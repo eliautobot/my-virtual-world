@@ -1,0 +1,64 @@
+services:
+  virtual-world:
+    build: .
+    image: my-virtual-world:local
+    container_name: my-virtual-world
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8590:8590"
+    volumes:
+      - vw-data:/data
+      - ~/.openclaw:/openclaw:ro
+      - ~/.openclaw/workspace/uploads:/openclaw/workspace/uploads
+      # Optional native Hermes integration. Comment these three mounts out if you do not use Hermes.
+      - ~/.hermes:/home/vw/.hermes
+      - ~/.local/bin/hermes:/home/vw/.local/bin/hermes:ro
+      - ~/.local/share/uv:/home/vw/.local/share/uv:ro
+    environment:
+      - VW_PORT=8590
+      - VW_DATA_DIR=/data
+      - VW_OPENCLAW_PATH=/openclaw
+      - VW_GATEWAY_URL=${VW_GATEWAY_URL:-ws://host.docker.internal:18789}
+      - VW_HERMES_ENABLED=${VW_HERMES_ENABLED:-true}
+      - VW_HERMES_HOME=${VW_HERMES_HOME:-/home/vw/.hermes}
+      - VW_HERMES_BIN=${VW_HERMES_BIN:-/home/vw/.local/bin/hermes}
+      - VW_HERMES_TIMEOUT_SEC=${VW_HERMES_TIMEOUT_SEC:-600}
+      # Optional external provider relay for future non-Hermes providers.
+      # Virtual World core features and native Hermes work with this unset.
+      # - VW_AGENT_PLATFORM_PROVIDER_URL=http://host.docker.internal:PORT
+      # - VW_TIMEZONE=America/New_York  # Optional server fallback only; UI renders browser-local time.
+      # - VW_STATUS_FILE=              # Optional local status-file fallback path.
+    restart: unless-stopped
+
+  # Optional: Agent Browser (uncomment to enable only on trusted networks)
+  # Configure inside Virtual World Settings -> Agent Browser:
+  #   CDP URL: http://host.docker.internal:9222
+  #   Viewer URL: https://localhost:6901
+  #
+  # agent-browser:
+  #   image: kasmweb/chromium:1.17.0
+  #   container_name: virtual-world-agent-browser
+  #   entrypoint: /dockerstartup/kasm_default_profile.sh
+  #   command: ["/tmp/override-startup.sh", "/dockerstartup/kasm_startup.sh", "--wait"]
+  #   shm_size: 1g
+  #   ports:
+  #     - "6901:6901"
+  #     - "9222:9222"
+  #   environment:
+  #     - VNC_PW=${BROWSER_VNC_PASSWORD:?set_browser_vnc_password}
+  #     - VNC_RESOLUTION=1600x900
+  #     - KASMVNC_AUTO_RECOVER=true
+  #   volumes:
+  #     - browser-data:/home/kasm-user/.config/chromium
+  #     - ./kasm-browser-config/chromium-browser:/usr/bin/chromium
+  #     - ./kasm-browser-config/override-startup.sh:/tmp/override-startup.sh
+  #     - ./kasm-browser-config/start-cdp-proxy.sh:/tmp/start-cdp-proxy.sh
+  #     - ./kasm-browser-config/post-boot.sh:/tmp/post-boot.sh
+  #     - ./kasm-browser-config/install-chrome.sh:/tmp/install-chrome.sh
+  #     - ./kasm-browser-config/browser-supervisor.sh:/tmp/browser-supervisor.sh
+  #   restart: unless-stopped
+
+volumes:
+  vw-data:
+  # browser-data:

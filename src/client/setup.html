@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Virtual World Setup</title>
+  <link rel="icon" href="favicon.png" type="image/png">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #0b1020; color: #f5f7ff; font-family: Arial, sans-serif; display: grid; place-items: center; padding: 24px; }
+    .shell { width: min(1060px, 96vw); min-height: min(760px, 92vh); display: grid; grid-template-columns: 260px 1fr; background: linear-gradient(180deg, rgba(18,27,51,.96), rgba(10,15,29,.94)); border: 1px solid rgba(255,214,0,.36); border-radius: 18px; box-shadow: 0 24px 80px rgba(0,0,0,.45); overflow: hidden; }
+    .rail { padding: 24px; border-right: 1px solid rgba(255,255,255,.10); background: rgba(0,0,0,.18); }
+    .brand { display: flex; gap: 10px; align-items: center; margin-bottom: 26px; }
+    .brand img { width: 36px; height: 36px; }
+    h1, .step-title { font-family: "Press Start 2P", monospace; color: #ffd600; letter-spacing: 0; }
+    h1 { font-size: 13px; line-height: 1.5; }
+    .rail button { width: 100%; text-align: left; margin: 0 0 8px; padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); color: #c8d2ee; cursor: pointer; }
+    .rail button.active { background: linear-gradient(135deg, #ffd600, #ff8f00); color: #151000; border-color: #ffd600; }
+    main { padding: 28px; overflow: auto; }
+    .step { display: none; max-width: 720px; }
+    .step.active { display: block; }
+    .step-title { font-size: 12px; margin-bottom: 10px; }
+    .desc { color: #aeb8d4; line-height: 1.5; margin-bottom: 18px; }
+    label { display: block; color: #dce4ff; font-size: 13px; margin: 14px 0 6px; }
+    input, select { width: 100%; padding: 11px 12px; border-radius: 9px; border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.26); color: #fff; }
+    .field-example { margin-top: 6px; color: #93a2c8; font-size: 12px; line-height: 1.45; }
+    .field-example code { color: #ffe082; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .check { display: flex; align-items: center; gap: 8px; }
+    .check input { width: auto; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
+    button, .launch { padding: 11px 16px; border-radius: 10px; border: 1px solid rgba(255,214,0,.55); background: rgba(255,214,0,.13); color: #fff; cursor: pointer; text-decoration: none; }
+    button.primary, .launch { background: linear-gradient(135deg, #ffd600, #ff8f00); color: #151000; font-weight: 700; }
+    .status { margin-top: 12px; padding: 12px; border-radius: 10px; background: rgba(255,255,255,.06); color: #cbd5f2; }
+    .status.ok { border: 1px solid rgba(76,175,80,.5); }
+    .status.warn { border: 1px solid rgba(255,193,7,.5); }
+    .note { margin-top: 16px; padding: 14px; border: 1px solid rgba(255,255,255,.10); border-radius: 12px; color: #aeb8d4; line-height: 1.5; background: rgba(255,255,255,.04); }
+    @media (max-width: 760px) { .shell { grid-template-columns: 1fr; } .rail { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.10); } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand"><img src="assets/logo-transparent.png" alt=""><h1>MY VIRTUAL WORLD</h1></div>
+      <button class="active" data-step="0">License</button>
+      <button data-step="1">World</button>
+      <button data-step="2">Connections</button>
+      <button data-step="3">Browser</button>
+      <button data-step="4">SMS</button>
+      <button data-step="5">Features</button>
+      <button data-step="6">Launch</button>
+    </aside>
+    <main>
+      <section class="step active" data-pane="0">
+        <div class="step-title">LICENSE / DEMO</div>
+        <p class="desc">Activate with a Lemon Squeezy key or start demo mode. Demo mode allows 3 agents and locks editing, Agent Browser, SMS / Twilio, and Agent Live Mode.</p>
+        <div id="licenseStatus" class="status">Loading...</div>
+        <label>Activation Key</label><input id="licenseKey" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        <div class="row"><button class="primary" id="activate">Activate</button><button id="trial">Continue Demo</button></div>
+      </section>
+      <section class="step" data-pane="1">
+        <div class="step-title">WORLD IDENTITY</div>
+        <label>World Name</label><input id="worldName" value="My Virtual World">
+        <label class="check"><input type="checkbox" id="dayNight" checked> Day and time cycle</label>
+        <label class="check"><input type="checkbox" id="weather" checked> Weather effects</label>
+      </section>
+      <section class="step" data-pane="2">
+        <div class="step-title">CONNECTIONS</div>
+        <label>OpenClaw Home</label><input id="openclawPath" placeholder="~/.openclaw">
+        <div class="field-example">Example: local install <code>~/.openclaw</code>; Docker install <code>/openclaw</code>.</div>
+        <label>Gateway URL</label><input id="gatewayUrl" placeholder="ws://127.0.0.1:18789">
+        <div class="field-example">Example: local install <code>ws://127.0.0.1:18789</code>; Docker install <code>ws://host.docker.internal:18789</code>.</div>
+        <label class="check"><input type="checkbox" id="hermesEnabled" checked> Enable Hermes</label>
+        <label>Hermes Home</label><input id="hermesHome">
+        <div class="field-example">Example: local install <code>~/.hermes</code>; Docker install <code>/home/vw/.hermes</code>.</div>
+        <label>Hermes CLI</label><input id="hermesBin">
+        <div class="field-example">Example: local install <code>~/.local/bin/hermes</code>; Docker install <code>/home/vw/.local/bin/hermes</code>.</div>
+        <button id="testHermes">Test Hermes</button><div id="hermesStatus" class="status"></div>
+      </section>
+      <section class="step" data-pane="3">
+        <div class="step-title">AGENT BROWSER</div>
+        <p class="desc">Paid feature. Configure CDP for agent control and a viewer URL to watch the browser live.</p>
+        <label class="check"><input type="checkbox" id="browserEnabled"> Enable Agent Browser</label>
+        <label>CDP URL</label><input id="browserCdp" placeholder="http://127.0.0.1:9222">
+        <label>Viewer URL</label><input id="browserViewer" placeholder="http://127.0.0.1:6902">
+        <button id="testBrowser">Test Browser</button><div id="browserStatus" class="status"></div>
+      </section>
+      <section class="step" data-pane="4">
+        <div class="step-title">SMS / TWILIO</div>
+        <p class="desc">Paid feature. Configure Twilio so agents can own an SMS inbox.</p>
+        <label class="check"><input type="checkbox" id="smsEnabled"> Enable SMS</label>
+        <label>Owner Agent</label><select id="smsOwner"><option value="">Select an agent...</option></select>
+        <label>Twilio Account SID</label><input id="twilioSid">
+        <label>Twilio Auth Token</label><input id="twilioToken" type="password">
+        <label>Twilio From Number</label><input id="twilioFrom" placeholder="+1...">
+        <button id="testSms">Check SMS</button><div id="smsStatus" class="status"></div>
+      </section>
+      <section class="step" data-pane="5">
+        <div class="step-title">FEATURES</div>
+        <label class="check"><input type="checkbox" id="agentLiveMode"> Agent Live Mode</label>
+        <label class="check"><input type="checkbox" id="debugTools" checked> Debug tools</label>
+        <label class="check"><input type="checkbox" id="movementDebug"> Movement debug overlays</label>
+        <label class="check"><input type="checkbox" id="actionPointDebug"> Object action points</label>
+      </section>
+      <section class="step" data-pane="6">
+        <div class="step-title">READY</div>
+        <p class="desc">Save your setup and launch the world. You can change everything later from Settings.</p>
+        <div id="saveStatus" class="status"></div>
+        <div class="row"><button class="primary" id="finish">Save & Launch</button><a class="launch" href="/">Launch Without Saving</a></div>
+      </section>
+      <div class="row"><button id="back">Back</button><button class="primary" id="next">Next</button></div>
+    </main>
+  </div>
+  <script>
+    let step = 0, cfg = {};
+    const $ = id => document.getElementById(id);
+    const val = id => ($(id)?.value || '').trim();
+    const chk = id => $(id)?.checked === true;
+    function show(n){ step=n; document.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('active',p.dataset.pane==n)); document.querySelectorAll('[data-step]').forEach(b=>b.classList.toggle('active',b.dataset.step==n)); }
+    async function json(url,opt){ const r=await fetch(url,opt); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.error||r.status); return d; }
+    function trial(){ const l=cfg.license||{}; return l.trial!==false && !l.licensed; }
+    function applyLocks(){ const locked=trial(); ['browserEnabled','browserCdp','browserViewer','testBrowser','smsEnabled','smsOwner','twilioSid','twilioToken','twilioFrom','testSms','agentLiveMode'].forEach(id=>{ const el=$(id); if(el) el.disabled=locked; }); if(locked){ $('browserStatus').textContent='Locked until activation.'; $('smsStatus').textContent='Locked until activation.'; } }
+    async function load(){ cfg=await json('/vw-config'); const l=cfg.license||{}; $('licenseStatus').textContent=trial()?`DEMO: ${l.limits?.maxAgents||3} agents max. Editing, Agent Browser, SMS / Twilio, and Agent Live Mode are locked.`:`${l.tierName} active.`; $('worldName').value=cfg.world?.name||'My Virtual World'; $('dayNight').checked=cfg.world?.dayNightCycleEnabled!==false; $('weather').checked=cfg.world?.weatherEnabled!==false; $('openclawPath').value=cfg.openclaw?.homePath||''; $('gatewayUrl').value=cfg.openclaw?.gatewayUrl||''; $('hermesEnabled').checked=cfg.hermes?.enabled!==false; $('hermesHome').value=cfg.hermes?.homePath||''; $('hermesBin').value=cfg.hermes?.binary||''; $('browserEnabled').checked=!trial()&&!!cfg.features?.agentBrowser; $('browserCdp').value=cfg.browser?.cdpUrl||''; $('browserViewer').value=cfg.browser?.viewerUrl||''; $('smsEnabled').checked=!trial()&&!!cfg.features?.sms; $('twilioSid').value=cfg.sms?.twilioAccountSid||''; $('twilioFrom').value=cfg.sms?.fromNumber||''; $('agentLiveMode').checked=!trial()&&!!cfg.features?.agentLiveMode; applyLocks(); populateAgents(cfg.sms?.ownerAgentId||''); }
+    async function populateAgents(sel){ try{ const d=await json('/agents-list'); (d.agents||[]).forEach(a=>{ const o=document.createElement('option'); o.value=a.agentId||a.key; o.textContent=(a.emoji||'')+' '+(a.name||a.key); if(o.value===sel)o.selected=true; $('smsOwner').appendChild(o); }); }catch{} }
+    function payload(){ const locked=trial(); const p={_setupComplete:true,world:{name:val('worldName')||'My Virtual World',dayNightCycleEnabled:chk('dayNight'),weatherEnabled:chk('weather')},openclaw:{homePath:val('openclawPath'),gatewayUrl:val('gatewayUrl')},hermes:{enabled:chk('hermesEnabled'),homePath:val('hermesHome'),binary:val('hermesBin')},features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:!locked&&chk('agentLiveMode'),debugTools:chk('debugTools'),weather:chk('weather')},browser:{cdpUrl:val('browserCdp'),viewerUrl:val('browserViewer')},sms:{ownerAgentId:val('smsOwner'),twilioAccountSid:val('twilioSid'),fromNumber:val('twilioFrom')},debug:{movementDebugOverlays:chk('movementDebug'),objectActionPointDebug:chk('actionPointDebug')}}; if(!locked&&val('twilioToken'))p.sms.twilioAuthToken=val('twilioToken'); return p; }
+    async function save(){ $('saveStatus').textContent='Saving...'; await json('/setup/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())}); $('saveStatus').textContent='Saved. Launching...'; setTimeout(()=>location.href='/',700); }
+    document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>show(Number(b.dataset.step))); $('next').onclick=()=>show(Math.min(6,step+1)); $('back').onclick=()=>show(Math.max(0,step-1)); $('trial').onclick=()=>show(1); $('finish').onclick=()=>save().catch(e=>$('saveStatus').textContent=e.message);
+    $('activate').onclick=async()=>{ try{ const r=await json('/api/license/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:val('licenseKey')})}); $('licenseStatus').textContent=r.ok?`${r.tierName} activated.`:r.error; await load(); }catch(e){ $('licenseStatus').textContent=e.message; } };
+    $('testHermes').onclick=async()=>{ const r=await json('/api/hermes/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({homePath:val('hermesHome'),binary:val('hermesBin')})}); $('hermesStatus').textContent=r.ok?`Connected: ${(r.agents||[]).length} profiles.`:(r.error||'Unavailable'); };
+    $('testBrowser').onclick=async()=>{ if(trial()){ $('browserStatus').textContent='Locked until activation.'; return; } await json('/setup/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())}); const r=await json('/browser-status'); $('browserStatus').textContent=r.locked?'Locked until activation.':r.cdpAvailable?'CDP connected.':'CDP not reachable.'; };
+    $('testSms').onclick=async()=>{ if(trial()){ $('smsStatus').textContent='Locked until activation.'; return; } await json('/setup/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())}); const r=await json('/sms-status'); $('smsStatus').textContent=r.locked?'Locked until activation.':r.hasCredentials?'Credentials configured.':'Missing credentials.'; };
+    load().catch(e=>$('licenseStatus').textContent=e.message);
+  </script>
+</body>
+</html>

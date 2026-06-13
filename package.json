@@ -1,0 +1,36 @@
+{
+  "name": "my-virtual-world",
+  "version": "1.0.0",
+  "description": "A self-hosted 3D AI virtual world for agent harnesses like OpenClaw and Hermes.",
+  "homepage": "https://myvirtualworld.ai/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eliautobot/my-virtual-world.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eliautobot/my-virtual-world/issues"
+  },
+  "keywords": [
+    "ai-agents",
+    "virtual-world",
+    "threejs",
+    "self-hosted",
+    "openclaw"
+  ],
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "python3 src/server/server.py",
+    "dev": "VW_PORT=${VW_PORT:-8590} VW_DATA_DIR=${VW_DATA_DIR:-.local-data} python3 src/server/server.py",
+    "test": "npm run verify:smoke",
+    "verify:smoke": "node scripts/verify-smoke.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "three": "^0.183.2",
+    "yuka": "^0.7.8"
+  }
+}

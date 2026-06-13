@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#1a1a2e">
+    <link rel="icon" href="favicon.png" type="image/png">
+    <title>My Virtual World</title>
+    <link rel="stylesheet" href="css/style.css?v=20260603-sidebar-toggle-caret-only-v2">
+    <link rel="stylesheet" href="css/ui-redesign.css?v=20260613-license-website-r1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Top Bar -->
+    <div id="topBar">
+        <div id="topBar-left">
+            <span id="worldTitle"><img class="app-logo app-logo-topbar" src="assets/logo-transparent.png" alt="My Virtual World logo"><span class="world-title-text">My Virtual World</span></span>
+        </div>
+        <div id="topBar-center">
+            <button id="btn-select" class="toolbar-btn active" title="Select (V)" aria-label="Select">
+                <svg class="toolbar-pointer-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 3l13 9-6 1.2 3.8 6.3-2.6 1.5-3.8-6.3-4.4 4.3V3z"></path>
+                </svg>
+            </button>
+            <div class="toolbar-sep"></div>
+            <button id="btn-undo" class="toolbar-btn" title="Undo (Ctrl+Z)">↩️</button>
+            <button id="btn-redo" class="toolbar-btn" title="Redo (Ctrl+Y)">↪️</button>
+            <button id="btn-save" class="toolbar-btn" title="Save (Ctrl+S)">💾</button>
+            <button id="btn-help" class="toolbar-btn" title="Keyboard Shortcuts (H / ?)">❔</button>
+            <button id="btn-chatExpandAll" class="toolbar-btn" title="Expand All Chat Bubbles">💬＋</button>
+            <button id="btn-chatMinimizeAll" class="toolbar-btn" title="Minimize All Chat Bubbles">💬－</button>
+            <button id="btn-agentIntentDebug" class="toolbar-btn" title="Toggle Agent Intent Debug Readout">🧭</button>
+            <div class="toolbar-sep"></div>
+            <!-- Building View Mode (hide roof, active walls, x-ray, solid viz) -->
+            <div id="viewModeButtons" style="display:inline-flex;gap:2px;"></div>
+        </div>
+        <div id="topBar-right">
+            <div id="worldSearchWrapper" style="position:relative;display:inline-block">
+                <input id="worldSearch" type="text" placeholder="🔍 Search…" autocomplete="off"
+                    style="background:rgba(0,0,0,0.4);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:3px 8px;font-size:11px;width:120px;outline:none;">
+                <div id="worldSearchDropdown"
+                    style="display:none;position:absolute;top:100%;right:0;min-width:180px;background:#1e1e2e;border:1px solid rgba(255,255,255,0.15);border-radius:6px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.5);overflow:hidden;margin-top:3px;">
+                </div>
+            </div>
+            <span id="coordDisplay" style="display:none">0, 0</span>
+            <span id="fpsDisplay">-- fps</span>
+            <span id="licenseStatusChip" class="license-status-chip">Trial</span>
+            <button id="btn-browserPanel" class="toolbar-btn" title="Agent Browser">🌐</button>
+            <button id="btn-smsPanel" class="toolbar-btn" title="SMS">📱</button>
+            <button id="btn-settings" class="toolbar-btn" title="Settings">⚙️</button>
+        </div>
+    </div>
+    <div id="trialWatermark" class="demo-license-banner" hidden>
+        DEMO: 3 agents max, some features are locked. Get a License Key to activate all features.
+    </div>
+
+    <!-- Main Canvas Area -->
+    <div id="canvasWrapper">
+        <div id="pixiContainer"></div>
+
+        <div id="agentIntentDebugReadout" class="agent-intent-debug-readout" hidden aria-live="polite">
+            <div class="agent-intent-debug-header">
+                <span>🧭 Intent Debug</span>
+                <div class="agent-intent-debug-actions">
+                    <button id="agentIntentDebugScope" type="button" title="Toggle selected/all agents">All</button>
+                    <button id="agentIntentDebugClose" type="button" title="Hide intent debug readout">×</button>
+                </div>
+            </div>
+            <div id="agentIntentDebugBody" class="agent-intent-debug-body">No agents loaded.</div>
+        </div>
+
+        <!-- Left Sidebar — Edit Tools -->
+        <div id="leftSidebar" class="left-sidebar left-sidebar-collapsed">
+            <button id="btn-toggleLeftSidebar" class="left-sidebar-toggle" title="Toggle Edit Panel" aria-label="Toggle Edit Panel"><span class="sidebar-toggle-caret" aria-hidden="true">▶</span></button>
+            <div id="leftSidebarContent">
+                <!-- Edit Mode Accordions -->
+                <div class="left-sidebar-modes edit-mode-accordion">
+                    <div class="palette-title">🛠️ Edit World</div>
+
+                    <div class="edit-mode-group" data-mode="world">
+                        <button id="btn-mode-world" class="toolbar-btn mode-btn edit-mode-toggle" title="Edit Decorations (1)"><span>🪴 Decorations</span><span class="edit-mode-caret">▾</span></button>
+                        <div id="terrainPalette" class="edit-section edit-mode-panel"></div>
+                    </div>
+
+                    <div class="edit-mode-group" data-mode="roads">
+                        <button id="btn-mode-roads" class="toolbar-btn mode-btn edit-mode-toggle" title="Edit Roads (2)"><span>🛣️ Roads</span><span class="edit-mode-caret">▾</span></button>
+                        <div id="roadPalette" class="edit-section edit-mode-panel">
+                            <div class="palette-title">🛣️ Street Tools</div>
+                            <div class="palette-items" id="roadItems"></div>
+                        </div>
+                    </div>
+
+                    <div class="edit-mode-group" data-mode="buildings">
+                        <button id="btn-mode-buildings" class="toolbar-btn mode-btn edit-mode-toggle" title="Edit Buildings (3)"><span>🏗️ Buildings</span><span class="edit-mode-caret">▾</span></button>
+                        <div id="buildingEditPanel" class="edit-section edit-mode-panel">
+                            <div class="left-sidebar-tabs">
+                                <button class="sidebar-tab active" id="tab-building" onclick="window._switchBuildingTab('building')">🏗️ Building</button>
+                                <button class="sidebar-tab" id="tab-furniture" onclick="window._switchBuildingTab('furniture')">🪑 Furniture</button>
+                            </div>
+                            <div id="buildingTabContent" class="tab-content visible">
+                                <button id="btn-newBuilding" class="sidebar-action-btn sidebar-create-btn">+ New Building</button>
+                                <div id="buildingEditContent">
+                                    <p class="palette-hint">Click a building in the world to select it for editing</p>
+                                </div>
+                            </div>
+                            <div id="furnitureTabContent" class="tab-content">
+                                <div id="furnitureCatalogInline"></div>
+                            </div>
+                            <div id="interiorWallTools" class="edit-section" style="display:none;margin-top:8px">
+                                <div class="palette-title">🧱 Interior Walls</div>
+                                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+                                    <button id="btn-newInteriorWall" class="sidebar-action-btn" style="flex:1">+ New Wall</button>
+                                    <button id="btn-newInteriorOpening" class="sidebar-action-btn" style="flex:1">Create Wall Opening</button>
+                                    <button id="btn-cancelInteriorWall" class="sidebar-action-btn" style="flex:1;display:none">Cancel Wall</button>
+                                    <button id="btn-deleteInteriorWall" class="sidebar-action-btn" style="flex:1;display:none">Delete Wall</button>
+                                </div>
+                                <div id="interiorWallHint" class="palette-hint">Enter a building to draw interior walls</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="edit-mode-group" data-mode="outside">
+                        <button id="btn-mode-outside" class="toolbar-btn mode-btn edit-mode-toggle" title="Edit Outside Spaces (4)"><span>🌳 Outside Spaces</span><span class="edit-mode-caret">▾</span></button>
+                        <div id="outsideSpaceEditPanel" class="edit-section edit-mode-panel">
+                            <button id="btn-newOutsideSpace" class="sidebar-action-btn sidebar-create-btn">+ New Outside Space</button>
+                            <p class="palette-hint">Outside space list and occupants are shown in the right info panel.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Context tools (reserved for mode-specific helpers) -->
+                <div id="modeTools" class="mode-tools left-sidebar-mode-tools"></div>
+
+                <!-- Agents are editable, so keep agent selection with edit tools -->
+                <div class="edit-section-always edit-agents-section">
+                    <div class="palette-title">🤖 Edit Agents</div>
+                    <label class="agent-editor-select-wrap">
+                        <span>Select agent</span>
+                        <select id="agentList" class="agent-editor-select">
+                            <option value="">Choose an agent…</option>
+                        </select>
+                    </label>
+                    <div id="agentPanel" class="agent-panel agent-panel-inline" style="display:none">
+                        <div class="agent-panel-header">
+                            <span id="agentPanel-title">🤖 Agent</span>
+                            <button class="modal-close" onclick="window.closeAgentEditor?.()">✕</button>
+                        </div>
+                        <div class="agent-panel-body">
+                            <div id="agentPanel-info"></div>
+                            <div class="agent-panel-section">
+                                <h4>Assignment</h4>
+                                <div class="form-group">
+                                    <label>Work Building</label>
+                                    <select id="agentPanel-work"><option value="">None</option></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Home Building</label>
+                                    <select id="agentPanel-home"><option value="">None</option></select>
+                                </div>
+                                <div style="display:flex;gap:8px;margin-top:8px">
+                                    <button class="btn-primary" id="agentPanel-assign" style="flex:1">💾 Save Assignment</button>
+                                    <button class="btn-secondary" id="agentPanel-goto" style="flex:0 0 auto;padding:10px 14px">📍 Go To</button>
+                                </div>
+                            </div>
+                            <div class="agent-panel-section">
+                                <h4>Status</h4>
+                                <div id="agentPanel-status"></div>
+                            </div>
+                            <div class="agent-panel-section">
+                                <h4>🧠 Needs</h4>
+                                <div id="agentPanel-needs"></div>
+                            </div>
+                            <div class="agent-panel-section">
+                                <h4>🎭 Personality</h4>
+                                <div id="agentPanel-personality"></div>
+                            </div>
+                            <div class="agent-panel-section">
+                                <h4>Activity</h4>
+                                <div id="agentPanel-activity"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Outside spaces moved into the Edit Mode accordion above. -->
+            </div>
+        </div>
+
+        <!-- Mini-map + coordinates -->
+        <div id="miniMap">
+            <canvas id="miniMapCanvas" width="200" height="200"></canvas>
+            <div id="miniMapCoords" style="position:absolute;bottom:2px;left:4px;right:4px;font-size:9px;color:#ccc;font-family:'Press Start 2P',monospace;text-shadow:0 1px 2px #000;pointer-events:none;text-align:center">
+                <span id="coordDisplay2">0, 0</span>
+            </div>
+        </div>
+
+        <!-- Zoom controls + Chat toggle -->
+        <div id="zoomControls">
+            <button id="chat-toggle" class="chat-toggle-btn">💬</button>
+            <div style="height:6px"></div>
+            <button id="btn-zoomIn" class="zoom-btn" title="Zoom In">+</button>
+            <span id="zoomLevel">1.0x</span>
+            <button id="btn-zoomOut" class="zoom-btn" title="Zoom Out">−</button>
+            <button id="btn-zoomReset" class="zoom-btn" title="Reset View (Home)">⌂</button>
+            <div style="height:4px"></div>
+            <button id="btn-rotateL" class="zoom-btn" title="Rotate Left (Q)">↶</button>
+            <button id="btn-rotateR" class="zoom-btn" title="Rotate Right (E)">↷</button>
+        </div>
+    </div>
+
+    <!-- Right Sidebar — World information -->
+    <div id="sidebar" class="sidebar-collapsed">
+        <button id="btn-toggleSidebar" class="sidebar-toggle" title="Toggle Info Panel" aria-label="Toggle Info Panel"><span class="sidebar-toggle-caret" aria-hidden="true">◀</span></button>
+        <div id="sidebarContent">
+            <div class="sidebar-section">
+                <h3>🏢 Buildings</h3>
+                <div id="buildingList" class="sidebar-list"></div>
+            </div>
+            <div class="sidebar-section">
+                <h3>🌳 Outside Spaces</h3>
+                <div id="outsideSpaceList" class="sidebar-list"></div>
+            </div>
+            <div class="sidebar-section">
+                <h3>📋 Activity Log</h3>
+                <div id="activityLogList" class="sidebar-list activity-log-list" style="max-height:200px;overflow-y:auto;font-size:10px;line-height:1.6"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Meeting Panel -->
+    <div id="meetingPanel" class="meeting-panel" style="display:none">
+        <div class="agent-panel-header">
+            <span>📊 Meetings</span>
+            <button class="modal-close" onclick="document.getElementById('meetingPanel').style.display='none'">✕</button>
+        </div>
+        <div class="agent-panel-body">
+            <div id="meetingList"></div>
+            <button class="btn-primary" id="btn-newMeeting" style="width:100%;margin-top:8px">+ New Meeting</button>
+        </div>
+    </div>
+
+    <!-- Building Creation Modal -->
+    <div id="buildingModal" class="modal" style="display:none">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🏗️ New Building</h2>
+                <button class="modal-close" onclick="closeBuildingModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Template Preset</label>
+                    <select id="bld-template">
+                        <option value="">Blank / custom</option>
+                    </select>
+                    <div id="bld-templateHint" class="palette-hint">Template suggestions reference completed existing assets only.</div>
+                </div>
+                <div class="form-group">
+                    <label>Building Name</label>
+                    <input type="text" id="bld-name" placeholder="My Office" value="New Building">
+                </div>
+                <div class="form-group">
+                    <label>Type</label>
+                    <select id="bld-type">
+                        <option value="office">🏢 Office (25×17)</option>
+                        <option value="home">🏠 Home (10×8)</option>
+                        <option value="store">🏪 Store (15×12)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Width (tiles)</label>
+                    <input type="number" id="bld-width" min="5" max="100" value="25">
+                </div>
+                <div class="form-group">
+                    <label>Height (tiles)</label>
+                    <input type="number" id="bld-height" min="5" max="100" value="17">
+                </div>
+                <div class="form-group">
+                    <label>Color Theme</label>
+                    <select id="bld-theme">
+                        <!-- Populated by JS via BUILDING_THEMES -->
+                        <option value="modern">Modern</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Roof Color</label>
+                    <input type="color" id="bld-roofColor" value="#546e7a">
+                </div>
+                <div class="form-group">
+                    <label>Wall Color</label>
+                    <input type="color" id="bld-wallColor" value="#78909c">
+                </div>
+                <div class="form-group">
+                    <label>Door Position</label>
+                    <select id="bld-doorPos">
+                        <option value="south">South (Front)</option>
+                        <option value="north">North</option>
+                        <option value="east">East</option>
+                        <option value="west">West</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <button id="btn-createBuilding" class="btn-primary">Create & Place</button>
+                    <button class="btn-secondary" onclick="closeBuildingModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Outside Space Creation Modal -->
+    <div id="outsideSpaceModal" class="modal" style="display:none">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🌳 New Outside Space</h2>
+                <button class="modal-close" onclick="closeOutsideSpaceModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Outside Space Name</label>
+                    <input type="text" id="outside-name" placeholder="Central Park" value="New Outside Space">
+                </div>
+                <div class="form-group">
+                    <label>Type</label>
+                    <select id="outside-type">
+                        <option value="park">🌳 Park (20×20)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Width (tiles)</label>
+                    <input type="number" id="outside-width" min="5" max="100" value="20">
+                </div>
+                <div class="form-group">
+                    <label>Height (tiles)</label>
+                    <input type="number" id="outside-height" min="5" max="100" value="20">
+                </div>
+                <div class="form-row">
+                    <button id="btn-createOutsideSpace" class="btn-primary">Create & Place</button>
+                    <button class="btn-secondary" onclick="closeOutsideSpaceModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Interior View (overlay when inside a building) -->
+    <div id="interiorOverlay" style="display:none">
+        <div id="interiorTopBar">
+            <button id="btn-exitBuilding" class="toolbar-btn" title="Exit Building (Esc)">🚪 Exit</button>
+            <span id="interiorTitle">Building Interior</span>
+            <button id="btn-editInterior" class="toolbar-btn" title="Edit Interior (E)">✏️ Edit</button>
+        </div>
+        <canvas id="interiorCanvas"></canvas>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal" style="display:none">
+        <div class="modal-content settings-modal-content">
+            <div class="modal-header">
+                <h2>⚙️ Settings</h2>
+                <button class="modal-close" onclick="closeSettingsModal()">✕</button>
+            </div>
+            <div class="settings-tabbar" role="tablist">
+                <button class="settings-tab active" data-settings-tab="license">License</button>
+                <button class="settings-tab" data-settings-tab="general">General</button>
+                <button class="settings-tab" data-settings-tab="connections">Connections</button>
+                <button class="settings-tab" data-settings-tab="features">Features</button>
+                <button class="settings-tab" data-settings-tab="browser">Browser</button>
+                <button class="settings-tab" data-settings-tab="sms">SMS</button>
+                <button class="settings-tab" data-settings-tab="debug">Debug</button>
+                <button class="settings-tab" data-settings-tab="data">Data</button>
+            </div>
+            <div class="modal-body settings-tabbody">
+                <section class="settings-pane visible" data-settings-pane="license">
+                    <div id="licenseSummary" class="settings-status-card">Loading license...</div>
+                    <div class="settings-resource-card">
+                        <div>
+                            <strong>Need product details or a License Key?</strong>
+                            <span>Visit MyVirtualWorld.ai for setup details, pricing, and license activation.</span>
+                        </div>
+                        <a class="btn-secondary settings-link-button" href="https://myvirtualworld.ai/" target="_blank" rel="noopener noreferrer">Open Website</a>
+                    </div>
+                    <div class="form-group">
+                        <label>Activation Key</label>
+                        <input type="text" id="setting-licenseKey" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off">
+                    </div>
+                    <div class="form-row">
+                        <button class="btn-primary" id="btn-activateLicense">Activate</button>
+                        <button class="btn-secondary" id="btn-deactivateLicense">Deactivate</button>
+                    </div>
+                    <div id="licenseActionStatus" class="settings-inline-status"></div>
+                </section>
+
+                <section class="settings-pane" data-settings-pane="general">
+                    <div class="form-group"><label>World Name</label><input type="text" id="setting-worldName" value="My Virtual World"></div>
+                    <label class="settings-check"><input type="checkbox" id="setting-showGrid" checked> Show Grid Lines</label>
+                    <label class="settings-check"><input type="checkbox" id="setting-showMinimap" checked> Show Mini-Map</label>
+                    <label class="settings-check"><input type="checkbox" id="setting-showCoords" checked> Show Coordinates</label>
+                    <label class="settings-check"><input type="checkbox" id="setting-enableDayNightCycle" checked> Enable Day &amp; Time Cycle</label>
+                    <label class="settings-check"><input type="checkbox" id="setting-enableWeather" checked> Enable Weather</label>
+                    <label class="settings-check"><input type="checkbox" id="setting-soundEnabled"> Sound (coming soon)</label>
+                </section>
+
+                <section class="settings-pane" data-settings-pane="connections">
+                    <div class="form-group"><label>OpenClaw Home Directory</label><input type="text" id="setting-openclawPath" placeholder="~/.openclaw"><div class="field-example">Example: local install <code>~/.openclaw</code>; Docker install <code>/openclaw</code>.</div></div>
+                    <div class="form-group"><label>Gateway URL</label><input type="text" id="setting-gatewayUrl" placeholder="ws://127.0.0.1:18789"><div class="field-example">Example: local install <code>ws://127.0.0.1:18789</code>; Docker install <code>ws://host.docker.internal:18789</code>.</div></div>
+                    <div class="form-group"><label>Gateway Token</label><input type="password" id="setting-gatewayToken" placeholder="Configured value is preserved when blank"><div class="field-example">Example: leave blank unless your OpenClaw gateway requires a token.</div></div>
+                    <label class="settings-check"><input type="checkbox" id="setting-hermesEnabled" checked> Enable Hermes</label>
+                    <div class="form-group"><label>Hermes Home</label><input type="text" id="setting-hermesHome" placeholder="~/.hermes"><div class="field-example">Example: local install <code>~/.hermes</code>; Docker install <code>/home/vw/.hermes</code>.</div></div>
+                    <div class="form-group"><label>Hermes CLI</label><input type="text" id="setting-hermesBin" placeholder="~/.local/bin/hermes"><div class="field-example">Example: local install <code>~/.local/bin/hermes</code>; Docker install <code>/home/vw/.local/bin/hermes</code>.</div></div>
+                    <div class="form-group"><label>Hermes API URL</label><input type="text" id="setting-hermesApiUrl" placeholder="http://127.0.0.1:8642"><div class="field-example">Example: leave blank for CLI mode, or use <code>http://127.0.0.1:8642</code> if your Hermes API is running locally.</div></div>
+                    <div class="form-group"><label>Hermes API Key</label><input type="password" id="setting-hermesApiKey" placeholder="Configured value is preserved when blank"><div class="field-example">Example: leave blank unless your Hermes API requires a key.</div></div>
+                    <button class="btn-secondary" id="btn-testHermes">Test Hermes</button>
+                    <div id="hermesTestStatus" class="settings-inline-status"></div>
+                </section>
+
+                <section class="settings-pane" data-settings-pane="features">
+                    <label class="settings-check"><input type="checkbox" id="setting-featureBrowser"> Agent Browser</label>
+                    <label class="settings-check"><input type="checkbox" id="setting-featureSms"> SMS / Twilio</label>
+                    <label class="settings-check"><input type="checkbox" id="setting-featureAgentLiveMode"> Agent Live Mode</label>
+                    <label class="settings-check"><input type="checkbox" id="setting-featureDebugTools" checked> Debug Tools</label>
+                    <div id="featureLockNotice" class="settings-status-card"></div>
+                </section>
+
+                <section class="settings-pane" data-settings-pane="browser">
+                    <div class="form-group"><label>CDP URL</label><input type="text" id="setting-browserCdpUrl" placeholder="http://127.0.0.1:9222"></div>
+                    <div class="form-group"><label>Viewer URL</label><input type="text" id="setting-browserViewerUrl" placeholder="http://127.0.0.1:6902"></div>
+                    <div class="form-row">
+                        <button class="btn-secondary" id="btn-testBrowser">Test Browser</button>
+                        <button class="btn-secondary" id="btn-openBrowserPanel">Open Browser Panel</button>
+                    </div>
+                    <div id="browserTestStatus" class="settings-inline-status"></div>
+                </section>
+
+                <section class="settings-pane" data-settings-pane="sms">
+                    <div class="form-group"><label>Owner Agent</label><select id="setting-smsOwnerAgent"><option value="">Select an agent...</option></select></div>
+                    <div class="form-group"><label>Twilio Account SID</label><input type="text" id="setting-twilioSid" placeholder="AC..."></div>
+                    <div class="form-group"><label>Twilio Auth Token</label><input type="password" id="setting-twilioToken" placeholder="Configured value is preserved when blank"></div>
+                    <div class="form-group"><label>Twilio From Number</label><input type="text" id="setting-twilioFrom" placeholder="+1..."></div>
+                    <div class="form-group"><label>Public Media Base URL</label><input type="text" id="setting-smsPublicMediaUrl" placeholder="https://..."></div>
+                    <div class="form-row">
+                        <button class="btn-secondary" id="btn-testSms">Check SMS</button>
+                        <button class="btn-secondary" id="btn-openSmsPanel">Open SMS Panel</button>
+                    </div>
+                    <div id="smsTestStatus" class="settings-inline-status"></div>
+                </section>
+
+                <section class="settings-pane" data-settings-pane="debug">
+                    <div class="form-group settings-debug-option">
+                        <label><input type="checkbox" id="setting-movementDebugOverlays" checked> Show Movement Debug Overlays</label>
+                        <div id="movementDebugOverlaysStatus" class="settings-debug-status">Collision, avoidance, interior routing, and exterior routing overlays are on.</div>
+                        <div id="movementDebugOverlaysLegend" class="settings-debug-legend"><b>Legend:</b> white=desired direction/current heading, blue=chosen path, purple=actual movement, orange=final target, green/yellow/red=probe reads.</div>
+                    </div>
+                    <div class="form-group settings-debug-option">
+                        <label><input type="checkbox" id="setting-objectActionPointDebug"> Show Object Action Points</label>
+                        <div id="objectActionPointDebugStatus" class="settings-debug-status">Object action point markers are off.</div>
+                    </div>
+                </section>
+
+                <section class="settings-pane" data-settings-pane="data">
+                    <div class="form-row">
+                        <button class="btn-secondary" onclick="exportWorld()" title="Download world as JSON">Export World</button>
+                        <button class="btn-secondary" onclick="importWorld()" title="Load world from JSON file">Import World</button>
+                        <a class="btn-secondary settings-link-button" href="/setup">Run Setup Wizard</a>
+                    </div>
+                </section>
+
+                <div class="form-row settings-actions">
+                    <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
+                    <button class="btn-secondary" onclick="closeSettingsModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="browserPanel" class="integration-panel" style="display:none">
+        <div class="integration-panel-header"><span>🌐 Agent Browser</span><button class="modal-close" id="browserPanelClose">✕</button></div>
+        <div id="browserPanelStatus" class="integration-panel-status">Loading...</div>
+        <iframe id="browserPanelFrame" title="Agent Browser Viewer"></iframe>
+    </div>
+
+    <div id="smsPanel" class="integration-panel sms-panel" style="display:none">
+        <div class="integration-panel-header"><span>📱 SMS</span><button class="modal-close" id="smsPanelClose">✕</button></div>
+        <div id="smsPanelStatus" class="integration-panel-status">Loading...</div>
+        <div id="smsThreadList" class="sms-thread-list"></div>
+        <div class="sms-compose">
+            <input id="smsTo" type="text" placeholder="+1 phone number">
+            <textarea id="smsBody" rows="3" placeholder="Message"></textarea>
+            <button id="smsSend" class="btn-primary">Send</button>
+        </div>
+    </div>
+
+    <!-- Hover Tooltip (Feature 3) -->
+    <div id="hoverTooltip">
+        <div class="tooltip-name" id="tooltipName">Building</div>
+        <div class="tooltip-detail" id="tooltipDetail"></div>
+    </div>
+
+    <!-- Chat Bubble Overlay -->
+    <div id="chatBubbleContainer" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:75;overflow:hidden"></div>
+
+    <!-- World Stats Bar (Feature 5) -->
+    <div id="worldStats">
+        <div class="stat-item">🌍 <span id="statWorldName" class="stat-val">My Virtual World</span></div>
+        <div class="stat-item">🏢 <span id="statBuildings" class="stat-val">0</span> buildings</div>
+        <div class="stat-item">🤖 <span id="statAgents" class="stat-val">0</span> agents</div>
+        <div class="stat-item">🕐 <span id="statTime" class="stat-val">12:00</span></div>
+        <!-- Time controls removed — real-time simulation only -->
+    </div>
+
+    <!-- Keyboard Shortcuts Modal (Feature 6) -->
+    <div id="shortcutsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⌨️ Keyboard Shortcuts</h2>
+                <button class="modal-close" onclick="document.getElementById('shortcutsModal').classList.remove('visible')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="shortcut-row"><span class="shortcut-key">V</span><span class="shortcut-desc">View mode (deselect tool)</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">1</span><span class="shortcut-desc">Edit Decorations</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">2</span><span class="shortcut-desc">Edit Roads &amp; Paths</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">3</span><span class="shortcut-desc">Edit Buildings</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">4</span><span class="shortcut-desc">Edit Outside Spaces</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">W A S D</span><span class="shortcut-desc">Pan camera</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">↑ ↓ ← →</span><span class="shortcut-desc">Pan camera (arrow keys)</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">Q / E</span><span class="shortcut-desc">Rotate camera left / right</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">Scroll</span><span class="shortcut-desc">Zoom in / out</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">Home</span><span class="shortcut-desc">Reset camera to origin</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">Esc</span><span class="shortcut-desc">Exit building / cancel placement</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">Click</span><span class="shortcut-desc">Select / enter building or agent</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">Ctrl + Z</span><span class="shortcut-desc">Undo terrain / building change</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">Ctrl + Y</span><span class="shortcut-desc">Redo (undo the undo)</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">Z</span><span class="shortcut-desc">Zoom to fit all buildings</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">Ctrl + S</span><span class="shortcut-desc">Save world</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">C</span><span class="shortcut-desc">Cycle camera angle (Iso / Top-down / Close-up)</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">P</span><span class="shortcut-desc">Screenshot (download PNG)</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">Right-click</span><span class="shortcut-desc">Context menu on building or agent</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">? / H</span><span class="shortcut-desc">Show this help</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">F</span><span class="shortcut-desc">Toggle debug stats panel</span></div>
+                <div class="shortcut-row"><span class="shortcut-key">G</span><span class="shortcut-desc">Toggle grid overlay (in edit modes)</span></div>
+                <div style="margin-top:12px">
+                    <button class="btn-primary" style="width:100%" onclick="document.getElementById('shortcutsModal').classList.remove('visible')">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="contextMenu">
+        <div class="ctx-item" id="ctx-enter">🚪 Enter Building</div>
+        <div class="ctx-item" id="ctx-edit">✏️ Edit Building</div>
+        <div class="ctx-item" id="ctx-rename">📝 Rename</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" id="ctx-delete" style="color:var(--error)">🗑️ Delete</div>
+    </div>
+
+    <!-- Furniture Catalog (legacy — now in left sidebar tabs) -->
+    <div id="furnitureCatalog" style="display:none !important">
+        <h4>🪑 Furniture</h4>
+        <div class="furn-btn" data-type="desk">🖥️ Desk</div>
+        <div class="furn-btn" data-type="chair">🪑 Chair</div>
+        <div class="furn-btn" data-type="meetingTable">📊 Meeting Table</div>
+        <div class="furn-btn" data-type="smallRoundMeetingTable">🟣 Small Round Meeting Table</div>
+        <div class="furn-btn" data-type="bookshelf">📚 Bookshelf</div>
+        <div class="furn-btn" data-type="couch">🛋️ Couch</div>
+        <div class="furn-btn" data-type="sectionalSofa">🛋️ Sectional Sofa Variants</div>
+        <div class="furn-btn" data-type="loveseat">🛋️ Loveseat</div>
+        <div class="furn-btn" data-type="plant">🪴 Plant</div>
+        <div class="furn-btn" data-type="tallPlant">🌿 Tall Plant</div>
+        <div class="furn-btn" data-type="tv">📺 TV</div>
+        <div class="furn-btn" data-type="tvStand">📺 TV Stand / Media Console</div>
+        <div class="furn-btn" data-type="vendingMachine">🥤 Vending Machine</div>
+        <div class="furn-btn" data-type="waterCooler">💧 Water Cooler</div>
+        <div class="furn-btn" data-type="coffeeMaker">☕ Coffee Maker</div>
+        <div class="furn-btn" data-type="filingCabinet">🗂️ Filing Cabinet</div>
+        <div class="furn-btn" data-type="whiteboard">📋 Whiteboard</div>
+        <div class="furn-btn" data-type="floorLamp">💡 Floor Lamp</div>
+    </div>
+
+    <!-- Loading Screen (Feature 4) -->
+    <div id="loadingScreen">
+        <div id="loadingContent">
+            <div id="loadingEmoji"><img class="app-logo app-logo-loading" src="assets/logo-transparent.png" alt="My Virtual World logo"></div>
+            <div id="loadingTitle">My Virtual World</div>
+            <div id="loadingBar"><div id="loadingBarFill"></div></div>
+            <div id="loadingText">Initializing<span id="loadingDots"></span></div>
+            <div id="loadingSteps">
+                <div class="loading-step" id="lstep-engine">⏳ Engine</div>
+                <div class="loading-step" id="lstep-buildings">⏳ Buildings</div>
+                <div class="loading-step" id="lstep-agents">⏳ Agents</div>
+                <div class="loading-step" id="lstep-terrain">⏳ Terrain</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Panel (Feature 6 - F key) -->
+    <div id="statsPanel" style="display:none">
+        <div class="stats-header">📊 Debug Stats <kbd>F</kbd></div>
+        <div class="stats-row"><span class="stats-lbl">Meshes</span><span class="stats-val" id="stat-meshes">0</span></div>
+        <div class="stats-row"><span class="stats-lbl">Triangles</span><span class="stats-val" id="stat-tris">0</span></div>
+        <div class="stats-row"><span class="stats-lbl">Draw Calls</span><span class="stats-val" id="stat-draws">0</span></div>
+        <div class="stats-row"><span class="stats-lbl">Chunks</span><span class="stats-val" id="stat-chunks">0</span></div>
+        <div class="stats-row"><span class="stats-lbl">Agents</span><span class="stats-val" id="stat-agents">0</span></div>
+        <div class="stats-row"><span class="stats-lbl">↳ Working</span><span class="stats-val" id="stat-working">0</span></div>
+        <div class="stats-row"><span class="stats-lbl">↳ Idle</span><span class="stats-val" id="stat-idle">0</span></div>
+        <div class="stats-row"><span class="stats-lbl">↳ Offline</span><span class="stats-val" id="stat-offline">0</span></div>
+        <div class="stats-row"><span class="stats-lbl">Memory</span><span class="stats-val" id="stat-memory">—</span></div>
+        <div class="stats-row"><span class="stats-lbl">Physics</span><span class="stats-val" id="stat-physics">—</span></div>
+    </div>
+
+    <!-- Chat Panel -->
+    <div id="chat-panel" class="chat-panel">
+        <div id="chat-resize-handle-top-left" class="chat-resize-handle top-left"></div>
+        <div id="chat-resize-handle-top" class="chat-resize-handle top"></div>
+        <div id="chat-resize-handle-top-right" class="chat-resize-handle top-right"></div>
+        <div id="chat-resize-handle-right" class="chat-resize-handle right"></div>
+        <div id="chat-resize-handle-bottom-right" class="chat-resize-handle bottom-right"></div>
+        <div id="chat-resize-handle-bottom" class="chat-resize-handle bottom"></div>
+        <div id="chat-resize-handle-bottom-left" class="chat-resize-handle bottom-left"></div>
+        <div id="chat-resize-handle-left" class="chat-resize-handle left"></div>
+        <div class="chat-header">
+            <select id="chat-agent-select" class="chat-agent-select" title="Switch agent">
+                <option>Loading...</option>
+            </select>
+            <span id="chat-status" class="chat-status">Offline</span>
+
+            <div class="chat-header-btns">
+                <button id="chat-new-session" class="chat-new-session" title="New Session">🔄</button>
+                <button id="chat-move" class="chat-move-btn" title="Move/snap chat window">⇱</button>
+                <button id="chat-close" class="chat-close">&times;</button>
+            </div>
+        </div>
+        <div id="chat-model-bar" class="chat-model-bar">
+            <span id="chat-model-name" class="chat-model-name">—</span>
+            <span id="chat-context-info" class="chat-context-info">— / —</span>
+        </div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div id="chat-attachments-preview" class="chat-attachments-preview"></div>
+        <div class="chat-input-row">
+            <button id="chat-attach" class="chat-attach-btn" title="Attach file">📎</button>
+            <input type="file" id="chat-file-input" class="chat-file-input" multiple accept="image/*,.pdf,.txt,.csv,.json,.md,.py,.js" style="display:none">
+            <textarea id="chat-input" class="chat-input" placeholder="Type a message..." rows="1"></textarea>
+            <button id="chat-mic" class="chat-mic-btn" title="Voice input">🎙️</button>
+            <button id="chat-stop" class="chat-stop-btn" title="Stop response">⏹</button>
+            <button id="chat-send" class="chat-send-btn">▶</button>
+        </div>
+    </div>
+    <div id="chat-exterior-tabs" class="chat-exterior-tabs" aria-label="Chat window controls">
+        <button class="chat-slot-tab" data-chat-slot-toggle="1" title="Open chat window 1"><span class="chat-slot-tab-label">W1</span></button>
+        <button class="chat-slot-tab" data-chat-slot-toggle="2" title="Open chat window 2"><span class="chat-slot-tab-label">W2</span></button>
+        <button class="chat-slot-tab" data-chat-slot-toggle="3" title="Open chat window 3"><span class="chat-slot-tab-label">W3</span></button>
+        <button id="chat-reset-layout" class="chat-slot-tab chat-slot-tab-reset" title="Reset chat layout">↺</button>
+    </div>
+    <div id="chat-secondary-1" class="chat-panel-secondary-placeholder" data-chat-slot-placeholder="1"></div>
+    <div id="chat-secondary-2" class="chat-panel-secondary-placeholder" data-chat-slot-placeholder="2"></div>
+    <div id="chat-secondary-3" class="chat-panel-secondary-placeholder" data-chat-slot-placeholder="3"></div>
+
+    <!-- Toast notifications -->
+    <div id="toastContainer"></div>
+
+    <!-- Scripts -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "/node_modules/three/build/three.module.min.js?v=20260609-node-modules-route",
+            "three/addons/": "/node_modules/three/examples/jsm/",
+            "@dimforge/rapier3d-compat": "/node_modules/@dimforge/rapier3d-compat/rapier.mjs?v=20260609-node-modules-route"
+        }
+    }
+    </script>
+    <script src="js/vo-engine.js?v=printer-copier-asset-v1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script type="module" src="js/main3d.js?v=20260613-demo-license-locks-r1"></script>
+    <script src="js/chat.js?v=20260612-chat-agent-persistence-r1"></script>
+    <script src="js/settings.js?v=20260613-demo-license-locks-r1"></script>
+</body>
+</html>

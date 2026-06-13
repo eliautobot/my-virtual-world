@@ -1,0 +1,43 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data
+.local-data/
+.tmp-data/
+data/
+backups/
+memory/
+virtual-world/
+
+# Dependencies and caches
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local scratch and review artifacts
+.tmp-*
+tmp-*
+*.bak
+*.bak2
+*.bak3
+*.tmp
+*.log
+
+# Generated media and screenshots
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
+/*.mp4
+/*.mov
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

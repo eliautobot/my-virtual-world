@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Wrapper that replaces Kasm's default Chromium launcher.
+# Launches Google Chrome exclusively. Run post-boot.sh to install Chrome first.
+
+CHROME_BIN="/opt/google/chrome/google-chrome"
+
+if [ ! -f "$CHROME_BIN" ]; then
+    echo "ERROR: Google Chrome is not installed."
+    echo "Run: docker exec --user root <container> bash /tmp/post-boot.sh"
+    exit 1
+fi
+
+BROWSER="$CHROME_BIN"
+PROFILE_DIR="$HOME/.config/google-chrome"
+echo "Launching Google Chrome"
+
+# Clean up stale locks
+if ! pgrep -f "$BROWSER" > /dev/null; then
+    rm -f "$PROFILE_DIR/SingletonLock" "$PROFILE_DIR/SingletonCookie" "$PROFILE_DIR/SingletonSocket"
+fi
+
+# Fix crash recovery nags
+sed -i 's/"exited_cleanly":false/"exited_cleanly":true/' "$PROFILE_DIR/Default/Preferences" 2>/dev/null
+sed -i 's/"exit_type":"Crashed"/"exit_type":"None"/' "$PROFILE_DIR/Default/Preferences" 2>/dev/null
+
+# CDP mode toggle: touch /tmp/no-cdp to disable remote debugging
+if [ -f /tmp/no-cdp ]; then
+    CDP_FLAGS=""
+    echo "Starting browser WITHOUT CDP (clean mode)"
+else
+    CDP_FLAGS="--remote-debugging-address=0.0.0.0 --remote-debugging-port=9222 --remote-allow-origins=*"
+    echo "Starting browser WITH CDP on port 9222"
+fi
+
+RENDER_FLAGS="--use-gl=swiftshader --disable-smooth-scrolling"
+WINDOW_FLAGS="--start-maximized --window-position=0,0 --window-size=1600,900"
+SUPPRESS_FLAGS="--disable-notifications --disable-infobars --no-default-browser-check"
+
+# Stealth flags - anti-bot-detection
+STEALTH_FLAGS="--disable-blink-features=AutomationControlled"
+STEALTH_FLAGS="$STEALTH_FLAGS --disable-features=AutomationControlled"
+STEALTH_FLAGS="$STEALTH_FLAGS --disable-infobars"
+STEALTH_FLAGS="$STEALTH_FLAGS --excludeSwitches=enable-automation"
+
+# Force 1600x900 resolution
+xrandr --newmode "1600x900" 0 1600 1600 1600 1600 900 900 900 900 2>/dev/null
+xrandr --addmode VNC-0 "1600x900" 2>/dev/null
+xrandr --output VNC-0 --mode "1600x900" 2>/dev/null
+
+exec $BROWSER \
+    --user-data-dir="$PROFILE_DIR" \
+    --password-store=basic \
+    --no-sandbox \
+    --ignore-gpu-blocklist \
+    --no-first-run \
+    --simulate-outdated-no-au="Tue, 31 Dec 2099 23:59:59 GMT" \
+    $CDP_FLAGS $RENDER_FLAGS $WINDOW_FLAGS $STEALTH_FLAGS $SUPPRESS_FLAGS "$@"

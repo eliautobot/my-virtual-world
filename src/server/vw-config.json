@@ -1,0 +1,51 @@
+{
+  "_setupComplete": false,
+  "world": {
+    "name": "My Virtual World",
+    "showGrid": true,
+    "showMinimap": true,
+    "showCoords": true,
+    "dayNightCycleEnabled": true,
+    "weatherEnabled": true
+  },
+  "openclaw": {
+    "homePath": "",
+    "hostHomePath": "",
+    "gatewayUrl": "",
+    "gatewayToken": ""
+  },
+  "hermes": {
+    "enabled": true,
+    "homePath": "",
+    "binary": "",
+    "timeoutSec": 600,
+    "apiUrl": "",
+    "apiKey": "",
+    "preferApi": true
+  },
+  "features": {
+    "agentBrowser": false,
+    "sms": false,
+    "weather": true,
+    "agentLiveMode": false,
+    "debugTools": true
+  },
+  "browser": {
+    "cdpUrl": "",
+    "viewerUrl": ""
+  },
+  "sms": {
+    "ownerAgentId": "",
+    "twilioAccountSid": "",
+    "twilioAuthToken": "",
+    "fromNumber": "",
+    "publicMediaBaseUrl": ""
+  },
+  "debug": {
+    "movementDebugOverlays": false,
+    "objectActionPointDebug": false
+  },
+  "license": {
+    "acceptedTrial": false
+  }
+}
