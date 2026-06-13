@@ -24,6 +24,7 @@ const requiredFiles = [
   'src/client/setup.html',
   'src/client/favicon.png',
   'src/client/assets/logo-transparent.png',
+  'src/client/js/starter-map.mjs',
   'src/server/server.py',
   'src/server/gateway_presence.py',
   'src/server/providers/hermes.py',
@@ -87,6 +88,7 @@ const jsSyntaxTargets = [
   'src/client/js/main3d.js',
   'src/client/js/agent-characters.js',
   'src/client/js/settings.js',
+  'src/client/js/starter-map.mjs',
   'src/client/js/chat.js',
   'src/client/js/dynamic-interior-routing.js',
   'src/client/js/dynamic-exterior-routing.js',
@@ -123,6 +125,7 @@ const indexHtml = read('src/client/index.html');
 const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
+const starterMapJs = read('src/client/js/starter-map.mjs');
 const uiCss = read('src/client/css/ui-redesign.css');
 
 for (const token of [
@@ -149,6 +152,15 @@ for (const token of [
   'body["features"][feature] = False',
 ]) {
   assert(serverPy.includes(token), `server.py missing demo lock token: ${token}`);
+}
+
+for (const token of [
+  'STARTER_WORLD_BUILDING_IDS',
+  'bld_1781275602998',
+  'bld_1781275645157',
+  'Current 8590 desktop starter street layout',
+]) {
+  assert(serverPy.includes(token), `server.py missing starter map token: ${token}`);
 }
 
 for (const token of [
@@ -183,6 +195,28 @@ for (const token of [
   'Importing a world',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing edit lock token: ${token}`);
+}
+
+for (const token of [
+  'cloneStarterMapBuildings',
+  'cloneStarterMapStreets',
+  'desktop-8590-2026-06-13',
+  'js/main3d.js?v=20260613-starter-map-r1',
+]) {
+  assert(`${main3dJs}\n${indexHtml}`.includes(token), `client starter map wiring missing token: ${token}`);
+}
+
+for (const token of [
+  'STARTER_MAP_BUILDINGS',
+  'STARTER_MAP_STREETS',
+  'First Park',
+  'Office',
+  'meetingTable',
+  'picnicTable',
+  'deletedGeneratedNodeIds',
+  'x2: 142',
+]) {
+  assert(starterMapJs.includes(token), `starter-map.mjs missing 8590 layout token: ${token}`);
 }
 
 for (const token of [

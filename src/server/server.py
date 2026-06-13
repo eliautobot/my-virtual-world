@@ -320,9 +320,11 @@ def _is_starter_world_seed_request(path, payload=None):
     if path in {"/api/streets"} or path.startswith("/api/chunk/"):
         return True
     if path in {"/api/building", "/api/buildings"} and isinstance(payload, dict):
-        return str(payload.get("id") or "").startswith("auto_") and len(list_buildings()) < 4
+        building_id = str(payload.get("id") or "")
+        starter_id = building_id.startswith("auto_") or building_id in STARTER_WORLD_BUILDING_IDS
+        return starter_id and len(list_buildings()) < 4
     if path == "/api/meta" and isinstance(payload, dict):
-        return set(payload.keys()).issubset({"initialized"}) and payload.get("initialized") is True
+        return set(payload.keys()).issubset({"initialized", "name", "starterMap"}) and payload.get("initialized") is True
     return False
 
 
@@ -492,20 +494,21 @@ DEFAULT_META = {
     "createdAt": None,
 }
 
-# Latest known-good desktop checkpoint street layout restored on 2026-04-29.
-# Keep this server-side guard narrow: it only protects the saved street list
-# from accidental empty/default world-meta rewrites. Buildings, agents, and
-# other world state are intentionally left alone.
+STARTER_WORLD_BUILDING_IDS = {"bld_1781275602998", "bld_1781275645157"}
+
+# Current 8590 desktop starter street layout. Keep this server-side guard
+# narrow: it only protects the saved street list from accidental empty/default
+# world-meta rewrites. Buildings, agents, and other world state stay separate.
 LATEST_CHECKPOINT_STREETS_20260429 = [
-    {"x1": -135, "z1": 15, "x2": -12, "z2": 15, "type": None, "rotation": 0, "openEdges": None},
-    {"x1": -2, "z1": 15, "x2": 147, "z2": 15, "type": None, "rotation": 0, "openEdges": None},
-    {"x1": -7, "z1": 15, "x2": -7, "z2": 15, "type": "x-int", "rotation": 0, "openEdges": {"n": True, "s": True, "e": True, "w": True}},
     {"x1": -7, "z1": 20, "x2": -7, "z2": 159, "type": None, "rotation": 0, "openEdges": None},
     {"x1": -7, "z1": -133, "x2": -7, "z2": -45, "type": None, "rotation": 0, "openEdges": None},
     {"x1": -7, "z1": -35, "x2": -7, "z2": 10, "type": None, "rotation": 0, "openEdges": None},
-    {"x1": -7, "z1": -40, "x2": -7, "z2": -40, "type": "x-int", "rotation": 0, "openEdges": {"n": True, "s": True, "e": True, "w": True}},
     {"x1": -109, "z1": -40, "x2": -12, "z2": -40, "type": None, "rotation": 0, "openEdges": None},
-    {"x1": -2, "z1": -40, "x2": 191, "z2": -40, "type": None, "rotation": 0, "openEdges": None},
+    {"x1": -7, "z1": -40, "x2": -7, "z2": -40, "type": "x-int", "rotation": 0, "openEdges": {"n": True, "s": True, "e": True, "w": True}},
+    {"x1": -2, "z1": 15, "x2": 142, "z2": 15, "type": None, "rotation": 0, "openEdges": None},
+    {"x1": -2, "z1": -40, "x2": 141, "z2": -40, "type": None, "rotation": 0, "openEdges": None},
+    {"x1": -7, "z1": 15, "x2": -7, "z2": 15, "type": "x-int", "rotation": 0, "openEdges": {"n": True, "s": True, "e": True, "w": True}},
+    {"x1": -12, "z1": 15, "x2": -109, "z2": 15, "type": None, "rotation": 0, "openEdges": None},
 ]
 
 
