@@ -78,7 +78,7 @@ import {
   STARTER_MAP_NAME,
   cloneStarterMapBuildings,
   cloneStarterMapStreets,
-} from './starter-map.mjs?v=20260613-appliance-traffic-r2';
+} from './starter-map.mjs?v=20260613-road-terrain-r1';
 import {
   CAPABILITY_TAG_GROUPS,
   CAPABILITY_TAG_DEFINITIONS,
@@ -6440,10 +6440,13 @@ function createChunk(cx, cz) {
   fetchChunk(cx, cz).then(d => {
     if (d && d.terrain) {
       data.terrain = d.terrain;
-      // Repaint street terrain on newly loaded chunks
-      _repaintStreetTerrainForChunk(cx, cz);
-      rebuildChunk(data);
     }
+    // Repaint street terrain even when the server has no saved chunk yet.
+    // Fresh GitHub installs start with only /api/streets, so missing chunks
+    // must still become road/sidewalk terrain instead of grass with trees.
+    _repaintStreetTerrainForChunk(cx, cz);
+    rebuildChunk(data);
+    if (data.dirty) _debounceSaveStreets();
   });
 }
 
@@ -51476,7 +51479,7 @@ function _debounceRebuildTrafficLights() {
 // FEATURE 1 — VEHICLES ON ROADS
 // ═══════════════════════════════════════════════════════════════
 const VEHICLE_COLORS = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0x8e24aa, 0xff6f00, 0x00897b, 0x5c6bc0];
-const VEHICLE_SPEED = 2.0; // world units/sec — calm ambient starter-road traffic
+const VEHICLE_SPEED = 7.0; // world units/sec (~4x walking speed)
 
 // Vehicle types for variety
 const VEHICLE_TYPES = ['car', 'car', 'car', 'sedan', 'sedan', 'truck', 'van', 'bus'];
@@ -51676,7 +51679,7 @@ function initVehicles() {
 
   // Generate spawn candidates: place points at regular intervals along each segment
   const spawnCandidates = [];
-  const spacing = 16; // tile spacing between spawn points
+  const spacing = 8; // tile spacing between spawn points
   for (const seg of roadSegs) {
     const dx = seg.x2 - seg.x1, dz = seg.z2 - seg.z1;
     const segLen = Math.sqrt(dx * dx + dz * dz);
@@ -51718,14 +51721,13 @@ function initVehicles() {
     }
   }
 
-  // Scale vehicle count with total road length. Keep defaults sparse so traffic
-  // reads as ambient motion instead of a dense simulation on starter roads.
+  // Scale vehicle count with total road length.
   let totalRoadLen = 0;
   for (const seg of roadSegs) {
     const dx = seg.x2 - seg.x1, dz = seg.z2 - seg.z1;
     totalRoadLen += Math.sqrt(dx * dx + dz * dz);
   }
-  const vehicleCount = Math.min(Math.max(2, Math.floor(totalRoadLen / 140)), 5, interleaved.length);
+  const vehicleCount = Math.min(Math.max(2, Math.floor(totalRoadLen / 15)), 30, interleaved.length);
   let spawned = 0;
   for (const sp of interleaved) {
     if (spawned >= vehicleCount) break;
