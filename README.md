@@ -8,7 +8,7 @@ Website: [myvirtualworld.ai](https://myvirtualworld.ai/)
 
 This product is built for local machines, LANs, and private remote-access networks. It is not intended to be exposed directly to the public internet without authentication and network hardening.
 
-![My Virtual World setup preview](docs/assets/setup-8090.png)
+![My Virtual World setup preview](docs/assets/my-virtual-world-setup-preview.png)
 
 ## Highlights
 
@@ -22,6 +22,22 @@ This product is built for local machines, LANs, and private remote-access networ
 - Persistent world data stored as JSON
 - Docker-first deployment with local development support
 
+## Requirements
+
+For the recommended Docker install, you need:
+
+- Docker Desktop on Windows or macOS, or Docker Engine with Docker Compose on Linux.
+- Git, so you can download and update the repo.
+- A web browser.
+- At least 4 GB of free RAM and 2 GB of free disk space.
+
+Optional integrations:
+
+- OpenClaw, if you want live OpenClaw agent presence and activity in the world.
+- Hermes, if you want Hermes profile integration.
+- Tailscale, if you want to access the app remotely without exposing it publicly.
+- A License Key from [myvirtualworld.ai](https://myvirtualworld.ai/) to unlock paid features.
+
 ## Quick Start
 
 The easiest way to run My Virtual World is with Docker. You do not need to install Python or Node.js on your computer when using Docker.
@@ -33,7 +49,13 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Open the app:
+Check that Docker started it:
+
+```bash
+docker compose ps
+```
+
+Open the app in your browser:
 
 ```bash
 http://localhost:8590
@@ -41,9 +63,32 @@ http://localhost:8590
 
 Then open the setup wizard at `http://localhost:8590/setup`.
 
-New to Docker or agent connections? Start with the beginner guide:
+If the page does not load, check the logs:
 
-[docs/INSTALLATION.md](docs/INSTALLATION.md)
+```bash
+docker compose logs -f virtual-world
+```
+
+The longer beginner guide is here: [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+## First Setup
+
+On first run, open:
+
+```text
+http://localhost:8590/setup
+```
+
+The setup wizard walks through:
+
+- License or demo mode.
+- World name.
+- OpenClaw connection paths.
+- Hermes connection paths.
+- Optional Agent Browser settings.
+- Optional SMS/Twilio settings.
+
+You can change the same options later from `Settings` inside the app.
 
 ## License Keys
 
@@ -71,18 +116,55 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for more detail.
 
 My Virtual World can show live agent presence and activity when your agent tools are available on the same machine.
 
-For the default Docker setup:
+OpenClaw and Hermes are optional. The app still runs without them, but live agents and activity work best when they are connected.
+
+### Docker Path Defaults
+
+When running with Docker, use these values in `Settings > Connections`:
+
+| Field | Docker value |
+| --- | --- |
+| OpenClaw Home | `/openclaw` |
+| Gateway URL | `ws://host.docker.internal:18789` |
+| Gateway Token | Leave blank unless your gateway requires one |
+| Hermes Home | `/home/vw/.hermes` |
+| Hermes CLI | `/home/vw/.local/bin/hermes` |
+| Hermes API URL | Leave blank for CLI mode |
+| Hermes API Key | Leave blank unless your Hermes API requires one |
+
+These values match the Docker mounts in `docker-compose.yml`:
 
 - OpenClaw home is mounted into the container at `/openclaw`.
 - The OpenClaw gateway is reached from inside Docker at `ws://host.docker.internal:18789`.
 - Hermes home is mounted at `/home/vw/.hermes`.
 - The Hermes CLI is mounted at `/home/vw/.local/bin/hermes`.
 
-After the app is running, open `Settings > Connections` or the setup wizard and use those values. See [docs/INSTALLATION.md](docs/INSTALLATION.md#connect-openclaw-and-hermes-agents) for the full beginner walkthrough.
+### Local Development Path Defaults
+
+If you are running the server directly without Docker, use local paths instead:
+
+| Field | Local value |
+| --- | --- |
+| OpenClaw Home | `~/.openclaw` |
+| Gateway URL | Usually `ws://127.0.0.1:18789` or your gateway URL |
+| Hermes Home | `~/.hermes` |
+| Hermes CLI | `~/.local/bin/hermes` |
+
+If OpenClaw agents do not appear, confirm OpenClaw and the OpenClaw gateway are running. If Hermes does not connect, confirm Hermes is installed and the Hermes binary exists at `~/.local/bin/hermes`.
+
+See [docs/INSTALLATION.md](docs/INSTALLATION.md#connect-openclaw-and-hermes-agents) for the full beginner walkthrough.
 
 ## Remote Access
 
-I recommend using Tailscale for remote access instead of opening ports on your router. Install Tailscale on the computer running My Virtual World and on the device you want to connect from, then open:
+I recommend using Tailscale for remote access instead of opening ports on your router. Tailscale keeps access inside your private Tailnet.
+
+Basic setup:
+
+1. Install Tailscale on the computer running My Virtual World.
+2. Install Tailscale on the device you want to connect from.
+3. Sign in to the same Tailnet on both devices.
+4. Start My Virtual World with Docker.
+5. From the remote device, open:
 
 ```text
 http://<your-tailscale-device-name>:8590
@@ -94,7 +176,24 @@ or:
 http://<your-tailscale-ip>:8590
 ```
 
-Keep `8590`, `18789`, `9222`, and browser/VNC ports off the public internet. See [docs/SECURITY.md](docs/SECURITY.md#remote-access-with-tailscale) for the recommended remote-access setup.
+Do not port-forward `8590` to the public internet. Also keep `18789`, `9222`, and browser/VNC ports private. See [docs/SECURITY.md](docs/SECURITY.md#remote-access-with-tailscale) for the recommended remote-access setup.
+
+## Updating Docker Later
+
+From the repo folder:
+
+```bash
+git pull
+docker compose up --build -d
+```
+
+To stop the app:
+
+```bash
+docker compose down
+```
+
+Your world data is stored in the Docker volume `vw-data`, so rebuilding the app does not erase saved worlds.
 
 ## Local Development
 

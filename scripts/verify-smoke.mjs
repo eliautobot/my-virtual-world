@@ -19,6 +19,7 @@ const requiredFiles = [
   'docs/CONFIGURATION.md',
   'docs/INSTALLATION.md',
   'docs/SECURITY.md',
+  'docs/assets/my-virtual-world-setup-preview.png',
   'src/client/index.html',
   'src/client/setup.html',
   'src/client/favicon.png',
