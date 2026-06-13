@@ -221,6 +221,7 @@
       body: JSON.stringify(buildSettingsPayload()),
     });
     populateForm(result.config);
+    window.dispatchEvent(new CustomEvent('vw:settings-saved', { detail: { config: result.config } }));
     window.closeSettingsModal?.();
   }
 

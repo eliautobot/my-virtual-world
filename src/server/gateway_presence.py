@@ -67,6 +67,7 @@ _manual_overrides = {}  # agent_id → {state, task, updated, expires}
 # Gateway connection state
 _gw_connected = False
 _gw_error = None
+_gw_origin = ""
 _debug = {
     "connectedAt": 0,
     "lastEventAt": 0,
@@ -156,6 +157,7 @@ def get_connection_status():
     return {
         "connected": _gw_connected,
         "error": _gw_error,
+        "origin": _gw_origin,
         "agentsCached": agents_cached,
         "debug": dict(_debug),
     }
@@ -610,6 +612,7 @@ async def _gateway_loop(gateway_url, gateway_token, origin, client_version="unkn
 
     while True:
         try:
+            _gw_connected = False
             _gw_error = None
 
             async with ws_connect(
@@ -655,6 +658,7 @@ async def _gateway_loop(gateway_url, gateway_token, origin, client_version="unkn
                 raw = await asyncio.wait_for(ws.recv(), timeout=10)
                 res = json.loads(raw)
                 if not res.get("ok"):
+                    _gw_connected = False
                     err = res.get("error", {}).get("message", "unknown error")
                     _gw_error = err
                     _consecutive_failures += 1
@@ -794,9 +798,9 @@ _thread = None
 _loop = None
 
 
-def start(gateway_url, gateway_token, port=8590, client_version="unknown"):
+def start(gateway_url, gateway_token, port=8590, client_version="unknown", origin=None):
     """Start the gateway presence listener in a background thread."""
-    global _thread, _loop
+    global _thread, _loop, _gw_origin
 
     if websockets is None:
         print("⚠️  Gateway presence: websockets not installed, skipping")
@@ -808,7 +812,8 @@ def start(gateway_url, gateway_token, port=8590, client_version="unknown"):
 
     _thread = None
     _loop = None
-    origin = f"http://127.0.0.1:{port}"
+    origin = origin or f"http://127.0.0.1:{port}"
+    _gw_origin = origin
 
     def run():
         global _loop

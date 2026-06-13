@@ -79,6 +79,22 @@ docker compose logs -f virtual-world
 
 The longer beginner guide is here: [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
+## Documentation for Users and Agents
+
+The repo includes internal documentation for both people and AI agents:
+
+- [AGENTS.md](AGENTS.md) - safe repo instructions for AI coding agents.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - how the client, server, Docker runtime, and saved data fit together.
+- [docs/API.md](docs/API.md) - HTTP endpoint reference.
+- [docs/WORLD-DATA.md](docs/WORLD-DATA.md) - saved world JSON, buildings, chunks, roads, agents, and world actions.
+- [docs/AGENT-INTEGRATION.md](docs/AGENT-INTEGRATION.md) - OpenClaw, Hermes, agent presence, chat, and Agent Live Mode.
+- [docs/AGENT_PLATFORM_COMMUNICATIONS.md](docs/AGENT_PLATFORM_COMMUNICATIONS.md) - visible agent-to-agent messaging through My Virtual World.
+- [docs/VIRTUAL_WORLD_AGENT_TOOLS.md](docs/VIRTUAL_WORLD_AGENT_TOOLS.md) - canonical agent-facing tool index.
+- [docs/SKILLS.md](docs/SKILLS.md) - reusable skill files under `docs/skills/`.
+- [docs/UPDATES-AND-PERSISTENCE.md](docs/UPDATES-AND-PERSISTENCE.md) - update behavior and saved-data protection.
+
+Documentation examples use placeholders and avoid private paths, keys, tokens, hostnames, IPs, and runtime data.
+
 ## First Setup
 
 On first run, open:

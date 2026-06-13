@@ -49,6 +49,8 @@ def _env_or(key, fallback):
     return val if val else fallback
 
 PORT = int(_env_or("VW_PORT", "8590"))
+PUBLIC_HOST_PORT = _env_or("VW_HOST_PORT", str(PORT))
+PUBLIC_ORIGIN = _env_or("VW_PUBLIC_ORIGIN", f"http://127.0.0.1:{PUBLIC_HOST_PORT}")
 DATA_DIR = _env_or("VW_DATA_DIR", "/data")
 CHUNKS_DIR = os.path.join(DATA_DIR, "chunks")
 BUILDINGS_DIR = os.path.join(DATA_DIR, "buildings")
@@ -256,6 +258,7 @@ def _save_vw_config_update(body):
     global VW_CONFIG, WORKSPACE_BASE, HOST_WORKSPACE_BASE, HERMES_ENABLED, HERMES_HOME, HERMES_BIN, HERMES_TIMEOUT_SEC, UPLOADS_DIR, UPLOADS_HOST_DIR
     if not isinstance(body, dict):
         return {"ok": False, "error": "settings payload must be an object"}, 400
+    old_gateway_config = _gateway_config_key()
     existing = _deep_merge(_default_vw_config(), _load_config_file(_resolve_vw_config_path()))
     _preserve_secret_updates(existing, body)
     if isinstance(body.get("features"), dict):
@@ -275,6 +278,8 @@ def _save_vw_config_update(body):
     HERMES_TIMEOUT_SEC = int(VW_CONFIG["hermes"].get("timeoutSec") or 600)
     UPLOADS_DIR = _env_or("VW_UPLOADS_DIR", os.path.join(WORKSPACE_BASE, "workspace", "uploads"))
     UPLOADS_HOST_DIR = _env_or("VW_UPLOADS_HOST_DIR", os.path.join(HOST_WORKSPACE_BASE, "workspace", "uploads"))
+    if _gateway_config_key() != old_gateway_config:
+        restart_gateway_presence()
     world = body.get("world") if isinstance(body.get("world"), dict) else {}
     if world:
         meta_patch = {k: v for k, v in world.items() if k in {"name", "showMinimap", "dayNightCycleEnabled", "weatherEnabled"}}
@@ -477,6 +482,7 @@ _gateway_presence = _load_external_module("vw_gateway_presence_local", os.path.j
 _presence_snapshot_path = os.path.join(DATA_DIR, "presence-snapshot.json")
 _presence_snapshot_thread = None
 _presence_enabled = False
+_presence_gateway_config = None
 HERMES_APPROVAL_LOCK = threading.Lock()
 HERMES_APPROVAL_PENDING = {}
 HERMES_LIVE_LOCK = threading.Lock()
@@ -4127,8 +4133,78 @@ def _read_gateway_config():
     return gw_url, gw_token
 
 
+def _gateway_config_key():
+    gw_url, gw_token = _read_gateway_config()
+    return gw_url or "", gw_token or ""
+
+
+def _gateway_info_payload():
+    gw_url, gw_token = _read_gateway_config()
+    ws_port = 18789
+    if gw_url:
+        try:
+            parsed = urllib.parse.urlparse(gw_url)
+            if parsed.port:
+                ws_port = int(parsed.port)
+        except Exception:
+            pass
+    return {
+        "wsPort": ws_port,
+        "gatewayUrl": gw_url or "",
+        "token": gw_token or "",
+        "tokenConfigured": bool(gw_token),
+        "openclawVersion": _get_openclaw_version(),
+    }
+
+
+def _gateway_presence_connected():
+    if not (_presence_enabled and _gateway_presence and hasattr(_gateway_presence, "get_connection_status")):
+        return False
+    try:
+        return bool((_gateway_presence.get_connection_status() or {}).get("connected"))
+    except Exception:
+        return False
+
+
+def _gateway_origin_candidates():
+    candidates = []
+    if PUBLIC_ORIGIN:
+        candidates.append(PUBLIC_ORIGIN.rstrip("/"))
+    for port in [PUBLIC_HOST_PORT, str(PORT)]:
+        if not port:
+            continue
+        candidates.extend([f"http://127.0.0.1:{port}", f"http://localhost:{port}"])
+    seen = set()
+    unique = []
+    for origin in candidates:
+        if origin and origin not in seen:
+            seen.add(origin)
+            unique.append(origin)
+    return unique
+
+
+def _read_gateway_allowed_origins():
+    config_path = os.path.join(WORKSPACE_BASE, "openclaw.json")
+    try:
+        with open(config_path, "r") as f:
+            cfg = json.load(f)
+        origins = cfg.get("gateway", {}).get("controlUi", {}).get("allowedOrigins", [])
+        return origins if isinstance(origins, list) else []
+    except Exception:
+        return []
+
+
+def _gateway_control_origin():
+    allowed = set(_read_gateway_allowed_origins())
+    candidates = _gateway_origin_candidates()
+    for origin in candidates:
+        if origin in allowed:
+            return origin
+    return candidates[0] if candidates else f"http://127.0.0.1:{PORT}"
+
+
 def initialize_live_presence():
-    global _presence_enabled, _presence_snapshot_thread
+    global _presence_enabled, _presence_snapshot_thread, _presence_gateway_config
     if not _gateway_presence:
         print("⚠️  Virtual World presence: gateway_presence unavailable, falling back to legacy status file")
         return
@@ -4152,11 +4228,13 @@ def initialize_live_presence():
     gw_url, gw_token = _read_gateway_config()
     if gw_url and gw_token:
         try:
-            _gateway_presence.start(gw_url, gw_token, port=PORT, client_version=_get_openclaw_version())
+            _gateway_presence.start(gw_url, gw_token, port=PORT, client_version=_get_openclaw_version(), origin=_gateway_control_origin())
             _presence_enabled = True
+            _presence_gateway_config = (gw_url or "", gw_token or "")
         except Exception as e:
             print(f"⚠️  Virtual World presence: failed to start gateway listener: {e}")
     else:
+        _presence_gateway_config = None
         print("⚠️  Virtual World presence: missing gateway config/token, falling back to legacy status file")
 
     if _presence_enabled and _presence_snapshot_thread is None:
@@ -4170,6 +4248,20 @@ def initialize_live_presence():
 
         _presence_snapshot_thread = threading.Thread(target=snapshot_loop, daemon=True, name="vw-presence-snapshot")
         _presence_snapshot_thread.start()
+
+
+def restart_gateway_presence():
+    global _presence_enabled, _presence_gateway_config
+    if not _gateway_presence:
+        return
+    try:
+        if hasattr(_gateway_presence, "stop"):
+            _gateway_presence.stop()
+    except Exception as e:
+        print(f"⚠️  Virtual World presence: failed to stop old gateway listener: {e}")
+    _presence_enabled = False
+    _presence_gateway_config = None
+    initialize_live_presence()
 
 
 def _normalize_presence_entry(entry):
@@ -4537,6 +4629,10 @@ def _format_time_et(ts):
 def get_agent_chat():
     """Read recent chat messages from agent session JSONL files."""
     global _chat_cache, _chat_cache_time
+    if not _gateway_presence_connected():
+        _chat_cache = {}
+        _chat_cache_time = time.time()
+        return {}
     now = time.time()
     if now - _chat_cache_time < 2:  # cache for 2 seconds
         return _chat_cache
@@ -5164,19 +5260,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         # ─── CHAT INTERFACE ENDPOINTS ─────────────────────────────
         if path == "/gateway-info":
-            # Provide gateway WS port + auth token for chat WebSocket connection
-            token = ""
-            ws_port = 18789
-            config_path = os.path.join(WORKSPACE_BASE, "openclaw.json")
-            try:
-                with open(config_path, "r") as f:
-                    cfg = json.loads(f.read())
-                gw = cfg.get("gateway", {})
-                ws_port = gw.get("port", 18789)
-                token = gw.get("auth", {}).get("token", "")
-            except Exception:
-                pass
-            return self._send_json({"wsPort": ws_port, "token": token, "openclawVersion": _get_openclaw_version()})
+            return self._send_json(_gateway_info_payload())
 
         if path == "/agents-list":
             # Return agent roster formatted for chat agent selector
@@ -5700,16 +5784,15 @@ def _check_gateway_origin():
     Logs a warning if not — user needs to add it via openclaw config or the VO settings.
     (Can't auto-add from Docker since openclaw.json is mounted read-only.)
     """
-    config_path = os.path.join(WORKSPACE_BASE, "openclaw.json")
-    origin_local = f"http://127.0.0.1:{PORT}"
     try:
-        with open(config_path, "r") as f:
-            cfg = json.loads(f.read())
-        origins = cfg.get("gateway", {}).get("controlUi", {}).get("allowedOrigins", [])
-        if origin_local in origins:
-            print(f"[chat] ✅ Gateway origin {origin_local} found in allowedOrigins")
+        allowed = set(_read_gateway_allowed_origins())
+        candidates = _gateway_origin_candidates()
+        accepted = [origin for origin in candidates if origin in allowed]
+        if accepted:
+            print(f"[chat] ✅ Gateway origin {accepted[0]} found in allowedOrigins")
         else:
-            print(f"[chat] ⚠️  Origin {origin_local} NOT in gateway.controlUi.allowedOrigins!")
+            expected = candidates[0] if candidates else f"http://127.0.0.1:{PORT}"
+            print(f"[chat] ⚠️  Origin {expected} NOT in gateway.controlUi.allowedOrigins!")
             print(f"[chat]    Chat will get 1008 disconnects. Add this origin to openclaw.json")
             print(f"[chat]    and restart the gateway, or use the VO settings panel.")
     except Exception as e:

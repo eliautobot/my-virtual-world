@@ -1,6 +1,7 @@
 // Virtual World Chat — Gateway WebSocket Client (Multi-Window, ported from Virtual Office)
 (() => {
   let GATEWAY_TOKEN = '';
+  let GATEWAY_URL = '';
   let ws = null;
   let reqId = 0;
   let connected = false;
@@ -8,19 +9,34 @@
   let _chatWsPort = null;
   let GATEWAY_CLIENT_VERSION = 'unknown';
   let _modelBarInterval = null;
+  let gatewayAuthFailed = false;
+  let gatewayAuthFailureMessage = '';
+  let lastGatewayToken = null;
   const runOwners = new Map();
-  const gatewayInfoReady = fetch('/gateway-info')
-    .then(r => r.json())
-    .then(d => {
+  const LOCAL_GATEWAY_HOSTS = new Set(['127.0.0.1', 'localhost', '0.0.0.0', 'host.docker.internal']);
+
+  async function loadGatewayInfo() {
+    try {
+      const r = await fetch('/gateway-info', { cache: 'no-store' });
+      const d = await r.json();
       if (d.wsPort) _chatWsPort = d.wsPort;
-      if (d.token) GATEWAY_TOKEN = d.token;
+      GATEWAY_URL = typeof d.gatewayUrl === 'string' ? d.gatewayUrl.trim() : '';
+      const nextToken = typeof d.token === 'string' ? d.token : '';
+      if (nextToken !== lastGatewayToken) {
+        gatewayAuthFailed = false;
+        gatewayAuthFailureMessage = '';
+        lastGatewayToken = nextToken;
+      }
+      GATEWAY_TOKEN = nextToken;
       if (d.openclawVersion) GATEWAY_CLIENT_VERSION = d.openclawVersion;
       return d;
-    })
-    .catch((err) => {
+    } catch (err) {
       console.warn('[chat] Failed to load gateway info:', err);
       return null;
-    });
+    }
+  }
+
+  const gatewayInfoReady = loadGatewayInfo();
 
   const MAX_INPUT_LINES = 15;
   const TOOL_RENDER_INTERVAL_MS = 80;
@@ -1631,9 +1647,31 @@
 
   function nextId() { return `vw-${++reqId}-${Date.now()}`; }
 
+  function browserGatewayUrlFromConfig(rawUrl) {
+    if (!rawUrl) return '';
+    try {
+      const parsed = new URL(rawUrl);
+      if (!['ws:', 'wss:'].includes(parsed.protocol)) return '';
+      const browserHost = window.location.hostname || '127.0.0.1';
+      if (LOCAL_GATEWAY_HOSTS.has(parsed.hostname)) {
+        parsed.hostname = browserHost;
+      }
+      if (window.location.protocol === 'https:' && parsed.protocol === 'ws:') {
+        parsed.protocol = 'wss:';
+      }
+      return parsed.toString();
+    } catch (err) {
+      console.warn('[chat] Invalid gateway URL:', rawUrl, err);
+      return '';
+    }
+  }
+
   function getGatewayUrl() {
+    const configured = browserGatewayUrlFromConfig(GATEWAY_URL);
+    if (configured) return configured;
     const host = window.location.hostname || '127.0.0.1';
     if (window.location.protocol === 'https:') return `wss://${host}:8443/ws-gateway`;
+    if (!_chatWsPort) return '';
     return `ws://${host}:${_chatWsPort}`;
   }
 
@@ -1648,21 +1686,28 @@
   async function connectGateway() {
     if (ws) return;
     chatWindows.forEach(w => w.setStatus('Connecting...', 'connecting'));
-    await gatewayInfoReady;
+    await loadGatewayInfo();
     if (ws) return;
-    if (!GATEWAY_TOKEN) {
-      chatWindows.forEach(w => w.setStatus('Gateway token unavailable', 'disconnected'));
+    if (!GATEWAY_URL && !_chatWsPort) {
+      chatWindows.forEach(w => w.setStatus('Gateway URL unavailable', 'disconnected'));
       return;
     }
-    if (!_chatWsPort) {
-      chatWindows.forEach(w => w.setStatus('Gateway port unavailable', 'disconnected'));
+    const gatewayUrl = getGatewayUrl();
+    if (!gatewayUrl) {
+      chatWindows.forEach(w => w.setStatus('Gateway URL unavailable', 'disconnected'));
       return;
     }
-    ws = new WebSocket(getGatewayUrl());
-    ws.onmessage = (evt) => {
+    try {
+      ws = new WebSocket(gatewayUrl);
+    } catch (err) {
+      chatWindows.forEach(w => w.setStatus('Gateway URL invalid', 'disconnected'));
+      return;
+    }
+    const socket = ws;
+    socket.onmessage = (evt) => {
       let msg;
       try { msg = JSON.parse(evt.data); } catch { return; }
-      if (msg.type === 'event' && msg.event === 'connect.challenge') return sendConnect();
+      if (msg.type === 'event' && msg.event === 'connect.challenge') return sendConnect(socket);
       if (msg.type === 'res') {
         const cb = pendingCallbacks[msg.id];
         if (cb) { delete pendingCallbacks[msg.id]; cb(msg); }
@@ -1670,16 +1715,21 @@
       }
       if (msg.type === 'event') handleEvent(msg);
     };
-    ws.onclose = (evt) => {
+    socket.onclose = (evt) => {
+      if (ws !== socket) return;
       connected = false;
       ws = null;
-      chatWindows.forEach(w => w.setStatus(`Disconnected (${evt.code})`, 'disconnected'));
-      if (primaryWindow.root.classList.contains('open')) setTimeout(connectGateway, 3000);
+      const message = gatewayAuthFailed && gatewayAuthFailureMessage ? gatewayAuthFailureMessage : `Disconnected (${evt.code})`;
+      chatWindows.forEach(w => w.setStatus(message, 'disconnected'));
+      if (!gatewayAuthFailed && primaryWindow.root.classList.contains('open')) setTimeout(connectGateway, 3000);
     };
-    ws.onerror = () => chatWindows.forEach(w => w.setStatus('Connection error', 'disconnected'));
+    socket.onerror = () => {
+      if (ws === socket) chatWindows.forEach(w => w.setStatus('Connection error', 'disconnected'));
+    };
   }
 
-  function sendConnect() {
+  function sendConnect(socket = ws) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
     const id = nextId();
     const msg = {
       type: 'req', id, method: 'connect',
@@ -1702,10 +1752,15 @@
         });
         startModelBarRefresh();
       } else {
-        chatWindows.forEach(w => w.setStatus(`Auth failed: ${res.error?.message || 'unknown'}`, 'disconnected'));
+        gatewayAuthFailed = true;
+        gatewayAuthFailureMessage = `Auth failed: ${res.error?.message || 'unknown'}`;
+        connected = false;
+        chatWindows.forEach(w => w.setStatus(gatewayAuthFailureMessage, 'disconnected'));
+        if (ws === socket) ws = null;
+        try { socket.close(1008, 'auth failed'); } catch {}
       }
     };
-    ws.send(JSON.stringify(msg));
+    socket.send(JSON.stringify(msg));
   }
 
   function rpc(method, params) {
@@ -2381,6 +2436,20 @@
     }
   }
 
+  async function refreshGatewayConnectionFromSettings() {
+    gatewayAuthFailed = false;
+    gatewayAuthFailureMessage = '';
+    pendingCallbacks = {};
+    const oldWs = ws;
+    ws = null;
+    connected = false;
+    if (oldWs) {
+      try { oldWs.close(1000, 'settings updated'); } catch {}
+    }
+    await loadGatewayInfo();
+    connectGateway();
+  }
+
   function forcePrimaryPanelToggle(e) {
     // Capture-phase guard: keeps the chat button reliable even if another
     // listener/regression interrupts the normal toggle path.
@@ -2394,6 +2463,10 @@
 
   chatBtn.addEventListener('click', () => {
     setPrimaryPanelOpen(!primaryWindow.root.classList.contains('open'));
+  });
+
+  window.addEventListener('vw:settings-saved', () => {
+    refreshGatewayConnectionFromSettings().catch(() => {});
   });
 
   const chatUrlParams = new URLSearchParams(window.location.search);
@@ -2410,8 +2483,8 @@
     setTimeout(applyQueryAgentAssignments, 400);
   }
 
-  // Gateway info is loaded once at startup by gatewayInfoReady above so chat never
-  // opens against the default port/token before the product server responds.
+  // Gateway info is refreshed on connect and after settings saves so token changes
+  // apply without a full browser reload.
 
   // --- MOVE / SNAP SYSTEM (primary window only) ---
   const chatPanel = primaryWindow.root;

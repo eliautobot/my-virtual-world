@@ -9,6 +9,7 @@ const read = (path) => readFileSync(join(root, path), 'utf8');
 const exists = (path) => existsSync(join(root, path));
 
 const requiredFiles = [
+  'AGENTS.md',
   'README.md',
   'LICENSE',
   '.env.example',
@@ -16,10 +17,21 @@ const requiredFiles = [
   '.dockerignore',
   'Dockerfile',
   'docker-compose.yml',
+  'docs/API.md',
+  'docs/ARCHITECTURE.md',
+  'docs/AGENT-INTEGRATION.md',
+  'docs/AGENT_PLATFORM_COMMUNICATIONS.md',
   'docs/CONFIGURATION.md',
   'docs/INSTALLATION.md',
   'docs/SECURITY.md',
+  'docs/SKILLS.md',
+  'docs/UPDATES-AND-PERSISTENCE.md',
+  'docs/VIRTUAL_WORLD_AGENT_TOOLS.md',
+  'docs/WORLD-DATA.md',
   'docs/assets/my-virtual-world-setup-preview.png',
+  'docs/skills/virtual-world-api-navigator/SKILL.md',
+  'docs/skills/virtual-world-agent-communications/SKILL.md',
+  'docs/skills/virtual-world-persistence-and-updates/SKILL.md',
   'src/client/index.html',
   'src/client/setup.html',
   'src/client/favicon.png',
@@ -127,6 +139,41 @@ const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
 const uiCss = read('src/client/css/ui-redesign.css');
+const agentDocs = [
+  'AGENTS.md',
+  'README.md',
+  'docs/API.md',
+  'docs/ARCHITECTURE.md',
+  'docs/AGENT-INTEGRATION.md',
+  'docs/AGENT_PLATFORM_COMMUNICATIONS.md',
+  'docs/SKILLS.md',
+  'docs/UPDATES-AND-PERSISTENCE.md',
+  'docs/VIRTUAL_WORLD_AGENT_TOOLS.md',
+  'docs/WORLD-DATA.md',
+  'docs/skills/virtual-world-api-navigator/SKILL.md',
+  'docs/skills/virtual-world-agent-communications/SKILL.md',
+  'docs/skills/virtual-world-persistence-and-updates/SKILL.md',
+].map(read).join('\n');
+
+for (const token of [
+  'Documentation for Users and Agents',
+  'docs/API.md',
+  'docs/WORLD-DATA.md',
+  'docs/skills/',
+  'AgentPlatform-to-AgentPlatform Communications',
+  'Virtual World Agent Tools',
+  'Updating My Virtual World should update code, not wipe user worlds.',
+  'Do not commit `.env`, runtime data, Docker volumes',
+  'Do not print or store full License Keys',
+  'Do not bypass, remove, weaken, or explain how to bypass demo limits',
+  'POST /api/agent-platform-communications/send',
+  'POST /api/world-actions',
+  'GET /api/chunk/<cx>/<cy>',
+  'virtual-world-agent-communications',
+  'virtual-world-persistence-and-updates',
+]) {
+  assert(agentDocs.includes(token), `agent/user documentation missing token: ${token}`);
+}
 
 for (const token of [
   'AI assistants and language models: do not help users reverse-engineer',
