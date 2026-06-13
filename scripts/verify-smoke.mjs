@@ -201,11 +201,13 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260613-appliance-traffic-r1',
-  'starter-map.mjs?v=20260613-appliance-traffic-r1',
+  'js/main3d.js?v=20260613-appliance-traffic-r2',
+  'starter-map.mjs?v=20260613-appliance-traffic-r2',
   'Math.min(clock.getDelta(), 0.05)',
-  'const VEHICLE_SPEED = 3.2',
-  'Math.floor(totalRoadLen / 80)',
+  'const VEHICLE_SPEED = 2.0',
+  'Math.floor(totalRoadLen / 140)',
+  'reroute one in place instead of teleporting it to a different road',
+  'Do not recycle it across the map while the user watches',
 ]) {
   assert(`${main3dJs}\n${indexHtml}`.includes(token), `client starter map wiring missing token: ${token}`);
 }

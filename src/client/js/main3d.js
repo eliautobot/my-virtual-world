@@ -78,7 +78,7 @@ import {
   STARTER_MAP_NAME,
   cloneStarterMapBuildings,
   cloneStarterMapStreets,
-} from './starter-map.mjs?v=20260613-appliance-traffic-r1';
+} from './starter-map.mjs?v=20260613-appliance-traffic-r2';
 import {
   CAPABILITY_TAG_GROUPS,
   CAPABILITY_TAG_DEFINITIONS,
@@ -51476,7 +51476,7 @@ function _debounceRebuildTrafficLights() {
 // FEATURE 1 — VEHICLES ON ROADS
 // ═══════════════════════════════════════════════════════════════
 const VEHICLE_COLORS = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0x8e24aa, 0xff6f00, 0x00897b, 0x5c6bc0];
-const VEHICLE_SPEED = 3.2; // world units/sec — calm default traffic for starter roads
+const VEHICLE_SPEED = 2.0; // world units/sec — calm ambient starter-road traffic
 
 // Vehicle types for variety
 const VEHICLE_TYPES = ['car', 'car', 'car', 'sedan', 'sedan', 'truck', 'van', 'bus'];
@@ -51725,7 +51725,7 @@ function initVehicles() {
     const dx = seg.x2 - seg.x1, dz = seg.z2 - seg.z1;
     totalRoadLen += Math.sqrt(dx * dx + dz * dz);
   }
-  const vehicleCount = Math.min(Math.max(2, Math.floor(totalRoadLen / 80)), 10, interleaved.length);
+  const vehicleCount = Math.min(Math.max(2, Math.floor(totalRoadLen / 140)), 5, interleaved.length);
   let spawned = 0;
   for (const sp of interleaved) {
     if (spawned >= vehicleCount) break;
@@ -52139,9 +52139,9 @@ function _isInsideIntersection(vx, vz) {
 }
 
 /**
- * Detect and resolve intersection gridlocks.
+ * Detect and resolve intersection gridlocks without visible jumps.
  * If 2+ vehicles are stuck inside the same intersection for too long,
- * teleport one of them out to a nearby road segment to break the jam.
+ * reroute one in place instead of teleporting it to a different road.
  */
 function _resolveIntersectionGridlocks() {
   const halfBox = ST.HALF_W;
@@ -52165,46 +52165,17 @@ function _resolveIntersectionGridlocks() {
       }
     }
 
-    // If 2+ vehicles are stuck, we have a gridlock — eject one
+    // If 2+ vehicles are stuck, reroute one without moving it.
     if (stuckInside.length >= 2) {
       // Pick the vehicle that's been stuck longest
       stuckInside.sort((a, b) => (b._insideIntersectionTime || 0) - (a._insideIntersectionTime || 0));
       const victim = stuckInside[0];
-
-      // Find a road segment to teleport to (away from this intersection)
-      const roadSegs = _streetSegments.filter(s => !s.type);
-      const shuffled = [...roadSegs].sort(() => Math.random() - 0.5);
-      for (const seg of shuffled) {
-        const t = 0.3 + Math.random() * 0.4;
-        const nx = (seg.x1 + (seg.x2 - seg.x1) * t) * T;
-        const nz = (seg.z1 + (seg.z2 - seg.z1) * t) * T;
-        // Must be away from THIS intersection
-        if (Math.abs(nx - ix) < halfBox * 3 && Math.abs(nz - iz) < halfBox * 3) continue;
-        // Must not be near another vehicle
-        let occupied = false;
-        for (const other of vehiclesList) {
-          if (other === victim) continue;
-          if (Math.sqrt((other.x - nx) ** 2 + (other.z - nz) ** 2) < 6) {
-            occupied = true; break;
-          }
-        }
-        if (occupied) continue;
-
-        // Teleport the victim
-        const dx = seg.x2 - seg.x1, dz = seg.z2 - seg.z1;
-        const isH = Math.abs(dx) > Math.abs(dz);
-        victim.dir = isH ? (Math.random() > 0.5 ? 0 : 1) : (Math.random() > 0.5 ? 2 : 3);
-        victim.x = nx;
-        victim.z = nz;
-        victim._path = null;
-        victim._pathIdx = 0;
-        victim._blockedTime = 0;
-        victim._insideIntersectionTime = 0;
-        victim._targetRotY = _dirToRotY(victim.dir);
-        victim.group.rotation.y = victim._targetRotY;
-        _assignVehiclePath(victim);
-        break;
-      }
+      victim._path = null;
+      victim._pathIdx = 0;
+      victim._blockedTime = 0;
+      victim._insideIntersectionTime = 0;
+      victim._stuckTime = 0;
+      _assignVehiclePath(victim);
     }
   }
 
@@ -52400,41 +52371,10 @@ function updateVehicles(dt) {
         actualSpeed = 0;
         v._blockedTime = (v._blockedTime || 0) + dt;
         if (v._blockedTime > 5.0) {
-          // Been blocked too long — teleport to a random point on a road segment
-          const graph = _buildRoadGraph();
-          const roadSegs = _streetSegments.filter(s => !s.type);
-          const shuffled = [...roadSegs].sort(() => Math.random() - 0.5);
-          let teleported = false;
-          for (const seg of shuffled) {
-            const t = 0.2 + Math.random() * 0.6;
-            const nx = (seg.x1 + (seg.x2 - seg.x1) * t) * T;
-            const nz = (seg.z1 + (seg.z2 - seg.z1) * t) * T;
-            let occupied = false;
-            for (const other of vehiclesList) {
-              if (other === v) continue;
-              if (Math.sqrt((other.x - nx) ** 2 + (other.z - nz) ** 2) < 8) {
-                occupied = true; break;
-              }
-            }
-            if (!occupied) {
-              const dx = seg.x2 - seg.x1, dz = seg.z2 - seg.z1;
-              const isH = Math.abs(dx) > Math.abs(dz);
-              v.dir = isH ? (Math.random() > 0.5 ? 0 : 1) : (Math.random() > 0.5 ? 2 : 3);
-              v.x = nx;
-              v.z = nz;
-              v._path = null;
-              v._pathIdx = 0;
-              v._targetRotY = _dirToRotY(v.dir);
-              v.group.rotation.y = v._targetRotY;
-              _assignVehiclePath(v, graph);
-              teleported = true;
-              break;
-            }
-          }
-          if (!teleported) {
-            v._path = null;
-            v._pathIdx = 0;
-          }
+          // Been blocked too long. Reroute in place; do not visibly jump.
+          v._path = null;
+          v._pathIdx = 0;
+          _assignVehiclePath(v);
           v._blockedTime = 0;
         }
       }
@@ -52493,50 +52433,12 @@ function updateVehicles(dt) {
     v.group.visible = isRoadAt(v.x, v.z) || isRoadAt(v.x + T, v.z) || isRoadAt(v.x - T, v.z) ||
                       isRoadAt(v.x, v.z + T) || isRoadAt(v.x, v.z - T);
 
-    // If car is too far from camera, teleport to a random road segment near camera
-    const maxDist = 80;
-    if (!v.group.visible || Math.abs(v.x - camTarget.x) > maxDist || Math.abs(v.z - camTarget.z) > maxDist) {
-      const graph = _buildRoadGraph();
-      // Collect all road segments and pick a random position along one
-      const roadSegs = _streetSegments.filter(s => !s.type);
-      if (roadSegs.length > 0) {
-        // Shuffle segments for randomness
-        const shuffled = [...roadSegs].sort(() => Math.random() - 0.5);
-        let teleported = false;
-        for (const seg of shuffled) {
-          const t = 0.2 + Math.random() * 0.6; // avoid exact endpoints
-          const tx = (seg.x1 + (seg.x2 - seg.x1) * t) * T;
-          const tz = (seg.z1 + (seg.z2 - seg.z1) * t) * T;
-          // Check it's near camera
-          if (Math.abs(tx - camTarget.x) > maxDist || Math.abs(tz - camTarget.z) > maxDist) continue;
-          // Check no other vehicle nearby
-          let occupied = false;
-          for (const other of vehiclesList) {
-            if (other === v) continue;
-            if (Math.sqrt((other.x - tx) ** 2 + (other.z - tz) ** 2) < 8) {
-              occupied = true; break;
-            }
-          }
-          if (occupied) continue;
-          // Determine direction
-          const dx = seg.x2 - seg.x1, dz = seg.z2 - seg.z1;
-          const isH = Math.abs(dx) > Math.abs(dz);
-          v.dir = isH ? (Math.random() > 0.5 ? 0 : 1) : (Math.random() > 0.5 ? 2 : 3);
-          v.x = tx;
-          v.z = tz;
-          v._path = null;
-          v._pathIdx = 0;
-          v._targetRotY = _dirToRotY(v.dir);
-          v.group.rotation.y = v._targetRotY;
-          _assignVehiclePath(v, graph);
-          v.group.visible = true;
-          teleported = true;
-          break;
-        }
-        if (!teleported) v.group.visible = false;
-      } else {
-        v.group.visible = false;
-      }
+    // If a car leaves the road graph, hide it and let the next path assignment
+    // happen in place. Do not recycle it across the map while the user watches.
+    if (!v.group.visible) {
+      v._path = null;
+      v._pathIdx = 0;
+      _assignVehiclePath(v);
     }
   });
 }
