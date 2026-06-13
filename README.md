@@ -49,6 +49,14 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
+To run on a different outside port, edit `.env` before starting Docker:
+
+```bash
+VW_HOST_PORT=8586
+```
+
+Leave `VW_PORT=8590` unless you specifically need to change the port inside the container.
+
 Check that Docker started it:
 
 ```bash
@@ -102,6 +110,7 @@ Most deployments only need the defaults in `.env.example`.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `VW_HOST_PORT` | `8590` | Outside Docker host port you open in the browser |
 | `VW_PORT` | `8590` | HTTP server port |
 | `VW_DATA_DIR` | `/data` | Persistent world data directory in Docker |
 | `VW_OPENCLAW_PATH` | `/openclaw` | Mounted OpenClaw home path |
@@ -175,6 +184,8 @@ or:
 ```text
 http://<your-tailscale-ip>:8590
 ```
+
+If you changed `VW_HOST_PORT`, use that port in the remote URL. For example, `VW_HOST_PORT=8586` means `http://<your-tailscale-device-name>:8586`.
 
 Do not port-forward `8590` to the public internet. Also keep `18789`, `9222`, and browser/VNC ports private. See [docs/SECURITY.md](docs/SECURITY.md#remote-access-with-tailscale) for the recommended remote-access setup.
 

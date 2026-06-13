@@ -44,29 +44,47 @@ cd my-virtual-world
 cp .env.example .env
 ```
 
-3. Start the app:
+3. Optional: change the outside browser port.
+
+The default browser URL is `http://localhost:8590`. If that port is already in use, edit `.env` and change only `VW_HOST_PORT`:
+
+```bash
+VW_HOST_PORT=8586
+```
+
+Most users should leave `VW_PORT=8590`. `VW_HOST_PORT` is the port on your computer; `VW_PORT` is the port inside the Docker container.
+
+4. Start the app:
 
 ```bash
 docker compose up --build -d
 ```
 
-4. Check that it is running:
+5. Check that it is running:
 
 ```bash
 docker compose ps
 ```
 
-5. Open the app in your browser:
+6. Open the app in your browser:
 
 ```text
 http://localhost:8590
 ```
 
-6. Open the setup wizard:
+If you changed `VW_HOST_PORT`, use that port instead, for example:
+
+```text
+http://localhost:8586
+```
+
+7. Open the setup wizard:
 
 ```text
 http://localhost:8590/setup
 ```
+
+With `VW_HOST_PORT=8586`, the setup URL is `http://localhost:8586/setup`.
 
 If the page does not load, run:
 
@@ -218,6 +236,8 @@ or:
 ```text
 http://<your-tailscale-ip>:8590
 ```
+
+If you changed `VW_HOST_PORT`, use that port in the Tailscale URL.
 
 Example:
 

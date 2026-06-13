@@ -6,7 +6,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8590:8590"
+      - "${VW_HOST_PORT:-8590}:${VW_PORT:-8590}"
     volumes:
       - vw-data:/data
       - ~/.openclaw:/openclaw:ro
@@ -16,7 +16,7 @@ services:
       - ~/.local/bin/hermes:/home/vw/.local/bin/hermes:ro
       - ~/.local/share/uv:/home/vw/.local/share/uv:ro
     environment:
-      - VW_PORT=8590
+      - VW_PORT=${VW_PORT:-8590}
       - VW_DATA_DIR=/data
       - VW_OPENCLAW_PATH=/openclaw
       - VW_GATEWAY_URL=${VW_GATEWAY_URL:-ws://host.docker.internal:18789}

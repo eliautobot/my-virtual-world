@@ -20,8 +20,10 @@ Recommended setup:
 1. Install Tailscale on the computer running My Virtual World.
 2. Install Tailscale on each device that needs remote access.
 3. Sign in to the same Tailnet.
-4. Keep the Docker app bound to its normal local port, `8590`.
+4. Keep the Docker app bound to its local host port, normally `8590`.
 5. Connect remotely with `http://<tailscale-device-name>:8590` or `http://<tailscale-ip>:8590`.
+
+If you changed `VW_HOST_PORT`, use that port in the Tailscale URL. For example, `VW_HOST_PORT=8586` means `http://<tailscale-device-name>:8586`.
 
 This avoids opening public router ports. Keep OpenClaw gateway ports, browser CDP ports, and VNC/browser viewer ports private as well.
 

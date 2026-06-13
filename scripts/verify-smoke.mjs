@@ -57,7 +57,8 @@ assert(dockerfile.includes('VW_PORT=8590'), 'Dockerfile should default to the 85
 const dockerCompose = read('docker-compose.yml');
 assert(!/(^|[^A-Za-z0-9_])\/home\/(?!vw\b|kasm-user\b)[A-Za-z0-9._-]+/i.test(dockerCompose), 'docker-compose.yml must not contain host home paths');
 assert(!/\b100\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(dockerCompose), 'docker-compose.yml must not contain private tailnet addresses');
-assert(dockerCompose.includes('8590'), 'docker-compose.yml should expose the 8590 product port');
+assert(dockerCompose.includes('${VW_HOST_PORT:-8590}:${VW_PORT:-8590}'), 'docker-compose.yml should support a configurable Docker host port');
+assert(read('.env.example').includes('VW_HOST_PORT=8590'), '.env.example should document the Docker host port');
 
 const gitignore = read('.gitignore');
 for (const token of ['.env', 'node_modules/', '.tmp-data/', 'backups/', 'memory/', '*.py[cod]', '__pycache__/']) {

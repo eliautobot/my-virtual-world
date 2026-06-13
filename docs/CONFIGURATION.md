@@ -20,7 +20,8 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `VW_PORT` | `8590` | HTTP server port. |
+| `VW_HOST_PORT` | `8590` | Outside Docker host port you open in the browser. Change this if another app already uses 8590. |
+| `VW_PORT` | `8590` | HTTP server port inside the container. Most Docker installs should leave this at 8590. |
 | `VW_DATA_DIR` | `/data` | Persistent data directory inside Docker. |
 | `VW_OPENCLAW_PATH` | `/openclaw` | Mounted OpenClaw home path. |
 | `VW_GATEWAY_URL` | `ws://host.docker.internal:18789` | OpenClaw gateway WebSocket URL. |
