@@ -201,7 +201,11 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260613-starter-map-r1',
+  'js/main3d.js?v=20260613-appliance-traffic-r1',
+  'starter-map.mjs?v=20260613-appliance-traffic-r1',
+  'Math.min(clock.getDelta(), 0.05)',
+  'const VEHICLE_SPEED = 3.2',
+  'Math.floor(totalRoadLen / 80)',
 ]) {
   assert(`${main3dJs}\n${indexHtml}`.includes(token), `client starter map wiring missing token: ${token}`);
 }
@@ -214,6 +218,11 @@ for (const token of [
   'meetingTable',
   'picnicTable',
   'deletedGeneratedNodeIds',
+  'stationary-persistent-kitchen-counter-with-appliance-slots',
+  "slotId: 'appliance-right'",
+  "slotId: 'appliance-center'",
+  'stationary-persistent-quick-heating-appliance',
+  'stationary-persistent-countertop-beverage-appliance',
   'x2: 142',
 ]) {
   assert(starterMapJs.includes(token), `starter-map.mjs missing 8590 layout token: ${token}`);

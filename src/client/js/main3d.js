@@ -78,7 +78,7 @@ import {
   STARTER_MAP_NAME,
   cloneStarterMapBuildings,
   cloneStarterMapStreets,
-} from './starter-map.mjs?v=20260613-starter-map-r1';
+} from './starter-map.mjs?v=20260613-appliance-traffic-r1';
 import {
   CAPABILITY_TAG_GROUPS,
   CAPABILITY_TAG_DEFINITIONS,
@@ -6268,7 +6268,7 @@ let _animErrorCount = 0;
 function animate() {
   requestAnimationFrame(animate);
   try {
-    const dt = clock.getDelta();
+    const dt = Math.min(clock.getDelta(), 0.05);
     waterTick += dt;
 
     updateDayNight();
@@ -51476,7 +51476,7 @@ function _debounceRebuildTrafficLights() {
 // FEATURE 1 — VEHICLES ON ROADS
 // ═══════════════════════════════════════════════════════════════
 const VEHICLE_COLORS = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0x8e24aa, 0xff6f00, 0x00897b, 0x5c6bc0];
-const VEHICLE_SPEED = 7.0; // world units/sec (~4x walking speed — faster flow, less intersection congestion)
+const VEHICLE_SPEED = 3.2; // world units/sec — calm default traffic for starter roads
 
 // Vehicle types for variety
 const VEHICLE_TYPES = ['car', 'car', 'car', 'sedan', 'sedan', 'truck', 'van', 'bus'];
@@ -51676,7 +51676,7 @@ function initVehicles() {
 
   // Generate spawn candidates: place points at regular intervals along each segment
   const spawnCandidates = [];
-  const spacing = 8; // tile spacing between spawn points
+  const spacing = 16; // tile spacing between spawn points
   for (const seg of roadSegs) {
     const dx = seg.x2 - seg.x1, dz = seg.z2 - seg.z1;
     const segLen = Math.sqrt(dx * dx + dz * dz);
@@ -51718,13 +51718,14 @@ function initVehicles() {
     }
   }
 
-  // Scale vehicle count with total road length — 1 car per ~15 tiles of road, min 2, max 30
+  // Scale vehicle count with total road length. Keep defaults sparse so traffic
+  // reads as ambient motion instead of a dense simulation on starter roads.
   let totalRoadLen = 0;
   for (const seg of roadSegs) {
     const dx = seg.x2 - seg.x1, dz = seg.z2 - seg.z1;
     totalRoadLen += Math.sqrt(dx * dx + dz * dz);
   }
-  const vehicleCount = Math.min(Math.max(2, Math.floor(totalRoadLen / 15)), 30, interleaved.length);
+  const vehicleCount = Math.min(Math.max(2, Math.floor(totalRoadLen / 80)), 10, interleaved.length);
   let spawned = 0;
   for (const sp of interleaved) {
     if (spawned >= vehicleCount) break;
@@ -52338,8 +52339,8 @@ function updateVehicles(dt) {
     }
     v._stoppedAtLight = false;
 
-    // Inside intersection: boost speed to clear it quickly, ignore turn slowdown
-    const intersectionBoost = insideIntersection ? 1.3 : 1.0;
+    // Inside intersections, skip stop checks but keep speed calm and predictable.
+    const intersectionBoost = 1.0;
     const speed = VEHICLE_SPEED * dt * speedMult * (v._speedMult || 1.0) * intersectionBoost;
 
     // Current target waypoint (in tile coords)
