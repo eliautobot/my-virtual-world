@@ -27,7 +27,7 @@ Optional:
 - Twilio credentials if you want SMS features.
 - The optional Agent Browser service if you want browser-control features.
 
-The default `.env.example` includes the public Lemon Squeezy store and product IDs needed to confirm activation keys belong to My Virtual World. Do not remove `VW_LICENSE_STORE_ID` or `VW_LICENSE_PRODUCT_IDS` unless you are running a private fork with a different product.
+The app has My Virtual World's public Lemon Squeezy store and product IDs built in, and `.env.example` includes the same IDs for clarity. Do not change `VW_LICENSE_STORE_ID` or `VW_LICENSE_PRODUCT_IDS` unless you are running a private fork with a different product.
 
 ## Install With Docker
 

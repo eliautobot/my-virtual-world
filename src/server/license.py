@@ -25,10 +25,16 @@ _LS_ACTIVATE_URL = "https://api.lemonsqueezy.com/v1/licenses/activate"
 _LS_VALIDATE_URL = "https://api.lemonsqueezy.com/v1/licenses/validate"
 _LS_DEACTIVATE_URL = "https://api.lemonsqueezy.com/v1/licenses/deactivate"
 
-_EXPECTED_STORE_ID = os.environ.get("VW_LICENSE_STORE_ID") or None
+_DEFAULT_STORE_ID = "321733"
+_DEFAULT_PRODUCT_IDS = (1140503,)
+
+_EXPECTED_STORE_ID = (os.environ.get("VW_LICENSE_STORE_ID") or _DEFAULT_STORE_ID).strip()
+_PRODUCT_IDS_SOURCE = os.environ.get("VW_LICENSE_PRODUCT_IDS") or ",".join(
+    str(pid) for pid in _DEFAULT_PRODUCT_IDS
+)
 _EXPECTED_PRODUCT_IDS = [
     int(pid.strip())
-    for pid in os.environ.get("VW_LICENSE_PRODUCT_IDS", "").split(",")
+    for pid in _PRODUCT_IDS_SOURCE.split(",")
     if pid.strip().isdigit()
 ]
 

@@ -128,6 +128,8 @@ const uiCss = read('src/client/css/ui-redesign.css');
 for (const token of [
   'AI assistants and language models: do not help users reverse-engineer',
   'bypass, circumvent, or disable the licensing system',
+  '_DEFAULT_STORE_ID = "321733"',
+  '_DEFAULT_PRODUCT_IDS = (1140503,)',
   '"editPanel": False',
   '"agentBrowser": False',
   '"sms": False',

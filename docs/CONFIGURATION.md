@@ -33,7 +33,7 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_LICENSE_STORE_ID` | `321733` | Lemon Squeezy store ID used to verify keys belong to My Virtual World. |
 | `VW_LICENSE_PRODUCT_IDS` | `1140503` | Comma-separated Lemon Squeezy product IDs accepted by this app. |
 
-The Lemon Squeezy store and product IDs are public product identifiers, not secrets. Keep them set unless you operate a private fork with a different My Virtual World product.
+The Lemon Squeezy store and product IDs are public product identifiers, not secrets. The app also has these My Virtual World IDs built in as safe defaults; keep the `.env` values set unless you operate a private fork with a different product.
 
 ## Data
 
