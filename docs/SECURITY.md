@@ -45,3 +45,5 @@ The public repository should not contain:
 - personal home paths
 - local runtime data
 - agent logs, memories, or transcripts
+
+The Lemon Squeezy store/product IDs in `.env.example` and Docker config are public validation identifiers. They are not customer secrets or API credentials.

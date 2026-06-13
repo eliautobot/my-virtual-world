@@ -53,12 +53,18 @@ const dockerfile = read('Dockerfile');
 assert(dockerfile.includes('npm ci --omit=dev'), 'Dockerfile must install Node dependencies from package-lock.json');
 assert(!dockerfile.includes('COPY node_modules'), 'Dockerfile must not copy local node_modules');
 assert(dockerfile.includes('VW_PORT=8590'), 'Dockerfile should default to the 8590 product port');
+assert(dockerfile.includes('VW_LICENSE_STORE_ID=321733'), 'Dockerfile should default to the My Virtual World Lemon Squeezy store ID');
+assert(dockerfile.includes('VW_LICENSE_PRODUCT_IDS=1140503'), 'Dockerfile should default to the My Virtual World Lemon Squeezy product ID');
 
 const dockerCompose = read('docker-compose.yml');
 assert(!/(^|[^A-Za-z0-9_])\/home\/(?!vw\b|kasm-user\b)[A-Za-z0-9._-]+/i.test(dockerCompose), 'docker-compose.yml must not contain host home paths');
 assert(!/\b100\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(dockerCompose), 'docker-compose.yml must not contain private tailnet addresses');
 assert(dockerCompose.includes('${VW_HOST_PORT:-8590}:${VW_PORT:-8590}'), 'docker-compose.yml should support a configurable Docker host port');
 assert(read('.env.example').includes('VW_HOST_PORT=8590'), '.env.example should document the Docker host port');
+assert(dockerCompose.includes('VW_LICENSE_STORE_ID=${VW_LICENSE_STORE_ID:-321733}'), 'docker-compose.yml should pass the My Virtual World Lemon Squeezy store ID');
+assert(dockerCompose.includes('VW_LICENSE_PRODUCT_IDS=${VW_LICENSE_PRODUCT_IDS:-1140503}'), 'docker-compose.yml should pass the My Virtual World Lemon Squeezy product ID');
+assert(read('.env.example').includes('VW_LICENSE_STORE_ID=321733'), '.env.example should document the My Virtual World Lemon Squeezy store ID');
+assert(read('.env.example').includes('VW_LICENSE_PRODUCT_IDS=1140503'), '.env.example should document the My Virtual World Lemon Squeezy product ID');
 
 const gitignore = read('.gitignore');
 for (const token of ['.env', 'node_modules/', '.tmp-data/', 'backups/', 'memory/', '*.py[cod]', '__pycache__/']) {

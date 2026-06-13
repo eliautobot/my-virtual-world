@@ -118,6 +118,8 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_HERMES_ENABLED` | `true` | Enable local Hermes profile support |
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker |
 | `VW_HERMES_BIN` | `/home/vw/.local/bin/hermes` | Hermes CLI path inside Docker |
+| `VW_LICENSE_STORE_ID` | `321733` | Lemon Squeezy store ID used to verify keys belong to My Virtual World |
+| `VW_LICENSE_PRODUCT_IDS` | `1140503` | Lemon Squeezy product ID list accepted by My Virtual World |
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for more detail.
 

@@ -30,6 +30,10 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker. |
 | `VW_HERMES_BIN` | `/home/vw/.local/bin/hermes` | Hermes CLI path inside Docker. |
 | `VW_HERMES_TIMEOUT_SEC` | `600` | Hermes call timeout. |
+| `VW_LICENSE_STORE_ID` | `321733` | Lemon Squeezy store ID used to verify keys belong to My Virtual World. |
+| `VW_LICENSE_PRODUCT_IDS` | `1140503` | Comma-separated Lemon Squeezy product IDs accepted by this app. |
+
+The Lemon Squeezy store and product IDs are public product identifiers, not secrets. Keep them set unless you operate a private fork with a different My Virtual World product.
 
 ## Data
 
