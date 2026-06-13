@@ -8,7 +8,7 @@ Website: [myvirtualworld.ai](https://myvirtualworld.ai/)
 
 This product is built for local machines, LANs, and private remote-access networks. It is not intended to be exposed directly to the public internet without authentication and network hardening.
 
-![My Virtual World 8090 setup reference](docs/assets/setup-8090.png)
+![My Virtual World setup preview](docs/assets/setup-8090.png)
 
 ## Highlights
 
@@ -24,17 +24,26 @@ This product is built for local machines, LANs, and private remote-access networ
 
 ## Quick Start
 
+The easiest way to run My Virtual World is with Docker. You do not need to install Python or Node.js on your computer when using Docker.
+
 ```bash
+git clone https://github.com/eliautobot/my-virtual-world.git
+cd my-virtual-world
 cp .env.example .env
 docker compose up --build -d
-open http://localhost:8590
 ```
 
-Then open the setup wizard:
+Open the app:
 
 ```bash
-open http://localhost:8590/setup
+http://localhost:8590
 ```
+
+Then open the setup wizard at `http://localhost:8590/setup`.
+
+New to Docker or agent connections? Start with the beginner guide:
+
+[docs/INSTALLATION.md](docs/INSTALLATION.md)
 
 ## License Keys
 
@@ -57,6 +66,35 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_HERMES_BIN` | `/home/vw/.local/bin/hermes` | Hermes CLI path inside Docker |
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for more detail.
+
+## Connecting OpenClaw and Hermes
+
+My Virtual World can show live agent presence and activity when your agent tools are available on the same machine.
+
+For the default Docker setup:
+
+- OpenClaw home is mounted into the container at `/openclaw`.
+- The OpenClaw gateway is reached from inside Docker at `ws://host.docker.internal:18789`.
+- Hermes home is mounted at `/home/vw/.hermes`.
+- The Hermes CLI is mounted at `/home/vw/.local/bin/hermes`.
+
+After the app is running, open `Settings > Connections` or the setup wizard and use those values. See [docs/INSTALLATION.md](docs/INSTALLATION.md#connect-openclaw-and-hermes-agents) for the full beginner walkthrough.
+
+## Remote Access
+
+I recommend using Tailscale for remote access instead of opening ports on your router. Install Tailscale on the computer running My Virtual World and on the device you want to connect from, then open:
+
+```text
+http://<your-tailscale-device-name>:8590
+```
+
+or:
+
+```text
+http://<your-tailscale-ip>:8590
+```
+
+Keep `8590`, `18789`, `9222`, and browser/VNC ports off the public internet. See [docs/SECURITY.md](docs/SECURITY.md#remote-access-with-tailscale) for the recommended remote-access setup.
 
 ## Local Development
 

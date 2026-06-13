@@ -14,6 +14,8 @@ docker compose up --build -d
 
 The Docker Compose file mounts persistent world data into the `vw-data` volume and mounts local agent-system folders only when present on the host.
 
+For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
+
 ## Core Variables
 
 | Variable | Default | Notes |
@@ -33,3 +35,25 @@ The Docker Compose file mounts persistent world data into the `vw-data` volume a
 World data is stored under `VW_DATA_DIR`.
 
 Do not commit runtime data to source control. The `.gitignore` excludes local data, backups, generated screenshots, and temporary verification files.
+
+## Agent Connections
+
+Use these defaults when running with Docker:
+
+| Setting screen field | Value |
+| --- | --- |
+| OpenClaw Home | `/openclaw` |
+| Gateway URL | `ws://host.docker.internal:18789` |
+| Hermes Home | `/home/vw/.hermes` |
+| Hermes CLI | `/home/vw/.local/bin/hermes` |
+
+Use these defaults when running directly on your machine without Docker:
+
+| Setting screen field | Value |
+| --- | --- |
+| OpenClaw Home | `~/.openclaw` |
+| Gateway URL | `ws://127.0.0.1:18789` or your gateway URL |
+| Hermes Home | `~/.hermes` |
+| Hermes CLI | `~/.local/bin/hermes` |
+
+If OpenClaw or Hermes do not appear connected, confirm the host tools are running first, then restart the container after changing `.env` or Docker volume mounts.

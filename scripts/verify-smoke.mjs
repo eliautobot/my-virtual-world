@@ -17,6 +17,7 @@ const requiredFiles = [
   'Dockerfile',
   'docker-compose.yml',
   'docs/CONFIGURATION.md',
+  'docs/INSTALLATION.md',
   'docs/SECURITY.md',
   'src/client/index.html',
   'src/client/setup.html',
