@@ -211,6 +211,18 @@ for (const token of [
 }
 
 for (const token of [
+  'repair_starter_office_appliance_metadata',
+  'STARTER_OFFICE_COUNTER_INDEX = 17',
+  'STARTER_OFFICE_MICROWAVE_INDEX = 18',
+  'STARTER_OFFICE_COFFEE_INDEX = 19',
+  'stationary-persistent-kitchen-counter-with-appliance-slots',
+  'stationary-persistent-quick-heating-appliance',
+  'stationary-persistent-countertop-beverage-appliance',
+]) {
+  assert(serverPy.includes(token), `server.py missing starter appliance repair token: ${token}`);
+}
+
+for (const token of [
   'STARTER_MAP_BUILDINGS',
   'STARTER_MAP_STREETS',
   'First Park',

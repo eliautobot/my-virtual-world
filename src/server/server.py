@@ -5,6 +5,7 @@ Self-contained Virtual World server; Virtual Office is reference/inspiration onl
 """
 import asyncio
 import base64
+import copy
 import hashlib
 import http.server
 import importlib.util
@@ -2925,17 +2926,199 @@ def strip_building_transient_object_assignments(building):
             strip_transient_object_assignment_state(node)
     return building
 
+
+STARTER_OFFICE_ID = "bld_1781275645157"
+STARTER_OFFICE_COUNTER_INDEX = 17
+STARTER_OFFICE_MICROWAVE_INDEX = 18
+STARTER_OFFICE_COFFEE_INDEX = 19
+COUNTER_APPLIANCE_SLOT_ACCEPTS = ["countertopCoffeeMachine", "microwave"]
+
+
+def _merge_missing(target, defaults):
+    if not isinstance(target, dict):
+        return copy.deepcopy(defaults)
+    for key, value in defaults.items():
+        if key not in target or target[key] is None:
+            target[key] = copy.deepcopy(value)
+        elif isinstance(target.get(key), dict) and isinstance(value, dict):
+            _merge_missing(target[key], value)
+    return target
+
+
+def _starter_counter_appliance_slots():
+    return [
+        {"id": "appliance-left", "dx": -0.86, "dz": 0, "y": 0.91, "accepts": list(COUNTER_APPLIANCE_SLOT_ACCEPTS), "occupiedBy": None},
+        {"id": "appliance-center", "dx": 0, "dz": 0, "y": 0.91, "accepts": list(COUNTER_APPLIANCE_SLOT_ACCEPTS), "occupiedBy": STARTER_OFFICE_COFFEE_INDEX},
+        {"id": "appliance-right", "dx": 0.86, "dz": 0, "y": 0.91, "accepts": list(COUNTER_APPLIANCE_SLOT_ACCEPTS), "occupiedBy": STARTER_OFFICE_MICROWAVE_INDEX},
+    ]
+
+
+def repair_starter_office_appliance_metadata(building):
+    """Keep the starter Office counter appliances mounted across old saved volumes."""
+    if not isinstance(building, dict):
+        return building
+    if building.get("id") != STARTER_OFFICE_ID and building.get("name") != "Office":
+        return building
+    furniture = ((building.get("interior") or {}).get("furniture") or [])
+    if not isinstance(furniture, list) or len(furniture) <= STARTER_OFFICE_COFFEE_INDEX:
+        return building
+
+    counter = furniture[STARTER_OFFICE_COUNTER_INDEX]
+    microwave = furniture[STARTER_OFFICE_MICROWAVE_INDEX]
+    coffee = furniture[STARTER_OFFICE_COFFEE_INDEX]
+    if not (
+        isinstance(counter, dict) and counter.get("type") == "counter" and
+        isinstance(microwave, dict) and microwave.get("type") == "microwave" and
+        isinstance(coffee, dict) and coffee.get("type") == "countertopCoffeeMachine"
+    ):
+        return building
+
+    counter.update({
+        "stationary": True,
+        "carryable": False,
+        "temporary": False,
+        "persistsUntilDeleted": True,
+        "assetClass": "stationary-persistent-kitchen-counter-with-appliance-slots",
+        "applianceSlots": _starter_counter_appliance_slots(),
+    })
+    _merge_missing(counter, {
+        "lifecycle": {
+            "stationary": True,
+            "carryable": False,
+            "temporary": False,
+            "persistsUntilDeleted": True,
+            "surfaceMount": {
+                "kind": "counter-appliance-slots",
+                "slotIds": ["appliance-left", "appliance-center", "appliance-right"],
+                "accepts": list(COUNTER_APPLIANCE_SLOT_ACCEPTS),
+                "interaction": "counter stores placement slots only; agents target the placed appliance, not the counter",
+            },
+        },
+        "counterState": {
+            "applianceSlotCount": 3,
+            "occupiedApplianceSlots": 2,
+            "acceptsAppliances": list(COUNTER_APPLIANCE_SLOT_ACCEPTS),
+            "persistentFurniture": True,
+        },
+    })
+    counter["counterState"].update({
+        "applianceSlotCount": 3,
+        "occupiedApplianceSlots": 2,
+        "acceptsAppliances": list(COUNTER_APPLIANCE_SLOT_ACCEPTS),
+        "persistentFurniture": True,
+    })
+
+    microwave.update({
+        "stationary": True,
+        "carryable": False,
+        "temporary": False,
+        "persistsUntilDeleted": True,
+        "assetClass": "stationary-persistent-quick-heating-appliance",
+        "surfaceMount": {
+            "requiredSurfaceType": "counter",
+            "slotKind": "counter-appliance",
+            "allowedSlotIds": ["appliance-left", "appliance-center", "appliance-right"],
+            "parentFurnitureIndex": STARTER_OFFICE_COUNTER_INDEX,
+            "slotId": "appliance-right",
+            "relativeRotation": 0,
+            "visualMountHeight": 0.91,
+        },
+    })
+    _merge_missing(microwave, {
+        "lifecycle": {
+            "stationary": True,
+            "carryable": False,
+            "temporary": False,
+            "persistsUntilDeleted": True,
+            "spawnsTemporary": {
+                "catalogId": "temporaryFood",
+                "label": "Microwave Food",
+                "itemPool": ["Popcorn", "Pizza Slice", "Sandwich"],
+                "foodItems": [
+                    {"id": "popcorn", "label": "Popcorn", "visualKind": "microwave-popcorn"},
+                    {"id": "pizza-slice", "label": "Pizza Slice", "visualKind": "microwave-pizza-slice"},
+                    {"id": "sandwich", "label": "Sandwich", "visualKind": "microwave-sandwich"},
+                ],
+                "carryable": True,
+                "attachPoint": "right-hand",
+                "temporary": True,
+                "validDropOff": ["desk", "diningTable", "smallCafeTable", "outdoorCafeTable", "picnicTable", "patioTable", "counter", "cafeCounter"],
+            },
+        },
+        "applianceState": {
+            "doorOpen": False,
+            "status": "ready",
+            "activeSlotIds": [],
+            "reservedSlotIds": [],
+            "lastAction": "life.heatFood",
+            "lastInteractionSpotId": "use-front",
+            "animationId": "microwave-use",
+            "facingVerified": True,
+            "reachableUseFrontSpot": True,
+            "persistentFurniture": True,
+        },
+    })
+
+    coffee.update({
+        "stationary": True,
+        "carryable": False,
+        "temporary": False,
+        "persistsUntilDeleted": True,
+        "assetClass": "stationary-persistent-countertop-beverage-appliance",
+        "surfaceMount": {
+            "requiredSurfaceType": "counter",
+            "slotKind": "counter-appliance",
+            "allowedSlotIds": ["appliance-left", "appliance-center", "appliance-right"],
+            "parentFurnitureIndex": STARTER_OFFICE_COUNTER_INDEX,
+            "slotId": "appliance-center",
+            "relativeRotation": 0,
+            "visualMountHeight": 0.91,
+        },
+    })
+    _merge_missing(coffee, {
+        "lifecycle": {
+            "stationary": True,
+            "carryable": False,
+            "temporary": False,
+            "persistsUntilDeleted": True,
+            "spawnsTemporary": {
+                "catalogId": "temporaryFood",
+                "label": "Coffee Drink",
+                "carryable": True,
+                "attachPoint": "right-hand",
+                "temporary": True,
+                "validDropOff": ["desk", "diningTable", "smallCafeTable", "outdoorCafeTable", "picnicTable", "patioTable", "counter", "cafeCounter"],
+            },
+        },
+        "coffeeState": {
+            "status": "ready",
+            "activeSlotIds": [],
+            "reservedSlotIds": [],
+            "lastAction": "life.getCoffee",
+            "lastInteractionSpotId": "use-front",
+            "animationId": "order-food-drink",
+            "facingVerified": True,
+            "reachableUseFrontSpot": True,
+            "persistentFurniture": True,
+        },
+    })
+
+    return building
+
+
 def load_building(building_id):
     path = building_path(building_id)
     try:
         with open(path, "r") as f:
-            return strip_building_transient_object_assignments(json.load(f))
+            data = strip_building_transient_object_assignments(json.load(f))
+            return repair_starter_office_appliance_metadata(data)
     except (FileNotFoundError, json.JSONDecodeError):
         return None
 
 def save_building(building_id, data):
     path = building_path(building_id)
     data = strip_building_transient_object_assignments(data)
+    data = repair_starter_office_appliance_metadata(data)
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
