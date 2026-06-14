@@ -483,6 +483,10 @@ _presence_snapshot_path = os.path.join(DATA_DIR, "presence-snapshot.json")
 _presence_snapshot_thread = None
 _presence_enabled = False
 _presence_gateway_config = None
+_live_agent_loop_thread = None
+_live_agent_loop_stop = threading.Event()
+_live_agent_loop_lock = threading.RLock()
+_live_agent_loop_last_client_at = 0
 HERMES_APPROVAL_LOCK = threading.Lock()
 HERMES_APPROVAL_PENDING = {}
 HERMES_LIVE_LOCK = threading.Lock()
@@ -1114,6 +1118,35 @@ WORLD_ACTION_EVENT_REUSE_NOTES = [
     "Reuse Task 7 setAgentTarget route handoff metadata; event hooks expose route targets but never calculate paths or bypass dynamic routing/collision logic.",
 ]
 WORLD_ACTION_EVENT_ROUTE_GUARDRAILS = MOVE_INTENT_ROUTE_GUARDRAILS
+LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"
+LIVE_AGENT_LOOP_DEFAULTS = {
+    "enabled": True,
+    "intervalSec": 30,
+    "minActionIntervalSec": 120,
+    "clientActiveTtlSec": 45,
+    "maxActionsPerTick": 1,
+    "worldClientRequired": True,
+    "eventRetention": 100,
+}
+LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION = "20260613-live-mode-visibility-r2"
+LIVE_AGENT_LOOP_ACTIONS = [
+    {
+        "id": "hydrate-water-cooler",
+        "catalogIds": ["waterCooler", "coffeeMachine"],
+        "actionType": "life.getWater",
+        "capabilityTag": "life.hydration",
+        "interactionSpotId": "use-front",
+        "label": "get water",
+    },
+    {
+        "id": "hydrate-coffee-machine",
+        "catalogIds": ["countertopCoffeeMachine"],
+        "actionType": "life.getCoffee",
+        "capabilityTag": "life.hydration",
+        "interactionSpotId": "use-front",
+        "label": "get coffee",
+    },
+]
 
 
 def _api_error(code, message, *, details=None):
@@ -2171,6 +2204,35 @@ def _move_target_invalid_reason(target):
     return None
 
 
+def _linked_world_action_terminal_for_move(intent):
+    if not isinstance(intent, dict):
+        return None
+    action_id = intent.get("actionId") or intent.get("worldActionId")
+    target = intent.get("target") if isinstance(intent.get("target"), dict) else {}
+    action_id = action_id or target.get("actionId") or target.get("worldActionId")
+    if not action_id:
+        return None
+    store = get_world_actions_store(persist_migration=True)
+    bucket, _, action = _find_world_action_record(store, action_id)
+    if action is None:
+        return {"status": "failed", "reason": "linked_action_missing", "actionId": action_id}
+    status = _canonical_world_action_status(action.get("status"))
+    if bucket == "active" and status not in WORLD_ACTION_TERMINAL_STATES:
+        return None
+    terminal_status = {
+        "completed": "arrived",
+        "cancelled": "cancelled",
+        "failed": "failed",
+        "expired": "expired",
+    }.get(status, "failed")
+    return {
+        "status": terminal_status,
+        "reason": action.get("failureReason") or status or "linked_action_terminal",
+        "actionId": action_id,
+        "worldActionStatus": status,
+    }
+
+
 def reconcile_move_intents():
     store = get_move_intents_store(persist_migration=True)
     now = _utc_now_iso()
@@ -2178,12 +2240,16 @@ def reconcile_move_intents():
     history = list(store.get("history", []))
     changed = False
     for intent in store.get("active", []):
-        reason = _move_target_invalid_reason(intent.get("target"))
+        linked_terminal = _linked_world_action_terminal_for_move(intent)
+        reason = linked_terminal.get("reason") if linked_terminal else _move_target_invalid_reason(intent.get("target"))
         if reason:
             failed = dict(intent)
-            failed.update({"status": "invalidated", "routeStatus": "failed", "failureReason": reason, "invalidatedAt": now, "updatedAt": now})
+            route_status = linked_terminal.get("status") if linked_terminal else "failed"
+            failed.update({"status": route_status if linked_terminal else "invalidated", "routeStatus": route_status, "failureReason": None if route_status == "arrived" else reason, "invalidatedAt": now, "updatedAt": now})
             route = dict(failed.get("route") or {})
-            route.update({"state": "failed", "status": "failed", "setAgentTarget": False, "failureReason": reason})
+            route.update({"state": route_status, "status": route_status, "setAgentTarget": False, "failureReason": None if route_status == "arrived" else reason})
+            if linked_terminal:
+                route["linkedWorldAction"] = linked_terminal
             failed["route"] = route
             history.append(failed)
             changed = True
@@ -2315,6 +2381,459 @@ def create_agent_live_mode_action_request(payload):
         cancel_world_action(action_id, {"failureReason": "cancelled_by_system", "reason": "cancelled_by_system", "actor": "agent-live-mode", "source": "agent-live-mode"})
         return False, _api_error("move_intent_handoff_failed", "Agent Live Mode action was validated but could not create the existing move-intent/AgentIntent handoff; the reserved action was cancelled.", details=move_result), move_status
     return True, {"ok": True, "action": action_result.get("action"), "worldAction": action_result, "moveIntent": move_result.get("moveIntent"), "routeHandoff": move_result.get("routeHandoff"), "linkedAction": move_result.get("linkedAction"), "interruptedLowerLayer": interrupted, "callerContract": {"endpoint": "POST /api/agent-model/actions", "requiredSourceKind": "agent-live-mode", "requiresAgentLiveModeEnabled": True, "usesExistingWorldActionValidation": True, "usesExistingMoveIntentHandoff": True, "overrideOrder": ["user", "agent-live-mode", "agent-scripted-mode"]}}, 202
+
+
+# ─── AGENT LIVE MODE PERSISTENT LOOP ─────────────────────────────
+def _epoch_to_utc_iso(epoch):
+    try:
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(epoch)))
+    except (TypeError, ValueError, OSError):
+        return _utc_now_iso()
+
+
+def default_live_agent_loop_state():
+    now = _utc_now_iso()
+    return {
+        "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
+        "enabled": LIVE_AGENT_LOOP_DEFAULTS["enabled"],
+        "createdAt": now,
+        "updatedAt": now,
+        "lastTickAt": None,
+        "intervalSec": LIVE_AGENT_LOOP_DEFAULTS["intervalSec"],
+        "minActionIntervalSec": LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"],
+        "clientActiveTtlSec": LIVE_AGENT_LOOP_DEFAULTS["clientActiveTtlSec"],
+        "maxActionsPerTick": LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"],
+        "worldClientRequired": LIVE_AGENT_LOOP_DEFAULTS["worldClientRequired"],
+        "agents": {},
+        "events": [],
+        "stats": {"ticks": 0, "actionsCreated": 0, "dryRuns": 0, "errors": 0},
+    }
+
+
+def _normalize_int(value, fallback, *, minimum=None, maximum=None):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = fallback
+    if minimum is not None:
+        number = max(minimum, number)
+    if maximum is not None:
+        number = min(maximum, number)
+    return number
+
+
+def _normalize_live_agent_loop_state(raw):
+    state = default_live_agent_loop_state()
+    if isinstance(raw, dict):
+        for key in ("enabled", "createdAt", "updatedAt", "lastTickAt", "worldClientRequired"):
+            if key in raw:
+                state[key] = raw[key]
+        state["intervalSec"] = _normalize_int(raw.get("intervalSec"), state["intervalSec"], minimum=10, maximum=300)
+        state["minActionIntervalSec"] = _normalize_int(raw.get("minActionIntervalSec"), state["minActionIntervalSec"], minimum=30, maximum=3600)
+        state["clientActiveTtlSec"] = _normalize_int(raw.get("clientActiveTtlSec"), state["clientActiveTtlSec"], minimum=10, maximum=300)
+        state["maxActionsPerTick"] = _normalize_int(raw.get("maxActionsPerTick"), state["maxActionsPerTick"], minimum=1, maximum=5)
+        if isinstance(raw.get("agents"), dict):
+            state["agents"] = {str(k): v for k, v in raw["agents"].items() if isinstance(v, dict)}
+        if isinstance(raw.get("events"), list):
+            state["events"] = [event for event in raw["events"] if isinstance(event, dict)][-LIVE_AGENT_LOOP_DEFAULTS["eventRetention"]:]
+        if isinstance(raw.get("stats"), dict):
+            state["stats"].update({k: v for k, v in raw["stats"].items() if isinstance(v, (int, float))})
+    state["schemaVersion"] = LIVE_AGENT_LOOP_SCHEMA_VERSION
+    state["enabled"] = bool(state.get("enabled"))
+    state["worldClientRequired"] = bool(state.get("worldClientRequired"))
+    return state
+
+
+def get_live_agent_loop_state(*, persist_migration=False):
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    existing = agent_life.get("liveModeLoop")
+    state = _normalize_live_agent_loop_state(existing)
+    if persist_migration and state != existing:
+        agent_life["liveModeLoop"] = state
+        meta["agentLife"] = agent_life
+        save_world_meta(meta)
+    return state
+
+
+def save_live_agent_loop_state(state):
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    state = _normalize_live_agent_loop_state(state)
+    state["updatedAt"] = _utc_now_iso()
+    agent_life["liveModeLoop"] = state
+    meta["agentLife"] = agent_life
+    save_world_meta(meta)
+    return state
+
+
+def note_live_agent_loop_world_client_activity(source="/api/world-actions/active", client_version=None):
+    global _live_agent_loop_last_client_at
+    if client_version != LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION:
+        return False
+    with _live_agent_loop_lock:
+        _live_agent_loop_last_client_at = time.time()
+    return True
+
+
+def _live_agent_loop_world_client_status(state=None):
+    state = state if isinstance(state, dict) else get_live_agent_loop_state()
+    ttl = _normalize_int(state.get("clientActiveTtlSec"), LIVE_AGENT_LOOP_DEFAULTS["clientActiveTtlSec"], minimum=10, maximum=300)
+    now = time.time()
+    last_seen = float(_live_agent_loop_last_client_at or 0)
+    age = (now - last_seen) if last_seen else None
+    return {
+        "active": bool(last_seen and age is not None and age <= ttl),
+        "lastSeenAt": _epoch_to_utc_iso(last_seen) if last_seen else None,
+        "ageSec": round(age, 3) if age is not None else None,
+        "ttlSec": ttl,
+        "source": "/api/world-actions/active",
+        "requiredClientVersion": LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION,
+    }
+
+
+def _live_agent_loop_stat(container, key, amount=1):
+    stats = container.setdefault("stats", {})
+    try:
+        stats[key] = int(stats.get(key) or 0) + amount
+    except (TypeError, ValueError):
+        stats[key] = amount
+    return stats[key]
+
+
+def _live_agent_loop_add_event(state, event_type, *, agent_id=None, details=None):
+    retention = LIVE_AGENT_LOOP_DEFAULTS["eventRetention"]
+    event = {"at": _utc_now_iso(), "type": event_type}
+    if agent_id:
+        event["agentId"] = agent_id
+    if isinstance(details, dict):
+        event["details"] = details
+    events = [event for event in (state.get("events") or []) if isinstance(event, dict)]
+    events.append(event)
+    state["events"] = events[-retention:]
+    return event
+
+
+def _live_agent_loop_agent_state(state, agent_id):
+    agents = state.setdefault("agents", {})
+    row = dict(agents.get(agent_id) or {})
+    row.setdefault("enabled", True)
+    row.setdefault("stats", {
+        "ticks": 0,
+        "actionsCreated": 0,
+        "skippedActive": 0,
+        "skippedCooldown": 0,
+        "skippedNoClient": 0,
+        "targetMisses": 0,
+        "errors": 0,
+    })
+    agents[agent_id] = row
+    return row
+
+
+def _live_agent_loop_enabled_roster():
+    roster = _merge_agent_profiles(get_roster())
+    enabled = []
+    for agent in roster:
+        agent_id = agent.get("statusKey") or agent.get("id")
+        if not agent_id:
+            continue
+        if agent.get("agentLiveModeEnabled") is True:
+            enabled.append({**agent, "agentId": agent_id})
+    return enabled
+
+
+def _live_agent_loop_presence(agent_id, state, task):
+    if not (_presence_enabled and _gateway_presence):
+        return False
+    try:
+        current = _gateway_presence.get_agent_state(agent_id) if hasattr(_gateway_presence, "get_agent_state") else {}
+        current_state = str((current or {}).get("state") or "").lower()
+        current_task = str((current or {}).get("task") or "")
+        if state == "idle" and current_state in {"working", "finishing"} and "Living in My Virtual World" not in current_task:
+            return False
+        _gateway_presence.set_manual_override(agent_id, state, task)
+        return True
+    except Exception as e:
+        print(f"⚠️  Live Mode loop presence update failed for {agent_id}: {e}")
+        return False
+
+
+def _live_agent_loop_find_action_target(action_def, *, agent_id=None):
+    wanted = {_normalize_token(catalog_id) for catalog_id in action_def.get("catalogIds", [])}
+    for building in list_buildings():
+        if not isinstance(building, dict) or _building_unavailable(building):
+            continue
+        records = (building.get("interior") or {}).get("furniture") or []
+        if not isinstance(records, list):
+            continue
+        for index, obj in enumerate(records):
+            if not isinstance(obj, dict):
+                continue
+            catalog_id = _object_catalog_id(obj)
+            if _normalize_token(catalog_id) not in wanted:
+                continue
+            object_id = obj.get("objectInstanceId") or obj.get("id") or obj.get("instanceId") or (sorted(_candidate_object_ids(building, obj, index, "furniture")) or [None])[0]
+            if not object_id:
+                continue
+            target = {
+                "kind": "object-instance",
+                "buildingId": building.get("id"),
+                "objectInstanceId": object_id,
+                "catalogId": catalog_id,
+                "furnitureIndex": index,
+                "interactionSpotId": action_def.get("interactionSpotId") or "use-front",
+                "floor": obj.get("floor") or obj.get("buildingFloor") or 1,
+            }
+            resolved = _find_world_action_target(target)
+            availability = get_object_availability(target, agent_id=agent_id, resolved=resolved)
+            if availability.get("state") == "available":
+                return {
+                    "target": target,
+                    "buildingName": building.get("name"),
+                    "objectType": catalog_id,
+                    "availability": availability,
+                    "action": action_def,
+                }
+    return None
+
+
+def _live_agent_loop_select_next_action(agent_id, agent_state):
+    actions_created = _normalize_int((agent_state.get("stats") or {}).get("actionsCreated"), 0, minimum=0)
+    options = LIVE_AGENT_LOOP_ACTIONS[:]
+    if options:
+        offset = actions_created % len(options)
+        options = options[offset:] + options[:offset]
+    for action_def in options:
+        target = _live_agent_loop_find_action_target(action_def, agent_id=agent_id)
+        if target:
+            return target
+    return None
+
+
+def _live_agent_loop_next_allowed_epoch(agent_state):
+    raw = agent_state.get("nextAllowedAt")
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    parsed = _parse_isoish_epoch(raw)
+    return float(parsed or 0)
+
+
+def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=True)
+        now_epoch = time.time()
+        now_iso = _utc_now_iso()
+        world_client = _live_agent_loop_world_client_status(state)
+        result = {
+            "ok": True,
+            "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
+            "reason": reason,
+            "forced": bool(force),
+            "dryRun": bool(dry_run),
+            "worldClient": world_client,
+            "enabledAgents": [],
+            "actionsCreated": [],
+            "skipped": [],
+            "errors": [],
+        }
+        state["lastTickAt"] = now_iso
+        _live_agent_loop_stat(state, "ticks")
+        if dry_run:
+            _live_agent_loop_stat(state, "dryRuns")
+
+        if not check_feature("agentLiveMode"):
+            result["ok"] = False
+            result["disabledReason"] = "agentLiveMode feature is disabled or locked"
+            _live_agent_loop_add_event(state, "feature-disabled", details={"reason": result["disabledReason"]})
+            if not dry_run:
+                save_live_agent_loop_state(state)
+            return result
+
+        if not state.get("enabled") and not force:
+            result["disabledReason"] = "live agent loop is disabled"
+            _live_agent_loop_add_event(state, "loop-disabled")
+            if not dry_run:
+                save_live_agent_loop_state(state)
+            return result
+
+        enabled_agents = _live_agent_loop_enabled_roster()
+        result["enabledAgents"] = [{"agentId": a.get("agentId"), "name": a.get("name"), "providerKind": a.get("providerKind")} for a in enabled_agents]
+        actions_created_this_tick = 0
+        max_actions = _normalize_int(state.get("maxActionsPerTick"), LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"], minimum=1, maximum=5)
+        cooldown = _normalize_int(state.get("minActionIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"], minimum=30, maximum=3600)
+
+        for agent in enabled_agents:
+            agent_id = agent.get("agentId")
+            agent_state = _live_agent_loop_agent_state(state, agent_id)
+            if agent_state.get("enabled") is False and not force:
+                result["skipped"].append({"agentId": agent_id, "reason": "agent-loop-disabled"})
+                continue
+
+            agent_state["lastHeartbeatAt"] = now_iso
+            _live_agent_loop_stat(agent_state, "ticks")
+            _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World 8587")
+
+            active = _active_behavior_records_for_agent(agent_id)
+            if active:
+                _live_agent_loop_stat(agent_state, "skippedActive")
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "active-behavior", "active": [{k: item.get(k) for k in ("type", "id", "status", "behaviorSourceKind")} for item in active]}
+                _live_agent_loop_presence(agent_id, "working", "Living in My Virtual World 8587")
+                result["skipped"].append({"agentId": agent_id, "reason": "active-behavior", "active": agent_state["lastOutcome"]["active"]})
+                continue
+
+            if state.get("worldClientRequired") and not world_client.get("active") and not force:
+                _live_agent_loop_stat(agent_state, "skippedNoClient")
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "world-client-inactive", "worldClient": world_client}
+                result["skipped"].append({"agentId": agent_id, "reason": "world-client-inactive", "worldClient": world_client})
+                continue
+
+            next_allowed = _live_agent_loop_next_allowed_epoch(agent_state)
+            if next_allowed and now_epoch < next_allowed and not force:
+                _live_agent_loop_stat(agent_state, "skippedCooldown")
+                result["skipped"].append({"agentId": agent_id, "reason": "cooldown", "nextAllowedAt": _epoch_to_utc_iso(next_allowed)})
+                continue
+
+            selected = _live_agent_loop_select_next_action(agent_id, agent_state)
+            if not selected:
+                _live_agent_loop_stat(agent_state, "targetMisses")
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "no-available-loop-target"}
+                result["skipped"].append({"agentId": agent_id, "reason": "no-available-loop-target"})
+                continue
+
+            action_def = selected["action"]
+            request_id = f"live-loop-{agent_id}-{int(now_epoch)}"
+            payload = {
+                "agentId": agent_id,
+                "source": {
+                    "kind": "agent-live-mode",
+                    "requestedBy": "server.py#live_agent_loop_tick",
+                    "requestId": request_id,
+                    "surface": "8587-live-agent-loop",
+                    "roles": ["participant"],
+                    "loopId": LIVE_AGENT_LOOP_SCHEMA_VERSION,
+                },
+                "actionType": action_def["actionType"],
+                "capabilityTag": action_def["capabilityTag"],
+                "target": selected["target"],
+                "priority": "normal",
+                "params": {
+                    "reason": "continuous-presence",
+                    "loopActionId": action_def["id"],
+                    "loopActionLabel": action_def.get("label"),
+                    "worldClientActive": world_client.get("active"),
+                },
+            }
+            if dry_run:
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload}
+                result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected})
+                continue
+
+            ok, created, status = create_agent_live_mode_action_request(payload)
+            if ok:
+                action = created.get("action") if isinstance(created, dict) else {}
+                action_id = action.get("id") if isinstance(action, dict) else None
+                _live_agent_loop_stat(agent_state, "actionsCreated")
+                _live_agent_loop_stat(state, "actionsCreated")
+                agent_state["lastActionAt"] = now_iso
+                agent_state["lastActionId"] = action_id
+                agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + cooldown)
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "httpStatus": status}
+                _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World 8587: {action_def.get('label')}")
+                _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, details={"actionId": action_id, "loopActionId": action_def["id"], "target": selected["target"]})
+                result["actionsCreated"].append({"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "httpStatus": status})
+                actions_created_this_tick += 1
+            else:
+                _live_agent_loop_stat(agent_state, "errors")
+                _live_agent_loop_stat(state, "errors")
+                agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + min(45, cooldown))
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "error", "httpStatus": status, "error": created}
+                _live_agent_loop_add_event(state, "action-error", agent_id=agent_id, details={"httpStatus": status, "error": created})
+                result["errors"].append({"agentId": agent_id, "httpStatus": status, "error": created})
+
+            if actions_created_this_tick >= max_actions:
+                break
+
+        if not dry_run:
+            save_live_agent_loop_state(state)
+        return result
+
+
+def get_live_agent_loop_status():
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=True)
+        thread_alive = bool(_live_agent_loop_thread and _live_agent_loop_thread.is_alive())
+        return {
+            "ok": True,
+            "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
+            "state": state,
+            "runtime": {
+                "threadAlive": thread_alive,
+                "worldClient": _live_agent_loop_world_client_status(state),
+                "guardrails": {
+                    "worldClientRequired": state.get("worldClientRequired"),
+                    "maxActionsPerTick": state.get("maxActionsPerTick"),
+                    "minActionIntervalSec": state.get("minActionIntervalSec"),
+                    "onlyAgentsWithAgentLiveModeEnabled": True,
+                },
+            },
+        }
+
+
+def update_live_agent_loop_settings(payload):
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "Live agent loop settings payload must be an object."), 400
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=True)
+        changed = {}
+        for key in ("enabled", "worldClientRequired"):
+            if key in payload:
+                if not isinstance(payload.get(key), bool):
+                    return False, _api_error("invalid_payload", f"{key} must be a boolean."), 400
+                state[key] = payload[key]
+                changed[key] = payload[key]
+        int_limits = {
+            "intervalSec": (10, 300),
+            "minActionIntervalSec": (30, 3600),
+            "clientActiveTtlSec": (10, 300),
+            "maxActionsPerTick": (1, 5),
+        }
+        for key, (minimum, maximum) in int_limits.items():
+            if key in payload:
+                state[key] = _normalize_int(payload.get(key), state.get(key) or LIVE_AGENT_LOOP_DEFAULTS[key], minimum=minimum, maximum=maximum)
+                changed[key] = state[key]
+        agent_id = _resolve_agent_id(payload.get("agentId")) if payload.get("agentId") else None
+        if agent_id and "agentEnabled" in payload:
+            if not isinstance(payload.get("agentEnabled"), bool):
+                return False, _api_error("invalid_payload", "agentEnabled must be a boolean."), 400
+            agent_state = _live_agent_loop_agent_state(state, agent_id)
+            agent_state["enabled"] = payload["agentEnabled"]
+            changed["agentEnabled"] = {"agentId": agent_id, "enabled": payload["agentEnabled"]}
+        _live_agent_loop_add_event(state, "settings-updated", details=changed)
+        saved = save_live_agent_loop_state(state)
+        return True, {"ok": True, "state": saved, "changed": changed}, 200
+
+
+def start_live_agent_loop():
+    global _live_agent_loop_thread
+    if _live_agent_loop_thread and _live_agent_loop_thread.is_alive():
+        return
+
+    def loop():
+        while not _live_agent_loop_stop.is_set():
+            interval = LIVE_AGENT_LOOP_DEFAULTS["intervalSec"]
+            try:
+                tick = live_agent_loop_tick(reason="timer")
+                state = get_live_agent_loop_state()
+                interval = _normalize_int(state.get("intervalSec"), interval, minimum=10, maximum=300)
+                if tick.get("errors"):
+                    print(f"⚠️  Live Mode loop tick errors: {tick.get('errors')}")
+            except Exception as e:
+                print(f"⚠️  Live Mode loop tick failed: {e}")
+            _live_agent_loop_stop.wait(interval)
+
+    _live_agent_loop_thread = threading.Thread(target=loop, daemon=True, name="vw-live-agent-loop")
+    _live_agent_loop_thread.start()
 
 
 def _route_planner_for_target(kind, resolved, target):
@@ -5078,6 +5597,11 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             return self._send_json(reconcile_world_action_reservations())
 
         if path == "/api/world-actions/active":
+            query = urllib.parse.parse_qs(parsed.query)
+            client_markers = {str(value).strip() for value in query.get("client", [])}
+            client_versions = {str(value).strip() for value in query.get("version", [])}
+            if "main3d-live-sync" in client_markers:
+                note_live_agent_loop_world_client_activity(client_version=next(iter(client_versions), None))
             return self._send_json(reconcile_world_action_reservations().get("active", []))
 
         if path == "/api/world-actions/history":
@@ -5189,6 +5713,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/agent-chat":
             return self._send_json(get_agent_chat())
+
+        if path == "/api/agent-live-loop":
+            return self._send_json(get_live_agent_loop_status())
 
         if path == "/api/agent-platform-communications/skill":
             self.send_response(200)
@@ -5462,6 +5989,25 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             data = self._read_body()
             ok, result, status = create_agent_live_mode_action_request(data)
             return self._send_json(result, status)
+
+        if path == "/api/agent-live-loop":
+            if _demo_feature_locked("agentLiveMode"):
+                return self._send_json(_locked_response("agentLiveMode"), 403)
+            ok, result, status = update_live_agent_loop_settings(self._read_body() or {})
+            return self._send_json(result, status)
+
+        if path == "/api/agent-live-loop/tick":
+            if _demo_feature_locked("agentLiveMode"):
+                return self._send_json(_locked_response("agentLiveMode"), 403)
+            data = self._read_body() or {}
+            if not isinstance(data, dict):
+                return self._send_json(_api_error("invalid_payload", "tick payload must be an object."), 400)
+            result = live_agent_loop_tick(
+                reason=str(data.get("reason") or "api"),
+                force=bool(data.get("force")),
+                dry_run=bool(data.get("dryRun")),
+            )
+            return self._send_json(result, 200 if result.get("ok") else 409)
 
         if path.startswith("/api/agents/") and path.endswith("/move"):
             parts = path.strip("/").split("/")
@@ -5811,6 +6357,10 @@ def main():
 
     # Derive working/idle from Virtual World's own live OpenClaw gateway state.
     initialize_live_presence()
+
+    # Keep enabled Live Mode agents present across restarts; action creation stays
+    # gated by the active 8587 world client polling /api/world-actions/active.
+    start_live_agent_loop()
 
     handler = VWHandler
     with socketserver.ThreadingTCPServer(("", PORT), handler) as httpd:

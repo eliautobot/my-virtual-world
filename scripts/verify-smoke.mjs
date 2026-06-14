@@ -137,6 +137,7 @@ const indexHtml = read('src/client/index.html');
 const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
+const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
 const uiCss = read('src/client/css/ui-redesign.css');
 const agentDocs = [
@@ -248,7 +249,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260613-road-terrain-r1',
+  'js/main3d.js?v=20260613-live-mode-visibility-r2',
   'starter-map.mjs?v=20260613-road-terrain-r1',
   'Math.min(clock.getDelta(), 0.05)',
   'const VEHICLE_SPEED = 7.0',
@@ -259,6 +260,41 @@ for (const token of [
   'Do not recycle it across the map while the user watches',
 ]) {
   assert(`${main3dJs}\n${indexHtml}`.includes(token), `client starter map wiring missing token: ${token}`);
+}
+
+for (const token of [
+  'LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"',
+  'def live_agent_loop_tick',
+  'def start_live_agent_loop',
+  'def note_live_agent_loop_world_client_activity',
+  'LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION = "20260613-live-mode-visibility-r2"',
+  '"/api/agent-live-loop/tick"',
+]) {
+  assert(serverPy.includes(token), `server.py missing Live Agent loop token: ${token}`);
+}
+assert(main3dJs.includes('client=main3d-live-sync'), 'main3d.js missing Live Agent loop client marker');
+assert(main3dJs.includes('version=20260613-live-mode-visibility-r2'), 'main3d.js missing Live Agent loop client marker version');
+
+for (const token of [
+  'agent-characters.js?v=20260613-live-mode-dot-r1',
+  'agent?.agentLiveModeEnabled === true',
+  'parts.statusDot.material.color.setHex(liveModeEnabled ? 0x22c55e : 0xef4444)',
+  'agentHasLiveModeWorldActionRoute',
+  'stale_claim_released',
+]) {
+  assert(`${main3dJs}\n${agentCharactersJs}`.includes(token), `Live Mode head indicator missing token: ${token}`);
+}
+
+for (const token of [
+  'data-settings-tab="live-mode"',
+  'liveModeAgentList',
+  'btn-saveLiveAgents',
+  'saveLiveModeAgents',
+  'data-live-agent-toggle',
+  '/live-mode',
+  'settings-live-agent-dot',
+]) {
+  assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);
 }
 
 for (const token of [

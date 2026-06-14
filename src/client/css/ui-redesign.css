@@ -573,10 +573,89 @@ body.vw-demo-locked .feature-locked-control {
     text-decoration: none;
     flex-shrink: 0;
 }
+.settings-live-agent-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.settings-live-agent-list {
+    display: grid;
+    gap: 8px;
+}
+.settings-live-agent-row {
+    display: grid;
+    grid-template-columns: auto 12px minmax(140px, 1fr) minmax(120px, auto);
+    align-items: center;
+    gap: 9px;
+    min-height: 42px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255,255,255,.10);
+    border-radius: 8px;
+    background: rgba(255,255,255,.04);
+    cursor: pointer;
+}
+.settings-live-agent-row.live {
+    border-color: rgba(34,197,94,.45);
+    background: rgba(34,197,94,.08);
+}
+.settings-live-agent-row.off {
+    border-color: rgba(239,68,68,.26);
+}
+.settings-live-agent-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    display: inline-block;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.18);
+}
+.settings-live-agent-dot.live {
+    background: #22c55e;
+    box-shadow: 0 0 0 1px rgba(187,247,208,.45), 0 0 12px rgba(34,197,94,.72);
+    animation: liveAgentPulse 1.25s ease-in-out infinite;
+}
+.settings-live-agent-dot.off {
+    background: #ef4444;
+    box-shadow: 0 0 0 1px rgba(254,202,202,.28);
+}
+.settings-live-agent-name {
+    color: var(--text-primary);
+    font-weight: 700;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.settings-live-agent-meta {
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-align: right;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.settings-live-agent-empty {
+    padding: 12px;
+    color: var(--text-secondary);
+    border: 1px dashed rgba(255,255,255,.16);
+    border-radius: 8px;
+    background: rgba(255,255,255,.035);
+}
+@keyframes liveAgentPulse {
+    0%, 100% { transform: scale(1); opacity: .9; }
+    50% { transform: scale(1.38); opacity: 1; }
+}
 @media (max-width: 640px) {
     .settings-resource-card {
         align-items: flex-start;
         flex-direction: column;
+    }
+    .settings-live-agent-row {
+        grid-template-columns: auto 12px minmax(0, 1fr);
+    }
+    .settings-live-agent-meta {
+        grid-column: 3;
+        text-align: left;
     }
 }
 .integration-panel {

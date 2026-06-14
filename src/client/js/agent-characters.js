@@ -1621,12 +1621,14 @@ export function createAgentCharacter(agent) {
 
   mergeAgentCharacterVoxelParts(agentGroup);
 
-  // ── STATUS DOT ────────────────────────────────────────────
+  // ── LIVE MODE / STATUS DOT ────────────────────────────────
   const dotGeo = new THREE.SphereGeometry(0.055, 6, 6);
-  const dotMat = new THREE.MeshBasicMaterial({ color: 0x888888 });
+  const dotMat = new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.92 });
   const statusDot = new THREE.Mesh(dotGeo, dotMat);
-  statusDot.position.set(0.38, 1.92, 0);
+  statusDot.position.set(0.42, 1.98, 0);
   statusDot.name = 'statusDot';
+  statusDot.userData.liveModeIndicator = true;
+  statusDot.userData.baseScale = 1;
   agentGroup.add(statusDot);
 
   // ── SPEECH BUBBLE ─────────────────────────────────────────
@@ -3230,13 +3232,14 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     }
   }
 
-  // ── STATUS DOT ────────────────────────────────────────────
+  // ── LIVE MODE / STATUS DOT ────────────────────────────────
   if (parts.statusDot) {
-    parts.statusDot.material.color.setHex(
-      status === 'working' ? 0xe53935 :
-      status === 'idle'    ? 0x4caf50 :
-                             0x888888
-    );
+    const liveModeEnabled = agent?.agentLiveModeEnabled === true;
+    const pulse = liveModeEnabled ? 1 + Math.sin(Date.now() / 260) * 0.28 : 1;
+    parts.statusDot.material.color.setHex(liveModeEnabled ? 0x22c55e : 0xef4444);
+    parts.statusDot.material.opacity = liveModeEnabled ? 0.96 : 0.82;
+    parts.statusDot.scale.setScalar(pulse);
+    parts.statusDot.visible = true;
   }
 }
 

@@ -366,6 +366,7 @@
                 <button class="settings-tab" data-settings-tab="general">General</button>
                 <button class="settings-tab" data-settings-tab="connections">Connections</button>
                 <button class="settings-tab" data-settings-tab="features">Features</button>
+                <button class="settings-tab" data-settings-tab="live-mode">Live Mode</button>
                 <button class="settings-tab" data-settings-tab="browser">Browser</button>
                 <button class="settings-tab" data-settings-tab="sms">SMS</button>
                 <button class="settings-tab" data-settings-tab="debug">Debug</button>
@@ -421,6 +422,16 @@
                     <label class="settings-check"><input type="checkbox" id="setting-featureAgentLiveMode"> Agent Live Mode</label>
                     <label class="settings-check"><input type="checkbox" id="setting-featureDebugTools" checked> Debug Tools</label>
                     <div id="featureLockNotice" class="settings-status-card"></div>
+                </section>
+
+                <section class="settings-pane" data-settings-pane="live-mode">
+                    <div id="liveModeSummary" class="settings-status-card">Loading agents...</div>
+                    <div class="settings-live-agent-toolbar">
+                        <button class="btn-secondary" id="btn-refreshLiveAgents" type="button">Refresh Agents</button>
+                        <button class="btn-primary" id="btn-saveLiveAgents" type="button">Apply Selection</button>
+                    </div>
+                    <div id="liveModeAgentList" class="settings-live-agent-list"></div>
+                    <div id="liveModeAgentStatus" class="settings-inline-status"></div>
                 </section>
 
                 <section class="settings-pane" data-settings-pane="browser">
@@ -671,8 +682,8 @@
     </script>
     <script src="js/vo-engine.js?v=printer-copier-asset-v1"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script type="module" src="js/main3d.js?v=20260613-road-terrain-r1"></script>
+    <script type="module" src="js/main3d.js?v=20260613-live-mode-visibility-r2"></script>
     <script src="js/chat.js?v=20260612-chat-agent-persistence-r1"></script>
-    <script src="js/settings.js?v=20260613-demo-license-locks-r1"></script>
+    <script src="js/settings.js?v=20260613-live-mode-agent-settings-r1"></script>
 </body>
 </html>
