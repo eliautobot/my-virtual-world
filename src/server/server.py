@@ -486,6 +486,7 @@ _presence_gateway_config = None
 _live_agent_loop_thread = None
 _live_agent_loop_stop = threading.Event()
 _live_agent_loop_lock = threading.RLock()
+_live_agent_action_handoff_lock = threading.RLock()
 _live_agent_loop_last_client_at = 0
 HERMES_APPROVAL_LOCK = threading.Lock()
 HERMES_APPROVAL_PENDING = {}
@@ -1130,15 +1131,28 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "memoryRetention": 24,
     "reflectionRetention": 18,
     "feedbackRetention": 24,
+    "settledActionRetention": 120,
     "decisionMode": "perception-heuristic",
 }
-LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION = "20260613-live-mode-visibility-r2"
+LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION = "20260614-live-mode-home-interior-r25"
+LIVE_AGENT_HOME_INTERIOR_VERSION = "20260614-live-home-starter-interior-r1"
+LIVE_AGENT_LOOP_STALE_ACTIVE_ACTION_SECONDS = {
+    "route_pending": 360,
+    "routing": 420,
+    "arrived": 300,
+    "in_progress": 900,
+}
+LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION = "agent-live-mode-visible-action-contract/v1"
+LIVE_AGENT_LOOP_API_TILE = 40
+LIVE_AGENT_HOME_BUILD_SITE_WIDTH_TILES = 10
+LIVE_AGENT_HOME_BUILD_SITE_HEIGHT_TILES = 8
 LIVE_AGENT_LOOP_NEED_DEFAULTS = {
     "hydration": 0.45,
     "food": 0.35,
     "energy": 0.32,
     "curiosity": 0.55,
     "maintenance": 0.22,
+    "shelter": 0.68,
 }
 LIVE_AGENT_LOOP_NEED_RATES_PER_MIN = {
     "hydration": 0.012,
@@ -1146,6 +1160,7 @@ LIVE_AGENT_LOOP_NEED_RATES_PER_MIN = {
     "energy": 0.006,
     "curiosity": 0.010,
     "maintenance": 0.004,
+    "shelter": 0.001,
 }
 LIVE_AGENT_LOOP_ACTIONS = [
     {
@@ -1188,6 +1203,186 @@ LIVE_AGENT_LOOP_ACTIONS = [
         "label": "heat food",
         "experience": "heat a snack in the microwave",
     },
+    {
+        "id": "brainstorm-whiteboard",
+        "catalogIds": ["whiteboard"],
+        "actionType": "planning.brainstorm",
+        "capabilityTag": "planning.brainstorm",
+        "interactionSpotId": "presenter",
+        "need": "curiosity",
+        "label": "brainstorm at whiteboard",
+        "experience": "think through ideas at the Office whiteboard",
+    },
+    {
+        "id": "print-copy-document",
+        "catalogIds": ["printerCopier", "all-in-one-printer-scanner"],
+        "actionType": "maintenance.printCopy",
+        "capabilityTag": "maintenance.printCopy",
+        "interactionSpotId": "use-front",
+        "need": "maintenance",
+        "label": "print or copy",
+        "experience": "use the Office printer/copier",
+    },
+    {
+        "id": "build-small-home-site",
+        "targetKind": "world-point",
+        "siteKind": "agent-home",
+        "actionType": "world.buildStructure",
+        "capabilityTag": "world.build",
+        "need": "shelter",
+        "label": "build a small home",
+        "experience": "build a small home at a visible construction site",
+    },
+    {
+        "id": "rest-at-home",
+        "targetKind": "agent-home-building",
+        "actionType": "life.restAtHome",
+        "capabilityTag": "life.rest",
+        "need": "energy",
+        "label": "rest at home",
+        "experience": "go home and rest at their visible home",
+    },
+]
+LIVE_AGENT_VISIBLE_ACTION_CONTRACTS = {
+    "life.getWater": {
+        "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "policy": "visible-world-execution-required",
+        "visibleInWorld": True,
+        "hiddenWorldMutationAllowed": False,
+        "requiresWorldAction": True,
+        "requiresMoveIntent": True,
+        "targetKind": "object-instance",
+        "clientExecutor": "main3d.js#routeLiveModeStandingMachineWorldAction",
+        "routeKind": "standing-machine-use",
+        "requiredStages": ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"],
+    },
+    "life.getCoffee": {
+        "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "policy": "visible-world-execution-required",
+        "visibleInWorld": True,
+        "hiddenWorldMutationAllowed": False,
+        "requiresWorldAction": True,
+        "requiresMoveIntent": True,
+        "targetKind": "object-instance",
+        "clientExecutor": "main3d.js#routeLiveModeStandingMachineWorldAction",
+        "routeKind": "standing-machine-use",
+        "requiredStages": ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"],
+    },
+    "life.buyVendingSnackDrink": {
+        "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "policy": "visible-world-execution-required",
+        "visibleInWorld": True,
+        "hiddenWorldMutationAllowed": False,
+        "requiresWorldAction": True,
+        "requiresMoveIntent": True,
+        "targetKind": "object-instance",
+        "clientExecutor": "main3d.js#routeLiveModeStandingMachineWorldAction",
+        "routeKind": "standing-machine-use",
+        "requiredStages": ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"],
+    },
+    "life.heatFood": {
+        "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "policy": "visible-world-execution-required",
+        "visibleInWorld": True,
+        "hiddenWorldMutationAllowed": False,
+        "requiresWorldAction": True,
+        "requiresMoveIntent": True,
+        "targetKind": "object-instance",
+        "clientExecutor": "main3d.js#routeLiveModeStandingMachineWorldAction",
+        "routeKind": "standing-machine-use",
+        "requiredStages": ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"],
+    },
+    "life.restAtHome": {
+        "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "policy": "visible-world-execution-required",
+        "visibleInWorld": True,
+        "hiddenWorldMutationAllowed": False,
+        "requiresWorldAction": True,
+        "requiresMoveIntent": True,
+        "targetKind": "building",
+        "clientExecutor": "main3d.js#routeLiveModeHomeWorldAction",
+        "routeKind": "home-rest",
+        "requiredStages": ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"],
+    },
+    "planning.brainstorm": {
+        "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "policy": "visible-world-execution-required",
+        "visibleInWorld": True,
+        "hiddenWorldMutationAllowed": False,
+        "requiresWorldAction": True,
+        "requiresMoveIntent": True,
+        "targetKind": "object-instance",
+        "clientExecutor": "main3d.js#routeLiveModeLocalObjectWorldAction",
+        "routeKind": "local-object-use",
+        "requiredStages": ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"],
+    },
+    "maintenance.printCopy": {
+        "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "policy": "visible-world-execution-required",
+        "visibleInWorld": True,
+        "hiddenWorldMutationAllowed": False,
+        "requiresWorldAction": True,
+        "requiresMoveIntent": True,
+        "targetKind": "object-instance",
+        "clientExecutor": "main3d.js#routeLiveModeStandingMachineWorldAction",
+        "routeKind": "standing-machine-use",
+        "requiredStages": ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"],
+    },
+    "world.buildStructure": {
+        "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "policy": "visible-world-execution-required",
+        "visibleInWorld": True,
+        "hiddenWorldMutationAllowed": False,
+        "requiresWorldAction": True,
+        "requiresMoveIntent": True,
+        "targetKind": "world-point",
+        "clientExecutor": "main3d.js#routeLiveModeConstructionSiteWorldAction",
+        "routeKind": "construction-site-build",
+        "mutatesWorldOnlyAfterVisibleCompletion": True,
+        "requiredStages": ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"],
+    },
+}
+LIVE_AGENT_PROPOSAL_ONLY_CAPABILITIES = [
+    {
+        "id": "world.build.customStructure",
+        "actionType": "world.build",
+        "capabilityTag": "world.build",
+        "label": "build arbitrary custom structures",
+        "status": "proposal_only",
+        "blockedReason": "missing-visible-client-executor",
+        "requiredExecutor": "visible-custom-construction-site-build",
+        "requirement": "Arbitrary structures still need typed visible executors. The small-home path is executable through world.buildStructure and routeLiveModeConstructionSiteWorldAction.",
+    },
+    {
+        "id": "world.modify.road",
+        "actionType": "world.modifyRoad",
+        "capabilityTag": "world.terrain",
+        "label": "modify a road or path",
+        "status": "proposal_only",
+        "blockedReason": "missing-visible-client-executor",
+        "requiredExecutor": "visible-roadwork-construction",
+        "requirement": "Agent must be physically present at the roadwork site and show the edit as an in-world construction sequence before changing persisted streets or terrain.",
+    },
+    {
+        "id": "world.move.object",
+        "actionType": "world.moveObject",
+        "capabilityTag": "world.decorate",
+        "label": "move a placed object",
+        "status": "proposal_only",
+        "blockedReason": "missing-visible-client-executor",
+        "requiredExecutor": "visible-object-relocation",
+        "requirement": "Agent must visibly go to the object, pick up or stage it, move to the destination, place it, then persist the placement.",
+    },
+    {
+        "id": "world.delete.object",
+        "actionType": "world.deleteObject",
+        "capabilityTag": "world.decorate",
+        "label": "delete or remove a placed object",
+        "status": "proposal_only",
+        "blockedReason": "missing-visible-client-executor",
+        "requiredExecutor": "visible-object-removal",
+        "requirement": "Agent must visibly go to the object and perform a removal/cleanup sequence before the object is deleted from persistent world state.",
+    },
 ]
 
 
@@ -1196,6 +1391,74 @@ def _api_error(code, message, *, details=None):
     if details is not None:
         body["error"]["details"] = details
     return body
+
+
+def _copy_jsonable(value):
+    return json.loads(json.dumps(value))
+
+
+def _live_agent_visible_action_contract(action_type):
+    key = str(action_type or "").strip()
+    contract = LIVE_AGENT_VISIBLE_ACTION_CONTRACTS.get(key)
+    return _copy_jsonable(contract) if isinstance(contract, dict) else None
+
+
+def _live_agent_visible_action_policy():
+    return {
+        "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "policy": "visible-world-execution-required",
+        "hiddenWorldMutationAllowed": False,
+        "appliesToSourceKind": "agent-live-mode",
+        "requiredExecution": {
+            "requiresWorldAction": True,
+            "requiresMoveIntent": True,
+            "requiresVisibleClientExecutor": True,
+            "requiresVisibleCompletionEvent": True,
+            "requiresPhysicalAgentPresence": True,
+        },
+        "proposalOnlyCapabilities": _copy_jsonable(LIVE_AGENT_PROPOSAL_ONLY_CAPABILITIES),
+    }
+
+
+def _validate_live_agent_visible_action_contract(payload, action_type=None, capability=None):
+    if not isinstance(payload, dict):
+        return None, None
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    if source.get("kind") != "agent-live-mode":
+        return None, None
+    resolved_action_type = str(action_type or payload.get("actionType") or payload.get("actionId") or "").strip()
+    if not resolved_action_type:
+        return None, None
+    contract = _live_agent_visible_action_contract(resolved_action_type)
+    if not contract:
+        return None, _api_error(
+            "hidden_action_not_allowed",
+            "Agent Live Mode actions must have a visible world executor before they can mutate or reserve world state.",
+            details={
+                "actionType": resolved_action_type,
+                "capabilityTag": capability or payload.get("capabilityTag"),
+                "contractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+                "policy": "visible-world-execution-required",
+                "hiddenWorldMutationAllowed": False,
+                "proposalOnlyCapabilities": _copy_jsonable(LIVE_AGENT_PROPOSAL_ONLY_CAPABILITIES),
+            },
+        )
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    target_kind = target.get("kind") or "object-instance"
+    required_target_kind = contract.get("targetKind")
+    if required_target_kind and target_kind != required_target_kind:
+        return None, _api_error(
+            "visible_executor_missing",
+            "Agent Live Mode action target does not match the visible client executor contract.",
+            details={
+                "actionType": resolved_action_type,
+                "targetKind": target_kind,
+                "requiredTargetKind": required_target_kind,
+                "clientExecutor": contract.get("clientExecutor"),
+                "contractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+            },
+        )
+    return contract, None
 
 
 def _normalize_behavior_source_kind(value):
@@ -1451,6 +1714,13 @@ def _normalize_token(value):
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
+WORLD_ACTION_CATALOG_ID_ALIASES = {
+    "printercopier": "all-in-one-printer-scanner",
+    "printerscanner": "all-in-one-printer-scanner",
+    "allinoneprinterscanner": "all-in-one-printer-scanner",
+}
+
+
 def _load_text_file(path):
     try:
         with open(path, "r") as f:
@@ -1495,6 +1765,9 @@ def _catalog_block_for(catalog_id):
     key = _normalize_token(catalog_id)
     if not key:
         return None
+    aliased_catalog_id = WORLD_ACTION_CATALOG_ID_ALIASES.get(key)
+    if aliased_catalog_id:
+        key = _normalize_token(aliased_catalog_id)
     blocks = _catalog_blocks()
     if key in blocks:
         return blocks[key]
@@ -1965,6 +2238,11 @@ def _validate_create_world_action_payload(payload):
     params = payload.get("params", {})
     if not isinstance(params, dict):
         errors.append("params must be an object when present")
+    visible_action_contract = None
+    if isinstance(source, dict) and source.get("kind") == "agent-live-mode":
+        visible_action_contract, contract_error = _validate_live_agent_visible_action_contract(payload, action_type=action_type, capability=capability)
+        if contract_error:
+            return None, contract_error
     ui_context = payload.get("uiContext", None)
     if ui_context is not None and not isinstance(ui_context, dict):
         errors.append("uiContext must be an object when present")
@@ -2078,6 +2356,17 @@ def _validate_create_world_action_payload(payload):
         "events": [],
         "audit": {"schemaVersion": WORLD_ACTION_SCHEMA_VERSION, "stateMachineVersion": WORLD_ACTION_STATE_MACHINE_VERSION, "createVersion": WORLD_ACTION_CREATE_VERSION, "eventHooksVersion": WORLD_ACTION_EVENT_HOOKS_VERSION, "reuseDecisions": [*WORLD_ACTION_CREATE_REUSE_NOTES, *WORLD_ACTION_EVENT_REUSE_NOTES], "routeGuardrails": WORLD_ACTION_EVENT_ROUTE_GUARDRAILS},
     }
+    if visible_action_contract:
+        action["visibility"] = {
+            "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+            "policy": visible_action_contract.get("policy"),
+            "visibleInWorld": True,
+            "hiddenWorldMutationAllowed": False,
+            "clientExecutor": visible_action_contract.get("clientExecutor"),
+            "requiresMoveIntent": visible_action_contract.get("requiresMoveIntent") is True,
+            "requiresPhysicalAgentPresence": True,
+        }
+        action["route"]["visibleActionContract"] = action["visibility"]
     if ui_context is not None:
         action["uiContext"] = ui_context
     record_errors = validate_world_action_record(action, expected_bucket="active")
@@ -2098,6 +2387,8 @@ def create_world_action(payload):
             "invalid_behavior_category": 400,
             "unsupported_target": 422,
             "unsupported_capability": 422,
+            "hidden_action_not_allowed": 422,
+            "visible_executor_missing": 422,
             "missing_interaction_spot": 422,
             "target_disabled": 409,
             "target_blocked": 409,
@@ -2421,34 +2712,51 @@ def create_agent_live_mode_action_request(payload):
     if not setting or setting.get("agentLiveModeEnabled") is not True:
         return False, _agent_live_mode_disabled_error(agent_id), 403
 
-    interrupted, error, status = _prepare_agent_live_mode_action_call(agent_id)
-    if error:
-        return False, error, status
+    visible_action_contract, contract_error = _validate_live_agent_visible_action_contract(payload, action_type=payload.get("actionType") or payload.get("actionId"), capability=payload.get("capabilityTag"))
+    if contract_error:
+        return False, contract_error, 422
 
-    action_payload = {**payload, "agentId": agent_id, "source": {**source, "kind": "agent-live-mode"}}
-    ok, action_result, action_status = create_world_action(action_payload)
-    if not ok:
-        return False, action_result, action_status
-    action = action_result.get("action") if isinstance(action_result, dict) else None
-    action_id = action.get("id") if isinstance(action, dict) else None
-    move_payload = {
-        "agentId": agent_id,
-        "actionAgentId": agent_id,
-        "actionId": action_id,
-        "worldActionId": action_id,
-        "source": action_payload["source"],
-        "behaviorCategory": action_payload.get("behaviorCategory"),
-        "behaviorSelectedObject": action_payload.get("behaviorSelectedObject"),
-        "behaviorSelectedSpot": action_payload.get("behaviorSelectedSpot"),
-        "behaviorProbabilityRoll": action_payload.get("behaviorProbabilityRoll"),
-        "behaviorFallbackReason": action_payload.get("behaviorFallbackReason"),
-        "target": {**(action.get("target") if isinstance(action, dict) and isinstance(action.get("target"), dict) else payload.get("target") or {}), "actionId": action_id, "worldActionId": action_id},
-    }
-    ok, move_result, move_status = create_move_intent(agent_id, move_payload)
-    if not ok:
-        cancel_world_action(action_id, {"failureReason": "cancelled_by_system", "reason": "cancelled_by_system", "actor": "agent-live-mode", "source": "agent-live-mode"})
-        return False, _api_error("move_intent_handoff_failed", "Agent Live Mode action was validated but could not create the existing move-intent/AgentIntent handoff; the reserved action was cancelled.", details=move_result), move_status
-    return True, {"ok": True, "action": action_result.get("action"), "worldAction": action_result, "moveIntent": move_result.get("moveIntent"), "routeHandoff": move_result.get("routeHandoff"), "linkedAction": move_result.get("linkedAction"), "interruptedLowerLayer": interrupted, "callerContract": {"endpoint": "POST /api/agent-model/actions", "requiredSourceKind": "agent-live-mode", "requiresAgentLiveModeEnabled": True, "usesExistingWorldActionValidation": True, "usesExistingMoveIntentHandoff": True, "overrideOrder": ["user", "agent-live-mode", "agent-scripted-mode"]}}, 202
+    with _live_agent_action_handoff_lock:
+        interrupted, error, status = _prepare_agent_live_mode_action_call(agent_id)
+        if error:
+            return False, error, status
+
+        action_payload = {**payload, "agentId": agent_id, "source": {**source, "kind": "agent-live-mode"}}
+        visible_params = {
+            "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+            "visibleActionPolicy": "visible-world-execution-required",
+            "visibleWorldAction": True,
+            "hiddenWorldMutationAllowed": False,
+            "visibleExecutor": visible_action_contract.get("clientExecutor") if visible_action_contract else None,
+            "requiresPhysicalAgentPresence": True,
+        }
+        if isinstance(payload.get("params"), dict):
+            action_payload["params"] = {**payload.get("params"), **visible_params}
+        elif payload.get("params") is None:
+            action_payload["params"] = visible_params
+        ok, action_result, action_status = create_world_action(action_payload)
+        if not ok:
+            return False, action_result, action_status
+        action = action_result.get("action") if isinstance(action_result, dict) else None
+        action_id = action.get("id") if isinstance(action, dict) else None
+        move_payload = {
+            "agentId": agent_id,
+            "actionAgentId": agent_id,
+            "actionId": action_id,
+            "worldActionId": action_id,
+            "source": action_payload["source"],
+            "behaviorCategory": action_payload.get("behaviorCategory"),
+            "behaviorSelectedObject": action_payload.get("behaviorSelectedObject"),
+            "behaviorSelectedSpot": action_payload.get("behaviorSelectedSpot"),
+            "behaviorProbabilityRoll": action_payload.get("behaviorProbabilityRoll"),
+            "behaviorFallbackReason": action_payload.get("behaviorFallbackReason"),
+            "target": {**(action.get("target") if isinstance(action, dict) and isinstance(action.get("target"), dict) else payload.get("target") or {}), "actionId": action_id, "worldActionId": action_id},
+        }
+        ok, move_result, move_status = create_move_intent(agent_id, move_payload)
+        if not ok:
+            cancel_world_action(action_id, {"failureReason": "cancelled_by_system", "reason": "cancelled_by_system", "actor": "agent-live-mode", "source": "agent-live-mode"})
+            return False, _api_error("move_intent_handoff_failed", "Agent Live Mode action was validated but could not create the existing move-intent/AgentIntent handoff; the reserved action was cancelled.", details=move_result), move_status
+        return True, {"ok": True, "action": action_result.get("action"), "worldAction": action_result, "moveIntent": move_result.get("moveIntent"), "routeHandoff": move_result.get("routeHandoff"), "linkedAction": move_result.get("linkedAction"), "interruptedLowerLayer": interrupted, "callerContract": {"endpoint": "POST /api/agent-model/actions", "requiredSourceKind": "agent-live-mode", "requiresAgentLiveModeEnabled": True, "usesExistingWorldActionValidation": True, "usesExistingMoveIntentHandoff": True, "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION, "visibleWorldExecutionRequired": True, "hiddenWorldMutationAllowed": False, "visibleExecutor": visible_action_contract.get("clientExecutor") if visible_action_contract else None, "overrideOrder": ["user", "agent-live-mode", "agent-scripted-mode"]}}, 202
 
 
 # ─── AGENT LIVE MODE PERSISTENT LOOP ─────────────────────────────
@@ -2601,9 +2909,34 @@ def _live_agent_loop_normalize_memory(agent_state):
     memory.setdefault("recentActions", [])
     memory.setdefault("observations", [])
     memory.setdefault("reflections", [])
+    memory["recentActions"] = _live_agent_loop_trim_list(
+        _live_agent_loop_dedupe_settled_records(
+            memory.get("recentActions"),
+            lambda item: _live_agent_loop_settled_action_key(item.get("actionId"), item.get("status")),
+        ),
+        LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+    )
+    memory["observations"] = _live_agent_loop_trim_list(
+        _live_agent_loop_dedupe_settled_records(
+            memory.get("observations"),
+            lambda item: _live_agent_loop_settled_action_key(item.get("actionId"), item.get("status")),
+        ),
+        LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+    )
+    memory["reflections"] = _live_agent_loop_trim_list(
+        _live_agent_loop_dedupe_settled_records(memory.get("reflections"), lambda item: item.get("actionId")),
+        LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"],
+    )
     agent_state["memory"] = memory
     if not isinstance(agent_state.get("feedbackReports"), list):
         agent_state["feedbackReports"] = []
+    else:
+        agent_state["feedbackReports"] = _live_agent_loop_trim_list(
+            _live_agent_loop_dedupe_settled_records(agent_state.get("feedbackReports"), _live_agent_loop_feedback_dedupe_key),
+            LIVE_AGENT_LOOP_DEFAULTS["feedbackRetention"],
+        )
+    retained_keys = sorted(_live_agent_loop_existing_settled_keys(agent_state))
+    agent_state["settledActionKeys"] = retained_keys[-LIVE_AGENT_LOOP_DEFAULTS["settledActionRetention"]:]
     return agent_state
 
 
@@ -2653,6 +2986,64 @@ def _live_agent_loop_trim_list(values, limit):
     return values[-max(1, int(limit)):]
 
 
+def _live_agent_loop_settled_action_key(action_id, status):
+    if not action_id or not status:
+        return None
+    return f"{action_id}:{_canonical_world_action_status(status)}"
+
+
+def _live_agent_loop_dedupe_settled_records(values, key_fn):
+    deduped = []
+    seen = set()
+    for item in (values or []):
+        if not isinstance(item, dict):
+            continue
+        key = key_fn(item)
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _live_agent_loop_feedback_dedupe_key(item):
+    details = item.get("details") if isinstance(item.get("details"), dict) else {}
+    action_key = _live_agent_loop_settled_action_key(details.get("actionId"), details.get("status"))
+    if not action_key:
+        return None
+    return f"{action_key}:{item.get('level')}:{item.get('message')}"
+
+
+def _live_agent_loop_existing_settled_keys(agent_state):
+    keys = set(str(key) for key in (agent_state.get("settledActionKeys") or []) if isinstance(key, str))
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    for item in memory.get("recentActions") or []:
+        if not isinstance(item, dict):
+            continue
+        key = _live_agent_loop_settled_action_key(item.get("actionId"), item.get("status"))
+        if key:
+            keys.add(key)
+    for item in agent_state.get("feedbackReports") or []:
+        if not isinstance(item, dict):
+            continue
+        details = item.get("details") if isinstance(item.get("details"), dict) else {}
+        key = _live_agent_loop_settled_action_key(details.get("actionId"), details.get("status"))
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _live_agent_loop_mark_settled_action(agent_state, action_id, status):
+    key = _live_agent_loop_settled_action_key(action_id, status)
+    if not key:
+        return None
+    retention = max(1, int(LIVE_AGENT_LOOP_DEFAULTS.get("settledActionRetention") or 120))
+    existing = [str(item) for item in (agent_state.get("settledActionKeys") or []) if isinstance(item, str) and item != key]
+    agent_state["settledActionKeys"] = [*existing, key][-retention:]
+    return key
+
+
 def _live_agent_loop_add_feedback(state, agent_id, level, message, details=None):
     agent_state = _live_agent_loop_agent_state(state, agent_id)
     report = {
@@ -2696,7 +3087,169 @@ def _live_agent_loop_presence(agent_id, state, task):
         return False
 
 
+def _live_agent_loop_agent_aliases(agent_id):
+    aliases = {str(agent_id or "").strip()}
+    aliases.discard("")
+    wanted = set(aliases)
+    for agent in get_roster():
+        if not isinstance(agent, dict):
+            continue
+        agent_aliases = {str(agent.get("id") or "").strip(), str(agent.get("statusKey") or "").strip()}
+        agent_aliases.discard("")
+        if wanted.intersection(agent_aliases):
+            aliases.update(agent_aliases)
+    return aliases
+
+
+def _live_agent_loop_existing_home_for_agent(agent_id):
+    aliases = _live_agent_loop_agent_aliases(agent_id)
+    if not aliases:
+        return None
+    for building in list_buildings():
+        if not isinstance(building, dict) or _building_unavailable(building):
+            continue
+        home_for = str(building.get("liveModeHomeForAgentId") or building.get("ownerAgentId") or "").strip()
+        if home_for and home_for in aliases:
+            return building
+    return None
+
+
+def _live_agent_loop_building_footprint(building):
+    if not isinstance(building, dict) or _building_unavailable(building):
+        return None
+    try:
+        world_x = float(building.get("worldX") or 0)
+        world_y = float(building.get("worldY") or 0)
+        width = float(building.get("widthTiles") or 0)
+        height = float(building.get("heightTiles") or 0)
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return {"minX": world_x, "minY": world_y, "maxX": world_x + width, "maxY": world_y + height}
+
+
+def _live_agent_loop_footprints_overlap(candidate, existing, padding=0):
+    if not candidate or not existing:
+        return False
+    pad = max(0, float(padding or 0))
+    return (
+        candidate["minX"] < existing["maxX"] + pad
+        and candidate["maxX"] > existing["minX"] - pad
+        and candidate["minY"] < existing["maxY"] + pad
+        and candidate["maxY"] > existing["minY"] - pad
+    )
+
+
+def _live_agent_loop_agent_display_name(agent_id):
+    aliases = _live_agent_loop_agent_aliases(agent_id)
+    for agent in get_roster():
+        if not isinstance(agent, dict):
+            continue
+        if str(agent.get("id") or "").strip() in aliases or str(agent.get("statusKey") or "").strip() in aliases:
+            return str(agent.get("name") or agent.get("statusKey") or agent.get("id") or agent_id).strip()
+    return str(agent_id or "Agent").strip() or "Agent"
+
+
+def _live_agent_loop_find_home_build_site(agent_id):
+    if _live_agent_loop_existing_home_for_agent(agent_id):
+        return None
+    agent_token = re.sub(r"[^a-z0-9_-]+", "-", str(agent_id or "agent").lower()).strip("-") or "agent"
+    display_name = _live_agent_loop_agent_display_name(agent_id)
+    width = LIVE_AGENT_HOME_BUILD_SITE_WIDTH_TILES
+    height = LIVE_AGENT_HOME_BUILD_SITE_HEIGHT_TILES
+    candidate_origins = [
+        (-14, 34),
+        (34, 34),
+        (-18, -30),
+        (34, -30),
+        (-32, 8),
+        (44, 8),
+        (-38, 48),
+        (48, 48),
+    ]
+    start = sum(ord(ch) for ch in agent_token) % len(candidate_origins)
+    ordered_origins = candidate_origins[start:] + candidate_origins[:start]
+    existing_footprints = [fp for fp in (_live_agent_loop_building_footprint(b) for b in list_buildings()) if fp]
+    for world_x, world_y in ordered_origins:
+        candidate = {"minX": world_x, "minY": world_y, "maxX": world_x + width, "maxY": world_y + height}
+        if any(_live_agent_loop_footprints_overlap(candidate, existing, padding=2) for existing in existing_footprints):
+            continue
+        building_id = f"live-home-{agent_token}"
+        build_site = {
+            "schemaVersion": "agent-live-mode-build-site/v1",
+            "siteKind": "agent-home",
+            "buildingId": building_id,
+            "buildingName": f"{display_name}'s Home",
+            "type": "home",
+            "worldX": world_x,
+            "worldY": world_y,
+            "widthTiles": width,
+            "heightTiles": height,
+            "ownerAgentId": agent_id,
+            "liveModeHomeForAgentId": agent_id,
+            "exterior": {"wallColor": "#c8b89a", "roofColor": "#795548"},
+        }
+        approach_x = int(round((world_x + width / 2) * LIVE_AGENT_LOOP_API_TILE))
+        approach_z = int(round((world_y + height + 2) * LIVE_AGENT_LOOP_API_TILE))
+        target = {
+            "kind": "world-point",
+            "x": approach_x,
+            "y": approach_z,
+            "z": approach_z,
+            "floor": 1,
+            "siteKind": "agent-home",
+            "buildSite": _copy_jsonable(build_site),
+        }
+        return {
+            "target": target,
+            "buildingName": build_site["buildingName"],
+            "objectType": "construction-site",
+            "availability": {"state": "available", "reason": None, "siteKind": "agent-home"},
+            "buildSite": build_site,
+        }
+    return None
+
+
+def _live_agent_loop_unavailable_reason(action_def, agent_id):
+    if action_def.get("id") == "build-small-home-site" and _live_agent_loop_existing_home_for_agent(agent_id):
+        return "agent-home-already-built"
+    if action_def.get("id") == "rest-at-home" and not _live_agent_loop_existing_home_for_agent(agent_id):
+        return "agent-home-not-built"
+    if action_def.get("targetKind") == "world-point":
+        return "no-open-construction-site"
+    if action_def.get("targetKind") == "agent-home-building":
+        return "agent-home-not-built"
+    return "no-available-target"
+
+
 def _live_agent_loop_find_action_target(action_def, *, agent_id=None):
+    if action_def.get("targetKind") == "agent-home-building":
+        home = _live_agent_loop_existing_home_for_agent(agent_id)
+        if not home:
+            return None
+        target = {
+            "kind": "building",
+            "buildingId": home.get("id"),
+            "floor": 1,
+            "homeRole": "resident",
+            "liveModeHomeForAgentId": agent_id,
+        }
+        return {
+            "target": target,
+            "buildingName": home.get("name"),
+            "objectType": "agent-home",
+            "availability": {"state": "available", "reason": None, "homeRole": "resident"},
+            "action": action_def,
+            "home": _copy_jsonable(home),
+        }
+    if action_def.get("targetKind") == "world-point":
+        if action_def.get("siteKind") == "agent-home":
+            selected = _live_agent_loop_find_home_build_site(agent_id)
+            if selected:
+                selected["action"] = action_def
+            return selected
+        return None
     wanted = {_normalize_token(catalog_id) for catalog_id in action_def.get("catalogIds", [])}
     for building in list_buildings():
         if not isinstance(building, dict) or _building_unavailable(building):
@@ -2806,6 +3359,7 @@ def _live_agent_loop_action_affordances(agent_id, agent_state):
     affordances = []
     for action_def in LIVE_AGENT_LOOP_ACTIONS:
         selected = _live_agent_loop_find_action_target(action_def, agent_id=agent_id)
+        visible_contract = _live_agent_visible_action_contract(action_def.get("actionType"))
         affordance = {
             "id": action_def.get("id"),
             "label": action_def.get("label"),
@@ -2814,6 +3368,15 @@ def _live_agent_loop_action_affordances(agent_id, agent_state):
             "capabilityTag": action_def.get("capabilityTag"),
             "need": action_def.get("need"),
             "available": bool(selected),
+            "visibility": {
+                "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+                "policy": "visible-world-execution-required",
+                "visibleInWorld": bool(visible_contract),
+                "hiddenWorldMutationAllowed": False,
+                "clientExecutor": visible_contract.get("clientExecutor") if visible_contract else None,
+                "requiresMoveIntent": bool(visible_contract and visible_contract.get("requiresMoveIntent")),
+                "requiresPhysicalAgentPresence": bool(visible_contract),
+            },
         }
         if selected:
             affordance.update({
@@ -2824,7 +3387,7 @@ def _live_agent_loop_action_affordances(agent_id, agent_state):
                 "selected": selected,
             })
         else:
-            affordance["reason"] = "no-available-target"
+            affordance["reason"] = _live_agent_loop_unavailable_reason(action_def, agent_id)
         affordances.append(affordance)
     return affordances
 
@@ -2845,6 +3408,7 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
         "active": [{k: item.get(k) for k in ("type", "id", "status", "worldActionId", "behaviorSourceKind")} for item in active],
         "affordances": [{k: v for k, v in affordance.items() if k != "selected"} for affordance in affordances],
         "recentWorldActions": recent_actions,
+        "visibleActionContract": _live_agent_visible_action_policy(),
         "memory": {
             "recentActions": _live_agent_loop_trim_list(memory.get("recentActions"), 8),
             "observations": _live_agent_loop_trim_list(memory.get("observations"), 6),
@@ -2874,6 +3438,10 @@ def _live_agent_loop_decision_score(affordance, agent_state):
         score -= 0.18
     if need_key in {"curiosity", "maintenance"}:
         score += 0.08
+    if affordance.get("id") == "build-small-home-site":
+        score += 0.28
+    if affordance.get("id") == "rest-at-home":
+        score += 0.16
     return round(score, 3)
 
 
@@ -2895,12 +3463,18 @@ def _live_agent_loop_build_decision_frame(agent_id, perception, agent_state):
         "agentId": agent_id,
         "mode": LIVE_AGENT_LOOP_DEFAULTS["decisionMode"],
         "modelReady": True,
+        "visibleActionContract": {
+            "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+            "policy": "visible-world-execution-required",
+            "hiddenWorldMutationAllowed": False,
+            "proposalOnlyCapabilityIds": [item.get("id") for item in LIVE_AGENT_PROPOSAL_ONLY_CAPABILITIES],
+        },
         "topNeed": {"id": top_need[0], "value": top_need[1]},
         "selectedActionId": selected.get("id") if selected else None,
         "selectedActionLabel": selected.get("label") if selected else None,
         "score": selected.get("score") if selected else 0,
         "candidates": candidates,
-        "prompt": "Choose one available action for the agent based on needs, recent memory, active world state, and safe pacing. Return a loopActionId from candidates or skip.",
+        "prompt": "Choose one available visible in-world action for the agent based on needs, recent memory, active world state, physical presence, and safe pacing. Return a loopActionId from candidates or skip. Home rest is executable only by physically routing to the agent-owned home. Small-home construction is executable only through the visible construction-site executor; arbitrary build/modify/move/delete world changes remain proposal-only until typed visible executors exist.",
         "reason": f"{selected.get('label')} best matches current {selected.get('need')} need" if selected else "no available candidates",
     }
     agent_state["lastDecision"] = {k: frame.get(k) for k in ("at", "mode", "topNeed", "selectedActionId", "selectedActionLabel", "score", "reason")}
@@ -2952,44 +3526,185 @@ def _live_agent_loop_action_summary(action):
     }
 
 
+def _live_agent_loop_action_epoch(action):
+    if not isinstance(action, dict):
+        return 0
+    timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+    for key in ("terminalAt", "completedAt", "updatedAt", "routePendingAt", "createdAt", "requestedAt"):
+        parsed = _parse_isoish_epoch(timing.get(key))
+        if parsed:
+            return parsed
+    return 0
+
+
+def _live_agent_loop_owns_world_action(action):
+    if not isinstance(action, dict):
+        return False
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    if params.get("loopActionId"):
+        return True
+    source = action.get("source") if isinstance(action.get("source"), dict) else {}
+    return str(source.get("requestId") or "").startswith("live-loop-")
+
+
+def _live_agent_loop_action_status_timestamp(action, status):
+    timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+    route = action.get("route") if isinstance(action.get("route"), dict) else {}
+    keys_by_status = {
+        "route_pending": ("routePendingAt", "handoffPendingAt", "updatedAt", "createdAt"),
+        "routing": ("startedAt", "updatedAt", "routePendingAt", "createdAt"),
+        "arrived": ("arrivedAt", "updatedAt", "startedAt", "createdAt"),
+        "in_progress": ("inUseAt", "arrivedAt", "updatedAt", "startedAt", "createdAt"),
+    }
+    for key in keys_by_status.get(status, ("updatedAt", "createdAt")):
+        value = timing.get(key) if key in timing else route.get(key)
+        parsed = _parse_isoish_epoch(value) if value else None
+        if parsed:
+            return parsed, key
+    return None, None
+
+
+def _live_agent_loop_stale_threshold_seconds(action, status):
+    timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    default_threshold = LIVE_AGENT_LOOP_STALE_ACTIVE_ACTION_SECONDS.get(status)
+    timeout_ms = timing.get("timeoutMs")
+    if isinstance(timeout_ms, (int, float)) and timeout_ms > 0:
+        return max(60, int(timeout_ms / 1000))
+    if status == "in_progress":
+        duration_ms = params.get("constructionDurationMs") or params.get("estimatedUseMs")
+        if isinstance(duration_ms, (int, float)) and duration_ms > 0:
+            return max(default_threshold or 300, int(duration_ms / 1000) + 180)
+    return default_threshold
+
+
+def _live_agent_loop_reconcile_stale_active_behaviors(state=None, *, now_epoch=None):
+    now_epoch = float(now_epoch or time.time())
+    store = get_world_actions_store(persist_migration=True)
+    stale = []
+    for action in store.get("active", []):
+        if not isinstance(action, dict):
+            continue
+        if _behavior_source_kind_from_record(action) != "agent-live-mode":
+            continue
+        status = _canonical_world_action_status(action.get("status"))
+        threshold = _live_agent_loop_stale_threshold_seconds(action, status)
+        if not threshold:
+            continue
+        started_epoch, timestamp_key = _live_agent_loop_action_status_timestamp(action, status)
+        if not started_epoch:
+            continue
+        age_sec = max(0, int(now_epoch - started_epoch))
+        if age_sec < threshold:
+            continue
+        stale.append({
+            "actionId": action.get("id"),
+            "agentId": action.get("agentId"),
+            "status": status,
+            "ageSec": age_sec,
+            "thresholdSec": threshold,
+            "timestampKey": timestamp_key,
+            "actionType": action.get("actionType"),
+            "loopActionId": (action.get("params") if isinstance(action.get("params"), dict) else {}).get("loopActionId"),
+        })
+
+    expired = []
+    for item in stale:
+        action_id = item.get("actionId")
+        if not action_id:
+            continue
+        ok, response, status_code = transition_world_action(
+            action_id,
+            "expired",
+            result={
+                "status": "expired",
+                "reason": "live_mode_active_action_stale",
+                "stale": item,
+            },
+            failure_reason="timed_out",
+            actor="server.py#live-agent-loop-stale-reconcile",
+            source="agent-live-mode",
+        )
+        item["transitionOk"] = bool(ok)
+        item["httpStatus"] = status_code
+        if not ok:
+            item["error"] = response
+        expired.append(item)
+
+    if expired:
+        reconcile_move_intents()
+        if isinstance(state, dict):
+            now_iso = _utc_now_iso()
+            for item in expired:
+                agent_id = item.get("agentId")
+                if not agent_id:
+                    continue
+                agent_state = _live_agent_loop_agent_state(state, agent_id)
+                if item.get("transitionOk"):
+                    agent_state["lastOutcome"] = {
+                        "at": now_iso,
+                        "status": "expired",
+                        "reason": "live-mode-stale-active-action",
+                        "actionId": item.get("actionId"),
+                        "loopActionId": item.get("loopActionId"),
+                        "stale": {k: item.get(k) for k in ("status", "ageSec", "thresholdSec", "timestampKey", "actionType")},
+                    }
+                    _live_agent_loop_add_feedback(state, agent_id, "warning", "Expired stale Live Mode action so the resident loop could continue.", item)
+                    _live_agent_loop_add_event(state, "stale-action-expired", agent_id=agent_id, details=item)
+                else:
+                    _live_agent_loop_add_feedback(state, agent_id, "error", "Could not expire stale Live Mode action.", item)
+                    _live_agent_loop_add_event(state, "stale-action-expire-failed", agent_id=agent_id, details=item)
+    return expired
+
+
 def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary):
     if not isinstance(summary, dict):
         return None
+    action_id = summary.get("id")
+    action_status = _canonical_world_action_status(summary.get("status"))
+    settled_key = _live_agent_loop_settled_action_key(action_id, action_status)
+    if settled_key and settled_key in _live_agent_loop_existing_settled_keys(agent_state):
+        _live_agent_loop_mark_settled_action(agent_state, action_id, action_status)
+        return {"actionId": action_id, "status": action_status, "settledActionKey": settled_key, "duplicate": True}
     action_def = _live_agent_loop_action_definition(summary.get("loopActionId"), summary.get("actionType"))
     label = (action_def or {}).get("label") or summary.get("actionType") or "world action"
     need_key = (action_def or {}).get("need")
-    completed = summary.get("status") == "completed"
+    completed = action_status == "completed"
     if need_key:
         _live_agent_loop_decay_need_after_action(agent_state, need_key, completed=completed)
     memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
     recent_entry = {
         "at": _utc_now_iso(),
-        "actionId": summary.get("id"),
+        "actionId": action_id,
         "loopActionId": summary.get("loopActionId"),
         "actionType": summary.get("actionType"),
         "label": label,
-        "status": summary.get("status"),
+        "status": action_status,
         "need": need_key,
+        "settledActionKey": settled_key,
     }
     memory["recentActions"] = _live_agent_loop_trim_list([*(memory.get("recentActions") or []), recent_entry], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
-    observation_text = f"{label} finished with status {summary.get('status')}."
+    observation_text = f"{label} finished with status {action_status}."
     target = action.get("target") if isinstance(action, dict) and isinstance(action.get("target"), dict) else {}
     if target.get("buildingId"):
         observation_text = f"{observation_text} Target building {target.get('buildingId')} object {target.get('catalogId') or target.get('objectInstanceId')}."
-    observation = {"at": recent_entry["at"], "text": observation_text, "actionId": summary.get("id"), "status": summary.get("status")}
+    observation = {"at": recent_entry["at"], "text": observation_text, "actionId": action_id, "status": action_status, "settledActionKey": settled_key}
     memory["observations"] = _live_agent_loop_trim_list([*(memory.get("observations") or []), observation], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
     reflection = {
         "at": recent_entry["at"],
         "text": f"I {('completed' if completed else 'ended')} {label}; next I should balance needs instead of repeating the same object.",
-        "actionId": summary.get("id"),
+        "actionId": action_id,
         "loopActionId": summary.get("loopActionId"),
+        "settledActionKey": settled_key,
     }
     memory["reflections"] = _live_agent_loop_trim_list([*(memory.get("reflections") or []), reflection], LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
     agent_state["memory"] = memory
+    _live_agent_loop_mark_settled_action(agent_state, action_id, action_status)
+    details = {"actionId": action_id, "loopActionId": summary.get("loopActionId"), "status": action_status}
     if completed:
-        _live_agent_loop_add_feedback(state, agent_id, "info", reflection["text"], {"actionId": summary.get("id"), "loopActionId": summary.get("loopActionId"), "status": summary.get("status")})
+        _live_agent_loop_add_feedback(state, agent_id, "info", reflection["text"], details)
     else:
-        _live_agent_loop_add_feedback(state, agent_id, "warning", f"{label} ended as {summary.get('status')}; watch this action type.", {"actionId": summary.get("id"), "loopActionId": summary.get("loopActionId"), "status": summary.get("status")})
+        _live_agent_loop_add_feedback(state, agent_id, "warning", f"{label} ended as {action_status}; watch this action type.", details)
     return recent_entry
 
 
@@ -3007,14 +3722,32 @@ def _live_agent_loop_refresh_completed_outcomes(state):
         if not isinstance(agent_state, dict):
             continue
         action_id = agent_state.get("lastActionId")
-        if not action_id or action_id in active_ids:
-            continue
-        action = history_by_id.get(action_id)
+        action = None
+        if action_id and action_id not in active_ids:
+            action = history_by_id.get(action_id)
+        latest_loop_action = None
+        latest_loop_epoch = 0
+        for candidate in world_actions.get("history", []):
+            if not isinstance(candidate, dict) or candidate.get("agentId") != agent_id:
+                continue
+            if not _live_agent_loop_owns_world_action(candidate):
+                continue
+            candidate_status = _canonical_world_action_status(candidate.get("status"))
+            if candidate_status not in WORLD_ACTION_TERMINAL_STATES:
+                continue
+            candidate_epoch = _live_agent_loop_action_epoch(candidate)
+            if candidate_epoch >= latest_loop_epoch:
+                latest_loop_action = candidate
+                latest_loop_epoch = candidate_epoch
+        if latest_loop_action and (not action or latest_loop_epoch > _live_agent_loop_action_epoch(action)):
+            action = latest_loop_action
+            action_id = action.get("id")
         if not action:
             continue
         action_status = _canonical_world_action_status(action.get("status"))
         if action_status not in WORLD_ACTION_TERMINAL_STATES:
             continue
+        settled_key = _live_agent_loop_settled_action_key(action_id, action_status)
         current = agent_state.get("lastOutcome") if isinstance(agent_state.get("lastOutcome"), dict) else {}
         if current.get("actionId") == action_id and current.get("status") == action_status and current.get("observedBy") == "agent-live-loop-status":
             continue
@@ -3027,12 +3760,17 @@ def _live_agent_loop_refresh_completed_outcomes(state):
             "loopActionId": summary.get("loopActionId") if summary else None,
             "worldAction": summary,
             "observedBy": "agent-live-loop-status",
+            "settledActionKey": settled_key,
         }
+        agent_state["lastActionId"] = action_id
+        timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+        agent_state["lastActionAt"] = timing.get("requestedAt") or timing.get("createdAt") or agent_state.get("lastActionAt")
         agent_state["lastSettledActionAt"] = now
         if action_status == "completed":
             agent_state["lastCompletedActionAt"] = now
-        _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary)
-        _live_agent_loop_add_event(state, "action-settled", agent_id=agent_id, details={"actionId": action_id, "status": action_status})
+        remembered = _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary)
+        if not (isinstance(remembered, dict) and remembered.get("duplicate")):
+            _live_agent_loop_add_event(state, "action-settled", agent_id=agent_id, details={"actionId": action_id, "status": action_status})
         changed = True
     return changed
 
@@ -3058,6 +3796,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
         now_epoch = time.time()
         now_iso = _utc_now_iso()
         world_client = _live_agent_loop_world_client_status(state)
+        stale_expired = [] if dry_run else _live_agent_loop_reconcile_stale_active_behaviors(state, now_epoch=now_epoch)
         result = {
             "ok": True,
             "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
@@ -3065,6 +3804,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             "forced": bool(force),
             "dryRun": bool(dry_run),
             "worldClient": world_client,
+            "staleExpired": stale_expired,
             "enabledAgents": [],
             "actionsCreated": [],
             "skipped": [],
@@ -3106,14 +3846,14 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
 
             agent_state["lastHeartbeatAt"] = now_iso
             _live_agent_loop_stat(agent_state, "ticks")
-            _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World")
+            _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World 8587")
             perception = _live_agent_loop_build_perception(agent_id, agent_state, world_client=world_client, now_epoch=now_epoch)
 
             active = perception.get("active") or []
             if active:
                 _live_agent_loop_stat(agent_state, "skippedActive")
                 agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "active-behavior", "active": active, "perceptionAt": perception.get("at")}
-                _live_agent_loop_presence(agent_id, "working", "Living in My Virtual World")
+                _live_agent_loop_presence(agent_id, "working", "Living in My Virtual World 8587")
                 result["skipped"].append({"agentId": agent_id, "reason": "active-behavior", "active": agent_state["lastOutcome"]["active"]})
                 continue
 
@@ -3138,6 +3878,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 continue
 
             action_def = selected["action"]
+            visible_action_contract = _live_agent_visible_action_contract(action_def.get("actionType")) or {}
             adaptive_cooldown = _live_agent_loop_cooldown_for_decision(cooldown, decision)
             request_id = f"live-loop-{agent_id}-{int(now_epoch)}"
             payload = {
@@ -3146,7 +3887,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     "kind": "agent-live-mode",
                     "requestedBy": "server.py#live_agent_loop_tick",
                     "requestId": request_id,
-                    "surface": "agent-live-loop",
+                    "surface": "8587-live-agent-loop",
                     "roles": ["participant"],
                     "loopId": LIVE_AGENT_LOOP_SCHEMA_VERSION,
                 },
@@ -3163,8 +3904,16 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     "decisionReason": decision.get("reason") if isinstance(decision, dict) else None,
                     "perceptionAt": perception.get("at"),
                     "worldClientActive": world_client.get("active"),
+                    "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+                    "visibleActionPolicy": "visible-world-execution-required",
+                    "visibleWorldAction": True,
+                    "hiddenWorldMutationAllowed": False,
+                    "visibleExecutor": visible_action_contract.get("clientExecutor"),
+                    "requiresPhysicalAgentPresence": True,
                 },
             }
+            if isinstance(selected.get("buildSite"), dict):
+                payload["params"]["buildSite"] = _copy_jsonable(selected.get("buildSite"))
             if dry_run:
                 agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload, "decision": decision, "perception": perception}
                 result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected, "decision": agent_state.get("lastDecision")})
@@ -3180,7 +3929,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 agent_state["lastActionId"] = action_id
                 agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
                 agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "httpStatus": status, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown}
-                _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
+                _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World 8587: {action_def.get('label')}")
                 _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, details={"actionId": action_id, "loopActionId": action_def["id"], "target": selected["target"], "decision": agent_state.get("lastDecision")})
                 result["actionsCreated"].append({"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "httpStatus": status, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown})
                 actions_created_this_tick += 1
@@ -3204,7 +3953,8 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
 def get_live_agent_loop_status():
     with _live_agent_loop_lock:
         state = get_live_agent_loop_state(persist_migration=True)
-        if _live_agent_loop_refresh_completed_outcomes(state):
+        stale_expired = _live_agent_loop_reconcile_stale_active_behaviors(state)
+        if _live_agent_loop_refresh_completed_outcomes(state) or stale_expired:
             state = save_live_agent_loop_state(state)
         thread_alive = bool(_live_agent_loop_thread and _live_agent_loop_thread.is_alive())
         return {
@@ -3214,6 +3964,7 @@ def get_live_agent_loop_status():
             "runtime": {
                 "threadAlive": thread_alive,
                 "worldClient": _live_agent_loop_world_client_status(state),
+                "staleExpired": stale_expired,
                 "guardrails": {
                     "worldClientRequired": state.get("worldClientRequired"),
                     "maxActionsPerTick": state.get("maxActionsPerTick"),
@@ -3238,21 +3989,32 @@ def get_live_agent_loop_perception(agent_id):
         return True, {"ok": True, "agentId": resolved_agent_id, "perception": perception, "decision": decision, "state": (saved.get("agents") or {}).get(resolved_agent_id, agent_state)}, 200
 
 
-def get_live_agent_loop_feedback(agent_id=None):
+def _live_agent_loop_limited_feedback_reports(agent_state, limit=None):
+    reports = [item for item in (agent_state.get("feedbackReports") or []) if isinstance(item, dict)]
+    if limit is None:
+        return reports
+    limit_value = _normalize_int(limit, LIVE_AGENT_LOOP_DEFAULTS["feedbackRetention"], minimum=1, maximum=LIVE_AGENT_LOOP_DEFAULTS["feedbackRetention"])
+    return reports[-limit_value:]
+
+
+def get_live_agent_loop_feedback(agent_id=None, limit=None):
     with _live_agent_loop_lock:
         state = get_live_agent_loop_state(persist_migration=True)
+        limit_value = None
+        if limit not in (None, ""):
+            limit_value = _normalize_int(limit, LIVE_AGENT_LOOP_DEFAULTS["feedbackRetention"], minimum=1, maximum=LIVE_AGENT_LOOP_DEFAULTS["feedbackRetention"])
         reports = {}
         if agent_id:
             resolved_agent_id = _resolve_agent_id(agent_id)
             if not resolved_agent_id:
                 return False, _api_error("agent_not_found", "agentId must reference an existing live-mode-capable agent.", details={"agentId": agent_id}), 404
             agent_state = _live_agent_loop_agent_state(state, resolved_agent_id)
-            reports[resolved_agent_id] = agent_state.get("feedbackReports") or []
+            reports[resolved_agent_id] = _live_agent_loop_limited_feedback_reports(agent_state, limit_value)
         else:
             for resolved_agent_id, agent_state in (state.get("agents") or {}).items():
                 if isinstance(agent_state, dict):
-                    reports[resolved_agent_id] = agent_state.get("feedbackReports") or []
-        return True, {"ok": True, "feedbackReports": reports}, 200
+                    reports[resolved_agent_id] = _live_agent_loop_limited_feedback_reports(agent_state, limit_value)
+        return True, {"ok": True, "feedbackReports": reports, **({"limit": limit_value} if limit_value is not None else {})}, 200
 
 
 def update_live_agent_loop_settings(payload):
@@ -3705,7 +4467,7 @@ def _transition_actor(source, actor):
     return "api"
 
 
-def transition_world_action(action_id, to_status, *, result=None, failure_reason=None, actor=None, source="api"):
+def _transition_world_action_unlocked(action_id, to_status, *, result=None, failure_reason=None, actor=None, source="api"):
     to_status = _canonical_world_action_status(to_status)
     failure_reason = _canonical_world_action_failure(failure_reason)
     if to_status not in WORLD_ACTION_STATUSES:
@@ -3802,7 +4564,12 @@ def transition_world_action(action_id, to_status, *, result=None, failure_reason
     return True, {"ok": True, "action": action, "worldActions": {"activeCount": len(saved.get("active", [])), "historyCount": len(saved.get("history", []))}}, 200
 
 
-def reconcile_world_action_reservations():
+def transition_world_action(action_id, to_status, *, result=None, failure_reason=None, actor=None, source="api"):
+    with _live_agent_action_handoff_lock:
+        return _transition_world_action_unlocked(action_id, to_status, result=result, failure_reason=failure_reason, actor=actor, source=source)
+
+
+def _reconcile_world_action_reservations_unlocked():
     store = get_world_actions_store(persist_migration=True)
     changed = False
     active = []
@@ -3811,10 +4578,22 @@ def reconcile_world_action_reservations():
     for action in store.get("active", []):
         target = action.get("target") if isinstance(action.get("target"), dict) else {}
         timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+        status = _canonical_world_action_status(action.get("status"))
+        behavior_source_kind = _behavior_source_kind_from_record(action)
         timeout_ms = timing.get("timeoutMs")
         created_epoch = _parse_isoish_epoch(timing.get("createdAt"))
         timed_out = isinstance(timeout_ms, (int, float)) and timeout_ms > 0 and created_epoch is not None and now_epoch >= created_epoch + timeout_ms / 1000
         missing_state = _target_deleted_or_missing(target, _find_world_action_target(target)) if target.get("kind") == "object-instance" else None
+        if (
+            missing_state in {"deleted", "missing"}
+            and behavior_source_kind == "agent-live-mode"
+            and status in WORLD_ACTION_ACTIVE_STATES
+        ):
+            # Live Mode routes are consumed by the browser runtime while buildings
+            # can be saving/reloading. Treat transient lookup misses as pending;
+            # the Live Mode stale-action reconciler expires genuinely stuck routes.
+            active.append(action)
+            continue
         if not timed_out and missing_state not in {"deleted", "missing"}:
             active.append(action)
             continue
@@ -3843,6 +4622,11 @@ def reconcile_world_action_reservations():
         return store
     ok, saved = save_world_actions_store({"active": active, "history": history})
     return saved if ok else store
+
+
+def reconcile_world_action_reservations():
+    with _live_agent_action_handoff_lock:
+        return _reconcile_world_action_reservations_unlocked()
 
 # ─── CHUNK STORAGE ────────────────────────────────────────────────
 def chunk_path(cx, cy):
@@ -4109,12 +4893,108 @@ def repair_starter_office_appliance_metadata(building):
     return building
 
 
+def _live_agent_home_owner_id(building):
+    if not isinstance(building, dict):
+        return ""
+    return str(building.get("liveModeHomeForAgentId") or building.get("ownerAgentId") or "").strip()
+
+
+def _live_agent_home_starter_furniture_item(building_id, item_type, index, x, z, *, rotation=0, room="sleep-zone", capability_tags=None):
+    object_id = f"{building_id}:furn:{item_type}:{index}:live-home-starter"
+    tags = list(capability_tags or [])
+    return {
+        "id": object_id,
+        "objectInstanceId": object_id,
+        "instanceId": object_id,
+        "type": item_type,
+        "catalogId": item_type,
+        "x": x,
+        "z": z,
+        "rotation": rotation,
+        "floor": 1,
+        "room": room,
+        "capabilityTags": tags,
+        "liveHomeStarterInterior": True,
+        "liveHomeInteriorVersion": LIVE_AGENT_HOME_INTERIOR_VERSION,
+        "lifecycle": {
+            "stationary": True,
+            "carryable": False,
+            "temporary": False,
+            "persistsUntilDeleted": True,
+        },
+    }
+
+
+def ensure_live_agent_home_starter_interior(building):
+    if not isinstance(building, dict):
+        return building, False
+    owner_id = _live_agent_home_owner_id(building)
+    if not owner_id or building.get("type") != "home":
+        return building, False
+    interior = building.get("interior") if isinstance(building.get("interior"), dict) else {}
+    changed = interior is not building.get("interior")
+    floors = interior.get("floors")
+    if not isinstance(floors, list) or not floors:
+        interior["floors"] = [{"level": 1, "name": "Floor 1"}]
+        changed = True
+    if not isinstance(interior.get("walls"), list):
+        interior["walls"] = []
+        changed = True
+    furniture = interior.get("furniture")
+    if not isinstance(furniture, list):
+        furniture = []
+        interior["furniture"] = furniture
+        changed = True
+
+    has_usable_bed = any(
+        isinstance(item, dict)
+        and item.get("type") in {"bed", "sleepPod", "sleep-pod"}
+        and item.get("deleted") is not True
+        and item.get("removed") is not True
+        for item in furniture
+    )
+    version = interior.get("liveModeHomeInteriorVersion")
+    if version != LIVE_AGENT_HOME_INTERIOR_VERSION:
+        interior["liveModeHomeInteriorVersion"] = LIVE_AGENT_HOME_INTERIOR_VERSION
+        interior["homeResidentAgentId"] = owner_id
+        interior["homeInteriorSource"] = "agent-live-mode"
+        changed = True
+
+    if not has_usable_bed:
+        building_id = building.get("id") or f"live-home-{re.sub(r'[^a-z0-9_-]+', '-', owner_id.lower()).strip('-') or 'agent'}"
+        width = max(8.0, float(building.get("widthTiles") or 10))
+        height = max(7.0, float(building.get("heightTiles") or 8))
+        base_index = len(furniture)
+        starter_items = [
+            _live_agent_home_starter_furniture_item(building_id, "bed", base_index, round(width * 0.50, 2), round(min(height - 2.3, 2.2), 2), capability_tags=["life.rest"]),
+            _live_agent_home_starter_furniture_item(building_id, "nightstand", base_index + 1, round(width * 0.68, 2), round(min(height - 2.3, 2.2), 2), capability_tags=["life.rest", "world.decorate"]),
+            _live_agent_home_starter_furniture_item(building_id, "armchair", base_index + 2, round(width * 0.33, 2), round(height * 0.66, 2), rotation=180, room="living-zone", capability_tags=["life.rest", "life.social"]),
+            _live_agent_home_starter_furniture_item(building_id, "sideTable", base_index + 3, round(width * 0.50, 2), round(height * 0.66, 2), rotation=180, room="living-zone", capability_tags=["life.rest", "world.decorate"]),
+            _live_agent_home_starter_furniture_item(building_id, "dresser", base_index + 4, round(width - 1.2, 2), round(height * 0.46, 2), rotation=270, room="sleep-zone", capability_tags=["appearance.customize", "life.rest"]),
+        ]
+        furniture.extend(starter_items)
+        building["homeState"] = {
+            **(building.get("homeState") if isinstance(building.get("homeState"), dict) else {}),
+            "starterInteriorVersion": LIVE_AGENT_HOME_INTERIOR_VERSION,
+            "residentAgentId": owner_id,
+            "hasUsableBed": True,
+        }
+        changed = True
+
+    building["interior"] = interior
+    return building, changed
+
+
 def load_building(building_id):
     path = building_path(building_id)
     try:
         with open(path, "r") as f:
             data = strip_building_transient_object_assignments(json.load(f))
-            return repair_starter_office_appliance_metadata(data)
+            data = repair_starter_office_appliance_metadata(data)
+            data, changed = ensure_live_agent_home_starter_interior(data)
+            if changed and isinstance(data, dict) and data.get("id"):
+                save_building(data["id"], data)
+            return data
     except (FileNotFoundError, json.JSONDecodeError):
         return None
 
@@ -4122,6 +5002,7 @@ def save_building(building_id, data):
     path = building_path(building_id)
     data = strip_building_transient_object_assignments(data)
     data = repair_starter_office_appliance_metadata(data)
+    data, _ = ensure_live_agent_home_starter_interior(data)
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -4138,6 +5019,10 @@ def list_buildings():
         try:
             with open(fname, "r") as f:
                 b = strip_building_transient_object_assignments(json.load(f))
+                b = repair_starter_office_appliance_metadata(b)
+                b, changed = ensure_live_agent_home_starter_interior(b)
+                if changed and isinstance(b, dict) and b.get("id"):
+                    save_building(b["id"], b)
                 buildings.append(b)
         except (json.JSONDecodeError, OSError):
             continue
@@ -6080,7 +6965,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             client_versions = {str(value).strip() for value in query.get("version", [])}
             if "main3d-live-sync" in client_markers:
                 note_live_agent_loop_world_client_activity(client_version=next(iter(client_versions), None))
-            return self._send_json(reconcile_world_action_reservations().get("active", []))
+            with _live_agent_action_handoff_lock:
+                active_actions = reconcile_world_action_reservations().get("active", [])
+            return self._send_json(active_actions)
 
         if path == "/api/world-actions/history":
             return self._send_json(reconcile_world_action_reservations().get("history", []))
@@ -6201,7 +7088,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/agent-live-loop/feedback":
             qs = urllib.parse.parse_qs(parsed.query)
             agent_id = (qs.get("agentId") or qs.get("agent") or [None])[0]
-            ok, result, status = get_live_agent_loop_feedback(agent_id)
+            limit = (qs.get("limit") or [None])[0]
+            ok, result, status = get_live_agent_loop_feedback(agent_id, limit=limit)
             return self._send_json(result, status)
 
         if path == "/api/agent-live-loop":
@@ -6849,7 +7737,7 @@ def main():
     initialize_live_presence()
 
     # Keep enabled Live Mode agents present across restarts; action creation stays
-            # gated by the active world client polling /api/world-actions/active.
+    # gated by the active 8587 world client polling /api/world-actions/active.
     start_live_agent_loop()
 
     handler = VWHandler

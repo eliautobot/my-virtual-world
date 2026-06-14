@@ -217,7 +217,9 @@ export function moveAgentWithController(id, dx, dz, groundY) {
 export function teleportAgent(id, x, y, z) {
   const body = bodyMap.get(id);
   if (!body) return;
-  body.setNextKinematicTranslation({ x, y: y + 0.7, z });
+  const position = { x, y: y + 0.7, z };
+  if (typeof body.setTranslation === 'function') body.setTranslation(position, true);
+  body.setNextKinematicTranslation(position);
 }
 
 /**

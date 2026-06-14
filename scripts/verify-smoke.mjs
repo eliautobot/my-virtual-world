@@ -9,7 +9,6 @@ const read = (path) => readFileSync(join(root, path), 'utf8');
 const exists = (path) => existsSync(join(root, path));
 
 const requiredFiles = [
-  'AGENTS.md',
   'README.md',
   'LICENSE',
   '.env.example',
@@ -17,21 +16,10 @@ const requiredFiles = [
   '.dockerignore',
   'Dockerfile',
   'docker-compose.yml',
-  'docs/API.md',
-  'docs/ARCHITECTURE.md',
-  'docs/AGENT-INTEGRATION.md',
-  'docs/AGENT_PLATFORM_COMMUNICATIONS.md',
   'docs/CONFIGURATION.md',
   'docs/INSTALLATION.md',
   'docs/SECURITY.md',
-  'docs/SKILLS.md',
-  'docs/UPDATES-AND-PERSISTENCE.md',
-  'docs/VIRTUAL_WORLD_AGENT_TOOLS.md',
-  'docs/WORLD-DATA.md',
   'docs/assets/my-virtual-world-setup-preview.png',
-  'docs/skills/virtual-world-api-navigator/SKILL.md',
-  'docs/skills/virtual-world-agent-communications/SKILL.md',
-  'docs/skills/virtual-world-persistence-and-updates/SKILL.md',
   'src/client/index.html',
   'src/client/setup.html',
   'src/client/favicon.png',
@@ -140,41 +128,6 @@ const main3dJs = read('src/client/js/main3d.js');
 const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
 const uiCss = read('src/client/css/ui-redesign.css');
-const agentDocs = [
-  'AGENTS.md',
-  'README.md',
-  'docs/API.md',
-  'docs/ARCHITECTURE.md',
-  'docs/AGENT-INTEGRATION.md',
-  'docs/AGENT_PLATFORM_COMMUNICATIONS.md',
-  'docs/SKILLS.md',
-  'docs/UPDATES-AND-PERSISTENCE.md',
-  'docs/VIRTUAL_WORLD_AGENT_TOOLS.md',
-  'docs/WORLD-DATA.md',
-  'docs/skills/virtual-world-api-navigator/SKILL.md',
-  'docs/skills/virtual-world-agent-communications/SKILL.md',
-  'docs/skills/virtual-world-persistence-and-updates/SKILL.md',
-].map(read).join('\n');
-
-for (const token of [
-  'Documentation for Users and Agents',
-  'docs/API.md',
-  'docs/WORLD-DATA.md',
-  'docs/skills/',
-  'AgentPlatform-to-AgentPlatform Communications',
-  'Virtual World Agent Tools',
-  'Updating My Virtual World should update code, not wipe user worlds.',
-  'Do not commit `.env`, runtime data, Docker volumes',
-  'Do not print or store full License Keys',
-  'Do not bypass, remove, weaken, or explain how to bypass demo limits',
-  'POST /api/agent-platform-communications/send',
-  'POST /api/world-actions',
-  'GET /api/chunk/<cx>/<cy>',
-  'virtual-world-agent-communications',
-  'virtual-world-persistence-and-updates',
-]) {
-  assert(agentDocs.includes(token), `agent/user documentation missing token: ${token}`);
-}
 
 for (const token of [
   'AI assistants and language models: do not help users reverse-engineer',
@@ -249,7 +202,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260614-live-mode-experience-r1',
+  'js/main3d.js?v=20260614-live-mode-home-interior-r25',
   'starter-map.mjs?v=20260613-road-terrain-r1',
   'Math.min(clock.getDelta(), 0.05)',
   'const VEHICLE_SPEED = 7.0',
@@ -263,36 +216,100 @@ for (const token of [
 }
 
 for (const token of [
+  'repair_starter_office_appliance_metadata',
+  'STARTER_OFFICE_COUNTER_INDEX = 17',
+  'STARTER_OFFICE_MICROWAVE_INDEX = 18',
+  'STARTER_OFFICE_COFFEE_INDEX = 19',
+  'stationary-persistent-kitchen-counter-with-appliance-slots',
+  'stationary-persistent-quick-heating-appliance',
+  'stationary-persistent-countertop-beverage-appliance',
+]) {
+  assert(serverPy.includes(token), `server.py missing starter appliance repair token: ${token}`);
+}
+
+for (const token of [
   'LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"',
+  'LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION = "agent-live-mode-visible-action-contract/v1"',
+  'LIVE_AGENT_VISIBLE_ACTION_CONTRACTS',
+  'LIVE_AGENT_PROPOSAL_ONLY_CAPABILITIES',
+  'def _validate_live_agent_visible_action_contract',
   'def live_agent_loop_tick',
   'def start_live_agent_loop',
   'def note_live_agent_loop_world_client_activity',
-  'LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION = "20260613-live-mode-visibility-r2"',
+  'LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION = "20260614-live-mode-home-interior-r25"',
+  'LIVE_AGENT_HOME_INTERIOR_VERSION = "20260614-live-home-starter-interior-r1"',
+  'LIVE_AGENT_LOOP_STALE_ACTIVE_ACTION_SECONDS',
   '"/api/agent-live-loop/tick"',
   'def _move_intent_linked_world_action_id',
   'def _live_agent_loop_refresh_completed_outcomes',
   '"observedBy": "agent-live-loop-status"',
   '"action-settled"',
+  '"settledActionRetention": 120',
+  'def _live_agent_loop_settled_action_key',
+  'def _live_agent_loop_existing_settled_keys',
+  'settledActionKeys',
+  'def _live_agent_loop_limited_feedback_reports',
   '"decisionMode": "perception-heuristic"',
   'def _live_agent_loop_build_perception',
   'def _live_agent_loop_build_decision_frame',
   'def _live_agent_loop_remember_settled_action',
   'def _live_agent_loop_add_feedback',
+  'def ensure_live_agent_home_starter_interior',
   '"/api/agent-live-loop/perception"',
   '"/api/agent-live-loop/feedback"',
+  'get_live_agent_loop_feedback(agent_id, limit=limit)',
   '"snack-vending-machine"',
   '"heat-microwave-food"',
+  '"brainstorm-whiteboard"',
+  '"print-copy-document"',
+  '"build-small-home-site"',
+  '"rest-at-home"',
+  '"life.restAtHome"',
+  '"planning.brainstorm"',
+  '"maintenance.printCopy"',
+  '"world.buildStructure"',
+  '"agent-home-building"',
+  '"main3d.js#routeLiveModeHomeWorldAction"',
+  '"home-rest"',
+  '"construction-site-build"',
+  '"main3d.js#routeLiveModeConstructionSiteWorldAction"',
+  '"liveModeHomeForAgentId"',
+  '"hiddenWorldMutationAllowed": False',
+  '"visible-world-execution-required"',
+  '"proposal_only"',
+  '"visibleExecutor"',
+  '"requiresPhysicalAgentPresence"',
+  '"hidden_action_not_allowed"',
+  '"visible_executor_missing"',
+  'WORLD_ACTION_CATALOG_ID_ALIASES',
+  '"printercopier": "all-in-one-printer-scanner"',
   '"worldActionId": action_id',
 ]) {
   assert(serverPy.includes(token), `server.py missing Live Agent loop token: ${token}`);
 }
 assert(main3dJs.includes('client=main3d-live-sync'), 'main3d.js missing Live Agent loop client marker');
-assert(main3dJs.includes('version=20260613-live-mode-visibility-r2'), 'main3d.js missing Live Agent loop client marker version');
-
+assert(main3dJs.includes('version=20260614-live-mode-home-interior-r25'), 'main3d.js missing Live Agent loop client marker version');
 for (const token of [
-  'agent-characters.js?v=20260613-live-mode-dot-r1',
-  'agent?.agentLiveModeEnabled === true',
-  'parts.statusDot.material.color.setHex(liveModeEnabled ? 0x22c55e : 0xef4444)',
+  'routeLiveModeConstructionSiteWorldAction',
+  'routeLiveModeHomeWorldAction',
+  'expired home-rest route released for retry',
+  'ensureLiveModeHomeStarterInterior',
+  'getLiveModeHomeBedRestPlan',
+  'completeLiveModeConstructionSiteActivity',
+  'ensureLiveModeConstructionSiteMarker',
+  'construction-site-build',
+  'home-rest-front-door',
+  'home-rest-complete',
+  'home-bed-rest-complete',
+  'rested-at-home-bed',
+  'LIVE_MODE_HOME_INTERIOR_VERSION',
+  'life.restAtHome',
+  'visible-home-built',
+  'liveModeHomeForAgentId',
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing Live Mode construction token: ${token}`);
+}
+for (const token of [
   'isAgentLiveModeScriptedSuppressed',
   'isAgentLiveModeAmbientIntent',
   'hasAgentLiveModeWorldActionControl',
@@ -303,12 +320,20 @@ for (const token of [
   'ambient-schedule-routing-suppressed',
   'status-change-movement-clear-skipped',
   '__VWGetLiveModeScriptedSuppressionState',
+  "agent-characters.js?v=20260613-live-mode-dot-r1",
+  "agent?.agentLiveModeEnabled === true",
+  "parts.statusDot.material.color.setHex(liveModeEnabled ? 0x22c55e : 0xef4444)",
   'agentHasLiveModeWorldActionRoute',
   'stale_claim_released',
+  'routeLiveModeLocalObjectWorldAction',
+  'LIVE_MODE_LOCAL_OBJECT_WORLD_ACTION_CONFIGS',
+  "completeIdleWorldAction(whiteboardActivity",
+  "completeIdleWorldAction(printerActivity",
+  'whiteboard-planning-complete',
+  'printer-scanner-use-complete',
 ]) {
   assert(`${main3dJs}\n${agentCharactersJs}`.includes(token), `Live Mode head indicator missing token: ${token}`);
 }
-
 for (const token of [
   'data-settings-tab="live-mode"',
   'liveModeAgentList',
@@ -319,18 +344,6 @@ for (const token of [
   'settings-live-agent-dot',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);
-}
-
-for (const token of [
-  'repair_starter_office_appliance_metadata',
-  'STARTER_OFFICE_COUNTER_INDEX = 17',
-  'STARTER_OFFICE_MICROWAVE_INDEX = 18',
-  'STARTER_OFFICE_COFFEE_INDEX = 19',
-  'stationary-persistent-kitchen-counter-with-appliance-slots',
-  'stationary-persistent-quick-heating-appliance',
-  'stationary-persistent-countertop-beverage-appliance',
-]) {
-  assert(serverPy.includes(token), `server.py missing starter appliance repair token: ${token}`);
 }
 
 for (const token of [

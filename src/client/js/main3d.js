@@ -26,7 +26,7 @@ import {
   getPhysicsDebugInfo,
   getPhysicsWorld,
   RAPIER,
-} from './physics.js?v=20260427-floor-collider-y';
+} from './physics.js?v=20260614-live-mode-construction-r12';
 import {
   OBSTACLE_AVOIDANCE,
   adjustMoveForObstacles,
@@ -2842,6 +2842,7 @@ const RECOGNIZED_IDLE_ACTIVITY_PREFIXES = Object.freeze([
   'bookshelf-', 'pantry-shelf-', 'curtains-', 'whiteboard-', 'bulletin-board-', 'outdoor-notice-board-', 'park-lamp-', 'wall-art-', 'menu-board-', 'dresser-', 'wardrobe-', 'nightstand-', 'side-table-', 'tv-stand-', 'mirror-', 'clothing-rack-', 'accessory-display-stand-', 'display-mannequin-', 'display-case-', 'salon-mirror-station-',
   'reception-desk-', 'cafe-counter-', 'kitchen-island-', 'small-cafe-table-', 'outdoor-cafe-table-', 'picnic-table-', 'patio-table-', 'small-round-meeting-table-', 'checkout-counter-', 'checkout-register-', 'trash-bin-', 'grill-', 'outdoor-planter-', 'flower-bed-', 'fountain-', 'gazebo-pavilion-', 'food-truck-counter-', 'water-cooler-', 'water-desk-', 'coffee-machine-', 'coffee-desk-', 'vending-machine-', 'vending-desk-', 'fridge-', 'microwave-', 'coffee-pickup-shelf-', 'arcade-machine-', 'gaming-station-',
   'printer-scanner-', 'laptop-monitor-', 'tool-cart-', 'workbench-', 'storage-boxes-', 'server-rack-', 'diagnostic-station-', 'medical-supply-cabinet-', 'supply-cabinet-', 'standing-desk-', 'drafting-table-', 'teaching-podium-', 'treadmill-', 'training-mat-', 'dumbbell-rack-', 'gym-bench-', 'outdoor-exercise-station-', 'playground-slide-', 'playground-swing-', 'pond-dock-', 'outdoor-stage-', 'pingpong-', 'pool-table-', 'meeting-table', 'service-queue-',
+  'construction-site-', 'home-rest-',
 ]);
 const LOCAL_IDLE_FURNITURE_ACTIVITY_CONFIG = Object.freeze({
   chair: Object.freeze({ kind: 'chair-sit', spotId: 'seat', animationId: 'sit', dockSnapRadius: 6, stayMs: [9000, 15000] }),
@@ -8045,6 +8046,7 @@ function setAgentTargetForExplicitObjectAction(agent, target, building = null, f
       preserveUntilRelease: true,
     },
     release: { policy: priorityName === 'manual' ? 'manual-only' : 'on-object-complete', releaseObjectReservation: true, releaseActiveUse: true, ...(metadata.release || {}) },
+    expires: metadata.expires || target?.expires || null,
     source: {
       family: metadata.sourceFamily || 'context-menu',
       functionName: metadata.sourceFunction || 'setAgentTargetForExplicitObjectAction',
@@ -18287,6 +18289,28 @@ function updateAgentAnimations(dt) {
     } else if (agent._idleActivity?.phase === 'approach') {
       // Object-use activities are still routing to their dock target. Do not let
       // the daily schedule completion chain clear them before movement resolves arrival.
+    } else if (String(agent._idleActivity?.kind || '').startsWith('construction-site-')) {
+      const constructionActivity = agent._idleActivity;
+      completeLiveModeConstructionSiteActivity(agent, constructionActivity);
+      releaseAgentIntent(agent, 'object-complete', { releaseBy: 'object-complete', clearRoute: false, releaseSummary: 'construction site stay complete released live mode intent' });
+      clearLiveModeWorldActionRouteClaim(constructionActivity.worldActionId);
+      agent._idleActivity = null;
+      agent._schedPhase = 'construction-site-complete';
+      agent._stayTimer = 900;
+      agent._wanderTimer = 1800 + Math.random() * 2600;
+    } else if (String(agent._idleActivity?.kind || '').startsWith('home-rest-')) {
+      const homeActivity = agent._idleActivity;
+      completeIdleWorldAction(homeActivity, {
+        objectEffect: 'home-rest-complete',
+        completionState: 'rested-at-home',
+        buildingId: homeActivity.homeBuildingId || homeActivity.buildingId || null,
+      });
+      releaseAgentIntent(agent, 'object-complete', { releaseBy: 'object-complete', clearRoute: false, releaseSummary: 'home rest complete released live mode intent' });
+      clearLiveModeWorldActionRouteClaim(homeActivity.worldActionId);
+      agent._idleActivity = null;
+      agent._schedPhase = 'home-rest-complete';
+      agent._stayTimer = 900;
+      agent._wanderTimer = 2200 + Math.random() * 3200;
     } else if (String(agent._idleActivity?.kind || '').startsWith('couch-')) {
       const couchActivity = agent._idleActivity;
       const couchBuilding = buildingsMap.get(couchActivity?.buildingId);
@@ -18564,6 +18588,7 @@ function updateAgentAnimations(dt) {
         const releaseResult = releaseReadInspectStandingUse(board, whiteboardActivity, agent, 'stay-complete');
         board.activeUse = { ...(board.activeUse || {}), state: 'complete', mode: 'planning-ready', lastAgentId: agent.id || null, lastAction: whiteboardActivity.action || whiteboardActivity.kind };
         board.boardSession = { ...(board.boardSession || {}), active: false, mode: 'ready', lastAction: board.activeUse.lastAction, persistentFurniture: true, completionReleased: releaseResult?.release?.ok !== false, releasedSlotId: releaseResult?.slotId || whiteboardActivity.activeUseSlotId || whiteboardActivity.spotId || null };
+        completeIdleWorldAction(whiteboardActivity, { objectEffect: 'whiteboard-planning-complete', completionState: 'whiteboard-ready' });
       }
       agent._idleActivity = null;
       agent._schedPhase = 'whiteboard-complete';
@@ -19439,12 +19464,14 @@ function updateAgentAnimations(dt) {
         printer.activeUse = { ...(printer.activeUse || {}), state: 'complete', mode: printerActivity.mode || 'print', actionId: printerActivity.action || 'maintenance.printCopy', completedAt: new Date().toISOString(), completionReleased: releaseResult?.release?.ok !== false };
         printer.printerScannerMode = 'ready';
         printer.printerScannerState = { ...(printer.printerScannerState || {}), status: 'ready', lastAction: printer.activeUse.actionId, releasedSlotId: releaseResult?.slotId || printerActivity.activeUseSlotId || printerActivity.spotId || null, persistentFurniture: true };
+        completeIdleWorldAction(printerActivity, { objectEffect: 'printer-scanner-use-complete', completionState: 'printer-ready' });
       }
       agent._idleActivity = null;
       agent._schedPhase = 'printer-scanner-complete';
       agent._wanderTimer = 1600 + Math.random() * 2400;
     } else if (String(agent._idleActivity?.kind || '').startsWith('bed-')) {
       const bedActivity = agent._idleActivity;
+      const isLiveModeHomeRest = bedActivity?.homeRestActivity === true || bedActivity?.actionId === 'life.restAtHome' || bedActivity?.action === 'life.restAtHome';
       if (bedActivity?.standTarget) {
         agent.x = bedActivity.standTarget.x;
         agent.y = bedActivity.standTarget.y;
@@ -19459,9 +19486,15 @@ function updateAgentAnimations(dt) {
         bed.sleepState = { ...(bed.sleepState || {}), status: 'available', lastAction: bed.activeUse.lastAction, lifecycle: 'rest-sleep-complete', persistentFurniture: true };
         persistBuilding(bedBuilding);
       }
-      completeIdleWorldAction(bedActivity, { objectEffect: 'sleep-rest-lifecycle', completionState: 'woke-up' });
+      completeIdleWorldAction(bedActivity, isLiveModeHomeRest
+        ? { objectEffect: 'home-bed-rest-complete', completionState: 'rested-at-home-bed', buildingId: bedActivity.homeBuildingId || bedActivity.buildingId || null }
+        : { objectEffect: 'sleep-rest-lifecycle', completionState: 'woke-up' });
+      if (isLiveModeHomeRest || bedActivity?.worldActionId) {
+        releaseAgentIntent(agent, 'object-complete', { releaseBy: 'object-complete', clearRoute: false, releaseSummary: 'bed rest complete released live mode intent' });
+        clearLiveModeWorldActionRouteClaim(bedActivity.worldActionId);
+      }
       agent._idleActivity = null;
-      agent._schedPhase = 'wake-stand';
+      agent._schedPhase = isLiveModeHomeRest ? 'home-bed-rest-complete' : 'wake-stand';
       agent._stayTimer = 900;
       agent._wanderTimer = 2500 + Math.random() * 2500;
     } else if (agent._wanderTimer <= 0) {
@@ -19647,6 +19680,22 @@ function updateAgentAnimations(dt) {
       let effectiveTarget = agent._wanderTarget;
       const keepAvoiding = !!(agent._avoid && agent._avoid.mode && agent._avoid.mode !== 'seek');
       const directInteriorTarget = agent._wanderTarget;
+      const directTargetIsLiveModeConstructionSite = !!(
+        directInteriorTarget &&
+        (directInteriorTarget.constructionSiteId || directInteriorTarget.constructionBuildingId || directInteriorTarget.buildSite?.siteKind === 'agent-home')
+      );
+      const constructionHandoffRouteKey = directTargetIsLiveModeConstructionSite
+        ? (directInteriorTarget.worldActionId || agent._idleActivity?.worldActionId || directInteriorTarget.constructionSiteId || directInteriorTarget.constructionBuildingId || null)
+        : null;
+      if (directTargetIsLiveModeConstructionSite && agent._liveModeConstructionExteriorHandoffRouteKey !== constructionHandoffRouteKey) {
+        const constructionDoorBuildingId = agent._doorTransition?.buildingId || agent._agentIntent?.debug?.routeHandoff?.doorTransition?.buildingId || null;
+        const constructionHandoff = handoffLiveModeConstructionAgentToExterior(agent, constructionDoorBuildingId, directInteriorTarget);
+        if (constructionHandoff) {
+          agent._liveModeConstructionExteriorHandoffRouteKey = constructionHandoffRouteKey;
+          agent._lastLiveModeConstructionExteriorHandoff = { ...constructionHandoff, routeKey: constructionHandoffRouteKey, atMs: Date.now() };
+          if (agent._agentIntent?.debug) agent._agentIntent.debug.exteriorHandoff = agent._lastLiveModeConstructionExteriorHandoff;
+        }
+      }
       const physicalInteriorBuilding = getMovementInteriorBuildingAt(agent.x, agent.y) || null;
       const hintedTargetBuilding = agent._targetBuilding || null;
       const agentInteriorBuilding = physicalInteriorBuilding;
@@ -19661,6 +19710,7 @@ function updateAgentAnimations(dt) {
           ['placed-object', 'interior-object', 'interior-action-spot', 'agent-desk', 'desk', 'elevator-pad', 'elevator-queue'].includes(directTargetKind)
         )
       );
+      const directTargetAllowsDoorTransition = directInteriorTarget?.allowDoorTransition === true || directInteriorTarget?.allowBuildingDoorTransition === true;
       const directInteriorTargetBuilding = directInteriorTarget
         ? ((directTargetHasObjectIntent ? getMovementInteriorBuildingAt(directInteriorTarget.x, directInteriorTarget.y) : null) ||
           (hintedTargetBuilding && directTargetHasObjectIntent && isPointInsideBuildingInterior(hintedTargetBuilding, directInteriorTarget.x, directInteriorTarget.y, -0.15) ? hintedTargetBuilding : null))
@@ -19909,7 +19959,13 @@ function updateAgentAnimations(dt) {
             });
           }
           }
-        } else if (directTargetHasObjectIntent && directInteriorTargetBuilding && directInteriorTargetBuilding.type !== 'park' && !agentIsInsideInterior) {
+        } else if (
+          directTargetHasObjectIntent &&
+          directInteriorTargetBuilding &&
+          directInteriorTargetBuilding.type !== 'park' &&
+          (directInteriorTarget?.disableDynamicExteriorRouting !== true || directTargetAllowsDoorTransition) &&
+          !agentIsInsideInterior
+        ) {
           const points = getBuildingDoorTransitionPointsAPI(directInteriorTargetBuilding);
           if (points) {
             routingTarget = points.outside;
@@ -19945,6 +20001,7 @@ function updateAgentAnimations(dt) {
       const useDynamicExteriorRouting = !!(
         DYNAMIC_EXTERIOR_ROUTING.enabled &&
         routingTarget &&
+        directInteriorTarget?.disableDynamicExteriorRouting !== true &&
         !useDynamicInteriorRouting &&
         !forcedDoorRunTarget &&
         (!agentIsInsideInterior || !targetIsInsideSameInterior)
@@ -28909,6 +28966,24 @@ async function fetchActiveLinkedWorldAction(worldActionId) {
   return actions.find(action => action?.id === worldActionId) || null;
 }
 
+function waitForLinkedWorldActionBridge(ms = 120) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+async function waitForPersistedLinkedWorldActionStatus(worldActionId, expectedStatus, previousStatus = null) {
+  let latestAction = null;
+  let latestStatus = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (attempt > 0) await waitForLinkedWorldActionBridge(90 + attempt * 90);
+    latestAction = await fetchActiveLinkedWorldAction(worldActionId);
+    latestStatus = latestAction ? String(latestAction.status || '').toLowerCase() : null;
+    if (latestStatus === expectedStatus) {
+      return { ok: true, action: latestAction, status: latestStatus, attempts: attempt + 1 };
+    }
+  }
+  return { ok: false, action: latestAction, status: latestStatus, expectedStatus, previousStatus };
+}
+
 async function postLinkedWorldActionTransition(context = {}, toStatus = 'routing', result = {}) {
   const response = await fetch(`/api/world-actions/${encodeURIComponent(context.worldActionId)}/transition`, {
     method: 'POST',
@@ -28935,8 +29010,24 @@ async function advanceLinkedWorldActionForCompletion(context = {}, result = {}) 
     if (!nextStatus) return { ok: false, reason: 'cannot_bridge_from_status', currentStatus, steps };
     const transition = await postLinkedWorldActionTransition(context, nextStatus, result);
     steps.push({ from: currentStatus, to: nextStatus, transition });
-    if (!transition.ok) return { ok: false, reason: 'bridge_transition_failed', currentStatus, nextStatus, steps, transition };
-    currentStatus = String(transition.data?.action?.status || nextStatus).toLowerCase();
+    if (!transition.ok) {
+      const persisted = await waitForPersistedLinkedWorldActionStatus(context.worldActionId, nextStatus, currentStatus);
+      if (!persisted.ok) return { ok: false, reason: 'bridge_transition_failed', currentStatus, nextStatus, steps, transition, persisted };
+      steps.push({ from: currentStatus, to: nextStatus, persisted });
+      currentStatus = persisted.status;
+      guard++;
+      continue;
+    }
+    let persisted = await waitForPersistedLinkedWorldActionStatus(context.worldActionId, nextStatus, currentStatus);
+    if (!persisted.ok && persisted.status === currentStatus) {
+      const retry = await postLinkedWorldActionTransition(context, nextStatus, { ...result, reason: result.reason || `retry-${nextStatus}` });
+      steps.push({ from: currentStatus, to: nextStatus, retry: true, transition: retry });
+      if (!retry.ok) return { ok: false, reason: 'bridge_retry_failed', currentStatus, nextStatus, steps, transition: retry, persisted };
+      persisted = await waitForPersistedLinkedWorldActionStatus(context.worldActionId, nextStatus, currentStatus);
+    }
+    if (!persisted.ok) return { ok: false, reason: 'bridge_persist_not_observed', currentStatus, nextStatus, steps, transition, persisted };
+    steps.push({ from: currentStatus, to: nextStatus, persisted });
+    currentStatus = persisted.status;
     guard++;
   }
   return { ok: currentStatus === 'in_progress', finalStatus: currentStatus, steps };
@@ -30732,7 +30823,7 @@ function assignAgentToMvpFurniture(buildingId, furnitureIndex, preferredAgent = 
     stayMs: 12000,
     faceAngle: approach.faceAngle,
     dockTarget: { x: approach.apiX, y: approach.apiZ },
-    dockSnapRadius: 8,
+    dockSnapRadius: 18,
     furnitureType: furniture.type,
     spotId: approach.spotId,
     worldActionId: assignment.payload.id,
@@ -32233,6 +32324,7 @@ function invokeLinkedCapabilityUi(buildingId, furnitureIndex, action, routeConte
 let _barberChairWorldActionSyncTimer = null;
 const LIVE_MODE_WORLD_ACTION_ROUTE_CLAIM_TTL_MS = 120000;
 const liveModeWorldActionRouteClaims = new Map();
+const liveModeConstructionSiteMarkers = new Map();
 
 function isLiveModeWorldActionRouteClaimed(actionId) {
   if (!actionId) return false;
@@ -32312,6 +32404,1033 @@ function makeLiveModeStandingMachineSpawnedItem(machineType) {
   const isWater = isWaterCoolerFurnitureType(machineType);
   const isCoffee = machineType === 'countertopCoffeeMachine';
   return { label: isWater ? 'Water Cup' : (isCoffee ? 'Coffee Drink' : 'Temporary Snack / Drink'), catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', visualKind: isWater ? 'water' : (isCoffee ? 'coffee' : null), drinkKind: isWater ? 'water' : (isCoffee ? 'coffee' : null), validDropOff: ['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter'] };
+}
+
+const LIVE_MODE_LOCAL_OBJECT_WORLD_ACTION_CONFIGS = Object.freeze({
+  whiteboard: Object.freeze({
+    routeKind: 'read-inspect',
+    actionId: 'planning.brainstorm',
+    capabilityTag: 'planning.brainstorm',
+    spotId: 'presenter',
+    kind: 'whiteboard-planning',
+    mode: 'planning',
+    animationId: 'write-teach',
+    label: 'whiteboard',
+  }),
+});
+const LIVE_MODE_HOME_INTERIOR_VERSION = '20260614-live-home-starter-interior-r1';
+
+function getLiveModeLocalObjectWorldActionConfig(furnitureType, actionType = null) {
+  const config = LIVE_MODE_LOCAL_OBJECT_WORLD_ACTION_CONFIGS[furnitureType] || null;
+  if (!config) return null;
+  if (actionType && actionType !== config.actionId) return null;
+  return config;
+}
+
+function liveModeAgentToken(agentId) {
+  return String(agentId || 'agent').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'agent';
+}
+
+function round2(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function makeLiveModeHomeStarterFurnitureItem(buildingId, type, index, x, z, {
+  rotation = 0,
+  room = 'sleep-zone',
+  capabilityTags = [],
+} = {}) {
+  const objectId = `${buildingId}:furn:${type}:${index}:live-home-starter`;
+  return {
+    id: objectId,
+    objectInstanceId: objectId,
+    instanceId: objectId,
+    type,
+    catalogId: type,
+    x,
+    z,
+    rotation,
+    floor: 1,
+    room,
+    capabilityTags: [...capabilityTags],
+    liveHomeStarterInterior: true,
+    liveHomeInteriorVersion: LIVE_MODE_HOME_INTERIOR_VERSION,
+    lifecycle: {
+      stationary: true,
+      carryable: false,
+      temporary: false,
+      persistsUntilDeleted: true,
+    },
+  };
+}
+
+function liveModeHomeStarterFurniture(building) {
+  const buildingId = building?.id || 'live-home-agent';
+  const width = Math.max(8, Number(building?.widthTiles || 10) || 10);
+  const height = Math.max(7, Number(building?.heightTiles || 8) || 8);
+  return [
+    makeLiveModeHomeStarterFurnitureItem(buildingId, 'bed', 0, round2(width * 0.50), round2(Math.min(height - 2.3, 2.2)), { capabilityTags: ['life.rest'] }),
+    makeLiveModeHomeStarterFurnitureItem(buildingId, 'nightstand', 1, round2(width * 0.68), round2(Math.min(height - 2.3, 2.2)), { capabilityTags: ['life.rest', 'world.decorate'] }),
+    makeLiveModeHomeStarterFurnitureItem(buildingId, 'armchair', 2, round2(width * 0.33), round2(height * 0.66), { rotation: 180, room: 'living-zone', capabilityTags: ['life.rest', 'life.social'] }),
+    makeLiveModeHomeStarterFurnitureItem(buildingId, 'sideTable', 3, round2(width * 0.50), round2(height * 0.66), { rotation: 180, room: 'living-zone', capabilityTags: ['life.rest', 'world.decorate'] }),
+    makeLiveModeHomeStarterFurnitureItem(buildingId, 'dresser', 4, round2(width - 1.2), round2(height * 0.46), { rotation: 270, capabilityTags: ['appearance.customize', 'life.rest'] }),
+  ];
+}
+
+function ensureLiveModeHomeStarterInterior(building, { persist = false, rebuild = false } = {}) {
+  if (!building || building.type !== 'home' || !(building.liveModeHomeForAgentId || building.ownerAgentId)) return false;
+  if (!building.interior || typeof building.interior !== 'object') building.interior = {};
+  let changed = false;
+  if (!Array.isArray(building.interior.floors) || building.interior.floors.length === 0) {
+    building.interior.floors = [{ level: 1, name: 'Floor 1' }];
+    changed = true;
+  }
+  if (!Array.isArray(building.interior.walls)) {
+    building.interior.walls = [];
+    changed = true;
+  }
+  if (!Array.isArray(building.interior.furniture)) {
+    building.interior.furniture = [];
+    changed = true;
+  }
+  const hasUsableBed = building.interior.furniture.some(item => item && ['bed', 'sleepPod', 'sleep-pod'].includes(item.type) && item.deleted !== true && item.removed !== true);
+  if (building.interior.liveModeHomeInteriorVersion !== LIVE_MODE_HOME_INTERIOR_VERSION) {
+    building.interior.liveModeHomeInteriorVersion = LIVE_MODE_HOME_INTERIOR_VERSION;
+    building.interior.homeResidentAgentId = building.liveModeHomeForAgentId || building.ownerAgentId || null;
+    building.interior.homeInteriorSource = 'agent-live-mode';
+    changed = true;
+  }
+  if (!hasUsableBed) {
+    building.interior.furniture.push(...liveModeHomeStarterFurniture(building));
+    building.homeState = {
+      ...(building.homeState || {}),
+      starterInteriorVersion: LIVE_MODE_HOME_INTERIOR_VERSION,
+      residentAgentId: building.liveModeHomeForAgentId || building.ownerAgentId || null,
+      hasUsableBed: true,
+    };
+    changed = true;
+  }
+  if (changed) {
+    ensureBuildingPlacedObjectActionTargets(building);
+    if (rebuild) createBuilding3D(building);
+    if (persist) {
+      fetch('/api/buildings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(_buildingPayload(building)),
+      }).catch(() => {});
+    }
+  }
+  return changed;
+}
+
+function findLiveModeHomeForAgent(agentId) {
+  const wanted = String(agentId || '').trim();
+  if (!wanted) return null;
+  for (const building of buildingsMap.values()) {
+    if (!building) continue;
+    if (String(building.liveModeHomeForAgentId || '').trim() === wanted) return building;
+  }
+  return null;
+}
+
+function normalizeLiveModeBuildSite(action = {}) {
+  const params = action.params || {};
+  const target = action.target || action.route?.target || {};
+  const rawSite = params.buildSite || target.buildSite || action.buildSite || {};
+  const agentId = String(action.agentId || rawSite.liveModeHomeForAgentId || rawSite.ownerAgentId || 'agent').trim() || 'agent';
+  const token = liveModeAgentToken(agentId);
+  const widthTiles = Math.max(4, Number(rawSite.widthTiles || 10) || 10);
+  const heightTiles = Math.max(4, Number(rawSite.heightTiles || 8) || 8);
+  const targetX = Number(target.x);
+  const targetY = Number(target.y ?? target.z);
+  const rawWorldX = Number(rawSite.worldX);
+  const rawWorldY = Number(rawSite.worldY);
+  const worldX = Number.isFinite(rawWorldX)
+    ? rawWorldX
+    : (Number.isFinite(targetX) ? Math.round((targetX / API_TILE) - widthTiles / 2) : -14);
+  const worldY = Number.isFinite(rawWorldY)
+    ? rawWorldY
+    : (Number.isFinite(targetY) ? Math.round((targetY / API_TILE) - heightTiles - 2) : 34);
+  const approachX = Number.isFinite(targetX) ? targetX : (worldX + widthTiles / 2) * API_TILE;
+  const approachY = Number.isFinite(targetY) ? targetY : (worldY + heightTiles + 2) * API_TILE;
+  return {
+    schemaVersion: rawSite.schemaVersion || 'agent-live-mode-build-site/v1',
+    siteKind: rawSite.siteKind || target.siteKind || 'agent-home',
+    buildingId: rawSite.buildingId || `live-home-${token}`,
+    buildingName: rawSite.buildingName || `${agentId}'s Home`,
+    type: rawSite.type || 'home',
+    worldX,
+    worldY,
+    widthTiles,
+    heightTiles,
+    approachX,
+    approachY,
+    ownerAgentId: rawSite.ownerAgentId || agentId,
+    liveModeHomeForAgentId: rawSite.liveModeHomeForAgentId || agentId,
+    exterior: {
+      wallColor: rawSite.exterior?.wallColor || '#c8b89a',
+      roofColor: rawSite.exterior?.roofColor || '#795548',
+    },
+  };
+}
+
+function ensureLiveModeConstructionSiteMarker(site = {}, action = {}, agent = null) {
+  const worldActionId = action.id || action.worldActionId || site.worldActionId || site.buildingId;
+  if (!worldActionId) return null;
+  const existing = liveModeConstructionSiteMarkers.get(worldActionId);
+  if (existing) return existing;
+  const width = Math.max(1, Number(site.widthTiles || 10)) * T;
+  const depth = Math.max(1, Number(site.heightTiles || 8)) * T;
+  const group = new THREE.Group();
+  group.name = `live-mode-construction-site-${worldActionId}`;
+  group.userData = {
+    liveModeConstructionSite: true,
+    worldActionId,
+    buildingId: site.buildingId || null,
+    agentId: agent?.id || site.liveModeHomeForAgentId || null,
+  };
+  group.position.set(Number(site.worldX || 0) * T, 0.04, Number(site.worldY || 0) * T);
+
+  const foundation = posVox(width / 2, 0.05, depth / 2, width, 0.1, depth, 0xb0bec5);
+  foundation.material.transparent = true;
+  foundation.material.opacity = 0.55;
+  group.add(foundation);
+  group.add(posVox(width / 2, 0.18, 0, width, 0.2, 0.32, 0x6d4c41));
+  group.add(posVox(width / 2, 0.18, depth, width, 0.2, 0.32, 0x6d4c41));
+  group.add(posVox(0, 0.18, depth / 2, 0.32, 0.2, depth, 0x6d4c41));
+  group.add(posVox(width, 0.18, depth / 2, 0.32, 0.2, depth, 0x6d4c41));
+  group.add(posVox(width * 0.18, 0.55, depth * 0.18, 1.2, 1.0, 1.2, 0xffc107));
+  group.add(posVox(width * 0.82, 0.48, depth * 0.24, 1.0, 0.8, 1.0, 0xffd54f));
+  group.add(posVox(width * 0.72, 0.4, depth * 0.78, 2.2, 0.28, 0.55, 0x8d6e63));
+  group.add(posVox(width * 0.72, 0.72, depth * 0.78, 1.8, 0.28, 0.45, 0xa1887f));
+  const label = makeTextSprite(`Building ${site.buildingName || 'home'}`, Math.min(14, width * 0.08));
+  label.position.set(width / 2, 2.3, depth / 2);
+  label.scale.set(4.6, 1.1, 1);
+  group.add(label);
+  scene.add(group);
+  liveModeConstructionSiteMarkers.set(worldActionId, group);
+  return group;
+}
+
+function clearLiveModeConstructionSiteMarker(worldActionId) {
+  if (!worldActionId) return false;
+  const group = liveModeConstructionSiteMarkers.get(worldActionId);
+  if (!group) return false;
+  group.parent?.remove(group);
+  liveModeConstructionSiteMarkers.delete(worldActionId);
+  return true;
+}
+
+function resolveLiveModeConstructionExteriorPoint(building, points, destination = null) {
+  if (!building || !points?.outside) return points?.outside || null;
+  const bx = Number(building.worldX || 0) * API_TILE;
+  const by = Number(building.worldY || 0) * API_TILE;
+  const bw = Math.max(API_TILE, Number(building.widthTiles || 0) * API_TILE);
+  const bd = Math.max(API_TILE, Number(building.heightTiles || 0) * API_TILE);
+  const margin = API_TILE * 4;
+  const center = { x: bx + bw / 2, y: by + bd / 2 };
+  const outside = { x: Number(points.outside.x || 0), y: Number(points.outside.y || 0) };
+  const reference = Number.isFinite(Number(destination?.x)) && Number.isFinite(Number(destination?.y))
+    ? { x: Number(destination.x), y: Number(destination.y) }
+    : outside;
+  const awayX = reference.x - center.x;
+  const awayY = reference.y - center.y;
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  if (Math.abs(awayX) > Math.abs(awayY)) {
+    return {
+      x: awayX < 0 ? bx - margin : bx + bw + margin,
+      y: clamp(outside.y, by - margin, by + bd + margin),
+    };
+  }
+  return {
+    x: clamp(outside.x, bx - margin, bx + bw + margin),
+    y: awayY < 0 ? by - margin : by + bd + margin,
+  };
+}
+
+function handoffLiveModeConstructionAgentToExterior(agent, fallbackBuildingId = null, destination = null) {
+  if (!agent) return null;
+  const hasActiveDoorTransition = Boolean(agent._doorTransition?.phase);
+  const transitionBuildingId = agent._doorTransition?.buildingId || fallbackBuildingId || null;
+  const transitionBuilding = transitionBuildingId ? buildingsMap.get(transitionBuildingId) : null;
+  const physicalBuilding = getMovementInteriorBuildingAt(agent.x, agent.y) || null;
+  const footprintBuilding = Array.from(buildingsMap.values()).find((building) => {
+    if (!building || building.type === 'park') return false;
+    const bx = Number(building.worldX || 0) * API_TILE;
+    const by = Number(building.worldY || 0) * API_TILE;
+    const bw = Number(building.widthTiles || 0) * API_TILE;
+    const bd = Number(building.heightTiles || 0) * API_TILE;
+    return bw > 0 && bd > 0 && agent.x >= bx - API_TILE && agent.x <= bx + bw + API_TILE && agent.y >= by - API_TILE && agent.y <= by + bd + API_TILE;
+  }) || null;
+  const currentBuilding = physicalBuilding || footprintBuilding || (hasActiveDoorTransition ? transitionBuilding : null);
+  if (!currentBuilding || currentBuilding.type === 'park') return null;
+  const points = getBuildingDoorTransitionPointsAPI(currentBuilding);
+  if (!points?.outside) return null;
+  const exteriorPoint = resolveLiveModeConstructionExteriorPoint(currentBuilding, points, destination);
+  if (!exteriorPoint) return null;
+  agent.x = exteriorPoint.x;
+  agent.y = exteriorPoint.y;
+  agent._floor = 1;
+  agent._targetFloor = 1;
+  agent._currentBuilding = null;
+  agent._targetBuilding = null;
+  agent._doorTransition = null;
+  agent._doorEntryLock = null;
+  agent._elevatorTrip = null;
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  agent._waypointPathIdx = 0;
+  clearDynamicInteriorRoutingForAgent(agent.id);
+  clearDynamicExteriorRoutingForAgent(agent.id);
+  resetObstacleAvoidance(agent);
+  if (isPhysicsReady()) {
+    const worldScale = T / API_TILE;
+    teleportAgent('agent_' + agent.id, agent.x * worldScale, getGroundY(agent.x * worldScale, agent.y * worldScale), agent.y * worldScale);
+  }
+  return {
+    fromBuildingId: currentBuilding.id || null,
+    fromBuildingName: currentBuilding.name || null,
+    x: agent.x,
+    y: agent.y,
+    doorwayOutside: points.outside,
+    destination: destination ? { x: destination.x, y: destination.y } : null,
+    reason: 'construction-world-point-door-exit-handoff',
+  };
+}
+
+function makeLiveModeHomeBuilding(agent, site = {}, worldActionId = null) {
+  const now = new Date().toISOString();
+  const building = {
+    id: site.buildingId || `live-home-${liveModeAgentToken(agent?.id || site.liveModeHomeForAgentId)}`,
+    name: site.buildingName || `${agent?.name || agent?.id || 'Agent'}'s Home`,
+    type: site.type || 'home',
+    worldX: Number(site.worldX || 0),
+    worldY: Number(site.worldY || 0),
+    widthTiles: Number(site.widthTiles || 10),
+    heightTiles: Number(site.heightTiles || 8),
+    exterior: {
+      wallColor: site.exterior?.wallColor || '#c8b89a',
+      roofColor: site.exterior?.roofColor || '#795548',
+    },
+    ownerAgentId: agent?.id || site.ownerAgentId || null,
+    liveModeHomeForAgentId: agent?.id || site.liveModeHomeForAgentId || null,
+    createdByAgentId: agent?.id || site.ownerAgentId || null,
+    createdFromWorldActionId: worldActionId,
+    source: 'agent-live-mode',
+    constructionState: {
+      status: 'complete',
+      completedAt: now,
+      visibleExecutor: 'main3d.js#routeLiveModeConstructionSiteWorldAction',
+    },
+    interior: {
+      floors: [{ level: 1, name: 'Floor 1' }],
+      furniture: [],
+      walls: [],
+    },
+  };
+  ensureLiveModeHomeStarterInterior(building);
+  return building;
+}
+
+async function completeLiveModeConstructionSiteActivity(agent, activity = {}) {
+  if (!activity?.worldActionId || activity._completionStarted) return null;
+  activity._completionStarted = true;
+  const worldActionId = activity.worldActionId;
+  const site = activity.buildSite || normalizeLiveModeBuildSite({ agentId: agent?.id, id: worldActionId, target: activity.routeMetadata || {}, params: { buildSite: activity.buildSite || {} } });
+  const context = {
+    actionId: activity.actionId || activity.action || 'world.buildStructure',
+    worldActionId,
+    agentId: agent?.id || activity.agentId || null,
+    objectInstanceId: site.buildingId || null,
+    source: 'main3d.js#construction-site-completion',
+  };
+  try {
+    const existingHome = findLiveModeHomeForAgent(agent?.id);
+    if (existingHome) {
+      clearLiveModeConstructionSiteMarker(worldActionId);
+      return await transitionLinkedWorldAction(context, 'completed', {
+        reason: 'live_mode_home_already_built',
+        source: 'main3d.js#construction-site-completion',
+        objectEffect: 'visible-home-already-built',
+        completionState: 'home-built',
+        buildingId: existingHome.id,
+      });
+    }
+    if (checkBuildingCollision(site.worldX, site.worldY, site.widthTiles, site.heightTiles, site.buildingId)) {
+      clearLiveModeConstructionSiteMarker(worldActionId);
+      return await transitionLinkedWorldAction(context, 'failed', {
+        reason: 'construction_site_blocked',
+        failureReason: 'construction_site_blocked',
+        source: 'main3d.js#construction-site-completion',
+        buildSite: site,
+      });
+    }
+    _removeNaturalDecorationsInArea(site.worldX, site.worldY, site.widthTiles, site.heightTiles);
+    const building = makeLiveModeHomeBuilding(agent, site, worldActionId);
+    buildingsMap.set(building.id, building);
+    createBuilding3D(building);
+    updateBuildingList();
+    pushUndo({ type: 'buildingCreate', buildingId: building.id, source: 'agent-live-mode' });
+    const bx1 = Math.floor(building.worldX / CHUNK);
+    const bz1 = Math.floor(building.worldY / CHUNK);
+    const bx2 = Math.floor((building.worldX + building.widthTiles) / CHUNK);
+    const bz2 = Math.floor((building.worldY + building.heightTiles) / CHUNK);
+    for (let ccx = bx1; ccx <= bx2; ccx++) {
+      for (let ccz = bz1; ccz <= bz2; ccz++) {
+        const chunk = loadedChunks.get(chunkKey(ccx, ccz));
+        if (chunk) rebuildChunk(chunk);
+      }
+    }
+    const response = await fetch('/api/buildings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(_buildingPayload(building)),
+    });
+    if (!response.ok) throw new Error(`home persist failed: ${response.status}`);
+    clearLiveModeConstructionSiteMarker(worldActionId);
+    const transition = await transitionLinkedWorldAction(context, 'completed', {
+      reason: 'visible_construction_completed',
+      source: 'main3d.js#construction-site-completion',
+      objectEffect: 'visible-home-built',
+      completionState: 'home-built',
+      buildingId: building.id,
+      buildSite: site,
+    });
+    window.__VWLastLiveModeConstructionCompletion = { ok: Boolean(transition?.ok), agentId: agent?.id || null, buildingId: building.id, worldActionId, transition };
+    showToast(`${agent?.name || agent?.id || 'Agent'} built ${building.name}`, 'success');
+    addActivityLog(`Live Mode construction complete: ${building.name}`);
+    return transition;
+  } catch (error) {
+    clearLiveModeConstructionSiteMarker(worldActionId);
+    const transition = await transitionLinkedWorldAction(context, 'failed', {
+      reason: 'construction_completion_failed',
+      failureReason: 'construction_completion_failed',
+      source: 'main3d.js#construction-site-completion',
+      message: error?.message || String(error),
+    });
+    window.__VWLastLiveModeConstructionCompletion = { ok: false, agentId: agent?.id || null, worldActionId, error: error?.message || String(error), transition };
+    return transition;
+  }
+}
+
+function routeLiveModeConstructionSiteWorldAction(action = {}) {
+  if (action?.source?.kind !== 'agent-live-mode' && action?.behaviorSourceKind !== 'agent-live-mode') return false;
+  const actionType = String(action.actionType || action.actionId || '').trim();
+  if (actionType !== 'world.buildStructure') return false;
+  const worldActionId = action.id || action.worldActionId || null;
+  const agent = resolveAgentForWorldAction(action);
+  if (!agent || !worldActionId) return false;
+  const hasMatchingRoute = agentHasLiveModeWorldActionRoute(agent, worldActionId);
+  const existingRoutePhase = String(agent._agentIntent?.phase || agent._idleActivity?.phase || '').toLowerCase();
+  const existingRouteTerminal = ['failed', 'expired', 'cancelled', 'rejected'].includes(existingRoutePhase);
+  const existingConstructionDoorHandoff = Boolean(hasMatchingRoute && agent._doorTransition?.phase);
+  const existingDoorBuildingId = agent._doorTransition?.buildingId || null;
+  const recoveredDoorHandoff = existingConstructionDoorHandoff
+    ? handoffLiveModeConstructionAgentToExterior(agent, existingDoorBuildingId)
+    : null;
+  if (hasMatchingRoute && (existingRouteTerminal || existingConstructionDoorHandoff)) {
+    releaseAgentIntent(agent, 'route-failed', { releaseBy: 'route-failed', clearRoute: true, clearLifecycle: true, releaseSummary: 'expired construction route released for retry' });
+    agent._idleActivity = null;
+    agent._doorTransition = null;
+    clearLiveModeWorldActionRouteClaim(worldActionId);
+  } else if (hasMatchingRoute) {
+    window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'already_routing', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
+    return true;
+  }
+  if (isLiveModeWorldActionRouteClaimed(worldActionId)) {
+    clearLiveModeWorldActionRouteClaim(worldActionId);
+    window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'stale_claim_released', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
+  }
+  const site = normalizeLiveModeBuildSite(action);
+  const existingHome = findLiveModeHomeForAgent(agent.id);
+  if (existingHome) {
+    const context = { actionId: actionType, worldActionId, agentId: agent.id, objectInstanceId: existingHome.id, source: 'main3d.js#routeLiveModeConstructionSiteWorldAction' };
+    transitionLinkedWorldAction(context, 'completed', { reason: 'live_mode_home_already_built', source: context.source, objectEffect: 'visible-home-already-built', completionState: 'home-built', buildingId: existingHome.id });
+    return true;
+  }
+  ensureLiveModeConstructionSiteMarker(site, action, agent);
+  const routeTarget = {
+    kind: 'world-point',
+    targetKind: 'scripted-world-point',
+    siteKind: site.siteKind || 'agent-home',
+    x: site.approachX,
+    y: site.approachY,
+    z: site.approachY,
+    floor: 1,
+    buildingId: null,
+    constructionBuildingId: site.buildingId,
+    constructionSiteId: site.buildingId,
+    disableDynamicExteriorRouting: true,
+    actionId: actionType,
+    capabilityTag: action.capabilityTag || 'world.build',
+    worldActionId,
+    buildSite: site,
+    routeOwner: 'main3d.js#setAgentTarget -> live-mode-construction-site',
+  };
+  const exteriorHandoff = recoveredDoorHandoff || handoffLiveModeConstructionAgentToExterior(agent, existingDoorBuildingId, routeTarget);
+  const routeAdmission = setAgentTarget(agent, routeTarget, null, 1, {
+    owner: 'world-action',
+    priorityName: 'explicit-object',
+    phase: 'approach',
+    expires: { staleAfterMs: 180000 },
+    target: routeTarget,
+    object: {
+      type: 'construction-site',
+      id: site.buildingId,
+      worldActionId,
+      actionId: actionType,
+    },
+    release: { policy: 'on-object-complete' },
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorAuthority: action.behaviorAuthority || action.source?.behaviorAuthority || 900,
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    debug: { label: 'agent-live:world.buildStructure', buildSite: site, exteriorHandoff },
+    source: { family: 'world-action-sync', functionName: 'routeLiveModeConstructionSiteWorldAction' },
+  });
+  if (routeAdmission?.accepted === false) {
+    window.__VWLastLiveModeWorldActionSync = { ok: false, reason: 'route_admission_rejected', actionId: worldActionId, agentId: agent.id, routeAdmission };
+    return false;
+  }
+  const requestedMs = Number(action.params?.constructionDurationMs || 22000);
+  const stayMs = Math.max(3500, Math.min(45000, Number.isFinite(requestedMs) ? requestedMs : 22000));
+  agent._idleActivity = {
+    kind: 'construction-site-build',
+    phase: 'approach',
+    approachStartedAt: performance.now(),
+    stayMs,
+    dockTarget: { x: site.approachX, y: site.approachY },
+    dockSnapRadius: 18,
+    faceAngle: Number.isFinite(Number(action.params?.faceAngle)) ? Number(action.params.faceAngle) : Math.PI,
+    siteKind: site.siteKind || 'agent-home',
+    buildSite: site,
+    action: actionType,
+    actionId: actionType,
+    capabilityTag: action.capabilityTag || 'world.build',
+    animationId: 'workbench-tool-use',
+    source: 'agent-live-mode-world-action',
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    routeApproachTarget: { x: site.approachX, y: site.approachY, floor: 1, spotId: 'construction-front', faceAngle: Math.PI },
+    routeMetadata: routeTarget,
+    worldActionId,
+    objectInstanceId: site.buildingId,
+    lifecycle: { stationary: true, carryable: false, temporary: false, constructionSite: true, releaseOnCompletion: true },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  agent._schedPhase = 'construction-site-build';
+  claimLiveModeWorldActionRoute(worldActionId);
+  window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, buildSite: site, checkedAt: new Date().toISOString() };
+  addActivityLog(`Live Mode routed ${agent.name || agent.id} to build ${site.buildingName || 'a home'}`);
+  return true;
+}
+
+function getLiveModeHomeBedRestPlan(building, agent) {
+  if (!building || building.type === 'park') return null;
+  const furniture = Array.isArray(building.interior?.furniture) ? building.interior.furniture : [];
+  for (let index = 0; index < furniture.length; index++) {
+    const bed = furniture[index];
+    if (!bed || !['bed', 'sleepPod', 'sleep-pod'].includes(bed.type) || bed.enabled === false || bed.deleted || bed.removed) continue;
+    const occupancy = getBedOccupancyState(building.id, index);
+    if (occupancy.occupied && occupancy.agent !== agent) continue;
+    const approach = getFurnitureActionSpot(building, bed, 'approach') || getFurnitureActionSpot(building, bed);
+    const lieSpot = getFurnitureActionSpot(building, bed, 'lie-sleep') || approach;
+    const wakeStand = getFurnitureActionSpot(building, bed, 'wake-stand') || approach;
+    if (!approach || !lieSpot || !wakeStand) continue;
+    const objectInstanceId = bed.objectInstanceId || bed.id || bed.instanceId || `${building.id}:furn:bed:${index}:live-home`;
+    return { building, bed, furnitureIndex: index, objectInstanceId, approach, lieSpot, wakeStand };
+  }
+  return null;
+}
+
+function makeLiveModeHomeBedRouteTarget(building, bedPlan, action = {}, worldActionId = null) {
+  if (!building || !bedPlan?.approach) return null;
+  const actionId = action.actionType || action.actionId || 'life.restAtHome';
+  return {
+    x: bedPlan.approach.apiX,
+    y: bedPlan.approach.apiZ,
+    floor: bedPlan.approach.floor,
+    buildingFloor: bedPlan.approach.floor,
+    targetKind: 'placed-object',
+    routeKind: 'home-bed-rest',
+    buildingId: building.id || null,
+    homeBuildingId: building.id || null,
+    furnitureIndex: bedPlan.furnitureIndex,
+    objectId: bedPlan.objectInstanceId,
+    objectInstanceId: bedPlan.objectInstanceId,
+    objectType: 'bed',
+    catalogKey: bedPlan.bed?.catalogId || bedPlan.bed?.objectCatalogId || bedPlan.bed?.type || 'bed',
+    actionId,
+    capabilityTag: action.capabilityTag || 'life.rest',
+    spotId: 'approach',
+    interactionSpotId: 'lie-sleep',
+    activationSpotId: 'lie-sleep',
+    approachSpotId: 'approach',
+    routeSpotId: 'approach',
+    disableDynamicExteriorRouting: true,
+    allowDoorTransition: true,
+    faceAngle: bedPlan.lieSpot.faceAngle,
+    scope: 'indoor',
+    worldActionId,
+    routeOwner: 'main3d.js#setAgentTarget -> live-mode-home-bed-rest',
+  };
+}
+
+function routeLiveModeHomeBedWorldAction(action, agent, building, bedPlan, worldActionId, actionType) {
+  const routeTarget = makeLiveModeHomeBedRouteTarget(building, bedPlan, action, worldActionId);
+  if (!routeTarget) return false;
+  const reservationId = action.reservation?.id || `res-${worldActionId}-${bedPlan.objectInstanceId}-lie-sleep`;
+  const routeAdmission = setAgentTargetForExplicitObjectAction(agent, routeTarget, building, bedPlan.approach.floor, {
+    owner: 'world-action',
+    sourceFamily: 'world-action-sync',
+    sourceFunction: 'routeLiveModeHomeWorldAction',
+    buildingId: building.id || null,
+    furnitureIndex: bedPlan.furnitureIndex,
+    furniture: bedPlan.bed,
+    objectType: 'bed',
+    actionId: actionType,
+    capabilityTag: action.capabilityTag || 'life.rest',
+    spotId: 'lie-sleep',
+    slotId: 'lie-sleep',
+    reservationId,
+    worldActionId,
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorAuthority: action.behaviorAuthority || action.source?.behaviorAuthority || 900,
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    behaviorSelectedObject: action.source?.behavior?.behaviorSelectedObject || null,
+    behaviorSelectedSpot: action.source?.behavior?.behaviorSelectedSpot || null,
+    expires: { staleAfterMs: 240000 },
+    debugLabel: 'agent-live:life.restAtHome:bed',
+    sourceSummary: 'agent live mode home bed rest handoff',
+  });
+  if (routeAdmission?.accepted === false) {
+    window.__VWLastLiveModeWorldActionSync = { ok: false, reason: 'route_admission_rejected', actionId: worldActionId, agentId: agent.id, routeAdmission };
+    return false;
+  }
+  const requestedMs = Number(action.params?.restDurationMs || action.params?.estimatedUseMs || 18000);
+  const stayMs = Math.max(4500, Math.min(45000, Number.isFinite(requestedMs) ? requestedMs : 18000));
+  bedPlan.bed.reservation = {
+    ...(bedPlan.bed.reservation || {}),
+    id: reservationId,
+    reservationId,
+    agentId: agent.id || null,
+    actionId: actionType,
+    capabilityTag: action.capabilityTag || 'life.rest',
+    spotId: 'lie-sleep',
+    activationSpotId: 'lie-sleep',
+    approachSpotId: 'approach',
+    status: 'held',
+    source: 'agent-live-mode',
+    worldActionId,
+  };
+  bedPlan.bed.activeUse = {
+    ...(bedPlan.bed.activeUse || {}),
+    state: 'reserved',
+    mode: 'home-rest',
+    actionId: actionType,
+    agentId: agent.id || null,
+    interactionSpotId: 'lie-sleep',
+    approachSpotId: 'approach',
+    activeUseSlotId: 'lie-sleep',
+    animationId: 'bed-rest',
+    worldActionId,
+    reservationId,
+  };
+  bedPlan.bed.sleepState = { ...(bedPlan.bed.sleepState || {}), status: 'reserved', lastAction: actionType, persistentFurniture: true, homeRest: true };
+  agent._idleActivity = {
+    kind: 'bed-sleep',
+    phase: 'approach',
+    approachStartedAt: performance.now(),
+    buildingId: building.id || null,
+    homeBuildingId: building.id || null,
+    furnitureIndex: bedPlan.furnitureIndex,
+    stayMs,
+    faceAngle: bedPlan.lieSpot.faceAngle,
+    dockTarget: { x: bedPlan.lieSpot.apiX, y: bedPlan.lieSpot.apiZ },
+    dockSnapRadius: 18,
+    standTarget: { x: bedPlan.wakeStand.apiX, y: bedPlan.wakeStand.apiZ, floor: bedPlan.wakeStand.floor },
+    standFaceAngle: bedPlan.wakeStand.faceAngle,
+    furnitureType: 'bed',
+    spotId: 'lie-sleep',
+    activationSpotId: 'lie-sleep',
+    approachSpotId: 'approach',
+    reservationId,
+    mode: 'home-rest',
+    action: actionType,
+    actionId: actionType,
+    capabilityTag: action.capabilityTag || 'life.rest',
+    animationId: 'bed-rest',
+    wakeTransitionMs: 1600,
+    homeRestActivity: true,
+    source: 'agent-live-mode-world-action',
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    routeApproachTarget: { x: bedPlan.approach.apiX, y: bedPlan.approach.apiZ, floor: bedPlan.approach.floor, spotId: 'approach', faceAngle: bedPlan.approach.faceAngle },
+    routeMetadata: routeTarget,
+    worldActionId,
+    objectInstanceId: bedPlan.objectInstanceId,
+    lifecycle: { stationary: true, carryable: false, temporary: false, homeRest: true, releaseOnCompletion: true },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  agent._schedPhase = 'home-bed-rest';
+  claimLiveModeWorldActionRoute(worldActionId);
+  window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, homeBuildingId: building.id || null, furnitureIndex: bedPlan.furnitureIndex, checkedAt: new Date().toISOString() };
+  addActivityLog(`Live Mode routed ${agent.name || agent.id} to rest in bed at ${building.name || building.id}`);
+  return true;
+}
+
+function makeLiveModeHomeRestRouteTarget(building, agent, action = {}, worldActionId = null) {
+  if (!building) return null;
+  const points = getBuildingDoorTransitionPointsAPI(building);
+  const approach = getBuildingDoorApproachPos(building, agent, { side: 'outside', purpose: 'live-mode-home-rest' })
+    || getBuildingDoorPosAPI(building)
+    || points?.outside
+    || null;
+  if (!approach || !Number.isFinite(Number(approach.x)) || !Number.isFinite(Number(approach.y))) return null;
+  const threshold = points?.threshold || getBuildingDoorwayPosAPI(building) || {
+    x: (Number(building.worldX || 0) + Number(building.widthTiles || 8) / 2) * API_TILE,
+    y: (Number(building.worldY || 0) + Number(building.heightTiles || 6)) * API_TILE,
+  };
+  const faceAngle = Math.atan2((threshold.x || 0) - approach.x, (threshold.y || 0) - approach.y);
+  return {
+    kind: 'building',
+    targetKind: 'building-door-approach',
+    routeKind: 'home-rest',
+    x: approach.x,
+    y: approach.y,
+    z: approach.y,
+    floor: 1,
+    buildingId: null,
+    targetBuildingId: building.id || null,
+    homeBuildingId: building.id || null,
+    buildingName: building.name || null,
+    actionId: action.actionType || action.actionId || 'life.restAtHome',
+    capabilityTag: action.capabilityTag || 'life.rest',
+    worldActionId,
+    disableDynamicExteriorRouting: true,
+    faceAngle,
+    routeOwner: 'main3d.js#setAgentTarget -> live-mode-home-rest',
+  };
+}
+
+function routeLiveModeHomeWorldAction(action = {}) {
+  if (action?.source?.kind !== 'agent-live-mode' && action?.behaviorSourceKind !== 'agent-live-mode') return false;
+  const actionType = String(action.actionType || action.actionId || '').trim();
+  if (actionType !== 'life.restAtHome') return false;
+  const worldActionId = action.id || action.worldActionId || null;
+  const target = action.target || {};
+  const buildingId = target.buildingId || target.homeBuildingId || action?.route?.target?.buildingId || action?.route?.target?.homeBuildingId || null;
+  const building = buildingId ? buildingsMap.get(buildingId) : null;
+  const agent = resolveAgentForWorldAction(action);
+  if (!agent || !worldActionId || !building) return false;
+  const hasMatchingRoute = agentHasLiveModeWorldActionRoute(agent, worldActionId);
+  const existingRoutePhase = String(agent._agentIntent?.phase || agent._idleActivity?.phase || '').toLowerCase();
+  const existingRouteTerminal = ['failed', 'expired', 'cancelled', 'rejected'].includes(existingRoutePhase);
+  if (hasMatchingRoute && existingRouteTerminal) {
+    releaseAgentIntent(agent, 'route-failed', { releaseBy: 'route-failed', clearRoute: true, clearLifecycle: true, releaseSummary: 'expired home-rest route released for retry' });
+    agent._idleActivity = null;
+    agent._doorTransition = null;
+    clearLiveModeWorldActionRouteClaim(worldActionId);
+  } else if (hasMatchingRoute) {
+    window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'already_routing', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
+    return true;
+  }
+  if (isLiveModeWorldActionRouteClaimed(worldActionId)) {
+    clearLiveModeWorldActionRouteClaim(worldActionId);
+    window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'stale_claim_released', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
+  }
+  ensureLiveModeHomeStarterInterior(building, { persist: true, rebuild: true });
+  const bedPlan = getLiveModeHomeBedRestPlan(building, agent);
+  if (bedPlan && routeLiveModeHomeBedWorldAction(action, agent, building, bedPlan, worldActionId, actionType)) {
+    return true;
+  }
+  const routeTarget = makeLiveModeHomeRestRouteTarget(building, agent, action, worldActionId);
+  if (!routeTarget) return false;
+  const exteriorHandoff = handoffLiveModeConstructionAgentToExterior(agent, agent._doorTransition?.buildingId || null, routeTarget);
+  const routeAdmission = setAgentTarget(agent, routeTarget, null, 1, {
+    owner: 'world-action',
+    priorityName: 'explicit-object',
+    phase: 'approach',
+    expires: { staleAfterMs: 180000 },
+    target: routeTarget,
+    object: {
+      type: 'building',
+      id: building.id || null,
+      buildingId: building.id || null,
+      actionId: actionType,
+      worldActionId,
+      preserveUntilRelease: true,
+    },
+    release: { policy: 'on-object-complete' },
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorAuthority: action.behaviorAuthority || action.source?.behaviorAuthority || 900,
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    debug: { label: 'agent-live:life.restAtHome', buildingId: building.id || null, exteriorHandoff },
+    source: { family: 'world-action-sync', functionName: 'routeLiveModeHomeWorldAction' },
+  });
+  if (routeAdmission?.accepted === false) {
+    window.__VWLastLiveModeWorldActionSync = { ok: false, reason: 'route_admission_rejected', actionId: worldActionId, agentId: agent.id, routeAdmission };
+    return false;
+  }
+  const requestedMs = Number(action.params?.restDurationMs || action.params?.estimatedUseMs || 16000);
+  const stayMs = Math.max(4500, Math.min(45000, Number.isFinite(requestedMs) ? requestedMs : 16000));
+  agent._idleActivity = {
+    kind: 'home-rest-front-door',
+    phase: 'approach',
+    approachStartedAt: performance.now(),
+    buildingId: building.id || null,
+    homeBuildingId: building.id || null,
+    stayMs,
+    dockTarget: { x: routeTarget.x, y: routeTarget.y },
+    dockSnapRadius: 18,
+    faceAngle: routeTarget.faceAngle,
+    action: actionType,
+    actionId: actionType,
+    capabilityTag: action.capabilityTag || 'life.rest',
+    animationId: 'home-rest',
+    source: 'agent-live-mode-world-action',
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    routeApproachTarget: { x: routeTarget.x, y: routeTarget.y, floor: 1, spotId: 'home-front-door', faceAngle: routeTarget.faceAngle },
+    routeMetadata: routeTarget,
+    worldActionId,
+    objectInstanceId: building.id || null,
+    lifecycle: { stationary: true, carryable: false, temporary: false, homeRest: true, releaseOnCompletion: true },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  agent._schedPhase = 'home-rest';
+  claimLiveModeWorldActionRoute(worldActionId);
+  window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, homeBuildingId: building.id || null, checkedAt: new Date().toISOString() };
+  addActivityLog(`Live Mode routed ${agent.name || agent.id} home to rest at ${building.name || building.id}`);
+  return true;
+}
+
+function makeLiveModeLocalObjectRouteTarget(building, object, furnitureIndex, spot, config, extra = {}) {
+  const buildingId = building?.id || null;
+  const objectId = extra.objectInstanceId || object?.objectInstanceId || object?.id || object?.instanceId || (buildingId && furnitureIndex != null && object?.type ? `${buildingId}-${object.type}-${furnitureIndex}` : null);
+  const spotId = spot?.spotId || config?.spotId || 'use-front';
+  return {
+    x: spot?.apiX,
+    y: spot?.apiZ,
+    floor: spot?.floor,
+    buildingFloor: spot?.floor,
+    targetKind: 'placed-object',
+    buildingId,
+    furnitureIndex,
+    objectId,
+    objectInstanceId: objectId,
+    objectType: object?.type || null,
+    catalogKey: object?.catalogId || object?.objectCatalogId || object?.type || null,
+    actionId: config?.actionId || null,
+    capabilityTag: config?.capabilityTag || null,
+    spotId,
+    interactionSpotId: spotId,
+    activationSpotId: spot?.activationSpotId || config?.spotId || spotId,
+    approachSpotId: spot?.approachSpotId || config?.spotId || spotId,
+    routeSpotId: spotId,
+    routeSpotRole: config?.routeKind || 'local-object-use',
+    faceAngle: spot?.faceAngle,
+    matchesDebugPoint: spot?.matchesDebugPoint === true,
+    skipReachabilityAdjust: spot?.matchesDebugPoint === true,
+    scope: 'indoor',
+    routeOwner: 'main3d.js#setAgentTarget -> dynamic-interior-routing.js',
+    ...extra,
+  };
+}
+
+function routeLiveModeLocalObjectWorldAction(action = {}) {
+  if (action?.source?.kind !== 'agent-live-mode' && action?.behaviorSourceKind !== 'agent-live-mode') return false;
+  const worldActionId = action.id || action.worldActionId || null;
+  const target = action.target || {};
+  const buildingId = target.buildingId || action?.route?.target?.buildingId;
+  const building = buildingsMap.get(buildingId);
+  const furnitureIndex = getWorldActionFurnitureIndex(action, target);
+  const object = building?.interior?.furniture?.[furnitureIndex];
+  const actionType = String(action.actionType || action.actionId || '').trim();
+  const config = getLiveModeLocalObjectWorldActionConfig(object?.type, actionType);
+  if (!building || !object || !config) return false;
+  const localActivity = getLocalIdleActivityConfig(object.type);
+  if (!localActivity) return false;
+  const agent = resolveAgentForWorldAction(action);
+  if (!agent) return false;
+  const hasMatchingRoute = agentHasLiveModeWorldActionRoute(agent, worldActionId);
+  if (hasMatchingRoute) {
+    window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'already_routing', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
+    return true;
+  }
+  if (isLiveModeWorldActionRouteClaimed(worldActionId)) {
+    clearLiveModeWorldActionRouteClaim(worldActionId);
+    window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'stale_claim_released', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
+  }
+  const spotId = target.interactionSpotId || config.spotId || localActivity.spotId;
+  const spot = getFurnitureActionSpotAtDebugPoint(building, object, spotId) || getFurnitureActionSpot(building, object, spotId) || getFurnitureActionSpot(building, object, localActivity.spotId);
+  if (!spot) return false;
+  if (isLocalIdleTargetClaimed(building, { ...spot, furniture: object, furnitureIndex, activity: localActivity }, agent)) {
+    window.__VWLastLiveModeWorldActionSync = { ok: false, reason: 'local_object_claimed', actionId: worldActionId, agentId: agent.id, furnitureIndex, furnitureType: object.type, checkedAt: new Date().toISOString() };
+    return false;
+  }
+  let reserved = null;
+  if (config.routeKind === 'read-inspect') {
+    reserved = reserveReadInspectStandingUse(object, {
+      building,
+      furnitureIndex,
+      agent,
+      spotId: spot.spotId,
+      actionId: config.actionId,
+      mode: config.mode,
+      animationId: localActivity.animationId || config.animationId,
+    });
+  }
+  if (!reserved?.ok) {
+    window.__VWLastLiveModeWorldActionSync = { ok: false, reason: reserved?.reason || 'local_object_reservation_failed', actionId: worldActionId, agentId: agent.id, furnitureIndex, furnitureType: object.type, checkedAt: new Date().toISOString() };
+    return false;
+  }
+  const localReservationId = reserved.reservation?.id || object.reservation?.id || null;
+  const serverReservationId = action.reservation?.id || null;
+  const routeTarget = makeLiveModeLocalObjectRouteTarget(building, object, furnitureIndex, spot, config, {
+    objectInstanceId: target.objectInstanceId || action?.route?.target?.objectInstanceId || object?.objectInstanceId || object?.id || object?.instanceId || null,
+    reservationId: localReservationId,
+    serverReservationId,
+    worldActionId,
+  });
+  const routeAdmission = setAgentTargetForExplicitObjectAction(agent, routeTarget, building, spot.floor, {
+    owner: 'world-action',
+    sourceFamily: 'world-action-sync',
+    sourceFunction: 'routeLiveModeLocalObjectWorldAction',
+    buildingId,
+    furnitureIndex,
+    furniture: object,
+    objectType: object.type,
+    actionId: config.actionId,
+    capabilityTag: config.capabilityTag,
+    spotId: spot.spotId,
+    slotId: reserved.slotId || spot.spotId,
+    reservationId: localReservationId,
+    serverReservationId,
+    worldActionId,
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorAuthority: action.behaviorAuthority || action.source?.behaviorAuthority || 900,
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    behaviorSelectedObject: action.source?.behavior?.behaviorSelectedObject || null,
+    behaviorSelectedSpot: action.source?.behavior?.behaviorSelectedSpot || null,
+    debugLabel: `agent-live:${config.actionId}`,
+    sourceSummary: 'agent live mode world action local-object handoff',
+  });
+  if (routeAdmission?.accepted === false) {
+    releaseReadInspectStandingUse(object, {
+      buildingId,
+      furnitureIndex,
+      furnitureType: object.type,
+      reservationId: localReservationId,
+      activeUseSlotId: reserved.slotId || spot.spotId,
+      spotId: spot.spotId,
+      mode: config.mode,
+      action: config.actionId,
+      actionId: config.actionId,
+    }, agent, 'route-admission-rejected');
+    window.__VWLastLiveModeWorldActionSync = { ok: false, reason: 'route_admission_rejected', actionId: worldActionId, agentId: agent.id, routeAdmission };
+    return false;
+  }
+  const activeUseSlotId = reserved.slotId || spot.spotId;
+  object.reservation = {
+    ...(object.reservation || {}),
+    id: localReservationId,
+    reservationId: localReservationId,
+    serverReservationId,
+    agentId: agent.id || null,
+    actionId: config.actionId,
+    capabilityTag: config.capabilityTag,
+    spotId: spot.spotId,
+    activationSpotId: spot.activationSpotId || spot.spotId,
+    approachSpotId: spot.approachSpotId || spot.spotId,
+    activeUseSlotId,
+    capacityKey: reserved.capacityKey,
+    status: 'held',
+    worldActionId,
+  };
+  object.activeUse = {
+    ...(object.activeUse || {}),
+    state: 'reserved',
+    mode: config.mode,
+    actionId: config.actionId,
+    capabilityTag: config.capabilityTag,
+    agentId: agent.id || null,
+    interactionSpotId: spot.spotId,
+    approachSpotId: spot.approachSpotId || spot.spotId,
+    activationSpotId: spot.activationSpotId || spot.spotId,
+    activeUseSlotId,
+    animationId: localActivity.animationId || config.animationId,
+    worldActionId,
+    reservationId: localReservationId,
+    serverReservationId,
+  };
+  if (object.type === 'whiteboard') {
+    object.boardSession = {
+      ...(object.boardSession || {}),
+      active: true,
+      mode: config.mode,
+      topic: action.params?.topic || object.boardSession?.topic || 'Live Mode planning',
+      context: action.params?.context || object.boardSession?.context || 'Agent Live Mode curiosity',
+      actionId: config.actionId,
+      agentId: agent.id || null,
+      objectInstanceId: routeTarget.objectInstanceId,
+      worldActionId,
+      status: 'reserved',
+      updatedAt: new Date().toISOString(),
+      persistentFurniture: true,
+    };
+  }
+  agent._idleActivity = {
+    kind: config.kind || localActivity.kind,
+    phase: 'approach',
+    approachStartedAt: performance.now(),
+    buildingId,
+    furnitureIndex,
+    stayMs: randomRangeMs(localActivity.stayMs, 12000),
+    faceAngle: spot.faceAngle,
+    dockTarget: { x: spot.apiX, y: spot.apiZ },
+    dockSnapRadius: localActivity.dockSnapRadius || 6,
+    furnitureType: object.type,
+    spotId: spot.spotId,
+    interactionSpotId: spot.spotId,
+    activationSpotId: spot.activationSpotId || spot.spotId,
+    approachSpotId: spot.approachSpotId || spot.spotId,
+    activeUseSlotId,
+    reservationId: localReservationId,
+    serverReservationId,
+    capacityKey: reserved.capacityKey,
+    mode: config.mode,
+    action: config.actionId,
+    actionId: config.actionId,
+    capabilityTag: config.capabilityTag,
+    animationId: localActivity.animationId || config.animationId,
+    readInspectActivated: false,
+    source: 'agent-live-mode-world-action',
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    routeApproachTarget: { x: spot.apiX, y: spot.apiZ, floor: spot.floor, spotId: spot.spotId, faceAngle: spot.faceAngle },
+    routeMetadata: routeTarget,
+    worldActionId,
+    objectInstanceId: routeTarget.objectInstanceId,
+    lifecycle: { stationary: true, carryable: false, temporary: false, standingUse: true, releaseOnCompletion: true },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  claimLiveModeWorldActionRoute(worldActionId);
+  window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, furnitureIndex, furnitureType: object.type, checkedAt: new Date().toISOString() };
+  addActivityLog(`🤖 Live Mode routed ${agent.name || agent.id} to ${config.label || object.type}`);
+  return true;
 }
 
 function routeLiveModeStandingMachineWorldAction(action = {}) {
@@ -32512,7 +33631,7 @@ function routeBarberChairWorldAction(action = {}) {
 
 async function syncActiveBarberChairWorldActions() {
   try {
-    const response = await fetch('/api/world-actions/active?client=main3d-live-sync&version=20260613-live-mode-visibility-r2');
+    const response = await fetch('/api/world-actions/active?client=main3d-live-sync&version=20260614-live-mode-home-interior-r25');
     if (!response.ok) return false;
     const actions = await response.json();
     if (!Array.isArray(actions)) return false;
@@ -32521,7 +33640,7 @@ async function syncActiveBarberChairWorldActions() {
     for (const action of actions) {
       const status = String(action?.status || '').toLowerCase();
       if (!['requested', 'created', 'reserved', 'route_pending', 'routing'].includes(status)) continue;
-      if (routeBarberChairWorldAction(action) || routeLiveModeStandingMachineWorldAction(action)) routed++;
+      if (routeBarberChairWorldAction(action) || routeLiveModeConstructionSiteWorldAction(action) || routeLiveModeHomeWorldAction(action) || routeLiveModeStandingMachineWorldAction(action) || routeLiveModeLocalObjectWorldAction(action)) routed++;
     }
     if (routed) window.__VWLastBarberChairWorldActionSync = { ...(window.__VWLastBarberChairWorldActionSync || {}), routed, checkedAt: new Date().toISOString() };
     return routed > 0;
