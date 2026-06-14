@@ -2,10 +2,18 @@
   let vwConfig = null;
   let originalSaveSettings = null;
   let liveModeAgents = [];
+  let liveModeLoopStatus = null;
   const liveModeAgentEdits = new Map();
 
   const $ = (id) => document.getElementById(id);
   const setText = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
   const setStatus = (id, text, tone = 'info') => {
     const el = $(id);
     if (!el) return;
@@ -125,9 +133,58 @@
 
   function setLiveModeControlsDisabled(disabled) {
     $('btn-saveLiveAgents')?.toggleAttribute('disabled', disabled);
+    $('btn-refreshLiveLoop')?.toggleAttribute('disabled', disabled);
+    $('btn-pauseLiveLoop')?.toggleAttribute('disabled', disabled);
+    $('btn-resumeLiveLoop')?.toggleAttribute('disabled', disabled);
+    $('btn-clearLiveClient')?.toggleAttribute('disabled', disabled);
+    $('setting-liveLoopPauseSec')?.toggleAttribute('disabled', disabled);
     document.querySelectorAll('[data-live-agent-toggle]').forEach(input => {
       input.disabled = disabled;
     });
+  }
+
+  function renderLiveModeLoopStatus() {
+    const card = $('liveModeLoopStatus');
+    if (!card) return;
+    const trial = isTrialLicense(vwConfig?.license || {});
+    const globalEnabled = checked('setting-featureAgentLiveMode');
+    if (trial || !globalEnabled) {
+      card.classList.add('locked');
+      card.innerHTML = trial
+        ? '<strong>Loop locked</strong><span>Activate a License Key to manage the Live Mode loop.</span>'
+        : '<strong>Loop off</strong><span>Turn on Agent Live Mode in Features to manage loop controls.</span>';
+      return;
+    }
+
+    const runtime = liveModeLoopStatus?.runtime || {};
+    const state = liveModeLoopStatus?.state || {};
+    const pause = runtime.pause || {};
+    const worldClient = runtime.worldClient || {};
+    const client = worldClient.client || {};
+    const paused = pause.active === true;
+    const clientLabel = worldClient.active
+      ? `Client active (${Math.round(Number(worldClient.ageSec) || 0)}s)`
+      : 'Client inactive';
+    const sessionLabel = client.sessionId
+      ? `Session ${String(client.sessionId).slice(0, 28)}`
+      : (client.lastSeenAt ? 'Last client session unknown' : 'No client session recorded');
+    const clientMeta = [
+      client.version || worldClient.requiredClientVersion,
+      client.visibility,
+      client.page,
+    ].filter(Boolean).join(' · ');
+    const diagnostic = worldClient.diagnostic || (worldClient.active
+      ? 'A current 3D tab can let the loop create visible actions.'
+      : 'The loop waits for a fresh 3D tab before creating visible actions.');
+    const details = [
+      `<span>${escapeHtml(sessionLabel)}</span>`,
+      clientMeta ? `<span>${escapeHtml(clientMeta)}</span>` : '',
+      diagnostic ? `<span>${escapeHtml(diagnostic)}</span>` : '',
+    ].filter(Boolean).join('');
+    card.classList.toggle('locked', paused || state.enabled === false);
+    card.innerHTML = paused
+      ? `<strong>Loop paused · ${Math.max(0, Number(pause.remainingSec) || 0)}s</strong><span>${escapeHtml(clientLabel)}</span>${details}`
+      : `<strong>${state.enabled === false ? 'Loop disabled' : 'Loop ready'}</strong><span>${escapeHtml(clientLabel)}</span>${details}`;
   }
 
   function renderLiveModeAgents() {
@@ -192,6 +249,64 @@
     });
 
     setLiveModeControlsDisabled(trial || !globalEnabled);
+    renderLiveModeLoopStatus();
+  }
+
+  async function refreshLiveModeLoopStatus({ quiet = false } = {}) {
+    try {
+      liveModeLoopStatus = await fetchJson('/api/agent-live-loop');
+      renderLiveModeLoopStatus();
+      if (!quiet) setStatus('liveModeLoopActionStatus', 'Loop status refreshed.', 'success');
+      return liveModeLoopStatus;
+    } catch (err) {
+      setStatus('liveModeLoopActionStatus', err.message || 'Could not load loop status.', 'warn');
+      throw err;
+    }
+  }
+
+  async function updateLiveModeLoop(payload, successText) {
+    if (isTrialLicense(vwConfig?.license || {})) {
+      setStatus('liveModeLoopActionStatus', 'Agent Live Mode is locked until activation.', 'warn');
+      return null;
+    }
+    if (!checked('setting-featureAgentLiveMode')) {
+      setStatus('liveModeLoopActionStatus', 'Turn on Agent Live Mode in Features first.', 'warn');
+      return null;
+    }
+    const result = await fetchJson('/api/agent-live-loop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    liveModeLoopStatus = {
+      ok: result.ok,
+      state: result.state,
+      runtime: result.runtime,
+    };
+    renderLiveModeLoopStatus();
+    setStatus('liveModeLoopActionStatus', successText, 'success');
+    return result;
+  }
+
+  async function pauseLiveModeLoop() {
+    const input = $('setting-liveLoopPauseSec');
+    const raw = Number(input?.value || 600);
+    const pauseSec = Math.min(3600, Math.max(30, Number.isFinite(raw) ? Math.round(raw) : 600));
+    if (input) input.value = String(pauseSec);
+    await updateLiveModeLoop({
+      pauseSec,
+      pauseReason: 'operator-ui',
+      pausedBy: 'settings-ui',
+      clearWorldClientActivity: true,
+    }, `Paused loop for ${pauseSec} seconds.`);
+  }
+
+  async function resumeLiveModeLoop() {
+    await updateLiveModeLoop({ clearPause: true }, 'Loop resumed.');
+  }
+
+  async function clearLiveModeClientActivity() {
+    await updateLiveModeLoop({ clearWorldClientActivity: true }, 'Client marker cleared.');
   }
 
   async function refreshLiveModeAgents() {
@@ -250,6 +365,7 @@
     updateLicenseUi(config);
     populateAgents(sms.ownerAgentId || '');
     refreshLiveModeAgents().catch(() => {});
+    refreshLiveModeLoopStatus({ quiet: true }).catch(() => {});
   }
 
   function buildSettingsPayload() {
@@ -454,9 +570,16 @@
 
   function bind() {
     document.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.settingsTab)));
-    $('setting-featureAgentLiveMode')?.addEventListener('change', renderLiveModeAgents);
+    $('setting-featureAgentLiveMode')?.addEventListener('change', () => {
+      renderLiveModeAgents();
+      renderLiveModeLoopStatus();
+    });
     $('btn-refreshLiveAgents')?.addEventListener('click', () => refreshLiveModeAgents().catch(err => setStatus('liveModeAgentStatus', err.message, 'warn')));
     $('btn-saveLiveAgents')?.addEventListener('click', () => saveLiveModeAgents().catch(err => setStatus('liveModeAgentStatus', err.message, 'warn')));
+    $('btn-refreshLiveLoop')?.addEventListener('click', () => refreshLiveModeLoopStatus().catch(() => {}));
+    $('btn-pauseLiveLoop')?.addEventListener('click', () => pauseLiveModeLoop().catch(err => setStatus('liveModeLoopActionStatus', err.message, 'warn')));
+    $('btn-resumeLiveLoop')?.addEventListener('click', () => resumeLiveModeLoop().catch(err => setStatus('liveModeLoopActionStatus', err.message, 'warn')));
+    $('btn-clearLiveClient')?.addEventListener('click', () => clearLiveModeClientActivity().catch(err => setStatus('liveModeLoopActionStatus', err.message, 'warn')));
     $('btn-activateLicense')?.addEventListener('click', activateLicense);
     $('btn-deactivateLicense')?.addEventListener('click', deactivateLicense);
     $('btn-testBrowser')?.addEventListener('click', () => testBrowser().catch(err => setStatus('browserTestStatus', err.message, 'warn')));

@@ -578,6 +578,22 @@ body.vw-demo-locked .feature-locked-control {
     flex-wrap: wrap;
     gap: 8px;
 }
+.settings-live-loop-status {
+    border-color: rgba(96,165,250,.34);
+    background: rgba(59,130,246,.09);
+}
+.settings-live-loop-controls {
+    display: grid;
+    grid-template-columns: minmax(120px, 160px) repeat(4, minmax(96px, auto));
+    align-items: end;
+    gap: 8px;
+}
+.settings-live-loop-duration {
+    margin: 0;
+}
+.settings-live-loop-duration input {
+    min-height: 36px;
+}
 .settings-live-agent-list {
     display: grid;
     gap: 8px;
@@ -649,6 +665,12 @@ body.vw-demo-locked .feature-locked-control {
     .settings-resource-card {
         align-items: flex-start;
         flex-direction: column;
+    }
+    .settings-live-loop-controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .settings-live-loop-duration {
+        grid-column: 1 / -1;
     }
     .settings-live-agent-row {
         grid-template-columns: auto 12px minmax(0, 1fr);

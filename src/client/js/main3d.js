@@ -2842,7 +2842,7 @@ const RECOGNIZED_IDLE_ACTIVITY_PREFIXES = Object.freeze([
   'bookshelf-', 'pantry-shelf-', 'curtains-', 'whiteboard-', 'bulletin-board-', 'outdoor-notice-board-', 'park-lamp-', 'wall-art-', 'menu-board-', 'dresser-', 'wardrobe-', 'nightstand-', 'side-table-', 'tv-stand-', 'mirror-', 'clothing-rack-', 'accessory-display-stand-', 'display-mannequin-', 'display-case-', 'salon-mirror-station-',
   'reception-desk-', 'cafe-counter-', 'kitchen-island-', 'small-cafe-table-', 'outdoor-cafe-table-', 'picnic-table-', 'patio-table-', 'small-round-meeting-table-', 'checkout-counter-', 'checkout-register-', 'trash-bin-', 'grill-', 'outdoor-planter-', 'flower-bed-', 'fountain-', 'gazebo-pavilion-', 'food-truck-counter-', 'water-cooler-', 'water-desk-', 'coffee-machine-', 'coffee-desk-', 'vending-machine-', 'vending-desk-', 'fridge-', 'microwave-', 'coffee-pickup-shelf-', 'arcade-machine-', 'gaming-station-',
   'printer-scanner-', 'laptop-monitor-', 'tool-cart-', 'workbench-', 'storage-boxes-', 'server-rack-', 'diagnostic-station-', 'medical-supply-cabinet-', 'supply-cabinet-', 'standing-desk-', 'drafting-table-', 'teaching-podium-', 'treadmill-', 'training-mat-', 'dumbbell-rack-', 'gym-bench-', 'outdoor-exercise-station-', 'playground-slide-', 'playground-swing-', 'pond-dock-', 'outdoor-stage-', 'pingpong-', 'pool-table-', 'meeting-table', 'service-queue-',
-  'construction-site-', 'home-rest-',
+  'construction-site-', 'home-rest-', 'live-social-',
 ]);
 const LOCAL_IDLE_FURNITURE_ACTIVITY_CONFIG = Object.freeze({
   chair: Object.freeze({ kind: 'chair-sit', spotId: 'seat', animationId: 'sit', dockSnapRadius: 6, stayMs: [9000, 15000] }),
@@ -18311,6 +18311,25 @@ function updateAgentAnimations(dt) {
       agent._schedPhase = 'home-rest-complete';
       agent._stayTimer = 900;
       agent._wanderTimer = 2200 + Math.random() * 3200;
+    } else if (String(agent._idleActivity?.kind || '').startsWith('live-social-conversation')) {
+      const socialActivity = agent._idleActivity;
+      const partner = agentsList.find(candidate => candidate && (candidate.id === socialActivity.targetAgentId || candidate.statusKey === socialActivity.targetAgentId)) || null;
+      const conversationId = agent._socialState?.convId || partner?._socialState?.convId || socialActivity.conversationId || null;
+      completeIdleWorldAction(socialActivity, {
+        objectEffect: 'visible-social-conversation-complete',
+        completionState: 'talked-with-nearby-agent',
+        targetAgentId: socialActivity.targetAgentId || null,
+        targetAgentName: socialActivity.targetAgentName || partner?.name || null,
+        conversationId,
+      });
+      if (agent._socialState?.convId === conversationId) agent._socialState = null;
+      if (partner?._socialState?.convId === conversationId) partner._socialState = null;
+      releaseAgentIntent(agent, 'object-complete', { releaseBy: 'object-complete', clearRoute: false, releaseSummary: 'live social conversation complete released live mode intent' });
+      clearLiveModeWorldActionRouteClaim(socialActivity.worldActionId);
+      agent._idleActivity = null;
+      agent._schedPhase = 'live-social-conversation-complete';
+      agent._stayTimer = 900;
+      agent._wanderTimer = 2200 + Math.random() * 3200;
     } else if (String(agent._idleActivity?.kind || '').startsWith('couch-')) {
       const couchActivity = agent._idleActivity;
       const couchBuilding = buildingsMap.get(couchActivity?.buildingId);
@@ -20450,6 +20469,24 @@ function updateAgentAnimations(dt) {
             idleActivity.phase = 'active';
             idleActivity.startedAt = performance.now();
             idleActivity.endsAt = performance.now() + agent._stayTimer;
+          }
+          if (String(idleActivity.kind || '').startsWith('live-social-conversation')) {
+            const partner = agentsList.find(candidate => candidate && (candidate.id === idleActivity.targetAgentId || candidate.statusKey === idleActivity.targetAgentId)) || null;
+            if (partner && !agent._socialState) {
+              _startConversation(agent, partner, {
+                ambient: false,
+                source: 'agent-live-mode',
+                durationMs: Math.max(5000, Number(idleActivity.stayMs || agent._stayTimer || 9000) - 800),
+              });
+              agent._socialState.worldActionId = idleActivity.worldActionId || null;
+              agent._socialState.liveMode = true;
+              agent._socialState.targetAgentId = idleActivity.targetAgentId || null;
+              idleActivity.conversationId = agent._socialState.convId || null;
+              if (partner._socialState) {
+                partner._socialState.liveModePartner = true;
+                partner._socialState.worldActionId = idleActivity.worldActionId || null;
+              }
+            }
           }
           if (String(idleActivity.kind || '').startsWith('couch-')) {
             const couchBuilding = buildingsMap.get(idleActivity.buildingId);
@@ -32323,12 +32360,23 @@ function invokeLinkedCapabilityUi(buildingId, furnitureIndex, action, routeConte
 
 let _barberChairWorldActionSyncTimer = null;
 const LIVE_MODE_WORLD_ACTION_ROUTE_CLAIM_TTL_MS = 120000;
+const LIVE_MODE_WORLD_ACTION_ROUTE_CLAIM_NOTIFY_INTERVAL_MS = 10000;
 const liveModeWorldActionRouteClaims = new Map();
 const liveModeConstructionSiteMarkers = new Map();
 
+function getLiveModeWorldActionRouteClaim(actionId) {
+  if (!actionId) return null;
+  const claim = liveModeWorldActionRouteClaims.get(actionId);
+  if (!claim) return null;
+  if (typeof claim === 'number') return { claimedAt: claim };
+  if (typeof claim === 'object') return claim;
+  return null;
+}
+
 function isLiveModeWorldActionRouteClaimed(actionId) {
   if (!actionId) return false;
-  const claimedAt = liveModeWorldActionRouteClaims.get(actionId);
+  const claim = getLiveModeWorldActionRouteClaim(actionId);
+  const claimedAt = Number(claim?.claimedAt || 0);
   if (!claimedAt) return false;
   if (Date.now() - claimedAt > LIVE_MODE_WORLD_ACTION_ROUTE_CLAIM_TTL_MS) {
     liveModeWorldActionRouteClaims.delete(actionId);
@@ -32337,8 +32385,18 @@ function isLiveModeWorldActionRouteClaimed(actionId) {
   return true;
 }
 
-function claimLiveModeWorldActionRoute(actionId) {
-  if (actionId) liveModeWorldActionRouteClaims.set(actionId, Date.now());
+function claimLiveModeWorldActionRoute(actionId, metadata = {}) {
+  if (!actionId) return null;
+  const now = Date.now();
+  const previous = getLiveModeWorldActionRouteClaim(actionId);
+  const claim = {
+    ...(previous || {}),
+    ...(metadata || {}),
+    claimedAt: Number(previous?.claimedAt || 0) || now,
+    updatedAt: now,
+  };
+  liveModeWorldActionRouteClaims.set(actionId, claim);
+  return claim;
 }
 
 function clearLiveModeWorldActionRouteClaim(actionId) {
@@ -32350,6 +32408,142 @@ function pruneLiveModeWorldActionRouteClaims(activeActions = []) {
   for (const actionId of liveModeWorldActionRouteClaims.keys()) {
     if (!activeIds.has(actionId)) liveModeWorldActionRouteClaims.delete(actionId);
   }
+}
+
+function makeLiveModeWorldActionRouteClaimMetadata(action = {}, metadata = {}) {
+  const routeTarget = metadata.routeTarget || {};
+  const worldActionId = action.id || action.worldActionId || metadata.worldActionId || null;
+  return {
+    schemaVersion: 'agent-live-mode-route-claim/v1',
+    worldActionId,
+    actionType: action.actionType || action.actionId || metadata.actionType || null,
+    agentId: metadata.agentId || action.agentId || null,
+    executor: metadata.executor || metadata.sourceFunction || 'main3d.js#live-mode-route-claim',
+    sourceFunction: metadata.sourceFunction || metadata.executor || 'main3d.js#live-mode-route-claim',
+    routeKind: metadata.routeKind || routeTarget.routeKind || routeTarget.routeSpotRole || routeTarget.kind || routeTarget.targetKind || null,
+    targetKind: metadata.targetKind || routeTarget.targetKind || routeTarget.kind || null,
+    buildingId: metadata.buildingId || routeTarget.buildingId || routeTarget.targetBuildingId || routeTarget.homeBuildingId || null,
+    furnitureIndex: metadata.furnitureIndex ?? routeTarget.furnitureIndex ?? null,
+    objectInstanceId: metadata.objectInstanceId || routeTarget.objectInstanceId || routeTarget.objectId || null,
+    reservationId: metadata.reservationId || routeTarget.reservationId || action.reservation?.id || null,
+    visibleClientClaimedAt: new Date().toISOString(),
+    reason: metadata.reason || 'visible_client_route_claimed',
+  };
+}
+
+async function postLiveModeWorldActionRouteClaimStatus(action = {}, toStatus = 'routing', metadata = {}) {
+  const worldActionId = action.id || action.worldActionId || metadata.worldActionId || null;
+  if (!worldActionId) return { ok: false, skipped: true, reason: 'no_world_action_id' };
+  const routeClaim = makeLiveModeWorldActionRouteClaimMetadata(action, metadata);
+  const source = metadata.sourceFunction || metadata.executor || 'main3d.js#live-mode-route-claim';
+  const actor = metadata.actor || metadata.agentId || action.agentId || source;
+  const response = await fetch(`/api/world-actions/${encodeURIComponent(worldActionId)}/transition`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      status: toStatus,
+      actor,
+      source,
+      result: {
+        status: toStatus,
+        reason: routeClaim.reason,
+        routeClaim,
+      },
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok && data?.ok !== false, status: response.status, toStatus, data, routeClaim };
+}
+
+async function transitionLiveModeWorldActionRouteClaim(action = {}, metadata = {}) {
+  const worldActionId = action.id || action.worldActionId || metadata.worldActionId || null;
+  if (!worldActionId) return { ok: false, skipped: true, reason: 'no_world_action_id' };
+  const latestAction = await fetchActiveLinkedWorldAction(worldActionId);
+  let currentStatus = String(latestAction?.status || action.status || '').toLowerCase();
+  const steps = [];
+  if (!latestAction && !['reserved', 'route_pending', 'routing', 'arrived', 'in_progress'].includes(currentStatus)) {
+    return { ok: true, skipped: true, reason: 'active_action_not_found', actionId: worldActionId, steps };
+  }
+  if (['routing', 'arrived', 'in_progress'].includes(currentStatus)) {
+    return { ok: true, alreadyAdvanced: true, actionId: worldActionId, finalStatus: currentStatus, steps };
+  }
+  if (currentStatus === 'reserved') {
+    const pending = await postLiveModeWorldActionRouteClaimStatus(latestAction || action, 'route_pending', metadata);
+    const persisted = await waitForPersistedLinkedWorldActionStatus(worldActionId, 'route_pending', currentStatus);
+    steps.push({ from: currentStatus, to: 'route_pending', transition: pending, persisted });
+    if (!pending.ok && !['route_pending', 'routing', 'arrived', 'in_progress'].includes(persisted.status)) return { ok: false, reason: 'route_claim_route_pending_failed', actionId: worldActionId, currentStatus, steps };
+    currentStatus = ['route_pending', 'routing', 'arrived', 'in_progress'].includes(persisted.status) ? persisted.status : 'route_pending';
+  }
+  if (currentStatus === 'route_pending') {
+    const routing = await postLiveModeWorldActionRouteClaimStatus(latestAction || action, 'routing', metadata);
+    const persisted = await waitForPersistedLinkedWorldActionStatus(worldActionId, 'routing', currentStatus);
+    steps.push({ from: currentStatus, to: 'routing', transition: routing, persisted });
+    if (!routing.ok && !['routing', 'arrived', 'in_progress'].includes(persisted.status)) return { ok: false, reason: 'route_claim_routing_failed', actionId: worldActionId, currentStatus, steps };
+    currentStatus = ['routing', 'arrived', 'in_progress'].includes(persisted.status) ? persisted.status : 'routing';
+  }
+  if (['routing', 'arrived', 'in_progress'].includes(currentStatus)) {
+    return { ok: true, actionId: worldActionId, finalStatus: currentStatus, steps };
+  }
+  return { ok: true, skipped: true, reason: 'route_claim_status_not_ready', actionId: worldActionId, finalStatus: currentStatus || null, steps };
+}
+
+function markLiveModeWorldActionRouteClaimed(action = {}, metadata = {}) {
+  const worldActionId = action.id || action.worldActionId || metadata.worldActionId || null;
+  if (!worldActionId) return null;
+  const claimMetadata = makeLiveModeWorldActionRouteClaimMetadata(action, metadata);
+  const claim = claimLiveModeWorldActionRoute(worldActionId, claimMetadata);
+  const now = Date.now();
+  const notifiedAt = Number(claim?.serverNotifiedAt || 0);
+  if (notifiedAt && now - notifiedAt < LIVE_MODE_WORLD_ACTION_ROUTE_CLAIM_NOTIFY_INTERVAL_MS) {
+    window.__VWLastLiveModeRouteClaimTransition = {
+      ...(window.__VWLastLiveModeRouteClaimTransition || {}),
+      ok: true,
+      skipped: true,
+      reason: 'route_claim_notification_throttled',
+      actionId: worldActionId,
+      claim: claimMetadata,
+      checkedAt: new Date().toISOString(),
+    };
+    return claim;
+  }
+  claim.serverNotifiedAt = now;
+  liveModeWorldActionRouteClaims.set(worldActionId, claim);
+  transitionLiveModeWorldActionRouteClaim(action, claimMetadata)
+    .then(result => {
+      const latest = getLiveModeWorldActionRouteClaim(worldActionId);
+      if (latest) {
+        const lastStep = Array.isArray(result?.steps) && result.steps.length ? result.steps[result.steps.length - 1] : null;
+        latest.lastServerTransitionAt = Date.now();
+        latest.lastServerTransitionOk = result?.ok !== false;
+        latest.lastServerTransitionStatus = result?.finalStatus || lastStep?.to || null;
+        latest.lastServerTransitionReason = result?.reason || null;
+        liveModeWorldActionRouteClaims.set(worldActionId, latest);
+      }
+      window.__VWLastLiveModeRouteClaimTransition = {
+        ok: result?.ok !== false,
+        actionId: worldActionId,
+        claim: claimMetadata,
+        result,
+        checkedAt: new Date().toISOString(),
+      };
+    })
+    .catch(error => {
+      const latest = getLiveModeWorldActionRouteClaim(worldActionId);
+      if (latest) {
+        latest.lastServerTransitionAt = Date.now();
+        latest.lastServerTransitionOk = false;
+        latest.lastServerTransitionReason = error?.message || String(error);
+        liveModeWorldActionRouteClaims.set(worldActionId, latest);
+      }
+      window.__VWLastLiveModeRouteClaimTransition = {
+        ok: false,
+        actionId: worldActionId,
+        claim: claimMetadata,
+        error: error?.message || String(error),
+        checkedAt: new Date().toISOString(),
+      };
+    });
+  return claim;
 }
 
 function agentHasLiveModeWorldActionRoute(agent, worldActionId) {
@@ -32835,6 +33029,13 @@ function routeLiveModeConstructionSiteWorldAction(action = {}) {
     agent._doorTransition = null;
     clearLiveModeWorldActionRouteClaim(worldActionId);
   } else if (hasMatchingRoute) {
+    markLiveModeWorldActionRouteClaimed(action, {
+      agentId: agent.id,
+      sourceFunction: 'main3d.js#routeLiveModeConstructionSiteWorldAction',
+      executor: 'main3d.js#routeLiveModeConstructionSiteWorldAction',
+      routeKind: 'construction-site-build',
+      reason: 'already_routing_route_claim_refresh',
+    });
     window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'already_routing', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
     return true;
   }
@@ -32922,7 +33123,15 @@ function routeLiveModeConstructionSiteWorldAction(action = {}) {
   agent._wanderTimer = 150;
   agent._stayTimer = 0;
   agent._schedPhase = 'construction-site-build';
-  claimLiveModeWorldActionRoute(worldActionId);
+  markLiveModeWorldActionRouteClaimed(action, {
+    agentId: agent.id,
+    sourceFunction: 'main3d.js#routeLiveModeConstructionSiteWorldAction',
+    executor: 'main3d.js#routeLiveModeConstructionSiteWorldAction',
+    routeTarget,
+    routeKind: 'construction-site-build',
+    buildingId: site.buildingId,
+    objectInstanceId: site.buildingId,
+  });
   window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, buildSite: site, checkedAt: new Date().toISOString() };
   addActivityLog(`Live Mode routed ${agent.name || agent.id} to build ${site.buildingName || 'a home'}`);
   return true;
@@ -33079,7 +33288,17 @@ function routeLiveModeHomeBedWorldAction(action, agent, building, bedPlan, world
   agent._wanderTimer = 150;
   agent._stayTimer = 0;
   agent._schedPhase = 'home-bed-rest';
-  claimLiveModeWorldActionRoute(worldActionId);
+  markLiveModeWorldActionRouteClaimed(action, {
+    agentId: agent.id,
+    sourceFunction: 'main3d.js#routeLiveModeHomeWorldAction',
+    executor: 'main3d.js#routeLiveModeHomeWorldAction',
+    routeTarget,
+    routeKind: 'home-bed-rest',
+    buildingId: building.id || null,
+    furnitureIndex: bedPlan.furnitureIndex,
+    objectInstanceId: bedPlan.objectInstanceId,
+    reservationId,
+  });
   window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, homeBuildingId: building.id || null, furnitureIndex: bedPlan.furnitureIndex, checkedAt: new Date().toISOString() };
   addActivityLog(`Live Mode routed ${agent.name || agent.id} to rest in bed at ${building.name || building.id}`);
   return true;
@@ -33138,6 +33357,15 @@ function routeLiveModeHomeWorldAction(action = {}) {
     agent._doorTransition = null;
     clearLiveModeWorldActionRouteClaim(worldActionId);
   } else if (hasMatchingRoute) {
+    markLiveModeWorldActionRouteClaimed(action, {
+      agentId: agent.id,
+      sourceFunction: 'main3d.js#routeLiveModeHomeWorldAction',
+      executor: 'main3d.js#routeLiveModeHomeWorldAction',
+      routeKind: 'home-rest',
+      buildingId,
+      objectInstanceId: buildingId,
+      reason: 'already_routing_route_claim_refresh',
+    });
     window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'already_routing', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
     return true;
   }
@@ -33208,9 +33436,140 @@ function routeLiveModeHomeWorldAction(action = {}) {
   agent._wanderTimer = 150;
   agent._stayTimer = 0;
   agent._schedPhase = 'home-rest';
-  claimLiveModeWorldActionRoute(worldActionId);
+  markLiveModeWorldActionRouteClaimed(action, {
+    agentId: agent.id,
+    sourceFunction: 'main3d.js#routeLiveModeHomeWorldAction',
+    executor: 'main3d.js#routeLiveModeHomeWorldAction',
+    routeTarget,
+    routeKind: 'home-rest',
+    buildingId: building.id || null,
+    objectInstanceId: building.id || null,
+  });
   window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, homeBuildingId: building.id || null, checkedAt: new Date().toISOString() };
   addActivityLog(`Live Mode routed ${agent.name || agent.id} home to rest at ${building.name || building.id}`);
+  return true;
+}
+
+function routeLiveModeSocialWorldAction(action = {}) {
+  if (action?.source?.kind !== 'agent-live-mode' && action?.behaviorSourceKind !== 'agent-live-mode') return false;
+  const worldActionId = action.id || action.worldActionId || null;
+  const target = action.target || {};
+  const actionType = String(action.actionType || action.actionId || '').trim();
+  if (actionType !== 'life.social') return false;
+  const agent = resolveAgentForWorldAction(action);
+  const targetAgentId = String(target.targetAgentId || target.agentId || '').trim();
+  const partner = agentsList.find(candidate => candidate && (candidate.id === targetAgentId || candidate.statusKey === targetAgentId)) || null;
+  if (!agent || !partner || partner === agent) return false;
+  const hasMatchingRoute = agentHasLiveModeWorldActionRoute(agent, worldActionId);
+  if (hasMatchingRoute) {
+    markLiveModeWorldActionRouteClaimed(action, {
+      agentId: agent.id,
+      targetAgentId: partner.id || partner.statusKey || targetAgentId,
+      sourceFunction: 'main3d.js#routeLiveModeSocialWorldAction',
+      executor: 'main3d.js#routeLiveModeSocialWorldAction',
+      routeKind: 'social-agent-conversation',
+      targetKind: 'agent',
+      reason: 'already_routing_route_claim_refresh',
+    });
+    window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'already_routing', actionId: worldActionId, agentId: agent.id, targetAgentId, checkedAt: new Date().toISOString() };
+    return true;
+  }
+  if (isLiveModeWorldActionRouteClaimed(worldActionId)) {
+    clearLiveModeWorldActionRouteClaim(worldActionId);
+    window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'stale_claim_released', actionId: worldActionId, agentId: agent.id, targetAgentId, checkedAt: new Date().toISOString() };
+  }
+  const buildingId = target.buildingId || partner._currentBuilding?.id || partner._targetBuilding?.id || null;
+  const building = buildingId ? buildingsMap.get(buildingId) : (getMovementInteriorBuildingAt(partner.x, partner.y) || getMovementInteriorBuildingAt(agent.x, agent.y) || null);
+  const floor = Math.max(1, Number(target.floor || getAgentFloor(partner, building) || getAgentFloor(agent, building) || 1) || 1);
+  const point = (building && typeof buildReachableAgentApproachPoint === 'function')
+    ? buildReachableAgentApproachPoint(agent, partner, building, API_TILE * 1.35)
+    : { x: Number(partner.x || 0) + Math.max(14, API_TILE * 0.75), y: Number(partner.y || 0) };
+  if (!Number.isFinite(Number(point?.x)) || !Number.isFinite(Number(point?.y))) return false;
+  const faceAngle = Math.atan2((partner.x || 0) - point.x, (partner.y || 0) - point.y);
+  const routeTarget = {
+    x: point.x,
+    y: point.y,
+    floor,
+    buildingFloor: floor,
+    targetKind: 'agent',
+    targetAgentId: partner.id || partner.statusKey || targetAgentId,
+    targetAgentName: partner.name || target.targetAgentName || null,
+    buildingId: building?.id || buildingId || null,
+    actionId: 'life.social',
+    capabilityTag: action.capabilityTag || 'life.social',
+    routeOwner: 'main3d.js#setAgentTarget -> dynamic-routing.js',
+    worldActionId,
+    reservationId: action.reservation?.id || null,
+    faceAngle,
+    routeSpotRole: 'social-agent-approach',
+  };
+  const routeAdmission = setAgentTarget(agent, routeTarget, building || null, floor, {
+    owner: 'world-action',
+    priorityName: 'explicit-object',
+    target: routeTarget,
+    building: building || null,
+    floor,
+    object: {
+      type: 'agent',
+      id: routeTarget.targetAgentId,
+      targetAgentId: routeTarget.targetAgentId,
+      actionId: 'life.social',
+      worldActionId,
+      reservationId: routeTarget.reservationId,
+      preserveUntilRelease: true,
+    },
+    release: { policy: 'on-object-complete', releaseObjectReservation: false, releaseActiveUse: false },
+    source: { family: 'world-action-sync', functionName: 'routeLiveModeSocialWorldAction' },
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorAuthority: action.behaviorAuthority || action.source?.behaviorAuthority || 900,
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || 'socialize',
+    debug: { label: 'agent-live:life.social', sourceSummary: 'agent live mode world action social handoff' },
+  });
+  if (routeAdmission?.accepted === false) {
+    window.__VWLastLiveModeWorldActionSync = { ok: false, reason: 'route_admission_rejected', actionId: worldActionId, agentId: agent.id, targetAgentId, routeAdmission };
+    return false;
+  }
+  agent._idleActivity = {
+    kind: 'live-social-conversation',
+    phase: 'approach',
+    approachStartedAt: performance.now(),
+    buildingId: routeTarget.buildingId,
+    targetAgentId: routeTarget.targetAgentId,
+    targetAgentName: routeTarget.targetAgentName,
+    stayMs: 9000 + Math.random() * 5000,
+    faceAngle,
+    dockTarget: { x: routeTarget.x, y: routeTarget.y },
+    dockSnapRadius: Math.max(7, API_TILE * 0.35),
+    action: 'life.social',
+    actionId: 'life.social',
+    capabilityTag: 'life.social',
+    animationId: 'gather-talk',
+    source: 'agent-live-mode-world-action',
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorCategory: 'socialize',
+    routeApproachTarget: { x: routeTarget.x, y: routeTarget.y, floor, spotId: 'social-agent-approach', faceAngle },
+    routeMetadata: routeTarget,
+    worldActionId,
+    reservationId: routeTarget.reservationId,
+    lifecycle: { stationary: true, carryable: false, temporary: false, socialConversation: true, releaseOnCompletion: true },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  markLiveModeWorldActionRouteClaimed(action, {
+    agentId: agent.id,
+    targetAgentId: routeTarget.targetAgentId,
+    sourceFunction: 'main3d.js#routeLiveModeSocialWorldAction',
+    executor: 'main3d.js#routeLiveModeSocialWorldAction',
+    routeTarget,
+    routeKind: 'social-agent-conversation',
+    targetKind: 'agent',
+    buildingId: routeTarget.buildingId,
+    reservationId: routeTarget.reservationId,
+  });
+  window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, targetAgentId: routeTarget.targetAgentId, routeTarget, checkedAt: new Date().toISOString() };
+  addActivityLog(`Live Mode routed ${agent.name || agent.id} to talk with ${partner.name || partner.id}`);
   return true;
 }
 
@@ -33264,6 +33623,16 @@ function routeLiveModeLocalObjectWorldAction(action = {}) {
   if (!agent) return false;
   const hasMatchingRoute = agentHasLiveModeWorldActionRoute(agent, worldActionId);
   if (hasMatchingRoute) {
+    markLiveModeWorldActionRouteClaimed(action, {
+      agentId: agent.id,
+      sourceFunction: 'main3d.js#routeLiveModeLocalObjectWorldAction',
+      executor: 'main3d.js#routeLiveModeLocalObjectWorldAction',
+      routeKind: config.routeKind || 'local-object-use',
+      buildingId,
+      furnitureIndex,
+      objectInstanceId: target.objectInstanceId || action?.route?.target?.objectInstanceId || object?.objectInstanceId || object?.id || object?.instanceId || null,
+      reason: 'already_routing_route_claim_refresh',
+    });
     window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'already_routing', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
     return true;
   }
@@ -33427,7 +33796,17 @@ function routeLiveModeLocalObjectWorldAction(action = {}) {
   };
   agent._wanderTimer = 150;
   agent._stayTimer = 0;
-  claimLiveModeWorldActionRoute(worldActionId);
+  markLiveModeWorldActionRouteClaimed(action, {
+    agentId: agent.id,
+    sourceFunction: 'main3d.js#routeLiveModeLocalObjectWorldAction',
+    executor: 'main3d.js#routeLiveModeLocalObjectWorldAction',
+    routeTarget,
+    routeKind: config.routeKind || 'local-object-use',
+    buildingId,
+    furnitureIndex,
+    objectInstanceId: routeTarget.objectInstanceId,
+    reservationId: localReservationId,
+  });
   window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, furnitureIndex, furnitureType: object.type, checkedAt: new Date().toISOString() };
   addActivityLog(`🤖 Live Mode routed ${agent.name || agent.id} to ${config.label || object.type}`);
   return true;
@@ -33449,6 +33828,16 @@ function routeLiveModeStandingMachineWorldAction(action = {}) {
   if (!agent) return false;
   const hasMatchingRoute = agentHasLiveModeWorldActionRoute(agent, worldActionId);
   if (hasMatchingRoute) {
+    markLiveModeWorldActionRouteClaimed(action, {
+      agentId: agent.id,
+      sourceFunction: 'main3d.js#routeLiveModeStandingMachineWorldAction',
+      executor: 'main3d.js#routeLiveModeStandingMachineWorldAction',
+      routeKind: 'standing-machine-use',
+      buildingId,
+      furnitureIndex,
+      objectInstanceId: target.objectInstanceId || action?.route?.target?.objectInstanceId || machine?.objectInstanceId || machine?.id || machine?.instanceId || null,
+      reason: 'already_routing_route_claim_refresh',
+    });
     window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'already_routing', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
     return true;
   }
@@ -33527,7 +33916,17 @@ function routeLiveModeStandingMachineWorldAction(action = {}) {
   };
   agent._wanderTimer = 150;
   agent._stayTimer = 0;
-  claimLiveModeWorldActionRoute(worldActionId);
+  markLiveModeWorldActionRouteClaimed(action, {
+    agentId: agent.id,
+    sourceFunction: 'main3d.js#routeLiveModeStandingMachineWorldAction',
+    executor: 'main3d.js#routeLiveModeStandingMachineWorldAction',
+    routeTarget,
+    routeKind: 'standing-machine-use',
+    buildingId,
+    furnitureIndex,
+    objectInstanceId: routeTarget.objectInstanceId,
+    reservationId,
+  });
   window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, furnitureIndex, furnitureType: machine.type, checkedAt: new Date().toISOString() };
   addActivityLog(`🤖 Live Mode routed ${agent.name || agent.id} to ${machine.type}`);
   return true;
@@ -33629,9 +34028,34 @@ function routeBarberChairWorldAction(action = {}) {
   return true;
 }
 
+function getLiveModeWorldClientSessionId() {
+  const storageKey = 'vw-live-mode-world-client-session-id';
+  try {
+    const existing = window.sessionStorage?.getItem(storageKey);
+    if (existing) return existing;
+    const randomPart = (window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`).replace(/[^a-zA-Z0-9-]/g, '');
+    const sessionId = `main3d-${randomPart}`;
+    window.sessionStorage?.setItem(storageKey, sessionId);
+    return sessionId;
+  } catch (error) {
+    return `main3d-fallback-${Date.now().toString(36)}`;
+  }
+}
+
+function getLiveModeWorldClientMarkerUrl() {
+  const params = new URLSearchParams({
+    client: 'main3d-live-sync',
+    version: '20260614-live-mode-social-r28',
+    sessionId: getLiveModeWorldClientSessionId(),
+    page: `${window.location.pathname || '/'}${window.location.search || ''}`,
+    visibility: document.visibilityState || 'unknown',
+  });
+  return `/api/world-actions/active?${params.toString()}`;
+}
+
 async function syncActiveBarberChairWorldActions() {
   try {
-    const response = await fetch('/api/world-actions/active?client=main3d-live-sync&version=20260614-live-mode-home-interior-r25');
+    const response = await fetch(getLiveModeWorldClientMarkerUrl());
     if (!response.ok) return false;
     const actions = await response.json();
     if (!Array.isArray(actions)) return false;
@@ -33640,7 +34064,7 @@ async function syncActiveBarberChairWorldActions() {
     for (const action of actions) {
       const status = String(action?.status || '').toLowerCase();
       if (!['requested', 'created', 'reserved', 'route_pending', 'routing'].includes(status)) continue;
-      if (routeBarberChairWorldAction(action) || routeLiveModeConstructionSiteWorldAction(action) || routeLiveModeHomeWorldAction(action) || routeLiveModeStandingMachineWorldAction(action) || routeLiveModeLocalObjectWorldAction(action)) routed++;
+      if (routeBarberChairWorldAction(action) || routeLiveModeConstructionSiteWorldAction(action) || routeLiveModeHomeWorldAction(action) || routeLiveModeSocialWorldAction(action) || routeLiveModeStandingMachineWorldAction(action) || routeLiveModeLocalObjectWorldAction(action)) routed++;
     }
     if (routed) window.__VWLastBarberChairWorldActionSync = { ...(window.__VWLastBarberChairWorldActionSync || {}), routed, checkedAt: new Date().toISOString() };
     return routed > 0;

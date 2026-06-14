@@ -426,6 +426,15 @@
 
                 <section class="settings-pane" data-settings-pane="live-mode">
                     <div id="liveModeSummary" class="settings-status-card">Loading agents...</div>
+                    <div id="liveModeLoopStatus" class="settings-status-card settings-live-loop-status">Loading loop...</div>
+                    <div class="settings-live-loop-controls">
+                        <div class="form-group settings-live-loop-duration"><label>Pause Seconds</label><input type="number" id="setting-liveLoopPauseSec" min="30" max="3600" step="30" value="600"></div>
+                        <button class="btn-secondary" id="btn-refreshLiveLoop" type="button">Refresh Loop</button>
+                        <button class="btn-secondary" id="btn-pauseLiveLoop" type="button">Pause Loop</button>
+                        <button class="btn-secondary" id="btn-resumeLiveLoop" type="button">Resume Loop</button>
+                        <button class="btn-secondary" id="btn-clearLiveClient" type="button">Clear Client</button>
+                    </div>
+                    <div id="liveModeLoopActionStatus" class="settings-inline-status"></div>
                     <div class="settings-live-agent-toolbar">
                         <button class="btn-secondary" id="btn-refreshLiveAgents" type="button">Refresh Agents</button>
                         <button class="btn-primary" id="btn-saveLiveAgents" type="button">Apply Selection</button>
@@ -682,8 +691,8 @@
     </script>
     <script src="js/vo-engine.js?v=printer-copier-asset-v1"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script type="module" src="js/main3d.js?v=20260614-live-mode-home-interior-r25"></script>
+    <script type="module" src="js/main3d.js?v=20260614-live-mode-social-r28"></script>
     <script src="js/chat.js?v=20260612-chat-agent-persistence-r1"></script>
-    <script src="js/settings.js?v=20260613-live-mode-agent-settings-r1"></script>
+    <script src="js/settings.js?v=20260614-live-loop-controls-r2"></script>
 </body>
 </html>
