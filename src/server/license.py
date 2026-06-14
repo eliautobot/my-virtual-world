@@ -26,7 +26,7 @@ _LS_VALIDATE_URL = "https://api.lemonsqueezy.com/v1/licenses/validate"
 _LS_DEACTIVATE_URL = "https://api.lemonsqueezy.com/v1/licenses/deactivate"
 
 _DEFAULT_STORE_ID = "321733"
-_DEFAULT_PRODUCT_IDS = (1140503,)
+_DEFAULT_PRODUCT_IDS = (1140366,)
 
 _EXPECTED_STORE_ID = (os.environ.get("VW_LICENSE_STORE_ID") or _DEFAULT_STORE_ID).strip()
 _PRODUCT_IDS_SOURCE = os.environ.get("VW_LICENSE_PRODUCT_IDS") or ",".join(

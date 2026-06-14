@@ -26,7 +26,7 @@ services:
       - VW_HERMES_BIN=${VW_HERMES_BIN:-/home/vw/.local/bin/hermes}
       - VW_HERMES_TIMEOUT_SEC=${VW_HERMES_TIMEOUT_SEC:-600}
       - VW_LICENSE_STORE_ID=${VW_LICENSE_STORE_ID:-321733}
-      - VW_LICENSE_PRODUCT_IDS=${VW_LICENSE_PRODUCT_IDS:-1140503}
+      - VW_LICENSE_PRODUCT_IDS=${VW_LICENSE_PRODUCT_IDS:-1140366}
       # Optional external provider relay for future non-Hermes providers.
       # Virtual World core features and native Hermes work with this unset.
       # - VW_AGENT_PLATFORM_PROVIDER_URL=http://host.docker.internal:PORT
