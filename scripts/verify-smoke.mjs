@@ -7,6 +7,32 @@ import { spawnSync } from 'node:child_process';
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), 'utf8');
 const exists = (path) => existsSync(join(root, path));
+const textFileSuffixes = [
+  '.css',
+  '.dockerignore',
+  '.env.example',
+  '.gitignore',
+  '.html',
+  '.js',
+  '.json',
+  '.md',
+  '.mjs',
+  '.py',
+  '.txt',
+  '.yaml',
+  '.yml',
+];
+const isProductTextFile = (path) => textFileSuffixes.some((suffix) => path.toLowerCase().endsWith(suffix));
+const collectProductTextFiles = (path) => {
+  const absolute = join(root, path);
+  if (!existsSync(absolute)) return [];
+  const stats = statSync(absolute);
+  if (stats.isDirectory()) {
+    return readdirSync(absolute)
+      .flatMap((name) => collectProductTextFiles(join(path, name)));
+  }
+  return isProductTextFile(path) ? [path] : [];
+};
 
 const requiredFiles = [
   'README.md',
@@ -48,6 +74,29 @@ const removedProductArtifacts = [
 
 for (const path of removedProductArtifacts) {
   assert(!exists(path), `internal/runtime artifact should not be present: ${path}`);
+}
+
+const stagingPort = ['85', '87'].join('');
+const forbiddenStagingReferences = [
+  stagingPort,
+  `localhost:${stagingPort}`,
+  ['my-vw-github-', stagingPort].join(''),
+  [stagingPort, '-live-agent-loop'].join(''),
+  ['Living in My Virtual World ', stagingPort].join(''),
+];
+const productReferenceFiles = [
+  'README.md',
+  'Dockerfile',
+  'docker-compose.yml',
+  '.env.example',
+  'docs',
+  'src',
+].flatMap((path) => collectProductTextFiles(path));
+for (const path of productReferenceFiles) {
+  const content = read(path);
+  for (const token of forbiddenStagingReferences) {
+    assert(!content.includes(token), `product file ${path} contains staging reference ${token}`);
+  }
 }
 
 const dockerfile = read('Dockerfile');

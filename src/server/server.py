@@ -3846,14 +3846,14 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
 
             agent_state["lastHeartbeatAt"] = now_iso
             _live_agent_loop_stat(agent_state, "ticks")
-            _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World 8587")
+            _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World")
             perception = _live_agent_loop_build_perception(agent_id, agent_state, world_client=world_client, now_epoch=now_epoch)
 
             active = perception.get("active") or []
             if active:
                 _live_agent_loop_stat(agent_state, "skippedActive")
                 agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "active-behavior", "active": active, "perceptionAt": perception.get("at")}
-                _live_agent_loop_presence(agent_id, "working", "Living in My Virtual World 8587")
+                _live_agent_loop_presence(agent_id, "working", "Living in My Virtual World")
                 result["skipped"].append({"agentId": agent_id, "reason": "active-behavior", "active": agent_state["lastOutcome"]["active"]})
                 continue
 
@@ -3887,7 +3887,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     "kind": "agent-live-mode",
                     "requestedBy": "server.py#live_agent_loop_tick",
                     "requestId": request_id,
-                    "surface": "8587-live-agent-loop",
+                    "surface": "agent-live-mode-loop",
                     "roles": ["participant"],
                     "loopId": LIVE_AGENT_LOOP_SCHEMA_VERSION,
                 },
@@ -3929,7 +3929,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 agent_state["lastActionId"] = action_id
                 agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
                 agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "httpStatus": status, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown}
-                _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World 8587: {action_def.get('label')}")
+                _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
                 _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, details={"actionId": action_id, "loopActionId": action_def["id"], "target": selected["target"], "decision": agent_state.get("lastDecision")})
                 result["actionsCreated"].append({"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "httpStatus": status, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown})
                 actions_created_this_tick += 1
@@ -7737,7 +7737,7 @@ def main():
     initialize_live_presence()
 
     # Keep enabled Live Mode agents present across restarts; action creation stays
-    # gated by the active 8587 world client polling /api/world-actions/active.
+    # gated by the active world client polling /api/world-actions/active.
     start_live_agent_loop()
 
     handler = VWHandler
