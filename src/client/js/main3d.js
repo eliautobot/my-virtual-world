@@ -3209,6 +3209,10 @@ function getNearbyIdleConversationCandidate(agent, anchorBuilding = null, maxDis
   let bestDist = Infinity;
   for (const other of agentsList) {
     if (!other || other === agent || !other._group3d) continue;
+    if (isAgentLiveModeScriptedSuppressed(other)) {
+      markAgentLiveModeScriptedSuppression(other, 'nearby-idle-conversation-candidate-suppressed');
+      continue;
+    }
     if (isWorkPresenceStatus(other.status) || other._atDesk) continue;
     if (other._tagState?.playing || other._onBreak || other._curInteraction) continue;
     if (other._wanderTarget) continue;
@@ -3737,6 +3741,11 @@ function markAgentScriptedMeaningfulActivity(agent, kind = 'meaningful-action', 
 
 function updateAgentScriptedActivityTelemetry(agent, nowMs = Date.now()) {
   if (!agent) return;
+  if (isAgentLiveModeScriptedSuppressed(agent)) {
+    agent._idleSinceAtMs = null;
+    markAgentLiveModeScriptedSuppression(agent, 'scripted-telemetry-suppressed', { nowMs });
+    return;
+  }
   if (isWorkPresenceStatus(agent.status) || agent._atDesk || agent._activeWorkSpot) {
     agent._lastMeaningfulActionAtMs = nowMs;
     agent._lastWorkActivityAtMs = nowMs;
@@ -4515,6 +4524,10 @@ function markScriptedProximityCooldown(agent, key, nowMs = Date.now()) {
 }
 
 function isAgentEligibleForScriptedProximity(agent, anchorBuilding = null, { allowIdleIntent = false } = {}) {
+  if (isAgentLiveModeScriptedSuppressed(agent)) {
+    markAgentLiveModeScriptedSuppression(agent, 'scripted-proximity-suppressed');
+    return false;
+  }
   if (!agent || isWorkPresenceStatus(agent.status) || agent._atDesk || agent._tagState?.playing || agent._curInteraction) return false;
   syncAgentIntentFromLifecycle(agent);
   const activeIntent = agent._agentIntent || null;
@@ -4872,6 +4885,10 @@ function submitScriptedIdlePulseCategory(agent, category, anchorBuilding, workTa
 
 function maybeRunDefaultScriptedIdlePulse(agent, anchorBuilding, workTarget = null, nowMs = Date.now()) {
   if (!agent || !anchorBuilding || (!workTarget && !VO_STYLE_IDLE_TEST)) return false;
+  if (isAgentLiveModeScriptedSuppressed(agent)) {
+    markAgentLiveModeScriptedSuppression(agent, 'default-scripted-idle-pulse-suppressed', { anchorBuildingId: anchorBuilding?.id || null, nowMs });
+    return false;
+  }
   if (agent._idleActivity || agent._wanderTarget || isAgentIntentActive(agent._agentIntent)) return false;
   const nearDesk = workTarget ? Math.hypot((agent.x || 0) - workTarget.apiX, (agent.y || 0) - workTarget.apiZ) <= WORK_DESK_IDLE_SEATED_RADIUS : false;
   if (workTarget && !agent._atDesk && !nearDesk && !VO_STYLE_IDLE_TEST) return false;
@@ -4901,6 +4918,11 @@ function maybeRunDefaultScriptedIdlePulse(agent, anchorBuilding, workTarget = nu
 
 function applyDeskProneIdlePlan(agent, setTarget) {
   if (!agent || !(agent.status === 'idle' || !agent.status)) return false;
+  if (isAgentLiveModeScriptedSuppressed(agent)) {
+    markAgentLiveModeScriptedSuppression(agent, 'desk-prone-idle-plan-suppressed');
+    agent._forceIdleDeskReturn = false;
+    return false;
+  }
   const activeIntent = agent._agentIntent || null;
   if (isAgentIntentActive(activeIntent) && ['manual', 'explicit-object'].includes(activeIntent.priorityName)) {
     agent._lastIdleDeskPlanBlocked = { reason: 'manual-or-explicit-object-active', activeIntentId: activeIntent.id || null, owner: activeIntent.owner || null, priorityName: activeIntent.priorityName || null, object: activeIntent.object || null, atMs: Date.now() };
@@ -7649,6 +7671,23 @@ function admitAgentIntent(agent, options = {}) {
   syncAgentIntentFromLifecycle(agent);
   const attemptedIntent = createAgentIntent(agent, options);
   const activeIntent = agent?._agentIntent || null;
+  if (isAgentLiveModeScriptedSuppressed(agent) && isAgentLiveModeAmbientIntent(attemptedIntent)) {
+    markAgentLiveModeScriptedSuppression(agent, 'ambient-intent-admission-rejected', {
+      attemptedOwner: attemptedIntent.owner || null,
+      attemptedPriorityName: attemptedIntent.priorityName || null,
+      attemptedBehaviorSourceKind: attemptedIntent.behavior?.behaviorSourceKind || attemptedIntent.source?.behaviorSourceKind || null,
+    });
+    const blockedOverride = createRejectedIntentDebugEvent(activeIntent, attemptedIntent, 'agent-live-mode-scripted-suppressed');
+    attemptedIntent.debug = {
+      ...(attemptedIntent.debug || {}),
+      lastAdmissionDecision: 'rejected',
+      lastDecisionReason: 'agent-live-mode-scripted-suppressed',
+      blockedAtMs: Date.now(),
+    };
+    agent._lastBlockedIntentOverride = blockedOverride;
+    agent._lastLiveModeScriptedSuppressionAttempt = blockedOverride;
+    return { accepted: false, attemptedIntent, activeIntent, reason: 'agent-live-mode-scripted-suppressed', blockedOverride };
+  }
   if (!isAgentIntentActive(activeIntent)) return { accepted: true, attemptedIntent, activeIntent: null, reason: 'no-active-intent' };
   if ((attemptedIntent.priority || 0) > (activeIntent.priority || 0)) return { accepted: true, attemptedIntent, activeIntent, reason: 'higher-priority-intent' };
   const samePriority = (attemptedIntent.priority || 0) === (activeIntent.priority || 0);
@@ -8222,6 +8261,89 @@ function getAllAgentIntentSnapshots() {
 
 function normalizeAgentLiveModeEnabled(agent = null) {
   return Boolean(agent?.agentLiveModeEnabled);
+}
+
+function isAgentLiveModeScriptedSuppressed(agent = null) {
+  return normalizeAgentLiveModeEnabled(agent);
+}
+
+function isAgentLiveModeAmbientIntent(intent = null) {
+  const owner = String(intent?.owner || '');
+  const priorityName = String(intent?.priorityName || '');
+  const sourceKind = String(intent?.behavior?.behaviorSourceKind || intent?.source?.behaviorSourceKind || intent?.behaviorSourceKind || '');
+  return (
+    ['idle', 'schedule', 'live-status'].includes(owner) ||
+    ['idle', 'schedule', 'live-status'].includes(priorityName) ||
+    sourceKind === 'agent-scripted-mode' ||
+    sourceKind === 'system-schedule'
+  );
+}
+
+function hasAgentLiveModeWorldActionControl(agent = null) {
+  const intent = agent?._agentIntent || null;
+  const intentSourceKind = intent?.behavior?.behaviorSourceKind || intent?.source?.behaviorSourceKind || null;
+  const activity = agent?._idleActivity || null;
+  return Boolean(
+    normalizeAgentLiveModeEnabled(agent) &&
+    (
+      (isAgentIntentActive(intent) && intentSourceKind === 'agent-live-mode' && intent?.object?.worldActionId) ||
+      (activity && (activity.behaviorSourceKind === 'agent-live-mode' || activity.source === 'agent-live-mode-world-action' || activity.worldActionId))
+    )
+  );
+}
+
+function markAgentLiveModeScriptedSuppression(agent, reason = 'agent-live-mode-enabled', details = {}) {
+  if (!agent || !isAgentLiveModeScriptedSuppressed(agent)) return false;
+  const nowMs = Date.now();
+  const previous = agent._lastLiveModeScriptedSuppression || null;
+  const shouldRefresh = !previous || previous.reason !== reason || nowMs - Number(previous.atMs || 0) >= 5000;
+  if (!shouldRefresh) return true;
+  agent._liveModeScriptedSuppressionCount = Number(agent._liveModeScriptedSuppressionCount || 0) + 1;
+  agent._lastLiveModeScriptedSuppression = {
+    reason,
+    atMs: nowMs,
+    at: new Date(nowMs).toISOString(),
+    count: agent._liveModeScriptedSuppressionCount,
+    agentLiveModeEnabled: true,
+    details,
+  };
+  return true;
+}
+
+function getLiveModeScriptedSuppressionState(agentOrId = null) {
+  const agent = typeof agentOrId === 'string'
+    ? agentsList.find(candidate => candidate && String(candidate.id || candidate.statusKey || candidate.name || '') === String(agentOrId))
+    : agentOrId;
+  if (!agent) return null;
+  return {
+    agentId: agent.id || agent.statusKey || agent.name || null,
+    agentLiveModeEnabled: normalizeAgentLiveModeEnabled(agent),
+    scriptedSuppressed: isAgentLiveModeScriptedSuppressed(agent),
+    lastSuppression: agent._lastLiveModeScriptedSuppression || null,
+    suppressionCount: Number(agent._liveModeScriptedSuppressionCount || 0),
+    activeIntent: agent._agentIntent ? {
+      id: agent._agentIntent.id || null,
+      owner: agent._agentIntent.owner || null,
+      priorityName: agent._agentIntent.priorityName || null,
+      phase: agent._agentIntent.phase || null,
+      active: isAgentIntentActive(agent._agentIntent),
+      ambientSuppressed: isAgentLiveModeAmbientIntent(agent._agentIntent),
+      liveModeWorldActionControl: hasAgentLiveModeWorldActionControl(agent),
+      behaviorSourceKind: agent._agentIntent.behavior?.behaviorSourceKind || agent._agentIntent.source?.behaviorSourceKind || null,
+    } : null,
+    lastRejectedAttempt: agent._lastLiveModeScriptedSuppressionAttempt || null,
+    idleActivity: agent._idleActivity ? {
+      kind: agent._idleActivity.kind || null,
+      actionId: agent._idleActivity.actionId || agent._idleActivity.action || null,
+      behaviorSourceKind: agent._idleActivity.behaviorSourceKind || null,
+      worldActionId: agent._idleActivity.worldActionId || agent._idleActivity.routeMetadata?.worldActionId || null,
+    } : null,
+    wanderTarget: agent._wanderTarget ? {
+      actionId: agent._wanderTarget.actionId || null,
+      targetKind: agent._wanderTarget.targetKind || agent._wanderTarget.routeMode || null,
+      worldActionId: agent._wanderTarget.worldActionId || null,
+    } : null,
+  };
 }
 
 function getIntentReadoutFallbackClassification(intent = null) {
@@ -10391,6 +10513,7 @@ if (typeof window !== 'undefined') {
     submitAgentScriptedBehaviorProposal,
     submitScriptedStandingUseBehavior,
     submitScriptedPlaySocialProximityBehavior,
+    getLiveModeScriptedSuppressionState,
     verifyPhase4Task9ScriptedModeAgentIntentObjectUse,
     verifyPhase4Task12ScriptedPlaySocialProximity,
     verifyPhase4Task14DebugReadoutAndControls,
@@ -10410,6 +10533,7 @@ if (typeof window !== 'undefined') {
   window.__VWRenderAgentIntentDebugReadout = renderAgentIntentDebugReadout;
   window.__VWSetAgentIntentDebugReadoutEnabled = setAgentIntentDebugReadoutEnabled;
   window.__VWSetAgentLiveModeEnabled = setAgentLiveModeEnabled;
+  window.__VWGetLiveModeScriptedSuppressionState = getLiveModeScriptedSuppressionState;
   window.__VWGetMovementDebugSnapshot = getMovementDebugSnapshot;
   window.__verifyPhase3BTask2ExplicitObjectIntent = verifyPhase3BTask2ExplicitObjectIntent;
   window.__verifyPhase3BTask3LiveStatusIntent = verifyPhase3BTask3LiveStatusIntent;
@@ -17909,9 +18033,25 @@ function updateAgentAnimations(dt) {
     updateAgentScriptedActivityTelemetry(agent, Date.now());
 
     const hasStandingDrinkMachineActivity = String(agent._idleActivity?.kind || '').startsWith('water-cooler-') || String(agent._idleActivity?.kind || '').startsWith('coffee-machine-') || String(agent._idleActivity?.kind || '').startsWith('vending-machine-');
+    const liveModeScriptedSuppressed = isAgentLiveModeScriptedSuppressed(agent);
+    if (liveModeScriptedSuppressed) {
+      markAgentLiveModeScriptedSuppression(agent, 'agent-live-mode-status-routing-suppressed', {
+        status: agent.status || null,
+        activeIntentPriority: agent._agentIntent?.priorityName || null,
+        idleActivityKind: agent._idleActivity?.kind || null,
+      });
+      if (isAgentIntentActive(agent._agentIntent) && isAgentLiveModeAmbientIntent(agent._agentIntent)) {
+        releaseAgentIntent(agent, 'agent-live-mode-ambient-intent-suppressed', {
+          releaseBy: 'higher-priority',
+          clearRoute: true,
+          clearLifecycle: false,
+          releaseSummary: 'Agent Live Mode suppresses ambient status, schedule, and scripted routing',
+        });
+      }
+    }
 
     // ── REAL STATUS OVERRIDE: meeting agents go sit at the conference table ──────
-    const meetingTarget = normalizeLiveAgentStatus(agent.status) === 'meeting' && !manualPlacementLocked && !hasStandingDrinkMachineActivity ? getLiveMeetingTargetForAgent(agent) : null;
+    const meetingTarget = !liveModeScriptedSuppressed && normalizeLiveAgentStatus(agent.status) === 'meeting' && !manualPlacementLocked && !hasStandingDrinkMachineActivity ? getLiveMeetingTargetForAgent(agent) : null;
     if (meetingTarget?.building) {
       const existing = agent._idleActivity?.kind === 'meeting-table' ? agent._idleActivity : null;
       if (!existing || existing.spotId !== meetingTarget.spotId || existing.buildingId !== meetingTarget.entry.buildingId || Number(existing.furnitureIndex) !== Number(meetingTarget.entry.index)) {
@@ -17959,8 +18099,8 @@ function updateAgentAnimations(dt) {
     const hasDeskDrinkConsumeActivity = String(agent._idleActivity?.kind || '').startsWith('coffee-desk-') || String(agent._idleActivity?.kind || '').startsWith('water-desk-') || String(agent._idleActivity?.kind || '').startsWith('vending-desk-') || String(agent._idleActivity?.kind || '').startsWith('microwave-desk-');
     const hasProtectedDrinkActivity = hasStandingDrinkMachineActivity || hasDeskDrinkConsumeActivity;
     const hasPostDrinkDeskRelease = isPostDrinkDeskReleaseActive(agent);
-    const workTarget = isWorkPresenceStatus(agent.status) && !meetingTarget && !manualPlacementLocked && !hasProtectedDrinkActivity && !hasPostDrinkDeskRelease ? getAgentWorkTarget(agent) : null;
-    const deskIdleTarget = isIdlePresenceStatus(agent.status) && !meetingTarget && !manualPlacementLocked && !hasProtectedDrinkActivity && !hasPostDrinkDeskRelease
+    const workTarget = !liveModeScriptedSuppressed && isWorkPresenceStatus(agent.status) && !meetingTarget && !manualPlacementLocked && !hasProtectedDrinkActivity && !hasPostDrinkDeskRelease ? getAgentWorkTarget(agent) : null;
+    const deskIdleTarget = !liveModeScriptedSuppressed && isIdlePresenceStatus(agent.status) && !meetingTarget && !manualPlacementLocked && !hasProtectedDrinkActivity && !hasPostDrinkDeskRelease
       ? (agent._activeWorkSpot || getAgentWorkTarget(agent))
       : null;
     const deskIdleDist = deskIdleTarget ? Math.hypot((agent.x || 0) - deskIdleTarget.apiX, (agent.y || 0) - deskIdleTarget.apiZ) : Infinity;
@@ -19363,7 +19503,15 @@ function updateAgentAnimations(dt) {
       }
       const _scheduleAccepted = (route) => route?.accepted !== false;
 
-      if (applyDeskProneIdlePlan(agent, _setTarget)) {
+      if (liveModeScriptedSuppressed) {
+        markAgentLiveModeScriptedSuppression(agent, 'ambient-schedule-routing-suppressed', {
+          schedulePhase: schedulePhaseForGate,
+          status: agent.status || null,
+        });
+        agent._schedPhase = 'agent-live-mode-waiting';
+        agent._wanderTimer = Math.max(agent._wanderTimer || 0, 1500);
+        agent._stayTimer = Math.max(agent._stayTimer || 0, 1000);
+      } else if (applyDeskProneIdlePlan(agent, _setTarget)) {
         agent._schedPhase = 'idle-local';
       } else if (isSleeping) {
         // Head home and rest inside. Do not mark agents as sleeping while they are still outside.
@@ -27145,9 +27293,17 @@ async function loadAgents() {
             else if (newStatus === 'break') addActivityLog(`${emoji} ${name} went on break`);
             else if (!newStatus || newStatus === 'offline') addActivityLog(`⚫ ${name} went offline`);
 
-            clearAgentTransientMovement(a);
-            a._stayTimer = 0;
-            a._wanderTimer = 0;
+            if (hasAgentLiveModeWorldActionControl(a)) {
+              markAgentLiveModeScriptedSuppression(a, 'status-change-movement-clear-skipped', {
+                previousStatus: prevStatus || null,
+                nextStatus: newStatus || null,
+                worldActionId: a._agentIntent?.object?.worldActionId || a._idleActivity?.worldActionId || null,
+              });
+            } else {
+              clearAgentTransientMovement(a);
+              a._stayTimer = 0;
+              a._wanderTimer = 0;
+            }
           }
 
           _agentLastStatus.set(a.id, newStatus);
@@ -50296,6 +50452,10 @@ function ensureVisiblePingPongPaddle(agent, color = 0xf44336, side = 'left') {
 
 function isPingPongEligibleIdleAgent(agent) {
   if (!agent) return false;
+  if (isAgentLiveModeScriptedSuppressed(agent)) {
+    markAgentLiveModeScriptedSuppression(agent, 'pingpong-recruitment-suppressed');
+    return false;
+  }
   if (agent.status && agent.status !== 'idle') return false;
   if (isWorkPresenceStatus(agent.status) || agent._atDesk || agent._tagState?.playing || agent._curInteraction) return false;
   const activeKind = String(agent._idleActivity?.kind || '');

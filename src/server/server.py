@@ -1127,8 +1127,26 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "maxActionsPerTick": 1,
     "worldClientRequired": True,
     "eventRetention": 100,
+    "memoryRetention": 24,
+    "reflectionRetention": 18,
+    "feedbackRetention": 24,
+    "decisionMode": "perception-heuristic",
 }
 LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION = "20260613-live-mode-visibility-r2"
+LIVE_AGENT_LOOP_NEED_DEFAULTS = {
+    "hydration": 0.45,
+    "food": 0.35,
+    "energy": 0.32,
+    "curiosity": 0.55,
+    "maintenance": 0.22,
+}
+LIVE_AGENT_LOOP_NEED_RATES_PER_MIN = {
+    "hydration": 0.012,
+    "food": 0.008,
+    "energy": 0.006,
+    "curiosity": 0.010,
+    "maintenance": 0.004,
+}
 LIVE_AGENT_LOOP_ACTIONS = [
     {
         "id": "hydrate-water-cooler",
@@ -1136,7 +1154,9 @@ LIVE_AGENT_LOOP_ACTIONS = [
         "actionType": "life.getWater",
         "capabilityTag": "life.hydration",
         "interactionSpotId": "use-front",
+        "need": "hydration",
         "label": "get water",
+        "experience": "get water from the Office cooler",
     },
     {
         "id": "hydrate-coffee-machine",
@@ -1144,7 +1164,29 @@ LIVE_AGENT_LOOP_ACTIONS = [
         "actionType": "life.getCoffee",
         "capabilityTag": "life.hydration",
         "interactionSpotId": "use-front",
+        "need": "energy",
         "label": "get coffee",
+        "experience": "make coffee at the counter",
+    },
+    {
+        "id": "snack-vending-machine",
+        "catalogIds": ["vending", "vending-machine"],
+        "actionType": "life.buyVendingSnackDrink",
+        "capabilityTag": "life.food",
+        "interactionSpotId": "use-front",
+        "need": "food",
+        "label": "buy a snack",
+        "experience": "use the vending machine",
+    },
+    {
+        "id": "heat-microwave-food",
+        "catalogIds": ["microwave"],
+        "actionType": "life.heatFood",
+        "capabilityTag": "life.food",
+        "interactionSpotId": "use-front",
+        "need": "food",
+        "label": "heat food",
+        "experience": "heat a snack in the microwave",
     },
 ]
 
@@ -2207,9 +2249,7 @@ def _move_target_invalid_reason(target):
 def _linked_world_action_terminal_for_move(intent):
     if not isinstance(intent, dict):
         return None
-    action_id = intent.get("actionId") or intent.get("worldActionId")
-    target = intent.get("target") if isinstance(intent.get("target"), dict) else {}
-    action_id = action_id or target.get("actionId") or target.get("worldActionId")
+    action_id = _move_intent_linked_world_action_id(intent)
     if not action_id:
         return None
     store = get_world_actions_store(persist_migration=True)
@@ -2229,8 +2269,35 @@ def _linked_world_action_terminal_for_move(intent):
         "status": terminal_status,
         "reason": action.get("failureReason") or status or "linked_action_terminal",
         "actionId": action_id,
+        "worldActionId": action_id,
         "worldActionStatus": status,
     }
+
+
+def _move_intent_linked_world_action_id(intent):
+    if not isinstance(intent, dict):
+        return None
+    target = intent.get("target") if isinstance(intent.get("target"), dict) else {}
+    metadata = intent.get("targetMetadata") if isinstance(intent.get("targetMetadata"), dict) else {}
+    route = intent.get("route") if isinstance(intent.get("route"), dict) else {}
+    route_target = route.get("target") if isinstance(route.get("target"), dict) else {}
+    route_metadata = route.get("targetMetadata") if isinstance(route.get("targetMetadata"), dict) else {}
+    for value in (
+        intent.get("worldActionId"),
+        intent.get("actionId"),
+        target.get("worldActionId"),
+        target.get("actionId"),
+        metadata.get("worldActionId"),
+        metadata.get("actionId"),
+        route.get("worldActionId"),
+        route_target.get("worldActionId"),
+        route_target.get("actionId"),
+        route_metadata.get("worldActionId"),
+        route_metadata.get("actionId"),
+    ):
+        if value:
+            return value
+    return None
 
 
 def reconcile_move_intents():
@@ -2269,7 +2336,8 @@ def _agent_busy_for_move(agent_id, action_id=None):
         if status in WORLD_ACTION_ACTIVE_STATES and (not action_id or action.get("id") != action_id):
             return {"type": "world-action", "id": action.get("id"), "status": status}
     for intent in reconcile_move_intents().get("active", []):
-        if intent.get("agentId") == agent_id and intent.get("routeStatus") in MOVE_INTENT_ACTIVE_STATES and (not action_id or intent.get("actionId") != action_id):
+        intent_action_id = _move_intent_linked_world_action_id(intent)
+        if intent.get("agentId") == agent_id and intent.get("routeStatus") in MOVE_INTENT_ACTIVE_STATES and (not action_id or intent_action_id != action_id):
             return {"type": "move-intent", "id": intent.get("id"), "status": intent.get("routeStatus")}
     return None
 
@@ -2290,7 +2358,7 @@ def _active_behavior_records_for_agent(agent_id):
     for intent in reconcile_move_intents().get("active", []):
         if intent.get("agentId") != agent_id or intent.get("routeStatus") not in MOVE_INTENT_ACTIVE_STATES:
             continue
-        records.append({"type": "move-intent", "id": intent.get("id"), "status": intent.get("routeStatus"), "behaviorSourceKind": _behavior_source_kind_from_record(intent), "record": intent})
+        records.append({"type": "move-intent", "id": intent.get("id"), "status": intent.get("routeStatus"), "worldActionId": _move_intent_linked_world_action_id(intent), "behaviorSourceKind": _behavior_source_kind_from_record(intent), "record": intent})
     return records
 
 
@@ -2514,6 +2582,31 @@ def _live_agent_loop_add_event(state, event_type, *, agent_id=None, details=None
     return event
 
 
+def _live_agent_loop_clamp_need(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = 0
+    return round(max(0, min(1.25, number)), 3)
+
+
+def _live_agent_loop_normalize_memory(agent_state):
+    if not isinstance(agent_state.get("needs"), dict):
+        agent_state["needs"] = dict(LIVE_AGENT_LOOP_NEED_DEFAULTS)
+    else:
+        needs = dict(LIVE_AGENT_LOOP_NEED_DEFAULTS)
+        needs.update({key: _live_agent_loop_clamp_need(value) for key, value in agent_state.get("needs", {}).items() if key in LIVE_AGENT_LOOP_NEED_DEFAULTS})
+        agent_state["needs"] = needs
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    memory.setdefault("recentActions", [])
+    memory.setdefault("observations", [])
+    memory.setdefault("reflections", [])
+    agent_state["memory"] = memory
+    if not isinstance(agent_state.get("feedbackReports"), list):
+        agent_state["feedbackReports"] = []
+    return agent_state
+
+
 def _live_agent_loop_agent_state(state, agent_id):
     agents = state.setdefault("agents", {})
     row = dict(agents.get(agent_id) or {})
@@ -2527,8 +2620,52 @@ def _live_agent_loop_agent_state(state, agent_id):
         "targetMisses": 0,
         "errors": 0,
     })
+    _live_agent_loop_normalize_memory(row)
     agents[agent_id] = row
     return row
+
+
+def _live_agent_loop_update_needs(agent_state, now_epoch=None):
+    _live_agent_loop_normalize_memory(agent_state)
+    now_epoch = float(now_epoch or time.time())
+    last_epoch = _parse_isoish_epoch(agent_state.get("lastNeedUpdateAt")) or now_epoch
+    elapsed_min = max(0, min(60, (now_epoch - last_epoch) / 60.0))
+    needs = dict(agent_state.get("needs") or LIVE_AGENT_LOOP_NEED_DEFAULTS)
+    for key, rate in LIVE_AGENT_LOOP_NEED_RATES_PER_MIN.items():
+        needs[key] = _live_agent_loop_clamp_need(needs.get(key, LIVE_AGENT_LOOP_NEED_DEFAULTS.get(key, 0)) + (rate * elapsed_min))
+    agent_state["needs"] = needs
+    agent_state["lastNeedUpdateAt"] = _epoch_to_utc_iso(now_epoch)
+    return needs
+
+
+def _live_agent_loop_decay_need_after_action(agent_state, need_key, completed=True):
+    needs = dict((agent_state or {}).get("needs") or LIVE_AGENT_LOOP_NEED_DEFAULTS)
+    if need_key in needs:
+        needs[need_key] = _live_agent_loop_clamp_need(0.12 if completed else min(1.25, needs.get(need_key, 0.5) + 0.12))
+    if completed and need_key != "curiosity":
+        needs["curiosity"] = _live_agent_loop_clamp_need(needs.get("curiosity", LIVE_AGENT_LOOP_NEED_DEFAULTS["curiosity"]) + 0.04)
+    agent_state["needs"] = needs
+    return needs
+
+
+def _live_agent_loop_trim_list(values, limit):
+    values = [item for item in (values or []) if isinstance(item, dict)]
+    return values[-max(1, int(limit)):]
+
+
+def _live_agent_loop_add_feedback(state, agent_id, level, message, details=None):
+    agent_state = _live_agent_loop_agent_state(state, agent_id)
+    report = {
+        "at": _utc_now_iso(),
+        "level": level or "info",
+        "message": str(message or "").strip()[:500],
+    }
+    if isinstance(details, dict):
+        report["details"] = details
+    reports = _live_agent_loop_trim_list([*(agent_state.get("feedbackReports") or []), report], LIVE_AGENT_LOOP_DEFAULTS["feedbackRetention"])
+    agent_state["feedbackReports"] = reports
+    _live_agent_loop_add_event(state, "feedback-report", agent_id=agent_id, details={"level": report["level"], "message": report["message"], **({"actionId": details.get("actionId")} if isinstance(details, dict) and details.get("actionId") else {})})
+    return report
 
 
 def _live_agent_loop_enabled_roster():
@@ -2598,17 +2735,191 @@ def _live_agent_loop_find_action_target(action_def, *, agent_id=None):
     return None
 
 
-def _live_agent_loop_select_next_action(agent_id, agent_state):
-    actions_created = _normalize_int((agent_state.get("stats") or {}).get("actionsCreated"), 0, minimum=0)
-    options = LIVE_AGENT_LOOP_ACTIONS[:]
-    if options:
-        offset = actions_created % len(options)
-        options = options[offset:] + options[:offset]
-    for action_def in options:
-        target = _live_agent_loop_find_action_target(action_def, agent_id=agent_id)
-        if target:
-            return target
+def _live_agent_loop_action_definition(loop_action_id=None, action_type=None):
+    for action_def in LIVE_AGENT_LOOP_ACTIONS:
+        if loop_action_id and action_def.get("id") == loop_action_id:
+            return action_def
+        if action_type and action_def.get("actionType") == action_type:
+            return action_def
     return None
+
+
+def _live_agent_loop_agent_snapshot(agent_id):
+    status = load_agent_status()
+    roster = _merge_agent_profiles(get_roster())
+    for agent in roster:
+        status_key = agent.get("statusKey") or agent.get("id")
+        if status_key != agent_id and agent.get("id") != agent_id:
+            continue
+        agent_status = status.get(status_key, {}) or status.get(agent.get("id"), {})
+        return {
+            "agentId": status_key,
+            "id": agent.get("id"),
+            "name": agent.get("name"),
+            "providerKind": agent.get("providerKind"),
+            "status": agent_status.get("state", agent_status.get("status", "offline")),
+            "task": agent_status.get("task", ""),
+            "agentLiveModeEnabled": bool((get_agent_live_mode_setting(status_key) or {}).get("agentLiveModeEnabled")),
+        }
+    return {"agentId": agent_id, "status": "unknown", "task": "", "agentLiveModeEnabled": False}
+
+
+def _live_agent_loop_world_summary():
+    buildings = [b for b in list_buildings() if isinstance(b, dict)]
+    object_counts = {}
+    for building in buildings:
+        for obj in ((building.get("interior") or {}).get("furniture") or []):
+            if not isinstance(obj, dict):
+                continue
+            catalog_id = _object_catalog_id(obj)
+            object_counts[catalog_id] = object_counts.get(catalog_id, 0) + 1
+    return {
+        "buildingCount": len(buildings),
+        "buildings": [{"id": b.get("id"), "name": b.get("name"), "furnitureCount": len(((b.get("interior") or {}).get("furniture") or []))} for b in buildings[:12]],
+        "objectCounts": object_counts,
+    }
+
+
+def _live_agent_loop_recent_world_actions(agent_id, limit=8):
+    store = get_world_actions_store(persist_migration=True)
+    rows = []
+    for bucket in ("active", "history"):
+        for action in store.get(bucket, []):
+            if not isinstance(action, dict) or action.get("agentId") != agent_id:
+                continue
+            timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+            params = action.get("params") if isinstance(action.get("params"), dict) else {}
+            rows.append({
+                "id": action.get("id"),
+                "bucket": bucket,
+                "status": _canonical_world_action_status(action.get("status")),
+                "actionType": action.get("actionType"),
+                "loopActionId": params.get("loopActionId"),
+                "updatedAt": timing.get("updatedAt"),
+                "terminalAt": timing.get("terminalAt"),
+            })
+    rows.sort(key=lambda row: row.get("terminalAt") or row.get("updatedAt") or "", reverse=True)
+    return rows[:max(1, int(limit))]
+
+
+def _live_agent_loop_action_affordances(agent_id, agent_state):
+    affordances = []
+    for action_def in LIVE_AGENT_LOOP_ACTIONS:
+        selected = _live_agent_loop_find_action_target(action_def, agent_id=agent_id)
+        affordance = {
+            "id": action_def.get("id"),
+            "label": action_def.get("label"),
+            "experience": action_def.get("experience"),
+            "actionType": action_def.get("actionType"),
+            "capabilityTag": action_def.get("capabilityTag"),
+            "need": action_def.get("need"),
+            "available": bool(selected),
+        }
+        if selected:
+            affordance.update({
+                "target": selected.get("target"),
+                "buildingName": selected.get("buildingName"),
+                "objectType": selected.get("objectType"),
+                "availability": selected.get("availability"),
+                "selected": selected,
+            })
+        else:
+            affordance["reason"] = "no-available-target"
+        affordances.append(affordance)
+    return affordances
+
+
+def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, now_epoch=None):
+    now_epoch = float(now_epoch or time.time())
+    needs = _live_agent_loop_update_needs(agent_state, now_epoch)
+    active = _active_behavior_records_for_agent(agent_id)
+    affordances = _live_agent_loop_action_affordances(agent_id, agent_state)
+    recent_actions = _live_agent_loop_recent_world_actions(agent_id)
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    perception = {
+        "schemaVersion": "agent-live-mode-perception/v1",
+        "at": _epoch_to_utc_iso(now_epoch),
+        "agent": _live_agent_loop_agent_snapshot(agent_id),
+        "worldClient": world_client if isinstance(world_client, dict) else _live_agent_loop_world_client_status(),
+        "needs": needs,
+        "active": [{k: item.get(k) for k in ("type", "id", "status", "worldActionId", "behaviorSourceKind")} for item in active],
+        "affordances": [{k: v for k, v in affordance.items() if k != "selected"} for affordance in affordances],
+        "recentWorldActions": recent_actions,
+        "memory": {
+            "recentActions": _live_agent_loop_trim_list(memory.get("recentActions"), 8),
+            "observations": _live_agent_loop_trim_list(memory.get("observations"), 6),
+            "reflections": _live_agent_loop_trim_list(memory.get("reflections"), 6),
+        },
+        "world": _live_agent_loop_world_summary(),
+    }
+    agent_state["lastPerception"] = {
+        "at": perception["at"],
+        "needs": needs,
+        "availableActionIds": [item["id"] for item in affordances if item.get("available")],
+        "activeCount": len(active),
+        "recentWorldActionIds": [item.get("id") for item in recent_actions[:4]],
+    }
+    return perception
+
+
+def _live_agent_loop_decision_score(affordance, agent_state):
+    need_key = affordance.get("need") or "curiosity"
+    needs = agent_state.get("needs") if isinstance(agent_state.get("needs"), dict) else LIVE_AGENT_LOOP_NEED_DEFAULTS
+    score = 0.25 + float(needs.get(need_key, 0.3))
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    recent_ids = [item.get("loopActionId") for item in _live_agent_loop_trim_list(memory.get("recentActions"), 6)]
+    if recent_ids and affordance.get("id") == recent_ids[-1]:
+        score -= 0.42
+    elif affordance.get("id") in recent_ids:
+        score -= 0.18
+    if need_key in {"curiosity", "maintenance"}:
+        score += 0.08
+    return round(score, 3)
+
+
+def _live_agent_loop_build_decision_frame(agent_id, perception, agent_state):
+    candidates = []
+    for affordance in perception.get("affordances", []):
+        if not affordance.get("available"):
+            candidates.append({**affordance, "score": 0, "decision": "unavailable"})
+            continue
+        score = _live_agent_loop_decision_score(affordance, agent_state)
+        candidates.append({**affordance, "score": score, "decision": "candidate"})
+    available = [candidate for candidate in candidates if candidate.get("decision") == "candidate"]
+    available.sort(key=lambda item: (float(item.get("score") or 0), item.get("id") or ""), reverse=True)
+    selected = available[0] if available else None
+    top_need = max((perception.get("needs") or {}).items(), key=lambda item: item[1], default=("curiosity", 0))
+    frame = {
+        "schemaVersion": "agent-live-mode-decision/v1",
+        "at": perception.get("at"),
+        "agentId": agent_id,
+        "mode": LIVE_AGENT_LOOP_DEFAULTS["decisionMode"],
+        "modelReady": True,
+        "topNeed": {"id": top_need[0], "value": top_need[1]},
+        "selectedActionId": selected.get("id") if selected else None,
+        "selectedActionLabel": selected.get("label") if selected else None,
+        "score": selected.get("score") if selected else 0,
+        "candidates": candidates,
+        "prompt": "Choose one available action for the agent based on needs, recent memory, active world state, and safe pacing. Return a loopActionId from candidates or skip.",
+        "reason": f"{selected.get('label')} best matches current {selected.get('need')} need" if selected else "no available candidates",
+    }
+    agent_state["lastDecision"] = {k: frame.get(k) for k in ("at", "mode", "topNeed", "selectedActionId", "selectedActionLabel", "score", "reason")}
+    return frame
+
+
+def _live_agent_loop_select_next_action(agent_id, agent_state, perception=None):
+    perception = perception if isinstance(perception, dict) else _live_agent_loop_build_perception(agent_id, agent_state)
+    decision = _live_agent_loop_build_decision_frame(agent_id, perception, agent_state)
+    selected_id = decision.get("selectedActionId")
+    if not selected_id:
+        return None, decision
+    selected_affordance = next((item for item in _live_agent_loop_action_affordances(agent_id, agent_state) if item.get("id") == selected_id and item.get("available")), None)
+    if not selected_affordance:
+        return None, decision
+    selected = selected_affordance.get("selected")
+    if isinstance(selected, dict):
+        selected["decision"] = decision
+    return selected, decision
 
 
 def _live_agent_loop_next_allowed_epoch(agent_state):
@@ -2617,6 +2928,128 @@ def _live_agent_loop_next_allowed_epoch(agent_state):
         return float(raw)
     parsed = _parse_isoish_epoch(raw)
     return float(parsed or 0)
+
+
+def _live_agent_loop_action_summary(action):
+    if not isinstance(action, dict):
+        return None
+    timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+    source = action.get("source") if isinstance(action.get("source"), dict) else {}
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    result = action.get("result") if isinstance(action.get("result"), dict) else {}
+    return {
+        "id": action.get("id"),
+        "status": _canonical_world_action_status(action.get("status")),
+        "actionType": action.get("actionType"),
+        "agentId": action.get("agentId"),
+        "loopActionId": params.get("loopActionId"),
+        "requestId": source.get("requestId"),
+        "updatedAt": timing.get("updatedAt"),
+        "terminalAt": timing.get("terminalAt"),
+        "completedAt": timing.get("completedAt"),
+        "failureReason": action.get("failureReason"),
+        "result": result,
+    }
+
+
+def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary):
+    if not isinstance(summary, dict):
+        return None
+    action_def = _live_agent_loop_action_definition(summary.get("loopActionId"), summary.get("actionType"))
+    label = (action_def or {}).get("label") or summary.get("actionType") or "world action"
+    need_key = (action_def or {}).get("need")
+    completed = summary.get("status") == "completed"
+    if need_key:
+        _live_agent_loop_decay_need_after_action(agent_state, need_key, completed=completed)
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    recent_entry = {
+        "at": _utc_now_iso(),
+        "actionId": summary.get("id"),
+        "loopActionId": summary.get("loopActionId"),
+        "actionType": summary.get("actionType"),
+        "label": label,
+        "status": summary.get("status"),
+        "need": need_key,
+    }
+    memory["recentActions"] = _live_agent_loop_trim_list([*(memory.get("recentActions") or []), recent_entry], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
+    observation_text = f"{label} finished with status {summary.get('status')}."
+    target = action.get("target") if isinstance(action, dict) and isinstance(action.get("target"), dict) else {}
+    if target.get("buildingId"):
+        observation_text = f"{observation_text} Target building {target.get('buildingId')} object {target.get('catalogId') or target.get('objectInstanceId')}."
+    observation = {"at": recent_entry["at"], "text": observation_text, "actionId": summary.get("id"), "status": summary.get("status")}
+    memory["observations"] = _live_agent_loop_trim_list([*(memory.get("observations") or []), observation], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
+    reflection = {
+        "at": recent_entry["at"],
+        "text": f"I {('completed' if completed else 'ended')} {label}; next I should balance needs instead of repeating the same object.",
+        "actionId": summary.get("id"),
+        "loopActionId": summary.get("loopActionId"),
+    }
+    memory["reflections"] = _live_agent_loop_trim_list([*(memory.get("reflections") or []), reflection], LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
+    agent_state["memory"] = memory
+    if completed:
+        _live_agent_loop_add_feedback(state, agent_id, "info", reflection["text"], {"actionId": summary.get("id"), "loopActionId": summary.get("loopActionId"), "status": summary.get("status")})
+    else:
+        _live_agent_loop_add_feedback(state, agent_id, "warning", f"{label} ended as {summary.get('status')}; watch this action type.", {"actionId": summary.get("id"), "loopActionId": summary.get("loopActionId"), "status": summary.get("status")})
+    return recent_entry
+
+
+def _live_agent_loop_refresh_completed_outcomes(state):
+    changed = False
+    world_actions = get_world_actions_store(persist_migration=True)
+    active_ids = {action.get("id") for action in world_actions.get("active", []) if isinstance(action, dict)}
+    history_by_id = {
+        action.get("id"): action
+        for action in world_actions.get("history", [])
+        if isinstance(action, dict) and action.get("id")
+    }
+    now = _utc_now_iso()
+    for agent_id, agent_state in (state.get("agents") or {}).items():
+        if not isinstance(agent_state, dict):
+            continue
+        action_id = agent_state.get("lastActionId")
+        if not action_id or action_id in active_ids:
+            continue
+        action = history_by_id.get(action_id)
+        if not action:
+            continue
+        action_status = _canonical_world_action_status(action.get("status"))
+        if action_status not in WORLD_ACTION_TERMINAL_STATES:
+            continue
+        current = agent_state.get("lastOutcome") if isinstance(agent_state.get("lastOutcome"), dict) else {}
+        if current.get("actionId") == action_id and current.get("status") == action_status and current.get("observedBy") == "agent-live-loop-status":
+            continue
+        summary = _live_agent_loop_action_summary(action)
+        agent_state["lastOutcome"] = {
+            "at": now,
+            "status": action_status,
+            "reason": "world-action-terminal-history",
+            "actionId": action_id,
+            "loopActionId": summary.get("loopActionId") if summary else None,
+            "worldAction": summary,
+            "observedBy": "agent-live-loop-status",
+        }
+        agent_state["lastSettledActionAt"] = now
+        if action_status == "completed":
+            agent_state["lastCompletedActionAt"] = now
+        _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary)
+        _live_agent_loop_add_event(state, "action-settled", agent_id=agent_id, details={"actionId": action_id, "status": action_status})
+        changed = True
+    return changed
+
+
+def _live_agent_loop_cooldown_for_decision(base_cooldown, decision):
+    score = 0
+    try:
+        score = float((decision or {}).get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0
+    if score >= 1.0:
+        multiplier = 0.80
+    elif score <= 0.55:
+        multiplier = 1.30
+    else:
+        multiplier = 1.0
+    return _normalize_int(round(base_cooldown * multiplier), base_cooldown, minimum=45, maximum=3600)
 
 
 def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
@@ -2635,6 +3068,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             "enabledAgents": [],
             "actionsCreated": [],
             "skipped": [],
+            "decisions": [],
             "errors": [],
         }
         state["lastTickAt"] = now_iso
@@ -2672,19 +3106,20 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
 
             agent_state["lastHeartbeatAt"] = now_iso
             _live_agent_loop_stat(agent_state, "ticks")
-            _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World 8587")
+            _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World")
+            perception = _live_agent_loop_build_perception(agent_id, agent_state, world_client=world_client, now_epoch=now_epoch)
 
-            active = _active_behavior_records_for_agent(agent_id)
+            active = perception.get("active") or []
             if active:
                 _live_agent_loop_stat(agent_state, "skippedActive")
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "active-behavior", "active": [{k: item.get(k) for k in ("type", "id", "status", "behaviorSourceKind")} for item in active]}
-                _live_agent_loop_presence(agent_id, "working", "Living in My Virtual World 8587")
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "active-behavior", "active": active, "perceptionAt": perception.get("at")}
+                _live_agent_loop_presence(agent_id, "working", "Living in My Virtual World")
                 result["skipped"].append({"agentId": agent_id, "reason": "active-behavior", "active": agent_state["lastOutcome"]["active"]})
                 continue
 
             if state.get("worldClientRequired") and not world_client.get("active") and not force:
                 _live_agent_loop_stat(agent_state, "skippedNoClient")
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "world-client-inactive", "worldClient": world_client}
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "world-client-inactive", "worldClient": world_client, "perceptionAt": perception.get("at")}
                 result["skipped"].append({"agentId": agent_id, "reason": "world-client-inactive", "worldClient": world_client})
                 continue
 
@@ -2694,14 +3129,16 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 result["skipped"].append({"agentId": agent_id, "reason": "cooldown", "nextAllowedAt": _epoch_to_utc_iso(next_allowed)})
                 continue
 
-            selected = _live_agent_loop_select_next_action(agent_id, agent_state)
+            selected, decision = _live_agent_loop_select_next_action(agent_id, agent_state, perception)
+            result["decisions"].append({"agentId": agent_id, "decision": agent_state.get("lastDecision")})
             if not selected:
                 _live_agent_loop_stat(agent_state, "targetMisses")
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "no-available-loop-target"}
-                result["skipped"].append({"agentId": agent_id, "reason": "no-available-loop-target"})
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "no-available-loop-target", "decision": decision, "perceptionAt": perception.get("at")}
+                result["skipped"].append({"agentId": agent_id, "reason": "no-available-loop-target", "decision": agent_state.get("lastDecision")})
                 continue
 
             action_def = selected["action"]
+            adaptive_cooldown = _live_agent_loop_cooldown_for_decision(cooldown, decision)
             request_id = f"live-loop-{agent_id}-{int(now_epoch)}"
             payload = {
                 "agentId": agent_id,
@@ -2709,7 +3146,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     "kind": "agent-live-mode",
                     "requestedBy": "server.py#live_agent_loop_tick",
                     "requestId": request_id,
-                    "surface": "8587-live-agent-loop",
+                    "surface": "agent-live-loop",
                     "roles": ["participant"],
                     "loopId": LIVE_AGENT_LOOP_SCHEMA_VERSION,
                 },
@@ -2721,12 +3158,16 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     "reason": "continuous-presence",
                     "loopActionId": action_def["id"],
                     "loopActionLabel": action_def.get("label"),
+                    "loopNeed": action_def.get("need"),
+                    "decisionMode": decision.get("mode") if isinstance(decision, dict) else LIVE_AGENT_LOOP_DEFAULTS["decisionMode"],
+                    "decisionReason": decision.get("reason") if isinstance(decision, dict) else None,
+                    "perceptionAt": perception.get("at"),
                     "worldClientActive": world_client.get("active"),
                 },
             }
             if dry_run:
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload}
-                result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected})
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload, "decision": decision, "perception": perception}
+                result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected, "decision": agent_state.get("lastDecision")})
                 continue
 
             ok, created, status = create_agent_live_mode_action_request(payload)
@@ -2737,17 +3178,18 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 _live_agent_loop_stat(state, "actionsCreated")
                 agent_state["lastActionAt"] = now_iso
                 agent_state["lastActionId"] = action_id
-                agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + cooldown)
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "httpStatus": status}
-                _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World 8587: {action_def.get('label')}")
-                _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, details={"actionId": action_id, "loopActionId": action_def["id"], "target": selected["target"]})
-                result["actionsCreated"].append({"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "httpStatus": status})
+                agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "httpStatus": status, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown}
+                _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
+                _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, details={"actionId": action_id, "loopActionId": action_def["id"], "target": selected["target"], "decision": agent_state.get("lastDecision")})
+                result["actionsCreated"].append({"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "httpStatus": status, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown})
                 actions_created_this_tick += 1
             else:
                 _live_agent_loop_stat(agent_state, "errors")
                 _live_agent_loop_stat(state, "errors")
                 agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + min(45, cooldown))
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "error", "httpStatus": status, "error": created}
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "error", "httpStatus": status, "error": created, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at")}
+                _live_agent_loop_add_feedback(state, agent_id, "error", "Live Mode action request failed.", {"httpStatus": status, "error": created})
                 _live_agent_loop_add_event(state, "action-error", agent_id=agent_id, details={"httpStatus": status, "error": created})
                 result["errors"].append({"agentId": agent_id, "httpStatus": status, "error": created})
 
@@ -2762,6 +3204,8 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
 def get_live_agent_loop_status():
     with _live_agent_loop_lock:
         state = get_live_agent_loop_state(persist_migration=True)
+        if _live_agent_loop_refresh_completed_outcomes(state):
+            state = save_live_agent_loop_state(state)
         thread_alive = bool(_live_agent_loop_thread and _live_agent_loop_thread.is_alive())
         return {
             "ok": True,
@@ -2778,6 +3222,37 @@ def get_live_agent_loop_status():
                 },
             },
         }
+
+
+def get_live_agent_loop_perception(agent_id):
+    with _live_agent_loop_lock:
+        resolved_agent_id = _resolve_agent_id(agent_id)
+        if not resolved_agent_id:
+            return False, _api_error("agent_not_found", "agentId must reference an existing live-mode-capable agent.", details={"agentId": agent_id}), 404
+        state = get_live_agent_loop_state(persist_migration=True)
+        agent_state = _live_agent_loop_agent_state(state, resolved_agent_id)
+        world_client = _live_agent_loop_world_client_status(state)
+        perception = _live_agent_loop_build_perception(resolved_agent_id, agent_state, world_client=world_client)
+        decision = _live_agent_loop_build_decision_frame(resolved_agent_id, perception, agent_state)
+        saved = save_live_agent_loop_state(state)
+        return True, {"ok": True, "agentId": resolved_agent_id, "perception": perception, "decision": decision, "state": (saved.get("agents") or {}).get(resolved_agent_id, agent_state)}, 200
+
+
+def get_live_agent_loop_feedback(agent_id=None):
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=True)
+        reports = {}
+        if agent_id:
+            resolved_agent_id = _resolve_agent_id(agent_id)
+            if not resolved_agent_id:
+                return False, _api_error("agent_not_found", "agentId must reference an existing live-mode-capable agent.", details={"agentId": agent_id}), 404
+            agent_state = _live_agent_loop_agent_state(state, resolved_agent_id)
+            reports[resolved_agent_id] = agent_state.get("feedbackReports") or []
+        else:
+            for resolved_agent_id, agent_state in (state.get("agents") or {}).items():
+                if isinstance(agent_state, dict):
+                    reports[resolved_agent_id] = agent_state.get("feedbackReports") or []
+        return True, {"ok": True, "feedbackReports": reports}, 200
 
 
 def update_live_agent_loop_settings(payload):
@@ -2858,9 +3333,9 @@ def _normalize_move_target(target, agent_id, action_id=None):
     supplied_floor = _number_or_none(target.get("floor") if target.get("floor") is not None else target.get("buildingFloor"))
     floor = max(1, int(supplied_floor or 1))
     room_id = target.get("roomId") or target.get("room")
-    target_action_id = action_id or target.get("actionId") or target.get("worldActionId")
+    target_action_id = action_id or target.get("worldActionId") or target.get("actionId")
     resolved = None
-    metadata = {"kind": kind, "floor": floor, "roomId": room_id, "actionId": target_action_id, "guardrails": MOVE_INTENT_ROUTE_GUARDRAILS}
+    metadata = {"kind": kind, "floor": floor, "roomId": room_id, "actionId": target_action_id, "worldActionId": target_action_id, "guardrails": MOVE_INTENT_ROUTE_GUARDRAILS}
 
     if kind == "world-point":
         x = _number_or_none(target.get("x") if target.get("x") is not None else target.get("worldX"))
@@ -2872,7 +3347,7 @@ def _normalize_move_target(target, agent_id, action_id=None):
             building_reason = _building_unavailable(load_building(building_id))
             if building_reason:
                 return None, None, _api_error(building_reason, "Target building is unavailable.", details={"buildingId": building_id})
-        normalized = {"kind": "world-point", "x": x, "y": y, "floor": floor, "buildingId": building_id, "roomId": room_id, "actionId": target_action_id, "targetKind": "world-point"}
+        normalized = {"kind": "world-point", "x": x, "y": y, "floor": floor, "buildingId": building_id, "roomId": room_id, "actionId": target_action_id, "worldActionId": target_action_id, "targetKind": "world-point"}
         metadata.update({"coordinate": {"x": x, "y": y}, "routingPlan": "world-coordinate-to-setAgentTarget"})
         return normalized, metadata, None
 
@@ -2886,7 +3361,7 @@ def _normalize_move_target(target, agent_id, action_id=None):
         reason = _building_unavailable(building)
         if reason:
             return None, None, _api_error(reason, "Target building is unavailable.", details={"buildingId": building_id})
-        normalized = {"kind": kind, "buildingId": building_id, "floor": floor, "roomId": room_id, "actionId": target_action_id, "targetKind": kind}
+        normalized = {"kind": kind, "buildingId": building_id, "floor": floor, "roomId": room_id, "actionId": target_action_id, "worldActionId": target_action_id, "targetKind": kind}
         if target.get("x") is not None or target.get("y") is not None or target.get("z") is not None:
             x = _number_or_none(target.get("x"))
             y = _number_or_none(target.get("y") if target.get("y") is not None else target.get("z"))
@@ -2927,6 +3402,7 @@ def _normalize_move_target(target, agent_id, action_id=None):
         "floor": object_floor,
         "roomId": room_id if room_id is not None else obj.get("roomId"),
         "actionId": target_action_id,
+        "worldActionId": target_action_id,
         "targetKind": "outdoor-area-node" if resolved.get("collection") == "outdoor-node" else "interior-object",
     }
     metadata.update({
@@ -2960,7 +3436,7 @@ def _attach_move_intent_to_world_action(action_id, move_intent):
             next_active.append(action)
             return {"error": "agent_mismatch", "action": action}
         route = dict(updated.get("route") or {})
-        route.update({"state": move_intent.get("routeStatus"), "status": move_intent.get("routeStatus"), "target": move_intent.get("target"), "targetMetadata": move_intent.get("targetMetadata"), "handoff": WORLD_ACTION_CREATE_ROUTE_OWNER, "routeOwner": "client-runtime", "setAgentTarget": True, "source": move_intent.get("source"), "behavior": move_intent.get("behavior"), "behaviorSourceKind": move_intent.get("behaviorSourceKind"), "behaviorMode": move_intent.get("behaviorMode"), "behaviorCategory": move_intent.get("behaviorCategory"), "moveIntent": {"id": move_intent.get("id"), "state": move_intent.get("routeStatus"), "createdAt": move_intent.get("createdAt")}})
+        route.update({"state": move_intent.get("routeStatus"), "status": move_intent.get("routeStatus"), "target": move_intent.get("target"), "targetMetadata": move_intent.get("targetMetadata"), "handoff": WORLD_ACTION_CREATE_ROUTE_OWNER, "routeOwner": "client-runtime", "setAgentTarget": True, "worldActionId": action_id, "source": move_intent.get("source"), "behavior": move_intent.get("behavior"), "behaviorSourceKind": move_intent.get("behaviorSourceKind"), "behaviorMode": move_intent.get("behaviorMode"), "behaviorCategory": move_intent.get("behaviorCategory"), "moveIntent": {"id": move_intent.get("id"), "state": move_intent.get("routeStatus"), "createdAt": move_intent.get("createdAt"), "worldActionId": action_id}})
         updated["route"] = route
         if _canonical_world_action_status(updated.get("status")) == "reserved":
             updated["status"] = "route_pending"
@@ -2988,7 +3464,7 @@ def create_move_intent(path_agent_id, payload):
     supplied_agent = payload.get("agentId") or payload.get("actionAgentId")
     if supplied_agent is not None and _resolve_agent_id(supplied_agent) != agent_id:
         return False, _api_error("permission_denied", "Payload agentId must match the URL agentId."), 403
-    linked_action_id = payload.get("actionId") or payload.get("worldActionId")
+    linked_action_id = payload.get("worldActionId") or payload.get("actionId")
     if linked_action_id and not _active_world_action_for_move(linked_action_id, agent_id):
         return False, _api_error("action_not_found", "actionId/worldActionId must reference an active action for this agent."), 404
     raw_source = payload.get("source") if isinstance(payload.get("source"), dict) else {"kind": "api"}
@@ -3019,8 +3495,8 @@ def create_move_intent(path_agent_id, payload):
         return False, error, status
     route_behavior = {k: behavior.get(k) for k in ["behaviorSourceKind", "behaviorMode", "behaviorAuthority", "behaviorSelectedCategory", "behaviorSelectedObject", "behaviorSelectedSpot", "behaviorProbabilityRoll", "behaviorFallbackReason"]}
     metadata = {**metadata, "behavior": route_behavior, "behaviorSourceKind": behavior.get("behaviorSourceKind"), "behaviorMode": behavior.get("behaviorMode"), "behaviorCategory": behavior.get("behaviorSelectedCategory")}
-    action_id = linked_action_id or target.get("actionId")
-    busy = _agent_busy_for_move(agent_id, action_id=linked_action_id)
+    action_id = linked_action_id or target.get("worldActionId") or target.get("actionId")
+    busy = _agent_busy_for_move(agent_id, action_id=action_id)
     if busy:
         return False, _api_error("agent_unavailable", "Agent already has an active action or move intent.", details=busy), 409
     now = _utc_now_iso()
@@ -3037,6 +3513,7 @@ def create_move_intent(path_agent_id, payload):
         "routingOwner": "main3d.js#setAgentTarget()",
         "planner": planner,
         "collisionGuardrails": MOVE_INTENT_ROUTE_GUARDRAILS,
+        "worldActionId": action_id,
         "source": source,
         "behavior": route_behavior,
         "behaviorSourceKind": behavior.get("behaviorSourceKind"),
@@ -3049,6 +3526,7 @@ def create_move_intent(path_agent_id, payload):
         "schemaVersion": MOVE_INTENT_SCHEMA_VERSION,
         "agentId": agent_id,
         "actionId": action_id,
+        "worldActionId": action_id,
         "status": "route_pending",
         "routeStatus": "route_pending",
         "target": target,
@@ -5714,6 +6192,18 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/agent-chat":
             return self._send_json(get_agent_chat())
 
+        if path == "/api/agent-live-loop/perception":
+            qs = urllib.parse.parse_qs(parsed.query)
+            agent_id = (qs.get("agentId") or qs.get("agent") or ["adam"])[0]
+            ok, result, status = get_live_agent_loop_perception(agent_id)
+            return self._send_json(result, status)
+
+        if path == "/api/agent-live-loop/feedback":
+            qs = urllib.parse.parse_qs(parsed.query)
+            agent_id = (qs.get("agentId") or qs.get("agent") or [None])[0]
+            ok, result, status = get_live_agent_loop_feedback(agent_id)
+            return self._send_json(result, status)
+
         if path == "/api/agent-live-loop":
             return self._send_json(get_live_agent_loop_status())
 
@@ -6359,7 +6849,7 @@ def main():
     initialize_live_presence()
 
     # Keep enabled Live Mode agents present across restarts; action creation stays
-    # gated by the active 8587 world client polling /api/world-actions/active.
+            # gated by the active world client polling /api/world-actions/active.
     start_live_agent_loop()
 
     handler = VWHandler
