@@ -11840,9 +11840,10 @@ function createBuilding3D(building) {
     building._signGroup = null;
   }
 
-  // Re-apply current view mode to newly created building
+  // Re-apply the effective view for this building. Entered buildings keep their
+  // shell-open interior view even when edits rebuild their 3D group.
   if (typeof _buildingViewMode !== 'undefined') {
-    applyBuildingViewMode(building, _buildingViewMode);
+    applyBuildingViewMode(building, getEffectiveBuildingViewMode(building));
   }
 
   // Physics: add/update building collider (skip parks — they are open spaces accessible from any direction)
@@ -28365,7 +28366,7 @@ window._rotateBld = (id) => {
   // Rebuild so visuals, colliders, doors, furniture, and outdoor props all stay in sync.
   createBuilding3D(b);
   if (insideBuildingId === id) {
-    applyBuildingViewMode(b, 'xray');
+    applyBuildingViewMode(b, getEffectiveBuildingViewMode(b));
   }
   // Refresh terrain/decor suppression around rotated footprint
   _rebuildNearChunks(b.worldX || 0, b.worldY || 0, Math.max(b.widthTiles || 25, b.heightTiles || 17) + 3);
@@ -28525,7 +28526,7 @@ function cancelBuildingMove() {
 let _buildingViewMode = 'solid';
 
 function getEffectiveBuildingViewMode(building, requestedMode = _buildingViewMode) {
-  if (building && insideBuildingId === building.id && requestedMode !== 'xray') {
+  if (building && insideBuildingId === building.id) {
     return 'entered';
   }
   return requestedMode;
@@ -28661,7 +28662,7 @@ function setBuildingTransparent(buildingId, transparent) {
   if (transparent) {
     applyBuildingViewMode(b, 'xray');
   } else {
-    applyBuildingViewMode(b, _buildingViewMode);
+    applyBuildingViewMode(b, getEffectiveBuildingViewMode(b));
   }
 }
 

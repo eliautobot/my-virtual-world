@@ -246,12 +246,28 @@ for (const token of [
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing edit lock token: ${token}`);
 }
+assert(
+  main3dJs.includes('applyBuildingViewMode(building, getEffectiveBuildingViewMode(building))'),
+  'main3d.js must preserve the effective selected/entered building view after createBuilding3D rebuilds',
+);
+assert(
+  !main3dJs.includes('applyBuildingViewMode(building, _buildingViewMode)'),
+  'createBuilding3D must not reset rebuilt buildings directly to the global view mode',
+);
+assert(
+  main3dJs.includes('if (building && insideBuildingId === building.id)'),
+  'entered buildings must keep the selected interior view for every global view mode',
+);
+assert(
+  !main3dJs.includes("requestedMode !== 'xray'"),
+  'xray must not bypass the entered-building view while a building is selected/entered',
+);
 
 for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260615-presence-status-dot-r1',
+  'js/main3d.js?v=20260615-building-view-preserve-r2',
   'starter-map.mjs?v=20260613-road-terrain-r1',
   'Math.min(clock.getDelta(), 0.05)',
   'const VEHICLE_SPEED = 7.0',
