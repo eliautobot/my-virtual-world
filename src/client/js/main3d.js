@@ -8,7 +8,7 @@ import * as THREE from 'three';
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
   createAgentCharacter, updateAgentAnimation, getAgentAppearance, APPEARANCE_CATALOG,
-} from './agent-characters.js?v=20260613-live-mode-dot-r1';
+} from './agent-characters.js?v=20260615-presence-status-dot-r1';
 import {
   listObjectUseActiveCandidates,
   chooseAndReserveObjectUseActiveSlot,

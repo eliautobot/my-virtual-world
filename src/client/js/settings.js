@@ -230,7 +230,7 @@
     summary.innerHTML = trial
       ? '<strong>Agent Live Mode locked</strong><span>Activate a License Key to manage live agents.</span>'
       : globalEnabled
-        ? `<strong>${enabledCount} live agent${enabledCount === 1 ? '' : 's'} selected</strong><span>Green pulsing head dot = Live Mode on. Red head dot = Live Mode off.</span>`
+        ? `<strong>${enabledCount} live agent${enabledCount === 1 ? '' : 's'} selected</strong><span>Head dots show presence: green idle, red working.</span>`
         : '<strong>Agent Live Mode off</strong><span>Turn on Agent Live Mode in Features before applying agent selection.</span>';
 
     list.innerHTML = '';

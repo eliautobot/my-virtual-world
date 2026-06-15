@@ -746,6 +746,15 @@ function normalizeAgentAnimationStatus(statusValue) {
   return WORKLIKE_AGENT_STATUSES.has(normalized) ? 'working' : normalized;
 }
 
+function getAgentPresenceDotColor(statusValue) {
+  const normalized = normalizeAgentAnimationStatus(statusValue);
+  if (normalized === 'working') return 0xef4444;
+  if (normalized === 'idle' || normalized === 'available' || normalized === 'ready' || normalized === 'standby') return 0x22c55e;
+  if (normalized === 'meeting') return 0x38bdf8;
+  if (normalized === 'break' || normalized === 'away') return 0xf59e0b;
+  return 0x94a3b8;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // SPRITE HELPERS (canvas-based, no DOM dependency beyond canvas)
 // ═══════════════════════════════════════════════════════════════
@@ -1621,13 +1630,13 @@ export function createAgentCharacter(agent) {
 
   mergeAgentCharacterVoxelParts(agentGroup);
 
-  // ── LIVE MODE / STATUS DOT ────────────────────────────────
+  // ── PRESENCE STATUS DOT ───────────────────────────────────
   const dotGeo = new THREE.SphereGeometry(0.055, 6, 6);
-  const dotMat = new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.92 });
+  const dotMat = new THREE.MeshBasicMaterial({ color: getAgentPresenceDotColor(agent?.status || 'idle'), transparent: true, opacity: 0.92 });
   const statusDot = new THREE.Mesh(dotGeo, dotMat);
   statusDot.position.set(0.42, 1.98, 0);
   statusDot.name = 'statusDot';
-  statusDot.userData.liveModeIndicator = true;
+  statusDot.userData.presenceStatusIndicator = true;
   statusDot.userData.baseScale = 1;
   agentGroup.add(statusDot);
 
@@ -3232,12 +3241,13 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     }
   }
 
-  // ── LIVE MODE / STATUS DOT ────────────────────────────────
+  // ── PRESENCE STATUS DOT ───────────────────────────────────
   if (parts.statusDot) {
-    const liveModeEnabled = agent?.agentLiveModeEnabled === true;
-    const pulse = liveModeEnabled ? 1 + Math.sin(Date.now() / 260) * 0.28 : 1;
-    parts.statusDot.material.color.setHex(liveModeEnabled ? 0x22c55e : 0xef4444);
-    parts.statusDot.material.opacity = liveModeEnabled ? 0.96 : 0.82;
+    const normalizedStatus = normalizeAgentAnimationStatus(agent?.status);
+    const isActiveWork = normalizedStatus === 'working';
+    const pulse = isActiveWork ? 1 + Math.sin(Date.now() / 260) * 0.28 : 1;
+    parts.statusDot.material.color.setHex(getAgentPresenceDotColor(normalizedStatus));
+    parts.statusDot.material.opacity = normalizedStatus === 'offline' || normalizedStatus === 'unknown' ? 0.68 : 0.96;
     parts.statusDot.scale.setScalar(pulse);
     parts.statusDot.visible = true;
   }
