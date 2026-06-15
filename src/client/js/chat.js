@@ -45,6 +45,8 @@
   const CHAT_BOTTOM_OFFSET = 36;
   const HERMES_APPROVAL_POLL_MS = 1500;
   const CHAT_SELECTION_STORAGE_KEY = 'vw-chat-selection-v1';
+  const DEFAULT_CHAT_AGENT_KEY = 'main';
+  const DEFAULT_CHAT_SESSION_KEY = 'agent:main:main';
   const secondarySlotButtons = Array.from(document.querySelectorAll('[data-chat-slot-toggle]'));
   let activeSecondarySlot = null;
   const secondaryPanelPlaceholders = {
@@ -84,6 +86,16 @@
     }
   }
 
+  function titleCaseAgentKey(agentKey) {
+    const raw = String(agentKey || '').trim();
+    if (!raw) return 'Saved chat';
+    return raw
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
   class ChatWindow {
     constructor(root, options = {}) {
       this.root = root;
@@ -93,9 +105,9 @@
       this.root.dataset.chatSlot = this.slotId;
       const savedSelection = getSavedChatSelection(this.slotId);
       this.agentList = [];
-      this.selectedAgentKey = options.selectedAgentKey || savedSelection?.selectedAgentKey || 'main';
-      this.sessionKey = options.sessionKey || savedSelection?.sessionKey || 'agent:main:main';
-      this.hasExplicitAgentSelection = !!savedSelection;
+      this.selectedAgentKey = options.selectedAgentKey || savedSelection?.selectedAgentKey || DEFAULT_CHAT_AGENT_KEY;
+      this.sessionKey = options.sessionKey || savedSelection?.sessionKey || DEFAULT_CHAT_SESSION_KEY;
+      this.hasExplicitAgentSelection = !!savedSelection || !!options.selectedAgentKey || !!options.sessionKey;
       this.currentRunId = null;
       this.streamingMsg = null;
       this.liveToolCards = new Map();
@@ -244,21 +256,57 @@
     syncAgentSelect() {
       if (!this.agentSelect) return;
       const options = Array.from(this.agentSelect.querySelectorAll('option'));
-      let matched = false;
-      for (const opt of options) {
-        const isMatch = opt.value === this.selectedAgentKey && opt.dataset.sessionKey === this.sessionKey;
-        opt.selected = isMatch;
-        if (isMatch) matched = true;
+      const exactMatch = options.find(opt => opt.value === this.selectedAgentKey && opt.dataset.sessionKey === this.sessionKey);
+      if (exactMatch) {
+        options.forEach(opt => { opt.selected = opt === exactMatch; });
+        return;
       }
-      if (!matched) {
-        const fallback = options.find(opt => opt.value === this.selectedAgentKey) || options.find(opt => opt.dataset.sessionKey === this.sessionKey) || options[0];
-        if (fallback) {
-          fallback.selected = true;
-          this.selectedAgentKey = fallback.value;
-          this.sessionKey = fallback.dataset.sessionKey || this.sessionKey;
-          this.saveSelection();
-        }
+      const rosterMatch = options.find(opt => opt.value === this.selectedAgentKey)
+        || options.find(opt => opt.dataset.agentId === this.selectedAgentKey)
+        || options.find(opt => opt.dataset.providerAgentId === this.selectedAgentKey)
+        || options.find(opt => opt.dataset.sessionKey === this.sessionKey);
+      if (rosterMatch) {
+        options.forEach(opt => { opt.selected = opt === rosterMatch; });
+        this.selectedAgentKey = rosterMatch.value;
+        this.sessionKey = rosterMatch.dataset.sessionKey || this.sessionKey;
+        this.saveSelection();
+        return;
       }
+      if (!this.isDefaultSelection()) {
+        this.ensurePreservedAgentOption();
+        return;
+      }
+      const fallback = options[0];
+      if (fallback) {
+        fallback.selected = true;
+        this.selectedAgentKey = fallback.value;
+        this.sessionKey = fallback.dataset.sessionKey || this.sessionKey;
+        this.saveSelection();
+      }
+    }
+
+    isDefaultSelection() {
+      return this.selectedAgentKey === DEFAULT_CHAT_AGENT_KEY && this.sessionKey === DEFAULT_CHAT_SESSION_KEY;
+    }
+
+    ensurePreservedAgentOption() {
+      if (!this.agentSelect) return;
+      this.agentSelect.querySelectorAll('[data-preserved-chat-selection="true"]').forEach(el => el.remove());
+      const agentKey = this.selectedAgentKey || parseAgentIdFromSessionKey(this.sessionKey) || DEFAULT_CHAT_AGENT_KEY;
+      const group = document.createElement('optgroup');
+      group.label = 'Current chat';
+      group.dataset.preservedChatSelection = 'true';
+      const opt = document.createElement('option');
+      opt.value = agentKey;
+      opt.textContent = titleCaseAgentKey(agentKey);
+      opt.dataset.sessionKey = this.sessionKey || `agent:${agentKey}:main`;
+      opt.dataset.agentId = agentKey;
+      opt.dataset.providerKind = String(this.sessionKey || '').startsWith('hermes:') ? 'hermes' : 'openclaw';
+      opt.dataset.providerAgentId = agentKey;
+      opt.dataset.preservedChatSelection = 'true';
+      opt.selected = true;
+      group.appendChild(opt);
+      this.agentSelect.insertBefore(group, this.agentSelect.firstChild);
     }
 
     saveSelection() {
@@ -268,12 +316,12 @@
       });
     }
 
-    applySelection(opt, { markExplicit = false, systemPrefix = 'Switched to' } = {}) {
+    applySelection(opt, { markExplicit = false, preserveForInheritance = markExplicit, systemPrefix = 'Switched to' } = {}) {
       if (!opt) return;
       const newSessionKey = opt.dataset.sessionKey;
       const newAgentKey = opt.value;
       if (newSessionKey === this.sessionKey && newAgentKey === this.selectedAgentKey) {
-        if (markExplicit) {
+        if (markExplicit || preserveForInheritance) {
           this.hasExplicitAgentSelection = true;
           this.saveSelection();
         }
@@ -281,7 +329,7 @@
       }
       this.selectedAgentKey = newAgentKey;
       this.sessionKey = newSessionKey;
-      if (markExplicit) this.hasExplicitAgentSelection = true;
+      if (markExplicit || preserveForInheritance) this.hasExplicitAgentSelection = true;
       this.saveSelection();
       this.currentRunId = null;
       this.streamingMsg = null;
@@ -1573,7 +1621,8 @@
     if (!windowInstance || windowInstance.hasExplicitAgentSelection) return;
     const primaryOpt = primaryWindow.agentSelect?.selectedOptions?.[0];
     if (!primaryOpt) return;
-    windowInstance.applySelection(primaryOpt, { markExplicit: false, systemPrefix: 'Ready to chat with' });
+    if (!primaryOpt.dataset.sessionKey) return;
+    windowInstance.applySelection(primaryOpt, { markExplicit: false, preserveForInheritance: false, systemPrefix: 'Ready to chat with' });
   }
 
   function shouldUseSingleWindowMobileLayout() {
@@ -2337,7 +2386,7 @@
     chatWindowsByRoot.set(panel, w);
   });
 
-  chatWindows.forEach(w => w.loadAgentList());
+  const agentListsReady = Promise.all(chatWindows.map(w => w.loadAgentList()));
   syncSecondaryChatControls();
   // Virtual World shows the chat dock in the HUD even before the panel is expanded.
   // Connect immediately so users don't see a stale "Offline" state while the UI is visible.
@@ -2362,7 +2411,7 @@
     assignments.forEach((opt, index) => {
       const windowInstance = windows[index];
       if (!windowInstance || !opt) return;
-      windowInstance.applySelection(opt, { markExplicit: false, systemPrefix: 'Loaded' });
+      windowInstance.applySelection(opt, { markExplicit: false, preserveForInheritance: true, systemPrefix: 'Loaded' });
     });
   }
 
@@ -2477,10 +2526,10 @@
       setSecondaryPanelOpen('1', true);
       setSecondaryPanelOpen('2', true);
       setSecondaryPanelOpen('3', true);
-      setTimeout(applyQueryAgentAssignments, 400);
+      agentListsReady.then(applyQueryAgentAssignments).catch(() => {});
     }, 50);
   } else if (chatUrlParams.get('chatAgents')) {
-    setTimeout(applyQueryAgentAssignments, 400);
+    agentListsReady.then(applyQueryAgentAssignments).catch(() => {});
   }
 
   // Gateway info is refreshed on connect and after settings saves so token changes

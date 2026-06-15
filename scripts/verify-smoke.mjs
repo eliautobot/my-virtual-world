@@ -174,6 +174,7 @@ const indexHtml = read('src/client/index.html');
 const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
+const chatJs = read('src/client/js/chat.js');
 const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
 const uiCss = read('src/client/css/ui-redesign.css');
@@ -267,7 +268,8 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260615-building-view-preserve-r2',
+  'js/main3d.js?v=20260615-chat-bubble-desk-carry-r1',
+  'js/chat.js?v=20260615-chat-agent-picker-r1',
   'starter-map.mjs?v=20260613-road-terrain-r1',
   'Math.min(clock.getDelta(), 0.05)',
   'const VEHICLE_SPEED = 7.0',
@@ -278,6 +280,29 @@ for (const token of [
   'Do not recycle it across the map while the user watches',
 ]) {
   assert(`${main3dJs}\n${indexHtml}`.includes(token), `client starter map wiring missing token: ${token}`);
+}
+for (const token of [
+  'ensurePreservedAgentOption',
+  'data-preserved-chat-selection',
+  'preserveForInheritance',
+  'agentListsReady.then(applyQueryAgentAssignments)',
+]) {
+  assert(chatJs.includes(token), `chat.js missing agent picker persistence token: ${token}`);
+}
+for (const token of [
+  "agent-characters.js?v=20260615-desk-carry-rest-r1",
+  "state.miniEl.style.top = (sy - 42) + 'px'",
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing chat bubble/desk carry token: ${token}`);
+}
+for (const token of [
+  'function isAgentDeskCarrySurfaceActive(agent)',
+  'const deskSurfaceActive = isAgentDeskCarrySurfaceActive(agent)',
+  'const handActiveForDeskConsume = deskSipState.isDeskConsume && deskSipState.handActive',
+  'cup.visible = isAgentDeskCarrySurfaceActive(agent) && !deskSipState.handActive',
+  'item.visible = isAgentDeskCarrySurfaceActive(agent) && !deskSipState.handActive',
+]) {
+  assert(agentCharactersJs.includes(token), `agent-characters.js missing desk-resting carry token: ${token}`);
 }
 
 for (const token of [
@@ -455,7 +480,7 @@ for (const token of [
   'ambient-schedule-routing-suppressed',
   'status-change-movement-clear-skipped',
   '__VWGetLiveModeScriptedSuppressionState',
-  "agent-characters.js?v=20260615-presence-status-dot-r1",
+  "agent-characters.js?v=20260615-desk-carry-rest-r1",
   'function getAgentPresenceDotColor(statusValue)',
   'statusDot.userData.presenceStatusIndicator = true',
   'parts.statusDot.material.color.setHex(getAgentPresenceDotColor(normalizedStatus))',

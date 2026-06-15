@@ -259,6 +259,20 @@ function getCoffeeDeskSipState(agent) {
   return { isDeskConsume: true, handActive, lift, reachToTable, setDownToTable, phase, localSipPhase };
 }
 
+function isAgentDeskCarrySurfaceActive(agent) {
+  const deskSipState = getCoffeeDeskSipState(agent);
+  if (deskSipState.isDeskConsume) return true;
+  const workSpot = agent?._activeWorkSpot || null;
+  const atRealWorkSpot = !!(
+    workSpot &&
+    workSpot.kind !== 'legacy-grid' &&
+    Number.isFinite(workSpot.apiX) &&
+    Number.isFinite(workSpot.apiZ) &&
+    Math.hypot((agent?.x || 0) - workSpot.apiX, (agent?.y || 0) - workSpot.apiZ) <= 24
+  );
+  return Boolean(agent?._atDesk || atRealWorkSpot);
+}
+
 function placeRightHandCoffeeCupAsset(cup, agent) {
   const activityKind = String(agent?._idleActivity?.kind || '');
   const isMachineUse = (activityKind.startsWith('coffee-machine-') || activityKind.startsWith('water-cooler-')) && agent?._idleActivity?.phase === 'active';
@@ -284,7 +298,7 @@ function placeDeskCoffeeCupAsset(cup, agent) {
   cup.position.set(0.24, 1.03, 0.92);
   cup.rotation.set(0, 0, 0);
   cup.scale.setScalar(1);
-  cup.visible = deskSipState.isDeskConsume && !deskSipState.handActive;
+  cup.visible = isAgentDeskCarrySurfaceActive(agent) && !deskSipState.handActive;
 }
 
 function syncDeskCoffeeCupVisual(parts, agent, shouldShow) {
@@ -467,7 +481,7 @@ function placeDeskVendingItemAsset(item, agent) {
   item.position.set(0.24, 1.05, 0.92);
   item.rotation.set(deskRot[0], deskRot[1], deskRot[2]);
   item.scale.setScalar(1);
-  item.visible = deskSipState.isDeskConsume && !deskSipState.handActive;
+  item.visible = isAgentDeskCarrySurfaceActive(agent) && !deskSipState.handActive;
 }
 
 function syncDeskVendingItemVisual(parts, agent, shouldShow) {
@@ -3293,10 +3307,12 @@ function syncRightHandCarryVisual(parts, agent) {
   );
   const isPongRacket = isPingPongActivity || (carried && carryKey.includes('pingpong'));
   const deskSipState = getCoffeeDeskSipState(agent);
-  const showDrinkInHand = isDrinkCup && (!deskSipState.isDeskConsume || deskSipState.handActive);
-  const showDrinkOnDesk = isDrinkCup && deskSipState.isDeskConsume && !deskSipState.handActive;
-  const showSnackInHand = isHeatedSnack && (!deskSipState.isDeskConsume || deskSipState.handActive);
-  const showSnackOnDesk = isHeatedSnack && deskSipState.isDeskConsume && !deskSipState.handActive;
+  const deskSurfaceActive = isAgentDeskCarrySurfaceActive(agent);
+  const handActiveForDeskConsume = deskSipState.isDeskConsume && deskSipState.handActive;
+  const showDrinkInHand = isDrinkCup && (!deskSurfaceActive || handActiveForDeskConsume);
+  const showDrinkOnDesk = isDrinkCup && deskSurfaceActive && !handActiveForDeskConsume;
+  const showSnackInHand = isHeatedSnack && (!deskSurfaceActive || handActiveForDeskConsume);
+  const showSnackOnDesk = isHeatedSnack && deskSurfaceActive && !handActiveForDeskConsume;
   let cup = rightArm.getObjectByName('rightHandCoffeeDrink') || rightHand.getObjectByName('rightHandCoffeeDrink');
   let snack = rightArm.getObjectByName('rightHandHeatedSnack') || rightHand.getObjectByName('rightHandHeatedSnack');
   let racket = rightArm.getObjectByName('rightHandPingPongRacket') || rightHand.getObjectByName('rightHandPingPongRacket');

@@ -8,7 +8,7 @@ import * as THREE from 'three';
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
   createAgentCharacter, updateAgentAnimation, getAgentAppearance, APPEARANCE_CATALOG,
-} from './agent-characters.js?v=20260615-presence-status-dot-r1';
+} from './agent-characters.js?v=20260615-desk-carry-rest-r1';
 import {
   listObjectUseActiveCandidates,
   chooseAndReserveObjectUseActiveSlot,
@@ -55655,9 +55655,9 @@ function updateChatBubblePositions() {
 
       bubbleRects.push({ agentId, x: bx, y: by, w: bw, h: bh, state, anchorX: sx, anchorY: sy, color: getAgentColor(agent) });
     } else {
-      // Mini icon — position right above the agent's head (closer)
+      // Mini icon — keep clear of the name label.
       state.miniEl.style.left = (sx - 14) + 'px';
-      state.miniEl.style.top = (sy - 18) + 'px';
+      state.miniEl.style.top = (sy - 42) + 'px';
       state.miniEl.style.display = 'flex';
       state.el.style.display = 'none';
       hideChatBubbleConnector(state);
