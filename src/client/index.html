@@ -10,7 +10,7 @@
     <link rel="icon" href="favicon.png" type="image/png">
     <title>My Virtual World</title>
     <link rel="stylesheet" href="css/style.css?v=20260603-sidebar-toggle-caret-only-v2">
-    <link rel="stylesheet" href="css/ui-redesign.css?v=20260613-license-website-r1">
+    <link rel="stylesheet" href="css/ui-redesign.css?v=20260615-live-mode-coming-soon-r1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
@@ -419,28 +419,15 @@
                 <section class="settings-pane" data-settings-pane="features">
                     <label class="settings-check"><input type="checkbox" id="setting-featureBrowser"> Agent Browser</label>
                     <label class="settings-check"><input type="checkbox" id="setting-featureSms"> SMS / Twilio</label>
-                    <label class="settings-check"><input type="checkbox" id="setting-featureAgentLiveMode"> Agent Live Mode</label>
+                    <label class="settings-check settings-check-disabled"><input type="checkbox" id="setting-featureAgentLiveMode" disabled aria-disabled="true"> Agent Live Mode <span class="settings-feature-note">Coming Soon</span></label>
                     <label class="settings-check"><input type="checkbox" id="setting-featureDebugTools" checked> Debug Tools</label>
                     <div id="featureLockNotice" class="settings-status-card"></div>
                 </section>
 
                 <section class="settings-pane" data-settings-pane="live-mode">
-                    <div id="liveModeSummary" class="settings-status-card">Loading agents...</div>
-                    <div id="liveModeLoopStatus" class="settings-status-card settings-live-loop-status">Loading loop...</div>
-                    <div class="settings-live-loop-controls">
-                        <div class="form-group settings-live-loop-duration"><label>Pause Seconds</label><input type="number" id="setting-liveLoopPauseSec" min="30" max="3600" step="30" value="600"></div>
-                        <button class="btn-secondary" id="btn-refreshLiveLoop" type="button">Refresh Loop</button>
-                        <button class="btn-secondary" id="btn-pauseLiveLoop" type="button">Pause Loop</button>
-                        <button class="btn-secondary" id="btn-resumeLiveLoop" type="button">Resume Loop</button>
-                        <button class="btn-secondary" id="btn-clearLiveClient" type="button">Clear Client</button>
+                    <div id="liveModeComingSoon" class="settings-status-card settings-live-mode-coming-soon">
+                        <strong>Live Agent Mode Coming Soon</strong>
                     </div>
-                    <div id="liveModeLoopActionStatus" class="settings-inline-status"></div>
-                    <div class="settings-live-agent-toolbar">
-                        <button class="btn-secondary" id="btn-refreshLiveAgents" type="button">Refresh Agents</button>
-                        <button class="btn-primary" id="btn-saveLiveAgents" type="button">Apply Selection</button>
-                    </div>
-                    <div id="liveModeAgentList" class="settings-live-agent-list"></div>
-                    <div id="liveModeAgentStatus" class="settings-inline-status"></div>
                 </section>
 
                 <section class="settings-pane" data-settings-pane="browser">
@@ -691,8 +678,8 @@
     </script>
     <script src="js/vo-engine.js?v=printer-copier-asset-v1"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script type="module" src="js/main3d.js?v=20260614-live-mode-social-r28"></script>
+    <script type="module" src="js/main3d.js?v=20260615-live-mode-coming-soon-r1"></script>
     <script src="js/chat.js?v=20260612-chat-agent-persistence-r1"></script>
-    <script src="js/settings.js?v=20260614-live-loop-controls-r2"></script>
+    <script src="js/settings.js?v=20260615-live-mode-coming-soon-r1"></script>
 </body>
 </html>

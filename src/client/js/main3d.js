@@ -28796,6 +28796,8 @@ async function persistAgentProfile(agent, patch) {
 }
 
 async function setAgentLiveModeEnabled(agentOrId, enabled, options = {}) {
+  showToast('Live Agent Mode Coming Soon', 'info');
+  throw new Error('Live Agent Mode Coming Soon');
   if (isLicenseFeatureLocked('agentLiveMode')) {
     showLicenseLockedToast('Agent Live Mode');
     throw new Error('Activation required for Agent Live Mode.');
@@ -29263,11 +29265,10 @@ function openAgentPanel(agentId, _opts = {}) {
     <span class="agent-status-badge ${statusClass}">${getPresenceStateIcon(agent.status)} ${agent.status || 'offline'}</span>
     ${agent.task ? `<div class="agent-task-text">${escapeHtml(agent.task)}</div>` : ''}
     ${agent.presenceSource ? `<div class="agent-task-text">source: ${escapeHtml(agent.presenceSource)}</div>` : ''}
-    <label class="agent-live-mode-toggle" title="When enabled, the agent model may choose actions above Scripted Mode but below user-directed commands.">
-      <input id="agentPanel-liveMode" type="checkbox" ${normalizeAgentLiveModeEnabled(agent) ? 'checked' : ''}>
-      <span>Agent Live Mode</span>
-      <strong>${normalizeAgentLiveModeEnabled(agent) ? 'enabled' : 'disabled'}</strong>
-    </label>
+    <div class="agent-live-mode-toggle agent-live-mode-toggle-disabled" title="Live Agent Mode Coming Soon">
+      <span>Live Agent Mode Coming Soon</span>
+      <strong>disabled</strong>
+    </div>
   `;
   const liveModeToggle = document.getElementById('agentPanel-liveMode');
   liveModeToggle?.addEventListener('change', async () => {

@@ -251,7 +251,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260614-live-mode-social-r28',
+  'js/main3d.js?v=20260615-live-mode-coming-soon-r1',
   'starter-map.mjs?v=20260613-road-terrain-r1',
   'Math.min(clock.getDelta(), 0.05)',
   'const VEHICLE_SPEED = 7.0',
@@ -455,23 +455,17 @@ for (const token of [
 }
 for (const token of [
   'data-settings-tab="live-mode"',
-  'liveModeAgentList',
-  'btn-saveLiveAgents',
+  'Live Agent Mode Coming Soon',
+  'settings-live-mode-coming-soon',
+  'setting-featureAgentLiveMode" disabled',
+  'agentLiveMode: false',
   'saveLiveModeAgents',
-  'liveModeLoopStatus',
-  'btn-pauseLiveLoop',
-  'btn-resumeLiveLoop',
-  'btn-clearLiveClient',
-  'setting-liveLoopPauseSec',
+  'applyLiveAgentModeComingSoonUi',
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260614-live-loop-controls-r2',
-  'Session ',
-  'data-live-agent-toggle',
+  'js/settings.js?v=20260615-live-mode-coming-soon-r1',
   '/live-mode',
-  'settings-live-agent-dot',
-  'settings-live-loop-controls',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);
 }
@@ -495,9 +489,10 @@ for (const token of [
 }
 
 for (const token of [
-  'Editing, Agent Browser, SMS / Twilio, and Agent Live Mode are locked.',
+  'Live Agent Mode Coming Soon',
+  'Editing, Agent Browser, and SMS / Twilio are locked. Live Agent Mode is coming soon.',
   'applyLocks',
-  "features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:!locked&&chk('agentLiveMode')",
+  "features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:false",
 ]) {
   assert(setupHtml.includes(token), `setup.html missing demo setup token: ${token}`);
 }

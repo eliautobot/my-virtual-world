@@ -185,6 +185,10 @@
 }
 .agent-live-mode-toggle input { accent-color: var(--accent-gold); }
 .agent-live-mode-toggle strong { color: var(--accent-gold); font-size: 10px; }
+.agent-live-mode-toggle-disabled {
+    opacity: .75;
+    cursor: not-allowed;
+}
 @media (max-width: 760px) {
     .agent-intent-debug-readout { left: 8px; right: 8px; transform: none; width: auto; }
     .agent-intent-debug-row { grid-template-columns: 1fr; }

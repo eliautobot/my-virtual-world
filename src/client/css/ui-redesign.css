@@ -505,6 +505,15 @@ body.vw-demo-locked .feature-locked-control {
     border-radius: 10px;
     background: rgba(255,255,255,.04);
 }
+.settings-check-disabled {
+    opacity: .72;
+    cursor: not-allowed;
+}
+.settings-feature-note {
+    margin-left: auto;
+    color: #ffe082;
+    font-size: 11px;
+}
 .settings-status-card {
     display: grid;
     gap: 5px;
@@ -517,6 +526,18 @@ body.vw-demo-locked .feature-locked-control {
 .settings-status-card.locked {
     border-color: rgba(255,193,7,.42);
     background: rgba(255,193,7,.10);
+}
+.settings-live-mode-coming-soon {
+    min-height: 120px;
+    align-content: center;
+    justify-items: center;
+    text-align: center;
+    border-color: rgba(255,193,7,.42);
+    background: rgba(255,193,7,.10);
+}
+.settings-live-mode-coming-soon strong {
+    color: #ffe082;
+    font-size: 16px;
 }
 .settings-resource-card {
     display: flex;
