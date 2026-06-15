@@ -268,7 +268,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260615-chat-bubble-desk-carry-r1',
+  'js/main3d.js?v=20260615-lod-object-radius-100-r1',
   'js/chat.js?v=20260615-chat-agent-picker-r1',
   'starter-map.mjs?v=20260613-road-terrain-r1',
   'Math.min(clock.getDelta(), 0.05)',
@@ -292,6 +292,7 @@ for (const token of [
 for (const token of [
   "agent-characters.js?v=20260615-desk-carry-rest-r1",
   "state.miniEl.style.top = (sy - 42) + 'px'",
+  'if (dist > 100)',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing chat bubble/desk carry token: ${token}`);
 }

@@ -24384,7 +24384,7 @@ function updateBuildingLOD() {
       // Never touch structural elements (roof/walls/windows/interior walls) — view mode controls those
       if (isStructural) return;
 
-      if (dist > 40) {
+      if (dist > 100) {
         if (isFurniture || isDoor) obj.visible = false;
       } else if (dist > 20) {
         if (isFurniture) obj.visible = true;
