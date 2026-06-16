@@ -275,7 +275,7 @@ for (const token of [
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
   'js/main3d.js?v=20260615-new-agent-menu-r2',
-  'js/chat.js?v=20260615-new-agent-menu-r2',
+  'js/chat.js?v=20260616-hermes-model-info-r1',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-codexOptions',

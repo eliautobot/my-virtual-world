@@ -218,6 +218,41 @@ def _load_vw_config():
 
 VW_CONFIG = _load_vw_config()
 
+KNOWN_MODEL_CONTEXT_WINDOWS = {
+    "anthropic/claude-opus-4-6": 1000000,
+    "anthropic/claude-sonnet-4-6": 1000000,
+    "anthropic/claude-sonnet-4-20250514": 200000,
+    "google/gemini-2.5-flash": 1048576,
+    "google/gemini-2.5-pro": 1048576,
+    "google/gemini-3.1-pro-preview": 1048576,
+    "openai/gpt-4o": 128000,
+    "openai/gpt-5.4": 1000000,
+    "openai/gpt-5.5": 1000000,
+    "openai-codex/gpt-5.5": 1000000,
+    "gpt-5.4": 1000000,
+    "gpt-5.5": 1000000,
+    "openai/o3": 200000,
+    "openai/o4-mini": 200000,
+    "o3": 200000,
+    "o4-mini": 200000,
+}
+
+
+def _known_context_window(model, provider=""):
+    model_key = str(model or "").strip().lower()
+    provider_key = str(provider or "").strip().lower()
+    candidates = []
+    if model_key:
+        candidates.append(model_key)
+        if "/" in model_key:
+            candidates.append(model_key.split("/", 1)[1])
+    if provider_key and model_key and "/" not in model_key:
+        candidates.insert(0, f"{provider_key}/{model_key}")
+    for key in candidates:
+        if key in KNOWN_MODEL_CONTEXT_WINDOWS:
+            return KNOWN_MODEL_CONTEXT_WINDOWS[key]
+    return 0
+
 
 def _display_user_home_path(path):
     if not path or not isinstance(path, str):
@@ -10198,6 +10233,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                     "providerKind": provider_kind,
                     "providerType": a.get("providerType", "runtime"),
                     "providerAgentId": a.get("providerAgentId", a["id"]),
+                    "model": a.get("model", ""),
+                    "provider": a.get("provider", ""),
                     # Identity.md is the source of truth for the visible agent persona.
                     # Office config may still provide grouping/session metadata, but it
                     # should not mask the agent's chosen identity name or emoji.
@@ -10209,33 +10246,42 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/session-info":
             # Return current model + context window for the active session
-            KNOWN_CONTEXT = {
-                "anthropic/claude-opus-4-6": 1000000,
-                "anthropic/claude-sonnet-4-6": 1000000,
-                "anthropic/claude-sonnet-4-20250514": 200000,
-                "google/gemini-2.5-flash": 1048576,
-                "google/gemini-2.5-pro": 1048576,
-                "google/gemini-3.1-pro-preview": 1048576,
-                "openai/gpt-4o": 128000,
-                "openai/gpt-5.4": 1000000,
-                "openai/o3": 200000,
-                "openai/o4-mini": 200000,
-            }
+            qs = urllib.parse.parse_qs(parsed.query)
+            agent_key = (qs.get("agent") or qs.get("agentId") or qs.get("key") or [""])[0]
+            provider_kind = str((qs.get("providerKind") or qs.get("provider") or [""])[0] or "").strip().lower()
+            provider_agent = None
+            if agent_key and (provider_kind == "hermes" or agent_key.startswith(("hermes:", "hermes-"))):
+                provider_agent = _get_hermes_agent(agent_key)
+            elif agent_key and (provider_kind == "codex" or agent_key.startswith(("codex:", "codex-"))):
+                provider_agent = _get_codex_agent(agent_key)
+            if provider_agent:
+                model = provider_agent.get("model") or "unknown"
+                provider = provider_agent.get("provider") or provider_agent.get("providerKind") or ""
+                return self._send_json({
+                    "model": model,
+                    "provider": provider,
+                    "providerKind": provider_agent.get("providerKind", ""),
+                    "contextWindow": _known_context_window(model, provider),
+                })
+
             config_path = os.path.join(WORKSPACE_BASE, "openclaw.json")
             model = "unknown"
             context_window = 0
+            provider = ""
             try:
                 with open(config_path, "r") as f:
                     cfg = json.loads(f.read())
                 model = cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("primary", "unknown")
+                provider = cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("provider", "")
                 for a_cfg in cfg.get("agents", {}).get("list", []):
                     if a_cfg.get("default") and a_cfg.get("model"):
                         model = a_cfg["model"]
+                        provider = a_cfg.get("provider", provider)
                         break
-                context_window = KNOWN_CONTEXT.get(model, 0)
+                context_window = _known_context_window(model, provider)
             except Exception:
                 pass
-            return self._send_json({"model": model, "contextWindow": context_window})
+            return self._send_json({"model": model, "provider": provider, "contextWindow": context_window})
 
         # Serve node_modules for pixi.js
         if path.startswith("/node_modules/"):

@@ -375,11 +375,17 @@
             opt.dataset.agentId = a.agentId;
             opt.dataset.providerKind = a.providerKind || 'openclaw';
             opt.dataset.providerAgentId = a.providerAgentId || a.agentId;
+            opt.dataset.model = a.model || '';
+            opt.dataset.provider = a.provider || '';
             group.appendChild(opt);
           }
           this.agentSelect.appendChild(group);
         }
         this.syncAgentSelect();
+        if (connected && (this.isPrimary || this.root.classList.contains('open'))) {
+          this.fetchSessionInfo();
+          this.loadHistory();
+        }
       } catch (e) {
         console.warn('[chat] Failed to load agent list:', e);
       }
@@ -512,23 +518,28 @@
 
     async fetchSessionInfo() {
       let gatewayContext = 0;
-      try {
-        if (this.isProviderAgentSelected()) return;
-        // Targeted lookup avoids rebuilding the full sessions.list index.
-        const res = await rpc('sessions.describe', { key: this.sessionKey });
-        const s = res?.payload?.session;
-        if (res.ok && s) {
-          if (s.totalTokens > 0) this.contextUsed = s.totalTokens;
-          if (s.contextTokens > 0) gatewayContext = s.contextTokens;
+      if (!this.isProviderAgentSelected()) {
+        try {
+          // Targeted lookup avoids rebuilding the full sessions.list index.
+          const res = await rpc('sessions.describe', { key: this.sessionKey });
+          const s = res?.payload?.session;
+          if (res.ok && s) {
+            if (s.totalTokens > 0) this.contextUsed = s.totalTokens;
+            if (s.contextTokens > 0) gatewayContext = s.contextTokens;
+          }
+        } catch (e) {
+          console.warn('[chat] sessions.describe failed:', e);
         }
-      } catch (e) {
-        console.warn('[chat] sessions.describe failed:', e);
       }
       let serverContext = 0;
       try {
         // Pass current agent ID so server returns the correct configured model
         const agentId = this.getSelectedAgentId();
-        const qs = agentId ? `?agent=${encodeURIComponent(agentId)}` : '';
+        const providerKind = this.getSelectedProviderKind();
+        const params = new URLSearchParams();
+        if (agentId) params.set('agent', agentId);
+        if (providerKind) params.set('providerKind', providerKind);
+        const qs = params.toString() ? `?${params.toString()}` : '';
         const res = await fetch('/session-info' + qs);
         const data = await res.json();
         // Always use the configured model from the server — this reflects
