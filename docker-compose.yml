@@ -11,10 +11,12 @@ services:
       - vw-data:/data
       - ~/.openclaw:/openclaw:ro
       - ~/.openclaw/workspace/uploads:/openclaw/workspace/uploads
-      # Optional native Hermes integration. Comment these three mounts out if you do not use Hermes.
-      - ~/.hermes:/home/vw/.hermes
-      - ~/.local/bin/hermes:/home/vw/.local/bin/hermes:ro
-      - ~/.local/share/uv:/home/vw/.local/share/uv:ro
+      # Optional native Hermes integration.
+      # If your Hermes launcher stores absolute paths, set VW_HERMES_HOME,
+      # VW_HERMES_BIN, and VW_HERMES_CONTAINER_UV to matching container paths.
+      - ${VW_HERMES_HOST_HOME:-~/.hermes}:${VW_HERMES_HOME:-/home/vw/.hermes}
+      - ${VW_HERMES_HOST_BIN:-~/.local/bin/hermes}:${VW_HERMES_BIN:-/home/vw/.local/bin/hermes}:ro
+      - ${VW_HERMES_HOST_UV:-~/.local/share/uv}:${VW_HERMES_CONTAINER_UV:-/home/vw/.local/share/uv}:ro
       # Optional native Codex integration. Override VW_CODEX_* if your Codex install lives elsewhere.
       - ~/.codex:/home/vw/.codex
     environment:
@@ -26,7 +28,7 @@ services:
       - VW_GATEWAY_URL=${VW_GATEWAY_URL:-ws://host.docker.internal:18789}
       - VW_HERMES_ENABLED=${VW_HERMES_ENABLED:-true}
       - VW_HERMES_HOME=${VW_HERMES_HOME:-/home/vw/.hermes}
-      - VW_HERMES_BIN=${VW_HERMES_BIN:-/home/vw/.hermes/hermes-agent/hermes}
+      - VW_HERMES_BIN=${VW_HERMES_BIN:-/home/vw/.local/bin/hermes}
       - VW_HERMES_TIMEOUT_SEC=${VW_HERMES_TIMEOUT_SEC:-600}
       - CODEX_HOME=${VW_CODEX_HOME:-/home/vw/.codex}
       - VW_CODEX_ENABLED=${VW_CODEX_ENABLED:-true}
