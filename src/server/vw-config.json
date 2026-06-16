@@ -6,7 +6,13 @@
     "showMinimap": true,
     "showCoords": true,
     "dayNightCycleEnabled": true,
-    "weatherEnabled": true
+    "weatherEnabled": true,
+    "location": {
+      "label": "",
+      "timeZone": "",
+      "latitude": null,
+      "longitude": null
+    }
   },
   "openclaw": {
     "homePath": "",
@@ -22,6 +28,21 @@
     "apiUrl": "",
     "apiKey": "",
     "preferApi": true
+  },
+  "codex": {
+    "enabled": true,
+    "homePath": "",
+    "binary": "",
+    "workspaceRoot": "",
+    "mainWorkspace": "",
+    "timeoutSec": 900,
+    "model": "",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "never",
+    "preferAppServer": true,
+    "includeMain": true,
+    "includeNativeAgents": true,
+    "registerNativeAgents": true
   },
   "features": {
     "agentBrowser": false,

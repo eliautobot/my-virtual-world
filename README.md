@@ -130,20 +130,25 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_PORT` | `8590` | HTTP server port |
 | `VW_DATA_DIR` | `/data` | Persistent world data directory in Docker |
 | `VW_OPENCLAW_PATH` | `/openclaw` | Mounted OpenClaw home path |
+| `VW_OPENCLAW_HOST_PATH` | `~/.openclaw` | Host OpenClaw home path used when Gateway creates agent workspaces |
 | `VW_GATEWAY_URL` | `ws://host.docker.internal:18789` | OpenClaw gateway WebSocket URL |
 | `VW_HERMES_ENABLED` | `true` | Enable local Hermes profile support |
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker |
-| `VW_HERMES_BIN` | `/home/vw/.local/bin/hermes` | Hermes CLI path inside Docker |
+| `VW_HERMES_BIN` | `/home/vw/.hermes/hermes-agent/hermes` | Hermes CLI path inside Docker |
+| `VW_CODEX_ENABLED` | `true` | Enable local Codex workspace agent support |
+| `VW_CODEX_HOME` | `/home/vw/.codex` | Codex home path inside Docker |
+| `VW_CODEX_BIN` | `/home/vw/.codex/packages/standalone/current/bin/codex` | Codex CLI path inside Docker |
+| `VW_CODEX_WORKSPACE_ROOT` | `/data/codex-agents` | Managed Codex agent workspaces |
 | `VW_LICENSE_STORE_ID` | `321733` | Lemon Squeezy store ID used to verify keys belong to My Virtual World |
 | `VW_LICENSE_PRODUCT_IDS` | `1140366` | Lemon Squeezy product ID list accepted by My Virtual World |
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for more detail.
 
-## Connecting OpenClaw and Hermes
+## Connecting OpenClaw, Hermes, and Codex
 
 My Virtual World can show live agent presence and activity when your agent tools are available on the same machine.
 
-OpenClaw and Hermes are optional. The app still runs without them, but live agents and activity work best when they are connected.
+OpenClaw, Hermes, and Codex are optional. The app still runs without them, but live agents and activity work best when they are connected.
 
 ### Docker Path Defaults
 
@@ -152,19 +157,24 @@ When running with Docker, use these values in `Settings > Connections`:
 | Field | Docker value |
 | --- | --- |
 | OpenClaw Home | `/openclaw` |
+| OpenClaw Host Home | `~/.openclaw` |
 | Gateway URL | `ws://host.docker.internal:18789` |
 | Gateway Token | Leave blank unless your gateway requires one |
 | Hermes Home | `/home/vw/.hermes` |
-| Hermes CLI | `/home/vw/.local/bin/hermes` |
+| Hermes CLI | `/home/vw/.hermes/hermes-agent/hermes` |
 | Hermes API URL | Leave blank for CLI mode |
 | Hermes API Key | Leave blank unless your Hermes API requires one |
+| Codex Home | `/home/vw/.codex` |
+| Codex CLI | `/home/vw/.codex/packages/standalone/current/bin/codex` |
+| Codex Workspace Root | `/data/codex-agents` |
 
 These values match the Docker mounts in `docker-compose.yml`:
 
 - OpenClaw home is mounted into the container at `/openclaw`.
 - The OpenClaw gateway is reached from inside Docker at `ws://host.docker.internal:18789`.
 - Hermes home is mounted at `/home/vw/.hermes`.
-- The Hermes CLI is mounted at `/home/vw/.local/bin/hermes`.
+- The Hermes CLI is discovered from the mounted Hermes home, usually `/home/vw/.hermes/hermes-agent/hermes`.
+- Codex home is mounted at `/home/vw/.codex`; override `VW_CODEX_BIN` if your Codex binary is installed somewhere else.
 
 ### Local Development Path Defaults
 
@@ -176,8 +186,10 @@ If you are running the server directly without Docker, use local paths instead:
 | Gateway URL | Usually `ws://127.0.0.1:18789` or your gateway URL |
 | Hermes Home | `~/.hermes` |
 | Hermes CLI | `~/.local/bin/hermes` |
+| Codex Home | `~/.codex` |
+| Codex CLI | `codex` or your installed Codex binary path |
 
-If OpenClaw agents do not appear, confirm OpenClaw and the OpenClaw gateway are running. If Hermes does not connect, confirm Hermes is installed and the Hermes binary exists at `~/.local/bin/hermes`.
+If OpenClaw agents do not appear, confirm OpenClaw and the OpenClaw gateway are running. If Hermes does not connect, confirm Hermes is installed and the Hermes binary exists at `~/.local/bin/hermes`. If Codex is unavailable, confirm the Codex CLI is installed, authenticated, and reachable through `VW_CODEX_BIN`.
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md#connect-openclaw-and-hermes-agents) for the full beginner walkthrough.
 

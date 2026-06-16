@@ -9,7 +9,7 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; background: #0b1020; color: #f5f7ff; font-family: Arial, sans-serif; display: grid; place-items: center; padding: 24px; }
-    .shell { width: min(1060px, 96vw); min-height: min(760px, 92vh); display: grid; grid-template-columns: 260px 1fr; background: linear-gradient(180deg, rgba(18,27,51,.96), rgba(10,15,29,.94)); border: 1px solid rgba(255,214,0,.36); border-radius: 18px; box-shadow: 0 24px 80px rgba(0,0,0,.45); overflow: hidden; }
+    .shell { width: 100%; max-width: 1060px; min-height: min(760px, 92vh); display: grid; grid-template-columns: 260px 1fr; background: linear-gradient(180deg, rgba(18,27,51,.96), rgba(10,15,29,.94)); border: 1px solid rgba(255,214,0,.36); border-radius: 18px; box-shadow: 0 24px 80px rgba(0,0,0,.45); overflow: hidden; }
     .rail { padding: 24px; border-right: 1px solid rgba(255,255,255,.10); background: rgba(0,0,0,.18); }
     .brand { display: flex; gap: 10px; align-items: center; margin-bottom: 26px; }
     .brand img { width: 36px; height: 36px; }
@@ -26,6 +26,7 @@
     input, select { width: 100%; padding: 11px 12px; border-radius: 9px; border: 1px solid rgba(255,255,255,.14); background: rgba(0,0,0,.26); color: #fff; }
     .field-example { margin-top: 6px; color: #93a2c8; font-size: 12px; line-height: 1.45; }
     .field-example code { color: #ffe082; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .field-grid { display: grid; grid-template-columns: minmax(160px, 1.2fr) repeat(2, minmax(120px, .8fr)); gap: 12px; }
     .check { display: flex; align-items: center; gap: 8px; }
     .check input { width: auto; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
@@ -35,7 +36,7 @@
     .status.ok { border: 1px solid rgba(76,175,80,.5); }
     .status.warn { border: 1px solid rgba(255,193,7,.5); }
     .note { margin-top: 16px; padding: 14px; border: 1px solid rgba(255,255,255,.10); border-radius: 12px; color: #aeb8d4; line-height: 1.5; background: rgba(255,255,255,.04); }
-    @media (max-width: 760px) { .shell { grid-template-columns: 1fr; } .rail { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.10); } }
+    @media (max-width: 760px) { body { padding: 12px; } .shell { grid-template-columns: 1fr; } .rail { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.10); } .field-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -61,6 +62,22 @@
       <section class="step" data-pane="1">
         <div class="step-title">WORLD IDENTITY</div>
         <label>World Name</label><input id="worldName" value="My Virtual World">
+        <label>World Location</label><input id="locationLabel" placeholder="Orlando, FL">
+        <div class="field-example">Needed for location-aware Day &amp; Time Cycle, Time, and Weather data. Example: <code>Orlando, FL</code>.</div>
+        <div class="field-grid">
+          <div>
+            <label>Time Zone</label><input id="timeZone" placeholder="America/New_York">
+            <div class="field-example">Used to align the world clock with local time.</div>
+          </div>
+          <div>
+            <label>Latitude</label><input id="latitude" type="number" placeholder="28.5383" step="0.0001">
+            <div class="field-example">Optional, for precise sunrise/sunset and weather lookup.</div>
+          </div>
+          <div>
+            <label>Longitude</label><input id="longitude" type="number" placeholder="-81.3792" step="0.0001">
+            <div class="field-example">Optional, for precise sunrise/sunset and weather lookup.</div>
+          </div>
+        </div>
         <label class="check"><input type="checkbox" id="dayNight" checked> Day and time cycle</label>
         <label class="check"><input type="checkbox" id="weather" checked> Weather effects</label>
       </section>
@@ -117,13 +134,65 @@
     const $ = id => document.getElementById(id);
     const val = id => ($(id)?.value || '').trim();
     const chk = id => $(id)?.checked === true;
+    const num = id => { const raw = val(id); if (!raw) return null; const parsed = Number(raw); return Number.isFinite(parsed) ? parsed : null; };
     function show(n){ step=n; document.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('active',p.dataset.pane==n)); document.querySelectorAll('[data-step]').forEach(b=>b.classList.toggle('active',b.dataset.step==n)); }
     async function json(url,opt){ const r=await fetch(url,opt); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.error||r.status); return d; }
     function trial(){ const l=cfg.license||{}; return l.trial!==false && !l.licensed; }
     function applyLocks(){ const locked=trial(); ['browserEnabled','browserCdp','browserViewer','testBrowser','smsEnabled','smsOwner','twilioSid','twilioToken','twilioFrom','testSms','agentLiveMode'].forEach(id=>{ const el=$(id); if(el) el.disabled=locked; }); if(locked){ $('browserStatus').textContent='Locked until activation.'; $('smsStatus').textContent='Locked until activation.'; } }
-    async function load(){ cfg=await json('/vw-config'); const l=cfg.license||{}; $('licenseStatus').textContent=trial()?`DEMO: ${l.limits?.maxAgents||3} agents max. Editing, Agent Browser, and SMS / Twilio are locked. Live Agent Mode is coming soon.`:`${l.tierName} active. Live Agent Mode is coming soon.`; $('worldName').value=cfg.world?.name||'My Virtual World'; $('dayNight').checked=cfg.world?.dayNightCycleEnabled!==false; $('weather').checked=cfg.world?.weatherEnabled!==false; $('openclawPath').value=cfg.openclaw?.homePath||''; $('gatewayUrl').value=cfg.openclaw?.gatewayUrl||''; $('hermesEnabled').checked=cfg.hermes?.enabled!==false; $('hermesHome').value=cfg.hermes?.homePath||''; $('hermesBin').value=cfg.hermes?.binary||''; $('browserEnabled').checked=!trial()&&!!cfg.features?.agentBrowser; $('browserCdp').value=cfg.browser?.cdpUrl||''; $('browserViewer').value=cfg.browser?.viewerUrl||''; $('smsEnabled').checked=!trial()&&!!cfg.features?.sms; $('twilioSid').value=cfg.sms?.twilioAccountSid||''; $('twilioFrom').value=cfg.sms?.fromNumber||''; $('agentLiveMode').checked=false; applyLocks(); populateAgents(cfg.sms?.ownerAgentId||''); }
+    async function load(){
+      cfg=await json('/vw-config');
+      const l=cfg.license||{};
+      const world=cfg.world||{};
+      const location=world.location||{};
+      $('licenseStatus').textContent=trial()?`DEMO: ${l.limits?.maxAgents||3} agents max. Editing, Agent Browser, and SMS / Twilio are locked. Live Agent Mode is coming soon.`:`${l.tierName} active. Live Agent Mode is coming soon.`;
+      $('worldName').value=world.name||'My Virtual World';
+      $('locationLabel').value=location.label||'';
+      $('timeZone').value=location.timeZone||'';
+      $('latitude').value=location.latitude??'';
+      $('longitude').value=location.longitude??'';
+      $('dayNight').checked=world.dayNightCycleEnabled!==false;
+      $('weather').checked=world.weatherEnabled!==false;
+      $('openclawPath').value=cfg.openclaw?.homePath||'';
+      $('gatewayUrl').value=cfg.openclaw?.gatewayUrl||'';
+      $('hermesEnabled').checked=cfg.hermes?.enabled!==false;
+      $('hermesHome').value=cfg.hermes?.homePath||'';
+      $('hermesBin').value=cfg.hermes?.binary||'';
+      $('browserEnabled').checked=!trial()&&!!cfg.features?.agentBrowser;
+      $('browserCdp').value=cfg.browser?.cdpUrl||'';
+      $('browserViewer').value=cfg.browser?.viewerUrl||'';
+      $('smsEnabled').checked=!trial()&&!!cfg.features?.sms;
+      $('twilioSid').value=cfg.sms?.twilioAccountSid||'';
+      $('twilioFrom').value=cfg.sms?.fromNumber||'';
+      $('agentLiveMode').checked=false;
+      applyLocks();
+      populateAgents(cfg.sms?.ownerAgentId||'');
+    }
     async function populateAgents(sel){ try{ const d=await json('/agents-list'); (d.agents||[]).forEach(a=>{ const o=document.createElement('option'); o.value=a.agentId||a.key; o.textContent=(a.emoji||'')+' '+(a.name||a.key); if(o.value===sel)o.selected=true; $('smsOwner').appendChild(o); }); }catch{} }
-    function payload(){ const locked=trial(); const p={_setupComplete:true,world:{name:val('worldName')||'My Virtual World',dayNightCycleEnabled:chk('dayNight'),weatherEnabled:chk('weather')},openclaw:{homePath:val('openclawPath'),gatewayUrl:val('gatewayUrl')},hermes:{enabled:chk('hermesEnabled'),homePath:val('hermesHome'),binary:val('hermesBin')},features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:false,debugTools:chk('debugTools'),weather:chk('weather')},browser:{cdpUrl:val('browserCdp'),viewerUrl:val('browserViewer')},sms:{ownerAgentId:val('smsOwner'),twilioAccountSid:val('twilioSid'),fromNumber:val('twilioFrom')},debug:{movementDebugOverlays:chk('movementDebug'),objectActionPointDebug:chk('actionPointDebug')}}; if(!locked&&val('twilioToken'))p.sms.twilioAuthToken=val('twilioToken'); return p; }
+    function payload(){
+      const locked=trial();
+      const p={
+        _setupComplete:true,
+        world:{
+          name:val('worldName')||'My Virtual World',
+          dayNightCycleEnabled:chk('dayNight'),
+          weatherEnabled:chk('weather'),
+          location:{
+            label:val('locationLabel'),
+            timeZone:val('timeZone'),
+            latitude:num('latitude'),
+            longitude:num('longitude')
+          }
+        },
+        openclaw:{homePath:val('openclawPath'),gatewayUrl:val('gatewayUrl')},
+        hermes:{enabled:chk('hermesEnabled'),homePath:val('hermesHome'),binary:val('hermesBin')},
+        features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:false,debugTools:chk('debugTools'),weather:chk('weather')},
+        browser:{cdpUrl:val('browserCdp'),viewerUrl:val('browserViewer')},
+        sms:{ownerAgentId:val('smsOwner'),twilioAccountSid:val('twilioSid'),fromNumber:val('twilioFrom')},
+        debug:{movementDebugOverlays:chk('movementDebug'),objectActionPointDebug:chk('actionPointDebug')}
+      };
+      if(!locked&&val('twilioToken'))p.sms.twilioAuthToken=val('twilioToken');
+      return p;
+    }
     async function save(){ $('saveStatus').textContent='Saving...'; await json('/setup/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())}); $('saveStatus').textContent='Saved. Launching...'; setTimeout(()=>location.href='/',700); }
     document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>show(Number(b.dataset.step))); $('next').onclick=()=>show(Math.min(6,step+1)); $('back').onclick=()=>show(Math.max(0,step-1)); $('trial').onclick=()=>show(1); $('finish').onclick=()=>save().catch(e=>$('saveStatus').textContent=e.message);
     $('activate').onclick=async()=>{ try{ const r=await json('/api/license/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:val('licenseKey')})}); $('licenseStatus').textContent=r.ok?`${r.tierName} activated.`:r.error; await load(); }catch(e){ $('licenseStatus').textContent=e.message; } };

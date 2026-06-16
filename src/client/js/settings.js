@@ -23,6 +23,12 @@
   };
   const checked = (id) => $(id)?.checked === true;
   const value = (id) => ($(id)?.value || '').trim();
+  const optionalNumber = (id) => {
+    const raw = value(id);
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
   const DEMO_MESSAGE = 'DEMO: 3 agents max, some features are locked. Get a License Key to activate all features.';
 
   function isTrialLicense(lic) {
@@ -378,7 +384,12 @@
     const browser = config.browser || {};
     const sms = config.sms || {};
     const debug = config.debug || {};
+    const location = world.location || {};
     if ($('setting-worldName')) $('setting-worldName').value = world.name || 'My Virtual World';
+    if ($('setting-locationLabel')) $('setting-locationLabel').value = location.label || '';
+    if ($('setting-timeZone')) $('setting-timeZone').value = location.timeZone || '';
+    if ($('setting-latitude')) $('setting-latitude').value = location.latitude ?? '';
+    if ($('setting-longitude')) $('setting-longitude').value = location.longitude ?? '';
     if ($('setting-showGrid')) $('setting-showGrid').checked = world.showGrid !== false;
     if ($('setting-showMinimap')) $('setting-showMinimap').checked = world.showMinimap !== false;
     if ($('setting-showCoords')) $('setting-showCoords').checked = world.showCoords !== false;
@@ -421,6 +432,12 @@
         showCoords: checked('setting-showCoords'),
         dayNightCycleEnabled: checked('setting-enableDayNightCycle'),
         weatherEnabled: checked('setting-enableWeather'),
+        location: {
+          label: value('setting-locationLabel'),
+          timeZone: value('setting-timeZone'),
+          latitude: optionalNumber('setting-latitude'),
+          longitude: optionalNumber('setting-longitude'),
+        },
       },
       openclaw: {
         homePath: value('setting-openclawPath'),

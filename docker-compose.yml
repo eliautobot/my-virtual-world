@@ -15,16 +15,33 @@ services:
       - ~/.hermes:/home/vw/.hermes
       - ~/.local/bin/hermes:/home/vw/.local/bin/hermes:ro
       - ~/.local/share/uv:/home/vw/.local/share/uv:ro
+      # Optional native Codex integration. Override VW_CODEX_* if your Codex install lives elsewhere.
+      - ~/.codex:/home/vw/.codex
     environment:
       - VW_PORT=${VW_PORT:-8590}
       - VW_HOST_PORT=${VW_HOST_PORT:-8590}
       - VW_DATA_DIR=/data
       - VW_OPENCLAW_PATH=/openclaw
+      - VW_OPENCLAW_HOST_PATH=${VW_OPENCLAW_HOST_PATH:-${HOME}/.openclaw}
       - VW_GATEWAY_URL=${VW_GATEWAY_URL:-ws://host.docker.internal:18789}
       - VW_HERMES_ENABLED=${VW_HERMES_ENABLED:-true}
       - VW_HERMES_HOME=${VW_HERMES_HOME:-/home/vw/.hermes}
-      - VW_HERMES_BIN=${VW_HERMES_BIN:-/home/vw/.local/bin/hermes}
+      - VW_HERMES_BIN=${VW_HERMES_BIN:-/home/vw/.hermes/hermes-agent/hermes}
       - VW_HERMES_TIMEOUT_SEC=${VW_HERMES_TIMEOUT_SEC:-600}
+      - CODEX_HOME=${VW_CODEX_HOME:-/home/vw/.codex}
+      - VW_CODEX_ENABLED=${VW_CODEX_ENABLED:-true}
+      - VW_CODEX_HOME=${VW_CODEX_HOME:-/home/vw/.codex}
+      - VW_CODEX_BIN=${VW_CODEX_BIN:-/home/vw/.codex/packages/standalone/current/bin/codex}
+      - VW_CODEX_WORKSPACE_ROOT=${VW_CODEX_WORKSPACE_ROOT:-/data/codex-agents}
+      - VW_CODEX_MAIN_WORKSPACE=${VW_CODEX_MAIN_WORKSPACE:-/data/codex-main}
+      - VW_CODEX_TIMEOUT_SEC=${VW_CODEX_TIMEOUT_SEC:-900}
+      - VW_CODEX_MODEL=${VW_CODEX_MODEL:-}
+      - VW_CODEX_SANDBOX=${VW_CODEX_SANDBOX:-workspace-write}
+      - VW_CODEX_APPROVAL_POLICY=${VW_CODEX_APPROVAL_POLICY:-never}
+      - VW_CODEX_PREFER_APP_SERVER=${VW_CODEX_PREFER_APP_SERVER:-true}
+      - VW_CODEX_INCLUDE_MAIN=${VW_CODEX_INCLUDE_MAIN:-true}
+      - VW_CODEX_INCLUDE_NATIVE_AGENTS=${VW_CODEX_INCLUDE_NATIVE_AGENTS:-true}
+      - VW_CODEX_REGISTER_NATIVE_AGENTS=${VW_CODEX_REGISTER_NATIVE_AGENTS:-true}
       - VW_LICENSE_STORE_ID=${VW_LICENSE_STORE_ID:-321733}
       - VW_LICENSE_PRODUCT_IDS=${VW_LICENSE_PRODUCT_IDS:-1140366}
       # Optional external provider relay for future non-Hermes providers.

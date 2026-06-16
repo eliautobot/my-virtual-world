@@ -43,10 +43,30 @@ except Exception as e:
     HermesProvider = None
     print(f"⚠️  Virtual World Hermes provider unavailable: {e}")
 
+try:
+    from providers.codex import CodexProvider
+except Exception as e:
+    CodexProvider = None
+    print(f"⚠️  Virtual World Codex provider unavailable: {e}")
+
+try:
+    from websockets.asyncio.client import connect as ws_connect
+except Exception as e:
+    ws_connect = None
+    print(f"⚠️  Virtual World Gateway RPC client unavailable: {e}")
+
 # ─── CONFIGURATION ───────────────────────────────────────────────
 def _env_or(key, fallback):
     val = os.environ.get(key)
     return val if val else fallback
+
+
+def _env_bool(key, fallback=False):
+    val = os.environ.get(key)
+    if val is None or val == "":
+        return bool(fallback)
+    return str(val).strip().lower() not in ("0", "false", "no", "off")
+
 
 PORT = int(_env_or("VW_PORT", "8590"))
 PUBLIC_HOST_PORT = _env_or("VW_HOST_PORT", str(PORT))
@@ -98,9 +118,32 @@ def _default_vw_config():
         return default
     return {
         "_setupComplete": False,
-        "world": {"name": "My Virtual World", "showGrid": True, "showMinimap": True, "showCoords": True, "dayNightCycleEnabled": True, "weatherEnabled": True},
+        "world": {
+            "name": "My Virtual World",
+            "showGrid": True,
+            "showMinimap": True,
+            "showCoords": True,
+            "dayNightCycleEnabled": True,
+            "weatherEnabled": True,
+            "location": {"label": "", "timeZone": "", "latitude": None, "longitude": None},
+        },
         "openclaw": {"homePath": "", "hostHomePath": "", "gatewayUrl": "", "gatewayToken": ""},
         "hermes": {"enabled": True, "homePath": "", "binary": "", "timeoutSec": 600, "apiUrl": "", "apiKey": "", "preferApi": True},
+        "codex": {
+            "enabled": True,
+            "homePath": "",
+            "binary": "",
+            "workspaceRoot": "",
+            "mainWorkspace": "",
+            "timeoutSec": 900,
+            "model": "",
+            "sandbox": "workspace-write",
+            "approvalPolicy": "never",
+            "preferAppServer": True,
+            "includeMain": True,
+            "includeNativeAgents": True,
+            "registerNativeAgents": True,
+        },
         "features": {"agentBrowser": False, "sms": False, "weather": True, "agentLiveMode": False, "debugTools": True},
         "browser": {"cdpUrl": "", "viewerUrl": ""},
         "sms": {"ownerAgentId": "", "twilioAccountSid": "", "twilioAuthToken": "", "fromNumber": "", "publicMediaBaseUrl": ""},
@@ -113,11 +156,14 @@ def _load_vw_config():
     cfg = _deep_merge(_default_vw_config(), _load_config_file(_resolve_vw_config_path()))
     cfg.setdefault("openclaw", {})
     cfg.setdefault("hermes", {})
+    cfg.setdefault("codex", {})
     cfg.setdefault("browser", {})
     cfg.setdefault("sms", {})
     cfg.setdefault("features", {})
     cfg.setdefault("world", {})
     cfg.setdefault("debug", {})
+    if not isinstance(cfg["world"].get("location"), dict):
+        cfg["world"]["location"] = {"label": "", "timeZone": "", "latitude": None, "longitude": None}
     cfg["openclaw"]["homePath"] = os.path.expanduser(_env_or("VW_OPENCLAW_PATH", cfg["openclaw"].get("homePath") or "~/.openclaw"))
     cfg["openclaw"]["hostHomePath"] = os.path.expanduser(_env_or("VW_OPENCLAW_HOST_PATH", cfg["openclaw"].get("hostHomePath") or cfg["openclaw"]["homePath"]))
     cfg["openclaw"]["gatewayUrl"] = _env_or("VW_GATEWAY_URL", cfg["openclaw"].get("gatewayUrl") or "")
@@ -128,6 +174,19 @@ def _load_vw_config():
     cfg["hermes"]["timeoutSec"] = int(_env_or("VW_HERMES_TIMEOUT_SEC", cfg["hermes"].get("timeoutSec", 600)))
     cfg["hermes"]["apiUrl"] = _env_or("VW_HERMES_API_URL", cfg["hermes"].get("apiUrl") or "")
     cfg["hermes"]["apiKey"] = _env_or("VW_HERMES_API_KEY", cfg["hermes"].get("apiKey") or "")
+    cfg["codex"]["enabled"] = _env_bool("VW_CODEX_ENABLED", cfg["codex"].get("enabled", True))
+    cfg["codex"]["homePath"] = os.path.expanduser(_env_or("VW_CODEX_HOME", _env_or("CODEX_HOME", cfg["codex"].get("homePath") or "~/.codex")))
+    cfg["codex"]["binary"] = os.path.expanduser(_env_or("VW_CODEX_BIN", cfg["codex"].get("binary") or "codex"))
+    cfg["codex"]["workspaceRoot"] = os.path.expanduser(_env_or("VW_CODEX_WORKSPACE_ROOT", cfg["codex"].get("workspaceRoot") or os.path.join(DATA_DIR, "codex-agents")))
+    cfg["codex"]["mainWorkspace"] = os.path.expanduser(_env_or("VW_CODEX_MAIN_WORKSPACE", cfg["codex"].get("mainWorkspace") or os.path.join(DATA_DIR, "codex-main")))
+    cfg["codex"]["timeoutSec"] = int(_env_or("VW_CODEX_TIMEOUT_SEC", cfg["codex"].get("timeoutSec", 900)))
+    cfg["codex"]["model"] = _env_or("VW_CODEX_MODEL", cfg["codex"].get("model") or "")
+    cfg["codex"]["sandbox"] = _env_or("VW_CODEX_SANDBOX", cfg["codex"].get("sandbox") or "workspace-write")
+    cfg["codex"]["approvalPolicy"] = _env_or("VW_CODEX_APPROVAL_POLICY", cfg["codex"].get("approvalPolicy") or "never")
+    cfg["codex"]["preferAppServer"] = _env_bool("VW_CODEX_PREFER_APP_SERVER", cfg["codex"].get("preferAppServer", True))
+    cfg["codex"]["includeMain"] = _env_bool("VW_CODEX_INCLUDE_MAIN", cfg["codex"].get("includeMain", True))
+    cfg["codex"]["includeNativeAgents"] = _env_bool("VW_CODEX_INCLUDE_NATIVE_AGENTS", cfg["codex"].get("includeNativeAgents", True))
+    cfg["codex"]["registerNativeAgents"] = _env_bool("VW_CODEX_REGISTER_NATIVE_AGENTS", cfg["codex"].get("registerNativeAgents", True))
     cfg["browser"]["cdpUrl"] = _env_or("VW_BROWSER_CDP_URL", cfg["browser"].get("cdpUrl") or "")
     cfg["browser"]["viewerUrl"] = _env_or("VW_BROWSER_VIEWER_URL", cfg["browser"].get("viewerUrl") or "")
     cfg["sms"]["ownerAgentId"] = _env_or("VW_SMS_OWNER_AGENT_ID", cfg["sms"].get("ownerAgentId") or "")
@@ -164,6 +223,19 @@ HERMES_ENABLED = VW_CONFIG["hermes"]["enabled"]
 HERMES_HOME = VW_CONFIG["hermes"]["homePath"]
 HERMES_BIN = VW_CONFIG["hermes"]["binary"]
 HERMES_TIMEOUT_SEC = int(VW_CONFIG["hermes"].get("timeoutSec") or 600)
+CODEX_ENABLED = VW_CONFIG["codex"].get("enabled", True)
+CODEX_HOME = VW_CONFIG["codex"].get("homePath") or os.path.expanduser("~/.codex")
+CODEX_BIN = VW_CONFIG["codex"].get("binary") or "codex"
+CODEX_WORKSPACE_ROOT = VW_CONFIG["codex"].get("workspaceRoot") or os.path.join(DATA_DIR, "codex-agents")
+CODEX_MAIN_WORKSPACE = VW_CONFIG["codex"].get("mainWorkspace") or os.path.join(DATA_DIR, "codex-main")
+CODEX_TIMEOUT_SEC = int(VW_CONFIG["codex"].get("timeoutSec") or 900)
+CODEX_MODEL = VW_CONFIG["codex"].get("model") or ""
+CODEX_SANDBOX = VW_CONFIG["codex"].get("sandbox") or "workspace-write"
+CODEX_APPROVAL_POLICY = VW_CONFIG["codex"].get("approvalPolicy") or "never"
+CODEX_PREFER_APP_SERVER = bool(VW_CONFIG["codex"].get("preferAppServer", True))
+CODEX_INCLUDE_MAIN = bool(VW_CONFIG["codex"].get("includeMain", True))
+CODEX_INCLUDE_NATIVE_AGENTS = bool(VW_CONFIG["codex"].get("includeNativeAgents", True))
+CODEX_REGISTER_NATIVE_AGENTS = bool(VW_CONFIG["codex"].get("registerNativeAgents", True))
 # Chat uploads must be saved somewhere OpenClaw agents can read from the host.
 # The returned path defaults to the same configured OpenClaw tree instead of a
 # machine-specific absolute path; deployments with distinct readable/host-visible
@@ -186,6 +258,7 @@ def _safe_vw_config():
     lic = get_license_status()
     sms_cfg = VW_CONFIG.get("sms", {}) or {}
     hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+    codex_cfg = VW_CONFIG.get("codex", {}) or {}
     openclaw_cfg = VW_CONFIG.get("openclaw", {}) or {}
     return {
         "_setupComplete": bool(VW_CONFIG.get("_setupComplete")),
@@ -206,6 +279,21 @@ def _safe_vw_config():
             "apiUrl": hermes_cfg.get("apiUrl"),
             "apiKeyConfigured": bool(hermes_cfg.get("apiKey")),
             "preferApi": hermes_cfg.get("preferApi", True),
+        },
+        "codex": {
+            "enabled": codex_cfg.get("enabled", True),
+            "homePath": _display_user_home_path(codex_cfg.get("homePath")),
+            "binary": _display_user_home_path(codex_cfg.get("binary")),
+            "workspaceRoot": _display_user_home_path(codex_cfg.get("workspaceRoot")),
+            "mainWorkspace": _display_user_home_path(codex_cfg.get("mainWorkspace")),
+            "timeoutSec": codex_cfg.get("timeoutSec", 900),
+            "model": codex_cfg.get("model"),
+            "sandbox": codex_cfg.get("sandbox", "workspace-write"),
+            "approvalPolicy": codex_cfg.get("approvalPolicy", "never"),
+            "preferAppServer": codex_cfg.get("preferAppServer", True),
+            "includeMain": codex_cfg.get("includeMain", True),
+            "includeNativeAgents": codex_cfg.get("includeNativeAgents", True),
+            "registerNativeAgents": codex_cfg.get("registerNativeAgents", True),
         },
         "browser": {
             "cdpUrl": (VW_CONFIG.get("browser") or {}).get("cdpUrl"),
@@ -255,7 +343,10 @@ def _preserve_secret_updates(existing, body):
 
 
 def _save_vw_config_update(body):
-    global VW_CONFIG, WORKSPACE_BASE, HOST_WORKSPACE_BASE, HERMES_ENABLED, HERMES_HOME, HERMES_BIN, HERMES_TIMEOUT_SEC, UPLOADS_DIR, UPLOADS_HOST_DIR
+    global VW_CONFIG, WORKSPACE_BASE, HOST_WORKSPACE_BASE, HERMES_ENABLED, HERMES_HOME, HERMES_BIN, HERMES_TIMEOUT_SEC
+    global CODEX_ENABLED, CODEX_HOME, CODEX_BIN, CODEX_WORKSPACE_ROOT, CODEX_MAIN_WORKSPACE, CODEX_TIMEOUT_SEC
+    global CODEX_MODEL, CODEX_SANDBOX, CODEX_APPROVAL_POLICY, CODEX_PREFER_APP_SERVER, CODEX_INCLUDE_MAIN
+    global CODEX_INCLUDE_NATIVE_AGENTS, CODEX_REGISTER_NATIVE_AGENTS, UPLOADS_DIR, UPLOADS_HOST_DIR
     if not isinstance(body, dict):
         return {"ok": False, "error": "settings payload must be an object"}, 400
     old_gateway_config = _gateway_config_key()
@@ -276,13 +367,26 @@ def _save_vw_config_update(body):
     HERMES_HOME = VW_CONFIG["hermes"]["homePath"]
     HERMES_BIN = VW_CONFIG["hermes"]["binary"]
     HERMES_TIMEOUT_SEC = int(VW_CONFIG["hermes"].get("timeoutSec") or 600)
+    CODEX_ENABLED = VW_CONFIG["codex"].get("enabled", True)
+    CODEX_HOME = VW_CONFIG["codex"].get("homePath") or os.path.expanduser("~/.codex")
+    CODEX_BIN = VW_CONFIG["codex"].get("binary") or "codex"
+    CODEX_WORKSPACE_ROOT = VW_CONFIG["codex"].get("workspaceRoot") or os.path.join(DATA_DIR, "codex-agents")
+    CODEX_MAIN_WORKSPACE = VW_CONFIG["codex"].get("mainWorkspace") or os.path.join(DATA_DIR, "codex-main")
+    CODEX_TIMEOUT_SEC = int(VW_CONFIG["codex"].get("timeoutSec") or 900)
+    CODEX_MODEL = VW_CONFIG["codex"].get("model") or ""
+    CODEX_SANDBOX = VW_CONFIG["codex"].get("sandbox") or "workspace-write"
+    CODEX_APPROVAL_POLICY = VW_CONFIG["codex"].get("approvalPolicy") or "never"
+    CODEX_PREFER_APP_SERVER = bool(VW_CONFIG["codex"].get("preferAppServer", True))
+    CODEX_INCLUDE_MAIN = bool(VW_CONFIG["codex"].get("includeMain", True))
+    CODEX_INCLUDE_NATIVE_AGENTS = bool(VW_CONFIG["codex"].get("includeNativeAgents", True))
+    CODEX_REGISTER_NATIVE_AGENTS = bool(VW_CONFIG["codex"].get("registerNativeAgents", True))
     UPLOADS_DIR = _env_or("VW_UPLOADS_DIR", os.path.join(WORKSPACE_BASE, "workspace", "uploads"))
     UPLOADS_HOST_DIR = _env_or("VW_UPLOADS_HOST_DIR", os.path.join(HOST_WORKSPACE_BASE, "workspace", "uploads"))
     if _gateway_config_key() != old_gateway_config:
         restart_gateway_presence()
     world = body.get("world") if isinstance(body.get("world"), dict) else {}
     if world:
-        meta_patch = {k: v for k, v in world.items() if k in {"name", "showMinimap", "dayNightCycleEnabled", "weatherEnabled"}}
+        meta_patch = {k: v for k, v in world.items() if k in {"name", "showMinimap", "dayNightCycleEnabled", "weatherEnabled", "location"}}
         if meta_patch:
             meta = load_world_meta()
             meta.update(meta_patch)
@@ -6585,6 +6689,26 @@ def _hermes_provider():
     return HermesProvider(home_path=HERMES_HOME, binary=HERMES_BIN, enabled=HERMES_ENABLED, timeout_sec=HERMES_TIMEOUT_SEC)
 
 
+def _codex_provider():
+    if CodexProvider is None:
+        return None
+    return CodexProvider(
+        home_path=CODEX_HOME,
+        binary=CODEX_BIN,
+        workspace_root=CODEX_WORKSPACE_ROOT,
+        enabled=CODEX_ENABLED,
+        timeout_sec=CODEX_TIMEOUT_SEC,
+        model=CODEX_MODEL,
+        sandbox=CODEX_SANDBOX,
+        approval_policy=CODEX_APPROVAL_POLICY,
+        prefer_app_server=CODEX_PREFER_APP_SERVER,
+        main_workspace=CODEX_MAIN_WORKSPACE,
+        include_main=CODEX_INCLUDE_MAIN,
+        include_native_agents=CODEX_INCLUDE_NATIVE_AGENTS,
+        register_native_agents=CODEX_REGISTER_NATIVE_AGENTS,
+    )
+
+
 def _discover_hermes_agents():
     provider = _hermes_provider()
     if not provider:
@@ -6593,6 +6717,17 @@ def _discover_hermes_agents():
         return provider.discover_agents()
     except Exception as e:
         print(f"⚠️  Virtual World Hermes discovery failed: {e}")
+        return []
+
+
+def _discover_codex_agents():
+    provider = _codex_provider()
+    if not provider:
+        return []
+    try:
+        return provider.discover_agents()
+    except Exception as e:
+        print(f"⚠️  Virtual World Codex discovery failed: {e}")
         return []
 
 
@@ -6607,11 +6742,31 @@ def _is_hermes_agent(agent_id_or_key):
     return needle.startswith("hermes:") or needle.startswith("hermes-")
 
 
+def _is_codex_agent(agent_id_or_key):
+    needle = str(agent_id_or_key or "").strip()
+    if not needle:
+        return False
+    for agent in get_roster():
+        aliases = {str(agent.get("id") or ""), str(agent.get("statusKey") or ""), str(agent.get("providerAgentId") or "")}
+        if needle in aliases:
+            return agent.get("providerKind") == "codex"
+    return needle.startswith("codex:") or needle.startswith("codex-")
+
+
 def _get_hermes_agent(agent_id_or_key=None):
     needle = str(agent_id_or_key or "").strip()
     for agent in get_roster():
         aliases = {str(agent.get("id") or ""), str(agent.get("statusKey") or ""), str(agent.get("providerAgentId") or "")}
         if agent.get("providerKind") == "hermes" and (not needle or needle in aliases or needle == f"hermes:{agent.get('profile') or agent.get('providerAgentId')}"):
+            return agent
+    return None
+
+
+def _get_codex_agent(agent_id_or_key=None):
+    needle = str(agent_id_or_key or "").strip()
+    for agent in get_roster():
+        aliases = {str(agent.get("id") or ""), str(agent.get("statusKey") or ""), str(agent.get("providerAgentId") or "")}
+        if agent.get("providerKind") == "codex" and (not needle or needle in aliases or needle == f"codex:{agent.get('profile') or agent.get('providerAgentId')}"):
             return agent
     return None
 
@@ -6659,6 +6814,51 @@ def _set_hermes_session_id(profile="default", session_id=""):
     state = _load_hermes_state(profile)
     state["sessionId"] = session_id or ""
     _save_hermes_state(profile, state)
+
+
+def _codex_history_path(profile="main"):
+    safe_profile = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(profile or "main")).strip("-.") or "main"
+    return os.path.join(DATA_DIR, f"codex-chat-{safe_profile}.json")
+
+
+def _load_codex_state(profile="main"):
+    try:
+        with open(_codex_history_path(profile), "r") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            return {"messages": data, "sessionId": ""}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {"messages": [], "sessionId": ""}
+
+
+def _load_codex_history(profile="main"):
+    messages = _load_codex_state(profile).get("messages", [])
+    return messages if isinstance(messages, list) else []
+
+
+def _save_codex_state(profile, state):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(_codex_history_path(profile), "w") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def _save_codex_history(profile, messages):
+    state = _load_codex_state(profile)
+    state["messages"] = messages[-500:]
+    _save_codex_state(profile, state)
+
+
+def _get_codex_session_id(profile="main"):
+    return str(_load_codex_state(profile).get("sessionId") or "")
+
+
+def _set_codex_session_id(profile="main", session_id=""):
+    state = _load_codex_state(profile)
+    state["sessionId"] = session_id or ""
+    _save_codex_state(profile, state)
 
 
 def _jsonish(value):
@@ -7240,6 +7440,106 @@ def _handle_hermes_chat(body):
     }
 
 
+def _handle_codex_chat(body):
+    if not isinstance(body, dict):
+        return {"ok": False, "error": "payload must be an object", "_status": 400}
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-main"
+    message = str(body.get("message") or body.get("text") or "").strip()
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    provider = _codex_provider()
+    if not provider:
+        return {"ok": False, "error": "Codex provider module unavailable", "_status": 503}
+    timeout = int(body.get("timeoutSec") or CODEX_TIMEOUT_SEC)
+    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+    from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
+    is_human_source = from_type in {"human", "user", "chat", "ui"}
+    source_app = str(body.get("sourceApp") or body.get("app") or "virtual-world").strip() or "virtual-world"
+    source_surface = str(body.get("sourceSurface") or body.get("surface") or "chat-window").strip() or "chat-window"
+    source_label = str(body.get("sourceLabel") or "").strip()
+    sender_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
+    delivery_message = message
+    if is_human_source:
+        pretty_surface = source_label or ("Virtual World Chat" if source_app == "virtual-world" and source_surface in {"chat-window", "chat"} else f"{source_app.replace('-', ' ').title()} {source_surface.replace('-', ' ').title()}".strip())
+        delivery_message = (
+            f"[A2A from=user name={json.dumps(sender_name)} to={agent.get('id') or agent_key} isUser=true sourceApp={json.dumps(source_app)} sourceSurface={json.dumps(source_surface)}]\n"
+            f"Message from {sender_name} via {pretty_surface}.\n\n"
+            f"{message}\n\n"
+            "Reply directly to the user. Do not assume a personal name unless the user provides one."
+        )
+
+    history = _load_codex_history(profile)
+    now_ms = int(time.time() * 1000)
+    history.append({
+        "role": "user",
+        "text": message,
+        "ts": now_ms,
+        "epochMs": now_ms,
+        "from": sender_name if is_human_source else "You",
+        "fromType": from_type or "",
+        "source": "codex",
+        "sourceApp": source_app if is_human_source else "",
+        "sourceSurface": source_surface if is_human_source else "",
+        "sourceLabel": source_label if is_human_source else "",
+    })
+    _save_codex_history(profile, history)
+
+    if _gateway_presence:
+        try:
+            _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Codex task")
+        except Exception:
+            pass
+    session_id = _get_codex_session_id(profile)
+    result = provider.send_chat_message(
+        profile,
+        delivery_message,
+        session_id=session_id,
+        timeout_sec=timeout,
+    )
+    if result.get("sessionId"):
+        _set_codex_session_id(profile, result.get("sessionId"))
+    active_session_id = result.get("sessionId") or session_id
+    reply = result.get("reply") or result.get("error") or ""
+    tools = result.get("tools") if isinstance(result.get("tools"), list) else []
+    thinking = result.get("thinking") or ""
+    now_ms = int(time.time() * 1000)
+    history = _load_codex_history(profile)
+    history.append({
+        "role": "assistant",
+        "text": reply,
+        "ts": now_ms,
+        "epochMs": now_ms,
+        "from": agent.get("name") or "Codex",
+        "source": "codex",
+        "sessionId": active_session_id,
+        "exitCode": result.get("exitCode"),
+        "tools": tools,
+        "thinking": thinking,
+        "reasoningTokens": result.get("reasoningTokens") or 0,
+    })
+    _save_codex_history(profile, history)
+    if _gateway_presence:
+        try:
+            _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "idle" if result.get("ok") else "offline", "")
+        except Exception:
+            pass
+    return {
+        "ok": bool(result.get("ok")),
+        "reply": reply,
+        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": profile},
+        "sessionId": active_session_id,
+        "tools": tools,
+        "thinking": thinking,
+        "reasoningTokens": result.get("reasoningTokens") or 0,
+        "error": result.get("error"),
+        "stderr": result.get("stderr", ""),
+        "exitCode": result.get("exitCode"),
+    }
+
+
 def _handle_hermes_approval_respond(body):
     body = body if isinstance(body, dict) else {}
     approval = body.get("approval") if isinstance(body.get("approval"), dict) else {}
@@ -7387,6 +7687,30 @@ def _handle_agent_platform_comm_send(data):
             result.setdefault("conversationId", conversation_id)
             return result, int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
         return {"ok": False, "error": "Invalid Hermes response", "messageId": inbound["id"], "replyMessageId": outbound["id"]}, 502
+    if to_ref.get("providerKind") == "codex" or _is_codex_agent(to_ref.get("id")):
+        result = _handle_codex_chat({
+            "agentId": to_ref.get("id"),
+            "message": message,
+            "timeoutSec": data.get("timeoutSec") or CODEX_TIMEOUT_SEC,
+            "fromType": from_type,
+            "fromDisplayName": from_ref.get("name") or "User",
+            "sourceApp": source_app,
+            "sourceSurface": source_surface,
+            "sourceLabel": source_label,
+        })
+        reply = result.get("reply") if isinstance(result, dict) else ""
+        outbound = _append_comm_event({
+            "type": "message", "direction": "reply", "conversationId": conversation_id,
+            "from": to_ref, "to": from_ref, "text": reply or (result.get("error") if isinstance(result, dict) else ""),
+            "inReplyTo": inbound["id"], "ok": bool(isinstance(result, dict) and result.get("ok")), "via": "virtual-world-codex-native",
+        })
+        if isinstance(result, dict):
+            result = dict(result)
+            result.setdefault("messageId", inbound["id"])
+            result.setdefault("replyMessageId", outbound["id"])
+            result.setdefault("conversationId", conversation_id)
+            return result, int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
+        return {"ok": False, "error": "Invalid Codex response", "messageId": inbound["id"], "replyMessageId": outbound["id"]}, 502
     if not AGENT_PLATFORM_PROVIDER_URL:
         return {
             "ok": False,
@@ -7469,6 +7793,357 @@ def _gateway_info_payload():
         "token": gw_token or "",
         "tokenConfigured": bool(gw_token),
         "openclawVersion": _get_openclaw_version(),
+    }
+
+
+##############################################################################
+# AGENT CREATION
+##############################################################################
+
+def _sanitize_agent_id(name):
+    s = str(name or "").lower().strip()
+    s = re.sub(r"[^a-z0-9\s-]", "", s)
+    s = re.sub(r"[\s]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-")
+    return s or f"agent-{int(time.time())}"
+
+
+def _run_async_blocking(coro, timeout=30):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, coro)
+        return future.result(timeout=timeout)
+
+
+async def _gateway_rpc_call_async(method, params=None, timeout=20):
+    if ws_connect is None:
+        return {"ok": False, "error": "Gateway websocket client is unavailable"}
+    gw_url, token = _read_gateway_config()
+    if not token:
+        return {"ok": False, "error": "Gateway token is not configured"}
+    if not gw_url:
+        return {"ok": False, "error": "Gateway URL is not configured"}
+    origin = _gateway_control_origin()
+    async with ws_connect(
+        gw_url,
+        max_size=1024 * 1024,
+        additional_headers={"Origin": origin},
+        close_timeout=3,
+    ) as ws:
+        await asyncio.wait_for(ws.recv(), timeout=5)
+        connect_id = f"vw-agent-admin-connect-{uuid.uuid4()}"
+        await ws.send(json.dumps({
+            "type": "req",
+            "id": connect_id,
+            "method": "connect",
+            "params": {
+                "minProtocol": 4,
+                "maxProtocol": 4,
+                "client": {"id": "openclaw-control-ui", "version": _get_openclaw_version(), "platform": "server", "mode": "webchat"},
+                "role": "operator",
+                "scopes": ["operator.read", "operator.write", "operator.admin"],
+                "caps": [],
+                "commands": [],
+                "permissions": {},
+                "auth": {"token": token},
+                "locale": "en-US",
+                "userAgent": "virtual-world-server/agent-admin",
+            },
+        }))
+        while True:
+            msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+            if msg.get("id") == connect_id:
+                if not msg.get("ok"):
+                    return {"ok": False, "error": (msg.get("error") or {}).get("message", "Gateway connect failed")}
+                break
+
+        req_id = f"vw-agent-admin-{uuid.uuid4()}"
+        await ws.send(json.dumps({
+            "type": "req",
+            "id": req_id,
+            "method": method,
+            "params": params or {},
+        }))
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=min(10, max(1, deadline - time.time()))))
+            if msg.get("id") != req_id:
+                continue
+            if not msg.get("ok"):
+                return {"ok": False, "error": (msg.get("error") or {}).get("message", f"{method} failed")}
+            payload = msg.get("payload")
+            if isinstance(payload, dict):
+                payload.setdefault("ok", True)
+                return payload
+            return {"ok": True, "payload": payload}
+    return {"ok": False, "error": f"{method} timed out"}
+
+
+def _gateway_rpc_call(method, params=None, timeout=20):
+    try:
+        return _run_async_blocking(_gateway_rpc_call_async(method, params=params, timeout=timeout), timeout=timeout + 10)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _agent_template_files(name, role, emoji, agent_kind="OpenClaw", prompt=""):
+    instructions = (prompt or role or "Be helpful and direct.").strip()
+    return {
+        "IDENTITY.md": f"""# IDENTITY.md
+
+- **Name:** {name}
+- **Creature:** {role} - {agent_kind} agent
+- **Vibe:** Helpful, efficient, ready to work
+- **Emoji:** {emoji}
+""",
+        "SOUL.md": f"""# SOUL.md - {name}
+
+You are **{name}** {emoji} - {role}.
+
+## Style
+- Be helpful and direct
+- Follow your AGENTS.md workflow strictly
+- Keep work visible through Virtual World when possible
+
+## Standing Instructions
+{instructions}
+""",
+        "USER.md": """# USER.md
+
+- **Name:** (set by your owner)
+- **Timezone:** (set by your owner)
+- **Notes:** Prefers direct, clear communication.
+""",
+        "AGENTS.md": f"""# {name} {emoji} - {role}
+
+## Role
+{role}
+
+## Standing Instructions
+{instructions}
+
+## Core Rules
+- Follow instructions carefully
+- Log your work in memory/YYYY-MM-DD.md when useful
+- Complete the full loop: working -> work -> report -> idle
+
+## Communication
+- Use Virtual World communication tools when talking to other world agents
+- Your text reply IS your response - write it directly
+
+## Memory
+- Daily logs: `memory/YYYY-MM-DD.md`
+- Long-term: `MEMORY.md`
+""",
+        "HEARTBEAT.md": """# HEARTBEAT.md
+
+# Add periodic tasks below. If nothing needs attention, reply HEARTBEAT_OK.
+""",
+        "MEMORY.md": f"# MEMORY.md - {name}\n\n_No memories yet._\n",
+        "TOOLS.md": f"# TOOLS.md - {name}\n\n_Add tool-specific notes here._\n",
+    }
+
+
+def _default_openclaw_agent_model():
+    result = _gateway_rpc_call("agents.list", {}, timeout=10)
+    if not result.get("ok"):
+        return ""
+    for agent in result.get("agents", []):
+        if agent.get("id") == "main":
+            model = agent.get("model")
+            if isinstance(model, dict):
+                return str(model.get("primary") or "")
+            if isinstance(model, str):
+                return model
+    return ""
+
+
+def _refresh_agent_roster_after_create():
+    global _agent_roster, _roster_time
+    try:
+        _agent_roster = discover_agents()
+        _roster_time = time.time()
+        if _gateway_presence:
+            _gateway_presence.init_agents([
+                a.get("statusKey") or a.get("id")
+                for a in _agent_roster
+                if a.get("statusKey") or a.get("id")
+            ])
+    except Exception as exc:
+        print(f"⚠️  Virtual World agent roster refresh failed: {exc}")
+
+
+def _handle_agent_platforms():
+    hermes_status = _hermes_provider().test() if _hermes_provider() else {"ok": False, "error": "Hermes provider module unavailable", "agents": []}
+    codex_provider = _codex_provider()
+    codex_status = codex_provider.test() if codex_provider else {"ok": False, "error": "Codex provider module unavailable", "agents": []}
+    codex_cfg = VW_CONFIG.get("codex", {}) or {}
+    codex_home = codex_status.get("homePath") or codex_cfg.get("homePath") or ""
+    return {
+        "ok": True,
+        "platforms": [
+            {
+                "id": "openclaw",
+                "label": "OpenClaw",
+                "description": "Native OpenClaw workspace agent",
+                "providerType": "runtime",
+                "available": True,
+                "create": True,
+            },
+            {
+                "id": "hermes",
+                "label": "Hermes",
+                "description": "Hermes profile-backed agent",
+                "providerType": "runtime",
+                "available": bool(hermes_status.get("ok")),
+                "create": bool(hermes_status.get("ok")),
+                "error": "" if hermes_status.get("ok") else hermes_status.get("error", "Hermes is not available"),
+            },
+            {
+                "id": "codex",
+                "label": "Codex",
+                "description": "Native Codex app-server workspace agent",
+                "providerType": "harness",
+                "available": bool(codex_status.get("ok")),
+                "create": bool(codex_status.get("ok")),
+                "error": "" if codex_status.get("ok") else codex_status.get("error", "Codex is not available"),
+                "codex": {
+                    "homePath": codex_home,
+                    "nativeAgentsDir": os.path.join(codex_home, "agents") if codex_home else "",
+                    "workspaceRoot": codex_status.get("workspaceRoot") or codex_cfg.get("workspaceRoot") or "",
+                    "mainWorkspace": codex_status.get("mainWorkspace") or codex_cfg.get("mainWorkspace") or "",
+                    "defaultCreationMode": "standard",
+                    "registerNativeAgents": bool(codex_cfg.get("registerNativeAgents", True)),
+                },
+            },
+        ],
+    }
+
+
+def _handle_agent_create(body):
+    if not isinstance(body, dict):
+        return {"error": "payload must be an object", "_status": 400}
+    name = (body.get("name") or "").strip()
+    if not name:
+        return {"error": "Agent name is required", "_status": 400}
+
+    platform = (body.get("agentPlatform") or body.get("platform") or body.get("providerKind") or "openclaw").strip().lower()
+    if platform in {"hermes", "hermes-agent"}:
+        return _handle_hermes_agent_create(body, name)
+    if platform in {"codex", "codex-cli", "codex-agent"}:
+        return _handle_codex_agent_create(body, name)
+    if platform not in {"openclaw", "openclaw-agent"}:
+        return {"error": f"Unsupported agent platform '{platform}'", "_status": 400}
+
+    agent_id = _sanitize_agent_id(body.get("id") or name)
+    emoji = body.get("emoji") or "🤖"
+    role = body.get("role") or "AI assistant"
+    prompt = body.get("prompt") or body.get("systemPrompt") or body.get("instructions") or ""
+    model = body.get("model") or ""
+    workspace_dir = os.path.join(HOST_WORKSPACE_BASE, f"workspace-{agent_id}")
+    try:
+        create_params = {"name": name, "workspace": workspace_dir, "emoji": emoji}
+        selected_model = model or _default_openclaw_agent_model()
+        if selected_model:
+            create_params["model"] = selected_model
+        result = _gateway_rpc_call("agents.create", create_params, timeout=30)
+        if not result.get("ok"):
+            status = 409 if "already exists" in str(result.get("error", "")).lower() else 500
+            return {"error": result.get("error", "OpenClaw agent creation failed"), "_status": status}
+
+        agent_id = result.get("agentId") or agent_id
+        for filename, content in _agent_template_files(name, role, emoji, "OpenClaw", prompt=prompt).items():
+            file_result = _gateway_rpc_call("agents.files.set", {"agentId": agent_id, "name": filename, "content": content}, timeout=20)
+            if not file_result.get("ok"):
+                return {"error": f"Agent created but failed to write {filename}: {file_result.get('error', 'unknown error')}", "_status": 500}
+
+        _refresh_agent_roster_after_create()
+        return {
+            "ok": True,
+            "agentId": agent_id,
+            "providerKind": "openclaw",
+            "providerType": "runtime",
+            "providerAgentId": agent_id,
+            "name": name,
+            "emoji": emoji,
+            "role": role,
+            "workspace": workspace_dir,
+            "message": f"Agent '{name}' ({agent_id}) created successfully",
+        }
+    except Exception as exc:
+        return {"error": str(exc), "_status": 500}
+
+
+def _handle_hermes_agent_create(body, name):
+    provider = _hermes_provider()
+    if not provider:
+        return {"error": "Hermes provider module unavailable", "_status": 503}
+    emoji = body.get("emoji") or "⚕️"
+    role = body.get("role") or "Hermes Agent"
+    prompt = body.get("prompt") or body.get("systemPrompt") or body.get("instructions") or ""
+    model = body.get("model") or ""
+    profile = body.get("id") or body.get("profile") or _sanitize_agent_id(name)
+    result = provider.create_agent(name=name, role=role, model=model, emoji=emoji, profile=profile, prompt=prompt)
+    if not result.get("ok"):
+        return {"error": result.get("error", "Hermes agent creation failed"), "_status": 500}
+    _refresh_agent_roster_after_create()
+    return {
+        "ok": True,
+        "agentId": result.get("agentId"),
+        "providerKind": "hermes",
+        "providerType": "runtime",
+        "providerAgentId": result.get("profile"),
+        "profile": result.get("profile"),
+        "name": name,
+        "emoji": emoji,
+        "role": role,
+        "workspace": result.get("workspace"),
+        "message": result.get("message", f"Hermes agent '{name}' created successfully"),
+    }
+
+
+def _handle_codex_agent_create(body, name):
+    provider = _codex_provider()
+    if not provider:
+        return {"error": "Codex provider module unavailable", "_status": 503}
+    emoji = body.get("emoji") or "🤖"
+    role = body.get("role") or "Codex Agent"
+    prompt = body.get("prompt") or body.get("systemPrompt") or body.get("instructions") or role
+    model = body.get("model") or CODEX_MODEL
+    profile = body.get("id") or body.get("profile") or _sanitize_agent_id(name)
+    creation_mode = body.get("codexCreationMode") or body.get("creationMode") or body.get("agentDirectoryMode") or "standard"
+    custom_directory = body.get("codexCustomDirectory") or body.get("customDirectory") or body.get("agentDirectory") or ""
+    result = provider.create_agent(
+        name=name,
+        role=role,
+        model=model,
+        emoji=emoji,
+        profile=profile,
+        prompt=prompt,
+        creation_mode=creation_mode,
+        custom_directory=custom_directory,
+    )
+    if not result.get("ok"):
+        return {"error": result.get("error", "Codex agent creation failed"), "_status": 500}
+    _refresh_agent_roster_after_create()
+    return {
+        "ok": True,
+        "agentId": result.get("agentId"),
+        "providerKind": "codex",
+        "providerType": "harness",
+        "providerAgentId": result.get("profile"),
+        "profile": result.get("profile"),
+        "name": name,
+        "emoji": emoji,
+        "role": role,
+        "workspace": result.get("workspace"),
+        "creationMode": result.get("creationMode"),
+        "nativeAgentPath": result.get("nativeAgentPath"),
+        "message": result.get("message", f"Codex agent '{name}' created successfully"),
     }
 
 
@@ -7754,6 +8429,7 @@ def discover_agents():
             agent_info = {"id": name, "statusKey": name, "name": name.capitalize(), "emoji": "🤖", "providerKind": "openclaw", "providerType": "runtime", "providerAgentId": name}
             agents.append(_apply_identity_to_agent(agent_info))
     agents.extend(_discover_hermes_agents())
+    agents.extend(_discover_codex_agents())
     return agents
 
 
@@ -7944,18 +8620,17 @@ def _format_time_et(ts):
 def get_agent_chat():
     """Read recent chat messages from agent session JSONL files."""
     global _chat_cache, _chat_cache_time
-    if not _gateway_presence_connected():
-        _chat_cache = {}
-        _chat_cache_time = time.time()
-        return {}
+    gateway_connected = _gateway_presence_connected()
     now = time.time()
-    if now - _chat_cache_time < 2:  # cache for 2 seconds
+    if gateway_connected and now - _chat_cache_time < 2:  # cache for 2 seconds
         return _chat_cache
 
     result = {}
     roster = get_roster()
 
     for agent in roster:
+        if not gateway_connected:
+            continue
         agent_id = agent.get("id", "")
         if not agent_id:
             continue
@@ -8092,6 +8767,28 @@ def get_agent_chat():
                 })
             if hermes_messages:
                 result.setdefault(agent.get("id"), []).extend(hermes_messages[-500:])
+        elif agent.get("providerKind") == "codex":
+            profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+            codex_messages = []
+            for msg in _load_codex_history(profile):
+                if not isinstance(msg, dict):
+                    continue
+                codex_messages.append({
+                    "role": msg.get("role") or "assistant",
+                    "text": str(msg.get("text") or msg.get("content") or ""),
+                    "time": msg.get("time") or "",
+                    "ts": msg.get("ts") or msg.get("epochMs") or msg.get("timestamp") or 0,
+                    "epochMs": msg.get("epochMs") or msg.get("ts") or 0,
+                    "from": msg.get("from") or agent.get("name") or "Codex",
+                    "source": "codex",
+                    "sessionId": msg.get("sessionId") or "",
+                    "exitCode": msg.get("exitCode"),
+                    "tools": msg.get("tools") if isinstance(msg.get("tools"), list) else [],
+                    "thinking": msg.get("thinking") or "",
+                    "reasoningTokens": msg.get("reasoningTokens") or 0,
+                })
+            if codex_messages:
+                result.setdefault(agent.get("id"), []).extend(codex_messages[-500:])
 
     # Merge Virtual World's own local A2A log so world-originated
     # communication remains visible from world UI surfaces.
@@ -8104,8 +8801,12 @@ def get_agent_chat():
         if (
             from_ref.get("providerKind") == "hermes"
             or to_ref.get("providerKind") == "hermes"
+            or from_ref.get("providerKind") == "codex"
+            or to_ref.get("providerKind") == "codex"
             or _is_hermes_agent(from_ref.get("id"))
             or _is_hermes_agent(to_ref.get("id"))
+            or _is_codex_agent(from_ref.get("id"))
+            or _is_codex_agent(to_ref.get("id"))
         ):
             continue
         for ref in [event.get("from") or {}, event.get("to") or {}]:
@@ -8484,6 +9185,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 result.append(a)
             return self._send_json(result)
 
+        if path == "/api/agent-platforms":
+            return self._send_json(_handle_agent_platforms())
+
         if path.startswith("/api/agent/") and path.endswith("/live-mode"):
             parts = path.strip("/").split("/")
             agent_id = urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
@@ -8609,6 +9313,17 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/hermes/test":
             return self._send_json(_handle_hermes_test())
 
+        if path == "/api/codex/history" or path.startswith("/api/codex/history?"):
+            qs = urllib.parse.parse_qs(parsed.query)
+            agent_key = (qs.get("agentId") or qs.get("key") or ["codex-main"])[0]
+            agent = _get_codex_agent(agent_key) or {}
+            profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+            return self._send_json({"ok": True, "messages": _load_codex_history(profile), "profile": profile})
+
+        if path == "/api/codex/test":
+            provider = _codex_provider()
+            return self._send_json(provider.test() if provider else {"ok": False, "error": "Codex provider module unavailable", "agents": []})
+
         if path == "/chat-media":
             return self._serve_chat_media(parsed.query)
 
@@ -8649,7 +9364,12 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             total_agents = len(roster)
             for a in _limited(roster, get_agent_limit()):
                 provider_kind = a.get("providerKind", "openclaw")
-                session_key = f"hermes:{a.get('profile') or a.get('providerAgentId') or a['id']}" if provider_kind == "hermes" else f"agent:{a['id']}:main"
+                if provider_kind == "hermes":
+                    session_key = f"hermes:{a.get('profile') or a.get('providerAgentId') or a['id']}"
+                elif provider_kind == "codex":
+                    session_key = f"codex:{a.get('profile') or a.get('providerAgentId') or a['id']}"
+                else:
+                    session_key = f"agent:{a['id']}:main"
                 oc = oc_overrides.get(a["id"], {})
                 branch_id = oc.get("branch", "")
                 branch_name = oc_branches.get(branch_id, "") if branch_id else ""
@@ -8773,6 +9493,11 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             result, status = _handle_agent_platform_comm_send(self._read_body())
             return self._send_json(result, status)
 
+        if path == "/api/agent/create":
+            result = _handle_agent_create(self._read_body() or {})
+            status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 500) or 500)
+            return self._send_json(result, status)
+
         if path == "/api/hermes/chat":
             result = _handle_hermes_chat(self._read_body())
             status = int(result.pop("_status", 200) or 200) if (result.get("ok") or result.get("approval")) else int(result.pop("_status", 502) or 502)
@@ -8792,6 +9517,22 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/hermes/test":
             return self._send_json(_handle_hermes_test(self._read_body()))
+
+        if path == "/api/codex/chat":
+            result = _handle_codex_chat(self._read_body())
+            status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
+            return self._send_json(result, status)
+
+        if path == "/api/codex/history/clear":
+            body = self._read_body() or {}
+            agent = _get_codex_agent(body.get("agentId") or body.get("key") or "codex-main") or {}
+            profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+            _save_codex_state(profile, {"messages": [], "sessionId": ""})
+            return self._send_json({"ok": True, "profile": profile})
+
+        if path == "/api/codex/test":
+            provider = _codex_provider()
+            return self._send_json(provider.test() if provider else {"ok": False, "error": "Codex provider module unavailable", "agents": []})
 
         if path == "/api/world-actions":
             if not check_feature("agentLiveMode"):

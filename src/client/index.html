@@ -10,7 +10,7 @@
     <link rel="icon" href="favicon.png" type="image/png">
     <title>My Virtual World</title>
     <link rel="stylesheet" href="css/style.css?v=20260603-sidebar-toggle-caret-only-v2">
-    <link rel="stylesheet" href="css/ui-redesign.css?v=20260615-live-mode-coming-soon-r1">
+    <link rel="stylesheet" href="css/ui-redesign.css?v=20260615-new-agent-menu-r2">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
@@ -138,6 +138,7 @@
                 <!-- Agents are editable, so keep agent selection with edit tools -->
                 <div class="edit-section-always edit-agents-section">
                     <div class="palette-title">🤖 Edit Agents</div>
+                    <button id="btn-newAgent" class="sidebar-action-btn sidebar-create-btn" type="button">+ New Agent</button>
                     <label class="agent-editor-select-wrap">
                         <span>Select agent</span>
                         <select id="agentList" class="agent-editor-select">
@@ -395,6 +396,28 @@
 
                 <section class="settings-pane" data-settings-pane="general">
                     <div class="form-group"><label>World Name</label><input type="text" id="setting-worldName" value="My Virtual World"></div>
+                    <div class="form-group">
+                        <label>World Location</label>
+                        <input type="text" id="setting-locationLabel" placeholder="Orlando, FL">
+                        <div class="field-example">Needed for location-aware Day &amp; Time Cycle, Time, and Weather data. Example: <code>Orlando, FL</code>.</div>
+                    </div>
+                    <div class="settings-location-grid">
+                        <div class="form-group">
+                            <label>Time Zone</label>
+                            <input type="text" id="setting-timeZone" placeholder="America/New_York">
+                            <div class="field-example">Used to align the world clock with local time.</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Latitude</label>
+                            <input type="number" id="setting-latitude" placeholder="28.5383" step="0.0001">
+                            <div class="field-example">Optional, for precise sunrise/sunset and weather lookup.</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Longitude</label>
+                            <input type="number" id="setting-longitude" placeholder="-81.3792" step="0.0001">
+                            <div class="field-example">Optional, for precise sunrise/sunset and weather lookup.</div>
+                        </div>
+                    </div>
                     <label class="settings-check"><input type="checkbox" id="setting-showGrid" checked> Show Grid Lines</label>
                     <label class="settings-check"><input type="checkbox" id="setting-showMinimap" checked> Show Mini-Map</label>
                     <label class="settings-check"><input type="checkbox" id="setting-showCoords" checked> Show Coordinates</label>
@@ -678,8 +701,8 @@
     </script>
     <script src="js/vo-engine.js?v=printer-copier-asset-v1"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script type="module" src="js/main3d.js?v=20260615-lod-object-radius-100-r1"></script>
-    <script src="js/chat.js?v=20260615-chat-agent-picker-r1"></script>
-    <script src="js/settings.js?v=20260615-presence-status-dot-r1"></script>
+    <script type="module" src="js/main3d.js?v=20260615-new-agent-menu-r2"></script>
+    <script src="js/chat.js?v=20260615-new-agent-menu-r2"></script>
+    <script src="js/settings.js?v=20260615-location-settings-r1"></script>
 </body>
 </html>

@@ -53,6 +53,7 @@ const requiredFiles = [
   'src/client/js/starter-map.mjs',
   'src/server/server.py',
   'src/server/gateway_presence.py',
+  'src/server/providers/codex.py',
   'src/server/providers/hermes.py',
 ];
 
@@ -155,6 +156,7 @@ const pyTargets = [
   'src/server/gateway_presence.py',
   'src/server/license.py',
   'src/server/providers/__init__.py',
+  'src/server/providers/codex.py',
   'src/server/providers/hermes.py',
 ];
 
@@ -201,6 +203,10 @@ for (const token of [
   'not check_feature("sms")',
   'not check_feature("agentLiveMode")',
   'body["features"][feature] = False',
+  '_handle_agent_platforms',
+  '_handle_agent_create',
+  '/api/agent-platforms',
+  '/api/agent/create',
 ]) {
   assert(serverPy.includes(token), `server.py missing demo lock token: ${token}`);
 }
@@ -268,8 +274,13 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260615-lod-object-radius-100-r1',
-  'js/chat.js?v=20260615-chat-agent-picker-r1',
+  'js/main3d.js?v=20260615-new-agent-menu-r2',
+  'js/chat.js?v=20260615-new-agent-menu-r2',
+  'btn-newAgent',
+  'Agent Platform',
+  'newAgent-codexOptions',
+  '/api/agent/create',
+  'vw:agents-changed',
   'starter-map.mjs?v=20260613-road-terrain-r1',
   'Math.min(clock.getDelta(), 0.05)',
   'const VEHICLE_SPEED = 7.0',
@@ -280,6 +291,26 @@ for (const token of [
   'Do not recycle it across the map while the user watches',
 ]) {
   assert(`${main3dJs}\n${indexHtml}`.includes(token), `client starter map wiring missing token: ${token}`);
+}
+for (const token of [
+  'setting-locationLabel',
+  'setting-timeZone',
+  'setting-latitude',
+  'setting-longitude',
+  'Needed for location-aware Day &amp; Time Cycle, Time, and Weather data',
+  'const location = world.location || {}',
+  "label: value('setting-locationLabel')",
+  "timeZone: value('setting-timeZone')",
+  "latitude: optionalNumber('setting-latitude')",
+  "longitude: optionalNumber('setting-longitude')",
+  "location:{",
+  "label:val('locationLabel')",
+  "timeZone:val('timeZone')",
+  "latitude:num('latitude')",
+  "longitude:num('longitude')",
+  '"location": {"label": "", "timeZone": "", "latitude": None, "longitude": None}',
+]) {
+  assert(`${indexHtml}\n${setupHtml}\n${settingsJs}\n${serverPy}`.includes(token), `settings location wiring missing token: ${token}`);
 }
 for (const token of [
   'ensurePreservedAgentOption',
@@ -507,7 +538,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260615-presence-status-dot-r1',
+  'js/settings.js?v=20260615-location-settings-r1',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);

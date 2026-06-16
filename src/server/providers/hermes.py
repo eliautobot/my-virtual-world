@@ -13,6 +13,8 @@ import re
 import shutil
 import subprocess
 import json
+import time
+import glob
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,17 +32,12 @@ class HermesProvider:
     provider_type: str = "runtime"
 
     def __post_init__(self) -> None:
-        self.binary = os.path.expanduser(
-            self.binary
-            or os.environ.get("VW_HERMES_BIN")
-            or shutil.which("hermes")
-            or "~/.local/bin/hermes"
-        )
         self.home_path = os.path.expanduser(
             self.home_path
             or os.environ.get("VW_HERMES_HOME")
             or "~/.hermes"
         )
+        self.binary = self._resolve_binary(self.binary)
 
     def is_available(self) -> bool:
         return bool(self.enabled and self.binary and os.path.exists(self.binary) and self.home_path and os.path.isdir(self.home_path))
@@ -58,6 +55,11 @@ class HermesProvider:
             env["VW_HERMES_HOME"] = self.home_path
             if os.path.basename(self.home_path.rstrip(os.sep)) == ".hermes":
                 env["HOME"] = os.path.dirname(self.home_path.rstrip(os.sep)) or env.get("HOME", "")
+            agent_root = os.path.join(self.home_path, "hermes-agent")
+            site_packages = sorted(glob.glob(os.path.join(agent_root, "venv", "lib", "python*", "site-packages")))
+            pythonpath_parts = [p for p in [agent_root, *site_packages, env.get("PYTHONPATH", "")] if p]
+            if os.path.isdir(agent_root):
+                env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
         return env
 
     def discover_agents(self) -> list[dict[str, Any]]:
@@ -77,6 +79,7 @@ class HermesProvider:
                 self.home_path if profile == "default" else os.path.join(self.home_path or "", "profiles", profile)
             )
             scan_home = profile_home if os.path.isdir(profile_home) else (self.home_path or "")
+            identity = self._read_identity(profile_home)
             suffix = self._safe_suffix(profile)
             agents.append({
                 "id": f"hermes-{suffix}",
@@ -85,9 +88,9 @@ class HermesProvider:
                 "providerType": self.provider_type,
                 "providerAgentId": profile,
                 "profile": profile,
-                "name": self._display_name(profile),
-                "emoji": os.environ.get("VW_HERMES_AGENT_EMOJI", "⚕️"),
-                "role": "Hermes Agent",
+                "name": identity.get("name") or self._display_name(profile),
+                "emoji": identity.get("emoji") or os.environ.get("VW_HERMES_AGENT_EMOJI", "⚕️"),
+                "role": identity.get("role") or "Hermes Agent",
                 "model": model,
                 "provider": provider,
                 "gateway": gateway,
@@ -106,6 +109,9 @@ class HermesProvider:
         if not self.home_path or not os.path.isdir(self.home_path):
             return {"ok": False, "error": f"Hermes home not found at {self.home_path}", "agents": []}
         try:
+            probe = subprocess.run([self.binary, "profile", "list"], capture_output=True, text=True, timeout=15, env=self._subprocess_env())
+            if probe.returncode != 0:
+                return {"ok": False, "error": (probe.stderr or probe.stdout or "Hermes CLI probe failed").strip()[:1000], "agents": []}
             return {"ok": True, "binary": self.binary, "homePath": self.home_path, "agents": self.discover_agents()}
         except Exception as exc:  # defensive: test endpoint should not crash server
             return {"ok": False, "error": str(exc), "agents": []}
@@ -250,6 +256,97 @@ class HermesProvider:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "session": None}
 
+    def create_agent(self, name: str, role: str = "Hermes Agent", model: str | None = None, emoji: str = "⚕️", profile: str | None = None, prompt: str | None = None) -> dict[str, Any]:
+        """Create a Hermes profile that Virtual World treats as an agent."""
+        if not self.binary or not os.path.exists(self.binary):
+            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}"}
+        if not self.home_path or not os.path.isdir(self.home_path):
+            return {"ok": False, "error": f"Hermes home not found at {self.home_path}"}
+
+        safe_profile = self._safe_profile_name(profile or name)
+        if safe_profile == "default":
+            return {"ok": False, "error": "Cannot create or overwrite the default Hermes profile"}
+        if any(a.get("profile") == safe_profile for a in self.discover_agents()):
+            return {"ok": False, "error": f"Hermes profile '{safe_profile}' already exists"}
+
+        description = (role or "Hermes Agent").strip()[:500]
+        cmd = [
+            self.binary,
+            "profile",
+            "create",
+            safe_profile,
+            "--clone",
+            "--clone-from",
+            "default",
+            "--no-alias",
+            "--description",
+            description,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=self._subprocess_env())
+        if result.returncode != 0:
+            fallback = subprocess.run(
+                [self.binary, "profile", "create", safe_profile, "--no-alias", "--description", description],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=self._subprocess_env(),
+            )
+            if fallback.returncode != 0:
+                return {
+                    "ok": False,
+                    "error": (fallback.stderr or fallback.stdout or result.stderr or result.stdout or "Hermes profile create failed").strip()[:2000],
+                    "exitCode": fallback.returncode,
+                }
+
+        if model and str(model).strip():
+            subprocess.run(
+                [self.binary, "--profile", safe_profile, "config", "set", "model.default", str(model).strip()],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=self._subprocess_env(),
+            )
+
+        profile_home = os.path.join(self.home_path, "profiles", safe_profile)
+        os.makedirs(profile_home, exist_ok=True)
+        self._write_profile_bootstrap(profile_home, name=name, role=role, emoji=emoji, profile=safe_profile, prompt=prompt or "")
+        self._chown_like_home(profile_home)
+
+        return {
+            "ok": True,
+            "profile": safe_profile,
+            "agentId": f"hermes-{safe_profile}",
+            "name": name,
+            "workspace": profile_home,
+            "message": f"Hermes profile '{safe_profile}' created successfully",
+        }
+
+    def delete_agent(self, profile: str) -> dict[str, Any]:
+        """Delete a Hermes profile through the public CLI."""
+        safe_profile = self._safe_profile_name(profile)
+        if safe_profile == "default":
+            return {"ok": False, "error": "Cannot delete the default Hermes profile"}
+        if not self.binary or not os.path.exists(self.binary):
+            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}"}
+
+        result = subprocess.run(
+            [self.binary, "profile", "delete", safe_profile, "--yes"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=self._subprocess_env(),
+        )
+        return {
+            "ok": result.returncode == 0,
+            "deleted": result.returncode == 0,
+            "profile": safe_profile,
+            "agentId": f"hermes-{safe_profile}",
+            "stdout": (result.stdout or "").strip()[:1000],
+            "stderr": (result.stderr or "").strip()[:1000],
+            "error": "" if result.returncode == 0 else ((result.stderr or result.stdout or "Hermes profile delete failed").strip()[:1000]),
+            "exitCode": result.returncode,
+        }
+
     def delete_session(self, profile: str, session_id: str) -> dict[str, Any]:
         """Delete a Hermes session through the public sessions CLI."""
         if not session_id:
@@ -330,6 +427,91 @@ class HermesProvider:
         safe = re.sub(r"[^a-zA-Z0-9_.-]+", "-", profile or "default").strip("-.")
         return safe or "default"
 
+    def _resolve_binary(self, value: str | None) -> str:
+        home = os.path.expanduser(self.home_path or os.environ.get("VW_HERMES_HOME") or "~/.hermes")
+        candidates = [
+            value,
+            os.environ.get("VW_HERMES_BIN"),
+            shutil.which("hermes"),
+            os.path.expanduser("~/.local/bin/hermes"),
+            os.path.join(home, "hermes-agent", "hermes"),
+            os.path.join(home, "hermes-agent", "venv", "bin", "hermes"),
+        ]
+        candidates.extend(sorted(glob.glob(os.path.join(home, "**", "bin", "hermes"), recursive=True), reverse=True))
+        candidates.extend(sorted(glob.glob(os.path.join(home, "**", "hermes"), recursive=True), reverse=True))
+        for candidate in candidates:
+            if not candidate:
+                continue
+            expanded = os.path.expanduser(str(candidate))
+            resolved = shutil.which(expanded) if os.path.basename(expanded) == expanded else expanded
+            if resolved and os.path.isfile(resolved) and os.access(resolved, os.X_OK):
+                return resolved
+        return os.path.expanduser(str(value or os.environ.get("VW_HERMES_BIN") or "hermes"))
+
+    @staticmethod
+    def _safe_profile_name(value: str) -> str:
+        safe = re.sub(r"[^a-z0-9_-]+", "-", (value or "").lower().strip()).strip("-_")
+        safe = re.sub(r"[-_]{2,}", "-", safe)
+        return (safe or f"agent-{int(time.time())}")[:63]
+
+    def _write_profile_bootstrap(self, profile_home: str, *, name: str, role: str, emoji: str, profile: str, prompt: str = "") -> None:
+        instructions = (prompt or role or "Be helpful and direct.").strip()
+        files = {
+            "IDENTITY.md": f"""# IDENTITY.md
+
+- **Name:** {name}
+- **Creature:** {role} - Hermes profile
+- **Vibe:** Helpful, direct, ready to work
+- **Emoji:** {emoji}
+""",
+            "SOUL.md": f"""# SOUL.md - {name}
+
+You are **{name}** {emoji} - {role}.
+
+## Style
+- Be helpful and direct
+- Keep work visible through Virtual World when possible
+- Use your Hermes profile `{profile}` for isolated context
+
+## Standing Instructions
+{instructions}
+""",
+            "AGENTS.md": f"""# {name} {emoji} - {role}
+
+## Role
+{role}
+
+## Standing Instructions
+{instructions}
+
+## Core Rules
+- Follow instructions carefully
+- Keep replies concise and useful
+- Do not expose secrets from your Hermes profile
+
+## Memory
+- Use Hermes profile memory and sessions normally.
+""",
+            "MEMORY.md": f"# MEMORY.md - {name}\n\n_No memories yet._\n",
+            "TOOLS.md": f"# TOOLS.md - {name}\n\n_Add tool-specific notes here._\n",
+        }
+        for filename, content in files.items():
+            with open(os.path.join(profile_home, filename), "w", encoding="utf-8") as f:
+                f.write(content)
+
+    def _chown_like_home(self, path: str) -> None:
+        try:
+            st = os.stat(self.home_path or path)
+            for root, dirs, files in os.walk(path):
+                os.chown(root, st.st_uid, st.st_gid)
+                for name in dirs + files:
+                    try:
+                        os.chown(os.path.join(root, name), st.st_uid, st.st_gid)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
     def _display_name(self, profile: str) -> str:
         env_key = f"VW_HERMES_PROFILE_NAME_{self._safe_suffix(profile).upper().replace('-', '_')}"
         override = os.environ.get(env_key)
@@ -338,6 +520,26 @@ class HermesProvider:
         if profile == "default":
             return "Hermes"
         return profile.replace("-", " ").replace("_", " ").title()
+
+    @staticmethod
+    def _read_identity(profile_home: str) -> dict[str, str]:
+        identity: dict[str, str] = {}
+        try:
+            with open(os.path.join(profile_home, "IDENTITY.md"), "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    m = re.match(r'-\s*\*\*Name:\*\*\s*(.+)', line)
+                    if m:
+                        identity["name"] = m.group(1).strip()
+                    m = re.match(r'-\s*\*\*Emoji:\*\*\s*(.+)', line)
+                    if m:
+                        identity["emoji"] = m.group(1).strip()
+                    m = re.match(r'-\s*\*\*Creature:\*\*\s*(.+)', line)
+                    if m:
+                        identity["role"] = m.group(1).split(" - Hermes profile")[0].strip().rstrip(" -")
+        except (OSError, UnicodeError):
+            pass
+        return identity
 
     @staticmethod
     def _last_active(home_path: str) -> int:

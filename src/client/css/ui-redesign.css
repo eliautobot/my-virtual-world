@@ -509,6 +509,16 @@ body.vw-demo-locked .feature-locked-control {
     opacity: .72;
     cursor: not-allowed;
 }
+.settings-location-grid {
+    display: grid;
+    grid-template-columns: minmax(160px, 1.2fr) repeat(2, minmax(120px, .8fr));
+    gap: 12px;
+}
+@media (max-width: 720px) {
+    .settings-location-grid {
+        grid-template-columns: 1fr;
+    }
+}
 .settings-feature-note {
     margin-left: auto;
     color: #ffe082;
@@ -1413,6 +1423,142 @@ body.vw-demo-locked .feature-locked-control {
     box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
 }
 .bld-edit-btn-primary { border-color: rgba(33,150,243,.55) !important; background: rgba(33,150,243,.16) !important; }
+
+.agent-create-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background: rgba(0, 0, 0, .52);
+}
+.agent-create-content {
+    width: min(520px, 100%);
+    max-height: min(720px, calc(100vh - 36px));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 8px !important;
+}
+.agent-create-content .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.agent-create-content .modal-header h3 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.2;
+}
+.agent-create-form {
+    display: grid;
+    gap: 12px;
+    padding: 14px 16px;
+    overflow: auto;
+}
+.agent-create-form .form-group {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+}
+.agent-create-form .form-group span,
+.agent-create-option-title {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+.agent-create-form input,
+.agent-create-form select,
+.agent-create-form textarea {
+    width: 100%;
+    min-height: 38px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(0,0,0,.24);
+    color: var(--text-primary);
+    padding: 9px 10px;
+    font: inherit;
+}
+.agent-create-form textarea {
+    min-height: 92px;
+    resize: vertical;
+}
+.agent-create-emoji-row input {
+    max-width: 92px;
+}
+.agent-create-platform-note {
+    min-height: 20px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.06);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.35;
+}
+.agent-create-platform-note.warning,
+.agent-create-error {
+    border: 1px solid rgba(255,82,82,.45);
+    background: rgba(255,82,82,.12);
+    color: #ffd0d0;
+}
+.agent-create-codex-options {
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 8px;
+    background: rgba(255,255,255,.045);
+}
+.agent-create-codex-options label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+.agent-create-codex-options input[type="radio"] {
+    width: auto;
+    min-height: auto;
+}
+.agent-create-error {
+    padding: 9px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+}
+.agent-create-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 16px;
+    border-top: 1px solid rgba(255,255,255,.1);
+}
+.agent-create-actions .btn-primary,
+.agent-create-actions .btn-secondary {
+    min-height: 38px;
+    border-radius: 8px !important;
+}
+
+@media (max-width: 560px) {
+    .agent-create-modal {
+        align-items: stretch;
+        padding: 10px;
+    }
+    .agent-create-content {
+        max-height: calc(100vh - 20px);
+    }
+    .agent-create-actions {
+        flex-direction: column-reverse;
+    }
+    .agent-create-actions .btn-primary,
+    .agent-create-actions .btn-secondary {
+        width: 100%;
+    }
+}
 .bld-edit-btn-success { border-color: rgba(76,175,80,.55) !important; background: rgba(76,175,80,.15) !important; }
 .bld-edit-btn-danger { border-color: rgba(244,67,54,.48) !important; color: #ffc9c4 !important; background: rgba(244,67,54,.11) !important; }
 .bld-edit-btn:hover {

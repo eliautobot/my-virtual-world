@@ -301,7 +301,9 @@
       opt.textContent = titleCaseAgentKey(agentKey);
       opt.dataset.sessionKey = this.sessionKey || `agent:${agentKey}:main`;
       opt.dataset.agentId = agentKey;
-      opt.dataset.providerKind = String(this.sessionKey || '').startsWith('hermes:') ? 'hermes' : 'openclaw';
+      opt.dataset.providerKind = String(this.sessionKey || '').startsWith('hermes:')
+        ? 'hermes'
+        : (String(this.sessionKey || '').startsWith('codex:') ? 'codex' : 'openclaw');
       opt.dataset.providerAgentId = agentKey;
       opt.dataset.preservedChatSelection = 'true';
       opt.selected = true;
@@ -412,8 +414,12 @@
       return this.getSelectedProviderKind() === 'hermes' || String(this.sessionKey || '').startsWith('hermes:');
     }
 
+    isCodexSelected() {
+      return this.getSelectedProviderKind() === 'codex' || String(this.sessionKey || '').startsWith('codex:');
+    }
+
     isProviderAgentSelected() {
-      return this.getSelectedProviderKind() !== 'openclaw' || this.isHermesSelected();
+      return this.getSelectedProviderKind() !== 'openclaw' || this.isHermesSelected() || this.isCodexSelected();
     }
 
     startHermesApprovalPolling() {
@@ -570,7 +576,7 @@
     }
 
     async newSession() {
-      if (!connected) { this.appendSystem('Not connected'); return; }
+      if (!connected && !this.isProviderAgentSelected()) { this.appendSystem('Not connected'); return; }
       const agentName = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'this agent';
       if (!confirm(`Start a new session for ${agentName}? This clears the conversation history.`)) return;
       try {
@@ -583,6 +589,17 @@
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
           this.resetConversation('New Hermes session started');
+          return;
+        }
+        if (this.isCodexSelected()) {
+          const res = await fetch('/api/codex/history/clear', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+          this.resetConversation('New Codex session started');
           return;
         }
         const res = await rpc('sessions.reset', { key: this.sessionKey });
@@ -2387,6 +2404,9 @@
   });
 
   const agentListsReady = Promise.all(chatWindows.map(w => w.loadAgentList()));
+  window.addEventListener('vw:agents-changed', () => {
+    chatWindows.forEach(w => w.loadAgentList().catch(() => {}));
+  });
   syncSecondaryChatControls();
   // Virtual World shows the chat dock in the HUD even before the panel is expanded.
   // Connect immediately so users don't see a stale "Offline" state while the UI is visible.

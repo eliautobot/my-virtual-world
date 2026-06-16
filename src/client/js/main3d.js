@@ -26137,6 +26137,274 @@ setInterval(() => {
   if (expandedBuildingOccupants.size > 0) updateBuildingList();
 }, 2500);
 
+const NEW_AGENT_PLATFORM_DEFAULTS = {
+  openclaw: { name: 'New OpenClaw Agent', role: 'AI assistant', emoji: '🤖', prompt: '' },
+  hermes: { name: 'New Hermes Agent', role: 'Hermes Agent', emoji: '⚕️', prompt: '' },
+  codex: { name: 'New Codex Agent', role: 'Codex Agent', emoji: '🤖', prompt: 'You are a helpful Codex agent inside My Virtual World.' },
+};
+
+let _newAgentPlatformsCache = null;
+let _newAgentDialog = null;
+
+async function fetchNewAgentPlatforms() {
+  const res = await fetch('/api/agent-platforms', { cache: 'no-store' });
+  const data = await res.json();
+  if (!res.ok || data.ok === false) throw new Error(data.error || 'Could not load agent platforms');
+  const platforms = Array.isArray(data.platforms) ? data.platforms : [];
+  _newAgentPlatformsCache = platforms;
+  return platforms;
+}
+
+function getNewAgentPlatformDefaults(platformId) {
+  return NEW_AGENT_PLATFORM_DEFAULTS[platformId] || NEW_AGENT_PLATFORM_DEFAULTS.openclaw;
+}
+
+function closeNewAgentDialog() {
+  if (!_newAgentDialog) return;
+  document.removeEventListener('keydown', handleNewAgentDialogKeydown);
+  _newAgentDialog.remove();
+  _newAgentDialog = null;
+}
+
+function handleNewAgentDialogKeydown(event) {
+  if (event.key === 'Escape') closeNewAgentDialog();
+}
+
+function updateNewAgentDialogPlatform(modal) {
+  const platformSelect = modal.querySelector('#newAgent-platform');
+  const nameInput = modal.querySelector('#newAgent-name');
+  const roleInput = modal.querySelector('#newAgent-role');
+  const emojiInput = modal.querySelector('#newAgent-emoji');
+  const promptInput = modal.querySelector('#newAgent-prompt');
+  const note = modal.querySelector('#newAgent-platformNote');
+  const codexOptions = modal.querySelector('#newAgent-codexOptions');
+  const customDir = modal.querySelector('#newAgent-codexCustomDirectory');
+  const selected = platformSelect?.selectedOptions?.[0] || null;
+  const platformId = selected?.value || 'openclaw';
+  const defaults = getNewAgentPlatformDefaults(platformId);
+  if (nameInput && (!nameInput.value || nameInput.dataset.autofilled === 'true')) {
+    nameInput.value = defaults.name;
+    nameInput.dataset.autofilled = 'true';
+  }
+  if (roleInput) roleInput.value = defaults.role;
+  if (emojiInput) emojiInput.value = defaults.emoji;
+  if (promptInput && platformId === 'codex' && !promptInput.value.trim()) promptInput.value = defaults.prompt;
+  if (codexOptions) codexOptions.style.display = platformId === 'codex' ? 'grid' : 'none';
+  if (customDir && platformId !== 'codex') customDir.value = '';
+  if (note) {
+    note.textContent = selected?.dataset.description || '';
+    const error = selected?.dataset.error || '';
+    note.classList.toggle('warning', Boolean(error));
+    if (error) note.textContent = error;
+  }
+}
+
+function setNewAgentDialogError(modal, message) {
+  const errorEl = modal.querySelector('#newAgent-error');
+  if (!errorEl) return;
+  errorEl.textContent = message || '';
+  errorEl.style.display = message ? 'block' : 'none';
+}
+
+function buildWorldAgentFromCreateResult(result) {
+  const providerKind = result.providerKind || result.platform || 'openclaw';
+  const profile = result.profile || result.providerAgentId || '';
+  const id = result.agentId || result.id || (providerKind === 'openclaw' ? result.name : `${providerKind}-${profile || result.name}`);
+  const base = agentsList[agentsList.length - 1] || null;
+  const offsetIndex = Math.max(0, agentsList.length % 8);
+  const baseX = base ? Number(base.x || 0) : 0;
+  const baseY = base ? Number(base.y || 0) : 0;
+  const spawnX = baseX + (offsetIndex - 3) * API_TILE * 0.8;
+  const spawnY = baseY + API_TILE * 1.4;
+  let appearance = {};
+  if (typeof window.voGetDefaultAppearance === 'function') {
+    appearance = window.voGetDefaultAppearance(id, 'M');
+  } else {
+    appearance = getAgentAppearance(id, 'M');
+  }
+  return {
+    id,
+    statusKey: result.statusKey || id,
+    name: result.name || id,
+    emoji: result.emoji || (providerKind === 'hermes' ? '⚕️' : '🤖'),
+    role: result.role || '',
+    providerKind,
+    providerType: result.providerType || (providerKind === 'codex' ? 'harness' : 'runtime'),
+    providerAgentId: result.providerAgentId || profile || id,
+    profile,
+    workspace: result.workspace || '',
+    status: 'idle',
+    task: '',
+    _appearance: appearance,
+    x: spawnX,
+    y: spawnY,
+    homeX: spawnX,
+    homeY: spawnY,
+    _tick: Math.floor(Math.random() * 1000),
+    _wanderTimer: Math.random() * 3000,
+    _wanderTarget: null,
+    _workBuilding: null,
+    _homeBuilding: null,
+    _agentRole: 'agent',
+    _atDesk: false,
+    _floor: 1,
+    _targetFloor: 1,
+  };
+}
+
+function insertCreatedAgentIntoWorld(result) {
+  if (!result?.agentId && !result?.id) return null;
+  const agent = buildWorldAgentFromCreateResult(result);
+  const existingIndex = agentsList.findIndex(item => item && (item.id === agent.id || item.statusKey === agent.statusKey));
+  if (existingIndex >= 0) {
+    const existing = agentsList[existingIndex];
+    agentsList[existingIndex] = { ...existing, ...agent, x: existing.x, y: existing.y, homeX: existing.homeX, homeY: existing.homeY, _appearance: existing._appearance || agent._appearance };
+    createAgent3D(agentsList[existingIndex]);
+    _agentLastStatus.set(agentsList[existingIndex].id, agentsList[existingIndex].status || 'idle');
+    window.agents = agentsList;
+    return agentsList[existingIndex];
+  }
+  agentsList.push(agent);
+  createAgent3D(agent);
+  _agentLastStatus.set(agent.id, agent.status || 'idle');
+  window.agents = agentsList;
+  return agent;
+}
+
+async function submitNewAgentDialog(modal) {
+  const platformSelect = modal.querySelector('#newAgent-platform');
+  const selected = platformSelect?.selectedOptions?.[0] || null;
+  const platform = selected?.value || 'openclaw';
+  const name = (modal.querySelector('#newAgent-name')?.value || '').trim();
+  const role = (modal.querySelector('#newAgent-role')?.value || '').trim();
+  const emoji = (modal.querySelector('#newAgent-emoji')?.value || '').trim();
+  const prompt = (modal.querySelector('#newAgent-prompt')?.value || '').trim();
+  const codexCreationMode = modal.querySelector('input[name="newAgent-codexMode"]:checked')?.value || 'standard';
+  const codexCustomDirectory = (modal.querySelector('#newAgent-codexCustomDirectory')?.value || '').trim();
+  if (!name) {
+    setNewAgentDialogError(modal, 'Agent name is required.');
+    return;
+  }
+  if (platform === 'codex' && codexCreationMode === 'custom' && !codexCustomDirectory) {
+    setNewAgentDialogError(modal, 'Choose a custom parent directory for this Codex agent.');
+    return;
+  }
+  const createBtn = modal.querySelector('#newAgent-create');
+  setNewAgentDialogError(modal, '');
+  if (createBtn) {
+    createBtn.disabled = true;
+    createBtn.textContent = 'Creating...';
+  }
+  try {
+    const payload = { platform, name, role, emoji, prompt };
+    if (platform === 'codex') {
+      payload.codexCreationMode = codexCreationMode;
+      payload.codexCustomDirectory = codexCustomDirectory;
+    }
+    const res = await fetch('/api/agent/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) throw new Error(data.error || data.message || 'Agent creation failed');
+    const created = insertCreatedAgentIntoWorld(data);
+    updateAgentList();
+    window.dispatchEvent(new CustomEvent('vw:agents-changed', { detail: { agent: data } }));
+    closeNewAgentDialog();
+    if (created) openAgentPanel(created.id, { preserveCamera: true });
+    showToast(data.message || `Created ${name}`, 'success');
+  } catch (error) {
+    setNewAgentDialogError(modal, error?.message || 'Agent creation failed');
+  } finally {
+    if (createBtn && document.body.contains(createBtn)) {
+      createBtn.disabled = false;
+      createBtn.textContent = 'Create Agent';
+    }
+  }
+}
+
+async function showCreateAgentDialog() {
+  try {
+    const platforms = (_newAgentPlatformsCache || await fetchNewAgentPlatforms())
+      .filter(platform => platform && platform.available && platform.create);
+    if (!platforms.length) {
+      showToast('No agent creation platforms are available', 'error');
+      return;
+    }
+    closeNewAgentDialog();
+    const modal = document.createElement('div');
+    modal.className = 'modal visible agent-create-modal';
+    modal.innerHTML = `
+      <div class="modal-content agent-create-content" role="dialog" aria-modal="true" aria-labelledby="newAgent-title">
+        <div class="modal-header">
+          <h3 id="newAgent-title">New Agent</h3>
+          <button class="modal-close" type="button" data-new-agent-close>×</button>
+        </div>
+        <div class="agent-create-form">
+          <label class="form-group">
+            <span>Agent Platform</span>
+            <select id="newAgent-platform">
+              ${platforms.map(platform => `<option value="${escapeAttr(platform.id)}" data-description="${escapeAttr(platform.description || '')}" data-error="${escapeAttr(platform.error || '')}">${escapeHtml(platform.label || platform.id)}</option>`).join('')}
+            </select>
+          </label>
+          <div id="newAgent-platformNote" class="agent-create-platform-note"></div>
+          <div id="newAgent-codexOptions" class="agent-create-codex-options" style="display:none">
+            <div class="agent-create-option-title">Codex Location</div>
+            <label><input type="radio" name="newAgent-codexMode" value="standard" checked> Standard Codex agents directory</label>
+            <label><input type="radio" name="newAgent-codexMode" value="custom"> Custom parent directory</label>
+            <input id="newAgent-codexCustomDirectory" placeholder="/path/to/parent-directory" autocomplete="off">
+          </div>
+          <label class="form-group">
+            <span>Name</span>
+            <input id="newAgent-name" maxlength="60" autocomplete="off">
+          </label>
+          <label class="form-group">
+            <span>Role</span>
+            <input id="newAgent-role" maxlength="120" autocomplete="off">
+          </label>
+          <label class="form-group agent-create-emoji-row">
+            <span>Emoji</span>
+            <input id="newAgent-emoji" maxlength="8" autocomplete="off">
+          </label>
+          <label class="form-group">
+            <span>Standing Prompt</span>
+            <textarea id="newAgent-prompt" rows="4" maxlength="3000"></textarea>
+          </label>
+          <div id="newAgent-error" class="agent-create-error" style="display:none"></div>
+        </div>
+        <div class="agent-create-actions">
+          <button class="btn-secondary" type="button" data-new-agent-close>Cancel</button>
+          <button class="btn-primary" type="button" id="newAgent-create">Create Agent</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    _newAgentDialog = modal;
+    const nameInput = modal.querySelector('#newAgent-name');
+    nameInput?.addEventListener('input', () => { nameInput.dataset.autofilled = 'false'; });
+    modal.querySelector('#newAgent-platform')?.addEventListener('change', () => updateNewAgentDialogPlatform(modal));
+    modal.querySelectorAll('[data-new-agent-close]').forEach(btn => btn.addEventListener('click', closeNewAgentDialog));
+    modal.addEventListener('click', event => {
+      if (event.target === modal) closeNewAgentDialog();
+    });
+    modal.querySelector('#newAgent-create')?.addEventListener('click', () => submitNewAgentDialog(modal));
+    modal.querySelectorAll('input[name="newAgent-codexMode"]').forEach(input => {
+      input.addEventListener('change', () => {
+        const custom = modal.querySelector('#newAgent-codexCustomDirectory');
+        if (custom) custom.disabled = modal.querySelector('input[name="newAgent-codexMode"]:checked')?.value !== 'custom';
+      });
+    });
+    const custom = modal.querySelector('#newAgent-codexCustomDirectory');
+    if (custom) custom.disabled = true;
+    document.addEventListener('keydown', handleNewAgentDialogKeydown);
+    updateNewAgentDialogPlatform(modal);
+    setTimeout(() => modal.querySelector('#newAgent-name')?.focus(), 0);
+  } catch (error) {
+    showToast(error?.message || 'Could not open New Agent', 'error');
+  }
+}
+
 function updateAgentList() {
   const l = document.getElementById('agentList');
   if (!l) return;
@@ -26160,6 +26428,21 @@ function updateAgentList() {
         selectedAgentId = null;
         const panel = document.getElementById('agentPanel');
         if (panel) panel.style.display = 'none';
+      }
+    });
+  }
+
+  const newAgentBtn = document.getElementById('btn-newAgent');
+  if (newAgentBtn && !newAgentBtn.dataset.boundNewAgent) {
+    newAgentBtn.dataset.boundNewAgent = 'true';
+    newAgentBtn.addEventListener('click', async () => {
+      if (!ensureEditorUnlocked('Agent creation')) return;
+      newAgentBtn.disabled = true;
+      try {
+        await fetchNewAgentPlatforms();
+        await showCreateAgentDialog();
+      } finally {
+        newAgentBtn.disabled = false;
       }
     });
   }
