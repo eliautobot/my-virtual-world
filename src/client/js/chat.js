@@ -452,7 +452,10 @@
       const approvalId = approval.approval_id || approval.id || '';
       if (approvalId) {
         const existing = [...this.messages.querySelectorAll('[data-approval-id]')].find(el => el.dataset.approvalId === approvalId);
-        if (existing) return;
+        if (existing) {
+          this.updateHermesApprovalCard(existing, approval);
+          return;
+        }
       }
       const enriched = {
         ...approval,
@@ -474,6 +477,25 @@
         []
       );
       this.scrollBottom();
+    }
+
+    updateHermesApprovalCard(card, approval) {
+      if (!card || !approval) return;
+      const status = String(approval.status || 'pending').toLowerCase();
+      const visualStatus = status.includes('approved')
+        ? 'approved'
+        : (status.includes('denied') || status.includes('expired') || status.includes('timeout'))
+          ? 'denied'
+          : 'pending';
+      card.classList.remove('pending', 'approved', 'denied', 'responding');
+      card.classList.add(visualStatus);
+      const icon = card.querySelector('.chat-approval-icon');
+      if (icon) icon.textContent = visualStatus === 'approved' ? 'OK' : visualStatus === 'denied' ? 'x' : '!';
+      const state = card.querySelector('.chat-approval-status');
+      if (state) state.textContent = status === 'pending' ? 'pending' : status;
+      if (visualStatus !== 'pending') {
+        for (const button of card.querySelectorAll('button')) button.disabled = true;
+      }
     }
 
     async fetchSessionInfo() {
@@ -2081,14 +2103,19 @@
   function renderHermesApprovalCard(approval, windowInstance) {
     const card = document.createElement('div');
     const status = String(approval.status || 'pending').toLowerCase();
-    card.className = 'chat-approval-card ' + (status.includes('denied') ? 'denied' : status.includes('approved') ? 'approved' : 'pending');
+    const visualStatus = status.includes('approved')
+      ? 'approved'
+      : (status.includes('denied') || status.includes('expired') || status.includes('timeout'))
+        ? 'denied'
+        : 'pending';
+    card.className = 'chat-approval-card ' + visualStatus;
     card.dataset.approvalId = approval.approval_id || approval.id || '';
 
     const header = document.createElement('div');
     header.className = 'chat-approval-header';
     const icon = document.createElement('span');
     icon.className = 'chat-approval-icon';
-    icon.textContent = status.includes('denied') ? 'x' : status.includes('approved') ? 'OK' : '!';
+    icon.textContent = visualStatus === 'denied' ? 'x' : visualStatus === 'approved' ? 'OK' : '!';
     const title = document.createElement('span');
     title.className = 'chat-approval-title';
     title.textContent = approval.title || 'Hermes approval required';

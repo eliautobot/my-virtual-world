@@ -7162,6 +7162,39 @@ def _get_hermes_approval_pending(agent_key="hermes-default", session_id=""):
     return {"ok": True, "pending": None, "pending_count": 0, "session_id": session_id or ""}
 
 
+def _is_hermes_approval_pending_active(approval):
+    if not isinstance(approval, dict):
+        return False
+    approval_id = str(approval.get("approval_id") or approval.get("id") or "").strip()
+    if not approval_id:
+        return False
+    with HERMES_APPROVAL_LOCK:
+        for items in HERMES_APPROVAL_PENDING.values():
+            for item in items:
+                item_id = str(item.get("approval_id") or item.get("id") or "").strip()
+                if item_id == approval_id and item.get("status", "pending") == "pending":
+                    return True
+    return False
+
+
+def _normalize_hermes_history_for_client(messages):
+    normalized = []
+    for msg in messages if isinstance(messages, list) else []:
+        if not isinstance(msg, dict):
+            continue
+        item = dict(msg)
+        approval = item.get("approval")
+        if isinstance(approval, dict) and str(approval.get("status") or "pending").lower() == "pending":
+            if not _is_hermes_approval_pending_active(approval):
+                item["approval"] = {
+                    **approval,
+                    "status": "expired",
+                    "description": approval.get("description") or "This Hermes approval is no longer active.",
+                }
+        normalized.append(item)
+    return normalized
+
+
 def _resolve_hermes_approval_pending(agent_key="hermes-default", approval_id="", session_id="", choice=""):
     agent = _get_hermes_agent(agent_key) or {}
     agent_id = agent.get("id") or agent_key or "hermes-default"
@@ -7193,9 +7226,38 @@ def _resolve_hermes_approval_pending(agent_key="hermes-default", approval_id="",
     return None
 
 
+def _discard_hermes_approval_bridge_pending(agent_key="hermes-default", profile="", session_id="", bridge_run_id=""):
+    agent = _get_hermes_agent(agent_key) or {}
+    agent_id = agent.get("id") or agent_key or "hermes-default"
+    profile = profile or agent.get("profile") or agent.get("providerAgentId") or "default"
+    bridge_run_id = _safe_hermes_bridge_run_id(bridge_run_id) if bridge_run_id else ""
+    expired = []
+    with HERMES_APPROVAL_LOCK:
+        for key, queue in list(HERMES_APPROVAL_PENDING.items()):
+            keep = []
+            for item in queue:
+                if item.get("status", "pending") != "pending":
+                    keep.append(item)
+                    continue
+                if bridge_run_id and item.get("bridgeRunId") != bridge_run_id:
+                    keep.append(item)
+                    continue
+                if session_id and item.get("session_id") and item.get("session_id") != session_id:
+                    keep.append(item)
+                    continue
+                if item.get("agentId") not in {agent_id, agent_key} and item.get("profile") != profile:
+                    keep.append(item)
+                    continue
+                expired.append({**item, "status": "expired", "resolvedAt": int(time.time() * 1000)})
+            HERMES_APPROVAL_PENDING[key] = keep
+    return expired
+
+
 def _detect_hermes_approval_request(reply="", stderr="", original_message="", agent_key="hermes-default"):
     text = f"{reply or ''}\n{stderr or ''}"
     lower = text.lower()
+    if "user denied" in lower and "timeout" not in lower:
+        return None
     markers = (
         "timeout — denying command",
         "timeout - denying command",
@@ -7244,6 +7306,19 @@ def _detect_hermes_approval_request(reply="", stderr="", original_message="", ag
         "agentId": agent_key,
         "choices": ["approve_once", "deny"],
     }
+
+
+def _hermes_terminal_command_from_tools(tools):
+    for tool in reversed(tools if isinstance(tools, list) else []):
+        if not isinstance(tool, dict):
+            continue
+        if str(tool.get("name") or "").lower() != "terminal":
+            continue
+        args = tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {}
+        command = str(args.get("command") or "").strip()
+        if command:
+            return command[:500]
+    return ""
 
 
 def _approval_result_message(approval, choice):
@@ -7383,6 +7458,14 @@ def _handle_hermes_chat(body):
     if result.get("sessionId"):
         _set_hermes_session_id(profile, result.get("sessionId"))
     active_session_id = result.get("sessionId") or session_id
+    if live_run_id:
+        for expired_approval in _discard_hermes_approval_bridge_pending(
+            agent.get("id") or agent_key,
+            profile,
+            active_session_id,
+            live_run_id,
+        ):
+            _append_hermes_live_event(live_run_id, "approval", {"approval": expired_approval, "pending_count": 0})
     activity = {"tools": [], "thinking": "", "reasoningTokens": 0}
     if active_session_id and hasattr(provider, "export_session"):
         exported = provider.export_session(profile, active_session_id)
@@ -7392,6 +7475,11 @@ def _handle_hermes_chat(body):
     visible_tools = activity.get("tools") or []
     approval = _detect_hermes_approval_request(reply, result.get("stderr", ""), message, agent.get("id") or agent_key)
     if approval:
+        detected_command = str(approval.get("command") or "").strip().lower()
+        if not detected_command or detected_command.startswith(("the terminal command", "approval-gated hermes command")):
+            tool_command = _hermes_terminal_command_from_tools(visible_tools)
+            if tool_command:
+                approval["command"] = tool_command
         approval = _remember_hermes_approval_pending(approval, agent.get("id") or agent_key, profile, result.get("sessionId") or _get_hermes_session_id(profile))
         _append_hermes_live_event(live_run_id, "approval", {"approval": approval})
     now_ms = int(time.time() * 1000)
@@ -8747,7 +8835,7 @@ def get_agent_chat():
         if agent.get("providerKind") == "hermes":
             profile = agent.get("profile") or agent.get("providerAgentId") or "default"
             hermes_messages = []
-            for msg in _load_hermes_history(profile):
+            for msg in _normalize_hermes_history_for_client(_load_hermes_history(profile)):
                 if not isinstance(msg, dict):
                     continue
                 hermes_messages.append({
@@ -9281,7 +9369,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             agent_key = (qs.get("agentId") or qs.get("key") or ["hermes-default"])[0]
             agent = _get_hermes_agent(agent_key) or {}
             profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-            return self._send_json({"ok": True, "messages": _load_hermes_history(profile), "profile": profile})
+            return self._send_json({"ok": True, "messages": _normalize_hermes_history_for_client(_load_hermes_history(profile)), "profile": profile})
 
         if path == "/api/hermes/live" or path.startswith("/api/hermes/live?"):
             qs = urllib.parse.parse_qs(parsed.query)
