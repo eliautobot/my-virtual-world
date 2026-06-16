@@ -7195,6 +7195,35 @@ def _normalize_hermes_history_for_client(messages):
     return normalized
 
 
+def _hermes_history_with_pending_approval(profile="default", agent_key="hermes-default"):
+    messages = _normalize_hermes_history_for_client(_load_hermes_history(profile))
+    pending_result = _get_hermes_approval_pending(agent_key, _get_hermes_session_id(profile))
+    pending = pending_result.get("pending") if isinstance(pending_result, dict) else None
+    if isinstance(pending, dict):
+        pending_id = pending.get("approval_id") or pending.get("id")
+        already_present = any(
+            isinstance(msg, dict)
+            and isinstance(msg.get("approval"), dict)
+            and (msg["approval"].get("approval_id") or msg["approval"].get("id")) == pending_id
+            for msg in messages
+        )
+        if not already_present:
+            messages.append({
+                "role": "assistant",
+                "text": "",
+                "ts": int(time.time() * 1000),
+                "epochMs": int(time.time() * 1000),
+                "from": "Hermes",
+                "source": "hermes",
+                "sessionId": pending.get("session_id") or "",
+                "tools": [],
+                "thinking": "",
+                "reasoningTokens": 0,
+                "approval": {**pending, "pending_count": pending_result.get("pending_count") or 1},
+            })
+    return messages
+
+
 def _resolve_hermes_approval_pending(agent_key="hermes-default", approval_id="", session_id="", choice=""):
     agent = _get_hermes_agent(agent_key) or {}
     agent_id = agent.get("id") or agent_key or "hermes-default"
@@ -8835,7 +8864,7 @@ def get_agent_chat():
         if agent.get("providerKind") == "hermes":
             profile = agent.get("profile") or agent.get("providerAgentId") or "default"
             hermes_messages = []
-            for msg in _normalize_hermes_history_for_client(_load_hermes_history(profile)):
+            for msg in _hermes_history_with_pending_approval(profile, agent.get("id") or agent.get("statusKey") or "hermes-default"):
                 if not isinstance(msg, dict):
                     continue
                 hermes_messages.append({
@@ -9369,7 +9398,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             agent_key = (qs.get("agentId") or qs.get("key") or ["hermes-default"])[0]
             agent = _get_hermes_agent(agent_key) or {}
             profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-            return self._send_json({"ok": True, "messages": _normalize_hermes_history_for_client(_load_hermes_history(profile)), "profile": profile})
+            return self._send_json({"ok": True, "messages": _hermes_history_with_pending_approval(profile, agent.get("id") or agent_key), "profile": profile})
 
         if path == "/api/hermes/live" or path.startswith("/api/hermes/live?"):
             qs = urllib.parse.parse_qs(parsed.query)

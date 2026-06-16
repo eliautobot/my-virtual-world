@@ -411,7 +411,12 @@
     }
 
     isHermesSelected() {
-      return this.getSelectedProviderKind() === 'hermes' || String(this.sessionKey || '').startsWith('hermes:');
+      const selectedAgentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
+      return (
+        this.getSelectedProviderKind() === 'hermes'
+        || String(this.sessionKey || '').startsWith('hermes:')
+        || String(selectedAgentId).startsWith('hermes-')
+      );
     }
 
     isCodexSelected() {
