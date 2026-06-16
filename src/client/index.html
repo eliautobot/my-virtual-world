@@ -435,6 +435,10 @@
                     <div class="form-group"><label>Hermes CLI</label><input type="text" id="setting-hermesBin" placeholder="~/.local/bin/hermes"><div class="field-example">Example: local install <code>~/.local/bin/hermes</code>; Docker install <code>/home/vw/.local/bin/hermes</code>.</div></div>
                     <div class="form-group"><label>Hermes API URL</label><input type="text" id="setting-hermesApiUrl" placeholder="http://127.0.0.1:8642"><div class="field-example">Example: leave blank for CLI mode, or use <code>http://127.0.0.1:8642</code> if your Hermes API is running locally.</div></div>
                     <div class="form-group"><label>Hermes API Key</label><input type="password" id="setting-hermesApiKey" placeholder="Configured value is preserved when blank"><div class="field-example">Example: leave blank unless your Hermes API requires a key.</div></div>
+                    <label class="settings-check"><input type="checkbox" id="setting-hermesPreferApi" checked> Prefer Hermes native API streaming</label>
+                    <label class="settings-check"><input type="checkbox" id="setting-hermesAutoStartProfileApis" checked> Auto-start local Hermes profile APIs</label>
+                    <label class="settings-check"><input type="checkbox" id="setting-hermesAutoStartDefaultApi" checked> Auto-start default Hermes API</label>
+                    <div class="form-group"><label>Hermes Profile API Port Base</label><input type="text" id="setting-hermesApiProfilePortBase" placeholder="8643"><div class="field-example">Used only for profile-specific local API servers. Remote API URLs are never overwritten.</div></div>
                     <button class="btn-secondary" id="btn-testHermes">Test Hermes</button>
                     <div id="hermesTestStatus" class="settings-inline-status"></div>
                 </section>

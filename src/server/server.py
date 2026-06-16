@@ -20,6 +20,7 @@ import mimetypes
 import re
 import socketserver
 import subprocess
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -38,8 +39,9 @@ from license import (
 )
 
 try:
-    from providers.hermes import HermesProvider
+    from providers.hermes import HermesApiClient, HermesProvider
 except Exception as e:
+    HermesApiClient = None
     HermesProvider = None
     print(f"⚠️  Virtual World Hermes provider unavailable: {e}")
 
@@ -128,7 +130,19 @@ def _default_vw_config():
             "location": {"label": "", "timeZone": "", "latitude": None, "longitude": None},
         },
         "openclaw": {"homePath": "", "hostHomePath": "", "gatewayUrl": "", "gatewayToken": ""},
-        "hermes": {"enabled": True, "homePath": "", "binary": "", "timeoutSec": 600, "apiUrl": "", "apiKey": "", "preferApi": True},
+        "hermes": {
+            "enabled": True,
+            "homePath": "",
+            "binary": "",
+            "timeoutSec": 600,
+            "apiUrl": "",
+            "apiKey": "",
+            "preferApi": True,
+            "autoStartProfileApis": True,
+            "autoStartDefaultApi": True,
+            "apiProfilePortBase": "",
+            "apiProfiles": {},
+        },
         "codex": {
             "enabled": True,
             "homePath": "",
@@ -174,6 +188,12 @@ def _load_vw_config():
     cfg["hermes"]["timeoutSec"] = int(_env_or("VW_HERMES_TIMEOUT_SEC", cfg["hermes"].get("timeoutSec", 600)))
     cfg["hermes"]["apiUrl"] = _env_or("VW_HERMES_API_URL", cfg["hermes"].get("apiUrl") or "")
     cfg["hermes"]["apiKey"] = _env_or("VW_HERMES_API_KEY", cfg["hermes"].get("apiKey") or "")
+    cfg["hermes"]["preferApi"] = _env_bool("VW_HERMES_PREFER_API", cfg["hermes"].get("preferApi", True))
+    cfg["hermes"]["autoStartProfileApis"] = _env_bool("VW_HERMES_AUTO_START_PROFILE_APIS", cfg["hermes"].get("autoStartProfileApis", True))
+    cfg["hermes"]["autoStartDefaultApi"] = _env_bool("VW_HERMES_AUTO_START_DEFAULT_API", cfg["hermes"].get("autoStartDefaultApi", cfg["hermes"].get("autoStartProfileApis", True)))
+    cfg["hermes"]["apiProfilePortBase"] = _env_or("VW_HERMES_API_PROFILE_PORT_BASE", cfg["hermes"].get("apiProfilePortBase") or "")
+    if not isinstance(cfg["hermes"].get("apiProfiles"), dict):
+        cfg["hermes"]["apiProfiles"] = {}
     cfg["codex"]["enabled"] = _env_bool("VW_CODEX_ENABLED", cfg["codex"].get("enabled", True))
     cfg["codex"]["homePath"] = os.path.expanduser(_env_or("VW_CODEX_HOME", _env_or("CODEX_HOME", cfg["codex"].get("homePath") or "~/.codex")))
     cfg["codex"]["binary"] = os.path.expanduser(_env_or("VW_CODEX_BIN", cfg["codex"].get("binary") or "codex"))
@@ -279,6 +299,10 @@ def _safe_vw_config():
             "apiUrl": hermes_cfg.get("apiUrl"),
             "apiKeyConfigured": bool(hermes_cfg.get("apiKey")),
             "preferApi": hermes_cfg.get("preferApi", True),
+            "autoStartProfileApis": hermes_cfg.get("autoStartProfileApis", True),
+            "autoStartDefaultApi": hermes_cfg.get("autoStartDefaultApi", True),
+            "apiProfilePortBase": hermes_cfg.get("apiProfilePortBase") or "",
+            "apiProfilesConfigured": sorted((hermes_cfg.get("apiProfiles") or {}).keys()) if isinstance(hermes_cfg.get("apiProfiles"), dict) else [],
         },
         "codex": {
             "enabled": codex_cfg.get("enabled", True),
@@ -599,6 +623,10 @@ HERMES_LIVE_LOCK = threading.Lock()
 HERMES_LIVE_EVENTS = {}
 HERMES_LIVE_MAX_EVENTS = 250
 HERMES_APPROVAL_BRIDGE_DIR = os.path.join(DATA_DIR, "hermes-approval-bridge")
+HERMES_ACTIVE_RUNS_LOCK = threading.Lock()
+HERMES_ACTIVE_RUNS = {}
+HERMES_PROFILE_API_LOCK = threading.Lock()
+HERMES_PROFILE_API_PROCESSES = {}
 
 # ─── WORLD METADATA ──────────────────────────────────────────────
 DEFAULT_META = {
@@ -7091,6 +7119,135 @@ def _remove_hermes_progress_messages(messages):
     return [m for m in messages if not (isinstance(m, dict) and m.get("ephemeral") == "hermes-progress")]
 
 
+def _remember_hermes_active_run(meta):
+    if not isinstance(meta, dict) or not meta.get("runId"):
+        return
+    with HERMES_ACTIVE_RUNS_LOCK:
+        HERMES_ACTIVE_RUNS[str(meta["runId"])] = dict(meta)
+
+
+def _get_hermes_active_run(run_id):
+    with HERMES_ACTIVE_RUNS_LOCK:
+        meta = HERMES_ACTIVE_RUNS.get(str(run_id or ""))
+        return dict(meta) if isinstance(meta, dict) else None
+
+
+def _find_hermes_active_run(agent_key="", profile=""):
+    with HERMES_ACTIVE_RUNS_LOCK:
+        for meta in reversed(list(HERMES_ACTIVE_RUNS.values())):
+            if agent_key and agent_key in {meta.get("agentId"), meta.get("agentKey")}:
+                return dict(meta)
+            if profile and profile == meta.get("profile"):
+                return dict(meta)
+    return None
+
+
+def _clear_hermes_active_run(run_id):
+    with HERMES_ACTIVE_RUNS_LOCK:
+        HERMES_ACTIVE_RUNS.pop(str(run_id or ""), None)
+
+
+def _set_hermes_presence(agent_id, state, task=""):
+    if not _gateway_presence or not agent_id:
+        return
+    try:
+        _gateway_presence.set_manual_override(agent_id, state, task)
+    except Exception:
+        pass
+
+
+def _publish_hermes_api_progress(profile, agent_id, run_id, tools=None, reasoning_parts=None, reply=""):
+    """Publish in-flight native Hermes API events to the visible chat history."""
+    if not run_id:
+        return
+    progress_id = f"hermes-api-progress-{run_id}"
+    history = _load_hermes_history(profile)
+    history = [
+        msg for msg in history
+        if not (isinstance(msg, dict) and msg.get("ephemeral") == "hermes-progress" and msg.get("progressId") == progress_id)
+    ]
+    now_ms = int(time.time() * 1000)
+    history.append({
+        "role": "assistant",
+        "text": reply or "",
+        "ts": now_ms,
+        "epochMs": now_ms,
+        "agentId": agent_id,
+        "from": "Hermes",
+        "source": "hermes",
+        "ephemeral": "hermes-progress",
+        "progressId": progress_id,
+        "runId": run_id,
+        "sessionId": _get_hermes_session_id(profile) or "",
+        "tools": tools or [],
+        "thinking": "\n\n".join(reasoning_parts or [])[:12000],
+        "reasoningTokens": 0,
+    })
+    _save_hermes_history(profile, history)
+
+
+def _format_hermes_attachment_context(attachments):
+    if not isinstance(attachments, list) or not attachments:
+        return ""
+    lines = [
+        "Attachments provided by Virtual World:",
+        "Use these attachments when answering. Prefer the URL if the local path is not readable from your runtime.",
+    ]
+    for idx, item in enumerate(attachments, 1):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("filename") or f"attachment-{idx}").strip()
+        path = str(item.get("path") or item.get("filePath") or "").strip()
+        url = str(item.get("url") or item.get("mediaUrl") or "").strip()
+        mime_type = str(item.get("mimeType") or item.get("contentType") or item.get("media_type") or "").strip()
+        size = item.get("size") or item.get("bytes") or ""
+        if path and not url:
+            url = "/chat-media?path=" + urllib.parse.quote(path)
+        if url.startswith("/"):
+            url = f"http://127.0.0.1:{PORT}{url}"
+        details = [f"{idx}. {name}"]
+        if mime_type:
+            details.append(f"type: {mime_type}")
+        if size:
+            details.append(f"size: {size} bytes")
+        if path:
+            details.append(f"path: {path}")
+        if url:
+            details.append(f"url: {url}")
+        lines.append(" | ".join(details))
+    return "\n".join(lines) if len(lines) > 2 else ""
+
+
+def _hermes_tool_activity_messages(tools, agent_id="", run_id="", base_ts=None, coerce_complete=False):
+    """Store Hermes tools like recovered activity: one tool-only message per card."""
+    if not isinstance(tools, list) or not tools:
+        return []
+    start_ts = int(base_ts if base_ts is not None else time.time() * 1000)
+    messages = []
+    for idx, tool in enumerate(tools):
+        if not isinstance(tool, dict):
+            continue
+        item = dict(tool)
+        item["runId"] = item.get("runId") or run_id or ""
+        status = str(item.get("status") or "").lower()
+        if coerce_complete and status == "running":
+            item["status"] = "done"
+            if not item.get("result") or str(item.get("result")).strip().lower() == "running":
+                item["result"] = "Completed"
+        messages.append({
+            "role": "assistant",
+            "text": "",
+            "ts": start_ts + idx,
+            "epochMs": start_ts + idx,
+            "agentId": agent_id,
+            "from": "Hermes",
+            "source": "hermes-tool-activity",
+            "runId": item.get("runId") or run_id or "",
+            "tools": [item],
+        })
+    return messages
+
+
 def _hermes_approval_key(agent_id="", profile="", session_id=""):
     if session_id:
         return f"session:{session_id}"
@@ -7364,6 +7521,226 @@ def _approval_result_message(approval, choice):
     }
 
 
+def _parse_url_port(url, default=8642):
+    try:
+        parsed = urllib.parse.urlparse(str(url or ""))
+        return int(parsed.port or default)
+    except Exception:
+        return default
+
+
+def _is_local_http_url(url):
+    try:
+        parsed = urllib.parse.urlparse(str(url or ""))
+        return parsed.scheme in {"http", "https"} and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+    except Exception:
+        return False
+
+
+def _hermes_profile_api_port(profile):
+    hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+    base = hermes_cfg.get("apiProfilePortBase") or os.environ.get("VW_HERMES_API_PROFILE_PORT_BASE")
+    try:
+        base = int(base)
+    except (TypeError, ValueError):
+        base = _parse_url_port(hermes_cfg.get("apiUrl"), 8642) + 1
+    digest = hashlib.sha1(str(profile or "default").encode("utf-8")).hexdigest()
+    return base + (int(digest[:6], 16) % 1000)
+
+
+def _hermes_profile_api_config(profile):
+    profile = profile or "default"
+    hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+    profile_cfgs = hermes_cfg.get("apiProfiles") if isinstance(hermes_cfg.get("apiProfiles"), dict) else {}
+    profile_cfg = profile_cfgs.get(profile) if isinstance(profile_cfgs.get(profile), dict) else {}
+    api_key = profile_cfg.get("apiKey") or hermes_cfg.get("apiKey") or ""
+    auto_start_all = hermes_cfg.get("autoStartProfileApis", True) is not False
+    if profile == "default":
+        url = profile_cfg.get("apiUrl") or hermes_cfg.get("apiUrl") or "http://127.0.0.1:8642"
+        auto_start = profile_cfg.get("autoStart", hermes_cfg.get("autoStartDefaultApi", auto_start_all)) is not False
+        return {
+            "url": url,
+            "key": api_key,
+            "autoStart": bool(api_key and auto_start and _is_local_http_url(url)),
+            "port": _parse_url_port(url, 8642),
+        }
+    port = _hermes_profile_api_port(profile)
+    url = profile_cfg.get("apiUrl") or f"http://127.0.0.1:{port}"
+    auto_start = profile_cfg.get("autoStart", auto_start_all) is not False
+    return {
+        "url": url,
+        "key": api_key,
+        "autoStart": bool(api_key and auto_start and _is_local_http_url(url)),
+        "port": _parse_url_port(url, port),
+    }
+
+
+def _hermes_api_client_for_profile(profile):
+    if HermesApiClient is None:
+        raise RuntimeError("Hermes API client module unavailable")
+    profile = profile or "default"
+    cfg = _hermes_profile_api_config(profile)
+    if cfg.get("autoStart"):
+        _ensure_hermes_profile_api(profile, cfg)
+    return HermesApiClient(
+        base_url=cfg.get("url"),
+        api_key=cfg.get("key"),
+        timeout_sec=min(int((VW_CONFIG.get("hermes") or {}).get("timeoutSec") or 600), 60),
+    )
+
+
+def _ensure_hermes_profile_api(profile, api_cfg):
+    """Start a profile-scoped Hermes API server only for local keyed URLs."""
+    if not profile:
+        return
+    api_key = api_cfg.get("key") or ""
+    if not api_key or not api_cfg.get("autoStart") or not _is_local_http_url(api_cfg.get("url")):
+        return
+    if HermesApiClient is None:
+        return
+    client = HermesApiClient(base_url=api_cfg.get("url"), api_key=api_key, timeout_sec=5)
+    if client.is_available():
+        return
+
+    with HERMES_PROFILE_API_LOCK:
+        proc = HERMES_PROFILE_API_PROCESSES.get(profile)
+        if proc and proc.poll() is None:
+            return
+
+        hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+        hermes_bin = os.path.expanduser(hermes_cfg.get("binary") or "~/.local/bin/hermes")
+        hermes_home = os.path.expanduser(hermes_cfg.get("homePath") or "~/.hermes")
+        if not os.path.exists(hermes_bin):
+            return
+
+        env = os.environ.copy()
+        env.update({
+            "API_SERVER_ENABLED": "true",
+            "API_SERVER_HOST": "127.0.0.1",
+            "API_SERVER_PORT": str(api_cfg.get("port") or _parse_url_port(api_cfg.get("url"), 8642)),
+            "API_SERVER_KEY": api_key,
+            "API_SERVER_MODEL_NAME": f"hermes-{HermesProvider._safe_suffix(profile) if HermesProvider else profile}",
+            "VW_HERMES_HOME": hermes_home,
+        })
+        if os.path.basename(hermes_home.rstrip(os.sep)) == ".hermes":
+            env["HOME"] = os.path.dirname(hermes_home.rstrip(os.sep)) or env.get("HOME", "")
+        agent_root = os.path.join(hermes_home, "hermes-agent")
+        if os.path.isdir(agent_root):
+            site_packages = sorted(glob.glob(os.path.join(agent_root, "venv", "lib", "python*", "site-packages")))
+            pythonpath_parts = [p for p in [agent_root, *site_packages, env.get("PYTHONPATH", "")] if p]
+            env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+
+        log_path = os.path.join(STATUS_DIR, f"hermes-api-{HermesProvider._safe_suffix(profile) if HermesProvider else profile}.log")
+        try:
+            log_f = open(log_path, "ab", buffering=0)
+            cmd = [hermes_bin]
+            if profile != "default":
+                cmd.extend(["--profile", profile])
+            cmd.extend(["gateway", "run"])
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                env=env,
+                start_new_session=True,
+            )
+            HERMES_PROFILE_API_PROCESSES[profile] = proc
+        except Exception as exc:
+            print(f"⚠️ Hermes profile API start failed for {profile}: {exc}")
+            return
+
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        try:
+            if client.is_available():
+                return
+        except Exception:
+            pass
+        proc = HERMES_PROFILE_API_PROCESSES.get(profile)
+        if proc and proc.poll() is not None:
+            return
+        time.sleep(0.5)
+
+
+def _hermes_event_tool_card(event, status="running", fallback_id=""):
+    tool = str(event.get("tool") or event.get("name") or event.get("tool_name") or "Hermes tool")
+    preview = str(event.get("preview") or event.get("label") or "")
+    duration = event.get("duration")
+    result = "Running" if status == "running" else "Completed"
+    if event.get("error"):
+        result = "Failed"
+    if duration is not None and status != "running":
+        result = f"{result} in {duration}s"
+    card = {
+        "id": str(event.get("toolCallId") or event.get("tool_call_id") or event.get("id") or fallback_id or f"hermes-tool-{int(time.time() * 1000)}"),
+        "name": tool,
+        "status": status,
+        "args_preview": preview,
+        "result": result,
+    }
+    if preview:
+        card["arguments"] = {"command": preview}
+    return card
+
+
+def _hermes_api_approval_from_event(event, agent_id="", profile="", session_id="", original_message=""):
+    command = str(event.get("command") or event.get("preview") or event.get("tool") or "Hermes approval request")
+    description = str(event.get("description") or "Hermes needs approval before it can continue this run.")
+    run_id = str(event.get("run_id") or event.get("runId") or "")
+    seed = f"{agent_id}|{profile}|{session_id}|{run_id}|{command}|{original_message}"
+    approval_id = "hermes-api-approval-" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
+    return {
+        "id": approval_id,
+        "approval_id": approval_id,
+        "provider": "hermes-api",
+        "kind": "dangerous_command",
+        "title": "Hermes approval required",
+        "description": description,
+        "command": command,
+        "message": original_message,
+        "agentId": agent_id or "hermes-default",
+        "profile": profile or "default",
+        "session_id": session_id or "",
+        "runId": run_id,
+        "choices": event.get("choices") or ["once", "deny"],
+        "status": "pending",
+        "createdAt": int(time.time() * 1000),
+    }
+
+
+def _build_hermes_delivery_message(agent, agent_key, message, body):
+    from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
+    is_human_source = from_type in {"human", "user", "chat", "ui"}
+    attachments = body.get("attachments") if isinstance(body.get("attachments"), list) else []
+    attachment_context = _format_hermes_attachment_context(attachments)
+    source_app = str(body.get("sourceApp") or body.get("app") or "virtual-world").strip() or "virtual-world"
+    source_surface = str(body.get("sourceSurface") or body.get("surface") or "chat-window").strip() or "chat-window"
+    source_label = str(body.get("sourceLabel") or "").strip()
+    sender_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
+    delivery_message = message
+    if is_human_source:
+        pretty_surface = source_label or ("Virtual World Chat" if source_app == "virtual-world" and source_surface in {"chat-window", "chat"} else f"{source_app.replace('-', ' ').title()} {source_surface.replace('-', ' ').title()}".strip())
+        delivery_message = (
+            f"[A2A from=user name={json.dumps(sender_name)} to={agent.get('id') or agent_key} isUser=true sourceApp={json.dumps(source_app)} sourceSurface={json.dumps(source_surface)}]\n"
+            f"Message from {sender_name} via {pretty_surface}.\n\n"
+            f"{message}\n\n"
+            "Reply directly to the user. Do not assume a personal name unless the user provides one."
+        )
+    if attachment_context:
+        delivery_message = f"{delivery_message}\n\n{attachment_context}"
+    return {
+        "deliveryMessage": delivery_message,
+        "fromType": from_type,
+        "isHumanSource": is_human_source,
+        "attachments": attachments,
+        "sourceApp": source_app,
+        "sourceSurface": source_surface,
+        "sourceLabel": source_label,
+        "senderName": sender_name,
+    }
+
+
 def _handle_hermes_test(body=None):
     body = body if isinstance(body, dict) else {}
     provider = HermesProvider(
@@ -7374,7 +7751,300 @@ def _handle_hermes_test(body=None):
     ) if HermesProvider else None
     if not provider:
         return {"ok": False, "error": "Hermes provider module unavailable", "agents": []}
-    return provider.test()
+    result = provider.test()
+    profile_apis = {}
+    for agent in result.get("agents") or []:
+        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+        try:
+            api = _hermes_api_client_for_profile(profile)
+            caps = api.capabilities()
+            features = caps.get("features") if isinstance(caps.get("features"), dict) else {}
+            profile_apis[profile] = {
+                "ok": bool(features.get("run_submission") and features.get("run_events_sse")),
+                "url": api.base_url,
+                "model": caps.get("model") or caps.get("model_name") or "",
+                "features": {
+                    "runSubmission": bool(features.get("run_submission")),
+                    "runEventsSse": bool(features.get("run_events_sse")),
+                    "runApproval": bool(features.get("run_approval") or features.get("run_approval_response")),
+                    "runStop": bool(features.get("run_stop")),
+                },
+            }
+        except Exception as exc:
+            cfg = _hermes_profile_api_config(profile)
+            profile_apis[profile] = {"ok": False, "url": cfg.get("url"), "error": str(exc)[:500]}
+    result["profileApis"] = profile_apis
+    return result
+
+
+def _handle_hermes_run_start(body):
+    """Start a native Hermes API run and return the run id for browser SSE attach."""
+    body = body if isinstance(body, dict) else {}
+    message = str(body.get("message") or body.get("text") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "hermes-default"
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    agent = _get_hermes_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
+    hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+    if not hermes_cfg.get("preferApi", True):
+        return {"ok": False, "fallback": True, "error": "Hermes native API is disabled by configuration", "_status": 409}
+
+    timeout = int(body.get("timeoutSec") or hermes_cfg.get("timeoutSec") or HERMES_TIMEOUT_SEC)
+    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    try:
+        client = _hermes_api_client_for_profile(profile)
+    except Exception as exc:
+        return {"ok": False, "fallback": True, "error": str(exc), "_status": 409}
+    if not client.is_available():
+        return {"ok": False, "fallback": True, "error": "Hermes API Server is not available", "_status": 409}
+
+    delivery = _build_hermes_delivery_message(agent, agent_key, message, body)
+    now_ms = int(time.time() * 1000)
+    history = _load_hermes_history(profile)
+    history.append({
+        "role": "user",
+        "text": message,
+        "ts": now_ms,
+        "epochMs": now_ms,
+        "agentId": agent.get("id"),
+        "from": delivery["senderName"] if delivery["isHumanSource"] else "You",
+        "fromType": delivery["fromType"] or "",
+        "source": "hermes",
+        "sourceApp": delivery["sourceApp"] if delivery["isHumanSource"] else "",
+        "sourceSurface": delivery["sourceSurface"] if delivery["isHumanSource"] else "",
+        "sourceLabel": delivery["sourceLabel"] if delivery["isHumanSource"] else "",
+        "attachments": delivery["attachments"],
+    })
+    _save_hermes_history(profile, history)
+
+    safe_profile = HermesProvider._safe_suffix(profile) if HermesProvider else re.sub(r"[^A-Za-z0-9_.-]+", "-", profile)
+    session_id = _get_hermes_session_id(profile) or f"vw-hermes-{safe_profile}"
+    session_key = f"virtual-world:hermes:{profile}"
+    try:
+        started = client.start_run(delivery["deliveryMessage"], session_id=session_id, session_key=session_key)
+    except Exception as exc:
+        return {"ok": False, "fallback": True, "error": str(exc), "_status": 502}
+    run_id = started.get("run_id") or started.get("runId") or started.get("id")
+    if not run_id:
+        return {"ok": False, "fallback": True, "error": started.get("error") or "Hermes API did not return a run_id", "_status": 502}
+
+    _set_hermes_session_id(profile, session_id)
+    _remember_hermes_active_run({
+        "runId": run_id,
+        "sessionId": session_id,
+        "agentId": agent.get("id") or agent_key,
+        "agentKey": agent_key,
+        "statusKey": agent.get("statusKey") or agent.get("id") or agent_key,
+        "profile": profile,
+        "message": message,
+        "deliveryMessage": delivery["deliveryMessage"],
+        "timeoutSec": timeout,
+        "startedAt": now_ms,
+    })
+    _set_hermes_presence(agent.get("statusKey") or agent.get("id"), "working", "Hermes native run")
+    _publish_hermes_api_progress(profile, agent.get("id") or agent_key, run_id, tools=[], reasoning_parts=[], reply="")
+    return {
+        "ok": True,
+        "providerPath": "api",
+        "runId": run_id,
+        "sessionId": session_id,
+        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
+    }
+
+
+def _handle_hermes_run_events(handler, run_id):
+    """Proxy Hermes' native run SSE stream to the browser and persist final history."""
+    meta = _get_hermes_active_run(run_id)
+    if not meta:
+        return handler._send_json({"ok": False, "error": f"Hermes run '{run_id}' not found"}, 404)
+
+    profile = meta.get("profile") or "default"
+    agent = _get_hermes_agent(meta.get("agentId") or meta.get("agentKey") or f"hermes-{profile}") or {}
+    agent_id = agent.get("id") or meta.get("agentId") or "hermes-default"
+    status_key = agent.get("statusKey") or meta.get("statusKey") or agent_id
+    session_id = meta.get("sessionId") or _get_hermes_session_id(profile) or ""
+    original_message = meta.get("message") or ""
+    timeout = int(meta.get("timeoutSec") or (VW_CONFIG.get("hermes") or {}).get("timeoutSec") or HERMES_TIMEOUT_SEC)
+    try:
+        client = _hermes_api_client_for_profile(profile)
+    except Exception as exc:
+        return handler._send_json({"ok": False, "error": str(exc)}, 502)
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.end_headers()
+
+    client_connected = True
+
+    def send_sse(event_name, payload):
+        nonlocal client_connected
+        if not client_connected:
+            return False
+        data = dict(payload or {})
+        data.setdefault("event", event_name)
+        data.setdefault("runId", run_id)
+        data.setdefault("sessionId", session_id)
+        try:
+            handler.wfile.write(f"event: {event_name}\ndata: {json.dumps(data)}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+            return True
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            client_connected = False
+            return False
+
+    reply = ""
+    reasoning_parts = []
+    tools = []
+    started_tools = {}
+    started_tool_keys = {}
+    tool_seq = 0
+    approval = None
+    terminal_event = None
+    error_text = ""
+    last_progress_publish = 0.0
+
+    def publish_progress(force=False):
+        nonlocal last_progress_publish
+        now = time.time()
+        if force or now - last_progress_publish >= 0.25:
+            _publish_hermes_api_progress(profile, agent_id, run_id, tools=tools, reasoning_parts=reasoning_parts, reply=reply)
+            last_progress_publish = now
+
+    def finalize_history(ok=False):
+        history = _remove_hermes_progress_messages(_load_hermes_history(profile))
+        final_ts = int(time.time() * 1000)
+        history.extend(_hermes_tool_activity_messages(
+            tools,
+            agent_id=agent_id,
+            run_id=run_id,
+            base_ts=final_ts,
+            coerce_complete=bool(ok) and not approval,
+        ))
+        history.append({
+            "role": "assistant",
+            "text": reply,
+            "ts": final_ts + len(tools),
+            "epochMs": final_ts + len(tools),
+            "agentId": agent_id,
+            "from": agent.get("name") or "Hermes",
+            "source": "hermes",
+            "exitCode": 0 if ok else 1,
+            "sessionId": session_id,
+            "runId": run_id,
+            "tools": [],
+            "thinking": "" if "\n\n".join(reasoning_parts).strip() == reply.strip() else "\n\n".join(reasoning_parts),
+            "reasoningTokens": 0,
+            "approval": approval,
+            "error": error_text or None,
+        })
+        _save_hermes_history(profile, history)
+        _clear_hermes_active_run(run_id)
+        _set_hermes_presence(status_key, "idle" if ok or approval else "offline", "")
+
+    send_sse("run.started", {"ok": True, "agentId": agent_id, "profile": profile})
+    publish_progress(force=True)
+
+    try:
+        for event in client.stream_run_events(run_id, timeout_sec=timeout + 30):
+            _set_hermes_presence(status_key, "working", "Hermes native run")
+            event_name = str(event.get("event") or "").lower() or "event"
+            payload = {**event, "agentId": agent_id, "profile": profile}
+            if event_name == "message.delta":
+                delta = str(event.get("delta") or "")
+                reply += delta
+                payload["reply"] = reply
+                publish_progress()
+            elif event_name == "reasoning.available":
+                text = str(event.get("text") or "")
+                if text:
+                    reasoning_parts.append(text)
+                    payload["thinking"] = "\n\n".join(reasoning_parts)
+                    publish_progress(force=True)
+            elif event_name == "tool.started":
+                tool_seq += 1
+                fallback_id = f"{run_id}:tool:{tool_seq}"
+                card = _hermes_event_tool_card(event, "running", fallback_id=fallback_id)
+                event_tool_key = f"{event.get('tool') or event.get('name') or 'tool'}:{event.get('preview') or event.get('label') or ''}"
+                started_tool_keys[event_tool_key] = card["id"]
+                started_tools[card["id"]] = card
+                tools.append(card)
+                payload["toolCard"] = card
+                publish_progress(force=True)
+            elif event_name in {"tool.completed", "tool.failed"}:
+                event_tool_key = f"{event.get('tool') or event.get('name') or 'tool'}:{event.get('preview') or event.get('label') or ''}"
+                fallback_id = started_tool_keys.get(event_tool_key)
+                if not fallback_id:
+                    matching_id = next((tid for tid, item in reversed(list(started_tools.items())) if item.get("name") == (event.get("tool") or event.get("name"))), "")
+                    fallback_id = matching_id or f"{run_id}:tool:{len(started_tools) + 1}"
+                card = _hermes_event_tool_card(event, "done" if event_name == "tool.completed" else "error", fallback_id=fallback_id)
+                if card["id"] in started_tools:
+                    started_tools[card["id"]].update(card)
+                    card = started_tools[card["id"]]
+                else:
+                    tools.append(card)
+                payload["toolCard"] = card
+                publish_progress(force=True)
+            elif event_name == "approval.request":
+                approval = _remember_hermes_approval_pending(
+                    _hermes_api_approval_from_event(event, agent_id=agent_id, profile=profile, session_id=session_id, original_message=original_message),
+                    agent_id=agent_id,
+                    profile=profile,
+                    session_id=session_id,
+                )
+                payload["approval"] = approval
+                publish_progress(force=True)
+            elif event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
+                terminal_event = event
+                if event.get("output"):
+                    reply = str(event.get("output") or reply)
+                if event.get("error"):
+                    error_text = str(event.get("error") or "")
+                if event_name == "run.completed":
+                    approval = None
+                payload.update({"reply": reply, "tools": tools, "approval": approval, "error": error_text or None})
+                publish_progress(force=True)
+                send_sse(event_name, payload)
+                break
+            send_sse(event_name, payload)
+    except Exception as exc:
+        error_text = str(exc)
+        terminal_event = {"event": "run.failed", "error": error_text}
+        send_sse("run.failed", {"ok": False, "error": error_text, "reply": reply, "tools": tools})
+
+    terminal_name = str((terminal_event or {}).get("event") or "").lower()
+    ok = terminal_name == "run.completed"
+    if approval:
+        ok = False
+        error_text = error_text or "Hermes is waiting for approval."
+    elif terminal_name in {"run.failed", "run.cancelled", "run.canceled"}:
+        ok = False
+        error_text = error_text or terminal_name.replace("run.", "Hermes run ")
+    finalize_history(ok=ok)
+
+
+def _handle_hermes_interrupt(body):
+    body = body if isinstance(body, dict) else {}
+    agent_key = body.get("agentId") or body.get("key") or "hermes-default"
+    run_id = str(body.get("runId") or body.get("run_id") or "").strip()
+    agent = _get_hermes_agent(agent_key) or {}
+    profile = agent.get("profile") or agent.get("providerAgentId") or ""
+    meta = _get_hermes_active_run(run_id) if run_id else _find_hermes_active_run(agent_key, profile)
+    if not meta:
+        return {"ok": False, "error": "No active Hermes run is running for this agent.", "_status": 409}
+    run_id = meta.get("runId") or run_id
+    profile = meta.get("profile") or profile or "default"
+    try:
+        client = _hermes_api_client_for_profile(profile)
+        result = client.stop_run(run_id)
+        _set_hermes_presence(meta.get("statusKey") or agent.get("statusKey") or agent_key, "working", "Hermes stopping")
+        return {"ok": True, "providerPath": "api", "runId": run_id, "result": result, "message": "Hermes stop requested."}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "providerPath": "api", "runId": run_id, "_status": 500}
 
 
 def _handle_hermes_chat(body):
@@ -7674,6 +8344,31 @@ def _handle_hermes_approval_respond(body):
     if not agent:
         return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    if approval.get("provider") == "hermes-api" and approval.get("runId"):
+        run_id = str(approval.get("runId"))
+        api_choice = "deny" if choice == "deny" else "once"
+        try:
+            client = _hermes_api_client_for_profile(profile)
+            approved = client.respond_approval(run_id, api_choice)
+            history = _load_hermes_history(profile)
+            history.append(_approval_result_message({**approval, "agentId": agent.get("id") or agent_key, "message": message}, choice))
+            _save_hermes_history(profile, history)
+            if choice == "deny":
+                _set_hermes_presence(agent.get("statusKey") or agent.get("id"), "idle", "")
+                return {"ok": True, "choice": "deny", "providerPath": "api", "runId": run_id, "result": approved, "message": "Hermes approval denied."}
+            _set_hermes_presence(agent.get("statusKey") or agent.get("id"), "working", "Hermes approval responded")
+            return {
+                "ok": True,
+                "choice": "approve_once",
+                "approvalChoice": "approve_once",
+                "providerPath": "api",
+                "runId": run_id,
+                "sessionId": approval.get("session_id") or "",
+                "result": approved,
+                "message": "Hermes approval approved. The active run will continue streaming.",
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "providerPath": "api", "runId": run_id, "_status": 500}
     history = _load_hermes_history(profile)
     history.append(_approval_result_message({**approval, "agentId": agent.get("id") or agent_key, "message": message}, choice))
     _save_hermes_history(profile, history)
@@ -9427,6 +10122,10 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(f"event: {event_name}\ndata: {payload}\n\n".encode("utf-8"))
             return
 
+        if path.startswith("/api/hermes/runs/") and path.endswith("/events"):
+            run_id = urllib.parse.unquote(path[len("/api/hermes/runs/"):-len("/events")].strip("/"))
+            return _handle_hermes_run_events(self, run_id)
+
         if path == "/api/hermes/test":
             return self._send_json(_handle_hermes_test())
 
@@ -9613,6 +10312,40 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/agent/create":
             result = _handle_agent_create(self._read_body() or {})
             status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 500) or 500)
+            return self._send_json(result, status)
+
+        if path == "/api/hermes/runs":
+            result = _handle_hermes_run_start(self._read_body())
+            status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
+            return self._send_json(result, status)
+
+        if path.startswith("/api/hermes/runs/") and path.endswith("/stop"):
+            run_id = urllib.parse.unquote(path[len("/api/hermes/runs/"):-len("/stop")].strip("/"))
+            body = self._read_body() or {}
+            body["runId"] = run_id
+            result = _handle_hermes_interrupt(body)
+            status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
+            return self._send_json(result, status)
+
+        if path.startswith("/api/hermes/runs/") and path.endswith("/approval"):
+            run_id = urllib.parse.unquote(path[len("/api/hermes/runs/"):-len("/approval")].strip("/"))
+            body = self._read_body() or {}
+            meta = _get_hermes_active_run(run_id) or {}
+            body["agentId"] = body.get("agentId") or meta.get("agentId") or meta.get("agentKey") or "hermes-default"
+            body.setdefault("approval", {})
+            if isinstance(body["approval"], dict):
+                body["approval"]["provider"] = body["approval"].get("provider") or "hermes-api"
+                body["approval"]["runId"] = body["approval"].get("runId") or run_id
+                body["approval"]["agentId"] = body["approval"].get("agentId") or body["agentId"]
+                body["approval"]["profile"] = body["approval"].get("profile") or meta.get("profile") or ""
+                body["approval"]["session_id"] = body["approval"].get("session_id") or meta.get("sessionId") or ""
+            result = _handle_hermes_approval_respond(body)
+            status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
+            return self._send_json(result, status)
+
+        if path == "/api/hermes/interrupt":
+            result = _handle_hermes_interrupt(self._read_body())
+            status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
             return self._send_json(result, status)
 
         if path == "/api/hermes/chat":

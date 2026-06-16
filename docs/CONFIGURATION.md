@@ -30,6 +30,12 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker. |
 | `VW_HERMES_BIN` | `/home/vw/.local/bin/hermes` | Hermes CLI path inside Docker. |
 | `VW_HERMES_TIMEOUT_SEC` | `600` | Hermes call timeout. |
+| `VW_HERMES_API_URL` | `http://127.0.0.1:8642` | Hermes native API server URL for the default profile or a user-managed API. |
+| `VW_HERMES_API_KEY` | empty | Bearer token sent server-side to Hermes. Required for auto-started local API servers. |
+| `VW_HERMES_PREFER_API` | `true` | Prefer Hermes native `POST /v1/runs` plus SSE events over CLI fallback. |
+| `VW_HERMES_AUTO_START_PROFILE_APIS` | `true` | Allow Virtual World to start profile-scoped local Hermes API servers. Only localhost URLs and configured API keys are eligible. |
+| `VW_HERMES_AUTO_START_DEFAULT_API` | `true` | Allow auto-start for the default Hermes profile. |
+| `VW_HERMES_API_PROFILE_PORT_BASE` | `8643` | Base port used to derive profile-specific local API ports. |
 | `VW_LICENSE_STORE_ID` | `321733` | Lemon Squeezy store ID used to verify keys belong to My Virtual World. |
 | `VW_LICENSE_PRODUCT_IDS` | `1140366` | Comma-separated Lemon Squeezy product IDs accepted by this app. |
 
@@ -62,3 +68,16 @@ Use these defaults when running directly on your machine without Docker:
 | Hermes CLI | `~/.local/bin/hermes` |
 
 If OpenClaw or Hermes do not appear connected, confirm the host tools are running first, then restart the container after changing `.env` or Docker volume mounts.
+
+## Hermes Native Streaming
+
+Virtual World uses Hermes' public API server when available:
+
+- `POST /v1/runs` starts a run.
+- `GET /v1/runs/{run_id}/events` streams `message.delta`, `tool.started`, `tool.completed`, `reasoning.available`, approvals, and terminal run events.
+- `POST /v1/runs/{run_id}/approval` resolves approvals.
+- `POST /v1/runs/{run_id}/stop` interrupts a run.
+
+The browser connects only to Virtual World proxy endpoints, so the Hermes API key stays server-side. If the native API is unavailable, chat falls back to the public Hermes CLI path.
+
+Product-neutral `vw-config.json` also supports `hermes.apiProfiles.<profile>` entries with `apiUrl`, `apiKey`, and `autoStart` overrides. Remote or user-managed API URLs are used as configured and are not overwritten or auto-started.

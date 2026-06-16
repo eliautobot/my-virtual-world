@@ -15,8 +15,10 @@ import subprocess
 import json
 import time
 import glob
+import urllib.request
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urljoin
 
 
 @dataclass
@@ -552,3 +554,121 @@ You are **{name}** {emoji} - {role}.
             except OSError:
                 pass
         return latest
+
+
+@dataclass
+class HermesApiClient:
+    """Small client for Hermes Agent's native API Server run/event surface."""
+
+    base_url: str | None = None
+    api_key: str | None = None
+    timeout_sec: int = 30
+
+    def __post_init__(self) -> None:
+        self.base_url = (self.base_url or os.environ.get("VW_HERMES_API_URL") or "http://127.0.0.1:8642").rstrip("/")
+        self.api_key = self.api_key if self.api_key is not None else os.environ.get("VW_HERMES_API_KEY", "")
+
+    def _url(self, path: str) -> str:
+        return urljoin(self.base_url + "/", path.lstrip("/"))
+
+    def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        if extra:
+            headers.update({k: v for k, v in extra.items() if v is not None})
+        return headers
+
+    def _json_request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout_sec: int | None = None,
+    ) -> dict[str, Any]:
+        data = None
+        req_headers = self._headers(headers)
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            req_headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(self._url(path), data=data, headers=req_headers, method=method.upper())
+        with urllib.request.urlopen(req, timeout=int(timeout_sec or self.timeout_sec)) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            parsed = json.loads(raw) if raw.strip() else {}
+            if isinstance(parsed, dict):
+                parsed["_status"] = getattr(resp, "status", 200)
+                return parsed
+            return {"data": parsed, "_status": getattr(resp, "status", 200)}
+
+    def capabilities(self) -> dict[str, Any]:
+        return self._json_request("GET", "/v1/capabilities")
+
+    def health(self) -> dict[str, Any]:
+        return self._json_request("GET", "/health", timeout_sec=min(self.timeout_sec, 5))
+
+    def is_available(self) -> bool:
+        try:
+            health = self.health()
+            if health.get("status") not in {"ok", "healthy"}:
+                return False
+            caps = self.capabilities()
+            features = caps.get("features") if isinstance(caps.get("features"), dict) else {}
+            return bool(features.get("run_submission") and features.get("run_events_sse"))
+        except Exception:
+            return False
+
+    def start_run(
+        self,
+        message: str,
+        *,
+        session_id: str | None = None,
+        session_key: str | None = None,
+        instructions: str | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"input": message}
+        if session_id:
+            body["session_id"] = session_id
+        if instructions:
+            body["instructions"] = instructions
+        if conversation_history:
+            body["conversation_history"] = conversation_history
+        headers = {"X-Hermes-Session-Key": session_key} if session_key and self.api_key else None
+        return self._json_request("POST", "/v1/runs", body, headers=headers)
+
+    def get_run(self, run_id: str) -> dict[str, Any]:
+        return self._json_request("GET", f"/v1/runs/{run_id}")
+
+    def respond_approval(self, run_id: str, choice: str) -> dict[str, Any]:
+        return self._json_request("POST", f"/v1/runs/{run_id}/approval", {"choice": choice})
+
+    def stop_run(self, run_id: str) -> dict[str, Any]:
+        return self._json_request("POST", f"/v1/runs/{run_id}/stop", {})
+
+    def stream_run_events(self, run_id: str, timeout_sec: int | None = None):
+        """Yield dict events from Hermes' SSE run stream."""
+        req = urllib.request.Request(
+            self._url(f"/v1/runs/{run_id}/events"),
+            headers=self._headers({"Accept": "text/event-stream"}),
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=int(timeout_sec or self.timeout_sec)) as resp:
+            data_lines: list[str] = []
+            for raw in resp:
+                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                if not line:
+                    if data_lines:
+                        payload = "\n".join(data_lines)
+                        data_lines = []
+                        try:
+                            item = json.loads(payload)
+                            if isinstance(item, dict):
+                                yield item
+                        except json.JSONDecodeError:
+                            continue
+                    continue
+                if line.startswith(":"):
+                    continue
+                if line.startswith("data:"):
+                    data_lines.append(line[5:].lstrip())

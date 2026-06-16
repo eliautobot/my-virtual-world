@@ -116,6 +116,8 @@
       this.hermesProgressTimers = [];
       this.hermesLivePollTimer = null;
       this.hermesLiveEventSeq = 0;
+      this.hermesEventSource = null;
+      this.hermesCompletedToolKeys = new Set();
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
       this.scrollFrame = null;
@@ -209,6 +211,11 @@
       this.messages.innerHTML = '';
       this.streamingMsg = null;
       this.currentRunId = null;
+      this.closeHermesEventSource();
+      this.stopHermesLivePolling();
+      if (this.toolFlushTimer) { clearTimeout(this.toolFlushTimer); this.toolFlushTimer = null; }
+      this.pendingToolEvents.clear();
+      this.liveToolCards.clear();
       this.sessionModel = '—';
       this.contextWindow = 0;
       this.contextUsed = 0;
@@ -796,69 +803,49 @@
       if (this.isHermesSelected()) {
         const hermesLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Hermes';
         const hermesProgress = this.startHermesProgress(hermesLabel);
+        const hermesSendStartedAt = Date.now();
+        const hermesBody = {
+          agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+          message: text || '(attached files)',
+          timeoutSec: 180,
+          fromType: 'human',
+          fromDisplayName: 'User',
+          sourceApp: 'virtual-world',
+          sourceSurface: 'chat-window',
+          sourceLabel: 'Virtual World Chat'
+        };
         try {
-          const resp = await fetch('/api/hermes/chat', {
+          const resp = await fetch('/api/hermes/runs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              agentId: this.getSelectedAgentId() || this.selectedAgentKey,
-              message: text || '(attached files)',
-              liveRunId: hermesProgress?.runId || '',
-              timeoutSec: 180,
-              fromType: 'human',
-              fromDisplayName: 'User',
-              sourceApp: 'virtual-world',
-              sourceSurface: 'chat-window',
-              sourceLabel: 'Virtual World Chat'
-            })
+            body: JSON.stringify(hermesBody)
           });
           const data = await resp.json();
-          this.finishHermesProgress(hermesProgress, true);
-          this.removeTypingIndicator();
-          const hermesTools = normalizeHermesTools(data.tools || []);
-          const hasRenderableHermesReply = !!(data.reply || data.thinking || data.reasoningTokens || data.approval || hermesTools.length);
           if (!resp.ok || data.ok === false) {
-            if (hasRenderableHermesReply) {
-              this.appendMessage(
-                'assistant',
-                data.reply || '',
-                Date.now(),
-                [],
-                {
-                  label: hermesLabel,
-                  kind: 'agent',
-                  thinking: data.thinking || '',
-                  reasoningTokens: data.reasoningTokens || 0,
-                  approval: data.approval || null
-                },
-                hermesTools
-              );
-              if (!data.approval) this.appendSystem('Hermes returned an error response: ' + (data.error || resp.statusText));
-            } else {
-              throw new Error(data.error || resp.statusText);
+            if (data.fallback) {
+              await this.sendHermesBlockingMessage({ ...hermesBody, liveRunId: hermesProgress?.runId || '', forceCliFallback: true }, hermesProgress);
+              return;
             }
-          } else {
-            this.appendMessage(
-              'assistant',
-              data.reply || '',
-              Date.now(),
-              [],
-              {
-                label: hermesLabel,
-                kind: 'agent',
-                thinking: data.thinking || '',
-                reasoningTokens: data.reasoningTokens || 0,
-                approval: data.approval || null
-              },
-              hermesTools
-            );
+            throw new Error(data.error || data.reply || resp.statusText);
           }
+          this.currentRunId = data.runId || null;
+          await this.streamHermesRunEvents(data.runId, hermesProgress);
+          this.removeTypingIndicator();
+          this.finishHermesProgress(hermesProgress, true);
+          await this.loadHistory({ recoverFinal: true, startedAt: hermesSendStartedAt });
           await this.pollHermesApproval().catch(() => {});
           this.setStatus('Hermes ready', 'connected');
           this.scrollBottom();
         } catch (e) {
+          this.closeHermesEventSource();
           this.finishHermesProgress(hermesProgress, false, e.message);
           this.removeTypingIndicator();
+          const recovered = await this.recoverHermesFinalFromHistory(hermesSendStartedAt).catch(() => false);
+          if (recovered) {
+            await this.pollHermesApproval().catch(() => {});
+            this.setStatus('Hermes ready', 'connected');
+            return;
+          }
           this.appendSystem('Hermes send failed: ' + e.message);
           this.setStatus('Hermes error', 'disconnected');
         }
@@ -923,6 +910,18 @@
 
     async sendStop() {
       try {
+        if (this.isHermesSelected()) {
+          const resp = await fetch('/api/hermes/interrupt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey, runId: this.currentRunId || '' })
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
+          this.appendSystem('Stop sent');
+          this.setStatus('Hermes stopping...', 'connecting');
+          return;
+        }
         if (this.streamingMsg) {
           this.finalizeStreamingMessage(this.streamingMsg.content || '');
           this.streamingMsg = null;
@@ -1211,6 +1210,14 @@
     }
 
     clearActivityFeed() { this.messages.querySelectorAll('.chat-activity').forEach(el => el.remove()); }
+
+    closeHermesEventSource() {
+      if (this.hermesEventSource) {
+        try { this.hermesEventSource.close(); } catch (_) {}
+        this.hermesEventSource = null;
+      }
+    }
+
     scrollBottom() {
       if (this.scrollFrame) return;
       const scrollToEnd = () => {
@@ -1230,6 +1237,176 @@
       if (!this.hermesProgressTimers?.length) return;
       for (const timer of this.hermesProgressTimers) clearTimeout(timer);
       this.hermesProgressTimers = [];
+    }
+
+    async sendHermesBlockingMessage(hermesBody, hermesProgress) {
+      this.startHermesLivePolling(hermesProgress);
+      try {
+        const resp = await fetch('/api/hermes/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(hermesBody)
+        });
+        const data = await resp.json();
+        this.stopHermesLivePolling();
+        this.removeTypingIndicator();
+        const hermesTools = normalizeHermesTools(data.tools || []);
+        const hasRenderableHermesReply = !!(data.reply || data.thinking || data.reasoningTokens || data.approval || hermesTools.length);
+        if (!resp.ok || data.ok === false) {
+          if (!hasRenderableHermesReply) throw new Error(data.error || data.reply || resp.statusText);
+          if (!data.approval) this.appendSystem('Hermes returned an error response: ' + (data.error || resp.statusText));
+        }
+        this.finishHermesProgress(hermesProgress, true);
+        this.appendMessage(
+          'assistant',
+          data.reply || '',
+          Date.now(),
+          [],
+          {
+            label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Hermes',
+            kind: 'agent',
+            thinking: data.thinking || '',
+            reasoningTokens: data.reasoningTokens || 0,
+            approval: data.approval || null
+          },
+          hermesTools
+        );
+        await this.pollHermesApproval().catch(() => {});
+        this.setStatus('Hermes ready', 'connected');
+      } catch (e) {
+        this.stopHermesLivePolling();
+        throw e;
+      }
+    }
+
+    streamHermesRunEvents(runId, hermesProgress) {
+      if (!runId) return Promise.reject(new Error('Hermes run did not return a run id'));
+      this.closeHermesEventSource();
+      this.hermesCompletedToolKeys = new Set();
+      this.currentRunId = runId;
+      this.setStatus('Hermes stream active...', 'connecting');
+      this.markLiveEvent();
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
+      const url = '/api/hermes/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const source = new EventSource(url);
+        this.hermesEventSource = source;
+        const cleanup = () => {
+          if (this.hermesEventSource === source) this.hermesEventSource = null;
+          source.close();
+        };
+        const finish = (ok, value) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (ok) resolve(value);
+          else reject(value instanceof Error ? value : new Error(String(value || 'Hermes stream failed')));
+        };
+        const handle = (eventName, evt) => {
+          let data = {};
+          try { data = JSON.parse(evt.data || '{}'); } catch (_) {}
+          this.handleHermesNativeEvent(eventName, data);
+          if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+            finish(eventName === 'run.completed', eventName === 'run.completed' ? data : new Error(data.error || eventName));
+          }
+        };
+        [
+          'run.started',
+          'message.delta',
+          'reasoning.available',
+          'tool.started',
+          'tool.completed',
+          'tool.failed',
+          'approval.request',
+          'run.completed',
+          'run.failed',
+          'run.cancelled',
+          'run.canceled'
+        ].forEach(name => source.addEventListener(name, evt => handle(name, evt)));
+        source.onmessage = evt => handle('message', evt);
+        source.onerror = () => {
+          if (!settled) finish(false, new Error('Hermes native stream disconnected'));
+        };
+      }).finally(() => {
+        this.finishHermesProgress(hermesProgress, true);
+      });
+    }
+
+    handleHermesNativeEvent(eventName, data) {
+      this.markLiveEvent();
+      const runId = data?.runId || this.currentRunId || '';
+      if (runId) this.currentRunId = runId;
+
+      if (eventName === 'run.started') {
+        this.updateTypingIndicator('Hermes is running...');
+        return;
+      }
+
+      if (eventName === 'message.delta') {
+        if (!this.streamingMsg || this.streamingMsg.id !== runId) {
+          this.streamingMsg = { id: runId, role: 'assistant', content: '' };
+          this.appendStreamingMessage();
+        }
+        this.streamingMsg.content = data.reply || (this.streamingMsg.content + String(data.delta || ''));
+        this.updateStreamingMessage(this.streamingMsg.content);
+        this.scrollBottom();
+        return;
+      }
+
+      if (eventName === 'reasoning.available') {
+        this.updateTypingIndicator('Hermes is reasoning...');
+        return;
+      }
+
+      if (eventName === 'approval.request') {
+        if (data.approval) this.appendHermesPendingApproval(data.approval, data.pending_count || 1);
+        this.updateTypingIndicator('Hermes is waiting for approval...');
+        return;
+      }
+
+      if (eventName === 'tool.started' || eventName === 'tool.completed' || eventName === 'tool.failed') {
+        const card = data.toolCard || {};
+        const isTerminal = eventName !== 'tool.started';
+        const payload = {
+          runId,
+          data: {
+            toolCallId: card.id || data.toolCallId || data.id || '',
+            phase: isTerminal ? 'result' : 'start',
+            name: card.name || data.tool || data.name || 'Hermes tool',
+            args: card.arguments || (card.args_preview ? { command: card.args_preview } : (data.preview ? { command: data.preview } : {})),
+            result: card.result || data.result || data.output || '',
+            isError: eventName === 'tool.failed' || card.status === 'error' || !!data.error,
+            error: data.error || card.error || ''
+          }
+        };
+        const label = formatToolLabel(payload.data.name, coerceToolArgs(payload.data.args));
+        this.updateTypingIndicator(isTerminal ? 'Processing...' : label);
+        if (isTerminal) {
+          if (!this.liveToolCards.has(this.toolKey(payload))) {
+            this.appendToolCall({ ...payload, data: { ...payload.data, phase: 'start' } });
+          }
+          this.finishToolCall(payload);
+        } else {
+          this.updateToolCall(payload);
+        }
+        return;
+      }
+
+      if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+        const finalText = data.reply || data.output || (this.streamingMsg ? this.streamingMsg.content : '');
+        this.flushToolEvents(true);
+        this.clearActivityFeed();
+        this.removeTypingIndicator();
+        if (this.streamingMsg) {
+          this.finalizeStreamingMessage(finalText);
+          this.streamingMsg = null;
+        } else if (finalText) {
+          this.appendMessage('assistant', finalText);
+        }
+        if (runId) this.finalizeRunToolCards(runId);
+        this.currentRunId = null;
+      }
     }
 
     stopHermesLivePolling() {
@@ -1305,13 +1482,42 @@
       }
     }
 
+    async recoverHermesFinalFromHistory(startedAt, timeoutMs = 45000) {
+      if (!this.isHermesSelected()) return false;
+      const deadline = Date.now() + timeoutMs;
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      while (Date.now() < deadline) {
+        const res = await fetch('/api/hermes/history?agentId=' + encodeURIComponent(agentId));
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.messages)) {
+          const finalMsg = [...data.messages].reverse().find(msg =>
+            msg &&
+            msg.role === 'assistant' &&
+            msg.ephemeral !== 'hermes-progress' &&
+            (msg.text || msg.approval) &&
+            Number(msg.ts || msg.epochMs || 0) >= Number(startedAt || 0)
+          );
+          if (finalMsg) {
+            if (this.streamingMsg) {
+              const existing = this.messages.querySelector('.streaming-msg');
+              if (existing) existing.remove();
+              this.streamingMsg = null;
+            }
+            await this.loadHistory({ recoverFinal: true });
+            return true;
+          }
+        }
+        await new Promise(resolve => setTimeout(resolve, 1200));
+      }
+      return false;
+    }
+
     startHermesProgress(label) {
       this.stopHermesProgressTimers();
       const runId = 'hermes-' + Date.now() + '-' + Math.random().toString(36).slice(2);
       this.currentRunId = runId;
       this.setStatus('Hermes stream active...', 'connecting');
       this.updateTypingIndicator(label + ' is running Hermes');
-      this.startHermesLivePolling({ runId, label });
       return { runId, label };
     }
 
@@ -1347,20 +1553,24 @@
             const status = card.querySelector('.chat-approval-status');
             if (status) status.textContent = 'approved';
           }
-          this.appendMessage(
-            'assistant',
-            data.reply || '',
-            Date.now(),
-            [],
-            {
-              label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Hermes',
-              kind: 'agent',
-              thinking: data.thinking || '',
-              reasoningTokens: data.reasoningTokens || 0,
-              approval: data.approval || null
-            },
-            normalizeHermesTools(data.tools || [])
-          );
+          if (data.providerPath !== 'api') {
+            this.appendMessage(
+              'assistant',
+              data.reply || '',
+              Date.now(),
+              [],
+              {
+                label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Hermes',
+                kind: 'agent',
+                thinking: data.thinking || '',
+                reasoningTokens: data.reasoningTokens || 0,
+                approval: data.approval || null
+              },
+              normalizeHermesTools(data.tools || [])
+            );
+          } else {
+            this.updateTypingIndicator('Hermes is continuing...');
+          }
           await this.pollHermesApproval().catch(() => {});
         } else {
           if (card) {

@@ -27,7 +27,11 @@
     "timeoutSec": 600,
     "apiUrl": "",
     "apiKey": "",
-    "preferApi": true
+    "preferApi": true,
+    "autoStartProfileApis": true,
+    "autoStartDefaultApi": true,
+    "apiProfilePortBase": "",
+    "apiProfiles": {}
   },
   "codex": {
     "enabled": true,

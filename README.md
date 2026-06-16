@@ -135,6 +135,9 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_HERMES_ENABLED` | `true` | Enable local Hermes profile support |
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker |
 | `VW_HERMES_BIN` | `/home/vw/.hermes/hermes-agent/hermes` | Hermes CLI path inside Docker |
+| `VW_HERMES_API_URL` | `http://127.0.0.1:8642` | Hermes native API server URL |
+| `VW_HERMES_API_KEY` | empty | Server-side bearer token for Hermes API |
+| `VW_HERMES_PREFER_API` | `true` | Prefer native Hermes run/SSE streaming |
 | `VW_CODEX_ENABLED` | `true` | Enable local Codex workspace agent support |
 | `VW_CODEX_HOME` | `/home/vw/.codex` | Codex home path inside Docker |
 | `VW_CODEX_BIN` | `/home/vw/.codex/packages/standalone/current/bin/codex` | Codex CLI path inside Docker |
@@ -162,8 +165,8 @@ When running with Docker, use these values in `Settings > Connections`:
 | Gateway Token | Leave blank unless your gateway requires one |
 | Hermes Home | `/home/vw/.hermes` |
 | Hermes CLI | `/home/vw/.hermes/hermes-agent/hermes` |
-| Hermes API URL | Leave blank for CLI mode |
-| Hermes API Key | Leave blank unless your Hermes API requires one |
+| Hermes API URL | `http://127.0.0.1:8642` for the default local API, or your own API URL |
+| Hermes API Key | Required only when your Hermes API requires one or Virtual World should auto-start local profile APIs |
 | Codex Home | `/home/vw/.codex` |
 | Codex CLI | `/home/vw/.codex/packages/standalone/current/bin/codex` |
 | Codex Workspace Root | `/data/codex-agents` |

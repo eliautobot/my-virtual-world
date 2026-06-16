@@ -226,8 +226,12 @@ History query parameters:
 | --- | --- | --- |
 | GET | `/api/hermes/history` | Read Hermes chat history. |
 | POST | `/api/hermes/history/clear` | Clear Hermes history for a profile. |
-| GET | `/api/hermes/live` | Read Hermes live run events. |
-| POST | `/api/hermes/chat` | Send a chat message to Hermes. |
+| POST | `/api/hermes/runs` | Start a native Hermes API run through `POST /v1/runs`. |
+| GET | `/api/hermes/runs/{run_id}/events` | Proxy Hermes native run SSE events from `GET /v1/runs/{run_id}/events`. |
+| POST | `/api/hermes/runs/{run_id}/approval` | Resolve a run approval through `POST /v1/runs/{run_id}/approval`. |
+| POST | `/api/hermes/runs/{run_id}/stop` | Stop a native Hermes run through `POST /v1/runs/{run_id}/stop`. |
+| GET | `/api/hermes/live` | Compatibility live-event polling for CLI fallback. |
+| POST | `/api/hermes/chat` | Compatibility CLI chat fallback when the native API is unavailable. |
 | GET | `/api/hermes/approval/pending` | Read pending Hermes approval state. |
 | GET | `/api/hermes/approval/stream` | One-shot event-stream approval check. |
 | POST | `/api/hermes/approval/respond` | Respond to a Hermes approval. |

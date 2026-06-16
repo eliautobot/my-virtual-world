@@ -57,10 +57,16 @@ GET /session-info
 Hermes chat uses:
 
 ```text
+POST /api/hermes/runs
+GET /api/hermes/runs/{run_id}/events
+POST /api/hermes/runs/{run_id}/approval
+POST /api/hermes/runs/{run_id}/stop
 POST /api/hermes/chat
 GET /api/hermes/history
 GET /api/hermes/live
 ```
+
+The `/api/hermes/runs*` endpoints are the primary native Hermes API path and proxy Hermes' public run/SSE endpoints while keeping API keys server-side. `/api/hermes/chat` and `/api/hermes/live` remain compatibility fallback paths for installs without the native API server.
 
 ## AgentPlatform-to-AgentPlatform Communication
 

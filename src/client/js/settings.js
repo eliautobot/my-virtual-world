@@ -403,6 +403,10 @@
     if ($('setting-hermesBin')) $('setting-hermesBin').value = hermes.binary || '';
     if ($('setting-hermesApiUrl')) $('setting-hermesApiUrl').value = hermes.apiUrl || '';
     if ($('setting-hermesApiKey')) $('setting-hermesApiKey').placeholder = hermes.apiKeyConfigured ? 'Configured - leave blank to keep' : 'Hermes API key';
+    if ($('setting-hermesPreferApi')) $('setting-hermesPreferApi').checked = hermes.preferApi !== false;
+    if ($('setting-hermesAutoStartProfileApis')) $('setting-hermesAutoStartProfileApis').checked = hermes.autoStartProfileApis !== false;
+    if ($('setting-hermesAutoStartDefaultApi')) $('setting-hermesAutoStartDefaultApi').checked = hermes.autoStartDefaultApi !== false;
+    if ($('setting-hermesApiProfilePortBase')) $('setting-hermesApiProfilePortBase').value = hermes.apiProfilePortBase || '';
     const trial = isTrialLicense(config.license || {});
     if ($('setting-featureBrowser')) $('setting-featureBrowser').checked = !trial && !!features.agentBrowser;
     if ($('setting-featureSms')) $('setting-featureSms').checked = !trial && !!features.sms;
@@ -448,7 +452,10 @@
         homePath: value('setting-hermesHome'),
         binary: value('setting-hermesBin'),
         apiUrl: value('setting-hermesApiUrl'),
-        preferApi: true,
+        preferApi: checked('setting-hermesPreferApi'),
+        autoStartProfileApis: checked('setting-hermesAutoStartProfileApis'),
+        autoStartDefaultApi: checked('setting-hermesAutoStartDefaultApi'),
+        apiProfilePortBase: value('setting-hermesApiProfilePortBase'),
       },
       features: {
         agentBrowser: !trial && checked('setting-featureBrowser'),
