@@ -254,6 +254,50 @@ def _known_context_window(model, provider=""):
     return 0
 
 
+def _load_openclaw_model_config():
+    config_path = os.path.join(WORKSPACE_BASE, "openclaw.json")
+    try:
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _default_openclaw_model(cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _load_openclaw_model_config()
+    for agent_cfg in cfg.get("agents", {}).get("list", []) or []:
+        if isinstance(agent_cfg, dict) and agent_cfg.get("default") and agent_cfg.get("model"):
+            return str(agent_cfg["model"])
+    return str(cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("primary") or "")
+
+
+def _configured_context_window(model, cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _load_openclaw_model_config()
+    model_key = str(model or "").strip()
+    if not model_key:
+        return 0
+    candidates = [model_key]
+    if "/" in model_key:
+        candidates.append(model_key.split("/", 1)[1])
+    defaults = cfg.get("agents", {}).get("defaults", {})
+    models = defaults.get("models") if isinstance(defaults.get("models"), dict) else {}
+    for key in candidates:
+        meta = models.get(key)
+        params = meta.get("params") if isinstance(meta, dict) and isinstance(meta.get("params"), dict) else {}
+        value = params.get("contextWindow") or meta.get("contextWindow") if isinstance(meta, dict) else 0
+        try:
+            if value:
+                return int(value)
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
+def _context_window_for_model(model, provider="", cfg=None):
+    return _configured_context_window(model, cfg) or _known_context_window(model, provider)
+
+
 def _display_user_home_path(path):
     if not path or not isinstance(path, str):
         return path
@@ -662,6 +706,7 @@ HERMES_ACTIVE_RUNS_LOCK = threading.Lock()
 HERMES_ACTIVE_RUNS = {}
 CODEX_ACTIVE_RUNS_LOCK = threading.Lock()
 CODEX_ACTIVE_RUNS = {}
+CODEX_TOKEN_USAGE_CACHE = {}
 HERMES_PROFILE_API_LOCK = threading.Lock()
 HERMES_PROFILE_API_PROCESSES = {}
 
@@ -6913,6 +6958,7 @@ def _save_codex_state(profile, state):
 def _save_codex_history(profile, messages):
     state = _load_codex_state(profile)
     state["messages"] = messages[-500:]
+    state = _apply_codex_usage_to_state(profile, state)
     _save_codex_state(profile, state)
 
 
@@ -6924,6 +6970,174 @@ def _set_codex_session_id(profile="main", session_id=""):
     state = _load_codex_state(profile)
     state["sessionId"] = session_id or ""
     _save_codex_state(profile, state)
+
+
+def _as_nonnegative_int(value, default=0):
+    try:
+        number = int(value)
+        return number if number >= 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _codex_usage_bucket(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    return {
+        "totalTokens": _as_nonnegative_int(raw.get("total_tokens", raw.get("totalTokens"))),
+        "inputTokens": _as_nonnegative_int(raw.get("input_tokens", raw.get("inputTokens"))),
+        "cachedInputTokens": _as_nonnegative_int(raw.get("cached_input_tokens", raw.get("cachedInputTokens"))),
+        "outputTokens": _as_nonnegative_int(raw.get("output_tokens", raw.get("outputTokens"))),
+        "reasoningOutputTokens": _as_nonnegative_int(raw.get("reasoning_output_tokens", raw.get("reasoningOutputTokens"))),
+    }
+
+
+def _normalize_codex_token_usage(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    info = raw.get("info") if isinstance(raw.get("info"), dict) else raw
+    total = _codex_usage_bucket(info.get("total_token_usage") or info.get("total") or {})
+    last = _codex_usage_bucket(info.get("last_token_usage") or info.get("last") or {})
+    context_window = _as_nonnegative_int(info.get("model_context_window", info.get("modelContextWindow")))
+    if not any(total.values()) and not any(last.values()) and not context_window:
+        return {}
+    return {
+        "total": total,
+        "last": last,
+        "modelContextWindow": context_window,
+    }
+
+
+def _codex_context_used_from_usage(usage):
+    usage = usage if isinstance(usage, dict) else {}
+    last = usage.get("last") if isinstance(usage.get("last"), dict) else {}
+    total = usage.get("total") if isinstance(usage.get("total"), dict) else {}
+    return (
+        _as_nonnegative_int(last.get("totalTokens"))
+        or _as_nonnegative_int(last.get("inputTokens")) + _as_nonnegative_int(last.get("outputTokens")) + _as_nonnegative_int(last.get("reasoningOutputTokens"))
+        or _as_nonnegative_int(total.get("totalTokens"))
+    )
+
+
+def _estimate_codex_context_used(messages):
+    if not isinstance(messages, list) or not messages:
+        return 0
+    text_parts = []
+    for msg in messages[-40:]:
+        if not isinstance(msg, dict):
+            continue
+        for key in ("text", "thinking", "error"):
+            value = msg.get(key)
+            if value:
+                text_parts.append(str(value))
+        tools = msg.get("tools") if isinstance(msg.get("tools"), list) else []
+        for tool in tools[-12:]:
+            if isinstance(tool, dict):
+                text_parts.append(str(tool.get("name") or ""))
+                text_parts.append(str(tool.get("arguments") or ""))
+                text_parts.append(str(tool.get("result") or tool.get("error") or "")[:4000])
+    text = "\n".join(part for part in text_parts if part)
+    return max(0, (len(text) // 4) + (len(messages) * 20))
+
+
+def _codex_session_log_path(session_id):
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        return ""
+    pattern = os.path.join(CODEX_HOME, "sessions", "**", f"*{session_id}.jsonl")
+    try:
+        matches = glob.glob(pattern, recursive=True)
+    except (OSError, RuntimeError):
+        return ""
+    if not matches:
+        return ""
+    matches.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0, reverse=True)
+    return matches[0]
+
+
+def _read_codex_log_token_usage(session_id):
+    path = _codex_session_log_path(session_id)
+    if not path:
+        return {}
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return {}
+    cache_key = f"{session_id}:{path}"
+    cached = CODEX_TOKEN_USAGE_CACHE.get(cache_key)
+    if isinstance(cached, dict) and cached.get("mtime") == mtime:
+        return dict(cached.get("usage") or {})
+
+    latest = {}
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                if '"token_count"' not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+                if payload.get("type") != "token_count":
+                    continue
+                usage = _normalize_codex_token_usage(payload.get("info") or {})
+                if usage:
+                    latest = usage
+    except OSError:
+        return {}
+
+    CODEX_TOKEN_USAGE_CACHE[cache_key] = {"mtime": mtime, "usage": latest}
+    return dict(latest)
+
+
+def _codex_usage_snapshot(profile="main", session_id="", state=None):
+    state = state if isinstance(state, dict) else _load_codex_state(profile)
+    session_id = session_id or state.get("sessionId") or ""
+    usage = _read_codex_log_token_usage(session_id)
+    if not usage:
+        usage = _normalize_codex_token_usage(state.get("tokenUsage") or {})
+    messages = state.get("messages") if isinstance(state.get("messages"), list) else []
+    context_used = _codex_context_used_from_usage(usage)
+    if context_used <= 0:
+        context_used = _as_nonnegative_int(state.get("contextUsed")) or _estimate_codex_context_used(messages)
+    return {
+        "tokenUsage": usage,
+        "contextUsed": context_used,
+        "codexContextWindow": _as_nonnegative_int(usage.get("modelContextWindow")) if isinstance(usage, dict) else 0,
+    }
+
+
+def _apply_codex_usage_to_state(profile, state, session_id=""):
+    state = dict(state or {})
+    usage = _codex_usage_snapshot(profile, session_id=session_id, state=state)
+    if usage.get("tokenUsage"):
+        state["tokenUsage"] = usage["tokenUsage"]
+    state["contextUsed"] = _as_nonnegative_int(usage.get("contextUsed"))
+    if usage.get("codexContextWindow"):
+        state["codexContextWindow"] = usage["codexContextWindow"]
+    state["updatedAt"] = int(time.time() * 1000)
+    return state
+
+
+def _codex_context_payload(provider_agent=None, agent_key="", profile="", session_id="", model_cfg=None):
+    provider_agent = provider_agent if isinstance(provider_agent, dict) else (_get_codex_agent(agent_key) or {})
+    model_cfg = model_cfg if isinstance(model_cfg, dict) else _load_openclaw_model_config()
+    profile = profile or provider_agent.get("profile") or provider_agent.get("providerAgentId") or "main"
+    model = provider_agent.get("model") or CODEX_MODEL or _default_openclaw_model(model_cfg) or "Codex default"
+    provider = provider_agent.get("provider") or provider_agent.get("providerKind") or "codex"
+    usage = _codex_usage_snapshot(profile, session_id=session_id)
+    context_window = _context_window_for_model(model, provider, model_cfg) or _as_nonnegative_int(usage.get("codexContextWindow"))
+    payload = {
+        "model": model,
+        "provider": provider,
+        "providerKind": provider_agent.get("providerKind", "codex"),
+        "contextWindow": context_window,
+        "contextUsed": _as_nonnegative_int(usage.get("contextUsed")),
+    }
+    if usage.get("codexContextWindow"):
+        payload["codexContextWindow"] = usage["codexContextWindow"]
+    if usage.get("tokenUsage"):
+        payload["tokenUsage"] = usage["tokenUsage"]
+    return payload
 
 
 def _jsonish(value):
@@ -8584,6 +8798,8 @@ def _handle_codex_run_events(handler, run_id):
                 continue
             if event.get("error"):
                 error_text = str(event.get("error") or "")
+            if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
+                payload.update(_codex_context_payload(agent, profile=profile, session_id=payload.get("sessionId") or session_id))
             if send_sse(event_name, payload) and event_name == "run.started":
                 sent_run_started = True
             if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
@@ -10509,36 +10725,36 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             qs = urllib.parse.parse_qs(parsed.query)
             agent_key = (qs.get("agent") or qs.get("agentId") or qs.get("key") or [""])[0]
             provider_kind = str((qs.get("providerKind") or qs.get("provider") or [""])[0] or "").strip().lower()
+            model_cfg = _load_openclaw_model_config()
             provider_agent = None
             if agent_key and (provider_kind == "hermes" or agent_key.startswith(("hermes:", "hermes-"))):
                 provider_agent = _get_hermes_agent(agent_key)
             elif agent_key and (provider_kind == "codex" or agent_key.startswith(("codex:", "codex-"))):
                 provider_agent = _get_codex_agent(agent_key)
             if provider_agent:
-                model = provider_agent.get("model") or "unknown"
+                if provider_agent.get("providerKind") == "codex":
+                    return self._send_json(_codex_context_payload(provider_agent, agent_key=agent_key, model_cfg=model_cfg))
+                else:
+                    model = provider_agent.get("model") or "unknown"
                 provider = provider_agent.get("provider") or provider_agent.get("providerKind") or ""
                 return self._send_json({
                     "model": model,
                     "provider": provider,
                     "providerKind": provider_agent.get("providerKind", ""),
-                    "contextWindow": _known_context_window(model, provider),
+                    "contextWindow": _context_window_for_model(model, provider, model_cfg),
                 })
 
-            config_path = os.path.join(WORKSPACE_BASE, "openclaw.json")
-            model = "unknown"
+            model = _default_openclaw_model(model_cfg) or "unknown"
             context_window = 0
             provider = ""
             try:
-                with open(config_path, "r") as f:
-                    cfg = json.loads(f.read())
-                model = cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("primary", "unknown")
-                provider = cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("provider", "")
-                for a_cfg in cfg.get("agents", {}).get("list", []):
+                provider = model_cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("provider", "")
+                for a_cfg in model_cfg.get("agents", {}).get("list", []):
                     if a_cfg.get("default") and a_cfg.get("model"):
                         model = a_cfg["model"]
                         provider = a_cfg.get("provider", provider)
                         break
-                context_window = _known_context_window(model, provider)
+                context_window = _context_window_for_model(model, provider, model_cfg)
             except Exception:
                 pass
             return self._send_json({"model": model, "provider": provider, "contextWindow": context_window})

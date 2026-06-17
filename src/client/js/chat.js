@@ -240,10 +240,8 @@
       if (!this.modelName || !this.contextInfo) return;
       const shortModel = this.sessionModel.includes('/') ? this.sessionModel.split('/').pop() : this.sessionModel;
       this.modelName.textContent = shortModel;
-      if (this.contextWindow > 0 && this.contextUsed > 0) {
-        this.contextInfo.textContent = this.formatTokens(this.contextUsed) + ' / ' + this.formatTokens(this.contextWindow);
-      } else if (this.contextWindow > 0) {
-        this.contextInfo.textContent = '— / ' + this.formatTokens(this.contextWindow);
+      if (this.contextWindow > 0) {
+        this.contextInfo.textContent = this.formatTokens(Math.max(0, this.contextUsed || 0)) + ' / ' + this.formatTokens(this.contextWindow);
       } else {
         this.contextInfo.textContent = '';
       }
@@ -549,11 +547,21 @@
         // what the agent is SET to use, not what was last used historically.
         // The gateway transcript model can be stale (from before a model change).
         if (data.model) this.sessionModel = data.model;
-        if (data.contextWindow) serverContext = data.contextWindow;
+        const contextUsed = Number(data.contextUsed);
+        if (Number.isFinite(contextUsed) && contextUsed >= 0) this.contextUsed = contextUsed;
+        if (data.contextWindow || data.codexContextWindow) serverContext = data.contextWindow || data.codexContextWindow;
       } catch (e) {
         console.warn('[chat] /session-info failed:', e);
       }
       this.contextWindow = Math.max(gatewayContext, serverContext);
+      this.updateModelBar();
+    }
+
+    applyContextUsage(data = {}) {
+      const contextUsed = Number(data.contextUsed);
+      const contextWindow = Number(data.contextWindow || data.codexContextWindow);
+      if (Number.isFinite(contextUsed) && contextUsed >= 0) this.contextUsed = contextUsed;
+      if (Number.isFinite(contextWindow) && contextWindow > 0) this.contextWindow = contextWindow;
       this.updateModelBar();
     }
 
@@ -921,6 +929,7 @@
           await this.streamCodexRunEvents(data.runId);
           this.removeTypingIndicator();
           await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt });
+          await this.fetchSessionInfo();
           this.setStatus('Codex ready', 'connected');
           this.scrollBottom();
         } catch (e) {
@@ -1652,6 +1661,7 @@
       }
 
       if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+        this.applyContextUsage(data);
         const finalText = data.reply || data.output || (this.streamingMsg ? this.streamingMsg.content : '');
         this.flushToolEvents(true);
         this.clearActivityFeed();
@@ -1664,6 +1674,7 @@
         }
         if (runId) this.finalizeRunToolCards(runId);
         this.currentRunId = null;
+        this.fetchSessionInfo();
       }
     }
 
@@ -2240,7 +2251,7 @@
     if (_modelBarInterval) clearInterval(_modelBarInterval);
     _modelBarInterval = setInterval(() => {
       if (!connected) return;
-      chatWindows.forEach(w => w.fetchContextUsage());
+      chatWindows.forEach(w => w.fetchSessionInfo());
     }, 60000);
   }
 

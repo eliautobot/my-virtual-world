@@ -2346,8 +2346,10 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
     letter-spacing: 0.3px;
     line-height: 1.4;
 }
-.chat-model-bar #chat-model-name { color: #7ecfff; }
-.chat-model-bar #chat-context-info { color: #bbb; }
+.chat-model-bar .chat-model-name,
+.chat-model-bar #chat-model-name { color: #7ecfff !important; }
+.chat-model-bar .chat-context-info,
+.chat-model-bar #chat-context-info { color: #bbb !important; }
 
 .chat-messages {
     flex: 1;
