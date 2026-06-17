@@ -660,6 +660,8 @@ HERMES_LIVE_MAX_EVENTS = 250
 HERMES_APPROVAL_BRIDGE_DIR = os.path.join(DATA_DIR, "hermes-approval-bridge")
 HERMES_ACTIVE_RUNS_LOCK = threading.Lock()
 HERMES_ACTIVE_RUNS = {}
+CODEX_ACTIVE_RUNS_LOCK = threading.Lock()
+CODEX_ACTIVE_RUNS = {}
 HERMES_PROFILE_API_LOCK = threading.Lock()
 HERMES_PROFILE_API_PROCESSES = {}
 
@@ -7182,6 +7184,24 @@ def _clear_hermes_active_run(run_id):
         HERMES_ACTIVE_RUNS.pop(str(run_id or ""), None)
 
 
+def _remember_codex_active_run(meta):
+    if not isinstance(meta, dict) or not meta.get("runId"):
+        return
+    with CODEX_ACTIVE_RUNS_LOCK:
+        CODEX_ACTIVE_RUNS[str(meta["runId"])] = meta
+
+
+def _get_codex_active_run(run_id):
+    with CODEX_ACTIVE_RUNS_LOCK:
+        meta = CODEX_ACTIVE_RUNS.get(str(run_id or ""))
+        return meta if isinstance(meta, dict) else None
+
+
+def _clear_codex_active_run(run_id):
+    with CODEX_ACTIVE_RUNS_LOCK:
+        CODEX_ACTIVE_RUNS.pop(str(run_id or ""), None)
+
+
 def _set_hermes_presence(agent_id, state, task=""):
     if not _gateway_presence or not agent_id:
         return
@@ -8262,21 +8282,7 @@ def _handle_hermes_chat(body):
     }
 
 
-def _handle_codex_chat(body):
-    if not isinstance(body, dict):
-        return {"ok": False, "error": "payload must be an object", "_status": 400}
-    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-main"
-    message = str(body.get("message") or body.get("text") or "").strip()
-    if not message:
-        return {"ok": False, "error": "message is required", "_status": 400}
-    agent = _get_codex_agent(agent_key)
-    if not agent:
-        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
-    provider = _codex_provider()
-    if not provider:
-        return {"ok": False, "error": "Codex provider module unavailable", "_status": 503}
-    timeout = int(body.get("timeoutSec") or CODEX_TIMEOUT_SEC)
-    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+def _build_codex_delivery_message(agent, agent_key, message, body):
     from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
     is_human_source = from_type in {"human", "user", "chat", "ui"}
     source_app = str(body.get("sourceApp") or body.get("app") or "virtual-world").strip() or "virtual-world"
@@ -8292,6 +8298,33 @@ def _handle_codex_chat(body):
             f"{message}\n\n"
             "Reply directly to the user. Do not assume a personal name unless the user provides one."
         )
+    return {
+        "deliveryMessage": delivery_message,
+        "fromType": from_type,
+        "isHumanSource": is_human_source,
+        "sourceApp": source_app,
+        "sourceSurface": source_surface,
+        "sourceLabel": source_label,
+        "senderName": sender_name,
+    }
+
+
+def _handle_codex_chat(body):
+    if not isinstance(body, dict):
+        return {"ok": False, "error": "payload must be an object", "_status": 400}
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-main"
+    message = str(body.get("message") or body.get("text") or "").strip()
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    provider = _codex_provider()
+    if not provider:
+        return {"ok": False, "error": "Codex provider module unavailable", "_status": 503}
+    timeout = int(body.get("timeoutSec") or CODEX_TIMEOUT_SEC)
+    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+    delivery = _build_codex_delivery_message(agent, agent_key, message, body)
 
     history = _load_codex_history(profile)
     now_ms = int(time.time() * 1000)
@@ -8300,12 +8333,12 @@ def _handle_codex_chat(body):
         "text": message,
         "ts": now_ms,
         "epochMs": now_ms,
-        "from": sender_name if is_human_source else "You",
-        "fromType": from_type or "",
+        "from": delivery["senderName"] if delivery["isHumanSource"] else "You",
+        "fromType": delivery["fromType"] or "",
         "source": "codex",
-        "sourceApp": source_app if is_human_source else "",
-        "sourceSurface": source_surface if is_human_source else "",
-        "sourceLabel": source_label if is_human_source else "",
+        "sourceApp": delivery["sourceApp"] if delivery["isHumanSource"] else "",
+        "sourceSurface": delivery["sourceSurface"] if delivery["isHumanSource"] else "",
+        "sourceLabel": delivery["sourceLabel"] if delivery["isHumanSource"] else "",
     })
     _save_codex_history(profile, history)
 
@@ -8317,7 +8350,7 @@ def _handle_codex_chat(body):
     session_id = _get_codex_session_id(profile)
     result = provider.send_chat_message(
         profile,
-        delivery_message,
+        delivery["deliveryMessage"],
         session_id=session_id,
         timeout_sec=timeout,
     )
@@ -8360,6 +8393,229 @@ def _handle_codex_chat(body):
         "stderr": result.get("stderr", ""),
         "exitCode": result.get("exitCode"),
     }
+
+
+def _handle_codex_run_start(body):
+    """Start a native Codex app-server turn and return the run id for browser SSE attach."""
+    body = body if isinstance(body, dict) else {}
+    message = str(body.get("message") or body.get("text") or "").strip()
+    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-main"
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    agent = _get_codex_agent(agent_key)
+    if not agent:
+        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
+    provider = _codex_provider()
+    if not provider:
+        return {"ok": False, "error": "Codex provider module unavailable", "_status": 503}
+    if not getattr(provider, "prefer_app_server", False):
+        return {"ok": False, "fallback": True, "error": "Codex app-server streaming is disabled by configuration", "_status": 409}
+
+    timeout = int(body.get("timeoutSec") or CODEX_TIMEOUT_SEC)
+    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+    delivery = _build_codex_delivery_message(agent, agent_key, message, body)
+    now_ms = int(time.time() * 1000)
+    history = _load_codex_history(profile)
+    history.append({
+        "role": "user",
+        "text": message,
+        "ts": now_ms,
+        "epochMs": now_ms,
+        "from": delivery["senderName"] if delivery["isHumanSource"] else "You",
+        "fromType": delivery["fromType"] or "",
+        "source": "codex",
+        "sourceApp": delivery["sourceApp"] if delivery["isHumanSource"] else "",
+        "sourceSurface": delivery["sourceSurface"] if delivery["isHumanSource"] else "",
+        "sourceLabel": delivery["sourceLabel"] if delivery["isHumanSource"] else "",
+    })
+    _save_codex_history(profile, history)
+
+    if _gateway_presence:
+        try:
+            _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Codex app-server run")
+        except Exception:
+            pass
+
+    session_id = _get_codex_session_id(profile)
+    try:
+        run = provider.start_chat_stream(
+            profile,
+            delivery["deliveryMessage"],
+            session_id=session_id,
+            timeout_sec=timeout,
+        )
+    except Exception as exc:
+        if _gateway_presence:
+            try:
+                _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "offline", "")
+            except Exception:
+                pass
+        return {"ok": False, "error": str(exc), "_status": 502}
+
+    active_session_id = run.thread_id or session_id
+    if active_session_id:
+        _set_codex_session_id(profile, active_session_id)
+    run_id = run.turn_id or f"codex-run-{uuid.uuid4().hex[:16]}"
+    _remember_codex_active_run({
+        "runId": run_id,
+        "sessionId": active_session_id,
+        "agentId": agent.get("id") or agent_key,
+        "agentKey": agent_key,
+        "statusKey": agent.get("statusKey") or agent.get("id") or agent_key,
+        "profile": profile,
+        "message": message,
+        "deliveryMessage": delivery["deliveryMessage"],
+        "timeoutSec": timeout,
+        "startedAt": now_ms,
+        "run": run,
+    })
+    return {
+        "ok": True,
+        "providerPath": "app-server",
+        "runId": run_id,
+        "sessionId": active_session_id,
+        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": profile},
+    }
+
+
+def _handle_codex_run_events(handler, run_id):
+    """Proxy Codex app-server notifications to the browser and persist final history."""
+    meta = _get_codex_active_run(run_id)
+    if not meta:
+        return handler._send_json({"ok": False, "error": f"Codex run '{run_id}' not found"}, 404)
+
+    run = meta.get("run")
+    if not run:
+        _clear_codex_active_run(run_id)
+        return handler._send_json({"ok": False, "error": f"Codex run '{run_id}' is missing its stream"}, 410)
+
+    profile = meta.get("profile") or "main"
+    agent = _get_codex_agent(meta.get("agentId") or meta.get("agentKey") or f"codex-{profile}") or {}
+    agent_id = agent.get("id") or meta.get("agentId") or "codex-main"
+    status_key = agent.get("statusKey") or meta.get("statusKey") or agent_id
+    session_id = meta.get("sessionId") or run.thread_id or _get_codex_session_id(profile) or ""
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.end_headers()
+
+    client_connected = True
+
+    def send_sse(event_name, payload):
+        nonlocal client_connected
+        if not client_connected:
+            return False
+        data = dict(payload or {})
+        data.setdefault("event", event_name)
+        data.setdefault("runId", run_id)
+        data.setdefault("turnId", run_id)
+        data.setdefault("sessionId", session_id)
+        data.setdefault("agentId", agent_id)
+        data.setdefault("profile", profile)
+        try:
+            handler.wfile.write(f"event: {event_name}\ndata: {json.dumps(data)}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+            return True
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            client_connected = False
+            return False
+
+    terminal_event = None
+    error_text = ""
+
+    def finalize_history(ok=False):
+        snapshot = run.snapshot()
+        active_session_id = snapshot.get("sessionId") or session_id
+        if active_session_id:
+            _set_codex_session_id(profile, active_session_id)
+        tools = snapshot.get("tools") if isinstance(snapshot.get("tools"), list) else []
+        thinking = snapshot.get("thinking") or ""
+        reply = snapshot.get("reply") or error_text or snapshot.get("error") or ""
+        final_ts = int(time.time() * 1000)
+        history = _load_codex_history(profile)
+        history.append({
+            "role": "assistant",
+            "text": reply,
+            "ts": final_ts,
+            "epochMs": final_ts,
+            "from": agent.get("name") or "Codex",
+            "source": "codex",
+            "sessionId": active_session_id,
+            "runId": run_id,
+            "exitCode": 0 if ok else 1,
+            "tools": tools,
+            "thinking": thinking,
+            "reasoningTokens": 0,
+            "error": error_text or snapshot.get("error") or None,
+        })
+        _save_codex_history(profile, history)
+        _clear_codex_active_run(run_id)
+        try:
+            run.close()
+        except Exception:
+            pass
+        if _gateway_presence:
+            try:
+                _gateway_presence.set_manual_override(status_key, "idle" if ok else "offline", "")
+            except Exception:
+                pass
+
+    sent_run_started = send_sse("run.started", {"ok": True, "reply": "", "tools": [], "thinking": ""})
+
+    try:
+        while True:
+            if _gateway_presence:
+                try:
+                    _gateway_presence.set_manual_override(status_key, "working", "Codex app-server run")
+                except Exception:
+                    pass
+            event = run.next_event(timeout=0.5)
+            if event is None:
+                if getattr(run.state, "completed", False):
+                    terminal_event = terminal_event or {"event": "run.failed", "error": run.snapshot().get("error") or "Codex stream ended without a terminal event"}
+                    break
+                continue
+            event_name = str(event.get("event") or "event")
+            payload = {**event, "agentId": agent_id, "profile": profile, "sessionId": session_id, "runId": run_id, "turnId": run_id}
+            if event_name == "run.started" and sent_run_started:
+                continue
+            if event.get("error"):
+                error_text = str(event.get("error") or "")
+            if send_sse(event_name, payload) and event_name == "run.started":
+                sent_run_started = True
+            if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
+                terminal_event = event
+                break
+    except Exception as exc:
+        error_text = str(exc)
+        terminal_event = {"event": "run.failed", "error": error_text}
+        send_sse("run.failed", {"ok": False, "error": error_text, **run.snapshot()})
+
+    terminal_name = str((terminal_event or {}).get("event") or "").lower()
+    ok = terminal_name == "run.completed"
+    if terminal_name in {"run.failed", "run.cancelled", "run.canceled"}:
+        error_text = error_text or str((terminal_event or {}).get("error") or terminal_name.replace("run.", "Codex run "))
+    finalize_history(ok=ok)
+
+
+def _handle_codex_interrupt(body):
+    body = body if isinstance(body, dict) else {}
+    agent_key = body.get("agentId") or body.get("key") or "codex-main"
+    agent = _get_codex_agent(agent_key) or {}
+    profile = agent.get("profile") or agent.get("providerAgentId") or "main"
+    provider = _codex_provider()
+    if not provider:
+        return {"ok": False, "error": "Codex provider module unavailable", "_status": 503}
+    result = provider.interrupt(profile)
+    if result.get("ok") and _gateway_presence:
+        try:
+            _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Codex stopping")
+        except Exception:
+            pass
+    return result
 
 
 def _handle_hermes_approval_respond(body):
@@ -10171,6 +10427,10 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             profile = agent.get("profile") or agent.get("providerAgentId") or "main"
             return self._send_json({"ok": True, "messages": _load_codex_history(profile), "profile": profile})
 
+        if path.startswith("/api/codex/runs/") and path.endswith("/events"):
+            run_id = urllib.parse.unquote(path[len("/api/codex/runs/"):-len("/events")].strip("/"))
+            return _handle_codex_run_events(self, run_id)
+
         if path == "/api/codex/test":
             provider = _codex_provider()
             return self._send_json(provider.test() if provider else {"ok": False, "error": "Codex provider module unavailable", "agents": []})
@@ -10416,6 +10676,16 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/codex/chat":
             result = _handle_codex_chat(self._read_body())
+            status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
+            return self._send_json(result, status)
+
+        if path == "/api/codex/runs":
+            result = _handle_codex_run_start(self._read_body())
+            status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
+            return self._send_json(result, status)
+
+        if path == "/api/codex/interrupt":
+            result = _handle_codex_interrupt(self._read_body())
             status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
             return self._send_json(result, status)
 

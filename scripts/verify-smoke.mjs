@@ -275,7 +275,7 @@ for (const token of [
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
   'js/main3d.js?v=20260615-new-agent-menu-r2',
-  'js/chat.js?v=20260616-hermes-model-info-r1',
+  'js/chat.js?v=20260617-codex-tool-stream-r1',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-codexOptions',
@@ -317,8 +317,32 @@ for (const token of [
   'data-preserved-chat-selection',
   'preserveForInheritance',
   'agentListsReady.then(applyQueryAgentAssignments)',
+  'streamCodexRunEvents',
+  '/api/codex/runs',
+  '/api/codex/runs/',
+  'tool.updated',
+  'handleCodexNativeEvent',
 ]) {
   assert(chatJs.includes(token), `chat.js missing agent picker persistence token: ${token}`);
+}
+for (const token of [
+  'def _handle_codex_run_start',
+  'def _handle_codex_run_events',
+  'path.startswith("/api/codex/runs/") and path.endswith("/events")',
+  'path == "/api/codex/runs"',
+  'Content-Type", "text/event-stream"',
+]) {
+  assert(serverPy.includes(token), `server.py missing Codex stream token: ${token}`);
+}
+for (const token of [
+  'def start_chat_stream',
+  'class CodexAppStreamRun',
+  'item/agentMessage/delta',
+  'item/commandExecution/outputDelta',
+  'tool.updated',
+  'handle_server_request',
+]) {
+  assert(read('src/server/providers/codex.py').includes(token), `codex.py missing stream token: ${token}`);
 }
 for (const token of [
   "agent-characters.js?v=20260615-desk-carry-rest-r1",

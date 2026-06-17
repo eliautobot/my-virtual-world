@@ -117,6 +117,7 @@
       this.hermesLivePollTimer = null;
       this.hermesLiveEventSeq = 0;
       this.hermesEventSource = null;
+      this.codexEventSource = null;
       this.hermesCompletedToolKeys = new Set();
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
@@ -340,6 +341,8 @@
       this.sessionKey = newSessionKey;
       if (markExplicit || preserveForInheritance) this.hasExplicitAgentSelection = true;
       this.saveSelection();
+      this.closeHermesEventSource();
+      this.closeCodexEventSource();
       this.currentRunId = null;
       this.streamingMsg = null;
       this.syncAgentSelect();
@@ -578,6 +581,30 @@
             this.scrollBottom();
           }
           await this.pollHermesApproval().catch(() => {});
+          return;
+        }
+        if (this.isCodexSelected()) {
+          const res = await fetch('/api/codex/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
+          const data = await res.json();
+          if (data.ok && Array.isArray(data.messages)) {
+            this.messages.innerHTML = '';
+            for (const msg of data.messages) {
+              const tools = normalizeHermesTools(msg.tools || []);
+              const meta = msg.role === 'user'
+                ? { label: msg.from || 'You', kind: msg.fromType === 'human' ? 'human' : 'agent' }
+                : {
+                    label: msg.from || this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex',
+                    kind: 'agent',
+                    thinking: msg.thinking || '',
+                    reasoningTokens: msg.reasoningTokens || 0,
+                    approval: msg.approval || null
+                  };
+              if (msg.text || tools.length || msg.thinking || msg.reasoningTokens || msg.approval) {
+                this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, tools);
+              }
+            }
+            this.scrollBottom();
+          }
           return;
         }
         if (this.isProviderAgentSelected()) {
@@ -863,6 +890,48 @@
         return;
       }
 
+      if (this.isCodexSelected()) {
+        const codexLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex';
+        const codexSendStartedAt = Date.now();
+        const codexBody = {
+          agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+          message: text || '(attached files)',
+          timeoutSec: 180,
+          fromType: 'human',
+          fromDisplayName: 'User',
+          sourceApp: 'virtual-world',
+          sourceSurface: 'chat-window',
+          sourceLabel: 'Virtual World Chat'
+        };
+        try {
+          const resp = await fetch('/api/codex/runs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(codexBody)
+          });
+          const data = await resp.json();
+          if (!resp.ok || data.ok === false) {
+            if (data.fallback) {
+              await this.sendCodexBlockingMessage(codexBody, codexLabel);
+              return;
+            }
+            throw new Error(data.error || data.reply || resp.statusText);
+          }
+          this.currentRunId = data.runId || null;
+          await this.streamCodexRunEvents(data.runId);
+          this.removeTypingIndicator();
+          await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt });
+          this.setStatus('Codex ready', 'connected');
+          this.scrollBottom();
+        } catch (e) {
+          this.closeCodexEventSource();
+          this.removeTypingIndicator();
+          this.appendSystem('Codex send failed: ' + e.message);
+          this.setStatus('Codex error', 'disconnected');
+        }
+        return;
+      }
+
       if (this.isProviderAgentSelected()) {
         const providerLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Agent';
         this.setStatus('Sending via Virtual World...', 'connecting');
@@ -931,6 +1000,18 @@
           if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
           this.appendSystem('Stop sent');
           this.setStatus('Hermes stopping...', 'connecting');
+          return;
+        }
+        if (this.isCodexSelected()) {
+          const resp = await fetch('/api/codex/interrupt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId: this.getSelectedAgentId() || this.selectedAgentKey, runId: this.currentRunId || '' })
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
+          this.appendSystem('Stop sent');
+          this.setStatus('Codex stopping...', 'connecting');
           return;
         }
         if (this.streamingMsg) {
@@ -1229,6 +1310,13 @@
       }
     }
 
+    closeCodexEventSource() {
+      if (this.codexEventSource) {
+        try { this.codexEventSource.close(); } catch (_) {}
+        this.codexEventSource = null;
+      }
+    }
+
     scrollBottom() {
       if (this.scrollFrame) return;
       const scrollToEnd = () => {
@@ -1288,6 +1376,38 @@
         this.stopHermesLivePolling();
         throw e;
       }
+    }
+
+    async sendCodexBlockingMessage(codexBody, codexLabel = 'Codex') {
+      this.setStatus('Sending via Codex...', 'connecting');
+      const resp = await fetch('/api/codex/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(codexBody)
+      });
+      const data = await resp.json();
+      this.removeTypingIndicator();
+      const codexTools = normalizeHermesTools(data.tools || []);
+      const hasRenderableReply = !!(data.reply || data.thinking || data.reasoningTokens || codexTools.length);
+      if (!resp.ok || data.ok === false) {
+        if (!hasRenderableReply) throw new Error(data.error || data.reply || resp.statusText);
+        this.appendSystem('Codex returned an error response: ' + (data.error || resp.statusText));
+      }
+      this.appendMessage(
+        'assistant',
+        data.reply || '',
+        Date.now(),
+        [],
+        {
+          label: codexLabel,
+          kind: 'agent',
+          thinking: data.thinking || '',
+          reasoningTokens: data.reasoningTokens || 0,
+          approval: data.approval || null
+        },
+        codexTools
+      );
+      this.setStatus('Codex ready', 'connected');
     }
 
     streamHermesRunEvents(runId, hermesProgress) {
@@ -1386,6 +1506,133 @@
             phase: isTerminal ? 'result' : 'start',
             name: card.name || data.tool || data.name || 'Hermes tool',
             args: card.arguments || (card.args_preview ? { command: card.args_preview } : (data.preview ? { command: data.preview } : {})),
+            result: card.result || data.result || data.output || '',
+            isError: eventName === 'tool.failed' || card.status === 'error' || !!data.error,
+            error: data.error || card.error || ''
+          }
+        };
+        const label = formatToolLabel(payload.data.name, coerceToolArgs(payload.data.args));
+        this.updateTypingIndicator(isTerminal ? 'Processing...' : label);
+        if (isTerminal) {
+          if (!this.liveToolCards.has(this.toolKey(payload))) {
+            this.appendToolCall({ ...payload, data: { ...payload.data, phase: 'start' } });
+          }
+          this.finishToolCall(payload);
+        } else {
+          this.updateToolCall(payload);
+        }
+        return;
+      }
+
+      if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+        const finalText = data.reply || data.output || (this.streamingMsg ? this.streamingMsg.content : '');
+        this.flushToolEvents(true);
+        this.clearActivityFeed();
+        this.removeTypingIndicator();
+        if (this.streamingMsg) {
+          this.finalizeStreamingMessage(finalText);
+          this.streamingMsg = null;
+        } else if (finalText) {
+          this.appendMessage('assistant', finalText);
+        }
+        if (runId) this.finalizeRunToolCards(runId);
+        this.currentRunId = null;
+      }
+    }
+
+    streamCodexRunEvents(runId) {
+      if (!runId) return Promise.reject(new Error('Codex run did not return a run id'));
+      this.closeCodexEventSource();
+      this.currentRunId = runId;
+      this.setStatus('Codex stream active...', 'connecting');
+      this.markLiveEvent();
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
+      const url = '/api/codex/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const source = new EventSource(url);
+        this.codexEventSource = source;
+        const cleanup = () => {
+          if (this.codexEventSource === source) this.codexEventSource = null;
+          source.close();
+        };
+        const finish = (ok, value) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (ok) resolve(value);
+          else reject(value instanceof Error ? value : new Error(String(value || 'Codex stream failed')));
+        };
+        const handle = (eventName, evt) => {
+          let data = {};
+          try { data = JSON.parse(evt.data || '{}'); } catch (_) {}
+          this.handleCodexNativeEvent(eventName, data);
+          if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+            finish(eventName === 'run.completed', eventName === 'run.completed' ? data : new Error(data.error || eventName));
+          }
+        };
+        [
+          'run.started',
+          'message.delta',
+          'reasoning.available',
+          'tool.started',
+          'tool.updated',
+          'tool.completed',
+          'tool.failed',
+          'approval.request',
+          'run.completed',
+          'run.failed',
+          'run.cancelled',
+          'run.canceled'
+        ].forEach(name => source.addEventListener(name, evt => handle(name, evt)));
+        source.onmessage = evt => handle('message', evt);
+        source.onerror = () => {
+          if (!settled) finish(false, new Error('Codex stream disconnected'));
+        };
+      });
+    }
+
+    handleCodexNativeEvent(eventName, data) {
+      this.markLiveEvent();
+      const runId = data?.runId || this.currentRunId || '';
+      if (runId) this.currentRunId = runId;
+
+      if (eventName === 'run.started') {
+        this.updateTypingIndicator('Codex is running...');
+        return;
+      }
+
+      if (eventName === 'message.delta') {
+        if (!this.streamingMsg || this.streamingMsg.id !== runId) {
+          this.streamingMsg = { id: runId, role: 'assistant', content: '' };
+          this.appendStreamingMessage();
+        }
+        this.streamingMsg.content = data.reply || (this.streamingMsg.content + String(data.delta || ''));
+        this.updateStreamingMessage(this.streamingMsg.content);
+        this.scrollBottom();
+        return;
+      }
+
+      if (eventName === 'reasoning.available') {
+        this.updateTypingIndicator('Codex is reasoning...');
+        return;
+      }
+
+      if (eventName === 'approval.request') {
+        this.updateTypingIndicator('Codex requested input...');
+        return;
+      }
+
+      if (['tool.started', 'tool.updated', 'tool.completed', 'tool.failed'].includes(eventName)) {
+        const card = data.toolCard || {};
+        const isTerminal = eventName === 'tool.completed' || eventName === 'tool.failed';
+        const payload = {
+          runId,
+          data: {
+            toolCallId: card.id || data.toolCallId || data.id || '',
+            phase: isTerminal ? 'result' : eventName === 'tool.updated' ? 'update' : 'start',
+            name: card.name || data.tool || data.name || 'Codex tool',
+            args: card.arguments || data.preview || {},
             result: card.result || data.result || data.output || '',
             isError: eventName === 'tool.failed' || card.status === 'error' || !!data.error,
             error: data.error || card.error || ''
