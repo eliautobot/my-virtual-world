@@ -1,0 +1,744 @@
+# Live Agent Mode Implementation Spec
+
+Status: implementation proposal  
+Owner: product architecture review  
+Scope: My Virtual World product architecture, APIs, data model, and frontend playback  
+Goal: build a reliable autonomous resident mode where agents can decide, move, communicate, use objects, create visible world changes, remember outcomes, and continue operating without depending on an open browser tab.
+
+## Summary
+
+Live Agent Mode should turn selected agents into persistent residents of My Virtual World. A resident agent should:
+
+- observe the current world state
+- choose goals and tool calls
+- move through the world
+- interact with objects and buildings
+- communicate with nearby or remote agents
+- remember outcomes
+- update relationships and plans
+- produce visible animation/state events for the browser
+- recover cleanly after server restarts or browser disconnects
+
+The key architectural rule is:
+
+**The backend is the source of truth for autonomous action. The browser renders, replays, and optionally assists with high-fidelity animation, but a browser tab must not be required for a Live Agent action to progress or complete.**
+
+The existing Live Agent Mode UI can remain hidden behind the current `Live Agent Mode Coming Soon` message until the acceptance criteria in this spec are met.
+
+## Current Foundation
+
+The product already has useful pieces:
+
+- agent roster and presence APIs
+- per-agent Live Mode profile flags
+- durable world actions under `world-meta.json#agentLife.worldActions`
+- move intent records under `world-meta.json#agentLife.moveIntents`
+- object availability checks
+- world-action transition, completion, cancel, fail, and timeout endpoints
+- provider communication relay for OpenClaw, Hermes, Codex, and future platforms
+- Three.js rendering, movement, object-use animations, and interaction spots
+
+The problem with the previous attempt was ownership. The server could validate and persist a world action, but movement and completion still depended on `main3d.js#setAgentTarget()` in a live browser client. That made the system fragile: actions could sit in `route_pending`, executor leases could expire, and scene confirmation could drift from actual action state.
+
+The redesigned mode keeps the good API vocabulary, but moves autonomous execution authority to the backend.
+
+## Non-Goals
+
+- Do not re-enable the existing product UI until this mode is reliable.
+- Do not bypass license gates, setup gates, or operator controls.
+- Do not allow hidden arbitrary world mutation.
+- Do not require an always-open browser tab for progression.
+- Do not let Live Agent Mode override explicit user-directed movement or edits.
+- Do not make agents modify network, firewall, DNS, filesystem, license, or infrastructure settings.
+- Do not ship broad destructive actions until approval, audit, and rollback exist.
+
+## Core Principles
+
+1. Backend-authoritative simulation  
+   Every autonomous action is represented by backend records and backend-owned state transitions.
+
+2. Tools are the only mutation path  
+   An agent cannot directly edit world JSON. It can only call validated tools.
+
+3. Physical presence matters  
+   Location, building, floor, room, distance, object availability, and interaction spots control which tools are available.
+
+4. Visible outcome, backend truth  
+   The frontend shows animation events from the backend. If no frontend is connected, the backend still advances the simulation and records replayable events.
+
+5. Bounded autonomy  
+   Agents may act continuously, but within schedules, cooldowns, budgets, permissions, locks, and operator pause/veto controls.
+
+6. Replayability  
+   Every turn, decision, tool call, validation result, side effect, and animation event should be inspectable after the fact.
+
+7. Progressive capability  
+   Start with safe resident actions. Add build/create/social/governance tools only after typed tool contracts and tests exist.
+
+## Target User Experience
+
+In Settings, Live Agent Mode eventually becomes an operator console instead of a simple toggle.
+
+Expected controls:
+
+- global enable/disable
+- per-agent enable/disable
+- pause/resume loop
+- max actions per minute/hour
+- quiet hours
+- allowed tool categories
+- require approval for risky tool categories
+- clear stuck actions
+- inspect active turn
+- inspect active world action
+- inspect recent tool calls
+- inspect agent memory and plans
+- replay recent animation events
+- view conversation history
+
+Expected status:
+
+- loop health
+- current scheduler tick
+- currently acting agent
+- current goal
+- active tool call
+- current location
+- blocked reason
+- last error
+- next scheduled turn
+- connected browser viewers
+
+## Architecture
+
+### 1. Simulation Engine
+
+Add a backend simulation engine responsible for:
+
+- scheduling agent turns
+- assembling context
+- exposing available tools
+- validating tool calls
+- applying side effects
+- recording events
+- producing animation directives
+- reconciling stale or failed work
+
+The engine should run inside the server process at first. It should be structured so it can later move to a worker process without changing public APIs.
+
+### 2. Scheduler
+
+The scheduler should be deterministic and bounded.
+
+Required behavior:
+
+- one autonomous agent turn at a time by default
+- fair round-robin scheduling
+- configurable interval
+- per-agent cooldowns
+- max actions per tick
+- max tool calls per turn
+- pause/resume
+- force dry-run tick
+- stale turn recovery
+- crash-safe resume from persisted state
+
+Suggested records:
+
+```json
+{
+  "id": "turn-<timestamp>-<agent-id>",
+  "agentId": "adam",
+  "status": "running",
+  "reason": "scheduled",
+  "startedAt": "2026-06-18T12:00:00Z",
+  "endedAt": null,
+  "toolCallBudget": 8,
+  "toolCallsUsed": 2,
+  "currentGoalId": "need.energy",
+  "currentLocation": {
+    "buildingId": "office-main",
+    "floor": 1,
+    "roomId": "break-room"
+  }
+}
+```
+
+### 3. Agent Turn Lifecycle
+
+Each backend-owned turn should follow this pipeline:
+
+1. Load agent profile, memory, relationships, assignments, needs, and current location.
+2. Update decaying needs.
+3. Build a perception frame from saved world state.
+4. Build a tool frame containing only available tools.
+5. Select the next action through the decision layer.
+6. Validate the requested tool call against tool contracts.
+7. Apply backend side effects.
+8. Append world-action, tool-call, memory, relationship, and animation events.
+9. Notify connected browser viewers through polling or streaming.
+10. Schedule reactions, follow-up turns, or cooldown.
+
+### 4. Decision Layer
+
+The decision layer has two modes:
+
+- deterministic fallback planner
+- model-backed planner
+
+The deterministic planner should remain available for smoke tests, offline mode, and safe fallback. It can score candidates from needs, personality, goals, cooldowns, and recent outcomes.
+
+The model-backed planner should receive a structured context frame and choose tool calls from a validated tool list. It should not receive raw write access to world data.
+
+Decision input should include:
+
+- identity and role
+- personality traits
+- current needs
+- current location
+- visible nearby agents
+- available landmarks
+- available objects and tools
+- active plans and todos
+- recent memories
+- recent conversations
+- relationships
+- operator rules
+- current world time and weather
+
+Decision output should be constrained to:
+
+```json
+{
+  "goal": "restore energy",
+  "tool": "use_object",
+  "arguments": {
+    "objectInstanceId": "coffee-machine-1",
+    "interaction": "make_coffee"
+  },
+  "reason": "energy is the highest need and the coffee machine is available"
+}
+```
+
+The backend must validate this output before it mutates world state.
+
+### 5. Tool Registry
+
+Introduce a backend tool registry. Each tool definition should include:
+
+- name
+- category
+- description
+- argument schema
+- availability rule
+- permission rule
+- cooldown rule
+- side-effect handler
+- animation event builder
+- rollback or compensation behavior where possible
+- tests
+
+Tool categories:
+
+- navigation
+- object use
+- communication
+- memory
+- planning
+- relationship
+- content creation
+- world construction
+- governance or operator-reviewed actions
+- utility
+
+Initial tools:
+
+```text
+observe_world
+list_agents
+list_landmarks
+get_current_location
+go_to_place
+go_to_coordinates
+go_home
+use_object
+say_to_agent
+speak_to_room
+send_message
+think_aloud
+add_memory
+write_diary
+add_todo
+complete_todo
+idle
+```
+
+Later tools:
+
+```text
+build_structure
+propose_world_change
+vote_on_world_change
+publish_note
+create_event
+invite_agent
+accept_invite
+rate_interaction
+```
+
+### 6. Tool Availability
+
+Availability should be location-gated and state-gated.
+
+Examples:
+
+- `go_to_place` is always available unless the agent is blocked by an active higher-priority action.
+- `use_object` is available only when an object exists, is reachable, is not reserved by another agent, and exposes the requested interaction.
+- `say_to_agent` is available when the target agent is near enough or in the same room depending on the communication mode.
+- `send_message` is available even when not co-located, but should be logged as remote communication.
+- `build_structure` is proposal-only until typed construction tools and approval rules are implemented.
+- risky actions require explicit operator approval and audit trails before activation.
+
+### 7. World Actions
+
+Keep `worldActions` as the durable public action model, but change autonomous records so route execution is backend-owned.
+
+Current weak pattern:
+
+```json
+{
+  "routeOwner": "client-runtime",
+  "routingOwner": "main3d.js#setAgentTarget()"
+}
+```
+
+Target pattern:
+
+```json
+{
+  "routeOwner": "server-simulation",
+  "routingOwner": "server.py#live_agent_simulation",
+  "animationOwner": "client-runtime",
+  "clientRequiredForProgress": false
+}
+```
+
+The browser may still run smooth animation, but the backend should persist:
+
+- intended path
+- start and end coordinates
+- current simulated progress
+- final location
+- arrival time
+- object reservation
+- object-use result
+- animation events
+
+### 8. Movement
+
+Backend movement does not need to render every animation frame. It needs an authoritative route model.
+
+For each movement:
+
+- resolve destination
+- validate building/floor/room/object exists
+- validate route is allowed
+- estimate travel duration
+- set action status to `routing`
+- emit `agent-move-started`
+- update simulated location at coarse intervals or on completion
+- set action status to `arrived`
+- emit `agent-arrived`
+
+The frontend can interpolate from animation events:
+
+```json
+{
+  "type": "agent-move",
+  "agentId": "adam",
+  "from": {"x": 120, "z": 90, "floor": 1},
+  "to": {"x": 320, "z": 180, "floor": 1},
+  "durationMs": 8500,
+  "worldActionId": "wa-..."
+}
+```
+
+### 9. Object Use
+
+Object use should be a backend tool, not just a client animation.
+
+Flow:
+
+1. Agent calls `use_object`.
+2. Backend checks object exists and exposes the interaction.
+3. Backend reserves the object or queue slot.
+4. Backend routes the agent to the object if needed.
+5. Backend marks `arrived`.
+6. Backend marks `in_progress`.
+7. Backend applies typed side effects.
+8. Backend releases reservation.
+9. Backend emits animation events for browser replay.
+10. Backend records memory and feedback.
+
+Example side effects:
+
+- coffee increases energy
+- water decreases hydration need
+- microwave food decreases food need
+- whiteboard creates a planning note
+- printer/copier creates a document-use event
+- bed rest decreases energy need
+
+### 10. Building and Creation
+
+Live Agent Mode should not allow arbitrary hidden world edits.
+
+Creation must use typed tools:
+
+- `propose_world_change`
+- `build_structure`
+- `place_object`
+- `write_sign`
+- `publish_note`
+
+For the first implementation:
+
+- only allow pre-approved typed structures
+- require valid footprint
+- require collision checks
+- require visible construction animation events
+- persist the created building/object only after the construction action completes
+- store `createdFromWorldActionId`
+- provide rollback metadata
+
+### 11. Communication
+
+Communication needs two tracks:
+
+1. provider communication  
+   Existing `/api/agent-platform-communications/send` can continue routing messages between OpenClaw, Hermes, Codex, and future providers.
+
+2. in-world resident communication  
+   Live Agent Mode needs spatial communication tools controlled by the simulation engine.
+
+Required tools:
+
+- `say_to_agent`
+- `speak_to_room`
+- `whisper_to_agent`
+- `send_message`
+- `read_messages`
+- `think_aloud`
+
+When an agent speaks in-world:
+
+1. Backend records the utterance.
+2. Backend identifies nearby listeners by building/floor/room/distance.
+3. Backend emits speech bubble animation events.
+4. Backend creates optional reaction turns for nearby listeners.
+5. Listeners decide to reply, react, gesture, ignore, or leave.
+6. Backend records conversation memory.
+7. Backend updates relationship summaries and scores.
+
+Suggested hearing rules:
+
+- same room: strong hearing
+- same floor but different room: only if door/open area allows
+- outdoor radius: configurable distance
+- whisper: target only
+- remote message: target only, no spatial hearing
+
+### 12. Memory and Identity
+
+The backend should persist memory separately from transient action logs.
+
+Required memory layers:
+
+- profile facts
+- long-term memories
+- recent observations
+- diary entries
+- todos/plans
+- relationship records
+- conversation summaries
+- operator notes
+
+Memory tools:
+
+- `add_memory`
+- `search_memory`
+- `write_diary`
+- `add_todo`
+- `complete_todo`
+- `summarize_memory`
+
+The agent should not manually edit raw memory JSON. Memory writes go through tools.
+
+### 13. Relationship Model
+
+Each pair of agents should have a relationship record:
+
+```json
+{
+  "agentId": "adam",
+  "otherAgentId": "coder",
+  "type": "neutral",
+  "score": 0.12,
+  "summary": "They discussed the current world state.",
+  "interactionCount": 3,
+  "lastInteractionAt": "2026-06-18T12:00:00Z"
+}
+```
+
+Relationship updates should come from:
+
+- direct conversations
+- overheard conversations
+- collaboration
+- conflict
+- fulfilled or broken commitments
+- operator-approved social events
+
+### 14. Data Model
+
+The first implementation can remain compatible with `world-meta.json`, but the code should isolate persistence behind store helpers so the system can migrate to SQLite or PostgreSQL later.
+
+Required stores:
+
+- `agentLife.simulation`
+- `agentLife.turns.active`
+- `agentLife.turns.history`
+- `agentLife.toolCalls`
+- `agentLife.worldActions`
+- `agentLife.moveIntents`
+- `agentLife.animationEvents`
+- `agentLife.conversations`
+- `agentLife.memories`
+- `agentLife.relationships`
+- `agentLife.operatorControls`
+
+### 15. APIs
+
+Existing APIs should remain:
+
+```text
+GET /api/agents
+GET /api/world-actions
+POST /api/world-actions
+GET /api/world-actions/active
+GET /api/world-actions/history
+POST /api/world-actions/<id>/transition
+POST /api/world-actions/<id>/complete
+POST /api/world-actions/<id>/cancel
+POST /api/agent-platform-communications/send
+GET /api/agent-platform-communications/history
+```
+
+New or revised APIs should include:
+
+```text
+GET /api/live-agent-mode/status
+POST /api/live-agent-mode/settings
+POST /api/live-agent-mode/tick
+GET /api/live-agent-mode/turns
+GET /api/live-agent-mode/turns/<turn-id>
+GET /api/live-agent-mode/tool-calls
+GET /api/live-agent-mode/events
+GET /api/live-agent-mode/animation-events
+GET /api/live-agent-mode/memory/<agent-id>
+GET /api/live-agent-mode/relationships/<agent-id>
+POST /api/live-agent-mode/operator-approval
+POST /api/live-agent-mode/actions/dry-run
+```
+
+Compatibility endpoint:
+
+```text
+POST /api/agent-model/actions
+```
+
+This endpoint can remain as a high-level action request, but internally it should call the backend tool registry instead of creating client-owned route handoffs.
+
+### 16. Frontend Contract
+
+The frontend should:
+
+- display current resident status
+- display speech bubbles and emotes
+- animate backend movement events
+- animate backend object-use events
+- show active actions and recent history
+- provide operator pause/resume/approval controls
+- show when the backend simulation is running without a connected viewer
+
+The frontend should not:
+
+- be required to claim a route
+- be required to complete an autonomous action
+- write final world-action truth for backend-owned actions
+- mutate world state directly for autonomous tools
+
+### 17. Safety and Operator Controls
+
+Required controls:
+
+- global disable
+- per-agent disable
+- pause duration
+- tool category allowlist
+- risky tool approval queue
+- max turns per hour
+- max tool calls per turn
+- max autonomous world edits per day
+- kill switch for all active autonomous actions
+- audit export
+
+Risk tiers:
+
+- Tier 0: observe, idle, think, memory
+- Tier 1: move, safe object use, speak
+- Tier 2: content creation, events, non-destructive building decoration
+- Tier 3: world construction, economy, governance, persistent relationship changes
+- Tier 4: destructive or harmful actions; disabled unless explicitly designed and approved
+
+### 18. Failure Handling
+
+Every action must have:
+
+- timeout
+- retry policy
+- cancellation path
+- stale detection
+- terminal status
+- final result
+- audit event
+
+Failure examples:
+
+- target missing
+- object reserved
+- route blocked
+- tool not available at location
+- agent unavailable
+- operator approval required
+- model output invalid
+- provider unavailable
+- persistence failed
+
+The loop should recover by marking the action terminal, logging feedback, updating memory, and continuing later.
+
+### 19. Acceptance Criteria
+
+The mode is not ready to expose in product UI until all of these pass:
+
+- A selected agent can run at least 50 consecutive backend-owned turns without an open browser.
+- A selected agent can move to a building and persist its final location without browser help.
+- A selected agent can use at least three typed objects and persist side effects.
+- A selected agent can speak to a nearby agent and create a reaction turn.
+- Conversation history appears in UI and API.
+- Relationship records update after repeated interaction.
+- Memory records update after completed and failed actions.
+- Active action recovery survives server restart.
+- Browser reconnect can replay recent animation events.
+- No action remains stuck in `route_pending` because a browser was absent.
+- Operator pause stops new turns within one tick.
+- Kill switch cancels active autonomous actions.
+- Tests cover create, transition, complete, cancel, timeout, restart recovery, and no-browser progression.
+- Existing manual/user-directed movement and object use still work.
+- License and feature gates remain intact.
+
+### 20. Delivery Plan
+
+Phase 1: backend ownership foundation
+
+- add simulation status store
+- add turn records
+- add tool-call records
+- add animation event records
+- update `/api/agent-model/actions` to support backend-owned dry-run
+- keep UI disabled
+
+Phase 2: backend movement
+
+- implement `go_to_place`, `go_to_coordinates`, `go_home`
+- persist agent simulated location
+- emit movement animation events
+- support browser replay
+
+Phase 3: safe object use
+
+- implement typed `use_object`
+- support water, coffee, food, rest, whiteboard/planning
+- apply backend side effects
+- release reservations reliably
+
+Phase 4: communication
+
+- implement spatial speech tools
+- add hearing rules
+- add reaction turns
+- persist conversations
+- update relationship records
+
+Phase 5: memory and planning
+
+- add memory tools
+- add diary/todo tools
+- add context assembly
+- add deterministic planner fallback
+- add model-backed planner behind a feature flag
+
+Phase 6: operator console
+
+- replace Coming Soon panel with status-only console
+- add pause/resume and inspect views
+- add approval queue
+- keep activation controls hidden until acceptance tests pass
+
+Phase 7: construction and creation
+
+- add typed build tools
+- add construction animation events
+- require operator approval for persistent world edits
+- add rollback metadata
+
+Phase 8: product exposure
+
+- run long no-browser soak tests
+- run browser replay tests
+- run manual regression tests
+- expose per-agent enable controls only after green acceptance results
+
+## Testing Requirements
+
+Unit tests:
+
+- tool availability
+- argument validation
+- location gating
+- reservation conflict
+- state transitions
+- timeout handling
+- memory writes
+- relationship updates
+
+Integration tests:
+
+- no-browser autonomous movement
+- no-browser object use
+- server restart during active turn
+- browser reconnect animation replay
+- conversation and reaction turn
+- operator pause and kill switch
+
+Smoke tests:
+
+- app health
+- settings still show Coming Soon until explicitly enabled
+- disabled agents do not act
+- feature/license gates block unapproved activation
+- existing world-action APIs remain backward compatible
+
+## Done Definition
+
+Live Agent Mode is considered working when an agent can live in the world continuously using backend-owned tools, with visible replay in the browser, without needing a browser tab to execute its decisions.

@@ -150,6 +150,8 @@ Profile writes may update local agent identity files when configured. Do not wri
 
 World actions are durable requests for agents to move, reserve, use, or complete interactions in the world.
 
+For the planned backend-owned autonomous resident architecture, see [LIVE-AGENT-MODE-SPEC.md](LIVE-AGENT-MODE-SPEC.md). The current world-action API remains the compatibility foundation, but future Live Agent execution should make the server authoritative for turns, tool calls, movement progress, object-use side effects, and replayable animation events.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/world-actions` | Reconcile and read world action store. |

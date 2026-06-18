@@ -57,7 +57,7 @@ Use these when agents need to communicate through the visible My Virtual World b
 - `POST /api/agents/<agent-id>/move`
 - `GET /api/world-actions/object-availability`
 
-Use these for durable movement and object-interaction workflows. Agent Live Mode is license-gated.
+Use these for durable movement and object-interaction workflows. Agent Live Mode is license-gated and should remain hidden until the backend-owned autonomy acceptance criteria in `docs/LIVE-AGENT-MODE-SPEC.md` are met.
 
 ### Hermes
 
@@ -86,6 +86,7 @@ These are plain `SKILL.md` files that users can copy into their agent systems.
 - Use `docs/API.md` as the endpoint reference.
 - Use `docs/WORLD-DATA.md` for saved JSON and world model details.
 - Use `docs/AGENT-INTEGRATION.md` for provider and communication behavior.
+- Use `docs/LIVE-AGENT-MODE-SPEC.md` before changing autonomous resident behavior.
 - Use `docs/UPDATES-AND-PERSISTENCE.md` before changing install/update instructions.
 - Do not duplicate secrets or real private paths in examples.
 - Do not add endpoint docs that claim a feature exists before the server implements it.

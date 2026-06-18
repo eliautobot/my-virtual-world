@@ -48,6 +48,10 @@ The server is the durable store and guardrail layer:
 - preserves saved user data during updates
 - exposes agent integration APIs
 
+## Live Agent Mode Direction
+
+Agent Live Mode is currently hidden in the product UI until the backend can own autonomous execution reliably. The target architecture is documented in [LIVE-AGENT-MODE-SPEC.md](LIVE-AGENT-MODE-SPEC.md): selected agents should act through backend-validated tools, persist turn/tool/action state on the server, and stream replayable animation events to browsers. A browser may render and animate Live Agent work, but it must not be required for autonomous actions to progress or complete.
+
 ## Starter World
 
 The starter world is defined in `src/client/js/starter-map.mjs` and guarded on the server. It is only used when a world is fresh and uninitialized.
