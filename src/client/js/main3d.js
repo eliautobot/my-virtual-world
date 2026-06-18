@@ -21512,10 +21512,10 @@ function setupInput() {
           let tx = Math.floor(hit.x / T);
           let tz = Math.floor(hit.z / T);
           if (_streetTool === 'line' || _streetTool === 'erase') {
-            // Snap start point to nearest existing street endpoint
-            const startSnap = findNearestStreetEndpoint(tx, tz, 6);
-            if (startSnap) { tx = startSnap.x; tz = startSnap.z; }
-            _streetDrawStart = { x: tx, z: tz };
+            const handleHit = _streetTool === 'line' ? getStreetHandleHit(e) : null;
+            _streetDrawStart = handleHit
+              ? { x: handleHit.x, z: handleHit.z, snap: true, position: handleHit.role || null, fromHandle: true, handle: handleHit }
+              : makeStreetLineStart(tx, tz);
           } else {
             // Intersection/turn tools — use snapped position from ghost preview
             const placeTX = _streetSnapTarget ? _streetSnapTarget.x : tx;
@@ -21697,8 +21697,9 @@ function setupInput() {
             // Line tool: show a square preview matching the full street width (same as erase)
             _terrainPreviewMesh.scale.set(Math.ceil(ST.FULL_W), 1, Math.ceil(ST.FULL_W));
             _terrainPreviewMesh.material.color.setHex(0x333333);
-            // Snap the preview position to the nearest endpoint if close
-            const ep = findNearestStreetEndpoint(tx, tz, 6);
+            // Snap the preview to any nearby street point so branches can start
+            // from existing road middles, not only from exposed endpoints.
+            const ep = findNearestStreetLineSnap(tx, tz, STREET_LINE_SNAP_RADIUS);
             if (ep) {
               _terrainPreviewMesh.position.set(ep.x * T + T / 2, 0.25, ep.z * T + T / 2);
             }
@@ -21766,35 +21767,15 @@ function setupInput() {
     if (_streetDrawStart && editMode === 'roads' && (_streetTool === 'line' || _streetTool === 'erase')) {
       const hit = raycastGround(e);
       if (hit) {
-        let tx = Math.floor(hit.x / T);
-        let tz = Math.floor(hit.z / T);
-        // Snap end to nearest street endpoint during preview too
-        const previewSnap = findNearestStreetEndpoint(tx, tz, 6);
-        if (previewSnap) { tx = previewSnap.x; tz = previewSnap.z; }
-        const rdx = tx - _streetDrawStart.x;
-        const rdz = tz - _streetDrawStart.z;
-        // Orthogonal snap
-        const isH = Math.abs(rdx) >= Math.abs(rdz);
-        if (isH) tz = _streetDrawStart.z; else tx = _streetDrawStart.x;
+        const rawTx = Math.floor(hit.x / T);
+        const rawTz = Math.floor(hit.z / T);
+        const resolved = resolveStreetLineDraw(_streetDrawStart, rawTx, rawTz);
+        if (!resolved) return;
 
-        const len = Math.max(Math.abs(tx - _streetDrawStart.x), Math.abs(tz - _streetDrawStart.z));
         // Remove old ghost
-        if (_streetDrawGhost) { scene.remove(_streetDrawGhost); _streetDrawGhost = null; }
-        if (len > 2) {
-          const ghostW = ST.FULL_W;
-          // Ghost must match actual mesh size: L+T = (len+1)*T in the draw direction
-          const meshLen = (len + 1) * T;
-          const geo = new THREE.BoxGeometry(
-            isH ? meshLen : ghostW,
-            0.4,
-            isH ? ghostW : meshLen
-          );
-          const mat = new THREE.MeshBasicMaterial({ color: 0xffd600, transparent: true, opacity: 0.25, depthWrite: false });
-          _streetDrawGhost = new THREE.Mesh(geo, mat);
-          // Center matches buildStreetMesh: midpoint of endpoints + 0.5
-          const cx = (_streetDrawStart.x + tx) / 2 * T + 0.5;
-          const cz = (_streetDrawStart.z + tz) / 2 * T + 0.5;
-          _streetDrawGhost.position.set(cx, 0.3, cz);
+        clearStreetDrawGhost();
+        if (resolved.len > 2) {
+          _streetDrawGhost = makeFadedStreetPreview(resolved.x1, resolved.z1, resolved.x2, resolved.z2);
           scene.add(_streetDrawGhost);
 
           // Show snap point indicators at start and end
@@ -22015,43 +21996,30 @@ function setupInput() {
     if (_streetDrawStart && editMode === 'roads' && e.button === 0) {
       const hit = raycastGround(e);
       if (hit) {
-        let tx = Math.floor(hit.x / T);
-        let tz = Math.floor(hit.z / T);
-
-        // Snap end point to nearest existing street endpoint first
-        const endSnap = findNearestStreetEndpoint(tx, tz, 6);
-        if (endSnap) { tx = endSnap.x; tz = endSnap.z; }
-
-        const rdx = tx - _streetDrawStart.x;
-        const rdz = tz - _streetDrawStart.z;
-
-        // ORTHOGONAL SNAP: lock to either horizontal or vertical (whichever is dominant)
-        if (Math.abs(rdx) >= Math.abs(rdz)) {
-          tz = _streetDrawStart.z; // lock Z, draw horizontal
-        } else {
-          tx = _streetDrawStart.x; // lock X, draw vertical
-        }
-
-        const len = Math.max(Math.abs(tx - _streetDrawStart.x), Math.abs(tz - _streetDrawStart.z));
-        if (len > 2) { // minimum 3 tiles to draw a street
+        const rawTx = Math.floor(hit.x / T);
+        const rawTz = Math.floor(hit.z / T);
+        const resolved = resolveStreetLineDraw(_streetDrawStart, rawTx, rawTz);
+        const len = resolved ? resolved.len : 0;
+        if (resolved && len > 2) { // minimum 3 tiles to draw a street
           if (_streetTool === 'erase') {
             pushUndo({ type: 'streets', snapshot: _snapshotStreets() });
-            eraseStreetAt(_streetDrawStart.x, _streetDrawStart.z);
-            eraseStreetAt(tx, tz);
-            _rebuildNearChunks(_streetDrawStart.x, _streetDrawStart.z, 5);
-            _rebuildNearChunks(tx, tz, 5);
+            eraseStreetAt(resolved.x1, resolved.z1);
+            eraseStreetAt(resolved.x2, resolved.z2);
+            _rebuildNearChunks(resolved.x1, resolved.z1, 5);
+            _rebuildNearChunks(resolved.x2, resolved.z2, 5);
             showToast('🗑️ Street erased', 'warning');
           } else if (_streetTool === 'line') {
             pushUndo({ type: 'streets', snapshot: _snapshotStreets() });
-            addStreetSegment(_streetDrawStart.x, _streetDrawStart.z, tx, tz);
-            _rebuildNearChunks(_streetDrawStart.x, _streetDrawStart.z, 5);
-            _rebuildNearChunks(tx, tz, 5);
-            showToast(`🛣️ Street drawn: ${len} tiles`, 'success');
+            const extended = tryExtendStreetFromHandle(_streetDrawStart, resolved);
+            if (!extended) addStreetSegment(resolved.x1, resolved.z1, resolved.x2, resolved.z2);
+            _rebuildNearChunks(resolved.x1, resolved.z1, 5);
+            _rebuildNearChunks(resolved.x2, resolved.z2, 5);
+            showToast(extended ? `🛣️ Street extended: ${len} tiles` : `🛣️ Street drawn: ${len} tiles`, 'success');
           }
         }
       }
       _streetDrawStart = null;
-      if (_streetDrawGhost) { scene.remove(_streetDrawGhost); _streetDrawGhost = null; }
+      clearStreetDrawGhost();
     }
 
     const elapsed = performance.now() - pointerDownTime;
@@ -24534,6 +24502,8 @@ function setEditMode(m, options = {}) {
   cancelDecorationPlacement();
   // Clean up street snap ghost
   if (_streetSnapGhost) { scene.remove(_streetSnapGhost); _streetSnapGhost = null; _streetSnapTarget = null; }
+  clearStreetDrawGhost();
+  refreshStreetEditHandles();
   // Hide grid when leaving edit mode
   if (!m && _gridVisible) {
     _gridVisible = false;
@@ -24642,7 +24612,7 @@ function cancelDecorationPlacement() {
 // Cross-section (perpendicular): Sidewalk | Curb | Gutter | Lane | Center | Lane | Gutter | Curb | Sidewalk
 // Heights: sidewalk=0.3, curb top=0.3, curb face=0.3→0.18, gutter=0.15, road=0.18
 
-let _streetDrawStart = null;    // {x, z} world tile coords
+let _streetDrawStart = null;    // {x, z, snap, position} world tile coords
 let _streetDrawGhost = null;    // preview mesh
 let _streetTool = 'line';       // 'line' | 'x-int' | 't-int' | 'right-turn' | 'left-turn' | 'erase'
 let _streetPieceRotation = 0;   // 0, 90, 180, 270 — rotation for intersection/turn pieces
@@ -24650,6 +24620,7 @@ let _streetSnapGhost = null;    // ghost mesh for intersection/turn tool snap pr
 let _streetSnapTarget = null;   // {x, z} snapped tile coords for intersection/turn
 const _streetSegments = [];     // [{x1,z1,x2,z2,dir,mesh}, ...]
 let _streetGroup = null;        // THREE.Group for all street meshes
+let _streetHandleGroup = null;  // visible edit handles for road endpoints/midpoints
 
 // Street dimensions (in world units = tiles)
 const ST = {
@@ -24667,6 +24638,9 @@ const ST = {
 // Total half-width: SIDEWALK + CURB + GUTTER + LANE + CENTER/2
 ST.HALF_W = ST.SIDEWALK_W + ST.CURB_W + ST.GUTTER_W + ST.LANE_W + ST.CENTER_W / 2; // ~3.85
 ST.FULL_W = ST.HALF_W * 2; // ~7.7 tiles total width
+const STREET_LINE_SNAP_RADIUS = 8;
+const STREET_LINE_AXIS_ALIGN_RADIUS = Math.ceil(ST.HALF_W) + 2;
+const STREET_HANDLE_Y = ST.BASE + ST.SIDEWALK_H + 0.32;
 
 let _streetLampGroup = null;      // THREE.Group for street light poles
 let _streetLampDebounce = null;   // debounce timer for light pole rebuild
@@ -24678,6 +24652,10 @@ function initStreetGroup() {
   _streetGroup.name = 'streets';
   scene.add(_streetGroup);
 
+  _streetHandleGroup = new THREE.Group();
+  _streetHandleGroup.name = 'streetEditHandles';
+  scene.add(_streetHandleGroup);
+
   _streetLampGroup = new THREE.Group();
   _streetLampGroup.name = 'streetLamps';
   scene.add(_streetLampGroup);
@@ -24685,6 +24663,126 @@ function initStreetGroup() {
   _trafficLightGroup = new THREE.Group();
   _trafficLightGroup.name = 'trafficLights';
   scene.add(_trafficLightGroup);
+}
+
+function clearStreetDrawGhost() {
+  if (!_streetDrawGhost) return;
+  scene.remove(_streetDrawGhost);
+  _streetDrawGhost.traverse?.(obj => {
+    if (!obj.isMesh) return;
+    obj.geometry?.dispose?.();
+    if (Array.isArray(obj.material)) obj.material.forEach(mat => mat?.dispose?.());
+    else obj.material?.dispose?.();
+  });
+  _streetDrawGhost = null;
+}
+
+function makeFadedStreetPreview(x1, z1, x2, z2) {
+  const ghost = buildStreetMesh(x1, z1, x2, z2);
+  ghost.name = 'streetDrawPreview';
+  ghost.userData.streetDrawPreview = true;
+  ghost.traverse(obj => {
+    if (!obj.isMesh) return;
+    obj.material = obj.material.clone();
+    obj.material.transparent = true;
+    obj.material.opacity = obj.material.color?.getHex?.() === 0xffffff ? 0.55 : 0.38;
+    obj.material.depthWrite = false;
+    obj.renderOrder = 9;
+  });
+  return ghost;
+}
+
+function disposeStreetHandleObject(obj) {
+  obj.traverse?.(child => {
+    if (!child.isMesh) return;
+    child.geometry?.dispose?.();
+    if (Array.isArray(child.material)) child.material.forEach(mat => mat?.dispose?.());
+    else child.material?.dispose?.();
+  });
+}
+
+function clearStreetEditHandles() {
+  if (!_streetHandleGroup) return;
+  while (_streetHandleGroup.children.length > 0) {
+    const child = _streetHandleGroup.children[0];
+    _streetHandleGroup.remove(child);
+    disposeStreetHandleObject(child);
+  }
+}
+
+function getStreetSegmentAxis(seg) {
+  return Math.abs(seg.x2 - seg.x1) >= Math.abs(seg.z2 - seg.z1) ? 'h' : 'v';
+}
+
+function makeStreetHandleMesh(tx, tz, role, key, meta = {}) {
+  const endpoint = role !== 'mid';
+  const geo = endpoint
+    ? new THREE.CylinderGeometry(0.38, 0.38, 0.12, 18)
+    : new THREE.BoxGeometry(0.62, 0.12, 0.62);
+  const mat = new THREE.MeshLambertMaterial({
+    color: endpoint ? 0x38bdf8 : 0xffd54f,
+    emissive: endpoint ? 0x0b3a4a : 0x443100,
+    transparent: true,
+    opacity: endpoint ? 0.92 : 0.82,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(tx * T + 0.5, STREET_HANDLE_Y, tz * T + 0.5);
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.userData = { streetHandle: true, role, key, x: tx, z: tz, ...meta };
+  return mesh;
+}
+
+function refreshStreetEditHandles() {
+  clearStreetEditHandles();
+  if (!_streetHandleGroup || editMode !== 'roads') return;
+  const endpointMap = new Map();
+  _streetSegments.forEach((seg, index) => {
+    if (seg.type) return;
+    const axis = getStreetSegmentAxis(seg);
+    const endpoints = [
+      [seg.x1, seg.z1, 'start'],
+      [seg.x2, seg.z2, 'end'],
+    ];
+    for (const [x, z, role] of endpoints) {
+      const key = `${x},${z}`;
+      if (!endpointMap.has(key)) endpointMap.set(key, { x, z, segments: [] });
+      endpointMap.get(key).segments.push({
+        seg,
+        index,
+        role,
+        axis,
+        otherX: role === 'start' ? seg.x2 : seg.x1,
+        otherZ: role === 'start' ? seg.z2 : seg.z1,
+      });
+    }
+    const midX = Math.round((seg.x1 + seg.x2) / 2);
+    const midZ = Math.round((seg.z1 + seg.z2) / 2);
+    _streetHandleGroup.add(makeStreetHandleMesh(midX, midZ, 'mid', `${index}:mid`, {
+      seg,
+      segmentIndex: index,
+      axis,
+      segments: [{ seg, index, role: 'mid', axis, otherX: null, otherZ: null }],
+    }));
+  });
+  for (const [key, handle] of endpointMap) {
+    const role = handle.segments.length === 1 ? handle.segments[0].role : 'endpoint';
+    _streetHandleGroup.add(makeStreetHandleMesh(handle.x, handle.z, role, key, {
+      segments: handle.segments,
+    }));
+  }
+}
+
+function getStreetHandleHit(e) {
+  if (editMode !== 'roads' || !_streetHandleGroup || _streetHandleGroup.children.length === 0) return null;
+  const activeRaycaster = getPointerRaycast(e);
+  const hits = activeRaycaster.intersectObjects(_streetHandleGroup.children, true);
+  for (const hit of hits) {
+    let obj = hit.object;
+    while (obj && !obj.userData?.streetHandle) obj = obj.parent;
+    if (obj?.userData?.streetHandle) return obj.userData;
+  }
+  return null;
 }
 
 /**
@@ -25006,6 +25104,194 @@ function findNearestStreetEndpoint(wx, wz, radius) {
   return bestX !== null ? { x: bestX, z: bestZ, onSegment: true } : null;
 }
 
+function findNearestStreetLineSnap(wx, wz, radius = STREET_LINE_SNAP_RADIUS) {
+  const p = findNearestStreetPoint(wx, wz, radius);
+  if (p && p.onSegment) {
+    return { x: p.x, z: p.z, onSegment: true, position: p.position || null };
+  }
+  return { x: wx, z: wz, onSegment: false, position: null };
+}
+
+function makeStreetLineStart(wx, wz) {
+  const p = findNearestStreetLineSnap(wx, wz, STREET_LINE_SNAP_RADIUS);
+  return { x: p.x, z: p.z, snap: !!p.onSegment, position: p.position || null };
+}
+
+function getStreetSnapAxis(point) {
+  if (!point?.onSegment && !point?.snap) return null;
+  const hit = isOnStreetSegment(point.x, point.z);
+  if (hit?.seg) {
+    return Math.abs(hit.seg.x2 - hit.seg.x1) >= Math.abs(hit.seg.z2 - hit.seg.z1) ? 'h' : 'v';
+  }
+  const dir = detectRoadDirection(point.x, point.z);
+  if (dir.hSpan > dir.vSpan) return 'h';
+  if (dir.vSpan > dir.hSpan) return 'v';
+  return null;
+}
+
+function slideStreetSnapAlongSegment(point, isHorizontalDraw, targetX, targetZ) {
+  if (!point?.onSegment && !point?.snap) return { x: point?.x, z: point?.z, adjusted: false };
+  const hit = isOnStreetSegment(point.x, point.z);
+  if (!hit?.seg) return { x: point.x, z: point.z, adjusted: false };
+  const seg = hit.seg;
+  const segH = Math.abs(seg.x2 - seg.x1) >= Math.abs(seg.z2 - seg.z1);
+  if (isHorizontalDraw && !segH) {
+    const lo = Math.min(seg.z1, seg.z2);
+    const hi = Math.max(seg.z1, seg.z2);
+    const z = Math.round(Math.max(lo, Math.min(hi, targetZ)));
+    if (targetZ >= lo - STREET_LINE_AXIS_ALIGN_RADIUS && targetZ <= hi + STREET_LINE_AXIS_ALIGN_RADIUS) {
+      return { x: seg.x1, z, adjusted: z !== point.z };
+    }
+  }
+  if (!isHorizontalDraw && segH) {
+    const lo = Math.min(seg.x1, seg.x2);
+    const hi = Math.max(seg.x1, seg.x2);
+    const x = Math.round(Math.max(lo, Math.min(hi, targetX)));
+    if (targetX >= lo - STREET_LINE_AXIS_ALIGN_RADIUS && targetX <= hi + STREET_LINE_AXIS_ALIGN_RADIUS) {
+      return { x, z: seg.z1, adjusted: x !== point.x };
+    }
+  }
+  return { x: point.x, z: point.z, adjusted: false };
+}
+
+function findStreetAxisConnectionSnap(rawX, rawZ, isHorizontalDraw, fixedCoord, radius = STREET_LINE_AXIS_ALIGN_RADIUS) {
+  let best = null;
+  let bestDist = Infinity;
+
+  for (const seg of _streetSegments) {
+    if (seg.type) continue;
+    const segH = getStreetSegmentAxis(seg) === 'h';
+    if (isHorizontalDraw === segH) continue;
+
+    if (isHorizontalDraw) {
+      const lo = Math.min(seg.z1, seg.z2);
+      const hi = Math.max(seg.z1, seg.z2);
+      if (fixedCoord < lo - radius || fixedCoord > hi + radius) continue;
+      if (Math.abs(rawX - seg.x1) > radius) continue;
+      const z = Math.round(Math.max(lo, Math.min(hi, fixedCoord)));
+      const beyond = fixedCoord < lo ? lo - fixedCoord : fixedCoord > hi ? fixedCoord - hi : 0;
+      const d = Math.abs(rawX - seg.x1) + Math.abs(rawZ - fixedCoord) * 0.35 + beyond;
+      if (d < bestDist) {
+        bestDist = d;
+        best = { x: seg.x1, z, onSegment: true, position: 'middle', axisCorrection: true, distance: d };
+      }
+    } else {
+      const lo = Math.min(seg.x1, seg.x2);
+      const hi = Math.max(seg.x1, seg.x2);
+      if (fixedCoord < lo - radius || fixedCoord > hi + radius) continue;
+      if (Math.abs(rawZ - seg.z1) > radius) continue;
+      const x = Math.round(Math.max(lo, Math.min(hi, fixedCoord)));
+      const beyond = fixedCoord < lo ? lo - fixedCoord : fixedCoord > hi ? fixedCoord - hi : 0;
+      const d = Math.abs(rawZ - seg.z1) + Math.abs(rawX - fixedCoord) * 0.35 + beyond;
+      if (d < bestDist) {
+        bestDist = d;
+        best = { x, z: seg.z1, onSegment: true, position: 'middle', axisCorrection: true, distance: d };
+      }
+    }
+  }
+
+  return bestDist <= radius + 1 ? best : null;
+}
+
+function resolveStreetLineDraw(start, rawEndX, rawEndZ) {
+  if (!start || !Number.isFinite(start.x) || !Number.isFinite(start.z)) return null;
+  let endSnap = findNearestStreetLineSnap(rawEndX, rawEndZ, STREET_LINE_SNAP_RADIUS);
+  const startAxis = getStreetSnapAxis(start);
+  let endAxis = getStreetSnapAxis(endSnap);
+
+  let x1 = start.x;
+  let z1 = start.z;
+  let x2 = endSnap.x;
+  let z2 = endSnap.z;
+
+  let dx = x2 - x1;
+  let dz = z2 - z1;
+  if (Math.abs(dx) + Math.abs(dz) < 0.001) {
+    dx = rawEndX - x1;
+    dz = rawEndZ - z1;
+  }
+  let isH = Math.abs(dx) >= Math.abs(dz);
+  if (start.fromHandle && Array.isArray(start.handle?.segments)) {
+    const handleAxes = new Set(start.handle.segments.map(c => c?.axis).filter(Boolean));
+    const rawDx = rawEndX - start.x;
+    const rawDz = rawEndZ - start.z;
+    if (handleAxes.has('h') && Math.abs(rawDz) <= STREET_LINE_AXIS_ALIGN_RADIUS && Math.abs(rawDx) > 2) isH = true;
+    if (handleAxes.has('v') && Math.abs(rawDx) <= STREET_LINE_AXIS_ALIGN_RADIUS && Math.abs(rawDz) > 2) isH = false;
+  }
+  const axisSnap = findStreetAxisConnectionSnap(rawEndX, rawEndZ, isH, isH ? z1 : x1);
+  if (axisSnap && (!endSnap.onSegment || axisSnap.distance <= STREET_LINE_AXIS_ALIGN_RADIUS)) {
+    endSnap = axisSnap;
+    endAxis = getStreetSnapAxis(endSnap);
+    x2 = endSnap.x;
+    z2 = endSnap.z;
+  }
+
+  if (isH) {
+    const endIsHorizontalAnchor = endSnap.onSegment && (endAxis === 'h' || endSnap.position === 'intersection');
+    const startIsHorizontalAnchor = start.snap && (startAxis === 'h' || start.position === 'intersection');
+    if (endIsHorizontalAnchor && Math.abs(endSnap.z - z1) <= STREET_LINE_AXIS_ALIGN_RADIUS) {
+      const slidStart = slideStreetSnapAlongSegment(start, true, x1, endSnap.z);
+      x1 = Number.isFinite(slidStart.x) ? slidStart.x : x1;
+      z1 = start.snap && Number.isFinite(slidStart.z) ? slidStart.z : endSnap.z;
+      z2 = z1;
+    } else if (startIsHorizontalAnchor && endSnap.onSegment && Math.abs(z2 - z1) <= STREET_LINE_AXIS_ALIGN_RADIUS) {
+      const slidEnd = slideStreetSnapAlongSegment(endSnap, true, x2, z1);
+      x2 = Number.isFinite(slidEnd.x) ? slidEnd.x : x2;
+      z2 = Number.isFinite(slidEnd.z) ? slidEnd.z : z1;
+    } else if (endSnap.onSegment && endAxis === 'v' && Math.abs(endSnap.z - z1) <= STREET_LINE_AXIS_ALIGN_RADIUS) {
+      const slidEnd = slideStreetSnapAlongSegment(endSnap, true, x2, z1);
+      x2 = Number.isFinite(slidEnd.x) ? slidEnd.x : x2;
+      z2 = Number.isFinite(slidEnd.z) ? slidEnd.z : z1;
+    } else if (start.snap && startAxis === 'v' && endSnap.onSegment && Math.abs(z2 - z1) <= STREET_LINE_AXIS_ALIGN_RADIUS) {
+      const slidStart = slideStreetSnapAlongSegment(start, true, x1, z2);
+      x1 = Number.isFinite(slidStart.x) ? slidStart.x : x1;
+      z1 = Number.isFinite(slidStart.z) ? slidStart.z : z1;
+      z2 = z1;
+    } else {
+      z2 = z1;
+    }
+    if (start.snap && startAxis === 'v' && !endSnap.onSegment && Math.abs(rawEndX - x1) <= STREET_LINE_AXIS_ALIGN_RADIUS) {
+      x2 = x1;
+    }
+  } else {
+    const endIsVerticalAnchor = endSnap.onSegment && (endAxis === 'v' || endSnap.position === 'intersection');
+    const startIsVerticalAnchor = start.snap && (startAxis === 'v' || start.position === 'intersection');
+    if (endIsVerticalAnchor && Math.abs(endSnap.x - x1) <= STREET_LINE_AXIS_ALIGN_RADIUS) {
+      const slidStart = slideStreetSnapAlongSegment(start, false, endSnap.x, z1);
+      x1 = start.snap && Number.isFinite(slidStart.x) ? slidStart.x : endSnap.x;
+      z1 = Number.isFinite(slidStart.z) ? slidStart.z : z1;
+      x2 = x1;
+    } else if (startIsVerticalAnchor && endSnap.onSegment && Math.abs(x2 - x1) <= STREET_LINE_AXIS_ALIGN_RADIUS) {
+      const slidEnd = slideStreetSnapAlongSegment(endSnap, false, x1, z2);
+      x2 = Number.isFinite(slidEnd.x) ? slidEnd.x : x1;
+      z2 = Number.isFinite(slidEnd.z) ? slidEnd.z : z2;
+    } else if (endSnap.onSegment && endAxis === 'h' && Math.abs(endSnap.x - x1) <= STREET_LINE_AXIS_ALIGN_RADIUS) {
+      const slidEnd = slideStreetSnapAlongSegment(endSnap, false, x1, z2);
+      x2 = Number.isFinite(slidEnd.x) ? slidEnd.x : x1;
+      z2 = Number.isFinite(slidEnd.z) ? slidEnd.z : z2;
+    } else if (start.snap && startAxis === 'h' && endSnap.onSegment && Math.abs(x2 - x1) <= STREET_LINE_AXIS_ALIGN_RADIUS) {
+      const slidStart = slideStreetSnapAlongSegment(start, false, x2, z1);
+      x1 = Number.isFinite(slidStart.x) ? slidStart.x : x1;
+      z1 = Number.isFinite(slidStart.z) ? slidStart.z : z1;
+      x2 = x1;
+    } else {
+      x2 = x1;
+    }
+    if (start.snap && startAxis === 'h' && !endSnap.onSegment && Math.abs(rawEndZ - z1) <= STREET_LINE_AXIS_ALIGN_RADIUS) {
+      z2 = z1;
+    }
+  }
+
+  const len = Math.max(Math.abs(x2 - x1), Math.abs(z2 - z1));
+  return {
+    x1, z1, x2, z2, len,
+    isHorizontal: isH,
+    startSnap: !!start.snap,
+    endSnap: !!endSnap.onSegment,
+    endPosition: endSnap.position || null,
+  };
+}
+
 function findStreetSnapPoint(wx, wz) {
   const p = findNearestStreetPoint(wx, wz, 10);
   const dir = detectRoadDirection(p.x, p.z);
@@ -25063,15 +25349,28 @@ function buildStreetSnapGhost(tx, tz, type) {
  * Includes end caps: at each end, sidewalk wraps around with curb + gutter
  * so standalone segments look complete and overlap with intersections is invisible.
  */
-function buildStreetMesh(x1, z1, x2, z2) {
+function buildStreetMesh(x1, z1, x2, z2, options = {}) {
   const g = new THREE.Group();
   const dx = x2 - x1, dz = z2 - z1;
   const isH = Math.abs(dx) >= Math.abs(dz);
   const len = isH ? Math.abs(dx) : Math.abs(dz);
   if (len === 0) return g;
 
+  const trimStart = Math.max(0, Math.min(0.95, Number(options.trimStart || 0)));
+  const trimEnd = Math.max(0, Math.min(0.95, Number(options.trimEnd || 0)));
+  let minEdge, maxEdge;
+  if (isH) {
+    const lowIsStart = x1 <= x2;
+    minEdge = Math.min(x1, x2) + (lowIsStart ? trimStart : trimEnd);
+    maxEdge = Math.max(x1, x2) + 1 - (lowIsStart ? trimEnd : trimStart);
+  } else {
+    const lowIsStart = z1 <= z2;
+    minEdge = Math.min(z1, z2) + (lowIsStart ? trimStart : trimEnd);
+    maxEdge = Math.max(z1, z2) + 1 - (lowIsStart ? trimEnd : trimStart);
+  }
+  const visualLen = Math.max(0.1, (maxEdge - minEdge) * T);
   const L = len * T;
-  const segLen = L + T;
+  const segLen = visualLen;
   const B = ST.BASE;
   const roadTop = B + ST.ROAD_THICK;
   const gutterOff = ST.LANE_W + ST.CENTER_W / 2 + ST.GUTTER_W / 2;
@@ -25080,8 +25379,9 @@ function buildStreetMesh(x1, z1, x2, z2) {
   const roadW     = ST.LANE_W * 2 + ST.CENTER_W;
   const curbH     = ST.ROAD_THICK + ST.CURB_RISE;
   const gutterH   = ST.ROAD_THICK - ST.GUTTER_DIP;
-  const cx = (x1 + x2) / 2 * T + 0.5;
-  const cz = (z1 + z2) / 2 * T + 0.5;
+  const centerPrimary = (minEdge + maxEdge) / 2 * T;
+  const cx = isH ? centerPrimary : x1 * T + 0.5;
+  const cz = isH ? z1 * T + 0.5 : centerPrimary;
 
   function addBox(prim, y, cross, primLen, h, crossLen, color) {
     g.add(posVox(isH ? prim : cross, y, isH ? cross : prim,
@@ -25103,9 +25403,9 @@ function buildStreetMesh(x1, z1, x2, z2) {
   }
   // Yellow center dashes
   const dashLen = 0.8 * T, totalStride = dashLen + 3 * T;
-  for (let i = 0, n = Math.floor(L / totalStride) + 1; i < n; i++) {
-    const off = -L / 2 + i * totalStride + dashLen / 2;
-    if (off > L / 2) break;
+  for (let i = 0, n = Math.floor(visualLen / totalStride) + 1; i < n; i++) {
+    const off = -visualLen / 2 + i * totalStride + dashLen / 2;
+    if (off > visualLen / 2) break;
     addBox(off, roadTop + 0.005, 0, dashLen, 0.01, 0.12, 0xffd600);
   }
   // White edge lines
@@ -25114,6 +25414,80 @@ function buildStreetMesh(x1, z1, x2, z2) {
 
   g.position.set(cx, 0, cz);
   return mergeStaticGroupMeshes(g);
+}
+
+function disposeStreetMeshObject(obj) {
+  obj?.traverse?.(child => {
+    if (!child.isMesh) return;
+    child.geometry?.dispose?.();
+    if (Array.isArray(child.material)) child.material.forEach(mat => mat?.dispose?.());
+    else child.material?.dispose?.();
+  });
+}
+
+function getStreetEndpointIntersectionTrim(seg, endpointName) {
+  if (!seg || seg.type) return 0;
+  const gap = Math.round(ST.HALF_W);
+  const maxDist = gap + 1;
+  const isH = getStreetSegmentAxis(seg) === 'h';
+  const ex = endpointName === 'start' ? seg.x1 : seg.x2;
+  const ez = endpointName === 'start' ? seg.z1 : seg.z2;
+  const ox = endpointName === 'start' ? seg.x2 : seg.x1;
+  const oz = endpointName === 'start' ? seg.z2 : seg.z1;
+  const outward = isH ? Math.sign(ex - ox) : Math.sign(ez - oz);
+  if (outward === 0) return 0;
+
+  for (const piece of _streetSegments) {
+    if (!piece.type) continue;
+    if (isH) {
+      const d = (piece.x1 - ex) * outward;
+      if (d <= 0 || d > maxDist || Math.abs(piece.z1 - ez) > 1) continue;
+      return Math.max(0, ST.HALF_W + 0.5 - d);
+    }
+    const d = (piece.z1 - ez) * outward;
+    if (d <= 0 || d > maxDist || Math.abs(piece.x1 - ex) > 1) continue;
+    return Math.max(0, ST.HALF_W + 0.5 - d);
+  }
+  return 0;
+}
+
+function getStreetSegmentVisualTrim(seg) {
+  return {
+    trimStart: getStreetEndpointIntersectionTrim(seg, 'start'),
+    trimEnd: getStreetEndpointIntersectionTrim(seg, 'end'),
+  };
+}
+
+function rebuildStreetSegmentMesh(seg) {
+  if (!seg || seg.type) return;
+  const nextMesh = buildStreetMesh(seg.x1, seg.z1, seg.x2, seg.z2, getStreetSegmentVisualTrim(seg));
+  if (seg.mesh) {
+    _streetGroup.remove(seg.mesh);
+    disposeStreetMeshObject(seg.mesh);
+  }
+  seg.mesh = nextMesh;
+  _streetGroup.add(nextMesh);
+}
+
+function refreshStreetSegmentMeshesNear(tx, tz, radius = Math.ceil(ST.HALF_W) + 3) {
+  for (const seg of _streetSegments) {
+    if (seg.type) continue;
+    const minX = Math.min(seg.x1, seg.x2) - radius;
+    const maxX = Math.max(seg.x1, seg.x2) + radius;
+    const minZ = Math.min(seg.z1, seg.z2) - radius;
+    const maxZ = Math.max(seg.z1, seg.z2) + radius;
+    if (tx >= minX && tx <= maxX && tz >= minZ && tz <= maxZ) {
+      rebuildStreetSegmentMesh(seg);
+    }
+  }
+  invalidateGroundIndex();
+}
+
+function refreshAllStreetSegmentMeshes() {
+  for (const seg of _streetSegments) {
+    if (!seg.type) rebuildStreetSegmentMesh(seg);
+  }
+  invalidateGroundIndex();
 }
 
 /**
@@ -25170,6 +25544,232 @@ function buildIntersectionMesh(ix, iz, type, rotation, openEdges) {
   // Curb/gutter flank: extend from road edge to intersection boundary for seamless overlap
   const cgFlankLen = halfSize - roadHalf;
   const cgFlankCenter = roadHalf + cgFlankLen / 2;
+  const gutterInnerEdge = roadHalf;
+  const gutterOuterEdge = roadHalf + ST.GUTTER_W;
+  const curbInnerEdge = gutterOuterEdge;
+  const sidewalkInnerEdge = curbInnerEdge + ST.CURB_W;
+  const sidewalkOuterEdge = halfSize;
+  const cornerCurveRadius = Math.min(ST.SIDEWALK_W * 0.78, sidewalkOuterEdge - sidewalkInnerEdge);
+  const roadColor = 0x2a2a2a;
+  const reverseTurnRoadCurveRadius = Math.max(1.35, Math.min(roadHalf - 0.65, ST.SIDEWALK_W * 0.9));
+  const reverseTurnCurveCenterEdge = roadHalf - reverseTurnRoadCurveRadius;
+  const reverseTurnGutterOuterCurveRadius = reverseTurnRoadCurveRadius + ST.GUTTER_W;
+  const reverseTurnSidewalkCurveRadius = reverseTurnGutterOuterCurveRadius + ST.CURB_W;
+
+  function addRoundedCornerPatch(sx, sz, inner, outer, radius, height, color, name) {
+    if (outer <= inner || height <= 0) return;
+    radius = Math.max(0.05, Math.min(radius, outer - inner));
+    const shape = new THREE.Shape();
+    const pt = (x, z) => [sx * x, -sz * z];
+    let p = pt(inner + radius, inner);
+    shape.moveTo(p[0], p[1]);
+    p = pt(outer, inner);
+    shape.lineTo(p[0], p[1]);
+    p = pt(outer, outer);
+    shape.lineTo(p[0], p[1]);
+    p = pt(inner, outer);
+    shape.lineTo(p[0], p[1]);
+    p = pt(inner, inner + radius);
+    shape.lineTo(p[0], p[1]);
+    const c = pt(inner, inner);
+    p = pt(inner + radius, inner);
+    shape.quadraticCurveTo(c[0], c[1], p[0], p[1]);
+    shape.closePath();
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+    geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, getMat(color));
+    mesh.position.y = B;
+    mesh.receiveShadow = true;
+    mesh.userData[name] = true;
+    g.add(mesh);
+  }
+
+  function addCurvedCornerBand(sx, sz, outerBase, innerBase, outerEdge, height, color, name, drawAsSurface = false) {
+    if (outerBase <= innerBase || outerEdge <= outerBase || height <= 0) return;
+    const shape = new THREE.Shape();
+    const pt = (x, z) => [sx * x, -sz * z];
+    const curvePt = (base, t) => {
+      const inv = 1 - t;
+      const radius = outerEdge - base;
+      return pt(base + t * t * radius, base + inv * inv * radius);
+    };
+    const steps = 18;
+
+    for (let i = 0; i <= steps; i++) {
+      const p = curvePt(outerBase, i / steps);
+      if (i === 0) shape.moveTo(p[0], p[1]);
+      else shape.lineTo(p[0], p[1]);
+    }
+    for (let i = steps; i >= 0; i--) {
+      const p = curvePt(innerBase, i / steps);
+      shape.lineTo(p[0], p[1]);
+    }
+    shape.closePath();
+
+    if (drawAsSurface) {
+      const geo = new THREE.ShapeGeometry(shape);
+      geo.rotateX(-Math.PI / 2);
+      const mesh = new THREE.Mesh(geo, getMat(color));
+      mesh.position.y = B + ST.ROAD_THICK + 0.01;
+      mesh.receiveShadow = true;
+      mesh.renderOrder = 2;
+      mesh.userData[name] = true;
+      g.add(mesh);
+      return;
+    }
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+    geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, getMat(color));
+    mesh.position.y = B + 0.003;
+    mesh.receiveShadow = true;
+    mesh.userData[name] = true;
+    g.add(mesh);
+  }
+
+  function addConcaveTurnBand(sx, sz, centerEdge, innerRadius, outerRadius, height, color, name, drawAsSurface = false) {
+    if (outerRadius <= innerRadius || innerRadius <= 0 || height <= 0) return;
+    const shape = new THREE.Shape();
+    const pt = (x, z) => [sx * x, -sz * z];
+    const curvePt = (radius, t) => {
+      const theta = (Math.PI / 2) * (1 - t);
+      return pt(centerEdge + Math.cos(theta) * radius, centerEdge + Math.sin(theta) * radius);
+    };
+    const steps = 24;
+
+    for (let i = 0; i <= steps; i++) {
+      const p = curvePt(outerRadius, i / steps);
+      if (i === 0) shape.moveTo(p[0], p[1]);
+      else shape.lineTo(p[0], p[1]);
+    }
+    for (let i = steps; i >= 0; i--) {
+      const p = curvePt(innerRadius, i / steps);
+      shape.lineTo(p[0], p[1]);
+    }
+    shape.closePath();
+
+    if (drawAsSurface) {
+      const geo = new THREE.ShapeGeometry(shape);
+      geo.rotateX(-Math.PI / 2);
+      const mesh = new THREE.Mesh(geo, getMat(color));
+      mesh.position.y = B + ST.ROAD_THICK + 0.012;
+      mesh.receiveShadow = true;
+      mesh.renderOrder = 3;
+      mesh.userData[name] = true;
+      g.add(mesh);
+      return;
+    }
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+    geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, getMat(color));
+    mesh.position.y = B + 0.006;
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 2;
+    mesh.userData[name] = true;
+    g.add(mesh);
+  }
+
+  function addConcaveTurnSidewalkPatch(sx, sz, centerEdge, radius, height, color, name) {
+    if (radius <= 0 || height <= 0) return;
+    const shape = new THREE.Shape();
+    const pt = (x, z) => [sx * x, -sz * z];
+    const curvePt = (t) => {
+      const theta = (Math.PI / 2) * (1 - t);
+      return pt(centerEdge + Math.cos(theta) * radius, centerEdge + Math.sin(theta) * radius);
+    };
+    const steps = 24;
+
+    let p = pt(centerEdge, centerEdge + radius);
+    shape.moveTo(p[0], p[1]);
+    p = pt(centerEdge, sidewalkOuterEdge);
+    shape.lineTo(p[0], p[1]);
+    p = pt(sidewalkOuterEdge, sidewalkOuterEdge);
+    shape.lineTo(p[0], p[1]);
+    p = pt(sidewalkOuterEdge, centerEdge);
+    shape.lineTo(p[0], p[1]);
+    p = pt(centerEdge + radius, centerEdge);
+    shape.lineTo(p[0], p[1]);
+    for (let i = steps - 1; i >= 0; i--) {
+      p = curvePt(i / steps);
+      shape.lineTo(p[0], p[1]);
+    }
+    shape.closePath();
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+    geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, getMat(color));
+    mesh.position.y = B + 0.006;
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 1;
+    mesh.userData[name] = true;
+    g.add(mesh);
+  }
+
+  function addRoundedSidewalkCorner(sx, sz) {
+    const zOpen = sz < 0 ? oN : oS;
+    const xOpen = sx < 0 ? oW : oE;
+    if (!zOpen || !xOpen) return;
+
+    addCurvedCornerBand(sx, sz, curbInnerEdge, gutterInnerEdge, sidewalkOuterEdge, gutterH, 0x1a1a1a, 'roundedIntersectionGutter');
+    addCurvedCornerBand(sx, sz, sidewalkInnerEdge, curbInnerEdge, sidewalkOuterEdge, curbH, 0x999999, 'roundedIntersectionCurb');
+    addRoundedCornerPatch(
+      sx,
+      sz,
+      sidewalkInnerEdge,
+      sidewalkOuterEdge,
+      cornerCurveRadius,
+      ST.SIDEWALK_H,
+      0xb0b0b0,
+      'roundedIntersectionSidewalk'
+    );
+  }
+
+  function isOpenOpenCorner(sx, sz) {
+    const zOpen = sz < 0 ? oN : oS;
+    const xOpen = sx < 0 ? oW : oE;
+    return zOpen && xOpen;
+  }
+
+  function isTurnPiece() {
+    const openCount = [oN, oS, oE, oW].filter(Boolean).length;
+    return openCount === 2 && !((oN && oS) || (oE && oW));
+  }
+
+  function isTPiece() {
+    return [oN, oS, oE, oW].filter(Boolean).length === 3;
+  }
+
+  function isStraightThroughPiece() {
+    const openCount = [oN, oS, oE, oW].filter(Boolean).length;
+    return openCount === 2 && ((oN && oS) || (oE && oW));
+  }
+
+  function hasContinuousClosedSideCurb() {
+    return isTPiece() || isStraightThroughPiece();
+  }
+
+  function isContinuousClosedAdjacentFlank(axis, sign) {
+    if (!hasContinuousClosedSideCurb()) return false;
+    return axis === 'x'
+      ? !(sign < 0 ? oW : oE)
+      : !(sign < 0 ? oN : oS);
+  }
+
+  function isClosedClosedTurnCorner(sx, sz) {
+    if (!isTurnPiece()) return false;
+    const zOpen = sz < 0 ? oN : oS;
+    const xOpen = sx < 0 ? oW : oE;
+    return !zOpen && !xOpen;
+  }
+
+  function addReverseTurnCorner(sx, sz) {
+    if (!isClosedClosedTurnCorner(sx, sz)) return;
+    addConcaveTurnSidewalkPatch(sx, sz, reverseTurnCurveCenterEdge, reverseTurnSidewalkCurveRadius, ST.SIDEWALK_H, 0xb0b0b0, 'reverseTurnSidewalk');
+    addConcaveTurnBand(sx, sz, reverseTurnCurveCenterEdge, reverseTurnGutterOuterCurveRadius, reverseTurnSidewalkCurveRadius, curbH, 0x999999, 'reverseTurnCurb');
+    addConcaveTurnBand(sx, sz, reverseTurnCurveCenterEdge, reverseTurnRoadCurveRadius, reverseTurnGutterOuterCurveRadius, ST.ROAD_THICK, roadColor, 'reverseTurnPavementFill', true);
+  }
 
   // Helper: add curb + gutter + sidewalk for one side
   // axis: 'x' = side runs along X (N/S edges), 'z' = side runs along Z (E/W edges)
@@ -25184,32 +25784,49 @@ function buildIntersectionMesh(ix, iz, type, rotation, openEdges) {
       if (isOpen) {
         // Flanking pieces — curb/gutter extend to intersection edge for seamless connection
         for (const sx of [-1, 1]) {
-          g.add(posVox(sx * swFlankCenter, B + ST.SIDEWALK_H / 2, swP, swFlankLen, ST.SIDEWALK_H, ST.SIDEWALK_W, 0xb0b0b0));
-          g.add(posVox(sx * cgFlankCenter, B + curbH / 2, crbP, cgFlankLen, curbH, ST.CURB_W, 0x999999));
-          g.add(posVox(sx * cgFlankCenter, B + gutterH / 2, gutP, cgFlankLen, gutterH, ST.GUTTER_W, 0x1a1a1a));
+          if (isTurnPiece() || isOpenOpenCorner(sx, sign) || isContinuousClosedAdjacentFlank('x', sx)) continue;
+          const curbLen = cgFlankLen;
+          const gutterLen = cgFlankLen;
+          g.add(posVox(sx * (roadHalf + curbLen / 2), B + curbH / 2, crbP, curbLen, curbH, ST.CURB_W, 0x999999));
+          g.add(posVox(sx * (roadHalf + gutterLen / 2), B + gutterH / 2, gutP, gutterLen, gutterH, ST.GUTTER_W, 0x1a1a1a));
         }
-        // Corner blocks
-        g.add(posVox(-swOff, B + ST.SIDEWALK_H / 2, swP, ST.SIDEWALK_W, ST.SIDEWALK_H, ST.SIDEWALK_W, 0xb0b0b0));
-        g.add(posVox( swOff, B + ST.SIDEWALK_H / 2, swP, ST.SIDEWALK_W, ST.SIDEWALK_H, ST.SIDEWALK_W, 0xb0b0b0));
       } else {
         // Closed: full sidewalk span + curb/gutter across road width
         g.add(posVox(0, B + ST.SIDEWALK_H / 2, swP, fullSideLen, ST.SIDEWALK_H, ST.SIDEWALK_W, 0xb0b0b0));
-        g.add(posVox(0, B + curbH / 2, crbP, roadW, curbH, ST.CURB_W, 0x999999));
-        g.add(posVox(0, B + gutterH / 2, gutP, roadW, gutterH, ST.GUTTER_W, 0x1a1a1a));
+        let minX = -roadHalf;
+        let maxX = roadHalf;
+        if (hasContinuousClosedSideCurb()) { minX = -halfSize; maxX = halfSize; }
+        if (isTurnPiece() && oW) minX = -halfSize;
+        if (isTurnPiece() && oE) maxX = halfSize;
+        if (isClosedClosedTurnCorner(-1, sign)) minX = -reverseTurnCurveCenterEdge;
+        if (isClosedClosedTurnCorner(1, sign)) maxX = reverseTurnCurveCenterEdge;
+        const trimLen = Math.max(0.05, maxX - minX);
+        const trimCenter = (minX + maxX) / 2;
+        g.add(posVox(trimCenter, B + curbH / 2, crbP, trimLen, curbH, ST.CURB_W, 0x999999));
+        g.add(posVox(trimCenter, B + gutterH / 2, gutP, trimLen, gutterH, ST.GUTTER_W, 0x1a1a1a));
       }
     } else {
       if (isOpen) {
         for (const sz of [-1, 1]) {
-          g.add(posVox(swP, B + ST.SIDEWALK_H / 2, sz * swFlankCenter, ST.SIDEWALK_W, ST.SIDEWALK_H, swFlankLen, 0xb0b0b0));
-          g.add(posVox(crbP, B + curbH / 2, sz * cgFlankCenter, ST.CURB_W, curbH, cgFlankLen, 0x999999));
-          g.add(posVox(gutP, B + gutterH / 2, sz * cgFlankCenter, ST.GUTTER_W, gutterH, cgFlankLen, 0x1a1a1a));
+          if (isTurnPiece() || isOpenOpenCorner(sign, sz) || isContinuousClosedAdjacentFlank('z', sz)) continue;
+          const curbLen = cgFlankLen;
+          const gutterLen = cgFlankLen;
+          g.add(posVox(crbP, B + curbH / 2, sz * (roadHalf + curbLen / 2), ST.CURB_W, curbH, curbLen, 0x999999));
+          g.add(posVox(gutP, B + gutterH / 2, sz * (roadHalf + gutterLen / 2), ST.GUTTER_W, gutterH, gutterLen, 0x1a1a1a));
         }
-        g.add(posVox(swP, B + ST.SIDEWALK_H / 2, -swOff, ST.SIDEWALK_W, ST.SIDEWALK_H, ST.SIDEWALK_W, 0xb0b0b0));
-        g.add(posVox(swP, B + ST.SIDEWALK_H / 2,  swOff, ST.SIDEWALK_W, ST.SIDEWALK_H, ST.SIDEWALK_W, 0xb0b0b0));
       } else {
         g.add(posVox(swP, B + ST.SIDEWALK_H / 2, 0, ST.SIDEWALK_W, ST.SIDEWALK_H, fullSideLen, 0xb0b0b0));
-        g.add(posVox(crbP, B + curbH / 2, 0, ST.CURB_W, curbH, roadW, 0x999999));
-        g.add(posVox(gutP, B + gutterH / 2, 0, ST.GUTTER_W, gutterH, roadW, 0x1a1a1a));
+        let minZ = -roadHalf;
+        let maxZ = roadHalf;
+        if (hasContinuousClosedSideCurb()) { minZ = -halfSize; maxZ = halfSize; }
+        if (isTurnPiece() && oN) minZ = -halfSize;
+        if (isTurnPiece() && oS) maxZ = halfSize;
+        if (isClosedClosedTurnCorner(sign, -1)) minZ = -reverseTurnCurveCenterEdge;
+        if (isClosedClosedTurnCorner(sign, 1)) maxZ = reverseTurnCurveCenterEdge;
+        const trimLen = Math.max(0.05, maxZ - minZ);
+        const trimCenter = (minZ + maxZ) / 2;
+        g.add(posVox(crbP, B + curbH / 2, trimCenter, ST.CURB_W, curbH, trimLen, 0x999999));
+        g.add(posVox(gutP, B + gutterH / 2, trimCenter, ST.GUTTER_W, gutterH, trimLen, 0x1a1a1a));
       }
     }
   }
@@ -25218,6 +25835,15 @@ function buildIntersectionMesh(ix, iz, type, rotation, openEdges) {
   addSideElements('x',  1, oS);  // South
   addSideElements('z', -1, oW);  // West
   addSideElements('z',  1, oE);  // East
+
+  addRoundedSidewalkCorner(-1, -1);
+  addRoundedSidewalkCorner( 1, -1);
+  addRoundedSidewalkCorner(-1,  1);
+  addRoundedSidewalkCorner( 1,  1);
+  addReverseTurnCorner(-1, -1);
+  addReverseTurnCorner( 1, -1);
+  addReverseTurnCorner(-1,  1);
+  addReverseTurnCorner( 1,  1);
 
   // ── Crosswalks (zebra stripes) at each open edge ──
   // Each crosswalk is a band that spans the ROAD WIDTH (across the arm) and is
@@ -25267,12 +25893,13 @@ function buildIntersectionMesh(ix, iz, type, rotation, openEdges) {
 // ── Core: add a raw street segment (no auto-intersection) ────
 function _addRawSegment(x1, z1, x2, z2) {
   if (x1 === x2 && z1 === z2) return null;
-  const mesh = buildStreetMesh(x1, z1, x2, z2);
-  _streetGroup.add(mesh);
-  const seg = { x1, z1, x2, z2, mesh };
+  const seg = { x1, z1, x2, z2, mesh: null };
   _streetSegments.push(seg);
+  seg.mesh = buildStreetMesh(x1, z1, x2, z2, getStreetSegmentVisualTrim(seg));
+  _streetGroup.add(seg.mesh);
   invalidateGroundIndex(); // PERF: street layout changed
   _paintSegmentTerrain(x1, z1, x2, z2);
+  refreshStreetEditHandles();
   _debounceSaveStreets();
   _debounceRebuildLamps();
   _debounceRebuildTrafficLights();
@@ -25298,6 +25925,8 @@ function _addRawIntersection(ix, iz, type, rotation, openEdges) {
     }
   }
   _invalidateRoadGraph();
+  refreshStreetSegmentMeshesNear(ix, iz);
+  refreshStreetEditHandles();
   _debounceSaveStreets();
   _debounceRebuildLamps();
   _debounceRebuildTrafficLights();
@@ -25418,6 +26047,8 @@ function _restoreStreets(snapshot) {
   for (const s of snapshot) {
     _rebuildNearChunks(s.x1, s.z1, 5);
   }
+  refreshAllStreetSegmentMeshes();
+  refreshStreetEditHandles();
 }
 
 function _removeSegment(seg) {
@@ -25427,6 +26058,7 @@ function _removeSegment(seg) {
     _streetSegments.splice(idx, 1);
     invalidateGroundIndex(); // PERF: street layout changed
     _invalidateRoadGraph();
+    refreshStreetEditHandles();
     _debounceSaveStreets();
     _debounceRebuildLamps();
   _debounceRebuildTrafficLights();
@@ -25570,8 +26202,63 @@ function _findCrossings(x1, z1, x2, z2) {
   return crossings;
 }
 
+function tryExtendStreetFromHandle(start, resolved) {
+  if (!start?.fromHandle || !start.handle || start.handle.role === 'mid' || !resolved) return false;
+  const axis = resolved.isHorizontal ? 'h' : 'v';
+  const candidates = Array.isArray(start.handle.segments) ? start.handle.segments : [];
+  const candidate = candidates.find(c => c?.axis === axis && c.seg && _streetSegments.includes(c.seg));
+  if (!candidate) return false;
+
+  const seg = candidate.seg;
+  const anchorX = Math.round(start.handle.x);
+  const anchorZ = Math.round(start.handle.z);
+  const otherX = Math.round(candidate.otherX);
+  const otherZ = Math.round(candidate.otherZ);
+  let targetX = Math.round(resolved.x2);
+  let targetZ = Math.round(resolved.z2);
+
+  if (axis === 'h') {
+    const fixedZ = Math.round(seg.z1);
+    if (Math.abs(anchorZ - fixedZ) > 1 || otherZ !== fixedZ) return false;
+    targetZ = fixedZ;
+    const outwardDir = Math.sign(anchorX - otherX);
+    if (outwardDir === 0) return false;
+    if (Math.sign(targetX - anchorX) !== outwardDir || Math.abs(targetX - anchorX) < 2) return false;
+    if (Math.abs(targetX - otherX) < 2) return false;
+
+    _removeSegment(seg);
+    addStreetSegment(otherX, fixedZ, targetX, fixedZ);
+    _rebuildNearChunks(anchorX, fixedZ, 7);
+    _rebuildNearChunks(otherX, fixedZ, 7);
+    _rebuildNearChunks(targetX, fixedZ, 7);
+    return true;
+  }
+
+  const fixedX = Math.round(seg.x1);
+  if (Math.abs(anchorX - fixedX) > 1 || otherX !== fixedX) return false;
+  targetX = fixedX;
+  const outwardDir = Math.sign(anchorZ - otherZ);
+  if (outwardDir === 0) return false;
+  if (Math.sign(targetZ - anchorZ) !== outwardDir || Math.abs(targetZ - anchorZ) < 2) return false;
+  if (Math.abs(targetZ - otherZ) < 2) return false;
+
+  _removeSegment(seg);
+  addStreetSegment(fixedX, otherZ, fixedX, targetZ);
+  _rebuildNearChunks(fixedX, anchorZ, 7);
+  _rebuildNearChunks(fixedX, otherZ, 7);
+  _rebuildNearChunks(fixedX, targetZ, 7);
+  return true;
+}
+
 function addStreetSegment(x1, z1, x2, z2) {
+  x1 = Math.round(x1);
+  z1 = Math.round(z1);
+  x2 = Math.round(x2);
+  z2 = Math.round(z2);
   const isH = Math.abs(x2 - x1) >= Math.abs(z2 - z1);
+  if (isH) z2 = z1;
+  else x2 = x1;
+  if (x1 === x2 && z1 === z2) return;
   
   // Snap endpoints to nearby existing endpoints / intersection centers
   for (const seg of _streetSegments) {
@@ -25762,6 +26449,7 @@ function eraseStreetAt(tx, tz) {
   }
   if (erased) {
     _invalidateRoadGraph();
+    refreshStreetEditHandles();
     _debounceSaveStreets();
     _debounceRebuildLamps();
   _debounceRebuildTrafficLights();
@@ -27470,6 +28158,7 @@ async function loadStreets() {
       _rebuildNearChunks(s.x1, s.z1, 5);
       if (s.x1 !== s.x2 || s.z1 !== s.z2) _rebuildNearChunks(s.x2, s.z2, 5);
     }
+    refreshAllStreetSegmentMeshes();
     // Rebuild light poles and traffic lights after all streets loaded
     _rebuildStreetLightPoles();
     _rebuildTrafficLights();
