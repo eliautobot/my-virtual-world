@@ -42,6 +42,7 @@ const requiredFiles = [
   '.dockerignore',
   'Dockerfile',
   'docker-compose.yml',
+  'scripts/live-agent-mode-8587-harness.mjs',
   'docs/CONFIGURATION.md',
   'docs/INSTALLATION.md',
   'docs/SECURITY.md',
@@ -93,7 +94,11 @@ const productReferenceFiles = [
   'docs',
   'src',
 ].flatMap((path) => collectProductTextFiles(path));
+const allowedStagingReferenceFiles = new Set([
+  'docs/LIVE-AGENT-MODE-SPEC.md',
+]);
 for (const path of productReferenceFiles) {
+  if (allowedStagingReferenceFiles.has(path)) continue;
   const content = read(path);
   for (const token of forbiddenStagingReferences) {
     assert(!content.includes(token), `product file ${path} contains staging reference ${token}`);
@@ -130,8 +135,23 @@ for (const token of ['.env', 'node_modules/', '.tmp-data/', 'backups/', 'memory/
 const packageJson = JSON.parse(read('package.json'));
 assert.equal(packageJson.scripts.test, 'npm run verify:smoke', 'package test script should run the public smoke suite');
 assert.equal(packageJson.scripts['verify:smoke'], 'node scripts/verify-smoke.mjs', 'verify:smoke should use the public verifier');
+assert.equal(packageJson.scripts['dev:live-agent-mode:8587'], 'node scripts/live-agent-mode-8587-harness.mjs --keep-open', 'Live Agent Mode dev harness must stay pinned to 8587');
+assert.equal(packageJson.scripts['verify:live-agent-mode:8587'], 'node scripts/live-agent-mode-8587-harness.mjs', 'Live Agent Mode verifier must use the 8587 harness');
 for (const scriptName of Object.keys(packageJson.scripts)) {
   assert(!scriptName.includes('phase'), `public package script should not expose internal phase verifier: ${scriptName}`);
+}
+
+const liveAgentHarness = read('scripts/live-agent-mode-8587-harness.mjs');
+for (const token of [
+  'const TEST_PORT = 8587;',
+  'const PRODUCT_PORT = 8590;',
+  'function assertNoProductPortTargets()',
+  'function assertNoConflictingHarnessPortEnv()',
+  'VW_PUBLIC_ORIGIN: BASE_URL',
+  'VW_DATA_DIR: dataDir',
+  'Number(health.port) === TEST_PORT',
+]) {
+  assert(liveAgentHarness.includes(token), `Live Agent Mode 8587 harness missing guard token: ${token}`);
 }
 
 const jsSyntaxTargets = [

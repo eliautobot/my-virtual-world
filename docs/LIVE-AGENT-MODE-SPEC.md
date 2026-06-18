@@ -52,6 +52,22 @@ The redesigned mode keeps the good API vocabulary, but moves autonomous executio
 - Do not make agents modify network, firewall, DNS, filesystem, license, or infrastructure settings.
 - Do not ship broad destructive actions until approval, audit, and rollback exist.
 
+## Local Autopilot Test Harness
+
+Autonomous Live Agent Mode development should use the isolated 8587 harness instead of the normal product port. The harness starts a temporary-data server, checks `/healthz`, and refuses environment or argument targets that point at 8590.
+
+```bash
+npm run verify:live-agent-mode:8587
+```
+
+For manual browser checks, keep the same isolated server open:
+
+```bash
+npm run dev:live-agent-mode:8587
+```
+
+Then open `http://127.0.0.1:8587`. Do not restart, bind over, or kill a product instance that may already be running on 8590.
+
 ## Core Principles
 
 1. Backend-authoritative simulation  
