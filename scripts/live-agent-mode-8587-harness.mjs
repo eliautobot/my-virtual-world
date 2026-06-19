@@ -121,7 +121,11 @@ async function requestJson(path, { method = 'GET', body } = {}) {
       payload = null;
     }
     if (!response.ok) {
-      throw new Error(`${path} returned HTTP ${response.status}${payload ? `\n${JSON.stringify(payload, null, 2)}` : ''}`);
+      const error = new Error(`${path} returned HTTP ${response.status}${payload ? `\n${JSON.stringify(payload, null, 2)}` : ''}`);
+      error.status = response.status;
+      error.path = path;
+      error.payload = payload;
+      throw error;
     }
     return payload;
   } finally {
@@ -517,7 +521,8 @@ function liveAgentSource(requestId) {
 }
 
 async function requestLiveAgentAction({ actionType, capabilityTag, target, params = {}, agentId = TEST_AGENT_ID, requestId }) {
-  const result = await postJson('/api/agent-model/actions', {
+  let result = null;
+  const body = {
     agentId,
     source: liveAgentSource(requestId || `8587-acceptance-${actionType}`),
     actionType,
@@ -528,7 +533,22 @@ async function requestLiveAgentAction({ actionType, capabilityTag, target, param
       reason: '8587-autonomy-metrics',
       ...params,
     },
-  });
+  };
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      result = await postJson('/api/agent-model/actions', body);
+      break;
+    } catch (error) {
+      const errorCode = error?.payload?.error?.code;
+      const detailCode = error?.payload?.error?.details?.error?.code;
+      if (attempt < 2 && errorCode === 'backend_executor_failed' && detailCode === 'not_found') {
+        console.log(`INFO: retrying transient backend executor lookup for ${actionType}.`);
+        await delay(250);
+        continue;
+      }
+      throw error;
+    }
+  }
   assert(result?.ok === true, `Live Agent action request failed for ${actionType}`, result);
   const action = result.action || result.worldAction?.action;
   assert(action?.status === 'completed', `Live Agent action ${actionType} did not complete`, action || result);
