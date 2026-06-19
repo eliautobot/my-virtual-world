@@ -223,6 +223,87 @@ finally:
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(liveAgentToolSchemaCheck.status, 0, `Live Agent coordinate schema check failed\n${liveAgentToolSchemaCheck.stderr || liveAgentToolSchemaCheck.stdout}`);
 
+const liveAgentBackendExecutionCheck = spawnSync('python3', ['-B', '-c', `
+import importlib.util
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+path = Path("src/server/server.py")
+data_dir = tempfile.mkdtemp(prefix="vw-smoke-backend-executor-")
+os.environ["VW_DATA_DIR"] = data_dir
+try:
+    spec = importlib.util.spec_from_file_location("vw_server", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.get_roster = lambda: [{"id": "adam", "statusKey": "adam", "name": "Adam", "providerKind": "openclaw"}]
+
+    meta = module.load_world_meta()
+    meta["agentProfiles"] = {"adam": {"agentLiveModeEnabled": True}}
+    module.save_world_meta(meta)
+    module.save_building("office-smoke", {
+        "id": "office-smoke",
+        "name": "Office Smoke",
+        "worldX": 0,
+        "worldY": 0,
+        "widthTiles": 12,
+        "heightTiles": 10,
+        "interior": {
+            "furniture": [{
+                "id": "cooler-smoke",
+                "objectInstanceId": "cooler-smoke",
+                "type": "waterCooler",
+                "catalogId": "waterCooler",
+                "x": 4,
+                "z": 4,
+                "floor": 1,
+                "buildingFloor": 1,
+            }]
+        },
+    })
+    ok, result, status = module.create_agent_live_mode_action_request({
+        "agentId": "adam",
+        "source": {
+            "kind": "agent-live-mode",
+            "requestedBy": "smoke",
+            "requestId": "live-loop-adam-backend-executor-smoke",
+            "roles": ["participant"],
+        },
+        "actionType": "life.getWater",
+        "capabilityTag": "life.hydration",
+        "target": {
+            "kind": "object-instance",
+            "buildingId": "office-smoke",
+            "objectInstanceId": "cooler-smoke",
+            "catalogId": "waterCooler",
+            "interactionSpotId": "use-front",
+        },
+        "params": {"loopActionId": "hydrate-water-cooler"},
+    })
+    assert ok, result
+    assert status == 202, status
+    action_id = result["action"]["id"]
+    store = module.get_world_actions_store(persist_migration=True)
+    assert not any(action.get("id") == action_id and action.get("status") == "route_pending" for action in store["active"]), store
+    completed = next(action for action in store["history"] if action.get("id") == action_id)
+    assert completed["status"] == "completed", completed
+    assert completed["execution"]["owner"] == "server-simulation", completed["execution"]
+    assert completed["execution"]["clientRequiredForProgress"] is False, completed["execution"]
+    assert completed["route"]["routeOwner"] == "server-simulation", completed["route"]
+    assert completed["route"]["setAgentTarget"] is False, completed["route"]
+    assert not module.reconcile_move_intents()["active"], module.get_move_intents_store()
+    events = module.list_live_agent_animation_events({"actionId": action_id, "limit": "20"})["events"]
+    names = {event.get("name") for event in events}
+    assert {"agent-move-started", "agent-arrived", "object-use-started", "object-use-completed", "world-action-completed"} <= names, names
+    location = module.load_world_meta()["agentLife"]["simulation"]["agentLocations"]["adam"]
+    assert location["buildingId"] == "office-smoke", location
+    print("live agent backend executor ok")
+finally:
+    shutil.rmtree(data_dir, ignore_errors=True)
+`], { cwd: root, encoding: 'utf8' });
+assert.equal(liveAgentBackendExecutionCheck.status, 0, `Live Agent backend executor check failed\n${liveAgentBackendExecutionCheck.stderr || liveAgentBackendExecutionCheck.stdout}`);
+
 const licensePy = read('src/server/license.py');
 const serverPy = read('src/server/server.py');
 const indexHtml = read('src/client/index.html');
@@ -557,6 +638,13 @@ for (const token of [
   'def get_live_agent_tool_registry',
   'def validate_live_agent_tool_call',
   'def _live_agent_tool_schema_errors',
+  'LIVE_AGENT_BACKEND_EXECUTION_VERSION = "agent-live-mode-backend-world-action-executor/v1"',
+  'LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"',
+  'def advance_live_agent_backend_world_action',
+  'def list_live_agent_animation_events',
+  '"/api/live-agent-mode/animation-events"',
+  '"backendOwnsProgressAndCompletion": True',
+  '"worldClientRequiredForProgress": False',
   '"/api/live-agent-mode/tools"',
   '"/api/live-agent-mode/actions/dry-run"',
   '"invalid_tool_arguments"',
