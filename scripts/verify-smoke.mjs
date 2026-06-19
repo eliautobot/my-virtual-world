@@ -510,6 +510,23 @@ for (const token of [
   'WORLD_ACTION_CATALOG_ID_ALIASES',
   '"printercopier": "all-in-one-printer-scanner"',
   '"worldActionId": action_id',
+  'LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION = "agent-live-mode-tool-registry/v1"',
+  'LIVE_AGENT_TOOL_CALL_SCHEMA_VERSION = "agent-live-mode-tool-call/v1"',
+  'LIVE_AGENT_TOOL_REGISTRY',
+  'def get_live_agent_tool_registry',
+  'def validate_live_agent_tool_call',
+  'def _live_agent_tool_schema_errors',
+  '"/api/live-agent-mode/tools"',
+  '"/api/live-agent-mode/actions/dry-run"',
+  '"invalid_tool_arguments"',
+  '"permissionRule"',
+  '"locationRule"',
+  '"observe_world"',
+  '"go_to_coordinates"',
+  '"use_object"',
+  '"say_to_agent"',
+  '"add_memory"',
+  '"build_structure"',
 ]) {
   assert(serverPy.includes(token), `server.py missing Live Agent loop token: ${token}`);
 }

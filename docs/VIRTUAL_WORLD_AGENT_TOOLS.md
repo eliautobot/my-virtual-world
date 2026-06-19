@@ -56,8 +56,13 @@ Use these when agents need to communicate through the visible My Virtual World b
 - `POST /api/agent-model/actions`
 - `POST /api/agents/<agent-id>/move`
 - `GET /api/world-actions/object-availability`
+- `GET /api/live-agent-mode/tools`
+- `POST /api/live-agent-mode/actions/dry-run`
+- `POST /api/live-agent-mode/tool-calls/validate`
 
 Use these for durable movement and object-interaction workflows. Agent Live Mode is license-gated and should remain hidden until the backend-owned autonomy acceptance criteria in `docs/LIVE-AGENT-MODE-SPEC.md` are met.
+
+The `/api/live-agent-mode/tools` registry is backend-owned and typed. Dry-run validation checks tool arguments, location gates, object permissions, and build/create proposal gates without executing actions or enabling the public Live Agent UI.
 
 ### Hermes
 
