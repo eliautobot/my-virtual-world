@@ -1411,6 +1411,12 @@ LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES = [
     "identity",
     "profileStorage",
     "liveModeToggle",
+    "observe",
+    "decide",
+    "propose",
+    "toolCallResult",
+    "timeoutCancellation",
+    "deterministicFallback",
     "providerNeutralToolRegistry",
     "backendActionExecution",
     "inWorldCommunication",
@@ -1419,6 +1425,9 @@ LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES = [
     "animationReplay",
     "readOnlyMetrics",
 ]
+LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION = "agent-live-mode-provider-bridge/v1"
+LIVE_AGENT_PROVIDER_BRIDGE_OPERATIONS = ["observe", "decide", "propose", "toolCallResult"]
+LIVE_AGENT_PROVIDER_BRIDGE_DEFAULT_TIMEOUT_SEC = 2.0
 LIVE_AGENT_CLAWMIND_MODULES = [
     "perception",
     "memory",
@@ -4143,8 +4152,9 @@ def _live_agent_provider_kind(agent):
     return kind or "unknown"
 
 
-def _live_agent_provider_adapter_metrics(roster):
+def _live_agent_provider_adapter_metrics(roster, loop_state=None):
     profiles = load_world_meta().get("agentProfiles") or {}
+    bridge_state = _normalize_live_agent_provider_bridge((loop_state or {}).get("providerBridge") if isinstance(loop_state, dict) else None)
     provider_kinds = {}
     for agent in [item for item in (roster or []) if isinstance(item, dict)]:
         kind = _live_agent_provider_kind(agent)
@@ -4165,42 +4175,72 @@ def _live_agent_provider_adapter_metrics(roster):
         if agent_id and len(bucket["sampleAgentIds"]) < 5:
             bucket["sampleAgentIds"].append(agent_id)
 
-    base_capabilities = {
-        "identity": True,
-        "profileStorage": True,
-        "liveModeToggle": True,
-        "providerNeutralToolRegistry": bool(LIVE_AGENT_TOOL_REGISTRY),
-        "backendActionExecution": True,
-        "inWorldCommunication": "say_to_agent" in LIVE_AGENT_TOOL_REGISTRY,
-        "memoryBuckets": "add_memory" in LIVE_AGENT_TOOL_REGISTRY,
-        "relationshipStorage": True,
-        "animationReplay": True,
-        "readOnlyMetrics": True,
-    }
-    for bucket in provider_kinds.values():
-        bucket["capabilities"] = dict(base_capabilities)
-        bucket["gaps"] = [key for key, ok in bucket["capabilities"].items() if not ok]
+    for kind in bridge_state.get("providers") or {}:
+        provider_kinds.setdefault(kind, {
+            "agentCount": 0,
+            "liveModeEnabledCount": 0,
+            "sampleAgentIds": [],
+            "capabilities": {},
+            "gaps": [],
+        })
+
+    for kind, bucket in provider_kinds.items():
+        adapter = _live_agent_provider_bridge_adapter(kind)
+        bridge_provider = (bridge_state.get("providers") or {}).get(kind) if isinstance(bridge_state.get("providers"), dict) else {}
+        capabilities = adapter.get("capabilities") if isinstance(adapter.get("capabilities"), dict) else {}
+        bucket["capabilities"] = capabilities
+        bucket["gaps"] = list(adapter.get("capabilityGaps") or [])
+        bucket["bridge"] = {
+            "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
+            "operations": list(LIVE_AGENT_PROVIDER_BRIDGE_OPERATIONS),
+            "stats": (bridge_provider or {}).get("stats") if isinstance((bridge_provider or {}).get("stats"), dict) else {
+                "calls": 0,
+                "observeCalls": 0,
+                "decisionCalls": 0,
+                "proposeCalls": 0,
+                "toolCallResultCalls": 0,
+                "timeouts": 0,
+                "fallbacks": 0,
+            },
+            "capabilityGaps": list(adapter.get("capabilityGaps") or []),
+            "lastDecisionAt": (bridge_provider or {}).get("lastDecisionAt"),
+            "lastTimeoutAt": (bridge_provider or {}).get("lastTimeoutAt"),
+            "lastFallbackAt": (bridge_provider or {}).get("lastFallbackAt"),
+        }
 
     provider_kind_count = len(provider_kinds)
     live_enabled_provider_kind_count = len([item for item in provider_kinds.values() if item.get("liveModeEnabledCount", 0) > 0])
+    bridge_stats = bridge_state.get("stats") if isinstance(bridge_state.get("stats"), dict) else {}
     checklist = {
         "cachedRosterOnly": True,
         "noProviderModelCalls": True,
         "providerKindCoverage": provider_kind_count > 0,
-        "providerNeutralProfileStorage": base_capabilities["profileStorage"],
-        "providerNeutralToolRegistry": base_capabilities["providerNeutralToolRegistry"],
-        "providerNeutralCommunication": base_capabilities["inWorldCommunication"],
-        "providerNeutralMemory": base_capabilities["memoryBuckets"],
-        "providerNeutralReplay": base_capabilities["animationReplay"],
+        "providerNeutralProfileStorage": True,
+        "providerNeutralToolRegistry": bool(LIVE_AGENT_TOOL_REGISTRY),
+        "providerNeutralCommunication": "say_to_agent" in LIVE_AGENT_TOOL_REGISTRY,
+        "providerNeutralMemory": "add_memory" in LIVE_AGENT_TOOL_REGISTRY,
+        "providerNeutralReplay": True,
+        "providerBridgeInterface": set(LIVE_AGENT_PROVIDER_BRIDGE_OPERATIONS).issubset({"observe", "decide", "propose", "toolCallResult"}),
+        "providerBridgeTimeoutCancellation": all((item.get("capabilities") or {}).get("timeoutCancellation") for item in provider_kinds.values()) if provider_kinds else False,
+        "deterministicFallbackReady": all((item.get("capabilities") or {}).get("deterministicFallback") for item in provider_kinds.values()) if provider_kinds else False,
         "allProviderKindsHaveCoreAdapter": provider_kind_count > 0 and all(not item.get("gaps") for item in provider_kinds.values()),
     }
     return {
         "schemaVersion": LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION,
+        "bridgeSchemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
         "adapterCapabilities": list(LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES),
+        "bridgeOperations": list(LIVE_AGENT_PROVIDER_BRIDGE_OPERATIONS),
         "discoveredAgentCount": sum(item.get("agentCount", 0) for item in provider_kinds.values()),
         "providerKindCount": provider_kind_count,
         "liveModeEnabledProviderKindCount": live_enabled_provider_kind_count,
         "providerKinds": provider_kinds,
+        "bridgeMetrics": {
+            "decisionCalls": _normalize_int(bridge_stats.get("decisionCalls"), 0, minimum=0, maximum=1000000000),
+            "timeouts": _normalize_int(bridge_stats.get("timeouts"), 0, minimum=0, maximum=1000000000),
+            "fallbacks": _normalize_int(bridge_stats.get("fallbacks"), 0, minimum=0, maximum=1000000000),
+            "calls": _normalize_int(bridge_stats.get("calls"), 0, minimum=0, maximum=1000000000),
+        },
+        "capabilityGapsByProvider": {kind: list((bucket.get("bridge") or {}).get("capabilityGaps") or []) for kind, bucket in provider_kinds.items()},
         "checklist": checklist,
         "gaps": [key for key, ok in checklist.items() if not ok],
         "optimization": {
@@ -4410,7 +4450,7 @@ def get_live_agent_mode_autonomy_metrics():
     kill_switch = _live_agent_loop_kill_switch_status(loop_state)
     cached_roster = _live_agent_cached_roster_for_metrics()
     cached_live_enabled_agents = [agent for agent in cached_roster if isinstance(agent, dict) and agent.get("agentLiveModeEnabled") is True]
-    provider_support = _live_agent_provider_adapter_metrics(cached_roster)
+    provider_support = _live_agent_provider_adapter_metrics(cached_roster, loop_state=loop_state)
     clawmind_architecture = _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
     checklist = {
         "featureGateOpen": _agent_live_mode_available(),
@@ -6253,6 +6293,12 @@ def default_live_agent_loop_state():
             "traces": [],
             "moduleStats": {},
         },
+        "providerBridge": {
+            "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
+            "operations": list(LIVE_AGENT_PROVIDER_BRIDGE_OPERATIONS),
+            "stats": {"calls": 0, "decisionCalls": 0, "timeouts": 0, "fallbacks": 0},
+            "providers": {},
+        },
         "stats": {"ticks": 0, "actionsCreated": 0, "dryRuns": 0, "errors": 0, "plans": 0, "replans": 0, "failedExpectations": 0, "successfulRecoveries": 0},
     }
 
@@ -6485,6 +6531,52 @@ def _live_agent_clawmind_record_skipped_modules(state, turn, module_names, reaso
     return rows
 
 
+def _normalize_live_agent_provider_bridge(raw):
+    source = raw if isinstance(raw, dict) else {}
+    stats = source.get("stats") if isinstance(source.get("stats"), dict) else {}
+    bridge = {
+        "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
+        "operations": list(LIVE_AGENT_PROVIDER_BRIDGE_OPERATIONS),
+        "updatedAt": source.get("updatedAt") if _parse_isoish_epoch(source.get("updatedAt")) else None,
+        "lastCallAt": source.get("lastCallAt") if _parse_isoish_epoch(source.get("lastCallAt")) else None,
+        "stats": {
+            "calls": _normalize_int(stats.get("calls"), 0, minimum=0, maximum=1000000000),
+            "decisionCalls": _normalize_int(stats.get("decisionCalls"), 0, minimum=0, maximum=1000000000),
+            "timeouts": _normalize_int(stats.get("timeouts"), 0, minimum=0, maximum=1000000000),
+            "fallbacks": _normalize_int(stats.get("fallbacks"), 0, minimum=0, maximum=1000000000),
+        },
+        "providers": {},
+    }
+    providers = source.get("providers") if isinstance(source.get("providers"), dict) else {}
+    for kind, raw_provider in providers.items():
+        if not isinstance(raw_provider, dict):
+            continue
+        provider_kind = _live_agent_loop_clean_plan_text(kind, limit=80) or "unknown"
+        provider_stats = raw_provider.get("stats") if isinstance(raw_provider.get("stats"), dict) else {}
+        row = {
+            "providerKind": provider_kind,
+            "capabilities": raw_provider.get("capabilities") if isinstance(raw_provider.get("capabilities"), dict) else {},
+            "capabilityGaps": [str(item)[:120] for item in (raw_provider.get("capabilityGaps") or []) if item],
+            "stats": {
+                "calls": _normalize_int(provider_stats.get("calls"), 0, minimum=0, maximum=1000000000),
+                "observeCalls": _normalize_int(provider_stats.get("observeCalls"), 0, minimum=0, maximum=1000000000),
+                "decisionCalls": _normalize_int(provider_stats.get("decisionCalls"), 0, minimum=0, maximum=1000000000),
+                "proposeCalls": _normalize_int(provider_stats.get("proposeCalls"), 0, minimum=0, maximum=1000000000),
+                "toolCallResultCalls": _normalize_int(provider_stats.get("toolCallResultCalls"), 0, minimum=0, maximum=1000000000),
+                "timeouts": _normalize_int(provider_stats.get("timeouts"), 0, minimum=0, maximum=1000000000),
+                "fallbacks": _normalize_int(provider_stats.get("fallbacks"), 0, minimum=0, maximum=1000000000),
+            },
+        }
+        for key in ("lastCallAt", "lastDecisionAt", "lastTimeoutAt", "lastFallbackAt", "lastOperation", "lastStatus"):
+            value = raw_provider.get(key)
+            if key.endswith("At"):
+                row[key] = value if _parse_isoish_epoch(value) else None
+            elif value:
+                row[key] = _live_agent_loop_clean_plan_text(value, limit=120)
+        bridge["providers"][provider_kind] = row
+    return bridge
+
+
 def _normalize_live_agent_loop_state(raw):
     state = default_live_agent_loop_state()
     if isinstance(raw, dict):
@@ -6505,6 +6597,8 @@ def _normalize_live_agent_loop_state(raw):
             state["scheduler"] = _live_agent_loop_normalize_scheduler(raw["scheduler"])
         if isinstance(raw.get("clawMindRuntime"), dict):
             state["clawMindRuntime"] = _normalize_live_agent_clawmind_runtime(raw["clawMindRuntime"])
+        if isinstance(raw.get("providerBridge"), dict):
+            state["providerBridge"] = _normalize_live_agent_provider_bridge(raw["providerBridge"])
         if isinstance(raw.get("agents"), dict):
             state["agents"] = {str(k): v for k, v in raw["agents"].items() if isinstance(v, dict)}
         if isinstance(raw.get("events"), list):
@@ -6525,6 +6619,7 @@ def _normalize_live_agent_loop_state(raw):
         state["pausedBy"] = None
     _live_agent_loop_normalize_operator_proposals(state)
     state["clawMindRuntime"] = _normalize_live_agent_clawmind_runtime(state.get("clawMindRuntime"))
+    state["providerBridge"] = _normalize_live_agent_provider_bridge(state.get("providerBridge"))
     for agent_id, agent_state in list((state.get("agents") or {}).items()):
         if isinstance(agent_state, dict):
             _live_agent_loop_normalize_memory(agent_state, agent_id=agent_id)
@@ -7037,7 +7132,7 @@ def _live_agent_loop_normalize_operator_proposal(proposal):
     for key in ("resolvedAt",):
         if _parse_isoish_epoch(proposal.get(key)):
             normalized[key] = proposal.get(key)
-    for key in ("capability", "target", "payloadPreview", "rejection"):
+    for key in ("capability", "target", "payloadPreview", "rejection", "providerBridge"):
         value = proposal.get(key)
         if isinstance(value, dict):
             normalized[key] = _copy_jsonable(value)
@@ -7121,6 +7216,14 @@ def _live_agent_loop_record_operator_proposal_from_rejection(state, agent_id, pa
     })
     state["operatorProposals"] = [*existing, proposal][-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
     _live_agent_loop_add_event(state, "operator-proposal-created", agent_id=agent_id, details={"proposalId": proposal_id, "actionType": action_type, "capabilityId": capability.get("id")})
+    agent_state = _live_agent_loop_agent_state(state, agent_id)
+    proposal["providerBridge"] = _live_agent_provider_bridge_propose(
+        _live_agent_loop_agent_snapshot(agent_id),
+        agent_state,
+        state,
+        {"id": proposal_id, "agentId": agent_id, "status": "proposal_only"},
+        proposal,
+    )
     return proposal
 
 
@@ -8534,6 +8637,316 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
     return perception
 
 
+_live_agent_provider_bridge_hooks = {}
+
+
+def _live_agent_provider_bridge_capabilities(provider_kind=None):
+    kind = str(provider_kind or "unknown").strip().lower() or "unknown"
+    return {
+        "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
+        "providerKind": kind,
+        "operations": {
+            "observe": True,
+            "decide": True,
+            "propose": True,
+            "toolCallResult": True,
+        },
+        "timeoutCancellation": True,
+        "deterministicFallback": True,
+        "externalModelDecision": False,
+        "providerNeutralToolRegistry": bool(LIVE_AGENT_TOOL_REGISTRY),
+        "backendActionExecution": True,
+        "inWorldCommunication": "say_to_agent" in LIVE_AGENT_TOOL_REGISTRY,
+        "memoryBuckets": "add_memory" in LIVE_AGENT_TOOL_REGISTRY,
+        "relationshipStorage": True,
+        "animationReplay": True,
+        "readOnlyMetrics": True,
+    }
+
+
+def _live_agent_provider_bridge_capability_gaps(capabilities):
+    source = capabilities if isinstance(capabilities, dict) else {}
+    gaps = []
+    operations = source.get("operations") if isinstance(source.get("operations"), dict) else {}
+    for operation in LIVE_AGENT_PROVIDER_BRIDGE_OPERATIONS:
+        if not operations.get(operation):
+            gaps.append(f"operation.{operation}")
+    for key in ("timeoutCancellation", "deterministicFallback", "providerNeutralToolRegistry", "backendActionExecution", "inWorldCommunication", "memoryBuckets", "relationshipStorage", "animationReplay", "readOnlyMetrics"):
+        if not source.get(key):
+            gaps.append(key)
+    return gaps
+
+
+def _live_agent_register_provider_bridge(provider_kind, *, hooks=None, capabilities=None):
+    kind = str(provider_kind or "").strip().lower()
+    if not kind:
+        return None
+    entry = {
+        "providerKind": kind,
+        "hooks": hooks if isinstance(hooks, dict) else {},
+        "capabilities": capabilities if isinstance(capabilities, dict) else _live_agent_provider_bridge_capabilities(kind),
+    }
+    _live_agent_provider_bridge_hooks[kind] = entry
+    return entry
+
+
+def _live_agent_provider_bridge_adapter(provider_kind):
+    kind = str(provider_kind or "unknown").strip().lower() or "unknown"
+    registered = _live_agent_provider_bridge_hooks.get(kind)
+    capabilities = _live_agent_provider_bridge_capabilities(kind)
+    hooks = {}
+    if isinstance(registered, dict):
+        hooks = registered.get("hooks") if isinstance(registered.get("hooks"), dict) else {}
+        if isinstance(registered.get("capabilities"), dict):
+            capabilities.update(registered.get("capabilities"))
+            capabilities["providerKind"] = kind
+    return {
+        "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
+        "providerKind": kind,
+        "hooks": hooks,
+        "capabilities": capabilities,
+        "capabilityGaps": _live_agent_provider_bridge_capability_gaps(capabilities),
+    }
+
+
+def _live_agent_provider_bridge_state(state):
+    bridge = _normalize_live_agent_provider_bridge((state or {}).get("providerBridge") if isinstance(state, dict) else None)
+    if isinstance(state, dict):
+        state["providerBridge"] = bridge
+    return bridge
+
+
+def _live_agent_provider_bridge_stat_key(operation):
+    operation = str(operation or "").strip()
+    return {
+        "observe": "observeCalls",
+        "decide": "decisionCalls",
+        "propose": "proposeCalls",
+        "toolCallResult": "toolCallResultCalls",
+    }.get(operation, "calls")
+
+
+def _live_agent_provider_bridge_record(state, provider_kind, operation, *, status="completed", fallback=False, timeout=False, capabilities=None, gaps=None):
+    if not isinstance(state, dict):
+        return None
+    now_iso = _utc_now_iso()
+    kind = str(provider_kind or "unknown").strip().lower() or "unknown"
+    bridge = _live_agent_provider_bridge_state(state)
+    bridge["updatedAt"] = now_iso
+    bridge["lastCallAt"] = now_iso
+    stats = bridge.setdefault("stats", {})
+    stats["calls"] = _normalize_int(stats.get("calls"), 0, minimum=0, maximum=1000000000) + 1
+    if operation == "decide":
+        stats["decisionCalls"] = _normalize_int(stats.get("decisionCalls"), 0, minimum=0, maximum=1000000000) + 1
+    if timeout:
+        stats["timeouts"] = _normalize_int(stats.get("timeouts"), 0, minimum=0, maximum=1000000000) + 1
+    if fallback:
+        stats["fallbacks"] = _normalize_int(stats.get("fallbacks"), 0, minimum=0, maximum=1000000000) + 1
+    provider = bridge.setdefault("providers", {}).setdefault(kind, {
+        "providerKind": kind,
+        "capabilities": {},
+        "capabilityGaps": [],
+        "stats": {
+            "calls": 0,
+            "observeCalls": 0,
+            "decisionCalls": 0,
+            "proposeCalls": 0,
+            "toolCallResultCalls": 0,
+            "timeouts": 0,
+            "fallbacks": 0,
+        },
+    })
+    provider["capabilities"] = capabilities if isinstance(capabilities, dict) else provider.get("capabilities") or {}
+    provider["capabilityGaps"] = [str(item)[:120] for item in (gaps or provider.get("capabilityGaps") or []) if item]
+    provider["lastCallAt"] = now_iso
+    provider["lastOperation"] = operation
+    provider["lastStatus"] = status
+    provider_stats = provider.setdefault("stats", {})
+    provider_stats["calls"] = _normalize_int(provider_stats.get("calls"), 0, minimum=0, maximum=1000000000) + 1
+    operation_key = _live_agent_provider_bridge_stat_key(operation)
+    provider_stats[operation_key] = _normalize_int(provider_stats.get(operation_key), 0, minimum=0, maximum=1000000000) + 1
+    if operation == "decide":
+        provider["lastDecisionAt"] = now_iso
+    if timeout:
+        provider_stats["timeouts"] = _normalize_int(provider_stats.get("timeouts"), 0, minimum=0, maximum=1000000000) + 1
+        provider["lastTimeoutAt"] = now_iso
+    if fallback:
+        provider_stats["fallbacks"] = _normalize_int(provider_stats.get("fallbacks"), 0, minimum=0, maximum=1000000000) + 1
+        provider["lastFallbackAt"] = now_iso
+    return provider
+
+
+def _live_agent_provider_bridge_context(agent, agent_state, state, turn, operation, *, perception=None, world_client=None, now_epoch=None, timeout_sec=None, payload=None):
+    agent = agent if isinstance(agent, dict) else {}
+    agent_id = agent.get("agentId") or agent.get("statusKey") or agent.get("id")
+    provider_kind = _live_agent_provider_kind(agent)
+    adapter = _live_agent_provider_bridge_adapter(provider_kind)
+    timeout_value = float(timeout_sec if timeout_sec is not None else LIVE_AGENT_PROVIDER_BRIDGE_DEFAULT_TIMEOUT_SEC)
+    return {
+        "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
+        "operation": operation,
+        "agent": agent,
+        "agentId": agent_id,
+        "providerKind": provider_kind,
+        "agentState": agent_state if isinstance(agent_state, dict) else {},
+        "state": state if isinstance(state, dict) else {},
+        "turn": turn if isinstance(turn, dict) else {},
+        "perception": perception if isinstance(perception, dict) else None,
+        "worldClient": world_client if isinstance(world_client, dict) else None,
+        "nowEpoch": float(now_epoch or time.time()),
+        "timeoutSec": timeout_value,
+        "deadlineEpoch": time.time() + max(0.001, timeout_value),
+        "capabilities": adapter.get("capabilities"),
+        "capabilityGaps": adapter.get("capabilityGaps"),
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+
+
+def _live_agent_provider_bridge_call(hook, context, *, timeout_sec=None):
+    timeout_value = max(0.001, float(timeout_sec if timeout_sec is not None else context.get("timeoutSec") or LIVE_AGENT_PROVIDER_BRIDGE_DEFAULT_TIMEOUT_SEC))
+    cancellation = threading.Event()
+    context["cancelled"] = cancellation.is_set
+    context["cancellation"] = cancellation
+    box = {"ok": False, "result": None, "error": None}
+
+    def run_hook():
+        try:
+            box["result"] = hook(context)
+            box["ok"] = True
+        except Exception as exc:
+            box["error"] = str(exc)
+
+    thread = threading.Thread(target=run_hook, daemon=True)
+    thread.start()
+    thread.join(timeout_value)
+    if thread.is_alive():
+        cancellation.set()
+        return {"ok": False, "timeout": True, "error": f"provider bridge {context.get('operation')} timed out after {timeout_value:.3f}s"}
+    if not box["ok"]:
+        return {"ok": False, "timeout": False, "error": box.get("error") or "provider bridge hook failed"}
+    result = box.get("result")
+    if isinstance(result, dict):
+        return {"ok": True, "timeout": False, **result}
+    return {"ok": True, "timeout": False, "result": result}
+
+
+def _live_agent_provider_bridge_observe(agent, agent_state, state, turn, *, world_client=None, now_epoch=None, timeout_sec=None):
+    agent_id = agent.get("agentId") or agent.get("statusKey") or agent.get("id") if isinstance(agent, dict) else None
+    provider_kind = _live_agent_provider_kind(agent)
+    adapter = _live_agent_provider_bridge_adapter(provider_kind)
+    context = _live_agent_provider_bridge_context(agent, agent_state, state, turn, "observe", world_client=world_client, now_epoch=now_epoch, timeout_sec=timeout_sec)
+    hook = (adapter.get("hooks") or {}).get("observe")
+    if callable(hook):
+        result = _live_agent_provider_bridge_call(hook, context, timeout_sec=context.get("timeoutSec"))
+        if result.get("ok") and isinstance(result.get("perception"), dict):
+            _live_agent_provider_bridge_record(state, provider_kind, "observe", capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+            return result["perception"]
+        _live_agent_provider_bridge_record(state, provider_kind, "observe", status="fallback", fallback=True, timeout=bool(result.get("timeout")), capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+    else:
+        _live_agent_provider_bridge_record(state, provider_kind, "observe", status="fallback", fallback=True, capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+    perception = _live_agent_loop_build_perception(agent_id, agent_state, world_client=world_client, now_epoch=now_epoch)
+    perception["providerBridge"] = {
+        "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
+        "providerKind": provider_kind,
+        "operation": "observe",
+        "fallbackUsed": True,
+        "capabilityGaps": adapter.get("capabilityGaps"),
+    }
+    return perception
+
+
+def _live_agent_provider_bridge_resolve_selected(agent_id, agent_state, selected_id):
+    if not selected_id:
+        return None
+    selected_affordance = next((item for item in _live_agent_loop_action_affordances(agent_id, agent_state) if item.get("id") == selected_id and item.get("available")), None)
+    if not selected_affordance:
+        return None
+    return selected_affordance.get("selected")
+
+
+def _live_agent_provider_bridge_fallback_decide(agent_id, agent_state, perception):
+    selected, decision = _live_agent_loop_select_next_action(agent_id, agent_state, perception)
+    if isinstance(decision, dict):
+        decision["providerBridge"] = {
+            "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
+            "operation": "decide",
+            "fallbackUsed": True,
+        }
+    return selected, decision
+
+
+def _live_agent_provider_bridge_decide(agent, agent_state, state, turn, perception, *, timeout_sec=None):
+    agent_id = agent.get("agentId") or agent.get("statusKey") or agent.get("id") if isinstance(agent, dict) else None
+    provider_kind = _live_agent_provider_kind(agent)
+    adapter = _live_agent_provider_bridge_adapter(provider_kind)
+    context = _live_agent_provider_bridge_context(agent, agent_state, state, turn, "decide", perception=perception, timeout_sec=timeout_sec)
+    hook = (adapter.get("hooks") or {}).get("decide")
+    if callable(hook):
+        result = _live_agent_provider_bridge_call(hook, context, timeout_sec=context.get("timeoutSec"))
+        if result.get("ok"):
+            decision = result.get("decision") if isinstance(result.get("decision"), dict) else {}
+            selected = result.get("selected") if isinstance(result.get("selected"), dict) else None
+            selected_id = decision.get("selectedActionId") or result.get("selectedActionId")
+            if not selected and selected_id:
+                selected = _live_agent_provider_bridge_resolve_selected(agent_id, agent_state, selected_id)
+            if decision:
+                decision.setdefault("schemaVersion", "agent-live-mode-decision/v1")
+                decision.setdefault("at", (perception or {}).get("at") or _utc_now_iso())
+                decision.setdefault("agentId", agent_id)
+                decision.setdefault("mode", f"provider-bridge-{provider_kind}")
+                decision["providerBridge"] = {
+                    "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
+                    "providerKind": provider_kind,
+                    "operation": "decide",
+                    "fallbackUsed": False,
+                    "capabilityGaps": adapter.get("capabilityGaps"),
+                }
+                agent_state["lastDecision"] = {k: decision.get(k) for k in ("at", "mode", "topNeed", "selectedActionId", "selectedActionLabel", "score", "reason")}
+                agent_state["lastDecision"]["candidateActionsConsidered"] = _live_agent_loop_compact_candidate_actions(decision)
+            if selected:
+                selected["decision"] = decision
+            _live_agent_provider_bridge_record(state, provider_kind, "decide", capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+            return selected, decision
+        _live_agent_provider_bridge_record(state, provider_kind, "decide", status="fallback", fallback=True, timeout=bool(result.get("timeout")), capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+    else:
+        _live_agent_provider_bridge_record(state, provider_kind, "decide", status="fallback", fallback=True, capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+    selected, decision = _live_agent_provider_bridge_fallback_decide(agent_id, agent_state, perception)
+    if isinstance(decision, dict):
+        decision["providerBridge"]["providerKind"] = provider_kind
+        decision["providerBridge"]["capabilityGaps"] = adapter.get("capabilityGaps")
+    return selected, decision
+
+
+def _live_agent_provider_bridge_propose(agent, agent_state, state, turn, proposal, *, timeout_sec=None):
+    provider_kind = _live_agent_provider_kind(agent)
+    adapter = _live_agent_provider_bridge_adapter(provider_kind)
+    context = _live_agent_provider_bridge_context(agent, agent_state, state, turn, "propose", timeout_sec=timeout_sec, payload=proposal if isinstance(proposal, dict) else {})
+    hook = (adapter.get("hooks") or {}).get("propose")
+    if callable(hook):
+        result = _live_agent_provider_bridge_call(hook, context, timeout_sec=context.get("timeoutSec"))
+        _live_agent_provider_bridge_record(state, provider_kind, "propose", status="completed" if result.get("ok") else "fallback", fallback=not result.get("ok"), timeout=bool(result.get("timeout")), capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+        if result.get("ok"):
+            return result
+    else:
+        _live_agent_provider_bridge_record(state, provider_kind, "propose", status="fallback", fallback=True, capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+    return {"ok": True, "fallback": True, "proposal": proposal if isinstance(proposal, dict) else {}, "providerKind": provider_kind}
+
+
+def _live_agent_provider_bridge_handle_tool_call_result(agent, agent_state, state, turn, tool_call_result, *, timeout_sec=None):
+    provider_kind = _live_agent_provider_kind(agent)
+    adapter = _live_agent_provider_bridge_adapter(provider_kind)
+    context = _live_agent_provider_bridge_context(agent, agent_state, state, turn, "toolCallResult", timeout_sec=timeout_sec, payload=tool_call_result if isinstance(tool_call_result, dict) else {})
+    hook = (adapter.get("hooks") or {}).get("toolCallResult")
+    if callable(hook):
+        result = _live_agent_provider_bridge_call(hook, context, timeout_sec=context.get("timeoutSec"))
+        _live_agent_provider_bridge_record(state, provider_kind, "toolCallResult", status="completed" if result.get("ok") else "fallback", fallback=not result.get("ok"), timeout=bool(result.get("timeout")), capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+        if result.get("ok"):
+            return result
+    else:
+        _live_agent_provider_bridge_record(state, provider_kind, "toolCallResult", status="fallback", fallback=True, capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+    return {"ok": True, "fallback": True, "providerKind": provider_kind, "handled": True}
+
+
 def _live_agent_loop_decision_score(affordance, agent_state, goal_frame=None):
     need_key = affordance.get("need") or "curiosity"
     needs = agent_state.get("needs") if isinstance(agent_state.get("needs"), dict) else LIVE_AGENT_LOOP_NEED_DEFAULTS
@@ -9834,7 +10247,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 _live_agent_loop_stat(agent_state, "ticks")
                 _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World")
                 perception_started = _live_agent_clawmind_trace_start()
-                perception = _live_agent_loop_build_perception(agent_id, agent_state, world_client=world_client, now_epoch=now_epoch)
+                perception = _live_agent_provider_bridge_observe(agent, agent_state, state, turn, world_client=world_client, now_epoch=now_epoch)
                 _live_agent_clawmind_append_trace(
                     state,
                     "perception",
@@ -9932,7 +10345,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     break
 
                 planning_started = _live_agent_clawmind_trace_start()
-                selected, decision = _live_agent_loop_select_next_action(agent_id, agent_state, perception)
+                selected, decision = _live_agent_provider_bridge_decide(agent, agent_state, state, turn, perception)
                 result["decisions"].append({
                     "agentId": agent_id,
                     "decision": agent_state.get("lastDecision"),
@@ -10050,6 +10463,14 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                         decisions={"settledActionObserved": False, "expectedOutcomeRecorded": True},
                         status="dry_run",
                     )
+                    provider_result = _live_agent_provider_bridge_handle_tool_call_result(agent, agent_state, state, turn, {
+                        "status": "dry-run",
+                        "loopActionId": action_def["id"],
+                        "planId": plan.get("id") if isinstance(plan, dict) else None,
+                        "payload": payload,
+                    })
+                    if result["decisions"]:
+                        result["decisions"][-1]["providerBridgeResult"] = provider_result
                     _live_agent_loop_finish_turn(state, turn, "completed", outcome={"dryRun": True, "loopActionId": action_def["id"], "planId": plan.get("id") if isinstance(plan, dict) else None}, now_epoch=now_epoch)
                     _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "completed", "loopActionId": action_def["id"], "planId": plan.get("id") if isinstance(plan, dict) else None}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
                     break
@@ -10102,6 +10523,15 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                         outputs={"lastOutcome": agent_state.get("lastOutcome"), "action": action_summary, "createdRow": created_row},
                         decisions={"settledActionObserved": _canonical_world_action_status((action_summary or {}).get("status")) in WORLD_ACTION_TERMINAL_STATES, "expectedOutcomeRecorded": True},
                     )
+                    provider_result = _live_agent_provider_bridge_handle_tool_call_result(agent, agent_state, state, turn, {
+                        "status": "completed",
+                        "actionId": action_id,
+                        "loopActionId": action_def["id"],
+                        "planId": (stored_plan or plan or {}).get("id"),
+                        "httpStatus": status_code,
+                        "action": action_summary,
+                    })
+                    created_row["providerBridgeResult"] = provider_result
                     _live_agent_loop_finish_turn(state, turn, "completed", outcome={**created_row, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id")}, now_epoch=now_epoch)
                     _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "completed", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id")}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
                 else:
@@ -10115,6 +10545,13 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     _live_agent_loop_add_event(state, "action-error", agent_id=agent_id, turn_id=turn.get("id"), details={"httpStatus": status_code, "error": created, "retry": retry})
                     error_row = {"agentId": agent_id, "httpStatus": status_code, "error": created, "turnId": turn.get("id"), "retry": retry}
                     result["errors"].append(error_row)
+                    provider_result = _live_agent_provider_bridge_handle_tool_call_result(agent, agent_state, state, turn, {
+                        "status": "failed",
+                        "httpStatus": status_code,
+                        "error": created,
+                        "planId": (failed_plan or plan or {}).get("id"),
+                    })
+                    error_row["providerBridgeResult"] = provider_result
                     _live_agent_clawmind_append_trace(
                         state,
                         "actionExecution",
@@ -15077,8 +15514,14 @@ def _merge_agent_profiles(roster):
     meta = load_world_meta()
     profiles = meta.get("agentProfiles", {}) if isinstance(meta.get("agentProfiles"), dict) else {}
     merged = []
+    seen = set()
     for agent in roster:
         a = dict(agent)
+        key = _agent_profile_key(a)
+        if key:
+            seen.add(key)
+        if a.get("id"):
+            seen.add(str(a.get("id")))
         profile = profiles.get(_agent_profile_key(a)) or profiles.get(str(a.get("id"))) or {}
         a["agentLiveModeEnabled"] = _agent_live_mode_enabled_from_profile(profile)
         if isinstance(profile, dict):
@@ -15091,6 +15534,27 @@ def _merge_agent_profiles(roster):
             if isinstance(profile.get("docs"), dict):
                 a["docs"] = profile["docs"]
         merged.append(a)
+    for profile_id, profile in profiles.items():
+        if not isinstance(profile, dict) or not isinstance(profile.get("providerKind"), str):
+            continue
+        agent_id = str(profile.get("id") or profile.get("statusKey") or profile_id).strip()
+        if not agent_id or agent_id in seen:
+            continue
+        provider_kind = str(profile.get("providerKind") or "fake").strip().lower() or "fake"
+        provider_agent_id = str(profile.get("providerAgentId") or profile.get("profile") or agent_id).strip()
+        merged.append({
+            "id": agent_id,
+            "statusKey": agent_id,
+            "name": profile.get("name") or agent_id,
+            "emoji": profile.get("emoji") or "",
+            "providerKind": provider_kind,
+            "providerType": profile.get("providerType") or "profile-backed",
+            "providerAgentId": provider_agent_id,
+            "profile": profile.get("profile") or provider_agent_id,
+            "agentLiveModeEnabled": _agent_live_mode_enabled_from_profile(profile),
+            "capabilities": profile.get("capabilities") if isinstance(profile.get("capabilities"), list) else [],
+        })
+        seen.add(agent_id)
     return merged
 
 

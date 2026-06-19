@@ -12,6 +12,9 @@ const BASE_URL = `http://${HOST}:${TEST_PORT}`;
 const PRODUCT_URL = `http://${HOST}:${PRODUCT_PORT}`;
 const TEST_AGENT_ID = 'acceptance-agent';
 const PEER_AGENT_ID = 'acceptance-peer';
+const HERMES_FIXTURE_AGENT_ID = 'acceptance-hermes';
+const CODEX_FIXTURE_AGENT_ID = 'acceptance-codex';
+const FAKE_FIXTURE_AGENT_ID = 'acceptance-fake-provider';
 const OFFICE_BUILDING_ID = 'acceptance-office';
 const HOME_BUILDING_ID = 'acceptance-home';
 const WATER_COOLER_ID = 'acceptance-water-cooler';
@@ -151,6 +154,22 @@ async function fetchJson(path) {
 
 async function postJson(path, body) {
   return requestJson(path, { method: 'POST', body });
+}
+
+async function postJsonExpectStatus(path, body, expectedStatus) {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  assert(response.status === expectedStatus, `${path} returned HTTP ${response.status}, expected ${expectedStatus}`, payload);
+  return payload;
 }
 
 async function waitForHealth(child, getOutput) {
@@ -350,6 +369,30 @@ async function seedAcceptanceWorld() {
           curious: 0.4,
           easygoing: 0.5,
         },
+      },
+      [HERMES_FIXTURE_AGENT_ID]: {
+        name: 'Acceptance Hermes Fixture',
+        providerKind: 'hermes',
+        providerType: 'profile-backed',
+        providerAgentId: 'acceptance-hermes',
+        agentLiveModeEnabled: false,
+        capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
+      },
+      [CODEX_FIXTURE_AGENT_ID]: {
+        name: 'Acceptance Codex Fixture',
+        providerKind: 'codex',
+        providerType: 'profile-backed',
+        providerAgentId: 'acceptance-codex',
+        agentLiveModeEnabled: false,
+        capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
+      },
+      [FAKE_FIXTURE_AGENT_ID]: {
+        name: 'Acceptance Fake Provider',
+        providerKind: 'fake',
+        providerType: 'profile-backed',
+        providerAgentId: 'acceptance-fake',
+        agentLiveModeEnabled: false,
+        capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
       },
     },
     agentLife: {
@@ -610,6 +653,50 @@ async function executeLiveAgentTool(tool, args, { agentId = TEST_AGENT_ID, reque
   return result;
 }
 
+async function verifyFakeProviderBridgeContract() {
+  const enabled = await postJson(`/api/agent/${encodeURIComponent(FAKE_FIXTURE_AGENT_ID)}/live-mode`, {
+    agentLiveModeEnabled: true,
+  });
+  assert(enabled?.ok === true && enabled.agentLiveModeEnabled === true, 'failed to enable fake provider fixture for bridge contract', enabled);
+
+  try {
+    const rejected = await postJsonExpectStatus('/api/agent-model/actions', {
+      agentId: FAKE_FIXTURE_AGENT_ID,
+      source: liveAgentSource('8587-acceptance-fake-provider-proposal'),
+      actionType: 'world.modifyRoad',
+      capabilityTag: 'world.terrain',
+      target: { kind: 'world-point', x: 0, z: 0 },
+      priority: 'normal',
+      params: {
+        reason: '8587-provider-bridge-contract',
+      },
+    }, 422);
+    const proposalId = rejected?.error?.details?.operatorProposal?.id;
+    assert(proposalId, 'proposal-only fake provider request should return an operator proposal reference', rejected);
+
+    const proposals = await fetchJson(`/api/agent-live-loop/proposals?agentId=${encodeURIComponent(FAKE_FIXTURE_AGENT_ID)}&includeResolved=true&limit=10`);
+    const proposal = (proposals.proposals || []).find((item) => item?.id === proposalId);
+    assert(proposal?.providerBridge?.providerKind === 'fake', 'fake provider proposal should retain bridge metadata', { proposalId, proposal });
+
+    const metrics = await fetchJson('/api/live-agent-mode/metrics');
+    const fake = metrics.providerSupport?.providerKinds?.fake;
+    assert(fake?.capabilities?.operations?.observe === true, 'fake provider bridge should expose observe capability', fake);
+    assert(fake?.capabilities?.operations?.decide === true, 'fake provider bridge should expose decide capability', fake);
+    assert(fake?.capabilities?.operations?.propose === true, 'fake provider bridge should expose propose capability', fake);
+    assert(fake?.capabilities?.operations?.toolCallResult === true, 'fake provider bridge should expose tool result capability', fake);
+    assert(fake?.bridge?.stats?.proposeCalls >= 1, 'fake provider bridge should record proposal calls', fake?.bridge);
+    assert(fake?.bridge?.stats?.fallbacks >= 1, 'fake provider bridge should record deterministic fallback for proposal calls', fake?.bridge);
+    assert(Array.isArray(metrics.providerSupport?.capabilityGapsByProvider?.fake), 'fake provider bridge should report capability gaps list', metrics.providerSupport?.capabilityGapsByProvider);
+    console.log(`PASS: fake provider bridge contract recorded proposal ${proposalId} without model calls.`);
+    return { proposalId, metrics };
+  } finally {
+    const disabled = await postJson(`/api/agent/${encodeURIComponent(FAKE_FIXTURE_AGENT_ID)}/live-mode`, {
+      agentLiveModeEnabled: false,
+    });
+    assert(disabled?.ok === true && disabled.agentLiveModeEnabled === false, 'failed to disable fake provider fixture after bridge contract', disabled);
+  }
+}
+
 async function verifySocialCommunicationAndMemory() {
   const social = await requestLiveAgentAction({
     actionType: 'life.social',
@@ -812,7 +899,15 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
   assert(metrics.checklist?.clawMindModuleContractsReady === true, 'metrics checklist should confirm ClawMind module contracts', metrics.checklist);
   assert(metrics.checklist?.lightweightMetricsOptimized === true, 'metrics checklist should confirm lightweight metrics optimization', metrics.checklist);
   assert(metrics.providerSupport?.schemaVersion === 'agent-live-mode-provider-adapter-contract/v1', 'provider support metrics should use the adapter contract schema', metrics.providerSupport);
-  assert(metrics.providerSupport?.providerKindCount >= 1, 'provider support metrics should include at least one provider kind', metrics.providerSupport);
+  assert(metrics.providerSupport?.bridgeSchemaVersion === 'agent-live-mode-provider-bridge/v1', 'provider support metrics should expose the bridge schema', metrics.providerSupport);
+  assert(metrics.providerSupport?.providerKindCount >= 3, 'provider support metrics should include mixed provider kinds', metrics.providerSupport);
+  assert(metrics.providerSupport?.providerKinds?.fake, 'provider support metrics should include the fake provider fixture', metrics.providerSupport);
+  assert(metrics.providerSupport?.providerKinds?.hermes || metrics.providerSupport?.providerKinds?.codex, 'provider support metrics should include at least one non-OpenClaw provider fixture', metrics.providerSupport);
+  assert(metrics.providerSupport?.bridgeMetrics?.decisionCalls >= 1, 'provider bridge metrics should count decision calls', metrics.providerSupport?.bridgeMetrics);
+  assert(typeof metrics.providerSupport?.bridgeMetrics?.timeouts === 'number', 'provider bridge metrics should report timeout count', metrics.providerSupport?.bridgeMetrics);
+  assert(typeof metrics.providerSupport?.bridgeMetrics?.fallbacks === 'number', 'provider bridge metrics should report fallback count', metrics.providerSupport?.bridgeMetrics);
+  assert(metrics.providerSupport?.providerKinds?.fake?.bridge?.stats?.proposeCalls >= 1, 'provider bridge metrics should count fake provider proposal calls', metrics.providerSupport?.providerKinds?.fake?.bridge);
+  assert(metrics.providerSupport?.capabilityGapsByProvider?.fake && Array.isArray(metrics.providerSupport.capabilityGapsByProvider.fake), 'provider support metrics should report per-provider capability gaps', metrics.providerSupport?.capabilityGapsByProvider);
   assert(metrics.providerSupport?.optimization?.providerCallsDuringMetrics === 0, 'provider support metrics must not call providers', metrics.providerSupport?.optimization);
   assert(metrics.providerSupport?.optimization?.modelCallsDuringMetrics === 0, 'provider support metrics must not call models', metrics.providerSupport?.optimization);
   assert(metrics.clawMindArchitecture?.schemaVersion === 'agent-live-mode-clawmind-architecture/v1', 'ClawMind metrics should use the architecture schema', metrics.clawMindArchitecture);
@@ -1027,6 +1122,7 @@ try {
   await verifySocialCommunicationAndMemory();
   await verifyOperatorControlsStopTurns();
   await verifyFailureInjectionReplanning();
+  await verifyFakeProviderBridgeContract();
   await verifyAutonomyMetrics({ expectedTurns: ACCEPTANCE_TURN_TARGET });
   await runBrowserReplayRenderCheck(backendSeries.proofs[0].actionId);
 
