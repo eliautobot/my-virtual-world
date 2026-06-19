@@ -76,6 +76,20 @@ GET /api/live-agent-mode/metrics
 
 It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, reaction opportunities, memory entries, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
 
+It also reports lightweight provider and PIANO-style architecture readiness:
+
+- `providerSupport.schemaVersion = agent-live-mode-provider-adapter-contract/v1`
+- `providerSupport.providerKinds`
+- `providerSupport.checklist.allProviderKindsHaveCoreAdapter`
+- `providerSupport.optimization.providerCallsDuringMetrics = 0`
+- `providerSupport.optimization.modelCallsDuringMetrics = 0`
+- `pianoArchitecture.schemaVersion = agent-live-mode-piano-architecture/v1`
+- `pianoArchitecture.modules`
+- `pianoArchitecture.checklist.allModuleContractsReady`
+- `pianoArchitecture.optimization.heavyWorldScan = false`
+
+Provider and PIANO metrics intentionally use cached roster/world state only. They must not call OpenClaw, Hermes, Codex, or any model provider while serving the metrics endpoint.
+
 For manual browser checks, keep the same isolated server open:
 
 ```bash
@@ -157,6 +171,101 @@ Add a backend simulation engine responsible for:
 - reconciling stale or failed work
 
 The engine should run inside the server process at first. It should be structured so it can later move to a worker process without changing public APIs.
+
+### 1a. Provider Adapter Contract
+
+Live Agent Mode must be provider-neutral. OpenClaw, Hermes, Codex, and future providers should all enter the same backend simulation contract instead of each provider owning a separate resident loop.
+
+Required adapter capabilities:
+
+- `identity`: stable `id`, `statusKey`, `name`, and `providerKind`
+- `profileStorage`: Live Mode settings stored in `world-meta.json#agentProfiles`
+- `liveModeToggle`: per-agent enable/disable works for any provider kind
+- `providerNeutralToolRegistry`: all autonomous actions use `LIVE_AGENT_TOOL_REGISTRY`
+- `backendActionExecution`: provider agents use the same server executor
+- `inWorldCommunication`: `say_to_agent` creates world communication, not provider relay
+- `memoryBuckets`: `add_memory` writes provider-neutral resident memory
+- `relationshipStorage`: social outcomes update shared relationship records
+- `animationReplay`: all providers emit replayable animation events
+- `readOnlyMetrics`: readiness can be measured without calling provider APIs
+
+Provider-specific chat/model execution can be added later, but it must plug into this contract. A provider adapter may enrich reasoning, but it must not bypass world-action validation, license gates, operator controls, or backend action ownership.
+
+The minimum readiness metrics are:
+
+```json
+{
+  "providerSupport": {
+    "schemaVersion": "agent-live-mode-provider-adapter-contract/v1",
+    "discoveredAgentCount": 3,
+    "providerKindCount": 3,
+    "providerKinds": {
+      "openclaw": {"agentCount": 1, "liveModeEnabledCount": 1, "gaps": []},
+      "hermes": {"agentCount": 1, "liveModeEnabledCount": 0, "gaps": []},
+      "codex": {"agentCount": 1, "liveModeEnabledCount": 0, "gaps": []}
+    },
+    "checklist": {
+      "allProviderKindsHaveCoreAdapter": true,
+      "providerNeutralToolRegistry": true,
+      "providerNeutralCommunication": true,
+      "providerNeutralMemory": true
+    },
+    "optimization": {
+      "providerCallsDuringMetrics": 0,
+      "modelCallsDuringMetrics": 0
+    }
+  }
+}
+```
+
+### 1b. PIANO-Style Lightweight Orchestration
+
+Live Agent Mode should follow the Smallville/PIANO pattern without making the product heavy. That means the architecture exposes parallel module contracts, but the first implementation can keep those modules lightweight and deterministic.
+
+Required modules:
+
+- `perception`: builds the current world frame
+- `memory`: stores observations, conversations, diary, and facts
+- `reflection`: summarizes experience into higher-level beliefs
+- `planning`: chooses goals and next tool calls
+- `socialReasoning`: tracks relationships and nearby agents
+- `conversation`: creates in-world communication events
+- `actionExecution`: runs validated tools through backend execution
+- `outcomeAwareness`: compares expected action outcomes against recorded results
+- `orchestrator`: schedules modules and decides which output wins
+
+The important product rule is that modules produce proposals and evidence; only the backend executor mutates world state.
+
+Readiness is measured by:
+
+```json
+{
+  "pianoArchitecture": {
+    "schemaVersion": "agent-live-mode-piano-architecture/v1",
+    "modules": {
+      "perception": {"contractReady": true, "runtimeEvidence": true},
+      "memory": {"contractReady": true, "runtimeEvidence": true},
+      "reflection": {"contractReady": true, "runtimeEvidence": false},
+      "planning": {"contractReady": true, "runtimeEvidence": true},
+      "socialReasoning": {"contractReady": true, "runtimeEvidence": true},
+      "conversation": {"contractReady": true, "runtimeEvidence": true},
+      "actionExecution": {"contractReady": true, "runtimeEvidence": true},
+      "outcomeAwareness": {"contractReady": true, "runtimeEvidence": true},
+      "orchestrator": {"contractReady": true, "runtimeEvidence": true}
+    },
+    "contractGaps": [],
+    "runtimeEvidenceGaps": ["reflection"],
+    "optimization": {
+      "readOnly": true,
+      "providerCallsDuringMetrics": 0,
+      "modelCallsDuringMetrics": 0,
+      "heavyWorldScan": false
+    }
+  }
+}
+```
+
+`contractReady` means the product has a stable module slot and validation path. `runtimeEvidence` means the current world/test run has produced data for that module. This distinction prevents the UI from claiming a feature is actively working just because the code contract exists.
 
 ### 2. Scheduler
 

@@ -162,6 +162,9 @@ for (const token of [
   'function runBrowserReplayRenderCheck(actionId)',
   "postJson('/api/agent-live-loop/tick'",
   '/api/live-agent-mode/metrics',
+  'providerAdapterReadiness',
+  'pianoModuleContractsReady',
+  'lightweightMetricsOptimized',
   "actionType: 'life.social'",
   '__VWReplayLiveAgentModeAnimationEvents',
   '__VWLiveAgentModeAnimationReplayState',
@@ -401,6 +404,53 @@ finally:
     shutil.rmtree(data_dir, ignore_errors=True)
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(liveAgentCommunicationMemoryCheck.status, 0, `Live Agent communication/memory check failed\n${liveAgentCommunicationMemoryCheck.stderr || liveAgentCommunicationMemoryCheck.stdout}`);
+
+const liveAgentProviderPianoMetricsCheck = spawnSync('python3', ['-B', '-c', `
+import importlib.util
+import os
+import shutil
+import tempfile
+import time
+from pathlib import Path
+
+path = Path("src/server/server.py")
+data_dir = tempfile.mkdtemp(prefix="vw-smoke-provider-piano-")
+os.environ["VW_DATA_DIR"] = data_dir
+try:
+    spec = importlib.util.spec_from_file_location("vw_server", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module._agent_roster = [
+        {"id": "adam", "statusKey": "adam", "name": "Adam", "providerKind": "openclaw"},
+        {"id": "hermes-default", "statusKey": "hermes-default", "name": "Hermes", "providerKind": "hermes"},
+        {"id": "codex-main", "statusKey": "codex-main", "name": "Codex", "providerKind": "codex"},
+    ]
+    module._roster_time = time.time()
+    meta = module.load_world_meta()
+    meta["agentProfiles"] = {"adam": {"agentLiveModeEnabled": True}}
+    module.save_world_meta(meta)
+
+    metrics = module.get_live_agent_mode_autonomy_metrics()
+    provider = metrics["providerSupport"]
+    piano = metrics["pianoArchitecture"]
+    assert provider["schemaVersion"] == "agent-live-mode-provider-adapter-contract/v1", provider
+    assert piano["schemaVersion"] == "agent-live-mode-piano-architecture/v1", piano
+    assert provider["providerKindCount"] == 3, provider
+    assert set(provider["providerKinds"]) == {"openclaw", "hermes", "codex"}, provider
+    assert provider["checklist"]["allProviderKindsHaveCoreAdapter"] is True, provider
+    assert provider["optimization"]["providerCallsDuringMetrics"] == 0, provider
+    assert provider["optimization"]["modelCallsDuringMetrics"] == 0, provider
+    assert piano["checklist"]["allModuleContractsReady"] is True, piano
+    assert set(module.LIVE_AGENT_PIANO_MODULES) <= set(piano["modules"]), piano
+    assert piano["optimization"]["heavyWorldScan"] is False, piano
+    assert metrics["checklist"]["providerAdapterReadiness"] is True, metrics["checklist"]
+    assert metrics["checklist"]["pianoModuleContractsReady"] is True, metrics["checklist"]
+    assert metrics["checklist"]["lightweightMetricsOptimized"] is True, metrics["checklist"]
+    print("live agent provider and piano metrics ok")
+finally:
+    shutil.rmtree(data_dir, ignore_errors=True)
+`], { cwd: root, encoding: 'utf8' });
+assert.equal(liveAgentProviderPianoMetricsCheck.status, 0, `Live Agent provider/PIANO metrics check failed\n${liveAgentProviderPianoMetricsCheck.stderr || liveAgentProviderPianoMetricsCheck.stdout}`);
 
 const licensePy = read('src/server/license.py');
 const serverPy = read('src/server/server.py');
@@ -740,13 +790,28 @@ for (const token of [
   'LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"',
   'LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION = "agent-live-mode-in-world-communication/v1"',
   'LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"',
+  'LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"',
+  'LIVE_AGENT_PIANO_ARCHITECTURE_VERSION = "agent-live-mode-piano-architecture/v1"',
+  'LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES',
+  'LIVE_AGENT_PIANO_MODULES',
   'apply_live_agent_build_completion_effect',
   'building-persisted',
   'def advance_live_agent_backend_world_action',
   'def list_live_agent_animation_events',
   'def list_live_agent_in_world_communications',
   'def get_live_agent_mode_autonomy_metrics',
+  'def _live_agent_provider_adapter_metrics',
+  'def _live_agent_piano_architecture_metrics',
   '"agent-live-mode-autonomy-metrics/v1"',
+  '"agent-live-mode-provider-adapter-contract/v1"',
+  '"agent-live-mode-piano-architecture/v1"',
+  '"providerSupport"',
+  '"pianoArchitecture"',
+  '"providerAdapterReadiness"',
+  '"pianoModuleContractsReady"',
+  '"lightweightMetricsOptimized"',
+  '"providerCallsDuringMetrics": 0',
+  '"modelCallsDuringMetrics": 0',
   '"agent-location-to-setAgentTarget"',
   '"skipsMoveIntentHandoffForBackendOwnedActions": True',
   'def _execute_live_agent_communication_tool',
