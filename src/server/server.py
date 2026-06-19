@@ -7823,6 +7823,8 @@ def _live_agent_loop_record_outcome_observed(state, agent_id, plan, summary, act
         expected = existing.get("expectedOutcome")
     observed = _live_agent_loop_observed_outcome(summary, action, now_iso=now_iso)
     mismatch = expectation_mismatch if isinstance(expectation_mismatch, dict) else None
+    if mismatch is None and expected:
+        mismatch = _live_agent_loop_expected_outcome_mismatch({**plan, "expectedOutcome": expected}, summary, action)
     if mismatch:
         resolution_status = "recovery_pending"
         recovery_decision = "select-replacement-plan"

@@ -476,6 +476,44 @@ try:
     direct_observed = next(item for item in state["outcomeAwareness"] if item.get("actionId") == direct_id)
     assert direct_observed.get("observedOutcome", {}).get("status") == "completed", direct_observed
     assert direct_observed.get("resolution", {}).get("status") == "matched", direct_observed
+
+    ok, failed_result, failed_status = module.create_world_action({
+        "agentId": "adam",
+        "source": {
+            "kind": "agent-live-mode",
+            "requestedBy": "smoke",
+            "requestId": "live-loop-adam-direct-world-action-failed-smoke",
+            "roles": ["participant"],
+        },
+        "actionType": "life.getWater",
+        "capabilityTag": "life.hydration",
+        "target": {
+            "kind": "object-instance",
+            "buildingId": "office-smoke",
+            "objectInstanceId": "cooler-smoke",
+            "catalogId": "waterCooler",
+            "interactionSpotId": "use-front",
+        },
+        "params": {"loopActionId": "hydrate-water-cooler-direct-failed"},
+    })
+    assert ok and failed_status == 201, failed_result
+    failed_id = failed_result["action"]["id"]
+    ok, failed_transition, failed_transition_status = module.transition_world_action(
+        failed_id,
+        "failed",
+        result={"status": "failed", "reason": "smoke-runtime-error"},
+        failure_reason="runtime_error",
+        actor="verify-smoke",
+        source="agent-live-mode",
+    )
+    assert ok and failed_transition_status == 200, failed_transition
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    failed_observed = next(item for item in state["outcomeAwareness"] if item.get("actionId") == failed_id)
+    assert failed_observed.get("expectedOutcome", {}).get("status") == "completed", failed_observed
+    assert failed_observed.get("observedOutcome", {}).get("status") == "failed", failed_observed
+    assert failed_observed.get("resolution", {}).get("status") == "recovery_pending", failed_observed
+    assert failed_observed.get("resolution", {}).get("recoveryDecision") == "select-replacement-plan", failed_observed
+    assert "expected completed, observed failed" in failed_observed.get("resolution", {}).get("reason", ""), failed_observed
     location = module.load_world_meta()["agentLife"]["simulation"]["agentLocations"]["adam"]
     assert location["buildingId"] == "office-smoke", location
     print("live agent backend executor ok")
