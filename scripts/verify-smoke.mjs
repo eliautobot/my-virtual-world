@@ -154,7 +154,9 @@ for (const token of [
   'function verifyNoBrowserBackendTurn()',
   'function runBrowserReplayRenderCheck(actionId)',
   "postJson('/api/agent-live-loop/tick'",
-  '/api/live-agent-mode/animation-events?actionId=',
+  '__VWReplayLiveAgentModeAnimationEvents',
+  '__VWLiveAgentModeAnimationReplayState',
+  'vw-live-agent-mode-replay-',
   'VW_OPENCLAW_PATH: workspaceRoot',
   'VW_CODEX_ENABLED: \'false\'',
 ]) {
@@ -495,7 +497,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260617-road-draw-r26',
+  'js/main3d.js?v=20260618-live-agent-replay-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -757,6 +759,19 @@ assert(main3dJs.includes('main3d-live-sync'), 'main3d.js missing Live Agent loop
 assert(main3dJs.includes('20260614-live-mode-social-r28'), 'main3d.js missing Live Agent loop client marker version');
 assert(main3dJs.includes('vw-live-mode-world-client-session-id'), 'main3d.js missing stable Live Mode client session id');
 assert(main3dJs.includes('getLiveModeWorldClientMarkerUrl'), 'main3d.js missing Live Mode client diagnostic marker helper');
+for (const token of [
+  'LIVE_AGENT_MODE_ANIMATION_REPLAY_ENDPOINT',
+  '/api/live-agent-mode/animation-events',
+  'main3d-live-animation-replay',
+  'syncLiveAgentModeAnimationEvents',
+  'applyLiveAgentModeReplayEvent',
+  'renderLiveAgentModeReplayEvent',
+  'window.__VWReplayLiveAgentModeAnimationEvents',
+  'window.__VWLiveAgentModeAnimationReplayState',
+  'vw-live-agent-mode-replay-',
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing Live Agent animation replay token: ${token}`);
+}
 for (const token of [
   'routeLiveModeConstructionSiteWorldAction',
   'routeLiveModeHomeWorldAction',

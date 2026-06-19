@@ -398,89 +398,47 @@ with sync_playwright() as p:
     browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
     page = browser.new_page(viewport={"width": 960, "height": 640}, device_scale_factor=1)
     page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_selector("body", timeout=10000)
+    page.wait_for_selector("#pixiContainer canvas", timeout=30000)
+    page.wait_for_function("() => typeof window.__VWReplayLiveAgentModeAnimationEvents === 'function' && typeof window.__VWScene === 'function'", timeout=30000)
     result = page.evaluate("""
 async ({ actionId }) => {
-  const response = await fetch('/api/live-agent-mode/animation-events?actionId=' + encodeURIComponent(actionId) + '&limit=50', { cache: 'no-store' });
-  if (!response.ok) throw new Error('animation event replay fetch failed: ' + response.status);
-  const payload = await response.json();
-  const events = Array.isArray(payload.events) ? payload.events : [];
-  if (events.length < 5) throw new Error('expected at least 5 replay events, got ' + events.length);
-
-  const canvas = document.createElement('canvas');
-  canvas.id = 'vw-live-agent-mode-8587-replay-proof';
-  canvas.width = 320;
-  canvas.height = 180;
-  canvas.style.cssText = 'position:fixed;left:12px;bottom:12px;width:320px;height:180px;z-index:2147483647;pointer-events:none;';
-  document.body.appendChild(canvas);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('2d canvas context unavailable');
-
-  const points = [];
-  const eventNames = new Set();
-  const pushPoint = (location) => {
-    if (!location || typeof location !== 'object') return;
-    const rawX = location.x ?? (Number.isFinite(Number(location.apiX)) ? Number(location.apiX) / 40 : undefined);
-    const rawZ = location.z ?? location.y ?? (Number.isFinite(Number(location.apiZ)) ? Number(location.apiZ) / 40 : undefined);
-    const x = Number(rawX);
-    const z = Number(rawZ);
-    if (Number.isFinite(x) && Number.isFinite(z)) points.push({ x, z });
-  };
-  for (const event of events) {
-    eventNames.add(event.name);
-    pushPoint(event.from);
-    pushPoint(event.to);
+  const expectedNames = ['agent-move-started', 'agent-arrived', 'object-use-started', 'object-use-completed', 'world-action-completed'];
+  let lastState = null;
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    await window.__VWReplayLiveAgentModeAnimationEvents({ actionId, force: true, limit: 50 });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const state = window.__VWLiveAgentModeAnimationReplayState || {};
+    const actionState = state.actions?.[actionId] || null;
+    const eventNames = new Set(actionState?.eventNames || []);
+    const scene = window.__VWScene?.();
+    const replayGroup = scene?.getObjectByName?.('vw-live-agent-mode-replay-' + actionId) || null;
+    const agent = (window.agents || []).find(candidate => String(candidate?.id || candidate?.statusKey || '') === 'acceptance-agent') || null;
+    const canvas = document.querySelector('#pixiContainer canvas');
+    const canvasRect = canvas?.getBoundingClientRect?.();
+    const rendererInfo = window.__VWRenderInfo?.() || {};
+    const hasExpectedEvents = expectedNames.every(name => eventNames.has(name));
+    const groupChildCount = replayGroup?.children?.length || 0;
+    const agentRendered = Boolean(actionState?.agentRendered && agent?._group3d && Number.isFinite(agent._group3d.position.x) && Number.isFinite(agent._group3d.position.z));
+    const canvasRendered = Boolean(canvasRect && canvasRect.width > 100 && canvasRect.height > 100 && Number(rendererInfo.calls || 0) > 0);
+    lastState = {
+      ok: Boolean(state.ok && actionState && hasExpectedEvents && groupChildCount >= 2 && agentRendered && canvasRendered),
+      actionId,
+      eventCount: actionState?.eventCount || 0,
+      renderedEventCount: actionState?.renderedEventCount || 0,
+      groupChildCount,
+      eventNames: Array.from(eventNames).sort(),
+      agentRendered,
+      agentPosition: actionState?.lastAgentPosition || null,
+      sceneGroupName: replayGroup?.name || null,
+      rendererCalls: rendererInfo.calls || 0,
+      canvas: canvasRect ? { width: canvasRect.width, height: canvasRect.height } : null,
+      pageUrl: window.location.href,
+      replaySource: state.source || null,
+    };
+    if (lastState.ok) return lastState;
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
-  if (points.length < 2) throw new Error('expected replayable from/to points, got ' + points.length);
-
-  const minX = Math.min(...points.map(point => point.x));
-  const maxX = Math.max(...points.map(point => point.x));
-  const minZ = Math.min(...points.map(point => point.z));
-  const maxZ = Math.max(...points.map(point => point.z));
-  const pad = 24;
-  const spanX = Math.max(1, maxX - minX);
-  const spanZ = Math.max(1, maxZ - minZ);
-  const sx = (x) => pad + ((x - minX) / spanX) * (canvas.width - pad * 2);
-  const sy = (z) => canvas.height - pad - ((z - minZ) / spanZ) * (canvas.height - pad * 2);
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.lineWidth = 4;
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = '#2563eb';
-  ctx.beginPath();
-  points.forEach((point, index) => {
-    const x = sx(point.x);
-    const y = sy(point.z);
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-  ctx.fillStyle = '#16a34a';
-  points.forEach((point) => {
-    ctx.beginPath();
-    ctx.arc(sx(point.x), sy(point.z), 5, 0, Math.PI * 2);
-    ctx.fill();
-  });
-  ctx.fillStyle = '#111827';
-  ctx.font = '12px sans-serif';
-  ctx.fillText('Live Agent replay: ' + events.length + ' events', 14, 18);
-
-  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  let coloredPixels = 0;
-  for (let index = 3; index < pixels.length; index += 4) {
-    if (pixels[index] > 0) coloredPixels += 1;
-  }
-  if (coloredPixels < 80) throw new Error('browser canvas replay rendered too few pixels: ' + coloredPixels);
-
-  window.__VWLiveAgentMode8587ReplayProof = {
-    ok: true,
-    actionId,
-    eventCount: events.length,
-    eventNames: Array.from(eventNames).sort(),
-    replayedPoints: points.length,
-    coloredPixels,
-  };
-  return { ...window.__VWLiveAgentMode8587ReplayProof, pageUrl: window.location.href };
+  throw new Error('real product replay/render state did not settle: ' + JSON.stringify(lastState));
 }
 """, {"actionId": action_id})
     browser.close()
@@ -500,7 +458,8 @@ print(json.dumps(result, sort_keys=True))
   const result = JSON.parse(resultText);
   assert(result.ok === true, 'browser replay/render check failed', result);
   assert(String(result.pageUrl || '').startsWith(BASE_URL), 'browser replay/render check did not run on the 8587 app', result);
-  console.log(`PASS: browser replay/render check drew ${result.replayedPoints} event points for ${actionId} on ${BASE_URL}.`);
+  assert(result.sceneGroupName, 'browser replay/render check did not use a real product scene replay group', result);
+  console.log(`PASS: browser replay/render check used product client scene replay group ${result.sceneGroupName} with ${result.renderedEventCount} rendered events for ${actionId} on ${BASE_URL}.`);
   return result;
 }
 
