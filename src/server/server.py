@@ -8791,6 +8791,23 @@ def _live_agent_provider_bridge_record(state, provider_kind, operation, *, statu
     return provider
 
 
+def _live_agent_provider_bridge_snapshot(value):
+    try:
+        return _copy_jsonable(value)
+    except Exception:
+        if isinstance(value, dict):
+            snapshot = {}
+            for key, item in value.items():
+                if isinstance(key, (str, int, float, bool)) or key is None:
+                    snapshot[str(key)] = _live_agent_provider_bridge_snapshot(item)
+            return snapshot
+        if isinstance(value, (list, tuple)):
+            return [_live_agent_provider_bridge_snapshot(item) for item in value]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
+
+
 def _live_agent_provider_bridge_context(agent, agent_state, state, turn, operation, *, perception=None, world_client=None, now_epoch=None, timeout_sec=None, payload=None):
     agent = agent if isinstance(agent, dict) else {}
     agent_id = agent.get("agentId") or agent.get("statusKey") or agent.get("id")
@@ -8800,20 +8817,20 @@ def _live_agent_provider_bridge_context(agent, agent_state, state, turn, operati
     return {
         "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
         "operation": operation,
-        "agent": agent,
+        "agent": _live_agent_provider_bridge_snapshot(agent),
         "agentId": agent_id,
         "providerKind": provider_kind,
-        "agentState": agent_state if isinstance(agent_state, dict) else {},
-        "state": state if isinstance(state, dict) else {},
-        "turn": turn if isinstance(turn, dict) else {},
-        "perception": perception if isinstance(perception, dict) else None,
-        "worldClient": world_client if isinstance(world_client, dict) else None,
+        "agentState": _live_agent_provider_bridge_snapshot(agent_state) if isinstance(agent_state, dict) else {},
+        "state": _live_agent_provider_bridge_snapshot(state) if isinstance(state, dict) else {},
+        "turn": _live_agent_provider_bridge_snapshot(turn) if isinstance(turn, dict) else {},
+        "perception": _live_agent_provider_bridge_snapshot(perception) if isinstance(perception, dict) else None,
+        "worldClient": _live_agent_provider_bridge_snapshot(world_client) if isinstance(world_client, dict) else None,
         "nowEpoch": float(now_epoch or time.time()),
         "timeoutSec": timeout_value,
         "deadlineEpoch": time.time() + max(0.001, timeout_value),
-        "capabilities": adapter.get("capabilities"),
-        "capabilityGaps": adapter.get("capabilityGaps"),
-        "payload": payload if isinstance(payload, dict) else {},
+        "capabilities": _live_agent_provider_bridge_snapshot(adapter.get("capabilities") or {}),
+        "capabilityGaps": _live_agent_provider_bridge_snapshot(adapter.get("capabilityGaps") or []),
+        "payload": _live_agent_provider_bridge_snapshot(payload) if isinstance(payload, dict) else {},
     }
 
 
@@ -8899,11 +8916,22 @@ def _live_agent_provider_bridge_decide(agent, agent_state, state, turn, percepti
     if callable(hook):
         result = _live_agent_provider_bridge_call(hook, context, timeout_sec=context.get("timeoutSec"))
         if result.get("ok"):
-            decision = result.get("decision") if isinstance(result.get("decision"), dict) else {}
-            selected = result.get("selected") if isinstance(result.get("selected"), dict) else None
-            selected_id = decision.get("selectedActionId") or result.get("selectedActionId")
-            if not selected and selected_id:
-                selected = _live_agent_provider_bridge_resolve_selected(agent_id, agent_state, selected_id)
+            decision = _live_agent_provider_bridge_snapshot(result.get("decision")) if isinstance(result.get("decision"), dict) else {}
+            raw_selected = result.get("selected") if isinstance(result.get("selected"), dict) else None
+            selected_action = raw_selected.get("action") if isinstance(raw_selected, dict) and isinstance(raw_selected.get("action"), dict) else {}
+            selected_id = decision.get("selectedActionId") or result.get("selectedActionId") or selected_action.get("id")
+            selected = _live_agent_provider_bridge_resolve_selected(agent_id, agent_state, selected_id) if selected_id else None
+            if not selected:
+                _live_agent_provider_bridge_record(state, provider_kind, "decide", status="fallback", fallback=True, capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
+                fallback_selected, fallback_decision = _live_agent_provider_bridge_fallback_decide(agent_id, agent_state, perception)
+                if isinstance(fallback_decision, dict):
+                    provider_bridge = fallback_decision.setdefault("providerBridge", {})
+                    provider_bridge["providerKind"] = provider_kind
+                    provider_bridge["capabilityGaps"] = adapter.get("capabilityGaps")
+                    provider_bridge["fallbackReason"] = "provider-selection-unresolved"
+                    if selected_id:
+                        provider_bridge["rejectedSelectedActionId"] = str(selected_id)[:160]
+                return fallback_selected, fallback_decision
             if decision:
                 decision.setdefault("schemaVersion", "agent-live-mode-decision/v1")
                 decision.setdefault("at", (perception or {}).get("at") or _utc_now_iso())

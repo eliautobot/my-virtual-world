@@ -639,10 +639,23 @@ try:
 
     def timeout_decide(context):
         time.sleep(0.05)
+        context["state"]["leakedTimeoutMutation"] = True
+        context["agentState"]["leakedTimeoutMutation"] = True
         return {"decision": {"selectedActionId": "hydrate-water-cooler"}}
+
+    def invalid_decide(context):
+        return {
+            "decision": {
+                "selectedActionId": "does-not-exist",
+                "selectedActionLabel": "Invalid provider selection",
+                "score": 9.9,
+                "reason": "fake provider selected an unavailable action",
+            }
+        }
 
     module._live_agent_register_provider_bridge("fake", hooks={"decide": fake_decide})
     module._live_agent_register_provider_bridge("fake-timeout", hooks={"decide": timeout_decide})
+    module._live_agent_register_provider_bridge("fake-invalid", hooks={"decide": invalid_decide})
 
     state = module.get_live_agent_loop_state(persist_migration=True)
     turn = {"id": "bridge-turn", "agentId": "fake-agent"}
@@ -681,6 +694,15 @@ try:
     timeout_perception = module._live_agent_provider_bridge_observe(timeout_agent, timeout_state, state, {"id": "timeout-turn", "agentId": "timeout-agent"}, world_client={"active": False}, now_epoch=time.time())
     timeout_selected, timeout_decision = module._live_agent_provider_bridge_decide(timeout_agent, timeout_state, state, {"id": "timeout-turn", "agentId": "timeout-agent"}, timeout_perception, timeout_sec=0.001)
     assert timeout_selected and timeout_decision["providerBridge"]["fallbackUsed"] is True, timeout_decision["providerBridge"]
+    time.sleep(0.08)
+    assert "leakedTimeoutMutation" not in state, state.get("leakedTimeoutMutation")
+    assert "leakedTimeoutMutation" not in timeout_state, timeout_state.get("leakedTimeoutMutation")
+
+    invalid_agent = {"id": "fake-agent", "statusKey": "fake-agent", "agentId": "fake-agent", "providerKind": "fake-invalid"}
+    invalid_selected, invalid_decision = module._live_agent_provider_bridge_decide(invalid_agent, agent_state, state, {"id": "invalid-turn", "agentId": "fake-agent"}, perception)
+    assert invalid_selected and invalid_decision["providerBridge"]["fallbackUsed"] is True, invalid_decision["providerBridge"]
+    assert invalid_decision["providerBridge"]["fallbackReason"] == "provider-selection-unresolved", invalid_decision["providerBridge"]
+    assert invalid_decision["providerBridge"]["rejectedSelectedActionId"] == "does-not-exist", invalid_decision["providerBridge"]
 
     metrics = module._live_agent_provider_adapter_metrics(module.get_roster(), loop_state=state)
     assert metrics["bridgeSchemaVersion"] == "agent-live-mode-provider-bridge/v1", metrics
