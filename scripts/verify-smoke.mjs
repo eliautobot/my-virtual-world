@@ -163,7 +163,7 @@ for (const token of [
   "postJson('/api/agent-live-loop/tick'",
   '/api/live-agent-mode/metrics',
   'providerAdapterReadiness',
-  'pianoModuleContractsReady',
+  'clawMindModuleContractsReady',
   'lightweightMetricsOptimized',
   "actionType: 'life.social'",
   '__VWReplayLiveAgentModeAnimationEvents',
@@ -471,7 +471,7 @@ finally:
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(liveAgentCommunicationMemoryCheck.status, 0, `Live Agent communication/memory check failed\n${liveAgentCommunicationMemoryCheck.stderr || liveAgentCommunicationMemoryCheck.stdout}`);
 
-const liveAgentProviderPianoMetricsCheck = spawnSync('python3', ['-B', '-c', `
+const liveAgentProviderClawMindMetricsCheck = spawnSync('python3', ['-B', '-c', `
 import importlib.util
 import os
 import shutil
@@ -480,7 +480,7 @@ import time
 from pathlib import Path
 
 path = Path("src/server/server.py")
-data_dir = tempfile.mkdtemp(prefix="vw-smoke-provider-piano-")
+data_dir = tempfile.mkdtemp(prefix="vw-smoke-provider-clawmind-")
 os.environ["VW_DATA_DIR"] = data_dir
 os.environ["_VW_INT"] = "1"
 try:
@@ -500,25 +500,25 @@ try:
 
     metrics = module.get_live_agent_mode_autonomy_metrics()
     provider = metrics["providerSupport"]
-    piano = metrics["pianoArchitecture"]
+    clawmind = metrics["clawMindArchitecture"]
     assert provider["schemaVersion"] == "agent-live-mode-provider-adapter-contract/v1", provider
-    assert piano["schemaVersion"] == "agent-live-mode-piano-architecture/v1", piano
+    assert clawmind["schemaVersion"] == "agent-live-mode-clawmind-architecture/v1", clawmind
     assert provider["providerKindCount"] == 3, provider
     assert set(provider["providerKinds"]) == {"openclaw", "hermes", "codex"}, provider
     assert provider["checklist"]["allProviderKindsHaveCoreAdapter"] is True, provider
     assert provider["optimization"]["providerCallsDuringMetrics"] == 0, provider
     assert provider["optimization"]["modelCallsDuringMetrics"] == 0, provider
-    assert piano["checklist"]["allModuleContractsReady"] is True, piano
-    assert set(module.LIVE_AGENT_PIANO_MODULES) <= set(piano["modules"]), piano
-    assert piano["optimization"]["heavyWorldScan"] is False, piano
+    assert clawmind["checklist"]["allModuleContractsReady"] is True, clawmind
+    assert set(module.LIVE_AGENT_CLAWMIND_MODULES) <= set(clawmind["modules"]), clawmind
+    assert clawmind["optimization"]["heavyWorldScan"] is False, clawmind
     assert metrics["checklist"]["providerAdapterReadiness"] is True, metrics["checklist"]
-    assert metrics["checklist"]["pianoModuleContractsReady"] is True, metrics["checklist"]
+    assert metrics["checklist"]["clawMindModuleContractsReady"] is True, metrics["checklist"]
     assert metrics["checklist"]["lightweightMetricsOptimized"] is True, metrics["checklist"]
-    print("live agent provider and piano metrics ok")
+    print("live agent provider and ClawMind metrics ok")
 finally:
     shutil.rmtree(data_dir, ignore_errors=True)
 `], { cwd: root, encoding: 'utf8' });
-assert.equal(liveAgentProviderPianoMetricsCheck.status, 0, `Live Agent provider/PIANO metrics check failed\n${liveAgentProviderPianoMetricsCheck.stderr || liveAgentProviderPianoMetricsCheck.stdout}`);
+assert.equal(liveAgentProviderClawMindMetricsCheck.status, 0, `Live Agent provider/ClawMind metrics check failed\n${liveAgentProviderClawMindMetricsCheck.stderr || liveAgentProviderClawMindMetricsCheck.stdout}`);
 
 const licensePy = read('src/server/license.py');
 const serverPy = read('src/server/server.py');
@@ -862,9 +862,9 @@ for (const token of [
   'LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION = "agent-live-mode-in-world-communication/v1"',
   'LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"',
   'LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"',
-  'LIVE_AGENT_PIANO_ARCHITECTURE_VERSION = "agent-live-mode-piano-architecture/v1"',
+  'LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"',
   'LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES',
-  'LIVE_AGENT_PIANO_MODULES',
+  'LIVE_AGENT_CLAWMIND_MODULES',
   'apply_live_agent_build_completion_effect',
   'building-persisted',
   'def advance_live_agent_backend_world_action',
@@ -872,14 +872,14 @@ for (const token of [
   'def list_live_agent_in_world_communications',
   'def get_live_agent_mode_autonomy_metrics',
   'def _live_agent_provider_adapter_metrics',
-  'def _live_agent_piano_architecture_metrics',
+  'def _live_agent_clawmind_architecture_metrics',
   '"agent-live-mode-autonomy-metrics/v1"',
   '"agent-live-mode-provider-adapter-contract/v1"',
-  '"agent-live-mode-piano-architecture/v1"',
+  '"agent-live-mode-clawmind-architecture/v1"',
   '"providerSupport"',
-  '"pianoArchitecture"',
+  '"clawMindArchitecture"',
   '"providerAdapterReadiness"',
-  '"pianoModuleContractsReady"',
+  '"clawMindModuleContractsReady"',
   '"lightweightMetricsOptimized"',
   '"providerCallsDuringMetrics": 0',
   '"modelCallsDuringMetrics": 0',

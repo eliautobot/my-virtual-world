@@ -1397,7 +1397,7 @@ LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"
 LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION = "agent-live-mode-in-world-communication/v1"
 LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"
 LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"
-LIVE_AGENT_PIANO_ARCHITECTURE_VERSION = "agent-live-mode-piano-architecture/v1"
+LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"
 LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES = [
     "identity",
     "profileStorage",
@@ -1410,7 +1410,7 @@ LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES = [
     "animationReplay",
     "readOnlyMetrics",
 ]
-LIVE_AGENT_PIANO_MODULES = [
+LIVE_AGENT_CLAWMIND_MODULES = [
     "perception",
     "memory",
     "reflection",
@@ -1437,6 +1437,8 @@ LIVE_AGENT_IN_WORLD_COMMUNICATION_EVENT_NAMES = {
 }
 LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"
 LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION = "agent-live-mode-plan/v1"
+LIVE_AGENT_CLAWMIND_RUNTIME_TRACE_VERSION = "agent-live-mode-clawmind-runtime-trace/v1"
+LIVE_AGENT_LEGACY_CLAWMIND_RUNTIME_KEYS = ("pia" + "noRuntime",)
 LIVE_AGENT_OPERATOR_PROPOSAL_SCHEMA_VERSION = "agent-live-mode-operator-proposal/v1"
 LIVE_AGENT_OPERATOR_TIMELINE_SCHEMA_VERSION = "agent-live-mode-operator-timeline/v1"
 LIVE_AGENT_LOOP_DEFAULTS = {
@@ -1454,6 +1456,7 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "planRetention": 12,
     "planMaxRetries": 2,
     "turnRetention": 80,
+    "clawMindRuntimeTraceRetention": 240,
     "turnTimeoutSec": 240,
     "turnRetryBackoffSec": 45,
     "maxTurnRetries": 2,
@@ -3581,6 +3584,50 @@ def _live_agent_metric_client_free(action):
     )
 
 
+def _live_agent_metric_build_effect_persisted(action):
+    if not isinstance(action, dict) or action.get("actionType") != "world.buildStructure":
+        return False
+    result = action.get("result") if isinstance(action.get("result"), dict) else {}
+    execution = action.get("execution") if isinstance(action.get("execution"), dict) else {}
+    effects = []
+    for source in (result, execution):
+        source_effects = source.get("effects") if isinstance(source.get("effects"), list) else []
+        effects.extend([item for item in source_effects if isinstance(item, dict)])
+    return any(effect.get("effect") == "building-persisted" for effect in effects)
+
+
+def _live_agent_metric_live_building_ids(meta, completed_backend_actions):
+    ids = set()
+    for action in completed_backend_actions or []:
+        if not _live_agent_metric_build_effect_persisted(action):
+            continue
+        result = action.get("result") if isinstance(action.get("result"), dict) else {}
+        execution = action.get("execution") if isinstance(action.get("execution"), dict) else {}
+        for source in (result, execution):
+            for effect in source.get("effects") or []:
+                if isinstance(effect, dict) and effect.get("buildingId"):
+                    ids.add(str(effect.get("buildingId")))
+    assignments = meta.get("agentAssignments") if isinstance(meta.get("agentAssignments"), dict) else {}
+    for assignment in assignments.values():
+        if not isinstance(assignment, dict):
+            continue
+        home_id = assignment.get("home") or assignment.get("homeBuildingId")
+        if home_id:
+            ids.add(str(home_id))
+    return sorted(ids)[:50]
+
+
+def _live_agent_metric_persisted_live_building_count(meta, completed_backend_actions):
+    count = 0
+    for building_id in _live_agent_metric_live_building_ids(meta, completed_backend_actions):
+        building = load_building(building_id)
+        if not isinstance(building, dict):
+            continue
+        if building.get("source") == "agent-live-mode" or building.get("createdFromWorldActionId") or building.get("liveModeHomeForAgentId"):
+            count += 1
+    return count
+
+
 def _live_agent_metric_memory_counts(loop_state):
     counts = {"agentsWithMemory": 0, "entries": 0, "observations": 0, "reflections": 0, "diary": 0, "conversations": 0, "total": 0}
     for agent_state in (loop_state.get("agents") or {}).values():
@@ -3680,68 +3727,99 @@ def _live_agent_provider_adapter_metrics(roster):
     }
 
 
-def _live_agent_piano_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names):
-    modules = {
+def _live_agent_clawmind_contract_readiness(memory_counts):
+    return {
         "perception": {
             "contractReady": "observe_world" in LIVE_AGENT_TOOL_REGISTRY,
-            "runtimeEvidence": bool(loop_state.get("lastTickAt")),
             "measure": "observe_world tool contract plus loop tick timestamps",
         },
         "memory": {
             "contractReady": "add_memory" in LIVE_AGENT_TOOL_REGISTRY,
-            "runtimeEvidence": memory_counts.get("total", 0) > 0,
             "measure": "memory bucket counts",
         },
         "reflection": {
             "contractReady": "reflections" in memory_counts,
-            "runtimeEvidence": memory_counts.get("reflections", 0) > 0,
             "measure": "reflection bucket count",
         },
         "planning": {
-            "contractReady": bool(loop_state.get("decisionMode") or "planner-v2"),
-            "runtimeEvidence": len(loop_state.get("scheduler", {}).get("turnHistory", []) if isinstance(loop_state.get("scheduler"), dict) else []) > 0 or bool(loop_state.get("lastTickAt")),
+            "contractReady": True,
             "measure": "decision mode and turn history",
         },
         "socialReasoning": {
             "contractReady": "say_to_agent" in LIVE_AGENT_TOOL_REGISTRY,
-            "runtimeEvidence": len(relationships or {}) > 0,
             "measure": "relationship records",
         },
         "conversation": {
             "contractReady": "say_to_agent" in LIVE_AGENT_TOOL_REGISTRY,
-            "runtimeEvidence": len(communication_events or []) > 0,
             "measure": "in-world communication events",
         },
         "actionExecution": {
             "contractReady": True,
-            "runtimeEvidence": len(completed_backend_actions or []) > 0,
             "measure": "completed backend-owned actions",
         },
         "outcomeAwareness": {
             "contractReady": True,
-            "runtimeEvidence": bool(animation_event_names),
             "measure": "world-action transition history and replay event names",
         },
         "orchestrator": {
             "contractReady": True,
-            "runtimeEvidence": bool(loop_state.get("enabled")),
             "measure": "backend scheduler/orchestrator state",
         },
     }
+
+
+def _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names):
+    runtime = _normalize_live_agent_clawmind_runtime(loop_state.get("clawMindRuntime") if isinstance(loop_state, dict) else None)
+    traces = [trace for trace in (runtime.get("traces") or []) if isinstance(trace, dict)]
+    contract_readiness = _live_agent_clawmind_contract_readiness(memory_counts)
+    modules = {}
+    for module_name in LIVE_AGENT_CLAWMIND_MODULES:
+        contract = contract_readiness.get(module_name, {"contractReady": False, "measure": "missing module contract"})
+        stat = (runtime.get("moduleStats") or {}).get(module_name) if isinstance((runtime.get("moduleStats") or {}).get(module_name), dict) else {}
+        execution_count = _normalize_int(stat.get("executionCount"), 0, minimum=0, maximum=1000000000)
+        recent_trace = next((trace for trace in reversed(traces) if trace.get("module") == module_name), None)
+        last_latency = stat.get("lastLatencyMs")
+        if not isinstance(last_latency, (int, float)):
+            last_latency = recent_trace.get("latencyMs") if isinstance(recent_trace, dict) and isinstance(recent_trace.get("latencyMs"), (int, float)) else 0
+        last_execution_at = stat.get("lastExecutionAt") or stat.get("lastExecutedAt") or (recent_trace.get("endedAt") if isinstance(recent_trace, dict) else None)
+        modules[module_name] = {
+            "contractReady": bool(contract.get("contractReady")),
+            "runtimeEvidence": execution_count > 0,
+            "executionCount": execution_count,
+            "lastExecutionAt": last_execution_at,
+            "lastExecutedAt": last_execution_at,
+            "lastLatencyMs": round(float(last_latency or 0), 3),
+            "lastStatus": stat.get("lastStatus") or (recent_trace.get("status") if isinstance(recent_trace, dict) else "never_run"),
+            "lastTurnId": stat.get("lastTurnId") or (recent_trace.get("turnId") if isinstance(recent_trace, dict) else None),
+            "lastTraceId": stat.get("lastTraceId") or (recent_trace.get("id") if isinstance(recent_trace, dict) else None),
+            "gaps": list(stat.get("lastGaps") or []),
+            "measure": contract.get("measure"),
+        }
     checklist = {
         "allModuleContractsReady": all(item.get("contractReady") for item in modules.values()),
+        "allModulesExecuted": all(item.get("runtimeEvidence") for item in modules.values()),
         "hasRuntimeEvidence": any(item.get("runtimeEvidence") for item in modules.values()),
-        "parallelModuleContractPresent": set(LIVE_AGENT_PIANO_MODULES).issubset(set(modules.keys())),
+        "parallelModuleContractPresent": set(LIVE_AGENT_CLAWMIND_MODULES).issubset(set(modules.keys())),
+        "contractReadinessSeparatedFromRuntimeExecution": True,
         "lightweightReadOnlyMetrics": True,
         "browserNotRequiredForModuleMetrics": True,
     }
     return {
-        "schemaVersion": LIVE_AGENT_PIANO_ARCHITECTURE_VERSION,
+        "schemaVersion": LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION,
         "modules": modules,
-        "moduleOrder": list(LIVE_AGENT_PIANO_MODULES),
+        "moduleOrder": list(LIVE_AGENT_CLAWMIND_MODULES),
+        "runtime": {
+            "schemaVersion": runtime.get("schemaVersion"),
+            "traceCount": len(traces),
+            "traceRetention": runtime.get("traceRetention"),
+            "lastTurnId": runtime.get("lastTurnId"),
+            "updatedAt": runtime.get("updatedAt"),
+            "boundedTraceStore": True,
+        },
         "checklist": checklist,
         "contractGaps": [key for key, item in modules.items() if not item.get("contractReady")],
         "runtimeEvidenceGaps": [key for key, item in modules.items() if not item.get("runtimeEvidence")],
+        "executionGaps": [key for key, item in modules.items() if item.get("gaps")],
         "optimization": {
             "readOnly": True,
             "modelCallsDuringMetrics": 0,
@@ -3787,24 +3865,21 @@ def get_live_agent_mode_autonomy_metrics():
     simulation = agent_life.get("simulation") if isinstance(agent_life.get("simulation"), dict) else {}
     simulated_locations = simulation.get("agentLocations") if isinstance(simulation.get("agentLocations"), dict) else {}
     relationships = meta.get("agentRelationships") if isinstance(meta.get("agentRelationships"), dict) else {}
-    buildings = list_buildings()
-    live_agent_buildings = [
-        building for building in buildings
-        if isinstance(building, dict)
-        and (
-            building.get("source") == "agent-live-mode"
-            or building.get("createdFromWorldActionId")
-            or building.get("liveModeHomeForAgentId")
-        )
+    live_agent_build_actions = [
+        action for action in completed_backend_actions
+        if _live_agent_metric_build_effect_persisted(action)
     ]
+    live_agent_building_count = _live_agent_metric_persisted_live_building_count(meta, completed_backend_actions)
     turns = scheduler.get("turnHistory") if isinstance(scheduler.get("turnHistory"), list) else []
     completed_turns = [turn for turn in turns if isinstance(turn, dict) and turn.get("status") == "completed"]
     failed_turns = [turn for turn in turns if isinstance(turn, dict) and turn.get("status") == "failed"]
     memory_counts = _live_agent_metric_memory_counts(loop_state)
     pause = _live_agent_loop_pause_status(loop_state)
     kill_switch = _live_agent_loop_kill_switch_status(loop_state)
-    provider_support = _live_agent_provider_adapter_metrics(_live_agent_cached_roster_for_metrics())
-    piano_architecture = _live_agent_piano_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
+    cached_roster = _live_agent_cached_roster_for_metrics()
+    cached_live_enabled_agents = [agent for agent in cached_roster if isinstance(agent, dict) and agent.get("agentLiveModeEnabled") is True]
+    provider_support = _live_agent_provider_adapter_metrics(cached_roster)
+    clawmind_architecture = _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
     checklist = {
         "featureGateOpen": _agent_live_mode_available(),
         "configGateOpen": _agent_live_mode_config_enabled(),
@@ -3813,7 +3888,7 @@ def get_live_agent_mode_autonomy_metrics():
         "browserFreeBackendCompletions": len(completed_backend_actions) > 0,
         "movementPersisted": len([loc for loc in simulated_locations.values() if isinstance(loc, dict) and loc.get("source") == "server-simulation"]) > 0,
         "threeTypedObjectUses": len(object_action_types) >= 3,
-        "buildEffectPersisted": len(live_agent_buildings) > 0,
+        "buildEffectPersisted": live_agent_building_count > 0,
         "animationReplayReady": all(name in animation_event_names for name in ["agent-move-started", "agent-arrived", "object-use-started", "object-use-completed", "world-action-completed"]),
         "spatialOrWorldCommunication": len(communication_events) > 0,
         "reactionOpportunitiesCreated": len(reaction_opportunities) > 0,
@@ -3824,8 +3899,8 @@ def get_live_agent_mode_autonomy_metrics():
         "operatorKillSwitchAvailable": kill_switch.get("active") in {True, False},
         "noRoutePendingStuck": len(active_route_pending) == 0,
         "providerAdapterReadiness": provider_support.get("checklist", {}).get("allProviderKindsHaveCoreAdapter") is True,
-        "pianoModuleContractsReady": piano_architecture.get("checklist", {}).get("allModuleContractsReady") is True,
-        "lightweightMetricsOptimized": provider_support.get("optimization", {}).get("modelCallsDuringMetrics") == 0 and piano_architecture.get("optimization", {}).get("heavyWorldScan") is False,
+        "clawMindModuleContractsReady": clawmind_architecture.get("checklist", {}).get("allModuleContractsReady") is True,
+        "lightweightMetricsOptimized": provider_support.get("optimization", {}).get("modelCallsDuringMetrics") == 0 and clawmind_architecture.get("optimization", {}).get("heavyWorldScan") is False,
     }
     return {
         "ok": True,
@@ -3836,7 +3911,7 @@ def get_live_agent_mode_autonomy_metrics():
             "enabled": bool(loop_state.get("enabled")),
             "lastTickAt": loop_state.get("lastTickAt"),
             "decisionMode": loop_state.get("decisionMode"),
-            "enabledAgentCount": len(_live_agent_loop_enabled_roster()),
+            "enabledAgentCount": len(cached_live_enabled_agents),
             "threadAlive": checklist["schedulerThreadAlive"],
             "pause": pause,
             "killSwitch": kill_switch,
@@ -3859,10 +3934,11 @@ def get_live_agent_mode_autonomy_metrics():
             "relationshipCount": len(relationships),
             "memory": memory_counts,
             "operatorProposalCount": len(loop_state.get("operatorProposals") or []),
-            "liveAgentBuildingCount": len(live_agent_buildings),
+            "liveAgentBuildingCount": live_agent_building_count,
+            "liveAgentBuildEffectActionCount": len(live_agent_build_actions),
         },
         "providerSupport": provider_support,
-        "pianoArchitecture": piano_architecture,
+        "clawMindArchitecture": clawmind_architecture,
         "checklist": checklist,
         "gaps": [key for key, passed in checklist.items() if not passed],
         "acceptanceNotes": {
@@ -3871,7 +3947,7 @@ def get_live_agent_mode_autonomy_metrics():
             "browserRequiredForProgress": False,
             "fullSoakTargetTurns": 50,
             "universalProviderSupportMeasured": True,
-            "pianoArchitectureMeasured": True,
+            "clawMindArchitectureMeasured": True,
             "metricsProviderCalls": 0,
             "metricsModelCalls": 0,
         },
@@ -5606,6 +5682,14 @@ def default_live_agent_loop_state():
         "events": [],
         "eventSequence": 0,
         "scheduler": {"lastAgentId": None, "turnSequence": 0, "activeTurn": None, "turnHistory": []},
+        "clawMindRuntime": {
+            "schemaVersion": LIVE_AGENT_CLAWMIND_RUNTIME_TRACE_VERSION,
+            "moduleOrder": list(LIVE_AGENT_CLAWMIND_MODULES),
+            "traceRetention": LIVE_AGENT_LOOP_DEFAULTS["clawMindRuntimeTraceRetention"],
+            "nextSequence": 1,
+            "traces": [],
+            "moduleStats": {},
+        },
         "stats": {"ticks": 0, "actionsCreated": 0, "dryRuns": 0, "errors": 0},
     }
 
@@ -5695,6 +5779,143 @@ def _live_agent_loop_normalize_scheduler(raw):
     return scheduler
 
 
+def _live_agent_clawmind_summary(value, *, depth=0):
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:240]
+    if isinstance(value, list):
+        sample = [_live_agent_clawmind_summary(item, depth=depth + 1) for item in value[:5]]
+        summary = {"count": len(value), "sample": sample}
+        if len(value) > 5:
+            summary["truncated"] = True
+        return summary
+    if isinstance(value, dict):
+        if depth >= 2:
+            return {"keys": sorted([str(key) for key in value.keys()])[:16], "fieldCount": len(value)}
+        summary = {}
+        for index, key in enumerate(sorted(value.keys(), key=lambda item: str(item))):
+            if index >= 16:
+                summary["truncated"] = True
+                break
+            summary[str(key)] = _live_agent_clawmind_summary(value.get(key), depth=depth + 1)
+        return summary
+    return str(value)[:240]
+
+
+def _live_agent_clawmind_trace_start():
+    return {"at": _utc_now_iso(), "perf": time.perf_counter()}
+
+
+def _normalize_live_agent_clawmind_runtime(raw):
+    source = raw if isinstance(raw, dict) else {}
+    retention = _normalize_int(
+        source.get("traceRetention"),
+        LIVE_AGENT_LOOP_DEFAULTS["clawMindRuntimeTraceRetention"],
+        minimum=len(LIVE_AGENT_CLAWMIND_MODULES),
+        maximum=1000,
+    )
+    runtime = {
+        "schemaVersion": LIVE_AGENT_CLAWMIND_RUNTIME_TRACE_VERSION,
+        "moduleOrder": list(LIVE_AGENT_CLAWMIND_MODULES),
+        "traceRetention": retention,
+        "nextSequence": _normalize_int(source.get("nextSequence"), 1, minimum=1, maximum=1000000000),
+        "traces": [],
+        "moduleStats": {},
+    }
+    traces = [trace for trace in (source.get("traces") or []) if isinstance(trace, dict)]
+    runtime["traces"] = traces[-retention:]
+    stats = source.get("moduleStats") if isinstance(source.get("moduleStats"), dict) else {}
+    for module_name in LIVE_AGENT_CLAWMIND_MODULES:
+        raw_stat = stats.get(module_name) if isinstance(stats.get(module_name), dict) else {}
+        runtime["moduleStats"][module_name] = {
+            "executionCount": _normalize_int(raw_stat.get("executionCount"), 0, minimum=0, maximum=1000000000),
+            "lastExecutionAt": raw_stat.get("lastExecutionAt") if _parse_isoish_epoch(raw_stat.get("lastExecutionAt")) else None,
+            "lastExecutedAt": raw_stat.get("lastExecutedAt") if _parse_isoish_epoch(raw_stat.get("lastExecutedAt")) else raw_stat.get("lastExecutionAt") if _parse_isoish_epoch(raw_stat.get("lastExecutionAt")) else None,
+            "lastTurnId": _live_agent_loop_clean_plan_text(raw_stat.get("lastTurnId"), limit=180),
+            "lastAgentId": _live_agent_loop_clean_plan_text(raw_stat.get("lastAgentId"), limit=120),
+            "lastLatencyMs": round(float(raw_stat.get("lastLatencyMs") or 0), 3) if isinstance(raw_stat.get("lastLatencyMs"), (int, float)) else 0,
+            "lastStatus": _live_agent_loop_clean_plan_text(raw_stat.get("lastStatus"), limit=80) or "never_run",
+            "lastGaps": [str(item)[:180] for item in (raw_stat.get("lastGaps") or []) if item],
+            "lastTraceId": _live_agent_loop_clean_plan_text(raw_stat.get("lastTraceId"), limit=180),
+        }
+    return runtime
+
+
+def _live_agent_clawmind_runtime_state(state):
+    runtime = _normalize_live_agent_clawmind_runtime(state.get("clawMindRuntime") if isinstance(state, dict) else None)
+    state["clawMindRuntime"] = runtime
+    return runtime
+
+
+def _live_agent_clawmind_append_trace(state, module_name, turn, started, *, inputs=None, outputs=None, decisions=None, gaps=None, status="completed", error=None):
+    if module_name not in LIVE_AGENT_CLAWMIND_MODULES or not isinstance(state, dict):
+        return None
+    runtime = _live_agent_clawmind_runtime_state(state)
+    now_iso = _utc_now_iso()
+    started_perf = started.get("perf") if isinstance(started, dict) else None
+    latency_ms = 0.0
+    if isinstance(started_perf, (int, float)):
+        latency_ms = max(0.0, (time.perf_counter() - float(started_perf)) * 1000)
+    sequence = _normalize_int(runtime.get("nextSequence"), 1, minimum=1, maximum=1000000000)
+    runtime["nextSequence"] = sequence + 1
+    clean_gaps = [str(item)[:180] for item in (gaps or []) if item]
+    turn_id = turn.get("id") if isinstance(turn, dict) else None
+    agent_id = turn.get("agentId") if isinstance(turn, dict) else None
+    trace = {
+        "schemaVersion": LIVE_AGENT_CLAWMIND_RUNTIME_TRACE_VERSION,
+        "id": f"clawmind-trace-{sequence}",
+        "sequence": sequence,
+        "module": module_name,
+        "turnId": turn_id,
+        "agentId": agent_id,
+        "status": _live_agent_loop_clean_plan_text(status, limit=80) or "completed",
+        "startedAt": started.get("at") if isinstance(started, dict) and _parse_isoish_epoch(started.get("at")) else now_iso,
+        "endedAt": now_iso,
+        "latencyMs": round(latency_ms, 3),
+        "inputs": _live_agent_clawmind_summary(inputs or {}),
+        "outputs": _live_agent_clawmind_summary(outputs or {}),
+        "decisions": _live_agent_clawmind_summary(decisions or {}),
+        "gaps": clean_gaps,
+    }
+    if isinstance(error, dict):
+        trace["error"] = _live_agent_clawmind_summary(error)
+    elif error:
+        trace["error"] = str(error)[:240]
+    retention = _normalize_int(runtime.get("traceRetention"), LIVE_AGENT_LOOP_DEFAULTS["clawMindRuntimeTraceRetention"], minimum=len(LIVE_AGENT_CLAWMIND_MODULES), maximum=1000)
+    runtime["traces"] = [*(runtime.get("traces") or []), trace][-retention:]
+    stat = runtime.setdefault("moduleStats", {}).setdefault(module_name, {"executionCount": 0})
+    stat["executionCount"] = _normalize_int(stat.get("executionCount"), 0, minimum=0, maximum=1000000000) + 1
+    stat["lastExecutionAt"] = now_iso
+    stat["lastExecutedAt"] = now_iso
+    stat["lastTurnId"] = turn_id
+    stat["lastAgentId"] = agent_id
+    stat["lastLatencyMs"] = trace["latencyMs"]
+    stat["lastStatus"] = trace["status"]
+    stat["lastGaps"] = clean_gaps
+    stat["lastTraceId"] = trace["id"]
+    runtime["updatedAt"] = now_iso
+    runtime["lastTurnId"] = turn_id
+    return trace
+
+
+def _live_agent_clawmind_record_skipped_modules(state, turn, module_names, reason, details=None):
+    rows = []
+    for module_name in module_names:
+        rows.append(_live_agent_clawmind_append_trace(
+            state,
+            module_name,
+            turn,
+            _live_agent_clawmind_trace_start(),
+            inputs={"turnId": (turn or {}).get("id"), "agentId": (turn or {}).get("agentId")},
+            outputs={"reason": reason, "details": details if isinstance(details, dict) else {}},
+            decisions={"status": "skipped", "reason": reason},
+            gaps=[reason],
+            status="skipped",
+        ))
+    return rows
+
+
 def _normalize_live_agent_loop_state(raw):
     state = default_live_agent_loop_state()
     if isinstance(raw, dict):
@@ -5712,6 +5933,14 @@ def _normalize_live_agent_loop_state(raw):
         state["eventSequence"] = _normalize_int(raw.get("eventSequence"), 0, minimum=0, maximum=1000000000)
         if isinstance(raw.get("scheduler"), dict):
             state["scheduler"] = _live_agent_loop_normalize_scheduler(raw["scheduler"])
+        raw_clawmind_runtime = raw.get("clawMindRuntime")
+        if not isinstance(raw_clawmind_runtime, dict):
+            raw_clawmind_runtime = next(
+                (raw.get(key) for key in LIVE_AGENT_LEGACY_CLAWMIND_RUNTIME_KEYS if isinstance(raw.get(key), dict)),
+                None,
+            )
+        if isinstance(raw_clawmind_runtime, dict):
+            state["clawMindRuntime"] = _normalize_live_agent_clawmind_runtime(raw_clawmind_runtime)
         if isinstance(raw.get("agents"), dict):
             state["agents"] = {str(k): v for k, v in raw["agents"].items() if isinstance(v, dict)}
         if isinstance(raw.get("events"), list):
@@ -5729,6 +5958,7 @@ def _normalize_live_agent_loop_state(raw):
         state["pausedAt"] = None
         state["pausedBy"] = None
     _live_agent_loop_normalize_operator_proposals(state)
+    state["clawMindRuntime"] = _normalize_live_agent_clawmind_runtime(state.get("clawMindRuntime"))
     return state
 
 
@@ -8007,6 +8237,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 result["skipped"].append({"agentId": agent_id, "reason": "turn-retry-backoff", "retryAfter": _epoch_to_utc_iso(retry_after), "lastTurnRetry": agent_state.get("lastTurnRetry")})
                 continue
 
+            orchestrator_started = _live_agent_clawmind_trace_start()
             turn = _live_agent_loop_begin_turn(state, agent_id, reason, now_epoch=now_epoch, force=force, dry_run=dry_run)
             result["turn"] = turn
             result["scheduler"]["activeTurn"] = turn
@@ -8018,7 +8249,62 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 agent_state["lastHeartbeatAt"] = now_iso
                 _live_agent_loop_stat(agent_state, "ticks")
                 _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World")
+                perception_started = _live_agent_clawmind_trace_start()
                 perception = _live_agent_loop_build_perception(agent_id, agent_state, world_client=world_client, now_epoch=now_epoch)
+                _live_agent_clawmind_append_trace(
+                    state,
+                    "perception",
+                    turn,
+                    perception_started,
+                    inputs={"worldClientActive": world_client.get("active"), "agentId": agent_id},
+                    outputs={
+                        "activeCount": len(perception.get("active") or []),
+                        "availableActionIds": [item.get("id") for item in (perception.get("affordances") or []) if item.get("available")],
+                        "world": perception.get("world"),
+                        "social": {k: (perception.get("social") or {}).get(k) for k in ("knownAgentCount", "liveEnabledPeerCount", "nearbyAgentCount")},
+                    },
+                    decisions={"perceptionAt": perception.get("at"), "schemaVersion": perception.get("schemaVersion")},
+                )
+                memory_started = _live_agent_clawmind_trace_start()
+                memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+                _live_agent_clawmind_append_trace(
+                    state,
+                    "memory",
+                    turn,
+                    memory_started,
+                    inputs={"perceptionAt": perception.get("at"), "lastOutcome": agent_state.get("lastOutcome")},
+                    outputs={
+                        "recentActions": len(memory.get("recentActions") or []),
+                        "observations": len(memory.get("observations") or []),
+                        "reflections": len(memory.get("reflections") or []),
+                        "entries": len(memory.get("entries") or []),
+                        "diary": len(memory.get("diary") or []),
+                        "conversations": len(memory.get("conversations") or []),
+                    },
+                    decisions={"memoryBucketsNormalized": True},
+                )
+                reflection_started = _live_agent_clawmind_trace_start()
+                reflections = _live_agent_loop_trim_list(memory.get("reflections"), 4)
+                _live_agent_clawmind_append_trace(
+                    state,
+                    "reflection",
+                    turn,
+                    reflection_started,
+                    inputs={"recentObservationCount": len(memory.get("observations") or []), "recentActionCount": len(memory.get("recentActions") or [])},
+                    outputs={"reflectionCount": len(memory.get("reflections") or []), "recentReflections": reflections},
+                    decisions={"usesSettledActionReflection": True, "hasPriorReflection": bool(reflections)},
+                )
+                social_started = _live_agent_clawmind_trace_start()
+                social = perception.get("social") if isinstance(perception.get("social"), dict) else {}
+                _live_agent_clawmind_append_trace(
+                    state,
+                    "socialReasoning",
+                    turn,
+                    social_started,
+                    inputs={"agentId": agent_id, "selfLocation": social.get("selfLocation")},
+                    outputs={k: social.get(k) for k in ("knownAgentCount", "liveEnabledPeerCount", "nearbyAgentCount", "conversation")},
+                    decisions={"nearbyAgentIds": [item.get("agentId") for item in (social.get("nearbyAgents") or []) if isinstance(item, dict)]},
+                )
 
                 active = perception.get("active") or []
                 if active:
@@ -8028,6 +8314,8 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     skipped = {"agentId": agent_id, "reason": "active-behavior", "active": agent_state["lastOutcome"]["active"]}
                     result["skipped"].append(skipped)
                     _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": "active-behavior", "details": skipped}, now_epoch=now_epoch)
+                    _live_agent_clawmind_record_skipped_modules(state, turn, ["planning", "conversation", "actionExecution", "outcomeAwareness"], "active-behavior", skipped)
+                    _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "skipped", "skipReason": "active-behavior"}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
                     break
 
                 if state.get("worldClientRequired") and not world_client.get("active") and not force:
@@ -8036,6 +8324,8 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     skipped = {"agentId": agent_id, "reason": "world-client-inactive", "worldClient": world_client}
                     result["skipped"].append(skipped)
                     _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": "world-client-inactive", "details": skipped}, now_epoch=now_epoch)
+                    _live_agent_clawmind_record_skipped_modules(state, turn, ["planning", "conversation", "actionExecution", "outcomeAwareness"], "world-client-inactive", skipped)
+                    _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "skipped", "skipReason": "world-client-inactive"}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
                     break
 
                 next_allowed = _live_agent_loop_next_allowed_epoch(agent_state)
@@ -8044,8 +8334,11 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     skipped = {"agentId": agent_id, "reason": "cooldown", "nextAllowedAt": _epoch_to_utc_iso(next_allowed)}
                     result["skipped"].append(skipped)
                     _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": "cooldown", "details": skipped}, now_epoch=now_epoch)
+                    _live_agent_clawmind_record_skipped_modules(state, turn, ["planning", "conversation", "actionExecution", "outcomeAwareness"], "cooldown", skipped)
+                    _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "skipped", "skipReason": "cooldown"}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
                     break
 
+                planning_started = _live_agent_clawmind_trace_start()
                 selected, decision = _live_agent_loop_select_next_action(agent_id, agent_state, perception)
                 result["decisions"].append({"agentId": agent_id, "decision": agent_state.get("lastDecision")})
                 if not selected:
@@ -8053,7 +8346,10 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "no-available-loop-target", "decision": decision, "perceptionAt": perception.get("at")}
                     skipped = {"agentId": agent_id, "reason": "no-available-loop-target", "decision": agent_state.get("lastDecision")}
                     result["skipped"].append(skipped)
+                    _live_agent_clawmind_append_trace(state, "planning", turn, planning_started, inputs={"availableAffordanceCount": len([item for item in (perception.get("affordances") or []) if item.get("available")])}, outputs={"selected": None, "decision": decision}, decisions=agent_state.get("lastDecision"), gaps=["no-available-loop-target"], status="completed")
                     _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": "no-available-loop-target", "decision": agent_state.get("lastDecision")}, now_epoch=now_epoch)
+                    _live_agent_clawmind_record_skipped_modules(state, turn, ["conversation", "actionExecution", "outcomeAwareness"], "no-available-loop-target", skipped)
+                    _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "skipped", "skipReason": "no-available-loop-target"}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
                     break
 
                 action_def = selected["action"]
@@ -8061,6 +8357,15 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 adaptive_cooldown = _live_agent_loop_cooldown_for_decision(cooldown, decision)
                 plan = _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, persist=not dry_run)
                 plan_step = _live_agent_loop_plan_current_step(plan)
+                _live_agent_clawmind_append_trace(
+                    state,
+                    "planning",
+                    turn,
+                    planning_started,
+                    inputs={"availableAffordanceCount": len([item for item in (perception.get("affordances") or []) if item.get("available")]), "topNeed": (decision or {}).get("topNeed")},
+                    outputs={"selectedActionId": action_def.get("id"), "actionType": action_def.get("actionType"), "planId": (plan or {}).get("id"), "planStepId": (plan_step or {}).get("id")},
+                    decisions={"decision": agent_state.get("lastDecision"), "adaptiveCooldownSec": adaptive_cooldown},
+                )
                 request_id = f"live-loop-{agent_id}-{int(now_epoch)}"
                 payload = {
                     "agentId": agent_id,
@@ -8101,10 +8406,42 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 }
                 if isinstance(selected.get("buildSite"), dict):
                     payload["params"]["buildSite"] = _copy_jsonable(selected.get("buildSite"))
+                action_execution_started = _live_agent_clawmind_trace_start()
                 if dry_run:
                     agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload, "wouldPlan": plan, "decision": decision, "perception": perception}
                     result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected, "decision": agent_state.get("lastDecision"), "plan": plan, "turnId": turn.get("id")})
+                    _live_agent_clawmind_append_trace(
+                        state,
+                        "actionExecution",
+                        turn,
+                        action_execution_started,
+                        inputs={"payload": payload, "dryRun": True},
+                        outputs={"wouldCreateAction": True, "loopActionId": action_def["id"], "planId": plan.get("id") if isinstance(plan, dict) else None},
+                        decisions={"visibleExecutor": visible_action_contract.get("clientExecutor"), "backendTurnOwner": True},
+                        status="dry_run",
+                    )
+                    _live_agent_clawmind_append_trace(
+                        state,
+                        "conversation",
+                        turn,
+                        _live_agent_clawmind_trace_start(),
+                        inputs={"actionType": action_def.get("actionType"), "target": selected.get("target")},
+                        outputs={"wouldCreateConversation": action_def.get("actionType") == "life.social"},
+                        decisions={"conversationModuleEvaluated": True},
+                        status="dry_run",
+                    )
+                    _live_agent_clawmind_append_trace(
+                        state,
+                        "outcomeAwareness",
+                        turn,
+                        _live_agent_clawmind_trace_start(),
+                        inputs={"planId": plan.get("id") if isinstance(plan, dict) else None},
+                        outputs={"status": "dry-run", "lastOutcome": agent_state.get("lastOutcome")},
+                        decisions={"settledActionObserved": False, "expectedOutcomeRecorded": True},
+                        status="dry_run",
+                    )
                     _live_agent_loop_finish_turn(state, turn, "completed", outcome={"dryRun": True, "loopActionId": action_def["id"], "planId": plan.get("id") if isinstance(plan, dict) else None}, now_epoch=now_epoch)
+                    _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "completed", "loopActionId": action_def["id"], "planId": plan.get("id") if isinstance(plan, dict) else None}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
                     break
 
                 ok, created, status_code = create_agent_live_mode_action_request(payload)
@@ -8123,7 +8460,40 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, turn_id=turn.get("id"), details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "target": selected["target"], "decision": agent_state.get("lastDecision")})
                     created_row = {"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown, "turnId": turn.get("id")}
                     result["actionsCreated"].append(created_row)
+                    action_summary = _live_agent_loop_action_summary(action)
+                    _live_agent_clawmind_append_trace(
+                        state,
+                        "actionExecution",
+                        turn,
+                        action_execution_started,
+                        inputs={"payload": payload, "dryRun": False},
+                        outputs={"ok": True, "httpStatus": status_code, "action": action_summary, "backendExecution": created.get("backendExecution") if isinstance(created, dict) else None},
+                        decisions={"visibleExecutor": visible_action_contract.get("clientExecutor"), "backendTurnOwner": True, "clientRequiredForProgress": False},
+                    )
+                    _live_agent_clawmind_append_trace(
+                        state,
+                        "conversation",
+                        turn,
+                        _live_agent_clawmind_trace_start(),
+                        inputs={"actionType": action_def.get("actionType"), "target": selected.get("target"), "social": social},
+                        outputs={
+                            "conversationRequested": action_def.get("actionType") == "life.social",
+                            "conversationId": ((action_summary or {}).get("result") or {}).get("conversationId") if isinstance((action_summary or {}).get("result"), dict) else None,
+                            "communicationEventsExpected": action_def.get("actionType") == "life.social",
+                        },
+                        decisions={"conversationModuleEvaluated": True, "usesInWorldCommunicationStore": True},
+                    )
+                    _live_agent_clawmind_append_trace(
+                        state,
+                        "outcomeAwareness",
+                        turn,
+                        _live_agent_clawmind_trace_start(),
+                        inputs={"actionId": action_id, "planId": (stored_plan or plan or {}).get("id")},
+                        outputs={"lastOutcome": agent_state.get("lastOutcome"), "action": action_summary, "createdRow": created_row},
+                        decisions={"settledActionObserved": _canonical_world_action_status((action_summary or {}).get("status")) in WORLD_ACTION_TERMINAL_STATES, "expectedOutcomeRecorded": True},
+                    )
                     _live_agent_loop_finish_turn(state, turn, "completed", outcome={**created_row, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id")}, now_epoch=now_epoch)
+                    _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "completed", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id")}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
                 else:
                     _live_agent_loop_stat(agent_state, "errors")
                     _live_agent_loop_stat(state, "errors")
@@ -8135,7 +8505,21 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     _live_agent_loop_add_event(state, "action-error", agent_id=agent_id, turn_id=turn.get("id"), details={"httpStatus": status_code, "error": created, "retry": retry})
                     error_row = {"agentId": agent_id, "httpStatus": status_code, "error": created, "turnId": turn.get("id"), "retry": retry}
                     result["errors"].append(error_row)
+                    _live_agent_clawmind_append_trace(
+                        state,
+                        "actionExecution",
+                        turn,
+                        action_execution_started,
+                        inputs={"payload": payload, "dryRun": False},
+                        outputs={"ok": False, "httpStatus": status_code, "error": created},
+                        decisions={"retry": retry, "visibleExecutor": visible_action_contract.get("clientExecutor")},
+                        gaps=["action-request-failed"],
+                        status="failed",
+                        error=created,
+                    )
+                    _live_agent_clawmind_record_skipped_modules(state, turn, ["conversation", "outcomeAwareness"], "action-request-failed", error_row)
                     _live_agent_loop_finish_turn(state, turn, "failed", outcome={"failureReason": "action-request-failed", "planId": (failed_plan or plan or {}).get("id"), "retryAfter": retry.get("retryAfter")}, error=created, now_epoch=now_epoch)
+                    _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "failed", "failureReason": "action-request-failed"}, decisions={"selectedAgentId": agent_id, "processed": True, "retry": retry}, gaps=["action-request-failed"], status="failed")
             except Exception as e:
                 _live_agent_loop_stat(agent_state, "errors")
                 _live_agent_loop_stat(state, "errors")
@@ -8144,6 +8528,8 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 result["errors"].append({"agentId": agent_id, "error": error_body, "turnId": turn.get("id"), "retry": retry})
                 agent_state["lastOutcome"] = {"at": now_iso, "status": "error", "error": error_body, "turnId": turn.get("id"), "retry": retry}
                 _live_agent_loop_finish_turn(state, turn, "failed", outcome={"failureReason": "turn-runtime-error", "retryAfter": retry.get("retryAfter")}, error=error_body, now_epoch=now_epoch)
+                _live_agent_clawmind_record_skipped_modules(state, turn, ["conversation", "actionExecution", "outcomeAwareness"], "turn-runtime-error", {"message": str(e), "retry": retry})
+                _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "failed", "failureReason": "turn-runtime-error"}, decisions={"selectedAgentId": agent_id, "processed": True, "retry": retry}, gaps=["turn-runtime-error"], status="failed", error=error_body)
             break
 
         if not turn_processed and not enabled_agents:
