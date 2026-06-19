@@ -150,6 +150,13 @@ for (const token of [
   'VW_PUBLIC_ORIGIN: BASE_URL',
   'VW_DATA_DIR: dataDir',
   'Number(health.port) === TEST_PORT',
+  'function seedAcceptanceWorld()',
+  'function verifyNoBrowserBackendTurn()',
+  'function runBrowserReplayRenderCheck(actionId)',
+  "postJson('/api/agent-live-loop/tick'",
+  '/api/live-agent-mode/animation-events?actionId=',
+  'VW_OPENCLAW_PATH: workspaceRoot',
+  'VW_CODEX_ENABLED: \'false\'',
 ]) {
   assert(liveAgentHarness.includes(token), `Live Agent Mode 8587 harness missing guard token: ${token}`);
 }

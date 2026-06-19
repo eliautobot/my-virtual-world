@@ -56,7 +56,7 @@ The redesigned mode keeps the good API vocabulary, but moves autonomous executio
 
 ## Local Autopilot Test Harness
 
-Autonomous Live Agent Mode development should use the isolated 8587 harness instead of the normal product port. The harness starts a temporary-data server, checks `/healthz`, and refuses environment or argument targets that point at 8590.
+Autonomous Live Agent Mode development should use the isolated 8587 harness instead of the normal product port. The harness starts a temporary-data server, checks `/healthz`, proves one backend scheduler turn completes before any browser client is opened, runs a browser replay/render check against `/api/live-agent-mode/animation-events`, and refuses environment or argument targets that point at 8590.
 
 ```bash
 npm run verify:live-agent-mode:8587
