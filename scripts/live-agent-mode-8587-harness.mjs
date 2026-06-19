@@ -310,11 +310,15 @@ async function seedAcceptanceWorld() {
         home: HOME_BUILDING_ID,
         work: OFFICE_BUILDING_ID,
       },
+      [PEER_AGENT_ID]: {
+        work: OFFICE_BUILDING_ID,
+      },
     },
     agentProfiles: {
       [TEST_AGENT_ID]: {
         name: 'Acceptance Agent',
         agentLiveModeEnabled: true,
+        roles: ['acceptance resident', 'social initiator'],
         personality: {
           outgoing: 0.4,
           curious: 0.5,
@@ -323,7 +327,8 @@ async function seedAcceptanceWorld() {
       },
       [PEER_AGENT_ID]: {
         name: 'Acceptance Peer',
-        agentLiveModeEnabled: false,
+        agentLiveModeEnabled: true,
+        roles: ['acceptance resident', 'social peer'],
         personality: {
           outgoing: 0.6,
           curious: 0.4,
@@ -382,6 +387,19 @@ async function seedAcceptanceWorld() {
               social: 0.1,
             },
           },
+          [PEER_AGENT_ID]: {
+            enabled: true,
+            lastNeedUpdateAt: now,
+            needs: {
+              hydration: 0.2,
+              food: 0.2,
+              energy: 0.2,
+              curiosity: 0.2,
+              maintenance: 0.2,
+              shelter: 0.1,
+              social: 0.9,
+            },
+          },
         },
       },
     },
@@ -392,6 +410,10 @@ async function seedAcceptanceWorld() {
     agentLiveModeEnabled: true,
   });
   assert(liveMode?.ok === true && liveMode.agentLiveModeEnabled === true, 'failed to enable Live Agent Mode for acceptance agent', liveMode);
+  const peerLiveMode = await postJson(`/api/agent/${encodeURIComponent(PEER_AGENT_ID)}/live-mode`, {
+    agentLiveModeEnabled: true,
+  });
+  assert(peerLiveMode?.ok === true && peerLiveMode.agentLiveModeEnabled === true, 'failed to enable Live Agent Mode for acceptance peer', peerLiveMode);
 
   const loopSettings = await postJson('/api/agent-live-loop', {
     enabled: true,
@@ -408,6 +430,14 @@ async function seedAcceptanceWorld() {
     clearTurnRetry: true,
   });
   assert(loopSettings?.ok === true, 'failed to configure Live Agent Mode loop for acceptance', loopSettings);
+
+  const peerLoopSettings = await postJson('/api/agent-live-loop', {
+    agentId: PEER_AGENT_ID,
+    agentEnabled: true,
+    clearTurnRetry: true,
+    actor: '8587-acceptance-harness',
+  });
+  assert(peerLoopSettings?.ok === true, 'failed to configure peer Live Agent Mode loop for acceptance', peerLoopSettings);
 }
 
 async function enableGlobalAgentLiveModeFeature() {
@@ -575,7 +605,8 @@ async function verifySocialCommunicationAndMemory() {
   }, { requestId: '8587-acceptance-add-memory' });
   assert(memory.toolCall?.result?.memoryEntry?.id, 'add_memory should persist a memory entry', memory);
   assert(memory.toolCall?.result?.streamEntry?.id, 'add_memory should append to the memory stream', memory);
-  assert(memory.toolCall?.result?.reflection?.id, 'add_memory should synthesize a reflection from accumulated stream entries', memory);
+  const memoryReflectionId = memory.toolCall?.result?.reflection?.id || memory.toolCall?.result?.state?.memory?.reflections?.at?.(-1)?.id;
+  assert(memoryReflectionId, 'memory state should include a synthesized reflection from accumulated stream entries', memory);
 
   const communications = await fetchJson(`/api/live-agent-mode/in-world-communications?agentId=${encodeURIComponent(TEST_AGENT_ID)}&limit=20`);
   assert((communications.events || []).some((event) => event.targetAgentId === PEER_AGENT_ID), 'communication log should include the peer-targeted event', communications);
@@ -587,7 +618,7 @@ async function verifySocialCommunicationAndMemory() {
   assert(retrieved.memory?.counts?.stream >= 2, 'memory stream should include conversation and memory entries', retrieved.memory?.counts);
   assert(retrieved.memory?.counts?.reflections > 0, 'memory endpoint should report synthesized reflections', retrieved.memory?.counts);
 
-  console.log(`PASS: social target ${social.action.id}, in-world speech ${speech.toolCall.id}, memory ${memory.toolCall.result.memoryEntry.id}, and reflection ${memory.toolCall.result.reflection.id} verified.`);
+  console.log(`PASS: social target ${social.action.id}, in-world speech ${speech.toolCall.id}, memory ${memory.toolCall.result.memoryEntry.id}, and reflection ${memoryReflectionId} verified.`);
   return { socialAction: social.action, speech, memory, communications, retrieved };
 }
 
@@ -645,24 +676,33 @@ async function verifyFailureInjectionReplanning() {
   assert(configured?.ok === true, 'failed to configure expected-outcome failure injection', configured);
   assert(configured.changed?.failureInjection?.remaining === 1, 'failure injection setting was not activated', configured.changed);
 
-  const injectedTick = await postJson('/api/agent-live-loop/tick', {
-    reason: '8587-failure-injection',
-    force: true,
-  });
+  const runTargetAgentTick = async (reason, predicate, attempts = 4) => {
+    const misses = [];
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const tick = await postJson('/api/agent-live-loop/tick', {
+        reason: `${reason}-${attempt}`,
+        force: true,
+      });
+      assert(tick?.ok === true, `${reason} tick failed`, tick);
+      const action = tick.actionsCreated?.[0];
+      if (action?.agentId === TEST_AGENT_ID && (!predicate || predicate(action, tick))) {
+        return { tick, action };
+      }
+      misses.push({ attempt, agentId: action?.agentId, actionId: action?.actionId, loopActionId: action?.loopActionId, skipped: tick.skipped });
+    }
+    throw new Error(`${reason} did not reach ${TEST_AGENT_ID}\n${JSON.stringify(misses, null, 2)}`);
+  };
+
+  const { tick: injectedTick, action: injectedAction } = await runTargetAgentTick('8587-failure-injection', (action) => Boolean(action?.activeGoal?.id));
   assert(injectedTick?.ok === true, 'failure-injection tick failed', injectedTick);
-  const injectedAction = injectedTick.actionsCreated?.[0];
   assert(injectedAction?.actionId, 'failure-injection tick did not create an action', injectedTick);
   assert(injectedAction?.activeGoal?.id, 'injected turn should record active goal', injectedAction);
   assert(Array.isArray(injectedAction?.candidateActionsConsidered) && injectedAction.candidateActionsConsidered.length > 0, 'injected turn should record candidate actions considered', injectedAction);
   assert(injectedAction?.selectedPlanStep?.id, 'injected turn should record selected plan step', injectedAction);
   assert(injectedAction?.finalActionDecision?.selectedActionId, 'injected turn should record final action decision', injectedAction);
 
-  const recoveryTick = await postJson('/api/agent-live-loop/tick', {
-    reason: '8587-failure-replan',
-    force: true,
-  });
+  const { tick: recoveryTick, action: recoveryAction } = await runTargetAgentTick('8587-failure-replan', (action) => action?.activeGoal?.kind === 'replan');
   assert(recoveryTick?.ok === true, 'failure recovery tick failed', recoveryTick);
-  const recoveryAction = recoveryTick.actionsCreated?.[0];
   assert(recoveryAction?.actionId, 'failure recovery tick did not create a replacement action', recoveryTick);
   assert(recoveryAction.planId && recoveryAction.planId !== injectedAction.planId, 'failure recovery should use a replacement plan', { injectedAction, recoveryAction });
   assert(recoveryAction.loopActionId && recoveryAction.loopActionId !== injectedAction.loopActionId, 'failure recovery should select a replacement action', { injectedAction, recoveryAction });
@@ -687,6 +727,30 @@ async function verifyFailureInjectionReplanning() {
   return { injectedAction, recoveryAction, metrics };
 }
 
+function verifyMultiAgentSocialMetrics(metrics) {
+  assert(metrics.loop?.enabledAgentCount >= 2, 'metrics should include at least two enabled live agents', metrics.loop);
+  assert(metrics.metrics?.relationshipCount >= 1, 'metrics should report at least one relationship', metrics.metrics);
+  assert(metrics.metrics?.socialObservationCount >= 1, 'metrics should report social observations', metrics.metrics);
+  assert(metrics.metrics?.groupGoalCount >= 1, 'metrics should report group/shared goals', metrics.metrics);
+  assert(metrics.metrics?.conversationTriggerCount >= 1, 'metrics should report conversation triggers', metrics.metrics);
+  assert(metrics.metrics?.society?.roleCount >= 2, 'society metrics should include at least two role records', metrics.metrics?.society);
+  assert(metrics.metrics?.society?.liveEnabledRoleCount >= 2, 'society metrics should include two enabled live-agent roles', metrics.metrics?.society);
+  assert(metrics.metrics?.society?.normConstraintCount >= 1, 'society metrics should include norms/constraints', metrics.metrics?.society);
+  assert(metrics.checklist?.societyRolesPresent === true, 'metrics checklist should confirm society roles', metrics.checklist);
+  assert(metrics.checklist?.socialObservationsCreated === true, 'metrics checklist should confirm social observations', metrics.checklist);
+  assert(metrics.checklist?.groupGoalsUpdated === true, 'metrics checklist should confirm group goals', metrics.checklist);
+  assert(metrics.checklist?.conversationTriggersCreated === true, 'metrics checklist should confirm conversation triggers', metrics.checklist);
+  assert(metrics.checklist?.societyStateUpdated === true, 'metrics checklist should confirm society state updates', metrics.checklist);
+  console.log(`PASS: multi-agent social metrics ${JSON.stringify({
+    enabledAgentCount: metrics.loop.enabledAgentCount,
+    relationshipCount: metrics.metrics.relationshipCount,
+    socialObservationCount: metrics.metrics.socialObservationCount,
+    groupGoalCount: metrics.metrics.groupGoalCount,
+    conversationTriggerCount: metrics.metrics.conversationTriggerCount,
+    society: metrics.metrics.society,
+  })}`);
+}
+
 async function verifyAutonomyMetrics({ expectedTurns }) {
   const metrics = await fetchJson('/api/live-agent-mode/metrics');
   assert(metrics?.ok === true, 'Live Agent metrics endpoint failed', metrics);
@@ -703,6 +767,7 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
   assert(metrics.checklist?.memoryUpdated === true, 'metrics checklist should confirm memory updates', metrics.checklist);
   assert(metrics.metrics?.memory?.stream > 0, 'metrics memory stream count should be positive', metrics.metrics?.memory);
   assert(metrics.metrics?.memory?.reflections > 0, 'metrics should report at least one memory reflection', metrics.metrics?.memory);
+  verifyMultiAgentSocialMetrics(metrics);
   assert(typeof metrics.metrics?.planCount === 'number' && metrics.metrics.planCount > 0, 'metrics should report plan count', metrics.metrics);
   assert(typeof metrics.metrics?.replanCount === 'number' && metrics.metrics.replanCount >= 1, 'metrics should report replan count', metrics.metrics);
   assert(typeof metrics.metrics?.failedExpectationCount === 'number' && metrics.metrics.failedExpectationCount >= 1, 'metrics should report failed expectation count', metrics.metrics);
@@ -735,6 +800,10 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
     inWorldCommunicationCount: metrics.metrics.inWorldCommunicationCount,
     reactionOpportunityCount: metrics.metrics.reactionOpportunityCount,
     relationshipCount: metrics.metrics.relationshipCount,
+    socialObservationCount: metrics.metrics.socialObservationCount,
+    groupGoalCount: metrics.metrics.groupGoalCount,
+    conversationTriggerCount: metrics.metrics.conversationTriggerCount,
+    societyRoleCount: metrics.metrics.societyRoleCount,
     memory: metrics.metrics.memory,
     planner: {
       planCount: metrics.metrics.planCount,

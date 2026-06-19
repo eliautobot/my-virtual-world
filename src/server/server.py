@@ -1403,6 +1403,10 @@ LIVE_AGENT_EXPECTED_OUTCOME_SCHEMA_VERSION = "agent-live-mode-expected-outcome/v
 LIVE_AGENT_FAILED_EXPECTATION_SCHEMA_VERSION = "agent-live-mode-failed-expectation/v1"
 LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"
 LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"
+LIVE_AGENT_SOCIETY_SCHEMA_VERSION = "agent-live-mode-society-state/v1"
+LIVE_AGENT_SOCIAL_OBSERVATION_SCHEMA_VERSION = "agent-live-mode-social-observation/v1"
+LIVE_AGENT_GROUP_GOAL_SCHEMA_VERSION = "agent-live-mode-group-goal/v1"
+LIVE_AGENT_CONVERSATION_TRIGGER_SCHEMA_VERSION = "agent-live-mode-conversation-trigger/v1"
 LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES = [
     "identity",
     "profileStorage",
@@ -1471,6 +1475,10 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "turnRetryBackoffSec": 45,
     "maxTurnRetries": 2,
     "operatorProposalRetention": 24,
+    "societyObservationRetention": 160,
+    "conversationTriggerRetention": 120,
+    "conversationOpportunityRetention": 120,
+    "groupGoalRetention": 64,
     "decisionMode": "planner-v2",
 }
 LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION = "20260614-live-mode-social-r28"
@@ -3271,6 +3279,7 @@ def _live_agent_record_communication_side_effects(saved_event):
                 },
             )
         relationship = _live_agent_loop_update_relationship_from_communication(state, saved_event)
+        society = _live_agent_society_record_communication_event(saved_event, state)
         _live_agent_memory_maybe_synthesize_reflection(state, from_agent_id, reason="in-world-communication")
         for observer_id in saved_event.get("observerIds") or []:
             _live_agent_memory_maybe_synthesize_reflection(state, observer_id, reason="observed-communication")
@@ -3278,6 +3287,7 @@ def _live_agent_record_communication_side_effects(saved_event):
         return {
             "loopEventsCursor": saved_state.get("eventSequence"),
             "relationship": relationship,
+            "society": society,
         }
 
 
@@ -4340,6 +4350,13 @@ def get_live_agent_mode_autonomy_metrics():
     simulation = agent_life.get("simulation") if isinstance(agent_life.get("simulation"), dict) else {}
     simulated_locations = simulation.get("agentLocations") if isinstance(simulation.get("agentLocations"), dict) else {}
     relationships = meta.get("agentRelationships") if isinstance(meta.get("agentRelationships"), dict) else {}
+    society_store = _live_agent_society_store_from_meta(meta)
+    society_store, _society_role_changed = _live_agent_society_sync_roles(society_store, meta, now_iso=_utc_now_iso())
+    society_roles = society_store.get("roles") if isinstance(society_store.get("roles"), dict) else {}
+    society_observations = [item for item in (society_store.get("observations") or []) if isinstance(item, dict)]
+    group_goals = society_store.get("groupGoals") if isinstance(society_store.get("groupGoals"), dict) else {}
+    conversation_triggers = [item for item in (society_store.get("conversationTriggers") or []) if isinstance(item, dict)]
+    conversation_opportunities = [item for item in (society_store.get("conversationOpportunities") or []) if isinstance(item, dict)]
     live_agent_build_actions = [
         action for action in completed_backend_actions
         if _live_agent_metric_build_effect_persisted(action)
@@ -4409,6 +4426,11 @@ def get_live_agent_mode_autonomy_metrics():
         "reactionOpportunitiesCreated": len(reaction_opportunities) > 0,
         "memoryUpdated": memory_counts.get("total", 0) > 0,
         "relationshipsUpdated": len(relationships) > 0,
+        "societyRolesPresent": len(society_roles) >= len(cached_live_enabled_agents) and len(society_roles) > 0,
+        "socialObservationsCreated": len(society_observations) > 0,
+        "groupGoalsUpdated": len(group_goals) > 0,
+        "conversationTriggersCreated": len(conversation_triggers) > 0,
+        "societyStateUpdated": len(society_roles) > 0 and len(society_observations) > 0 and len(group_goals) > 0 and len(conversation_triggers) > 0,
         "operatorProposalQueuePresent": isinstance(loop_state.get("operatorProposals"), list),
         "operatorPauseAvailable": pause.get("active") in {True, False},
         "operatorKillSwitchAvailable": kill_switch.get("active") in {True, False},
@@ -4449,6 +4471,11 @@ def get_live_agent_mode_autonomy_metrics():
             "inWorldCommunicationCount": len(communication_events),
             "reactionOpportunityCount": len(reaction_opportunities),
             "relationshipCount": len(relationships),
+            "socialObservationCount": len(society_observations),
+            "groupGoalCount": len(group_goals),
+            "conversationTriggerCount": len(conversation_triggers),
+            "societyRoleCount": len(society_roles),
+            "liveEnabledSocietyRoleCount": len([role for role in society_roles.values() if isinstance(role, dict) and role.get("liveModeEnabled") is True]),
             "memory": memory_counts,
             "operatorProposalCount": len(loop_state.get("operatorProposals") or []),
             "liveAgentBuildingCount": live_agent_building_count,
@@ -4458,6 +4485,18 @@ def get_live_agent_mode_autonomy_metrics():
             "failedExpectationCount": planner_metrics["failedExpectationCount"],
             "successfulRecoveryCount": planner_metrics["successfulRecoveryCount"],
             "planner": planner_metrics,
+            "society": {
+                "schemaVersion": society_store.get("schemaVersion"),
+                "roleCount": len(society_roles),
+                "liveEnabledRoleCount": len([role for role in society_roles.values() if isinstance(role, dict) and role.get("liveModeEnabled") is True]),
+                "observationCount": len(society_observations),
+                "groupGoalCount": len(group_goals),
+                "conversationTriggerCount": len(conversation_triggers),
+                "conversationOpportunityCount": len(conversation_opportunities),
+                "normConstraintCount": len((society_store.get("norms") or {}).get("constraints") or []) if isinstance(society_store.get("norms"), dict) else 0,
+                "recentObservationIds": [item.get("id") for item in society_observations[-5:] if item.get("id")],
+                "activeGroupGoalIds": [goal.get("id") for goal in list(group_goals.values())[-5:] if isinstance(goal, dict) and goal.get("id")],
+            },
         },
         "providerSupport": provider_support,
         "clawMindArchitecture": clawmind_architecture,
@@ -7927,6 +7966,7 @@ def _live_agent_loop_social_perception(agent_id):
         if self_location and location and self_location.get("buildingId") == location.get("buildingId") and int(self_location.get("floor") or 1) == int(location.get("floor") or 1):
             nearby.append({**row, "nearbyReason": "same-building-floor", "buildingId": location.get("buildingId"), "floor": location.get("floor") or 1})
     known.sort(key=lambda item: (not item.get("liveModeEnabled"), item.get("name") or item.get("agentId") or ""))
+    society_frame, society_store, _society_changed = _live_agent_society_update_nearby_awareness(agent_id, self_location, nearby)
     return {
         "schemaVersion": "agent-live-mode-social-perception/v1",
         "agentId": agent_id,
@@ -7944,6 +7984,16 @@ def _live_agent_loop_social_perception(agent_id):
             "loopActionId": "talk-with-nearby-agent",
             "status": "available" if nearby else "waiting_for_nearby_agent",
             "blockedReason": None if nearby else "no-nearby-visible-agent",
+        },
+        "society": {
+            "schemaVersion": society_store.get("schemaVersion"),
+            "role": (society_store.get("roles") or {}).get(agent_id),
+            "roleCount": len(society_store.get("roles") or {}),
+            "nearbyAwareness": society_frame,
+            "observationCount": len(society_store.get("observations") or []),
+            "groupGoalCount": len(society_store.get("groupGoals") or {}),
+            "conversationTriggerCount": len(society_store.get("conversationTriggers") or []),
+            "norms": society_store.get("norms"),
         },
     }
 
@@ -8836,6 +8886,596 @@ def _live_agent_loop_relationship_key(agent_id, other_agent_id):
     return f"{pair[0]}::{pair[1]}"
 
 
+def _live_agent_society_norms():
+    return {
+        "schemaVersion": "agent-live-mode-society-norms/v1",
+        "constraints": [
+            {
+                "id": "visible-social-context",
+                "summary": "Spatial conversation should prefer agents in the same visible building and floor.",
+            },
+            {
+                "id": "bounded-relationship-delta",
+                "summary": "Relationship score updates are small, deterministic, and clamped.",
+            },
+            {
+                "id": "in-world-vs-provider-relay",
+                "summary": "In-world speech remains distinct from provider relay messages.",
+            },
+            {
+                "id": "group-goals-reference-visible-members",
+                "summary": "Shared goals must name the resident members that can act on them.",
+            },
+        ],
+        "determinism": {
+            "ids": "relationship pair and source event/action ids",
+            "ordering": "lexicographic member ids then bounded append-only event order",
+            "modelCallsRequired": False,
+        },
+    }
+
+
+def _live_agent_default_society_store():
+    return {
+        "schemaVersion": LIVE_AGENT_SOCIETY_SCHEMA_VERSION,
+        "updatedAt": None,
+        "roles": {},
+        "nearby": {},
+        "observations": [],
+        "groupGoals": {},
+        "conversationOpportunities": [],
+        "conversationTriggers": [],
+        "norms": _live_agent_society_norms(),
+        "retention": {
+            "observations": LIVE_AGENT_LOOP_DEFAULTS["societyObservationRetention"],
+            "conversationTriggers": LIVE_AGENT_LOOP_DEFAULTS["conversationTriggerRetention"],
+            "conversationOpportunities": LIVE_AGENT_LOOP_DEFAULTS["conversationOpportunityRetention"],
+            "groupGoals": LIVE_AGENT_LOOP_DEFAULTS["groupGoalRetention"],
+        },
+        "storage": "world-meta.json#agentLife.society",
+    }
+
+
+def _live_agent_society_normalize_store(raw=None):
+    source = raw if isinstance(raw, dict) else {}
+    store = _live_agent_default_society_store()
+    roles = source.get("roles") if isinstance(source.get("roles"), dict) else {}
+    nearby = source.get("nearby") if isinstance(source.get("nearby"), dict) else {}
+    group_goals = source.get("groupGoals") if isinstance(source.get("groupGoals"), dict) else {}
+    retention = source.get("retention") if isinstance(source.get("retention"), dict) else {}
+    store.update({
+        "updatedAt": source.get("updatedAt") if source.get("updatedAt") else None,
+        "roles": {str(key): value for key, value in roles.items() if str(key or "").strip() and isinstance(value, dict)},
+        "nearby": {str(key): value for key, value in nearby.items() if str(key or "").strip() and isinstance(value, dict)},
+        "groupGoals": {str(key): value for key, value in group_goals.items() if str(key or "").strip() and isinstance(value, dict)},
+        "observations": _live_agent_loop_trim_list(
+            [item for item in (source.get("observations") or []) if isinstance(item, dict)],
+            LIVE_AGENT_LOOP_DEFAULTS["societyObservationRetention"],
+        ),
+        "conversationOpportunities": _live_agent_loop_trim_list(
+            [item for item in (source.get("conversationOpportunities") or []) if isinstance(item, dict)],
+            LIVE_AGENT_LOOP_DEFAULTS["conversationOpportunityRetention"],
+        ),
+        "conversationTriggers": _live_agent_loop_trim_list(
+            [item for item in (source.get("conversationTriggers") or []) if isinstance(item, dict)],
+            LIVE_AGENT_LOOP_DEFAULTS["conversationTriggerRetention"],
+        ),
+        "norms": source.get("norms") if isinstance(source.get("norms"), dict) else _live_agent_society_norms(),
+        "retention": {
+            **store["retention"],
+            **{key: value for key, value in retention.items() if key in store["retention"]},
+        },
+    })
+    if len(store["groupGoals"]) > LIVE_AGENT_LOOP_DEFAULTS["groupGoalRetention"]:
+        ordered = sorted(
+            store["groupGoals"].items(),
+            key=lambda item: ((item[1] or {}).get("updatedAt") or "", item[0]),
+        )
+        store["groupGoals"] = dict(ordered[-LIVE_AGENT_LOOP_DEFAULTS["groupGoalRetention"]:])
+    return store
+
+
+def _live_agent_society_store_from_meta(meta=None):
+    meta = meta if isinstance(meta, dict) else load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    return _live_agent_society_normalize_store(agent_life.get("society"))
+
+
+def _live_agent_society_save_store(meta, store, *, now_iso=None):
+    if not isinstance(meta, dict):
+        meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    normalized = _live_agent_society_normalize_store(store)
+    normalized["schemaVersion"] = LIVE_AGENT_SOCIETY_SCHEMA_VERSION
+    normalized["updatedAt"] = now_iso or _utc_now_iso()
+    normalized["storage"] = "world-meta.json#agentLife.society"
+    agent_life["society"] = normalized
+    meta["agentLife"] = agent_life
+    save_world_meta(meta)
+    return normalized
+
+
+def _live_agent_society_role_row(agent, meta, status, now_iso):
+    agent = agent if isinstance(agent, dict) else {}
+    agent_id = str(agent.get("statusKey") or agent.get("id") or "").strip()
+    if not agent_id:
+        return None
+    profiles = meta.get("agentProfiles") if isinstance(meta.get("agentProfiles"), dict) else {}
+    assignments = meta.get("agentAssignments") if isinstance(meta.get("agentAssignments"), dict) else {}
+    profile = profiles.get(agent_id) or profiles.get(str(agent.get("id") or "")) or {}
+    assignment = assignments.get(agent_id) or assignments.get(str(agent.get("id") or "")) or {}
+    snapshot = status.get(agent_id) or status.get(str(agent.get("id") or "")) or {}
+    profile_roles = []
+    if isinstance(profile.get("roles"), list):
+        profile_roles = [str(role).strip() for role in profile.get("roles") if str(role).strip()]
+    elif profile.get("role"):
+        profile_roles = [str(profile.get("role")).strip()]
+    role_tags = ["resident"]
+    if bool(agent.get("agentLiveModeEnabled") or _agent_live_mode_enabled_from_profile(profile)):
+        role_tags.append("live-agent-enabled")
+    if assignment.get("home"):
+        role_tags.append("home-resident")
+    if assignment.get("work"):
+        role_tags.append("worker")
+    provider_kind = _live_agent_provider_kind(agent)
+    if provider_kind:
+        role_tags.append(f"provider:{provider_kind}")
+    for role in profile_roles:
+        normalized_role = re.sub(r"[^a-z0-9_.:-]+", "-", role.lower()).strip("-")
+        if normalized_role:
+            role_tags.append(normalized_role)
+    role_tags = sorted(dict.fromkeys(role_tags))
+    primary_role = "live-resident" if "live-agent-enabled" in role_tags else "resident"
+    if profile_roles:
+        primary_role = profile_roles[0][:80]
+    return {
+        "agentId": agent_id,
+        "displayName": agent.get("name") or profile.get("name") or agent_id,
+        "primaryRole": primary_role,
+        "roleTags": role_tags,
+        "liveModeEnabled": "live-agent-enabled" in role_tags,
+        "providerKind": provider_kind,
+        "homeBuildingId": assignment.get("home"),
+        "workBuildingId": assignment.get("work"),
+        "status": snapshot.get("state", snapshot.get("status", "offline")),
+        "task": snapshot.get("task", ""),
+        "updatedAt": now_iso,
+        "source": "roster-and-agent-profile",
+    }
+
+
+def _live_agent_society_sync_roles(store=None, meta=None, *, now_iso=None):
+    meta = meta if isinstance(meta, dict) else load_world_meta()
+    store = _live_agent_society_normalize_store(store)
+    now_iso = now_iso or _utc_now_iso()
+    status = load_agent_status()
+    changed = False
+    for agent in _merge_agent_profiles(get_roster()):
+        row = _live_agent_society_role_row(agent, meta, status, now_iso)
+        if not row:
+            continue
+        previous = store["roles"].get(row["agentId"]) if isinstance(store["roles"].get(row["agentId"]), dict) else {}
+        comparable = {k: v for k, v in row.items() if k != "updatedAt"}
+        previous_comparable = {k: v for k, v in previous.items() if k != "updatedAt"}
+        if comparable != previous_comparable:
+            store["roles"][row["agentId"]] = row
+            changed = True
+    return store, changed
+
+
+def _live_agent_society_append_unique(items, row, limit):
+    if not isinstance(row, dict) or not row.get("id"):
+        return _live_agent_loop_trim_list(items, limit), False
+    existing = [item for item in (items or []) if isinstance(item, dict) and item.get("id") != row.get("id")]
+    changed = len(existing) != len([item for item in (items or []) if isinstance(item, dict)]) or not any(isinstance(item, dict) and item.get("id") == row.get("id") and item == row for item in (items or []))
+    return _live_agent_loop_trim_list([*existing, row], limit), changed
+
+
+def _live_agent_society_upsert_conversation_trigger(store, *, trigger_id, kind, agent_id, target_agent_id=None, member_agent_ids=None, relationship_id=None, location=None, source=None, now_iso=None):
+    now_iso = now_iso or _utc_now_iso()
+    members = sorted({str(item).strip() for item in (member_agent_ids or [agent_id, target_agent_id]) if str(item or "").strip()})
+    if not trigger_id or not agent_id or len(members) < 1:
+        return None, False
+    opportunity_id = f"opportunity-{trigger_id}"
+    trigger = {
+        "schemaVersion": LIVE_AGENT_CONVERSATION_TRIGGER_SCHEMA_VERSION,
+        "id": trigger_id,
+        "kind": kind,
+        "agentId": agent_id,
+        "targetAgentId": target_agent_id,
+        "memberAgentIds": members,
+        "relationshipId": relationship_id,
+        "conversationOpportunityId": opportunity_id,
+        "status": "open",
+        "triggeredAt": now_iso,
+        "updatedAt": now_iso,
+        "location": _copy_jsonable(location) if isinstance(location, dict) else None,
+        "source": _copy_jsonable(source) if isinstance(source, dict) else {"kind": kind},
+        "normIds": ["visible-social-context", "in-world-vs-provider-relay"],
+    }
+    trigger = {key: value for key, value in trigger.items() if value is not None}
+    store["conversationTriggers"], trigger_changed = _live_agent_society_append_unique(
+        store.get("conversationTriggers") or [],
+        trigger,
+        LIVE_AGENT_LOOP_DEFAULTS["conversationTriggerRetention"],
+    )
+    opportunity = {
+        "id": opportunity_id,
+        "triggerId": trigger_id,
+        "kind": "conversation",
+        "status": "open",
+        "memberAgentIds": members,
+        "agentId": agent_id,
+        "targetAgentId": target_agent_id,
+        "relationshipId": relationship_id,
+        "suggestedTools": ["say_to_agent"] if target_agent_id else ["speak_to_room"],
+        "createdAt": now_iso,
+        "updatedAt": now_iso,
+        "source": trigger.get("source"),
+    }
+    store["conversationOpportunities"], opportunity_changed = _live_agent_society_append_unique(
+        store.get("conversationOpportunities") or [],
+        opportunity,
+        LIVE_AGENT_LOOP_DEFAULTS["conversationOpportunityRetention"],
+    )
+    return trigger, trigger_changed or opportunity_changed
+
+
+def _live_agent_society_append_observation(store, *, observer_agent_id, subject_agent_id=None, kind, text, source=None, location=None, relationship_id=None, member_agent_ids=None, now_iso=None, observation_id=None, tags=None):
+    now_iso = now_iso or _utc_now_iso()
+    observer_agent_id = str(observer_agent_id or "").strip()
+    if not observer_agent_id:
+        return None, False
+    source = source if isinstance(source, dict) else {}
+    source_id = source.get("eventId") or source.get("actionId") or source.get("id") or int(_parse_isoish_epoch(now_iso) or time.time())
+    safe_source = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(source_id)).strip("-") or "source"
+    safe_observer = re.sub(r"[^A-Za-z0-9_.-]+", "-", observer_agent_id).strip("-") or "agent"
+    safe_kind = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(kind or "social-observation")).strip("-") or "social-observation"
+    members = sorted({str(item).strip() for item in (member_agent_ids or [observer_agent_id, subject_agent_id]) if str(item or "").strip()})
+    row = {
+        "schemaVersion": LIVE_AGENT_SOCIAL_OBSERVATION_SCHEMA_VERSION,
+        "id": observation_id or f"social-observation-{safe_source}-{safe_observer}-{safe_kind}",
+        "kind": kind or "social-observation",
+        "agentId": observer_agent_id,
+        "observerAgentId": observer_agent_id,
+        "subjectAgentId": subject_agent_id,
+        "memberAgentIds": members,
+        "text": _live_agent_loop_clean_plan_text(text, limit=500) or "Observed a nearby social event.",
+        "at": now_iso,
+        "relationshipId": relationship_id,
+        "location": _copy_jsonable(location) if isinstance(location, dict) else None,
+        "tags": _live_agent_memory_clean_tags(tags, extra=["social", kind or "observation"]),
+        "source": _copy_jsonable(source),
+    }
+    row = {key: value for key, value in row.items() if value is not None}
+    store["observations"], changed = _live_agent_society_append_unique(
+        store.get("observations") or [],
+        row,
+        LIVE_AGENT_LOOP_DEFAULTS["societyObservationRetention"],
+    )
+    return row, changed
+
+
+def _live_agent_society_upsert_group_goal(store, *, member_agent_ids, kind, relationship_id=None, source=None, now_iso=None):
+    now_iso = now_iso or _utc_now_iso()
+    members = sorted({str(item).strip() for item in (member_agent_ids or []) if str(item or "").strip()})
+    if len(members) < 2:
+        return None, False
+    relationship_id = relationship_id or _live_agent_loop_relationship_key(members[0], members[1])
+    safe_relationship = re.sub(r"[^A-Za-z0-9_.:-]+", "-", str(relationship_id or "::".join(members))).strip("-") or "group"
+    goal_id = f"group-goal-{safe_relationship}-{kind or 'shared-social-context'}"
+    previous = store.get("groupGoals", {}).get(goal_id) if isinstance(store.get("groupGoals", {}).get(goal_id), dict) else {}
+    progress = _normalize_int(previous.get("progressCount"), 0, minimum=0, maximum=1000000000) + 1
+    row = {
+        "schemaVersion": LIVE_AGENT_GROUP_GOAL_SCHEMA_VERSION,
+        "id": goal_id,
+        "kind": kind or "shared-social-context",
+        "status": "active",
+        "memberAgentIds": members,
+        "relationshipId": relationship_id,
+        "title": "Maintain a constructive in-world relationship",
+        "summary": "Residents have a shared social thread that can influence future conversation planning.",
+        "progressCount": progress,
+        "createdAt": previous.get("createdAt") or now_iso,
+        "updatedAt": now_iso,
+        "lastSource": _copy_jsonable(source) if isinstance(source, dict) else {"kind": kind or "shared-social-context"},
+        "normIds": ["bounded-relationship-delta", "group-goals-reference-visible-members"],
+    }
+    changed = previous != row
+    store.setdefault("groupGoals", {})[goal_id] = row
+    if len(store["groupGoals"]) > LIVE_AGENT_LOOP_DEFAULTS["groupGoalRetention"]:
+        ordered = sorted(store["groupGoals"].items(), key=lambda item: ((item[1] or {}).get("updatedAt") or "", item[0]))
+        store["groupGoals"] = dict(ordered[-LIVE_AGENT_LOOP_DEFAULTS["groupGoalRetention"]:])
+    return row, changed
+
+
+def _live_agent_society_update_nearby_awareness(agent_id, self_location, nearby_agents, *, store=None, meta=None, now_iso=None):
+    meta = meta if isinstance(meta, dict) else load_world_meta()
+    store = _live_agent_society_store_from_meta(meta) if store is None else _live_agent_society_normalize_store(store)
+    now_iso = now_iso or _utc_now_iso()
+    store, role_changed = _live_agent_society_sync_roles(store, meta, now_iso=now_iso)
+    nearby_rows = []
+    changed = role_changed
+    for item in nearby_agents or []:
+        if not isinstance(item, dict) or not item.get("agentId"):
+            continue
+        nearby_rows.append({
+            "agentId": item.get("agentId"),
+            "name": item.get("name"),
+            "liveModeEnabled": bool(item.get("liveModeEnabled")),
+            "relationship": _copy_jsonable(item.get("relationship")) if isinstance(item.get("relationship"), dict) else {},
+            "nearbyReason": item.get("nearbyReason"),
+            "buildingId": item.get("buildingId"),
+            "floor": item.get("floor") or 1,
+        })
+        relationship_id = _live_agent_loop_relationship_key(agent_id, item.get("agentId"))
+        trigger_id = f"conversation-trigger-nearby-{relationship_id}-{item.get('buildingId') or (self_location or {}).get('buildingId')}-{item.get('floor') or (self_location or {}).get('floor') or 1}"
+        _trigger, trigger_changed = _live_agent_society_upsert_conversation_trigger(
+            store,
+            trigger_id=trigger_id,
+            kind="nearby-agent-awareness",
+            agent_id=agent_id,
+            target_agent_id=item.get("agentId"),
+            member_agent_ids=[agent_id, item.get("agentId")],
+            relationship_id=relationship_id,
+            location={"buildingId": item.get("buildingId") or (self_location or {}).get("buildingId"), "floor": item.get("floor") or (self_location or {}).get("floor") or 1},
+            source={"kind": "social-perception", "agentId": agent_id},
+            now_iso=now_iso,
+        )
+        changed = changed or trigger_changed
+    nearby_rows.sort(key=lambda row: row.get("agentId") or "")
+    frame = {
+        "agentId": agent_id,
+        "updatedAt": now_iso,
+        "selfLocation": _copy_jsonable(self_location) if isinstance(self_location, dict) else None,
+        "nearbyAgentIds": [row.get("agentId") for row in nearby_rows],
+        "nearbyAgents": nearby_rows,
+        "source": "social-perception",
+    }
+    previous = store.get("nearby", {}).get(agent_id) if isinstance(store.get("nearby", {}).get(agent_id), dict) else {}
+    comparable = {k: v for k, v in frame.items() if k != "updatedAt"}
+    previous_comparable = {k: v for k, v in previous.items() if k != "updatedAt"}
+    if comparable != previous_comparable:
+        store.setdefault("nearby", {})[agent_id] = frame
+        changed = True
+    if changed:
+        store = _live_agent_society_save_store(meta, store, now_iso=now_iso)
+    return store.get("nearby", {}).get(agent_id, frame), store, changed
+
+
+def _live_agent_society_memory_observation(state, observation):
+    if not isinstance(state, dict) or not isinstance(observation, dict):
+        return None
+    agent_id = observation.get("agentId")
+    if not agent_id:
+        return None
+    memory_observation = {
+        "schemaVersion": LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION,
+        "id": f"memory-{observation.get('id')}",
+        "at": observation.get("at") or _utc_now_iso(),
+        "agentId": agent_id,
+        "kind": "observation",
+        "text": observation.get("text"),
+        "importance": "normal",
+        "salience": 0.5,
+        "tags": _live_agent_memory_clean_tags(observation.get("tags"), extra=["social-observation"]),
+        "source": {"kind": "society-observation", "observationId": observation.get("id"), **(observation.get("source") if isinstance(observation.get("source"), dict) else {})},
+    }
+    _live_agent_loop_append_memory_bucket(state, agent_id, "observations", memory_observation, retention=LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
+    _live_agent_loop_append_memory_stream_entry(state, agent_id, {**memory_observation, "bucket": "observations", "sourceEntryId": memory_observation.get("id")}, retention=LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"])
+    _live_agent_loop_add_event(state, "social-observation-created", agent_id=agent_id, details={"observationId": observation.get("id"), "kind": observation.get("kind"), "source": observation.get("source")})
+    return memory_observation
+
+
+def _live_agent_society_record_communication_event(saved_event, state=None):
+    if not isinstance(saved_event, dict):
+        return None
+    now_iso = saved_event.get("at") if _parse_isoish_epoch(saved_event.get("at")) else _utc_now_iso()
+    from_agent_id = saved_event.get("fromAgentId")
+    target_agent_id = saved_event.get("targetAgentId")
+    members = sorted({str(item).strip() for item in [from_agent_id, target_agent_id, *(saved_event.get("observerIds") or [])] if str(item or "").strip()})
+    relationship_id = _live_agent_loop_relationship_key(from_agent_id, target_agent_id) if target_agent_id else None
+    meta = load_world_meta()
+    store = _live_agent_society_store_from_meta(meta)
+    store, role_changed = _live_agent_society_sync_roles(store, meta, now_iso=now_iso)
+    changed = role_changed
+    observations = []
+    source = {
+        "kind": "in-world-communication",
+        "eventId": saved_event.get("id"),
+        "conversationId": saved_event.get("conversationId"),
+        "scope": saved_event.get("scope"),
+    }
+    text = _live_agent_loop_clean_plan_text(saved_event.get("text"), limit=180) or "an in-world message"
+    if from_agent_id:
+        observation, observation_changed = _live_agent_society_append_observation(
+            store,
+            observer_agent_id=from_agent_id,
+            subject_agent_id=target_agent_id,
+            kind="conversation-sent",
+            text=f"I opened an in-world conversation: {text}",
+            source=source,
+            location=saved_event.get("location") if isinstance(saved_event.get("location"), dict) else {"buildingId": saved_event.get("buildingId"), "floor": saved_event.get("floor") or 1},
+            relationship_id=relationship_id,
+            member_agent_ids=members,
+            now_iso=now_iso,
+            tags=["conversation", "sent", saved_event.get("scope")],
+        )
+        if observation:
+            observations.append(observation)
+            if isinstance(state, dict):
+                _live_agent_society_memory_observation(state, observation)
+        changed = changed or observation_changed
+    for observer_id in saved_event.get("observerIds") or []:
+        direction = "conversation-received" if observer_id == target_agent_id else "conversation-observed"
+        observation, observation_changed = _live_agent_society_append_observation(
+            store,
+            observer_agent_id=observer_id,
+            subject_agent_id=from_agent_id,
+            kind=direction,
+            text=f"I noticed {from_agent_id} say: {text}",
+            source=source,
+            location=saved_event.get("location") if isinstance(saved_event.get("location"), dict) else {"buildingId": saved_event.get("buildingId"), "floor": saved_event.get("floor") or 1},
+            relationship_id=relationship_id,
+            member_agent_ids=members,
+            now_iso=now_iso,
+            tags=["conversation", direction, saved_event.get("scope")],
+        )
+        if observation:
+            observations.append(observation)
+            if isinstance(state, dict):
+                _live_agent_society_memory_observation(state, observation)
+        changed = changed or observation_changed
+    trigger_id = f"conversation-trigger-event-{saved_event.get('id')}"
+    _trigger, trigger_changed = _live_agent_society_upsert_conversation_trigger(
+        store,
+        trigger_id=trigger_id,
+        kind="in-world-communication",
+        agent_id=from_agent_id,
+        target_agent_id=target_agent_id,
+        member_agent_ids=members,
+        relationship_id=relationship_id,
+        location=saved_event.get("location") if isinstance(saved_event.get("location"), dict) else {"buildingId": saved_event.get("buildingId"), "floor": saved_event.get("floor") or 1},
+        source=source,
+        now_iso=now_iso,
+    )
+    changed = changed or trigger_changed
+    if len(members) >= 2:
+        _goal, goal_changed = _live_agent_society_upsert_group_goal(
+            store,
+            member_agent_ids=members[:4],
+            kind="shared-conversation-thread",
+            relationship_id=relationship_id,
+            source=source,
+            now_iso=now_iso,
+        )
+        changed = changed or goal_changed
+    if changed:
+        store = _live_agent_society_save_store(meta, store, now_iso=now_iso)
+    return {
+        "observationIds": [item.get("id") for item in observations if item.get("id")],
+        "observationCount": len(observations),
+        "relationshipId": relationship_id,
+        "groupGoalCount": len(store.get("groupGoals") or {}),
+        "conversationTriggerCount": len(store.get("conversationTriggers") or []),
+    }
+
+
+def _live_agent_society_record_world_action_event(state, agent_id, action, summary, now_iso):
+    if not isinstance(action, dict) or not isinstance(summary, dict) or not agent_id:
+        return None
+    action_status = _canonical_world_action_status(summary.get("status"))
+    if action_status != "completed":
+        return None
+    action_id = summary.get("id")
+    loop_action_id = summary.get("loopActionId")
+    action_type = summary.get("actionType")
+    location = _live_agent_simulated_location(agent_id)
+    target = action.get("target") if isinstance(action.get("target"), dict) else {}
+    if not location and target.get("buildingId"):
+        location = {"buildingId": target.get("buildingId"), "floor": target.get("floor") or 1}
+    active_locations = _live_agent_loop_active_locations_by_agent()
+    nearby_observers = []
+    if location and location.get("buildingId"):
+        for other_id, other_location in active_locations.items():
+            if other_id == agent_id or not isinstance(other_location, dict):
+                continue
+            if other_location.get("buildingId") == location.get("buildingId") and int(other_location.get("floor") or 1) == int(location.get("floor") or 1):
+                nearby_observers.append(other_id)
+    target_agent_id = _resolve_agent_id(target.get("targetAgentId")) if target.get("targetAgentId") else None
+    if target_agent_id and target_agent_id not in nearby_observers and target_agent_id != agent_id:
+        nearby_observers.append(target_agent_id)
+    if not nearby_observers and action_type != "life.social":
+        return None
+    meta = load_world_meta()
+    store = _live_agent_society_store_from_meta(meta)
+    store, role_changed = _live_agent_society_sync_roles(store, meta, now_iso=now_iso)
+    changed = role_changed
+    relationship_id = _live_agent_loop_relationship_key(agent_id, target_agent_id) if target_agent_id else None
+    members = sorted({str(item).strip() for item in [agent_id, target_agent_id, *nearby_observers] if str(item or "").strip()})
+    observations = []
+    source = {"kind": "world-action", "actionId": action_id, "loopActionId": loop_action_id, "actionType": action_type}
+    actor_observation, actor_changed = _live_agent_society_append_observation(
+        store,
+        observer_agent_id=agent_id,
+        subject_agent_id=target_agent_id,
+        kind="social-action-completed" if action_type == "life.social" else "own-action-social-context",
+        text=f"I completed {action_type or loop_action_id or 'a visible action'} with nearby social context.",
+        source=source,
+        location=location,
+        relationship_id=relationship_id,
+        member_agent_ids=members or [agent_id],
+        now_iso=now_iso,
+        tags=["world-action", loop_action_id, action_type],
+    )
+    if actor_observation:
+        observations.append(actor_observation)
+    changed = changed or actor_changed
+    for observer_id in sorted(set(nearby_observers)):
+        observation, observation_changed = _live_agent_society_append_observation(
+            store,
+            observer_agent_id=observer_id,
+            subject_agent_id=agent_id,
+            kind="nearby-action-observed",
+            text=f"I noticed {agent_id} complete {action_type or loop_action_id or 'a visible action'} nearby.",
+            source=source,
+            location=location,
+            relationship_id=_live_agent_loop_relationship_key(observer_id, agent_id),
+            member_agent_ids=members,
+            now_iso=now_iso,
+            tags=["nearby-action", loop_action_id, action_type],
+        )
+        if observation:
+            observations.append(observation)
+            if isinstance(state, dict):
+                _live_agent_society_memory_observation(state, observation)
+        changed = changed or observation_changed
+    if len(members) >= 2:
+        _trigger, trigger_changed = _live_agent_society_upsert_conversation_trigger(
+            store,
+            trigger_id=f"conversation-trigger-action-{action_id}",
+            kind="nearby-action-follow-up",
+            agent_id=agent_id,
+            target_agent_id=target_agent_id or (nearby_observers[0] if nearby_observers else None),
+            member_agent_ids=members[:4],
+            relationship_id=relationship_id or _live_agent_loop_relationship_key(members[0], members[1]),
+            location=location,
+            source=source,
+            now_iso=now_iso,
+        )
+        _goal, goal_changed = _live_agent_society_upsert_group_goal(
+            store,
+            member_agent_ids=members[:4],
+            kind="nearby-action-follow-up",
+            relationship_id=relationship_id or _live_agent_loop_relationship_key(members[0], members[1]),
+            source=source,
+            now_iso=now_iso,
+        )
+        changed = changed or trigger_changed or goal_changed
+    if changed:
+        store = _live_agent_society_save_store(meta, store, now_iso=now_iso)
+    if isinstance(state, dict) and observations:
+        _live_agent_loop_add_event(
+            state,
+            "society-state-updated",
+            agent_id=agent_id,
+            details={
+                "sourceActionId": action_id,
+                "observationIds": [item.get("id") for item in observations],
+                "nearbyObserverIds": sorted(set(nearby_observers)),
+                "groupGoalCount": len(store.get("groupGoals") or {}),
+                "conversationTriggerCount": len(store.get("conversationTriggers") or []),
+            },
+        )
+    return {
+        "observationIds": [item.get("id") for item in observations if item.get("id")],
+        "observationCount": len(observations),
+        "nearbyObserverIds": sorted(set(nearby_observers)),
+        "groupGoalCount": len(store.get("groupGoals") or {}),
+        "conversationTriggerCount": len(store.get("conversationTriggers") or []),
+    }
+
+
 def _live_agent_loop_record_social_outcome(state, agent_id, action, summary, now_iso):
     if not isinstance(action, dict) or not isinstance(summary, dict):
         return None
@@ -8923,6 +9563,7 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
         }
     memory["recentActions"] = _live_agent_loop_trim_list([*(memory.get("recentActions") or []), recent_entry], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
     social_relationship = _live_agent_loop_record_social_outcome(state, agent_id, action, summary, recent_entry["at"])
+    society_update = _live_agent_society_record_world_action_event(state, agent_id, action, summary, recent_entry["at"])
     observation_text = f"{label} finished with status {action_status}."
     if isinstance(expectation_mismatch, dict):
         observation_text = f"{observation_text} Expected outcome mismatch: {expectation_mismatch.get('reason') or expectation_mismatch.get('code')}."
@@ -8931,6 +9572,8 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
         observation_text = f"{observation_text} Target building {target.get('buildingId')} object {target.get('catalogId') or target.get('objectInstanceId')}."
     if social_relationship:
         observation_text = f"{observation_text} Social partner {social_relationship.get('otherAgentId')} relationship score {social_relationship.get('score')}."
+    if society_update:
+        observation_text = f"{observation_text} Society observations {society_update.get('observationCount')} group goals {society_update.get('groupGoalCount')}."
     observation = {
         "schemaVersion": LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION,
         "id": f"memory-{action_id}-observation",
@@ -8976,6 +9619,8 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
     _live_agent_memory_maybe_synthesize_reflection(state, agent_id, reason="world-action-outcome")
     _live_agent_loop_mark_settled_action(agent_state, action_id, action_status)
     details = {"actionId": action_id, "loopActionId": summary.get("loopActionId"), "status": effective_status}
+    if society_update:
+        details["society"] = society_update
     if completed:
         _live_agent_loop_add_feedback(state, agent_id, "info", reflection["text"], details)
     else:
