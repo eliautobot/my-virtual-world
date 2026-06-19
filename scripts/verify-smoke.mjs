@@ -715,6 +715,10 @@ try:
     assert metrics["bridgeMetrics"]["decisionCalls"] >= 2, metrics["bridgeMetrics"]
     assert metrics["bridgeMetrics"]["timeouts"] >= 1, metrics["bridgeMetrics"]
     assert metrics["bridgeMetrics"]["fallbacks"] >= 1, metrics["bridgeMetrics"]
+    assert metrics["providerKinds"]["fake-timeout"]["bridge"]["stats"]["timeouts"] >= 1, metrics["providerKinds"]["fake-timeout"]
+    assert metrics["providerKinds"]["fake-timeout"]["bridge"]["stats"]["fallbacks"] >= 1, metrics["providerKinds"]["fake-timeout"]
+    assert metrics["providerKinds"]["fake-invalid"]["bridge"]["stats"]["decisionCalls"] >= 1, metrics["providerKinds"]["fake-invalid"]
+    assert metrics["providerKinds"]["fake-invalid"]["bridge"]["stats"]["fallbacks"] >= 1, metrics["providerKinds"]["fake-invalid"]
     assert "fake" in metrics["capabilityGapsByProvider"], metrics["capabilityGapsByProvider"]
     assert isinstance(metrics["providerKinds"]["fake"]["bridge"]["capabilityGaps"], list), metrics["providerKinds"]["fake"]
     print("live agent provider bridge contract ok")
