@@ -105,31 +105,43 @@ function assert(condition, message, details = undefined) {
 }
 
 async function requestJson(path, { method = 'GET', body } = {}) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-  try {
-    const response = await fetch(`${BASE_URL}${path}`, {
-      method,
-      signal: controller.signal,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    let payload = null;
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
-      payload = await response.json();
-    } catch {
-      payload = null;
-    }
-    if (!response.ok) {
-      const error = new Error(`${path} returned HTTP ${response.status}${payload ? `\n${JSON.stringify(payload, null, 2)}` : ''}`);
-      error.status = response.status;
-      error.path = path;
-      error.payload = payload;
+      const response = await fetch(`${BASE_URL}${path}`, {
+        method,
+        signal: controller.signal,
+        headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+      if (!response.ok) {
+        const error = new Error(`${path} returned HTTP ${response.status}${payload ? `\n${JSON.stringify(payload, null, 2)}` : ''}`);
+        error.status = response.status;
+        error.path = path;
+        error.payload = payload;
+        throw error;
+      }
+      return payload;
+    } catch (error) {
+      const transientSocketClose = error instanceof TypeError
+        && error.message === 'fetch failed'
+        && error.cause?.code === 'UND_ERR_SOCKET';
+      if (attempt < maxAttempts && transientSocketClose) {
+        await delay(250);
+        continue;
+      }
       throw error;
+    } finally {
+      clearTimeout(timeout);
     }
-    return payload;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -873,10 +885,18 @@ base_url = os.environ["VW_ACCEPTANCE_BASE_URL"]
 action_id = os.environ["VW_ACCEPTANCE_ACTION_ID"]
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+    browser = p.chromium.launch(headless=True, args=[
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--ignore-gpu-blocklist",
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--use-angle=swiftshader",
+        "--enable-unsafe-swiftshader",
+    ])
     page = browser.new_page(viewport={"width": 960, "height": 640}, device_scale_factor=1)
     page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_selector("#pixiContainer canvas", timeout=30000)
+    page.wait_for_selector("#pixiContainer canvas", state="attached", timeout=60000)
     page.wait_for_function("() => typeof window.__VWReplayLiveAgentModeAnimationEvents === 'function' && typeof window.__VWScene === 'function'", timeout=30000)
     result = page.evaluate("""
 async ({ actionId }) => {
