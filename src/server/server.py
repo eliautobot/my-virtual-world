@@ -2155,9 +2155,9 @@ def _live_agent_tool_schema_errors(schema, value, path="arguments"):
         for key in required:
             if key not in value:
                 errors.append({"path": f"{path}.{key}", "code": "required"})
-        for group in schema.get("oneOfRequired") or []:
-            if isinstance(group, list) and not any(key in value for key in group):
-                errors.append({"path": path, "code": "one_of_required", "oneOf": group})
+        one_of_required = [group for group in (schema.get("oneOfRequired") or []) if isinstance(group, list)]
+        if one_of_required and not any(all(key in value for key in group) for group in one_of_required):
+            errors.append({"path": path, "code": "one_of_required", "oneOf": one_of_required})
         properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
         if schema.get("additionalProperties") is False:
             for key in value.keys():
