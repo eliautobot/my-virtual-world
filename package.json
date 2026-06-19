@@ -25,7 +25,9 @@
   "scripts": {
     "start": "python3 src/server/server.py",
     "dev": "VW_PORT=${VW_PORT:-8590} VW_DATA_DIR=${VW_DATA_DIR:-.local-data} python3 src/server/server.py",
+    "dev:live-agent-mode:8587": "node scripts/live-agent-mode-8587-harness.mjs --keep-open",
     "test": "npm run verify:smoke",
+    "verify:live-agent-mode:8587": "node scripts/live-agent-mode-8587-harness.mjs",
     "verify:smoke": "node scripts/verify-smoke.mjs"
   },
   "dependencies": {
