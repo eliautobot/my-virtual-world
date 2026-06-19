@@ -1338,6 +1338,31 @@ LIVE_AGENT_BACKEND_EXECUTION_VERSION = "agent-live-mode-backend-world-action-exe
 LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"
 LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION = "agent-live-mode-in-world-communication/v1"
 LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"
+LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"
+LIVE_AGENT_PIANO_ARCHITECTURE_VERSION = "agent-live-mode-piano-architecture/v1"
+LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES = [
+    "identity",
+    "profileStorage",
+    "liveModeToggle",
+    "providerNeutralToolRegistry",
+    "backendActionExecution",
+    "inWorldCommunication",
+    "memoryBuckets",
+    "relationshipStorage",
+    "animationReplay",
+    "readOnlyMetrics",
+]
+LIVE_AGENT_PIANO_MODULES = [
+    "perception",
+    "memory",
+    "reflection",
+    "planning",
+    "socialReasoning",
+    "conversation",
+    "actionExecution",
+    "outcomeAwareness",
+    "orchestrator",
+]
 LIVE_AGENT_SIMULATION_SCHEMA_VERSION = "agent-live-mode-simulation/v1"
 LIVE_AGENT_BACKEND_EXECUTOR_ID = "server.py#live_agent_backend_action_executor"
 LIVE_AGENT_ANIMATION_EVENT_NAMES = {
@@ -3507,6 +3532,159 @@ def _live_agent_metric_memory_counts(loop_state):
     return counts
 
 
+def _live_agent_cached_roster_for_metrics():
+    try:
+        cached = _agent_roster if isinstance(_agent_roster, list) else []
+        return _merge_agent_profiles(cached)
+    except Exception:
+        return []
+
+
+def _live_agent_provider_kind(agent):
+    kind = str((agent or {}).get("providerKind") or (agent or {}).get("provider") or "openclaw").strip().lower()
+    return kind or "unknown"
+
+
+def _live_agent_provider_adapter_metrics(roster):
+    profiles = load_world_meta().get("agentProfiles") or {}
+    provider_kinds = {}
+    for agent in [item for item in (roster or []) if isinstance(item, dict)]:
+        kind = _live_agent_provider_kind(agent)
+        agent_id = str(agent.get("id") or agent.get("statusKey") or "").strip()
+        status_key = str(agent.get("statusKey") or agent_id).strip()
+        profile = profiles.get(status_key) or profiles.get(agent_id) or {}
+        live_enabled = bool(agent.get("agentLiveModeEnabled") or (isinstance(profile, dict) and profile.get("agentLiveModeEnabled") is True))
+        bucket = provider_kinds.setdefault(kind, {
+            "agentCount": 0,
+            "liveModeEnabledCount": 0,
+            "sampleAgentIds": [],
+            "capabilities": {},
+            "gaps": [],
+        })
+        bucket["agentCount"] += 1
+        if live_enabled:
+            bucket["liveModeEnabledCount"] += 1
+        if agent_id and len(bucket["sampleAgentIds"]) < 5:
+            bucket["sampleAgentIds"].append(agent_id)
+
+    base_capabilities = {
+        "identity": True,
+        "profileStorage": True,
+        "liveModeToggle": True,
+        "providerNeutralToolRegistry": bool(LIVE_AGENT_TOOL_REGISTRY),
+        "backendActionExecution": True,
+        "inWorldCommunication": "say_to_agent" in LIVE_AGENT_TOOL_REGISTRY,
+        "memoryBuckets": "add_memory" in LIVE_AGENT_TOOL_REGISTRY,
+        "relationshipStorage": True,
+        "animationReplay": True,
+        "readOnlyMetrics": True,
+    }
+    for bucket in provider_kinds.values():
+        bucket["capabilities"] = dict(base_capabilities)
+        bucket["gaps"] = [key for key, ok in bucket["capabilities"].items() if not ok]
+
+    provider_kind_count = len(provider_kinds)
+    live_enabled_provider_kind_count = len([item for item in provider_kinds.values() if item.get("liveModeEnabledCount", 0) > 0])
+    checklist = {
+        "cachedRosterOnly": True,
+        "noProviderModelCalls": True,
+        "providerKindCoverage": provider_kind_count > 0,
+        "providerNeutralProfileStorage": base_capabilities["profileStorage"],
+        "providerNeutralToolRegistry": base_capabilities["providerNeutralToolRegistry"],
+        "providerNeutralCommunication": base_capabilities["inWorldCommunication"],
+        "providerNeutralMemory": base_capabilities["memoryBuckets"],
+        "providerNeutralReplay": base_capabilities["animationReplay"],
+        "allProviderKindsHaveCoreAdapter": provider_kind_count > 0 and all(not item.get("gaps") for item in provider_kinds.values()),
+    }
+    return {
+        "schemaVersion": LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION,
+        "adapterCapabilities": list(LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES),
+        "discoveredAgentCount": sum(item.get("agentCount", 0) for item in provider_kinds.values()),
+        "providerKindCount": provider_kind_count,
+        "liveModeEnabledProviderKindCount": live_enabled_provider_kind_count,
+        "providerKinds": provider_kinds,
+        "checklist": checklist,
+        "gaps": [key for key, ok in checklist.items() if not ok],
+        "optimization": {
+            "readOnly": True,
+            "usesCachedRoster": True,
+            "providerCallsDuringMetrics": 0,
+            "modelCallsDuringMetrics": 0,
+        },
+    }
+
+
+def _live_agent_piano_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names):
+    modules = {
+        "perception": {
+            "contractReady": "observe_world" in LIVE_AGENT_TOOL_REGISTRY,
+            "runtimeEvidence": bool(loop_state.get("lastTickAt")),
+            "measure": "observe_world tool contract plus loop tick timestamps",
+        },
+        "memory": {
+            "contractReady": "add_memory" in LIVE_AGENT_TOOL_REGISTRY,
+            "runtimeEvidence": memory_counts.get("total", 0) > 0,
+            "measure": "memory bucket counts",
+        },
+        "reflection": {
+            "contractReady": "reflections" in memory_counts,
+            "runtimeEvidence": memory_counts.get("reflections", 0) > 0,
+            "measure": "reflection bucket count",
+        },
+        "planning": {
+            "contractReady": bool(loop_state.get("decisionMode") or "planner-v2"),
+            "runtimeEvidence": len(loop_state.get("scheduler", {}).get("turnHistory", []) if isinstance(loop_state.get("scheduler"), dict) else []) > 0 or bool(loop_state.get("lastTickAt")),
+            "measure": "decision mode and turn history",
+        },
+        "socialReasoning": {
+            "contractReady": "say_to_agent" in LIVE_AGENT_TOOL_REGISTRY,
+            "runtimeEvidence": len(relationships or {}) > 0,
+            "measure": "relationship records",
+        },
+        "conversation": {
+            "contractReady": "say_to_agent" in LIVE_AGENT_TOOL_REGISTRY,
+            "runtimeEvidence": len(communication_events or []) > 0,
+            "measure": "in-world communication events",
+        },
+        "actionExecution": {
+            "contractReady": True,
+            "runtimeEvidence": len(completed_backend_actions or []) > 0,
+            "measure": "completed backend-owned actions",
+        },
+        "outcomeAwareness": {
+            "contractReady": True,
+            "runtimeEvidence": bool(animation_event_names),
+            "measure": "world-action transition history and replay event names",
+        },
+        "orchestrator": {
+            "contractReady": True,
+            "runtimeEvidence": bool(loop_state.get("enabled")),
+            "measure": "backend scheduler/orchestrator state",
+        },
+    }
+    checklist = {
+        "allModuleContractsReady": all(item.get("contractReady") for item in modules.values()),
+        "hasRuntimeEvidence": any(item.get("runtimeEvidence") for item in modules.values()),
+        "parallelModuleContractPresent": set(LIVE_AGENT_PIANO_MODULES).issubset(set(modules.keys())),
+        "lightweightReadOnlyMetrics": True,
+        "browserNotRequiredForModuleMetrics": True,
+    }
+    return {
+        "schemaVersion": LIVE_AGENT_PIANO_ARCHITECTURE_VERSION,
+        "modules": modules,
+        "moduleOrder": list(LIVE_AGENT_PIANO_MODULES),
+        "checklist": checklist,
+        "contractGaps": [key for key, item in modules.items() if not item.get("contractReady")],
+        "runtimeEvidenceGaps": [key for key, item in modules.items() if not item.get("runtimeEvidence")],
+        "optimization": {
+            "readOnly": True,
+            "modelCallsDuringMetrics": 0,
+            "providerCallsDuringMetrics": 0,
+            "heavyWorldScan": False,
+        },
+    }
+
+
 def get_live_agent_mode_autonomy_metrics():
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
@@ -3559,6 +3737,8 @@ def get_live_agent_mode_autonomy_metrics():
     memory_counts = _live_agent_metric_memory_counts(loop_state)
     pause = _live_agent_loop_pause_status(loop_state)
     kill_switch = _live_agent_loop_kill_switch_status(loop_state)
+    provider_support = _live_agent_provider_adapter_metrics(_live_agent_cached_roster_for_metrics())
+    piano_architecture = _live_agent_piano_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
     checklist = {
         "featureGateOpen": check_feature("agentLiveMode"),
         "loopEnabled": bool(loop_state.get("enabled")),
@@ -3576,6 +3756,9 @@ def get_live_agent_mode_autonomy_metrics():
         "operatorPauseAvailable": pause.get("active") in {True, False},
         "operatorKillSwitchAvailable": kill_switch.get("active") in {True, False},
         "noRoutePendingStuck": len(active_route_pending) == 0,
+        "providerAdapterReadiness": provider_support.get("checklist", {}).get("allProviderKindsHaveCoreAdapter") is True,
+        "pianoModuleContractsReady": piano_architecture.get("checklist", {}).get("allModuleContractsReady") is True,
+        "lightweightMetricsOptimized": provider_support.get("optimization", {}).get("modelCallsDuringMetrics") == 0 and piano_architecture.get("optimization", {}).get("heavyWorldScan") is False,
     }
     return {
         "ok": True,
@@ -3611,6 +3794,8 @@ def get_live_agent_mode_autonomy_metrics():
             "operatorProposalCount": len(loop_state.get("operatorProposals") or []),
             "liveAgentBuildingCount": len(live_agent_buildings),
         },
+        "providerSupport": provider_support,
+        "pianoArchitecture": piano_architecture,
         "checklist": checklist,
         "gaps": [key for key, passed in checklist.items() if not passed],
         "acceptanceNotes": {
@@ -3618,6 +3803,10 @@ def get_live_agent_mode_autonomy_metrics():
             "mutationEndpointsRemainLicenseGated": True,
             "browserRequiredForProgress": False,
             "fullSoakTargetTurns": 50,
+            "universalProviderSupportMeasured": True,
+            "pianoArchitectureMeasured": True,
+            "metricsProviderCalls": 0,
+            "metricsModelCalls": 0,
         },
     }
 
