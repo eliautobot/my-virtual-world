@@ -1336,6 +1336,8 @@ WORLD_ACTION_EVENT_REUSE_NOTES = [
 WORLD_ACTION_EVENT_ROUTE_GUARDRAILS = MOVE_INTENT_ROUTE_GUARDRAILS
 LIVE_AGENT_BACKEND_EXECUTION_VERSION = "agent-live-mode-backend-world-action-executor/v1"
 LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"
+LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION = "agent-live-mode-in-world-communication/v1"
+LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"
 LIVE_AGENT_SIMULATION_SCHEMA_VERSION = "agent-live-mode-simulation/v1"
 LIVE_AGENT_BACKEND_EXECUTOR_ID = "server.py#live_agent_backend_action_executor"
 LIVE_AGENT_ANIMATION_EVENT_NAMES = {
@@ -1344,6 +1346,11 @@ LIVE_AGENT_ANIMATION_EVENT_NAMES = {
     "object-use-started",
     "object-use-completed",
     "world-action-completed",
+}
+LIVE_AGENT_IN_WORLD_COMMUNICATION_EVENT_NAMES = {
+    "in-world-message",
+    "room-speech",
+    "agent-thought",
 }
 LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"
 LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION = "agent-live-mode-plan/v1"
@@ -2505,6 +2512,344 @@ def _live_agent_tool_check_availability(tool, context, args):
     return False, _live_agent_tool_error("tool_not_found", "Unknown Live Agent tool.", tool=tool_name), 404
 
 
+LIVE_AGENT_EXECUTABLE_TOOL_NAMES = {"say_to_agent", "speak_to_room", "send_message", "think_aloud", "add_memory", "write_diary"}
+
+
+def _live_agent_tool_execution_enabled(tool_name):
+    return tool_name in LIVE_AGENT_EXECUTABLE_TOOL_NAMES
+
+
+def _live_agent_memory_entry_id(prefix, agent_id):
+    safe_agent = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(agent_id or "agent")).strip("-") or "agent"
+    return f"{prefix}-{int(time.time() * 1000)}-{safe_agent}-{uuid.uuid4().hex[:8]}"
+
+
+def _live_agent_loop_append_memory_bucket(state, agent_id, bucket, entry, *, retention=None):
+    if not isinstance(state, dict) or not agent_id or not isinstance(entry, dict):
+        return None
+    agent_state = _live_agent_loop_agent_state(state, agent_id)
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    existing = [
+        item for item in (memory.get(bucket) or [])
+        if isinstance(item, dict) and item.get("id") != entry.get("id")
+    ]
+    existing.append(entry)
+    memory[bucket] = _live_agent_loop_trim_list(existing, retention or LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
+    agent_state["memory"] = memory
+    return entry
+
+
+def _live_agent_loop_update_relationship_from_communication(state, event):
+    if not isinstance(event, dict):
+        return None
+    from_agent_id = event.get("fromAgentId")
+    target_agent_id = event.get("targetAgentId")
+    if not from_agent_id or not target_agent_id or from_agent_id == target_agent_id:
+        return None
+    relationship_key = _live_agent_loop_relationship_key(from_agent_id, target_agent_id)
+    if not relationship_key:
+        return None
+    now_iso = event.get("at") if _parse_isoish_epoch(event.get("at")) else _utc_now_iso()
+    meta = load_world_meta()
+    relationships = meta.get("agentRelationships") if isinstance(meta.get("agentRelationships"), dict) else {}
+    previous = relationships.get(relationship_key) if isinstance(relationships.get(relationship_key), dict) else {}
+    previous_score = previous.get("score")
+    try:
+        delta = 0.035 if event.get("spatial") else 0.018
+        next_score = min(1.0, max(-1.0, float(previous_score if previous_score is not None else 0) + delta))
+    except (TypeError, ValueError):
+        next_score = 0.035 if event.get("spatial") else 0.018
+    scope = event.get("scope") or event.get("name") or "in-world-message"
+    relationships[relationship_key] = {
+        **previous,
+        "agentId": relationship_key.split("::", 1)[0],
+        "otherAgentId": relationship_key.split("::", 1)[1],
+        "summary": f"{from_agent_id} and {target_agent_id} exchanged a visible {scope} in My Virtual World.",
+        "score": round(next_score, 3),
+        "lastOutcome": "in-world-communication",
+        "lastCommunicationEventId": event.get("id"),
+        "lastConversationId": event.get("conversationId"),
+        "updatedAt": now_iso,
+    }
+    meta["agentRelationships"] = relationships
+    save_world_meta(meta)
+    details = {
+        "relationshipId": relationship_key,
+        "otherAgentId": target_agent_id,
+        "communicationEventId": event.get("id"),
+        "conversationId": event.get("conversationId"),
+        "score": relationships[relationship_key].get("score"),
+        "source": "in-world-communication",
+    }
+    if isinstance(state, dict):
+        _live_agent_loop_add_event(state, "social-relationship-updated", agent_id=from_agent_id, details=details)
+    return details
+
+
+def _live_agent_in_world_observers(tool_name, context, availability):
+    agent_id = context.get("agentId")
+    social = _live_agent_loop_social_perception(agent_id)
+    nearby = social.get("nearbyAgents") if isinstance(social.get("nearbyAgents"), list) else []
+    observers = []
+    seen = {agent_id}
+
+    def add_observer(observer_agent_id, reason, nearby_row=None):
+        observer_agent_id = _resolve_agent_id(observer_agent_id) or str(observer_agent_id or "").strip()
+        if not observer_agent_id or observer_agent_id in seen:
+            return
+        seen.add(observer_agent_id)
+        observers.append({
+            "agentId": observer_agent_id,
+            "reason": reason,
+            "nearby": {k: nearby_row.get(k) for k in ("name", "status", "task", "nearbyReason", "buildingId", "floor") if nearby_row and nearby_row.get(k) is not None} if isinstance(nearby_row, dict) else None,
+        })
+
+    target_agent_id = availability.get("targetAgentId") if isinstance(availability, dict) else None
+    if target_agent_id:
+        target_nearby = next((item for item in nearby if isinstance(item, dict) and item.get("agentId") == target_agent_id), None)
+        add_observer(target_agent_id, "direct-target" if tool_name != "send_message" else "direct-world-message", target_nearby)
+    if tool_name in {"say_to_agent", "speak_to_room", "think_aloud"}:
+        for item in nearby:
+            if isinstance(item, dict):
+                add_observer(item.get("agentId"), "nearby-same-building-floor", item)
+    return observers
+
+
+def _live_agent_in_world_communication_payload(tool_name, context, args, availability):
+    now_iso = _utc_now_iso()
+    agent_id = context.get("agentId")
+    location = context.get("location") if isinstance(context.get("location"), dict) else {}
+    message = str(args.get("message") or args.get("text") or "").strip()
+    if tool_name == "add_memory":
+        message = str(args.get("text") or "").strip()
+    target_agent_id = availability.get("targetAgentId") if isinstance(availability, dict) else None
+    observers = _live_agent_in_world_observers(tool_name, context, availability if isinstance(availability, dict) else {})
+    observer_ids = [observer.get("agentId") for observer in observers if observer.get("agentId")]
+    if tool_name == "speak_to_room":
+        name = "room-speech"
+        scope = "current-room"
+    elif tool_name == "think_aloud":
+        name = "agent-thought"
+        scope = "ambient-thought"
+    elif tool_name == "send_message":
+        name = "in-world-message"
+        scope = "world-message"
+    else:
+        name = "in-world-message"
+        scope = "nearby-agent-speech"
+    conversation_id = str(args.get("conversationId") or "").strip()
+    if not conversation_id:
+        if target_agent_id:
+            conversation_id = f"in-world:{min(agent_id, target_agent_id)}::{max(agent_id, target_agent_id)}"
+        else:
+            conversation_id = f"in-world-room:{location.get('buildingId') or 'world'}:{location.get('floor') or 1}"
+    event_id = _live_agent_memory_entry_id("comm", agent_id)
+    reaction_opportunities = []
+    for observer in observers:
+        observer_id = observer.get("agentId")
+        if not observer_id:
+            continue
+        reaction_opportunities.append({
+            "id": f"react-{event_id}-{re.sub(r'[^A-Za-z0-9_.-]+', '-', observer_id).strip('-') or 'agent'}",
+            "agentId": observer_id,
+            "status": "open",
+            "createdAt": now_iso,
+            "reason": observer.get("reason"),
+            "canReplyInWorld": True,
+            "suggestedTools": ["say_to_agent"] if scope in {"nearby-agent-speech", "current-room", "ambient-thought"} else ["send_message"],
+        })
+    return {
+        "schemaVersion": LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION,
+        "id": event_id,
+        "name": name,
+        "type": "live-agent-in-world-communication",
+        "scope": scope,
+        "at": now_iso,
+        "timestamp": now_iso,
+        "agentId": agent_id,
+        "fromAgentId": agent_id,
+        "from": {"agentId": agent_id, "name": _live_agent_loop_agent_display_name(agent_id)},
+        "targetAgentId": target_agent_id,
+        "to": [{"agentId": target_agent_id, "name": _live_agent_loop_agent_display_name(target_agent_id)}] if target_agent_id else [],
+        "audience": availability.get("audience") if isinstance(availability, dict) and isinstance(availability.get("audience"), dict) else None,
+        "message": message,
+        "text": message,
+        "tone": args.get("tone"),
+        "conversationId": conversation_id,
+        "location": location,
+        "buildingId": location.get("buildingId"),
+        "floor": location.get("floor") or 1,
+        "spatial": tool_name in {"say_to_agent", "speak_to_room", "think_aloud"},
+        "observerIds": observer_ids,
+        "observers": observers,
+        "reactionOpportunities": reaction_opportunities,
+        "source": {
+            "kind": "agent-live-mode",
+            "tool": tool_name,
+            "requestId": (context.get("source") or {}).get("requestId"),
+        },
+        "visibleInWorld": True,
+        "providerRelay": False,
+        "distinctFromProviderRelay": True,
+    }
+
+
+def _live_agent_record_communication_side_effects(saved_event):
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=True)
+        from_agent_id = saved_event.get("fromAgentId")
+        target_agent_id = saved_event.get("targetAgentId")
+        text = _live_agent_loop_clean_plan_text(saved_event.get("text"), limit=500) or ""
+        conversation_memory = {
+            "schemaVersion": LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION,
+            "id": f"memory-{saved_event.get('id')}-sender",
+            "at": saved_event.get("at"),
+            "agentId": from_agent_id,
+            "kind": "conversation",
+            "direction": "sent",
+            "text": f"I said: {text}",
+            "communicationEventId": saved_event.get("id"),
+            "conversationId": saved_event.get("conversationId"),
+            "targetAgentId": target_agent_id,
+        }
+        _live_agent_loop_append_memory_bucket(state, from_agent_id, "conversations", conversation_memory)
+        _live_agent_loop_add_event(
+            state,
+            "in-world-message-emitted",
+            agent_id=from_agent_id,
+            details={
+                "communicationEventId": saved_event.get("id"),
+                "conversationId": saved_event.get("conversationId"),
+                "targetAgentId": target_agent_id,
+                "observerIds": saved_event.get("observerIds") or [],
+                "providerRelay": False,
+            },
+        )
+        for opportunity in saved_event.get("reactionOpportunities") or []:
+            observer_id = opportunity.get("agentId") if isinstance(opportunity, dict) else None
+            if not observer_id:
+                continue
+            direction = "received" if observer_id == target_agent_id else "observed"
+            observed_memory = {
+                "schemaVersion": LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION,
+                "id": f"memory-{saved_event.get('id')}-{observer_id}",
+                "at": saved_event.get("at"),
+                "agentId": observer_id,
+                "kind": "conversation",
+                "direction": direction,
+                "text": f"{from_agent_id} said: {text}",
+                "communicationEventId": saved_event.get("id"),
+                "conversationId": saved_event.get("conversationId"),
+                "fromAgentId": from_agent_id,
+                "reactionOpportunityId": opportunity.get("id"),
+            }
+            _live_agent_loop_append_memory_bucket(state, observer_id, "conversations", observed_memory)
+            _live_agent_loop_add_event(
+                state,
+                "in-world-reaction-opportunity",
+                agent_id=observer_id,
+                details={
+                    "communicationEventId": saved_event.get("id"),
+                    "reactionOpportunityId": opportunity.get("id"),
+                    "fromAgentId": from_agent_id,
+                    "conversationId": saved_event.get("conversationId"),
+                    "suggestedTools": opportunity.get("suggestedTools"),
+                },
+            )
+        relationship = _live_agent_loop_update_relationship_from_communication(state, saved_event)
+        saved_state = save_live_agent_loop_state(state)
+        return {
+            "loopEventsCursor": saved_state.get("eventSequence"),
+            "relationship": relationship,
+        }
+
+
+def _execute_live_agent_communication_tool(tool_name, context, args, availability):
+    event_payload = _live_agent_in_world_communication_payload(tool_name, context, args, availability)
+    saved_events = append_live_agent_in_world_communication_events([event_payload])
+    saved_event = saved_events[0] if saved_events else event_payload
+    side_effects = _live_agent_record_communication_side_effects(saved_event)
+    return {
+        "communicationEvent": saved_event,
+        "sideEffects": side_effects,
+        "reactionOpportunityCount": len(saved_event.get("reactionOpportunities") or []),
+        "storage": "world-meta.json#agentLife.inWorldCommunications",
+        "providerRelay": False,
+    }
+
+
+def _execute_live_agent_memory_tool(tool_name, context, args, availability):
+    del availability
+    now_iso = _utc_now_iso()
+    agent_id = context.get("agentId")
+    text = str(args.get("text") or "").strip()
+    bucket = "diary" if tool_name == "write_diary" else "entries"
+    entry = {
+        "schemaVersion": LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION,
+        "id": _live_agent_memory_entry_id("memory", agent_id),
+        "at": now_iso,
+        "agentId": agent_id,
+        "kind": "diary" if tool_name == "write_diary" else "memory",
+        "text": text,
+        "sourceTool": tool_name,
+        "source": {
+            "kind": "agent-live-mode",
+            "requestId": (context.get("source") or {}).get("requestId"),
+        },
+    }
+    if tool_name == "write_diary":
+        if args.get("mood"):
+            entry["mood"] = str(args.get("mood")).strip()[:80]
+    else:
+        entry["importance"] = args.get("importance") or "normal"
+        entry["tags"] = [str(tag).strip()[:64] for tag in (args.get("tags") or []) if str(tag).strip()]
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=True)
+        _live_agent_loop_append_memory_bucket(
+            state,
+            agent_id,
+            bucket,
+            entry,
+            retention=LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"] if bucket == "diary" else LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+        )
+        if bucket == "diary":
+            _live_agent_loop_append_memory_bucket(state, agent_id, "reflections", {**entry, "actionId": entry["id"]}, retention=LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
+        else:
+            _live_agent_loop_append_memory_bucket(state, agent_id, "observations", {**entry, "actionId": entry["id"]}, retention=LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
+        _live_agent_loop_add_event(
+            state,
+            "memory-updated",
+            agent_id=agent_id,
+            details={
+                "memoryEntryId": entry.get("id"),
+                "bucket": bucket,
+                "sourceTool": tool_name,
+                "storage": "world-meta.json#agentLife.liveModeLoop.agents.<agentId>.memory",
+            },
+        )
+        saved_state = save_live_agent_loop_state(state)
+    return {
+        "memoryEntry": entry,
+        "bucket": bucket,
+        "state": (saved_state.get("agents") or {}).get(agent_id, {}),
+        "storage": "world-meta.json#agentLife.liveModeLoop.agents.<agentId>.memory",
+    }
+
+
+def _execute_live_agent_tool_call(tool, context, args, availability):
+    tool_name = tool.get("name")
+    if tool_name in {"say_to_agent", "speak_to_room", "send_message", "think_aloud"}:
+        return True, _execute_live_agent_communication_tool(tool_name, context, args, availability), 201
+    if tool_name in {"add_memory", "write_diary"}:
+        return True, _execute_live_agent_memory_tool(tool_name, context, args, availability), 201
+    return False, _live_agent_tool_error(
+        "tool_execution_not_enabled",
+        "Live Agent tool execution is currently enabled only for safe in-world communication and memory tools; movement and object use execute through the backend world-action APIs.",
+        tool=tool_name,
+        details={"enabledTools": sorted(LIVE_AGENT_EXECUTABLE_TOOL_NAMES), "dryRunSupported": True, "publicUiEnabled": False},
+    ), 501
+
+
 def get_live_agent_tool_registry(agent_id=None):
     context = None
     if agent_id:
@@ -2560,15 +2905,38 @@ def validate_live_agent_tool_call(payload, *, dry_run=True):
     available, availability, availability_status = _live_agent_tool_check_availability(tool, context, args)
     if not available:
         return False, availability, availability_status
-    if not dry_run:
-        return False, _live_agent_tool_error(
-            "tool_execution_not_enabled",
-            "Live Agent tool execution is not enabled by this foundation; use /api/live-agent-mode/actions/dry-run for contract validation.",
-            tool=tool_name,
-            details={"dryRunSupported": True, "publicUiEnabled": False},
-        ), 501
     now = _utc_now_iso()
     call_id = f"toolcall-{int(time.time() * 1000)}-{context.get('agentId')}-{re.sub(r'[^A-Za-z0-9_.-]+', '-', tool_name).strip('-')}"
+    if not dry_run:
+        executed, execution_result, execution_status = _execute_live_agent_tool_call(tool, context, args, availability)
+        if not executed:
+            return False, execution_result, execution_status
+        return True, {
+            "ok": True,
+            "schemaVersion": LIVE_AGENT_TOOL_RESULT_SCHEMA_VERSION,
+            "dryRun": False,
+            "toolCall": {
+                "schemaVersion": LIVE_AGENT_TOOL_CALL_SCHEMA_VERSION,
+                "id": call_id,
+                "tool": tool_name,
+                "agentId": context.get("agentId"),
+                "status": "completed",
+                "validatedAt": now,
+                "completedAt": _utc_now_iso(),
+                "arguments": args,
+                "result": execution_result,
+            },
+            "contract": _live_agent_tool_contract(tool),
+            "availability": availability,
+            "permission": {"checked": True, "rule": tool.get("permissionRule"), "roles": context.get("roles")},
+            "location": {"checked": True, "rule": tool.get("locationRule"), "current": context.get("location")},
+            "execution": {
+                "enabled": True,
+                "sideEffect": tool.get("sideEffect"),
+                "providerRelay": False if tool_name in {"say_to_agent", "speak_to_room", "send_message", "think_aloud"} else None,
+                "storage": execution_result.get("storage") if isinstance(execution_result, dict) else None,
+            },
+        }, execution_status
     return True, {
         "ok": True,
         "schemaVersion": LIVE_AGENT_TOOL_RESULT_SCHEMA_VERSION,
@@ -2587,9 +2955,10 @@ def validate_live_agent_tool_call(payload, *, dry_run=True):
         "permission": {"checked": True, "rule": tool.get("permissionRule"), "roles": context.get("roles")},
         "location": {"checked": True, "rule": tool.get("locationRule"), "current": context.get("location")},
         "execution": {
-            "enabled": False,
+            "enabled": _live_agent_tool_execution_enabled(tool_name),
             "publicUiEnabled": False,
-            "message": "Registry foundation validates typed tool calls only; execution remains behind later backend simulation phases.",
+            "message": "Communication and memory tools can execute through backend persistence; movement and object-use tools use the dedicated world-action APIs.",
+            "enabledTools": sorted(LIVE_AGENT_EXECUTABLE_TOOL_NAMES),
         },
     }, 200
 
@@ -2956,6 +3325,154 @@ def list_live_agent_animation_events(query=None):
         "events": events[-limit:],
         "nextCursor": store.get("nextSequence", 1) - 1,
         "replay": {"clientRequiredForProgress": False, "sourceOfTruth": "server"},
+    }
+
+
+def default_live_agent_in_world_communications_store():
+    return {
+        "schemaVersion": LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION,
+        "nextSequence": 1,
+        "events": [],
+        "retention": {"maxEvents": 1000},
+        "subscription": {
+            "mode": "poll",
+            "endpoint": "/api/live-agent-mode/in-world-communications",
+            "cursorField": "sequence",
+        },
+        "providerRelay": False,
+    }
+
+
+def get_live_agent_in_world_communications_store(*, persist_migration=False):
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    store = agent_life.get("inWorldCommunications") if isinstance(agent_life.get("inWorldCommunications"), dict) else None
+    changed = store is None
+    if not store:
+        store = default_live_agent_in_world_communications_store()
+    raw_events = store.get("events") if isinstance(store.get("events"), list) else []
+    events = [
+        event
+        for event in raw_events
+        if isinstance(event, dict) and event.get("name") in LIVE_AGENT_IN_WORLD_COMMUNICATION_EVENT_NAMES
+    ]
+    try:
+        next_sequence = int(store.get("nextSequence") or 1)
+    except (TypeError, ValueError):
+        next_sequence = 1
+    if events:
+        next_sequence = max(next_sequence, max(int(event.get("sequence") or 0) for event in events) + 1)
+    next_store = default_live_agent_in_world_communications_store()
+    next_store.update({
+        "nextSequence": next_sequence,
+        "events": events[-int((store.get("retention") or {}).get("maxEvents") or 1000):],
+        "retention": {**next_store["retention"], **(store.get("retention") if isinstance(store.get("retention"), dict) else {})},
+    })
+    if persist_migration and changed:
+        agent_life["inWorldCommunications"] = next_store
+        meta["agentLife"] = agent_life
+        save_world_meta(meta)
+    return next_store
+
+
+def save_live_agent_in_world_communications_store(store):
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    next_store = default_live_agent_in_world_communications_store()
+    if isinstance(store, dict):
+        next_store.update({k: v for k, v in store.items() if k in {"nextSequence", "events", "retention", "subscription", "providerRelay"}})
+    max_events = int((next_store.get("retention") or {}).get("maxEvents") or 1000)
+    next_store["events"] = [
+        event
+        for event in (next_store.get("events") or [])
+        if isinstance(event, dict) and event.get("name") in LIVE_AGENT_IN_WORLD_COMMUNICATION_EVENT_NAMES
+    ][-max_events:]
+    try:
+        next_store["nextSequence"] = int(next_store.get("nextSequence") or 1)
+    except (TypeError, ValueError):
+        next_store["nextSequence"] = 1
+    next_store["providerRelay"] = False
+    agent_life["inWorldCommunications"] = next_store
+    meta["agentLife"] = agent_life
+    save_world_meta(meta)
+    return next_store
+
+
+def append_live_agent_in_world_communication_events(event_payloads):
+    payloads = [
+        event
+        for event in event_payloads
+        if isinstance(event, dict) and event.get("name") in LIVE_AGENT_IN_WORLD_COMMUNICATION_EVENT_NAMES
+    ]
+    if not payloads:
+        return []
+    store = get_live_agent_in_world_communications_store(persist_migration=True)
+    sequence = int(store.get("nextSequence") or 1)
+    next_events = list(store.get("events", []))
+    saved_events = []
+    for payload in payloads:
+        event = {
+            **payload,
+            "schemaVersion": LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION,
+            "sequence": sequence,
+            "cursor": sequence,
+            "providerRelay": False,
+            "distinctFromProviderRelay": True,
+        }
+        sequence += 1
+        next_events.append(event)
+        saved_events.append(event)
+    save_live_agent_in_world_communications_store({**store, "nextSequence": sequence, "events": next_events})
+    return saved_events
+
+
+def list_live_agent_in_world_communications(query=None):
+    query = query if isinstance(query, dict) else {}
+    store = get_live_agent_in_world_communications_store(persist_migration=True)
+    events = list(store.get("events", []))
+    since = (query.get("since") or query.get("after") or [None])[0] if isinstance(query.get("since") or query.get("after"), list) else query.get("since") or query.get("after")
+    try:
+        since = int(since) if since is not None else None
+    except (TypeError, ValueError):
+        since = None
+    if since is not None:
+        events = [event for event in events if int(event.get("sequence") or 0) > since]
+    filters = (
+        ("agentId", "agentId"),
+        ("fromAgentId", "fromAgentId"),
+        ("targetAgentId", "targetAgentId"),
+        ("buildingId", "buildingId"),
+        ("conversationId", "conversationId"),
+        ("name", "name"),
+    )
+    for field, key in filters:
+        value = (query.get(field) or [None])[0] if isinstance(query.get(field), list) else query.get(field)
+        if not value:
+            continue
+        if field == "agentId":
+            events = [
+                event for event in events
+                if event.get("fromAgentId") == value
+                or event.get("targetAgentId") == value
+                or value in (event.get("observerIds") or [])
+            ]
+        else:
+            events = [event for event in events if event.get(key) == value]
+    try:
+        limit = int(((query.get("limit") or [100])[0]) if isinstance(query.get("limit"), list) else query.get("limit") or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 500))
+    return {
+        "ok": True,
+        "schemaVersion": LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION,
+        "subscription": store.get("subscription"),
+        "events": events[-limit:],
+        "nextCursor": store.get("nextSequence", 1) - 1,
+        "storage": {
+            "durableStore": "world-meta.json#agentLife.inWorldCommunications",
+            "providerRelay": False,
+        },
     }
 
 
@@ -4997,6 +5514,9 @@ def _live_agent_loop_normalize_memory(agent_state):
     memory.setdefault("recentActions", [])
     memory.setdefault("observations", [])
     memory.setdefault("reflections", [])
+    memory.setdefault("entries", [])
+    memory.setdefault("diary", [])
+    memory.setdefault("conversations", [])
     memory["recentActions"] = _live_agent_loop_trim_list(
         _live_agent_loop_dedupe_settled_records(
             memory.get("recentActions"),
@@ -5014,6 +5534,18 @@ def _live_agent_loop_normalize_memory(agent_state):
     memory["reflections"] = _live_agent_loop_trim_list(
         _live_agent_loop_dedupe_settled_records(memory.get("reflections"), lambda item: item.get("actionId")),
         LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"],
+    )
+    memory["entries"] = _live_agent_loop_trim_list(
+        _live_agent_loop_dedupe_settled_records(memory.get("entries"), lambda item: item.get("id")),
+        LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+    )
+    memory["diary"] = _live_agent_loop_trim_list(
+        _live_agent_loop_dedupe_settled_records(memory.get("diary"), lambda item: item.get("id")),
+        LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"],
+    )
+    memory["conversations"] = _live_agent_loop_trim_list(
+        _live_agent_loop_dedupe_settled_records(memory.get("conversations"), lambda item: item.get("id")),
+        LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
     )
     agent_state["memory"] = memory
     if not isinstance(agent_state.get("feedbackReports"), list):
@@ -6304,6 +6836,9 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
             "recentActions": _live_agent_loop_trim_list(memory.get("recentActions"), 8),
             "observations": _live_agent_loop_trim_list(memory.get("observations"), 6),
             "reflections": _live_agent_loop_trim_list(memory.get("reflections"), 6),
+            "entries": _live_agent_loop_trim_list(memory.get("entries"), 6),
+            "diary": _live_agent_loop_trim_list(memory.get("diary"), 4),
+            "conversations": _live_agent_loop_trim_list(memory.get("conversations"), 8),
         },
         "world": _live_agent_loop_world_summary(),
     }
@@ -12535,6 +13070,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/live-agent-mode/animation-events":
             return self._send_json(list_live_agent_animation_events(urllib.parse.parse_qs(parsed.query)))
 
+        if path == "/api/live-agent-mode/in-world-communications":
+            return self._send_json(list_live_agent_in_world_communications(urllib.parse.parse_qs(parsed.query)))
+
         if path == "/api/agent-live-loop":
             return self._send_json(get_live_agent_loop_status())
 
@@ -12923,6 +13461,14 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if _demo_feature_locked("agentLiveMode"):
                 return self._send_json(_locked_response("agentLiveMode"), 403)
             ok, result, status = validate_live_agent_tool_call(self._read_body(), dry_run=True)
+            return self._send_json(result, status)
+
+        if path in {"/api/live-agent-mode/tool-calls", "/api/live-agent-mode/tool-calls/execute"}:
+            if _demo_feature_locked("agentLiveMode"):
+                return self._send_json(_locked_response("agentLiveMode"), 403)
+            data = self._read_body()
+            dry_run = bool(data.get("dryRun")) if isinstance(data, dict) else False
+            ok, result, status = validate_live_agent_tool_call(data, dry_run=dry_run)
             return self._send_json(result, status)
 
         if path == "/api/agent-live-loop":

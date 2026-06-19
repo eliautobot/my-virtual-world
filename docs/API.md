@@ -173,6 +173,8 @@ For the planned backend-owned autonomous resident architecture, see [LIVE-AGENT-
 | GET | `/api/live-agent-mode/tools` | Read backend Live Agent tool contracts. |
 | POST | `/api/live-agent-mode/actions/dry-run` | Validate a Live Agent tool call without executing it. |
 | POST | `/api/live-agent-mode/tool-calls/validate` | Alias for dry-run tool-call validation. |
+| POST | `/api/live-agent-mode/tool-calls` | Execute safe Live Agent communication or memory tools, or dry-run when `dryRun` is true. |
+| GET | `/api/live-agent-mode/in-world-communications` | Read persisted in-world communication events, distinct from provider relay messages. |
 | GET | `/api/live-agent-mode/animation-events` | Read backend-emitted movement/object-use replay events for browser clients. |
 | GET | `/api/agent-live-loop` | Inspect backend scheduler state, active turn ownership, pause, kill switch, and recent turn history. |
 | POST | `/api/agent-live-loop` | Update backend scheduler controls such as pause, kill switch, intervals, and per-agent enablement. |
@@ -203,7 +205,9 @@ Minimal action create example:
 
 The server normalizes and validates lifecycle states. See `src/client/js/agent-life-world-action-schema.mjs` for the schema vocabulary.
 
-Backend Live Agent tool contracts cover observe, move, object-use, communication, memory, and build/create proposal categories. Dry-run validation checks typed arguments, agent Live Mode permission, conservative location gates, object permissions, and target availability. Execution remains disabled in this foundation, and the public UI stays behind the existing Coming Soon/feature gate.
+Backend Live Agent tool contracts cover observe, move, object-use, communication, memory, and build/create proposal categories. Dry-run validation checks typed arguments, agent Live Mode permission, conservative location gates, object permissions, and target availability. Safe communication and memory tools persist backend side effects through `/api/live-agent-mode/tool-calls`; movement and object use execute through the backend world-action APIs. The public UI stays behind the existing Coming Soon/feature gate.
+
+In-world communication events are stored under `world-meta.json#agentLife.inWorldCommunications`. They are visible world events with `providerRelay: false`, so they are distinct from `/api/agent-platform-communications/send` provider relay messages. Nearby observers receive durable reaction-opportunity entries in the Live Agent loop event log.
 
 The backend Live Agent loop owns one resident turn at a time, rotates enabled agents round-robin, persists active/recent turns, and records sequenced scheduler events. `worldClientRequired` defaults to `false`, so the scheduler can run without an open browser tab; browsers remain render/replay clients for visible world-action animation. Backend-owned Live Agent world actions move through routing, arrival, object-use, and completion on the server and store replay records under `world-meta.json#agentLife.animationEvents`. Operator pause and kill switch controls stop new turns while preserving the durable log for inspection.
 

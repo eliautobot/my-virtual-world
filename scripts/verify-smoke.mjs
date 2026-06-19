@@ -304,6 +304,86 @@ finally:
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(liveAgentBackendExecutionCheck.status, 0, `Live Agent backend executor check failed\n${liveAgentBackendExecutionCheck.stderr || liveAgentBackendExecutionCheck.stdout}`);
 
+const liveAgentCommunicationMemoryCheck = spawnSync('python3', ['-B', '-c', `
+import importlib.util
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+path = Path("src/server/server.py")
+data_dir = tempfile.mkdtemp(prefix="vw-smoke-communication-memory-")
+os.environ["VW_DATA_DIR"] = data_dir
+try:
+    spec = importlib.util.spec_from_file_location("vw_server", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.get_roster = lambda: [
+        {"id": "adam", "statusKey": "adam", "name": "Adam", "providerKind": "openclaw"},
+        {"id": "beth", "statusKey": "beth", "name": "Beth", "providerKind": "openclaw"},
+        {"id": "cal", "statusKey": "cal", "name": "Cal", "providerKind": "openclaw"},
+    ]
+
+    meta = module.load_world_meta()
+    meta["agentProfiles"] = {
+        "adam": {"agentLiveModeEnabled": True},
+        "beth": {"agentLiveModeEnabled": True},
+        "cal": {"agentLiveModeEnabled": True},
+    }
+    module.save_world_meta(meta)
+    shared_location = {"buildingId": "office-smoke", "floor": 1, "x": 1, "z": 1}
+    module._save_live_agent_simulated_location("adam", shared_location)
+    module._save_live_agent_simulated_location("beth", {**shared_location, "x": 2})
+    module._save_live_agent_simulated_location("cal", {**shared_location, "x": 3})
+
+    ok, result, status = module.validate_live_agent_tool_call({
+        "agentId": "adam",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": "comm-memory-smoke", "roles": ["participant"]},
+        "tool": "say_to_agent",
+        "arguments": {"targetAgentId": "beth", "message": "Lunch sync?", "tone": "friendly"},
+    }, dry_run=False)
+    assert ok, result
+    assert status == 201, status
+    communication = result["toolCall"]["result"]["communicationEvent"]
+    assert communication["providerRelay"] is False, communication
+    assert communication["distinctFromProviderRelay"] is True, communication
+    assert communication["targetAgentId"] == "beth", communication
+    assert {"beth", "cal"} <= set(communication["observerIds"]), communication
+    assert result["toolCall"]["result"]["reactionOpportunityCount"] >= 2, result
+
+    listed = module.list_live_agent_in_world_communications({"agentId": "beth", "limit": "10"})
+    assert any(event.get("id") == communication["id"] for event in listed["events"]), listed
+    assert listed["storage"]["providerRelay"] is False, listed
+
+    ok, memory_result, memory_status = module.validate_live_agent_tool_call({
+        "agentId": "adam",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": "memory-smoke", "roles": ["participant"]},
+        "tool": "add_memory",
+        "arguments": {"text": "Beth prefers quick lunch syncs.", "importance": "high", "tags": ["social", "lunch"]},
+    }, dry_run=False)
+    assert ok, memory_result
+    assert memory_status == 201, memory_status
+
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    adam_memory = state["agents"]["adam"]["memory"]
+    beth_memory = state["agents"]["beth"]["memory"]
+    assert any(item.get("text") == "Beth prefers quick lunch syncs." for item in adam_memory["entries"]), adam_memory
+    assert any(item.get("communicationEventId") == communication["id"] for item in beth_memory["conversations"]), beth_memory
+
+    meta = module.load_world_meta()
+    relationship = meta["agentRelationships"]["adam::beth"]
+    assert relationship["lastCommunicationEventId"] == communication["id"], relationship
+    assert relationship["score"] > 0, relationship
+
+    ok, events_payload, events_status = module.get_live_agent_loop_events(agent_id="beth", limit=20)
+    assert ok and events_status == 200, events_payload
+    assert any(event.get("type") == "in-world-reaction-opportunity" for event in events_payload["events"]), events_payload
+    print("live agent communication and memory ok")
+finally:
+    shutil.rmtree(data_dir, ignore_errors=True)
+`], { cwd: root, encoding: 'utf8' });
+assert.equal(liveAgentCommunicationMemoryCheck.status, 0, `Live Agent communication/memory check failed\n${liveAgentCommunicationMemoryCheck.stderr || liveAgentCommunicationMemoryCheck.stdout}`);
+
 const licensePy = read('src/server/license.py');
 const serverPy = read('src/server/server.py');
 const indexHtml = read('src/client/index.html');
@@ -640,9 +720,16 @@ for (const token of [
   'def _live_agent_tool_schema_errors',
   'LIVE_AGENT_BACKEND_EXECUTION_VERSION = "agent-live-mode-backend-world-action-executor/v1"',
   'LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"',
+  'LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION = "agent-live-mode-in-world-communication/v1"',
+  'LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"',
   'def advance_live_agent_backend_world_action',
   'def list_live_agent_animation_events',
+  'def list_live_agent_in_world_communications',
+  'def _execute_live_agent_communication_tool',
+  'def _execute_live_agent_memory_tool',
   '"/api/live-agent-mode/animation-events"',
+  '"/api/live-agent-mode/in-world-communications"',
+  '"/api/live-agent-mode/tool-calls"',
   '"backendOwnsProgressAndCompletion": True',
   '"worldClientRequiredForProgress": False',
   '"/api/live-agent-mode/tools"',
