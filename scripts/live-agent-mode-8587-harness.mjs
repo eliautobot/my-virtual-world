@@ -570,12 +570,21 @@ async function verifySocialCommunicationAndMemory() {
     tags: ['acceptance', 'autonomy'],
   }, { requestId: '8587-acceptance-add-memory' });
   assert(memory.toolCall?.result?.memoryEntry?.id, 'add_memory should persist a memory entry', memory);
+  assert(memory.toolCall?.result?.streamEntry?.id, 'add_memory should append to the memory stream', memory);
+  assert(memory.toolCall?.result?.reflection?.id, 'add_memory should synthesize a reflection from accumulated stream entries', memory);
 
   const communications = await fetchJson(`/api/live-agent-mode/in-world-communications?agentId=${encodeURIComponent(TEST_AGENT_ID)}&limit=20`);
   assert((communications.events || []).some((event) => event.targetAgentId === PEER_AGENT_ID), 'communication log should include the peer-targeted event', communications);
 
-  console.log(`PASS: social target ${social.action.id}, in-world speech ${speech.toolCall.id}, and memory ${memory.toolCall.result.memoryEntry.id} verified.`);
-  return { socialAction: social.action, speech, memory, communications };
+  const retrieved = await fetchJson(`/api/live-agent-mode/memory/${encodeURIComponent(TEST_AGENT_ID)}?query=${encodeURIComponent('communicate remember acceptance')}&limit=5`);
+  assert(retrieved?.ok === true, 'memory retrieval endpoint should return ok', retrieved);
+  assert((retrieved.results || []).length >= 1, 'memory retrieval should return ranked results', retrieved);
+  assert(typeof retrieved.results[0]?.retrieval?.score === 'number', 'memory retrieval should include deterministic scores', retrieved.results?.[0]);
+  assert(retrieved.memory?.counts?.stream >= 2, 'memory stream should include conversation and memory entries', retrieved.memory?.counts);
+  assert(retrieved.memory?.counts?.reflections > 0, 'memory endpoint should report synthesized reflections', retrieved.memory?.counts);
+
+  console.log(`PASS: social target ${social.action.id}, in-world speech ${speech.toolCall.id}, memory ${memory.toolCall.result.memoryEntry.id}, and reflection ${memory.toolCall.result.reflection.id} verified.`);
+  return { socialAction: social.action, speech, memory, communications, retrieved };
 }
 
 async function verifyOperatorControlsStopTurns() {
@@ -630,6 +639,8 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
   assert(metrics.checklist?.spatialOrWorldCommunication === true, 'metrics checklist should confirm in-world communication', metrics.checklist);
   assert(metrics.checklist?.reactionOpportunitiesCreated === true, 'metrics checklist should confirm reaction opportunities', metrics.checklist);
   assert(metrics.checklist?.memoryUpdated === true, 'metrics checklist should confirm memory updates', metrics.checklist);
+  assert(metrics.metrics?.memory?.stream > 0, 'metrics memory stream count should be positive', metrics.metrics?.memory);
+  assert(metrics.metrics?.memory?.reflections > 0, 'metrics should report at least one memory reflection', metrics.metrics?.memory);
   assert(metrics.checklist?.relationshipsUpdated === true, 'metrics checklist should confirm relationship updates', metrics.checklist);
   assert(metrics.checklist?.providerAdapterReadiness === true, 'metrics checklist should confirm provider adapter readiness', metrics.checklist);
   assert(metrics.checklist?.clawMindModuleContractsReady === true, 'metrics checklist should confirm ClawMind module contracts', metrics.checklist);
@@ -655,6 +666,7 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
     inWorldCommunicationCount: metrics.metrics.inWorldCommunicationCount,
     reactionOpportunityCount: metrics.metrics.reactionOpportunityCount,
     relationshipCount: metrics.metrics.relationshipCount,
+    memory: metrics.metrics.memory,
     providerKindCount: metrics.providerSupport.providerKindCount,
     clawMindContractGaps: metrics.clawMindArchitecture.contractGaps,
     clawMindRuntimeEvidenceGaps: metrics.clawMindArchitecture.runtimeEvidenceGaps,

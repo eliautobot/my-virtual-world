@@ -1396,6 +1396,9 @@ LIVE_AGENT_BACKEND_EXECUTION_VERSION = "agent-live-mode-backend-world-action-exe
 LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"
 LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION = "agent-live-mode-in-world-communication/v1"
 LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"
+LIVE_AGENT_MEMORY_STREAM_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-stream-entry/v1"
+LIVE_AGENT_MEMORY_RETRIEVAL_SCHEMA_VERSION = "agent-live-mode-memory-retrieval/v1"
+LIVE_AGENT_MEMORY_REFLECTION_SCHEMA_VERSION = "agent-live-mode-memory-reflection/v1"
 LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"
 LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"
 LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES = [
@@ -1449,7 +1452,10 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "worldClientRequired": False,
     "eventRetention": 250,
     "memoryRetention": 24,
+    "memoryStreamRetention": 72,
+    "memoryRetrievalLimit": 12,
     "reflectionRetention": 18,
+    "reflectionSynthesisThreshold": 2,
     "feedbackRetention": 24,
     "settledActionRetention": 120,
     "planRetention": 12,
@@ -1971,8 +1977,31 @@ LIVE_AGENT_TOOL_REGISTRY = {
             "required": ["text"],
             "properties": {
                 "text": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "kind": {"type": "string", "enum": ["memory", "fact", "observation"]},
                 "importance": {"type": "string", "enum": ["low", "normal", "high"]},
+                "salience": {"type": "number", "minimum": 0, "maximum": 1},
                 "tags": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+            },
+        },
+    },
+    "search_memory": {
+        "name": "search_memory",
+        "category": "remember",
+        "description": "Retrieve ranked resident memories by relevance, recency, and importance.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-memory",
+        "locationRule": "none",
+        "sideEffect": "none",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["query"],
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": 500},
+                "currentPlan": {"type": "string", "maxLength": 1000},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 25},
+                "tags": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+                "kinds": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 32}},
             },
         },
     },
@@ -2587,7 +2616,7 @@ def _live_agent_tool_check_availability(tool, context, args):
 
     if tool_name in {"observe_world", "list_agents", "list_landmarks", "get_current_location", "think_aloud", "idle"}:
         return True, {"available": True, "reason": None, "location": context.get("location")}, 200
-    if tool_name in {"add_memory", "write_diary"}:
+    if tool_name in {"add_memory", "search_memory", "write_diary"}:
         return True, {"available": True, "reason": None, "memoryScope": "agent", "agentId": context.get("agentId")}, 200
     if tool_name in {"go_to_place", "go_to_coordinates", "go_home"}:
         return _live_agent_tool_check_move_target(tool_name, context, args)
@@ -2602,7 +2631,7 @@ def _live_agent_tool_check_availability(tool, context, args):
     return False, _live_agent_tool_error("tool_not_found", "Unknown Live Agent tool.", tool=tool_name), 404
 
 
-LIVE_AGENT_EXECUTABLE_TOOL_NAMES = {"say_to_agent", "speak_to_room", "send_message", "think_aloud", "add_memory", "write_diary"}
+LIVE_AGENT_EXECUTABLE_TOOL_NAMES = {"say_to_agent", "speak_to_room", "send_message", "think_aloud", "add_memory", "search_memory", "write_diary"}
 
 
 def _live_agent_tool_execution_enabled(tool_name):
@@ -2627,6 +2656,386 @@ def _live_agent_loop_append_memory_bucket(state, agent_id, bucket, entry, *, ret
     memory[bucket] = _live_agent_loop_trim_list(existing, retention or LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
     agent_state["memory"] = memory
     return entry
+
+
+def _live_agent_memory_clean_text(value, limit=2000):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text)[:limit]
+
+
+def _live_agent_memory_clean_tags(tags, *, extra=None):
+    cleaned = []
+    seen = set()
+    for tag in [*(tags or []), *(extra or [])]:
+        text = str(tag or "").strip().lower()
+        text = re.sub(r"\s+", "-", text)[:64]
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    return cleaned[:12]
+
+
+def _live_agent_memory_importance(value, *, fallback="normal"):
+    key = str(value or fallback or "normal").strip().lower()
+    if key in {"critical", "very-high", "very_high"}:
+        return "high", 1.0
+    if key == "high":
+        return "high", 0.85
+    if key in {"low", "minor"}:
+        return "low", 0.25
+    return "normal", 0.55
+
+
+def _live_agent_memory_salience(value, importance_score):
+    if isinstance(value, (int, float)):
+        return round(max(0.0, min(1.0, float(value))), 3)
+    return round(max(0.0, min(1.0, float(importance_score or 0.55))), 3)
+
+
+def _live_agent_memory_kind_for_bucket(bucket, entry=None):
+    kind = str((entry or {}).get("kind") or "").strip().lower()
+    if kind in {"fact", "observation", "conversation", "diary", "reflection", "memory", "action"}:
+        return kind
+    return {
+        "facts": "fact",
+        "observations": "observation",
+        "conversations": "conversation",
+        "diary": "diary",
+        "reflections": "reflection",
+        "recentActions": "action",
+    }.get(bucket, "memory")
+
+
+def _live_agent_memory_source_for_bucket(bucket, entry=None):
+    source = (entry or {}).get("source") if isinstance((entry or {}).get("source"), dict) else {}
+    if source:
+        return _copy_jsonable(source)
+    return {
+        "kind": "agent-live-mode",
+        "bucket": bucket,
+        "sourceId": (entry or {}).get("id") or (entry or {}).get("actionId") or (entry or {}).get("communicationEventId"),
+    }
+
+
+def _live_agent_memory_stream_entry_from_bucket(agent_id, bucket, entry):
+    if not isinstance(entry, dict):
+        return None
+    text = (
+        entry.get("text")
+        or entry.get("message")
+        or entry.get("summary")
+        or entry.get("label")
+        or entry.get("status")
+    )
+    text = _live_agent_memory_clean_text(text, limit=2400)
+    if not text:
+        return None
+    kind = _live_agent_memory_kind_for_bucket(bucket, entry)
+    importance, importance_score = _live_agent_memory_importance(entry.get("importance"), fallback="normal")
+    if kind in {"reflection", "fact"} and "importance" not in entry:
+        importance, importance_score = _live_agent_memory_importance("high")
+    salience = _live_agent_memory_salience(entry.get("salience"), importance_score)
+    tags = _live_agent_memory_clean_tags(entry.get("tags"), extra=[kind, bucket])
+    source_id = entry.get("id") or entry.get("actionId") or entry.get("communicationEventId")
+    return {
+        "schemaVersion": LIVE_AGENT_MEMORY_STREAM_ENTRY_SCHEMA_VERSION,
+        "id": f"stream-{agent_id}-{source_id}" if source_id else _live_agent_memory_entry_id("stream", agent_id),
+        "at": entry.get("at") if _parse_isoish_epoch(entry.get("at")) else _utc_now_iso(),
+        "agentId": agent_id,
+        "kind": kind,
+        "bucket": bucket,
+        "sourceEntryId": source_id,
+        "text": text,
+        "importance": importance,
+        "importanceScore": round(importance_score, 3),
+        "salience": salience,
+        "tags": tags,
+        "source": _live_agent_memory_source_for_bucket(bucket, entry),
+    }
+
+
+def _normalize_live_agent_memory_stream_entry(entry, agent_id=None):
+    if not isinstance(entry, dict):
+        return None
+    resolved_agent_id = str(entry.get("agentId") or agent_id or "").strip()
+    if not resolved_agent_id:
+        return None
+    text = _live_agent_memory_clean_text(entry.get("text"), limit=2400)
+    if not text:
+        return None
+    kind = _live_agent_memory_kind_for_bucket(entry.get("bucket"), entry)
+    importance, importance_score = _live_agent_memory_importance(entry.get("importance"), fallback="normal")
+    if isinstance(entry.get("importanceScore"), (int, float)):
+        importance_score = max(0.0, min(1.0, float(entry.get("importanceScore"))))
+    salience = _live_agent_memory_salience(entry.get("salience"), importance_score)
+    source = entry.get("source") if isinstance(entry.get("source"), dict) else {"kind": "agent-live-mode"}
+    return {
+        "schemaVersion": LIVE_AGENT_MEMORY_STREAM_ENTRY_SCHEMA_VERSION,
+        "id": _live_agent_loop_clean_plan_text(entry.get("id"), limit=180) or _live_agent_memory_entry_id("stream", resolved_agent_id),
+        "sequence": _normalize_int(entry.get("sequence"), 0, minimum=0, maximum=1000000000),
+        "at": entry.get("at") if _parse_isoish_epoch(entry.get("at")) else _utc_now_iso(),
+        "agentId": resolved_agent_id,
+        "kind": kind,
+        "bucket": _live_agent_loop_clean_plan_text(entry.get("bucket"), limit=40) or kind,
+        "sourceEntryId": _live_agent_loop_clean_plan_text(entry.get("sourceEntryId"), limit=180),
+        "text": text,
+        "importance": importance,
+        "importanceScore": round(importance_score, 3),
+        "salience": salience,
+        "tags": _live_agent_memory_clean_tags(entry.get("tags"), extra=[kind]),
+        "source": _copy_jsonable(source),
+    }
+
+
+def _live_agent_memory_seed_stream_from_buckets(agent_id, memory):
+    seeded = []
+    for bucket in ("facts", "entries", "observations", "conversations", "diary", "reflections", "recentActions"):
+        for item in memory.get(bucket) or []:
+            stream_entry = _live_agent_memory_stream_entry_from_bucket(agent_id, bucket, item)
+            if stream_entry:
+                seeded.append(stream_entry)
+    seeded.sort(key=lambda item: (_parse_isoish_epoch(item.get("at")) or 0, item.get("id") or ""))
+    normalized = []
+    seen = set()
+    sequence = 0
+    for entry in seeded:
+        source_key = entry.get("id") or f"{entry.get('bucket')}:{entry.get('sourceEntryId')}"
+        if source_key in seen:
+            continue
+        seen.add(source_key)
+        sequence += 1
+        entry["sequence"] = sequence
+        normalized.append(entry)
+    retention = LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"]
+    memory["streamSequence"] = max(_normalize_int(memory.get("streamSequence"), 0, minimum=0, maximum=1000000000), sequence)
+    return normalized[-retention:]
+
+
+def _live_agent_loop_append_memory_stream_entry(state, agent_id, entry, *, retention=None):
+    if not isinstance(state, dict) or not agent_id or not isinstance(entry, dict):
+        return None
+    agent_state = _live_agent_loop_agent_state(state, agent_id)
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    normalized = _normalize_live_agent_memory_stream_entry({**entry, "agentId": agent_id}, agent_id=agent_id)
+    if not normalized:
+        return None
+    sequence = _normalize_int(memory.get("streamSequence"), 0, minimum=0, maximum=1000000000) + 1
+    memory["streamSequence"] = sequence
+    normalized["sequence"] = sequence
+    existing = []
+    for item in memory.get("stream") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("id") == normalized.get("id"):
+            continue
+        existing.append(item)
+    limit = retention or LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"]
+    memory["stream"] = _live_agent_loop_trim_list([*existing, normalized], limit)
+    agent_state["memory"] = memory
+    return normalized
+
+
+def _live_agent_memory_stream_for_agent(agent_state, agent_id):
+    _live_agent_loop_normalize_memory(agent_state, agent_id=agent_id)
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    return [item for item in (memory.get("stream") or []) if isinstance(item, dict)]
+
+
+def _live_agent_memory_tokens(*values):
+    text = " ".join(str(value or "") for value in values if value is not None).lower()
+    return set(re.findall(r"[a-z0-9][a-z0-9_.-]{1,}", text))
+
+
+def _live_agent_memory_entry_tokens(entry):
+    source = entry.get("source") if isinstance(entry.get("source"), dict) else {}
+    return _live_agent_memory_tokens(
+        entry.get("text"),
+        entry.get("kind"),
+        entry.get("bucket"),
+        " ".join(entry.get("tags") or []),
+        source.get("kind"),
+        source.get("tool"),
+    )
+
+
+def _live_agent_memory_scoring_now_epoch(stream, now_epoch=None):
+    if isinstance(now_epoch, (int, float)):
+        return float(now_epoch)
+    if os.environ.get("_VW_INT"):
+        epochs = [_parse_isoish_epoch(item.get("at")) for item in stream if isinstance(item, dict)]
+        epochs = [epoch for epoch in epochs if epoch]
+        if epochs:
+            return max(epochs)
+    return time.time()
+
+
+def _live_agent_memory_score_entry(entry, query_tokens, *, query_text="", current_plan="", now_epoch=None):
+    entry_tokens = _live_agent_memory_entry_tokens(entry)
+    if query_tokens:
+        overlap = query_tokens.intersection(entry_tokens)
+        relevance = min(1.0, len(overlap) / max(1, len(query_tokens)))
+    else:
+        overlap = set()
+        relevance = 0.35
+    lower_text = str(entry.get("text") or "").lower()
+    lower_query = str(query_text or "").strip().lower()
+    if lower_query and lower_query in lower_text:
+        relevance = min(1.0, relevance + 0.25)
+    tag_overlap = query_tokens.intersection(set(entry.get("tags") or [])) if query_tokens else set()
+    if tag_overlap:
+        relevance = min(1.0, relevance + 0.15)
+    if current_plan and _live_agent_memory_tokens(current_plan).intersection(entry_tokens):
+        relevance = min(1.0, relevance + 0.10)
+    importance = entry.get("importanceScore")
+    if not isinstance(importance, (int, float)):
+        _importance, importance = _live_agent_memory_importance(entry.get("importance"))
+    salience = entry.get("salience") if isinstance(entry.get("salience"), (int, float)) else importance
+    importance_component = max(float(importance or 0), float(salience or 0))
+    entry_epoch = _parse_isoish_epoch(entry.get("at"))
+    if entry_epoch and now_epoch:
+        age_hours = max(0.0, (float(now_epoch) - float(entry_epoch)) / 3600.0)
+        recency = 1.0 / (1.0 + (age_hours / 24.0))
+    else:
+        recency = 0.25
+    score = (0.55 * relevance) + (0.25 * importance_component) + (0.20 * recency)
+    return {
+        "score": round(score, 4),
+        "relevance": round(relevance, 4),
+        "recency": round(recency, 4),
+        "importance": round(importance_component, 4),
+        "matchedTokens": sorted(overlap)[:12],
+    }
+
+
+def _live_agent_memory_retrieve_from_stream(stream, *, query="", current_plan="", tags=None, kinds=None, limit=None, now_epoch=None):
+    query_text = _live_agent_memory_clean_text(query, limit=500)
+    current_plan_text = _live_agent_memory_clean_text(current_plan, limit=1000)
+    query_tokens = _live_agent_memory_tokens(query_text, current_plan_text, " ".join(tags or []), " ".join(kinds or []))
+    tag_filter = set(_live_agent_memory_clean_tags(tags))
+    kind_filter = {str(kind or "").strip().lower() for kind in (kinds or []) if str(kind or "").strip()}
+    limit_value = _normalize_int(limit, LIVE_AGENT_LOOP_DEFAULTS["memoryRetrievalLimit"], minimum=1, maximum=25)
+    now_value = _live_agent_memory_scoring_now_epoch(stream, now_epoch=now_epoch)
+    rows = []
+    for entry in stream:
+        if not isinstance(entry, dict):
+            continue
+        entry_tags = set(entry.get("tags") or [])
+        if tag_filter and not tag_filter.intersection(entry_tags):
+            continue
+        if kind_filter and str(entry.get("kind") or "").strip().lower() not in kind_filter:
+            continue
+        scored = _live_agent_memory_score_entry(entry, query_tokens, query_text=query_text, current_plan=current_plan_text, now_epoch=now_value)
+        rows.append({**_copy_jsonable(entry), "retrieval": scored})
+    rows.sort(key=lambda item: (
+        -float((item.get("retrieval") or {}).get("score") or 0),
+        -(_parse_isoish_epoch(item.get("at")) or 0),
+        str(item.get("id") or ""),
+    ))
+    return rows[:limit_value]
+
+
+def _live_agent_memory_reflection_candidate_entries(memory):
+    state = memory.get("reflectionState") if isinstance(memory.get("reflectionState"), dict) else {}
+    last_sequence = _normalize_int(state.get("lastStreamSequence"), 0, minimum=0, maximum=1000000000)
+    candidates = []
+    for entry in memory.get("stream") or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("kind") == "reflection":
+            continue
+        sequence = _normalize_int(entry.get("sequence"), 0, minimum=0, maximum=1000000000)
+        if sequence <= last_sequence:
+            continue
+        candidates.append(entry)
+    return candidates, state
+
+
+def _live_agent_memory_maybe_synthesize_reflection(state, agent_id, *, reason="memory-stream"):
+    if not isinstance(state, dict) or not agent_id:
+        return None
+    agent_state = _live_agent_loop_agent_state(state, agent_id)
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    candidates, reflection_state = _live_agent_memory_reflection_candidate_entries(memory)
+    if not candidates:
+        return None
+    salience_total = round(sum(float(item.get("salience") or 0) for item in candidates), 3)
+    threshold = _normalize_int(LIVE_AGENT_LOOP_DEFAULTS.get("reflectionSynthesisThreshold"), 2, minimum=1, maximum=12)
+    if len(candidates) < threshold and salience_total < 1.45:
+        return None
+    selected = candidates[-min(5, len(candidates)):]
+    kinds = {}
+    tags = {}
+    for entry in selected:
+        kind = entry.get("kind") or "memory"
+        kinds[kind] = kinds.get(kind, 0) + 1
+        for tag in entry.get("tags") or []:
+            tags[tag] = tags.get(tag, 0) + 1
+    top_kind = sorted(kinds.items(), key=lambda item: (-item[1], item[0]))[0][0]
+    top_tags = [tag for tag, _count in sorted(tags.items(), key=lambda item: (-item[1], item[0]))[:4]]
+    topic = top_tags[0] if top_tags else top_kind
+    snippets = [_live_agent_memory_clean_text(item.get("text"), limit=90) for item in selected[:2]]
+    joined = "; ".join([snippet for snippet in snippets if snippet])
+    text = f"Recent {top_kind} memories suggest {topic} matters."
+    if joined:
+        text = f"{text} Evidence: {joined}."
+    now_iso = _utc_now_iso()
+    reflection_id = _live_agent_memory_entry_id("reflection", agent_id)
+    importance = "high" if salience_total >= 2.1 else "normal"
+    importance_label, importance_score = _live_agent_memory_importance(importance)
+    reflection = {
+        "schemaVersion": LIVE_AGENT_MEMORY_REFLECTION_SCHEMA_VERSION,
+        "id": reflection_id,
+        "at": now_iso,
+        "agentId": agent_id,
+        "kind": "reflection",
+        "beliefType": "experience-summary",
+        "text": text,
+        "importance": importance_label,
+        "importanceScore": round(importance_score, 3),
+        "salience": _live_agent_memory_salience(salience_total / max(1, len(selected)), importance_score),
+        "tags": _live_agent_memory_clean_tags(top_tags, extra=["reflection", "belief", top_kind]),
+        "source": {
+            "kind": "clawmind-reflection",
+            "reason": reason,
+            "synthesizedFromCount": len(selected),
+        },
+        "synthesizedFrom": [item.get("id") for item in selected if item.get("id")],
+        "streamSequenceStart": selected[0].get("sequence"),
+        "streamSequenceEnd": selected[-1].get("sequence"),
+        "actionId": reflection_id,
+    }
+    _live_agent_loop_append_memory_bucket(state, agent_id, "reflections", reflection, retention=LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
+    stream_entry = _live_agent_loop_append_memory_stream_entry(
+        state,
+        agent_id,
+        {**reflection, "bucket": "reflections", "sourceEntryId": reflection_id},
+        retention=LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"],
+    )
+    agent_state = _live_agent_loop_agent_state(state, agent_id)
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    memory["reflectionState"] = {
+        **(reflection_state if isinstance(reflection_state, dict) else {}),
+        "lastReflectionAt": now_iso,
+        "lastReflectionId": reflection_id,
+        "lastStreamSequence": _normalize_int(reflection.get("streamSequenceEnd"), 0, minimum=0, maximum=1000000000),
+        "lastSynthesizedFrom": reflection.get("synthesizedFrom"),
+    }
+    agent_state["memory"] = memory
+    _live_agent_loop_add_event(
+        state,
+        "memory-reflection-created",
+        agent_id=agent_id,
+        details={
+            "reflectionId": reflection_id,
+            "synthesizedFromCount": len(selected),
+            "reason": reason,
+            "streamSequenceEnd": reflection.get("streamSequenceEnd"),
+        },
+    )
+    return {**reflection, "streamEntryId": (stream_entry or {}).get("id")}
 
 
 def _live_agent_loop_update_relationship_from_communication(state, event):
@@ -2798,11 +3207,16 @@ def _live_agent_record_communication_side_effects(saved_event):
             "kind": "conversation",
             "direction": "sent",
             "text": f"I said: {text}",
+            "importance": "normal",
+            "salience": 0.65,
+            "tags": _live_agent_memory_clean_tags(["conversation", "sent", saved_event.get("scope")]),
+            "source": {"kind": "in-world-communication", "tool": (saved_event.get("source") or {}).get("tool"), "requestId": (saved_event.get("source") or {}).get("requestId")},
             "communicationEventId": saved_event.get("id"),
             "conversationId": saved_event.get("conversationId"),
             "targetAgentId": target_agent_id,
         }
         _live_agent_loop_append_memory_bucket(state, from_agent_id, "conversations", conversation_memory)
+        _live_agent_loop_append_memory_stream_entry(state, from_agent_id, {**conversation_memory, "bucket": "conversations", "sourceEntryId": conversation_memory.get("id")})
         _live_agent_loop_add_event(
             state,
             "in-world-message-emitted",
@@ -2828,12 +3242,17 @@ def _live_agent_record_communication_side_effects(saved_event):
                 "kind": "conversation",
                 "direction": direction,
                 "text": f"{from_agent_id} said: {text}",
+                "importance": "normal",
+                "salience": 0.6 if direction == "received" else 0.45,
+                "tags": _live_agent_memory_clean_tags(["conversation", direction, saved_event.get("scope")]),
+                "source": {"kind": "in-world-communication", "tool": (saved_event.get("source") or {}).get("tool"), "requestId": (saved_event.get("source") or {}).get("requestId")},
                 "communicationEventId": saved_event.get("id"),
                 "conversationId": saved_event.get("conversationId"),
                 "fromAgentId": from_agent_id,
                 "reactionOpportunityId": opportunity.get("id"),
             }
             _live_agent_loop_append_memory_bucket(state, observer_id, "conversations", observed_memory)
+            _live_agent_loop_append_memory_stream_entry(state, observer_id, {**observed_memory, "bucket": "conversations", "sourceEntryId": observed_memory.get("id")})
             _live_agent_loop_add_event(
                 state,
                 "in-world-reaction-opportunity",
@@ -2847,6 +3266,9 @@ def _live_agent_record_communication_side_effects(saved_event):
                 },
             )
         relationship = _live_agent_loop_update_relationship_from_communication(state, saved_event)
+        _live_agent_memory_maybe_synthesize_reflection(state, from_agent_id, reason="in-world-communication")
+        for observer_id in saved_event.get("observerIds") or []:
+            _live_agent_memory_maybe_synthesize_reflection(state, observer_id, reason="observed-communication")
         saved_state = save_live_agent_loop_state(state)
         return {
             "loopEventsCursor": saved_state.get("eventSequence"),
@@ -2873,26 +3295,34 @@ def _execute_live_agent_memory_tool(tool_name, context, args, availability):
     now_iso = _utc_now_iso()
     agent_id = context.get("agentId")
     text = str(args.get("text") or "").strip()
-    bucket = "diary" if tool_name == "write_diary" else "entries"
+    requested_kind = str(args.get("kind") or "memory").strip().lower()
+    if requested_kind not in {"memory", "fact", "observation"}:
+        requested_kind = "memory"
+    bucket = "diary" if tool_name == "write_diary" else {"fact": "facts", "observation": "observations"}.get(requested_kind, "entries")
+    importance = args.get("importance") or ("high" if requested_kind == "fact" else "normal")
+    importance_label, importance_score = _live_agent_memory_importance(importance)
+    tags = _live_agent_memory_clean_tags(args.get("tags"), extra=[requested_kind] if tool_name != "write_diary" else ["diary"])
     entry = {
         "schemaVersion": LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION,
         "id": _live_agent_memory_entry_id("memory", agent_id),
         "at": now_iso,
         "agentId": agent_id,
-        "kind": "diary" if tool_name == "write_diary" else "memory",
+        "kind": "diary" if tool_name == "write_diary" else requested_kind,
         "text": text,
+        "importance": importance_label,
+        "importanceScore": round(importance_score, 3),
+        "salience": _live_agent_memory_salience(args.get("salience"), importance_score),
+        "tags": tags,
         "sourceTool": tool_name,
         "source": {
             "kind": "agent-live-mode",
+            "tool": tool_name,
             "requestId": (context.get("source") or {}).get("requestId"),
         },
     }
     if tool_name == "write_diary":
         if args.get("mood"):
             entry["mood"] = str(args.get("mood")).strip()[:80]
-    else:
-        entry["importance"] = args.get("importance") or "normal"
-        entry["tags"] = [str(tag).strip()[:64] for tag in (args.get("tags") or []) if str(tag).strip()]
     with _live_agent_loop_lock:
         state = get_live_agent_loop_state(persist_migration=True)
         _live_agent_loop_append_memory_bucket(
@@ -2902,10 +3332,27 @@ def _execute_live_agent_memory_tool(tool_name, context, args, availability):
             entry,
             retention=LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"] if bucket == "diary" else LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
         )
+        stream_entry = _live_agent_loop_append_memory_stream_entry(
+            state,
+            agent_id,
+            {**entry, "bucket": bucket, "sourceEntryId": entry.get("id")},
+            retention=LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"],
+        )
         if bucket == "diary":
-            _live_agent_loop_append_memory_bucket(state, agent_id, "reflections", {**entry, "actionId": entry["id"]}, retention=LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
-        else:
+            diary_reflection = {
+                **entry,
+                "kind": "reflection",
+                "schemaVersion": LIVE_AGENT_MEMORY_REFLECTION_SCHEMA_VERSION,
+                "beliefType": "diary-reflection",
+                "actionId": entry["id"],
+                "source": {**entry.get("source", {}), "kind": "diary-reflection"},
+                "tags": _live_agent_memory_clean_tags(entry.get("tags"), extra=["reflection", "diary"]),
+            }
+            _live_agent_loop_append_memory_bucket(state, agent_id, "reflections", diary_reflection, retention=LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
+            _live_agent_loop_append_memory_stream_entry(state, agent_id, {**diary_reflection, "bucket": "reflections", "sourceEntryId": diary_reflection.get("id")}, retention=LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"])
+        elif bucket == "entries":
             _live_agent_loop_append_memory_bucket(state, agent_id, "observations", {**entry, "actionId": entry["id"]}, retention=LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
+        synthesized = _live_agent_memory_maybe_synthesize_reflection(state, agent_id, reason=tool_name)
         _live_agent_loop_add_event(
             state,
             "memory-updated",
@@ -2914,6 +3361,8 @@ def _execute_live_agent_memory_tool(tool_name, context, args, availability):
                 "memoryEntryId": entry.get("id"),
                 "bucket": bucket,
                 "sourceTool": tool_name,
+                "streamEntryId": (stream_entry or {}).get("id"),
+                "reflectionId": (synthesized or {}).get("id"),
                 "storage": "world-meta.json#agentLife.liveModeLoop.agents.<agentId>.memory",
             },
         )
@@ -2921,15 +3370,36 @@ def _execute_live_agent_memory_tool(tool_name, context, args, availability):
     return {
         "memoryEntry": entry,
         "bucket": bucket,
+        "streamEntry": stream_entry,
+        "reflection": synthesized,
         "state": (saved_state.get("agents") or {}).get(agent_id, {}),
         "storage": "world-meta.json#agentLife.liveModeLoop.agents.<agentId>.memory",
     }
+
+
+def _execute_live_agent_memory_search_tool(context, args, availability):
+    del availability
+    ok, result, status = get_live_agent_memory(
+        context.get("agentId"),
+        {
+            "query": [args.get("query")],
+            "currentPlan": [args.get("currentPlan")],
+            "limit": [args.get("limit")],
+            "tags": args.get("tags") or [],
+            "kinds": args.get("kinds") or [],
+        },
+    )
+    if not ok:
+        return False, result, status
+    return True, result, 200
 
 
 def _execute_live_agent_tool_call(tool, context, args, availability):
     tool_name = tool.get("name")
     if tool_name in {"say_to_agent", "speak_to_room", "send_message", "think_aloud"}:
         return True, _execute_live_agent_communication_tool(tool_name, context, args, availability), 201
+    if tool_name == "search_memory":
+        return _execute_live_agent_memory_search_tool(context, args, availability)
     if tool_name in {"add_memory", "write_diary"}:
         return True, _execute_live_agent_memory_tool(tool_name, context, args, availability), 201
     return False, _live_agent_tool_error(
@@ -3628,13 +4098,14 @@ def _live_agent_metric_persisted_live_building_count(meta, completed_backend_act
 
 
 def _live_agent_metric_memory_counts(loop_state):
-    counts = {"agentsWithMemory": 0, "entries": 0, "observations": 0, "reflections": 0, "diary": 0, "conversations": 0, "total": 0}
-    for agent_state in (loop_state.get("agents") or {}).values():
+    counts = {"agentsWithMemory": 0, "stream": 0, "entries": 0, "facts": 0, "observations": 0, "reflections": 0, "diary": 0, "conversations": 0, "total": 0}
+    for agent_id, agent_state in (loop_state.get("agents") or {}).items():
         if not isinstance(agent_state, dict):
             continue
+        _live_agent_loop_normalize_memory(agent_state, agent_id=agent_id)
         memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
         agent_total = 0
-        for bucket in ("entries", "observations", "reflections", "diary", "conversations"):
+        for bucket in ("stream", "entries", "facts", "observations", "reflections", "diary", "conversations"):
             size = len([item for item in (memory.get(bucket) or []) if isinstance(item, dict)])
             counts[bucket] += size
             agent_total += size
@@ -3733,12 +4204,12 @@ def _live_agent_clawmind_contract_readiness(memory_counts):
             "measure": "observe_world tool contract plus loop tick timestamps",
         },
         "memory": {
-            "contractReady": "add_memory" in LIVE_AGENT_TOOL_REGISTRY,
-            "measure": "memory bucket counts",
+            "contractReady": "add_memory" in LIVE_AGENT_TOOL_REGISTRY and "search_memory" in LIVE_AGENT_TOOL_REGISTRY,
+            "measure": "bounded memory stream plus retrieval scores",
         },
         "reflection": {
             "contractReady": "reflections" in memory_counts,
-            "measure": "reflection bucket count",
+            "measure": "thresholded reflection synthesis count",
         },
         "planning": {
             "contractReady": True,
@@ -5952,6 +6423,9 @@ def _normalize_live_agent_loop_state(raw):
         state["pausedBy"] = None
     _live_agent_loop_normalize_operator_proposals(state)
     state["clawMindRuntime"] = _normalize_live_agent_clawmind_runtime(state.get("clawMindRuntime"))
+    for agent_id, agent_state in list((state.get("agents") or {}).items()):
+        if isinstance(agent_state, dict):
+            _live_agent_loop_normalize_memory(agent_state, agent_id=agent_id)
     return state
 
 
@@ -6249,7 +6723,7 @@ def _live_agent_loop_clamp_need(value):
     return round(max(0, min(1.25, number)), 3)
 
 
-def _live_agent_loop_normalize_memory(agent_state):
+def _live_agent_loop_normalize_memory(agent_state, agent_id=None):
     if not isinstance(agent_state.get("needs"), dict):
         agent_state["needs"] = dict(LIVE_AGENT_LOOP_NEED_DEFAULTS)
     else:
@@ -6261,8 +6735,11 @@ def _live_agent_loop_normalize_memory(agent_state):
     memory.setdefault("observations", [])
     memory.setdefault("reflections", [])
     memory.setdefault("entries", [])
+    memory.setdefault("facts", [])
     memory.setdefault("diary", [])
     memory.setdefault("conversations", [])
+    memory.setdefault("stream", [])
+    memory["streamSequence"] = _normalize_int(memory.get("streamSequence"), 0, minimum=0, maximum=1000000000)
     memory["recentActions"] = _live_agent_loop_trim_list(
         _live_agent_loop_dedupe_settled_records(
             memory.get("recentActions"),
@@ -6285,6 +6762,10 @@ def _live_agent_loop_normalize_memory(agent_state):
         _live_agent_loop_dedupe_settled_records(memory.get("entries"), lambda item: item.get("id")),
         LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
     )
+    memory["facts"] = _live_agent_loop_trim_list(
+        _live_agent_loop_dedupe_settled_records(memory.get("facts"), lambda item: item.get("id")),
+        LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+    )
     memory["diary"] = _live_agent_loop_trim_list(
         _live_agent_loop_dedupe_settled_records(memory.get("diary"), lambda item: item.get("id")),
         LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"],
@@ -6293,6 +6774,26 @@ def _live_agent_loop_normalize_memory(agent_state):
         _live_agent_loop_dedupe_settled_records(memory.get("conversations"), lambda item: item.get("id")),
         LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
     )
+    normalized_stream = []
+    seen_stream_ids = set()
+    max_sequence = memory["streamSequence"]
+    for item in memory.get("stream") or []:
+        normalized = _normalize_live_agent_memory_stream_entry(item, agent_id=agent_id)
+        if not normalized:
+            continue
+        stream_id = normalized.get("id")
+        if stream_id in seen_stream_ids:
+            continue
+        seen_stream_ids.add(stream_id)
+        max_sequence = max(max_sequence, _normalize_int(normalized.get("sequence"), 0, minimum=0, maximum=1000000000))
+        normalized_stream.append(normalized)
+    if agent_id and not normalized_stream:
+        normalized_stream = _live_agent_memory_seed_stream_from_buckets(agent_id, memory)
+        max_sequence = max(max_sequence, _normalize_int(memory.get("streamSequence"), 0, minimum=0, maximum=1000000000))
+    memory["stream"] = _live_agent_loop_trim_list(normalized_stream, LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"])
+    memory["streamSequence"] = max(max_sequence, _normalize_int(memory.get("streamSequence"), 0, minimum=0, maximum=1000000000))
+    if not isinstance(memory.get("reflectionState"), dict):
+        memory["reflectionState"] = {}
     agent_state["memory"] = memory
     if not isinstance(agent_state.get("feedbackReports"), list):
         agent_state["feedbackReports"] = []
@@ -6333,7 +6834,7 @@ def _live_agent_loop_agent_state(state, agent_id):
         "targetMisses": 0,
         "errors": 0,
     })
-    _live_agent_loop_normalize_memory(row)
+    _live_agent_loop_normalize_memory(row, agent_id=agent_id)
     agents[agent_id] = row
     return row
 
@@ -7567,6 +8068,12 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
     affordances = _live_agent_loop_action_affordances(agent_id, agent_state)
     recent_actions = _live_agent_loop_recent_world_actions(agent_id)
     memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    retrieved_memory = _live_agent_memory_retrieve_from_stream(
+        memory.get("stream") or [],
+        query="needs plan outcome social relationship",
+        current_plan=str(agent_state.get("activePlan") or agent_state.get("lastOutcome") or ""),
+        limit=5,
+    )
     social = _live_agent_loop_social_perception(agent_id)
     perception = {
         "schemaVersion": "agent-live-mode-perception/v1",
@@ -7580,10 +8087,13 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
         "visibleActionContract": _live_agent_visible_action_policy(),
         "social": social,
         "memory": {
+            "stream": _live_agent_loop_trim_list(memory.get("stream"), 8),
+            "retrieved": retrieved_memory,
             "recentActions": _live_agent_loop_trim_list(memory.get("recentActions"), 8),
             "observations": _live_agent_loop_trim_list(memory.get("observations"), 6),
             "reflections": _live_agent_loop_trim_list(memory.get("reflections"), 6),
             "entries": _live_agent_loop_trim_list(memory.get("entries"), 6),
+            "facts": _live_agent_loop_trim_list(memory.get("facts"), 6),
             "diary": _live_agent_loop_trim_list(memory.get("diary"), 4),
             "conversations": _live_agent_loop_trim_list(memory.get("conversations"), 8),
         },
@@ -8021,20 +8531,46 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
         observation_text = f"{observation_text} Target building {target.get('buildingId')} object {target.get('catalogId') or target.get('objectInstanceId')}."
     if social_relationship:
         observation_text = f"{observation_text} Social partner {social_relationship.get('otherAgentId')} relationship score {social_relationship.get('score')}."
-    observation = {"at": recent_entry["at"], "text": observation_text, "actionId": action_id, "status": action_status, "settledActionKey": settled_key}
+    observation = {
+        "schemaVersion": LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION,
+        "id": f"memory-{action_id}-observation",
+        "at": recent_entry["at"],
+        "agentId": agent_id,
+        "kind": "observation",
+        "text": observation_text,
+        "actionId": action_id,
+        "status": action_status,
+        "settledActionKey": settled_key,
+        "importance": "normal",
+        "salience": 0.55 if completed else 0.75,
+        "tags": _live_agent_memory_clean_tags(["observation", action_status, summary.get("loopActionId"), summary.get("actionType")]),
+        "source": {"kind": "world-action-outcome", "actionId": action_id, "loopActionId": summary.get("loopActionId")},
+    }
     memory["observations"] = _live_agent_loop_trim_list([*(memory.get("observations") or []), observation], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
     reflection = {
+        "schemaVersion": LIVE_AGENT_MEMORY_REFLECTION_SCHEMA_VERSION,
+        "id": f"memory-{action_id}-reflection",
         "at": recent_entry["at"],
+        "agentId": agent_id,
+        "kind": "reflection",
+        "beliefType": "action-outcome",
         "text": f"I {('completed' if completed else 'ended')} {label}; next I should balance needs instead of repeating the same object.",
         "actionId": action_id,
         "loopActionId": summary.get("loopActionId"),
         "settledActionKey": settled_key,
+        "importance": "normal",
+        "salience": 0.6 if completed else 0.8,
+        "tags": _live_agent_memory_clean_tags(["reflection", action_status, summary.get("loopActionId"), summary.get("actionType")]),
+        "source": {"kind": "world-action-reflection", "actionId": action_id, "loopActionId": summary.get("loopActionId")},
     }
     if social_relationship:
         reflection["text"] = f"I completed a visible conversation with {social_relationship.get('otherAgentId')}; next I should let that relationship context influence future plans."
         reflection["relationship"] = social_relationship
     memory["reflections"] = _live_agent_loop_trim_list([*(memory.get("reflections") or []), reflection], LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
     agent_state["memory"] = memory
+    _live_agent_loop_append_memory_stream_entry(state, agent_id, {**observation, "bucket": "observations", "sourceEntryId": observation.get("id")})
+    _live_agent_loop_append_memory_stream_entry(state, agent_id, {**reflection, "bucket": "reflections", "sourceEntryId": reflection.get("id")})
+    _live_agent_memory_maybe_synthesize_reflection(state, agent_id, reason="world-action-outcome")
     _live_agent_loop_mark_settled_action(agent_state, action_id, action_status)
     details = {"actionId": action_id, "loopActionId": summary.get("loopActionId"), "status": action_status}
     if completed:
@@ -8260,6 +8796,12 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 )
                 memory_started = _live_agent_clawmind_trace_start()
                 memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+                retrieved_memories = _live_agent_memory_retrieve_from_stream(
+                    memory.get("stream") or [],
+                    query="current plan needs recent outcome relationship",
+                    current_plan=str(agent_state.get("lastDecision") or agent_state.get("lastOutcome") or ""),
+                    limit=4,
+                )
                 _live_agent_clawmind_append_trace(
                     state,
                     "memory",
@@ -8268,13 +8810,16 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     inputs={"perceptionAt": perception.get("at"), "lastOutcome": agent_state.get("lastOutcome")},
                     outputs={
                         "recentActions": len(memory.get("recentActions") or []),
+                        "stream": len(memory.get("stream") or []),
                         "observations": len(memory.get("observations") or []),
                         "reflections": len(memory.get("reflections") or []),
                         "entries": len(memory.get("entries") or []),
+                        "facts": len(memory.get("facts") or []),
                         "diary": len(memory.get("diary") or []),
                         "conversations": len(memory.get("conversations") or []),
+                        "retrieved": [{"id": item.get("id"), "kind": item.get("kind"), "score": (item.get("retrieval") or {}).get("score")} for item in retrieved_memories],
                     },
-                    decisions={"memoryBucketsNormalized": True},
+                    decisions={"memoryBucketsNormalized": True, "retrievalRankedBy": ["relevance", "recency", "importance"], "boundedStream": True},
                 )
                 reflection_started = _live_agent_clawmind_trace_start()
                 reflections = _live_agent_loop_trim_list(memory.get("reflections"), 4)
@@ -8284,8 +8829,8 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     turn,
                     reflection_started,
                     inputs={"recentObservationCount": len(memory.get("observations") or []), "recentActionCount": len(memory.get("recentActions") or [])},
-                    outputs={"reflectionCount": len(memory.get("reflections") or []), "recentReflections": reflections},
-                    decisions={"usesSettledActionReflection": True, "hasPriorReflection": bool(reflections)},
+                    outputs={"reflectionCount": len(memory.get("reflections") or []), "recentReflections": reflections, "reflectionState": memory.get("reflectionState") if isinstance(memory.get("reflectionState"), dict) else {}},
+                    decisions={"usesSettledActionReflection": True, "usesThresholdedSynthesis": True, "hasPriorReflection": bool(reflections)},
                 )
                 social_started = _live_agent_clawmind_trace_start()
                 social = perception.get("social") if isinstance(perception.get("social"), dict) else {}
@@ -8621,6 +9166,93 @@ def get_live_agent_loop_events(agent_id=None, limit=None, since=None):
                 "recent": (scheduler.get("turnHistory") or [])[-min(limit_value, LIVE_AGENT_LOOP_DEFAULTS["turnRetention"]):],
             },
             "policy": {"readOnly": True, "durableStore": "world-meta.json#agentLife.liveModeLoop.events"},
+        }, 200
+
+
+def _query_param_first(query_params, *names, default=None):
+    if not isinstance(query_params, dict):
+        return default
+    for name in names:
+        values = query_params.get(name)
+        if isinstance(values, list) and values:
+            value = values[0]
+        else:
+            value = values
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _query_param_list(query_params, *names):
+    values = []
+    if not isinstance(query_params, dict):
+        return values
+    for name in names:
+        raw = query_params.get(name)
+        if raw is None:
+            continue
+        raw_values = raw if isinstance(raw, list) else [raw]
+        for value in raw_values:
+            if isinstance(value, list):
+                values.extend([str(item) for item in value if str(item or "").strip()])
+                continue
+            for part in str(value or "").split(","):
+                if part.strip():
+                    values.append(part.strip())
+    return values
+
+
+def get_live_agent_memory(agent_id, query_params=None):
+    with _live_agent_loop_lock:
+        resolved_agent_id = _resolve_agent_id(agent_id)
+        state = get_live_agent_loop_state(persist_migration=True)
+        if not resolved_agent_id and isinstance((state.get("agents") or {}).get(str(agent_id or "")), dict):
+            resolved_agent_id = str(agent_id)
+        if not resolved_agent_id:
+            return False, _api_error("agent_not_found", "agentId must reference an existing live-mode-capable agent or memory owner.", details={"agentId": agent_id}), 404
+        agent_state = _live_agent_loop_agent_state(state, resolved_agent_id)
+        stream = _live_agent_memory_stream_for_agent(agent_state, resolved_agent_id)
+        query = _query_param_first(query_params, "query", "q", default="")
+        current_plan = _query_param_first(query_params, "currentPlan", "plan", "current_plan", default="")
+        limit = _query_param_first(query_params, "limit", default=LIVE_AGENT_LOOP_DEFAULTS["memoryRetrievalLimit"])
+        tags = _query_param_list(query_params, "tags", "tag")
+        kinds = _query_param_list(query_params, "kinds", "kind")
+        results = _live_agent_memory_retrieve_from_stream(
+            stream,
+            query=query,
+            current_plan=current_plan,
+            tags=tags,
+            kinds=kinds,
+            limit=limit,
+        )
+        memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+        bucket_counts = {
+            bucket: len([item for item in (memory.get(bucket) or []) if isinstance(item, dict)])
+            for bucket in ("stream", "entries", "facts", "observations", "conversations", "diary", "reflections", "recentActions")
+        }
+        saved = save_live_agent_loop_state(state)
+        return True, {
+            "ok": True,
+            "schemaVersion": LIVE_AGENT_MEMORY_RETRIEVAL_SCHEMA_VERSION,
+            "agentId": resolved_agent_id,
+            "query": _live_agent_memory_clean_text(query, limit=500),
+            "currentPlan": _live_agent_memory_clean_text(current_plan, limit=1000),
+            "filters": {"tags": _live_agent_memory_clean_tags(tags), "kinds": [str(kind).strip().lower() for kind in kinds if str(kind).strip()]},
+            "results": results,
+            "memory": {
+                "counts": bucket_counts,
+                "recentStream": stream[-min(len(stream), LIVE_AGENT_LOOP_DEFAULTS["memoryRetrievalLimit"]):],
+                "reflectionState": memory.get("reflectionState") if isinstance(memory.get("reflectionState"), dict) else {},
+            },
+            "caps": {
+                "stream": LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"],
+                "memoryBucket": LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+                "reflections": LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"],
+                "retrievalLimit": 25,
+            },
+            "storage": "world-meta.json#agentLife.liveModeLoop.agents.<agentId>.memory",
+            "policy": {"readOnly": True, "bounded": True, "deterministicInTestMode": bool(os.environ.get("_VW_INT"))},
+            "state": (saved.get("agents") or {}).get(resolved_agent_id, {}),
         }, 200
 
 
@@ -14086,6 +14718,11 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/live-agent-mode/in-world-communications":
             return self._send_json(list_live_agent_in_world_communications(urllib.parse.parse_qs(parsed.query)))
+
+        if path.startswith("/api/live-agent-mode/memory/"):
+            agent_id = urllib.parse.unquote(path[len("/api/live-agent-mode/memory/"):].strip("/"))
+            ok, result, status = get_live_agent_memory(agent_id, urllib.parse.parse_qs(parsed.query))
+            return self._send_json(result, status)
 
         if path == "/api/live-agent-mode/metrics":
             return self._send_json(get_live_agent_mode_autonomy_metrics())
