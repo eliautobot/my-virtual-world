@@ -900,6 +900,12 @@ async function verifyFailureInjectionReplanning() {
   assert(metrics.metrics?.failedExpectationCount >= 1, 'metrics should count failed expectations', metrics.metrics);
   assert(metrics.metrics?.replanCount >= 1, 'metrics should count replans', metrics.metrics);
   assert(metrics.metrics?.successfulRecoveryCount >= 1, 'metrics should count successful recoveries', metrics.metrics);
+  assert(metrics.metrics?.outcomeAwareness?.expectedOutcomeCount >= 2, 'metrics should record expected outcomes for created backend actions', metrics.metrics?.outcomeAwareness);
+  assert(metrics.metrics?.outcomeAwareness?.observedOutcomeCount >= 1, 'metrics should record observed outcomes for settled backend actions', metrics.metrics?.outcomeAwareness);
+  assert(metrics.metrics?.outcomeAwareness?.mismatchCount >= 1, 'metrics should record expected-vs-observed mismatches', metrics.metrics?.outcomeAwareness);
+  assert(metrics.metrics?.outcomeAwareness?.recoveryCount >= 1, 'metrics should record outcome recovery count', metrics.metrics?.outcomeAwareness);
+  assert(metrics.metrics?.outcomeAwareness?.unresolvedMismatchCount === 0, 'recovered mismatch should not remain unresolved', metrics.metrics?.outcomeAwareness);
+  assert(typeof metrics.metrics?.expectedObservedSuccessRate === 'number', 'metrics should report expected-vs-observed success rate', metrics.metrics);
   assert(metrics.metrics?.planner?.turnsWithPlanningRecordCount >= 2, 'metrics should count turn planning records', metrics.metrics?.planner);
   assert(metrics.metrics?.planner?.bounds?.maxActionsPerTick === 1, 'metrics should report max actions per tick bound', metrics.metrics?.planner);
   assert(metrics.metrics?.planner?.bounds?.maxToolCallsPerTurn === 1, 'metrics should report max tool calls per turn bound', metrics.metrics?.planner);
@@ -965,6 +971,11 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
   assert(typeof metrics.metrics?.replanCount === 'number' && metrics.metrics.replanCount >= 1, 'metrics should report replan count', metrics.metrics);
   assert(typeof metrics.metrics?.failedExpectationCount === 'number' && metrics.metrics.failedExpectationCount >= 1, 'metrics should report failed expectation count', metrics.metrics);
   assert(typeof metrics.metrics?.successfulRecoveryCount === 'number' && metrics.metrics.successfulRecoveryCount >= 1, 'metrics should report successful recovery count', metrics.metrics);
+  assert(typeof metrics.metrics?.expectedObservedSuccessRate === 'number', 'metrics should report expected-vs-observed success rate', metrics.metrics);
+  assert(typeof metrics.metrics?.recoveryCount === 'number' && metrics.metrics.recoveryCount >= 1, 'metrics should report recovery count', metrics.metrics);
+  assert(typeof metrics.metrics?.unresolvedMismatchCount === 'number', 'metrics should report unresolved mismatch count', metrics.metrics);
+  assert(typeof metrics.metrics?.escalationCount === 'number', 'metrics should report escalation count', metrics.metrics);
+  assert(metrics.checklist?.outcomeAwarenessRecordsPresent === true, 'metrics checklist should confirm outcome awareness records', metrics.checklist);
   assert(metrics.metrics?.planner?.bounds?.maxActionsPerTick >= 1, 'planner metrics should report max actions per tick bound', metrics.metrics?.planner);
   assert(metrics.metrics?.planner?.bounds?.maxToolCallsPerTurn >= 1, 'planner metrics should report max tool calls per turn bound', metrics.metrics?.planner);
   assert(metrics.metrics?.planner?.bounds?.perAgentCooldownEnforced === true, 'planner metrics should report per-agent cooldown enforcement', metrics.metrics?.planner);
