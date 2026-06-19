@@ -1399,6 +1399,8 @@ LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"
 LIVE_AGENT_MEMORY_STREAM_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-stream-entry/v1"
 LIVE_AGENT_MEMORY_RETRIEVAL_SCHEMA_VERSION = "agent-live-mode-memory-retrieval/v1"
 LIVE_AGENT_MEMORY_REFLECTION_SCHEMA_VERSION = "agent-live-mode-memory-reflection/v1"
+LIVE_AGENT_EXPECTED_OUTCOME_SCHEMA_VERSION = "agent-live-mode-expected-outcome/v1"
+LIVE_AGENT_FAILED_EXPECTATION_SCHEMA_VERSION = "agent-live-mode-failed-expectation/v1"
 LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"
 LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"
 LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES = [
@@ -1449,6 +1451,7 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "minActionIntervalSec": 120,
     "clientActiveTtlSec": 45,
     "maxActionsPerTick": 1,
+    "maxToolCallsPerTurn": 1,
     "worldClientRequired": False,
     "eventRetention": 250,
     "memoryRetention": 24,
@@ -1460,6 +1463,8 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "settledActionRetention": 120,
     "planRetention": 12,
     "planMaxRetries": 2,
+    "goalRetention": 12,
+    "candidateActionRetention": 12,
     "turnRetention": 80,
     "clawMindRuntimeTraceRetention": 240,
     "turnTimeoutSec": 240,
@@ -4343,6 +4348,46 @@ def get_live_agent_mode_autonomy_metrics():
     turns = scheduler.get("turnHistory") if isinstance(scheduler.get("turnHistory"), list) else []
     completed_turns = [turn for turn in turns if isinstance(turn, dict) and turn.get("status") == "completed"]
     failed_turns = [turn for turn in turns if isinstance(turn, dict) and turn.get("status") == "failed"]
+    state_agents = loop_state.get("agents") if isinstance(loop_state.get("agents"), dict) else {}
+    planner_records = []
+    for planner_agent_id, planner_agent_state in state_agents.items():
+        if not isinstance(planner_agent_state, dict):
+            continue
+        seen_plan_ids = set()
+        active_plan = _live_agent_loop_normalize_plan(planner_agent_state.get("activePlan"))
+        for candidate_plan in [active_plan, *(planner_agent_state.get("plans") or [])]:
+            plan = _live_agent_loop_normalize_plan(candidate_plan)
+            if not plan or plan.get("id") in seen_plan_ids:
+                continue
+            seen_plan_ids.add(plan.get("id"))
+            planner_records.append({"agentId": planner_agent_id, **plan})
+    state_stats = loop_state.get("stats") if isinstance(loop_state.get("stats"), dict) else {}
+    failed_expectation_events = [
+        event for event in (loop_state.get("events") or [])
+        if isinstance(event, dict) and event.get("type") == "plan-expectation-mismatch"
+    ]
+    recovery_events = [
+        event for event in (loop_state.get("events") or [])
+        if isinstance(event, dict) and event.get("type") == "plan-recovery-completed"
+    ]
+    planner_metrics = {
+        "planCount": len(planner_records),
+        "activePlanCount": len([plan for plan in planner_records if _live_agent_loop_plan_is_active(plan)]),
+        "replanCount": max(_normalize_int(state_stats.get("replans"), 0, minimum=0, maximum=1000000000), len([plan for plan in planner_records if plan.get("replanOfPlanId")])),
+        "failedExpectationCount": max(_normalize_int(state_stats.get("failedExpectations"), 0, minimum=0, maximum=1000000000), len(failed_expectation_events)),
+        "successfulRecoveryCount": max(_normalize_int(state_stats.get("successfulRecoveries"), 0, minimum=0, maximum=1000000000), len(recovery_events)),
+        "turnsWithPlanningRecordCount": len([turn for turn in turns if isinstance(turn, dict) and isinstance(turn.get("activeGoal"), dict) and isinstance(turn.get("selectedPlanStep"), dict) and isinstance(turn.get("finalActionDecision"), dict)]),
+        "candidateActionRecordCount": sum(len(turn.get("candidateActionsConsidered") or []) for turn in turns if isinstance(turn, dict)),
+        "bounds": {
+            "maxToolCallsPerTurn": _normalize_int(loop_state.get("maxToolCallsPerTurn"), LIVE_AGENT_LOOP_DEFAULTS["maxToolCallsPerTurn"], minimum=1, maximum=5),
+            "modelToolCallsUsedPerTurn": 0,
+            "maxActionsPerTick": _normalize_int(loop_state.get("maxActionsPerTick"), LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"], minimum=1, maximum=5),
+            "minActionIntervalSec": _normalize_int(loop_state.get("minActionIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"], minimum=30, maximum=3600),
+            "candidateActionRetention": LIVE_AGENT_LOOP_DEFAULTS["candidateActionRetention"],
+            "planRetentionPerAgent": LIVE_AGENT_LOOP_DEFAULTS["planRetention"],
+            "perAgentCooldownEnforced": True,
+        },
+    }
     memory_counts = _live_agent_metric_memory_counts(loop_state)
     pause = _live_agent_loop_pause_status(loop_state)
     kill_switch = _live_agent_loop_kill_switch_status(loop_state)
@@ -4371,6 +4416,8 @@ def get_live_agent_mode_autonomy_metrics():
         "providerAdapterReadiness": provider_support.get("checklist", {}).get("allProviderKindsHaveCoreAdapter") is True,
         "clawMindModuleContractsReady": clawmind_architecture.get("checklist", {}).get("allModuleContractsReady") is True,
         "lightweightMetricsOptimized": provider_support.get("optimization", {}).get("modelCallsDuringMetrics") == 0 and clawmind_architecture.get("optimization", {}).get("heavyWorldScan") is False,
+        "plannerMetricsPresent": all(key in planner_metrics for key in ("planCount", "replanCount", "failedExpectationCount", "successfulRecoveryCount")),
+        "turnPlanningRecordsPresent": planner_metrics["turnsWithPlanningRecordCount"] > 0 if turns else True,
     }
     return {
         "ok": True,
@@ -4406,6 +4453,11 @@ def get_live_agent_mode_autonomy_metrics():
             "operatorProposalCount": len(loop_state.get("operatorProposals") or []),
             "liveAgentBuildingCount": live_agent_building_count,
             "liveAgentBuildEffectActionCount": len(live_agent_build_actions),
+            "planCount": planner_metrics["planCount"],
+            "replanCount": planner_metrics["replanCount"],
+            "failedExpectationCount": planner_metrics["failedExpectationCount"],
+            "successfulRecoveryCount": planner_metrics["successfulRecoveryCount"],
+            "planner": planner_metrics,
         },
         "providerSupport": provider_support,
         "clawMindArchitecture": clawmind_architecture,
@@ -6144,6 +6196,7 @@ def default_live_agent_loop_state():
         "minActionIntervalSec": LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"],
         "clientActiveTtlSec": LIVE_AGENT_LOOP_DEFAULTS["clientActiveTtlSec"],
         "maxActionsPerTick": LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"],
+        "maxToolCallsPerTurn": LIVE_AGENT_LOOP_DEFAULTS["maxToolCallsPerTurn"],
         "worldClientRequired": LIVE_AGENT_LOOP_DEFAULTS["worldClientRequired"],
         "turnTimeoutSec": LIVE_AGENT_LOOP_DEFAULTS["turnTimeoutSec"],
         "turnRetryBackoffSec": LIVE_AGENT_LOOP_DEFAULTS["turnRetryBackoffSec"],
@@ -6152,6 +6205,7 @@ def default_live_agent_loop_state():
         "events": [],
         "eventSequence": 0,
         "scheduler": {"lastAgentId": None, "turnSequence": 0, "activeTurn": None, "turnHistory": []},
+        "failureInjection": None,
         "clawMindRuntime": {
             "schemaVersion": LIVE_AGENT_CLAWMIND_RUNTIME_TRACE_VERSION,
             "moduleOrder": list(LIVE_AGENT_CLAWMIND_MODULES),
@@ -6160,7 +6214,7 @@ def default_live_agent_loop_state():
             "traces": [],
             "moduleStats": {},
         },
-        "stats": {"ticks": 0, "actionsCreated": 0, "dryRuns": 0, "errors": 0},
+        "stats": {"ticks": 0, "actionsCreated": 0, "dryRuns": 0, "errors": 0, "plans": 0, "replans": 0, "failedExpectations": 0, "successfulRecoveries": 0},
     }
 
 
@@ -6221,9 +6275,15 @@ def _live_agent_loop_normalize_turn_record(turn):
         cleaned = _live_agent_loop_clean_plan_text(turn.get(key), limit=limit)
         if cleaned:
             normalized[key] = cleaned
-    for key in ("decision", "outcome", "error", "details"):
+    for key in ("activeGoal", "selectedPlanStep", "finalActionDecision", "decision", "outcome", "error", "details"):
         if isinstance(turn.get(key), dict):
             normalized[key] = _copy_jsonable(turn.get(key))
+    if isinstance(turn.get("candidateActionsConsidered"), list):
+        normalized["candidateActionsConsidered"] = [
+            _copy_jsonable(item)
+            for item in turn.get("candidateActionsConsidered")[:LIVE_AGENT_LOOP_DEFAULTS["candidateActionRetention"]]
+            if isinstance(item, dict)
+        ]
     if isinstance(turn.get("durationSec"), (int, float)):
         normalized["durationSec"] = round(max(0, float(turn["durationSec"])), 3)
     return normalized
@@ -6396,6 +6456,7 @@ def _normalize_live_agent_loop_state(raw):
         state["minActionIntervalSec"] = _normalize_int(raw.get("minActionIntervalSec"), state["minActionIntervalSec"], minimum=30, maximum=3600)
         state["clientActiveTtlSec"] = _normalize_int(raw.get("clientActiveTtlSec"), state["clientActiveTtlSec"], minimum=10, maximum=300)
         state["maxActionsPerTick"] = _normalize_int(raw.get("maxActionsPerTick"), state["maxActionsPerTick"], minimum=1, maximum=5)
+        state["maxToolCallsPerTurn"] = _normalize_int(raw.get("maxToolCallsPerTurn"), state["maxToolCallsPerTurn"], minimum=1, maximum=5)
         state["turnTimeoutSec"] = _normalize_int(raw.get("turnTimeoutSec"), state["turnTimeoutSec"], minimum=30, maximum=3600)
         state["turnRetryBackoffSec"] = _normalize_int(raw.get("turnRetryBackoffSec"), state["turnRetryBackoffSec"], minimum=5, maximum=1800)
         state["maxTurnRetries"] = _normalize_int(raw.get("maxTurnRetries"), state["maxTurnRetries"], minimum=0, maximum=10)
@@ -6411,6 +6472,8 @@ def _normalize_live_agent_loop_state(raw):
             state["events"] = [event for event in raw["events"] if isinstance(event, dict)][-LIVE_AGENT_LOOP_DEFAULTS["eventRetention"]:]
         if isinstance(raw.get("operatorProposals"), list):
             state["operatorProposals"] = [proposal for proposal in raw["operatorProposals"] if isinstance(proposal, dict)][-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
+        if os.environ.get("_VW_INT") and isinstance(raw.get("failureInjection"), dict):
+            state["failureInjection"] = _copy_jsonable(raw.get("failureInjection"))
         if isinstance(raw.get("stats"), dict):
             state["stats"].update({k: v for k, v in raw["stats"].items() if isinstance(v, (int, float))})
     state["schemaVersion"] = LIVE_AGENT_LOOP_SCHEMA_VERSION
@@ -6802,6 +6865,17 @@ def _live_agent_loop_normalize_memory(agent_state, agent_id=None):
             _live_agent_loop_dedupe_settled_records(agent_state.get("feedbackReports"), _live_agent_loop_feedback_dedupe_key),
             LIVE_AGENT_LOOP_DEFAULTS["feedbackRetention"],
         )
+    active_goal = _live_agent_loop_compact_goal(agent_state.get("activeGoal"))
+    if active_goal:
+        agent_state["activeGoal"] = active_goal
+    elif "activeGoal" in agent_state:
+        agent_state.pop("activeGoal", None)
+    goal_history = []
+    for goal in agent_state.get("goalHistory") or []:
+        compact = _live_agent_loop_compact_goal(goal)
+        if compact:
+            goal_history.append(compact)
+    agent_state["goalHistory"] = goal_history[-LIVE_AGENT_LOOP_DEFAULTS["goalRetention"]:]
     retained_keys = sorted(_live_agent_loop_existing_settled_keys(agent_state))
     agent_state["settledActionKeys"] = retained_keys[-LIVE_AGENT_LOOP_DEFAULTS["settledActionRetention"]:]
     normalized_plans = []
@@ -6818,6 +6892,8 @@ def _live_agent_loop_normalize_memory(agent_state, agent_id=None):
         agent_state["activePlan"] = active_plan
     elif "activePlan" in agent_state:
         agent_state.pop("activePlan", None)
+    if isinstance(agent_state.get("lastFailedExpectation"), dict):
+        agent_state["lastFailedExpectation"] = _copy_jsonable(agent_state["lastFailedExpectation"])
     return agent_state
 
 
@@ -6833,6 +6909,10 @@ def _live_agent_loop_agent_state(state, agent_id):
         "skippedNoClient": 0,
         "targetMisses": 0,
         "errors": 0,
+        "plans": 0,
+        "replans": 0,
+        "failedExpectations": 0,
+        "successfulRecoveries": 0,
     })
     _live_agent_loop_normalize_memory(row, agent_id=agent_id)
     agents[agent_id] = row
@@ -7055,10 +7135,15 @@ def _live_agent_loop_normalize_plan(plan):
         "retries": _normalize_int(plan.get("retries"), 0, minimum=0, maximum=20),
         "maxRetries": _normalize_int(plan.get("maxRetries"), LIVE_AGENT_LOOP_DEFAULTS["planMaxRetries"], minimum=0, maximum=5),
     }
-    for key, limit in (("agentId", 120), ("loopActionId", 120), ("actionType", 120), ("need", 80), ("lastActionId", 160), ("failureReason", 240), ("operatorSummary", 500)):
+    for key, limit in (("agentId", 120), ("loopActionId", 120), ("actionType", 120), ("need", 80), ("lastActionId", 160), ("failureReason", 240), ("operatorSummary", 500), ("replanOfPlanId", 160), ("replanForActionId", 160), ("replanReason", 240)):
         cleaned = _live_agent_loop_clean_plan_text(plan.get(key), limit=limit)
         if cleaned:
             normalized[key] = cleaned
+    for key in ("activeGoal", "expectedOutcome", "failedExpectation", "recovery"):
+        if isinstance(plan.get(key), dict):
+            normalized[key] = _copy_jsonable(plan.get(key))
+    if isinstance(plan.get("candidateActionIds"), list):
+        normalized["candidateActionIds"] = [str(item)[:120] for item in plan.get("candidateActionIds") if item]
     for key in ("startedAt", "completedAt", "failedAt", "cancelledAt"):
         if _parse_isoish_epoch(plan.get(key)):
             normalized[key] = plan.get(key)
@@ -7178,6 +7263,228 @@ def _live_agent_loop_add_feedback(state, agent_id, level, message, details=None)
     agent_state["feedbackReports"] = reports
     _live_agent_loop_add_event(state, "feedback-report", agent_id=agent_id, details={"level": report["level"], "message": report["message"], **({"actionId": details.get("actionId")} if isinstance(details, dict) and details.get("actionId") else {})})
     return report
+
+
+def _live_agent_loop_compact_goal(goal):
+    if not isinstance(goal, dict):
+        return None
+    compact = {
+        "id": _live_agent_loop_clean_plan_text(goal.get("id"), limit=160),
+        "kind": _live_agent_loop_clean_plan_text(goal.get("kind"), limit=80),
+        "priority": goal.get("priority"),
+        "reason": _live_agent_loop_clean_plan_text(goal.get("reason"), limit=260),
+    }
+    for key, limit in (("need", 80), ("planId", 140), ("loopActionId", 120), ("failedLoopActionId", 120)):
+        cleaned = _live_agent_loop_clean_plan_text(goal.get(key), limit=limit)
+        if cleaned:
+            compact[key] = cleaned
+    return {key: value for key, value in compact.items() if value is not None}
+
+
+def _live_agent_loop_active_goal_from_decision(decision):
+    goal_frame = decision.get("goalFrame") if isinstance(decision, dict) and isinstance(decision.get("goalFrame"), dict) else {}
+    goals = [goal for goal in (goal_frame.get("goals") or []) if isinstance(goal, dict)]
+    if not goals:
+        return None
+    selected_id = decision.get("selectedActionId") if isinstance(decision, dict) else None
+    replan_goal = next((goal for goal in goals if goal.get("kind") == "replan" and selected_id and goal.get("failedLoopActionId") != selected_id), None)
+    if replan_goal:
+        return _live_agent_loop_compact_goal(replan_goal)
+    selected_goal = next((goal for goal in goals if selected_id and goal.get("loopActionId") == selected_id), None)
+    return _live_agent_loop_compact_goal(selected_goal or goals[0])
+
+
+def _live_agent_loop_compact_candidate_actions(decision):
+    candidates = []
+    for candidate in (decision.get("candidates") if isinstance(decision, dict) else []) or []:
+        if not isinstance(candidate, dict):
+            continue
+        row = {
+            "id": candidate.get("id"),
+            "label": candidate.get("label"),
+            "actionType": candidate.get("actionType"),
+            "capabilityTag": candidate.get("capabilityTag"),
+            "need": candidate.get("need"),
+            "available": bool(candidate.get("available")),
+            "decision": candidate.get("decision"),
+            "score": candidate.get("score"),
+            "reason": candidate.get("reason"),
+            "objectType": candidate.get("objectType"),
+            "buildingName": candidate.get("buildingName"),
+        }
+        if isinstance(candidate.get("availability"), dict):
+            row["availability"] = {k: candidate["availability"].get(k) for k in ("state", "reason") if candidate["availability"].get(k) is not None}
+        if isinstance(candidate.get("scoreBreakdown"), dict):
+            row["scoreBreakdown"] = _copy_jsonable(candidate.get("scoreBreakdown"))
+        candidates.append({k: v for k, v in row.items() if v is not None})
+    candidates.sort(key=lambda item: (float(item.get("score") or 0), str(item.get("id") or "")), reverse=True)
+    return candidates[:LIVE_AGENT_LOOP_DEFAULTS["candidateActionRetention"]]
+
+
+def _live_agent_loop_remember_active_goal(agent_state, active_goal, now_iso):
+    if not isinstance(agent_state, dict) or not isinstance(active_goal, dict):
+        return None
+    row = {
+        **active_goal,
+        "schemaVersion": "agent-live-mode-active-goal/v1",
+        "selectedAt": now_iso,
+    }
+    agent_state["activeGoal"] = row
+    existing = [
+        item for item in (agent_state.get("goalHistory") or [])
+        if isinstance(item, dict) and item.get("id") != row.get("id")
+    ]
+    agent_state["goalHistory"] = [*existing, row][-LIVE_AGENT_LOOP_DEFAULTS["goalRetention"]:]
+    return row
+
+
+def _live_agent_loop_target_fingerprint(target):
+    if not isinstance(target, dict):
+        return {}
+    return {
+        key: target.get(key)
+        for key in ("kind", "buildingId", "objectInstanceId", "catalogId", "interactionSpotId", "targetAgentId", "floor", "siteKind")
+        if target.get(key) is not None
+    }
+
+
+def _live_agent_loop_expected_outcome(action_def, selected, decision, now_iso, injection=None):
+    action_def = action_def if isinstance(action_def, dict) else {}
+    selected = selected if isinstance(selected, dict) else {}
+    active_goal = _live_agent_loop_active_goal_from_decision(decision if isinstance(decision, dict) else {})
+    expected = {
+        "schemaVersion": LIVE_AGENT_EXPECTED_OUTCOME_SCHEMA_VERSION,
+        "createdAt": now_iso,
+        "status": "completed",
+        "loopActionId": action_def.get("id"),
+        "actionType": action_def.get("actionType"),
+        "capabilityTag": action_def.get("capabilityTag"),
+        "target": _live_agent_loop_target_fingerprint(selected.get("target")),
+        "activeGoal": active_goal,
+    }
+    if isinstance(injection, dict):
+        expected["injectedFailure"] = {
+            "mode": injection.get("mode") or "expected-outcome-mismatch",
+            "reason": _live_agent_loop_clean_plan_text(injection.get("reason"), limit=220) or "integration harness failure injection",
+            "requestedAt": injection.get("requestedAt"),
+        }
+        expected["forceMismatch"] = True
+    return expected
+
+
+def _live_agent_loop_expected_outcome_mismatch(plan, summary, action=None):
+    plan = plan if isinstance(plan, dict) else {}
+    summary = summary if isinstance(summary, dict) else {}
+    expected = plan.get("expectedOutcome") if isinstance(plan.get("expectedOutcome"), dict) else {}
+    if not expected:
+        return None
+    actual_status = _canonical_world_action_status(summary.get("status"))
+    expected_status = _canonical_world_action_status(expected.get("status") or "completed")
+    base = {
+        "schemaVersion": LIVE_AGENT_FAILED_EXPECTATION_SCHEMA_VERSION,
+        "planId": plan.get("id"),
+        "actionId": summary.get("id"),
+        "loopActionId": summary.get("loopActionId") or plan.get("loopActionId"),
+        "actionType": summary.get("actionType") or plan.get("actionType"),
+        "expected": _copy_jsonable(expected),
+        "actual": {
+            "status": actual_status,
+            "loopActionId": summary.get("loopActionId"),
+            "actionType": summary.get("actionType"),
+            "target": _live_agent_loop_target_fingerprint((action or {}).get("target") if isinstance(action, dict) else None),
+        },
+    }
+    if expected.get("forceMismatch"):
+        return {**base, "code": "injected_expected_outcome_mismatch", "reason": (expected.get("injectedFailure") or {}).get("reason") or "expected outcome mismatch was injected"}
+    if actual_status != expected_status:
+        return {**base, "code": "status_mismatch", "reason": f"expected {expected_status}, observed {actual_status}"}
+    if expected.get("loopActionId") and summary.get("loopActionId") and expected.get("loopActionId") != summary.get("loopActionId"):
+        return {**base, "code": "loop_action_mismatch", "reason": "settled action did not match the planned loop action"}
+    if expected.get("actionType") and summary.get("actionType") and expected.get("actionType") != summary.get("actionType"):
+        return {**base, "code": "action_type_mismatch", "reason": "settled action did not match the planned action type"}
+    actual_target = base["actual"].get("target") or {}
+    for key, value in (expected.get("target") or {}).items():
+        if value is not None and actual_target.get(key) is not None and actual_target.get(key) != value:
+            return {**base, "code": "target_mismatch", "reason": f"expected target {key}={value}, observed {actual_target.get(key)}"}
+    return None
+
+
+def _live_agent_loop_pending_failed_expectation(agent_state):
+    failure = agent_state.get("lastFailedExpectation") if isinstance(agent_state, dict) and isinstance(agent_state.get("lastFailedExpectation"), dict) else None
+    if not failure:
+        return None
+    if failure.get("recoveredAt") or failure.get("recoveryActionId"):
+        return None
+    return failure
+
+
+def _live_agent_loop_consume_failure_injection(state, agent_id, now_iso):
+    if not os.environ.get("_VW_INT") or not isinstance(state, dict):
+        return None
+    injection = state.get("failureInjection") if isinstance(state.get("failureInjection"), dict) else None
+    if not injection:
+        return None
+    target_agent_id = injection.get("agentId")
+    if target_agent_id and str(target_agent_id) != str(agent_id):
+        return None
+    remaining = _normalize_int(injection.get("remaining"), 1, minimum=0, maximum=10)
+    if remaining <= 0:
+        state["failureInjection"] = None
+        return None
+    consumed = {
+        **_copy_jsonable(injection),
+        "agentId": agent_id,
+        "mode": injection.get("mode") or "expected-outcome-mismatch",
+        "consumedAt": now_iso,
+        "remainingBefore": remaining,
+    }
+    remaining -= 1
+    if remaining <= 0:
+        state["failureInjection"] = None
+    else:
+        state["failureInjection"] = {**injection, "remaining": remaining, "lastConsumedAt": now_iso}
+    _live_agent_loop_add_event(state, "failure-injection-consumed", agent_id=agent_id, details={k: consumed.get(k) for k in ("mode", "reason", "remainingBefore", "consumedAt")})
+    return consumed
+
+
+def _live_agent_loop_apply_turn_planning_record(turn, *, decision=None, plan=None, plan_step=None, selected=None, final_status="selected"):
+    if not isinstance(turn, dict):
+        return None
+    active_goal = _live_agent_loop_active_goal_from_decision(decision if isinstance(decision, dict) else {})
+    candidates = _live_agent_loop_compact_candidate_actions(decision if isinstance(decision, dict) else {})
+    selected_step = _copy_jsonable(plan_step) if isinstance(plan_step, dict) else None
+    final_decision = {
+        "status": final_status,
+        "selectedActionId": (decision or {}).get("selectedActionId") if isinstance(decision, dict) else None,
+        "selectedActionLabel": (decision or {}).get("selectedActionLabel") if isinstance(decision, dict) else None,
+        "score": (decision or {}).get("score") if isinstance(decision, dict) else None,
+        "reason": (decision or {}).get("reason") if isinstance(decision, dict) else None,
+        "planId": (plan or {}).get("id") if isinstance(plan, dict) else None,
+        "planStepId": (plan_step or {}).get("id") if isinstance(plan_step, dict) else None,
+        "loopActionId": ((selected or {}).get("action") or {}).get("id") if isinstance(selected, dict) and isinstance(selected.get("action"), dict) else ((plan_step or {}).get("loopActionId") if isinstance(plan_step, dict) else None),
+    }
+    turn["activeGoal"] = active_goal or {}
+    turn["selectedPlanStep"] = selected_step or {}
+    turn["candidateActionsConsidered"] = candidates
+    turn["finalActionDecision"] = {key: value for key, value in final_decision.items() if value is not None}
+    if isinstance(decision, dict):
+        turn["decision"] = {
+            "schemaVersion": decision.get("schemaVersion"),
+            "at": decision.get("at"),
+            "mode": decision.get("mode"),
+            "activeGoal": active_goal,
+            "selectedActionId": decision.get("selectedActionId"),
+            "selectedActionLabel": decision.get("selectedActionLabel"),
+            "score": decision.get("score"),
+            "reason": decision.get("reason"),
+            "candidateActionCount": len(candidates),
+        }
+    return {
+        "activeGoal": active_goal,
+        "selectedPlanStep": selected_step,
+        "candidateActionsConsidered": candidates,
+        "finalActionDecision": turn.get("finalActionDecision"),
+    }
 
 
 def _live_agent_loop_enabled_roster():
@@ -7752,8 +8059,8 @@ def _live_agent_loop_recent_outcome_summary(agent_state, perception=None, limit=
         bucket["recentStatuses"].append(status)
         if status == "completed":
             bucket["completed"] += 1
-        elif status in {"failed", "expired", "cancelled"}:
-            bucket[status] += 1
+        elif status in {"failed", "expired", "cancelled", "failed_expectation"}:
+            bucket["failed" if status == "failed_expectation" else status] += 1
     recent_world = perception.get("recentWorldActions") if isinstance(perception, dict) else []
     return {
         "window": len(records),
@@ -7763,7 +8070,7 @@ def _live_agent_loop_recent_outcome_summary(agent_state, perception=None, limit=
     }
 
 
-def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso):
+def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso, *, agent_state=None, failure_injection=None):
     action_def = action_def if isinstance(action_def, dict) else {}
     decision = decision if isinstance(decision, dict) else {}
     selected = selected if isinstance(selected, dict) else {}
@@ -7772,6 +8079,10 @@ def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso)
     plan_id = f"plan-{agent_id}-{loop_action_id}-{int(time.time())}"
     target = selected.get("target") if isinstance(selected.get("target"), dict) else {}
     target_label = target.get("buildingId") or target.get("catalogId") or target.get("kind") or "visible target"
+    active_goal = _live_agent_loop_active_goal_from_decision(decision)
+    expected_outcome = _live_agent_loop_expected_outcome(action_def, selected, decision, now_iso, injection=failure_injection)
+    pending_failure = _live_agent_loop_pending_failed_expectation(agent_state if isinstance(agent_state, dict) else {})
+    candidate_ids = [item.get("id") for item in _live_agent_loop_compact_candidate_actions(decision) if item.get("id")]
     plan = {
         "schemaVersion": LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION,
         "id": plan_id,
@@ -7787,6 +8098,9 @@ def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso)
         "retries": 0,
         "maxRetries": LIVE_AGENT_LOOP_DEFAULTS["planMaxRetries"],
         "operatorSummary": f"Planning to {title} through a visible in-world executor.",
+        "activeGoal": active_goal,
+        "expectedOutcome": expected_outcome,
+        "candidateActionIds": candidate_ids,
         "steps": [
             {
                 "id": "choose-goal",
@@ -7811,10 +8125,16 @@ def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso)
             },
         ],
     }
+    if pending_failure:
+        plan["replanOfPlanId"] = pending_failure.get("planId")
+        plan["replanForActionId"] = pending_failure.get("actionId")
+        plan["replanReason"] = pending_failure.get("reason") or pending_failure.get("code") or "failed expectation"
+        plan["operatorSummary"] = f"Replacement plan after expected outcome mismatch: {plan['replanReason']}."
+        plan["failedExpectation"] = _copy_jsonable(pending_failure)
     return _live_agent_loop_normalize_plan(plan)
 
 
-def _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, *, persist=True):
+def _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, *, persist=True, failure_injection=None):
     loop_action_id = (action_def or {}).get("id")
     active_plan = _live_agent_loop_normalize_plan(agent_state.get("activePlan"))
     if _live_agent_loop_plan_is_active(active_plan):
@@ -7833,7 +8153,7 @@ def _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, s
             active_plan["failureReason"] = "superseded-by-new-plan"
             active_plan["operatorSummary"] = "Previous active plan was cancelled because its current visible step was no longer selected."
             _live_agent_loop_store_plan(agent_state, active_plan)
-    plan = _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso)
+    plan = _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso, agent_state=agent_state, failure_injection=failure_injection)
     if persist:
         return _live_agent_loop_store_plan(agent_state, plan)
     return plan
@@ -7909,19 +8229,19 @@ def _live_agent_loop_find_plan_for_action(agent_state, summary):
     return None
 
 
-def _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_state, summary, action_status, now_iso):
+def _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_state, summary, action_status, now_iso, *, expectation_mismatch=None):
     plan = _live_agent_loop_find_plan_for_action(agent_state, summary)
     if not plan:
         return None
     step = _live_agent_loop_plan_current_step(plan)
-    completed = action_status == "completed"
+    completed = action_status == "completed" and not isinstance(expectation_mismatch, dict)
     if isinstance(step, dict):
         step["actionId"] = summary.get("id") or step.get("actionId")
         step["settledAt"] = now_iso
         step["updatedAt"] = now_iso
         step["status"] = "completed" if completed else "failed"
         if not completed:
-            step["failureReason"] = _live_agent_loop_clean_plan_text(summary.get("failureReason") or action_status, limit=220)
+            step["failureReason"] = _live_agent_loop_clean_plan_text((expectation_mismatch or {}).get("reason") if isinstance(expectation_mismatch, dict) else summary.get("failureReason") or action_status, limit=220)
     plan["lastActionId"] = summary.get("id") or plan.get("lastActionId")
     plan["updatedAt"] = now_iso
     if completed:
@@ -7936,23 +8256,56 @@ def _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_stat
         plan["operatorSummary"] = f"Completed plan: {plan.get('title')}."
         event_type = "plan-completed"
         details = {"planId": plan.get("id"), "actionId": summary.get("id"), "status": action_status}
+        if plan.get("replanOfPlanId"):
+            recovery = {
+                "schemaVersion": "agent-live-mode-recovery/v1",
+                "planId": plan.get("id"),
+                "replanOfPlanId": plan.get("replanOfPlanId"),
+                "actionId": summary.get("id"),
+                "loopActionId": summary.get("loopActionId"),
+                "recoveredAt": now_iso,
+                "status": "completed",
+            }
+            plan["recovery"] = recovery
+            pending_failure = _live_agent_loop_pending_failed_expectation(agent_state)
+            if pending_failure:
+                pending_failure["recoveredAt"] = now_iso
+                pending_failure["recoveryPlanId"] = plan.get("id")
+                pending_failure["recoveryActionId"] = summary.get("id")
+                agent_state["lastFailedExpectation"] = pending_failure
+            _live_agent_loop_stat(agent_state, "successfulRecoveries")
+            _live_agent_loop_stat(state, "successfulRecoveries")
+            _live_agent_loop_add_event(state, "plan-recovery-completed", agent_id=agent_id, details=recovery)
+            details["recovery"] = recovery
     else:
         retries = _normalize_int(plan.get("retries"), 0, minimum=0, maximum=20) + 1
         max_retries = _normalize_int(plan.get("maxRetries"), LIVE_AGENT_LOOP_DEFAULTS["planMaxRetries"], minimum=0, maximum=5)
         plan["retries"] = retries
-        plan["failureReason"] = _live_agent_loop_clean_plan_text(summary.get("failureReason") or action_status, limit=240)
-        if retries <= max_retries:
+        plan["failureReason"] = _live_agent_loop_clean_plan_text((expectation_mismatch or {}).get("reason") if isinstance(expectation_mismatch, dict) else summary.get("failureReason") or action_status, limit=240)
+        if isinstance(expectation_mismatch, dict):
+            expectation_mismatch = {**expectation_mismatch, "at": now_iso}
+            plan["failedExpectation"] = _copy_jsonable(expectation_mismatch)
+            plan["status"] = "failed"
+            plan["failedAt"] = now_iso
+            plan["operatorSummary"] = f"Expected outcome mismatch; replacement plan required: {plan.get('failureReason')}."
+            agent_state["lastFailedExpectation"] = _copy_jsonable(expectation_mismatch)
+            _live_agent_loop_stat(agent_state, "failedExpectations")
+            _live_agent_loop_stat(state, "failedExpectations")
+            event_type = "plan-expectation-mismatch"
+            details = {"planId": plan.get("id"), "actionId": summary.get("id"), "status": action_status, "mismatch": expectation_mismatch}
+        elif retries <= max_retries:
             if isinstance(step, dict):
                 step["status"] = "pending"
             plan["status"] = "retrying"
             plan["operatorSummary"] = f"Retrying plan {plan.get('title')} after {action_status} ({retries}/{max_retries})."
             event_type = "plan-retrying"
+            details = {"planId": plan.get("id"), "actionId": summary.get("id"), "status": action_status, "retries": retries, "maxRetries": max_retries}
         else:
             plan["status"] = "failed"
             plan["failedAt"] = now_iso
             plan["operatorSummary"] = f"Plan failed after {retries} unsuccessful attempt(s): {plan.get('failureReason')}."
             event_type = "plan-failed"
-        details = {"planId": plan.get("id"), "actionId": summary.get("id"), "status": action_status, "retries": retries, "maxRetries": max_retries}
+            details = {"planId": plan.get("id"), "actionId": summary.get("id"), "status": action_status, "retries": retries, "maxRetries": max_retries}
     stored = _live_agent_loop_store_plan(agent_state, plan)
     _live_agent_loop_add_event(state, event_type, agent_id=agent_id, details=details)
     return stored
@@ -7963,9 +8316,30 @@ def _live_agent_loop_build_goal_frame(agent_id, perception, agent_state):
     context = _live_agent_loop_agent_context(agent_id)
     if isinstance(perception, dict) and isinstance(perception.get("social"), dict):
         context["social"] = perception.get("social")
+    if isinstance(perception, dict) and isinstance(perception.get("memory"), dict):
+        retrieved = perception["memory"].get("retrieved") if isinstance(perception["memory"].get("retrieved"), list) else []
+        context["retrievedMemory"] = [
+            {
+                "id": item.get("id"),
+                "kind": item.get("kind"),
+                "score": (item.get("retrieval") or {}).get("score") if isinstance(item.get("retrieval"), dict) else None,
+                "tags": item.get("tags") if isinstance(item.get("tags"), list) else [],
+            }
+            for item in retrieved[:5]
+            if isinstance(item, dict)
+        ]
     recent = _live_agent_loop_recent_outcome_summary(agent_state, perception)
     active_plan = _live_agent_loop_normalize_plan(agent_state.get("activePlan"))
+    pending_failed_expectation = _live_agent_loop_pending_failed_expectation(agent_state)
     goals = []
+    if pending_failed_expectation:
+        goals.append({
+            "id": f"replan.after-failed-expectation.{pending_failed_expectation.get('planId') or pending_failed_expectation.get('actionId')}",
+            "kind": "replan",
+            "failedLoopActionId": pending_failed_expectation.get("loopActionId"),
+            "priority": 0.92,
+            "reason": pending_failed_expectation.get("reason") or pending_failed_expectation.get("code") or "expected outcome did not happen",
+        })
     for need_id, value in sorted((needs or {}).items(), key=lambda item: item[1], reverse=True)[:3]:
         goals.append({
             "id": f"need.{need_id}",
@@ -8169,6 +8543,13 @@ def _live_agent_loop_decision_score(affordance, agent_state, goal_frame=None):
             penalty = min(0.85, max(0.16, priority))
             score -= penalty
             breakdown["reliability"] -= penalty
+        if goal.get("kind") == "replan":
+            if goal.get("failedLoopActionId") == loop_action_id:
+                score -= 1.15
+                breakdown["reliability"] -= 1.15
+            else:
+                score += 0.20
+                breakdown["reliability"] += 0.20
         if goal.get("kind") == "plan" and goal.get("loopActionId") == loop_action_id:
             boost = min(0.70, max(0.24, priority))
             score += boost
@@ -8222,8 +8603,18 @@ def _live_agent_loop_build_decision_frame(agent_id, perception, agent_state):
         "prompt": "Choose one available visible in-world action for the agent from this planner-v2 frame. Consider needs, personality, relationships, home/work context, recent outcomes, active plans, physical presence, visible executor availability, and safe pacing. Return a loopActionId from candidates or skip. Social talk is executable only when social perception reports a nearby visible agent target. Home rest is executable only by physically routing to the agent-owned home. Small-home construction is executable only through the visible construction-site executor; arbitrary build/modify/move/delete world changes remain proposal-only until typed visible executors exist.",
         "reason": f"{selected.get('label')} best matches planner-v2 goals for {selected.get('need')}" if selected else "no available candidates",
     }
+    active_goal = _live_agent_loop_active_goal_from_decision(frame)
+    if active_goal:
+        frame["activeGoal"] = active_goal
+        _live_agent_loop_remember_active_goal(agent_state, active_goal, perception.get("at") or _utc_now_iso())
+    frame["candidateActionsConsidered"] = _live_agent_loop_compact_candidate_actions(frame)
     agent_state["lastDecision"] = {k: frame.get(k) for k in ("at", "mode", "topNeed", "selectedActionId", "selectedActionLabel", "score", "reason")}
+    agent_state["lastDecision"]["activeGoal"] = active_goal
     agent_state["lastDecision"]["goalIds"] = [item.get("id") for item in goal_frame.get("goals", [])[:6]]
+    agent_state["lastDecision"]["candidateActionCount"] = len(frame["candidateActionsConsidered"])
+    agent_state["lastDecision"]["candidateActionsConsidered"] = frame["candidateActionsConsidered"]
+    context = goal_frame.get("context") if isinstance(goal_frame.get("context"), dict) else {}
+    agent_state["lastDecision"]["retrievedMemoryIds"] = [item.get("id") for item in (context.get("retrievedMemory") or []) if item.get("id")]
     return frame
 
 
@@ -8497,19 +8888,20 @@ def _live_agent_loop_record_social_outcome(state, agent_id, action, summary, now
     return details
 
 
-def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary):
+def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary, expectation_mismatch=None):
     if not isinstance(summary, dict):
         return None
     action_id = summary.get("id")
     action_status = _canonical_world_action_status(summary.get("status"))
-    settled_key = _live_agent_loop_settled_action_key(action_id, action_status)
+    effective_status = "failed_expectation" if isinstance(expectation_mismatch, dict) else action_status
+    settled_key = _live_agent_loop_settled_action_key(action_id, effective_status)
     if settled_key and settled_key in _live_agent_loop_existing_settled_keys(agent_state):
         _live_agent_loop_mark_settled_action(agent_state, action_id, action_status)
         return {"actionId": action_id, "status": action_status, "settledActionKey": settled_key, "duplicate": True}
     action_def = _live_agent_loop_action_definition(summary.get("loopActionId"), summary.get("actionType"))
     label = (action_def or {}).get("label") or summary.get("actionType") or "world action"
     need_key = (action_def or {}).get("need")
-    completed = action_status == "completed"
+    completed = action_status == "completed" and not isinstance(expectation_mismatch, dict)
     if need_key:
         _live_agent_loop_decay_need_after_action(agent_state, need_key, completed=completed)
     memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
@@ -8519,13 +8911,21 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
         "loopActionId": summary.get("loopActionId"),
         "actionType": summary.get("actionType"),
         "label": label,
-        "status": action_status,
+        "status": effective_status,
         "need": need_key,
         "settledActionKey": settled_key,
     }
+    if isinstance(expectation_mismatch, dict):
+        recent_entry["expectationMismatch"] = {
+            "code": expectation_mismatch.get("code"),
+            "reason": expectation_mismatch.get("reason"),
+            "planId": expectation_mismatch.get("planId"),
+        }
     memory["recentActions"] = _live_agent_loop_trim_list([*(memory.get("recentActions") or []), recent_entry], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
     social_relationship = _live_agent_loop_record_social_outcome(state, agent_id, action, summary, recent_entry["at"])
     observation_text = f"{label} finished with status {action_status}."
+    if isinstance(expectation_mismatch, dict):
+        observation_text = f"{observation_text} Expected outcome mismatch: {expectation_mismatch.get('reason') or expectation_mismatch.get('code')}."
     target = action.get("target") if isinstance(action, dict) and isinstance(action.get("target"), dict) else {}
     if target.get("buildingId"):
         observation_text = f"{observation_text} Target building {target.get('buildingId')} object {target.get('catalogId') or target.get('objectInstanceId')}."
@@ -8539,11 +8939,11 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
         "kind": "observation",
         "text": observation_text,
         "actionId": action_id,
-        "status": action_status,
+        "status": effective_status,
         "settledActionKey": settled_key,
         "importance": "normal",
         "salience": 0.55 if completed else 0.75,
-        "tags": _live_agent_memory_clean_tags(["observation", action_status, summary.get("loopActionId"), summary.get("actionType")]),
+        "tags": _live_agent_memory_clean_tags(["observation", effective_status, summary.get("loopActionId"), summary.get("actionType")]),
         "source": {"kind": "world-action-outcome", "actionId": action_id, "loopActionId": summary.get("loopActionId")},
     }
     memory["observations"] = _live_agent_loop_trim_list([*(memory.get("observations") or []), observation], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
@@ -8560,23 +8960,26 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
         "settledActionKey": settled_key,
         "importance": "normal",
         "salience": 0.6 if completed else 0.8,
-        "tags": _live_agent_memory_clean_tags(["reflection", action_status, summary.get("loopActionId"), summary.get("actionType")]),
+        "tags": _live_agent_memory_clean_tags(["reflection", effective_status, summary.get("loopActionId"), summary.get("actionType")]),
         "source": {"kind": "world-action-reflection", "actionId": action_id, "loopActionId": summary.get("loopActionId")},
     }
     if social_relationship:
         reflection["text"] = f"I completed a visible conversation with {social_relationship.get('otherAgentId')}; next I should let that relationship context influence future plans."
         reflection["relationship"] = social_relationship
+    if isinstance(expectation_mismatch, dict):
+        reflection["text"] = f"I expected {label} to succeed, but {expectation_mismatch.get('reason') or 'the observed outcome did not match'}; next I should choose a replacement plan."
+        reflection["expectationMismatch"] = {k: expectation_mismatch.get(k) for k in ("code", "reason", "planId", "actionId", "loopActionId")}
     memory["reflections"] = _live_agent_loop_trim_list([*(memory.get("reflections") or []), reflection], LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
     agent_state["memory"] = memory
     _live_agent_loop_append_memory_stream_entry(state, agent_id, {**observation, "bucket": "observations", "sourceEntryId": observation.get("id")})
     _live_agent_loop_append_memory_stream_entry(state, agent_id, {**reflection, "bucket": "reflections", "sourceEntryId": reflection.get("id")})
     _live_agent_memory_maybe_synthesize_reflection(state, agent_id, reason="world-action-outcome")
     _live_agent_loop_mark_settled_action(agent_state, action_id, action_status)
-    details = {"actionId": action_id, "loopActionId": summary.get("loopActionId"), "status": action_status}
+    details = {"actionId": action_id, "loopActionId": summary.get("loopActionId"), "status": effective_status}
     if completed:
         _live_agent_loop_add_feedback(state, agent_id, "info", reflection["text"], details)
     else:
-        _live_agent_loop_add_feedback(state, agent_id, "warning", f"{label} ended as {action_status}; watch this action type.", details)
+        _live_agent_loop_add_feedback(state, agent_id, "warning", f"{label} ended as {effective_status}; watch this action type.", details)
     return recent_entry
 
 
@@ -8621,7 +9024,7 @@ def _live_agent_loop_refresh_completed_outcomes(state):
             continue
         settled_key = _live_agent_loop_settled_action_key(action_id, action_status)
         current = agent_state.get("lastOutcome") if isinstance(agent_state.get("lastOutcome"), dict) else {}
-        if current.get("actionId") == action_id and current.get("status") == action_status and current.get("observedBy") == "agent-live-loop-status":
+        if current.get("actionId") == action_id and current.get("observedBy") == "agent-live-loop-status" and current.get("status") in {action_status, "failed_expectation"}:
             continue
         summary = _live_agent_loop_action_summary(action)
         agent_state["lastOutcome"] = {
@@ -8640,8 +9043,13 @@ def _live_agent_loop_refresh_completed_outcomes(state):
         agent_state["lastSettledActionAt"] = now
         if action_status == "completed":
             agent_state["lastCompletedActionAt"] = now
-        remembered = _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary)
-        _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_state, summary, action_status, now)
+        plan_for_action = _live_agent_loop_find_plan_for_action(agent_state, summary)
+        expectation_mismatch = _live_agent_loop_expected_outcome_mismatch(plan_for_action, summary, action) if plan_for_action else None
+        if expectation_mismatch:
+            agent_state["lastOutcome"]["status"] = "failed_expectation"
+            agent_state["lastOutcome"]["expectationMismatch"] = {k: expectation_mismatch.get(k) for k in ("code", "reason", "planId", "actionId", "loopActionId")}
+        _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_state, summary, action_status, now, expectation_mismatch=expectation_mismatch)
+        remembered = _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary, expectation_mismatch=expectation_mismatch)
         if not (isinstance(remembered, dict) and remembered.get("duplicate")):
             _live_agent_loop_add_event(state, "action-settled", agent_id=agent_id, details={"actionId": action_id, "status": action_status})
         changed = True
@@ -8751,8 +9159,10 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
         enabled_agents = _live_agent_loop_enabled_roster()
         result["enabledAgents"] = [{"agentId": a.get("agentId"), "name": a.get("name"), "providerKind": a.get("providerKind")} for a in enabled_agents]
         max_actions = _normalize_int(state.get("maxActionsPerTick"), LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"], minimum=1, maximum=5)
+        max_tool_calls = _normalize_int(state.get("maxToolCallsPerTurn"), LIVE_AGENT_LOOP_DEFAULTS["maxToolCallsPerTurn"], minimum=1, maximum=5)
         cooldown = _normalize_int(state.get("minActionIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"], minimum=30, maximum=3600)
         result["scheduler"]["maxActionsPerTick"] = max_actions
+        result["scheduler"]["maxToolCallsPerTurn"] = max_tool_calls
         turn_processed = False
 
         for agent in _live_agent_loop_order_agents_for_turn(enabled_agents, scheduler.get("lastAgentId")):
@@ -8878,12 +9288,18 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
 
                 planning_started = _live_agent_clawmind_trace_start()
                 selected, decision = _live_agent_loop_select_next_action(agent_id, agent_state, perception)
-                result["decisions"].append({"agentId": agent_id, "decision": agent_state.get("lastDecision")})
+                result["decisions"].append({
+                    "agentId": agent_id,
+                    "decision": agent_state.get("lastDecision"),
+                    "activeGoal": agent_state.get("activeGoal"),
+                    "candidateActionsConsidered": _live_agent_loop_compact_candidate_actions(decision if isinstance(decision, dict) else {}),
+                })
                 if not selected:
                     _live_agent_loop_stat(agent_state, "targetMisses")
                     agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "no-available-loop-target", "decision": decision, "perceptionAt": perception.get("at")}
                     skipped = {"agentId": agent_id, "reason": "no-available-loop-target", "decision": agent_state.get("lastDecision")}
                     result["skipped"].append(skipped)
+                    _live_agent_loop_apply_turn_planning_record(turn, decision=decision, final_status="skipped")
                     _live_agent_clawmind_append_trace(state, "planning", turn, planning_started, inputs={"availableAffordanceCount": len([item for item in (perception.get("affordances") or []) if item.get("available")])}, outputs={"selected": None, "decision": decision}, decisions=agent_state.get("lastDecision"), gaps=["no-available-loop-target"], status="completed")
                     _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": "no-available-loop-target", "decision": agent_state.get("lastDecision")}, now_epoch=now_epoch)
                     _live_agent_clawmind_record_skipped_modules(state, turn, ["conversation", "actionExecution", "outcomeAwareness"], "no-available-loop-target", skipped)
@@ -8893,16 +9309,26 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 action_def = selected["action"]
                 visible_action_contract = _live_agent_visible_action_contract(action_def.get("actionType")) or {}
                 adaptive_cooldown = _live_agent_loop_cooldown_for_decision(cooldown, decision)
-                plan = _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, persist=not dry_run)
+                failure_injection = None if dry_run else _live_agent_loop_consume_failure_injection(state, agent_id, now_iso)
+                plan = _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, persist=not dry_run, failure_injection=failure_injection)
                 plan_step = _live_agent_loop_plan_current_step(plan)
+                plan_created_this_turn = isinstance(plan, dict) and plan.get("createdAt") == now_iso
+                if plan_created_this_turn and not dry_run:
+                    _live_agent_loop_stat(agent_state, "plans")
+                    _live_agent_loop_stat(state, "plans")
+                    if plan.get("replanOfPlanId"):
+                        _live_agent_loop_stat(agent_state, "replans")
+                        _live_agent_loop_stat(state, "replans")
+                        _live_agent_loop_add_event(state, "plan-replanned", agent_id=agent_id, turn_id=turn.get("id"), details={"planId": plan.get("id"), "replanOfPlanId": plan.get("replanOfPlanId"), "replanForActionId": plan.get("replanForActionId"), "reason": plan.get("replanReason")})
+                turn_planning_record = _live_agent_loop_apply_turn_planning_record(turn, decision=decision, plan=plan, plan_step=plan_step, selected=selected, final_status="selected")
                 _live_agent_clawmind_append_trace(
                     state,
                     "planning",
                     turn,
                     planning_started,
                     inputs={"availableAffordanceCount": len([item for item in (perception.get("affordances") or []) if item.get("available")]), "topNeed": (decision or {}).get("topNeed")},
-                    outputs={"selectedActionId": action_def.get("id"), "actionType": action_def.get("actionType"), "planId": (plan or {}).get("id"), "planStepId": (plan_step or {}).get("id")},
-                    decisions={"decision": agent_state.get("lastDecision"), "adaptiveCooldownSec": adaptive_cooldown},
+                    outputs={"selectedActionId": action_def.get("id"), "actionType": action_def.get("actionType"), "planId": (plan or {}).get("id"), "planStepId": (plan_step or {}).get("id"), "activeGoal": (turn_planning_record or {}).get("activeGoal"), "candidateActionCount": len((turn_planning_record or {}).get("candidateActionsConsidered") or [])},
+                    decisions={"decision": agent_state.get("lastDecision"), "adaptiveCooldownSec": adaptive_cooldown, "failedExpectationInjection": bool(failure_injection)},
                 )
                 request_id = f"live-loop-{agent_id}-{int(now_epoch)}"
                 payload = {
@@ -8929,6 +9355,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                         "planSchemaVersion": LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION,
                         "planId": plan.get("id") if isinstance(plan, dict) else None,
                         "planStepId": plan_step.get("id") if isinstance(plan_step, dict) else None,
+                        "expectedOutcome": plan.get("expectedOutcome") if isinstance(plan, dict) else None,
                         "decisionMode": decision.get("mode") if isinstance(decision, dict) else LIVE_AGENT_LOOP_DEFAULTS["decisionMode"],
                         "decisionReason": decision.get("reason") if isinstance(decision, dict) else None,
                         "perceptionAt": perception.get("at"),
@@ -8947,7 +9374,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 action_execution_started = _live_agent_clawmind_trace_start()
                 if dry_run:
                     agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload, "wouldPlan": plan, "decision": decision, "perception": perception}
-                    result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected, "decision": agent_state.get("lastDecision"), "plan": plan, "turnId": turn.get("id")})
+                    result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected, "decision": agent_state.get("lastDecision"), "plan": plan, "turnId": turn.get("id"), **(turn_planning_record or {})})
                     _live_agent_clawmind_append_trace(
                         state,
                         "actionExecution",
@@ -8996,7 +9423,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown, "turnId": turn.get("id")}
                     _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
                     _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, turn_id=turn.get("id"), details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "target": selected["target"], "decision": agent_state.get("lastDecision")})
-                    created_row = {"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown, "turnId": turn.get("id")}
+                    created_row = {"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown, "turnId": turn.get("id"), **(turn_planning_record or {})}
                     result["actionsCreated"].append(created_row)
                     action_summary = _live_agent_loop_action_summary(action)
                     _live_agent_clawmind_append_trace(
@@ -9123,6 +9550,7 @@ def get_live_agent_loop_status():
                     "worldClientRequired": state.get("worldClientRequired"),
                     "browserTabRequiredForScheduler": False,
                     "maxActionsPerTick": state.get("maxActionsPerTick"),
+                    "maxToolCallsPerTurn": state.get("maxToolCallsPerTurn"),
                     "minActionIntervalSec": state.get("minActionIntervalSec"),
                     "onlyAgentsWithAgentLiveModeEnabled": True,
                     "pauseStopsNewTurns": True,
@@ -9656,6 +10084,7 @@ def update_live_agent_loop_settings(payload):
             "minActionIntervalSec": (30, 3600),
             "clientActiveTtlSec": (10, 300),
             "maxActionsPerTick": (1, 5),
+            "maxToolCallsPerTurn": (1, 5),
             "turnTimeoutSec": (30, 3600),
             "turnRetryBackoffSec": (5, 1800),
             "maxTurnRetries": (0, 10),
@@ -9675,6 +10104,42 @@ def update_live_agent_loop_settings(payload):
             agent_state = _live_agent_loop_agent_state(state, agent_id)
             _live_agent_loop_clear_turn_retry(agent_state)
             changed["turnRetry"] = {"agentId": agent_id, "cleared": True}
+        if "clearFailureInjection" in payload:
+            if not isinstance(payload.get("clearFailureInjection"), bool):
+                return False, _api_error("invalid_payload", "clearFailureInjection must be a boolean."), 400
+            if payload.get("clearFailureInjection"):
+                state["failureInjection"] = None
+                changed["failureInjection"] = {"cleared": True}
+        if "injectNextExpectedOutcomeFailure" in payload or "failureInjection" in payload:
+            if not os.environ.get("_VW_INT"):
+                return False, _api_error("unsupported_in_production", "Failure injection is only available in the isolated integration harness."), 403
+            if "failureInjection" in payload and payload.get("failureInjection") in (None, False):
+                state["failureInjection"] = None
+                changed["failureInjection"] = {"active": False}
+                _live_agent_loop_add_event(state, "settings-updated", details=changed)
+                saved = save_live_agent_loop_state(state)
+                return True, {"ok": True, "state": saved, "changed": changed, "runtime": {"pause": _live_agent_loop_pause_status(saved), "killSwitch": _live_agent_loop_kill_switch_status(saved), "worldClient": _live_agent_loop_world_client_status(saved), "scheduler": _live_agent_loop_scheduler_state(saved)}}, 200
+            if "failureInjection" in payload and not isinstance(payload.get("failureInjection"), dict):
+                return False, _api_error("invalid_payload", "failureInjection must be an object, false, or null."), 400
+            requested = payload.get("failureInjection") if isinstance(payload.get("failureInjection"), dict) else {}
+            enabled = payload.get("injectNextExpectedOutcomeFailure")
+            if enabled is not None and not isinstance(enabled, bool):
+                return False, _api_error("invalid_payload", "injectNextExpectedOutcomeFailure must be a boolean."), 400
+            if enabled is False:
+                state["failureInjection"] = None
+                changed["failureInjection"] = {"active": False}
+            else:
+                target_agent_id = agent_id or _resolve_agent_id(requested.get("agentId")) if requested.get("agentId") else agent_id
+                injection = {
+                    "mode": "expected-outcome-mismatch",
+                    "reason": _live_agent_loop_clean_plan_text(requested.get("reason") or payload.get("failureInjectionReason") or "integration harness failure injection", limit=220),
+                    "agentId": target_agent_id,
+                    "requestedAt": now_iso,
+                    "requestedBy": _live_agent_loop_clean_plan_text(payload.get("actor") or requested.get("actor") or "integration-harness", limit=120),
+                    "remaining": _normalize_int(requested.get("remaining") or payload.get("failureInjectionCount"), 1, minimum=1, maximum=3),
+                }
+                state["failureInjection"] = injection
+                changed["failureInjection"] = {**injection, "active": True}
         _live_agent_loop_add_event(state, "settings-updated", details=changed)
         saved = save_live_agent_loop_state(state)
         return True, {"ok": True, "state": saved, "changed": changed, "runtime": {"pause": _live_agent_loop_pause_status(saved), "killSwitch": _live_agent_loop_kill_switch_status(saved), "worldClient": _live_agent_loop_world_client_status(saved), "scheduler": _live_agent_loop_scheduler_state(saved)}}, 200
