@@ -1438,7 +1438,6 @@ LIVE_AGENT_IN_WORLD_COMMUNICATION_EVENT_NAMES = {
 LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"
 LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION = "agent-live-mode-plan/v1"
 LIVE_AGENT_CLAWMIND_RUNTIME_TRACE_VERSION = "agent-live-mode-clawmind-runtime-trace/v1"
-LIVE_AGENT_LEGACY_CLAWMIND_RUNTIME_KEYS = ("pia" + "noRuntime",)
 LIVE_AGENT_OPERATOR_PROPOSAL_SCHEMA_VERSION = "agent-live-mode-operator-proposal/v1"
 LIVE_AGENT_OPERATOR_TIMELINE_SCHEMA_VERSION = "agent-live-mode-operator-timeline/v1"
 LIVE_AGENT_LOOP_DEFAULTS = {
@@ -5933,14 +5932,8 @@ def _normalize_live_agent_loop_state(raw):
         state["eventSequence"] = _normalize_int(raw.get("eventSequence"), 0, minimum=0, maximum=1000000000)
         if isinstance(raw.get("scheduler"), dict):
             state["scheduler"] = _live_agent_loop_normalize_scheduler(raw["scheduler"])
-        raw_clawmind_runtime = raw.get("clawMindRuntime")
-        if not isinstance(raw_clawmind_runtime, dict):
-            raw_clawmind_runtime = next(
-                (raw.get(key) for key in LIVE_AGENT_LEGACY_CLAWMIND_RUNTIME_KEYS if isinstance(raw.get(key), dict)),
-                None,
-            )
-        if isinstance(raw_clawmind_runtime, dict):
-            state["clawMindRuntime"] = _normalize_live_agent_clawmind_runtime(raw_clawmind_runtime)
+        if isinstance(raw.get("clawMindRuntime"), dict):
+            state["clawMindRuntime"] = _normalize_live_agent_clawmind_runtime(raw["clawMindRuntime"])
         if isinstance(raw.get("agents"), dict):
             state["agents"] = {str(k): v for k, v in raw["agents"].items() if isinstance(v, dict)}
         if isinstance(raw.get("events"), list):
