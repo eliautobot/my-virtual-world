@@ -35027,6 +35027,331 @@ function getLiveModeWorldClientMarkerUrl() {
   return `/api/world-actions/active?${params.toString()}`;
 }
 
+const LIVE_AGENT_MODE_ANIMATION_REPLAY_CLIENT_VERSION = '20260618-client-animation-replay-r1';
+const LIVE_AGENT_MODE_ANIMATION_REPLAY_ENDPOINT = '/api/live-agent-mode/animation-events';
+const _liveAgentModeAnimationReplaySequences = new Set();
+const _liveAgentModeAnimationReplayGroups = new Map();
+let _liveAgentModeAnimationReplayCursor = 0;
+let _liveAgentModeAnimationReplayTimer = null;
+let _liveAgentModeAnimationReplayState = {
+  ok: false,
+  schemaVersion: 'main3d-live-agent-mode-animation-replay/v1',
+  version: LIVE_AGENT_MODE_ANIMATION_REPLAY_CLIENT_VERSION,
+  source: 'main3d.js#syncLiveAgentModeAnimationEvents',
+  endpoint: LIVE_AGENT_MODE_ANIMATION_REPLAY_ENDPOINT,
+  lastCursor: 0,
+  checkedAt: null,
+  appliedEventCount: 0,
+  renderedEventCount: 0,
+  actions: {},
+};
+
+window.__VWLiveAgentModeAnimationReplayState = _liveAgentModeAnimationReplayState;
+
+function setLiveAgentModeAnimationReplayState(patch = {}) {
+  _liveAgentModeAnimationReplayState = {
+    ..._liveAgentModeAnimationReplayState,
+    ...patch,
+    checkedAt: new Date().toISOString(),
+  };
+  window.__VWLiveAgentModeAnimationReplayState = _liveAgentModeAnimationReplayState;
+  return _liveAgentModeAnimationReplayState;
+}
+
+function getLiveAgentModeReplayActionState(actionId) {
+  const key = String(actionId || 'unknown-action');
+  const actions = _liveAgentModeAnimationReplayState.actions || {};
+  if (!actions[key]) {
+    actions[key] = {
+      actionId: actionId || null,
+      agentId: null,
+      eventCount: 0,
+      renderedEventCount: 0,
+      eventNames: [],
+      lastSequence: 0,
+      lastRenderedAt: null,
+      lastAgentPosition: null,
+      sceneObjectNames: [],
+    };
+    setLiveAgentModeAnimationReplayState({ actions });
+  }
+  return actions[key];
+}
+
+function updateLiveAgentModeReplayActionState(actionId, patch = {}) {
+  const key = String(actionId || 'unknown-action');
+  const actions = { ...(_liveAgentModeAnimationReplayState.actions || {}) };
+  actions[key] = { ...(actions[key] || { actionId: actionId || null }), ...patch };
+  return setLiveAgentModeAnimationReplayState({ actions });
+}
+
+function normalizeLiveAgentModeReplayPoint(location = null) {
+  if (!location || typeof location !== 'object') return null;
+  const apiX = Number.isFinite(Number(location.apiX))
+    ? Number(location.apiX)
+    : (Number.isFinite(Number(location.x)) ? Number(location.x) * API_TILE : NaN);
+  const apiZ = Number.isFinite(Number(location.apiZ))
+    ? Number(location.apiZ)
+    : (Number.isFinite(Number(location.z)) ? Number(location.z) * API_TILE : (Number.isFinite(Number(location.y)) ? Number(location.y) * API_TILE : NaN));
+  if (!Number.isFinite(apiX) || !Number.isFinite(apiZ)) return null;
+  return {
+    apiX,
+    apiZ,
+    x: apiX,
+    y: apiZ,
+    worldX: apiX / API_TILE,
+    worldZ: apiZ / API_TILE,
+    floor: Math.max(1, Number(location.floor || location.buildingFloor || 1) || 1),
+    buildingId: location.buildingId || null,
+    source: location.source || null,
+  };
+}
+
+function resolveAgentForLiveAgentModeReplayEvent(event = {}) {
+  const agentId = String(event.agentId || event.target?.agentId || '').trim();
+  if (!agentId) return null;
+  return (agentsList || []).find(agent => {
+    if (!agent) return false;
+    const keys = getAgentIdentityKeys(agent);
+    return keys.has(agentId) || String(agent.id || '') === agentId || String(agent.statusKey || '') === agentId;
+  }) || null;
+}
+
+function getLiveAgentModeReplayWorldPoint(point) {
+  if (!point) return null;
+  const x = point.apiX * (T / API_TILE);
+  const z = point.apiZ * (T / API_TILE);
+  const y = (typeof getGroundY === 'function' ? getGroundY(x, z) : 0) + 0.08;
+  return new THREE.Vector3(x, y, z);
+}
+
+function getLiveAgentModeReplayGroup(actionId) {
+  const key = String(actionId || 'unknown-action');
+  if (_liveAgentModeAnimationReplayGroups.has(key)) return _liveAgentModeAnimationReplayGroups.get(key);
+  if (!scene) return null;
+  const group = new THREE.Group();
+  group.name = `vw-live-agent-mode-replay-${key}`;
+  group.userData.liveAgentModeReplay = {
+    actionId: actionId || null,
+    version: LIVE_AGENT_MODE_ANIMATION_REPLAY_CLIENT_VERSION,
+  };
+  scene.add(group);
+  _liveAgentModeAnimationReplayGroups.set(key, group);
+  return group;
+}
+
+function renderLiveAgentModeReplayEvent(event = {}, fromPoint = null, toPoint = null) {
+  if (!scene || !THREE) return null;
+  const actionId = event.worldActionId || event.actionId || null;
+  const group = getLiveAgentModeReplayGroup(actionId);
+  if (!group) return null;
+  const sequence = Number(event.sequence || event.cursor || 0) || group.children.length + 1;
+  const renderPoint = toPoint || fromPoint;
+  const fromWorld = getLiveAgentModeReplayWorldPoint(fromPoint);
+  const toWorld = getLiveAgentModeReplayWorldPoint(renderPoint);
+  if (!toWorld) return null;
+  const eventColor = event.name === 'world-action-completed'
+    ? 0x16a34a
+    : (event.name === 'agent-move-started' || event.name === 'agent-arrived' ? 0x2563eb : 0xf59e0b);
+  const material = new THREE.MeshBasicMaterial({ color: eventColor, transparent: true, opacity: 0.92, depthTest: true });
+  const marker = new THREE.Mesh(_sphereGeo, material);
+  marker.name = `vw-live-agent-mode-replay-marker-${sequence}`;
+  marker.scale.set(0.22, 0.22, 0.22);
+  marker.position.copy(toWorld);
+  marker.userData.liveAgentModeReplay = {
+    actionId,
+    sequence,
+    name: event.name || null,
+    agentId: event.agentId || null,
+  };
+  group.add(marker);
+
+  if (fromWorld && fromWorld.distanceTo(toWorld) > 0.001) {
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints([fromWorld, toWorld]);
+    const lineMaterial = new THREE.LineBasicMaterial({ color: eventColor, transparent: true, opacity: 0.72 });
+    const line = new THREE.Line(lineGeometry, lineMaterial);
+    line.name = `vw-live-agent-mode-replay-line-${sequence}`;
+    line.userData.liveAgentModeReplay = marker.userData.liveAgentModeReplay;
+    group.add(line);
+  }
+
+  while (group.children.length > 160) {
+    const old = group.children[0];
+    group.remove(old);
+    old?.geometry?.dispose?.();
+    old?.material?.dispose?.();
+  }
+  return marker.name;
+}
+
+function markLiveAgentModeReplayObjectUse(event = {}) {
+  const target = event.target || {};
+  const buildingId = target.buildingId || event.to?.buildingId || event.from?.buildingId;
+  const building = buildingId ? buildingsMap.get(buildingId) : null;
+  const furniture = building?.interior?.furniture;
+  if (!Array.isArray(furniture)) return false;
+  const objectId = target.objectInstanceId || target.objectId || event.to?.objectInstanceId || event.from?.objectInstanceId;
+  const catalogId = target.catalogId || event.to?.catalogId || event.from?.catalogId;
+  const match = furniture.find(item => {
+    if (!item) return false;
+    if (objectId && [item.objectInstanceId, item.id, item.instanceId].map(value => String(value || '')).includes(String(objectId))) return true;
+    return catalogId && String(item.catalogId || item.type || '') === String(catalogId);
+  });
+  if (!match) return false;
+  const completed = event.name === 'object-use-completed' || event.name === 'world-action-completed';
+  match.activeUse = {
+    ...(match.activeUse || {}),
+    state: completed ? 'completed' : 'active',
+    source: 'live-agent-mode-animation-replay',
+    worldActionId: event.worldActionId || event.actionId || null,
+    agentId: event.agentId || null,
+    updatedAt: new Date().toISOString(),
+  };
+  return true;
+}
+
+function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = false } = {}) {
+  const sequence = Number(event.sequence || event.cursor || 0) || null;
+  const eventKey = sequence ? `seq:${sequence}` : `id:${event.id || event.worldActionId || event.actionId || event.name || Date.now()}`;
+  const alreadyApplied = _liveAgentModeAnimationReplaySequences.has(eventKey);
+  if (alreadyApplied && !allowDuplicateRender) return { applied: false, duplicate: true, sequence };
+
+  const actionId = event.worldActionId || event.actionId || null;
+  const actionState = getLiveAgentModeReplayActionState(actionId);
+  const eventNames = new Set(actionState.eventNames || []);
+  if (event.name) eventNames.add(event.name);
+  const fromPoint = normalizeLiveAgentModeReplayPoint(event.from);
+  const toPoint = normalizeLiveAgentModeReplayPoint(event.to);
+  const renderPoint = toPoint || fromPoint;
+  const agent = resolveAgentForLiveAgentModeReplayEvent(event);
+  let agentRendered = false;
+  if (agent && renderPoint) {
+    agent.x = renderPoint.apiX;
+    agent.y = renderPoint.apiZ;
+    agent._floor = renderPoint.floor;
+    agent._targetFloor = renderPoint.floor;
+    if (renderPoint.buildingId) agent._currentBuilding = buildingsMap.get(renderPoint.buildingId) || agent._currentBuilding || null;
+    agent._wanderTarget = null;
+    agent._waypointPath = null;
+    agent._stayTimer = Math.max(Number(agent._stayTimer || 0), 1800);
+    agent._wanderTimer = Math.max(Number(agent._wanderTimer || 0), 1800);
+    agent._liveAgentModeReplay = {
+      source: 'main3d.js#applyLiveAgentModeReplayEvent',
+      actionId,
+      sequence,
+      name: event.name || null,
+      point: renderPoint,
+      updatedAt: new Date().toISOString(),
+    };
+    if (event.name && event.name.startsWith('object-use')) {
+      agent._idleActivity = {
+        ...(agent._idleActivity || {}),
+        kind: 'live-agent-mode-replay-object-use',
+        phase: event.name === 'object-use-completed' ? 'completed' : 'active',
+        source: 'live-agent-mode-animation-replay',
+        worldActionId: actionId,
+        actionId: event.actionType || null,
+        buildingId: renderPoint.buildingId || event.target?.buildingId || null,
+        objectInstanceId: event.target?.objectInstanceId || null,
+      };
+    }
+    if (agent._group3d) {
+      const worldPoint = getLiveAgentModeReplayWorldPoint(renderPoint);
+      if (worldPoint) {
+        agent._group3d.position.copy(worldPoint);
+        agentRendered = true;
+      }
+    }
+    if (isPhysicsReady()) {
+      teleportAgent('agent_' + agent.id, renderPoint.apiX * (T / API_TILE), agent._group3d?.position?.y || 0, renderPoint.apiZ * (T / API_TILE));
+    }
+  }
+
+  const objectStateUpdated = markLiveAgentModeReplayObjectUse(event);
+  const sceneObjectName = renderLiveAgentModeReplayEvent(event, fromPoint, toPoint);
+  if (!alreadyApplied) _liveAgentModeAnimationReplaySequences.add(eventKey);
+
+  const renderedEventCount = actionState.renderedEventCount + (sceneObjectName ? 1 : 0);
+  updateLiveAgentModeReplayActionState(actionId, {
+    actionId,
+    agentId: event.agentId || actionState.agentId || null,
+    eventCount: actionState.eventCount + (alreadyApplied ? 0 : 1),
+    renderedEventCount,
+    eventNames: Array.from(eventNames).sort(),
+    lastSequence: Math.max(Number(actionState.lastSequence || 0), sequence || 0),
+    lastRenderedAt: sceneObjectName ? new Date().toISOString() : actionState.lastRenderedAt,
+    lastAgentPosition: agent && renderPoint ? { agentId: agent.id || null, x: agent.x, y: agent.y, floor: agent._floor || 1 } : actionState.lastAgentPosition,
+    agentRendered: actionState.agentRendered || agentRendered,
+    objectStateUpdated: actionState.objectStateUpdated || objectStateUpdated,
+    sceneObjectNames: sceneObjectName ? [...(actionState.sceneObjectNames || []), sceneObjectName].slice(-40) : (actionState.sceneObjectNames || []),
+  });
+
+  return { applied: true, duplicate: alreadyApplied, sequence, agentRendered, objectStateUpdated, sceneObjectName };
+}
+
+function getLiveAgentModeAnimationReplayUrl({ actionId = null, since = null, limit = 100 } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    client: 'main3d-live-animation-replay',
+    version: LIVE_AGENT_MODE_ANIMATION_REPLAY_CLIENT_VERSION,
+    sessionId: getLiveModeWorldClientSessionId(),
+  });
+  if (actionId) params.set('actionId', actionId);
+  else if (since != null) params.set('since', String(since));
+  return `${LIVE_AGENT_MODE_ANIMATION_REPLAY_ENDPOINT}?${params.toString()}`;
+}
+
+async function syncLiveAgentModeAnimationEvents({ actionId = null, force = false, limit = 100 } = {}) {
+  if (!scene || !agentGroup || !renderer) {
+    setLiveAgentModeAnimationReplayState({ ok: false, reason: 'scene_not_ready' });
+    return false;
+  }
+  try {
+    const response = await fetch(getLiveAgentModeAnimationReplayUrl({
+      actionId,
+      since: force || actionId ? null : _liveAgentModeAnimationReplayCursor,
+      limit,
+    }), { cache: 'no-store' });
+    if (!response.ok) {
+      setLiveAgentModeAnimationReplayState({ ok: false, reason: `http_${response.status}` });
+      return false;
+    }
+    const payload = await response.json();
+    const events = Array.isArray(payload.events) ? payload.events : [];
+    let maxCursor = _liveAgentModeAnimationReplayCursor;
+    let applied = 0;
+    let rendered = 0;
+    for (const event of events) {
+      const result = applyLiveAgentModeReplayEvent(event, { allowDuplicateRender: Boolean(actionId) });
+      if (result.applied) applied += 1;
+      if (result.sceneObjectName) rendered += 1;
+      if (Number.isFinite(Number(event.sequence))) maxCursor = Math.max(maxCursor, Number(event.sequence));
+    }
+    if (!actionId) _liveAgentModeAnimationReplayCursor = maxCursor;
+    const state = setLiveAgentModeAnimationReplayState({
+      ok: true,
+      reason: null,
+      lastCursor: _liveAgentModeAnimationReplayCursor,
+      nextCursor: payload.nextCursor ?? null,
+      appliedEventCount: _liveAgentModeAnimationReplayState.appliedEventCount + applied,
+      renderedEventCount: _liveAgentModeAnimationReplayState.renderedEventCount + rendered,
+      lastFetchEventCount: events.length,
+    });
+    return actionId ? (state.actions || {})[String(actionId)] || state : state;
+  } catch (error) {
+    setLiveAgentModeAnimationReplayState({ ok: false, error: error?.message || String(error) });
+    return false;
+  }
+}
+
+function startLiveAgentModeAnimationReplaySync() {
+  if (_liveAgentModeAnimationReplayTimer) return;
+  _liveAgentModeAnimationReplayTimer = setInterval(() => {
+    syncLiveAgentModeAnimationEvents();
+  }, 1500);
+  setTimeout(() => syncLiveAgentModeAnimationEvents({ force: true }), 0);
+}
+
 async function syncActiveBarberChairWorldActions() {
   try {
     const response = await fetch(getLiveModeWorldClientMarkerUrl());
@@ -35055,8 +35380,11 @@ function startBarberChairWorldActionSync() {
 }
 
 startBarberChairWorldActionSync();
+startLiveAgentModeAnimationReplaySync();
 window.__VWSyncActiveBarberChairWorldActions = syncActiveBarberChairWorldActions;
 window.__VWSyncActiveLiveModeWorldActions = syncActiveBarberChairWorldActions;
+window.__VWSyncLiveAgentModeAnimationEvents = syncLiveAgentModeAnimationEvents;
+window.__VWReplayLiveAgentModeAnimationEvents = syncLiveAgentModeAnimationEvents;
 
 function makeCapabilityContextMenuItem({ buildingId, furnitureIndex, action }) {
   const presentation = getContextMenuCapabilityPresentation(action.worldAction?.capabilityTag);
