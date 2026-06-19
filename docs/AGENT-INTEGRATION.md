@@ -128,9 +128,13 @@ POST /api/agent/<agent-id>/live-mode
 POST /api/agent-model/actions
 POST /api/world-actions
 POST /api/agents/<agent-id>/move
+POST /api/live-agent-mode/tool-calls
+GET /api/live-agent-mode/in-world-communications
 ```
 
 Agent Live Mode is license-gated. Agents must not bypass or weaken that gate.
+
+Live Agent Mode communication tools such as `say_to_agent`, `speak_to_room`, `send_message`, and `think_aloud` create My Virtual World in-world communication events. These are persisted separately from provider relay messages and include nearby observer/reaction opportunities. Memory tools such as `add_memory` and `write_diary` persist resident memory entries in the Live Agent loop state.
 
 ## World Actions and Movement
 

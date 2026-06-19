@@ -36,6 +36,7 @@ Do not commit this data. It can contain private user world state, local configur
 - agent profiles
 - decorations
 - Agent Life world action state
+- Live Agent Mode loop state, in-world communication events, agent memories, and relationships
 
 The `initialized` flag prevents starter buildings from being recreated after users delete them.
 
@@ -140,6 +141,8 @@ Agents come from connected provider systems such as OpenClaw or Hermes. The worl
 - Agent Live Mode setting
 
 Provider-owned runtime details stay with the provider. My Virtual World stores only the world-facing metadata it needs to render and coordinate agents.
+
+Live Agent Mode persists world-owned resident context under `agentLife.liveModeLoop.agents.<agent-id>.memory`. In-world messages are stored under `agentLife.inWorldCommunications` with `providerRelay: false`, while relationship summaries live in `agentRelationships`.
 
 ## World Actions
 
