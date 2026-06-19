@@ -656,8 +656,25 @@ try:
 
     proposal = module._live_agent_provider_bridge_propose(agent, agent_state, state, turn, {"proposalType": "note", "summary": "fake bridge proposal"})
     assert proposal["ok"] is True, proposal
+    assert "proposal" not in proposal, proposal
     tool_result = module._live_agent_provider_bridge_handle_tool_call_result(agent, agent_state, state, turn, {"tool": "say_to_agent", "status": "completed"})
     assert tool_result["ok"] is True and tool_result["handled"] is True, tool_result
+
+    ok, rejected, rejected_status = module.create_agent_live_mode_action_request({
+        "agentId": "fake-agent",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke-provider-bridge", "requestId": "proposal-contract", "roles": ["participant"]},
+        "actionType": "world.modifyRoad",
+        "capabilityTag": "world.terrain",
+        "target": {"kind": "world-point", "x": 0, "z": 0},
+        "priority": "normal",
+        "params": {"reason": "smoke-provider-bridge-proposal"},
+    })
+    assert ok is False and rejected_status == 422, (ok, rejected_status, rejected)
+    operator_proposal = rejected["error"]["details"]["operatorProposal"]
+    saved_state = module.get_live_agent_loop_state(persist_migration=True)
+    stored_proposal = next(item for item in saved_state["operatorProposals"] if item["id"] == operator_proposal["id"])
+    assert stored_proposal["providerBridge"]["providerKind"] == "fake", stored_proposal
+    assert "proposal" not in stored_proposal["providerBridge"], stored_proposal["providerBridge"]
 
     timeout_agent = {"id": "timeout-agent", "statusKey": "timeout-agent", "agentId": "timeout-agent", "providerKind": "fake-timeout"}
     timeout_state = module._live_agent_loop_agent_state(state, "timeout-agent")

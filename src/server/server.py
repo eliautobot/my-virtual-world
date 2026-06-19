@@ -5579,6 +5579,21 @@ def _resolve_agent_id(agent_id):
         candidates = {str(agent.get("id") or ""), str(agent.get("statusKey") or "")}
         if wanted in candidates:
             return str(agent.get("statusKey") or agent.get("id"))
+    profiles = load_world_meta().get("agentProfiles") or {}
+    if isinstance(profiles, dict):
+        for profile_id, profile in profiles.items():
+            if not isinstance(profile, dict) or not isinstance(profile.get("providerKind"), str):
+                continue
+            resolved = str(profile.get("statusKey") or profile.get("id") or profile_id).strip()
+            candidates = {
+                str(profile_id or ""),
+                str(profile.get("id") or ""),
+                str(profile.get("statusKey") or ""),
+                str(profile.get("providerAgentId") or ""),
+                str(profile.get("profile") or ""),
+            }
+            if resolved and wanted in candidates:
+                return resolved
     return None
 
 
@@ -8926,10 +8941,23 @@ def _live_agent_provider_bridge_propose(agent, agent_state, state, turn, proposa
         result = _live_agent_provider_bridge_call(hook, context, timeout_sec=context.get("timeoutSec"))
         _live_agent_provider_bridge_record(state, provider_kind, "propose", status="completed" if result.get("ok") else "fallback", fallback=not result.get("ok"), timeout=bool(result.get("timeout")), capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
         if result.get("ok"):
-            return result
+            compact = {k: _copy_jsonable(v) for k, v in result.items() if k not in {"proposal", "payload", "state", "agentState"}}
+            compact.setdefault("schemaVersion", LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION)
+            compact.setdefault("operation", "propose")
+            compact.setdefault("providerKind", provider_kind)
+            compact.setdefault("fallback", False)
+            compact.setdefault("capabilityGaps", adapter.get("capabilityGaps"))
+            return compact
     else:
         _live_agent_provider_bridge_record(state, provider_kind, "propose", status="fallback", fallback=True, capabilities=adapter.get("capabilities"), gaps=adapter.get("capabilityGaps"))
-    return {"ok": True, "fallback": True, "proposal": proposal if isinstance(proposal, dict) else {}, "providerKind": provider_kind}
+    return {
+        "ok": True,
+        "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
+        "operation": "propose",
+        "fallback": True,
+        "providerKind": provider_kind,
+        "capabilityGaps": adapter.get("capabilityGaps"),
+    }
 
 
 def _live_agent_provider_bridge_handle_tool_call_result(agent, agent_state, state, turn, tool_call_result, *, timeout_sec=None):

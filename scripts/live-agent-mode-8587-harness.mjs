@@ -426,7 +426,7 @@ async function seedAcceptanceWorld() {
       },
       liveModeLoop: {
         schemaVersion: 'agent-live-mode-loop/v1',
-        enabled: true,
+        enabled: false,
         intervalSec: 300,
         worldClientRequired: false,
         minActionIntervalSec: 30,
@@ -475,7 +475,7 @@ async function seedAcceptanceWorld() {
   assert(peerLiveMode?.ok === true && peerLiveMode.agentLiveModeEnabled === true, 'failed to enable Live Agent Mode for acceptance peer', peerLiveMode);
 
   const loopSettings = await postJson('/api/agent-live-loop', {
-    enabled: true,
+    enabled: false,
     worldClientRequired: false,
     intervalSec: 300,
     clearWorldClientActivity: true,
@@ -575,7 +575,41 @@ function liveAgentSource(requestId) {
   };
 }
 
+function worldActionAgentId(action) {
+  return action?.agentId || action?.actor?.id || action?.agent?.id || action?.source?.agentId || '';
+}
+
+async function waitForAgentWorldActionIdle(agentId, context) {
+  let lastActive = [];
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const active = await fetchJson('/api/world-actions/active');
+    assert(Array.isArray(active), 'active world actions response was not a list', active);
+    lastActive = active.filter((action) => worldActionAgentId(action) === agentId);
+    if (lastActive.length === 0) return;
+    await delay(250);
+  }
+  throw new Error(`${context || 'agent'} still has active world actions for ${agentId}\n${JSON.stringify(lastActive, null, 2)}`);
+}
+
+async function waitForLiveAgentSchedulerIdle(context, timeoutMs = 45000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    const status = await fetchJson('/api/agent-live-loop');
+    const activeTurn = status?.runtime?.scheduler?.activeTurn || status?.state?.scheduler?.activeTurn || null;
+    if (!activeTurn || activeTurn.status !== 'running') return;
+    last = activeTurn;
+    await postJson('/api/agent-live-loop/tick', {
+      reason: `${context || '8587-wait-scheduler-idle'}-recover`,
+      force: true,
+    });
+    await delay(1000);
+  }
+  throw new Error(`${context || 'scheduler'} still has an active live-agent turn\n${JSON.stringify(last, null, 2)}`);
+}
+
 async function requestLiveAgentAction({ actionType, capabilityTag, target, params = {}, agentId = TEST_AGENT_ID, requestId }) {
+  await waitForAgentWorldActionIdle(agentId, `before ${actionType}`);
   let result = null;
   const body = {
     agentId,
@@ -589,16 +623,22 @@ async function requestLiveAgentAction({ actionType, capabilityTag, target, param
       ...params,
     },
   };
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       result = await postJson('/api/agent-model/actions', body);
       break;
     } catch (error) {
       const errorCode = error?.payload?.error?.code;
       const detailCode = error?.payload?.error?.details?.error?.code;
-      if (attempt < 2 && errorCode === 'backend_executor_failed' && detailCode === 'not_found') {
-        console.log(`INFO: retrying transient backend executor lookup for ${actionType}.`);
-        await delay(250);
+      const transitionDetails = error?.payload?.error?.details?.error?.details || {};
+      const transientBackendRace = errorCode === 'backend_executor_failed' && (
+        detailCode === 'not_found'
+        || (detailCode === 'illegal_transition' && transitionDetails.from === 'routing' && transitionDetails.to === 'in_progress')
+      );
+      if (attempt < maxAttempts && transientBackendRace) {
+        console.log(`INFO: retrying transient backend executor race for ${actionType}.`);
+        await delay(350);
         continue;
       }
       throw error;
@@ -608,6 +648,7 @@ async function requestLiveAgentAction({ actionType, capabilityTag, target, param
   const action = result.action || result.worldAction?.action;
   assert(action?.status === 'completed', `Live Agent action ${actionType} did not complete`, action || result);
   assert(action?.execution?.clientRequiredForProgress === false, `Live Agent action ${actionType} should be backend-owned`, action?.execution);
+  await waitForAgentWorldActionIdle(agentId, `after ${actionType}`);
   return { result, action };
 }
 
@@ -651,6 +692,18 @@ async function executeLiveAgentTool(tool, args, { agentId = TEST_AGENT_ID, reque
   });
   assert(result?.ok === true, `Live Agent tool ${tool} failed`, result);
   return result;
+}
+
+async function waitForCommunicationEvent(eventId) {
+  let last = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const communications = await fetchJson('/api/live-agent-mode/in-world-communications?limit=50');
+    last = communications;
+    const event = (communications.events || []).find((item) => item?.id === eventId);
+    if (event) return { communications, event };
+    await delay(250);
+  }
+  throw new Error(`communication log did not persist event ${eventId}\n${JSON.stringify(last, null, 2)}`);
 }
 
 async function verifyFakeProviderBridgeContract() {
@@ -716,6 +769,9 @@ async function verifySocialCommunicationAndMemory() {
     tone: 'friendly',
   }, { requestId: '8587-acceptance-say-to-agent' });
   assert(speech.toolCall?.result?.reactionOpportunityCount >= 1, 'say_to_agent should create a reaction opportunity', speech);
+  const speechEvent = speech.toolCall?.result?.communicationEvent;
+  assert(speechEvent?.id && speechEvent.targetAgentId === PEER_AGENT_ID, 'say_to_agent should return the peer-targeted communication event', speech);
+  const { communications } = await waitForCommunicationEvent(speechEvent.id);
 
   const memory = await executeLiveAgentTool('add_memory', {
     text: 'Acceptance harness confirmed backend-owned Live Agent Mode can communicate and remember.',
@@ -727,7 +783,6 @@ async function verifySocialCommunicationAndMemory() {
   const memoryReflectionId = memory.toolCall?.result?.reflection?.id || memory.toolCall?.result?.state?.memory?.reflections?.at?.(-1)?.id;
   assert(memoryReflectionId, 'memory state should include a synthesized reflection from accumulated stream entries', memory);
 
-  const communications = await fetchJson(`/api/live-agent-mode/in-world-communications?agentId=${encodeURIComponent(TEST_AGENT_ID)}&limit=20`);
   assert((communications.events || []).some((event) => event.targetAgentId === PEER_AGENT_ID), 'communication log should include the peer-targeted event', communications);
 
   const retrieved = await fetchJson(`/api/live-agent-mode/memory/${encodeURIComponent(TEST_AGENT_ID)}?query=${encodeURIComponent('communicate remember acceptance')}&limit=5`);
@@ -781,6 +836,9 @@ async function verifyOperatorControlsStopTurns() {
 
 async function verifyFailureInjectionReplanning() {
   const configured = await postJson('/api/agent-live-loop', {
+    enabled: false,
+    clearPause: true,
+    clearKillSwitch: true,
     agentId: TEST_AGENT_ID,
     failureInjection: {
       agentId: TEST_AGENT_ID,
@@ -794,8 +852,9 @@ async function verifyFailureInjectionReplanning() {
   });
   assert(configured?.ok === true, 'failed to configure expected-outcome failure injection', configured);
   assert(configured.changed?.failureInjection?.remaining === 1, 'failure injection setting was not activated', configured.changed);
+  await waitForLiveAgentSchedulerIdle('8587-before-failure-injection');
 
-  const runTargetAgentTick = async (reason, predicate, attempts = 4) => {
+  const runTargetAgentTick = async (reason, predicate, attempts = 10) => {
     const misses = [];
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       const tick = await postJson('/api/agent-live-loop/tick', {
@@ -807,7 +866,11 @@ async function verifyFailureInjectionReplanning() {
       if (action?.agentId === TEST_AGENT_ID && (!predicate || predicate(action, tick))) {
         return { tick, action };
       }
+      const activeTurnRunning = (tick.skipped || []).some((item) => item?.reason === 'active-turn-running');
       misses.push({ attempt, agentId: action?.agentId, actionId: action?.actionId, loopActionId: action?.loopActionId, skipped: tick.skipped });
+      if (activeTurnRunning && attempt < attempts) {
+        await waitForLiveAgentSchedulerIdle(`${reason}-active-turn-${attempt}`);
+      }
     }
     throw new Error(`${reason} did not reach ${TEST_AGENT_ID}\n${JSON.stringify(misses, null, 2)}`);
   };
@@ -844,6 +907,17 @@ async function verifyFailureInjectionReplanning() {
 
   console.log(`PASS: failure injection mismatch ${injectedAction.actionId}/${injectedAction.loopActionId} replanned to ${recoveryAction.actionId}/${recoveryAction.loopActionId}.`);
   return { injectedAction, recoveryAction, metrics };
+}
+
+async function enableLoopForFinalMetrics() {
+  const enabled = await postJson('/api/agent-live-loop', {
+    enabled: true,
+    clearPause: true,
+    clearKillSwitch: true,
+    actor: '8587-acceptance-final-metrics',
+  });
+  assert(enabled?.ok === true && enabled.state?.enabled === true, 'failed to re-enable loop for final metrics', enabled);
+  return enabled;
 }
 
 function verifyMultiAgentSocialMetrics(metrics) {
@@ -1123,6 +1197,7 @@ try {
   await verifyOperatorControlsStopTurns();
   await verifyFailureInjectionReplanning();
   await verifyFakeProviderBridgeContract();
+  await enableLoopForFinalMetrics();
   await verifyAutonomyMetrics({ expectedTurns: ACCEPTANCE_TURN_TARGET });
   await runBrowserReplayRenderCheck(backendSeries.proofs[0].actionId);
 
