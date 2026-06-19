@@ -1344,14 +1344,18 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "minActionIntervalSec": 120,
     "clientActiveTtlSec": 45,
     "maxActionsPerTick": 1,
-    "worldClientRequired": True,
-    "eventRetention": 100,
+    "worldClientRequired": False,
+    "eventRetention": 250,
     "memoryRetention": 24,
     "reflectionRetention": 18,
     "feedbackRetention": 24,
     "settledActionRetention": 120,
     "planRetention": 12,
     "planMaxRetries": 2,
+    "turnRetention": 80,
+    "turnTimeoutSec": 240,
+    "turnRetryBackoffSec": 45,
+    "maxTurnRetries": 2,
     "operatorProposalRetention": 24,
     "decisionMode": "planner-v2",
 }
@@ -3926,13 +3930,19 @@ def default_live_agent_loop_state():
         "pauseReason": None,
         "pausedAt": None,
         "pausedBy": None,
+        "killSwitch": {"active": False, "reason": None, "activatedAt": None, "activatedBy": None},
         "intervalSec": LIVE_AGENT_LOOP_DEFAULTS["intervalSec"],
         "minActionIntervalSec": LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"],
         "clientActiveTtlSec": LIVE_AGENT_LOOP_DEFAULTS["clientActiveTtlSec"],
         "maxActionsPerTick": LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"],
         "worldClientRequired": LIVE_AGENT_LOOP_DEFAULTS["worldClientRequired"],
+        "turnTimeoutSec": LIVE_AGENT_LOOP_DEFAULTS["turnTimeoutSec"],
+        "turnRetryBackoffSec": LIVE_AGENT_LOOP_DEFAULTS["turnRetryBackoffSec"],
+        "maxTurnRetries": LIVE_AGENT_LOOP_DEFAULTS["maxTurnRetries"],
         "agents": {},
         "events": [],
+        "eventSequence": 0,
+        "scheduler": {"lastAgentId": None, "turnSequence": 0, "activeTurn": None, "turnHistory": []},
         "stats": {"ticks": 0, "actionsCreated": 0, "dryRuns": 0, "errors": 0},
     }
 
@@ -3949,6 +3959,79 @@ def _normalize_int(value, fallback, *, minimum=None, maximum=None):
     return number
 
 
+def _live_agent_loop_normalize_kill_switch(raw):
+    source = raw if isinstance(raw, dict) else {}
+    active = bool(source.get("active") or source.get("killSwitchActive"))
+    activated_at = source.get("activatedAt") or source.get("at")
+    if not _parse_isoish_epoch(activated_at):
+        activated_at = _utc_now_iso() if active else None
+    return {
+        "active": active,
+        "reason": _live_agent_loop_clean_plan_text(source.get("reason") or source.get("killSwitchReason"), limit=180) if active else None,
+        "activatedAt": activated_at if active else None,
+        "activatedBy": _live_agent_loop_clean_plan_text(source.get("activatedBy") or source.get("actor") or source.get("by"), limit=120) if active else None,
+    }
+
+
+def _live_agent_loop_turn_status(value, default="running"):
+    status = str(value or default).strip().lower().replace("-", "_")
+    allowed = {"running", "completed", "skipped", "failed", "aborted", "stale_recovered"}
+    return status if status in allowed else default
+
+
+def _live_agent_loop_normalize_turn_record(turn):
+    if not isinstance(turn, dict):
+        return None
+    turn_id = _live_agent_loop_clean_plan_text(turn.get("id"), limit=180)
+    agent_id = _live_agent_loop_clean_plan_text(turn.get("agentId"), limit=120)
+    if not turn_id or not agent_id:
+        return None
+    now_iso = _utc_now_iso()
+    normalized = {
+        "schemaVersion": "agent-live-mode-turn/v1",
+        "id": turn_id,
+        "agentId": agent_id,
+        "status": _live_agent_loop_turn_status(turn.get("status")),
+        "reason": _live_agent_loop_clean_plan_text(turn.get("reason"), limit=120) or "timer",
+        "startedAt": turn.get("startedAt") if _parse_isoish_epoch(turn.get("startedAt")) else now_iso,
+        "endedAt": turn.get("endedAt") if _parse_isoish_epoch(turn.get("endedAt")) else None,
+        "attempt": _normalize_int(turn.get("attempt"), 1, minimum=1, maximum=50),
+        "owner": _live_agent_loop_clean_plan_text(turn.get("owner"), limit=160) or "server.py#live_agent_loop_tick",
+        "forced": bool(turn.get("forced")),
+        "dryRun": bool(turn.get("dryRun")),
+    }
+    for key, limit in (("actionId", 180), ("loopActionId", 120), ("planId", 180), ("skipReason", 180), ("failureReason", 240), ("retryAfter", 80)):
+        cleaned = _live_agent_loop_clean_plan_text(turn.get(key), limit=limit)
+        if cleaned:
+            normalized[key] = cleaned
+    for key in ("decision", "outcome", "error", "details"):
+        if isinstance(turn.get(key), dict):
+            normalized[key] = _copy_jsonable(turn.get(key))
+    if isinstance(turn.get("durationSec"), (int, float)):
+        normalized["durationSec"] = round(max(0, float(turn["durationSec"])), 3)
+    return normalized
+
+
+def _live_agent_loop_normalize_scheduler(raw):
+    source = raw if isinstance(raw, dict) else {}
+    scheduler = {
+        "lastAgentId": _live_agent_loop_clean_plan_text(source.get("lastAgentId"), limit=120),
+        "turnSequence": _normalize_int(source.get("turnSequence"), 0, minimum=0, maximum=1000000000),
+        "activeTurn": None,
+        "turnHistory": [],
+    }
+    active_turn = _live_agent_loop_normalize_turn_record(source.get("activeTurn"))
+    if active_turn and active_turn.get("status") == "running":
+        scheduler["activeTurn"] = active_turn
+    history = []
+    for item in source.get("turnHistory") or []:
+        normalized = _live_agent_loop_normalize_turn_record(item)
+        if normalized and normalized.get("status") != "running":
+            history.append(normalized)
+    scheduler["turnHistory"] = history[-LIVE_AGENT_LOOP_DEFAULTS["turnRetention"]:]
+    return scheduler
+
+
 def _normalize_live_agent_loop_state(raw):
     state = default_live_agent_loop_state()
     if isinstance(raw, dict):
@@ -3959,6 +4042,13 @@ def _normalize_live_agent_loop_state(raw):
         state["minActionIntervalSec"] = _normalize_int(raw.get("minActionIntervalSec"), state["minActionIntervalSec"], minimum=30, maximum=3600)
         state["clientActiveTtlSec"] = _normalize_int(raw.get("clientActiveTtlSec"), state["clientActiveTtlSec"], minimum=10, maximum=300)
         state["maxActionsPerTick"] = _normalize_int(raw.get("maxActionsPerTick"), state["maxActionsPerTick"], minimum=1, maximum=5)
+        state["turnTimeoutSec"] = _normalize_int(raw.get("turnTimeoutSec"), state["turnTimeoutSec"], minimum=30, maximum=3600)
+        state["turnRetryBackoffSec"] = _normalize_int(raw.get("turnRetryBackoffSec"), state["turnRetryBackoffSec"], minimum=5, maximum=1800)
+        state["maxTurnRetries"] = _normalize_int(raw.get("maxTurnRetries"), state["maxTurnRetries"], minimum=0, maximum=10)
+        state["killSwitch"] = _live_agent_loop_normalize_kill_switch(raw.get("killSwitch") if isinstance(raw.get("killSwitch"), dict) else raw)
+        state["eventSequence"] = _normalize_int(raw.get("eventSequence"), 0, minimum=0, maximum=1000000000)
+        if isinstance(raw.get("scheduler"), dict):
+            state["scheduler"] = _live_agent_loop_normalize_scheduler(raw["scheduler"])
         if isinstance(raw.get("agents"), dict):
             state["agents"] = {str(k): v for k, v in raw["agents"].items() if isinstance(v, dict)}
         if isinstance(raw.get("events"), list):
@@ -4088,6 +4178,157 @@ def _live_agent_loop_pause_status(state, now_epoch=None):
     }
 
 
+def _live_agent_loop_kill_switch_status(state):
+    kill_switch = _live_agent_loop_normalize_kill_switch(state.get("killSwitch"))
+    return {
+        "active": bool(kill_switch.get("active")),
+        "reason": kill_switch.get("reason") if kill_switch.get("active") else None,
+        "activatedAt": kill_switch.get("activatedAt") if kill_switch.get("active") else None,
+        "activatedBy": kill_switch.get("activatedBy") if kill_switch.get("active") else None,
+    }
+
+
+def _live_agent_loop_scheduler_state(state):
+    scheduler = _live_agent_loop_normalize_scheduler(state.get("scheduler"))
+    state["scheduler"] = scheduler
+    return scheduler
+
+
+def _live_agent_loop_order_agents_for_turn(enabled_agents, last_agent_id=None):
+    agents = [agent for agent in (enabled_agents or []) if isinstance(agent, dict) and agent.get("agentId")]
+    if not agents or not last_agent_id:
+        return agents
+    index = next((i for i, agent in enumerate(agents) if agent.get("agentId") == last_agent_id), -1)
+    if index < 0:
+        return agents
+    return agents[index + 1:] + agents[:index + 1]
+
+
+def _live_agent_loop_retry_after_epoch(agent_state):
+    raw = agent_state.get("retryTurnAfter") if isinstance(agent_state, dict) else None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    parsed = _parse_isoish_epoch(raw)
+    return float(parsed or 0)
+
+
+def _live_agent_loop_clear_turn_retry(agent_state):
+    if not isinstance(agent_state, dict):
+        return
+    agent_state["turnRetryCount"] = 0
+    agent_state.pop("retryTurnAfter", None)
+    agent_state.pop("lastTurnRetry", None)
+
+
+def _live_agent_loop_schedule_turn_retry(state, agent_id, agent_state, reason, now_epoch=None, turn=None):
+    now_epoch = float(now_epoch or time.time())
+    max_retries = _normalize_int(state.get("maxTurnRetries"), LIVE_AGENT_LOOP_DEFAULTS["maxTurnRetries"], minimum=0, maximum=10)
+    retries = _normalize_int(agent_state.get("turnRetryCount"), 0, minimum=0, maximum=50) + 1
+    agent_state["turnRetryCount"] = retries
+    retry_after = None
+    if retries <= max_retries:
+        base_backoff = _normalize_int(state.get("turnRetryBackoffSec"), LIVE_AGENT_LOOP_DEFAULTS["turnRetryBackoffSec"], minimum=5, maximum=1800)
+        retry_after = _epoch_to_utc_iso(now_epoch + min(1800, base_backoff * retries))
+        agent_state["retryTurnAfter"] = retry_after
+    else:
+        agent_state.pop("retryTurnAfter", None)
+    retry = {
+        "at": _epoch_to_utc_iso(now_epoch),
+        "reason": _live_agent_loop_clean_plan_text(reason, limit=240) or "turn failed",
+        "retries": retries,
+        "maxRetries": max_retries,
+        "retryAfter": retry_after,
+        "exhausted": retries > max_retries,
+    }
+    agent_state["lastTurnRetry"] = retry
+    _live_agent_loop_add_event(state, "turn-retry-scheduled" if retry_after else "turn-retries-exhausted", agent_id=agent_id, turn_id=(turn or {}).get("id"), details=retry)
+    return retry
+
+
+def _live_agent_loop_begin_turn(state, agent_id, reason, *, now_epoch=None, force=False, dry_run=False):
+    now_epoch = float(now_epoch or time.time())
+    scheduler = _live_agent_loop_scheduler_state(state)
+    sequence = _normalize_int(scheduler.get("turnSequence"), 0, minimum=0, maximum=1000000000) + 1
+    scheduler["turnSequence"] = sequence
+    safe_agent = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(agent_id or "agent")).strip("-") or "agent"
+    turn = {
+        "schemaVersion": "agent-live-mode-turn/v1",
+        "id": f"turn-{int(now_epoch * 1000)}-{sequence}-{safe_agent}",
+        "agentId": agent_id,
+        "status": "running",
+        "reason": str(reason or "timer")[:120],
+        "startedAt": _epoch_to_utc_iso(now_epoch),
+        "endedAt": None,
+        "attempt": 1,
+        "owner": "server.py#live_agent_loop_tick",
+        "forced": bool(force),
+        "dryRun": bool(dry_run),
+    }
+    scheduler["activeTurn"] = turn
+    _live_agent_loop_add_event(state, "turn-started", agent_id=agent_id, turn_id=turn["id"], details={"reason": turn["reason"], "forced": bool(force), "dryRun": bool(dry_run)})
+    return turn
+
+
+def _live_agent_loop_finish_turn(state, turn, status, *, outcome=None, error=None, now_epoch=None):
+    if not isinstance(turn, dict):
+        return None
+    now_epoch = float(now_epoch or time.time())
+    started_epoch = _parse_isoish_epoch(turn.get("startedAt")) or now_epoch
+    completed = dict(turn)
+    completed["status"] = _live_agent_loop_turn_status(status, default="completed")
+    completed["endedAt"] = _epoch_to_utc_iso(now_epoch)
+    completed["durationSec"] = round(max(0, now_epoch - started_epoch), 3)
+    if isinstance(outcome, dict):
+        completed["outcome"] = _copy_jsonable(outcome)
+        for key in ("actionId", "loopActionId", "planId", "skipReason", "failureReason", "retryAfter"):
+            if outcome.get(key):
+                completed[key] = outcome.get(key)
+    if isinstance(error, dict):
+        completed["error"] = _copy_jsonable(error)
+    scheduler = _live_agent_loop_scheduler_state(state)
+    active = scheduler.get("activeTurn") if isinstance(scheduler.get("activeTurn"), dict) else {}
+    if active.get("id") == completed.get("id"):
+        scheduler["activeTurn"] = None
+    scheduler["lastAgentId"] = completed.get("agentId") or scheduler.get("lastAgentId")
+    history = [item for item in scheduler.get("turnHistory") or [] if isinstance(item, dict) and item.get("id") != completed.get("id")]
+    normalized = _live_agent_loop_normalize_turn_record(completed)
+    if normalized:
+        history.append(normalized)
+    scheduler["turnHistory"] = history[-LIVE_AGENT_LOOP_DEFAULTS["turnRetention"]:]
+    _live_agent_loop_add_event(
+        state,
+        f"turn-{completed['status']}",
+        agent_id=completed.get("agentId"),
+        turn_id=completed.get("id"),
+        details={k: completed.get(k) for k in ("status", "reason", "durationSec", "actionId", "loopActionId", "planId", "skipReason", "failureReason", "retryAfter") if completed.get(k) is not None},
+    )
+    return normalized or completed
+
+
+def _live_agent_loop_recover_stale_turn(state, *, now_epoch=None):
+    now_epoch = float(now_epoch or time.time())
+    scheduler = _live_agent_loop_scheduler_state(state)
+    active = scheduler.get("activeTurn")
+    if not isinstance(active, dict) or active.get("status") != "running":
+        return None
+    started_epoch = _parse_isoish_epoch(active.get("startedAt")) or now_epoch
+    timeout = _normalize_int(state.get("turnTimeoutSec"), LIVE_AGENT_LOOP_DEFAULTS["turnTimeoutSec"], minimum=30, maximum=3600)
+    age_sec = max(0, int(now_epoch - started_epoch))
+    if age_sec < timeout:
+        return None
+    agent_id = active.get("agentId")
+    if agent_id:
+        agent_state = _live_agent_loop_agent_state(state, agent_id)
+        _live_agent_loop_schedule_turn_retry(state, agent_id, agent_state, "stale running turn recovered", now_epoch=now_epoch, turn=active)
+    return _live_agent_loop_finish_turn(
+        state,
+        active,
+        "stale_recovered",
+        outcome={"failureReason": "stale-turn-timeout", "ageSec": age_sec, "timeoutSec": timeout},
+        now_epoch=now_epoch,
+    )
+
+
 def _live_agent_loop_stat(container, key, amount=1):
     stats = container.setdefault("stats", {})
     try:
@@ -4097,13 +4338,17 @@ def _live_agent_loop_stat(container, key, amount=1):
     return stats[key]
 
 
-def _live_agent_loop_add_event(state, event_type, *, agent_id=None, details=None):
+def _live_agent_loop_add_event(state, event_type, *, agent_id=None, details=None, turn_id=None):
     retention = LIVE_AGENT_LOOP_DEFAULTS["eventRetention"]
-    event = {"at": _utc_now_iso(), "type": event_type}
+    sequence = _normalize_int(state.get("eventSequence"), 0, minimum=0, maximum=1000000000) + 1
+    state["eventSequence"] = sequence
+    event = {"id": f"live-loop-event-{sequence}", "sequence": sequence, "at": _utc_now_iso(), "type": event_type}
     if agent_id:
         event["agentId"] = agent_id
+    if turn_id:
+        event["turnId"] = turn_id
     if isinstance(details, dict):
-        event["details"] = details
+        event["details"] = _copy_jsonable(details)
     events = [event for event in (state.get("events") or []) if isinstance(event, dict)]
     events.append(event)
     state["events"] = events[-retention:]
@@ -5948,8 +6193,12 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
         now_iso = _utc_now_iso()
         world_client = _live_agent_loop_world_client_status(state)
         pause = _live_agent_loop_pause_status(state, now_epoch=now_epoch)
+        kill_switch = _live_agent_loop_kill_switch_status(state)
+        stale_turn_recovered = None if dry_run else _live_agent_loop_recover_stale_turn(state, now_epoch=now_epoch)
         stale_expired = [] if dry_run else _live_agent_loop_reconcile_stale_active_behaviors(state, now_epoch=now_epoch)
         settled_refreshed = False if dry_run else _live_agent_loop_refresh_completed_outcomes(state)
+        scheduler = _live_agent_loop_scheduler_state(state)
+        active_turn = scheduler.get("activeTurn")
         result = {
             "ok": True,
             "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
@@ -5958,8 +6207,18 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             "dryRun": bool(dry_run),
             "worldClient": world_client,
             "pause": pause,
+            "killSwitch": kill_switch,
+            "staleTurnRecovered": stale_turn_recovered,
             "staleExpired": stale_expired,
             "settledRefreshed": settled_refreshed,
+            "scheduler": {
+                "singleAgentTurnOwnership": True,
+                "lastAgentId": scheduler.get("lastAgentId"),
+                "activeTurn": active_turn,
+                "turnSequence": scheduler.get("turnSequence"),
+                "turnRetryBackoffSec": state.get("turnRetryBackoffSec"),
+                "maxTurnRetries": state.get("maxTurnRetries"),
+            },
             "enabledAgents": [],
             "actionsCreated": [],
             "skipped": [],
@@ -5986,147 +6245,213 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 save_live_agent_loop_state(state)
             return result
 
-        if pause.get("active") and not force:
+        if kill_switch.get("active"):
+            result["disabledReason"] = "live agent loop kill switch is active"
+            result["skipped"].append({"reason": "kill-switch-active", "killSwitch": kill_switch})
+            _live_agent_loop_add_event(state, "kill-switch-active", details=kill_switch)
+            if not dry_run:
+                save_live_agent_loop_state(state)
+            return result
+
+        if pause.get("active") and not dry_run:
             result["disabledReason"] = "live agent loop is paused"
             result["skipped"].append({"reason": "loop-paused", "pause": pause})
             if not dry_run:
                 save_live_agent_loop_state(state)
             return result
 
+        if isinstance(active_turn, dict) and active_turn.get("status") == "running" and not dry_run:
+            result["disabledReason"] = "another live agent turn is already running"
+            result["skipped"].append({"reason": "active-turn-running", "turn": active_turn})
+            _live_agent_loop_add_event(state, "turn-ownership-blocked", agent_id=active_turn.get("agentId"), turn_id=active_turn.get("id"), details={"reason": "active-turn-running"})
+            save_live_agent_loop_state(state)
+            return result
+
         enabled_agents = _live_agent_loop_enabled_roster()
         result["enabledAgents"] = [{"agentId": a.get("agentId"), "name": a.get("name"), "providerKind": a.get("providerKind")} for a in enabled_agents]
-        actions_created_this_tick = 0
         max_actions = _normalize_int(state.get("maxActionsPerTick"), LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"], minimum=1, maximum=5)
         cooldown = _normalize_int(state.get("minActionIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"], minimum=30, maximum=3600)
+        result["scheduler"]["maxActionsPerTick"] = max_actions
+        turn_processed = False
 
-        for agent in enabled_agents:
+        for agent in _live_agent_loop_order_agents_for_turn(enabled_agents, scheduler.get("lastAgentId")):
             agent_id = agent.get("agentId")
             agent_state = _live_agent_loop_agent_state(state, agent_id)
             if agent_state.get("enabled") is False and not force:
                 result["skipped"].append({"agentId": agent_id, "reason": "agent-loop-disabled"})
                 continue
-
-            agent_state["lastHeartbeatAt"] = now_iso
-            _live_agent_loop_stat(agent_state, "ticks")
-            _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World")
-            perception = _live_agent_loop_build_perception(agent_id, agent_state, world_client=world_client, now_epoch=now_epoch)
-
-            active = perception.get("active") or []
-            if active:
-                _live_agent_loop_stat(agent_state, "skippedActive")
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "active-behavior", "active": active, "perceptionAt": perception.get("at")}
-                _live_agent_loop_presence(agent_id, "working", "Living in My Virtual World")
-                result["skipped"].append({"agentId": agent_id, "reason": "active-behavior", "active": agent_state["lastOutcome"]["active"]})
+            retry_after = _live_agent_loop_retry_after_epoch(agent_state)
+            if retry_after and now_epoch < retry_after and not force:
+                result["skipped"].append({"agentId": agent_id, "reason": "turn-retry-backoff", "retryAfter": _epoch_to_utc_iso(retry_after), "lastTurnRetry": agent_state.get("lastTurnRetry")})
                 continue
 
-            if state.get("worldClientRequired") and not world_client.get("active") and not force:
-                _live_agent_loop_stat(agent_state, "skippedNoClient")
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "world-client-inactive", "worldClient": world_client, "perceptionAt": perception.get("at")}
-                result["skipped"].append({"agentId": agent_id, "reason": "world-client-inactive", "worldClient": world_client})
-                continue
+            turn = _live_agent_loop_begin_turn(state, agent_id, reason, now_epoch=now_epoch, force=force, dry_run=dry_run)
+            result["turn"] = turn
+            result["scheduler"]["activeTurn"] = turn
+            turn_processed = True
+            if not dry_run:
+                save_live_agent_loop_state(state)
 
-            next_allowed = _live_agent_loop_next_allowed_epoch(agent_state)
-            if next_allowed and now_epoch < next_allowed and not force:
-                _live_agent_loop_stat(agent_state, "skippedCooldown")
-                result["skipped"].append({"agentId": agent_id, "reason": "cooldown", "nextAllowedAt": _epoch_to_utc_iso(next_allowed)})
-                continue
+            try:
+                agent_state["lastHeartbeatAt"] = now_iso
+                _live_agent_loop_stat(agent_state, "ticks")
+                _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World")
+                perception = _live_agent_loop_build_perception(agent_id, agent_state, world_client=world_client, now_epoch=now_epoch)
 
-            selected, decision = _live_agent_loop_select_next_action(agent_id, agent_state, perception)
-            result["decisions"].append({"agentId": agent_id, "decision": agent_state.get("lastDecision")})
-            if not selected:
-                _live_agent_loop_stat(agent_state, "targetMisses")
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "no-available-loop-target", "decision": decision, "perceptionAt": perception.get("at")}
-                result["skipped"].append({"agentId": agent_id, "reason": "no-available-loop-target", "decision": agent_state.get("lastDecision")})
-                continue
+                active = perception.get("active") or []
+                if active:
+                    _live_agent_loop_stat(agent_state, "skippedActive")
+                    agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "active-behavior", "active": active, "perceptionAt": perception.get("at")}
+                    _live_agent_loop_presence(agent_id, "working", "Living in My Virtual World")
+                    skipped = {"agentId": agent_id, "reason": "active-behavior", "active": agent_state["lastOutcome"]["active"]}
+                    result["skipped"].append(skipped)
+                    _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": "active-behavior", "details": skipped}, now_epoch=now_epoch)
+                    break
 
-            action_def = selected["action"]
-            visible_action_contract = _live_agent_visible_action_contract(action_def.get("actionType")) or {}
-            adaptive_cooldown = _live_agent_loop_cooldown_for_decision(cooldown, decision)
-            plan = _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, persist=not dry_run)
-            plan_step = _live_agent_loop_plan_current_step(plan)
-            request_id = f"live-loop-{agent_id}-{int(now_epoch)}"
-            payload = {
-                "agentId": agent_id,
-                "source": {
-                    "kind": "agent-live-mode",
-                    "requestedBy": "server.py#live_agent_loop_tick",
-                    "requestId": request_id,
-                    "surface": "agent-live-loop",
-                    "roles": ["participant"],
-                    "loopId": LIVE_AGENT_LOOP_SCHEMA_VERSION,
-                },
-                "actionType": action_def["actionType"],
-                "capabilityTag": action_def["capabilityTag"],
-                "target": selected["target"],
-                "priority": "normal",
-                "params": {
-                    "reason": "continuous-presence",
-                    "loopActionId": action_def["id"],
-                    "loopActionLabel": action_def.get("label"),
-                    "loopNeed": action_def.get("need"),
-                    "planSchemaVersion": LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION,
-                    "planId": plan.get("id") if isinstance(plan, dict) else None,
-                    "planStepId": plan_step.get("id") if isinstance(plan_step, dict) else None,
-                    "decisionMode": decision.get("mode") if isinstance(decision, dict) else LIVE_AGENT_LOOP_DEFAULTS["decisionMode"],
-                    "decisionReason": decision.get("reason") if isinstance(decision, dict) else None,
-                    "perceptionAt": perception.get("at"),
-                    "worldClientActive": world_client.get("active"),
-                    "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
-                    "visibleActionPolicy": "visible-world-execution-required",
-                    "visibleWorldAction": True,
-                    "hiddenWorldMutationAllowed": False,
-                    "visibleExecutor": visible_action_contract.get("clientExecutor"),
-                    "requiresPhysicalAgentPresence": True,
-                },
-            }
-            if isinstance(selected.get("buildSite"), dict):
-                payload["params"]["buildSite"] = _copy_jsonable(selected.get("buildSite"))
-            if dry_run:
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload, "wouldPlan": plan, "decision": decision, "perception": perception}
-                result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected, "decision": agent_state.get("lastDecision"), "plan": plan})
-                continue
+                if state.get("worldClientRequired") and not world_client.get("active") and not force:
+                    _live_agent_loop_stat(agent_state, "skippedNoClient")
+                    agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "world-client-inactive", "worldClient": world_client, "perceptionAt": perception.get("at")}
+                    skipped = {"agentId": agent_id, "reason": "world-client-inactive", "worldClient": world_client}
+                    result["skipped"].append(skipped)
+                    _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": "world-client-inactive", "details": skipped}, now_epoch=now_epoch)
+                    break
 
-            ok, created, status = create_agent_live_mode_action_request(payload)
-            if ok:
-                action = created.get("action") if isinstance(created, dict) else {}
-                action_id = action.get("id") if isinstance(action, dict) else None
-                _live_agent_loop_stat(agent_state, "actionsCreated")
-                _live_agent_loop_stat(state, "actionsCreated")
-                agent_state["lastActionAt"] = now_iso
-                agent_state["lastActionId"] = action_id
-                agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
-                stored_plan = _live_agent_loop_mark_plan_action_created(state, agent_id, agent_state, plan, action_id, now_iso)
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown}
-                _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
-                _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "target": selected["target"], "decision": agent_state.get("lastDecision")})
-                result["actionsCreated"].append({"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown})
-                actions_created_this_tick += 1
-            else:
+                next_allowed = _live_agent_loop_next_allowed_epoch(agent_state)
+                if next_allowed and now_epoch < next_allowed and not force:
+                    _live_agent_loop_stat(agent_state, "skippedCooldown")
+                    skipped = {"agentId": agent_id, "reason": "cooldown", "nextAllowedAt": _epoch_to_utc_iso(next_allowed)}
+                    result["skipped"].append(skipped)
+                    _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": "cooldown", "details": skipped}, now_epoch=now_epoch)
+                    break
+
+                selected, decision = _live_agent_loop_select_next_action(agent_id, agent_state, perception)
+                result["decisions"].append({"agentId": agent_id, "decision": agent_state.get("lastDecision")})
+                if not selected:
+                    _live_agent_loop_stat(agent_state, "targetMisses")
+                    agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "no-available-loop-target", "decision": decision, "perceptionAt": perception.get("at")}
+                    skipped = {"agentId": agent_id, "reason": "no-available-loop-target", "decision": agent_state.get("lastDecision")}
+                    result["skipped"].append(skipped)
+                    _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": "no-available-loop-target", "decision": agent_state.get("lastDecision")}, now_epoch=now_epoch)
+                    break
+
+                action_def = selected["action"]
+                visible_action_contract = _live_agent_visible_action_contract(action_def.get("actionType")) or {}
+                adaptive_cooldown = _live_agent_loop_cooldown_for_decision(cooldown, decision)
+                plan = _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, persist=not dry_run)
+                plan_step = _live_agent_loop_plan_current_step(plan)
+                request_id = f"live-loop-{agent_id}-{int(now_epoch)}"
+                payload = {
+                    "agentId": agent_id,
+                    "source": {
+                        "kind": "agent-live-mode",
+                        "requestedBy": "server.py#live_agent_loop_tick",
+                        "requestId": request_id,
+                        "surface": "agent-live-loop",
+                        "roles": ["participant"],
+                        "loopId": LIVE_AGENT_LOOP_SCHEMA_VERSION,
+                        "turnId": turn.get("id"),
+                    },
+                    "actionType": action_def["actionType"],
+                    "capabilityTag": action_def["capabilityTag"],
+                    "target": selected["target"],
+                    "priority": "normal",
+                    "params": {
+                        "reason": "continuous-presence",
+                        "turnId": turn.get("id"),
+                        "loopActionId": action_def["id"],
+                        "loopActionLabel": action_def.get("label"),
+                        "loopNeed": action_def.get("need"),
+                        "planSchemaVersion": LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION,
+                        "planId": plan.get("id") if isinstance(plan, dict) else None,
+                        "planStepId": plan_step.get("id") if isinstance(plan_step, dict) else None,
+                        "decisionMode": decision.get("mode") if isinstance(decision, dict) else LIVE_AGENT_LOOP_DEFAULTS["decisionMode"],
+                        "decisionReason": decision.get("reason") if isinstance(decision, dict) else None,
+                        "perceptionAt": perception.get("at"),
+                        "worldClientActive": world_client.get("active"),
+                        "backendTurnOwner": True,
+                        "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+                        "visibleActionPolicy": "visible-world-execution-required",
+                        "visibleWorldAction": True,
+                        "hiddenWorldMutationAllowed": False,
+                        "visibleExecutor": visible_action_contract.get("clientExecutor"),
+                        "requiresPhysicalAgentPresence": True,
+                    },
+                }
+                if isinstance(selected.get("buildSite"), dict):
+                    payload["params"]["buildSite"] = _copy_jsonable(selected.get("buildSite"))
+                if dry_run:
+                    agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload, "wouldPlan": plan, "decision": decision, "perception": perception}
+                    result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected, "decision": agent_state.get("lastDecision"), "plan": plan, "turnId": turn.get("id")})
+                    _live_agent_loop_finish_turn(state, turn, "completed", outcome={"dryRun": True, "loopActionId": action_def["id"], "planId": plan.get("id") if isinstance(plan, dict) else None}, now_epoch=now_epoch)
+                    break
+
+                ok, created, status_code = create_agent_live_mode_action_request(payload)
+                if ok:
+                    action = created.get("action") if isinstance(created, dict) else {}
+                    action_id = action.get("id") if isinstance(action, dict) else None
+                    _live_agent_loop_stat(agent_state, "actionsCreated")
+                    _live_agent_loop_stat(state, "actionsCreated")
+                    _live_agent_loop_clear_turn_retry(agent_state)
+                    agent_state["lastActionAt"] = now_iso
+                    agent_state["lastActionId"] = action_id
+                    agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
+                    stored_plan = _live_agent_loop_mark_plan_action_created(state, agent_id, agent_state, plan, action_id, now_iso)
+                    agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown, "turnId": turn.get("id")}
+                    _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
+                    _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, turn_id=turn.get("id"), details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "target": selected["target"], "decision": agent_state.get("lastDecision")})
+                    created_row = {"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown, "turnId": turn.get("id")}
+                    result["actionsCreated"].append(created_row)
+                    _live_agent_loop_finish_turn(state, turn, "completed", outcome={**created_row, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id")}, now_epoch=now_epoch)
+                else:
+                    _live_agent_loop_stat(agent_state, "errors")
+                    _live_agent_loop_stat(state, "errors")
+                    agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + min(45, cooldown))
+                    failed_plan = _live_agent_loop_mark_plan_action_request_failed(state, agent_id, agent_state, plan, created, now_iso)
+                    retry = _live_agent_loop_schedule_turn_retry(state, agent_id, agent_state, "action request failed", now_epoch=now_epoch, turn=turn)
+                    agent_state["lastOutcome"] = {"at": now_iso, "status": "error", "httpStatus": status_code, "error": created, "planId": (failed_plan or plan or {}).get("id"), "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "turnId": turn.get("id"), "retry": retry}
+                    _live_agent_loop_add_feedback(state, agent_id, "error", "Live Mode action request failed.", {"httpStatus": status_code, "error": created})
+                    _live_agent_loop_add_event(state, "action-error", agent_id=agent_id, turn_id=turn.get("id"), details={"httpStatus": status_code, "error": created, "retry": retry})
+                    error_row = {"agentId": agent_id, "httpStatus": status_code, "error": created, "turnId": turn.get("id"), "retry": retry}
+                    result["errors"].append(error_row)
+                    _live_agent_loop_finish_turn(state, turn, "failed", outcome={"failureReason": "action-request-failed", "planId": (failed_plan or plan or {}).get("id"), "retryAfter": retry.get("retryAfter")}, error=created, now_epoch=now_epoch)
+            except Exception as e:
                 _live_agent_loop_stat(agent_state, "errors")
                 _live_agent_loop_stat(state, "errors")
-                agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + min(45, cooldown))
-                failed_plan = _live_agent_loop_mark_plan_action_request_failed(state, agent_id, agent_state, plan, created, now_iso)
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "error", "httpStatus": status, "error": created, "planId": (failed_plan or plan or {}).get("id"), "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at")}
-                _live_agent_loop_add_feedback(state, agent_id, "error", "Live Mode action request failed.", {"httpStatus": status, "error": created})
-                _live_agent_loop_add_event(state, "action-error", agent_id=agent_id, details={"httpStatus": status, "error": created})
-                result["errors"].append({"agentId": agent_id, "httpStatus": status, "error": created})
+                retry = _live_agent_loop_schedule_turn_retry(state, agent_id, agent_state, str(e), now_epoch=now_epoch, turn=turn)
+                error_body = _api_error("turn_runtime_error", "Live Agent turn failed while running on the backend scheduler.", details={"message": str(e), "retry": retry})
+                result["errors"].append({"agentId": agent_id, "error": error_body, "turnId": turn.get("id"), "retry": retry})
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "error", "error": error_body, "turnId": turn.get("id"), "retry": retry}
+                _live_agent_loop_finish_turn(state, turn, "failed", outcome={"failureReason": "turn-runtime-error", "retryAfter": retry.get("retryAfter")}, error=error_body, now_epoch=now_epoch)
+            break
 
-            if actions_created_this_tick >= max_actions:
-                break
+        if not turn_processed and not enabled_agents:
+            result["skipped"].append({"reason": "no-live-mode-agents-enabled"})
+        elif not turn_processed and enabled_agents:
+            result["skipped"].append({"reason": "no-agent-ready-for-turn"})
 
+        scheduler = _live_agent_loop_scheduler_state(state)
+        if isinstance(result.get("turn"), dict):
+            completed_turn = next((item for item in reversed(scheduler.get("turnHistory") or []) if item.get("id") == result["turn"].get("id")), None)
+            if completed_turn:
+                result["turn"] = completed_turn
+        result["scheduler"] = {**result["scheduler"], **scheduler}
         if not dry_run:
-            save_live_agent_loop_state(state)
+            saved = save_live_agent_loop_state(state)
+            result["scheduler"] = {**result["scheduler"], **(saved.get("scheduler") or {})}
         return result
 
 
 def get_live_agent_loop_status():
     with _live_agent_loop_lock:
         state = get_live_agent_loop_state(persist_migration=True)
+        stale_turn_recovered = _live_agent_loop_recover_stale_turn(state)
         stale_expired = _live_agent_loop_reconcile_stale_active_behaviors(state)
-        if _live_agent_loop_refresh_completed_outcomes(state) or stale_expired:
+        if _live_agent_loop_refresh_completed_outcomes(state) or stale_expired or stale_turn_recovered:
             state = save_live_agent_loop_state(state)
         thread_alive = bool(_live_agent_loop_thread and _live_agent_loop_thread.is_alive())
         pause = _live_agent_loop_pause_status(state)
+        kill_switch = _live_agent_loop_kill_switch_status(state)
+        scheduler = _live_agent_loop_scheduler_state(state)
         return {
             "ok": True,
             "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
@@ -6135,15 +6460,67 @@ def get_live_agent_loop_status():
                 "threadAlive": thread_alive,
                 "worldClient": _live_agent_loop_world_client_status(state),
                 "pause": pause,
+                "killSwitch": kill_switch,
+                "scheduler": {
+                    "singleAgentTurnOwnership": True,
+                    "activeTurn": scheduler.get("activeTurn"),
+                    "lastAgentId": scheduler.get("lastAgentId"),
+                    "turnHistoryCount": len(scheduler.get("turnHistory") or []),
+                    "turnSequence": scheduler.get("turnSequence"),
+                    "turnTimeoutSec": state.get("turnTimeoutSec"),
+                    "turnRetryBackoffSec": state.get("turnRetryBackoffSec"),
+                    "maxTurnRetries": state.get("maxTurnRetries"),
+                },
+                "staleTurnRecovered": stale_turn_recovered,
                 "staleExpired": stale_expired,
                 "guardrails": {
                     "worldClientRequired": state.get("worldClientRequired"),
+                    "browserTabRequiredForScheduler": False,
                     "maxActionsPerTick": state.get("maxActionsPerTick"),
                     "minActionIntervalSec": state.get("minActionIntervalSec"),
                     "onlyAgentsWithAgentLiveModeEnabled": True,
+                    "pauseStopsNewTurns": True,
+                    "killSwitchStopsNewTurns": True,
                 },
             },
         }
+
+
+def get_live_agent_loop_events(agent_id=None, limit=None, since=None):
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=True)
+        resolved_agent_id = None
+        if agent_id:
+            resolved_agent_id = _resolve_agent_id(agent_id)
+            if not resolved_agent_id:
+                return False, _api_error("agent_not_found", "agentId must reference an existing live-mode-capable agent.", details={"agentId": agent_id}), 404
+        limit_value = _normalize_int(limit, LIVE_AGENT_LOOP_DEFAULTS["eventRetention"], minimum=1, maximum=LIVE_AGENT_LOOP_DEFAULTS["eventRetention"]) if limit not in (None, "") else LIVE_AGENT_LOOP_DEFAULTS["eventRetention"]
+        since_sequence = _normalize_int(since, 0, minimum=0, maximum=1000000000) if since not in (None, "") else 0
+        events = []
+        for event in state.get("events") or []:
+            if not isinstance(event, dict):
+                continue
+            if resolved_agent_id and event.get("agentId") != resolved_agent_id:
+                continue
+            sequence = _normalize_int(event.get("sequence"), 0, minimum=0, maximum=1000000000)
+            if since_sequence and sequence <= since_sequence:
+                continue
+            events.append(_copy_jsonable(event))
+        scheduler = _live_agent_loop_scheduler_state(state)
+        return True, {
+            "ok": True,
+            "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
+            "agentId": resolved_agent_id,
+            "limit": limit_value,
+            "since": since_sequence,
+            "events": events[-limit_value:],
+            "cursor": state.get("eventSequence") or 0,
+            "turns": {
+                "activeTurn": scheduler.get("activeTurn"),
+                "recent": (scheduler.get("turnHistory") or [])[-min(limit_value, LIVE_AGENT_LOOP_DEFAULTS["turnRetention"]):],
+            },
+            "policy": {"readOnly": True, "durableStore": "world-meta.json#agentLife.liveModeLoop.events"},
+        }, 200
 
 
 def get_live_agent_loop_perception(agent_id):
@@ -6484,6 +6861,27 @@ def update_live_agent_loop_settings(payload):
                     return False, _api_error("invalid_payload", f"{key} must be a boolean."), 400
                 state[key] = payload[key]
                 changed[key] = payload[key]
+        kill_switch_value_present = "killSwitchActive" in payload or "killSwitch" in payload
+        if kill_switch_value_present:
+            raw_value = payload.get("killSwitchActive") if "killSwitchActive" in payload else payload.get("killSwitch")
+            if not isinstance(raw_value, bool):
+                return False, _api_error("invalid_payload", "killSwitch/killSwitchActive must be a boolean."), 400
+            if raw_value:
+                state["killSwitch"] = {
+                    "active": True,
+                    "reason": str(payload.get("killSwitchReason") or payload.get("reason") or "operator-kill-switch").strip()[:180],
+                    "activatedAt": now_iso,
+                    "activatedBy": str(payload.get("activatedBy") or payload.get("actor") or "api").strip()[:120],
+                }
+            else:
+                state["killSwitch"] = {"active": False, "reason": None, "activatedAt": None, "activatedBy": None}
+            changed["killSwitch"] = _live_agent_loop_kill_switch_status(state)
+        if "clearKillSwitch" in payload:
+            if not isinstance(payload.get("clearKillSwitch"), bool):
+                return False, _api_error("invalid_payload", "clearKillSwitch must be a boolean."), 400
+            if payload.get("clearKillSwitch"):
+                state["killSwitch"] = {"active": False, "reason": None, "activatedAt": None, "activatedBy": None}
+                changed["killSwitch"] = {"active": False, "cleared": True}
         if "clearWorldClientActivity" in payload:
             if not isinstance(payload.get("clearWorldClientActivity"), bool):
                 return False, _api_error("invalid_payload", "clearWorldClientActivity must be a boolean."), 400
@@ -6519,6 +6917,9 @@ def update_live_agent_loop_settings(payload):
             "minActionIntervalSec": (30, 3600),
             "clientActiveTtlSec": (10, 300),
             "maxActionsPerTick": (1, 5),
+            "turnTimeoutSec": (30, 3600),
+            "turnRetryBackoffSec": (5, 1800),
+            "maxTurnRetries": (0, 10),
         }
         for key, (minimum, maximum) in int_limits.items():
             if key in payload:
@@ -6531,9 +6932,13 @@ def update_live_agent_loop_settings(payload):
             agent_state = _live_agent_loop_agent_state(state, agent_id)
             agent_state["enabled"] = payload["agentEnabled"]
             changed["agentEnabled"] = {"agentId": agent_id, "enabled": payload["agentEnabled"]}
+        if agent_id and payload.get("clearTurnRetry") is True:
+            agent_state = _live_agent_loop_agent_state(state, agent_id)
+            _live_agent_loop_clear_turn_retry(agent_state)
+            changed["turnRetry"] = {"agentId": agent_id, "cleared": True}
         _live_agent_loop_add_event(state, "settings-updated", details=changed)
         saved = save_live_agent_loop_state(state)
-        return True, {"ok": True, "state": saved, "changed": changed, "runtime": {"pause": _live_agent_loop_pause_status(saved), "worldClient": _live_agent_loop_world_client_status(saved)}}, 200
+        return True, {"ok": True, "state": saved, "changed": changed, "runtime": {"pause": _live_agent_loop_pause_status(saved), "killSwitch": _live_agent_loop_kill_switch_status(saved), "worldClient": _live_agent_loop_world_client_status(saved), "scheduler": _live_agent_loop_scheduler_state(saved)}}, 200
 
 
 def start_live_agent_loop():
@@ -11411,6 +11816,14 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             ok, result, status = get_live_agent_loop_operator_timeline(agent_id, limit=limit, include_resolved=include_resolved)
             return self._send_json(result, status)
 
+        if path == "/api/agent-live-loop/events":
+            qs = urllib.parse.parse_qs(parsed.query)
+            agent_id = (qs.get("agentId") or qs.get("agent") or [None])[0]
+            limit = (qs.get("limit") or [None])[0]
+            since = (qs.get("since") or qs.get("cursor") or [None])[0]
+            ok, result, status = get_live_agent_loop_events(agent_id=agent_id, limit=limit, since=since)
+            return self._send_json(result, status)
+
         if path == "/api/agent-live-loop":
             return self._send_json(get_live_agent_loop_status())
 
@@ -12175,8 +12588,8 @@ def main():
     # Derive working/idle from Virtual World's own live OpenClaw gateway state.
     initialize_live_presence()
 
-    # Keep enabled Live Mode agents present across restarts; action creation stays
-    # gated by an active world client polling /api/world-actions/active.
+    # Keep enabled Live Mode agents present across restarts. The backend owns
+    # scheduler turns even when no browser is polling for world-action playback.
     start_live_agent_loop()
 
     handler = VWHandler
