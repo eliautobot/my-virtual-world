@@ -577,6 +577,152 @@ finally:
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(liveAgentProviderClawMindMetricsCheck.status, 0, `Live Agent provider/ClawMind metrics check failed\n${liveAgentProviderClawMindMetricsCheck.stderr || liveAgentProviderClawMindMetricsCheck.stdout}`);
 
+const liveAgentProviderBridgeContractCheck = spawnSync('python3', ['-B', '-c', `
+import importlib.util
+import os
+import shutil
+import tempfile
+import time
+from pathlib import Path
+
+path = Path("src/server/server.py")
+data_dir = tempfile.mkdtemp(prefix="vw-smoke-provider-bridge-")
+os.environ["VW_DATA_DIR"] = data_dir
+os.environ["_VW_INT"] = "1"
+try:
+    spec = importlib.util.spec_from_file_location("vw_server", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
+    module.get_roster = lambda: [
+        {"id": "fake-agent", "statusKey": "fake-agent", "name": "Fake Agent", "providerKind": "fake"},
+        {"id": "timeout-agent", "statusKey": "timeout-agent", "name": "Timeout Agent", "providerKind": "fake-timeout"},
+    ]
+
+    meta = module.load_world_meta()
+    meta["agentProfiles"] = {
+        "fake-agent": {"agentLiveModeEnabled": True, "providerKind": "fake"},
+        "timeout-agent": {"agentLiveModeEnabled": True, "providerKind": "fake-timeout"},
+    }
+    module.save_world_meta(meta)
+    module.save_building("bridge-office", {
+        "id": "bridge-office",
+        "name": "Bridge Office",
+        "worldX": 0,
+        "worldY": 0,
+        "widthTiles": 12,
+        "heightTiles": 10,
+        "interior": {
+            "furniture": [{
+                "id": "bridge-cooler",
+                "objectInstanceId": "bridge-cooler",
+                "type": "waterCooler",
+                "catalogId": "waterCooler",
+                "x": 4,
+                "z": 4,
+                "floor": 1,
+                "buildingFloor": 1,
+            }]
+        },
+    })
+
+    def fake_decide(context):
+        return {
+            "decision": {
+                "selectedActionId": "hydrate-water-cooler",
+                "selectedActionLabel": "Get water",
+                "score": 1.2,
+                "reason": "fake provider selected the deterministic water affordance",
+                "candidateActionsConsidered": [{"id": "hydrate-water-cooler", "score": 1.2}],
+            }
+        }
+
+    def timeout_decide(context):
+        context["state"]["leakedTimeoutMutationBeforeSleep"] = True
+        context["agentState"]["leakedTimeoutMutationBeforeSleep"] = True
+        time.sleep(0.05)
+        context["state"]["leakedTimeoutMutation"] = True
+        context["state"].setdefault("providerBridge", {})["leakedTimeoutMutation"] = True
+        context["agentState"]["leakedTimeoutMutation"] = True
+        return {"decision": {"selectedActionId": "hydrate-water-cooler"}}
+
+    def invalid_decide(context):
+        return {
+            "decision": {
+                "selectedActionId": "does-not-exist",
+                "selectedActionLabel": "Invalid provider selection",
+                "score": 9.9,
+                "reason": "fake provider selected an unavailable action",
+            }
+        }
+
+    module._live_agent_register_provider_bridge("fake", hooks={"decide": fake_decide})
+    module._live_agent_register_provider_bridge("fake-timeout", hooks={"decide": timeout_decide})
+    module._live_agent_register_provider_bridge("fake-invalid", hooks={"decide": invalid_decide})
+
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    turn = {"id": "bridge-turn", "agentId": "fake-agent"}
+    agent = {"id": "fake-agent", "statusKey": "fake-agent", "agentId": "fake-agent", "providerKind": "fake"}
+    agent_state = module._live_agent_loop_agent_state(state, "fake-agent")
+    perception = module._live_agent_provider_bridge_observe(agent, agent_state, state, turn, world_client={"active": False}, now_epoch=time.time())
+    assert perception["providerBridge"]["operation"] == "observe", perception.get("providerBridge")
+    selected, decision = module._live_agent_provider_bridge_decide(agent, agent_state, state, turn, perception)
+    assert selected and selected["action"]["id"] == "hydrate-water-cooler", selected
+    assert decision["providerBridge"]["fallbackUsed"] is False, decision["providerBridge"]
+
+    proposal = module._live_agent_provider_bridge_propose(agent, agent_state, state, turn, {"proposalType": "note", "summary": "fake bridge proposal"})
+    assert proposal["ok"] is True, proposal
+    assert "proposal" not in proposal, proposal
+    tool_result = module._live_agent_provider_bridge_handle_tool_call_result(agent, agent_state, state, turn, {"tool": "say_to_agent", "status": "completed"})
+    assert tool_result["ok"] is True and tool_result["handled"] is True, tool_result
+
+    ok, rejected, rejected_status = module.create_agent_live_mode_action_request({
+        "agentId": "fake-agent",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke-provider-bridge", "requestId": "proposal-contract", "roles": ["participant"]},
+        "actionType": "world.modifyRoad",
+        "capabilityTag": "world.terrain",
+        "target": {"kind": "world-point", "x": 0, "z": 0},
+        "priority": "normal",
+        "params": {"reason": "smoke-provider-bridge-proposal"},
+    })
+    assert ok is False and rejected_status == 422, (ok, rejected_status, rejected)
+    operator_proposal = rejected["error"]["details"]["operatorProposal"]
+    saved_state = module.get_live_agent_loop_state(persist_migration=True)
+    stored_proposal = next(item for item in saved_state["operatorProposals"] if item["id"] == operator_proposal["id"])
+    assert stored_proposal["providerBridge"]["providerKind"] == "fake", stored_proposal
+    assert "proposal" not in stored_proposal["providerBridge"], stored_proposal["providerBridge"]
+
+    timeout_agent = {"id": "timeout-agent", "statusKey": "timeout-agent", "agentId": "timeout-agent", "providerKind": "fake-timeout"}
+    timeout_state = module._live_agent_loop_agent_state(state, "timeout-agent")
+    timeout_perception = module._live_agent_provider_bridge_observe(timeout_agent, timeout_state, state, {"id": "timeout-turn", "agentId": "timeout-agent"}, world_client={"active": False}, now_epoch=time.time())
+    timeout_selected, timeout_decision = module._live_agent_provider_bridge_decide(timeout_agent, timeout_state, state, {"id": "timeout-turn", "agentId": "timeout-agent"}, timeout_perception, timeout_sec=0.001)
+    assert timeout_selected and timeout_decision["providerBridge"]["fallbackUsed"] is True, timeout_decision["providerBridge"]
+    time.sleep(0.08)
+    assert "leakedTimeoutMutationBeforeSleep" not in state, state.get("leakedTimeoutMutationBeforeSleep")
+    assert "leakedTimeoutMutationBeforeSleep" not in timeout_state, timeout_state.get("leakedTimeoutMutationBeforeSleep")
+    assert "leakedTimeoutMutation" not in state, state.get("leakedTimeoutMutation")
+    assert "leakedTimeoutMutation" not in state.get("providerBridge", {}), state.get("providerBridge")
+    assert "leakedTimeoutMutation" not in timeout_state, timeout_state.get("leakedTimeoutMutation")
+
+    invalid_agent = {"id": "fake-agent", "statusKey": "fake-agent", "agentId": "fake-agent", "providerKind": "fake-invalid"}
+    invalid_selected, invalid_decision = module._live_agent_provider_bridge_decide(invalid_agent, agent_state, state, {"id": "invalid-turn", "agentId": "fake-agent"}, perception)
+    assert invalid_selected and invalid_decision["providerBridge"]["fallbackUsed"] is True, invalid_decision["providerBridge"]
+    assert invalid_decision["providerBridge"]["fallbackReason"] == "provider-selection-unresolved", invalid_decision["providerBridge"]
+    assert invalid_decision["providerBridge"]["rejectedSelectedActionId"] == "does-not-exist", invalid_decision["providerBridge"]
+
+    metrics = module._live_agent_provider_adapter_metrics(module.get_roster(), loop_state=state)
+    assert metrics["bridgeSchemaVersion"] == "agent-live-mode-provider-bridge/v1", metrics
+    assert metrics["bridgeMetrics"]["decisionCalls"] >= 2, metrics["bridgeMetrics"]
+    assert metrics["bridgeMetrics"]["timeouts"] >= 1, metrics["bridgeMetrics"]
+    assert metrics["bridgeMetrics"]["fallbacks"] >= 1, metrics["bridgeMetrics"]
+    assert "fake" in metrics["capabilityGapsByProvider"], metrics["capabilityGapsByProvider"]
+    assert isinstance(metrics["providerKinds"]["fake"]["bridge"]["capabilityGaps"], list), metrics["providerKinds"]["fake"]
+    print("live agent provider bridge contract ok")
+finally:
+    shutil.rmtree(data_dir, ignore_errors=True)
+`], { cwd: root, encoding: 'utf8' });
+assert.equal(liveAgentProviderBridgeContractCheck.status, 0, `Live Agent provider bridge contract check failed\n${liveAgentProviderBridgeContractCheck.stderr || liveAgentProviderBridgeContractCheck.stdout}`);
+
 const licensePy = read('src/server/license.py');
 const serverPy = read('src/server/server.py');
 const indexHtml = read('src/client/index.html');
