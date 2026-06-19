@@ -640,6 +640,13 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
   assert(metrics.providerSupport?.optimization?.modelCallsDuringMetrics === 0, 'provider support metrics must not call models', metrics.providerSupport?.optimization);
   assert(metrics.pianoArchitecture?.schemaVersion === 'agent-live-mode-piano-architecture/v1', 'PIANO metrics should use the architecture schema', metrics.pianoArchitecture);
   assert(metrics.pianoArchitecture?.checklist?.allModuleContractsReady === true, 'PIANO metrics should confirm all module contracts', metrics.pianoArchitecture);
+  assert(metrics.pianoArchitecture?.checklist?.allModulesExecuted === true, 'PIANO metrics should confirm all modules executed', metrics.pianoArchitecture);
+  for (const [moduleName, moduleMetrics] of Object.entries(metrics.pianoArchitecture?.modules || {})) {
+    assert(moduleMetrics?.runtimeEvidence === true, `PIANO module ${moduleName} should have runtime evidence`, moduleMetrics);
+    assert(Number(moduleMetrics?.executionCount || 0) > 0, `PIANO module ${moduleName} should report execution count`, moduleMetrics);
+    assert(moduleMetrics?.lastExecutionAt, `PIANO module ${moduleName} should report last execution time`, moduleMetrics);
+    assert(typeof moduleMetrics?.lastLatencyMs === 'number', `PIANO module ${moduleName} should report latency`, moduleMetrics);
+  }
   assert(metrics.pianoArchitecture?.optimization?.heavyWorldScan === false, 'PIANO metrics must stay lightweight', metrics.pianoArchitecture?.optimization);
   console.log(`PASS: autonomy metrics ${JSON.stringify({
     completedTurnCount: metrics.metrics.completedTurnCount,
@@ -650,6 +657,7 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
     relationshipCount: metrics.metrics.relationshipCount,
     providerKindCount: metrics.providerSupport.providerKindCount,
     pianoContractGaps: metrics.pianoArchitecture.contractGaps,
+    pianoRuntimeEvidenceGaps: metrics.pianoArchitecture.runtimeEvidenceGaps,
     gaps: metrics.gaps,
   })}`);
   return metrics;

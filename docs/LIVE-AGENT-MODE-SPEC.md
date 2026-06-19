@@ -76,7 +76,7 @@ GET /api/live-agent-mode/metrics
 
 It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, reaction opportunities, memory entries, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
 
-It also reports lightweight provider and PIANO-style architecture readiness:
+It also reports lightweight provider readiness plus PIANO-style architecture contract readiness and runtime execution evidence:
 
 - `providerSupport.schemaVersion = agent-live-mode-provider-adapter-contract/v1`
 - `providerSupport.providerKinds`
@@ -86,9 +86,14 @@ It also reports lightweight provider and PIANO-style architecture readiness:
 - `pianoArchitecture.schemaVersion = agent-live-mode-piano-architecture/v1`
 - `pianoArchitecture.modules`
 - `pianoArchitecture.checklist.allModuleContractsReady`
+- `pianoArchitecture.checklist.allModulesExecuted`
+- `pianoArchitecture.modules.*.executionCount`
+- `pianoArchitecture.modules.*.lastExecutionAt`
+- `pianoArchitecture.modules.*.lastLatencyMs`
+- `pianoArchitecture.runtime.traceCount`
 - `pianoArchitecture.optimization.heavyWorldScan = false`
 
-Provider and PIANO metrics intentionally use cached roster/world state only. They must not call OpenClaw, Hermes, Codex, or any model provider while serving the metrics endpoint.
+Provider and PIANO metrics intentionally use cached roster/world state plus bounded persisted module traces only. They must not call OpenClaw, Hermes, Codex, or any model provider while serving the metrics endpoint.
 
 For manual browser checks, keep the same isolated server open:
 
@@ -236,25 +241,26 @@ Required modules:
 
 The important product rule is that modules produce proposals and evidence; only the backend executor mutates world state.
 
-Readiness is measured by:
+Readiness and runtime execution are measured separately by:
 
 ```json
 {
   "pianoArchitecture": {
     "schemaVersion": "agent-live-mode-piano-architecture/v1",
     "modules": {
-      "perception": {"contractReady": true, "runtimeEvidence": true},
-      "memory": {"contractReady": true, "runtimeEvidence": true},
-      "reflection": {"contractReady": true, "runtimeEvidence": false},
-      "planning": {"contractReady": true, "runtimeEvidence": true},
-      "socialReasoning": {"contractReady": true, "runtimeEvidence": true},
-      "conversation": {"contractReady": true, "runtimeEvidence": true},
-      "actionExecution": {"contractReady": true, "runtimeEvidence": true},
-      "outcomeAwareness": {"contractReady": true, "runtimeEvidence": true},
-      "orchestrator": {"contractReady": true, "runtimeEvidence": true}
+      "perception": {"contractReady": true, "runtimeEvidence": true, "executionCount": 12, "lastExecutionAt": "2026-06-19T19:35:00Z", "lastLatencyMs": 1.2, "gaps": []},
+      "memory": {"contractReady": true, "runtimeEvidence": true, "executionCount": 12, "lastExecutionAt": "2026-06-19T19:35:00Z", "lastLatencyMs": 0.1, "gaps": []},
+      "reflection": {"contractReady": true, "runtimeEvidence": true, "executionCount": 12, "lastExecutionAt": "2026-06-19T19:35:00Z", "lastLatencyMs": 0.1, "gaps": []},
+      "planning": {"contractReady": true, "runtimeEvidence": true, "executionCount": 12, "lastExecutionAt": "2026-06-19T19:35:00Z", "lastLatencyMs": 1.6, "gaps": []},
+      "socialReasoning": {"contractReady": true, "runtimeEvidence": true, "executionCount": 12, "lastExecutionAt": "2026-06-19T19:35:00Z", "lastLatencyMs": 0.1, "gaps": []},
+      "conversation": {"contractReady": true, "runtimeEvidence": true, "executionCount": 12, "lastExecutionAt": "2026-06-19T19:35:00Z", "lastLatencyMs": 0.1, "gaps": []},
+      "actionExecution": {"contractReady": true, "runtimeEvidence": true, "executionCount": 12, "lastExecutionAt": "2026-06-19T19:35:00Z", "lastLatencyMs": 35.0, "gaps": []},
+      "outcomeAwareness": {"contractReady": true, "runtimeEvidence": true, "executionCount": 12, "lastExecutionAt": "2026-06-19T19:35:00Z", "lastLatencyMs": 0.1, "gaps": []},
+      "orchestrator": {"contractReady": true, "runtimeEvidence": true, "executionCount": 12, "lastExecutionAt": "2026-06-19T19:35:00Z", "lastLatencyMs": 40.0, "gaps": []}
     },
     "contractGaps": [],
-    "runtimeEvidenceGaps": ["reflection"],
+    "runtimeEvidenceGaps": [],
+    "runtime": {"traceCount": 108, "boundedTraceStore": true},
     "optimization": {
       "readOnly": true,
       "providerCallsDuringMetrics": 0,
@@ -265,7 +271,7 @@ Readiness is measured by:
 }
 ```
 
-`contractReady` means the product has a stable module slot and validation path. `runtimeEvidence` means the current world/test run has produced data for that module. This distinction prevents the UI from claiming a feature is actively working just because the code contract exists.
+`contractReady` means the product has a stable module slot and validation path. `runtimeEvidence` means the current world/test run has produced bounded persisted trace data for that module. Each trace records timing, input/output summaries, decisions, and gaps without invoking a provider/model call during metrics reads. This distinction prevents the UI from claiming a feature is actively working just because the code contract exists.
 
 ### 2. Scheduler
 
