@@ -406,6 +406,16 @@ async function seedAcceptanceWorld() {
   assert(loopSettings?.ok === true, 'failed to configure Live Agent Mode loop for acceptance', loopSettings);
 }
 
+async function enableGlobalAgentLiveModeFeature() {
+  const settings = await postJson('/api/settings', {
+    features: {
+      agentLiveMode: true,
+    },
+  });
+  assert(settings?.ok === true, 'failed to enable global Agent Live Mode feature for acceptance', settings);
+  assert(settings?.config?.features?.agentLiveMode === true, 'global Agent Live Mode feature did not persist for acceptance', settings?.config?.features);
+}
+
 async function verifyNoBrowserBackendTurn(reason = '8587-acceptance-no-browser') {
   const before = await fetchJson('/api/agent-live-loop');
   assert(before?.runtime?.worldClient?.active === false, 'expected no active browser client before backend tick', before?.runtime?.worldClient);
@@ -810,6 +820,7 @@ try {
   }
   console.log(`PASS: Live Agent Mode harness verified ${BASE_URL}/healthz with isolated data at ${dataDir}.`);
 
+  await enableGlobalAgentLiveModeFeature();
   await seedAcceptanceWorld();
   const backendSeries = await verifyNoBrowserBackendTurnSeries(ACCEPTANCE_TURN_TARGET);
   await verifyTypedObjectActions();

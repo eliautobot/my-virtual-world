@@ -517,6 +517,64 @@ def _demo_feature_locked(feature):
     return not check_feature(feature)
 
 
+def _config_feature_enabled(feature):
+    features = VW_CONFIG.get("features") if isinstance(VW_CONFIG.get("features"), dict) else {}
+    return bool(features.get(feature))
+
+
+def _agent_live_mode_config_enabled():
+    return _config_feature_enabled("agentLiveMode")
+
+
+def _agent_live_mode_available():
+    return check_feature("agentLiveMode") and _agent_live_mode_config_enabled()
+
+
+def _agent_live_mode_gate_error():
+    if _demo_feature_locked("agentLiveMode"):
+        return _api_error(
+            "agent_live_mode_feature_locked",
+            "Activation required for Agent Live Mode.",
+            details={"feature": "agentLiveMode", "license": get_license_status()},
+        )
+    if not _agent_live_mode_config_enabled():
+        return _api_error(
+            "agent_live_mode_feature_disabled",
+            "Agent Live Mode is disabled in Settings; enable features.agentLiveMode before starting Live Agent Mode backend work.",
+            details={"feature": "agentLiveMode", "configPath": "features.agentLiveMode", "globalEnabled": False},
+        )
+    return None
+
+
+def _agent_live_mode_locked_response():
+    if _demo_feature_locked("agentLiveMode"):
+        return _locked_response("agentLiveMode")
+    response = _locked_response(
+        "agentLiveMode",
+        "Agent Live Mode is disabled in Settings; enable features.agentLiveMode before starting Live Agent Mode backend work.",
+    )
+    response["disabledBySettings"] = True
+    response["configPath"] = "features.agentLiveMode"
+    return response
+
+
+def _payload_includes_agent_live_mode_source(value):
+    if isinstance(value, dict):
+        source = value.get("source")
+        if isinstance(source, dict) and source.get("kind") == "agent-live-mode":
+            return True
+        if source == "agent-live-mode" or value.get("behaviorSourceKind") == "agent-live-mode":
+            return True
+        return any(
+            _payload_includes_agent_live_mode_source(child)
+            for child in value.values()
+            if isinstance(child, (dict, list))
+        )
+    if isinstance(value, list):
+        return any(_payload_includes_agent_live_mode_source(item) for item in value)
+    return False
+
+
 def _demo_edit_locked_response():
     return _locked_response(
         "advancedEditor",
@@ -2240,6 +2298,8 @@ def _live_agent_tool_error_status(code):
         "building_missing": 404,
         "target_deleted": 410,
         "building_deleted": 410,
+        "agent_live_mode_feature_disabled": 403,
+        "agent_live_mode_feature_locked": 403,
         "agent_live_mode_disabled": 403,
         "permission_denied": 403,
         "operator_approval_required": 403,
@@ -2264,6 +2324,9 @@ def _live_agent_tool_context(payload):
     source = payload.get("source") if isinstance(payload.get("source"), dict) else None
     if not source or source.get("kind") != "agent-live-mode":
         return None, _api_error("invalid_behavior_source", "Live Agent tool calls require source.kind to be agent-live-mode.", details={"required": "agent-live-mode"}), 400
+    gate_error = _agent_live_mode_gate_error()
+    if gate_error:
+        return None, gate_error, 403
     agent_id = _resolve_agent_id(payload.get("agentId"))
     if not agent_id:
         return None, _api_error("agent_not_found", "agentId must reference an existing agent id or statusKey"), 404
@@ -2892,10 +2955,13 @@ def get_live_agent_tool_registry(agent_id=None):
         row = _live_agent_tool_contract(tool)
         row["availableForAgent"] = None
         if context:
-            enabled = bool((context.get("setting") or {}).get("agentLiveModeEnabled"))
+            gate_error = _agent_live_mode_gate_error()
+            enabled = gate_error is None and bool((context.get("setting") or {}).get("agentLiveModeEnabled"))
             row["availableForAgent"] = enabled
             row["agentId"] = context.get("agentId")
-            if not enabled:
+            if gate_error:
+                row["unavailableReason"] = (gate_error.get("error") or {}).get("code")
+            elif not enabled:
                 row["unavailableReason"] = "agent_live_mode_disabled"
         tools.append(row)
     return {
@@ -3740,7 +3806,8 @@ def get_live_agent_mode_autonomy_metrics():
     provider_support = _live_agent_provider_adapter_metrics(_live_agent_cached_roster_for_metrics())
     piano_architecture = _live_agent_piano_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
     checklist = {
-        "featureGateOpen": check_feature("agentLiveMode"),
+        "featureGateOpen": _agent_live_mode_available(),
+        "configGateOpen": _agent_live_mode_config_enabled(),
         "loopEnabled": bool(loop_state.get("enabled")),
         "schedulerThreadAlive": bool(_live_agent_loop_thread and _live_agent_loop_thread.is_alive()),
         "browserFreeBackendCompletions": len(completed_backend_actions) > 0,
@@ -4206,6 +4273,9 @@ def _current_live_agent_backend_action(action_id):
 
 
 def advance_live_agent_backend_world_action(action_id, *, reason="server-owned-progress"):
+    gate_error = _agent_live_mode_gate_error()
+    if gate_error:
+        return False, gate_error, 403
     bucket, _, action = _current_live_agent_backend_action(action_id)
     if action is None:
         return False, _api_error("not_found", "World action is not active or does not exist."), 404
@@ -4892,6 +4962,10 @@ def _validate_create_world_action_payload(payload):
         if behavior_error:
             return None, behavior_error
         source = _source_snapshot_with_behavior(source, behavior)
+        if source.get("kind") == "agent-live-mode":
+            gate_error = _agent_live_mode_gate_error()
+            if gate_error:
+                return None, gate_error
     agent_id = _resolve_agent_id(payload.get("agentId"))
     if not agent_id:
         errors.append("agentId must reference an existing agent id or statusKey")
@@ -5092,6 +5166,8 @@ def create_world_action(payload):
             "target_missing": 404,
             "target_deleted": 410,
             "permission_denied": 403,
+            "agent_live_mode_feature_disabled": 403,
+            "agent_live_mode_feature_locked": 403,
             "agent_live_mode_disabled": 403,
             "duplicate_action": 409,
             "object_reserved": 409,
@@ -5402,6 +5478,9 @@ def create_agent_live_mode_action_request(payload):
     source = payload.get("source") if isinstance(payload.get("source"), dict) else None
     if not source or source.get("kind") != "agent-live-mode":
         return False, _api_error("invalid_behavior_source", "Agent Live Mode action caller requires source.kind to be agent-live-mode.", details={"required": "agent-live-mode"}), 400
+    gate_error = _agent_live_mode_gate_error()
+    if gate_error:
+        return False, gate_error, 403
     agent_id = _resolve_agent_id(payload.get("agentId"))
     if not agent_id:
         return False, _api_error("agent_not_found", "agentId must reference an existing agent id or statusKey"), 404
@@ -7869,10 +7948,14 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
         if dry_run:
             _live_agent_loop_stat(state, "dryRuns")
 
-        if not check_feature("agentLiveMode"):
+        gate_error = _agent_live_mode_gate_error()
+        if gate_error:
+            gate_payload = gate_error.get("error") if isinstance(gate_error, dict) else {}
             result["ok"] = False
-            result["disabledReason"] = "agentLiveMode feature is disabled or locked"
-            _live_agent_loop_add_event(state, "feature-disabled", details={"reason": result["disabledReason"]})
+            result["disabledReason"] = gate_payload.get("message") or "Agent Live Mode is disabled or locked."
+            result["disabledCode"] = gate_payload.get("code")
+            result["disabledDetails"] = gate_payload.get("details")
+            _live_agent_loop_add_event(state, "feature-disabled", details={"reason": result["disabledReason"], "code": result.get("disabledCode")})
             if not dry_run:
                 save_live_agent_loop_state(state)
             return result
@@ -8442,6 +8525,9 @@ def get_live_agent_loop_operator_proposals(agent_id=None, include_resolved=False
 def resolve_live_agent_loop_operator_proposal(payload):
     if not isinstance(payload, dict):
         return False, _api_error("invalid_payload", "Operator proposal payload must be an object."), 400
+    gate_error = _agent_live_mode_gate_error()
+    if gate_error:
+        return False, gate_error, 403
     proposal_id = _live_agent_loop_clean_plan_text(payload.get("proposalId") or payload.get("id"), limit=160)
     if not proposal_id:
         return False, _api_error("invalid_payload", "proposalId is required."), 400
@@ -8489,6 +8575,9 @@ def resolve_live_agent_loop_operator_proposal(payload):
 def update_live_agent_loop_settings(payload):
     if not isinstance(payload, dict):
         return False, _api_error("invalid_payload", "Live agent loop settings payload must be an object."), 400
+    gate_error = _agent_live_mode_gate_error()
+    if gate_error:
+        return False, gate_error, 403
     with _live_agent_loop_lock:
         state = get_live_agent_loop_state(persist_migration=True)
         now_epoch = time.time()
@@ -8826,6 +8915,9 @@ def create_move_intent(path_agent_id, payload):
         return False, behavior_error, 400
     source = _source_snapshot_with_behavior(raw_source, behavior)
     if source.get("kind") == "agent-live-mode":
+        gate_error = _agent_live_mode_gate_error()
+        if gate_error:
+            return False, gate_error, 403
         setting = get_agent_live_mode_setting(agent_id)
         if not setting or setting.get("agentLiveModeEnabled") is not True:
             return False, _agent_live_mode_disabled_error(agent_id), 403
@@ -12831,6 +12923,10 @@ def get_agent_live_mode_setting(agent_id):
 def set_agent_live_mode_setting(agent_id, enabled):
     if not isinstance(enabled, bool):
         return False, _api_error("invalid_payload", "agentLiveModeEnabled must be a boolean"), 400
+    if enabled:
+        gate_error = _agent_live_mode_gate_error()
+        if gate_error:
+            return False, gate_error, 403
     meta = load_world_meta()
     profiles, resolved_id, profile = _agent_profile_for(meta, agent_id)
     if not resolved_id:
@@ -13964,15 +14060,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             return self._send_json(provider.test() if provider else {"ok": False, "error": "Codex provider module unavailable", "agents": []})
 
         if path == "/api/world-actions":
-            if not check_feature("agentLiveMode"):
-                data_preview = self._read_body()
-                source = (data_preview or {}).get("source") if isinstance(data_preview, dict) else None
-                source_kind = (source or {}).get("kind") if isinstance(source, dict) else ""
-                if source_kind == "agent-live-mode":
-                    return self._send_json(_locked_response("agentLiveMode"), 403)
-                data = data_preview
-            else:
-                data = self._read_body()
+            data = self._read_body()
+            if _payload_includes_agent_live_mode_source(data) and _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
             if not isinstance(data, dict):
                 return self._send_json({"error": "world-actions payload must be an object"}, 400)
             # Backward-compatible bulk replace from Task 2. A create request is
@@ -13990,8 +14080,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             return self._send_json(result, status)
 
         if path == "/api/agent-model/actions":
-            if _demo_feature_locked("agentLiveMode"):
-                return self._send_json(_locked_response("agentLiveMode"), 403)
+            if _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
             data = self._read_body()
             if _is_live_agent_tool_call_payload(data):
                 ok, result, status = validate_live_agent_tool_call(data, dry_run=bool((data or {}).get("dryRun", True)))
@@ -14000,34 +14090,34 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             return self._send_json(result, status)
 
         if path in {"/api/live-agent-mode/actions/dry-run", "/api/live-agent-mode/tool-calls/validate"}:
-            if _demo_feature_locked("agentLiveMode"):
-                return self._send_json(_locked_response("agentLiveMode"), 403)
+            if _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
             ok, result, status = validate_live_agent_tool_call(self._read_body(), dry_run=True)
             return self._send_json(result, status)
 
         if path in {"/api/live-agent-mode/tool-calls", "/api/live-agent-mode/tool-calls/execute"}:
-            if _demo_feature_locked("agentLiveMode"):
-                return self._send_json(_locked_response("agentLiveMode"), 403)
+            if _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
             data = self._read_body()
             dry_run = bool(data.get("dryRun")) if isinstance(data, dict) else False
             ok, result, status = validate_live_agent_tool_call(data, dry_run=dry_run)
             return self._send_json(result, status)
 
         if path == "/api/agent-live-loop":
-            if _demo_feature_locked("agentLiveMode"):
-                return self._send_json(_locked_response("agentLiveMode"), 403)
+            if _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
             ok, result, status = update_live_agent_loop_settings(self._read_body() or {})
             return self._send_json(result, status)
 
         if path == "/api/agent-live-loop/proposals":
-            if _demo_feature_locked("agentLiveMode"):
-                return self._send_json(_locked_response("agentLiveMode"), 403)
+            if _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
             ok, result, status = resolve_live_agent_loop_operator_proposal(self._read_body() or {})
             return self._send_json(result, status)
 
         if path == "/api/agent-live-loop/tick":
-            if _demo_feature_locked("agentLiveMode"):
-                return self._send_json(_locked_response("agentLiveMode"), 403)
+            if _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
             data = self._read_body() or {}
             if not isinstance(data, dict):
                 return self._send_json(_api_error("invalid_payload", "tick payload must be an object."), 400)
@@ -14046,12 +14136,14 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 return self._send_json(result, status)
             return self._send_json({"error": "Unsupported agent move endpoint"}, 404)
 
-        if path.startswith("/api/world-actions/") and path not in {"/api/world-actions/active", "/api/world-actions/history"}: 
+        if path.startswith("/api/world-actions/") and path not in {"/api/world-actions/active", "/api/world-actions/history"}:
             parts = path.strip("/").split("/")
             if len(parts) == 4 and parts[0] == "api" and parts[1] == "world-actions":
                 action_id = urllib.parse.unquote(parts[2])
                 op = parts[3]
                 data = self._read_body() or {}
+                if _payload_includes_agent_live_mode_source(data) and _agent_live_mode_gate_error():
+                    return self._send_json(_agent_live_mode_locked_response(), 403)
                 actor = data.get("actor") if isinstance(data, dict) else None
                 source = data.get("source") if isinstance(data, dict) and isinstance(data.get("source"), str) else "api"
                 if op == "transition":
@@ -14073,6 +14165,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/world-actions/active":
             data = self._read_body()
+            if _payload_includes_agent_live_mode_source(data) and _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
             records = data if isinstance(data, list) else (data.get("active") if isinstance(data, dict) else None)
             if records is None:
                 return self._send_json({"error": "active payload must be an array or { active: [] }"}, 400)
@@ -14084,6 +14178,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/world-actions/history":
             data = self._read_body()
+            if _payload_includes_agent_live_mode_source(data) and _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
             records = data if isinstance(data, list) else (data.get("history") if isinstance(data, dict) else None)
             if records is None:
                 return self._send_json({"error": "history payload must be an array or { history: [] }"}, 400)
@@ -14128,6 +14224,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if data is None:
                 return self._send_json({"error": "No data"}, 400)
             enabled = data.get("agentLiveModeEnabled") if isinstance(data, dict) else None
+            if enabled is True and _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
             ok, result, status = set_agent_live_mode_setting(agent_id, enabled)
             return self._send_json(result, status)
 
@@ -14147,6 +14245,11 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if "agentLiveModeEnabled" in data:
                 if not isinstance(data.get("agentLiveModeEnabled"), bool):
                     return self._send_json(_api_error("invalid_payload", "agentLiveModeEnabled must be a boolean"), 400)
+                if data.get("agentLiveModeEnabled") is True:
+                    if _demo_feature_locked("agentLiveMode"):
+                        return self._send_json(_locked_response("agentLiveMode"), 403)
+                    if _agent_live_mode_gate_error():
+                        return self._send_json(_agent_live_mode_locked_response(), 403)
                 profile["agentLiveModeEnabled"] = data["agentLiveModeEnabled"]
             if "name" in data:
                 profile["name"] = str(data.get("name") or "").strip()

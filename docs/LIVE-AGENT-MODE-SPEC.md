@@ -1,8 +1,8 @@
 # Live Agent Mode Implementation Spec
 
-Status: implementation proposal  
-Owner: product architecture review  
-Scope: My Virtual World product architecture, APIs, data model, and frontend playback  
+Status: implementation proposal
+Owner: product architecture review
+Scope: My Virtual World product architecture, APIs, data model, and frontend playback
 Goal: build a reliable autonomous resident mode where agents can decide, move, communicate, use objects, create visible world changes, remember outcomes, and continue operating without depending on an open browser tab.
 
 ## Summary
@@ -100,25 +100,25 @@ Then open `http://127.0.0.1:8587`. Do not restart, bind over, or kill a product 
 
 ## Core Principles
 
-1. Backend-authoritative simulation  
+1. Backend-authoritative simulation
    Every autonomous action is represented by backend records and backend-owned state transitions.
 
-2. Tools are the only mutation path  
+2. Tools are the only mutation path
    An agent cannot directly edit world JSON. It can only call validated tools.
 
-3. Physical presence matters  
+3. Physical presence matters
    Location, building, floor, room, distance, object availability, and interaction spots control which tools are available.
 
-4. Visible outcome, backend truth  
+4. Visible outcome, backend truth
    The frontend shows animation events from the backend. If no frontend is connected, the backend still advances the simulation and records replayable events.
 
-5. Bounded autonomy  
+5. Bounded autonomy
    Agents may act continuously, but within schedules, cooldowns, budgets, permissions, locks, and operator pause/veto controls.
 
-6. Replayability  
+6. Replayability
    Every turn, decision, tool call, validation result, side effect, and animation event should be inspectable after the fact.
 
-7. Progressive capability  
+7. Progressive capability
    Start with safe resident actions. Add build/create/social/governance tools only after typed tool contracts and tests exist.
 
 ## Target User Experience
@@ -558,10 +558,10 @@ For the first implementation:
 
 Communication needs two tracks:
 
-1. provider communication  
+1. provider communication
    Existing `/api/agent-platform-communications/send` can continue routing messages between OpenClaw, Hermes, Codex, and future providers.
 
-2. in-world resident communication  
+2. in-world resident communication
    Live Agent Mode needs spatial communication tools controlled by the simulation engine.
 
 Required tools:

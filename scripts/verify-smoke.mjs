@@ -244,6 +244,68 @@ finally:
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(liveAgentToolSchemaCheck.status, 0, `Live Agent coordinate schema check failed\n${liveAgentToolSchemaCheck.stderr || liveAgentToolSchemaCheck.stdout}`);
 
+const liveAgentGlobalFeatureGateCheck = spawnSync('python3', ['-B', '-c', `
+import importlib.util
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+path = Path("src/server/server.py")
+data_dir = tempfile.mkdtemp(prefix="vw-smoke-live-global-gate-")
+os.environ["VW_DATA_DIR"] = data_dir
+os.environ["_VW_INT"] = "1"
+try:
+    spec = importlib.util.spec_from_file_location("vw_server", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.get_roster = lambda: [{"id": "adam", "statusKey": "adam", "name": "Adam", "providerKind": "openclaw"}]
+
+    meta = module.load_world_meta()
+    meta["agentProfiles"] = {"adam": {"agentLiveModeEnabled": True}}
+    module.save_world_meta(meta)
+
+    def error_code(result):
+        return (result.get("error") or {}).get("code") if isinstance(result, dict) else None
+
+    tick = module.live_agent_loop_tick(reason="smoke-global-off", force=True)
+    assert tick.get("ok") is False, tick
+    assert tick.get("disabledCode") == "agent_live_mode_feature_disabled", tick
+
+    ok, result, status = module.validate_live_agent_tool_call({
+        "agentId": "adam",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": "global-gate-tool", "roles": ["participant"]},
+        "tool": "observe_world",
+        "arguments": {},
+    }, dry_run=True)
+    assert not ok and status == 403 and error_code(result) == "agent_live_mode_feature_disabled", result
+
+    ok, result, status = module.create_agent_live_mode_action_request({
+        "agentId": "adam",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": "global-gate-action", "roles": ["participant"]},
+    })
+    assert not ok and status == 403 and error_code(result) == "agent_live_mode_feature_disabled", result
+
+    ok, result, status = module.update_live_agent_loop_settings({"enabled": True})
+    assert not ok and status == 403 and error_code(result) == "agent_live_mode_feature_disabled", result
+
+    module.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
+    ok, result, status = module.validate_live_agent_tool_call({
+        "agentId": "adam",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": "global-gate-tool-on", "roles": ["participant"]},
+        "tool": "observe_world",
+        "arguments": {},
+    }, dry_run=True)
+    assert ok and status == 200, result
+
+    ok, result, status = module.update_live_agent_loop_settings({"enabled": True})
+    assert ok and status == 200 and result.get("ok") is True, result
+    print("live agent global feature gate ok")
+finally:
+    shutil.rmtree(data_dir, ignore_errors=True)
+`], { cwd: root, encoding: 'utf8' });
+assert.equal(liveAgentGlobalFeatureGateCheck.status, 0, `Live Agent global feature gate check failed\n${liveAgentGlobalFeatureGateCheck.stderr || liveAgentGlobalFeatureGateCheck.stdout}`);
+
 const liveAgentBackendExecutionCheck = spawnSync('python3', ['-B', '-c', `
 import importlib.util
 import os
@@ -254,10 +316,12 @@ from pathlib import Path
 path = Path("src/server/server.py")
 data_dir = tempfile.mkdtemp(prefix="vw-smoke-backend-executor-")
 os.environ["VW_DATA_DIR"] = data_dir
+os.environ["_VW_INT"] = "1"
 try:
     spec = importlib.util.spec_from_file_location("vw_server", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
     module.get_roster = lambda: [{"id": "adam", "statusKey": "adam", "name": "Adam", "providerKind": "openclaw"}]
 
     meta = module.load_world_meta()
@@ -335,10 +399,12 @@ from pathlib import Path
 path = Path("src/server/server.py")
 data_dir = tempfile.mkdtemp(prefix="vw-smoke-communication-memory-")
 os.environ["VW_DATA_DIR"] = data_dir
+os.environ["_VW_INT"] = "1"
 try:
     spec = importlib.util.spec_from_file_location("vw_server", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
     module.get_roster = lambda: [
         {"id": "adam", "statusKey": "adam", "name": "Adam", "providerKind": "openclaw"},
         {"id": "beth", "statusKey": "beth", "name": "Beth", "providerKind": "openclaw"},
@@ -416,10 +482,12 @@ from pathlib import Path
 path = Path("src/server/server.py")
 data_dir = tempfile.mkdtemp(prefix="vw-smoke-provider-piano-")
 os.environ["VW_DATA_DIR"] = data_dir
+os.environ["_VW_INT"] = "1"
 try:
     spec = importlib.util.spec_from_file_location("vw_server", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    module.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
     module._agent_roster = [
         {"id": "adam", "statusKey": "adam", "name": "Adam", "providerKind": "openclaw"},
         {"id": "hermes-default", "statusKey": "hermes-default", "name": "Hermes", "providerKind": "hermes"},
@@ -483,7 +551,10 @@ for (const token of [
   'Demo mode locks world editing',
   'not check_feature("agentBrowser")',
   'not check_feature("sms")',
-  'not check_feature("agentLiveMode")',
+  'check_feature("agentLiveMode")',
+  'def _agent_live_mode_available',
+  'def _agent_live_mode_gate_error',
+  '"configPath": "features.agentLiveMode"',
   'body["features"][feature] = False',
   '_handle_agent_platforms',
   '_handle_agent_create',
