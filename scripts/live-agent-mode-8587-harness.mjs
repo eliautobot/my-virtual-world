@@ -632,15 +632,22 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
   assert(metrics.checklist?.memoryUpdated === true, 'metrics checklist should confirm memory updates', metrics.checklist);
   assert(metrics.checklist?.relationshipsUpdated === true, 'metrics checklist should confirm relationship updates', metrics.checklist);
   assert(metrics.checklist?.providerAdapterReadiness === true, 'metrics checklist should confirm provider adapter readiness', metrics.checklist);
-  assert(metrics.checklist?.pianoModuleContractsReady === true, 'metrics checklist should confirm PIANO module contracts', metrics.checklist);
+  assert(metrics.checklist?.clawMindModuleContractsReady === true, 'metrics checklist should confirm ClawMind module contracts', metrics.checklist);
   assert(metrics.checklist?.lightweightMetricsOptimized === true, 'metrics checklist should confirm lightweight metrics optimization', metrics.checklist);
   assert(metrics.providerSupport?.schemaVersion === 'agent-live-mode-provider-adapter-contract/v1', 'provider support metrics should use the adapter contract schema', metrics.providerSupport);
   assert(metrics.providerSupport?.providerKindCount >= 1, 'provider support metrics should include at least one provider kind', metrics.providerSupport);
   assert(metrics.providerSupport?.optimization?.providerCallsDuringMetrics === 0, 'provider support metrics must not call providers', metrics.providerSupport?.optimization);
   assert(metrics.providerSupport?.optimization?.modelCallsDuringMetrics === 0, 'provider support metrics must not call models', metrics.providerSupport?.optimization);
-  assert(metrics.pianoArchitecture?.schemaVersion === 'agent-live-mode-piano-architecture/v1', 'PIANO metrics should use the architecture schema', metrics.pianoArchitecture);
-  assert(metrics.pianoArchitecture?.checklist?.allModuleContractsReady === true, 'PIANO metrics should confirm all module contracts', metrics.pianoArchitecture);
-  assert(metrics.pianoArchitecture?.optimization?.heavyWorldScan === false, 'PIANO metrics must stay lightweight', metrics.pianoArchitecture?.optimization);
+  assert(metrics.clawMindArchitecture?.schemaVersion === 'agent-live-mode-clawmind-architecture/v1', 'ClawMind metrics should use the architecture schema', metrics.clawMindArchitecture);
+  assert(metrics.clawMindArchitecture?.checklist?.allModuleContractsReady === true, 'ClawMind metrics should confirm all module contracts', metrics.clawMindArchitecture);
+  assert(metrics.clawMindArchitecture?.checklist?.allModulesExecuted === true, 'ClawMind metrics should confirm all modules executed', metrics.clawMindArchitecture);
+  for (const [moduleName, moduleMetrics] of Object.entries(metrics.clawMindArchitecture?.modules || {})) {
+    assert(moduleMetrics?.runtimeEvidence === true, `ClawMind module ${moduleName} should have runtime evidence`, moduleMetrics);
+    assert(Number(moduleMetrics?.executionCount || 0) > 0, `ClawMind module ${moduleName} should report execution count`, moduleMetrics);
+    assert(moduleMetrics?.lastExecutionAt, `ClawMind module ${moduleName} should report last execution time`, moduleMetrics);
+    assert(typeof moduleMetrics?.lastLatencyMs === 'number', `ClawMind module ${moduleName} should report latency`, moduleMetrics);
+  }
+  assert(metrics.clawMindArchitecture?.optimization?.heavyWorldScan === false, 'ClawMind metrics must stay lightweight', metrics.clawMindArchitecture?.optimization);
   console.log(`PASS: autonomy metrics ${JSON.stringify({
     completedTurnCount: metrics.metrics.completedTurnCount,
     completedBackendActionCount: metrics.metrics.completedBackendActionCount,
@@ -649,7 +656,8 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
     reactionOpportunityCount: metrics.metrics.reactionOpportunityCount,
     relationshipCount: metrics.metrics.relationshipCount,
     providerKindCount: metrics.providerSupport.providerKindCount,
-    pianoContractGaps: metrics.pianoArchitecture.contractGaps,
+    clawMindContractGaps: metrics.clawMindArchitecture.contractGaps,
+    clawMindRuntimeEvidenceGaps: metrics.clawMindArchitecture.runtimeEvidenceGaps,
     gaps: metrics.gaps,
   })}`);
   return metrics;
@@ -760,10 +768,6 @@ print(json.dumps(result, sort_keys=True))
 assertNoProductPortTargets();
 assertNoConflictingHarnessPortEnv();
 await assertPortAvailable(TEST_PORT);
-const productAlreadyOpen = await isTcpOpen(PRODUCT_PORT);
-if (productAlreadyOpen) {
-  console.log(`Product port ${PRODUCT_PORT} is already listening; the harness will leave it untouched.`);
-}
 
 const dataDir = mkdtempSync(join(tmpdir(), 'vw-live-agent-mode-8587-'));
 const workspaceRoot = join(dataDir, 'openclaw');
