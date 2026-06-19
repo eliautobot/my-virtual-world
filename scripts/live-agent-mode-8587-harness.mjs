@@ -363,9 +363,11 @@ async function seedAcceptanceWorld() {
       liveModeLoop: {
         schemaVersion: 'agent-live-mode-loop/v1',
         enabled: true,
+        intervalSec: 300,
         worldClientRequired: false,
         minActionIntervalSec: 30,
         maxActionsPerTick: 1,
+        maxToolCallsPerTurn: 1,
         agents: {
           [TEST_AGENT_ID]: {
             enabled: true,
@@ -394,10 +396,12 @@ async function seedAcceptanceWorld() {
   const loopSettings = await postJson('/api/agent-live-loop', {
     enabled: true,
     worldClientRequired: false,
+    intervalSec: 300,
     clearWorldClientActivity: true,
     clearPause: true,
     clearKillSwitch: true,
     maxActionsPerTick: 1,
+    maxToolCallsPerTurn: 1,
     minActionIntervalSec: 30,
     agentId: TEST_AGENT_ID,
     agentEnabled: true,
@@ -625,6 +629,64 @@ async function verifyOperatorControlsStopTurns() {
   return { paused, pausedTick, kill, killedTick, cleared };
 }
 
+async function verifyFailureInjectionReplanning() {
+  const configured = await postJson('/api/agent-live-loop', {
+    agentId: TEST_AGENT_ID,
+    failureInjection: {
+      agentId: TEST_AGENT_ID,
+      mode: 'expected-outcome-mismatch',
+      reason: '8587 failure-injection replanning assertion',
+      remaining: 1,
+      requestedBy: '8587-acceptance-harness',
+    },
+    actor: '8587-acceptance-harness',
+    clearTurnRetry: true,
+  });
+  assert(configured?.ok === true, 'failed to configure expected-outcome failure injection', configured);
+  assert(configured.changed?.failureInjection?.remaining === 1, 'failure injection setting was not activated', configured.changed);
+
+  const injectedTick = await postJson('/api/agent-live-loop/tick', {
+    reason: '8587-failure-injection',
+    force: true,
+  });
+  assert(injectedTick?.ok === true, 'failure-injection tick failed', injectedTick);
+  const injectedAction = injectedTick.actionsCreated?.[0];
+  assert(injectedAction?.actionId, 'failure-injection tick did not create an action', injectedTick);
+  assert(injectedAction?.activeGoal?.id, 'injected turn should record active goal', injectedAction);
+  assert(Array.isArray(injectedAction?.candidateActionsConsidered) && injectedAction.candidateActionsConsidered.length > 0, 'injected turn should record candidate actions considered', injectedAction);
+  assert(injectedAction?.selectedPlanStep?.id, 'injected turn should record selected plan step', injectedAction);
+  assert(injectedAction?.finalActionDecision?.selectedActionId, 'injected turn should record final action decision', injectedAction);
+
+  const recoveryTick = await postJson('/api/agent-live-loop/tick', {
+    reason: '8587-failure-replan',
+    force: true,
+  });
+  assert(recoveryTick?.ok === true, 'failure recovery tick failed', recoveryTick);
+  const recoveryAction = recoveryTick.actionsCreated?.[0];
+  assert(recoveryAction?.actionId, 'failure recovery tick did not create a replacement action', recoveryTick);
+  assert(recoveryAction.planId && recoveryAction.planId !== injectedAction.planId, 'failure recovery should use a replacement plan', { injectedAction, recoveryAction });
+  assert(recoveryAction.loopActionId && recoveryAction.loopActionId !== injectedAction.loopActionId, 'failure recovery should select a replacement action', { injectedAction, recoveryAction });
+  assert(recoveryAction?.activeGoal?.kind === 'replan', 'recovery turn should record the replan goal', recoveryAction);
+  assert(recoveryAction?.selectedPlanStep?.id, 'recovery turn should record selected plan step', recoveryAction);
+  assert(recoveryAction?.finalActionDecision?.selectedActionId === recoveryAction.loopActionId, 'recovery turn final decision should match replacement action', recoveryAction);
+
+  const status = await fetchJson('/api/agent-live-loop');
+  const agentState = status?.state?.agents?.[TEST_AGENT_ID] || {};
+  assert(agentState.lastFailedExpectation?.recoveryActionId === recoveryAction.actionId, 'status refresh should mark the mismatch as recovered', agentState.lastFailedExpectation);
+
+  const metrics = await fetchJson('/api/live-agent-mode/metrics');
+  assert(metrics.metrics?.failedExpectationCount >= 1, 'metrics should count failed expectations', metrics.metrics);
+  assert(metrics.metrics?.replanCount >= 1, 'metrics should count replans', metrics.metrics);
+  assert(metrics.metrics?.successfulRecoveryCount >= 1, 'metrics should count successful recoveries', metrics.metrics);
+  assert(metrics.metrics?.planner?.turnsWithPlanningRecordCount >= 2, 'metrics should count turn planning records', metrics.metrics?.planner);
+  assert(metrics.metrics?.planner?.bounds?.maxActionsPerTick === 1, 'metrics should report max actions per tick bound', metrics.metrics?.planner);
+  assert(metrics.metrics?.planner?.bounds?.maxToolCallsPerTurn === 1, 'metrics should report max tool calls per turn bound', metrics.metrics?.planner);
+  assert(metrics.metrics?.planner?.bounds?.perAgentCooldownEnforced === true, 'metrics should report per-agent cooldown enforcement', metrics.metrics?.planner);
+
+  console.log(`PASS: failure injection mismatch ${injectedAction.actionId}/${injectedAction.loopActionId} replanned to ${recoveryAction.actionId}/${recoveryAction.loopActionId}.`);
+  return { injectedAction, recoveryAction, metrics };
+}
+
 async function verifyAutonomyMetrics({ expectedTurns }) {
   const metrics = await fetchJson('/api/live-agent-mode/metrics');
   assert(metrics?.ok === true, 'Live Agent metrics endpoint failed', metrics);
@@ -641,6 +703,13 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
   assert(metrics.checklist?.memoryUpdated === true, 'metrics checklist should confirm memory updates', metrics.checklist);
   assert(metrics.metrics?.memory?.stream > 0, 'metrics memory stream count should be positive', metrics.metrics?.memory);
   assert(metrics.metrics?.memory?.reflections > 0, 'metrics should report at least one memory reflection', metrics.metrics?.memory);
+  assert(typeof metrics.metrics?.planCount === 'number' && metrics.metrics.planCount > 0, 'metrics should report plan count', metrics.metrics);
+  assert(typeof metrics.metrics?.replanCount === 'number' && metrics.metrics.replanCount >= 1, 'metrics should report replan count', metrics.metrics);
+  assert(typeof metrics.metrics?.failedExpectationCount === 'number' && metrics.metrics.failedExpectationCount >= 1, 'metrics should report failed expectation count', metrics.metrics);
+  assert(typeof metrics.metrics?.successfulRecoveryCount === 'number' && metrics.metrics.successfulRecoveryCount >= 1, 'metrics should report successful recovery count', metrics.metrics);
+  assert(metrics.metrics?.planner?.bounds?.maxActionsPerTick >= 1, 'planner metrics should report max actions per tick bound', metrics.metrics?.planner);
+  assert(metrics.metrics?.planner?.bounds?.maxToolCallsPerTurn >= 1, 'planner metrics should report max tool calls per turn bound', metrics.metrics?.planner);
+  assert(metrics.metrics?.planner?.bounds?.perAgentCooldownEnforced === true, 'planner metrics should report per-agent cooldown enforcement', metrics.metrics?.planner);
   assert(metrics.checklist?.relationshipsUpdated === true, 'metrics checklist should confirm relationship updates', metrics.checklist);
   assert(metrics.checklist?.providerAdapterReadiness === true, 'metrics checklist should confirm provider adapter readiness', metrics.checklist);
   assert(metrics.checklist?.clawMindModuleContractsReady === true, 'metrics checklist should confirm ClawMind module contracts', metrics.checklist);
@@ -667,6 +736,12 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
     reactionOpportunityCount: metrics.metrics.reactionOpportunityCount,
     relationshipCount: metrics.metrics.relationshipCount,
     memory: metrics.metrics.memory,
+    planner: {
+      planCount: metrics.metrics.planCount,
+      replanCount: metrics.metrics.replanCount,
+      failedExpectationCount: metrics.metrics.failedExpectationCount,
+      successfulRecoveryCount: metrics.metrics.successfulRecoveryCount,
+    },
     providerKindCount: metrics.providerSupport.providerKindCount,
     clawMindContractGaps: metrics.clawMindArchitecture.contractGaps,
     clawMindRuntimeEvidenceGaps: metrics.clawMindArchitecture.runtimeEvidenceGaps,
@@ -842,6 +917,7 @@ try {
   await verifyTypedObjectActions();
   await verifySocialCommunicationAndMemory();
   await verifyOperatorControlsStopTurns();
+  await verifyFailureInjectionReplanning();
   await verifyAutonomyMetrics({ expectedTurns: ACCEPTANCE_TURN_TARGET });
   await runBrowserReplayRenderCheck(backendSeries.proofs[0].actionId);
 
