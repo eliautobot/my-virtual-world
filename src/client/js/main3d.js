@@ -29769,8 +29769,6 @@ async function persistAgentProfile(agent, patch) {
 }
 
 async function setAgentLiveModeEnabled(agentOrId, enabled, options = {}) {
-  showToast('Live Agent Mode Coming Soon', 'info');
-  throw new Error('Live Agent Mode Coming Soon');
   if (isLicenseFeatureLocked('agentLiveMode')) {
     showLicenseLockedToast('Agent Live Mode');
     throw new Error('Activation required for Agent Live Mode.');
@@ -30238,9 +30236,9 @@ function openAgentPanel(agentId, _opts = {}) {
     <span class="agent-status-badge ${statusClass}">${getPresenceStateIcon(agent.status)} ${agent.status || 'offline'}</span>
     ${agent.task ? `<div class="agent-task-text">${escapeHtml(agent.task)}</div>` : ''}
     ${agent.presenceSource ? `<div class="agent-task-text">source: ${escapeHtml(agent.presenceSource)}</div>` : ''}
-    <div class="agent-live-mode-toggle agent-live-mode-toggle-disabled" title="Live Agent Mode Coming Soon">
-      <span>Live Agent Mode Coming Soon</span>
-      <strong>disabled</strong>
+    <div class="agent-live-mode-toggle ${isLicenseFeatureLocked('agentLiveMode') ? 'agent-live-mode-toggle-disabled' : ''}" title="Agent Live Mode">
+      <label><input type="checkbox" id="agentPanel-liveMode" ${normalizeAgentLiveModeEnabled(agent) ? 'checked' : ''} ${isLicenseFeatureLocked('agentLiveMode') ? 'disabled aria-disabled="true"' : ''}> <span>Agent Live Mode</span></label>
+      <strong>${normalizeAgentLiveModeEnabled(agent) ? 'enabled' : 'disabled'}</strong>
     </div>
   `;
   const liveModeToggle = document.getElementById('agentPanel-liveMode');
@@ -35156,8 +35154,9 @@ function renderLiveAgentModeReplayEvent(event = {}, fromPoint = null, toPoint = 
   const material = new THREE.MeshBasicMaterial({ color: eventColor, transparent: true, opacity: 0.92, depthTest: true });
   const marker = new THREE.Mesh(_sphereGeo, material);
   marker.name = `vw-live-agent-mode-replay-marker-${sequence}`;
-  marker.scale.set(0.22, 0.22, 0.22);
+  marker.scale.set(0.58, 0.58, 0.58);
   marker.position.copy(toWorld);
+  marker.position.y += 0.35;
   marker.userData.liveAgentModeReplay = {
     actionId,
     sequence,
@@ -35173,6 +35172,18 @@ function renderLiveAgentModeReplayEvent(event = {}, fromPoint = null, toPoint = 
     line.name = `vw-live-agent-mode-replay-line-${sequence}`;
     line.userData.liveAgentModeReplay = marker.userData.liveAgentModeReplay;
     group.add(line);
+  }
+
+  if (event.name === 'world-action-completed' && typeof makeTextSprite === 'function') {
+    const agent = resolveAgentForLiveAgentModeReplayEvent(event);
+    const actionLabel = String(event.actionType || event.actionId || 'action').replace(/^.*\./, '');
+    const label = makeTextSprite(`${agent?.name || event.agentId || 'Agent'}: ${actionLabel}`, 0.9);
+    label.name = `vw-live-agent-mode-replay-label-${sequence}`;
+    label.position.copy(toWorld);
+    label.position.y += 2.2;
+    label.scale.set(3.4, 0.85, 1);
+    label.userData.liveAgentModeReplay = marker.userData.liveAgentModeReplay;
+    group.add(label);
   }
 
   while (group.children.length > 160) {
@@ -35208,6 +35219,61 @@ function markLiveAgentModeReplayObjectUse(event = {}) {
     updatedAt: new Date().toISOString(),
   };
   return true;
+}
+
+function applyLiveAgentModeReplayBuildCompletion(event = {}) {
+  const actionType = String(event.actionType || event.actionId || '').trim();
+  if (event.name !== 'world-action-completed' || actionType !== 'world.buildStructure') return false;
+  const target = event.target || event.to || {};
+  const site = normalizeLiveModeBuildSite({
+    id: event.worldActionId || event.actionId || event.id || null,
+    agentId: event.agentId || target.agentId || null,
+    target,
+    params: { buildSite: target.buildSite || event.buildSite || {} },
+  });
+  if (!site?.buildingId || buildingsMap.has(site.buildingId)) return false;
+  const agent = resolveAgentForLiveAgentModeReplayEvent(event) || { id: event.agentId || site.liveModeHomeForAgentId, name: event.agentName || event.agentId || 'Agent' };
+  try {
+    _removeNaturalDecorationsInArea(site.worldX, site.worldY, site.widthTiles, site.heightTiles);
+    const building = makeLiveModeHomeBuilding(agent, site, event.worldActionId || event.actionId || null);
+    building.constructionState = {
+      ...(building.constructionState || {}),
+      visibleExecutor: 'main3d.js#applyLiveAgentModeReplayBuildCompletion',
+      replayMaterializedAt: new Date().toISOString(),
+    };
+    buildingsMap.set(building.id, building);
+    createBuilding3D(building);
+    updateBuildingList();
+    clearLiveModeConstructionSiteMarker(event.worldActionId || event.actionId || null);
+    const bx1 = Math.floor(building.worldX / CHUNK);
+    const bz1 = Math.floor(building.worldY / CHUNK);
+    const bx2 = Math.floor((building.worldX + building.widthTiles) / CHUNK);
+    const bz2 = Math.floor((building.worldY + building.heightTiles) / CHUNK);
+    for (let ccx = bx1; ccx <= bx2; ccx++) {
+      for (let ccz = bz1; ccz <= bz2; ccz++) {
+        const chunk = loadedChunks.get(chunkKey(ccx, ccz));
+        if (chunk) rebuildChunk(chunk);
+      }
+    }
+    window.__VWLastLiveModeReplayBuildingMaterialized = {
+      ok: true,
+      buildingId: building.id,
+      buildingName: building.name,
+      agentId: agent?.id || event.agentId || null,
+      worldActionId: event.worldActionId || event.actionId || null,
+      checkedAt: new Date().toISOString(),
+    };
+    return true;
+  } catch (error) {
+    window.__VWLastLiveModeReplayBuildingMaterialized = {
+      ok: false,
+      error: error?.message || String(error),
+      agentId: event.agentId || null,
+      worldActionId: event.worldActionId || event.actionId || null,
+      checkedAt: new Date().toISOString(),
+    };
+    return false;
+  }
 }
 
 function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = false } = {}) {
@@ -35268,6 +35334,7 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
   }
 
   const objectStateUpdated = markLiveAgentModeReplayObjectUse(event);
+  const buildingMaterialized = applyLiveAgentModeReplayBuildCompletion(event);
   const sceneObjectName = renderLiveAgentModeReplayEvent(event, fromPoint, toPoint);
   if (!alreadyApplied) _liveAgentModeAnimationReplaySequences.add(eventKey);
 
@@ -35283,10 +35350,11 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
     lastAgentPosition: agent && renderPoint ? { agentId: agent.id || null, x: agent.x, y: agent.y, floor: agent._floor || 1 } : actionState.lastAgentPosition,
     agentRendered: actionState.agentRendered || agentRendered,
     objectStateUpdated: actionState.objectStateUpdated || objectStateUpdated,
+    buildingMaterialized: actionState.buildingMaterialized || buildingMaterialized,
     sceneObjectNames: sceneObjectName ? [...(actionState.sceneObjectNames || []), sceneObjectName].slice(-40) : (actionState.sceneObjectNames || []),
   });
 
-  return { applied: true, duplicate: alreadyApplied, sequence, agentRendered, objectStateUpdated, sceneObjectName };
+  return { applied: true, duplicate: alreadyApplied, sequence, agentRendered, objectStateUpdated, buildingMaterialized, sceneObjectName };
 }
 
 function getLiveAgentModeAnimationReplayUrl({ actionId = null, since = null, limit = 100 } = {}) {

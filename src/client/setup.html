@@ -114,8 +114,7 @@
       </section>
       <section class="step" data-pane="5">
         <div class="step-title">FEATURES</div>
-        <input type="checkbox" id="agentLiveMode" hidden disabled>
-        <div class="status" style="display:block;">Live Agent Mode Coming Soon</div>
+        <label class="check"><input type="checkbox" id="agentLiveMode"> Agent Live Mode</label>
         <label class="check"><input type="checkbox" id="debugTools" checked> Debug tools</label>
         <label class="check"><input type="checkbox" id="movementDebug"> Movement debug overlays</label>
         <label class="check"><input type="checkbox" id="actionPointDebug"> Object action points</label>
@@ -144,7 +143,7 @@
       const l=cfg.license||{};
       const world=cfg.world||{};
       const location=world.location||{};
-      $('licenseStatus').textContent=trial()?`DEMO: ${l.limits?.maxAgents||3} agents max. Editing, Agent Browser, and SMS / Twilio are locked. Live Agent Mode is coming soon.`:`${l.tierName} active. Live Agent Mode is coming soon.`;
+      $('licenseStatus').textContent=trial()?`DEMO: ${l.limits?.maxAgents||3} agents max. Editing, Agent Browser, SMS / Twilio, and Live Agent Mode are locked.`:`${l.tierName} active.`;
       $('worldName').value=world.name||'My Virtual World';
       $('locationLabel').value=location.label||'';
       $('timeZone').value=location.timeZone||'';
@@ -163,7 +162,7 @@
       $('smsEnabled').checked=!trial()&&!!cfg.features?.sms;
       $('twilioSid').value=cfg.sms?.twilioAccountSid||'';
       $('twilioFrom').value=cfg.sms?.fromNumber||'';
-      $('agentLiveMode').checked=false;
+      $('agentLiveMode').checked=!trial()&&!!cfg.features?.agentLiveMode;
       applyLocks();
       populateAgents(cfg.sms?.ownerAgentId||'');
     }
@@ -185,7 +184,7 @@
         },
         openclaw:{homePath:val('openclawPath'),gatewayUrl:val('gatewayUrl')},
         hermes:{enabled:chk('hermesEnabled'),homePath:val('hermesHome'),binary:val('hermesBin')},
-        features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:false,debugTools:chk('debugTools'),weather:chk('weather')},
+        features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:!locked&&chk('agentLiveMode'),debugTools:chk('debugTools'),weather:chk('weather')},
         browser:{cdpUrl:val('browserCdp'),viewerUrl:val('browserViewer')},
         sms:{ownerAgentId:val('smsOwner'),twilioAccountSid:val('twilioSid'),fromNumber:val('twilioFrom')},
         debug:{movementDebugOverlays:chk('movementDebug'),objectActionPointDebug:chk('actionPointDebug')}

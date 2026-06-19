@@ -11,9 +11,16 @@ const HOST = '127.0.0.1';
 const BASE_URL = `http://${HOST}:${TEST_PORT}`;
 const PRODUCT_URL = `http://${HOST}:${PRODUCT_PORT}`;
 const TEST_AGENT_ID = 'acceptance-agent';
+const PEER_AGENT_ID = 'acceptance-peer';
 const OFFICE_BUILDING_ID = 'acceptance-office';
 const HOME_BUILDING_ID = 'acceptance-home';
 const WATER_COOLER_ID = 'acceptance-water-cooler';
+const COFFEE_MACHINE_ID = 'acceptance-coffee-machine';
+const VENDING_ID = 'acceptance-vending';
+const WHITEBOARD_ID = 'acceptance-whiteboard';
+const PRINTER_ID = 'acceptance-printer';
+const MICROWAVE_ID = 'acceptance-microwave';
+const ACCEPTANCE_TURN_TARGET = Math.max(1, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS || '12', 10) || 12);
 const keepOpen = process.argv.includes('--keep-open');
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
@@ -23,7 +30,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
 
 The harness starts My Virtual World on ${BASE_URL} with temporary data,
 checks /healthz, proves a backend Live Agent Mode turn can finish without
-a browser, runs a browser replay/render check against emitted animation
+a browser, runs autonomy metrics, runs a browser replay/render check against emitted animation
 events, pins the child process to ${TEST_PORT}, and refuses environment or
 argument targets that point at ${PRODUCT_URL}.`);
   process.exit(0);
@@ -81,16 +88,10 @@ function isTcpOpen(port) {
   });
 }
 
-function assertPortAvailable(port) {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', (error) => {
-      reject(new Error(`port ${port} is unavailable: ${error.message}`));
-    });
-    server.listen(port, HOST, () => {
-      server.close(resolve);
-    });
-  });
+async function assertPortAvailable(port) {
+  if (await isTcpOpen(port)) {
+    throw new Error(`port ${port} is unavailable: an existing listener answered on ${HOST}:${port}`);
+  }
 }
 
 function delay(ms) {
@@ -105,7 +106,7 @@ function assert(condition, message, details = undefined) {
 
 async function requestJson(path, { method = 'GET', body } = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
+  const timeout = setTimeout(() => controller.abort(), 15000);
   try {
     const response = await fetch(`${BASE_URL}${path}`, {
       method,
@@ -176,6 +177,16 @@ function writeAcceptanceWorkspace(workspaceRoot) {
     '- **Role:** Isolated Live Agent Mode acceptance fixture',
     '',
   ].join('\n'));
+  const peerDir = join(workspaceRoot, 'agents', PEER_AGENT_ID, 'agent');
+  mkdirSync(peerDir, { recursive: true });
+  writeFileSync(join(peerDir, 'IDENTITY.md'), [
+    '# Acceptance Peer',
+    '',
+    '- **Name:** Acceptance Peer',
+    '- **Emoji:** P',
+    '- **Role:** Isolated Live Agent Mode social fixture',
+    '',
+  ].join('\n'));
 }
 
 function acceptanceOfficeBuilding() {
@@ -203,6 +214,61 @@ function acceptanceOfficeBuilding() {
           floor: 1,
           buildingFloor: 1,
           capabilityTags: ['life.hydration'],
+        },
+        {
+          id: COFFEE_MACHINE_ID,
+          objectInstanceId: COFFEE_MACHINE_ID,
+          type: 'countertopCoffeeMachine',
+          catalogId: 'countertopCoffeeMachine',
+          x: 7,
+          z: 4,
+          floor: 1,
+          buildingFloor: 1,
+          capabilityTags: ['life.hydration'],
+        },
+        {
+          id: VENDING_ID,
+          objectInstanceId: VENDING_ID,
+          type: 'vending',
+          catalogId: 'vending',
+          x: 8,
+          z: 6,
+          floor: 1,
+          buildingFloor: 1,
+          capabilityTags: ['life.food'],
+        },
+        {
+          id: WHITEBOARD_ID,
+          objectInstanceId: WHITEBOARD_ID,
+          type: 'whiteboard',
+          catalogId: 'whiteboard',
+          x: 3,
+          z: 2,
+          floor: 1,
+          buildingFloor: 1,
+          capabilityTags: ['planning.brainstorm'],
+        },
+        {
+          id: PRINTER_ID,
+          objectInstanceId: PRINTER_ID,
+          type: 'printerCopier',
+          catalogId: 'printerCopier',
+          x: 3,
+          z: 7,
+          floor: 1,
+          buildingFloor: 1,
+          capabilityTags: ['maintenance.printCopy'],
+        },
+        {
+          id: MICROWAVE_ID,
+          objectInstanceId: MICROWAVE_ID,
+          type: 'microwave',
+          catalogId: 'microwave',
+          x: 9,
+          z: 3,
+          floor: 1,
+          buildingFloor: 1,
+          capabilityTags: ['life.food'],
         },
       ],
     },
@@ -255,6 +321,15 @@ async function seedAcceptanceWorld() {
           easygoing: 0.8,
         },
       },
+      [PEER_AGENT_ID]: {
+        name: 'Acceptance Peer',
+        agentLiveModeEnabled: false,
+        personality: {
+          outgoing: 0.6,
+          curious: 0.4,
+          easygoing: 0.5,
+        },
+      },
     },
     agentLife: {
       simulation: {
@@ -270,6 +345,17 @@ async function seedAcceptanceWorld() {
             z: -7,
             apiX: -280,
             apiZ: -280,
+            updatedAt: now,
+          },
+          [PEER_AGENT_ID]: {
+            source: '8587-acceptance-seed',
+            agentId: PEER_AGENT_ID,
+            buildingId: OFFICE_BUILDING_ID,
+            floor: 1,
+            x: 18,
+            z: 12,
+            apiX: 720,
+            apiZ: 480,
             updatedAt: now,
           },
         },
@@ -320,13 +406,13 @@ async function seedAcceptanceWorld() {
   assert(loopSettings?.ok === true, 'failed to configure Live Agent Mode loop for acceptance', loopSettings);
 }
 
-async function verifyNoBrowserBackendTurn() {
+async function verifyNoBrowserBackendTurn(reason = '8587-acceptance-no-browser') {
   const before = await fetchJson('/api/agent-live-loop');
   assert(before?.runtime?.worldClient?.active === false, 'expected no active browser client before backend tick', before?.runtime?.worldClient);
   assert(before?.runtime?.guardrails?.browserTabRequiredForScheduler === false, 'expected scheduler guardrail to allow no-browser progression', before?.runtime?.guardrails);
 
   const tick = await postJson('/api/agent-live-loop/tick', {
-    reason: '8587-acceptance-no-browser',
+    reason,
     force: true,
   });
   assert(tick?.ok === true, 'Live Agent Mode backend tick failed', tick);
@@ -349,6 +435,10 @@ async function verifyNoBrowserBackendTurn() {
   assert(completed?.status === 'completed', 'backend-owned action did not complete', completed);
   assert(completed?.execution?.clientRequiredForProgress === false, 'completed action should record browser-free progress', completed?.execution);
   assert(completed?.route?.clientRequiredForProgress === false, 'completed action route should record browser-free progress', completed?.route);
+  const routeTo = completed?.result?.backendExecution?.route?.to;
+  if (routeTo?.coordinateSpace === 'world-tiles') {
+    assert(Math.abs(Number(routeTo.x || 0)) < 500 && Math.abs(Number(routeTo.z || 0)) < 500, 'backend route location should be stored in world tiles, not API pixels', routeTo);
+  }
 
   const replay = await fetchJson(`/api/live-agent-mode/animation-events?actionId=${encodeURIComponent(actionId)}&limit=20`);
   const names = new Set((replay?.events || []).map((event) => event?.name));
@@ -359,6 +449,188 @@ async function verifyNoBrowserBackendTurn() {
 
   console.log(`PASS: no-browser Live Agent Mode turn completed ${actionId} with ${replay.events.length} replay events.`);
   return { actionId, action: completed, events: replay.events };
+}
+
+async function verifyNoBrowserBackendTurnSeries(targetCount = ACCEPTANCE_TURN_TARGET) {
+  const proofs = [];
+  const actionTypes = new Set();
+  for (let index = 0; index < targetCount; index += 1) {
+    const proof = await verifyNoBrowserBackendTurn(`8587-acceptance-no-browser-${index + 1}`);
+    proofs.push(proof);
+    if (proof.action?.actionType) actionTypes.add(proof.action.actionType);
+  }
+  console.log(`PASS: ${proofs.length}/${targetCount} no-browser backend turns completed with action types: ${Array.from(actionTypes).sort().join(', ')}`);
+  return { proofs, actionTypes: Array.from(actionTypes).sort() };
+}
+
+function liveAgentSource(requestId) {
+  return {
+    kind: 'agent-live-mode',
+    requestId,
+    surface: '8587-acceptance-harness',
+    roles: ['participant'],
+  };
+}
+
+async function requestLiveAgentAction({ actionType, capabilityTag, target, params = {}, agentId = TEST_AGENT_ID, requestId }) {
+  const result = await postJson('/api/agent-model/actions', {
+    agentId,
+    source: liveAgentSource(requestId || `8587-acceptance-${actionType}`),
+    actionType,
+    capabilityTag,
+    target,
+    priority: 'normal',
+    params: {
+      reason: '8587-autonomy-metrics',
+      ...params,
+    },
+  });
+  assert(result?.ok === true, `Live Agent action request failed for ${actionType}`, result);
+  const action = result.action || result.worldAction?.action;
+  assert(action?.status === 'completed', `Live Agent action ${actionType} did not complete`, action || result);
+  assert(action?.execution?.clientRequiredForProgress === false, `Live Agent action ${actionType} should be backend-owned`, action?.execution);
+  return { result, action };
+}
+
+async function verifyTypedObjectActions() {
+  const targets = [
+    {
+      actionType: 'life.getCoffee',
+      capabilityTag: 'life.hydration',
+      target: { kind: 'object-instance', buildingId: OFFICE_BUILDING_ID, objectInstanceId: COFFEE_MACHINE_ID, catalogId: 'countertopCoffeeMachine', interactionSpotId: 'use-front', floor: 1 },
+    },
+    {
+      actionType: 'life.buyVendingSnackDrink',
+      capabilityTag: 'life.food',
+      target: { kind: 'object-instance', buildingId: OFFICE_BUILDING_ID, objectInstanceId: VENDING_ID, catalogId: 'vending', interactionSpotId: 'use-front', floor: 1 },
+    },
+    {
+      actionType: 'planning.brainstorm',
+      capabilityTag: 'planning.brainstorm',
+      target: { kind: 'object-instance', buildingId: OFFICE_BUILDING_ID, objectInstanceId: WHITEBOARD_ID, catalogId: 'whiteboard', interactionSpotId: 'presenter', floor: 1 },
+    },
+  ];
+  const actions = [];
+  for (const target of targets) {
+    const proof = await requestLiveAgentAction({
+      ...target,
+      requestId: `8587-acceptance-object-${target.actionType}`,
+    });
+    actions.push(proof.action);
+  }
+  console.log(`PASS: typed object backend actions completed: ${actions.map((action) => action.actionType).join(', ')}`);
+  return actions;
+}
+
+async function executeLiveAgentTool(tool, args, { agentId = TEST_AGENT_ID, requestId, dryRun = false } = {}) {
+  const result = await postJson('/api/live-agent-mode/tool-calls', {
+    agentId,
+    source: liveAgentSource(requestId || `8587-acceptance-tool-${tool}`),
+    tool,
+    arguments: args,
+    dryRun,
+  });
+  assert(result?.ok === true, `Live Agent tool ${tool} failed`, result);
+  return result;
+}
+
+async function verifySocialCommunicationAndMemory() {
+  const social = await requestLiveAgentAction({
+    actionType: 'life.social',
+    capabilityTag: 'life.social',
+    target: {
+      kind: 'agent',
+      targetAgentId: PEER_AGENT_ID,
+      buildingId: OFFICE_BUILDING_ID,
+      floor: 1,
+    },
+    requestId: '8587-acceptance-social-agent-target',
+  });
+
+  const speech = await executeLiveAgentTool('say_to_agent', {
+    targetAgentId: PEER_AGENT_ID,
+    message: 'Acceptance check: visible resident conversation and reaction opportunity.',
+    tone: 'friendly',
+  }, { requestId: '8587-acceptance-say-to-agent' });
+  assert(speech.toolCall?.result?.reactionOpportunityCount >= 1, 'say_to_agent should create a reaction opportunity', speech);
+
+  const memory = await executeLiveAgentTool('add_memory', {
+    text: 'Acceptance harness confirmed backend-owned Live Agent Mode can communicate and remember.',
+    importance: 'high',
+    tags: ['acceptance', 'autonomy'],
+  }, { requestId: '8587-acceptance-add-memory' });
+  assert(memory.toolCall?.result?.memoryEntry?.id, 'add_memory should persist a memory entry', memory);
+
+  const communications = await fetchJson(`/api/live-agent-mode/in-world-communications?agentId=${encodeURIComponent(TEST_AGENT_ID)}&limit=20`);
+  assert((communications.events || []).some((event) => event.targetAgentId === PEER_AGENT_ID), 'communication log should include the peer-targeted event', communications);
+
+  console.log(`PASS: social target ${social.action.id}, in-world speech ${speech.toolCall.id}, and memory ${memory.toolCall.result.memoryEntry.id} verified.`);
+  return { socialAction: social.action, speech, memory, communications };
+}
+
+async function verifyOperatorControlsStopTurns() {
+  const paused = await postJson('/api/agent-live-loop', {
+    pauseSec: 120,
+    pauseReason: '8587-acceptance-pause',
+    actor: '8587-acceptance-harness',
+  });
+  assert(paused?.ok === true && paused.runtime?.pause?.active === true, 'pause control did not activate', paused);
+  const pausedTick = await postJson('/api/agent-live-loop/tick', {
+    reason: '8587-acceptance-paused-tick',
+    force: true,
+  });
+  assert((pausedTick.skipped || []).some((item) => item?.reason === 'loop-paused'), 'paused loop should skip new turns', pausedTick);
+  assert(!pausedTick.actionsCreated?.length, 'paused loop should not create actions', pausedTick);
+
+  const kill = await postJson('/api/agent-live-loop', {
+    clearPause: true,
+    killSwitchActive: true,
+    killSwitchReason: '8587-acceptance-kill-switch',
+    actor: '8587-acceptance-harness',
+  });
+  assert(kill?.ok === true && kill.runtime?.killSwitch?.active === true, 'kill switch did not activate', kill);
+  const killedTick = await postJson('/api/agent-live-loop/tick', {
+    reason: '8587-acceptance-kill-switch-tick',
+    force: true,
+  });
+  assert((killedTick.skipped || []).some((item) => item?.reason === 'kill-switch-active'), 'kill switch should skip new turns', killedTick);
+  assert(!killedTick.actionsCreated?.length, 'kill switch should not create actions', killedTick);
+
+  const cleared = await postJson('/api/agent-live-loop', {
+    clearPause: true,
+    clearKillSwitch: true,
+    actor: '8587-acceptance-harness',
+  });
+  assert(cleared?.ok === true && cleared.runtime?.killSwitch?.active === false && cleared.runtime?.pause?.active === false, 'operator controls did not clear cleanly', cleared);
+  console.log('PASS: operator pause and kill switch both stop new turns and clear cleanly.');
+  return { paused, pausedTick, kill, killedTick, cleared };
+}
+
+async function verifyAutonomyMetrics({ expectedTurns }) {
+  const metrics = await fetchJson('/api/live-agent-mode/metrics');
+  assert(metrics?.ok === true, 'Live Agent metrics endpoint failed', metrics);
+  assert(metrics.metrics?.completedTurnCount >= expectedTurns, `metrics should show at least ${expectedTurns} completed turns`, metrics.metrics);
+  assert(metrics.metrics?.completedBackendActionCount >= expectedTurns, `metrics should show at least ${expectedTurns} backend-owned completed actions`, metrics.metrics);
+  assert(metrics.metrics?.routePendingActiveCount === 0, 'metrics should show no active route_pending actions', metrics.metrics);
+  assert(metrics.checklist?.browserFreeBackendCompletions === true, 'metrics checklist should confirm browser-free backend completion', metrics.checklist);
+  assert(metrics.checklist?.movementPersisted === true, 'metrics checklist should confirm persisted movement', metrics.checklist);
+  assert(metrics.checklist?.threeTypedObjectUses === true, 'metrics checklist should confirm at least three typed object-use actions', metrics.checklist);
+  assert(metrics.checklist?.buildEffectPersisted === true, 'metrics checklist should confirm build effects persisted', metrics.checklist);
+  assert(metrics.checklist?.animationReplayReady === true, 'metrics checklist should confirm replay readiness', metrics.checklist);
+  assert(metrics.checklist?.spatialOrWorldCommunication === true, 'metrics checklist should confirm in-world communication', metrics.checklist);
+  assert(metrics.checklist?.reactionOpportunitiesCreated === true, 'metrics checklist should confirm reaction opportunities', metrics.checklist);
+  assert(metrics.checklist?.memoryUpdated === true, 'metrics checklist should confirm memory updates', metrics.checklist);
+  assert(metrics.checklist?.relationshipsUpdated === true, 'metrics checklist should confirm relationship updates', metrics.checklist);
+  console.log(`PASS: autonomy metrics ${JSON.stringify({
+    completedTurnCount: metrics.metrics.completedTurnCount,
+    completedBackendActionCount: metrics.metrics.completedBackendActionCount,
+    typedObjectActionTypes: metrics.metrics.typedObjectActionTypes,
+    inWorldCommunicationCount: metrics.metrics.inWorldCommunicationCount,
+    reactionOpportunityCount: metrics.metrics.reactionOpportunityCount,
+    relationshipCount: metrics.metrics.relationshipCount,
+    gaps: metrics.gaps,
+  })}`);
+  return metrics;
 }
 
 function runChild(command, args, { input, env } = {}) {
@@ -527,8 +799,12 @@ try {
   console.log(`PASS: Live Agent Mode harness verified ${BASE_URL}/healthz with isolated data at ${dataDir}.`);
 
   await seedAcceptanceWorld();
-  const backendProof = await verifyNoBrowserBackendTurn();
-  await runBrowserReplayRenderCheck(backendProof.actionId);
+  const backendSeries = await verifyNoBrowserBackendTurnSeries(ACCEPTANCE_TURN_TARGET);
+  await verifyTypedObjectActions();
+  await verifySocialCommunicationAndMemory();
+  await verifyOperatorControlsStopTurns();
+  await verifyAutonomyMetrics({ expectedTurns: ACCEPTANCE_TURN_TARGET });
+  await runBrowserReplayRenderCheck(backendSeries.proofs[0].actionId);
 
   if (keepOpen) {
     console.log(`Serving isolated Live Agent Mode harness at ${BASE_URL}. Press Ctrl-C to stop.`);

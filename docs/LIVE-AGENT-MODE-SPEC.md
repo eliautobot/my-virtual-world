@@ -56,11 +56,25 @@ The redesigned mode keeps the good API vocabulary, but moves autonomous executio
 
 ## Local Autopilot Test Harness
 
-Autonomous Live Agent Mode development should use the isolated 8587 harness instead of the normal product port. The harness starts a temporary-data server, checks `/healthz`, proves one backend scheduler turn completes before any browser client is opened, then opens the real product browser client and verifies its `/api/live-agent-mode/animation-events` replay consumer renders scene and agent state. It refuses environment or argument targets that point at 8590.
+Autonomous Live Agent Mode development should use the isolated 8587 harness instead of the normal product port. The harness starts a temporary-data server, checks `/healthz`, proves repeated backend scheduler turns complete before any browser client is opened, verifies typed object actions, verifies social agent-target routing, verifies in-world communication/memory side effects, verifies operator pause/kill-switch controls, then opens the real product browser client and verifies its `/api/live-agent-mode/animation-events` replay consumer renders scene and agent state. It refuses environment or argument targets that point at 8590.
 
 ```bash
 npm run verify:live-agent-mode:8587
 ```
+
+The default harness target is a short CI-safe proof. The full no-browser soak target uses the same script:
+
+```bash
+VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS=50 npm run verify:live-agent-mode:8587
+```
+
+The read-only metrics endpoint is:
+
+```text
+GET /api/live-agent-mode/metrics
+```
+
+It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, reaction opportunities, memory entries, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
 
 For manual browser checks, keep the same isolated server open:
 
@@ -577,7 +591,7 @@ Compatibility endpoint:
 POST /api/agent-model/actions
 ```
 
-This endpoint can remain as a high-level action request, but internally it should call the backend tool registry instead of creating client-owned route handoffs.
+This endpoint can remain as a high-level action request, but backend-owned Live Mode actions should execute through the server executor and skip the legacy move-intent/client-owned route handoff entirely.
 
 ### 16. Frontend Contract
 
