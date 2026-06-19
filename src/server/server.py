@@ -1638,6 +1638,313 @@ LIVE_AGENT_PROPOSAL_ONLY_CAPABILITIES = [
         "requirement": "Agent must visibly go to the object and perform a removal/cleanup sequence before the object is deleted from persistent world state.",
     },
 ]
+LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION = "agent-live-mode-tool-registry/v1"
+LIVE_AGENT_TOOL_CALL_SCHEMA_VERSION = "agent-live-mode-tool-call/v1"
+LIVE_AGENT_TOOL_CONTRACT_VERSION = "agent-live-mode-tool-contract/v1"
+LIVE_AGENT_TOOL_RESULT_SCHEMA_VERSION = "agent-live-mode-tool-result/v1"
+LIVE_AGENT_TOOL_CATEGORIES = {
+    "observe",
+    "move",
+    "object-use",
+    "communicate",
+    "remember",
+    "build-create",
+}
+LIVE_AGENT_TOOL_REGISTRY = {
+    "observe_world": {
+        "name": "observe_world",
+        "category": "observe",
+        "description": "Read a bounded, backend-assembled world summary without mutating world state.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-read",
+        "locationRule": "none",
+        "sideEffect": "none",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "radius": {"type": "number", "minimum": 0, "maximum": 500},
+                "includeObjects": {"type": "boolean"},
+                "includeAgents": {"type": "boolean"},
+            },
+        },
+    },
+    "list_agents": {
+        "name": "list_agents",
+        "category": "observe",
+        "description": "List visible world agents and live-mode profile overlays.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-read",
+        "locationRule": "none",
+        "sideEffect": "none",
+        "argumentSchema": {"type": "object", "additionalProperties": False, "properties": {}},
+    },
+    "list_landmarks": {
+        "name": "list_landmarks",
+        "category": "observe",
+        "description": "List persisted buildings and high-level landmarks.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-read",
+        "locationRule": "none",
+        "sideEffect": "none",
+        "argumentSchema": {"type": "object", "additionalProperties": False, "properties": {}},
+    },
+    "get_current_location": {
+        "name": "get_current_location",
+        "category": "observe",
+        "description": "Return the server's conservative current location frame for the agent.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-read",
+        "locationRule": "none",
+        "sideEffect": "none",
+        "argumentSchema": {"type": "object", "additionalProperties": False, "properties": {}},
+    },
+    "go_to_place": {
+        "name": "go_to_place",
+        "category": "move",
+        "description": "Request movement to a persisted building, floor, or room target.",
+        "riskTier": 1,
+        "permissionRule": "live-agent-move",
+        "locationRule": "reachable-place",
+        "sideEffect": "move-intent",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["buildingId"],
+            "properties": {
+                "buildingId": {"type": "string", "minLength": 1},
+                "floor": {"type": "integer", "minimum": 1},
+                "roomId": {"type": "string"},
+            },
+        },
+    },
+    "go_to_coordinates": {
+        "name": "go_to_coordinates",
+        "category": "move",
+        "description": "Request movement to explicit world coordinates.",
+        "riskTier": 1,
+        "permissionRule": "live-agent-move",
+        "locationRule": "world-coordinate",
+        "sideEffect": "move-intent",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["x"],
+            "properties": {
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "z": {"type": "number"},
+                "floor": {"type": "integer", "minimum": 1},
+                "buildingId": {"type": "string"},
+            },
+            "oneOfRequired": [["y"], ["z"]],
+        },
+    },
+    "go_home": {
+        "name": "go_home",
+        "category": "move",
+        "description": "Request movement to the agent's assigned or owned home building.",
+        "riskTier": 1,
+        "permissionRule": "live-agent-move",
+        "locationRule": "agent-home",
+        "sideEffect": "move-intent",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"floor": {"type": "integer", "minimum": 1}},
+        },
+    },
+    "use_object": {
+        "name": "use_object",
+        "category": "object-use",
+        "description": "Use a persisted object through its catalog action, capability, and interaction spot contract.",
+        "riskTier": 1,
+        "permissionRule": "object-action",
+        "locationRule": "object-interaction-spot",
+        "sideEffect": "world-action",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["objectInstanceId", "actionType", "capabilityTag", "interactionSpotId"],
+            "properties": {
+                "objectInstanceId": {"type": "string", "minLength": 1},
+                "buildingId": {"type": "string"},
+                "catalogId": {"type": "string"},
+                "actionType": {"type": "string", "minLength": 1},
+                "capabilityTag": {"type": "string", "minLength": 1},
+                "interactionSpotId": {"type": "string", "minLength": 1},
+                "routeIfNeeded": {"type": "boolean"},
+            },
+        },
+    },
+    "say_to_agent": {
+        "name": "say_to_agent",
+        "category": "communicate",
+        "description": "Speak to a nearby visible agent; same building/floor proximity is required.",
+        "riskTier": 1,
+        "permissionRule": "live-agent-speak",
+        "locationRule": "nearby-agent",
+        "sideEffect": "conversation-event",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["targetAgentId", "message"],
+            "properties": {
+                "targetAgentId": {"type": "string", "minLength": 1},
+                "message": {"type": "string", "minLength": 1, "maxLength": 1000},
+                "tone": {"type": "string", "maxLength": 80},
+            },
+        },
+    },
+    "speak_to_room": {
+        "name": "speak_to_room",
+        "category": "communicate",
+        "description": "Speak to the agent's current room/floor audience.",
+        "riskTier": 1,
+        "permissionRule": "live-agent-speak",
+        "locationRule": "current-room",
+        "sideEffect": "conversation-event",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["message"],
+            "properties": {
+                "message": {"type": "string", "minLength": 1, "maxLength": 1000},
+                "buildingId": {"type": "string"},
+                "floor": {"type": "integer", "minimum": 1},
+                "roomId": {"type": "string"},
+            },
+        },
+    },
+    "send_message": {
+        "name": "send_message",
+        "category": "communicate",
+        "description": "Send a visible remote message through the world communication log.",
+        "riskTier": 1,
+        "permissionRule": "live-agent-message",
+        "locationRule": "none",
+        "sideEffect": "communication-log",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["targetAgentId", "message"],
+            "properties": {
+                "targetAgentId": {"type": "string", "minLength": 1},
+                "message": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "conversationId": {"type": "string", "maxLength": 160},
+            },
+        },
+    },
+    "think_aloud": {
+        "name": "think_aloud",
+        "category": "communicate",
+        "description": "Record a visible non-directed thought without contacting another provider.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-read",
+        "locationRule": "none",
+        "sideEffect": "audit-event",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["message"],
+            "properties": {"message": {"type": "string", "minLength": 1, "maxLength": 1000}},
+        },
+    },
+    "add_memory": {
+        "name": "add_memory",
+        "category": "remember",
+        "description": "Append a typed resident memory through the backend memory contract.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-memory",
+        "locationRule": "none",
+        "sideEffect": "memory-write",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["text"],
+            "properties": {
+                "text": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "importance": {"type": "string", "enum": ["low", "normal", "high"]},
+                "tags": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+            },
+        },
+    },
+    "write_diary": {
+        "name": "write_diary",
+        "category": "remember",
+        "description": "Write a dated diary/reflection entry through the backend memory contract.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-memory",
+        "locationRule": "none",
+        "sideEffect": "memory-write",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["text"],
+            "properties": {
+                "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "mood": {"type": "string", "maxLength": 80},
+            },
+        },
+    },
+    "propose_world_change": {
+        "name": "propose_world_change",
+        "category": "build-create",
+        "description": "Create an operator-reviewed proposal for a world change without mutating the world.",
+        "riskTier": 2,
+        "permissionRule": "operator-reviewed",
+        "locationRule": "none",
+        "sideEffect": "operator-proposal",
+        "executionMode": "proposal-only",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["proposalType", "summary"],
+            "properties": {
+                "proposalType": {"type": "string", "enum": ["build", "decorate", "event", "note"]},
+                "summary": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "target": {"type": "object"},
+            },
+        },
+    },
+    "build_structure": {
+        "name": "build_structure",
+        "category": "build-create",
+        "description": "Validate a typed construction request; execution remains operator-reviewed until backend construction is implemented.",
+        "riskTier": 3,
+        "permissionRule": "operator-reviewed",
+        "locationRule": "typed-build-site",
+        "sideEffect": "operator-proposal",
+        "executionMode": "proposal-only",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["structureType", "x", "y"],
+            "properties": {
+                "structureType": {"type": "string", "enum": ["small-home", "meeting-pavilion", "garden-plot"]},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "widthTiles": {"type": "number", "minimum": 1, "maximum": 24},
+                "heightTiles": {"type": "number", "minimum": 1, "maximum": 24},
+                "summary": {"type": "string", "maxLength": 2000},
+            },
+        },
+    },
+    "idle": {
+        "name": "idle",
+        "category": "observe",
+        "description": "Explicitly take no world-mutating action for this turn.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-read",
+        "locationRule": "none",
+        "sideEffect": "none",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"reason": {"type": "string", "maxLength": 500}},
+        },
+    },
+}
 
 
 def _api_error(code, message, *, details=None):
@@ -1736,6 +2043,537 @@ def _validate_live_agent_visible_action_contract(payload, action_type=None, capa
             },
         )
     return contract, None
+
+
+def _live_agent_tool_contract(tool):
+    if not isinstance(tool, dict):
+        return None
+    public_keys = {
+        "name",
+        "category",
+        "description",
+        "riskTier",
+        "permissionRule",
+        "locationRule",
+        "sideEffect",
+        "executionMode",
+        "argumentSchema",
+    }
+    contract = {key: _copy_jsonable(value) for key, value in tool.items() if key in public_keys}
+    contract["schemaVersion"] = LIVE_AGENT_TOOL_CONTRACT_VERSION
+    contract["typedArguments"] = True
+    contract["permissionGated"] = bool(tool.get("permissionRule"))
+    contract["locationGated"] = tool.get("locationRule") not in {None, "", "none"}
+    return contract
+
+
+def _is_live_agent_tool_call_payload(payload):
+    return isinstance(payload, dict) and any(payload.get(key) is not None for key in ("tool", "toolName", "name"))
+
+
+def _live_agent_tool_name(payload):
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("tool") or payload.get("toolName") or payload.get("name") or "").strip()
+
+
+def _live_agent_tool_arguments(payload):
+    if not isinstance(payload, dict):
+        return None
+    if "arguments" in payload:
+        return payload.get("arguments")
+    if "args" in payload:
+        return payload.get("args")
+    return {}
+
+
+def _live_agent_tool_type_name(value):
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
+def _live_agent_tool_value_matches_type(value, expected):
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected == "null":
+        return value is None
+    return True
+
+
+def _live_agent_tool_schema_errors(schema, value, path="arguments"):
+    if not isinstance(schema, dict):
+        return []
+    errors = []
+    expected_type = schema.get("type")
+    if isinstance(expected_type, list):
+        type_ok = any(_live_agent_tool_value_matches_type(value, item) for item in expected_type)
+    elif expected_type:
+        type_ok = _live_agent_tool_value_matches_type(value, expected_type)
+    else:
+        type_ok = True
+    if not type_ok:
+        expected = expected_type if isinstance(expected_type, list) else [expected_type]
+        return [{"path": path, "code": "invalid_type", "expected": expected, "actual": _live_agent_tool_type_name(value)}]
+
+    if "enum" in schema and value not in schema.get("enum", []):
+        errors.append({"path": path, "code": "invalid_enum", "allowed": schema.get("enum", []), "actual": value})
+    if isinstance(value, str):
+        if schema.get("minLength") is not None and len(value.strip()) < int(schema.get("minLength")):
+            errors.append({"path": path, "code": "too_short", "minLength": int(schema.get("minLength"))})
+        if schema.get("maxLength") is not None and len(value) > int(schema.get("maxLength")):
+            errors.append({"path": path, "code": "too_long", "maxLength": int(schema.get("maxLength"))})
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if schema.get("minimum") is not None and value < float(schema.get("minimum")):
+            errors.append({"path": path, "code": "below_minimum", "minimum": schema.get("minimum")})
+        if schema.get("maximum") is not None and value > float(schema.get("maximum")):
+            errors.append({"path": path, "code": "above_maximum", "maximum": schema.get("maximum")})
+    if isinstance(value, dict):
+        required = schema.get("required") if isinstance(schema.get("required"), list) else []
+        for key in required:
+            if key not in value:
+                errors.append({"path": f"{path}.{key}", "code": "required"})
+        one_of_required = [group for group in (schema.get("oneOfRequired") or []) if isinstance(group, list)]
+        if one_of_required and not any(all(key in value for key in group) for group in one_of_required):
+            errors.append({"path": path, "code": "one_of_required", "oneOf": one_of_required})
+        properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        if schema.get("additionalProperties") is False:
+            for key in value.keys():
+                if key not in properties:
+                    errors.append({"path": f"{path}.{key}", "code": "unknown_argument"})
+        for key, child_schema in properties.items():
+            if key in value:
+                errors.extend(_live_agent_tool_schema_errors(child_schema, value.get(key), f"{path}.{key}"))
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            errors.extend(_live_agent_tool_schema_errors(schema["items"], item, f"{path}[{index}]"))
+    return errors
+
+
+def _live_agent_tool_error(code, message, *, tool=None, details=None):
+    payload = {"tool": tool} if tool else {}
+    if isinstance(details, dict):
+        payload.update(details)
+    elif details is not None:
+        payload["details"] = details
+    return _api_error(code, message, details=payload if payload else None)
+
+
+def _live_agent_tool_error_status(code):
+    return {
+        "invalid_payload": 400,
+        "invalid_tool": 400,
+        "invalid_tool_arguments": 400,
+        "invalid_behavior_source": 400,
+        "agent_not_found": 404,
+        "target_missing": 404,
+        "tool_not_found": 404,
+        "building_missing": 404,
+        "target_deleted": 410,
+        "building_deleted": 410,
+        "agent_live_mode_disabled": 403,
+        "permission_denied": 403,
+        "operator_approval_required": 403,
+        "location_unknown": 409,
+        "location_mismatch": 409,
+        "target_not_nearby": 409,
+        "agent_unavailable": 409,
+        "object_reserved": 409,
+        "target_disabled": 409,
+        "target_blocked": 409,
+        "building_unavailable": 409,
+        "missing_interaction_spot": 422,
+        "unsupported_target": 422,
+        "unsupported_capability": 422,
+        "tool_execution_not_enabled": 501,
+    }.get(code, 400)
+
+
+def _live_agent_tool_context(payload):
+    if not isinstance(payload, dict):
+        return None, _api_error("invalid_payload", "Live Agent tool call payload must be an object."), 400
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else None
+    if not source or source.get("kind") != "agent-live-mode":
+        return None, _api_error("invalid_behavior_source", "Live Agent tool calls require source.kind to be agent-live-mode.", details={"required": "agent-live-mode"}), 400
+    agent_id = _resolve_agent_id(payload.get("agentId"))
+    if not agent_id:
+        return None, _api_error("agent_not_found", "agentId must reference an existing agent id or statusKey"), 404
+    setting = get_agent_live_mode_setting(agent_id)
+    if not setting or setting.get("agentLiveModeEnabled") is not True:
+        return None, _agent_live_mode_disabled_error(agent_id), 403
+    return {
+        "agentId": agent_id,
+        "source": source,
+        "roles": sorted(_source_roles(source)),
+        "setting": setting,
+        "location": _live_agent_tool_current_location(agent_id),
+    }, None, None
+
+
+def _live_agent_tool_current_location(agent_id):
+    for action in get_world_actions_store().get("active", []):
+        if not isinstance(action, dict) or action.get("agentId") != agent_id:
+            continue
+        status = _canonical_world_action_status(action.get("status"))
+        if status not in WORLD_ACTION_ACTIVE_STATES:
+            continue
+        location = _live_agent_loop_location_from_active_record({"type": "world-action", "id": action.get("id"), "status": status, "record": action})
+        if location:
+            return location
+    for intent in get_move_intents_store().get("active", []):
+        if not isinstance(intent, dict) or intent.get("agentId") != agent_id or intent.get("routeStatus") not in MOVE_INTENT_ACTIVE_STATES:
+            continue
+        location = _live_agent_loop_location_from_active_record({"type": "move-intent", "id": intent.get("id"), "status": intent.get("routeStatus"), "worldActionId": _move_intent_linked_world_action_id(intent), "record": intent})
+        if location:
+            return location
+    return _live_agent_loop_assignment_location(agent_id)
+
+
+def _live_agent_tool_source_has_role(context, roles):
+    source_roles = set(context.get("roles") or [])
+    if (context.get("source") or {}).get("kind") == "agent-live-mode":
+        source_roles.add("participant")
+    return bool(source_roles.intersection(set(roles)))
+
+
+def _live_agent_tool_target_from_args(args):
+    args = args if isinstance(args, dict) else {}
+    return {
+        "kind": "object-instance",
+        "objectInstanceId": args.get("objectInstanceId"),
+        "buildingId": args.get("buildingId"),
+        "catalogId": args.get("catalogId"),
+        "interactionSpotId": args.get("interactionSpotId"),
+    }
+
+
+def _live_agent_tool_location_matches(current, target):
+    if not isinstance(current, dict) or not isinstance(target, dict):
+        return False
+    current_building = current.get("buildingId")
+    target_building = target.get("buildingId")
+    if not current_building or not target_building or current_building != target_building:
+        return False
+    try:
+        return int(current.get("floor") or 1) == int(target.get("floor") or 1)
+    except (TypeError, ValueError):
+        return False
+
+
+def _live_agent_tool_place_target(args):
+    return {
+        "kind": "building" if not args.get("roomId") else "room",
+        "buildingId": args.get("buildingId"),
+        "floor": args.get("floor") or 1,
+        "roomId": args.get("roomId"),
+    }
+
+
+def _live_agent_tool_coordinate_target(args):
+    return {
+        "kind": "world-point",
+        "x": args.get("x"),
+        "y": args.get("y") if args.get("y") is not None else args.get("z"),
+        "z": args.get("z") if args.get("z") is not None else args.get("y"),
+        "floor": args.get("floor") or 1,
+        "buildingId": args.get("buildingId"),
+    }
+
+
+def _live_agent_tool_home_target(context, args):
+    agent_id = context.get("agentId")
+    home = _live_agent_loop_existing_home_for_agent(agent_id)
+    if not home:
+        meta = load_world_meta()
+        assignments = meta.get("agentAssignments") if isinstance(meta.get("agentAssignments"), dict) else {}
+        aliases = _live_agent_loop_agent_aliases(agent_id)
+        home_id = None
+        for alias in aliases:
+            assignment = assignments.get(alias)
+            if isinstance(assignment, dict) and assignment.get("home"):
+                home_id = assignment.get("home")
+                break
+        home = load_building(home_id) if home_id else None
+    if not isinstance(home, dict):
+        return None
+    return {"kind": "building", "buildingId": home.get("id"), "floor": args.get("floor") or 1, "homeRole": "resident"}
+
+
+def _live_agent_tool_check_move_target(tool_name, context, args):
+    if tool_name == "go_to_place":
+        target = _live_agent_tool_place_target(args)
+    elif tool_name == "go_to_coordinates":
+        target = _live_agent_tool_coordinate_target(args)
+    elif tool_name == "go_home":
+        target = _live_agent_tool_home_target(context, args)
+        if not target:
+            return False, _live_agent_tool_error("target_missing", "Agent does not have an assigned or owned home building.", tool=tool_name, details={"agentId": context.get("agentId")}), 404
+    else:
+        target = {}
+    normalized, metadata, error = _normalize_move_target(target, context.get("agentId"))
+    if error:
+        code = (error.get("error") or {}).get("code") or "invalid_tool_arguments"
+        return False, _live_agent_tool_error(code, (error.get("error") or {}).get("message") or "Move target is not valid for this tool.", tool=tool_name, details=(error.get("error") or {}).get("details")), _live_agent_tool_error_status(code)
+    return True, {
+        "available": True,
+        "reason": None,
+        "target": normalized,
+        "targetMetadata": metadata,
+        "locationRule": LIVE_AGENT_TOOL_REGISTRY[tool_name].get("locationRule"),
+    }, 200
+
+
+def _live_agent_tool_check_use_object(context, args):
+    tool_name = "use_object"
+    target = _live_agent_tool_target_from_args(args)
+    resolved = _find_world_action_target(target)
+    if not resolved:
+        return False, _live_agent_tool_error("target_missing", "Target object does not exist in persisted buildings/objects.", tool=tool_name, details={"target": target}), 404
+    target_obj = resolved.get("object")
+    building = resolved.get("building") or {}
+    catalog_id = args.get("catalogId") or _object_catalog_id(target_obj)
+    catalog = _catalog_block_for(catalog_id)
+    if not catalog:
+        return False, _live_agent_tool_error("unsupported_target", "Target catalog is not known to the object catalog registry.", tool=tool_name, details={"catalogId": catalog_id}), 422
+    capability = _normalize_capability_tag(args.get("capabilityTag"))
+    action_permission = _catalog_action_permission(catalog, args.get("actionType"), capability)
+    if not action_permission:
+        return False, _live_agent_tool_error("unsupported_capability", "Target does not expose the requested capability/action.", tool=tool_name, details={"catalogId": catalog_id, "actionType": args.get("actionType"), "capabilityTag": capability}), 422
+    if action_permission.get("capabilityTag") != capability:
+        return False, _live_agent_tool_error("unsupported_capability", "Requested capabilityTag does not match the target action capability.", tool=tool_name, details=action_permission), 422
+    if not _catalog_has_spot(catalog, args.get("interactionSpotId"), args.get("actionType")):
+        return False, _live_agent_tool_error("missing_interaction_spot", "Target does not expose the requested interaction/action spot.", tool=tool_name, details={"interactionSpotId": args.get("interactionSpotId"), "catalogId": catalog_id}), 422
+    allowed, deny_reason = _permission_allows(action_permission.get("permissionLevel"), context.get("agentId"), context.get("source"), target_obj)
+    if not allowed:
+        return False, _live_agent_tool_error("permission_denied", "Tool call is not allowed by the target object permission contract.", tool=tool_name, details={"reason": deny_reason, "permission": action_permission}), 403
+    object_id = args.get("objectInstanceId") or (resolved.get("candidateIds") or [None])[0]
+    availability = get_object_availability({**target, "objectInstanceId": object_id, "catalogId": catalog_id}, agent_id=context.get("agentId"), resolved=resolved)
+    if availability.get("state") in {"disabled", "blocked", "missing", "deleted"}:
+        code = "target_disabled" if availability.get("state") == "disabled" else f"target_{availability.get('state')}"
+        return False, _live_agent_tool_error(code, "Target is not available for object use.", tool=tool_name, details=availability), _live_agent_tool_error_status(code)
+    if availability.get("state") in {"reserved", "in_use"}:
+        return False, _live_agent_tool_error("object_reserved", "Target interaction spot/capacity slot is already reserved by another active action.", tool=tool_name, details=availability), 409
+    target_location = {
+        "buildingId": args.get("buildingId") or building.get("id"),
+        "floor": int(target_obj.get("floor") or target_obj.get("level") or 1) if isinstance(target_obj, dict) else 1,
+    }
+    current_location = context.get("location")
+    at_target = _live_agent_tool_location_matches(current_location, target_location)
+    route_if_needed = args.get("routeIfNeeded") is not False
+    if not at_target and not route_if_needed:
+        return False, _live_agent_tool_error("location_mismatch", "Agent is not at the target object's building/floor and routeIfNeeded is false.", tool=tool_name, details={"currentLocation": current_location, "targetLocation": target_location}), 409
+    return True, {
+        "available": True,
+        "reason": None,
+        "target": {**target, "objectInstanceId": object_id, "catalogId": catalog_id, "buildingId": target_location.get("buildingId"), "floor": target_location.get("floor")},
+        "permission": action_permission,
+        "availability": availability,
+        "location": {
+            "current": current_location,
+            "target": target_location,
+            "atTarget": at_target,
+            "requiresMovement": not at_target,
+            "routeIfNeeded": route_if_needed,
+        },
+    }, 200
+
+
+def _live_agent_tool_check_agent_message(tool_name, context, args):
+    target_agent_id = _resolve_agent_id(args.get("targetAgentId"))
+    if not target_agent_id:
+        return False, _live_agent_tool_error("agent_not_found", "targetAgentId must reference an existing agent.", tool=tool_name, details={"targetAgentId": args.get("targetAgentId")}), 404
+    if target_agent_id == context.get("agentId"):
+        return False, _live_agent_tool_error("unsupported_target", "Communication tools cannot target the same agent.", tool=tool_name, details={"agentId": context.get("agentId")}), 422
+    if tool_name == "send_message":
+        return True, {"available": True, "reason": None, "targetAgentId": target_agent_id, "spatial": False}, 200
+    social = _live_agent_loop_social_perception(context.get("agentId"))
+    nearby = social.get("nearbyAgents") if isinstance(social.get("nearbyAgents"), list) else []
+    match = next((item for item in nearby if isinstance(item, dict) and item.get("agentId") == target_agent_id), None)
+    if not match:
+        return False, _live_agent_tool_error("target_not_nearby", "Target agent is not currently in the same visible building/floor perception frame.", tool=tool_name, details={"targetAgentId": target_agent_id, "currentLocation": context.get("location"), "nearbyAgentIds": [item.get("agentId") for item in nearby if isinstance(item, dict)]}), 409
+    return True, {"available": True, "reason": None, "targetAgentId": target_agent_id, "spatial": True, "nearby": match}, 200
+
+
+def _live_agent_tool_check_room_speech(context, args):
+    current = context.get("location")
+    if not isinstance(current, dict) or not current.get("buildingId"):
+        return False, _live_agent_tool_error("location_unknown", "Agent current building/floor is unknown, so room speech is unavailable.", tool="speak_to_room", details={"currentLocation": current}), 409
+    wanted = {
+        "buildingId": args.get("buildingId") or current.get("buildingId"),
+        "floor": args.get("floor") or current.get("floor") or 1,
+        "roomId": args.get("roomId") or current.get("roomId"),
+    }
+    if not _live_agent_tool_location_matches(current, wanted):
+        return False, _live_agent_tool_error("location_mismatch", "Room speech must target the agent's current building/floor.", tool="speak_to_room", details={"currentLocation": current, "targetLocation": wanted}), 409
+    return True, {"available": True, "reason": None, "audience": wanted, "spatial": True}, 200
+
+
+def _live_agent_tool_check_build_create(tool_name, context, args):
+    if tool_name == "propose_world_change":
+        return True, {
+            "available": True,
+            "reason": "operator_review_required",
+            "requiresApproval": True,
+            "executesOnApproval": False,
+            "hiddenWorldMutationAllowed": False,
+        }, 200
+    target = _live_agent_tool_coordinate_target(args)
+    normalized, metadata, error = _normalize_move_target(target, context.get("agentId"))
+    if error:
+        code = (error.get("error") or {}).get("code") or "invalid_tool_arguments"
+        return False, _live_agent_tool_error(code, (error.get("error") or {}).get("message") or "Build site target is not valid.", tool=tool_name, details=(error.get("error") or {}).get("details")), _live_agent_tool_error_status(code)
+    return True, {
+        "available": True,
+        "reason": "operator_review_required",
+        "requiresApproval": True,
+        "executesOnApproval": False,
+        "hiddenWorldMutationAllowed": False,
+        "buildSite": {
+            "structureType": args.get("structureType"),
+            "target": normalized,
+            "targetMetadata": metadata,
+            "widthTiles": args.get("widthTiles"),
+            "heightTiles": args.get("heightTiles"),
+        },
+    }, 200
+
+
+def _live_agent_tool_check_availability(tool, context, args):
+    tool_name = tool.get("name")
+    permission_rule = tool.get("permissionRule")
+    if permission_rule in {"live-agent-move", "object-action"} and not _live_agent_tool_source_has_role(context, {"participant", "assigned", "manager", "admin", "owner"}):
+        return False, _live_agent_tool_error("permission_denied", "Tool requires a Live Agent participant or stronger world role.", tool=tool_name, details={"permissionRule": permission_rule, "roles": context.get("roles")}), 403
+    if permission_rule in {"live-agent-speak", "live-agent-message", "live-agent-memory"} and not _live_agent_tool_source_has_role(context, {"participant", "assigned", "manager", "admin", "owner"}):
+        return False, _live_agent_tool_error("permission_denied", "Tool requires a Live Agent participant or stronger world role.", tool=tool_name, details={"permissionRule": permission_rule, "roles": context.get("roles")}), 403
+    if permission_rule == "operator-reviewed" and not _live_agent_tool_source_has_role(context, {"participant", "assigned", "manager", "admin", "owner"}):
+        return False, _live_agent_tool_error("permission_denied", "Proposal tools require a Live Agent participant or stronger world role.", tool=tool_name, details={"permissionRule": permission_rule, "roles": context.get("roles")}), 403
+
+    if tool_name in {"observe_world", "list_agents", "list_landmarks", "get_current_location", "think_aloud", "idle"}:
+        return True, {"available": True, "reason": None, "location": context.get("location")}, 200
+    if tool_name in {"add_memory", "write_diary"}:
+        return True, {"available": True, "reason": None, "memoryScope": "agent", "agentId": context.get("agentId")}, 200
+    if tool_name in {"go_to_place", "go_to_coordinates", "go_home"}:
+        return _live_agent_tool_check_move_target(tool_name, context, args)
+    if tool_name == "use_object":
+        return _live_agent_tool_check_use_object(context, args)
+    if tool_name in {"say_to_agent", "send_message"}:
+        return _live_agent_tool_check_agent_message(tool_name, context, args)
+    if tool_name == "speak_to_room":
+        return _live_agent_tool_check_room_speech(context, args)
+    if tool_name in {"propose_world_change", "build_structure"}:
+        return _live_agent_tool_check_build_create(tool_name, context, args)
+    return False, _live_agent_tool_error("tool_not_found", "Unknown Live Agent tool.", tool=tool_name), 404
+
+
+def get_live_agent_tool_registry(agent_id=None):
+    context = None
+    if agent_id:
+        resolved = _resolve_agent_id(agent_id)
+        if resolved:
+            context = {
+                "agentId": resolved,
+                "source": {"kind": "agent-live-mode", "roles": ["participant"], "surface": "tool-registry"},
+                "roles": ["participant"],
+                "setting": get_agent_live_mode_setting(resolved),
+                "location": _live_agent_tool_current_location(resolved),
+            }
+    tools = []
+    for tool in LIVE_AGENT_TOOL_REGISTRY.values():
+        row = _live_agent_tool_contract(tool)
+        row["availableForAgent"] = None
+        if context:
+            enabled = bool((context.get("setting") or {}).get("agentLiveModeEnabled"))
+            row["availableForAgent"] = enabled
+            row["agentId"] = context.get("agentId")
+            if not enabled:
+                row["unavailableReason"] = "agent_live_mode_disabled"
+        tools.append(row)
+    return {
+        "ok": True,
+        "schemaVersion": LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION,
+        "agentId": context.get("agentId") if context else None,
+        "currentLocation": context.get("location") if context else None,
+        "categories": sorted(LIVE_AGENT_TOOL_CATEGORIES),
+        "tools": tools,
+        "uiExposure": {"publicUiEnabled": False, "settingsPanel": "Live Agent Mode Coming Soon"},
+    }
+
+
+def validate_live_agent_tool_call(payload, *, dry_run=True):
+    context, error, status = _live_agent_tool_context(payload)
+    if error:
+        return False, error, status
+    tool_name = _live_agent_tool_name(payload)
+    if not tool_name:
+        return False, _api_error("invalid_tool", "Live Agent tool call requires tool/toolName/name."), 400
+    tool = LIVE_AGENT_TOOL_REGISTRY.get(tool_name)
+    if not tool:
+        return False, _live_agent_tool_error("tool_not_found", "Unknown Live Agent tool.", tool=tool_name, details={"allowedTools": sorted(LIVE_AGENT_TOOL_REGISTRY.keys())}), 404
+    args = _live_agent_tool_arguments(payload)
+    if args is None:
+        args = {}
+    if not isinstance(args, dict):
+        return False, _live_agent_tool_error("invalid_tool_arguments", "Tool arguments must be an object.", tool=tool_name, details={"actual": _live_agent_tool_type_name(args)}), 400
+    argument_errors = _live_agent_tool_schema_errors(tool.get("argumentSchema"), args)
+    if argument_errors:
+        return False, _live_agent_tool_error("invalid_tool_arguments", "Tool arguments did not match the tool contract.", tool=tool_name, details={"argumentErrors": argument_errors, "schemaVersion": LIVE_AGENT_TOOL_CONTRACT_VERSION}), 400
+    available, availability, availability_status = _live_agent_tool_check_availability(tool, context, args)
+    if not available:
+        return False, availability, availability_status
+    if not dry_run:
+        return False, _live_agent_tool_error(
+            "tool_execution_not_enabled",
+            "Live Agent tool execution is not enabled by this foundation; use /api/live-agent-mode/actions/dry-run for contract validation.",
+            tool=tool_name,
+            details={"dryRunSupported": True, "publicUiEnabled": False},
+        ), 501
+    now = _utc_now_iso()
+    call_id = f"toolcall-{int(time.time() * 1000)}-{context.get('agentId')}-{re.sub(r'[^A-Za-z0-9_.-]+', '-', tool_name).strip('-')}"
+    return True, {
+        "ok": True,
+        "schemaVersion": LIVE_AGENT_TOOL_RESULT_SCHEMA_VERSION,
+        "dryRun": True,
+        "toolCall": {
+            "schemaVersion": LIVE_AGENT_TOOL_CALL_SCHEMA_VERSION,
+            "id": call_id,
+            "tool": tool_name,
+            "agentId": context.get("agentId"),
+            "status": "validated",
+            "validatedAt": now,
+            "arguments": args,
+        },
+        "contract": _live_agent_tool_contract(tool),
+        "availability": availability,
+        "permission": {"checked": True, "rule": tool.get("permissionRule"), "roles": context.get("roles")},
+        "location": {"checked": True, "rule": tool.get("locationRule"), "current": context.get("location")},
+        "execution": {
+            "enabled": False,
+            "publicUiEnabled": False,
+            "message": "Registry foundation validates typed tool calls only; execution remains behind later backend simulation phases.",
+        },
+    }, 200
 
 
 def _normalize_behavior_source_kind(value):
@@ -10576,6 +11414,11 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/agent-live-loop":
             return self._send_json(get_live_agent_loop_status())
 
+        if path == "/api/live-agent-mode/tools":
+            qs = urllib.parse.parse_qs(parsed.query)
+            agent_id = (qs.get("agentId") or qs.get("agent") or [None])[0]
+            return self._send_json(get_live_agent_tool_registry(agent_id=agent_id))
+
         if path == "/api/agent-platform-communications/skill":
             self.send_response(200)
             self.send_header("Content-Type", "text/markdown; charset=utf-8")
@@ -10946,7 +11789,16 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if _demo_feature_locked("agentLiveMode"):
                 return self._send_json(_locked_response("agentLiveMode"), 403)
             data = self._read_body()
+            if _is_live_agent_tool_call_payload(data):
+                ok, result, status = validate_live_agent_tool_call(data, dry_run=bool((data or {}).get("dryRun", True)))
+                return self._send_json(result, status)
             ok, result, status = create_agent_live_mode_action_request(data)
+            return self._send_json(result, status)
+
+        if path in {"/api/live-agent-mode/actions/dry-run", "/api/live-agent-mode/tool-calls/validate"}:
+            if _demo_feature_locked("agentLiveMode"):
+                return self._send_json(_locked_response("agentLiveMode"), 403)
+            ok, result, status = validate_live_agent_tool_call(self._read_body(), dry_run=True)
             return self._send_json(result, status)
 
         if path == "/api/agent-live-loop":
