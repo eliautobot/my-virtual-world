@@ -5913,6 +5913,11 @@ def create_world_action(payload):
     ok, saved = save_world_actions_store({"active": [*store.get("active", []), action], "history": store.get("history", [])})
     if not ok:
         return False, _api_error("invalid_action_record", "World action could not be persisted.", details=saved), 500
+    if _world_action_backend_owned(action):
+        with _live_agent_loop_lock:
+            state = get_live_agent_loop_state(persist_migration=True)
+            if _live_agent_loop_record_backend_action_expected(state, action, fallback_payload=payload, now_iso=now):
+                save_live_agent_loop_state(state)
     return True, {"ok": True, "action": action, "worldActions": {"activeCount": len(saved.get("active", [])), "historyCount": len(saved.get("history", []))}, "routeHandoff": action.get("route")}, 201
 
 # ─── AGENT MOVE INTENT API ───────────────────────────────────────
@@ -6274,28 +6279,6 @@ def create_agent_live_mode_action_request(payload):
             )
             return False, _api_error("backend_executor_failed", "Agent Live Mode action was created but backend-owned execution failed; the action was marked failed.", details=backend_result), backend_status
         final_action = backend_result.get("action") if isinstance(backend_result, dict) else action_result.get("action")
-        if isinstance(final_action, dict) and final_action.get("id"):
-            params = final_action.get("params") if isinstance(final_action.get("params"), dict) else {}
-            expected = params.get("expectedOutcome") if isinstance(params.get("expectedOutcome"), dict) else {
-                "schemaVersion": LIVE_AGENT_EXPECTED_OUTCOME_SCHEMA_VERSION,
-                "createdAt": params.get("perceptionAt") or _utc_now_iso(),
-                "status": "completed",
-                "loopActionId": params.get("loopActionId"),
-                "actionType": final_action.get("actionType"),
-                "capabilityTag": final_action.get("capabilityTag") or payload.get("capabilityTag"),
-                "target": _live_agent_loop_target_fingerprint(final_action.get("target") if isinstance(final_action.get("target"), dict) else payload.get("target")),
-            }
-            plan_stub = {
-                "id": params.get("planId"),
-                "loopActionId": params.get("loopActionId"),
-                "actionType": final_action.get("actionType"),
-                "expectedOutcome": expected,
-            }
-            with _live_agent_loop_lock:
-                state = get_live_agent_loop_state(persist_migration=True)
-                _live_agent_loop_record_outcome_expected(state, agent_id, plan_stub, final_action.get("id"), expected.get("createdAt") or _utc_now_iso())
-                _live_agent_loop_record_outcome_observed(state, agent_id, plan_stub, _live_agent_loop_action_summary(final_action), final_action, _utc_now_iso())
-                save_live_agent_loop_state(state)
         return True, {
             "ok": True,
             "action": final_action,
@@ -6825,6 +6808,13 @@ def _live_agent_loop_kill_switch_status(state):
         "activatedAt": kill_switch.get("activatedAt") if kill_switch.get("active") else None,
         "activatedBy": kill_switch.get("activatedBy") if kill_switch.get("active") else None,
     }
+
+
+def _live_agent_loop_recovery_work_allowed(state, *, kill_switch=None):
+    if _agent_live_mode_gate_error():
+        return False
+    resolved_kill_switch = kill_switch if isinstance(kill_switch, dict) else _live_agent_loop_kill_switch_status(state)
+    return not bool(resolved_kill_switch.get("active"))
 
 
 def _live_agent_loop_scheduler_state(state):
@@ -7713,10 +7703,20 @@ def _live_agent_loop_upsert_outcome_awareness(state, record):
     return normalized
 
 
+def _live_agent_loop_outcome_awareness_for_action(state, action_id):
+    if not isinstance(state, dict) or not action_id:
+        return None
+    for item in state.get("outcomeAwareness") or []:
+        if isinstance(item, dict) and item.get("actionId") == action_id:
+            return _live_agent_loop_normalize_outcome_awareness(item)
+    return None
+
+
 def _live_agent_loop_record_outcome_expected(state, agent_id, plan, action_id, now_iso):
     if not isinstance(plan, dict) or not action_id:
         return None
     expected = plan.get("expectedOutcome") if isinstance(plan.get("expectedOutcome"), dict) else {}
+    existing = _live_agent_loop_outcome_awareness_for_action(state, action_id)
     record = {
         "id": f"outcome-awareness-{action_id}",
         "agentId": agent_id,
@@ -7730,14 +7730,97 @@ def _live_agent_loop_record_outcome_expected(state, agent_id, plan, action_id, n
         "createdAt": now_iso,
         "updatedAt": now_iso,
     }
+    if isinstance(existing, dict):
+        if isinstance(existing.get("observedOutcome"), dict) and existing.get("observedOutcome"):
+            record["observedOutcome"] = existing["observedOutcome"]
+        if isinstance(existing.get("resolution"), dict) and existing.get("resolution"):
+            record["resolution"] = existing["resolution"]
+        if isinstance(existing.get("confidence"), (int, float)) and existing.get("confidence") > record["confidence"]:
+            record["confidence"] = existing["confidence"]
+        record["createdAt"] = existing.get("createdAt") or record["createdAt"]
     return _live_agent_loop_upsert_outcome_awareness(state, record)
+
+
+def _live_agent_loop_expected_outcome_from_action(action, *, fallback_payload=None, now_iso=None):
+    if not isinstance(action, dict):
+        return {}
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    expected = params.get("expectedOutcome") if isinstance(params.get("expectedOutcome"), dict) else {}
+    if expected:
+        return _copy_jsonable(expected)
+    timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+    fallback_payload = fallback_payload if isinstance(fallback_payload, dict) else {}
+    target = action.get("target") if isinstance(action.get("target"), dict) else fallback_payload.get("target")
+    return {
+        "schemaVersion": LIVE_AGENT_EXPECTED_OUTCOME_SCHEMA_VERSION,
+        "createdAt": params.get("perceptionAt") or timing.get("requestedAt") or timing.get("createdAt") or now_iso or _utc_now_iso(),
+        "status": "completed",
+        "loopActionId": params.get("loopActionId"),
+        "actionType": action.get("actionType") or fallback_payload.get("actionType"),
+        "capabilityTag": action.get("capabilityTag") or fallback_payload.get("capabilityTag"),
+        "target": _live_agent_loop_target_fingerprint(target),
+    }
+
+
+def _live_agent_loop_plan_stub_from_action(action, *, fallback_payload=None, expected=None, now_iso=None):
+    if not isinstance(action, dict):
+        return None
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    expected = expected if isinstance(expected, dict) else _live_agent_loop_expected_outcome_from_action(action, fallback_payload=fallback_payload, now_iso=now_iso)
+    if not expected:
+        return None
+    return {
+        "id": params.get("planId"),
+        "loopActionId": params.get("loopActionId") or expected.get("loopActionId"),
+        "actionType": action.get("actionType") or expected.get("actionType"),
+        "expectedOutcome": expected,
+    }
+
+
+def _live_agent_loop_record_backend_action_expected(state, action, *, fallback_payload=None, now_iso=None):
+    if not _world_action_backend_owned(action):
+        return None
+    plan_stub = _live_agent_loop_plan_stub_from_action(action, fallback_payload=fallback_payload, now_iso=now_iso)
+    if not isinstance(plan_stub, dict) or not isinstance(plan_stub.get("expectedOutcome"), dict):
+        return None
+    expected = plan_stub.get("expectedOutcome") or {}
+    return _live_agent_loop_record_outcome_expected(
+        state,
+        action.get("agentId"),
+        plan_stub,
+        action.get("id"),
+        expected.get("createdAt") or now_iso or _utc_now_iso(),
+    )
+
+
+def _live_agent_loop_record_backend_action_observed(state, action, *, fallback_payload=None, now_iso=None, expectation_mismatch=None):
+    if not _world_action_backend_owned(action):
+        return None
+    summary = _live_agent_loop_action_summary(action)
+    if not isinstance(summary, dict) or not summary.get("id"):
+        return None
+    plan_stub = _live_agent_loop_plan_stub_from_action(action, fallback_payload=fallback_payload, now_iso=now_iso)
+    if isinstance(plan_stub, dict):
+        _live_agent_loop_record_backend_action_expected(state, action, fallback_payload=fallback_payload, now_iso=now_iso)
+    return _live_agent_loop_record_outcome_observed(
+        state,
+        action.get("agentId"),
+        plan_stub,
+        summary,
+        action,
+        now_iso or _utc_now_iso(),
+        expectation_mismatch=expectation_mismatch,
+    )
 
 
 def _live_agent_loop_record_outcome_observed(state, agent_id, plan, summary, action, now_iso, *, expectation_mismatch=None):
     if not isinstance(summary, dict) or not summary.get("id"):
         return None
     plan = plan if isinstance(plan, dict) else {}
+    existing = _live_agent_loop_outcome_awareness_for_action(state, summary.get("id"))
     expected = plan.get("expectedOutcome") if isinstance(plan.get("expectedOutcome"), dict) else {}
+    if not expected and isinstance(existing, dict) and isinstance(existing.get("expectedOutcome"), dict):
+        expected = existing.get("expectedOutcome")
     observed = _live_agent_loop_observed_outcome(summary, action, now_iso=now_iso)
     mismatch = expectation_mismatch if isinstance(expectation_mismatch, dict) else None
     if mismatch:
@@ -7756,9 +7839,9 @@ def _live_agent_loop_record_outcome_observed(state, agent_id, plan, summary, act
         "id": f"outcome-awareness-{summary.get('id')}",
         "agentId": agent_id,
         "actionId": summary.get("id"),
-        "planId": plan.get("id") or summary.get("planId"),
-        "loopActionId": summary.get("loopActionId") or plan.get("loopActionId"),
-        "actionType": summary.get("actionType") or plan.get("actionType"),
+        "planId": plan.get("id") or summary.get("planId") or (existing or {}).get("planId"),
+        "loopActionId": summary.get("loopActionId") or plan.get("loopActionId") or expected.get("loopActionId") or (existing or {}).get("loopActionId"),
+        "actionType": summary.get("actionType") or plan.get("actionType") or expected.get("actionType") or (existing or {}).get("actionType"),
         "expectedOutcome": expected,
         "observedOutcome": observed,
         "confidence": confidence,
@@ -7768,7 +7851,7 @@ def _live_agent_loop_record_outcome_observed(state, agent_id, plan, summary, act
             "recoveryDecision": recovery_decision,
             "resolvedAt": now_iso if resolution_status == "matched" else None,
         },
-        "createdAt": now_iso,
+        "createdAt": (existing or {}).get("createdAt") or now_iso,
         "updatedAt": now_iso,
     }
     if mismatch:
@@ -10402,7 +10485,8 @@ def _live_agent_loop_refresh_completed_outcomes(state):
         agent_state["lastSettledActionAt"] = now
         if action_status == "completed":
             agent_state["lastCompletedActionAt"] = now
-        plan_for_action = _live_agent_loop_find_plan_for_action(agent_state, summary)
+        stored_plan_for_action = _live_agent_loop_find_plan_for_action(agent_state, summary)
+        plan_for_action = stored_plan_for_action or _live_agent_loop_plan_stub_from_action(action, now_iso=now)
         expectation_mismatch = _live_agent_loop_expected_outcome_mismatch(plan_for_action, summary, action) if plan_for_action else None
         if expectation_mismatch:
             agent_state["lastOutcome"]["status"] = "failed_expectation"
@@ -10445,9 +10529,9 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
         world_client = _live_agent_loop_world_client_status(state)
         pause = _live_agent_loop_pause_status(state, now_epoch=now_epoch)
         kill_switch = _live_agent_loop_kill_switch_status(state)
-        stale_turn_recovered = None if dry_run else _live_agent_loop_recover_stale_turn(state, now_epoch=now_epoch)
-        stale_expired = [] if dry_run else _live_agent_loop_reconcile_stale_active_behaviors(state, now_epoch=now_epoch)
-        settled_refreshed = False if dry_run else _live_agent_loop_refresh_completed_outcomes(state)
+        stale_turn_recovered = None
+        stale_expired = []
+        settled_refreshed = False
         scheduler = _live_agent_loop_scheduler_state(state)
         active_turn = scheduler.get("activeTurn")
         result = {
@@ -10507,6 +10591,21 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             if not dry_run:
                 save_live_agent_loop_state(state)
             return result
+
+        if not dry_run:
+            stale_turn_recovered = _live_agent_loop_recover_stale_turn(state, now_epoch=now_epoch)
+            stale_expired = _live_agent_loop_reconcile_stale_active_behaviors(state, now_epoch=now_epoch)
+            settled_refreshed = _live_agent_loop_refresh_completed_outcomes(state)
+            scheduler = _live_agent_loop_scheduler_state(state)
+            active_turn = scheduler.get("activeTurn")
+            result["staleTurnRecovered"] = stale_turn_recovered
+            result["staleExpired"] = stale_expired
+            result["settledRefreshed"] = settled_refreshed
+            result["scheduler"].update({
+                "lastAgentId": scheduler.get("lastAgentId"),
+                "activeTurn": active_turn,
+                "turnSequence": scheduler.get("turnSequence"),
+            })
 
         if pause.get("active") and not dry_run:
             result["disabledReason"] = "live agent loop is paused"
@@ -10909,13 +11008,16 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
 def get_live_agent_loop_status():
     with _live_agent_loop_lock:
         state = get_live_agent_loop_state(persist_migration=True)
-        stale_turn_recovered = _live_agent_loop_recover_stale_turn(state)
-        stale_expired = _live_agent_loop_reconcile_stale_active_behaviors(state)
-        if _live_agent_loop_refresh_completed_outcomes(state) or stale_expired or stale_turn_recovered:
-            state = save_live_agent_loop_state(state)
         thread_alive = bool(_live_agent_loop_thread and _live_agent_loop_thread.is_alive())
         pause = _live_agent_loop_pause_status(state)
         kill_switch = _live_agent_loop_kill_switch_status(state)
+        stale_turn_recovered = None
+        stale_expired = []
+        if _live_agent_loop_recovery_work_allowed(state, kill_switch=kill_switch):
+            stale_turn_recovered = _live_agent_loop_recover_stale_turn(state)
+            stale_expired = _live_agent_loop_reconcile_stale_active_behaviors(state)
+            if _live_agent_loop_refresh_completed_outcomes(state) or stale_expired or stale_turn_recovered:
+                state = save_live_agent_loop_state(state)
         scheduler = _live_agent_loop_scheduler_state(state)
         return {
             "ok": True,
@@ -11201,10 +11303,12 @@ def _live_agent_loop_world_action_timeline_entries(agent_id, limit):
 def get_live_agent_loop_operator_timeline(agent_id=None, limit=None, include_resolved=True):
     with _live_agent_loop_lock:
         state = get_live_agent_loop_state(persist_migration=True)
-        stale_expired = _live_agent_loop_reconcile_stale_active_behaviors(state)
-        changed = _live_agent_loop_refresh_completed_outcomes(state)
-        if changed or stale_expired:
-            state = save_live_agent_loop_state(state)
+        kill_switch = _live_agent_loop_kill_switch_status(state)
+        if _live_agent_loop_recovery_work_allowed(state, kill_switch=kill_switch):
+            stale_expired = _live_agent_loop_reconcile_stale_active_behaviors(state)
+            changed = _live_agent_loop_refresh_completed_outcomes(state)
+            if changed or stale_expired:
+                state = save_live_agent_loop_state(state)
         resolved_agent_id = None
         if agent_id:
             resolved_agent_id = _resolve_agent_id(agent_id)
@@ -12145,7 +12249,14 @@ def _transition_world_action_unlocked(action_id, to_status, *, result=None, fail
 
 def transition_world_action(action_id, to_status, *, result=None, failure_reason=None, actor=None, source="api"):
     with _live_agent_action_handoff_lock:
-        return _transition_world_action_unlocked(action_id, to_status, result=result, failure_reason=failure_reason, actor=actor, source=source)
+        ok, response, status = _transition_world_action_unlocked(action_id, to_status, result=result, failure_reason=failure_reason, actor=actor, source=source)
+    action = response.get("action") if ok and isinstance(response, dict) else None
+    if isinstance(action, dict) and _canonical_world_action_status(action.get("status")) in WORLD_ACTION_TERMINAL_STATES and _world_action_backend_owned(action):
+        with _live_agent_loop_lock:
+            state = get_live_agent_loop_state(persist_migration=True)
+            if _live_agent_loop_record_backend_action_observed(state, action, now_iso=_utc_now_iso()):
+                save_live_agent_loop_state(state)
+    return ok, response, status
 
 
 def _reconcile_world_action_reservations_unlocked():

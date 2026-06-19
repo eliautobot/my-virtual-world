@@ -268,9 +268,45 @@ try:
     def error_code(result):
         return (result.get("error") or {}).get("code") if isinstance(result, dict) else None
 
+    def seed_stale_turn(turn_id, *, kill_switch=False):
+        state = module.get_live_agent_loop_state(persist_migration=True)
+        state["enabled"] = True
+        state["turnTimeoutSec"] = 30
+        state["killSwitch"] = {
+            "active": bool(kill_switch),
+            "reason": "smoke recovery guard" if kill_switch else None,
+            "activatedAt": "2026-06-19T00:00:00Z" if kill_switch else None,
+            "activatedBy": "verify-smoke" if kill_switch else None,
+        }
+        scheduler = module._live_agent_loop_scheduler_state(state)
+        scheduler["activeTurn"] = {
+            "id": turn_id,
+            "agentId": "adam",
+            "status": "running",
+            "reason": "smoke-stale-turn",
+            "startedAt": "2000-01-01T00:00:00Z",
+            "attempt": 1,
+            "owner": "verify-smoke",
+            "forced": False,
+            "dryRun": False,
+        }
+        return module.save_live_agent_loop_state(state)
+
+    def active_turn_id():
+        state = module.get_live_agent_loop_state(persist_migration=True)
+        active = ((state.get("scheduler") or {}).get("activeTurn") or {})
+        return active.get("id") if isinstance(active, dict) else None
+
+    seed_stale_turn("smoke-global-gate-stale")
     tick = module.live_agent_loop_tick(reason="smoke-global-off", force=True)
     assert tick.get("ok") is False, tick
     assert tick.get("disabledCode") == "agent_live_mode_feature_disabled", tick
+    assert tick.get("staleTurnRecovered") is None, tick
+    assert active_turn_id() == "smoke-global-gate-stale", active_turn_id()
+
+    status_snapshot = module.get_live_agent_loop_status()
+    assert status_snapshot.get("runtime", {}).get("staleTurnRecovered") is None, status_snapshot
+    assert active_turn_id() == "smoke-global-gate-stale", active_turn_id()
 
     ok, result, status = module.validate_live_agent_tool_call({
         "agentId": "adam",
@@ -300,6 +336,17 @@ try:
 
     ok, result, status = module.update_live_agent_loop_settings({"enabled": True})
     assert ok and status == 200 and result.get("ok") is True, result
+
+    seed_stale_turn("smoke-kill-switch-stale", kill_switch=True)
+    tick = module.live_agent_loop_tick(reason="smoke-kill-switch", force=True)
+    assert tick.get("disabledReason") == "live agent loop kill switch is active", tick
+    assert tick.get("staleTurnRecovered") is None, tick
+    assert active_turn_id() == "smoke-kill-switch-stale", active_turn_id()
+
+    status_snapshot = module.get_live_agent_loop_status()
+    assert status_snapshot.get("runtime", {}).get("staleTurnRecovered") is None, status_snapshot
+    assert active_turn_id() == "smoke-kill-switch-stale", active_turn_id()
+
     print("live agent global feature gate ok")
 finally:
     shutil.rmtree(data_dir, ignore_errors=True)
@@ -377,10 +424,58 @@ try:
     assert completed["execution"]["clientRequiredForProgress"] is False, completed["execution"]
     assert completed["route"]["routeOwner"] == "server-simulation", completed["route"]
     assert completed["route"]["setAgentTarget"] is False, completed["route"]
+    loop_state = module.get_live_agent_loop_state(persist_migration=True)
+    outcome_record = next((item for item in loop_state["outcomeAwareness"] if item.get("actionId") == action_id), None)
+    assert outcome_record, loop_state["outcomeAwareness"]
+    assert outcome_record["expectedOutcome"]["status"] == "completed", outcome_record
+    assert outcome_record["observedOutcome"]["status"] == "completed", outcome_record
+    assert isinstance(outcome_record.get("confidence"), (int, float)) and outcome_record["confidence"] > 0, outcome_record
+    assert outcome_record["resolution"]["status"] == "matched", outcome_record
     assert not module.reconcile_move_intents()["active"], module.get_move_intents_store()
     events = module.list_live_agent_animation_events({"actionId": action_id, "limit": "20"})["events"]
     names = {event.get("name") for event in events}
     assert {"agent-move-started", "agent-arrived", "object-use-started", "object-use-completed", "world-action-completed"} <= names, names
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    outcome = next(item for item in state["outcomeAwareness"] if item.get("actionId") == action_id)
+    assert outcome.get("expectedOutcome", {}).get("loopActionId") == "hydrate-water-cooler", outcome
+    assert outcome.get("observedOutcome", {}).get("status") == "completed", outcome
+    assert outcome.get("resolution", {}).get("status") == "matched", outcome
+
+    ok, direct_result, direct_status = module.create_world_action({
+        "agentId": "adam",
+        "source": {
+            "kind": "agent-live-mode",
+            "requestedBy": "smoke",
+            "requestId": "live-loop-adam-direct-world-action-smoke",
+            "roles": ["participant"],
+        },
+        "actionType": "life.getWater",
+        "capabilityTag": "life.hydration",
+        "target": {
+            "kind": "object-instance",
+            "buildingId": "office-smoke",
+            "objectInstanceId": "cooler-smoke",
+            "catalogId": "waterCooler",
+            "interactionSpotId": "use-front",
+        },
+        "params": {"loopActionId": "hydrate-water-cooler-direct"},
+    })
+    assert ok and direct_status == 201, direct_result
+    direct_id = direct_result["action"]["id"]
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    direct_expected = next(item for item in state["outcomeAwareness"] if item.get("actionId") == direct_id)
+    assert direct_expected.get("expectedOutcome", {}).get("loopActionId") == "hydrate-water-cooler-direct", direct_expected
+    assert direct_expected.get("resolution", {}).get("status") == "pending", direct_expected
+    ok, advanced, advanced_status = module.advance_live_agent_backend_world_action(direct_id, reason="smoke-direct-world-action")
+    assert ok and advanced_status == 200, advanced
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    direct_plan = module._live_agent_loop_plan_stub_from_action(advanced["action"], now_iso=module._utc_now_iso())
+    module._live_agent_loop_record_outcome_observed(state, "adam", direct_plan, module._live_agent_loop_action_summary(advanced["action"]), advanced["action"], module._utc_now_iso())
+    module.save_live_agent_loop_state(state)
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    direct_observed = next(item for item in state["outcomeAwareness"] if item.get("actionId") == direct_id)
+    assert direct_observed.get("observedOutcome", {}).get("status") == "completed", direct_observed
+    assert direct_observed.get("resolution", {}).get("status") == "matched", direct_observed
     location = module.load_world_meta()["agentLife"]["simulation"]["agentLocations"]["adam"]
     assert location["buildingId"] == "office-smoke", location
     print("live agent backend executor ok")
