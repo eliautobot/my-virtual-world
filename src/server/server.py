@@ -1400,6 +1400,7 @@ LIVE_AGENT_MEMORY_STREAM_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-stream-e
 LIVE_AGENT_MEMORY_RETRIEVAL_SCHEMA_VERSION = "agent-live-mode-memory-retrieval/v1"
 LIVE_AGENT_MEMORY_REFLECTION_SCHEMA_VERSION = "agent-live-mode-memory-reflection/v1"
 LIVE_AGENT_EXPECTED_OUTCOME_SCHEMA_VERSION = "agent-live-mode-expected-outcome/v1"
+LIVE_AGENT_OUTCOME_AWARENESS_SCHEMA_VERSION = "agent-live-mode-outcome-awareness/v1"
 LIVE_AGENT_FAILED_EXPECTATION_SCHEMA_VERSION = "agent-live-mode-failed-expectation/v1"
 LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"
 LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"
@@ -1484,6 +1485,7 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "turnRetryBackoffSec": 45,
     "maxTurnRetries": 2,
     "operatorProposalRetention": 24,
+    "outcomeAwarenessRetention": 160,
     "societyObservationRetention": 160,
     "conversationTriggerRetention": 120,
     "conversationOpportunityRetention": 120,
@@ -4284,7 +4286,7 @@ def _live_agent_clawmind_contract_readiness(memory_counts):
         },
         "outcomeAwareness": {
             "contractReady": True,
-            "measure": "world-action transition history and replay event names",
+            "measure": "expected-vs-observed action outcome ledger",
         },
         "orchestrator": {
             "contractReady": True,
@@ -4427,6 +4429,34 @@ def get_live_agent_mode_autonomy_metrics():
         event for event in (loop_state.get("events") or [])
         if isinstance(event, dict) and event.get("type") == "plan-recovery-completed"
     ]
+    outcome_records = [
+        _live_agent_loop_normalize_outcome_awareness(item)
+        for item in (loop_state.get("outcomeAwareness") or [])
+        if isinstance(item, dict)
+    ]
+    outcome_records_with_expected = [item for item in outcome_records if isinstance(item.get("expectedOutcome"), dict) and item.get("expectedOutcome")]
+    outcome_records_observed = [item for item in outcome_records_with_expected if isinstance(item.get("observedOutcome"), dict) and item.get("observedOutcome")]
+    outcome_matched = [item for item in outcome_records_observed if (item.get("resolution") or {}).get("status") == "matched"]
+    outcome_recovery_completed = [item for item in outcome_records if (item.get("resolution") or {}).get("status") == "recovery_completed"]
+    outcome_unresolved = [
+        item for item in outcome_records
+        if (item.get("resolution") or {}).get("status") in {"recovery_pending", "unresolved_mismatch", "operator_escalated"}
+    ]
+    pending_operator_proposals = _live_agent_loop_limited_operator_proposals(loop_state, include_resolved=False, limit=LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"])
+    outcome_escalations = [item for item in outcome_records if (item.get("resolution") or {}).get("status") == "operator_escalated" or (item.get("resolution") or {}).get("operatorProposalId")]
+    expected_observed_success_rate = round(len(outcome_matched) / len(outcome_records_observed), 3) if outcome_records_observed else 0
+    outcome_awareness_metrics = {
+        "schemaVersion": LIVE_AGENT_OUTCOME_AWARENESS_SCHEMA_VERSION,
+        "recordCount": len(outcome_records),
+        "expectedOutcomeCount": len(outcome_records_with_expected),
+        "observedOutcomeCount": len(outcome_records_observed),
+        "matchedCount": len(outcome_matched),
+        "mismatchCount": max(len(failed_expectation_events), len([item for item in outcome_records_observed if (item.get("resolution") or {}).get("status") in {"recovery_pending", "recovery_completed", "unresolved_mismatch", "operator_escalated"}])),
+        "expectedObservedSuccessRate": expected_observed_success_rate,
+        "recoveryCount": max(len(recovery_events), len(outcome_recovery_completed)),
+        "unresolvedMismatchCount": len(outcome_unresolved),
+        "escalationCount": len(outcome_escalations) + len(pending_operator_proposals),
+    }
     planner_metrics = {
         "planCount": len(planner_records),
         "activePlanCount": len([plan for plan in planner_records if _live_agent_loop_plan_is_active(plan)]),
@@ -4479,6 +4509,7 @@ def get_live_agent_mode_autonomy_metrics():
         "clawMindModuleContractsReady": clawmind_architecture.get("checklist", {}).get("allModuleContractsReady") is True,
         "lightweightMetricsOptimized": provider_support.get("optimization", {}).get("modelCallsDuringMetrics") == 0 and clawmind_architecture.get("optimization", {}).get("heavyWorldScan") is False,
         "plannerMetricsPresent": all(key in planner_metrics for key in ("planCount", "replanCount", "failedExpectationCount", "successfulRecoveryCount")),
+        "outcomeAwarenessRecordsPresent": outcome_awareness_metrics["expectedOutcomeCount"] >= len(completed_backend_actions) if completed_backend_actions else True,
         "turnPlanningRecordsPresent": planner_metrics["turnsWithPlanningRecordCount"] > 0 if turns else True,
     }
     return {
@@ -4520,6 +4551,13 @@ def get_live_agent_mode_autonomy_metrics():
             "operatorProposalCount": len(loop_state.get("operatorProposals") or []),
             "liveAgentBuildingCount": live_agent_building_count,
             "liveAgentBuildEffectActionCount": len(live_agent_build_actions),
+            "expectedObservedSuccessRate": outcome_awareness_metrics["expectedObservedSuccessRate"],
+            "expectedObservedMatchedCount": outcome_awareness_metrics["matchedCount"],
+            "expectedObservedMismatchCount": outcome_awareness_metrics["mismatchCount"],
+            "recoveryCount": outcome_awareness_metrics["recoveryCount"],
+            "unresolvedMismatchCount": outcome_awareness_metrics["unresolvedMismatchCount"],
+            "escalationCount": outcome_awareness_metrics["escalationCount"],
+            "outcomeAwareness": outcome_awareness_metrics,
             "planCount": planner_metrics["planCount"],
             "replanCount": planner_metrics["replanCount"],
             "failedExpectationCount": planner_metrics["failedExpectationCount"],
@@ -6236,6 +6274,28 @@ def create_agent_live_mode_action_request(payload):
             )
             return False, _api_error("backend_executor_failed", "Agent Live Mode action was created but backend-owned execution failed; the action was marked failed.", details=backend_result), backend_status
         final_action = backend_result.get("action") if isinstance(backend_result, dict) else action_result.get("action")
+        if isinstance(final_action, dict) and final_action.get("id"):
+            params = final_action.get("params") if isinstance(final_action.get("params"), dict) else {}
+            expected = params.get("expectedOutcome") if isinstance(params.get("expectedOutcome"), dict) else {
+                "schemaVersion": LIVE_AGENT_EXPECTED_OUTCOME_SCHEMA_VERSION,
+                "createdAt": params.get("perceptionAt") or _utc_now_iso(),
+                "status": "completed",
+                "loopActionId": params.get("loopActionId"),
+                "actionType": final_action.get("actionType"),
+                "capabilityTag": final_action.get("capabilityTag") or payload.get("capabilityTag"),
+                "target": _live_agent_loop_target_fingerprint(final_action.get("target") if isinstance(final_action.get("target"), dict) else payload.get("target")),
+            }
+            plan_stub = {
+                "id": params.get("planId"),
+                "loopActionId": params.get("loopActionId"),
+                "actionType": final_action.get("actionType"),
+                "expectedOutcome": expected,
+            }
+            with _live_agent_loop_lock:
+                state = get_live_agent_loop_state(persist_migration=True)
+                _live_agent_loop_record_outcome_expected(state, agent_id, plan_stub, final_action.get("id"), expected.get("createdAt") or _utc_now_iso())
+                _live_agent_loop_record_outcome_observed(state, agent_id, plan_stub, _live_agent_loop_action_summary(final_action), final_action, _utc_now_iso())
+                save_live_agent_loop_state(state)
         return True, {
             "ok": True,
             "action": final_action,
@@ -6300,6 +6360,7 @@ def default_live_agent_loop_state():
         "eventSequence": 0,
         "scheduler": {"lastAgentId": None, "turnSequence": 0, "activeTurn": None, "turnHistory": []},
         "failureInjection": None,
+        "outcomeAwareness": [],
         "clawMindRuntime": {
             "schemaVersion": LIVE_AGENT_CLAWMIND_RUNTIME_TRACE_VERSION,
             "moduleOrder": list(LIVE_AGENT_CLAWMIND_MODULES),
@@ -6620,6 +6681,12 @@ def _normalize_live_agent_loop_state(raw):
             state["events"] = [event for event in raw["events"] if isinstance(event, dict)][-LIVE_AGENT_LOOP_DEFAULTS["eventRetention"]:]
         if isinstance(raw.get("operatorProposals"), list):
             state["operatorProposals"] = [proposal for proposal in raw["operatorProposals"] if isinstance(proposal, dict)][-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
+        if isinstance(raw.get("outcomeAwareness"), list):
+            state["outcomeAwareness"] = [
+                _live_agent_loop_normalize_outcome_awareness(item)
+                for item in raw["outcomeAwareness"]
+                if isinstance(item, dict)
+            ][-LIVE_AGENT_LOOP_DEFAULTS["outcomeAwarenessRetention"]:]
         if os.environ.get("_VW_INT") and isinstance(raw.get("failureInjection"), dict):
             state["failureInjection"] = _copy_jsonable(raw.get("failureInjection"))
         if isinstance(raw.get("stats"), dict):
@@ -7566,6 +7633,177 @@ def _live_agent_loop_expected_outcome_mismatch(plan, summary, action=None):
     return None
 
 
+def _live_agent_loop_resolution_status(value, default="pending"):
+    allowed = {
+        "pending",
+        "matched",
+        "recovery_pending",
+        "recovery_completed",
+        "operator_escalated",
+        "unresolved_mismatch",
+        "terminal_without_expectation",
+    }
+    text = str(value or "").strip().lower().replace("-", "_")
+    return text if text in allowed else default
+
+
+def _live_agent_loop_observed_outcome(summary, action=None, *, now_iso=None):
+    summary = summary if isinstance(summary, dict) else {}
+    action = action if isinstance(action, dict) else {}
+    timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+    observed_at = now_iso or timing.get("terminalAt") or timing.get("completedAt") or timing.get("updatedAt") or _utc_now_iso()
+    return {
+        "at": observed_at,
+        "status": _canonical_world_action_status(summary.get("status") or action.get("status")),
+        "loopActionId": summary.get("loopActionId"),
+        "actionType": summary.get("actionType") or action.get("actionType"),
+        "target": _live_agent_loop_target_fingerprint(action.get("target") if isinstance(action.get("target"), dict) else None),
+        "result": _copy_jsonable(summary.get("result")) if isinstance(summary.get("result"), dict) else _copy_jsonable(action.get("result")) if isinstance(action.get("result"), dict) else {},
+    }
+
+
+def _live_agent_loop_normalize_outcome_awareness(record):
+    record = record if isinstance(record, dict) else {}
+    now_iso = _utc_now_iso()
+    expected = record.get("expectedOutcome") if isinstance(record.get("expectedOutcome"), dict) else record.get("expected") if isinstance(record.get("expected"), dict) else {}
+    observed = record.get("observedOutcome") if isinstance(record.get("observedOutcome"), dict) else record.get("observed") if isinstance(record.get("observed"), dict) else {}
+    resolution = record.get("resolution") if isinstance(record.get("resolution"), dict) else {}
+    action_id = _live_agent_loop_clean_plan_text(record.get("actionId"), limit=160)
+    plan_id = _live_agent_loop_clean_plan_text(record.get("planId"), limit=160)
+    normalized = {
+        "schemaVersion": LIVE_AGENT_OUTCOME_AWARENESS_SCHEMA_VERSION,
+        "id": _live_agent_loop_clean_plan_text(record.get("id"), limit=180) or f"outcome-awareness-{action_id or plan_id or int(time.time())}",
+        "agentId": _live_agent_loop_clean_plan_text(record.get("agentId"), limit=120),
+        "actionId": action_id,
+        "planId": plan_id,
+        "loopActionId": _live_agent_loop_clean_plan_text(record.get("loopActionId") or expected.get("loopActionId") or observed.get("loopActionId"), limit=120),
+        "actionType": _live_agent_loop_clean_plan_text(record.get("actionType") or expected.get("actionType") or observed.get("actionType"), limit=120),
+        "expectedOutcome": _copy_jsonable(expected),
+        "observedOutcome": _copy_jsonable(observed),
+        "confidence": round(float(record.get("confidence") if isinstance(record.get("confidence"), (int, float)) else 0), 3),
+        "resolution": {
+            "status": _live_agent_loop_resolution_status(record.get("resolutionStatus") or resolution.get("status"), default="pending"),
+            "reason": _live_agent_loop_clean_plan_text(record.get("mismatchReason") or resolution.get("reason"), limit=300),
+            "recoveryDecision": _live_agent_loop_clean_plan_text(record.get("recoveryDecision") or resolution.get("recoveryDecision"), limit=160),
+            "operatorProposalId": _live_agent_loop_clean_plan_text(record.get("operatorProposalId") or resolution.get("operatorProposalId"), limit=160),
+            "recoveryPlanId": _live_agent_loop_clean_plan_text(record.get("recoveryPlanId") or resolution.get("recoveryPlanId"), limit=160),
+            "recoveryActionId": _live_agent_loop_clean_plan_text(record.get("recoveryActionId") or resolution.get("recoveryActionId"), limit=160),
+            "resolvedAt": resolution.get("resolvedAt") if _parse_isoish_epoch(resolution.get("resolvedAt")) else None,
+        },
+        "createdAt": record.get("createdAt") if _parse_isoish_epoch(record.get("createdAt")) else now_iso,
+        "updatedAt": record.get("updatedAt") if _parse_isoish_epoch(record.get("updatedAt")) else now_iso,
+    }
+    normalized["resolution"] = {k: v for k, v in normalized["resolution"].items() if v is not None}
+    return {k: v for k, v in normalized.items() if v not in (None, "")}
+
+
+def _live_agent_loop_upsert_outcome_awareness(state, record):
+    if not isinstance(state, dict) or not isinstance(record, dict):
+        return None
+    normalized = _live_agent_loop_normalize_outcome_awareness(record)
+    if not normalized:
+        return None
+    retention = LIVE_AGENT_LOOP_DEFAULTS["outcomeAwarenessRetention"]
+    existing = []
+    for item in state.get("outcomeAwareness") or []:
+        candidate = _live_agent_loop_normalize_outcome_awareness(item)
+        if candidate and candidate.get("id") != normalized.get("id") and candidate.get("actionId") != normalized.get("actionId"):
+            existing.append(candidate)
+    state["outcomeAwareness"] = [*existing, normalized][-retention:]
+    return normalized
+
+
+def _live_agent_loop_record_outcome_expected(state, agent_id, plan, action_id, now_iso):
+    if not isinstance(plan, dict) or not action_id:
+        return None
+    expected = plan.get("expectedOutcome") if isinstance(plan.get("expectedOutcome"), dict) else {}
+    record = {
+        "id": f"outcome-awareness-{action_id}",
+        "agentId": agent_id,
+        "actionId": action_id,
+        "planId": plan.get("id"),
+        "loopActionId": plan.get("loopActionId") or expected.get("loopActionId"),
+        "actionType": plan.get("actionType") or expected.get("actionType"),
+        "expectedOutcome": expected,
+        "confidence": 0.35,
+        "resolution": {"status": "pending", "recoveryDecision": "observe-settled-world-action"},
+        "createdAt": now_iso,
+        "updatedAt": now_iso,
+    }
+    return _live_agent_loop_upsert_outcome_awareness(state, record)
+
+
+def _live_agent_loop_record_outcome_observed(state, agent_id, plan, summary, action, now_iso, *, expectation_mismatch=None):
+    if not isinstance(summary, dict) or not summary.get("id"):
+        return None
+    plan = plan if isinstance(plan, dict) else {}
+    expected = plan.get("expectedOutcome") if isinstance(plan.get("expectedOutcome"), dict) else {}
+    observed = _live_agent_loop_observed_outcome(summary, action, now_iso=now_iso)
+    mismatch = expectation_mismatch if isinstance(expectation_mismatch, dict) else None
+    if mismatch:
+        resolution_status = "recovery_pending"
+        recovery_decision = "select-replacement-plan"
+        confidence = 0.94
+    elif expected:
+        resolution_status = "matched"
+        recovery_decision = "none"
+        confidence = 0.86
+    else:
+        resolution_status = "terminal_without_expectation"
+        recovery_decision = "none"
+        confidence = 0.55
+    record = {
+        "id": f"outcome-awareness-{summary.get('id')}",
+        "agentId": agent_id,
+        "actionId": summary.get("id"),
+        "planId": plan.get("id") or summary.get("planId"),
+        "loopActionId": summary.get("loopActionId") or plan.get("loopActionId"),
+        "actionType": summary.get("actionType") or plan.get("actionType"),
+        "expectedOutcome": expected,
+        "observedOutcome": observed,
+        "confidence": confidence,
+        "resolution": {
+            "status": resolution_status,
+            "reason": (mismatch or {}).get("reason"),
+            "recoveryDecision": recovery_decision,
+            "resolvedAt": now_iso if resolution_status == "matched" else None,
+        },
+        "createdAt": now_iso,
+        "updatedAt": now_iso,
+    }
+    if mismatch:
+        record["mismatch"] = _copy_jsonable(mismatch)
+    outcome = _live_agent_loop_upsert_outcome_awareness(state, record)
+    _live_agent_loop_add_event(state, "outcome-awareness-recorded", agent_id=agent_id, details={"actionId": summary.get("id"), "planId": record.get("planId"), "resolutionStatus": (outcome or {}).get("resolution", {}).get("status"), "confidence": (outcome or {}).get("confidence")})
+    return outcome
+
+
+def _live_agent_loop_mark_outcome_recovered(state, agent_id, failed_expectation, recovery):
+    if not isinstance(state, dict) or not isinstance(failed_expectation, dict) or not isinstance(recovery, dict):
+        return None
+    action_id = failed_expectation.get("actionId")
+    if not action_id:
+        return None
+    existing = next((item for item in state.get("outcomeAwareness") or [] if isinstance(item, dict) and item.get("actionId") == action_id), None)
+    if not existing:
+        return None
+    record = _live_agent_loop_normalize_outcome_awareness(existing)
+    resolution = record.get("resolution") if isinstance(record.get("resolution"), dict) else {}
+    resolution.update({
+        "status": "recovery_completed",
+        "reason": resolution.get("reason") or failed_expectation.get("reason"),
+        "recoveryDecision": "replacement-plan-completed",
+        "recoveryPlanId": recovery.get("planId"),
+        "recoveryActionId": recovery.get("actionId"),
+        "resolvedAt": recovery.get("recoveredAt") or _utc_now_iso(),
+    })
+    record["resolution"] = resolution
+    record["updatedAt"] = recovery.get("recoveredAt") or _utc_now_iso()
+    updated = _live_agent_loop_upsert_outcome_awareness(state, record)
+    _live_agent_loop_add_event(state, "outcome-awareness-recovered", agent_id=agent_id, details={"actionId": action_id, "recoveryActionId": recovery.get("actionId"), "recoveryPlanId": recovery.get("planId")})
+    return updated
+
+
 def _live_agent_loop_pending_failed_expectation(agent_state):
     failure = agent_state.get("lastFailedExpectation") if isinstance(agent_state, dict) and isinstance(agent_state.get("lastFailedExpectation"), dict) else None
     if not failure:
@@ -8441,6 +8679,7 @@ def _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_stat
                 pending_failure["recoveryPlanId"] = plan.get("id")
                 pending_failure["recoveryActionId"] = summary.get("id")
                 agent_state["lastFailedExpectation"] = pending_failure
+                _live_agent_loop_mark_outcome_recovered(state, agent_id, pending_failure, recovery)
             _live_agent_loop_stat(agent_state, "successfulRecoveries")
             _live_agent_loop_stat(state, "successfulRecoveries")
             _live_agent_loop_add_event(state, "plan-recovery-completed", agent_id=agent_id, details=recovery)
@@ -10168,6 +10407,13 @@ def _live_agent_loop_refresh_completed_outcomes(state):
         if expectation_mismatch:
             agent_state["lastOutcome"]["status"] = "failed_expectation"
             agent_state["lastOutcome"]["expectationMismatch"] = {k: expectation_mismatch.get(k) for k in ("code", "reason", "planId", "actionId", "loopActionId")}
+        outcome_record = _live_agent_loop_record_outcome_observed(state, agent_id, plan_for_action, summary, action, now, expectation_mismatch=expectation_mismatch)
+        if outcome_record:
+            agent_state["lastOutcome"]["outcomeAwareness"] = {
+                "id": outcome_record.get("id"),
+                "confidence": outcome_record.get("confidence"),
+                "resolutionStatus": (outcome_record.get("resolution") or {}).get("status") if isinstance(outcome_record.get("resolution"), dict) else None,
+            }
         _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_state, summary, action_status, now, expectation_mismatch=expectation_mismatch)
         remembered = _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary, expectation_mismatch=expectation_mismatch)
         if not (isinstance(remembered, dict) and remembered.get("duplicate")):
@@ -10548,6 +10794,8 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     agent_state["lastActionId"] = action_id
                     agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
                     stored_plan = _live_agent_loop_mark_plan_action_created(state, agent_id, agent_state, plan, action_id, now_iso)
+                    if action_id and isinstance(stored_plan or plan, dict):
+                        _live_agent_loop_record_outcome_expected(state, agent_id, stored_plan or plan, action_id, now_iso)
                     agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown, "turnId": turn.get("id")}
                     _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
                     _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, turn_id=turn.get("id"), details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "target": selected["target"], "decision": agent_state.get("lastDecision")})
