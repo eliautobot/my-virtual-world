@@ -456,6 +456,63 @@ try:
     beth_memory = state["agents"]["beth"]["memory"]
     assert any(item.get("text") == "Beth prefers quick lunch syncs." for item in adam_memory["entries"]), adam_memory
     assert any(item.get("communicationEventId") == communication["id"] for item in beth_memory["conversations"]), beth_memory
+    assert len(adam_memory["stream"]) >= 2, adam_memory
+    assert len(adam_memory["reflections"]) > 0, adam_memory
+
+    old_entry = {
+        "schemaVersion": module.LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION,
+        "id": "memory-old-coffee",
+        "at": "2026-01-01T00:00:00Z",
+        "agentId": "adam",
+        "kind": "memory",
+        "text": "Adam once considered a quiet coffee break.",
+        "importance": "low",
+        "salience": 0.1,
+        "tags": ["coffee"],
+        "source": {"kind": "smoke-test"},
+    }
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    module._live_agent_loop_append_memory_bucket(state, "adam", "entries", old_entry)
+    module._live_agent_loop_append_memory_stream_entry(state, "adam", {**old_entry, "bucket": "entries", "sourceEntryId": old_entry["id"]})
+    module.save_live_agent_loop_state(state)
+
+    ok, fact_result, fact_status = module.validate_live_agent_tool_call({
+        "agentId": "adam",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": "memory-fact-smoke", "roles": ["participant"]},
+        "tool": "add_memory",
+        "arguments": {"kind": "fact", "text": "Beth strongly prefers quick lunch syncs near the office.", "importance": "high", "salience": 1, "tags": ["social", "lunch"]},
+    }, dry_run=False)
+    assert ok, fact_result
+    assert fact_status == 201, fact_status
+    fact_entry = fact_result["toolCall"]["result"]["memoryEntry"]
+    assert fact_entry["kind"] == "fact", fact_entry
+
+    ok, retrieval, retrieval_status = module.get_live_agent_memory("adam", {"query": ["lunch sync"], "limit": ["10"]})
+    assert ok and retrieval_status == 200, retrieval
+    assert retrieval["memory"]["counts"]["facts"] >= 1, retrieval["memory"]["counts"]
+    assert retrieval["memory"]["counts"]["stream"] <= module.LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"], retrieval["memory"]["counts"]
+    assert retrieval["memory"]["counts"]["reflections"] > 0, retrieval["memory"]["counts"]
+    assert retrieval["results"][0]["sourceEntryId"] == fact_entry["id"], retrieval["results"][:3]
+    assert retrieval["results"][0]["retrieval"]["score"] > retrieval["results"][-1]["retrieval"]["score"], retrieval["results"]
+    assert set(["relevance", "recency", "importance"]) <= set(retrieval["results"][0]["retrieval"].keys()), retrieval["results"][0]
+
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    cap = module.LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"]
+    for i in range(cap + 5):
+        module._live_agent_loop_append_memory_stream_entry(state, "adam", {
+            "id": f"stream-cap-smoke-{i}",
+            "at": f"2026-06-19T12:{i % 60:02d}:00Z",
+            "agentId": "adam",
+            "kind": "observation",
+            "bucket": "observations",
+            "text": f"bounded memory cap check {i}",
+            "importance": "normal",
+            "salience": 0.5,
+            "tags": ["cap-check"],
+            "source": {"kind": "smoke-test"},
+        })
+    state = module.save_live_agent_loop_state(state)
+    assert len(state["agents"]["adam"]["memory"]["stream"]) == cap, state["agents"]["adam"]["memory"]["stream"]
 
     meta = module.load_world_meta()
     relationship = meta["agentRelationships"]["adam::beth"]
