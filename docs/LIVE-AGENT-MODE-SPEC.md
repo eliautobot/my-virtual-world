@@ -40,6 +40,8 @@ The product already has useful pieces:
 
 The problem with the previous attempt was ownership. The server could validate and persist a world action, but movement and completion still depended on `main3d.js#setAgentTarget()` in a live browser client. That made the system fragile: actions could sit in `route_pending`, executor leases could expire, and scene confirmation could drift from actual action state.
 
+The current backend executor moves Agent Live Mode world actions through routing, arrival, object use, and completion on the server. Browser clients no longer need to claim a route for autonomous completion; they can poll `/api/live-agent-mode/animation-events` and replay server-emitted movement/object-use events while the durable world action and final simulated agent location remain server-owned.
+
 The redesigned mode keeps the good API vocabulary, but moves autonomous execution authority to the backend.
 
 ## Non-Goals
@@ -378,6 +380,8 @@ The frontend can interpolate from animation events:
   "worldActionId": "wa-..."
 }
 ```
+
+Implementation note: backend-owned Live Agent actions now persist `execution.owner: "server-simulation"`, `route.routeOwner: "server-simulation"`, and `clientRequiredForProgress: false`. The executor records final agent locations under `world-meta.json#agentLife.simulation.agentLocations` and emits sequenced replay events under `world-meta.json#agentLife.animationEvents`.
 
 ### 9. Object Use
 

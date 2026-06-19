@@ -173,6 +173,7 @@ For the planned backend-owned autonomous resident architecture, see [LIVE-AGENT-
 | GET | `/api/live-agent-mode/tools` | Read backend Live Agent tool contracts. |
 | POST | `/api/live-agent-mode/actions/dry-run` | Validate a Live Agent tool call without executing it. |
 | POST | `/api/live-agent-mode/tool-calls/validate` | Alias for dry-run tool-call validation. |
+| GET | `/api/live-agent-mode/animation-events` | Read backend-emitted movement/object-use replay events for browser clients. |
 | GET | `/api/agent-live-loop` | Inspect backend scheduler state, active turn ownership, pause, kill switch, and recent turn history. |
 | POST | `/api/agent-live-loop` | Update backend scheduler controls such as pause, kill switch, intervals, and per-agent enablement. |
 | POST | `/api/agent-live-loop/tick` | Run a backend scheduler tick or dry-run tick without requiring a browser tab. |
@@ -204,7 +205,9 @@ The server normalizes and validates lifecycle states. See `src/client/js/agent-l
 
 Backend Live Agent tool contracts cover observe, move, object-use, communication, memory, and build/create proposal categories. Dry-run validation checks typed arguments, agent Live Mode permission, conservative location gates, object permissions, and target availability. Execution remains disabled in this foundation, and the public UI stays behind the existing Coming Soon/feature gate.
 
-The backend Live Agent loop owns one resident turn at a time, rotates enabled agents round-robin, persists active/recent turns, and records sequenced scheduler events. `worldClientRequired` defaults to `false`, so the scheduler can run without an open browser tab; browsers remain render/replay clients for visible world-action animation. Operator pause and kill switch controls stop new turns while preserving the durable log for inspection.
+The backend Live Agent loop owns one resident turn at a time, rotates enabled agents round-robin, persists active/recent turns, and records sequenced scheduler events. `worldClientRequired` defaults to `false`, so the scheduler can run without an open browser tab; browsers remain render/replay clients for visible world-action animation. Backend-owned Live Agent world actions move through routing, arrival, object-use, and completion on the server and store replay records under `world-meta.json#agentLife.animationEvents`. Operator pause and kill switch controls stop new turns while preserving the durable log for inspection.
+
+Animation event queries accept `since`, `limit`, `agentId`, `actionId`, `worldActionId`, `name`, and `type`. Events are sequenced for polling clients and include `clientRequiredForProgress: false` in their render metadata.
 
 ## AgentPlatform-to-AgentPlatform Communication
 

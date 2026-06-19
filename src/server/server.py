@@ -1334,6 +1334,17 @@ WORLD_ACTION_EVENT_REUSE_NOTES = [
     "Reuse Task 7 setAgentTarget route handoff metadata; event hooks expose route targets but never calculate paths or bypass dynamic routing/collision logic.",
 ]
 WORLD_ACTION_EVENT_ROUTE_GUARDRAILS = MOVE_INTENT_ROUTE_GUARDRAILS
+LIVE_AGENT_BACKEND_EXECUTION_VERSION = "agent-live-mode-backend-world-action-executor/v1"
+LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"
+LIVE_AGENT_SIMULATION_SCHEMA_VERSION = "agent-live-mode-simulation/v1"
+LIVE_AGENT_BACKEND_EXECUTOR_ID = "server.py#live_agent_backend_action_executor"
+LIVE_AGENT_ANIMATION_EVENT_NAMES = {
+    "agent-move-started",
+    "agent-arrived",
+    "object-use-started",
+    "object-use-completed",
+    "world-action-completed",
+}
 LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"
 LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION = "agent-live-mode-plan/v1"
 LIVE_AGENT_OPERATOR_PROPOSAL_SCHEMA_VERSION = "agent-live-mode-operator-proposal/v1"
@@ -2252,6 +2263,9 @@ def _live_agent_tool_current_location(agent_id):
         location = _live_agent_loop_location_from_active_record({"type": "move-intent", "id": intent.get("id"), "status": intent.get("routeStatus"), "worldActionId": _move_intent_linked_world_action_id(intent), "record": intent})
         if location:
             return location
+    simulated = _live_agent_simulated_location(agent_id)
+    if simulated:
+        return simulated
     return _live_agent_loop_assignment_location(agent_id)
 
 
@@ -2827,6 +2841,561 @@ def list_world_action_events(query=None):
         limit = 100
     limit = max(1, min(limit, 500))
     return {"ok": True, "schemaVersion": WORLD_ACTION_EVENT_HOOKS_VERSION, "subscription": store.get("subscription"), "events": events[-limit:], "nextCursor": store.get("nextSequence", 1) - 1}
+
+
+def default_live_agent_animation_events_store():
+    return {
+        "schemaVersion": LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION,
+        "nextSequence": 1,
+        "events": [],
+        "retention": {"maxEvents": 1000},
+        "subscription": {
+            "mode": "poll",
+            "endpoint": "/api/live-agent-mode/animation-events",
+            "cursorField": "sequence",
+        },
+    }
+
+
+def get_live_agent_animation_events_store(*, persist_migration=False):
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    store = agent_life.get("animationEvents") if isinstance(agent_life.get("animationEvents"), dict) else None
+    changed = store is None
+    if not store:
+        store = default_live_agent_animation_events_store()
+    raw_events = store.get("events") if isinstance(store.get("events"), list) else []
+    events = [event for event in raw_events if isinstance(event, dict) and event.get("name") in LIVE_AGENT_ANIMATION_EVENT_NAMES]
+    try:
+        next_sequence = int(store.get("nextSequence") or 1)
+    except (TypeError, ValueError):
+        next_sequence = 1
+    if events:
+        next_sequence = max(next_sequence, max(int(event.get("sequence") or 0) for event in events) + 1)
+    next_store = default_live_agent_animation_events_store()
+    next_store.update({
+        "nextSequence": next_sequence,
+        "events": events[-int((store.get("retention") or {}).get("maxEvents") or 1000):],
+        "retention": {**next_store["retention"], **(store.get("retention") if isinstance(store.get("retention"), dict) else {})},
+    })
+    if persist_migration and changed:
+        agent_life["animationEvents"] = next_store
+        meta["agentLife"] = agent_life
+        save_world_meta(meta)
+    return next_store
+
+
+def save_live_agent_animation_events_store(store):
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    next_store = default_live_agent_animation_events_store()
+    if isinstance(store, dict):
+        next_store.update({k: v for k, v in store.items() if k in {"nextSequence", "events", "retention", "subscription"}})
+    max_events = int((next_store.get("retention") or {}).get("maxEvents") or 1000)
+    next_store["events"] = [
+        event
+        for event in (next_store.get("events") or [])
+        if isinstance(event, dict) and event.get("name") in LIVE_AGENT_ANIMATION_EVENT_NAMES
+    ][-max_events:]
+    try:
+        next_store["nextSequence"] = int(next_store.get("nextSequence") or 1)
+    except (TypeError, ValueError):
+        next_store["nextSequence"] = 1
+    agent_life["animationEvents"] = next_store
+    meta["agentLife"] = agent_life
+    save_world_meta(meta)
+    return next_store
+
+
+def append_live_agent_animation_events(event_payloads):
+    payloads = [event for event in event_payloads if isinstance(event, dict) and event.get("name") in LIVE_AGENT_ANIMATION_EVENT_NAMES]
+    if not payloads:
+        return []
+    store = get_live_agent_animation_events_store(persist_migration=True)
+    sequence = int(store.get("nextSequence") or 1)
+    next_events = list(store.get("events", []))
+    saved_events = []
+    for payload in payloads:
+        event = {
+            **payload,
+            "schemaVersion": LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION,
+            "sequence": sequence,
+            "cursor": sequence,
+        }
+        sequence += 1
+        next_events.append(event)
+        saved_events.append(event)
+    save_live_agent_animation_events_store({**store, "nextSequence": sequence, "events": next_events})
+    return saved_events
+
+
+def list_live_agent_animation_events(query=None):
+    query = query if isinstance(query, dict) else {}
+    store = get_live_agent_animation_events_store(persist_migration=True)
+    events = list(store.get("events", []))
+    since = (query.get("since") or query.get("after") or [None])[0] if isinstance(query.get("since") or query.get("after"), list) else query.get("since") or query.get("after")
+    try:
+        since = int(since) if since is not None else None
+    except (TypeError, ValueError):
+        since = None
+    if since is not None:
+        events = [event for event in events if int(event.get("sequence") or 0) > since]
+    for field, key in (("agentId", "agentId"), ("actionId", "worldActionId"), ("worldActionId", "worldActionId"), ("name", "name"), ("type", "type")):
+        value = (query.get(field) or [None])[0] if isinstance(query.get(field), list) else query.get(field)
+        if value:
+            events = [event for event in events if event.get(key) == value]
+    try:
+        limit = int(((query.get("limit") or [100])[0]) if isinstance(query.get("limit"), list) else query.get("limit") or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 500))
+    return {
+        "ok": True,
+        "schemaVersion": LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION,
+        "subscription": store.get("subscription"),
+        "events": events[-limit:],
+        "nextCursor": store.get("nextSequence", 1) - 1,
+        "replay": {"clientRequiredForProgress": False, "sourceOfTruth": "server"},
+    }
+
+
+def _world_action_backend_owned(action):
+    if not isinstance(action, dict):
+        return False
+    execution = action.get("execution") if isinstance(action.get("execution"), dict) else {}
+    route = action.get("route") if isinstance(action.get("route"), dict) else {}
+    if execution.get("owner") == "server-simulation" or route.get("routeOwner") == "server-simulation":
+        return True
+    return _behavior_source_kind_from_record(action) == "agent-live-mode"
+
+
+def _live_agent_backend_execution_block(action, state="pending"):
+    existing = action.get("execution") if isinstance(action, dict) and isinstance(action.get("execution"), dict) else {}
+    now = _utc_now_iso()
+    return {
+        **existing,
+        "schemaVersion": LIVE_AGENT_BACKEND_EXECUTION_VERSION,
+        "owner": "server-simulation",
+        "state": state,
+        "routeOwner": "server-simulation",
+        "routingOwner": LIVE_AGENT_BACKEND_EXECUTOR_ID,
+        "animationOwner": "client-runtime",
+        "clientRequiredForProgress": False,
+        "replayEndpoint": "/api/live-agent-mode/animation-events",
+        "updatedAt": now,
+    }
+
+
+def _with_live_agent_backend_execution(action, state="pending"):
+    if not isinstance(action, dict):
+        return action
+    next_action = dict(action)
+    route = dict(next_action.get("route") or {})
+    route.update({
+        "routeOwner": "server-simulation",
+        "routingOwner": LIVE_AGENT_BACKEND_EXECUTOR_ID,
+        "animationOwner": "client-runtime",
+        "clientRequiredForProgress": False,
+        "setAgentTarget": False,
+        "replayEndpoint": "/api/live-agent-mode/animation-events",
+    })
+    next_action["route"] = route
+    next_action["execution"] = _live_agent_backend_execution_block(next_action, state=state)
+    audit = next_action.get("audit") if isinstance(next_action.get("audit"), dict) else {}
+    reuse = list(audit.get("reuseDecisions") or [])
+    note = "Backend-owned Live Agent execution advances movement/object-use and emits replay events without a browser route claimant."
+    if note not in reuse:
+        reuse.append(note)
+    audit["reuseDecisions"] = reuse
+    audit["backendExecutionVersion"] = LIVE_AGENT_BACKEND_EXECUTION_VERSION
+    next_action["audit"] = audit
+    return next_action
+
+
+def _save_active_world_action_update(action_id, update_fn):
+    store = get_world_actions_store(persist_migration=True)
+    active = []
+    updated = None
+    for record in store.get("active", []):
+        if record.get("id") != action_id:
+            active.append(record)
+            continue
+        updated = update_fn(_normalize_world_action_record(record))
+        active.append(updated)
+    if updated is None:
+        return None
+    ok, saved = save_world_actions_store({"active": active, "history": store.get("history", [])})
+    if not ok:
+        return {"error": "persist_failed", "details": saved}
+    return _find_world_action_record(saved, action_id)[2]
+
+
+def _building_world_tile_point(building, local_x, local_z):
+    if not isinstance(building, dict):
+        return None
+    x = _number_or_none(local_x)
+    z = _number_or_none(local_z)
+    if x is None or z is None:
+        return None
+    base_x = _number_or_none(building.get("worldX") if building.get("worldX") is not None else building.get("x")) or 0.0
+    base_z = _number_or_none(building.get("worldY") if building.get("worldY") is not None else building.get("z")) or 0.0
+    width = _number_or_none(building.get("widthTiles")) or 25.0
+    depth = _number_or_none(building.get("heightTiles")) or _number_or_none(building.get("depth")) or 17.0
+    try:
+        rotation = int(float(building.get("_rotation") or building.get("rotation") or 0)) % 360
+    except (TypeError, ValueError):
+        rotation = 0
+    if rotation == 90:
+        world_x = base_x + depth - z
+        world_z = base_z + x
+    elif rotation == 180:
+        world_x = base_x + width - x
+        world_z = base_z + depth - z
+    elif rotation == 270:
+        world_x = base_x + z
+        world_z = base_z + width - x
+    else:
+        world_x = base_x + x
+        world_z = base_z + z
+    return {"x": round(world_x, 3), "z": round(world_z, 3), "coordinateSpace": "world-tiles"}
+
+
+def _live_agent_location_with_api(location):
+    if not isinstance(location, dict):
+        return None
+    next_location = dict(location)
+    x = _number_or_none(next_location.get("x"))
+    z = _number_or_none(next_location.get("z") if next_location.get("z") is not None else next_location.get("y"))
+    if x is not None:
+        next_location["apiX"] = round(x * LIVE_AGENT_LOOP_API_TILE, 3)
+    if z is not None:
+        next_location["apiZ"] = round(z * LIVE_AGENT_LOOP_API_TILE, 3)
+    return next_location
+
+
+def _live_agent_backend_target_location(action):
+    target = action.get("target") if isinstance(action, dict) and isinstance(action.get("target"), dict) else {}
+    kind = target.get("kind")
+    try:
+        floor = int(target.get("floor") or target.get("buildingFloor") or 1)
+    except (TypeError, ValueError):
+        floor = 1
+    base = {
+        "source": "world-action-target",
+        "worldActionId": action.get("id"),
+        "buildingId": target.get("buildingId"),
+        "floor": floor,
+        "roomId": target.get("roomId"),
+        "targetKind": kind,
+        "objectInstanceId": target.get("objectInstanceId"),
+        "catalogId": target.get("catalogId"),
+        "targetAgentId": target.get("targetAgentId"),
+    }
+    if kind == "world-point":
+        x = _number_or_none(target.get("x") if target.get("x") is not None else target.get("worldX"))
+        z = _number_or_none(target.get("z") if target.get("z") is not None else target.get("y") if target.get("y") is not None else target.get("worldZ"))
+        if x is not None and z is not None:
+            return _live_agent_location_with_api({**base, "x": x, "z": z, "coordinateSpace": target.get("coordinateSpace") or "world-tiles"})
+        return base
+    if kind in {"building", "room"} and target.get("buildingId"):
+        building = load_building(target.get("buildingId"))
+        if isinstance(building, dict):
+            door = building.get("doorSpec") if isinstance(building.get("doorSpec"), dict) else {}
+            local_x = door.get("localCenterX")
+            local_z = door.get("localInteriorZ") or door.get("localDoorwayZ") or door.get("localThresholdZ")
+            if local_x is None or local_z is None:
+                local_x = (_number_or_none(building.get("widthTiles")) or 25.0) / 2
+                local_z = (_number_or_none(building.get("heightTiles")) or 17.0) / 2
+            point = _building_world_tile_point(building, local_x, local_z)
+            if point:
+                return _live_agent_location_with_api({**base, **point})
+        return base
+    if kind == "agent":
+        target_agent_id = _resolve_agent_id(target.get("targetAgentId"))
+        if target_agent_id:
+            other = _live_agent_simulated_location(target_agent_id) or _live_agent_loop_active_location(target_agent_id) or _live_agent_loop_assignment_location(target_agent_id)
+            if isinstance(other, dict):
+                return {**base, **{k: v for k, v in other.items() if k not in {"source", "activeId", "status"}}}
+        return base
+    resolved = _find_world_action_target(target)
+    if isinstance(resolved, dict):
+        building = resolved.get("building") or {}
+        obj = resolved.get("object") or {}
+        point = _building_world_tile_point(building, obj.get("x"), obj.get("z"))
+        if point:
+            try:
+                object_floor = int(target.get("floor") or obj.get("floor") or obj.get("level") or 1)
+            except (TypeError, ValueError):
+                object_floor = 1
+            return _live_agent_location_with_api({
+                **base,
+                **point,
+                "buildingId": target.get("buildingId") or building.get("id"),
+                "floor": object_floor,
+                "roomId": target.get("roomId") if target.get("roomId") is not None else obj.get("roomId"),
+            })
+    return base
+
+
+def _live_agent_simulated_location(agent_id):
+    if not agent_id:
+        return None
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    simulation = agent_life.get("simulation") if isinstance(agent_life.get("simulation"), dict) else {}
+    locations = simulation.get("agentLocations") if isinstance(simulation.get("agentLocations"), dict) else {}
+    location = locations.get(agent_id)
+    return dict(location) if isinstance(location, dict) else None
+
+
+def _live_agent_simulated_locations_by_agent():
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    simulation = agent_life.get("simulation") if isinstance(agent_life.get("simulation"), dict) else {}
+    locations = simulation.get("agentLocations") if isinstance(simulation.get("agentLocations"), dict) else {}
+    return {agent_id: dict(location) for agent_id, location in locations.items() if isinstance(location, dict)}
+
+
+def _save_live_agent_simulated_location(agent_id, location, action=None):
+    if not agent_id or not isinstance(location, dict):
+        return None
+    now = _utc_now_iso()
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    simulation = agent_life.get("simulation") if isinstance(agent_life.get("simulation"), dict) else {}
+    locations = simulation.get("agentLocations") if isinstance(simulation.get("agentLocations"), dict) else {}
+    stored = {
+        **location,
+        "source": "server-simulation",
+        "agentId": agent_id,
+        "worldActionId": action.get("id") if isinstance(action, dict) else location.get("worldActionId"),
+        "actionType": action.get("actionType") if isinstance(action, dict) else location.get("actionType"),
+        "updatedAt": now,
+        "schemaVersion": LIVE_AGENT_SIMULATION_SCHEMA_VERSION,
+    }
+    locations[agent_id] = stored
+    simulation.update({
+        "schemaVersion": LIVE_AGENT_SIMULATION_SCHEMA_VERSION,
+        "agentLocations": locations,
+        "updatedAt": now,
+    })
+    agent_life["simulation"] = simulation
+    meta["agentLife"] = agent_life
+    save_world_meta(meta)
+    return stored
+
+
+def _live_agent_animation_event_payload(action, name, *, phase=None, from_location=None, to_location=None, duration_ms=None, result=None):
+    now = _utc_now_iso()
+    target = action.get("target") if isinstance(action, dict) and isinstance(action.get("target"), dict) else {}
+    event_type = "agent-move" if name in {"agent-move-started", "agent-arrived"} else "object-use" if name.startswith("object-use") else "world-action"
+    return {
+        "schemaVersion": LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION,
+        "id": f"anim-{action.get('id')}-{name}-{int(time.time() * 1000)}",
+        "name": name,
+        "type": event_type,
+        "phase": phase or name,
+        "at": now,
+        "timestamp": now,
+        "worldActionId": action.get("id"),
+        "actionId": action.get("id"),
+        "actionType": action.get("actionType"),
+        "agentId": action.get("agentId"),
+        "target": target,
+        "from": from_location,
+        "to": to_location,
+        "durationMs": duration_ms,
+        "result": result,
+        "source": LIVE_AGENT_BACKEND_EXECUTOR_ID,
+        "render": {
+            "clientRequiredForProgress": False,
+            "replayable": True,
+            "interpolation": "client",
+            "truthOwner": "server",
+        },
+    }
+
+
+def _live_agent_backend_route_duration_ms(from_location, to_location):
+    fx = _number_or_none((from_location or {}).get("x"))
+    fz = _number_or_none((from_location or {}).get("z"))
+    tx = _number_or_none((to_location or {}).get("x"))
+    tz = _number_or_none((to_location or {}).get("z"))
+    if None in (fx, fz, tx, tz):
+        return 1200
+    distance = ((tx - fx) ** 2 + (tz - fz) ** 2) ** 0.5
+    return int(max(900, min(12000, 700 + distance * 280)))
+
+
+def _current_live_agent_backend_action(action_id):
+    store = get_world_actions_store(persist_migration=True)
+    return _find_world_action_record(store, action_id)
+
+
+def advance_live_agent_backend_world_action(action_id, *, reason="server-owned-progress"):
+    bucket, _, action = _current_live_agent_backend_action(action_id)
+    if action is None:
+        return False, _api_error("not_found", "World action is not active or does not exist."), 404
+    if bucket == "history":
+        return True, {"ok": True, "action": action, "alreadyTerminal": True, "backendExecution": action.get("execution")}, 200
+    if not _world_action_backend_owned(action):
+        return False, _api_error("unsupported_action_owner", "Only backend-owned Live Agent actions can be advanced by the backend executor.", details={"actionId": action_id}), 409
+
+    updated = _save_active_world_action_update(action_id, lambda record: _with_live_agent_backend_execution(record, state="running"))
+    if isinstance(updated, dict) and updated.get("error"):
+        return False, _api_error("persist_failed", "Could not mark world action as backend-owned.", details=updated), 500
+    action = updated or action
+    to_location = _live_agent_backend_target_location(action)
+    from_location = _live_agent_simulated_location(action.get("agentId")) or _live_agent_loop_assignment_location(action.get("agentId"))
+    duration_ms = _live_agent_backend_route_duration_ms(from_location, to_location)
+    saved_animation_events = []
+
+    def transition_to(status, result):
+        ok, response, status_code = transition_world_action(
+            action_id,
+            status,
+            result=result,
+            actor=LIVE_AGENT_BACKEND_EXECUTOR_ID,
+            source="agent-live-mode",
+        )
+        return ok, response, status_code
+
+    order = ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"]
+    while True:
+        _, _, current = _current_live_agent_backend_action(action_id)
+        if not current:
+            return False, _api_error("not_found", "World action disappeared during backend execution.", details={"actionId": action_id}), 404
+        current_status = _canonical_world_action_status(current.get("status"))
+        if current_status in WORLD_ACTION_TERMINAL_STATES:
+            return True, {
+                "ok": True,
+                "action": current,
+                "animationEvents": saved_animation_events,
+                "backendExecution": current.get("execution"),
+            }, 200
+        if current_status == "reserved":
+            ok, response, status_code = transition_to("route_pending", {
+                "status": "route_pending",
+                "reason": reason,
+                "backendExecution": True,
+                "clientRequiredForProgress": False,
+            })
+            if not ok:
+                return ok, response, status_code
+            continue
+        if current_status == "route_pending":
+            event = _live_agent_animation_event_payload(
+                current,
+                "agent-move-started",
+                phase="routing",
+                from_location=from_location,
+                to_location=to_location,
+                duration_ms=duration_ms,
+            )
+            saved_animation_events.extend(append_live_agent_animation_events([event]))
+            ok, response, status_code = transition_to("routing", {
+                "status": "routing",
+                "reason": "backend-route-started",
+                "backendExecution": True,
+                "clientRequiredForProgress": False,
+                "route": {"from": from_location, "to": to_location, "durationMs": duration_ms},
+                "animationEventIds": [event.get("id")],
+            })
+            if not ok:
+                return ok, response, status_code
+            continue
+        if current_status == "routing":
+            event = _live_agent_animation_event_payload(
+                current,
+                "agent-arrived",
+                phase="arrived",
+                from_location=from_location,
+                to_location=to_location,
+                duration_ms=0,
+            )
+            saved_animation_events.extend(append_live_agent_animation_events([event]))
+            stored_location = _save_live_agent_simulated_location(current.get("agentId"), to_location, current)
+            ok, response, status_code = transition_to("arrived", {
+                "status": "arrived",
+                "reason": "backend-arrived",
+                "backendExecution": True,
+                "clientRequiredForProgress": False,
+                "location": stored_location,
+                "animationEventIds": [event.get("id")],
+            })
+            if not ok:
+                return ok, response, status_code
+            continue
+        if current_status == "arrived":
+            event = _live_agent_animation_event_payload(
+                current,
+                "object-use-started",
+                phase="in_progress",
+                from_location=to_location,
+                to_location=to_location,
+                duration_ms=1200,
+            )
+            saved_animation_events.extend(append_live_agent_animation_events([event]))
+            ok, response, status_code = transition_to("in_progress", {
+                "status": "in_progress",
+                "reason": "backend-object-use-started",
+                "backendExecution": True,
+                "clientRequiredForProgress": False,
+                "animationEventIds": [event.get("id")],
+            })
+            if not ok:
+                return ok, response, status_code
+            continue
+        if current_status == "in_progress":
+            completion_events = append_live_agent_animation_events([
+                _live_agent_animation_event_payload(
+                    current,
+                    "object-use-completed",
+                    phase="completed",
+                    from_location=to_location,
+                    to_location=to_location,
+                    duration_ms=0,
+                    result={"status": "completed", "reason": "backend-object-use-completed"},
+                ),
+                _live_agent_animation_event_payload(
+                    current,
+                    "world-action-completed",
+                    phase="completed",
+                    from_location=from_location,
+                    to_location=to_location,
+                    duration_ms=duration_ms,
+                    result={"status": "completed", "reason": "backend-world-action-completed"},
+                ),
+            ])
+            saved_animation_events.extend(completion_events)
+            ok, response, status_code = transition_to("completed", {
+                "status": "completed",
+                "applied": True,
+                "reason": "backend-world-action-completed",
+                "backendExecution": {
+                    "schemaVersion": LIVE_AGENT_BACKEND_EXECUTION_VERSION,
+                    "owner": "server-simulation",
+                    "clientRequiredForProgress": False,
+                    "route": {"from": from_location, "to": to_location, "durationMs": duration_ms},
+                    "animationEventSequences": [event.get("sequence") for event in saved_animation_events if event.get("sequence")],
+                },
+            })
+            if not ok:
+                return ok, response, status_code
+            final_action = response.get("action") if isinstance(response, dict) else None
+            if isinstance(final_action, dict):
+                final_action = {**final_action, "execution": _live_agent_backend_execution_block(final_action, state="completed")}
+                # Persist the completed execution block in history without changing lifecycle state.
+                store = get_world_actions_store(persist_migration=True)
+                history = [final_action if item.get("id") == action_id else item for item in store.get("history", [])]
+                save_world_actions_store({"active": store.get("active", []), "history": history})
+                response["action"] = final_action
+                response["backendExecution"] = final_action.get("execution")
+            response["animationEvents"] = saved_animation_events
+            reconcile_move_intents()
+            return True, response, status_code
+        if current_status not in order:
+            return False, _api_error("illegal_transition", "Backend executor found an unsupported active status.", details={"actionId": action_id, "status": current_status}), 409
 
 
 def _normalize_token(value):
@@ -3447,7 +4016,22 @@ def _validate_create_world_action_payload(payload):
         target_snapshot["floor"] = int(target.get("floor") or 1)
     behavior = behavior or {}
     route_behavior = {k: behavior.get(k) for k in ["behaviorSourceKind", "behaviorMode", "behaviorAuthority", "behaviorSelectedCategory", "behaviorSelectedObject", "behaviorSelectedSpot", "behaviorProbabilityRoll", "behaviorFallbackReason"]}
-    route_target = {"target": target_snapshot, "handoff": WORLD_ACTION_CREATE_ROUTE_OWNER, "routeOwner": "client-runtime", "setAgentTarget": True, "source": source, "behavior": route_behavior, "behaviorSourceKind": behavior.get("behaviorSourceKind"), "behaviorMode": behavior.get("behaviorMode"), "behaviorCategory": behavior.get("behaviorSelectedCategory")}
+    backend_owned = behavior.get("behaviorSourceKind") == "agent-live-mode"
+    route_target = {
+        "target": target_snapshot,
+        "handoff": LIVE_AGENT_BACKEND_EXECUTOR_ID if backend_owned else WORLD_ACTION_CREATE_ROUTE_OWNER,
+        "routeOwner": "server-simulation" if backend_owned else "client-runtime",
+        "routingOwner": LIVE_AGENT_BACKEND_EXECUTOR_ID if backend_owned else None,
+        "animationOwner": "client-runtime" if backend_owned else None,
+        "clientRequiredForProgress": False if backend_owned else True,
+        "setAgentTarget": False if backend_owned else True,
+        "source": source,
+        "behavior": route_behavior,
+        "behaviorSourceKind": behavior.get("behaviorSourceKind"),
+        "behaviorMode": behavior.get("behaviorMode"),
+        "behaviorCategory": behavior.get("behaviorSelectedCategory"),
+    }
+    route_target = {k: v for k, v in route_target.items() if v is not None}
     action = {
         "id": action_id,
         "actionType": action_type,
@@ -3490,6 +4074,8 @@ def _validate_create_world_action_payload(payload):
         "events": [],
         "audit": {"schemaVersion": WORLD_ACTION_SCHEMA_VERSION, "stateMachineVersion": WORLD_ACTION_STATE_MACHINE_VERSION, "createVersion": WORLD_ACTION_CREATE_VERSION, "eventHooksVersion": WORLD_ACTION_EVENT_HOOKS_VERSION, "reuseDecisions": [*WORLD_ACTION_CREATE_REUSE_NOTES, *WORLD_ACTION_EVENT_REUSE_NOTES], "routeGuardrails": WORLD_ACTION_EVENT_ROUTE_GUARDRAILS},
     }
+    if backend_owned:
+        action = _with_live_agent_backend_execution(action, state="reserved")
     if visible_action_contract:
         action["visibility"] = {
             "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
@@ -3907,7 +4493,44 @@ def create_agent_live_mode_action_request(payload):
         if not ok:
             cancel_world_action(action_id, {"failureReason": "cancelled_by_system", "reason": "cancelled_by_system", "actor": "agent-live-mode", "source": "agent-live-mode"})
             return False, _api_error("move_intent_handoff_failed", "Agent Live Mode action was validated but could not create the existing move-intent/AgentIntent handoff; the reserved action was cancelled.", details=move_result), move_status
-        return True, {"ok": True, "action": action_result.get("action"), "worldAction": action_result, "moveIntent": move_result.get("moveIntent"), "routeHandoff": move_result.get("routeHandoff"), "linkedAction": move_result.get("linkedAction"), "interruptedLowerLayer": interrupted, "callerContract": {"endpoint": "POST /api/agent-model/actions", "requiredSourceKind": "agent-live-mode", "requiresAgentLiveModeEnabled": True, "usesExistingWorldActionValidation": True, "usesExistingMoveIntentHandoff": True, "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION, "visibleWorldExecutionRequired": True, "hiddenWorldMutationAllowed": False, "visibleExecutor": visible_action_contract.get("clientExecutor") if visible_action_contract else None, "overrideOrder": ["user", "agent-live-mode", "agent-scripted-mode"]}}, 202
+        backend_ok, backend_result, backend_status = advance_live_agent_backend_world_action(action_id, reason="agent-live-mode-request")
+        if not backend_ok:
+            transition_world_action(
+                action_id,
+                "failed",
+                result={"status": "failed", "reason": "backend_executor_failed", "details": backend_result},
+                failure_reason="runtime_error",
+                actor=LIVE_AGENT_BACKEND_EXECUTOR_ID,
+                source="agent-live-mode",
+            )
+            return False, _api_error("backend_executor_failed", "Agent Live Mode action was created but backend-owned execution failed; the action was marked failed.", details=backend_result), backend_status
+        final_action = backend_result.get("action") if isinstance(backend_result, dict) else action_result.get("action")
+        return True, {
+            "ok": True,
+            "action": final_action,
+            "worldAction": {**action_result, "action": final_action},
+            "moveIntent": move_result.get("moveIntent"),
+            "routeHandoff": move_result.get("routeHandoff"),
+            "linkedAction": move_result.get("linkedAction"),
+            "backendExecution": backend_result,
+            "interruptedLowerLayer": interrupted,
+            "callerContract": {
+                "endpoint": "POST /api/agent-model/actions",
+                "requiredSourceKind": "agent-live-mode",
+                "requiresAgentLiveModeEnabled": True,
+                "usesExistingWorldActionValidation": True,
+                "usesExistingMoveIntentHandoff": True,
+                "backendExecutionVersion": LIVE_AGENT_BACKEND_EXECUTION_VERSION,
+                "backendOwnsProgressAndCompletion": True,
+                "worldClientRequiredForProgress": False,
+                "animationEventsEndpoint": "/api/live-agent-mode/animation-events",
+                "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+                "visibleWorldExecutionRequired": True,
+                "hiddenWorldMutationAllowed": False,
+                "visibleExecutor": visible_action_contract.get("clientExecutor") if visible_action_contract else None,
+                "overrideOrder": ["user", "agent-live-mode", "agent-scripted-mode"],
+            },
+        }, 202
 
 
 # ─── AGENT LIVE MODE PERSISTENT LOOP ─────────────────────────────
@@ -5131,6 +5754,8 @@ def _live_agent_loop_active_locations_by_agent():
         location = _live_agent_loop_location_from_active_record({"type": "move-intent", "id": intent.get("id"), "status": intent.get("routeStatus"), "worldActionId": _move_intent_linked_world_action_id(intent), "record": intent})
         if location:
             locations[agent_id] = location
+    for agent_id, location in _live_agent_simulated_locations_by_agent().items():
+        locations.setdefault(agent_id, location)
     return locations
 
 
@@ -5139,6 +5764,9 @@ def _live_agent_loop_active_location(agent_id):
         location = _live_agent_loop_location_from_active_record(item)
         if location:
             return location
+    simulated = _live_agent_simulated_location(agent_id)
+    if simulated:
+        return simulated
     return None
 
 
@@ -5178,7 +5806,7 @@ def _live_agent_loop_social_perception(agent_id):
         agent_aliases.discard("")
         alias_map[resolved] = agent_aliases or {resolved}
     active_locations = _live_agent_loop_active_locations_by_agent()
-    self_location = active_locations.get(agent_id) or _live_agent_loop_assignment_location(agent_id)
+    self_location = active_locations.get(agent_id) or _live_agent_simulated_location(agent_id) or _live_agent_loop_assignment_location(agent_id)
     known = []
     live_enabled = []
     nearby = []
@@ -5909,6 +6537,37 @@ def _live_agent_loop_stale_threshold_seconds(action, status):
 def _live_agent_loop_reconcile_stale_active_behaviors(state=None, *, now_epoch=None):
     now_epoch = float(now_epoch or time.time())
     store = get_world_actions_store(persist_migration=True)
+    backend_advanced = []
+    for action in list(store.get("active", [])):
+        if not isinstance(action, dict):
+            continue
+        if _behavior_source_kind_from_record(action) != "agent-live-mode":
+            continue
+        status = _canonical_world_action_status(action.get("status"))
+        if status not in {"reserved", "route_pending", "routing", "arrived", "in_progress"}:
+            continue
+        ok, response, status_code = advance_live_agent_backend_world_action(action.get("id"), reason="live-agent-loop-reconcile")
+        item = {
+            "actionId": action.get("id"),
+            "agentId": action.get("agentId"),
+            "fromStatus": status,
+            "transitionOk": bool(ok),
+            "httpStatus": status_code,
+        }
+        if ok and isinstance(response, dict):
+            item["toStatus"] = _canonical_world_action_status((response.get("action") or {}).get("status"))
+            item["animationEventCount"] = len(response.get("animationEvents") or [])
+        else:
+            item["error"] = response
+        backend_advanced.append(item)
+    if backend_advanced:
+        store = get_world_actions_store(persist_migration=True)
+        if isinstance(state, dict):
+            for item in backend_advanced:
+                if item.get("transitionOk"):
+                    _live_agent_loop_add_event(state, "backend-action-advanced", agent_id=item.get("agentId"), details=item)
+                else:
+                    _live_agent_loop_add_event(state, "backend-action-advance-failed", agent_id=item.get("agentId"), details=item)
     stale = []
     for action in store.get("active", []):
         if not isinstance(action, dict):
@@ -7087,9 +7746,30 @@ def _attach_move_intent_to_world_action(action_id, move_intent):
         if updated.get("agentId") != move_intent.get("agentId"):
             next_active.append(action)
             return {"error": "agent_mismatch", "action": action}
+        backend_owned = _world_action_backend_owned(updated) or _behavior_source_kind_from_record(move_intent) == "agent-live-mode"
         route = dict(updated.get("route") or {})
-        route.update({"state": move_intent.get("routeStatus"), "status": move_intent.get("routeStatus"), "target": move_intent.get("target"), "targetMetadata": move_intent.get("targetMetadata"), "handoff": WORLD_ACTION_CREATE_ROUTE_OWNER, "routeOwner": "client-runtime", "setAgentTarget": True, "worldActionId": action_id, "source": move_intent.get("source"), "behavior": move_intent.get("behavior"), "behaviorSourceKind": move_intent.get("behaviorSourceKind"), "behaviorMode": move_intent.get("behaviorMode"), "behaviorCategory": move_intent.get("behaviorCategory"), "moveIntent": {"id": move_intent.get("id"), "state": move_intent.get("routeStatus"), "createdAt": move_intent.get("createdAt"), "worldActionId": action_id}})
+        route.update({
+            "state": move_intent.get("routeStatus"),
+            "status": move_intent.get("routeStatus"),
+            "target": move_intent.get("target"),
+            "targetMetadata": move_intent.get("targetMetadata"),
+            "handoff": LIVE_AGENT_BACKEND_EXECUTOR_ID if backend_owned else WORLD_ACTION_CREATE_ROUTE_OWNER,
+            "routeOwner": "server-simulation" if backend_owned else "client-runtime",
+            "routingOwner": LIVE_AGENT_BACKEND_EXECUTOR_ID if backend_owned else route.get("routingOwner"),
+            "animationOwner": "client-runtime" if backend_owned else route.get("animationOwner"),
+            "clientRequiredForProgress": False if backend_owned else route.get("clientRequiredForProgress", True),
+            "setAgentTarget": False if backend_owned else True,
+            "worldActionId": action_id,
+            "source": move_intent.get("source"),
+            "behavior": move_intent.get("behavior"),
+            "behaviorSourceKind": move_intent.get("behaviorSourceKind"),
+            "behaviorMode": move_intent.get("behaviorMode"),
+            "behaviorCategory": move_intent.get("behaviorCategory"),
+            "moveIntent": {"id": move_intent.get("id"), "state": move_intent.get("routeStatus"), "createdAt": move_intent.get("createdAt"), "worldActionId": action_id},
+        })
         updated["route"] = route
+        if backend_owned:
+            updated = _with_live_agent_backend_execution(updated, state=move_intent.get("routeStatus") or "route_pending")
         if _canonical_world_action_status(updated.get("status")) == "reserved":
             updated["status"] = "route_pending"
             updated["timing"] = {**(updated.get("timing") if isinstance(updated.get("timing"), dict) else {}), "updatedAt": now, "routePendingAt": now}
@@ -7153,16 +7833,19 @@ def create_move_intent(path_agent_id, payload):
         return False, _api_error("agent_unavailable", "Agent already has an active action or move intent.", details=busy), 409
     now = _utc_now_iso()
     planner = _route_planner_for_target(target.get("kind"), _find_world_action_target(target), target)
+    backend_owned = behavior.get("behaviorSourceKind") == "agent-live-mode"
     route = {
         "id": f"route-{_move_intent_id(agent_id)}",
         "state": "route_pending",
         "status": "route_pending",
         "target": target,
         "targetMetadata": metadata,
-        "handoff": WORLD_ACTION_CREATE_ROUTE_OWNER,
-        "routeOwner": "client-runtime",
-        "setAgentTarget": True,
-        "routingOwner": "main3d.js#setAgentTarget()",
+        "handoff": LIVE_AGENT_BACKEND_EXECUTOR_ID if backend_owned else WORLD_ACTION_CREATE_ROUTE_OWNER,
+        "routeOwner": "server-simulation" if backend_owned else "client-runtime",
+        "setAgentTarget": False if backend_owned else True,
+        "routingOwner": LIVE_AGENT_BACKEND_EXECUTOR_ID if backend_owned else "main3d.js#setAgentTarget()",
+        "animationOwner": "client-runtime" if backend_owned else None,
+        "clientRequiredForProgress": False if backend_owned else True,
         "planner": planner,
         "collisionGuardrails": MOVE_INTENT_ROUTE_GUARDRAILS,
         "worldActionId": action_id,
@@ -7173,6 +7856,7 @@ def create_move_intent(path_agent_id, payload):
         "behaviorCategory": behavior.get("behaviorSelectedCategory"),
         "lifecycleAdvance": {"from": "route_pending/routing", "arrived": "arrived", "failed": "failed"},
     }
+    route = {k: v for k, v in route.items() if v is not None}
     move_intent = {
         "id": route["id"].replace("route-", "", 1),
         "schemaVersion": MOVE_INTENT_SCHEMA_VERSION,
@@ -7233,14 +7917,25 @@ def _apply_world_action_side_effects(action, from_status, to_status, now, reason
     reservation = dict(next_action.get("reservation") or {})
     route = dict(next_action.get("route") or {})
     effects = list(next_action.get("effects") or [])
+    backend_owned = _world_action_backend_owned(next_action)
     if to_status == "reserved" and reservation and reservation.get("state") not in {"queued", "reserved"}:
         reservation.update({"state": "reserved", "status": "held", "availabilityState": "reserved", "reservedAt": reservation.get("reservedAt") or now})
     if to_status == "route_pending" and route:
-        route.update({"state": "route_pending", "handoffPendingAt": route.get("handoffPendingAt") or now, "setAgentTarget": True})
+        route.update({
+            "state": "route_pending",
+            "handoffPendingAt": route.get("handoffPendingAt") or now,
+            "setAgentTarget": False if backend_owned else True,
+            "clientRequiredForProgress": False if backend_owned else route.get("clientRequiredForProgress", True),
+        })
     if to_status == "routing" and route:
-        route.update({"state": "routing", "startedAt": route.get("startedAt") or now, "setAgentTarget": True})
+        route.update({
+            "state": "routing",
+            "startedAt": route.get("startedAt") or now,
+            "setAgentTarget": False if backend_owned else True,
+            "clientRequiredForProgress": False if backend_owned else route.get("clientRequiredForProgress", True),
+        })
     if to_status == "arrived" and route:
-        route.update({"state": "arrived", "arrivedAt": route.get("arrivedAt") or now})
+        route.update({"state": "arrived", "arrivedAt": route.get("arrivedAt") or now, "clientRequiredForProgress": False if backend_owned else route.get("clientRequiredForProgress", True)})
     if to_status == "in_progress" and reservation:
         reservation.update({"state": "in_use", "status": "active", "availabilityState": "in_use", "inUseAt": reservation.get("inUseAt") or now})
     if to_status in WORLD_ACTION_TERMINAL_STATES and route:
@@ -7261,7 +7956,20 @@ def _apply_world_action_side_effects(action, from_status, to_status, now, reason
             route["cancelledAt"] = route.get("cancelledAt") or now
         effects.append({"type": "route-intent-cleared", "at": now, "from": from_status, "to": to_status, "reason": reason or to_status})
     if route:
+        if backend_owned:
+            route.update({
+                "routeOwner": "server-simulation",
+                "routingOwner": LIVE_AGENT_BACKEND_EXECUTOR_ID,
+                "animationOwner": "client-runtime",
+                "clientRequiredForProgress": False,
+                "replayEndpoint": "/api/live-agent-mode/animation-events",
+            })
         next_action["route"] = route
+    if backend_owned:
+        next_action["execution"] = _live_agent_backend_execution_block(
+            next_action,
+            state="completed" if to_status == "completed" else "terminal" if to_status in WORLD_ACTION_TERMINAL_STATES else to_status,
+        )
     if reservation:
         next_action["reservation"] = reservation
     if to_status in WORLD_ACTION_TERMINAL_STATES:
@@ -11823,6 +12531,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             since = (qs.get("since") or qs.get("cursor") or [None])[0]
             ok, result, status = get_live_agent_loop_events(agent_id=agent_id, limit=limit, since=since)
             return self._send_json(result, status)
+
+        if path == "/api/live-agent-mode/animation-events":
+            return self._send_json(list_live_agent_animation_events(urllib.parse.parse_qs(parsed.query)))
 
         if path == "/api/agent-live-loop":
             return self._send_json(get_live_agent_loop_status())
