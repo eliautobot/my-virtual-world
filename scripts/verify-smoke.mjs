@@ -638,8 +638,11 @@ try:
         }
 
     def timeout_decide(context):
+        context["state"]["leakedTimeoutMutationBeforeSleep"] = True
+        context["agentState"]["leakedTimeoutMutationBeforeSleep"] = True
         time.sleep(0.05)
         context["state"]["leakedTimeoutMutation"] = True
+        context["state"].setdefault("providerBridge", {})["leakedTimeoutMutation"] = True
         context["agentState"]["leakedTimeoutMutation"] = True
         return {"decision": {"selectedActionId": "hydrate-water-cooler"}}
 
@@ -695,7 +698,10 @@ try:
     timeout_selected, timeout_decision = module._live_agent_provider_bridge_decide(timeout_agent, timeout_state, state, {"id": "timeout-turn", "agentId": "timeout-agent"}, timeout_perception, timeout_sec=0.001)
     assert timeout_selected and timeout_decision["providerBridge"]["fallbackUsed"] is True, timeout_decision["providerBridge"]
     time.sleep(0.08)
+    assert "leakedTimeoutMutationBeforeSleep" not in state, state.get("leakedTimeoutMutationBeforeSleep")
+    assert "leakedTimeoutMutationBeforeSleep" not in timeout_state, timeout_state.get("leakedTimeoutMutationBeforeSleep")
     assert "leakedTimeoutMutation" not in state, state.get("leakedTimeoutMutation")
+    assert "leakedTimeoutMutation" not in state.get("providerBridge", {}), state.get("providerBridge")
     assert "leakedTimeoutMutation" not in timeout_state, timeout_state.get("leakedTimeoutMutation")
 
     invalid_agent = {"id": "fake-agent", "statusKey": "fake-agent", "agentId": "fake-agent", "providerKind": "fake-invalid"}

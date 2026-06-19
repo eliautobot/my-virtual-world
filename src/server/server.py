@@ -8791,21 +8791,25 @@ def _live_agent_provider_bridge_record(state, provider_kind, operation, *, statu
     return provider
 
 
-def _live_agent_provider_bridge_snapshot(value):
+def _live_agent_provider_bridge_snapshot(value, *, depth=0):
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if depth >= 12:
+        return str(value)[:240]
+    if isinstance(value, dict):
+        return {
+            str(key): _live_agent_provider_bridge_snapshot(item, depth=depth + 1)
+            for key, item in value.items()
+            if isinstance(key, (str, int, float, bool)) or key is None
+        }
+    if isinstance(value, (list, tuple)):
+        return [_live_agent_provider_bridge_snapshot(item, depth=depth + 1) for item in value]
+    if isinstance(value, set):
+        return [_live_agent_provider_bridge_snapshot(item, depth=depth + 1) for item in sorted(value, key=lambda item: str(item))]
     try:
         return _copy_jsonable(value)
-    except Exception:
-        if isinstance(value, dict):
-            snapshot = {}
-            for key, item in value.items():
-                if isinstance(key, (str, int, float, bool)) or key is None:
-                    snapshot[str(key)] = _live_agent_provider_bridge_snapshot(item)
-            return snapshot
-        if isinstance(value, (list, tuple)):
-            return [_live_agent_provider_bridge_snapshot(item) for item in value]
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            return value
-        return str(value)
+    except (TypeError, ValueError, OverflowError):
+        return str(value)[:240]
 
 
 def _live_agent_provider_bridge_context(agent, agent_state, state, turn, operation, *, perception=None, world_client=None, now_epoch=None, timeout_sec=None, payload=None):
@@ -8814,6 +8818,8 @@ def _live_agent_provider_bridge_context(agent, agent_state, state, turn, operati
     provider_kind = _live_agent_provider_kind(agent)
     adapter = _live_agent_provider_bridge_adapter(provider_kind)
     timeout_value = float(timeout_sec if timeout_sec is not None else LIVE_AGENT_PROVIDER_BRIDGE_DEFAULT_TIMEOUT_SEC)
+    # Provider hooks run in daemon threads. Timed-out hooks may continue after
+    # fallback, so context data must be detached from authoritative loop state.
     return {
         "schemaVersion": LIVE_AGENT_PROVIDER_BRIDGE_SCHEMA_VERSION,
         "operation": operation,
