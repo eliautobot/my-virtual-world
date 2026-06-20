@@ -101,13 +101,17 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `clawMindArchitecture.runtime.traceCount`
 - `clawMindArchitecture.optimization.heavyWorldScan = false`
 - `finalGate.ok`
+- `finalGate.checks.featureGateOpen`
+- `finalGate.checks.configGateOpen`
 - `finalGate.checks.noRoutePendingActions`
 - `finalGate.checks.noUnresolvedMismatches`
 - `finalGate.checks.memoryWithinCaps`
 - `finalGate.checks.memoryGrowthBounded`
-- `finalGate.checks.noDisabledFeatureGateViolations`
+- `finalGate.checks.providerModelBudgetOk`
+- `finalGate.checks.clawMindRuntimeEvidence`
 - `finalGate.checks.defaultSoakEnabledAgentRosterPresent`
 - `finalGate.checks.defaultSoakCompletedTurnTargetMet`
+- `finalGate.checks.defaultSoakCompletedBackendActionTargetMet`
 - `finalGate.checks.turnsCompletedAcrossEnabledAgents`
 - `finalGate.checks.actionsCompletedAcrossEnabledAgents`
 - `finalGate.evidence.enabledAgents`
