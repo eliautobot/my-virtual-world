@@ -35444,7 +35444,7 @@ function applyLiveAgentModeReplayBuildCompletion(event = {}) {
   }
 }
 
-function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = false } = {}) {
+function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = false, persistPresence = true } = {}) {
   const sequence = Number(event.sequence || event.cursor || 0) || null;
   const eventKey = sequence ? `seq:${sequence}` : `id:${event.id || event.worldActionId || event.actionId || event.name || Date.now()}`;
   const alreadyApplied = _liveAgentModeAnimationReplaySequences.has(eventKey);
@@ -35491,12 +35491,14 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
       updatedAt: agent._liveAgentModeReplay.updatedAt,
     };
     agent.presence = agent._serverPresence;
-    persistAuthoritativeAgentPresence(agent, agent._serverPresence, {
-      source: 'browser-replay',
-      state: liveAgentModeReplayPresenceState(event),
-      event,
-      target: event.target || null,
-    });
+    if (persistPresence) {
+      persistAuthoritativeAgentPresence(agent, agent._serverPresence, {
+        source: 'browser-replay',
+        state: liveAgentModeReplayPresenceState(event),
+        event,
+        target: event.target || null,
+      });
+    }
     if (event.name && event.name.startsWith('object-use')) {
       agent._idleActivity = {
         ...(agent._idleActivity || {}),
@@ -35677,6 +35679,9 @@ function applyWorldEventFeedPresencePatch(event = {}) {
   };
   const applied = applyAuthoritativePresenceToAgent(agent, presence, { force: true });
   if (applied) {
+    clearAgentTransientMovement(agent);
+    agent._stayTimer = Math.max(Number(agent._stayTimer || 0), 1200);
+    agent._wanderTimer = Math.max(Number(agent._wanderTimer || 0), 1200);
     agent._liveAgentModeWorldEventFeed = {
       sequence: event.sequence || event.cursor || null,
       eventType: event.eventType || null,
@@ -35887,7 +35892,10 @@ async function syncLiveAgentModeAnimationEvents({ actionId = null, force = false
     let applied = 0;
     let rendered = 0;
     for (const event of events) {
-      const result = applyLiveAgentModeReplayEvent(event, { allowDuplicateRender: Boolean(actionId) });
+      const result = applyLiveAgentModeReplayEvent(event, {
+        allowDuplicateRender: Boolean(actionId),
+        persistPresence: !force && !actionId,
+      });
       if (result.applied) applied += 1;
       if (result.sceneObjectName) rendered += 1;
       if (Number.isFinite(Number(event.sequence))) maxCursor = Math.max(maxCursor, Number(event.sequence));

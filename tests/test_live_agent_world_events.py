@@ -208,6 +208,95 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertEqual(events[0].get("agentId"), agent_id)
         self.assertEqual((events[0].get("patch") or {}).get("collection"), "agentPresence")
 
+    def test_direct_presence_save_clears_stale_route_and_blocks_browser_replay(self):
+        agent_id = "presence-direct-move-agent"
+        previous_action_id = "wa-stale-browser-replay"
+        now = "2026-06-20T00:00:00Z"
+        previous = {
+            "agentId": agent_id,
+            "buildingId": "office",
+            "floor": 1,
+            "x": 20,
+            "z": 14,
+            "apiX": 800,
+            "apiZ": 560,
+            "source": "live-agent-loop",
+            "state": "completed",
+            "routeState": "completed",
+            "routeStatus": "completed",
+            "worldActionId": previous_action_id,
+            "actionId": previous_action_id,
+            "routeId": "route-stale-browser-replay",
+            "updatedAt": now,
+        }
+        meta = self.server.load_world_meta()
+        meta["agentProfiles"] = {
+            agent_id: {
+                "name": "Presence Direct Move Agent",
+                "providerKind": "fake",
+                "agentLiveModeEnabled": True,
+            }
+        }
+        meta["agentLife"] = {
+            "presence": {
+                "schemaVersion": self.server.LIVE_AGENT_PRESENCE_SCHEMA_VERSION,
+                "agents": {agent_id: previous},
+                "agentLocations": {agent_id: previous},
+                "history": [],
+                "updatedAt": now,
+            }
+        }
+        self.server.save_world_meta(meta)
+
+        ok, result, status = self.server.save_agent_presence_from_payload(agent_id, {
+            "source": "8587-two-client-world-event-feed",
+            "state": "arrived",
+            "location": {
+                "agentId": agent_id,
+                "buildingId": "office",
+                "floor": 1,
+                "x": -9,
+                "z": -4.5,
+                "apiX": -360,
+                "apiZ": -180,
+            },
+        })
+
+        self.assertTrue(ok, result)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["presence"]["apiX"], -360)
+        self.assertNotIn("worldActionId", result["presence"])
+        self.assertNotIn("routeId", result["presence"])
+
+        replay_ok, replay_result, replay_status = self.server.save_agent_presence_from_payload(agent_id, {
+            "source": "browser-replay",
+            "state": "completed",
+            "actionId": previous_action_id,
+            "worldActionId": previous_action_id,
+            "routeId": "route-stale-browser-replay",
+            "location": {
+                "agentId": agent_id,
+                "buildingId": "office",
+                "floor": 1,
+                "x": 20,
+                "z": 14,
+                "apiX": 800,
+                "apiZ": 560,
+                "worldActionId": previous_action_id,
+                "actionId": previous_action_id,
+                "routeId": "route-stale-browser-replay",
+            },
+        })
+        listing = self.server.list_live_agent_world_events({"since": "0", "limit": "10"})
+
+        self.assertTrue(replay_ok, replay_result)
+        self.assertEqual(replay_status, 200)
+        self.assertTrue(replay_result.get("ignored"), replay_result)
+        self.assertEqual(replay_result["presence"]["apiX"], -360)
+        self.assertEqual(listing["nextCursor"], 1)
+        self.assertEqual(len(listing.get("events") or []), 1)
+        self.assertEqual(((listing["events"][0].get("patch") or {}).get("value") or {}).get("apiX"), -360)
+
     def test_live_agent_build_completion_publishes_building_world_events(self):
         building_id = "live-home-world-events-regression"
         action = {

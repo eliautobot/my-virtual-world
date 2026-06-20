@@ -6141,6 +6141,11 @@ def save_agent_presence_from_payload(path_agent_id, payload):
     state = payload.get("state") or payload.get("routeStatus") or payload.get("routeState") or "arrived"
     route = payload.get("route") if isinstance(payload.get("route"), dict) else None
     target = payload.get("target") if isinstance(payload.get("target"), dict) else None
+    route_context_keys = ("worldActionId", "actionId", "routeId", "activeId", "actionType", "targetKind", "objectInstanceId")
+    has_route_context = bool(route or target or any(location.get(key) is not None or payload.get(key) is not None for key in route_context_keys))
+    if not has_route_context and str(source)[:120] != "browser-replay":
+        for key in ("worldActionId", "actionId", "routeId", "activeId", "actionType", "targetKind", "objectInstanceId", "route", "target"):
+            location[key] = None
     existing = _live_agent_presence_location(agent_id)
     incoming = {**location, "source": str(source)[:120], "state": str(state)[:80]}
     if _should_ignore_stale_browser_replay_presence(existing, incoming):
@@ -6306,11 +6311,11 @@ def _should_ignore_stale_browser_replay_presence(existing, incoming):
         return False
     if str(incoming.get("source") or "").strip() != "browser-replay":
         return False
-    if not _live_agent_presence_same_route_or_action(existing, incoming):
-        return False
     existing_source = str(existing.get("source") or "").strip()
     if existing_source == "browser-replay":
         return False
+    if not _live_agent_presence_same_route_or_action(existing, incoming):
+        return True
     existing_rank = _live_agent_presence_progress_rank(existing)
     incoming_rank = _live_agent_presence_progress_rank(incoming)
     return existing_rank >= _live_agent_presence_progress_rank("arrived") and incoming_rank <= existing_rank
