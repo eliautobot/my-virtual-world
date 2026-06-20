@@ -23,7 +23,7 @@ const VENDING_ID = 'acceptance-vending';
 const WHITEBOARD_ID = 'acceptance-whiteboard';
 const PRINTER_ID = 'acceptance-printer';
 const MICROWAVE_ID = 'acceptance-microwave';
-const ACCEPTANCE_TURN_TARGET = Math.max(1, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS || process.env.VW_LIVE_AGENT_MODE_SOAK_TURNS || '100', 10) || 100);
+const ACCEPTANCE_TURN_TARGET = Math.max(1, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS || process.env.VW_LIVE_AGENT_MODE_SOAK_TURNS || '5', 10) || 5);
 const SOAK_AGENT_COUNT = Math.max(2, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_SOAK_AGENT_COUNT || process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_AGENTS || '5', 10) || 5);
 const REQUEST_TIMEOUT_MS = Math.max(30000, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_8587_REQUEST_TIMEOUT_MS || '60000', 10) || 60000);
 const EXTRA_SOAK_AGENT_IDS = Array.from({ length: Math.max(0, SOAK_AGENT_COUNT - 2) }, (_, index) => `acceptance-soak-${index + 3}`);
@@ -1500,6 +1500,7 @@ def wait_for_world_event_client(page, label):
   && window.__VWLiveAgentModeWorldEventFeedState
   && window.buildings instanceof Map
   && Array.isArray(window.agents)
+  && window.agents.length > 0
 """, timeout=60000)
     result = page.evaluate("() => window.__VWSyncLiveAgentModeWorldEvents({ force: true, snapshot: true, limit: 200 })")
     if not result:

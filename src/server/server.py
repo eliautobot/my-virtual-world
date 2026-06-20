@@ -4217,8 +4217,11 @@ def _world_event_json_fingerprint(value):
 def _normalize_world_event_payload(payload, sequence):
     payload = payload if isinstance(payload, dict) else {}
     now = _utc_now_iso()
+    published_epoch_ms = int(time.time() * 1000)
     event_type = _clean_world_event_text(payload.get("eventType") or payload.get("type") or "world-updated", limit=80) or "world-updated"
     created_at = payload.get("createdAt") if _parse_isoish_epoch(payload.get("createdAt")) else now
+    created_epoch = _parse_isoish_epoch(created_at)
+    created_epoch_ms = int(created_epoch * 1000) if created_epoch else published_epoch_ms
     event_id = _clean_world_event_text(payload.get("eventId") or payload.get("id"), limit=160) or f"world-evt-{sequence}-{uuid.uuid4().hex[:12]}"
     event = {
         **payload,
@@ -4231,6 +4234,9 @@ def _normalize_world_event_payload(payload, sequence):
         "cursor": sequence,
         "createdAt": created_at,
         "timestamp": created_at,
+        "createdEpochMs": payload.get("createdEpochMs") or created_epoch_ms,
+        "publishedAt": payload.get("publishedAt") or now,
+        "publishedEpochMs": payload.get("publishedEpochMs") or published_epoch_ms,
         "replayable": payload.get("replayable", True) is not False,
         "requiresSnapshotRefresh": payload.get("requiresSnapshotRefresh") is True,
     }

@@ -5386,6 +5386,18 @@ function applyAuthoritativePresenceToAgent(agent, presence = null, { force = fal
   const normalized = normalizeAuthoritativeAgentPresence(presence || agent.presence || agent.serverPresence);
   if (!normalized || !Number.isFinite(normalized.apiX) || !Number.isFinite(normalized.apiZ)) return false;
   const previousPresence = agent._serverPresence || null;
+  const holdUntil = Number(agent._worldEventFeedPresenceHoldUntil || 0);
+  const holdActive = !force && holdUntil > performance.now();
+  if (holdActive) {
+    const heldAction = String(previousPresence?.worldActionId || previousPresence?.actionId || previousPresence?.routeId || '');
+    const incomingAction = String(normalized.worldActionId || normalized.actionId || normalized.routeId || '');
+    const sameHeldAction = Boolean(heldAction && incomingAction && heldAction === incomingAction);
+    const incomingSource = String(normalized.source || '');
+    const incomingUpdated = Date.parse(normalized.updatedAt || '');
+    const heldUpdated = Date.parse(previousPresence?.updatedAt || '');
+    const incomingIsOlder = Number.isFinite(incomingUpdated) && Number.isFinite(heldUpdated) && incomingUpdated < heldUpdated;
+    if (!sameHeldAction && (incomingIsOlder || incomingSource === 'live-agent-loop' || incomingSource === 'browser-replay')) return false;
+  }
   const sameUpdate = previousPresence?.updatedAt && normalized.updatedAt && previousPresence.updatedAt === normalized.updatedAt;
   if (!force && sameUpdate) return false;
   if (!force && agent._wanderTarget && !['live-agent-loop', 'server-recovery', 'browser-replay'].includes(String(normalized.source || ''))) return false;
@@ -35459,7 +35471,11 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
   const renderPoint = toPoint || fromPoint;
   const agent = resolveAgentForLiveAgentModeReplayEvent(event);
   let agentRendered = false;
-  if (agent && renderPoint) {
+  const heldPresenceAction = String(agent?._serverPresence?.worldActionId || agent?._serverPresence?.actionId || agent?._serverPresence?.routeId || '');
+  const replayAction = String(actionId || event.routeId || '');
+  const sameHeldPresenceAction = Boolean(heldPresenceAction && replayAction && heldPresenceAction === replayAction);
+  const feedPresenceHoldActive = Boolean(agent && Number(agent._worldEventFeedPresenceHoldUntil || 0) > performance.now() && !sameHeldPresenceAction);
+  if (agent && renderPoint && !feedPresenceHoldActive) {
     agent.x = renderPoint.apiX;
     agent.y = renderPoint.apiZ;
     agent._floor = renderPoint.floor;
@@ -35521,6 +35537,14 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
     if (isPhysicsReady()) {
       teleportAgent('agent_' + agent.id, renderPoint.apiX * (T / API_TILE), agent._group3d?.position?.y || 0, renderPoint.apiZ * (T / API_TILE));
     }
+  } else if (agent && renderPoint && feedPresenceHoldActive) {
+    agent._liveAgentModeReplaySkippedByWorldEventFeed = {
+      source: 'main3d.js#applyLiveAgentModeReplayEvent',
+      actionId,
+      sequence,
+      name: event.name || null,
+      skippedAt: new Date().toISOString(),
+    };
   }
 
   const objectStateUpdated = markLiveAgentModeReplayObjectUse(event);
@@ -35550,6 +35574,7 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
 const LIVE_AGENT_MODE_WORLD_EVENT_FEED_CLIENT_VERSION = '20260620-world-event-feed-r1';
 const LIVE_AGENT_MODE_WORLD_EVENT_FEED_ENDPOINT = '/api/world-events';
 const LIVE_AGENT_MODE_WORLD_EVENT_FEED_SYNC_MS = 500;
+const LIVE_AGENT_MODE_WORLD_EVENT_FEED_PRESENCE_HOLD_MS = 12000;
 const _liveAgentModeWorldEventFeedApplied = new Set();
 let _liveAgentModeWorldEventFeedCursor = 0;
 let _liveAgentModeWorldEventFeedTimer = null;
@@ -35605,6 +35630,22 @@ function getLiveAgentModeWorldEventKey(event = {}) {
   const sequence = Number(event.sequence || event.cursor || 0);
   if (Number.isFinite(sequence) && sequence > 0) return `seq:${sequence}`;
   return `id:${event.eventId || event.id || event.eventType || Date.now()}`;
+}
+
+function getLiveAgentModeWorldEventLatencyMs(event = {}) {
+  const epochMs = Number(event.publishedEpochMs || event.createdEpochMs || 0);
+  if (Number.isFinite(epochMs) && epochMs > 0) return Math.max(0, Date.now() - epochMs);
+  return event.createdAt ? Math.max(0, Date.now() - Date.parse(event.createdAt)) : null;
+}
+
+function isLiveAgentModeWorldEventFeedRuntimeReady() {
+  return Boolean(
+    buildingGroup
+    && agentGroup
+    && typeof fetch === 'function'
+    && Array.isArray(agentsList)
+    && agentsList.length > 0
+  );
 }
 
 function removeWorldEventFeedBuilding(buildingId, { updateList = true, rebuild = true } = {}) {
@@ -35682,6 +35723,7 @@ function applyWorldEventFeedPresencePatch(event = {}) {
     clearAgentTransientMovement(agent);
     agent._stayTimer = Math.max(Number(agent._stayTimer || 0), 1200);
     agent._wanderTimer = Math.max(Number(agent._wanderTimer || 0), 1200);
+    agent._worldEventFeedPresenceHoldUntil = performance.now() + LIVE_AGENT_MODE_WORLD_EVENT_FEED_PRESENCE_HOLD_MS;
     agent._liveAgentModeWorldEventFeed = {
       sequence: event.sequence || event.cursor || null,
       eventType: event.eventType || null,
@@ -35741,7 +35783,7 @@ function applyLiveAgentModeWorldEvent(event = {}) {
     applied,
     requiresSnapshotRefresh,
     sequence: Number(event.sequence || event.cursor || 0) || 0,
-    latencyMs: event.createdAt ? Math.max(0, Date.now() - Date.parse(event.createdAt)) : null,
+    latencyMs: getLiveAgentModeWorldEventLatencyMs(event),
   };
 }
 
@@ -35771,8 +35813,12 @@ function applyLiveAgentModeWorldEventSnapshot(snapshot = {}) {
 
 async function syncLiveAgentModeWorldEvents({ force = false, snapshot = false, limit = 200 } = {}) {
   if (_liveAgentModeWorldEventFeedInFlight) return _liveAgentModeWorldEventFeedInFlight;
-  if (!buildingGroup || !agentGroup || typeof fetch !== 'function') {
-    setLiveAgentModeWorldEventFeedState({ ok: false, reason: 'scene_not_ready' });
+  if (!isLiveAgentModeWorldEventFeedRuntimeReady()) {
+    setLiveAgentModeWorldEventFeedState({
+      ok: false,
+      reason: 'scene_not_ready',
+      agentReadyCount: Array.isArray(agentsList) ? agentsList.length : 0,
+    });
     return false;
   }
   _liveAgentModeWorldEventFeedInFlight = (async () => {

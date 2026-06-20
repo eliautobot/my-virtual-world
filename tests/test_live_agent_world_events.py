@@ -207,6 +207,9 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertEqual(events[0].get("eventType"), "agent-presence-updated")
         self.assertEqual(events[0].get("agentId"), agent_id)
         self.assertEqual((events[0].get("patch") or {}).get("collection"), "agentPresence")
+        self.assertIsInstance(events[0].get("createdEpochMs"), int)
+        self.assertIsInstance(events[0].get("publishedEpochMs"), int)
+        self.assertGreater(events[0].get("publishedEpochMs"), 0)
 
     def test_direct_presence_save_clears_stale_route_and_blocks_browser_replay(self):
         agent_id = "presence-direct-move-agent"
