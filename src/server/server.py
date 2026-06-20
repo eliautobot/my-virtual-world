@@ -4650,6 +4650,8 @@ def list_live_agent_world_events(query=None):
     requires_snapshot_refresh = bool(events and since is not None and since < oldest_cursor - 1)
     if since is not None and not requires_snapshot_refresh:
         events = [event for event in events if int(event.get("sequence") or 0) > since]
+        if len(events) > limit:
+            requires_snapshot_refresh = True
     if requires_snapshot_refresh:
         events = []
         include_snapshot = True

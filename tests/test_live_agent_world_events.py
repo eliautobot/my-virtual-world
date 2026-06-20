@@ -110,6 +110,28 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertEqual(len(set(sequences)), expected_count)
         self.assertEqual({event.get("eventId") for event in events}, expected_event_ids)
 
+    def test_event_listing_requires_snapshot_when_unseen_events_exceed_limit(self):
+        total_events = 250
+        for index in range(total_events):
+            self.server.append_live_agent_world_events([{
+                "eventType": "test-feed-limit-gap",
+                "eventId": f"evt-limit-gap-{index}",
+            }])
+
+        over_limit = self.server.list_live_agent_world_events({"since": "0", "limit": "200"})
+
+        self.assertTrue(over_limit["requiresSnapshotRefresh"])
+        self.assertEqual(over_limit["events"], [])
+        self.assertIn("snapshot", over_limit)
+        self.assertEqual(over_limit["snapshot"]["cursor"], total_events)
+        self.assertEqual(over_limit["nextCursor"], total_events)
+
+        within_limit = self.server.list_live_agent_world_events({"since": "50", "limit": "200"})
+
+        self.assertFalse(within_limit["requiresSnapshotRefresh"])
+        self.assertNotIn("snapshot", within_limit)
+        self.assertEqual([event.get("sequence") for event in within_limit["events"]], list(range(51, total_events + 1)))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
