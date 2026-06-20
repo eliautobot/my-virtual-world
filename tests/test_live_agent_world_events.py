@@ -176,6 +176,61 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertEqual(((building_events[0].get("patch") or {}).get("value") or {}).get("id"), building_id)
         self.assertEqual(building_events[0].get("source"), "server.py#apply_live_agent_build_completion_effect")
 
+    def test_outdoor_area_nodes_publish_object_world_events(self):
+        building_id = "park-world-events-regression"
+        node_id = "park-bench-world-events"
+        before_empty = {
+            "id": building_id,
+            "type": "park",
+            "outdoorArea": {"id": f"{building_id}-area", "outdoorAreaType": "park", "nodes": []},
+        }
+        after_create = {
+            **before_empty,
+            "outdoorArea": {
+                **before_empty["outdoorArea"],
+                "nodes": [{
+                    "id": node_id,
+                    "catalogId": "parkBench",
+                    "type": "parkBench",
+                    "x": 4,
+                    "z": 6,
+                    "label": "Bench A",
+                }],
+            },
+        }
+        after_update = {
+            **after_create,
+            "outdoorArea": {
+                **after_create["outdoorArea"],
+                "nodes": [{**after_create["outdoorArea"]["nodes"][0], "label": "Bench B"}],
+            },
+        }
+
+        created = self.server.publish_building_world_events(before_empty, after_create, source="test-outdoor-area-nodes")
+        updated = self.server.publish_building_world_events(after_create, after_update, source="test-outdoor-area-nodes")
+        deleted = self.server.publish_building_world_events(after_update, before_empty, source="test-outdoor-area-nodes")
+
+        self.assertEqual([event.get("eventType") for event in created], ["building-updated", "object-created"])
+        self.assertEqual([event.get("eventType") for event in updated], ["building-updated", "object-updated"])
+        self.assertEqual([event.get("eventType") for event in deleted], ["building-updated", "object-deleted"])
+
+        object_events = [created[1], updated[1], deleted[1]]
+        self.assertEqual([event.get("sequence") for event in object_events], [2, 4, 6])
+        self.assertEqual([event.get("eventType") for event in object_events], ["object-created", "object-updated", "object-deleted"])
+        for event in object_events:
+            self.assertEqual((event.get("target") or {}).get("kind"), "object-instance")
+            self.assertEqual((event.get("target") or {}).get("buildingId"), building_id)
+            self.assertEqual((event.get("target") or {}).get("objectInstanceId"), node_id)
+            self.assertEqual((event.get("target") or {}).get("catalogId"), "parkBench")
+            self.assertEqual((event.get("patch") or {}).get("collection"), "buildingObjects")
+            self.assertEqual((event.get("patch") or {}).get("buildingId"), building_id)
+            self.assertEqual((event.get("patch") or {}).get("objectInstanceId"), node_id)
+
+        self.assertEqual((created[1].get("patch") or {}).get("op"), "upsert")
+        self.assertEqual((updated[1].get("patch") or {}).get("op"), "upsert")
+        self.assertEqual((deleted[1].get("patch") or {}).get("op"), "delete")
+        self.assertEqual(((deleted[1].get("patch") or {}).get("buildingPatch") or {}).get("op"), "delete-object")
+
     def test_metrics_ignore_replay_latency_and_sample_live_incremental_latency(self):
         replay_query = {
             "client": "main3d-world-event-feed",

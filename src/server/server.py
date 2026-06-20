@@ -4449,13 +4449,19 @@ def _building_object_records(building):
         object_id = _world_event_object_id(item, index, f"{building_id}:furniture")
         if object_id:
             records[object_id] = {"id": object_id, "kind": "interior-furniture", "index": index, "value": _world_event_json_clone(item)}
-    outdoor_nodes = building.get("outdoorNodes") if isinstance(building.get("outdoorNodes"), list) else []
-    for index, item in enumerate(outdoor_nodes):
-        if not isinstance(item, dict):
-            continue
-        object_id = _world_event_object_id(item, index, f"{building_id}:outdoor")
-        if object_id:
-            records[object_id] = {"id": object_id, "kind": "outdoor-node", "index": index, "value": _world_event_json_clone(item)}
+    outdoor_sources = [
+        (building.get("outdoorNodes") if isinstance(building.get("outdoorNodes"), list) else [], f"{building_id}:outdoor"),
+    ]
+    outdoor_area = building.get("outdoorArea") if isinstance(building.get("outdoorArea"), dict) else {}
+    outdoor_area_nodes = outdoor_area.get("nodes") if isinstance(outdoor_area.get("nodes"), list) else []
+    outdoor_sources.append((outdoor_area_nodes, f"{building_id}:outdoorArea"))
+    for outdoor_nodes, prefix in outdoor_sources:
+        for index, item in enumerate(outdoor_nodes):
+            if not isinstance(item, dict):
+                continue
+            object_id = _world_event_object_id(item, index, prefix)
+            if object_id:
+                records[object_id] = {"id": object_id, "kind": "outdoor-node", "index": index, "value": _world_event_json_clone(item)}
     return records
 
 
