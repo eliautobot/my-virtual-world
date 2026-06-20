@@ -757,6 +757,7 @@ _live_agent_loop_lock = threading.RLock()
 _live_agent_action_handoff_lock = threading.RLock()
 _live_agent_loop_last_client_at = 0
 _live_agent_loop_last_client_info = {}
+_world_event_feed_store_lock = threading.RLock()
 _world_event_feed_client_lock = threading.RLock()
 _world_event_feed_clients = {}
 _world_event_feed_latency_samples = []
@@ -4104,6 +4105,11 @@ def default_live_agent_world_event_feed_store():
 
 
 def get_live_agent_world_event_feed_store(*, persist_migration=False):
+    with _world_event_feed_store_lock:
+        return _get_live_agent_world_event_feed_store_unlocked(persist_migration=persist_migration)
+
+
+def _get_live_agent_world_event_feed_store_unlocked(*, persist_migration=False):
     migrated_from_meta = False
     try:
         store = _read_json_file(LIVE_AGENT_WORLD_EVENT_FEED_FILE)
@@ -4141,6 +4147,11 @@ def get_live_agent_world_event_feed_store(*, persist_migration=False):
 
 
 def save_live_agent_world_event_feed_store(store):
+    with _world_event_feed_store_lock:
+        return _save_live_agent_world_event_feed_store_unlocked(store)
+
+
+def _save_live_agent_world_event_feed_store_unlocked(store):
     next_store = default_live_agent_world_event_feed_store()
     if isinstance(store, dict):
         next_store.update({k: v for k, v in store.items() if k in {"nextSequence", "events", "retention", "subscription"}})
@@ -4230,17 +4241,18 @@ def append_live_agent_world_events(event_payloads):
     payloads = [payload for payload in (event_payloads or []) if isinstance(payload, dict) and (payload.get("eventType") or payload.get("type"))]
     if not payloads:
         return []
-    store = get_live_agent_world_event_feed_store(persist_migration=True)
-    sequence = int(store.get("nextSequence") or 1)
-    next_events = list(store.get("events") or [])
-    saved_events = []
-    for payload in payloads:
-        event = _normalize_world_event_payload(payload, sequence)
-        sequence += 1
-        next_events.append(event)
-        saved_events.append(event)
-    save_live_agent_world_event_feed_store({**store, "nextSequence": sequence, "events": next_events})
-    return saved_events
+    with _world_event_feed_store_lock:
+        store = _get_live_agent_world_event_feed_store_unlocked(persist_migration=True)
+        sequence = int(store.get("nextSequence") or 1)
+        next_events = list(store.get("events") or [])
+        saved_events = []
+        for payload in payloads:
+            event = _normalize_world_event_payload(payload, sequence)
+            sequence += 1
+            next_events.append(event)
+            saved_events.append(event)
+        _save_live_agent_world_event_feed_store_unlocked({**store, "nextSequence": sequence, "events": next_events})
+        return saved_events
 
 
 def _world_event_target_from_action_event(event):
