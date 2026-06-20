@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import net from 'node:net';
@@ -111,6 +111,25 @@ function assert(condition, message, details = undefined) {
   if (condition) return;
   const suffix = details === undefined ? '' : `\n${typeof details === 'string' ? details : JSON.stringify(details, null, 2)}`;
   throw new Error(`${message}${suffix}`);
+}
+
+function missingBrowserRuntimeDependencies() {
+  return [
+    'node_modules/three/build/three.module.min.js',
+    'node_modules/@dimforge/rapier3d-compat/rapier.mjs',
+  ].filter((filePath) => !existsSync(filePath));
+}
+
+async function ensureBrowserRuntimeDependencies() {
+  const missing = missingBrowserRuntimeDependencies();
+  if (!missing.length) return;
+  console.log(`INFO: installing missing browser runtime dependencies for 8587 verification: ${missing.join(', ')}`);
+  await runChild('npm', ['ci', '--ignore-scripts', '--no-audit']);
+  const stillMissing = missingBrowserRuntimeDependencies();
+  assert(stillMissing.length === 0, 'browser runtime dependencies are missing after npm ci', {
+    missing: stillMissing,
+    hint: 'Run npm install/npm ci before browser-based Live Agent Mode verification.',
+  });
 }
 
 function compactTickResult(tick) {
@@ -1839,6 +1858,7 @@ async function verifyServerRestartPresencePersistenceAndRouteState() {
 
 assertNoProductPortTargets();
 assertNoConflictingHarnessPortEnv();
+await ensureBrowserRuntimeDependencies();
 await assertPortAvailable(TEST_PORT);
 
 const dataDir = mkdtempSync(join(tmpdir(), 'vw-live-agent-mode-8587-'));
@@ -1855,6 +1875,7 @@ const childEnv = {
   VW_OPENCLAW_PATH: workspaceRoot,
   VW_OPENCLAW_HOST_PATH: workspaceRoot,
   VW_GATEWAY_URL: '',
+  VW_DISABLE_GATEWAY_CLIENT: 'true',
   VW_HERMES_ENABLED: 'false',
   VW_CODEX_ENABLED: 'false',
 };

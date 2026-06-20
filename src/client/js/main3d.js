@@ -35547,7 +35547,7 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
 
 const LIVE_AGENT_MODE_WORLD_EVENT_FEED_CLIENT_VERSION = '20260620-world-event-feed-r1';
 const LIVE_AGENT_MODE_WORLD_EVENT_FEED_ENDPOINT = '/api/world-events';
-const LIVE_AGENT_MODE_WORLD_EVENT_FEED_SYNC_MS = 1000;
+const LIVE_AGENT_MODE_WORLD_EVENT_FEED_SYNC_MS = 500;
 const _liveAgentModeWorldEventFeedApplied = new Set();
 let _liveAgentModeWorldEventFeedCursor = 0;
 let _liveAgentModeWorldEventFeedTimer = null;

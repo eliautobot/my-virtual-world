@@ -16808,7 +16808,20 @@ def _gateway_config_key():
     return gw_url or "", gw_token or ""
 
 
+def _gateway_client_disabled():
+    return _env_bool("VW_DISABLE_GATEWAY_CLIENT", False)
+
+
 def _gateway_info_payload():
+    if _gateway_client_disabled():
+        return {
+            "wsPort": None,
+            "gatewayUrl": "",
+            "token": "",
+            "tokenConfigured": False,
+            "gatewayClientDisabled": True,
+            "openclawVersion": _get_openclaw_version(),
+        }
     gw_url, gw_token = _read_gateway_config()
     ws_port = 18789
     if gw_url:
