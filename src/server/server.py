@@ -6565,6 +6565,13 @@ def apply_live_agent_build_completion_effect(action):
     if not isinstance(building, dict) or not building.get("id"):
         return None
     save_building(building["id"], building)
+    persisted = load_building(building["id"]) or building
+    world_events = publish_building_world_events(
+        None,
+        persisted,
+        source="server.py#apply_live_agent_build_completion_effect",
+        actor=action.get("agentId") or "agent-live-mode",
+    )
     return {
         "schemaVersion": "agent-live-mode-build-effect/v1",
         "effect": "building-persisted",
@@ -6572,6 +6579,8 @@ def apply_live_agent_build_completion_effect(action):
         "buildingId": building["id"],
         "buildingName": building.get("name"),
         "source": "server.py#apply_live_agent_build_completion_effect",
+        "worldEventCount": len(world_events),
+        "worldEventIds": [event.get("eventId") for event in world_events if isinstance(event, dict) and event.get("eventId")],
     }
 
 

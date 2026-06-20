@@ -35786,6 +35786,10 @@ async function syncLiveAgentModeWorldEvents({ force = false, snapshot = false, l
     }
     const events = Array.isArray(payload.events) ? payload.events : [];
     let maxCursor = _liveAgentModeWorldEventFeedCursor;
+    if (snapshotApplied) {
+      const snapshotCursor = Number(payload.nextCursor ?? payload.snapshot?.cursor ?? 0);
+      if (Number.isFinite(snapshotCursor)) maxCursor = Math.max(maxCursor, snapshotCursor);
+    }
     let applied = 0;
     const latencies = [];
     let unsafePatch = false;
@@ -35801,7 +35805,8 @@ async function syncLiveAgentModeWorldEvents({ force = false, snapshot = false, l
       if (snapshotResponse.ok) {
         const snapshotPayload = await snapshotResponse.json();
         snapshotApplied = applyLiveAgentModeWorldEventSnapshot(snapshotPayload.snapshot || {});
-        maxCursor = Math.max(maxCursor, Number(snapshotPayload.nextCursor || 0));
+        const snapshotCursor = Number(snapshotPayload.nextCursor ?? snapshotPayload.snapshot?.cursor ?? 0);
+        if (Number.isFinite(snapshotCursor)) maxCursor = Math.max(maxCursor, snapshotCursor);
       }
     }
     if (!force) _liveAgentModeWorldEventFeedCursor = maxCursor;

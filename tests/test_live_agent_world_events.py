@@ -132,6 +132,50 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertNotIn("snapshot", within_limit)
         self.assertEqual([event.get("sequence") for event in within_limit["events"]], list(range(51, total_events + 1)))
 
+    def test_live_agent_build_completion_publishes_building_world_events(self):
+        building_id = "live-home-world-events-regression"
+        action = {
+            "id": "world-action-build-regression",
+            "actionType": "world.buildStructure",
+            "agentId": "agent-world-events",
+            "target": {
+                "x": 120,
+                "y": 160,
+                "buildSite": {
+                    "buildingId": building_id,
+                    "buildingName": "World Events Regression Home",
+                    "worldX": 7,
+                    "worldY": 11,
+                    "widthTiles": 10,
+                    "heightTiles": 8,
+                },
+            },
+        }
+
+        effect = self.server.apply_live_agent_build_completion_effect(action)
+        building = self.server.load_building(building_id)
+        listing = self.server.list_live_agent_world_events({"since": "0", "limit": "50"})
+        events = listing.get("events") or []
+        building_events = [
+            event for event in events
+            if event.get("eventType") == "building-created"
+            and (event.get("patch") or {}).get("buildingId") == building_id
+        ]
+
+        self.assertIsInstance(effect, dict)
+        self.assertEqual(effect.get("effect"), "building-persisted")
+        self.assertFalse(effect.get("alreadyExisted"))
+        self.assertIsInstance(building, dict)
+        self.assertEqual(building.get("id"), building_id)
+        self.assertGreater(effect.get("worldEventCount") or 0, 0)
+        self.assertEqual(effect.get("worldEventCount"), len(events))
+        self.assertFalse(listing["requiresSnapshotRefresh"])
+        self.assertEqual(listing["nextCursor"], len(events))
+        self.assertEqual(len(building_events), 1)
+        self.assertEqual((building_events[0].get("patch") or {}).get("op"), "upsert")
+        self.assertEqual(((building_events[0].get("patch") or {}).get("value") or {}).get("id"), building_id)
+        self.assertEqual(building_events[0].get("source"), "server.py#apply_live_agent_build_completion_effect")
+
     def test_metrics_ignore_replay_latency_and_sample_live_incremental_latency(self):
         replay_query = {
             "client": "main3d-world-event-feed",
