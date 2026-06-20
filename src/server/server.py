@@ -4593,8 +4593,7 @@ def _live_agent_metric_per_agent_distribution(enabled_agents, turns, backend_ter
         return row
 
     for agent in [item for item in (enabled_agents or []) if isinstance(item, dict)]:
-        agent_id = _live_agent_metric_roster_agent_id(agent)
-        row = ensure_row(agent_id, agent)
+        row = ensure_row(_live_agent_metric_roster_agent_id(agent), agent)
         if row:
             enabled_agent_ids.append(row["agentId"])
 
@@ -4835,6 +4834,8 @@ def get_live_agent_mode_autonomy_metrics():
         row["agentId"]: row["completedBackendActionCount"]
         for row in enabled_agent_distribution_evidence
     }
+    default_soak_target_agents = 5
+    default_soak_target_turns = 100
     provider_support = _live_agent_provider_adapter_metrics(cached_roster, loop_state=loop_state)
     clawmind_architecture = _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
     backend_action_total = len(backend_terminal_actions)
@@ -4881,6 +4882,9 @@ def get_live_agent_mode_autonomy_metrics():
         "outcomeAwarenessRecordsPresent": outcome_awareness_metrics["expectedOutcomeCount"] >= len(completed_backend_actions) if completed_backend_actions else True,
         "turnPlanningRecordsPresent": planner_metrics["turnsWithPlanningRecordCount"] > 0 if turns else True,
         "perAgentTurnActionDistributionPresent": per_agent_distribution["enabledAgentCount"] > 0 and len(per_agent_distribution["agents"]) >= per_agent_distribution["enabledAgentCount"],
+        "defaultSoakEnabledAgentRosterPresent": per_agent_distribution["enabledAgentCount"] >= default_soak_target_agents,
+        "defaultSoakCompletedTurnTargetMet": len(completed_turns) >= default_soak_target_turns,
+        "defaultSoakCompletedBackendActionTargetMet": len(completed_backend_actions) >= default_soak_target_turns,
         "turnsCompletedAcrossEnabledAgents": per_agent_distribution["allEnabledAgentsHaveCompletedTurn"],
         "actionsCompletedAcrossEnabledAgents": per_agent_distribution["allEnabledAgentsHaveCompletedBackendAction"],
     }
@@ -4893,6 +4897,9 @@ def get_live_agent_mode_autonomy_metrics():
         "memoryGrowthBounded": memory_growth["bounded"],
         "providerModelBudgetOk": provider_model_call_counts["metricsReadOnlyBudgetOk"],
         "clawMindRuntimeEvidence": clawmind_architecture.get("checklist", {}).get("allModulesExecuted") is True,
+        "defaultSoakEnabledAgentRosterPresent": checklist["defaultSoakEnabledAgentRosterPresent"],
+        "defaultSoakCompletedTurnTargetMet": checklist["defaultSoakCompletedTurnTargetMet"],
+        "defaultSoakCompletedBackendActionTargetMet": checklist["defaultSoakCompletedBackendActionTargetMet"],
         "turnsCompletedAcrossEnabledAgents": checklist["turnsCompletedAcrossEnabledAgents"],
         "actionsCompletedAcrossEnabledAgents": checklist["actionsCompletedAcrossEnabledAgents"],
     }
@@ -4903,8 +4910,12 @@ def get_live_agent_mode_autonomy_metrics():
         "failures": [key for key, passed in final_gate_checks.items() if not passed],
         "evidence": {
             "perAgentDistributionSchemaVersion": per_agent_distribution["schemaVersion"],
+            "requiredEnabledAgentCount": default_soak_target_agents,
+            "requiredCompletedTurnCount": default_soak_target_turns,
             "enabledAgentCount": per_agent_distribution["enabledAgentCount"],
             "enabledAgentIds": per_agent_distribution["enabledAgentIds"],
+            "completedTurnCount": len(completed_turns),
+            "completedBackendActionCount": len(completed_backend_actions),
             "enabledCompletedTurnAgentCount": per_agent_distribution["enabledCompletedTurnAgentCount"],
             "enabledCompletedTurnAgentIds": per_agent_distribution["enabledCompletedTurnAgentIds"],
             "enabledCompletedBackendActionAgentCount": per_agent_distribution["enabledCompletedBackendActionAgentCount"],
@@ -4973,6 +4984,8 @@ def get_live_agent_mode_autonomy_metrics():
             "unresolvedMismatchCount": outcome_awareness_metrics["unresolvedMismatchCount"],
             "escalationCount": outcome_awareness_metrics["escalationCount"],
             "outcomeAwareness": outcome_awareness_metrics,
+            "providerModelCalls": provider_model_call_counts,
+            "perAgentDistribution": per_agent_distribution,
             "planCount": planner_metrics["planCount"],
             "replanCount": planner_metrics["replanCount"],
             "failedExpectationCount": planner_metrics["failedExpectationCount"],

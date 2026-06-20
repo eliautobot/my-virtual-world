@@ -700,6 +700,9 @@ try:
     assert distribution["schemaVersion"] == "agent-live-mode-per-agent-distribution/v1", distribution
     assert distribution["enabledAgentIds"] == ["adam", "loop-only"], distribution
     assert distribution["enabledAgentsMissingCompletedTurns"] == ["adam", "loop-only"], distribution
+    assert distribution["enabledAgentsMissingCompletedBackendActions"] == ["adam", "loop-only"], distribution
+    assert metrics["finalGate"]["checks"]["defaultSoakEnabledAgentRosterPresent"] is False, metrics["finalGate"]
+    assert metrics["finalGate"]["checks"]["turnsCompletedAcrossEnabledAgents"] is False, metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["enabledAgentCount"] == 2, metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["enabledAgents"][0]["agentId"] == "adam", metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["enabledAgents"][0]["completedTurnCount"] == 0, metrics["finalGate"]

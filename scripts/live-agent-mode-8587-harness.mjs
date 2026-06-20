@@ -747,6 +747,13 @@ async function verifyFakeProviderBridgeContract() {
       agentLiveModeEnabled: false,
     });
     assert(disabled?.ok === true && disabled.agentLiveModeEnabled === false, 'failed to disable fake provider fixture after bridge contract', disabled);
+    const loopDisabled = await postJson('/api/agent-live-loop', {
+      agentId: FAKE_FIXTURE_AGENT_ID,
+      agentEnabled: false,
+      clearTurnRetry: true,
+      actor: '8587-acceptance-fake-provider-complete',
+    });
+    assert(loopDisabled?.ok === true, 'failed to disable fake provider loop state after bridge contract', loopDisabled);
   }
 }
 
@@ -973,6 +980,9 @@ function verifySoakDistributionMetrics(metrics, { expectedAgents, expectedTurns 
   const distributedCompletedActionCount = Object.values(rowsByAgent).reduce((sum, row) => sum + Number(row?.completedBackendActionCount || 0), 0);
   assert(distributedCompletedTurnCount >= expectedTurns, `per-agent completed turn total should cover at least ${expectedTurns} turns`, { distributedCompletedTurnCount, distribution });
   assert(distributedCompletedActionCount >= expectedTurns, `per-agent completed action total should cover at least ${expectedTurns} backend actions`, { distributedCompletedActionCount, distribution });
+  assert(metrics.finalGate?.checks?.defaultSoakEnabledAgentRosterPresent === true, 'final gate should check the default enabled soak roster size', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.defaultSoakCompletedTurnTargetMet === true, 'final gate should check the default completed-turn soak target', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.defaultSoakCompletedBackendActionTargetMet === true, 'final gate should check the default backend-action soak target', metrics.finalGate);
   assert(metrics.finalGate?.checks?.turnsCompletedAcrossEnabledAgents === true, 'final gate should check enabled-agent turn distribution', metrics.finalGate);
   assert(metrics.finalGate?.checks?.actionsCompletedAcrossEnabledAgents === true, 'final gate should check enabled-agent action distribution', metrics.finalGate);
   assert(metrics.finalGate?.evidence?.enabledCompletedTurnAgentCount >= expectedAgents, 'final gate should report turn distribution evidence', metrics.finalGate);
@@ -1082,6 +1092,7 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
     enabledAgentCount: metrics.loop.enabledAgentCount,
     completedTurnCount: metrics.metrics.completedTurnCount,
     completedBackendActionCount: metrics.metrics.completedBackendActionCount,
+    completedBackendActionCountByAgent: metrics.metrics.completedBackendActionCountByAgent,
     perAgentDistribution: metrics.finalGate.evidence,
     turnDuration: metrics.metrics.turnDuration,
     actionSuccessRate: metrics.metrics.actionSuccessRate,
