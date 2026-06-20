@@ -4560,6 +4560,8 @@ def _record_world_event_feed_client_activity(query):
         applied_cursor = int(applied_cursor) if applied_cursor not in (None, "") else None
     except (TypeError, ValueError):
         applied_cursor = None
+    latency_source = _clean_world_event_text(_world_event_query_value(query, "lastAppliedLatencySource", "latencySource"), limit=48)
+    latency_sample_allowed = latency_source in {"live-incremental", "live-patch"}
     latency_ms = _world_event_query_value(query, "lastAppliedLatencyMs", "latencyMs")
     try:
         latency_ms = float(latency_ms) if latency_ms not in (None, "") else None
@@ -4575,9 +4577,11 @@ def _record_world_event_feed_client_activity(query):
             "lastSeenAt": _epoch_to_utc_iso(now_epoch),
             "lastSeenEpoch": now_epoch,
             "appliedCursor": applied_cursor,
-            "lastAppliedLatencyMs": latency_ms,
+            "lastAppliedLatencyMs": latency_ms if latency_sample_allowed else None,
+            "lastAppliedLatencySource": latency_source,
+            "lastAppliedLatencySampled": bool(latency_sample_allowed and latency_ms is not None and math.isfinite(latency_ms) and latency_ms >= 0),
         }
-        if latency_ms is not None and math.isfinite(latency_ms) and latency_ms >= 0:
+        if latency_sample_allowed and latency_ms is not None and math.isfinite(latency_ms) and latency_ms >= 0:
             _world_event_feed_latency_samples.append(latency_ms)
             del _world_event_feed_latency_samples[:-LIVE_AGENT_WORLD_EVENT_FEED_LATENCY_SAMPLE_LIMIT]
     return session_id

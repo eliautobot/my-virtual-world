@@ -35552,6 +35552,7 @@ const _liveAgentModeWorldEventFeedApplied = new Set();
 let _liveAgentModeWorldEventFeedCursor = 0;
 let _liveAgentModeWorldEventFeedTimer = null;
 let _liveAgentModeWorldEventFeedLastLatencyMs = null;
+let _liveAgentModeWorldEventFeedLastLatencySource = null;
 let _liveAgentModeWorldEventFeedState = {
   ok: false,
   schemaVersion: 'main3d-live-agent-mode-world-event-feed/v1',
@@ -35590,8 +35591,9 @@ function getLiveAgentModeWorldEventFeedUrl({ since = null, snapshot = false, lim
   });
   if (since != null) params.set('since', String(since));
   if (snapshot) params.set('snapshot', '1');
-  if (_liveAgentModeWorldEventFeedLastLatencyMs != null) {
+  if (_liveAgentModeWorldEventFeedLastLatencyMs != null && _liveAgentModeWorldEventFeedLastLatencySource === 'live-incremental') {
     params.set('lastAppliedLatencyMs', String(Math.max(0, Math.round(_liveAgentModeWorldEventFeedLastLatencyMs))));
+    params.set('lastAppliedLatencySource', _liveAgentModeWorldEventFeedLastLatencySource);
   }
   return `${LIVE_AGENT_MODE_WORLD_EVENT_FEED_ENDPOINT}?${params.toString()}`;
 }
@@ -35767,8 +35769,9 @@ async function syncLiveAgentModeWorldEvents({ force = false, snapshot = false, l
     return false;
   }
   try {
+    const requestSince = force ? null : _liveAgentModeWorldEventFeedCursor;
     const response = await fetch(getLiveAgentModeWorldEventFeedUrl({
-      since: force ? null : _liveAgentModeWorldEventFeedCursor,
+      since: requestSince,
       snapshot,
       limit,
     }), { cache: 'no-store' });
@@ -35803,8 +35806,15 @@ async function syncLiveAgentModeWorldEvents({ force = false, snapshot = false, l
     }
     if (!force) _liveAgentModeWorldEventFeedCursor = maxCursor;
     else _liveAgentModeWorldEventFeedCursor = Math.max(_liveAgentModeWorldEventFeedCursor, Number(payload.nextCursor || maxCursor || 0));
-    const p95LatencyMs = latencies.length ? [...latencies].sort((a, b) => a - b)[Math.min(latencies.length - 1, Math.floor((latencies.length - 1) * 0.95))] : _liveAgentModeWorldEventFeedLastLatencyMs;
-    if (p95LatencyMs != null && Number.isFinite(Number(p95LatencyMs))) _liveAgentModeWorldEventFeedLastLatencyMs = Number(p95LatencyMs);
+    const canReportLiveLatency = !force && !snapshot && !payload.requiresSnapshotRefresh && !snapshotApplied && !unsafePatch && requestSince != null;
+    const p95LatencyMs = canReportLiveLatency && latencies.length ? [...latencies].sort((a, b) => a - b)[Math.min(latencies.length - 1, Math.floor((latencies.length - 1) * 0.95))] : null;
+    if (p95LatencyMs != null && Number.isFinite(Number(p95LatencyMs))) {
+      _liveAgentModeWorldEventFeedLastLatencyMs = Number(p95LatencyMs);
+      _liveAgentModeWorldEventFeedLastLatencySource = 'live-incremental';
+    } else if (!canReportLiveLatency || !latencies.length) {
+      _liveAgentModeWorldEventFeedLastLatencyMs = null;
+      _liveAgentModeWorldEventFeedLastLatencySource = null;
+    }
     return setLiveAgentModeWorldEventFeedState({
       ok: true,
       reason: null,

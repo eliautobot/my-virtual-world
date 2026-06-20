@@ -132,6 +132,35 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertNotIn("snapshot", within_limit)
         self.assertEqual([event.get("sequence") for event in within_limit["events"]], list(range(51, total_events + 1)))
 
+    def test_metrics_ignore_replay_latency_and_sample_live_incremental_latency(self):
+        replay_query = {
+            "client": "main3d-world-event-feed",
+            "sessionId": "client-replay",
+            "lastAppliedLatencyMs": "7000",
+            "lastAppliedLatencySource": "replay",
+        }
+        self.server.list_live_agent_world_events(replay_query)
+
+        replay_metrics = self.server.get_live_agent_world_event_feed_metrics()
+
+        self.assertTrue(replay_metrics["ok"])
+        self.assertEqual(replay_metrics["latency"]["sampleCount"], 0)
+        self.assertEqual(replay_metrics["p95MultiClientSyncLatencyMs"], 0)
+
+        live_query = {
+            "client": "main3d-world-event-feed",
+            "sessionId": "client-live",
+            "lastAppliedLatencyMs": "1200",
+            "lastAppliedLatencySource": "live-incremental",
+        }
+        self.server.list_live_agent_world_events(live_query)
+
+        live_metrics = self.server.get_live_agent_world_event_feed_metrics()
+
+        self.assertTrue(live_metrics["ok"])
+        self.assertEqual(live_metrics["latency"]["sampleCount"], 1)
+        self.assertEqual(live_metrics["p95MultiClientSyncLatencyMs"], 1200)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
