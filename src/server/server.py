@@ -495,6 +495,8 @@ def _save_vw_config_update(body):
             meta = load_world_meta()
             meta.update(meta_patch)
             save_world_meta(meta)
+    if _agent_live_mode_available():
+        start_live_agent_loop()
     return {"ok": True, "config": _safe_vw_config()}, 200
 
 
@@ -4471,9 +4473,9 @@ def _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_acti
 def get_live_agent_mode_autonomy_metrics():
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
-    loop_state = get_live_agent_loop_state(persist_migration=True)
+    loop_state = get_live_agent_loop_state(persist_migration=False)
     scheduler = _live_agent_loop_scheduler_state(loop_state)
-    action_store = get_world_actions_store(persist_migration=True)
+    action_store = get_world_actions_store(meta, persist_migration=False)
     active_actions = [item for item in (action_store.get("active") or []) if isinstance(item, dict)]
     history_actions = [item for item in (action_store.get("history") or []) if isinstance(item, dict)]
     completed_backend_actions = [
@@ -4499,10 +4501,10 @@ def get_live_agent_mode_autonomy_metrics():
         action for action in active_actions
         if _canonical_world_action_status(action.get("status")) == "route_pending"
     ]
-    animation_store = get_live_agent_animation_events_store(persist_migration=True)
+    animation_store = get_live_agent_animation_events_store(persist_migration=False)
     animation_events = [event for event in (animation_store.get("events") or []) if isinstance(event, dict)]
     animation_event_names = sorted({str(event.get("name") or "") for event in animation_events if event.get("name")})
-    communication_store = get_live_agent_in_world_communications_store(persist_migration=True)
+    communication_store = get_live_agent_in_world_communications_store(persist_migration=False)
     communication_events = [event for event in (communication_store.get("events") or []) if isinstance(event, dict)]
     reaction_opportunities = [
         opportunity
@@ -10729,6 +10731,26 @@ def _live_agent_loop_cooldown_for_decision(base_cooldown, decision):
 
 
 def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
+    gate_error = _agent_live_mode_gate_error()
+    if gate_error:
+        gate_payload = gate_error.get("error") if isinstance(gate_error, dict) else {}
+        if not isinstance(gate_payload, dict):
+            gate_payload = {}
+        return {
+            "ok": False,
+            "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
+            "reason": reason,
+            "forced": bool(force),
+            "dryRun": bool(dry_run),
+            "disabledReason": gate_payload.get("message") or "Agent Live Mode is disabled or locked.",
+            "disabledCode": gate_payload.get("code"),
+            "disabledDetails": gate_payload.get("details"),
+            "enabledAgents": [],
+            "actionsCreated": [],
+            "skipped": [{"reason": "agent-live-mode-gated"}],
+            "decisions": [],
+            "errors": [],
+        }
     with _live_agent_loop_lock:
         state = get_live_agent_loop_state(persist_migration=True)
         now_epoch = time.time()
@@ -10771,18 +10793,6 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
         _live_agent_loop_stat(state, "ticks")
         if dry_run:
             _live_agent_loop_stat(state, "dryRuns")
-
-        gate_error = _agent_live_mode_gate_error()
-        if gate_error:
-            gate_payload = gate_error.get("error") if isinstance(gate_error, dict) else {}
-            result["ok"] = False
-            result["disabledReason"] = gate_payload.get("message") or "Agent Live Mode is disabled or locked."
-            result["disabledCode"] = gate_payload.get("code")
-            result["disabledDetails"] = gate_payload.get("details")
-            _live_agent_loop_add_event(state, "feature-disabled", details={"reason": result["disabledReason"], "code": result.get("disabledCode")})
-            if not dry_run:
-                save_live_agent_loop_state(state)
-            return result
 
         if not state.get("enabled") and not force:
             result["disabledReason"] = "live agent loop is disabled"
@@ -11850,6 +11860,8 @@ def update_live_agent_loop_settings(payload):
 
 def start_live_agent_loop():
     global _live_agent_loop_thread
+    if not _agent_live_mode_available():
+        return
     if _live_agent_loop_thread and _live_agent_loop_thread.is_alive():
         return
 
@@ -16878,6 +16890,21 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/agent-chat":
             return self._send_json(get_agent_chat())
 
+        gated_live_agent_read_paths = {
+            "/api/agent-live-loop/perception",
+            "/api/agent-live-loop/feedback",
+            "/api/agent-live-loop/proposals",
+            "/api/agent-live-loop/timeline",
+            "/api/agent-live-loop/events",
+            "/api/live-agent-mode/animation-events",
+            "/api/live-agent-mode/in-world-communications",
+            "/api/agent-live-loop",
+            "/api/live-agent-mode/tools",
+        }
+        if path in gated_live_agent_read_paths or path.startswith("/api/live-agent-mode/memory/"):
+            if _agent_live_mode_gate_error():
+                return self._send_json(_agent_live_mode_locked_response(), 403)
+
         if path == "/api/agent-live-loop/perception":
             qs = urllib.parse.parse_qs(parsed.query)
             agent_id = (qs.get("agentId") or qs.get("agent") or ["adam"])[0]
@@ -17714,8 +17741,12 @@ def main():
     initialize_live_presence()
 
     # Keep enabled Live Mode agents present across restarts. The backend owns
-    # scheduler turns even when no browser is polling for world-action playback.
-    start_live_agent_loop()
+    # scheduler turns even when no browser is polling for world-action playback,
+    # but disabled or locked installs must not create durable Live Mode state.
+    if _agent_live_mode_available():
+        start_live_agent_loop()
+    else:
+        print("Live Agent Mode scheduler disabled until feature and Settings gates are open.")
 
     handler = VWHandler
     with ReusableThreadingTCPServer(("", PORT), handler) as httpd:
