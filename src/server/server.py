@@ -5517,6 +5517,12 @@ def save_agent_presence_from_payload(path_agent_id, payload):
     state = payload.get("state") or payload.get("routeStatus") or payload.get("routeState") or "arrived"
     route = payload.get("route") if isinstance(payload.get("route"), dict) else None
     target = payload.get("target") if isinstance(payload.get("target"), dict) else None
+    existing = _live_agent_presence_location(agent_id)
+    incoming = {**location, "source": str(source)[:120], "state": str(state)[:80]}
+    if _should_ignore_stale_browser_replay_presence(existing, incoming):
+        preserved = dict(existing)
+        preserved["ignoredBrowserReplay"] = True
+        return True, {"ok": True, "presence": preserved, "ignored": True, "reason": "stale_browser_replay_presence"}, 200
     record = _save_live_agent_presence_location(
         agent_id,
         location,
@@ -5638,6 +5644,51 @@ def _live_agent_presence_persistence_metrics(enabled_live_agents, meta=None):
         "refreshResetCount": refresh_reset_count,
         "ok": refresh_reset_count == 0 and (agent_count == 0 or len(persisted_agent_ids) >= agent_count),
     }
+
+
+def _live_agent_presence_progress_rank(record_or_state):
+    if isinstance(record_or_state, dict):
+        state = record_or_state.get("routeState") or record_or_state.get("routeStatus") or record_or_state.get("state") or record_or_state.get("status")
+    else:
+        state = record_or_state
+    status = _canonical_world_action_status(state)
+    if status in WORLD_ACTION_TERMINAL_STATES:
+        return 50
+    return {
+        "requested": 0,
+        "created": 5,
+        "reserved": 10,
+        "route_pending": 20,
+        "routing": 30,
+        "arrived": 40,
+        "in_progress": 45,
+    }.get(status, 0)
+
+
+def _live_agent_presence_same_route_or_action(left, right):
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    for key in ("worldActionId", "actionId", "routeId"):
+        left_value = str(left.get(key) or "").strip()
+        right_value = str(right.get(key) or "").strip()
+        if left_value and right_value and left_value == right_value:
+            return True
+    return False
+
+
+def _should_ignore_stale_browser_replay_presence(existing, incoming):
+    if not isinstance(existing, dict) or not isinstance(incoming, dict):
+        return False
+    if str(incoming.get("source") or "").strip() != "browser-replay":
+        return False
+    if not _live_agent_presence_same_route_or_action(existing, incoming):
+        return False
+    existing_source = str(existing.get("source") or "").strip()
+    if existing_source == "browser-replay":
+        return False
+    existing_rank = _live_agent_presence_progress_rank(existing)
+    incoming_rank = _live_agent_presence_progress_rank(incoming)
+    return existing_rank >= _live_agent_presence_progress_rank("arrived") and incoming_rank <= existing_rank
 
 
 def _live_agent_backend_target_location(action):
@@ -13234,7 +13285,7 @@ def transition_world_action(action_id, to_status, *, result=None, failure_reason
     with _live_agent_action_handoff_lock:
         ok, response, status = _transition_world_action_unlocked(action_id, to_status, result=result, failure_reason=failure_reason, actor=actor, source=source)
     action = response.get("action") if ok and isinstance(response, dict) else None
-    if isinstance(action, dict):
+    if isinstance(action, dict) and not (_world_action_backend_owned(action) and _canonical_world_action_status(to_status) in {"route_pending", "routing", "in_progress"}):
         _save_live_agent_presence_for_action_status(action, to_status, transition_source=source)
     if isinstance(action, dict) and _canonical_world_action_status(action.get("status")) in WORLD_ACTION_TERMINAL_STATES and _world_action_backend_owned(action):
         with _live_agent_loop_lock:
