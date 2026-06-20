@@ -757,6 +757,9 @@ _live_agent_loop_lock = threading.RLock()
 _live_agent_action_handoff_lock = threading.RLock()
 _live_agent_loop_last_client_at = 0
 _live_agent_loop_last_client_info = {}
+_world_event_feed_client_lock = threading.RLock()
+_world_event_feed_clients = {}
+_world_event_feed_latency_samples = []
 HERMES_APPROVAL_LOCK = threading.Lock()
 HERMES_APPROVAL_PENDING = {}
 HERMES_LIVE_LOCK = threading.Lock()
@@ -944,16 +947,17 @@ def load_world_meta():
                 return _default_world_meta()
 
 
-def save_world_meta(meta):
+def save_world_meta(meta, *, update_backup=True):
     os.makedirs(os.path.dirname(META_FILE), exist_ok=True)
     with _WORLD_META_LOCK:
         # Keep a last-known-good backup, but never replace it with malformed
         # current contents. This is intentionally not a lock file.
-        try:
-            _read_json_file(META_FILE)
-            shutil.copy2(META_FILE, META_BACKUP_FILE)
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            pass
+        if update_backup:
+            try:
+                _read_json_file(META_FILE)
+                shutil.copy2(META_FILE, META_BACKUP_FILE)
+            except (FileNotFoundError, json.JSONDecodeError, OSError):
+                pass
 
         tmp_path = f"{META_FILE}.tmp-{os.getpid()}-{threading.get_ident()}"
         with open(tmp_path, "w") as f:
@@ -1448,6 +1452,12 @@ LIVE_AGENT_PRESENCE_SCHEMA_VERSION = "agent-live-mode-presence-persistence/v1"
 LIVE_AGENT_PRESENCE_LOCATION_SCHEMA_VERSION = "agent-live-mode-presence-location/v1"
 LIVE_AGENT_PRESENCE_METRICS_SCHEMA_VERSION = "agent-live-mode-presence-persistence-metrics/v1"
 LIVE_AGENT_PRESENCE_HISTORY_LIMIT = 200
+LIVE_AGENT_WORLD_EVENT_FEED_SCHEMA_VERSION = "agent-live-mode-world-event-feed/v1"
+LIVE_AGENT_WORLD_EVENT_FEED_CLIENT_VERSION = "20260620-world-event-feed-r1"
+LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS = 3000
+LIVE_AGENT_WORLD_EVENT_FEED_CLIENT_TTL_SEC = 20
+LIVE_AGENT_WORLD_EVENT_FEED_LATENCY_SAMPLE_LIMIT = 500
+LIVE_AGENT_WORLD_EVENT_FEED_FILE = os.path.join(DATA_DIR, "live-agent-world-events.json")
 LIVE_AGENT_BACKEND_EXECUTOR_ID = "server.py#live_agent_backend_action_executor"
 LIVE_AGENT_ANIMATION_EVENT_NAMES = {
     "agent-move-started",
@@ -3773,6 +3783,7 @@ def _append_world_action_events(action, event_payloads):
     existing_keys = {(event.get("actionId"), event.get("name"), event.get("fromStatus"), event.get("toStatus")) for event in store.get("events", [])}
     next_events = list(store.get("events", []))
     action_events = list(action.get("events") or [])
+    saved_events = []
     for payload in payloads:
         key = (payload.get("actionId"), payload.get("name"), payload.get("fromStatus"), payload.get("toStatus"))
         if key in existing_keys:
@@ -3782,7 +3793,9 @@ def _append_world_action_events(action, event_payloads):
         existing_keys.add(key)
         next_events.append(event)
         action_events.append(event)
+        saved_events.append(event)
     save_world_action_events_store({**store, "nextSequence": sequence, "events": next_events})
+    _publish_world_action_lifecycle_world_events(saved_events)
     return {**action, "events": action_events}
 
 
@@ -4020,6 +4033,7 @@ def append_live_agent_in_world_communication_events(event_payloads):
         next_events.append(event)
         saved_events.append(event)
     save_live_agent_in_world_communications_store({**store, "nextSequence": sequence, "events": next_events})
+    _publish_live_agent_communication_world_events(saved_events)
     return saved_events
 
 
@@ -4071,6 +4085,576 @@ def list_live_agent_in_world_communications(query=None):
             "providerRelay": False,
         },
     }
+
+
+# ─── LIVE WORLD EVENT FEED ────────────────────────────────────────
+def default_live_agent_world_event_feed_store():
+    return {
+        "schemaVersion": LIVE_AGENT_WORLD_EVENT_FEED_SCHEMA_VERSION,
+        "nextSequence": 1,
+        "events": [],
+        "retention": {"maxEvents": 200},
+        "subscription": {
+            "mode": "poll",
+            "endpoint": "/api/world-events",
+            "cursorField": "sequence",
+            "syncLatencyTargetMs": LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS,
+        },
+    }
+
+
+def get_live_agent_world_event_feed_store(*, persist_migration=False):
+    migrated_from_meta = False
+    try:
+        store = _read_json_file(LIVE_AGENT_WORLD_EVENT_FEED_FILE)
+    except (FileNotFoundError, json.JSONDecodeError):
+        meta = load_world_meta()
+        agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+        store = agent_life.get("worldEvents") if isinstance(agent_life.get("worldEvents"), dict) else None
+        migrated_from_meta = store is not None
+    changed = store is None
+    if not store:
+        store = default_live_agent_world_event_feed_store()
+    raw_events = store.get("events") if isinstance(store.get("events"), list) else []
+    events = [
+        event for event in raw_events
+        if isinstance(event, dict) and event.get("eventType") and event.get("sequence") is not None
+    ]
+    try:
+        next_sequence = int(store.get("nextSequence") or 1)
+    except (TypeError, ValueError):
+        next_sequence = 1
+    if events:
+        next_sequence = max(next_sequence, max(int(event.get("sequence") or 0) for event in events) + 1)
+    next_store = default_live_agent_world_event_feed_store()
+    retention = store.get("retention") if isinstance(store.get("retention"), dict) else {}
+    max_events = _normalize_int(retention.get("maxEvents"), next_store["retention"]["maxEvents"], minimum=100, maximum=10000)
+    next_store.update({
+        "nextSequence": next_sequence,
+        "events": events[-max_events:],
+        "retention": {**next_store["retention"], **retention, "maxEvents": max_events},
+        "subscription": {**next_store["subscription"], **(store.get("subscription") if isinstance(store.get("subscription"), dict) else {})},
+    })
+    if persist_migration and (changed or migrated_from_meta):
+        save_live_agent_world_event_feed_store(next_store)
+    return next_store
+
+
+def save_live_agent_world_event_feed_store(store):
+    next_store = default_live_agent_world_event_feed_store()
+    if isinstance(store, dict):
+        next_store.update({k: v for k, v in store.items() if k in {"nextSequence", "events", "retention", "subscription"}})
+    retention = next_store.get("retention") if isinstance(next_store.get("retention"), dict) else {}
+    max_events = _normalize_int(retention.get("maxEvents"), 200, minimum=100, maximum=10000)
+    next_store["retention"] = {**default_live_agent_world_event_feed_store()["retention"], **retention, "maxEvents": max_events}
+    next_store["subscription"] = {**default_live_agent_world_event_feed_store()["subscription"], **(next_store.get("subscription") if isinstance(next_store.get("subscription"), dict) else {})}
+    next_store["events"] = [
+        event for event in (next_store.get("events") or [])
+        if isinstance(event, dict) and event.get("eventType")
+    ][-max_events:]
+    try:
+        next_store["nextSequence"] = int(next_store.get("nextSequence") or 1)
+    except (TypeError, ValueError):
+        next_store["nextSequence"] = 1
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp_path = f"{LIVE_AGENT_WORLD_EVENT_FEED_FILE}.tmp-{os.getpid()}-{threading.get_ident()}"
+    with open(tmp_path, "w") as f:
+        json.dump(next_store, f, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, LIVE_AGENT_WORLD_EVENT_FEED_FILE)
+    return next_store
+
+
+def _world_event_query_value(query, *names, default=None):
+    if not isinstance(query, dict):
+        return default
+    for name in names:
+        value = query.get(name)
+        if isinstance(value, list):
+            value = value[0] if value else None
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _clean_world_event_text(value, limit=160):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text[:limit]
+
+
+def _world_event_json_clone(value):
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        try:
+            return json.loads(json.dumps(value, default=str))
+        except Exception:
+            return None
+
+
+def _world_event_json_fingerprint(value):
+    try:
+        return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    except Exception:
+        return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+
+
+def _normalize_world_event_payload(payload, sequence):
+    payload = payload if isinstance(payload, dict) else {}
+    now = _utc_now_iso()
+    event_type = _clean_world_event_text(payload.get("eventType") or payload.get("type") or "world-updated", limit=80) or "world-updated"
+    created_at = payload.get("createdAt") if _parse_isoish_epoch(payload.get("createdAt")) else now
+    event_id = _clean_world_event_text(payload.get("eventId") or payload.get("id"), limit=160) or f"world-evt-{sequence}-{uuid.uuid4().hex[:12]}"
+    event = {
+        **payload,
+        "schemaVersion": LIVE_AGENT_WORLD_EVENT_FEED_SCHEMA_VERSION,
+        "eventId": event_id,
+        "id": event_id,
+        "eventType": event_type,
+        "type": event_type,
+        "sequence": sequence,
+        "cursor": sequence,
+        "createdAt": created_at,
+        "timestamp": created_at,
+        "replayable": payload.get("replayable", True) is not False,
+        "requiresSnapshotRefresh": payload.get("requiresSnapshotRefresh") is True,
+    }
+    return event
+
+
+def append_live_agent_world_events(event_payloads):
+    payloads = [payload for payload in (event_payloads or []) if isinstance(payload, dict) and (payload.get("eventType") or payload.get("type"))]
+    if not payloads:
+        return []
+    store = get_live_agent_world_event_feed_store(persist_migration=True)
+    sequence = int(store.get("nextSequence") or 1)
+    next_events = list(store.get("events") or [])
+    saved_events = []
+    for payload in payloads:
+        event = _normalize_world_event_payload(payload, sequence)
+        sequence += 1
+        next_events.append(event)
+        saved_events.append(event)
+    save_live_agent_world_event_feed_store({**store, "nextSequence": sequence, "events": next_events})
+    return saved_events
+
+
+def _world_event_target_from_action_event(event):
+    target = event.get("target") if isinstance(event.get("target"), dict) else {}
+    return {
+        **target,
+        "kind": target.get("kind") or event.get("targetKind"),
+        "agentId": event.get("agentId"),
+        "worldActionId": event.get("actionId") or event.get("worldActionId"),
+        "reservationId": event.get("reservationId"),
+        "routeId": event.get("routeId"),
+    }
+
+
+def _compact_world_action_event_for_feed(event):
+    if not isinstance(event, dict):
+        return None
+    return {
+        key: event.get(key)
+        for key in (
+            "schemaVersion",
+            "name",
+            "type",
+            "id",
+            "at",
+            "timestamp",
+            "actionId",
+            "actionType",
+            "status",
+            "fromStatus",
+            "toStatus",
+            "from",
+            "to",
+            "agentId",
+            "targetId",
+            "targetKind",
+            "routeId",
+            "reservationId",
+            "source",
+            "actor",
+            "reason",
+        )
+        if event.get(key) is not None
+    }
+
+
+def _publish_world_action_lifecycle_world_events(events):
+    payloads = []
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        name = event.get("name")
+        if name == "in-progress":
+            continue
+        event_type = "action-lifecycle"
+        if name == "route-started":
+            event_type = "agent-movement-started"
+        elif name == "arrived":
+            event_type = "agent-movement-arrived"
+        elif name == "object-reserved":
+            event_type = "reservation-created"
+        elif name == "reservation-released":
+            event_type = "reservation-released"
+        target = _world_event_target_from_action_event(event)
+        payloads.append({
+            "eventType": event_type,
+            "eventId": f"world-{event.get('id') or uuid.uuid4().hex}",
+            "createdAt": event.get("createdAt") or event.get("at") or event.get("timestamp") or _utc_now_iso(),
+            "agentId": event.get("agentId"),
+            "worldActionId": event.get("actionId") or event.get("worldActionId"),
+            "actionId": event.get("actionId"),
+            "target": target,
+            "patch": {
+                "op": "upsert",
+                "collection": "worldActions",
+                "worldActionId": event.get("actionId"),
+                "status": event.get("toStatus") or event.get("status"),
+                "event": _compact_world_action_event_for_feed(event),
+            },
+            "source": "world-action-events",
+        })
+    append_live_agent_world_events(payloads)
+
+
+def _publish_live_agent_animation_world_events(events):
+    payloads = []
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        name = event.get("name")
+        if name == "agent-move-started":
+            event_type = "agent-movement-started"
+        elif name == "agent-arrived":
+            event_type = "agent-movement-arrived"
+        elif name in {"object-use-started", "object-use-completed"}:
+            event_type = name.replace("object-use", "object-action")
+        else:
+            event_type = "action-lifecycle"
+        target = event.get("target") if isinstance(event.get("target"), dict) else {}
+        payloads.append({
+            "eventType": event_type,
+            "eventId": f"world-animation-{event.get('id') or uuid.uuid4().hex}",
+            "createdAt": event.get("createdAt") or event.get("at") or event.get("timestamp") or _utc_now_iso(),
+            "agentId": event.get("agentId"),
+            "worldActionId": event.get("worldActionId") or event.get("actionId"),
+            "target": {**target, "agentId": event.get("agentId"), "worldActionId": event.get("worldActionId") or event.get("actionId")},
+            "patch": {
+                "op": "upsert",
+                "collection": "agentPresence",
+                "agentId": event.get("agentId"),
+                "from": _world_event_json_clone(event.get("from")),
+                "to": _world_event_json_clone(event.get("to")),
+                "animationEvent": _world_event_json_clone(event),
+            },
+            "source": "live-agent-animation-events",
+        })
+    append_live_agent_world_events(payloads)
+
+
+def _publish_live_agent_communication_world_events(events):
+    payloads = []
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        target = {
+            "kind": "speech",
+            "agentId": event.get("fromAgentId") or event.get("agentId"),
+            "targetAgentId": event.get("targetAgentId"),
+            "buildingId": event.get("buildingId"),
+            "conversationId": event.get("conversationId"),
+        }
+        payloads.append({
+            "eventType": "visible-speech",
+            "eventId": f"world-speech-{event.get('id') or uuid.uuid4().hex}",
+            "createdAt": event.get("createdAt") or event.get("at") or event.get("timestamp") or _utc_now_iso(),
+            "agentId": event.get("fromAgentId") or event.get("agentId"),
+            "target": target,
+            "patch": {
+                "op": "append",
+                "collection": "inWorldCommunications",
+                "value": _world_event_json_clone(event),
+            },
+            "source": "in-world-communications",
+        })
+    append_live_agent_world_events(payloads)
+
+
+def _publish_agent_presence_world_event(record, previous=None):
+    if not isinstance(record, dict) or not record.get("agentId"):
+        return []
+    return append_live_agent_world_events([{
+        "eventType": "agent-presence-updated",
+        "eventId": f"world-presence-{record.get('agentId')}-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}",
+        "createdAt": record.get("updatedAt") or _utc_now_iso(),
+        "agentId": record.get("agentId"),
+        "worldActionId": record.get("worldActionId"),
+        "target": {
+            "kind": "agent",
+            "agentId": record.get("agentId"),
+            "buildingId": record.get("buildingId"),
+            "floor": record.get("floor"),
+        },
+        "patch": {
+            "op": "upsert",
+            "collection": "agentPresence",
+            "agentId": record.get("agentId"),
+            "previous": _world_event_json_clone(previous),
+            "value": _world_event_json_clone(record),
+        },
+        "source": record.get("source") or "agent-presence",
+    }])
+
+
+def _world_event_object_id(item, index, prefix):
+    if not isinstance(item, dict):
+        return None
+    for key in ("objectInstanceId", "id", "instanceId", "objectId"):
+        value = item.get(key)
+        if value not in (None, ""):
+            return str(value)
+    catalog = item.get("catalogId") or item.get("objectCatalogId") or item.get("type") or "object"
+    return f"{prefix}:{catalog}:{index}"
+
+
+def _building_object_records(building):
+    records = {}
+    if not isinstance(building, dict):
+        return records
+    building_id = str(building.get("id") or "")
+    furniture = ((building.get("interior") or {}).get("furniture") if isinstance(building.get("interior"), dict) else None) or []
+    for index, item in enumerate(furniture):
+        if not isinstance(item, dict):
+            continue
+        object_id = _world_event_object_id(item, index, f"{building_id}:furniture")
+        if object_id:
+            records[object_id] = {"id": object_id, "kind": "interior-furniture", "index": index, "value": _world_event_json_clone(item)}
+    outdoor_nodes = building.get("outdoorNodes") if isinstance(building.get("outdoorNodes"), list) else []
+    for index, item in enumerate(outdoor_nodes):
+        if not isinstance(item, dict):
+            continue
+        object_id = _world_event_object_id(item, index, f"{building_id}:outdoor")
+        if object_id:
+            records[object_id] = {"id": object_id, "kind": "outdoor-node", "index": index, "value": _world_event_json_clone(item)}
+    return records
+
+
+def _building_world_event_payload(event_type, building, *, previous=None, source=None, actor=None):
+    building_id = (building or previous or {}).get("id")
+    patch_op = "delete" if event_type == "building-deleted" else "upsert"
+    return {
+        "eventType": event_type,
+        "eventId": f"world-{event_type}-{building_id or uuid.uuid4().hex}-{int(time.time() * 1000)}",
+        "createdAt": _utc_now_iso(),
+        "target": {"kind": "building", "buildingId": building_id},
+            "patch": {
+                "op": patch_op,
+                "collection": "buildings",
+                "buildingId": building_id,
+                "value": None if patch_op == "delete" else _world_event_json_clone(building),
+            },
+        "source": source or "building-api",
+        "actor": actor,
+    }
+
+
+def _object_world_event_payload(event_type, building, object_record, *, previous=None, source=None, actor=None):
+    building_id = building.get("id") if isinstance(building, dict) else None
+    object_value = object_record.get("value") if isinstance(object_record, dict) else None
+    object_id = object_record.get("id") if isinstance(object_record, dict) else None
+    patch_op = "delete" if event_type == "object-deleted" else "upsert"
+    return {
+        "eventType": event_type,
+        "eventId": f"world-{event_type}-{building_id or 'building'}-{object_id or uuid.uuid4().hex}-{int(time.time() * 1000)}",
+        "createdAt": _utc_now_iso(),
+        "target": {
+            "kind": "object-instance",
+            "buildingId": building_id,
+            "objectInstanceId": object_id,
+            "catalogId": object_value.get("catalogId") if isinstance(object_value, dict) else None,
+        },
+        "patch": {
+            "op": patch_op,
+            "collection": "buildingObjects",
+            "buildingId": building_id,
+            "objectInstanceId": object_id,
+            "buildingPatch": {
+                "op": "upsert" if patch_op != "delete" else "delete-object",
+                "collection": "buildings",
+                "buildingId": building_id,
+            },
+        },
+        "source": source or "building-api",
+        "actor": actor,
+    }
+
+
+def publish_building_world_events(before, after, *, source=None, actor=None):
+    before = before if isinstance(before, dict) else None
+    after = after if isinstance(after, dict) else None
+    if not before and not after:
+        return []
+    payloads = []
+    if after and not before:
+        payloads.append(_building_world_event_payload("building-created", after, source=source, actor=actor))
+    elif before and after:
+        payloads.append(_building_world_event_payload("building-updated", after, previous=before, source=source, actor=actor))
+    elif before and not after:
+        payloads.append(_building_world_event_payload("building-deleted", None, previous=before, source=source, actor=actor))
+
+    before_objects = _building_object_records(before)
+    after_objects = _building_object_records(after)
+    for object_id in sorted(set(after_objects) - set(before_objects)):
+        payloads.append(_object_world_event_payload("object-created", after, after_objects[object_id], source=source, actor=actor))
+    for object_id in sorted(set(before_objects) & set(after_objects)):
+        if _world_event_json_fingerprint(before_objects[object_id].get("value")) != _world_event_json_fingerprint(after_objects[object_id].get("value")):
+            payloads.append(_object_world_event_payload("object-updated", after, after_objects[object_id], previous=before_objects[object_id], source=source, actor=actor))
+    for object_id in sorted(set(before_objects) - set(after_objects)):
+        payloads.append(_object_world_event_payload("object-deleted", before or after or {}, before_objects[object_id], previous=before_objects[object_id], source=source, actor=actor))
+    return append_live_agent_world_events(payloads)
+
+
+def _world_event_snapshot_payload(cursor=None):
+    meta = load_world_meta()
+    store = get_live_agent_world_event_feed_store(persist_migration=False)
+    snapshot_cursor = int(cursor if cursor is not None else (store.get("nextSequence", 1) - 1))
+    return {
+        "schemaVersion": f"{LIVE_AGENT_WORLD_EVENT_FEED_SCHEMA_VERSION}:snapshot",
+        "cursor": snapshot_cursor,
+        "createdAt": _utc_now_iso(),
+        "meta": _world_event_json_clone(meta),
+        "buildings": list_buildings(),
+        "agentPresence": get_live_agent_presence_store(meta, persist_migration=False),
+    }
+
+
+def _record_world_event_feed_client_activity(query):
+    query = query if isinstance(query, dict) else {}
+    client = _clean_world_event_text(_world_event_query_value(query, "client"), limit=80)
+    if client not in {"main3d-world-event-feed", "main3d-live-sync", "main3d-live-animation-replay"}:
+        return None
+    session_id = _clean_world_event_text(_world_event_query_value(query, "sessionId", "session"), limit=96) or f"anonymous-{uuid.uuid4().hex[:8]}"
+    now_epoch = time.time()
+    applied_cursor = _world_event_query_value(query, "appliedCursor", "lastAppliedCursor")
+    try:
+        applied_cursor = int(applied_cursor) if applied_cursor not in (None, "") else None
+    except (TypeError, ValueError):
+        applied_cursor = None
+    latency_ms = _world_event_query_value(query, "lastAppliedLatencyMs", "latencyMs")
+    try:
+        latency_ms = float(latency_ms) if latency_ms not in (None, "") else None
+    except (TypeError, ValueError):
+        latency_ms = None
+    with _world_event_feed_client_lock:
+        _world_event_feed_clients[session_id] = {
+            "sessionId": session_id,
+            "client": client,
+            "version": _clean_world_event_text(_world_event_query_value(query, "version"), limit=96),
+            "page": _clean_world_event_text(_world_event_query_value(query, "page"), limit=160),
+            "visibility": _clean_world_event_text(_world_event_query_value(query, "visibility"), limit=32),
+            "lastSeenAt": _epoch_to_utc_iso(now_epoch),
+            "lastSeenEpoch": now_epoch,
+            "appliedCursor": applied_cursor,
+            "lastAppliedLatencyMs": latency_ms,
+        }
+        if latency_ms is not None and math.isfinite(latency_ms) and latency_ms >= 0:
+            _world_event_feed_latency_samples.append(latency_ms)
+            del _world_event_feed_latency_samples[:-LIVE_AGENT_WORLD_EVENT_FEED_LATENCY_SAMPLE_LIMIT]
+    return session_id
+
+
+def _world_event_feed_client_metrics():
+    now_epoch = time.time()
+    with _world_event_feed_client_lock:
+        active_clients = [
+            {k: v for k, v in client.items() if k != "lastSeenEpoch"}
+            for client in _world_event_feed_clients.values()
+            if now_epoch - float(client.get("lastSeenEpoch") or 0) <= LIVE_AGENT_WORLD_EVENT_FEED_CLIENT_TTL_SEC
+        ]
+        stale_ids = [
+            session_id for session_id, client in _world_event_feed_clients.items()
+            if now_epoch - float(client.get("lastSeenEpoch") or 0) > LIVE_AGENT_WORLD_EVENT_FEED_CLIENT_TTL_SEC * 3
+        ]
+        for session_id in stale_ids:
+            _world_event_feed_clients.pop(session_id, None)
+        latency_samples = list(_world_event_feed_latency_samples)
+    latency = _latency_summary(latency_samples)
+    return {
+        "connectedClientCount": len(active_clients),
+        "clients": active_clients[-20:],
+        "latency": latency,
+        "p95MultiClientSyncLatencyMs": latency["p95Ms"],
+        "syncLatencyTargetMs": LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS,
+        "ok": latency["p95Ms"] <= LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS or latency["sampleCount"] == 0,
+    }
+
+
+def get_live_agent_world_event_feed_metrics():
+    store = get_live_agent_world_event_feed_store(persist_migration=False)
+    events = [event for event in (store.get("events") or []) if isinstance(event, dict)]
+    client_metrics = _world_event_feed_client_metrics()
+    return {
+        "schemaVersion": LIVE_AGENT_WORLD_EVENT_FEED_SCHEMA_VERSION,
+        "ok": client_metrics["ok"],
+        "replayableEventCount": len([event for event in events if event.get("replayable") is not False]),
+        "eventCount": len(events),
+        "connectedClientCount": client_metrics["connectedClientCount"],
+        "p95MultiClientSyncLatencyMs": client_metrics["p95MultiClientSyncLatencyMs"],
+        "syncLatencyTargetMs": LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS,
+        "nextCursor": int(store.get("nextSequence") or 1) - 1,
+        "oldestCursor": int(events[0].get("sequence") or 0) if events else 0,
+        "latency": client_metrics["latency"],
+        "clients": client_metrics["clients"],
+        "subscription": store.get("subscription"),
+    }
+
+
+def list_live_agent_world_events(query=None):
+    query = query if isinstance(query, dict) else {}
+    _record_world_event_feed_client_activity(query)
+    store = get_live_agent_world_event_feed_store(persist_migration=True)
+    events = list(store.get("events") or [])
+    next_cursor = int(store.get("nextSequence") or 1) - 1
+    oldest_cursor = int(events[0].get("sequence") or 0) if events else next_cursor
+    since = _world_event_query_value(query, "since", "after")
+    try:
+        since = int(since) if since not in (None, "") else None
+    except (TypeError, ValueError):
+        since = None
+    try:
+        limit = int(_world_event_query_value(query, "limit", default=200) or 200)
+    except (TypeError, ValueError):
+        limit = 200
+    limit = max(1, min(limit, 500))
+    include_snapshot = str(_world_event_query_value(query, "snapshot", "includeSnapshot", default="")).lower() in {"1", "true", "yes"}
+    requires_snapshot_refresh = bool(events and since is not None and since < oldest_cursor - 1)
+    if since is not None and not requires_snapshot_refresh:
+        events = [event for event in events if int(event.get("sequence") or 0) > since]
+    if requires_snapshot_refresh:
+        events = []
+        include_snapshot = True
+    result = {
+        "ok": True,
+        "schemaVersion": LIVE_AGENT_WORLD_EVENT_FEED_SCHEMA_VERSION,
+        "subscription": store.get("subscription"),
+        "events": events[-limit:],
+        "nextCursor": next_cursor,
+        "oldestCursor": oldest_cursor,
+        "requiresSnapshotRefresh": requires_snapshot_refresh,
+        "replay": {"sourceOfTruth": "server", "snapshotOnGap": True, "clientRequiredForProgress": False},
+        "metrics": get_live_agent_world_event_feed_metrics(),
+    }
+    if include_snapshot:
+        result["snapshot"] = _world_event_snapshot_payload(next_cursor)
+    return result
 
 
 def _live_agent_metric_client_free(action):
@@ -4819,6 +5403,7 @@ def get_live_agent_mode_autonomy_metrics():
     cached_roster = _live_agent_cached_roster_for_metrics()
     enabled_live_agents = _live_agent_metric_enabled_agent_records(cached_roster, loop_state, meta)
     presence_persistence = _live_agent_presence_persistence_metrics(enabled_live_agents, meta)
+    world_event_feed = get_live_agent_world_event_feed_metrics()
     per_agent_distribution = _live_agent_metric_per_agent_distribution(enabled_live_agents, turns, backend_terminal_actions)
     per_agent_distribution_by_agent = per_agent_distribution.get("byAgent") if isinstance(per_agent_distribution.get("byAgent"), dict) else {}
     enabled_agent_distribution_evidence = []
@@ -4893,6 +5478,7 @@ def get_live_agent_mode_autonomy_metrics():
         "turnsCompletedAcrossEnabledAgents": per_agent_distribution["allEnabledAgentsHaveCompletedTurn"],
         "actionsCompletedAcrossEnabledAgents": per_agent_distribution["allEnabledAgentsHaveCompletedBackendAction"],
         "presencePersistenceOk": presence_persistence["ok"],
+        "worldEventFeedOk": world_event_feed["ok"],
     }
     final_gate_checks = {
         "featureGateOpen": checklist["featureGateOpen"],
@@ -4909,6 +5495,7 @@ def get_live_agent_mode_autonomy_metrics():
         "turnsCompletedAcrossEnabledAgents": checklist["turnsCompletedAcrossEnabledAgents"],
         "actionsCompletedAcrossEnabledAgents": checklist["actionsCompletedAcrossEnabledAgents"],
         "presencePersistenceOk": checklist["presencePersistenceOk"],
+        "worldEventFeedOk": checklist["worldEventFeedOk"],
     }
     final_gate = {
         "schemaVersion": "agent-live-mode-final-gate/v1",
@@ -4931,6 +5518,7 @@ def get_live_agent_mode_autonomy_metrics():
             "enabledAgentsMissingCompletedBackendActions": per_agent_distribution["enabledAgentsMissingCompletedBackendActions"],
             "enabledAgents": enabled_agent_distribution_evidence,
             "presencePersistence": presence_persistence,
+            "worldEventFeed": world_event_feed,
         },
     }
     return {
@@ -4957,6 +5545,10 @@ def get_live_agent_mode_autonomy_metrics():
             "enabledAgentsWithCompletedBackendActions": per_agent_distribution["enabledCompletedBackendActionAgentCount"],
             "perAgentDistribution": per_agent_distribution,
             "presencePersistence": presence_persistence,
+            "worldEventFeed": world_event_feed,
+            "worldEventFeedReplayableEventCount": world_event_feed["replayableEventCount"],
+            "worldEventFeedConnectedClientCount": world_event_feed["connectedClientCount"],
+            "worldEventFeedP95MultiClientSyncLatencyMs": world_event_feed["p95MultiClientSyncLatencyMs"],
             "turnDuration": _latency_summary([sample * 1000 for sample in turn_duration_samples]),
             "activeWorldActionCount": len(active_actions),
             "routePendingActiveCount": len(active_route_pending),
@@ -5031,6 +5623,7 @@ def get_live_agent_mode_autonomy_metrics():
             "metricsProviderCalls": 0,
             "metricsModelCalls": 0,
             "presencePersistenceMeasured": True,
+            "worldEventFeedMeasured": True,
         },
     }
 
@@ -5497,6 +6090,12 @@ def _save_live_agent_presence_location(agent_id, location=None, *, source=None, 
     agent_life["presence"] = store
     meta["agentLife"] = agent_life
     save_world_meta(meta)
+    location_changed = not previous or any(
+        str(previous.get(key)) != str(record.get(key))
+        for key in ("apiX", "apiZ", "buildingId", "floor")
+    )
+    if location_changed:
+        _publish_agent_presence_world_event(record, previous=None)
     return record
 
 
@@ -12050,6 +12649,7 @@ def get_live_agent_loop_status():
             "runtime": {
                 "threadAlive": thread_alive,
                 "worldClient": _live_agent_loop_world_client_status(state),
+                "worldEventFeed": get_live_agent_world_event_feed_metrics(),
                 "pause": pause,
                 "killSwitch": kill_switch,
                 "scheduler": {
@@ -17572,6 +18172,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path in {"/api/world-action-events", "/api/world-actions/events"}:
             return self._send_json(list_world_action_events(urllib.parse.parse_qs(parsed.query)))
 
+        if path in {"/api/world-events", "/api/live-agent-mode/world-events"}:
+            return self._send_json(list_live_agent_world_events(urllib.parse.parse_qs(parsed.query)))
+
         if path == "/api/world-actions":
             return self._send_json(reconcile_world_action_reservations())
 
@@ -18457,7 +19060,10 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                         "error": f"Demo mode is limited to {building_limit} buildings.",
                         "license": get_license_status(),
                     }, 403)
+                before = load_building(data["id"]) if exists else None
                 save_building(data["id"], data)
+                after = load_building(data["id"]) or data
+                publish_building_world_events(before, after, source=path, actor="api")
                 return self._send_json({"ok": True, "id": data["id"]})
             return self._send_json({"error": "No data or missing id"}, 400)
 
@@ -18467,8 +19073,11 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             building_id = path.split("/")[-1]
             data = self._read_body()
             if data:
+                before = load_building(building_id)
                 data["id"] = building_id
                 save_building(building_id, data)
+                after = load_building(building_id) or data
+                publish_building_world_events(before, after, source=path, actor="api")
                 return self._send_json({"ok": True})
             return self._send_json({"error": "No data"}, 400)
 
@@ -18534,7 +19143,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if _demo_feature_locked("advancedEditor"):
                 return self._send_json(_demo_edit_locked_response(), 403)
             building_id = path.split("/")[-1]
+            before = load_building(building_id)
             if delete_building(building_id):
+                publish_building_world_events(before, None, source=path, actor="api")
                 return self._send_json({"ok": True})
             return self._send_json({"error": "Not found"}, 404)
 

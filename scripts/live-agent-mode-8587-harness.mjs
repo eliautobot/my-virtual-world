@@ -25,6 +25,7 @@ const PRINTER_ID = 'acceptance-printer';
 const MICROWAVE_ID = 'acceptance-microwave';
 const ACCEPTANCE_TURN_TARGET = Math.max(1, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS || process.env.VW_LIVE_AGENT_MODE_SOAK_TURNS || '100', 10) || 100);
 const SOAK_AGENT_COUNT = Math.max(2, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_SOAK_AGENT_COUNT || process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_AGENTS || '5', 10) || 5);
+const REQUEST_TIMEOUT_MS = Math.max(30000, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_8587_REQUEST_TIMEOUT_MS || '60000', 10) || 60000);
 const EXTRA_SOAK_AGENT_IDS = Array.from({ length: Math.max(0, SOAK_AGENT_COUNT - 2) }, (_, index) => `acceptance-soak-${index + 3}`);
 const SOAK_AGENT_IDS = [TEST_AGENT_ID, PEER_AGENT_ID, ...EXTRA_SOAK_AGENT_IDS];
 const keepOpen = process.argv.includes('--keep-open');
@@ -163,7 +164,7 @@ async function requestJson(path, { method = 'GET', body } = {}) {
   const maxAttempts = 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       const response = await fetch(`${BASE_URL}${path}`, {
         method,
@@ -206,6 +207,13 @@ async function fetchJson(path) {
 
 async function postJson(path, body) {
   return requestJson(path, { method: 'POST', body });
+}
+
+async function disableDayNightCycleFor8587() {
+  const result = await postJson('/api/meta', { dayNightCycleEnabled: false });
+  assert(result?.ok === true, 'failed to disable day/night cycle on 8587 before browser verification', result);
+  console.log('PASS: disabled day/night cycle on isolated 8587 before browser verification.');
+  return result;
 }
 
 async function postJsonExpectStatus(path, body, expectedStatus) {
@@ -1335,6 +1343,266 @@ print(json.dumps(result, sort_keys=True))
   return result;
 }
 
+async function runTwoClientWorldEventFeedSyncCheck() {
+  const script = String.raw`
+import json
+import os
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
+
+base_url = os.environ["VW_ACCEPTANCE_BASE_URL"]
+agent_id = os.environ["VW_ACCEPTANCE_AGENT_ID"]
+home_building_id = os.environ["VW_ACCEPTANCE_HOME_BUILDING_ID"]
+sync_building_id = "8587-two-client-feed-building"
+sync_object_id = "8587-two-client-feed-object"
+
+def install_page_diagnostics(page):
+    console_messages = []
+    page_errors = []
+    page.on("console", lambda msg: console_messages.append(f"{msg.type}: {msg.text}") if len(console_messages) < 80 else None)
+    page.on("pageerror", lambda exc: page_errors.append(str(exc)) if len(page_errors) < 20 else None)
+    return console_messages, page_errors
+
+def wait_for_product_canvas(page, console_messages, page_errors, label):
+    try:
+        page.wait_for_selector("#pixiContainer canvas", state="attached", timeout=90000)
+        return
+    except PlaywrightTimeoutError as exc:
+        diagnostics = page.evaluate("""
+() => {
+  const pixi = document.querySelector('#pixiContainer');
+  return {
+    url: window.location.href,
+    bootStage: window.__vwBootStage || null,
+    bodyText: (document.body?.innerText || '').slice(0, 2000),
+    canvasCount: document.querySelectorAll('canvas').length,
+    pixiExists: Boolean(pixi),
+    pixiHtml: pixi ? pixi.innerHTML.slice(0, 1000) : null,
+    scripts: Array.from(document.scripts || []).map(script => script.src || script.textContent?.slice(0, 80) || '').slice(-20),
+  };
+}
+""")
+        diagnostics["console"] = console_messages[-40:]
+        diagnostics["pageErrors"] = page_errors[-20:]
+        raise AssertionError(json.dumps({"label": label, "diagnostics": diagnostics}, sort_keys=True)) from exc
+
+def wait_for_world_event_client(page, label):
+    page.wait_for_function("""
+() => typeof window.__VWSyncLiveAgentModeWorldEvents === 'function'
+  && window.__VWLiveAgentModeWorldEventFeedState
+  && window.buildings instanceof Map
+  && Array.isArray(window.agents)
+""", timeout=60000)
+    result = page.evaluate("() => window.__VWSyncLiveAgentModeWorldEvents({ force: true, snapshot: true, limit: 200 })")
+    if not result:
+        raise AssertionError(f"{label} could not run initial world-event sync")
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True, args=[
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--ignore-gpu-blocklist",
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--use-angle=swiftshader",
+        "--enable-unsafe-swiftshader",
+    ])
+    page_a = browser.new_page(viewport={"width": 960, "height": 640}, device_scale_factor=1)
+    page_b = browser.new_page(viewport={"width": 960, "height": 640}, device_scale_factor=1)
+    diagnostics = []
+    for label, page in (("client-a", page_a), ("client-b", page_b)):
+        console_messages, page_errors = install_page_diagnostics(page)
+        diagnostics.append((label, page, console_messages, page_errors))
+        page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
+        wait_for_product_canvas(page, console_messages, page_errors, label)
+        wait_for_world_event_client(page, label)
+
+    movement = page_a.evaluate("""
+async ({ agentId, homeBuildingId }) => {
+  const payload = {
+    source: '8587-two-client-world-event-feed',
+    state: 'arrived',
+    location: {
+      agentId,
+      buildingId: homeBuildingId,
+      floor: 1,
+      apiX: -360,
+      apiZ: -180,
+      x: -9,
+      z: -4.5,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+  const response = await fetch('/api/agent-presence/' + encodeURIComponent(agentId), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json();
+  if (!response.ok || result.ok !== true) throw new Error('presence mutation failed: ' + JSON.stringify(result));
+  return result.presence;
+}
+""", {"agentId": agent_id, "homeBuildingId": home_building_id})
+
+    movement_seen = page_b.evaluate("""
+async ({ agentId, expectedX, expectedY }) => {
+  let last = null;
+  for (let attempt = 0; attempt < 36; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const agent = (window.agents || []).find(candidate => String(candidate?.id || candidate?.statusKey || '') === agentId) || null;
+    const dx = Math.abs(Number(agent?.x) - expectedX);
+    const dy = Math.abs(Number(agent?.y) - expectedY);
+    const feed = window.__VWLiveAgentModeWorldEventFeedState || {};
+    last = { ok: Boolean(agent && dx <= 0.01 && dy <= 0.01), agent: agent ? { x: agent.x, y: agent.y, source: agent._serverPresence?.source || null } : null, delta: { dx, dy }, feed };
+    if (last.ok) return last;
+  }
+  throw new Error('second client did not receive movement patch: ' + JSON.stringify(last));
+}
+""", {"agentId": agent_id, "expectedX": -360, "expectedY": -180})
+
+    building = {
+      "id": sync_building_id,
+      "name": "8587 Two Client Feed",
+      "type": "office",
+      "worldX": 34,
+      "worldY": -14,
+      "x": 34,
+      "z": -14,
+      "widthTiles": 8,
+      "heightTiles": 7,
+      "width": 8,
+      "depth": 7,
+      "interior": {"furniture": [], "walls": []},
+    }
+    page_a.evaluate("""
+async ({ building }) => {
+  const response = await fetch('/api/building', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(building),
+  });
+  const result = await response.json();
+  if (!response.ok || result.ok !== true) throw new Error('building create failed: ' + JSON.stringify(result));
+}
+""", {"building": building})
+
+    create_seen = page_b.evaluate("""
+async ({ buildingId }) => {
+  let last = null;
+  for (let attempt = 0; attempt < 36; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const building = window.buildings?.get?.(buildingId);
+    last = { ok: Boolean(building), buildingName: building?.name || null, feed: window.__VWLiveAgentModeWorldEventFeedState || {} };
+    if (last.ok) return last;
+  }
+  throw new Error('second client did not receive building create patch: ' + JSON.stringify(last));
+}
+""", {"buildingId": sync_building_id})
+
+    updated_building = dict(building)
+    updated_building["interior"] = {
+        "furniture": [{
+            "id": sync_object_id,
+            "objectInstanceId": sync_object_id,
+            "type": "whiteboard",
+            "catalogId": "whiteboard",
+            "x": 3,
+            "z": 3,
+            "floor": 1,
+            "buildingFloor": 1,
+            "capabilityTags": ["planning.brainstorm"],
+        }],
+        "walls": [],
+    }
+    page_a.evaluate("""
+async ({ building }) => {
+  const response = await fetch('/api/building/' + encodeURIComponent(building.id), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(building),
+  });
+  const result = await response.json();
+  if (!response.ok || result.ok !== true) throw new Error('building update failed: ' + JSON.stringify(result));
+}
+""", {"building": updated_building})
+
+    update_seen = page_b.evaluate("""
+async ({ buildingId, objectId }) => {
+  let last = null;
+  for (let attempt = 0; attempt < 36; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const building = window.buildings?.get?.(buildingId);
+    const furniture = building?.interior?.furniture || [];
+    const object = furniture.find(item => String(item?.objectInstanceId || item?.id || '') === objectId) || null;
+    last = { ok: Boolean(object), object: object ? { id: object.id, type: object.type, catalogId: object.catalogId } : null, feed: window.__VWLiveAgentModeWorldEventFeedState || {} };
+    if (last.ok) return last;
+  }
+  throw new Error('second client did not receive object create/update patch: ' + JSON.stringify(last));
+}
+""", {"buildingId": sync_building_id, "objectId": sync_object_id})
+
+    page_a.evaluate("""
+async ({ buildingId }) => {
+  const response = await fetch('/api/building/' + encodeURIComponent(buildingId), { method: 'DELETE' });
+  const result = await response.json();
+  if (!response.ok || result.ok !== true) throw new Error('building delete failed: ' + JSON.stringify(result));
+}
+""", {"buildingId": sync_building_id})
+
+    delete_seen = page_b.evaluate("""
+async ({ buildingId }) => {
+  let last = null;
+  for (let attempt = 0; attempt < 36; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const exists = window.buildings?.has?.(buildingId);
+    last = { ok: exists === false, exists, feed: window.__VWLiveAgentModeWorldEventFeedState || {} };
+    if (last.ok) return last;
+  }
+  throw new Error('second client did not receive building delete patch: ' + JSON.stringify(last));
+}
+""", {"buildingId": sync_building_id})
+
+    metrics = page_b.evaluate("""
+async () => {
+  const response = await fetch('/api/live-agent-mode/metrics', { cache: 'no-store' });
+  const metrics = await response.json();
+  return metrics.metrics?.worldEventFeed || null;
+}
+""")
+    browser.close()
+
+if not metrics or metrics.get("ok") is not True:
+    raise AssertionError(json.dumps({"metrics": metrics}, sort_keys=True))
+if int(metrics.get("connectedClientCount") or 0) < 2:
+    raise AssertionError(json.dumps({"reason": "connected client count below two", "metrics": metrics}, sort_keys=True))
+if int(metrics.get("replayableEventCount") or 0) < 4:
+    raise AssertionError(json.dumps({"reason": "world event replay count too low", "metrics": metrics}, sort_keys=True))
+
+print(json.dumps({
+    "ok": True,
+    "movement": movement,
+    "movementSeen": movement_seen,
+    "createSeen": create_seen,
+    "updateSeen": update_seen,
+    "deleteSeen": delete_seen,
+    "metrics": metrics,
+}, sort_keys=True))
+`;
+  const { stdout } = await runChild('python3', ['-'], {
+    input: script,
+    env: {
+      VW_ACCEPTANCE_BASE_URL: BASE_URL,
+      VW_ACCEPTANCE_AGENT_ID: TEST_AGENT_ID,
+      VW_ACCEPTANCE_HOME_BUILDING_ID: HOME_BUILDING_ID,
+    },
+  });
+  const result = JSON.parse(stdout.trim().split('\n').at(-1));
+  assert(result.ok === true, 'two-client world event feed sync check failed', result);
+  assert(result.metrics?.connectedClientCount >= 2, 'world event metrics did not record two connected clients', result.metrics);
+  assert(result.metrics?.ok === true, 'world event metrics did not report ok=true', result.metrics);
+  console.log(`PASS: two 8587 browser clients synced movement plus building/object create-update-delete via ${result.metrics.replayableEventCount} replayable world events (p95 ${result.metrics.p95MultiClientSyncLatencyMs}ms).`);
+  return result;
+}
+
 async function runBrowserRefreshPresenceCheck() {
   const script = String.raw`
 import json
@@ -1553,7 +1821,9 @@ try {
   await enableGlobalAgentLiveModeFeature();
   await seedAcceptanceWorld();
   const backendSeries = await verifyNoBrowserBackendTurnSeries(ACCEPTANCE_TURN_TARGET);
+  await disableDayNightCycleFor8587();
   await runBrowserRefreshPresenceCheck();
+  await runTwoClientWorldEventFeedSyncCheck();
   await verifyTypedObjectActions();
   await verifySocialCommunicationAndMemory();
   await verifyOperatorControlsStopTurns();

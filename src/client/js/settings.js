@@ -166,6 +166,7 @@
     const state = liveModeLoopStatus?.state || {};
     const pause = runtime.pause || {};
     const worldClient = runtime.worldClient || {};
+    const worldEventFeed = runtime.worldEventFeed || {};
     const client = worldClient.client || {};
     const paused = pause.active === true;
     const clientLabel = worldClient.active
@@ -182,9 +183,13 @@
     const diagnostic = worldClient.diagnostic || (worldClient.active
       ? 'A current 3D tab can let the loop create visible actions.'
       : 'The loop waits for a fresh 3D tab before creating visible actions.');
+    const feedMeta = worldEventFeed.schemaVersion
+      ? `Feed ${Number(worldEventFeed.replayableEventCount || 0)} · clients ${Number(worldEventFeed.connectedClientCount || 0)} · p95 ${Math.round(Number(worldEventFeed.p95MultiClientSyncLatencyMs || 0))}ms`
+      : '';
     const details = [
       `<span>${escapeHtml(sessionLabel)}</span>`,
       clientMeta ? `<span>${escapeHtml(clientMeta)}</span>` : '',
+      feedMeta ? `<span>${escapeHtml(feedMeta)}</span>` : '',
       diagnostic ? `<span>${escapeHtml(diagnostic)}</span>` : '',
     ].filter(Boolean).join('');
     card.classList.toggle('locked', paused || state.enabled === false);

@@ -35545,6 +35545,291 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
   return { applied: true, duplicate: alreadyApplied, sequence, agentRendered, objectStateUpdated, buildingMaterialized, sceneObjectName };
 }
 
+const LIVE_AGENT_MODE_WORLD_EVENT_FEED_CLIENT_VERSION = '20260620-world-event-feed-r1';
+const LIVE_AGENT_MODE_WORLD_EVENT_FEED_ENDPOINT = '/api/world-events';
+const LIVE_AGENT_MODE_WORLD_EVENT_FEED_SYNC_MS = 1000;
+const _liveAgentModeWorldEventFeedApplied = new Set();
+let _liveAgentModeWorldEventFeedCursor = 0;
+let _liveAgentModeWorldEventFeedTimer = null;
+let _liveAgentModeWorldEventFeedLastLatencyMs = null;
+let _liveAgentModeWorldEventFeedState = {
+  ok: false,
+  schemaVersion: 'main3d-live-agent-mode-world-event-feed/v1',
+  version: LIVE_AGENT_MODE_WORLD_EVENT_FEED_CLIENT_VERSION,
+  endpoint: LIVE_AGENT_MODE_WORLD_EVENT_FEED_ENDPOINT,
+  lastCursor: 0,
+  nextCursor: 0,
+  appliedEventCount: 0,
+  snapshotRefreshCount: 0,
+  lastFetchEventCount: 0,
+  p95ApplyLatencyMs: 0,
+  checkedAt: null,
+};
+
+window.__VWLiveAgentModeWorldEventFeedState = _liveAgentModeWorldEventFeedState;
+
+function setLiveAgentModeWorldEventFeedState(patch = {}) {
+  _liveAgentModeWorldEventFeedState = {
+    ..._liveAgentModeWorldEventFeedState,
+    ...patch,
+    checkedAt: new Date().toISOString(),
+  };
+  window.__VWLiveAgentModeWorldEventFeedState = _liveAgentModeWorldEventFeedState;
+  return _liveAgentModeWorldEventFeedState;
+}
+
+function getLiveAgentModeWorldEventFeedUrl({ since = null, snapshot = false, limit = 200 } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    client: 'main3d-world-event-feed',
+    version: LIVE_AGENT_MODE_WORLD_EVENT_FEED_CLIENT_VERSION,
+    sessionId: getLiveModeWorldClientSessionId(),
+    page: `${window.location.pathname || '/'}${window.location.search || ''}`,
+    visibility: document.visibilityState || 'unknown',
+    appliedCursor: String(_liveAgentModeWorldEventFeedCursor || 0),
+  });
+  if (since != null) params.set('since', String(since));
+  if (snapshot) params.set('snapshot', '1');
+  if (_liveAgentModeWorldEventFeedLastLatencyMs != null) {
+    params.set('lastAppliedLatencyMs', String(Math.max(0, Math.round(_liveAgentModeWorldEventFeedLastLatencyMs))));
+  }
+  return `${LIVE_AGENT_MODE_WORLD_EVENT_FEED_ENDPOINT}?${params.toString()}`;
+}
+
+function getLiveAgentModeWorldEventKey(event = {}) {
+  const sequence = Number(event.sequence || event.cursor || 0);
+  if (Number.isFinite(sequence) && sequence > 0) return `seq:${sequence}`;
+  return `id:${event.eventId || event.id || event.eventType || Date.now()}`;
+}
+
+function removeWorldEventFeedBuilding(buildingId, { updateList = true, rebuild = true } = {}) {
+  const id = String(buildingId || '').trim();
+  if (!id) return false;
+  const building = buildingsMap.get(id);
+  if (!building) return false;
+  if (building._group) buildingGroup?.remove?.(building._group);
+  if (building._signGroup) buildingGroup?.remove?.(building._signGroup);
+  if (isPhysicsReady()) {
+    removeBody(id);
+    for (let i = 0; i < 128; i++) removeBody(`${id}_iwall_${i}`);
+    if (building.type === 'park') {
+      removeBody(`${id}_fountain`);
+      for (let i = 0; i < 4; i++) removeBody(`${id}_bench_${i}`);
+    }
+    for (let i = 0; i < 3; i++) removeBody(`${id}_outdoor_bench_${i}`);
+    clearManualFurnitureColliders(id);
+  }
+  buildingsMap.delete(id);
+  if (selectedBuildingId === id) {
+    clearSelectedBuildingHelper();
+    clearSelectedBuildingResizeHandles();
+    selectedBuildingId = null;
+    updateFloorControlPanel();
+    const content = document.getElementById('buildingEditContent');
+    if (content) content.innerHTML = '';
+  }
+  if (insideBuildingId === id) insideBuildingId = null;
+  if (rebuild) _rebuildNearChunks(building.worldX || 0, building.worldY || 0, Math.max(building.widthTiles || 25, building.heightTiles || 17) + 3);
+  if (updateList) updateBuildingList();
+  return true;
+}
+
+function upsertWorldEventFeedBuilding(building, { updateList = true, rebuild = true } = {}) {
+  if (!building || typeof building !== 'object' || !building.id) return false;
+  const incoming = JSON.parse(JSON.stringify(building));
+  const current = buildingsMap.get(incoming.id);
+  const oldX = current?.worldX ?? incoming.worldX ?? 0;
+  const oldZ = current?.worldY ?? incoming.worldY ?? 0;
+  const oldRadius = Math.max(current?.widthTiles || incoming.widthTiles || 25, current?.heightTiles || incoming.heightTiles || 17) + 3;
+  if (current?._group) buildingGroup?.remove?.(current._group);
+  if (current?._signGroup) buildingGroup?.remove?.(current._signGroup);
+  buildingsMap.set(incoming.id, incoming);
+  createBuilding3D(incoming);
+  if (insideBuildingId === incoming.id) applyBuildingViewMode(incoming, getEffectiveBuildingViewMode(incoming));
+  if (selectedBuildingId === incoming.id) selectBuilding(incoming.id);
+  if (rebuild) {
+    _rebuildNearChunks(oldX, oldZ, oldRadius);
+    _rebuildNearChunks(incoming.worldX || 0, incoming.worldY || 0, Math.max(incoming.widthTiles || 25, incoming.heightTiles || 17) + 3);
+  }
+  if (updateList) updateBuildingList();
+  return true;
+}
+
+function applyWorldEventFeedPresencePatch(event = {}) {
+  const patch = event.patch || {};
+  const value = patch.value || patch.to || event.to || event.target || null;
+  const agentId = String(patch.agentId || event.agentId || value?.agentId || event.target?.agentId || '').trim();
+  if (!agentId || !value) return false;
+  const agent = (agentsList || []).find(candidate => {
+    if (!candidate) return false;
+    const keys = getAgentIdentityKeys(candidate);
+    return keys.has(agentId) || String(candidate.id || '') === agentId || String(candidate.statusKey || '') === agentId;
+  });
+  if (!agent) return false;
+  const presence = {
+    ...value,
+    agentId,
+    source: value.source || event.source || 'world-event-feed',
+    updatedAt: value.updatedAt || event.createdAt || new Date().toISOString(),
+  };
+  const applied = applyAuthoritativePresenceToAgent(agent, presence, { force: true });
+  if (applied) {
+    agent._liveAgentModeWorldEventFeed = {
+      sequence: event.sequence || event.cursor || null,
+      eventType: event.eventType || null,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  return applied;
+}
+
+function applyWorldEventFeedSpeechPatch(event = {}) {
+  const speech = event.patch?.value || {};
+  const agentId = speech.fromAgentId || speech.agentId || event.agentId;
+  const agent = (agentsList || []).find(candidate => getAgentIdentityKeys(candidate).has(String(agentId || ''))) || null;
+  const text = String(speech.message || speech.text || speech.content || '').trim();
+  if (agent && text) {
+    agent._worldEventFeedSpeech = { text, at: event.createdAt || new Date().toISOString(), eventId: event.eventId || null };
+    addActivityLog(`${agent.emoji || ''} ${agent.name || agent.id || 'Agent'}: ${text}`.trim());
+    return true;
+  }
+  return false;
+}
+
+function applyLiveAgentModeWorldEvent(event = {}) {
+  const eventKey = getLiveAgentModeWorldEventKey(event);
+  if (_liveAgentModeWorldEventFeedApplied.has(eventKey)) return { applied: false, duplicate: true, sequence: Number(event.sequence || 0) || 0 };
+  const patch = event.patch || {};
+  let applied = false;
+  let requiresSnapshotRefresh = event.requiresSnapshotRefresh === true;
+
+  if (patch.collection === 'buildings') {
+    if (patch.op === 'delete') applied = removeWorldEventFeedBuilding(patch.buildingId || event.target?.buildingId);
+    else if (patch.op === 'upsert' && patch.value) applied = upsertWorldEventFeedBuilding(patch.value);
+    else requiresSnapshotRefresh = true;
+  } else if (patch.collection === 'buildingObjects') {
+    if (patch.building) applied = upsertWorldEventFeedBuilding(patch.building);
+    else if (patch.buildingPatch?.value) applied = upsertWorldEventFeedBuilding(patch.buildingPatch.value);
+    else applied = true;
+  } else if (patch.collection === 'agentPresence') {
+    applied = applyWorldEventFeedPresencePatch(event);
+    if (!applied && (patch.value || patch.to)) requiresSnapshotRefresh = true;
+  } else if (patch.collection === 'inWorldCommunications') {
+    applied = applyWorldEventFeedSpeechPatch(event) || true;
+  } else if (patch.collection === 'worldActions') {
+    applied = true;
+  } else if (event.eventType === 'building-created' || event.eventType === 'building-updated') {
+    applied = upsertWorldEventFeedBuilding(patch.value || event.building);
+  } else if (event.eventType === 'building-deleted') {
+    applied = removeWorldEventFeedBuilding(patch.buildingId || event.target?.buildingId);
+  } else if (String(event.eventType || '').startsWith('agent-')) {
+    applied = applyWorldEventFeedPresencePatch(event);
+  } else {
+    applied = true;
+  }
+
+  if (applied) _liveAgentModeWorldEventFeedApplied.add(eventKey);
+  return {
+    applied,
+    requiresSnapshotRefresh,
+    sequence: Number(event.sequence || event.cursor || 0) || 0,
+    latencyMs: event.createdAt ? Math.max(0, Date.now() - Date.parse(event.createdAt)) : null,
+  };
+}
+
+function applyLiveAgentModeWorldEventSnapshot(snapshot = {}) {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+  if (snapshot.meta) {
+    _worldMetaCache = { ...(_worldMetaCache || {}), ...snapshot.meta };
+    applyWorldMetaSettings(_worldMetaCache);
+  }
+  if (Array.isArray(snapshot.buildings)) {
+    const incomingIds = new Set(snapshot.buildings.map(building => String(building?.id || '')).filter(Boolean));
+    for (const id of Array.from(buildingsMap.keys())) {
+      if (!incomingIds.has(String(id))) removeWorldEventFeedBuilding(id, { updateList: false, rebuild: false });
+    }
+    for (const building of snapshot.buildings) {
+      upsertWorldEventFeedBuilding(building, { updateList: false, rebuild: false });
+    }
+    updateBuildingList();
+    for (const [, chunk] of loadedChunks) rebuildChunk(chunk);
+  }
+  const presenceAgents = snapshot.agentPresence?.agents || snapshot.agentPresence?.agentLocations || {};
+  for (const [agentId, presence] of Object.entries(presenceAgents)) {
+    applyWorldEventFeedPresencePatch({ eventType: 'agent-presence-updated', agentId, patch: { collection: 'agentPresence', op: 'upsert', agentId, value: presence } });
+  }
+  return true;
+}
+
+async function syncLiveAgentModeWorldEvents({ force = false, snapshot = false, limit = 200 } = {}) {
+  if (!buildingGroup || !agentGroup || typeof fetch !== 'function') {
+    setLiveAgentModeWorldEventFeedState({ ok: false, reason: 'scene_not_ready' });
+    return false;
+  }
+  try {
+    const response = await fetch(getLiveAgentModeWorldEventFeedUrl({
+      since: force ? null : _liveAgentModeWorldEventFeedCursor,
+      snapshot,
+      limit,
+    }), { cache: 'no-store' });
+    if (!response.ok) {
+      setLiveAgentModeWorldEventFeedState({ ok: false, reason: `http_${response.status}` });
+      return false;
+    }
+    const payload = await response.json();
+    let snapshotApplied = false;
+    if (payload.requiresSnapshotRefresh || payload.snapshot) {
+      snapshotApplied = applyLiveAgentModeWorldEventSnapshot(payload.snapshot || {});
+    }
+    const events = Array.isArray(payload.events) ? payload.events : [];
+    let maxCursor = _liveAgentModeWorldEventFeedCursor;
+    let applied = 0;
+    const latencies = [];
+    let unsafePatch = false;
+    for (const event of events) {
+      const result = applyLiveAgentModeWorldEvent(event);
+      if (result.applied) applied += 1;
+      if (result.requiresSnapshotRefresh) unsafePatch = true;
+      if (Number.isFinite(Number(result.sequence))) maxCursor = Math.max(maxCursor, Number(result.sequence));
+      if (Number.isFinite(Number(result.latencyMs))) latencies.push(Number(result.latencyMs));
+    }
+    if (unsafePatch && !snapshotApplied) {
+      const snapshotResponse = await fetch(getLiveAgentModeWorldEventFeedUrl({ since: null, snapshot: true, limit: 1 }), { cache: 'no-store' });
+      if (snapshotResponse.ok) {
+        const snapshotPayload = await snapshotResponse.json();
+        snapshotApplied = applyLiveAgentModeWorldEventSnapshot(snapshotPayload.snapshot || {});
+        maxCursor = Math.max(maxCursor, Number(snapshotPayload.nextCursor || 0));
+      }
+    }
+    if (!force) _liveAgentModeWorldEventFeedCursor = maxCursor;
+    else _liveAgentModeWorldEventFeedCursor = Math.max(_liveAgentModeWorldEventFeedCursor, Number(payload.nextCursor || maxCursor || 0));
+    const p95LatencyMs = latencies.length ? [...latencies].sort((a, b) => a - b)[Math.min(latencies.length - 1, Math.floor((latencies.length - 1) * 0.95))] : _liveAgentModeWorldEventFeedLastLatencyMs;
+    if (p95LatencyMs != null && Number.isFinite(Number(p95LatencyMs))) _liveAgentModeWorldEventFeedLastLatencyMs = Number(p95LatencyMs);
+    return setLiveAgentModeWorldEventFeedState({
+      ok: true,
+      reason: null,
+      lastCursor: _liveAgentModeWorldEventFeedCursor,
+      nextCursor: payload.nextCursor ?? null,
+      appliedEventCount: _liveAgentModeWorldEventFeedState.appliedEventCount + applied,
+      snapshotRefreshCount: _liveAgentModeWorldEventFeedState.snapshotRefreshCount + (snapshotApplied ? 1 : 0),
+      lastFetchEventCount: events.length,
+      p95ApplyLatencyMs: Number(_liveAgentModeWorldEventFeedLastLatencyMs || 0),
+      metrics: payload.metrics || null,
+    });
+  } catch (error) {
+    setLiveAgentModeWorldEventFeedState({ ok: false, error: error?.message || String(error) });
+    return false;
+  }
+}
+
+function startLiveAgentModeWorldEventFeedSync() {
+  if (_liveAgentModeWorldEventFeedTimer) return;
+  _liveAgentModeWorldEventFeedTimer = setInterval(() => {
+    syncLiveAgentModeWorldEvents();
+  }, LIVE_AGENT_MODE_WORLD_EVENT_FEED_SYNC_MS);
+  setTimeout(() => syncLiveAgentModeWorldEvents({ force: true, snapshot: true }), 0);
+}
+
 function getLiveAgentModeAnimationReplayUrl({ actionId = null, since = null, limit = 100 } = {}) {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -35637,10 +35922,13 @@ function startBarberChairWorldActionSync() {
 
 startBarberChairWorldActionSync();
 startLiveAgentModeAnimationReplaySync();
+startLiveAgentModeWorldEventFeedSync();
 window.__VWSyncActiveBarberChairWorldActions = syncActiveBarberChairWorldActions;
 window.__VWSyncActiveLiveModeWorldActions = syncActiveBarberChairWorldActions;
 window.__VWSyncLiveAgentModeAnimationEvents = syncLiveAgentModeAnimationEvents;
 window.__VWReplayLiveAgentModeAnimationEvents = syncLiveAgentModeAnimationEvents;
+window.__VWSyncLiveAgentModeWorldEvents = syncLiveAgentModeWorldEvents;
+window.__VWApplyLiveAgentModeWorldEventSnapshot = applyLiveAgentModeWorldEventSnapshot;
 
 function makeCapabilityContextMenuItem({ buildingId, furnitureIndex, action }) {
   const presentation = getContextMenuCapabilityPresentation(action.worldAction?.capabilityTag);
