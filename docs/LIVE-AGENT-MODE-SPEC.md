@@ -74,7 +74,9 @@ The read-only metrics endpoint is:
 GET /api/live-agent-mode/metrics
 ```
 
-It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, p50/p95 turn duration, action success/recovery rates, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, reaction opportunities, bounded memory growth, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
+It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, per-agent live turn/action distribution, p50/p95 turn duration, action success/recovery rates, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, reaction opportunities, bounded memory growth, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
+
+The default 8587 soak gate must prove the 100 completed backend turns are distributed across at least five enabled Live Agent Mode residents. The metrics surface this as `metrics.perAgentDistribution` and repeat the compact evidence under `finalGate.evidence` so reviewers can see which enabled agents completed live turns and backend-owned actions.
 
 It also reports lightweight provider readiness plus ClawMind-style architecture contract readiness and runtime execution evidence:
 
@@ -84,6 +86,9 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `providerSupport.optimization.providerCallsDuringMetrics = 0`
 - `providerSupport.optimization.modelCallsDuringMetrics = 0`
 - `providerModelCallCounts`
+- `metrics.perAgentDistribution`
+- `metrics.completedTurnCountByAgent`
+- `metrics.completedBackendActionCountByAgent`
 - `clawMindArchitecture.schemaVersion = agent-live-mode-clawmind-architecture/v1`
 - `clawMindArchitecture.modules`
 - `clawMindArchitecture.checklist.allModuleContractsReady`
@@ -100,6 +105,9 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `finalGate.checks.noUnresolvedMismatches`
 - `finalGate.checks.memoryWithinCaps`
 - `finalGate.checks.memoryGrowthBounded`
+- `finalGate.checks.turnsCompletedAcrossEnabledAgents`
+- `finalGate.checks.actionsCompletedAcrossEnabledAgents`
+- `finalGate.evidence.enabledAgents`
 
 Provider and ClawMind metrics intentionally use cached roster/world state plus bounded persisted module traces only. They must not call OpenClaw, Hermes, Codex, or any model provider while serving the metrics endpoint.
 
@@ -789,6 +797,7 @@ The loop should recover by marking the action terminal, logging feedback, updati
 The mode is not ready to expose in product UI until all of these pass:
 
 - A selected agent can run at least 50 consecutive backend-owned turns without an open browser.
+- The default 8587 soak can complete 100 backend-owned turns across at least five enabled Live Agent Mode agents, with per-agent turn/action counts in metrics.
 - A selected agent can move to a building and persist its final location without browser help.
 - A selected agent can use at least three typed objects and persist side effects.
 - A selected agent can speak to a nearby agent and create a reaction turn.

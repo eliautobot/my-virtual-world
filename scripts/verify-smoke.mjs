@@ -687,12 +687,23 @@ try:
     meta = module.load_world_meta()
     meta["agentProfiles"] = {"adam": {"agentLiveModeEnabled": True}}
     module.save_world_meta(meta)
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    state["agents"]["loop-only"] = {"enabled": True}
+    module.save_live_agent_loop_state(state)
 
     metrics = module.get_live_agent_mode_autonomy_metrics()
     provider = metrics["providerSupport"]
     clawmind = metrics["clawMindArchitecture"]
+    distribution = metrics["metrics"]["perAgentDistribution"]
     assert provider["schemaVersion"] == "agent-live-mode-provider-adapter-contract/v1", provider
     assert clawmind["schemaVersion"] == "agent-live-mode-clawmind-architecture/v1", clawmind
+    assert distribution["schemaVersion"] == "agent-live-mode-per-agent-distribution/v1", distribution
+    assert distribution["enabledAgentIds"] == ["adam", "loop-only"], distribution
+    assert distribution["enabledAgentsMissingCompletedTurns"] == ["adam", "loop-only"], distribution
+    assert metrics["finalGate"]["evidence"]["enabledAgentCount"] == 2, metrics["finalGate"]
+    assert metrics["finalGate"]["evidence"]["enabledAgents"][0]["agentId"] == "adam", metrics["finalGate"]
+    assert metrics["finalGate"]["evidence"]["enabledAgents"][0]["completedTurnCount"] == 0, metrics["finalGate"]
+    assert metrics["finalGate"]["evidence"]["enabledAgents"][1]["agentId"] == "loop-only", metrics["finalGate"]
     assert provider["providerKindCount"] == 3, provider
     assert set(provider["providerKinds"]) == {"openclaw", "hermes", "codex"}, provider
     assert provider["checklist"]["allProviderKindsHaveCoreAdapter"] is True, provider
