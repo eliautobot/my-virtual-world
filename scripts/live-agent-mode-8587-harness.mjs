@@ -779,6 +779,65 @@ async function waitForCommunicationEvent(eventId) {
   throw new Error(`communication log did not persist event ${eventId}\n${JSON.stringify(last, null, 2)}`);
 }
 
+async function fetchAgentPresenceSnapshot(agentId) {
+  const presence = await fetchJson('/api/live-agent-mode/presence');
+  const location = presence?.locations?.[agentId]
+    || presence?.presence?.agentLocations?.[agentId]
+    || presence?.presence?.agents?.[agentId]
+    || null;
+  assert(location, `missing persisted presence for ${agentId}`, presence);
+  return JSON.parse(JSON.stringify(location));
+}
+
+async function saveAgentPresenceSnapshot(agentId, snapshot, source) {
+  assert(snapshot && typeof snapshot === 'object', `cannot restore missing persisted presence for ${agentId}`, snapshot);
+  const result = await postJson(`/api/agent-presence/${encodeURIComponent(agentId)}`, {
+    ...snapshot,
+    agentId,
+    source,
+    state: snapshot.routeState || snapshot.routeStatus || snapshot.state || 'arrived',
+  });
+  assert(result?.ok === true, `failed to restore persisted presence for ${agentId}`, result);
+  return result.presence;
+}
+
+function socialFixturePresence(agentId, x, z) {
+  return {
+    agentId,
+    source: '8587-acceptance-social-fixture',
+    buildingId: OFFICE_BUILDING_ID,
+    floor: 1,
+    x,
+    z,
+    apiX: x * 40,
+    apiZ: z * 40,
+    coordinateSpace: 'world-tiles',
+    state: 'arrived',
+    routeState: 'arrived',
+    routeStatus: 'arrived',
+    routeId: null,
+    activeId: null,
+    worldActionId: null,
+    actionId: null,
+    actionType: null,
+    route: null,
+    target: null,
+    targetKind: null,
+    objectInstanceId: null,
+    catalogId: null,
+    targetAgentId: null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function placeSocialFixturesInOffice() {
+  const agent = await saveAgentPresenceSnapshot(TEST_AGENT_ID, socialFixturePresence(TEST_AGENT_ID, 15, 10), '8587-acceptance-social-fixture');
+  const peer = await saveAgentPresenceSnapshot(PEER_AGENT_ID, socialFixturePresence(PEER_AGENT_ID, 16, 10), '8587-acceptance-social-fixture');
+  assert(agent?.buildingId === OFFICE_BUILDING_ID && peer?.buildingId === OFFICE_BUILDING_ID, 'failed to place social fixtures in the office', { agent, peer });
+  console.log(`PASS: placed ${TEST_AGENT_ID} and ${PEER_AGENT_ID} together in ${OFFICE_BUILDING_ID} for social communication verification.`);
+  return { agent, peer };
+}
+
 async function verifyFakeProviderBridgeContract() {
   const enabled = await postJson(`/api/agent/${encodeURIComponent(FAKE_FIXTURE_AGENT_ID)}/live-mode`, {
     agentLiveModeEnabled: true,
@@ -831,6 +890,8 @@ async function verifyFakeProviderBridgeContract() {
 }
 
 async function verifySocialCommunicationAndMemory() {
+  await placeSocialFixturesInOffice();
+
   const social = await requestLiveAgentAction({
     actionType: 'life.social',
     capabilityTag: 'life.social',
@@ -1030,6 +1091,13 @@ function verifyMultiAgentSocialMetrics(metrics) {
   })}`);
 }
 
+function isReducedFinalGateRun(metrics, { expectedAgents, expectedTurns }) {
+  const evidence = metrics.finalGate?.evidence || {};
+  const requiredAgents = Number(evidence.requiredEnabledAgentCount || expectedAgents || 0);
+  const requiredTurns = Number(evidence.requiredCompletedTurnCount || expectedTurns || 0);
+  return expectedAgents < requiredAgents || expectedTurns < requiredTurns;
+}
+
 function verifySoakDistributionMetrics(metrics, { expectedAgents, expectedTurns }) {
   const distribution = metrics.metrics?.perAgentDistribution;
   assert(distribution?.schemaVersion === 'agent-live-mode-per-agent-distribution/v1', 'metrics should expose per-agent turn/action distribution', distribution);
@@ -1053,9 +1121,20 @@ function verifySoakDistributionMetrics(metrics, { expectedAgents, expectedTurns 
   const distributedCompletedActionCount = Object.values(rowsByAgent).reduce((sum, row) => sum + Number(row?.completedBackendActionCount || 0), 0);
   assert(distributedCompletedTurnCount >= expectedTurns, `per-agent completed turn total should cover at least ${expectedTurns} turns`, { distributedCompletedTurnCount, distribution });
   assert(distributedCompletedActionCount >= expectedTurns, `per-agent completed action total should cover at least ${expectedTurns} backend actions`, { distributedCompletedActionCount, distribution });
-  assert(metrics.finalGate?.checks?.defaultSoakEnabledAgentRosterPresent === true, 'final gate should check the default enabled soak roster size', metrics.finalGate);
-  assert(metrics.finalGate?.checks?.defaultSoakCompletedTurnTargetMet === true, 'final gate should check the default completed-turn soak target', metrics.finalGate);
-  assert(metrics.finalGate?.checks?.defaultSoakCompletedBackendActionTargetMet === true, 'final gate should check the default backend-action soak target', metrics.finalGate);
+  const defaultSoakChecks = [
+    'defaultSoakEnabledAgentRosterPresent',
+    'defaultSoakCompletedTurnTargetMet',
+    'defaultSoakCompletedBackendActionTargetMet',
+  ];
+  if (isReducedFinalGateRun(metrics, { expectedAgents, expectedTurns })) {
+    for (const checkName of defaultSoakChecks) {
+      assert(typeof metrics.finalGate?.checks?.[checkName] === 'boolean', `reduced final gate should still report ${checkName}`, metrics.finalGate);
+    }
+  } else {
+    for (const checkName of defaultSoakChecks) {
+      assert(metrics.finalGate?.checks?.[checkName] === true, `final gate should pass ${checkName}`, metrics.finalGate);
+    }
+  }
   assert(metrics.finalGate?.checks?.turnsCompletedAcrossEnabledAgents === true, 'final gate should check enabled-agent turn distribution', metrics.finalGate);
   assert(metrics.finalGate?.checks?.actionsCompletedAcrossEnabledAgents === true, 'final gate should check enabled-agent action distribution', metrics.finalGate);
   assert(metrics.finalGate?.evidence?.enabledCompletedTurnAgentCount >= expectedAgents, 'final gate should report turn distribution evidence', metrics.finalGate);
@@ -1158,7 +1237,17 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
     assert(typeof moduleMetrics?.latency?.p95Ms === 'number', `ClawMind module ${moduleName} should report p95 latency`, moduleMetrics);
   }
   assert(metrics.clawMindArchitecture?.optimization?.heavyWorldScan === false, 'ClawMind metrics must stay lightweight', metrics.clawMindArchitecture?.optimization);
-  assert(metrics.finalGate?.ok === true, 'final soak gate should pass', metrics.finalGate);
+  if (isReducedFinalGateRun(metrics, { expectedAgents, expectedTurns })) {
+    const allowedReducedFailures = new Set([
+      'defaultSoakEnabledAgentRosterPresent',
+      'defaultSoakCompletedTurnTargetMet',
+      'defaultSoakCompletedBackendActionTargetMet',
+    ]);
+    const unexpectedFailures = (metrics.finalGate?.failures || []).filter((failure) => !allowedReducedFailures.has(failure));
+    assert(unexpectedFailures.length === 0, 'reduced final gate should fail only default soak sizing checks', metrics.finalGate);
+  } else {
+    assert(metrics.finalGate?.ok === true, 'final soak gate should pass', metrics.finalGate);
+  }
   assert(metrics.finalGate?.checks?.noRoutePendingActions === true, 'final gate should fail on route-pending actions', metrics.finalGate);
   assert(metrics.finalGate?.checks?.noUnresolvedMismatches === true, 'final gate should fail on unresolved mismatches', metrics.finalGate);
   assert(metrics.finalGate?.checks?.memoryWithinCaps === true, 'final gate should fail on memory cap breaches', metrics.finalGate);
@@ -1344,6 +1433,7 @@ print(json.dumps(result, sort_keys=True))
 }
 
 async function runTwoClientWorldEventFeedSyncCheck() {
+  const originalPresence = await fetchAgentPresenceSnapshot(TEST_AGENT_ID);
   const script = String.raw`
 import json
 import os
@@ -1599,7 +1689,10 @@ print(json.dumps({
   assert(result.ok === true, 'two-client world event feed sync check failed', result);
   assert(result.metrics?.connectedClientCount >= 2, 'world event metrics did not record two connected clients', result.metrics);
   assert(result.metrics?.ok === true, 'world event metrics did not report ok=true', result.metrics);
+  const restored = await saveAgentPresenceSnapshot(TEST_AGENT_ID, originalPresence, '8587-two-client-world-event-feed-restore');
+  assert(restored?.buildingId === originalPresence?.buildingId, 'two-client check did not restore the original agent building', { originalPresence, restored });
   console.log(`PASS: two 8587 browser clients synced movement plus building/object create-update-delete via ${result.metrics.replayableEventCount} replayable world events (p95 ${result.metrics.p95MultiClientSyncLatencyMs}ms).`);
+  console.log(`PASS: restored ${TEST_AGENT_ID} presence after two-client world-event sync to ${restored.buildingId || '<world>'} floor ${restored.floor || 1}.`);
   return result;
 }
 
