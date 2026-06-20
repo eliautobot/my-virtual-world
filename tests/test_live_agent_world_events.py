@@ -132,6 +132,82 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertNotIn("snapshot", within_limit)
         self.assertEqual([event.get("sequence") for event in within_limit["events"]], list(range(51, total_events + 1)))
 
+    def test_explicit_snapshot_without_cursor_omits_retained_backlog(self):
+        total_events = 250
+        for index in range(total_events):
+            self.server.append_live_agent_world_events([{
+                "eventType": "test-initial-snapshot",
+                "eventId": f"evt-initial-snapshot-{index}",
+            }])
+
+        listing = self.server.list_live_agent_world_events({"snapshot": "1", "limit": "200"})
+
+        self.assertFalse(listing["requiresSnapshotRefresh"])
+        self.assertEqual(listing["events"], [])
+        self.assertIn("snapshot", listing)
+        self.assertEqual(listing["snapshot"]["cursor"], total_events)
+        self.assertEqual(listing["nextCursor"], total_events)
+
+    def test_api_presence_save_publishes_world_event_even_when_location_matches(self):
+        agent_id = "presence-world-event-agent"
+        now = "2026-06-20T00:00:00Z"
+        presence = {
+            "agentId": agent_id,
+            "buildingId": "office",
+            "floor": 1,
+            "x": 15,
+            "z": 10,
+            "apiX": 600,
+            "apiZ": 400,
+            "source": "live-agent-loop",
+            "state": "arrived",
+            "routeState": "arrived",
+            "updatedAt": now,
+        }
+        meta = self.server.load_world_meta()
+        meta["agentProfiles"] = {
+            agent_id: {
+                "name": "Presence World Event Agent",
+                "providerKind": "fake",
+                "agentLiveModeEnabled": True,
+            }
+        }
+        meta["agentLife"] = {
+            "presence": {
+                "schemaVersion": self.server.LIVE_AGENT_PRESENCE_SCHEMA_VERSION,
+                "agents": {agent_id: presence},
+                "agentLocations": {agent_id: presence},
+                "history": [],
+                "updatedAt": now,
+            }
+        }
+        self.server.save_world_meta(meta)
+
+        ok, result, status = self.server.save_agent_presence_from_payload(agent_id, {
+            "source": "api-regression",
+            "state": "arrived",
+            "location": {
+                "agentId": agent_id,
+                "buildingId": "office",
+                "floor": 1,
+                "x": 15,
+                "z": 10,
+                "apiX": 600,
+                "apiZ": 400,
+            },
+        })
+        listing = self.server.list_live_agent_world_events({"since": "0", "limit": "10"})
+        events = listing.get("events") or []
+
+        self.assertTrue(ok, result)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["presence"]["apiX"], 600)
+        self.assertEqual(listing["nextCursor"], 1)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].get("eventType"), "agent-presence-updated")
+        self.assertEqual(events[0].get("agentId"), agent_id)
+        self.assertEqual((events[0].get("patch") or {}).get("collection"), "agentPresence")
+
     def test_live_agent_build_completion_publishes_building_world_events(self):
         building_id = "live-home-world-events-regression"
         action = {

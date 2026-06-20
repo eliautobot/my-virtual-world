@@ -4658,11 +4658,12 @@ def list_live_agent_world_events(query=None):
     limit = max(1, min(limit, 500))
     include_snapshot = str(_world_event_query_value(query, "snapshot", "includeSnapshot", default="")).lower() in {"1", "true", "yes"}
     requires_snapshot_refresh = bool(events and since is not None and since < oldest_cursor - 1)
+    explicit_snapshot_without_cursor = include_snapshot and since is None
     if since is not None and not requires_snapshot_refresh:
         events = [event for event in events if int(event.get("sequence") or 0) > since]
         if len(events) > limit:
             requires_snapshot_refresh = True
-    if requires_snapshot_refresh:
+    if requires_snapshot_refresh or explicit_snapshot_without_cursor:
         events = []
         include_snapshot = True
     result = {
@@ -6071,7 +6072,7 @@ def _legacy_live_agent_simulated_locations_by_agent(meta=None):
     return {agent_id: dict(location) for agent_id, location in locations.items() if isinstance(location, dict)}
 
 
-def _save_live_agent_presence_location(agent_id, location=None, *, source=None, state=None, action=None, route=None, target=None, route_state=None):
+def _save_live_agent_presence_location(agent_id, location=None, *, source=None, state=None, action=None, route=None, target=None, route_state=None, force_world_event=False):
     resolved_agent_id = _resolve_agent_id(agent_id) or str(agent_id or "").strip()
     if not resolved_agent_id:
         return None
@@ -6118,8 +6119,8 @@ def _save_live_agent_presence_location(agent_id, location=None, *, source=None, 
         str(previous.get(key)) != str(record.get(key))
         for key in ("apiX", "apiZ", "buildingId", "floor")
     )
-    if location_changed:
-        _publish_agent_presence_world_event(record, previous=None)
+    if location_changed or force_world_event:
+        _publish_agent_presence_world_event(record, previous=previous or None)
     return record
 
 
@@ -6153,6 +6154,7 @@ def save_agent_presence_from_payload(path_agent_id, payload):
         state=str(state)[:80],
         route=route,
         target=target,
+        force_world_event=str(source)[:120] != "browser-replay",
     )
     if not _live_agent_presence_has_location(record):
         return False, _api_error("invalid_location", "Agent presence requires a building/floor or numeric coordinates."), 400

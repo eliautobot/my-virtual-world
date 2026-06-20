@@ -35551,6 +35551,7 @@ const LIVE_AGENT_MODE_WORLD_EVENT_FEED_SYNC_MS = 500;
 const _liveAgentModeWorldEventFeedApplied = new Set();
 let _liveAgentModeWorldEventFeedCursor = 0;
 let _liveAgentModeWorldEventFeedTimer = null;
+let _liveAgentModeWorldEventFeedInFlight = null;
 let _liveAgentModeWorldEventFeedLastLatencyMs = null;
 let _liveAgentModeWorldEventFeedLastLatencySource = null;
 let _liveAgentModeWorldEventFeedState = {
@@ -35764,76 +35765,84 @@ function applyLiveAgentModeWorldEventSnapshot(snapshot = {}) {
 }
 
 async function syncLiveAgentModeWorldEvents({ force = false, snapshot = false, limit = 200 } = {}) {
+  if (_liveAgentModeWorldEventFeedInFlight) return _liveAgentModeWorldEventFeedInFlight;
   if (!buildingGroup || !agentGroup || typeof fetch !== 'function') {
     setLiveAgentModeWorldEventFeedState({ ok: false, reason: 'scene_not_ready' });
     return false;
   }
-  try {
-    const requestSince = force ? null : _liveAgentModeWorldEventFeedCursor;
-    const response = await fetch(getLiveAgentModeWorldEventFeedUrl({
-      since: requestSince,
-      snapshot,
-      limit,
-    }), { cache: 'no-store' });
-    if (!response.ok) {
-      setLiveAgentModeWorldEventFeedState({ ok: false, reason: `http_${response.status}` });
-      return false;
-    }
-    const payload = await response.json();
-    let snapshotApplied = false;
-    if (payload.requiresSnapshotRefresh || payload.snapshot) {
-      snapshotApplied = applyLiveAgentModeWorldEventSnapshot(payload.snapshot || {});
-    }
-    const events = Array.isArray(payload.events) ? payload.events : [];
-    let maxCursor = _liveAgentModeWorldEventFeedCursor;
-    if (snapshotApplied) {
-      const snapshotCursor = Number(payload.nextCursor ?? payload.snapshot?.cursor ?? 0);
-      if (Number.isFinite(snapshotCursor)) maxCursor = Math.max(maxCursor, snapshotCursor);
-    }
-    let applied = 0;
-    const latencies = [];
-    let unsafePatch = false;
-    for (const event of events) {
-      const result = applyLiveAgentModeWorldEvent(event);
-      if (result.applied) applied += 1;
-      if (result.requiresSnapshotRefresh) unsafePatch = true;
-      if (Number.isFinite(Number(result.sequence))) maxCursor = Math.max(maxCursor, Number(result.sequence));
-      if (Number.isFinite(Number(result.latencyMs))) latencies.push(Number(result.latencyMs));
-    }
-    if (unsafePatch && !snapshotApplied) {
-      const snapshotResponse = await fetch(getLiveAgentModeWorldEventFeedUrl({ since: null, snapshot: true, limit: 1 }), { cache: 'no-store' });
-      if (snapshotResponse.ok) {
-        const snapshotPayload = await snapshotResponse.json();
-        snapshotApplied = applyLiveAgentModeWorldEventSnapshot(snapshotPayload.snapshot || {});
-        const snapshotCursor = Number(snapshotPayload.nextCursor ?? snapshotPayload.snapshot?.cursor ?? 0);
+  _liveAgentModeWorldEventFeedInFlight = (async () => {
+    try {
+      const requestSince = force ? null : _liveAgentModeWorldEventFeedCursor;
+      const response = await fetch(getLiveAgentModeWorldEventFeedUrl({
+        since: requestSince,
+        snapshot,
+        limit,
+      }), { cache: 'no-store' });
+      if (!response.ok) {
+        setLiveAgentModeWorldEventFeedState({ ok: false, reason: `http_${response.status}` });
+        return false;
+      }
+      const payload = await response.json();
+      let snapshotApplied = false;
+      if (payload.requiresSnapshotRefresh || payload.snapshot) {
+        snapshotApplied = applyLiveAgentModeWorldEventSnapshot(payload.snapshot || {});
+      }
+      const events = Array.isArray(payload.events) ? payload.events : [];
+      let maxCursor = _liveAgentModeWorldEventFeedCursor;
+      if (snapshotApplied) {
+        const snapshotCursor = Number(payload.nextCursor ?? payload.snapshot?.cursor ?? 0);
         if (Number.isFinite(snapshotCursor)) maxCursor = Math.max(maxCursor, snapshotCursor);
       }
+      let applied = 0;
+      const latencies = [];
+      let unsafePatch = false;
+      for (const event of events) {
+        const result = applyLiveAgentModeWorldEvent(event);
+        if (result.applied) applied += 1;
+        if (result.requiresSnapshotRefresh) unsafePatch = true;
+        if (Number.isFinite(Number(result.sequence))) maxCursor = Math.max(maxCursor, Number(result.sequence));
+        if (Number.isFinite(Number(result.latencyMs))) latencies.push(Number(result.latencyMs));
+      }
+      if (unsafePatch && !snapshotApplied) {
+        const snapshotResponse = await fetch(getLiveAgentModeWorldEventFeedUrl({ since: null, snapshot: true, limit: 1 }), { cache: 'no-store' });
+        if (snapshotResponse.ok) {
+          const snapshotPayload = await snapshotResponse.json();
+          snapshotApplied = applyLiveAgentModeWorldEventSnapshot(snapshotPayload.snapshot || {});
+          const snapshotCursor = Number(snapshotPayload.nextCursor ?? snapshotPayload.snapshot?.cursor ?? 0);
+          if (Number.isFinite(snapshotCursor)) maxCursor = Math.max(maxCursor, snapshotCursor);
+        }
+      }
+      if (!force) _liveAgentModeWorldEventFeedCursor = maxCursor;
+      else _liveAgentModeWorldEventFeedCursor = Math.max(_liveAgentModeWorldEventFeedCursor, Number(payload.nextCursor || maxCursor || 0));
+      const canReportLiveLatency = !force && !snapshot && !payload.requiresSnapshotRefresh && !snapshotApplied && !unsafePatch && requestSince != null;
+      const p95LatencyMs = canReportLiveLatency && latencies.length ? [...latencies].sort((a, b) => a - b)[Math.min(latencies.length - 1, Math.floor((latencies.length - 1) * 0.95))] : null;
+      if (p95LatencyMs != null && Number.isFinite(Number(p95LatencyMs))) {
+        _liveAgentModeWorldEventFeedLastLatencyMs = Number(p95LatencyMs);
+        _liveAgentModeWorldEventFeedLastLatencySource = 'live-incremental';
+      } else if (!canReportLiveLatency || !latencies.length) {
+        _liveAgentModeWorldEventFeedLastLatencyMs = null;
+        _liveAgentModeWorldEventFeedLastLatencySource = null;
+      }
+      return setLiveAgentModeWorldEventFeedState({
+        ok: true,
+        reason: null,
+        lastCursor: _liveAgentModeWorldEventFeedCursor,
+        nextCursor: payload.nextCursor ?? null,
+        appliedEventCount: _liveAgentModeWorldEventFeedState.appliedEventCount + applied,
+        snapshotRefreshCount: _liveAgentModeWorldEventFeedState.snapshotRefreshCount + (snapshotApplied ? 1 : 0),
+        lastFetchEventCount: events.length,
+        p95ApplyLatencyMs: Number(_liveAgentModeWorldEventFeedLastLatencyMs || 0),
+        metrics: payload.metrics || null,
+      });
+    } catch (error) {
+      setLiveAgentModeWorldEventFeedState({ ok: false, error: error?.message || String(error) });
+      return false;
     }
-    if (!force) _liveAgentModeWorldEventFeedCursor = maxCursor;
-    else _liveAgentModeWorldEventFeedCursor = Math.max(_liveAgentModeWorldEventFeedCursor, Number(payload.nextCursor || maxCursor || 0));
-    const canReportLiveLatency = !force && !snapshot && !payload.requiresSnapshotRefresh && !snapshotApplied && !unsafePatch && requestSince != null;
-    const p95LatencyMs = canReportLiveLatency && latencies.length ? [...latencies].sort((a, b) => a - b)[Math.min(latencies.length - 1, Math.floor((latencies.length - 1) * 0.95))] : null;
-    if (p95LatencyMs != null && Number.isFinite(Number(p95LatencyMs))) {
-      _liveAgentModeWorldEventFeedLastLatencyMs = Number(p95LatencyMs);
-      _liveAgentModeWorldEventFeedLastLatencySource = 'live-incremental';
-    } else if (!canReportLiveLatency || !latencies.length) {
-      _liveAgentModeWorldEventFeedLastLatencyMs = null;
-      _liveAgentModeWorldEventFeedLastLatencySource = null;
-    }
-    return setLiveAgentModeWorldEventFeedState({
-      ok: true,
-      reason: null,
-      lastCursor: _liveAgentModeWorldEventFeedCursor,
-      nextCursor: payload.nextCursor ?? null,
-      appliedEventCount: _liveAgentModeWorldEventFeedState.appliedEventCount + applied,
-      snapshotRefreshCount: _liveAgentModeWorldEventFeedState.snapshotRefreshCount + (snapshotApplied ? 1 : 0),
-      lastFetchEventCount: events.length,
-      p95ApplyLatencyMs: Number(_liveAgentModeWorldEventFeedLastLatencyMs || 0),
-      metrics: payload.metrics || null,
-    });
-  } catch (error) {
-    setLiveAgentModeWorldEventFeedState({ ok: false, error: error?.message || String(error) });
-    return false;
+  })();
+  try {
+    return await _liveAgentModeWorldEventFeedInFlight;
+  } finally {
+    _liveAgentModeWorldEventFeedInFlight = null;
   }
 }
 
