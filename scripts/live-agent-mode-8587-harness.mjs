@@ -950,12 +950,64 @@ function verifyMultiAgentSocialMetrics(metrics) {
   })}`);
 }
 
+function verifySoakDistributionMetrics(metrics, { expectedAgents, expectedTurns }) {
+  const distribution = metrics.metrics?.perAgentDistribution;
+  assert(distribution?.schemaVersion === 'agent-live-mode-per-agent-distribution/v1', 'metrics should expose per-agent turn/action distribution', distribution);
+  assert(Array.isArray(distribution.agents), 'per-agent distribution should include agent rows', distribution);
+  assert(distribution.enabledAgentCount >= expectedAgents, `per-agent distribution should include at least ${expectedAgents} enabled agents`, distribution);
+  assert(distribution.enabledCompletedTurnAgentCount >= expectedAgents, `soak turns should complete across at least ${expectedAgents} enabled live agents`, distribution);
+  assert(distribution.enabledCompletedBackendActionAgentCount >= expectedAgents, `soak backend actions should complete across at least ${expectedAgents} enabled live agents`, distribution);
+  assert(distribution.allEnabledAgentsHaveCompletedTurn === true, 'all enabled soak agents should have at least one completed turn', distribution);
+  assert(distribution.allEnabledAgentsHaveCompletedBackendAction === true, 'all enabled soak agents should have at least one completed backend action', distribution);
+
+  const rowsByAgent = distribution.byAgent || Object.fromEntries(distribution.agents.map((row) => [row.agentId, row]));
+  const expectedSoakAgents = SOAK_AGENT_IDS.slice(0, expectedAgents);
+  for (const agentId of expectedSoakAgents) {
+    const row = rowsByAgent[agentId];
+    assert(row?.liveModeEnabled === true, `per-agent distribution missing enabled soak agent ${agentId}`, { agentId, distribution });
+    assert(Number(row.completedTurnCount || 0) > 0, `soak agent ${agentId} has no completed turns`, row);
+    assert(Number(row.completedBackendActionCount || 0) > 0, `soak agent ${agentId} has no completed backend actions`, row);
+  }
+
+  const distributedCompletedTurnCount = Object.values(rowsByAgent).reduce((sum, row) => sum + Number(row?.completedTurnCount || 0), 0);
+  const distributedCompletedActionCount = Object.values(rowsByAgent).reduce((sum, row) => sum + Number(row?.completedBackendActionCount || 0), 0);
+  assert(distributedCompletedTurnCount >= expectedTurns, `per-agent completed turn total should cover at least ${expectedTurns} turns`, { distributedCompletedTurnCount, distribution });
+  assert(distributedCompletedActionCount >= expectedTurns, `per-agent completed action total should cover at least ${expectedTurns} backend actions`, { distributedCompletedActionCount, distribution });
+  assert(metrics.finalGate?.checks?.turnsCompletedAcrossEnabledAgents === true, 'final gate should check enabled-agent turn distribution', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.actionsCompletedAcrossEnabledAgents === true, 'final gate should check enabled-agent action distribution', metrics.finalGate);
+  assert(metrics.finalGate?.evidence?.enabledCompletedTurnAgentCount >= expectedAgents, 'final gate should report turn distribution evidence', metrics.finalGate);
+  assert(metrics.finalGate?.evidence?.enabledCompletedBackendActionAgentCount >= expectedAgents, 'final gate should report action distribution evidence', metrics.finalGate);
+  const evidenceRows = metrics.finalGate?.evidence?.enabledAgents || [];
+  assert(evidenceRows.length >= expectedAgents, 'final gate should include compact enabled-agent distribution rows', metrics.finalGate?.evidence);
+
+  const compactRows = Object.fromEntries(expectedSoakAgents.map((agentId) => {
+    const row = rowsByAgent[agentId] || {};
+    const evidenceRow = evidenceRows.find((candidate) => candidate?.agentId === agentId);
+    assert(Number(evidenceRow?.completedTurnCount || 0) === Number(row.completedTurnCount || 0), `final gate turn evidence does not match per-agent row for ${agentId}`, { row, evidenceRow });
+    assert(Number(evidenceRow?.completedBackendActionCount || 0) === Number(row.completedBackendActionCount || 0), `final gate action evidence does not match per-agent row for ${agentId}`, { row, evidenceRow });
+    return [agentId, {
+      completedTurnCount: row.completedTurnCount || 0,
+      completedBackendActionCount: row.completedBackendActionCount || 0,
+      completedActionTypes: row.completedActionTypes || [],
+    }];
+  }));
+  console.log(`PASS: soak distribution metrics ${JSON.stringify({
+    enabledAgentCount: distribution.enabledAgentCount,
+    enabledCompletedTurnAgentCount: distribution.enabledCompletedTurnAgentCount,
+    enabledCompletedBackendActionAgentCount: distribution.enabledCompletedBackendActionAgentCount,
+    expectedSoakAgents,
+    agents: compactRows,
+    finalGateEvidence: metrics.finalGate.evidence,
+  })}`);
+}
+
 async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   const metrics = await fetchJson('/api/live-agent-mode/metrics');
   assert(metrics?.ok === true, 'Live Agent metrics endpoint failed', metrics);
   assert(metrics.loop?.enabledAgentCount >= expectedAgents, `metrics should include at least ${expectedAgents} enabled live agents`, metrics.loop);
   assert(metrics.metrics?.completedTurnCount >= expectedTurns, `metrics should show at least ${expectedTurns} completed turns`, metrics.metrics);
   assert(metrics.metrics?.completedBackendActionCount >= expectedTurns, `metrics should show at least ${expectedTurns} backend-owned completed actions`, metrics.metrics);
+  verifySoakDistributionMetrics(metrics, { expectedAgents, expectedTurns });
   assert(metrics.metrics?.routePendingActiveCount === 0, 'metrics should show no active route_pending actions', metrics.metrics);
   assert(metrics.metrics?.memoryCaps?.withinCaps === true, 'metrics should show live-agent memory stayed within bounded caps', metrics.metrics?.memoryCaps);
   assert(metrics.metrics?.memoryCaps?.breachCount === 0, 'metrics should show no memory cap breaches', metrics.metrics?.memoryCaps);
@@ -1030,6 +1082,7 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
     enabledAgentCount: metrics.loop.enabledAgentCount,
     completedTurnCount: metrics.metrics.completedTurnCount,
     completedBackendActionCount: metrics.metrics.completedBackendActionCount,
+    perAgentDistribution: metrics.finalGate.evidence,
     turnDuration: metrics.metrics.turnDuration,
     actionSuccessRate: metrics.metrics.actionSuccessRate,
     recoveryRate: metrics.metrics.recoveryRate,

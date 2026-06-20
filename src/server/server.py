@@ -4470,6 +4470,211 @@ def _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_acti
     }
 
 
+def _live_agent_metric_roster_agent_id(agent):
+    if not isinstance(agent, dict):
+        return None
+    return _live_agent_loop_clean_plan_text(agent.get("agentId") or agent.get("statusKey") or agent.get("id"), limit=120)
+
+
+def _live_agent_metric_enabled_agent_records(cached_roster, loop_state, meta):
+    records_by_agent = {}
+    profiles = meta.get("agentProfiles") if isinstance(meta.get("agentProfiles"), dict) else {}
+    state_agents = loop_state.get("agents") if isinstance(loop_state.get("agents"), dict) else {}
+
+    def upsert(agent_id, source=None):
+        safe_agent_id = _live_agent_loop_clean_plan_text(agent_id, limit=120)
+        if not safe_agent_id:
+            return
+        record = dict(records_by_agent.get(safe_agent_id) or {})
+        record["id"] = record.get("id") or safe_agent_id
+        record["agentId"] = safe_agent_id
+        record["statusKey"] = record.get("statusKey") or safe_agent_id
+        record["agentLiveModeEnabled"] = True
+        if isinstance(source, dict):
+            for key in ("name", "displayName", "providerKind", "provider"):
+                if source.get(key) and not record.get(key):
+                    record[key] = source.get(key)
+        profile = profiles.get(safe_agent_id) if isinstance(profiles.get(safe_agent_id), dict) else {}
+        if profile:
+            record["name"] = record.get("name") or profile.get("name")
+            record["displayName"] = record.get("displayName") or profile.get("displayName")
+            record["providerKind"] = record.get("providerKind") or profile.get("providerKind")
+            record["provider"] = record.get("provider") or profile.get("provider")
+        records_by_agent[safe_agent_id] = record
+
+    for agent in [item for item in (cached_roster or []) if isinstance(item, dict)]:
+        if agent.get("agentLiveModeEnabled") is True:
+            upsert(_live_agent_metric_roster_agent_id(agent), agent)
+
+    for agent_id, profile in profiles.items():
+        if isinstance(profile, dict) and profile.get("agentLiveModeEnabled") is True:
+            upsert(agent_id, profile)
+
+    for agent_id, agent_state in state_agents.items():
+        if isinstance(agent_state, dict) and agent_state.get("enabled") is True:
+            upsert(agent_id, agent_state)
+
+    return [records_by_agent[agent_id] for agent_id in sorted(records_by_agent)]
+
+
+def _live_agent_metric_action_agent_id(action):
+    if not isinstance(action, dict):
+        return None
+    direct = _live_agent_loop_clean_plan_text(action.get("agentId"), limit=120)
+    if direct:
+        return direct
+    for key in ("actor", "agent", "source"):
+        value = action.get(key)
+        if isinstance(value, dict):
+            resolved = _live_agent_loop_clean_plan_text(value.get("agentId") or value.get("id"), limit=120)
+            if resolved:
+                return resolved
+    return None
+
+
+def _live_agent_metric_timestamp(record, keys):
+    if not isinstance(record, dict):
+        return None
+    for key in keys:
+        value = record.get(key)
+        if _parse_isoish_epoch(value):
+            return value
+    return None
+
+
+def _live_agent_metric_newer_timestamp(current, candidate):
+    candidate_epoch = _parse_isoish_epoch(candidate)
+    if not candidate_epoch:
+        return current
+    current_epoch = _parse_isoish_epoch(current)
+    if not current_epoch or candidate_epoch >= current_epoch:
+        return candidate
+    return current
+
+
+def _live_agent_metric_per_agent_distribution(enabled_agents, turns, backend_terminal_actions):
+    rows_by_agent = {}
+    enabled_agent_ids = []
+
+    def ensure_row(agent_id, agent=None):
+        safe_agent_id = _live_agent_loop_clean_plan_text(agent_id, limit=120)
+        if not safe_agent_id:
+            return None
+        row = rows_by_agent.get(safe_agent_id)
+        if row is None:
+            row = {
+                "agentId": safe_agent_id,
+                "name": None,
+                "providerKind": None,
+                "liveModeEnabled": False,
+                "turnCount": 0,
+                "completedTurnCount": 0,
+                "failedTurnCount": 0,
+                "skippedTurnCount": 0,
+                "terminalBackendActionCount": 0,
+                "completedBackendActionCount": 0,
+                "failedBackendActionCount": 0,
+                "turnStatusCounts": {},
+                "backendActionStatusCounts": {},
+                "completedActionTypes": [],
+                "recentCompletedTurnIds": [],
+                "recentCompletedBackendActionIds": [],
+                "lastCompletedTurnAt": None,
+                "lastCompletedBackendActionAt": None,
+                "_completedActionTypes": set(),
+                "_recentCompletedTurnIds": [],
+                "_recentCompletedBackendActionIds": [],
+            }
+            rows_by_agent[safe_agent_id] = row
+        if isinstance(agent, dict):
+            row["name"] = row["name"] or agent.get("name") or agent.get("displayName")
+            row["providerKind"] = row["providerKind"] or _live_agent_provider_kind(agent)
+            row["liveModeEnabled"] = True
+        return row
+
+    for agent in [item for item in (enabled_agents or []) if isinstance(item, dict)]:
+        agent_id = _live_agent_metric_roster_agent_id(agent)
+        row = ensure_row(agent_id, agent)
+        if row:
+            enabled_agent_ids.append(row["agentId"])
+
+    for turn in [item for item in (turns or []) if isinstance(item, dict)]:
+        row = ensure_row(turn.get("agentId"))
+        if not row:
+            continue
+        status = _live_agent_loop_turn_status(turn.get("status"), default="running")
+        row["turnCount"] += 1
+        row["turnStatusCounts"][status] = row["turnStatusCounts"].get(status, 0) + 1
+        if status == "completed":
+            row["completedTurnCount"] += 1
+            if turn.get("id"):
+                row["_recentCompletedTurnIds"] = [*row["_recentCompletedTurnIds"], turn.get("id")][-5:]
+            row["lastCompletedTurnAt"] = _live_agent_metric_newer_timestamp(row["lastCompletedTurnAt"], turn.get("endedAt") or turn.get("startedAt"))
+        elif status == "failed":
+            row["failedTurnCount"] += 1
+        elif status == "skipped":
+            row["skippedTurnCount"] += 1
+
+    for action in [item for item in (backend_terminal_actions or []) if isinstance(item, dict)]:
+        row = ensure_row(_live_agent_metric_action_agent_id(action))
+        if not row:
+            continue
+        status = _canonical_world_action_status(action.get("status"))
+        row["terminalBackendActionCount"] += 1
+        row["backendActionStatusCounts"][status] = row["backendActionStatusCounts"].get(status, 0) + 1
+        if status == "completed" and _live_agent_metric_client_free(action):
+            row["completedBackendActionCount"] += 1
+            if action.get("id"):
+                row["_recentCompletedBackendActionIds"] = [*row["_recentCompletedBackendActionIds"], action.get("id")][-5:]
+            if action.get("actionType"):
+                row["_completedActionTypes"].add(str(action.get("actionType")))
+            timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+            completed_at = _live_agent_metric_timestamp(timing, ("terminalAt", "completedAt", "updatedAt", "createdAt"))
+            row["lastCompletedBackendActionAt"] = _live_agent_metric_newer_timestamp(row["lastCompletedBackendActionAt"], completed_at)
+        elif status in {"failed", "expired", "cancelled"}:
+            row["failedBackendActionCount"] += 1
+
+    all_rows = []
+    for agent_id in sorted(rows_by_agent):
+        row = dict(rows_by_agent[agent_id])
+        row["completedActionTypes"] = sorted(row.pop("_completedActionTypes"))
+        row["recentCompletedTurnIds"] = list(row.pop("_recentCompletedTurnIds"))
+        row["recentCompletedBackendActionIds"] = list(row.pop("_recentCompletedBackendActionIds"))
+        all_rows.append(row)
+
+    enabled_agent_ids = sorted(set(enabled_agent_ids))
+    by_agent = {row["agentId"]: row for row in all_rows}
+    enabled_turn_agent_ids = sorted([
+        agent_id for agent_id in enabled_agent_ids
+        if (by_agent.get(agent_id) or {}).get("completedTurnCount", 0) > 0
+    ])
+    enabled_action_agent_ids = sorted([
+        agent_id for agent_id in enabled_agent_ids
+        if (by_agent.get(agent_id) or {}).get("completedBackendActionCount", 0) > 0
+    ])
+    turn_agent_ids = sorted([row["agentId"] for row in all_rows if row.get("completedTurnCount", 0) > 0])
+    action_agent_ids = sorted([row["agentId"] for row in all_rows if row.get("completedBackendActionCount", 0) > 0])
+    return {
+        "schemaVersion": "agent-live-mode-per-agent-distribution/v1",
+        "enabledAgentCount": len(enabled_agent_ids),
+        "enabledAgentIds": enabled_agent_ids,
+        "completedTurnAgentCount": len(turn_agent_ids),
+        "completedTurnAgentIds": turn_agent_ids,
+        "enabledCompletedTurnAgentCount": len(enabled_turn_agent_ids),
+        "enabledCompletedTurnAgentIds": enabled_turn_agent_ids,
+        "enabledAgentsMissingCompletedTurns": sorted(set(enabled_agent_ids) - set(enabled_turn_agent_ids)),
+        "completedBackendActionAgentCount": len(action_agent_ids),
+        "completedBackendActionAgentIds": action_agent_ids,
+        "enabledCompletedBackendActionAgentCount": len(enabled_action_agent_ids),
+        "enabledCompletedBackendActionAgentIds": enabled_action_agent_ids,
+        "enabledAgentsMissingCompletedBackendActions": sorted(set(enabled_agent_ids) - set(enabled_action_agent_ids)),
+        "allEnabledAgentsHaveCompletedTurn": bool(enabled_agent_ids) and len(enabled_turn_agent_ids) == len(enabled_agent_ids),
+        "allEnabledAgentsHaveCompletedBackendAction": bool(enabled_agent_ids) and len(enabled_action_agent_ids) == len(enabled_agent_ids),
+        "agents": all_rows,
+        "byAgent": by_agent,
+    }
+
+
 def get_live_agent_mode_autonomy_metrics():
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
@@ -4609,7 +4814,27 @@ def get_live_agent_mode_autonomy_metrics():
     pause = _live_agent_loop_pause_status(loop_state)
     kill_switch = _live_agent_loop_kill_switch_status(loop_state)
     cached_roster = _live_agent_cached_roster_for_metrics()
-    cached_live_enabled_agents = [agent for agent in cached_roster if isinstance(agent, dict) and agent.get("agentLiveModeEnabled") is True]
+    enabled_live_agents = _live_agent_metric_enabled_agent_records(cached_roster, loop_state, meta)
+    per_agent_distribution = _live_agent_metric_per_agent_distribution(enabled_live_agents, turns, backend_terminal_actions)
+    per_agent_distribution_by_agent = per_agent_distribution.get("byAgent") if isinstance(per_agent_distribution.get("byAgent"), dict) else {}
+    enabled_agent_distribution_evidence = []
+    for agent_id in per_agent_distribution["enabledAgentIds"]:
+        row = per_agent_distribution_by_agent.get(agent_id) if isinstance(per_agent_distribution_by_agent.get(agent_id), dict) else {}
+        enabled_agent_distribution_evidence.append({
+            "agentId": agent_id,
+            "completedTurnCount": _normalize_int(row.get("completedTurnCount"), 0, minimum=0, maximum=1000000000),
+            "completedBackendActionCount": _normalize_int(row.get("completedBackendActionCount"), 0, minimum=0, maximum=1000000000),
+            "terminalBackendActionCount": _normalize_int(row.get("terminalBackendActionCount"), 0, minimum=0, maximum=1000000000),
+            "completedActionTypes": list(row.get("completedActionTypes") or [])[:10] if isinstance(row.get("completedActionTypes"), list) else [],
+        })
+    completed_turn_counts_by_agent = {
+        row["agentId"]: row["completedTurnCount"]
+        for row in enabled_agent_distribution_evidence
+    }
+    completed_backend_action_counts_by_agent = {
+        row["agentId"]: row["completedBackendActionCount"]
+        for row in enabled_agent_distribution_evidence
+    }
     provider_support = _live_agent_provider_adapter_metrics(cached_roster, loop_state=loop_state)
     clawmind_architecture = _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
     backend_action_total = len(backend_terminal_actions)
@@ -4639,7 +4864,7 @@ def get_live_agent_mode_autonomy_metrics():
         "reactionOpportunitiesCreated": len(reaction_opportunities) > 0,
         "memoryUpdated": memory_counts.get("total", 0) > 0,
         "relationshipsUpdated": len(relationships) > 0,
-        "societyRolesPresent": len(society_roles) >= len(cached_live_enabled_agents) and len(society_roles) > 0,
+        "societyRolesPresent": len(society_roles) >= len(enabled_live_agents) and len(society_roles) > 0,
         "socialObservationsCreated": len(society_observations) > 0,
         "groupGoalsUpdated": len(group_goals) > 0,
         "conversationTriggersCreated": len(conversation_triggers) > 0,
@@ -4655,6 +4880,9 @@ def get_live_agent_mode_autonomy_metrics():
         "plannerMetricsPresent": all(key in planner_metrics for key in ("planCount", "replanCount", "failedExpectationCount", "successfulRecoveryCount")),
         "outcomeAwarenessRecordsPresent": outcome_awareness_metrics["expectedOutcomeCount"] >= len(completed_backend_actions) if completed_backend_actions else True,
         "turnPlanningRecordsPresent": planner_metrics["turnsWithPlanningRecordCount"] > 0 if turns else True,
+        "perAgentTurnActionDistributionPresent": per_agent_distribution["enabledAgentCount"] > 0 and len(per_agent_distribution["agents"]) >= per_agent_distribution["enabledAgentCount"],
+        "turnsCompletedAcrossEnabledAgents": per_agent_distribution["allEnabledAgentsHaveCompletedTurn"],
+        "actionsCompletedAcrossEnabledAgents": per_agent_distribution["allEnabledAgentsHaveCompletedBackendAction"],
     }
     final_gate_checks = {
         "featureGateOpen": checklist["featureGateOpen"],
@@ -4665,12 +4893,26 @@ def get_live_agent_mode_autonomy_metrics():
         "memoryGrowthBounded": memory_growth["bounded"],
         "providerModelBudgetOk": provider_model_call_counts["metricsReadOnlyBudgetOk"],
         "clawMindRuntimeEvidence": clawmind_architecture.get("checklist", {}).get("allModulesExecuted") is True,
+        "turnsCompletedAcrossEnabledAgents": checklist["turnsCompletedAcrossEnabledAgents"],
+        "actionsCompletedAcrossEnabledAgents": checklist["actionsCompletedAcrossEnabledAgents"],
     }
     final_gate = {
         "schemaVersion": "agent-live-mode-final-gate/v1",
         "ok": all(final_gate_checks.values()),
         "checks": final_gate_checks,
         "failures": [key for key, passed in final_gate_checks.items() if not passed],
+        "evidence": {
+            "perAgentDistributionSchemaVersion": per_agent_distribution["schemaVersion"],
+            "enabledAgentCount": per_agent_distribution["enabledAgentCount"],
+            "enabledAgentIds": per_agent_distribution["enabledAgentIds"],
+            "enabledCompletedTurnAgentCount": per_agent_distribution["enabledCompletedTurnAgentCount"],
+            "enabledCompletedTurnAgentIds": per_agent_distribution["enabledCompletedTurnAgentIds"],
+            "enabledCompletedBackendActionAgentCount": per_agent_distribution["enabledCompletedBackendActionAgentCount"],
+            "enabledCompletedBackendActionAgentIds": per_agent_distribution["enabledCompletedBackendActionAgentIds"],
+            "enabledAgentsMissingCompletedTurns": per_agent_distribution["enabledAgentsMissingCompletedTurns"],
+            "enabledAgentsMissingCompletedBackendActions": per_agent_distribution["enabledAgentsMissingCompletedBackendActions"],
+            "enabledAgents": enabled_agent_distribution_evidence,
+        },
     }
     return {
         "ok": True,
@@ -4681,7 +4923,7 @@ def get_live_agent_mode_autonomy_metrics():
             "enabled": bool(loop_state.get("enabled")),
             "lastTickAt": loop_state.get("lastTickAt"),
             "decisionMode": loop_state.get("decisionMode"),
-            "enabledAgentCount": len(cached_live_enabled_agents),
+            "enabledAgentCount": len(enabled_live_agents),
             "threadAlive": checklist["schedulerThreadAlive"],
             "pause": pause,
             "killSwitch": kill_switch,
@@ -4691,11 +4933,16 @@ def get_live_agent_mode_autonomy_metrics():
             "turnHistoryCount": len(turns),
             "completedTurnCount": len(completed_turns),
             "failedTurnCount": len(failed_turns),
+            "completedTurnCountByAgent": completed_turn_counts_by_agent,
+            "enabledAgentsWithCompletedTurns": per_agent_distribution["enabledCompletedTurnAgentCount"],
+            "enabledAgentsWithCompletedBackendActions": per_agent_distribution["enabledCompletedBackendActionAgentCount"],
+            "perAgentDistribution": per_agent_distribution,
             "turnDuration": _latency_summary([sample * 1000 for sample in turn_duration_samples]),
             "activeWorldActionCount": len(active_actions),
             "routePendingActiveCount": len(active_route_pending),
             "completedBackendActionCount": len(completed_backend_actions),
             "failedBackendActionCount": len(failed_backend_actions),
+            "completedBackendActionCountByAgent": completed_backend_action_counts_by_agent,
             "terminalBackendActionCount": backend_action_total,
             "actionSuccessRate": action_success_rate,
             "recoveryRate": recovery_rate,
@@ -4755,6 +5002,8 @@ def get_live_agent_mode_autonomy_metrics():
             "mutationEndpointsRemainLicenseGated": True,
             "browserRequiredForProgress": False,
             "fullSoakTargetTurns": 100,
+            "fullSoakTargetAgents": 5,
+            "perAgentDistributionEvidence": True,
             "universalProviderSupportMeasured": True,
             "clawMindArchitectureMeasured": True,
             "metricsProviderCalls": 0,
