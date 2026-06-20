@@ -42,6 +42,8 @@ The problem with the previous attempt was ownership. The server could validate a
 
 The current backend executor moves Agent Live Mode world actions through routing, arrival, object use, and completion on the server. Browser clients no longer need to claim a route for autonomous completion; they can poll `/api/live-agent-mode/animation-events` and replay server-emitted movement/object-use events while the durable world action and final simulated agent location remain server-owned.
 
+The next reliability bar is online-game-style presence. Every browser tab must be a client of one authoritative world, not a separate visual instance. Refreshing the page must not reset an agent to a spawn/default location. If an agent moves, builds, places an object, deletes an object, or changes a building, the server must persist that action and publish it to every connected client so the change appears without a manual refresh. Agent actions must be presence-defined: the agent routes to the target building/floor/object/coordinates first, then the backend applies the mutation only after arrival.
+
 The redesigned mode keeps the good API vocabulary, but moves autonomous execution authority to the backend.
 
 ## Non-Goals
@@ -75,6 +77,34 @@ GET /api/live-agent-mode/metrics
 ```
 
 It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, per-agent live turn/action distribution, p50/p95 turn duration, action success/recovery rates, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, reaction opportunities, bounded memory growth, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
+
+The metrics endpoint must also expose the online-game presence contract:
+
+- `metrics.presencePersistence.agentCount`
+- `metrics.presencePersistence.persistedLocationCount`
+- `metrics.presencePersistence.refreshResetCount`
+- `metrics.presencePersistence.ok`
+- `metrics.worldEventFeed.lastSequence`
+- `metrics.worldEventFeed.replayableEventCount`
+- `metrics.worldEventFeed.connectedClientCount`
+- `metrics.worldEventFeed.multiClientSyncLatencyMs.p95`
+- `metrics.worldEventFeed.ok`
+- `metrics.routeBeforeAction.routeRequiredCount`
+- `metrics.routeBeforeAction.arrivalBeforeMutationCount`
+- `metrics.routeBeforeAction.violations`
+- `metrics.routeBeforeAction.ok`
+- `metrics.presenceDefinedMutation.mutationCount`
+- `metrics.presenceDefinedMutation.mutationWithoutPresenceCount`
+- `metrics.presenceDefinedMutation.rejectedWrongLocationCount`
+- `metrics.presenceDefinedMutation.ok`
+- `metrics.reconnectReplay.clientCatchupCount`
+- `metrics.reconnectReplay.missedMutationCount`
+- `metrics.reconnectReplay.ok`
+- `finalGate.checks.presencePersistenceOk`
+- `finalGate.checks.multiClientWorldSyncOk`
+- `finalGate.checks.routeBeforeActionOk`
+- `finalGate.checks.presenceDefinedMutationsOk`
+- `finalGate.checks.reconnectReplayOk`
 
 The default 8587 soak gate must prove the 100 completed backend turns are distributed across at least five enabled Live Agent Mode residents. The metrics surface this as `metrics.perAgentDistribution` and repeat the compact evidence under `finalGate.evidence` so reviewers can see which enabled agents completed live turns and backend-owned actions.
 
@@ -535,6 +565,91 @@ The frontend can interpolate from animation events:
 
 Implementation note: backend-owned Live Agent actions now persist `execution.owner: "server-simulation"`, `route.routeOwner: "server-simulation"`, and `clientRequiredForProgress: false`. The executor records final agent locations under `world-meta.json#agentLife.simulation.agentLocations` and emits sequenced replay events under `world-meta.json#agentLife.animationEvents`.
 
+### 8A. Server-Authoritative Presence and Permanence
+
+Live Agent Mode must behave like a persistent online world:
+
+- the server owns every agent's authoritative location
+- browser clients render the current server location
+- page refresh reloads the same server location instead of resetting to spawn
+- server restart reloads resident locations from durable world state
+- active route state survives browser disconnect/reconnect
+- user-directed moves and Live Agent moves converge into the same location store
+
+The authoritative presence record must include:
+
+- `agentId`
+- `providerKind`
+- `buildingId`
+- `floor`
+- `roomId`, when known
+- `x` and `z` in world-tile coordinates
+- `apiX` and `apiZ`, when API-pixel compatibility is needed
+- `facing`
+- `routeId`
+- `worldActionId`
+- `target`
+- `state` such as `idle`, `routing`, `arrived`, `acting`, `blocked`
+- `updatedAt`
+- `source` such as `live-agent-loop`, `user-move`, `browser-replay`, or `server-recovery`
+
+The browser must never treat local spawn placement as authoritative once a persisted server location exists.
+
+### 8B. Shared World Event Feed
+
+All clients should receive the same world changes from one durable event stream. The event feed must cover:
+
+- agent location updates
+- route start/progress/arrival
+- action start/progress/complete/fail
+- building create/update/delete
+- object place/update/delete
+- reservation create/release
+- speech and visible reaction events
+
+Each event must include:
+
+- monotonic `sequence`
+- `eventId`
+- `eventType`
+- `agentId`, when applicable
+- `worldActionId`, when applicable
+- `target`
+- `patch` or typed payload
+- `createdAt`
+- `requiresSnapshotRefresh` when a patch cannot be applied incrementally
+
+On load/reconnect, a client must fetch a current snapshot plus all events after the snapshot cursor. If the event gap is too large, the server must force a snapshot refresh. A connected client should not require a manual browser refresh to see another client or agent's world mutation.
+
+### 8C. Route-Before-Action Contract
+
+Every physical Live Agent action must be tied to a routeable target. The backend must reject, queue, or convert to operator proposal when it cannot resolve a target.
+
+For physical actions:
+
+1. Resolve the building/floor/object/coordinate/agent target.
+2. Persist the action as `route_pending`.
+3. Persist the route target and expected arrival location.
+4. Move the server-authoritative agent location along that route.
+5. Emit route and movement events.
+6. Mark the action `arrived` only when the authoritative location matches the target tolerance.
+7. Apply object/building mutation only after arrival.
+8. Emit mutation and completion events.
+
+The mutation record must include `agentId`, `fromLocation`, `targetLocation`, `arrivedAt`, `actionStartedAt`, and `mutationAppliedAt`. A mutation applied while the agent is physically elsewhere is a contract violation.
+
+### 8D. Presence-Defined World Mutations
+
+Build, place, delete, and update operations must be location-gated:
+
+- an agent can modify a building only from that building/floor or a valid construction target
+- an agent can place an object only at the route target or within the target footprint
+- an agent can delete/update an object only after routing to that object or its control point
+- object changes must publish world-event patches immediately
+- if an operation requires operator approval, the proposal must still include the route target and intended visible action
+
+The server must record rejected mutations caused by missing or mismatched presence so acceptance tests can prove hidden background edits are not slipping through.
+
 ### 9. Object Use
 
 Object use should be a backend tool, not just a client animation.
@@ -806,6 +921,11 @@ The mode is not ready to expose in product UI until all of these pass:
 - A selected agent can run at least 50 consecutive backend-owned turns without an open browser.
 - The default 8587 soak can complete 100 backend-owned turns across at least five enabled Live Agent Mode agents, with per-agent turn/action counts in metrics and final-gate evidence.
 - A selected agent can move to a building and persist its final location without browser help.
+- Refreshing the browser three times does not reset any live-enabled agent's server-authoritative location.
+- Two connected browser clients see the same agent movement and object/building mutation without manual refresh.
+- Client reconnect catches up by snapshot plus world-event replay without missing a completed mutation.
+- A selected agent can build/place/delete/update only after routing to the target location.
+- Metrics report zero route-before-action violations and zero mutation-without-presence violations.
 - A selected agent can use at least three typed objects and persist side effects.
 - A selected agent can speak to a nearby agent and create a reaction turn.
 - Conversation history appears in UI and API.
@@ -882,6 +1002,15 @@ Phase 8: product exposure
 - run manual regression tests
 - expose per-agent enable controls only after green acceptance results
 
+Phase 9: online-game presence hardening
+
+- persist server-authoritative agent locations for refresh/restart permanence
+- add durable world event feed and client patch application
+- enforce route-before-action for build/place/delete/update/object-use mutations
+- add reconnect catch-up by snapshot plus event cursor
+- add two-client 8587 verification for movement and world mutations without refresh
+- add metrics/final-gate checks for presence persistence, multi-client sync, route-before-action, presence-defined mutations, and reconnect replay
+
 ## Testing Requirements
 
 Unit tests:
@@ -901,6 +1030,10 @@ Integration tests:
 - no-browser object use
 - server restart during active turn
 - browser reconnect animation replay
+- browser refresh location persistence
+- two-client movement/object mutation sync
+- route-before-action mutation enforcement
+- reconnect snapshot/event catch-up
 - conversation and reaction turn
 - operator pause and kill switch
 
