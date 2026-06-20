@@ -595,6 +595,8 @@ The authoritative presence record must include:
 
 The browser must never treat local spawn placement as authoritative once a persisted server location exists.
 
+Implementation note: the backend now keeps the unified presence store at `world-meta.json#agentLife.presence.agentLocations`. Existing `agentLife.simulation.agentLocations` records are migrated into that store for compatibility, and every backend Live Agent movement, user move intent, world-action route transition, browser replay completion, and server recovery path writes the same presence record. `/api/agents` includes each agent's `presence` snapshot so `main3d.js` places refreshed clients at the server-owned location before applying desk/spawn fallback logic. `/api/live-agent-mode/metrics` reports `metrics.presencePersistence` and `finalGate.checks.presencePersistenceOk`.
+
 ### 8B. Shared World Event Feed
 
 All clients should receive the same world changes from one durable event stream. The event feed must cover:
