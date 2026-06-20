@@ -428,6 +428,24 @@ try:
     assert presence["buildingId"] == "office-smoke", presence
     assert presence["source"] == "live-agent-loop", presence
     assert presence["routeState"] == "completed", presence
+    ok, stale_result, stale_status = module.save_agent_presence_from_payload("adam", {
+        "source": "browser-replay",
+        "state": "routing",
+        "actionId": action_id,
+        "worldActionId": action_id,
+        "location": {
+            "buildingId": "office-smoke",
+            "floor": 1,
+            "apiX": 160,
+            "apiZ": 160,
+            "x": 4,
+            "z": 4,
+        },
+    })
+    assert ok and stale_status == 200, stale_result
+    presence = module.load_world_meta()["agentLife"]["presence"]["agentLocations"]["adam"]
+    assert presence["source"] == "live-agent-loop", presence
+    assert presence["routeState"] == "completed", presence
     loop_state = module.get_live_agent_loop_state(persist_migration=True)
     outcome_record = next((item for item in loop_state["outcomeAwareness"] if item.get("actionId") == action_id), None)
     assert outcome_record, loop_state["outcomeAwareness"]

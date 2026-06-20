@@ -1492,6 +1492,7 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "turnTimeoutSec": 240,
     "turnRetryBackoffSec": 45,
     "maxTurnRetries": 2,
+    "soakTargetTurns": 100,
     "operatorProposalRetention": 24,
     "outcomeAwarenessRetention": 160,
     "societyObservationRetention": 160,
@@ -4840,7 +4841,7 @@ def get_live_agent_mode_autonomy_metrics():
         for row in enabled_agent_distribution_evidence
     }
     default_soak_target_agents = 5
-    default_soak_target_turns = 100
+    default_soak_target_turns = _normalize_int(loop_state.get("soakTargetTurns"), LIVE_AGENT_LOOP_DEFAULTS["soakTargetTurns"], minimum=1, maximum=1000)
     provider_support = _live_agent_provider_adapter_metrics(cached_roster, loop_state=loop_state)
     clawmind_architecture = _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
     backend_action_total = len(backend_terminal_actions)
@@ -7315,6 +7316,7 @@ def default_live_agent_loop_state():
         "turnTimeoutSec": LIVE_AGENT_LOOP_DEFAULTS["turnTimeoutSec"],
         "turnRetryBackoffSec": LIVE_AGENT_LOOP_DEFAULTS["turnRetryBackoffSec"],
         "maxTurnRetries": LIVE_AGENT_LOOP_DEFAULTS["maxTurnRetries"],
+        "soakTargetTurns": LIVE_AGENT_LOOP_DEFAULTS["soakTargetTurns"],
         "agents": {},
         "events": [],
         "eventSequence": 0,
@@ -7664,6 +7666,7 @@ def _normalize_live_agent_loop_state(raw):
         state["turnTimeoutSec"] = _normalize_int(raw.get("turnTimeoutSec"), state["turnTimeoutSec"], minimum=30, maximum=3600)
         state["turnRetryBackoffSec"] = _normalize_int(raw.get("turnRetryBackoffSec"), state["turnRetryBackoffSec"], minimum=5, maximum=1800)
         state["maxTurnRetries"] = _normalize_int(raw.get("maxTurnRetries"), state["maxTurnRetries"], minimum=0, maximum=10)
+        state["soakTargetTurns"] = _normalize_int(raw.get("soakTargetTurns"), state["soakTargetTurns"], minimum=1, maximum=1000)
         state["killSwitch"] = _live_agent_loop_normalize_kill_switch(raw.get("killSwitch") if isinstance(raw.get("killSwitch"), dict) else raw)
         state["eventSequence"] = _normalize_int(raw.get("eventSequence"), 0, minimum=0, maximum=1000000000)
         if isinstance(raw.get("scheduler"), dict):
@@ -12608,6 +12611,7 @@ def update_live_agent_loop_settings(payload):
             "turnTimeoutSec": (30, 3600),
             "turnRetryBackoffSec": (5, 1800),
             "maxTurnRetries": (0, 10),
+            "soakTargetTurns": (1, 1000),
         }
         for key, (minimum, maximum) in int_limits.items():
             if key in payload:

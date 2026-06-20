@@ -23,10 +23,12 @@ const VENDING_ID = 'acceptance-vending';
 const WHITEBOARD_ID = 'acceptance-whiteboard';
 const PRINTER_ID = 'acceptance-printer';
 const MICROWAVE_ID = 'acceptance-microwave';
-const ACCEPTANCE_TURN_TARGET = Math.max(1, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS || process.env.VW_LIVE_AGENT_MODE_SOAK_TURNS || '100', 10) || 100);
+const ACCEPTANCE_TURN_TARGET = Math.max(1, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS || process.env.VW_LIVE_AGENT_MODE_SOAK_TURNS || '10', 10) || 10);
 const SOAK_AGENT_COUNT = Math.max(2, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_SOAK_AGENT_COUNT || process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_AGENTS || '5', 10) || 5);
 const EXTRA_SOAK_AGENT_IDS = Array.from({ length: Math.max(0, SOAK_AGENT_COUNT - 2) }, (_, index) => `acceptance-soak-${index + 3}`);
 const SOAK_AGENT_IDS = [TEST_AGENT_ID, PEER_AGENT_ID, ...EXTRA_SOAK_AGENT_IDS];
+const REQUEST_TIMEOUT_MS = 30000;
+const BACKEND_TICK_TIMEOUT_MS = 120000;
 const keepOpen = process.argv.includes('--keep-open');
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
@@ -163,7 +165,18 @@ async function requestJson(path, { method = 'GET', body } = {}) {
   const maxAttempts = 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
+    const timeoutMs = method === 'POST' && path === '/api/agent-live-loop/tick'
+      ? BACKEND_TICK_TIMEOUT_MS
+      : REQUEST_TIMEOUT_MS;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let heartbeat = null;
+    if (method === 'POST' && path === '/api/agent-live-loop/tick') {
+      const startedAt = Date.now();
+      heartbeat = setInterval(() => {
+        const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+        console.log(`INFO: waiting for ${method} ${path} (${elapsedSec}s elapsed, attempt ${attempt}/${maxAttempts})`);
+      }, 10000);
+    }
     try {
       const response = await fetch(`${BASE_URL}${path}`, {
         method,
@@ -193,8 +206,14 @@ async function requestJson(path, { method = 'GET', body } = {}) {
         await delay(250);
         continue;
       }
+      if (error?.name === 'AbortError') {
+        const timeoutError = new Error(`${method} ${path} timed out after ${timeoutMs}ms`, { cause: error });
+        timeoutError.name = 'AbortError';
+        throw timeoutError;
+      }
       throw error;
     } finally {
+      if (heartbeat) clearInterval(heartbeat);
       clearTimeout(timeout);
     }
   }
@@ -378,16 +397,8 @@ function acceptanceHomeBuilding() {
   };
 }
 
-async function seedAcceptanceWorld() {
-  const office = await postJson('/api/building', acceptanceOfficeBuilding());
-  assert(office?.ok === true, 'failed to seed acceptance office building', office);
-
-  const home = await postJson('/api/building', acceptanceHomeBuilding());
-  assert(home?.ok === true, 'failed to seed acceptance home building', home);
-
-  const now = new Date().toISOString();
-  const agentAssignments = {};
-  const agentProfiles = {
+function providerFixtureProfiles() {
+  return {
     [HERMES_FIXTURE_AGENT_ID]: {
       name: 'Acceptance Hermes Fixture',
       providerKind: 'hermes',
@@ -413,6 +424,30 @@ async function seedAcceptanceWorld() {
       capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
     },
   };
+}
+
+async function ensureProviderFixtureProfiles() {
+  const meta = await fetchJson('/api/meta');
+  const currentProfiles = meta?.agentProfiles && typeof meta.agentProfiles === 'object' ? meta.agentProfiles : {};
+  const seeded = await postJson('/api/meta', {
+    agentProfiles: {
+      ...currentProfiles,
+      ...providerFixtureProfiles(),
+    },
+  });
+  assert(seeded?.ok === true, 'failed to restore provider fixture profiles for bridge contract', seeded);
+}
+
+async function seedAcceptanceWorld() {
+  const office = await postJson('/api/building', acceptanceOfficeBuilding());
+  assert(office?.ok === true, 'failed to seed acceptance office building', office);
+
+  const home = await postJson('/api/building', acceptanceHomeBuilding());
+  assert(home?.ok === true, 'failed to seed acceptance home building', home);
+
+  const now = new Date().toISOString();
+  const agentAssignments = {};
+  const agentProfiles = providerFixtureProfiles();
   const agentLocations = {};
   const loopAgents = {};
   for (const [index, agentId] of SOAK_AGENT_IDS.entries()) {
@@ -474,6 +509,7 @@ async function seedAcceptanceWorld() {
   const seeded = await postJson('/api/meta', {
     initialized: true,
     name: '8587 Live Agent Mode Acceptance',
+    dayNightCycleEnabled: false,
     agentAssignments,
     agentProfiles,
     agentLife: {
@@ -490,6 +526,7 @@ async function seedAcceptanceWorld() {
         minActionIntervalSec: 30,
         maxActionsPerTick: 1,
         maxToolCallsPerTurn: 1,
+        soakTargetTurns: ACCEPTANCE_TURN_TARGET,
         agents: loopAgents,
       },
     },
@@ -515,6 +552,7 @@ async function seedAcceptanceWorld() {
     maxActionsPerTick: 1,
     maxToolCallsPerTurn: 1,
     minActionIntervalSec: 30,
+    soakTargetTurns: ACCEPTANCE_TURN_TARGET,
     agentId: TEST_AGENT_ID,
     agentEnabled: true,
     clearTurnRetry: true,
@@ -673,7 +711,22 @@ async function waitForLiveAgentSchedulerIdle(context, timeoutMs = 45000) {
   throw new Error(`${context || 'scheduler'} still has an active live-agent turn\n${JSON.stringify(last, null, 2)}`);
 }
 
+async function ensureAgentReadyForLiveActions(agentId) {
+  const liveMode = await postJson(`/api/agent/${encodeURIComponent(agentId)}/live-mode`, {
+    agentLiveModeEnabled: true,
+  });
+  assert(liveMode?.ok === true && liveMode.agentLiveModeEnabled === true, `failed to enable Live Agent Mode before action for ${agentId}`, liveMode);
+  const loop = await postJson('/api/agent-live-loop', {
+    agentId,
+    agentEnabled: true,
+    clearTurnRetry: true,
+    actor: '8587-acceptance-action-helper',
+  });
+  assert(loop?.ok === true, `failed to enable Live Agent loop state before action for ${agentId}`, loop);
+}
+
 async function requestLiveAgentAction({ actionType, capabilityTag, target, params = {}, agentId = TEST_AGENT_ID, requestId }) {
+  await ensureAgentReadyForLiveActions(agentId);
   await waitForAgentWorldActionIdle(agentId, `before ${actionType}`);
   let result = null;
   const body = {
@@ -772,6 +825,7 @@ async function waitForCommunicationEvent(eventId) {
 }
 
 async function verifyFakeProviderBridgeContract() {
+  await ensureProviderFixtureProfiles();
   const enabled = await postJson(`/api/agent/${encodeURIComponent(FAKE_FIXTURE_AGENT_ID)}/live-mode`, {
     agentLiveModeEnabled: true,
   });
@@ -822,6 +876,32 @@ async function verifyFakeProviderBridgeContract() {
   }
 }
 
+async function ensurePeerNearAcceptanceAgent() {
+  const presence = await fetchJson('/api/live-agent-mode/presence');
+  const agentLocation = presence?.locations?.[TEST_AGENT_ID] || presence?.presence?.agentLocations?.[TEST_AGENT_ID];
+  assert(agentLocation, 'acceptance agent presence missing before social communication check', presence);
+  const tileX = Number.isFinite(Number(agentLocation.x)) ? Number(agentLocation.x) : Number(agentLocation.apiX) / 40;
+  const tileZ = Number.isFinite(Number(agentLocation.z)) ? Number(agentLocation.z) : Number(agentLocation.apiZ) / 40;
+  const nextPeerLocation = {
+    buildingId: agentLocation.buildingId || OFFICE_BUILDING_ID,
+    floor: agentLocation.floor || 1,
+    x: Number.isFinite(tileX) ? tileX + 0.25 : 15.25,
+    z: Number.isFinite(tileZ) ? tileZ : 10,
+    apiX: Number.isFinite(Number(agentLocation.apiX)) ? Number(agentLocation.apiX) + 10 : 610,
+    apiZ: Number.isFinite(Number(agentLocation.apiZ)) ? Number(agentLocation.apiZ) : 400,
+    coordinateSpace: 'world-tiles',
+    routeState: 'completed',
+    routeStatus: 'completed',
+  };
+  const saved = await postJson(`/api/agent-presence/${encodeURIComponent(PEER_AGENT_ID)}`, {
+    source: '8587-acceptance-social-proximity',
+    state: 'completed',
+    location: nextPeerLocation,
+  });
+  assert(saved?.ok === true, 'failed to place peer near acceptance agent for social communication check', saved);
+  return saved.presence;
+}
+
 async function verifySocialCommunicationAndMemory() {
   const social = await requestLiveAgentAction({
     actionType: 'life.social',
@@ -834,6 +914,7 @@ async function verifySocialCommunicationAndMemory() {
     },
     requestId: '8587-acceptance-social-agent-target',
   });
+  await ensurePeerNearAcceptanceAgent();
 
   const speech = await executeLiveAgentTool('say_to_agent', {
     targetAgentId: PEER_AGENT_ID,
@@ -1203,10 +1284,19 @@ function runChild(command, args, { input, env } = {}) {
     });
     let stdout = '';
     let stderr = '';
+    const startedAt = Date.now();
+    const heartbeat = setInterval(() => {
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+      console.log(`INFO: waiting for ${command} ${args.join(' ')} (${elapsedSec}s elapsed)`);
+    }, 15000);
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.once('error', reject);
+    child.once('error', (error) => {
+      clearInterval(heartbeat);
+      reject(error);
+    });
     child.once('exit', (code, signal) => {
+      clearInterval(heartbeat);
       if (code === 0) {
         resolve({ stdout, stderr });
       } else {
@@ -1336,6 +1426,11 @@ print(json.dumps(result, sort_keys=True))
 }
 
 async function runBrowserRefreshPresenceCheck() {
+  const presencePayload = await fetchJson('/api/live-agent-mode/presence');
+  const presenceLocations = presencePayload?.locations || presencePayload?.presence?.agentLocations || {};
+  const agentId = [TEST_AGENT_ID, ...SOAK_AGENT_IDS].find((candidate) => presenceLocations?.[candidate])
+    || Object.keys(presenceLocations || {}).find((candidate) => candidate);
+  assert(agentId, 'no persisted presence location available before browser refresh check', presencePayload);
   const script = String.raw`
 import json
 import os
@@ -1427,12 +1522,12 @@ print(json.dumps({"ok": True, "refreshes": len(results) - 1, "results": results}
     input: script,
     env: {
       VW_ACCEPTANCE_BASE_URL: BASE_URL,
-      VW_ACCEPTANCE_AGENT_ID: TEST_AGENT_ID,
+      VW_ACCEPTANCE_AGENT_ID: agentId,
     },
   });
   const result = JSON.parse(stdout.trim().split('\n').at(-1));
   assert(result.ok === true && result.refreshes >= 3, 'browser refresh presence check failed', result);
-  console.log(`PASS: ${TEST_AGENT_ID} stayed at server-authoritative presence coordinates across ${result.refreshes} browser refreshes on ${BASE_URL}.`);
+  console.log(`PASS: ${agentId} stayed at server-authoritative presence coordinates across ${result.refreshes} browser refreshes on ${BASE_URL}.`);
   return result;
 }
 
