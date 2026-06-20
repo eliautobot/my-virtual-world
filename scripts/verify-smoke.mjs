@@ -424,6 +424,10 @@ try:
     assert completed["execution"]["clientRequiredForProgress"] is False, completed["execution"]
     assert completed["route"]["routeOwner"] == "server-simulation", completed["route"]
     assert completed["route"]["setAgentTarget"] is False, completed["route"]
+    presence = module.load_world_meta()["agentLife"]["presence"]["agentLocations"]["adam"]
+    assert presence["buildingId"] == "office-smoke", presence
+    assert presence["source"] == "live-agent-loop", presence
+    assert presence["routeState"] == "completed", presence
     loop_state = module.get_live_agent_loop_state(persist_migration=True)
     outcome_record = next((item for item in loop_state["outcomeAwareness"] if item.get("actionId") == action_id), None)
     assert outcome_record, loop_state["outcomeAwareness"]
@@ -701,6 +705,8 @@ try:
     assert distribution["enabledAgentIds"] == ["adam", "loop-only"], distribution
     assert distribution["enabledAgentsMissingCompletedTurns"] == ["adam", "loop-only"], distribution
     assert distribution["enabledAgentsMissingCompletedBackendActions"] == ["adam", "loop-only"], distribution
+    assert metrics["metrics"]["presencePersistence"]["agentCount"] == 2, metrics["metrics"]["presencePersistence"]
+    assert metrics["metrics"]["presencePersistence"]["refreshResetCount"] == 0, metrics["metrics"]["presencePersistence"]
     assert metrics["finalGate"]["checks"]["defaultSoakEnabledAgentRosterPresent"] is False, metrics["finalGate"]
     assert metrics["finalGate"]["checks"]["turnsCompletedAcrossEnabledAgents"] is False, metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["enabledAgentCount"] == 2, metrics["finalGate"]
@@ -1083,6 +1089,10 @@ for (const token of [
 
 for (const token of [
   'LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"',
+  'LIVE_AGENT_PRESENCE_SCHEMA_VERSION = "agent-live-mode-presence-persistence/v1"',
+  'def get_live_agent_presence_store',
+  'def _save_live_agent_presence_for_action_status',
+  'presencePersistence',
   'LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION = "agent-live-mode-plan/v1"',
   'LIVE_AGENT_OPERATOR_PROPOSAL_SCHEMA_VERSION = "agent-live-mode-operator-proposal/v1"',
   'LIVE_AGENT_OPERATOR_TIMELINE_SCHEMA_VERSION = "agent-live-mode-operator-timeline/v1"',
@@ -1327,6 +1337,8 @@ for (const token of [
   'agentHasLiveModeWorldActionRoute',
   'stale_claim_released',
   'routeLiveModeLocalObjectWorldAction',
+  'normalizeAuthoritativeAgentPresence',
+  'applyAuthoritativePresenceToAgent',
   'LIVE_MODE_LOCAL_OBJECT_WORLD_ACTION_CONFIGS',
   "completeIdleWorldAction(whiteboardActivity",
   "completeIdleWorldAction(printerActivity",

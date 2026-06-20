@@ -1444,6 +1444,10 @@ LIVE_AGENT_CLAWMIND_MODULES = [
     "orchestrator",
 ]
 LIVE_AGENT_SIMULATION_SCHEMA_VERSION = "agent-live-mode-simulation/v1"
+LIVE_AGENT_PRESENCE_SCHEMA_VERSION = "agent-live-mode-presence-persistence/v1"
+LIVE_AGENT_PRESENCE_LOCATION_SCHEMA_VERSION = "agent-live-mode-presence-location/v1"
+LIVE_AGENT_PRESENCE_METRICS_SCHEMA_VERSION = "agent-live-mode-presence-persistence-metrics/v1"
+LIVE_AGENT_PRESENCE_HISTORY_LIMIT = 200
 LIVE_AGENT_BACKEND_EXECUTOR_ID = "server.py#live_agent_backend_action_executor"
 LIVE_AGENT_ANIMATION_EVENT_NAMES = {
     "agent-move-started",
@@ -4814,6 +4818,7 @@ def get_live_agent_mode_autonomy_metrics():
     kill_switch = _live_agent_loop_kill_switch_status(loop_state)
     cached_roster = _live_agent_cached_roster_for_metrics()
     enabled_live_agents = _live_agent_metric_enabled_agent_records(cached_roster, loop_state, meta)
+    presence_persistence = _live_agent_presence_persistence_metrics(enabled_live_agents, meta)
     per_agent_distribution = _live_agent_metric_per_agent_distribution(enabled_live_agents, turns, backend_terminal_actions)
     per_agent_distribution_by_agent = per_agent_distribution.get("byAgent") if isinstance(per_agent_distribution.get("byAgent"), dict) else {}
     enabled_agent_distribution_evidence = []
@@ -4887,6 +4892,7 @@ def get_live_agent_mode_autonomy_metrics():
         "defaultSoakCompletedBackendActionTargetMet": len(completed_backend_actions) >= default_soak_target_turns,
         "turnsCompletedAcrossEnabledAgents": per_agent_distribution["allEnabledAgentsHaveCompletedTurn"],
         "actionsCompletedAcrossEnabledAgents": per_agent_distribution["allEnabledAgentsHaveCompletedBackendAction"],
+        "presencePersistenceOk": presence_persistence["ok"],
     }
     final_gate_checks = {
         "featureGateOpen": checklist["featureGateOpen"],
@@ -4902,6 +4908,7 @@ def get_live_agent_mode_autonomy_metrics():
         "defaultSoakCompletedBackendActionTargetMet": checklist["defaultSoakCompletedBackendActionTargetMet"],
         "turnsCompletedAcrossEnabledAgents": checklist["turnsCompletedAcrossEnabledAgents"],
         "actionsCompletedAcrossEnabledAgents": checklist["actionsCompletedAcrossEnabledAgents"],
+        "presencePersistenceOk": checklist["presencePersistenceOk"],
     }
     final_gate = {
         "schemaVersion": "agent-live-mode-final-gate/v1",
@@ -4923,6 +4930,7 @@ def get_live_agent_mode_autonomy_metrics():
             "enabledAgentsMissingCompletedTurns": per_agent_distribution["enabledAgentsMissingCompletedTurns"],
             "enabledAgentsMissingCompletedBackendActions": per_agent_distribution["enabledAgentsMissingCompletedBackendActions"],
             "enabledAgents": enabled_agent_distribution_evidence,
+            "presencePersistence": presence_persistence,
         },
     }
     return {
@@ -4948,6 +4956,7 @@ def get_live_agent_mode_autonomy_metrics():
             "enabledAgentsWithCompletedTurns": per_agent_distribution["enabledCompletedTurnAgentCount"],
             "enabledAgentsWithCompletedBackendActions": per_agent_distribution["enabledCompletedBackendActionAgentCount"],
             "perAgentDistribution": per_agent_distribution,
+            "presencePersistence": presence_persistence,
             "turnDuration": _latency_summary([sample * 1000 for sample in turn_duration_samples]),
             "activeWorldActionCount": len(active_actions),
             "routePendingActiveCount": len(active_route_pending),
@@ -5021,6 +5030,7 @@ def get_live_agent_mode_autonomy_metrics():
             "clawMindArchitectureMeasured": True,
             "metricsProviderCalls": 0,
             "metricsModelCalls": 0,
+            "presencePersistenceMeasured": True,
         },
     }
 
@@ -5130,13 +5140,504 @@ def _live_agent_location_with_api(location):
     if not isinstance(location, dict):
         return None
     next_location = dict(location)
+    coordinate_space = str(next_location.get("coordinateSpace") or "").strip().lower()
     x = _number_or_none(next_location.get("x"))
     z = _number_or_none(next_location.get("z") if next_location.get("z") is not None else next_location.get("y"))
+    if coordinate_space in {"api-pixels", "api", "client-pixels"}:
+        if x is not None:
+            next_location["apiX"] = round(x, 3)
+            x = round(x / LIVE_AGENT_LOOP_API_TILE, 3)
+            next_location["x"] = x
+        if z is not None:
+            next_location["apiZ"] = round(z, 3)
+            z = round(z / LIVE_AGENT_LOOP_API_TILE, 3)
+            next_location["z"] = z
+        next_location["coordinateSpace"] = "world-tiles"
     if x is not None:
         next_location["apiX"] = round(x * LIVE_AGENT_LOOP_API_TILE, 3)
     if z is not None:
         next_location["apiZ"] = round(z * LIVE_AGENT_LOOP_API_TILE, 3)
     return next_location
+
+
+def _live_agent_presence_aliases(agent_id):
+    aliases = set()
+    wanted = str(agent_id or "").strip()
+    if wanted:
+        aliases.add(wanted)
+    try:
+        aliases.update(alias for alias in _live_agent_loop_agent_aliases(wanted) if alias)
+    except Exception:
+        pass
+    try:
+        resolved = _resolve_agent_id(wanted)
+        if resolved:
+            aliases.add(resolved)
+            aliases.update(alias for alias in _live_agent_loop_agent_aliases(resolved) if alias)
+    except Exception:
+        pass
+    return {str(alias).strip() for alias in aliases if str(alias or "").strip()}
+
+
+def _live_agent_presence_provider_kind(agent_id):
+    aliases = _live_agent_presence_aliases(agent_id)
+    try:
+        for agent in get_roster():
+            if not isinstance(agent, dict):
+                continue
+            agent_aliases = {
+                str(agent.get("id") or "").strip(),
+                str(agent.get("statusKey") or "").strip(),
+                str(agent.get("providerAgentId") or "").strip(),
+            }
+            agent_aliases.discard("")
+            if aliases.intersection(agent_aliases):
+                return agent.get("providerKind") or agent.get("provider")
+    except Exception:
+        pass
+    profiles = load_world_meta().get("agentProfiles") or {}
+    if isinstance(profiles, dict):
+        for profile_id, profile in profiles.items():
+            if not isinstance(profile, dict):
+                continue
+            profile_aliases = {
+                str(profile_id or "").strip(),
+                str(profile.get("id") or "").strip(),
+                str(profile.get("statusKey") or "").strip(),
+                str(profile.get("providerAgentId") or "").strip(),
+                str(profile.get("profile") or "").strip(),
+            }
+            profile_aliases.discard("")
+            if aliases.intersection(profile_aliases):
+                return profile.get("providerKind") or profile.get("provider")
+    return None
+
+
+def _live_agent_presence_location_fields(location):
+    if not isinstance(location, dict):
+        return {}
+    raw = dict(location)
+    coordinate_space = str(raw.get("coordinateSpace") or "").strip().lower()
+    api_x = _number_or_none(raw.get("apiX") if raw.get("apiX") is not None else raw.get("api_x"))
+    api_z = _number_or_none(
+        raw.get("apiZ")
+        if raw.get("apiZ") is not None
+        else raw.get("apiY")
+        if raw.get("apiY") is not None
+        else raw.get("api_z")
+    )
+    world_x = _number_or_none(raw.get("worldX") if raw.get("worldX") is not None else raw.get("x"))
+    world_z = _number_or_none(
+        raw.get("worldZ")
+        if raw.get("worldZ") is not None
+        else raw.get("z")
+        if raw.get("z") is not None
+        else raw.get("y")
+    )
+    if coordinate_space in {"api-pixels", "api", "client-pixels"}:
+        if api_x is None:
+            api_x = _number_or_none(raw.get("x"))
+        if api_z is None:
+            api_z = _number_or_none(raw.get("z") if raw.get("z") is not None else raw.get("y"))
+        world_x = round(api_x / LIVE_AGENT_LOOP_API_TILE, 3) if api_x is not None else None
+        world_z = round(api_z / LIVE_AGENT_LOOP_API_TILE, 3) if api_z is not None else None
+    else:
+        if api_x is None and world_x is not None:
+            api_x = round(world_x * LIVE_AGENT_LOOP_API_TILE, 3)
+        if api_z is None and world_z is not None:
+            api_z = round(world_z * LIVE_AGENT_LOOP_API_TILE, 3)
+    fields = {
+        "buildingId": raw.get("buildingId"),
+        "floor": max(1, int(_number_or_none(raw.get("floor") if raw.get("floor") is not None else raw.get("buildingFloor")) or 1)),
+        "roomId": raw.get("roomId") or raw.get("room"),
+        "x": round(world_x, 3) if world_x is not None else None,
+        "z": round(world_z, 3) if world_z is not None else None,
+        "apiX": round(api_x, 3) if api_x is not None else None,
+        "apiZ": round(api_z, 3) if api_z is not None else None,
+        "facing": _number_or_none(raw.get("facing") if raw.get("facing") is not None else raw.get("heading")),
+        "targetKind": raw.get("targetKind") or raw.get("kind"),
+        "objectInstanceId": raw.get("objectInstanceId"),
+        "catalogId": raw.get("catalogId"),
+        "targetAgentId": raw.get("targetAgentId"),
+        "coordinateSpace": "world-tiles",
+    }
+    return {key: value for key, value in fields.items() if value is not None}
+
+
+def _live_agent_presence_has_location(record):
+    if not isinstance(record, dict):
+        return False
+    return bool(record.get("buildingId") or (record.get("apiX") is not None and record.get("apiZ") is not None) or (record.get("x") is not None and record.get("z") is not None))
+
+
+def _live_agent_presence_target_snapshot(target):
+    if not isinstance(target, dict):
+        return None
+    allowed = {
+        "kind",
+        "buildingId",
+        "floor",
+        "buildingFloor",
+        "roomId",
+        "objectInstanceId",
+        "catalogId",
+        "targetAgentId",
+        "actionId",
+        "worldActionId",
+        "x",
+        "y",
+        "z",
+        "apiX",
+        "apiZ",
+        "coordinateSpace",
+    }
+    snapshot = {key: copy.deepcopy(value) for key, value in target.items() if key in allowed and value is not None}
+    return snapshot or None
+
+
+def _normalize_live_agent_presence_record(agent_id, location=None, *, source=None, state=None, action=None, route=None, target=None, provider_kind=None, now=None):
+    now = now or _utc_now_iso()
+    location = location if isinstance(location, dict) else {}
+    action = action if isinstance(action, dict) else {}
+    route = route if isinstance(route, dict) else action.get("route") if isinstance(action.get("route"), dict) else {}
+    target = target if isinstance(target, dict) else action.get("target") if isinstance(action.get("target"), dict) else route.get("target") if isinstance(route.get("target"), dict) else {}
+    location_fields = _live_agent_presence_location_fields(location)
+    route_state = state or route.get("state") or route.get("status") or action.get("status") or location.get("state") or location.get("status") or location.get("routeStatus")
+    world_action_id = (
+        action.get("id")
+        or route.get("worldActionId")
+        or location.get("worldActionId")
+        or location.get("actionId")
+        or target.get("worldActionId")
+        or target.get("actionId")
+    )
+    route_id = route.get("id") or route.get("routeId") or route.get("activeId") or location.get("routeId") or location.get("activeId")
+    route_snapshot = {
+        "routeId": route_id,
+        "routeState": route_state,
+        "worldActionId": world_action_id,
+        "routeOwner": route.get("routeOwner") or route.get("owner"),
+        "routingOwner": route.get("routingOwner"),
+        "clientRequiredForProgress": route.get("clientRequiredForProgress"),
+        "target": _live_agent_presence_target_snapshot(target),
+        "targetMetadata": route.get("targetMetadata") if isinstance(route.get("targetMetadata"), dict) else None,
+    }
+    route_snapshot = {key: value for key, value in route_snapshot.items() if value is not None}
+    record = {
+        "schemaVersion": LIVE_AGENT_PRESENCE_LOCATION_SCHEMA_VERSION,
+        "agentId": agent_id,
+        "providerKind": provider_kind or location.get("providerKind") or _live_agent_presence_provider_kind(agent_id),
+        **location_fields,
+        "state": route_state,
+        "routeStatus": route_state,
+        "routeState": route_state,
+        "routeId": route_id,
+        "route": route_snapshot or None,
+        "worldActionId": world_action_id,
+        "actionType": action.get("actionType") or location.get("actionType"),
+        "target": _live_agent_presence_target_snapshot(target) or _live_agent_presence_target_snapshot(location.get("target")),
+        "source": source or location.get("source") or "server-recovery",
+        "updatedAt": now,
+    }
+    return {key: value for key, value in record.items() if value is not None}
+
+
+def _default_live_agent_presence_store(now=None):
+    now = now or _utc_now_iso()
+    return {
+        "schemaVersion": LIVE_AGENT_PRESENCE_SCHEMA_VERSION,
+        "agents": {},
+        "metrics": {"refreshResetCount": 0},
+        "history": [],
+        "updatedAt": now,
+    }
+
+
+def get_live_agent_presence_store(meta=None, persist_migration=False):
+    meta = meta if isinstance(meta, dict) else load_world_meta()
+    now = _utc_now_iso()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    store = agent_life.get("presence") if isinstance(agent_life.get("presence"), dict) else _default_live_agent_presence_store(now)
+    changed = store is not agent_life.get("presence")
+    if store.get("schemaVersion") != LIVE_AGENT_PRESENCE_SCHEMA_VERSION:
+        store["schemaVersion"] = LIVE_AGENT_PRESENCE_SCHEMA_VERSION
+        changed = True
+    agents = store.get("agents") if isinstance(store.get("agents"), dict) else {}
+    legacy_presence_locations = store.get("agentLocations") if isinstance(store.get("agentLocations"), dict) else {}
+    for agent_id, location in legacy_presence_locations.items():
+        safe_agent_id = str(agent_id or "").strip()
+        if not safe_agent_id or not isinstance(location, dict) or isinstance(agents.get(safe_agent_id), dict):
+            continue
+        agents[safe_agent_id] = _normalize_live_agent_presence_record(
+            safe_agent_id,
+            location,
+            source=location.get("source") or "server-recovery",
+            state=location.get("routeStatus") or location.get("routeState") or location.get("state") or location.get("status") or "arrived",
+            now=location.get("updatedAt") or now,
+        )
+        changed = True
+    metrics = store.get("metrics") if isinstance(store.get("metrics"), dict) else {}
+    history = store.get("history") if isinstance(store.get("history"), list) else []
+    simulation = agent_life.get("simulation") if isinstance(agent_life.get("simulation"), dict) else {}
+    simulated_locations = simulation.get("agentLocations") if isinstance(simulation.get("agentLocations"), dict) else {}
+    for agent_id, location in simulated_locations.items():
+        safe_agent_id = str(agent_id or "").strip()
+        if not safe_agent_id or not isinstance(location, dict) or isinstance(agents.get(safe_agent_id), dict):
+            continue
+        agents[safe_agent_id] = _normalize_live_agent_presence_record(
+            safe_agent_id,
+            location,
+            source=location.get("source") or "server-recovery",
+            state=location.get("routeStatus") or location.get("state") or location.get("status") or "arrived",
+            now=location.get("updatedAt") or now,
+        )
+        changed = True
+    store["agents"] = agents
+    store["agentLocations"] = agents
+    metrics["refreshResetCount"] = _normalize_int(metrics.get("refreshResetCount"), 0, minimum=0, maximum=1000000000)
+    store["metrics"] = metrics
+    store["history"] = history[-LIVE_AGENT_PRESENCE_HISTORY_LIMIT:]
+    store["updatedAt"] = store.get("updatedAt") or now
+    agent_life["presence"] = store
+    meta["agentLife"] = agent_life
+    if changed and persist_migration:
+        save_world_meta(meta)
+    return store
+
+
+def _live_agent_presence_locations_from_store(presence):
+    if not isinstance(presence, dict):
+        return {}
+    agents = presence.get("agents") if isinstance(presence.get("agents"), dict) else {}
+    locations = presence.get("agentLocations") if isinstance(presence.get("agentLocations"), dict) else {}
+    merged = {**locations, **agents}
+    return {str(agent_id): dict(location) for agent_id, location in merged.items() if isinstance(location, dict)}
+
+
+def _live_agent_presence_location(agent_id, meta=None):
+    if not agent_id:
+        return None
+    store = get_live_agent_presence_store(meta, persist_migration=False)
+    agents = store.get("agents") if isinstance(store.get("agents"), dict) else {}
+    for alias in _live_agent_presence_aliases(agent_id):
+        record = agents.get(alias)
+        if isinstance(record, dict):
+            return dict(record)
+    return None
+
+
+def _live_agent_presence_locations_by_agent(meta=None):
+    store = get_live_agent_presence_store(meta, persist_migration=False)
+    agents = store.get("agents") if isinstance(store.get("agents"), dict) else {}
+    return {agent_id: dict(location) for agent_id, location in agents.items() if isinstance(location, dict)}
+
+
+def _legacy_live_agent_simulated_location(agent_id, meta=None):
+    if not agent_id:
+        return None
+    meta = meta or load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    simulation = agent_life.get("simulation") if isinstance(agent_life.get("simulation"), dict) else {}
+    locations = simulation.get("agentLocations") if isinstance(simulation.get("agentLocations"), dict) else {}
+    for alias in _live_agent_presence_aliases(agent_id):
+        location = locations.get(alias)
+        if isinstance(location, dict):
+            return dict(location)
+    return None
+
+
+def _legacy_live_agent_simulated_locations_by_agent(meta=None):
+    meta = meta or load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    simulation = agent_life.get("simulation") if isinstance(agent_life.get("simulation"), dict) else {}
+    locations = simulation.get("agentLocations") if isinstance(simulation.get("agentLocations"), dict) else {}
+    return {agent_id: dict(location) for agent_id, location in locations.items() if isinstance(location, dict)}
+
+
+def _save_live_agent_presence_location(agent_id, location=None, *, source=None, state=None, action=None, route=None, target=None, route_state=None):
+    resolved_agent_id = _resolve_agent_id(agent_id) or str(agent_id or "").strip()
+    if not resolved_agent_id:
+        return None
+    now = _utc_now_iso()
+    meta = load_world_meta()
+    store = get_live_agent_presence_store(meta, persist_migration=False)
+    agents = store.get("agents") if isinstance(store.get("agents"), dict) else {}
+    previous = agents.get(resolved_agent_id) if isinstance(agents.get(resolved_agent_id), dict) else {}
+    merged_location = {**previous, **(location if isinstance(location, dict) else {})}
+    record = _normalize_live_agent_presence_record(
+        resolved_agent_id,
+        merged_location,
+        source=source,
+        state=state or route_state,
+        action=action,
+        route=route,
+        target=target,
+        now=now,
+    )
+    agents[resolved_agent_id] = record
+    history = list(store.get("history") or [])
+    history.append({
+        "agentId": resolved_agent_id,
+        "source": record.get("source"),
+        "state": record.get("state"),
+        "routeState": record.get("routeState"),
+        "worldActionId": record.get("worldActionId"),
+        "routeId": record.get("routeId"),
+        "buildingId": record.get("buildingId"),
+        "floor": record.get("floor"),
+        "apiX": record.get("apiX"),
+        "apiZ": record.get("apiZ"),
+        "updatedAt": now,
+    })
+    store["agents"] = agents
+    store["agentLocations"] = agents
+    store["history"] = history[-LIVE_AGENT_PRESENCE_HISTORY_LIMIT:]
+    store["updatedAt"] = now
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    agent_life["presence"] = store
+    meta["agentLife"] = agent_life
+    save_world_meta(meta)
+    return record
+
+
+def save_agent_presence_from_payload(path_agent_id, payload):
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "Agent presence payload must be an object."), 400
+    agent_id = _resolve_agent_id(path_agent_id)
+    if not agent_id:
+        return False, _api_error("agent_not_found", "agentId must reference an existing agent id or statusKey"), 404
+    supplied_agent = payload.get("agentId") or payload.get("actionAgentId")
+    if supplied_agent is not None and _resolve_agent_id(supplied_agent) != agent_id:
+        return False, _api_error("permission_denied", "Payload agentId must match the URL agentId."), 403
+    location = dict(payload.get("location") if isinstance(payload.get("location"), dict) else payload)
+    for key in ("worldActionId", "actionId", "routeId", "activeId"):
+        if payload.get(key) is not None and location.get(key) is None:
+            location[key] = payload.get(key)
+    source = payload.get("source") or "api"
+    state = payload.get("state") or payload.get("routeStatus") or payload.get("routeState") or "arrived"
+    route = payload.get("route") if isinstance(payload.get("route"), dict) else None
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else None
+    record = _save_live_agent_presence_location(
+        agent_id,
+        location,
+        source=str(source)[:120],
+        state=str(state)[:80],
+        route=route,
+        target=target,
+    )
+    if not _live_agent_presence_has_location(record):
+        return False, _api_error("invalid_location", "Agent presence requires a building/floor or numeric coordinates."), 400
+    return True, {"ok": True, "presence": record}, 200
+
+
+def _save_agent_presence_for_world_action(action, *, state=None, result=None, source=None):
+    if not isinstance(action, dict) or not action.get("agentId"):
+        return None
+    route = action.get("route") if isinstance(action.get("route"), dict) else {}
+    location = None
+    if isinstance(result, dict) and isinstance(result.get("location"), dict):
+        location = result.get("location")
+    if not location:
+        location = _live_agent_backend_target_location(action)
+    return _save_live_agent_presence_location(
+        action.get("agentId"),
+        location,
+        source=source or ("live-agent-loop" if _world_action_backend_owned(action) else "user-move"),
+        state=state or action.get("status"),
+        action=action,
+        route=route,
+        target=action.get("target") if isinstance(action.get("target"), dict) else route.get("target"),
+    )
+
+
+def _save_agent_presence_for_move_intent(intent, *, state=None, source=None):
+    if not isinstance(intent, dict) or not intent.get("agentId"):
+        return None
+    target = intent.get("target") if isinstance(intent.get("target"), dict) else {}
+    route = intent.get("route") if isinstance(intent.get("route"), dict) else {}
+    source_kind = _behavior_source_kind_from_record(intent)
+    presence_source = source or ("live-agent-loop" if source_kind == "agent-live-mode" else "user-move")
+    return _save_live_agent_presence_location(
+        intent.get("agentId"),
+        target,
+        source=presence_source,
+        state=state or intent.get("routeStatus") or intent.get("status"),
+        route=route,
+        target=target,
+    )
+
+
+def _live_agent_presence_source_for_action(action=None, transition_source=None):
+    action = action if isinstance(action, dict) else {}
+    behavior_source_kind = _behavior_source_kind_from_record(action)
+    text = str(transition_source or action.get("source") or "").lower()
+    if behavior_source_kind == "agent-live-mode" or "agent-live-mode" in text or _world_action_backend_owned(action):
+        return "live-agent-loop"
+    if "main3d" in text or "browser" in text or "linked-object-ui" in text or "route-claim" in text:
+        return "browser-replay"
+    if behavior_source_kind == "user" or "user" in text or "manual" in text or text == "api":
+        return "user-move"
+    return "server-recovery"
+
+
+def _live_agent_presence_location_for_action_status(action, status=None):
+    if not isinstance(action, dict) or not action.get("agentId"):
+        return None
+    agent_id = action.get("agentId")
+    status = _canonical_world_action_status(status or action.get("status"))
+    target_location = _live_agent_backend_target_location(action)
+    current_location = _live_agent_presence_location(agent_id) or _legacy_live_agent_simulated_location(agent_id) or _live_agent_loop_assignment_location(agent_id)
+    if status in {"route_pending", "routing"}:
+        return current_location or target_location
+    if status in {"arrived", "in_progress", "completed"}:
+        return target_location or current_location
+    return current_location or target_location
+
+
+def _save_live_agent_presence_for_action_status(action, status=None, *, transition_source=None):
+    if not isinstance(action, dict) or not action.get("agentId"):
+        return None
+    location = _live_agent_presence_location_for_action_status(action, status)
+    if not isinstance(location, dict):
+        return None
+    source = _live_agent_presence_source_for_action(action, transition_source)
+    route = action.get("route") if isinstance(action.get("route"), dict) else None
+    return _save_live_agent_presence_location(
+        action.get("agentId"),
+        location,
+        source=source,
+        state=status or action.get("status"),
+        action=action,
+        route=route,
+        target=action.get("target") if isinstance(action.get("target"), dict) else None,
+    )
+
+
+def _live_agent_presence_persistence_metrics(enabled_live_agents, meta=None):
+    store = get_live_agent_presence_store(meta, persist_migration=False)
+    agents = store.get("agents") if isinstance(store.get("agents"), dict) else {}
+    enabled_agent_ids = sorted({
+        str(agent.get("agentId") or agent.get("statusKey") or agent.get("id") or "").strip()
+        for agent in (enabled_live_agents or [])
+        if isinstance(agent, dict) and str(agent.get("agentId") or agent.get("statusKey") or agent.get("id") or "").strip()
+    })
+    count_scope = enabled_agent_ids or sorted(agent_id for agent_id, record in agents.items() if isinstance(record, dict))
+    persisted_agent_ids = [
+        agent_id
+        for agent_id in count_scope
+        if _live_agent_presence_has_location(_live_agent_presence_location(agent_id, meta=meta))
+    ]
+    refresh_reset_count = _normalize_int((store.get("metrics") or {}).get("refreshResetCount"), 0, minimum=0, maximum=1000000000)
+    agent_count = len(count_scope)
+    return {
+        "schemaVersion": LIVE_AGENT_PRESENCE_METRICS_SCHEMA_VERSION,
+        "agentCount": agent_count,
+        "persistedLocationCount": len(persisted_agent_ids),
+        "persistedAgentIds": sorted(persisted_agent_ids),
+        "missingPersistedLocationAgentIds": sorted(set(count_scope) - set(persisted_agent_ids)),
+        "refreshResetCount": refresh_reset_count,
+        "ok": refresh_reset_count == 0 and (agent_count == 0 or len(persisted_agent_ids) >= agent_count),
+    }
 
 
 def _live_agent_backend_target_location(action):
@@ -5209,22 +5710,13 @@ def _live_agent_backend_target_location(action):
 
 
 def _live_agent_simulated_location(agent_id):
-    if not agent_id:
-        return None
-    meta = load_world_meta()
-    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
-    simulation = agent_life.get("simulation") if isinstance(agent_life.get("simulation"), dict) else {}
-    locations = simulation.get("agentLocations") if isinstance(simulation.get("agentLocations"), dict) else {}
-    location = locations.get(agent_id)
-    return dict(location) if isinstance(location, dict) else None
+    return _live_agent_presence_location(agent_id) or _legacy_live_agent_simulated_location(agent_id)
 
 
 def _live_agent_simulated_locations_by_agent():
-    meta = load_world_meta()
-    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
-    simulation = agent_life.get("simulation") if isinstance(agent_life.get("simulation"), dict) else {}
-    locations = simulation.get("agentLocations") if isinstance(simulation.get("agentLocations"), dict) else {}
-    return {agent_id: dict(location) for agent_id, location in locations.items() if isinstance(location, dict)}
+    locations = _legacy_live_agent_simulated_locations_by_agent()
+    locations.update(_live_agent_presence_locations_by_agent())
+    return locations
 
 
 def _save_live_agent_simulated_location(agent_id, location, action=None):
@@ -5253,6 +5745,7 @@ def _save_live_agent_simulated_location(agent_id, location, action=None):
     agent_life["simulation"] = simulation
     meta["agentLife"] = agent_life
     save_world_meta(meta)
+    _save_live_agent_presence_location(agent_id, stored, source="live-agent-loop", action=action, route=(action.get("route") if isinstance(action, dict) else None), route_state="arrived")
     return stored
 
 
@@ -6550,6 +7043,7 @@ def reconcile_move_intents():
                 route["linkedWorldAction"] = linked_terminal
             failed["route"] = route
             history.append(failed)
+            _save_agent_presence_for_move_intent(failed, state=route_status)
             changed = True
         else:
             active.append(intent)
@@ -12451,6 +12945,14 @@ def create_move_intent(path_agent_id, payload):
     linked_action = _attach_move_intent_to_world_action(linked_action_id, move_intent) if linked_action_id else None
     if isinstance(linked_action, dict) and linked_action.get("error"):
         return False, _api_error(linked_action.get("error"), "Move intent could not be attached to the linked world action.", details=linked_action), 409
+    presence_action = linked_action if isinstance(linked_action, dict) and not linked_action.get("error") else {
+        "id": action_id,
+        "agentId": agent_id,
+        "target": target,
+        "route": route,
+        "status": "route_pending",
+    }
+    _save_live_agent_presence_for_action_status(presence_action, "route_pending", transition_source=source.get("kind") or "api")
     return True, {"ok": True, "moveIntent": move_intent, "routeStatus": move_intent.get("routeStatus"), "targetMetadata": metadata, "routeHandoff": route, "linkedAction": linked_action, "moveIntents": {"activeCount": len(saved.get("active", [])), "historyCount": len(saved.get("history", []))}}, 202
 
 
@@ -12732,6 +13234,8 @@ def transition_world_action(action_id, to_status, *, result=None, failure_reason
     with _live_agent_action_handoff_lock:
         ok, response, status = _transition_world_action_unlocked(action_id, to_status, result=result, failure_reason=failure_reason, actor=actor, source=source)
     action = response.get("action") if ok and isinstance(response, dict) else None
+    if isinstance(action, dict):
+        _save_live_agent_presence_for_action_status(action, to_status, transition_source=source)
     if isinstance(action, dict) and _canonical_world_action_status(action.get("status")) in WORLD_ACTION_TERMINAL_STATES and _world_action_backend_owned(action):
         with _live_agent_loop_lock:
             state = get_live_agent_loop_state(persist_migration=True)
@@ -17093,6 +17597,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             # Load agent assignments from world meta
             meta = load_world_meta()
             assignments = meta.get("agentAssignments", {})
+            presence_locations = _live_agent_presence_locations_by_agent(meta)
             # Merge status + assignments into roster
             result = []
             for agent in roster:
@@ -17109,8 +17614,31 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                     a["appearance"] = profile["appearance"]
                 if isinstance(profile.get("personality"), dict):
                     a["personality"] = profile["personality"]
+                presence = None
+                for presence_key in _live_agent_loop_agent_aliases(status_key):
+                    if isinstance(presence_locations.get(presence_key), dict):
+                        presence = dict(presence_locations[presence_key])
+                        break
+                if presence:
+                    a["presence"] = presence
+                    a["serverPresence"] = presence
                 result.append(a)
             return self._send_json(result)
+
+        if path in {"/api/agent-presence", "/api/agent-presence/"}:
+            meta = load_world_meta()
+            return self._send_json(get_live_agent_presence_store(meta, persist_migration=True))
+
+        if path.startswith("/api/agent-presence/"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 3 and parts[0] == "api" and parts[1] == "agent-presence":
+                agent_id = urllib.parse.unquote(parts[2])
+                meta = load_world_meta()
+                presence = _live_agent_presence_location(agent_id, meta=meta)
+                if presence:
+                    return self._send_json({"ok": True, "presence": presence})
+                return self._send_json(_api_error("not_found", "No persisted agent presence found.", details={"agentId": agent_id}), 404)
+            return self._send_json({"error": "Unsupported agent presence endpoint"}, 404)
 
         if path == "/api/agent-platforms":
             return self._send_json(_handle_agent_platforms())
@@ -17161,6 +17689,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             "/api/live-agent-mode/animation-events",
             "/api/live-agent-mode/in-world-communications",
             "/api/agent-live-loop",
+            "/api/live-agent-mode/presence",
             "/api/live-agent-mode/tools",
         }
         if path in gated_live_agent_read_paths or path.startswith("/api/live-agent-mode/memory/"):
@@ -17209,6 +17738,11 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/live-agent-mode/in-world-communications":
             return self._send_json(list_live_agent_in_world_communications(urllib.parse.parse_qs(parsed.query)))
+
+        if path == "/api/live-agent-mode/presence":
+            meta = load_world_meta()
+            presence = get_live_agent_presence_store(meta, persist_migration=True)
+            return self._send_json({"ok": True, "presence": presence, "locations": _live_agent_presence_locations_from_store(presence)})
 
         if path.startswith("/api/live-agent-mode/memory/"):
             agent_id = urllib.parse.unquote(path[len("/api/live-agent-mode/memory/"):].strip("/"))
@@ -17634,6 +18168,13 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 dry_run=bool(data.get("dryRun")),
             )
             return self._send_json(result, 200 if result.get("ok") else 409)
+
+        if path.startswith("/api/agent-presence/"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 3 and parts[0] == "api" and parts[1] == "agent-presence":
+                ok, result, status = save_agent_presence_from_payload(urllib.parse.unquote(parts[2]), self._read_body())
+                return self._send_json(result, status)
+            return self._send_json({"error": "Unsupported agent presence endpoint"}, 404)
 
         if path.startswith("/api/agents/") and path.endswith("/move"):
             parts = path.strip("/").split("/")

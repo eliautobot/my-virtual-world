@@ -1017,6 +1017,10 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   assert(metrics.loop?.enabledAgentCount >= expectedAgents, `metrics should include at least ${expectedAgents} enabled live agents`, metrics.loop);
   assert(metrics.metrics?.completedTurnCount >= expectedTurns, `metrics should show at least ${expectedTurns} completed turns`, metrics.metrics);
   assert(metrics.metrics?.completedBackendActionCount >= expectedTurns, `metrics should show at least ${expectedTurns} backend-owned completed actions`, metrics.metrics);
+  assert(metrics.metrics?.presencePersistence?.agentCount >= expectedAgents, 'metrics should expose presence persistence agent count', metrics.metrics?.presencePersistence);
+  assert(metrics.metrics?.presencePersistence?.persistedLocationCount >= expectedAgents, 'metrics should expose persisted server-authoritative locations', metrics.metrics?.presencePersistence);
+  assert(metrics.metrics?.presencePersistence?.refreshResetCount === 0, 'metrics should show no refresh resets', metrics.metrics?.presencePersistence);
+  assert(metrics.metrics?.presencePersistence?.ok === true, 'metrics should report passing presence persistence', metrics.metrics?.presencePersistence);
   verifySoakDistributionMetrics(metrics, { expectedAgents, expectedTurns });
   assert(metrics.metrics?.routePendingActiveCount === 0, 'metrics should show no active route_pending actions', metrics.metrics);
   assert(metrics.metrics?.memoryCaps?.withinCaps === true, 'metrics should show live-agent memory stayed within bounded caps', metrics.metrics?.memoryCaps);
@@ -1088,6 +1092,7 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   assert(metrics.finalGate?.checks?.memoryGrowthBounded === true, 'final gate should fail on unbounded memory growth', metrics.finalGate);
   assert(metrics.finalGate?.checks?.featureGateOpen === true && metrics.finalGate?.checks?.configGateOpen === true, 'final gate should fail on disabled feature gates', metrics.finalGate);
   assert(metrics.finalGate?.checks?.providerModelBudgetOk === true, 'final gate should fail on provider/model budget violations', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.presencePersistenceOk === true, 'final gate should fail on presence persistence resets', metrics.finalGate);
   console.log(`PASS: autonomy metrics ${JSON.stringify({
     enabledAgentCount: metrics.loop.enabledAgentCount,
     completedTurnCount: metrics.metrics.completedTurnCount,
@@ -1106,6 +1111,7 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
     conversationTriggerCount: metrics.metrics.conversationTriggerCount,
     societyRoleCount: metrics.metrics.societyRoleCount,
     memory: metrics.metrics.memory,
+    presencePersistence: metrics.metrics.presencePersistence,
     memoryGrowth: metrics.metrics.memoryGrowth,
     planner: {
       planCount: metrics.metrics.planCount,
@@ -1233,6 +1239,116 @@ print(json.dumps(result, sort_keys=True))
   return result;
 }
 
+async function runBrowserRefreshPresenceCheck() {
+  const script = String.raw`
+import json
+import os
+from playwright.sync_api import sync_playwright
+
+base_url = os.environ["VW_ACCEPTANCE_BASE_URL"]
+agent_id = os.environ["VW_ACCEPTANCE_AGENT_ID"]
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True, args=[
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--ignore-gpu-blocklist",
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--use-angle=swiftshader",
+        "--enable-unsafe-swiftshader",
+    ])
+    page = browser.new_page(viewport={"width": 960, "height": 640}, device_scale_factor=1)
+    page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
+    results = []
+    for refresh_index in range(4):
+        if refresh_index > 0:
+            page.reload(wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_selector("#pixiContainer canvas", state="attached", timeout=60000)
+        page.wait_for_function("() => Array.isArray(window.agents) && window.agents.length > 0", timeout=60000)
+        result = page.evaluate("""
+async ({ agentId, refreshIndex }) => {
+  const response = await fetch('/api/live-agent-mode/presence', { cache: 'no-store' });
+  const payload = await response.json();
+  const presence = payload.locations?.[agentId] || payload.presence?.agentLocations?.[agentId] || null;
+  const agent = (window.agents || []).find(candidate => String(candidate?.id || candidate?.statusKey || '') === agentId) || null;
+  const expectedX = Number.isFinite(Number(presence?.apiX)) ? Number(presence.apiX) : Number(presence?.x) * 40;
+  const expectedY = Number.isFinite(Number(presence?.apiZ)) ? Number(presence.apiZ) : Number(presence?.z) * 40;
+  const actualX = Number(agent?.x);
+  const actualY = Number(agent?.y);
+  const dx = Math.abs(actualX - expectedX);
+  const dy = Math.abs(actualY - expectedY);
+  return {
+    ok: Boolean(agent && presence && Number.isFinite(expectedX) && Number.isFinite(expectedY) && dx <= 0.01 && dy <= 0.01),
+    refreshIndex,
+    agentId,
+    actual: agent ? { x: actualX, y: actualY, floor: agent._floor || null, presenceSource: agent._serverPresence?.source || agent.presence?.source || null } : null,
+    expected: presence ? { apiX: expectedX, apiZ: expectedY, floor: presence.floor || null, source: presence.source || null, routeState: presence.routeState || null } : null,
+    delta: { dx, dy },
+    pageUrl: window.location.href,
+  };
+}
+""", {"agentId": agent_id, "refreshIndex": refresh_index})
+        results.append(result)
+    browser.close()
+
+if not all(item.get("ok") for item in results):
+    raise AssertionError(json.dumps(results, sort_keys=True))
+print(json.dumps({"ok": True, "refreshes": len(results) - 1, "results": results}, sort_keys=True))
+`;
+  const { stdout } = await runChild('python3', ['-'], {
+    input: script,
+    env: {
+      VW_ACCEPTANCE_BASE_URL: BASE_URL,
+      VW_ACCEPTANCE_AGENT_ID: TEST_AGENT_ID,
+    },
+  });
+  const result = JSON.parse(stdout.trim().split('\n').at(-1));
+  assert(result.ok === true && result.refreshes >= 3, 'browser refresh presence check failed', result);
+  console.log(`PASS: ${TEST_AGENT_ID} stayed at server-authoritative presence coordinates across ${result.refreshes} browser refreshes on ${BASE_URL}.`);
+  return result;
+}
+
+async function verifyServerRestartPresencePersistenceAndRouteState() {
+  const before = await fetchJson('/api/live-agent-mode/presence');
+  const beforeLocation = before?.locations?.[TEST_AGENT_ID] || before?.presence?.agentLocations?.[TEST_AGENT_ID];
+  assert(beforeLocation, 'presence location missing before restart check', before);
+  const move = await postJson(`/api/agents/${encodeURIComponent(TEST_AGENT_ID)}/move`, {
+    source: {
+      kind: 'user',
+      requestedBy: '8587-acceptance-presence-restart',
+      requestId: '8587-presence-restart-route-state',
+    },
+    target: {
+      kind: 'world-point',
+      x: -320,
+      y: -240,
+      coordinateSpace: 'api-pixels',
+      floor: 1,
+      buildingId: HOME_BUILDING_ID,
+    },
+  });
+  assert(move?.ok === true && move?.routeStatus === 'route_pending', 'failed to persist active move intent before restart', move);
+
+  const preRestart = await fetchJson('/api/live-agent-mode/presence');
+  const preRestartLocation = preRestart?.locations?.[TEST_AGENT_ID] || preRestart?.presence?.agentLocations?.[TEST_AGENT_ID];
+  assert(preRestartLocation?.routeState === 'route_pending', 'presence did not record active route_pending state before restart', preRestartLocation);
+
+  await restartHarnessServer('presence-persistence-active-route');
+
+  const after = await fetchJson('/api/live-agent-mode/presence');
+  const afterLocation = after?.locations?.[TEST_AGENT_ID] || after?.presence?.agentLocations?.[TEST_AGENT_ID];
+  assert(afterLocation?.routeState === 'route_pending', 'presence route state did not survive server restart', afterLocation);
+  assert(afterLocation?.routeId === preRestartLocation?.routeId, 'presence route id changed across restart', { before: preRestartLocation, after: afterLocation });
+  assert(Number(afterLocation?.apiX) === Number(preRestartLocation?.apiX) && Number(afterLocation?.apiZ) === Number(preRestartLocation?.apiZ), 'presence coordinates changed across restart', { before: preRestartLocation, after: afterLocation });
+
+  const agents = await fetchJson('/api/agents');
+  const agent = Array.isArray(agents) ? agents.find((candidate) => candidate?.id === TEST_AGENT_ID || candidate?.statusKey === TEST_AGENT_ID) : null;
+  assert(agent?.presence?.routeState === 'route_pending', 'agent roster did not reload persisted presence route state after restart', agent);
+  console.log(`PASS: server restart reloaded ${TEST_AGENT_ID} presence at (${afterLocation.apiX}, ${afterLocation.apiZ}) with active route ${afterLocation.routeId}.`);
+  return { before: preRestartLocation, after: afterLocation };
+}
+
 assertNoProductPortTargets();
 assertNoConflictingHarnessPortEnv();
 await assertPortAvailable(TEST_PORT);
@@ -1255,20 +1371,26 @@ const childEnv = {
   VW_CODEX_ENABLED: 'false',
 };
 
-const server = spawn('python3', ['-B', 'src/server/server.py'], {
-  cwd: process.cwd(),
-  env: childEnv,
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
-
 let serverOutput = '';
+function startHarnessServer() {
+  serverOutput = '';
+  const child = spawn('python3', ['-B', 'src/server/server.py'], {
+    cwd: process.cwd(),
+    env: childEnv,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  child.stdout.on('data', (chunk) => appendOutput(chunk, process.stdout));
+  child.stderr.on('data', (chunk) => appendOutput(chunk, process.stderr));
+  return child;
+}
+
 const appendOutput = (chunk, stream) => {
   const text = chunk.toString();
   serverOutput = `${serverOutput}${text}`.slice(-8000);
   if (keepOpen) stream.write(text);
 };
-server.stdout.on('data', (chunk) => appendOutput(chunk, process.stdout));
-server.stderr.on('data', (chunk) => appendOutput(chunk, process.stderr));
+
+let server = startHarnessServer();
 
 let cleaned = false;
 const cleanup = async () => {
@@ -1277,6 +1399,15 @@ const cleanup = async () => {
   await stopServer(server);
   rmSync(dataDir, { recursive: true, force: true });
 };
+
+async function restartHarnessServer(reason = 'presence-persistence-restart') {
+  await stopServer(server);
+  server = startHarnessServer();
+  const health = await waitForHealth(server, () => serverOutput);
+  assert(health.dataDir === dataDir, `${reason} restarted with the wrong dataDir`, health);
+  console.log(`PASS: restarted 8587 harness server for ${reason} with persisted data at ${dataDir}.`);
+  return health;
+}
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, async () => {
@@ -1295,6 +1426,7 @@ try {
   await enableGlobalAgentLiveModeFeature();
   await seedAcceptanceWorld();
   const backendSeries = await verifyNoBrowserBackendTurnSeries(ACCEPTANCE_TURN_TARGET);
+  await runBrowserRefreshPresenceCheck();
   await verifyTypedObjectActions();
   await verifySocialCommunicationAndMemory();
   await verifyOperatorControlsStopTurns();
@@ -1303,6 +1435,7 @@ try {
   await enableLoopForFinalMetrics();
   await verifyAutonomyMetrics({ expectedTurns: ACCEPTANCE_TURN_TARGET, expectedAgents: SOAK_AGENT_COUNT });
   await runBrowserReplayRenderCheck(backendSeries.proofs[0].actionId);
+  await verifyServerRestartPresencePersistenceAndRouteState();
 
   if (keepOpen) {
     console.log(`Serving isolated Live Agent Mode harness at ${BASE_URL}. Press Ctrl-C to stop.`);

@@ -5355,6 +5355,133 @@ async function fetchAgentRosterWithLiveStatus() {
     : [];
 }
 
+function normalizeAuthoritativeAgentPresence(presence = null) {
+  if (!presence || typeof presence !== 'object') return null;
+  const apiX = Number.isFinite(Number(presence.apiX))
+    ? Number(presence.apiX)
+    : (Number.isFinite(Number(presence.x)) ? Number(presence.x) * API_TILE : NaN);
+  const apiZ = Number.isFinite(Number(presence.apiZ))
+    ? Number(presence.apiZ)
+    : (Number.isFinite(Number(presence.z)) ? Number(presence.z) * API_TILE : (Number.isFinite(Number(presence.y)) ? Number(presence.y) * API_TILE : NaN));
+  const hasCoordinates = Number.isFinite(apiX) && Number.isFinite(apiZ);
+  const normalized = {
+    ...presence,
+    apiX: hasCoordinates ? apiX : null,
+    apiZ: hasCoordinates ? apiZ : null,
+    x: hasCoordinates ? apiX : null,
+    y: hasCoordinates ? apiZ : null,
+    worldX: hasCoordinates ? apiX / API_TILE : (Number.isFinite(Number(presence.x)) ? Number(presence.x) : null),
+    worldZ: hasCoordinates ? apiZ / API_TILE : (Number.isFinite(Number(presence.z)) ? Number(presence.z) : null),
+    floor: Math.max(1, Number(presence.floor || presence.buildingFloor || 1) || 1),
+    buildingId: presence.buildingId || null,
+    source: presence.source || 'server-presence',
+    routeState: presence.routeState || presence.route?.routeState || presence.route?.state || null,
+  };
+  if (!hasCoordinates && !normalized.buildingId) return null;
+  return normalized;
+}
+
+function applyAuthoritativePresenceToAgent(agent, presence = null, { force = false } = {}) {
+  if (!agent) return false;
+  const normalized = normalizeAuthoritativeAgentPresence(presence || agent.presence || agent.serverPresence);
+  if (!normalized || !Number.isFinite(normalized.apiX) || !Number.isFinite(normalized.apiZ)) return false;
+  const previousPresence = agent._serverPresence || null;
+  const sameUpdate = previousPresence?.updatedAt && normalized.updatedAt && previousPresence.updatedAt === normalized.updatedAt;
+  if (!force && sameUpdate) return false;
+  if (!force && agent._wanderTarget && !['live-agent-loop', 'server-recovery', 'browser-replay'].includes(String(normalized.source || ''))) return false;
+  agent.x = normalized.apiX;
+  agent.y = normalized.apiZ;
+  agent._floor = normalized.floor;
+  agent._targetFloor = normalized.floor;
+  if (normalized.buildingId) {
+    agent._currentBuilding = buildingsMap.get(normalized.buildingId) || agent._currentBuilding || null;
+  }
+  agent._serverPresence = normalized;
+  agent.presence = normalized;
+  if (agent._group3d) {
+    const worldX = normalized.apiX * (T / API_TILE);
+    const worldZ = normalized.apiZ * (T / API_TILE);
+    agent._group3d.position.set(worldX, getGroundY(worldX, worldZ), worldZ);
+  }
+  if (isPhysicsReady()) {
+    teleportAgent('agent_' + agent.id, normalized.apiX * (T / API_TILE), agent._group3d?.position?.y || 0, normalized.apiZ * (T / API_TILE));
+  }
+  return true;
+}
+
+const _authoritativePresencePersistCache = new Map();
+
+function persistAuthoritativeAgentPresence(agent, presence = null, { source = 'browser-replay', state = 'arrived', event = null, target = null } = {}) {
+  if (!agent?.id || typeof fetch !== 'function') return false;
+  const normalized = normalizeAuthoritativeAgentPresence(presence || agent._serverPresence || agent.presence || {
+    apiX: agent.x,
+    apiZ: agent.y,
+    floor: agent._floor || agent._targetFloor || 1,
+    buildingId: agent._currentBuilding?.id || agent._targetBuilding?.id || null,
+  });
+  if (!normalized || !Number.isFinite(normalized.apiX) || !Number.isFinite(normalized.apiZ)) return false;
+  const worldActionId = event?.worldActionId || event?.actionId || normalized.worldActionId || normalized.actionId || target?.worldActionId || target?.actionId || null;
+  const routeId = normalized.routeId || normalized.route?.routeId || normalized.route?.id || null;
+  const cacheKey = [
+    agent.id,
+    source,
+    state,
+    worldActionId || '',
+    routeId || '',
+    Math.round(normalized.apiX * 10) / 10,
+    Math.round(normalized.apiZ * 10) / 10,
+    normalized.floor,
+  ].join('|');
+  const now = Date.now();
+  if (now - Number(_authoritativePresencePersistCache.get(cacheKey) || 0) < 1200) return false;
+  _authoritativePresencePersistCache.set(cacheKey, now);
+  const body = {
+    agentId: agent.statusKey || agent.id,
+    source,
+    state,
+    routeStatus: state,
+    worldActionId,
+    actionId: worldActionId,
+    routeId,
+    target: target || event?.target || normalized.target || null,
+    location: {
+      coordinateSpace: 'api-pixels',
+      x: normalized.apiX,
+      y: normalized.apiZ,
+      apiX: normalized.apiX,
+      apiZ: normalized.apiZ,
+      floor: normalized.floor,
+      buildingId: normalized.buildingId || agent._currentBuilding?.id || agent._targetBuilding?.id || null,
+      roomId: normalized.roomId || null,
+      facing: agent._group3d?.rotation?.y ?? normalized.facing ?? null,
+    },
+  };
+  fetch(`/api/agent-presence/${encodeURIComponent(agent.statusKey || agent.id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  })
+    .then(response => response.ok ? response.json().catch(() => null) : null)
+    .then(data => {
+      if (data?.presence) {
+        agent._serverPresence = normalizeAuthoritativeAgentPresence(data.presence) || agent._serverPresence || normalized;
+        agent.presence = agent._serverPresence;
+      }
+    })
+    .catch(() => {});
+  return true;
+}
+
+function liveAgentModeReplayPresenceState(event = {}) {
+  const name = String(event?.name || '');
+  if (name === 'world-action-completed' || name === 'object-use-completed') return 'completed';
+  if (name === 'agent-arrived') return 'arrived';
+  if (name === 'object-use-started') return 'in_progress';
+  if (name === 'agent-move-started') return 'routing';
+  return 'routing';
+}
+
 // Terrain paint preview highlight
 let _terrainPreviewMesh = null;
 
@@ -20450,6 +20577,20 @@ function updateAgentAnimations(dt) {
           agent.y = idleActivity.dockTarget.y;
         }
         agent._wanderTarget = null;
+        persistAuthoritativeAgentPresence(agent, {
+          apiX: agent.x,
+          apiZ: agent.y,
+          floor: idleActivity.floor || idleActivity.buildingFloor || agent._floor || agent._targetFloor || 1,
+          buildingId: idleActivity.buildingId || agent._currentBuilding?.id || agent._targetBuilding?.id || null,
+          worldActionId: idleActivity.worldActionId || null,
+          actionId: idleActivity.actionId || idleActivity.action || null,
+          target: directInteriorTarget || idleActivity.dockTarget || null,
+        }, {
+          source: idleActivity.behaviorSourceKind === 'agent-live-mode' || idleActivity.source === 'agent-live-mode-world-action' ? 'browser-replay' : 'user-move',
+          state: 'arrived',
+          event: { worldActionId: idleActivity.worldActionId || null, actionId: idleActivity.actionId || idleActivity.action || null, target: directInteriorTarget || idleActivity.dockTarget || null },
+          target: directInteriorTarget || idleActivity.dockTarget || null,
+        });
         agent._isRunning = false;
         agent._stayTimer = idleActivity.stayMs || (6000 + Math.random() * 8000);
         if (Number.isFinite(idleActivity.faceAngle) && agent._group3d) {
@@ -20966,7 +21107,23 @@ function updateAgentAnimations(dt) {
         agent._movementDebugStableWaypoint = null;
         agent._avoidDebugOptions = null;
         if (agent._avoid) agent._avoid.actualMove = null;
+        const completedTarget = directInteriorTarget || agent._wanderTarget || null;
         agent._wanderTarget = null;
+        if (completedTarget?.worldActionId || completedTarget?.actionId || completedTarget?.targetKind || completedTarget?.source) {
+          persistAuthoritativeAgentPresence(agent, {
+            apiX: agent.x,
+            apiZ: agent.y,
+            floor: completedTarget.floor || completedTarget.buildingFloor || agent._floor || agent._targetFloor || 1,
+            buildingId: completedTarget.buildingId || agent._currentBuilding?.id || agent._targetBuilding?.id || null,
+            worldActionId: completedTarget.worldActionId || completedTarget.actionId || null,
+            target: completedTarget,
+          }, {
+            source: completedTarget.behaviorSourceKind === 'agent-live-mode' || completedTarget.source === 'agent-live-mode-world-action' ? 'browser-replay' : 'user-move',
+            state: 'arrived',
+            event: { worldActionId: completedTarget.worldActionId || completedTarget.actionId || null, target: completedTarget },
+            target: completedTarget,
+          });
+        }
       }
     } else {
       resetObstacleAvoidance(agent);
@@ -28229,6 +28386,7 @@ async function loadAgents() {
 
       // Start agents at their desk work location for testing, otherwise near their assigned work/home building
       let startX, startY, homeX, homeY;
+      const serverPresence = normalizeAuthoritativeAgentPresence(a.presence || a.serverPresence || null);
       if (initialDeskSpot) {
         startX = initialDeskSpot.apiX;
         startY = initialDeskSpot.apiZ;
@@ -28270,6 +28428,10 @@ async function loadAgents() {
         homeX = startX;
         homeY = startY;
       }
+      if (serverPresence && Number.isFinite(serverPresence.apiX) && Number.isFinite(serverPresence.apiZ)) {
+        startX = serverPresence.apiX;
+        startY = serverPresence.apiZ;
+      }
 
       return {
         ...a,
@@ -28288,15 +28450,18 @@ async function loadAgents() {
         _agentRole: agentRole,
         _atDesk: !!(initialDeskSpot && isWorkPresenceStatus(a.status)),
         _workPresenceHoldUntil: isWorkPresenceStatus(a.status) ? performance.now() + WORK_PRESENCE_CLIENT_HOLD_MS : 0,
-        _floor: initialDeskSpot?.floor || 1,
-        _targetFloor: initialDeskSpot?.floor || 1,
+        _floor: serverPresence?.floor || initialDeskSpot?.floor || 1,
+        _targetFloor: serverPresence?.floor || initialDeskSpot?.floor || 1,
         _deskFacingAngle: initialDeskSpot?.faceAngle ?? null,
         _activeWorkSpot: initialDeskSpot,
+        _serverPresence: serverPresence,
+        presence: serverPresence || a.presence || null,
       };
     });
 
     agentsList.forEach(a => {
       createAgent3D(a);
+      if (a._serverPresence) applyAuthoritativePresenceToAgent(a, a._serverPresence, { force: true });
       _agentLastStatus.set(a.id, a.status || 'offline'); // seed initial status
     });
     updateAgentList();
@@ -28390,6 +28555,9 @@ async function loadAgents() {
           }
           if (rosterMatch && typeof rosterMatch.agentLiveModeEnabled === 'boolean') {
             a.agentLiveModeEnabled = rosterMatch.agentLiveModeEnabled;
+          }
+          if (rosterMatch?.presence || rosterMatch?.serverPresence) {
+            applyAuthoritativePresenceToAgent(a, rosterMatch.presence || rosterMatch.serverPresence);
           }
         });
         updateAgentList();
@@ -35309,6 +35477,26 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
       point: renderPoint,
       updatedAt: new Date().toISOString(),
     };
+    agent._serverPresence = {
+      ...(agent._serverPresence || {}),
+      source: 'browser-replay',
+      actionId,
+      worldActionId: actionId,
+      apiX: renderPoint.apiX,
+      apiZ: renderPoint.apiZ,
+      x: renderPoint.worldX,
+      z: renderPoint.worldZ,
+      floor: renderPoint.floor,
+      buildingId: renderPoint.buildingId,
+      updatedAt: agent._liveAgentModeReplay.updatedAt,
+    };
+    agent.presence = agent._serverPresence;
+    persistAuthoritativeAgentPresence(agent, agent._serverPresence, {
+      source: 'browser-replay',
+      state: liveAgentModeReplayPresenceState(event),
+      event,
+      target: event.target || null,
+    });
     if (event.name && event.name.startsWith('object-use')) {
       agent._idleActivity = {
         ...(agent._idleActivity || {}),
