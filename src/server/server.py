@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import glob
+import math
 import mimetypes
 import re
 import socketserver
@@ -1479,8 +1480,9 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "planMaxRetries": 2,
     "goalRetention": 12,
     "candidateActionRetention": 12,
-    "turnRetention": 80,
+    "turnRetention": 160,
     "clawMindRuntimeTraceRetention": 240,
+    "moduleLatencyRetention": 200,
     "turnTimeoutSec": 240,
     "turnRetryBackoffSec": 45,
     "maxTurnRetries": 2,
@@ -4141,6 +4143,103 @@ def _live_agent_metric_memory_counts(loop_state):
     return counts
 
 
+def _live_agent_metric_memory_caps(loop_state):
+    bucket_caps = {
+        "stream": LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"],
+        "entries": LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+        "facts": LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+        "observations": LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+        "reflections": LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"],
+        "diary": LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+        "conversations": LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+        "recentActions": LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+    }
+    breaches = []
+    per_agent = {}
+    for agent_id, agent_state in (loop_state.get("agents") or {}).items():
+        if not isinstance(agent_state, dict):
+            continue
+        _live_agent_loop_normalize_memory(agent_state, agent_id=agent_id)
+        memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+        counts = {}
+        for bucket, cap in bucket_caps.items():
+            size = len([item for item in (memory.get(bucket) or []) if isinstance(item, dict)])
+            counts[bucket] = size
+            if size > cap:
+                breaches.append({"agentId": agent_id, "bucket": bucket, "count": size, "cap": cap})
+        per_agent[agent_id] = counts
+    return {
+        "schemaVersion": "agent-live-mode-memory-caps/v1",
+        "bucketCaps": bucket_caps,
+        "agentCount": len(per_agent),
+        "perAgent": per_agent,
+        "breaches": breaches,
+        "breachCount": len(breaches),
+        "withinCaps": len(breaches) == 0,
+    }
+
+
+def _live_agent_metric_memory_growth(loop_state, memory_caps):
+    bucket_caps = memory_caps.get("bucketCaps") if isinstance(memory_caps, dict) and isinstance(memory_caps.get("bucketCaps"), dict) else {}
+    per_agent_caps = memory_caps.get("perAgent") if isinstance(memory_caps, dict) and isinstance(memory_caps.get("perAgent"), dict) else {}
+    per_agent = {}
+    total_retained = 0
+    total_cap = 0
+    total_stream_writes = 0
+    total_trimmed_stream = 0
+    max_retained_entries = 0
+    max_retained_to_cap_ratio = 0
+    for agent_id, counts in per_agent_caps.items():
+        if not isinstance(counts, dict):
+            continue
+        agent_state = (loop_state.get("agents") or {}).get(agent_id) if isinstance(loop_state, dict) else {}
+        if not isinstance(agent_state, dict):
+            agent_state = {}
+        memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+        retained_total = sum(
+            _normalize_int(counts.get(bucket), 0, minimum=0, maximum=1000000000)
+            for bucket in bucket_caps
+        )
+        cap_total = sum(
+            _normalize_int(cap, 0, minimum=0, maximum=1000000000)
+            for cap in bucket_caps.values()
+        )
+        stream_sequence = _normalize_int(memory.get("streamSequence"), 0, minimum=0, maximum=1000000000)
+        retained_stream = _normalize_int(counts.get("stream"), 0, minimum=0, maximum=1000000000)
+        trimmed_stream = max(0, stream_sequence - retained_stream)
+        ratio = round(retained_total / cap_total, 3) if cap_total else 0
+        per_agent[agent_id] = {
+            "retainedEntries": retained_total,
+            "retentionCap": cap_total,
+            "retainedToCapRatio": ratio,
+            "streamWrites": stream_sequence,
+            "retainedStreamEntries": retained_stream,
+            "trimmedStreamEntries": trimmed_stream,
+            "bucketCounts": counts,
+        }
+        total_retained += retained_total
+        total_cap += cap_total
+        total_stream_writes += stream_sequence
+        total_trimmed_stream += trimmed_stream
+        max_retained_entries = max(max_retained_entries, retained_total)
+        max_retained_to_cap_ratio = max(max_retained_to_cap_ratio, ratio)
+    breach_count = _normalize_int(memory_caps.get("breachCount") if isinstance(memory_caps, dict) else 0, 0, minimum=0, maximum=1000000000)
+    return {
+        "schemaVersion": "agent-live-mode-memory-growth/v1",
+        "agentCount": len(per_agent),
+        "totalRetainedEntries": total_retained,
+        "totalRetentionCap": total_cap,
+        "totalStreamWrites": total_stream_writes,
+        "totalTrimmedStreamEntries": total_trimmed_stream,
+        "maxRetainedEntriesPerAgent": max_retained_entries,
+        "maxRetainedToCapRatio": round(max_retained_to_cap_ratio, 3),
+        "perAgent": per_agent,
+        "withinCaps": bool(memory_caps.get("withinCaps")) if isinstance(memory_caps, dict) else False,
+        "breachCount": breach_count,
+        "bounded": bool(memory_caps.get("withinCaps")) and breach_count == 0 and max_retained_to_cap_ratio <= 1 if isinstance(memory_caps, dict) else False,
+    }
+
+
 def _live_agent_cached_roster_for_metrics():
     try:
         cached = _agent_roster if isinstance(_agent_roster, list) else []
@@ -4308,6 +4407,17 @@ def _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_acti
         last_latency = stat.get("lastLatencyMs")
         if not isinstance(last_latency, (int, float)):
             last_latency = recent_trace.get("latencyMs") if isinstance(recent_trace, dict) and isinstance(recent_trace.get("latencyMs"), (int, float)) else 0
+        latency_samples = [
+            float(item)
+            for item in (stat.get("latencySamplesMs") or [])
+            if isinstance(item, (int, float)) and math.isfinite(float(item))
+        ]
+        if not latency_samples:
+            latency_samples = [
+                float(trace.get("latencyMs"))
+                for trace in traces
+                if trace.get("module") == module_name and isinstance(trace.get("latencyMs"), (int, float)) and math.isfinite(float(trace.get("latencyMs")))
+            ]
         last_execution_at = stat.get("lastExecutionAt") or stat.get("lastExecutedAt") or (recent_trace.get("endedAt") if isinstance(recent_trace, dict) else None)
         modules[module_name] = {
             "contractReady": bool(contract.get("contractReady")),
@@ -4316,6 +4426,7 @@ def _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_acti
             "lastExecutionAt": last_execution_at,
             "lastExecutedAt": last_execution_at,
             "lastLatencyMs": round(float(last_latency or 0), 3),
+            "latency": _latency_summary(latency_samples),
             "lastStatus": stat.get("lastStatus") or (recent_trace.get("status") if isinstance(recent_trace, dict) else "never_run"),
             "lastTurnId": stat.get("lastTurnId") or (recent_trace.get("turnId") if isinstance(recent_trace, dict) else None),
             "lastTraceId": stat.get("lastTraceId") or (recent_trace.get("id") if isinstance(recent_trace, dict) else None),
@@ -4339,6 +4450,7 @@ def _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_acti
             "schemaVersion": runtime.get("schemaVersion"),
             "traceCount": len(traces),
             "traceRetention": runtime.get("traceRetention"),
+            "latencySampleRetention": LIVE_AGENT_LOOP_DEFAULTS["moduleLatencyRetention"],
             "lastTurnId": runtime.get("lastTurnId"),
             "updatedAt": runtime.get("updatedAt"),
             "boundedTraceStore": True,
@@ -4368,6 +4480,15 @@ def get_live_agent_mode_autonomy_metrics():
         action for action in history_actions
         if _canonical_world_action_status(action.get("status")) == "completed"
         and _live_agent_metric_client_free(action)
+    ]
+    backend_terminal_actions = [
+        action for action in history_actions
+        if _canonical_world_action_status(action.get("status")) in WORLD_ACTION_TERMINAL_STATES
+        and (_live_agent_metric_client_free(action) or _world_action_backend_owned(action))
+    ]
+    failed_backend_actions = [
+        action for action in backend_terminal_actions
+        if _canonical_world_action_status(action.get("status")) in {"failed", "expired", "cancelled"}
     ]
     completed_action_types = sorted({str(action.get("actionType") or "") for action in completed_backend_actions if action.get("actionType")})
     object_action_types = sorted({
@@ -4407,6 +4528,11 @@ def get_live_agent_mode_autonomy_metrics():
     turns = scheduler.get("turnHistory") if isinstance(scheduler.get("turnHistory"), list) else []
     completed_turns = [turn for turn in turns if isinstance(turn, dict) and turn.get("status") == "completed"]
     failed_turns = [turn for turn in turns if isinstance(turn, dict) and turn.get("status") == "failed"]
+    turn_duration_samples = [
+        float(turn.get("durationSec"))
+        for turn in turns
+        if isinstance(turn, dict) and isinstance(turn.get("durationSec"), (int, float)) and math.isfinite(float(turn.get("durationSec")))
+    ]
     state_agents = loop_state.get("agents") if isinstance(loop_state.get("agents"), dict) else {}
     planner_records = []
     for planner_agent_id, planner_agent_state in state_agents.items():
@@ -4476,12 +4602,27 @@ def get_live_agent_mode_autonomy_metrics():
         },
     }
     memory_counts = _live_agent_metric_memory_counts(loop_state)
+    memory_caps = _live_agent_metric_memory_caps(loop_state)
+    memory_growth = _live_agent_metric_memory_growth(loop_state, memory_caps)
     pause = _live_agent_loop_pause_status(loop_state)
     kill_switch = _live_agent_loop_kill_switch_status(loop_state)
     cached_roster = _live_agent_cached_roster_for_metrics()
     cached_live_enabled_agents = [agent for agent in cached_roster if isinstance(agent, dict) and agent.get("agentLiveModeEnabled") is True]
     provider_support = _live_agent_provider_adapter_metrics(cached_roster, loop_state=loop_state)
     clawmind_architecture = _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
+    backend_action_total = len(backend_terminal_actions)
+    action_success_rate = round(len(completed_backend_actions) / backend_action_total, 3) if backend_action_total else 0
+    recovery_rate = round(outcome_awareness_metrics["recoveryCount"] / outcome_awareness_metrics["mismatchCount"], 3) if outcome_awareness_metrics["mismatchCount"] else 1
+    provider_model_call_counts = {
+        "schemaVersion": "agent-live-mode-provider-model-call-counts/v1",
+        "providerBridgeCalls": provider_support.get("bridgeMetrics", {}).get("calls", 0),
+        "providerDecisionCalls": provider_support.get("bridgeMetrics", {}).get("decisionCalls", 0),
+        "providerTimeouts": provider_support.get("bridgeMetrics", {}).get("timeouts", 0),
+        "providerFallbacks": provider_support.get("bridgeMetrics", {}).get("fallbacks", 0),
+        "providerCallsDuringMetrics": provider_support.get("optimization", {}).get("providerCallsDuringMetrics", 0),
+        "modelCallsDuringMetrics": provider_support.get("optimization", {}).get("modelCallsDuringMetrics", 0),
+        "metricsReadOnlyBudgetOk": provider_support.get("optimization", {}).get("providerCallsDuringMetrics") == 0 and provider_support.get("optimization", {}).get("modelCallsDuringMetrics") == 0,
+    }
     checklist = {
         "featureGateOpen": _agent_live_mode_available(),
         "configGateOpen": _agent_live_mode_config_enabled(),
@@ -4508,9 +4649,26 @@ def get_live_agent_mode_autonomy_metrics():
         "providerAdapterReadiness": provider_support.get("checklist", {}).get("allProviderKindsHaveCoreAdapter") is True,
         "clawMindModuleContractsReady": clawmind_architecture.get("checklist", {}).get("allModuleContractsReady") is True,
         "lightweightMetricsOptimized": provider_support.get("optimization", {}).get("modelCallsDuringMetrics") == 0 and clawmind_architecture.get("optimization", {}).get("heavyWorldScan") is False,
+        "memoryGrowthBounded": memory_growth["bounded"],
         "plannerMetricsPresent": all(key in planner_metrics for key in ("planCount", "replanCount", "failedExpectationCount", "successfulRecoveryCount")),
         "outcomeAwarenessRecordsPresent": outcome_awareness_metrics["expectedOutcomeCount"] >= len(completed_backend_actions) if completed_backend_actions else True,
         "turnPlanningRecordsPresent": planner_metrics["turnsWithPlanningRecordCount"] > 0 if turns else True,
+    }
+    final_gate_checks = {
+        "featureGateOpen": checklist["featureGateOpen"],
+        "configGateOpen": checklist["configGateOpen"],
+        "noRoutePendingActions": len(active_route_pending) == 0,
+        "noUnresolvedMismatches": outcome_awareness_metrics["unresolvedMismatchCount"] == 0,
+        "memoryWithinCaps": memory_caps["withinCaps"],
+        "memoryGrowthBounded": memory_growth["bounded"],
+        "providerModelBudgetOk": provider_model_call_counts["metricsReadOnlyBudgetOk"],
+        "clawMindRuntimeEvidence": clawmind_architecture.get("checklist", {}).get("allModulesExecuted") is True,
+    }
+    final_gate = {
+        "schemaVersion": "agent-live-mode-final-gate/v1",
+        "ok": all(final_gate_checks.values()),
+        "checks": final_gate_checks,
+        "failures": [key for key, passed in final_gate_checks.items() if not passed],
     }
     return {
         "ok": True,
@@ -4531,9 +4689,14 @@ def get_live_agent_mode_autonomy_metrics():
             "turnHistoryCount": len(turns),
             "completedTurnCount": len(completed_turns),
             "failedTurnCount": len(failed_turns),
+            "turnDuration": _latency_summary([sample * 1000 for sample in turn_duration_samples]),
             "activeWorldActionCount": len(active_actions),
             "routePendingActiveCount": len(active_route_pending),
             "completedBackendActionCount": len(completed_backend_actions),
+            "failedBackendActionCount": len(failed_backend_actions),
+            "terminalBackendActionCount": backend_action_total,
+            "actionSuccessRate": action_success_rate,
+            "recoveryRate": recovery_rate,
             "completedBackendActionTypes": completed_action_types,
             "typedObjectActionTypes": object_action_types,
             "simulatedLocationCount": len([loc for loc in simulated_locations.values() if isinstance(loc, dict)]),
@@ -4548,7 +4711,10 @@ def get_live_agent_mode_autonomy_metrics():
             "societyRoleCount": len(society_roles),
             "liveEnabledSocietyRoleCount": len([role for role in society_roles.values() if isinstance(role, dict) and role.get("liveModeEnabled") is True]),
             "memory": memory_counts,
+            "memoryCaps": memory_caps,
+            "memoryGrowth": memory_growth,
             "operatorProposalCount": len(loop_state.get("operatorProposals") or []),
+            "pendingOperatorProposalCount": len(pending_operator_proposals),
             "liveAgentBuildingCount": live_agent_building_count,
             "liveAgentBuildEffectActionCount": len(live_agent_build_actions),
             "expectedObservedSuccessRate": outcome_awareness_metrics["expectedObservedSuccessRate"],
@@ -4577,14 +4743,16 @@ def get_live_agent_mode_autonomy_metrics():
             },
         },
         "providerSupport": provider_support,
+        "providerModelCallCounts": provider_model_call_counts,
         "clawMindArchitecture": clawmind_architecture,
+        "finalGate": final_gate,
         "checklist": checklist,
         "gaps": [key for key, passed in checklist.items() if not passed],
         "acceptanceNotes": {
             "readOnly": True,
             "mutationEndpointsRemainLicenseGated": True,
             "browserRequiredForProgress": False,
-            "fullSoakTargetTurns": 50,
+            "fullSoakTargetTurns": 100,
             "universalProviderSupportMeasured": True,
             "clawMindArchitectureMeasured": True,
             "metricsProviderCalls": 0,
@@ -6374,6 +6542,31 @@ def _normalize_int(value, fallback, *, minimum=None, maximum=None):
     return number
 
 
+def _percentile(values, percentile):
+    samples = sorted(float(value) for value in values if isinstance(value, (int, float)) and math.isfinite(float(value)))
+    if not samples:
+        return 0
+    if len(samples) == 1:
+        return round(samples[0], 3)
+    rank = (len(samples) - 1) * max(0, min(100, float(percentile))) / 100
+    lower = int(math.floor(rank))
+    upper = int(math.ceil(rank))
+    if lower == upper:
+        return round(samples[lower], 3)
+    weight = rank - lower
+    return round(samples[lower] * (1 - weight) + samples[upper] * weight, 3)
+
+
+def _latency_summary(values):
+    samples = [float(value) for value in values if isinstance(value, (int, float)) and math.isfinite(float(value))]
+    return {
+        "sampleCount": len(samples),
+        "p50Ms": _percentile(samples, 50),
+        "p95Ms": _percentile(samples, 95),
+        "maxMs": round(max(samples), 3) if samples else 0,
+    }
+
+
 def _live_agent_loop_normalize_kill_switch(raw):
     source = raw if isinstance(raw, dict) else {}
     active = bool(source.get("active") or source.get("killSwitchActive"))
@@ -6502,6 +6695,11 @@ def _normalize_live_agent_clawmind_runtime(raw):
     stats = source.get("moduleStats") if isinstance(source.get("moduleStats"), dict) else {}
     for module_name in LIVE_AGENT_CLAWMIND_MODULES:
         raw_stat = stats.get(module_name) if isinstance(stats.get(module_name), dict) else {}
+        latency_samples = [
+            round(float(item), 3)
+            for item in (raw_stat.get("latencySamplesMs") or [])
+            if isinstance(item, (int, float)) and math.isfinite(float(item))
+        ][-LIVE_AGENT_LOOP_DEFAULTS["moduleLatencyRetention"]:]
         runtime["moduleStats"][module_name] = {
             "executionCount": _normalize_int(raw_stat.get("executionCount"), 0, minimum=0, maximum=1000000000),
             "lastExecutionAt": raw_stat.get("lastExecutionAt") if _parse_isoish_epoch(raw_stat.get("lastExecutionAt")) else None,
@@ -6509,6 +6707,7 @@ def _normalize_live_agent_clawmind_runtime(raw):
             "lastTurnId": _live_agent_loop_clean_plan_text(raw_stat.get("lastTurnId"), limit=180),
             "lastAgentId": _live_agent_loop_clean_plan_text(raw_stat.get("lastAgentId"), limit=120),
             "lastLatencyMs": round(float(raw_stat.get("lastLatencyMs") or 0), 3) if isinstance(raw_stat.get("lastLatencyMs"), (int, float)) else 0,
+            "latencySamplesMs": latency_samples,
             "lastStatus": _live_agent_loop_clean_plan_text(raw_stat.get("lastStatus"), limit=80) or "never_run",
             "lastGaps": [str(item)[:180] for item in (raw_stat.get("lastGaps") or []) if item],
             "lastTraceId": _live_agent_loop_clean_plan_text(raw_stat.get("lastTraceId"), limit=180),
@@ -6565,6 +6764,12 @@ def _live_agent_clawmind_append_trace(state, module_name, turn, started, *, inpu
     stat["lastTurnId"] = turn_id
     stat["lastAgentId"] = agent_id
     stat["lastLatencyMs"] = trace["latencyMs"]
+    samples = [
+        round(float(item), 3)
+        for item in (stat.get("latencySamplesMs") or [])
+        if isinstance(item, (int, float)) and math.isfinite(float(item))
+    ]
+    stat["latencySamplesMs"] = [*samples, trace["latencyMs"]][-LIVE_AGENT_LOOP_DEFAULTS["moduleLatencyRetention"]:]
     stat["lastStatus"] = trace["status"]
     stat["lastGaps"] = clean_gaps
     stat["lastTraceId"] = trace["id"]

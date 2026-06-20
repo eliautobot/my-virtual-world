@@ -62,10 +62,10 @@ Autonomous Live Agent Mode development should use the isolated 8587 harness inst
 npm run verify:live-agent-mode:8587
 ```
 
-The default harness target is a short CI-safe proof. The full no-browser soak target uses the same script:
+The default harness target is the 8587 scale/soak acceptance gate: at least five Live Agent Mode agents and 100 backend turns, isolated from the protected 8590 runtime. Smaller or larger local runs use the same script:
 
 ```bash
-VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS=50 npm run verify:live-agent-mode:8587
+VW_LIVE_AGENT_MODE_SOAK_AGENT_COUNT=3 VW_LIVE_AGENT_MODE_SOAK_TURNS=20 npm run verify:live-agent-mode:8587
 ```
 
 The read-only metrics endpoint is:
@@ -74,7 +74,7 @@ The read-only metrics endpoint is:
 GET /api/live-agent-mode/metrics
 ```
 
-It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, reaction opportunities, memory entries, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
+It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, p50/p95 turn duration, action success/recovery rates, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, reaction opportunities, bounded memory growth, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
 
 It also reports lightweight provider readiness plus ClawMind-style architecture contract readiness and runtime execution evidence:
 
@@ -83,6 +83,7 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `providerSupport.checklist.allProviderKindsHaveCoreAdapter`
 - `providerSupport.optimization.providerCallsDuringMetrics = 0`
 - `providerSupport.optimization.modelCallsDuringMetrics = 0`
+- `providerModelCallCounts`
 - `clawMindArchitecture.schemaVersion = agent-live-mode-clawmind-architecture/v1`
 - `clawMindArchitecture.modules`
 - `clawMindArchitecture.checklist.allModuleContractsReady`
@@ -90,8 +91,15 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `clawMindArchitecture.modules.*.executionCount`
 - `clawMindArchitecture.modules.*.lastExecutionAt`
 - `clawMindArchitecture.modules.*.lastLatencyMs`
+- `clawMindArchitecture.modules.*.latency.p50Ms`
+- `clawMindArchitecture.modules.*.latency.p95Ms`
 - `clawMindArchitecture.runtime.traceCount`
 - `clawMindArchitecture.optimization.heavyWorldScan = false`
+- `finalGate.ok`
+- `finalGate.checks.noRoutePendingActions`
+- `finalGate.checks.noUnresolvedMismatches`
+- `finalGate.checks.memoryWithinCaps`
+- `finalGate.checks.memoryGrowthBounded`
 
 Provider and ClawMind metrics intentionally use cached roster/world state plus bounded persisted module traces only. They must not call OpenClaw, Hermes, Codex, or any model provider while serving the metrics endpoint.
 

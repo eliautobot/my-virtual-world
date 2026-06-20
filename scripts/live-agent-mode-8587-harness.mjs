@@ -23,7 +23,10 @@ const VENDING_ID = 'acceptance-vending';
 const WHITEBOARD_ID = 'acceptance-whiteboard';
 const PRINTER_ID = 'acceptance-printer';
 const MICROWAVE_ID = 'acceptance-microwave';
-const ACCEPTANCE_TURN_TARGET = Math.max(1, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS || '12', 10) || 12);
+const ACCEPTANCE_TURN_TARGET = Math.max(1, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS || process.env.VW_LIVE_AGENT_MODE_SOAK_TURNS || '100', 10) || 100);
+const SOAK_AGENT_COUNT = Math.max(2, Number.parseInt(process.env.VW_LIVE_AGENT_MODE_SOAK_AGENT_COUNT || process.env.VW_LIVE_AGENT_MODE_ACCEPTANCE_AGENTS || '5', 10) || 5);
+const EXTRA_SOAK_AGENT_IDS = Array.from({ length: Math.max(0, SOAK_AGENT_COUNT - 2) }, (_, index) => `acceptance-soak-${index + 3}`);
+const SOAK_AGENT_IDS = [TEST_AGENT_ID, PEER_AGENT_ID, ...EXTRA_SOAK_AGENT_IDS];
 const keepOpen = process.argv.includes('--keep-open');
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
@@ -33,7 +36,9 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
 
 The harness starts My Virtual World on ${BASE_URL} with temporary data,
 checks /healthz, proves a backend Live Agent Mode turn can finish without
-a browser, runs autonomy metrics, runs a browser replay/render check against emitted animation
+a browser, runs a configurable multi-agent soak (${SOAK_AGENT_COUNT} agents,
+${ACCEPTANCE_TURN_TARGET} backend turns by default), runs autonomy metrics,
+runs a browser replay/render check against emitted animation
 events, pins the child process to ${TEST_PORT}, and refuses environment or
 argument targets that point at ${PRODUCT_URL}.`);
   process.exit(0);
@@ -202,26 +207,23 @@ async function stopServer(child) {
 }
 
 function writeAcceptanceWorkspace(workspaceRoot) {
-  const agentDir = join(workspaceRoot, 'agents', TEST_AGENT_ID, 'agent');
-  mkdirSync(agentDir, { recursive: true });
-  writeFileSync(join(agentDir, 'IDENTITY.md'), [
-    '# Acceptance Agent',
-    '',
-    '- **Name:** Acceptance Agent',
-    '- **Emoji:** A',
-    '- **Role:** Isolated Live Agent Mode acceptance fixture',
-    '',
-  ].join('\n'));
-  const peerDir = join(workspaceRoot, 'agents', PEER_AGENT_ID, 'agent');
-  mkdirSync(peerDir, { recursive: true });
-  writeFileSync(join(peerDir, 'IDENTITY.md'), [
-    '# Acceptance Peer',
-    '',
-    '- **Name:** Acceptance Peer',
-    '- **Emoji:** P',
-    '- **Role:** Isolated Live Agent Mode social fixture',
-    '',
-  ].join('\n'));
+  for (const [index, agentId] of SOAK_AGENT_IDS.entries()) {
+    const agentDir = join(workspaceRoot, 'agents', agentId, 'agent');
+    const displayName = agentId === TEST_AGENT_ID
+      ? 'Acceptance Agent'
+      : agentId === PEER_AGENT_ID
+        ? 'Acceptance Peer'
+        : `Acceptance Soak ${index + 1}`;
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(agentDir, 'IDENTITY.md'), [
+      `# ${displayName}`,
+      '',
+      `- **Name:** ${displayName}`,
+      `- **Emoji:** ${index + 1}`,
+      '- **Role:** Isolated Live Agent Mode soak fixture',
+      '',
+    ].join('\n'));
+  }
 }
 
 function acceptanceOfficeBuilding() {
@@ -337,92 +339,101 @@ async function seedAcceptanceWorld() {
   assert(home?.ok === true, 'failed to seed acceptance home building', home);
 
   const now = new Date().toISOString();
+  const agentAssignments = {};
+  const agentProfiles = {
+    [HERMES_FIXTURE_AGENT_ID]: {
+      name: 'Acceptance Hermes Fixture',
+      providerKind: 'hermes',
+      providerType: 'profile-backed',
+      providerAgentId: 'acceptance-hermes',
+      agentLiveModeEnabled: false,
+      capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
+    },
+    [CODEX_FIXTURE_AGENT_ID]: {
+      name: 'Acceptance Codex Fixture',
+      providerKind: 'codex',
+      providerType: 'profile-backed',
+      providerAgentId: 'acceptance-codex',
+      agentLiveModeEnabled: false,
+      capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
+    },
+    [FAKE_FIXTURE_AGENT_ID]: {
+      name: 'Acceptance Fake Provider',
+      providerKind: 'fake',
+      providerType: 'profile-backed',
+      providerAgentId: 'acceptance-fake',
+      agentLiveModeEnabled: false,
+      capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
+    },
+  };
+  const agentLocations = {};
+  const loopAgents = {};
+  for (const [index, agentId] of SOAK_AGENT_IDS.entries()) {
+    agentAssignments[agentId] = {
+      work: OFFICE_BUILDING_ID,
+      ...(agentId === TEST_AGENT_ID ? { home: HOME_BUILDING_ID } : {}),
+    };
+    agentProfiles[agentId] = {
+      name: agentId === TEST_AGENT_ID ? 'Acceptance Agent' : agentId === PEER_AGENT_ID ? 'Acceptance Peer' : `Acceptance Soak ${index + 1}`,
+      agentLiveModeEnabled: true,
+      roles: agentId === TEST_AGENT_ID
+        ? ['acceptance resident', 'social initiator']
+        : agentId === PEER_AGENT_ID
+          ? ['acceptance resident', 'social peer']
+          : ['acceptance resident', 'soak participant'],
+      personality: {
+        outgoing: Math.min(0.9, 0.35 + (index * 0.08)),
+        curious: Math.min(0.9, 0.45 + (index * 0.05)),
+        easygoing: Math.max(0.2, 0.8 - (index * 0.06)),
+      },
+    };
+    agentLocations[agentId] = agentId === TEST_AGENT_ID
+      ? {
+          source: '8587-acceptance-seed',
+          agentId,
+          buildingId: HOME_BUILDING_ID,
+          floor: 1,
+          x: -7,
+          z: -7,
+          apiX: -280,
+          apiZ: -280,
+          updatedAt: now,
+        }
+      : {
+          source: '8587-acceptance-seed',
+          agentId,
+          buildingId: OFFICE_BUILDING_ID,
+          floor: 1,
+          x: 15 + index,
+          z: 10 + (index % 3),
+          apiX: (15 + index) * 40,
+          apiZ: (10 + (index % 3)) * 40,
+          updatedAt: now,
+        };
+    loopAgents[agentId] = {
+      enabled: true,
+      lastNeedUpdateAt: now,
+      needs: {
+        hydration: index % 5 === 0 ? 0.95 : 0.2 + ((index % 4) * 0.12),
+        food: index % 5 === 1 ? 0.9 : 0.15 + ((index % 3) * 0.12),
+        energy: index % 5 === 2 ? 0.85 : 0.15,
+        curiosity: index % 5 === 3 ? 0.9 : 0.2,
+        maintenance: index % 5 === 4 ? 0.9 : 0.2,
+        shelter: agentId === TEST_AGENT_ID ? 0.1 : 0.2,
+        social: agentId === PEER_AGENT_ID ? 0.9 : 0.25 + ((index % 2) * 0.2),
+      },
+    };
+  }
   const seeded = await postJson('/api/meta', {
     initialized: true,
     name: '8587 Live Agent Mode Acceptance',
-    agentAssignments: {
-      [TEST_AGENT_ID]: {
-        home: HOME_BUILDING_ID,
-        work: OFFICE_BUILDING_ID,
-      },
-      [PEER_AGENT_ID]: {
-        work: OFFICE_BUILDING_ID,
-      },
-    },
-    agentProfiles: {
-      [TEST_AGENT_ID]: {
-        name: 'Acceptance Agent',
-        agentLiveModeEnabled: true,
-        roles: ['acceptance resident', 'social initiator'],
-        personality: {
-          outgoing: 0.4,
-          curious: 0.5,
-          easygoing: 0.8,
-        },
-      },
-      [PEER_AGENT_ID]: {
-        name: 'Acceptance Peer',
-        agentLiveModeEnabled: true,
-        roles: ['acceptance resident', 'social peer'],
-        personality: {
-          outgoing: 0.6,
-          curious: 0.4,
-          easygoing: 0.5,
-        },
-      },
-      [HERMES_FIXTURE_AGENT_ID]: {
-        name: 'Acceptance Hermes Fixture',
-        providerKind: 'hermes',
-        providerType: 'profile-backed',
-        providerAgentId: 'acceptance-hermes',
-        agentLiveModeEnabled: false,
-        capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
-      },
-      [CODEX_FIXTURE_AGENT_ID]: {
-        name: 'Acceptance Codex Fixture',
-        providerKind: 'codex',
-        providerType: 'profile-backed',
-        providerAgentId: 'acceptance-codex',
-        agentLiveModeEnabled: false,
-        capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
-      },
-      [FAKE_FIXTURE_AGENT_ID]: {
-        name: 'Acceptance Fake Provider',
-        providerKind: 'fake',
-        providerType: 'profile-backed',
-        providerAgentId: 'acceptance-fake',
-        agentLiveModeEnabled: false,
-        capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
-      },
-    },
+    agentAssignments,
+    agentProfiles,
     agentLife: {
       simulation: {
         schemaVersion: 'agent-live-mode-simulation/v1',
         updatedAt: now,
-        agentLocations: {
-          [TEST_AGENT_ID]: {
-            source: '8587-acceptance-seed',
-            agentId: TEST_AGENT_ID,
-            buildingId: HOME_BUILDING_ID,
-            floor: 1,
-            x: -7,
-            z: -7,
-            apiX: -280,
-            apiZ: -280,
-            updatedAt: now,
-          },
-          [PEER_AGENT_ID]: {
-            source: '8587-acceptance-seed',
-            agentId: PEER_AGENT_ID,
-            buildingId: OFFICE_BUILDING_ID,
-            floor: 1,
-            x: 18,
-            z: 12,
-            apiX: 720,
-            apiZ: 480,
-            updatedAt: now,
-          },
-        },
+        agentLocations,
       },
       liveModeLoop: {
         schemaVersion: 'agent-live-mode-loop/v1',
@@ -432,34 +443,7 @@ async function seedAcceptanceWorld() {
         minActionIntervalSec: 30,
         maxActionsPerTick: 1,
         maxToolCallsPerTurn: 1,
-        agents: {
-          [TEST_AGENT_ID]: {
-            enabled: true,
-            lastNeedUpdateAt: now,
-            needs: {
-              hydration: 0.95,
-              food: 0.1,
-              energy: 0.1,
-              curiosity: 0.1,
-              maintenance: 0.1,
-              shelter: 0.1,
-              social: 0.1,
-            },
-          },
-          [PEER_AGENT_ID]: {
-            enabled: true,
-            lastNeedUpdateAt: now,
-            needs: {
-              hydration: 0.2,
-              food: 0.2,
-              energy: 0.2,
-              curiosity: 0.2,
-              maintenance: 0.2,
-              shelter: 0.1,
-              social: 0.9,
-            },
-          },
-        },
+        agents: loopAgents,
       },
     },
   });
@@ -497,6 +481,22 @@ async function seedAcceptanceWorld() {
     actor: '8587-acceptance-harness',
   });
   assert(peerLoopSettings?.ok === true, 'failed to configure peer Live Agent Mode loop for acceptance', peerLoopSettings);
+
+  for (const agentId of EXTRA_SOAK_AGENT_IDS) {
+    const liveModeResult = await postJson(`/api/agent/${encodeURIComponent(agentId)}/live-mode`, {
+      agentLiveModeEnabled: true,
+    });
+    assert(liveModeResult?.ok === true && liveModeResult.agentLiveModeEnabled === true, `failed to enable Live Agent Mode for soak agent ${agentId}`, liveModeResult);
+    const loopResult = await postJson('/api/agent-live-loop', {
+      agentId,
+      agentEnabled: true,
+      clearTurnRetry: true,
+      actor: '8587-acceptance-harness',
+    });
+    assert(loopResult?.ok === true, `failed to configure soak agent ${agentId} for acceptance`, loopResult);
+  }
+
+  console.log(`PASS: seeded ${SOAK_AGENT_IDS.length} Live Agent Mode soak agents for ${ACCEPTANCE_TURN_TARGET} backend turns.`);
 }
 
 async function enableGlobalAgentLiveModeFeature() {
@@ -950,12 +950,21 @@ function verifyMultiAgentSocialMetrics(metrics) {
   })}`);
 }
 
-async function verifyAutonomyMetrics({ expectedTurns }) {
+async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   const metrics = await fetchJson('/api/live-agent-mode/metrics');
   assert(metrics?.ok === true, 'Live Agent metrics endpoint failed', metrics);
+  assert(metrics.loop?.enabledAgentCount >= expectedAgents, `metrics should include at least ${expectedAgents} enabled live agents`, metrics.loop);
   assert(metrics.metrics?.completedTurnCount >= expectedTurns, `metrics should show at least ${expectedTurns} completed turns`, metrics.metrics);
   assert(metrics.metrics?.completedBackendActionCount >= expectedTurns, `metrics should show at least ${expectedTurns} backend-owned completed actions`, metrics.metrics);
   assert(metrics.metrics?.routePendingActiveCount === 0, 'metrics should show no active route_pending actions', metrics.metrics);
+  assert(metrics.metrics?.memoryCaps?.withinCaps === true, 'metrics should show live-agent memory stayed within bounded caps', metrics.metrics?.memoryCaps);
+  assert(metrics.metrics?.memoryCaps?.breachCount === 0, 'metrics should show no memory cap breaches', metrics.metrics?.memoryCaps);
+  assert(metrics.metrics?.memoryGrowth?.bounded === true, 'metrics should expose bounded memory growth', metrics.metrics?.memoryGrowth);
+  assert(metrics.metrics?.memoryGrowth?.maxRetainedToCapRatio <= 1, 'metrics should show retained memory stayed within growth caps', metrics.metrics?.memoryGrowth);
+  assert(typeof metrics.metrics?.turnDuration?.p50Ms === 'number', 'metrics should expose p50 turn duration', metrics.metrics?.turnDuration);
+  assert(typeof metrics.metrics?.turnDuration?.p95Ms === 'number', 'metrics should expose p95 turn duration', metrics.metrics?.turnDuration);
+  assert(typeof metrics.metrics?.actionSuccessRate === 'number' && metrics.metrics.actionSuccessRate >= 0.99, 'metrics should expose a passing action success rate', metrics.metrics);
+  assert(typeof metrics.metrics?.recoveryRate === 'number' && metrics.metrics.recoveryRate >= 1, 'metrics should expose a passing recovery rate', metrics.metrics);
   assert(metrics.checklist?.browserFreeBackendCompletions === true, 'metrics checklist should confirm browser-free backend completion', metrics.checklist);
   assert(metrics.checklist?.movementPersisted === true, 'metrics checklist should confirm persisted movement', metrics.checklist);
   assert(metrics.checklist?.threeTypedObjectUses === true, 'metrics checklist should confirm at least three typed object-use actions', metrics.checklist);
@@ -995,6 +1004,9 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
   assert(metrics.providerSupport?.capabilityGapsByProvider?.fake && Array.isArray(metrics.providerSupport.capabilityGapsByProvider.fake), 'provider support metrics should report per-provider capability gaps', metrics.providerSupport?.capabilityGapsByProvider);
   assert(metrics.providerSupport?.optimization?.providerCallsDuringMetrics === 0, 'provider support metrics must not call providers', metrics.providerSupport?.optimization);
   assert(metrics.providerSupport?.optimization?.modelCallsDuringMetrics === 0, 'provider support metrics must not call models', metrics.providerSupport?.optimization);
+  assert(metrics.providerModelCallCounts?.metricsReadOnlyBudgetOk === true, 'provider/model budget metrics should stay read-only', metrics.providerModelCallCounts);
+  assert(typeof metrics.providerModelCallCounts?.providerBridgeCalls === 'number', 'provider/model metrics should expose provider bridge call counts', metrics.providerModelCallCounts);
+  assert(typeof metrics.providerModelCallCounts?.modelCallsDuringMetrics === 'number', 'provider/model metrics should expose model call counts', metrics.providerModelCallCounts);
   assert(metrics.clawMindArchitecture?.schemaVersion === 'agent-live-mode-clawmind-architecture/v1', 'ClawMind metrics should use the architecture schema', metrics.clawMindArchitecture);
   assert(metrics.clawMindArchitecture?.checklist?.allModuleContractsReady === true, 'ClawMind metrics should confirm all module contracts', metrics.clawMindArchitecture);
   assert(metrics.clawMindArchitecture?.checklist?.allModulesExecuted === true, 'ClawMind metrics should confirm all modules executed', metrics.clawMindArchitecture);
@@ -1003,11 +1015,24 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
     assert(Number(moduleMetrics?.executionCount || 0) > 0, `ClawMind module ${moduleName} should report execution count`, moduleMetrics);
     assert(moduleMetrics?.lastExecutionAt, `ClawMind module ${moduleName} should report last execution time`, moduleMetrics);
     assert(typeof moduleMetrics?.lastLatencyMs === 'number', `ClawMind module ${moduleName} should report latency`, moduleMetrics);
+    assert(typeof moduleMetrics?.latency?.p50Ms === 'number', `ClawMind module ${moduleName} should report p50 latency`, moduleMetrics);
+    assert(typeof moduleMetrics?.latency?.p95Ms === 'number', `ClawMind module ${moduleName} should report p95 latency`, moduleMetrics);
   }
   assert(metrics.clawMindArchitecture?.optimization?.heavyWorldScan === false, 'ClawMind metrics must stay lightweight', metrics.clawMindArchitecture?.optimization);
+  assert(metrics.finalGate?.ok === true, 'final soak gate should pass', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.noRoutePendingActions === true, 'final gate should fail on route-pending actions', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.noUnresolvedMismatches === true, 'final gate should fail on unresolved mismatches', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.memoryWithinCaps === true, 'final gate should fail on memory cap breaches', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.memoryGrowthBounded === true, 'final gate should fail on unbounded memory growth', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.featureGateOpen === true && metrics.finalGate?.checks?.configGateOpen === true, 'final gate should fail on disabled feature gates', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.providerModelBudgetOk === true, 'final gate should fail on provider/model budget violations', metrics.finalGate);
   console.log(`PASS: autonomy metrics ${JSON.stringify({
+    enabledAgentCount: metrics.loop.enabledAgentCount,
     completedTurnCount: metrics.metrics.completedTurnCount,
     completedBackendActionCount: metrics.metrics.completedBackendActionCount,
+    turnDuration: metrics.metrics.turnDuration,
+    actionSuccessRate: metrics.metrics.actionSuccessRate,
+    recoveryRate: metrics.metrics.recoveryRate,
     typedObjectActionTypes: metrics.metrics.typedObjectActionTypes,
     inWorldCommunicationCount: metrics.metrics.inWorldCommunicationCount,
     reactionOpportunityCount: metrics.metrics.reactionOpportunityCount,
@@ -1017,6 +1042,7 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
     conversationTriggerCount: metrics.metrics.conversationTriggerCount,
     societyRoleCount: metrics.metrics.societyRoleCount,
     memory: metrics.metrics.memory,
+    memoryGrowth: metrics.metrics.memoryGrowth,
     planner: {
       planCount: metrics.metrics.planCount,
       replanCount: metrics.metrics.replanCount,
@@ -1024,8 +1050,10 @@ async function verifyAutonomyMetrics({ expectedTurns }) {
       successfulRecoveryCount: metrics.metrics.successfulRecoveryCount,
     },
     providerKindCount: metrics.providerSupport.providerKindCount,
+    providerModelCallCounts: metrics.providerModelCallCounts,
     clawMindContractGaps: metrics.clawMindArchitecture.contractGaps,
     clawMindRuntimeEvidenceGaps: metrics.clawMindArchitecture.runtimeEvidenceGaps,
+    finalGate: metrics.finalGate,
     gaps: metrics.gaps,
   })}`);
   return metrics;
@@ -1209,7 +1237,7 @@ try {
   await verifyFailureInjectionReplanning();
   await verifyFakeProviderBridgeContract();
   await enableLoopForFinalMetrics();
-  await verifyAutonomyMetrics({ expectedTurns: ACCEPTANCE_TURN_TARGET });
+  await verifyAutonomyMetrics({ expectedTurns: ACCEPTANCE_TURN_TARGET, expectedAgents: SOAK_AGENT_COUNT });
   await runBrowserReplayRenderCheck(backendSeries.proofs[0].actionId);
 
   if (keepOpen) {
