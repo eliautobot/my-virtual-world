@@ -101,10 +101,17 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `clawMindArchitecture.runtime.traceCount`
 - `clawMindArchitecture.optimization.heavyWorldScan = false`
 - `finalGate.ok`
+- `finalGate.checks.featureGateOpen`
+- `finalGate.checks.configGateOpen`
 - `finalGate.checks.noRoutePendingActions`
 - `finalGate.checks.noUnresolvedMismatches`
 - `finalGate.checks.memoryWithinCaps`
 - `finalGate.checks.memoryGrowthBounded`
+- `finalGate.checks.providerModelBudgetOk`
+- `finalGate.checks.clawMindRuntimeEvidence`
+- `finalGate.checks.defaultSoakEnabledAgentRosterPresent`
+- `finalGate.checks.defaultSoakCompletedTurnTargetMet`
+- `finalGate.checks.defaultSoakCompletedBackendActionTargetMet`
 - `finalGate.checks.turnsCompletedAcrossEnabledAgents`
 - `finalGate.checks.actionsCompletedAcrossEnabledAgents`
 - `finalGate.evidence.enabledAgents`
@@ -797,7 +804,7 @@ The loop should recover by marking the action terminal, logging feedback, updati
 The mode is not ready to expose in product UI until all of these pass:
 
 - A selected agent can run at least 50 consecutive backend-owned turns without an open browser.
-- The default 8587 soak can complete 100 backend-owned turns across at least five enabled Live Agent Mode agents, with per-agent turn/action counts in metrics.
+- The default 8587 soak can complete 100 backend-owned turns across at least five enabled Live Agent Mode agents, with per-agent turn/action counts in metrics and final-gate evidence.
 - A selected agent can move to a building and persist its final location without browser help.
 - A selected agent can use at least three typed objects and persist side effects.
 - A selected agent can speak to a nearby agent and create a reaction turn.
