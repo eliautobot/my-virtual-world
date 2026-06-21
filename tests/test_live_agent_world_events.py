@@ -589,6 +589,39 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertEqual(live_metrics["latency"]["sampleCount"], 1)
         self.assertEqual(live_metrics["p95MultiClientSyncLatencyMs"], 1200)
 
+    def test_metrics_keep_latest_proven_multi_client_sync_after_later_unsampled_poll(self):
+        for session_id, cursor, latency_ms in (("client-a", 4, 180), ("client-b", 5, 240)):
+            self.server.list_live_agent_world_events({
+                "client": "main3d-world-event-feed",
+                "sessionId": session_id,
+                "appliedCursor": str(cursor),
+                "lastAppliedLatencyMs": str(latency_ms),
+                "lastAppliedLatencySource": "live-incremental",
+            })
+
+        proven_metrics = self.server.get_live_agent_world_event_feed_metrics()
+        self.assertTrue(proven_metrics["multiClientWorldSyncOk"])
+        self.assertGreaterEqual(proven_metrics["latestMultiClientSync"]["sampledClientCount"], 2)
+        self.assertEqual(
+            proven_metrics["latestProvenMultiClientSync"],
+            proven_metrics["latestMultiClientSync"],
+        )
+
+        for session_id in ("client-a", "client-b"):
+            self.server.list_live_agent_world_events({
+                "client": "main3d-world-event-feed",
+                "sessionId": session_id,
+                "appliedCursor": "0",
+            })
+
+        final_metrics = self.server.get_live_agent_world_event_feed_metrics()
+
+        self.assertTrue(final_metrics["multiClientWorldSyncOk"])
+        self.assertGreaterEqual(final_metrics["maxObservedClientCount"], 2)
+        self.assertGreaterEqual(final_metrics["latestMultiClientSync"]["sampledClientCount"], 2)
+        self.assertTrue(final_metrics["latestProvenMultiClientSync"]["ok"])
+        self.assertFalse(final_metrics["latestMultiClientSyncAttempt"]["ok"])
+
     def test_live_agent_final_gate_default_turn_target_is_five(self):
         metrics = self.server.get_live_agent_mode_autonomy_metrics()
 

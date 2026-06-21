@@ -5745,6 +5745,8 @@ def _world_event_feed_client_metrics():
             del _world_event_feed_multi_client_sync_samples[:-LIVE_AGENT_WORLD_EVENT_FEED_EVIDENCE_SAMPLE_LIMIT]
         multi_client_samples = list(_world_event_feed_multi_client_sync_samples)
     observed_ok_samples = [sample for sample in multi_client_samples if sample.get("ok")]
+    latest_multi_client_sync_attempt = multi_client_samples[-1] if multi_client_samples else None
+    latest_proven_multi_client_sync = observed_ok_samples[-1] if observed_ok_samples else None
     max_observed_client_count = max([_normalize_int(sample.get("clientCount"), 0, minimum=0, maximum=1000000) for sample in multi_client_samples] or [len(active_clients)])
     return {
         "connectedClientCount": len(active_clients),
@@ -5761,7 +5763,9 @@ def _world_event_feed_client_metrics():
             if sample.get("ok")
         ),
         "maxObservedClientCount": max_observed_client_count,
-        "latestMultiClientSync": (multi_client_samples[-1] if multi_client_samples else None),
+        "latestMultiClientSync": latest_proven_multi_client_sync or latest_multi_client_sync_attempt,
+        "latestProvenMultiClientSync": latest_proven_multi_client_sync,
+        "latestMultiClientSyncAttempt": latest_multi_client_sync_attempt,
     }
 
 
@@ -5782,6 +5786,8 @@ def get_live_agent_world_event_feed_metrics():
         "multiClientAppliedSampleCount": client_metrics["multiClientAppliedSampleCount"],
         "maxObservedClientCount": client_metrics["maxObservedClientCount"],
         "latestMultiClientSync": client_metrics["latestMultiClientSync"],
+        "latestProvenMultiClientSync": client_metrics["latestProvenMultiClientSync"],
+        "latestMultiClientSyncAttempt": client_metrics["latestMultiClientSyncAttempt"],
         "nextCursor": int(store.get("nextSequence") or 1) - 1,
         "oldestCursor": int(events[0].get("sequence") or 0) if events else 0,
         "latency": client_metrics["latency"],
