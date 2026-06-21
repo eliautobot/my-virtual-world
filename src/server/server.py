@@ -1456,6 +1456,7 @@ WORLD_ACTION_EVENT_ROUTE_GUARDRAILS = MOVE_INTENT_ROUTE_GUARDRAILS
 LIVE_AGENT_BACKEND_EXECUTION_VERSION = "agent-live-mode-backend-world-action-executor/v1"
 LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"
 LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION = "agent-live-mode-in-world-communication/v1"
+LIVE_AGENT_PUBLIC_EXPRESSION_SCHEMA_VERSION = "agent-live-mode-public-expression/v1"
 LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"
 LIVE_AGENT_MEMORY_STREAM_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-stream-entry/v1"
 LIVE_AGENT_MEMORY_RETRIEVAL_SCHEMA_VERSION = "agent-live-mode-memory-retrieval/v1"
@@ -1914,6 +1915,36 @@ LIVE_AGENT_PROPOSAL_ONLY_CAPABILITIES = [
         "requiredExecutor": "visible-object-removal",
         "requirement": "Agent must visibly go to the object and perform a removal/cleanup sequence before the object is deleted from persistent world state.",
     },
+    {
+        "id": "culture.event.public",
+        "actionType": "culture.createEvent",
+        "capabilityTag": "culture.event",
+        "label": "create a public cultural event",
+        "status": "proposal_only",
+        "blockedReason": "missing-visible-client-executor",
+        "requiredExecutor": "typed-visible-event-planning",
+        "requirement": "Public events need typed visible scheduling, venue capacity, operator approval, and audit trails before they can change the world calendar.",
+    },
+    {
+        "id": "culture.governance.proposal",
+        "actionType": "culture.governance",
+        "capabilityTag": "culture.governance",
+        "label": "start governance or civic rule changes",
+        "status": "proposal_only",
+        "blockedReason": "missing-visible-client-executor",
+        "requiredExecutor": "operator-reviewed-civic-process",
+        "requirement": "Governance changes remain proposal-only until My Virtual World has typed civic executors, approvals, audit trails, and rollback.",
+    },
+    {
+        "id": "culture.economy.activity",
+        "actionType": "culture.economy",
+        "capabilityTag": "culture.economy",
+        "label": "start economy or market activity",
+        "status": "proposal_only",
+        "blockedReason": "missing-visible-client-executor",
+        "requiredExecutor": "operator-reviewed-economy-process",
+        "requirement": "Economy activity remains proposal-only until typed visible executors, balances, approvals, and rollback controls exist.",
+    },
 ]
 LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION = "agent-live-mode-tool-registry/v1"
 LIVE_AGENT_TOOL_CALL_SCHEMA_VERSION = "agent-live-mode-tool-call/v1"
@@ -2162,6 +2193,27 @@ LIVE_AGENT_TOOL_REGISTRY = {
             "properties": {"message": {"type": "string", "minLength": 1, "maxLength": 1000}},
         },
     },
+    "publish_note": {
+        "name": "publish_note",
+        "category": "content",
+        "description": "Post a safe public note at the agent's current place and persist visible in-world evidence.",
+        "riskTier": 1,
+        "permissionRule": "live-agent-speak",
+        "locationRule": "current-place",
+        "sideEffect": "public-expression",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["title", "body"],
+            "properties": {
+                "title": {"type": "string", "minLength": 1, "maxLength": 80},
+                "body": {"type": "string", "minLength": 1, "maxLength": 800},
+                "displaySurface": {"type": "string", "enum": ["notice-board", "billboard", "plaza-post"]},
+                "visibility": {"type": "string", "enum": ["room", "building", "public"]},
+                "tags": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+            },
+        },
+    },
     "add_memory": {
         "name": "add_memory",
         "category": "remember",
@@ -2277,6 +2329,68 @@ LIVE_AGENT_TOOL_REGISTRY = {
                 "proposalType": {"type": "string", "enum": ["build", "decorate", "event", "note"]},
                 "summary": {"type": "string", "minLength": 1, "maxLength": 2000},
                 "target": {"type": "object"},
+            },
+        },
+    },
+    "create_public_event": {
+        "name": "create_public_event",
+        "category": "events",
+        "description": "Draft a public event proposal; it does not schedule or mutate world state until a typed visible executor exists.",
+        "riskTier": 2,
+        "permissionRule": "operator-reviewed",
+        "locationRule": "current-place",
+        "sideEffect": "operator-proposal",
+        "executionMode": "proposal-only",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["title", "summary"],
+            "properties": {
+                "title": {"type": "string", "minLength": 1, "maxLength": 120},
+                "summary": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "eventKind": {"type": "string", "enum": ["meetup", "performance", "workshop", "civic-meeting"]},
+                "proposedAt": {"type": "string", "maxLength": 120},
+                "locationProposal": {"type": "object"},
+            },
+        },
+    },
+    "propose_governance_action": {
+        "name": "propose_governance_action",
+        "category": "governance",
+        "description": "Draft a governance or cultural rule proposal without changing world rules or resident permissions.",
+        "riskTier": 3,
+        "permissionRule": "operator-reviewed",
+        "locationRule": "none",
+        "sideEffect": "operator-proposal",
+        "executionMode": "proposal-only",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["summary"],
+            "properties": {
+                "summary": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "policyArea": {"type": "string", "maxLength": 120},
+                "affectedAgents": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 120}},
+            },
+        },
+    },
+    "propose_economy_activity": {
+        "name": "propose_economy_activity",
+        "category": "economy",
+        "description": "Draft an economy or market activity proposal without creating balances, prices, ownership, or transactions.",
+        "riskTier": 3,
+        "permissionRule": "operator-reviewed",
+        "locationRule": "none",
+        "sideEffect": "operator-proposal",
+        "executionMode": "proposal-only",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["summary"],
+            "properties": {
+                "summary": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "activityKind": {"type": "string", "enum": ["market", "service", "trade", "budget"]},
+                "safetyReview": {"type": "string", "maxLength": 1000},
             },
         },
     },
@@ -2573,9 +2687,19 @@ def _live_agent_tool_contextual_availability(tool, context, args=None, affordanc
                 message="No known target agent is available for remote messaging.",
                 source="socialPerception",
             )
+    elif tool_name == "publish_note":
+        current = context.get("location") if isinstance(context, dict) else None
+        if not isinstance(current, dict) or not any(current.get(key) is not None for key in ("buildingId", "x", "y", "z", "worldX", "worldY")):
+            available = False
+            _live_agent_tool_add_reason(
+                reasons,
+                "wrong_location",
+                message="A public note needs a current place so the world can render durable evidence.",
+                source="currentLocation",
+            )
 
     probe_args = args
-    probe_tool_names = {"observe_world", "list_agents", "list_landmarks", "get_current_location", "go_home", "speak_to_room", "idle"}
+    probe_tool_names = {"observe_world", "list_agents", "list_landmarks", "get_current_location", "go_home", "speak_to_room", "publish_note", "idle"}
     if tool_name in probe_tool_names:
         ok, availability, _ = _live_agent_tool_check_availability(tool, context, probe_args)
         if not ok:
@@ -2991,6 +3115,23 @@ def _live_agent_tool_check_room_speech(context, args):
     return True, {"available": True, "reason": None, "audience": wanted, "spatial": True}, 200
 
 
+def _live_agent_tool_check_public_note(context, args):
+    current = context.get("location")
+    if not isinstance(current, dict) or not any(current.get(key) is not None for key in ("buildingId", "x", "y", "z", "worldX", "worldY")):
+        return False, _live_agent_tool_error("location_unknown", "Agent current place is unknown, so a durable public note cannot be placed.", tool="publish_note", details={"currentLocation": current}), 409
+    visibility = str(args.get("visibility") or "building").strip().lower()
+    if visibility not in {"room", "building", "public"}:
+        visibility = "building"
+    return True, {
+        "available": True,
+        "reason": None,
+        "location": current,
+        "visibility": visibility,
+        "durableWorldEvidence": True,
+        "hiddenWorldMutationAllowed": False,
+    }, 200
+
+
 def _live_agent_tool_check_build_create(tool_name, context, args):
     if tool_name == "propose_world_change":
         return True, {
@@ -2999,6 +3140,16 @@ def _live_agent_tool_check_build_create(tool_name, context, args):
             "requiresApproval": True,
             "executesOnApproval": False,
             "hiddenWorldMutationAllowed": False,
+        }, 200
+    if tool_name in {"create_public_event", "propose_governance_action", "propose_economy_activity"}:
+        return True, {
+            "available": True,
+            "reason": "operator_review_required",
+            "requiresApproval": True,
+            "executesOnApproval": False,
+            "hiddenWorldMutationAllowed": False,
+            "proposalCategory": LIVE_AGENT_TOOL_REGISTRY.get(tool_name, {}).get("category"),
+            "currentLocation": context.get("location") if isinstance(context, dict) else None,
         }, 200
     target = _live_agent_tool_coordinate_target(args)
     normalized, metadata, error = _normalize_move_target(target, context.get("agentId"))
@@ -3035,6 +3186,8 @@ def _live_agent_tool_check_availability(tool, context, args):
         return True, {"available": True, "reason": None, "location": context.get("location")}, 200
     if tool_name in {"add_memory", "search_memory", "write_diary", "add_todo", "complete_todo"}:
         return True, {"available": True, "reason": None, "memoryScope": "agent", "agentId": context.get("agentId")}, 200
+    if tool_name == "publish_note":
+        return _live_agent_tool_check_public_note(context, args)
     if tool_name in {"go_to_place", "go_to_coordinates", "go_home"}:
         return _live_agent_tool_check_move_target(tool_name, context, args)
     if tool_name == "use_object":
@@ -3043,12 +3196,12 @@ def _live_agent_tool_check_availability(tool, context, args):
         return _live_agent_tool_check_agent_message(tool_name, context, args)
     if tool_name == "speak_to_room":
         return _live_agent_tool_check_room_speech(context, args)
-    if tool_name in {"propose_world_change", "build_structure"}:
+    if tool_name in {"propose_world_change", "build_structure", "create_public_event", "propose_governance_action", "propose_economy_activity"}:
         return _live_agent_tool_check_build_create(tool_name, context, args)
     return False, _live_agent_tool_error("tool_not_found", "Unknown Live Agent tool.", tool=tool_name), 404
 
 
-LIVE_AGENT_EXECUTABLE_TOOL_NAMES = {"say_to_agent", "speak_to_room", "send_message", "think_aloud", "add_memory", "search_memory", "write_diary", "add_todo", "complete_todo", "idle"}
+LIVE_AGENT_EXECUTABLE_TOOL_NAMES = {"say_to_agent", "speak_to_room", "send_message", "think_aloud", "publish_note", "add_memory", "search_memory", "write_diary", "add_todo", "complete_todo", "idle"}
 
 
 def _live_agent_tool_execution_enabled(tool_name):
@@ -3728,6 +3881,168 @@ def _execute_live_agent_communication_tool(tool_name, context, args, availabilit
     }
 
 
+def _live_agent_public_expression_position(location):
+    location = location if isinstance(location, dict) else {}
+    building_id = location.get("buildingId")
+    building = load_building(building_id) if building_id else None
+
+    def number_or_none(*values):
+        for value in values:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return float(value)
+            try:
+                if value not in (None, ""):
+                    return float(value)
+            except (TypeError, ValueError):
+                pass
+        return None
+
+    x = number_or_none(location.get("x"), location.get("worldX"), location.get("tileX"))
+    z = number_or_none(location.get("z"), location.get("y"), location.get("worldY"), location.get("tileY"))
+    if isinstance(building, dict):
+        x = number_or_none(x, building.get("worldX"), building.get("x"), building.get("tileX"), 0)
+        z = number_or_none(z, building.get("worldY"), building.get("worldZ"), building.get("z"), building.get("y"), building.get("tileY"), 0)
+        width = number_or_none(building.get("widthTiles"), building.get("width"), 8) or 8
+        depth = number_or_none(building.get("heightTiles"), building.get("depthTiles"), building.get("depth"), 8) or 8
+        return {
+            "x": round(float(x or 0), 3),
+            "z": round(float(z or 0) + max(2.5, float(depth) * 0.45 + 1.5), 3),
+            "y": 2.4,
+            "buildingId": building_id,
+            "buildingName": building.get("name"),
+            "anchor": "building-front",
+            "widthTiles": width,
+            "depthTiles": depth,
+        }
+    return {
+        "x": round(float(x or 0), 3),
+        "z": round(float(z or 0), 3),
+        "y": 2.4,
+        "anchor": "current-place",
+    }
+
+
+def _live_agent_public_expression_payload(context, args, availability):
+    now_iso = _utc_now_iso()
+    agent_id = context.get("agentId")
+    location = availability.get("location") if isinstance(availability, dict) and isinstance(availability.get("location"), dict) else context.get("location") if isinstance(context.get("location"), dict) else {}
+    title = _live_agent_memory_clean_text(args.get("title"), limit=80)
+    body = _live_agent_memory_clean_text(args.get("body"), limit=800)
+    display_surface = str(args.get("displaySurface") or "notice-board").strip().lower()
+    if display_surface not in {"notice-board", "billboard", "plaza-post"}:
+        display_surface = "notice-board"
+    visibility = str(args.get("visibility") or (availability.get("visibility") if isinstance(availability, dict) else None) or "building").strip().lower()
+    if visibility not in {"room", "building", "public"}:
+        visibility = "building"
+    expression_id = _live_agent_memory_entry_id("pubexpr", agent_id)
+    position = _live_agent_public_expression_position(location)
+    return {
+        "schemaVersion": LIVE_AGENT_PUBLIC_EXPRESSION_SCHEMA_VERSION,
+        "id": expression_id,
+        "name": "public-note-posted",
+        "type": "live-agent-public-expression",
+        "kind": "public-note",
+        "status": "posted",
+        "at": now_iso,
+        "createdAt": now_iso,
+        "timestamp": now_iso,
+        "agentId": agent_id,
+        "fromAgentId": agent_id,
+        "from": {"agentId": agent_id, "name": _live_agent_loop_agent_display_name(agent_id)},
+        "title": title,
+        "body": body,
+        "text": body,
+        "summary": title,
+        "tags": _live_agent_memory_clean_tags(args.get("tags"), extra=["public-expression", "note"]),
+        "visibility": visibility,
+        "display": {
+            "surface": display_surface,
+            "label": title,
+            "markerName": f"vw-live-agent-public-expression-{expression_id}",
+            "position": position,
+        },
+        "location": location,
+        "buildingId": location.get("buildingId"),
+        "floor": location.get("floor") or 1,
+        "source": {
+            "kind": "agent-live-mode",
+            "tool": "publish_note",
+            "requestId": (context.get("source") or {}).get("requestId"),
+        },
+        "visibleInWorld": True,
+        "durableWorldEvidence": True,
+        "hiddenWorldMutationAllowed": False,
+        "providerRelay": False,
+    }
+
+
+def _record_live_agent_public_expression_side_effects(expression):
+    agent_id = expression.get("agentId")
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=True)
+        agent_state = _live_agent_loop_agent_state(state, agent_id)
+        public_history = [item for item in (agent_state.get("publicExpressions") or []) if isinstance(item, dict)]
+        public_history.append({
+            "id": expression.get("id"),
+            "kind": expression.get("kind"),
+            "title": expression.get("title"),
+            "at": expression.get("at"),
+            "buildingId": expression.get("buildingId"),
+            "visibleInWorld": True,
+        })
+        agent_state["publicExpressions"] = _live_agent_loop_trim_list(public_history, 24)
+        memory_entry = {
+            "schemaVersion": LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION,
+            "id": f"memory-{expression.get('id')}",
+            "at": expression.get("at"),
+            "agentId": agent_id,
+            "kind": "public-expression",
+            "text": f"I posted a public note: {expression.get('title')}",
+            "importance": "normal",
+            "salience": 0.55,
+            "tags": _live_agent_memory_clean_tags(["public-expression", "note"]),
+            "source": {"kind": "public-expression", "tool": "publish_note", "requestId": (expression.get("source") or {}).get("requestId")},
+            "publicExpressionId": expression.get("id"),
+        }
+        _live_agent_loop_append_memory_bucket(state, agent_id, "observations", memory_entry, retention=LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
+        _live_agent_loop_append_memory_stream_entry(state, agent_id, {**memory_entry, "bucket": "observations", "sourceEntryId": memory_entry.get("id")}, retention=LIVE_AGENT_LOOP_DEFAULTS["memoryStreamRetention"])
+        _live_agent_loop_add_event(
+            state,
+            "public-expression-posted",
+            agent_id=agent_id,
+            details={
+                "publicExpressionId": expression.get("id"),
+                "title": expression.get("title"),
+                "buildingId": expression.get("buildingId"),
+                "storage": "world-meta.json#agentLife.publicExpressions",
+                "visibleInWorld": True,
+            },
+        )
+        saved_state = save_live_agent_loop_state(state)
+    return {
+        "loopEventsCursor": saved_state.get("eventSequence"),
+        "agentPublicExpressionCount": len((saved_state.get("agents") or {}).get(agent_id, {}).get("publicExpressions") or []),
+    }
+
+
+def _execute_live_agent_public_expression_tool(context, args, availability):
+    expression_payload = _live_agent_public_expression_payload(context, args, availability)
+    saved_expressions = append_live_agent_public_expressions([expression_payload])
+    saved_expression = saved_expressions[0] if saved_expressions else expression_payload
+    side_effects = _record_live_agent_public_expression_side_effects(saved_expression)
+    return {
+        "publicExpression": saved_expression,
+        "sideEffects": side_effects,
+        "storage": "world-meta.json#agentLife.publicExpressions",
+        "visibleWorldEvidence": {
+            "durable": True,
+            "worldEventCollection": "publicExpressions",
+            "markerName": (saved_expression.get("display") or {}).get("markerName"),
+        },
+        "providerRelay": False,
+    }
+
+
 def _execute_live_agent_memory_tool(tool_name, context, args, availability):
     del availability
     now_iso = _utc_now_iso()
@@ -3897,6 +4212,8 @@ def _execute_live_agent_tool_call(tool, context, args, availability):
     tool_name = tool.get("name")
     if tool_name in {"say_to_agent", "speak_to_room", "send_message", "think_aloud"}:
         return True, _execute_live_agent_communication_tool(tool_name, context, args, availability), 201
+    if tool_name == "publish_note":
+        return True, _execute_live_agent_public_expression_tool(context, args, availability), 201
     if tool_name == "search_memory":
         return _execute_live_agent_memory_search_tool(context, args, availability)
     if tool_name in {"add_memory", "write_diary"}:
@@ -3907,7 +4224,7 @@ def _execute_live_agent_tool_call(tool, context, args, availability):
         return True, _execute_live_agent_idle_tool(context, args, availability), 201
     return False, _live_agent_tool_error(
         "tool_execution_not_enabled",
-        "Live Agent tool execution is currently enabled only for safe in-world communication, memory, planning, and idle tools; movement and object use execute through the backend world-action APIs.",
+        "Live Agent tool execution is currently enabled only for safe in-world communication, public expression, memory, planning, and idle tools; movement and object use execute through the backend world-action APIs.",
         tool=tool_name,
         details={"enabledTools": sorted(LIVE_AGENT_EXECUTABLE_TOOL_NAMES), "dryRunSupported": True, "publicUiEnabled": False},
     ), 501
@@ -4028,7 +4345,7 @@ def validate_live_agent_tool_call(payload, *, dry_run=True):
         "execution": {
             "enabled": _live_agent_tool_execution_enabled(tool_name),
             "publicUiEnabled": False,
-            "message": "Communication, memory, planning, and idle tools can execute through backend persistence; movement and object-use tools use the dedicated world-action APIs.",
+            "message": "Communication, public expression, memory, planning, and idle tools can execute through backend persistence; movement and object-use tools use the dedicated world-action APIs.",
             "enabledTools": sorted(LIVE_AGENT_EXECUTABLE_TOOL_NAMES),
         },
     }, 200
@@ -4551,6 +4868,151 @@ def list_live_agent_in_world_communications(query=None):
     }
 
 
+def default_live_agent_public_expressions_store():
+    return {
+        "schemaVersion": LIVE_AGENT_PUBLIC_EXPRESSION_SCHEMA_VERSION,
+        "nextSequence": 1,
+        "expressions": [],
+        "retention": {"maxExpressions": 500},
+        "subscription": {
+            "mode": "poll",
+            "endpoint": "/api/live-agent-mode/public-expressions",
+            "cursorField": "sequence",
+        },
+        "visibleWorldEvidence": True,
+    }
+
+
+def get_live_agent_public_expressions_store(*, persist_migration=False):
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    store = agent_life.get("publicExpressions") if isinstance(agent_life.get("publicExpressions"), dict) else None
+    changed = store is None
+    if not store:
+        store = default_live_agent_public_expressions_store()
+    raw_expressions = store.get("expressions") if isinstance(store.get("expressions"), list) else []
+    expressions = [
+        expression
+        for expression in raw_expressions
+        if isinstance(expression, dict) and expression.get("kind") == "public-note" and expression.get("id")
+    ]
+    try:
+        next_sequence = int(store.get("nextSequence") or 1)
+    except (TypeError, ValueError):
+        next_sequence = 1
+    if expressions:
+        next_sequence = max(next_sequence, max(int(expression.get("sequence") or 0) for expression in expressions) + 1)
+    next_store = default_live_agent_public_expressions_store()
+    retention = store.get("retention") if isinstance(store.get("retention"), dict) else {}
+    max_expressions = _normalize_int(retention.get("maxExpressions"), next_store["retention"]["maxExpressions"], minimum=50, maximum=5000)
+    next_store.update({
+        "nextSequence": next_sequence,
+        "expressions": expressions[-max_expressions:],
+        "retention": {**next_store["retention"], **retention, "maxExpressions": max_expressions},
+    })
+    if persist_migration and changed:
+        agent_life["publicExpressions"] = next_store
+        meta["agentLife"] = agent_life
+        save_world_meta(meta)
+    return next_store
+
+
+def save_live_agent_public_expressions_store(store):
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    next_store = default_live_agent_public_expressions_store()
+    if isinstance(store, dict):
+        next_store.update({k: v for k, v in store.items() if k in {"nextSequence", "expressions", "retention", "subscription", "visibleWorldEvidence"}})
+    retention = next_store.get("retention") if isinstance(next_store.get("retention"), dict) else {}
+    max_expressions = _normalize_int(retention.get("maxExpressions"), 500, minimum=50, maximum=5000)
+    next_store["retention"] = {**default_live_agent_public_expressions_store()["retention"], **retention, "maxExpressions": max_expressions}
+    next_store["expressions"] = [
+        expression
+        for expression in (next_store.get("expressions") or [])
+        if isinstance(expression, dict) and expression.get("kind") == "public-note" and expression.get("id")
+    ][-max_expressions:]
+    try:
+        next_store["nextSequence"] = int(next_store.get("nextSequence") or 1)
+    except (TypeError, ValueError):
+        next_store["nextSequence"] = 1
+    next_store["visibleWorldEvidence"] = True
+    agent_life["publicExpressions"] = next_store
+    meta["agentLife"] = agent_life
+    save_world_meta(meta)
+    return next_store
+
+
+def append_live_agent_public_expressions(expression_payloads):
+    payloads = [
+        expression
+        for expression in expression_payloads
+        if isinstance(expression, dict) and expression.get("kind") == "public-note" and expression.get("id")
+    ]
+    if not payloads:
+        return []
+    store = get_live_agent_public_expressions_store(persist_migration=True)
+    sequence = int(store.get("nextSequence") or 1)
+    next_expressions = list(store.get("expressions") or [])
+    saved_expressions = []
+    for payload in payloads:
+        expression = {
+            **payload,
+            "schemaVersion": LIVE_AGENT_PUBLIC_EXPRESSION_SCHEMA_VERSION,
+            "sequence": sequence,
+            "cursor": sequence,
+            "visibleInWorld": True,
+            "durableWorldEvidence": True,
+            "hiddenWorldMutationAllowed": False,
+            "providerRelay": False,
+        }
+        sequence += 1
+        next_expressions.append(expression)
+        saved_expressions.append(expression)
+    save_live_agent_public_expressions_store({**store, "nextSequence": sequence, "expressions": next_expressions})
+    _publish_live_agent_public_expression_world_events(saved_expressions)
+    return saved_expressions
+
+
+def list_live_agent_public_expressions(query=None):
+    query = query if isinstance(query, dict) else {}
+    store = get_live_agent_public_expressions_store(persist_migration=True)
+    expressions = list(store.get("expressions") or [])
+    since = (query.get("since") or query.get("after") or [None])[0] if isinstance(query.get("since") or query.get("after"), list) else query.get("since") or query.get("after")
+    try:
+        since = int(since) if since is not None else None
+    except (TypeError, ValueError):
+        since = None
+    if since is not None:
+        expressions = [expression for expression in expressions if int(expression.get("sequence") or 0) > since]
+    filters = (
+        ("agentId", "agentId"),
+        ("buildingId", "buildingId"),
+        ("kind", "kind"),
+        ("name", "name"),
+    )
+    for field, key in filters:
+        value = (query.get(field) or [None])[0] if isinstance(query.get(field), list) else query.get(field)
+        if value:
+            expressions = [expression for expression in expressions if expression.get(key) == value]
+    try:
+        limit = int(((query.get("limit") or [100])[0]) if isinstance(query.get("limit"), list) else query.get("limit") or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 500))
+    return {
+        "ok": True,
+        "schemaVersion": LIVE_AGENT_PUBLIC_EXPRESSION_SCHEMA_VERSION,
+        "subscription": store.get("subscription"),
+        "expressions": expressions[-limit:],
+        "nextCursor": store.get("nextSequence", 1) - 1,
+        "storage": {
+            "durableStore": "world-meta.json#agentLife.publicExpressions",
+            "visibleWorldEvidence": True,
+            "providerRelay": False,
+        },
+    }
+
+
 # ─── LIVE WORLD EVENT FEED ────────────────────────────────────────
 def default_live_agent_world_event_feed_store():
     return {
@@ -4865,6 +5327,35 @@ def _publish_live_agent_communication_world_events(events):
                 "value": _world_event_json_clone(event),
             },
             "source": "in-world-communications",
+        })
+    append_live_agent_world_events(payloads)
+
+
+def _publish_live_agent_public_expression_world_events(expressions):
+    payloads = []
+    for expression in expressions or []:
+        if not isinstance(expression, dict):
+            continue
+        target = {
+            "kind": "public-expression",
+            "publicExpressionId": expression.get("id"),
+            "agentId": expression.get("agentId"),
+            "buildingId": expression.get("buildingId"),
+            "display": _world_event_json_clone(expression.get("display")),
+        }
+        payloads.append({
+            "eventType": "public-expression-posted",
+            "eventId": f"world-public-expression-{expression.get('id') or uuid.uuid4().hex}",
+            "createdAt": expression.get("createdAt") or expression.get("at") or expression.get("timestamp") or _utc_now_iso(),
+            "agentId": expression.get("agentId"),
+            "target": target,
+            "patch": {
+                "op": "upsert",
+                "collection": "publicExpressions",
+                "publicExpressionId": expression.get("id"),
+                "value": _world_event_json_clone(expression),
+            },
+            "source": "live-agent-public-expressions",
         })
     append_live_agent_world_events(payloads)
 
@@ -5710,6 +6201,7 @@ def _live_agent_live_world_reference_metrics(
     society_observation_count,
     group_goal_count,
     conversation_trigger_count,
+    public_expression_metrics,
     operator_proposal_count,
     live_agent_building_count,
     completed_backend_action_count,
@@ -5829,12 +6321,15 @@ def _live_agent_live_world_reference_metrics(
             "moduleEvidence": module_evidence(["planning", "actionExecution", "outcomeAwareness"]),
             "evidence": {
                 "proposalOnlyTools": proposal_only_tools,
+                "safeExecutablePublicExpressionTools": list((public_expression_metrics or {}).get("safeExecutableTools") or []),
+                "publicExpressionCount": _normalize_int((public_expression_metrics or {}).get("publicExpressionCount"), 0, minimum=0, maximum=1000000000),
+                "visiblePublicExpressionEvidenceCount": _normalize_int((public_expression_metrics or {}).get("visibleEvidenceCount"), 0, minimum=0, maximum=1000000000),
                 "operatorProposalCount": _normalize_int(operator_proposal_count, 0, minimum=0, maximum=1000000000),
                 "liveAgentBuildingCount": _normalize_int(live_agent_building_count, 0, minimum=0, maximum=1000000000),
             },
             "gaps": [
                 "unsafe-or-destructive-reference-tools-require-typed-visible-executors",
-                "economy-governance-and-public-expression-tools-require-separate-product-scoped-contracts",
+                "economy-governance-and-broad-cultural-tools-require-separate-product-scoped-contracts",
             ],
         },
         "aliveWorldIndicators": {
@@ -5846,6 +6341,7 @@ def _live_agent_live_world_reference_metrics(
                 "basicPopulationEvidence": _normalize_int(per_agent_distribution.get("enabledAgentCount"), 0, minimum=0, maximum=1000000000),
                 "basicSocialEvidence": _normalize_int(relationship_count, 0, minimum=0, maximum=1000000000),
                 "basicToolEvidence": len(typed_object_action_types or []),
+                "publicExpressionEvidence": _normalize_int((public_expression_metrics or {}).get("visibleEvidenceCount"), 0, minimum=0, maximum=1000000000),
             },
             "gaps": [
                 "population-health-indicator",
@@ -6385,6 +6881,99 @@ def _live_agent_tool_exploration_metrics(loop_state, turns, enabled_live_agents)
     }
 
 
+def _live_agent_public_expression_metrics(public_expression_store, enabled_live_agents):
+    enabled_ids = sorted({
+        str((item or {}).get("agentId") or "").strip()
+        for item in (enabled_live_agents or [])
+        if str((item or {}).get("agentId") or "").strip()
+    })
+    expressions = [
+        expression
+        for expression in ((public_expression_store or {}).get("expressions") or [])
+        if isinstance(expression, dict)
+    ]
+    by_agent = {
+        agent_id: {
+            "agentId": agent_id,
+            "liveModeEnabled": True,
+            "publicExpressionCount": 0,
+            "visibleEvidenceCount": 0,
+            "kinds": {},
+            "recentExpressionIds": [],
+            "latestExpressionAt": None,
+        }
+        for agent_id in enabled_ids
+    }
+    total_visible = 0
+    kind_counts = {}
+    for expression in expressions:
+        agent_id = str(expression.get("agentId") or expression.get("fromAgentId") or "").strip()
+        if not agent_id:
+            continue
+        row = by_agent.setdefault(agent_id, {
+            "agentId": agent_id,
+            "liveModeEnabled": agent_id in enabled_ids,
+            "publicExpressionCount": 0,
+            "visibleEvidenceCount": 0,
+            "kinds": {},
+            "recentExpressionIds": [],
+            "latestExpressionAt": None,
+        })
+        kind = str(expression.get("kind") or "public-expression").strip() or "public-expression"
+        row["publicExpressionCount"] += 1
+        row["kinds"][kind] = row["kinds"].get(kind, 0) + 1
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+        if expression.get("visibleInWorld") is True and expression.get("durableWorldEvidence") is True:
+            row["visibleEvidenceCount"] += 1
+            total_visible += 1
+        if expression.get("id"):
+            row["recentExpressionIds"] = [*row["recentExpressionIds"], expression.get("id")][-5:]
+        row["latestExpressionAt"] = _live_agent_metric_newer_timestamp(row.get("latestExpressionAt"), expression.get("at") or expression.get("createdAt"))
+    enabled_with_expression = sorted([
+        agent_id for agent_id in enabled_ids
+        if (by_agent.get(agent_id) or {}).get("publicExpressionCount", 0) > 0
+    ])
+    enabled_with_visible_evidence = sorted([
+        agent_id for agent_id in enabled_ids
+        if (by_agent.get(agent_id) or {}).get("visibleEvidenceCount", 0) > 0
+    ])
+    return {
+        "schemaVersion": LIVE_AGENT_PUBLIC_EXPRESSION_SCHEMA_VERSION,
+        "enabledAgentCount": len(enabled_ids),
+        "enabledAgentIds": enabled_ids,
+        "publicExpressionCount": len(expressions),
+        "visibleEvidenceCount": total_visible,
+        "enabledAgentsWithExpressionCount": len(enabled_with_expression),
+        "enabledAgentsWithExpression": enabled_with_expression,
+        "enabledAgentsWithVisibleEvidenceCount": len(enabled_with_visible_evidence),
+        "enabledAgentsWithVisibleEvidence": enabled_with_visible_evidence,
+        "publicExpressionCountByAgent": {
+            agent_id: _normalize_int(row.get("publicExpressionCount"), 0, minimum=0, maximum=1000000000)
+            for agent_id, row in by_agent.items()
+        },
+        "visibleEvidenceCountByAgent": {
+            agent_id: _normalize_int(row.get("visibleEvidenceCount"), 0, minimum=0, maximum=1000000000)
+            for agent_id, row in by_agent.items()
+        },
+        "kindCounts": kind_counts,
+        "byAgent": by_agent,
+        "safeExecutableTools": ["publish_note"],
+        "proposalOnlyTools": [
+            name
+            for name, tool in sorted(LIVE_AGENT_TOOL_REGISTRY.items())
+            if isinstance(tool, dict) and tool.get("category") in {"events", "governance", "economy"} and tool.get("executionMode") == "proposal-only"
+        ],
+        "storage": "world-meta.json#agentLife.publicExpressions",
+        "optimization": {
+            "readOnly": True,
+            "source": "world-meta.json#agentLife.publicExpressions",
+            "modelCallsDuringMetrics": 0,
+            "providerCallsDuringMetrics": 0,
+            "heavyWorldScan": False,
+        },
+    }
+
+
 def get_live_agent_mode_autonomy_metrics():
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
@@ -6421,6 +7010,8 @@ def get_live_agent_mode_autonomy_metrics():
     animation_event_names = sorted({str(event.get("name") or "") for event in animation_events if event.get("name")})
     communication_store = get_live_agent_in_world_communications_store(persist_migration=False)
     communication_events = [event for event in (communication_store.get("events") or []) if isinstance(event, dict)]
+    public_expression_store = get_live_agent_public_expressions_store(persist_migration=False)
+    public_expressions = [expression for expression in (public_expression_store.get("expressions") or []) if isinstance(expression, dict)]
     reaction_opportunities = [
         opportunity
         for event in communication_events
@@ -6554,6 +7145,7 @@ def get_live_agent_mode_autonomy_metrics():
     per_agent_distribution = _live_agent_metric_per_agent_distribution(enabled_live_agents, turns, backend_terminal_actions)
     turn_context_assembly = _live_agent_turn_context_assembly_metrics(turns, enabled_live_agents)
     tool_exploration = _live_agent_tool_exploration_metrics(loop_state, turns, enabled_live_agents)
+    public_expression_metrics = _live_agent_public_expression_metrics(public_expression_store, enabled_live_agents)
     route_before_action = _live_agent_route_before_action_metrics([*active_actions, *history_actions])
     per_agent_distribution_by_agent = per_agent_distribution.get("byAgent") if isinstance(per_agent_distribution.get("byAgent"), dict) else {}
     enabled_agent_distribution_evidence = []
@@ -6594,6 +7186,7 @@ def get_live_agent_mode_autonomy_metrics():
         society_observation_count=len(society_observations),
         group_goal_count=len(group_goals),
         conversation_trigger_count=len(conversation_triggers),
+        public_expression_metrics=public_expression_metrics,
         operator_proposal_count=len(loop_state.get("operatorProposals") or []),
         live_agent_building_count=live_agent_building_count,
         completed_backend_action_count=len(completed_backend_actions),
@@ -6650,6 +7243,12 @@ def get_live_agent_mode_autonomy_metrics():
         "turnContextAssemblyRecorded": turn_context_assembly["allCompletedTurnsHaveContext"],
         "turnContextAssemblyAcrossEnabledAgents": turn_context_assembly["enabledAgentContextCount"] >= min(default_soak_target_agents, max(1, turn_context_assembly["enabledAgentCount"])),
         "toolExplorationMetricsPresent": tool_exploration["enabledAgentCount"] == 0 or tool_exploration["enabledAgentsWithDiscoveryCount"] >= min(default_soak_target_agents, max(1, tool_exploration["enabledAgentCount"])),
+        "publicExpressionMetricsPresent": public_expression_metrics["enabledAgentCount"] == 0 or set(public_expression_metrics["enabledAgentIds"]).issubset(set(public_expression_metrics["publicExpressionCountByAgent"].keys())),
+        "publicExpressionVisibleEvidencePresent": public_expression_metrics["publicExpressionCount"] == 0 or public_expression_metrics["visibleEvidenceCount"] >= public_expression_metrics["publicExpressionCount"],
+        "unsafeCultureGovernanceEconomyProposalOnly": all(
+            (LIVE_AGENT_TOOL_REGISTRY.get(tool_name) or {}).get("executionMode") == "proposal-only"
+            for tool_name in ["create_public_event", "propose_governance_action", "propose_economy_activity"]
+        ),
         "perAgentTurnActionDistributionPresent": per_agent_distribution["enabledAgentCount"] > 0 and len(per_agent_distribution["agents"]) >= per_agent_distribution["enabledAgentCount"],
         "defaultSoakEnabledAgentRosterPresent": per_agent_distribution["enabledAgentCount"] >= default_soak_target_agents,
         "defaultSoakCompletedTurnTargetMet": len(completed_turns) >= default_soak_target_turns,
@@ -6744,6 +7343,16 @@ def get_live_agent_mode_autonomy_metrics():
                 "unavailableReasonCounts": tool_exploration.get("unavailableReasonCounts"),
                 "optimization": tool_exploration.get("optimization"),
             },
+            "publicExpression": {
+                "schemaVersion": public_expression_metrics.get("schemaVersion"),
+                "publicExpressionCount": public_expression_metrics.get("publicExpressionCount"),
+                "visibleEvidenceCount": public_expression_metrics.get("visibleEvidenceCount"),
+                "publicExpressionCountByAgent": public_expression_metrics.get("publicExpressionCountByAgent"),
+                "visibleEvidenceCountByAgent": public_expression_metrics.get("visibleEvidenceCountByAgent"),
+                "safeExecutableTools": public_expression_metrics.get("safeExecutableTools"),
+                "proposalOnlyTools": public_expression_metrics.get("proposalOnlyTools"),
+                "storage": public_expression_metrics.get("storage"),
+            },
             "liveWorldReference": {
                 "schemaVersion": live_world_reference.get("schemaVersion"),
                 "reference": live_world_reference.get("reference"),
@@ -6837,6 +7446,8 @@ def get_live_agent_mode_autonomy_metrics():
             "socialObservationCount": len(society_observations),
             "groupGoalCount": len(group_goals),
             "conversationTriggerCount": len(conversation_triggers),
+            "publicExpressionCount": len(public_expressions),
+            "publicExpression": public_expression_metrics,
             "societyRoleCount": len(society_roles),
             "liveEnabledSocietyRoleCount": len([role for role in society_roles.values() if isinstance(role, dict) and role.get("liveModeEnabled") is True]),
             "memory": memory_counts,
@@ -6904,6 +7515,8 @@ def get_live_agent_mode_autonomy_metrics():
             "liveWorldReferenceGuidance": True,
             "turnContextAssemblyMeasured": True,
             "toolExplorationMeasured": True,
+            "publicExpressionMeasured": True,
+            "unsafeCultureGovernanceEconomyProposalOnly": True,
             "metricsProviderCalls": 0,
             "metricsModelCalls": 0,
             "presencePersistenceMeasured": True,
@@ -21209,6 +21822,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/live-agent-mode/in-world-communications":
             return self._send_json(list_live_agent_in_world_communications(urllib.parse.parse_qs(parsed.query)))
+
+        if path == "/api/live-agent-mode/public-expressions":
+            return self._send_json(list_live_agent_public_expressions(urllib.parse.parse_qs(parsed.query)))
 
         if path == "/api/live-agent-mode/presence":
             meta = load_world_meta()
