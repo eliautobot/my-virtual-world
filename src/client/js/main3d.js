@@ -5421,6 +5421,135 @@ function applyAuthoritativePresenceToAgent(agent, presence = null, { force = fal
   return true;
 }
 
+function resolveAuthoritativePresenceRouteBuilding(normalized) {
+  if (!normalized) return null;
+  return (normalized.buildingId ? buildingsMap.get(normalized.buildingId) : null)
+    || getMovementInteriorBuildingAt(normalized.apiX, normalized.apiZ)
+    || getMovementParkAt(normalized.apiX, normalized.apiZ)
+    || null;
+}
+
+function buildAuthoritativePresenceRouteTarget(normalized, event = null, building = null) {
+  const sourceTarget = normalized?.target && typeof normalized.target === 'object' ? normalized.target : {};
+  const actionId = normalized.worldActionId || normalized.actionId || event?.worldActionId || event?.actionId || null;
+  const routeId = normalized.routeId || normalized.route?.routeId || normalized.route?.id || event?.routeId || null;
+  const floor = Math.max(1, Number(normalized.floor || sourceTarget.floor || sourceTarget.buildingFloor || 1) || 1);
+  return {
+    ...sourceTarget,
+    x: normalized.apiX,
+    y: normalized.apiZ,
+    floor,
+    buildingFloor: floor,
+    buildingId: normalized.buildingId || sourceTarget.buildingId || building?.id || null,
+    targetKind: normalized.targetKind || sourceTarget.targetKind || sourceTarget.kind || 'live-agent-presence',
+    routeMode: normalized.routeMode || normalized.routeState || normalized.route?.routeMode || normalized.route?.state || 'live-agent-presence',
+    worldActionId: actionId,
+    actionId: sourceTarget.actionId || actionId,
+    routeId,
+    source: normalized.source || event?.source || 'world-event-feed',
+  };
+}
+
+function routeAuthoritativePresenceToAgent(agent, presence = null, { event = null, snap = false, sourceFamily = 'world-event-feed', sourceFunction = 'routeAuthoritativePresenceToAgent' } = {}) {
+  if (!agent || snap) return { applied: false, reason: snap ? 'snap-requested' : 'missing-agent' };
+  const normalized = normalizeAuthoritativeAgentPresence(presence || agent.presence || agent.serverPresence);
+  if (!normalized || !Number.isFinite(normalized.apiX) || !Number.isFinite(normalized.apiZ)) {
+    return { applied: false, reason: 'missing-coordinates' };
+  }
+  if (!agent._group3d || !Number.isFinite(Number(agent.x)) || !Number.isFinite(Number(agent.y))) {
+    return { applied: false, reason: 'agent-not-rendered' };
+  }
+
+  const previousPresence = agent._serverPresence || null;
+  const sameUpdate = previousPresence?.updatedAt && normalized.updatedAt && previousPresence.updatedAt === normalized.updatedAt;
+  if (sameUpdate) return { applied: false, reason: 'duplicate-presence' };
+
+  const currentFloor = Math.max(1, Number(agent._floor || agent._targetFloor || 1) || 1);
+  const currentBuildingId = agent._currentBuilding?.id || agent._targetBuilding?.id || null;
+  const sameFloor = currentFloor === Math.max(1, Number(normalized.floor || 1) || 1);
+  const sameBuilding = String(currentBuildingId || '') === String(normalized.buildingId || currentBuildingId || '');
+  const distanceApi = Math.hypot(Number(agent.x) - normalized.apiX, Number(agent.y) - normalized.apiZ);
+  if (distanceApi < 0.75 && sameFloor && sameBuilding) {
+    return { applied: false, reason: 'already-at-presence' };
+  }
+
+  const building = resolveAuthoritativePresenceRouteBuilding(normalized);
+  const routeTarget = buildAuthoritativePresenceRouteTarget(normalized, event, building);
+  const floor = Math.max(1, Number(routeTarget.floor || normalized.floor || 1) || 1);
+  const actionId = routeTarget.worldActionId || routeTarget.actionId || null;
+  agent._serverPresence = normalized;
+  agent.presence = normalized;
+  const admission = setAgentTarget(agent, routeTarget, building, floor, {
+    owner: 'world-action',
+    priorityName: 'explicit-object',
+    phase: 'routing',
+    target: routeTarget,
+    building,
+    floor,
+    object: {
+      type: routeTarget.objectId || routeTarget.objectInstanceId || routeTarget.furnitureIndex != null || routeTarget.objectType
+        ? (routeTarget.scope === 'outdoor' || routeTarget.targetKind === 'outdoor-node' ? 'outdoor-node' : 'furniture')
+        : 'none',
+      id: routeTarget.objectInstanceId || routeTarget.objectId || routeTarget.nodeId || null,
+      buildingId: routeTarget.buildingId || null,
+      furnitureIndex: routeTarget.furnitureIndex ?? null,
+      objectType: routeTarget.objectType || routeTarget.catalogKey || routeTarget.catalogId || null,
+      actionId,
+      worldActionId: actionId,
+      spotId: routeTarget.spotId || routeTarget.interactionSpotId || routeTarget.routeSpotId || null,
+      slotId: routeTarget.slotId || routeTarget.seatId || null,
+      reservationId: null,
+      activeUseId: null,
+      preserveUntilRelease: false,
+    },
+    release: { policy: 'on-route-clear', releaseObjectReservation: false, releaseActiveUse: false },
+    expires: { staleAfterMs: 180000 },
+    source: {
+      family: sourceFamily,
+      functionName: sourceFunction,
+      taskRef: 'live-agent-mode-presence-route-handoff',
+    },
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: 'live-presence-route',
+    behaviorCategory: routeTarget.actionId || routeTarget.targetKind || 'agent-presence',
+    behaviorSelectedObject: routeTarget.objectId || routeTarget.objectInstanceId || routeTarget.nodeId ? {
+      kind: routeTarget.scope === 'outdoor' || routeTarget.targetKind === 'outdoor-node' ? 'outdoor-node' : 'furniture',
+      id: routeTarget.objectInstanceId || routeTarget.objectId || routeTarget.nodeId || null,
+      buildingId: routeTarget.buildingId || null,
+      furnitureIndex: routeTarget.furnitureIndex ?? null,
+      objectType: routeTarget.objectType || routeTarget.catalogKey || routeTarget.catalogId || null,
+    } : null,
+    behaviorSelectedSpot: {
+      spotId: routeTarget.spotId || routeTarget.interactionSpotId || routeTarget.routeSpotId || null,
+      x: routeTarget.x,
+      y: routeTarget.y,
+      floor,
+    },
+    debug: {
+      label: `live-presence:${agent.id || agent.statusKey || 'agent'}`,
+      sourceSummary: 'world-event/live replay presence routed through movement controller',
+      routeSummary: 'authoritative presence target handed to setAgentTarget; no immediate model teleport',
+      releaseSummary: 'on-route-clear; live presence route ownership only',
+      lastDecisionReason: 'live-presence-route-handoff',
+    },
+    skipReachabilityAdjust: routeTarget.skipReachabilityAdjust === true || routeTarget.matchesDebugPoint === true,
+  });
+  const result = {
+    applied: admission?.accepted !== false,
+    rejected: admission?.accepted === false,
+    reason: admission?.reason || (admission?.accepted === false ? 'intent-rejected' : 'routed'),
+    admission,
+    target: routeTarget,
+  };
+  agent._lastAuthoritativePresenceRoute = {
+    ...result,
+    eventType: event?.eventType || event?.name || null,
+    sequence: event?.sequence || event?.cursor || null,
+    updatedAt: new Date().toISOString(),
+  };
+  return result;
+}
+
 const _authoritativePresencePersistCache = new Map();
 
 function persistAuthoritativeAgentPresence(agent, presence = null, { source = 'browser-replay', state = 'arrived', event = null, target = null } = {}) {
@@ -18449,6 +18578,42 @@ function updateAgentAnimations(dt) {
       clearLiveModeWorldActionRouteClaim(homeActivity.worldActionId);
       agent._idleActivity = null;
       agent._schedPhase = 'home-rest-complete';
+      agent._stayTimer = 900;
+      agent._wanderTimer = 2200 + Math.random() * 3200;
+    } else if (String(agent._idleActivity?.kind || '').startsWith('home-decorate-place-object')) {
+      const decorateActivity = agent._idleActivity;
+      const placementResult = completeLiveModeHomeDecoratePlacement(agent, decorateActivity);
+      if (placementResult?.ok) {
+        completeIdleWorldAction(decorateActivity, {
+          objectEffect: placementResult.alreadyPlaced ? 'home-object-already-placed' : 'home-object-placed',
+          completionState: 'home-decorated',
+          buildingId: placementResult.buildingId || decorateActivity.homeBuildingId || decorateActivity.buildingId || null,
+          objectType: placementResult.objectType || decorateActivity.objectType || null,
+          objectInstanceId: placementResult.objectInstanceId || null,
+          furnitureIndex: placementResult.furnitureIndex,
+          placement: placementResult.placement || decorateActivity.placement || null,
+        });
+        window.__VWLastLiveModeHomeDecorateCompletion = { ok: true, agentId: agent.id || null, activity: decorateActivity, result: placementResult, completedAt: new Date().toISOString() };
+      } else {
+        transitionLinkedWorldAction({
+          actionId: decorateActivity.actionId || decorateActivity.action || 'world.placeObject',
+          worldActionId: decorateActivity.worldActionId,
+          agentId: agent.id || decorateActivity.agentId || null,
+          buildingId: decorateActivity.homeBuildingId || decorateActivity.buildingId || null,
+          objectInstanceId: decorateActivity.objectInstanceId || null,
+          source: 'main3d.js#home-decorate-completion',
+        }, 'failed', {
+          reason: placementResult?.reason || 'home_decorate_completion_failed',
+          failureReason: 'profile_save_failed_or_target_deleted',
+          source: 'main3d.js#home-decorate-completion',
+          objectType: decorateActivity.objectType || null,
+        });
+        window.__VWLastLiveModeHomeDecorateCompletion = { ok: false, agentId: agent.id || null, activity: decorateActivity, result: placementResult, completedAt: new Date().toISOString() };
+      }
+      releaseAgentIntent(agent, 'object-complete', { releaseBy: 'object-complete', clearRoute: false, releaseSummary: 'home decorate complete released live mode intent' });
+      clearLiveModeWorldActionRouteClaim(decorateActivity.worldActionId);
+      agent._idleActivity = null;
+      agent._schedPhase = placementResult?.ok ? 'home-decorate-complete' : 'home-decorate-failed';
       agent._stayTimer = 900;
       agent._wanderTimer = 2200 + Math.random() * 3200;
     } else if (String(agent._idleActivity?.kind || '').startsWith('live-social-conversation')) {
@@ -33880,6 +34045,167 @@ function findLiveModeHomeForAgent(agentId) {
   return null;
 }
 
+function normalizeLiveModeHomeDecorateObjectType(value = 'fridge') {
+  const normalized = String(value || 'fridge').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (['refrigerator', 'homefridge', 'kitchenfridge'].includes(normalized)) return 'fridge';
+  return normalized || 'fridge';
+}
+
+function hasLiveModeHomeDecorateObject(building, objectType = 'fridge') {
+  const wanted = normalizeLiveModeHomeDecorateObjectType(objectType);
+  return (building?.interior?.furniture || []).some(item => item
+    && item.deleted !== true
+    && item.removed !== true
+    && normalizeLiveModeHomeDecorateObjectType(item.type || item.catalogId || item.objectCatalogId) === wanted);
+}
+
+function liveModeHomeDecorateFootprint(objectType = 'fridge', rotation = 0) {
+  const base = FURNITURE_HALF_SIZES[objectType] || [0.5, 0.5];
+  const rot = ((Number(rotation) || 0) % 360 + 360) % 360;
+  return rot === 90 || rot === 270 ? [base[1], base[0]] : base;
+}
+
+function liveModeHomeDecorateSlotClear(building, objectType, x, z, floor = 1, rotation = 0) {
+  if (!building || !Number.isFinite(Number(x)) || !Number.isFinite(Number(z))) return false;
+  const activeFloor = Math.max(1, Number(floor) || 1);
+  const [halfW, halfD] = liveModeHomeDecorateFootprint(objectType, rotation);
+  if (doesFurnitureIntersectWalls(building, Number(x), Number(z), halfW, halfD, activeFloor)) return false;
+  for (const item of building.interior?.furniture || []) {
+    if (!item || item.deleted === true || item.removed === true) continue;
+    if (getFurnitureFloor(item) !== activeFloor) continue;
+    if (!Number.isFinite(Number(item.x)) || !Number.isFinite(Number(item.z))) continue;
+    const [otherW, otherD] = liveModeHomeDecorateFootprint(item.type || item.catalogId || 'furniture', item.rotation || 0);
+    if (Math.abs(Number(x) - Number(item.x)) < halfW + otherW + 0.35
+      && Math.abs(Number(z) - Number(item.z)) < halfD + otherD + 0.35) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function findLiveModeHomeDecoratePlacement(building, objectType = 'fridge', target = {}) {
+  if (!building) return null;
+  const type = normalizeLiveModeHomeDecorateObjectType(objectType);
+  const width = Math.max(8, Number(building.widthTiles || 10) || 10);
+  const height = Math.max(7, Number(building.heightTiles || 8) || 8);
+  const floor = Math.max(1, Number(target.floor || target.buildingFloor || 1) || 1);
+  const candidates = [];
+  const targetX = Number(target.localX ?? target.x);
+  const targetZ = Number(target.localZ ?? target.localY ?? target.z);
+  if (Number.isFinite(targetX) && Number.isFinite(targetZ)) candidates.push([targetX, targetZ, Number(target.rotation || 90) || 90]);
+  if (type === 'fridge') {
+    candidates.push(
+      [1.20, 3.25, 90],
+      [1.20, Math.max(2.20, height - 2.00), 90],
+      [Math.max(2.00, width - 1.35), Math.max(2.20, height - 1.75), 270],
+      [Math.max(2.00, width - 1.35), 2.75, 270],
+    );
+  }
+  candidates.push(
+    [Math.max(1.20, width * 0.20), Math.max(1.40, height * 0.55), 90],
+    [Math.max(1.20, width * 0.78), Math.max(1.40, height * 0.78), 270],
+  );
+  for (const [rawX, rawZ, rawRotation] of candidates) {
+    const x = round2(rawX);
+    const z = round2(rawZ);
+    const rotation = ((Number(rawRotation) || 0) % 360 + 360) % 360;
+    if (liveModeHomeDecorateSlotClear(building, type, x, z, floor, rotation)) {
+      return {
+        schemaVersion: 'agent-live-mode-home-decorate-placement/v1',
+        objectType: type,
+        catalogId: type,
+        roomId: target.roomId || 'kitchen-zone',
+        floor,
+        localX: x,
+        localZ: z,
+        rotation,
+      };
+    }
+  }
+  return null;
+}
+
+function makeLiveModeHomeDecorateFurnitureItem(building, objectType, placement = {}, action = {}, agent = null) {
+  const type = normalizeLiveModeHomeDecorateObjectType(objectType);
+  const furniture = building?.interior?.furniture || [];
+  const index = furniture.length;
+  const buildingId = building?.id || 'live-home';
+  const objectId = `${buildingId}:furn:${type}:${index}:live-home-decor`;
+  const now = new Date().toISOString();
+  const item = {
+    id: objectId,
+    objectInstanceId: objectId,
+    instanceId: objectId,
+    type,
+    catalogId: type,
+    x: Number(placement.localX ?? placement.x ?? 1.2),
+    z: Number(placement.localZ ?? placement.z ?? 3.25),
+    rotation: Number(placement.rotation || 0) || 0,
+    floor: Math.max(1, Number(placement.floor || 1) || 1),
+    buildingFloor: Math.max(1, Number(placement.floor || 1) || 1),
+    room: placement.roomId || 'kitchen-zone',
+    capabilityTags: type === 'fridge' ? ['life.food', 'world.decorate'] : ['world.decorate'],
+    stationary: true,
+    carryable: false,
+    temporary: false,
+    persistsUntilDeleted: true,
+    assetClass: type === 'fridge' ? 'stationary-persistent-food-storage-appliance' : 'stationary-persistent-furniture',
+    lifecycle: {
+      stationary: true,
+      carryable: false,
+      temporary: false,
+      persistsUntilDeleted: true,
+      source: 'agent-live-mode-home-decorate',
+      visibleExecutor: 'main3d.js#routeLiveModeHomeDecorateWorldAction',
+      worldActionId: action.id || action.worldActionId || null,
+      placedByAgentId: agent?.id || action.agentId || null,
+      placedAt: now,
+    },
+  };
+  if (type === 'fridge') {
+    item.reservation = null;
+    item.activeUse = { state: 'idle', mode: 'closed-stocked' };
+    item.fridgeState = { doorOpen: false, stockLevel: 'stocked', lastAction: null, retrievedCount: 0, persistentFurniture: true };
+    item.lifecycle.spawnsTemporary = { catalogId: 'temporaryFood', label: 'Chilled Snack', carryable: true, attachPoint: 'right-hand', temporary: true, validDropOff: ['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter', 'cafeCounter'] };
+  }
+  return item;
+}
+
+function completeLiveModeHomeDecoratePlacement(agent, activity = {}) {
+  const buildingId = activity.homeBuildingId || activity.buildingId || activity.routeMetadata?.buildingId || null;
+  const building = buildingId ? buildingsMap.get(buildingId) : null;
+  const objectType = normalizeLiveModeHomeDecorateObjectType(activity.objectType || activity.catalogKey || activity.routeMetadata?.objectType || 'fridge');
+  if (!building) return { ok: false, reason: 'missing-home-building', buildingId, objectType };
+  ensureLiveModeHomeStarterInterior(building, { persist: false, rebuild: false });
+  const existing = (building.interior?.furniture || []).find(item => item
+    && item.deleted !== true
+    && item.removed !== true
+    && normalizeLiveModeHomeDecorateObjectType(item.type || item.catalogId || item.objectCatalogId) === objectType);
+  if (existing) return { ok: true, alreadyPlaced: true, buildingId, objectType, objectInstanceId: existing.objectInstanceId || existing.id || null };
+  const placement = activity.placement || findLiveModeHomeDecoratePlacement(building, objectType, activity.routeMetadata || {});
+  if (!placement) return { ok: false, reason: 'no-safe-placement', buildingId, objectType };
+  if (!building.interior || typeof building.interior !== 'object') building.interior = {};
+  if (!Array.isArray(building.interior.furniture)) building.interior.furniture = [];
+  const item = makeLiveModeHomeDecorateFurnitureItem(building, objectType, placement, { id: activity.worldActionId, agentId: agent?.id || activity.agentId || null }, agent);
+  building.interior.furniture.push(item);
+  building.homeState = {
+    ...(building.homeState || {}),
+    [`${objectType}Count`]: (building.interior.furniture || []).filter(candidate => normalizeLiveModeHomeDecorateObjectType(candidate?.type || candidate?.catalogId) === objectType).length,
+    lastDecoratedAt: new Date().toISOString(),
+    lastDecoratedByAgentId: agent?.id || activity.agentId || null,
+    lastDecoratedWorldActionId: activity.worldActionId || null,
+  };
+  ensureBuildingPlacedObjectActionTargets(building);
+  const payload = _buildingPayload(building);
+  fetch(`/api/building/${encodeURIComponent(payload.id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+  upsertWorldEventFeedBuilding(payload, { updateList: true, rebuild: true });
+  return { ok: true, buildingId, objectType, objectInstanceId: item.objectInstanceId, furnitureIndex: building.interior.furniture.length - 1, placement };
+}
+
 function normalizeLiveModeBuildSite(action = {}) {
   const params = action.params || {};
   const target = action.target || action.route?.target || {};
@@ -34599,6 +34925,193 @@ function routeLiveModeHomeWorldAction(action = {}) {
   });
   window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, homeBuildingId: building.id || null, checkedAt: new Date().toISOString() };
   addActivityLog(`Live Mode routed ${agent.name || agent.id} home to rest at ${building.name || building.id}`);
+  return true;
+}
+
+function makeLiveModeHomeDecorateRouteTarget(building, placement = {}, action = {}, agent = null) {
+  if (!building || !placement) return null;
+  const width = Math.max(8, Number(building.widthTiles || 10) || 10);
+  const height = Math.max(7, Number(building.heightTiles || 8) || 8);
+  const localX = Number(placement.localX ?? placement.x ?? 1.2);
+  const localZ = Number(placement.localZ ?? placement.z ?? 3.25);
+  const approachLocalZ = Math.max(0.75, Math.min(height - 0.75, localZ + 0.9));
+  const approachLocalX = Math.max(0.75, Math.min(width - 0.75, localX));
+  const world = getBuildingWorldPoint(building, approachLocalX, approachLocalZ);
+  const itemWorld = getBuildingWorldPoint(building, localX, localZ);
+  const floor = Math.max(1, Number(placement.floor || 1) || 1);
+  const actionType = action.actionType || action.actionId || 'world.placeObject';
+  const worldActionId = action.id || action.worldActionId || null;
+  return {
+    kind: 'building',
+    targetKind: 'home-decorate-placement',
+    routeKind: 'home-decorate-place-object',
+    x: world.x * API_TILE,
+    y: world.z * API_TILE,
+    z: world.z * API_TILE,
+    floor,
+    buildingFloor: floor,
+    buildingId: building.id || null,
+    homeBuildingId: building.id || null,
+    buildingName: building.name || null,
+    objectType: placement.objectType || 'fridge',
+    catalogKey: placement.catalogId || placement.objectType || 'fridge',
+    roomId: placement.roomId || 'kitchen-zone',
+    placement,
+    localX,
+    localZ,
+    itemApiX: itemWorld.x * API_TILE,
+    itemApiZ: itemWorld.z * API_TILE,
+    actionId: actionType,
+    capabilityTag: action.capabilityTag || 'world.decorate',
+    worldActionId,
+    allowDoorTransition: true,
+    faceAngle: Math.atan2((itemWorld.x - world.x) * API_TILE, (itemWorld.z - world.z) * API_TILE),
+    scope: 'indoor',
+    routeOwner: 'main3d.js#setAgentTarget -> live-mode-home-decorate',
+    agentId: agent?.id || action.agentId || null,
+  };
+}
+
+function routeLiveModeHomeDecorateWorldAction(action = {}) {
+  if (action?.source?.kind !== 'agent-live-mode' && action?.behaviorSourceKind !== 'agent-live-mode') return false;
+  const actionType = String(action.actionType || action.actionId || '').trim();
+  if (actionType !== 'world.placeObject') return false;
+  const worldActionId = action.id || action.worldActionId || null;
+  const target = action.target || {};
+  const params = action.params || {};
+  const buildingId = target.buildingId || target.homeBuildingId || action?.route?.target?.buildingId || action?.route?.target?.homeBuildingId || null;
+  const building = buildingId ? buildingsMap.get(buildingId) : null;
+  const agent = resolveAgentForWorldAction(action);
+  if (!agent || !worldActionId || !building) return false;
+  const objectType = normalizeLiveModeHomeDecorateObjectType(target.objectType || params.objectType || target.catalogId || params.catalogId || 'fridge');
+  if (objectType !== 'fridge') return false;
+  const hasMatchingRoute = agentHasLiveModeWorldActionRoute(agent, worldActionId);
+  const existingRoutePhase = String(agent._agentIntent?.phase || agent._idleActivity?.phase || '').toLowerCase();
+  const existingRouteTerminal = ['failed', 'expired', 'cancelled', 'rejected'].includes(existingRoutePhase);
+  if (hasMatchingRoute && existingRouteTerminal) {
+    releaseAgentIntent(agent, 'route-failed', { releaseBy: 'route-failed', clearRoute: true, clearLifecycle: true, releaseSummary: 'expired home-decorate route released for retry' });
+    agent._idleActivity = null;
+    agent._doorTransition = null;
+    clearLiveModeWorldActionRouteClaim(worldActionId);
+  } else if (hasMatchingRoute) {
+    markLiveModeWorldActionRouteClaimed(action, {
+      agentId: agent.id,
+      sourceFunction: 'main3d.js#routeLiveModeHomeDecorateWorldAction',
+      executor: 'main3d.js#routeLiveModeHomeDecorateWorldAction',
+      routeKind: 'home-decorate-place-object',
+      buildingId,
+      objectType,
+      reason: 'already_routing_route_claim_refresh',
+    });
+    window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'already_routing', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
+    return true;
+  }
+  if (isLiveModeWorldActionRouteClaimed(worldActionId)) {
+    clearLiveModeWorldActionRouteClaim(worldActionId);
+    window.__VWLastLiveModeWorldActionSync = { ...(window.__VWLastLiveModeWorldActionSync || {}), ok: true, reason: 'stale_claim_released', actionId: worldActionId, agentId: agent.id, checkedAt: new Date().toISOString() };
+  }
+  ensureLiveModeHomeStarterInterior(building, { persist: true, rebuild: true });
+  const placement = target.placement || params.placement || findLiveModeHomeDecoratePlacement(building, objectType, target);
+  if (!placement) {
+    window.__VWLastLiveModeWorldActionSync = { ok: false, reason: 'no_safe_home_decorate_placement', actionId: worldActionId, agentId: agent.id, buildingId, objectType, checkedAt: new Date().toISOString() };
+    return false;
+  }
+  if (hasLiveModeHomeDecorateObject(building, objectType)) {
+    transitionLinkedWorldAction({
+      actionId: actionType,
+      worldActionId,
+      agentId: agent.id || null,
+      buildingId,
+      objectInstanceId: buildingId,
+      source: 'main3d.js#routeLiveModeHomeDecorateWorldAction',
+    }, 'completed', {
+      reason: 'home_object_already_placed',
+      source: 'main3d.js#routeLiveModeHomeDecorateWorldAction',
+      objectEffect: 'home-object-already-placed',
+      completionState: 'home-decorated',
+      buildingId,
+      objectType,
+    });
+    clearLiveModeWorldActionRouteClaim(worldActionId);
+    window.__VWLastLiveModeWorldActionSync = { ok: true, reason: 'home_object_already_placed', actionId: worldActionId, agentId: agent.id, buildingId, objectType, checkedAt: new Date().toISOString() };
+    return true;
+  }
+  const routeTarget = makeLiveModeHomeDecorateRouteTarget(building, placement, action, agent);
+  if (!routeTarget) return false;
+  const exteriorHandoff = handoffLiveModeConstructionAgentToExterior(agent, agent._doorTransition?.buildingId || null, routeTarget);
+  const routeAdmission = setAgentTarget(agent, routeTarget, building, routeTarget.floor, {
+    owner: 'world-action',
+    priorityName: 'explicit-object',
+    phase: 'approach',
+    expires: { staleAfterMs: 180000 },
+    target: routeTarget,
+    building,
+    floor: routeTarget.floor,
+    object: {
+      type: 'home-decorate-placement',
+      id: `${building.id || 'home'}:${objectType}`,
+      buildingId: building.id || null,
+      objectType,
+      actionId: actionType,
+      capabilityTag: action.capabilityTag || 'world.decorate',
+      worldActionId,
+      preserveUntilRelease: true,
+    },
+    release: { policy: 'on-object-complete' },
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorAuthority: action.behaviorAuthority || action.source?.behaviorAuthority || 900,
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    debug: { label: 'agent-live:world.placeObject:home-decorate', buildingId: building.id || null, objectType, exteriorHandoff },
+    source: { family: 'world-action-sync', functionName: 'routeLiveModeHomeDecorateWorldAction' },
+  });
+  if (routeAdmission?.accepted === false) {
+    window.__VWLastLiveModeWorldActionSync = { ok: false, reason: 'route_admission_rejected', actionId: worldActionId, agentId: agent.id, routeAdmission };
+    return false;
+  }
+  const requestedMs = Number(params.estimatedUseMs || params.placeDurationMs || 9000);
+  const stayMs = Math.max(3500, Math.min(30000, Number.isFinite(requestedMs) ? requestedMs : 9000));
+  agent._idleActivity = {
+    kind: 'home-decorate-place-object',
+    phase: 'approach',
+    approachStartedAt: performance.now(),
+    buildingId: building.id || null,
+    homeBuildingId: building.id || null,
+    stayMs,
+    dockTarget: { x: routeTarget.x, y: routeTarget.y },
+    dockSnapRadius: 12,
+    faceAngle: routeTarget.faceAngle,
+    objectType,
+    catalogKey: objectType,
+    placement,
+    action: actionType,
+    actionId: actionType,
+    capabilityTag: action.capabilityTag || 'world.decorate',
+    animationId: 'home-decorate-place-object',
+    source: 'agent-live-mode-world-action',
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    routeApproachTarget: { x: routeTarget.x, y: routeTarget.y, floor: routeTarget.floor, spotId: 'home-decorate-placement', faceAngle: routeTarget.faceAngle },
+    routeMetadata: routeTarget,
+    worldActionId,
+    objectInstanceId: `${building.id || 'home'}:${objectType}`,
+    lifecycle: { stationary: true, carryable: false, temporary: false, homeDecorate: true, releaseOnCompletion: true },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  agent._schedPhase = 'home-decorate-place-object';
+  markLiveModeWorldActionRouteClaimed(action, {
+    agentId: agent.id,
+    sourceFunction: 'main3d.js#routeLiveModeHomeDecorateWorldAction',
+    executor: 'main3d.js#routeLiveModeHomeDecorateWorldAction',
+    routeTarget,
+    routeKind: 'home-decorate-place-object',
+    buildingId: building.id || null,
+    objectType,
+  });
+  window.__VWLastLiveModeWorldActionSync = { ok: true, actionId: worldActionId, agentId: agent.id, routeTarget, homeBuildingId: building.id || null, objectType, checkedAt: new Date().toISOString() };
+  addActivityLog(`Live Mode routed ${agent.name || agent.id} home to place ${objectType} at ${building.name || building.id}`);
   return true;
 }
 
@@ -35476,38 +35989,56 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
   const sameHeldPresenceAction = Boolean(heldPresenceAction && replayAction && heldPresenceAction === replayAction);
   const feedPresenceHoldActive = Boolean(agent && Number(agent._worldEventFeedPresenceHoldUntil || 0) > performance.now() && !sameHeldPresenceAction);
   if (agent && renderPoint && !feedPresenceHoldActive) {
-    agent.x = renderPoint.apiX;
-    agent.y = renderPoint.apiZ;
-    agent._floor = renderPoint.floor;
-    agent._targetFloor = renderPoint.floor;
-    if (renderPoint.buildingId) agent._currentBuilding = buildingsMap.get(renderPoint.buildingId) || agent._currentBuilding || null;
-    agent._wanderTarget = null;
-    agent._waypointPath = null;
-    agent._stayTimer = Math.max(Number(agent._stayTimer || 0), 1800);
-    agent._wanderTimer = Math.max(Number(agent._wanderTimer || 0), 1800);
-    agent._liveAgentModeReplay = {
-      source: 'main3d.js#applyLiveAgentModeReplayEvent',
-      actionId,
-      sequence,
-      name: event.name || null,
-      point: renderPoint,
-      updatedAt: new Date().toISOString(),
-    };
-    agent._serverPresence = {
+    const replayUpdatedAt = new Date().toISOString();
+    const replayPresence = {
       ...(agent._serverPresence || {}),
       source: 'browser-replay',
       actionId,
       worldActionId: actionId,
       apiX: renderPoint.apiX,
       apiZ: renderPoint.apiZ,
-      x: renderPoint.worldX,
-      z: renderPoint.worldZ,
+      x: renderPoint.apiX,
+      y: renderPoint.apiZ,
+      worldX: renderPoint.worldX,
+      worldZ: renderPoint.worldZ,
       floor: renderPoint.floor,
       buildingId: renderPoint.buildingId,
-      updatedAt: agent._liveAgentModeReplay.updatedAt,
+      target: event.target || null,
+      updatedAt: replayUpdatedAt,
     };
+    const routeResult = routeAuthoritativePresenceToAgent(agent, replayPresence, {
+      event,
+      sourceFamily: 'live-agent-mode-animation-replay',
+      sourceFunction: 'applyLiveAgentModeReplayEvent',
+    });
+    const routeNoop = routeResult.reason === 'duplicate-presence' || routeResult.reason === 'already-at-presence';
+    agent._liveAgentModeReplay = {
+      source: 'main3d.js#applyLiveAgentModeReplayEvent',
+      actionId,
+      sequence,
+      name: event.name || null,
+      point: renderPoint,
+      routed: !!routeResult.applied,
+      routeNoop,
+      routeReason: routeResult.reason || null,
+      updatedAt: replayUpdatedAt,
+    };
+    if (routeResult.applied) {
+      agentRendered = true;
+    } else if (!routeResult.rejected && !routeNoop) {
+      agent.x = renderPoint.apiX;
+      agent.y = renderPoint.apiZ;
+      agent._floor = renderPoint.floor;
+      agent._targetFloor = renderPoint.floor;
+      if (renderPoint.buildingId) agent._currentBuilding = buildingsMap.get(renderPoint.buildingId) || agent._currentBuilding || null;
+      agent._wanderTarget = null;
+      agent._waypointPath = null;
+      agent._stayTimer = Math.max(Number(agent._stayTimer || 0), 1800);
+      agent._wanderTimer = Math.max(Number(agent._wanderTimer || 0), 1800);
+      agent._serverPresence = replayPresence;
+    }
     agent.presence = agent._serverPresence;
-    if (persistPresence) {
+    if (persistPresence && !routeResult.rejected) {
       persistAuthoritativeAgentPresence(agent, agent._serverPresence, {
         source: 'browser-replay',
         state: liveAgentModeReplayPresenceState(event),
@@ -35527,14 +36058,14 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
         objectInstanceId: event.target?.objectInstanceId || null,
       };
     }
-    if (agent._group3d) {
+    if (!routeResult.applied && !routeResult.rejected && !routeNoop && agent._group3d) {
       const worldPoint = getLiveAgentModeReplayWorldPoint(renderPoint);
       if (worldPoint) {
         agent._group3d.position.copy(worldPoint);
         agentRendered = true;
       }
     }
-    if (isPhysicsReady()) {
+    if (!routeResult.applied && !routeResult.rejected && !routeNoop && isPhysicsReady()) {
       teleportAgent('agent_' + agent.id, renderPoint.apiX * (T / API_TILE), agent._group3d?.position?.y || 0, renderPoint.apiZ * (T / API_TILE));
     }
   } else if (agent && renderPoint && feedPresenceHoldActive) {
@@ -35703,7 +36234,7 @@ function upsertWorldEventFeedBuilding(building, { updateList = true, rebuild = t
   return true;
 }
 
-function applyWorldEventFeedPresencePatch(event = {}) {
+function applyWorldEventFeedPresencePatch(event = {}, { snap = false } = {}) {
   const patch = event.patch || {};
   const value = patch.value || patch.to || event.to || event.target || null;
   const agentId = String(patch.agentId || event.agentId || value?.agentId || event.target?.agentId || '').trim();
@@ -35720,15 +36251,28 @@ function applyWorldEventFeedPresencePatch(event = {}) {
     source: value.source || event.source || 'world-event-feed',
     updatedAt: value.updatedAt || event.createdAt || new Date().toISOString(),
   };
-  const applied = applyAuthoritativePresenceToAgent(agent, presence, { force: true });
+  const routeResult = routeAuthoritativePresenceToAgent(agent, presence, {
+    event,
+    snap,
+    sourceFamily: 'world-event-feed',
+    sourceFunction: 'applyWorldEventFeedPresencePatch',
+  });
+  const routeNoop = routeResult.reason === 'duplicate-presence' || routeResult.reason === 'already-at-presence';
+  const shouldSnapFallback = !routeResult.applied && !routeResult.rejected && !routeNoop;
+  const applied = routeResult.applied || routeNoop || (shouldSnapFallback && applyAuthoritativePresenceToAgent(agent, presence, { force: true }));
   if (applied) {
-    clearAgentTransientMovement(agent);
-    agent._stayTimer = Math.max(Number(agent._stayTimer || 0), 1200);
-    agent._wanderTimer = Math.max(Number(agent._wanderTimer || 0), 1200);
+    if (!routeResult.applied && !routeNoop) {
+      clearAgentTransientMovement(agent);
+      agent._stayTimer = Math.max(Number(agent._stayTimer || 0), 1200);
+      agent._wanderTimer = Math.max(Number(agent._wanderTimer || 0), 1200);
+    }
     agent._worldEventFeedPresenceHoldUntil = performance.now() + LIVE_AGENT_MODE_WORLD_EVENT_FEED_PRESENCE_HOLD_MS;
     agent._liveAgentModeWorldEventFeed = {
       sequence: event.sequence || event.cursor || null,
       eventType: event.eventType || null,
+      routed: !!routeResult.applied,
+      routeNoop,
+      routeReason: routeResult.reason || null,
       updatedAt: new Date().toISOString(),
     };
   }
@@ -35808,7 +36352,7 @@ function applyLiveAgentModeWorldEventSnapshot(snapshot = {}) {
   }
   const presenceAgents = snapshot.agentPresence?.agents || snapshot.agentPresence?.agentLocations || {};
   for (const [agentId, presence] of Object.entries(presenceAgents)) {
-    applyWorldEventFeedPresencePatch({ eventType: 'agent-presence-updated', agentId, patch: { collection: 'agentPresence', op: 'upsert', agentId, value: presence } });
+    applyWorldEventFeedPresencePatch({ eventType: 'agent-presence-updated', agentId, patch: { collection: 'agentPresence', op: 'upsert', agentId, value: presence } }, { snap: true });
   }
   return true;
 }
@@ -35987,7 +36531,7 @@ async function syncActiveBarberChairWorldActions() {
     for (const action of actions) {
       const status = String(action?.status || '').toLowerCase();
       if (!['requested', 'created', 'reserved', 'route_pending', 'routing'].includes(status)) continue;
-      if (routeBarberChairWorldAction(action) || routeLiveModeConstructionSiteWorldAction(action) || routeLiveModeHomeWorldAction(action) || routeLiveModeSocialWorldAction(action) || routeLiveModeStandingMachineWorldAction(action) || routeLiveModeLocalObjectWorldAction(action)) routed++;
+      if (routeBarberChairWorldAction(action) || routeLiveModeConstructionSiteWorldAction(action) || routeLiveModeHomeDecorateWorldAction(action) || routeLiveModeHomeWorldAction(action) || routeLiveModeSocialWorldAction(action) || routeLiveModeStandingMachineWorldAction(action) || routeLiveModeLocalObjectWorldAction(action)) routed++;
     }
     if (routed) window.__VWLastBarberChairWorldActionSync = { ...(window.__VWLastBarberChairWorldActionSync || {}), routed, checkedAt: new Date().toISOString() };
     return routed > 0;

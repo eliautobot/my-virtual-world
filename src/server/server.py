@@ -1517,6 +1517,15 @@ LIVE_AGENT_WORLD_EVENT_FEED_LATENCY_SAMPLE_LIMIT = 500
 LIVE_AGENT_WORLD_EVENT_FEED_EVIDENCE_SAMPLE_LIMIT = 100
 LIVE_AGENT_WORLD_EVENT_FEED_FILE = os.path.join(DATA_DIR, "live-agent-world-events.json")
 LIVE_AGENT_BACKEND_EXECUTOR_ID = "server.py#live_agent_backend_action_executor"
+LIVE_AGENT_HOME_DECORATE_ALLOWED_OBJECTS = {"fridge"}
+LIVE_AGENT_HOME_DECORATE_FURNITURE_HALF_SIZES = {
+    "bed": (1.35, 1.60),
+    "nightstand": (0.43, 0.34),
+    "armchair": (0.62, 0.70),
+    "sideTable": (0.46, 0.38),
+    "dresser": (0.82, 0.38),
+    "fridge": (0.62, 0.46),
+}
 LIVE_AGENT_ANIMATION_EVENT_NAMES = {
     "agent-move-started",
     "agent-arrived",
@@ -1540,7 +1549,7 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "minActionIntervalSec": 120,
     "clientActiveTtlSec": 45,
     "maxActionsPerTick": 1,
-    "maxToolCallsPerTurn": 1,
+    "maxToolCallsPerTurn": 5,
     "worldClientRequired": False,
     "eventRetention": 250,
     "memoryRetention": 24,
@@ -1689,6 +1698,16 @@ LIVE_AGENT_LOOP_ACTIONS = [
         "experience": "go home and rest at their visible home",
     },
     {
+        "id": "decorate-home-fridge",
+        "targetKind": "agent-home-placement",
+        "objectType": "fridge",
+        "actionType": "world.placeObject",
+        "capabilityTag": "world.decorate",
+        "need": "food",
+        "label": "place a fridge at home",
+        "experience": "go home and visibly place a fridge in their kitchen",
+    },
+    {
         "id": "talk-with-nearby-agent",
         "targetKind": "agent",
         "actionType": "life.social",
@@ -1796,6 +1815,19 @@ LIVE_AGENT_VISIBLE_ACTION_CONTRACTS = {
         "mutatesWorldOnlyAfterVisibleCompletion": True,
         "requiredStages": ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"],
     },
+    "world.placeObject": {
+        "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "policy": "visible-world-execution-required",
+        "visibleInWorld": True,
+        "hiddenWorldMutationAllowed": False,
+        "requiresWorldAction": True,
+        "requiresMoveIntent": True,
+        "targetKind": "building",
+        "clientExecutor": "main3d.js#routeLiveModeHomeDecorateWorldAction",
+        "routeKind": "home-decorate-place-object",
+        "mutatesWorldOnlyAfterVisibleCompletion": True,
+        "requiredStages": ["reserved", "route_pending", "routing", "arrived", "in_progress", "completed"],
+    },
     "life.social": {
         "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
         "policy": "visible-world-execution-required",
@@ -1861,6 +1893,12 @@ LIVE_AGENT_TOOL_CATEGORIES = {
     "object-use",
     "communicate",
     "remember",
+    "planning",
+    "relationship",
+    "content",
+    "governance",
+    "economy",
+    "events",
     "build-create",
 }
 LIVE_AGENT_TOOL_REGISTRY = {
@@ -2120,6 +2158,44 @@ LIVE_AGENT_TOOL_REGISTRY = {
             "properties": {
                 "text": {"type": "string", "minLength": 1, "maxLength": 4000},
                 "mood": {"type": "string", "maxLength": 80},
+            },
+        },
+    },
+    "add_todo": {
+        "name": "add_todo",
+        "category": "planning",
+        "description": "Add a resident-owned todo item for future turns without mutating the world.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-memory",
+        "locationRule": "none",
+        "sideEffect": "planning-state-write",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["text"],
+            "properties": {
+                "text": {"type": "string", "minLength": 1, "maxLength": 1000},
+                "priority": {"type": "string", "enum": ["low", "normal", "high"]},
+                "dueAt": {"type": "string", "maxLength": 80},
+                "tags": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+            },
+        },
+    },
+    "complete_todo": {
+        "name": "complete_todo",
+        "category": "planning",
+        "description": "Mark a resident-owned todo item complete and record the outcome.",
+        "riskTier": 0,
+        "permissionRule": "live-agent-memory",
+        "locationRule": "none",
+        "sideEffect": "planning-state-write",
+        "argumentSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["todoId"],
+            "properties": {
+                "todoId": {"type": "string", "minLength": 1, "maxLength": 160},
+                "result": {"type": "string", "maxLength": 1000},
             },
         },
     },
@@ -2716,7 +2792,7 @@ def _live_agent_tool_check_availability(tool, context, args):
 
     if tool_name in {"observe_world", "list_agents", "list_landmarks", "get_current_location", "think_aloud", "idle"}:
         return True, {"available": True, "reason": None, "location": context.get("location")}, 200
-    if tool_name in {"add_memory", "search_memory", "write_diary"}:
+    if tool_name in {"add_memory", "search_memory", "write_diary", "add_todo", "complete_todo"}:
         return True, {"available": True, "reason": None, "memoryScope": "agent", "agentId": context.get("agentId")}, 200
     if tool_name in {"go_to_place", "go_to_coordinates", "go_home"}:
         return _live_agent_tool_check_move_target(tool_name, context, args)
@@ -2731,7 +2807,7 @@ def _live_agent_tool_check_availability(tool, context, args):
     return False, _live_agent_tool_error("tool_not_found", "Unknown Live Agent tool.", tool=tool_name), 404
 
 
-LIVE_AGENT_EXECUTABLE_TOOL_NAMES = {"say_to_agent", "speak_to_room", "send_message", "think_aloud", "add_memory", "search_memory", "write_diary"}
+LIVE_AGENT_EXECUTABLE_TOOL_NAMES = {"say_to_agent", "speak_to_room", "send_message", "think_aloud", "add_memory", "search_memory", "write_diary", "add_todo", "complete_todo", "idle"}
 
 
 def _live_agent_tool_execution_enabled(tool_name):
@@ -3496,6 +3572,67 @@ def _execute_live_agent_memory_search_tool(context, args, availability):
     return True, result, 200
 
 
+def _execute_live_agent_todo_tool(tool_name, context, args, availability):
+    del availability
+    now_iso = _utc_now_iso()
+    agent_id = context.get("agentId")
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=True)
+        agent_state = _live_agent_loop_agent_state(state, agent_id)
+        todos = [item for item in (agent_state.get("todos") or []) if isinstance(item, dict)]
+        if tool_name == "add_todo":
+            text = _live_agent_memory_clean_text(args.get("text"), limit=1000)
+            todo = {
+                "id": _live_agent_memory_entry_id("todo", agent_id),
+                "schemaVersion": "agent-live-mode-todo/v1",
+                "agentId": agent_id,
+                "status": "open",
+                "text": text,
+                "priority": str(args.get("priority") or "normal").strip().lower(),
+                "dueAt": str(args.get("dueAt") or "").strip()[:80] or None,
+                "tags": _live_agent_memory_clean_tags(args.get("tags"), extra=["todo"]),
+                "createdAt": now_iso,
+                "source": {"kind": "agent-live-mode", "tool": tool_name, "requestId": (context.get("source") or {}).get("requestId")},
+            }
+            todos.append({k: v for k, v in todo.items() if v is not None})
+            agent_state["todos"] = _live_agent_loop_trim_list(todos, LIVE_AGENT_LOOP_DEFAULTS["goalRetention"])
+            _live_agent_loop_add_event(state, "todo-added", agent_id=agent_id, details={"todoId": todo["id"], "text": text[:160]})
+            saved_state = save_live_agent_loop_state(state)
+            return {"todo": todo, "openTodoCount": len([item for item in agent_state["todos"] if item.get("status") == "open"]), "state": (saved_state.get("agents") or {}).get(agent_id, {})}
+
+        todo_id = str(args.get("todoId") or "").strip()
+        match = next((item for item in todos if item.get("id") == todo_id), None)
+        if not match:
+            return {"todoId": todo_id, "completed": False, "reason": "todo_not_found", "openTodoCount": len([item for item in todos if item.get("status") == "open"])}
+        next_todos = []
+        completed = None
+        for item in todos:
+            if item.get("id") == todo_id:
+                completed = {**item, "status": "completed", "completedAt": now_iso, "result": _live_agent_memory_clean_text(args.get("result"), limit=1000)}
+                next_todos.append(completed)
+            else:
+                next_todos.append(item)
+        agent_state["todos"] = _live_agent_loop_trim_list(next_todos, LIVE_AGENT_LOOP_DEFAULTS["goalRetention"])
+        _live_agent_loop_add_event(state, "todo-completed", agent_id=agent_id, details={"todoId": todo_id, "result": (completed or {}).get("result")})
+        saved_state = save_live_agent_loop_state(state)
+        return {"todo": completed, "completed": True, "openTodoCount": len([item for item in agent_state["todos"] if item.get("status") == "open"]), "state": (saved_state.get("agents") or {}).get(agent_id, {})}
+
+
+def _execute_live_agent_idle_tool(context, args, availability):
+    del availability
+    reason = _live_agent_memory_clean_text(args.get("reason") or "deliberate idle turn", limit=500)
+    agent_id = context.get("agentId")
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=True)
+        _live_agent_loop_add_event(state, "agent-idle-tool", agent_id=agent_id, details={"reason": reason, "location": context.get("location")})
+        agent_state = _live_agent_loop_agent_state(state, agent_id)
+        agent_state["lastIdleAt"] = _utc_now_iso()
+        agent_state["lastIdleReason"] = reason
+        saved_state = save_live_agent_loop_state(state)
+    _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World")
+    return {"idle": True, "reason": reason, "state": (saved_state.get("agents") or {}).get(agent_id, {})}
+
+
 def _execute_live_agent_tool_call(tool, context, args, availability):
     tool_name = tool.get("name")
     if tool_name in {"say_to_agent", "speak_to_room", "send_message", "think_aloud"}:
@@ -3504,9 +3641,13 @@ def _execute_live_agent_tool_call(tool, context, args, availability):
         return _execute_live_agent_memory_search_tool(context, args, availability)
     if tool_name in {"add_memory", "write_diary"}:
         return True, _execute_live_agent_memory_tool(tool_name, context, args, availability), 201
+    if tool_name in {"add_todo", "complete_todo"}:
+        return True, _execute_live_agent_todo_tool(tool_name, context, args, availability), 201
+    if tool_name == "idle":
+        return True, _execute_live_agent_idle_tool(context, args, availability), 201
     return False, _live_agent_tool_error(
         "tool_execution_not_enabled",
-        "Live Agent tool execution is currently enabled only for safe in-world communication and memory tools; movement and object use execute through the backend world-action APIs.",
+        "Live Agent tool execution is currently enabled only for safe in-world communication, memory, planning, and idle tools; movement and object use execute through the backend world-action APIs.",
         tool=tool_name,
         details={"enabledTools": sorted(LIVE_AGENT_EXECUTABLE_TOOL_NAMES), "dryRunSupported": True, "publicUiEnabled": False},
     ), 501
@@ -3622,7 +3763,7 @@ def validate_live_agent_tool_call(payload, *, dry_run=True):
         "execution": {
             "enabled": _live_agent_tool_execution_enabled(tool_name),
             "publicUiEnabled": False,
-            "message": "Communication and memory tools can execute through backend persistence; movement and object-use tools use the dedicated world-action APIs.",
+            "message": "Communication, memory, planning, and idle tools can execute through backend persistence; movement and object-use tools use the dedicated world-action APIs.",
             "enabledTools": sorted(LIVE_AGENT_EXECUTABLE_TOOL_NAMES),
         },
     }, 200
@@ -7052,6 +7193,275 @@ def apply_live_agent_build_completion_effect(action):
     }
 
 
+def _live_agent_home_decorate_object_type(target=None, params=None):
+    target = target if isinstance(target, dict) else {}
+    params = params if isinstance(params, dict) else {}
+    raw = target.get("objectType") or target.get("catalogId") or target.get("objectCatalogId") or params.get("objectType") or params.get("catalogId") or "fridge"
+    normalized = _normalize_token(raw)
+    aliases = {
+        "refrigerator": "fridge",
+        "homefridge": "fridge",
+        "kitchenfridge": "fridge",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _live_agent_home_decorate_owner_matches(building, agent_id):
+    if not isinstance(building, dict) or not agent_id:
+        return False
+    aliases = _live_agent_loop_agent_aliases(agent_id)
+    owners = {
+        str(building.get("liveModeHomeForAgentId") or "").strip(),
+        str(building.get("ownerAgentId") or "").strip(),
+        str(building.get("createdByAgentId") or "").strip(),
+    }
+    return bool(aliases.intersection({owner for owner in owners if owner}))
+
+
+def _live_agent_home_decorate_existing_objects(building, object_type):
+    furniture = ((building or {}).get("interior") or {}).get("furniture") or []
+    if not isinstance(furniture, list):
+        return []
+    wanted = _normalize_token(object_type)
+    return [
+        item for item in furniture
+        if isinstance(item, dict)
+        and item.get("deleted") is not True
+        and item.get("removed") is not True
+        and _normalize_token(item.get("type") or item.get("catalogId") or item.get("objectCatalogId")) == wanted
+    ]
+
+
+def _live_agent_home_decorate_half_size(object_type):
+    return LIVE_AGENT_HOME_DECORATE_FURNITURE_HALF_SIZES.get(object_type) or (0.50, 0.50)
+
+
+def _live_agent_home_decorate_slot_clear(building, object_type, x, z, floor=1):
+    try:
+        width = max(4.0, float(building.get("widthTiles") or 10))
+        height = max(4.0, float(building.get("heightTiles") or 8))
+        active_floor = int(floor or 1)
+        x = float(x)
+        z = float(z)
+    except (TypeError, ValueError):
+        return False
+    half_w, half_d = _live_agent_home_decorate_half_size(object_type)
+    wall_margin = 0.35
+    if x - half_w < wall_margin or x + half_w > width - wall_margin:
+        return False
+    if z - half_d < wall_margin or z + half_d > height - wall_margin:
+        return False
+    furniture = ((building.get("interior") or {}).get("furniture") or [])
+    if not isinstance(furniture, list):
+        return True
+    for item in furniture:
+        if not isinstance(item, dict) or item.get("deleted") is True or item.get("removed") is True:
+            continue
+        try:
+            item_floor = int(item.get("floor") or item.get("buildingFloor") or 1)
+            item_x = float(item.get("x"))
+            item_z = float(item.get("z"))
+        except (TypeError, ValueError):
+            continue
+        if item_floor != active_floor:
+            continue
+        other_w, other_d = _live_agent_home_decorate_half_size(_normalize_token(item.get("type") or item.get("catalogId") or "furniture"))
+        if abs(x - item_x) < (half_w + other_w + 0.35) and abs(z - item_z) < (half_d + other_d + 0.35):
+            return False
+    return True
+
+
+def _live_agent_home_decorate_placement(building, object_type, target=None, params=None):
+    if not isinstance(building, dict):
+        return None
+    target = target if isinstance(target, dict) else {}
+    params = params if isinstance(params, dict) else {}
+    try:
+        width = max(8.0, float(building.get("widthTiles") or 10))
+        height = max(7.0, float(building.get("heightTiles") or 8))
+    except (TypeError, ValueError):
+        width, height = 10.0, 8.0
+    floor = int(target.get("floor") or params.get("floor") or 1)
+    candidates = []
+    if target.get("localX") is not None and (target.get("localZ") is not None or target.get("localY") is not None):
+        candidates.append((target.get("localX"), target.get("localZ") if target.get("localZ") is not None else target.get("localY"), target.get("rotation") or params.get("rotation") or 90))
+    if params.get("localX") is not None and (params.get("localZ") is not None or params.get("localY") is not None):
+        candidates.append((params.get("localX"), params.get("localZ") if params.get("localZ") is not None else params.get("localY"), params.get("rotation") or 90))
+    if object_type == "fridge":
+        candidates.extend([
+            (1.20, 3.25, 90),
+            (1.20, max(2.20, height - 2.00), 90),
+            (max(2.00, width - 1.35), max(2.20, height - 1.75), 270),
+            (max(2.00, width - 1.35), 2.75, 270),
+        ])
+    candidates.extend([
+        (max(1.2, width * 0.20), max(1.4, height * 0.55), 90),
+        (max(1.2, width * 0.78), max(1.4, height * 0.78), 270),
+    ])
+    for raw_x, raw_z, raw_rotation in candidates:
+        try:
+            x = round(float(raw_x), 2)
+            z = round(float(raw_z), 2)
+            rotation = int(float(raw_rotation or 0)) % 360
+        except (TypeError, ValueError):
+            continue
+        if _live_agent_home_decorate_slot_clear(building, object_type, x, z, floor=floor):
+            return {
+                "schemaVersion": "agent-live-mode-home-decorate-placement/v1",
+                "objectType": object_type,
+                "catalogId": object_type,
+                "roomId": target.get("roomId") or params.get("roomId") or "kitchen-zone",
+                "floor": floor,
+                "localX": x,
+                "localZ": z,
+                "rotation": rotation,
+            }
+    return None
+
+
+def validate_live_agent_home_place_object_request(agent_id, target, params=None, building=None):
+    if not agent_id:
+        return None, _api_error("agent_not_found", "agentId must reference an existing agent id or statusKey")
+    target = target if isinstance(target, dict) else {}
+    params = params if isinstance(params, dict) else {}
+    building = building if isinstance(building, dict) else load_building(target.get("buildingId"))
+    if not isinstance(building, dict):
+        return None, _api_error("target_missing", "Home building target does not exist.", details={"buildingId": target.get("buildingId")})
+    if building.get("type") != "home" or not _live_agent_home_decorate_owner_matches(building, agent_id):
+        return None, _api_error(
+            "permission_denied",
+            "Live Agent home decoration can only place objects inside the agent-owned home.",
+            details={"agentId": agent_id, "buildingId": building.get("id"), "buildingType": building.get("type")},
+        )
+    object_type = _live_agent_home_decorate_object_type(target, params)
+    if object_type not in LIVE_AGENT_HOME_DECORATE_ALLOWED_OBJECTS:
+        return None, _api_error(
+            "unsupported_target",
+            "This Live Agent place-object executor only supports typed home furniture that has a visible executor.",
+            details={"objectType": object_type, "allowedObjectTypes": sorted(LIVE_AGENT_HOME_DECORATE_ALLOWED_OBJECTS)},
+        )
+    if _live_agent_home_decorate_existing_objects(building, object_type):
+        return None, _api_error(
+            "target_blocked",
+            "The home already has this object type, so another Live Agent placement would duplicate it.",
+            details={"buildingId": building.get("id"), "objectType": object_type},
+        )
+    placement = _live_agent_home_decorate_placement(building, object_type, target, params)
+    if not placement:
+        return None, _api_error(
+            "target_blocked",
+            "No safe visible placement spot was available in the agent home.",
+            details={"buildingId": building.get("id"), "objectType": object_type},
+        )
+    return {"building": building, "objectType": object_type, "placement": placement}, None
+
+
+def _live_agent_home_decorate_furniture_item(building, object_type, placement, action):
+    furniture = ((building.get("interior") or {}).get("furniture") or [])
+    index = len(furniture) if isinstance(furniture, list) else 0
+    building_id = building.get("id") or "live-home"
+    object_id = f"{building_id}:furn:{object_type}:{index}:live-home-decor"
+    now = _utc_now_iso()
+    item = {
+        "id": object_id,
+        "objectInstanceId": object_id,
+        "instanceId": object_id,
+        "type": object_type,
+        "catalogId": object_type,
+        "x": placement.get("localX"),
+        "z": placement.get("localZ"),
+        "rotation": placement.get("rotation") or 0,
+        "floor": placement.get("floor") or 1,
+        "buildingFloor": placement.get("floor") or 1,
+        "room": placement.get("roomId") or "kitchen-zone",
+        "capabilityTags": ["life.food", "world.decorate"] if object_type == "fridge" else ["world.decorate"],
+        "stationary": True,
+        "carryable": False,
+        "temporary": False,
+        "persistsUntilDeleted": True,
+        "assetClass": "stationary-persistent-food-storage-appliance" if object_type == "fridge" else "stationary-persistent-furniture",
+        "lifecycle": {
+            "stationary": True,
+            "carryable": False,
+            "temporary": False,
+            "persistsUntilDeleted": True,
+            "source": "agent-live-mode-home-decorate",
+            "visibleExecutor": "server.py#apply_live_agent_place_object_completion_effect",
+            "worldActionId": action.get("id"),
+            "placedByAgentId": action.get("agentId"),
+            "placedAt": now,
+        },
+    }
+    if object_type == "fridge":
+        item["reservation"] = None
+        item["activeUse"] = {"state": "idle", "mode": "closed-stocked"}
+        item["fridgeState"] = {"doorOpen": False, "stockLevel": "stocked", "lastAction": None, "retrievedCount": 0, "persistentFurniture": True}
+        item["lifecycle"]["spawnsTemporary"] = {
+            "catalogId": "temporaryFood",
+            "label": "Chilled Snack",
+            "carryable": True,
+            "attachPoint": "right-hand",
+            "temporary": True,
+            "validDropOff": ["desk", "diningTable", "smallCafeTable", "outdoorCafeTable", "picnicTable", "patioTable", "counter", "cafeCounter"],
+        }
+    return item
+
+
+def apply_live_agent_place_object_completion_effect(action):
+    if not isinstance(action, dict) or action.get("actionType") != "world.placeObject":
+        return None
+    target = action.get("target") if isinstance(action.get("target"), dict) else {}
+    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+    if (target.get("kind") or "") != "building":
+        return None
+    building_id = target.get("buildingId")
+    before = load_building(building_id)
+    validation, error = validate_live_agent_home_place_object_request(action.get("agentId"), target, params, before)
+    if error:
+        return {
+            "schemaVersion": "agent-live-mode-place-object-effect/v1",
+            "effect": "home-object-placement-blocked",
+            "blocked": True,
+            "error": error.get("error") if isinstance(error, dict) else error,
+            "buildingId": building_id,
+        }
+    building = _copy_jsonable(validation.get("building"))
+    object_type = validation.get("objectType")
+    placement = validation.get("placement")
+    interior = building.get("interior") if isinstance(building.get("interior"), dict) else {}
+    furniture = interior.get("furniture") if isinstance(interior.get("furniture"), list) else []
+    item = _live_agent_home_decorate_furniture_item(building, object_type, placement, action)
+    interior["furniture"] = [*furniture, item]
+    building["interior"] = interior
+    building["homeState"] = {
+        **(building.get("homeState") if isinstance(building.get("homeState"), dict) else {}),
+        f"{object_type}Count": len(_live_agent_home_decorate_existing_objects(building, object_type)),
+        "lastDecoratedAt": _utc_now_iso(),
+        "lastDecoratedByAgentId": action.get("agentId"),
+        "lastDecoratedWorldActionId": action.get("id"),
+    }
+    save_building(building["id"], building)
+    persisted = load_building(building["id"]) or building
+    world_events = publish_building_world_events(
+        before,
+        persisted,
+        source="server.py#apply_live_agent_place_object_completion_effect",
+        actor=action.get("agentId") or "agent-live-mode",
+    )
+    return {
+        "schemaVersion": "agent-live-mode-place-object-effect/v1",
+        "effect": "home-object-placed",
+        "buildingId": building.get("id"),
+        "objectType": object_type,
+        "objectInstanceId": item.get("objectInstanceId"),
+        "roomId": item.get("room"),
+        "placement": placement,
+        "source": "server.py#apply_live_agent_place_object_completion_effect",
+        "worldEventCount": len(world_events),
+        "worldEventIds": [event.get("eventId") for event in world_events if isinstance(event, dict) and event.get("eventId")],
+    }
+
+
 def _current_live_agent_backend_action(action_id):
     store = get_world_actions_store(persist_migration=True)
     return _find_world_action_record(store, action_id)
@@ -7179,7 +7589,8 @@ def advance_live_agent_backend_world_action(action_id, *, reason="server-owned-p
             if not gate_ok:
                 return False, gate_result, 409
             build_effect = apply_live_agent_build_completion_effect(current)
-            backend_effects = [build_effect] if build_effect else []
+            place_object_effect = apply_live_agent_place_object_completion_effect(current)
+            backend_effects = [effect for effect in (build_effect, place_object_effect) if effect]
             completion_events = append_live_agent_animation_events([
                 _live_agent_animation_event_payload(
                     current,
@@ -7867,6 +8278,19 @@ def _validate_create_world_action_payload(payload):
 
     target_kind = target.get("kind") or "object-instance"
     target_obj = resolved.get("object") if resolved else None
+    building = resolved.get("building") if resolved else None
+    if isinstance(source, dict) and source.get("kind") == "agent-live-mode" and action_type == "world.placeObject":
+        placement_validation, placement_error = validate_live_agent_home_place_object_request(agent_id, target, params, building)
+        if placement_error:
+            return None, placement_error
+        if isinstance(placement_validation, dict):
+            target = {
+                **target,
+                "objectType": placement_validation.get("objectType"),
+                "catalogId": placement_validation.get("objectType"),
+                "placementRole": "home-decorate",
+                "placement": placement_validation.get("placement"),
+            }
     if target_kind == "agent":
         target_agent_id = resolved.get("agentId") if isinstance(resolved, dict) else _resolve_agent_id(target.get("targetAgentId"))
         if not target_agent_id:
@@ -7912,7 +8336,6 @@ def _validate_create_world_action_payload(payload):
     now = _utc_now_iso()
     safe_action = re.sub(r"[^A-Za-z0-9_.-]+", "-", action_type).strip("-") or "action"
     action_id = str(payload.get("id") or f"wa-{int(time.time() * 1000)}-{agent_id}-{safe_action}")
-    building = resolved.get("building") if resolved else None
     target_snapshot = dict(target)
     target_snapshot["kind"] = target_kind
     target_snapshot["catalogId"] = catalog_id
@@ -7966,9 +8389,11 @@ def _validate_create_world_action_payload(payload):
         "floor": target_snapshot.get("floor"),
         "roomId": target_snapshot.get("roomId"),
         "objectInstanceId": target_snapshot.get("objectInstanceId"),
+        "objectType": target_snapshot.get("objectType"),
         "catalogId": target_snapshot.get("catalogId"),
         "interactionSpotId": target_snapshot.get("interactionSpotId"),
         "targetAgentId": target_snapshot.get("targetAgentId"),
+        "placementRole": target_snapshot.get("placementRole"),
         "x": target_snapshot.get("x"),
         "y": target_snapshot.get("y"),
         "z": target_snapshot.get("z"),
@@ -10350,10 +10775,20 @@ def _live_agent_loop_unavailable_reason(action_def, agent_id):
         return "agent-home-already-built"
     if action_def.get("id") == "rest-at-home" and not _live_agent_loop_existing_home_for_agent(agent_id):
         return "agent-home-not-built"
+    if action_def.get("id") == "decorate-home-fridge":
+        home = _live_agent_loop_existing_home_for_agent(agent_id)
+        if not home:
+            return "agent-home-not-built"
+        if _live_agent_home_decorate_existing_objects(home, "fridge"):
+            return "agent-home-fridge-already-placed"
+        if not _live_agent_home_decorate_placement(home, "fridge", {"floor": 1, "roomId": "kitchen-zone"}, {}):
+            return "agent-home-no-safe-fridge-placement"
     if action_def.get("targetKind") == "agent":
         return "no-nearby-visible-agent"
     if action_def.get("targetKind") == "world-point":
         return "no-open-construction-site"
+    if action_def.get("targetKind") == "agent-home-placement":
+        return "agent-home-placement-unavailable"
     if action_def.get("targetKind") == "agent-home-building":
         return "agent-home-not-built"
     return "no-available-target"
@@ -10402,6 +10837,42 @@ def _live_agent_loop_find_action_target(action_def, *, agent_id=None):
             "availability": {"state": "available", "reason": None, "homeRole": "resident"},
             "action": action_def,
             "home": _copy_jsonable(home),
+        }
+    if action_def.get("targetKind") == "agent-home-placement":
+        home = _live_agent_loop_existing_home_for_agent(agent_id)
+        if not home:
+            return None
+        object_type = _live_agent_home_decorate_object_type({"objectType": action_def.get("objectType") or "fridge"}, {})
+        if object_type not in LIVE_AGENT_HOME_DECORATE_ALLOWED_OBJECTS:
+            return None
+        if _live_agent_home_decorate_existing_objects(home, object_type):
+            return None
+        placement = _live_agent_home_decorate_placement(home, object_type, {"floor": 1, "roomId": "kitchen-zone"}, {})
+        if not placement:
+            return None
+        target = {
+            "kind": "building",
+            "buildingId": home.get("id"),
+            "floor": placement.get("floor") or 1,
+            "homeRole": "resident",
+            "liveModeHomeForAgentId": agent_id,
+            "objectType": object_type,
+            "catalogId": object_type,
+            "roomId": placement.get("roomId") or "kitchen-zone",
+            "placementRole": "home-decorate",
+            "placement": placement,
+            "localX": placement.get("localX"),
+            "localZ": placement.get("localZ"),
+            "rotation": placement.get("rotation"),
+        }
+        return {
+            "target": target,
+            "buildingName": home.get("name"),
+            "objectType": object_type,
+            "availability": {"state": "available", "reason": None, "homeRole": "resident", "placement": placement},
+            "action": action_def,
+            "home": _copy_jsonable(home),
+            "placement": placement,
         }
     if action_def.get("targetKind") == "world-point":
         if action_def.get("siteKind") == "agent-home":
@@ -11152,11 +11623,57 @@ def _live_agent_loop_action_affordances(agent_id, agent_state):
     return affordances
 
 
+def _live_agent_loop_tool_registry_frame(agent_id, agent_state):
+    del agent_state
+    context = {
+        "agentId": agent_id,
+        "source": {"kind": "agent-live-mode", "roles": ["participant"], "surface": "live-agent-loop"},
+        "roles": ["participant"],
+        "setting": get_agent_live_mode_setting(agent_id),
+        "location": _live_agent_tool_current_location(agent_id),
+    }
+    tools = []
+    available_by_category = {}
+    probe_without_args = {"observe_world", "list_agents", "list_landmarks", "get_current_location", "go_home", "speak_to_room", "idle"}
+    for tool in LIVE_AGENT_TOOL_REGISTRY.values():
+        args = {}
+        available = None
+        reason = None
+        if tool.get("name") in probe_without_args:
+            ok, availability, _ = _live_agent_tool_check_availability(tool, context, args)
+            available = bool(ok)
+            if not ok and isinstance(availability, dict):
+                reason = (availability.get("error") or {}).get("code") or availability.get("reason")
+        category = tool.get("category") or "utility"
+        if available:
+            available_by_category[category] = available_by_category.get(category, 0) + 1
+        tools.append({
+            "name": tool.get("name"),
+            "category": category,
+            "riskTier": tool.get("riskTier"),
+            "locationRule": tool.get("locationRule"),
+            "sideEffect": tool.get("sideEffect"),
+            "executionMode": tool.get("executionMode") or ("executable" if _live_agent_tool_execution_enabled(tool.get("name")) else "world-action-or-dry-run"),
+            "available": available,
+            **({"unavailableReason": reason} if reason else {}),
+        })
+    return {
+        "schemaVersion": LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION,
+        "currentLocation": context.get("location"),
+        "categories": sorted(LIVE_AGENT_TOOL_CATEGORIES),
+        "toolCount": len(tools),
+        "executableTools": sorted(LIVE_AGENT_EXECUTABLE_TOOL_NAMES),
+        "availableByCategory": available_by_category,
+        "tools": tools,
+    }
+
+
 def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, now_epoch=None):
     now_epoch = float(now_epoch or time.time())
     needs = _live_agent_loop_update_needs(agent_state, now_epoch)
     active = _active_behavior_records_for_agent(agent_id)
     affordances = _live_agent_loop_action_affordances(agent_id, agent_state)
+    tool_registry = _live_agent_loop_tool_registry_frame(agent_id, agent_state)
     recent_actions = _live_agent_loop_recent_world_actions(agent_id)
     memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
     retrieved_memory = _live_agent_memory_retrieve_from_stream(
@@ -11175,6 +11692,7 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
         "active": [{k: item.get(k) for k in ("type", "id", "status", "worldActionId", "behaviorSourceKind")} for item in active],
         "affordances": [{k: v for k, v in affordance.items() if k != "selected"} for affordance in affordances],
         "recentWorldActions": recent_actions,
+        "toolRegistry": tool_registry,
         "visibleActionContract": _live_agent_visible_action_policy(),
         "social": social,
         "memory": {
@@ -11195,6 +11713,8 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
         "needs": needs,
         "availableActionIds": [item["id"] for item in affordances if item.get("available")],
         "activeCount": len(active),
+        "toolCount": tool_registry.get("toolCount"),
+        "executableToolCount": len(tool_registry.get("executableTools") or []),
         "recentWorldActionIds": [item.get("id") for item in recent_actions[:4]],
         "social": {k: social.get(k) for k in ("knownAgentCount", "liveEnabledPeerCount", "nearbyAgentCount")},
     }
@@ -11674,7 +12194,7 @@ def _live_agent_loop_build_decision_frame(agent_id, perception, agent_state):
         "selectedActionLabel": selected.get("label") if selected else None,
         "score": selected.get("score") if selected else 0,
         "candidates": candidates,
-        "prompt": "Choose one available visible in-world action for the agent from this planner-v2 frame. Consider needs, personality, relationships, home/work context, recent outcomes, active plans, physical presence, visible executor availability, and safe pacing. Return a loopActionId from candidates or skip. Social talk is executable only when social perception reports a nearby visible agent target. Home rest is executable only by physically routing to the agent-owned home. Small-home construction is executable only through the visible construction-site executor; arbitrary build/modify/move/delete world changes remain proposal-only until typed visible executors exist.",
+        "prompt": "Choose the next visible in-world action for a multi-step resident turn from this planner-v2 frame. Consider needs, personality, relationships, home/work context, recent outcomes, active plans, physical presence, the location-gated tool registry, visible executor availability, and safe pacing. Return a loopActionId from candidates or skip. Use the broader tool registry for observe, communication, memory, diary, todo, and idle follow-up work; physical movement, object use, home decoration, and construction still execute through typed backend world actions. Social talk is executable only when social perception reports a nearby visible agent target. Home rest and home fridge placement are executable only by physically routing to the agent-owned home. Small-home construction is executable only through the visible construction-site executor; arbitrary build/modify/move/delete world changes remain proposal-only until typed visible executors exist.",
         "reason": f"{selected.get('label')} best matches planner-v2 goals for {selected.get('need')}" if selected else "no available candidates",
     }
     active_goal = _live_agent_loop_active_goal_from_decision(frame)
@@ -12662,7 +13182,7 @@ def _live_agent_loop_refresh_completed_outcomes(state):
         if isinstance(action, dict) and action.get("id")
     }
     now = _utc_now_iso()
-    for agent_id, agent_state in (state.get("agents") or {}).items():
+    for agent_id, agent_state in list((state.get("agents") or {}).items()):
         if not isinstance(agent_state, dict):
             continue
         action_id = agent_state.get("lastActionId")
@@ -13071,6 +13591,9 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 }
                 if isinstance(selected.get("buildSite"), dict):
                     payload["params"]["buildSite"] = _copy_jsonable(selected.get("buildSite"))
+                if isinstance(selected.get("placement"), dict):
+                    payload["params"]["placement"] = _copy_jsonable(selected.get("placement"))
+                    payload["params"]["objectType"] = selected.get("objectType")
                 action_execution_started = _live_agent_clawmind_trace_start()
                 if dry_run:
                     agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload, "wouldPlan": plan, "decision": decision, "perception": perception}

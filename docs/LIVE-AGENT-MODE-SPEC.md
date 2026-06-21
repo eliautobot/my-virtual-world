@@ -44,6 +44,8 @@ The current backend executor moves Agent Live Mode world actions through routing
 
 The next reliability bar is online-game-style presence. Every browser tab must be a client of one authoritative world, not a separate visual instance. Refreshing the page must not reset an agent to a spawn/default location. If an agent moves, builds, places an object, deletes an object, or changes a building, the server must persist that action and publish it to every connected client so the change appears without a manual refresh. Agent actions must be presence-defined: the agent routes to the target building/floor/object/coordinates first, then the backend applies the mutation only after arrival.
 
+The next "alive world" bar is society-level behavior, not just more animation. Live Agent Mode should act like a persistent resident simulation where agents choose from a location-gated tool frame, take multi-step turns, speak in-world, form memories, maintain todos/plans, update relationships, and leave public evidence of what happened. The loop should feel alive because agents have goals, places to go, constraints, follow-up reactions, and consequences.
+
 The redesigned mode keeps the good API vocabulary, but moves autonomous execution authority to the backend.
 
 ## Non-Goals
@@ -184,6 +186,15 @@ Then open `http://127.0.0.1:8587`. Do not restart, bind over, or kill a product 
 
 7. Progressive capability
    Start with safe resident actions. Add build/create/social/governance tools only after typed tool contracts and tests exist.
+
+8. Resident society over scripted chores
+   The loop should not be a tiny hard-coded chore selector. Each turn should assemble location, nearby agents, available tools, memories, relationships, plans, and recent outcomes into a resident affordance frame. The planner chooses from that frame, and every action must remain validated by backend contracts.
+
+9. Multi-step turns, bounded by policy
+   A normal resident turn should have enough budget to observe, choose, act, remember, and optionally write a todo/diary entry. The default implementation budget is 5 tool calls per turn. Risky tools remain operator-reviewed even when the turn budget is larger.
+
+10. Places unlock behavior
+   Homes, work buildings, public spaces, shops, and future civic buildings should unlock different tools. A home can unlock rest/self-care/decoration; a shared room can unlock speech and social reactions; a construction site can unlock typed build completion; future civic spaces can unlock governance or public posting tools.
 
 ## Target User Experience
 
@@ -343,7 +354,7 @@ Required behavior:
 - configurable interval
 - per-agent cooldowns
 - max actions per tick
-- max tool calls per turn
+- max tool calls per turn, defaulting to 5 so one turn can observe, act, communicate or remember, and leave a follow-up plan
 - pause/resume
 - force dry-run tick
 - stale turn recovery
@@ -478,6 +489,10 @@ add_todo
 complete_todo
 idle
 ```
+
+Implementation note: the backend registry currently exposes safe observe, movement-validation, object-use-validation, communication, memory, planning, idle, and operator-reviewed build/create contracts. `say_to_agent`, `speak_to_room`, `send_message`, `think_aloud`, `add_memory`, `search_memory`, `write_diary`, `add_todo`, `complete_todo`, and `idle` can execute through backend persistence. Physical movement and object-use tools still route through typed backend world actions so the agent must physically reach the target before mutation.
+
+Every perception frame should include a compact `toolRegistry` summary with categories, executable tools, the current location, and argument-independent availability probes. This is the bridge from hard-coded chores to a generated affordance loop: the planner can see what the resident can do from where it is, while the backend still validates every specific call.
 
 Later tools:
 
