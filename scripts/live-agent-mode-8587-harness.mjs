@@ -1502,6 +1502,12 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   assert(metrics.metrics?.planner?.bounds?.maxActionsPerTick >= 1, 'planner metrics should report max actions per tick bound', metrics.metrics?.planner);
   assert(metrics.metrics?.planner?.bounds?.maxToolCallsPerTurn >= 1, 'planner metrics should report max tool calls per turn bound', metrics.metrics?.planner);
   assert(metrics.metrics?.planner?.bounds?.perAgentCooldownEnforced === true, 'planner metrics should report per-agent cooldown enforcement', metrics.metrics?.planner);
+  assert(metrics.metrics?.turnContextAssembly?.schemaVersion === 'agent-live-mode-turn-context/v1', 'metrics should expose turn context assembly schema', metrics.metrics?.turnContextAssembly);
+  assert(metrics.metrics?.turnContextAssembly?.enabledAgentContextCount >= expectedAgents, 'metrics should prove context frames across enabled live agents', metrics.metrics?.turnContextAssembly);
+  assert(metrics.metrics?.turnContextAssembly?.completeFrameCount >= expectedTurns, 'metrics should count complete context assembly frames', metrics.metrics?.turnContextAssembly);
+  assert(metrics.metrics?.turnContextAssembly?.allCompletedTurnsHaveContext === true, 'completed turns should retain context assembly frames', metrics.metrics?.turnContextAssembly);
+  assert(metrics.metrics?.turnContextAssembly?.optimization?.heavyWorldScan === false, 'context assembly metrics should stay lightweight', metrics.metrics?.turnContextAssembly);
+  assert(metrics.finalGate?.evidence?.turnContextAssembly?.enabledAgentContextCount >= expectedAgents, 'final gate evidence should include context frame agent coverage', metrics.finalGate?.evidence?.turnContextAssembly);
   assert(metrics.checklist?.relationshipsUpdated === true, 'metrics checklist should confirm relationship updates', metrics.checklist);
   assert(metrics.checklist?.providerAdapterReadiness === true, 'metrics checklist should confirm provider adapter readiness', metrics.checklist);
   assert(metrics.checklist?.clawMindModuleContractsReady === true, 'metrics checklist should confirm ClawMind module contracts', metrics.checklist);

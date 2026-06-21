@@ -1566,6 +1566,7 @@ LIVE_AGENT_IN_WORLD_COMMUNICATION_EVENT_NAMES = {
 }
 LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"
 LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION = "agent-live-mode-plan/v1"
+LIVE_AGENT_TURN_CONTEXT_SCHEMA_VERSION = "agent-live-mode-turn-context/v1"
 LIVE_AGENT_CLAWMIND_RUNTIME_TRACE_VERSION = "agent-live-mode-clawmind-runtime-trace/v1"
 LIVE_AGENT_OPERATOR_PROPOSAL_SCHEMA_VERSION = "agent-live-mode-operator-proposal/v1"
 LIVE_AGENT_OPERATOR_TIMELINE_SCHEMA_VERSION = "agent-live-mode-operator-timeline/v1"
@@ -5925,6 +5926,84 @@ def _live_agent_route_before_action_metrics(actions):
     }
 
 
+def _live_agent_turn_context_assembly_metrics(turns, enabled_live_agents):
+    required_slots = [
+        "profile",
+        "place",
+        "nearbyAgents",
+        "memories",
+        "relationships",
+        "plan",
+        "recentConversation",
+        "toolRegistry",
+        "safetyConstraints",
+        "visibleWorldState",
+    ]
+    enabled_ids = sorted({
+        str((item or {}).get("agentId") or "").strip()
+        for item in (enabled_live_agents or [])
+        if str((item or {}).get("agentId") or "").strip()
+    })
+    frames = []
+    by_agent = {}
+    for turn in turns or []:
+        if not isinstance(turn, dict):
+            continue
+        frame = turn.get("contextAssembly") if isinstance(turn.get("contextAssembly"), dict) else None
+        if not frame:
+            continue
+        agent_id = str(frame.get("agentId") or turn.get("agentId") or "").strip()
+        present = {slot: slot in frame for slot in required_slots}
+        missing = [slot for slot, ok in present.items() if not ok]
+        row = {
+            "turnId": turn.get("id"),
+            "agentId": agent_id,
+            "contextId": frame.get("id"),
+            "assembledAt": frame.get("assembledAt"),
+            "schemaVersion": frame.get("schemaVersion"),
+            "complete": not missing and frame.get("schemaVersion") == LIVE_AGENT_TURN_CONTEXT_SCHEMA_VERSION,
+            "missingSlots": missing,
+            "nearbyAgentCount": len(frame.get("nearbyAgents") or []),
+            "retrievedMemoryCount": len(((frame.get("memories") or {}).get("retrieved") or [])),
+            "relationshipCount": len(frame.get("relationships") or []),
+            "recentConversationCount": _normalize_int((frame.get("recentConversation") or {}).get("count"), 0, minimum=0, maximum=1000000000),
+            "toolCount": _normalize_int((frame.get("toolRegistry") or {}).get("toolCount"), 0, minimum=0, maximum=1000000000),
+            "availableActionCount": len(((frame.get("visibleWorldState") or {}).get("availableActionIds") or [])),
+        }
+        frames.append(row)
+        if agent_id:
+            current = by_agent.get(agent_id)
+            if not current or str(row.get("assembledAt") or "") >= str(current.get("assembledAt") or ""):
+                by_agent[agent_id] = row
+    completed_turns = [turn for turn in (turns or []) if isinstance(turn, dict) and turn.get("status") == "completed"]
+    completed_turn_ids = {turn.get("id") for turn in completed_turns if turn.get("id")}
+    completed_context_turn_ids = {row.get("turnId") for row in frames if row.get("complete")}
+    enabled_with_context = sorted([agent_id for agent_id in enabled_ids if agent_id in by_agent and by_agent[agent_id].get("complete")])
+    return {
+        "schemaVersion": LIVE_AGENT_TURN_CONTEXT_SCHEMA_VERSION,
+        "requiredSlots": required_slots,
+        "turnContextFrameCount": len(frames),
+        "completeFrameCount": len([row for row in frames if row.get("complete")]),
+        "completedTurnCount": len(completed_turns),
+        "completedTurnsWithContextCount": len([turn_id for turn_id in completed_turn_ids if turn_id in completed_context_turn_ids]),
+        "allCompletedTurnsHaveContext": all(turn_id in completed_context_turn_ids for turn_id in completed_turn_ids),
+        "agentContextCount": len(by_agent),
+        "agentIdsWithContext": sorted(by_agent.keys()),
+        "enabledAgentCount": len(enabled_ids),
+        "enabledAgentIdsWithContext": enabled_with_context,
+        "enabledAgentContextCount": len(enabled_with_context),
+        "enabledAgentsMissingContext": sorted(set(enabled_ids) - set(enabled_with_context)),
+        "byAgent": by_agent,
+        "recentFrames": frames[-12:],
+        "optimization": {
+            "readOnly": True,
+            "boundedTurnHistory": True,
+            "heavyWorldScan": False,
+            "source": "world-meta.json#agentLife.liveModeLoop.scheduler.turnHistory[].contextAssembly",
+        },
+    }
+
+
 def get_live_agent_mode_autonomy_metrics():
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
@@ -6069,6 +6148,7 @@ def get_live_agent_mode_autonomy_metrics():
     world_event_feed = get_live_agent_world_event_feed_metrics()
     reconnect_replay = get_live_agent_reconnect_replay_metrics()
     per_agent_distribution = _live_agent_metric_per_agent_distribution(enabled_live_agents, turns, backend_terminal_actions)
+    turn_context_assembly = _live_agent_turn_context_assembly_metrics(turns, enabled_live_agents)
     route_before_action = _live_agent_route_before_action_metrics([*active_actions, *history_actions])
     per_agent_distribution_by_agent = per_agent_distribution.get("byAgent") if isinstance(per_agent_distribution.get("byAgent"), dict) else {}
     enabled_agent_distribution_evidence = []
@@ -6159,6 +6239,8 @@ def get_live_agent_mode_autonomy_metrics():
         "plannerMetricsPresent": all(key in planner_metrics for key in ("planCount", "replanCount", "failedExpectationCount", "successfulRecoveryCount")),
         "outcomeAwarenessRecordsPresent": outcome_awareness_metrics["expectedOutcomeCount"] >= len(completed_backend_actions) if completed_backend_actions else True,
         "turnPlanningRecordsPresent": planner_metrics["turnsWithPlanningRecordCount"] > 0 if turns else True,
+        "turnContextAssemblyRecorded": turn_context_assembly["allCompletedTurnsHaveContext"],
+        "turnContextAssemblyAcrossEnabledAgents": turn_context_assembly["enabledAgentContextCount"] >= min(default_soak_target_agents, max(1, turn_context_assembly["enabledAgentCount"])),
         "perAgentTurnActionDistributionPresent": per_agent_distribution["enabledAgentCount"] > 0 and len(per_agent_distribution["agents"]) >= per_agent_distribution["enabledAgentCount"],
         "defaultSoakEnabledAgentRosterPresent": per_agent_distribution["enabledAgentCount"] >= default_soak_target_agents,
         "defaultSoakCompletedTurnTargetMet": len(completed_turns) >= default_soak_target_turns,
@@ -6223,6 +6305,17 @@ def get_live_agent_mode_autonomy_metrics():
             "worldEventFeed": world_event_feed,
             "routeBeforeAction": route_before_action,
             "reconnectReplay": reconnect_replay,
+            "turnContextAssembly": {
+                "schemaVersion": turn_context_assembly.get("schemaVersion"),
+                "requiredSlots": turn_context_assembly.get("requiredSlots"),
+                "turnContextFrameCount": turn_context_assembly.get("turnContextFrameCount"),
+                "completeFrameCount": turn_context_assembly.get("completeFrameCount"),
+                "enabledAgentContextCount": turn_context_assembly.get("enabledAgentContextCount"),
+                "enabledAgentIdsWithContext": turn_context_assembly.get("enabledAgentIdsWithContext"),
+                "enabledAgentsMissingContext": turn_context_assembly.get("enabledAgentsMissingContext"),
+                "allCompletedTurnsHaveContext": turn_context_assembly.get("allCompletedTurnsHaveContext"),
+                "optimization": turn_context_assembly.get("optimization"),
+            },
             "liveWorldReference": {
                 "schemaVersion": live_world_reference.get("schemaVersion"),
                 "reference": live_world_reference.get("reference"),
@@ -6260,6 +6353,7 @@ def get_live_agent_mode_autonomy_metrics():
             "enabledAgentsWithCompletedTurns": per_agent_distribution["enabledCompletedTurnAgentCount"],
             "enabledAgentsWithCompletedBackendActions": per_agent_distribution["enabledCompletedBackendActionAgentCount"],
             "perAgentDistribution": per_agent_distribution,
+            "turnContextAssembly": turn_context_assembly,
             "presencePersistence": presence_persistence,
             "routeBeforeAction": route_before_action["routeBeforeAction"],
             "presenceDefinedMutation": route_before_action["presenceDefinedMutation"],
@@ -6355,6 +6449,7 @@ def get_live_agent_mode_autonomy_metrics():
             "universalProviderSupportMeasured": True,
             "clawMindArchitectureMeasured": True,
             "liveWorldReferenceGuidance": True,
+            "turnContextAssemblyMeasured": True,
             "metricsProviderCalls": 0,
             "metricsModelCalls": 0,
             "presencePersistenceMeasured": True,
@@ -9335,7 +9430,7 @@ def _live_agent_loop_normalize_turn_record(turn):
         cleaned = _live_agent_loop_clean_plan_text(turn.get(key), limit=limit)
         if cleaned:
             normalized[key] = cleaned
-    for key in ("activeGoal", "selectedPlanStep", "finalActionDecision", "decision", "outcome", "error", "details"):
+    for key in ("activeGoal", "selectedPlanStep", "finalActionDecision", "decision", "contextAssembly", "outcome", "error", "details"):
         if isinstance(turn.get(key), dict):
             normalized[key] = _copy_jsonable(turn.get(key))
     if isinstance(turn.get("candidateActionsConsidered"), list):
@@ -11999,6 +12094,247 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
     return perception
 
 
+def _live_agent_loop_compact_memory_context(rows, limit=6):
+    compact = []
+    for item in (rows or [])[:max(1, int(limit))]:
+        if not isinstance(item, dict):
+            continue
+        retrieval = item.get("retrieval") if isinstance(item.get("retrieval"), dict) else {}
+        row = {
+            "id": item.get("id"),
+            "kind": item.get("kind"),
+            "bucket": item.get("bucket"),
+            "at": item.get("at"),
+            "score": retrieval.get("score"),
+            "importance": item.get("importance"),
+            "tags": list(item.get("tags") or [])[:6] if isinstance(item.get("tags"), list) else [],
+            "text": _live_agent_memory_clean_text(item.get("text"), limit=180),
+        }
+        compact.append({key: value for key, value in row.items() if value not in (None, "", [])})
+    return compact
+
+
+def _live_agent_loop_compact_tool_registry_context(tool_registry):
+    source = tool_registry if isinstance(tool_registry, dict) else {}
+    tools = []
+    risk_tiers = {}
+    for tool in source.get("tools") or []:
+        if not isinstance(tool, dict):
+            continue
+        tier = tool.get("riskTier")
+        risk_key = f"tier{tier}" if tier is not None else "unknown"
+        risk_tiers[risk_key] = risk_tiers.get(risk_key, 0) + 1
+        tools.append({
+            "name": tool.get("name"),
+            "category": tool.get("category"),
+            "riskTier": tier,
+            "locationRule": tool.get("locationRule"),
+            "sideEffect": tool.get("sideEffect"),
+            "executionMode": tool.get("executionMode"),
+            "available": tool.get("available"),
+            **({"unavailableReason": tool.get("unavailableReason")} if tool.get("unavailableReason") else {}),
+        })
+    return {
+        "schemaVersion": source.get("schemaVersion") or LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION,
+        "currentLocation": _copy_jsonable(source.get("currentLocation")) if isinstance(source.get("currentLocation"), dict) else None,
+        "categories": list(source.get("categories") or [])[:24],
+        "toolCount": _normalize_int(source.get("toolCount"), len(tools), minimum=0, maximum=1000),
+        "executableTools": list(source.get("executableTools") or [])[:24],
+        "availableByCategory": _copy_jsonable(source.get("availableByCategory")) if isinstance(source.get("availableByCategory"), dict) else {},
+        "riskTierCounts": risk_tiers,
+        "tools": tools[:24],
+    }
+
+
+def _live_agent_loop_recent_conversation_context(memory):
+    conversations = [
+        item for item in _live_agent_loop_trim_list((memory or {}).get("conversations"), 6)
+        if isinstance(item, dict)
+    ]
+    return {
+        "count": len(conversations),
+        "items": [
+            {
+                "id": item.get("id"),
+                "at": item.get("at"),
+                "direction": item.get("direction"),
+                "conversationId": item.get("conversationId"),
+                "targetAgentId": item.get("targetAgentId") or item.get("fromAgentId"),
+                "text": _live_agent_memory_clean_text(item.get("text"), limit=180),
+            }
+            for item in conversations
+        ],
+    }
+
+
+def _live_agent_loop_build_turn_context_assembly(agent_id, agent_state, perception, turn, *, state=None, world_client=None, retrieved_memories=None, now_iso=None):
+    now_iso = now_iso or _utc_now_iso()
+    perception = perception if isinstance(perception, dict) else {}
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    social = perception.get("social") if isinstance(perception.get("social"), dict) else {}
+    agent_context = _live_agent_loop_agent_context(agent_id)
+    active_plan = _live_agent_loop_normalize_plan(agent_state.get("activePlan"))
+    retrieved = retrieved_memories if isinstance(retrieved_memories, list) else (
+        (perception.get("memory") or {}).get("retrieved") if isinstance(perception.get("memory"), dict) else []
+    )
+    profile = {
+        "agent": _copy_jsonable(perception.get("agent")) if isinstance(perception.get("agent"), dict) else _live_agent_loop_agent_snapshot(agent_id),
+        "personality": _copy_jsonable(agent_context.get("personality")) if isinstance(agent_context.get("personality"), dict) else {},
+        "home": _copy_jsonable(agent_context.get("home")) if isinstance(agent_context.get("home"), dict) else {},
+        "work": _copy_jsonable(agent_context.get("work")) if isinstance(agent_context.get("work"), dict) else {},
+        "docs": _copy_jsonable(agent_context.get("docs")) if isinstance(agent_context.get("docs"), dict) else {},
+    }
+    place = {
+        "currentLocation": _copy_jsonable(perception.get("toolRegistry", {}).get("currentLocation")) if isinstance(perception.get("toolRegistry"), dict) and isinstance(perception.get("toolRegistry", {}).get("currentLocation"), dict) else _copy_jsonable(social.get("selfLocation")) if isinstance(social.get("selfLocation"), dict) else None,
+        "selfLocation": _copy_jsonable(social.get("selfLocation")) if isinstance(social.get("selfLocation"), dict) else None,
+        "homeBuildingId": (agent_context.get("home") or {}).get("buildingId") if isinstance(agent_context.get("home"), dict) else None,
+        "workBuildingId": (agent_context.get("work") or {}).get("buildingId") if isinstance(agent_context.get("work"), dict) else None,
+    }
+    nearby_agents = [
+        {
+            "agentId": item.get("agentId"),
+            "name": item.get("name"),
+            "status": item.get("status"),
+            "task": item.get("task"),
+            "liveModeEnabled": bool(item.get("liveModeEnabled")),
+            "nearbyReason": item.get("nearbyReason"),
+            "buildingId": item.get("buildingId"),
+            "floor": item.get("floor"),
+            "relationship": _copy_jsonable(item.get("relationship")) if isinstance(item.get("relationship"), dict) else {},
+        }
+        for item in (social.get("nearbyAgents") or [])[:8]
+        if isinstance(item, dict)
+    ]
+    relationships = [
+        {
+            "id": item.get("id"),
+            "agentId": item.get("agentId"),
+            "otherAgentId": item.get("otherAgentId"),
+            "summary": _live_agent_memory_clean_text(item.get("summary"), limit=180),
+            "score": item.get("score"),
+            "updatedAt": item.get("updatedAt"),
+        }
+        for item in (agent_context.get("relationships") or [])[:6]
+        if isinstance(item, dict)
+    ]
+    plan = {
+        "activePlan": _copy_jsonable(active_plan) if isinstance(active_plan, dict) else None,
+        "activeGoal": _copy_jsonable(agent_state.get("activeGoal")) if isinstance(agent_state.get("activeGoal"), dict) else None,
+        "openTodos": [
+            {
+                "id": item.get("id"),
+                "status": item.get("status"),
+                "priority": item.get("priority"),
+                "text": _live_agent_memory_clean_text(item.get("text"), limit=180),
+            }
+            for item in (agent_state.get("todos") or [])[-6:]
+            if isinstance(item, dict) and item.get("status") != "completed"
+        ],
+        "recentPlanIds": [item.get("id") for item in (agent_state.get("plans") or [])[-6:] if isinstance(item, dict) and item.get("id")],
+    }
+    visible_policy = perception.get("visibleActionContract") if isinstance(perception.get("visibleActionContract"), dict) else _live_agent_visible_action_policy()
+    safety_constraints = {
+        "featureGateOpen": _agent_live_mode_available(),
+        "configGateOpen": _agent_live_mode_config_enabled(),
+        "maxToolCallsPerTurn": _normalize_int((state or {}).get("maxToolCallsPerTurn"), LIVE_AGENT_LOOP_DEFAULTS["maxToolCallsPerTurn"], minimum=1, maximum=5),
+        "maxActionsPerTick": _normalize_int((state or {}).get("maxActionsPerTick"), LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"], minimum=1, maximum=5),
+        "worldClientRequired": bool((state or {}).get("worldClientRequired")),
+        "worldClientActive": bool((world_client or {}).get("active")),
+        "hiddenWorldMutationAllowed": False,
+        "visibleWorldExecutionRequired": True,
+        "proposalOnlyCapabilityIds": [item.get("id") for item in LIVE_AGENT_PROPOSAL_ONLY_CAPABILITIES if isinstance(item, dict)],
+        "pause": _live_agent_loop_pause_status(state or {}) if isinstance(state, dict) else None,
+        "killSwitch": _live_agent_loop_kill_switch_status(state or {}) if isinstance(state, dict) else None,
+        "visibleActionPolicy": {key: visible_policy.get(key) for key in ("schemaVersion", "hiddenWorldMutationAllowed", "proposalOnlyCapabilityIds") if isinstance(visible_policy, dict) and visible_policy.get(key) is not None},
+    }
+    frame = {
+        "schemaVersion": LIVE_AGENT_TURN_CONTEXT_SCHEMA_VERSION,
+        "id": f"context-{turn.get('id')}" if isinstance(turn, dict) and turn.get("id") else _live_agent_memory_entry_id("context", agent_id),
+        "assembledAt": now_iso,
+        "agentId": agent_id,
+        "turnId": turn.get("id") if isinstance(turn, dict) else None,
+        "profile": profile,
+        "place": {key: value for key, value in place.items() if value is not None},
+        "nearbyAgents": nearby_agents,
+        "memories": {
+            "retrieved": _live_agent_loop_compact_memory_context(retrieved, limit=6),
+            "recentActions": _live_agent_loop_compact_memory_context(memory.get("recentActions"), limit=4),
+            "reflections": _live_agent_loop_compact_memory_context(memory.get("reflections"), limit=4),
+            "counts": {
+                bucket: len([item for item in (memory.get(bucket) or []) if isinstance(item, dict)])
+                for bucket in ("stream", "entries", "facts", "observations", "conversations", "diary", "reflections", "recentActions")
+            },
+        },
+        "relationships": relationships,
+        "plan": {key: value for key, value in plan.items() if value not in (None, [], {})},
+        "recentConversation": _live_agent_loop_recent_conversation_context(memory),
+        "toolRegistry": _live_agent_loop_compact_tool_registry_context(perception.get("toolRegistry")),
+        "safetyConstraints": {key: value for key, value in safety_constraints.items() if value is not None},
+        "visibleWorldState": {
+            "world": _copy_jsonable(perception.get("world")) if isinstance(perception.get("world"), dict) else {},
+            "active": _copy_jsonable(perception.get("active")) if isinstance(perception.get("active"), list) else [],
+            "recentWorldActions": _copy_jsonable(perception.get("recentWorldActions")) if isinstance(perception.get("recentWorldActions"), list) else [],
+            "affordanceCount": len([item for item in (perception.get("affordances") or []) if isinstance(item, dict)]),
+            "availableActionIds": [item.get("id") for item in (perception.get("affordances") or []) if isinstance(item, dict) and item.get("available")][:12],
+        },
+        "sourceStores": {
+            "profile": "world-meta.json#agentProfiles + roster",
+            "presence": "world-meta.json#agentLife.presence",
+            "memory": "world-meta.json#agentLife.liveModeLoop.agents.<agentId>.memory",
+            "relationships": "world-meta.json#agentRelationships",
+            "plans": "world-meta.json#agentLife.liveModeLoop.agents.<agentId>.plans",
+            "toolRegistry": "server.py#LIVE_AGENT_TOOL_REGISTRY",
+            "world": "bounded perception summary",
+        },
+        "bounds": {
+            "nearbyAgents": 8,
+            "relationships": 6,
+            "retrievedMemories": 6,
+            "recentConversations": 6,
+            "recentWorldActions": 8,
+            "toolRows": 24,
+            "fullWorldScan": False,
+        },
+    }
+    return frame
+
+
+def _live_agent_loop_record_turn_context_assembly(state, agent_id, agent_state, turn, frame):
+    if not isinstance(frame, dict) or not isinstance(turn, dict):
+        return None
+    turn["contextAssembly"] = _copy_jsonable(frame)
+    if isinstance(agent_state, dict):
+        agent_state["lastContextAssembly"] = _copy_jsonable({
+            "schemaVersion": frame.get("schemaVersion"),
+            "id": frame.get("id"),
+            "assembledAt": frame.get("assembledAt"),
+            "turnId": frame.get("turnId"),
+            "agentId": frame.get("agentId"),
+            "nearbyAgentCount": len(frame.get("nearbyAgents") or []),
+            "retrievedMemoryCount": len((frame.get("memories") or {}).get("retrieved") or []),
+            "relationshipCount": len(frame.get("relationships") or []),
+            "toolCount": (frame.get("toolRegistry") or {}).get("toolCount"),
+            "availableActionIds": ((frame.get("visibleWorldState") or {}).get("availableActionIds") or [])[:12],
+        })
+    if isinstance(state, dict):
+        _live_agent_loop_add_event(
+            state,
+            "turn-context-assembled",
+            agent_id=agent_id,
+            turn_id=turn.get("id"),
+            details={
+                "contextId": frame.get("id"),
+                "schemaVersion": frame.get("schemaVersion"),
+                "nearbyAgentCount": len(frame.get("nearbyAgents") or []),
+                "retrievedMemoryCount": len((frame.get("memories") or {}).get("retrieved") or []),
+                "relationshipCount": len(frame.get("relationships") or []),
+                "toolCount": (frame.get("toolRegistry") or {}).get("toolCount"),
+                "fullWorldScan": False,
+            },
+        )
+    return frame
+
+
 _live_agent_provider_bridge_hooks = {}
 
 
@@ -13751,6 +14087,17 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     outputs={k: social.get(k) for k in ("knownAgentCount", "liveEnabledPeerCount", "nearbyAgentCount", "conversation")},
                     decisions={"nearbyAgentIds": [item.get("agentId") for item in (social.get("nearbyAgents") or []) if isinstance(item, dict)]},
                 )
+                turn_context = _live_agent_loop_build_turn_context_assembly(
+                    agent_id,
+                    agent_state,
+                    perception,
+                    turn,
+                    state=state,
+                    world_client=world_client,
+                    retrieved_memories=retrieved_memories,
+                    now_iso=now_iso,
+                )
+                _live_agent_loop_record_turn_context_assembly(state, agent_id, agent_state, turn, turn_context)
 
                 active = perception.get("active") or []
                 if active:
