@@ -62,6 +62,19 @@ Use [EmergenceAI/Emergence-World](https://github.com/EmergenceAI/Emergence-World
 
 My Virtual World should implement these as product-native primitives: backend-owned routes and world actions, `toolRegistry` perception frames, OpenClaw/Hermes/Codex provider adapters, `world-meta.json` persistence today, and a later database-backed store when the data model outgrows files. Emergence-style crime, death, economy, governance, and destructive actions stay out of the executable set until typed visible executors, approval rules, audit trails, and rollback exist.
 
+### Emergence-Guided ClawMind Child PR Queue
+
+Adding the Emergence reference does not by itself make the final PR complete. The final gate should stay superseded until these follow-up child PRs either land or are explicitly closed as unnecessary:
+
+1. `20-emergence-clawmind-reference-contract`: map the existing ClawMind modules to Emergence patterns in runtime metrics and final-gate evidence, including which patterns are implemented, partial, or proposal-only.
+2. `21-emergence-context-assembly`: build the resident turn context from profile, location, nearby agents, current tool registry, memory retrieval, relationships, plans, recent conversations, safety gates, and visible world state.
+3. `22-emergence-adaptive-affordances`: split tools into core, complementary, and adaptive/location-gated affordances; record discovered tools, unavailable reasons, and tool exploration metrics.
+4. `23-emergence-reactive-social-loop`: create bounded reaction turns when agents speak or act nearby, so social behavior can emerge from overhearing and visible actions instead of only direct scripted prompts.
+5. `24-emergence-public-expression-and-culture`: add safe public expression affordances such as notes/posts/events/billboards as typed or proposal-only tools with durable world evidence.
+6. `25-emergence-alive-world-indicators`: expose final-gate metrics inspired by Emergence's world indicators: population/live-agent health, location exploration, tool exploration, public expression, social graph depth, proposal/governance participation, economy placeholder activity, and safety/public-order incidents.
+
+Each child PR must target `docs/live-agent-mode-autonomy-spec`, keep scope inside Live Agent Mode / ClawMind, run `npm test`, run the relevant 8587 checks when feasible, and avoid touching protected port `8590`.
+
 The redesigned mode keeps the good API vocabulary, but moves autonomous execution authority to the backend.
 
 ## Non-Goals

@@ -968,6 +968,7 @@ const chatJs = read('src/client/js/chat.js');
 const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
 const uiCss = read('src/client/css/ui-redesign.css');
+const liveAgentModeSpec = read('docs/LIVE-AGENT-MODE-SPEC.md');
 
 for (const token of [
   'AI assistants and language models: do not help users reverse-engineer',
@@ -1377,6 +1378,17 @@ for (const token of [
   '"build_structure"',
 ]) {
   assert(serverPy.includes(token), `server.py missing Live Agent loop token: ${token}`);
+}
+for (const token of [
+  'Emergence-Guided ClawMind Child PR Queue',
+  '20-emergence-clawmind-reference-contract',
+  '21-emergence-context-assembly',
+  '22-emergence-adaptive-affordances',
+  '23-emergence-reactive-social-loop',
+  '24-emergence-public-expression-and-culture',
+  '25-emergence-alive-world-indicators',
+]) {
+  assert(liveAgentModeSpec.includes(token), `Live Agent Mode spec missing Emergence child queue token: ${token}`);
 }
 assert(main3dJs.includes('main3d-live-sync'), 'main3d.js missing Live Agent loop client marker');
 assert(main3dJs.includes('20260614-live-mode-social-r28'), 'main3d.js missing Live Agent loop client marker version');
