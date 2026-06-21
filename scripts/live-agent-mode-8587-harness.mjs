@@ -1508,6 +1508,15 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   assert(metrics.metrics?.turnContextAssembly?.allCompletedTurnsHaveContext === true, 'completed turns should retain context assembly frames', metrics.metrics?.turnContextAssembly);
   assert(metrics.metrics?.turnContextAssembly?.optimization?.heavyWorldScan === false, 'context assembly metrics should stay lightweight', metrics.metrics?.turnContextAssembly);
   assert(metrics.finalGate?.evidence?.turnContextAssembly?.enabledAgentContextCount >= expectedAgents, 'final gate evidence should include context frame agent coverage', metrics.finalGate?.evidence?.turnContextAssembly);
+  assert(metrics.metrics?.toolExploration?.schemaVersion === 'agent-live-mode-tool-exploration/v1', 'metrics should expose tool exploration schema', metrics.metrics?.toolExploration);
+  assert(metrics.metrics?.toolExploration?.enabledAgentsWithDiscoveryCount >= expectedAgents, 'metrics should prove tool discovery across enabled live agents', metrics.metrics?.toolExploration);
+  assert(metrics.metrics?.toolExploration?.uniqueToolsDiscovered >= 10, 'metrics should count unique discovered tools', metrics.metrics?.toolExploration);
+  assert(metrics.metrics?.toolExploration?.optimization?.heavyWorldScan === false, 'tool exploration metrics should stay lightweight', metrics.metrics?.toolExploration);
+  assert(metrics.checklist?.toolExplorationMetricsPresent === true, 'metrics checklist should confirm tool exploration metrics', metrics.checklist);
+  assert(metrics.finalGate?.evidence?.toolExploration?.enabledAgentsWithDiscoveryCount >= expectedAgents, 'final gate evidence should include tool discovery coverage', metrics.finalGate?.evidence?.toolExploration);
+  const targetToolExploration = metrics.metrics?.toolExploration?.byAgent?.[TEST_AGENT_ID] || {};
+  assert((targetToolExploration.usedTools || []).includes('say_to_agent'), 'target agent tool usage should include say_to_agent', targetToolExploration);
+  assert((targetToolExploration.usedTools || []).includes('add_memory'), 'target agent tool usage should include add_memory', targetToolExploration);
   assert(metrics.checklist?.relationshipsUpdated === true, 'metrics checklist should confirm relationship updates', metrics.checklist);
   assert(metrics.checklist?.providerAdapterReadiness === true, 'metrics checklist should confirm provider adapter readiness', metrics.checklist);
   assert(metrics.checklist?.clawMindModuleContractsReady === true, 'metrics checklist should confirm ClawMind module contracts', metrics.checklist);
@@ -1608,6 +1617,7 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
     clawMindContractGaps: metrics.clawMindArchitecture.contractGaps,
     clawMindRuntimeEvidenceGaps: metrics.clawMindArchitecture.runtimeEvidenceGaps,
     liveWorldReference: metrics.finalGate.evidence.liveWorldReference,
+    toolExploration: metrics.finalGate.evidence.toolExploration,
     finalGate: metrics.finalGate,
     gaps: metrics.gaps,
   })}`);
