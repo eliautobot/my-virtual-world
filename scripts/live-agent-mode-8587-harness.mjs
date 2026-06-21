@@ -707,6 +707,32 @@ async function waitForAgentWorldActionIdle(agentId, context) {
   throw new Error(`${context || 'agent'} still has active world actions for ${agentId}\n${JSON.stringify(lastActive, null, 2)}`);
 }
 
+async function fetchWorldActionRecord(actionId) {
+  const active = await fetchJson('/api/world-actions/active');
+  assert(Array.isArray(active), 'active world actions response was not a list', active);
+  const activeAction = active.find((action) => action?.id === actionId);
+  if (activeAction) return { bucket: 'active', action: activeAction };
+
+  const history = await fetchJson('/api/world-actions/history');
+  assert(Array.isArray(history), 'history world actions response was not a list', history);
+  const historyAction = history.find((action) => action?.id === actionId);
+  if (historyAction) return { bucket: 'history', action: historyAction };
+
+  return { bucket: null, action: null };
+}
+
+async function waitForWorldActionStatus(actionId, expectedStatus, context, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    const record = await fetchWorldActionRecord(actionId);
+    last = record;
+    if (record.action?.status === expectedStatus) return record.action;
+    await delay(150);
+  }
+  throw new Error(`${context || actionId} did not reach ${expectedStatus}\n${JSON.stringify(last, null, 2)}`);
+}
+
 async function waitForLiveAgentSchedulerIdle(context, timeoutMs = 45000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
@@ -804,24 +830,27 @@ async function verifyRouteBeforeActionPresenceGates() {
   const create = await postJson('/api/world-actions', {
     agentId: TEST_AGENT_ID,
     source: liveAgentSource('8587-route-before-action-create'),
-    actionType: 'life.getCoffee',
-    capabilityTag: 'life.hydration',
+    actionType: 'maintenance.printCopy',
+    capabilityTag: 'maintenance.printCopy',
     target: {
       kind: 'object-instance',
       buildingId: OFFICE_BUILDING_ID,
-      objectInstanceId: COFFEE_MACHINE_ID,
-      catalogId: 'countertopCoffeeMachine',
+      objectInstanceId: PRINTER_ID,
+      catalogId: 'printerCopier',
       interactionSpotId: 'use-front',
       floor: 1,
     },
     priority: 'normal',
-    params: { reason: '8587-route-before-action-presence-gate' },
+    params: {
+      reason: '8587-route-before-action-presence-gate',
+      manualRouteBeforeActionVerifier: true,
+    },
   });
   assert(create?.ok === true && create.action?.id, 'failed to create route-before-action gate fixture action', create);
   const actionId = create.action.id;
   let completedFixture = false;
   assert(create.action.route?.targetMetadata?.buildingId === OFFICE_BUILDING_ID, 'created action should include route target building metadata', create.action.route);
-  assert(create.action.route?.targetMetadata?.objectInstanceId === COFFEE_MACHINE_ID, 'created action should include route target object metadata', create.action.route);
+  assert(create.action.route?.targetMetadata?.objectInstanceId === PRINTER_ID, 'created action should include route target object metadata', create.action.route);
   const routeTargetX = Number(create.action.route?.targetMetadata?.x ?? create.action.target?.x);
   const routeTargetZ = Number(create.action.route?.targetMetadata?.z ?? create.action.target?.z);
   assert(Number.isFinite(routeTargetX) && Number.isFinite(routeTargetZ), 'object-use route metadata should include resolved routeable coordinates', create.action.route);
@@ -844,7 +873,7 @@ async function verifyRouteBeforeActionPresenceGates() {
       result: { status, reason },
     });
     assert(response?.ok === true && response.action?.status === status, `failed to transition gate fixture to ${status}`, response);
-    return response.action;
+    return waitForWorldActionStatus(actionId, status, `route-before-action fixture transition to ${status}`);
   };
 
   try {
@@ -863,7 +892,7 @@ async function verifyRouteBeforeActionPresenceGates() {
       routeId: arrived.route?.id,
       actionType: arrived.actionType,
       targetKind: 'object-instance',
-      objectInstanceId: COFFEE_MACHINE_ID,
+      objectInstanceId: PRINTER_ID,
     };
     missingCoordinatePresence.x = null;
     missingCoordinatePresence.y = null;
@@ -883,7 +912,7 @@ async function verifyRouteBeforeActionPresenceGates() {
     const officeWithoutRouteTargetObject = structuredClone(originalOfficeBuilding);
     const officeFurniture = officeWithoutRouteTargetObject?.interior?.furniture;
     assert(Array.isArray(officeFurniture), 'acceptance office fixture should include furniture before object removal check', originalOfficeBuilding);
-    const remainingFurniture = officeFurniture.filter((item) => item?.objectInstanceId !== COFFEE_MACHINE_ID && item?.id !== COFFEE_MACHINE_ID);
+    const remainingFurniture = officeFurniture.filter((item) => item?.objectInstanceId !== PRINTER_ID && item?.id !== PRINTER_ID);
     assert(remainingFurniture.length === officeFurniture.length - 1, 'object removal check should remove exactly the routed target fixture', officeFurniture);
     officeWithoutRouteTargetObject.interior.furniture = remainingFurniture;
     const removedObjectUpdate = await postJson(`/api/building/${encodeURIComponent(OFFICE_BUILDING_ID)}`, officeWithoutRouteTargetObject);
@@ -910,7 +939,7 @@ async function verifyRouteBeforeActionPresenceGates() {
       routeId: arrived.route?.id,
       actionType: arrived.actionType,
       targetKind: 'object-instance',
-      objectInstanceId: COFFEE_MACHINE_ID,
+      objectInstanceId: PRINTER_ID,
     };
     await saveAgentPresenceSnapshot(TEST_AGENT_ID, farAwayPresence, '8587-same-building-far-away-presence-gate');
     const farAwayRejected = await postJsonExpectStatus(`/api/world-actions/${encodeURIComponent(actionId)}/transition`, {
@@ -1111,6 +1140,7 @@ async function placeSocialFixturesInOffice() {
 
 async function ensureFakeProviderFixtureProfile() {
   const meta = await fetchJson('/api/meta');
+  const existingFakeProfile = meta?.agentProfiles?.[FAKE_FIXTURE_AGENT_ID] || {};
   const profiles = {
     ...(meta?.agentProfiles && typeof meta.agentProfiles === 'object' ? meta.agentProfiles : {}),
     [HERMES_FIXTURE_AGENT_ID]: {
@@ -1132,12 +1162,12 @@ async function ensureFakeProviderFixtureProfile() {
       capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
     },
     [FAKE_FIXTURE_AGENT_ID]: {
-      ...(meta?.agentProfiles?.[FAKE_FIXTURE_AGENT_ID] || {}),
+      ...existingFakeProfile,
       name: 'Acceptance Fake Provider',
       providerKind: 'fake',
       providerType: 'profile-backed',
       providerAgentId: 'acceptance-fake',
-      agentLiveModeEnabled: false,
+      agentLiveModeEnabled: existingFakeProfile.agentLiveModeEnabled === true,
       capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
     },
   };
@@ -1760,7 +1790,7 @@ function runChild(command, args, { input, env } = {}) {
   });
 }
 
-async function runBrowserReplayRenderCheck(actionId, publicExpressionId = null) {
+async function runBrowserReplayRenderCheck(actionId, publicExpressionId = null, actionAgentId = TEST_AGENT_ID) {
   const script = String.raw`
 import json
 import os
@@ -1768,6 +1798,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_pla
 
 base_url = os.environ["VW_ACCEPTANCE_BASE_URL"]
 action_id = os.environ["VW_ACCEPTANCE_ACTION_ID"]
+action_agent_id = os.environ["VW_ACCEPTANCE_ACTION_AGENT_ID"]
 public_expression_id = os.environ.get("VW_ACCEPTANCE_PUBLIC_EXPRESSION_ID") or ""
 
 def install_page_diagnostics(page):
@@ -1816,10 +1847,13 @@ with sync_playwright() as p:
     wait_for_product_canvas(page, console_messages, page_errors, "browser-replay-render")
     page.wait_for_function("() => typeof window.__VWReplayLiveAgentModeAnimationEvents === 'function' && typeof window.__VWSyncLiveAgentModeWorldEvents === 'function' && typeof window.__VWScene === 'function'", timeout=30000)
     result = page.evaluate("""
-async ({ actionId, publicExpressionId }) => {
+async ({ actionId, actionAgentId, publicExpressionId }) => {
   const expectedNames = ['agent-move-started', 'agent-arrived', 'object-use-started', 'object-use-completed', 'world-action-completed'];
   let lastState = null;
   for (let attempt = 0; attempt < 24; attempt += 1) {
+    for (const agent of window.agents || []) {
+      agent._worldEventFeedPresenceHoldUntil = 0;
+    }
     await window.__VWReplayLiveAgentModeAnimationEvents({ actionId, force: true, limit: 50 });
     await window.__VWSyncLiveAgentModeWorldEvents({ force: true, snapshot: true, limit: 200 });
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -1829,7 +1863,8 @@ async ({ actionId, publicExpressionId }) => {
     const scene = window.__VWScene?.();
     const replayGroup = scene?.getObjectByName?.('vw-live-agent-mode-replay-' + actionId) || null;
     const publicExpressionMarker = publicExpressionId ? scene?.getObjectByName?.('vw-live-agent-public-expression-' + publicExpressionId) : null;
-    const agent = (window.agents || []).find(candidate => String(candidate?.id || candidate?.statusKey || '') === 'acceptance-agent') || null;
+    const replayAgentId = actionState?.lastAgentPosition?.agentId || actionAgentId;
+    const agent = (window.agents || []).find(candidate => String(candidate?.id || candidate?.statusKey || '') === replayAgentId) || null;
     const canvas = document.querySelector('#pixiContainer canvas');
     const canvasRect = canvas?.getBoundingClientRect?.();
     const rendererInfo = window.__VWRenderInfo?.() || {};
@@ -1861,7 +1896,7 @@ async ({ actionId, publicExpressionId }) => {
   }
   throw new Error('real product replay/render state did not settle: ' + JSON.stringify(lastState));
 }
-""", {"actionId": action_id, "publicExpressionId": public_expression_id})
+""", {"actionId": action_id, "actionAgentId": action_agent_id, "publicExpressionId": public_expression_id})
     browser.close()
 
 if not result.get("ok"):
@@ -1873,6 +1908,7 @@ print(json.dumps(result, sort_keys=True))
     env: {
       VW_ACCEPTANCE_BASE_URL: BASE_URL,
       VW_ACCEPTANCE_ACTION_ID: actionId,
+      VW_ACCEPTANCE_ACTION_AGENT_ID: actionAgentId || TEST_AGENT_ID,
       VW_ACCEPTANCE_PUBLIC_EXPRESSION_ID: publicExpressionId || '',
     },
   });
@@ -2504,8 +2540,8 @@ try {
   await disableDayNightCycleFor8587();
   await runBrowserRefreshPresenceCheck();
   await runTwoClientWorldEventFeedSyncCheck();
-  await verifyTypedObjectActions();
-  await runReconnectReplayCatchupCheck();
+  const typedActions = await verifyTypedObjectActions();
+  const reconnectReplay = await runReconnectReplayCatchupCheck();
   await verifyRouteBeforeActionPresenceGates();
   const socialCommunication = await verifySocialCommunicationAndMemory();
   await verifyOperatorControlsStopTurns();
@@ -2514,7 +2550,11 @@ try {
   await runTwoClientWorldEventFeedSyncCheck();
   await enableLoopForFinalMetrics();
   await verifyAutonomyMetrics({ expectedTurns: ACCEPTANCE_TURN_TARGET, expectedAgents: SOAK_AGENT_COUNT });
-  await runBrowserReplayRenderCheck(backendSeries.proofs[0].actionId, socialCommunication?.publicExpression?.id || null);
+  const replayAction = typedActions.find((action) => action?.agentId === TEST_AGENT_ID && action?.actionType === 'life.getCoffee')
+    || reconnectReplay?.action
+    || backendSeries.proofs.find((proof) => proof?.action?.agentId === TEST_AGENT_ID)?.action
+    || backendSeries.proofs[0].action;
+  await runBrowserReplayRenderCheck(replayAction.id || replayAction.actionId, socialCommunication?.publicExpression?.id || null, replayAction.agentId || TEST_AGENT_ID);
   await verifyServerRestartPresencePersistenceAndRouteState();
 
   if (keepOpen) {

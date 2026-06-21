@@ -35531,6 +35531,7 @@ function routeLiveModeLocalObjectWorldAction(action = {}) {
 
 function routeLiveModeStandingMachineWorldAction(action = {}) {
   if (action?.source?.kind !== 'agent-live-mode' && action?.behaviorSourceKind !== 'agent-live-mode') return false;
+  if (action?.params?.manualRouteBeforeActionVerifier === true) return false;
   const worldActionId = action.id || action.worldActionId || null;
   const target = action.target || {};
   const buildingId = target.buildingId || action?.route?.target?.buildingId;
