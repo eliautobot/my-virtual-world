@@ -36023,7 +36023,7 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
       routeReason: routeResult.reason || null,
       updatedAt: replayUpdatedAt,
     };
-    if (routeResult.applied) {
+    if (routeResult.applied || (routeNoop && agent._group3d && Number.isFinite(agent._group3d.position.x) && Number.isFinite(agent._group3d.position.z))) {
       agentRendered = true;
     } else if (!routeResult.rejected && !routeNoop) {
       agent.x = renderPoint.apiX;

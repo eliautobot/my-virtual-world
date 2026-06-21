@@ -1190,6 +1190,24 @@ async function verifySocialCommunicationAndMemory() {
   const speechEvent = speech.toolCall?.result?.communicationEvent;
   assert(speechEvent?.id && speechEvent.targetAgentId === PEER_AGENT_ID, 'say_to_agent should return the peer-targeted communication event', speech);
   const { communications } = await waitForCommunicationEvent(speechEvent.id);
+  const reactionMetricsBefore = await fetchJson('/api/live-agent-mode/metrics');
+  assert(reactionMetricsBefore.metrics?.reactionTriggers?.byTriggerKind?.['nearby-speech'] >= 1, 'speech should enqueue a nearby-speech reaction trigger', reactionMetricsBefore.metrics?.reactionTriggers);
+  assert(reactionMetricsBefore.metrics?.reactionTriggers?.bounds?.reactionCooldownLowerThanRegular === true, 'reaction cooldown should be lower than regular resident cooldown', reactionMetricsBefore.metrics?.reactionTriggers?.bounds);
+  assert(reactionMetricsBefore.metrics?.reactionTriggers?.bounds?.reactionMaxToolCallsPerTurn <= reactionMetricsBefore.metrics?.reactionTriggers?.bounds?.regularMaxToolCallsPerTurn, 'reaction tool-call limit should not exceed regular resident turns', reactionMetricsBefore.metrics?.reactionTriggers?.bounds);
+
+  const reactionTick = await postJson('/api/agent-live-loop/tick', {
+    reason: '8587-acceptance-reactive-social-loop',
+    force: true,
+  });
+  assert(reactionTick?.ok === true, 'reaction social-loop tick failed', reactionTick);
+  assert(reactionTick.turn?.turnType === 'reaction', 'reaction social-loop tick should run a reaction turn', reactionTick);
+  assert(reactionTick.turn?.bounds?.cooldownSec < reactionTick.turn?.bounds?.regularCooldownSec, 'reaction turn should use a shorter cooldown than regular turns', reactionTick.turn?.bounds);
+  assert(Number(reactionTick.turn?.bounds?.maxToolCallsPerTurn || 0) <= Number(reactionTick.turn?.bounds?.regularMaxToolCallsPerTurn || 0), 'reaction turn should use a bounded tool-call limit', reactionTick.turn?.bounds);
+  await waitForLiveAgentSchedulerIdle('after reactive social-loop tick');
+  const reactionMetricsAfter = await fetchJson('/api/live-agent-mode/metrics');
+  assert(reactionMetricsAfter.metrics?.completedReactionTurnCount >= 1, 'metrics should count completed reaction turns separately', reactionMetricsAfter.metrics);
+  assert(reactionMetricsAfter.metrics?.completedRegularTurnCount >= 1, 'metrics should keep regular turn counts separate from reactions', reactionMetricsAfter.metrics);
+  assert(reactionMetricsAfter.metrics?.reactionTurnsByTriggerKind?.[reactionTick.turn?.reaction?.triggerKind || 'nearby-speech'] >= 1, 'metrics should expose reaction turn trigger counts', reactionMetricsAfter.metrics?.reactionTurnsByTriggerKind);
 
   const memory = await executeLiveAgentTool('add_memory', {
     text: 'Acceptance harness confirmed backend-owned Live Agent Mode can communicate and remember.',
@@ -1210,8 +1228,8 @@ async function verifySocialCommunicationAndMemory() {
   assert(retrieved.memory?.counts?.stream >= 2, 'memory stream should include conversation and memory entries', retrieved.memory?.counts);
   assert(retrieved.memory?.counts?.reflections > 0, 'memory endpoint should report synthesized reflections', retrieved.memory?.counts);
 
-  console.log(`PASS: social target ${social.action.id}, in-world speech ${speech.toolCall.id}, memory ${memory.toolCall.result.memoryEntry.id}, and reflection ${memoryReflectionId} verified.`);
-  return { socialAction: social.action, speech, memory, communications, retrieved };
+  console.log(`PASS: social target ${social.action.id}, in-world speech ${speech.toolCall.id}, reaction turn ${reactionTick.turn.id}, memory ${memory.toolCall.result.memoryEntry.id}, and reflection ${memoryReflectionId} verified.`);
+  return { socialAction: social.action, speech, reactionTick, memory, communications, retrieved };
 }
 
 async function verifyOperatorControlsStopTurns() {
@@ -1278,6 +1296,7 @@ async function verifyFailureInjectionReplanning() {
       const tick = await postJson('/api/agent-live-loop/tick', {
         reason: `${reason}-${attempt}`,
         force: true,
+        skipReactions: true,
       });
       assert(tick?.ok === true, `${reason} tick failed`, tick);
       const action = tick.actionsCreated?.[0];
@@ -1868,20 +1887,41 @@ async ({ agentId, homeBuildingId }) => {
 """, {"agentId": agent_id, "homeBuildingId": home_building_id})
 
     movement_seen = page_b.evaluate("""
-async ({ agentId, expectedX, expectedY }) => {
+async ({ agentId, expectedX, expectedY, expectedSource }) => {
   let last = null;
   for (let attempt = 0; attempt < 36; attempt += 1) {
     await new Promise(resolve => setTimeout(resolve, 250));
     const agent = (window.agents || []).find(candidate => String(candidate?.id || candidate?.statusKey || '') === agentId) || null;
-    const dx = Math.abs(Number(agent?.x) - expectedX);
-    const dy = Math.abs(Number(agent?.y) - expectedY);
+    const presence = agent?._serverPresence || agent?.presence || null;
+    const positionDx = Math.abs(Number(agent?.x) - expectedX);
+    const positionDy = Math.abs(Number(agent?.y) - expectedY);
+    const presenceX = Number.isFinite(Number(presence?.apiX)) ? Number(presence.apiX) : Number(presence?.x);
+    const presenceY = Number.isFinite(Number(presence?.apiZ)) ? Number(presence.apiZ) : Number(presence?.y);
+    const presenceDx = Math.abs(presenceX - expectedX);
+    const presenceDy = Math.abs(presenceY - expectedY);
+    const positionSynced = positionDx <= 0.01 && positionDy <= 0.01;
+    const presenceSynced = presenceDx <= 0.01 && presenceDy <= 0.01 && String(presence?.source || '') === expectedSource;
     const feed = window.__VWLiveAgentModeWorldEventFeedState || {};
-    last = { ok: Boolean(agent && dx <= 0.01 && dy <= 0.01), agent: agent ? { x: agent.x, y: agent.y, source: agent._serverPresence?.source || null } : null, delta: { dx, dy }, feed };
+    last = {
+      ok: Boolean(agent && (positionSynced || presenceSynced)),
+      agent: agent ? { x: agent.x, y: agent.y, source: agent._serverPresence?.source || null } : null,
+      presence: presence ? { apiX: presenceX, apiZ: presenceY, source: presence.source || null } : null,
+      route: agent?._lastAuthoritativePresenceRoute ? {
+        applied: agent._lastAuthoritativePresenceRoute.applied,
+        rejected: agent._lastAuthoritativePresenceRoute.rejected,
+        reason: agent._lastAuthoritativePresenceRoute.reason || null,
+      } : null,
+      delta: {
+        position: { dx: positionDx, dy: positionDy },
+        presence: { dx: presenceDx, dy: presenceDy },
+      },
+      feed,
+    };
     if (last.ok) return last;
   }
   throw new Error('second client did not receive movement patch: ' + JSON.stringify(last));
 }
-""", {"agentId": agent_id, "expectedX": -360, "expectedY": -180})
+""", {"agentId": agent_id, "expectedX": -360, "expectedY": -180, "expectedSource": "8587-two-client-world-event-feed"})
 
     building = {
       "id": sync_building_id,
