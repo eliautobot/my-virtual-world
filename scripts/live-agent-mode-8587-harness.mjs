@@ -1451,6 +1451,12 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   assert(metrics.metrics?.presencePersistence?.refreshResetCount === 0, 'metrics should show no refresh resets', metrics.metrics?.presencePersistence);
   assert(metrics.metrics?.presencePersistence?.ok === true, 'metrics should report passing presence persistence', metrics.metrics?.presencePersistence);
   verifySoakDistributionMetrics(metrics, { expectedAgents, expectedTurns });
+  assert(metrics.metrics?.worldEventFeed?.multiClientWorldSyncOk === true, 'metrics should show multi-client world sync evidence', metrics.metrics?.worldEventFeed);
+  assert(metrics.metrics?.worldEventFeed?.multiClientSyncSampleCount >= 1, 'metrics should expose multi-client sync sample count', metrics.metrics?.worldEventFeed);
+  assert(metrics.metrics?.worldEventFeed?.maxObservedClientCount >= 2, 'metrics should prove at least two world-event clients synced', metrics.metrics?.worldEventFeed);
+  assert(metrics.metrics?.reconnectReplay?.ok === true, 'metrics should show reconnect replay succeeded', metrics.metrics?.reconnectReplay);
+  assert(metrics.metrics?.reconnectReplay?.clientCatchupCount >= 1, 'metrics should count reconnect replay catch-ups', metrics.metrics?.reconnectReplay);
+  assert(metrics.metrics?.reconnectReplay?.missedMutationCount === 0, 'metrics should show no missed reconnect replay mutations', metrics.metrics?.reconnectReplay);
   assert(metrics.metrics?.routePendingActiveCount === 0, 'metrics should show no active route_pending actions', metrics.metrics);
   assert(metrics.metrics?.routeBeforeAction?.ok === true, 'metrics should show no route-before-action violations', metrics.metrics?.routeBeforeAction);
   assert(metrics.metrics?.routeBeforeAction?.mutationCount >= expectedTurns, 'route-before-action metrics should expose inspected mutation count', metrics.metrics?.routeBeforeAction);
@@ -1459,7 +1465,9 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   assert(metrics.metrics?.presenceDefinedMutation?.mutationCount >= expectedTurns, 'presence-defined mutation metrics should expose inspected mutation count', metrics.metrics?.presenceDefinedMutation);
   assert(metrics.metrics?.presenceDefinedMutation?.violationCount === 0, 'presence-defined mutation violation count should be zero', metrics.metrics?.presenceDefinedMutation);
   assert(metrics.finalGate?.checks?.routeBeforeAction === true, 'final gate should fail on route-before-action violations', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.routeBeforeActionOk === true, 'final gate should expose routeBeforeActionOk', metrics.finalGate);
   assert(metrics.finalGate?.checks?.presenceDefinedMutation === true, 'final gate should fail on presence-defined mutation violations', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.presenceDefinedMutationsOk === true, 'final gate should expose presenceDefinedMutationsOk', metrics.finalGate);
   assert(metrics.metrics?.memoryCaps?.withinCaps === true, 'metrics should show live-agent memory stayed within bounded caps', metrics.metrics?.memoryCaps);
   assert(metrics.metrics?.memoryCaps?.breachCount === 0, 'metrics should show no memory cap breaches', metrics.metrics?.memoryCaps);
   assert(metrics.metrics?.memoryGrowth?.bounded === true, 'metrics should expose bounded memory growth', metrics.metrics?.memoryGrowth);
@@ -1540,6 +1548,8 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   assert(metrics.finalGate?.checks?.featureGateOpen === true && metrics.finalGate?.checks?.configGateOpen === true, 'final gate should fail on disabled feature gates', metrics.finalGate);
   assert(metrics.finalGate?.checks?.providerModelBudgetOk === true, 'final gate should fail on provider/model budget violations', metrics.finalGate);
   assert(metrics.finalGate?.checks?.presencePersistenceOk === true, 'final gate should fail on presence persistence resets', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.multiClientWorldSyncOk === true, 'final gate should fail without multi-client sync evidence', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.reconnectReplayOk === true, 'final gate should fail without reconnect replay evidence', metrics.finalGate);
   console.log(`PASS: autonomy metrics ${JSON.stringify({
     enabledAgentCount: metrics.loop.enabledAgentCount,
     completedTurnCount: metrics.metrics.completedTurnCount,
@@ -1559,6 +1569,8 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
     societyRoleCount: metrics.metrics.societyRoleCount,
     memory: metrics.metrics.memory,
     presencePersistence: metrics.metrics.presencePersistence,
+    multiClientWorldSync: metrics.metrics.worldEventFeed,
+    reconnectReplay: metrics.metrics.reconnectReplay,
     memoryGrowth: metrics.metrics.memoryGrowth,
     planner: {
       planCount: metrics.metrics.planCount,
@@ -1982,6 +1994,64 @@ print(json.dumps({
   return result;
 }
 
+async function runReconnectReplayCatchupCheck() {
+  await waitForAgentWorldActionIdle(TEST_AGENT_ID, 'before reconnect replay catch-up check');
+  const before = await fetchJson('/api/world-events?limit=1');
+  assert(before?.ok === true && Number.isFinite(Number(before.nextCursor)), 'failed to read reconnect replay starting cursor', before);
+  const disconnectedCursor = Number(before.nextCursor || 0);
+  const proof = await requestLiveAgentAction({
+    actionType: 'life.getCoffee',
+    capabilityTag: 'life.hydration',
+    target: {
+      kind: 'object-instance',
+      buildingId: OFFICE_BUILDING_ID,
+      objectInstanceId: COFFEE_MACHINE_ID,
+      catalogId: 'countertopCoffeeMachine',
+      interactionSpotId: 'use-front',
+      floor: 1,
+    },
+    requestId: '8587-reconnect-replay-action',
+  });
+  const replayQuery = new URLSearchParams({
+    since: String(disconnectedCursor),
+    snapshot: '1',
+    limit: '200',
+    client: 'main3d-world-event-feed',
+    version: '8587-reconnect-replay-harness',
+    sessionId: `8587-reconnect-replay-${Date.now()}`,
+    reconnectReplay: '1',
+    expectedWorldActionId: proof.action.id,
+  });
+  const replay = await fetchJson(`/api/world-events?${replayQuery.toString()}`);
+  assert(replay?.ok === true, 'reconnect replay world-event fetch failed', replay);
+  assert(replay.snapshot?.cursor >= disconnectedCursor, 'reconnect replay response should include a current snapshot cursor', replay);
+  const replayEvents = Array.isArray(replay.events) ? replay.events : [];
+  const completedMutation = replayEvents.find((event) => {
+    const eventActionId = String(event?.worldActionId || event?.actionId || '');
+    const patch = event?.patch || {};
+    const compact = patch.event || {};
+    return eventActionId === proof.action.id
+      && event?.eventType === 'action-lifecycle'
+      && [event.status, event.toStatus, patch.status, compact.status, compact.toStatus, compact.to]
+        .map((value) => String(value || '').toLowerCase())
+        .includes('completed');
+  });
+  assert(completedMutation, 'reconnect replay did not include the completed action mutation', {
+    actionId: proof.action.id,
+    disconnectedCursor,
+    replayEvents,
+    reconnectReplay: replay.reconnectReplay,
+  });
+  assert(replay.reconnectReplay?.ok === true, 'server did not record reconnect replay catch-up evidence', replay.reconnectReplay);
+  const metrics = await fetchJson('/api/live-agent-mode/metrics');
+  assert(metrics.metrics?.reconnectReplay?.ok === true, 'metrics should report reconnect replay ok after catch-up', metrics.metrics?.reconnectReplay);
+  assert(metrics.metrics?.reconnectReplay?.clientCatchupCount >= 1, 'reconnect replay metrics should count client catch-up', metrics.metrics?.reconnectReplay);
+  assert(metrics.metrics?.reconnectReplay?.missedMutationCount === 0, 'reconnect replay metrics should report no missed mutations', metrics.metrics?.reconnectReplay);
+  assert(metrics.finalGate?.checks?.reconnectReplayOk === true, 'final gate should include reconnectReplayOk', metrics.finalGate);
+  console.log(`PASS: reconnect replay caught up action ${proof.action.id} from cursor ${disconnectedCursor} with snapshot cursor ${replay.snapshot.cursor} and ${replayEvents.length} replay events.`);
+  return { action: proof.action, replay, metrics };
+}
+
 async function runBrowserRefreshPresenceCheck() {
   const script = String.raw`
 import json
@@ -2206,6 +2276,7 @@ try {
   await runBrowserRefreshPresenceCheck();
   await runTwoClientWorldEventFeedSyncCheck();
   await verifyTypedObjectActions();
+  await runReconnectReplayCatchupCheck();
   await verifyRouteBeforeActionPresenceGates();
   await verifySocialCommunicationAndMemory();
   await verifyOperatorControlsStopTurns();

@@ -87,7 +87,9 @@ The metrics endpoint must also expose the online-game presence contract:
 - `metrics.worldEventFeed.lastSequence`
 - `metrics.worldEventFeed.replayableEventCount`
 - `metrics.worldEventFeed.connectedClientCount`
+- `metrics.worldEventFeed.maxObservedClientCount`
 - `metrics.worldEventFeed.multiClientSyncLatencyMs.p95`
+- `metrics.worldEventFeed.multiClientWorldSyncOk`
 - `metrics.worldEventFeed.ok`
 - `metrics.routeBeforeAction.violationCount`
 - `metrics.routeBeforeAction.violations`
@@ -101,9 +103,11 @@ The metrics endpoint must also expose the online-game presence contract:
 - `metrics.reconnectReplay.ok`
 - `finalGate.checks.presencePersistenceOk`
 - `finalGate.checks.multiClientWorldSyncOk`
-- `finalGate.checks.routeBeforeAction`
-- `finalGate.checks.presenceDefinedMutation`
+- `finalGate.checks.routeBeforeActionOk`
+- `finalGate.checks.presenceDefinedMutationsOk`
 - `finalGate.checks.reconnectReplayOk`
+
+The 8587 final gate treats `worldEventFeedOk`, `routeBeforeAction`, and `presenceDefinedMutation` as compatibility aliases. The PR-final online-game presence contract uses the `*Ok` names above and requires reconnect replay evidence from a client that recorded a cursor, disconnected while a backend-owned action completed, then fetched a current snapshot plus replay events after that cursor without missing the completed mutation.
 
 The default 8587 soak gate must prove the 5 completed backend turns are distributed across at least five enabled Live Agent Mode residents. The metrics surface this as `metrics.perAgentDistribution` and repeat the compact evidence under `finalGate.evidence` so reviewers can see which enabled agents completed live turns and backend-owned actions.
 
