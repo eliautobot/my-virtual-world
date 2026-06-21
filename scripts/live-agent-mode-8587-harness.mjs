@@ -1453,9 +1453,12 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   verifySoakDistributionMetrics(metrics, { expectedAgents, expectedTurns });
   assert(metrics.metrics?.worldEventFeed?.multiClientWorldSyncOk === true, 'metrics should show multi-client world sync evidence', metrics.metrics?.worldEventFeed);
   assert(metrics.metrics?.worldEventFeed?.multiClientSyncSampleCount >= 1, 'metrics should expose multi-client sync sample count', metrics.metrics?.worldEventFeed);
+  assert(metrics.metrics?.worldEventFeed?.multiClientAppliedSampleCount >= 1, 'metrics should expose measured multi-client applied samples', metrics.metrics?.worldEventFeed);
   assert(metrics.metrics?.worldEventFeed?.maxObservedClientCount >= 2, 'metrics should prove at least two world-event clients synced', metrics.metrics?.worldEventFeed);
+  assert(metrics.metrics?.worldEventFeed?.latestMultiClientSync?.sampledClientCount >= 2, 'metrics should prove at least two clients applied sampled events', metrics.metrics?.worldEventFeed);
   assert(metrics.metrics?.reconnectReplay?.ok === true, 'metrics should show reconnect replay succeeded', metrics.metrics?.reconnectReplay);
   assert(metrics.metrics?.reconnectReplay?.clientCatchupCount >= 1, 'metrics should count reconnect replay catch-ups', metrics.metrics?.reconnectReplay);
+  assert(metrics.metrics?.reconnectReplay?.completedMutationEventCount >= 1, 'metrics should count completed mutation replay proof', metrics.metrics?.reconnectReplay);
   assert(metrics.metrics?.reconnectReplay?.missedMutationCount === 0, 'metrics should show no missed reconnect replay mutations', metrics.metrics?.reconnectReplay);
   assert(metrics.metrics?.routePendingActiveCount === 0, 'metrics should show no active route_pending actions', metrics.metrics);
   assert(metrics.metrics?.routeBeforeAction?.ok === true, 'metrics should show no route-before-action violations', metrics.metrics?.routeBeforeAction);
@@ -1987,6 +1990,11 @@ print(json.dumps({
   assert(result.ok === true, 'two-client world event feed sync check failed', result);
   assert(result.metrics?.connectedClientCount >= 2, 'world event metrics did not record two connected clients', result.metrics);
   assert(result.metrics?.ok === true, 'world event metrics did not report ok=true', result.metrics);
+  assert(result.metrics?.multiClientWorldSyncOk === true, 'world event metrics did not record measured two-client sync evidence', result.metrics);
+  assert(result.metrics?.latency?.sampleCount >= 1, 'world event metrics did not record applied latency samples', result.metrics);
+  assert(result.metrics?.multiClientAppliedSampleCount >= 1, 'world event metrics did not count applied multi-client samples', result.metrics);
+  assert(result.metrics?.latestMultiClientSync?.sampledClientCount >= 2, 'world event metrics did not prove two sampled clients applied events', result.metrics?.latestMultiClientSync);
+  assert(result.metrics?.latestMultiClientSync?.latencySampleCount >= 1, 'world event metrics did not attach latency evidence to the latest two-client sync sample', result.metrics?.latestMultiClientSync);
   const restored = await saveAgentPresenceSnapshot(TEST_AGENT_ID, originalPresence, '8587-two-client-world-event-feed-restore');
   assert(restored?.buildingId === originalPresence?.buildingId, 'two-client check did not restore the original agent building', { originalPresence, restored });
   console.log(`PASS: two 8587 browser clients synced movement plus building/object create-update-delete via ${result.metrics.replayableEventCount} replayable world events (p95 ${result.metrics.p95MultiClientSyncLatencyMs}ms).`);
@@ -2043,9 +2051,13 @@ async function runReconnectReplayCatchupCheck() {
     reconnectReplay: replay.reconnectReplay,
   });
   assert(replay.reconnectReplay?.ok === true, 'server did not record reconnect replay catch-up evidence', replay.reconnectReplay);
+  assert(replay.reconnectReplay?.expectedWorldActionId === proof.action.id, 'server reconnect replay evidence should bind to expected world action', replay.reconnectReplay);
+  assert(replay.reconnectReplay?.completedMutationProven === true, 'server reconnect replay evidence should prove the completed mutation', replay.reconnectReplay);
+  assert(replay.reconnectReplay?.completedMutationEventCount >= 1, 'server reconnect replay evidence should count the completed mutation event', replay.reconnectReplay);
   const metrics = await fetchJson('/api/live-agent-mode/metrics');
   assert(metrics.metrics?.reconnectReplay?.ok === true, 'metrics should report reconnect replay ok after catch-up', metrics.metrics?.reconnectReplay);
   assert(metrics.metrics?.reconnectReplay?.clientCatchupCount >= 1, 'reconnect replay metrics should count client catch-up', metrics.metrics?.reconnectReplay);
+  assert(metrics.metrics?.reconnectReplay?.completedMutationEventCount >= 1, 'reconnect replay metrics should count completed mutation proof', metrics.metrics?.reconnectReplay);
   assert(metrics.metrics?.reconnectReplay?.missedMutationCount === 0, 'reconnect replay metrics should report no missed mutations', metrics.metrics?.reconnectReplay);
   assert(metrics.finalGate?.checks?.reconnectReplayOk === true, 'final gate should include reconnectReplayOk', metrics.finalGate);
   console.log(`PASS: reconnect replay caught up action ${proof.action.id} from cursor ${disconnectedCursor} with snapshot cursor ${replay.snapshot.cursor} and ${replayEvents.length} replay events.`);

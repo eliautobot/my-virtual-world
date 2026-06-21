@@ -4698,8 +4698,9 @@ def _record_world_event_feed_reconnect_replay(query, result, *, since=None):
         event for event in events
         if _world_event_is_completed_mutation(event, expected_world_action_id)
     ]
-    missed_mutation_count = 1 if expected_world_action_id and not completed_mutation_events else 0
-    ok = bool(since is not None and snapshot and events and missed_mutation_count == 0)
+    completed_mutation_proven = bool(expected_world_action_id and completed_mutation_events)
+    missed_mutation_count = 0 if completed_mutation_proven else 1
+    ok = bool(since is not None and snapshot and completed_mutation_proven and missed_mutation_count == 0)
     sample = {
         "schemaVersion": LIVE_AGENT_RECONNECT_REPLAY_METRICS_SCHEMA_VERSION,
         "ok": ok,
@@ -4714,6 +4715,7 @@ def _record_world_event_feed_reconnect_replay(query, result, *, since=None):
         "expectedWorldActionId": expected_world_action_id,
         "completedMutationEventIds": [event.get("eventId") or event.get("id") for event in completed_mutation_events[:10]],
         "completedMutationEventCount": len(completed_mutation_events),
+        "completedMutationProven": completed_mutation_proven,
         "missedMutationCount": missed_mutation_count,
         "snapshotIncluded": bool(snapshot),
         "snapshotRefreshRequired": bool(result.get("requiresSnapshotRefresh")) if isinstance(result, dict) else False,
@@ -4740,11 +4742,30 @@ def _world_event_feed_client_metrics():
             _world_event_feed_clients.pop(session_id, None)
         latency_samples = list(_world_event_feed_latency_samples)
         latency = _latency_summary(latency_samples)
-        current_multi_client_ok = len(active_clients) >= 2 and (latency["p95Ms"] <= LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS or latency["sampleCount"] == 0)
+        sampled_active_clients = [
+            client for client in active_clients
+            if client.get("lastAppliedLatencySampled") is True
+            and _normalize_int(client.get("appliedCursor"), 0, minimum=0, maximum=1000000000) > 0
+        ]
+        sampled_client_count = len(sampled_active_clients)
+        sampled_applied_cursors = sorted({
+            _normalize_int(client.get("appliedCursor"), 0, minimum=0, maximum=1000000000)
+            for client in sampled_active_clients
+            if _normalize_int(client.get("appliedCursor"), 0, minimum=0, maximum=1000000000) > 0
+        })
+        current_multi_client_ok = (
+            len(active_clients) >= 2
+            and sampled_client_count >= 2
+            and latency["sampleCount"] > 0
+            and latency["p95Ms"] <= LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS
+        )
         if len(active_clients) >= 2:
             _world_event_feed_multi_client_sync_samples.append({
                 "recordedAt": _epoch_to_utc_iso(now_epoch),
                 "clientCount": len(active_clients),
+                "sampledClientCount": sampled_client_count,
+                "sampledAppliedCursors": sampled_applied_cursors[-10:],
+                "latencySampleCount": latency["sampleCount"],
                 "p95MultiClientSyncLatencyMs": latency["p95Ms"],
                 "syncLatencyTargetMs": LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS,
                 "ok": current_multi_client_ok,
@@ -4763,6 +4784,11 @@ def _world_event_feed_client_metrics():
         "ok": latency["p95Ms"] <= LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS or latency["sampleCount"] == 0,
         "multiClientWorldSyncOk": bool(observed_ok_samples),
         "multiClientSyncSampleCount": len(multi_client_samples),
+        "multiClientAppliedSampleCount": sum(
+            _normalize_int(sample.get("latencySampleCount"), 0, minimum=0, maximum=1000000000)
+            for sample in multi_client_samples
+            if sample.get("ok")
+        ),
         "maxObservedClientCount": max_observed_client_count,
         "latestMultiClientSync": (multi_client_samples[-1] if multi_client_samples else None),
     }
@@ -4782,6 +4808,7 @@ def get_live_agent_world_event_feed_metrics():
         "syncLatencyTargetMs": LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS,
         "multiClientWorldSyncOk": client_metrics["multiClientWorldSyncOk"],
         "multiClientSyncSampleCount": client_metrics["multiClientSyncSampleCount"],
+        "multiClientAppliedSampleCount": client_metrics["multiClientAppliedSampleCount"],
         "maxObservedClientCount": client_metrics["maxObservedClientCount"],
         "latestMultiClientSync": client_metrics["latestMultiClientSync"],
         "nextCursor": int(store.get("nextSequence") or 1) - 1,
@@ -4798,12 +4825,14 @@ def get_live_agent_reconnect_replay_metrics():
     ok_samples = [sample for sample in samples if sample.get("ok")]
     missed_mutation_count = sum(_normalize_int(sample.get("missedMutationCount"), 0, minimum=0, maximum=1000000) for sample in samples)
     replayed_event_count = sum(_normalize_int(sample.get("replayedEventCount"), 0, minimum=0, maximum=1000000) for sample in samples)
+    completed_mutation_event_count = sum(_normalize_int(sample.get("completedMutationEventCount"), 0, minimum=0, maximum=1000000) for sample in ok_samples)
     return {
         "schemaVersion": LIVE_AGENT_RECONNECT_REPLAY_METRICS_SCHEMA_VERSION,
-        "ok": bool(ok_samples) and missed_mutation_count == 0,
+        "ok": bool(ok_samples) and missed_mutation_count == 0 and completed_mutation_event_count > 0,
         "clientCatchupCount": len(ok_samples),
         "sampleCount": len(samples),
         "missedMutationCount": missed_mutation_count,
+        "completedMutationEventCount": completed_mutation_event_count,
         "replayedEventCount": replayed_event_count,
         "latest": samples[-1] if samples else None,
         "recentSamples": samples[-10:],

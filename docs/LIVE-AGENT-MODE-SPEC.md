@@ -89,6 +89,8 @@ The metrics endpoint must also expose the online-game presence contract:
 - `metrics.worldEventFeed.connectedClientCount`
 - `metrics.worldEventFeed.maxObservedClientCount`
 - `metrics.worldEventFeed.multiClientSyncLatencyMs.p95`
+- `metrics.worldEventFeed.multiClientAppliedSampleCount`
+- `metrics.worldEventFeed.latestMultiClientSync.sampledClientCount`
 - `metrics.worldEventFeed.multiClientWorldSyncOk`
 - `metrics.worldEventFeed.ok`
 - `metrics.routeBeforeAction.violationCount`
@@ -99,6 +101,7 @@ The metrics endpoint must also expose the online-game presence contract:
 - `metrics.presenceDefinedMutation.violations`
 - `metrics.presenceDefinedMutation.ok`
 - `metrics.reconnectReplay.clientCatchupCount`
+- `metrics.reconnectReplay.completedMutationEventCount`
 - `metrics.reconnectReplay.missedMutationCount`
 - `metrics.reconnectReplay.ok`
 - `finalGate.checks.presencePersistenceOk`
@@ -107,7 +110,7 @@ The metrics endpoint must also expose the online-game presence contract:
 - `finalGate.checks.presenceDefinedMutationsOk`
 - `finalGate.checks.reconnectReplayOk`
 
-The 8587 final gate treats `worldEventFeedOk`, `routeBeforeAction`, and `presenceDefinedMutation` as compatibility aliases. The PR-final online-game presence contract uses the `*Ok` names above and requires reconnect replay evidence from a client that recorded a cursor, disconnected while a backend-owned action completed, then fetched a current snapshot plus replay events after that cursor without missing the completed mutation.
+The 8587 final gate treats `worldEventFeedOk`, `routeBeforeAction`, and `presenceDefinedMutation` as compatibility aliases. The PR-final online-game presence contract uses the `*Ok` names above and requires reconnect replay evidence from a client that recorded a cursor, disconnected while a backend-owned action completed, then fetched a current snapshot plus replay events after that cursor with `expectedWorldActionId` set and at least one completed mutation event for that action after the cursor. Multi-client sync evidence must include sampled applied cursors and latency from at least two active world-event clients; connected streams without applied-event samples are not enough for `multiClientWorldSyncOk`.
 
 The default 8587 soak gate must prove the 5 completed backend turns are distributed across at least five enabled Live Agent Mode residents. The metrics surface this as `metrics.perAgentDistribution` and repeat the compact evidence under `finalGate.evidence` so reviewers can see which enabled agents completed live turns and backend-owned actions.
 
@@ -1014,7 +1017,7 @@ Phase 9: online-game presence hardening
 - enforce route-before-action for build/place/delete/update/object-use mutations
 - add reconnect catch-up by snapshot plus event cursor
 - add two-client 8587 verification for movement and world mutations without refresh
-- add metrics/final-gate checks for presence persistence, multi-client sync, route-before-action, presence-defined mutations, and reconnect replay
+- add metrics/final-gate checks for presence persistence, measured multi-client applied-event sync, route-before-action, presence-defined mutations, and reconnect replay with completed-mutation proof
 
 ## Testing Requirements
 
