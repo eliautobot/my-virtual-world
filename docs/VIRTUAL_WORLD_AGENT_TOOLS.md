@@ -66,6 +66,8 @@ Use these for durable movement and object-interaction workflows. Agent Live Mode
 
 The `/api/live-agent-mode/tools` registry is backend-owned and typed. Dry-run validation checks tool arguments, location gates, object permissions, and build/create proposal gates without enabling the public Live Agent UI. Safe communication, memory, planning, and idle tool calls can persist in-world messages, reaction opportunities, relationships, resident memory, diary entries, and todos through the backend. For Live Agent Mode and ClawMind only, the tool model follows the [reference repo](https://github.com/EmergenceAI/Emergence-World) direction: agents should affect the world only through validated tools, and new social/economy/governance/world-changing affordances become executable only after My Virtual World has typed visible executors and audit/rollback controls.
 
+Live Agent tool registry frames classify each tool as `core`, `complementary`, or `adaptive-location-gated`. Core tools are always-present observation/idling affordances, complementary tools cover safe communication, memory, and planning helpers, and adaptive/location-gated tools depend on place, nearby agents, visible objects, typed executors, or operator approval. Unavailable adaptive tools include structured `unavailableReasons` such as `wrong_location`, `missing_object`, `approval_required`, and `unsafe_proposal_only`; these reasons are discovery metadata and do not enable unsafe or proposal-only tools. `/api/live-agent-mode/metrics` exposes `metrics.toolExploration` with unique tools discovered and used per enabled Live Agent.
+
 ### Hermes
 
 - `POST /api/hermes/chat`

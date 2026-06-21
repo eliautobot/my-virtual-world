@@ -1928,6 +1928,35 @@ LIVE_AGENT_TOOL_CATEGORIES = {
     "events",
     "build-create",
 }
+LIVE_AGENT_TOOL_AFFORDANCE_CLASSES = {"core", "complementary", "adaptive-location-gated"}
+LIVE_AGENT_TOOL_CORE_NAMES = {
+    "observe_world",
+    "list_agents",
+    "list_landmarks",
+    "get_current_location",
+    "idle",
+}
+LIVE_AGENT_TOOL_EXPLORATION_SCHEMA_VERSION = "agent-live-mode-tool-exploration/v1"
+LIVE_AGENT_TOOL_UNAVAILABLE_REASON_LABELS = {
+    "wrong_location": "wrong location",
+    "missing_object": "missing object",
+    "missing_agent": "missing agent",
+    "missing_target": "missing target",
+    "approval_required": "approval required",
+    "unsafe_proposal_only": "unsafe/proposal-only",
+    "permission_denied": "permission denied",
+    "agent_live_mode_disabled": "Live Agent Mode disabled",
+    "agent_live_mode_feature_disabled": "Live Agent Mode feature disabled",
+    "agent_live_mode_feature_locked": "Live Agent Mode feature locked",
+    "agent_unavailable": "agent unavailable",
+    "target_blocked": "target blocked",
+    "target_disabled": "target disabled",
+    "object_reserved": "object reserved",
+    "unsupported_target": "unsupported target",
+    "unsupported_capability": "unsupported capability",
+    "requires_arguments": "requires arguments",
+    "unknown": "unknown",
+}
 LIVE_AGENT_TOOL_REGISTRY = {
     "observe_world": {
         "name": "observe_world",
@@ -2384,6 +2413,183 @@ def _validate_live_agent_visible_action_contract(payload, action_type=None, capa
     return contract, None
 
 
+def _live_agent_tool_affordance_class(tool):
+    if not isinstance(tool, dict):
+        return "complementary"
+    name = str(tool.get("name") or "").strip()
+    category = str(tool.get("category") or "").strip()
+    location_rule = tool.get("locationRule")
+    execution_mode = tool.get("executionMode")
+    try:
+        risk_tier = int(tool.get("riskTier") or 0)
+    except (TypeError, ValueError):
+        risk_tier = 0
+    if name in LIVE_AGENT_TOOL_CORE_NAMES:
+        return "core"
+    if (
+        location_rule not in {None, "", "none"}
+        or execution_mode == "proposal-only"
+        or category in {"move", "object-use", "build-create"}
+        or risk_tier >= 2
+    ):
+        return "adaptive-location-gated"
+    return "complementary"
+
+
+def _live_agent_tool_gate_codes(tool):
+    if not isinstance(tool, dict):
+        return []
+    gates = []
+
+    def add_gate(code):
+        if code and code not in gates:
+            gates.append(code)
+
+    permission_rule = tool.get("permissionRule")
+    location_rule = tool.get("locationRule")
+    execution_mode = tool.get("executionMode")
+    category = tool.get("category")
+    side_effect = tool.get("sideEffect")
+    if permission_rule and permission_rule != "live-agent-read":
+        add_gate("permission")
+    if location_rule not in {None, "", "none"}:
+        add_gate("location")
+    if permission_rule == "operator-reviewed":
+        add_gate("approval")
+    if execution_mode == "proposal-only":
+        add_gate("proposal-only")
+    if category in {"move", "object-use", "build-create"} or side_effect in {"move-intent", "world-action", "operator-proposal"}:
+        add_gate("visible-executor")
+    return gates
+
+
+def _live_agent_tool_required_arguments(tool):
+    schema = tool.get("argumentSchema") if isinstance(tool, dict) and isinstance(tool.get("argumentSchema"), dict) else {}
+    return [str(item) for item in (schema.get("required") or []) if str(item or "").strip()]
+
+
+def _live_agent_tool_reason_row(code, *, message=None, source=None):
+    safe_code = str(code or "unknown").strip() or "unknown"
+    row = {
+        "code": safe_code,
+        "label": LIVE_AGENT_TOOL_UNAVAILABLE_REASON_LABELS.get(safe_code, safe_code.replace("_", " ")),
+    }
+    if message:
+        row["message"] = str(message)
+    if source:
+        row["source"] = str(source)
+    return row
+
+
+def _live_agent_tool_add_reason(rows, code, *, message=None, source=None):
+    safe_code = str(code or "unknown").strip() or "unknown"
+    if safe_code not in {row.get("code") for row in rows if isinstance(row, dict)}:
+        rows.append(_live_agent_tool_reason_row(safe_code, message=message, source=source))
+
+
+def _live_agent_tool_error_code(payload):
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    return error.get("code") or payload.get("reason")
+
+
+def _live_agent_tool_reason_from_error_code(tool, code):
+    safe_code = str(code or "").strip()
+    if not safe_code:
+        return None
+    tool_name = str((tool or {}).get("name") or "").strip()
+    permission_rule = (tool or {}).get("permissionRule")
+    if safe_code in {"location_unknown", "location_mismatch", "target_not_nearby"}:
+        return "wrong_location"
+    if safe_code in {"target_missing", "target_deleted", "missing_interaction_spot"}:
+        if tool_name == "use_object":
+            return "missing_object"
+        if tool_name in {"say_to_agent", "send_message"}:
+            return "missing_agent"
+        return "missing_target"
+    if safe_code in {"agent_not_found", "agent_unavailable"}:
+        return "missing_agent" if safe_code == "agent_not_found" else "agent_unavailable"
+    if safe_code in {"building_missing", "building_deleted"}:
+        return "missing_target"
+    if safe_code == "permission_denied":
+        return "approval_required" if permission_rule == "operator-reviewed" else "permission_denied"
+    if safe_code in {"tool_execution_not_enabled", "operator_approval_required"}:
+        return "approval_required" if permission_rule == "operator-reviewed" else "unsafe_proposal_only"
+    return safe_code
+
+
+def _live_agent_tool_contextual_availability(tool, context, args=None, affordances=None):
+    tool_name = str((tool or {}).get("name") or "").strip()
+    args = args if isinstance(args, dict) else {}
+    affordances = [item for item in (affordances or []) if isinstance(item, dict)]
+    reasons = []
+    details = {}
+    available = True
+
+    if (tool or {}).get("executionMode") == "proposal-only":
+        available = False
+        _live_agent_tool_add_reason(reasons, "approval_required", source="executionMode")
+        _live_agent_tool_add_reason(reasons, "unsafe_proposal_only", source="executionMode")
+    if (tool or {}).get("permissionRule") == "operator-reviewed":
+        available = False
+        _live_agent_tool_add_reason(reasons, "approval_required", source="permissionRule")
+
+    if tool_name == "use_object":
+        object_affordance_available = any(
+            item.get("available") and item.get("capabilityTag") and not str(item.get("capabilityTag")).startswith("world.")
+            for item in affordances
+        )
+        if not object_affordance_available:
+            available = False
+            _live_agent_tool_add_reason(
+                reasons,
+                "missing_object",
+                message="No visible object/action affordance is currently selected for this agent.",
+                source="visibleWorldState",
+            )
+    elif tool_name in {"say_to_agent", "send_message"}:
+        social = _live_agent_loop_social_perception(context.get("agentId")) if isinstance(context, dict) and context.get("agentId") else {}
+        details["knownAgentCount"] = _normalize_int(social.get("knownAgentCount"), 0, minimum=0, maximum=1000000000) if isinstance(social, dict) else 0
+        details["nearbyAgentCount"] = _normalize_int(social.get("nearbyAgentCount"), 0, minimum=0, maximum=1000000000) if isinstance(social, dict) else 0
+        if tool_name == "say_to_agent" and details["nearbyAgentCount"] <= 0:
+            available = False
+            _live_agent_tool_add_reason(
+                reasons,
+                "wrong_location",
+                message="No target agent is co-located in the current building/floor frame.",
+                source="socialPerception",
+            )
+        elif tool_name == "send_message" and details["knownAgentCount"] <= 0:
+            available = False
+            _live_agent_tool_add_reason(
+                reasons,
+                "missing_agent",
+                message="No known target agent is available for remote messaging.",
+                source="socialPerception",
+            )
+
+    probe_args = args
+    probe_tool_names = {"observe_world", "list_agents", "list_landmarks", "get_current_location", "go_home", "speak_to_room", "idle"}
+    if tool_name in probe_tool_names:
+        ok, availability, _ = _live_agent_tool_check_availability(tool, context, probe_args)
+        if not ok:
+            available = False
+            code = _live_agent_tool_error_code(availability)
+            mapped = _live_agent_tool_reason_from_error_code(tool, code)
+            _live_agent_tool_add_reason(reasons, mapped or "unknown", source="availability")
+            if isinstance(availability, dict):
+                details["availability"] = _copy_jsonable(availability)
+        elif isinstance(availability, dict):
+            details["availability"] = _copy_jsonable(availability)
+
+    return {
+        "available": available,
+        "reasons": reasons,
+        "details": details,
+    }
+
+
 def _live_agent_tool_contract(tool):
     if not isinstance(tool, dict):
         return None
@@ -2403,6 +2609,9 @@ def _live_agent_tool_contract(tool):
     contract["typedArguments"] = True
     contract["permissionGated"] = bool(tool.get("permissionRule"))
     contract["locationGated"] = tool.get("locationRule") not in {None, "", "none"}
+    contract["affordanceClass"] = _live_agent_tool_affordance_class(tool)
+    contract["gates"] = _live_agent_tool_gate_codes(tool)
+    contract["requiredArguments"] = _live_agent_tool_required_arguments(tool)
     return contract
 
 
@@ -3702,9 +3911,12 @@ def get_live_agent_tool_registry(agent_id=None):
             row["availableForAgent"] = enabled
             row["agentId"] = context.get("agentId")
             if gate_error:
-                row["unavailableReason"] = (gate_error.get("error") or {}).get("code")
+                code = (gate_error.get("error") or {}).get("code")
+                row["unavailableReason"] = code
+                row["unavailableReasons"] = [_live_agent_tool_reason_row(code, source="featureGate")]
             elif not enabled:
                 row["unavailableReason"] = "agent_live_mode_disabled"
+                row["unavailableReasons"] = [_live_agent_tool_reason_row("agent_live_mode_disabled", source="agentSetting")]
         tools.append(row)
     return {
         "ok": True,
@@ -3712,6 +3924,7 @@ def get_live_agent_tool_registry(agent_id=None):
         "agentId": context.get("agentId") if context else None,
         "currentLocation": context.get("location") if context else None,
         "categories": sorted(LIVE_AGENT_TOOL_CATEGORIES),
+        "affordanceClasses": sorted(LIVE_AGENT_TOOL_AFFORDANCE_CLASSES),
         "tools": tools,
         "uiExposure": {"publicUiEnabled": False, "settingsPanel": "Live Agent Mode Coming Soon"},
     }
@@ -3744,6 +3957,7 @@ def validate_live_agent_tool_call(payload, *, dry_run=True):
         executed, execution_result, execution_status = _execute_live_agent_tool_call(tool, context, args, availability)
         if not executed:
             return False, execution_result, execution_status
+        _live_agent_record_tool_use(context.get("agentId"), tool_name, executed=True, status=execution_status)
         return True, {
             "ok": True,
             "schemaVersion": LIVE_AGENT_TOOL_RESULT_SCHEMA_VERSION,
@@ -6004,6 +6218,149 @@ def _live_agent_turn_context_assembly_metrics(turns, enabled_live_agents):
     }
 
 
+def _live_agent_tool_exploration_metrics(loop_state, turns, enabled_live_agents):
+    enabled_ids = sorted({
+        str((item or {}).get("agentId") or "").strip()
+        for item in (enabled_live_agents or [])
+        if str((item or {}).get("agentId") or "").strip()
+    })
+    state_agents = loop_state.get("agents") if isinstance(loop_state, dict) and isinstance(loop_state.get("agents"), dict) else {}
+    rows = {}
+
+    def ensure_row(agent_id):
+        safe_agent_id = str(agent_id or "").strip()
+        if not safe_agent_id:
+            return None
+        row = rows.get(safe_agent_id)
+        if row is None:
+            row = {
+                "agentId": safe_agent_id,
+                "liveModeEnabled": safe_agent_id in enabled_ids,
+                "_discoveredTools": set(),
+                "_usedTools": set(),
+                "affordanceClassCounts": {},
+                "unavailableReasonCounts": {},
+                "unavailableReasonsByTool": {},
+                "recentUses": [],
+                "lastDiscoveryAt": None,
+                "lastUseAt": None,
+            }
+            rows[safe_agent_id] = row
+        return row
+
+    for agent_id in enabled_ids:
+        ensure_row(agent_id)
+
+    def add_unavailable_reasons(row, tool_name, reason_codes):
+        for code in [str(item or "").strip() for item in (reason_codes or []) if str(item or "").strip()]:
+            row["unavailableReasonCounts"][code] = row["unavailableReasonCounts"].get(code, 0) + 1
+            if tool_name:
+                existing = row["unavailableReasonsByTool"].setdefault(tool_name, [])
+                if code not in existing:
+                    existing.append(code)
+
+    for agent_id, agent_state in state_agents.items():
+        if not isinstance(agent_state, dict):
+            continue
+        row = ensure_row(agent_id)
+        if not row:
+            continue
+        exploration = agent_state.get("toolExploration") if isinstance(agent_state.get("toolExploration"), dict) else {}
+        row["_discoveredTools"].update(str(item) for item in (exploration.get("discoveredTools") or []) if str(item or "").strip())
+        row["_usedTools"].update(str(item) for item in (exploration.get("usedTools") or []) if str(item or "").strip())
+        for key, value in (exploration.get("affordanceClassCounts") or {}).items():
+            row["affordanceClassCounts"][key] = max(_normalize_int(row["affordanceClassCounts"].get(key), 0, minimum=0, maximum=1000000000), _normalize_int(value, 0, minimum=0, maximum=1000000000))
+        for tool_name, reason_codes in (exploration.get("unavailableReasonsByTool") or {}).items():
+            add_unavailable_reasons(row, str(tool_name), reason_codes)
+        row["recentUses"].extend([item for item in (exploration.get("recentUses") or []) if isinstance(item, dict)][-12:])
+        row["lastDiscoveryAt"] = _live_agent_metric_newer_timestamp(row["lastDiscoveryAt"], exploration.get("lastDiscoveryAt"))
+        row["lastUseAt"] = _live_agent_metric_newer_timestamp(row["lastUseAt"], exploration.get("lastUseAt"))
+
+    for turn in [item for item in (turns or []) if isinstance(item, dict)]:
+        frame = turn.get("contextAssembly") if isinstance(turn.get("contextAssembly"), dict) else {}
+        agent_id = str(frame.get("agentId") or turn.get("agentId") or "").strip()
+        row = ensure_row(agent_id)
+        if not row:
+            continue
+        registry = frame.get("toolRegistry") if isinstance(frame.get("toolRegistry"), dict) else {}
+        for tool in [item for item in (registry.get("tools") or []) if isinstance(item, dict)]:
+            tool_name = str(tool.get("name") or "").strip()
+            if not tool_name:
+                continue
+            row["_discoveredTools"].add(tool_name)
+            affordance_class = str(tool.get("affordanceClass") or "complementary")
+            row["affordanceClassCounts"][affordance_class] = row["affordanceClassCounts"].get(affordance_class, 0) + 1
+            reason_codes = [
+                reason.get("code")
+                for reason in (tool.get("unavailableReasons") or [])
+                if isinstance(reason, dict) and reason.get("code")
+            ]
+            if tool.get("unavailableReason"):
+                reason_codes.append(tool.get("unavailableReason"))
+            add_unavailable_reasons(row, tool_name, reason_codes)
+        row["lastDiscoveryAt"] = _live_agent_metric_newer_timestamp(row["lastDiscoveryAt"], frame.get("assembledAt") or turn.get("startedAt"))
+
+    for event in [item for item in ((loop_state or {}).get("events") or []) if isinstance(item, dict) and item.get("type") == "tool-used"]:
+        agent_id = str(event.get("agentId") or "").strip()
+        details = event.get("details") if isinstance(event.get("details"), dict) else {}
+        tool_name = str(details.get("tool") or "").strip()
+        row = ensure_row(agent_id)
+        if row and tool_name:
+            row["_usedTools"].add(tool_name)
+            row["_discoveredTools"].add(tool_name)
+            row["lastUseAt"] = _live_agent_metric_newer_timestamp(row["lastUseAt"], event.get("at") or event.get("timestamp"))
+
+    by_agent = {}
+    all_discovered = set()
+    all_used = set()
+    unavailable_reason_counts = {}
+    for agent_id in sorted(rows):
+        row = rows[agent_id]
+        discovered = sorted(row.pop("_discoveredTools"))
+        used = sorted(row.pop("_usedTools"))
+        all_discovered.update(discovered)
+        all_used.update(used)
+        for code, count in row["unavailableReasonCounts"].items():
+            unavailable_reason_counts[code] = unavailable_reason_counts.get(code, 0) + _normalize_int(count, 0, minimum=0, maximum=1000000000)
+        row["discoveredTools"] = discovered[:50]
+        row["usedTools"] = used[:50]
+        row["uniqueToolsDiscovered"] = len(discovered)
+        row["uniqueToolsUsed"] = len(used)
+        row["recentUses"] = row["recentUses"][-12:]
+        by_agent[agent_id] = row
+
+    enabled_with_discovery = sorted([
+        agent_id for agent_id in enabled_ids
+        if (by_agent.get(agent_id) or {}).get("uniqueToolsDiscovered", 0) > 0
+    ])
+    enabled_with_usage = sorted([
+        agent_id for agent_id in enabled_ids
+        if (by_agent.get(agent_id) or {}).get("uniqueToolsUsed", 0) > 0
+    ])
+    return {
+        "schemaVersion": LIVE_AGENT_TOOL_EXPLORATION_SCHEMA_VERSION,
+        "enabledAgentCount": len(enabled_ids),
+        "enabledAgentIds": enabled_ids,
+        "enabledAgentsWithDiscoveryCount": len(enabled_with_discovery),
+        "enabledAgentsWithDiscovery": enabled_with_discovery,
+        "enabledAgentsWithUsageCount": len(enabled_with_usage),
+        "enabledAgentsWithUsage": enabled_with_usage,
+        "uniqueToolsDiscovered": len(all_discovered),
+        "uniqueToolsUsed": len(all_used),
+        "discoveredTools": sorted(all_discovered)[:50],
+        "usedTools": sorted(all_used)[:50],
+        "unavailableReasonCounts": unavailable_reason_counts,
+        "byAgent": by_agent,
+        "optimization": {
+            "readOnly": True,
+            "source": "live-agent loop state plus bounded turn context frames",
+            "modelCallsDuringMetrics": 0,
+            "providerCallsDuringMetrics": 0,
+            "heavyWorldScan": False,
+        },
+    }
+
+
 def get_live_agent_mode_autonomy_metrics():
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
@@ -6149,6 +6506,7 @@ def get_live_agent_mode_autonomy_metrics():
     reconnect_replay = get_live_agent_reconnect_replay_metrics()
     per_agent_distribution = _live_agent_metric_per_agent_distribution(enabled_live_agents, turns, backend_terminal_actions)
     turn_context_assembly = _live_agent_turn_context_assembly_metrics(turns, enabled_live_agents)
+    tool_exploration = _live_agent_tool_exploration_metrics(loop_state, turns, enabled_live_agents)
     route_before_action = _live_agent_route_before_action_metrics([*active_actions, *history_actions])
     per_agent_distribution_by_agent = per_agent_distribution.get("byAgent") if isinstance(per_agent_distribution.get("byAgent"), dict) else {}
     enabled_agent_distribution_evidence = []
@@ -6241,6 +6599,7 @@ def get_live_agent_mode_autonomy_metrics():
         "turnPlanningRecordsPresent": planner_metrics["turnsWithPlanningRecordCount"] > 0 if turns else True,
         "turnContextAssemblyRecorded": turn_context_assembly["allCompletedTurnsHaveContext"],
         "turnContextAssemblyAcrossEnabledAgents": turn_context_assembly["enabledAgentContextCount"] >= min(default_soak_target_agents, max(1, turn_context_assembly["enabledAgentCount"])),
+        "toolExplorationMetricsPresent": tool_exploration["enabledAgentCount"] == 0 or tool_exploration["enabledAgentsWithDiscoveryCount"] >= min(default_soak_target_agents, max(1, tool_exploration["enabledAgentCount"])),
         "perAgentTurnActionDistributionPresent": per_agent_distribution["enabledAgentCount"] > 0 and len(per_agent_distribution["agents"]) >= per_agent_distribution["enabledAgentCount"],
         "defaultSoakEnabledAgentRosterPresent": per_agent_distribution["enabledAgentCount"] >= default_soak_target_agents,
         "defaultSoakCompletedTurnTargetMet": len(completed_turns) >= default_soak_target_turns,
@@ -6316,6 +6675,15 @@ def get_live_agent_mode_autonomy_metrics():
                 "allCompletedTurnsHaveContext": turn_context_assembly.get("allCompletedTurnsHaveContext"),
                 "optimization": turn_context_assembly.get("optimization"),
             },
+            "toolExploration": {
+                "schemaVersion": tool_exploration.get("schemaVersion"),
+                "enabledAgentsWithDiscoveryCount": tool_exploration.get("enabledAgentsWithDiscoveryCount"),
+                "enabledAgentsWithUsageCount": tool_exploration.get("enabledAgentsWithUsageCount"),
+                "uniqueToolsDiscovered": tool_exploration.get("uniqueToolsDiscovered"),
+                "uniqueToolsUsed": tool_exploration.get("uniqueToolsUsed"),
+                "unavailableReasonCounts": tool_exploration.get("unavailableReasonCounts"),
+                "optimization": tool_exploration.get("optimization"),
+            },
             "liveWorldReference": {
                 "schemaVersion": live_world_reference.get("schemaVersion"),
                 "reference": live_world_reference.get("reference"),
@@ -6354,6 +6722,7 @@ def get_live_agent_mode_autonomy_metrics():
             "enabledAgentsWithCompletedBackendActions": per_agent_distribution["enabledCompletedBackendActionAgentCount"],
             "perAgentDistribution": per_agent_distribution,
             "turnContextAssembly": turn_context_assembly,
+            "toolExploration": tool_exploration,
             "presencePersistence": presence_persistence,
             "routeBeforeAction": route_before_action["routeBeforeAction"],
             "presenceDefinedMutation": route_before_action["presenceDefinedMutation"],
@@ -6450,6 +6819,7 @@ def get_live_agent_mode_autonomy_metrics():
             "clawMindArchitectureMeasured": True,
             "liveWorldReferenceGuidance": True,
             "turnContextAssemblyMeasured": True,
+            "toolExplorationMeasured": True,
             "metricsProviderCalls": 0,
             "metricsModelCalls": 0,
             "presencePersistenceMeasured": True,
@@ -11996,7 +12366,7 @@ def _live_agent_loop_action_affordances(agent_id, agent_state):
     return affordances
 
 
-def _live_agent_loop_tool_registry_frame(agent_id, agent_state):
+def _live_agent_loop_tool_registry_frame(agent_id, agent_state, affordances=None):
     del agent_state
     context = {
         "agentId": agent_id,
@@ -12007,38 +12377,124 @@ def _live_agent_loop_tool_registry_frame(agent_id, agent_state):
     }
     tools = []
     available_by_category = {}
-    probe_without_args = {"observe_world", "list_agents", "list_landmarks", "get_current_location", "go_home", "speak_to_room", "idle"}
+    available_by_affordance_class = {}
+    unavailable_reason_counts = {}
     for tool in LIVE_AGENT_TOOL_REGISTRY.values():
         args = {}
-        available = None
-        reason = None
-        if tool.get("name") in probe_without_args:
-            ok, availability, _ = _live_agent_tool_check_availability(tool, context, args)
-            available = bool(ok)
-            if not ok and isinstance(availability, dict):
-                reason = (availability.get("error") or {}).get("code") or availability.get("reason")
+        availability = _live_agent_tool_contextual_availability(tool, context, args, affordances=affordances)
+        available = bool(availability.get("available"))
+        reasons = [item for item in (availability.get("reasons") or []) if isinstance(item, dict)]
         category = tool.get("category") or "utility"
+        affordance_class = _live_agent_tool_affordance_class(tool)
         if available:
             available_by_category[category] = available_by_category.get(category, 0) + 1
+            available_by_affordance_class[affordance_class] = available_by_affordance_class.get(affordance_class, 0) + 1
+        for reason in reasons:
+            code = reason.get("code")
+            if code:
+                unavailable_reason_counts[code] = unavailable_reason_counts.get(code, 0) + 1
         tools.append({
             "name": tool.get("name"),
             "category": category,
+            "affordanceClass": affordance_class,
             "riskTier": tool.get("riskTier"),
             "locationRule": tool.get("locationRule"),
+            "gates": _live_agent_tool_gate_codes(tool),
             "sideEffect": tool.get("sideEffect"),
             "executionMode": tool.get("executionMode") or ("executable" if _live_agent_tool_execution_enabled(tool.get("name")) else "world-action-or-dry-run"),
+            "requiredArguments": _live_agent_tool_required_arguments(tool),
             "available": available,
-            **({"unavailableReason": reason} if reason else {}),
+            **({"unavailableReason": reasons[0].get("code")} if reasons else {}),
+            **({"unavailableReasons": reasons} if reasons else {}),
+            **({"availabilityDetails": availability.get("details")} if availability.get("details") else {}),
         })
     return {
         "schemaVersion": LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION,
         "currentLocation": context.get("location"),
         "categories": sorted(LIVE_AGENT_TOOL_CATEGORIES),
+        "affordanceClasses": sorted(LIVE_AGENT_TOOL_AFFORDANCE_CLASSES),
         "toolCount": len(tools),
         "executableTools": sorted(LIVE_AGENT_EXECUTABLE_TOOL_NAMES),
         "availableByCategory": available_by_category,
+        "availableByAffordanceClass": available_by_affordance_class,
+        "unavailableReasonCounts": unavailable_reason_counts,
         "tools": tools,
     }
+
+
+def _live_agent_loop_record_tool_discovery(agent_state, tool_registry):
+    if not isinstance(agent_state, dict) or not isinstance(tool_registry, dict):
+        return None
+    tools = [item for item in (tool_registry.get("tools") or []) if isinstance(item, dict) and item.get("name")]
+    exploration = dict(agent_state.get("toolExploration") or {})
+    discovered = set(str(item) for item in (exploration.get("discoveredTools") or []) if str(item or "").strip())
+    used = set(str(item) for item in (exploration.get("usedTools") or []) if str(item or "").strip())
+    unavailable_by_tool = exploration.get("unavailableReasonsByTool") if isinstance(exploration.get("unavailableReasonsByTool"), dict) else {}
+    unavailable_by_tool = {str(key): list(value or [])[:8] for key, value in unavailable_by_tool.items()}
+    affordance_class_counts = {}
+    for tool in tools:
+        name = str(tool.get("name") or "").strip()
+        if not name:
+            continue
+        discovered.add(name)
+        affordance_class = str(tool.get("affordanceClass") or "complementary")
+        affordance_class_counts[affordance_class] = affordance_class_counts.get(affordance_class, 0) + 1
+        reason_codes = [
+            str(reason.get("code"))
+            for reason in (tool.get("unavailableReasons") or [])
+            if isinstance(reason, dict) and reason.get("code")
+        ]
+        if reason_codes:
+            unavailable_by_tool[name] = reason_codes[:8]
+    exploration.update({
+        "schemaVersion": LIVE_AGENT_TOOL_EXPLORATION_SCHEMA_VERSION,
+        "lastDiscoveryAt": _utc_now_iso(),
+        "lastToolRegistrySchemaVersion": tool_registry.get("schemaVersion"),
+        "discoveredTools": sorted(discovered),
+        "usedTools": sorted(used),
+        "uniqueToolsDiscovered": len(discovered),
+        "uniqueToolsUsed": len(used),
+        "lastVisibleToolCount": len(tools),
+        "lastAvailableToolCount": len([tool for tool in tools if tool.get("available") is True]),
+        "affordanceClassCounts": affordance_class_counts,
+        "unavailableReasonsByTool": unavailable_by_tool,
+    })
+    agent_state["toolExploration"] = exploration
+    return exploration
+
+
+def _live_agent_record_tool_use(agent_id, tool_name, *, executed=False, status=None):
+    safe_agent_id = str(agent_id or "").strip()
+    safe_tool_name = str(tool_name or "").strip()
+    if not safe_agent_id or not safe_tool_name:
+        return None
+    state = get_live_agent_loop_state(persist_migration=True)
+    agent_state = _live_agent_loop_agent_state(state, safe_agent_id)
+    exploration = dict(agent_state.get("toolExploration") or {})
+    discovered = set(str(item) for item in (exploration.get("discoveredTools") or []) if str(item or "").strip())
+    used = set(str(item) for item in (exploration.get("usedTools") or []) if str(item or "").strip())
+    discovered.add(safe_tool_name)
+    used.add(safe_tool_name)
+    recent_uses = [item for item in (exploration.get("recentUses") or []) if isinstance(item, dict)]
+    recent_uses.append({
+        "tool": safe_tool_name,
+        "at": _utc_now_iso(),
+        "executed": bool(executed),
+        "status": status,
+    })
+    exploration.update({
+        "schemaVersion": LIVE_AGENT_TOOL_EXPLORATION_SCHEMA_VERSION,
+        "lastUseAt": _utc_now_iso(),
+        "discoveredTools": sorted(discovered),
+        "usedTools": sorted(used),
+        "uniqueToolsDiscovered": len(discovered),
+        "uniqueToolsUsed": len(used),
+        "recentUses": recent_uses[-12:],
+    })
+    agent_state["toolExploration"] = exploration
+    _live_agent_loop_add_event(state, "tool-used", agent_id=safe_agent_id, details={"tool": safe_tool_name, "executed": bool(executed), "status": status})
+    save_live_agent_loop_state(state)
+    return exploration
 
 
 def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, now_epoch=None):
@@ -12046,7 +12502,8 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
     needs = _live_agent_loop_update_needs(agent_state, now_epoch)
     active = _active_behavior_records_for_agent(agent_id)
     affordances = _live_agent_loop_action_affordances(agent_id, agent_state)
-    tool_registry = _live_agent_loop_tool_registry_frame(agent_id, agent_state)
+    tool_registry = _live_agent_loop_tool_registry_frame(agent_id, agent_state, affordances=affordances)
+    _live_agent_loop_record_tool_discovery(agent_state, tool_registry)
     recent_actions = _live_agent_loop_recent_world_actions(agent_id)
     memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
     retrieved_memory = _live_agent_memory_retrieve_from_stream(
@@ -12127,20 +12584,26 @@ def _live_agent_loop_compact_tool_registry_context(tool_registry):
         tools.append({
             "name": tool.get("name"),
             "category": tool.get("category"),
+            "affordanceClass": tool.get("affordanceClass"),
             "riskTier": tier,
             "locationRule": tool.get("locationRule"),
+            "gates": list(tool.get("gates") or [])[:8] if isinstance(tool.get("gates"), list) else [],
             "sideEffect": tool.get("sideEffect"),
             "executionMode": tool.get("executionMode"),
             "available": tool.get("available"),
             **({"unavailableReason": tool.get("unavailableReason")} if tool.get("unavailableReason") else {}),
+            **({"unavailableReasons": list(tool.get("unavailableReasons") or [])[:4]} if isinstance(tool.get("unavailableReasons"), list) and tool.get("unavailableReasons") else {}),
         })
     return {
         "schemaVersion": source.get("schemaVersion") or LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION,
         "currentLocation": _copy_jsonable(source.get("currentLocation")) if isinstance(source.get("currentLocation"), dict) else None,
         "categories": list(source.get("categories") or [])[:24],
+        "affordanceClasses": list(source.get("affordanceClasses") or [])[:8],
         "toolCount": _normalize_int(source.get("toolCount"), len(tools), minimum=0, maximum=1000),
         "executableTools": list(source.get("executableTools") or [])[:24],
         "availableByCategory": _copy_jsonable(source.get("availableByCategory")) if isinstance(source.get("availableByCategory"), dict) else {},
+        "availableByAffordanceClass": _copy_jsonable(source.get("availableByAffordanceClass")) if isinstance(source.get("availableByAffordanceClass"), dict) else {},
+        "unavailableReasonCounts": _copy_jsonable(source.get("unavailableReasonCounts")) if isinstance(source.get("unavailableReasonCounts"), dict) else {},
         "riskTierCounts": risk_tiers,
         "tools": tools[:24],
     }

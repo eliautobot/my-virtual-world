@@ -249,6 +249,77 @@ finally:
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(liveAgentToolSchemaCheck.status, 0, `Live Agent coordinate schema check failed\n${liveAgentToolSchemaCheck.stderr || liveAgentToolSchemaCheck.stdout}`);
 
+const liveAgentToolAffordanceDiscoveryCheck = spawnSync('python3', ['-B', '-c', `
+import importlib.util
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+path = Path("src/server/server.py")
+data_dir = tempfile.mkdtemp(prefix="vw-smoke-tool-affordances-")
+os.environ["VW_DATA_DIR"] = data_dir
+os.environ["_VW_INT"] = "1"
+try:
+    spec = importlib.util.spec_from_file_location("vw_server", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
+    module.get_roster = lambda: [
+        {"id": "adam", "statusKey": "adam", "name": "Adam", "providerKind": "fake"},
+    ]
+
+    meta = module.load_world_meta()
+    meta["agentProfiles"] = {
+        "adam": {"agentLiveModeEnabled": True, "providerKind": "fake"},
+    }
+    module.save_world_meta(meta)
+
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    agent_state = module._live_agent_loop_agent_state(state, "adam")
+    registry = module._live_agent_loop_tool_registry_frame("adam", agent_state, affordances=[])
+    assert registry["schemaVersion"] == module.LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION, registry
+    classes = {tool.get("affordanceClass") for tool in registry["tools"]}
+    assert {"core", "complementary", "adaptive-location-gated"} <= classes, classes
+    assert all(tool.get("affordanceClass") in module.LIVE_AGENT_TOOL_AFFORDANCE_CLASSES for tool in registry["tools"]), registry["tools"]
+
+    tools = {tool["name"]: tool for tool in registry["tools"]}
+    assert tools["observe_world"]["affordanceClass"] == "core", tools["observe_world"]
+    assert tools["add_memory"]["affordanceClass"] == "complementary", tools["add_memory"]
+    assert tools["use_object"]["affordanceClass"] == "adaptive-location-gated", tools["use_object"]
+    assert tools["use_object"]["available"] is False, tools["use_object"]
+    assert "missing_object" in [reason["code"] for reason in tools["use_object"]["unavailableReasons"]], tools["use_object"]
+    assert tools["say_to_agent"]["available"] is False, tools["say_to_agent"]
+    assert "wrong_location" in [reason["code"] for reason in tools["say_to_agent"]["unavailableReasons"]], tools["say_to_agent"]
+    assert tools["propose_world_change"]["available"] is False, tools["propose_world_change"]
+    proposal_reasons = [reason["code"] for reason in tools["propose_world_change"]["unavailableReasons"]]
+    assert "approval_required" in proposal_reasons and "unsafe_proposal_only" in proposal_reasons, tools["propose_world_change"]
+
+    module._live_agent_loop_record_tool_discovery(agent_state, registry)
+    module.save_live_agent_loop_state(state)
+    ok, result, status = module.validate_live_agent_tool_call({
+        "agentId": "adam",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": "tool-affordance-use", "roles": ["participant"]},
+        "tool": "add_memory",
+        "arguments": {"text": "Smoke fixture confirmed tool exploration metrics."},
+    }, dry_run=False)
+    assert ok and status == 201, result
+
+    metrics = module.get_live_agent_mode_autonomy_metrics()
+    exploration = metrics["metrics"]["toolExploration"]
+    adam = exploration["byAgent"]["adam"]
+    assert exploration["schemaVersion"] == module.LIVE_AGENT_TOOL_EXPLORATION_SCHEMA_VERSION, exploration
+    assert adam["uniqueToolsDiscovered"] == len(module.LIVE_AGENT_TOOL_REGISTRY), adam
+    assert "add_memory" in adam["usedTools"], adam
+    assert adam["uniqueToolsUsed"] >= 1, adam
+    assert adam["unavailableReasonsByTool"]["use_object"] == ["missing_object"], adam
+    assert metrics["checklist"]["toolExplorationMetricsPresent"] is True, metrics["checklist"]
+    print("live agent adaptive tool affordance discovery ok")
+finally:
+    shutil.rmtree(data_dir, ignore_errors=True)
+`], { cwd: root, encoding: 'utf8' });
+assert.equal(liveAgentToolAffordanceDiscoveryCheck.status, 0, `Live Agent adaptive tool affordance discovery check failed\n${liveAgentToolAffordanceDiscoveryCheck.stderr || liveAgentToolAffordanceDiscoveryCheck.stdout}`);
+
 const liveAgentGlobalFeatureGateCheck = spawnSync('python3', ['-B', '-c', `
 import importlib.util
 import os
@@ -1398,6 +1469,11 @@ for (const token of [
   '"worldActionId": action_id',
   'LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION = "agent-live-mode-tool-registry/v1"',
   'LIVE_AGENT_TOOL_CALL_SCHEMA_VERSION = "agent-live-mode-tool-call/v1"',
+  'LIVE_AGENT_TOOL_EXPLORATION_SCHEMA_VERSION = "agent-live-mode-tool-exploration/v1"',
+  'LIVE_AGENT_TOOL_AFFORDANCE_CLASSES',
+  'def _live_agent_tool_contextual_availability',
+  'def _live_agent_loop_record_tool_discovery',
+  'def _live_agent_record_tool_use',
   'LIVE_AGENT_TOOL_REGISTRY',
   'def _live_agent_loop_tool_registry_frame',
   'def get_live_agent_tool_registry',
@@ -1440,6 +1516,7 @@ for (const token of [
   '"referenceArchitectures"',
   '"liveWorldReference"',
   '"turnContextAssembly"',
+  '"toolExploration"',
   '"referenceWorldExpansionTools"',
   '"aliveWorldIndicators"',
   '"proposal-only"',
