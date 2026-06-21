@@ -1051,6 +1051,11 @@ def _utc_now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def _utc_now_iso_precise():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
 def default_world_actions_store():
     return {
         "schemaVersion": WORLD_ACTION_SCHEMA_VERSION,
@@ -11390,7 +11395,12 @@ def get_live_agent_loop_state(*, persist_migration=False):
 def save_live_agent_loop_state(state):
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    existing = _normalize_live_agent_loop_state(agent_life.get("liveModeLoop"))
     state = _normalize_live_agent_loop_state(state)
+    state["operatorProposals"] = _live_agent_loop_merge_operator_proposals(
+        existing.get("operatorProposals") if isinstance(existing, dict) else [],
+        state.get("operatorProposals"),
+    )
     state["updatedAt"] = _utc_now_iso()
     agent_life["liveModeLoop"] = state
     meta["agentLife"] = agent_life
@@ -12131,6 +12141,33 @@ def _live_agent_loop_normalize_operator_proposals(state):
     return state["operatorProposals"]
 
 
+def _live_agent_loop_operator_proposal_sort_epoch(proposal):
+    if not isinstance(proposal, dict):
+        return 0
+    return max(
+        _parse_isoish_epoch(proposal.get("updatedAt")) or 0,
+        _parse_isoish_epoch(proposal.get("requestedAt")) or 0,
+    )
+
+
+def _live_agent_loop_merge_operator_proposals(existing, incoming):
+    by_id = {}
+    for item in [*(existing or []), *(incoming or [])]:
+        proposal = _live_agent_loop_normalize_operator_proposal(item)
+        if not proposal:
+            continue
+        proposal_id = proposal.get("id")
+        current = by_id.get(proposal_id)
+        if current and _live_agent_loop_operator_proposal_sort_epoch(current) > _live_agent_loop_operator_proposal_sort_epoch(proposal):
+            continue
+        by_id[proposal_id] = proposal
+    proposals = sorted(
+        by_id.values(),
+        key=lambda item: (_live_agent_loop_operator_proposal_sort_epoch(item), item.get("id") or ""),
+    )
+    return proposals[-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
+
+
 def _live_agent_loop_record_operator_proposal_from_rejection(state, agent_id, payload, rejection):
     if not isinstance(state, dict) or not isinstance(payload, dict):
         return None
@@ -12139,7 +12176,7 @@ def _live_agent_loop_record_operator_proposal_from_rejection(state, agent_id, pa
     capability = _live_agent_proposal_only_capability_for(action_type, capability_tag)
     if not capability:
         return None
-    now_iso = _utc_now_iso()
+    now_iso = _utc_now_iso_precise()
     source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
     target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
     seed = json.dumps(
@@ -12180,16 +12217,22 @@ def _live_agent_loop_record_operator_proposal_from_rejection(state, agent_id, pa
         },
         "rejection": _copy_jsonable(rejection.get("error")) if isinstance(rejection.get("error"), dict) else _copy_jsonable(rejection),
     })
-    state["operatorProposals"] = [*existing, proposal][-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
     _live_agent_loop_add_event(state, "operator-proposal-created", agent_id=agent_id, details={"proposalId": proposal_id, "actionType": action_type, "capabilityId": capability.get("id")})
     agent_state = _live_agent_loop_agent_state(state, agent_id)
+    agent_snapshot = _live_agent_loop_agent_snapshot(agent_id)
+    if not agent_snapshot.get("providerKind"):
+        _, _, profile = _agent_profile_for(load_world_meta(), agent_id)
+        if isinstance(profile, dict) and profile.get("providerKind"):
+            agent_snapshot["providerKind"] = str(profile.get("providerKind")).strip().lower()
     proposal["providerBridge"] = _live_agent_provider_bridge_propose(
-        _live_agent_loop_agent_snapshot(agent_id),
+        agent_snapshot,
         agent_state,
         state,
         {"id": proposal_id, "agentId": agent_id, "status": "proposal_only"},
         proposal,
     )
+    proposal = _live_agent_loop_normalize_operator_proposal(proposal) or proposal
+    state["operatorProposals"] = [*existing, proposal][-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
     return proposal
 
 

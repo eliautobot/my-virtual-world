@@ -1292,6 +1292,7 @@ try:
     tool_result = module._live_agent_provider_bridge_handle_tool_call_result(agent, agent_state, state, turn, {"tool": "say_to_agent", "status": "completed"})
     assert tool_result["ok"] is True and tool_result["handled"] is True, tool_result
 
+    stale_state_before_proposal = module.get_live_agent_loop_state(persist_migration=True)
     ok, rejected, rejected_status = module.create_agent_live_mode_action_request({
         "agentId": "fake-agent",
         "source": {"kind": "agent-live-mode", "requestedBy": "smoke-provider-bridge", "requestId": "proposal-contract", "roles": ["participant"]},
@@ -1307,6 +1308,15 @@ try:
     stored_proposal = next(item for item in saved_state["operatorProposals"] if item["id"] == operator_proposal["id"])
     assert stored_proposal["providerBridge"]["providerKind"] == "fake", stored_proposal
     assert "proposal" not in stored_proposal["providerBridge"], stored_proposal["providerBridge"]
+    ok, proposal_listing, proposal_listing_status = module.get_live_agent_loop_operator_proposals("fake-agent", include_resolved=True, limit=10)
+    assert ok is True and proposal_listing_status == 200, proposal_listing
+    listed_proposal = next(item for item in proposal_listing["proposals"] if item["id"] == operator_proposal["id"])
+    assert listed_proposal["providerBridge"]["providerKind"] == "fake", listed_proposal
+    module.save_live_agent_loop_state(stale_state_before_proposal)
+    ok, merged_listing, merged_listing_status = module.get_live_agent_loop_operator_proposals("fake-agent", include_resolved=True, limit=10)
+    assert ok is True and merged_listing_status == 200, merged_listing
+    merged_proposal = next(item for item in merged_listing["proposals"] if item["id"] == operator_proposal["id"])
+    assert merged_proposal["providerBridge"]["providerKind"] == "fake", merged_proposal
 
     timeout_agent = {"id": "timeout-agent", "statusKey": "timeout-agent", "agentId": "timeout-agent", "providerKind": "fake-timeout"}
     timeout_state = module._live_agent_loop_agent_state(state, "timeout-agent")

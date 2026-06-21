@@ -1201,13 +1201,23 @@ async function verifyFakeProviderBridgeContract() {
     const proposalId = rejected?.error?.details?.operatorProposal?.id;
     assert(proposalId, 'proposal-only fake provider request should return an operator proposal reference', rejected);
 
-    const proposals = await fetchJson(`/api/agent-live-loop/proposals?agentId=${encodeURIComponent(FAKE_FIXTURE_AGENT_ID)}&includeResolved=true&limit=10`);
-    let proposal = (proposals.proposals || []).find((item) => item?.id === proposalId);
-    if (!proposal) {
-      const allProposals = await fetchJson('/api/agent-live-loop/proposals?includeResolved=true&limit=50');
-      proposal = (allProposals.proposals || []).find((item) => item?.id === proposalId);
+    let proposal;
+    let lastProposalListing;
+    const deadline = Date.now() + 5000;
+    while (!proposal && Date.now() < deadline) {
+      const proposals = await fetchJson(`/api/agent-live-loop/proposals?agentId=${encodeURIComponent(FAKE_FIXTURE_AGENT_ID)}&includeResolved=true&limit=10`);
+      lastProposalListing = proposals;
+      proposal = (proposals.proposals || []).find((item) => item?.id === proposalId);
+      if (!proposal) {
+        const allProposals = await fetchJson('/api/agent-live-loop/proposals?includeResolved=true&limit=50');
+        lastProposalListing = allProposals;
+        proposal = (allProposals.proposals || []).find((item) => item?.id === proposalId);
+      }
+      if (!proposal) {
+        await delay(250);
+      }
     }
-    assert(proposal?.providerBridge?.providerKind === 'fake', 'fake provider proposal should retain bridge metadata', { proposalId, proposal });
+    assert(proposal?.providerBridge?.providerKind === 'fake', 'fake provider proposal should retain bridge metadata', { proposalId, proposal, lastProposalListing });
 
     const metrics = await fetchJson('/api/live-agent-mode/metrics');
     const fake = metrics.providerSupport?.providerKinds?.fake;
