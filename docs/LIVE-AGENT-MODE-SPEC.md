@@ -46,12 +46,25 @@ The next reliability bar is online-game-style presence. Every browser tab must b
 
 The next "alive world" bar is society-level behavior, not just more animation. Live Agent Mode should act like a persistent resident simulation where agents choose from a location-gated tool frame, take multi-step turns, speak in-world, form memories, maintain todos/plans, update relationships, and leave public evidence of what happened. The loop should feel alive because agents have goals, places to go, constraints, follow-up reactions, and consequences.
 
-### Reference Architecture Guidance
+### Unified Autonomy Plan and Reference Guidance
 
-Use the [reference repo](https://github.com/EmergenceAI/Emergence-World) as the primary reference direction for Live Agent Mode and ClawMind. The reviewed public reference commit is `7613dcb6554133144779f4c4f0ba49064894b3a5`. The goal is not to copy its stack wholesale; it is to adapt the architecture patterns that make a custom world feel alive:
+Use [LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md](LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md) as the ordered implementation plan for this spec. That plan captures the current product requirement: Live Agent Mode is a separate per-agent behavior system, and when it is enabled for an agent it supersedes browser scripted behavior for that agent.
+
+The copy/reuse reference priority is MIT-first:
+
+- [a16z-infra/ai-town](https://github.com/a16z-infra/ai-town): primary MIT reference for a virtual town where AI characters live, chat, socialize, share global state, and run under a simulation engine.
+- [nmatter1/smallville](https://github.com/nmatter1/smallville): MIT reference for game-oriented generative agents that observe, remember, and react to world state changes.
+- [neural-maze/philoagents-course](https://github.com/neural-maze/philoagents-course): MIT reference for production agent/API orchestration, tracing, and simulation-engine teaching patterns.
+- [joonspk-research/generative_agents](https://github.com/joonspk-research/generative_agents): Apache-2.0 canonical research implementation; use as attributed design lineage, not as an MIT source.
+- [EmergenceAI/Emergence-World](https://github.com/EmergenceAI/Emergence-World): non-MIT research/non-commercial/proprietary source; use as architecture inspiration only and do not copy code, content, tool catalogs, profiles, prompts, or datasets.
+
+The existing `liveWorldReference` metrics contract still pins the reviewed Emergence World reference until the planned MIT reference migration child PR lands. That legacy metric is a product-scoped guidance contract, not permission to copy from that repository.
+
+The goal is not to copy any stack wholesale; it is to adapt architecture patterns that make a custom world feel alive:
 
 - scope is Live Agent Mode and ClawMind only; this is not a general product rewrite or a requirement for normal manual world editing
 - embodied persistent residents, not detached chat sessions
+- explicit behavior ownership so Live Mode can disable browser scripted behavior per agent
 - tools as the only way an agent mutates the world
 - location-gated and context-aware tool availability
 - one-agent-at-a-time resident turns with bounded multi-tool follow-up
@@ -64,14 +77,21 @@ My Virtual World should implement these as product-native primitives: backend-ow
 
 ### Live World ClawMind Child PR Queue
 
-Adding the reference repo does not by itself make the final PR complete. The final gate should stay superseded until these follow-up child PRs either land or are explicitly closed as unnecessary:
+Adding references or metrics does not by itself make the final PR complete. The final gate should stay superseded until the ordered child PRs in [LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md](LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md#required-child-prs) land or are explicitly closed as unnecessary:
 
-1. `20-liveworld-clawmind-reference-contract`: map the existing ClawMind modules to reference-world patterns in runtime metrics and final-gate evidence, including which patterns are implemented, partial, or proposal-only.
-2. `21-liveworld-context-assembly`: build the resident turn context from profile, location, nearby agents, current tool registry, memory retrieval, relationships, plans, recent conversations, safety gates, and visible world state.
-3. `22-liveworld-adaptive-affordances`: split tools into core, complementary, and adaptive/location-gated affordances; record discovered tools, unavailable reasons, and tool exploration metrics.
-4. `23-liveworld-reactive-social-loop`: create bounded reaction turns when agents speak or act nearby, so social behavior can emerge from overhearing and visible actions instead of only direct scripted prompts.
-5. `24-liveworld-public-expression-and-culture`: add safe public expression affordances such as notes/posts/events/billboards as typed or proposal-only tools with durable world evidence.
-6. `25-liveworld-alive-world-indicators`: expose final-gate metrics inspired by the reference repo's world indicators: population/live-agent health, location exploration, tool exploration, public expression, social graph depth, proposal/governance participation, economy placeholder activity, and safety/public-order incidents.
+The earlier ClawMind queue remains part of the historical acceptance vocabulary and is now folded into the ordered Live ownership plan: `20-liveworld-clawmind-reference-contract`, `21-liveworld-context-assembly`, `22-liveworld-adaptive-affordances`, `23-liveworld-reactive-social-loop`, `24-liveworld-public-expression-and-culture`, and `25-liveworld-alive-world-indicators`.
+
+1. `26-live-behavior-ownership-boundary`: Live Mode becomes a per-agent behavior owner and suppresses browser scripted behavior for live-owned agents.
+2. `27-backend-live-intent-visible-status`: backend-owned goal/intent/tool/result status becomes visible and durable.
+3. `28-generated-world-affordance-frame`: planner input comes from generated world affordances instead of the static chore catalog.
+4. `29-model-first-tool-planner`: provider/model decisions choose validated tool calls directly; deterministic scoring becomes fallback only.
+5. `30-core-tool-executor-parity`: core movement, object-use, observe, and idle tools execute through backend state.
+6. `31-resident-memory-reflection-self-feedback`: outcomes change future behavior through memory, reflection, todos, and follow-up goals.
+7. `32-spatial-social-loop`: speech, nearby reactions, conversations, and relationships become backend-owned resident behavior.
+8. `33-exploration-public-expression`: curiosity and public notes become visible, durable affordances.
+9. `34-operator-console-audit`: operator controls, timeline, inspection, approval, pause, and kill switch become usable.
+10. `35-mit-reference-migration-reuse-audit`: metrics and docs distinguish MIT reusable references from inspiration-only sources.
+11. `36-unified-autonomy-soak-gate`: 8587 proves no-browser turns, multi-agent distribution, browser replay, no resets, and scripted suppression.
 
 Each child PR must target `docs/live-agent-mode-autonomy-spec`, keep scope inside Live Agent Mode / ClawMind, run `npm test`, run the relevant 8587 checks when feasible, and avoid touching protected port `8590`.
 
@@ -155,6 +175,9 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `providerModelCallCounts`
 - `clawMindArchitecture.referenceArchitectures[].id = live-world-reference`
 - `clawMindArchitecture.referenceArchitectures[].url = https://github.com/EmergenceAI/Emergence-World`
+- `clawMindArchitecture.referenceArchitectures[]` also includes MIT reuse candidates for AI Town, Smallville, and PhiloAgents
+- `clawMindArchitecture.referenceArchitectures[].licenseFit`
+- `clawMindArchitecture.referenceArchitectures[].codeReuseAllowed`
 - `clawMindArchitecture.referenceArchitectures[].patterns`
 - `metrics.perAgentDistribution`
 - `metrics.completedTurnCountByAgent`
@@ -245,31 +268,34 @@ Then open `http://127.0.0.1:8587`. Do not restart, bind over, or kill a product 
 1. Backend-authoritative simulation
    Every autonomous action is represented by backend records and backend-owned state transitions.
 
-2. Tools are the only mutation path
+2. Live Mode owns live-owned agents
+   When an agent is Live Mode enabled, browser scripted behavior must not schedule, route, idle, socialize, return-to-desk, or assign object-use work for that agent. The browser may render backend intent and replay events only.
+
+3. Tools are the only mutation path
    An agent cannot directly edit world JSON. It can only call validated tools.
 
-3. Physical presence matters
+4. Physical presence matters
    Location, building, floor, room, distance, object availability, and interaction spots control which tools are available.
 
-4. Visible outcome, backend truth
+5. Visible outcome, backend truth
    The frontend shows animation events from the backend. If no frontend is connected, the backend still advances the simulation and records replayable events.
 
-5. Bounded autonomy
+6. Bounded autonomy
    Agents may act continuously, but within schedules, cooldowns, budgets, permissions, locks, and operator pause/veto controls.
 
-6. Replayability
+7. Replayability
    Every turn, decision, tool call, validation result, side effect, and animation event should be inspectable after the fact.
 
-7. Progressive capability
+8. Progressive capability
    Start with safe resident actions. Add build/create/social/governance tools only after typed tool contracts and tests exist.
 
-8. Resident society over scripted chores
+9. Resident society over scripted chores
    The loop should not be a tiny hard-coded chore selector. Each turn should assemble location, nearby agents, available tools, memories, relationships, plans, and recent outcomes into a resident affordance frame. The planner chooses from that frame, and every action must remain validated by backend contracts.
 
-9. Multi-step turns, bounded by policy
+10. Multi-step turns, bounded by policy
    A normal resident turn should have enough budget to observe, choose, act, remember, and optionally write a todo/diary entry. The default implementation budget is 5 tool calls per turn. Risky tools remain operator-reviewed even when the turn budget is larger.
 
-10. Places unlock behavior
+11. Places unlock behavior
    Homes, work buildings, public spaces, shops, and future civic buildings should unlock different tools. A home can unlock rest/self-care/decoration; a shared room can unlock speech and social reactions; a construction site can unlock typed build completion; future civic spaces can unlock governance or public posting tools.
 
 ## Target User Experience
@@ -419,7 +445,7 @@ Readiness and runtime execution are measured separately by:
 
 `contractReady` means the product has a stable module slot and validation path. `runtimeEvidence` means the current world/test run has produced bounded persisted trace data for that module. Each trace records timing, input/output summaries, decisions, and gaps without invoking a provider/model call during metrics reads. This distinction prevents the UI from claiming a feature is actively working just because the code contract exists.
 
-The Live World reference mapping is a product-scoped guidance contract, not a wholesale import of the reference stack. `/api/live-agent-mode/metrics` exposes `liveWorldReference` and a compact `metrics.liveWorldReference` summary that maps ClawMind modules to the reviewed EmergenceAI/Emergence-World commit. Current statuses are:
+The Live World reference mapping is a product-scoped guidance contract, not a wholesale import of the reference stack. `/api/live-agent-mode/metrics` exposes `liveWorldReference` and a compact `metrics.liveWorldReference` summary that maps ClawMind modules to the reviewed EmergenceAI/Emergence-World commit for legacy final-gate compatibility. `/api/live-agent-mode/metrics#clawMindArchitecture.referenceArchitectures` also lists MIT reuse candidates with `licenseFit` and `codeReuseAllowed` so the next migration can move the final gate to license-aware references without losing the existing runtime evidence. Current legacy statuses are:
 
 - `implemented`: embodied residents, tool-only mutation, location-gated tools, memory, visible events, and AWI-style alive-world indicators.
 - `partial`: relationship/social-fabric coverage, because the product has relationship and society traces but not the full reference taxonomy.
@@ -509,6 +535,8 @@ The decision layer has two modes:
 The deterministic planner should remain available for smoke tests, offline mode, and safe fallback. It can score candidates from needs, personality, goals, cooldowns, and recent outcomes.
 
 The model-backed planner should receive a structured context frame and choose tool calls from a validated tool list. It should not receive raw write access to world data.
+
+The model-backed planner must not be forced to pick from the static `LIVE_AGENT_LOOP_ACTIONS` chore catalog. That catalog can remain as a compatibility bridge while existing world-action executors are migrated, but the target planner output is a validated tool call with arguments. If a provider returns an invalid or unavailable tool call, the turn should record a validation failure or repair attempt instead of silently replacing the decision with a hard-coded chore.
 
 Decision input should include:
 
@@ -992,12 +1020,14 @@ This endpoint can remain as a high-level action request, but backend-owned Live 
 The frontend should:
 
 - display current resident status
+- display the backend-owned goal, intent, active tool, and blocked reason for a live-owned agent
 - display speech bubbles and emotes
 - animate backend movement events
 - animate backend object-use events
 - show active actions and recent history
 - provide operator pause/resume/approval controls
 - show when the backend simulation is running without a connected viewer
+- suppress browser scripted behavior for agents whose `behaviorOwner` is `live-agent-mode`
 
 The frontend should not:
 
@@ -1005,6 +1035,8 @@ The frontend should not:
 - be required to complete an autonomous action
 - write final world-action truth for backend-owned actions
 - mutate world state directly for autonomous tools
+- assign `_wanderTarget`, `_idleActivity`, proximity-social routines, desk-return work, or object-use scripts to live-owned agents
+- silently fall back from backend Live Mode to local browser autonomy when the scheduler pauses, fails, or disconnects
 
 ### 17. Safety and Operator Controls
 
@@ -1061,6 +1093,10 @@ The mode is not ready to expose in product UI until all of these pass:
 
 - A selected agent can run at least 50 consecutive backend-owned turns without an open browser.
 - The default 8587 soak can complete 5 backend-owned turns across at least five enabled Live Agent Mode agents, with per-agent turn/action counts in metrics and final-gate evidence.
+- Enabling Live Mode for an agent suppresses browser scripted movement, idle activity, proximity behavior, desk-return routines, and local object-use scripts for that agent.
+- Non-live agents continue to use normal browser scripted behavior.
+- The resident planner can choose validated tool calls from a generated affordance frame without mapping every decision through `LIVE_AGENT_LOOP_ACTIONS`.
+- Invalid provider/model tool calls are rejected, repaired, or skipped with audit evidence instead of silently becoming a hard-coded chore.
 - A selected agent can move to a building and persist its final location without browser help.
 - Refreshing the browser three times does not reset any live-enabled agent's server-authoritative location.
 - Two connected browser clients see the same agent movement and object/building mutation without manual refresh.
@@ -1082,6 +1118,15 @@ The mode is not ready to expose in product UI until all of these pass:
 - License and feature gates remain intact.
 
 ### 20. Delivery Plan
+
+The actionable delivery sequence is the child-PR queue in [LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md](LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md#required-child-prs). That queue supersedes any attempt to finish Live Agent Mode through broad phase work because the ownership boundary must land before planner, social, UI, and soak work can be trusted.
+
+Phase 0: Live ownership boundary
+
+- add per-agent behavior owner
+- suppress browser scripted behavior for live-owned agents
+- keep browser replay and explicit user commands working
+- prove normal scripted behavior still works for non-live agents
 
 Phase 1: backend ownership foundation
 

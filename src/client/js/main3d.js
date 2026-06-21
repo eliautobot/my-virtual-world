@@ -5421,6 +5421,55 @@ function applyAuthoritativePresenceToAgent(agent, presence = null, { force = fal
   return true;
 }
 
+function reconcileAuthoritativePresenceToAgent(agent, presence = null, {
+  force = false,
+  event = null,
+  sourceFamily = 'server-presence',
+  sourceFunction = 'reconcileAuthoritativePresenceToAgent',
+} = {}) {
+  if (!agent) return false;
+  const normalized = normalizeAuthoritativeAgentPresence(presence || agent.presence || agent.serverPresence);
+  if (!normalized || !Number.isFinite(normalized.apiX) || !Number.isFinite(normalized.apiZ)) return false;
+  if (force || !agent._group3d || !agent._serverPresence) {
+    return applyAuthoritativePresenceToAgent(agent, normalized, { force: true });
+  }
+
+  const previousPresence = agent._serverPresence || null;
+  const sameUpdate = previousPresence?.updatedAt && normalized.updatedAt && previousPresence.updatedAt === normalized.updatedAt;
+  if (sameUpdate) return false;
+
+  const routeState = String(normalized.routeState || normalized.routeStatus || normalized.state || '').toLowerCase();
+  const isTerminalPresence = ['completed', 'cancelled', 'failed', 'expired'].includes(routeState);
+  const source = String(normalized.source || '').toLowerCase();
+  const hasLiveRouteContext = Boolean(
+    normalized.worldActionId || normalized.actionId || normalized.routeId || normalized.route || normalized.target
+  );
+  const shouldRouteInsteadOfSnap = Boolean(
+    hasLiveRouteContext ||
+    (!isTerminalPresence && routeState) ||
+    ['live-agent-loop', 'browser-replay', 'user-move', 'world-event-feed', 'server-recovery'].includes(source) ||
+    agent._wanderTarget ||
+    agent._waypointPath ||
+    agent._agentIntent ||
+    agent._idleActivity ||
+    Number(agent._worldEventFeedPresenceHoldUntil || 0) > performance.now()
+  );
+
+  if (shouldRouteInsteadOfSnap) {
+    const routeResult = routeAuthoritativePresenceToAgent(agent, normalized, {
+      event,
+      snap: false,
+      sourceFamily,
+      sourceFunction,
+    });
+    const routeNoop = routeResult.reason === 'duplicate-presence' || routeResult.reason === 'already-at-presence';
+    if (routeResult.applied || routeNoop) return true;
+    if (routeResult.rejected) return false;
+  }
+
+  return applyAuthoritativePresenceToAgent(agent, normalized, { force: false });
+}
+
 function resolveAuthoritativePresenceRouteBuilding(normalized) {
   if (!normalized) return null;
   return (normalized.buildingId ? buildingsMap.get(normalized.buildingId) : null)
@@ -28734,7 +28783,10 @@ async function loadAgents() {
             a.agentLiveModeEnabled = rosterMatch.agentLiveModeEnabled;
           }
           if (rosterMatch?.presence || rosterMatch?.serverPresence) {
-            applyAuthoritativePresenceToAgent(a, rosterMatch.presence || rosterMatch.serverPresence);
+            reconcileAuthoritativePresenceToAgent(a, rosterMatch.presence || rosterMatch.serverPresence, {
+              sourceFamily: 'agent-roster-refresh',
+              sourceFunction: 'loadAgents:statusPoll',
+            });
           }
         });
         updateAgentList();
@@ -36251,14 +36303,17 @@ function applyWorldEventFeedPresencePatch(event = {}, { snap = false } = {}) {
     source: value.source || event.source || 'world-event-feed',
     updatedAt: value.updatedAt || event.createdAt || new Date().toISOString(),
   };
-  const routeResult = routeAuthoritativePresenceToAgent(agent, presence, {
-    event,
-    snap,
-    sourceFamily: 'world-event-feed',
-    sourceFunction: 'applyWorldEventFeedPresencePatch',
-  });
+  const shouldSnapOnly = snap && (!agent._group3d || !agent._serverPresence);
+  const routeResult = shouldSnapOnly
+    ? { applied: false, rejected: false, reason: 'snap-requested' }
+    : routeAuthoritativePresenceToAgent(agent, presence, {
+        event,
+        snap: false,
+        sourceFamily: 'world-event-feed',
+        sourceFunction: 'applyWorldEventFeedPresencePatch',
+      });
   const routeNoop = routeResult.reason === 'duplicate-presence' || routeResult.reason === 'already-at-presence';
-  const shouldSnapFallback = !routeResult.applied && !routeResult.rejected && !routeNoop;
+  const shouldSnapFallback = shouldSnapOnly && !routeResult.applied && !routeResult.rejected && !routeNoop;
   const applied = routeResult.applied || routeNoop || (shouldSnapFallback && applyAuthoritativePresenceToAgent(agent, presence, { force: true }));
   if (applied) {
     if (!routeResult.applied && !routeNoop) {

@@ -118,7 +118,7 @@ GET /api/agent-platform-communications/skill
 
 Agent Live Mode lets activated installs accept higher-level agent action requests.
 
-The product UI currently keeps this mode hidden behind `Live Agent Mode Coming Soon`. The implementation target is a backend-owned autonomous resident loop where agents act through validated tools, persist decisions and side effects server-side, and publish browser-replayable animation events. The reference direction for Live Agent Mode and ClawMind only is the [reference repo](https://github.com/EmergenceAI/Emergence-World): embodied residents, location-gated tools, memory/relationship context, visible state changes, and measurable society behavior adapted to My Virtual World's provider-neutral safety model. See [LIVE-AGENT-MODE-SPEC.md](LIVE-AGENT-MODE-SPEC.md) for the detailed contract and acceptance criteria.
+The product UI currently keeps this mode hidden behind `Live Agent Mode Coming Soon`. The implementation target is a backend-owned autonomous resident loop where agents act through validated tools, persist decisions and side effects server-side, suppress browser scripted behavior for live-owned agents, and publish browser-replayable animation events. The MIT-first implementation references and ordered child PR plan live in [LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md](LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md); [LIVE-AGENT-MODE-SPEC.md](LIVE-AGENT-MODE-SPEC.md) remains the detailed contract and acceptance criteria.
 
 Relevant endpoints:
 

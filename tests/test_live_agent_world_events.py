@@ -59,6 +59,72 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_live_agent_action_request_does_not_hold_handoff_lock_during_backend_execution(self):
+        class TrackingLock:
+            def __init__(self):
+                self.held = False
+
+            def __enter__(self):
+                self.held = True
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                self.held = False
+                return False
+
+        lock = TrackingLock()
+        action = {
+            "id": "wa-test-adam-maintenance.printCopy",
+            "agentId": "adam",
+            "actionType": "maintenance.printCopy",
+            "route": {"id": "route-wa-test"},
+        }
+
+        original_handoff_lock = self.server._live_agent_action_handoff_lock
+        replacements = {
+            "_live_agent_action_handoff_lock": lock,
+            "_agent_live_mode_gate_error": lambda: None,
+            "_resolve_agent_id": lambda value: "adam" if value == "adam" else None,
+            "get_agent_live_mode_setting": lambda agent_id: {"agentLiveModeEnabled": True},
+            "_validate_live_agent_visible_action_contract": lambda payload, action_type=None, capability=None: ({"clientExecutor": "main3d.js#printCopy"}, None),
+        }
+
+        def fake_prepare(agent_id):
+            self.assertTrue(lock.held)
+            return [], None, None
+
+        def fake_create_world_action(payload):
+            self.assertFalse(lock.held, "backend-owned action creation must not run under the handoff lock")
+            return True, {"ok": True, "action": action}, 201
+
+        def fake_advance(action_id, *, reason):
+            self.assertFalse(lock.held, "backend-owned action advancement must not run under the handoff lock")
+            self.assertEqual(action_id, action["id"])
+            return True, {"ok": True, "action": {**action, "status": "completed"}}, 200
+
+        replacements.update({
+            "_prepare_agent_live_mode_action_call": fake_prepare,
+            "create_world_action": fake_create_world_action,
+            "advance_live_agent_backend_world_action": fake_advance,
+        })
+
+        originals = {name: getattr(self.server, name) for name in replacements}
+        self.addCleanup(lambda: setattr(self.server, "_live_agent_action_handoff_lock", original_handoff_lock))
+        for name, value in replacements.items():
+            setattr(self.server, name, value)
+        self.addCleanup(lambda: [setattr(self.server, name, value) for name, value in originals.items()])
+
+        ok, body, status = self.server.create_agent_live_mode_action_request({
+            "agentId": "adam",
+            "actionType": "maintenance.printCopy",
+            "capabilityTag": "maintenance.printCopy",
+            "source": {"kind": "agent-live-mode"},
+        })
+
+        self.assertTrue(ok, body)
+        self.assertEqual(status, 202)
+        self.assertEqual(body.get("action", {}).get("status"), "completed")
+
     def _seed_two_live_agents_for_reactions(self):
         previous_vw_int = os.environ.get("_VW_INT")
         os.environ["_VW_INT"] = "1"

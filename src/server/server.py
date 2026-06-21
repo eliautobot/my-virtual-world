@@ -1521,6 +1521,8 @@ LIVE_AGENT_REFERENCE_ARCHITECTURES = [
         "url": "https://github.com/EmergenceAI/Emergence-World",
         "reviewedCommit": "7613dcb6554133144779f4c4f0ba49064894b3a5",
         "role": "guidance",
+        "licenseFit": "inspiration-only-non-mit",
+        "codeReuseAllowed": False,
         "scope": "live-agent-mode-clawmind-only",
         "implementationMode": "adapted-to-my-virtual-world",
         "patterns": [
@@ -1536,6 +1538,66 @@ LIVE_AGENT_REFERENCE_ARCHITECTURES = [
             "do-not-copy-stack-wholesale",
             "do-not-add-unsafe-actions-without-typed-executors",
             "do-not-require-browser-tab-for-progression",
+        ],
+    },
+    {
+        "id": "ai-town-mit-reference",
+        "name": "AI Town",
+        "url": "https://github.com/a16z-infra/ai-town",
+        "role": "primary-mit-reference",
+        "licenseFit": "mit-code-reuse-candidate",
+        "codeReuseAllowed": True,
+        "scope": "live-agent-mode-clawmind-only",
+        "implementationMode": "adapt-patterns-to-my-virtual-world",
+        "patterns": [
+            "ai-residents-live-chat-socialize",
+            "shared-global-state",
+            "transactional-simulation-engine",
+            "multiplayer-friendly-world-state",
+        ],
+        "nonGoals": [
+            "do-not-migrate-to-convex-in-this-pr",
+            "do-not-copy-without-attribution-and-review",
+        ],
+    },
+    {
+        "id": "smallville-mit-reference",
+        "name": "Smallville",
+        "url": "https://github.com/nmatter1/smallville",
+        "role": "secondary-mit-reference",
+        "licenseFit": "mit-code-reuse-candidate",
+        "codeReuseAllowed": True,
+        "scope": "live-agent-mode-clawmind-only",
+        "implementationMode": "adapt-patterns-to-my-virtual-world",
+        "patterns": [
+            "observe-surroundings",
+            "store-memories",
+            "react-to-world-state",
+            "game-facing-generative-agents",
+        ],
+        "nonGoals": [
+            "do-not-replace-existing-world-engine",
+            "do-not-copy-without-attribution-and-review",
+        ],
+    },
+    {
+        "id": "philoagents-mit-reference",
+        "name": "PhiloAgents Course",
+        "url": "https://github.com/neural-maze/philoagents-course",
+        "role": "secondary-mit-reference",
+        "licenseFit": "mit-code-reuse-candidate",
+        "codeReuseAllowed": True,
+        "scope": "live-agent-mode-clawmind-only",
+        "implementationMode": "adapt-patterns-to-my-virtual-world",
+        "patterns": [
+            "agentic-simulation-engine",
+            "rest-api-agent-boundary",
+            "rag-and-agent-orchestration",
+            "llmops-observability",
+        ],
+        "nonGoals": [
+            "do-not-import-course-stack-wholesale",
+            "do-not-copy-without-attribution-and-review",
         ],
     },
 ]
@@ -10689,66 +10751,66 @@ def create_agent_live_mode_action_request(payload):
 
     with _live_agent_action_handoff_lock:
         interrupted, error, status = _prepare_agent_live_mode_action_call(agent_id)
-        if error:
-            return False, error, status
+    if error:
+        return False, error, status
 
-        action_payload = {**payload, "agentId": agent_id, "source": {**source, "kind": "agent-live-mode"}}
-        visible_params = {
+    action_payload = {**payload, "agentId": agent_id, "source": {**source, "kind": "agent-live-mode"}}
+    visible_params = {
+        "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+        "visibleActionPolicy": "visible-world-execution-required",
+        "visibleWorldAction": True,
+        "hiddenWorldMutationAllowed": False,
+        "visibleExecutor": visible_action_contract.get("clientExecutor") if visible_action_contract else None,
+        "requiresPhysicalAgentPresence": True,
+    }
+    if isinstance(payload.get("params"), dict):
+        action_payload["params"] = {**payload.get("params"), **visible_params}
+    elif payload.get("params") is None:
+        action_payload["params"] = visible_params
+    ok, action_result, action_status = create_world_action(action_payload)
+    if not ok:
+        return False, action_result, action_status
+    action = action_result.get("action") if isinstance(action_result, dict) else None
+    action_id = action.get("id") if isinstance(action, dict) else None
+    backend_ok, backend_result, backend_status = advance_live_agent_backend_world_action(action_id, reason="agent-live-mode-request")
+    if not backend_ok:
+        transition_world_action(
+            action_id,
+            "failed",
+            result={"status": "failed", "reason": "backend_executor_failed", "details": backend_result},
+            failure_reason="runtime_error",
+            actor=LIVE_AGENT_BACKEND_EXECUTOR_ID,
+            source="agent-live-mode",
+        )
+        return False, _api_error("backend_executor_failed", "Agent Live Mode action was created but backend-owned execution failed; the action was marked failed.", details=backend_result), backend_status
+    final_action = backend_result.get("action") if isinstance(backend_result, dict) else action_result.get("action")
+    return True, {
+        "ok": True,
+        "action": final_action,
+        "worldAction": {**action_result, "action": final_action},
+        "moveIntent": None,
+        "routeHandoff": final_action.get("route") if isinstance(final_action, dict) else None,
+        "linkedAction": final_action,
+        "backendExecution": backend_result,
+        "interruptedLowerLayer": interrupted,
+        "callerContract": {
+            "endpoint": "POST /api/agent-model/actions",
+            "requiredSourceKind": "agent-live-mode",
+            "requiresAgentLiveModeEnabled": True,
+            "usesExistingWorldActionValidation": True,
+            "usesExistingMoveIntentHandoff": False,
+            "skipsMoveIntentHandoffForBackendOwnedActions": True,
+            "backendExecutionVersion": LIVE_AGENT_BACKEND_EXECUTION_VERSION,
+            "backendOwnsProgressAndCompletion": True,
+            "worldClientRequiredForProgress": False,
+            "animationEventsEndpoint": "/api/live-agent-mode/animation-events",
             "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
-            "visibleActionPolicy": "visible-world-execution-required",
-            "visibleWorldAction": True,
+            "visibleWorldExecutionRequired": True,
             "hiddenWorldMutationAllowed": False,
             "visibleExecutor": visible_action_contract.get("clientExecutor") if visible_action_contract else None,
-            "requiresPhysicalAgentPresence": True,
-        }
-        if isinstance(payload.get("params"), dict):
-            action_payload["params"] = {**payload.get("params"), **visible_params}
-        elif payload.get("params") is None:
-            action_payload["params"] = visible_params
-        ok, action_result, action_status = create_world_action(action_payload)
-        if not ok:
-            return False, action_result, action_status
-        action = action_result.get("action") if isinstance(action_result, dict) else None
-        action_id = action.get("id") if isinstance(action, dict) else None
-        backend_ok, backend_result, backend_status = advance_live_agent_backend_world_action(action_id, reason="agent-live-mode-request")
-        if not backend_ok:
-            transition_world_action(
-                action_id,
-                "failed",
-                result={"status": "failed", "reason": "backend_executor_failed", "details": backend_result},
-                failure_reason="runtime_error",
-                actor=LIVE_AGENT_BACKEND_EXECUTOR_ID,
-                source="agent-live-mode",
-            )
-            return False, _api_error("backend_executor_failed", "Agent Live Mode action was created but backend-owned execution failed; the action was marked failed.", details=backend_result), backend_status
-        final_action = backend_result.get("action") if isinstance(backend_result, dict) else action_result.get("action")
-        return True, {
-            "ok": True,
-            "action": final_action,
-            "worldAction": {**action_result, "action": final_action},
-            "moveIntent": None,
-            "routeHandoff": final_action.get("route") if isinstance(final_action, dict) else None,
-            "linkedAction": final_action,
-            "backendExecution": backend_result,
-            "interruptedLowerLayer": interrupted,
-            "callerContract": {
-                "endpoint": "POST /api/agent-model/actions",
-                "requiredSourceKind": "agent-live-mode",
-                "requiresAgentLiveModeEnabled": True,
-                "usesExistingWorldActionValidation": True,
-                "usesExistingMoveIntentHandoff": False,
-                "skipsMoveIntentHandoffForBackendOwnedActions": True,
-                "backendExecutionVersion": LIVE_AGENT_BACKEND_EXECUTION_VERSION,
-                "backendOwnsProgressAndCompletion": True,
-                "worldClientRequiredForProgress": False,
-                "animationEventsEndpoint": "/api/live-agent-mode/animation-events",
-                "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
-                "visibleWorldExecutionRequired": True,
-                "hiddenWorldMutationAllowed": False,
-                "visibleExecutor": visible_action_contract.get("clientExecutor") if visible_action_contract else None,
-                "overrideOrder": ["user", "agent-live-mode", "agent-scripted-mode"],
-            },
-        }, 202
+            "overrideOrder": ["user", "agent-live-mode", "agent-scripted-mode"],
+        },
+    }, 202
 
 
 # ─── AGENT LIVE MODE PERSISTENT LOOP ─────────────────────────────
@@ -22013,8 +22075,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                         "userAgent": self.headers.get("User-Agent"),
                     },
                 )
-            with _live_agent_action_handoff_lock:
-                active_actions = reconcile_world_action_reservations().get("active", [])
+            active_actions = reconcile_world_action_reservations().get("active", [])
             return self._send_json(active_actions)
 
         if path == "/api/world-actions/history":
