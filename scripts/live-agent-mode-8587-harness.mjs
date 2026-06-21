@@ -236,10 +236,14 @@ async function disableDayNightCycleFor8587() {
 }
 
 async function postJsonExpectStatus(path, body, expectedStatus) {
+  return requestJsonExpectStatus(path, { method: 'POST', body }, expectedStatus);
+}
+
+async function requestJsonExpectStatus(path, { method = 'POST', body = undefined } = {}, expectedStatus) {
   const response = await fetch(`${BASE_URL}${path}`, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   let payload = null;
   try {
@@ -247,7 +251,7 @@ async function postJsonExpectStatus(path, body, expectedStatus) {
   } catch {
     payload = null;
   }
-  assert(response.status === expectedStatus, `${path} returned HTTP ${response.status}, expected ${expectedStatus}`, payload);
+  assert(response.status === expectedStatus, `${method} ${path} returned HTTP ${response.status}, expected ${expectedStatus}`, payload);
   return payload;
 }
 
@@ -873,6 +877,13 @@ async function verifyRouteBeforeActionPresenceGates() {
     const stillArrived = (active || []).find((item) => item?.id === actionId);
     assert(stillArrived?.status === 'arrived', 'rejected mutation must not silently advance the world action', stillArrived || active);
 
+    await saveAgentPresenceSnapshot(TEST_AGENT_ID, arrivedPresence, '8587-route-before-action-correct-presence');
+    const inProgress = await transition('in_progress', '8587-route-before-action-in-progress-after-presence-restore');
+    assert(inProgress.timing?.mutationAppliedAt, 'in-progress transition should record mutationAppliedAt after arrival', inProgress);
+    const completed = await transition('completed', '8587-route-before-action-completed-after-presence-restore');
+    assert(completed.status === 'completed', 'route-before-action fixture should complete after correct presence is restored', completed);
+    completedFixture = true;
+
     const rawRejected = await postJsonExpectStatus('/api/buildings', {
       id: '8587-hidden-live-agent-raw-building',
       name: 'Hidden Live Agent Raw Building',
@@ -887,15 +898,57 @@ async function verifyRouteBeforeActionPresenceGates() {
     assert(rawRejected?.error?.code === 'route_before_action_required', 'direct Live Agent raw world mutation should be rejected', rawRejected);
     assert(rawRejected?.error?.details?.hiddenWorldMutationAllowed === false, 'raw mutation rejection should state hidden mutation is not allowed', rawRejected);
 
-    await saveAgentPresenceSnapshot(TEST_AGENT_ID, arrivedPresence, '8587-route-before-action-correct-presence');
-    const inProgress = await transition('in_progress', '8587-route-before-action-in-progress-after-presence-restore');
-    assert(inProgress.timing?.mutationAppliedAt, 'in-progress transition should record mutationAppliedAt after arrival', inProgress);
-    const completed = await transition('completed', '8587-route-before-action-completed-after-presence-restore');
-    assert(completed.status === 'completed', 'route-before-action fixture should complete after correct presence is restored', completed);
-    completedFixture = true;
+    const deleteFixtureBuildingId = '8587-hidden-live-agent-delete-building';
+    const deleteFixtureBuilding = await postJson('/api/building', {
+      id: deleteFixtureBuildingId,
+      name: '8587 Live Agent Delete Gate Fixture',
+      type: 'office',
+      worldX: 40,
+      worldY: 40,
+      x: 40,
+      z: 40,
+      widthTiles: 4,
+      heightTiles: 4,
+      interior: { furniture: [] },
+    });
+    assert(deleteFixtureBuilding?.ok === true, 'failed to seed raw delete gate building fixture', deleteFixtureBuilding);
+    const rawBuildingDeleteRejected = await requestJsonExpectStatus(`/api/building/${encodeURIComponent(deleteFixtureBuildingId)}`, {
+      method: 'DELETE',
+      body: {
+        source: liveAgentSource('8587-route-before-action-raw-delete-building'),
+        agentId: TEST_AGENT_ID,
+        actionType: 'world.deleteBuilding',
+        capabilityTag: 'world.structure',
+        target: { kind: 'building', buildingId: deleteFixtureBuildingId, floor: 1 },
+      },
+    }, 422);
+    assert(rawBuildingDeleteRejected?.error?.code === 'route_before_action_required', 'direct Live Agent raw building DELETE should be rejected', rawBuildingDeleteRejected);
+    const stillPresentBuilding = await fetchJson(`/api/building/${encodeURIComponent(deleteFixtureBuildingId)}`);
+    assert(stillPresentBuilding?.id === deleteFixtureBuildingId, 'rejected Live Agent raw building DELETE must not remove the building', stillPresentBuilding);
+    await requestJsonExpectStatus(`/api/building/${encodeURIComponent(deleteFixtureBuildingId)}`, { method: 'DELETE' }, 200);
 
-    console.log(`PASS: route-before-action gate rejected missing-coordinate and far-away mutations for ${actionId} and blocked direct raw Live Agent world edit.`);
-    return { actionId, missingCoordinateRejected, farAwayRejected, rawRejected };
+    const chunkFixture = await postJson('/api/chunk/8587/4242', {
+      source: '8587-route-before-action-raw-delete-chunk-fixture',
+      terrain: [{ x: 0, y: 0, type: 'grass' }],
+    });
+    assert(chunkFixture?.ok === true, 'failed to seed raw delete gate chunk fixture', chunkFixture);
+    const rawChunkDeleteRejected = await requestJsonExpectStatus('/api/chunk/8587/4242', {
+      method: 'DELETE',
+      body: {
+        source: liveAgentSource('8587-route-before-action-raw-delete-chunk'),
+        agentId: TEST_AGENT_ID,
+        actionType: 'world.deleteChunk',
+        capabilityTag: 'world.terrain',
+        target: { kind: 'world-point', chunkX: 8587, chunkY: 4242 },
+      },
+    }, 422);
+    assert(rawChunkDeleteRejected?.error?.code === 'route_before_action_required', 'direct Live Agent raw chunk DELETE should be rejected', rawChunkDeleteRejected);
+    const stillPresentChunk = await fetchJson('/api/chunk/8587/4242');
+    assert(stillPresentChunk !== null, 'rejected Live Agent raw chunk DELETE must not remove the chunk', stillPresentChunk);
+    await requestJsonExpectStatus('/api/chunk/8587/4242', { method: 'DELETE' }, 200);
+
+    console.log(`PASS: route-before-action gate rejected missing-coordinate and far-away mutations for ${actionId} and blocked direct raw Live Agent create/delete world edits.`);
+    return { actionId, missingCoordinateRejected, farAwayRejected, rawRejected, rawBuildingDeleteRejected, rawChunkDeleteRejected };
   } finally {
     if (!completedFixture) {
       try {
@@ -999,6 +1052,24 @@ async function ensureFakeProviderFixtureProfile() {
   const meta = await fetchJson('/api/meta');
   const profiles = {
     ...(meta?.agentProfiles && typeof meta.agentProfiles === 'object' ? meta.agentProfiles : {}),
+    [HERMES_FIXTURE_AGENT_ID]: {
+      ...(meta?.agentProfiles?.[HERMES_FIXTURE_AGENT_ID] || {}),
+      name: 'Acceptance Hermes Fixture',
+      providerKind: 'hermes',
+      providerType: 'profile-backed',
+      providerAgentId: 'acceptance-hermes',
+      agentLiveModeEnabled: false,
+      capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
+    },
+    [CODEX_FIXTURE_AGENT_ID]: {
+      ...(meta?.agentProfiles?.[CODEX_FIXTURE_AGENT_ID] || {}),
+      name: 'Acceptance Codex Fixture',
+      providerKind: 'codex',
+      providerType: 'profile-backed',
+      providerAgentId: 'acceptance-codex',
+      agentLiveModeEnabled: false,
+      capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
+    },
     [FAKE_FIXTURE_AGENT_ID]: {
       ...(meta?.agentProfiles?.[FAKE_FIXTURE_AGENT_ID] || {}),
       name: 'Acceptance Fake Provider',
@@ -1353,8 +1424,10 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   verifySoakDistributionMetrics(metrics, { expectedAgents, expectedTurns });
   assert(metrics.metrics?.routePendingActiveCount === 0, 'metrics should show no active route_pending actions', metrics.metrics);
   assert(metrics.metrics?.routeBeforeAction?.ok === true, 'metrics should show no route-before-action violations', metrics.metrics?.routeBeforeAction);
+  assert(metrics.metrics?.routeBeforeAction?.mutationCount >= expectedTurns, 'route-before-action metrics should expose inspected mutation count', metrics.metrics?.routeBeforeAction);
   assert(metrics.metrics?.routeBeforeAction?.violationCount === 0, 'route-before-action violation count should be zero', metrics.metrics?.routeBeforeAction);
   assert(metrics.metrics?.presenceDefinedMutation?.ok === true, 'metrics should show no presence-defined mutation violations', metrics.metrics?.presenceDefinedMutation);
+  assert(metrics.metrics?.presenceDefinedMutation?.mutationCount >= expectedTurns, 'presence-defined mutation metrics should expose inspected mutation count', metrics.metrics?.presenceDefinedMutation);
   assert(metrics.metrics?.presenceDefinedMutation?.violationCount === 0, 'presence-defined mutation violation count should be zero', metrics.metrics?.presenceDefinedMutation);
   assert(metrics.finalGate?.checks?.routeBeforeAction === true, 'final gate should fail on route-before-action violations', metrics.finalGate);
   assert(metrics.finalGate?.checks?.presenceDefinedMutation === true, 'final gate should fail on presence-defined mutation violations', metrics.finalGate);

@@ -720,6 +720,7 @@ try:
     assert metrics["metrics"]["presencePersistence"]["refreshResetCount"] == 0, metrics["metrics"]["presencePersistence"]
     assert metrics["metrics"]["routeBeforeAction"]["violationCount"] == 0, metrics["metrics"]["routeBeforeAction"]
     assert metrics["metrics"]["presenceDefinedMutation"]["violationCount"] == 0, metrics["metrics"]["presenceDefinedMutation"]
+    assert isinstance(metrics["metrics"]["presenceDefinedMutation"]["mutationCount"], int), metrics["metrics"]["presenceDefinedMutation"]
     assert metrics["finalGate"]["checks"]["routeBeforeAction"] is True, metrics["finalGate"]
     assert metrics["finalGate"]["checks"]["presenceDefinedMutation"] is True, metrics["finalGate"]
     assert metrics["finalGate"]["checks"]["defaultSoakEnabledAgentRosterPresent"] is False, metrics["finalGate"]

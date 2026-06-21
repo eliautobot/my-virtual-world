@@ -5397,12 +5397,14 @@ def _live_agent_route_before_action_metrics(actions):
         "inspectedActionCount": len(inspected),
         "routeBeforeAction": {
             "ok": len(route_violations) == 0,
+            "mutationCount": mutation_count,
             "violationCount": len(route_violations),
             "violations": route_violations[:20],
         },
         "presenceDefinedMutation": {
             "schemaVersion": LIVE_AGENT_PRESENCE_DEFINED_MUTATION_SCHEMA_VERSION,
             "ok": len(presence_violations) == 0,
+            "mutationCount": mutation_count,
             "violationCount": len(presence_violations),
             "violations": presence_violations[:20],
         },
@@ -19607,11 +19609,41 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
+        payload = {}
+        if int(self.headers.get("Content-Length", 0) or 0) > 0:
+            try:
+                body = self._read_body()
+            except json.JSONDecodeError:
+                return self._send_json(_api_error("invalid_json", "DELETE request body must be valid JSON."), 400)
+            if isinstance(body, dict):
+                payload = body
+            elif body is not None:
+                return self._send_json(_api_error("invalid_payload", "DELETE request body must be an object when supplied."), 400)
+        if query.get("source") or query.get("agentId") or query.get("actionType"):
+            source_value = (query.get("source") or [None])[0]
+            query_payload = {
+                "source": {"kind": source_value} if source_value else None,
+                "agentId": (query.get("agentId") or [None])[0],
+                "actionType": (query.get("actionType") or [None])[0],
+            }
+            payload = {**{key: value for key, value in query_payload.items() if value}, **payload}
 
         if path.startswith("/api/building/"):
             if _demo_feature_locked("advancedEditor"):
                 return self._send_json(_demo_edit_locked_response(), 403)
             building_id = path.split("/")[-1]
+            if _payload_includes_agent_live_mode_source(payload):
+                delete_payload = {
+                    **payload,
+                    "actionType": payload.get("actionType") or "world.deleteBuilding",
+                    "capabilityTag": payload.get("capabilityTag") or "world.structure",
+                    "target": payload.get("target") if isinstance(payload.get("target"), dict) else {
+                        "kind": "building",
+                        "buildingId": building_id,
+                    },
+                }
+                return self._send_json(_live_agent_raw_mutation_blocked_response(delete_payload, endpoint=path, action_type="world.deleteBuilding"), 422)
             before = load_building(building_id)
             if delete_building(building_id):
                 publish_building_world_events(before, None, source=path, actor="api")
@@ -19625,6 +19657,18 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if len(parts) >= 5:
                 try:
                     cx, cy = int(parts[3]), int(parts[4])
+                    if _payload_includes_agent_live_mode_source(payload):
+                        delete_payload = {
+                            **payload,
+                            "actionType": payload.get("actionType") or "world.deleteChunk",
+                            "capabilityTag": payload.get("capabilityTag") or "world.terrain",
+                            "target": payload.get("target") if isinstance(payload.get("target"), dict) else {
+                                "kind": "world-point",
+                                "chunkX": cx,
+                                "chunkY": cy,
+                            },
+                        }
+                        return self._send_json(_live_agent_raw_mutation_blocked_response(delete_payload, endpoint=path, action_type="world.deleteChunk"), 422)
                     p = chunk_path(cx, cy)
                     if os.path.exists(p):
                         os.remove(p)
