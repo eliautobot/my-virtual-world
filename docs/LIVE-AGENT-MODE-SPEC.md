@@ -58,7 +58,7 @@ The copy/reuse reference priority is MIT-first:
 - [joonspk-research/generative_agents](https://github.com/joonspk-research/generative_agents): Apache-2.0 canonical research implementation; use as attributed design lineage, not as an MIT source.
 - [EmergenceAI/Emergence-World](https://github.com/EmergenceAI/Emergence-World): non-MIT research/non-commercial/proprietary source; use as architecture inspiration only and do not copy code, content, tool catalogs, profiles, prompts, or datasets.
 
-The existing `liveWorldReference` metrics contract still pins the reviewed Emergence World reference until the planned MIT reference migration child PR lands. That legacy metric is a product-scoped guidance contract, not permission to copy from that repository.
+The existing `liveWorldReference` metrics contract still pins the reviewed Emergence World reference as inspiration-only evidence. The MIT-first reference contract in PR #1 must keep copy/reuse candidates separate from non-MIT inspiration, and the legacy metric is not permission to copy from that repository.
 
 The goal is not to copy any stack wholesale; it is to adapt architecture patterns that make a custom world feel alive:
 
@@ -77,7 +77,7 @@ My Virtual World should implement these as product-native primitives: backend-ow
 
 ### Live World ClawMind Child PR Queue
 
-Adding references or metrics does not by itself make the final PR complete. The final gate should stay superseded until the ordered child PRs in [LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md](LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md#required-child-prs) land or are explicitly closed as unnecessary:
+Adding references or metrics does not by itself make the final PR complete. Eli's current requirement is that PR #1 carry the full working Live Agent architecture, so the ordered implementation slices in [LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md](LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md#consolidated-pr-1-implementation-slices) must be implemented, folded in, or explicitly proven unnecessary before PR #1 is treated as complete:
 
 The earlier ClawMind queue remains part of the historical acceptance vocabulary and is now folded into the ordered Live ownership plan: `20-liveworld-clawmind-reference-contract`, `21-liveworld-context-assembly`, `22-liveworld-adaptive-affordances`, `23-liveworld-reactive-social-loop`, `24-liveworld-public-expression-and-culture`, and `25-liveworld-alive-world-indicators`.
 
@@ -93,7 +93,7 @@ The earlier ClawMind queue remains part of the historical acceptance vocabulary 
 10. `35-mit-reference-migration-reuse-audit`: metrics and docs distinguish MIT reusable references from inspiration-only sources.
 11. `36-unified-autonomy-soak-gate`: 8587 proves no-browser turns, multi-agent distribution, browser replay, no resets, and scripted suppression.
 
-Each child PR must target `docs/live-agent-mode-autonomy-spec`, keep scope inside Live Agent Mode / ClawMind, run `npm test`, run the relevant 8587 checks when feasible, and avoid touching protected port `8590`.
+Each slice must keep scope inside Live Agent Mode / ClawMind, run `npm test`, run the relevant 8587 checks when feasible, and avoid touching protected port `8590`.
 
 The redesigned mode keeps the good API vocabulary, but moves autonomous execution authority to the backend.
 
@@ -1119,7 +1119,7 @@ The mode is not ready to expose in product UI until all of these pass:
 
 ### 20. Delivery Plan
 
-The actionable delivery sequence is the child-PR queue in [LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md](LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md#required-child-prs). That queue supersedes any attempt to finish Live Agent Mode through broad phase work because the ownership boundary must land before planner, social, UI, and soak work can be trusted.
+The actionable delivery sequence is the consolidated PR #1 implementation slice list in [LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md](LIVE-AGENT-MODE-UNIFIED-AUTONOMY-PLAN.md#consolidated-pr-1-implementation-slices). Those slices supersede broad phase work because the ownership boundary must land before planner, social, UI, and soak work can be trusted, but the work should remain folded into PR #1 unless Eli explicitly reopens separate child PRs.
 
 Phase 0: Live ownership boundary
 

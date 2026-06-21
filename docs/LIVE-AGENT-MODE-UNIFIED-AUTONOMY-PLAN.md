@@ -1,10 +1,12 @@
 # Live Agent Mode Unified Autonomy Plan
 
-Status: PR #1 preparation plan
+Status: PR #1 consolidated implementation plan
 Owner: product architecture review
 Scope: Live Agent Mode and ClawMind only
 
 This document turns the Live Agent Mode direction into an ordered implementation plan. The target is a coherent resident system where Live Mode supersedes browser scripted behavior, the backend owns intent and state, and agents make self-authorized decisions through validated tools.
+
+Scope update: PR #1 is now the consolidation branch for the full working Live Agent architecture, not merely a preparation/specification branch. The implementation slices below are retained as ordering and review boundaries, but remaining work should be folded into PR #1 before final merge unless Eli explicitly reopens separate child work.
 
 ## User Requirement
 
@@ -44,7 +46,7 @@ Only MIT-compatible sources should be candidates for code reuse. Non-MIT sources
 | `nmatter1/smallville` | MIT | Generative agents for video games; agents observe surroundings, store memories, and react to state changes. | Secondary reusable reference for memory/reaction loops and game-facing NPC autonomy. Use concepts and small compatible patterns after code review. |
 | `neural-maze/philoagents-course` | MIT | AI-powered game simulation engine, REST API, RAG/LLMOps, LangGraph/LangChain patterns, observability. | Secondary reusable reference for production agent orchestration, API boundaries, tracing, and evaluation. It is less directly a spatial-world engine than AI Town. |
 | `joonspk-research/generative_agents` | Apache-2.0 | Canonical Generative Agents implementation and research lineage for memory, reflection, planning, and believable behavior. | Study and reimplement concepts where useful. Do not treat it as MIT; Apache-2.0 is usable but should stay clearly attributed and reviewed separately. |
-| `EmergenceAI/Emergence-World` | Not MIT; research/non-commercial/proprietary terms | Long-horizon multi-agent world, location/context-gated tools, persistent memory, governance/economy concepts, "no scripts/no resets" direction. | Architecture inspiration only. Do not copy code, content, profiles, datasets, tool catalogs, prompts, or licensed material. Current metrics still expose the legacy Live World reference contract; a child PR should migrate that contract to MIT-first references plus non-copy inspiration. |
+| `EmergenceAI/Emergence-World` | Not MIT; research/non-commercial/proprietary terms | Long-horizon multi-agent world, location/context-gated tools, persistent memory, governance/economy concepts, "no scripts/no resets" direction. | Architecture inspiration only. Do not copy code, content, profiles, datasets, tool catalogs, prompts, or licensed material. PR #1 must keep MIT/code-reuse sources primary and classify Emergence World as inspiration-only. |
 
 Recommended source priority:
 
@@ -181,9 +183,25 @@ Autonomy remains bounded:
 
 Agents can self-authorize Tier 0-1 actions when Live Mode is enabled. Higher tiers require approval, quotas, or proposal workflows.
 
-## Required Child PRs
+## Consolidated PR #1 Implementation Slices
 
-These child PRs should target `docs/live-agent-mode-autonomy-spec` and keep scope inside Live Agent Mode / ClawMind. Each PR must avoid protected product runtime ports, run `npm test`, and run the relevant isolated Live Agent harness checks when feasible.
+These slices were originally written as child PRs targeting `docs/live-agent-mode-autonomy-spec`. Eli clarified that they should be addressed as part of PR #1 instead. Keep the slice numbers for traceability, but do not treat unopened PR numbers as completed work. PR #1 must avoid protected product runtime ports, run `npm test`, and run the relevant isolated Live Agent harness checks when feasible.
+
+Current PR #1 consolidation status:
+
+| Slice | Status in PR #1 | Evidence |
+| --- | --- | --- |
+| 26 - Live Behavior Ownership Boundary | Folded | Route-gate corrective commit interrupts/rejects scripted ownership conflicts and adds regression tests for scripted/user/live authority. |
+| 27 - Backend Live Intent and Visible Status | Folded | Metrics, timeline, plan summaries, current intent/tool/result fields, and world-event replay evidence are asserted by the isolated Live Agent harness. |
+| 28 - Generated World Affordance Frame | Folded | Turn context assembly and adaptive tool registry metrics prove real affordances, unavailable reasons, and bounded context frames. |
+| 29 - Model-First Tool Planner | Folded with deterministic fallback bounded | Provider bridge and decision/proposal metrics prove provider/tool-call contracts while deterministic fallback remains smoke/offline recovery. |
+| 30 - Core Tool Executor Parity | Folded | Backend world actions execute movement/object-use; safe communication, memory, public expression, planning, and idle tools execute through backend persistence. |
+| 31 - Resident Memory, Reflection, and Self-Feedback | Folded | Outcome-awareness, memory-growth, replan, reflection, failed-expectation, and recovery metrics are final-gate evidence. |
+| 32 - Spatial Social Loop | Folded | In-world speech, nearby reaction turns, relationship updates, and conversation memory are asserted by the isolated Live Agent harness. |
+| 33 - Exploration and Public Expression | Folded | Tool exploration metrics, visible `publish_note` public expressions, world-event patches, and browser-rendered public markers are asserted by the isolated Live Agent harness. |
+| 34 - Operator Console and Audit | Folded at API/audit level | `/api/agent-live-loop`, timeline/proposals endpoints, pause, kill switch, per-agent enablement, and proposal flows are asserted by tests and the isolated Live Agent harness. |
+| 35 - MIT Reference Migration and Reuse Audit | Folded as a zero-import reuse audit | `LIVE_AGENT_REFERENCE_ARCHITECTURES` classifies MIT code-reuse candidates separately from non-MIT inspiration; no external code is copied into product sources. |
+| 36 - Unified Autonomy Soak Gate | Folded | The isolated Live Agent harness checks no-browser turns, five-agent distribution, browser replay, reconnect replay, multi-client sync, public expression, memory growth, and final-gate evidence. |
 
 ### PR 26 - Live Behavior Ownership Boundary
 
@@ -398,15 +416,15 @@ Acceptance:
 - No browser-scripted behavior starts for live-owned agents.
 - Final gate remains false until all required evidence is present.
 
-## PR #1 Preparation Checklist
+## PR #1 Consolidation Checklist
 
-PR #1 should be considered prepared for the unified autonomy work when it contains:
+PR #1 should be considered ready for final review when it contains:
 
 - this document
 - `LIVE-AGENT-MODE-SPEC.md` updates that make browser-script suppression a hard requirement
 - API/docs updates that classify reference repos by license and copyability
 - current reset/presence continuity fixes preserved
 - no protected product runtime changes
-- a clean child-PR sequence with dependencies and acceptance gates
-
-It should not attempt to implement every child PR at once.
+- the PR 26 route-gate corrective work folded into this branch
+- implementation evidence for slices 27 through 36 in code, tests, metrics, or the isolated Live Agent harness
+- no stale requirement that separate follow-up PRs must land before PR #1 can be considered complete
