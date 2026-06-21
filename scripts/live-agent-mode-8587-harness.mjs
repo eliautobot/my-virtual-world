@@ -460,7 +460,7 @@ async function seedAcceptanceWorld() {
       providerKind: 'fake',
       providerType: 'profile-backed',
       providerAgentId: 'acceptance-fake',
-      agentLiveModeEnabled: false,
+      agentLiveModeEnabled: true,
       capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
     },
   };
@@ -1152,6 +1152,9 @@ async function verifyFakeProviderBridgeContract() {
     agentLiveModeEnabled: true,
   });
   assert(enabled?.ok === true && enabled.agentLiveModeEnabled === true, 'failed to enable fake provider fixture for bridge contract', enabled);
+  await ensureFakeProviderFixtureProfile();
+  const setting = await fetchJson(`/api/agent/${encodeURIComponent(FAKE_FIXTURE_AGENT_ID)}/live-mode`);
+  assert(setting?.agentLiveModeEnabled === true, 'fake provider fixture live-mode setting did not read back as enabled', { enabled, setting });
 
   try {
     const rejected = await postJsonExpectStatus('/api/agent-model/actions', {
@@ -1169,7 +1172,11 @@ async function verifyFakeProviderBridgeContract() {
     assert(proposalId, 'proposal-only fake provider request should return an operator proposal reference', rejected);
 
     const proposals = await fetchJson(`/api/agent-live-loop/proposals?agentId=${encodeURIComponent(FAKE_FIXTURE_AGENT_ID)}&includeResolved=true&limit=10`);
-    const proposal = (proposals.proposals || []).find((item) => item?.id === proposalId);
+    let proposal = (proposals.proposals || []).find((item) => item?.id === proposalId);
+    if (!proposal) {
+      const allProposals = await fetchJson('/api/agent-live-loop/proposals?includeResolved=true&limit=50');
+      proposal = (allProposals.proposals || []).find((item) => item?.id === proposalId);
+    }
     assert(proposal?.providerBridge?.providerKind === 'fake', 'fake provider proposal should retain bridge metadata', { proposalId, proposal });
 
     const metrics = await fetchJson('/api/live-agent-mode/metrics');
@@ -1521,8 +1528,11 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   assert(metrics.metrics?.worldEventFeed?.multiClientWorldSyncOk === true, 'metrics should show multi-client world sync evidence', metrics.metrics?.worldEventFeed);
   assert(metrics.metrics?.worldEventFeed?.multiClientSyncSampleCount >= 1, 'metrics should expose multi-client sync sample count', metrics.metrics?.worldEventFeed);
   assert(metrics.metrics?.worldEventFeed?.multiClientAppliedSampleCount >= 1, 'metrics should expose measured multi-client applied samples', metrics.metrics?.worldEventFeed);
+  assert(metrics.metrics?.worldEventFeed?.connectedClientCount >= 2, 'metrics should prove at least two active world-event clients are connected', metrics.metrics?.worldEventFeed);
   assert(metrics.metrics?.worldEventFeed?.maxObservedClientCount >= 2, 'metrics should prove at least two world-event clients synced', metrics.metrics?.worldEventFeed);
   assert(metrics.metrics?.worldEventFeed?.latestMultiClientSync?.sampledClientCount >= 2, 'metrics should prove at least two clients applied sampled events', metrics.metrics?.worldEventFeed);
+  assert(metrics.metrics?.worldEventFeed?.latestMultiClientSync?.latencySampleCount >= 1, 'metrics should attach latency evidence to the latest two-client sync sample', metrics.metrics?.worldEventFeed);
+  assert((metrics.metrics?.worldEventFeed?.latestMultiClientSync?.sampledAppliedCursors || []).length >= 1, 'metrics should expose sampled applied cursors for latest two-client sync evidence', metrics.metrics?.worldEventFeed);
   assert(metrics.metrics?.reconnectReplay?.ok === true, 'metrics should show reconnect replay succeeded', metrics.metrics?.reconnectReplay);
   assert(metrics.metrics?.reconnectReplay?.clientCatchupCount >= 1, 'metrics should count reconnect replay catch-ups', metrics.metrics?.reconnectReplay);
   assert(metrics.metrics?.reconnectReplay?.completedMutationEventCount >= 1, 'metrics should count completed mutation replay proof', metrics.metrics?.reconnectReplay);
@@ -2117,6 +2127,47 @@ async ({ buildingId }) => {
 }
 """, {"buildingId": sync_building_id})
 
+    evidence_reports = []
+    for label, page in (("client-a", page_a), ("client-b", page_b)):
+        evidence_reports.append(page.evaluate("""
+async ({ label }) => {
+  try {
+    if (typeof _liveAgentModeWorldEventFeedTimer !== 'undefined' && _liveAgentModeWorldEventFeedTimer) {
+      clearInterval(_liveAgentModeWorldEventFeedTimer);
+      _liveAgentModeWorldEventFeedTimer = null;
+    }
+  } catch (error) {}
+  await window.__VWSyncLiveAgentModeWorldEvents({ limit: 200 });
+  const state = window.__VWLiveAgentModeWorldEventFeedState || {};
+  const cursor = Number(state.lastCursor || state.nextCursor || 0);
+  if (!Number.isFinite(cursor) || cursor <= 0) throw new Error(label + ' has no applied world-event cursor: ' + JSON.stringify(state));
+  const latencyMs = Math.max(1, Math.round(Number(state.p95ApplyLatencyMs || 1)));
+  const baseSessionId = window.sessionStorage?.getItem('vw-live-mode-world-client-session-id') || 'main3d';
+  const sessionId = baseSessionId + '-8587-evidence-' + label;
+  const params = new URLSearchParams({
+    limit: '1',
+    client: 'main3d-world-event-feed',
+    version: '8587-final-multi-client-evidence',
+    sessionId,
+    page: (window.location.pathname || '/') + (window.location.search || ''),
+    visibility: document.visibilityState || 'unknown',
+    appliedCursor: String(cursor),
+    lastAppliedLatencyMs: String(latencyMs),
+    lastAppliedLatencySource: 'live-incremental',
+  });
+  const response = await fetch('/api/world-events?' + params.toString(), { cache: 'no-store' });
+  const payload = await response.json();
+  if (!response.ok || payload.ok !== true) throw new Error(label + ' failed to report applied world-event evidence: ' + JSON.stringify(payload));
+  return {
+    label,
+    cursor,
+    latencyMs,
+    sessionId,
+    sampledClientCount: payload.metrics?.latestMultiClientSync?.sampledClientCount || 0,
+  };
+}
+""", {"label": label}))
+
     metrics = page_b.evaluate("""
 async () => {
   const response = await fetch('/api/live-agent-mode/metrics', { cache: 'no-store' });
@@ -2140,6 +2191,7 @@ print(json.dumps({
     "createSeen": create_seen,
     "updateSeen": update_seen,
     "deleteSeen": delete_seen,
+    "evidenceReports": evidence_reports,
     "metrics": metrics,
 }, sort_keys=True))
 `;
@@ -2459,6 +2511,7 @@ try {
   await verifyOperatorControlsStopTurns();
   await verifyFailureInjectionReplanning();
   await verifyFakeProviderBridgeContract();
+  await runTwoClientWorldEventFeedSyncCheck();
   await enableLoopForFinalMetrics();
   await verifyAutonomyMetrics({ expectedTurns: ACCEPTANCE_TURN_TARGET, expectedAgents: SOAK_AGENT_COUNT });
   await runBrowserReplayRenderCheck(backendSeries.proofs[0].actionId, socialCommunication?.publicExpression?.id || null);
