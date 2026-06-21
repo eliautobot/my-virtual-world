@@ -22161,6 +22161,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             "/api/agent-live-loop/events",
             "/api/live-agent-mode/animation-events",
             "/api/live-agent-mode/in-world-communications",
+            "/api/live-agent-mode/public-expressions",
             "/api/agent-live-loop",
             "/api/live-agent-mode/presence",
             "/api/live-agent-mode/tools",

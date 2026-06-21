@@ -112,6 +112,7 @@ class LiveAgentModeGateRegressionTest(unittest.TestCase):
             "/api/agent-live-loop/events",
             "/api/live-agent-mode/animation-events",
             "/api/live-agent-mode/in-world-communications",
+            "/api/live-agent-mode/public-expressions",
             "/api/live-agent-mode/memory/adam",
             "/api/agent-live-loop",
             "/api/live-agent-mode/tools",

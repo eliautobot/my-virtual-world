@@ -179,8 +179,21 @@ function isTransientBackendTurnSkip(tick) {
   return reasons.has('active-behavior') || reasons.has('active-turn-running');
 }
 
+function isConnectionRefused(error) {
+  return error instanceof TypeError
+    && error.message === 'fetch failed'
+    && error.cause?.code === 'ECONNREFUSED';
+}
+
+function harnessServerExitDetails(path, method) {
+  if (!server || (server.exitCode === null && !server.signalCode)) return null;
+  return `harness server exited before ${method} ${path} could complete`
+    + `\nexitCode=${server.exitCode ?? '<none>'} signal=${server.signalCode ?? '<none>'}`
+    + `\n${serverOutput || '<no server output captured>'}`;
+}
+
 async function requestJson(path, { method = 'GET', body } = {}) {
-  const maxAttempts = 2;
+  const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -209,7 +222,14 @@ async function requestJson(path, { method = 'GET', body } = {}) {
       const transientSocketClose = error instanceof TypeError
         && error.message === 'fetch failed'
         && error.cause?.code === 'UND_ERR_SOCKET';
-      if (attempt < maxAttempts && transientSocketClose) {
+      if (isConnectionRefused(error)) {
+        await delay(250);
+        const exitDetails = harnessServerExitDetails(path, method);
+        if (exitDetails) {
+          throw new Error(exitDetails);
+        }
+      }
+      if (attempt < maxAttempts && (transientSocketClose || isConnectionRefused(error))) {
         await delay(250);
         continue;
       }
