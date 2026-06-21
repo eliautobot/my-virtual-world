@@ -1465,6 +1465,7 @@ LIVE_AGENT_OUTCOME_AWARENESS_SCHEMA_VERSION = "agent-live-mode-outcome-awareness
 LIVE_AGENT_FAILED_EXPECTATION_SCHEMA_VERSION = "agent-live-mode-failed-expectation/v1"
 LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"
 LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"
+LIVE_AGENT_LIVE_WORLD_REFERENCE_VERSION = "agent-live-mode-live-world-reference/v1"
 LIVE_AGENT_SOCIETY_SCHEMA_VERSION = "agent-live-mode-society-state/v1"
 LIVE_AGENT_SOCIAL_OBSERVATION_SCHEMA_VERSION = "agent-live-mode-social-observation/v1"
 LIVE_AGENT_GROUP_GOAL_SCHEMA_VERSION = "agent-live-mode-group-goal/v1"
@@ -5453,6 +5454,206 @@ def _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_acti
     }
 
 
+def _live_agent_live_world_reference_metrics(
+    clawmind_architecture,
+    *,
+    per_agent_distribution,
+    presence_persistence,
+    route_before_action,
+    world_event_feed,
+    reconnect_replay,
+    memory_counts,
+    relationship_count,
+    communication_count,
+    reaction_opportunity_count,
+    animation_event_count,
+    animation_event_names,
+    society_observation_count,
+    group_goal_count,
+    conversation_trigger_count,
+    operator_proposal_count,
+    live_agent_building_count,
+    completed_backend_action_count,
+    typed_object_action_types,
+):
+    modules = clawmind_architecture.get("modules") if isinstance(clawmind_architecture.get("modules"), dict) else {}
+    reference = _copy_jsonable(LIVE_AGENT_REFERENCE_ARCHITECTURES[0])
+    location_gated_tools = sorted([
+        name
+        for name, tool in LIVE_AGENT_TOOL_REGISTRY.items()
+        if isinstance(tool, dict) and tool.get("locationRule") not in {None, "", "none"}
+    ])
+    proposal_only_tools = sorted([
+        name
+        for name, tool in LIVE_AGENT_TOOL_REGISTRY.items()
+        if isinstance(tool, dict) and tool.get("executionMode") == "proposal-only"
+    ])
+
+    def module_evidence(module_names):
+        evidence = {}
+        for module_name in module_names:
+            item = modules.get(module_name) if isinstance(modules.get(module_name), dict) else {}
+            evidence[module_name] = {
+                "contractReady": bool(item.get("contractReady")),
+                "runtimeEvidence": bool(item.get("runtimeEvidence")),
+                "executionCount": _normalize_int(item.get("executionCount"), 0, minimum=0, maximum=1000000000),
+            }
+        return evidence
+
+    patterns = {
+        "embodiedResidents": {
+            "referencePattern": "embodied-persistent-residents",
+            "status": "implemented",
+            "clawMindModules": ["perception", "planning", "actionExecution", "orchestrator"],
+            "moduleEvidence": module_evidence(["perception", "planning", "actionExecution", "orchestrator"]),
+            "evidence": {
+                "enabledAgentCount": _normalize_int(per_agent_distribution.get("enabledAgentCount"), 0, minimum=0, maximum=1000000000),
+                "completedTurnAgentCount": _normalize_int(per_agent_distribution.get("completedTurnAgentCount"), 0, minimum=0, maximum=1000000000),
+                "completedBackendActionAgentCount": _normalize_int(per_agent_distribution.get("completedBackendActionAgentCount"), 0, minimum=0, maximum=1000000000),
+                "presenceAgentCount": _normalize_int(presence_persistence.get("agentCount"), 0, minimum=0, maximum=1000000000),
+                "presencePersistenceOk": bool(presence_persistence.get("ok")),
+            },
+        },
+        "toolOnlyMutation": {
+            "referencePattern": "tool-only-world-mutation",
+            "status": "implemented",
+            "clawMindModules": ["planning", "actionExecution", "outcomeAwareness"],
+            "moduleEvidence": module_evidence(["planning", "actionExecution", "outcomeAwareness"]),
+            "evidence": {
+                "toolRegistrySize": len(LIVE_AGENT_TOOL_REGISTRY),
+                "completedBackendActionCount": _normalize_int(completed_backend_action_count, 0, minimum=0, maximum=1000000000),
+                "routeBeforeActionOk": bool((route_before_action.get("routeBeforeAction") or {}).get("ok")),
+                "presenceDefinedMutationsOk": bool((route_before_action.get("presenceDefinedMutation") or {}).get("ok")),
+                "hiddenWorldMutationAllowed": False,
+            },
+        },
+        "locationGatedTools": {
+            "referencePattern": "location-gated-tool-registry",
+            "status": "implemented",
+            "clawMindModules": ["perception", "planning", "socialReasoning", "actionExecution"],
+            "moduleEvidence": module_evidence(["perception", "planning", "socialReasoning", "actionExecution"]),
+            "evidence": {
+                "locationGatedToolCount": len(location_gated_tools),
+                "locationGatedTools": location_gated_tools,
+                "typedObjectActionTypes": list(typed_object_action_types or []),
+            },
+        },
+        "memory": {
+            "referencePattern": "memory-relationship-conversation-context",
+            "status": "implemented",
+            "clawMindModules": ["memory", "reflection", "planning"],
+            "moduleEvidence": module_evidence(["memory", "reflection", "planning"]),
+            "evidence": {
+                "streamCount": _normalize_int(memory_counts.get("stream"), 0, minimum=0, maximum=1000000000),
+                "diaryCount": _normalize_int(memory_counts.get("diary"), 0, minimum=0, maximum=1000000000),
+                "reflectionCount": _normalize_int(memory_counts.get("reflections"), 0, minimum=0, maximum=1000000000),
+                "conversationMemoryCount": _normalize_int(memory_counts.get("conversations"), 0, minimum=0, maximum=1000000000),
+                "searchTool": "search_memory" in LIVE_AGENT_TOOL_REGISTRY,
+                "writeDiaryTool": "write_diary" in LIVE_AGENT_TOOL_REGISTRY,
+            },
+        },
+        "relationships": {
+            "referencePattern": "relationship-graph-and-social-fabric",
+            "status": "partial",
+            "clawMindModules": ["socialReasoning", "conversation", "memory"],
+            "moduleEvidence": module_evidence(["socialReasoning", "conversation", "memory"]),
+            "evidence": {
+                "relationshipCount": _normalize_int(relationship_count, 0, minimum=0, maximum=1000000000),
+                "communicationCount": _normalize_int(communication_count, 0, minimum=0, maximum=1000000000),
+                "reactionOpportunityCount": _normalize_int(reaction_opportunity_count, 0, minimum=0, maximum=1000000000),
+                "societyObservationCount": _normalize_int(society_observation_count, 0, minimum=0, maximum=1000000000),
+                "groupGoalCount": _normalize_int(group_goal_count, 0, minimum=0, maximum=1000000000),
+                "conversationTriggerCount": _normalize_int(conversation_trigger_count, 0, minimum=0, maximum=1000000000),
+            },
+            "gaps": [
+                "full-reference-relationship-taxonomy-not-yet-implemented",
+                "governance-and-economy-social-roles-remain-future-work",
+            ],
+        },
+        "visibleEvents": {
+            "referencePattern": "visible-animation-and-event-dispatch",
+            "status": "implemented",
+            "clawMindModules": ["actionExecution", "conversation", "orchestrator"],
+            "moduleEvidence": module_evidence(["actionExecution", "conversation", "orchestrator"]),
+            "evidence": {
+                "animationEventCount": _normalize_int(animation_event_count, 0, minimum=0, maximum=1000000000),
+                "animationEventNames": list(animation_event_names or []),
+                "worldEventFeedOk": bool(world_event_feed.get("ok")),
+                "multiClientWorldSyncOk": bool(world_event_feed.get("multiClientWorldSyncOk")),
+                "reconnectReplayOk": bool(reconnect_replay.get("ok")),
+            },
+        },
+        "referenceWorldExpansionTools": {
+            "referencePattern": "reference-social-economy-governance-and-world-changing-tools",
+            "status": "proposal-only",
+            "clawMindModules": ["planning", "actionExecution", "outcomeAwareness"],
+            "moduleEvidence": module_evidence(["planning", "actionExecution", "outcomeAwareness"]),
+            "evidence": {
+                "proposalOnlyTools": proposal_only_tools,
+                "operatorProposalCount": _normalize_int(operator_proposal_count, 0, minimum=0, maximum=1000000000),
+                "liveAgentBuildingCount": _normalize_int(live_agent_building_count, 0, minimum=0, maximum=1000000000),
+            },
+            "gaps": [
+                "unsafe-or-destructive-reference-tools-require-typed-visible-executors",
+                "economy-governance-and-public-expression-tools-require-separate-product-scoped-contracts",
+            ],
+        },
+        "aliveWorldIndicators": {
+            "referencePattern": "alive-world-indicators",
+            "status": "missing",
+            "clawMindModules": ["perception", "memory", "socialReasoning", "outcomeAwareness", "orchestrator"],
+            "moduleEvidence": module_evidence(["perception", "memory", "socialReasoning", "outcomeAwareness", "orchestrator"]),
+            "evidence": {
+                "basicPopulationEvidence": _normalize_int(per_agent_distribution.get("enabledAgentCount"), 0, minimum=0, maximum=1000000000),
+                "basicSocialEvidence": _normalize_int(relationship_count, 0, minimum=0, maximum=1000000000),
+                "basicToolEvidence": len(typed_object_action_types or []),
+            },
+            "gaps": [
+                "population-health-indicator",
+                "location-exploration-indicator",
+                "tool-exploration-indicator",
+                "public-expression-indicator",
+                "social-graph-depth-indicator",
+                "governance-participation-indicator",
+                "economy-activity-indicator",
+                "safety-public-order-indicator",
+            ],
+        },
+    }
+    status_buckets = {status: [] for status in ("implemented", "partial", "proposal-only", "missing")}
+    for pattern_id, pattern in patterns.items():
+        status = pattern.get("status")
+        status_buckets.setdefault(status, []).append(pattern_id)
+    return {
+        "schemaVersion": LIVE_AGENT_LIVE_WORLD_REFERENCE_VERSION,
+        "reference": reference,
+        "scope": "live-agent-mode-clawmind-only",
+        "naming": "Live World reference repo guidance",
+        "statusVocabulary": ["implemented", "partial", "proposal-only", "missing"],
+        "patterns": patterns,
+        "statusBuckets": status_buckets,
+        "summary": {
+            "implementedCount": len(status_buckets.get("implemented") or []),
+            "partialCount": len(status_buckets.get("partial") or []),
+            "proposalOnlyCount": len(status_buckets.get("proposal-only") or []),
+            "missingCount": len(status_buckets.get("missing") or []),
+        },
+        "checklist": {
+            "referenceSourcePinned": reference.get("url") == "https://github.com/EmergenceAI/Emergence-World" and reference.get("reviewedCommit") == "7613dcb6554133144779f4c4f0ba49064894b3a5",
+            "allPatternStatusesClassified": all(pattern.get("status") in status_buckets for pattern in patterns.values()),
+            "clawMindModulesMapped": all(isinstance(pattern.get("clawMindModules"), list) and pattern.get("clawMindModules") for pattern in patterns.values()),
+            "manualWorldEditingUnaffected": True,
+            "metricsReadOnly": True,
+        },
+        "optimization": {
+            "readOnly": True,
+            "providerCallsDuringMetrics": 0,
+            "modelCallsDuringMetrics": 0,
+            "heavyWorldScan": False,
+        },
+    }
+
+
 def _live_agent_metric_roster_agent_id(agent):
     if not isinstance(agent, dict):
         return None
@@ -5892,6 +6093,27 @@ def get_live_agent_mode_autonomy_metrics():
     default_soak_target_turns = 5
     provider_support = _live_agent_provider_adapter_metrics(cached_roster, loop_state=loop_state)
     clawmind_architecture = _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
+    live_world_reference = _live_agent_live_world_reference_metrics(
+        clawmind_architecture,
+        per_agent_distribution=per_agent_distribution,
+        presence_persistence=presence_persistence,
+        route_before_action=route_before_action,
+        world_event_feed=world_event_feed,
+        reconnect_replay=reconnect_replay,
+        memory_counts=memory_counts,
+        relationship_count=len(relationships),
+        communication_count=len(communication_events),
+        reaction_opportunity_count=len(reaction_opportunities),
+        animation_event_count=len(animation_events),
+        animation_event_names=animation_event_names,
+        society_observation_count=len(society_observations),
+        group_goal_count=len(group_goals),
+        conversation_trigger_count=len(conversation_triggers),
+        operator_proposal_count=len(loop_state.get("operatorProposals") or []),
+        live_agent_building_count=live_agent_building_count,
+        completed_backend_action_count=len(completed_backend_actions),
+        typed_object_action_types=object_action_types,
+    )
     backend_action_total = len(backend_terminal_actions)
     action_success_rate = round(len(completed_backend_actions) / backend_action_total, 3) if backend_action_total else 0
     recovery_rate = round(outcome_awareness_metrics["recoveryCount"] / outcome_awareness_metrics["mismatchCount"], 3) if outcome_awareness_metrics["mismatchCount"] else 1
@@ -5930,6 +6152,8 @@ def get_live_agent_mode_autonomy_metrics():
         "noRoutePendingStuck": len(active_route_pending) == 0,
         "providerAdapterReadiness": provider_support.get("checklist", {}).get("allProviderKindsHaveCoreAdapter") is True,
         "clawMindModuleContractsReady": clawmind_architecture.get("checklist", {}).get("allModuleContractsReady") is True,
+        "liveWorldReferenceContractPresent": live_world_reference.get("checklist", {}).get("referenceSourcePinned") is True and live_world_reference.get("checklist", {}).get("allPatternStatusesClassified") is True,
+        "liveWorldReferenceScopedToClawMind": live_world_reference.get("checklist", {}).get("manualWorldEditingUnaffected") is True and live_world_reference.get("scope") == "live-agent-mode-clawmind-only",
         "lightweightMetricsOptimized": provider_support.get("optimization", {}).get("modelCallsDuringMetrics") == 0 and clawmind_architecture.get("optimization", {}).get("heavyWorldScan") is False,
         "memoryGrowthBounded": memory_growth["bounded"],
         "plannerMetricsPresent": all(key in planner_metrics for key in ("planCount", "replanCount", "failedExpectationCount", "successfulRecoveryCount")),
@@ -5959,6 +6183,8 @@ def get_live_agent_mode_autonomy_metrics():
         "memoryGrowthBounded": memory_growth["bounded"],
         "providerModelBudgetOk": provider_model_call_counts["metricsReadOnlyBudgetOk"],
         "clawMindRuntimeEvidence": clawmind_architecture.get("checklist", {}).get("allModulesExecuted") is True,
+        "liveWorldReferenceContractPresent": checklist["liveWorldReferenceContractPresent"],
+        "liveWorldReferenceScopedToClawMind": checklist["liveWorldReferenceScopedToClawMind"],
         "defaultSoakEnabledAgentRosterPresent": checklist["defaultSoakEnabledAgentRosterPresent"],
         "defaultSoakCompletedTurnTargetMet": checklist["defaultSoakCompletedTurnTargetMet"],
         "defaultSoakCompletedBackendActionTargetMet": checklist["defaultSoakCompletedBackendActionTargetMet"],
@@ -5997,6 +6223,18 @@ def get_live_agent_mode_autonomy_metrics():
             "worldEventFeed": world_event_feed,
             "routeBeforeAction": route_before_action,
             "reconnectReplay": reconnect_replay,
+            "liveWorldReference": {
+                "schemaVersion": live_world_reference.get("schemaVersion"),
+                "reference": live_world_reference.get("reference"),
+                "scope": live_world_reference.get("scope"),
+                "statusBuckets": live_world_reference.get("statusBuckets"),
+                "summary": live_world_reference.get("summary"),
+                "patternStatuses": {
+                    pattern_id: pattern.get("status")
+                    for pattern_id, pattern in (live_world_reference.get("patterns") or {}).items()
+                    if isinstance(pattern, dict)
+                },
+            },
         },
     }
     return {
@@ -6069,6 +6307,18 @@ def get_live_agent_mode_autonomy_metrics():
             "escalationCount": outcome_awareness_metrics["escalationCount"],
             "outcomeAwareness": outcome_awareness_metrics,
             "providerModelCalls": provider_model_call_counts,
+            "liveWorldReference": {
+                "schemaVersion": live_world_reference.get("schemaVersion"),
+                "statusBuckets": live_world_reference.get("statusBuckets"),
+                "summary": live_world_reference.get("summary"),
+                "patternStatuses": {
+                    pattern_id: pattern.get("status")
+                    for pattern_id, pattern in (live_world_reference.get("patterns") or {}).items()
+                    if isinstance(pattern, dict)
+                },
+                "reference": live_world_reference.get("reference"),
+                "scope": live_world_reference.get("scope"),
+            },
             "perAgentDistribution": per_agent_distribution,
             "planCount": planner_metrics["planCount"],
             "replanCount": planner_metrics["replanCount"],
@@ -6091,6 +6341,7 @@ def get_live_agent_mode_autonomy_metrics():
         "providerSupport": provider_support,
         "providerModelCallCounts": provider_model_call_counts,
         "clawMindArchitecture": clawmind_architecture,
+        "liveWorldReference": live_world_reference,
         "finalGate": final_gate,
         "checklist": checklist,
         "gaps": [key for key, passed in checklist.items() if not passed],
