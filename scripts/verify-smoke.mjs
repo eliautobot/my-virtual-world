@@ -765,14 +765,33 @@ try:
     metrics = module.get_live_agent_mode_autonomy_metrics()
     provider = metrics["providerSupport"]
     clawmind = metrics["clawMindArchitecture"]
+    live_world_reference = metrics["liveWorldReference"]
     distribution = metrics["metrics"]["perAgentDistribution"]
     assert provider["schemaVersion"] == "agent-live-mode-provider-adapter-contract/v1", provider
     assert clawmind["schemaVersion"] == "agent-live-mode-clawmind-architecture/v1", clawmind
+    assert live_world_reference["schemaVersion"] == "agent-live-mode-live-world-reference/v1", live_world_reference
     reference_architectures = clawmind["referenceArchitectures"]
     assert reference_architectures[0]["id"] == "live-world-reference", reference_architectures
     assert reference_architectures[0]["url"] == "https://github.com/EmergenceAI/Emergence-World", reference_architectures
     assert reference_architectures[0]["scope"] == "live-agent-mode-clawmind-only", reference_architectures
     assert "location-gated-tool-registry" in reference_architectures[0]["patterns"], reference_architectures
+    assert live_world_reference["reference"]["url"] == "https://github.com/EmergenceAI/Emergence-World", live_world_reference
+    assert live_world_reference["reference"]["reviewedCommit"] == "7613dcb6554133144779f4c4f0ba49064894b3a5", live_world_reference
+    assert live_world_reference["scope"] == "live-agent-mode-clawmind-only", live_world_reference
+    assert live_world_reference["patterns"]["embodiedResidents"]["status"] == "implemented", live_world_reference
+    assert live_world_reference["patterns"]["toolOnlyMutation"]["status"] == "implemented", live_world_reference
+    assert live_world_reference["patterns"]["locationGatedTools"]["status"] == "implemented", live_world_reference
+    assert live_world_reference["patterns"]["memory"]["status"] == "implemented", live_world_reference
+    assert live_world_reference["patterns"]["relationships"]["status"] == "partial", live_world_reference
+    assert live_world_reference["patterns"]["visibleEvents"]["status"] == "implemented", live_world_reference
+    assert live_world_reference["patterns"]["referenceWorldExpansionTools"]["status"] == "proposal-only", live_world_reference
+    assert live_world_reference["patterns"]["aliveWorldIndicators"]["status"] == "missing", live_world_reference
+    assert live_world_reference["statusBuckets"]["implemented"], live_world_reference
+    assert live_world_reference["statusBuckets"]["partial"] == ["relationships"], live_world_reference
+    assert live_world_reference["statusBuckets"]["proposal-only"] == ["referenceWorldExpansionTools"], live_world_reference
+    assert live_world_reference["statusBuckets"]["missing"] == ["aliveWorldIndicators"], live_world_reference
+    assert metrics["metrics"]["liveWorldReference"]["patternStatuses"]["aliveWorldIndicators"] == "missing", metrics["metrics"]["liveWorldReference"]
+    assert metrics["finalGate"]["evidence"]["liveWorldReference"]["patternStatuses"]["referenceWorldExpansionTools"] == "proposal-only", metrics["finalGate"]["evidence"]["liveWorldReference"]
     assert distribution["schemaVersion"] == "agent-live-mode-per-agent-distribution/v1", distribution
     assert distribution["enabledAgentIds"] == ["adam", "loop-only"], distribution
     assert distribution["enabledAgentsMissingCompletedTurns"] == ["adam", "loop-only"], distribution
@@ -784,6 +803,8 @@ try:
     assert isinstance(metrics["metrics"]["presenceDefinedMutation"]["mutationCount"], int), metrics["metrics"]["presenceDefinedMutation"]
     assert metrics["finalGate"]["checks"]["routeBeforeAction"] is True, metrics["finalGate"]
     assert metrics["finalGate"]["checks"]["presenceDefinedMutation"] is True, metrics["finalGate"]
+    assert metrics["finalGate"]["checks"]["liveWorldReferenceContractPresent"] is True, metrics["finalGate"]
+    assert metrics["finalGate"]["checks"]["liveWorldReferenceScopedToClawMind"] is True, metrics["finalGate"]
     assert metrics["finalGate"]["checks"]["defaultSoakEnabledAgentRosterPresent"] is False, metrics["finalGate"]
     assert metrics["finalGate"]["checks"]["turnsCompletedAcrossEnabledAgents"] is False, metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["requiredCompletedTurnCount"] == 5, metrics["finalGate"]
@@ -1315,6 +1336,7 @@ for (const token of [
   'LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"',
   'LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"',
   'LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"',
+  'LIVE_AGENT_LIVE_WORLD_REFERENCE_VERSION = "agent-live-mode-live-world-reference/v1"',
   'LIVE_AGENT_REFERENCE_ARCHITECTURES',
   '"id": "live-world-reference"',
   '"scope": "live-agent-mode-clawmind-only"',
@@ -1340,6 +1362,10 @@ for (const token of [
   '"providerSupport"',
   '"clawMindArchitecture"',
   '"referenceArchitectures"',
+  '"liveWorldReference"',
+  '"referenceWorldExpansionTools"',
+  '"aliveWorldIndicators"',
+  '"proposal-only"',
   '"liveWorldReferenceGuidance": True',
   '"providerAdapterReadiness"',
   '"clawMindModuleContractsReady"',

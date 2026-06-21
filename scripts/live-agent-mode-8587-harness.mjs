@@ -1533,6 +1533,22 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
     assert(typeof moduleMetrics?.latency?.p95Ms === 'number', `ClawMind module ${moduleName} should report p95 latency`, moduleMetrics);
   }
   assert(metrics.clawMindArchitecture?.optimization?.heavyWorldScan === false, 'ClawMind metrics must stay lightweight', metrics.clawMindArchitecture?.optimization);
+  assert(metrics.liveWorldReference?.schemaVersion === 'agent-live-mode-live-world-reference/v1', 'Live World reference mapping should use the reference contract schema', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.reference?.url === 'https://github.com/EmergenceAI/Emergence-World', 'Live World reference mapping should pin the reference repo URL', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.reference?.reviewedCommit === '7613dcb6554133144779f4c4f0ba49064894b3a5', 'Live World reference mapping should pin the reviewed commit', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.scope === 'live-agent-mode-clawmind-only', 'Live World reference mapping should stay scoped to Live Agent Mode / ClawMind', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.patterns?.embodiedResidents?.status === 'implemented', 'Live World reference should classify embodied residents', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.patterns?.toolOnlyMutation?.status === 'implemented', 'Live World reference should classify tool-only mutation', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.patterns?.locationGatedTools?.status === 'implemented', 'Live World reference should classify location-gated tools', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.patterns?.memory?.status === 'implemented', 'Live World reference should classify memory', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.patterns?.relationships?.status === 'partial', 'Live World reference should classify relationship coverage', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.patterns?.visibleEvents?.status === 'implemented', 'Live World reference should classify visible events', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.patterns?.referenceWorldExpansionTools?.status === 'proposal-only', 'Live World reference should classify proposal-only reference tools', metrics.liveWorldReference);
+  assert(metrics.liveWorldReference?.patterns?.aliveWorldIndicators?.status === 'missing', 'Live World reference should classify missing alive-world indicators', metrics.liveWorldReference);
+  assert(metrics.metrics?.liveWorldReference?.patternStatuses?.aliveWorldIndicators === 'missing', 'metrics should expose compact Live World reference statuses', metrics.metrics?.liveWorldReference);
+  assert(metrics.finalGate?.checks?.liveWorldReferenceContractPresent === true, 'final gate should confirm Live World reference contract presence', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.liveWorldReferenceScopedToClawMind === true, 'final gate should confirm Live World reference scoping', metrics.finalGate);
+  assert(metrics.finalGate?.evidence?.liveWorldReference?.patternStatuses?.referenceWorldExpansionTools === 'proposal-only', 'final gate evidence should include Live World reference pattern statuses', metrics.finalGate?.evidence);
   if (isReducedFinalGateRun(metrics, { expectedAgents, expectedTurns })) {
     const allowedReducedFailures = new Set([
       'defaultSoakEnabledAgentRosterPresent',
@@ -1585,6 +1601,7 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
     providerModelCallCounts: metrics.providerModelCallCounts,
     clawMindContractGaps: metrics.clawMindArchitecture.contractGaps,
     clawMindRuntimeEvidenceGaps: metrics.clawMindArchitecture.runtimeEvidenceGaps,
+    liveWorldReference: metrics.finalGate.evidence.liveWorldReference,
     finalGate: metrics.finalGate,
     gaps: metrics.gaps,
   })}`);

@@ -170,6 +170,12 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `clawMindArchitecture.modules.*.latency.p95Ms`
 - `clawMindArchitecture.runtime.traceCount`
 - `clawMindArchitecture.optimization.heavyWorldScan = false`
+- `liveWorldReference.schemaVersion = agent-live-mode-live-world-reference/v1`
+- `liveWorldReference.reference.url = https://github.com/EmergenceAI/Emergence-World`
+- `liveWorldReference.reference.reviewedCommit = 7613dcb6554133144779f4c4f0ba49064894b3a5`
+- `liveWorldReference.scope = live-agent-mode-clawmind-only`
+- `liveWorldReference.patterns.*.status` using `implemented`, `partial`, `proposal-only`, or `missing`
+- `metrics.liveWorldReference.patternStatuses`
 - `finalGate.ok`
 - `finalGate.checks.featureGateOpen`
 - `finalGate.checks.configGateOpen`
@@ -179,12 +185,15 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `finalGate.checks.memoryGrowthBounded`
 - `finalGate.checks.providerModelBudgetOk`
 - `finalGate.checks.clawMindRuntimeEvidence`
+- `finalGate.checks.liveWorldReferenceContractPresent`
+- `finalGate.checks.liveWorldReferenceScopedToClawMind`
 - `finalGate.checks.defaultSoakEnabledAgentRosterPresent`
 - `finalGate.checks.defaultSoakCompletedTurnTargetMet`
 - `finalGate.checks.defaultSoakCompletedBackendActionTargetMet`
 - `finalGate.checks.turnsCompletedAcrossEnabledAgents`
 - `finalGate.checks.actionsCompletedAcrossEnabledAgents`
 - `finalGate.evidence.enabledAgents`
+- `finalGate.evidence.liveWorldReference`
 
 Provider and ClawMind metrics intentionally use cached roster/world state plus bounded persisted module traces only. They must not call OpenClaw, Hermes, Codex, or any model provider while serving the metrics endpoint.
 
@@ -374,6 +383,15 @@ Readiness and runtime execution are measured separately by:
 ```
 
 `contractReady` means the product has a stable module slot and validation path. `runtimeEvidence` means the current world/test run has produced bounded persisted trace data for that module. Each trace records timing, input/output summaries, decisions, and gaps without invoking a provider/model call during metrics reads. This distinction prevents the UI from claiming a feature is actively working just because the code contract exists.
+
+The Live World reference mapping is a product-scoped guidance contract, not a wholesale import of the reference stack. `/api/live-agent-mode/metrics` exposes `liveWorldReference` and a compact `metrics.liveWorldReference` summary that maps ClawMind modules to the reviewed EmergenceAI/Emergence-World commit. Current statuses are:
+
+- `implemented`: embodied residents, tool-only mutation, location-gated tools, memory, and visible events.
+- `partial`: relationship/social-fabric coverage, because the product has relationship and society traces but not the full reference taxonomy.
+- `proposal-only`: broader reference-style social, economy, governance, and world-changing affordances until typed visible executors, approvals, and rollback controls exist.
+- `missing`: AWI-style alive-world indicators until a follow-up exposes population health, location/tool exploration, public expression, social graph depth, governance, economy, and safety/public-order metrics.
+
+Final-gate evidence repeats the compact `liveWorldReference` statuses so reviewers can see exactly which reference patterns are implemented, partial, proposal-only, or missing without changing manual world editing behavior.
 
 ### 2. Scheduler
 
