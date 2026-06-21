@@ -771,6 +771,7 @@ try:
     reference_architectures = clawmind["referenceArchitectures"]
     assert reference_architectures[0]["id"] == "emergence-world", reference_architectures
     assert reference_architectures[0]["url"] == "https://github.com/EmergenceAI/Emergence-World", reference_architectures
+    assert reference_architectures[0]["scope"] == "live-agent-mode-clawmind-only", reference_architectures
     assert "location-gated-tool-registry" in reference_architectures[0]["patterns"], reference_architectures
     assert distribution["schemaVersion"] == "agent-live-mode-per-agent-distribution/v1", distribution
     assert distribution["enabledAgentIds"] == ["adam", "loop-only"], distribution
@@ -1315,6 +1316,7 @@ for (const token of [
   'LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"',
   'LIVE_AGENT_REFERENCE_ARCHITECTURES',
   '"id": "emergence-world"',
+  '"scope": "live-agent-mode-clawmind-only"',
   '"https://github.com/EmergenceAI/Emergence-World"',
   '"location-gated-tool-registry"',
   '"alive-world-indicators"',

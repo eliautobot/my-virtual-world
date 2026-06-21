@@ -1508,6 +1508,7 @@ LIVE_AGENT_REFERENCE_ARCHITECTURES = [
         "url": "https://github.com/EmergenceAI/Emergence-World",
         "reviewedCommit": "7613dcb6554133144779f4c4f0ba49064894b3a5",
         "role": "guidance",
+        "scope": "live-agent-mode-clawmind-only",
         "implementationMode": "adapted-to-my-virtual-world",
         "patterns": [
             "embodied-persistent-residents",

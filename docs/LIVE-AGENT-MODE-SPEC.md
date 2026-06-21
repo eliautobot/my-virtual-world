@@ -50,6 +50,7 @@ The next "alive world" bar is society-level behavior, not just more animation. L
 
 Use [EmergenceAI/Emergence-World](https://github.com/EmergenceAI/Emergence-World) as the primary reference direction for Live Agent Mode and ClawMind. The reviewed public reference commit is `7613dcb6554133144779f4c4f0ba49064894b3a5`. The goal is not to copy its stack wholesale; it is to adapt the architecture patterns that make a custom world feel alive:
 
+- scope is Live Agent Mode and ClawMind only; this is not a general product rewrite or a requirement for normal manual world editing
 - embodied persistent residents, not detached chat sessions
 - tools as the only way an agent mutates the world
 - location-gated and context-aware tool availability
