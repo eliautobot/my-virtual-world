@@ -59,6 +59,101 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def _seed_two_live_agents_for_reactions(self):
+        previous_vw_int = os.environ.get("_VW_INT")
+        os.environ["_VW_INT"] = "1"
+        self.addCleanup(lambda: os.environ.pop("_VW_INT", None) if previous_vw_int is None else os.environ.__setitem__("_VW_INT", previous_vw_int))
+        self.server.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
+        now = "2026-06-21T12:00:00Z"
+        building = {
+            "id": "reaction-office",
+            "name": "Reaction Office",
+            "type": "office",
+            "worldX": 1,
+            "worldY": 1,
+            "widthTiles": 8,
+            "heightTiles": 8,
+            "interior": {"furniture": []},
+        }
+        self.server.save_building(building["id"], building)
+        meta = self.server.load_world_meta()
+        meta["agentProfiles"] = {
+            "speaker-agent": {
+                "name": "Speaker Agent",
+                "providerKind": "fake",
+                "providerType": "profile-backed",
+                "providerAgentId": "speaker-agent",
+                "agentLiveModeEnabled": True,
+            },
+            "listener-agent": {
+                "name": "Listener Agent",
+                "providerKind": "fake",
+                "providerType": "profile-backed",
+                "providerAgentId": "listener-agent",
+                "agentLiveModeEnabled": True,
+                "personality": {"outgoing": 0.9, "curious": 0.8, "easygoing": 0.7},
+            },
+        }
+        meta["agentAssignments"] = {
+            "speaker-agent": {"work": building["id"]},
+            "listener-agent": {"work": building["id"]},
+        }
+        presence = {
+            "schemaVersion": self.server.LIVE_AGENT_PRESENCE_SCHEMA_VERSION,
+            "agents": {
+                "speaker-agent": {
+                    "agentId": "speaker-agent",
+                    "buildingId": building["id"],
+                    "floor": 1,
+                    "x": 3,
+                    "z": 3,
+                    "apiX": 120,
+                    "apiZ": 120,
+                    "source": "reaction-test",
+                    "state": "arrived",
+                    "updatedAt": now,
+                },
+                "listener-agent": {
+                    "agentId": "listener-agent",
+                    "buildingId": building["id"],
+                    "floor": 1,
+                    "x": 4,
+                    "z": 3,
+                    "apiX": 160,
+                    "apiZ": 120,
+                    "source": "reaction-test",
+                    "state": "arrived",
+                    "updatedAt": now,
+                },
+            },
+            "agentLocations": {},
+            "history": [],
+            "updatedAt": now,
+        }
+        presence["agentLocations"] = dict(presence["agents"])
+        meta["agentLife"] = {
+            "presence": presence,
+            "simulation": {
+                "schemaVersion": self.server.LIVE_AGENT_SIMULATION_SCHEMA_VERSION,
+                "agentLocations": dict(presence["agents"]),
+                "updatedAt": now,
+            },
+            "liveModeLoop": {
+                "schemaVersion": self.server.LIVE_AGENT_LOOP_SCHEMA_VERSION,
+                "enabled": True,
+                "worldClientRequired": False,
+                "minActionIntervalSec": 120,
+                "maxActionsPerTick": 1,
+                "maxToolCallsPerTurn": 5,
+                "agents": {
+                    "speaker-agent": {"enabled": True, "needs": {"social": 0.3, "curiosity": 0.2}},
+                    "listener-agent": {"enabled": True, "needs": {"social": 0.95, "curiosity": 0.2}},
+                },
+            },
+        }
+        self.server.save_world_meta(meta)
+        return now, building
+
     def test_concurrent_appends_keep_all_events_and_unique_sequences(self):
         thread_count = 20
         appends_per_thread = 10
@@ -435,6 +530,86 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertEqual(metrics["finalGate"]["evidence"]["requiredCompletedTurnCount"], 5)
         self.assertFalse(metrics["finalGate"]["checks"]["defaultSoakCompletedTurnTargetMet"])
         self.assertFalse(metrics["finalGate"]["checks"]["defaultSoakCompletedBackendActionTargetMet"])
+
+    def test_nearby_speech_enqueues_and_runs_bounded_reaction_turn(self):
+        now, building = self._seed_two_live_agents_for_reactions()
+        event = {
+            "id": "comm-reaction-regression",
+            "at": now,
+            "fromAgentId": "speaker-agent",
+            "targetAgentId": "listener-agent",
+            "observerIds": ["listener-agent"],
+            "scope": "nearby-agent-speech",
+            "text": "Can you take a quick look at this?",
+            "conversationId": "reaction-regression",
+            "location": {"buildingId": building["id"], "floor": 1},
+            "reactionOpportunities": [{
+                "id": "react-comm-reaction-regression-listener-agent",
+                "agentId": "listener-agent",
+                "status": "open",
+                "createdAt": now,
+                "reason": "direct-target",
+                "suggestedTools": ["say_to_agent"],
+            }],
+            "source": {"kind": "agent-live-mode", "tool": "say_to_agent"},
+            "spatial": True,
+        }
+
+        side_effects = self.server._live_agent_record_communication_side_effects(event)
+        state = self.server.get_live_agent_loop_state(persist_migration=False)
+        queued = state.get("reactionQueue") or []
+        metrics_before = self.server.get_live_agent_mode_autonomy_metrics()
+
+        self.assertEqual(side_effects["queuedReactionTurns"][0]["id"], "react-comm-reaction-regression-listener-agent")
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0]["triggerKind"], "nearby-speech")
+        self.assertEqual(queued[0]["agentId"], "listener-agent")
+        self.assertLess(queued[0]["bounds"]["reactionMaxToolCallsPerTurn"], queued[0]["bounds"]["regularMaxToolCallsPerTurn"])
+        self.assertLess(queued[0]["bounds"]["reactionCooldownSec"], queued[0]["bounds"]["regularCooldownSec"])
+        self.assertEqual(metrics_before["metrics"]["reactionTriggers"]["byTriggerKind"]["nearby-speech"], 1)
+
+        tick = self.server.live_agent_loop_tick(reason="reaction-regression", force=True)
+        metrics_after = self.server.get_live_agent_mode_autonomy_metrics()
+
+        self.assertTrue(tick["ok"], tick)
+        self.assertEqual(tick["turn"]["turnType"], "reaction")
+        self.assertEqual(tick["turn"]["agentId"], "listener-agent")
+        self.assertEqual(tick["turn"]["reaction"]["triggerKind"], "nearby-speech")
+        self.assertEqual(tick["turn"]["bounds"]["maxToolCallsPerTurn"], 2)
+        self.assertLess(tick["turn"]["bounds"]["cooldownSec"], tick["turn"]["bounds"]["regularCooldownSec"])
+        self.assertGreaterEqual(metrics_after["metrics"]["completedReactionTurnCount"], 1)
+        self.assertGreaterEqual(metrics_after["metrics"]["completedRegularTurnCount"], 0)
+        self.assertEqual(metrics_after["metrics"]["reactionTriggers"]["completedCount"], 1)
+
+    def test_nearby_visible_action_enqueues_reaction_opportunity(self):
+        now, building = self._seed_two_live_agents_for_reactions()
+        state = self.server.get_live_agent_loop_state(persist_migration=True)
+        action = {
+            "id": "world-action-reaction-regression",
+            "actionType": "life.getCoffee",
+            "agentId": "speaker-agent",
+            "target": {"kind": "object-instance", "buildingId": building["id"], "floor": 1, "objectInstanceId": "coffee"},
+            "params": {"loopActionId": "get-coffee"},
+        }
+        summary = {
+            "id": action["id"],
+            "status": "completed",
+            "actionType": action["actionType"],
+            "loopActionId": "get-coffee",
+        }
+
+        update = self.server._live_agent_society_record_world_action_event(state, "speaker-agent", action, summary, now)
+        saved = self.server.save_live_agent_loop_state(state)
+        metrics = self.server.get_live_agent_mode_autonomy_metrics()
+        action_reactions = [item for item in saved.get("reactionQueue") or [] if item.get("triggerKind") == "nearby-action"]
+
+        self.assertIsInstance(update, dict)
+        self.assertEqual(update["nearbyObserverIds"], ["listener-agent"])
+        self.assertEqual(len(update["queuedReactionTurns"]), 1)
+        self.assertEqual(len(action_reactions), 1)
+        self.assertEqual(action_reactions[0]["agentId"], "listener-agent")
+        self.assertEqual(action_reactions[0]["subjectAgentId"], "speaker-agent")
+        self.assertEqual(metrics["metrics"]["reactionTriggers"]["byTriggerKind"]["nearby-action"], 1)
 
 
 if __name__ == "__main__":

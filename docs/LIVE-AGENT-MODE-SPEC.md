@@ -159,6 +159,13 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `metrics.perAgentDistribution`
 - `metrics.completedTurnCountByAgent`
 - `metrics.completedBackendActionCountByAgent`
+- `metrics.completedRegularTurnCount`
+- `metrics.completedReactionTurnCount`
+- `metrics.reactionTurnsByTriggerKind`
+- `metrics.reactionTriggers.byTriggerKind.nearby-speech`
+- `metrics.reactionTriggers.byTriggerKind.nearby-action`
+- `metrics.reactionTriggers.bounds.reactionMaxToolCallsPerTurn`
+- `metrics.reactionTriggers.bounds.reactionCooldownSec`
 - `clawMindArchitecture.schemaVersion = agent-live-mode-clawmind-architecture/v1`
 - `clawMindArchitecture.modules`
 - `clawMindArchitecture.checklist.allModuleContractsReady`
@@ -411,6 +418,7 @@ Required behavior:
 - per-agent cooldowns
 - max actions per tick
 - max tool calls per turn, defaulting to 5 so one turn can observe, act, communicate or remember, and leave a follow-up plan
+- bounded reaction turns for nearby speech/action triggers, using a lower tool-call limit and shorter reaction cooldown than regular resident turns
 - pause/resume
 - force dry-run tick
 - stale turn recovery
@@ -423,6 +431,7 @@ Suggested records:
   "id": "turn-<timestamp>-<agent-id>",
   "agentId": "adam",
   "status": "running",
+  "turnType": "regular",
   "reason": "scheduled",
   "startedAt": "2026-06-18T12:00:00Z",
   "endedAt": null,
@@ -436,6 +445,8 @@ Suggested records:
   }
 }
 ```
+
+Reaction opportunities are stored in `world-meta.json#agentLife.liveModeLoop.reactionQueue` using `agent-live-mode-reaction-turn/v1`. Speech and completed visible world actions enqueue deterministic, de-duplicated rows for eligible nearby Live Mode agents. A ready reaction turn takes priority over normal round-robin scheduling, carries `turnType: "reaction"`, persists its source trigger under `turn.reaction`, and uses reaction bounds such as `maxToolCallsPerTurn: 2` and a shorter reaction cooldown. If the listener is no longer eligible, active, or expired, the queued row is marked skipped/expired instead of growing unbounded.
 
 ### 3. Agent Turn Lifecycle
 
@@ -819,6 +830,15 @@ When an agent speaks in-world:
 5. Listeners decide to reply, react, gesture, ignore, or leave.
 6. Backend records conversation memory.
 7. Backend updates relationship summaries and scores.
+
+When an agent completes a visible action near another live resident:
+
+1. Backend records a social observation for nearby residents.
+2. Backend enqueues `nearby-action` reaction opportunities for eligible observers.
+3. The next scheduler tick may run one bounded reaction turn before resuming regular resident turns.
+4. Metrics distinguish regular and reaction turn history so action-triggered social loops do not inflate normal resident-turn evidence unnoticed.
+
+The metrics endpoint exposes `metrics.completedRegularTurnCount`, `metrics.completedReactionTurnCount`, `metrics.reactionTurnsByTriggerKind`, and `metrics.reactionTriggers` with trigger/status counts, recent compact trigger rows, and the reaction-versus-regular bounds.
 
 Suggested hearing rules:
 

@@ -1567,6 +1567,7 @@ LIVE_AGENT_IN_WORLD_COMMUNICATION_EVENT_NAMES = {
 LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"
 LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION = "agent-live-mode-plan/v1"
 LIVE_AGENT_TURN_CONTEXT_SCHEMA_VERSION = "agent-live-mode-turn-context/v1"
+LIVE_AGENT_REACTION_TURN_SCHEMA_VERSION = "agent-live-mode-reaction-turn/v1"
 LIVE_AGENT_CLAWMIND_RUNTIME_TRACE_VERSION = "agent-live-mode-clawmind-runtime-trace/v1"
 LIVE_AGENT_OPERATOR_PROPOSAL_SCHEMA_VERSION = "agent-live-mode-operator-proposal/v1"
 LIVE_AGENT_OPERATOR_TIMELINE_SCHEMA_VERSION = "agent-live-mode-operator-timeline/v1"
@@ -1577,6 +1578,10 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "clientActiveTtlSec": 45,
     "maxActionsPerTick": 1,
     "maxToolCallsPerTurn": 5,
+    "reactionMaxToolCallsPerTurn": 2,
+    "reactionTurnCooldownSec": 20,
+    "reactionOpportunityTtlSec": 300,
+    "reactionOpportunityRetention": 120,
     "worldClientRequired": False,
     "eventRetention": 250,
     "memoryRetention": 24,
@@ -3641,6 +3646,7 @@ def _live_agent_record_communication_side_effects(saved_event):
                 "providerRelay": False,
             },
         )
+        queued_reactions = []
         for opportunity in saved_event.get("reactionOpportunities") or []:
             observer_id = opportunity.get("agentId") if isinstance(opportunity, dict) else None
             if not observer_id:
@@ -3677,6 +3683,23 @@ def _live_agent_record_communication_side_effects(saved_event):
                     "suggestedTools": opportunity.get("suggestedTools"),
                 },
             )
+            queued, queued_changed = _live_agent_loop_enqueue_reaction_opportunity(
+                state,
+                agent_id=observer_id,
+                trigger_kind="nearby-speech",
+                trigger_id=opportunity.get("id") or saved_event.get("id"),
+                subject_agent_id=from_agent_id,
+                reason=opportunity.get("reason") or saved_event.get("scope") or "nearby speech",
+                source_event_id=saved_event.get("id"),
+                communication_event_id=saved_event.get("id"),
+                location=saved_event.get("location") if isinstance(saved_event.get("location"), dict) else {"buildingId": saved_event.get("buildingId"), "floor": saved_event.get("floor") or 1},
+                suggested_tools=opportunity.get("suggestedTools") if isinstance(opportunity.get("suggestedTools"), list) else ["say_to_agent"],
+                source={"kind": "in-world-communication", "eventId": saved_event.get("id"), "scope": saved_event.get("scope")},
+                now_iso=saved_event.get("at") if _parse_isoish_epoch(saved_event.get("at")) else None,
+                opportunity_id=opportunity.get("id"),
+            )
+            if queued_changed and queued:
+                queued_reactions.append(_live_agent_loop_reaction_compact(queued))
         relationship = _live_agent_loop_update_relationship_from_communication(state, saved_event)
         society = _live_agent_society_record_communication_event(saved_event, state)
         _live_agent_memory_maybe_synthesize_reflection(state, from_agent_id, reason="in-world-communication")
@@ -3687,6 +3710,7 @@ def _live_agent_record_communication_side_effects(saved_event):
             "loopEventsCursor": saved_state.get("eventSequence"),
             "relationship": relationship,
             "society": society,
+            "queuedReactionTurns": queued_reactions,
         }
 
 
@@ -6421,6 +6445,29 @@ def get_live_agent_mode_autonomy_metrics():
     turns = scheduler.get("turnHistory") if isinstance(scheduler.get("turnHistory"), list) else []
     completed_turns = [turn for turn in turns if isinstance(turn, dict) and turn.get("status") == "completed"]
     failed_turns = [turn for turn in turns if isinstance(turn, dict) and turn.get("status") == "failed"]
+    reaction_queue = _live_agent_loop_reaction_queue(loop_state)
+    reaction_turns = [turn for turn in turns if isinstance(turn, dict) and turn.get("turnType") == "reaction"]
+    regular_turns = [turn for turn in turns if isinstance(turn, dict) and turn.get("turnType", "regular") != "reaction"]
+    completed_reaction_turns = [turn for turn in reaction_turns if turn.get("status") == "completed"]
+    completed_regular_turns = [turn for turn in regular_turns if turn.get("status") == "completed"]
+    reaction_trigger_counts = {}
+    reaction_status_counts = {}
+    reaction_agent_counts = {}
+    for item in reaction_queue:
+        if not isinstance(item, dict):
+            continue
+        trigger_kind = item.get("triggerKind") or "unknown"
+        reaction_trigger_counts[trigger_kind] = reaction_trigger_counts.get(trigger_kind, 0) + 1
+        status = item.get("status") or "unknown"
+        reaction_status_counts[status] = reaction_status_counts.get(status, 0) + 1
+        agent_id = item.get("agentId")
+        if agent_id:
+            reaction_agent_counts[agent_id] = reaction_agent_counts.get(agent_id, 0) + 1
+    reaction_turns_by_trigger = {}
+    for turn in reaction_turns:
+        trigger_kind = ((turn.get("reaction") or {}).get("triggerKind") if isinstance(turn.get("reaction"), dict) else None) or "unknown"
+        reaction_turns_by_trigger[trigger_kind] = reaction_turns_by_trigger.get(trigger_kind, 0) + 1
+    reaction_bounds = _live_agent_loop_reaction_bounds(loop_state)
     turn_duration_samples = [
         float(turn.get("durationSec"))
         for turn in turns
@@ -6577,6 +6624,9 @@ def get_live_agent_mode_autonomy_metrics():
         "animationReplayReady": all(name in animation_event_names for name in ["agent-move-started", "agent-arrived", "object-use-started", "object-use-completed", "world-action-completed"]),
         "spatialOrWorldCommunication": len(communication_events) > 0,
         "reactionOpportunitiesCreated": len(reaction_opportunities) > 0,
+        "reactionTurnsQueued": len(reaction_queue) > 0,
+        "reactionMetricsDistinguishTurns": len(reaction_turns) + len(regular_turns) == len(turns),
+        "reactionBoundsLowerThanRegular": reaction_bounds["reactionCooldownLowerThanRegular"] and (reaction_bounds["reactionToolLimitLowerThanRegular"] or reaction_bounds["regularMaxToolCallsPerTurn"] == 1),
         "memoryUpdated": memory_counts.get("total", 0) > 0,
         "relationshipsUpdated": len(relationships) > 0,
         "societyRolesPresent": len(society_roles) >= len(enabled_live_agents) and len(society_roles) > 0,
@@ -6652,6 +6702,8 @@ def get_live_agent_mode_autonomy_metrics():
             "enabledAgentCount": per_agent_distribution["enabledAgentCount"],
             "enabledAgentIds": per_agent_distribution["enabledAgentIds"],
             "completedTurnCount": len(completed_turns),
+            "completedRegularTurnCount": len(completed_regular_turns),
+            "completedReactionTurnCount": len(completed_reaction_turns),
             "completedBackendActionCount": len(completed_backend_actions),
             "enabledCompletedTurnAgentCount": per_agent_distribution["enabledCompletedTurnAgentCount"],
             "enabledCompletedTurnAgentIds": per_agent_distribution["enabledCompletedTurnAgentIds"],
@@ -6664,6 +6716,14 @@ def get_live_agent_mode_autonomy_metrics():
             "worldEventFeed": world_event_feed,
             "routeBeforeAction": route_before_action,
             "reconnectReplay": reconnect_replay,
+            "reactionTriggers": {
+                "schemaVersion": LIVE_AGENT_REACTION_TURN_SCHEMA_VERSION,
+                "total": len(reaction_queue),
+                "byTriggerKind": reaction_trigger_counts,
+                "byStatus": reaction_status_counts,
+                "completedReactionTurnCount": len(completed_reaction_turns),
+                "bounds": reaction_bounds,
+            },
             "turnContextAssembly": {
                 "schemaVersion": turn_context_assembly.get("schemaVersion"),
                 "requiredSlots": turn_context_assembly.get("requiredSlots"),
@@ -6717,6 +6777,30 @@ def get_live_agent_mode_autonomy_metrics():
             "turnHistoryCount": len(turns),
             "completedTurnCount": len(completed_turns),
             "failedTurnCount": len(failed_turns),
+            "regularTurnCount": len(regular_turns),
+            "completedRegularTurnCount": len(completed_regular_turns),
+            "reactionTurnCount": len(reaction_turns),
+            "completedReactionTurnCount": len(completed_reaction_turns),
+            "reactionTurnsByTriggerKind": reaction_turns_by_trigger,
+            "reactionTriggers": {
+                "schemaVersion": LIVE_AGENT_REACTION_TURN_SCHEMA_VERSION,
+                "total": len(reaction_queue),
+                "queuedCount": reaction_status_counts.get("queued", 0),
+                "claimedCount": reaction_status_counts.get("claimed", 0),
+                "completedCount": reaction_status_counts.get("completed", 0),
+                "skippedCount": reaction_status_counts.get("skipped", 0),
+                "failedCount": reaction_status_counts.get("failed", 0),
+                "expiredCount": reaction_status_counts.get("expired", 0),
+                "byTriggerKind": reaction_trigger_counts,
+                "byStatus": reaction_status_counts,
+                "byAgent": reaction_agent_counts,
+                "bounds": reaction_bounds,
+                "recent": [
+                    _live_agent_loop_reaction_compact(item)
+                    for item in reaction_queue[-8:]
+                    if isinstance(item, dict)
+                ],
+            },
             "completedTurnCountByAgent": completed_turn_counts_by_agent,
             "enabledAgentsWithCompletedTurns": per_agent_distribution["enabledCompletedTurnAgentCount"],
             "enabledAgentsWithCompletedBackendActions": per_agent_distribution["enabledCompletedBackendActionAgentCount"],
@@ -9690,6 +9774,8 @@ def default_live_agent_loop_state():
         "clientActiveTtlSec": LIVE_AGENT_LOOP_DEFAULTS["clientActiveTtlSec"],
         "maxActionsPerTick": LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"],
         "maxToolCallsPerTurn": LIVE_AGENT_LOOP_DEFAULTS["maxToolCallsPerTurn"],
+        "reactionMaxToolCallsPerTurn": LIVE_AGENT_LOOP_DEFAULTS["reactionMaxToolCallsPerTurn"],
+        "reactionTurnCooldownSec": LIVE_AGENT_LOOP_DEFAULTS["reactionTurnCooldownSec"],
         "worldClientRequired": LIVE_AGENT_LOOP_DEFAULTS["worldClientRequired"],
         "turnTimeoutSec": LIVE_AGENT_LOOP_DEFAULTS["turnTimeoutSec"],
         "turnRetryBackoffSec": LIVE_AGENT_LOOP_DEFAULTS["turnRetryBackoffSec"],
@@ -9714,7 +9800,8 @@ def default_live_agent_loop_state():
             "stats": {"calls": 0, "decisionCalls": 0, "timeouts": 0, "fallbacks": 0},
             "providers": {},
         },
-        "stats": {"ticks": 0, "actionsCreated": 0, "dryRuns": 0, "errors": 0, "plans": 0, "replans": 0, "failedExpectations": 0, "successfulRecoveries": 0},
+        "reactionQueue": [],
+        "stats": {"ticks": 0, "actionsCreated": 0, "dryRuns": 0, "errors": 0, "plans": 0, "replans": 0, "failedExpectations": 0, "successfulRecoveries": 0, "reactionTriggers": 0, "reactionTurnsStarted": 0, "reactionTurnsCompleted": 0},
     }
 
 
@@ -9789,6 +9876,7 @@ def _live_agent_loop_normalize_turn_record(turn):
         "agentId": agent_id,
         "status": _live_agent_loop_turn_status(turn.get("status")),
         "reason": _live_agent_loop_clean_plan_text(turn.get("reason"), limit=120) or "timer",
+        "turnType": _live_agent_loop_clean_plan_text(turn.get("turnType") or turn.get("type"), limit=40) or "regular",
         "startedAt": turn.get("startedAt") if _parse_isoish_epoch(turn.get("startedAt")) else now_iso,
         "endedAt": turn.get("endedAt") if _parse_isoish_epoch(turn.get("endedAt")) else None,
         "attempt": _normalize_int(turn.get("attempt"), 1, minimum=1, maximum=50),
@@ -9803,6 +9891,10 @@ def _live_agent_loop_normalize_turn_record(turn):
     for key in ("activeGoal", "selectedPlanStep", "finalActionDecision", "decision", "contextAssembly", "outcome", "error", "details"):
         if isinstance(turn.get(key), dict):
             normalized[key] = _copy_jsonable(turn.get(key))
+    if isinstance(turn.get("reaction"), dict):
+        normalized["reaction"] = _copy_jsonable(turn.get("reaction"))
+    if isinstance(turn.get("bounds"), dict):
+        normalized["bounds"] = _copy_jsonable(turn.get("bounds"))
     if isinstance(turn.get("candidateActionsConsidered"), list):
         normalized["candidateActionsConsidered"] = [
             _copy_jsonable(item)
@@ -10029,6 +10121,112 @@ def _normalize_live_agent_provider_bridge(raw):
     return bridge
 
 
+def _live_agent_loop_reaction_status(value, default="queued"):
+    status = str(value or default).strip().lower().replace("-", "_")
+    allowed = {"queued", "claimed", "completed", "skipped", "failed", "expired", "cancelled"}
+    return status if status in allowed else default
+
+
+def _live_agent_loop_reaction_bounds(state):
+    source = state if isinstance(state, dict) else {}
+    regular_tools = _normalize_int(
+        source.get("maxToolCallsPerTurn"),
+        LIVE_AGENT_LOOP_DEFAULTS["maxToolCallsPerTurn"],
+        minimum=1,
+        maximum=5,
+    )
+    configured_reaction_tools = _normalize_int(
+        source.get("reactionMaxToolCallsPerTurn"),
+        LIVE_AGENT_LOOP_DEFAULTS["reactionMaxToolCallsPerTurn"],
+        minimum=1,
+        maximum=5,
+    )
+    reaction_tools = min(regular_tools, configured_reaction_tools)
+    if regular_tools > 1:
+        reaction_tools = min(reaction_tools, regular_tools - 1)
+    regular_cooldown = _normalize_int(
+        source.get("minActionIntervalSec"),
+        LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"],
+        minimum=30,
+        maximum=3600,
+    )
+    configured_reaction_cooldown = _normalize_int(
+        source.get("reactionTurnCooldownSec"),
+        LIVE_AGENT_LOOP_DEFAULTS["reactionTurnCooldownSec"],
+        minimum=5,
+        maximum=1800,
+    )
+    reaction_cooldown = configured_reaction_cooldown
+    if reaction_cooldown >= regular_cooldown:
+        reaction_cooldown = max(5, regular_cooldown // 2)
+    return {
+        "schemaVersion": LIVE_AGENT_REACTION_TURN_SCHEMA_VERSION,
+        "regularMaxToolCallsPerTurn": regular_tools,
+        "reactionMaxToolCallsPerTurn": max(1, reaction_tools),
+        "regularCooldownSec": regular_cooldown,
+        "reactionCooldownSec": max(5, reaction_cooldown),
+        "reactionToolLimitLowerThanRegular": regular_tools > 1 and reaction_tools < regular_tools,
+        "reactionCooldownLowerThanRegular": max(5, reaction_cooldown) < regular_cooldown,
+        "maxActionsPerTick": 1,
+    }
+
+
+def _live_agent_loop_normalize_reaction_opportunity(opportunity):
+    if not isinstance(opportunity, dict):
+        return None
+    reaction_id = _live_agent_loop_clean_plan_text(opportunity.get("id"), limit=180)
+    agent_id = _live_agent_loop_clean_plan_text(opportunity.get("agentId"), limit=120)
+    trigger_kind = _live_agent_loop_clean_plan_text(opportunity.get("triggerKind"), limit=80)
+    if not reaction_id or not agent_id or not trigger_kind:
+        return None
+    now_iso = _utc_now_iso()
+    row = {
+        "schemaVersion": LIVE_AGENT_REACTION_TURN_SCHEMA_VERSION,
+        "id": reaction_id,
+        "agentId": agent_id,
+        "status": _live_agent_loop_reaction_status(opportunity.get("status")),
+        "triggerKind": trigger_kind,
+        "triggerId": _live_agent_loop_clean_plan_text(opportunity.get("triggerId"), limit=180),
+        "subjectAgentId": _live_agent_loop_clean_plan_text(opportunity.get("subjectAgentId"), limit=120),
+        "targetAgentId": _live_agent_loop_clean_plan_text(opportunity.get("targetAgentId"), limit=120),
+        "reason": _live_agent_loop_clean_plan_text(opportunity.get("reason"), limit=220) or trigger_kind,
+        "createdAt": opportunity.get("createdAt") if _parse_isoish_epoch(opportunity.get("createdAt")) else now_iso,
+        "readyAt": opportunity.get("readyAt") if _parse_isoish_epoch(opportunity.get("readyAt")) else opportunity.get("createdAt") if _parse_isoish_epoch(opportunity.get("createdAt")) else now_iso,
+        "expiresAt": opportunity.get("expiresAt") if _parse_isoish_epoch(opportunity.get("expiresAt")) else None,
+        "updatedAt": opportunity.get("updatedAt") if _parse_isoish_epoch(opportunity.get("updatedAt")) else None,
+    }
+    for key in ("claimedAt", "completedAt", "skippedAt", "failedAt", "expiredAt"):
+        if _parse_isoish_epoch(opportunity.get(key)):
+            row[key] = opportunity.get(key)
+    for key, limit in (("turnId", 180), ("sourceEventId", 180), ("communicationEventId", 180), ("worldActionId", 180), ("actionId", 180), ("loopActionId", 120), ("skipReason", 180), ("failureReason", 220)):
+        cleaned = _live_agent_loop_clean_plan_text(opportunity.get(key), limit=limit)
+        if cleaned:
+            row[key] = cleaned
+    for key in ("location", "source", "bounds", "outcome"):
+        if isinstance(opportunity.get(key), dict):
+            row[key] = _copy_jsonable(opportunity.get(key))
+    if isinstance(opportunity.get("suggestedTools"), list):
+        row["suggestedTools"] = [
+            _live_agent_loop_clean_plan_text(item, limit=80)
+            for item in opportunity.get("suggestedTools")[:8]
+            if _live_agent_loop_clean_plan_text(item, limit=80)
+        ]
+    return {key: value for key, value in row.items() if value not in (None, "", [])}
+
+
+def _live_agent_loop_reaction_queue(state):
+    if not isinstance(state, dict):
+        return []
+    normalized = [
+        item
+        for item in (_live_agent_loop_normalize_reaction_opportunity(raw) for raw in (state.get("reactionQueue") or []))
+        if isinstance(item, dict)
+    ]
+    retention = LIVE_AGENT_LOOP_DEFAULTS["reactionOpportunityRetention"]
+    state["reactionQueue"] = normalized[-retention:]
+    return state["reactionQueue"]
+
+
 def _normalize_live_agent_loop_state(raw):
     state = default_live_agent_loop_state()
     if isinstance(raw, dict):
@@ -10040,6 +10238,8 @@ def _normalize_live_agent_loop_state(raw):
         state["clientActiveTtlSec"] = _normalize_int(raw.get("clientActiveTtlSec"), state["clientActiveTtlSec"], minimum=10, maximum=300)
         state["maxActionsPerTick"] = _normalize_int(raw.get("maxActionsPerTick"), state["maxActionsPerTick"], minimum=1, maximum=5)
         state["maxToolCallsPerTurn"] = _normalize_int(raw.get("maxToolCallsPerTurn"), state["maxToolCallsPerTurn"], minimum=1, maximum=5)
+        state["reactionMaxToolCallsPerTurn"] = _normalize_int(raw.get("reactionMaxToolCallsPerTurn"), state["reactionMaxToolCallsPerTurn"], minimum=1, maximum=5)
+        state["reactionTurnCooldownSec"] = _normalize_int(raw.get("reactionTurnCooldownSec"), state["reactionTurnCooldownSec"], minimum=5, maximum=1800)
         state["turnTimeoutSec"] = _normalize_int(raw.get("turnTimeoutSec"), state["turnTimeoutSec"], minimum=30, maximum=3600)
         state["turnRetryBackoffSec"] = _normalize_int(raw.get("turnRetryBackoffSec"), state["turnRetryBackoffSec"], minimum=5, maximum=1800)
         state["maxTurnRetries"] = _normalize_int(raw.get("maxTurnRetries"), state["maxTurnRetries"], minimum=0, maximum=10)
@@ -10055,6 +10255,8 @@ def _normalize_live_agent_loop_state(raw):
             state["agents"] = {str(k): v for k, v in raw["agents"].items() if isinstance(v, dict)}
         if isinstance(raw.get("events"), list):
             state["events"] = [event for event in raw["events"] if isinstance(event, dict)][-LIVE_AGENT_LOOP_DEFAULTS["eventRetention"]:]
+        if isinstance(raw.get("reactionQueue"), list):
+            state["reactionQueue"] = raw.get("reactionQueue")
         if isinstance(raw.get("operatorProposals"), list):
             state["operatorProposals"] = [proposal for proposal in raw["operatorProposals"] if isinstance(proposal, dict)][-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
         if isinstance(raw.get("outcomeAwareness"), list):
@@ -10070,6 +10272,7 @@ def _normalize_live_agent_loop_state(raw):
     state["schemaVersion"] = LIVE_AGENT_LOOP_SCHEMA_VERSION
     state["enabled"] = bool(state.get("enabled"))
     state["worldClientRequired"] = bool(state.get("worldClientRequired"))
+    _live_agent_loop_reaction_queue(state)
     if state.get("pausedUntil") and not _parse_isoish_epoch(state.get("pausedUntil")):
         state["pausedUntil"] = None
         state["pauseReason"] = None
@@ -10267,7 +10470,186 @@ def _live_agent_loop_schedule_turn_retry(state, agent_id, agent_state, reason, n
     return retry
 
 
-def _live_agent_loop_begin_turn(state, agent_id, reason, *, now_epoch=None, force=False, dry_run=False):
+def _live_agent_loop_reaction_compact(opportunity):
+    if not isinstance(opportunity, dict):
+        return None
+    compact = {
+        "schemaVersion": LIVE_AGENT_REACTION_TURN_SCHEMA_VERSION,
+        "id": opportunity.get("id"),
+        "triggerKind": opportunity.get("triggerKind"),
+        "triggerId": opportunity.get("triggerId"),
+        "subjectAgentId": opportunity.get("subjectAgentId"),
+        "targetAgentId": opportunity.get("targetAgentId") or opportunity.get("subjectAgentId"),
+        "sourceEventId": opportunity.get("sourceEventId"),
+        "communicationEventId": opportunity.get("communicationEventId"),
+        "worldActionId": opportunity.get("worldActionId") or opportunity.get("actionId"),
+        "loopActionId": opportunity.get("loopActionId"),
+        "reason": opportunity.get("reason"),
+        "suggestedTools": list(opportunity.get("suggestedTools") or [])[:8] if isinstance(opportunity.get("suggestedTools"), list) else [],
+        "location": _copy_jsonable(opportunity.get("location")) if isinstance(opportunity.get("location"), dict) else None,
+        "bounds": _copy_jsonable(opportunity.get("bounds")) if isinstance(opportunity.get("bounds"), dict) else None,
+    }
+    return {key: value for key, value in compact.items() if value not in (None, "", [])}
+
+
+def _live_agent_loop_reaction_agent_eligible(state, agent_id, subject_agent_id=None):
+    safe_agent_id = _live_agent_loop_clean_plan_text(agent_id, limit=120)
+    if not safe_agent_id or safe_agent_id == subject_agent_id:
+        return False
+    setting = get_agent_live_mode_setting(safe_agent_id)
+    if not setting or setting.get("agentLiveModeEnabled") is not True:
+        return False
+    agent_state = _live_agent_loop_agent_state(state, safe_agent_id)
+    return agent_state.get("enabled") is not False
+
+
+def _live_agent_loop_reaction_opportunity_id(trigger_kind, trigger_id, agent_id):
+    safe_kind = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(trigger_kind or "reaction")).strip("-") or "reaction"
+    safe_trigger = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(trigger_id or int(time.time() * 1000))).strip("-") or "trigger"
+    safe_agent = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(agent_id or "agent")).strip("-") or "agent"
+    return f"reaction-{safe_kind}-{safe_trigger}-{safe_agent}"[:180]
+
+
+def _live_agent_loop_enqueue_reaction_opportunity(state, *, agent_id, trigger_kind, trigger_id, subject_agent_id=None, reason=None, source_event_id=None, communication_event_id=None, world_action_id=None, loop_action_id=None, location=None, suggested_tools=None, source=None, now_iso=None, opportunity_id=None):
+    if not isinstance(state, dict):
+        return None, False
+    safe_agent_id = _live_agent_loop_clean_plan_text(agent_id, limit=120)
+    safe_subject_id = _live_agent_loop_clean_plan_text(subject_agent_id, limit=120)
+    if not _live_agent_loop_reaction_agent_eligible(state, safe_agent_id, safe_subject_id):
+        return None, False
+    now_iso = now_iso or _utc_now_iso()
+    bounds = _live_agent_loop_reaction_bounds(state)
+    resolved_trigger_id = _live_agent_loop_clean_plan_text(trigger_id or source_event_id or communication_event_id or world_action_id, limit=180) or f"trigger-{int(time.time() * 1000)}"
+    reaction_id = opportunity_id or _live_agent_loop_reaction_opportunity_id(trigger_kind, resolved_trigger_id, safe_agent_id)
+    queue = _live_agent_loop_reaction_queue(state)
+    existing = next((item for item in queue if item.get("id") == reaction_id), None)
+    if existing:
+        return existing, False
+    created_epoch = _parse_isoish_epoch(now_iso) or time.time()
+    row = _live_agent_loop_normalize_reaction_opportunity({
+        "id": reaction_id,
+        "agentId": safe_agent_id,
+        "status": "queued",
+        "triggerKind": trigger_kind,
+        "triggerId": resolved_trigger_id,
+        "subjectAgentId": safe_subject_id,
+        "targetAgentId": safe_subject_id,
+        "reason": reason or trigger_kind,
+        "createdAt": now_iso,
+        "readyAt": now_iso,
+        "expiresAt": _epoch_to_utc_iso(created_epoch + LIVE_AGENT_LOOP_DEFAULTS["reactionOpportunityTtlSec"]),
+        "sourceEventId": source_event_id,
+        "communicationEventId": communication_event_id,
+        "worldActionId": world_action_id,
+        "actionId": world_action_id,
+        "loopActionId": loop_action_id,
+        "location": location if isinstance(location, dict) else None,
+        "suggestedTools": suggested_tools or ["say_to_agent"],
+        "source": source if isinstance(source, dict) else {"kind": trigger_kind},
+        "bounds": bounds,
+    })
+    if not row:
+        return None, False
+    state["reactionQueue"] = _live_agent_loop_trim_list([*queue, row], LIVE_AGENT_LOOP_DEFAULTS["reactionOpportunityRetention"])
+    _live_agent_loop_stat(state, "reactionTriggers")
+    _live_agent_loop_add_event(
+        state,
+        "reaction-opportunity-queued",
+        agent_id=safe_agent_id,
+        details={
+            "reactionOpportunityId": row.get("id"),
+            "triggerKind": row.get("triggerKind"),
+            "triggerId": row.get("triggerId"),
+            "subjectAgentId": row.get("subjectAgentId"),
+            "bounds": row.get("bounds"),
+        },
+    )
+    return row, True
+
+
+def _live_agent_loop_mark_reaction_opportunity(state, reaction_id, status, *, turn_id=None, outcome=None, reason=None, now_iso=None):
+    if not isinstance(state, dict) or not reaction_id:
+        return None
+    now_iso = now_iso or _utc_now_iso()
+    target_status = _live_agent_loop_reaction_status(status)
+    queue = _live_agent_loop_reaction_queue(state)
+    updated = None
+    for index, item in enumerate(queue):
+        if item.get("id") != reaction_id:
+            continue
+        next_item = dict(item)
+        next_item["status"] = target_status
+        next_item["updatedAt"] = now_iso
+        if turn_id:
+            next_item["turnId"] = turn_id
+        if reason:
+            if target_status == "skipped":
+                next_item["skipReason"] = _live_agent_loop_clean_plan_text(reason, limit=180)
+            elif target_status == "failed":
+                next_item["failureReason"] = _live_agent_loop_clean_plan_text(reason, limit=220)
+        if isinstance(outcome, dict):
+            next_item["outcome"] = _copy_jsonable(outcome)
+        timestamp_key = {
+            "claimed": "claimedAt",
+            "completed": "completedAt",
+            "skipped": "skippedAt",
+            "failed": "failedAt",
+            "expired": "expiredAt",
+        }.get(target_status)
+        if timestamp_key:
+            next_item[timestamp_key] = now_iso
+        normalized = _live_agent_loop_normalize_reaction_opportunity(next_item)
+        if normalized:
+            queue[index] = normalized
+            updated = normalized
+        break
+    state["reactionQueue"] = queue[-LIVE_AGENT_LOOP_DEFAULTS["reactionOpportunityRetention"]:]
+    return updated
+
+
+def _live_agent_loop_select_reaction_opportunity(state, enabled_agent_ids, *, now_epoch=None, force=False):
+    now_epoch = float(now_epoch or time.time())
+    enabled = {str(agent_id) for agent_id in (enabled_agent_ids or []) if str(agent_id or "").strip()}
+    selected = None
+    queue = _live_agent_loop_reaction_queue(state)
+    for item in queue:
+        if item.get("status") not in {"queued", "claimed"}:
+            continue
+        expires_epoch = _parse_isoish_epoch(item.get("expiresAt"))
+        if expires_epoch and expires_epoch < now_epoch:
+            _live_agent_loop_mark_reaction_opportunity(state, item.get("id"), "expired", reason="reaction opportunity expired", now_iso=_epoch_to_utc_iso(now_epoch))
+            continue
+        if item.get("status") != "queued":
+            continue
+        ready_epoch = _parse_isoish_epoch(item.get("readyAt")) or 0
+        if ready_epoch and now_epoch < ready_epoch and not force:
+            continue
+        agent_id = item.get("agentId")
+        if enabled and agent_id not in enabled:
+            continue
+        if not _live_agent_loop_reaction_agent_eligible(state, agent_id, item.get("subjectAgentId")):
+            _live_agent_loop_mark_reaction_opportunity(state, item.get("id"), "skipped", reason="reaction agent no longer eligible", now_iso=_epoch_to_utc_iso(now_epoch))
+            continue
+        agent_state = _live_agent_loop_agent_state(state, agent_id)
+        next_reaction_allowed = _parse_isoish_epoch(agent_state.get("nextReactionAllowedAt")) or 0
+        if next_reaction_allowed and now_epoch < next_reaction_allowed and not force:
+            continue
+        if _active_behavior_records_for_agent(agent_id) and not force:
+            continue
+        selected = item
+        break
+    return selected
+
+
+def _live_agent_loop_next_reaction_allowed_epoch(agent_state):
+    raw = agent_state.get("nextReactionAllowedAt") if isinstance(agent_state, dict) else None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    parsed = _parse_isoish_epoch(raw)
+    return float(parsed or 0)
+
+
+def _live_agent_loop_begin_turn(state, agent_id, reason, *, now_epoch=None, force=False, dry_run=False, turn_type="regular", reaction=None, bounds=None):
     now_epoch = float(now_epoch or time.time())
     scheduler = _live_agent_loop_scheduler_state(state)
     sequence = _normalize_int(scheduler.get("turnSequence"), 0, minimum=0, maximum=1000000000) + 1
@@ -10279,6 +10661,7 @@ def _live_agent_loop_begin_turn(state, agent_id, reason, *, now_epoch=None, forc
         "agentId": agent_id,
         "status": "running",
         "reason": str(reason or "timer")[:120],
+        "turnType": _live_agent_loop_clean_plan_text(turn_type, limit=40) or "regular",
         "startedAt": _epoch_to_utc_iso(now_epoch),
         "endedAt": None,
         "attempt": 1,
@@ -10286,8 +10669,14 @@ def _live_agent_loop_begin_turn(state, agent_id, reason, *, now_epoch=None, forc
         "forced": bool(force),
         "dryRun": bool(dry_run),
     }
+    if isinstance(bounds, dict):
+        turn["bounds"] = _copy_jsonable(bounds)
+    if isinstance(reaction, dict):
+        compact_reaction = _live_agent_loop_reaction_compact(reaction)
+        if compact_reaction:
+            turn["reaction"] = compact_reaction
     scheduler["activeTurn"] = turn
-    _live_agent_loop_add_event(state, "turn-started", agent_id=agent_id, turn_id=turn["id"], details={"reason": turn["reason"], "forced": bool(force), "dryRun": bool(dry_run)})
+    _live_agent_loop_add_event(state, "turn-started", agent_id=agent_id, turn_id=turn["id"], details={"reason": turn["reason"], "turnType": turn["turnType"], "forced": bool(force), "dryRun": bool(dry_run), "reaction": turn.get("reaction"), "bounds": turn.get("bounds")})
     return turn
 
 
@@ -10307,6 +10696,30 @@ def _live_agent_loop_finish_turn(state, turn, status, *, outcome=None, error=Non
                 completed[key] = outcome.get(key)
     if isinstance(error, dict):
         completed["error"] = _copy_jsonable(error)
+    reaction_id = None
+    if isinstance(completed.get("reaction"), dict):
+        reaction_id = completed["reaction"].get("id")
+    completed_status = completed["status"]
+    if reaction_id:
+        reaction_status = "completed" if completed_status == "completed" else "failed" if completed_status == "failed" else "skipped"
+        reaction_reason = None
+        if isinstance(outcome, dict):
+            reaction_reason = outcome.get("skipReason") or outcome.get("failureReason")
+        _live_agent_loop_mark_reaction_opportunity(
+            state,
+            reaction_id,
+            reaction_status,
+            turn_id=completed.get("id"),
+            outcome=outcome if isinstance(outcome, dict) else None,
+            reason=reaction_reason,
+            now_iso=_epoch_to_utc_iso(now_epoch),
+        )
+        agent_state = _live_agent_loop_agent_state(state, completed.get("agentId"))
+        active_reaction = agent_state.get("activeReaction") if isinstance(agent_state.get("activeReaction"), dict) else {}
+        if active_reaction.get("id") == reaction_id:
+            agent_state.pop("activeReaction", None)
+        if reaction_status == "completed":
+            _live_agent_loop_stat(state, "reactionTurnsCompleted")
     scheduler = _live_agent_loop_scheduler_state(state)
     active = scheduler.get("activeTurn") if isinstance(scheduler.get("activeTurn"), dict) else {}
     if active.get("id") == completed.get("id"):
@@ -10322,7 +10735,7 @@ def _live_agent_loop_finish_turn(state, turn, status, *, outcome=None, error=Non
         f"turn-{completed['status']}",
         agent_id=completed.get("agentId"),
         turn_id=completed.get("id"),
-        details={k: completed.get(k) for k in ("status", "reason", "durationSec", "actionId", "loopActionId", "planId", "skipReason", "failureReason", "retryAfter") if completed.get(k) is not None},
+        details={k: completed.get(k) for k in ("status", "reason", "turnType", "durationSec", "actionId", "loopActionId", "planId", "skipReason", "failureReason", "retryAfter") if completed.get(k) is not None},
     )
     return normalized or completed
 
@@ -11537,11 +11950,16 @@ def _live_agent_loop_unavailable_reason(action_def, agent_id):
     return "no-available-target"
 
 
-def _live_agent_loop_find_action_target(action_def, *, agent_id=None):
+def _live_agent_loop_find_action_target(action_def, *, agent_id=None, preferred_target_agent_id=None):
     if action_def.get("targetKind") == "agent":
         social = _live_agent_loop_social_perception(agent_id)
         nearby = social.get("nearbyAgents") if isinstance(social.get("nearbyAgents"), list) else []
-        selected_peer = next((item for item in nearby if isinstance(item, dict) and item.get("agentId")), None)
+        preferred_target_agent_id = _live_agent_loop_clean_plan_text(preferred_target_agent_id, limit=120)
+        selected_peer = None
+        if preferred_target_agent_id:
+            selected_peer = next((item for item in nearby if isinstance(item, dict) and item.get("agentId") == preferred_target_agent_id), None)
+        if not selected_peer:
+            selected_peer = next((item for item in nearby if isinstance(item, dict) and item.get("agentId")), None)
         if not selected_peer:
             return None
         location = selected_peer.get("location") if isinstance(selected_peer.get("location"), dict) else {}
@@ -12261,6 +12679,9 @@ def _live_agent_loop_build_goal_frame(agent_id, perception, agent_state):
         ]
     recent = _live_agent_loop_recent_outcome_summary(agent_state, perception)
     active_plan = _live_agent_loop_normalize_plan(agent_state.get("activePlan"))
+    active_reaction = agent_state.get("activeReaction") if isinstance(agent_state.get("activeReaction"), dict) else None
+    if active_reaction:
+        context["activeReaction"] = _live_agent_loop_reaction_compact(active_reaction)
     pending_failed_expectation = _live_agent_loop_pending_failed_expectation(agent_state)
     goals = []
     if pending_failed_expectation:
@@ -12288,6 +12709,16 @@ def _live_agent_loop_build_goal_frame(agent_id, perception, agent_state):
     else:
         goals.append({"id": "work.keep-general-routine", "kind": "work", "priority": 0.10, "reason": "no assigned work building is available"})
     social = context.get("social") if isinstance(context.get("social"), dict) else {}
+    if active_reaction:
+        goals.append({
+            "id": f"reaction.respond.{active_reaction.get('id')}",
+            "kind": "reaction",
+            "loopActionId": "talk-with-nearby-agent",
+            "targetAgentId": active_reaction.get("targetAgentId") or active_reaction.get("subjectAgentId"),
+            "triggerKind": active_reaction.get("triggerKind"),
+            "priority": 0.96,
+            "reason": active_reaction.get("reason") or "respond to nearby speech or visible action",
+        })
     if social.get("nearbyAgentCount"):
         goals.append({"id": "social.perceive-nearby-agent", "kind": "relationship", "priority": 0.34, "reason": "another known agent appears co-located in the current social perception frame"})
     if social.get("liveEnabledPeerCount"):
@@ -12331,8 +12762,10 @@ def _live_agent_loop_build_goal_frame(agent_id, perception, agent_state):
 
 def _live_agent_loop_action_affordances(agent_id, agent_state):
     affordances = []
+    active_reaction = agent_state.get("activeReaction") if isinstance(agent_state.get("activeReaction"), dict) else {}
+    preferred_target_agent_id = active_reaction.get("targetAgentId") or active_reaction.get("subjectAgentId")
     for action_def in LIVE_AGENT_LOOP_ACTIONS:
-        selected = _live_agent_loop_find_action_target(action_def, agent_id=agent_id)
+        selected = _live_agent_loop_find_action_target(action_def, agent_id=agent_id, preferred_target_agent_id=preferred_target_agent_id)
         visible_contract = _live_agent_visible_action_contract(action_def.get("actionType"))
         affordance = {
             "id": action_def.get("id"),
@@ -12696,11 +13129,19 @@ def _live_agent_loop_build_turn_context_assembly(agent_id, agent_state, percepti
         "recentPlanIds": [item.get("id") for item in (agent_state.get("plans") or [])[-6:] if isinstance(item, dict) and item.get("id")],
     }
     visible_policy = perception.get("visibleActionContract") if isinstance(perception.get("visibleActionContract"), dict) else _live_agent_visible_action_policy()
+    turn_bounds = turn.get("bounds") if isinstance(turn, dict) and isinstance(turn.get("bounds"), dict) else {}
+    turn_type = _live_agent_loop_clean_plan_text((turn or {}).get("turnType"), limit=40) or "regular"
     safety_constraints = {
         "featureGateOpen": _agent_live_mode_available(),
         "configGateOpen": _agent_live_mode_config_enabled(),
-        "maxToolCallsPerTurn": _normalize_int((state or {}).get("maxToolCallsPerTurn"), LIVE_AGENT_LOOP_DEFAULTS["maxToolCallsPerTurn"], minimum=1, maximum=5),
+        "turnType": turn_type,
+        "maxToolCallsPerTurn": _normalize_int(turn_bounds.get("maxToolCallsPerTurn"), _normalize_int((state or {}).get("maxToolCallsPerTurn"), LIVE_AGENT_LOOP_DEFAULTS["maxToolCallsPerTurn"], minimum=1, maximum=5), minimum=1, maximum=5),
+        "regularMaxToolCallsPerTurn": _normalize_int((state or {}).get("maxToolCallsPerTurn"), LIVE_AGENT_LOOP_DEFAULTS["maxToolCallsPerTurn"], minimum=1, maximum=5),
+        "reactionMaxToolCallsPerTurn": turn_bounds.get("maxToolCallsPerTurn") if turn_type == "reaction" else _live_agent_loop_reaction_bounds(state or {}).get("reactionMaxToolCallsPerTurn"),
         "maxActionsPerTick": _normalize_int((state or {}).get("maxActionsPerTick"), LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"], minimum=1, maximum=5),
+        "cooldownSec": turn_bounds.get("cooldownSec"),
+        "regularCooldownSec": _normalize_int((state or {}).get("minActionIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"], minimum=30, maximum=3600),
+        "reactionCooldownSec": turn_bounds.get("cooldownSec") if turn_type == "reaction" else _live_agent_loop_reaction_bounds(state or {}).get("reactionCooldownSec"),
         "worldClientRequired": bool((state or {}).get("worldClientRequired")),
         "worldClientActive": bool((world_client or {}).get("active")),
         "hiddenWorldMutationAllowed": False,
@@ -12710,6 +13151,8 @@ def _live_agent_loop_build_turn_context_assembly(agent_id, agent_state, percepti
         "killSwitch": _live_agent_loop_kill_switch_status(state or {}) if isinstance(state, dict) else None,
         "visibleActionPolicy": {key: visible_policy.get(key) for key in ("schemaVersion", "hiddenWorldMutationAllowed", "proposalOnlyCapabilityIds") if isinstance(visible_policy, dict) and visible_policy.get(key) is not None},
     }
+    if turn_type == "reaction" and isinstance((turn or {}).get("reaction"), dict):
+        safety_constraints["reaction"] = _copy_jsonable(turn.get("reaction"))
     frame = {
         "schemaVersion": LIVE_AGENT_TURN_CONTEXT_SCHEMA_VERSION,
         "id": f"context-{turn.get('id')}" if isinstance(turn, dict) and turn.get("id") else _live_agent_memory_entry_id("context", agent_id),
@@ -13225,6 +13668,10 @@ def _live_agent_loop_decision_score(affordance, agent_state, goal_frame=None):
             boost = min(0.70, max(0.24, priority))
             score += boost
             breakdown["plan"] += boost
+        if goal.get("kind") == "reaction" and goal.get("loopActionId") == loop_action_id:
+            boost = min(0.82, max(0.36, priority))
+            score += boost
+            breakdown["context"] += boost
     action_summary = (recent.get("byAction") or {}).get(loop_action_id) if isinstance(recent.get("byAction"), dict) else None
     if isinstance(action_summary, dict):
         completed = int(action_summary.get("completed") or 0)
@@ -14073,6 +14520,26 @@ def _live_agent_society_record_world_action_event(state, agent_id, action, summa
             now_iso=now_iso,
         )
         changed = changed or trigger_changed or goal_changed
+    queued_reactions = []
+    if isinstance(state, dict):
+        for observer_id in sorted(set(nearby_observers)):
+            queued, queued_changed = _live_agent_loop_enqueue_reaction_opportunity(
+                state,
+                agent_id=observer_id,
+                trigger_kind="nearby-action",
+                trigger_id=action_id,
+                subject_agent_id=agent_id,
+                reason=f"observed {action_type or loop_action_id or 'visible action'} nearby",
+                source_event_id=action_id,
+                world_action_id=action_id,
+                loop_action_id=loop_action_id,
+                location=location,
+                suggested_tools=["say_to_agent"],
+                source=source,
+                now_iso=now_iso,
+            )
+            if queued_changed and queued:
+                queued_reactions.append(_live_agent_loop_reaction_compact(queued))
     if changed:
         store = _live_agent_society_save_store(meta, store, now_iso=now_iso)
     if isinstance(state, dict) and observations:
@@ -14084,6 +14551,7 @@ def _live_agent_society_record_world_action_event(state, agent_id, action, summa
                 "sourceActionId": action_id,
                 "observationIds": [item.get("id") for item in observations],
                 "nearbyObserverIds": sorted(set(nearby_observers)),
+                "queuedReactionTurnIds": [item.get("id") for item in queued_reactions if isinstance(item, dict)],
                 "groupGoalCount": len(store.get("groupGoals") or {}),
                 "conversationTriggerCount": len(store.get("conversationTriggers") or []),
             },
@@ -14092,6 +14560,7 @@ def _live_agent_society_record_world_action_event(state, agent_id, action, summa
         "observationIds": [item.get("id") for item in observations if item.get("id")],
         "observationCount": len(observations),
         "nearbyObserverIds": sorted(set(nearby_observers)),
+        "queuedReactionTurns": queued_reactions,
         "groupGoalCount": len(store.get("groupGoals") or {}),
         "conversationTriggerCount": len(store.get("conversationTriggers") or []),
     }
@@ -14330,7 +14799,7 @@ def _live_agent_loop_refresh_completed_outcomes(state):
     return changed
 
 
-def _live_agent_loop_cooldown_for_decision(base_cooldown, decision):
+def _live_agent_loop_cooldown_for_decision(base_cooldown, decision, *, minimum=45):
     score = 0
     try:
         score = float((decision or {}).get("score") or 0)
@@ -14342,7 +14811,7 @@ def _live_agent_loop_cooldown_for_decision(base_cooldown, decision):
         multiplier = 1.30
     else:
         multiplier = 1.0
-    return _normalize_int(round(base_cooldown * multiplier), base_cooldown, minimum=45, maximum=3600)
+    return _normalize_int(round(base_cooldown * multiplier), base_cooldown, minimum=minimum, maximum=3600)
 
 
 def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
@@ -14458,13 +14927,46 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
         max_actions = _normalize_int(state.get("maxActionsPerTick"), LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"], minimum=1, maximum=5)
         max_tool_calls = _normalize_int(state.get("maxToolCallsPerTurn"), LIVE_AGENT_LOOP_DEFAULTS["maxToolCallsPerTurn"], minimum=1, maximum=5)
         cooldown = _normalize_int(state.get("minActionIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"], minimum=30, maximum=3600)
+        reaction_bounds = _live_agent_loop_reaction_bounds(state)
+        regular_turn_bounds = {
+            "schemaVersion": LIVE_AGENT_REACTION_TURN_SCHEMA_VERSION,
+            "turnType": "regular",
+            "maxActionsPerTick": max_actions,
+            "maxToolCallsPerTurn": max_tool_calls,
+            "cooldownSec": cooldown,
+        }
+        reaction_turn_bounds = {
+            "schemaVersion": LIVE_AGENT_REACTION_TURN_SCHEMA_VERSION,
+            "turnType": "reaction",
+            "maxActionsPerTick": 1,
+            "maxToolCallsPerTurn": reaction_bounds["reactionMaxToolCallsPerTurn"],
+            "cooldownSec": reaction_bounds["reactionCooldownSec"],
+            "regularMaxToolCallsPerTurn": reaction_bounds["regularMaxToolCallsPerTurn"],
+            "regularCooldownSec": reaction_bounds["regularCooldownSec"],
+        }
         result["scheduler"]["maxActionsPerTick"] = max_actions
         result["scheduler"]["maxToolCallsPerTurn"] = max_tool_calls
+        result["scheduler"]["reactionMaxToolCallsPerTurn"] = reaction_turn_bounds["maxToolCallsPerTurn"]
+        result["scheduler"]["reactionCooldownSec"] = reaction_turn_bounds["cooldownSec"]
+        result["scheduler"]["reactionBounds"] = reaction_bounds
         turn_processed = False
+        enabled_agent_ids = [a.get("agentId") for a in enabled_agents if a.get("agentId")]
+        scheduled_reaction = _live_agent_loop_select_reaction_opportunity(state, enabled_agent_ids, now_epoch=now_epoch, force=force)
+        ordered_agents = _live_agent_loop_order_agents_for_turn(enabled_agents, scheduler.get("lastAgentId"))
+        if scheduled_reaction:
+            ordered_agents = [agent for agent in enabled_agents if agent.get("agentId") == scheduled_reaction.get("agentId")]
+            result["reaction"] = {
+                "selected": _live_agent_loop_reaction_compact(scheduled_reaction),
+                "queueDepth": len([item for item in _live_agent_loop_reaction_queue(state) if item.get("status") == "queued"]),
+                "bounds": reaction_turn_bounds,
+            }
 
-        for agent in _live_agent_loop_order_agents_for_turn(enabled_agents, scheduler.get("lastAgentId")):
+        for agent in ordered_agents:
             agent_id = agent.get("agentId")
             agent_state = _live_agent_loop_agent_state(state, agent_id)
+            turn_reaction = scheduled_reaction if scheduled_reaction and scheduled_reaction.get("agentId") == agent_id else None
+            turn_type = "reaction" if isinstance(turn_reaction, dict) else "regular"
+            turn_bounds = reaction_turn_bounds if turn_type == "reaction" else regular_turn_bounds
             if agent_state.get("enabled") is False and not force:
                 result["skipped"].append({"agentId": agent_id, "reason": "agent-loop-disabled"})
                 continue
@@ -14474,7 +14976,17 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 continue
 
             orchestrator_started = _live_agent_clawmind_trace_start()
-            turn = _live_agent_loop_begin_turn(state, agent_id, reason, now_epoch=now_epoch, force=force, dry_run=dry_run)
+            turn = _live_agent_loop_begin_turn(state, agent_id, reason, now_epoch=now_epoch, force=force, dry_run=dry_run, turn_type=turn_type, reaction=turn_reaction, bounds=turn_bounds)
+            if turn_reaction:
+                claimed_reaction = _live_agent_loop_mark_reaction_opportunity(state, turn_reaction.get("id"), "claimed", turn_id=turn.get("id"), now_iso=now_iso)
+                agent_state["activeReaction"] = _live_agent_loop_reaction_compact(claimed_reaction or turn_reaction)
+                agent_state["lastReactionClaimedAt"] = now_iso
+                _live_agent_loop_stat(state, "reactionTurnsStarted")
+                result["reaction"] = {
+                    **(result.get("reaction") if isinstance(result.get("reaction"), dict) else {}),
+                    "claimed": _live_agent_loop_reaction_compact(claimed_reaction or turn_reaction),
+                    "turnId": turn.get("id"),
+                }
             result["turn"] = turn
             result["scheduler"]["activeTurn"] = turn
             turn_processed = True
@@ -14584,14 +15096,14 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "skipped", "skipReason": "world-client-inactive"}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
                     break
 
-                next_allowed = _live_agent_loop_next_allowed_epoch(agent_state)
+                next_allowed = _live_agent_loop_next_reaction_allowed_epoch(agent_state) if turn_type == "reaction" else _live_agent_loop_next_allowed_epoch(agent_state)
                 if next_allowed and now_epoch < next_allowed and not force:
                     _live_agent_loop_stat(agent_state, "skippedCooldown")
-                    skipped = {"agentId": agent_id, "reason": "cooldown", "nextAllowedAt": _epoch_to_utc_iso(next_allowed)}
+                    skipped = {"agentId": agent_id, "reason": "reaction-cooldown" if turn_type == "reaction" else "cooldown", "nextAllowedAt": _epoch_to_utc_iso(next_allowed), "turnType": turn_type}
                     result["skipped"].append(skipped)
-                    _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": "cooldown", "details": skipped}, now_epoch=now_epoch)
-                    _live_agent_clawmind_record_skipped_modules(state, turn, ["planning", "conversation", "actionExecution", "outcomeAwareness"], "cooldown", skipped)
-                    _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "skipped", "skipReason": "cooldown"}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
+                    _live_agent_loop_finish_turn(state, turn, "skipped", outcome={"skipReason": skipped["reason"], "details": skipped}, now_epoch=now_epoch)
+                    _live_agent_clawmind_record_skipped_modules(state, turn, ["planning", "conversation", "actionExecution", "outcomeAwareness"], skipped["reason"], skipped)
+                    _live_agent_clawmind_append_trace(state, "orchestrator", turn, orchestrator_started, inputs={"reason": reason, "force": force, "dryRun": dry_run}, outputs={"turnStatus": "skipped", "skipReason": skipped["reason"]}, decisions={"selectedAgentId": agent_id, "processed": True}, status="completed")
                     break
 
                 planning_started = _live_agent_clawmind_trace_start()
@@ -14616,7 +15128,9 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
 
                 action_def = selected["action"]
                 visible_action_contract = _live_agent_visible_action_contract(action_def.get("actionType")) or {}
-                adaptive_cooldown = _live_agent_loop_cooldown_for_decision(cooldown, decision)
+                adaptive_cooldown = _live_agent_loop_cooldown_for_decision(turn_bounds.get("cooldownSec") or cooldown, decision, minimum=5 if turn_type == "reaction" else 45)
+                if turn_type == "reaction":
+                    adaptive_cooldown = min(adaptive_cooldown, reaction_turn_bounds["cooldownSec"])
                 failure_injection = None if dry_run else _live_agent_loop_consume_failure_injection(state, agent_id, now_iso)
                 plan = _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, persist=not dry_run, failure_injection=failure_injection)
                 plan_step = _live_agent_loop_plan_current_step(plan)
@@ -14649,6 +15163,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                         "roles": ["participant"],
                         "loopId": LIVE_AGENT_LOOP_SCHEMA_VERSION,
                         "turnId": turn.get("id"),
+                        "turnType": turn_type,
                     },
                     "actionType": action_def["actionType"],
                     "capabilityTag": action_def["capabilityTag"],
@@ -14657,6 +15172,9 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     "params": {
                         "reason": "continuous-presence",
                         "turnId": turn.get("id"),
+                        "turnType": turn_type,
+                        "reaction": turn.get("reaction") if turn_type == "reaction" else None,
+                        "maxToolCallsPerTurn": turn_bounds.get("maxToolCallsPerTurn"),
                         "loopActionId": action_def["id"],
                         "loopActionLabel": action_def.get("label"),
                         "loopNeed": action_def.get("need"),
@@ -14685,7 +15203,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 action_execution_started = _live_agent_clawmind_trace_start()
                 if dry_run:
                     agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload, "wouldPlan": plan, "decision": decision, "perception": perception}
-                    result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected, "decision": agent_state.get("lastDecision"), "plan": plan, "turnId": turn.get("id"), **(turn_planning_record or {})})
+                    result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected, "decision": agent_state.get("lastDecision"), "plan": plan, "turnId": turn.get("id"), "turnType": turn_type, "reaction": turn.get("reaction"), "bounds": turn_bounds, **(turn_planning_record or {})})
                     _live_agent_clawmind_append_trace(
                         state,
                         "actionExecution",
@@ -14737,14 +15255,18 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     _live_agent_loop_clear_turn_retry(agent_state)
                     agent_state["lastActionAt"] = now_iso
                     agent_state["lastActionId"] = action_id
-                    agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
+                    if turn_type == "reaction":
+                        agent_state["lastReactionAt"] = now_iso
+                        agent_state["nextReactionAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
+                    else:
+                        agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
                     stored_plan = _live_agent_loop_mark_plan_action_created(state, agent_id, agent_state, plan, action_id, now_iso)
                     if action_id and isinstance(stored_plan or plan, dict):
                         _live_agent_loop_record_outcome_expected(state, agent_id, stored_plan or plan, action_id, now_iso)
-                    agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown, "turnId": turn.get("id")}
+                    agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown, "turnId": turn.get("id"), "turnType": turn_type, "reaction": turn.get("reaction") if turn_type == "reaction" else None}
                     _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
-                    _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, turn_id=turn.get("id"), details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "target": selected["target"], "decision": agent_state.get("lastDecision")})
-                    created_row = {"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown, "turnId": turn.get("id"), **(turn_planning_record or {})}
+                    _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, turn_id=turn.get("id"), details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "target": selected["target"], "decision": agent_state.get("lastDecision"), "turnType": turn_type, "reaction": turn.get("reaction")})
+                    created_row = {"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status_code, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown, "cooldownField": "nextReactionAllowedAt" if turn_type == "reaction" else "nextAllowedAt", "turnId": turn.get("id"), "turnType": turn_type, "reaction": turn.get("reaction") if turn_type == "reaction" else None, "bounds": turn_bounds, **(turn_planning_record or {})}
                     result["actionsCreated"].append(created_row)
                     action_summary = _live_agent_loop_action_summary(action)
                     _live_agent_clawmind_append_trace(
@@ -14792,7 +15314,10 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 else:
                     _live_agent_loop_stat(agent_state, "errors")
                     _live_agent_loop_stat(state, "errors")
-                    agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + min(45, cooldown))
+                    if turn_type == "reaction":
+                        agent_state["nextReactionAllowedAt"] = _epoch_to_utc_iso(now_epoch + min(reaction_turn_bounds["cooldownSec"], adaptive_cooldown))
+                    else:
+                        agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + min(45, cooldown))
                     failed_plan = _live_agent_loop_mark_plan_action_request_failed(state, agent_id, agent_state, plan, created, now_iso)
                     retry = _live_agent_loop_schedule_turn_retry(state, agent_id, agent_state, "action request failed", now_epoch=now_epoch, turn=turn)
                     agent_state["lastOutcome"] = {"at": now_iso, "status": "error", "httpStatus": status_code, "error": created, "planId": (failed_plan or plan or {}).get("id"), "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "turnId": turn.get("id"), "retry": retry}
@@ -14884,6 +15409,8 @@ def get_live_agent_loop_status():
                     "turnTimeoutSec": state.get("turnTimeoutSec"),
                     "turnRetryBackoffSec": state.get("turnRetryBackoffSec"),
                     "maxTurnRetries": state.get("maxTurnRetries"),
+                    "reactionQueueDepth": len([item for item in _live_agent_loop_reaction_queue(state) if item.get("status") == "queued"]),
+                    "reactionBounds": _live_agent_loop_reaction_bounds(state),
                 },
                 "staleTurnRecovered": stale_turn_recovered,
                 "staleExpired": stale_expired,
@@ -14892,8 +15419,11 @@ def get_live_agent_loop_status():
                     "browserTabRequiredForScheduler": False,
                     "maxActionsPerTick": state.get("maxActionsPerTick"),
                     "maxToolCallsPerTurn": state.get("maxToolCallsPerTurn"),
+                    "reactionMaxToolCallsPerTurn": _live_agent_loop_reaction_bounds(state).get("reactionMaxToolCallsPerTurn"),
+                    "reactionTurnCooldownSec": _live_agent_loop_reaction_bounds(state).get("reactionCooldownSec"),
                     "minActionIntervalSec": state.get("minActionIntervalSec"),
                     "onlyAgentsWithAgentLiveModeEnabled": True,
+                    "reactionTurnsUseLowerBounds": _live_agent_loop_reaction_bounds(state).get("reactionToolLimitLowerThanRegular") and _live_agent_loop_reaction_bounds(state).get("reactionCooldownLowerThanRegular"),
                     "pauseStopsNewTurns": True,
                     "killSwitchStopsNewTurns": True,
                 },
@@ -15428,6 +15958,8 @@ def update_live_agent_loop_settings(payload):
             "clientActiveTtlSec": (10, 300),
             "maxActionsPerTick": (1, 5),
             "maxToolCallsPerTurn": (1, 5),
+            "reactionMaxToolCallsPerTurn": (1, 5),
+            "reactionTurnCooldownSec": (5, 1800),
             "turnTimeoutSec": (30, 3600),
             "turnRetryBackoffSec": (5, 1800),
             "maxTurnRetries": (0, 10),
