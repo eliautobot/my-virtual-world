@@ -170,6 +170,12 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `clawMindArchitecture.modules.*.latency.p95Ms`
 - `clawMindArchitecture.runtime.traceCount`
 - `clawMindArchitecture.optimization.heavyWorldScan = false`
+- `metrics.turnContextAssembly.schemaVersion = agent-live-mode-turn-context/v1`
+- `metrics.turnContextAssembly.enabledAgentContextCount`
+- `metrics.turnContextAssembly.completeFrameCount`
+- `metrics.turnContextAssembly.allCompletedTurnsHaveContext`
+- `metrics.turnContextAssembly.optimization.heavyWorldScan = false`
+- `finalGate.evidence.turnContextAssembly`
 - `liveWorldReference.schemaVersion = agent-live-mode-live-world-reference/v1`
 - `liveWorldReference.reference.url = https://github.com/EmergenceAI/Emergence-World`
 - `liveWorldReference.reference.reviewedCommit = 7613dcb6554133144779f4c4f0ba49064894b3a5`
@@ -439,12 +445,26 @@ Each backend-owned turn should follow this pipeline:
 2. Update decaying needs.
 3. Build a perception frame from saved world state.
 4. Build a tool frame containing only available tools.
-5. Select the next action through the decision layer.
-6. Validate the requested tool call against tool contracts.
-7. Apply backend side effects.
-8. Append world-action, tool-call, memory, relationship, and animation events.
-9. Notify connected browser viewers through polling or streaming.
-10. Schedule reactions, follow-up turns, or cooldown.
+5. Assemble and persist a compact turn context frame.
+6. Select the next action through the decision layer.
+7. Validate the requested tool call against tool contracts.
+8. Apply backend side effects.
+9. Append world-action, tool-call, memory, relationship, and animation events.
+10. Notify connected browser viewers through polling or streaming.
+11. Schedule reactions, follow-up turns, or cooldown.
+
+The persisted context frame uses `agent-live-mode-turn-context/v1` and is stored on each scheduler turn as `contextAssembly`. It must stay compact and bounded, with no metrics-time full-world scan. Required slots are:
+
+- `profile`: roster/profile identity, personality, home/work, and limited profile docs
+- `place`: current server-owned location plus home/work ids
+- `nearbyAgents`: same-building/floor social perception rows
+- `memories`: ranked retrieval results plus bounded recent action/reflection counts
+- `relationships`: bounded relationship summaries for this resident
+- `plan`: active plan, active goal, open todos, and recent plan ids
+- `recentConversation`: bounded conversation memory rows
+- `toolRegistry`: compact current registry categories, executable tools, risk tiers, and availability probes
+- `safetyConstraints`: feature/config gates, turn budgets, pause/kill-switch, proposal-only capabilities, and visible-world mutation policy
+- `visibleWorldState`: bounded world summary, active behavior rows, recent world actions, affordance counts, and available action ids
 
 ### 4. Decision Layer
 

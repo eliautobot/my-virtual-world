@@ -829,6 +829,81 @@ finally:
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(liveAgentProviderClawMindMetricsCheck.status, 0, `Live Agent provider/ClawMind metrics check failed\n${liveAgentProviderClawMindMetricsCheck.stderr || liveAgentProviderClawMindMetricsCheck.stdout}`);
 
+const liveAgentTurnContextAssemblyCheck = spawnSync('python3', ['-B', '-c', `
+import importlib.util
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+path = Path("src/server/server.py")
+data_dir = tempfile.mkdtemp(prefix="vw-smoke-turn-context-")
+os.environ["VW_DATA_DIR"] = data_dir
+os.environ["_VW_INT"] = "1"
+try:
+    spec = importlib.util.spec_from_file_location("vw_server", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
+    agents = [
+        {"id": f"context-agent-{i}", "statusKey": f"context-agent-{i}", "name": f"Context Agent {i}", "providerKind": "fake", "agentLiveModeEnabled": True}
+        for i in range(1, 6)
+    ]
+    module.get_roster = lambda: agents
+    meta = module.load_world_meta()
+    meta["agentProfiles"] = {
+        agent["statusKey"]: {
+            "agentLiveModeEnabled": True,
+            "providerKind": "fake",
+            "personality": {"outgoing": 1.1, "curious": 1.2, "easygoing": 0.9},
+        }
+        for agent in agents
+    }
+    module.save_world_meta(meta)
+
+    required_slots = [
+        "profile",
+        "place",
+        "nearbyAgents",
+        "memories",
+        "relationships",
+        "plan",
+        "recentConversation",
+        "toolRegistry",
+        "safetyConstraints",
+        "visibleWorldState",
+    ]
+    seen = set()
+    for i in range(5):
+        result = module.live_agent_loop_tick(reason=f"context-assembly-smoke-{i}", force=True)
+        assert result["ok"] is True, result
+        turn = result.get("turn") or {}
+        frame = turn.get("contextAssembly")
+        assert frame and frame["schemaVersion"] == module.LIVE_AGENT_TURN_CONTEXT_SCHEMA_VERSION, turn
+        assert all(slot in frame for slot in required_slots), frame
+        assert frame["toolRegistry"]["schemaVersion"] == module.LIVE_AGENT_TOOL_REGISTRY_SCHEMA_VERSION, frame["toolRegistry"]
+        assert frame["safetyConstraints"]["hiddenWorldMutationAllowed"] is False, frame["safetyConstraints"]
+        assert frame["bounds"]["fullWorldScan"] is False, frame["bounds"]
+        seen.add(frame["agentId"])
+
+    assert len(seen) == 5, seen
+    state = module.get_live_agent_loop_state(persist_migration=False)
+    history = state["scheduler"]["turnHistory"]
+    assert len([turn for turn in history if turn.get("contextAssembly")]) >= 5, history
+    metrics = module.get_live_agent_mode_autonomy_metrics()
+    context_metrics = metrics["metrics"]["turnContextAssembly"]
+    assert context_metrics["schemaVersion"] == module.LIVE_AGENT_TURN_CONTEXT_SCHEMA_VERSION, context_metrics
+    assert context_metrics["enabledAgentContextCount"] >= 5, context_metrics
+    assert context_metrics["completeFrameCount"] >= 5, context_metrics
+    assert context_metrics["optimization"]["heavyWorldScan"] is False, context_metrics
+    assert metrics["checklist"]["turnContextAssemblyRecorded"] is True, metrics["checklist"]
+    assert metrics["checklist"]["turnContextAssemblyAcrossEnabledAgents"] is True, metrics["checklist"]
+    print("live agent turn context assembly ok")
+finally:
+    shutil.rmtree(data_dir, ignore_errors=True)
+`], { cwd: root, encoding: 'utf8' });
+assert.equal(liveAgentTurnContextAssemblyCheck.status, 0, `Live Agent turn context assembly check failed\n${liveAgentTurnContextAssemblyCheck.stderr || liveAgentTurnContextAssemblyCheck.stdout}`);
+
 const liveAgentProviderBridgeContractCheck = spawnSync('python3', ['-B', '-c', `
 import importlib.util
 import os
@@ -1337,6 +1412,7 @@ for (const token of [
   'LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"',
   'LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"',
   'LIVE_AGENT_LIVE_WORLD_REFERENCE_VERSION = "agent-live-mode-live-world-reference/v1"',
+  'LIVE_AGENT_TURN_CONTEXT_SCHEMA_VERSION = "agent-live-mode-turn-context/v1"',
   'LIVE_AGENT_REFERENCE_ARCHITECTURES',
   '"id": "live-world-reference"',
   '"scope": "live-agent-mode-clawmind-only"',
@@ -1363,6 +1439,7 @@ for (const token of [
   '"clawMindArchitecture"',
   '"referenceArchitectures"',
   '"liveWorldReference"',
+  '"turnContextAssembly"',
   '"referenceWorldExpansionTools"',
   '"aliveWorldIndicators"',
   '"proposal-only"',
