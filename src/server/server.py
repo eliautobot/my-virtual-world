@@ -3811,6 +3811,7 @@ def _live_agent_record_communication_side_effects(saved_event):
             },
         )
         queued_reactions = []
+        reaction_enqueue_iso = _utc_now_iso()
         for opportunity in saved_event.get("reactionOpportunities") or []:
             observer_id = opportunity.get("agentId") if isinstance(opportunity, dict) else None
             if not observer_id:
@@ -3859,7 +3860,7 @@ def _live_agent_record_communication_side_effects(saved_event):
                 location=saved_event.get("location") if isinstance(saved_event.get("location"), dict) else {"buildingId": saved_event.get("buildingId"), "floor": saved_event.get("floor") or 1},
                 suggested_tools=opportunity.get("suggestedTools") if isinstance(opportunity.get("suggestedTools"), list) else ["say_to_agent"],
                 source={"kind": "in-world-communication", "eventId": saved_event.get("id"), "scope": saved_event.get("scope")},
-                now_iso=saved_event.get("at") if _parse_isoish_epoch(saved_event.get("at")) else None,
+                now_iso=reaction_enqueue_iso,
                 opportunity_id=opportunity.get("id"),
             )
             if queued_changed and queued:
