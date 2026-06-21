@@ -171,6 +171,7 @@ for (const token of [
   '__VWLiveAgentModeAnimationReplayState',
   'vw-live-agent-mode-replay-',
   'runTwoClientWorldEventFeedSyncCheck',
+  'runReconnectReplayCatchupCheck',
   '__VWSyncLiveAgentModeWorldEvents',
   'disableDayNightCycleFor8587',
   'VW_OPENCLAW_PATH: workspaceRoot',
@@ -450,6 +451,61 @@ try:
     assert world_event_metrics["ok"] is True, world_event_metrics
     assert world_event_metrics["replayableEventCount"] >= len(events), world_event_metrics
     assert "p95MultiClientSyncLatencyMs" in world_event_metrics, world_event_metrics
+    reconnect_without_expected = module.list_live_agent_world_events({
+        "since": "0",
+        "snapshot": "1",
+        "limit": "100",
+        "reconnectReplay": "1",
+    })["reconnectReplay"]
+    assert reconnect_without_expected["ok"] is False, reconnect_without_expected
+    assert reconnect_without_expected["completedMutationProven"] is False, reconnect_without_expected
+    assert reconnect_without_expected["missedMutationCount"] == 1, reconnect_without_expected
+    with module._world_event_feed_client_lock:
+        module._world_event_feed_reconnect_replay_samples.clear()
+    reconnect_with_expected = module.list_live_agent_world_events({
+        "since": "0",
+        "snapshot": "1",
+        "limit": "100",
+        "reconnectReplay": "1",
+        "expectedWorldActionId": action_id,
+    })["reconnectReplay"]
+    assert reconnect_with_expected["ok"] is True, reconnect_with_expected
+    assert reconnect_with_expected["completedMutationProven"] is True, reconnect_with_expected
+    assert reconnect_with_expected["completedMutationEventCount"] >= 1, reconnect_with_expected
+    reconnect_metrics = module.get_live_agent_reconnect_replay_metrics()
+    assert reconnect_metrics["ok"] is True, reconnect_metrics
+    assert reconnect_metrics["completedMutationEventCount"] >= 1, reconnect_metrics
+
+    with module._world_event_feed_client_lock:
+        module._world_event_feed_clients.clear()
+        module._world_event_feed_latency_samples.clear()
+        module._world_event_feed_multi_client_sync_samples.clear()
+    module.list_live_agent_world_events({"client": "main3d-world-event-feed", "sessionId": "smoke-client-a", "limit": "1"})
+    module.list_live_agent_world_events({"client": "main3d-world-event-feed", "sessionId": "smoke-client-b", "limit": "1"})
+    passive_client_metrics = module.get_live_agent_world_event_feed_metrics()
+    assert passive_client_metrics["connectedClientCount"] >= 2, passive_client_metrics
+    assert passive_client_metrics["multiClientWorldSyncOk"] is False, passive_client_metrics
+    assert passive_client_metrics["latestMultiClientSync"]["latencySampleCount"] == 0, passive_client_metrics
+    module.list_live_agent_world_events({
+        "client": "main3d-world-event-feed",
+        "sessionId": "smoke-client-a",
+        "appliedCursor": str(reconnect_with_expected["nextCursor"] or 1),
+        "lastAppliedLatencyMs": "5",
+        "lastAppliedLatencySource": "live-incremental",
+        "limit": "1",
+    })
+    module.list_live_agent_world_events({
+        "client": "main3d-world-event-feed",
+        "sessionId": "smoke-client-b",
+        "appliedCursor": str(reconnect_with_expected["nextCursor"] or 1),
+        "lastAppliedLatencyMs": "8",
+        "lastAppliedLatencySource": "live-incremental",
+        "limit": "1",
+    })
+    applied_client_metrics = module.get_live_agent_world_event_feed_metrics()
+    assert applied_client_metrics["multiClientWorldSyncOk"] is True, applied_client_metrics
+    assert applied_client_metrics["multiClientAppliedSampleCount"] >= 1, applied_client_metrics
+    assert applied_client_metrics["latestMultiClientSync"]["sampledClientCount"] >= 2, applied_client_metrics
     state = module.get_live_agent_loop_state(persist_migration=True)
     outcome = next(item for item in state["outcomeAwareness"] if item.get("actionId") == action_id)
     assert outcome.get("expectedOutcome", {}).get("loopActionId") == "hydrate-water-cooler", outcome
@@ -1242,6 +1298,7 @@ for (const token of [
   'LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"',
   'LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION = "agent-live-mode-in-world-communication/v1"',
   'LIVE_AGENT_WORLD_EVENT_FEED_SCHEMA_VERSION = "agent-live-mode-world-event-feed/v1"',
+  'LIVE_AGENT_RECONNECT_REPLAY_METRICS_SCHEMA_VERSION = "agent-live-mode-reconnect-replay-metrics/v1"',
   'LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"',
   'LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"',
   'LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"',
@@ -1254,6 +1311,7 @@ for (const token of [
   'def list_live_agent_in_world_communications',
   'def list_live_agent_world_events',
   'def get_live_agent_world_event_feed_metrics',
+  'def get_live_agent_reconnect_replay_metrics',
   'def get_live_agent_mode_autonomy_metrics',
   'def _live_agent_provider_adapter_metrics',
   'def _live_agent_clawmind_architecture_metrics',
@@ -1267,6 +1325,8 @@ for (const token of [
   '"lightweightMetricsOptimized"',
   '"providerCallsDuringMetrics": 0',
   '"modelCallsDuringMetrics": 0',
+  '"multiClientWorldSyncOk"',
+  '"reconnectReplayOk"',
   '"agent-location-to-setAgentTarget"',
   '"skipsMoveIntentHandoffForBackendOwnedActions": True',
   'def _execute_live_agent_communication_tool',

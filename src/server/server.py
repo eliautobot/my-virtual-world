@@ -812,6 +812,8 @@ _world_event_feed_store_lock = threading.RLock()
 _world_event_feed_client_lock = threading.RLock()
 _world_event_feed_clients = {}
 _world_event_feed_latency_samples = []
+_world_event_feed_multi_client_sync_samples = []
+_world_event_feed_reconnect_replay_samples = []
 HERMES_APPROVAL_LOCK = threading.Lock()
 HERMES_APPROVAL_PENDING = {}
 HERMES_LIVE_LOCK = threading.Lock()
@@ -1505,12 +1507,14 @@ LIVE_AGENT_PRESENCE_LOCATION_SCHEMA_VERSION = "agent-live-mode-presence-location
 LIVE_AGENT_PRESENCE_METRICS_SCHEMA_VERSION = "agent-live-mode-presence-persistence-metrics/v1"
 LIVE_AGENT_ROUTE_BEFORE_ACTION_METRICS_SCHEMA_VERSION = "agent-live-mode-route-before-action-metrics/v1"
 LIVE_AGENT_PRESENCE_DEFINED_MUTATION_SCHEMA_VERSION = "agent-live-mode-presence-defined-mutation/v1"
+LIVE_AGENT_RECONNECT_REPLAY_METRICS_SCHEMA_VERSION = "agent-live-mode-reconnect-replay-metrics/v1"
 LIVE_AGENT_PRESENCE_HISTORY_LIMIT = 200
 LIVE_AGENT_WORLD_EVENT_FEED_SCHEMA_VERSION = "agent-live-mode-world-event-feed/v1"
 LIVE_AGENT_WORLD_EVENT_FEED_CLIENT_VERSION = "20260620-world-event-feed-r1"
 LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS = 3000
 LIVE_AGENT_WORLD_EVENT_FEED_CLIENT_TTL_SEC = 20
 LIVE_AGENT_WORLD_EVENT_FEED_LATENCY_SAMPLE_LIMIT = 500
+LIVE_AGENT_WORLD_EVENT_FEED_EVIDENCE_SAMPLE_LIMIT = 100
 LIVE_AGENT_WORLD_EVENT_FEED_FILE = os.path.join(DATA_DIR, "live-agent-world-events.json")
 LIVE_AGENT_BACKEND_EXECUTOR_ID = "server.py#live_agent_backend_action_executor"
 LIVE_AGENT_ANIMATION_EVENT_NAMES = {
@@ -4652,6 +4656,76 @@ def _record_world_event_feed_client_activity(query):
     return session_id
 
 
+def _world_event_query_bool(query, *names):
+    value = _world_event_query_value(query, *names, default=None)
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _world_event_is_completed_mutation(event, expected_world_action_id=None):
+    if not isinstance(event, dict):
+        return False
+    expected_world_action_id = str(expected_world_action_id or "").strip()
+    event_action_id = str(event.get("worldActionId") or event.get("actionId") or "").strip()
+    if expected_world_action_id and event_action_id != expected_world_action_id:
+        return False
+    patch = event.get("patch") if isinstance(event.get("patch"), dict) else {}
+    compact = patch.get("event") if isinstance(patch.get("event"), dict) else {}
+    statuses = {
+        str(event.get("status") or "").strip().lower(),
+        str(event.get("toStatus") or "").strip().lower(),
+        str(patch.get("status") or "").strip().lower(),
+        str(compact.get("status") or "").strip().lower(),
+        str(compact.get("toStatus") or "").strip().lower(),
+        str(compact.get("to") or "").strip().lower(),
+    }
+    return (
+        (not expected_world_action_id or bool(event_action_id))
+        and event.get("eventType") in {"action-lifecycle", "agent-movement-arrived", "object-action-completed"}
+        and "completed" in statuses
+    )
+
+
+def _record_world_event_feed_reconnect_replay(query, result, *, since=None):
+    query = query if isinstance(query, dict) else {}
+    if not _world_event_query_bool(query, "reconnectReplay", "reconnect", "catchup"):
+        return None
+    events = [event for event in (result.get("events") or []) if isinstance(event, dict)] if isinstance(result, dict) else []
+    snapshot = result.get("snapshot") if isinstance(result, dict) and isinstance(result.get("snapshot"), dict) else None
+    expected_world_action_id = _clean_world_event_text(_world_event_query_value(query, "expectedWorldActionId", "worldActionId", "actionId"), limit=160)
+    completed_mutation_events = [
+        event for event in events
+        if _world_event_is_completed_mutation(event, expected_world_action_id)
+    ]
+    completed_mutation_proven = bool(expected_world_action_id and completed_mutation_events)
+    missed_mutation_count = 0 if completed_mutation_proven else 1
+    ok = bool(since is not None and snapshot and completed_mutation_proven and missed_mutation_count == 0)
+    sample = {
+        "schemaVersion": LIVE_AGENT_RECONNECT_REPLAY_METRICS_SCHEMA_VERSION,
+        "ok": ok,
+        "recordedAt": _utc_now_iso(),
+        "client": _clean_world_event_text(_world_event_query_value(query, "client"), limit=80),
+        "sessionId": _clean_world_event_text(_world_event_query_value(query, "sessionId", "session"), limit=96),
+        "sinceCursor": since,
+        "snapshotCursor": snapshot.get("cursor") if snapshot else None,
+        "nextCursor": result.get("nextCursor") if isinstance(result, dict) else None,
+        "oldestCursor": result.get("oldestCursor") if isinstance(result, dict) else None,
+        "replayedEventCount": len(events),
+        "expectedWorldActionId": expected_world_action_id,
+        "completedMutationEventIds": [event.get("eventId") or event.get("id") for event in completed_mutation_events[:10]],
+        "completedMutationEventCount": len(completed_mutation_events),
+        "completedMutationProven": completed_mutation_proven,
+        "missedMutationCount": missed_mutation_count,
+        "snapshotIncluded": bool(snapshot),
+        "snapshotRefreshRequired": bool(result.get("requiresSnapshotRefresh")) if isinstance(result, dict) else False,
+    }
+    with _world_event_feed_client_lock:
+        _world_event_feed_reconnect_replay_samples.append(sample)
+        del _world_event_feed_reconnect_replay_samples[:-LIVE_AGENT_WORLD_EVENT_FEED_EVIDENCE_SAMPLE_LIMIT]
+    return sample
+
+
 def _world_event_feed_client_metrics():
     now_epoch = time.time()
     with _world_event_feed_client_lock:
@@ -4667,7 +4741,40 @@ def _world_event_feed_client_metrics():
         for session_id in stale_ids:
             _world_event_feed_clients.pop(session_id, None)
         latency_samples = list(_world_event_feed_latency_samples)
-    latency = _latency_summary(latency_samples)
+        latency = _latency_summary(latency_samples)
+        sampled_active_clients = [
+            client for client in active_clients
+            if client.get("lastAppliedLatencySampled") is True
+            and _normalize_int(client.get("appliedCursor"), 0, minimum=0, maximum=1000000000) > 0
+        ]
+        sampled_client_count = len(sampled_active_clients)
+        sampled_applied_cursors = sorted({
+            _normalize_int(client.get("appliedCursor"), 0, minimum=0, maximum=1000000000)
+            for client in sampled_active_clients
+            if _normalize_int(client.get("appliedCursor"), 0, minimum=0, maximum=1000000000) > 0
+        })
+        current_multi_client_ok = (
+            len(active_clients) >= 2
+            and sampled_client_count >= 2
+            and latency["sampleCount"] > 0
+            and latency["p95Ms"] <= LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS
+        )
+        if len(active_clients) >= 2:
+            _world_event_feed_multi_client_sync_samples.append({
+                "recordedAt": _epoch_to_utc_iso(now_epoch),
+                "clientCount": len(active_clients),
+                "sampledClientCount": sampled_client_count,
+                "sampledAppliedCursors": sampled_applied_cursors[-10:],
+                "latencySampleCount": latency["sampleCount"],
+                "p95MultiClientSyncLatencyMs": latency["p95Ms"],
+                "syncLatencyTargetMs": LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS,
+                "ok": current_multi_client_ok,
+                "sessionIds": [client.get("sessionId") for client in active_clients if client.get("sessionId")][:20],
+            })
+            del _world_event_feed_multi_client_sync_samples[:-LIVE_AGENT_WORLD_EVENT_FEED_EVIDENCE_SAMPLE_LIMIT]
+        multi_client_samples = list(_world_event_feed_multi_client_sync_samples)
+    observed_ok_samples = [sample for sample in multi_client_samples if sample.get("ok")]
+    max_observed_client_count = max([_normalize_int(sample.get("clientCount"), 0, minimum=0, maximum=1000000) for sample in multi_client_samples] or [len(active_clients)])
     return {
         "connectedClientCount": len(active_clients),
         "clients": active_clients[-20:],
@@ -4675,6 +4782,15 @@ def _world_event_feed_client_metrics():
         "p95MultiClientSyncLatencyMs": latency["p95Ms"],
         "syncLatencyTargetMs": LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS,
         "ok": latency["p95Ms"] <= LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS or latency["sampleCount"] == 0,
+        "multiClientWorldSyncOk": bool(observed_ok_samples),
+        "multiClientSyncSampleCount": len(multi_client_samples),
+        "multiClientAppliedSampleCount": sum(
+            _normalize_int(sample.get("latencySampleCount"), 0, minimum=0, maximum=1000000000)
+            for sample in multi_client_samples
+            if sample.get("ok")
+        ),
+        "maxObservedClientCount": max_observed_client_count,
+        "latestMultiClientSync": (multi_client_samples[-1] if multi_client_samples else None),
     }
 
 
@@ -4690,11 +4806,36 @@ def get_live_agent_world_event_feed_metrics():
         "connectedClientCount": client_metrics["connectedClientCount"],
         "p95MultiClientSyncLatencyMs": client_metrics["p95MultiClientSyncLatencyMs"],
         "syncLatencyTargetMs": LIVE_AGENT_WORLD_EVENT_FEED_SYNC_TARGET_MS,
+        "multiClientWorldSyncOk": client_metrics["multiClientWorldSyncOk"],
+        "multiClientSyncSampleCount": client_metrics["multiClientSyncSampleCount"],
+        "multiClientAppliedSampleCount": client_metrics["multiClientAppliedSampleCount"],
+        "maxObservedClientCount": client_metrics["maxObservedClientCount"],
+        "latestMultiClientSync": client_metrics["latestMultiClientSync"],
         "nextCursor": int(store.get("nextSequence") or 1) - 1,
         "oldestCursor": int(events[0].get("sequence") or 0) if events else 0,
         "latency": client_metrics["latency"],
         "clients": client_metrics["clients"],
         "subscription": store.get("subscription"),
+    }
+
+
+def get_live_agent_reconnect_replay_metrics():
+    with _world_event_feed_client_lock:
+        samples = list(_world_event_feed_reconnect_replay_samples)
+    ok_samples = [sample for sample in samples if sample.get("ok")]
+    missed_mutation_count = sum(_normalize_int(sample.get("missedMutationCount"), 0, minimum=0, maximum=1000000) for sample in samples)
+    replayed_event_count = sum(_normalize_int(sample.get("replayedEventCount"), 0, minimum=0, maximum=1000000) for sample in samples)
+    completed_mutation_event_count = sum(_normalize_int(sample.get("completedMutationEventCount"), 0, minimum=0, maximum=1000000) for sample in ok_samples)
+    return {
+        "schemaVersion": LIVE_AGENT_RECONNECT_REPLAY_METRICS_SCHEMA_VERSION,
+        "ok": bool(ok_samples) and missed_mutation_count == 0 and completed_mutation_event_count > 0,
+        "clientCatchupCount": len(ok_samples),
+        "sampleCount": len(samples),
+        "missedMutationCount": missed_mutation_count,
+        "completedMutationEventCount": completed_mutation_event_count,
+        "replayedEventCount": replayed_event_count,
+        "latest": samples[-1] if samples else None,
+        "recentSamples": samples[-10:],
     }
 
 
@@ -4738,6 +4879,9 @@ def list_live_agent_world_events(query=None):
     }
     if include_snapshot:
         result["snapshot"] = _world_event_snapshot_payload(next_cursor)
+    reconnect_sample = _record_world_event_feed_reconnect_replay(query, result, since=since)
+    if reconnect_sample:
+        result["reconnectReplay"] = reconnect_sample
     return result
 
 
@@ -5555,6 +5699,7 @@ def get_live_agent_mode_autonomy_metrics():
     enabled_live_agents = _live_agent_metric_enabled_agent_records(cached_roster, loop_state, meta)
     presence_persistence = _live_agent_presence_persistence_metrics(enabled_live_agents, meta)
     world_event_feed = get_live_agent_world_event_feed_metrics()
+    reconnect_replay = get_live_agent_reconnect_replay_metrics()
     per_agent_distribution = _live_agent_metric_per_agent_distribution(enabled_live_agents, turns, backend_terminal_actions)
     route_before_action = _live_agent_route_before_action_metrics([*active_actions, *history_actions])
     per_agent_distribution_by_agent = per_agent_distribution.get("byAgent") if isinstance(per_agent_distribution.get("byAgent"), dict) else {}
@@ -5631,8 +5776,12 @@ def get_live_agent_mode_autonomy_metrics():
         "actionsCompletedAcrossEnabledAgents": per_agent_distribution["allEnabledAgentsHaveCompletedBackendAction"],
         "presencePersistenceOk": presence_persistence["ok"],
         "worldEventFeedOk": world_event_feed["ok"],
+        "multiClientWorldSyncOk": world_event_feed["multiClientWorldSyncOk"],
         "routeBeforeAction": route_before_action["routeBeforeAction"]["ok"],
+        "routeBeforeActionOk": route_before_action["routeBeforeAction"]["ok"],
         "presenceDefinedMutation": route_before_action["presenceDefinedMutation"]["ok"],
+        "presenceDefinedMutationsOk": route_before_action["presenceDefinedMutation"]["ok"],
+        "reconnectReplayOk": reconnect_replay["ok"],
     }
     final_gate_checks = {
         "featureGateOpen": checklist["featureGateOpen"],
@@ -5650,8 +5799,12 @@ def get_live_agent_mode_autonomy_metrics():
         "actionsCompletedAcrossEnabledAgents": checklist["actionsCompletedAcrossEnabledAgents"],
         "presencePersistenceOk": checklist["presencePersistenceOk"],
         "worldEventFeedOk": checklist["worldEventFeedOk"],
+        "multiClientWorldSyncOk": checklist["multiClientWorldSyncOk"],
         "routeBeforeAction": checklist["routeBeforeAction"],
+        "routeBeforeActionOk": checklist["routeBeforeActionOk"],
         "presenceDefinedMutation": checklist["presenceDefinedMutation"],
+        "presenceDefinedMutationsOk": checklist["presenceDefinedMutationsOk"],
+        "reconnectReplayOk": checklist["reconnectReplayOk"],
     }
     final_gate = {
         "schemaVersion": "agent-live-mode-final-gate/v1",
@@ -5676,6 +5829,7 @@ def get_live_agent_mode_autonomy_metrics():
             "presencePersistence": presence_persistence,
             "worldEventFeed": world_event_feed,
             "routeBeforeAction": route_before_action,
+            "reconnectReplay": reconnect_replay,
         },
     }
     return {
@@ -5705,10 +5859,12 @@ def get_live_agent_mode_autonomy_metrics():
             "routeBeforeAction": route_before_action["routeBeforeAction"],
             "presenceDefinedMutation": route_before_action["presenceDefinedMutation"],
             "routeBeforeActionPresence": route_before_action,
+            "reconnectReplay": reconnect_replay,
             "worldEventFeed": world_event_feed,
             "worldEventFeedReplayableEventCount": world_event_feed["replayableEventCount"],
             "worldEventFeedConnectedClientCount": world_event_feed["connectedClientCount"],
             "worldEventFeedP95MultiClientSyncLatencyMs": world_event_feed["p95MultiClientSyncLatencyMs"],
+            "multiClientWorldSyncOk": world_event_feed["multiClientWorldSyncOk"],
             "turnDuration": _latency_summary([sample * 1000 for sample in turn_duration_samples]),
             "activeWorldActionCount": len(active_actions),
             "routePendingActiveCount": len(active_route_pending),
@@ -5784,6 +5940,7 @@ def get_live_agent_mode_autonomy_metrics():
             "metricsModelCalls": 0,
             "presencePersistenceMeasured": True,
             "worldEventFeedMeasured": True,
+            "reconnectReplayMeasured": True,
         },
     }
 
