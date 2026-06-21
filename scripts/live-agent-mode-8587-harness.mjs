@@ -806,6 +806,15 @@ async function verifyRouteBeforeActionPresenceGates() {
   const routeTargetZ = Number(create.action.route?.targetMetadata?.z ?? create.action.target?.z);
   assert(Number.isFinite(routeTargetX) && Number.isFinite(routeTargetZ), 'object-use route metadata should include resolved routeable coordinates', create.action.route);
   assert(create.action.route?.targetMetadata?.routeTargetSource === 'persisted-object-interaction-spot', 'object-use route metadata should cite persisted object interaction evidence', create.action.route?.targetMetadata);
+  const originalOfficeBuilding = await fetchJson(`/api/building/${encodeURIComponent(OFFICE_BUILDING_ID)}`);
+  let routeTargetObjectRestored = true;
+
+  const restoreRouteTargetObject = async () => {
+    if (routeTargetObjectRestored) return;
+    const restored = await postJson(`/api/building/${encodeURIComponent(OFFICE_BUILDING_ID)}`, originalOfficeBuilding);
+    assert(restored?.ok === true, 'failed to restore route target object fixture after removal check', restored);
+    routeTargetObjectRestored = true;
+  };
 
   const transition = async (status, reason) => {
     const response = await postJson(`/api/world-actions/${encodeURIComponent(actionId)}/transition`, {
@@ -850,6 +859,25 @@ async function verifyRouteBeforeActionPresenceGates() {
       result: { status: 'in_progress', reason: 'should-reject-missing-coordinates' },
     }, 409);
     assert(missingCoordinateRejected?.error?.code === 'presence_location_mismatch', 'same-building mutation with missing coordinates should be rejected by presence gate', missingCoordinateRejected);
+
+    const officeWithoutRouteTargetObject = structuredClone(originalOfficeBuilding);
+    const officeFurniture = officeWithoutRouteTargetObject?.interior?.furniture;
+    assert(Array.isArray(officeFurniture), 'acceptance office fixture should include furniture before object removal check', originalOfficeBuilding);
+    const remainingFurniture = officeFurniture.filter((item) => item?.objectInstanceId !== COFFEE_MACHINE_ID && item?.id !== COFFEE_MACHINE_ID);
+    assert(remainingFurniture.length === officeFurniture.length - 1, 'object removal check should remove exactly the routed target fixture', officeFurniture);
+    officeWithoutRouteTargetObject.interior.furniture = remainingFurniture;
+    const removedObjectUpdate = await postJson(`/api/building/${encodeURIComponent(OFFICE_BUILDING_ID)}`, officeWithoutRouteTargetObject);
+    assert(removedObjectUpdate?.ok === true, 'failed to remove routed object fixture for stale route coordinate check', removedObjectUpdate);
+    routeTargetObjectRestored = false;
+    await saveAgentPresenceSnapshot(TEST_AGENT_ID, missingCoordinatePresence, '8587-removed-object-missing-coordinate-presence-gate');
+    const removedObjectMissingCoordinateRejected = await postJsonExpectStatus(`/api/world-actions/${encodeURIComponent(actionId)}/transition`, {
+      status: 'in_progress',
+      source: 'agent-live-mode',
+      actor: '8587-route-before-action-presence-gate',
+      result: { status: 'in_progress', reason: 'should-reject-removed-object-with-missing-coordinates' },
+    }, 409);
+    assert(removedObjectMissingCoordinateRejected?.error?.code === 'presence_location_mismatch', 'removed-object mutation with same-building missing-coordinate presence should still use stored route coordinates and reject', removedObjectMissingCoordinateRejected);
+    await restoreRouteTargetObject();
 
     const farAwayPresence = {
       ...arrivedPresence,
@@ -947,9 +975,10 @@ async function verifyRouteBeforeActionPresenceGates() {
     assert(stillPresentChunk !== null, 'rejected Live Agent raw chunk DELETE must not remove the chunk', stillPresentChunk);
     await requestJsonExpectStatus('/api/chunk/8587/4242', { method: 'DELETE' }, 200);
 
-    console.log(`PASS: route-before-action gate rejected missing-coordinate and far-away mutations for ${actionId} and blocked direct raw Live Agent create/delete world edits.`);
-    return { actionId, missingCoordinateRejected, farAwayRejected, rawRejected, rawBuildingDeleteRejected, rawChunkDeleteRejected };
+    console.log(`PASS: route-before-action gate rejected missing-coordinate, removed-object, and far-away mutations for ${actionId} and blocked direct raw Live Agent create/delete world edits.`);
+    return { actionId, missingCoordinateRejected, removedObjectMissingCoordinateRejected, farAwayRejected, rawRejected, rawBuildingDeleteRejected, rawChunkDeleteRejected };
   } finally {
+    await restoreRouteTargetObject();
     if (!completedFixture) {
       try {
         await postJson(`/api/world-actions/${encodeURIComponent(actionId)}/cancel`, {

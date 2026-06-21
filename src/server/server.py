@@ -5367,7 +5367,7 @@ def _live_agent_route_before_action_metrics(actions):
         route_metadata_ok = _live_agent_route_target_metadata_ok(action)
         route_ok = bool(route_metadata_ok and arrived_epoch and mutation_epoch and arrived_epoch <= mutation_epoch)
         mutation_gate = action.get("routeBeforeAction") if isinstance(action.get("routeBeforeAction"), dict) else {}
-        target_location = mutation_gate.get("targetLocation") if isinstance(mutation_gate.get("targetLocation"), dict) else _live_agent_backend_target_location(action)
+        target_location = mutation_gate.get("targetLocation") if isinstance(mutation_gate.get("targetLocation"), dict) else _live_agent_stored_route_target_location(action)
         presence = action.get("presenceAtMutation") if isinstance(action.get("presenceAtMutation"), dict) else mutation_gate.get("presence")
         presence_defined = _live_agent_presence_has_location(presence)
         presence_at_target = presence_defined and _live_agent_location_matches_route_target(presence, target_location)
@@ -6542,6 +6542,54 @@ def _live_agent_backend_target_location(action):
     return base
 
 
+def _live_agent_stored_route_target_location(action):
+    if not isinstance(action, dict):
+        return None
+    target = action.get("target") if isinstance(action.get("target"), dict) else {}
+    route = action.get("route") if isinstance(action.get("route"), dict) else {}
+    route_target = route.get("target") if isinstance(route.get("target"), dict) else {}
+    metadata = route.get("targetMetadata") if isinstance(route.get("targetMetadata"), dict) else {}
+    sources = [metadata, route_target, target]
+
+    def first_value(keys):
+        for source in sources:
+            for key in keys:
+                if source.get(key) is not None:
+                    return source.get(key)
+        return None
+
+    kind = first_value(("targetKind", "kind")) or target.get("kind")
+    try:
+        floor = int(first_value(("floor", "buildingFloor")) or 1)
+    except (TypeError, ValueError):
+        floor = 1
+    base = {
+        "source": "world-action-route-target",
+        "worldActionId": action.get("id"),
+        "buildingId": first_value(("buildingId",)),
+        "floor": floor,
+        "roomId": first_value(("roomId",)),
+        "targetKind": kind,
+        "objectInstanceId": first_value(("objectInstanceId",)),
+        "catalogId": first_value(("catalogId",)),
+        "targetAgentId": first_value(("targetAgentId",)),
+    }
+
+    x = _number_or_none(first_value(("x", "worldX")))
+    z = _number_or_none(first_value(("z", "y", "worldZ", "worldY")))
+    if x is not None and z is not None:
+        coordinate_space = first_value(("coordinateSpace",)) or "world-tiles"
+        if coordinate_space in {"api-pixels", "api", "client-pixels"}:
+            x = round(x / LIVE_AGENT_LOOP_API_TILE, 3)
+            z = round(z / LIVE_AGENT_LOOP_API_TILE, 3)
+            coordinate_space = "world-tiles"
+        return _live_agent_location_with_api({**base, "x": x, "z": z, "coordinateSpace": coordinate_space})
+
+    if kind in {"object-instance", "world-point"}:
+        return None
+    return _live_agent_backend_target_location(action)
+
+
 def _live_agent_location_matches_route_target(presence, target_location):
     if not isinstance(presence, dict) or not isinstance(target_location, dict):
         return False
@@ -6605,7 +6653,7 @@ def _live_agent_route_before_action_gate(action, to_status, *, now=None):
     timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
     route = action.get("route") if isinstance(action.get("route"), dict) else {}
     arrived_at = timing.get("arrivedAt") or route.get("arrivedAt")
-    target_location = _live_agent_backend_target_location(action)
+    target_location = _live_agent_stored_route_target_location(action)
     presence = _live_agent_presence_location(action.get("agentId"))
     evidence = {
         "schemaVersion": LIVE_AGENT_PRESENCE_DEFINED_MUTATION_SCHEMA_VERSION,
@@ -6628,6 +6676,8 @@ def _live_agent_route_before_action_gate(action, to_status, *, now=None):
     }
     if not _live_agent_route_target_metadata_ok(action):
         return False, _api_error("route_target_missing", "Live Agent physical mutations require a routeable target with building/floor/object or coordinate metadata before mutation.", details=evidence)
+    if not isinstance(target_location, dict):
+        return False, _api_error("route_target_missing", "Live Agent physical mutations require stored route target coordinates before mutation.", details=evidence)
     if not arrived_at:
         return False, _api_error("route_not_arrived", "Live Agent physical mutations require an arrival record before mutation.", details=evidence)
     if not _live_agent_presence_has_location(presence):
