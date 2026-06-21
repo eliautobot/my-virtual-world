@@ -46,6 +46,21 @@ The next reliability bar is online-game-style presence. Every browser tab must b
 
 The next "alive world" bar is society-level behavior, not just more animation. Live Agent Mode should act like a persistent resident simulation where agents choose from a location-gated tool frame, take multi-step turns, speak in-world, form memories, maintain todos/plans, update relationships, and leave public evidence of what happened. The loop should feel alive because agents have goals, places to go, constraints, follow-up reactions, and consequences.
 
+### Reference Architecture Guidance: Emergence World
+
+Use [EmergenceAI/Emergence-World](https://github.com/EmergenceAI/Emergence-World) as the primary reference direction for Live Agent Mode and ClawMind. The reviewed public reference commit is `7613dcb6554133144779f4c4f0ba49064894b3a5`. The goal is not to copy its stack wholesale; it is to adapt the architecture patterns that make a custom world feel alive:
+
+- embodied persistent residents, not detached chat sessions
+- tools as the only way an agent mutates the world
+- location-gated and context-aware tool availability
+- one-agent-at-a-time resident turns with bounded multi-tool follow-up
+- context assembly from profile, world state, nearby agents, memories, relationships, plans, and recent conversations
+- validated execution, persistent state writes, and visible animation/event dispatch
+- reactive social opportunities when agents speak or act near each other
+- measurable alive-world indicators: exploration, tool usage, public expression, social graph depth, governance participation, economy activity, and long-run population/agent health
+
+My Virtual World should implement these as product-native primitives: backend-owned routes and world actions, `toolRegistry` perception frames, OpenClaw/Hermes/Codex provider adapters, `world-meta.json` persistence today, and a later database-backed store when the data model outgrows files. Emergence-style crime, death, economy, governance, and destructive actions stay out of the executable set until typed visible executors, approval rules, audit trails, and rollback exist.
+
 The redesigned mode keeps the good API vocabulary, but moves autonomous execution authority to the backend.
 
 ## Non-Goals
@@ -124,6 +139,9 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `providerSupport.optimization.providerCallsDuringMetrics = 0`
 - `providerSupport.optimization.modelCallsDuringMetrics = 0`
 - `providerModelCallCounts`
+- `clawMindArchitecture.referenceArchitectures[].id = emergence-world`
+- `clawMindArchitecture.referenceArchitectures[].url = https://github.com/EmergenceAI/Emergence-World`
+- `clawMindArchitecture.referenceArchitectures[].patterns`
 - `metrics.perAgentDistribution`
 - `metrics.completedTurnCountByAgent`
 - `metrics.completedBackendActionCountByAgent`

@@ -1501,6 +1501,30 @@ LIVE_AGENT_CLAWMIND_MODULES = [
     "outcomeAwareness",
     "orchestrator",
 ]
+LIVE_AGENT_REFERENCE_ARCHITECTURES = [
+    {
+        "id": "emergence-world",
+        "name": "Emergence World",
+        "url": "https://github.com/EmergenceAI/Emergence-World",
+        "reviewedCommit": "7613dcb6554133144779f4c4f0ba49064894b3a5",
+        "role": "guidance",
+        "implementationMode": "adapted-to-my-virtual-world",
+        "patterns": [
+            "embodied-persistent-residents",
+            "tool-only-world-mutation",
+            "location-gated-tool-registry",
+            "turn-based-simulation-loop",
+            "memory-relationship-conversation-context",
+            "visible-animation-and-event-dispatch",
+            "alive-world-indicators",
+        ],
+        "nonGoals": [
+            "do-not-copy-stack-wholesale",
+            "do-not-add-unsafe-actions-without-typed-executors",
+            "do-not-require-browser-tab-for-progression",
+        ],
+    },
+]
 LIVE_AGENT_SIMULATION_SCHEMA_VERSION = "agent-live-mode-simulation/v1"
 LIVE_AGENT_PRESENCE_SCHEMA_VERSION = "agent-live-mode-presence-persistence/v1"
 LIVE_AGENT_PRESENCE_LOCATION_SCHEMA_VERSION = "agent-live-mode-presence-location/v1"
@@ -5403,6 +5427,7 @@ def _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_acti
     }
     return {
         "schemaVersion": LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION,
+        "referenceArchitectures": _copy_jsonable(LIVE_AGENT_REFERENCE_ARCHITECTURES),
         "modules": modules,
         "moduleOrder": list(LIVE_AGENT_CLAWMIND_MODULES),
         "runtime": {
@@ -6077,6 +6102,7 @@ def get_live_agent_mode_autonomy_metrics():
             "perAgentDistributionEvidence": True,
             "universalProviderSupportMeasured": True,
             "clawMindArchitectureMeasured": True,
+            "emergenceWorldReferenceGuidance": True,
             "metricsProviderCalls": 0,
             "metricsModelCalls": 0,
             "presencePersistenceMeasured": True,

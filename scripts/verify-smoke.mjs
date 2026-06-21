@@ -768,6 +768,10 @@ try:
     distribution = metrics["metrics"]["perAgentDistribution"]
     assert provider["schemaVersion"] == "agent-live-mode-provider-adapter-contract/v1", provider
     assert clawmind["schemaVersion"] == "agent-live-mode-clawmind-architecture/v1", clawmind
+    reference_architectures = clawmind["referenceArchitectures"]
+    assert reference_architectures[0]["id"] == "emergence-world", reference_architectures
+    assert reference_architectures[0]["url"] == "https://github.com/EmergenceAI/Emergence-World", reference_architectures
+    assert "location-gated-tool-registry" in reference_architectures[0]["patterns"], reference_architectures
     assert distribution["schemaVersion"] == "agent-live-mode-per-agent-distribution/v1", distribution
     assert distribution["enabledAgentIds"] == ["adam", "loop-only"], distribution
     assert distribution["enabledAgentsMissingCompletedTurns"] == ["adam", "loop-only"], distribution
@@ -1309,6 +1313,11 @@ for (const token of [
   'LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"',
   'LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"',
   'LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"',
+  'LIVE_AGENT_REFERENCE_ARCHITECTURES',
+  '"id": "emergence-world"',
+  '"https://github.com/EmergenceAI/Emergence-World"',
+  '"location-gated-tool-registry"',
+  '"alive-world-indicators"',
   'LIVE_AGENT_PROVIDER_ADAPTER_CAPABILITIES',
   'LIVE_AGENT_CLAWMIND_MODULES',
   'apply_live_agent_build_completion_effect',
@@ -1327,6 +1336,8 @@ for (const token of [
   '"agent-live-mode-clawmind-architecture/v1"',
   '"providerSupport"',
   '"clawMindArchitecture"',
+  '"referenceArchitectures"',
+  '"emergenceWorldReferenceGuidance": True',
   '"providerAdapterReadiness"',
   '"clawMindModuleContractsReady"',
   '"lightweightMetricsOptimized"',
