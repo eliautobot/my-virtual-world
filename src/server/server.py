@@ -578,6 +578,23 @@ def _payload_includes_agent_live_mode_source(value):
     return False
 
 
+def _live_agent_bulk_world_action_replace_error(endpoint):
+    return _api_error(
+        "live_agent_bulk_world_action_replace_forbidden",
+        "Live Agent Mode cannot bulk-replace world action stores; use the per-action transition/complete/cancel endpoints so route-before-action and presence gates run before visible mutations.",
+        details={
+            "endpoint": endpoint,
+            "allowedRoutes": [
+                "POST /api/agent-model/actions",
+                "POST /api/world-actions/<action-id>/transition",
+                "POST /api/world-actions/<action-id>/complete",
+                "POST /api/world-actions/<action-id>/cancel",
+            ],
+            "routeBeforeActionRequired": True,
+        },
+    )
+
+
 def _live_agent_raw_mutation_blocked_response(payload, *, endpoint=None, action_type=None):
     payload = payload if isinstance(payload, dict) else {}
     source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
@@ -7006,7 +7023,6 @@ def advance_live_agent_backend_world_action(action_id, *, reason="server-owned-p
                 to_location=to_location,
                 duration_ms=1200,
             )
-            saved_animation_events.extend(append_live_agent_animation_events([event]))
             ok, response, status_code = transition_to("in_progress", {
                 "status": "in_progress",
                 "reason": "backend-object-use-started",
@@ -7016,6 +7032,7 @@ def advance_live_agent_backend_world_action(action_id, *, reason="server-owned-p
             })
             if not ok:
                 return ok, response, status_code
+            saved_animation_events.extend(append_live_agent_animation_events([event]))
             continue
         if current_status == "in_progress":
             gate_ok, gate_result = _live_agent_route_before_action_gate(current, "completed", now=_utc_now_iso())
@@ -19275,6 +19292,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             # identified by agentId/actionType/target/source and appends one
             # queued action instead of replacing the full store.
             if "active" in data or "history" in data:
+                if _payload_includes_agent_live_mode_source(data):
+                    return self._send_json(_live_agent_bulk_world_action_replace_error("/api/world-actions"), 422)
                 ok, result = save_world_actions_store({
                     "active": data.get("active", []),
                     "history": data.get("history", []),
@@ -19380,6 +19399,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             data = self._read_body()
             if _payload_includes_agent_live_mode_source(data) and _agent_live_mode_gate_error():
                 return self._send_json(_agent_live_mode_locked_response(), 403)
+            if _payload_includes_agent_live_mode_source(data):
+                return self._send_json(_live_agent_bulk_world_action_replace_error("/api/world-actions/active"), 422)
             records = data if isinstance(data, list) else (data.get("active") if isinstance(data, dict) else None)
             if records is None:
                 return self._send_json({"error": "active payload must be an array or { active: [] }"}, 400)
@@ -19393,6 +19414,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             data = self._read_body()
             if _payload_includes_agent_live_mode_source(data) and _agent_live_mode_gate_error():
                 return self._send_json(_agent_live_mode_locked_response(), 403)
+            if _payload_includes_agent_live_mode_source(data):
+                return self._send_json(_live_agent_bulk_world_action_replace_error("/api/world-actions/history"), 422)
             records = data if isinstance(data, list) else (data.get("history") if isinstance(data, dict) else None)
             if records is None:
                 return self._send_json({"error": "history payload must be an array or { history: [] }"}, 400)

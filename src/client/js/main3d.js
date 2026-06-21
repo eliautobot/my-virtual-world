@@ -35456,7 +35456,7 @@ function applyLiveAgentModeReplayBuildCompletion(event = {}) {
   }
 }
 
-function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = false, persistPresence = true } = {}) {
+function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = false, persistPresence = true, forceAgentRender = false } = {}) {
   const sequence = Number(event.sequence || event.cursor || 0) || null;
   const eventKey = sequence ? `seq:${sequence}` : `id:${event.id || event.worldActionId || event.actionId || event.name || Date.now()}`;
   const alreadyApplied = _liveAgentModeAnimationReplaySequences.has(eventKey);
@@ -35474,7 +35474,7 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
   const heldPresenceAction = String(agent?._serverPresence?.worldActionId || agent?._serverPresence?.actionId || agent?._serverPresence?.routeId || '');
   const replayAction = String(actionId || event.routeId || '');
   const sameHeldPresenceAction = Boolean(heldPresenceAction && replayAction && heldPresenceAction === replayAction);
-  const feedPresenceHoldActive = Boolean(agent && Number(agent._worldEventFeedPresenceHoldUntil || 0) > performance.now() && !sameHeldPresenceAction);
+  const feedPresenceHoldActive = Boolean(agent && Number(agent._worldEventFeedPresenceHoldUntil || 0) > performance.now() && !sameHeldPresenceAction && !forceAgentRender);
   if (agent && renderPoint && !feedPresenceHoldActive) {
     agent.x = renderPoint.apiX;
     agent.y = renderPoint.apiZ;
@@ -35526,6 +35526,13 @@ function applyLiveAgentModeReplayEvent(event = {}, { allowDuplicateRender = fals
         buildingId: renderPoint.buildingId || event.target?.buildingId || null,
         objectInstanceId: event.target?.objectInstanceId || null,
       };
+    }
+    if (!agent._group3d && agentGroup && typeof createAgent3D === 'function') {
+      try {
+        createAgent3D(agent);
+      } catch (error) {
+        agent._liveAgentModeReplayRenderError = error?.message || String(error);
+      }
     }
     if (agent._group3d) {
       const worldPoint = getLiveAgentModeReplayWorldPoint(renderPoint);
@@ -35946,6 +35953,7 @@ async function syncLiveAgentModeAnimationEvents({ actionId = null, force = false
       const result = applyLiveAgentModeReplayEvent(event, {
         allowDuplicateRender: Boolean(actionId),
         persistPresence: !force && !actionId,
+        forceAgentRender: Boolean(actionId),
       });
       if (result.applied) applied += 1;
       if (result.sceneObjectName) rendered += 1;
