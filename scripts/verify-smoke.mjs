@@ -427,6 +427,114 @@ finally:
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(liveAgentPublicExpressionCheck.status, 0, `Live Agent public expression check failed\n${liveAgentPublicExpressionCheck.stderr || liveAgentPublicExpressionCheck.stdout}`);
 
+const liveAgentAliveWorldIndicatorsCheck = spawnSync('python3', ['-B', '-c', `
+import importlib.util
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+path = Path("src/server/server.py")
+data_dir = tempfile.mkdtemp(prefix="vw-smoke-alive-world-indicators-")
+os.environ["VW_DATA_DIR"] = data_dir
+os.environ["_VW_INT"] = "1"
+try:
+    spec = importlib.util.spec_from_file_location("vw_server", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
+    agents = [
+        {"id": "adam", "statusKey": "adam", "name": "Adam", "providerKind": "fake"},
+        {"id": "bea", "statusKey": "bea", "name": "Bea", "providerKind": "fake"},
+        {"id": "cyd", "statusKey": "cyd", "name": "Cyd", "providerKind": "fake"},
+    ]
+    module.get_roster = lambda: agents
+    meta = module.load_world_meta()
+    meta["agentProfiles"] = {agent["statusKey"]: {"agentLiveModeEnabled": True, "providerKind": "fake"} for agent in agents}
+    meta["agentRelationships"] = {
+        "adam::bea": {"agentId": "adam", "otherAgentId": "bea", "score": 0.2},
+        "adam::cyd": {"agentId": "adam", "otherAgentId": "cyd", "score": 0.1},
+    }
+    module.save_world_meta(meta)
+
+    module._save_live_agent_simulated_location("adam", {"buildingId": "office", "floor": 1, "roomId": "lobby", "x": 1, "y": 2})
+    module._save_live_agent_simulated_location("bea", {"buildingId": "studio", "floor": 2, "roomId": "gallery", "x": 5, "y": 8})
+    module._save_live_agent_simulated_location("cyd", {"x": 9, "y": 4, "floor": 1})
+    module.append_live_agent_public_expressions([{
+        "id": "public-note-alive-world",
+        "kind": "public-note",
+        "agentId": "adam",
+        "title": "Alive world check",
+        "body": "Visible public expression indicator fixture.",
+        "createdAt": module._utc_now_iso(),
+    }])
+
+    state = module.get_live_agent_loop_state(persist_migration=True)
+    state["agents"] = {
+        "adam": {
+            "enabled": True,
+            "toolExploration": {
+                "discoveredTools": ["observe_world", "add_memory", "propose_governance_action"],
+                "usedTools": ["add_memory"],
+                "affordanceClassCounts": {"core": 1, "adaptive-location-gated": 1},
+                "unavailableReasonsByTool": {"propose_governance_action": ["approval_required"]},
+            },
+        },
+        "bea": {"enabled": True, "toolExploration": {"discoveredTools": ["observe_world"], "usedTools": []}},
+        "cyd": {"enabled": True, "toolExploration": {"discoveredTools": ["observe_world"], "usedTools": []}},
+    }
+    state["scheduler"] = {
+        **state.get("scheduler", {}),
+        "turnHistory": [
+            {"id": "turn-adam", "agentId": "adam", "status": "completed", "turnType": "regular", "durationSec": 0.12},
+            {"id": "turn-bea", "agentId": "bea", "status": "completed", "turnType": "regular", "durationSec": 0.2},
+            {"id": "turn-cyd", "agentId": "cyd", "status": "failed", "turnType": "regular", "durationSec": 0.04},
+        ],
+    }
+    state["operatorProposals"] = [
+        {"id": "gov-1", "status": "pending", "agentId": "adam", "actionType": "culture.governance", "title": "Governance", "summary": "Governance indicator fixture."},
+        {"id": "econ-1", "status": "acknowledged", "agentId": "bea", "actionType": "culture.economy", "title": "Economy", "summary": "Economy placeholder fixture."},
+    ]
+    state["events"] = [
+        {"type": "plan-expectation-mismatch", "agentId": "cyd", "at": module._utc_now_iso(), "details": {"reason": "fixture"}},
+    ]
+    module.save_live_agent_loop_state(state)
+
+    metrics = module.get_live_agent_mode_autonomy_metrics()
+    indicators = metrics["metrics"]["aliveWorldIndicators"]
+    required = set(module.LIVE_AGENT_ALIVE_WORLD_INDICATOR_BUCKETS)
+    assert indicators["schemaVersion"] == module.LIVE_AGENT_ALIVE_WORLD_INDICATORS_SCHEMA_VERSION, indicators
+    assert set(indicators["bucketIds"]) == required, indicators
+    assert indicators["optimization"]["readOnly"] is True, indicators["optimization"]
+    assert indicators["optimization"]["providerCallsDuringMetrics"] == 0, indicators["optimization"]
+    assert indicators["optimization"]["modelCallsDuringMetrics"] == 0, indicators["optimization"]
+    assert indicators["optimization"]["protectedRuntimeScanned"] is False, indicators["optimization"]
+    assert indicators["liveAgentHealth"]["enabledAgentCount"] == 3, indicators["liveAgentHealth"]
+    assert indicators["liveAgentHealth"]["completedTurnCount"] == 2, indicators["liveAgentHealth"]
+    assert indicators["locationExploration"]["uniqueLocationCount"] >= 3, indicators["locationExploration"]
+    assert indicators["toolExploration"]["uniqueToolsDiscovered"] >= 3, indicators["toolExploration"]
+    assert indicators["toolExploration"]["uniqueToolsUsed"] >= 1, indicators["toolExploration"]
+    assert indicators["publicExpression"]["publicExpressionCount"] == 1, indicators["publicExpression"]
+    assert indicators["publicExpression"]["visibleEvidenceCount"] == 1, indicators["publicExpression"]
+    assert indicators["socialGraphDepth"]["relationshipCount"] == 2, indicators["socialGraphDepth"]
+    assert indicators["socialGraphDepth"]["maxRelationshipDegree"] == 2, indicators["socialGraphDepth"]
+    assert indicators["governanceProposalParticipation"]["operatorProposalCount"] == 2, indicators["governanceProposalParticipation"]
+    assert indicators["governanceProposalParticipation"]["governanceProposalCount"] == 1, indicators["governanceProposalParticipation"]
+    assert indicators["economyPlaceholderActivity"]["economyProposalCount"] == 1, indicators["economyPlaceholderActivity"]
+    assert indicators["economyPlaceholderActivity"]["economyExecutableToolCount"] == 0, indicators["economyPlaceholderActivity"]
+    assert indicators["economyPlaceholderActivity"]["transactionCount"] == 0, indicators["economyPlaceholderActivity"]
+    assert indicators["economyPlaceholderActivity"]["placeholderOnly"] is True, indicators["economyPlaceholderActivity"]
+    assert indicators["safetyPublicOrderIncidents"]["incidentCount"] >= 1, indicators["safetyPublicOrderIncidents"]
+    assert metrics["finalGate"]["checks"]["aliveWorldIndicatorsPresent"] is True, metrics["finalGate"]
+    assert metrics["finalGate"]["evidence"]["aliveWorldIndicators"]["schemaVersion"] == module.LIVE_AGENT_ALIVE_WORLD_INDICATORS_SCHEMA_VERSION, metrics["finalGate"]["evidence"]
+    assert metrics["liveWorldReference"]["patterns"]["aliveWorldIndicators"]["status"] == "implemented", metrics["liveWorldReference"]
+    assert metrics["metrics"]["liveWorldReference"]["patternStatuses"]["aliveWorldIndicators"] == "implemented", metrics["metrics"]["liveWorldReference"]
+    print("live agent alive-world indicators metrics ok")
+finally:
+    shutil.rmtree(data_dir, ignore_errors=True)
+`], { cwd: root, encoding: 'utf8' });
+assert.equal(liveAgentAliveWorldIndicatorsCheck.status, 0, `Live Agent alive-world indicators check failed\n${liveAgentAliveWorldIndicatorsCheck.stderr || liveAgentAliveWorldIndicatorsCheck.stdout}`);
+
 const liveAgentGlobalFeatureGateCheck = spawnSync('python3', ['-B', '-c', `
 import importlib.util
 import os
@@ -963,13 +1071,16 @@ try:
     assert live_world_reference["patterns"]["relationships"]["status"] == "partial", live_world_reference
     assert live_world_reference["patterns"]["visibleEvents"]["status"] == "implemented", live_world_reference
     assert live_world_reference["patterns"]["referenceWorldExpansionTools"]["status"] == "proposal-only", live_world_reference
-    assert live_world_reference["patterns"]["aliveWorldIndicators"]["status"] == "missing", live_world_reference
+    assert live_world_reference["patterns"]["aliveWorldIndicators"]["status"] == "implemented", live_world_reference
     assert live_world_reference["statusBuckets"]["implemented"], live_world_reference
     assert live_world_reference["statusBuckets"]["partial"] == ["relationships"], live_world_reference
     assert live_world_reference["statusBuckets"]["proposal-only"] == ["referenceWorldExpansionTools"], live_world_reference
-    assert live_world_reference["statusBuckets"]["missing"] == ["aliveWorldIndicators"], live_world_reference
-    assert metrics["metrics"]["liveWorldReference"]["patternStatuses"]["aliveWorldIndicators"] == "missing", metrics["metrics"]["liveWorldReference"]
+    assert live_world_reference["statusBuckets"]["missing"] == [], live_world_reference
+    assert metrics["metrics"]["liveWorldReference"]["patternStatuses"]["aliveWorldIndicators"] == "implemented", metrics["metrics"]["liveWorldReference"]
     assert metrics["finalGate"]["evidence"]["liveWorldReference"]["patternStatuses"]["referenceWorldExpansionTools"] == "proposal-only", metrics["finalGate"]["evidence"]["liveWorldReference"]
+    assert metrics["metrics"]["aliveWorldIndicators"]["schemaVersion"] == module.LIVE_AGENT_ALIVE_WORLD_INDICATORS_SCHEMA_VERSION, metrics["metrics"]["aliveWorldIndicators"]
+    assert metrics["finalGate"]["evidence"]["aliveWorldIndicators"]["schemaVersion"] == module.LIVE_AGENT_ALIVE_WORLD_INDICATORS_SCHEMA_VERSION, metrics["finalGate"]["evidence"]
+    assert metrics["finalGate"]["checks"]["aliveWorldIndicatorsPresent"] is True, metrics["finalGate"]
     assert distribution["schemaVersion"] == "agent-live-mode-per-agent-distribution/v1", distribution
     assert distribution["enabledAgentIds"] == ["adam", "loop-only"], distribution
     assert distribution["enabledAgentsMissingCompletedTurns"] == ["adam", "loop-only"], distribution
@@ -1595,6 +1706,7 @@ for (const token of [
   'LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"',
   'LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"',
   'LIVE_AGENT_LIVE_WORLD_REFERENCE_VERSION = "agent-live-mode-live-world-reference/v1"',
+  'LIVE_AGENT_ALIVE_WORLD_INDICATORS_SCHEMA_VERSION = "agent-live-mode-alive-world-indicators/v1"',
   'LIVE_AGENT_TURN_CONTEXT_SCHEMA_VERSION = "agent-live-mode-turn-context/v1"',
   'LIVE_AGENT_REFERENCE_ARCHITECTURES',
   '"id": "live-world-reference"',
@@ -1615,6 +1727,7 @@ for (const token of [
   'def get_live_agent_mode_autonomy_metrics',
   'def _live_agent_provider_adapter_metrics',
   'def _live_agent_clawmind_architecture_metrics',
+  'def _live_agent_alive_world_indicators_metrics',
   '"agent-live-mode-autonomy-metrics/v1"',
   '"agent-live-mode-provider-adapter-contract/v1"',
   '"agent-live-mode-clawmind-architecture/v1"',
@@ -1626,6 +1739,9 @@ for (const token of [
   '"toolExploration"',
   '"referenceWorldExpansionTools"',
   '"aliveWorldIndicators"',
+  '"governanceProposalParticipation"',
+  '"economyPlaceholderActivity"',
+  '"safetyPublicOrderIncidents"',
   '"proposal-only"',
   '"liveWorldReferenceGuidance": True',
   '"providerAdapterReadiness"',

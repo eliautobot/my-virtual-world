@@ -1467,6 +1467,17 @@ LIVE_AGENT_FAILED_EXPECTATION_SCHEMA_VERSION = "agent-live-mode-failed-expectati
 LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"
 LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"
 LIVE_AGENT_LIVE_WORLD_REFERENCE_VERSION = "agent-live-mode-live-world-reference/v1"
+LIVE_AGENT_ALIVE_WORLD_INDICATORS_SCHEMA_VERSION = "agent-live-mode-alive-world-indicators/v1"
+LIVE_AGENT_ALIVE_WORLD_INDICATOR_BUCKETS = [
+    "liveAgentHealth",
+    "locationExploration",
+    "toolExploration",
+    "publicExpression",
+    "socialGraphDepth",
+    "governanceProposalParticipation",
+    "economyPlaceholderActivity",
+    "safetyPublicOrderIncidents",
+]
 LIVE_AGENT_SOCIETY_SCHEMA_VERSION = "agent-live-mode-society-state/v1"
 LIVE_AGENT_SOCIAL_OBSERVATION_SCHEMA_VERSION = "agent-live-mode-social-observation/v1"
 LIVE_AGENT_GROUP_GOAL_SCHEMA_VERSION = "agent-live-mode-group-goal/v1"
@@ -6206,6 +6217,7 @@ def _live_agent_live_world_reference_metrics(
     live_agent_building_count,
     completed_backend_action_count,
     typed_object_action_types,
+    alive_world_indicators,
 ):
     modules = clawmind_architecture.get("modules") if isinstance(clawmind_architecture.get("modules"), dict) else {}
     reference = _copy_jsonable(LIVE_AGENT_REFERENCE_ARCHITECTURES[0])
@@ -6334,25 +6346,23 @@ def _live_agent_live_world_reference_metrics(
         },
         "aliveWorldIndicators": {
             "referencePattern": "alive-world-indicators",
-            "status": "missing",
+            "status": "implemented",
             "clawMindModules": ["perception", "memory", "socialReasoning", "outcomeAwareness", "orchestrator"],
             "moduleEvidence": module_evidence(["perception", "memory", "socialReasoning", "outcomeAwareness", "orchestrator"]),
             "evidence": {
-                "basicPopulationEvidence": _normalize_int(per_agent_distribution.get("enabledAgentCount"), 0, minimum=0, maximum=1000000000),
-                "basicSocialEvidence": _normalize_int(relationship_count, 0, minimum=0, maximum=1000000000),
-                "basicToolEvidence": len(typed_object_action_types or []),
-                "publicExpressionEvidence": _normalize_int((public_expression_metrics or {}).get("visibleEvidenceCount"), 0, minimum=0, maximum=1000000000),
+                "schemaVersion": (alive_world_indicators or {}).get("schemaVersion"),
+                "bucketCount": _normalize_int(((alive_world_indicators or {}).get("summary") or {}).get("bucketCount"), 0, minimum=0, maximum=1000000000),
+                "bucketIds": list((alive_world_indicators or {}).get("bucketIds") or []),
+                "liveAgentHealthCount": _normalize_int(((alive_world_indicators or {}).get("activityCounts") or {}).get("liveAgentHealth"), 0, minimum=0, maximum=1000000000),
+                "locationExplorationCount": _normalize_int(((alive_world_indicators or {}).get("activityCounts") or {}).get("locationExploration"), 0, minimum=0, maximum=1000000000),
+                "toolExplorationCount": _normalize_int(((alive_world_indicators or {}).get("activityCounts") or {}).get("toolExploration"), 0, minimum=0, maximum=1000000000),
+                "publicExpressionCount": _normalize_int(((alive_world_indicators or {}).get("activityCounts") or {}).get("publicExpression"), 0, minimum=0, maximum=1000000000),
+                "socialGraphDepthCount": _normalize_int(((alive_world_indicators or {}).get("activityCounts") or {}).get("socialGraphDepth"), 0, minimum=0, maximum=1000000000),
+                "governanceProposalParticipationCount": _normalize_int(((alive_world_indicators or {}).get("activityCounts") or {}).get("governanceProposalParticipation"), 0, minimum=0, maximum=1000000000),
+                "economyPlaceholderActivityCount": _normalize_int(((alive_world_indicators or {}).get("activityCounts") or {}).get("economyPlaceholderActivity"), 0, minimum=0, maximum=1000000000),
+                "safetyPublicOrderIncidentCount": _normalize_int(((alive_world_indicators or {}).get("activityCounts") or {}).get("safetyPublicOrderIncidents"), 0, minimum=0, maximum=1000000000),
+                "readOnly": ((alive_world_indicators or {}).get("optimization") or {}).get("readOnly") is True,
             },
-            "gaps": [
-                "population-health-indicator",
-                "location-exploration-indicator",
-                "tool-exploration-indicator",
-                "public-expression-indicator",
-                "social-graph-depth-indicator",
-                "governance-participation-indicator",
-                "economy-activity-indicator",
-                "safety-public-order-indicator",
-            ],
         },
     }
     status_buckets = {status: [] for status in ("implemented", "partial", "proposal-only", "missing")}
@@ -6974,6 +6984,347 @@ def _live_agent_public_expression_metrics(public_expression_store, enabled_live_
     }
 
 
+def _live_agent_alive_world_location_signature(location):
+    if not isinstance(location, dict):
+        return None
+    building_id = str(location.get("buildingId") or location.get("buildingID") or "").strip()
+    room_id = str(location.get("roomId") or location.get("roomID") or "").strip()
+    floor = _normalize_int(location.get("floor"), 1, minimum=1, maximum=1000000)
+    if building_id:
+        suffix = f":room:{room_id}" if room_id else ""
+        return f"building:{building_id}:floor:{floor}{suffix}"
+
+    def first_number(keys):
+        for key in keys:
+            if key in location:
+                number = _number_or_none(location.get(key))
+                if number is not None and math.isfinite(number):
+                    return round(number, 3)
+        return None
+
+    x = first_number(("x", "worldX", "apiX"))
+    z = first_number(("z", "worldZ", "apiZ", "y", "worldY"))
+    if x is not None and z is not None:
+        return f"point:{x}:{z}:floor:{floor}"
+    return None
+
+
+def _live_agent_operator_proposal_indicator_category(proposal):
+    if not isinstance(proposal, dict):
+        return "other"
+    action_type = str(proposal.get("actionType") or proposal.get("tool") or proposal.get("toolName") or "").strip()
+    tool = LIVE_AGENT_TOOL_REGISTRY.get(action_type)
+    if isinstance(tool, dict) and tool.get("category"):
+        return str(tool.get("category"))
+    capability = proposal.get("capability") if isinstance(proposal.get("capability"), dict) else {}
+    values = " ".join(
+        str(value or "")
+        for value in (
+            action_type,
+            proposal.get("capabilityTag"),
+            capability.get("id"),
+            capability.get("actionType"),
+            capability.get("capabilityTag"),
+            proposal.get("requiredExecutor"),
+            proposal.get("blockedReason"),
+        )
+    ).lower()
+    if "governance" in values or "civic" in values:
+        return "governance"
+    if "economy" in values or "market" in values or "trade" in values or "budget" in values:
+        return "economy"
+    if "event" in values or "culture" in values:
+        return "events"
+    if "world." in values or "build" in values or "decorate" in values:
+        return "build-create"
+    return "other"
+
+
+def _live_agent_alive_world_indicators_metrics(
+    *,
+    meta,
+    enabled_live_agents,
+    loop_state,
+    scheduler,
+    turns,
+    completed_turns,
+    failed_turns,
+    active_route_pending,
+    completed_backend_actions,
+    failed_backend_actions,
+    simulated_locations,
+    presence_persistence,
+    route_before_action,
+    tool_exploration,
+    public_expression_metrics,
+    relationships,
+    communication_events,
+    reaction_opportunities,
+    society_observations,
+    group_goals,
+    conversation_triggers,
+    conversation_opportunities,
+    outcome_awareness_metrics,
+    pause,
+    kill_switch,
+):
+    enabled_agent_ids = sorted({
+        str(agent.get("agentId") or agent.get("statusKey") or agent.get("id") or "").strip()
+        for agent in (enabled_live_agents or [])
+        if isinstance(agent, dict) and str(agent.get("agentId") or agent.get("statusKey") or agent.get("id") or "").strip()
+    })
+    completed_turn_agent_ids = sorted({
+        str(turn.get("agentId") or "").strip()
+        for turn in (completed_turns or [])
+        if isinstance(turn, dict) and str(turn.get("agentId") or "").strip()
+    })
+    completed_action_agent_ids = sorted({
+        str(action.get("agentId") or "").strip()
+        for action in (completed_backend_actions or [])
+        if isinstance(action, dict) and str(action.get("agentId") or "").strip()
+    })
+
+    presence_locations = _live_agent_presence_locations_by_agent(meta)
+    locations_by_agent = {}
+    for agent_id, location in (simulated_locations or {}).items():
+        if isinstance(location, dict):
+            locations_by_agent[str(agent_id)] = location
+    for agent_id, location in presence_locations.items():
+        if isinstance(location, dict):
+            locations_by_agent[str(agent_id)] = location
+    location_signatures = set()
+    building_ids = set()
+    room_ids = set()
+    coordinate_signatures = set()
+
+    def add_location(location):
+        signature = _live_agent_alive_world_location_signature(location)
+        if not signature:
+            return
+        location_signatures.add(signature)
+        building_id = str((location or {}).get("buildingId") or "").strip()
+        room_id = str((location or {}).get("roomId") or "").strip()
+        if building_id:
+            building_ids.add(building_id)
+        if room_id:
+            room_ids.add(f"{building_id}:{room_id}" if building_id else room_id)
+        if signature.startswith("point:"):
+            coordinate_signatures.add(signature)
+
+    for location in locations_by_agent.values():
+        add_location(location)
+    completed_route_action_count = 0
+    for action in [item for item in (completed_backend_actions or []) if isinstance(item, dict)]:
+        before_count = len(location_signatures)
+        target = action.get("target") if isinstance(action.get("target"), dict) else {}
+        route = action.get("route") if isinstance(action.get("route"), dict) else {}
+        route_target = route.get("target") if isinstance(route.get("target"), dict) else {}
+        presence_at_mutation = action.get("presenceAtMutation") if isinstance(action.get("presenceAtMutation"), dict) else {}
+        for candidate in (target, route_target, presence_at_mutation):
+            add_location(candidate)
+        if len(location_signatures) > before_count:
+            completed_route_action_count += 1
+
+    relationship_edges = []
+    relationship_agent_ids = set()
+    relationship_degree = {}
+    for key, relationship in (relationships or {}).items():
+        if not isinstance(relationship, dict):
+            continue
+        left = str(relationship.get("agentId") or "").strip()
+        right = str(relationship.get("otherAgentId") or "").strip()
+        if (not left or not right) and isinstance(key, str) and "::" in key:
+            left, right = [part.strip() for part in key.split("::", 1)]
+        if not left or not right or left == right:
+            continue
+        edge = tuple(sorted((left, right)))
+        if edge in relationship_edges:
+            continue
+        relationship_edges.append(edge)
+        relationship_agent_ids.update(edge)
+        for agent_id in edge:
+            relationship_degree[agent_id] = relationship_degree.get(agent_id, 0) + 1
+
+    operator_proposals = _live_agent_loop_limited_operator_proposals(
+        loop_state,
+        include_resolved=True,
+        limit=LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"],
+    )
+    proposal_status_counts = {}
+    proposal_category_counts = {}
+    proposal_agent_ids = set()
+    for proposal in operator_proposals:
+        status = str(proposal.get("status") or "pending")
+        proposal_status_counts[status] = proposal_status_counts.get(status, 0) + 1
+        category = _live_agent_operator_proposal_indicator_category(proposal)
+        proposal_category_counts[category] = proposal_category_counts.get(category, 0) + 1
+        if proposal.get("agentId"):
+            proposal_agent_ids.add(str(proposal.get("agentId")))
+
+    proposal_only_tool_counts = {}
+    executable_tool_counts = {}
+    for tool in LIVE_AGENT_TOOL_REGISTRY.values():
+        if not isinstance(tool, dict):
+            continue
+        category = str(tool.get("category") or "other")
+        if tool.get("executionMode") == "proposal-only":
+            proposal_only_tool_counts[category] = proposal_only_tool_counts.get(category, 0) + 1
+        if _live_agent_tool_execution_enabled(tool.get("name")):
+            executable_tool_counts[category] = executable_tool_counts.get(category, 0) + 1
+
+    route_metrics = route_before_action.get("routeBeforeAction") if isinstance(route_before_action.get("routeBeforeAction"), dict) else {}
+    presence_mutation_metrics = route_before_action.get("presenceDefinedMutation") if isinstance(route_before_action.get("presenceDefinedMutation"), dict) else {}
+    route_violation_count = _normalize_int(route_metrics.get("violationCount"), 0, minimum=0, maximum=1000000000)
+    presence_violation_count = _normalize_int(presence_mutation_metrics.get("violationCount"), 0, minimum=0, maximum=1000000000)
+    unresolved_mismatch_count = _normalize_int((outcome_awareness_metrics or {}).get("unresolvedMismatchCount"), 0, minimum=0, maximum=1000000000)
+    safety_event_types = []
+    for event in [item for item in ((loop_state or {}).get("events") or []) if isinstance(item, dict)]:
+        event_type = str(event.get("type") or "").strip()
+        if not event_type:
+            continue
+        lowered = event_type.lower()
+        if any(token in lowered for token in ("failed", "mismatch", "violation", "operator-proposal", "kill-switch", "paused")):
+            safety_event_types.append(event_type)
+    safety_public_order_incident_count = (
+        route_violation_count
+        + presence_violation_count
+        + unresolved_mismatch_count
+        + len(failed_turns or [])
+        + len(failed_backend_actions or [])
+        + _normalize_int((outcome_awareness_metrics or {}).get("escalationCount"), 0, minimum=0, maximum=1000000000)
+        + len(active_route_pending or [])
+        + (1 if (kill_switch or {}).get("active") is True else 0)
+    )
+
+    live_agent_health = {
+        "enabledAgentCount": len(enabled_agent_ids),
+        "enabledAgentIds": enabled_agent_ids,
+        "completedTurnCount": len(completed_turns or []),
+        "failedTurnCount": len(failed_turns or []),
+        "completedTurnAgentCount": len(completed_turn_agent_ids),
+        "completedTurnAgentIds": completed_turn_agent_ids,
+        "completedBackendActionCount": len(completed_backend_actions or []),
+        "failedBackendActionCount": len(failed_backend_actions or []),
+        "completedBackendActionAgentCount": len(completed_action_agent_ids),
+        "completedBackendActionAgentIds": completed_action_agent_ids,
+        "presencePersistedLocationCount": _normalize_int((presence_persistence or {}).get("persistedLocationCount"), 0, minimum=0, maximum=1000000000),
+        "presencePersistenceOk": bool((presence_persistence or {}).get("ok")),
+        "activeTurnPresent": isinstance((scheduler or {}).get("activeTurn"), dict),
+        "pauseActive": bool((pause or {}).get("active")),
+        "killSwitchActive": bool((kill_switch or {}).get("active")),
+    }
+    location_exploration = {
+        "agentLocationCount": len(locations_by_agent),
+        "agentsWithLocationCount": len([agent_id for agent_id, location in locations_by_agent.items() if isinstance(location, dict) and _live_agent_alive_world_location_signature(location)]),
+        "uniqueLocationCount": len(location_signatures),
+        "uniqueLocations": sorted(location_signatures)[:50],
+        "uniqueBuildingCount": len(building_ids),
+        "uniqueBuildingIds": sorted(building_ids)[:50],
+        "uniqueRoomCount": len(room_ids),
+        "uniqueCoordinateCount": len(coordinate_signatures),
+        "completedRouteActionCount": completed_route_action_count,
+    }
+    tool_usage = {
+        "enabledAgentsWithDiscoveryCount": _normalize_int((tool_exploration or {}).get("enabledAgentsWithDiscoveryCount"), 0, minimum=0, maximum=1000000000),
+        "enabledAgentsWithUsageCount": _normalize_int((tool_exploration or {}).get("enabledAgentsWithUsageCount"), 0, minimum=0, maximum=1000000000),
+        "uniqueToolsDiscovered": _normalize_int((tool_exploration or {}).get("uniqueToolsDiscovered"), 0, minimum=0, maximum=1000000000),
+        "uniqueToolsUsed": _normalize_int((tool_exploration or {}).get("uniqueToolsUsed"), 0, minimum=0, maximum=1000000000),
+        "discoveredTools": list((tool_exploration or {}).get("discoveredTools") or [])[:50],
+        "usedTools": list((tool_exploration or {}).get("usedTools") or [])[:50],
+        "unavailableReasonCounts": _copy_jsonable((tool_exploration or {}).get("unavailableReasonCounts") or {}),
+    }
+    public_expression = {
+        "publicExpressionCount": _normalize_int((public_expression_metrics or {}).get("publicExpressionCount"), 0, minimum=0, maximum=1000000000),
+        "visibleEvidenceCount": _normalize_int((public_expression_metrics or {}).get("visibleEvidenceCount"), 0, minimum=0, maximum=1000000000),
+        "enabledAgentsWithExpressionCount": _normalize_int((public_expression_metrics or {}).get("enabledAgentsWithExpressionCount"), 0, minimum=0, maximum=1000000000),
+        "enabledAgentsWithVisibleEvidenceCount": _normalize_int((public_expression_metrics or {}).get("enabledAgentsWithVisibleEvidenceCount"), 0, minimum=0, maximum=1000000000),
+        "kindCounts": _copy_jsonable((public_expression_metrics or {}).get("kindCounts") or {}),
+    }
+    social_graph_depth = {
+        "relationshipCount": len(relationship_edges),
+        "connectedAgentCount": len(relationship_agent_ids),
+        "maxRelationshipDegree": max(relationship_degree.values()) if relationship_degree else 0,
+        "relationshipDegreeByAgent": {agent_id: relationship_degree[agent_id] for agent_id in sorted(relationship_degree)},
+        "inWorldCommunicationCount": len(communication_events or []),
+        "reactionOpportunityCount": len(reaction_opportunities or []),
+        "socialObservationCount": len(society_observations or []),
+        "groupGoalCount": len(group_goals or {}),
+        "conversationTriggerCount": len(conversation_triggers or []),
+        "conversationOpportunityCount": len(conversation_opportunities or []),
+    }
+    governance_proposal_participation = {
+        "operatorProposalCount": len(operator_proposals),
+        "pendingOperatorProposalCount": proposal_status_counts.get("pending", 0),
+        "resolvedOperatorProposalCount": len(operator_proposals) - proposal_status_counts.get("pending", 0),
+        "proposalCountByStatus": proposal_status_counts,
+        "proposalCountByCategory": proposal_category_counts,
+        "participatingAgentCount": len(proposal_agent_ids),
+        "governanceProposalCount": proposal_category_counts.get("governance", 0),
+        "governanceProposalOnlyToolCount": proposal_only_tool_counts.get("governance", 0),
+        "eventProposalOnlyToolCount": proposal_only_tool_counts.get("events", 0),
+    }
+    economy_placeholder_activity = {
+        "economyProposalCount": proposal_category_counts.get("economy", 0),
+        "economyProposalOnlyToolCount": proposal_only_tool_counts.get("economy", 0),
+        "economyExecutableToolCount": executable_tool_counts.get("economy", 0),
+        "transactionCount": 0,
+        "balanceRecordCount": 0,
+        "placeholderActivityCount": proposal_category_counts.get("economy", 0) + proposal_only_tool_counts.get("economy", 0),
+        "placeholderOnly": True,
+        "hiddenWorldMutationAllowed": False,
+    }
+    safety_public_order = {
+        "incidentCount": safety_public_order_incident_count,
+        "routeBeforeActionViolationCount": route_violation_count,
+        "presenceDefinedMutationViolationCount": presence_violation_count,
+        "unresolvedMismatchCount": unresolved_mismatch_count,
+        "failedTurnCount": len(failed_turns or []),
+        "failedBackendActionCount": len(failed_backend_actions or []),
+        "operatorEscalationCount": _normalize_int((outcome_awareness_metrics or {}).get("escalationCount"), 0, minimum=0, maximum=1000000000),
+        "routePendingActiveCount": len(active_route_pending or []),
+        "killSwitchActiveIncidentCount": 1 if (kill_switch or {}).get("active") is True else 0,
+        "pauseActiveInterventionCount": 1 if (pause or {}).get("active") is True else 0,
+        "recentIncidentTypes": sorted(set(safety_event_types))[:20],
+        "publicOrderOk": safety_public_order_incident_count == 0,
+    }
+    activity_counts = {
+        "liveAgentHealth": live_agent_health["enabledAgentCount"] + live_agent_health["completedTurnCount"] + live_agent_health["completedBackendActionCount"],
+        "locationExploration": location_exploration["uniqueLocationCount"] + location_exploration["completedRouteActionCount"],
+        "toolExploration": tool_usage["uniqueToolsDiscovered"] + tool_usage["uniqueToolsUsed"],
+        "publicExpression": public_expression["publicExpressionCount"] + public_expression["visibleEvidenceCount"],
+        "socialGraphDepth": social_graph_depth["relationshipCount"] + social_graph_depth["inWorldCommunicationCount"] + social_graph_depth["reactionOpportunityCount"],
+        "governanceProposalParticipation": governance_proposal_participation["operatorProposalCount"] + governance_proposal_participation["governanceProposalOnlyToolCount"],
+        "economyPlaceholderActivity": economy_placeholder_activity["placeholderActivityCount"],
+        "safetyPublicOrderIncidents": safety_public_order["incidentCount"],
+    }
+    return {
+        "schemaVersion": LIVE_AGENT_ALIVE_WORLD_INDICATORS_SCHEMA_VERSION,
+        "bucketIds": list(LIVE_AGENT_ALIVE_WORLD_INDICATOR_BUCKETS),
+        "liveAgentHealth": live_agent_health,
+        "locationExploration": location_exploration,
+        "toolExploration": tool_usage,
+        "publicExpression": public_expression,
+        "socialGraphDepth": social_graph_depth,
+        "governanceProposalParticipation": governance_proposal_participation,
+        "economyPlaceholderActivity": economy_placeholder_activity,
+        "safetyPublicOrderIncidents": safety_public_order,
+        "activityCounts": activity_counts,
+        "summary": {
+            "bucketCount": len(LIVE_AGENT_ALIVE_WORLD_INDICATOR_BUCKETS),
+            "nonZeroBucketCount": len([count for count in activity_counts.values() if count > 0]),
+            "readOnly": True,
+        },
+        "optimization": {
+            "readOnly": True,
+            "source": "bounded world-meta.json Live Agent stores and current in-memory world-event metrics",
+            "modelCallsDuringMetrics": 0,
+            "providerCallsDuringMetrics": 0,
+            "protectedRuntimeScanned": False,
+            "heavyWorldScan": False,
+        },
+    }
+
+
 def get_live_agent_mode_autonomy_metrics():
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
@@ -7170,6 +7521,33 @@ def get_live_agent_mode_autonomy_metrics():
     default_soak_target_turns = 5
     provider_support = _live_agent_provider_adapter_metrics(cached_roster, loop_state=loop_state)
     clawmind_architecture = _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
+    alive_world_indicators = _live_agent_alive_world_indicators_metrics(
+        meta=meta,
+        enabled_live_agents=enabled_live_agents,
+        loop_state=loop_state,
+        scheduler=scheduler,
+        turns=turns,
+        completed_turns=completed_turns,
+        failed_turns=failed_turns,
+        active_route_pending=active_route_pending,
+        completed_backend_actions=completed_backend_actions,
+        failed_backend_actions=failed_backend_actions,
+        simulated_locations=simulated_locations,
+        presence_persistence=presence_persistence,
+        route_before_action=route_before_action,
+        tool_exploration=tool_exploration,
+        public_expression_metrics=public_expression_metrics,
+        relationships=relationships,
+        communication_events=communication_events,
+        reaction_opportunities=reaction_opportunities,
+        society_observations=society_observations,
+        group_goals=group_goals,
+        conversation_triggers=conversation_triggers,
+        conversation_opportunities=conversation_opportunities,
+        outcome_awareness_metrics=outcome_awareness_metrics,
+        pause=pause,
+        kill_switch=kill_switch,
+    )
     live_world_reference = _live_agent_live_world_reference_metrics(
         clawmind_architecture,
         per_agent_distribution=per_agent_distribution,
@@ -7191,6 +7569,7 @@ def get_live_agent_mode_autonomy_metrics():
         live_agent_building_count=live_agent_building_count,
         completed_backend_action_count=len(completed_backend_actions),
         typed_object_action_types=object_action_types,
+        alive_world_indicators=alive_world_indicators,
     )
     backend_action_total = len(backend_terminal_actions)
     action_success_rate = round(len(completed_backend_actions) / backend_action_total, 3) if backend_action_total else 0
@@ -7249,6 +7628,12 @@ def get_live_agent_mode_autonomy_metrics():
             (LIVE_AGENT_TOOL_REGISTRY.get(tool_name) or {}).get("executionMode") == "proposal-only"
             for tool_name in ["create_public_event", "propose_governance_action", "propose_economy_activity"]
         ),
+        "aliveWorldIndicatorsPresent": alive_world_indicators.get("schemaVersion") == LIVE_AGENT_ALIVE_WORLD_INDICATORS_SCHEMA_VERSION
+        and set(LIVE_AGENT_ALIVE_WORLD_INDICATOR_BUCKETS).issubset(set(alive_world_indicators.get("bucketIds") or []))
+        and (alive_world_indicators.get("optimization") or {}).get("readOnly") is True
+        and (alive_world_indicators.get("optimization") or {}).get("providerCallsDuringMetrics") == 0
+        and (alive_world_indicators.get("optimization") or {}).get("modelCallsDuringMetrics") == 0
+        and (alive_world_indicators.get("optimization") or {}).get("protectedRuntimeScanned") is False,
         "perAgentTurnActionDistributionPresent": per_agent_distribution["enabledAgentCount"] > 0 and len(per_agent_distribution["agents"]) >= per_agent_distribution["enabledAgentCount"],
         "defaultSoakEnabledAgentRosterPresent": per_agent_distribution["enabledAgentCount"] >= default_soak_target_agents,
         "defaultSoakCompletedTurnTargetMet": len(completed_turns) >= default_soak_target_turns,
@@ -7275,6 +7660,7 @@ def get_live_agent_mode_autonomy_metrics():
         "clawMindRuntimeEvidence": clawmind_architecture.get("checklist", {}).get("allModulesExecuted") is True,
         "liveWorldReferenceContractPresent": checklist["liveWorldReferenceContractPresent"],
         "liveWorldReferenceScopedToClawMind": checklist["liveWorldReferenceScopedToClawMind"],
+        "aliveWorldIndicatorsPresent": checklist["aliveWorldIndicatorsPresent"],
         "defaultSoakEnabledAgentRosterPresent": checklist["defaultSoakEnabledAgentRosterPresent"],
         "defaultSoakCompletedTurnTargetMet": checklist["defaultSoakCompletedTurnTargetMet"],
         "defaultSoakCompletedBackendActionTargetMet": checklist["defaultSoakCompletedBackendActionTargetMet"],
@@ -7353,6 +7739,7 @@ def get_live_agent_mode_autonomy_metrics():
                 "proposalOnlyTools": public_expression_metrics.get("proposalOnlyTools"),
                 "storage": public_expression_metrics.get("storage"),
             },
+            "aliveWorldIndicators": alive_world_indicators,
             "liveWorldReference": {
                 "schemaVersion": live_world_reference.get("schemaVersion"),
                 "reference": live_world_reference.get("reference"),
@@ -7448,6 +7835,7 @@ def get_live_agent_mode_autonomy_metrics():
             "conversationTriggerCount": len(conversation_triggers),
             "publicExpressionCount": len(public_expressions),
             "publicExpression": public_expression_metrics,
+            "aliveWorldIndicators": alive_world_indicators,
             "societyRoleCount": len(society_roles),
             "liveEnabledSocietyRoleCount": len([role for role in society_roles.values() if isinstance(role, dict) and role.get("liveModeEnabled") is True]),
             "memory": memory_counts,
@@ -7516,6 +7904,7 @@ def get_live_agent_mode_autonomy_metrics():
             "turnContextAssemblyMeasured": True,
             "toolExplorationMeasured": True,
             "publicExpressionMeasured": True,
+            "aliveWorldIndicatorsMeasured": True,
             "unsafeCultureGovernanceEconomyProposalOnly": True,
             "metricsProviderCalls": 0,
             "metricsModelCalls": 0,

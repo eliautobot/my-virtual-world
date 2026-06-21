@@ -1619,8 +1619,28 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   assert(metrics.liveWorldReference?.patterns?.relationships?.status === 'partial', 'Live World reference should classify relationship coverage', metrics.liveWorldReference);
   assert(metrics.liveWorldReference?.patterns?.visibleEvents?.status === 'implemented', 'Live World reference should classify visible events', metrics.liveWorldReference);
   assert(metrics.liveWorldReference?.patterns?.referenceWorldExpansionTools?.status === 'proposal-only', 'Live World reference should classify proposal-only reference tools', metrics.liveWorldReference);
-  assert(metrics.liveWorldReference?.patterns?.aliveWorldIndicators?.status === 'missing', 'Live World reference should classify missing alive-world indicators', metrics.liveWorldReference);
-  assert(metrics.metrics?.liveWorldReference?.patternStatuses?.aliveWorldIndicators === 'missing', 'metrics should expose compact Live World reference statuses', metrics.metrics?.liveWorldReference);
+  assert(metrics.liveWorldReference?.patterns?.aliveWorldIndicators?.status === 'implemented', 'Live World reference should classify alive-world indicators as implemented', metrics.liveWorldReference);
+  assert(metrics.metrics?.liveWorldReference?.patternStatuses?.aliveWorldIndicators === 'implemented', 'metrics should expose compact Live World reference statuses', metrics.metrics?.liveWorldReference);
+  assert(metrics.metrics?.aliveWorldIndicators?.schemaVersion === 'agent-live-mode-alive-world-indicators/v1', 'metrics should expose alive-world indicators', metrics.metrics?.aliveWorldIndicators);
+  for (const bucketId of [
+    'liveAgentHealth',
+    'locationExploration',
+    'toolExploration',
+    'publicExpression',
+    'socialGraphDepth',
+    'governanceProposalParticipation',
+    'economyPlaceholderActivity',
+    'safetyPublicOrderIncidents',
+  ]) {
+    assert(metrics.metrics?.aliveWorldIndicators?.bucketIds?.includes(bucketId), `alive-world indicators should include bucket ${bucketId}`, metrics.metrics?.aliveWorldIndicators);
+    assert(metrics.metrics?.aliveWorldIndicators?.[bucketId] && typeof metrics.metrics.aliveWorldIndicators[bucketId] === 'object', `alive-world indicator bucket ${bucketId} should be an object`, metrics.metrics?.aliveWorldIndicators);
+  }
+  assert(metrics.metrics?.aliveWorldIndicators?.optimization?.readOnly === true, 'alive-world indicators should be read-only', metrics.metrics?.aliveWorldIndicators?.optimization);
+  assert(metrics.metrics?.aliveWorldIndicators?.optimization?.providerCallsDuringMetrics === 0, 'alive-world indicators should not call providers', metrics.metrics?.aliveWorldIndicators?.optimization);
+  assert(metrics.metrics?.aliveWorldIndicators?.optimization?.modelCallsDuringMetrics === 0, 'alive-world indicators should not call models', metrics.metrics?.aliveWorldIndicators?.optimization);
+  assert(metrics.metrics?.aliveWorldIndicators?.optimization?.protectedRuntimeScanned === false, 'alive-world indicators should not scan protected runtime state', metrics.metrics?.aliveWorldIndicators?.optimization);
+  assert(metrics.finalGate?.checks?.aliveWorldIndicatorsPresent === true, 'final gate should confirm alive-world indicators presence', metrics.finalGate);
+  assert(metrics.finalGate?.evidence?.aliveWorldIndicators?.schemaVersion === 'agent-live-mode-alive-world-indicators/v1', 'final gate evidence should include alive-world indicators', metrics.finalGate?.evidence);
   assert(metrics.finalGate?.checks?.liveWorldReferenceContractPresent === true, 'final gate should confirm Live World reference contract presence', metrics.finalGate);
   assert(metrics.finalGate?.checks?.liveWorldReferenceScopedToClawMind === true, 'final gate should confirm Live World reference scoping', metrics.finalGate);
   assert(metrics.finalGate?.evidence?.liveWorldReference?.patternStatuses?.referenceWorldExpansionTools === 'proposal-only', 'final gate evidence should include Live World reference pattern statuses', metrics.finalGate?.evidence);
@@ -1662,6 +1682,7 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
     conversationTriggerCount: metrics.metrics.conversationTriggerCount,
     societyRoleCount: metrics.metrics.societyRoleCount,
     publicExpression: metrics.metrics.publicExpression,
+    aliveWorldIndicators: metrics.metrics.aliveWorldIndicators,
     memory: metrics.metrics.memory,
     presencePersistence: metrics.metrics.presencePersistence,
     multiClientWorldSync: metrics.metrics.worldEventFeed,
