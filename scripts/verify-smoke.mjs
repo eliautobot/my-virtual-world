@@ -145,6 +145,7 @@ const liveAgentHarness = read('scripts/live-agent-mode-8587-harness.mjs');
 for (const token of [
   'const TEST_PORT = 8587;',
   'const PRODUCT_PORT = 8590;',
+  "|| '5', 10) || 5",
   'const PEER_AGENT_ID',
   'VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS',
   'function assertNoProductPortTargets()',
@@ -169,6 +170,9 @@ for (const token of [
   '__VWReplayLiveAgentModeAnimationEvents',
   '__VWLiveAgentModeAnimationReplayState',
   'vw-live-agent-mode-replay-',
+  'runTwoClientWorldEventFeedSyncCheck',
+  '__VWSyncLiveAgentModeWorldEvents',
+  'disableDayNightCycleFor8587',
   'VW_OPENCLAW_PATH: workspaceRoot',
   'VW_CODEX_ENABLED: \'false\'',
 ]) {
@@ -439,6 +443,13 @@ try:
     events = module.list_live_agent_animation_events({"actionId": action_id, "limit": "20"})["events"]
     names = {event.get("name") for event in events}
     assert {"agent-move-started", "agent-arrived", "object-use-started", "object-use-completed", "world-action-completed"} <= names, names
+    world_events = module.list_live_agent_world_events({"limit": "100"})["events"]
+    world_event_types = {event.get("eventType") for event in world_events}
+    assert {"agent-movement-started", "agent-movement-arrived", "action-lifecycle"} <= world_event_types, world_event_types
+    world_event_metrics = module.get_live_agent_mode_autonomy_metrics()["metrics"]["worldEventFeed"]
+    assert world_event_metrics["ok"] is True, world_event_metrics
+    assert world_event_metrics["replayableEventCount"] >= len(events), world_event_metrics
+    assert "p95MultiClientSyncLatencyMs" in world_event_metrics, world_event_metrics
     state = module.get_live_agent_loop_state(persist_migration=True)
     outcome = next(item for item in state["outcomeAwareness"] if item.get("actionId") == action_id)
     assert outcome.get("expectedOutcome", {}).get("loopActionId") == "hydrate-water-cooler", outcome
@@ -709,6 +720,7 @@ try:
     assert metrics["metrics"]["presencePersistence"]["refreshResetCount"] == 0, metrics["metrics"]["presencePersistence"]
     assert metrics["finalGate"]["checks"]["defaultSoakEnabledAgentRosterPresent"] is False, metrics["finalGate"]
     assert metrics["finalGate"]["checks"]["turnsCompletedAcrossEnabledAgents"] is False, metrics["finalGate"]
+    assert metrics["finalGate"]["evidence"]["requiredCompletedTurnCount"] == 5, metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["enabledAgentCount"] == 2, metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["enabledAgents"][0]["agentId"] == "adam", metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["enabledAgents"][0]["completedTurnCount"] == 0, metrics["finalGate"]
@@ -1224,6 +1236,7 @@ for (const token of [
   'LIVE_AGENT_BACKEND_EXECUTION_VERSION = "agent-live-mode-backend-world-action-executor/v1"',
   'LIVE_AGENT_ANIMATION_EVENT_SCHEMA_VERSION = "agent-live-mode-animation-event/v1"',
   'LIVE_AGENT_IN_WORLD_COMMUNICATION_SCHEMA_VERSION = "agent-live-mode-in-world-communication/v1"',
+  'LIVE_AGENT_WORLD_EVENT_FEED_SCHEMA_VERSION = "agent-live-mode-world-event-feed/v1"',
   'LIVE_AGENT_MEMORY_ENTRY_SCHEMA_VERSION = "agent-live-mode-memory-entry/v1"',
   'LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"',
   'LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"',
@@ -1234,6 +1247,8 @@ for (const token of [
   'def advance_live_agent_backend_world_action',
   'def list_live_agent_animation_events',
   'def list_live_agent_in_world_communications',
+  'def list_live_agent_world_events',
+  'def get_live_agent_world_event_feed_metrics',
   'def get_live_agent_mode_autonomy_metrics',
   'def _live_agent_provider_adapter_metrics',
   'def _live_agent_clawmind_architecture_metrics',
@@ -1253,6 +1268,7 @@ for (const token of [
   'def _execute_live_agent_memory_tool',
   '"/api/live-agent-mode/animation-events"',
   '"/api/live-agent-mode/in-world-communications"',
+  '"/api/world-events"',
   '"/api/live-agent-mode/metrics"',
   '"/api/live-agent-mode/tool-calls"',
   '"backendOwnsProgressAndCompletion": True',
@@ -1287,6 +1303,14 @@ for (const token of [
   'window.__VWLiveAgentModeAnimationReplayState',
   '__VWLastLiveModeReplayBuildingMaterialized',
   'vw-live-agent-mode-replay-',
+  'LIVE_AGENT_MODE_WORLD_EVENT_FEED_ENDPOINT',
+  '/api/world-events',
+  'main3d-world-event-feed',
+  'syncLiveAgentModeWorldEvents',
+  'applyLiveAgentModeWorldEvent',
+  'applyLiveAgentModeWorldEventSnapshot',
+  'window.__VWLiveAgentModeWorldEventFeedState',
+  'window.__VWSyncLiveAgentModeWorldEvents',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing Live Agent animation replay token: ${token}`);
 }
@@ -1357,6 +1381,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
+  'worldEventFeed',
   'js/settings.js?v=20260619-live-agent-mode-ui-r1',
   '/live-mode',
 ]) {
