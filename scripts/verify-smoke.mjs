@@ -769,7 +769,7 @@ try:
     assert provider["schemaVersion"] == "agent-live-mode-provider-adapter-contract/v1", provider
     assert clawmind["schemaVersion"] == "agent-live-mode-clawmind-architecture/v1", clawmind
     reference_architectures = clawmind["referenceArchitectures"]
-    assert reference_architectures[0]["id"] == "emergence-world", reference_architectures
+    assert reference_architectures[0]["id"] == "live-world-reference", reference_architectures
     assert reference_architectures[0]["url"] == "https://github.com/EmergenceAI/Emergence-World", reference_architectures
     assert reference_architectures[0]["scope"] == "live-agent-mode-clawmind-only", reference_architectures
     assert "location-gated-tool-registry" in reference_architectures[0]["patterns"], reference_architectures
@@ -1316,7 +1316,7 @@ for (const token of [
   'LIVE_AGENT_PROVIDER_ADAPTER_CONTRACT_VERSION = "agent-live-mode-provider-adapter-contract/v1"',
   'LIVE_AGENT_CLAWMIND_ARCHITECTURE_VERSION = "agent-live-mode-clawmind-architecture/v1"',
   'LIVE_AGENT_REFERENCE_ARCHITECTURES',
-  '"id": "emergence-world"',
+  '"id": "live-world-reference"',
   '"scope": "live-agent-mode-clawmind-only"',
   '"https://github.com/EmergenceAI/Emergence-World"',
   '"location-gated-tool-registry"',
@@ -1340,7 +1340,7 @@ for (const token of [
   '"providerSupport"',
   '"clawMindArchitecture"',
   '"referenceArchitectures"',
-  '"emergenceWorldReferenceGuidance": True',
+  '"liveWorldReferenceGuidance": True',
   '"providerAdapterReadiness"',
   '"clawMindModuleContractsReady"',
   '"lightweightMetricsOptimized"',
@@ -1380,15 +1380,15 @@ for (const token of [
   assert(serverPy.includes(token), `server.py missing Live Agent loop token: ${token}`);
 }
 for (const token of [
-  'Emergence-Guided ClawMind Child PR Queue',
-  '20-emergence-clawmind-reference-contract',
-  '21-emergence-context-assembly',
-  '22-emergence-adaptive-affordances',
-  '23-emergence-reactive-social-loop',
-  '24-emergence-public-expression-and-culture',
-  '25-emergence-alive-world-indicators',
+  'Live World ClawMind Child PR Queue',
+  '20-liveworld-clawmind-reference-contract',
+  '21-liveworld-context-assembly',
+  '22-liveworld-adaptive-affordances',
+  '23-liveworld-reactive-social-loop',
+  '24-liveworld-public-expression-and-culture',
+  '25-liveworld-alive-world-indicators',
 ]) {
-  assert(liveAgentModeSpec.includes(token), `Live Agent Mode spec missing Emergence child queue token: ${token}`);
+  assert(liveAgentModeSpec.includes(token), `Live Agent Mode spec missing Live World child queue token: ${token}`);
 }
 assert(main3dJs.includes('main3d-live-sync'), 'main3d.js missing Live Agent loop client marker');
 assert(main3dJs.includes('20260614-live-mode-social-r28'), 'main3d.js missing Live Agent loop client marker version');

@@ -46,9 +46,9 @@ The next reliability bar is online-game-style presence. Every browser tab must b
 
 The next "alive world" bar is society-level behavior, not just more animation. Live Agent Mode should act like a persistent resident simulation where agents choose from a location-gated tool frame, take multi-step turns, speak in-world, form memories, maintain todos/plans, update relationships, and leave public evidence of what happened. The loop should feel alive because agents have goals, places to go, constraints, follow-up reactions, and consequences.
 
-### Reference Architecture Guidance: Emergence World
+### Reference Architecture Guidance
 
-Use [EmergenceAI/Emergence-World](https://github.com/EmergenceAI/Emergence-World) as the primary reference direction for Live Agent Mode and ClawMind. The reviewed public reference commit is `7613dcb6554133144779f4c4f0ba49064894b3a5`. The goal is not to copy its stack wholesale; it is to adapt the architecture patterns that make a custom world feel alive:
+Use the [reference repo](https://github.com/EmergenceAI/Emergence-World) as the primary reference direction for Live Agent Mode and ClawMind. The reviewed public reference commit is `7613dcb6554133144779f4c4f0ba49064894b3a5`. The goal is not to copy its stack wholesale; it is to adapt the architecture patterns that make a custom world feel alive:
 
 - scope is Live Agent Mode and ClawMind only; this is not a general product rewrite or a requirement for normal manual world editing
 - embodied persistent residents, not detached chat sessions
@@ -60,18 +60,18 @@ Use [EmergenceAI/Emergence-World](https://github.com/EmergenceAI/Emergence-World
 - reactive social opportunities when agents speak or act near each other
 - measurable alive-world indicators: exploration, tool usage, public expression, social graph depth, governance participation, economy activity, and long-run population/agent health
 
-My Virtual World should implement these as product-native primitives: backend-owned routes and world actions, `toolRegistry` perception frames, OpenClaw/Hermes/Codex provider adapters, `world-meta.json` persistence today, and a later database-backed store when the data model outgrows files. Emergence-style crime, death, economy, governance, and destructive actions stay out of the executable set until typed visible executors, approval rules, audit trails, and rollback exist.
+My Virtual World should implement these as product-native primitives: backend-owned routes and world actions, `toolRegistry` perception frames, OpenClaw/Hermes/Codex provider adapters, `world-meta.json` persistence today, and a later database-backed store when the data model outgrows files. Unsafe or destructive reference patterns such as crime, death, economy, and governance stay out of the executable set until typed visible executors, approval rules, audit trails, and rollback exist.
 
-### Emergence-Guided ClawMind Child PR Queue
+### Live World ClawMind Child PR Queue
 
-Adding the Emergence reference does not by itself make the final PR complete. The final gate should stay superseded until these follow-up child PRs either land or are explicitly closed as unnecessary:
+Adding the reference repo does not by itself make the final PR complete. The final gate should stay superseded until these follow-up child PRs either land or are explicitly closed as unnecessary:
 
-1. `20-emergence-clawmind-reference-contract`: map the existing ClawMind modules to Emergence patterns in runtime metrics and final-gate evidence, including which patterns are implemented, partial, or proposal-only.
-2. `21-emergence-context-assembly`: build the resident turn context from profile, location, nearby agents, current tool registry, memory retrieval, relationships, plans, recent conversations, safety gates, and visible world state.
-3. `22-emergence-adaptive-affordances`: split tools into core, complementary, and adaptive/location-gated affordances; record discovered tools, unavailable reasons, and tool exploration metrics.
-4. `23-emergence-reactive-social-loop`: create bounded reaction turns when agents speak or act nearby, so social behavior can emerge from overhearing and visible actions instead of only direct scripted prompts.
-5. `24-emergence-public-expression-and-culture`: add safe public expression affordances such as notes/posts/events/billboards as typed or proposal-only tools with durable world evidence.
-6. `25-emergence-alive-world-indicators`: expose final-gate metrics inspired by Emergence's world indicators: population/live-agent health, location exploration, tool exploration, public expression, social graph depth, proposal/governance participation, economy placeholder activity, and safety/public-order incidents.
+1. `20-liveworld-clawmind-reference-contract`: map the existing ClawMind modules to reference-world patterns in runtime metrics and final-gate evidence, including which patterns are implemented, partial, or proposal-only.
+2. `21-liveworld-context-assembly`: build the resident turn context from profile, location, nearby agents, current tool registry, memory retrieval, relationships, plans, recent conversations, safety gates, and visible world state.
+3. `22-liveworld-adaptive-affordances`: split tools into core, complementary, and adaptive/location-gated affordances; record discovered tools, unavailable reasons, and tool exploration metrics.
+4. `23-liveworld-reactive-social-loop`: create bounded reaction turns when agents speak or act nearby, so social behavior can emerge from overhearing and visible actions instead of only direct scripted prompts.
+5. `24-liveworld-public-expression-and-culture`: add safe public expression affordances such as notes/posts/events/billboards as typed or proposal-only tools with durable world evidence.
+6. `25-liveworld-alive-world-indicators`: expose final-gate metrics inspired by the reference repo's world indicators: population/live-agent health, location exploration, tool exploration, public expression, social graph depth, proposal/governance participation, economy placeholder activity, and safety/public-order incidents.
 
 Each child PR must target `docs/live-agent-mode-autonomy-spec`, keep scope inside Live Agent Mode / ClawMind, run `npm test`, run the relevant 8587 checks when feasible, and avoid touching protected port `8590`.
 
@@ -153,7 +153,7 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `providerSupport.optimization.providerCallsDuringMetrics = 0`
 - `providerSupport.optimization.modelCallsDuringMetrics = 0`
 - `providerModelCallCounts`
-- `clawMindArchitecture.referenceArchitectures[].id = emergence-world`
+- `clawMindArchitecture.referenceArchitectures[].id = live-world-reference`
 - `clawMindArchitecture.referenceArchitectures[].url = https://github.com/EmergenceAI/Emergence-World`
 - `clawMindArchitecture.referenceArchitectures[].patterns`
 - `metrics.perAgentDistribution`

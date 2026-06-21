@@ -1503,8 +1503,8 @@ LIVE_AGENT_CLAWMIND_MODULES = [
 ]
 LIVE_AGENT_REFERENCE_ARCHITECTURES = [
     {
-        "id": "emergence-world",
-        "name": "Emergence World",
+        "id": "live-world-reference",
+        "name": "Live World Reference",
         "url": "https://github.com/EmergenceAI/Emergence-World",
         "reviewedCommit": "7613dcb6554133144779f4c4f0ba49064894b3a5",
         "role": "guidance",
@@ -6103,7 +6103,7 @@ def get_live_agent_mode_autonomy_metrics():
             "perAgentDistributionEvidence": True,
             "universalProviderSupportMeasured": True,
             "clawMindArchitectureMeasured": True,
-            "emergenceWorldReferenceGuidance": True,
+            "liveWorldReferenceGuidance": True,
             "metricsProviderCalls": 0,
             "metricsModelCalls": 0,
             "presencePersistenceMeasured": True,
