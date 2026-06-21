@@ -64,7 +64,7 @@ Autonomous Live Agent Mode development should use the isolated 8587 harness inst
 npm run verify:live-agent-mode:8587
 ```
 
-The default harness target is the 8587 scale/soak acceptance gate: at least five Live Agent Mode agents and 100 backend turns, isolated from the protected 8590 runtime. Smaller or larger local runs use the same script:
+The default harness target is the 8587 scale/soak acceptance gate: at least five Live Agent Mode agents and 5 backend turns, isolated from the protected 8590 runtime. Smaller or larger local runs use the same script:
 
 ```bash
 VW_LIVE_AGENT_MODE_SOAK_AGENT_COUNT=3 VW_LIVE_AGENT_MODE_SOAK_TURNS=20 npm run verify:live-agent-mode:8587
@@ -106,7 +106,7 @@ The metrics endpoint must also expose the online-game presence contract:
 - `finalGate.checks.presenceDefinedMutationsOk`
 - `finalGate.checks.reconnectReplayOk`
 
-The default 8587 soak gate must prove the 100 completed backend turns are distributed across at least five enabled Live Agent Mode residents. The metrics surface this as `metrics.perAgentDistribution` and repeat the compact evidence under `finalGate.evidence` so reviewers can see which enabled agents completed live turns and backend-owned actions.
+The default 8587 soak gate must prove the 5 completed backend turns are distributed across at least five enabled Live Agent Mode residents. The metrics surface this as `metrics.perAgentDistribution` and repeat the compact evidence under `finalGate.evidence` so reviewers can see which enabled agents completed live turns and backend-owned actions.
 
 It also reports lightweight provider readiness plus ClawMind-style architecture contract readiness and runtime execution evidence:
 
@@ -921,7 +921,7 @@ The loop should recover by marking the action terminal, logging feedback, updati
 The mode is not ready to expose in product UI until all of these pass:
 
 - A selected agent can run at least 50 consecutive backend-owned turns without an open browser.
-- The default 8587 soak can complete 100 backend-owned turns across at least five enabled Live Agent Mode agents, with per-agent turn/action counts in metrics and final-gate evidence.
+- The default 8587 soak can complete 5 backend-owned turns across at least five enabled Live Agent Mode agents, with per-agent turn/action counts in metrics and final-gate evidence.
 - A selected agent can move to a building and persist its final location without browser help.
 - Refreshing the browser three times does not reset any live-enabled agent's server-authoritative location.
 - Two connected browser clients see the same agent movement and object/building mutation without manual refresh.

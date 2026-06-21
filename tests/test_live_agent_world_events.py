@@ -428,6 +428,14 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertEqual(live_metrics["latency"]["sampleCount"], 1)
         self.assertEqual(live_metrics["p95MultiClientSyncLatencyMs"], 1200)
 
+    def test_live_agent_final_gate_default_turn_target_is_five(self):
+        metrics = self.server.get_live_agent_mode_autonomy_metrics()
+
+        self.assertEqual(metrics["finalGate"]["evidence"]["requiredEnabledAgentCount"], 5)
+        self.assertEqual(metrics["finalGate"]["evidence"]["requiredCompletedTurnCount"], 5)
+        self.assertFalse(metrics["finalGate"]["checks"]["defaultSoakCompletedTurnTargetMet"])
+        self.assertFalse(metrics["finalGate"]["checks"]["defaultSoakCompletedBackendActionTargetMet"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

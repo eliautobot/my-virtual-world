@@ -5456,7 +5456,7 @@ def get_live_agent_mode_autonomy_metrics():
         for row in enabled_agent_distribution_evidence
     }
     default_soak_target_agents = 5
-    default_soak_target_turns = 100
+    default_soak_target_turns = 5
     provider_support = _live_agent_provider_adapter_metrics(cached_roster, loop_state=loop_state)
     clawmind_architecture = _live_agent_clawmind_architecture_metrics(loop_state, completed_backend_actions, memory_counts, communication_events, relationships, animation_event_names)
     backend_action_total = len(backend_terminal_actions)

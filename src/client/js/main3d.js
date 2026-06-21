@@ -35581,6 +35581,7 @@ let _liveAgentModeWorldEventFeedTimer = null;
 let _liveAgentModeWorldEventFeedInFlight = null;
 let _liveAgentModeWorldEventFeedLastLatencyMs = null;
 let _liveAgentModeWorldEventFeedLastLatencySource = null;
+let _liveAgentModeWorldEventFeedBootstrapped = false;
 let _liveAgentModeWorldEventFeedState = {
   ok: false,
   schemaVersion: 'main3d-live-agent-mode-world-event-feed/v1',
@@ -35590,6 +35591,7 @@ let _liveAgentModeWorldEventFeedState = {
   nextCursor: 0,
   appliedEventCount: 0,
   snapshotRefreshCount: 0,
+  bootstrapped: false,
   lastFetchEventCount: 0,
   p95ApplyLatencyMs: 0,
   checkedAt: null,
@@ -35824,6 +35826,7 @@ async function syncLiveAgentModeWorldEvents({ force = false, snapshot = false, l
   _liveAgentModeWorldEventFeedInFlight = (async () => {
     try {
       const requestSince = force ? null : _liveAgentModeWorldEventFeedCursor;
+      const wasBootstrapped = _liveAgentModeWorldEventFeedBootstrapped;
       const response = await fetch(getLiveAgentModeWorldEventFeedUrl({
         since: requestSince,
         snapshot,
@@ -35865,7 +35868,7 @@ async function syncLiveAgentModeWorldEvents({ force = false, snapshot = false, l
       }
       if (!force) _liveAgentModeWorldEventFeedCursor = maxCursor;
       else _liveAgentModeWorldEventFeedCursor = Math.max(_liveAgentModeWorldEventFeedCursor, Number(payload.nextCursor || maxCursor || 0));
-      const canReportLiveLatency = !force && !snapshot && !payload.requiresSnapshotRefresh && !snapshotApplied && !unsafePatch && requestSince != null;
+      const canReportLiveLatency = wasBootstrapped && !force && !snapshot && !payload.requiresSnapshotRefresh && !snapshotApplied && !unsafePatch && Number(requestSince) > 0;
       const p95LatencyMs = canReportLiveLatency && latencies.length ? [...latencies].sort((a, b) => a - b)[Math.min(latencies.length - 1, Math.floor((latencies.length - 1) * 0.95))] : null;
       if (p95LatencyMs != null && Number.isFinite(Number(p95LatencyMs))) {
         _liveAgentModeWorldEventFeedLastLatencyMs = Number(p95LatencyMs);
@@ -35874,9 +35877,11 @@ async function syncLiveAgentModeWorldEvents({ force = false, snapshot = false, l
         _liveAgentModeWorldEventFeedLastLatencyMs = null;
         _liveAgentModeWorldEventFeedLastLatencySource = null;
       }
+      _liveAgentModeWorldEventFeedBootstrapped = true;
       return setLiveAgentModeWorldEventFeedState({
         ok: true,
         reason: null,
+        bootstrapped: _liveAgentModeWorldEventFeedBootstrapped,
         lastCursor: _liveAgentModeWorldEventFeedCursor,
         nextCursor: payload.nextCursor ?? null,
         appliedEventCount: _liveAgentModeWorldEventFeedState.appliedEventCount + applied,

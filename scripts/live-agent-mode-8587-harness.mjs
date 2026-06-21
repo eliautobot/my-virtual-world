@@ -857,7 +857,27 @@ async function placeSocialFixturesInOffice() {
   return { agent, peer };
 }
 
+async function ensureFakeProviderFixtureProfile() {
+  const meta = await fetchJson('/api/meta');
+  const profiles = {
+    ...(meta?.agentProfiles && typeof meta.agentProfiles === 'object' ? meta.agentProfiles : {}),
+    [FAKE_FIXTURE_AGENT_ID]: {
+      ...(meta?.agentProfiles?.[FAKE_FIXTURE_AGENT_ID] || {}),
+      name: 'Acceptance Fake Provider',
+      providerKind: 'fake',
+      providerType: 'profile-backed',
+      providerAgentId: 'acceptance-fake',
+      agentLiveModeEnabled: false,
+      capabilities: ['observe', 'decide', 'propose', 'toolCallResult'],
+    },
+  };
+  const saved = await postJson('/api/meta', { agentProfiles: profiles });
+  assert(saved?.ok === true, 'failed to ensure fake provider fixture profile', saved);
+  return profiles[FAKE_FIXTURE_AGENT_ID];
+}
+
 async function verifyFakeProviderBridgeContract() {
+  await ensureFakeProviderFixtureProfile();
   const enabled = await postJson(`/api/agent/${encodeURIComponent(FAKE_FIXTURE_AGENT_ID)}/live-mode`, {
     agentLiveModeEnabled: true,
   });

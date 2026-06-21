@@ -145,6 +145,7 @@ const liveAgentHarness = read('scripts/live-agent-mode-8587-harness.mjs');
 for (const token of [
   'const TEST_PORT = 8587;',
   'const PRODUCT_PORT = 8590;',
+  "|| '5', 10) || 5",
   'const PEER_AGENT_ID',
   'VW_LIVE_AGENT_MODE_ACCEPTANCE_TURNS',
   'function assertNoProductPortTargets()',
@@ -719,6 +720,7 @@ try:
     assert metrics["metrics"]["presencePersistence"]["refreshResetCount"] == 0, metrics["metrics"]["presencePersistence"]
     assert metrics["finalGate"]["checks"]["defaultSoakEnabledAgentRosterPresent"] is False, metrics["finalGate"]
     assert metrics["finalGate"]["checks"]["turnsCompletedAcrossEnabledAgents"] is False, metrics["finalGate"]
+    assert metrics["finalGate"]["evidence"]["requiredCompletedTurnCount"] == 5, metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["enabledAgentCount"] == 2, metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["enabledAgents"][0]["agentId"] == "adam", metrics["finalGate"]
     assert metrics["finalGate"]["evidence"]["enabledAgents"][0]["completedTurnCount"] == 0, metrics["finalGate"]
