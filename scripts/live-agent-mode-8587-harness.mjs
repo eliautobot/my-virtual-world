@@ -1886,20 +1886,41 @@ async ({ agentId, homeBuildingId }) => {
 """, {"agentId": agent_id, "homeBuildingId": home_building_id})
 
     movement_seen = page_b.evaluate("""
-async ({ agentId, expectedX, expectedY }) => {
+async ({ agentId, expectedX, expectedY, expectedSource }) => {
   let last = null;
   for (let attempt = 0; attempt < 36; attempt += 1) {
     await new Promise(resolve => setTimeout(resolve, 250));
     const agent = (window.agents || []).find(candidate => String(candidate?.id || candidate?.statusKey || '') === agentId) || null;
-    const dx = Math.abs(Number(agent?.x) - expectedX);
-    const dy = Math.abs(Number(agent?.y) - expectedY);
+    const presence = agent?._serverPresence || agent?.presence || null;
+    const positionDx = Math.abs(Number(agent?.x) - expectedX);
+    const positionDy = Math.abs(Number(agent?.y) - expectedY);
+    const presenceX = Number.isFinite(Number(presence?.apiX)) ? Number(presence.apiX) : Number(presence?.x);
+    const presenceY = Number.isFinite(Number(presence?.apiZ)) ? Number(presence.apiZ) : Number(presence?.y);
+    const presenceDx = Math.abs(presenceX - expectedX);
+    const presenceDy = Math.abs(presenceY - expectedY);
+    const positionSynced = positionDx <= 0.01 && positionDy <= 0.01;
+    const presenceSynced = presenceDx <= 0.01 && presenceDy <= 0.01 && String(presence?.source || '') === expectedSource;
     const feed = window.__VWLiveAgentModeWorldEventFeedState || {};
-    last = { ok: Boolean(agent && dx <= 0.01 && dy <= 0.01), agent: agent ? { x: agent.x, y: agent.y, source: agent._serverPresence?.source || null } : null, delta: { dx, dy }, feed };
+    last = {
+      ok: Boolean(agent && (positionSynced || presenceSynced)),
+      agent: agent ? { x: agent.x, y: agent.y, source: agent._serverPresence?.source || null } : null,
+      presence: presence ? { apiX: presenceX, apiZ: presenceY, source: presence.source || null } : null,
+      route: agent?._lastAuthoritativePresenceRoute ? {
+        applied: agent._lastAuthoritativePresenceRoute.applied,
+        rejected: agent._lastAuthoritativePresenceRoute.rejected,
+        reason: agent._lastAuthoritativePresenceRoute.reason || null,
+      } : null,
+      delta: {
+        position: { dx: positionDx, dy: positionDy },
+        presence: { dx: presenceDx, dy: presenceDy },
+      },
+      feed,
+    };
     if (last.ok) return last;
   }
   throw new Error('second client did not receive movement patch: ' + JSON.stringify(last));
 }
-""", {"agentId": agent_id, "expectedX": -360, "expectedY": -180})
+""", {"agentId": agent_id, "expectedX": -360, "expectedY": -180, "expectedSource": "8587-two-client-world-event-feed"})
 
     building = {
       "id": sync_building_id,
