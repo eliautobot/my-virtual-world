@@ -1296,6 +1296,7 @@ async function verifyFailureInjectionReplanning() {
       const tick = await postJson('/api/agent-live-loop/tick', {
         reason: `${reason}-${attempt}`,
         force: true,
+        skipReactions: true,
       });
       assert(tick?.ok === true, `${reason} tick failed`, tick);
       const action = tick.actionsCreated?.[0];

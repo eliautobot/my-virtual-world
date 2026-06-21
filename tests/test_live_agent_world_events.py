@@ -568,6 +568,14 @@ class LiveAgentWorldEventFeedTest(unittest.TestCase):
         self.assertLess(queued[0]["bounds"]["reactionCooldownSec"], queued[0]["bounds"]["regularCooldownSec"])
         self.assertEqual(metrics_before["metrics"]["reactionTriggers"]["byTriggerKind"]["nearby-speech"], 1)
 
+        regular_tick = self.server.live_agent_loop_tick(reason="reaction-regression-forced-regular", force=True, skip_reactions=True)
+        state_after_regular = self.server.get_live_agent_loop_state(persist_migration=False)
+        original_reaction = next(item for item in state_after_regular.get("reactionQueue") or [] if item.get("id") == "react-comm-reaction-regression-listener-agent")
+        self.assertTrue(regular_tick["ok"], regular_tick)
+        self.assertTrue(regular_tick["reaction"]["selectionSkipped"], regular_tick)
+        self.assertNotEqual(regular_tick["turn"]["turnType"], "reaction")
+        self.assertEqual(original_reaction["status"], "queued")
+
         tick = self.server.live_agent_loop_tick(reason="reaction-regression", force=True)
         metrics_after = self.server.get_live_agent_mode_autonomy_metrics()
 

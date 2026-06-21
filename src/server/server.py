@@ -14814,7 +14814,7 @@ def _live_agent_loop_cooldown_for_decision(base_cooldown, decision, *, minimum=4
     return _normalize_int(round(base_cooldown * multiplier), base_cooldown, minimum=minimum, maximum=3600)
 
 
-def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
+def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False, skip_reactions=False):
     gate_error = _agent_live_mode_gate_error()
     if gate_error:
         gate_payload = gate_error.get("error") if isinstance(gate_error, dict) else {}
@@ -14853,6 +14853,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             "reason": reason,
             "forced": bool(force),
             "dryRun": bool(dry_run),
+            "skipReactions": bool(skip_reactions),
             "worldClient": world_client,
             "pause": pause,
             "killSwitch": kill_switch,
@@ -14951,13 +14952,20 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
         result["scheduler"]["reactionBounds"] = reaction_bounds
         turn_processed = False
         enabled_agent_ids = [a.get("agentId") for a in enabled_agents if a.get("agentId")]
-        scheduled_reaction = _live_agent_loop_select_reaction_opportunity(state, enabled_agent_ids, now_epoch=now_epoch, force=force)
+        scheduled_reaction = None if skip_reactions else _live_agent_loop_select_reaction_opportunity(state, enabled_agent_ids, now_epoch=now_epoch, force=force)
         ordered_agents = _live_agent_loop_order_agents_for_turn(enabled_agents, scheduler.get("lastAgentId"))
         if scheduled_reaction:
             ordered_agents = [agent for agent in enabled_agents if agent.get("agentId") == scheduled_reaction.get("agentId")]
             result["reaction"] = {
                 "selected": _live_agent_loop_reaction_compact(scheduled_reaction),
                 "queueDepth": len([item for item in _live_agent_loop_reaction_queue(state) if item.get("status") == "queued"]),
+                "bounds": reaction_turn_bounds,
+            }
+        elif skip_reactions:
+            result["reaction"] = {
+                "selectionSkipped": True,
+                "queueDepth": len([item for item in _live_agent_loop_reaction_queue(state) if item.get("status") == "queued"]),
+                "reason": "skipReactions",
                 "bounds": reaction_turn_bounds,
             }
 
@@ -21631,6 +21639,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 reason=str(data.get("reason") or "api"),
                 force=bool(data.get("force")),
                 dry_run=bool(data.get("dryRun")),
+                skip_reactions=bool(data.get("skipReactions")),
             )
             return self._send_json(result, 200 if result.get("ok") else 409)
 
