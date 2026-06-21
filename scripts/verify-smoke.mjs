@@ -160,7 +160,7 @@ for (const token of [
   'function verifySocialCommunicationAndMemory',
   'function verifyOperatorControlsStopTurns',
   'function verifyAutonomyMetrics',
-  'function runBrowserReplayRenderCheck(actionId)',
+  'function runBrowserReplayRenderCheck(actionId, publicExpressionId',
   "postJson('/api/agent-live-loop/tick'",
   '/api/live-agent-mode/metrics',
   'providerAdapterReadiness',
@@ -322,6 +322,110 @@ finally:
     shutil.rmtree(data_dir, ignore_errors=True)
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(liveAgentToolAffordanceDiscoveryCheck.status, 0, `Live Agent adaptive tool affordance discovery check failed\n${liveAgentToolAffordanceDiscoveryCheck.stderr || liveAgentToolAffordanceDiscoveryCheck.stdout}`);
+
+const liveAgentPublicExpressionCheck = spawnSync('python3', ['-B', '-c', `
+import importlib.util
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+path = Path("src/server/server.py")
+data_dir = tempfile.mkdtemp(prefix="vw-smoke-public-expression-")
+os.environ["VW_DATA_DIR"] = data_dir
+os.environ["_VW_INT"] = "1"
+try:
+    spec = importlib.util.spec_from_file_location("vw_server", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
+    module.get_roster = lambda: [
+        {"id": "adam", "statusKey": "adam", "name": "Adam", "providerKind": "fake"},
+        {"id": "bea", "statusKey": "bea", "name": "Bea", "providerKind": "fake"},
+    ]
+    module.save_building("office", {
+        "id": "office",
+        "name": "Office",
+        "worldX": 12,
+        "worldY": -8,
+        "widthTiles": 10,
+        "heightTiles": 8,
+        "interior": {"furniture": [], "walls": []},
+    })
+    meta = module.load_world_meta()
+    meta["agentProfiles"] = {
+        "adam": {"agentLiveModeEnabled": True, "providerKind": "fake"},
+        "bea": {"agentLiveModeEnabled": True, "providerKind": "fake"},
+    }
+    meta["agentAssignments"] = {
+        "adam": {"work": "office"},
+        "bea": {"work": "office"},
+    }
+    module.save_world_meta(meta)
+
+    dry_ok, dry_result, dry_status = module.validate_live_agent_tool_call({
+        "agentId": "adam",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": "public-expression-dry", "roles": ["participant"]},
+        "tool": "publish_note",
+        "arguments": {"title": "Lunch meetup", "body": "Meet by the office notice board at noon.", "displaySurface": "notice-board", "visibility": "building"},
+    }, dry_run=True)
+    assert dry_ok and dry_status == 200, dry_result
+    assert dry_result["execution"]["enabled"] is True, dry_result
+
+    ok, result, status = module.validate_live_agent_tool_call({
+        "agentId": "adam",
+        "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": "public-expression-exec", "roles": ["participant"]},
+        "tool": "publish_note",
+        "arguments": {"title": "Lunch meetup", "body": "Meet by the office notice board at noon.", "displaySurface": "notice-board", "visibility": "building", "tags": ["culture"]},
+    }, dry_run=False)
+    assert ok and status == 201, result
+    expression = result["toolCall"]["result"]["publicExpression"]
+    assert expression["durableWorldEvidence"] is True and expression["visibleInWorld"] is True, expression
+    assert expression["buildingId"] == "office", expression
+    assert result["toolCall"]["result"]["storage"] == "world-meta.json#agentLife.publicExpressions", result
+
+    public_list = module.list_live_agent_public_expressions({"agentId": ["adam"]})
+    assert len(public_list["expressions"]) == 1, public_list
+    world_events = module.list_live_agent_world_events({"limit": ["20"]})
+    assert any(event.get("eventType") == "public-expression-posted" and (event.get("patch") or {}).get("collection") == "publicExpressions" for event in world_events["events"]), world_events
+
+    metrics = module.get_live_agent_mode_autonomy_metrics()
+    public_metrics = metrics["metrics"]["publicExpression"]
+    assert public_metrics["schemaVersion"] == module.LIVE_AGENT_PUBLIC_EXPRESSION_SCHEMA_VERSION, public_metrics
+    assert public_metrics["publicExpressionCount"] == 1, public_metrics
+    assert public_metrics["visibleEvidenceCount"] == 1, public_metrics
+    assert public_metrics["publicExpressionCountByAgent"]["adam"] == 1, public_metrics
+    assert public_metrics["publicExpressionCountByAgent"]["bea"] == 0, public_metrics
+    assert "publish_note" in public_metrics["safeExecutableTools"], public_metrics
+    assert set(["create_public_event", "propose_governance_action", "propose_economy_activity"]).issubset(set(public_metrics["proposalOnlyTools"])), public_metrics
+    assert metrics["checklist"]["publicExpressionMetricsPresent"] is True, metrics["checklist"]
+    assert metrics["checklist"]["publicExpressionVisibleEvidencePresent"] is True, metrics["checklist"]
+    assert metrics["checklist"]["unsafeCultureGovernanceEconomyProposalOnly"] is True, metrics["checklist"]
+
+    for tool_name in ["create_public_event", "propose_governance_action", "propose_economy_activity"]:
+        tool = module.LIVE_AGENT_TOOL_REGISTRY[tool_name]
+        assert tool["executionMode"] == "proposal-only", tool
+        dry_ok, dry_result, dry_status = module.validate_live_agent_tool_call({
+            "agentId": "adam",
+            "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": f"{tool_name}-dry", "roles": ["participant"]},
+            "tool": tool_name,
+            "arguments": {"title": "Draft" if tool_name == "create_public_event" else None, "summary": "Proposal only check."} if tool_name == "create_public_event" else {"summary": "Proposal only check."},
+        }, dry_run=True)
+        assert dry_ok and dry_status == 200, (tool_name, dry_result)
+        assert dry_result["contract"]["executionMode"] == "proposal-only", dry_result
+        exec_ok, exec_result, exec_status = module.validate_live_agent_tool_call({
+            "agentId": "adam",
+            "source": {"kind": "agent-live-mode", "requestedBy": "smoke", "requestId": f"{tool_name}-exec", "roles": ["participant"]},
+            "tool": tool_name,
+            "arguments": {"title": "Draft", "summary": "Proposal only check."} if tool_name == "create_public_event" else {"summary": "Proposal only check."},
+        }, dry_run=False)
+        assert exec_ok is False and exec_status == 501, (tool_name, exec_result, exec_status)
+
+    print("live agent public expression persistence and metrics ok")
+finally:
+    shutil.rmtree(data_dir, ignore_errors=True)
+`], { cwd: root, encoding: 'utf8' });
+assert.equal(liveAgentPublicExpressionCheck.status, 0, `Live Agent public expression check failed\n${liveAgentPublicExpressionCheck.stderr || liveAgentPublicExpressionCheck.stdout}`);
 
 const liveAgentGlobalFeatureGateCheck = spawnSync('python3', ['-B', '-c', `
 import importlib.util

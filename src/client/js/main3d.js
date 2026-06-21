@@ -36292,6 +36292,102 @@ function applyWorldEventFeedSpeechPatch(event = {}) {
   return false;
 }
 
+const _liveAgentPublicExpressionMarkers = new Map();
+
+function removeLiveAgentPublicExpressionMarker(expressionId) {
+  const id = String(expressionId || '').trim();
+  if (!id) return false;
+  const existing = _liveAgentPublicExpressionMarkers.get(id);
+  if (!existing) return false;
+  scene?.remove?.(existing);
+  _liveAgentPublicExpressionMarkers.delete(id);
+  return true;
+}
+
+function liveAgentPublicExpressionPosition(expression = {}) {
+  const displayPosition = expression.display?.position || {};
+  const location = expression.location || {};
+  const buildingId = expression.buildingId || location.buildingId || displayPosition.buildingId;
+  const building = buildingId ? buildingsMap.get(buildingId) : null;
+  const numberOrNull = (...values) => {
+    for (const value of values) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) return numeric;
+    }
+    return null;
+  };
+  const x = numberOrNull(displayPosition.x, location.x, location.worldX, building?.worldX, building?.x, 0);
+  const z = numberOrNull(displayPosition.z, location.z, location.y, location.worldY, building?.worldY, building?.z, building?.y, 0);
+  const y = numberOrNull(displayPosition.y, location.height, 2.4) || 2.4;
+  return { x: x || 0, y, z: z || 0, buildingId };
+}
+
+function renderLiveAgentPublicExpression(expression = {}) {
+  const id = String(expression.id || expression.publicExpressionId || '').trim();
+  if (!id || !scene || typeof THREE === 'undefined') return false;
+  removeLiveAgentPublicExpressionMarker(id);
+  const position = liveAgentPublicExpressionPosition(expression);
+  const group = new THREE.Group();
+  group.name = expression.display?.markerName || `vw-live-agent-public-expression-${id}`;
+  group.position.set(position.x, position.y, position.z);
+  group.userData = {
+    kind: 'live-agent-public-expression',
+    publicExpressionId: id,
+    agentId: expression.agentId || expression.fromAgentId || null,
+    buildingId: position.buildingId || null,
+  };
+
+  const board = new THREE.Mesh(
+    new THREE.BoxGeometry(2.4, 1.1, 0.08),
+    new THREE.MeshBasicMaterial({ color: 0xf8fafc, transparent: true, opacity: 0.94 })
+  );
+  board.name = `${group.name}-board`;
+  board.position.set(0, 0, 0);
+  group.add(board);
+
+  const trim = new THREE.Mesh(
+    new THREE.BoxGeometry(2.55, 1.25, 0.04),
+    new THREE.MeshBasicMaterial({ color: 0x2563eb, transparent: true, opacity: 0.82 })
+  );
+  trim.name = `${group.name}-trim`;
+  trim.position.set(0, 0, -0.035);
+  group.add(trim);
+
+  const title = String(expression.title || expression.summary || 'Public note').trim().slice(0, 48);
+  const label = makeTextSprite(title, 3.4);
+  label.name = `${group.name}-label`;
+  label.position.set(0, 0.12, 0.12);
+  group.add(label);
+
+  scene.add(group);
+  _liveAgentPublicExpressionMarkers.set(id, group);
+  return true;
+}
+
+function applyWorldEventFeedPublicExpressionPatch(event = {}) {
+  const patch = event.patch || {};
+  const expression = patch.value || event.publicExpression || event.target || {};
+  const expressionId = patch.publicExpressionId || expression.id || event.target?.publicExpressionId;
+  if (patch.op === 'delete') return removeLiveAgentPublicExpressionMarker(expressionId) || true;
+  const rendered = renderLiveAgentPublicExpression(expression);
+  if (rendered) {
+    const title = String(expression.title || expression.summary || 'Public note').trim();
+    const agent = expression.agentId || expression.fromAgentId || event.agentId || 'Agent';
+    addActivityLog(`${agent} posted: ${title}`.trim());
+  }
+  return rendered;
+}
+
+function applyLiveAgentModePublicExpressionSnapshot(meta = {}) {
+  const store = meta?.agentLife?.publicExpressions || {};
+  const expressions = Array.isArray(store.expressions) ? store.expressions : [];
+  let rendered = 0;
+  for (const expression of expressions) {
+    if (renderLiveAgentPublicExpression(expression)) rendered += 1;
+  }
+  return rendered;
+}
+
 function applyLiveAgentModeWorldEvent(event = {}) {
   const eventKey = getLiveAgentModeWorldEventKey(event);
   if (_liveAgentModeWorldEventFeedApplied.has(eventKey)) return { applied: false, duplicate: true, sequence: Number(event.sequence || 0) || 0 };
@@ -36312,8 +36408,13 @@ function applyLiveAgentModeWorldEvent(event = {}) {
     if (!applied && (patch.value || patch.to)) requiresSnapshotRefresh = true;
   } else if (patch.collection === 'inWorldCommunications') {
     applied = applyWorldEventFeedSpeechPatch(event) || true;
+  } else if (patch.collection === 'publicExpressions') {
+    applied = applyWorldEventFeedPublicExpressionPatch(event);
+    if (!applied && patch.value) requiresSnapshotRefresh = true;
   } else if (patch.collection === 'worldActions') {
     applied = true;
+  } else if (event.eventType === 'public-expression-posted') {
+    applied = applyWorldEventFeedPublicExpressionPatch(event);
   } else if (event.eventType === 'building-created' || event.eventType === 'building-updated') {
     applied = upsertWorldEventFeedBuilding(patch.value || event.building);
   } else if (event.eventType === 'building-deleted') {
@@ -36354,6 +36455,7 @@ function applyLiveAgentModeWorldEventSnapshot(snapshot = {}) {
   for (const [agentId, presence] of Object.entries(presenceAgents)) {
     applyWorldEventFeedPresencePatch({ eventType: 'agent-presence-updated', agentId, patch: { collection: 'agentPresence', op: 'upsert', agentId, value: presence } }, { snap: true });
   }
+  if (snapshot.meta) applyLiveAgentModePublicExpressionSnapshot(snapshot.meta);
   return true;
 }
 

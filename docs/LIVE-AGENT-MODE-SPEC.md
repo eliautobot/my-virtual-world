@@ -107,7 +107,7 @@ The read-only metrics endpoint is:
 GET /api/live-agent-mode/metrics
 ```
 
-It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, per-agent live turn/action distribution, p50/p95 turn duration, action success/recovery rates, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, reaction opportunities, bounded memory growth, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
+It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, per-agent live turn/action distribution, p50/p95 turn duration, action success/recovery rates, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, public expression evidence, reaction opportunities, bounded memory growth, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
 
 The metrics endpoint must also expose the online-game presence contract:
 
@@ -183,6 +183,14 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `metrics.turnContextAssembly.allCompletedTurnsHaveContext`
 - `metrics.turnContextAssembly.optimization.heavyWorldScan = false`
 - `finalGate.evidence.turnContextAssembly`
+- `metrics.publicExpression.schemaVersion = agent-live-mode-public-expression/v1`
+- `metrics.publicExpression.publicExpressionCount`
+- `metrics.publicExpression.visibleEvidenceCount`
+- `metrics.publicExpression.publicExpressionCountByAgent`
+- `metrics.publicExpression.visibleEvidenceCountByAgent`
+- `metrics.publicExpression.safeExecutableTools[]` including `publish_note`
+- `metrics.publicExpression.proposalOnlyTools[]` for broad event/governance/economy tools
+- `finalGate.evidence.publicExpression`
 - `liveWorldReference.schemaVersion = agent-live-mode-live-world-reference/v1`
 - `liveWorldReference.reference.url = https://github.com/EmergenceAI/Emergence-World`
 - `liveWorldReference.reference.reviewedCommit = 7613dcb6554133144779f4c4f0ba49064894b3a5`
@@ -564,6 +572,7 @@ say_to_agent
 speak_to_room
 send_message
 think_aloud
+publish_note
 add_memory
 write_diary
 add_todo
@@ -571,7 +580,7 @@ complete_todo
 idle
 ```
 
-Implementation note: the backend registry currently exposes safe observe, movement-validation, object-use-validation, communication, memory, planning, idle, and operator-reviewed build/create contracts. `say_to_agent`, `speak_to_room`, `send_message`, `think_aloud`, `add_memory`, `search_memory`, `write_diary`, `add_todo`, `complete_todo`, and `idle` can execute through backend persistence. Physical movement and object-use tools still route through typed backend world actions so the agent must physically reach the target before mutation.
+Implementation note: the backend registry currently exposes safe observe, movement-validation, object-use-validation, communication, public expression, memory, planning, idle, and operator-reviewed build/create contracts. `say_to_agent`, `speak_to_room`, `send_message`, `think_aloud`, `publish_note`, `add_memory`, `search_memory`, `write_diary`, `add_todo`, `complete_todo`, and `idle` can execute through backend persistence. `publish_note` writes a durable `world-meta.json#agentLife.publicExpressions` record and emits a replayable `public-expression-posted` world event. Physical movement and object-use tools still route through typed backend world actions so the agent must physically reach the target before mutation.
 
 Every perception frame should include a compact `toolRegistry` summary with categories, executable tools, the current location, and argument-independent availability probes. This is the bridge from hard-coded chores to a generated affordance loop: the planner can see what the resident can do from where it is, while the backend still validates every specific call.
 
@@ -583,6 +592,9 @@ propose_world_change
 vote_on_world_change
 publish_note
 create_event
+create_public_event (proposal-only)
+propose_governance_action (proposal-only)
+propose_economy_activity (proposal-only)
 invite_agent
 accept_invite
 rate_interaction
@@ -598,7 +610,9 @@ Examples:
 - `use_object` is available only when an object exists, is reachable, is not reserved by another agent, and exposes the requested interaction.
 - `say_to_agent` is available when the target agent is near enough or in the same room depending on the communication mode.
 - `send_message` is available even when not co-located, but should be logged as remote communication.
+- `publish_note` is executable only as a safe public-expression write with durable visible evidence under `agentLife.publicExpressions`.
 - `build_structure` is proposal-only until typed construction tools and approval rules are implemented.
+- broad public events, governance changes, and economy activity remain proposal-only until typed visible executors, approvals, audit trails, and rollback rules exist.
 - risky actions require explicit operator approval and audit trails before activation.
 
 ### 7. World Actions

@@ -1018,6 +1018,18 @@ async function waitForCommunicationEvent(eventId) {
   throw new Error(`communication log did not persist event ${eventId}\n${JSON.stringify(last, null, 2)}`);
 }
 
+async function waitForPublicExpression(expressionId) {
+  let last = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const publicExpressions = await fetchJson('/api/live-agent-mode/public-expressions?limit=50');
+    last = publicExpressions;
+    const expression = (publicExpressions.expressions || []).find((item) => item?.id === expressionId);
+    if (expression) return { publicExpressions, expression };
+    await delay(250);
+  }
+  throw new Error(`public expression store did not persist expression ${expressionId}\n${JSON.stringify(last, null, 2)}`);
+}
+
 async function fetchAgentPresenceSnapshot(agentId) {
   const presence = await fetchJson('/api/live-agent-mode/presence');
   const location = presence?.locations?.[agentId]
@@ -1219,6 +1231,22 @@ async function verifySocialCommunicationAndMemory() {
   const memoryReflectionId = memory.toolCall?.result?.reflection?.id || memory.toolCall?.result?.state?.memory?.reflections?.at?.(-1)?.id;
   assert(memoryReflectionId, 'memory state should include a synthesized reflection from accumulated stream entries', memory);
 
+  const note = await executeLiveAgentTool('publish_note', {
+    title: 'Acceptance notice',
+    body: 'Live Agent Mode posted this durable public expression for browser-visible world evidence.',
+    displaySurface: 'notice-board',
+    visibility: 'building',
+    tags: ['acceptance', 'public-expression'],
+  }, { requestId: '8587-acceptance-publish-note' });
+  const publicExpression = note.toolCall?.result?.publicExpression;
+  assert(publicExpression?.id, 'publish_note should return a persisted public expression', note);
+  assert(publicExpression.visibleInWorld === true && publicExpression.durableWorldEvidence === true, 'publish_note should persist visible durable evidence', publicExpression);
+  assert(note.toolCall?.result?.storage === 'world-meta.json#agentLife.publicExpressions', 'publish_note should use the durable public expression store', note.toolCall?.result);
+  const { publicExpressions } = await waitForPublicExpression(publicExpression.id);
+  assert((publicExpressions.expressions || []).some((expression) => expression.id === publicExpression.id && expression.visibleInWorld === true), 'public expression endpoint should expose the note', publicExpressions);
+  const publicExpressionEvents = await fetchJson('/api/world-events?limit=80');
+  assert((publicExpressionEvents.events || []).some((event) => event.eventType === 'public-expression-posted' && event.patch?.collection === 'publicExpressions' && event.patch?.value?.id === publicExpression.id), 'world event feed should expose public expression visible evidence', publicExpressionEvents);
+
   assert((communications.events || []).some((event) => event.targetAgentId === PEER_AGENT_ID), 'communication log should include the peer-targeted event', communications);
 
   const retrieved = await fetchJson(`/api/live-agent-mode/memory/${encodeURIComponent(TEST_AGENT_ID)}?query=${encodeURIComponent('communicate remember acceptance')}&limit=5`);
@@ -1228,8 +1256,8 @@ async function verifySocialCommunicationAndMemory() {
   assert(retrieved.memory?.counts?.stream >= 2, 'memory stream should include conversation and memory entries', retrieved.memory?.counts);
   assert(retrieved.memory?.counts?.reflections > 0, 'memory endpoint should report synthesized reflections', retrieved.memory?.counts);
 
-  console.log(`PASS: social target ${social.action.id}, in-world speech ${speech.toolCall.id}, reaction turn ${reactionTick.turn.id}, memory ${memory.toolCall.result.memoryEntry.id}, and reflection ${memoryReflectionId} verified.`);
-  return { socialAction: social.action, speech, reactionTick, memory, communications, retrieved };
+  console.log(`PASS: social target ${social.action.id}, in-world speech ${speech.toolCall.id}, reaction turn ${reactionTick.turn.id}, memory ${memory.toolCall.result.memoryEntry.id}, public note ${publicExpression.id}, and reflection ${memoryReflectionId} verified.`);
+  return { socialAction: social.action, speech, reactionTick, memory, note, publicExpression, communications, publicExpressions, retrieved };
 }
 
 async function verifyOperatorControlsStopTurns() {
@@ -1536,6 +1564,19 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   const targetToolExploration = metrics.metrics?.toolExploration?.byAgent?.[TEST_AGENT_ID] || {};
   assert((targetToolExploration.usedTools || []).includes('say_to_agent'), 'target agent tool usage should include say_to_agent', targetToolExploration);
   assert((targetToolExploration.usedTools || []).includes('add_memory'), 'target agent tool usage should include add_memory', targetToolExploration);
+  assert((targetToolExploration.usedTools || []).includes('publish_note'), 'target agent tool usage should include publish_note', targetToolExploration);
+  assert(metrics.metrics?.publicExpression?.schemaVersion === 'agent-live-mode-public-expression/v1', 'metrics should expose public expression schema', metrics.metrics?.publicExpression);
+  assert(metrics.metrics?.publicExpression?.publicExpressionCount >= 1, 'metrics should count public expressions', metrics.metrics?.publicExpression);
+  assert(metrics.metrics?.publicExpression?.visibleEvidenceCount >= 1, 'metrics should count visible public expression evidence', metrics.metrics?.publicExpression);
+  assert((metrics.metrics?.publicExpression?.publicExpressionCountByAgent || {})[TEST_AGENT_ID] >= 1, 'metrics should expose public expression counts per enabled agent', metrics.metrics?.publicExpression);
+  assert((metrics.metrics?.publicExpression?.safeExecutableTools || []).includes('publish_note'), 'metrics should expose publish_note as the safe executable public expression tool', metrics.metrics?.publicExpression);
+  assert((metrics.metrics?.publicExpression?.proposalOnlyTools || []).includes('create_public_event'), 'public event creation should remain proposal-only', metrics.metrics?.publicExpression);
+  assert((metrics.metrics?.publicExpression?.proposalOnlyTools || []).includes('propose_governance_action'), 'governance tools should remain proposal-only', metrics.metrics?.publicExpression);
+  assert((metrics.metrics?.publicExpression?.proposalOnlyTools || []).includes('propose_economy_activity'), 'economy tools should remain proposal-only', metrics.metrics?.publicExpression);
+  assert(metrics.checklist?.publicExpressionMetricsPresent === true, 'metrics checklist should confirm public expression metrics', metrics.checklist);
+  assert(metrics.checklist?.publicExpressionVisibleEvidencePresent === true, 'metrics checklist should confirm visible public expression evidence', metrics.checklist);
+  assert(metrics.checklist?.unsafeCultureGovernanceEconomyProposalOnly === true, 'metrics checklist should confirm unsafe culture/governance/economy tools are proposal-only', metrics.checklist);
+  assert(metrics.finalGate?.evidence?.publicExpression?.publicExpressionCount >= 1, 'final gate evidence should include public expression counts', metrics.finalGate?.evidence?.publicExpression);
   assert(metrics.checklist?.relationshipsUpdated === true, 'metrics checklist should confirm relationship updates', metrics.checklist);
   assert(metrics.checklist?.providerAdapterReadiness === true, 'metrics checklist should confirm provider adapter readiness', metrics.checklist);
   assert(metrics.checklist?.clawMindModuleContractsReady === true, 'metrics checklist should confirm ClawMind module contracts', metrics.checklist);
@@ -1620,6 +1661,7 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
     groupGoalCount: metrics.metrics.groupGoalCount,
     conversationTriggerCount: metrics.metrics.conversationTriggerCount,
     societyRoleCount: metrics.metrics.societyRoleCount,
+    publicExpression: metrics.metrics.publicExpression,
     memory: metrics.metrics.memory,
     presencePersistence: metrics.metrics.presencePersistence,
     multiClientWorldSync: metrics.metrics.worldEventFeed,
@@ -1667,7 +1709,7 @@ function runChild(command, args, { input, env } = {}) {
   });
 }
 
-async function runBrowserReplayRenderCheck(actionId) {
+async function runBrowserReplayRenderCheck(actionId, publicExpressionId = null) {
   const script = String.raw`
 import json
 import os
@@ -1675,6 +1717,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_pla
 
 base_url = os.environ["VW_ACCEPTANCE_BASE_URL"]
 action_id = os.environ["VW_ACCEPTANCE_ACTION_ID"]
+public_expression_id = os.environ.get("VW_ACCEPTANCE_PUBLIC_EXPRESSION_ID") or ""
 
 def install_page_diagnostics(page):
     console_messages = []
@@ -1720,19 +1763,21 @@ with sync_playwright() as p:
     console_messages, page_errors = install_page_diagnostics(page)
     page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
     wait_for_product_canvas(page, console_messages, page_errors, "browser-replay-render")
-    page.wait_for_function("() => typeof window.__VWReplayLiveAgentModeAnimationEvents === 'function' && typeof window.__VWScene === 'function'", timeout=30000)
+    page.wait_for_function("() => typeof window.__VWReplayLiveAgentModeAnimationEvents === 'function' && typeof window.__VWSyncLiveAgentModeWorldEvents === 'function' && typeof window.__VWScene === 'function'", timeout=30000)
     result = page.evaluate("""
-async ({ actionId }) => {
+async ({ actionId, publicExpressionId }) => {
   const expectedNames = ['agent-move-started', 'agent-arrived', 'object-use-started', 'object-use-completed', 'world-action-completed'];
   let lastState = null;
   for (let attempt = 0; attempt < 24; attempt += 1) {
     await window.__VWReplayLiveAgentModeAnimationEvents({ actionId, force: true, limit: 50 });
+    await window.__VWSyncLiveAgentModeWorldEvents({ force: true, snapshot: true, limit: 200 });
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const state = window.__VWLiveAgentModeAnimationReplayState || {};
     const actionState = state.actions?.[actionId] || null;
     const eventNames = new Set(actionState?.eventNames || []);
     const scene = window.__VWScene?.();
     const replayGroup = scene?.getObjectByName?.('vw-live-agent-mode-replay-' + actionId) || null;
+    const publicExpressionMarker = publicExpressionId ? scene?.getObjectByName?.('vw-live-agent-public-expression-' + publicExpressionId) : null;
     const agent = (window.agents || []).find(candidate => String(candidate?.id || candidate?.statusKey || '') === 'acceptance-agent') || null;
     const canvas = document.querySelector('#pixiContainer canvas');
     const canvasRect = canvas?.getBoundingClientRect?.();
@@ -1740,15 +1785,19 @@ async ({ actionId }) => {
     const hasExpectedEvents = expectedNames.every(name => eventNames.has(name));
     const groupChildCount = replayGroup?.children?.length || 0;
     const agentRendered = Boolean(actionState?.agentRendered && agent?._group3d && Number.isFinite(agent._group3d.position.x) && Number.isFinite(agent._group3d.position.z));
+    const publicExpressionRendered = !publicExpressionId || Boolean(publicExpressionMarker && publicExpressionMarker.children?.length >= 2);
     const canvasRendered = Boolean(canvasRect && canvasRect.width > 100 && canvasRect.height > 100 && Number(rendererInfo.calls || 0) > 0);
     lastState = {
-      ok: Boolean(state.ok && actionState && hasExpectedEvents && groupChildCount >= 2 && agentRendered && canvasRendered),
+      ok: Boolean(state.ok && actionState && hasExpectedEvents && groupChildCount >= 2 && agentRendered && publicExpressionRendered && canvasRendered),
       actionId,
+      publicExpressionId: publicExpressionId || null,
       eventCount: actionState?.eventCount || 0,
       renderedEventCount: actionState?.renderedEventCount || 0,
       groupChildCount,
       eventNames: Array.from(eventNames).sort(),
       agentRendered,
+      publicExpressionRendered,
+      publicExpressionMarkerName: publicExpressionMarker?.name || null,
       agentPosition: actionState?.lastAgentPosition || null,
       sceneGroupName: replayGroup?.name || null,
       rendererCalls: rendererInfo.calls || 0,
@@ -1761,7 +1810,7 @@ async ({ actionId }) => {
   }
   throw new Error('real product replay/render state did not settle: ' + JSON.stringify(lastState));
 }
-""", {"actionId": action_id})
+""", {"actionId": action_id, "publicExpressionId": public_expression_id})
     browser.close()
 
 if not result.get("ok"):
@@ -1773,6 +1822,7 @@ print(json.dumps(result, sort_keys=True))
     env: {
       VW_ACCEPTANCE_BASE_URL: BASE_URL,
       VW_ACCEPTANCE_ACTION_ID: actionId,
+      VW_ACCEPTANCE_PUBLIC_EXPRESSION_ID: publicExpressionId || '',
     },
   });
   const resultText = stdout.trim().split('\n').at(-1);
@@ -1780,7 +1830,8 @@ print(json.dumps(result, sort_keys=True))
   assert(result.ok === true, 'browser replay/render check failed', result);
   assert(String(result.pageUrl || '').startsWith(BASE_URL), 'browser replay/render check did not run on the 8587 app', result);
   assert(result.sceneGroupName, 'browser replay/render check did not use a real product scene replay group', result);
-  console.log(`PASS: browser replay/render check used product client scene replay group ${result.sceneGroupName} with ${result.renderedEventCount} rendered events for ${actionId} on ${BASE_URL}.`);
+  if (publicExpressionId) assert(result.publicExpressionRendered === true && result.publicExpressionMarkerName, 'browser check did not render the public expression marker', result);
+  console.log(`PASS: browser replay/render check used product client scene replay group ${result.sceneGroupName} with ${result.renderedEventCount} rendered events${publicExpressionId ? ` and public expression marker ${result.publicExpressionMarkerName}` : ''} for ${actionId} on ${BASE_URL}.`);
   return result;
 }
 
@@ -2363,13 +2414,13 @@ try {
   await verifyTypedObjectActions();
   await runReconnectReplayCatchupCheck();
   await verifyRouteBeforeActionPresenceGates();
-  await verifySocialCommunicationAndMemory();
+  const socialCommunication = await verifySocialCommunicationAndMemory();
   await verifyOperatorControlsStopTurns();
   await verifyFailureInjectionReplanning();
   await verifyFakeProviderBridgeContract();
   await enableLoopForFinalMetrics();
   await verifyAutonomyMetrics({ expectedTurns: ACCEPTANCE_TURN_TARGET, expectedAgents: SOAK_AGENT_COUNT });
-  await runBrowserReplayRenderCheck(backendSeries.proofs[0].actionId);
+  await runBrowserReplayRenderCheck(backendSeries.proofs[0].actionId, socialCommunication?.publicExpression?.id || null);
   await verifyServerRestartPresencePersistenceAndRouteState();
 
   if (keepOpen) {

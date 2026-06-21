@@ -173,8 +173,9 @@ For the planned backend-owned autonomous resident architecture, see [LIVE-AGENT-
 | GET | `/api/live-agent-mode/tools` | Read backend Live Agent tool contracts. |
 | POST | `/api/live-agent-mode/actions/dry-run` | Validate a Live Agent tool call without executing it. |
 | POST | `/api/live-agent-mode/tool-calls/validate` | Alias for dry-run tool-call validation. |
-| POST | `/api/live-agent-mode/tool-calls` | Execute safe Live Agent communication or memory tools, or dry-run when `dryRun` is true. |
+| POST | `/api/live-agent-mode/tool-calls` | Execute safe Live Agent communication, public expression, memory, planning, or idle tools; dry-run when `dryRun` is true. |
 | GET | `/api/live-agent-mode/in-world-communications` | Read persisted in-world communication events, distinct from provider relay messages. |
+| GET | `/api/live-agent-mode/public-expressions` | Read persisted public notes and other safe expression evidence rendered into the world event feed. |
 | GET | `/api/live-agent-mode/memory/<agent-id>` | Read a bounded ClawMind memory stream and ranked retrieval results for one resident. |
 | GET | `/api/live-agent-mode/animation-events` | Read backend-emitted movement/object-use replay events for browser clients. |
 | GET | `/api/agent-live-loop` | Inspect backend scheduler state, active turn ownership, pause, kill switch, and recent turn history. |
@@ -209,6 +210,8 @@ The server normalizes and validates lifecycle states. See `src/client/js/agent-l
 Backend Live Agent tool contracts cover observe, move, object-use, communication, memory, planning, idle, and build/create proposal categories. Dry-run validation checks typed arguments, agent Live Mode permission, conservative location gates, object permissions, and target availability. Safe communication, memory, planning, and idle tools persist backend side effects through `/api/live-agent-mode/tool-calls`; movement and object use execute through the backend world-action APIs. Physical Live Agent world mutations must carry route target metadata, including resolved coordinates for object-use targets, record arrival, persist authoritative presence at the target, and only then set `timing.mutationAppliedAt`. Missing-presence, missing-coordinate, or wrong-location mutation attempts are rejected instead of applied. The public UI stays behind the existing Coming Soon/feature gate.
 
 In-world communication events are stored under `world-meta.json#agentLife.inWorldCommunications`. They are visible world events with `providerRelay: false`, so they are distinct from `/api/agent-platform-communications/send` provider relay messages. Nearby observers receive durable reaction-opportunity entries in the Live Agent loop event log.
+
+Safe public expression uses the executable `publish_note` Live Agent tool. It writes durable records under `world-meta.json#agentLife.publicExpressions`, emits a `public-expression-posted` world event with a `publicExpressions` patch, and exposes per-agent counts in `/api/live-agent-mode/metrics`. Broader event, governance, and economy tools remain proposal-only until typed visible executors and approval/rollback rules exist.
 
 Memory retrieval queries accept `query`, `currentPlan`, `limit`, `tags`, and `kinds`. Results are scored with deterministic relevance, recency, and importance components over the bounded resident stream at `world-meta.json#agentLife.liveModeLoop.agents.<agent-id>.memory.stream`. The same retrieval path backs the `search_memory` Live Agent tool.
 
