@@ -578,6 +578,57 @@ def _payload_includes_agent_live_mode_source(value):
     return False
 
 
+def _live_agent_raw_mutation_blocked_response(payload, *, endpoint=None, action_type=None):
+    payload = payload if isinstance(payload, dict) else {}
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    agent_id = _resolve_agent_id(payload.get("agentId") or source.get("agentId") or source.get("requestedBy"))
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    resolved_action_type = action_type or payload.get("actionType") or "world.updateObject"
+    details = {
+        "endpoint": endpoint,
+        "agentId": agent_id,
+        "actionType": resolved_action_type,
+        "target": target,
+        "requiredPath": "POST /api/agent-model/actions or proposal-only Live Agent tools",
+        "hiddenWorldMutationAllowed": False,
+        "reason": "route-before-action-required",
+    }
+    if agent_id:
+        proposal_payload = {
+            "agentId": agent_id,
+            "source": {**source, "kind": "agent-live-mode"},
+            "actionType": resolved_action_type,
+            "capabilityTag": payload.get("capabilityTag") or "world.decorate",
+            "target": target,
+            "params": {
+                "endpoint": endpoint,
+                "reason": "Direct Live Agent raw world mutation was converted to operator review.",
+            },
+        }
+        with _live_agent_loop_lock:
+            state = get_live_agent_loop_state(persist_migration=True)
+            proposal = _live_agent_loop_record_operator_proposal_from_rejection(
+                state,
+                agent_id,
+                proposal_payload,
+                _api_error("route_before_action_required", "Direct Live Agent raw world mutations require route-before-action execution."),
+            )
+            if proposal:
+                save_live_agent_loop_state(state)
+                details["operatorProposal"] = {
+                    "schemaVersion": LIVE_AGENT_OPERATOR_PROPOSAL_SCHEMA_VERSION,
+                    "id": proposal.get("id"),
+                    "status": proposal.get("status"),
+                    "executesOnApproval": False,
+                    "endpoint": "GET /api/agent-live-loop/proposals",
+                }
+    return _api_error(
+        "route_before_action_required",
+        "Live Agent world mutations must resolve a routeable target, record arrival, and pass presence gates before mutation; direct raw edits are rejected.",
+        details=details,
+    )
+
+
 def _demo_edit_locked_response():
     return _locked_response(
         "advancedEditor",
@@ -1452,6 +1503,8 @@ LIVE_AGENT_SIMULATION_SCHEMA_VERSION = "agent-live-mode-simulation/v1"
 LIVE_AGENT_PRESENCE_SCHEMA_VERSION = "agent-live-mode-presence-persistence/v1"
 LIVE_AGENT_PRESENCE_LOCATION_SCHEMA_VERSION = "agent-live-mode-presence-location/v1"
 LIVE_AGENT_PRESENCE_METRICS_SCHEMA_VERSION = "agent-live-mode-presence-persistence-metrics/v1"
+LIVE_AGENT_ROUTE_BEFORE_ACTION_METRICS_SCHEMA_VERSION = "agent-live-mode-route-before-action-metrics/v1"
+LIVE_AGENT_PRESENCE_DEFINED_MUTATION_SCHEMA_VERSION = "agent-live-mode-presence-defined-mutation/v1"
 LIVE_AGENT_PRESENCE_HISTORY_LIMIT = 200
 LIVE_AGENT_WORLD_EVENT_FEED_SCHEMA_VERSION = "agent-live-mode-world-event-feed/v1"
 LIVE_AGENT_WORLD_EVENT_FEED_CLIENT_VERSION = "20260620-world-event-feed-r1"
@@ -5293,6 +5346,71 @@ def _live_agent_metric_per_agent_distribution(enabled_agents, turns, backend_ter
     }
 
 
+def _live_agent_route_before_action_metrics(actions):
+    inspected = []
+    route_violations = []
+    presence_violations = []
+    mutation_count = 0
+    for action in [item for item in (actions or []) if isinstance(item, dict) and _world_action_backend_owned(item)]:
+        timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+        status = _canonical_world_action_status(action.get("status"))
+        mutation_applied_at = timing.get("mutationAppliedAt")
+        if not mutation_applied_at and status == "completed":
+            mutation_applied_at = timing.get("completedAt") or timing.get("terminalAt")
+        if not mutation_applied_at and status != "in_progress":
+            continue
+        mutation_count += 1
+        route = action.get("route") if isinstance(action.get("route"), dict) else {}
+        arrived_at = timing.get("arrivedAt") or route.get("arrivedAt")
+        mutation_epoch = _parse_isoish_epoch(mutation_applied_at)
+        arrived_epoch = _parse_isoish_epoch(arrived_at)
+        route_metadata_ok = _live_agent_route_target_metadata_ok(action)
+        route_ok = bool(route_metadata_ok and arrived_epoch and mutation_epoch and arrived_epoch <= mutation_epoch)
+        mutation_gate = action.get("routeBeforeAction") if isinstance(action.get("routeBeforeAction"), dict) else {}
+        target_location = mutation_gate.get("targetLocation") if isinstance(mutation_gate.get("targetLocation"), dict) else _live_agent_backend_target_location(action)
+        presence = action.get("presenceAtMutation") if isinstance(action.get("presenceAtMutation"), dict) else mutation_gate.get("presence")
+        presence_defined = _live_agent_presence_has_location(presence)
+        presence_at_target = presence_defined and _live_agent_location_matches_route_target(presence, target_location)
+        row = {
+            "actionId": action.get("id"),
+            "agentId": action.get("agentId"),
+            "actionType": action.get("actionType"),
+            "status": status,
+            "arrivedAt": arrived_at,
+            "mutationAppliedAt": mutation_applied_at,
+            "routeMetadataOk": route_metadata_ok,
+            "routeBeforeActionOk": route_ok,
+            "presenceDefined": presence_defined,
+            "presenceAtTarget": bool(presence_at_target),
+            "routeId": route.get("id"),
+            "routeOwner": route.get("routeOwner"),
+            "target": action.get("target") if isinstance(action.get("target"), dict) else None,
+        }
+        inspected.append(row)
+        if not route_ok:
+            route_violations.append(row)
+        if not presence_defined or not presence_at_target:
+            presence_violations.append(row)
+    return {
+        "schemaVersion": LIVE_AGENT_ROUTE_BEFORE_ACTION_METRICS_SCHEMA_VERSION,
+        "mutationCount": mutation_count,
+        "inspectedActionCount": len(inspected),
+        "routeBeforeAction": {
+            "ok": len(route_violations) == 0,
+            "violationCount": len(route_violations),
+            "violations": route_violations[:20],
+        },
+        "presenceDefinedMutation": {
+            "schemaVersion": LIVE_AGENT_PRESENCE_DEFINED_MUTATION_SCHEMA_VERSION,
+            "ok": len(presence_violations) == 0,
+            "violationCount": len(presence_violations),
+            "violations": presence_violations[:20],
+        },
+        "recentInspectedActions": inspected[-20:],
+        "ok": len(route_violations) == 0 and len(presence_violations) == 0,
+    }
+
+
 def get_live_agent_mode_autonomy_metrics():
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
@@ -5436,6 +5554,7 @@ def get_live_agent_mode_autonomy_metrics():
     presence_persistence = _live_agent_presence_persistence_metrics(enabled_live_agents, meta)
     world_event_feed = get_live_agent_world_event_feed_metrics()
     per_agent_distribution = _live_agent_metric_per_agent_distribution(enabled_live_agents, turns, backend_terminal_actions)
+    route_before_action = _live_agent_route_before_action_metrics([*active_actions, *history_actions])
     per_agent_distribution_by_agent = per_agent_distribution.get("byAgent") if isinstance(per_agent_distribution.get("byAgent"), dict) else {}
     enabled_agent_distribution_evidence = []
     for agent_id in per_agent_distribution["enabledAgentIds"]:
@@ -5510,6 +5629,8 @@ def get_live_agent_mode_autonomy_metrics():
         "actionsCompletedAcrossEnabledAgents": per_agent_distribution["allEnabledAgentsHaveCompletedBackendAction"],
         "presencePersistenceOk": presence_persistence["ok"],
         "worldEventFeedOk": world_event_feed["ok"],
+        "routeBeforeAction": route_before_action["routeBeforeAction"]["ok"],
+        "presenceDefinedMutation": route_before_action["presenceDefinedMutation"]["ok"],
     }
     final_gate_checks = {
         "featureGateOpen": checklist["featureGateOpen"],
@@ -5527,6 +5648,8 @@ def get_live_agent_mode_autonomy_metrics():
         "actionsCompletedAcrossEnabledAgents": checklist["actionsCompletedAcrossEnabledAgents"],
         "presencePersistenceOk": checklist["presencePersistenceOk"],
         "worldEventFeedOk": checklist["worldEventFeedOk"],
+        "routeBeforeAction": checklist["routeBeforeAction"],
+        "presenceDefinedMutation": checklist["presenceDefinedMutation"],
     }
     final_gate = {
         "schemaVersion": "agent-live-mode-final-gate/v1",
@@ -5550,6 +5673,7 @@ def get_live_agent_mode_autonomy_metrics():
             "enabledAgents": enabled_agent_distribution_evidence,
             "presencePersistence": presence_persistence,
             "worldEventFeed": world_event_feed,
+            "routeBeforeAction": route_before_action,
         },
     }
     return {
@@ -5576,6 +5700,9 @@ def get_live_agent_mode_autonomy_metrics():
             "enabledAgentsWithCompletedBackendActions": per_agent_distribution["enabledCompletedBackendActionAgentCount"],
             "perAgentDistribution": per_agent_distribution,
             "presencePersistence": presence_persistence,
+            "routeBeforeAction": route_before_action["routeBeforeAction"],
+            "presenceDefinedMutation": route_before_action["presenceDefinedMutation"],
+            "routeBeforeActionPresence": route_before_action,
             "worldEventFeed": world_event_feed,
             "worldEventFeedReplayableEventCount": world_event_feed["replayableEventCount"],
             "worldEventFeedConnectedClientCount": world_event_feed["connectedClientCount"],
@@ -6396,6 +6523,100 @@ def _live_agent_backend_target_location(action):
     return base
 
 
+def _live_agent_location_matches_route_target(presence, target_location):
+    if not isinstance(presence, dict) or not isinstance(target_location, dict):
+        return False
+    target_kind = target_location.get("targetKind") or target_location.get("kind")
+    target_building = target_location.get("buildingId")
+    if target_building:
+        if presence.get("buildingId") != target_building:
+            return False
+        try:
+            if int(presence.get("floor") or 1) != int(target_location.get("floor") or 1):
+                return False
+        except (TypeError, ValueError):
+            return False
+        if target_kind == "agent":
+            return True
+    px = _number_or_none(presence.get("x"))
+    pz = _number_or_none(presence.get("z") if presence.get("z") is not None else presence.get("y"))
+    tx = _number_or_none(target_location.get("x"))
+    tz = _number_or_none(target_location.get("z") if target_location.get("z") is not None else target_location.get("y"))
+    if tx is not None and tz is not None:
+        if px is None or pz is None:
+            return bool(target_building)
+        distance = ((px - tx) ** 2 + (pz - tz) ** 2) ** 0.5
+        return distance <= 2.5
+    return bool(target_building)
+
+
+def _live_agent_route_target_metadata_ok(action):
+    if not isinstance(action, dict):
+        return False
+    target = action.get("target") if isinstance(action.get("target"), dict) else {}
+    route = action.get("route") if isinstance(action.get("route"), dict) else {}
+    route_target = route.get("target") if isinstance(route.get("target"), dict) else {}
+    metadata = route.get("targetMetadata") if isinstance(route.get("targetMetadata"), dict) else {}
+    if not target or not route or not route.get("id") or not route_target:
+        return False
+    kind = target.get("kind")
+    if kind == "object-instance":
+        required = ("buildingId", "floor", "objectInstanceId", "catalogId", "interactionSpotId")
+        return all(target.get(key) is not None or metadata.get(key) is not None for key in required)
+    if kind in {"building", "room"}:
+        return bool(target.get("buildingId") or metadata.get("buildingId"))
+    if kind == "agent":
+        return bool(target.get("targetAgentId") and (target.get("buildingId") or metadata.get("buildingId")))
+    if kind == "world-point":
+        x = target.get("x") if target.get("x") is not None else metadata.get("x")
+        z = target.get("z") if target.get("z") is not None else target.get("y") if target.get("y") is not None else metadata.get("z")
+        return isinstance(x, (int, float)) and isinstance(z, (int, float))
+    return False
+
+
+def _live_agent_route_before_action_gate(action, to_status, *, now=None):
+    if not _world_action_backend_owned(action):
+        return True, None
+    to_status = _canonical_world_action_status(to_status)
+    if to_status not in {"in_progress", "completed"}:
+        return True, None
+    now = now or _utc_now_iso()
+    timing = action.get("timing") if isinstance(action.get("timing"), dict) else {}
+    route = action.get("route") if isinstance(action.get("route"), dict) else {}
+    arrived_at = timing.get("arrivedAt") or route.get("arrivedAt")
+    target_location = _live_agent_backend_target_location(action)
+    presence = _live_agent_presence_location(action.get("agentId"))
+    evidence = {
+        "schemaVersion": LIVE_AGENT_PRESENCE_DEFINED_MUTATION_SCHEMA_VERSION,
+        "checkedAt": now,
+        "actionId": action.get("id"),
+        "agentId": action.get("agentId"),
+        "target": action.get("target") if isinstance(action.get("target"), dict) else None,
+        "route": {
+            "id": route.get("id"),
+            "state": route.get("state") or route.get("status"),
+            "target": route.get("target") if isinstance(route.get("target"), dict) else None,
+            "targetMetadata": route.get("targetMetadata") if isinstance(route.get("targetMetadata"), dict) else None,
+            "routeOwner": route.get("routeOwner"),
+            "routingOwner": route.get("routingOwner"),
+        },
+        "arrivedAt": arrived_at,
+        "presence": presence,
+        "targetLocation": target_location,
+        "mutationStatus": to_status,
+    }
+    if not _live_agent_route_target_metadata_ok(action):
+        return False, _api_error("route_target_missing", "Live Agent physical mutations require a routeable target with building/floor/object or coordinate metadata before mutation.", details=evidence)
+    if not arrived_at:
+        return False, _api_error("route_not_arrived", "Live Agent physical mutations require an arrival record before mutation.", details=evidence)
+    if not _live_agent_presence_has_location(presence):
+        return False, _api_error("presence_missing", "Live Agent physical mutations require authoritative persisted presence at the target before mutation.", details=evidence)
+    if not _live_agent_location_matches_route_target(presence, target_location):
+        return False, _api_error("presence_location_mismatch", "Live Agent physical mutation rejected because authoritative presence is not at the route target.", details=evidence)
+    evidence["ok"] = True
+    return True, evidence
+
+
 def _live_agent_simulated_location(agent_id):
     return _live_agent_presence_location(agent_id) or _legacy_live_agent_simulated_location(agent_id)
 
@@ -6726,6 +6947,9 @@ def advance_live_agent_backend_world_action(action_id, *, reason="server-owned-p
                 return ok, response, status_code
             continue
         if current_status == "in_progress":
+            gate_ok, gate_result = _live_agent_route_before_action_gate(current, "completed", now=_utc_now_iso())
+            if not gate_ok:
+                return False, gate_result, 409
             build_effect = apply_live_agent_build_completion_effect(current)
             backend_effects = [build_effect] if build_effect else []
             completion_events = append_live_agent_animation_events([
@@ -7416,11 +7640,30 @@ def _validate_create_world_action_payload(payload):
         target_snapshot["targetAgentId"] = resolved.get("agentId") if isinstance(resolved, dict) else target.get("targetAgentId")
         target_snapshot["buildingId"] = target.get("buildingId")
         target_snapshot["floor"] = int(target.get("floor") or 1)
+    route_target_metadata = {
+        "schemaVersion": "agent-live-mode-route-target-metadata/v1",
+        "targetKind": target_kind,
+        "buildingId": target_snapshot.get("buildingId"),
+        "floor": target_snapshot.get("floor"),
+        "roomId": target_snapshot.get("roomId"),
+        "objectInstanceId": target_snapshot.get("objectInstanceId"),
+        "catalogId": target_snapshot.get("catalogId"),
+        "interactionSpotId": target_snapshot.get("interactionSpotId"),
+        "targetAgentId": target_snapshot.get("targetAgentId"),
+        "x": target_snapshot.get("x"),
+        "y": target_snapshot.get("y"),
+        "z": target_snapshot.get("z"),
+        "coordinateSpace": target_snapshot.get("coordinateSpace") or ("world-tiles" if target_kind == "world-point" else None),
+        "routeable": True,
+        "routingPlan": "backend-route-before-action-presence-gate",
+    }
+    route_target_metadata = {key: value for key, value in route_target_metadata.items() if value is not None}
     behavior = behavior or {}
     route_behavior = {k: behavior.get(k) for k in ["behaviorSourceKind", "behaviorMode", "behaviorAuthority", "behaviorSelectedCategory", "behaviorSelectedObject", "behaviorSelectedSpot", "behaviorProbabilityRoll", "behaviorFallbackReason"]}
     backend_owned = behavior.get("behaviorSourceKind") == "agent-live-mode"
     route_target = {
         "target": target_snapshot,
+        "targetMetadata": route_target_metadata,
         "handoff": LIVE_AGENT_BACKEND_EXECUTOR_ID if backend_owned else WORLD_ACTION_CREATE_ROUTE_OWNER,
         "routeOwner": "server-simulation" if backend_owned else "client-runtime",
         "routingOwner": LIVE_AGENT_BACKEND_EXECUTOR_ID if backend_owned else None,
@@ -13850,6 +14093,12 @@ def _transition_world_action_unlocked(action_id, to_status, *, result=None, fail
     from_status = action.get("status")
     if not _world_action_transition_allowed(from_status, to_status):
         return False, _api_error("illegal_transition", "World action lifecycle transition is not allowed.", details={"from": from_status, "to": to_status, "allowedNext": _world_action_allowed_next(from_status)}), 409
+    mutation_gate = None
+    gate_ok, gate_result = _live_agent_route_before_action_gate(action, to_status, now=now)
+    if not gate_ok:
+        return False, gate_result, 409
+    if isinstance(gate_result, dict):
+        mutation_gate = gate_result
     action["status"] = to_status
     action["failureReason"] = failure_reason if to_status in {"failed", "expired", "cancelled"} else None
     if result is not None:
@@ -13870,6 +14119,8 @@ def _transition_world_action_unlocked(action_id, to_status, *, result=None, fail
         timing["terminalAt"] = now
     if to_status == "completed":
         timing["completedAt"] = now
+    if mutation_gate:
+        timing["mutationAppliedAt"] = timing.get("mutationAppliedAt") or now
     action["timing"] = timing
     lifecycle = dict(action.get("lifecycle") or {})
     transition_log = list(lifecycle.get("transitionLog") or [])
@@ -13879,6 +14130,13 @@ def _transition_world_action_unlocked(action_id, to_status, *, result=None, fail
         lifecycle["terminalReason"] = failure_reason or to_status
     action["lifecycle"] = lifecycle
     action = _apply_world_action_side_effects(action, from_status, to_status, now, failure_reason)
+    if mutation_gate:
+        action["presenceAtMutation"] = mutation_gate.get("presence")
+        action["routeBeforeAction"] = {
+            **mutation_gate,
+            "mutationAppliedAt": action.get("timing", {}).get("mutationAppliedAt"),
+            "mutationStatus": to_status,
+        }
     event_name = WORLD_ACTION_EVENT_TRANSITION_MAP.get(to_status)
     event_payloads = []
     if event_name:
@@ -18717,6 +18975,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             data = self._read_body()
             if _demo_feature_locked("advancedEditor") and not _is_starter_world_seed_request(path, data):
                 return self._send_json(_demo_edit_locked_response(), 403)
+            if _payload_includes_agent_live_mode_source(data):
+                return self._send_json(_live_agent_raw_mutation_blocked_response(data, endpoint=path, action_type="world.updateMeta"), 422)
             if data:
                 meta = load_world_meta()
                 meta.update(data)
@@ -18958,6 +19218,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                     data = self._read_body()
                     if _demo_feature_locked("advancedEditor") and not _is_starter_world_seed_request(path, data):
                         return self._send_json(_demo_edit_locked_response(), 403)
+                    if _payload_includes_agent_live_mode_source(data):
+                        return self._send_json(_live_agent_raw_mutation_blocked_response(data, endpoint=path, action_type="world.updateChunk"), 422)
                     if data:
                         save_chunk(cx, cy, data)
                         return self._send_json({"ok": True})
@@ -19079,6 +19341,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if _demo_feature_locked("advancedEditor"):
                 return self._send_json(_demo_edit_locked_response(), 403)
             data = self._read_body()
+            if _payload_includes_agent_live_mode_source(data):
+                return self._send_json(_live_agent_raw_mutation_blocked_response(data, endpoint=path, action_type="world.updateDecorations"), 422)
             if data is not None:
                 meta = load_world_meta()
                 meta["decorations"] = data
@@ -19090,6 +19354,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             data = self._read_body()
             if _demo_feature_locked("advancedEditor") and not _is_starter_world_seed_request(path, data):
                 return self._send_json(_demo_edit_locked_response(), 403)
+            if _payload_includes_agent_live_mode_source(data):
+                return self._send_json(_live_agent_raw_mutation_blocked_response(data, endpoint=path, action_type="world.modifyRoad"), 422)
             if data is not None:
                 meta = load_world_meta()
                 if isinstance(data, list) and len(data) == 0:
@@ -19107,6 +19373,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             data = self._read_body()
             if _demo_feature_locked("advancedEditor") and not _is_starter_world_seed_request(path, data):
                 return self._send_json(_demo_edit_locked_response(), 403)
+            if _payload_includes_agent_live_mode_source(data):
+                return self._send_json(_live_agent_raw_mutation_blocked_response(data, endpoint=path, action_type="world.buildStructure"), 422)
             if data and data.get("id"):
                 building_limit = get_building_limit()
                 existing = list_buildings()
@@ -19131,6 +19399,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 return self._send_json(_demo_edit_locked_response(), 403)
             building_id = path.split("/")[-1]
             data = self._read_body()
+            if _payload_includes_agent_live_mode_source(data):
+                return self._send_json(_live_agent_raw_mutation_blocked_response(data, endpoint=path, action_type="world.updateObject"), 422)
             if data:
                 before = load_building(building_id)
                 data["id"] = building_id

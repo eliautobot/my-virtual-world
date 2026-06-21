@@ -774,6 +774,113 @@ async function verifyTypedObjectActions() {
   return actions;
 }
 
+async function verifyRouteBeforeActionPresenceGates() {
+  await waitForAgentWorldActionIdle(TEST_AGENT_ID, 'before route-before-action gate check');
+  const originalPresence = await fetchAgentPresenceSnapshot(TEST_AGENT_ID);
+  const create = await postJson('/api/world-actions', {
+    agentId: TEST_AGENT_ID,
+    source: liveAgentSource('8587-route-before-action-create'),
+    actionType: 'life.getCoffee',
+    capabilityTag: 'life.hydration',
+    target: {
+      kind: 'object-instance',
+      buildingId: OFFICE_BUILDING_ID,
+      objectInstanceId: COFFEE_MACHINE_ID,
+      catalogId: 'countertopCoffeeMachine',
+      interactionSpotId: 'use-front',
+      floor: 1,
+    },
+    priority: 'normal',
+    params: { reason: '8587-route-before-action-presence-gate' },
+  });
+  assert(create?.ok === true && create.action?.id, 'failed to create route-before-action gate fixture action', create);
+  const actionId = create.action.id;
+  let completedFixture = false;
+  assert(create.action.route?.targetMetadata?.buildingId === OFFICE_BUILDING_ID, 'created action should include route target building metadata', create.action.route);
+  assert(create.action.route?.targetMetadata?.objectInstanceId === COFFEE_MACHINE_ID, 'created action should include route target object metadata', create.action.route);
+
+  const transition = async (status, reason) => {
+    const response = await postJson(`/api/world-actions/${encodeURIComponent(actionId)}/transition`, {
+      status,
+      source: 'agent-live-mode',
+      actor: '8587-route-before-action-presence-gate',
+      result: { status, reason },
+    });
+    assert(response?.ok === true && response.action?.status === status, `failed to transition gate fixture to ${status}`, response);
+    return response.action;
+  };
+
+  try {
+    await transition('route_pending', '8587-route-before-action-route-pending');
+    await transition('routing', '8587-route-before-action-routing');
+    const arrived = await transition('arrived', '8587-route-before-action-arrived');
+    assert(arrived.timing?.arrivedAt, 'arrival transition should record arrivedAt before mutation', arrived);
+    const arrivedPresence = await fetchAgentPresenceSnapshot(TEST_AGENT_ID);
+
+    const wrongPresence = {
+      agentId: TEST_AGENT_ID,
+      buildingId: '8587-wrong-building',
+      floor: 1,
+      x: -999,
+      z: -999,
+      worldActionId: actionId,
+      routeId: arrived.route?.id,
+      actionType: arrived.actionType,
+      targetKind: 'object-instance',
+      objectInstanceId: COFFEE_MACHINE_ID,
+    };
+    await saveAgentPresenceSnapshot(TEST_AGENT_ID, wrongPresence, '8587-wrong-location-presence-gate');
+    const rejected = await postJsonExpectStatus(`/api/world-actions/${encodeURIComponent(actionId)}/transition`, {
+      status: 'in_progress',
+      source: 'agent-live-mode',
+      actor: '8587-route-before-action-presence-gate',
+      result: { status: 'in_progress', reason: 'should-reject-wrong-location' },
+    }, 409);
+    assert(rejected?.error?.code === 'presence_location_mismatch', 'wrong-location mutation should be rejected by presence gate', rejected);
+
+    const active = await fetchJson('/api/world-actions/active');
+    const stillArrived = (active || []).find((item) => item?.id === actionId);
+    assert(stillArrived?.status === 'arrived', 'rejected mutation must not silently advance the world action', stillArrived || active);
+
+    const rawRejected = await postJsonExpectStatus('/api/buildings', {
+      id: '8587-hidden-live-agent-raw-building',
+      name: 'Hidden Live Agent Raw Building',
+      source: liveAgentSource('8587-route-before-action-raw-building'),
+      agentId: TEST_AGENT_ID,
+      actionType: 'world.buildStructure',
+      capabilityTag: 'world.build',
+      target: { kind: 'world-point', x: 10, z: 12, floor: 1 },
+      widthTiles: 4,
+      heightTiles: 4,
+    }, 422);
+    assert(rawRejected?.error?.code === 'route_before_action_required', 'direct Live Agent raw world mutation should be rejected', rawRejected);
+    assert(rawRejected?.error?.details?.hiddenWorldMutationAllowed === false, 'raw mutation rejection should state hidden mutation is not allowed', rawRejected);
+
+    await saveAgentPresenceSnapshot(TEST_AGENT_ID, arrivedPresence, '8587-route-before-action-correct-presence');
+    const inProgress = await transition('in_progress', '8587-route-before-action-in-progress-after-presence-restore');
+    assert(inProgress.timing?.mutationAppliedAt, 'in-progress transition should record mutationAppliedAt after arrival', inProgress);
+    const completed = await transition('completed', '8587-route-before-action-completed-after-presence-restore');
+    assert(completed.status === 'completed', 'route-before-action fixture should complete after correct presence is restored', completed);
+    completedFixture = true;
+
+    console.log(`PASS: route-before-action gate rejected wrong-location mutation for ${actionId} and blocked direct raw Live Agent world edit.`);
+    return { actionId, rejected, rawRejected };
+  } finally {
+    if (!completedFixture) {
+      try {
+        await postJson(`/api/world-actions/${encodeURIComponent(actionId)}/cancel`, {
+          source: 'agent-live-mode',
+          actor: '8587-route-before-action-presence-gate-cleanup',
+          failureReason: 'cancelled_by_system',
+          reason: 'cancelled_by_system',
+        });
+      } catch {}
+    }
+    await saveAgentPresenceSnapshot(TEST_AGENT_ID, originalPresence, '8587-route-before-action-presence-restore');
+    await waitForAgentWorldActionIdle(TEST_AGENT_ID, 'after route-before-action gate check');
+  }
+}
+
 async function executeLiveAgentTool(tool, args, { agentId = TEST_AGENT_ID, requestId, dryRun = false } = {}) {
   const result = await postJson('/api/live-agent-mode/tool-calls', {
     agentId,
@@ -1214,6 +1321,12 @@ async function verifyAutonomyMetrics({ expectedTurns, expectedAgents }) {
   assert(metrics.metrics?.presencePersistence?.ok === true, 'metrics should report passing presence persistence', metrics.metrics?.presencePersistence);
   verifySoakDistributionMetrics(metrics, { expectedAgents, expectedTurns });
   assert(metrics.metrics?.routePendingActiveCount === 0, 'metrics should show no active route_pending actions', metrics.metrics);
+  assert(metrics.metrics?.routeBeforeAction?.ok === true, 'metrics should show no route-before-action violations', metrics.metrics?.routeBeforeAction);
+  assert(metrics.metrics?.routeBeforeAction?.violationCount === 0, 'route-before-action violation count should be zero', metrics.metrics?.routeBeforeAction);
+  assert(metrics.metrics?.presenceDefinedMutation?.ok === true, 'metrics should show no presence-defined mutation violations', metrics.metrics?.presenceDefinedMutation);
+  assert(metrics.metrics?.presenceDefinedMutation?.violationCount === 0, 'presence-defined mutation violation count should be zero', metrics.metrics?.presenceDefinedMutation);
+  assert(metrics.finalGate?.checks?.routeBeforeAction === true, 'final gate should fail on route-before-action violations', metrics.finalGate);
+  assert(metrics.finalGate?.checks?.presenceDefinedMutation === true, 'final gate should fail on presence-defined mutation violations', metrics.finalGate);
   assert(metrics.metrics?.memoryCaps?.withinCaps === true, 'metrics should show live-agent memory stayed within bounded caps', metrics.metrics?.memoryCaps);
   assert(metrics.metrics?.memoryCaps?.breachCount === 0, 'metrics should show no memory cap breaches', metrics.metrics?.memoryCaps);
   assert(metrics.metrics?.memoryGrowth?.bounded === true, 'metrics should expose bounded memory growth', metrics.metrics?.memoryGrowth);
@@ -1960,6 +2073,7 @@ try {
   await runBrowserRefreshPresenceCheck();
   await runTwoClientWorldEventFeedSyncCheck();
   await verifyTypedObjectActions();
+  await verifyRouteBeforeActionPresenceGates();
   await verifySocialCommunicationAndMemory();
   await verifyOperatorControlsStopTurns();
   await verifyFailureInjectionReplanning();

@@ -89,21 +89,20 @@ The metrics endpoint must also expose the online-game presence contract:
 - `metrics.worldEventFeed.connectedClientCount`
 - `metrics.worldEventFeed.multiClientSyncLatencyMs.p95`
 - `metrics.worldEventFeed.ok`
-- `metrics.routeBeforeAction.routeRequiredCount`
-- `metrics.routeBeforeAction.arrivalBeforeMutationCount`
+- `metrics.routeBeforeAction.violationCount`
 - `metrics.routeBeforeAction.violations`
 - `metrics.routeBeforeAction.ok`
 - `metrics.presenceDefinedMutation.mutationCount`
-- `metrics.presenceDefinedMutation.mutationWithoutPresenceCount`
-- `metrics.presenceDefinedMutation.rejectedWrongLocationCount`
+- `metrics.presenceDefinedMutation.violationCount`
+- `metrics.presenceDefinedMutation.violations`
 - `metrics.presenceDefinedMutation.ok`
 - `metrics.reconnectReplay.clientCatchupCount`
 - `metrics.reconnectReplay.missedMutationCount`
 - `metrics.reconnectReplay.ok`
 - `finalGate.checks.presencePersistenceOk`
 - `finalGate.checks.multiClientWorldSyncOk`
-- `finalGate.checks.routeBeforeActionOk`
-- `finalGate.checks.presenceDefinedMutationsOk`
+- `finalGate.checks.routeBeforeAction`
+- `finalGate.checks.presenceDefinedMutation`
 - `finalGate.checks.reconnectReplayOk`
 
 The default 8587 soak gate must prove the 5 completed backend turns are distributed across at least five enabled Live Agent Mode residents. The metrics surface this as `metrics.perAgentDistribution` and repeat the compact evidence under `finalGate.evidence` so reviewers can see which enabled agents completed live turns and backend-owned actions.
@@ -638,7 +637,7 @@ For physical actions:
 7. Apply object/building mutation only after arrival.
 8. Emit mutation and completion events.
 
-The mutation record must include `agentId`, `fromLocation`, `targetLocation`, `arrivedAt`, `actionStartedAt`, and `mutationAppliedAt`. A mutation applied while the agent is physically elsewhere is a contract violation.
+The mutation record must include `agentId`, route target metadata, `arrivedAt`, persisted presence-at-mutation evidence, target location, and `mutationAppliedAt`. A mutation applied while the agent is physically elsewhere is rejected and remains a contract violation if it appears in persisted history.
 
 ### 8D. Presence-Defined World Mutations
 
