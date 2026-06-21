@@ -637,7 +637,7 @@ For physical actions:
 7. Apply object/building mutation only after arrival.
 8. Emit mutation and completion events.
 
-The mutation record must include `agentId`, route target metadata, `arrivedAt`, persisted presence-at-mutation evidence, target location, and `mutationAppliedAt`. A mutation applied while the agent is physically elsewhere is rejected and remains a contract violation if it appears in persisted history.
+The mutation record must include `agentId`, route target metadata, `arrivedAt`, persisted presence-at-mutation evidence, target location, and `mutationAppliedAt`. Object-use route metadata must include resolved world coordinates from the persisted object/interaction spot before mutation. A mutation applied while the agent is physically elsewhere, or while same-building presence omits required target coordinates, is rejected and remains a contract violation if it appears in persisted history.
 
 ### 8D. Presence-Defined World Mutations
 

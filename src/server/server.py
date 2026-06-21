@@ -5887,6 +5887,22 @@ def _building_world_tile_point(building, local_x, local_z):
     return {"x": round(world_x, 3), "z": round(world_z, 3), "coordinateSpace": "world-tiles"}
 
 
+def _rotate_building_local_offset(x, z, rotation):
+    try:
+        rotation = int(float(rotation or 0)) % 360
+    except (TypeError, ValueError):
+        rotation = 0
+    x = _number_or_none(x) or 0.0
+    z = _number_or_none(z) or 0.0
+    if rotation == 90:
+        return -z, x
+    if rotation == 180:
+        return -x, -z
+    if rotation == 270:
+        return z, -x
+    return x, z
+
+
 def _live_agent_location_with_api(location):
     if not isinstance(location, dict):
         return None
@@ -6507,7 +6523,8 @@ def _live_agent_backend_target_location(action):
     if isinstance(resolved, dict):
         building = resolved.get("building") or {}
         obj = resolved.get("object") or {}
-        point = _building_world_tile_point(building, obj.get("x"), obj.get("z"))
+        catalog = _catalog_block_for(target.get("catalogId") or _object_catalog_id(obj))
+        point = _object_routeable_world_point(building, obj, catalog, target.get("interactionSpotId") or target.get("spotId")) or _building_world_tile_point(building, obj.get("x"), obj.get("z"))
         if point:
             try:
                 object_floor = int(target.get("floor") or obj.get("floor") or obj.get("level") or 1)
@@ -6536,17 +6553,17 @@ def _live_agent_location_matches_route_target(presence, target_location):
                 return False
         except (TypeError, ValueError):
             return False
-        if target_kind == "agent":
-            return True
     px = _number_or_none(presence.get("x"))
     pz = _number_or_none(presence.get("z") if presence.get("z") is not None else presence.get("y"))
     tx = _number_or_none(target_location.get("x"))
     tz = _number_or_none(target_location.get("z") if target_location.get("z") is not None else target_location.get("y"))
     if tx is not None and tz is not None:
         if px is None or pz is None:
-            return bool(target_building)
+            return False
         distance = ((px - tx) ** 2 + (pz - tz) ** 2) ** 0.5
         return distance <= 2.5
+    if target_kind == "agent" and target_building:
+        return True
     return bool(target_building)
 
 
@@ -6562,7 +6579,9 @@ def _live_agent_route_target_metadata_ok(action):
     kind = target.get("kind")
     if kind == "object-instance":
         required = ("buildingId", "floor", "objectInstanceId", "catalogId", "interactionSpotId")
-        return all(target.get(key) is not None or metadata.get(key) is not None for key in required)
+        x = target.get("x") if target.get("x") is not None else metadata.get("x") if metadata.get("x") is not None else route_target.get("x")
+        z = target.get("z") if target.get("z") is not None else target.get("y") if target.get("y") is not None else metadata.get("z") if metadata.get("z") is not None else metadata.get("y") if metadata.get("y") is not None else route_target.get("z") if route_target.get("z") is not None else route_target.get("y")
+        return all(target.get(key) is not None or metadata.get(key) is not None for key in required) and _number_or_none(x) is not None and _number_or_none(z) is not None
     if kind in {"building", "room"}:
         return bool(target.get("buildingId") or metadata.get("buildingId"))
     if kind == "agent":
@@ -7105,6 +7124,68 @@ def _catalog_has_spot(catalog, spot_id, action_type=None):
     return True
 
 
+def _catalog_spot_metadata(catalog, spot_id):
+    if not spot_id:
+        return None
+    block = (catalog or {}).get("block", "")
+    if not block:
+        return None
+    match = re.search(rf"Object\.freeze\(\{{(?P<body>[^{{}}]*?id:\s*'{re.escape(str(spot_id))}'[^{{}}]*?)\}}\)", block, flags=re.S)
+    if not match:
+        return None
+    body = match.group("body") or ""
+    def field(name):
+        quoted = re.search(rf"{name}:\s*'([^']*)'", body)
+        if quoted:
+            return quoted.group(1)
+        number = re.search(rf"{name}:\s*(-?\d+(?:\.\d+)?)", body)
+        if number:
+            return _number_or_none(number.group(1))
+        return None
+    return {key: value for key, value in {
+        "id": spot_id,
+        "dx": field("dx"),
+        "dz": field("dz"),
+        "facing": field("facing"),
+        "action": field("action"),
+        "capacity": field("capacity"),
+        "capacityKind": field("capacityKind"),
+        "requiresReservation": "true" if re.search(r"requiresReservation:\s*true\b", body) else "false" if re.search(r"requiresReservation:\s*false\b", body) else None,
+    }.items() if value is not None}
+
+
+def _object_routeable_world_point(building, obj, catalog=None, spot_id=None):
+    if not isinstance(building, dict) or not isinstance(obj, dict):
+        return None
+    object_x = _number_or_none(obj.get("x") if obj.get("x") is not None else obj.get("localX"))
+    object_z = _number_or_none(obj.get("z") if obj.get("z") is not None else obj.get("localZ") if obj.get("localZ") is not None else obj.get("y"))
+    if object_x is None or object_z is None:
+        return None
+    spot = _catalog_spot_metadata(catalog, spot_id) if catalog and spot_id else None
+    dx = _number_or_none((spot or {}).get("dx")) or 0.0
+    dz = _number_or_none((spot or {}).get("dz")) or 0.0
+    rotated_dx, rotated_dz = _rotate_building_local_offset(dx, dz, obj.get("rotationDeg") if obj.get("rotationDeg") is not None else obj.get("rotation"))
+    local_x = object_x + rotated_dx
+    local_z = object_z + rotated_dz
+    point = _building_world_tile_point(building, local_x, local_z)
+    if not point:
+        return None
+    point.update({
+        "localX": round(local_x, 3),
+        "localZ": round(local_z, 3),
+        "objectX": round(object_x, 3),
+        "objectZ": round(object_z, 3),
+    })
+    if spot:
+        point["interactionSpot"] = {
+            "id": spot_id,
+            "dx": dx,
+            "dz": dz,
+            **{key: spot[key] for key in ("facing", "action", "capacity", "capacityKind") if key in spot},
+        }
+    return point
+
+
 def _catalog_spot_capacity(catalog, spot_id):
     if not spot_id:
         return 1
@@ -7632,10 +7713,39 @@ def _validate_create_world_action_payload(payload):
         target_snapshot["buildingId"] = target.get("buildingId") or (building or {}).get("id")
         target_snapshot["floor"] = int(target.get("floor") or (target_obj or {}).get("floor") or (target_obj or {}).get("level") or 1)
         target_snapshot["roomId"] = target.get("roomId") if target.get("roomId") is not None else (target_obj or {}).get("roomId")
+        object_point = _object_routeable_world_point(building, target_obj, catalog, spot_id)
+        if object_point:
+            target_snapshot.update({
+                "x": object_point.get("x"),
+                "z": object_point.get("z"),
+                "coordinateSpace": object_point.get("coordinateSpace"),
+                "localX": object_point.get("localX"),
+                "localZ": object_point.get("localZ"),
+                "routeTargetSource": "persisted-object-interaction-spot",
+                "routeTargetEvidence": {
+                    "objectX": object_point.get("objectX"),
+                    "objectZ": object_point.get("objectZ"),
+                    "interactionSpot": object_point.get("interactionSpot"),
+                },
+            })
         if queue_details:
             target_snapshot["requestedInteractionSpotId"] = spot_id
             target_snapshot["interactionSpotId"] = queue_details.get("spotId")
             target_snapshot["queue"] = {"spotId": queue_details.get("spotId"), "slotId": queue_details.get("slotId"), "index": queue_details.get("index"), "capacity": queue_details.get("capacity"), "action": queue_details.get("action")}
+            queue_point = _object_routeable_world_point(building, target_obj, catalog, target_snapshot.get("interactionSpotId"))
+            if queue_point:
+                target_snapshot.update({
+                    "x": queue_point.get("x"),
+                    "z": queue_point.get("z"),
+                    "coordinateSpace": queue_point.get("coordinateSpace"),
+                    "localX": queue_point.get("localX"),
+                    "localZ": queue_point.get("localZ"),
+                    "routeTargetEvidence": {
+                        "objectX": queue_point.get("objectX"),
+                        "objectZ": queue_point.get("objectZ"),
+                        "interactionSpot": queue_point.get("interactionSpot"),
+                    },
+                })
     elif target_kind == "agent":
         target_snapshot["targetAgentId"] = resolved.get("agentId") if isinstance(resolved, dict) else target.get("targetAgentId")
         target_snapshot["buildingId"] = target.get("buildingId")
@@ -7654,6 +7764,10 @@ def _validate_create_world_action_payload(payload):
         "y": target_snapshot.get("y"),
         "z": target_snapshot.get("z"),
         "coordinateSpace": target_snapshot.get("coordinateSpace") or ("world-tiles" if target_kind == "world-point" else None),
+        "localX": target_snapshot.get("localX"),
+        "localZ": target_snapshot.get("localZ"),
+        "routeTargetSource": target_snapshot.get("routeTargetSource"),
+        "routeTargetEvidence": target_snapshot.get("routeTargetEvidence"),
         "routeable": True,
         "routingPlan": "backend-route-before-action-presence-gate",
     }
@@ -13701,6 +13815,7 @@ def _normalize_move_target(target, agent_id, action_id=None):
     if availability.get("state") in {"reserved", "in_use"}:
         return None, None, _api_error("object_reserved", "Target interaction spot/capacity slot is already reserved by another active action.", details=availability)
     object_floor = max(1, int(supplied_floor or obj.get("floor") or obj.get("level") or 1))
+    route_point = _object_routeable_world_point(building, obj, catalog, spot_id)
     normalized = {
         "kind": "object-instance",
         "objectInstanceId": object_id,
@@ -13713,6 +13828,16 @@ def _normalize_move_target(target, agent_id, action_id=None):
         "worldActionId": target_action_id,
         "targetKind": "outdoor-area-node" if resolved.get("collection") == "outdoor-node" else "interior-object",
     }
+    if route_point:
+        normalized.update({
+            "x": route_point.get("x"),
+            "y": route_point.get("z"),
+            "z": route_point.get("z"),
+            "coordinateSpace": route_point.get("coordinateSpace"),
+            "localX": route_point.get("localX"),
+            "localZ": route_point.get("localZ"),
+            "routeTargetSource": "persisted-object-interaction-spot",
+        })
     metadata.update({
         "objectInstanceId": object_id,
         "catalogId": catalog_id,
@@ -13725,6 +13850,21 @@ def _normalize_move_target(target, agent_id, action_id=None):
         "availability": availability,
         "routingPlan": "object-action-spot-to-setAgentTarget",
     })
+    if route_point:
+        metadata.update({
+            "x": route_point.get("x"),
+            "y": route_point.get("z"),
+            "z": route_point.get("z"),
+            "coordinateSpace": route_point.get("coordinateSpace"),
+            "localX": route_point.get("localX"),
+            "localZ": route_point.get("localZ"),
+            "routeTargetSource": "persisted-object-interaction-spot",
+            "routeTargetEvidence": {
+                "objectX": route_point.get("objectX"),
+                "objectZ": route_point.get("objectZ"),
+                "interactionSpot": route_point.get("interactionSpot"),
+            },
+        })
     return normalized, metadata, None
 
 

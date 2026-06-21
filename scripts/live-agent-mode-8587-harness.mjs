@@ -798,6 +798,10 @@ async function verifyRouteBeforeActionPresenceGates() {
   let completedFixture = false;
   assert(create.action.route?.targetMetadata?.buildingId === OFFICE_BUILDING_ID, 'created action should include route target building metadata', create.action.route);
   assert(create.action.route?.targetMetadata?.objectInstanceId === COFFEE_MACHINE_ID, 'created action should include route target object metadata', create.action.route);
+  const routeTargetX = Number(create.action.route?.targetMetadata?.x ?? create.action.target?.x);
+  const routeTargetZ = Number(create.action.route?.targetMetadata?.z ?? create.action.target?.z);
+  assert(Number.isFinite(routeTargetX) && Number.isFinite(routeTargetZ), 'object-use route metadata should include resolved routeable coordinates', create.action.route);
+  assert(create.action.route?.targetMetadata?.routeTargetSource === 'persisted-object-interaction-spot', 'object-use route metadata should cite persisted object interaction evidence', create.action.route?.targetMetadata);
 
   const transition = async (status, reason) => {
     const response = await postJson(`/api/world-actions/${encodeURIComponent(actionId)}/transition`, {
@@ -817,26 +821,53 @@ async function verifyRouteBeforeActionPresenceGates() {
     assert(arrived.timing?.arrivedAt, 'arrival transition should record arrivedAt before mutation', arrived);
     const arrivedPresence = await fetchAgentPresenceSnapshot(TEST_AGENT_ID);
 
-    const wrongPresence = {
+    const missingCoordinatePresence = {
+      ...arrivedPresence,
       agentId: TEST_AGENT_ID,
-      buildingId: '8587-wrong-building',
+      buildingId: OFFICE_BUILDING_ID,
       floor: 1,
-      x: -999,
-      z: -999,
       worldActionId: actionId,
       routeId: arrived.route?.id,
       actionType: arrived.actionType,
       targetKind: 'object-instance',
       objectInstanceId: COFFEE_MACHINE_ID,
     };
-    await saveAgentPresenceSnapshot(TEST_AGENT_ID, wrongPresence, '8587-wrong-location-presence-gate');
-    const rejected = await postJsonExpectStatus(`/api/world-actions/${encodeURIComponent(actionId)}/transition`, {
+    missingCoordinatePresence.x = null;
+    missingCoordinatePresence.y = null;
+    missingCoordinatePresence.z = null;
+    missingCoordinatePresence.apiX = null;
+    missingCoordinatePresence.apiY = null;
+    missingCoordinatePresence.apiZ = null;
+    await saveAgentPresenceSnapshot(TEST_AGENT_ID, missingCoordinatePresence, '8587-same-building-missing-coordinate-presence-gate');
+    const missingCoordinateRejected = await postJsonExpectStatus(`/api/world-actions/${encodeURIComponent(actionId)}/transition`, {
       status: 'in_progress',
       source: 'agent-live-mode',
       actor: '8587-route-before-action-presence-gate',
-      result: { status: 'in_progress', reason: 'should-reject-wrong-location' },
+      result: { status: 'in_progress', reason: 'should-reject-missing-coordinates' },
     }, 409);
-    assert(rejected?.error?.code === 'presence_location_mismatch', 'wrong-location mutation should be rejected by presence gate', rejected);
+    assert(missingCoordinateRejected?.error?.code === 'presence_location_mismatch', 'same-building mutation with missing coordinates should be rejected by presence gate', missingCoordinateRejected);
+
+    const farAwayPresence = {
+      ...arrivedPresence,
+      agentId: TEST_AGENT_ID,
+      buildingId: OFFICE_BUILDING_ID,
+      floor: 1,
+      x: routeTargetX + 50,
+      z: routeTargetZ + 50,
+      worldActionId: actionId,
+      routeId: arrived.route?.id,
+      actionType: arrived.actionType,
+      targetKind: 'object-instance',
+      objectInstanceId: COFFEE_MACHINE_ID,
+    };
+    await saveAgentPresenceSnapshot(TEST_AGENT_ID, farAwayPresence, '8587-same-building-far-away-presence-gate');
+    const farAwayRejected = await postJsonExpectStatus(`/api/world-actions/${encodeURIComponent(actionId)}/transition`, {
+      status: 'in_progress',
+      source: 'agent-live-mode',
+      actor: '8587-route-before-action-presence-gate',
+      result: { status: 'in_progress', reason: 'should-reject-far-away' },
+    }, 409);
+    assert(farAwayRejected?.error?.code === 'presence_location_mismatch', 'same-building far-away mutation should be rejected by presence gate', farAwayRejected);
 
     const active = await fetchJson('/api/world-actions/active');
     const stillArrived = (active || []).find((item) => item?.id === actionId);
@@ -863,8 +894,8 @@ async function verifyRouteBeforeActionPresenceGates() {
     assert(completed.status === 'completed', 'route-before-action fixture should complete after correct presence is restored', completed);
     completedFixture = true;
 
-    console.log(`PASS: route-before-action gate rejected wrong-location mutation for ${actionId} and blocked direct raw Live Agent world edit.`);
-    return { actionId, rejected, rawRejected };
+    console.log(`PASS: route-before-action gate rejected missing-coordinate and far-away mutations for ${actionId} and blocked direct raw Live Agent world edit.`);
+    return { actionId, missingCoordinateRejected, farAwayRejected, rawRejected };
   } finally {
     if (!completedFixture) {
       try {
