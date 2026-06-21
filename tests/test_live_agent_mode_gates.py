@@ -137,6 +137,19 @@ class LiveAgentModeGateRegressionTest(unittest.TestCase):
         self.assertNotIn("worldActions", after)
         self.assertNotIn("animationEvents", after)
         self.assertNotIn("inWorldCommunications", after)
+        indicators = body.get("metrics", {}).get("aliveWorldIndicators", {})
+        self.assertEqual(indicators.get("schemaVersion"), "agent-live-mode-alive-world-indicators/v1")
+        self.assertIn("liveAgentHealth", indicators)
+        self.assertIn("locationExploration", indicators)
+        self.assertIn("toolExploration", indicators)
+        self.assertIn("publicExpression", indicators)
+        self.assertIn("socialGraphDepth", indicators)
+        self.assertIn("governanceProposalParticipation", indicators)
+        self.assertIn("economyPlaceholderActivity", indicators)
+        self.assertIn("safetyPublicOrderIncidents", indicators)
+        self.assertTrue(indicators.get("optimization", {}).get("readOnly"))
+        self.assertFalse(indicators.get("optimization", {}).get("protectedRuntimeScanned"))
+        self.assertEqual(body.get("finalGate", {}).get("evidence", {}).get("aliveWorldIndicators", {}).get("schemaVersion"), "agent-live-mode-alive-world-indicators/v1")
 
 
 if __name__ == "__main__":

@@ -107,7 +107,7 @@ The read-only metrics endpoint is:
 GET /api/live-agent-mode/metrics
 ```
 
-It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, per-agent live turn/action distribution, p50/p95 turn duration, action success/recovery rates, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, public expression evidence, reaction opportunities, bounded memory growth, relationship records, operator proposals, persisted Live Agent buildings, pause status, and kill-switch status. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
+It returns `agent-live-mode-autonomy-metrics/v1` with a checklist and counts for completed backend-owned turns/actions, per-agent live turn/action distribution, p50/p95 turn duration, action success/recovery rates, route-pending actions, typed object-use action types, simulation locations, animation replay events, in-world communication events, public expression evidence, reaction opportunities, bounded memory growth, relationship records, operator proposals, persisted Live Agent buildings, pause status, kill-switch status, and reference-inspired alive-world indicators. Mutation/tick endpoints remain license-gated; metrics are read-only so locked/demo states can still explain what is missing.
 
 The metrics endpoint must also expose the online-game presence contract:
 
@@ -191,6 +191,20 @@ It also reports lightweight provider readiness plus ClawMind-style architecture 
 - `metrics.publicExpression.safeExecutableTools[]` including `publish_note`
 - `metrics.publicExpression.proposalOnlyTools[]` for broad event/governance/economy tools
 - `finalGate.evidence.publicExpression`
+- `metrics.aliveWorldIndicators.schemaVersion = agent-live-mode-alive-world-indicators/v1`
+- `metrics.aliveWorldIndicators.liveAgentHealth`
+- `metrics.aliveWorldIndicators.locationExploration`
+- `metrics.aliveWorldIndicators.toolExploration`
+- `metrics.aliveWorldIndicators.publicExpression`
+- `metrics.aliveWorldIndicators.socialGraphDepth`
+- `metrics.aliveWorldIndicators.governanceProposalParticipation`
+- `metrics.aliveWorldIndicators.economyPlaceholderActivity`
+- `metrics.aliveWorldIndicators.safetyPublicOrderIncidents`
+- `metrics.aliveWorldIndicators.optimization.providerCallsDuringMetrics = 0`
+- `metrics.aliveWorldIndicators.optimization.modelCallsDuringMetrics = 0`
+- `metrics.aliveWorldIndicators.optimization.protectedRuntimeScanned = false`
+- `finalGate.checks.aliveWorldIndicatorsPresent`
+- `finalGate.evidence.aliveWorldIndicators`
 - `liveWorldReference.schemaVersion = agent-live-mode-live-world-reference/v1`
 - `liveWorldReference.reference.url = https://github.com/EmergenceAI/Emergence-World`
 - `liveWorldReference.reference.reviewedCommit = 7613dcb6554133144779f4c4f0ba49064894b3a5`
@@ -407,10 +421,10 @@ Readiness and runtime execution are measured separately by:
 
 The Live World reference mapping is a product-scoped guidance contract, not a wholesale import of the reference stack. `/api/live-agent-mode/metrics` exposes `liveWorldReference` and a compact `metrics.liveWorldReference` summary that maps ClawMind modules to the reviewed EmergenceAI/Emergence-World commit. Current statuses are:
 
-- `implemented`: embodied residents, tool-only mutation, location-gated tools, memory, and visible events.
+- `implemented`: embodied residents, tool-only mutation, location-gated tools, memory, visible events, and AWI-style alive-world indicators.
 - `partial`: relationship/social-fabric coverage, because the product has relationship and society traces but not the full reference taxonomy.
 - `proposal-only`: broader reference-style social, economy, governance, and world-changing affordances until typed visible executors, approvals, and rollback controls exist.
-- `missing`: AWI-style alive-world indicators until a follow-up exposes population health, location/tool exploration, public expression, social graph depth, governance, economy, and safety/public-order metrics.
+- `missing`: no currently tracked Live World reference pattern.
 
 Final-gate evidence repeats the compact `liveWorldReference` statuses so reviewers can see exactly which reference patterns are implemented, partial, proposal-only, or missing without changing manual world editing behavior.
 
