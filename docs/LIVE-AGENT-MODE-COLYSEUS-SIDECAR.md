@@ -1,6 +1,6 @@
 # Live Agent Mode Colyseus Sidecar
 
-Status: first implementation PR for the online-game foundation
+Status: stacked implementation path for the online-game foundation
 Scope: phases 1-3 of the Live Agent Mode restart plan
 
 This document defines how My Virtual World uses Colyseus without replacing the existing Python server.
@@ -27,7 +27,7 @@ Three.js remains the renderer. Colyseus does not replace the visual world, pathf
 | Browser client | Three.js rendering, current interior/exterior route execution, object action animation. |
 | Colyseus sidecar | Realtime agent runtime snapshots, route leases, heartbeat state, multi-client broadcast, runtime persistence. |
 
-This PR starts the sidecar. Later PRs will wire the browser to hydrate and observe from it.
+The parent PR starts the sidecar. The first child PR wires the browser to hydrate and observe agent locations from it.
 
 ## Runtime Room
 
@@ -140,15 +140,44 @@ The public product smoke suite remains:
 npm test
 ```
 
+## Browser Hydration Child PR
+
+The browser loads the Colyseus browser SDK from:
+
+```text
+/node_modules/@colyseus/sdk/dist/colyseus.js
+```
+
+The Three.js client then connects through:
+
+```text
+src/client/js/agent-runtime-client.mjs
+```
+
+Hydration flow:
+
+1. the browser fetches `/vw-config`
+2. if realtime is enabled, it joins the `agent_runtime` room
+3. `loadAgents()` builds the normal roster with desk/home fallback positions
+4. matching Colyseus snapshots override those positions before `createAgent3D(...)`
+5. runtime updates continue to reposition matching agents
+6. live-owned or leased runtime snapshots are marked observer-only in this browser until route ownership is implemented
+
+Matching is done by stable identity keys:
+
+```text
+agentId, id, statusKey, name
+```
+
+This keeps the current product behavior safe when the sidecar is disabled or when no runtime snapshot exists for an agent.
+
 ## Next PRs
 
-This PR does not yet change visible browser movement.
+The sidecar parent PR does not change visible browser movement. The hydration child PR changes only initial/observed placement.
 
 Follow-up work:
 
-- browser runtime client module
-- hydrate agent positions from Colyseus before desk/home/random fallback
-- observer interpolation from Colyseus state
+- richer observer interpolation from Colyseus state
 - route executor lease claim before `setAgentTarget(...)`
 - heartbeat publishing during existing route execution
 - stale lease recovery on refresh or executor disconnect

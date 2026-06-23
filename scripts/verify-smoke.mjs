@@ -144,6 +144,7 @@ const jsSyntaxTargets = [
   'src/client/js/dynamic-exterior-routing.js',
   'src/client/js/physics.js',
   'src/client/js/vo-engine.js',
+  'src/client/js/agent-runtime-client.mjs',
   'src/realtime/agent-runtime-room.mjs',
   'src/realtime/server.mjs',
   'scripts/dev-with-realtime.mjs',
