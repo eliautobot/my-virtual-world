@@ -26,6 +26,11 @@ services:
       - VW_OPENCLAW_PATH=/openclaw
       - VW_OPENCLAW_HOST_PATH=${VW_OPENCLAW_HOST_PATH:-${HOME}/.openclaw}
       - VW_GATEWAY_URL=${VW_GATEWAY_URL:-ws://host.docker.internal:18789}
+      - VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-false}
+      - VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-}
+      - VW_REALTIME_URL=${VW_REALTIME_URL:-}
+      - VW_REALTIME_ROOM=${VW_REALTIME_ROOM:-agent_runtime}
+      - VW_REALTIME_PORT=${VW_REALTIME_PORT:-8591}
       - VW_HERMES_ENABLED=${VW_HERMES_ENABLED:-true}
       - VW_HERMES_HOME=${VW_HERMES_HOME:-/home/vw/.hermes}
       - VW_HERMES_BIN=${VW_HERMES_BIN:-/home/vw/.local/bin/hermes}

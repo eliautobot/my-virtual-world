@@ -135,6 +135,8 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_OPENCLAW_PATH` | `/openclaw` | Mounted OpenClaw home path |
 | `VW_OPENCLAW_HOST_PATH` | `~/.openclaw` | Host OpenClaw home path used when Gateway creates agent workspaces |
 | `VW_GATEWAY_URL` | `ws://host.docker.internal:18789` | OpenClaw gateway WebSocket URL |
+| `VW_REALTIME_ENABLED` | `false` | Enable optional Colyseus realtime runtime config |
+| `VW_REALTIME_BROWSER_URL` | `ws://127.0.0.1:8591` | Browser-reachable realtime URL for this self-hosted install |
 | `VW_HERMES_ENABLED` | `true` | Enable local Hermes profile support |
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker |
 | `VW_HERMES_BIN` | `/home/vw/.hermes/hermes-agent/hermes` | Hermes CLI path inside Docker |

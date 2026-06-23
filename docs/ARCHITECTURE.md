@@ -51,7 +51,7 @@ The server is the durable store and guardrail layer:
 
 ## Realtime Sidecar
 
-Live Agent Mode uses an optional Colyseus sidecar for online-game runtime state. The sidecar does not replace the Python server or Three.js renderer. It owns only realtime live-agent snapshots, route leases, heartbeat state, and broadcast to connected clients.
+Live Agent Mode uses an optional Colyseus sidecar for online-game runtime state. The sidecar does not replace the Python server or Three.js renderer. It owns only realtime live-agent snapshots, route leases, heartbeat state, and broadcast to connected clients. Each self-hosted install runs its own sidecar; browsers connect through that install's browser-reachable realtime URL.
 
 See [LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md](LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md).
 

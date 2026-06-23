@@ -108,14 +108,15 @@ assert(dockerfile.includes('VW_LICENSE_STORE_ID=321733'), 'Dockerfile should def
 assert(dockerfile.includes('VW_LICENSE_PRODUCT_IDS=1140366'), 'Dockerfile should default to the My Virtual World Lemon Squeezy product ID');
 
 const dockerCompose = read('docker-compose.yml');
+const envExample = read('.env.example');
 assert(!/(^|[^A-Za-z0-9_])\/home\/(?!vw\b|kasm-user\b)[A-Za-z0-9._-]+/i.test(dockerCompose), 'docker-compose.yml must not contain host home paths');
 assert(!/\b100\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(dockerCompose), 'docker-compose.yml must not contain private tailnet addresses');
 assert(dockerCompose.includes('${VW_HOST_PORT:-8590}:${VW_PORT:-8590}'), 'docker-compose.yml should support a configurable Docker host port');
-assert(read('.env.example').includes('VW_HOST_PORT=8590'), '.env.example should document the Docker host port');
+assert(envExample.includes('VW_HOST_PORT=8590'), '.env.example should document the Docker host port');
 assert(dockerCompose.includes('VW_LICENSE_STORE_ID=${VW_LICENSE_STORE_ID:-321733}'), 'docker-compose.yml should pass the My Virtual World Lemon Squeezy store ID');
 assert(dockerCompose.includes('VW_LICENSE_PRODUCT_IDS=${VW_LICENSE_PRODUCT_IDS:-1140366}'), 'docker-compose.yml should pass the My Virtual World Lemon Squeezy product ID');
-assert(read('.env.example').includes('VW_LICENSE_STORE_ID=321733'), '.env.example should document the My Virtual World Lemon Squeezy store ID');
-assert(read('.env.example').includes('VW_LICENSE_PRODUCT_IDS=1140366'), '.env.example should document the My Virtual World Lemon Squeezy product ID');
+assert(envExample.includes('VW_LICENSE_STORE_ID=321733'), '.env.example should document the My Virtual World Lemon Squeezy store ID');
+assert(envExample.includes('VW_LICENSE_PRODUCT_IDS=1140366'), '.env.example should document the My Virtual World Lemon Squeezy product ID');
 
 const gitignore = read('.gitignore');
 for (const token of ['.env', 'node_modules/', '.tmp-data/', 'backups/', 'memory/', '*.py[cod]', '__pycache__/']) {
@@ -531,6 +532,25 @@ for (const token of [
   'liveModeHomeForAgentId',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing Live Mode construction token: ${token}`);
+}
+for (const token of [
+  'VW_REALTIME_BROWSER_URL',
+  '_env_or("VW_REALTIME_URL", cfg["realtime"].get("url") or "")',
+]) {
+  assert(serverPy.includes(token), `server.py missing realtime browser URL token: ${token}`);
+}
+for (const token of [
+  'VW_REALTIME_BROWSER_URL=ws://127.0.0.1:8591',
+  'Browser-reachable Colyseus WebSocket URL for this self-hosted runtime',
+  'Self-Hosted Runtime Address',
+]) {
+  assert(`${envExample}\n${read('docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md')}`.includes(token), `realtime self-host docs missing token: ${token}`);
+}
+for (const token of [
+  'VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-}',
+  'VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-false}',
+]) {
+  assert(dockerCompose.includes(token), `docker-compose.yml missing realtime env token: ${token}`);
 }
 for (const token of [
   'isAgentLiveModeScriptedSuppressed',

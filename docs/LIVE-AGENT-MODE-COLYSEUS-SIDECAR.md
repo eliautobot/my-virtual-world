@@ -113,7 +113,7 @@ VW_DATA_DIR=.local-data VW_REALTIME_PORT=8591 npm run realtime
 Run the Python app and realtime sidecar together:
 
 ```bash
-VW_DATA_DIR=.local-data VW_REALTIME_ENABLED=true VW_REALTIME_URL=ws://127.0.0.1:8591 npm run dev:realtime
+VW_DATA_DIR=.local-data VW_REALTIME_ENABLED=true VW_REALTIME_BROWSER_URL=ws://127.0.0.1:8591 npm run dev:realtime
 ```
 
 Configuration variables:
@@ -121,9 +121,25 @@ Configuration variables:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VW_REALTIME_ENABLED` | `false` | Exposes the realtime config to the browser config payload. |
-| `VW_REALTIME_URL` | empty in app config | Browser-facing Colyseus WebSocket URL. |
+| `VW_REALTIME_BROWSER_URL` | empty in app config | Browser-reachable Colyseus WebSocket URL for this self-hosted runtime. |
+| `VW_REALTIME_URL` | empty | Backwards-compatible alias for `VW_REALTIME_BROWSER_URL`. |
 | `VW_REALTIME_ROOM` | `agent_runtime` | Colyseus room name. |
 | `VW_REALTIME_PORT` | `8591` | Sidecar HTTP/WebSocket port. |
+
+## Self-Hosted Runtime Address
+
+The realtime URL is not a hosted My Virtual World service. It is the address that a browser uses to reach the user's own Colyseus sidecar.
+
+Examples:
+
+| Setup | App URL | Realtime URL |
+| --- | --- | --- |
+| Same machine | `http://127.0.0.1:8590` | `ws://127.0.0.1:8591` |
+| LAN or Tailscale | `http://my-world-pc:8590` | `ws://my-world-pc:8591` |
+| LAN or Tailscale IP | `http://100.x.y.z:8590` | `ws://100.x.y.z:8591` |
+| Reverse proxy with TLS | `https://world.example.com` | `wss://world.example.com/realtime` |
+
+If `/vw-config` returns a loopback realtime URL, the browser client rewrites only the hostname to the page host when the page was opened through a non-loopback host. That keeps local defaults usable for LAN and private VPN testing, while explicit `VW_REALTIME_BROWSER_URL` values still win for custom deployments.
 
 ## Verification
 
