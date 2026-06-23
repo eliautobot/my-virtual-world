@@ -88,6 +88,9 @@ The repo includes internal documentation for both people and AI agents:
 - [docs/API.md](docs/API.md) - HTTP endpoint reference.
 - [docs/WORLD-DATA.md](docs/WORLD-DATA.md) - saved world JSON, buildings, chunks, roads, agents, and world actions.
 - [docs/AGENT-INTEGRATION.md](docs/AGENT-INTEGRATION.md) - OpenClaw, Hermes, agent presence, chat, and Agent Live Mode.
+- [docs/LIVE-AGENT-MODE-RESTART-SPEC.md](docs/LIVE-AGENT-MODE-RESTART-SPEC.md) - fresh Live Agent Mode architecture and Generative Agents adaptation.
+- [docs/LIVE-AGENT-MODE-RESTART-PHASES.md](docs/LIVE-AGENT-MODE-RESTART-PHASES.md) - ordered phase plan for building Live Agent Mode progressively.
+- [docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md](docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md) - Colyseus sidecar architecture for the online-game runtime foundation.
 - [docs/AGENT_PLATFORM_COMMUNICATIONS.md](docs/AGENT_PLATFORM_COMMUNICATIONS.md) - visible agent-to-agent messaging through My Virtual World.
 - [docs/VIRTUAL_WORLD_AGENT_TOOLS.md](docs/VIRTUAL_WORLD_AGENT_TOOLS.md) - canonical agent-facing tool index.
 - [docs/SKILLS.md](docs/SKILLS.md) - reusable skill files under `docs/skills/`.
