@@ -181,6 +181,7 @@ const indexHtml = read('src/client/index.html');
 const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
+const agentRuntimeClientJs = read('src/client/js/agent-runtime-client.mjs');
 const chatJs = read('src/client/js/chat.js');
 const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
@@ -279,7 +280,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260617-road-draw-r26',
+  'js/main3d.js?v=20260623-runtime-coherence-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -554,8 +555,20 @@ for (const token of [
   "completeIdleWorldAction(printerActivity",
   'whiteboard-planning-complete',
   'printer-scanner-use-complete',
+  'AGENT_RUNTIME_POSITION_WRITER_STALE_MS',
+  'makeAgentRuntimeClientOwner',
+  'isAgentRuntimeSnapshotRemoteWriterActive',
+  '_runtimeRemoteWriterActive',
+  'agent-runtime-client.mjs?v=20260623-runtime-url-r1',
 ]) {
   assert(`${main3dJs}\n${agentCharactersJs}`.includes(token), `Live Mode head indicator missing token: ${token}`);
+}
+for (const token of [
+  'resolveRuntimeUrlForPage',
+  'isLoopbackHost',
+  'parsed.hostname = pageHost',
+]) {
+  assert(agentRuntimeClientJs.includes(token), `agent runtime client missing URL resolution token: ${token}`);
 }
 for (const token of [
   'data-settings-tab="live-mode"',

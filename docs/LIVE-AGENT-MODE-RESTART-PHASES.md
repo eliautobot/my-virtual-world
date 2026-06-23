@@ -138,6 +138,15 @@ Third child PR scope:
 
 This makes persistence more visible without adding the planner/model layer.
 
+Runtime coherence child PR:
+
+- promote runtime snapshots from refresh persistence to multi-client authority for every agent
+- mark scripted/manual snapshot writers with the browser session in `owner`
+- make non-writer browsers render fresh remote snapshots as observer-only
+- publish idle keepalives so one tab continues to own coherent agent simulation
+- let another tab take over when the writer becomes stale or when a user manually drags an agent
+- keep route leases as the stronger movement ownership mechanism
+
 ## Phase 4 - Live Mode Ownership and Toggle Semantics
 
 Goal: make enable/disable behavior reliable.
