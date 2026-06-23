@@ -537,18 +537,6 @@ body.vw-demo-locked .feature-locked-control {
     border-color: rgba(255,193,7,.42);
     background: rgba(255,193,7,.10);
 }
-.settings-live-mode-coming-soon {
-    min-height: 120px;
-    align-content: center;
-    justify-items: center;
-    text-align: center;
-    border-color: rgba(255,193,7,.42);
-    background: rgba(255,193,7,.10);
-}
-.settings-live-mode-coming-soon strong {
-    color: #ffe082;
-    font-size: 16px;
-}
 .settings-resource-card {
     display: flex;
     align-items: center;

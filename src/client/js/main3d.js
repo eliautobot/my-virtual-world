@@ -30414,8 +30414,6 @@ async function persistAgentProfile(agent, patch) {
 }
 
 async function setAgentLiveModeEnabled(agentOrId, enabled, options = {}) {
-  showToast('Live Agent Mode Coming Soon', 'info');
-  throw new Error('Live Agent Mode Coming Soon');
   if (isLicenseFeatureLocked('agentLiveMode')) {
     showLicenseLockedToast('Agent Live Mode');
     throw new Error('Activation required for Agent Live Mode.');
@@ -30791,6 +30789,8 @@ function openAgentPanel(agentId, _opts = {}) {
   // Info card with appearance
   const normalizedPanelStatus = normalizeLiveAgentStatus(agent.status) || 'offline';
   const statusClass = ['working', 'finishing', 'meeting', 'idle', 'break'].includes(normalizedPanelStatus) ? normalizedPanelStatus : 'offline';
+  const agentLiveModeEnabled = normalizeAgentLiveModeEnabled(agent);
+  const agentLiveModeLocked = isLicenseFeatureLocked('agentLiveMode');
   const ap = agent._appearance || {};
   const shirtHex = ap.shirtColor || '#1565c0';
   const hairHex = ap.hairColor || '#333333';
@@ -30883,10 +30883,11 @@ function openAgentPanel(agentId, _opts = {}) {
     <span class="agent-status-badge ${statusClass}">${getPresenceStateIcon(agent.status)} ${agent.status || 'offline'}</span>
     ${agent.task ? `<div class="agent-task-text">${escapeHtml(agent.task)}</div>` : ''}
     ${agent.presenceSource ? `<div class="agent-task-text">source: ${escapeHtml(agent.presenceSource)}</div>` : ''}
-    <div class="agent-live-mode-toggle agent-live-mode-toggle-disabled" title="Live Agent Mode Coming Soon">
-      <span>Live Agent Mode Coming Soon</span>
-      <strong>disabled</strong>
-    </div>
+    <label class="agent-live-mode-toggle ${agentLiveModeLocked ? 'agent-live-mode-toggle-disabled' : ''}" title="${agentLiveModeLocked ? 'Activation required for Agent Live Mode.' : 'Agent Live Mode'}">
+      <span>Agent Live Mode</span>
+      <input id="agentPanel-liveMode" type="checkbox" ${agentLiveModeEnabled ? 'checked' : ''} ${agentLiveModeLocked ? 'disabled aria-disabled="true"' : ''}>
+      <strong>${agentLiveModeEnabled ? 'enabled' : 'disabled'}</strong>
+    </label>
   `;
   const liveModeToggle = document.getElementById('agentPanel-liveMode');
   liveModeToggle?.addEventListener('change', async () => {
@@ -30900,7 +30901,7 @@ function openAgentPanel(agentId, _opts = {}) {
       liveModeToggle.checked = normalizeAgentLiveModeEnabled(agent);
       showToast(error?.message || 'Could not update Agent Live Mode', 'error');
     } finally {
-      liveModeToggle.disabled = false;
+      liveModeToggle.disabled = isLicenseFeatureLocked('agentLiveMode');
       renderAgentIntentDebugReadout();
     }
   });
@@ -30948,7 +30949,7 @@ function openAgentPanel(agentId, _opts = {}) {
   }
 
   if (isLicenseFeatureLocked('advancedEditor')) {
-    for (const id of ['agentPanel-name', 'agentPanel-saveName', 'agentPanel-editAppearance', 'agentPanel-work', 'agentPanel-home', 'agentPanel-assign', 'agentPanel-liveMode']) {
+    for (const id of ['agentPanel-name', 'agentPanel-saveName', 'agentPanel-editAppearance', 'agentPanel-work', 'agentPanel-home', 'agentPanel-assign']) {
       const el = document.getElementById(id);
       if (!el) continue;
       el.disabled = true;
@@ -30960,7 +30961,7 @@ function openAgentPanel(agentId, _opts = {}) {
       const notice = document.createElement('div');
       notice.className = 'settings-status-card locked';
       notice.dataset.demoAgentLockNotice = '1';
-      notice.innerHTML = '<strong>Demo lock</strong><span>Agent name, appearance, assignment, and live-mode edits require a license key.</span>';
+      notice.innerHTML = '<strong>Demo lock</strong><span>Agent name, appearance, and assignment edits require a license key.</span>';
       body.insertBefore(notice, body.firstChild);
     }
   }

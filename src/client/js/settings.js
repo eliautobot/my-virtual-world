@@ -4,7 +4,6 @@
   let liveModeAgents = [];
   let liveModeLoopStatus = null;
   const liveModeAgentEdits = new Map();
-  const LIVE_AGENT_MODE_COMING_SOON = 'Live Agent Mode Coming Soon';
 
   const $ = (id) => document.getElementById(id);
   const setText = (id, text) => { const el = $(id); if (el) el.textContent = text; };
@@ -41,6 +40,7 @@
       if (!el) return;
       el.disabled = locked;
       el.classList.toggle('feature-locked-control', locked);
+      el.closest('.settings-check')?.classList.toggle('settings-check-disabled', locked);
       if (locked) el.setAttribute('aria-disabled', 'true');
       else el.removeAttribute('aria-disabled');
     });
@@ -80,15 +80,15 @@
     const summary = $('licenseSummary');
     if (summary) {
       summary.innerHTML = trial
-        ? `<strong>Demo mode</strong><span>${DEMO_MESSAGE} Editing, Agent Browser, and SMS / Twilio unlock after activation. Live Agent Mode is coming soon.</span>`
+        ? `<strong>Demo mode</strong><span>${DEMO_MESSAGE} Editing, Agent Browser, SMS / Twilio, and Agent Live Mode unlock after activation.</span>`
         : `<strong>${lic.tierName || 'Licensed'}</strong><span>All Virtual World features are unlocked${lic.activatedAt ? ` since ${lic.activatedAt}` : ''}.</span>`;
       summary.classList.toggle('locked', trial);
     }
     const lockNotice = $('featureLockNotice');
     if (lockNotice) {
       lockNotice.innerHTML = trial
-        ? '<strong>Demo locks active</strong><span>Editing, Agent Browser, and SMS / Twilio require an active license key. Live Agent Mode is coming soon.</span>'
-        : '<strong>Full access</strong><span>Paid integrations are available when configured. Live Agent Mode is coming soon.</span>';
+        ? '<strong>Demo locks active</strong><span>Editing, Agent Browser, SMS / Twilio, and Agent Live Mode require an active license key.</span>'
+        : '<strong>Full access</strong><span>Paid integrations and Agent Live Mode are available when configured.</span>';
       lockNotice.classList.toggle('locked', trial);
     }
     setLocked([
@@ -114,7 +114,7 @@
       const el = $(id);
       if (el && trial) el.checked = false;
     });
-    applyLiveAgentModeComingSoonUi();
+    applyLiveAgentModeAvailabilityUi();
   }
 
   async function populateAgents(selectedId = '') {
@@ -151,30 +151,16 @@
     });
   }
 
-  function applyLiveAgentModeComingSoonUi() {
+  function applyLiveAgentModeAvailabilityUi() {
     const feature = $('setting-featureAgentLiveMode');
     if (feature) {
-      feature.checked = false;
-      feature.disabled = true;
-      feature.setAttribute('aria-disabled', 'true');
-      feature.closest('.settings-check')?.classList.add('settings-check-disabled');
+      const trial = isTrialLicense(vwConfig?.license || {});
+      feature.closest('.settings-check')?.classList.toggle('settings-check-disabled', trial);
     }
-    liveModeAgents = [];
-    liveModeLoopStatus = null;
-    liveModeAgentEdits.clear();
-    setLiveModeControlsDisabled(true);
-    const card = $('liveModeComingSoon');
-    if (card) {
-      card.classList.add('locked');
-      card.innerHTML = `<strong>${LIVE_AGENT_MODE_COMING_SOON}</strong>`;
-    }
+    setLiveModeControlsDisabled(isTrialLicense(vwConfig?.license || {}) || !checked('setting-featureAgentLiveMode'));
   }
 
   function renderLiveModeLoopStatus() {
-    if ($('liveModeComingSoon')) {
-      applyLiveAgentModeComingSoonUi();
-      return;
-    }
     const card = $('liveModeLoopStatus');
     if (!card) return;
     const trial = isTrialLicense(vwConfig?.license || {});
@@ -219,10 +205,6 @@
   }
 
   function renderLiveModeAgents() {
-    if ($('liveModeComingSoon')) {
-      applyLiveAgentModeComingSoonUi();
-      return;
-    }
     const list = $('liveModeAgentList');
     const summary = $('liveModeSummary');
     if (!list || !summary) return;
@@ -245,7 +227,8 @@
       empty.className = 'settings-live-agent-empty';
       empty.textContent = 'No agents found.';
       list.appendChild(empty);
-      setLiveModeControlsDisabled(true);
+      setLiveModeControlsDisabled(trial || !globalEnabled);
+      $('btn-saveLiveAgents')?.toggleAttribute('disabled', true);
       return;
     }
 
@@ -288,11 +271,6 @@
   }
 
   async function refreshLiveModeLoopStatus({ quiet = false } = {}) {
-    if ($('liveModeComingSoon')) {
-      applyLiveAgentModeComingSoonUi();
-      if (!quiet) setStatus('liveModeLoopActionStatus', LIVE_AGENT_MODE_COMING_SOON, 'info');
-      return null;
-    }
     try {
       liveModeLoopStatus = await fetchJson('/api/agent-live-loop');
       renderLiveModeLoopStatus();
@@ -305,10 +283,6 @@
   }
 
   async function updateLiveModeLoop(payload, successText) {
-    if ($('liveModeComingSoon')) {
-      setStatus('liveModeLoopActionStatus', LIVE_AGENT_MODE_COMING_SOON, 'info');
-      return null;
-    }
     if (isTrialLicense(vwConfig?.license || {})) {
       setStatus('liveModeLoopActionStatus', 'Agent Live Mode is locked until activation.', 'warn');
       return null;
@@ -354,11 +328,6 @@
   }
 
   async function refreshLiveModeAgents() {
-    if ($('liveModeComingSoon')) {
-      applyLiveAgentModeComingSoonUi();
-      setStatus('liveModeAgentStatus', LIVE_AGENT_MODE_COMING_SOON, 'info');
-      return;
-    }
     const list = $('liveModeAgentList');
     if (list) list.innerHTML = '<div class="settings-live-agent-empty">Loading...</div>';
     try {
@@ -410,7 +379,7 @@
     const trial = isTrialLicense(config.license || {});
     if ($('setting-featureBrowser')) $('setting-featureBrowser').checked = !trial && !!features.agentBrowser;
     if ($('setting-featureSms')) $('setting-featureSms').checked = !trial && !!features.sms;
-    if ($('setting-featureAgentLiveMode')) $('setting-featureAgentLiveMode').checked = false;
+    if ($('setting-featureAgentLiveMode')) $('setting-featureAgentLiveMode').checked = !trial && !!features.agentLiveMode;
     if ($('setting-featureDebugTools')) $('setting-featureDebugTools').checked = features.debugTools !== false;
     if ($('setting-browserCdpUrl')) $('setting-browserCdpUrl').value = browser.cdpUrl || '';
     if ($('setting-browserViewerUrl')) $('setting-browserViewerUrl').value = browser.viewerUrl || '';
@@ -422,7 +391,13 @@
     if ($('setting-objectActionPointDebug')) $('setting-objectActionPointDebug').checked = debug.objectActionPointDebug === true;
     updateLicenseUi(config);
     populateAgents(sms.ownerAgentId || '');
-    applyLiveAgentModeComingSoonUi();
+    applyLiveAgentModeAvailabilityUi();
+    renderLiveModeAgents();
+    renderLiveModeLoopStatus();
+    if (!trial && !!features.agentLiveMode) {
+      refreshLiveModeAgents().catch(() => {});
+      refreshLiveModeLoopStatus({ quiet: true }).catch(() => {});
+    }
   }
 
   function buildSettingsPayload() {
@@ -460,7 +435,7 @@
       features: {
         agentBrowser: !trial && checked('setting-featureBrowser'),
         sms: !trial && checked('setting-featureSms'),
-        agentLiveMode: false,
+        agentLiveMode: !trial && checked('setting-featureAgentLiveMode'),
         debugTools: checked('setting-featureDebugTools'),
         weather: checked('setting-enableWeather'),
       },
@@ -503,10 +478,6 @@
   }
 
   async function saveLiveModeAgents() {
-    if ($('liveModeComingSoon')) {
-      setStatus('liveModeAgentStatus', LIVE_AGENT_MODE_COMING_SOON, 'info');
-      return;
-    }
     if (isTrialLicense(vwConfig?.license || {})) {
       setStatus('liveModeAgentStatus', 'Agent Live Mode is locked until activation.', 'warn');
       return;
@@ -641,8 +612,13 @@
   function bind() {
     document.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.settingsTab)));
     $('setting-featureAgentLiveMode')?.addEventListener('change', () => {
+      applyLiveAgentModeAvailabilityUi();
       renderLiveModeAgents();
       renderLiveModeLoopStatus();
+      if (checked('setting-featureAgentLiveMode')) {
+        refreshLiveModeAgents().catch(err => setStatus('liveModeAgentStatus', err.message, 'warn'));
+        refreshLiveModeLoopStatus({ quiet: true }).catch(() => {});
+      }
     });
     $('btn-refreshLiveAgents')?.addEventListener('click', () => refreshLiveModeAgents().catch(err => setStatus('liveModeAgentStatus', err.message, 'warn')));
     $('btn-saveLiveAgents')?.addEventListener('click', () => saveLiveModeAgents().catch(err => setStatus('liveModeAgentStatus', err.message, 'warn')));
