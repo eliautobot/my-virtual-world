@@ -146,6 +146,17 @@ async function run() {
     const conflict = await waitForRoomMessage(room, 'runtime:error', (msg) => msg.requestId === 'claim-conflict');
     assert.equal(conflict.code, 'lease_conflict');
 
+    room.send('runtime:snapshot', {
+      requestId: 'snapshot-during-lease',
+      agentId: 'adam',
+      x: 99,
+      y: 99,
+      floor: 1,
+      state: 'idle',
+    });
+    const snapshotConflict = await waitForRoomMessage(room, 'runtime:error', (msg) => msg.requestId === 'snapshot-during-lease');
+    assert.equal(snapshotConflict.code, 'lease_conflict');
+
     room.send('runtime:heartbeat', {
       requestId: 'heartbeat-1',
       agentId: 'adam',
@@ -171,6 +182,21 @@ async function run() {
     assert.equal(releaseAck.snapshot.leaseOwner, '');
     assert.equal(releaseAck.snapshot.routeId, '');
     assert.equal(releaseAck.snapshot.worldActionId, '');
+
+    room.send('runtime:claimRoute', {
+      requestId: 'claim-stale',
+      agentId: 'adam',
+      leaseOwner: 'smoke-client-stale',
+      routeId: 'route-stale-1',
+      target: { kind: 'world-point', x: 10, y: 11, floor: 1 },
+      ttlMs: 1000,
+    });
+    const staleClaimAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'claim-stale');
+    assert.equal(staleClaimAck.snapshot.leaseOwner, 'smoke-client-stale');
+    const expiredEvent = await waitForRoomMessage(room, 'runtime:event', (msg) => msg.type === 'route-lease-expired' && msg.agentId === 'adam');
+    assert.equal(expiredEvent.expiredLeaseOwner, 'smoke-client-stale');
+    const expiredAgent = await waitForAgent(room, 'adam', (agent) => agent.leaseOwner === '' && agent.routeId === '' && agent.state === 'idle');
+    assert.equal(expiredAgent.worldActionId, '');
     await room.leave(true);
 
     await stopServer(server);

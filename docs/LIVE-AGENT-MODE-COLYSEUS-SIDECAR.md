@@ -99,7 +99,8 @@ Lease rules:
 - a second lease owner is rejected while the current lease is active
 - heartbeats extend the lease TTL
 - releasing a route clears the lease and persists the final runtime snapshot
-- stale leases can be reclaimed after expiry
+- stale leases are automatically expired after their TTL
+- plain snapshots cannot overwrite an active route lease owned by another browser
 
 ## Local Development
 
@@ -132,7 +133,7 @@ Realtime smoke test:
 npm run verify:realtime
 ```
 
-The smoke test starts a sidecar on a temporary port, joins the `agent_runtime` room with the current Colyseus SDK client, writes a snapshot, claims a route lease, verifies a lease conflict, sends a heartbeat, releases the route, restarts the sidecar, and verifies the saved position reloads from `agent-runtime.json`.
+The smoke test starts a sidecar on a temporary port, joins the `agent_runtime` room with the current Colyseus SDK client, writes a snapshot, claims a route lease, verifies lease conflicts, blocks a plain snapshot from overwriting an active lease, sends a heartbeat, releases the route, expires a stale lease, restarts the sidecar, and verifies the saved position reloads from `agent-runtime.json`.
 
 The public product smoke suite remains:
 
@@ -202,12 +203,36 @@ window.__VWStartRuntimeLeasedRoute(agentId, { x, y, floor })
 
 That helper is for local/browser testing only. It gives Phase 3 a deterministic way to prove route claim, heartbeat, movement, and release before the AI planner exists.
 
+## Visible Persistence And Recovery Child PR
+
+The third child PR makes Phase 3 visible through normal movement paths, not only the deterministic debug helper.
+
+Runtime persistence flow:
+
+1. admitted `setAgentTarget(...)` routes claim a Colyseus route lease by default
+2. while the route is pending, the local agent waits instead of moving ahead of server ownership
+3. after claim ack, the existing browser route executor moves the agent
+4. route heartbeats update Colyseus while the agent moves
+5. route release persists the final location and clears route metadata
+6. manual drag/drop placement writes a forced `runtime:snapshot`
+7. ordinary idle/settled positions are published through a throttled snapshot path
+
+Recovery flow:
+
+1. every route heartbeat extends `leaseExpiresAt`
+2. the sidecar sweeps expired leases every second
+3. expired leases clear `routeId`, `worldActionId`, `target`, `leaseOwner`, and `leaseExpiresAt`
+4. the sidecar records a `route-lease-expired` event
+5. another browser can claim a new route after the stale lease is cleared
+
+This still does not add AI behavior. It makes the online-game foundation testable: move/place an agent, refresh, and the runtime snapshot should now be the source of the next load position.
+
 ## Next PRs
 
-The sidecar parent PR does not change visible browser movement. The hydration child PR changes only initial/observed placement.
+The sidecar parent PR starts the runtime server. The hydration child PR changes initial/observed placement. The route-heartbeat child PR proves route claim/heartbeat/release. The visible persistence child PR wires ordinary route movement and stale-lease recovery into that runtime.
 
 Follow-up work:
 
 - richer observer interpolation from Colyseus state
-- stale lease recovery on refresh or executor disconnect
+- promotion from normal movement persistence to Live Mode toggle ownership
 - promotion from debug/manual route trigger to real planner/model route requests
