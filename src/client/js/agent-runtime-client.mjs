@@ -1,5 +1,6 @@
 const DEFAULT_ROOM = 'agent_runtime';
 const DEFAULT_CONFIG = Object.freeze({ enabled: false, url: '', room: DEFAULT_ROOM });
+const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
 export function getRuntimeIdentityKeys(agent = {}) {
   const keys = new Set();
@@ -156,6 +157,7 @@ export async function createAgentRuntimeClient({
   let room = null;
   let client = null;
   let unsubscribeState = null;
+  let requestSeq = 0;
 
   const notify = source => {
     const frozen = new Map(snapshots);
@@ -195,6 +197,42 @@ export async function createAgentRuntimeClient({
     return agentRuntimeUnavailable('connection failed', config);
   }
 
+  const leaseOwner = `main3d:${room.sessionId}`;
+
+  const sendRequest = (type, payload = {}, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {}) => {
+    if (!room) return Promise.reject(new Error('runtime room unavailable'));
+    const requestId = `${type}:${Date.now()}:${++requestSeq}`;
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const cleanup = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (typeof unsubscribeAck === 'function') unsubscribeAck();
+        if (typeof unsubscribeError === 'function') unsubscribeError();
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`${type} timed out`));
+      }, timeoutMs);
+      const unsubscribeAck = room.onMessage('runtime:ack', message => {
+        if (message?.requestId !== requestId) return;
+        cleanup();
+        resolve(message);
+      });
+      const unsubscribeError = room.onMessage('runtime:error', message => {
+        if (message?.requestId !== requestId) return;
+        cleanup();
+        const error = new Error(message?.message || `${type} failed`);
+        error.code = message?.code || 'runtime_error';
+        error.details = message?.details || {};
+        error.response = message;
+        reject(error);
+      });
+      room.send(type, { ...(payload || {}), requestId });
+    });
+  };
+
   return Object.freeze({
     enabled: true,
     connected: true,
@@ -202,6 +240,7 @@ export async function createAgentRuntimeClient({
     config,
     room,
     client,
+    leaseOwner,
     get snapshots() {
       return new Map(snapshots);
     },
@@ -215,6 +254,19 @@ export async function createAgentRuntimeClient({
       if (typeof listener !== 'function') return () => {};
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    sendRequest,
+    writeSnapshot(payload, options) {
+      return sendRequest('runtime:snapshot', payload, options);
+    },
+    claimRoute(payload, options) {
+      return sendRequest('runtime:claimRoute', { leaseOwner, ...(payload || {}) }, options);
+    },
+    heartbeat(payload, options) {
+      return sendRequest('runtime:heartbeat', { leaseOwner, ...(payload || {}) }, options);
+    },
+    releaseRoute(payload, options) {
+      return sendRequest('runtime:releaseRoute', { leaseOwner, ...(payload || {}) }, options);
     },
     dispose() {
       listeners.clear();
@@ -230,10 +282,16 @@ function agentRuntimeUnavailable(reason, config = DEFAULT_CONFIG) {
     connected: false,
     reason,
     config,
+    leaseOwner: '',
     snapshots: new Map(),
     getSnapshotForAgent() { return null; },
     getSnapshotForKeys() { return null; },
     onSnapshots() { return () => {}; },
+    sendRequest() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
+    writeSnapshot() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
+    claimRoute() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
+    heartbeat() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
+    releaseRoute() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     dispose() {},
   });
 }

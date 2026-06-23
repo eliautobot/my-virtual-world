@@ -446,6 +446,9 @@ export class AgentRuntimeRoom extends Room {
       const agent = this.upsertSnapshot({
         agentId,
         state: message.state || 'idle',
+        routeId: '',
+        worldActionId: '',
+        target: null,
         leaseOwner: '',
         leaseExpiresAt: '',
       }, 'route-released', {

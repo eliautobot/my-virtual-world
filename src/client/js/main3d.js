@@ -1094,6 +1094,9 @@ let _agentRuntimeHydrationStatus = {
   lastSource: '',
   lastUpdateAt: '',
 };
+const AGENT_RUNTIME_ROUTE_LEASE_TTL_MS = 15000;
+const AGENT_RUNTIME_ROUTE_HEARTBEAT_INTERVAL_MS = 750;
+const AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS = 3500;
 let editMode = null;
 
 // ── Feature 1: Vehicles ──────────────────────────────────────────────
@@ -1205,6 +1208,12 @@ function getAgentRuntimeSnapshot(agent, runtimeClient = _agentRuntimeClient) {
   return runtimeClient.getSnapshotForKeys(getAgentIdentityKeys(agent));
 }
 
+function isAgentRuntimeSnapshotLeaseActive(snapshot) {
+  if (!snapshot?.leaseOwner || !snapshot.leaseExpiresAt) return false;
+  const expiresAt = Date.parse(snapshot.leaseExpiresAt);
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
+}
+
 function getAgentRuntimeFloorBuilding(agent, snapshot) {
   if (snapshot?.buildingId && buildingsMap.has(snapshot.buildingId)) {
     return buildingsMap.get(snapshot.buildingId);
@@ -1252,7 +1261,21 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   agent._runtimeLeaseOwner = snapshot.leaseOwner || '';
   agent._runtimeVersion = snapshot.version || 0;
   agent._runtimeUpdatedAt = snapshot.updatedAt || '';
-  agent._runtimeObserverOnly = snapshot.mode === 'live' || Boolean(snapshot.leaseOwner);
+  const leaseActive = isAgentRuntimeSnapshotLeaseActive(snapshot);
+  const leaseOwnedByThisClient = Boolean(leaseActive && snapshot.leaseOwner && snapshot.leaseOwner === _agentRuntimeClient?.leaseOwner);
+  const localLeaseActive = ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease?.state || ''));
+  if (leaseOwnedByThisClient && agent._runtimeRouteLease && (!snapshot.routeId || agent._runtimeRouteLease.routeId === snapshot.routeId)) {
+    agent._runtimeRouteLease = {
+      ...agent._runtimeRouteLease,
+      state: agent._runtimeRouteLease.state === 'releasing' ? 'releasing' : 'owned',
+      routeId: snapshot.routeId || agent._runtimeRouteLease.routeId,
+      worldActionId: snapshot.worldActionId || agent._runtimeRouteLease.worldActionId || '',
+      leaseOwner: snapshot.leaseOwner,
+      lastAckAtMs: Date.now(),
+      leaseExpiresAt: snapshot.leaseExpiresAt,
+    };
+  }
+  agent._runtimeObserverOnly = (snapshot.mode === 'live' || leaseActive) && !leaseOwnedByThisClient && !localLeaseActive;
 
   if (agent._runtimeObserverOnly) {
     clearAgentTransientMovement(agent);
@@ -1288,6 +1311,325 @@ function subscribeAgentRuntimeSnapshots() {
     const hydrated = applyAgentRuntimeSnapshotsToAgents(meta.source || 'runtime:update', { updateVisible: true });
     if (hydrated > 0) updateAgentList();
   });
+}
+
+function getAgentRuntimeAgentId(agent) {
+  for (const value of [agent?.agentId, agent?.id, agent?.statusKey, agent?.name]) {
+    const text = String(value || '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function getAgentRuntimeWorldActionId(target = null, intentOptions = {}) {
+  return intentOptions.worldActionId ||
+    intentOptions.object?.worldActionId ||
+    target?.worldActionId ||
+    target?.routeMetadata?.worldActionId ||
+    null;
+}
+
+function shouldUseAgentRuntimeRouteLease(agent, target = null, intentOptions = {}) {
+  if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner) return false;
+  if (!agent || !target || intentOptions.runtimeLease === false || target.runtimeLease === false) return false;
+  const sourceKind = intentOptions.behaviorSourceKind || target.behaviorSourceKind || intentOptions.source?.behaviorSourceKind || '';
+  const behaviorMode = intentOptions.behaviorMode || target.behaviorMode || '';
+  const routeOwner = String(target.routeOwner || target.source || '').toLowerCase();
+  const worldActionId = getAgentRuntimeWorldActionId(target, intentOptions);
+  return sourceKind === 'agent-live-mode' ||
+    behaviorMode === 'agent-live' ||
+    routeOwner.includes('live-mode') ||
+    Boolean(worldActionId && (sourceKind === 'agent-live-mode' || routeOwner.includes('live-mode')));
+}
+
+function makeAgentRuntimeRouteTarget(target = null, building = null, floor = null) {
+  const resolvedFloor = Math.max(1, Number(floor ?? target?.floor ?? target?.buildingFloor ?? 1) || 1);
+  const plain = {
+    kind: target?.kind || target?.targetKind || 'world-point',
+    targetKind: target?.targetKind || target?.kind || 'world-point',
+    x: Number(target?.x || 0),
+    y: Number(target?.y ?? target?.z ?? 0),
+    floor: resolvedFloor,
+    buildingId: target?.buildingId || building?.id || '',
+  };
+  [
+    'actionId',
+    'worldActionId',
+    'objectId',
+    'objectInstanceId',
+    'objectType',
+    'catalogKey',
+    'spotId',
+    'interactionSpotId',
+    'routeOwner',
+    'constructionSiteId',
+    'constructionBuildingId',
+    'capabilityTag',
+  ].forEach(key => {
+    if (target?.[key] != null && String(target[key]).trim()) plain[key] = String(target[key]).trim();
+  });
+  return plain;
+}
+
+function makeAgentRuntimePositionPayload(agent, state = 'routing', extra = {}) {
+  const floorBuilding = getMovementInteriorBuildingAt(agent.x, agent.y) || null;
+  return {
+    agentId: getAgentRuntimeAgentId(agent),
+    mode: 'live',
+    owner: 'agent-live-mode',
+    x: Number(agent.x || 0),
+    y: Number(agent.y || 0),
+    floor: Math.max(1, Number(agent._floor || agent._targetFloor || 1) || 1),
+    buildingId: floorBuilding?.id || agent._targetBuilding?.id || '',
+    heading: Number(agent._group3d?.rotation?.y || 0),
+    state,
+    ttlMs: AGENT_RUNTIME_ROUTE_LEASE_TTL_MS,
+    ...extra,
+  };
+}
+
+function updateAgentRuntimeRouteLeaseDebug(agent, patch = {}) {
+  const record = {
+    agentId: getAgentRuntimeAgentId(agent),
+    routeId: agent?._runtimeRouteLease?.routeId || null,
+    leaseOwner: agent?._runtimeRouteLease?.leaseOwner || _agentRuntimeClient?.leaseOwner || '',
+    state: agent?._runtimeRouteLease?.state || '',
+    checkedAt: new Date().toISOString(),
+    ...patch,
+  };
+  if (typeof window !== 'undefined') {
+    window.__VWLastAgentRuntimeRouteLease = record;
+  }
+  return record;
+}
+
+function isAgentRuntimeRouteLeaseOwned(agent) {
+  const lease = agent?._runtimeRouteLease || null;
+  return Boolean(
+    lease &&
+    (lease.state === 'owned' || lease.state === 'releasing') &&
+    lease.leaseOwner &&
+    lease.leaseOwner === _agentRuntimeClient?.leaseOwner
+  );
+}
+
+function isAgentRuntimeRouteLeasePending(agent) {
+  return agent?._runtimeRouteLease?.state === 'pending';
+}
+
+function holdAgentForRuntimeRouteLease(agent, dt) {
+  if (!isAgentRuntimeRouteLeasePending(agent)) return false;
+  agent._isRunning = false;
+  updateAgentAnimation(agent, dt, false, false);
+  return true;
+}
+
+function beginAgentRuntimeRouteLease(agent, target = null, building = null, floor = null, intentOptions = {}) {
+  if (!shouldUseAgentRuntimeRouteLease(agent, target, intentOptions)) return null;
+  const agentId = getAgentRuntimeAgentId(agent);
+  if (!agentId) return null;
+  const worldActionId = getAgentRuntimeWorldActionId(target, intentOptions);
+  const routeId = worldActionId
+    ? `runtime-route:${agentId}:${worldActionId}`
+    : `runtime-route:${agentId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+  const leaseOwner = _agentRuntimeClient.leaseOwner;
+  const routeTarget = makeAgentRuntimeRouteTarget(target, building, floor);
+
+  if (agent._runtimeRouteLease?.routeId && agent._runtimeRouteLease.routeId !== routeId) {
+    releaseAgentRuntimeRouteLease(agent, 'superseded', 'idle');
+  }
+
+  const lease = {
+    state: 'pending',
+    routeId,
+    worldActionId,
+    leaseOwner,
+    target: routeTarget,
+    startedAtMs: Date.now(),
+    lastHeartbeatAtMs: 0,
+    lastAckAtMs: 0,
+  };
+  agent._runtimeRouteLease = lease;
+  agent._runtimeObserverOnly = false;
+  updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'claim-pending', target: routeTarget });
+
+  _agentRuntimeClient.claimRoute({
+    ...makeAgentRuntimePositionPayload(agent, 'routing', {
+      routeId,
+      worldActionId: worldActionId || '',
+      target: routeTarget,
+    }),
+  }, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
+    .then(ack => {
+      if (agent._runtimeRouteLease?.routeId !== routeId || agent._runtimeRouteLease.state === 'cancelled') return ack;
+      agent._runtimeRouteLease = {
+        ...agent._runtimeRouteLease,
+        state: 'owned',
+        claimedAtMs: Date.now(),
+        lastAckAtMs: Date.now(),
+        lastAck: ack,
+      };
+      agent._runtimeObserverOnly = false;
+      agent._runtimeLeaseOwner = leaseOwner;
+      agent._runtimeRouteId = routeId;
+      updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'claim-owned', ack });
+      maybeSendAgentRuntimeRouteHeartbeat(agent, 'routing', { force: true });
+      return ack;
+    })
+    .catch(error => {
+      if (agent._runtimeRouteLease?.routeId !== routeId) return;
+      agent._runtimeRouteLease = {
+        ...agent._runtimeRouteLease,
+        state: 'rejected',
+        rejectedAtMs: Date.now(),
+        error: error?.message || String(error),
+        errorCode: error?.code || '',
+      };
+      agent._runtimeObserverOnly = Boolean(agent._runtimeSnapshot);
+      agent._wanderTarget = null;
+      releaseAgentIntent(agent, 'runtime-route-lease-rejected', {
+        releaseBy: 'route-failed',
+        clearRoute: true,
+        clearLifecycle: true,
+        releaseSummary: error?.message || 'runtime route lease rejected',
+      });
+      updateAgentRuntimeRouteLeaseDebug(agent, {
+        phase: 'claim-rejected',
+        ok: false,
+        error: error?.message || String(error),
+        code: error?.code || null,
+      });
+    });
+  return lease;
+}
+
+function maybeSendAgentRuntimeRouteHeartbeat(agent, state = 'routing', { force = false } = {}) {
+  const lease = agent?._runtimeRouteLease || null;
+  if (!lease || !['owned', 'releasing'].includes(lease.state) || !_agentRuntimeClient?.connected) return null;
+  const now = Date.now();
+  if (!force && now - Number(lease.lastHeartbeatAtMs || 0) < AGENT_RUNTIME_ROUTE_HEARTBEAT_INTERVAL_MS) return null;
+  lease.lastHeartbeatAtMs = now;
+  const request = _agentRuntimeClient.heartbeat({
+    ...makeAgentRuntimePositionPayload(agent, state, {
+      routeId: lease.routeId,
+      worldActionId: lease.worldActionId || '',
+      target: lease.target || null,
+    }),
+  }, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
+    .then(ack => {
+      if (agent._runtimeRouteLease?.routeId === lease.routeId) {
+        agent._runtimeRouteLease.lastAckAtMs = Date.now();
+        agent._runtimeRouteLease.lastAck = ack;
+      }
+      updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'heartbeat', ok: true, snapshot: ack?.snapshot || null });
+      return ack;
+    })
+    .catch(error => {
+      if (agent._runtimeRouteLease?.routeId === lease.routeId) {
+        agent._runtimeRouteLease.state = 'heartbeat-failed';
+        agent._runtimeRouteLease.error = error?.message || String(error);
+        agent._runtimeObserverOnly = Boolean(agent._runtimeSnapshot);
+        agent._wanderTarget = null;
+      }
+      updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'heartbeat-failed', ok: false, error: error?.message || String(error), code: error?.code || null });
+      return null;
+    });
+  return request;
+}
+
+function releaseAgentRuntimeRouteLease(agent, reason = 'arrived', state = 'idle') {
+  const lease = agent?._runtimeRouteLease || null;
+  if (!lease || !_agentRuntimeClient?.connected) return null;
+  if (lease.state === 'pending') {
+    agent._runtimeRouteLease = { ...lease, state: 'cancelled', cancelledAtMs: Date.now(), reason };
+    return null;
+  }
+  if (!['owned', 'releasing', 'heartbeat-failed'].includes(lease.state)) return null;
+  agent._runtimeRouteLease = { ...lease, state: 'releasing', releaseReason: reason };
+  updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'release-pending', reason, releaseState: state });
+  const finish = () => _agentRuntimeClient.releaseRoute({
+    agentId: getAgentRuntimeAgentId(agent),
+    routeId: lease.routeId,
+    worldActionId: lease.worldActionId || '',
+    state,
+    reason,
+  }, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
+    .then(ack => {
+      if (agent._runtimeRouteLease?.routeId === lease.routeId) {
+        agent._runtimeRouteLease = null;
+        agent._runtimeLeaseOwner = '';
+        agent._runtimeRouteId = '';
+      }
+      updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'released', ok: true, ack });
+      return ack;
+    })
+    .catch(error => {
+      if (agent._runtimeRouteLease?.routeId === lease.routeId) {
+        agent._runtimeRouteLease = { ...agent._runtimeRouteLease, state: 'release-failed', error: error?.message || String(error) };
+      }
+      updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'release-failed', ok: false, error: error?.message || String(error), code: error?.code || null });
+      return null;
+    });
+  const heartbeat = maybeSendAgentRuntimeRouteHeartbeat(agent, reason === 'arrived' ? 'arrived' : state, { force: true });
+  return heartbeat && typeof heartbeat.then === 'function' ? heartbeat.then(finish, finish) : finish();
+}
+
+function syncAgentRuntimeRouteLeaseAfterFrame(agent, { isMoving = false } = {}) {
+  if (!isAgentRuntimeRouteLeaseOwned(agent)) return;
+  if (!agent._wanderTarget) {
+    releaseAgentRuntimeRouteLease(agent, 'arrived', 'idle');
+    return;
+  }
+  if (isMoving) maybeSendAgentRuntimeRouteHeartbeat(agent, 'routing');
+}
+
+function startAgentRuntimeLeasedRouteForDebug(agentRef, target = {}) {
+  const agent = typeof agentRef === 'string'
+    ? agentsList.find(candidate => getAgentIdentityKeys(candidate).has(agentRef) || candidate.id === agentRef)
+    : agentRef;
+  if (!agent) return { ok: false, reason: 'agent_not_found' };
+  const routeTarget = {
+    x: Number(target.x),
+    y: Number(target.y),
+    floor: Math.max(1, Number(target.floor || agent._floor || 1) || 1),
+    targetKind: target.targetKind || 'runtime-debug-world-point',
+    kind: target.kind || 'world-point',
+    worldActionId: target.worldActionId || '',
+    routeOwner: 'runtime-live-mode-debug',
+    runtimeLease: true,
+  };
+  if (!Number.isFinite(routeTarget.x) || !Number.isFinite(routeTarget.y)) {
+    return { ok: false, reason: 'invalid_target' };
+  }
+  const building = target.buildingId ? buildingsMap.get(target.buildingId) || null : null;
+  const admission = setAgentTarget(agent, routeTarget, building, routeTarget.floor, {
+    owner: 'world-action',
+    priorityName: 'explicit-object',
+    phase: 'approach',
+    target: routeTarget,
+    building,
+    floor: routeTarget.floor,
+    behaviorSourceKind: 'agent-live-mode',
+    behaviorMode: 'agent-live',
+    behaviorAuthority: 900,
+    source: { family: 'runtime-debug', functionName: 'window.__VWStartRuntimeLeasedRoute' },
+    debug: { label: 'runtime-debug:leased-route', lastDecisionReason: 'runtime-debug-route-admitted' },
+  });
+  return {
+    ok: admission?.accepted !== false,
+    admission,
+    lease: agent._runtimeRouteLease || null,
+  };
+}
+
+if (typeof window !== 'undefined') {
+  window.__VWStartRuntimeLeasedRoute = startAgentRuntimeLeasedRouteForDebug;
+  window.__VWReleaseRuntimeRouteLease = (agentRef, reason = 'manual-release') => {
+    const agent = typeof agentRef === 'string'
+      ? agentsList.find(candidate => getAgentIdentityKeys(candidate).has(agentRef) || candidate.id === agentRef)
+      : agentRef;
+    return releaseAgentRuntimeRouteLease(agent, reason, 'idle');
+  };
 }
 
 function doesDeskAssignmentMatchAgent(agent, assignedTo) {
@@ -10837,6 +11179,7 @@ function setAgentTarget(agent, target, building = null, floor = null) {
   agent._isReturningToDesk = false;
   agent._atDesk = false;
   agent._activeWorkSpot = null;
+  beginAgentRuntimeRouteLease(agent, target, building, floor, proposedIntentOptions);
   const pendingTrip = agent._elevatorTrip || null;
   const pendingStillMatches = !!(
     pendingTrip &&
@@ -18167,7 +18510,9 @@ function updateAgentAnimations(dt) {
       return;
     }
 
-    if (agent._runtimeObserverOnly && agent._runtimeSnapshot) {
+    if (holdAgentForRuntimeRouteLease(agent, dt)) return;
+
+    if (agent._runtimeObserverOnly && agent._runtimeSnapshot && !isAgentRuntimeRouteLeaseOwned(agent)) {
       placeRuntimeHydratedAgentMesh(agent);
       updateAgentAnimation(agent, dt, false, false);
       updateAgentAvoidanceDebug(agent);
@@ -19847,6 +20192,8 @@ function updateAgentAnimations(dt) {
     }
     } // PERF: end staggered decision section
 
+    if (holdAgentForRuntimeRouteLease(agent, dt)) return;
+
     let isMoving = false;
     if (agent._stayTimer <= 0 && agent._wanderTarget) {
       const scale = T / API_TILE;
@@ -21405,6 +21752,8 @@ function updateAgentAnimations(dt) {
       agent._curiosityCooldown -= dtMs;
     }
 
+    syncAgentRuntimeRouteLeaseAfterFrame(agent, { isMoving });
+
     // Ground height sampling — stand on the correct surface
     const groundY = getGroundY(agent.x * scaleFactor, agent.y * scaleFactor);
     // Store groundY for the character animation module to use
@@ -22379,6 +22728,7 @@ function getAgentHitFromPointer(e) {
 
 function clearAgentTransientMovement(agent) {
   if (!agent) return;
+  releaseAgentRuntimeRouteLease(agent, 'transient-movement-cleared', 'idle');
   const interruptedActivity = agent._idleActivity || null;
   const intentRelease = releaseAgentIntent(agent, 'cancel', { releaseBy: 'cancel', clearRoute: false, clearLifecycle: true, releaseSummary: 'transient movement cleared/cancelled' });
   if (!intentRelease.released && interruptedActivity) {
