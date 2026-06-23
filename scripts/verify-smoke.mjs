@@ -559,12 +559,13 @@ for (const token of [
 }
 for (const token of [
   'data-settings-tab="live-mode"',
-  'Live Agent Mode Coming Soon',
-  'settings-live-mode-coming-soon',
-  'setting-featureAgentLiveMode" disabled',
-  'agentLiveMode: false',
+  'setting-featureAgentLiveMode',
+  'liveModeLoopStatus',
+  'liveModeAgentList',
+  'btn-saveLiveAgents',
+  'agentLiveMode: !trial && checked',
   'saveLiveModeAgents',
-  'applyLiveAgentModeComingSoonUi',
+  'applyLiveAgentModeAvailabilityUi',
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
@@ -593,10 +594,10 @@ for (const token of [
 }
 
 for (const token of [
-  'Live Agent Mode Coming Soon',
-  'Editing, Agent Browser, and SMS / Twilio are locked. Live Agent Mode is coming soon.',
+  'Enable Agent Live Mode',
+  'Editing, Agent Browser, SMS / Twilio, and Agent Live Mode are locked.',
   'applyLocks',
-  "features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:false",
+  "features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:!locked&&chk('agentLiveMode')",
 ]) {
   assert(setupHtml.includes(token), `setup.html missing demo setup token: ${token}`);
 }

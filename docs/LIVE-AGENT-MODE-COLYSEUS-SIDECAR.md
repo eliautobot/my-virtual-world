@@ -227,6 +227,19 @@ Recovery flow:
 
 This still does not add AI behavior. It makes the online-game foundation testable: move/place an agent, refresh, and the runtime snapshot should now be the source of the next load position.
 
+## Live Mode UI Unlock Child PR
+
+The fourth child PR removes the client-side placeholder that kept Live Agent Mode visibly disabled after the runtime foundation existed.
+
+It unlocks the existing controls behind the current license/internal gate:
+
+- the Settings feature checkbox can save `features.agentLiveMode`
+- the Live Mode Settings tab renders loop controls, agent selection, and status cards
+- per-agent toggles call `/api/agent/<id>/live-mode`
+- the setup wizard can preserve the global Live Mode feature flag
+
+This PR does not add model autonomy, planning, or new world actions. It only makes the Phase 4 operator surface usable so the next PR can attach behavior ownership and loop semantics to visible controls.
+
 ## Next PRs
 
 The sidecar parent PR starts the runtime server. The hydration child PR changes initial/observed placement. The route-heartbeat child PR proves route claim/heartbeat/release. The visible persistence child PR wires ordinary route movement and stale-lease recovery into that runtime.
@@ -234,5 +247,5 @@ The sidecar parent PR starts the runtime server. The hydration child PR changes 
 Follow-up work:
 
 - richer observer interpolation from Colyseus state
-- promotion from normal movement persistence to Live Mode toggle ownership
-- promotion from debug/manual route trigger to real planner/model route requests
+- promotion from unlocked Live Mode controls to behavior ownership
+- promotion from manual route trigger to real planner/model route requests

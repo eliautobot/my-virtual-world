@@ -142,6 +142,14 @@ This makes persistence more visible without adding the planner/model layer.
 
 Goal: make enable/disable behavior reliable.
 
+UI unlock child PR:
+
+- remove the hardcoded "Coming Soon" blocks from the Settings modal and agent panel
+- let the existing license/internal gate decide whether Live Mode controls are enabled
+- save the global `features.agentLiveMode` flag from Settings/setup
+- let per-agent UI toggles call `/api/agent/<id>/live-mode`
+- keep planner/model autonomy out of scope
+
 Work:
 
 - add explicit behavior owner state to runtime
