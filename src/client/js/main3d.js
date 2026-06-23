@@ -4,6 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-live-agent-runtime-hydration';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1081,6 +1082,18 @@ let terrainGroup, buildingGroup, agentGroup, decorGroup;
 const loadedChunks = new Map();
 const buildingsMap = new Map();
 let agentsList = [];
+let _agentRuntimeClientPromise = null;
+let _agentRuntimeClient = null;
+let _agentRuntimeUnsubscribe = null;
+let _agentRuntimeHydrationStatus = {
+  enabled: false,
+  connected: false,
+  reason: 'not-started',
+  hydrated: 0,
+  snapshots: 0,
+  lastSource: '',
+  lastUpdateAt: '',
+};
 let editMode = null;
 
 // ── Feature 1: Vehicles ──────────────────────────────────────────────
@@ -1140,10 +1153,141 @@ let redoStack = [];
 function getAgentIdentityKeys(agent) {
   const keys = new Set();
   if (!agent) return keys;
-  [agent.id, agent.statusKey, agent.name].forEach(value => {
+  [agent.agentId, agent.id, agent.statusKey, agent.name].forEach(value => {
     if (value != null && String(value).trim()) keys.add(String(value).trim());
   });
   return keys;
+}
+
+function updateAgentRuntimeHydrationDebug(patch = {}) {
+  _agentRuntimeHydrationStatus = Object.freeze({
+    ..._agentRuntimeHydrationStatus,
+    ...patch,
+    lastUpdateAt: new Date().toISOString(),
+  });
+  if (typeof window !== 'undefined') {
+    window.__VWAgentRuntimeClient = _agentRuntimeClient;
+    window.__VWAgentRuntimeHydrationStatus = _agentRuntimeHydrationStatus;
+  }
+}
+
+async function ensureAgentRuntimeClient() {
+  if (!_agentRuntimeClientPromise) {
+    _agentRuntimeClientPromise = createAgentRuntimeClient({ windowRef: window, logger: console })
+      .then(client => {
+        _agentRuntimeClient = client;
+        updateAgentRuntimeHydrationDebug({
+          enabled: client.enabled === true,
+          connected: client.connected === true,
+          reason: client.reason || '',
+          snapshots: client.snapshots?.size || 0,
+          lastSource: client.connected ? 'connect' : 'unavailable',
+        });
+        return client;
+      })
+      .catch(error => {
+        console.warn('Agent runtime hydration unavailable', error);
+        updateAgentRuntimeHydrationDebug({
+          enabled: false,
+          connected: false,
+          reason: error?.message || 'connection failed',
+          snapshots: 0,
+          lastSource: 'error',
+        });
+        return null;
+      });
+  }
+  return _agentRuntimeClientPromise;
+}
+
+function getAgentRuntimeSnapshot(agent, runtimeClient = _agentRuntimeClient) {
+  if (!agent || !runtimeClient?.connected) return null;
+  return runtimeClient.getSnapshotForKeys(getAgentIdentityKeys(agent));
+}
+
+function getAgentRuntimeFloorBuilding(agent, snapshot) {
+  if (snapshot?.buildingId && buildingsMap.has(snapshot.buildingId)) {
+    return buildingsMap.get(snapshot.buildingId);
+  }
+  return getMovementInteriorBuildingAt(agent.x, agent.y);
+}
+
+function placeRuntimeHydratedAgentMesh(agent) {
+  if (!agent?._group3d) return;
+  const scale = T / API_TILE;
+  const worldX = (agent.x || 0) * scale;
+  const worldZ = (agent.y || 0) * scale;
+  const floorBuilding = getAgentRuntimeFloorBuilding(agent, agent._runtimeSnapshot);
+  const floorY = floorBuilding && floorBuilding.type !== 'park'
+    ? getRenderedFloorY(floorBuilding, agent._floor || 1)
+    : 0;
+  const groundY = getGroundY(worldX, worldZ) + floorY;
+  agent._group3d.position.set(worldX, groundY, worldZ);
+  agent._group3d.userData._groundY = groundY;
+  if (Number.isFinite(Number(agent._runtimeSnapshot?.heading))) {
+    agent._group3d.rotation.y = Number(agent._runtimeSnapshot.heading);
+  }
+  if (isPhysicsReady()) {
+    teleportAgent('agent_' + agent.id, worldX, groundY, worldZ);
+  }
+}
+
+function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = false, source = 'runtime' } = {}) {
+  if (!agent || !snapshot) return false;
+  const x = Number(snapshot.x);
+  const y = Number(snapshot.y);
+  const floor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(floor)) return false;
+
+  agent.x = x;
+  agent.y = y;
+  agent._floor = floor;
+  agent._targetFloor = floor;
+  agent._runtimeSnapshot = snapshot;
+  agent._runtimeHydrated = true;
+  agent._runtimeHydrationSource = source;
+  agent._runtimeMode = snapshot.mode || '';
+  agent._runtimeOwner = snapshot.owner || '';
+  agent._runtimeState = snapshot.state || '';
+  agent._runtimeLeaseOwner = snapshot.leaseOwner || '';
+  agent._runtimeVersion = snapshot.version || 0;
+  agent._runtimeUpdatedAt = snapshot.updatedAt || '';
+  agent._runtimeObserverOnly = snapshot.mode === 'live' || Boolean(snapshot.leaseOwner);
+
+  if (agent._runtimeObserverOnly) {
+    clearAgentTransientMovement(agent);
+  }
+  if (updateVisible) placeRuntimeHydratedAgentMesh(agent);
+  return true;
+}
+
+function applyAgentRuntimeSnapshotsToAgents(source = 'runtime', { updateVisible = false } = {}) {
+  if (!_agentRuntimeClient?.connected || !agentsList.length) return 0;
+  let hydrated = 0;
+  agentsList.forEach(agent => {
+    const snapshot = getAgentRuntimeSnapshot(agent);
+    if (applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible, source })) {
+      hydrated++;
+    }
+  });
+  updateAgentRuntimeHydrationDebug({
+    enabled: _agentRuntimeClient.enabled === true,
+    connected: _agentRuntimeClient.connected === true,
+    reason: _agentRuntimeClient.reason || '',
+    hydrated,
+    snapshots: _agentRuntimeClient.snapshots?.size || 0,
+    lastSource: source,
+  });
+  return hydrated;
+}
+
+function subscribeAgentRuntimeSnapshots() {
+  if (!_agentRuntimeClient?.connected) return;
+  if (_agentRuntimeUnsubscribe) _agentRuntimeUnsubscribe();
+  _agentRuntimeUnsubscribe = _agentRuntimeClient.onSnapshots((snapshots, meta = {}) => {
+    const hydrated = applyAgentRuntimeSnapshotsToAgents(meta.source || 'runtime:update', { updateVisible: true });
+    if (hydrated > 0) updateAgentList();
+  });
 }
 
 function doesDeskAssignmentMatchAgent(agent, assignedTo) {
@@ -18023,6 +18167,15 @@ function updateAgentAnimations(dt) {
       return;
     }
 
+    if (agent._runtimeObserverOnly && agent._runtimeSnapshot) {
+      placeRuntimeHydratedAgentMesh(agent);
+      updateAgentAnimation(agent, dt, false, false);
+      updateAgentAvoidanceDebug(agent);
+      updateDynamicInteriorRoutingDebug(agent);
+      updateDynamicExteriorRoutingDebug(agent);
+      return;
+    }
+
     const runDecisions = !!agent._decisionThinkNow || agent._decisionSlot === _agentDecisionFrame;
     const decisionDtMs = runDecisions ? agent._decisionDtAccumMs : 0;
     if (runDecisions) {
@@ -28187,6 +28340,7 @@ async function loadBuildings() {
 
 async function loadAgents() {
   try {
+    const runtimeClientPromise = ensureAgentRuntimeClient();
     const list = await fetchAgentRosterWithLiveStatus();
     const cols = Math.max(1, Math.ceil(Math.sqrt(list.length)));
     const sp = API_TILE * 4;
@@ -28295,12 +28449,17 @@ async function loadAgents() {
       };
     });
 
+    await runtimeClientPromise;
+    applyAgentRuntimeSnapshotsToAgents('loadAgents', { updateVisible: false });
+
     agentsList.forEach(a => {
       createAgent3D(a);
+      if (a._runtimeHydrated) placeRuntimeHydratedAgentMesh(a);
       _agentLastStatus.set(a.id, a.status || 'offline'); // seed initial status
     });
     updateAgentList();
     window.agents = agentsList; // re-export after population
+    subscribeAgentRuntimeSnapshots();
 
     // Seed initial activity log entries
     agentsList.forEach(a => {

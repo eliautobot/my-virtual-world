@@ -68,10 +68,11 @@ Goal: all browsers render agents from the same runtime snapshot.
 
 Work:
 
-- add browser Colyseus runtime client
-- update agent loading to fetch runtime snapshots
+- add browser Colyseus runtime client in `src/client/js/agent-runtime-client.mjs`
+- load the Colyseus browser SDK from `/node_modules/@colyseus/sdk/dist/colyseus.js`
+- update agent loading to connect to the runtime room
 - place agents from runtime before desk/home/random fallback
-- subscribe to Colyseus state patches
+- subscribe to Colyseus runtime events and state patches
 - add interpolation for observer clients
 - mark live-owned agents as observer-only unless this client owns the route lease
 - add debug readout for runtime source, version, lease owner, and last update
@@ -82,6 +83,14 @@ Acceptance:
 - second browser opens at the same location
 - stale/missing runtime falls back cleanly to existing placement
 - non-live agents still behave normally
+
+First child PR scope:
+
+- hydrate initial agent `x/y/floor` from the Colyseus runtime snapshot
+- expose `window.__VWAgentRuntimeHydrationStatus` for browser verification
+- keep desk/home/random fallback intact when realtime is disabled, disconnected, or missing a snapshot
+- mark live-owned/leased snapshots as observer-only so old scripted movement does not immediately fight runtime truth
+- leave route claims, heartbeat publication, and executor recovery to Phase 3
 
 No live movement yet.
 
