@@ -100,12 +100,14 @@ Goal: move live agents through current routing while server snapshots stay autho
 
 Work:
 
-- make the active browser route executor claim a lease
-- executor uses existing `setAgentTarget(...)`
+- make the active browser route executor claim a Colyseus lease
+- keep existing `setAgentTarget(...)` as the route admission point
+- hold the agent still while the runtime claim is pending
+- executor uses existing dynamic interior/exterior routing after claim ack
 - executor sends heartbeat snapshots during movement
 - observer clients render from heartbeat snapshots only
-- terminal arrival writes final authoritative location
-- route failure writes failure state and releases lease
+- terminal arrival writes final authoritative location and releases the lease
+- route cancellation/failure releases or marks the runtime lease
 
 Acceptance:
 
@@ -113,6 +115,15 @@ Acceptance:
 - refresh during movement resumes from the latest server snapshot
 - executor close/reload expires lease and another client can recover
 - no duplicate browser clients simulate the same live-owned agent
+
+Second child PR scope:
+
+- add browser request helpers for `runtime:claimRoute`, `runtime:heartbeat`, and `runtime:releaseRoute`
+- start a runtime lease when an admitted route has Live Mode ownership metadata
+- add heartbeat/release hooks to the existing movement frame loop
+- clear `routeId`, `worldActionId`, `target`, `leaseOwner`, and `leaseExpiresAt` on sidecar route release
+- expose `window.__VWStartRuntimeLeasedRoute(...)` for deterministic browser verification before the planner exists
+- keep AI/model planning out of scope
 
 No cognition yet. Movement can be triggered manually or by a test API.
 

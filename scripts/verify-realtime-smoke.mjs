@@ -169,6 +169,8 @@ async function run() {
     });
     const releaseAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'release-1');
     assert.equal(releaseAck.snapshot.leaseOwner, '');
+    assert.equal(releaseAck.snapshot.routeId, '');
+    assert.equal(releaseAck.snapshot.worldActionId, '');
     await room.leave(true);
 
     await stopServer(server);

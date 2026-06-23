@@ -171,6 +171,37 @@ agentId, id, statusKey, name
 
 This keeps the current product behavior safe when the sidecar is disabled or when no runtime snapshot exists for an agent.
 
+## Route Lease Child PR
+
+The second child PR starts Phase 3 by letting the active browser become a route executor for a live-mode route.
+
+Route flow:
+
+1. `setAgentTarget(...)` admits a live-mode route through the existing intent/router system
+2. the browser sends `runtime:claimRoute` to Colyseus before the route moves
+3. the agent waits while the route lease is pending
+4. after claim ack, the browser becomes the executor and existing movement/routing runs normally
+5. while movement is active, the browser sends `runtime:heartbeat` snapshots
+6. when `_wanderTarget` clears at arrival, the browser sends a final heartbeat and `runtime:releaseRoute`
+7. observer browsers render the heartbeat snapshots and do not simulate the same route
+
+The route executor does not calculate a new path. It uses the current Virtual World pathing:
+
+```text
+setAgentTarget(...)
+dynamic-interior-routing.js
+dynamic-exterior-routing.js
+physics.js
+```
+
+The browser exposes a verification helper:
+
+```text
+window.__VWStartRuntimeLeasedRoute(agentId, { x, y, floor })
+```
+
+That helper is for local/browser testing only. It gives Phase 3 a deterministic way to prove route claim, heartbeat, movement, and release before the AI planner exists.
+
 ## Next PRs
 
 The sidecar parent PR does not change visible browser movement. The hydration child PR changes only initial/observed placement.
@@ -178,6 +209,5 @@ The sidecar parent PR does not change visible browser movement. The hydration ch
 Follow-up work:
 
 - richer observer interpolation from Colyseus state
-- route executor lease claim before `setAgentTarget(...)`
-- heartbeat publishing during existing route execution
 - stale lease recovery on refresh or executor disconnect
+- promotion from debug/manual route trigger to real planner/model route requests
