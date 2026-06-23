@@ -8,6 +8,7 @@ export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
 export const AGENT_RUNTIME_ROOM_NAME = 'agent_runtime';
 export const DEFAULT_ROUTE_LEASE_TTL_MS = 15000;
 export const MAX_ROUTE_LEASE_TTL_MS = 60000;
+export const STALE_ROUTE_LEASE_SWEEP_MS = 1000;
 export const MAX_RUNTIME_EVENTS = 500;
 
 const AGENT_ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
@@ -332,6 +333,12 @@ function hasActiveLease(agent, nowMs = Date.now()) {
   return Number.isFinite(expires) && expires > nowMs;
 }
 
+function hasExpiredLease(agent, nowMs = Date.now()) {
+  if (!agent?.leaseOwner || !agent?.leaseExpiresAt) return false;
+  const expires = Date.parse(agent.leaseExpiresAt);
+  return !Number.isFinite(expires) || expires <= nowMs;
+}
+
 function leaseTtlMs(value) {
   const ttl = Math.floor(numberOr(value, DEFAULT_ROUTE_LEASE_TTL_MS));
   return Math.min(MAX_ROUTE_LEASE_TTL_MS, Math.max(1000, ttl));
@@ -353,9 +360,11 @@ export class AgentRuntimeRoom extends Room {
     this.onMessage('runtime:claimRoute', (client, message) => this.handleClaimRoute(client, message));
     this.onMessage('runtime:heartbeat', (client, message) => this.handleHeartbeat(client, message));
     this.onMessage('runtime:releaseRoute', (client, message) => this.handleReleaseRoute(client, message));
+    this.clock.setInterval(() => this.expireStaleRouteLeases(), STALE_ROUTE_LEASE_SWEEP_MS);
   }
 
   onJoin(client) {
+    this.expireStaleRouteLeases();
     client.send('runtime:welcome', {
       sessionId: client.sessionId,
       room: AGENT_RUNTIME_ROOM_NAME,
@@ -370,7 +379,20 @@ export class AgentRuntimeRoom extends Room {
 
   handleSnapshot(client, message = {}) {
     this.withErrors(client, message, 'runtime:snapshot', () => {
+      this.expireStaleRouteLeases();
       const raw = message.snapshot && typeof message.snapshot === 'object' ? message.snapshot : message;
+      const agentId = normalizeAgentId(raw.agentId);
+      const existing = this.state.agents.get(agentId);
+      if (existing && hasActiveLease(existing)) {
+        const leaseOwner = safeText(raw.leaseOwner || message.leaseOwner, '');
+        if (leaseOwner !== existing.leaseOwner) {
+          throw apiError('lease_conflict', 'snapshot cannot overwrite an active route lease', {
+            agentId,
+            leaseOwner: existing.leaseOwner,
+            leaseExpiresAt: existing.leaseExpiresAt,
+          });
+        }
+      }
       const agent = this.upsertSnapshot(raw, 'snapshot');
       this.ack(client, message, 'runtime:snapshot', agent);
     });
@@ -378,6 +400,7 @@ export class AgentRuntimeRoom extends Room {
 
   handleClaimRoute(client, message = {}) {
     this.withErrors(client, message, 'runtime:claimRoute', () => {
+      this.expireStaleRouteLeases();
       const agentId = normalizeAgentId(message.agentId);
       const leaseOwner = safeText(message.leaseOwner, client.sessionId || '');
       if (!leaseOwner) throw apiError('invalid_lease_owner', 'leaseOwner is required');
@@ -407,6 +430,7 @@ export class AgentRuntimeRoom extends Room {
 
   handleHeartbeat(client, message = {}) {
     this.withErrors(client, message, 'runtime:heartbeat', () => {
+      this.expireStaleRouteLeases();
       const agentId = normalizeAgentId(message.agentId);
       const leaseOwner = safeText(message.leaseOwner, client.sessionId || '');
       const existing = this.state.agents.get(agentId);
@@ -433,6 +457,7 @@ export class AgentRuntimeRoom extends Room {
 
   handleReleaseRoute(client, message = {}) {
     this.withErrors(client, message, 'runtime:releaseRoute', () => {
+      this.expireStaleRouteLeases();
       const agentId = normalizeAgentId(message.agentId);
       const leaseOwner = safeText(message.leaseOwner, client.sessionId || '');
       const existing = this.state.agents.get(agentId);
@@ -456,6 +481,28 @@ export class AgentRuntimeRoom extends Room {
       });
       this.ack(client, message, 'runtime:releaseRoute', agent);
     });
+  }
+
+  expireStaleRouteLeases(nowMs = Date.now()) {
+    let expired = 0;
+    for (const [agentId, existing] of this.state.agents.entries()) {
+      if (!hasExpiredLease(existing, nowMs)) continue;
+      const before = snapshotToPlain(existing);
+      this.upsertSnapshot({
+        agentId,
+        state: 'idle',
+        routeId: '',
+        worldActionId: '',
+        target: null,
+        leaseOwner: '',
+        leaseExpiresAt: '',
+      }, 'route-lease-expired', {
+        expiredLeaseOwner: before.leaseOwner || '',
+        expiredLeaseExpiresAt: before.leaseExpiresAt || '',
+      });
+      expired++;
+    }
+    return expired;
   }
 
   upsertSnapshot(raw, eventType, extra = {}) {

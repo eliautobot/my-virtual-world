@@ -127,6 +127,17 @@ Second child PR scope:
 
 No cognition yet. Movement can be triggered manually or by a test API.
 
+Third child PR scope:
+
+- start Colyseus route leases for normal admitted `setAgentTarget(...)` routes, not only explicit Live Mode debug routes
+- publish throttled runtime snapshots for ordinary settled positions
+- publish forced runtime snapshots after manual drag/drop placement
+- block plain snapshots from overwriting an active route lease owned by another browser
+- add sidecar stale-lease sweeps that clear expired `routeId`, `worldActionId`, `target`, `leaseOwner`, and `leaseExpiresAt`
+- emit a `route-lease-expired` event and cover recovery in the realtime smoke test
+
+This makes persistence more visible without adding the planner/model layer.
+
 ## Phase 4 - Live Mode Ownership and Toggle Semantics
 
 Goal: make enable/disable behavior reliable.
