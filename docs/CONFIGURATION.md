@@ -36,10 +36,21 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_HERMES_AUTO_START_PROFILE_APIS` | `true` | Allow Virtual World to start profile-scoped local Hermes API servers. Only localhost URLs and configured API keys are eligible. |
 | `VW_HERMES_AUTO_START_DEFAULT_API` | `true` | Allow auto-start for the default Hermes profile. |
 | `VW_HERMES_API_PROFILE_PORT_BASE` | `8643` | Base port used to derive profile-specific local API ports. |
+| `VW_REALTIME_ENABLED` | `false` | Enable the optional Colyseus sidecar config for Live Agent Mode runtime state. |
+| `VW_REALTIME_BROWSER_URL` | empty | Browser-reachable websocket URL for this install's realtime sidecar, such as `ws://127.0.0.1:8591`, `ws://my-world-pc:8591`, or `wss://world.example.com/realtime`. |
+| `VW_REALTIME_URL` | empty | Backwards-compatible alias for `VW_REALTIME_BROWSER_URL`. |
+| `VW_REALTIME_ROOM` | `agent_runtime` | Colyseus room name used by the browser runtime client. |
+| `VW_REALTIME_PORT` | `8591` | Sidecar HTTP/WebSocket port when running the local realtime server. |
 | `VW_LICENSE_STORE_ID` | `321733` | Lemon Squeezy store ID used to verify keys belong to My Virtual World. |
 | `VW_LICENSE_PRODUCT_IDS` | `1140366` | Comma-separated Lemon Squeezy product IDs accepted by this app. |
 
 The Lemon Squeezy store and product IDs are public product identifiers, not secrets. The app also has these My Virtual World IDs built in as safe defaults; keep the `.env` values set unless you operate a private fork with a different product.
+
+## Realtime Runtime
+
+Live Agent Mode can use a Colyseus sidecar as the shared server runtime for agent positions, route leases, and heartbeat snapshots. This is self-hosted per install. The browser should connect back to the same machine, LAN host, Tailnet address, or reverse proxy that serves that user's world.
+
+Use `VW_REALTIME_BROWSER_URL` for the websocket URL that browsers can reach. The older `VW_REALTIME_URL` name is still accepted, but new setup instructions should prefer `VW_REALTIME_BROWSER_URL` because it describes the value more clearly.
 
 ## Data
 

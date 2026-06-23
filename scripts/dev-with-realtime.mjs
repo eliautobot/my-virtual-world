@@ -2,13 +2,17 @@
 // Local dev launcher for the Python app plus Colyseus realtime sidecar.
 import { spawn } from 'node:child_process';
 
+const realtimePort = process.env.VW_REALTIME_PORT || '8591';
+const realtimeBrowserUrl = process.env.VW_REALTIME_BROWSER_URL || process.env.VW_REALTIME_URL || `ws://127.0.0.1:${realtimePort}`;
+
 const env = {
   ...process.env,
   VW_PORT: process.env.VW_PORT || '8590',
-  VW_REALTIME_PORT: process.env.VW_REALTIME_PORT || '8591',
+  VW_REALTIME_PORT: realtimePort,
   VW_DATA_DIR: process.env.VW_DATA_DIR || '.local-data',
   VW_REALTIME_ENABLED: process.env.VW_REALTIME_ENABLED || 'true',
-  VW_REALTIME_URL: process.env.VW_REALTIME_URL || `ws://127.0.0.1:${process.env.VW_REALTIME_PORT || '8591'}`,
+  VW_REALTIME_BROWSER_URL: realtimeBrowserUrl,
+  VW_REALTIME_URL: realtimeBrowserUrl,
 };
 
 const children = [
