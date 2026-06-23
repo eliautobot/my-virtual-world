@@ -55,6 +55,11 @@
     "agentLiveMode": false,
     "debugTools": true
   },
+  "realtime": {
+    "enabled": false,
+    "url": "",
+    "room": "agent_runtime"
+  },
   "browser": {
     "cdpUrl": "",
     "viewerUrl": ""

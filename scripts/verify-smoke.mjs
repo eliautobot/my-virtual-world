@@ -144,6 +144,10 @@ const jsSyntaxTargets = [
   'src/client/js/dynamic-exterior-routing.js',
   'src/client/js/physics.js',
   'src/client/js/vo-engine.js',
+  'src/realtime/agent-runtime-room.mjs',
+  'src/realtime/server.mjs',
+  'scripts/dev-with-realtime.mjs',
+  'scripts/verify-realtime-smoke.mjs',
 ];
 
 for (const path of jsSyntaxTargets) {

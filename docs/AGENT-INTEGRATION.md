@@ -130,6 +130,12 @@ POST /api/agents/<agent-id>/move
 
 Agent Live Mode is license-gated. Agents must not bypass or weaken that gate.
 
+Fresh restart specs:
+
+- `docs/LIVE-AGENT-MODE-RESTART-SPEC.md`
+- `docs/LIVE-AGENT-MODE-RESTART-PHASES.md`
+- `docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md`
+
 ## World Actions and Movement
 
 World actions are the preferred durable API for agent/object interactions. Movement can be requested through `/api/agents/<agent-id>/move`, while object interactions should be represented as world actions.

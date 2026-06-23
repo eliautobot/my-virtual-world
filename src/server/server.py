@@ -159,6 +159,7 @@ def _default_vw_config():
             "registerNativeAgents": True,
         },
         "features": {"agentBrowser": False, "sms": False, "weather": True, "agentLiveMode": False, "debugTools": True},
+        "realtime": {"enabled": False, "url": "", "room": "agent_runtime"},
         "browser": {"cdpUrl": "", "viewerUrl": ""},
         "sms": {"ownerAgentId": "", "twilioAccountSid": "", "twilioAuthToken": "", "fromNumber": "", "publicMediaBaseUrl": ""},
         "debug": {"movementDebugOverlays": False, "objectActionPointDebug": False},
@@ -174,6 +175,7 @@ def _load_vw_config():
     cfg.setdefault("browser", {})
     cfg.setdefault("sms", {})
     cfg.setdefault("features", {})
+    cfg.setdefault("realtime", {})
     cfg.setdefault("world", {})
     cfg.setdefault("debug", {})
     if not isinstance(cfg["world"].get("location"), dict):
@@ -209,6 +211,9 @@ def _load_vw_config():
     cfg["codex"]["registerNativeAgents"] = _env_bool("VW_CODEX_REGISTER_NATIVE_AGENTS", cfg["codex"].get("registerNativeAgents", True))
     cfg["browser"]["cdpUrl"] = _env_or("VW_BROWSER_CDP_URL", cfg["browser"].get("cdpUrl") or "")
     cfg["browser"]["viewerUrl"] = _env_or("VW_BROWSER_VIEWER_URL", cfg["browser"].get("viewerUrl") or "")
+    cfg["realtime"]["enabled"] = _env_bool("VW_REALTIME_ENABLED", cfg["realtime"].get("enabled", False))
+    cfg["realtime"]["url"] = _env_or("VW_REALTIME_URL", cfg["realtime"].get("url") or "")
+    cfg["realtime"]["room"] = _env_or("VW_REALTIME_ROOM", cfg["realtime"].get("room") or "agent_runtime")
     cfg["sms"]["ownerAgentId"] = _env_or("VW_SMS_OWNER_AGENT_ID", cfg["sms"].get("ownerAgentId") or "")
     cfg["sms"]["twilioAccountSid"] = _env_or("VW_TWILIO_ACCOUNT_SID", cfg["sms"].get("twilioAccountSid") or "")
     cfg["sms"]["twilioAuthToken"] = _env_or("VW_TWILIO_AUTH_TOKEN", cfg["sms"].get("twilioAuthToken") or "")
@@ -359,6 +364,7 @@ def _safe_vw_config():
     hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
     codex_cfg = VW_CONFIG.get("codex", {}) or {}
     openclaw_cfg = VW_CONFIG.get("openclaw", {}) or {}
+    realtime_cfg = VW_CONFIG.get("realtime", {}) or {}
     return {
         "_setupComplete": bool(VW_CONFIG.get("_setupComplete")),
         "world": VW_CONFIG.get("world", {}),
@@ -401,6 +407,11 @@ def _safe_vw_config():
         "browser": {
             "cdpUrl": (VW_CONFIG.get("browser") or {}).get("cdpUrl"),
             "viewerUrl": (VW_CONFIG.get("browser") or {}).get("viewerUrl"),
+        },
+        "realtime": {
+            "enabled": bool(realtime_cfg.get("enabled")),
+            "url": realtime_cfg.get("url") or "",
+            "room": realtime_cfg.get("room") or "agent_runtime",
         },
         "sms": {
             "ownerAgentId": sms_cfg.get("ownerAgentId"),
