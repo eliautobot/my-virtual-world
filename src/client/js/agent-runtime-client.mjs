@@ -69,6 +69,29 @@ function normalizeConfig(config = null) {
   });
 }
 
+function isLoopbackHost(hostname = '') {
+  return ['127.0.0.1', 'localhost', '0.0.0.0', '::1'].includes(String(hostname || '').toLowerCase());
+}
+
+function resolveRuntimeUrlForPage(rawUrl = '', windowRef = globalThis.window || globalThis) {
+  const text = String(rawUrl || '').trim();
+  if (!text) return '';
+  const pageLocation = windowRef?.location || null;
+  try {
+    const parsed = new URL(text, pageLocation?.href || 'http://127.0.0.1/');
+    const pageHost = String(pageLocation?.hostname || '').trim();
+    if (pageHost && isLoopbackHost(parsed.hostname) && !isLoopbackHost(pageHost)) {
+      parsed.hostname = pageHost;
+    }
+    if (pageLocation?.protocol === 'https:' && parsed.protocol === 'ws:') {
+      parsed.protocol = 'wss:';
+    }
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return text;
+  }
+}
+
 function snapshotsFromRoomState(room) {
   const snapshots = new Map();
   const agents = room?.state?.agents;
@@ -136,7 +159,11 @@ export async function createAgentRuntimeClient({
   let config = DEFAULT_CONFIG;
   try {
     const response = await fetchImpl('/vw-config');
-    config = normalizeConfig(await response.json());
+    const rawConfig = normalizeConfig(await response.json());
+    config = Object.freeze({
+      ...rawConfig,
+      url: resolveRuntimeUrlForPage(rawConfig.url, windowRef),
+    });
   } catch (error) {
     logger?.warn?.('Agent runtime config unavailable', error);
     return agentRuntimeUnavailable('config unavailable');

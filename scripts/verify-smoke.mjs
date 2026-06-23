@@ -181,6 +181,7 @@ const indexHtml = read('src/client/index.html');
 const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
+const agentRuntimeClientJs = read('src/client/js/agent-runtime-client.mjs');
 const chatJs = read('src/client/js/chat.js');
 const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
@@ -558,8 +559,16 @@ for (const token of [
   'makeAgentRuntimeClientOwner',
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
+  'agent-runtime-client.mjs?v=20260623-runtime-url-r1',
 ]) {
   assert(`${main3dJs}\n${agentCharactersJs}`.includes(token), `Live Mode head indicator missing token: ${token}`);
+}
+for (const token of [
+  'resolveRuntimeUrlForPage',
+  'isLoopbackHost',
+  'parsed.hostname = pageHost',
+]) {
+  assert(agentRuntimeClientJs.includes(token), `agent runtime client missing URL resolution token: ${token}`);
 }
 for (const token of [
   'data-settings-tab="live-mode"',
