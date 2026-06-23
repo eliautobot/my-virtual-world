@@ -554,6 +554,10 @@ for (const token of [
   "completeIdleWorldAction(printerActivity",
   'whiteboard-planning-complete',
   'printer-scanner-use-complete',
+  'AGENT_RUNTIME_POSITION_WRITER_STALE_MS',
+  'makeAgentRuntimeClientOwner',
+  'isAgentRuntimeSnapshotRemoteWriterActive',
+  '_runtimeRemoteWriterActive',
 ]) {
   assert(`${main3dJs}\n${agentCharactersJs}`.includes(token), `Live Mode head indicator missing token: ${token}`);
 }

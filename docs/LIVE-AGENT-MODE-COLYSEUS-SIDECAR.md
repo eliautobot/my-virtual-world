@@ -240,6 +240,22 @@ It unlocks the existing controls behind the current license/internal gate:
 
 This PR does not add model autonomy, planning, or new world actions. It only makes the Phase 4 operator surface usable so the next PR can attach behavior ownership and loop semantics to visible controls.
 
+## Runtime Coherence Child PR
+
+The fifth child PR makes the online-game foundation apply to all agents, not only agents with Live Mode enabled.
+
+Coherence rule:
+
+- every agent position can be backed by a Colyseus runtime snapshot
+- ordinary scripted/manual snapshots include the writing browser session in `owner`
+- a browser that sees a fresh snapshot from another browser renders that agent as observer-only
+- the writer keeps ownership fresh with periodic snapshot keepalives, even when the agent is idle
+- if the writer tab disappears, ownership becomes stale and another tab may resume writing
+- active route leases still take priority over plain snapshots
+- manual drag/drop in any tab can take over the agent and publish a new authoritative position
+
+This closes the split-world problem where a scripted agent could stand in different places in different browser instances and then collide inconsistently with a Live Mode agent.
+
 ## Next PRs
 
 The sidecar parent PR starts the runtime server. The hydration child PR changes initial/observed placement. The route-heartbeat child PR proves route claim/heartbeat/release. The visible persistence child PR wires ordinary route movement and stale-lease recovery into that runtime.
@@ -247,5 +263,5 @@ The sidecar parent PR starts the runtime server. The hydration child PR changes 
 Follow-up work:
 
 - richer observer interpolation from Colyseus state
-- promotion from unlocked Live Mode controls to behavior ownership
+- promotion from runtime-coherent Live Mode controls to behavior ownership
 - promotion from manual route trigger to real planner/model route requests
