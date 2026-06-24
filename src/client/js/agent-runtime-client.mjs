@@ -31,6 +31,7 @@ export function normalizeRuntimeSnapshot(raw = null) {
     heading: Number.isFinite(Number(raw.heading)) ? Number(raw.heading) : 0,
     state: String(raw.state || 'idle'),
     target: raw.target && typeof raw.target === 'object' ? Object.freeze({ ...raw.target }) : null,
+    visualState: raw.visualState && typeof raw.visualState === 'object' ? Object.freeze({ ...raw.visualState }) : null,
     routeId: String(raw.routeId || ''),
     worldActionId: String(raw.worldActionId || ''),
     leaseOwner: String(raw.leaseOwner || ''),
@@ -105,6 +106,14 @@ function snapshotsFromRoomState(room) {
         target = null;
       }
     }
+    let visualState = null;
+    if (raw.visualStateJson) {
+      try {
+        visualState = JSON.parse(raw.visualStateJson);
+      } catch {
+        visualState = null;
+      }
+    }
     const snapshot = normalizeRuntimeSnapshot({
       agentId: raw.agentId || agentId,
       mode: raw.mode,
@@ -117,6 +126,7 @@ function snapshotsFromRoomState(room) {
       heading: raw.heading,
       state: raw.state,
       target,
+      visualState,
       routeId: raw.routeId,
       worldActionId: raw.worldActionId,
       leaseOwner: raw.leaseOwner,
