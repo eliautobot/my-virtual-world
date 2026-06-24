@@ -41,6 +41,30 @@ export function normalizeRuntimeSnapshot(raw = null) {
   });
 }
 
+export function normalizeWorldObjectState(raw = null) {
+  if (!raw || typeof raw !== 'object') return null;
+  const objectKey = String(raw.objectKey || '').trim();
+  if (!objectKey) return null;
+  return Object.freeze({
+    schemaVersion: String(raw.schemaVersion || 'agent-runtime/v1'),
+    objectKey,
+    owner: String(raw.owner || ''),
+    objectType: String(raw.objectType || ''),
+    buildingId: String(raw.buildingId || ''),
+    furnitureIndex: Number.isFinite(Number(raw.furnitureIndex)) ? Number(raw.furnitureIndex) : -1,
+    state: String(raw.state || 'idle'),
+    agentId: String(raw.agentId || ''),
+    actionId: String(raw.actionId || ''),
+    reservationId: String(raw.reservationId || ''),
+    activeUseId: String(raw.activeUseId || ''),
+    slotId: String(raw.slotId || ''),
+    data: raw.data && typeof raw.data === 'object' ? Object.freeze({ ...raw.data }) : null,
+    expiresAt: String(raw.expiresAt || ''),
+    updatedAt: String(raw.updatedAt || ''),
+    version: Number.isFinite(Number(raw.version)) ? Number(raw.version) : 0,
+  });
+}
+
 export function snapshotsFromRuntimeDocument(doc = null) {
   const snapshots = new Map();
   const rawAgents = doc?.agents && typeof doc.agents === 'object' ? doc.agents : {};
@@ -49,6 +73,16 @@ export function snapshotsFromRuntimeDocument(doc = null) {
     if (snapshot) snapshots.set(snapshot.agentId, snapshot);
   }
   return snapshots;
+}
+
+export function worldObjectsFromRuntimeDocument(doc = null) {
+  const objects = new Map();
+  const rawObjects = doc?.objects && typeof doc.objects === 'object' ? doc.objects : {};
+  for (const [fallbackKey, raw] of Object.entries(rawObjects)) {
+    const object = normalizeWorldObjectState({ ...raw, objectKey: raw?.objectKey || fallbackKey });
+    if (object) objects.set(object.objectKey, object);
+  }
+  return objects;
 }
 
 export function snapshotForIdentityKeys(snapshots, keys) {
@@ -139,6 +173,41 @@ function snapshotsFromRoomState(room) {
   return snapshots;
 }
 
+function worldObjectsFromRoomState(room) {
+  const objects = new Map();
+  const rawObjects = room?.state?.objects;
+  if (!rawObjects || typeof rawObjects.entries !== 'function') return objects;
+  for (const [objectKey, raw] of rawObjects.entries()) {
+    let data = null;
+    if (raw.dataJson) {
+      try {
+        data = JSON.parse(raw.dataJson);
+      } catch {
+        data = null;
+      }
+    }
+    const object = normalizeWorldObjectState({
+      objectKey: raw.objectKey || objectKey,
+      owner: raw.owner,
+      objectType: raw.objectType,
+      buildingId: raw.buildingId,
+      furnitureIndex: raw.furnitureIndex,
+      state: raw.state,
+      agentId: raw.agentId,
+      actionId: raw.actionId,
+      reservationId: raw.reservationId,
+      activeUseId: raw.activeUseId,
+      slotId: raw.slotId,
+      data,
+      expiresAt: raw.expiresAt,
+      updatedAt: raw.updatedAt,
+      version: raw.version,
+    });
+    if (object) objects.set(object.objectKey, object);
+  }
+  return objects;
+}
+
 function waitForMessage(room, type, timeoutMs = 1500) {
   return new Promise(resolve => {
     const timer = setTimeout(() => {
@@ -191,6 +260,7 @@ export async function createAgentRuntimeClient({
 
   const listeners = new Set();
   let snapshots = new Map();
+  let worldObjects = new Map();
   let room = null;
   let client = null;
   let unsubscribeState = null;
@@ -212,14 +282,17 @@ export async function createAgentRuntimeClient({
     room = await client.joinOrCreate(config.room, { client: 'main3d-runtime-hydration' });
     unsubscribeState = room.onStateChange(() => {
       snapshots = snapshotsFromRoomState(room);
+      worldObjects = worldObjectsFromRoomState(room);
       notify('state');
     });
     room.onMessage('runtime:event', () => {
       snapshots = snapshotsFromRoomState(room);
+      worldObjects = worldObjectsFromRoomState(room);
       notify('runtime:event');
     });
     room.onMessage('runtime:ack', () => {
       snapshots = snapshotsFromRoomState(room);
+      worldObjects = worldObjectsFromRoomState(room);
       notify('runtime:ack');
     });
     room.onMessage('runtime:error', message => {
@@ -229,6 +302,9 @@ export async function createAgentRuntimeClient({
     snapshots = welcome?.snapshot
       ? snapshotsFromRuntimeDocument(welcome.snapshot)
       : snapshotsFromRoomState(room);
+    worldObjects = welcome?.snapshot
+      ? worldObjectsFromRuntimeDocument(welcome.snapshot)
+      : worldObjectsFromRoomState(room);
   } catch (error) {
     logger?.warn?.('Agent runtime connection failed', error);
     return agentRuntimeUnavailable('connection failed', config);
@@ -281,11 +357,18 @@ export async function createAgentRuntimeClient({
     get snapshots() {
       return new Map(snapshots);
     },
+    get worldObjects() {
+      return new Map(worldObjects);
+    },
     getSnapshotForAgent(agent) {
       return snapshotForIdentityKeys(snapshots, getRuntimeIdentityKeys(agent));
     },
     getSnapshotForKeys(keys) {
       return snapshotForIdentityKeys(snapshots, keys);
+    },
+    getWorldObjectState(objectKey) {
+      const key = String(objectKey || '').trim();
+      return key ? worldObjects.get(key) || null : null;
     },
     onSnapshots(listener) {
       if (typeof listener !== 'function') return () => {};
@@ -295,6 +378,9 @@ export async function createAgentRuntimeClient({
     sendRequest,
     writeSnapshot(payload, options) {
       return sendRequest('runtime:snapshot', payload, options);
+    },
+    writeWorldObjectState(payload, options) {
+      return sendRequest('runtime:worldObject', payload, options);
     },
     claimRoute(payload, options) {
       return sendRequest('runtime:claimRoute', { leaseOwner, ...(payload || {}) }, options);
@@ -321,11 +407,14 @@ function agentRuntimeUnavailable(reason, config = DEFAULT_CONFIG) {
     config,
     leaseOwner: '',
     snapshots: new Map(),
+    worldObjects: new Map(),
     getSnapshotForAgent() { return null; },
     getSnapshotForKeys() { return null; },
+    getWorldObjectState() { return null; },
     onSnapshots() { return () => {}; },
     sendRequest() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     writeSnapshot() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
+    writeWorldObjectState() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     claimRoute() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     heartbeat() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     releaseRoute() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
