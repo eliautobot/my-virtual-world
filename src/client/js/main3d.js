@@ -1239,6 +1239,159 @@ function makeAgentRuntimeClientOwner(baseOwner = 'main3d-position-persistence') 
   return `${base}:${leaseOwner}`;
 }
 
+const AGENT_RUNTIME_MEMBER_SCHEMA = 'agent-runtime-member/v1';
+
+function getAgentRuntimeMembershipObjectKey(activity = null, target = null, options = {}) {
+  if (options.objectKey) return String(options.objectKey).trim();
+  const activityObjectKey = getAgentRuntimeActivityObjectKey(activity);
+  if (activityObjectKey) return activityObjectKey;
+  return getAgentRuntimeObjectKeyFromMeta(options, target, options.building || null);
+}
+
+function makeAgentRuntimeMemberRecord(agent, runtimePositionOwner = '', options = {}) {
+  const owner = String(runtimePositionOwner || options.runtimePositionOwner || '').trim();
+  if (!agent || !owner) return null;
+  const activity = options.activity ?? agent._idleActivity ?? null;
+  const target = options.target ?? agent._wanderTarget ?? null;
+  const agentId = getAgentRuntimeAgentId(agent) || getAgentDebugId(agent);
+  const buildingId = options.buildingId || activity?.buildingId || target?.buildingId || options.building?.id || '';
+  const furnitureIndex = options.furnitureIndex ?? activity?.furnitureIndex ?? target?.furnitureIndex ?? -1;
+  const objectType = options.objectType || activity?.furnitureType || activity?.objectType || target?.objectType || target?.catalogKey || '';
+  const actionId = options.actionId || activity?.actionId || activity?.action || target?.actionId || '';
+  const objectKey = getAgentRuntimeMembershipObjectKey(activity, target, {
+    ...options,
+    buildingId,
+    furnitureIndex,
+    objectType,
+    actionId,
+  });
+  const floor = Math.max(1, Number(options.floor ?? activity?.floor ?? target?.floor ?? agent._floor ?? agent._targetFloor ?? 1) || 1);
+  const targetX = Number(options.x ?? target?.x ?? activity?.dockTarget?.x ?? agent.x ?? 0);
+  const targetY = Number(options.y ?? target?.y ?? activity?.dockTarget?.y ?? agent.y ?? 0);
+  const memberKey = [owner, agentId, objectKey || target?.targetKind || activity?.kind || 'world'].filter(Boolean).join(':');
+  return {
+    schemaVersion: AGENT_RUNTIME_MEMBER_SCHEMA,
+    memberId: `runtime-member:${memberKey}`,
+    agentId,
+    runtimePositionOwner: owner,
+    writerOwner: makeAgentRuntimeClientOwner(owner),
+    objectKey,
+    objectType,
+    buildingId: buildingId || '',
+    furnitureIndex: Number.isFinite(Number(furnitureIndex)) ? Number(furnitureIndex) : -1,
+    actionId,
+    spotId: options.spotId || activity?.spotId || target?.spotId || target?.interactionSpotId || '',
+    state: options.state || activity?.phase || 'active',
+    activityKind: activity?.kind || '',
+    targetKind: target?.targetKind || '',
+    x: Number.isFinite(targetX) ? targetX : 0,
+    y: Number.isFinite(targetY) ? targetY : 0,
+    floor,
+    updatedAtMs: Date.now(),
+  };
+}
+
+function getAgentRuntimeMember(agent, runtimePositionOwner = '') {
+  if (!agent) return null;
+  const owner = String(runtimePositionOwner || '').trim();
+  const member = agent._runtimeMember || agent._runtimeMembership || agent._idleActivity?.runtimeMember || null;
+  if (!member) return null;
+  if (owner && member.runtimePositionOwner !== owner) return null;
+  return member;
+}
+
+function stampAgentRuntimeMember(agent, runtimePositionOwner = '', options = {}) {
+  const member = makeAgentRuntimeMemberRecord(agent, runtimePositionOwner, options);
+  if (!member) return null;
+  const activity = options.activity ?? agent._idleActivity ?? null;
+  const target = options.target ?? agent._wanderTarget ?? null;
+  agent._runtimeMember = member;
+  agent._runtimeMembership = member;
+  agent._runtimePositionOwner = member.runtimePositionOwner;
+  if (activity && options.stampActivity !== false) {
+    activity.runtimePositionOwner = member.runtimePositionOwner;
+    activity.runtimeMemberId = member.memberId;
+    activity.runtimeMember = member;
+    activity.lifecycle = {
+      ...(activity.lifecycle || {}),
+      runtimePositionOwner: member.runtimePositionOwner,
+      runtimeMemberId: member.memberId,
+      runtimeMemberSchema: AGENT_RUNTIME_MEMBER_SCHEMA,
+    };
+  }
+  if (target && options.stampTarget !== false) {
+    target.runtimePositionOwner = member.runtimePositionOwner;
+    target.runtimeMemberId = member.memberId;
+  }
+  const intent = agent._agentIntent || null;
+  if (isAgentIntentActive(intent) && options.stampIntent !== false) {
+    intent.debug = {
+      ...(intent.debug || {}),
+      updatedAtMs: Date.now(),
+      runtimeMember: member,
+      lastRuntimeMemberId: member.memberId,
+    };
+  }
+  return member;
+}
+
+function clearAgentRuntimeMember(agent, runtimePositionOwner = '') {
+  if (!agent) return false;
+  const owner = String(runtimePositionOwner || '').trim();
+  const currentOwner = String(agent._runtimeMember?.runtimePositionOwner || agent._runtimeMembership?.runtimePositionOwner || agent._runtimePositionOwner || '');
+  if (owner && currentOwner && currentOwner !== owner) return false;
+  const activity = agent._idleActivity || null;
+  if (!owner || activity?.runtimePositionOwner === owner) {
+    if (activity) {
+      delete activity.runtimeMember;
+      delete activity.runtimeMemberId;
+      if (!owner || activity.runtimePositionOwner === owner) delete activity.runtimePositionOwner;
+      if (!owner || activity.lifecycle?.runtimePositionOwner === owner) {
+        delete activity.lifecycle.runtimePositionOwner;
+        delete activity.lifecycle.runtimeMemberId;
+        delete activity.lifecycle.runtimeMemberSchema;
+      }
+    }
+  }
+  const target = agent._wanderTarget || null;
+  if (!owner || target?.runtimePositionOwner === owner) {
+    if (target) {
+      delete target.runtimeMemberId;
+      if (!owner || target.runtimePositionOwner === owner) delete target.runtimePositionOwner;
+    }
+  }
+  if (!owner || currentOwner === owner) {
+    agent._runtimeMember = null;
+    agent._runtimeMembership = null;
+    agent._runtimePositionOwner = '';
+  }
+  return true;
+}
+
+function clearAgentRuntimeMemberMovement(agent, runtimePositionOwner = '', { releaseRouteReason = 'runtime-member-position-owner', releaseRouteState = 'idle', clearDoorState = true } = {}) {
+  if (!agent) return false;
+  const owner = String(runtimePositionOwner || '').trim();
+  const targetOwner = String(agent._wanderTarget?.runtimePositionOwner || agent._runtimeMember?.runtimePositionOwner || '');
+  if (owner && targetOwner && targetOwner !== owner) return false;
+  agent._wanderTarget = null;
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  agent._waypointPathIdx = 0;
+  if (clearDoorState) {
+    agent._doorTransition = null;
+    agent._enteringBuilding = null;
+    agent._atDoor = false;
+  }
+  agent._isReturningToDesk = false;
+  clearDynamicInteriorRoutingForAgent(agent.id);
+  clearDynamicExteriorRoutingForAgent(agent.id);
+  resetObstacleAvoidance(agent);
+  if (agent._runtimeRouteLease && agent._runtimeRouteLease.state !== 'releasing') {
+    releaseAgentRuntimeRouteLease(agent, releaseRouteReason, releaseRouteState);
+  }
+  return true;
+}
+
 function getAgentRuntimeSnapshotOwnerToken(snapshot = null) {
   const owner = String(snapshot?.owner || '').trim();
   const match = owner.match(/:main3d:[A-Za-z0-9_-]+$/);
@@ -1723,6 +1876,9 @@ function makeAgentRuntimeWorldObjectStateForAgent(agent, state = 'idle') {
   const reservation = agentRuntimePlainObject(furniture?.reservation, null);
   const activeUse = agentRuntimePlainObject(furniture?.activeUse, null);
   const activityState = makeAgentRuntimeVisualActivity(agent);
+  const runtimeMember = getAgentRuntimeMember(agent, activity.runtimePositionOwner || '') || (activity.runtimePositionOwner
+    ? stampAgentRuntimeMember(agent, activity.runtimePositionOwner, { activity, state: objectState, stampIntent: false })
+    : null);
   return {
     objectKey,
     owner: makeAgentRuntimeClientOwner('main3d-world-runtime'),
@@ -1738,6 +1894,7 @@ function makeAgentRuntimeWorldObjectStateForAgent(agent, state = 'idle') {
     expiresAt,
     data: {
       activity: activityState,
+      runtimeMember,
       reservation,
       activeUse,
       anchor: {
@@ -4327,6 +4484,7 @@ function holdLiveStatusRuntimeObjectDock(agent, workTarget = null, kind = 'live-
   const furnitureIndex = Number(workTarget.furnitureIndex);
   const objectType = workTarget.kind || workTarget.objectType || 'desk';
   const actionId = String(kind || '').includes('meeting') ? 'planning.meeting' : 'work.desk';
+  const objectKey = getAgentRuntimeFurnitureObjectKey(buildingId, furnitureIndex, objectType);
   const stayMs = isWorkPresenceStatus(agent.status) ? 999999 : Math.max(3500, Number(agent._stayTimer || 0), 4500);
   const existing = String(agent._idleActivity?.kind || '').startsWith('live-status-') ? agent._idleActivity : null;
   agent._idleActivity = {
@@ -4334,11 +4492,10 @@ function holdLiveStatusRuntimeObjectDock(agent, workTarget = null, kind = 'live-
     kind,
     phase: 'active',
     source: 'live-status-runtime-dock',
-    runtimePositionOwner: LIVE_STATUS_RUNTIME_POSITION_OWNER,
     buildingId,
     furnitureIndex,
     furnitureType: objectType,
-    objectKey: getAgentRuntimeFurnitureObjectKey(buildingId, furnitureIndex, objectType),
+    objectKey,
     actionId,
     spotId: workTarget.spotId || null,
     stayMs,
@@ -4346,8 +4503,21 @@ function holdLiveStatusRuntimeObjectDock(agent, workTarget = null, kind = 'live-
     dockTarget: { x: Number(workTarget.apiX), y: Number(workTarget.apiZ) },
     dockSnapRadius: WORK_DESK_IDLE_SEATED_RADIUS,
     animationId: actionId === 'planning.meeting' ? 'meeting-sit-talk' : 'desk-work',
-    lifecycle: { stationary: true, carryable: false, temporary: false, runtimePositionOwner: LIVE_STATUS_RUNTIME_POSITION_OWNER },
+    lifecycle: { stationary: true, carryable: false, temporary: false },
   };
+  const runtimeMember = stampAgentRuntimeMember(agent, LIVE_STATUS_RUNTIME_POSITION_OWNER, {
+    activity: agent._idleActivity,
+    objectKey,
+    objectType,
+    buildingId,
+    furnitureIndex,
+    actionId,
+    spotId: workTarget.spotId || null,
+    x: Number(workTarget.apiX),
+    y: Number(workTarget.apiZ),
+    floor: workTarget.floor,
+    state: 'active',
+  });
   const intent = agent._agentIntent || null;
   if (isAgentIntentActive(intent) && intent.priorityName === 'live-status') {
     intent.phase = 'active';
@@ -4356,6 +4526,7 @@ function holdLiveStatusRuntimeObjectDock(agent, workTarget = null, kind = 'live-
       updatedAtMs: Date.now(),
       lastDecisionReason: 'live-status-runtime-object-dock-active',
       sourceSummary: 'live status desk/meeting direct dock is fenced by runtime object ownership',
+      runtimeMember,
     };
   }
   return agent._idleActivity;
@@ -18862,11 +19033,10 @@ function isAgentEligibleForRuntimeTagGame(agent) {
 function clearTagGameRuntimeTarget(agent) {
   const target = agent?._wanderTarget || null;
   if (!target || (target.runtimePositionOwner !== TAG_GAME_RUNTIME_POSITION_OWNER && target.targetKind !== 'tag-game-runtime')) return false;
-  agent._wanderTarget = null;
-  agent._waypointPath = null;
-  agent._waypointPathTarget = null;
-  agent._waypointPathIdx = 0;
-  return true;
+  return clearAgentRuntimeMemberMovement(agent, TAG_GAME_RUNTIME_POSITION_OWNER, {
+    releaseRouteReason: 'tag-game-runtime-target-cleared',
+    releaseRouteState: 'idle',
+  });
 }
 
 function releaseTagGameParticipant(agent, reason = 'tag-game-complete') {
@@ -18880,6 +19050,7 @@ function releaseTagGameParticipant(agent, reason = 'tag-game-complete') {
     })
     : null;
   clearTagGameRuntimeTarget(agent);
+  clearAgentRuntimeMember(agent, TAG_GAME_RUNTIME_POSITION_OWNER);
   agent._tagState = null;
   agent._isRunning = false;
   agent._wanderTimer = 2000 + Math.random() * 3000;
@@ -18894,7 +19065,6 @@ function admitTagGameParticipant(agent, gameId, { isIt = false, maxTime = 30000 
     floor: Math.max(1, Number(agent._floor || agent._targetFloor || 1) || 1),
     targetKind: 'tag-game-runtime',
     gameId,
-    runtimePositionOwner: TAG_GAME_RUNTIME_POSITION_OWNER,
   };
   const intentOptions = {
     owner: 'tag-game',
@@ -18924,8 +19094,12 @@ function admitTagGameParticipant(agent, gameId, { isIt = false, maxTime = 30000 
     isIt,
     timer: maxTime,
     evadeAngle: Math.random() * Math.PI * 2,
-    runtimePositionOwner: TAG_GAME_RUNTIME_POSITION_OWNER,
   };
+  stampAgentRuntimeMember(agent, TAG_GAME_RUNTIME_POSITION_OWNER, {
+    target,
+    state: isIt ? 'tagger' : 'evading',
+    stampActivity: false,
+  });
   agent._isRunning = true;
   return true;
 }
@@ -18933,19 +19107,23 @@ function admitTagGameParticipant(agent, gameId, { isIt = false, maxTime = 30000 
 function setTagGameRuntimeTarget(agent, target = null) {
   if (!agent?._tagState?.playing || !target || !isTagGameRuntimeIntentActive(agent, agent._tagState.gameId)) return false;
   if (!Number.isFinite(Number(target.x)) || !Number.isFinite(Number(target.y))) return false;
-  agent._wanderTarget = {
+  const runtimeTarget = {
     ...target,
     x: Number(target.x),
     y: Number(target.y),
     floor: Math.max(1, Number(target.floor || agent._floor || agent._targetFloor || 1) || 1),
     targetKind: 'tag-game-runtime',
     gameId: agent._tagState.gameId,
-    runtimePositionOwner: TAG_GAME_RUNTIME_POSITION_OWNER,
   };
+  agent._wanderTarget = runtimeTarget;
+  stampAgentRuntimeMember(agent, TAG_GAME_RUNTIME_POSITION_OWNER, {
+    target: runtimeTarget,
+    state: agent._tagState.isIt ? 'tagging' : 'evading',
+    stampActivity: false,
+  });
   agent._waypointPath = null;
   agent._waypointPathTarget = null;
   agent._waypointPathIdx = 0;
-  agent._tagState.runtimePositionOwner = TAG_GAME_RUNTIME_POSITION_OWNER;
   return true;
 }
 
@@ -19966,9 +20144,21 @@ function updateAgentAnimations(dt) {
           dockTarget: { x: meetingTarget.apiX, y: meetingTarget.apiZ },
           dockSnapRadius: 8,
           animationId: 'meeting-sit-talk',
-          runtimePositionOwner: LIVE_STATUS_RUNTIME_POSITION_OWNER,
-          lifecycle: { stationary: true, carryable: false, temporary: false, runtimePositionOwner: LIVE_STATUS_RUNTIME_POSITION_OWNER },
+          lifecycle: { stationary: true, carryable: false, temporary: false },
         };
+        stampAgentRuntimeMember(agent, LIVE_STATUS_RUNTIME_POSITION_OWNER, {
+          activity: agent._idleActivity,
+          objectKey: getAgentRuntimeFurnitureObjectKey(meetingTarget.entry.buildingId, meetingTarget.entry.index, 'meetingTable'),
+          objectType: 'meetingTable',
+          buildingId: meetingTarget.entry.buildingId,
+          furnitureIndex: meetingTarget.entry.index,
+          actionId: 'planning.meeting',
+          spotId: meetingTarget.spotId,
+          x: meetingTarget.apiX,
+          y: meetingTarget.apiZ,
+          floor: meetingTarget.floor,
+          state: 'approach',
+        });
         agent._meetingId = meetingTarget.meetingId;
         agent._meetingTopic = meetingTarget.topic;
         agent._wanderTimer = 120;
@@ -55041,10 +55231,22 @@ function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'mat
       action: actionId,
       actionId,
       animationId: 'play-pingpong',
-      runtimePositionOwner: PING_PONG_RUNTIME_POSITION_OWNER,
-      lifecycle: { stationary: true, carryable: false, temporary: false, spawnsTemporary: true, runtimePositionOwner: PING_PONG_RUNTIME_POSITION_OWNER },
+      lifecycle: { stationary: true, carryable: false, temporary: false, spawnsTemporary: true },
       spawnedItem: { label: 'Ping Pong Racket', catalogId: 'temporaryGameEquipment', temporary: true, carryable: true, attachPoint: 'right-hand' },
     };
+    stampAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER, {
+      activity: agent._idleActivity,
+      objectKey,
+      objectType: 'pingpong',
+      buildingId,
+      furnitureIndex: index,
+      actionId,
+      spotId: spot.spotId,
+      x: spot.apiX,
+      y: spot.apiZ,
+      floor: spot.floor,
+      state: 'approach',
+    });
     setPingPongRacket(agent, color, agent._idleActivity);
     agent._pingPongPaddleColor = color;
     agent._pingPongSide = side;
@@ -55080,6 +55282,7 @@ function endPingPongGame(table, reason = 'complete') {
           releaseSummary: 'ping-pong match ended and released table ownership',
         });
       }
+      clearAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER);
       releaseAgentRuntimeRouteLease(agent, 'pingpong-game-ended', 'idle');
       agent._schedPhase = reason === 'complete' ? 'pingpong-complete' : 'idle-local';
       agent._wanderTimer = 1400 + Math.random() * 2200;
@@ -55611,15 +55814,26 @@ function holdPingPongRuntimePosition(agent, pose = {}) {
   if (!agent) return;
   const activity = agent._idleActivity || null;
   if (activity && String(activity.kind || '').startsWith('pingpong-')) {
-    activity.runtimePositionOwner = PING_PONG_RUNTIME_POSITION_OWNER;
     activity.dockTarget = Number.isFinite(Number(pose.apiX)) && Number.isFinite(Number(pose.apiZ))
       ? { x: pose.apiX, y: pose.apiZ }
       : activity.dockTarget;
     activity.lifecycle = {
       ...(activity.lifecycle || {}),
       stationary: false,
-      runtimePositionOwner: PING_PONG_RUNTIME_POSITION_OWNER,
     };
+    stampAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER, {
+      activity,
+      objectKey: activity.objectKey,
+      objectType: 'pingpong',
+      buildingId: activity.buildingId,
+      furnitureIndex: activity.furnitureIndex,
+      actionId: activity.actionId || activity.action || 'life.playPingPong',
+      spotId: activity.spotId,
+      x: Number.isFinite(Number(pose.apiX)) ? Number(pose.apiX) : activity.dockTarget?.x,
+      y: Number.isFinite(Number(pose.apiZ)) ? Number(pose.apiZ) : activity.dockTarget?.y,
+      floor: pose.floor || activity.floor || agent._floor || agent._targetFloor || 1,
+      state: activity.phase || 'active',
+    });
   }
 
   const intent = agent._agentIntent || null;
@@ -55641,23 +55855,14 @@ function holdPingPongRuntimePosition(agent, pose = {}) {
     }
   }
 
-  agent._wanderTarget = null;
-  agent._waypointPath = null;
-  agent._waypointPathTarget = null;
-  agent._waypointPathIdx = 0;
-  agent._doorTransition = null;
-  agent._enteringBuilding = null;
-  agent._atDoor = false;
+  clearAgentRuntimeMemberMovement(agent, PING_PONG_RUNTIME_POSITION_OWNER, {
+    releaseRouteReason: 'pingpong-runtime-position-owner',
+    releaseRouteState: 'idle',
+  });
   agent._isReturningToDesk = false;
   agent._isRunning = false;
   agent._stayTimer = Math.max(agent._stayTimer || 0, 1200);
   agent._wanderTimer = Math.max(agent._wanderTimer || 0, 1200);
-  clearDynamicInteriorRoutingForAgent(agent.id);
-  clearDynamicExteriorRoutingForAgent(agent.id);
-  resetObstacleAvoidance(agent);
-  if (agent._runtimeRouteLease && agent._runtimeRouteLease.state !== 'releasing') {
-    releaseAgentRuntimeRouteLease(agent, 'pingpong-runtime-position-owner', 'idle');
-  }
 }
 
 function updatePingPongGames(dt = 0) {
