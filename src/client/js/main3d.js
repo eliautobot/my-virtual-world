@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-world-runtime-vehicles-r1';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-world-runtime-render-coherence-r2';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1107,10 +1107,13 @@ const AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE = 0.05;
 const AGENT_RUNTIME_WORLD_OBJECT_TTL_MS = 15000;
 const AGENT_RUNTIME_WORLD_OBJECT_COOLDOWN_MS = 8000;
 const AGENT_RUNTIME_TRAFFIC_TOPOLOGY_REQUEST_TIMEOUT_MS = 3500;
+const AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS = 650;
+const AGENT_RUNTIME_TRAFFIC_VEHICLE_SNAP_DISTANCE = API_TILE * 8;
 let editMode = null;
 
 // ── Feature 1: Vehicles ──────────────────────────────────────────────
 const vehiclesList = [];
+let _worldAutosaveSuppressDepth = 0;
 
 // ── Traffic Lights ───────────────────────────────────────────────────
 const _trafficLights = new Map(); // "ix,iz" → { phase, timer, meshes[], ns:'green'|'red', ew:'green'|'red' }
@@ -1258,7 +1261,14 @@ function isAgentRuntimeSnapshotFresh(snapshot = null, maxAgeMs = AGENT_RUNTIME_P
 
 function isAgentRuntimeSnapshotRemoteWriterActive(snapshot = null) {
   if (!snapshot || String(snapshot.mode || '') === 'live') return false;
-  return isAgentRuntimeSnapshotOwnerAnotherClient(snapshot) && isAgentRuntimeSnapshotFresh(snapshot);
+  if (!isAgentRuntimeSnapshotOwnerAnotherClient(snapshot) || !isAgentRuntimeSnapshotFresh(snapshot)) return false;
+  const owner = String(snapshot.owner || '');
+  const state = String(snapshot.state || '').toLowerCase();
+  const visualMovement = snapshot.visualState?.movement || null;
+  const isMovingSnapshot = state === 'moving' || state === 'routing' || visualMovement?.isMoving === true;
+  const hasRoute = Boolean(snapshot.routeId || snapshot.leaseOwner || snapshot.leaseExpiresAt);
+  if (owner.startsWith('main3d-position-persistence') && !isMovingSnapshot && !hasRoute) return false;
+  return true;
 }
 
 function getAgentRuntimeFloorBuilding(agent, snapshot) {
@@ -1531,6 +1541,47 @@ function applyAgentRuntimeTrafficLights() {
   return applied;
 }
 
+function getVehicleLaneOffsetForDir(dir) {
+  const laneOffset = ST.LANE_W * 0.45;
+  return {
+    x: dir === 2 ? -laneOffset : dir === 3 ? laneOffset : 0,
+    z: dir === 0 ? laneOffset : dir === 1 ? -laneOffset : 0,
+  };
+}
+
+function placeRuntimeTrafficVehicle(vehicle, { dt = 0, force = false } = {}) {
+  if (!vehicle?.group) return false;
+  const lane = getVehicleLaneOffsetForDir(vehicle.dir);
+  if (force) {
+    vehicle._laneOffX = lane.x;
+    vehicle._laneOffZ = lane.z;
+  } else {
+    const laneAlpha = 1 - Math.exp(-8 * Math.max(0, dt));
+    vehicle._laneOffX = Number(vehicle._laneOffX || 0) + (lane.x - Number(vehicle._laneOffX || 0)) * laneAlpha;
+    vehicle._laneOffZ = Number(vehicle._laneOffZ || 0) + (lane.z - Number(vehicle._laneOffZ || 0)) * laneAlpha;
+  }
+  if (Number.isFinite(Number(vehicle._targetRotY))) {
+    if (force) {
+      vehicle.group.rotation.y = Number(vehicle._targetRotY);
+    } else {
+      let diff = Number(vehicle._targetRotY) - Number(vehicle.group.rotation.y || 0);
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      const rotAlpha = 1 - Math.exp(-10 * Math.max(0, dt));
+      vehicle.group.rotation.y += diff * rotAlpha;
+    }
+  }
+  const vPosY = ST.BASE + ST.ROAD_THICK + 0.18;
+  const renderX = Number(vehicle.x || 0) + Number(vehicle._laneOffX || 0);
+  const renderZ = Number(vehicle.z || 0) + Number(vehicle._laneOffZ || 0);
+  if (isPhysicsReady() && vehicle._physicsId) {
+    setVehiclePosition(vehicle._physicsId, renderX, vPosY, renderZ, vehicle.group.rotation.y);
+  }
+  vehicle.group.position.set(renderX, vPosY, renderZ);
+  vehicle.group.visible = true;
+  return true;
+}
+
 function applyAgentRuntimeTrafficVehicles() {
   const worldRuntime = _agentRuntimeClient?.worldRuntime || null;
   const runtimeVehicles = worldRuntime?.trafficVehicles;
@@ -1544,13 +1595,33 @@ function applyAgentRuntimeTrafficVehicles() {
   let applied = 0;
   for (const runtimeVehicle of runtimeVehicles.values()) {
     let vehicle = byId.get(runtimeVehicle.vehicleId);
+    const targetX = Number(runtimeVehicle.x || 0);
+    const targetZ = Number(runtimeVehicle.z || 0);
     if (!vehicle) {
-      vehicle = makeVehicle(runtimeVehicle.color || VEHICLE_COLORS[vehiclesList.length % VEHICLE_COLORS.length], runtimeVehicle.x, runtimeVehicle.z, runtimeVehicle.dir, runtimeVehicle.vehicleType, { vehicleId: runtimeVehicle.vehicleId });
+      vehicle = makeVehicle(runtimeVehicle.color || VEHICLE_COLORS[vehiclesList.length % VEHICLE_COLORS.length], targetX, targetZ, runtimeVehicle.dir, runtimeVehicle.vehicleType, { vehicleId: runtimeVehicle.vehicleId });
       vehicle._runtimeVehicleId = runtimeVehicle.vehicleId;
       vehiclesList.push(vehicle);
     }
-    vehicle.x = Number(runtimeVehicle.x || 0);
-    vehicle.z = Number(runtimeVehicle.z || 0);
+    const startX = Number.isFinite(Number(vehicle.x)) ? Number(vehicle.x) : targetX;
+    const startZ = Number.isFinite(Number(vehicle.z)) ? Number(vehicle.z) : targetZ;
+    const distToTarget = Math.hypot(startX - targetX, startZ - targetZ);
+    const shouldSnap = !vehicle._runtimeWorldRuntime || distToTarget > AGENT_RUNTIME_TRAFFIC_VEHICLE_SNAP_DISTANCE;
+    if (shouldSnap) {
+      vehicle.x = targetX;
+      vehicle.z = targetZ;
+      vehicle._runtimeVehicleInterpolation = null;
+    } else {
+      vehicle._runtimeVehicleInterpolation = {
+        fromX: startX,
+        fromZ: startZ,
+        toX: targetX,
+        toZ: targetZ,
+        startedAtMs: performance.now(),
+        durationMs: AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS,
+        tickSeq: worldRuntime.tickSeq || 0,
+        version: runtimeVehicle.version || 0,
+      };
+    }
     vehicle.dir = Math.max(0, Math.min(3, Math.floor(Number(runtimeVehicle.dir || 0))));
     vehicle._targetRotY = Number.isFinite(Number(runtimeVehicle.rotationY)) ? Number(runtimeVehicle.rotationY) : _dirToRotY(vehicle.dir);
     vehicle._path = Array.isArray(runtimeVehicle.path) ? runtimeVehicle.path.map(point => ({ x: point.x / T, z: point.z / T })) : vehicle._path;
@@ -1558,19 +1629,11 @@ function applyAgentRuntimeTrafficVehicles() {
     vehicle._stoppedAtLight = runtimeVehicle.state === 'stopped';
     vehicle._runtimeWorldRuntime = true;
     vehicle._runtimeVersion = runtimeVehicle.version || 0;
-    vehicle.group.rotation.y = vehicle._targetRotY;
-    const laneOffset = ST.LANE_W * 0.45;
-    vehicle._laneOffX = vehicle.dir === 2 ? -laneOffset : vehicle.dir === 3 ? laneOffset : 0;
-    vehicle._laneOffZ = vehicle.dir === 0 ? laneOffset : vehicle.dir === 1 ? -laneOffset : 0;
-    const vPosY = ST.BASE + ST.ROAD_THICK + 0.18;
-    vehicle.group.position.set(vehicle.x + vehicle._laneOffX, vPosY, vehicle.z + vehicle._laneOffZ);
-    vehicle.group.visible = true;
-    if (isPhysicsReady() && vehicle._physicsId) {
-      setVehiclePosition(vehicle._physicsId, vehicle.x + vehicle._laneOffX, vPosY, vehicle.z + vehicle._laneOffZ, vehicle.group.rotation.y);
-    }
-    vehicle.group.children.forEach(child => {
-      if (child.name === 'wheel' && runtimeVehicle.state === 'moving') child.rotation.x += Number(runtimeVehicle.speed || VEHICLE_SPEED) * 0.025;
-    });
+    vehicle._runtimeServerX = targetX;
+    vehicle._runtimeServerZ = targetZ;
+    vehicle._runtimeState = runtimeVehicle.state || 'moving';
+    vehicle._runtimeSpeed = Number(runtimeVehicle.speed || VEHICLE_SPEED);
+    placeRuntimeTrafficVehicle(vehicle, { force: shouldSnap });
     applied++;
   }
   if (typeof window !== 'undefined') {
@@ -1582,6 +1645,38 @@ function applyAgentRuntimeTrafficVehicles() {
     };
   }
   return applied;
+}
+
+function updateRuntimeTrafficVehicles(dt = 0) {
+  applyAgentRuntimeTrafficVehicles();
+  let rendered = 0;
+  const now = performance.now();
+  for (const vehicle of vehiclesList) {
+    if (!vehicle?._runtimeWorldRuntime) continue;
+    const interpolation = vehicle._runtimeVehicleInterpolation || null;
+    if (interpolation) {
+      const duration = Math.max(1, Number(interpolation.durationMs || AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS));
+      const t = Math.min(1, Math.max(0, (now - Number(interpolation.startedAtMs || now)) / duration));
+      vehicle.x = Number(interpolation.fromX || 0) + (Number(interpolation.toX || 0) - Number(interpolation.fromX || 0)) * t;
+      vehicle.z = Number(interpolation.fromZ || 0) + (Number(interpolation.toZ || 0) - Number(interpolation.fromZ || 0)) * t;
+      if (t >= 1) vehicle._runtimeVehicleInterpolation = null;
+    }
+    placeRuntimeTrafficVehicle(vehicle, { dt });
+    if (vehicle._runtimeState === 'moving') {
+      vehicle.group.children.forEach(child => {
+        if (child.name === 'wheel') child.rotation.x += Number(vehicle._runtimeSpeed || VEHICLE_SPEED) * Math.max(0, dt) * 5;
+      });
+    }
+    rendered++;
+  }
+  if (typeof window !== 'undefined' && window.__VWWorldRuntimeVehicles) {
+    window.__VWWorldRuntimeVehicles = {
+      ...window.__VWWorldRuntimeVehicles,
+      rendered,
+      renderUpdatedAt: new Date().toISOString(),
+    };
+  }
+  return rendered;
 }
 
 function getAgentRuntimeObjectActivityState(agent, state = 'idle') {
@@ -1990,6 +2085,21 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   const floor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(floor)) return false;
 
+  const leaseActive = isAgentRuntimeSnapshotLeaseActive(snapshot);
+  const localRouteLease = agent._runtimeRouteLease || null;
+  const localLeaseActive = ['pending', 'owned', 'releasing'].includes(String(localRouteLease?.state || ''));
+  const snapshotUpdatedAtMs = Date.parse(snapshot.updatedAt || '');
+  if (
+    localLeaseActive &&
+    !leaseActive &&
+    !snapshot.routeId &&
+    Number.isFinite(snapshotUpdatedAtMs) &&
+    Number.isFinite(Number(localRouteLease.startedAtMs || 0)) &&
+    snapshotUpdatedAtMs < Number(localRouteLease.startedAtMs || 0)
+  ) {
+    return false;
+  }
+
   const previousPosition = {
     x: Number(agent.x || 0),
     y: Number(agent.y || 0),
@@ -2004,28 +2114,53 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   agent._runtimeLeaseOwner = snapshot.leaseOwner || '';
   agent._runtimeVersion = snapshot.version || 0;
   agent._runtimeUpdatedAt = snapshot.updatedAt || '';
-  const leaseActive = isAgentRuntimeSnapshotLeaseActive(snapshot);
   const leaseOwnedByThisClient = Boolean(leaseActive && snapshot.leaseOwner && snapshot.leaseOwner === _agentRuntimeClient?.leaseOwner);
-  const localLeaseActive = ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease?.state || ''));
   const remoteWriterActive = isAgentRuntimeSnapshotRemoteWriterActive(snapshot);
   const wasObserverOnly = agent._runtimeObserverOnly === true;
-  if (leaseOwnedByThisClient && agent._runtimeRouteLease && (!snapshot.routeId || agent._runtimeRouteLease.routeId === snapshot.routeId)) {
+  if (leaseOwnedByThisClient && (!agent._runtimeRouteLease || !snapshot.routeId || agent._runtimeRouteLease.routeId === snapshot.routeId)) {
+    const existingLease = agent._runtimeRouteLease || {};
+    const snapshotTarget = agentRuntimePlainObject(snapshot.target, null);
+    const wasOwned = existingLease.state === 'owned';
     agent._runtimeRouteLease = {
-      ...agent._runtimeRouteLease,
-      state: agent._runtimeRouteLease.state === 'releasing' ? 'releasing' : 'owned',
-      routeId: snapshot.routeId || agent._runtimeRouteLease.routeId,
-      worldActionId: snapshot.worldActionId || agent._runtimeRouteLease.worldActionId || '',
+      ...existingLease,
+      state: existingLease.state === 'releasing' ? 'releasing' : 'owned',
+      routeId: snapshot.routeId || existingLease.routeId || '',
+      worldActionId: snapshot.worldActionId || existingLease.worldActionId || '',
       leaseOwner: snapshot.leaseOwner,
+      runtimeMode: snapshot.mode || existingLease.runtimeMode || 'scripted',
+      runtimeOwner: snapshot.owner || existingLease.runtimeOwner || 'main3d-route-executor',
+      target: snapshotTarget || existingLease.target || null,
+      startedAtMs: Number(existingLease.startedAtMs || Date.now()),
       lastAckAtMs: Date.now(),
       leaseExpiresAt: snapshot.leaseExpiresAt,
     };
+    if (!agent._wanderTarget && snapshotTarget && Number.isFinite(Number(snapshotTarget.x)) && Number.isFinite(Number(snapshotTarget.y))) {
+      agent._wanderTarget = {
+        ...snapshotTarget,
+        x: Number(snapshotTarget.x),
+        y: Number(snapshotTarget.y),
+        floor: Math.max(1, Number(snapshotTarget.floor || snapshotTarget.buildingFloor || floor) || 1),
+      };
+      agent._targetFloor = agent._wanderTarget.floor;
+      agent._stayTimer = 0;
+      agent._wanderTimer = 0;
+    }
+    if (!wasOwned) maybeSendAgentRuntimeRouteHeartbeat(agent, snapshot.state || 'routing', { force: true });
   }
   if (!leaseActive && !snapshot.routeId && agent._runtimeRouteLease?.leaseOwner === _agentRuntimeClient?.leaseOwner) {
-    agent._runtimeRouteLease = null;
-    agent._runtimeLeaseOwner = '';
-    agent._runtimeRouteId = '';
-    if (agent._wanderTarget && ['routing', 'moving'].includes(String(snapshot.state || '').toLowerCase()) === false) {
-      clearAgentTransientMovement(agent);
+    const lease = agent._runtimeRouteLease || {};
+    const leaseStartedAtMs = Number(lease.startedAtMs || 0);
+    const ignoreNoLeaseSnapshot = ['pending', 'owned'].includes(String(lease.state || '')) &&
+      Number.isFinite(snapshotUpdatedAtMs) &&
+      Number.isFinite(leaseStartedAtMs) &&
+      snapshotUpdatedAtMs < leaseStartedAtMs;
+    if (!ignoreNoLeaseSnapshot) {
+      agent._runtimeRouteLease = null;
+      agent._runtimeLeaseOwner = '';
+      agent._runtimeRouteId = '';
+      if (agent._wanderTarget && ['routing', 'moving'].includes(String(snapshot.state || '').toLowerCase()) === false) {
+        clearAgentTransientMovement(agent);
+      }
     }
   }
   agent._runtimeObserverOnly = (snapshot.mode === 'live' || leaseActive || remoteWriterActive) && !leaseOwnedByThisClient && !localLeaseActive;
@@ -2553,6 +2688,24 @@ if (typeof window !== 'undefined') {
       : agentRef;
     return publishAgentRuntimeMovementSnapshot(agent, state, { ...(options || {}), force: true, reason: options.reason || 'debug-publish' });
   };
+  window.__VWGetAgentRuntimeDebug = () => agentsList.map(agent => ({
+    id: agent.id || null,
+    name: agent.name || agent.id || null,
+    status: agent.status || '',
+    x: Number(agent.x || 0),
+    y: Number(agent.y || 0),
+    floor: Math.max(1, Number(agent._floor || agent._targetFloor || 1) || 1),
+    target: agent._wanderTarget ? { ...agent._wanderTarget } : null,
+    stayTimer: Number(agent._stayTimer || 0),
+    wanderTimer: Number(agent._wanderTimer || 0),
+    idleActivity: agent._idleActivity?.kind || null,
+    observerOnly: agent._runtimeObserverOnly === true,
+    remoteWriterActive: agent._runtimeRemoteWriterActive === true,
+    runtimeOwner: agent._runtimeOwner || '',
+    runtimeState: agent._runtimeState || '',
+    runtimeUpdatedAt: agent._runtimeUpdatedAt || '',
+    routeLease: agent._runtimeRouteLease ? { ...agent._runtimeRouteLease } : null,
+  }));
 }
 
 function doesDeskAssignmentMatchAgent(agent, assignedTo) {
@@ -7869,16 +8022,21 @@ function createChunk(cx, cz) {
   const data = { cx, cz, terrain, mesh, decors, dirty: false };
   loadedChunks.set(key, data);
 
-  fetchChunk(cx, cz).then(d => {
+  fetchChunk(cx, cz).then(async d => {
     if (d && d.terrain) {
       data.terrain = d.terrain;
     }
     // Repaint street terrain even when the server has no saved chunk yet.
     // Fresh GitHub installs start with only /api/streets, so missing chunks
     // must still become road/sidewalk terrain instead of grass with trees.
-    _repaintStreetTerrainForChunk(cx, cz);
+    if (shouldPersistWorldAutosave()) {
+      _repaintStreetTerrainForChunk(cx, cz);
+    } else {
+      await withWorldAutosaveSuppressed(async () => _repaintStreetTerrainForChunk(cx, cz));
+      data.dirty = false;
+    }
     rebuildChunk(data);
-    if (data.dirty) _debounceSaveStreets();
+    if (data.dirty && shouldPersistWorldAutosave()) _debounceSaveStreets();
   });
 }
 
@@ -21005,6 +21163,9 @@ function updateAgentAnimations(dt) {
       agent._stayTimer = 900;
       agent._wanderTimer = 2500 + Math.random() * 2500;
     } else if (agent._wanderTimer <= 0) {
+      if (isAgentIntentActive(agent._agentIntent) && agent._wanderTarget) {
+        agent._wanderTimer = 500;
+      } else {
       // Pick next destination — factor in role + time of day
       const bArr = Array.from(buildingsMap.values());
       const wb = agent._workBuilding;
@@ -21175,6 +21336,7 @@ function updateAgentAnimations(dt) {
           }
           agent._wanderTimer = 3000 + Math.random() * 8000;
         }
+      }
       }
     } else {
       agent._wanderTimer -= decisionDtMs;
@@ -25909,6 +26071,20 @@ function ensureEditorUnlocked(featureLabel = 'Editing') {
   return false;
 }
 
+function shouldPersistWorldAutosave() {
+  const license = getCurrentLicenseStatus();
+  return _worldAutosaveSuppressDepth <= 0 && Boolean(license) && !isLicenseFeatureLocked('advancedEditor');
+}
+
+async function withWorldAutosaveSuppressed(work) {
+  _worldAutosaveSuppressDepth++;
+  try {
+    return await work();
+  } finally {
+    _worldAutosaveSuppressDepth = Math.max(0, _worldAutosaveSuppressDepth - 1);
+  }
+}
+
 function setupToolbar() {
   const on = (id, fn) => document.getElementById(id)?.addEventListener('click', fn);
 
@@ -29655,14 +29831,16 @@ async function loadStreets() {
     const r = await fetch('/api/streets');
     const data = await r.json();
     if (!Array.isArray(data)) return;
-    for (const s of data) {
-      if (s.type) {
-        // Intersection/turn piece
-        _addRawIntersection(s.x1, s.z1, s.type, s.rotation || 0, s.openEdges || undefined);
-      } else {
-        _addRawSegment(s.x1, s.z1, s.x2, s.z2);
+    await withWorldAutosaveSuppressed(async () => {
+      for (const s of data) {
+        if (s.type) {
+          // Intersection/turn piece
+          _addRawIntersection(s.x1, s.z1, s.type, s.rotation || 0, s.openEdges || undefined);
+        } else {
+          _addRawSegment(s.x1, s.z1, s.x2, s.z2);
+        }
       }
-    }
+    });
     for (const s of data) {
       _rebuildNearChunks(s.x1, s.z1, 5);
       if (s.x1 !== s.x2 || s.z1 !== s.z2) _rebuildNearChunks(s.x2, s.z2, 5);
@@ -30385,7 +30563,7 @@ function _setWorldTile(wx, wz, tileType) {
   const lx = ((wx % CHUNK) + CHUNK) % CHUNK;
   const lz = ((wz % CHUNK) + CHUNK) % CHUNK;
   chunk.terrain[lz * CHUNK + lx] = tileType;
-  chunk.dirty = true;
+  if (shouldPersistWorldAutosave()) chunk.dirty = true;
   // Remove user-placed decorations on non-grass tiles (e.g. roads painted over trees)
   if (tileType !== TERRAIN.GRASS && tileType !== TERRAIN.DIRT) {
     const pdKey = chunkDecorationKey(cx, cz);
@@ -30398,7 +30576,7 @@ function _setWorldTile(wx, wz, tileType) {
       });
       if (filtered.length !== pdList.length) {
         placedDecorations.set(pdKey, filtered);
-        debounceSavePlacedDecorations();
+        if (shouldPersistWorldAutosave()) debounceSavePlacedDecorations();
       }
     }
   }
@@ -30414,7 +30592,7 @@ function _setWorldTileIfGrass(wx, wz, tileType) {
   const idx = lz * CHUNK + lx;
   if (chunk.terrain[idx] === TERRAIN.GRASS || chunk.terrain[idx] === TERRAIN.DIRT) {
     chunk.terrain[idx] = tileType;
-    chunk.dirty = true;
+    if (shouldPersistWorldAutosave()) chunk.dirty = true;
   }
 }
 
@@ -31197,7 +31375,7 @@ window.__VWGetObjectActionPointDebugState = () => {
   }
   return { enabled: _objectActionPointDebugEnabled, overlayCount, markerCount };
 };
-window._debugVehicles = () => vehiclesList.map((v,i) => ({i, x:Math.round(v.x*10)/10, z:Math.round(v.z*10)/10, dir:v.dir, pathIdx:v._pathIdx, stopped:v._stoppedAtLight, blocked:v._blockedTime||0, visible:v.group.visible}));
+window._debugVehicles = () => vehiclesList.map((v,i) => ({i, x:Math.round(v.x*10)/10, z:Math.round(v.z*10)/10, serverX:Number.isFinite(Number(v._runtimeServerX))?Math.round(Number(v._runtimeServerX)*10)/10:null, serverZ:Number.isFinite(Number(v._runtimeServerZ))?Math.round(Number(v._runtimeServerZ)*10)/10:null, dir:v.dir, pathIdx:v._pathIdx, stopped:v._stoppedAtLight, blocked:v._blockedTime||0, runtime:!!v._runtimeWorldRuntime, visible:v.group.visible}));
 window._debugLightCheck = (vIdx) => {
   const v = vehiclesList[vIdx];
   if (!v) return null;
@@ -55310,8 +55488,10 @@ function _invalidateRoadGraph() { _roadGraphDirty = true; _roadGraph = null; }
 // ── Auto-save streets (debounced) ────────────────────────────
 let _streetSaveTimer = null;
 function _debounceSaveStreets() {
+  if (!shouldPersistWorldAutosave()) return;
   if (_streetSaveTimer) clearTimeout(_streetSaveTimer);
   _streetSaveTimer = setTimeout(async () => {
+    if (!shouldPersistWorldAutosave()) return;
     try {
       const streetData = _streetSegments.map(s => ({
         x1: s.x1, z1: s.z1, x2: s.x2, z2: s.z2,
@@ -56120,6 +56300,11 @@ function makeVehicle(color, startX, startZ, dir, vehicleType, options = {}) {
 }
 
 function initVehicles() {
+  if (_agentRuntimeClient?.worldRuntime?.trafficVehicles?.size || vehiclesList.some(vehicle => vehicle?._runtimeWorldRuntime)) {
+    applyAgentRuntimeTrafficVehicles();
+    return;
+  }
+
   // Only spawn vehicles if there are actual 3D street segments
   if (_streetSegments.length === 0) return;
 
@@ -56671,7 +56856,7 @@ function _resolveIntersectionGridlocks() {
 function updateVehicles(dt) {
   if (vehiclesList.length === 0) return;
   if (_agentRuntimeClient?.worldRuntime?.trafficVehicles?.size) {
-    applyAgentRuntimeTrafficVehicles();
+    updateRuntimeTrafficVehicles(dt);
     return;
   }
 

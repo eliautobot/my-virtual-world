@@ -106,6 +106,7 @@ async function connectRoom(port) {
   const client = new Client(`ws://127.0.0.1:${port}`);
   const room = await client.joinOrCreate(AGENT_RUNTIME_ROOM_NAME, { worldId: 'smoke' });
   room.onMessage('runtime:event', () => {});
+  room.onMessage('runtime:worldRuntime', () => {});
   await waitForRoomMessage(room, 'runtime:welcome');
   return room;
 }
