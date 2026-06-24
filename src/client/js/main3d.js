@@ -1101,6 +1101,9 @@ const AGENT_RUNTIME_SNAPSHOT_INTERVAL_MS = 1200;
 const AGENT_RUNTIME_SNAPSHOT_KEEPALIVE_MS = 3000;
 const AGENT_RUNTIME_SNAPSHOT_MIN_DISTANCE = 1.5;
 const AGENT_RUNTIME_POSITION_WRITER_STALE_MS = 7000;
+const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 850;
+const AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE = API_TILE * 6;
+const AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE = 0.05;
 let editMode = null;
 
 // ── Feature 1: Vehicles ──────────────────────────────────────────────
@@ -1259,7 +1262,7 @@ function getAgentRuntimeFloorBuilding(agent, snapshot) {
   return getMovementInteriorBuildingAt(agent.x, agent.y);
 }
 
-function placeRuntimeHydratedAgentMesh(agent) {
+function placeRuntimeHydratedAgentMesh(agent, { force = false } = {}) {
   if (!agent?._group3d) return;
   const scale = T / API_TILE;
   const worldX = (agent.x || 0) * scale;
@@ -1269,14 +1272,126 @@ function placeRuntimeHydratedAgentMesh(agent) {
     ? getRenderedFloorY(floorBuilding, agent._floor || 1)
     : 0;
   const groundY = getGroundY(worldX, worldZ) + floorY;
+  const heading = Number.isFinite(Number(agent._runtimeSnapshot?.heading))
+    ? Number(agent._runtimeSnapshot.heading)
+    : null;
+  const last = agent._runtimeLastMeshPlacement || null;
+  if (!force && last &&
+    Math.abs(last.x - worldX) < 0.0001 &&
+    Math.abs(last.y - groundY) < 0.0001 &&
+    Math.abs(last.z - worldZ) < 0.0001 &&
+    (heading == null || Math.abs((last.heading ?? heading) - heading) < 0.0001)) {
+    return;
+  }
   agent._group3d.position.set(worldX, groundY, worldZ);
   agent._group3d.userData._groundY = groundY;
-  if (Number.isFinite(Number(agent._runtimeSnapshot?.heading))) {
-    agent._group3d.rotation.y = Number(agent._runtimeSnapshot.heading);
+  if (heading != null) {
+    agent._group3d.rotation.y = heading;
   }
+  agent._runtimeLastMeshPlacement = { x: worldX, y: groundY, z: worldZ, heading };
   if (isPhysicsReady()) {
     teleportAgent('agent_' + agent.id, worldX, groundY, worldZ);
   }
+}
+
+function beginAgentRuntimeObserverInterpolation(agent, snapshot, previous = {}, { source = 'runtime' } = {}) {
+  if (!agent || !snapshot) return false;
+  const targetX = Number(snapshot.x);
+  const targetY = Number(snapshot.y);
+  const targetFloor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
+  if (!Number.isFinite(targetX) || !Number.isFinite(targetY) || !Number.isFinite(targetFloor)) return false;
+  const startX = Number.isFinite(previous.x) ? previous.x : Number(agent.x || 0);
+  const startY = Number.isFinite(previous.y) ? previous.y : Number(agent.y || 0);
+  const startFloor = Math.max(1, Math.floor(Number.isFinite(previous.floor) ? previous.floor : (agent._floor || 1)));
+  const distance = Math.hypot(targetX - startX, targetY - startY);
+  const floorChanged = targetFloor !== startFloor;
+  const shouldSnap = floorChanged || distance > AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE || !agent._group3d;
+  const existingInterpolation = agent._runtimeObserverInterpolation || null;
+  if (existingInterpolation &&
+    existingInterpolation.version === (snapshot.version || 0) &&
+    existingInterpolation.updatedAt === (snapshot.updatedAt || '') &&
+    Math.abs(existingInterpolation.toX - targetX) <= AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE &&
+    Math.abs(existingInterpolation.toY - targetY) <= AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE &&
+    existingInterpolation.toFloor === targetFloor) {
+    return true;
+  }
+
+  agent._runtimeObserverTarget = {
+    x: targetX,
+    y: targetY,
+    floor: targetFloor,
+    source,
+    version: snapshot.version || 0,
+    updatedAt: snapshot.updatedAt || '',
+  };
+
+  if (shouldSnap || distance <= AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE) {
+    agent.x = targetX;
+    agent.y = targetY;
+    agent._floor = targetFloor;
+    agent._targetFloor = targetFloor;
+    agent._runtimeObserverInterpolation = null;
+    placeRuntimeHydratedAgentMesh(agent, { force: true });
+    return false;
+  }
+
+  agent.x = startX;
+  agent.y = startY;
+  agent._floor = startFloor;
+  agent._targetFloor = targetFloor;
+  agent._runtimeObserverInterpolation = {
+    fromX: startX,
+    fromY: startY,
+    fromFloor: startFloor,
+    toX: targetX,
+    toY: targetY,
+    toFloor: targetFloor,
+    startedAtMs: performance.now(),
+    durationMs: AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS,
+    source,
+    version: snapshot.version || 0,
+    updatedAt: snapshot.updatedAt || '',
+  };
+  return true;
+}
+
+function updateAgentRuntimeObserverMotion(agent, dt = 0) {
+  if (!agent?._runtimeObserverOnly || !agent._runtimeSnapshot || isAgentRuntimeRouteLeaseOwned(agent)) return false;
+  const interpolation = agent._runtimeObserverInterpolation || null;
+  if (!interpolation) {
+    placeRuntimeHydratedAgentMesh(agent);
+    agent._isRunning = false;
+    return false;
+  }
+
+  const previousX = Number(agent.x || 0);
+  const previousY = Number(agent.y || 0);
+  const elapsed = performance.now() - Number(interpolation.startedAtMs || 0);
+  const duration = Math.max(1, Number(interpolation.durationMs || AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS));
+  const t = Math.min(1, Math.max(0, elapsed / duration));
+  agent.x = interpolation.fromX + (interpolation.toX - interpolation.fromX) * t;
+  agent.y = interpolation.fromY + (interpolation.toY - interpolation.fromY) * t;
+  agent._floor = t >= 1 ? interpolation.toFloor : interpolation.fromFloor;
+  agent._targetFloor = interpolation.toFloor;
+  if (t >= 1) {
+    agent.x = interpolation.toX;
+    agent.y = interpolation.toY;
+    agent._floor = interpolation.toFloor;
+    agent._runtimeObserverInterpolation = null;
+  }
+
+  placeRuntimeHydratedAgentMesh(agent);
+  const movedDistance = Math.hypot(agent.x - previousX, agent.y - previousY);
+  const moving = movedDistance > AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE * Math.max(1, dt * 60);
+  if (moving && agent._group3d) {
+    agent._group3d.rotation.y = Math.atan2(agent.x - previousX, agent.y - previousY);
+    agent._runtimeLastMeshPlacement = {
+      ...(agent._runtimeLastMeshPlacement || {}),
+      heading: agent._group3d.rotation.y,
+    };
+  }
+  agent._isRunning = moving;
+  return moving;
 }
 
 function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = false, source = 'runtime' } = {}) {
@@ -1286,10 +1401,11 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   const floor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(floor)) return false;
 
-  agent.x = x;
-  agent.y = y;
-  agent._floor = floor;
-  agent._targetFloor = floor;
+  const previousPosition = {
+    x: Number(agent.x || 0),
+    y: Number(agent.y || 0),
+    floor: Math.max(1, Math.floor(Number(agent._floor || agent._targetFloor || 1) || 1)),
+  };
   agent._runtimeSnapshot = snapshot;
   agent._runtimeHydrated = true;
   agent._runtimeHydrationSource = source;
@@ -1327,6 +1443,21 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
 
   if (agent._runtimeObserverOnly) {
     clearAgentTransientMovement(agent);
+    if (updateVisible) {
+      beginAgentRuntimeObserverInterpolation(agent, snapshot, previousPosition, { source });
+    } else {
+      agent.x = x;
+      agent.y = y;
+      agent._floor = floor;
+      agent._targetFloor = floor;
+      agent._runtimeObserverInterpolation = null;
+    }
+  } else {
+    agent.x = x;
+    agent.y = y;
+    agent._floor = floor;
+    agent._targetFloor = floor;
+    agent._runtimeObserverInterpolation = null;
   }
   if (updateVisible) placeRuntimeHydratedAgentMesh(agent);
   return true;
@@ -18673,8 +18804,8 @@ function updateAgentAnimations(dt) {
     if (holdAgentForRuntimeRouteLease(agent, dt)) return;
 
     if (agent._runtimeObserverOnly && agent._runtimeSnapshot && !isAgentRuntimeRouteLeaseOwned(agent)) {
-      placeRuntimeHydratedAgentMesh(agent);
-      updateAgentAnimation(agent, dt, false, false);
+      const observerMoving = updateAgentRuntimeObserverMotion(agent, dt);
+      updateAgentAnimation(agent, dt, observerMoving, false);
       updateAgentAvoidanceDebug(agent);
       updateDynamicInteriorRoutingDebug(agent);
       updateDynamicExteriorRoutingDebug(agent);
