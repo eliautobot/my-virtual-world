@@ -74,6 +74,13 @@ export function normalizeWorldRuntimeState(raw = null) {
     const light = normalizeTrafficLightState({ ...rawLight, key: rawLight?.key || fallbackKey });
     if (light) trafficLights.set(light.key, light);
   }
+  const rawVehicles = raw.trafficVehicles && typeof raw.trafficVehicles === 'object' ? raw.trafficVehicles : {};
+  const trafficVehicles = new Map();
+  const vehicleEntries = typeof rawVehicles.entries === 'function' ? rawVehicles.entries() : Object.entries(rawVehicles);
+  for (const [fallbackId, rawVehicle] of vehicleEntries) {
+    const vehicle = normalizeTrafficVehicleState({ ...rawVehicle, vehicleId: rawVehicle?.vehicleId || fallbackId });
+    if (vehicle) trafficVehicles.set(vehicle.vehicleId, vehicle);
+  }
   return Object.freeze({
     schemaVersion: String(raw.schemaVersion || 'world-runtime/v1'),
     mode: String(raw.mode || 'server-authoritative'),
@@ -89,6 +96,7 @@ export function normalizeWorldRuntimeState(raw = null) {
     trafficYellowMs: Number.isFinite(Number(raw.trafficYellowMs)) ? Number(raw.trafficYellowMs) : 3000,
     trafficAllRedMs: Number.isFinite(Number(raw.trafficAllRedMs)) ? Number(raw.trafficAllRedMs) : 2000,
     trafficLights,
+    trafficVehicles,
   });
 }
 
@@ -105,6 +113,33 @@ export function normalizeTrafficLightState(raw = null) {
     phaseMs: Number.isFinite(Number(raw.phaseMs)) ? Number(raw.phaseMs) : 0,
     ns: String(raw.ns || 'green'),
     ew: String(raw.ew || 'red'),
+    updatedAt: String(raw.updatedAt || ''),
+    version: Number.isFinite(Number(raw.version)) ? Number(raw.version) : 0,
+  });
+}
+
+export function normalizeTrafficVehicleState(raw = null) {
+  if (!raw || typeof raw !== 'object') return null;
+  const vehicleId = String(raw.vehicleId || '').trim();
+  if (!vehicleId) return null;
+  const path = Array.isArray(raw.path)
+    ? raw.path
+      .map(point => ({ x: Number(point?.x), z: Number(point?.z) }))
+      .filter(point => Number.isFinite(point.x) && Number.isFinite(point.z))
+    : [];
+  return Object.freeze({
+    vehicleId,
+    vehicleType: String(raw.vehicleType || 'car'),
+    color: Number.isFinite(Number(raw.color)) ? Number(raw.color) : 0,
+    x: Number.isFinite(Number(raw.x)) ? Number(raw.x) : 0,
+    z: Number.isFinite(Number(raw.z)) ? Number(raw.z) : 0,
+    dir: Number.isFinite(Number(raw.dir)) ? Number(raw.dir) : 0,
+    rotationY: Number.isFinite(Number(raw.rotationY)) ? Number(raw.rotationY) : 0,
+    speed: Number.isFinite(Number(raw.speed)) ? Number(raw.speed) : 0,
+    speedMult: Number.isFinite(Number(raw.speedMult)) ? Number(raw.speedMult) : 1,
+    path,
+    pathIdx: Number.isFinite(Number(raw.pathIdx)) ? Number(raw.pathIdx) : 0,
+    state: String(raw.state || 'moving'),
     updatedAt: String(raw.updatedAt || ''),
     version: Number.isFinite(Number(raw.version)) ? Number(raw.version) : 0,
   });
@@ -286,6 +321,36 @@ function worldRuntimeFromRoomState(room) {
       };
     }
   }
+  const trafficVehicles = {};
+  const rawVehicles = raw.trafficVehicles;
+  if (rawVehicles && typeof rawVehicles.entries === 'function') {
+    for (const [vehicleId, vehicle] of rawVehicles.entries()) {
+      let path = [];
+      if (vehicle.pathJson) {
+        try {
+          path = JSON.parse(vehicle.pathJson);
+        } catch {
+          path = [];
+        }
+      }
+      trafficVehicles[vehicleId] = {
+        vehicleId: vehicle.vehicleId || vehicleId,
+        vehicleType: vehicle.vehicleType,
+        color: vehicle.color,
+        x: vehicle.x,
+        z: vehicle.z,
+        dir: vehicle.dir,
+        rotationY: vehicle.rotationY,
+        speed: vehicle.speed,
+        speedMult: vehicle.speedMult,
+        path,
+        pathIdx: vehicle.pathIdx,
+        state: vehicle.state,
+        updatedAt: vehicle.updatedAt,
+        version: vehicle.version,
+      };
+    }
+  }
   return normalizeWorldRuntimeState({
     schemaVersion: raw.schemaVersion,
     mode: raw.mode,
@@ -301,6 +366,7 @@ function worldRuntimeFromRoomState(room) {
     trafficYellowMs: raw.trafficYellowMs,
     trafficAllRedMs: raw.trafficAllRedMs,
     trafficLights,
+    trafficVehicles,
   });
 }
 

@@ -188,17 +188,38 @@ async function run() {
         { key: 'traffic:0,0', ix: 0, iz: 0, type: 'x-int', openEdges: { n: true, s: true, e: true, w: true } },
         { key: 'traffic:1,0', ix: 1, iz: 0, type: 't-int', openEdges: { n: true, s: false, e: true, w: true } },
       ],
+      trafficVehicles: [
+        {
+          vehicleId: 'traffic-vehicle:0',
+          vehicleType: 'car',
+          color: 12345,
+          x: 0,
+          z: 0,
+          dir: 0,
+          speed: 10,
+          speedMult: 1,
+          path: [{ x: 0, z: 0 }, { x: 20, z: 0 }, { x: 20, z: 20 }],
+          pathIdx: 1,
+        },
+      ],
     });
     const topologyAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'world-topology-1');
     assert.equal(topologyAck.worldRuntime.schemaVersion, 'world-runtime/v1');
     assert.equal(Object.keys(topologyAck.worldRuntime.trafficLights).length, 2);
+    assert.equal(Object.keys(topologyAck.worldRuntime.trafficVehicles).length, 1);
     assert.equal(topologyAck.worldRuntime.topologyHash, 'traffic:smoke');
     const firstWorldRuntime = await waitForWorldRuntime(room, (runtime) => runtime.trafficLights?.size === 2);
     const firstPhase = firstWorldRuntime.trafficLights.get('traffic:0,0').phaseMs;
+    const firstVehicleX = firstWorldRuntime.trafficVehicles.get('traffic-vehicle:0').x;
     const firstTickSeq = firstWorldRuntime.tickSeq;
     const firstSimTimeMs = firstWorldRuntime.simTimeMs;
-    const tickedWorldRuntime = await waitForWorldRuntime(room, (runtime) => runtime.tickSeq > firstTickSeq && runtime.trafficLights.get('traffic:0,0').phaseMs !== firstPhase);
+    const tickedWorldRuntime = await waitForWorldRuntime(room, (runtime) =>
+      runtime.tickSeq > firstTickSeq &&
+      runtime.trafficLights.get('traffic:0,0').phaseMs !== firstPhase &&
+      runtime.trafficVehicles.get('traffic-vehicle:0').x !== firstVehicleX
+    );
     assert(tickedWorldRuntime.simTimeMs > firstSimTimeMs);
+    assert(tickedWorldRuntime.trafficVehicles.get('traffic-vehicle:0').x > firstVehicleX);
 
     room.send('runtime:claimRoute', {
       requestId: 'claim-1',
@@ -330,6 +351,7 @@ async function run() {
     assert(resumedObject?.dataJson.includes('coffee-active-1'));
     const resumedRuntime = await waitForWorldRuntime(resumedRoom, (runtime) => runtime.trafficLights?.size === 2);
     assert.equal(resumedRuntime.topologyHash, 'traffic:smoke');
+    assert.equal(resumedRuntime.trafficVehicles?.size, 1);
     await resumedRoom.leave(true);
 
     console.log('realtime smoke ok');
