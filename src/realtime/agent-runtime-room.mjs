@@ -16,6 +16,7 @@ export const WORLD_RUNTIME_TRAFFIC_CYCLE_MS = 40000;
 export const WORLD_RUNTIME_TRAFFIC_YELLOW_MS = 3000;
 export const WORLD_RUNTIME_TRAFFIC_ALL_RED_MS = 2000;
 export const MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS = 500;
+export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
 export const MAX_VISUAL_STATE_JSON_CHARS = 6000;
 export const MAX_WORLD_OBJECT_DATA_JSON_CHARS = 10000;
@@ -55,6 +56,44 @@ defineTypes(WorldRuntimeTrafficLightState, {
   version: 'number',
 });
 
+export class WorldRuntimeTrafficVehicleState extends Schema {
+  constructor(seed = {}) {
+    super();
+    this.vehicleId = '';
+    this.vehicleType = 'car';
+    this.color = 0;
+    this.x = 0;
+    this.z = 0;
+    this.dir = 0;
+    this.rotationY = 0;
+    this.speed = 0;
+    this.speedMult = 1;
+    this.pathJson = '';
+    this.pathIdx = 0;
+    this.state = 'moving';
+    this.updatedAt = '';
+    this.version = 0;
+    Object.assign(this, seed);
+  }
+}
+
+defineTypes(WorldRuntimeTrafficVehicleState, {
+  vehicleId: 'string',
+  vehicleType: 'string',
+  color: 'number',
+  x: 'number',
+  z: 'number',
+  dir: 'number',
+  rotationY: 'number',
+  speed: 'number',
+  speedMult: 'number',
+  pathJson: 'string',
+  pathIdx: 'number',
+  state: 'string',
+  updatedAt: 'string',
+  version: 'number',
+});
+
 export class WorldRuntimeState extends Schema {
   constructor(seed = {}) {
     super();
@@ -72,6 +111,7 @@ export class WorldRuntimeState extends Schema {
     this.trafficYellowMs = WORLD_RUNTIME_TRAFFIC_YELLOW_MS;
     this.trafficAllRedMs = WORLD_RUNTIME_TRAFFIC_ALL_RED_MS;
     this.trafficLights = new MapSchema();
+    this.trafficVehicles = new MapSchema();
     Object.assign(this, seed);
   }
 }
@@ -91,6 +131,7 @@ defineTypes(WorldRuntimeState, {
   trafficYellowMs: 'number',
   trafficAllRedMs: 'number',
   trafficLights: { map: WorldRuntimeTrafficLightState },
+  trafficVehicles: { map: WorldRuntimeTrafficVehicleState },
 });
 
 export class AgentRuntimeSnapshot extends Schema {
@@ -233,6 +274,10 @@ export function worldRuntimeToPlain(worldRuntime) {
   for (const [key, light] of (worldRuntime?.trafficLights?.entries?.() || [])) {
     trafficLights[key] = trafficLightToPlain(light);
   }
+  const trafficVehicles = {};
+  for (const [vehicleId, vehicle] of (worldRuntime?.trafficVehicles?.entries?.() || [])) {
+    trafficVehicles[vehicleId] = trafficVehicleToPlain(vehicle);
+  }
   return {
     schemaVersion: WORLD_RUNTIME_SCHEMA_VERSION,
     mode: worldRuntime?.mode || 'server-authoritative',
@@ -248,6 +293,7 @@ export function worldRuntimeToPlain(worldRuntime) {
     trafficYellowMs: Number(worldRuntime?.trafficYellowMs || WORLD_RUNTIME_TRAFFIC_YELLOW_MS),
     trafficAllRedMs: Number(worldRuntime?.trafficAllRedMs || WORLD_RUNTIME_TRAFFIC_ALL_RED_MS),
     trafficLights,
+    trafficVehicles,
   };
 }
 
@@ -271,6 +317,34 @@ export function trafficLightToPlain(light) {
     }
   } else {
     plain.openEdges = null;
+  }
+  return plain;
+}
+
+export function trafficVehicleToPlain(vehicle) {
+  const plain = {
+    vehicleId: vehicle.vehicleId,
+    vehicleType: vehicle.vehicleType || 'car',
+    color: Number(vehicle.color || 0),
+    x: Number(vehicle.x || 0),
+    z: Number(vehicle.z || 0),
+    dir: Number(vehicle.dir || 0),
+    rotationY: Number(vehicle.rotationY || 0),
+    speed: Number(vehicle.speed || 0),
+    speedMult: Number(vehicle.speedMult || 1),
+    pathIdx: Number(vehicle.pathIdx || 0),
+    state: vehicle.state || 'moving',
+    updatedAt: vehicle.updatedAt || '',
+    version: Number(vehicle.version || 0),
+  };
+  if (vehicle.pathJson) {
+    try {
+      plain.path = JSON.parse(vehicle.pathJson);
+    } catch {
+      plain.path = [];
+    }
+  } else {
+    plain.path = [];
   }
   return plain;
 }
@@ -498,6 +572,9 @@ function schemaWorldRuntimeFromPlain(plain) {
   for (const light of Object.values(normalized.trafficLights || {})) {
     worldRuntime.trafficLights.set(light.key, schemaTrafficLightFromPlain(light));
   }
+  for (const vehicle of Object.values(normalized.trafficVehicles || {})) {
+    worldRuntime.trafficVehicles.set(vehicle.vehicleId, schemaTrafficVehicleFromPlain(vehicle));
+  }
   return worldRuntime;
 }
 
@@ -511,6 +588,25 @@ function schemaTrafficLightFromPlain(plain) {
     phaseMs: plain.phaseMs,
     ns: plain.ns,
     ew: plain.ew,
+    updatedAt: plain.updatedAt,
+    version: plain.version,
+  });
+}
+
+function schemaTrafficVehicleFromPlain(plain) {
+  return new WorldRuntimeTrafficVehicleState({
+    vehicleId: plain.vehicleId,
+    vehicleType: plain.vehicleType,
+    color: plain.color,
+    x: plain.x,
+    z: plain.z,
+    dir: plain.dir,
+    rotationY: plain.rotationY,
+    speed: plain.speed,
+    speedMult: plain.speedMult,
+    pathJson: Array.isArray(plain.path) ? JSON.stringify(plain.path) : '',
+    pathIdx: plain.pathIdx,
+    state: plain.state,
     updatedAt: plain.updatedAt,
     version: plain.version,
   });
@@ -596,6 +692,19 @@ function normalizeWorldRuntime(raw = {}) {
       // Ignore malformed topology/light records while preserving the rest.
     }
   }
+  const rawVehicles = raw.trafficVehicles && typeof raw.trafficVehicles === 'object' ? raw.trafficVehicles : {};
+  const trafficVehicles = {};
+  for (const [fallbackId, vehicle] of Object.entries(rawVehicles).slice(0, MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES)) {
+    try {
+      const normalized = normalizeTrafficVehicleState({
+        ...vehicle,
+        vehicleId: vehicle?.vehicleId || fallbackId,
+      });
+      trafficVehicles[normalized.vehicleId] = normalized;
+    } catch {
+      // Ignore malformed vehicle records while preserving other runtime state.
+    }
+  }
   return {
     schemaVersion: WORLD_RUNTIME_SCHEMA_VERSION,
     mode: safeText(raw.mode, 'server-authoritative'),
@@ -611,6 +720,7 @@ function normalizeWorldRuntime(raw = {}) {
     trafficYellowMs,
     trafficAllRedMs,
     trafficLights,
+    trafficVehicles,
   };
 }
 
@@ -635,6 +745,42 @@ function normalizeTrafficLightState(raw = {}, runtime = {}) {
     updatedAt: safeIso(raw.updatedAt, ''),
     version: Math.max(0, Math.floor(numberOr(raw.version, 0))),
   };
+}
+
+function normalizeTrafficVehicleState(raw = {}) {
+  const vehicleId = normalizeWorldObjectKey(raw.vehicleId);
+  const path = normalizeVehiclePath(raw.path);
+  const pathIdx = clampInteger(raw.pathIdx, path.length > 1 ? 1 : 0, 0, Math.max(0, path.length - 1));
+  const dir = clampInteger(raw.dir, 0, 0, 3);
+  return {
+    vehicleId,
+    vehicleType: safeText(raw.vehicleType, 'car') || 'car',
+    color: Math.max(0, Math.floor(numberOr(raw.color, 0))),
+    x: coordinateOr(raw.x, path[0]?.x || 0, 'vehicle.x'),
+    z: coordinateOr(raw.z, path[0]?.z || 0, 'vehicle.z'),
+    dir,
+    rotationY: coordinateOr(raw.rotationY, dirToRotationY(dir), 'vehicle.rotationY'),
+    speed: Math.max(0, Math.min(100, numberOr(raw.speed, 7))),
+    speedMult: Math.max(0.1, Math.min(4, numberOr(raw.speedMult, 1))),
+    path,
+    pathIdx,
+    state: safeText(raw.state, 'moving') || 'moving',
+    updatedAt: safeIso(raw.updatedAt, ''),
+    version: Math.max(0, Math.floor(numberOr(raw.version, 0))),
+  };
+}
+
+function normalizeVehiclePath(value = []) {
+  if (!Array.isArray(value)) return [];
+  const path = [];
+  for (const point of value.slice(0, 80)) {
+    if (!point || typeof point !== 'object') continue;
+    const x = numberOr(point.x, NaN);
+    const z = numberOr(point.z, NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(z) || Math.abs(x) > 10000000 || Math.abs(z) > 10000000) continue;
+    path.push({ x, z });
+  }
+  return path;
 }
 
 function normalizeOpenEdges(value = null) {
@@ -684,6 +830,16 @@ function deterministicTopologyHash(trafficLights = []) {
     hash = Math.imul(hash, 16777619) >>> 0;
   }
   return `traffic:${trafficLights.length}:${hash.toString(36)}`;
+}
+
+function dirToRotationY(dir) {
+  return [0, Math.PI, -Math.PI / 2, Math.PI / 2][Math.max(0, Math.min(3, Math.floor(numberOr(dir, 0))))] || 0;
+}
+
+function directionFromDelta(dx, dz, fallback = 0) {
+  if (Math.abs(dx) < 0.001 && Math.abs(dz) < 0.001) return fallback;
+  if (Math.abs(dx) >= Math.abs(dz)) return dx >= 0 ? 0 : 1;
+  return dz >= 0 ? 2 : 3;
 }
 
 function positiveModulo(value, divisor) {
@@ -833,6 +989,12 @@ function hasExpiredLease(agent, nowMs = Date.now()) {
   return !Number.isFinite(expires) || expires <= nowMs;
 }
 
+function isManualSnapshotOverride(raw = {}) {
+  const mode = safeText(raw.mode, '').toLowerCase();
+  const owner = safeText(raw.owner, '').toLowerCase();
+  return mode === 'manual' || owner === 'user-directed' || owner.startsWith('user-directed:');
+}
+
 function hasActiveWorldObjectState(object, nowMs = Date.now()) {
   if (!object || !ACTIVE_WORLD_OBJECT_STATES.has(String(object.state || '').toLowerCase())) return false;
   if (!object.expiresAt) return true;
@@ -888,7 +1050,7 @@ export class AgentRuntimeRoom extends Room {
       const raw = message.snapshot && typeof message.snapshot === 'object' ? message.snapshot : message;
       const agentId = normalizeAgentId(raw.agentId);
       const existing = this.state.agents.get(agentId);
-      if (existing && hasActiveLease(existing)) {
+      if (existing && hasActiveLease(existing) && !isManualSnapshotOverride(raw)) {
         const leaseOwner = safeText(raw.leaseOwner || message.leaseOwner, '');
         if (leaseOwner !== existing.leaseOwner) {
           throw apiError('lease_conflict', 'snapshot cannot overwrite an active route lease', {
@@ -1011,6 +1173,8 @@ export class AgentRuntimeRoom extends Room {
       }
       const releaseSnapshot = {
         agentId,
+        mode: 'scripted',
+        owner: 'agent-scripted-mode',
         state: message.state || 'idle',
         routeId: '',
         worldActionId: '',
@@ -1033,6 +1197,8 @@ export class AgentRuntimeRoom extends Room {
       const before = snapshotToPlain(existing);
       this.upsertSnapshot({
         agentId,
+        mode: 'scripted',
+        owner: 'agent-scripted-mode',
         state: 'idle',
         routeId: '',
         worldActionId: '',
@@ -1080,9 +1246,14 @@ export class AgentRuntimeRoom extends Room {
     const now = new Date().toISOString();
     const owner = safeText(raw.owner, client?.sessionId || '') || safeText(client?.sessionId, 'world-runtime');
     const trafficLights = Array.isArray(raw.trafficLights) ? raw.trafficLights : [];
+    const trafficVehicles = Array.isArray(raw.trafficVehicles) ? raw.trafficVehicles : [];
     if (trafficLights.length > MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS) {
       throw apiError('world_topology_too_large', `world topology can include at most ${MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS} traffic lights`);
     }
+    if (trafficVehicles.length > MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES) {
+      throw apiError('world_topology_too_large', `world topology can include at most ${MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES} traffic vehicles`);
+    }
+    const previousTopologyHash = runtime.topologyHash || '';
     runtime.mode = 'server-authoritative';
     runtime.tickMs = clampInteger(raw.tickMs, runtime.tickMs || DEFAULT_WORLD_RUNTIME_TICK_MS, 100, 5000);
     runtime.trafficCycleMs = clampInteger(raw.trafficCycleMs, runtime.trafficCycleMs || WORLD_RUNTIME_TRAFFIC_CYCLE_MS, 10000, 180000);
@@ -1111,11 +1282,24 @@ export class AgentRuntimeRoom extends Room {
     for (const key of Array.from(runtime.trafficLights.keys())) {
       if (!seen.has(key)) runtime.trafficLights.delete(key);
     }
+    const shouldSeedVehicles = trafficVehicles.length > 0 && (runtime.trafficVehicles.size === 0 || previousTopologyHash !== runtime.topologyHash);
+    if (shouldSeedVehicles) {
+      runtime.trafficVehicles.clear();
+      for (const rawVehicle of trafficVehicles) {
+        const vehicle = normalizeTrafficVehicleState(rawVehicle);
+        runtime.trafficVehicles.set(vehicle.vehicleId, schemaTrafficVehicleFromPlain({
+          ...vehicle,
+          updatedAt: now,
+          version: 1,
+        }));
+      }
+    }
 
     this.state.updatedAt = now;
     const event = this.recordEvent(eventType, 'worldRuntime', worldRuntimeToPlain(runtime), {
       topologyHash: runtime.topologyHash,
       trafficLightCount: runtime.trafficLights.size,
+      trafficVehicleCount: runtime.trafficVehicles.size,
     });
     writeRuntimeDocument(this.dataDir, this.state, this.events);
     return { worldRuntime: runtime, event };
@@ -1146,12 +1330,67 @@ export class AgentRuntimeRoom extends Room {
         changedLights++;
       }
     }
+    const changedVehicles = this.tickTrafficVehicles(runtime, tickMs, now);
 
-    if (changedLights > 0 || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
+    if (changedLights > 0 || changedVehicles > 0 || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
       this.lastWorldRuntimePersistMs = nowMs;
       writeRuntimeDocument(this.dataDir, this.state, this.events);
     }
     return runtime;
+  }
+
+  tickTrafficVehicles(runtime, tickMs, updatedAt) {
+    if (!runtime?.trafficVehicles?.size) return 0;
+    let changed = 0;
+    for (const [, vehicle] of runtime.trafficVehicles.entries()) {
+      let path = [];
+      if (vehicle.pathJson) {
+        try {
+          path = normalizeVehiclePath(JSON.parse(vehicle.pathJson));
+        } catch {
+          path = [];
+        }
+      }
+      if (path.length < 2 || Number(vehicle.speed || 0) <= 0) {
+        vehicle.state = 'idle';
+        continue;
+      }
+      let pathIdx = clampInteger(vehicle.pathIdx, 1, 0, path.length - 1);
+      if (pathIdx <= 0) pathIdx = 1;
+      if (pathIdx >= path.length) pathIdx = path.length - 1;
+      const target = path[pathIdx];
+      const dx = target.x - Number(vehicle.x || 0);
+      const dz = target.z - Number(vehicle.z || 0);
+      const dist = Math.hypot(dx, dz);
+      const move = Math.max(0, Number(vehicle.speed || 0) * Number(vehicle.speedMult || 1) * (tickMs / 1000));
+      let moved = false;
+      if (dist <= Math.max(0.001, move)) {
+        vehicle.x = target.x;
+        vehicle.z = target.z;
+        pathIdx += 1;
+        if (pathIdx >= path.length) {
+          path = path.slice().reverse();
+          vehicle.pathJson = JSON.stringify(path);
+          pathIdx = Math.min(1, path.length - 1);
+        }
+        moved = true;
+      } else {
+        vehicle.x = Number(vehicle.x || 0) + (dx / dist) * move;
+        vehicle.z = Number(vehicle.z || 0) + (dz / dist) * move;
+        moved = move > 0;
+      }
+      const nextTarget = path[Math.max(0, Math.min(pathIdx, path.length - 1))] || target;
+      const nextDx = nextTarget.x - Number(vehicle.x || 0);
+      const nextDz = nextTarget.z - Number(vehicle.z || 0);
+      vehicle.pathIdx = pathIdx;
+      vehicle.dir = directionFromDelta(moved ? dx : nextDx, moved ? dz : nextDz, vehicle.dir);
+      vehicle.rotationY = dirToRotationY(vehicle.dir);
+      vehicle.state = moved ? 'moving' : 'idle';
+      vehicle.updatedAt = updatedAt;
+      vehicle.version = Number(vehicle.version || 0) + 1;
+      changed++;
+    }
+    return changed;
   }
 
   recordEvent(type, agentId, snapshot, extra = {}) {

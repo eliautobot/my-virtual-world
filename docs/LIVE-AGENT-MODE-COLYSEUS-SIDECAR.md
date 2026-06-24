@@ -101,8 +101,8 @@ in every browser:
 ```
 
 The room also exposes a top-level `worldRuntime`. This is the engine-shaped
-state that browser renderers observe. It starts with a server-owned tick and
-shared traffic-light phases:
+state that browser renderers observe. It starts with a server-owned tick,
+shared traffic-light phases, and server-owned traffic vehicle positions:
 
 ```json
 {
@@ -126,6 +126,22 @@ shared traffic-light phases:
       "ns": "red",
       "ew": "green",
       "version": 4
+    }
+  },
+  "trafficVehicles": {
+    "traffic-vehicle:0": {
+      "vehicleId": "traffic-vehicle:0",
+      "vehicleType": "car",
+      "color": 15087925,
+      "x": 120,
+      "z": -48,
+      "dir": 0,
+      "rotationY": 0,
+      "speed": 7,
+      "speedMult": 1,
+      "pathIdx": 1,
+      "state": "moving",
+      "path": [{ "x": 112, "z": -48 }, { "x": 200, "z": -48 }]
     }
   }
 }
@@ -367,11 +383,22 @@ then render the shared `worldRuntime.trafficLights` state instead of advancing
 their own traffic-light phase clocks.
 
 This removes one major source of multi-browser drift: traffic lights now change
-from one shared runtime clock. Vehicles still render and route in the browser in
-this slice, but they now read the shared light states. The next migration should
-move vehicle roster/path/position updates into `worldRuntime` too, followed by
-object interaction timers, seat/final-anchor resolution, and broader world
-events.
+from one shared runtime clock.
+
+## World Runtime Vehicle Migration
+
+The following child PR moves the traffic vehicle roster/path/position slice into
+`worldRuntime` too. Browsers still create the Three.js meshes from existing
+vehicle assets, but the first connected browser seeds deterministic vehicle
+records from the loaded road graph. Colyseus then owns vehicle path indexes,
+positions, directions, and movement ticks. Later browsers observe and render the
+same `worldRuntime.trafficVehicles` map instead of running an independent random
+vehicle simulation.
+
+This makes traffic lights and vehicle positions shared runtime state. Follow-up
+world migration slices should move collision/gridlock policy, object interaction
+timers, seat/final-anchor resolution, and broader world events onto the same
+server tick.
 
 ## Next PRs
 
@@ -380,7 +407,7 @@ The sidecar parent PR starts the runtime server. The hydration child PR changes 
 Follow-up work:
 
 - shared object-state coverage for more non-explicit ambient lifecycle paths
-- shared vehicle roster/path/position state from Colyseus
+- shared collision/gridlock policy for server-owned vehicles
 - server-side runtime ticks for timers and cooldown expiry
 - promotion from runtime-coherent Live Mode controls to behavior ownership
 - promotion from manual route trigger to real planner/model route requests

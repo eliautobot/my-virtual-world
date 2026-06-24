@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-world-runtime-engine-r1';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-world-runtime-vehicles-r1';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1120,6 +1120,7 @@ const ALL_RED_TIME = 2.0;    // all-red clearance interval — lets intersection
 let _trafficLightGroup = null;
 let _runtimeTrafficTopologyPublish = null;
 let _runtimeTrafficLastAppliedSeq = -1;
+let _runtimeTrafficVehicleLastAppliedSeq = -1;
 
 // ── Feature 6: Stats panel ───────────────────────────────────────────
 // ── Feature B3: Building notifications ──────────────────────────────
@@ -1423,6 +1424,9 @@ function makeAgentRuntimeTrafficTopology() {
     });
   }
   trafficLights.sort((a, b) => a.key.localeCompare(b.key));
+  const trafficVehicles = vehiclesList
+    .map((vehicle, index) => makeAgentRuntimeTrafficVehicleSeed(vehicle, index))
+    .filter(Boolean);
   return {
     owner: makeAgentRuntimeClientOwner('main3d-world-topology'),
     topologyHash: getRuntimeTrafficTopologyHash(trafficLights),
@@ -1430,6 +1434,27 @@ function makeAgentRuntimeTrafficTopology() {
     trafficYellowMs: Math.round(YELLOW_TIME * 1000),
     trafficAllRedMs: Math.round(ALL_RED_TIME * 1000),
     trafficLights,
+    trafficVehicles,
+  };
+}
+
+function makeAgentRuntimeTrafficVehicleSeed(vehicle, index = 0) {
+  if (!vehicle || !Array.isArray(vehicle._path) || vehicle._path.length < 2) return null;
+  const vehicleId = vehicle._runtimeVehicleId || `traffic-vehicle:${index}`;
+  vehicle._runtimeVehicleId = vehicleId;
+  return {
+    vehicleId,
+    vehicleType: vehicle.vehicleType || 'car',
+    color: Number(vehicle.color || 0),
+    x: Number(vehicle.x || 0),
+    z: Number(vehicle.z || 0),
+    dir: Number(vehicle.dir || 0),
+    rotationY: Number(vehicle.group?.rotation?.y || _dirToRotY(vehicle.dir || 0)),
+    speed: VEHICLE_SPEED,
+    speedMult: Number(vehicle._speedMult || 1),
+    path: vehicle._path.map(point => ({ x: Number(point.x || 0) * T, z: Number(point.z || 0) * T })),
+    pathIdx: Math.max(0, Math.floor(Number(vehicle._pathIdx || 0))),
+    state: vehicle._stoppedAtLight ? 'stopped' : 'moving',
   };
 }
 
@@ -1439,12 +1464,16 @@ function publishAgentRuntimeTrafficTopology({ force = false } = {}) {
   const topology = makeAgentRuntimeTrafficTopology();
   if (!topology.topologyHash) return null;
   const last = _runtimeTrafficTopologyPublish || null;
-  if (!force && last?.topologyHash === topology.topologyHash && last?.lightCount === topology.trafficLights.length) {
+  if (!force &&
+    last?.topologyHash === topology.topologyHash &&
+    last?.lightCount === topology.trafficLights.length &&
+    last?.vehicleCount === topology.trafficVehicles.length) {
     return null;
   }
   _runtimeTrafficTopologyPublish = {
     topologyHash: topology.topologyHash,
     lightCount: topology.trafficLights.length,
+    vehicleCount: topology.trafficVehicles.length,
     atMs: Date.now(),
   };
   return _agentRuntimeClient.writeWorldTopology(topology, { timeoutMs: AGENT_RUNTIME_TRAFFIC_TOPOLOGY_REQUEST_TIMEOUT_MS })
@@ -1455,6 +1484,7 @@ function publishAgentRuntimeTrafficTopology({ force = false } = {}) {
         tickSeq: ack?.worldRuntime?.tickSeq || null,
       };
       applyAgentRuntimeTrafficLights();
+      applyAgentRuntimeTrafficVehicles();
       return ack;
     })
     .catch(error => {
@@ -1495,6 +1525,59 @@ function applyAgentRuntimeTrafficLights() {
       tickSeq: worldRuntime.tickSeq || 0,
       topologyHash: worldRuntime.topologyHash || '',
       lightCount: runtimeLights.size,
+      updatedAt: worldRuntime.updatedAt || '',
+    };
+  }
+  return applied;
+}
+
+function applyAgentRuntimeTrafficVehicles() {
+  const worldRuntime = _agentRuntimeClient?.worldRuntime || null;
+  const runtimeVehicles = worldRuntime?.trafficVehicles;
+  if (!runtimeVehicles?.size) return 0;
+  if (Number(worldRuntime.tickSeq || 0) === _runtimeTrafficVehicleLastAppliedSeq) return 0;
+  _runtimeTrafficVehicleLastAppliedSeq = Number(worldRuntime.tickSeq || 0);
+  const byId = new Map(vehiclesList.map((vehicle, index) => {
+    if (!vehicle._runtimeVehicleId) vehicle._runtimeVehicleId = `traffic-vehicle:${index}`;
+    return [vehicle._runtimeVehicleId, vehicle];
+  }));
+  let applied = 0;
+  for (const runtimeVehicle of runtimeVehicles.values()) {
+    let vehicle = byId.get(runtimeVehicle.vehicleId);
+    if (!vehicle) {
+      vehicle = makeVehicle(runtimeVehicle.color || VEHICLE_COLORS[vehiclesList.length % VEHICLE_COLORS.length], runtimeVehicle.x, runtimeVehicle.z, runtimeVehicle.dir, runtimeVehicle.vehicleType, { vehicleId: runtimeVehicle.vehicleId });
+      vehicle._runtimeVehicleId = runtimeVehicle.vehicleId;
+      vehiclesList.push(vehicle);
+    }
+    vehicle.x = Number(runtimeVehicle.x || 0);
+    vehicle.z = Number(runtimeVehicle.z || 0);
+    vehicle.dir = Math.max(0, Math.min(3, Math.floor(Number(runtimeVehicle.dir || 0))));
+    vehicle._targetRotY = Number.isFinite(Number(runtimeVehicle.rotationY)) ? Number(runtimeVehicle.rotationY) : _dirToRotY(vehicle.dir);
+    vehicle._path = Array.isArray(runtimeVehicle.path) ? runtimeVehicle.path.map(point => ({ x: point.x / T, z: point.z / T })) : vehicle._path;
+    vehicle._pathIdx = Math.max(0, Math.floor(Number(runtimeVehicle.pathIdx || 0)));
+    vehicle._stoppedAtLight = runtimeVehicle.state === 'stopped';
+    vehicle._runtimeWorldRuntime = true;
+    vehicle._runtimeVersion = runtimeVehicle.version || 0;
+    vehicle.group.rotation.y = vehicle._targetRotY;
+    const laneOffset = ST.LANE_W * 0.45;
+    vehicle._laneOffX = vehicle.dir === 2 ? -laneOffset : vehicle.dir === 3 ? laneOffset : 0;
+    vehicle._laneOffZ = vehicle.dir === 0 ? laneOffset : vehicle.dir === 1 ? -laneOffset : 0;
+    const vPosY = ST.BASE + ST.ROAD_THICK + 0.18;
+    vehicle.group.position.set(vehicle.x + vehicle._laneOffX, vPosY, vehicle.z + vehicle._laneOffZ);
+    vehicle.group.visible = true;
+    if (isPhysicsReady() && vehicle._physicsId) {
+      setVehiclePosition(vehicle._physicsId, vehicle.x + vehicle._laneOffX, vPosY, vehicle.z + vehicle._laneOffZ, vehicle.group.rotation.y);
+    }
+    vehicle.group.children.forEach(child => {
+      if (child.name === 'wheel' && runtimeVehicle.state === 'moving') child.rotation.x += Number(runtimeVehicle.speed || VEHICLE_SPEED) * 0.025;
+    });
+    applied++;
+  }
+  if (typeof window !== 'undefined') {
+    window.__VWWorldRuntimeVehicles = {
+      applied,
+      tickSeq: worldRuntime.tickSeq || 0,
+      vehicleCount: runtimeVehicles.size,
       updatedAt: worldRuntime.updatedAt || '',
     };
   }
@@ -2001,6 +2084,7 @@ function subscribeAgentRuntimeSnapshots() {
     applyAgentRuntimeWorldObjectStatesToWorld();
     publishAgentRuntimeTrafficTopology();
     applyAgentRuntimeTrafficLights();
+    applyAgentRuntimeTrafficVehicles();
     const hydrated = applyAgentRuntimeSnapshotsToAgents(meta.source || 'runtime:update', { updateVisible: true });
     if (hydrated > 0) updateAgentList();
   });
@@ -2327,12 +2411,20 @@ function getAgentRuntimeSnapshotOwner(agent, options = {}) {
   return makeAgentRuntimeClientOwner('main3d-position-persistence');
 }
 
-function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', { force = false, visualState = null } = {}) {
+function isAgentRuntimeManualSnapshotOverride(agent, options = {}) {
+  if (options.force !== true || agent?._manualPlacementPreview) return false;
+  return getAgentRuntimeSnapshotMode(agent, options) === 'manual';
+}
+
+function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', options = {}) {
+  const { force = false, visualState = null } = options;
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || !getAgentRuntimeAgentId(agent)) return false;
-  if (agent?._runtimeObserverOnly || agent?._manualPlacementPreview) return false;
-  if (agent?._runtimeRouteLease && ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease.state || ''))) return false;
+  const manualOverride = isAgentRuntimeManualSnapshotOverride(agent, options);
+  if (agent?._manualPlacementPreview) return false;
+  if (agent?._runtimeObserverOnly && !manualOverride) return false;
+  if (agent?._runtimeRouteLease && ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease.state || '')) && !manualOverride) return false;
   const runtimeSnapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
-  if (runtimeSnapshot && isAgentRuntimeSnapshotLeaseActive(runtimeSnapshot) && runtimeSnapshot.leaseOwner !== _agentRuntimeClient.leaseOwner) return false;
+  if (runtimeSnapshot && isAgentRuntimeSnapshotLeaseActive(runtimeSnapshot) && runtimeSnapshot.leaseOwner !== _agentRuntimeClient.leaseOwner && !manualOverride) return false;
   const now = Date.now();
   const last = agent._runtimeSnapshotPublish || null;
   if (force || !last) return true;
@@ -2356,6 +2448,13 @@ function publishAgentRuntimeMovementSnapshot(agent, state = 'idle', options = {}
   if (!shouldPublishAgentRuntimeSnapshot(agent, state, { ...options, visualState })) return null;
   const mode = getAgentRuntimeSnapshotMode(agent, options);
   const owner = getAgentRuntimeSnapshotOwner(agent, { ...options, mode });
+  if (isAgentRuntimeManualSnapshotOverride(agent, { ...options, mode })) {
+    agent._runtimeObserverOnly = false;
+    agent._runtimeRemoteWriterActive = false;
+    agent._runtimeRouteLease = null;
+    agent._runtimeLeaseOwner = '';
+    agent._runtimeRouteId = '';
+  }
   const floor = Math.max(1, Number(agent._floor || agent._targetFloor || 1) || 1);
   const publishRecord = {
     atMs: Date.now(),
@@ -55969,7 +56068,7 @@ function _addWheels(g, positions, radius) {
   }
 }
 
-function makeVehicle(color, startX, startZ, dir, vehicleType) {
+function makeVehicle(color, startX, startZ, dir, vehicleType, options = {}) {
   const g = new THREE.Group();
   const type = vehicleType || 'car';
 
@@ -55989,7 +56088,7 @@ function makeVehicle(color, startX, startZ, dir, vehicleType) {
   const initRotY = dirRotations[dir] || 0;
   g.rotation.y = initRotY;
   scene.add(g);
-  const vehicleId = 'vehicle_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  const vehicleId = options.vehicleId || ('vehicle_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
   
   // Physics: add vehicle collider
   if (isPhysicsReady()) {
@@ -56100,11 +56199,15 @@ function initVehicles() {
     if (tooClose) continue;
 
     const vType = VEHICLE_TYPES[spawned % VEHICLE_TYPES.length];
-    const v = makeVehicle(VEHICLE_COLORS[spawned % VEHICLE_COLORS.length], wx, wz, sp.dir, vType);
+    const vehicleId = `traffic-vehicle:${spawned}`;
+    const v = makeVehicle(VEHICLE_COLORS[spawned % VEHICLE_COLORS.length], wx, wz, sp.dir, vType, { vehicleId });
+    v._runtimeVehicleId = vehicleId;
     _assignVehiclePath(v, graph);
     vehiclesList.push(v);
     spawned++;
   }
+  publishAgentRuntimeTrafficTopology({ force: true });
+  applyAgentRuntimeTrafficVehicles();
 }
 
 /**
@@ -56567,6 +56670,10 @@ function _resolveIntersectionGridlocks() {
 
 function updateVehicles(dt) {
   if (vehiclesList.length === 0) return;
+  if (_agentRuntimeClient?.worldRuntime?.trafficVehicles?.size) {
+    applyAgentRuntimeTrafficVehicles();
+    return;
+  }
 
   // ── Intersection gridlock resolver (runs every 1.5s) ──
   _gridlockCheckTimer += dt;

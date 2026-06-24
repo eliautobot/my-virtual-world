@@ -11,6 +11,7 @@ import {
 } from './agent-runtime-room.mjs';
 
 const DEFAULT_REALTIME_PORT = 8591;
+const DEFAULT_MAX_PAYLOAD_BYTES = 256 * 1024;
 
 function intEnv(name, fallback) {
   const value = Number(process.env[name]);
@@ -25,7 +26,10 @@ export async function createRealtimeServer({
   const httpServer = createServer();
   const gameServer = new Server({
     greet: false,
-    transport: new WebSocketTransport({ server: httpServer }),
+    transport: new WebSocketTransport({
+      server: httpServer,
+      maxPayload: intEnv('VW_REALTIME_MAX_PAYLOAD_BYTES', DEFAULT_MAX_PAYLOAD_BYTES),
+    }),
     express: (app) => {
       app.disable('x-powered-by');
       app.use(express.json({ limit: '64kb' }));
