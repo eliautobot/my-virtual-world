@@ -540,7 +540,12 @@ def _demo_edit_locked_response():
 
 def _is_starter_world_seed_request(path, payload=None):
     try:
-        if load_world_meta().get("initialized"):
+        meta = load_world_meta()
+        if meta.get("initialized"):
+            if path == "/api/streets" and _street_payload_matches(payload, meta.get("streets")):
+                return True
+            if path == "/api/streets" and _street_payload_matches(payload, get_latest_checkpoint_streets()):
+                return True
             return False
     except Exception:
         return False
@@ -756,6 +761,33 @@ LATEST_CHECKPOINT_STREETS_20260429 = [
 def get_latest_checkpoint_streets():
     # Return fresh dicts so callers can mutate without corrupting the guard copy.
     return [dict(seg) for seg in LATEST_CHECKPOINT_STREETS_20260429]
+
+
+def _normalize_starter_street_segment(segment):
+    if not isinstance(segment, dict):
+        return None
+    open_edges = segment.get("openEdges")
+    if isinstance(open_edges, dict):
+        open_edges = {str(k): bool(v) for k, v in sorted(open_edges.items())}
+    else:
+        open_edges = None
+    return {
+        "x1": segment.get("x1"),
+        "z1": segment.get("z1"),
+        "x2": segment.get("x2"),
+        "z2": segment.get("z2"),
+        "type": segment.get("type") or None,
+        "rotation": segment.get("rotation") or 0,
+        "openEdges": open_edges,
+    }
+
+
+def _street_payload_matches(left, right):
+    if not isinstance(left, list) or not isinstance(right, list):
+        return False
+    if len(left) != len(right):
+        return False
+    return [_normalize_starter_street_segment(item) for item in left] == [_normalize_starter_street_segment(item) for item in right]
 
 
 def ensure_checkpoint_streets(meta, *, persist=False):

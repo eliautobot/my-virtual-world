@@ -1332,6 +1332,15 @@ export class AgentRuntimeRoom extends Room {
     }
     const changedVehicles = this.tickTrafficVehicles(runtime, tickMs, now);
 
+    if (changedLights > 0 || changedVehicles > 0) {
+      this.broadcast('runtime:worldRuntime', {
+        type: 'world-runtime-tick',
+        worldRuntime: worldRuntimeToPlain(runtime),
+        changedLights,
+        changedVehicles,
+      });
+    }
+
     if (changedLights > 0 || changedVehicles > 0 || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
       this.lastWorldRuntimePersistMs = nowMs;
       writeRuntimeDocument(this.dataDir, this.state, this.events);

@@ -462,6 +462,14 @@ export async function createAgentRuntimeClient({
       worldRuntime = worldRuntimeFromRoomState(room);
       notify('runtime:ack');
     });
+    room.onMessage('runtime:worldRuntime', message => {
+      snapshots = snapshotsFromRoomState(room);
+      worldObjects = worldObjectsFromRoomState(room);
+      worldRuntime = message?.worldRuntime
+        ? normalizeWorldRuntimeState(message.worldRuntime)
+        : worldRuntimeFromRoomState(room);
+      notify('runtime:worldRuntime');
+    });
     room.onMessage('runtime:error', message => {
       if (!pendingRequestIds.has(message?.requestId)) {
         logger?.warn?.('Agent runtime sidecar error', message);
