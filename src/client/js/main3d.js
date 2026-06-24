@@ -1107,6 +1107,7 @@ const AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE = 0.05;
 const AGENT_RUNTIME_WORLD_OBJECT_TTL_MS = 15000;
 const AGENT_RUNTIME_WORLD_OBJECT_COOLDOWN_MS = 8000;
 const AGENT_RUNTIME_TRAFFIC_TOPOLOGY_REQUEST_TIMEOUT_MS = 3500;
+const AGENT_RUNTIME_TRAFFIC_TOPOLOGY_OWNER_TTL_MS = 30000;
 const AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS = 650;
 const AGENT_RUNTIME_TRAFFIC_VEHICLE_SNAP_DISTANCE = API_TILE * 8;
 let editMode = null;
@@ -1473,6 +1474,24 @@ function publishAgentRuntimeTrafficTopology({ force = false } = {}) {
   if (!_trafficLights.size) return null;
   const topology = makeAgentRuntimeTrafficTopology();
   if (!topology.topologyHash) return null;
+  const currentRuntime = _agentRuntimeClient.worldRuntime || null;
+  const currentOwner = String(currentRuntime?.topologyOwner || '');
+  const currentUpdatedAtMs = Date.parse(currentRuntime?.topologyUpdatedAt || currentRuntime?.updatedAt || '');
+  const currentOwnerFresh = Number.isFinite(currentUpdatedAtMs) && Date.now() - currentUpdatedAtMs < AGENT_RUNTIME_TRAFFIC_TOPOLOGY_OWNER_TTL_MS;
+  if (!force &&
+    currentOwner &&
+    currentOwner !== topology.owner &&
+    currentRuntime?.topologyHash === topology.topologyHash &&
+    currentOwnerFresh) {
+    _runtimeTrafficTopologyPublish = {
+      ...(_runtimeTrafficTopologyPublish || {}),
+      skippedAtMs: Date.now(),
+      skippedReason: 'fresh-runtime-topology-owned-by-another-client',
+      topologyOwner: currentOwner,
+      topologyHash: topology.topologyHash,
+    };
+    return null;
+  }
   const last = _runtimeTrafficTopologyPublish || null;
   if (!force &&
     last?.topologyHash === topology.topologyHash &&
@@ -1832,6 +1851,7 @@ function makeAgentRuntimeVisualActivity(agent) {
     'actionId',
     'reservationId',
     'activeUseId',
+    'runtimePositionOwner',
     'spotId',
     'slotId',
     'mode',
@@ -2540,6 +2560,13 @@ function getAgentRuntimeSnapshotMode(agent, options = {}) {
 
 function getAgentRuntimeSnapshotOwner(agent, options = {}) {
   if (options.owner) return makeAgentRuntimeClientOwner(options.owner);
+  const runtimePositionOwner =
+    options.runtimePositionOwner ||
+    agent?._wanderTarget?.runtimePositionOwner ||
+    agent?._idleActivity?.runtimePositionOwner ||
+    agent?._idleActivity?.lifecycle?.runtimePositionOwner ||
+    '';
+  if (runtimePositionOwner) return makeAgentRuntimeClientOwner(runtimePositionOwner);
   const mode = getAgentRuntimeSnapshotMode(agent, options);
   if (mode === 'manual') return makeAgentRuntimeClientOwner('user-directed');
   if (mode === 'live') return 'agent-live-mode';
@@ -4256,6 +4283,7 @@ function releasePlaygroundSwingUse(swing, activity, agent, reason = 'stay-comple
 const WORK_DESK_DOCK_SNAP_RADIUS = Math.max(18, API_TILE * 0.75);
 const WORK_DESK_IDLE_SEATED_RADIUS = Math.max(22, API_TILE * 0.85);
 const POST_DRINK_DESK_RELEASE_MS = 12000;
+const LIVE_STATUS_RUNTIME_POSITION_OWNER = 'live-status-dock';
 
 function getMonotonicNowMs() {
   return (typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now();
@@ -4290,6 +4318,47 @@ function releaseAgentFromDrinkDeskConsume(agent, drinkKind = 'drink') {
   clearDynamicInteriorRoutingForAgent(agent.id);
   clearDynamicExteriorRoutingForAgent(agent.id);
   return true;
+}
+
+function holdLiveStatusRuntimeObjectDock(agent, workTarget = null, kind = 'live-status-work-desk') {
+  if (!agent || !workTarget?.building || !Number.isFinite(Number(workTarget.apiX)) || !Number.isFinite(Number(workTarget.apiZ))) return null;
+  const buildingId = workTarget.building.id || workTarget.buildingId || null;
+  if (!buildingId || workTarget.furnitureIndex == null) return null;
+  const furnitureIndex = Number(workTarget.furnitureIndex);
+  const objectType = workTarget.kind || workTarget.objectType || 'desk';
+  const actionId = String(kind || '').includes('meeting') ? 'planning.meeting' : 'work.desk';
+  const stayMs = isWorkPresenceStatus(agent.status) ? 999999 : Math.max(3500, Number(agent._stayTimer || 0), 4500);
+  const existing = String(agent._idleActivity?.kind || '').startsWith('live-status-') ? agent._idleActivity : null;
+  agent._idleActivity = {
+    ...(existing || {}),
+    kind,
+    phase: 'active',
+    source: 'live-status-runtime-dock',
+    runtimePositionOwner: LIVE_STATUS_RUNTIME_POSITION_OWNER,
+    buildingId,
+    furnitureIndex,
+    furnitureType: objectType,
+    objectKey: getAgentRuntimeFurnitureObjectKey(buildingId, furnitureIndex, objectType),
+    actionId,
+    spotId: workTarget.spotId || null,
+    stayMs,
+    faceAngle: workTarget.faceAngle,
+    dockTarget: { x: Number(workTarget.apiX), y: Number(workTarget.apiZ) },
+    dockSnapRadius: WORK_DESK_IDLE_SEATED_RADIUS,
+    animationId: actionId === 'planning.meeting' ? 'meeting-sit-talk' : 'desk-work',
+    lifecycle: { stationary: true, carryable: false, temporary: false, runtimePositionOwner: LIVE_STATUS_RUNTIME_POSITION_OWNER },
+  };
+  const intent = agent._agentIntent || null;
+  if (isAgentIntentActive(intent) && intent.priorityName === 'live-status') {
+    intent.phase = 'active';
+    intent.debug = {
+      ...(intent.debug || {}),
+      updatedAtMs: Date.now(),
+      lastDecisionReason: 'live-status-runtime-object-dock-active',
+      sourceSummary: 'live status desk/meeting direct dock is fenced by runtime object ownership',
+    };
+  }
+  return agent._idleActivity;
 }
 
 function getAgentWorkTarget(agent) {
@@ -8966,6 +9035,7 @@ const AGENT_INTENT_OWNER_TO_PRIORITY_NAME = Object.freeze({
   meeting: 'live-status',
   recovery: 'recovery',
   schedule: 'schedule',
+  'tag-game': 'idle',
   idle: 'idle',
   'route-handoff': 'route-handoff',
 });
@@ -9560,23 +9630,67 @@ function evaluateAgentIntentRelease(agent) {
   return { released: false, reason: 'active' };
 }
 
+function inferExplicitObjectActionMetadataFromRouteTarget(target = null, building = null, metadata = {}) {
+  if (!building?.interior?.furniture || !target || metadata.furnitureIndex != null || target.furnitureIndex != null) return null;
+  if (!Number.isFinite(Number(target.x)) || !Number.isFinite(Number(target.y))) return null;
+  const targetFloor = Math.max(1, Number(metadata.floor ?? target.floor ?? target.buildingFloor ?? 1) || 1);
+  let best = null;
+  const seen = new Set();
+  building.interior.furniture.forEach((furniture, furnitureIndex) => {
+    if (!furniture || furniture.deleted || furniture.removed) return;
+    const spots = [];
+    const addSpot = (spot) => {
+      if (!spot || !Number.isFinite(Number(spot.apiX)) || !Number.isFinite(Number(spot.apiZ))) return;
+      const spotFloor = Math.max(1, Number(spot.floor ?? getFurnitureFloor(furniture) ?? 1) || 1);
+      if (spotFloor !== targetFloor) return;
+      const key = `${furnitureIndex}:${spot.spotId || spot.id || spots.length}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      spots.push(spot);
+    };
+    for (const def of FURNITURE_INTERACTION_SPOTS[furniture.type] || []) {
+      addSpot(getFurnitureActionSpot(building, furniture, def.id || def.spotId));
+    }
+    addSpot(getFurnitureActionSpot(building, furniture));
+    for (const spot of spots) {
+      const dist = Math.hypot(Number(target.x) - Number(spot.apiX), Number(target.y) - Number(spot.apiZ));
+      const maxDist = Math.max(3, Number(spot.snapRadius || spot.approachRadius || 0) || 0);
+      if (dist > maxDist) continue;
+      if (!best || dist < best.dist) {
+        best = {
+          dist,
+          buildingId: building.id || target.buildingId || null,
+          furnitureIndex,
+          furniture,
+          objectType: furniture.type || target.objectType || target.catalogKey || null,
+          spotId: spot.spotId || spot.id || target.spotId || target.interactionSpotId || null,
+          actionId: target.actionId || spot.action || spot.actionId || furniture.actionId || null,
+          floor: spot.floor || targetFloor,
+        };
+      }
+    }
+  });
+  return best;
+}
+
 function getExplicitObjectActionMetadata(agent, target = null, building = null, metadata = {}) {
+  const inferred = inferExplicitObjectActionMetadataFromRouteTarget(target, building, metadata);
   const selected = metadata.furnitureIndex == null && _selectedFurniture?.buildingId === building?.id ? _selectedFurniture : null;
-  const furnitureIndex = metadata.furnitureIndex ?? target?.furnitureIndex ?? selected?.index ?? null;
-  const furniture = metadata.furniture || (building && furnitureIndex != null ? building.interior?.furniture?.[furnitureIndex] : null) || null;
-  const buildingId = metadata.buildingId || target?.buildingId || building?.id || null;
-  const objectType = metadata.objectType || target?.objectType || target?.catalogKey || target?.catalogId || furniture?.type || null;
-  const actionId = metadata.actionId || target?.actionId || target?.apiActionId || target?.uiActionId || furniture?.reservation?.actionId || furniture?.activeUse?.actionId || `object-action:${objectType || 'object'}`;
+  const furnitureIndex = metadata.furnitureIndex ?? target?.furnitureIndex ?? inferred?.furnitureIndex ?? selected?.index ?? null;
+  const furniture = metadata.furniture || inferred?.furniture || (building && furnitureIndex != null ? building.interior?.furniture?.[furnitureIndex] : null) || null;
+  const buildingId = metadata.buildingId || target?.buildingId || inferred?.buildingId || building?.id || null;
+  const objectType = metadata.objectType || target?.objectType || target?.catalogKey || target?.catalogId || inferred?.objectType || furniture?.type || null;
+  const actionId = metadata.actionId || target?.actionId || target?.apiActionId || target?.uiActionId || inferred?.actionId || furniture?.reservation?.actionId || furniture?.activeUse?.actionId || `object-action:${objectType || 'object'}`;
   const objectId = metadata.objectId || target?.objectId || target?.objectInstanceId || (buildingId && objectType && furnitureIndex != null ? `${buildingId}-${objectType}-${furnitureIndex}` : null);
   const objectKey = getAgentRuntimeObjectKeyFromMeta({ ...metadata, buildingId, furnitureIndex, objectType, objectId, furniture }, target, building);
-  const spotId = metadata.spotId || target?.spotId || target?.interactionSpotId || target?.activationSpotId || target?.routeSpotId || furniture?.reservation?.spotId || furniture?.activeUse?.interactionSpotId || null;
+  const spotId = metadata.spotId || target?.spotId || target?.interactionSpotId || target?.activationSpotId || target?.routeSpotId || inferred?.spotId || furniture?.reservation?.spotId || furniture?.activeUse?.interactionSpotId || null;
   const reservationId = metadata.reservationId || target?.reservationId || furniture?.reservation?.reservationId || furniture?.reservation?.id || (objectId ? `reservation:${objectId}:${actionId}:${getAgentDebugId(agent)}` : null);
   const activeUseId = metadata.activeUseId || target?.activeUseId || furniture?.activeUse?.id || (objectId ? `active-use:${objectId}:${actionId}:${getAgentDebugId(agent)}` : null);
   return { buildingId, furnitureIndex, furniture, objectType, actionId, objectId, objectKey, spotId, reservationId, activeUseId };
 }
 
 function setAgentTargetForExplicitObjectAction(agent, target, building = null, floor = null, metadata = {}) {
-  const objectMeta = getExplicitObjectActionMetadata(agent, target, building, metadata);
+  const objectMeta = getExplicitObjectActionMetadata(agent, target, building, { ...metadata, floor });
   const runtimeObjectBlock = shouldBlockAgentRuntimeObjectAction(agent, objectMeta.objectKey);
   if (runtimeObjectBlock.blocked) {
     const attemptedIntent = createAgentIntent(agent, {
@@ -18718,6 +18832,122 @@ function routeAgentToAutonomyWorldObject(agent, obj, need = 'idle') {
 
 // ── Social Activity State ─────────────────────────────────────
 let _activeTagGame = null; // { id, participants: Set, taggerId, timer, maxTime }
+const TAG_GAME_RUNTIME_POSITION_OWNER = 'tag-game-loop';
+
+function isAgentRuntimeRouteLeaseBusy(agent) {
+  return ['pending', 'owned', 'releasing', 'heartbeat-failed'].includes(String(agent?._runtimeRouteLease?.state || ''));
+}
+
+function isTagGameRuntimeIntentActive(agent, gameId = null) {
+  const intent = agent?._agentIntent || null;
+  if (!isAgentIntentActive(intent) || intent.owner !== 'tag-game') return false;
+  if (!gameId) return true;
+  return intent.target?.gameId === gameId || agent?._tagState?.gameId === gameId;
+}
+
+function isAgentEligibleForRuntimeTagGame(agent) {
+  if (!agent?._group3d) return false;
+  if (isAgentLiveModeScriptedSuppressed(agent)) {
+    markAgentLiveModeScriptedSuppression(agent, 'tag-game-recruitment-suppressed');
+    return false;
+  }
+  if (agent._runtimeObserverOnly || isAgentRuntimeRouteLeaseBusy(agent)) return false;
+  if (isWorkPresenceStatus(agent.status) || agent._atDesk || agent._curInteraction || agent._curiosityTarget) return false;
+  if (agent._doorTransition || agent._elevatorTrip || agent._wanderTarget || agent._idleActivity || agent._socialState) return false;
+  const activeIntent = agent._agentIntent || null;
+  if (isAgentIntentActive(activeIntent) && activeIntent.owner !== 'tag-game') return false;
+  return true;
+}
+
+function clearTagGameRuntimeTarget(agent) {
+  const target = agent?._wanderTarget || null;
+  if (!target || (target.runtimePositionOwner !== TAG_GAME_RUNTIME_POSITION_OWNER && target.targetKind !== 'tag-game-runtime')) return false;
+  agent._wanderTarget = null;
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  agent._waypointPathIdx = 0;
+  return true;
+}
+
+function releaseTagGameParticipant(agent, reason = 'tag-game-complete') {
+  if (!agent) return false;
+  const released = isTagGameRuntimeIntentActive(agent)
+    ? releaseAgentIntent(agent, reason, {
+      releaseBy: 'owner',
+      clearRoute: true,
+      clearLifecycle: false,
+      releaseSummary: 'tag game runtime movement owner released',
+    })
+    : null;
+  clearTagGameRuntimeTarget(agent);
+  agent._tagState = null;
+  agent._isRunning = false;
+  agent._wanderTimer = 2000 + Math.random() * 3000;
+  return released?.released !== false;
+}
+
+function admitTagGameParticipant(agent, gameId, { isIt = false, maxTime = 30000 } = {}) {
+  if (!agent || !gameId) return false;
+  const target = {
+    x: Number(agent.x || 0),
+    y: Number(agent.y || 0),
+    floor: Math.max(1, Number(agent._floor || agent._targetFloor || 1) || 1),
+    targetKind: 'tag-game-runtime',
+    gameId,
+    runtimePositionOwner: TAG_GAME_RUNTIME_POSITION_OWNER,
+  };
+  const intentOptions = {
+    owner: 'tag-game',
+    priorityName: 'idle',
+    phase: 'active',
+    target,
+    release: { policy: 'on-timeout', allowedBy: AGENT_INTENT_RELEASE_ALLOWED_BY.idle },
+    source: { family: 'mini-game', functionName: '_startTagGame', taskRef: 'runtime-conflict-containment' },
+    behaviorSourceKind: 'agent-scripted-mode',
+    behaviorMode: 'tag-game',
+    behaviorCategory: 'play',
+    debug: {
+      label: 'tag-game:runtime-contained',
+      sourceSummary: 'tag mini-game direct chase target is fenced by runtime ownership guard',
+      lastDecisionReason: 'tag-game-runtime-intent-admitted',
+    },
+  };
+  const admission = admitAgentIntent(agent, intentOptions);
+  if (!admission.accepted) return false;
+  attachAgentIntent(agent, {
+    ...intentOptions,
+    id: admission.attemptedIntent?.id,
+    debug: admission.attemptedIntent?.debug || intentOptions.debug,
+  });
+  agent._tagState = {
+    playing: true, gameId,
+    isIt,
+    timer: maxTime,
+    evadeAngle: Math.random() * Math.PI * 2,
+    runtimePositionOwner: TAG_GAME_RUNTIME_POSITION_OWNER,
+  };
+  agent._isRunning = true;
+  return true;
+}
+
+function setTagGameRuntimeTarget(agent, target = null) {
+  if (!agent?._tagState?.playing || !target || !isTagGameRuntimeIntentActive(agent, agent._tagState.gameId)) return false;
+  if (!Number.isFinite(Number(target.x)) || !Number.isFinite(Number(target.y))) return false;
+  agent._wanderTarget = {
+    ...target,
+    x: Number(target.x),
+    y: Number(target.y),
+    floor: Math.max(1, Number(target.floor || agent._floor || agent._targetFloor || 1) || 1),
+    targetKind: 'tag-game-runtime',
+    gameId: agent._tagState.gameId,
+    runtimePositionOwner: TAG_GAME_RUNTIME_POSITION_OWNER,
+  };
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  agent._waypointPathIdx = 0;
+  agent._tagState.runtimePositionOwner = TAG_GAME_RUNTIME_POSITION_OWNER;
+  return true;
+}
 
 function _startConversation(a, b, options = {}) {
   const convId = 'conv_' + Date.now();
@@ -18899,12 +19129,22 @@ function _updateConversation(agent, dtMs) {
 
 function _startTagGame(nearbyAgents) {
   if (_activeTagGame) return; // only one game at a time
-  if (nearbyAgents.length < 3) return;
+  const eligible = nearbyAgents.filter(isAgentEligibleForRuntimeTagGame);
+  if (eligible.length < 3) return;
 
-  const participants = nearbyAgents.slice(0, Math.min(6, nearbyAgents.length));
-  const taggerIdx = Math.floor(Math.random() * participants.length);
+  const candidates = eligible.slice(0, Math.min(6, eligible.length));
   const gameId = 'tag_' + Date.now();
   const maxTime = 30000 + Math.random() * 30000; // 30-60s
+  const participants = [];
+  for (const ag of candidates) {
+    if (admitTagGameParticipant(ag, gameId, { isIt: false, maxTime })) participants.push(ag);
+  }
+  if (participants.length < 3) {
+    for (const ag of participants) releaseTagGameParticipant(ag, 'tag-game-insufficient-runtime-admission');
+    return;
+  }
+  const taggerIdx = Math.floor(Math.random() * participants.length);
+  if (participants[taggerIdx]?._tagState) participants[taggerIdx]._tagState.isIt = true;
 
   _activeTagGame = {
     id: gameId,
@@ -18914,21 +19154,19 @@ function _startTagGame(nearbyAgents) {
     maxTime
   };
 
-  for (const ag of participants) {
-    ag._tagState = {
-      playing: true, gameId,
-      isIt: ag.id === participants[taggerIdx].id,
-      timer: maxTime,
-      evadeAngle: Math.random() * Math.PI * 2
-    };
-    ag._isRunning = true;
-  }
+  for (const ag of participants) ag._isRunning = true;
 }
 
 function _updateTagGame(agent, dtMs) {
   if (!agent._tagState || !agent._tagState.playing) return false;
   if (!_activeTagGame || _activeTagGame.id !== agent._tagState.gameId) {
-    agent._tagState = null;
+    releaseTagGameParticipant(agent, 'tag-game-stale-state');
+    return false;
+  }
+  if (!isTagGameRuntimeIntentActive(agent, agent._tagState.gameId) || agent._runtimeObserverOnly || isAgentRuntimeRouteLeaseBusy(agent) || isAgentLiveModeScriptedSuppressed(agent) || isWorkPresenceStatus(agent.status) || agent._atDesk || agent._curInteraction || agent._curiosityTarget || agent._doorTransition || agent._elevatorTrip) {
+    _activeTagGame.participants.delete(agent.id);
+    releaseTagGameParticipant(agent, 'tag-game-runtime-conflict');
+    if (_activeTagGame && _activeTagGame.participants.size < 3) _endTagGame('tag-game-runtime-conflict');
     return false;
   }
 
@@ -18937,7 +19175,7 @@ function _updateTagGame(agent, dtMs) {
 
   // Time's up — end game
   if (_activeTagGame.timer <= 0) {
-    _endTagGame();
+    _endTagGame('timeout');
     return false;
   }
 
@@ -18945,14 +19183,11 @@ function _updateTagGame(agent, dtMs) {
   return true; // still playing
 }
 
-function _endTagGame() {
+function _endTagGame(reason = 'complete') {
   if (!_activeTagGame) return;
   for (const ag of agentsList) {
     if (ag._tagState && ag._tagState.gameId === _activeTagGame.id) {
-      ag._tagState = null;
-      ag._isRunning = false;
-      ag._wanderTarget = null;
-      ag._wanderTimer = 2000 + Math.random() * 3000;
+      releaseTagGameParticipant(ag, reason === 'complete' ? 'tag-game-complete' : reason);
     }
   }
   _activeTagGame = null;
@@ -19725,12 +19960,14 @@ function updateAgentAnimations(dt) {
           furnitureType: 'meetingTable',
           spotId: meetingTarget.spotId,
           action: 'planning.meeting',
+          actionId: 'planning.meeting',
           stayMs: 30000,
           faceAngle: meetingTarget.faceAngle,
           dockTarget: { x: meetingTarget.apiX, y: meetingTarget.apiZ },
           dockSnapRadius: 8,
           animationId: 'meeting-sit-talk',
-          lifecycle: { stationary: true, carryable: false, temporary: false },
+          runtimePositionOwner: LIVE_STATUS_RUNTIME_POSITION_OWNER,
+          lifecycle: { stationary: true, carryable: false, temporary: false, runtimePositionOwner: LIVE_STATUS_RUNTIME_POSITION_OWNER },
         };
         agent._meetingId = meetingTarget.meetingId;
         agent._meetingTopic = meetingTarget.topic;
@@ -19837,6 +20074,7 @@ function updateAgentAnimations(dt) {
           agent.y = deskZ;
           agent._wanderTarget = null;
           agent._stayTimer = 999999;
+          holdLiveStatusRuntimeObjectDock(agent, workTarget, 'live-status-work-desk');
           if (agent._group3d) agent._group3d.rotation.y = workTarget.faceAngle;
         }
       } else {
@@ -19844,6 +20082,7 @@ function updateAgentAnimations(dt) {
         agent._stayTimer = 999999;
         agent.x = deskX;
         agent.y = deskZ;
+        holdLiveStatusRuntimeObjectDock(agent, workTarget, 'live-status-work-desk');
         if (agent._group3d) agent._group3d.rotation.y = workTarget.faceAngle;
       }
     } else if (shouldHoldIdleAtDesk) {
@@ -19859,6 +20098,7 @@ function updateAgentAnimations(dt) {
       agent.y = deskIdleTarget.apiZ;
       agent._deskFacingAngle = deskIdleTarget.faceAngle;
       agent._activeWorkSpot = deskIdleTarget;
+      holdLiveStatusRuntimeObjectDock(agent, deskIdleTarget, 'live-status-idle-desk');
       if (agent._group3d) agent._group3d.rotation.y = deskIdleTarget.faceAngle;
     } else if (isRoutingToWorkDesk) {
       const routeTarget = agent._agentIntent?.target || agent._wanderTarget || null;
@@ -19894,6 +20134,7 @@ function updateAgentAnimations(dt) {
             // otherwise coffee/water sipping never reaches the cleanup branch.
           } else {
             agent._stayTimer = Math.max(agent._stayTimer || 0, isWorkPresenceStatus(agent.status) ? 999999 : 4500);
+            holdLiveStatusRuntimeObjectDock(agent, routedWorkTarget, isWorkPresenceStatus(agent.status) ? 'live-status-work-desk' : 'live-status-idle-desk');
           }
           if (hasDeskDrinkConsumeActivity && agent._idleActivity?.phase !== 'active') {
             agent._idleActivity.phase = 'active';
@@ -22554,6 +22795,7 @@ function updateAgentAnimations(dt) {
             agent.x = workSpot.apiX;
             agent.y = workSpot.apiZ;
             agent._stayTimer = Math.max(agent._stayTimer || 0, isWorkPresenceStatus(agent.status) ? 999999 : 4500);
+            holdLiveStatusRuntimeObjectDock(agent, workSpot, isWorkPresenceStatus(agent.status) ? 'live-status-work-desk' : 'live-status-idle-desk');
             if (agent._group3d && Number.isFinite(workSpot.faceAngle)) agent._group3d.rotation.y = workSpot.faceAngle;
           }
         }
@@ -22661,8 +22903,7 @@ function updateAgentAnimations(dt) {
             if (d < closestDist) { closestDist = d; closest = other; }
           }
           if (closest) {
-            agent._wanderTarget = { x: closest.x, y: closest.y };
-            agent._waypointPath = null; // direct chase, no pathfinding
+            setTagGameRuntimeTarget(agent, { x: closest.x, y: closest.y }); // direct chase, no pathfinding
             // Tag! Transfer "it" status
             if (closestDist < API_TILE * 1.5) {
               agent._tagState.isIt = false;
@@ -22685,16 +22926,14 @@ function updateAgentAnimations(dt) {
               const fleeX = agent.x + (dx / Math.max(dist, 1)) * API_TILE * 6;
               const fleeZ = agent.y + (dz / Math.max(dist, 1)) * API_TILE * 6;
               const snapped = snapTargetToSidewalk(fleeX, fleeZ);
-              agent._wanderTarget = snapped;
-              agent._waypointPath = null;
+              setTagGameRuntimeTarget(agent, snapped);
             } else {
               // Far from tagger — jog in random direction
               if (!agent._wanderTarget || Math.random() < 0.02) {
                 agent._tagState.evadeAngle += (Math.random() - 0.5) * 1.5;
                 const jx = agent.x + Math.cos(agent._tagState.evadeAngle) * API_TILE * 5;
                 const jz = agent.y + Math.sin(agent._tagState.evadeAngle) * API_TILE * 5;
-                agent._wanderTarget = snapTargetToSidewalk(jx, jz);
-                agent._waypointPath = null;
+                setTagGameRuntimeTarget(agent, snapTargetToSidewalk(jx, jz));
               }
             }
           }
@@ -54700,8 +54939,73 @@ function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'mat
   const leftSpot = getFurnitureActionSpot(building, table, 'player-left') || getFurnitureActionSpot(building, table);
   const rightSpot = getFurnitureActionSpot(building, table, 'player-right') || getFurnitureActionSpot(building, table);
   if (!leftSpot || !rightSpot) return false;
-  table.reservation = { agentIds: [p1.id, p2.id], actionId: 'life.playPingPong', spotIds: [leftSpot.spotId, rightSpot.spotId], status: 'held', source };
-  table.activeUse = { state: 'approach', mode, actionId: 'life.playPingPong', agentIds: [p1.id, p2.id], source };
+  const objectKey = getAgentRuntimeFurnitureObjectKey(buildingId, index, 'pingpong');
+  const actionId = 'life.playPingPong';
+  const reservationId = `reservation:${objectKey}:${actionId}:${Date.now()}`;
+  const activeUseId = `active-use:${objectKey}:${actionId}:${Date.now()}`;
+  const playerPlans = [
+    { agent: p1, spot: leftSpot, side: 'left', slotId: 'player-left', color: 0xf44336 },
+    { agent: p2, spot: rightSpot, side: 'right', slotId: 'player-right', color: 0x2196f3 },
+  ];
+  const admittedAgents = [];
+  for (const plan of playerPlans) {
+    const routeTarget = {
+      x: plan.spot.apiX,
+      y: plan.spot.apiZ,
+      floor: plan.spot.floor,
+      buildingId,
+      furnitureIndex: index,
+      objectType: 'pingpong',
+      objectKey,
+      actionId,
+      spotId: plan.spot.spotId,
+      interactionSpotId: plan.spot.spotId,
+      slotId: plan.slotId,
+      activeUseSlotId: plan.slotId,
+      reservationId,
+      activeUseId,
+      preserveUntilRelease: true,
+    };
+    const routeAdmission = setAgentTargetForExplicitObjectAction(plan.agent, routeTarget, building, plan.spot.floor, {
+      sourceFunction: 'startPingPongMatchOnTable',
+      sourceSummary: 'ping-pong match routes with explicit table runtime ownership',
+      objectType: 'pingpong',
+      objectKey,
+      furnitureIndex: index,
+      actionId,
+      spotId: plan.spot.spotId,
+      slotId: plan.slotId,
+      reservationId,
+      activeUseId,
+      release: { policy: 'on-object-complete', releaseObjectReservation: true, releaseActiveUse: true, allowedBy: AGENT_INTENT_RELEASE_ALLOWED_BY['explicit-object'] },
+    });
+    if (routeAdmission?.accepted === false) {
+      for (const admittedAgent of admittedAgents) {
+        releaseAgentIntent(admittedAgent, 'route-failed', {
+          releaseBy: 'route-failed',
+          clearRoute: true,
+          clearLifecycle: true,
+          releaseSummary: 'ping-pong table route admission failed before match start',
+        });
+        releaseAgentRuntimeRouteLease(admittedAgent, 'pingpong-table-route-admission-failed', 'idle');
+      }
+      return false;
+    }
+    admittedAgents.push(plan.agent);
+  }
+  const activeSlots = Object.fromEntries(playerPlans.map(plan => [plan.slotId, {
+    agentId: plan.agent.id || plan.agent.name || null,
+    reservationId,
+    activeUseId,
+    actionId,
+    interactionSpotId: plan.spot.spotId,
+    spotId: plan.spot.spotId,
+    dockTarget: { x: plan.spot.apiX, y: plan.spot.apiZ },
+    side: plan.side,
+    startedAt: new Date().toISOString(),
+  }]));
+  table.reservation = { id: reservationId, reservationId, agentIds: [p1.id, p2.id], actionId, spotIds: [leftSpot.spotId, rightSpot.spotId], slotIds: playerPlans.map(plan => plan.slotId), status: 'held', source };
+  table.activeUse = { id: activeUseId, activeUseId, state: 'approach', mode, actionId, agentIds: [p1.id, p2.id], activeSlots, source };
   table.pingPongScriptedState = { state: 'match-active', maxParticipants: 2, participants: [p1.id || p1.name, p2.id || p2.name].filter(Boolean), startedAtMs: Date.now(), source };
   table.pingPongGame = {
     phase: 'approach', timer: 0, pointTimer: 0, targetScore: 5,
@@ -54716,22 +55020,29 @@ function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'mat
     source,
   };
   resetPingPongBallForServe(table.pingPongGame);
-  for (const [agent, spot, side, color] of [[p1, leftSpot, 'left', 0xf44336], [p2, rightSpot, 'right', 0x2196f3]]) {
-    setAgentTargetForExplicitObjectAction(agent, { x: spot.apiX, y: spot.apiZ, floor: spot.floor }, building, spot.floor);
+  for (const { agent, spot, side, slotId, color } of playerPlans) {
     agent._idleActivity = {
       kind: `pingpong-${side}`,
       phase: 'approach',
+      source: 'pingpong-runtime-table',
       buildingId,
       furnitureIndex: index,
+      objectKey,
+      reservationId,
+      activeUseId,
+      activeUseSlotId: slotId,
+      slotId,
       stayMs,
       faceAngle: spot.faceAngle,
       dockTarget: { x: spot.apiX, y: spot.apiZ },
       dockSnapRadius: 7,
       furnitureType: 'pingpong',
       spotId: spot.spotId,
-      action: 'life.playPingPong',
+      action: actionId,
+      actionId,
       animationId: 'play-pingpong',
-      lifecycle: { stationary: true, carryable: false, temporary: false, spawnsTemporary: true },
+      runtimePositionOwner: PING_PONG_RUNTIME_POSITION_OWNER,
+      lifecycle: { stationary: true, carryable: false, temporary: false, spawnsTemporary: true, runtimePositionOwner: PING_PONG_RUNTIME_POSITION_OWNER },
       spawnedItem: { label: 'Ping Pong Racket', catalogId: 'temporaryGameEquipment', temporary: true, carryable: true, attachPoint: 'right-hand' },
     };
     setPingPongRacket(agent, color, agent._idleActivity);
@@ -54750,11 +55061,31 @@ function endPingPongGame(table, reason = 'complete') {
   for (const id of ids) {
     const agent = agentsList.find(candidate => candidate?.id === id);
     clearPingPongRacket(agent);
-    if (agent?._idleActivity?.kind?.startsWith('pingpong-')) agent._idleActivity = null;
     if (agent) {
+      if (agent._idleActivity?.kind?.startsWith('pingpong-')) {
+        agent._idleActivity = { ...agent._idleActivity, phase: 'complete' };
+        releaseAgentIntent(agent, 'object-complete', {
+          releaseBy: 'object-complete',
+          phase: 'complete',
+          clearRoute: true,
+          clearLifecycle: true,
+          releaseSummary: 'ping-pong match ended and released table ownership',
+        });
+      } else if (isAgentIntentActive(agent._agentIntent) && agent._agentIntent?.object?.objectType === 'pingpong') {
+        releaseAgentIntent(agent, 'object-complete', {
+          releaseBy: 'object-complete',
+          phase: 'complete',
+          clearRoute: true,
+          clearLifecycle: true,
+          releaseSummary: 'ping-pong match ended and released table ownership',
+        });
+      }
+      releaseAgentRuntimeRouteLease(agent, 'pingpong-game-ended', 'idle');
       agent._schedPhase = reason === 'complete' ? 'pingpong-complete' : 'idle-local';
       agent._wanderTimer = 1400 + Math.random() * 2200;
       agent._stayTimer = 0;
+      agent._pingPongSide = null;
+      agent._pingPongPaddleColor = null;
     }
   }
   if (table) {
