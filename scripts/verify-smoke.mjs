@@ -281,7 +281,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260623-runtime-visual-state-r1',
+  'js/main3d.js?v=20260623-world-runtime-authority-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -583,12 +583,17 @@ for (const token of [
   'makeAgentRuntimeVisualState',
   'applyAgentRuntimeVisualState',
   'visualStateHash',
+  'runtime:worldObject',
+  'writeWorldObjectState',
+  'shouldBlockAgentRuntimeObjectAction',
+  'applyAgentRuntimeWorldObjectStatesToWorld',
+  'AGENT_RUNTIME_WORLD_OBJECT_TTL_MS',
   'makeAgentRuntimeClientOwner',
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
-  'agent-runtime-client.mjs?v=20260623-runtime-visual-state-r1',
+  'agent-runtime-client.mjs?v=20260623-world-runtime-authority-r1',
 ]) {
-  assert(`${main3dJs}\n${agentCharactersJs}`.includes(token), `Live Mode head indicator missing token: ${token}`);
+  assert(`${main3dJs}\n${agentCharactersJs}\n${agentRuntimeClientJs}`.includes(token), `Live Mode head indicator missing token: ${token}`);
 }
 for (const token of [
   'resolveRuntimeUrlForPage',

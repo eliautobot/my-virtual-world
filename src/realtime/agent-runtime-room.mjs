@@ -11,9 +11,12 @@ export const MAX_ROUTE_LEASE_TTL_MS = 60000;
 export const STALE_ROUTE_LEASE_SWEEP_MS = 1000;
 export const MAX_RUNTIME_EVENTS = 500;
 export const MAX_VISUAL_STATE_JSON_CHARS = 6000;
+export const MAX_WORLD_OBJECT_DATA_JSON_CHARS = 10000;
 
 const AGENT_ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const SAFE_TEXT_RE = /^[A-Za-z0-9_.:/@# -]{0,160}$/;
+const WORLD_OBJECT_KEY_RE = /^[A-Za-z0-9_.:/@# -]{1,160}$/;
+const ACTIVE_WORLD_OBJECT_STATES = new Set(['reserved', 'routing', 'active', 'using', 'occupied', 'queued', 'cooldown']);
 
 export class AgentRuntimeSnapshot extends Schema {
   constructor(seed = {}) {
@@ -61,6 +64,46 @@ defineTypes(AgentRuntimeSnapshot, {
   version: 'number',
 });
 
+export class WorldRuntimeObjectState extends Schema {
+  constructor(seed = {}) {
+    super();
+    this.objectKey = '';
+    this.owner = '';
+    this.objectType = '';
+    this.buildingId = '';
+    this.furnitureIndex = -1;
+    this.state = 'idle';
+    this.agentId = '';
+    this.actionId = '';
+    this.reservationId = '';
+    this.activeUseId = '';
+    this.slotId = '';
+    this.dataJson = '';
+    this.expiresAt = '';
+    this.updatedAt = '';
+    this.version = 0;
+    Object.assign(this, seed);
+  }
+}
+
+defineTypes(WorldRuntimeObjectState, {
+  objectKey: 'string',
+  owner: 'string',
+  objectType: 'string',
+  buildingId: 'string',
+  furnitureIndex: 'number',
+  state: 'string',
+  agentId: 'string',
+  actionId: 'string',
+  reservationId: 'string',
+  activeUseId: 'string',
+  slotId: 'string',
+  dataJson: 'string',
+  expiresAt: 'string',
+  updatedAt: 'string',
+  version: 'number',
+});
+
 export class AgentRuntimeState extends Schema {
   constructor(seed = {}) {
     super();
@@ -69,6 +112,7 @@ export class AgentRuntimeState extends Schema {
     this.updatedAt = new Date(0).toISOString();
     this.eventSeq = 0;
     this.agents = new MapSchema();
+    this.objects = new MapSchema();
     Object.assign(this, seed);
   }
 }
@@ -79,6 +123,7 @@ defineTypes(AgentRuntimeState, {
   updatedAt: 'string',
   eventSeq: 'number',
   agents: { map: AgentRuntimeSnapshot },
+  objects: { map: WorldRuntimeObjectState },
 });
 
 export function runtimeFilePath(dataDir = process.env.VW_DATA_DIR || '.local-data') {
@@ -90,12 +135,17 @@ export function stateToPlain(state, events = []) {
   for (const [agentId, agent] of state.agents.entries()) {
     agents[agentId] = snapshotToPlain(agent);
   }
+  const objects = {};
+  for (const [objectKey, object] of state.objects.entries()) {
+    objects[objectKey] = worldObjectToPlain(object);
+  }
   return {
     schemaVersion: AGENT_RUNTIME_SCHEMA_VERSION,
     worldId: state.worldId || 'default',
     updatedAt: state.updatedAt || new Date().toISOString(),
     eventSeq: Number(state.eventSeq || 0),
     agents,
+    objects,
     events: events.slice(-MAX_RUNTIME_EVENTS),
   };
 }
@@ -141,6 +191,36 @@ export function snapshotToPlain(agent) {
   return plain;
 }
 
+export function worldObjectToPlain(object) {
+  const plain = {
+    schemaVersion: AGENT_RUNTIME_SCHEMA_VERSION,
+    objectKey: object.objectKey,
+    owner: object.owner || '',
+    objectType: object.objectType || '',
+    buildingId: object.buildingId || '',
+    furnitureIndex: Number(object.furnitureIndex ?? -1),
+    state: object.state || 'idle',
+    agentId: object.agentId || '',
+    actionId: object.actionId || '',
+    reservationId: object.reservationId || '',
+    activeUseId: object.activeUseId || '',
+    slotId: object.slotId || '',
+    expiresAt: object.expiresAt || '',
+    updatedAt: object.updatedAt || '',
+    version: Number(object.version || 0),
+  };
+  if (object.dataJson) {
+    try {
+      plain.data = JSON.parse(object.dataJson);
+    } catch {
+      plain.data = null;
+    }
+  } else {
+    plain.data = null;
+  }
+  return plain;
+}
+
 export function readRuntimeDocument(dataDir = process.env.VW_DATA_DIR || '.local-data') {
   const file = runtimeFilePath(dataDir);
   if (!existsSync(file)) {
@@ -177,6 +257,7 @@ function emptyRuntimeDocument() {
     updatedAt: new Date(0).toISOString(),
     eventSeq: 0,
     agents: {},
+    objects: {},
     events: [],
   };
 }
@@ -196,6 +277,15 @@ function normalizeRuntimeDocument(raw) {
       // Drop malformed agent records while preserving the rest of the runtime file.
     }
   }
+  const rawObjects = raw.objects && typeof raw.objects === 'object' ? raw.objects : {};
+  for (const [objectKey, record] of Object.entries(rawObjects)) {
+    try {
+      const normalized = normalizeWorldObjectState({ ...record, objectKey });
+      doc.objects[normalized.objectKey] = normalized;
+    } catch {
+      // Drop malformed object records while preserving the rest of the runtime file.
+    }
+  }
   if (Array.isArray(raw.events)) {
     doc.events = raw.events.slice(-MAX_RUNTIME_EVENTS).filter((event) => event && typeof event === 'object');
   }
@@ -210,6 +300,9 @@ function stateFromDocument(doc) {
   });
   for (const snapshot of Object.values(doc.agents || {})) {
     state.agents.set(snapshot.agentId, schemaSnapshotFromPlain(snapshot));
+  }
+  for (const object of Object.values(doc.objects || {})) {
+    state.objects.set(object.objectKey, schemaWorldObjectFromPlain(object));
   }
   return state;
 }
@@ -232,6 +325,26 @@ function schemaSnapshotFromPlain(plain) {
     worldActionId: plain.worldActionId,
     leaseOwner: plain.leaseOwner,
     leaseExpiresAt: plain.leaseExpiresAt,
+    updatedAt: plain.updatedAt,
+    version: plain.version,
+  });
+}
+
+function schemaWorldObjectFromPlain(plain) {
+  return new WorldRuntimeObjectState({
+    objectKey: plain.objectKey,
+    owner: plain.owner,
+    objectType: plain.objectType,
+    buildingId: plain.buildingId,
+    furnitureIndex: plain.furnitureIndex,
+    state: plain.state,
+    agentId: plain.agentId,
+    actionId: plain.actionId,
+    reservationId: plain.reservationId,
+    activeUseId: plain.activeUseId,
+    slotId: plain.slotId,
+    dataJson: plain.data ? JSON.stringify(plain.data) : '',
+    expiresAt: plain.expiresAt,
     updatedAt: plain.updatedAt,
     version: plain.version,
   });
@@ -267,6 +380,47 @@ function normalizeSnapshot(raw, existing = null) {
     updatedAt: safeIso(raw.updatedAt, now),
     version: Math.max(0, Math.floor(numberOr(raw.version, existingPlain.version || 0))),
   };
+}
+
+function normalizeWorldObjectState(raw, existing = null) {
+  if (!raw || typeof raw !== 'object') {
+    throw apiError('invalid_payload', 'world object payload must be an object');
+  }
+  const existingPlain = existing ? worldObjectToPlain(existing) : {};
+  const objectKey = normalizeWorldObjectKey(raw.objectKey || existingPlain.objectKey);
+  const now = new Date().toISOString();
+  const data = Object.hasOwn(raw, 'data') ? normalizeWorldObjectData(raw.data) : (existingPlain.data || null);
+  return {
+    schemaVersion: AGENT_RUNTIME_SCHEMA_VERSION,
+    objectKey,
+    owner: safeText(raw.owner, existingPlain.owner || ''),
+    objectType: safeText(raw.objectType, existingPlain.objectType || ''),
+    buildingId: safeText(raw.buildingId, existingPlain.buildingId || ''),
+    furnitureIndex: raw.furnitureIndex === '' || raw.furnitureIndex === null || raw.furnitureIndex === undefined
+      ? -1
+      : Math.max(-1, Math.floor(numberOr(raw.furnitureIndex, existingPlain.furnitureIndex ?? -1))),
+    state: safeText(raw.state, existingPlain.state || 'idle'),
+    agentId: safeText(raw.agentId, existingPlain.agentId || ''),
+    actionId: safeText(raw.actionId, existingPlain.actionId || ''),
+    reservationId: safeText(raw.reservationId, existingPlain.reservationId || ''),
+    activeUseId: safeText(raw.activeUseId, existingPlain.activeUseId || ''),
+    slotId: safeText(raw.slotId, existingPlain.slotId || ''),
+    data,
+    expiresAt: raw.expiresAt === '' ? '' : safeIso(raw.expiresAt, existingPlain.expiresAt || ''),
+    updatedAt: safeIso(raw.updatedAt, now),
+    version: Math.max(0, Math.floor(numberOr(raw.version, existingPlain.version || 0))),
+  };
+}
+
+function normalizeWorldObjectData(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const normalized = sanitizeVisualValue(value, 0);
+  if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) return null;
+  const json = JSON.stringify(normalized);
+  if (json.length > MAX_WORLD_OBJECT_DATA_JSON_CHARS) {
+    throw apiError('invalid_world_object_data', 'world object data is too large');
+  }
+  return normalized;
 }
 
 function normalizeVisualState(value) {
@@ -324,6 +478,14 @@ function normalizeAgentId(agentId) {
   const value = String(agentId || '').trim();
   if (!AGENT_ID_RE.test(value)) {
     throw apiError('invalid_agent_id', 'agentId must be 1-80 letters, numbers, dots, colons, underscores, or hyphens');
+  }
+  return value;
+}
+
+function normalizeWorldObjectKey(objectKey) {
+  const value = String(objectKey || '').trim();
+  if (!WORLD_OBJECT_KEY_RE.test(value)) {
+    throw apiError('invalid_object_key', 'objectKey must be 1-160 safe characters');
   }
   return value;
 }
@@ -386,6 +548,13 @@ function hasExpiredLease(agent, nowMs = Date.now()) {
   return !Number.isFinite(expires) || expires <= nowMs;
 }
 
+function hasActiveWorldObjectState(object, nowMs = Date.now()) {
+  if (!object || !ACTIVE_WORLD_OBJECT_STATES.has(String(object.state || '').toLowerCase())) return false;
+  if (!object.expiresAt) return true;
+  const expires = Date.parse(object.expiresAt);
+  return Number.isFinite(expires) && expires > nowMs;
+}
+
 function leaseTtlMs(value) {
   const ttl = Math.floor(numberOr(value, DEFAULT_ROUTE_LEASE_TTL_MS));
   return Math.min(MAX_ROUTE_LEASE_TTL_MS, Math.max(1000, ttl));
@@ -404,6 +573,7 @@ export class AgentRuntimeRoom extends Room {
     this.setState(stateFromDocument(doc));
 
     this.onMessage('runtime:snapshot', (client, message) => this.handleSnapshot(client, message));
+    this.onMessage('runtime:worldObject', (client, message) => this.handleWorldObject(client, message));
     this.onMessage('runtime:claimRoute', (client, message) => this.handleClaimRoute(client, message));
     this.onMessage('runtime:heartbeat', (client, message) => this.handleHeartbeat(client, message));
     this.onMessage('runtime:releaseRoute', (client, message) => this.handleReleaseRoute(client, message));
@@ -442,6 +612,34 @@ export class AgentRuntimeRoom extends Room {
       }
       const agent = this.upsertSnapshot(raw, 'snapshot');
       this.ack(client, message, 'runtime:snapshot', agent);
+    });
+  }
+
+  handleWorldObject(client, message = {}) {
+    this.withErrors(client, message, 'runtime:worldObject', () => {
+      const raw = message.object && typeof message.object === 'object' ? message.object : message;
+      const objectKey = normalizeWorldObjectKey(raw.objectKey);
+      const existing = this.state.objects.get(objectKey);
+      const nextOwner = safeText(raw.owner, client.sessionId || '');
+      const nextAgentId = safeText(raw.agentId, '');
+      if (existing && hasActiveWorldObjectState(existing)) {
+        const existingPlain = worldObjectToPlain(existing);
+        const sameOwner = nextOwner && existingPlain.owner && nextOwner === existingPlain.owner;
+        const sameAgent = nextAgentId && existingPlain.agentId && nextAgentId === existingPlain.agentId;
+        const nextState = safeText(raw.state, existingPlain.state || '');
+        const nextActive = ACTIVE_WORLD_OBJECT_STATES.has(String(nextState || '').toLowerCase());
+        if (nextActive && !sameOwner && !sameAgent) {
+          throw apiError('object_state_conflict', 'world object is active in another runtime owner', {
+            objectKey,
+            owner: existingPlain.owner || '',
+            agentId: existingPlain.agentId || '',
+            state: existingPlain.state || '',
+            expiresAt: existingPlain.expiresAt || '',
+          });
+        }
+      }
+      const object = this.upsertWorldObject(raw, 'world-object-updated');
+      this.ackWorldObject(client, message, 'runtime:worldObject', object);
     });
   }
 
@@ -567,6 +765,19 @@ export class AgentRuntimeRoom extends Room {
     return { agent, event };
   }
 
+  upsertWorldObject(raw, eventType, extra = {}) {
+    const existing = this.state.objects.get(raw.objectKey);
+    const normalized = normalizeWorldObjectState(raw, existing || null);
+    normalized.version = Number(existing?.version || 0) + 1;
+    normalized.updatedAt = new Date().toISOString();
+    const object = schemaWorldObjectFromPlain(normalized);
+    this.state.objects.set(object.objectKey, object);
+    this.state.updatedAt = normalized.updatedAt;
+    const event = this.recordEvent(eventType, object.objectKey, worldObjectToPlain(object), extra);
+    writeRuntimeDocument(this.dataDir, this.state, this.events);
+    return { object, event };
+  }
+
   recordEvent(type, agentId, snapshot, extra = {}) {
     this.state.eventSeq = Number(this.state.eventSeq || 0) + 1;
     const event = {
@@ -590,6 +801,17 @@ export class AgentRuntimeRoom extends Room {
       ok: true,
       agentId: result.agent.agentId,
       snapshot: snapshotToPlain(result.agent),
+      event: result.event,
+    });
+  }
+
+  ackWorldObject(client, message, type, result) {
+    client.send('runtime:ack', {
+      requestId: requestIdFrom(message),
+      type,
+      ok: true,
+      objectKey: result.object.objectKey,
+      object: worldObjectToPlain(result.object),
       event: result.event,
     });
   }

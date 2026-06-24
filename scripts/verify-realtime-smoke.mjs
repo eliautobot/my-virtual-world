@@ -134,6 +134,42 @@ async function run() {
     assert.equal(snapshotAck.snapshot.visualState.status, 'idle');
     await waitForAgent(room, 'adam', (agent) => agent.x === 3.5 && agent.y === 4.25 && agent.visualStateJson.includes('agent-runtime-visual/v1'));
 
+    room.send('runtime:worldObject', {
+      requestId: 'object-1',
+      objectKey: 'office:furniture:19:countertopCoffeeMachine',
+      owner: 'main3d-world-runtime:smoke-client-a',
+      objectType: 'countertopCoffeeMachine',
+      buildingId: 'office',
+      furnitureIndex: 19,
+      state: 'active',
+      agentId: 'adam',
+      actionId: 'food.getCoffee',
+      reservationId: 'coffee-res-1',
+      activeUseId: 'coffee-active-1',
+      slotId: 'use-front',
+      expiresAt: new Date(Date.now() + 10000).toISOString(),
+      data: {
+        reservation: { id: 'coffee-res-1', agentId: 'adam', status: 'held', slotId: 'use-front' },
+        activeUse: { id: 'coffee-active-1', state: 'active', agentId: 'adam', interactionSpotId: 'use-front' },
+        activity: { kind: 'coffee-machine-brew', phase: 'active', objectKey: 'office:furniture:19:countertopCoffeeMachine' },
+      },
+    });
+    const objectAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'object-1');
+    assert.equal(objectAck.object.objectKey, 'office:furniture:19:countertopCoffeeMachine');
+    assert.equal(objectAck.object.data.activeUse.state, 'active');
+
+    room.send('runtime:worldObject', {
+      requestId: 'object-conflict',
+      objectKey: 'office:furniture:19:countertopCoffeeMachine',
+      owner: 'main3d-world-runtime:smoke-client-b',
+      state: 'active',
+      agentId: 'beth',
+      expiresAt: new Date(Date.now() + 10000).toISOString(),
+      data: { activeUse: { state: 'active', agentId: 'beth' } },
+    });
+    const objectConflict = await waitForRoomMessage(room, 'runtime:error', (msg) => msg.requestId === 'object-conflict');
+    assert.equal(objectConflict.code, 'object_state_conflict');
+
     room.send('runtime:claimRoute', {
       requestId: 'claim-1',
       agentId: 'adam',
@@ -259,6 +295,9 @@ async function run() {
     assert.equal(resumedAgent.state, 'idle');
     assert(resumedAgent.visualStateJson.includes('Coffee Drink'));
     assert(resumedAgent.visualStateJson.includes('"activityActive":false'));
+    const resumedObject = resumedRoom.state?.objects?.get?.('office:furniture:19:countertopCoffeeMachine');
+    assert.equal(resumedObject?.state, 'active');
+    assert(resumedObject?.dataJson.includes('coffee-active-1'));
     await resumedRoom.leave(true);
 
     console.log('realtime smoke ok');

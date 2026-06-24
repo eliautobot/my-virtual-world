@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-runtime-visual-state-r1';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-world-runtime-authority-r1';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1104,6 +1104,8 @@ const AGENT_RUNTIME_POSITION_WRITER_STALE_MS = 7000;
 const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 850;
 const AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE = API_TILE * 6;
 const AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE = 0.05;
+const AGENT_RUNTIME_WORLD_OBJECT_TTL_MS = 15000;
+const AGENT_RUNTIME_WORLD_OBJECT_COOLDOWN_MS = 8000;
 let editMode = null;
 
 // ── Feature 1: Vehicles ──────────────────────────────────────────────
@@ -1262,6 +1264,211 @@ function getAgentRuntimeFloorBuilding(agent, snapshot) {
   return getMovementInteriorBuildingAt(agent.x, agent.y);
 }
 
+function agentRuntimePlainObject(value, fallback = null) {
+  if (!value || typeof value !== 'object') return fallback;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return fallback;
+  }
+}
+
+function getAgentRuntimeFurnitureObjectKey(buildingId, furnitureIndex, furnitureType = 'object') {
+  const bid = String(buildingId || 'building').trim() || 'building';
+  const index = Number.isFinite(Number(furnitureIndex)) ? Number(furnitureIndex) : 'unknown';
+  const type = String(furnitureType || 'object').trim() || 'object';
+  if (type === 'couch') return getCouchObjectKey(bid, index);
+  if (type === 'chair' || type === 'officeChair') return getChairObjectKey(bid, index);
+  if (type === 'loveseat') return getLoveseatObjectKey(bid, index);
+  if (type === 'sectionalSofa') return getSectionalSofaObjectKey(bid, index);
+  if (type === 'armchair') return getArmchairObjectKey(bid, index);
+  if (type === 'diningChair') return getDiningChairObjectKey(bid, index);
+  if (type === 'barStool') return getBarStoolObjectKey(bid, index);
+  if (type === 'patioChair') return getPatioChairObjectKey(bid, index);
+  if (type === 'smallCafeTable') return getSmallCafeTableObjectKey(bid, index);
+  if (type === 'outdoorCafeTable') return getOutdoorCafeTableObjectKey(bid, index);
+  if (type === 'picnicTable') return getPicnicTableObjectKey(bid, index);
+  if (type === 'smallRoundMeetingTable') return getSmallRoundMeetingTableObjectKey(bid, index);
+  if (type === 'hallwayBench') return getHallwayBenchObjectKey(bid, index);
+  if (type === 'treadmill') return getTreadmillObjectKey(bid, index);
+  if (type === 'trainingMat') return getTrainingMatObjectKey(bid, index);
+  if (type === 'gymBench') return getGymBenchObjectKey(bid, index);
+  if (type === 'outdoorExerciseStation') return getOutdoorExerciseStationObjectKey(bid, index);
+  if (type === 'playgroundSlide') return getPlaygroundSlideObjectKey(bid, index);
+  if (type === 'arcadeMachine') return getArcadeMachineObjectKey(bid, index);
+  return `${bid}:furniture:${index}:${type}`;
+}
+
+function getAgentRuntimeObjectKeyFromMeta(meta = {}, target = null, building = null) {
+  const explicit = target?.objectKey || meta.objectKey || meta.activeUseObjectKey || meta.reservationObjectKey;
+  if (explicit) return String(explicit).trim();
+  const buildingId = meta.buildingId || target?.buildingId || building?.id || '';
+  const furnitureIndex = meta.furnitureIndex ?? target?.furnitureIndex;
+  const objectType = meta.objectType || target?.objectType || target?.catalogKey || target?.catalogId || meta.furniture?.type || '';
+  if (buildingId && furnitureIndex != null) return getAgentRuntimeFurnitureObjectKey(buildingId, furnitureIndex, objectType || 'object');
+  const objectId = meta.objectId || target?.objectId || target?.objectInstanceId || '';
+  return objectId ? String(objectId).trim() : '';
+}
+
+function getAgentRuntimeActivityObjectKey(activity = null) {
+  if (!activity || typeof activity !== 'object') return '';
+  if (activity.objectKey) return String(activity.objectKey).trim();
+  if (activity.buildingId && activity.furnitureIndex != null) {
+    return getAgentRuntimeFurnitureObjectKey(activity.buildingId, activity.furnitureIndex, activity.furnitureType || activity.objectType || 'object');
+  }
+  return '';
+}
+
+function getAgentRuntimeWorldObjectState(objectKey = '') {
+  const key = String(objectKey || '').trim();
+  return key && _agentRuntimeClient?.connected ? _agentRuntimeClient.getWorldObjectState?.(key) || null : null;
+}
+
+function isAgentRuntimeWorldObjectStateFresh(objectState = null) {
+  if (!objectState) return false;
+  if (!objectState.expiresAt) return true;
+  const expiresAt = Date.parse(objectState.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
+}
+
+function isAgentRuntimeWorldObjectStateBlocking(objectState = null, agent = null) {
+  if (!objectState || !isAgentRuntimeWorldObjectStateFresh(objectState)) return false;
+  const state = String(objectState.state || '').toLowerCase();
+  const blockingStates = new Set(['reserved', 'routing', 'active', 'using', 'occupied', 'queued', 'cooldown']);
+  if (!blockingStates.has(state)) return false;
+  const agentId = getAgentRuntimeAgentId(agent);
+  if (agentId && objectState.agentId && String(objectState.agentId) === agentId) return false;
+  const ownerToken = getAgentRuntimeSnapshotOwnerToken(objectState);
+  if (ownerToken && _agentRuntimeClient?.leaseOwner && ownerToken === _agentRuntimeClient.leaseOwner) return false;
+  return true;
+}
+
+function shouldBlockAgentRuntimeObjectAction(agent, objectKey = '') {
+  const objectState = getAgentRuntimeWorldObjectState(objectKey);
+  if (!isAgentRuntimeWorldObjectStateBlocking(objectState, agent)) return { blocked: false, objectState };
+  return {
+    blocked: true,
+    reason: 'runtime-world-object-active',
+    objectKey,
+    objectState,
+  };
+}
+
+function resolveAgentRuntimeWorldObjectTarget(objectState = null) {
+  if (!objectState?.buildingId || objectState.furnitureIndex == null || Number(objectState.furnitureIndex) < 0) {
+    return { building: null, furniture: null };
+  }
+  const building = buildingsMap.get(objectState.buildingId) || null;
+  const furniture = building?.interior?.furniture?.[Number(objectState.furnitureIndex)] || null;
+  return { building, furniture };
+}
+
+function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
+  if (!objectState?.objectKey) return false;
+  const { furniture } = resolveAgentRuntimeWorldObjectTarget(objectState);
+  if (!furniture) return false;
+  if (furniture._runtimeWorldObjectVersion && Number(furniture._runtimeWorldObjectVersion) > Number(objectState.version || 0)) {
+    return false;
+  }
+  const data = objectState.data || {};
+  furniture._runtimeWorldObjectState = objectState;
+  furniture._runtimeWorldObjectVersion = Number(objectState.version || 0);
+  furniture._runtimeWorldObjectUpdatedAt = objectState.updatedAt || '';
+  if (data.reservation && typeof data.reservation === 'object') {
+    furniture.reservation = { ...(furniture.reservation || {}), ...data.reservation, runtimeWorldObject: true };
+  }
+  if (data.activeUse && typeof data.activeUse === 'object') {
+    furniture.activeUse = { ...(furniture.activeUse || {}), ...data.activeUse, runtimeWorldObject: true };
+  }
+  const state = String(objectState.state || '').toLowerCase();
+  if (state === 'idle' && data.clearReservation === true) furniture.reservation = null;
+  return true;
+}
+
+function applyAgentRuntimeWorldObjectStatesToWorld() {
+  if (!_agentRuntimeClient?.connected) return 0;
+  let applied = 0;
+  for (const objectState of _agentRuntimeClient.worldObjects.values()) {
+    if (applyAgentRuntimeWorldObjectStateToWorld(objectState)) applied++;
+  }
+  return applied;
+}
+
+function getAgentRuntimeObjectActivityState(agent, state = 'idle') {
+  const activity = agent?._idleActivity || null;
+  const phase = String(activity?.phase || '').toLowerCase();
+  const routeState = String(state || '').toLowerCase();
+  if (['active', 'using', 'docked'].includes(phase)) return 'active';
+  if (['approach', 'reserved', 'ready', 'routing'].includes(phase) || ['routing', 'moving'].includes(routeState)) return 'routing';
+  if (['complete', 'completed', 'released'].includes(phase)) return 'cooldown';
+  if (agent?._wanderTarget) return 'routing';
+  return activity ? 'reserved' : 'idle';
+}
+
+function makeAgentRuntimeWorldObjectStateForAgent(agent, state = 'idle') {
+  const activity = agent?._idleActivity || null;
+  if (!activity || typeof activity !== 'object') return null;
+  const objectKey = getAgentRuntimeActivityObjectKey(activity);
+  if (!objectKey) return null;
+  const building = activity.buildingId ? buildingsMap.get(activity.buildingId) || null : null;
+  const furniture = building && activity.furnitureIndex != null ? building.interior?.furniture?.[Number(activity.furnitureIndex)] || null : null;
+  const objectState = getAgentRuntimeObjectActivityState(agent, state);
+  const now = Date.now();
+  const active = ['reserved', 'routing', 'active', 'using', 'occupied', 'queued'].includes(objectState);
+  const expiresAt = new Date(now + (active ? AGENT_RUNTIME_WORLD_OBJECT_TTL_MS : AGENT_RUNTIME_WORLD_OBJECT_COOLDOWN_MS)).toISOString();
+  const reservation = agentRuntimePlainObject(furniture?.reservation, null);
+  const activeUse = agentRuntimePlainObject(furniture?.activeUse, null);
+  const activityState = makeAgentRuntimeVisualActivity(agent);
+  return {
+    objectKey,
+    owner: makeAgentRuntimeClientOwner('main3d-world-runtime'),
+    objectType: activity.furnitureType || furniture?.type || activity.objectType || '',
+    buildingId: activity.buildingId || '',
+    furnitureIndex: Number.isFinite(Number(activity.furnitureIndex)) ? Number(activity.furnitureIndex) : -1,
+    state: objectState,
+    agentId: getAgentRuntimeAgentId(agent),
+    actionId: activity.actionId || activity.action || reservation?.actionId || activeUse?.actionId || '',
+    reservationId: activity.reservationId || reservation?.id || reservation?.reservationId || '',
+    activeUseId: activity.activeUseId || activeUse?.id || '',
+    slotId: activity.activeUseSlotId || activity.slotId || activity.seatId || activity.spotId || activeUse?.activeUseSlotId || reservation?.slotId || '',
+    expiresAt,
+    data: {
+      activity: activityState,
+      reservation,
+      activeUse,
+      anchor: {
+        x: Number(agent?.x || 0),
+        y: Number(agent?.y || 0),
+        floor: Math.max(1, Number(agent?._floor || agent?._targetFloor || 1) || 1),
+        heading: Number(agent?._group3d?.rotation?.y || 0),
+      },
+      writer: _agentRuntimeClient?.leaseOwner || '',
+    },
+  };
+}
+
+function publishAgentRuntimeWorldObjectStateForAgent(agent, state = 'idle', { force = false } = {}) {
+  if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || agent?._runtimeObserverOnly) return null;
+  const objectState = makeAgentRuntimeWorldObjectStateForAgent(agent, state);
+  if (!objectState) return null;
+  const hash = getAgentRuntimeVisualStateHash(objectState);
+  const last = agent._runtimeWorldObjectPublish || null;
+  if (!force && last?.objectKey === objectState.objectKey && last.hash === hash && Date.now() - Number(last.atMs || 0) < AGENT_RUNTIME_ROUTE_HEARTBEAT_INTERVAL_MS) {
+    return null;
+  }
+  agent._runtimeWorldObjectPublish = { objectKey: objectState.objectKey, hash, atMs: Date.now(), state: objectState.state };
+  return _agentRuntimeClient.writeWorldObjectState(objectState, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
+    .then(ack => {
+      agent._runtimeWorldObjectPublish = { ...agent._runtimeWorldObjectPublish, ackAtMs: Date.now(), version: ack?.object?.version || null };
+      return ack;
+    })
+    .catch(error => {
+      agent._runtimeWorldObjectPublish = { ...agent._runtimeWorldObjectPublish, failedAtMs: Date.now(), error: error?.message || String(error), code: error?.code || null };
+      updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'world-object-state-failed', ok: false, error: error?.message || String(error), code: error?.code || null });
+      return null;
+    });
+}
+
 function agentRuntimeVisualText(value, maxLength = 120) {
   if (value === null || value === undefined) return '';
   return String(value).trim().slice(0, maxLength);
@@ -1325,6 +1532,8 @@ function makeAgentRuntimeVisualActivity(agent) {
   const activity = agent?._idleActivity || null;
   if (!activity || typeof activity !== 'object') return null;
   const out = {};
+  const objectKey = getAgentRuntimeActivityObjectKey(activity);
+  if (objectKey) out.objectKey = objectKey;
   [
     'kind',
     'phase',
@@ -1682,6 +1891,7 @@ function subscribeAgentRuntimeSnapshots() {
   if (!_agentRuntimeClient?.connected) return;
   if (_agentRuntimeUnsubscribe) _agentRuntimeUnsubscribe();
   _agentRuntimeUnsubscribe = _agentRuntimeClient.onSnapshots((snapshots, meta = {}) => {
+    applyAgentRuntimeWorldObjectStatesToWorld();
     const hydrated = applyAgentRuntimeSnapshotsToAgents(meta.source || 'runtime:update', { updateVisible: true });
     if (hydrated > 0) updateAgentList();
   });
@@ -1915,6 +2125,7 @@ function maybeSendAgentRuntimeRouteHeartbeat(agent, state = 'routing', { force =
   const now = Date.now();
   if (!force && now - Number(lease.lastHeartbeatAtMs || 0) < AGENT_RUNTIME_ROUTE_HEARTBEAT_INTERVAL_MS) return null;
   lease.lastHeartbeatAtMs = now;
+  publishAgentRuntimeWorldObjectStateForAgent(agent, state, { force });
   const request = _agentRuntimeClient.heartbeat({
     ...makeAgentRuntimePositionPayload(agent, state, {
       mode: lease.runtimeMode || 'scripted',
@@ -1955,6 +2166,7 @@ function releaseAgentRuntimeRouteLease(agent, reason = 'arrived', state = 'idle'
   if (!['owned', 'releasing', 'heartbeat-failed'].includes(lease.state)) return null;
   agent._runtimeRouteLease = { ...lease, state: 'releasing', releaseReason: reason };
   updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'release-pending', reason, releaseState: state });
+  publishAgentRuntimeWorldObjectStateForAgent(agent, state, { force: true });
   const finish = () => _agentRuntimeClient.releaseRoute({
     agentId: getAgentRuntimeAgentId(agent),
     routeId: lease.routeId,
@@ -2056,6 +2268,7 @@ function publishAgentRuntimeMovementSnapshot(agent, state = 'idle', options = {}
     leaseExpiresAt: '',
     visualState,
   });
+  publishAgentRuntimeWorldObjectStateForAgent(agent, state, { force: options.force === true });
   return _agentRuntimeClient.writeSnapshot(payload, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
     .then(ack => {
       agent._runtimeSnapshotPublish = { ...publishRecord, ackAtMs: Date.now(), version: ack?.snapshot?.version || null };
@@ -8905,6 +9118,7 @@ function releaseAgentIntent(agent, reason = 'released', options = {}) {
     intent.debug.objectAssignmentRelease = objectRelease;
     intent.debug.releaseSummary = `${intent.debug.releaseSummary}; object assignment released`;
   }
+  publishAgentRuntimeWorldObjectStateForAgent(agent, terminalPhase === 'complete' || reason === 'object-complete' ? 'idle' : terminalPhase, { force: true });
   if (options.clearRoute !== false) {
     agent._wanderTarget = null;
     agent._waypointPath = null;
@@ -8984,14 +9198,77 @@ function getExplicitObjectActionMetadata(agent, target = null, building = null, 
   const objectType = metadata.objectType || target?.objectType || target?.catalogKey || target?.catalogId || furniture?.type || null;
   const actionId = metadata.actionId || target?.actionId || target?.apiActionId || target?.uiActionId || furniture?.reservation?.actionId || furniture?.activeUse?.actionId || `object-action:${objectType || 'object'}`;
   const objectId = metadata.objectId || target?.objectId || target?.objectInstanceId || (buildingId && objectType && furnitureIndex != null ? `${buildingId}-${objectType}-${furnitureIndex}` : null);
+  const objectKey = getAgentRuntimeObjectKeyFromMeta({ ...metadata, buildingId, furnitureIndex, objectType, objectId, furniture }, target, building);
   const spotId = metadata.spotId || target?.spotId || target?.interactionSpotId || target?.activationSpotId || target?.routeSpotId || furniture?.reservation?.spotId || furniture?.activeUse?.interactionSpotId || null;
   const reservationId = metadata.reservationId || target?.reservationId || furniture?.reservation?.reservationId || furniture?.reservation?.id || (objectId ? `reservation:${objectId}:${actionId}:${getAgentDebugId(agent)}` : null);
   const activeUseId = metadata.activeUseId || target?.activeUseId || furniture?.activeUse?.id || (objectId ? `active-use:${objectId}:${actionId}:${getAgentDebugId(agent)}` : null);
-  return { buildingId, furnitureIndex, furniture, objectType, actionId, objectId, spotId, reservationId, activeUseId };
+  return { buildingId, furnitureIndex, furniture, objectType, actionId, objectId, objectKey, spotId, reservationId, activeUseId };
 }
 
 function setAgentTargetForExplicitObjectAction(agent, target, building = null, floor = null, metadata = {}) {
   const objectMeta = getExplicitObjectActionMetadata(agent, target, building, metadata);
+  const runtimeObjectBlock = shouldBlockAgentRuntimeObjectAction(agent, objectMeta.objectKey);
+  if (runtimeObjectBlock.blocked) {
+    const attemptedIntent = createAgentIntent(agent, {
+      owner: metadata.owner || 'object-action',
+      priorityName: metadata.priorityName || 'explicit-object',
+      target: target || null,
+      building,
+      floor,
+      object: {
+        type: metadata.objectKind || (target?.targetKind === 'outdoor-node' ? 'outdoor-node' : 'furniture'),
+        id: objectMeta.objectId,
+        objectKey: objectMeta.objectKey,
+        buildingId: objectMeta.buildingId,
+        furnitureIndex: objectMeta.furnitureIndex,
+        objectType: objectMeta.objectType,
+        actionId: objectMeta.actionId,
+        spotId: objectMeta.spotId,
+        reservationId: objectMeta.reservationId,
+        activeUseId: objectMeta.activeUseId,
+      },
+      source: { family: 'runtime-world-object', functionName: 'setAgentTargetForExplicitObjectAction' },
+      debug: {
+        lastAdmissionDecision: 'rejected',
+        lastDecisionReason: runtimeObjectBlock.reason,
+        runtimeObjectState: runtimeObjectBlock.objectState,
+      },
+    });
+    agent._lastBlockedIntentOverride = {
+      accepted: false,
+      reason: runtimeObjectBlock.reason,
+      objectKey: objectMeta.objectKey,
+      runtimeObjectState: runtimeObjectBlock.objectState,
+      blockedAtMs: Date.now(),
+    };
+    const cleanupBlockedLocalObjectUse = () => {
+      const activity = agent?._idleActivity || null;
+      const activityObjectKey = getAgentRuntimeActivityObjectKey(activity);
+      const matchesActivity = activity && (
+        activityObjectKey === objectMeta.objectKey ||
+        (activity.buildingId === objectMeta.buildingId && Number(activity.furnitureIndex) === Number(objectMeta.furnitureIndex))
+      );
+      if (matchesActivity) {
+        releaseObjectAssignmentForAgentActivity(agent, activity, 'runtime-world-object-active');
+        agent._idleActivity = null;
+      } else if (objectMeta.furniture) {
+        releaseObjectAssignmentForAgentIntent(agent, attemptedIntent, 'runtime-world-object-active');
+      }
+      agent._wanderTarget = null;
+      agent._waypointPath = null;
+      agent._waypointPathTarget = null;
+      agent._waypointPathIdx = 0;
+    };
+    cleanupBlockedLocalObjectUse();
+    setTimeout(cleanupBlockedLocalObjectUse, 0);
+    return {
+      accepted: false,
+      reason: runtimeObjectBlock.reason,
+      attemptedIntent,
+      activeIntent: agent?._agentIntent || null,
+      runtimeObjectState: runtimeObjectBlock.objectState,
+    };
+  }
   const owner = metadata.owner || 'object-action';
   const priorityName = metadata.priorityName || (owner === 'user' || owner === 'manual' || owner === 'verifier' ? 'manual' : 'explicit-object');
   const enrichedTarget = {
@@ -8999,6 +9276,7 @@ function setAgentTargetForExplicitObjectAction(agent, target, building = null, f
     targetKind: target?.targetKind || metadata.targetKind || 'placed-object',
     buildingId: objectMeta.buildingId,
     furnitureIndex: objectMeta.furnitureIndex,
+    objectKey: objectMeta.objectKey,
     objectId: objectMeta.objectId,
     objectInstanceId: target?.objectInstanceId || objectMeta.objectId,
     objectType: objectMeta.objectType,
@@ -9020,6 +9298,7 @@ function setAgentTargetForExplicitObjectAction(agent, target, building = null, f
     object: {
       type: metadata.objectKind || (enrichedTarget.targetKind === 'outdoor-node' ? 'outdoor-node' : 'furniture'),
       id: objectMeta.objectId,
+      objectKey: objectMeta.objectKey,
       buildingId: objectMeta.buildingId,
       furnitureIndex: objectMeta.furnitureIndex,
       objectType: objectMeta.objectType,
@@ -29317,6 +29596,7 @@ async function loadAgents() {
     });
 
     await runtimeClientPromise;
+    applyAgentRuntimeWorldObjectStatesToWorld();
     applyAgentRuntimeSnapshotsToAgents('loadAgents', { updateVisible: false });
 
     agentsList.forEach(a => {

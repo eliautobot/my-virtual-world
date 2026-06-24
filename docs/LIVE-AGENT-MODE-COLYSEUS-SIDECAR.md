@@ -73,12 +73,40 @@ The room stores a map of agent snapshots:
 }
 ```
 
+The room also stores a generic map of world object states. This is the first
+runtime authority layer for object/activity state that must not run separately
+in every browser:
+
+```json
+{
+  "objectKey": "office:furniture:19:countertopCoffeeMachine",
+  "owner": "main3d-world-runtime:main3d-session",
+  "objectType": "countertopCoffeeMachine",
+  "buildingId": "office",
+  "furnitureIndex": 19,
+  "state": "active",
+  "agentId": "adam",
+  "actionId": "food.getCoffee",
+  "reservationId": "coffee-res-1",
+  "activeUseId": "coffee-active-1",
+  "slotId": "use-front",
+  "data": {
+    "reservation": { "id": "coffee-res-1", "agentId": "adam", "status": "held" },
+    "activeUse": { "id": "coffee-active-1", "state": "active", "agentId": "adam" }
+  },
+  "expiresAt": "2026-06-23T18:00:10.000Z",
+  "updatedAt": "2026-06-23T18:00:00.000Z",
+  "version": 1
+}
+```
+
 ## Colyseus Messages
 
 Client to server:
 
 ```text
 runtime:snapshot
+runtime:worldObject
 runtime:claimRoute
 runtime:heartbeat
 runtime:releaseRoute
@@ -101,6 +129,8 @@ Lease rules:
 - releasing a route clears the lease and persists the final runtime snapshot
 - stale leases are automatically expired after their TTL
 - plain snapshots cannot overwrite an active route lease owned by another browser
+- active object states reject active overwrites from another owner/agent until
+  the object state expires or moves to a non-active state
 
 ## Local Development
 
@@ -272,12 +302,37 @@ Coherence rule:
 
 This closes the split-world problem where a scripted agent could stand in different places in different browser instances and then collide inconsistently with a Live Mode agent.
 
+## World Runtime Authority Slice
+
+The world runtime authority child PR starts moving object interaction state into
+Colyseus. The browser still renders and still uses the existing object-use code,
+but it now publishes and observes generic world object state:
+
+- object reservations
+- active-use state
+- activity kind/phase
+- object slot/seat ids
+- agent ownership
+- short-lived active/cooldown expiry
+
+Before a browser starts an explicit object route, it checks the Colyseus object
+state. If another fresh owner/agent is already using or cooling down that
+object, the local route admission is rejected instead of starting a duplicate
+parallel interaction.
+
+This is not the final online-game architecture yet. It is the first shared
+object authority layer. The same pattern should be extended to traffic,
+server-side timers, and broader world events until browsers are renderers of one
+persistent runtime world instead of independent simulations.
+
 ## Next PRs
 
 The sidecar parent PR starts the runtime server. The hydration child PR changes initial/observed placement. The route-heartbeat child PR proves route claim/heartbeat/release. The visible persistence child PR wires ordinary route movement and stale-lease recovery into that runtime.
 
 Follow-up work:
 
-- richer observer interpolation from Colyseus state
+- shared object-state coverage for more non-explicit ambient lifecycle paths
+- shared traffic/light/vehicle state from Colyseus
+- server-side runtime ticks for timers and cooldown expiry
 - promotion from runtime-coherent Live Mode controls to behavior ownership
 - promotion from manual route trigger to real planner/model route requests
