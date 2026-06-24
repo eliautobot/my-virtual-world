@@ -1261,7 +1261,14 @@ function isAgentRuntimeSnapshotFresh(snapshot = null, maxAgeMs = AGENT_RUNTIME_P
 
 function isAgentRuntimeSnapshotRemoteWriterActive(snapshot = null) {
   if (!snapshot || String(snapshot.mode || '') === 'live') return false;
-  return isAgentRuntimeSnapshotOwnerAnotherClient(snapshot) && isAgentRuntimeSnapshotFresh(snapshot);
+  if (!isAgentRuntimeSnapshotOwnerAnotherClient(snapshot) || !isAgentRuntimeSnapshotFresh(snapshot)) return false;
+  const owner = String(snapshot.owner || '');
+  const state = String(snapshot.state || '').toLowerCase();
+  const visualMovement = snapshot.visualState?.movement || null;
+  const isMovingSnapshot = state === 'moving' || state === 'routing' || visualMovement?.isMoving === true;
+  const hasRoute = Boolean(snapshot.routeId || snapshot.leaseOwner || snapshot.leaseExpiresAt);
+  if (owner.startsWith('main3d-position-persistence') && !isMovingSnapshot && !hasRoute) return false;
+  return true;
 }
 
 function getAgentRuntimeFloorBuilding(agent, snapshot) {
@@ -2078,6 +2085,21 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   const floor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(floor)) return false;
 
+  const leaseActive = isAgentRuntimeSnapshotLeaseActive(snapshot);
+  const localRouteLease = agent._runtimeRouteLease || null;
+  const localLeaseActive = ['pending', 'owned', 'releasing'].includes(String(localRouteLease?.state || ''));
+  const snapshotUpdatedAtMs = Date.parse(snapshot.updatedAt || '');
+  if (
+    localLeaseActive &&
+    !leaseActive &&
+    !snapshot.routeId &&
+    Number.isFinite(snapshotUpdatedAtMs) &&
+    Number.isFinite(Number(localRouteLease.startedAtMs || 0)) &&
+    snapshotUpdatedAtMs < Number(localRouteLease.startedAtMs || 0)
+  ) {
+    return false;
+  }
+
   const previousPosition = {
     x: Number(agent.x || 0),
     y: Number(agent.y || 0),
@@ -2092,28 +2114,53 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   agent._runtimeLeaseOwner = snapshot.leaseOwner || '';
   agent._runtimeVersion = snapshot.version || 0;
   agent._runtimeUpdatedAt = snapshot.updatedAt || '';
-  const leaseActive = isAgentRuntimeSnapshotLeaseActive(snapshot);
   const leaseOwnedByThisClient = Boolean(leaseActive && snapshot.leaseOwner && snapshot.leaseOwner === _agentRuntimeClient?.leaseOwner);
-  const localLeaseActive = ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease?.state || ''));
   const remoteWriterActive = isAgentRuntimeSnapshotRemoteWriterActive(snapshot);
   const wasObserverOnly = agent._runtimeObserverOnly === true;
-  if (leaseOwnedByThisClient && agent._runtimeRouteLease && (!snapshot.routeId || agent._runtimeRouteLease.routeId === snapshot.routeId)) {
+  if (leaseOwnedByThisClient && (!agent._runtimeRouteLease || !snapshot.routeId || agent._runtimeRouteLease.routeId === snapshot.routeId)) {
+    const existingLease = agent._runtimeRouteLease || {};
+    const snapshotTarget = agentRuntimePlainObject(snapshot.target, null);
+    const wasOwned = existingLease.state === 'owned';
     agent._runtimeRouteLease = {
-      ...agent._runtimeRouteLease,
-      state: agent._runtimeRouteLease.state === 'releasing' ? 'releasing' : 'owned',
-      routeId: snapshot.routeId || agent._runtimeRouteLease.routeId,
-      worldActionId: snapshot.worldActionId || agent._runtimeRouteLease.worldActionId || '',
+      ...existingLease,
+      state: existingLease.state === 'releasing' ? 'releasing' : 'owned',
+      routeId: snapshot.routeId || existingLease.routeId || '',
+      worldActionId: snapshot.worldActionId || existingLease.worldActionId || '',
       leaseOwner: snapshot.leaseOwner,
+      runtimeMode: snapshot.mode || existingLease.runtimeMode || 'scripted',
+      runtimeOwner: snapshot.owner || existingLease.runtimeOwner || 'main3d-route-executor',
+      target: snapshotTarget || existingLease.target || null,
+      startedAtMs: Number(existingLease.startedAtMs || Date.now()),
       lastAckAtMs: Date.now(),
       leaseExpiresAt: snapshot.leaseExpiresAt,
     };
+    if (!agent._wanderTarget && snapshotTarget && Number.isFinite(Number(snapshotTarget.x)) && Number.isFinite(Number(snapshotTarget.y))) {
+      agent._wanderTarget = {
+        ...snapshotTarget,
+        x: Number(snapshotTarget.x),
+        y: Number(snapshotTarget.y),
+        floor: Math.max(1, Number(snapshotTarget.floor || snapshotTarget.buildingFloor || floor) || 1),
+      };
+      agent._targetFloor = agent._wanderTarget.floor;
+      agent._stayTimer = 0;
+      agent._wanderTimer = 0;
+    }
+    if (!wasOwned) maybeSendAgentRuntimeRouteHeartbeat(agent, snapshot.state || 'routing', { force: true });
   }
   if (!leaseActive && !snapshot.routeId && agent._runtimeRouteLease?.leaseOwner === _agentRuntimeClient?.leaseOwner) {
-    agent._runtimeRouteLease = null;
-    agent._runtimeLeaseOwner = '';
-    agent._runtimeRouteId = '';
-    if (agent._wanderTarget && ['routing', 'moving'].includes(String(snapshot.state || '').toLowerCase()) === false) {
-      clearAgentTransientMovement(agent);
+    const lease = agent._runtimeRouteLease || {};
+    const leaseStartedAtMs = Number(lease.startedAtMs || 0);
+    const ignoreNoLeaseSnapshot = ['pending', 'owned'].includes(String(lease.state || '')) &&
+      Number.isFinite(snapshotUpdatedAtMs) &&
+      Number.isFinite(leaseStartedAtMs) &&
+      snapshotUpdatedAtMs < leaseStartedAtMs;
+    if (!ignoreNoLeaseSnapshot) {
+      agent._runtimeRouteLease = null;
+      agent._runtimeLeaseOwner = '';
+      agent._runtimeRouteId = '';
+      if (agent._wanderTarget && ['routing', 'moving'].includes(String(snapshot.state || '').toLowerCase()) === false) {
+        clearAgentTransientMovement(agent);
+      }
     }
   }
   agent._runtimeObserverOnly = (snapshot.mode === 'live' || leaseActive || remoteWriterActive) && !leaseOwnedByThisClient && !localLeaseActive;
@@ -2641,6 +2688,24 @@ if (typeof window !== 'undefined') {
       : agentRef;
     return publishAgentRuntimeMovementSnapshot(agent, state, { ...(options || {}), force: true, reason: options.reason || 'debug-publish' });
   };
+  window.__VWGetAgentRuntimeDebug = () => agentsList.map(agent => ({
+    id: agent.id || null,
+    name: agent.name || agent.id || null,
+    status: agent.status || '',
+    x: Number(agent.x || 0),
+    y: Number(agent.y || 0),
+    floor: Math.max(1, Number(agent._floor || agent._targetFloor || 1) || 1),
+    target: agent._wanderTarget ? { ...agent._wanderTarget } : null,
+    stayTimer: Number(agent._stayTimer || 0),
+    wanderTimer: Number(agent._wanderTimer || 0),
+    idleActivity: agent._idleActivity?.kind || null,
+    observerOnly: agent._runtimeObserverOnly === true,
+    remoteWriterActive: agent._runtimeRemoteWriterActive === true,
+    runtimeOwner: agent._runtimeOwner || '',
+    runtimeState: agent._runtimeState || '',
+    runtimeUpdatedAt: agent._runtimeUpdatedAt || '',
+    routeLease: agent._runtimeRouteLease ? { ...agent._runtimeRouteLease } : null,
+  }));
 }
 
 function doesDeskAssignmentMatchAgent(agent, assignedTo) {
@@ -21098,6 +21163,9 @@ function updateAgentAnimations(dt) {
       agent._stayTimer = 900;
       agent._wanderTimer = 2500 + Math.random() * 2500;
     } else if (agent._wanderTimer <= 0) {
+      if (isAgentIntentActive(agent._agentIntent) && agent._wanderTarget) {
+        agent._wanderTimer = 500;
+      } else {
       // Pick next destination — factor in role + time of day
       const bArr = Array.from(buildingsMap.values());
       const wb = agent._workBuilding;
@@ -21268,6 +21336,7 @@ function updateAgentAnimations(dt) {
           }
           agent._wanderTimer = 3000 + Math.random() * 8000;
         }
+      }
       }
     } else {
       agent._wanderTimer -= decisionDtMs;

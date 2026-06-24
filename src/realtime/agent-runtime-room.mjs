@@ -2,11 +2,12 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Room } from '@colyseus/core';
-import { MapSchema, Schema, defineTypes } from '@colyseus/schema';
+import { Encoder, MapSchema, Schema, defineTypes } from '@colyseus/schema';
 
 export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
 export const WORLD_RUNTIME_SCHEMA_VERSION = 'world-runtime/v1';
 export const AGENT_RUNTIME_ROOM_NAME = 'agent_runtime';
+export const DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES = 256 * 1024;
 export const DEFAULT_ROUTE_LEASE_TTL_MS = 15000;
 export const MAX_ROUTE_LEASE_TTL_MS = 60000;
 export const STALE_ROUTE_LEASE_SWEEP_MS = 1000;
@@ -20,6 +21,14 @@ export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
 export const MAX_VISUAL_STATE_JSON_CHARS = 6000;
 export const MAX_WORLD_OBJECT_DATA_JSON_CHARS = 10000;
+
+const configuredSchemaBufferSize = Number(process.env.VW_REALTIME_SCHEMA_BUFFER_SIZE_BYTES || DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES);
+Encoder.BUFFER_SIZE = Math.max(
+  Number(Encoder.BUFFER_SIZE || 0),
+  Number.isFinite(configuredSchemaBufferSize) && configuredSchemaBufferSize > 0
+    ? configuredSchemaBufferSize
+    : DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES,
+);
 
 const AGENT_ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const SAFE_TEXT_RE = /^[A-Za-z0-9_.:/@# -]{0,160}$/;

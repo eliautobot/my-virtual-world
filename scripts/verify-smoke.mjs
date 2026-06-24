@@ -183,6 +183,7 @@ const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
 const agentRuntimeClientJs = read('src/client/js/agent-runtime-client.mjs');
+const agentRuntimeRoomJs = read('src/realtime/agent-runtime-room.mjs');
 const chatJs = read('src/client/js/chat.js');
 const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
@@ -281,7 +282,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260623-world-runtime-render-coherence-r3',
+  'js/main3d.js?v=20260623-world-runtime-render-coherence-r5',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -591,6 +592,7 @@ for (const token of [
   'makeAgentRuntimeClientOwner',
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
+  '__VWGetAgentRuntimeDebug',
   'agent-runtime-client.mjs?v=20260623-world-runtime-render-coherence-r2',
   'runtime:worldRuntime',
   'runtime:worldTopology',
@@ -611,6 +613,13 @@ for (const token of [
   'parsed.hostname = pageHost',
 ]) {
   assert(agentRuntimeClientJs.includes(token), `agent runtime client missing URL resolution token: ${token}`);
+}
+for (const token of [
+  'DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES',
+  'VW_REALTIME_SCHEMA_BUFFER_SIZE_BYTES',
+  'Encoder.BUFFER_SIZE',
+]) {
+  assert(agentRuntimeRoomJs.includes(token), `agent runtime room missing schema buffer token: ${token}`);
 }
 for (const token of [
   'data-settings-tab="live-mode"',
