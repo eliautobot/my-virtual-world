@@ -11341,9 +11341,11 @@ def main():
     # gated by an active world client polling /api/world-actions/active.
     start_live_agent_loop()
 
+    class ReusableThreadingTCPServer(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+
     handler = VWHandler
-    with socketserver.ThreadingTCPServer(("", PORT), handler) as httpd:
-        httpd.allow_reuse_address = True
+    with ReusableThreadingTCPServer(("", PORT), handler) as httpd:
         print(f"🌐 Serving on http://0.0.0.0:{PORT}")
         try:
             httpd.serve_forever()

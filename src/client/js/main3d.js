@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-runtime-url-r1';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-runtime-visual-state-r1';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1262,6 +1262,195 @@ function getAgentRuntimeFloorBuilding(agent, snapshot) {
   return getMovementInteriorBuildingAt(agent.x, agent.y);
 }
 
+function agentRuntimeVisualText(value, maxLength = 120) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim().slice(0, maxLength);
+}
+
+function agentRuntimeVisualNumber(value, fallback = null) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function makeAgentRuntimeVisualPoint(point = null) {
+  if (!point || typeof point !== 'object') return null;
+  const x = agentRuntimeVisualNumber(point.apiX ?? point.x, null);
+  const y = agentRuntimeVisualNumber(point.apiZ ?? point.y ?? point.z, null);
+  if (x === null || y === null) return null;
+  const out = { x, y };
+  const floor = agentRuntimeVisualNumber(point.floor, null);
+  if (floor !== null) out.floor = Math.max(1, Math.floor(floor));
+  ['id', 'spotId', 'slotId', 'kind', 'type'].forEach(key => {
+    const text = agentRuntimeVisualText(point[key], 80);
+    if (text) out[key] = text;
+  });
+  const faceAngle = agentRuntimeVisualNumber(point.faceAngle, null);
+  if (faceAngle !== null) out.faceAngle = faceAngle;
+  return out;
+}
+
+function makeAgentRuntimeVisualCarryItem(agent) {
+  const carried = agent?._carriedItem || agent?._carrying || agent?._carryItem || (agent?.carryItem ? { label: agent.carryItem, kind: agent.carryItem } : null);
+  if (!carried) return null;
+  const out = {};
+  [
+    'id',
+    'catalogId',
+    'label',
+    'kind',
+    'visualKind',
+    'attachPoint',
+    'state',
+    'sourceFurnitureType',
+    'drinkKind',
+    'vendingItemId',
+    'microwaveFoodId',
+  ].forEach(key => {
+    const text = agentRuntimeVisualText(carried[key], 120);
+    if (text) out[key] = text;
+  });
+  if (!out.kind && agent?.carryItem) out.kind = agentRuntimeVisualText(agent.carryItem, 80);
+  if (!out.label && agent?.carryItem) out.label = agentRuntimeVisualText(agent.carryItem, 80);
+  ['color', 'packageColor', 'accentColor'].forEach(key => {
+    const number = agentRuntimeVisualNumber(carried[key], null);
+    if (number !== null) out[key] = number;
+  });
+  if (carried.temporary === true) out.temporary = true;
+  if (carried.carryable === true) out.carryable = true;
+  if (carried.consumable === true) out.consumable = true;
+  return Object.keys(out).length ? out : null;
+}
+
+function makeAgentRuntimeVisualActivity(agent) {
+  const activity = agent?._idleActivity || null;
+  if (!activity || typeof activity !== 'object') return null;
+  const out = {};
+  [
+    'kind',
+    'phase',
+    'source',
+    'behaviorSourceKind',
+    'behaviorMode',
+    'behaviorCategory',
+    'buildingId',
+    'furnitureType',
+    'objectId',
+    'actionId',
+    'reservationId',
+    'activeUseId',
+    'spotId',
+    'slotId',
+    'mode',
+    'animationId',
+    'targetAgentId',
+    'outdoorNodeType',
+    'barberRole',
+    'mirrorRole',
+  ].forEach(key => {
+    const text = agentRuntimeVisualText(activity[key], 120);
+    if (text) out[key] = text;
+  });
+  [
+    'floor',
+    'furnitureIndex',
+    'stayMs',
+    'dockSnapRadius',
+    'seatSurfaceLift',
+    'faceAngle',
+    'durationMs',
+  ].forEach(key => {
+    const number = agentRuntimeVisualNumber(activity[key], null);
+    if (number !== null) out[key] = number;
+  });
+  [
+    'dockTarget',
+    'standTarget',
+    'approachSpot',
+    'activationSpot',
+    'routeApproachTarget',
+    'target',
+    'stepOffSpot',
+  ].forEach(key => {
+    const point = makeAgentRuntimeVisualPoint(activity[key]);
+    if (point) out[key] = point;
+  });
+  const temporaryItem = activity.temporaryItem && typeof activity.temporaryItem === 'object'
+    ? makeAgentRuntimeVisualCarryItem({ _carriedItem: activity.temporaryItem })
+    : null;
+  if (temporaryItem) out.temporaryItem = temporaryItem;
+  return Object.keys(out).length ? out : null;
+}
+
+function makeAgentRuntimeVisualState(agent, state = 'idle') {
+  const activity = makeAgentRuntimeVisualActivity(agent);
+  const carriedItem = makeAgentRuntimeVisualCarryItem(agent);
+  const isMovingState = ['moving', 'routing'].includes(String(state || '').toLowerCase());
+  const visualState = {
+    schemaVersion: 'agent-runtime-visual/v1',
+    status: agentRuntimeVisualText(agent?.status || 'idle', 80) || 'idle',
+    state: agentRuntimeVisualText(state || 'idle', 80) || 'idle',
+    resolvedAnimationId: agentRuntimeVisualText(agent?._resolvedAnimationId || '', 120),
+    movement: {
+      isMoving: Boolean(isMovingState || agent?._wanderTarget || agent?._waypointPath),
+      isRunning: Boolean(agent?._isRunning),
+    },
+    activityActive: Boolean(activity),
+    carrying: Boolean(carriedItem),
+  };
+  if (activity) visualState.activity = activity;
+  if (carriedItem) visualState.carriedItem = carriedItem;
+  return visualState;
+}
+
+function getAgentRuntimeVisualStateHash(visualState = null) {
+  if (!visualState || typeof visualState !== 'object') return '';
+  try {
+    return JSON.stringify(visualState);
+  } catch {
+    return '';
+  }
+}
+
+function applyAgentRuntimeVisualState(agent, visualState = null) {
+  if (!agent || !visualState || typeof visualState !== 'object') return false;
+  agent._runtimeVisualState = visualState;
+  const status = agentRuntimeVisualText(visualState.status, 80);
+  if (status) agent.status = status;
+  const movement = visualState.movement && typeof visualState.movement === 'object' ? visualState.movement : null;
+  agent._runtimeVisualMovement = movement ? {
+    isMoving: movement.isMoving === true,
+    isRunning: movement.isRunning === true,
+  } : null;
+
+  if (visualState.activityActive === false) {
+    agent._idleActivity = null;
+  } else if (visualState.activity && typeof visualState.activity === 'object') {
+    agent._idleActivity = {
+      ...(agent._idleActivity || {}),
+      ...visualState.activity,
+      runtimeVisualOnly: true,
+    };
+  }
+
+  if (visualState.carrying === false) {
+    agent._carriedItem = null;
+    agent._carrying = null;
+    agent._carryItem = null;
+    agent.carryItem = null;
+  } else if (visualState.carriedItem && typeof visualState.carriedItem === 'object') {
+    const carriedItem = { ...visualState.carriedItem, runtimeVisualOnly: true };
+    const carryLabel = agentRuntimeVisualText(
+      carriedItem.kind || carriedItem.visualKind || carriedItem.drinkKind || carriedItem.label || carriedItem.catalogId,
+      80
+    );
+    agent._carriedItem = carriedItem;
+    agent._carrying = carriedItem;
+    agent._carryItem = carriedItem;
+    agent.carryItem = carryLabel || null;
+  }
+  return true;
+}
+
 function placeRuntimeHydratedAgentMesh(agent, { force = false } = {}) {
   if (!agent?._group3d) return;
   const scale = T / API_TILE;
@@ -1382,7 +1571,8 @@ function updateAgentRuntimeObserverMotion(agent, dt = 0) {
 
   placeRuntimeHydratedAgentMesh(agent);
   const movedDistance = Math.hypot(agent.x - previousX, agent.y - previousY);
-  const moving = movedDistance > AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE * Math.max(1, dt * 60);
+  const visualMovement = agent._runtimeVisualMovement || null;
+  const moving = visualMovement?.isMoving === true || movedDistance > AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE * Math.max(1, dt * 60);
   if (moving && agent._group3d) {
     agent._group3d.rotation.y = Math.atan2(agent.x - previousX, agent.y - previousY);
     agent._runtimeLastMeshPlacement = {
@@ -1390,7 +1580,7 @@ function updateAgentRuntimeObserverMotion(agent, dt = 0) {
       heading: agent._group3d.rotation.y,
     };
   }
-  agent._isRunning = moving;
+  agent._isRunning = visualMovement ? (moving && visualMovement.isRunning === true) : moving;
   return moving;
 }
 
@@ -1419,6 +1609,7 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   const leaseOwnedByThisClient = Boolean(leaseActive && snapshot.leaseOwner && snapshot.leaseOwner === _agentRuntimeClient?.leaseOwner);
   const localLeaseActive = ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease?.state || ''));
   const remoteWriterActive = isAgentRuntimeSnapshotRemoteWriterActive(snapshot);
+  const wasObserverOnly = agent._runtimeObserverOnly === true;
   if (leaseOwnedByThisClient && agent._runtimeRouteLease && (!snapshot.routeId || agent._runtimeRouteLease.routeId === snapshot.routeId)) {
     agent._runtimeRouteLease = {
       ...agent._runtimeRouteLease,
@@ -1442,7 +1633,10 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   agent._runtimeRemoteWriterActive = remoteWriterActive;
 
   if (agent._runtimeObserverOnly) {
-    clearAgentTransientMovement(agent);
+    if (!wasObserverOnly || agent._wanderTarget || agent._waypointPath || agent._agentIntent) {
+      clearAgentTransientMovement(agent);
+    }
+    applyAgentRuntimeVisualState(agent, snapshot.visualState);
     if (updateVisible) {
       beginAgentRuntimeObserverInterpolation(agent, snapshot, previousPosition, { source });
     } else {
@@ -1458,6 +1652,7 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
     agent._floor = floor;
     agent._targetFloor = floor;
     agent._runtimeObserverInterpolation = null;
+    agent._runtimeVisualMovement = null;
   }
   if (updateVisible) placeRuntimeHydratedAgentMesh(agent);
   return true;
@@ -1573,6 +1768,10 @@ function makeAgentRuntimeRouteTarget(target = null, building = null, floor = nul
 
 function makeAgentRuntimePositionPayload(agent, state = 'routing', extra = {}) {
   const floorBuilding = getMovementInteriorBuildingAt(agent.x, agent.y) || null;
+  const { visualState: extraVisualState, ...restExtra } = extra || {};
+  const visualState = extraVisualState === false
+    ? null
+    : (extraVisualState || makeAgentRuntimeVisualState(agent, state));
   return {
     agentId: getAgentRuntimeAgentId(agent),
     mode: 'live',
@@ -1583,8 +1782,9 @@ function makeAgentRuntimePositionPayload(agent, state = 'routing', extra = {}) {
     buildingId: floorBuilding?.id || agent._targetBuilding?.id || '',
     heading: Number(agent._group3d?.rotation?.y || 0),
     state,
+    visualState,
     ttlMs: AGENT_RUNTIME_ROUTE_LEASE_TTL_MS,
-    ...extra,
+    ...restExtra,
   };
 }
 
@@ -1760,6 +1960,7 @@ function releaseAgentRuntimeRouteLease(agent, reason = 'arrived', state = 'idle'
     routeId: lease.routeId,
     worldActionId: lease.worldActionId || '',
     state,
+    visualState: makeAgentRuntimeVisualState(agent, state),
     reason,
   }, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
     .then(ack => {
@@ -1805,7 +2006,7 @@ function getAgentRuntimeSnapshotOwner(agent, options = {}) {
   return makeAgentRuntimeClientOwner('main3d-position-persistence');
 }
 
-function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', { force = false } = {}) {
+function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', { force = false, visualState = null } = {}) {
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || !getAgentRuntimeAgentId(agent)) return false;
   if (agent?._runtimeObserverOnly || agent?._manualPlacementPreview) return false;
   if (agent?._runtimeRouteLease && ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease.state || ''))) return false;
@@ -1816,14 +2017,20 @@ function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', { force = fals
   const floor = Math.max(1, Number(agent._floor || agent._targetFloor || 1) || 1);
   const floorChanged = floor !== last.floor;
   const stateChanged = String(state || 'idle') !== String(last.state || 'idle');
+  const visualStateHash = getAgentRuntimeVisualStateHash(visualState);
+  const visualStateChanged = visualStateHash !== String(last.visualStateHash || '');
   const enoughTime = now - Number(last.atMs || 0) >= AGENT_RUNTIME_SNAPSHOT_INTERVAL_MS;
-  if (floorChanged || stateChanged) return true;
+  if (floorChanged || stateChanged || visualStateChanged) return true;
   if (isAgentRuntimeSnapshotOwnerThisClient(agent._runtimeSnapshot) && now - Number(last.atMs || 0) >= AGENT_RUNTIME_SNAPSHOT_KEEPALIVE_MS) return true;
   return enoughTime && dist >= AGENT_RUNTIME_SNAPSHOT_MIN_DISTANCE;
 }
 
 function publishAgentRuntimeMovementSnapshot(agent, state = 'idle', options = {}) {
-  if (!shouldPublishAgentRuntimeSnapshot(agent, state, options)) return null;
+  const visualState = options.visualState === false
+    ? null
+    : (options.visualState || makeAgentRuntimeVisualState(agent, state));
+  const visualStateHash = getAgentRuntimeVisualStateHash(visualState);
+  if (!shouldPublishAgentRuntimeSnapshot(agent, state, { ...options, visualState })) return null;
   const mode = getAgentRuntimeSnapshotMode(agent, options);
   const owner = getAgentRuntimeSnapshotOwner(agent, { ...options, mode });
   const floor = Math.max(1, Number(agent._floor || agent._targetFloor || 1) || 1);
@@ -1836,6 +2043,7 @@ function publishAgentRuntimeMovementSnapshot(agent, state = 'idle', options = {}
     mode,
     owner,
     reason: options.reason || '',
+    visualStateHash,
   };
   agent._runtimeSnapshotPublish = publishRecord;
   const payload = makeAgentRuntimePositionPayload(agent, state, {
@@ -1846,6 +2054,7 @@ function publishAgentRuntimeMovementSnapshot(agent, state = 'idle', options = {}
     target: null,
     leaseOwner: '',
     leaseExpiresAt: '',
+    visualState,
   });
   return _agentRuntimeClient.writeSnapshot(payload, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
     .then(ack => {

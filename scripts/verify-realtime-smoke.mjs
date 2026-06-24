@@ -119,11 +119,20 @@ async function run() {
       y: 4.25,
       floor: 1,
       state: 'idle',
+      visualState: {
+        schemaVersion: 'agent-runtime-visual/v1',
+        status: 'idle',
+        state: 'idle',
+        movement: { isMoving: false, isRunning: false },
+        activityActive: false,
+        carrying: false,
+      },
     });
     const snapshotAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'snapshot-1');
     assert.equal(snapshotAck.snapshot.agentId, 'adam');
     assert.equal(snapshotAck.snapshot.x, 3.5);
-    await waitForAgent(room, 'adam', (agent) => agent.x === 3.5 && agent.y === 4.25);
+    assert.equal(snapshotAck.snapshot.visualState.status, 'idle');
+    await waitForAgent(room, 'adam', (agent) => agent.x === 3.5 && agent.y === 4.25 && agent.visualStateJson.includes('agent-runtime-visual/v1'));
 
     room.send('runtime:claimRoute', {
       requestId: 'claim-1',
@@ -165,23 +174,66 @@ async function run() {
       y: 8.25,
       floor: 1,
       state: 'routing',
+      visualState: {
+        schemaVersion: 'agent-runtime-visual/v1',
+        status: 'idle',
+        state: 'routing',
+        movement: { isMoving: true, isRunning: false },
+        activityActive: true,
+        activity: {
+          kind: 'coffee-machine-brew',
+          phase: 'active',
+          furnitureType: 'countertopCoffeeMachine',
+          faceAngle: 1.57,
+        },
+        carrying: true,
+        carriedItem: {
+          label: 'Coffee Drink',
+          kind: 'coffee',
+          visualKind: 'coffee',
+          attachPoint: 'right-hand',
+          state: 'carried',
+          sourceFurnitureType: 'coffeeMachine',
+        },
+      },
       ttlMs: 10000,
     });
     const heartbeatAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'heartbeat-1');
     assert.equal(heartbeatAck.snapshot.x, 7.5);
-    await waitForAgent(room, 'adam', (agent) => agent.x === 7.5 && agent.state === 'routing');
+    assert.equal(heartbeatAck.snapshot.visualState.activity.kind, 'coffee-machine-brew');
+    assert.equal(heartbeatAck.snapshot.visualState.carriedItem.visualKind, 'coffee');
+    await waitForAgent(room, 'adam', (agent) => agent.x === 7.5 && agent.state === 'routing' && agent.visualStateJson.includes('Coffee Drink'));
 
     room.send('runtime:releaseRoute', {
       requestId: 'release-1',
       agentId: 'adam',
       leaseOwner: 'smoke-client-a',
       state: 'idle',
+      visualState: {
+        schemaVersion: 'agent-runtime-visual/v1',
+        status: 'idle',
+        state: 'idle',
+        movement: { isMoving: false, isRunning: false },
+        activityActive: false,
+        carrying: true,
+        carriedItem: {
+          label: 'Coffee Drink',
+          kind: 'coffee',
+          visualKind: 'coffee',
+          attachPoint: 'right-hand',
+          state: 'carried',
+          sourceFurnitureType: 'coffeeMachine',
+        },
+      },
       reason: 'smoke-complete',
     });
     const releaseAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'release-1');
     assert.equal(releaseAck.snapshot.leaseOwner, '');
     assert.equal(releaseAck.snapshot.routeId, '');
     assert.equal(releaseAck.snapshot.worldActionId, '');
+    assert.equal(releaseAck.snapshot.visualState.state, 'idle');
+    assert.equal(releaseAck.snapshot.visualState.activityActive, false);
+    assert.equal(releaseAck.snapshot.visualState.carriedItem.kind, 'coffee');
 
     room.send('runtime:claimRoute', {
       requestId: 'claim-stale',
@@ -205,6 +257,8 @@ async function run() {
     const resumedRoom = await connectRoom(port);
     const resumedAgent = await waitForAgent(resumedRoom, 'adam', (agent) => agent.x === 7.5 && agent.y === 8.25);
     assert.equal(resumedAgent.state, 'idle');
+    assert(resumedAgent.visualStateJson.includes('Coffee Drink'));
+    assert(resumedAgent.visualStateJson.includes('"activityActive":false'));
     await resumedRoom.leave(true);
 
     console.log('realtime smoke ok');

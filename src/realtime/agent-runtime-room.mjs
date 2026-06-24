@@ -10,6 +10,7 @@ export const DEFAULT_ROUTE_LEASE_TTL_MS = 15000;
 export const MAX_ROUTE_LEASE_TTL_MS = 60000;
 export const STALE_ROUTE_LEASE_SWEEP_MS = 1000;
 export const MAX_RUNTIME_EVENTS = 500;
+export const MAX_VISUAL_STATE_JSON_CHARS = 6000;
 
 const AGENT_ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const SAFE_TEXT_RE = /^[A-Za-z0-9_.:/@# -]{0,160}$/;
@@ -28,6 +29,7 @@ export class AgentRuntimeSnapshot extends Schema {
     this.heading = 0;
     this.state = 'idle';
     this.targetJson = '';
+    this.visualStateJson = '';
     this.routeId = '';
     this.worldActionId = '';
     this.leaseOwner = '';
@@ -50,6 +52,7 @@ defineTypes(AgentRuntimeSnapshot, {
   heading: 'number',
   state: 'string',
   targetJson: 'string',
+  visualStateJson: 'string',
   routeId: 'string',
   worldActionId: 'string',
   leaseOwner: 'string',
@@ -125,6 +128,15 @@ export function snapshotToPlain(agent) {
     }
   } else {
     plain.target = null;
+  }
+  if (agent.visualStateJson) {
+    try {
+      plain.visualState = JSON.parse(agent.visualStateJson);
+    } catch {
+      plain.visualState = null;
+    }
+  } else {
+    plain.visualState = null;
   }
   return plain;
 }
@@ -215,6 +227,7 @@ function schemaSnapshotFromPlain(plain) {
     heading: plain.heading,
     state: plain.state,
     targetJson: plain.target ? JSON.stringify(plain.target) : '',
+    visualStateJson: plain.visualState ? JSON.stringify(plain.visualState) : '',
     routeId: plain.routeId,
     worldActionId: plain.worldActionId,
     leaseOwner: plain.leaseOwner,
@@ -232,6 +245,7 @@ function normalizeSnapshot(raw, existing = null) {
   const agentId = normalizeAgentId(raw.agentId || existingPlain.agentId);
   const now = new Date().toISOString();
   const target = Object.hasOwn(raw, 'target') ? normalizeTarget(raw.target) : (existingPlain.target || null);
+  const visualState = Object.hasOwn(raw, 'visualState') ? normalizeVisualState(raw.visualState) : (existingPlain.visualState || null);
   return {
     schemaVersion: AGENT_RUNTIME_SCHEMA_VERSION,
     agentId,
@@ -245,6 +259,7 @@ function normalizeSnapshot(raw, existing = null) {
     heading: headingOr(raw.heading, existingPlain.heading || 0),
     state: safeText(raw.state, existingPlain.state || 'idle'),
     target,
+    visualState,
     routeId: safeText(raw.routeId, existingPlain.routeId || ''),
     worldActionId: safeText(raw.worldActionId, existingPlain.worldActionId || ''),
     leaseOwner: safeText(raw.leaseOwner, existingPlain.leaseOwner || ''),
@@ -252,6 +267,38 @@ function normalizeSnapshot(raw, existing = null) {
     updatedAt: safeIso(raw.updatedAt, now),
     version: Math.max(0, Math.floor(numberOr(raw.version, existingPlain.version || 0))),
   };
+}
+
+function normalizeVisualState(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const normalized = sanitizeVisualValue(value, 0);
+  if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) return null;
+  const json = JSON.stringify(normalized);
+  if (json.length > MAX_VISUAL_STATE_JSON_CHARS) {
+    throw apiError('invalid_visual_state', 'visualState is too large');
+  }
+  return normalized;
+}
+
+function sanitizeVisualValue(value, depth = 0) {
+  if (depth > 5) return null;
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return coordinateOr(value, 0, 'visual');
+  if (typeof value === 'string') return safeText(value, '');
+  if (Array.isArray(value)) {
+    return value.slice(0, 24).map(item => sanitizeVisualValue(item, depth + 1)).filter(item => item !== null && item !== undefined);
+  }
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [key, item] of Object.entries(value).slice(0, 80)) {
+      if (!SAFE_TEXT_RE.test(key) || key.length > 80) continue;
+      const normalized = sanitizeVisualValue(item, depth + 1);
+      if (normalized !== null && normalized !== undefined) out[key] = normalized;
+    }
+    return out;
+  }
+  return null;
 }
 
 function normalizeTarget(target) {
@@ -468,7 +515,7 @@ export class AgentRuntimeRoom extends Room {
           leaseExpiresAt: existing.leaseExpiresAt,
         });
       }
-      const agent = this.upsertSnapshot({
+      const releaseSnapshot = {
         agentId,
         state: message.state || 'idle',
         routeId: '',
@@ -476,7 +523,9 @@ export class AgentRuntimeRoom extends Room {
         target: null,
         leaseOwner: '',
         leaseExpiresAt: '',
-      }, 'route-released', {
+      };
+      if (Object.hasOwn(message, 'visualState')) releaseSnapshot.visualState = message.visualState;
+      const agent = this.upsertSnapshot(releaseSnapshot, 'route-released', {
         reason: safeText(message.reason, ''),
       });
       this.ack(client, message, 'runtime:releaseRoute', agent);
