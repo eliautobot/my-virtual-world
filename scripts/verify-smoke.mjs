@@ -282,7 +282,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260624-pingpong-runtime-owner-r1',
+  'js/main3d.js?v=20260624-runtime-conflict-containment-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -376,8 +376,33 @@ for (const token of [
   'function holdPingPongRuntimePosition(agent, pose = {})',
   'runtimePositionOwner: PING_PONG_RUNTIME_POSITION_OWNER',
   "releaseAgentRuntimeRouteLease(agent, 'pingpong-runtime-position-owner', 'idle')",
+  'ping-pong match routes with explicit table runtime ownership',
+  "releaseAgentIntent(admittedAgent, 'route-failed'",
+  'reservationId = `reservation:${objectKey}:${actionId}:${Date.now()}`',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing ping-pong runtime ownership token: ${token}`);
+}
+
+for (const token of [
+  'AGENT_RUNTIME_TRAFFIC_TOPOLOGY_OWNER_TTL_MS = 30000',
+  'fresh-runtime-topology-owned-by-another-client',
+  'inferExplicitObjectActionMetadataFromRouteTarget',
+  "TAG_GAME_RUNTIME_POSITION_OWNER = 'tag-game-loop'",
+  "owner: 'tag-game'",
+  'function setTagGameRuntimeTarget(agent, target = null)',
+  "LIVE_STATUS_RUNTIME_POSITION_OWNER = 'live-status-dock'",
+  'function holdLiveStatusRuntimeObjectDock(agent, workTarget = null',
+  'runtimePositionOwner: LIVE_STATUS_RUNTIME_POSITION_OWNER',
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing runtime conflict containment token: ${token}`);
+}
+
+for (const token of [
+  'WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000',
+  'world-topology-skipped-owner-fresh',
+  'topologyOwnerFresh',
+]) {
+  assert(agentRuntimeRoomJs.includes(token), `agent-runtime-room.mjs missing topology owner guard token: ${token}`);
 }
 
 for (const token of [

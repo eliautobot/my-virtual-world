@@ -16,6 +16,7 @@ export const WORLD_RUNTIME_PERSIST_INTERVAL_MS = 5000;
 export const WORLD_RUNTIME_TRAFFIC_CYCLE_MS = 40000;
 export const WORLD_RUNTIME_TRAFFIC_YELLOW_MS = 3000;
 export const WORLD_RUNTIME_TRAFFIC_ALL_RED_MS = 2000;
+export const WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000;
 export const MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS = 500;
 export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
@@ -1263,12 +1264,26 @@ export class AgentRuntimeRoom extends Room {
       throw apiError('world_topology_too_large', `world topology can include at most ${MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES} traffic vehicles`);
     }
     const previousTopologyHash = runtime.topologyHash || '';
+    const nextTopologyHash = safeText(raw.topologyHash, '') || deterministicTopologyHash(trafficLights);
+    const topologyOwnerUpdatedAtMs = Date.parse(runtime.topologyUpdatedAt || runtime.updatedAt || '');
+    const topologyOwnerFresh = Number.isFinite(topologyOwnerUpdatedAtMs) && Date.now() - topologyOwnerUpdatedAtMs < WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS;
+    if (runtime.topologyOwner &&
+      runtime.topologyOwner !== owner &&
+      runtime.topologyHash === nextTopologyHash &&
+      topologyOwnerFresh) {
+      const event = this.recordEvent('world-topology-skipped-owner-fresh', 'worldRuntime', worldRuntimeToPlain(runtime), {
+        topologyHash: runtime.topologyHash,
+        topologyOwner: runtime.topologyOwner,
+        skippedOwner: owner,
+      });
+      return { worldRuntime: runtime, event };
+    }
     runtime.mode = 'server-authoritative';
     runtime.tickMs = clampInteger(raw.tickMs, runtime.tickMs || DEFAULT_WORLD_RUNTIME_TICK_MS, 100, 5000);
     runtime.trafficCycleMs = clampInteger(raw.trafficCycleMs, runtime.trafficCycleMs || WORLD_RUNTIME_TRAFFIC_CYCLE_MS, 10000, 180000);
     runtime.trafficYellowMs = clampInteger(raw.trafficYellowMs, runtime.trafficYellowMs || WORLD_RUNTIME_TRAFFIC_YELLOW_MS, 1000, 20000);
     runtime.trafficAllRedMs = clampInteger(raw.trafficAllRedMs, runtime.trafficAllRedMs || WORLD_RUNTIME_TRAFFIC_ALL_RED_MS, 500, 20000);
-    runtime.topologyHash = safeText(raw.topologyHash, '') || deterministicTopologyHash(trafficLights);
+    runtime.topologyHash = nextTopologyHash;
     runtime.topologyOwner = owner;
     runtime.topologyUpdatedAt = now;
     runtime.updatedAt = now;
