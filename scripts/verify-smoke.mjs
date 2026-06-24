@@ -282,7 +282,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260623-world-runtime-render-coherence-r5',
+  'js/main3d.js?v=20260624-pingpong-runtime-owner-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -368,6 +368,16 @@ for (const token of [
   'item.visible = isAgentDeskCarrySurfaceActive(agent) && !deskSipState.handActive',
 ]) {
   assert(agentCharactersJs.includes(token), `agent-characters.js missing desk-resting carry token: ${token}`);
+}
+
+for (const token of [
+  "PING_PONG_RUNTIME_POSITION_OWNER = 'pingpong-game-loop'",
+  'updatePingPongGames(dt);\n    updateAgentAnimations(dt);',
+  'function holdPingPongRuntimePosition(agent, pose = {})',
+  'runtimePositionOwner: PING_PONG_RUNTIME_POSITION_OWNER',
+  "releaseAgentRuntimeRouteLease(agent, 'pingpong-runtime-position-owner', 'idle')",
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing ping-pong runtime ownership token: ${token}`);
 }
 
 for (const token of [

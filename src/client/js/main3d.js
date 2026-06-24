@@ -7859,8 +7859,10 @@ function animate() {
     updateDayNight();
     updateSmoothCamera(dt);
     updateChunks();
-    updateAgentAnimations(dt);
+    // Mini-game runtimes can own agent positions. Advance them before the
+    // normal agent render/physics sync so there is only one frame authority.
     updatePingPongGames(dt);
+    updateAgentAnimations(dt);
     updateTrafficLights(dt);
     updateVehicles(dt);
     
@@ -55260,6 +55262,73 @@ function updatePingPongGameMeshes() {
   });
 }
 
+const PING_PONG_RUNTIME_POSITION_OWNER = 'pingpong-game-loop';
+
+function doesAgentIntentMatchPingPongActivity(intent = null, activity = null) {
+  if (!intent || !activity) return false;
+  const object = intent.object || {};
+  const sameFurniture = object.buildingId === activity.buildingId &&
+    object.furnitureIndex != null &&
+    Number(object.furnitureIndex) === Number(activity.furnitureIndex);
+  if (!sameFurniture) return false;
+  const objectType = String(object.objectType || object.type || '').toLowerCase();
+  const actionId = String(object.actionId || '').toLowerCase();
+  return objectType === 'pingpong' || actionId.includes('playpingpong');
+}
+
+function holdPingPongRuntimePosition(agent, pose = {}) {
+  if (!agent) return;
+  const activity = agent._idleActivity || null;
+  if (activity && String(activity.kind || '').startsWith('pingpong-')) {
+    activity.runtimePositionOwner = PING_PONG_RUNTIME_POSITION_OWNER;
+    activity.dockTarget = Number.isFinite(Number(pose.apiX)) && Number.isFinite(Number(pose.apiZ))
+      ? { x: pose.apiX, y: pose.apiZ }
+      : activity.dockTarget;
+    activity.lifecycle = {
+      ...(activity.lifecycle || {}),
+      stationary: false,
+      runtimePositionOwner: PING_PONG_RUNTIME_POSITION_OWNER,
+    };
+  }
+
+  const intent = agent._agentIntent || null;
+  if (isAgentIntentActive(intent)) {
+    if (doesAgentIntentMatchPingPongActivity(intent, activity)) {
+      intent.phase = activity?.phase || 'active';
+      intent.debug = {
+        ...(intent.debug || {}),
+        updatedAtMs: Date.now(),
+        lastDecisionReason: 'pingpong-runtime-position-owner',
+      };
+    } else if (intent.priorityName !== 'manual') {
+      releaseAgentIntent(agent, 'pingpong-runtime-position-owner', {
+        releaseBy: 'higher-priority',
+        clearRoute: true,
+        clearLifecycle: false,
+        releaseSummary: 'ping-pong game loop owns player movement during active rally',
+      });
+    }
+  }
+
+  agent._wanderTarget = null;
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  agent._waypointPathIdx = 0;
+  agent._doorTransition = null;
+  agent._enteringBuilding = null;
+  agent._atDoor = false;
+  agent._isReturningToDesk = false;
+  agent._isRunning = false;
+  agent._stayTimer = Math.max(agent._stayTimer || 0, 1200);
+  agent._wanderTimer = Math.max(agent._wanderTimer || 0, 1200);
+  clearDynamicInteriorRoutingForAgent(agent.id);
+  clearDynamicExteriorRoutingForAgent(agent.id);
+  resetObstacleAvoidance(agent);
+  if (agent._runtimeRouteLease && agent._runtimeRouteLease.state !== 'releasing') {
+    releaseAgentRuntimeRouteLease(agent, 'pingpong-runtime-position-owner', 'idle');
+  }
+}
+
 function updatePingPongGames(dt = 0) {
   for (const building of buildingsMap.values()) {
     const furniture = building?.interior?.furniture || [];
@@ -55291,6 +55360,7 @@ function updatePingPongGames(dt = 0) {
             agent._idleActivity.endsAt = performance.now() + (agent._idleActivity.stayMs || 24000);
             agent.x = spot.apiX;
             agent.y = spot.apiZ;
+            holdPingPongRuntimePosition(agent, spot);
             if (agent._group3d) agent._group3d.rotation.y = spot.faceAngle;
           }
         } else if (game.timer > 60) {
@@ -55332,7 +55402,7 @@ function updatePingPongGames(dt = 0) {
           agent._pingPongBallX = game.ballX || 0;
           agent._pingPongLastHit = game.lastHit || null;
           agent._wanderTarget = null;
-          agent._stayTimer = Math.max(agent._stayTimer || 0, 150);
+          holdPingPongRuntimePosition(agent, pos);
           if (agent._group3d) agent._group3d.rotation.y = spot.faceAngle;
           const paddleColor = agent._pingPongPaddleColor || (agent === p1 ? 0xf44336 : 0x2196f3);
           if (!agent._carriedItem || String(agent._carriedItem.kind || '').toLowerCase() !== 'pingpong-racket') {
