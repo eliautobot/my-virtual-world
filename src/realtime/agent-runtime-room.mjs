@@ -989,6 +989,12 @@ function hasExpiredLease(agent, nowMs = Date.now()) {
   return !Number.isFinite(expires) || expires <= nowMs;
 }
 
+function isManualSnapshotOverride(raw = {}) {
+  const mode = safeText(raw.mode, '').toLowerCase();
+  const owner = safeText(raw.owner, '').toLowerCase();
+  return mode === 'manual' || owner === 'user-directed' || owner.startsWith('user-directed:');
+}
+
 function hasActiveWorldObjectState(object, nowMs = Date.now()) {
   if (!object || !ACTIVE_WORLD_OBJECT_STATES.has(String(object.state || '').toLowerCase())) return false;
   if (!object.expiresAt) return true;
@@ -1044,7 +1050,7 @@ export class AgentRuntimeRoom extends Room {
       const raw = message.snapshot && typeof message.snapshot === 'object' ? message.snapshot : message;
       const agentId = normalizeAgentId(raw.agentId);
       const existing = this.state.agents.get(agentId);
-      if (existing && hasActiveLease(existing)) {
+      if (existing && hasActiveLease(existing) && !isManualSnapshotOverride(raw)) {
         const leaseOwner = safeText(raw.leaseOwner || message.leaseOwner, '');
         if (leaseOwner !== existing.leaseOwner) {
           throw apiError('lease_conflict', 'snapshot cannot overwrite an active route lease', {
@@ -1167,6 +1173,8 @@ export class AgentRuntimeRoom extends Room {
       }
       const releaseSnapshot = {
         agentId,
+        mode: 'scripted',
+        owner: 'agent-scripted-mode',
         state: message.state || 'idle',
         routeId: '',
         worldActionId: '',
@@ -1189,6 +1197,8 @@ export class AgentRuntimeRoom extends Room {
       const before = snapshotToPlain(existing);
       this.upsertSnapshot({
         agentId,
+        mode: 'scripted',
+        owner: 'agent-scripted-mode',
         state: 'idle',
         routeId: '',
         worldActionId: '',

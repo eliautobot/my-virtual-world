@@ -188,25 +188,23 @@ async function run() {
         { key: 'traffic:0,0', ix: 0, iz: 0, type: 'x-int', openEdges: { n: true, s: true, e: true, w: true } },
         { key: 'traffic:1,0', ix: 1, iz: 0, type: 't-int', openEdges: { n: true, s: false, e: true, w: true } },
       ],
-      trafficVehicles: [
-        {
-          vehicleId: 'traffic-vehicle:0',
-          vehicleType: 'car',
-          color: 12345,
-          x: 0,
-          z: 0,
-          dir: 0,
-          speed: 10,
-          speedMult: 1,
-          path: [{ x: 0, z: 0 }, { x: 20, z: 0 }, { x: 20, z: 20 }],
-          pathIdx: 1,
-        },
-      ],
+      trafficVehicles: Array.from({ length: 30 }, (_, index) => ({
+        vehicleId: `traffic-vehicle:${index}`,
+        vehicleType: index % 5 === 0 ? 'truck' : 'car',
+        color: 12345 + index,
+        x: 0,
+        z: index * 2,
+        dir: 0,
+        speed: 10,
+        speedMult: 1,
+        path: [{ x: 0, z: index * 2 }, { x: 20, z: index * 2 }, { x: 20, z: 20 + index * 2 }],
+        pathIdx: 1,
+      })),
     });
     const topologyAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'world-topology-1');
     assert.equal(topologyAck.worldRuntime.schemaVersion, 'world-runtime/v1');
     assert.equal(Object.keys(topologyAck.worldRuntime.trafficLights).length, 2);
-    assert.equal(Object.keys(topologyAck.worldRuntime.trafficVehicles).length, 1);
+    assert.equal(Object.keys(topologyAck.worldRuntime.trafficVehicles).length, 30);
     assert.equal(topologyAck.worldRuntime.topologyHash, 'traffic:smoke');
     const firstWorldRuntime = await waitForWorldRuntime(room, (runtime) => runtime.trafficLights?.size === 2);
     const firstPhase = firstWorldRuntime.trafficLights.get('traffic:0,0').phaseMs;
@@ -252,6 +250,50 @@ async function run() {
     });
     const snapshotConflict = await waitForRoomMessage(room, 'runtime:error', (msg) => msg.requestId === 'snapshot-during-lease');
     assert.equal(snapshotConflict.code, 'lease_conflict');
+
+    room.send('runtime:claimRoute', {
+      requestId: 'claim-manual-agent',
+      agentId: 'manual-agent',
+      leaseOwner: 'smoke-client-route-owner',
+      routeId: 'route-manual-agent',
+      target: { kind: 'world-point', x: 20, y: 21, floor: 1 },
+      ttlMs: 10000,
+    });
+    const manualClaimAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'claim-manual-agent');
+    assert.equal(manualClaimAck.snapshot.leaseOwner, 'smoke-client-route-owner');
+
+    room.send('runtime:snapshot', {
+      requestId: 'manual-agent-conflict',
+      agentId: 'manual-agent',
+      x: 33,
+      y: 34,
+      floor: 1,
+      state: 'idle',
+    });
+    const manualAgentConflict = await waitForRoomMessage(room, 'runtime:error', (msg) => msg.requestId === 'manual-agent-conflict');
+    assert.equal(manualAgentConflict.code, 'lease_conflict');
+
+    room.send('runtime:snapshot', {
+      requestId: 'manual-agent-override',
+      agentId: 'manual-agent',
+      mode: 'manual',
+      owner: 'user-directed:smoke-client-b',
+      x: 33,
+      y: 34,
+      floor: 1,
+      state: 'idle',
+      routeId: '',
+      worldActionId: '',
+      target: null,
+      leaseOwner: '',
+      leaseExpiresAt: '',
+    });
+    const manualOverrideAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'manual-agent-override');
+    assert.equal(manualOverrideAck.snapshot.mode, 'manual');
+    assert.equal(manualOverrideAck.snapshot.owner, 'user-directed:smoke-client-b');
+    assert.equal(manualOverrideAck.snapshot.leaseOwner, '');
+    assert.equal(manualOverrideAck.snapshot.routeId, '');
+    assert.equal(manualOverrideAck.snapshot.x, 33);
 
     room.send('runtime:heartbeat', {
       requestId: 'heartbeat-1',
@@ -315,6 +357,8 @@ async function run() {
       reason: 'smoke-complete',
     });
     const releaseAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'release-1');
+    assert.equal(releaseAck.snapshot.mode, 'scripted');
+    assert.equal(releaseAck.snapshot.owner, 'agent-scripted-mode');
     assert.equal(releaseAck.snapshot.leaseOwner, '');
     assert.equal(releaseAck.snapshot.routeId, '');
     assert.equal(releaseAck.snapshot.worldActionId, '');
@@ -335,6 +379,8 @@ async function run() {
     const expiredEvent = await waitForRoomMessage(room, 'runtime:event', (msg) => msg.type === 'route-lease-expired' && msg.agentId === 'adam');
     assert.equal(expiredEvent.expiredLeaseOwner, 'smoke-client-stale');
     const expiredAgent = await waitForAgent(room, 'adam', (agent) => agent.leaseOwner === '' && agent.routeId === '' && agent.state === 'idle');
+    assert.equal(expiredAgent.mode, 'scripted');
+    assert.equal(expiredAgent.owner, 'agent-scripted-mode');
     assert.equal(expiredAgent.worldActionId, '');
     await room.leave(true);
 
@@ -351,7 +397,7 @@ async function run() {
     assert(resumedObject?.dataJson.includes('coffee-active-1'));
     const resumedRuntime = await waitForWorldRuntime(resumedRoom, (runtime) => runtime.trafficLights?.size === 2);
     assert.equal(resumedRuntime.topologyHash, 'traffic:smoke');
-    assert.equal(resumedRuntime.trafficVehicles?.size, 1);
+    assert.equal(resumedRuntime.trafficVehicles?.size, 30);
     await resumedRoom.leave(true);
 
     console.log('realtime smoke ok');

@@ -2411,12 +2411,20 @@ function getAgentRuntimeSnapshotOwner(agent, options = {}) {
   return makeAgentRuntimeClientOwner('main3d-position-persistence');
 }
 
-function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', { force = false, visualState = null } = {}) {
+function isAgentRuntimeManualSnapshotOverride(agent, options = {}) {
+  if (options.force !== true || agent?._manualPlacementPreview) return false;
+  return getAgentRuntimeSnapshotMode(agent, options) === 'manual';
+}
+
+function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', options = {}) {
+  const { force = false, visualState = null } = options;
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || !getAgentRuntimeAgentId(agent)) return false;
-  if (agent?._runtimeObserverOnly || agent?._manualPlacementPreview) return false;
-  if (agent?._runtimeRouteLease && ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease.state || ''))) return false;
+  const manualOverride = isAgentRuntimeManualSnapshotOverride(agent, options);
+  if (agent?._manualPlacementPreview) return false;
+  if (agent?._runtimeObserverOnly && !manualOverride) return false;
+  if (agent?._runtimeRouteLease && ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease.state || '')) && !manualOverride) return false;
   const runtimeSnapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
-  if (runtimeSnapshot && isAgentRuntimeSnapshotLeaseActive(runtimeSnapshot) && runtimeSnapshot.leaseOwner !== _agentRuntimeClient.leaseOwner) return false;
+  if (runtimeSnapshot && isAgentRuntimeSnapshotLeaseActive(runtimeSnapshot) && runtimeSnapshot.leaseOwner !== _agentRuntimeClient.leaseOwner && !manualOverride) return false;
   const now = Date.now();
   const last = agent._runtimeSnapshotPublish || null;
   if (force || !last) return true;
@@ -2440,6 +2448,13 @@ function publishAgentRuntimeMovementSnapshot(agent, state = 'idle', options = {}
   if (!shouldPublishAgentRuntimeSnapshot(agent, state, { ...options, visualState })) return null;
   const mode = getAgentRuntimeSnapshotMode(agent, options);
   const owner = getAgentRuntimeSnapshotOwner(agent, { ...options, mode });
+  if (isAgentRuntimeManualSnapshotOverride(agent, { ...options, mode })) {
+    agent._runtimeObserverOnly = false;
+    agent._runtimeRemoteWriterActive = false;
+    agent._runtimeRouteLease = null;
+    agent._runtimeLeaseOwner = '';
+    agent._runtimeRouteId = '';
+  }
   const floor = Math.max(1, Number(agent._floor || agent._targetFloor || 1) || 1);
   const publishRecord = {
     atMs: Date.now(),
