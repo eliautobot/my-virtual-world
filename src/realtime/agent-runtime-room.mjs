@@ -5,18 +5,93 @@ import { Room } from '@colyseus/core';
 import { MapSchema, Schema, defineTypes } from '@colyseus/schema';
 
 export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
+export const WORLD_RUNTIME_SCHEMA_VERSION = 'world-runtime/v1';
 export const AGENT_RUNTIME_ROOM_NAME = 'agent_runtime';
 export const DEFAULT_ROUTE_LEASE_TTL_MS = 15000;
 export const MAX_ROUTE_LEASE_TTL_MS = 60000;
 export const STALE_ROUTE_LEASE_SWEEP_MS = 1000;
+export const DEFAULT_WORLD_RUNTIME_TICK_MS = 500;
+export const WORLD_RUNTIME_PERSIST_INTERVAL_MS = 5000;
+export const WORLD_RUNTIME_TRAFFIC_CYCLE_MS = 40000;
+export const WORLD_RUNTIME_TRAFFIC_YELLOW_MS = 3000;
+export const WORLD_RUNTIME_TRAFFIC_ALL_RED_MS = 2000;
+export const MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS = 500;
 export const MAX_RUNTIME_EVENTS = 500;
 export const MAX_VISUAL_STATE_JSON_CHARS = 6000;
 export const MAX_WORLD_OBJECT_DATA_JSON_CHARS = 10000;
 
 const AGENT_ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const SAFE_TEXT_RE = /^[A-Za-z0-9_.:/@# -]{0,160}$/;
-const WORLD_OBJECT_KEY_RE = /^[A-Za-z0-9_.:/@# -]{1,160}$/;
+const WORLD_OBJECT_KEY_RE = /^[A-Za-z0-9_.:/@#, -]{1,160}$/;
 const ACTIVE_WORLD_OBJECT_STATES = new Set(['reserved', 'routing', 'active', 'using', 'occupied', 'queued', 'cooldown']);
+
+export class WorldRuntimeTrafficLightState extends Schema {
+  constructor(seed = {}) {
+    super();
+    this.key = '';
+    this.ix = 0;
+    this.iz = 0;
+    this.type = '';
+    this.openEdgesJson = '';
+    this.phaseMs = 0;
+    this.ns = 'green';
+    this.ew = 'red';
+    this.updatedAt = '';
+    this.version = 0;
+    Object.assign(this, seed);
+  }
+}
+
+defineTypes(WorldRuntimeTrafficLightState, {
+  key: 'string',
+  ix: 'number',
+  iz: 'number',
+  type: 'string',
+  openEdgesJson: 'string',
+  phaseMs: 'number',
+  ns: 'string',
+  ew: 'string',
+  updatedAt: 'string',
+  version: 'number',
+});
+
+export class WorldRuntimeState extends Schema {
+  constructor(seed = {}) {
+    super();
+    this.schemaVersion = WORLD_RUNTIME_SCHEMA_VERSION;
+    this.mode = 'server-authoritative';
+    this.tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS;
+    this.tickSeq = 0;
+    this.simTimeMs = 0;
+    this.startedAt = new Date().toISOString();
+    this.updatedAt = new Date(0).toISOString();
+    this.topologyHash = '';
+    this.topologyOwner = '';
+    this.topologyUpdatedAt = '';
+    this.trafficCycleMs = WORLD_RUNTIME_TRAFFIC_CYCLE_MS;
+    this.trafficYellowMs = WORLD_RUNTIME_TRAFFIC_YELLOW_MS;
+    this.trafficAllRedMs = WORLD_RUNTIME_TRAFFIC_ALL_RED_MS;
+    this.trafficLights = new MapSchema();
+    Object.assign(this, seed);
+  }
+}
+
+defineTypes(WorldRuntimeState, {
+  schemaVersion: 'string',
+  mode: 'string',
+  tickMs: 'number',
+  tickSeq: 'number',
+  simTimeMs: 'number',
+  startedAt: 'string',
+  updatedAt: 'string',
+  topologyHash: 'string',
+  topologyOwner: 'string',
+  topologyUpdatedAt: 'string',
+  trafficCycleMs: 'number',
+  trafficYellowMs: 'number',
+  trafficAllRedMs: 'number',
+  trafficLights: { map: WorldRuntimeTrafficLightState },
+});
 
 export class AgentRuntimeSnapshot extends Schema {
   constructor(seed = {}) {
@@ -111,6 +186,7 @@ export class AgentRuntimeState extends Schema {
     this.worldId = 'default';
     this.updatedAt = new Date(0).toISOString();
     this.eventSeq = 0;
+    this.worldRuntime = new WorldRuntimeState();
     this.agents = new MapSchema();
     this.objects = new MapSchema();
     Object.assign(this, seed);
@@ -122,6 +198,7 @@ defineTypes(AgentRuntimeState, {
   worldId: 'string',
   updatedAt: 'string',
   eventSeq: 'number',
+  worldRuntime: WorldRuntimeState,
   agents: { map: AgentRuntimeSnapshot },
   objects: { map: WorldRuntimeObjectState },
 });
@@ -144,10 +221,58 @@ export function stateToPlain(state, events = []) {
     worldId: state.worldId || 'default',
     updatedAt: state.updatedAt || new Date().toISOString(),
     eventSeq: Number(state.eventSeq || 0),
+    worldRuntime: worldRuntimeToPlain(state.worldRuntime),
     agents,
     objects,
     events: events.slice(-MAX_RUNTIME_EVENTS),
   };
+}
+
+export function worldRuntimeToPlain(worldRuntime) {
+  const trafficLights = {};
+  for (const [key, light] of (worldRuntime?.trafficLights?.entries?.() || [])) {
+    trafficLights[key] = trafficLightToPlain(light);
+  }
+  return {
+    schemaVersion: WORLD_RUNTIME_SCHEMA_VERSION,
+    mode: worldRuntime?.mode || 'server-authoritative',
+    tickMs: Number(worldRuntime?.tickMs || DEFAULT_WORLD_RUNTIME_TICK_MS),
+    tickSeq: Number(worldRuntime?.tickSeq || 0),
+    simTimeMs: Number(worldRuntime?.simTimeMs || 0),
+    startedAt: worldRuntime?.startedAt || '',
+    updatedAt: worldRuntime?.updatedAt || '',
+    topologyHash: worldRuntime?.topologyHash || '',
+    topologyOwner: worldRuntime?.topologyOwner || '',
+    topologyUpdatedAt: worldRuntime?.topologyUpdatedAt || '',
+    trafficCycleMs: Number(worldRuntime?.trafficCycleMs || WORLD_RUNTIME_TRAFFIC_CYCLE_MS),
+    trafficYellowMs: Number(worldRuntime?.trafficYellowMs || WORLD_RUNTIME_TRAFFIC_YELLOW_MS),
+    trafficAllRedMs: Number(worldRuntime?.trafficAllRedMs || WORLD_RUNTIME_TRAFFIC_ALL_RED_MS),
+    trafficLights,
+  };
+}
+
+export function trafficLightToPlain(light) {
+  const plain = {
+    key: light.key,
+    ix: Number(light.ix || 0),
+    iz: Number(light.iz || 0),
+    type: light.type || '',
+    phaseMs: Number(light.phaseMs || 0),
+    ns: light.ns || 'green',
+    ew: light.ew || 'red',
+    updatedAt: light.updatedAt || '',
+    version: Number(light.version || 0),
+  };
+  if (light.openEdgesJson) {
+    try {
+      plain.openEdges = JSON.parse(light.openEdgesJson);
+    } catch {
+      plain.openEdges = null;
+    }
+  } else {
+    plain.openEdges = null;
+  }
+  return plain;
 }
 
 export function snapshotToPlain(agent) {
@@ -256,6 +381,7 @@ function emptyRuntimeDocument() {
     worldId: 'default',
     updatedAt: new Date(0).toISOString(),
     eventSeq: 0,
+    worldRuntime: worldRuntimeToPlain(new WorldRuntimeState()),
     agents: {},
     objects: {},
     events: [],
@@ -268,6 +394,7 @@ function normalizeRuntimeDocument(raw) {
   doc.worldId = safeText(raw.worldId, 'default');
   doc.updatedAt = safeIso(raw.updatedAt, doc.updatedAt);
   doc.eventSeq = Math.max(0, Math.floor(numberOr(raw.eventSeq, 0)));
+  doc.worldRuntime = normalizeWorldRuntime(raw.worldRuntime || {});
   const rawAgents = raw.agents && typeof raw.agents === 'object' ? raw.agents : {};
   for (const [agentId, record] of Object.entries(rawAgents)) {
     try {
@@ -297,6 +424,7 @@ function stateFromDocument(doc) {
     worldId: safeText(doc.worldId, 'default'),
     updatedAt: safeIso(doc.updatedAt, new Date(0).toISOString()),
     eventSeq: Math.max(0, Math.floor(numberOr(doc.eventSeq, 0))),
+    worldRuntime: schemaWorldRuntimeFromPlain(doc.worldRuntime || {}),
   });
   for (const snapshot of Object.values(doc.agents || {})) {
     state.agents.set(snapshot.agentId, schemaSnapshotFromPlain(snapshot));
@@ -345,6 +473,44 @@ function schemaWorldObjectFromPlain(plain) {
     slotId: plain.slotId,
     dataJson: plain.data ? JSON.stringify(plain.data) : '',
     expiresAt: plain.expiresAt,
+    updatedAt: plain.updatedAt,
+    version: plain.version,
+  });
+}
+
+function schemaWorldRuntimeFromPlain(plain) {
+  const normalized = normalizeWorldRuntime(plain || {});
+  const worldRuntime = new WorldRuntimeState({
+    schemaVersion: WORLD_RUNTIME_SCHEMA_VERSION,
+    mode: normalized.mode,
+    tickMs: normalized.tickMs,
+    tickSeq: normalized.tickSeq,
+    simTimeMs: normalized.simTimeMs,
+    startedAt: normalized.startedAt,
+    updatedAt: normalized.updatedAt,
+    topologyHash: normalized.topologyHash,
+    topologyOwner: normalized.topologyOwner,
+    topologyUpdatedAt: normalized.topologyUpdatedAt,
+    trafficCycleMs: normalized.trafficCycleMs,
+    trafficYellowMs: normalized.trafficYellowMs,
+    trafficAllRedMs: normalized.trafficAllRedMs,
+  });
+  for (const light of Object.values(normalized.trafficLights || {})) {
+    worldRuntime.trafficLights.set(light.key, schemaTrafficLightFromPlain(light));
+  }
+  return worldRuntime;
+}
+
+function schemaTrafficLightFromPlain(plain) {
+  return new WorldRuntimeTrafficLightState({
+    key: plain.key,
+    ix: plain.ix,
+    iz: plain.iz,
+    type: plain.type,
+    openEdgesJson: plain.openEdges ? JSON.stringify(plain.openEdges) : '',
+    phaseMs: plain.phaseMs,
+    ns: plain.ns,
+    ew: plain.ew,
     updatedAt: plain.updatedAt,
     version: plain.version,
   });
@@ -410,6 +576,119 @@ function normalizeWorldObjectState(raw, existing = null) {
     updatedAt: safeIso(raw.updatedAt, now),
     version: Math.max(0, Math.floor(numberOr(raw.version, existingPlain.version || 0))),
   };
+}
+
+function normalizeWorldRuntime(raw = {}) {
+  const now = new Date().toISOString();
+  const trafficCycleMs = clampInteger(raw.trafficCycleMs, WORLD_RUNTIME_TRAFFIC_CYCLE_MS, 10000, 180000);
+  const trafficYellowMs = clampInteger(raw.trafficYellowMs, WORLD_RUNTIME_TRAFFIC_YELLOW_MS, 1000, 20000);
+  const trafficAllRedMs = clampInteger(raw.trafficAllRedMs, WORLD_RUNTIME_TRAFFIC_ALL_RED_MS, 500, 20000);
+  const rawLights = raw.trafficLights && typeof raw.trafficLights === 'object' ? raw.trafficLights : {};
+  const trafficLights = {};
+  for (const [fallbackKey, light] of Object.entries(rawLights).slice(0, MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS)) {
+    try {
+      const normalized = normalizeTrafficLightState({
+        ...light,
+        key: light?.key || fallbackKey,
+      }, { trafficCycleMs, trafficYellowMs, trafficAllRedMs });
+      trafficLights[normalized.key] = normalized;
+    } catch {
+      // Ignore malformed topology/light records while preserving the rest.
+    }
+  }
+  return {
+    schemaVersion: WORLD_RUNTIME_SCHEMA_VERSION,
+    mode: safeText(raw.mode, 'server-authoritative'),
+    tickMs: clampInteger(raw.tickMs, DEFAULT_WORLD_RUNTIME_TICK_MS, 100, 5000),
+    tickSeq: Math.max(0, Math.floor(numberOr(raw.tickSeq, 0))),
+    simTimeMs: Math.max(0, Math.floor(numberOr(raw.simTimeMs, 0))),
+    startedAt: safeIso(raw.startedAt, now),
+    updatedAt: safeIso(raw.updatedAt, new Date(0).toISOString()),
+    topologyHash: safeText(raw.topologyHash, ''),
+    topologyOwner: safeText(raw.topologyOwner, ''),
+    topologyUpdatedAt: safeIso(raw.topologyUpdatedAt, ''),
+    trafficCycleMs,
+    trafficYellowMs,
+    trafficAllRedMs,
+    trafficLights,
+  };
+}
+
+function normalizeTrafficLightState(raw = {}, runtime = {}) {
+  const key = normalizeWorldObjectKey(raw.key);
+  const cycleMs = clampInteger(runtime.trafficCycleMs ?? raw.trafficCycleMs, WORLD_RUNTIME_TRAFFIC_CYCLE_MS, 10000, 180000);
+  const phaseMs = positiveModulo(Math.floor(numberOr(raw.phaseMs, deterministicPhaseMs(key, cycleMs))), cycleMs);
+  const signal = computeTrafficSignal(phaseMs, {
+    trafficCycleMs: cycleMs,
+    trafficYellowMs: clampInteger(runtime.trafficYellowMs ?? raw.trafficYellowMs, WORLD_RUNTIME_TRAFFIC_YELLOW_MS, 1000, 20000),
+    trafficAllRedMs: clampInteger(runtime.trafficAllRedMs ?? raw.trafficAllRedMs, WORLD_RUNTIME_TRAFFIC_ALL_RED_MS, 500, 20000),
+  });
+  return {
+    key,
+    ix: Math.floor(numberOr(raw.ix, 0)),
+    iz: Math.floor(numberOr(raw.iz, 0)),
+    type: safeText(raw.type, ''),
+    openEdges: normalizeOpenEdges(raw.openEdges),
+    phaseMs,
+    ns: signal.ns,
+    ew: signal.ew,
+    updatedAt: safeIso(raw.updatedAt, ''),
+    version: Math.max(0, Math.floor(numberOr(raw.version, 0))),
+  };
+}
+
+function normalizeOpenEdges(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return {
+    n: value.n !== false,
+    s: value.s !== false,
+    e: value.e !== false,
+    w: value.w !== false,
+  };
+}
+
+function computeTrafficSignal(phaseMs, runtime = {}) {
+  const cycleMs = clampInteger(runtime.trafficCycleMs, WORLD_RUNTIME_TRAFFIC_CYCLE_MS, 10000, 180000);
+  const yellowMs = clampInteger(runtime.trafficYellowMs, WORLD_RUNTIME_TRAFFIC_YELLOW_MS, 1000, 20000);
+  const allRedMs = clampInteger(runtime.trafficAllRedMs, WORLD_RUNTIME_TRAFFIC_ALL_RED_MS, 500, 20000);
+  const halfCycle = cycleMs / 2;
+  const greenMs = Math.max(1000, halfCycle - yellowMs - allRedMs);
+  const phase = positiveModulo(phaseMs, cycleMs);
+  if (phase < greenMs) return { ns: 'green', ew: 'red' };
+  if (phase < greenMs + yellowMs) return { ns: 'yellow', ew: 'red' };
+  if (phase < halfCycle) return { ns: 'red', ew: 'red' };
+  if (phase < halfCycle + greenMs) return { ns: 'red', ew: 'green' };
+  if (phase < halfCycle + greenMs + yellowMs) return { ns: 'red', ew: 'yellow' };
+  return { ns: 'red', ew: 'red' };
+}
+
+function deterministicPhaseMs(key, cycleMs = WORLD_RUNTIME_TRAFFIC_CYCLE_MS) {
+  let hash = 2166136261;
+  for (const char of String(key || 'traffic-light')) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return hash % Math.max(1, cycleMs);
+}
+
+function deterministicTopologyHash(trafficLights = []) {
+  const normalized = trafficLights
+    .map(light => String(light?.key || `${light?.ix || 0},${light?.iz || 0}`).trim())
+    .filter(Boolean)
+    .sort()
+    .join('|');
+  if (!normalized) return '';
+  let hash = 2166136261;
+  for (const char of normalized) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return `traffic:${trafficLights.length}:${hash.toString(36)}`;
+}
+
+function positiveModulo(value, divisor) {
+  const d = Math.max(1, Number(divisor || 1));
+  return ((Number(value || 0) % d) + d) % d;
 }
 
 function normalizeWorldObjectData(value) {
@@ -495,6 +774,12 @@ function numberOr(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function clampInteger(value, fallback, min, max) {
+  const integer = Math.floor(numberOr(value, fallback));
+  if (!Number.isFinite(integer)) return fallback;
+  return Math.min(max, Math.max(min, integer));
+}
+
 function coordinateOr(value, fallback, field) {
   const number = numberOr(value, fallback);
   if (!Number.isFinite(number) || Math.abs(number) > 10000000) {
@@ -568,16 +853,19 @@ export class AgentRuntimeRoom extends Room {
   onCreate(options = {}) {
     this.dataDir = options.dataDir || process.env.VW_DATA_DIR || '.local-data';
     this.events = [];
+    this.lastWorldRuntimePersistMs = 0;
     const doc = readRuntimeDocument(this.dataDir);
     this.events = Array.isArray(doc.events) ? doc.events.slice(-MAX_RUNTIME_EVENTS) : [];
     this.setState(stateFromDocument(doc));
 
     this.onMessage('runtime:snapshot', (client, message) => this.handleSnapshot(client, message));
     this.onMessage('runtime:worldObject', (client, message) => this.handleWorldObject(client, message));
+    this.onMessage('runtime:worldTopology', (client, message) => this.handleWorldTopology(client, message));
     this.onMessage('runtime:claimRoute', (client, message) => this.handleClaimRoute(client, message));
     this.onMessage('runtime:heartbeat', (client, message) => this.handleHeartbeat(client, message));
     this.onMessage('runtime:releaseRoute', (client, message) => this.handleReleaseRoute(client, message));
     this.clock.setInterval(() => this.expireStaleRouteLeases(), STALE_ROUTE_LEASE_SWEEP_MS);
+    this.clock.setInterval(() => this.tickWorldRuntime(), DEFAULT_WORLD_RUNTIME_TICK_MS);
   }
 
   onJoin(client) {
@@ -640,6 +928,14 @@ export class AgentRuntimeRoom extends Room {
       }
       const object = this.upsertWorldObject(raw, 'world-object-updated');
       this.ackWorldObject(client, message, 'runtime:worldObject', object);
+    });
+  }
+
+  handleWorldTopology(client, message = {}) {
+    this.withErrors(client, message, 'runtime:worldTopology', () => {
+      const raw = message.topology && typeof message.topology === 'object' ? message.topology : message;
+      const worldRuntime = this.upsertWorldTopology(raw, client, 'world-topology-updated');
+      this.ackWorldRuntime(client, message, 'runtime:worldTopology', worldRuntime);
     });
   }
 
@@ -778,6 +1074,86 @@ export class AgentRuntimeRoom extends Room {
     return { object, event };
   }
 
+  upsertWorldTopology(raw, client, eventType) {
+    const runtime = this.state.worldRuntime || new WorldRuntimeState();
+    if (!this.state.worldRuntime) this.state.worldRuntime = runtime;
+    const now = new Date().toISOString();
+    const owner = safeText(raw.owner, client?.sessionId || '') || safeText(client?.sessionId, 'world-runtime');
+    const trafficLights = Array.isArray(raw.trafficLights) ? raw.trafficLights : [];
+    if (trafficLights.length > MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS) {
+      throw apiError('world_topology_too_large', `world topology can include at most ${MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS} traffic lights`);
+    }
+    runtime.mode = 'server-authoritative';
+    runtime.tickMs = clampInteger(raw.tickMs, runtime.tickMs || DEFAULT_WORLD_RUNTIME_TICK_MS, 100, 5000);
+    runtime.trafficCycleMs = clampInteger(raw.trafficCycleMs, runtime.trafficCycleMs || WORLD_RUNTIME_TRAFFIC_CYCLE_MS, 10000, 180000);
+    runtime.trafficYellowMs = clampInteger(raw.trafficYellowMs, runtime.trafficYellowMs || WORLD_RUNTIME_TRAFFIC_YELLOW_MS, 1000, 20000);
+    runtime.trafficAllRedMs = clampInteger(raw.trafficAllRedMs, runtime.trafficAllRedMs || WORLD_RUNTIME_TRAFFIC_ALL_RED_MS, 500, 20000);
+    runtime.topologyHash = safeText(raw.topologyHash, '') || deterministicTopologyHash(trafficLights);
+    runtime.topologyOwner = owner;
+    runtime.topologyUpdatedAt = now;
+    runtime.updatedAt = now;
+
+    const seen = new Set();
+    for (const rawLight of trafficLights) {
+      const light = normalizeTrafficLightState(rawLight, runtime);
+      const existing = runtime.trafficLights.get(light.key);
+      seen.add(light.key);
+      const schemaLight = schemaTrafficLightFromPlain({
+        ...light,
+        phaseMs: existing ? Number(existing.phaseMs || 0) : light.phaseMs,
+        ns: existing?.ns || light.ns,
+        ew: existing?.ew || light.ew,
+        updatedAt: now,
+        version: Number(existing?.version || 0) + 1,
+      });
+      runtime.trafficLights.set(light.key, schemaLight);
+    }
+    for (const key of Array.from(runtime.trafficLights.keys())) {
+      if (!seen.has(key)) runtime.trafficLights.delete(key);
+    }
+
+    this.state.updatedAt = now;
+    const event = this.recordEvent(eventType, 'worldRuntime', worldRuntimeToPlain(runtime), {
+      topologyHash: runtime.topologyHash,
+      trafficLightCount: runtime.trafficLights.size,
+    });
+    writeRuntimeDocument(this.dataDir, this.state, this.events);
+    return { worldRuntime: runtime, event };
+  }
+
+  tickWorldRuntime(nowMs = Date.now()) {
+    const runtime = this.state.worldRuntime;
+    if (!runtime) return null;
+    const tickMs = clampInteger(runtime.tickMs, DEFAULT_WORLD_RUNTIME_TICK_MS, 100, 5000);
+    const now = new Date(nowMs).toISOString();
+    runtime.tickMs = tickMs;
+    runtime.tickSeq = Number(runtime.tickSeq || 0) + 1;
+    runtime.simTimeMs = Math.max(0, Number(runtime.simTimeMs || 0) + tickMs);
+    runtime.updatedAt = now;
+    this.state.updatedAt = now;
+
+    let changedLights = 0;
+    for (const [, light] of runtime.trafficLights.entries()) {
+      const nextPhase = positiveModulo(Number(light.phaseMs || 0) + tickMs, runtime.trafficCycleMs || WORLD_RUNTIME_TRAFFIC_CYCLE_MS);
+      const signal = computeTrafficSignal(nextPhase, runtime);
+      const changed = light.ns !== signal.ns || light.ew !== signal.ew;
+      light.phaseMs = nextPhase;
+      if (changed) {
+        light.ns = signal.ns;
+        light.ew = signal.ew;
+        light.updatedAt = now;
+        light.version = Number(light.version || 0) + 1;
+        changedLights++;
+      }
+    }
+
+    if (changedLights > 0 || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
+      this.lastWorldRuntimePersistMs = nowMs;
+      writeRuntimeDocument(this.dataDir, this.state, this.events);
+    }
+    return runtime;
+  }
+
   recordEvent(type, agentId, snapshot, extra = {}) {
     this.state.eventSeq = Number(this.state.eventSeq || 0) + 1;
     const event = {
@@ -812,6 +1188,16 @@ export class AgentRuntimeRoom extends Room {
       ok: true,
       objectKey: result.object.objectKey,
       object: worldObjectToPlain(result.object),
+      event: result.event,
+    });
+  }
+
+  ackWorldRuntime(client, message, type, result) {
+    client.send('runtime:ack', {
+      requestId: requestIdFrom(message),
+      type,
+      ok: true,
+      worldRuntime: worldRuntimeToPlain(result.worldRuntime),
       event: result.event,
     });
   }

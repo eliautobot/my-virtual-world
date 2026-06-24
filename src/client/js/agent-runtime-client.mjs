@@ -65,6 +65,51 @@ export function normalizeWorldObjectState(raw = null) {
   });
 }
 
+export function normalizeWorldRuntimeState(raw = null) {
+  if (!raw || typeof raw !== 'object') return null;
+  const rawLights = raw.trafficLights && typeof raw.trafficLights === 'object' ? raw.trafficLights : {};
+  const trafficLights = new Map();
+  const entries = typeof rawLights.entries === 'function' ? rawLights.entries() : Object.entries(rawLights);
+  for (const [fallbackKey, rawLight] of entries) {
+    const light = normalizeTrafficLightState({ ...rawLight, key: rawLight?.key || fallbackKey });
+    if (light) trafficLights.set(light.key, light);
+  }
+  return Object.freeze({
+    schemaVersion: String(raw.schemaVersion || 'world-runtime/v1'),
+    mode: String(raw.mode || 'server-authoritative'),
+    tickMs: Number.isFinite(Number(raw.tickMs)) ? Number(raw.tickMs) : 500,
+    tickSeq: Number.isFinite(Number(raw.tickSeq)) ? Number(raw.tickSeq) : 0,
+    simTimeMs: Number.isFinite(Number(raw.simTimeMs)) ? Number(raw.simTimeMs) : 0,
+    startedAt: String(raw.startedAt || ''),
+    updatedAt: String(raw.updatedAt || ''),
+    topologyHash: String(raw.topologyHash || ''),
+    topologyOwner: String(raw.topologyOwner || ''),
+    topologyUpdatedAt: String(raw.topologyUpdatedAt || ''),
+    trafficCycleMs: Number.isFinite(Number(raw.trafficCycleMs)) ? Number(raw.trafficCycleMs) : 40000,
+    trafficYellowMs: Number.isFinite(Number(raw.trafficYellowMs)) ? Number(raw.trafficYellowMs) : 3000,
+    trafficAllRedMs: Number.isFinite(Number(raw.trafficAllRedMs)) ? Number(raw.trafficAllRedMs) : 2000,
+    trafficLights,
+  });
+}
+
+export function normalizeTrafficLightState(raw = null) {
+  if (!raw || typeof raw !== 'object') return null;
+  const key = String(raw.key || '').trim();
+  if (!key) return null;
+  return Object.freeze({
+    key,
+    ix: Number.isFinite(Number(raw.ix)) ? Number(raw.ix) : 0,
+    iz: Number.isFinite(Number(raw.iz)) ? Number(raw.iz) : 0,
+    type: String(raw.type || ''),
+    openEdges: raw.openEdges && typeof raw.openEdges === 'object' ? Object.freeze({ ...raw.openEdges }) : null,
+    phaseMs: Number.isFinite(Number(raw.phaseMs)) ? Number(raw.phaseMs) : 0,
+    ns: String(raw.ns || 'green'),
+    ew: String(raw.ew || 'red'),
+    updatedAt: String(raw.updatedAt || ''),
+    version: Number.isFinite(Number(raw.version)) ? Number(raw.version) : 0,
+  });
+}
+
 export function snapshotsFromRuntimeDocument(doc = null) {
   const snapshots = new Map();
   const rawAgents = doc?.agents && typeof doc.agents === 'object' ? doc.agents : {};
@@ -83,6 +128,10 @@ export function worldObjectsFromRuntimeDocument(doc = null) {
     if (object) objects.set(object.objectKey, object);
   }
   return objects;
+}
+
+export function worldRuntimeFromRuntimeDocument(doc = null) {
+  return normalizeWorldRuntimeState(doc?.worldRuntime || null);
 }
 
 export function snapshotForIdentityKeys(snapshots, keys) {
@@ -208,6 +257,53 @@ function worldObjectsFromRoomState(room) {
   return objects;
 }
 
+function worldRuntimeFromRoomState(room) {
+  const raw = room?.state?.worldRuntime;
+  if (!raw) return null;
+  const trafficLights = {};
+  const rawLights = raw.trafficLights;
+  if (rawLights && typeof rawLights.entries === 'function') {
+    for (const [key, light] of rawLights.entries()) {
+      let openEdges = null;
+      if (light.openEdgesJson) {
+        try {
+          openEdges = JSON.parse(light.openEdgesJson);
+        } catch {
+          openEdges = null;
+        }
+      }
+      trafficLights[key] = {
+        key: light.key || key,
+        ix: light.ix,
+        iz: light.iz,
+        type: light.type,
+        openEdges,
+        phaseMs: light.phaseMs,
+        ns: light.ns,
+        ew: light.ew,
+        updatedAt: light.updatedAt,
+        version: light.version,
+      };
+    }
+  }
+  return normalizeWorldRuntimeState({
+    schemaVersion: raw.schemaVersion,
+    mode: raw.mode,
+    tickMs: raw.tickMs,
+    tickSeq: raw.tickSeq,
+    simTimeMs: raw.simTimeMs,
+    startedAt: raw.startedAt,
+    updatedAt: raw.updatedAt,
+    topologyHash: raw.topologyHash,
+    topologyOwner: raw.topologyOwner,
+    topologyUpdatedAt: raw.topologyUpdatedAt,
+    trafficCycleMs: raw.trafficCycleMs,
+    trafficYellowMs: raw.trafficYellowMs,
+    trafficAllRedMs: raw.trafficAllRedMs,
+    trafficLights,
+  });
+}
+
 function waitForMessage(room, type, timeoutMs = 1500) {
   return new Promise(resolve => {
     const timer = setTimeout(() => {
@@ -261,10 +357,12 @@ export async function createAgentRuntimeClient({
   const listeners = new Set();
   let snapshots = new Map();
   let worldObjects = new Map();
+  let worldRuntime = null;
   let room = null;
   let client = null;
   let unsubscribeState = null;
   let requestSeq = 0;
+  const pendingRequestIds = new Set();
 
   const notify = source => {
     const frozen = new Map(snapshots);
@@ -283,20 +381,25 @@ export async function createAgentRuntimeClient({
     unsubscribeState = room.onStateChange(() => {
       snapshots = snapshotsFromRoomState(room);
       worldObjects = worldObjectsFromRoomState(room);
+      worldRuntime = worldRuntimeFromRoomState(room);
       notify('state');
     });
     room.onMessage('runtime:event', () => {
       snapshots = snapshotsFromRoomState(room);
       worldObjects = worldObjectsFromRoomState(room);
+      worldRuntime = worldRuntimeFromRoomState(room);
       notify('runtime:event');
     });
     room.onMessage('runtime:ack', () => {
       snapshots = snapshotsFromRoomState(room);
       worldObjects = worldObjectsFromRoomState(room);
+      worldRuntime = worldRuntimeFromRoomState(room);
       notify('runtime:ack');
     });
     room.onMessage('runtime:error', message => {
-      logger?.warn?.('Agent runtime sidecar error', message);
+      if (!pendingRequestIds.has(message?.requestId)) {
+        logger?.warn?.('Agent runtime sidecar error', message);
+      }
     });
     const welcome = await waitForMessage(room, 'runtime:welcome');
     snapshots = welcome?.snapshot
@@ -305,6 +408,9 @@ export async function createAgentRuntimeClient({
     worldObjects = welcome?.snapshot
       ? worldObjectsFromRuntimeDocument(welcome.snapshot)
       : worldObjectsFromRoomState(room);
+    worldRuntime = welcome?.snapshot
+      ? worldRuntimeFromRuntimeDocument(welcome.snapshot)
+      : worldRuntimeFromRoomState(room);
   } catch (error) {
     logger?.warn?.('Agent runtime connection failed', error);
     return agentRuntimeUnavailable('connection failed', config);
@@ -320,6 +426,7 @@ export async function createAgentRuntimeClient({
       const cleanup = () => {
         if (done) return;
         done = true;
+        pendingRequestIds.delete(requestId);
         clearTimeout(timer);
         if (typeof unsubscribeAck === 'function') unsubscribeAck();
         if (typeof unsubscribeError === 'function') unsubscribeError();
@@ -342,6 +449,7 @@ export async function createAgentRuntimeClient({
         error.response = message;
         reject(error);
       });
+      pendingRequestIds.add(requestId);
       room.send(type, { ...(payload || {}), requestId });
     });
   };
@@ -359,6 +467,9 @@ export async function createAgentRuntimeClient({
     },
     get worldObjects() {
       return new Map(worldObjects);
+    },
+    get worldRuntime() {
+      return worldRuntime;
     },
     getSnapshotForAgent(agent) {
       return snapshotForIdentityKeys(snapshots, getRuntimeIdentityKeys(agent));
@@ -381,6 +492,9 @@ export async function createAgentRuntimeClient({
     },
     writeWorldObjectState(payload, options) {
       return sendRequest('runtime:worldObject', payload, options);
+    },
+    writeWorldTopology(payload, options) {
+      return sendRequest('runtime:worldTopology', payload, options);
     },
     claimRoute(payload, options) {
       return sendRequest('runtime:claimRoute', { leaseOwner, ...(payload || {}) }, options);
@@ -408,6 +522,7 @@ function agentRuntimeUnavailable(reason, config = DEFAULT_CONFIG) {
     leaseOwner: '',
     snapshots: new Map(),
     worldObjects: new Map(),
+    worldRuntime: null,
     getSnapshotForAgent() { return null; },
     getSnapshotForKeys() { return null; },
     getWorldObjectState() { return null; },
@@ -415,6 +530,7 @@ function agentRuntimeUnavailable(reason, config = DEFAULT_CONFIG) {
     sendRequest() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     writeSnapshot() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     writeWorldObjectState() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
+    writeWorldTopology() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     claimRoute() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     heartbeat() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     releaseRoute() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },

@@ -92,6 +92,16 @@ async function waitForAgent(room, agentId, predicate = () => true) {
   throw new Error(`timed out waiting for agent ${agentId}`);
 }
 
+async function waitForWorldRuntime(room, predicate = () => true) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const worldRuntime = room.state?.worldRuntime;
+    if (worldRuntime && predicate(worldRuntime)) return worldRuntime;
+    await delay(50);
+  }
+  throw new Error('timed out waiting for worldRuntime');
+}
+
 async function connectRoom(port) {
   const client = new Client(`ws://127.0.0.1:${port}`);
   const room = await client.joinOrCreate(AGENT_RUNTIME_ROOM_NAME, { worldId: 'smoke' });
@@ -169,6 +179,26 @@ async function run() {
     });
     const objectConflict = await waitForRoomMessage(room, 'runtime:error', (msg) => msg.requestId === 'object-conflict');
     assert.equal(objectConflict.code, 'object_state_conflict');
+
+    room.send('runtime:worldTopology', {
+      requestId: 'world-topology-1',
+      owner: 'main3d-world-topology:smoke-client-a',
+      topologyHash: 'traffic:smoke',
+      trafficLights: [
+        { key: 'traffic:0,0', ix: 0, iz: 0, type: 'x-int', openEdges: { n: true, s: true, e: true, w: true } },
+        { key: 'traffic:1,0', ix: 1, iz: 0, type: 't-int', openEdges: { n: true, s: false, e: true, w: true } },
+      ],
+    });
+    const topologyAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'world-topology-1');
+    assert.equal(topologyAck.worldRuntime.schemaVersion, 'world-runtime/v1');
+    assert.equal(Object.keys(topologyAck.worldRuntime.trafficLights).length, 2);
+    assert.equal(topologyAck.worldRuntime.topologyHash, 'traffic:smoke');
+    const firstWorldRuntime = await waitForWorldRuntime(room, (runtime) => runtime.trafficLights?.size === 2);
+    const firstPhase = firstWorldRuntime.trafficLights.get('traffic:0,0').phaseMs;
+    const firstTickSeq = firstWorldRuntime.tickSeq;
+    const firstSimTimeMs = firstWorldRuntime.simTimeMs;
+    const tickedWorldRuntime = await waitForWorldRuntime(room, (runtime) => runtime.tickSeq > firstTickSeq && runtime.trafficLights.get('traffic:0,0').phaseMs !== firstPhase);
+    assert(tickedWorldRuntime.simTimeMs > firstSimTimeMs);
 
     room.send('runtime:claimRoute', {
       requestId: 'claim-1',
@@ -298,6 +328,8 @@ async function run() {
     const resumedObject = resumedRoom.state?.objects?.get?.('office:furniture:19:countertopCoffeeMachine');
     assert.equal(resumedObject?.state, 'active');
     assert(resumedObject?.dataJson.includes('coffee-active-1'));
+    const resumedRuntime = await waitForWorldRuntime(resumedRoom, (runtime) => runtime.trafficLights?.size === 2);
+    assert.equal(resumedRuntime.topologyHash, 'traffic:smoke');
     await resumedRoom.leave(true);
 
     console.log('realtime smoke ok');
