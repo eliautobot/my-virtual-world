@@ -281,7 +281,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260623-world-runtime-authority-r1',
+  'js/main3d.js?v=20260623-world-runtime-engine-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -591,7 +591,11 @@ for (const token of [
   'makeAgentRuntimeClientOwner',
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
-  'agent-runtime-client.mjs?v=20260623-world-runtime-authority-r1',
+  'agent-runtime-client.mjs?v=20260623-world-runtime-engine-r1',
+  'runtime:worldTopology',
+  'writeWorldTopology',
+  'applyAgentRuntimeTrafficLights',
+  '__VWWorldRuntimeTraffic',
 ]) {
   assert(`${main3dJs}\n${agentCharactersJs}\n${agentRuntimeClientJs}`.includes(token), `Live Mode head indicator missing token: ${token}`);
 }

@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-world-runtime-authority-r1';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-world-runtime-engine-r1';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1106,6 +1106,7 @@ const AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE = API_TILE * 6;
 const AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE = 0.05;
 const AGENT_RUNTIME_WORLD_OBJECT_TTL_MS = 15000;
 const AGENT_RUNTIME_WORLD_OBJECT_COOLDOWN_MS = 8000;
+const AGENT_RUNTIME_TRAFFIC_TOPOLOGY_REQUEST_TIMEOUT_MS = 3500;
 let editMode = null;
 
 // ── Feature 1: Vehicles ──────────────────────────────────────────────
@@ -1117,6 +1118,8 @@ const TRAFFIC_CYCLE = 40.0;  // seconds per full cycle (green + yellow + red per
 const YELLOW_TIME = 3.0;     // seconds of yellow before switching
 const ALL_RED_TIME = 2.0;    // all-red clearance interval — lets intersection clear before switching
 let _trafficLightGroup = null;
+let _runtimeTrafficTopologyPublish = null;
+let _runtimeTrafficLastAppliedSeq = -1;
 
 // ── Feature 6: Stats panel ───────────────────────────────────────────
 // ── Feature B3: Building notifications ──────────────────────────────
@@ -1390,6 +1393,110 @@ function applyAgentRuntimeWorldObjectStatesToWorld() {
   let applied = 0;
   for (const objectState of _agentRuntimeClient.worldObjects.values()) {
     if (applyAgentRuntimeWorldObjectStateToWorld(objectState)) applied++;
+  }
+  return applied;
+}
+
+function getRuntimeTrafficTopologyHash(lights = []) {
+  const keys = lights
+    .map(light => String(light?.key || `${light?.ix || 0},${light?.iz || 0}`).trim())
+    .filter(Boolean)
+    .sort();
+  if (!keys.length) return '';
+  let hash = 2166136261;
+  for (const char of keys.join('|')) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return `traffic:${keys.length}:${hash.toString(36)}`;
+}
+
+function makeAgentRuntimeTrafficTopology() {
+  const trafficLights = [];
+  for (const [key, tl] of _trafficLights.entries()) {
+    trafficLights.push({
+      key,
+      ix: tl.ix,
+      iz: tl.iz,
+      type: tl.type || '',
+      openEdges: tl.openEdges || null,
+    });
+  }
+  trafficLights.sort((a, b) => a.key.localeCompare(b.key));
+  return {
+    owner: makeAgentRuntimeClientOwner('main3d-world-topology'),
+    topologyHash: getRuntimeTrafficTopologyHash(trafficLights),
+    trafficCycleMs: Math.round(TRAFFIC_CYCLE * 1000),
+    trafficYellowMs: Math.round(YELLOW_TIME * 1000),
+    trafficAllRedMs: Math.round(ALL_RED_TIME * 1000),
+    trafficLights,
+  };
+}
+
+function publishAgentRuntimeTrafficTopology({ force = false } = {}) {
+  if (!_agentRuntimeClient?.connected || typeof _agentRuntimeClient.writeWorldTopology !== 'function') return null;
+  if (!_trafficLights.size) return null;
+  const topology = makeAgentRuntimeTrafficTopology();
+  if (!topology.topologyHash) return null;
+  const last = _runtimeTrafficTopologyPublish || null;
+  if (!force && last?.topologyHash === topology.topologyHash && last?.lightCount === topology.trafficLights.length) {
+    return null;
+  }
+  _runtimeTrafficTopologyPublish = {
+    topologyHash: topology.topologyHash,
+    lightCount: topology.trafficLights.length,
+    atMs: Date.now(),
+  };
+  return _agentRuntimeClient.writeWorldTopology(topology, { timeoutMs: AGENT_RUNTIME_TRAFFIC_TOPOLOGY_REQUEST_TIMEOUT_MS })
+    .then(ack => {
+      _runtimeTrafficTopologyPublish = {
+        ..._runtimeTrafficTopologyPublish,
+        ackAtMs: Date.now(),
+        tickSeq: ack?.worldRuntime?.tickSeq || null,
+      };
+      applyAgentRuntimeTrafficLights();
+      return ack;
+    })
+    .catch(error => {
+      _runtimeTrafficTopologyPublish = {
+        ..._runtimeTrafficTopologyPublish,
+        failedAtMs: Date.now(),
+        error: error?.message || String(error),
+        code: error?.code || null,
+      };
+      return null;
+    });
+}
+
+function applyAgentRuntimeTrafficLights() {
+  const worldRuntime = _agentRuntimeClient?.worldRuntime || null;
+  const runtimeLights = worldRuntime?.trafficLights;
+  if (!runtimeLights?.size || !_trafficLights.size) return 0;
+  if (Number(worldRuntime.tickSeq || 0) === _runtimeTrafficLastAppliedSeq) return 0;
+  _runtimeTrafficLastAppliedSeq = Number(worldRuntime.tickSeq || 0);
+  let applied = 0;
+  for (const [key, tl] of _trafficLights.entries()) {
+    const runtimeLight = runtimeLights.get(key);
+    if (!runtimeLight) continue;
+    const nextNs = runtimeLight.ns || tl.ns;
+    const nextEw = runtimeLight.ew || tl.ew;
+    const changed = tl.ns !== nextNs || tl.ew !== nextEw;
+    tl.phase = Number(runtimeLight.phaseMs || 0) / 1000;
+    tl.ns = nextNs;
+    tl.ew = nextEw;
+    tl.runtimeWorldRuntime = true;
+    tl.runtimeVersion = runtimeLight.version || 0;
+    if (changed) _updateTrafficLightVisuals(tl);
+    applied++;
+  }
+  if (typeof window !== 'undefined') {
+    window.__VWWorldRuntimeTraffic = {
+      applied,
+      tickSeq: worldRuntime.tickSeq || 0,
+      topologyHash: worldRuntime.topologyHash || '',
+      lightCount: runtimeLights.size,
+      updatedAt: worldRuntime.updatedAt || '',
+    };
   }
   return applied;
 }
@@ -1892,6 +1999,8 @@ function subscribeAgentRuntimeSnapshots() {
   if (_agentRuntimeUnsubscribe) _agentRuntimeUnsubscribe();
   _agentRuntimeUnsubscribe = _agentRuntimeClient.onSnapshots((snapshots, meta = {}) => {
     applyAgentRuntimeWorldObjectStatesToWorld();
+    publishAgentRuntimeTrafficTopology();
+    applyAgentRuntimeTrafficLights();
     const hydrated = applyAgentRuntimeSnapshotsToAgents(meta.source || 'runtime:update', { updateVisible: true });
     if (hydrated > 0) updateAgentList();
   });
@@ -2222,6 +2331,8 @@ function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', { force = fals
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || !getAgentRuntimeAgentId(agent)) return false;
   if (agent?._runtimeObserverOnly || agent?._manualPlacementPreview) return false;
   if (agent?._runtimeRouteLease && ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease.state || ''))) return false;
+  const runtimeSnapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
+  if (runtimeSnapshot && isAgentRuntimeSnapshotLeaseActive(runtimeSnapshot) && runtimeSnapshot.leaseOwner !== _agentRuntimeClient.leaseOwner) return false;
   const now = Date.now();
   const last = agent._runtimeSnapshotPublish || null;
   if (force || !last) return true;
@@ -29597,6 +29708,8 @@ async function loadAgents() {
 
     await runtimeClientPromise;
     applyAgentRuntimeWorldObjectStatesToWorld();
+    publishAgentRuntimeTrafficTopology({ force: true });
+    applyAgentRuntimeTrafficLights();
     applyAgentRuntimeSnapshotsToAgents('loadAgents', { updateVisible: false });
 
     agentsList.forEach(a => {
@@ -55533,6 +55646,8 @@ function _rebuildTrafficLights() {
   for (const [, tl] of _trafficLights) {
     _updateTrafficLightVisuals(tl);
   }
+  publishAgentRuntimeTrafficTopology({ force: true });
+  applyAgentRuntimeTrafficLights();
 }
 
 function _updateTrafficLightVisuals(tl) {
@@ -55548,6 +55663,11 @@ function _updateTrafficLightVisuals(tl) {
  * The all-red clearance phase ensures the intersection is empty before the next direction gets green.
  */
 function updateTrafficLights(dt) {
+  if (_agentRuntimeClient?.worldRuntime?.trafficLights?.size) {
+    applyAgentRuntimeTrafficLights();
+    return;
+  }
+
   // Phase layout: NS-green | NS-yellow | ALL-RED | EW-green | EW-yellow | ALL-RED
   const halfCycle = TRAFFIC_CYCLE / 2;
   const greenTime = halfCycle - YELLOW_TIME - ALL_RED_TIME;

@@ -7,7 +7,7 @@ This document defines how My Virtual World uses Colyseus without replacing the e
 
 ## Purpose
 
-The Colyseus sidecar is the authoritative realtime runtime for live agent location, route leases, and heartbeat snapshots.
+The Colyseus sidecar is the authoritative realtime runtime for live agent location, route leases, heartbeat snapshots, and the first server-ticked world runtime state.
 
 It exists because Live Agent Mode needs online-game behavior before AI behavior:
 
@@ -24,8 +24,8 @@ Three.js remains the renderer. Colyseus does not replace the visual world, pathf
 | Owner | Responsibility |
 | --- | --- |
 | Python server | Static files, world/building/chunk APIs, saved world data, licensing, provider integrations. |
-| Browser client | Three.js rendering, current interior/exterior route execution, object action animation. |
-| Colyseus sidecar | Realtime agent runtime snapshots, route leases, heartbeat state, multi-client broadcast, runtime persistence. |
+| Browser client | Three.js rendering, current interior/exterior route execution, object action animation, vehicle mesh rendering. |
+| Colyseus sidecar | Realtime agent runtime snapshots, route leases, heartbeat state, worldRuntime clock, traffic-light phases, multi-client broadcast, runtime persistence. |
 
 The parent PR starts the sidecar. The first child PR wires the browser to hydrate and observe agent locations from it.
 
@@ -100,6 +100,37 @@ in every browser:
 }
 ```
 
+The room also exposes a top-level `worldRuntime`. This is the engine-shaped
+state that browser renderers observe. It starts with a server-owned tick and
+shared traffic-light phases:
+
+```json
+{
+  "schemaVersion": "world-runtime/v1",
+  "mode": "server-authoritative",
+  "tickMs": 500,
+  "tickSeq": 42,
+  "simTimeMs": 21000,
+  "topologyHash": "traffic:12:abc123",
+  "trafficCycleMs": 40000,
+  "trafficYellowMs": 3000,
+  "trafficAllRedMs": 2000,
+  "trafficLights": {
+    "12,8": {
+      "key": "12,8",
+      "ix": 12,
+      "iz": 8,
+      "type": "x-int",
+      "openEdges": { "n": true, "s": true, "e": true, "w": true },
+      "phaseMs": 18500,
+      "ns": "red",
+      "ew": "green",
+      "version": 4
+    }
+  }
+}
+```
+
 ## Colyseus Messages
 
 Client to server:
@@ -107,6 +138,7 @@ Client to server:
 ```text
 runtime:snapshot
 runtime:worldObject
+runtime:worldTopology
 runtime:claimRoute
 runtime:heartbeat
 runtime:releaseRoute
@@ -325,6 +357,22 @@ object authority layer. The same pattern should be extended to traffic,
 server-side timers, and broader world events until browsers are renderers of one
 persistent runtime world instead of independent simulations.
 
+## World Runtime Engine Foundation
+
+The next child PR starts the full `worldRuntime` shape. Browsers publish the
+road/intersection topology they already load from the Python world APIs. The
+Colyseus room stores that topology under `worldRuntime`, owns the simulation
+clock, and advances traffic-light phases on the server tick. Browser instances
+then render the shared `worldRuntime.trafficLights` state instead of advancing
+their own traffic-light phase clocks.
+
+This removes one major source of multi-browser drift: traffic lights now change
+from one shared runtime clock. Vehicles still render and route in the browser in
+this slice, but they now read the shared light states. The next migration should
+move vehicle roster/path/position updates into `worldRuntime` too, followed by
+object interaction timers, seat/final-anchor resolution, and broader world
+events.
+
 ## Next PRs
 
 The sidecar parent PR starts the runtime server. The hydration child PR changes initial/observed placement. The route-heartbeat child PR proves route claim/heartbeat/release. The visible persistence child PR wires ordinary route movement and stale-lease recovery into that runtime.
@@ -332,7 +380,7 @@ The sidecar parent PR starts the runtime server. The hydration child PR changes 
 Follow-up work:
 
 - shared object-state coverage for more non-explicit ambient lifecycle paths
-- shared traffic/light/vehicle state from Colyseus
+- shared vehicle roster/path/position state from Colyseus
 - server-side runtime ticks for timers and cooldown expiry
 - promotion from runtime-coherent Live Mode controls to behavior ownership
 - promotion from manual route trigger to real planner/model route requests
