@@ -1,6 +1,7 @@
 const DEFAULT_ROOM = 'agent_runtime';
 const DEFAULT_CONFIG = Object.freeze({ enabled: false, url: '', room: DEFAULT_ROOM });
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 4500;
 
 export function getRuntimeIdentityKeys(agent = {}) {
   const keys = new Set();
@@ -388,6 +389,21 @@ function waitForMessage(room, type, timeoutMs = 1500) {
   });
 }
 
+function withTimeout(promise, timeoutMs = DEFAULT_CONNECT_TIMEOUT_MS, label = 'operation') {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), Math.max(1, Number(timeoutMs) || DEFAULT_CONNECT_TIMEOUT_MS));
+    Promise.resolve(promise)
+      .then(value => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(error => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
 export async function createAgentRuntimeClient({
   fetchImpl = globalThis.fetch?.bind(globalThis),
   windowRef = globalThis.window || globalThis,
@@ -443,7 +459,9 @@ export async function createAgentRuntimeClient({
 
   try {
     client = new Client(config.url);
-    room = await client.joinOrCreate(config.room, { client: 'main3d-runtime-hydration' });
+    const joinPromise = client.joinOrCreate(config.room, { client: 'main3d-runtime-hydration' });
+    joinPromise.catch(() => {});
+    room = await withTimeout(joinPromise, DEFAULT_CONNECT_TIMEOUT_MS, 'agent runtime connect');
     unsubscribeState = room.onStateChange(() => {
       snapshots = snapshotsFromRoomState(room);
       worldObjects = worldObjectsFromRoomState(room);
@@ -469,6 +487,18 @@ export async function createAgentRuntimeClient({
         ? normalizeWorldRuntimeState(message.worldRuntime)
         : worldRuntimeFromRoomState(room);
       notify('runtime:worldRuntime');
+    });
+    room.onMessage('runtime:state', message => {
+      snapshots = message?.snapshot
+        ? snapshotsFromRuntimeDocument(message.snapshot)
+        : snapshotsFromRoomState(room);
+      worldObjects = message?.snapshot
+        ? worldObjectsFromRuntimeDocument(message.snapshot)
+        : worldObjectsFromRoomState(room);
+      worldRuntime = message?.snapshot
+        ? worldRuntimeFromRuntimeDocument(message.snapshot)
+        : worldRuntimeFromRoomState(room);
+      notify('runtime:state');
     });
     room.onMessage('runtime:error', message => {
       if (!pendingRequestIds.has(message?.requestId)) {
@@ -567,6 +597,9 @@ export async function createAgentRuntimeClient({
     writeWorldObjectState(payload, options) {
       return sendRequest('runtime:worldObject', payload, options);
     },
+    requestObjectUse(payload, options) {
+      return sendRequest('runtime:objectUseRequest', payload, options);
+    },
     writeWorldTopology(payload, options) {
       return sendRequest('runtime:worldTopology', payload, options);
     },
@@ -604,6 +637,7 @@ function agentRuntimeUnavailable(reason, config = DEFAULT_CONFIG) {
     sendRequest() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     writeSnapshot() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     writeWorldObjectState() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
+    requestObjectUse() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     writeWorldTopology() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     claimRoute() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     heartbeat() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },

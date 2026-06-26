@@ -2,12 +2,17 @@
 // End-to-end smoke test for the Colyseus agent runtime sidecar.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@colyseus/sdk';
-import { AGENT_RUNTIME_ROOM_NAME } from '../src/realtime/agent-runtime-room.mjs';
+import {
+  AGENT_RUNTIME_ROOM_NAME,
+  SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
+  SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+  SERVER_WORLD_TOPOLOGY_OWNER,
+} from '../src/realtime/agent-runtime-room.mjs';
 
 const root = process.cwd();
 
@@ -70,6 +75,20 @@ async function waitForHealth(port, server) {
   throw new Error(`timed out waiting for ${url}: ${lastError?.message || 'no response'}\n${server.output}`);
 }
 
+async function verifyCorsPreflight(port) {
+  const response = await fetch(`http://127.0.0.1:${port}/matchmake/joinOrCreate/${AGENT_RUNTIME_ROOM_NAME}`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'http://127.0.0.1:8587',
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type',
+    },
+  });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get('access-control-allow-origin'), 'http://127.0.0.1:8587');
+  assert.match(response.headers.get('access-control-allow-methods') || '', /POST/);
+}
+
 function waitForRoomMessage(room, type, predicate = () => true) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error(`timed out waiting for ${type}`)), 5000);
@@ -85,29 +104,70 @@ function waitForRoomMessage(room, type, predicate = () => true) {
 async function waitForAgent(room, agentId, predicate = () => true) {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    const agent = room.state?.agents?.get?.(agentId);
+    const runtimeAgent = room.__runtimeDoc?.agents?.[agentId];
+    const agent = runtimeAgent
+      ? {
+          ...runtimeAgent,
+          targetJson: runtimeAgent.target ? JSON.stringify(runtimeAgent.target) : '',
+          visualStateJson: runtimeAgent.visualState ? JSON.stringify(runtimeAgent.visualState) : '',
+        }
+      : room.state?.agents?.get?.(agentId);
     if (agent && predicate(agent)) return agent;
     await delay(50);
   }
   throw new Error(`timed out waiting for agent ${agentId}`);
 }
 
+function testWorldRuntimeFromDocument(doc) {
+  const raw = doc?.worldRuntime;
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    ...raw,
+    trafficLights: new Map(Object.entries(raw.trafficLights || {})),
+    trafficVehicles: new Map(Object.entries(raw.trafficVehicles || {})),
+  };
+}
+
 async function waitForWorldRuntime(room, predicate = () => true) {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    const worldRuntime = room.state?.worldRuntime;
+    const worldRuntime = testWorldRuntimeFromDocument(room.__runtimeDoc) || room.state?.worldRuntime;
     if (worldRuntime && predicate(worldRuntime)) return worldRuntime;
     await delay(50);
   }
   throw new Error('timed out waiting for worldRuntime');
 }
 
+async function waitForObject(room, objectKey, predicate = () => true) {
+  const deadline = Date.now() + 6000;
+  while (Date.now() < deadline) {
+    const runtimeObject = room.__runtimeDoc?.objects?.[objectKey];
+    const object = runtimeObject
+      ? {
+          ...runtimeObject,
+          dataJson: runtimeObject.data ? JSON.stringify(runtimeObject.data) : '',
+        }
+      : room.state?.objects?.get?.(objectKey);
+    if (object && predicate(object)) return object;
+    await delay(50);
+  }
+  throw new Error(`timed out waiting for object ${objectKey}`);
+}
+
 async function connectRoom(port) {
   const client = new Client(`ws://127.0.0.1:${port}`);
   const room = await client.joinOrCreate(AGENT_RUNTIME_ROOM_NAME, { worldId: 'smoke' });
   room.onMessage('runtime:event', () => {});
-  room.onMessage('runtime:worldRuntime', () => {});
-  await waitForRoomMessage(room, 'runtime:welcome');
+  room.onMessage('runtime:state', (message) => {
+    if (message?.snapshot) room.__runtimeDoc = message.snapshot;
+  });
+  room.onMessage('runtime:worldRuntime', (message) => {
+    if (message?.worldRuntime && room.__runtimeDoc) {
+      room.__runtimeDoc = { ...room.__runtimeDoc, worldRuntime: message.worldRuntime };
+    }
+  });
+  const welcome = await waitForRoomMessage(room, 'runtime:welcome');
+  if (welcome?.snapshot) room.__runtimeDoc = welcome.snapshot;
   return room;
 }
 
@@ -119,6 +179,7 @@ async function run() {
     const health = await waitForHealth(port, server);
     assert.equal(health.ok, true);
     assert.equal(health.room, AGENT_RUNTIME_ROOM_NAME);
+    await verifyCorsPreflight(port);
 
     const room = await connectRoom(port);
     room.send('runtime:snapshot', {
@@ -400,6 +461,135 @@ async function run() {
     assert.equal(resumedRuntime.topologyHash, 'traffic:smoke');
     assert.equal(resumedRuntime.trafficVehicles?.size, 30);
     await resumedRoom.leave(true);
+
+    mkdirSync(join(dataDir, 'buildings'), { recursive: true });
+    writeFileSync(join(dataDir, 'world-meta.json'), `${JSON.stringify({
+      agentProfiles: {
+        adam: { agentLiveModeEnabled: true },
+      },
+      streets: [
+        { x1: -20, z1: 24, x2: 30, z2: 24 },
+        { x1: 30, z1: 24, x2: 80, z2: 24 },
+        { x1: 30, z1: -30, x2: 30, z2: 24 },
+        { x1: 30, z1: 24, x2: 30, z2: 80 },
+        { x1: 30, z1: 24, type: 'x-int', openEdges: { n: true, s: true, e: true, w: true } },
+      ],
+    }, null, 2)}\n`);
+    writeFileSync(join(dataDir, 'presence-snapshot.json'), `${JSON.stringify({
+      adam: { state: 'idle', agentLiveModeEnabled: true },
+    }, null, 2)}\n`);
+    writeFileSync(join(dataDir, 'buildings', 'office.json'), `${JSON.stringify({
+      id: 'office',
+      name: 'Smoke Office',
+      type: 'office',
+      worldX: 0,
+      worldY: 0,
+      widthTiles: 20,
+      heightTiles: 20,
+      interior: {
+        floors: [{ level: 1, name: 'Floor 1' }],
+        furniture: [{
+          type: 'armchair',
+          x: 5,
+          z: 5,
+          floor: 1,
+          room: 'lounge',
+          actionLocations: [{
+            id: 'seat',
+            roles: ['seat', 'rest'],
+            actionId: 'life.restAtArmchair',
+            actionTarget: { x: 5.25, z: 5.25, floor: 1 },
+            facing: 'south',
+          }],
+        }],
+      },
+    }, null, 2)}\n`);
+
+    const scriptedRoom = await connectRoom(port);
+    const serverRuntime = await waitForWorldRuntime(scriptedRoom, (runtime) =>
+      runtime.topologyOwner === SERVER_WORLD_TOPOLOGY_OWNER && runtime.trafficLights?.size >= 1
+    );
+    assert.equal(serverRuntime.topologyOwner, SERVER_WORLD_TOPOLOGY_OWNER);
+    assert.equal(serverRuntime.trafficLights?.size, 1);
+    assert(serverRuntime.trafficVehicles?.size > 0);
+    scriptedRoom.send('runtime:worldTopology', {
+      requestId: 'browser-topology-after-server-owner',
+      owner: 'main3d-world-topology:browser-smoke',
+      topologyHash: 'traffic:browser-should-not-own',
+      trafficLights: [
+        { key: 'traffic:99,99', ix: 99, iz: 99, type: 'x-int', openEdges: { n: true, s: true, e: true, w: true } },
+      ],
+      trafficVehicles: [],
+    });
+    const browserTopologyAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'browser-topology-after-server-owner');
+    assert.equal(browserTopologyAck.worldRuntime.topologyOwner, SERVER_WORLD_TOPOLOGY_OWNER);
+    assert.equal(browserTopologyAck.event.type, 'world-topology-skipped-server-authoritative');
+
+    const scriptedAgent = await waitForAgent(scriptedRoom, 'adam', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER ||
+      agent.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER
+    );
+    assert.equal(scriptedAgent.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    assert.equal(scriptedAgent.leaseOwner, SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER);
+    assert(scriptedAgent.visualStateJson.includes('runtimeRoute'));
+    assert(
+      scriptedAgent.visualStateJson.includes('dynamic-interior-routing.js') ||
+      scriptedAgent.visualStateJson.includes('dynamic-exterior-routing.js') ||
+      scriptedAgent.visualStateJson.includes('server-door-transition')
+    );
+    const scriptedObjectKey = 'office:furniture:0:armchair';
+    const scriptedObject = await waitForObject(scriptedRoom, scriptedObjectKey, (object) => object.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    assert.equal(scriptedObject.agentId, 'adam');
+    assert(['routing', 'active'].includes(scriptedObject.state));
+
+    scriptedRoom.send('runtime:worldObject', {
+      requestId: 'server-object-browser-overwrite',
+      objectKey: scriptedObjectKey,
+      owner: 'main3d-world-runtime:second-browser',
+      state: 'active',
+      agentId: 'adam',
+      expiresAt: new Date(Date.now() + 10000).toISOString(),
+      data: { activeUse: { state: 'active', agentId: 'adam' } },
+    });
+    const serverObjectConflict = await waitForRoomMessage(scriptedRoom, 'runtime:error', (msg) => msg.requestId === 'server-object-browser-overwrite');
+    assert.equal(serverObjectConflict.code, 'object_state_conflict');
+
+    scriptedRoom.send('runtime:snapshot', {
+      requestId: 'beth-backend-object-snapshot',
+      agentId: 'beth',
+      mode: 'scripted',
+      owner: 'agent-scripted-mode',
+      x: 40,
+      y: 40,
+      floor: 1,
+      state: 'idle',
+    });
+    const bethSnapshotAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'beth-backend-object-snapshot');
+    assert.equal(bethSnapshotAck.snapshot.agentId, 'beth');
+    scriptedRoom.send('runtime:objectUseRequest', {
+      requestId: 'beth-backend-object-use',
+      agentId: 'beth',
+      source: 'smoke-manual-object-use',
+      target: {
+        objectKey: 'manual-building:furniture:2:waterCooler',
+        buildingId: 'manual-building',
+        furnitureIndex: 2,
+        objectType: 'waterCooler',
+        actionId: 'life.getWater',
+        spotId: 'use-front',
+        x: 96,
+        y: 104,
+        floor: 1,
+      },
+      agentPosition: { x: 40, y: 40, floor: 1 },
+    });
+    const objectUseAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'beth-backend-object-use');
+    assert.equal(objectUseAck.type, 'runtime:objectUseRequest');
+    assert.equal(objectUseAck.snapshot.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    assert.equal(objectUseAck.object.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    assert.equal(objectUseAck.object.objectKey, 'manual-building:furniture:2:waterCooler');
+    await waitForAgent(scriptedRoom, 'beth', (agent) => agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    await scriptedRoom.leave(true);
 
     console.log('realtime smoke ok');
   } finally {

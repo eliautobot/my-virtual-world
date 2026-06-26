@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260623-world-runtime-render-coherence-r2';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260626-runtime-load-fix-r1';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1603,6 +1603,94 @@ function shouldBlockAgentRuntimeObjectAction(agent, objectKey = '') {
   };
 }
 
+function shouldRequestBackendObjectUseForExplicitObjectAction(agent, metadata = {}) {
+  if (metadata?.backendRuntimeObjectUse === false) return false;
+  if (!_agentRuntimeClient?.connected || typeof _agentRuntimeClient.requestObjectUse !== 'function') return false;
+  if (!getAgentRuntimeAgentId(agent)) return false;
+  return metadata?.backendRuntimeObjectUse === true ||
+    normalizeAgentLiveModeEnabled(agent) ||
+    metadata?.behaviorSourceKind === 'agent-live-mode' ||
+    metadata?.behaviorMode === 'agent-live';
+}
+
+function requestBackendObjectUseForExplicitObjectAction(agent, target = null, building = null, floor = null, metadata = {}, objectMeta = {}, enrichedTarget = null) {
+  if (!shouldRequestBackendObjectUseForExplicitObjectAction(agent, metadata)) return null;
+  const agentId = getAgentRuntimeAgentId(agent);
+  const routeTarget = makeAgentRuntimeRouteTarget(enrichedTarget || target || {}, building, floor);
+  const objectTarget = {
+    ...routeTarget,
+    targetKind: routeTarget.targetKind || 'scripted-object',
+    kind: routeTarget.kind || 'scripted-object',
+    buildingId: objectMeta.buildingId || routeTarget.buildingId || building?.id || '',
+    furnitureIndex: objectMeta.furnitureIndex,
+    objectKey: objectMeta.objectKey || enrichedTarget?.objectKey || target?.objectKey || '',
+    objectId: objectMeta.objectId || enrichedTarget?.objectId || target?.objectId || '',
+    objectInstanceId: enrichedTarget?.objectInstanceId || target?.objectInstanceId || objectMeta.objectId || '',
+    objectType: objectMeta.objectType || enrichedTarget?.objectType || target?.objectType || '',
+    catalogKey: enrichedTarget?.catalogKey || target?.catalogKey || objectMeta.objectType || '',
+    actionId: objectMeta.actionId || enrichedTarget?.actionId || target?.actionId || '',
+    spotId: objectMeta.spotId || enrichedTarget?.spotId || target?.spotId || target?.interactionSpotId || '',
+    interactionSpotId: enrichedTarget?.interactionSpotId || target?.interactionSpotId || objectMeta.spotId || '',
+    slotId: metadata.slotId || target?.slotId || target?.seatId || objectMeta.spotId || '',
+    faceAngle: Number.isFinite(Number(target?.faceAngle ?? metadata.faceAngle)) ? Number(target?.faceAngle ?? metadata.faceAngle) : 0,
+  };
+  const request = {
+    agentId,
+    source: metadata.sourceFunction || metadata.owner || 'explicit-object',
+    target: objectTarget,
+    agentPosition: {
+      x: Number(agent?.x || 0),
+      y: Number(agent?.y || 0),
+      floor: Math.max(1, Number(agent?._floor || agent?._targetFloor || floor || 1) || 1),
+      buildingId: getMovementInteriorBuildingAt(agent?.x, agent?.y)?.id || agent?._targetBuilding?.id || '',
+      heading: Number(agent?._group3d?.rotation?.y || 0),
+    },
+  };
+  const pending = {
+    objectKey: objectTarget.objectKey,
+    buildingId: objectTarget.buildingId,
+    furnitureIndex: objectTarget.furnitureIndex,
+    actionId: objectTarget.actionId,
+    requestedAtMs: Date.now(),
+    source: request.source,
+  };
+  agent._runtimeBackendObjectUsePending = pending;
+  agent._runtimeObserverOnly = true;
+  agent._runtimeRemoteWriterActive = true;
+  agent._wanderTarget = null;
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  agent._waypointPathIdx = 0;
+  updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'backend-object-use-requested', target: objectTarget });
+  _agentRuntimeClient.requestObjectUse(request, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
+    .then(ack => {
+      if (agent._runtimeBackendObjectUsePending === pending) {
+        agent._runtimeBackendObjectUsePending = { ...pending, ackAtMs: Date.now(), version: ack?.snapshot?.version || null };
+      }
+      if (ack?.snapshot) applyAgentRuntimeSnapshotToAgent(agent, ack.snapshot, { updateVisible: true, source: 'backend-object-use-requested' });
+      updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'backend-object-use-accepted', ok: true, ack });
+      return ack;
+    })
+    .catch(error => {
+      if (agent._runtimeBackendObjectUsePending === pending) agent._runtimeBackendObjectUsePending = null;
+      agent._runtimeObserverOnly = Boolean(getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null);
+      updateAgentRuntimeRouteLeaseDebug(agent, {
+        phase: 'backend-object-use-rejected',
+        ok: false,
+        error: error?.message || String(error),
+        code: error?.code || null,
+      });
+      return null;
+    });
+  return {
+    accepted: true,
+    reason: 'backend-runtime-object-use-requested',
+    backendRuntime: true,
+    objectKey: objectTarget.objectKey,
+    requestedAtMs: pending.requestedAtMs,
+  };
+}
+
 function resolveAgentRuntimeWorldObjectTarget(objectState = null) {
   if (!objectState?.buildingId || objectState.furnitureIndex == null || Number(objectState.furnitureIndex) < 0) {
     return { building: null, furniture: null };
@@ -1704,6 +1792,15 @@ function makeAgentRuntimeTrafficVehicleSeed(vehicle, index = 0) {
 }
 
 function publishAgentRuntimeTrafficTopology({ force = false } = {}) {
+  if (typeof window !== 'undefined' && window.__VWAllowBrowserWorldTopologyPublisher !== true) {
+    _runtimeTrafficTopologyPublish = {
+      ...(_runtimeTrafficTopologyPublish || {}),
+      skippedAtMs: Date.now(),
+      skippedReason: 'server-authoritative-world-topology-observer',
+      devOverrideFlag: '__VWAllowBrowserWorldTopologyPublisher',
+    };
+    return null;
+  }
   if (!_agentRuntimeClient?.connected || typeof _agentRuntimeClient.writeWorldTopology !== 'function') return null;
   if (!_trafficLights.size) return null;
   const topology = makeAgentRuntimeTrafficTopology();
@@ -1991,6 +2088,7 @@ function makeAgentRuntimeWorldObjectStateForAgent(agent, state = 'idle') {
 
 function publishAgentRuntimeWorldObjectStateForAgent(agent, state = 'idle', { force = false } = {}) {
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || agent?._runtimeObserverOnly) return null;
+  if (normalizeAgentLiveModeEnabled(agent) || agent?._runtimeBackendObjectUsePending) return null;
   const objectState = makeAgentRuntimeWorldObjectStateForAgent(agent, state);
   if (!objectState) return null;
   const hash = getAgentRuntimeVisualStateHash(objectState);
@@ -2173,6 +2271,20 @@ function applyAgentRuntimeVisualState(agent, visualState = null) {
     isMoving: movement.isMoving === true,
     isRunning: movement.isRunning === true,
   } : null;
+  const runtimeRoute = visualState.runtimeRoute && typeof visualState.runtimeRoute === 'object' ? visualState.runtimeRoute : null;
+  const runtimeNextPoint = makeAgentRuntimeVisualPoint(runtimeRoute?.nextPoint || null);
+  if (runtimeNextPoint && runtimeRoute?.active !== false) {
+    agent._movementDebugNextWaypoint = {
+      x: runtimeNextPoint.x,
+      y: runtimeNextPoint.y,
+      source: agentRuntimeVisualText(runtimeRoute.source || 'server-runtime-route', 80) || 'server-runtime-route',
+      routeIndex: agentRuntimeVisualNumber(runtimeRoute.routeIndex, null),
+      routeLength: agentRuntimeVisualNumber(runtimeRoute.routeLength, null),
+      reason: agentRuntimeVisualText(runtimeRoute.reason || '', 120),
+    };
+  } else if (agent._runtimeObserverOnly && runtimeRoute) {
+    agent._movementDebugNextWaypoint = null;
+  }
 
   if (visualState.activityActive === false) {
     agent._idleActivity = null;
@@ -10160,6 +10272,8 @@ function setAgentTargetForExplicitObjectAction(agent, target, building = null, f
     activeUseId: objectMeta.activeUseId,
     preserveUntilRelease: true,
   };
+  const backendObjectUse = requestBackendObjectUseForExplicitObjectAction(agent, target, building, floor, metadata, objectMeta, enrichedTarget);
+  if (backendObjectUse?.accepted) return backendObjectUse;
   return setAgentTarget(agent, enrichedTarget, building, floor, {
     owner,
     priorityName,

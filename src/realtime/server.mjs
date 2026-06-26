@@ -33,6 +33,19 @@ export async function createRealtimeServer({
     }),
     express: (app) => {
       app.disable('x-powered-by');
+      app.use((req, res, next) => {
+        const origin = req.headers.origin || '*';
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type');
+        res.setHeader('Access-Control-Max-Age', '600');
+        if (req.method === 'OPTIONS') {
+          res.status(204).end();
+          return;
+        }
+        next();
+      });
       app.use(express.json({ limit: '64kb' }));
       app.get('/healthz', (_req, res) => {
         res.json({
@@ -61,6 +74,7 @@ export async function createRealtimeServer({
     prewarmedAt: new Date().toISOString(),
   });
   runtimeRoomId = runtimeRoom?.roomId || '';
+  const runtimeRoomInstance = runtimeRoomId ? matchMaker.getLocalRoomById(runtimeRoomId) : null;
 
   return {
     gameServer,
@@ -69,6 +83,7 @@ export async function createRealtimeServer({
     port: httpServer.address()?.port || port,
     dataDir,
     runtimeRoomId,
+    runtimeRoom: runtimeRoomInstance,
     async close() {
       await gameServer.gracefullyShutdown(false);
     },
