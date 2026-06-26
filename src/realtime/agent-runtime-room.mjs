@@ -27,6 +27,8 @@ export const WORLD_RUNTIME_TRAFFIC_CYCLE_MS = 40000;
 export const WORLD_RUNTIME_TRAFFIC_YELLOW_MS = 3000;
 export const WORLD_RUNTIME_TRAFFIC_ALL_RED_MS = 2000;
 export const WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000;
+export const WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000;
+export const RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000;
 export const MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS = 500;
 export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
@@ -55,6 +57,8 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS = 15000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS = 8000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS = 7000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS = 12000;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 1;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 1;
 export const LIVE_ACTION_API_TILE = 40;
 export const SERVER_WORLD_TOPOLOGY_OWNER = 'server-world-topology-runtime';
 export const SERVER_WORLD_TRAFFIC_SPEED = 7;
@@ -1295,6 +1299,55 @@ function withRuntimeRouteVisualState(visualState, route = null) {
   return summary ? { ...visualState, runtimeRoute: summary } : visualState;
 }
 
+function selectCachedServerRuntimeRouteStep(current, currentPoint, finalTarget, arrivalRadius = 5) {
+  const runtimeRoute = current?.visualState?.runtimeRoute;
+  if (!runtimeRoute || typeof runtimeRoute !== 'object' || runtimeRoute.active !== true) return null;
+  const routePoints = Array.isArray(runtimeRoute.routePoints)
+    ? runtimeRoute.routePoints.map(cloneRuntimePoint).filter(Boolean)
+    : [];
+  if (routePoints.length === 0) return null;
+  const cachedFinal = cloneRuntimePoint(runtimeRoute.finalPoint || routePoints[routePoints.length - 1]);
+  const finalTolerance = Math.max(10, numberOr(arrivalRadius, 5) * 2);
+  if (cachedFinal) {
+    const finalDist = Math.hypot(Number(cachedFinal.x) - Number(finalTarget.x), Number(cachedFinal.y) - Number(finalTarget.y));
+    if (finalDist > finalTolerance) return null;
+    if (Number.isFinite(Number(cachedFinal.floor)) && floorOr(cachedFinal.floor, finalTarget.floor) !== finalTarget.floor) return null;
+  }
+  const startIndex = Math.max(0, Math.min(routePoints.length - 1, Math.floor(numberOr(runtimeRoute.routeIndex, 0))));
+  const minStepDist = Math.max(1, numberOr(arrivalRadius, 5) * 0.5);
+  let routeIndex = startIndex;
+  let steeringTarget = null;
+  for (let index = startIndex; index < routePoints.length; index += 1) {
+    const point = routePoints[index];
+    const dist = Math.hypot(Number(point.x) - Number(currentPoint.x), Number(point.y) - Number(currentPoint.y));
+    if (dist > minStepDist) {
+      routeIndex = index;
+      steeringTarget = { ...finalTarget, x: Number(point.x), y: Number(point.y), floor: floorOr(point.floor ?? finalTarget.floor, finalTarget.floor) };
+      break;
+    }
+  }
+  if (!steeringTarget) {
+    const distanceToFinal = Math.hypot(Number(finalTarget.x) - Number(currentPoint.x), Number(finalTarget.y) - Number(currentPoint.y));
+    if (distanceToFinal <= Math.max(1, numberOr(arrivalRadius, 5))) return null;
+    routeIndex = Math.max(0, routePoints.length - 1);
+    steeringTarget = finalTarget;
+  }
+  return {
+    steeringTarget,
+    route: {
+      ...runtimeRoute,
+      source: safeText(runtimeRoute.source, 'cached-server-route') || 'cached-server-route',
+      reason: 'cached-server-route',
+      active: true,
+      effectiveTarget: steeringTarget,
+      routeIndex,
+      route: routePoints,
+      routePoints,
+      finalPoint: finalTarget,
+    },
+  };
+}
+
 function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
   speedUnitsPerSec,
   arrivalRadius,
@@ -1312,14 +1365,11 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
     y: Number(current?.y || 0),
     floor: floorOr(current?.floor, finalTarget.floor),
   };
-  const targetBuilding = finalTarget.buildingId
-    ? readBuildingDocument(dataDir, finalTarget.buildingId)
-    : findInteriorBuildingAtApi(dataDir, finalTarget.x, finalTarget.y);
-  const currentBuilding = findInteriorBuildingAtApi(dataDir, currentPoint.x, currentPoint.y);
   let steeringTarget = finalTarget;
   let route = null;
   let phase = 'direct';
   const arrival = Math.max(1, numberOr(arrivalRadius, 5));
+  const cachedRouteStep = selectCachedServerRuntimeRouteStep(current, currentPoint, finalTarget, arrival);
   const makeRoute = (source, reason, effectiveTarget, points = [], active = false, extra = {}) => ({
     active,
     source,
@@ -1383,31 +1433,49 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
     return false;
   };
 
-  if (currentBuilding && currentBuilding.type !== 'park' && (!targetBuilding || currentBuilding.id !== targetBuilding.id)) {
-    steerDoorTransition(currentBuilding, 'exit');
-  } else if (targetBuilding && targetBuilding.type !== 'park') {
-    const currentInsideTarget = currentBuilding?.id === targetBuilding.id;
-    if (!currentInsideTarget) {
-      if (!steerDoorTransition(targetBuilding, 'enter')) useExteriorRoute();
-    } else {
-      const dynamicRoute = updateDynamicInteriorRouting(currentPoint, finalTarget, tickMs, {
-        building: targetBuilding,
-        debug: false,
-      });
-      if (dynamicRoute?.active && dynamicRoute.effectiveTarget) {
-        steeringTarget = { ...finalTarget, x: dynamicRoute.effectiveTarget.x, y: dynamicRoute.effectiveTarget.y };
-        phase = 'interior-route';
-        route = {
-          ...dynamicRoute,
-          source: 'dynamic-interior-routing.js',
-          finalPoint: finalTarget,
-        };
+  const continueScriptedRouteWithoutReplan = !cachedRouteStep &&
+    routeSource === 'server-scripted-object-runtime' &&
+    (current?.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || current?.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER) &&
+    safeText(current?.routeId, '');
+  if (cachedRouteStep) {
+    steeringTarget = cachedRouteStep.steeringTarget;
+    route = cachedRouteStep.route;
+    phase = String(route.source || '').includes('interior') ? 'interior-route' : 'exterior-route';
+  } else if (continueScriptedRouteWithoutReplan) {
+    steeringTarget = finalTarget;
+    phase = 'scripted-object-route-continuation';
+    route = makeRoute('server-scripted-object-route-continuation', 'active-route-replan-skipped', finalTarget, [finalTarget], true);
+  } else {
+    const targetBuilding = finalTarget.buildingId
+      ? readBuildingDocument(dataDir, finalTarget.buildingId)
+      : findInteriorBuildingAtApi(dataDir, finalTarget.x, finalTarget.y);
+    const currentBuilding = findInteriorBuildingAtApi(dataDir, currentPoint.x, currentPoint.y);
+    if (currentBuilding && currentBuilding.type !== 'park' && (!targetBuilding || currentBuilding.id !== targetBuilding.id)) {
+      steerDoorTransition(currentBuilding, 'exit');
+    } else if (targetBuilding && targetBuilding.type !== 'park') {
+      const currentInsideTarget = currentBuilding?.id === targetBuilding.id;
+      if (!currentInsideTarget) {
+        if (!steerDoorTransition(targetBuilding, 'enter')) useExteriorRoute();
       } else {
-        route = makeRoute('dynamic-interior-routing.js', dynamicRoute?.reason || 'interior-route-unavailable', finalTarget, [finalTarget]);
+        const dynamicRoute = updateDynamicInteriorRouting(currentPoint, finalTarget, tickMs, {
+          building: targetBuilding,
+          debug: false,
+        });
+        if (dynamicRoute?.active && dynamicRoute.effectiveTarget) {
+          steeringTarget = { ...finalTarget, x: dynamicRoute.effectiveTarget.x, y: dynamicRoute.effectiveTarget.y };
+          phase = 'interior-route';
+          route = {
+            ...dynamicRoute,
+            source: 'dynamic-interior-routing.js',
+            finalPoint: finalTarget,
+          };
+        } else {
+          route = makeRoute('dynamic-interior-routing.js', dynamicRoute?.reason || 'interior-route-unavailable', finalTarget, [finalTarget]);
+        }
       }
+    } else if (!currentBuilding) {
+      useExteriorRoute();
     }
-  } else if (!currentBuilding) {
-    useExteriorRoute();
   }
 
   const dx = Number(steeringTarget.x) - Number(currentPoint.x || 0);
@@ -1841,8 +1909,7 @@ function listScriptedObjectRuntimeTargets(dataDir) {
 
 function isWorldObjectActiveForAnotherAgent(object = null, agentId = '', nowMs = Date.now()) {
   if (!hasActiveWorldObjectState(object, nowMs)) return false;
-  const existing = worldObjectToPlain(object);
-  return Boolean(existing.agentId && agentId && existing.agentId !== agentId);
+  return Boolean(object.agentId && agentId && object.agentId !== agentId);
 }
 
 function isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs = Date.now()) {
@@ -3087,9 +3154,15 @@ function requestIdFrom(message) {
 export class AgentRuntimeRoom extends Room {
   onCreate(options = {}) {
     this.autoDispose = false;
+    this.patchRate = 0;
     this.dataDir = options.dataDir || process.env.VW_DATA_DIR || '.local-data';
     this.events = [];
     this.lastWorldRuntimePersistMs = 0;
+    this.lastServerWorldTopologyMs = 0;
+    this.deferRuntimeDocumentWrites = false;
+    this.runtimeDocumentDirty = false;
+    this.runtimeStateBroadcastDirty = false;
+    this.lastRuntimeStateBroadcastMs = 0;
     this.lastLiveActionRuntimePollMs = 0;
     this.liveActionRuntimeMeta = null;
     this.liveActionRuntimeStore = null;
@@ -3098,6 +3171,7 @@ export class AgentRuntimeRoom extends Room {
     this.lastScriptedObjectRuntimePollMs = 0;
     this.scriptedObjectRuntimePlan = null;
     this.scriptedObjectRuntimeCooldowns = new Map();
+    this.scriptedObjectRuntimeIdleCursor = 0;
     configureDynamicInteriorRouting({
       apiToWorldScale: 1 / LIVE_ACTION_API_TILE,
       getInteriorBuildingAt: (x, y) => findInteriorBuildingAtApi(this.dataDir, x, y),
@@ -3133,12 +3207,17 @@ export class AgentRuntimeRoom extends Room {
     this.onMessage('runtime:claimRoute', (client, message) => this.handleClaimRoute(client, message));
     this.onMessage('runtime:heartbeat', (client, message) => this.handleHeartbeat(client, message));
     this.onMessage('runtime:releaseRoute', (client, message) => this.handleReleaseRoute(client, message));
-    this.clock.setInterval(() => this.expireStaleRouteLeases(), STALE_ROUTE_LEASE_SWEEP_MS);
-    this.clock.setInterval(() => this.tickWorldRuntime(), DEFAULT_WORLD_RUNTIME_TICK_MS);
+    if (process.env.VW_REALTIME_DISABLE_LEASE_SWEEP !== 'true') {
+      this.clock.setInterval(() => this.expireStaleRouteLeases(), STALE_ROUTE_LEASE_SWEEP_MS);
+    }
+    if (process.env.VW_REALTIME_DISABLE_WORLD_TICK !== 'true') {
+      this.clock.setInterval(() => this.tickWorldRuntime(), DEFAULT_WORLD_RUNTIME_TICK_MS);
+    }
   }
 
   onJoin(client) {
     this.expireStaleRouteLeases();
+    this.broadcastRuntimeState('client-joined', { force: true });
     client.send('runtime:welcome', {
       sessionId: client.sessionId,
       room: AGENT_RUNTIME_ROOM_NAME,
@@ -3151,9 +3230,51 @@ export class AgentRuntimeRoom extends Room {
     return stateToPlain(this.state, this.events);
   }
 
+  persistRuntimeDocument() {
+    if (this.deferRuntimeDocumentWrites) {
+      this.runtimeDocumentDirty = true;
+      return false;
+    }
+    this.runtimeDocumentDirty = false;
+    writeRuntimeDocument(this.dataDir, this.state, this.events);
+    return true;
+  }
+
+  broadcastRuntimeState(source = 'runtime-state', { force = false } = {}) {
+    if (this.deferRuntimeDocumentWrites) {
+      this.runtimeStateBroadcastDirty = true;
+      return false;
+    }
+    const nowMs = Date.now();
+    if (!force && this.lastRuntimeStateBroadcastMs && nowMs - this.lastRuntimeStateBroadcastMs < RUNTIME_STATE_BROADCAST_INTERVAL_MS) {
+      this.runtimeStateBroadcastDirty = true;
+      return false;
+    }
+    this.runtimeStateBroadcastDirty = false;
+    this.lastRuntimeStateBroadcastMs = nowMs;
+    this.broadcast('runtime:state', {
+      type: 'runtime-state',
+      source,
+      snapshot: this.runtimeDocument(),
+    });
+    return true;
+  }
+
+  runWithDeferredRuntimeDocumentWrites(callback) {
+    const previous = this.deferRuntimeDocumentWrites;
+    this.deferRuntimeDocumentWrites = true;
+    try {
+      return callback();
+    } finally {
+      this.deferRuntimeDocumentWrites = previous;
+    }
+  }
+
   ensureServerWorldTopology(nowMs = Date.now(), { force = false } = {}) {
+    if (!force && this.lastServerWorldTopologyMs && nowMs - this.lastServerWorldTopologyMs < WORLD_RUNTIME_TOPOLOGY_REFRESH_MS) return null;
     const topology = buildServerWorldTopology(this.dataDir);
     if (!topology.topologyHash && !topology.trafficLights.length && !topology.trafficVehicles.length) return null;
+    this.lastServerWorldTopologyMs = nowMs;
     const runtime = this.state.worldRuntime || new WorldRuntimeState();
     if (!this.state.worldRuntime) this.state.worldRuntime = runtime;
     const alreadyServerOwned = runtime.topologyOwner === SERVER_WORLD_TOPOLOGY_OWNER;
@@ -3997,7 +4118,18 @@ export class AgentRuntimeRoom extends Room {
       changedObjects++;
     }
 
-    for (const agentId of idleAgentIds) {
+    const idleAgentList = Array.from(idleAgentIds);
+    let idleChecks = 0;
+    let idleStarts = 0;
+    while (
+      idleAgentList.length > 0 &&
+      idleChecks < SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK &&
+      idleStarts < SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK
+    ) {
+      const index = positiveModulo(this.scriptedObjectRuntimeIdleCursor, idleAgentList.length);
+      const agentId = idleAgentList[index];
+      this.scriptedObjectRuntimeIdleCursor = positiveModulo(index + 1, idleAgentList.length);
+      idleChecks++;
       const existing = this.state.agents.get(agentId);
       if (!existing) continue;
       const current = snapshotToPlain(existing);
@@ -4009,6 +4141,7 @@ export class AgentRuntimeRoom extends Room {
       const target = pickScriptedObjectRuntimeTarget(agentId, targets, this.state, nowMs);
       if (!target) continue;
       this.startServerScriptedObjectRoute(agentId, target, nowMs, now, { source: 'idle' });
+      idleStarts++;
       changedSnapshots++;
       changedObjects++;
     }
@@ -4029,7 +4162,8 @@ export class AgentRuntimeRoom extends Room {
     this.state.agents.set(agent.agentId, agent);
     this.state.updatedAt = normalized.updatedAt;
     const event = this.recordEvent(eventType, agent.agentId, snapshotToPlain(agent), extra);
-    writeRuntimeDocument(this.dataDir, this.state, this.events);
+    this.persistRuntimeDocument();
+    this.broadcastRuntimeState(eventType);
     return { agent, event };
   }
 
@@ -4042,7 +4176,8 @@ export class AgentRuntimeRoom extends Room {
     this.state.objects.set(object.objectKey, object);
     this.state.updatedAt = normalized.updatedAt;
     const event = this.recordEvent(eventType, object.objectKey, worldObjectToPlain(object), extra);
-    writeRuntimeDocument(this.dataDir, this.state, this.events);
+    this.persistRuntimeDocument();
+    this.broadcastRuntimeState(eventType);
     return { object, event };
   }
 
@@ -4130,7 +4265,8 @@ export class AgentRuntimeRoom extends Room {
       trafficLightCount: runtime.trafficLights.size,
       trafficVehicleCount: runtime.trafficVehicles.size,
     });
-    writeRuntimeDocument(this.dataDir, this.state, this.events);
+    this.persistRuntimeDocument();
+    this.broadcastRuntimeState(eventType);
     return { worldRuntime: runtime, event };
   }
 
@@ -4160,10 +4296,25 @@ export class AgentRuntimeRoom extends Room {
         changedLights++;
       }
     }
-    const changedVehicles = this.tickTrafficVehicles(runtime, tickMs, now);
-    const changedLiveActions = this.tickLiveActionRuntime(tickMs, nowMs, now);
-    const changedLiveStatus = this.tickLiveStatusRuntime(tickMs, nowMs, now);
-    const changedScriptedObjects = this.tickScriptedObjectRuntime(tickMs, nowMs, now);
+    let changedVehicles = 0;
+    let changedLiveActions = { changedActions: false, changedSnapshots: 0 };
+    let changedLiveStatus = { changedSnapshots: 0 };
+    let changedScriptedObjects = { changedSnapshots: 0, changedObjects: 0 };
+    this.runWithDeferredRuntimeDocumentWrites(() => {
+      changedVehicles = process.env.VW_REALTIME_DISABLE_TRAFFIC_TICK === 'true'
+        ? 0
+        : this.tickTrafficVehicles(runtime, tickMs, now);
+      changedLiveActions = process.env.VW_REALTIME_DISABLE_LIVE_ACTION_TICK === 'true'
+        ? { changedActions: false, changedSnapshots: 0 }
+        : this.tickLiveActionRuntime(tickMs, nowMs, now);
+      changedLiveStatus = process.env.VW_REALTIME_DISABLE_LIVE_STATUS_TICK === 'true'
+        ? { changedSnapshots: 0 }
+        : this.tickLiveStatusRuntime(tickMs, nowMs, now);
+      changedScriptedObjects = process.env.VW_REALTIME_DISABLE_SCRIPTED_OBJECT_TICK === 'true'
+        ? { changedSnapshots: 0, changedObjects: 0 }
+        : this.tickScriptedObjectRuntime(tickMs, nowMs, now);
+    });
+    if (this.runtimeStateBroadcastDirty) this.broadcastRuntimeState('world-runtime-state');
 
     if (changedLights > 0 || changedVehicles > 0) {
       this.broadcast('runtime:worldRuntime', {
@@ -4181,7 +4332,7 @@ export class AgentRuntimeRoom extends Room {
 
     if (changedLights > 0 || changedVehicles > 0 || changedLiveActions.changedActions || changedLiveStatus.changedSnapshots > 0 || changedScriptedObjects.changedSnapshots > 0 || changedScriptedObjects.changedObjects > 0 || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
       this.lastWorldRuntimePersistMs = nowMs;
-      writeRuntimeDocument(this.dataDir, this.state, this.events);
+      this.persistRuntimeDocument();
     }
     return runtime;
   }

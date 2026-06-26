@@ -283,7 +283,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260626-backend-object-runtime-r1',
+  'js/main3d.js?v=20260626-runtime-load-fix-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -411,13 +411,23 @@ for (const token of [
 
 for (const token of [
   'WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000',
+  'WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000',
+  'RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000',
+  'this.patchRate = 0',
+  'runWithDeferredRuntimeDocumentWrites',
+  'broadcastRuntimeState',
+  'runtime:state',
   'world-topology-skipped-owner-fresh',
   'topologyOwnerFresh',
   "LIVE_ACTION_RUNTIME_OWNER = 'server-live-action-runtime'",
   "SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runtime'",
+  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 1',
+  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 1',
   "SERVER_WORLD_TOPOLOGY_OWNER = 'server-world-topology-runtime'",
   'runtime:objectUseRequest',
   'tickScriptedObjectRuntime',
+  'selectCachedServerRuntimeRouteStep',
+  'active-route-replan-skipped',
   'makeServerRuntimeStep',
   'dynamic-interior-routing.js',
   'configureDynamicExteriorRouting',
@@ -436,6 +446,8 @@ for (const token of [
   'matchMaker.createRoom',
   'runtimeRoomId',
   'prewarmedAt',
+  'Access-Control-Allow-Origin',
+  "req.method === 'OPTIONS'",
 ]) {
   assert(realtimeServerJs.includes(token), `realtime server missing authoritative room prewarm token: ${token}`);
 }
@@ -674,7 +686,7 @@ for (const token of [
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
   '__VWGetAgentRuntimeDebug',
-  'agent-runtime-client.mjs?v=20260626-backend-object-runtime-r1',
+  'agent-runtime-client.mjs?v=20260626-runtime-load-fix-r1',
   'runtime:worldRuntime',
   'runtime:worldTopology',
   'writeWorldTopology',
@@ -693,6 +705,8 @@ for (const token of [
   'resolveRuntimeUrlForPage',
   'isLoopbackHost',
   'parsed.hostname = pageHost',
+  'DEFAULT_CONNECT_TIMEOUT_MS',
+  'agent runtime connect',
 ]) {
   assert(agentRuntimeClientJs.includes(token), `agent runtime client missing URL resolution token: ${token}`);
 }
