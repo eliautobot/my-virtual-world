@@ -3224,6 +3224,8 @@ def note_live_agent_loop_world_client_activity(source="/api/world-actions/active
     if client_version != LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION:
         return False
     now_epoch = time.time()
+    state = get_live_agent_loop_state()
+    ttl = _normalize_int(state.get("clientActiveTtlSec"), LIVE_AGENT_LOOP_DEFAULTS["clientActiveTtlSec"], minimum=10, maximum=300)
     info = client_info if isinstance(client_info, dict) else {}
     cleaned = {
         "sessionId": _clean_live_agent_loop_client_detail(info.get("sessionId"), limit=96),
@@ -3236,7 +3238,14 @@ def note_live_agent_loop_world_client_activity(source="/api/world-actions/active
         "lastSeenAt": _epoch_to_utc_iso(now_epoch),
     }
     cleaned = {key: value for key, value in cleaned.items() if value is not None}
+    incoming_session = cleaned.get("sessionId") or cleaned.get("client")
     with _live_agent_loop_lock:
+        current_info = dict(_live_agent_loop_last_client_info or {})
+        current_session = current_info.get("sessionId") or current_info.get("client")
+        last_seen = float(_live_agent_loop_last_client_at or 0)
+        current_active = bool(last_seen and (now_epoch - last_seen) <= ttl)
+        if current_active and current_session and incoming_session and current_session != incoming_session:
+            return False
         _live_agent_loop_last_client_at = now_epoch
         _live_agent_loop_last_client_info = cleaned
     return True
@@ -10462,17 +10471,22 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             query = urllib.parse.parse_qs(parsed.query)
             client_markers = {str(value).strip() for value in query.get("client", [])}
             client_versions = {str(value).strip() for value in query.get("version", [])}
+            client_visibility = str((query.get("visibility") or [""])[0] or "").strip().lower()
+            if client_visibility == "hidden":
+                return self._send_json([])
             if "main3d-live-sync" in client_markers:
-                note_live_agent_loop_world_client_activity(
+                world_client_claimed = note_live_agent_loop_world_client_activity(
                     client_version=next(iter(client_versions), None),
                     client_info={
                         "client": "main3d-live-sync",
                         "sessionId": (query.get("sessionId") or query.get("session") or [None])[0],
                         "page": (query.get("page") or [None])[0],
-                        "visibility": (query.get("visibility") or [None])[0],
+                        "visibility": client_visibility or None,
                         "userAgent": self.headers.get("User-Agent"),
                     },
                 )
+                if not world_client_claimed:
+                    return self._send_json([])
             with _live_agent_action_handoff_lock:
                 active_actions = reconcile_world_action_reservations().get("active", [])
             return self._send_json(active_actions)

@@ -1392,6 +1392,24 @@ function clearAgentRuntimeMemberMovement(agent, runtimePositionOwner = '', { rel
   return true;
 }
 
+function isRuntimeExecutorPageVisible() {
+  return typeof document === 'undefined' || document.visibilityState !== 'hidden';
+}
+
+function isAgentRuntimeUserDirectedIntent(intentOptions = {}) {
+  const owner = String(intentOptions.owner || '').toLowerCase();
+  const priorityName = String(intentOptions.priorityName || '').toLowerCase();
+  const sourceKind = String(intentOptions.behaviorSourceKind || intentOptions.source?.behaviorSourceKind || '').toLowerCase();
+  const behaviorMode = String(intentOptions.behaviorMode || '').toLowerCase();
+  const sourceFamily = String(intentOptions.source?.family || '').toLowerCase();
+  return owner === 'manual' ||
+    owner === 'user' ||
+    priorityName === 'manual' ||
+    sourceKind === 'user' ||
+    behaviorMode === 'user-directed' ||
+    sourceFamily.startsWith('manual');
+}
+
 function getAgentRuntimeSnapshotOwnerToken(snapshot = null) {
   const owner = String(snapshot?.owner || '').trim();
   const match = owner.match(/:main3d:[A-Za-z0-9_-]+$/);
@@ -1423,6 +1441,69 @@ function isAgentRuntimeSnapshotRemoteWriterActive(snapshot = null) {
   const hasRoute = Boolean(snapshot.routeId || snapshot.leaseOwner || snapshot.leaseExpiresAt);
   if (owner.startsWith('main3d-position-persistence') && !isMovingSnapshot && !hasRoute) return false;
   return true;
+}
+
+function isAgentRuntimeSnapshotForeignLeaseActive(snapshot = null) {
+  return Boolean(
+    snapshot &&
+    isAgentRuntimeSnapshotLeaseActive(snapshot) &&
+    snapshot.leaseOwner &&
+    _agentRuntimeClient?.leaseOwner &&
+    snapshot.leaseOwner !== _agentRuntimeClient.leaseOwner
+  );
+}
+
+function abandonAgentRuntimeLocalRoute(agent, reason = 'runtime-route-abandoned', { clearLifecycle = true, releaseServerLease = false, snapshot = null, error = null } = {}) {
+  if (!agent) return false;
+  const lease = agent._runtimeRouteLease || null;
+  if (releaseServerLease && lease && ['owned', 'releasing', 'heartbeat-failed'].includes(String(lease.state || ''))) {
+    releaseAgentRuntimeRouteLease(agent, reason, 'idle');
+  }
+  agent._runtimeRouteLease = null;
+  agent._runtimeLeaseOwner = '';
+  agent._runtimeRouteId = '';
+  agent._wanderTarget = null;
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  agent._waypointPathIdx = 0;
+  agent._doorTransition = null;
+  agent._enteringBuilding = null;
+  agent._atDoor = false;
+  agent._isRunning = false;
+  resetObstacleAvoidance(agent);
+  clearDynamicInteriorRoutingForAgent(agent.id);
+  clearDynamicExteriorRoutingForAgent(agent.id);
+  const intentRelease = releaseAgentIntent(agent, 'route-failed', {
+    releaseBy: 'route-failed',
+    clearRoute: true,
+    clearLifecycle,
+    releaseSummary: reason,
+  });
+  if (!intentRelease.released && clearLifecycle) agent._idleActivity = null;
+  updateAgentRuntimeRouteLeaseDebug(agent, {
+    phase: 'local-route-abandoned',
+    reason,
+    error: error?.message || String(error || ''),
+    snapshotLeaseOwner: snapshot?.leaseOwner || '',
+    snapshotRouteId: snapshot?.routeId || '',
+  });
+  return true;
+}
+
+function getAgentRuntimeRouteBlock(agent, intentOptions = {}) {
+  if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || !agent) return null;
+  if (isAgentRuntimeUserDirectedIntent(intentOptions)) return null;
+  if (!isRuntimeExecutorPageVisible()) {
+    return { blocked: true, reason: 'runtime-hidden-page-observer', snapshot: getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null };
+  }
+  const snapshot = getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null;
+  if (isAgentRuntimeSnapshotForeignLeaseActive(snapshot)) {
+    return { blocked: true, reason: 'runtime-route-foreign-owner', snapshot };
+  }
+  if (isAgentRuntimeSnapshotRemoteWriterActive(snapshot)) {
+    return { blocked: true, reason: 'runtime-remote-writer-active', snapshot };
+  }
+  return null;
 }
 
 function getAgentRuntimeFloorBuilding(agent, snapshot) {
@@ -2264,7 +2345,7 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
 
   const leaseActive = isAgentRuntimeSnapshotLeaseActive(snapshot);
   const localRouteLease = agent._runtimeRouteLease || null;
-  const localLeaseActive = ['pending', 'owned', 'releasing'].includes(String(localRouteLease?.state || ''));
+  let localLeaseActive = ['pending', 'owned', 'releasing'].includes(String(localRouteLease?.state || ''));
   const snapshotUpdatedAtMs = Date.parse(snapshot.updatedAt || '');
   if (
     localLeaseActive &&
@@ -2292,8 +2373,17 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   agent._runtimeVersion = snapshot.version || 0;
   agent._runtimeUpdatedAt = snapshot.updatedAt || '';
   const leaseOwnedByThisClient = Boolean(leaseActive && snapshot.leaseOwner && snapshot.leaseOwner === _agentRuntimeClient?.leaseOwner);
+  const foreignLeaseActive = isAgentRuntimeSnapshotForeignLeaseActive(snapshot);
   const remoteWriterActive = isAgentRuntimeSnapshotRemoteWriterActive(snapshot);
   const wasObserverOnly = agent._runtimeObserverOnly === true;
+  if (foreignLeaseActive && localRouteLease) {
+    abandonAgentRuntimeLocalRoute(agent, 'runtime-route-foreign-owner', {
+      snapshot,
+      clearLifecycle: true,
+      releaseServerLease: false,
+    });
+    localLeaseActive = false;
+  }
   if (leaseOwnedByThisClient && (!agent._runtimeRouteLease || !snapshot.routeId || agent._runtimeRouteLease.routeId === snapshot.routeId)) {
     const existingLease = agent._runtimeRouteLease || {};
     const snapshotTarget = agentRuntimePlainObject(snapshot.target, null);
@@ -2599,21 +2689,15 @@ function beginAgentRuntimeRouteLease(agent, target = null, building = null, floo
     })
     .catch(error => {
       if (agent._runtimeRouteLease?.routeId !== routeId) return;
-      agent._runtimeRouteLease = {
-        ...agent._runtimeRouteLease,
-        state: 'rejected',
-        rejectedAtMs: Date.now(),
-        error: error?.message || String(error),
-        errorCode: error?.code || '',
-      };
-      agent._runtimeObserverOnly = Boolean(agent._runtimeSnapshot);
-      agent._wanderTarget = null;
-      releaseAgentIntent(agent, 'runtime-route-lease-rejected', {
-        releaseBy: 'route-failed',
-        clearRoute: true,
+      const runtimeSnapshot = getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null;
+      abandonAgentRuntimeLocalRoute(agent, 'runtime-route-lease-rejected', {
+        snapshot: runtimeSnapshot,
         clearLifecycle: true,
-        releaseSummary: error?.message || 'runtime route lease rejected',
+        releaseServerLease: false,
+        error,
       });
+      agent._runtimeObserverOnly = Boolean(runtimeSnapshot);
+      if (runtimeSnapshot) applyAgentRuntimeSnapshotToAgent(agent, runtimeSnapshot, { updateVisible: true, source: 'runtime-route-claim-rejected' });
       updateAgentRuntimeRouteLeaseDebug(agent, {
         phase: 'claim-rejected',
         ok: false,
@@ -2650,10 +2734,15 @@ function maybeSendAgentRuntimeRouteHeartbeat(agent, state = 'routing', { force =
     })
     .catch(error => {
       if (agent._runtimeRouteLease?.routeId === lease.routeId) {
-        agent._runtimeRouteLease.state = 'heartbeat-failed';
-        agent._runtimeRouteLease.error = error?.message || String(error);
-        agent._runtimeObserverOnly = Boolean(agent._runtimeSnapshot);
-        agent._wanderTarget = null;
+        const runtimeSnapshot = getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null;
+        abandonAgentRuntimeLocalRoute(agent, 'runtime-route-heartbeat-failed', {
+          snapshot: runtimeSnapshot,
+          clearLifecycle: true,
+          releaseServerLease: false,
+          error,
+        });
+        agent._runtimeObserverOnly = Boolean(runtimeSnapshot);
+        if (runtimeSnapshot) applyAgentRuntimeSnapshotToAgent(agent, runtimeSnapshot, { updateVisible: true, source: 'runtime-route-heartbeat-failed' });
       }
       updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'heartbeat-failed', ok: false, error: error?.message || String(error), code: error?.code || null });
       return null;
@@ -5479,8 +5568,13 @@ function clearTransientObjectAssignmentState(object) {
   let changed = false;
   const deleteKey = (key) => {
     if (Object.prototype.hasOwnProperty.call(object, key)) {
-      delete object[key];
-      changed = true;
+      try {
+        delete object[key];
+        changed = true;
+      } catch {
+        // Some catalog/state records are frozen snapshots. Leave the source
+        // object alone when it cannot be edited in place.
+      }
     }
   };
   for (const key of [
@@ -5496,27 +5590,87 @@ function clearTransientObjectAssignmentState(object) {
     '_scriptedServiceQueueStore',
   ]) deleteKey(key);
   if (object.state?.reservation) {
-    delete object.state.reservation;
-    changed = true;
+    let state = object.state;
+    if (!Object.isExtensible(state) || Object.isSealed(state) || Object.isFrozen(state)) {
+      try {
+        state = { ...state };
+        object.state = state;
+        changed = true;
+      } catch {
+        state = null;
+      }
+    }
+    if (state) {
+      try {
+        delete state.reservation;
+        changed = true;
+      } catch {
+        // Frozen nested state cannot be repaired in place.
+      }
+    }
   }
-  for (const [key, value] of Object.entries(object)) {
-    if (!value || typeof value !== 'object' || Array.isArray(value) || !key.endsWith('State')) continue;
+  for (const [key, rawValue] of Object.entries(object)) {
+    if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue) || !key.endsWith('State')) continue;
+    let value = rawValue;
+    if (!Object.isExtensible(value) || Object.isSealed(value) || Object.isFrozen(value)) {
+      try {
+        value = { ...value };
+        object[key] = value;
+        changed = true;
+      } catch {
+        continue;
+      }
+    }
+    const replaceWithMutableCopy = () => {
+      if (value !== rawValue) return true;
+      try {
+        value = { ...rawValue };
+        object[key] = value;
+        changed = true;
+        return true;
+      } catch {
+        return false;
+      }
+    };
     for (const listKey of ['activeSlotIds', 'reservedSlotIds', 'activeSeatIds', 'reservedSeatIds']) {
       if (Array.isArray(value[listKey]) && value[listKey].length) {
-        value[listKey] = [];
-        changed = true;
+        try {
+          value[listKey] = [];
+          changed = true;
+        } catch {
+          if (replaceWithMutableCopy()) {
+            value[listKey] = [];
+            changed = true;
+          }
+        }
       }
     }
     const status = String(value.status || '').toLowerCase();
     if (['reserved', 'active', 'playing', 'occupied', 'queued', 'in-use', 'in_use'].includes(status)) {
-      value.status = value.readyStatus || value.openStatus || 'ready';
-      changed = true;
+      try {
+        value.status = value.readyStatus || value.openStatus || 'ready';
+        changed = true;
+      } catch {
+        if (replaceWithMutableCopy()) {
+          value.status = value.readyStatus || value.openStatus || 'ready';
+          changed = true;
+        }
+      }
     }
     if (value.agentId || value.reservedAgentId || value.activeAgentId) {
-      delete value.agentId;
-      delete value.reservedAgentId;
-      delete value.activeAgentId;
-      changed = true;
+      try {
+        delete value.agentId;
+        delete value.reservedAgentId;
+        delete value.activeAgentId;
+        changed = true;
+      } catch {
+        if (replaceWithMutableCopy()) {
+          delete value.agentId;
+          delete value.reservedAgentId;
+          delete value.activeAgentId;
+          changed = true;
+        }
+      }
     }
   }
   return changed;
@@ -9622,6 +9776,33 @@ function releaseObjectAssignmentForAgentIntent(agent, intent = null, reason = 'i
   const slotId = object.slotId || object.spotId || null;
   const actionId = object.actionId || null;
   let changed = false;
+  const setTargetProperty = (key, value) => {
+    try {
+      target[key] = value;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const mutableTargetRecord = (key, rawValue = target?.[key]) => {
+    if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) return null;
+    if (!Object.isExtensible(rawValue) || Object.isSealed(rawValue) || Object.isFrozen(rawValue)) {
+      const copy = { ...rawValue };
+      if (!setTargetProperty(key, copy)) return null;
+      changed = true;
+      return copy;
+    }
+    return rawValue;
+  };
+  const deleteRecordProperty = (record, key) => {
+    if (!record || !Object.prototype.hasOwnProperty.call(record, key)) return false;
+    try {
+      delete record[key];
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const matches = (entry = {}) => {
     if (!entry) return false;
     return Boolean(
@@ -9632,29 +9813,43 @@ function releaseObjectAssignmentForAgentIntent(agent, intent = null, reason = 'i
       (entry.agentId && String(entry.agentId) === agentId)
     );
   };
-  if (matches(target.reservation)) { target.reservation = null; changed = true; }
-  if (matches(target.state?.reservation)) { delete target.state.reservation; changed = true; }
+  if (matches(target.reservation) && setTargetProperty('reservation', null)) changed = true;
+  if (matches(target.state?.reservation)) {
+    const state = mutableTargetRecord('state', target.state);
+    if (state && deleteRecordProperty(state, 'reservation')) changed = true;
+  }
   for (const storeKey of ['objectUseSeat', 'objectUseStanding', 'objectUseActive', '_scriptedObjectUseStore', '_scriptedServiceQueueStore']) {
-    const reservations = target[storeKey]?.reservations;
+    const store = target[storeKey];
+    const reservations = store?.reservations;
     if (!Array.isArray(reservations)) continue;
-    target[storeKey].reservations = reservations.map(reservation => {
+    let releasedAny = false;
+    const nextReservations = reservations.map(reservation => {
       if (matches(reservation) && !['released', 'complete', 'completed', 'cancelled', 'failed'].includes(String(reservation.state || reservation.status || '').toLowerCase())) {
-        changed = true;
+        releasedAny = true;
         return { ...reservation, state: 'released', status: 'released', releasedAtMs: Date.now(), releaseReason: reason };
       }
       return reservation;
     });
+    if (releasedAny) {
+      const mutableStore = mutableTargetRecord(storeKey, store);
+      if (mutableStore) {
+        mutableStore.reservations = nextReservations;
+        changed = true;
+      }
+    }
   }
   for (const listKey of ['objectUseSeatReservations', 'objectUseStandingReservations', 'objectUseActiveReservations']) {
     const reservations = target[listKey];
     if (!Array.isArray(reservations)) continue;
-    target[listKey] = reservations.map(reservation => {
+    let releasedAny = false;
+    const nextReservations = reservations.map(reservation => {
       if (matches(reservation) && !['released', 'complete', 'completed', 'cancelled', 'failed'].includes(String(reservation.state || reservation.status || '').toLowerCase())) {
-        changed = true;
+        releasedAny = true;
         return { ...reservation, state: 'released', status: 'released', releasedAtMs: Date.now(), releaseReason: reason };
       }
       return reservation;
     });
+    if (releasedAny && setTargetProperty(listKey, nextReservations)) changed = true;
   }
   const activeUse = target.activeUse || null;
   if (activeUse) {
@@ -9672,26 +9867,48 @@ function releaseObjectAssignmentForAgentIntent(agent, intent = null, reason = 'i
       const remainingSeats = Object.keys(activeSeats).length;
       const remainingSlots = Object.keys(activeSlots).length;
       if (remainingSeats || remainingSlots) {
-        target.activeUse = { ...activeUse, activeSeats, activeSlots, state: 'active', lastReleasedAgentId: agentId, lastReleaseReason: reason };
+        setTargetProperty('activeUse', { ...activeUse, activeSeats, activeSlots, state: 'active', lastReleasedAgentId: agentId, lastReleaseReason: reason });
       } else {
-        target.activeUse = clearCompletedObjectAssignmentMarkers(target, activeUse, { state: 'idle', mode: activeUse.mode || 'open', activeSlots, agent, action: actionId || activeUse.actionId || activeUse.action || null, reason });
+        setTargetProperty('activeUse', clearCompletedObjectAssignmentMarkers(target, activeUse, { state: 'idle', mode: activeUse.mode || 'open', activeSlots, agent, action: actionId || activeUse.actionId || activeUse.action || null, reason }));
       }
       changed = true;
     }
   }
   if (changed) {
     if (target.type === 'arcadeMachine') target.playMode = 'ready';
-    for (const [key, value] of Object.entries(target)) {
-      if (!value || typeof value !== 'object' || Array.isArray(value) || !key.endsWith('State')) continue;
+    for (const [key, rawValue] of Object.entries(target)) {
+      if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue) || !key.endsWith('State')) continue;
+      let value = mutableTargetRecord(key, rawValue);
+      if (!value) continue;
+      const replaceWithMutableCopy = () => {
+        if (value !== rawValue) return true;
+        const copy = { ...rawValue };
+        if (!setTargetProperty(key, copy)) return false;
+        value = copy;
+        changed = true;
+        return true;
+      };
       for (const listKey of ['reservedSlotIds', 'activeSlotIds', 'reservedSeatIds', 'activeSeatIds']) {
         if (Array.isArray(value[listKey])) {
           const next = value[listKey].filter(id => String(id) !== String(slotId || ''));
-          if (next.length !== value[listKey].length) { value[listKey] = next; }
+          if (next.length !== value[listKey].length) {
+            try {
+              value[listKey] = next;
+            } catch {
+              if (replaceWithMutableCopy()) value[listKey] = next;
+            }
+          }
         }
       }
-      if (value.agentId && String(value.agentId) === agentId) delete value.agentId;
-      if (value.reservedAgentId && String(value.reservedAgentId) === agentId) delete value.reservedAgentId;
-      if (['reserved', 'active', 'playing', 'occupied', 'queued', 'in-use', 'in_use'].includes(String(value.status || '').toLowerCase())) value.status = 'ready';
+      if (value.agentId && String(value.agentId) === agentId && !deleteRecordProperty(value, 'agentId') && replaceWithMutableCopy()) delete value.agentId;
+      if (value.reservedAgentId && String(value.reservedAgentId) === agentId && !deleteRecordProperty(value, 'reservedAgentId') && replaceWithMutableCopy()) delete value.reservedAgentId;
+      if (['reserved', 'active', 'playing', 'occupied', 'queued', 'in-use', 'in_use'].includes(String(value.status || '').toLowerCase())) {
+        try {
+          value.status = 'ready';
+        } catch {
+          if (replaceWithMutableCopy()) value.status = 'ready';
+        }
+      }
     }
   }
   return { released: changed, reason: changed ? 'object-assignment-released' : 'no-matching-object-assignment', targetType: target.type || object.objectType || object.type || null };
@@ -12590,6 +12807,30 @@ function setAgentTarget(agent, target, building = null, floor = null) {
     behaviorFallbackReason: intentOptions.behaviorFallbackReason,
     debug: intentOptions.debug || undefined,
   };
+  const runtimeRouteBlock = getAgentRuntimeRouteBlock(agent, proposedIntentOptions);
+  if (runtimeRouteBlock?.blocked) {
+    abandonAgentRuntimeLocalRoute(agent, runtimeRouteBlock.reason, {
+      snapshot: runtimeRouteBlock.snapshot || null,
+      clearLifecycle: true,
+      releaseServerLease: false,
+    });
+    if (runtimeRouteBlock.snapshot) {
+      applyAgentRuntimeSnapshotToAgent(agent, runtimeRouteBlock.snapshot, {
+        updateVisible: true,
+        source: runtimeRouteBlock.reason,
+      });
+    }
+    return {
+      accepted: false,
+      reason: runtimeRouteBlock.reason,
+      runtimeRouteBlock: {
+        reason: runtimeRouteBlock.reason,
+        leaseOwner: runtimeRouteBlock.snapshot?.leaseOwner || '',
+        routeId: runtimeRouteBlock.snapshot?.routeId || '',
+        state: runtimeRouteBlock.snapshot?.state || '',
+      },
+    };
+  }
   const admission = admitAgentIntent(agent, proposedIntentOptions);
   if (!admission.accepted) return admission;
   const interruptRelease = releaseInterruptedLowerLayerIntentState(agent, admission.activeIntent, admission.attemptedIntent);
@@ -37156,6 +37397,16 @@ function getLiveModeWorldClientMarkerUrl() {
 }
 
 async function syncActiveBarberChairWorldActions() {
+  if (!isRuntimeExecutorPageVisible()) {
+    window.__VWLastBarberChairWorldActionSync = {
+      ok: true,
+      routed: 0,
+      skipped: true,
+      reason: 'runtime-hidden-page-observer',
+      checkedAt: new Date().toISOString(),
+    };
+    return false;
+  }
   try {
     const response = await fetch(getLiveModeWorldClientMarkerUrl());
     if (!response.ok) return false;
@@ -37182,7 +37433,25 @@ function startBarberChairWorldActionSync() {
   setTimeout(syncActiveBarberChairWorldActions, 0);
 }
 
+function surrenderRuntimeRoutesForHiddenPage() {
+  if (isRuntimeExecutorPageVisible()) {
+    setTimeout(syncActiveBarberChairWorldActions, 0);
+    return;
+  }
+  for (const agent of agentsList) {
+    const lease = agent?._runtimeRouteLease || null;
+    if (!lease || !['pending', 'owned', 'releasing', 'heartbeat-failed'].includes(String(lease.state || ''))) continue;
+    abandonAgentRuntimeLocalRoute(agent, 'runtime-hidden-page-surrender', {
+      clearLifecycle: true,
+      releaseServerLease: ['owned', 'releasing', 'heartbeat-failed'].includes(String(lease.state || '')),
+      snapshot: getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null,
+    });
+    agent._runtimeObserverOnly = Boolean(agent._runtimeSnapshot);
+  }
+}
+
 startBarberChairWorldActionSync();
+document.addEventListener('visibilitychange', surrenderRuntimeRoutesForHiddenPage);
 window.__VWSyncActiveBarberChairWorldActions = syncActiveBarberChairWorldActions;
 window.__VWSyncActiveLiveModeWorldActions = syncActiveBarberChairWorldActions;
 
