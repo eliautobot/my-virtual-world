@@ -2,12 +2,16 @@
 // End-to-end smoke test for the Colyseus agent runtime sidecar.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@colyseus/sdk';
-import { AGENT_RUNTIME_ROOM_NAME } from '../src/realtime/agent-runtime-room.mjs';
+import {
+  AGENT_RUNTIME_ROOM_NAME,
+  SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
+  SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+} from '../src/realtime/agent-runtime-room.mjs';
 
 const root = process.cwd();
 
@@ -100,6 +104,16 @@ async function waitForWorldRuntime(room, predicate = () => true) {
     await delay(50);
   }
   throw new Error('timed out waiting for worldRuntime');
+}
+
+async function waitForObject(room, objectKey, predicate = () => true) {
+  const deadline = Date.now() + 6000;
+  while (Date.now() < deadline) {
+    const object = room.state?.objects?.get?.(objectKey);
+    if (object && predicate(object)) return object;
+    await delay(50);
+  }
+  throw new Error(`timed out waiting for object ${objectKey}`);
 }
 
 async function connectRoom(port) {
@@ -400,6 +414,103 @@ async function run() {
     assert.equal(resumedRuntime.topologyHash, 'traffic:smoke');
     assert.equal(resumedRuntime.trafficVehicles?.size, 30);
     await resumedRoom.leave(true);
+
+    mkdirSync(join(dataDir, 'buildings'), { recursive: true });
+    writeFileSync(join(dataDir, 'world-meta.json'), `${JSON.stringify({
+      agentProfiles: {
+        adam: { agentLiveModeEnabled: true },
+      },
+    }, null, 2)}\n`);
+    writeFileSync(join(dataDir, 'presence-snapshot.json'), `${JSON.stringify({
+      adam: { state: 'idle', agentLiveModeEnabled: true },
+    }, null, 2)}\n`);
+    writeFileSync(join(dataDir, 'buildings', 'office.json'), `${JSON.stringify({
+      id: 'office',
+      name: 'Smoke Office',
+      type: 'office',
+      worldX: 0,
+      worldY: 0,
+      widthTiles: 20,
+      heightTiles: 20,
+      interior: {
+        floors: [{ level: 1, name: 'Floor 1' }],
+        furniture: [{
+          type: 'armchair',
+          x: 5,
+          z: 5,
+          floor: 1,
+          room: 'lounge',
+          actionLocations: [{
+            id: 'seat',
+            roles: ['seat', 'rest'],
+            actionId: 'life.restAtArmchair',
+            actionTarget: { x: 5.25, z: 5.25, floor: 1 },
+            facing: 'south',
+          }],
+        }],
+      },
+    }, null, 2)}\n`);
+
+    const scriptedRoom = await connectRoom(port);
+    const scriptedAgent = await waitForAgent(scriptedRoom, 'adam', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER ||
+      agent.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER
+    );
+    assert.equal(scriptedAgent.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    assert.equal(scriptedAgent.leaseOwner, SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER);
+    const scriptedObjectKey = 'office:furniture:0:armchair';
+    const scriptedObject = await waitForObject(scriptedRoom, scriptedObjectKey, (object) => object.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    assert.equal(scriptedObject.agentId, 'adam');
+    assert(['routing', 'active'].includes(scriptedObject.state));
+
+    scriptedRoom.send('runtime:worldObject', {
+      requestId: 'server-object-browser-overwrite',
+      objectKey: scriptedObjectKey,
+      owner: 'main3d-world-runtime:second-browser',
+      state: 'active',
+      agentId: 'adam',
+      expiresAt: new Date(Date.now() + 10000).toISOString(),
+      data: { activeUse: { state: 'active', agentId: 'adam' } },
+    });
+    const serverObjectConflict = await waitForRoomMessage(scriptedRoom, 'runtime:error', (msg) => msg.requestId === 'server-object-browser-overwrite');
+    assert.equal(serverObjectConflict.code, 'object_state_conflict');
+
+    scriptedRoom.send('runtime:snapshot', {
+      requestId: 'beth-backend-object-snapshot',
+      agentId: 'beth',
+      mode: 'scripted',
+      owner: 'agent-scripted-mode',
+      x: 40,
+      y: 40,
+      floor: 1,
+      state: 'idle',
+    });
+    const bethSnapshotAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'beth-backend-object-snapshot');
+    assert.equal(bethSnapshotAck.snapshot.agentId, 'beth');
+    scriptedRoom.send('runtime:objectUseRequest', {
+      requestId: 'beth-backend-object-use',
+      agentId: 'beth',
+      source: 'smoke-manual-object-use',
+      target: {
+        objectKey: 'manual-building:furniture:2:waterCooler',
+        buildingId: 'manual-building',
+        furnitureIndex: 2,
+        objectType: 'waterCooler',
+        actionId: 'life.getWater',
+        spotId: 'use-front',
+        x: 96,
+        y: 104,
+        floor: 1,
+      },
+      agentPosition: { x: 40, y: 40, floor: 1 },
+    });
+    const objectUseAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'beth-backend-object-use');
+    assert.equal(objectUseAck.type, 'runtime:objectUseRequest');
+    assert.equal(objectUseAck.snapshot.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    assert.equal(objectUseAck.object.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    assert.equal(objectUseAck.object.objectKey, 'manual-building:furniture:2:waterCooler');
+    await waitForAgent(scriptedRoom, 'beth', (agent) => agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    await scriptedRoom.leave(true);
 
     console.log('realtime smoke ok');
   } finally {

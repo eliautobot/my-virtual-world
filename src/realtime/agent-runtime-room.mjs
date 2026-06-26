@@ -29,6 +29,22 @@ export const LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC = 72;
 export const LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS = 3;
 export const LIVE_ACTION_RUNTIME_DWELL_MS = 5000;
 export const LIVE_ACTION_RUNTIME_LEASE_TTL_MS = 10000;
+export const LIVE_STATUS_RUNTIME_OWNER = 'server-live-status-runtime';
+export const LIVE_STATUS_RUNTIME_LEASE_OWNER = 'server-live-status';
+export const LIVE_STATUS_RUNTIME_POLL_MS = 1000;
+export const LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC = 96;
+export const LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS = 6;
+export const LIVE_STATUS_RUNTIME_LEASE_TTL_MS = 15000;
+export const LIVE_STATUS_RUNTIME_LEASE_REFRESH_MS = 8000;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runtime';
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER = 'server-scripted-object';
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS = 1500;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC = 72;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS = 5;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS = 15000;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS = 8000;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS = 7000;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS = 12000;
 export const LIVE_ACTION_API_TILE = 40;
 
 const WORLD_ACTION_SCHEMA_VERSION = 'agent-life-world-action/v1';
@@ -62,6 +78,7 @@ const AGENT_ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const SAFE_TEXT_RE = /^[A-Za-z0-9_.:/@# -]{0,160}$/;
 const WORLD_OBJECT_KEY_RE = /^[A-Za-z0-9_.:/@#, -]{1,160}$/;
 const ACTIVE_WORLD_OBJECT_STATES = new Set(['reserved', 'routing', 'active', 'using', 'occupied', 'queued', 'cooldown']);
+const SERVER_WORLD_OBJECT_RUNTIME_OWNERS = new Set([SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER]);
 
 export class WorldRuntimeTrafficLightState extends Schema {
   constructor(seed = {}) {
@@ -289,6 +306,10 @@ export function worldMetaFilePath(dataDir = process.env.VW_DATA_DIR || '.local-d
   return join(dataDir || '.local-data', 'world-meta.json');
 }
 
+export function presenceSnapshotFilePath(dataDir = process.env.VW_DATA_DIR || '.local-data') {
+  return join(dataDir || '.local-data', 'presence-snapshot.json');
+}
+
 function buildingsDirPath(dataDir = process.env.VW_DATA_DIR || '.local-data') {
   return join(dataDir || '.local-data', 'buildings');
 }
@@ -317,6 +338,11 @@ function writeJsonFileAtomic(path, value) {
 function readWorldMetaDocument(dataDir) {
   const meta = readJsonFile(worldMetaFilePath(dataDir), null);
   return meta && typeof meta === 'object' && !Array.isArray(meta) ? meta : {};
+}
+
+function readPresenceSnapshotDocument(dataDir) {
+  const snapshot = readJsonFile(presenceSnapshotFilePath(dataDir), null);
+  return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot : {};
 }
 
 function writeWorldMetaDocument(dataDir, meta) {
@@ -788,6 +814,579 @@ function makeLiveActionVisualState(isMoving, status = 'working') {
     activityActive: !isMoving,
     carrying: false,
   };
+}
+
+const LIVE_STATUS_WORK_STATES = new Set(['working', 'busy', 'running', 'executing']);
+const LIVE_STATUS_WORK_OBJECT_TYPES = new Set(['desk', 'standingDesk', 'receptionDesk', 'laptopMonitorProps']);
+const LIVE_STATUS_WORK_SPOT_DEFAULTS = {
+  desk: { dx: 0, dz: 0.8, facing: 'north', spotId: 'default' },
+  standingDesk: { dx: 0, dz: 0.92, facing: 'north', spotId: 'work-front' },
+  receptionDesk: { dx: 0, dz: -0.62, facing: 'south', spotId: 'staff-work' },
+  laptopMonitorProps: { dx: 0, dz: 0.66, facing: 'north', spotId: 'work-front' },
+};
+
+function normalizePresenceState(record) {
+  const state = typeof record === 'string' ? record : record?.state || record?.status || '';
+  return String(state || '').trim().toLowerCase();
+}
+
+function isLiveStatusWorking(record) {
+  return LIVE_STATUS_WORK_STATES.has(normalizePresenceState(record));
+}
+
+function liveStatusIdentityMatches(agentId, assignedTo) {
+  if (!agentId || assignedTo === null || assignedTo === undefined) return false;
+  const wanted = String(agentId || '').trim().toLowerCase();
+  return String(assignedTo || '').split(/[,\s]+/).some(part => part.trim().toLowerCase() === wanted);
+}
+
+function stableTextHash(value) {
+  let hash = 0;
+  for (const char of String(value || '')) {
+    hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function rotateRuntimeLocalOffset(dx, dz, rotationDeg = 0) {
+  const rad = (Number(rotationDeg || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return {
+    x: Number(dx || 0) * cos + Number(dz || 0) * sin,
+    z: -Number(dx || 0) * sin + Number(dz || 0) * cos,
+  };
+}
+
+function runtimeFacingAngle(building, furniture, localX, localZ, facing = 'north') {
+  const key = String(facing || 'north').toLowerCase();
+  const localFacing = key === 'south' ? { x: 0, z: -1 }
+    : key === 'east' ? { x: 1, z: 0 }
+    : key === 'west' ? { x: -1, z: 0 }
+    : { x: 0, z: 1 };
+  const rotated = rotateRuntimeLocalOffset(localFacing.x, localFacing.z, furniture?.rotation || 0);
+  const from = apiPointFromBuildingLocal(building, localX, localZ);
+  const to = apiPointFromBuildingLocal(building, Number(localX || 0) + rotated.x, Number(localZ || 0) + rotated.z);
+  if (!from || !to) return 0;
+  return Math.atan2(to.x - from.x, to.y - from.y);
+}
+
+function bestWorkSpotLocation(furniture) {
+  const locations = Array.isArray(furniture?.actionLocations) ? furniture.actionLocations : [];
+  return locations.find(location => {
+    const id = String(location?.id || location?.spotId || '').toLowerCase();
+    const roles = Array.isArray(location?.roles) ? location.roles.map(role => String(role || '').toLowerCase()) : [];
+    return id === 'work-front' || id === 'staff-work' || roles.includes('work');
+  }) || locations.find(location => {
+    const id = String(location?.id || location?.spotId || '').toLowerCase();
+    const roles = Array.isArray(location?.roles) ? location.roles.map(role => String(role || '').toLowerCase()) : [];
+    return id === 'default' || roles.includes('seat') || roles.includes('use');
+  }) || locations[0] || null;
+}
+
+function localPointFromWorkSpot(furniture, location) {
+  const explicit = location?.actionTarget || location?.buildingLocal || location?.activationTarget || null;
+  const x = numberOr(explicit?.x, NaN);
+  const z = numberOr(explicit?.z, NaN);
+  if (Number.isFinite(x) && Number.isFinite(z)) {
+    return {
+      x,
+      z,
+      spotId: safeText(location?.interactionSpotId || location?.spotId || location?.id, 'default') || 'default',
+      facing: safeText(location?.facing || explicit?.facing, 'north') || 'north',
+      floor: floorOr(location?.floor ?? explicit?.floor ?? furniture?.floor, 1),
+    };
+  }
+
+  const fallback = LIVE_STATUS_WORK_SPOT_DEFAULTS[furniture?.type] || LIVE_STATUS_WORK_SPOT_DEFAULTS.desk;
+  const rotated = rotateRuntimeLocalOffset(fallback.dx, fallback.dz, furniture?.rotation || 0);
+  return {
+    x: numberOr(furniture?.x, 0) + rotated.x,
+    z: numberOr(furniture?.z, 0) + rotated.z,
+    spotId: fallback.spotId,
+    facing: fallback.facing,
+    floor: floorOr(furniture?.floor, 1),
+  };
+}
+
+function workTargetFromFurniture(building, furniture, index) {
+  if (!building || !furniture || !LIVE_STATUS_WORK_OBJECT_TYPES.has(String(furniture.type || ''))) return null;
+  const location = bestWorkSpotLocation(furniture);
+  const local = localPointFromWorkSpot(furniture, location);
+  const point = apiPointFromBuildingLocal(building, local.x, local.z);
+  if (!point) return null;
+  const objectInstanceId = safeText(furniture.objectInstanceId || furniture.instanceId || furniture.id || `${building.id}:furniture:${index}`, '');
+  return {
+    x: point.x,
+    y: point.y,
+    floor: local.floor,
+    buildingId: safeText(building.id, ''),
+    roomId: safeText(furniture.room, ''),
+    targetKind: 'work-desk',
+    actionId: 'work.desk',
+    objectInstanceId,
+    furnitureIndex: index,
+    objectType: safeText(furniture.type, 'desk') || 'desk',
+    interactionSpotId: local.spotId,
+    spotId: local.spotId,
+    faceAngle: runtimeFacingAngle(building, furniture, local.x, local.z, local.facing),
+  };
+}
+
+function listLiveStatusWorkTargets(dataDir) {
+  const targets = [];
+  for (const building of listBuildingDocuments(dataDir)) {
+    if (!building || building.type === 'park') continue;
+    const furniture = Array.isArray(building?.interior?.furniture) ? building.interior.furniture : [];
+    for (let index = 0; index < furniture.length; index += 1) {
+      const item = furniture[index];
+      if (!item || item.deleted || item.removed || item.enabled === false) continue;
+      const target = workTargetFromFurniture(building, item, index);
+      if (!target) continue;
+      targets.push({
+        target,
+        buildingId: target.buildingId,
+        buildingType: safeText(building.type, ''),
+        buildingName: safeText(building.name, ''),
+        furnitureIndex: index,
+        objectType: target.objectType,
+        assignedTo: item.assignedTo ?? item.assignedAgentId ?? null,
+      });
+    }
+  }
+  return targets.sort((a, b) => `${a.buildingId}:${a.furnitureIndex}`.localeCompare(`${b.buildingId}:${b.furnitureIndex}`));
+}
+
+function agentAssignmentFor(meta, agentId) {
+  const assignments = meta?.agentAssignments && typeof meta.agentAssignments === 'object' && !Array.isArray(meta.agentAssignments)
+    ? meta.agentAssignments
+    : {};
+  const direct = assignments[agentId];
+  return direct && typeof direct === 'object' && !Array.isArray(direct) ? direct : {};
+}
+
+function pickLiveStatusWorkTarget(agentId, { meta, targets, workingAgentIds }) {
+  if (!agentId || !Array.isArray(targets) || targets.length === 0) return null;
+  const assigned = targets.find(entry => liveStatusIdentityMatches(agentId, entry.assignedTo));
+  if (assigned) return assigned.target;
+
+  const assignment = agentAssignmentFor(meta, agentId);
+  const workBuildingId = safeText(assignment.work || assignment.workBuilding || assignment.workBuildingId, '');
+  let candidates = targets.filter(entry => !entry.assignedTo);
+  if (workBuildingId) {
+    const inAssignedBuilding = candidates.filter(entry => entry.buildingId === workBuildingId);
+    if (inAssignedBuilding.length > 0) candidates = inAssignedBuilding;
+  } else {
+    const officeTargets = candidates.filter(entry =>
+      String(entry.buildingType || '').toLowerCase() === 'office' ||
+      String(entry.buildingName || '').toLowerCase().includes('office')
+    );
+    if (officeTargets.length > 0) candidates = officeTargets;
+  }
+  if (candidates.length === 0) candidates = targets;
+  if (candidates.length === 0) return null;
+  const sortedWorkers = Array.isArray(workingAgentIds) ? workingAgentIds : [];
+  const workerIndex = sortedWorkers.indexOf(agentId);
+  const index = workerIndex >= 0 ? workerIndex : stableTextHash(agentId);
+  return candidates[index % candidates.length]?.target || null;
+}
+
+function buildLiveStatusRuntimePlan(dataDir) {
+  const presence = readPresenceSnapshotDocument(dataDir);
+  const meta = readWorldMetaDocument(dataDir);
+  const targets = listLiveStatusWorkTargets(dataDir);
+  const workingAgentIds = Object.entries(presence)
+    .filter(([agentId, record]) => agentId && !agentId.startsWith('_') && isLiveStatusWorking(record))
+    .map(([agentId]) => safeText(agentId, ''))
+    .filter(Boolean)
+    .sort();
+  const targetsByAgent = {};
+  for (const agentId of workingAgentIds) {
+    const target = pickLiveStatusWorkTarget(agentId, { meta, targets, workingAgentIds });
+    if (target) targetsByAgent[agentId] = target;
+  }
+  return { presence, meta, targets, workingAgentIds, targetsByAgent };
+}
+
+function makeLiveStatusVisualState(isMoving, status = 'working') {
+  return {
+    schemaVersion: 'agent-runtime-visual/v1',
+    status,
+    state: isMoving ? 'moving' : 'idle',
+    resolvedAnimationId: isMoving ? 'walk' : 'typing',
+    movement: { isMoving, isRunning: false },
+    activityActive: !isMoving,
+    activityKind: 'live-status-work-desk',
+    carrying: false,
+  };
+}
+
+const SCRIPTED_OBJECT_IDLE_STATES = new Set(['idle', 'available', 'online']);
+const SCRIPTED_OBJECT_SKIP_ACTIONS = new Set(['sit_work', 'work.desk', 'planning.meeting', 'planning.schedule']);
+const SCRIPTED_OBJECT_SKIP_TYPES = new Set(['desk', 'standingdesk', 'receptiondesk', 'laptopmonitorprops']);
+const SCRIPTED_OBJECT_ALLOWED_TYPES = new Set([
+  'armchair',
+  'couch',
+  'chair',
+  'officechair',
+  'loveseat',
+  'sectionalsofa',
+  'diningchair',
+  'barstool',
+  'patiochair',
+  'smallcafetable',
+  'outdoorcafetable',
+  'picnictable',
+  'hallwaybench',
+  'vending',
+  'vendingmachine',
+  'watercooler',
+  'microwave',
+  'countertopcoffeemachine',
+  'coffeemachine',
+  'bookshelf',
+  'whiteboard',
+  'printer',
+  'arcademachine',
+  'trainingmat',
+  'treadmill',
+  'gymbench',
+  'outdoorexercisestation',
+  'playgroundslide',
+]);
+const SCRIPTED_OBJECT_ALLOWED_ROLES = new Set(['use', 'seat', 'social', 'browse', 'read', 'rest', 'relax', 'drink', 'food', 'play', 'inspect', 'exercise', 'wait']);
+
+function isAgentLiveModeEnabledForServer(meta, agentId, presenceRecord = null) {
+  const profiles = meta?.agentProfiles && typeof meta.agentProfiles === 'object' && !Array.isArray(meta.agentProfiles)
+    ? meta.agentProfiles
+    : {};
+  const profile = profiles[agentId] && typeof profiles[agentId] === 'object' && !Array.isArray(profiles[agentId])
+    ? profiles[agentId]
+    : {};
+  const record = presenceRecord && typeof presenceRecord === 'object' && !Array.isArray(presenceRecord) ? presenceRecord : {};
+  return Boolean(
+    profile.agentLiveModeEnabled === true ||
+    profile.liveModeEnabled === true ||
+    profile.liveMode === true ||
+    record.agentLiveModeEnabled === true ||
+    record.liveModeEnabled === true
+  );
+}
+
+function isPresenceIdleForScriptedObjectRuntime(record) {
+  return SCRIPTED_OBJECT_IDLE_STATES.has(normalizePresenceState(record));
+}
+
+function runtimeFurnitureObjectKey(buildingId, furnitureIndex, furnitureType = 'object') {
+  const bid = safeText(buildingId, 'building') || 'building';
+  const index = Number.isFinite(Number(furnitureIndex)) ? Number(furnitureIndex) : 'unknown';
+  const type = safeText(furnitureType, 'object') || 'object';
+  if (type === 'treadmill') return `${bid}:treadmill:${index}`;
+  if (type === 'trainingMat') return `${bid}:trainingMat:${index}`;
+  if (type === 'gymBench') return `${bid}:gymBench:${index}`;
+  if (type === 'outdoorExerciseStation') return `${bid}:outdoorExerciseStation:${index}`;
+  if (type === 'playgroundSlide') return `${bid}:playgroundSlide:${index}`;
+  if (type === 'arcadeMachine') return `${bid}:arcadeMachine:${index}`;
+  return `${bid}:furniture:${index}:${type}`;
+}
+
+function scriptedObjectSpotId(location = null) {
+  return safeText(location?.interactionSpotId || location?.spotId || location?.activationSpotId || location?.id, 'default') || 'default';
+}
+
+function scriptedObjectActionId(furniture = null, location = null) {
+  return safeText(
+    location?.actionId ||
+    location?.action ||
+    location?.uiActionId ||
+    location?.apiActionId ||
+    furniture?.actionId ||
+    `object.use.${safeText(furniture?.type, 'object') || 'object'}`,
+    'object.use',
+  ) || 'object.use';
+}
+
+function scriptedObjectRoles(location = null) {
+  return Array.isArray(location?.roles)
+    ? location.roles.map(role => String(role || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+}
+
+function isScriptedObjectSpotUsable(furniture = null, location = null) {
+  const objectType = String(furniture?.type || '').trim().toLowerCase();
+  if (!objectType || SCRIPTED_OBJECT_SKIP_TYPES.has(objectType)) return false;
+  const actionId = scriptedObjectActionId(furniture, location);
+  if (SCRIPTED_OBJECT_SKIP_ACTIONS.has(actionId)) return false;
+  const roles = scriptedObjectRoles(location);
+  const spotId = String(scriptedObjectSpotId(location) || '').toLowerCase();
+  if (spotId.includes('queue') || roles.includes('queue') || roles.includes('work')) return false;
+  if (roles.some(role => SCRIPTED_OBJECT_ALLOWED_ROLES.has(role))) return true;
+  if (SCRIPTED_OBJECT_ALLOWED_TYPES.has(objectType)) return true;
+  return /(^|[.-])(use|rest|read|browse|drink|coffee|water|snack|play|inspect|exercise)($|[.-])/i.test(actionId);
+}
+
+function scriptedObjectFallbackOffset(furniture = null) {
+  const type = String(furniture?.type || '').trim();
+  if (['couch', 'loveseat', 'sectionalSofa', 'armchair', 'chair', 'officeChair', 'diningChair', 'hallwayBench'].includes(type)) {
+    return { dx: 0, dz: 0.15, facing: 'north', poseKind: 'seat' };
+  }
+  return { dx: 0, dz: 0.82, facing: 'north', poseKind: 'stand-use' };
+}
+
+function localPointFromScriptedObjectSpot(furniture = null, location = null) {
+  const explicit = location?.actionTarget || location?.buildingLocal || location?.activationTarget || null;
+  const x = numberOr(explicit?.x, NaN);
+  const z = numberOr(explicit?.z, NaN);
+  const fallback = scriptedObjectFallbackOffset(furniture);
+  if (Number.isFinite(x) && Number.isFinite(z)) {
+    return {
+      x,
+      z,
+      floor: floorOr(location?.floor ?? explicit?.floor ?? furniture?.floor, 1),
+      facing: safeText(location?.facing || explicit?.facing, fallback.facing) || fallback.facing,
+      poseKind: scriptedObjectRoles(location).includes('seat') ? 'seat' : fallback.poseKind,
+    };
+  }
+  const rotated = rotateRuntimeLocalOffset(fallback.dx, fallback.dz, furniture?.rotation || 0);
+  return {
+    x: numberOr(furniture?.x, 0) + rotated.x,
+    z: numberOr(furniture?.z, 0) + rotated.z,
+    floor: floorOr(furniture?.floor, 1),
+    facing: fallback.facing,
+    poseKind: fallback.poseKind,
+  };
+}
+
+function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null, index = -1, location = null) {
+  if (!building || !furniture || !isScriptedObjectSpotUsable(furniture, location)) return null;
+  const local = localPointFromScriptedObjectSpot(furniture, location);
+  const world = location?.world && typeof location.world === 'object' && !Array.isArray(location.world) ? location.world : null;
+  const worldX = numberOr(world?.x, NaN);
+  const worldZ = numberOr(world?.z ?? world?.y, NaN);
+  const point = Number.isFinite(worldX) && Number.isFinite(worldZ)
+    ? { x: worldX * LIVE_ACTION_API_TILE, y: worldZ * LIVE_ACTION_API_TILE }
+    : apiPointFromBuildingLocal(building, local.x, local.z);
+  if (!point) return null;
+  const objectType = safeText(furniture.type, 'object') || 'object';
+  const objectKey = normalizeWorldObjectKey(runtimeFurnitureObjectKey(building.id || 'building', index, objectType));
+  const spotId = scriptedObjectSpotId(location);
+  const actionId = scriptedObjectActionId(furniture, location);
+  const objectInstanceId = safeText(furniture.objectInstanceId || furniture.instanceId || furniture.id || `${building.id}:furniture:${index}`, '');
+  return {
+    x: point.x,
+    y: point.y,
+    floor: local.floor,
+    buildingId: safeText(building.id, ''),
+    roomId: safeText(furniture.room, ''),
+    targetKind: 'scripted-object',
+    objectKey,
+    objectInstanceId,
+    furnitureIndex: index,
+    objectType,
+    actionId,
+    interactionSpotId: spotId,
+    spotId,
+    slotId: safeText(location?.slotId || location?.seatId || spotId, spotId) || spotId,
+    poseKind: local.poseKind,
+    faceAngle: runtimeFacingAngle(building, furniture, local.x, local.z, local.facing),
+  };
+}
+
+function listScriptedObjectRuntimeTargets(dataDir) {
+  const targets = [];
+  for (const building of listBuildingDocuments(dataDir)) {
+    const furniture = Array.isArray(building?.interior?.furniture) ? building.interior.furniture : [];
+    for (let index = 0; index < furniture.length; index += 1) {
+      const item = furniture[index];
+      if (!item || item.deleted || item.removed || item.enabled === false) continue;
+      const locations = Array.isArray(item.actionLocations) && item.actionLocations.length > 0 ? item.actionLocations : [null];
+      for (const location of locations) {
+        const target = scriptedObjectTargetFromFurnitureSpot(building, item, index, location);
+        if (target) targets.push(target);
+      }
+    }
+  }
+  return targets.sort((a, b) => `${a.buildingId}:${a.furnitureIndex}:${a.spotId}`.localeCompare(`${b.buildingId}:${b.furnitureIndex}:${b.spotId}`));
+}
+
+function isWorldObjectActiveForAnotherAgent(object = null, agentId = '', nowMs = Date.now()) {
+  if (!hasActiveWorldObjectState(object, nowMs)) return false;
+  const existing = worldObjectToPlain(object);
+  return Boolean(existing.agentId && agentId && existing.agentId !== agentId);
+}
+
+function isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs = Date.now()) {
+  if (!target?.objectKey) return false;
+  const object = state?.objects?.get?.(target.objectKey);
+  return !isWorldObjectActiveForAnotherAgent(object, agentId, nowMs);
+}
+
+function pickScriptedObjectRuntimeTarget(agentId, targets, state, nowMs = Date.now()) {
+  const available = (Array.isArray(targets) ? targets : []).filter(target => isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs));
+  if (available.length === 0) return null;
+  const nonWork = available.filter(target => !SCRIPTED_OBJECT_SKIP_TYPES.has(String(target.objectType || '').toLowerCase()));
+  const candidates = nonWork.length > 0 ? nonWork : available;
+  return candidates[stableTextHash(agentId) % candidates.length] || null;
+}
+
+function buildScriptedObjectRuntimePlan(dataDir) {
+  const presence = readPresenceSnapshotDocument(dataDir);
+  const meta = readWorldMetaDocument(dataDir);
+  const targets = listScriptedObjectRuntimeTargets(dataDir);
+  const idleAgentIds = Object.entries(presence)
+    .filter(([agentId, record]) => agentId && !agentId.startsWith('_') && isPresenceIdleForScriptedObjectRuntime(record) && isAgentLiveModeEnabledForServer(meta, agentId, record))
+    .map(([agentId]) => safeText(agentId, ''))
+    .filter(Boolean)
+    .sort();
+  return { presence, meta, targets, idleAgentIds };
+}
+
+function makeServerScriptedObjectVisualState(isMoving, target = null, status = 'idle') {
+  const poseKind = String(target?.poseKind || '').toLowerCase();
+  return {
+    schemaVersion: 'agent-runtime-visual/v1',
+    status,
+    state: isMoving ? 'moving' : 'idle',
+    resolvedAnimationId: isMoving ? 'walk' : (poseKind === 'seat' ? 'sit' : 'stand-use'),
+    movement: { isMoving, isRunning: false },
+    activityActive: !isMoving,
+    activityKind: 'server-scripted-object-use',
+    activity: {
+      kind: 'server-scripted-object-use',
+      phase: isMoving ? 'routing' : 'active',
+      objectKey: safeText(target?.objectKey, ''),
+      objectType: safeText(target?.objectType, ''),
+      actionId: safeText(target?.actionId, ''),
+      spotId: safeText(target?.spotId || target?.interactionSpotId, ''),
+      poseKind: safeText(target?.poseKind, ''),
+      faceAngle: numberOr(target?.faceAngle, 0),
+    },
+    carrying: false,
+  };
+}
+
+function makeServerScriptedObjectIdleVisualState() {
+  return {
+    schemaVersion: 'agent-runtime-visual/v1',
+    status: 'idle',
+    state: 'idle',
+    resolvedAnimationId: 'idle',
+    movement: { isMoving: false, isRunning: false },
+    activityActive: false,
+    carrying: false,
+  };
+}
+
+function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, source = 'idle') {
+  const objectKey = safeText(target?.objectKey, '') || runtimeFurnitureObjectKey(target?.buildingId, target?.furnitureIndex, target?.objectType || 'object');
+  const actionId = safeText(target?.actionId, 'object.use') || 'object.use';
+  const spotId = safeText(target?.spotId || target?.interactionSpotId || target?.slotId, 'default') || 'default';
+  const reservationId = safeText(`server-res:${objectKey}:${agentId}`, '') || `server-res:${agentId}`;
+  const activeUseId = safeText(`server-active:${objectKey}:${agentId}`, '') || `server-active:${agentId}`;
+  const active = ['active', 'using', 'occupied'].includes(String(state || '').toLowerCase());
+  return {
+    activity: {
+      schemaVersion: 'server-scripted-object-activity/v1',
+      kind: 'server-scripted-object-use',
+      phase: state,
+      source,
+      objectKey,
+      objectType: safeText(target?.objectType, ''),
+      actionId,
+      spotId,
+      poseKind: safeText(target?.poseKind, ''),
+      startedAt: safeIso(target?.runtimeStartedAt, now) || now,
+      activeAt: safeIso(target?.runtimeActiveAt, ''),
+      runtimeOwner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+    },
+    reservation: {
+      id: reservationId,
+      reservationId,
+      objectKey,
+      agentId,
+      actionId,
+      spotId,
+      slotId: safeText(target?.slotId || spotId, spotId) || spotId,
+      status: active ? 'active' : 'held',
+      state: active ? 'in_use' : 'reserved',
+      availabilityState: active ? 'in_use' : 'reserved',
+      reservedAt: safeIso(target?.runtimeStartedAt, now) || now,
+      expiresAt,
+      runtimeWorldObject: true,
+      runtimeOwner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+    },
+    activeUse: active ? {
+      id: activeUseId,
+      objectKey,
+      agentId,
+      actionId,
+      interactionSpotId: spotId,
+      slotId: safeText(target?.slotId || spotId, spotId) || spotId,
+      state: 'active',
+      status: 'active',
+      activeAt: safeIso(target?.runtimeActiveAt, now) || now,
+      runtimeWorldObject: true,
+      runtimeOwner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+    } : null,
+    anchor: {
+      x: numberOr(target?.x, 0),
+      y: numberOr(target?.y, 0),
+      floor: floorOr(target?.floor, 1),
+      heading: Number.isFinite(Number(target?.faceAngle)) ? ((Number(target.faceAngle) * 180 / Math.PI) + 360) % 360 : 0,
+    },
+    writer: 'agent-runtime-room.mjs#serverScriptedObjectRuntime',
+  };
+}
+
+function objectUseRequestTargetFromPoint(message = {}) {
+  const target = message?.target && typeof message.target === 'object' ? message.target : message;
+  const x = numberOr(target?.x, NaN);
+  const y = numberOr(target?.y ?? target?.z, NaN);
+  const buildingId = safeText(target?.buildingId || message?.buildingId, '');
+  const furnitureIndex = target?.furnitureIndex ?? message?.furnitureIndex;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !buildingId || furnitureIndex === undefined || furnitureIndex === null) return null;
+  const objectType = safeText(target?.objectType || target?.catalogKey || message?.objectType, 'object') || 'object';
+  const objectKey = safeText(target?.objectKey || message?.objectKey, '') || runtimeFurnitureObjectKey(buildingId, furnitureIndex, objectType);
+  const spotId = safeText(target?.spotId || target?.interactionSpotId || message?.spotId, 'default') || 'default';
+  return {
+    x,
+    y,
+    floor: floorOr(target?.floor ?? message?.floor, 1),
+    buildingId,
+    roomId: safeText(target?.roomId || message?.roomId, ''),
+    targetKind: 'scripted-object',
+    objectKey,
+    objectInstanceId: safeText(target?.objectInstanceId || target?.objectId || message?.objectInstanceId, ''),
+    furnitureIndex: Math.max(-1, Math.floor(numberOr(furnitureIndex, -1))),
+    objectType,
+    actionId: safeText(target?.actionId || message?.actionId, `object.use.${objectType}`) || `object.use.${objectType}`,
+    interactionSpotId: spotId,
+    spotId,
+    slotId: safeText(target?.slotId || target?.seatId || spotId, spotId) || spotId,
+    poseKind: safeText(target?.poseKind, ''),
+    faceAngle: numberOr(target?.faceAngle, 0),
+  };
+}
+
+function resolveScriptedObjectRuntimeTargetFromRequest(dataDir, message = {}) {
+  const rawTarget = message?.target && typeof message.target === 'object' ? message.target : message;
+  const requestedObjectKey = safeText(rawTarget?.objectKey || message?.objectKey, '');
+  const requestedBuildingId = safeText(rawTarget?.buildingId || message?.buildingId, '');
+  const requestedFurnitureIndex = rawTarget?.furnitureIndex ?? message?.furnitureIndex;
+  const requestedSpotId = safeText(rawTarget?.spotId || rawTarget?.interactionSpotId || message?.spotId, '');
+  const requestedActionId = safeText(rawTarget?.actionId || message?.actionId, '');
+  const targets = listScriptedObjectRuntimeTargets(dataDir);
+  const match = targets.find(target => {
+    if (requestedObjectKey && target.objectKey === requestedObjectKey) {
+      return !requestedSpotId || requestedSpotId === target.spotId || requestedSpotId === target.interactionSpotId;
+    }
+    if (requestedBuildingId && target.buildingId !== requestedBuildingId) return false;
+    if (requestedFurnitureIndex !== undefined && requestedFurnitureIndex !== null && Number(target.furnitureIndex) !== Number(requestedFurnitureIndex)) return false;
+    if (requestedSpotId && requestedSpotId !== target.spotId && requestedSpotId !== target.interactionSpotId) return false;
+    if (requestedActionId && requestedActionId !== target.actionId) return false;
+    return requestedBuildingId && requestedFurnitureIndex !== undefined && requestedFurnitureIndex !== null;
+  });
+  return match || objectUseRequestTargetFromPoint(message);
 }
 
 function serverLiveActionShouldComplete(action, nowMs) {
@@ -1614,12 +2213,18 @@ export class AgentRuntimeRoom extends Room {
     this.lastLiveActionRuntimePollMs = 0;
     this.liveActionRuntimeMeta = null;
     this.liveActionRuntimeStore = null;
+    this.lastLiveStatusRuntimePollMs = 0;
+    this.liveStatusRuntimePlan = null;
+    this.lastScriptedObjectRuntimePollMs = 0;
+    this.scriptedObjectRuntimePlan = null;
+    this.scriptedObjectRuntimeCooldowns = new Map();
     const doc = readRuntimeDocument(this.dataDir);
     this.events = Array.isArray(doc.events) ? doc.events.slice(-MAX_RUNTIME_EVENTS) : [];
     this.setState(stateFromDocument(doc));
 
     this.onMessage('runtime:snapshot', (client, message) => this.handleSnapshot(client, message));
     this.onMessage('runtime:worldObject', (client, message) => this.handleWorldObject(client, message));
+    this.onMessage('runtime:objectUseRequest', (client, message) => this.handleObjectUseRequest(client, message));
     this.onMessage('runtime:worldTopology', (client, message) => this.handleWorldTopology(client, message));
     this.onMessage('runtime:claimRoute', (client, message) => this.handleClaimRoute(client, message));
     this.onMessage('runtime:heartbeat', (client, message) => this.handleHeartbeat(client, message));
@@ -1676,7 +2281,8 @@ export class AgentRuntimeRoom extends Room {
         const sameAgent = nextAgentId && existingPlain.agentId && nextAgentId === existingPlain.agentId;
         const nextState = safeText(raw.state, existingPlain.state || '');
         const nextActive = ACTIVE_WORLD_OBJECT_STATES.has(String(nextState || '').toLowerCase());
-        if (nextActive && !sameOwner && !sameAgent) {
+        const serverOwned = SERVER_WORLD_OBJECT_RUNTIME_OWNERS.has(existingPlain.owner || '');
+        if ((serverOwned && !sameOwner) || (nextActive && !sameOwner && !sameAgent)) {
           throw apiError('object_state_conflict', 'world object is active in another runtime owner', {
             objectKey,
             owner: existingPlain.owner || '',
@@ -1688,6 +2294,62 @@ export class AgentRuntimeRoom extends Room {
       }
       const object = this.upsertWorldObject(raw, 'world-object-updated');
       this.ackWorldObject(client, message, 'runtime:worldObject', object);
+    });
+  }
+
+  handleObjectUseRequest(client, message = {}) {
+    this.withErrors(client, message, 'runtime:objectUseRequest', () => {
+      this.expireStaleRouteLeases();
+      const agentId = normalizeAgentId(message.agentId);
+      const target = resolveScriptedObjectRuntimeTargetFromRequest(this.dataDir, message);
+      if (!target?.objectKey) {
+        throw apiError('invalid_object_use_target', 'object use request requires a resolvable target object');
+      }
+      const existingObject = this.state.objects.get(target.objectKey);
+      if (isWorldObjectActiveForAnotherAgent(existingObject, agentId)) {
+        const existingPlain = worldObjectToPlain(existingObject);
+        throw apiError('object_state_conflict', 'world object is active for another agent', {
+          objectKey: target.objectKey,
+          owner: existingPlain.owner || '',
+          agentId: existingPlain.agentId || '',
+          state: existingPlain.state || '',
+          expiresAt: existingPlain.expiresAt || '',
+        });
+      }
+      if (!this.state.agents.get(agentId)) {
+        const position = message.agentPosition && typeof message.agentPosition === 'object' ? message.agentPosition : {};
+        this.upsertSnapshot({
+          agentId,
+          mode: 'scripted',
+          owner: 'agent-scripted-mode',
+          x: numberOr(position.x, numberOr(message.x, target.x)),
+          y: numberOr(position.y ?? position.z, numberOr(message.y ?? message.z, target.y)),
+          floor: floorOr(position.floor ?? message.floor ?? target.floor, 1),
+          buildingId: safeText(position.buildingId || message.buildingId || '', ''),
+          roomId: safeText(position.roomId || message.roomId || '', ''),
+          heading: headingOr(position.heading ?? message.heading, 0),
+          state: 'idle',
+          routeId: '',
+          worldActionId: '',
+          target: null,
+          leaseOwner: '',
+          leaseExpiresAt: '',
+        }, 'server-scripted-object-seeded', { reason: 'object-use-request' });
+      }
+      const result = this.startServerScriptedObjectRoute(agentId, target, Date.now(), new Date().toISOString(), {
+        source: safeText(message.source, 'request') || 'request',
+        force: true,
+      });
+      client.send('runtime:ack', {
+        requestId: requestIdFrom(message),
+        type: 'runtime:objectUseRequest',
+        ok: true,
+        agentId,
+        objectKey: target.objectKey,
+        snapshot: snapshotToPlain(result.agent),
+        object: worldObjectToPlain(result.object),
+        event: result.snapshotEvent,
+      });
     });
   }
 
@@ -1828,6 +2490,106 @@ export class AgentRuntimeRoom extends Room {
     this.liveActionRuntimeMeta = meta;
     this.liveActionRuntimeStore = store;
     this.lastLiveActionRuntimePollMs = nowMs;
+  }
+
+  loadLiveStatusRuntimePlan(nowMs = Date.now()) {
+    if (this.liveStatusRuntimePlan && nowMs - Number(this.lastLiveStatusRuntimePollMs || 0) < LIVE_STATUS_RUNTIME_POLL_MS) {
+      return this.liveStatusRuntimePlan;
+    }
+    try {
+      this.liveStatusRuntimePlan = buildLiveStatusRuntimePlan(this.dataDir);
+    } catch (error) {
+      this.liveStatusRuntimePlan = { presence: {}, meta: {}, targets: [], workingAgentIds: [], targetsByAgent: {}, error: error?.message || String(error) };
+    }
+    this.lastLiveStatusRuntimePollMs = nowMs;
+    return this.liveStatusRuntimePlan;
+  }
+
+  loadScriptedObjectRuntimePlan(nowMs = Date.now()) {
+    if (this.scriptedObjectRuntimePlan && nowMs - Number(this.lastScriptedObjectRuntimePollMs || 0) < SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS) {
+      return this.scriptedObjectRuntimePlan;
+    }
+    try {
+      this.scriptedObjectRuntimePlan = buildScriptedObjectRuntimePlan(this.dataDir);
+    } catch (error) {
+      this.scriptedObjectRuntimePlan = { presence: {}, meta: {}, targets: [], idleAgentIds: [], error: error?.message || String(error) };
+    }
+    this.lastScriptedObjectRuntimePollMs = nowMs;
+    return this.scriptedObjectRuntimePlan;
+  }
+
+  startServerScriptedObjectRoute(agentId, rawTarget, nowMs = Date.now(), now = new Date(nowMs).toISOString(), options = {}) {
+    const existing = this.state.agents.get(agentId);
+    if (!existing) {
+      throw apiError('agent_not_found', 'object runtime requires an existing agent snapshot', { agentId });
+    }
+    const target = {
+      ...rawTarget,
+      runtimeStartedAt: rawTarget.runtimeStartedAt || now,
+      runtimeActiveAt: options.active === true ? (rawTarget.runtimeActiveAt || now) : (rawTarget.runtimeActiveAt || ''),
+      runtimeSource: options.source || rawTarget.runtimeSource || 'idle',
+    };
+    const current = snapshotToPlain(existing);
+    const objectKey = normalizeWorldObjectKey(target.objectKey || runtimeFurnitureObjectKey(target.buildingId, target.furnitureIndex, target.objectType || 'object'));
+    target.objectKey = objectKey;
+    const existingObject = this.state.objects.get(objectKey);
+    if (!options.force && isWorldObjectActiveForAnotherAgent(existingObject, agentId, nowMs)) {
+      throw apiError('object_state_conflict', 'world object is active for another agent', { objectKey, agentId });
+    }
+    const routeId = safeText(`scripted-object:${agentId}:${target.buildingId || 'building'}:${target.furnitureIndex ?? 'object'}:${target.spotId || 'spot'}`, `scripted-object:${agentId}`);
+    const targetHeading = Number.isFinite(Number(target.faceAngle))
+      ? ((Number(target.faceAngle) * 180 / Math.PI) + 360) % 360
+      : numberOr(current.heading, 0);
+    const distance = Math.hypot(Number(target.x) - Number(current.x || 0), Number(target.y) - Number(current.y || 0));
+    const arrived = options.active === true || distance <= SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS;
+    const snapshotResult = this.upsertSnapshot({
+      agentId,
+      mode: 'live',
+      owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+      x: arrived ? Number(target.x) : current.x,
+      y: arrived ? Number(target.y) : current.y,
+      floor: target.floor,
+      buildingId: target.buildingId || '',
+      roomId: target.roomId || '',
+      heading: arrived ? targetHeading : current.heading,
+      state: arrived ? 'using' : 'routing',
+      routeId,
+      worldActionId: '',
+      target,
+      leaseOwner: SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
+      leaseExpiresAt: new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS).toISOString(),
+      visualState: makeServerScriptedObjectVisualState(!arrived, target, 'idle'),
+    }, arrived ? 'server-scripted-object-active' : 'server-scripted-object-routing', {
+      routeId,
+      objectKey,
+      source: options.source || 'idle',
+    });
+    const objectExpiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS + SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS).toISOString();
+    const objectState = arrived ? 'active' : 'routing';
+    const objectResult = this.upsertWorldObject({
+      objectKey,
+      owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+      objectType: target.objectType || '',
+      buildingId: target.buildingId || '',
+      furnitureIndex: target.furnitureIndex ?? -1,
+      state: objectState,
+      agentId,
+      actionId: target.actionId || '',
+      reservationId: safeText(`server-res:${objectKey}:${agentId}`, '') || `server-res:${agentId}`,
+      activeUseId: arrived ? (safeText(`server-active:${objectKey}:${agentId}`, '') || `server-active:${agentId}`) : '',
+      slotId: target.slotId || target.spotId || '',
+      expiresAt: objectExpiresAt,
+      data: makeServerScriptedObjectData(agentId, target, objectState, now, objectExpiresAt, options.source || 'idle'),
+    }, arrived ? 'server-scripted-object-world-active' : 'server-scripted-object-world-routing', {
+      routeId,
+      source: options.source || 'idle',
+    });
+    return {
+      agent: snapshotResult.agent,
+      object: objectResult.object,
+      snapshotEvent: snapshotResult.event,
+      objectEvent: objectResult.event,
+    };
   }
 
   transitionServerLiveAction(action, toStatus, options = {}) {
@@ -2029,6 +2791,304 @@ export class AgentRuntimeRoom extends Room {
     return { changedActions, changedSnapshots };
   }
 
+  tickLiveStatusRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
+    const plan = this.loadLiveStatusRuntimePlan(nowMs);
+    const targetsByAgent = plan?.targetsByAgent && typeof plan.targetsByAgent === 'object' ? plan.targetsByAgent : {};
+    let changedSnapshots = 0;
+
+    for (const [agentId, existing] of this.state.agents.entries()) {
+      const current = snapshotToPlain(existing);
+      const target = targetsByAgent[agentId] || null;
+      const ownedByStatusRuntime = current.owner === LIVE_STATUS_RUNTIME_OWNER || current.leaseOwner === LIVE_STATUS_RUNTIME_LEASE_OWNER;
+      const activeOtherLease = Boolean(
+        hasActiveLease(existing, nowMs) &&
+        current.leaseOwner &&
+        current.leaseOwner !== LIVE_STATUS_RUNTIME_LEASE_OWNER
+      );
+
+      if (!target) {
+        if (ownedByStatusRuntime) {
+          this.upsertSnapshot({
+            agentId,
+            mode: 'scripted',
+            owner: 'agent-scripted-mode',
+            x: current.x,
+            y: current.y,
+            floor: current.floor,
+            buildingId: current.buildingId || '',
+            roomId: current.roomId || '',
+            heading: current.heading,
+            state: 'idle',
+            routeId: '',
+            worldActionId: '',
+            target: null,
+            leaseOwner: '',
+            leaseExpiresAt: '',
+            visualState: makeLiveStatusVisualState(false, 'idle'),
+          }, 'server-live-status-released', { reason: 'presence-not-working' });
+          changedSnapshots++;
+        }
+        continue;
+      }
+
+      if (activeOtherLease) continue;
+
+      const dx = Number(target.x) - Number(current.x || 0);
+      const dy = Number(target.y) - Number(current.y || 0);
+      const distance = Math.hypot(dx, dy);
+      const step = Math.max(1, LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC * (tickMs / 1000));
+      const arrived = distance <= LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS;
+      const ratio = arrived ? 1 : Math.min(1, step / Math.max(distance, 0.001));
+      const nextX = arrived ? Number(target.x) : Number(current.x || 0) + dx * ratio;
+      const nextY = arrived ? Number(target.y) : Number(current.y || 0) + dy * ratio;
+      const targetHeading = Number.isFinite(Number(target.faceAngle))
+        ? ((Number(target.faceAngle) * 180 / Math.PI) + 360) % 360
+        : numberOr(current.heading, 0);
+      const heading = !arrived && distance > 0.001
+        ? ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360
+        : targetHeading;
+      const routeId = safeText(`live-status-work:${agentId}:${target.buildingId || 'building'}:${target.furnitureIndex ?? 'desk'}:${target.spotId || 'spot'}`, `live-status-work:${agentId}`);
+      const leaseExpiresAtMs = Date.parse(current.leaseExpiresAt || '');
+      const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= LIVE_STATUS_RUNTIME_LEASE_REFRESH_MS;
+      const targetChanged = current.routeId !== routeId || current.target?.buildingId !== target.buildingId || current.target?.furnitureIndex !== target.furnitureIndex;
+      const state = arrived ? 'working' : 'routing';
+      const shouldWrite = !ownedByStatusRuntime || !arrived || needsLeaseRefresh || targetChanged || current.state !== state;
+      if (!shouldWrite) continue;
+
+      this.upsertSnapshot({
+        agentId,
+        mode: 'live',
+        owner: LIVE_STATUS_RUNTIME_OWNER,
+        x: nextX,
+        y: nextY,
+        floor: target.floor,
+        buildingId: target.buildingId || '',
+        roomId: target.roomId || '',
+        heading,
+        state,
+        routeId,
+        worldActionId: '',
+        target,
+        leaseOwner: LIVE_STATUS_RUNTIME_LEASE_OWNER,
+        leaseExpiresAt: new Date(nowMs + LIVE_STATUS_RUNTIME_LEASE_TTL_MS).toISOString(),
+        visualState: makeLiveStatusVisualState(!arrived, 'working'),
+      }, arrived ? 'server-live-status-work-desk' : 'server-live-status-routing', {
+        routeId,
+        buildingId: target.buildingId || '',
+        furnitureIndex: target.furnitureIndex ?? null,
+      });
+      changedSnapshots++;
+    }
+
+    return { changedSnapshots };
+  }
+
+  releaseServerScriptedObjectRoute(agentId, current, target, nowMs, now, reason = 'completed') {
+    const objectKey = safeText(target?.objectKey, '');
+    const x = Number.isFinite(Number(target?.x)) ? Number(target.x) : Number(current?.x || 0);
+    const y = Number.isFinite(Number(target?.y)) ? Number(target.y) : Number(current?.y || 0);
+    const heading = Number.isFinite(Number(target?.faceAngle))
+      ? ((Number(target.faceAngle) * 180 / Math.PI) + 360) % 360
+      : numberOr(current?.heading, 0);
+    const snapshotResult = this.upsertSnapshot({
+      agentId,
+      mode: 'scripted',
+      owner: 'agent-scripted-mode',
+      x,
+      y,
+      floor: floorOr(target?.floor ?? current?.floor, 1),
+      buildingId: target?.buildingId || current?.buildingId || '',
+      roomId: target?.roomId || current?.roomId || '',
+      heading,
+      state: 'idle',
+      routeId: '',
+      worldActionId: '',
+      target: null,
+      leaseOwner: '',
+      leaseExpiresAt: '',
+      visualState: makeServerScriptedObjectIdleVisualState(),
+    }, 'server-scripted-object-released', {
+      objectKey,
+      reason,
+    });
+    let objectResult = null;
+    if (objectKey) {
+      objectResult = this.upsertWorldObject({
+        objectKey,
+        owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+        objectType: target?.objectType || '',
+        buildingId: target?.buildingId || '',
+        furnitureIndex: target?.furnitureIndex ?? -1,
+        state: 'idle',
+        agentId,
+        actionId: target?.actionId || '',
+        reservationId: '',
+        activeUseId: '',
+        slotId: target?.slotId || target?.spotId || '',
+        expiresAt: new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS).toISOString(),
+        data: {
+          ...makeServerScriptedObjectData(agentId, target, 'idle', now, new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS).toISOString(), target?.runtimeSource || 'idle'),
+          clearReservation: true,
+          releaseReason: reason,
+        },
+      }, 'server-scripted-object-world-released', { reason });
+    }
+    this.scriptedObjectRuntimeCooldowns.set(agentId, nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS);
+    return { agent: snapshotResult.agent, object: objectResult?.object || null };
+  }
+
+  tickScriptedObjectRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
+    const plan = this.loadScriptedObjectRuntimePlan(nowMs);
+    const idleAgentIds = new Set(Array.isArray(plan?.idleAgentIds) ? plan.idleAgentIds : []);
+    const targets = Array.isArray(plan?.targets) ? plan.targets : [];
+    let changedSnapshots = 0;
+    let changedObjects = 0;
+
+    for (const [agentId, existing] of this.state.agents.entries()) {
+      const current = snapshotToPlain(existing);
+      const ownedByScriptedObjectRuntime = current.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || current.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER;
+      if (!ownedByScriptedObjectRuntime) continue;
+      const target = current.target && typeof current.target === 'object' ? current.target : null;
+      const source = safeText(target?.runtimeSource, 'idle') || 'idle';
+      if (!target?.objectKey || (source === 'idle' && !idleAgentIds.has(agentId))) {
+        this.releaseServerScriptedObjectRoute(agentId, current, target || {}, nowMs, now, target?.objectKey ? 'presence-not-idle' : 'missing-target');
+        changedSnapshots++;
+        changedObjects += target?.objectKey ? 1 : 0;
+        continue;
+      }
+
+      const dx = Number(target.x) - Number(current.x || 0);
+      const dy = Number(target.y) - Number(current.y || 0);
+      const distance = Math.hypot(dx, dy);
+      const step = Math.max(1, SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC * (tickMs / 1000));
+      const alreadyActive = ['using', 'active', 'occupied'].includes(String(current.state || '').toLowerCase());
+      const arrived = alreadyActive || distance <= SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS;
+      const ratio = arrived ? 1 : Math.min(1, step / Math.max(distance, 0.001));
+      const nextX = arrived ? Number(target.x) : Number(current.x || 0) + dx * ratio;
+      const nextY = arrived ? Number(target.y) : Number(current.y || 0) + dy * ratio;
+      const targetHeading = Number.isFinite(Number(target.faceAngle))
+        ? ((Number(target.faceAngle) * 180 / Math.PI) + 360) % 360
+        : numberOr(current.heading, 0);
+      const heading = !arrived && distance > 0.001
+        ? ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360
+        : targetHeading;
+      const routeId = current.routeId || safeText(`scripted-object:${agentId}:${target.buildingId || 'building'}:${target.furnitureIndex ?? 'object'}:${target.spotId || 'spot'}`, `scripted-object:${agentId}`);
+      const leaseExpiresAtMs = Date.parse(current.leaseExpiresAt || '');
+      const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS;
+
+      if (!arrived) {
+        const objectExpiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS + SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS).toISOString();
+        this.upsertSnapshot({
+          agentId,
+          mode: 'live',
+          owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+          x: nextX,
+          y: nextY,
+          floor: target.floor,
+          buildingId: target.buildingId || '',
+          roomId: target.roomId || '',
+          heading,
+          state: 'routing',
+          routeId,
+          worldActionId: '',
+          target,
+          leaseOwner: SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
+          leaseExpiresAt: new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS).toISOString(),
+          visualState: makeServerScriptedObjectVisualState(true, target, 'idle'),
+        }, 'server-scripted-object-routing', { routeId, objectKey: target.objectKey });
+        changedSnapshots++;
+        this.upsertWorldObject({
+          objectKey: target.objectKey,
+          owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+          objectType: target.objectType || '',
+          buildingId: target.buildingId || '',
+          furnitureIndex: target.furnitureIndex ?? -1,
+          state: 'routing',
+          agentId,
+          actionId: target.actionId || '',
+          reservationId: safeText(`server-res:${target.objectKey}:${agentId}`, '') || `server-res:${agentId}`,
+          activeUseId: '',
+          slotId: target.slotId || target.spotId || '',
+          expiresAt: objectExpiresAt,
+          data: makeServerScriptedObjectData(agentId, target, 'routing', now, objectExpiresAt, source),
+        }, 'server-scripted-object-world-routing', { routeId });
+        changedObjects++;
+        continue;
+      }
+
+      const runtimeActiveAt = safeIso(target.runtimeActiveAt, '') || now;
+      const activeAtMs = Date.parse(runtimeActiveAt);
+      if (Number.isFinite(activeAtMs) && nowMs - activeAtMs >= SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS) {
+        this.releaseServerScriptedObjectRoute(agentId, current, { ...target, runtimeActiveAt }, nowMs, now, 'dwell-complete');
+        changedSnapshots++;
+        changedObjects++;
+        continue;
+      }
+
+      const activeTarget = { ...target, runtimeActiveAt };
+      const shouldWrite = needsLeaseRefresh || current.state !== 'using' || current.x !== Number(target.x) || current.y !== Number(target.y);
+      if (!shouldWrite) continue;
+      const objectExpiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS + SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS).toISOString();
+      this.upsertSnapshot({
+        agentId,
+        mode: 'live',
+        owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+        x: Number(target.x),
+        y: Number(target.y),
+        floor: target.floor,
+        buildingId: target.buildingId || '',
+        roomId: target.roomId || '',
+        heading,
+        state: 'using',
+        routeId,
+        worldActionId: '',
+        target: activeTarget,
+        leaseOwner: SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
+        leaseExpiresAt: new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS).toISOString(),
+        visualState: makeServerScriptedObjectVisualState(false, activeTarget, 'idle'),
+      }, 'server-scripted-object-active', { routeId, objectKey: target.objectKey });
+      changedSnapshots++;
+      this.upsertWorldObject({
+        objectKey: target.objectKey,
+        owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+        objectType: target.objectType || '',
+        buildingId: target.buildingId || '',
+        furnitureIndex: target.furnitureIndex ?? -1,
+        state: 'active',
+        agentId,
+        actionId: target.actionId || '',
+        reservationId: safeText(`server-res:${target.objectKey}:${agentId}`, '') || `server-res:${agentId}`,
+        activeUseId: safeText(`server-active:${target.objectKey}:${agentId}`, '') || `server-active:${agentId}`,
+        slotId: target.slotId || target.spotId || '',
+        expiresAt: objectExpiresAt,
+        data: makeServerScriptedObjectData(agentId, activeTarget, 'active', now, objectExpiresAt, source),
+      }, 'server-scripted-object-world-active', { routeId });
+      changedObjects++;
+    }
+
+    for (const agentId of idleAgentIds) {
+      const existing = this.state.agents.get(agentId);
+      if (!existing) continue;
+      const current = snapshotToPlain(existing);
+      if (current.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || current.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER) continue;
+      if (hasActiveLease(existing, nowMs)) continue;
+      if (!['idle', 'scripted'].includes(String(current.state || '').toLowerCase()) && String(current.state || '').toLowerCase() !== 'idle') continue;
+      const cooldownUntil = Number(this.scriptedObjectRuntimeCooldowns.get(agentId) || 0);
+      if (cooldownUntil > nowMs) continue;
+      const target = pickScriptedObjectRuntimeTarget(agentId, targets, this.state, nowMs);
+      if (!target) continue;
+      this.startServerScriptedObjectRoute(agentId, target, nowMs, now, { source: 'idle' });
+      changedSnapshots++;
+      changedObjects++;
+    }
+
+    for (const [agentId, untilMs] of Array.from(this.scriptedObjectRuntimeCooldowns.entries())) {
+      if (Number(untilMs || 0) <= nowMs) this.scriptedObjectRuntimeCooldowns.delete(agentId);
+    }
+
+    return { changedSnapshots, changedObjects };
+  }
+
   upsertSnapshot(raw, eventType, extra = {}) {
     const existing = this.state.agents.get(raw.agentId);
     const normalized = normalizeSnapshot(raw, existing || null);
@@ -2161,6 +3221,8 @@ export class AgentRuntimeRoom extends Room {
     }
     const changedVehicles = this.tickTrafficVehicles(runtime, tickMs, now);
     const changedLiveActions = this.tickLiveActionRuntime(tickMs, nowMs, now);
+    const changedLiveStatus = this.tickLiveStatusRuntime(tickMs, nowMs, now);
+    const changedScriptedObjects = this.tickScriptedObjectRuntime(tickMs, nowMs, now);
 
     if (changedLights > 0 || changedVehicles > 0) {
       this.broadcast('runtime:worldRuntime', {
@@ -2170,10 +3232,13 @@ export class AgentRuntimeRoom extends Room {
         changedVehicles,
         changedLiveActions: changedLiveActions.changedActions ? 1 : 0,
         changedLiveActionSnapshots: changedLiveActions.changedSnapshots,
+        changedLiveStatusSnapshots: changedLiveStatus.changedSnapshots,
+        changedScriptedObjectSnapshots: changedScriptedObjects.changedSnapshots,
+        changedScriptedObjects: changedScriptedObjects.changedObjects,
       });
     }
 
-    if (changedLights > 0 || changedVehicles > 0 || changedLiveActions.changedActions || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
+    if (changedLights > 0 || changedVehicles > 0 || changedLiveActions.changedActions || changedLiveStatus.changedSnapshots > 0 || changedScriptedObjects.changedSnapshots > 0 || changedScriptedObjects.changedObjects > 0 || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
       this.lastWorldRuntimePersistMs = nowMs;
       writeRuntimeDocument(this.dataDir, this.state, this.events);
     }
