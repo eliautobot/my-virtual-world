@@ -184,6 +184,7 @@ const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
 const agentRuntimeClientJs = read('src/client/js/agent-runtime-client.mjs');
 const agentRuntimeRoomJs = read('src/realtime/agent-runtime-room.mjs');
+const realtimeServerJs = read('src/realtime/server.mjs');
 const chatJs = read('src/client/js/chat.js');
 const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
@@ -282,7 +283,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260625-runtime-ownership-arbitration-r1',
+  'js/main3d.js?v=20260626-server-authoritative-runtime-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -396,6 +397,8 @@ for (const token of [
   'stampAgentRuntimeMember(agent, LIVE_STATUS_RUNTIME_POSITION_OWNER',
   'function isRuntimeExecutorPageVisible()',
   "'runtime-hidden-page-observer'",
+  "'server-authoritative-runtime-observer'",
+  'SERVER_AUTHORITATIVE_LIVE_ACTION_RUNTIME',
   "'runtime-route-foreign-owner'",
   'function abandonAgentRuntimeLocalRoute(agent',
   "AGENT_RUNTIME_MEMBER_SCHEMA = 'agent-runtime-member/v1'",
@@ -410,8 +413,19 @@ for (const token of [
   'WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000',
   'world-topology-skipped-owner-fresh',
   'topologyOwnerFresh',
+  "LIVE_ACTION_RUNTIME_OWNER = 'server-live-action-runtime'",
+  'this.autoDispose = false',
+  'tickLiveActionRuntime',
+  'writeServerBuiltHomeIfNeeded',
 ]) {
   assert(agentRuntimeRoomJs.includes(token), `agent-runtime-room.mjs missing topology owner guard token: ${token}`);
+}
+for (const token of [
+  'matchMaker.createRoom',
+  'runtimeRoomId',
+  'prewarmedAt',
+]) {
+  assert(realtimeServerJs.includes(token), `realtime server missing authoritative room prewarm token: ${token}`);
 }
 
 for (const token of [
@@ -439,6 +453,9 @@ for (const token of [
   'def start_live_agent_loop',
   'def note_live_agent_loop_world_client_activity',
   'def clear_live_agent_loop_world_client_activity',
+  'WORLD_ACTION_SERVER_RUNTIME_OWNER = "agent-runtime-room.mjs#tickLiveActionRuntime"',
+  '"serverRuntimeAuthority": True',
+  '"serverExecutor": WORLD_ACTION_SERVER_RUNTIME_OWNER',
   'client_visibility == "hidden"',
   'world_client_claimed',
   'current_session != incoming_session',

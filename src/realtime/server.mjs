@@ -1,7 +1,7 @@
 // Colyseus sidecar entrypoint for Live Agent Mode realtime state.
 import { createServer } from 'node:http';
 import express from 'express';
-import { Server } from '@colyseus/core';
+import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import {
   AGENT_RUNTIME_ROOM_NAME,
@@ -24,6 +24,7 @@ export async function createRealtimeServer({
   dataDir = process.env.VW_DATA_DIR || '.local-data',
 } = {}) {
   const httpServer = createServer();
+  let runtimeRoomId = '';
   const gameServer = new Server({
     greet: false,
     transport: new WebSocketTransport({
@@ -41,6 +42,8 @@ export async function createRealtimeServer({
           port: httpServer.address()?.port || port,
           dataDir,
           runtimeFile: runtimeFilePath(dataDir),
+          runtimeRoomId,
+          prewarmed: Boolean(runtimeRoomId),
           time: new Date().toISOString(),
         });
       });
@@ -52,6 +55,12 @@ export async function createRealtimeServer({
 
   gameServer.define(AGENT_RUNTIME_ROOM_NAME, AgentRuntimeRoom, { dataDir });
   await gameServer.listen(port, host);
+  const runtimeRoom = await matchMaker.createRoom(AGENT_RUNTIME_ROOM_NAME, {
+    dataDir,
+    serverRuntimeAuthority: true,
+    prewarmedAt: new Date().toISOString(),
+  });
+  runtimeRoomId = runtimeRoom?.roomId || '';
 
   return {
     gameServer,
@@ -59,6 +68,7 @@ export async function createRealtimeServer({
     host,
     port: httpServer.address()?.port || port,
     dataDir,
+    runtimeRoomId,
     async close() {
       await gameServer.gracefullyShutdown(false);
     },
@@ -68,5 +78,6 @@ export async function createRealtimeServer({
 if (import.meta.url === `file://${process.argv[1]}`) {
   const server = await createRealtimeServer();
   console.log(`Virtual World realtime sidecar listening on ${server.host}:${server.port}`);
+  console.log(`Runtime room: ${server.runtimeRoomId || 'not-created'}`);
   console.log(`Runtime data: ${server.dataDir}`);
 }

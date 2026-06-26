@@ -1326,6 +1326,7 @@ CATALOG_SCHEMA_FILE = os.path.join(CLIENT_DIR if 'CLIENT_DIR' in globals() else 
 CAPABILITY_SCHEMA_FILE = os.path.join(CLIENT_DIR if 'CLIENT_DIR' in globals() else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "client"), "js", "agent-life-capability-tags.mjs")
 WORLD_ACTION_CREATE_VERSION = "agent-life-world-action-create/v1"
 WORLD_ACTION_CREATE_ROUTE_OWNER = "main3d.js#setAgentTarget(agent, target, building, floor) via dynamic-interior-routing.js / dynamic-exterior-routing.js"
+WORLD_ACTION_SERVER_RUNTIME_OWNER = "agent-runtime-room.mjs#tickLiveActionRuntime"
 WORLD_ACTION_CREATE_REUSE_NOTES = [
     "Reuse server.py world-meta persistence from Phase 2 Task 2 instead of a new action store.",
     "Reuse get_roster() for agent validation and list_buildings()/load_building() for target validation.",
@@ -1390,7 +1391,8 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "minActionIntervalSec": 120,
     "clientActiveTtlSec": 45,
     "maxActionsPerTick": 1,
-    "worldClientRequired": True,
+    "worldClientRequired": False,
+    "serverRuntimeAuthority": True,
     "eventRetention": 100,
     "memoryRetention": 24,
     "reflectionRetention": 18,
@@ -1700,7 +1702,12 @@ def _copy_jsonable(value):
 def _live_agent_visible_action_contract(action_type):
     key = str(action_type or "").strip()
     contract = LIVE_AGENT_VISIBLE_ACTION_CONTRACTS.get(key)
-    return _copy_jsonable(contract) if isinstance(contract, dict) else None
+    if not isinstance(contract, dict):
+        return None
+    copied = _copy_jsonable(contract)
+    copied["serverExecutor"] = WORLD_ACTION_SERVER_RUNTIME_OWNER
+    copied["serverRuntimeAuthority"] = True
+    return copied
 
 
 def _live_agent_visible_action_policy():
@@ -1712,6 +1719,7 @@ def _live_agent_visible_action_policy():
         "requiredExecution": {
             "requiresWorldAction": True,
             "requiresMoveIntent": True,
+            "requiresServerRuntimeAuthority": True,
             "requiresVisibleClientExecutor": True,
             "requiresVisibleCompletionEvent": True,
             "requiresPhysicalAgentPresence": True,
@@ -2651,7 +2659,20 @@ def _validate_create_world_action_payload(payload):
         target_snapshot["floor"] = int(target.get("floor") or 1)
     behavior = behavior or {}
     route_behavior = {k: behavior.get(k) for k in ["behaviorSourceKind", "behaviorMode", "behaviorAuthority", "behaviorSelectedCategory", "behaviorSelectedObject", "behaviorSelectedSpot", "behaviorProbabilityRoll", "behaviorFallbackReason"]}
-    route_target = {"target": target_snapshot, "handoff": WORLD_ACTION_CREATE_ROUTE_OWNER, "routeOwner": "client-runtime", "setAgentTarget": True, "source": source, "behavior": route_behavior, "behaviorSourceKind": behavior.get("behaviorSourceKind"), "behaviorMode": behavior.get("behaviorMode"), "behaviorCategory": behavior.get("behaviorSelectedCategory")}
+    server_authoritative_runtime = bool(visible_action_contract)
+    route_target = {
+        "target": target_snapshot,
+        "handoff": WORLD_ACTION_SERVER_RUNTIME_OWNER if server_authoritative_runtime else WORLD_ACTION_CREATE_ROUTE_OWNER,
+        "routeOwner": "server-authoritative-runtime" if server_authoritative_runtime else "client-runtime",
+        "setAgentTarget": False if server_authoritative_runtime else True,
+        "serverExecutor": WORLD_ACTION_SERVER_RUNTIME_OWNER if server_authoritative_runtime else None,
+        "serverRuntimeAuthority": server_authoritative_runtime,
+        "source": source,
+        "behavior": route_behavior,
+        "behaviorSourceKind": behavior.get("behaviorSourceKind"),
+        "behaviorMode": behavior.get("behaviorMode"),
+        "behaviorCategory": behavior.get("behaviorSelectedCategory"),
+    }
     action = {
         "id": action_id,
         "actionType": action_type,
@@ -2701,6 +2722,8 @@ def _validate_create_world_action_payload(payload):
             "visibleInWorld": True,
             "hiddenWorldMutationAllowed": False,
             "clientExecutor": visible_action_contract.get("clientExecutor"),
+            "serverExecutor": WORLD_ACTION_SERVER_RUNTIME_OWNER,
+            "serverRuntimeAuthority": True,
             "requiresMoveIntent": visible_action_contract.get("requiresMoveIntent") is True,
             "requiresPhysicalAgentPresence": True,
         }
@@ -3139,6 +3162,7 @@ def default_live_agent_loop_state():
         "clientActiveTtlSec": LIVE_AGENT_LOOP_DEFAULTS["clientActiveTtlSec"],
         "maxActionsPerTick": LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"],
         "worldClientRequired": LIVE_AGENT_LOOP_DEFAULTS["worldClientRequired"],
+        "serverRuntimeAuthority": LIVE_AGENT_LOOP_DEFAULTS["serverRuntimeAuthority"],
         "agents": {},
         "events": [],
         "stats": {"ticks": 0, "actionsCreated": 0, "dryRuns": 0, "errors": 0},
@@ -3160,7 +3184,7 @@ def _normalize_int(value, fallback, *, minimum=None, maximum=None):
 def _normalize_live_agent_loop_state(raw):
     state = default_live_agent_loop_state()
     if isinstance(raw, dict):
-        for key in ("enabled", "createdAt", "updatedAt", "lastTickAt", "worldClientRequired", "pausedUntil", "pauseReason", "pausedAt", "pausedBy"):
+        for key in ("enabled", "createdAt", "updatedAt", "lastTickAt", "worldClientRequired", "serverRuntimeAuthority", "pausedUntil", "pauseReason", "pausedAt", "pausedBy"):
             if key in raw:
                 state[key] = raw[key]
         state["intervalSec"] = _normalize_int(raw.get("intervalSec"), state["intervalSec"], minimum=10, maximum=300)
@@ -3177,7 +3201,8 @@ def _normalize_live_agent_loop_state(raw):
             state["stats"].update({k: v for k, v in raw["stats"].items() if isinstance(v, (int, float))})
     state["schemaVersion"] = LIVE_AGENT_LOOP_SCHEMA_VERSION
     state["enabled"] = bool(state.get("enabled"))
-    state["worldClientRequired"] = bool(state.get("worldClientRequired"))
+    state["serverRuntimeAuthority"] = True
+    state["worldClientRequired"] = False
     if state.get("pausedUntil") and not _parse_isoish_epoch(state.get("pausedUntil")):
         state["pausedUntil"] = None
         state["pauseReason"] = None
@@ -5174,6 +5199,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             "forced": bool(force),
             "dryRun": bool(dry_run),
             "worldClient": world_client,
+            "serverRuntimeAuthority": True,
             "pause": pause,
             "staleExpired": stale_expired,
             "settledRefreshed": settled_refreshed,
@@ -5288,6 +5314,8 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     "decisionReason": decision.get("reason") if isinstance(decision, dict) else None,
                     "perceptionAt": perception.get("at"),
                     "worldClientActive": world_client.get("active"),
+                    "serverRuntimeAuthority": True,
+                    "serverExecutor": WORLD_ACTION_SERVER_RUNTIME_OWNER,
                     "visibleActionContractVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
                     "visibleActionPolicy": "visible-world-execution-required",
                     "visibleWorldAction": True,
@@ -5699,8 +5727,9 @@ def update_live_agent_loop_settings(payload):
             if key in payload:
                 if not isinstance(payload.get(key), bool):
                     return False, _api_error("invalid_payload", f"{key} must be a boolean."), 400
-                state[key] = payload[key]
-                changed[key] = payload[key]
+                state[key] = False if key == "worldClientRequired" else payload[key]
+                changed[key] = state[key]
+        state["serverRuntimeAuthority"] = True
         if "clearWorldClientActivity" in payload:
             if not isinstance(payload.get("clearWorldClientActivity"), bool):
                 return False, _api_error("invalid_payload", "clearWorldClientActivity must be a boolean."), 400
@@ -5900,7 +5929,25 @@ def _attach_move_intent_to_world_action(action_id, move_intent):
             next_active.append(action)
             return {"error": "agent_mismatch", "action": action}
         route = dict(updated.get("route") or {})
-        route.update({"state": move_intent.get("routeStatus"), "status": move_intent.get("routeStatus"), "target": move_intent.get("target"), "targetMetadata": move_intent.get("targetMetadata"), "handoff": WORLD_ACTION_CREATE_ROUTE_OWNER, "routeOwner": "client-runtime", "setAgentTarget": True, "worldActionId": action_id, "source": move_intent.get("source"), "behavior": move_intent.get("behavior"), "behaviorSourceKind": move_intent.get("behaviorSourceKind"), "behaviorMode": move_intent.get("behaviorMode"), "behaviorCategory": move_intent.get("behaviorCategory"), "moveIntent": {"id": move_intent.get("id"), "state": move_intent.get("routeStatus"), "createdAt": move_intent.get("createdAt"), "worldActionId": action_id}})
+        server_authoritative_runtime = _behavior_source_kind_from_record(updated) == "agent-live-mode"
+        route.update({
+            "state": move_intent.get("routeStatus"),
+            "status": move_intent.get("routeStatus"),
+            "target": move_intent.get("target"),
+            "targetMetadata": move_intent.get("targetMetadata"),
+            "handoff": WORLD_ACTION_SERVER_RUNTIME_OWNER if server_authoritative_runtime else WORLD_ACTION_CREATE_ROUTE_OWNER,
+            "routeOwner": "server-authoritative-runtime" if server_authoritative_runtime else "client-runtime",
+            "setAgentTarget": False if server_authoritative_runtime else True,
+            "serverExecutor": WORLD_ACTION_SERVER_RUNTIME_OWNER if server_authoritative_runtime else None,
+            "serverRuntimeAuthority": server_authoritative_runtime,
+            "worldActionId": action_id,
+            "source": move_intent.get("source"),
+            "behavior": move_intent.get("behavior"),
+            "behaviorSourceKind": move_intent.get("behaviorSourceKind"),
+            "behaviorMode": move_intent.get("behaviorMode"),
+            "behaviorCategory": move_intent.get("behaviorCategory"),
+            "moveIntent": {"id": move_intent.get("id"), "state": move_intent.get("routeStatus"), "createdAt": move_intent.get("createdAt"), "worldActionId": action_id},
+        })
         updated["route"] = route
         if _canonical_world_action_status(updated.get("status")) == "reserved":
             updated["status"] = "route_pending"
@@ -5965,16 +6012,19 @@ def create_move_intent(path_agent_id, payload):
         return False, _api_error("agent_unavailable", "Agent already has an active action or move intent.", details=busy), 409
     now = _utc_now_iso()
     planner = _route_planner_for_target(target.get("kind"), _find_world_action_target(target), target)
+    server_authoritative_runtime = source.get("kind") == "agent-live-mode"
     route = {
         "id": f"route-{_move_intent_id(agent_id)}",
         "state": "route_pending",
         "status": "route_pending",
         "target": target,
         "targetMetadata": metadata,
-        "handoff": WORLD_ACTION_CREATE_ROUTE_OWNER,
-        "routeOwner": "client-runtime",
-        "setAgentTarget": True,
-        "routingOwner": "main3d.js#setAgentTarget()",
+        "handoff": WORLD_ACTION_SERVER_RUNTIME_OWNER if server_authoritative_runtime else WORLD_ACTION_CREATE_ROUTE_OWNER,
+        "routeOwner": "server-authoritative-runtime" if server_authoritative_runtime else "client-runtime",
+        "setAgentTarget": False if server_authoritative_runtime else True,
+        "serverExecutor": WORLD_ACTION_SERVER_RUNTIME_OWNER if server_authoritative_runtime else None,
+        "serverRuntimeAuthority": server_authoritative_runtime,
+        "routingOwner": WORLD_ACTION_SERVER_RUNTIME_OWNER if server_authoritative_runtime else "main3d.js#setAgentTarget()",
         "planner": planner,
         "collisionGuardrails": MOVE_INTENT_ROUTE_GUARDRAILS,
         "worldActionId": action_id,
@@ -6291,9 +6341,10 @@ def _reconcile_world_action_reservations_unlocked():
             and behavior_source_kind == "agent-live-mode"
             and status in WORLD_ACTION_ACTIVE_STATES
         ):
-            # Live Mode routes are consumed by the browser runtime while buildings
-            # can be saving/reloading. Treat transient lookup misses as pending;
-            # the Live Mode stale-action reconciler expires genuinely stuck routes.
+            # Live Mode routes are consumed by the server-authoritative realtime
+            # runtime while buildings can be saving/reloading. Treat transient
+            # lookup misses as pending; the stale-action reconciler expires
+            # genuinely stuck routes.
             active.append(action)
             continue
         if not timed_out and missing_state not in {"deleted", "missing"}:
