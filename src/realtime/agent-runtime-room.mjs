@@ -3,6 +3,11 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import { dirname, join } from 'node:path';
 import { Room } from '@colyseus/core';
 import { Encoder, MapSchema, Schema, defineTypes } from '@colyseus/schema';
+import {
+  configureDynamicInteriorRouting,
+  clearDynamicInteriorRoutingForAgent,
+  updateDynamicInteriorRouting,
+} from '../client/js/dynamic-interior-routing.js';
 
 export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
 export const WORLD_RUNTIME_SCHEMA_VERSION = 'world-runtime/v1';
@@ -651,6 +656,78 @@ function apiPointFromBuildingLocal(building, localX, localZ) {
   return { x: worldX * LIVE_ACTION_API_TILE, y: worldZ * LIVE_ACTION_API_TILE };
 }
 
+function buildingLocalPointFromApi(building, apiX, apiY) {
+  if (!building || !Number.isFinite(Number(apiX)) || !Number.isFinite(Number(apiY))) return null;
+  const worldX = Number(apiX) / LIVE_ACTION_API_TILE;
+  const worldZ = Number(apiY) / LIVE_ACTION_API_TILE;
+  const baseX = Number(building?.worldX ?? building?.x ?? 0) || 0;
+  const baseZ = Number(building?.worldY ?? building?.z ?? 0) || 0;
+  const bw = Number(building?.widthTiles || 25) || 25;
+  const bd = Number(building?.heightTiles || 17) || 17;
+  const relX = worldX - baseX;
+  const relZ = worldZ - baseZ;
+  const rot = positiveModulo(Number(building?._rotation || 0), 360);
+  if (rot === 90) return { x: relZ, z: bd - relX };
+  if (rot === 180) return { x: bw - relX, z: bd - relZ };
+  if (rot === 270) return { x: bw - relZ, z: relX };
+  return { x: relX, z: relZ };
+}
+
+function buildingContainsApiPoint(building, apiX, apiY) {
+  const local = buildingLocalPointFromApi(building, apiX, apiY);
+  if (!local) return false;
+  const bw = Number(building?.widthTiles || 25) || 25;
+  const bd = Number(building?.heightTiles || 17) || 17;
+  return local.x >= -0.05 && local.x <= bw + 0.05 && local.z >= -0.05 && local.z <= bd + 0.05;
+}
+
+function findInteriorBuildingAtApi(dataDir, apiX, apiY) {
+  for (const building of listBuildingDocuments(dataDir)) {
+    if (!building || building.type === 'park') continue;
+    if (buildingContainsApiPoint(building, apiX, apiY)) return building;
+  }
+  return null;
+}
+
+function getBuildingDoorSpec(building) {
+  const width = Number(building?.widthTiles || 10) || 10;
+  const height = Number(building?.heightTiles || 8) || 8;
+  const fallback = {
+    localCenterX: Math.max(1, Math.min(width - 1, width / 2)),
+    localThresholdZ: height + 0.5,
+    localOutsideZ: height + 1.2,
+    localInteriorZ: Math.max(0.75, height - 1.2),
+    localDoorwayZ: height + 0.05,
+    doorwayReachWorld: 0.55,
+  };
+  const spec = building?.doorSpec && typeof building.doorSpec === 'object' && !Array.isArray(building.doorSpec)
+    ? building.doorSpec
+    : {};
+  return {
+    localCenterX: numberOr(spec.localCenterX, fallback.localCenterX),
+    localThresholdZ: numberOr(spec.localThresholdZ, fallback.localThresholdZ),
+    localOutsideZ: numberOr(spec.localOutsideZ, fallback.localOutsideZ),
+    localInteriorZ: numberOr(spec.localInteriorZ, fallback.localInteriorZ),
+    localDoorwayZ: numberOr(spec.localDoorwayZ, fallback.localDoorwayZ),
+    doorwayReachWorld: Math.max(0.25, numberOr(spec.doorwayReachWorld, fallback.doorwayReachWorld)),
+  };
+}
+
+function buildingDoorwayPointApi(building) {
+  const spec = getBuildingDoorSpec(building);
+  return apiPointFromBuildingLocal(building, spec.localCenterX, spec.localDoorwayZ);
+}
+
+function buildingInteriorEntryPointApi(building) {
+  const spec = getBuildingDoorSpec(building);
+  return apiPointFromBuildingLocal(building, spec.localCenterX, spec.localInteriorZ);
+}
+
+function buildingOutsideDoorPointApi(building) {
+  const spec = getBuildingDoorSpec(building);
+  return apiPointFromBuildingLocal(building, spec.localCenterX, spec.localOutsideZ);
+}
+
 function apiPointForBuilding(building) {
   if (!building || typeof building !== 'object') return null;
   const localX = Math.max(1, Number(building.widthTiles || 10) / 2);
@@ -813,6 +890,138 @@ function makeLiveActionVisualState(isMoving, status = 'working') {
     movement: { isMoving, isRunning: false },
     activityActive: !isMoving,
     carrying: false,
+  };
+}
+
+function cloneRuntimePoint(point = null) {
+  if (!point || typeof point !== 'object') return null;
+  const x = numberOr(point.x, NaN);
+  const y = numberOr(point.y ?? point.z, NaN);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const out = { x, y };
+  if (Number.isFinite(Number(point.floor))) out.floor = floorOr(point.floor, 1);
+  return out;
+}
+
+function summarizeServerRuntimeRoute(route = null) {
+  if (!route || typeof route !== 'object') return null;
+  const routePoints = Array.isArray(route.routePoints)
+    ? route.routePoints.map(cloneRuntimePoint).filter(Boolean).slice(0, 32)
+    : [];
+  const nextPoint = cloneRuntimePoint(route.effectiveTarget || route.pursuitTarget || route.route?.[route.routeIndex || 0] || null);
+  return {
+    schemaVersion: 'agent-runtime-server-route/v1',
+    source: safeText(route.source || 'dynamic-interior-routing.js', 'dynamic-interior-routing.js') || 'dynamic-interior-routing.js',
+    active: route.active === true,
+    reason: safeText(route.reason, ''),
+    routeIndex: Math.max(0, Math.floor(numberOr(route.routeIndex, 0))),
+    routeLength: Array.isArray(route.route) ? route.route.length : routePoints.length,
+    nextPoint,
+    finalPoint: cloneRuntimePoint(route.finalPoint || routePoints[routePoints.length - 1] || null),
+    targetAdjusted: route.targetAdjusted === true,
+    routePoints,
+  };
+}
+
+function withRuntimeRouteVisualState(visualState, route = null) {
+  const summary = summarizeServerRuntimeRoute(route);
+  return summary ? { ...visualState, runtimeRoute: summary } : visualState;
+}
+
+function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
+  speedUnitsPerSec,
+  arrivalRadius,
+  routeSource = 'server-runtime',
+} = {}) {
+  const finalTarget = {
+    x: Number(target?.x ?? current?.x ?? 0),
+    y: Number(target?.y ?? target?.z ?? current?.y ?? 0),
+    floor: floorOr(target?.floor ?? current?.floor, 1),
+    buildingId: safeText(target?.buildingId || '', ''),
+  };
+  const currentPoint = {
+    id: agentId,
+    x: Number(current?.x || 0),
+    y: Number(current?.y || 0),
+  };
+  const targetBuilding = finalTarget.buildingId ? readBuildingDocument(dataDir, finalTarget.buildingId) : null;
+  const currentBuilding = findInteriorBuildingAtApi(dataDir, currentPoint.x, currentPoint.y);
+  let steeringTarget = finalTarget;
+  let route = null;
+  let phase = 'direct';
+
+  if (targetBuilding && targetBuilding.type !== 'park') {
+    const currentInsideTarget = currentBuilding?.id === targetBuilding.id;
+    if (!currentInsideTarget) {
+      const door = buildingOutsideDoorPointApi(targetBuilding) || buildingDoorwayPointApi(targetBuilding);
+      if (door) {
+        steeringTarget = { ...finalTarget, ...door, floor: finalTarget.floor, targetKind: 'building-door-approach' };
+        phase = 'door-approach';
+        route = {
+          active: false,
+          source: 'server-door-handoff',
+          reason: 'outside-to-building-door',
+          effectiveTarget: steeringTarget,
+          routeIndex: 0,
+          route: [steeringTarget],
+          routePoints: [cloneRuntimePoint(currentPoint), cloneRuntimePoint(steeringTarget)].filter(Boolean),
+          finalPoint: steeringTarget,
+        };
+      }
+    } else {
+      const dynamicRoute = updateDynamicInteriorRouting(currentPoint, finalTarget, tickMs, {
+        building: targetBuilding,
+        debug: false,
+      });
+      if (dynamicRoute?.active && dynamicRoute.effectiveTarget) {
+        steeringTarget = { ...finalTarget, x: dynamicRoute.effectiveTarget.x, y: dynamicRoute.effectiveTarget.y };
+        phase = 'interior-route';
+        route = {
+          ...dynamicRoute,
+          source: 'dynamic-interior-routing.js',
+          finalPoint: finalTarget,
+        };
+      } else {
+        route = {
+          active: false,
+          source: 'dynamic-interior-routing.js',
+          reason: dynamicRoute?.reason || 'interior-route-unavailable',
+          effectiveTarget: finalTarget,
+          routeIndex: 0,
+          route: [finalTarget],
+          routePoints: [cloneRuntimePoint(currentPoint), cloneRuntimePoint(finalTarget)].filter(Boolean),
+          finalPoint: finalTarget,
+        };
+      }
+    }
+  }
+
+  const dx = Number(steeringTarget.x) - Number(currentPoint.x || 0);
+  const dy = Number(steeringTarget.y) - Number(currentPoint.y || 0);
+  const distanceToSteering = Math.hypot(dx, dy);
+  const finalDx = Number(finalTarget.x) - Number(currentPoint.x || 0);
+  const finalDy = Number(finalTarget.y) - Number(currentPoint.y || 0);
+  const distanceToFinal = Math.hypot(finalDx, finalDy);
+  const step = Math.max(1, numberOr(speedUnitsPerSec, 72) * (Math.max(1, tickMs) / 1000));
+  const arrived = distanceToFinal <= Math.max(1, numberOr(arrivalRadius, 5)) && phase !== 'door-approach';
+  const ratio = arrived ? 1 : Math.min(1, step / Math.max(distanceToSteering, 0.001));
+  const nextX = arrived ? Number(finalTarget.x) : Number(currentPoint.x || 0) + dx * ratio;
+  const nextY = arrived ? Number(finalTarget.y) : Number(currentPoint.y || 0) + dy * ratio;
+  const heading = distanceToSteering > 0.001
+    ? ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360
+    : numberOr(current?.heading, 0);
+  return {
+    x: nextX,
+    y: nextY,
+    floor: finalTarget.floor,
+    heading,
+    arrived,
+    distanceToFinal,
+    distanceToSteering,
+    steeringTarget,
+    finalTarget,
+    route: route ? { ...route, routeSource, phase } : null,
+    phase,
   };
 }
 
@@ -2218,6 +2427,10 @@ export class AgentRuntimeRoom extends Room {
     this.lastScriptedObjectRuntimePollMs = 0;
     this.scriptedObjectRuntimePlan = null;
     this.scriptedObjectRuntimeCooldowns = new Map();
+    configureDynamicInteriorRouting({
+      apiToWorldScale: 1 / LIVE_ACTION_API_TILE,
+      getInteriorBuildingAt: (x, y) => findInteriorBuildingAtApi(this.dataDir, x, y),
+    });
     const doc = readRuntimeDocument(this.dataDir);
     this.events = Array.isArray(doc.events) ? doc.events.slice(-MAX_RUNTIME_EVENTS) : [];
     this.setState(stateFromDocument(doc));
@@ -2443,6 +2656,7 @@ export class AgentRuntimeRoom extends Room {
         leaseExpiresAt: '',
       };
       if (Object.hasOwn(message, 'visualState')) releaseSnapshot.visualState = message.visualState;
+      clearDynamicInteriorRoutingForAgent(agentId);
       const agent = this.upsertSnapshot(releaseSnapshot, 'route-released', {
         reason: safeText(message.reason, ''),
       });
@@ -2455,6 +2669,7 @@ export class AgentRuntimeRoom extends Room {
     for (const [agentId, existing] of this.state.agents.entries()) {
       if (!hasExpiredLease(existing, nowMs)) continue;
       const before = snapshotToPlain(existing);
+      clearDynamicInteriorRoutingForAgent(agentId);
       this.upsertSnapshot({
         agentId,
         mode: 'scripted',
@@ -2540,25 +2755,29 @@ export class AgentRuntimeRoom extends Room {
     const targetHeading = Number.isFinite(Number(target.faceAngle))
       ? ((Number(target.faceAngle) * 180 / Math.PI) + 360) % 360
       : numberOr(current.heading, 0);
-    const distance = Math.hypot(Number(target.x) - Number(current.x || 0), Number(target.y) - Number(current.y || 0));
-    const arrived = options.active === true || distance <= SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS;
+    const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, DEFAULT_WORLD_RUNTIME_TICK_MS, {
+      speedUnitsPerSec: SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC,
+      arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
+      routeSource: 'server-scripted-object-runtime',
+    });
+    const arrived = options.active === true || movement.arrived;
     const snapshotResult = this.upsertSnapshot({
       agentId,
       mode: 'live',
       owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
-      x: arrived ? Number(target.x) : current.x,
-      y: arrived ? Number(target.y) : current.y,
+      x: arrived ? Number(target.x) : movement.x,
+      y: arrived ? Number(target.y) : movement.y,
       floor: target.floor,
       buildingId: target.buildingId || '',
       roomId: target.roomId || '',
-      heading: arrived ? targetHeading : current.heading,
+      heading: arrived ? targetHeading : movement.heading,
       state: arrived ? 'using' : 'routing',
       routeId,
       worldActionId: '',
       target,
       leaseOwner: SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
       leaseExpiresAt: new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS).toISOString(),
-      visualState: makeServerScriptedObjectVisualState(!arrived, target, 'idle'),
+      visualState: withRuntimeRouteVisualState(makeServerScriptedObjectVisualState(!arrived, target, 'idle'), movement.route),
     }, arrived ? 'server-scripted-object-active' : 'server-scripted-object-routing', {
       routeId,
       objectKey,
@@ -2650,15 +2869,15 @@ export class AgentRuntimeRoom extends Room {
 
       status = canonicalWorldActionStatus(action.status);
       const current = snapshotToPlain(existing);
-      const dx = Number(targetPoint.x) - Number(current.x || 0);
-      const dy = Number(targetPoint.y) - Number(current.y || 0);
-      const distance = Math.hypot(dx, dy);
-      const step = Math.max(1, LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC * (tickMs / 1000));
-      const arrived = distance <= LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS;
-      const ratio = arrived ? 1 : Math.min(1, step / Math.max(distance, 0.001));
-      const nextX = arrived ? Number(targetPoint.x) : Number(current.x || 0) + dx * ratio;
-      const nextY = arrived ? Number(targetPoint.y) : Number(current.y || 0) + dy * ratio;
-      const heading = distance > 0.001 ? ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360 : current.heading;
+      const movement = makeServerRuntimeStep(this.dataDir, agentId, current, targetPoint, tickMs, {
+        speedUnitsPerSec: LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
+        arrivalRadius: LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS,
+        routeSource: 'server-live-action-runtime',
+      });
+      const arrived = movement.arrived;
+      const nextX = movement.x;
+      const nextY = movement.y;
+      const heading = movement.heading;
       const snapshotTarget = makeLiveActionSnapshotTarget(action, targetPoint);
       const routeId = safeText(action?.route?.id || action?.route?.routeId, `route-${actionId}`) || `route-${actionId}`;
 
@@ -2679,7 +2898,7 @@ export class AgentRuntimeRoom extends Room {
           target: snapshotTarget,
           leaseOwner: LIVE_ACTION_RUNTIME_LEASE_OWNER,
           leaseExpiresAt: new Date(nowMs + LIVE_ACTION_RUNTIME_LEASE_TTL_MS).toISOString(),
-          visualState: makeLiveActionVisualState(!arrived),
+          visualState: withRuntimeRouteVisualState(makeLiveActionVisualState(!arrived), movement.route),
         }, arrived ? 'server-live-action-arrived' : 'server-live-action-routing', { actionId, routeId });
         changedSnapshots++;
         if (arrived && status === 'routing') {
@@ -2808,6 +3027,7 @@ export class AgentRuntimeRoom extends Room {
 
       if (!target) {
         if (ownedByStatusRuntime) {
+          clearDynamicInteriorRoutingForAgent(agentId);
           this.upsertSnapshot({
             agentId,
             mode: 'scripted',
@@ -2833,20 +3053,18 @@ export class AgentRuntimeRoom extends Room {
 
       if (activeOtherLease) continue;
 
-      const dx = Number(target.x) - Number(current.x || 0);
-      const dy = Number(target.y) - Number(current.y || 0);
-      const distance = Math.hypot(dx, dy);
-      const step = Math.max(1, LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC * (tickMs / 1000));
-      const arrived = distance <= LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS;
-      const ratio = arrived ? 1 : Math.min(1, step / Math.max(distance, 0.001));
-      const nextX = arrived ? Number(target.x) : Number(current.x || 0) + dx * ratio;
-      const nextY = arrived ? Number(target.y) : Number(current.y || 0) + dy * ratio;
+      const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, tickMs, {
+        speedUnitsPerSec: LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC,
+        arrivalRadius: LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS,
+        routeSource: 'server-live-status-runtime',
+      });
+      const arrived = movement.arrived;
+      const nextX = movement.x;
+      const nextY = movement.y;
       const targetHeading = Number.isFinite(Number(target.faceAngle))
         ? ((Number(target.faceAngle) * 180 / Math.PI) + 360) % 360
         : numberOr(current.heading, 0);
-      const heading = !arrived && distance > 0.001
-        ? ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360
-        : targetHeading;
+      const heading = arrived ? targetHeading : movement.heading;
       const routeId = safeText(`live-status-work:${agentId}:${target.buildingId || 'building'}:${target.furnitureIndex ?? 'desk'}:${target.spotId || 'spot'}`, `live-status-work:${agentId}`);
       const leaseExpiresAtMs = Date.parse(current.leaseExpiresAt || '');
       const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= LIVE_STATUS_RUNTIME_LEASE_REFRESH_MS;
@@ -2871,7 +3089,7 @@ export class AgentRuntimeRoom extends Room {
         target,
         leaseOwner: LIVE_STATUS_RUNTIME_LEASE_OWNER,
         leaseExpiresAt: new Date(nowMs + LIVE_STATUS_RUNTIME_LEASE_TTL_MS).toISOString(),
-        visualState: makeLiveStatusVisualState(!arrived, 'working'),
+        visualState: withRuntimeRouteVisualState(makeLiveStatusVisualState(!arrived, 'working'), movement.route),
       }, arrived ? 'server-live-status-work-desk' : 'server-live-status-routing', {
         routeId,
         buildingId: target.buildingId || '',
@@ -2884,6 +3102,7 @@ export class AgentRuntimeRoom extends Room {
   }
 
   releaseServerScriptedObjectRoute(agentId, current, target, nowMs, now, reason = 'completed') {
+    clearDynamicInteriorRoutingForAgent(agentId);
     const objectKey = safeText(target?.objectKey, '');
     const x = Number.isFinite(Number(target?.x)) ? Number(target.x) : Number(current?.x || 0);
     const y = Number.isFinite(Number(target?.y)) ? Number(target.y) : Number(current?.y || 0);
@@ -2957,21 +3176,19 @@ export class AgentRuntimeRoom extends Room {
         continue;
       }
 
-      const dx = Number(target.x) - Number(current.x || 0);
-      const dy = Number(target.y) - Number(current.y || 0);
-      const distance = Math.hypot(dx, dy);
-      const step = Math.max(1, SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC * (tickMs / 1000));
       const alreadyActive = ['using', 'active', 'occupied'].includes(String(current.state || '').toLowerCase());
-      const arrived = alreadyActive || distance <= SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS;
-      const ratio = arrived ? 1 : Math.min(1, step / Math.max(distance, 0.001));
-      const nextX = arrived ? Number(target.x) : Number(current.x || 0) + dx * ratio;
-      const nextY = arrived ? Number(target.y) : Number(current.y || 0) + dy * ratio;
+      const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, tickMs, {
+        speedUnitsPerSec: SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC,
+        arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
+        routeSource: 'server-scripted-object-runtime',
+      });
+      const arrived = alreadyActive || movement.arrived;
+      const nextX = arrived ? Number(target.x) : movement.x;
+      const nextY = arrived ? Number(target.y) : movement.y;
       const targetHeading = Number.isFinite(Number(target.faceAngle))
         ? ((Number(target.faceAngle) * 180 / Math.PI) + 360) % 360
         : numberOr(current.heading, 0);
-      const heading = !arrived && distance > 0.001
-        ? ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360
-        : targetHeading;
+      const heading = arrived ? targetHeading : movement.heading;
       const routeId = current.routeId || safeText(`scripted-object:${agentId}:${target.buildingId || 'building'}:${target.furnitureIndex ?? 'object'}:${target.spotId || 'spot'}`, `scripted-object:${agentId}`);
       const leaseExpiresAtMs = Date.parse(current.leaseExpiresAt || '');
       const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS;
@@ -2994,7 +3211,7 @@ export class AgentRuntimeRoom extends Room {
           target,
           leaseOwner: SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
           leaseExpiresAt: new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS).toISOString(),
-          visualState: makeServerScriptedObjectVisualState(true, target, 'idle'),
+          visualState: withRuntimeRouteVisualState(makeServerScriptedObjectVisualState(true, target, 'idle'), movement.route),
         }, 'server-scripted-object-routing', { routeId, objectKey: target.objectKey });
         changedSnapshots++;
         this.upsertWorldObject({

@@ -2262,6 +2262,20 @@ function applyAgentRuntimeVisualState(agent, visualState = null) {
     isMoving: movement.isMoving === true,
     isRunning: movement.isRunning === true,
   } : null;
+  const runtimeRoute = visualState.runtimeRoute && typeof visualState.runtimeRoute === 'object' ? visualState.runtimeRoute : null;
+  const runtimeNextPoint = makeAgentRuntimeVisualPoint(runtimeRoute?.nextPoint || null);
+  if (runtimeNextPoint && runtimeRoute?.active !== false) {
+    agent._movementDebugNextWaypoint = {
+      x: runtimeNextPoint.x,
+      y: runtimeNextPoint.y,
+      source: agentRuntimeVisualText(runtimeRoute.source || 'server-runtime-route', 80) || 'server-runtime-route',
+      routeIndex: agentRuntimeVisualNumber(runtimeRoute.routeIndex, null),
+      routeLength: agentRuntimeVisualNumber(runtimeRoute.routeLength, null),
+      reason: agentRuntimeVisualText(runtimeRoute.reason || '', 120),
+    };
+  } else if (agent._runtimeObserverOnly && runtimeRoute) {
+    agent._movementDebugNextWaypoint = null;
+  }
 
   if (visualState.activityActive === false) {
     agent._idleActivity = null;

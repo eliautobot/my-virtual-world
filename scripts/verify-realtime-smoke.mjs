@@ -458,6 +458,8 @@ async function run() {
     );
     assert.equal(scriptedAgent.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(scriptedAgent.leaseOwner, SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER);
+    assert(scriptedAgent.visualStateJson.includes('runtimeRoute'));
+    assert(scriptedAgent.visualStateJson.includes('dynamic-interior-routing.js') || scriptedAgent.visualStateJson.includes('server-door-handoff'));
     const scriptedObjectKey = 'office:furniture:0:armchair';
     const scriptedObject = await waitForObject(scriptedRoom, scriptedObjectKey, (object) => object.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(scriptedObject.agentId, 'adam');
