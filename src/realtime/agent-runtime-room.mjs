@@ -1,5 +1,5 @@
 // File-backed Colyseus room for authoritative live-agent runtime snapshots.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Room } from '@colyseus/core';
 import { Encoder, MapSchema, Schema, defineTypes } from '@colyseus/schema';
@@ -22,6 +22,33 @@ export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
 export const MAX_VISUAL_STATE_JSON_CHARS = 6000;
 export const MAX_WORLD_OBJECT_DATA_JSON_CHARS = 10000;
+export const LIVE_ACTION_RUNTIME_OWNER = 'server-live-action-runtime';
+export const LIVE_ACTION_RUNTIME_LEASE_OWNER = 'server-runtime';
+export const LIVE_ACTION_RUNTIME_POLL_MS = 1000;
+export const LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC = 72;
+export const LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS = 3;
+export const LIVE_ACTION_RUNTIME_DWELL_MS = 5000;
+export const LIVE_ACTION_RUNTIME_LEASE_TTL_MS = 10000;
+export const LIVE_ACTION_API_TILE = 40;
+
+const WORLD_ACTION_SCHEMA_VERSION = 'agent-life-world-action/v1';
+const WORLD_ACTION_PERSISTENCE_VERSION = 'agent-life-world-action-persistence/v1';
+const WORLD_ACTION_STATE_MACHINE_VERSION = 'agent-life-world-action-lifecycle/v1';
+const WORLD_ACTION_ACTIVE_STATUSES = new Set(['requested', 'created', 'reserved', 'route_pending', 'routing', 'arrived', 'in_progress']);
+const WORLD_ACTION_TERMINAL_STATUSES = new Set(['completed', 'cancelled', 'failed', 'expired']);
+const WORLD_ACTION_TRANSITIONS = {
+  requested: new Set(['created', 'cancelled', 'failed', 'expired']),
+  created: new Set(['reserved', 'cancelled', 'failed', 'expired']),
+  reserved: new Set(['route_pending', 'cancelled', 'failed', 'expired']),
+  route_pending: new Set(['routing', 'cancelled', 'failed', 'expired']),
+  routing: new Set(['arrived', 'cancelled', 'failed', 'expired']),
+  arrived: new Set(['in_progress', 'cancelled', 'failed', 'expired']),
+  in_progress: new Set(['completed', 'cancelled', 'failed', 'expired']),
+  completed: new Set(),
+  cancelled: new Set(),
+  failed: new Set(),
+  expired: new Set(),
+};
 
 const configuredSchemaBufferSize = Number(process.env.VW_REALTIME_SCHEMA_BUFFER_SIZE_BYTES || DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES);
 Encoder.BUFFER_SIZE = Math.max(
@@ -256,6 +283,563 @@ defineTypes(AgentRuntimeState, {
 
 export function runtimeFilePath(dataDir = process.env.VW_DATA_DIR || '.local-data') {
   return join(dataDir || '.local-data', 'agent-runtime.json');
+}
+
+export function worldMetaFilePath(dataDir = process.env.VW_DATA_DIR || '.local-data') {
+  return join(dataDir || '.local-data', 'world-meta.json');
+}
+
+function buildingsDirPath(dataDir = process.env.VW_DATA_DIR || '.local-data') {
+  return join(dataDir || '.local-data', 'buildings');
+}
+
+function buildingFilePath(dataDir, buildingId) {
+  return join(buildingsDirPath(dataDir), `${safeFilename(buildingId)}.json`);
+}
+
+function readJsonFile(path, fallback = null) {
+  if (!existsSync(path)) return fallback;
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonFileAtomic(path, value) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
+  renameSync(tmp, path);
+  return value;
+}
+
+function readWorldMetaDocument(dataDir) {
+  const meta = readJsonFile(worldMetaFilePath(dataDir), null);
+  return meta && typeof meta === 'object' && !Array.isArray(meta) ? meta : {};
+}
+
+function writeWorldMetaDocument(dataDir, meta) {
+  return writeJsonFileAtomic(worldMetaFilePath(dataDir), meta && typeof meta === 'object' ? meta : {});
+}
+
+function defaultWorldActionsStore() {
+  return {
+    schemaVersion: WORLD_ACTION_SCHEMA_VERSION,
+    persistenceVersion: WORLD_ACTION_PERSISTENCE_VERSION,
+    retention: { completedCancelledDays: 7, failedDays: 30, maxHistoryRecords: 1000 },
+    active: [],
+    history: [],
+  };
+}
+
+function readWorldActionsStore(dataDir) {
+  const meta = readWorldMetaDocument(dataDir);
+  const agentLife = meta.agentLife && typeof meta.agentLife === 'object' && !Array.isArray(meta.agentLife)
+    ? meta.agentLife
+    : {};
+  const rawStore = agentLife.worldActions && typeof agentLife.worldActions === 'object' && !Array.isArray(agentLife.worldActions)
+    ? agentLife.worldActions
+    : {};
+  const store = defaultWorldActionsStore();
+  if (rawStore.schemaVersion) store.schemaVersion = safeText(rawStore.schemaVersion, store.schemaVersion) || store.schemaVersion;
+  if (rawStore.persistenceVersion) store.persistenceVersion = safeText(rawStore.persistenceVersion, store.persistenceVersion) || store.persistenceVersion;
+  if (rawStore.retention && typeof rawStore.retention === 'object' && !Array.isArray(rawStore.retention)) {
+    store.retention = { ...store.retention, ...rawStore.retention };
+  }
+  store.active = Array.isArray(rawStore.active) ? rawStore.active.filter(record => record && typeof record === 'object') : [];
+  store.history = Array.isArray(rawStore.history) ? rawStore.history.filter(record => record && typeof record === 'object') : [];
+  return { meta, store };
+}
+
+function writeWorldActionsStore(dataDir, meta, store) {
+  const nextMeta = meta && typeof meta === 'object' && !Array.isArray(meta) ? { ...meta } : {};
+  const agentLife = nextMeta.agentLife && typeof nextMeta.agentLife === 'object' && !Array.isArray(nextMeta.agentLife)
+    ? { ...nextMeta.agentLife }
+    : {};
+  const previous = agentLife.worldActions && typeof agentLife.worldActions === 'object' && !Array.isArray(agentLife.worldActions)
+    ? agentLife.worldActions
+    : {};
+  agentLife.worldActions = {
+    schemaVersion: safeText(store?.schemaVersion || previous.schemaVersion, WORLD_ACTION_SCHEMA_VERSION) || WORLD_ACTION_SCHEMA_VERSION,
+    persistenceVersion: safeText(store?.persistenceVersion || previous.persistenceVersion, WORLD_ACTION_PERSISTENCE_VERSION) || WORLD_ACTION_PERSISTENCE_VERSION,
+    retention: store?.retention && typeof store.retention === 'object'
+      ? store.retention
+      : (previous.retention && typeof previous.retention === 'object' ? previous.retention : defaultWorldActionsStore().retention),
+    active: Array.isArray(store?.active) ? store.active : [],
+    history: Array.isArray(store?.history) ? store.history : [],
+    lastSavedAt: new Date().toISOString(),
+  };
+  nextMeta.agentLife = agentLife;
+  return writeWorldMetaDocument(dataDir, nextMeta);
+}
+
+function safeFilename(value) {
+  return String(value || '').replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 120) || 'unknown';
+}
+
+function cloneJson(value, fallback = null) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return fallback;
+  }
+}
+
+function canonicalWorldActionStatus(status) {
+  const value = String(status || '').trim();
+  return {
+    queued: 'requested',
+    arriving: 'arrived',
+    in_use: 'in_progress',
+    completing: 'in_progress',
+    done: 'completed',
+    blocked: 'failed',
+    timed_out: 'expired',
+  }[value] || value;
+}
+
+function worldActionAllowedNext(status) {
+  return Array.from(WORLD_ACTION_TRANSITIONS[canonicalWorldActionStatus(status)] || []).sort();
+}
+
+function worldActionTransitionAllowed(fromStatus, toStatus) {
+  const from = canonicalWorldActionStatus(fromStatus);
+  const to = canonicalWorldActionStatus(toStatus);
+  return Boolean(WORLD_ACTION_TRANSITIONS[from]?.has(to));
+}
+
+function worldActionActor(action, fallback = 'agent-runtime-room.mjs#tickLiveActionRuntime') {
+  const source = action?.source && typeof action.source === 'object' ? action.source : {};
+  return safeText(source.requestedBy || source.kind, fallback) || fallback;
+}
+
+function worldActionSourceKind(action, fallback = 'server-runtime') {
+  const source = action?.source && typeof action.source === 'object' ? action.source : {};
+  return safeText(action?.behaviorSourceKind || source.behaviorSourceKind || source.kind, fallback) || fallback;
+}
+
+function appendWorldActionEvent(action, name, now, { fromStatus = null, toStatus = null, reason = '', result = null, source = 'server-runtime', actor = 'agent-runtime-room.mjs#tickLiveActionRuntime' } = {}) {
+  const events = Array.isArray(action.events) ? [...action.events] : [];
+  const event = {
+    schemaVersion: 'agent-life-world-action-event-hooks/v1',
+    name,
+    type: name,
+    id: `evt-${safeText(action.id, 'action')}-${name}-${now.replace(/[^0-9A-Za-z]/g, '')}`,
+    at: now,
+    timestamp: now,
+    actionId: action.id || '',
+    actionType: action.actionType || action.actionId || '',
+    status: toStatus || action.status || '',
+    fromStatus,
+    toStatus,
+    from: fromStatus,
+    to: toStatus,
+    agentId: action.agentId || '',
+    targetKind: action.target?.kind || '',
+    target: action.target || null,
+    routeId: action.route?.id || action.route?.routeId || '',
+    reservationId: action.reservation?.id || '',
+    source,
+    behaviorSourceKind: action.behaviorSourceKind || action.source?.behaviorSourceKind || action.source?.kind || '',
+    behaviorMode: action.behaviorMode || action.source?.behaviorMode || '',
+    behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
+    actor,
+    reason,
+    result,
+    error: null,
+  };
+  events.push(event);
+  action.events = events.slice(-80);
+  return action;
+}
+
+function releaseWorldActionReservation(action, terminalStatus, now, reason = '') {
+  if (!action.reservation || typeof action.reservation !== 'object' || Array.isArray(action.reservation)) return action;
+  const releaseState = {
+    completed: 'released',
+    cancelled: 'cancelled',
+    failed: 'failed',
+    expired: 'timed_out',
+  }[terminalStatus] || 'released';
+  action.reservation = {
+    ...action.reservation,
+    state: releaseState,
+    status: 'released',
+    availabilityState: 'available',
+    releasedAt: action.reservation.releasedAt || now,
+    releaseReason: reason || terminalStatus,
+  };
+  return action;
+}
+
+function applyWorldActionSideEffects(action, fromStatus, toStatus, now, reason = '') {
+  const route = action.route && typeof action.route === 'object' && !Array.isArray(action.route) ? { ...action.route } : null;
+  const effects = Array.isArray(action.effects) ? [...action.effects] : [];
+  if (route) {
+    route.state = toStatus;
+    route.status = toStatus;
+    route.routeOwner = LIVE_ACTION_RUNTIME_OWNER;
+    route.serverExecutor = 'agent-runtime-room.mjs#tickLiveActionRuntime';
+    route.serverRuntimeAuthority = true;
+    route.setAgentTarget = false;
+    if (toStatus === 'route_pending') route.handoffPendingAt = route.handoffPendingAt || now;
+    if (toStatus === 'routing') route.startedAt = route.startedAt || now;
+    if (toStatus === 'arrived') route.arrivedAt = route.arrivedAt || now;
+    if (WORLD_ACTION_TERMINAL_STATUSES.has(toStatus)) {
+      route.stoppedAt = route.stoppedAt || now;
+      if (toStatus === 'completed') route.completedAt = route.completedAt || now;
+      if (toStatus === 'cancelled') route.cancelledAt = route.cancelledAt || now;
+      route.moveIntent = {
+        ...(route.moveIntent && typeof route.moveIntent === 'object' ? route.moveIntent : {}),
+        state: 'cleared',
+        clearedAt: now,
+        reason: reason || toStatus,
+      };
+      effects.push({ type: 'route-intent-cleared', at: now, from: fromStatus, to: toStatus, reason: reason || toStatus });
+    }
+    action.route = route;
+  }
+  if (toStatus === 'reserved' && action.reservation && typeof action.reservation === 'object') {
+    action.reservation = {
+      ...action.reservation,
+      state: ['queued', 'reserved'].includes(action.reservation.state) ? action.reservation.state : 'reserved',
+      status: action.reservation.status || 'held',
+      availabilityState: 'reserved',
+      reservedAt: action.reservation.reservedAt || now,
+    };
+  }
+  if (toStatus === 'in_progress' && action.reservation && typeof action.reservation === 'object') {
+    action.reservation = {
+      ...action.reservation,
+      state: 'in_use',
+      status: 'active',
+      availabilityState: 'in_use',
+      inUseAt: action.reservation.inUseAt || now,
+    };
+  }
+  if (WORLD_ACTION_TERMINAL_STATUSES.has(toStatus)) {
+    const hadReservation = Boolean(action.reservation && typeof action.reservation === 'object');
+    releaseWorldActionReservation(action, toStatus, now, reason);
+    if (hadReservation) {
+      effects.push({ type: 'reservation-released', at: now, state: action.reservation?.state || '', reason: reason || toStatus });
+    }
+  }
+  if (effects.length > 0) action.effects = effects;
+  return action;
+}
+
+function transitionWorldActionRecord(action, toStatus, { now = new Date().toISOString(), result = null, failureReason = null, actor = 'agent-runtime-room.mjs#tickLiveActionRuntime', source = 'server-runtime', reason = '' } = {}) {
+  const fromStatus = canonicalWorldActionStatus(action?.status);
+  const nextStatus = canonicalWorldActionStatus(toStatus);
+  if (!WORLD_ACTION_ACTIVE_STATUSES.has(fromStatus) || fromStatus === nextStatus) return { action, changed: false };
+  if (!worldActionTransitionAllowed(fromStatus, nextStatus)) return { action, changed: false, blocked: true };
+  const next = cloneJson(action, {}) || {};
+  next.status = nextStatus;
+  next.failureReason = ['failed', 'expired', 'cancelled'].includes(nextStatus) ? (failureReason || reason || nextStatus) : null;
+  const nextResult = result && typeof result === 'object' && !Array.isArray(result)
+    ? { ...result, status: result.status || nextStatus }
+    : { ...(next.result && typeof next.result === 'object' && !Array.isArray(next.result) ? next.result : {}), status: nextStatus };
+  if (nextStatus === 'completed') nextResult.applied = nextResult.applied !== false;
+  if (reason && !nextResult.reason) nextResult.reason = reason;
+  next.result = nextResult;
+  const timing = next.timing && typeof next.timing === 'object' && !Array.isArray(next.timing) ? { ...next.timing } : {};
+  timing.updatedAt = now;
+  if (nextStatus === 'route_pending') timing.routePendingAt = timing.routePendingAt || now;
+  if (nextStatus === 'routing') timing.startedAt = timing.startedAt || now;
+  if (nextStatus === 'arrived') timing.arrivedAt = timing.arrivedAt || now;
+  if (nextStatus === 'in_progress') timing.inProgressAt = timing.inProgressAt || now;
+  if (WORLD_ACTION_TERMINAL_STATUSES.has(nextStatus)) {
+    timing.terminalAt = timing.terminalAt || now;
+    if (nextStatus === 'completed') timing.completedAt = timing.completedAt || now;
+  }
+  next.timing = timing;
+  const lifecycle = next.lifecycle && typeof next.lifecycle === 'object' && !Array.isArray(next.lifecycle) ? { ...next.lifecycle } : {};
+  const transitionLog = Array.isArray(lifecycle.transitionLog) ? [...lifecycle.transitionLog] : [];
+  transitionLog.push({
+    at: now,
+    from: fromStatus,
+    to: nextStatus,
+    actor,
+    source,
+    reason: reason || failureReason || nextStatus,
+  });
+  lifecycle.previousStatus = fromStatus;
+  lifecycle.allowedNext = worldActionAllowedNext(nextStatus);
+  lifecycle.transitionLog = transitionLog;
+  if (WORLD_ACTION_TERMINAL_STATUSES.has(nextStatus)) lifecycle.terminalReason = failureReason || reason || nextStatus;
+  next.lifecycle = lifecycle;
+  next.audit = {
+    ...(next.audit && typeof next.audit === 'object' && !Array.isArray(next.audit) ? next.audit : {}),
+    schemaVersion: next.audit?.schemaVersion || WORLD_ACTION_SCHEMA_VERSION,
+    stateMachineVersion: next.audit?.stateMachineVersion || WORLD_ACTION_STATE_MACHINE_VERSION,
+    serverRuntimeExecutor: 'agent-runtime-room.mjs#tickLiveActionRuntime',
+  };
+  applyWorldActionSideEffects(next, fromStatus, nextStatus, now, reason || failureReason || nextStatus);
+  const eventName = WORLD_ACTION_TERMINAL_STATUSES.has(nextStatus)
+    ? (nextStatus === 'completed' ? 'completed' : 'failed')
+    : nextStatus;
+  appendWorldActionEvent(next, eventName, now, {
+    fromStatus,
+    toStatus: nextStatus,
+    reason: reason || failureReason || nextStatus,
+    result: next.result,
+    source,
+    actor,
+  });
+  if (WORLD_ACTION_TERMINAL_STATUSES.has(nextStatus) && next.reservation) {
+    appendWorldActionEvent(next, 'reservation-released', now, {
+      fromStatus,
+      toStatus: nextStatus,
+      reason: reason || failureReason || nextStatus,
+      result: next.result,
+      source: 'reservation',
+      actor,
+    });
+  }
+  return { action: next, changed: true };
+}
+
+function apiPointFromBuildingLocal(building, localX, localZ) {
+  const bw = Number(building?.widthTiles || 25) || 25;
+  const bd = Number(building?.heightTiles || 17) || 17;
+  const baseX = Number(building?.worldX ?? building?.x ?? 0) || 0;
+  const baseZ = Number(building?.worldY ?? building?.z ?? 0) || 0;
+  const rot = positiveModulo(Number(building?._rotation || 0), 360);
+  let worldX = Number(localX);
+  let worldZ = Number(localZ);
+  if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) return null;
+  if (rot === 90) {
+    worldX = baseX + bd - Number(localZ);
+    worldZ = baseZ + Number(localX);
+  } else if (rot === 180) {
+    worldX = baseX + bw - Number(localX);
+    worldZ = baseZ + bd - Number(localZ);
+  } else if (rot === 270) {
+    worldX = baseX + Number(localZ);
+    worldZ = baseZ + bw - Number(localX);
+  } else {
+    worldX = baseX + Number(localX);
+    worldZ = baseZ + Number(localZ);
+  }
+  return { x: worldX * LIVE_ACTION_API_TILE, y: worldZ * LIVE_ACTION_API_TILE };
+}
+
+function apiPointForBuilding(building) {
+  if (!building || typeof building !== 'object') return null;
+  const localX = Math.max(1, Number(building.widthTiles || 10) / 2);
+  const localZ = Math.max(1, Number(building.heightTiles || 8) + 0.75);
+  return apiPointFromBuildingLocal(building, localX, localZ);
+}
+
+function readBuildingDocument(dataDir, buildingId) {
+  if (!buildingId) return null;
+  const building = readJsonFile(buildingFilePath(dataDir, buildingId), null);
+  return building && typeof building === 'object' && !Array.isArray(building) ? building : null;
+}
+
+function listBuildingDocuments(dataDir) {
+  const dir = buildingsDirPath(dataDir);
+  if (!existsSync(dir)) return [];
+  try {
+    return readdirSync(dir)
+      .filter(name => name.endsWith('.json'))
+      .map(name => readJsonFile(join(dir, name), null))
+      .filter(building => building && typeof building === 'object' && !Array.isArray(building));
+  } catch {
+    return [];
+  }
+}
+
+function objectIdsForBuildingItem(building, object, index) {
+  const catalogId = object?.catalogId || object?.type || '';
+  return new Set([
+    object?.objectInstanceId,
+    object?.instanceId,
+    object?.id,
+    `${building?.id}:furn:${catalogId}:${index}`,
+    `${building?.id}:furniture:${index}`,
+    `${building?.id}:${catalogId}:${index}`,
+    `${catalogId}-${index}`,
+  ].filter(Boolean).map(String));
+}
+
+function resolveObjectTargetPoint(dataDir, target = {}) {
+  const buildingId = safeText(target.buildingId, '');
+  const buildings = buildingId ? [readBuildingDocument(dataDir, buildingId)].filter(Boolean) : listBuildingDocuments(dataDir);
+  const wantedId = String(target.objectInstanceId || target.id || '').trim();
+  const wantedCatalog = String(target.catalogId || target.objectCatalogId || '').trim().toLowerCase();
+  const spotId = String(target.interactionSpotId || target.spotId || '').trim();
+  for (const building of buildings) {
+    const furniture = Array.isArray(building?.interior?.furniture) ? building.interior.furniture : [];
+    for (let index = 0; index < furniture.length; index += 1) {
+      const object = furniture[index];
+      if (!object || typeof object !== 'object') continue;
+      const catalog = String(object.catalogId || object.type || '').trim().toLowerCase();
+      const ids = objectIdsForBuildingItem(building, object, index);
+      const idMatches = wantedId ? ids.has(wantedId) : Number(target.furnitureIndex) === index;
+      const catalogMatches = !wantedCatalog || wantedCatalog === catalog;
+      if (!idMatches || !catalogMatches) continue;
+      const locations = Array.isArray(object.actionLocations) ? object.actionLocations : [];
+      const location = locations.find(entry => {
+        if (!entry || typeof entry !== 'object') return false;
+        return [entry.id, entry.interactionSpotId, entry.activationSpotId, entry.spotId].filter(Boolean).map(String).includes(spotId);
+      }) || locations[0] || null;
+      if (location?.world && Number.isFinite(Number(location.world.x)) && Number.isFinite(Number(location.world.z))) {
+        return {
+          x: Number(location.world.x) * LIVE_ACTION_API_TILE,
+          y: Number(location.world.z) * LIVE_ACTION_API_TILE,
+          floor: floorOr(location.floor ?? object.floor ?? target.floor, 1),
+          buildingId: building.id || '',
+          roomId: safeText(target.roomId || object.room, ''),
+          objectInstanceId: Array.from(ids)[0] || wantedId,
+          interactionSpotId: spotId || location.id || '',
+        };
+      }
+      const local = location?.buildingLocal || location?.actionTarget || location?.activationTarget || object;
+      const point = apiPointFromBuildingLocal(building, Number(local.x), Number(local.z));
+      if (point) {
+        return {
+          ...point,
+          floor: floorOr(local.floor ?? object.floor ?? target.floor, 1),
+          buildingId: building.id || '',
+          roomId: safeText(target.roomId || object.room, ''),
+          objectInstanceId: Array.from(ids)[0] || wantedId,
+          interactionSpotId: spotId || location?.id || '',
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function resolveActionTargetPoint(dataDir, action, state) {
+  const routeTarget = action?.route?.target && typeof action.route.target === 'object' ? action.route.target : null;
+  const target = routeTarget || (action?.target && typeof action.target === 'object' ? action.target : null);
+  if (!target) return null;
+  const x = numberOr(target.x, NaN);
+  const y = numberOr(target.y ?? target.z, NaN);
+  if (Number.isFinite(x) && Number.isFinite(y)) {
+    return {
+      x,
+      y,
+      floor: floorOr(target.floor, 1),
+      buildingId: safeText(target.buildingId, ''),
+      roomId: safeText(target.roomId, ''),
+      targetKind: safeText(target.kind || target.targetKind, 'world-point'),
+    };
+  }
+  const kind = String(target.kind || target.targetKind || '').trim();
+  if (kind === 'building' || kind === 'room' || kind === 'agent-home-building') {
+    const building = readBuildingDocument(dataDir, target.buildingId);
+    const point = apiPointForBuilding(building);
+    return point ? {
+      ...point,
+      floor: floorOr(target.floor, 1),
+      buildingId: safeText(building?.id || target.buildingId, ''),
+      roomId: safeText(target.roomId, ''),
+      targetKind: kind || 'building',
+    } : null;
+  }
+  if (kind === 'object-instance' || target.objectInstanceId || target.catalogId) {
+    const point = resolveObjectTargetPoint(dataDir, target);
+    return point ? { ...point, targetKind: kind || 'object-instance' } : null;
+  }
+  if (kind === 'agent' || target.targetAgentId) {
+    const targetAgentId = safeText(target.targetAgentId, '');
+    const agent = targetAgentId ? state?.agents?.get?.(targetAgentId) : null;
+    if (!agent) return null;
+    const heading = Number(agent.heading || 0) * Math.PI / 180;
+    return {
+      x: Number(agent.x || 0) - Math.sin(heading) * 24,
+      y: Number(agent.y || 0) - Math.cos(heading) * 24,
+      floor: floorOr(target.floor ?? agent.floor, 1),
+      buildingId: safeText(agent.buildingId, ''),
+      roomId: safeText(agent.roomId, ''),
+      targetKind: 'agent',
+      targetAgentId,
+    };
+  }
+  return null;
+}
+
+function makeLiveActionSnapshotTarget(action, point) {
+  const target = {
+    actionId: safeText(action?.actionType || action?.actionId, ''),
+    worldActionId: safeText(action?.id || action?.worldActionId, ''),
+    targetKind: safeText(point?.targetKind || action?.target?.kind || 'world-point', 'world-point'),
+    x: Number(point.x),
+    y: Number(point.y),
+    floor: floorOr(point.floor, 1),
+  };
+  for (const key of ['buildingId', 'roomId', 'objectInstanceId', 'interactionSpotId', 'targetAgentId']) {
+    if (point?.[key]) target[key] = safeText(point[key], '');
+  }
+  return target;
+}
+
+function makeLiveActionVisualState(isMoving, status = 'working') {
+  return {
+    schemaVersion: 'agent-runtime-visual/v1',
+    status,
+    state: isMoving ? 'moving' : 'idle',
+    resolvedAnimationId: isMoving ? 'walk' : 'stand-use',
+    movement: { isMoving, isRunning: false },
+    activityActive: !isMoving,
+    carrying: false,
+  };
+}
+
+function serverLiveActionShouldComplete(action, nowMs) {
+  const timing = action?.timing && typeof action.timing === 'object' ? action.timing : {};
+  const inProgressAt = Date.parse(timing.inProgressAt || timing.arrivedAt || timing.updatedAt || '');
+  return Number.isFinite(inProgressAt) && nowMs - inProgressAt >= LIVE_ACTION_RUNTIME_DWELL_MS;
+}
+
+function writeServerBuiltHomeIfNeeded(dataDir, action, now) {
+  if (String(action?.actionType || action?.actionId || '') !== 'world.buildStructure') return null;
+  const site = action?.params?.buildSite || action?.target?.buildSite || action?.route?.target?.buildSite || null;
+  if (!site || typeof site !== 'object' || Array.isArray(site)) return null;
+  const agentId = safeText(action.agentId, '');
+  const buildingId = safeText(site.buildingId || `live-home-${agentId}`, '');
+  if (!buildingId) return null;
+  const file = buildingFilePath(dataDir, buildingId);
+  if (existsSync(file)) {
+    return { buildingId, status: 'already-exists' };
+  }
+  const building = {
+    id: buildingId,
+    name: safeText(site.buildingName, `${agentId || 'Agent'}'s Home`) || `${agentId || 'Agent'}'s Home`,
+    type: safeText(site.type, 'home') || 'home',
+    worldX: numberOr(site.worldX, 0),
+    worldY: numberOr(site.worldY, 0),
+    widthTiles: Math.max(4, numberOr(site.widthTiles, 10)),
+    heightTiles: Math.max(4, numberOr(site.heightTiles, 8)),
+    exterior: {
+      wallColor: safeText(site.exterior?.wallColor, '#c8b89a') || '#c8b89a',
+      roofColor: safeText(site.exterior?.roofColor, '#795548') || '#795548',
+    },
+    ownerAgentId: agentId || safeText(site.ownerAgentId, ''),
+    liveModeHomeForAgentId: agentId || safeText(site.liveModeHomeForAgentId, ''),
+    createdByAgentId: agentId || safeText(site.ownerAgentId, ''),
+    createdFromWorldActionId: safeText(action.id, ''),
+    source: 'agent-live-mode',
+    constructionState: {
+      status: 'complete',
+      completedAt: now,
+      visibleExecutor: 'agent-runtime-room.mjs#tickLiveActionRuntime',
+      serverRuntimeAuthority: true,
+    },
+    interior: {
+      floors: [{ level: 1, name: 'Floor 1' }],
+      furniture: [],
+      walls: [],
+      starterInteriorVersion: 'pending-python-load',
+      residentAgentId: agentId || safeText(site.liveModeHomeForAgentId, ''),
+    },
+  };
+  writeJsonFileAtomic(file, building);
+  return { buildingId, status: 'created' };
 }
 
 export function stateToPlain(state, events = []) {
@@ -1023,9 +1607,13 @@ function requestIdFrom(message) {
 
 export class AgentRuntimeRoom extends Room {
   onCreate(options = {}) {
+    this.autoDispose = false;
     this.dataDir = options.dataDir || process.env.VW_DATA_DIR || '.local-data';
     this.events = [];
     this.lastWorldRuntimePersistMs = 0;
+    this.lastLiveActionRuntimePollMs = 0;
+    this.liveActionRuntimeMeta = null;
+    this.liveActionRuntimeStore = null;
     const doc = readRuntimeDocument(this.dataDir);
     this.events = Array.isArray(doc.events) ? doc.events.slice(-MAX_RUNTIME_EVENTS) : [];
     this.setState(stateFromDocument(doc));
@@ -1224,6 +1812,223 @@ export class AgentRuntimeRoom extends Room {
     return expired;
   }
 
+  loadLiveActionRuntimeStore(nowMs = Date.now()) {
+    if (this.liveActionRuntimeStore && nowMs - Number(this.lastLiveActionRuntimePollMs || 0) < LIVE_ACTION_RUNTIME_POLL_MS) {
+      return { meta: this.liveActionRuntimeMeta, store: this.liveActionRuntimeStore };
+    }
+    const loaded = readWorldActionsStore(this.dataDir);
+    this.liveActionRuntimeMeta = loaded.meta;
+    this.liveActionRuntimeStore = loaded.store;
+    this.lastLiveActionRuntimePollMs = nowMs;
+    return loaded;
+  }
+
+  saveLiveActionRuntimeStore(meta, store, nowMs = Date.now()) {
+    writeWorldActionsStore(this.dataDir, meta, store);
+    this.liveActionRuntimeMeta = meta;
+    this.liveActionRuntimeStore = store;
+    this.lastLiveActionRuntimePollMs = nowMs;
+  }
+
+  transitionServerLiveAction(action, toStatus, options = {}) {
+    const transitioned = transitionWorldActionRecord(action, toStatus, {
+      actor: options.actor || 'agent-runtime-room.mjs#tickLiveActionRuntime',
+      source: options.source || 'server-runtime',
+      now: options.now || new Date().toISOString(),
+      reason: options.reason || `server-authoritative-${toStatus}`,
+      result: options.result,
+      failureReason: options.failureReason,
+    });
+    return transitioned;
+  }
+
+  tickLiveActionRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
+    const { meta, store } = this.loadLiveActionRuntimeStore(nowMs);
+    const active = Array.isArray(store.active) ? store.active : [];
+    if (active.length === 0) return { changedActions: false, changedSnapshots: 0 };
+
+    let changedActions = false;
+    let changedSnapshots = 0;
+    const nextActive = [];
+    const nextHistory = Array.isArray(store.history) ? [...store.history] : [];
+
+    for (const originalAction of active) {
+      let action = cloneJson(originalAction, originalAction) || originalAction;
+      const actionId = safeText(action?.id || action?.worldActionId, '');
+      const agentId = safeText(action?.agentId, '');
+      let status = canonicalWorldActionStatus(action?.status);
+      if (!actionId || !agentId || !WORLD_ACTION_ACTIVE_STATUSES.has(status)) {
+        nextActive.push(action);
+        continue;
+      }
+
+      const targetPoint = resolveActionTargetPoint(this.dataDir, action, this.state);
+      const existing = this.state.agents.get(agentId);
+      if (!targetPoint || !existing) {
+        nextActive.push(action);
+        continue;
+      }
+
+      const actor = 'agent-runtime-room.mjs#tickLiveActionRuntime';
+      const source = worldActionSourceKind(action, 'server-runtime');
+      for (const nextStatus of ['created', 'reserved', 'route_pending', 'routing']) {
+        status = canonicalWorldActionStatus(action.status);
+        if (!worldActionTransitionAllowed(status, nextStatus)) continue;
+        const transitioned = this.transitionServerLiveAction(action, nextStatus, {
+          now,
+          actor,
+          source,
+          reason: nextStatus === 'routing' ? 'server-runtime-route-started' : `server-runtime-${nextStatus}`,
+        });
+        if (transitioned.changed) {
+          action = transitioned.action;
+          changedActions = true;
+        }
+      }
+
+      status = canonicalWorldActionStatus(action.status);
+      const current = snapshotToPlain(existing);
+      const dx = Number(targetPoint.x) - Number(current.x || 0);
+      const dy = Number(targetPoint.y) - Number(current.y || 0);
+      const distance = Math.hypot(dx, dy);
+      const step = Math.max(1, LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC * (tickMs / 1000));
+      const arrived = distance <= LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS;
+      const ratio = arrived ? 1 : Math.min(1, step / Math.max(distance, 0.001));
+      const nextX = arrived ? Number(targetPoint.x) : Number(current.x || 0) + dx * ratio;
+      const nextY = arrived ? Number(targetPoint.y) : Number(current.y || 0) + dy * ratio;
+      const heading = distance > 0.001 ? ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360 : current.heading;
+      const snapshotTarget = makeLiveActionSnapshotTarget(action, targetPoint);
+      const routeId = safeText(action?.route?.id || action?.route?.routeId, `route-${actionId}`) || `route-${actionId}`;
+
+      if (status === 'routing' || status === 'route_pending') {
+        this.upsertSnapshot({
+          agentId,
+          mode: 'live',
+          owner: LIVE_ACTION_RUNTIME_OWNER,
+          x: nextX,
+          y: nextY,
+          floor: targetPoint.floor,
+          buildingId: targetPoint.buildingId || '',
+          roomId: targetPoint.roomId || '',
+          heading,
+          state: arrived ? 'arrived' : 'routing',
+          routeId,
+          worldActionId: actionId,
+          target: snapshotTarget,
+          leaseOwner: LIVE_ACTION_RUNTIME_LEASE_OWNER,
+          leaseExpiresAt: new Date(nowMs + LIVE_ACTION_RUNTIME_LEASE_TTL_MS).toISOString(),
+          visualState: makeLiveActionVisualState(!arrived),
+        }, arrived ? 'server-live-action-arrived' : 'server-live-action-routing', { actionId, routeId });
+        changedSnapshots++;
+        if (arrived && status === 'routing') {
+          const transitioned = this.transitionServerLiveAction(action, 'arrived', {
+            now,
+            actor,
+            source,
+            reason: 'server-runtime-arrived-at-target',
+          });
+          if (transitioned.changed) {
+            action = transitioned.action;
+            changedActions = true;
+          }
+        }
+      }
+
+      status = canonicalWorldActionStatus(action.status);
+      if (status === 'arrived') {
+        const transitioned = this.transitionServerLiveAction(action, 'in_progress', {
+          now,
+          actor,
+          source,
+          reason: 'server-runtime-activity-started',
+        });
+        if (transitioned.changed) {
+          action = transitioned.action;
+          changedActions = true;
+        }
+      }
+
+      status = canonicalWorldActionStatus(action.status);
+      if (status === 'in_progress') {
+        this.upsertSnapshot({
+          agentId,
+          mode: 'live',
+          owner: LIVE_ACTION_RUNTIME_OWNER,
+          x: Number(targetPoint.x),
+          y: Number(targetPoint.y),
+          floor: targetPoint.floor,
+          buildingId: targetPoint.buildingId || '',
+          roomId: targetPoint.roomId || '',
+          heading,
+          state: 'in_progress',
+          routeId,
+          worldActionId: actionId,
+          target: snapshotTarget,
+          leaseOwner: LIVE_ACTION_RUNTIME_LEASE_OWNER,
+          leaseExpiresAt: new Date(nowMs + LIVE_ACTION_RUNTIME_LEASE_TTL_MS).toISOString(),
+          visualState: makeLiveActionVisualState(false),
+        }, 'server-live-action-in-progress', { actionId, routeId });
+        changedSnapshots++;
+        if (serverLiveActionShouldComplete(action, nowMs)) {
+          const sideEffect = writeServerBuiltHomeIfNeeded(this.dataDir, action, now);
+          const result = {
+            status: 'completed',
+            applied: true,
+            reason: 'server_authoritative_live_action_completed',
+            runtime: LIVE_ACTION_RUNTIME_OWNER,
+            ...(sideEffect ? { objectEffect: sideEffect.status === 'created' ? 'visible-home-built' : 'visible-home-already-built', buildingId: sideEffect.buildingId } : {}),
+          };
+          const transitioned = this.transitionServerLiveAction(action, 'completed', {
+            now,
+            actor,
+            source,
+            reason: 'server-authoritative-live-action-completed',
+            result,
+          });
+          if (transitioned.changed) {
+            action = transitioned.action;
+            changedActions = true;
+          }
+          this.upsertSnapshot({
+            agentId,
+            mode: 'scripted',
+            owner: 'agent-scripted-mode',
+            x: Number(targetPoint.x),
+            y: Number(targetPoint.y),
+            floor: targetPoint.floor,
+            buildingId: targetPoint.buildingId || '',
+            roomId: targetPoint.roomId || '',
+            heading,
+            state: 'idle',
+            routeId: '',
+            worldActionId: '',
+            target: null,
+            leaseOwner: '',
+            leaseExpiresAt: '',
+            visualState: makeLiveActionVisualState(false, 'working'),
+          }, 'server-live-action-completed', { actionId, routeId });
+          changedSnapshots++;
+        }
+      }
+
+      status = canonicalWorldActionStatus(action.status);
+      if (WORLD_ACTION_TERMINAL_STATUSES.has(status)) {
+        nextHistory.unshift(action);
+      } else {
+        nextActive.push(action);
+      }
+    }
+
+    if (changedActions) {
+      this.saveLiveActionRuntimeStore(meta, {
+        ...store,
+        active: nextActive,
+        history: nextHistory.slice(0, 1000),
+      }, nowMs);
+    }
+    return { changedActions, changedSnapshots };
+  }
+
   upsertSnapshot(raw, eventType, extra = {}) {
     const existing = this.state.agents.get(raw.agentId);
     const normalized = normalizeSnapshot(raw, existing || null);
@@ -1355,6 +2160,7 @@ export class AgentRuntimeRoom extends Room {
       }
     }
     const changedVehicles = this.tickTrafficVehicles(runtime, tickMs, now);
+    const changedLiveActions = this.tickLiveActionRuntime(tickMs, nowMs, now);
 
     if (changedLights > 0 || changedVehicles > 0) {
       this.broadcast('runtime:worldRuntime', {
@@ -1362,10 +2168,12 @@ export class AgentRuntimeRoom extends Room {
         worldRuntime: worldRuntimeToPlain(runtime),
         changedLights,
         changedVehicles,
+        changedLiveActions: changedLiveActions.changedActions ? 1 : 0,
+        changedLiveActionSnapshots: changedLiveActions.changedSnapshots,
       });
     }
 
-    if (changedLights > 0 || changedVehicles > 0 || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
+    if (changedLights > 0 || changedVehicles > 0 || changedLiveActions.changedActions || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
       this.lastWorldRuntimePersistMs = nowMs;
       writeRuntimeDocument(this.dataDir, this.state, this.events);
     }

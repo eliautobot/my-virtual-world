@@ -37396,7 +37396,20 @@ function getLiveModeWorldClientMarkerUrl() {
   return `/api/world-actions/active?${params.toString()}`;
 }
 
+const SERVER_AUTHORITATIVE_LIVE_ACTION_RUNTIME = true;
+
 async function syncActiveBarberChairWorldActions() {
+  if (SERVER_AUTHORITATIVE_LIVE_ACTION_RUNTIME && window.__VWAllowBrowserWorldActionExecutor !== true) {
+    window.__VWLastBarberChairWorldActionSync = {
+      ok: true,
+      routed: 0,
+      skipped: true,
+      reason: 'server-authoritative-runtime-observer',
+      visible: isRuntimeExecutorPageVisible(),
+      checkedAt: new Date().toISOString(),
+    };
+    return false;
+  }
   if (!isRuntimeExecutorPageVisible()) {
     window.__VWLastBarberChairWorldActionSync = {
       ok: true,
