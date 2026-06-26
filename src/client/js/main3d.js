@@ -1792,6 +1792,15 @@ function makeAgentRuntimeTrafficVehicleSeed(vehicle, index = 0) {
 }
 
 function publishAgentRuntimeTrafficTopology({ force = false } = {}) {
+  if (typeof window !== 'undefined' && window.__VWAllowBrowserWorldTopologyPublisher !== true) {
+    _runtimeTrafficTopologyPublish = {
+      ...(_runtimeTrafficTopologyPublish || {}),
+      skippedAtMs: Date.now(),
+      skippedReason: 'server-authoritative-world-topology-observer',
+      devOverrideFlag: '__VWAllowBrowserWorldTopologyPublisher',
+    };
+    return null;
+  }
   if (!_agentRuntimeClient?.connected || typeof _agentRuntimeClient.writeWorldTopology !== 'function') return null;
   if (!_trafficLights.size) return null;
   const topology = makeAgentRuntimeTrafficTopology();

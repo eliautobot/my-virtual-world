@@ -1,5 +1,5 @@
 // File-backed Colyseus room for authoritative live-agent runtime snapshots.
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Room } from '@colyseus/core';
 import { Encoder, MapSchema, Schema, defineTypes } from '@colyseus/schema';
@@ -8,6 +8,11 @@ import {
   clearDynamicInteriorRoutingForAgent,
   updateDynamicInteriorRouting,
 } from '../client/js/dynamic-interior-routing.js';
+import {
+  configureDynamicExteriorRouting,
+  clearDynamicExteriorRoutingForAgent,
+  updateDynamicExteriorRouting,
+} from '../client/js/dynamic-exterior-routing.js';
 
 export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
 export const WORLD_RUNTIME_SCHEMA_VERSION = 'world-runtime/v1';
@@ -51,6 +56,9 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS = 8000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS = 7000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS = 12000;
 export const LIVE_ACTION_API_TILE = 40;
+export const SERVER_WORLD_TOPOLOGY_OWNER = 'server-world-topology-runtime';
+export const SERVER_WORLD_TRAFFIC_SPEED = 7;
+export const SERVER_WORLD_MAX_TRAFFIC_VEHICLES = 30;
 
 const WORLD_ACTION_SCHEMA_VERSION = 'agent-life-world-action/v1';
 const WORLD_ACTION_PERSISTENCE_VERSION = 'agent-life-world-action-persistence/v1';
@@ -323,6 +331,14 @@ function buildingFilePath(dataDir, buildingId) {
   return join(buildingsDirPath(dataDir), `${safeFilename(buildingId)}.json`);
 }
 
+function chunksDirPath(dataDir = process.env.VW_DATA_DIR || '.local-data') {
+  return join(dataDir || '.local-data', 'chunks');
+}
+
+function chunkFilePath(dataDir, cx, cz) {
+  return join(chunksDirPath(dataDir), `c_${cx}_${cz}.json`);
+}
+
 function readJsonFile(path, fallback = null) {
   if (!existsSync(path)) return fallback;
   try {
@@ -415,6 +431,327 @@ function cloneJson(value, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+const SERVER_TERRAIN = Object.freeze({
+  GRASS: 0,
+  DIRT: 1,
+  ROAD: 2,
+  SIDEWALK: 3,
+  WATER: 4,
+  SAND: 5,
+  PARKING: 6,
+});
+const SERVER_CHUNK_SIZE = 32;
+const SERVER_STREET_INTERSECTION_ROAD_RADIUS = 4;
+const SERVER_STREET_INTERSECTION_SIDEWALK_RADIUS = 6;
+const SERVER_VEHICLE_COLORS = Object.freeze([0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0x8e24aa, 0xff6f00, 0x00897b, 0x5c6bc0]);
+const SERVER_VEHICLE_TYPES = Object.freeze(['car', 'car', 'car', 'sedan', 'sedan', 'truck', 'van', 'bus']);
+const SERVER_VEHICLE_SPEED_MULT = Object.freeze({ car: 1, sedan: 1.05, truck: 0.8, van: 0.85, bus: 0.65 });
+const _chunkTerrainCache = new Map();
+const _streetSegmentCache = new Map();
+
+function readStreetSegments(dataDir) {
+  const file = worldMetaFilePath(dataDir);
+  let mtimeMs = 0;
+  try {
+    mtimeMs = statSync(file).mtimeMs;
+  } catch {
+    return [];
+  }
+  const cacheKey = `${dataDir || '.local-data'}:${file}`;
+  const cached = _streetSegmentCache.get(cacheKey);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.streets;
+  const meta = readJsonFile(file, null);
+  const streets = Array.isArray(meta?.streets)
+    ? meta.streets.filter(segment => segment && typeof segment === 'object')
+    : [];
+  _streetSegmentCache.set(cacheKey, { mtimeMs, streets });
+  return streets;
+}
+
+function normalizeStreetSegment(segment = null) {
+  if (!segment || typeof segment !== 'object') return null;
+  const x1 = Math.round(numberOr(segment.x1, 0));
+  const z1 = Math.round(numberOr(segment.z1, 0));
+  const x2 = Math.round(numberOr(segment.x2, x1));
+  const z2 = Math.round(numberOr(segment.z2, z1));
+  return {
+    x1,
+    z1,
+    x2,
+    z2,
+    type: safeText(segment.type || '', ''),
+    rotation: numberOr(segment.rotation, 0),
+    openEdges: normalizeOpenEdges(segment.openEdges),
+  };
+}
+
+function serverStreetTerrainAt(dataDir, wx, wz) {
+  const x = Math.round(numberOr(wx, 0));
+  const z = Math.round(numberOr(wz, 0));
+  let sidewalk = false;
+  for (const rawSegment of readStreetSegments(dataDir)) {
+    const segment = normalizeStreetSegment(rawSegment);
+    if (!segment) continue;
+    if (segment.type) {
+      const dx = Math.abs(x - segment.x1);
+      const dz = Math.abs(z - segment.z1);
+      if (dx <= SERVER_STREET_INTERSECTION_ROAD_RADIUS && dz <= SERVER_STREET_INTERSECTION_ROAD_RADIUS) {
+        return SERVER_TERRAIN.ROAD;
+      }
+      if (dx <= SERVER_STREET_INTERSECTION_SIDEWALK_RADIUS && dz <= SERVER_STREET_INTERSECTION_SIDEWALK_RADIUS) {
+        sidewalk = true;
+      }
+      continue;
+    }
+
+    const minX = Math.min(segment.x1, segment.x2);
+    const maxX = Math.max(segment.x1, segment.x2);
+    const minZ = Math.min(segment.z1, segment.z2);
+    const maxZ = Math.max(segment.z1, segment.z2);
+    const horizontal = Math.abs(segment.x2 - segment.x1) >= Math.abs(segment.z2 - segment.z1);
+    if (horizontal) {
+      if (x >= minX && x <= maxX) {
+        const dz = Math.abs(z - segment.z1);
+        if (dz <= 1) return SERVER_TERRAIN.ROAD;
+        if (dz <= 3) sidewalk = true;
+      }
+      if ((Math.abs(x - segment.x1) <= 3 || Math.abs(x - segment.x2) <= 3) && Math.abs(z - segment.z1) <= 3) {
+        if (Math.abs(z - segment.z1) <= 1) return SERVER_TERRAIN.ROAD;
+        sidewalk = true;
+      }
+    } else {
+      if (z >= minZ && z <= maxZ) {
+        const dx = Math.abs(x - segment.x1);
+        if (dx <= 1) return SERVER_TERRAIN.ROAD;
+        if (dx <= 3) sidewalk = true;
+      }
+      if ((Math.abs(z - segment.z1) <= 3 || Math.abs(z - segment.z2) <= 3) && Math.abs(x - segment.x1) <= 3) {
+        if (Math.abs(x - segment.x1) <= 1) return SERVER_TERRAIN.ROAD;
+        sidewalk = true;
+      }
+    }
+  }
+  return sidewalk ? SERVER_TERRAIN.SIDEWALK : null;
+}
+
+function readChunkTerrain(dataDir, cx, cz) {
+  const file = chunkFilePath(dataDir, cx, cz);
+  if (!existsSync(file)) return null;
+  const cacheKey = `${dataDir}:${cx}:${cz}`;
+  let mtimeMs = 0;
+  try {
+    mtimeMs = statSync(file).mtimeMs;
+  } catch {
+    return null;
+  }
+  const cached = _chunkTerrainCache.get(cacheKey);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.terrain;
+  const chunk = readJsonFile(file, null);
+  const terrain = Array.isArray(chunk?.terrain) ? chunk.terrain : null;
+  _chunkTerrainCache.set(cacheKey, { mtimeMs, terrain });
+  return terrain;
+}
+
+function getServerWorldTile(dataDir, wx, wz) {
+  const x = Math.round(numberOr(wx, 0));
+  const z = Math.round(numberOr(wz, 0));
+  const streetTile = serverStreetTerrainAt(dataDir, x, z);
+  if (streetTile !== null && streetTile !== undefined) return streetTile;
+  const cx = Math.floor(x / SERVER_CHUNK_SIZE);
+  const cz = Math.floor(z / SERVER_CHUNK_SIZE);
+  const terrain = readChunkTerrain(dataDir, cx, cz);
+  if (!terrain) return SERVER_TERRAIN.GRASS;
+  const lx = ((x % SERVER_CHUNK_SIZE) + SERVER_CHUNK_SIZE) % SERVER_CHUNK_SIZE;
+  const lz = ((z % SERVER_CHUNK_SIZE) + SERVER_CHUNK_SIZE) % SERVER_CHUNK_SIZE;
+  const tile = terrain[lz * SERVER_CHUNK_SIZE + lx];
+  return Number.isFinite(Number(tile)) ? Number(tile) : SERVER_TERRAIN.GRASS;
+}
+
+function isServerCrosswalk(dataDir, wx, wz) {
+  for (let r = 0; r <= 3; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dz = -r; dz <= r; dz++) {
+        if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue;
+        const cx = wx + dx;
+        const cz = wz + dz;
+        if (getServerWorldTile(dataDir, cx, cz) !== SERVER_TERRAIN.ROAD) continue;
+        const hasNS = getServerWorldTile(dataDir, cx, cz - 1) === SERVER_TERRAIN.ROAD || getServerWorldTile(dataDir, cx, cz + 1) === SERVER_TERRAIN.ROAD;
+        const hasEW = getServerWorldTile(dataDir, cx - 1, cz) === SERVER_TERRAIN.ROAD || getServerWorldTile(dataDir, cx + 1, cz) === SERVER_TERRAIN.ROAD;
+        if (hasNS && hasEW) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function findNearestServerSidewalk(dataDir, wx, wz, radius = 12) {
+  const x = Math.round(numberOr(wx, 0));
+  const z = Math.round(numberOr(wz, 0));
+  if (getServerWorldTile(dataDir, x, z) === SERVER_TERRAIN.SIDEWALK) return { x, z };
+  if (getServerWorldTile(dataDir, x, z) === SERVER_TERRAIN.ROAD) {
+    for (let d = 1; d <= 4; d++) {
+      for (const [dx, dz] of [[d, 0], [-d, 0], [0, d], [0, -d]]) {
+        if (getServerWorldTile(dataDir, x + dx, z + dz) === SERVER_TERRAIN.SIDEWALK) return { x: x + dx, z: z + dz };
+      }
+    }
+  }
+  const r = Math.max(1, Math.floor(numberOr(radius, 12)));
+  let best = null;
+  let bestDist = Infinity;
+  for (let dz = -r; dz <= r; dz++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (getServerWorldTile(dataDir, x + dx, z + dz) !== SERVER_TERRAIN.SIDEWALK) continue;
+      const dist = dx * dx + dz * dz;
+      if (dist < bestDist) {
+        best = { x: x + dx, z: z + dz };
+        bestDist = dist;
+      }
+    }
+  }
+  return best;
+}
+
+function pathfindServerSidewalk(dataDir, sx, sz, gx, gz) {
+  const startX = Math.round(numberOr(sx, 0));
+  const startZ = Math.round(numberOr(sz, 0));
+  const goalX = Math.round(numberOr(gx, startX));
+  const goalZ = Math.round(numberOr(gz, startZ));
+  const maxDist = Math.abs(goalX - startX) + Math.abs(goalZ - startZ);
+  if (maxDist > 400) return null;
+  if (maxDist < 2) return [{ x: goalX, z: goalZ }];
+  const open = new Map();
+  const closed = new Set();
+  const cameFrom = new Map();
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+  const keyFor = (x, z) => `${x},${z}`;
+  const heuristic = (x, z) => Math.abs(x - goalX) + Math.abs(z - goalZ);
+  open.set(keyFor(startX, startZ), { x: startX, z: startZ, f: heuristic(startX, startZ), g: 0 });
+
+  let iterations = 0;
+  while (open.size > 0 && iterations++ < 10000) {
+    let bestKey = null;
+    let bestF = Infinity;
+    for (const [key, entry] of open) {
+      if (entry.f < bestF) {
+        bestKey = key;
+        bestF = entry.f;
+      }
+    }
+    if (bestKey === keyFor(goalX, goalZ)) {
+      const fullPath = [];
+      let walkKey = bestKey;
+      while (walkKey) {
+        const [x, z] = walkKey.split(',').map(Number);
+        fullPath.unshift({ x, z });
+        walkKey = cameFrom.get(walkKey) || null;
+      }
+      if (fullPath.length <= 2) return fullPath;
+      const simplified = [fullPath[0]];
+      for (let i = 1; i < fullPath.length - 1; i++) {
+        const prev = fullPath[i - 1];
+        const cur = fullPath[i];
+        const next = fullPath[i + 1];
+        if (cur.x - prev.x !== next.x - cur.x || cur.z - prev.z !== next.z - cur.z) simplified.push(cur);
+      }
+      simplified.push(fullPath[fullPath.length - 1]);
+      return simplified;
+    }
+    const current = open.get(bestKey);
+    open.delete(bestKey);
+    closed.add(bestKey);
+    for (const [dx, dz] of dirs) {
+      const nx = current.x + dx;
+      const nz = current.z + dz;
+      const nKey = keyFor(nx, nz);
+      if (closed.has(nKey)) continue;
+      const tile = getServerWorldTile(dataDir, nx, nz);
+      if (tile !== SERVER_TERRAIN.SIDEWALK && tile !== SERVER_TERRAIN.ROAD && tile !== SERVER_TERRAIN.PARKING) continue;
+      const diag = dx !== 0 && dz !== 0;
+      const baseCost = tile === SERVER_TERRAIN.SIDEWALK
+        ? 1
+        : tile === SERVER_TERRAIN.PARKING
+          ? 3
+          : (isServerCrosswalk(dataDir, nx, nz) ? 3 : 40);
+      const moveCost = diag ? baseCost * Math.SQRT2 : baseCost;
+      const g = current.g + moveCost;
+      const existing = open.get(nKey);
+      if (!existing || g < existing.g) {
+        cameFrom.set(nKey, bestKey);
+        open.set(nKey, { x: nx, z: nz, g, f: g + heuristic(nx, nz) });
+      }
+    }
+  }
+  return null;
+}
+
+function lineIntersectsAabb(x1, y1, x2, y2, minX, minY, maxX, maxY) {
+  let tMin = 0;
+  let tMax = 1;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  for (const [p, q] of [[-dx, x1 - minX], [dx, maxX - x1], [-dy, y1 - minY], [dy, maxY - y1]]) {
+    if (Math.abs(p) < 0.001) {
+      if (q < 0) return false;
+    } else {
+      const r = q / p;
+      if (p < 0) {
+        if (r > tMax) return false;
+        if (r > tMin) tMin = r;
+      } else {
+        if (r < tMin) return false;
+        if (r < tMax) tMax = r;
+      }
+    }
+  }
+  return true;
+}
+
+function getServerSmartWaypoints(dataDir, ax, ay, tx, ty) {
+  const pad = LIVE_ACTION_API_TILE * 2.5;
+  const obstructions = [];
+  for (const building of listBuildingDocuments(dataDir)) {
+    if (!building || building.type === 'park') continue;
+    const bx1 = Number(building.worldX ?? building.x ?? 0) * LIVE_ACTION_API_TILE;
+    const bz1 = Number(building.worldY ?? building.z ?? 0) * LIVE_ACTION_API_TILE;
+    const bx2 = bx1 + Number(building.widthTiles || 25) * LIVE_ACTION_API_TILE;
+    const bz2 = bz1 + Number(building.heightTiles || 17) * LIVE_ACTION_API_TILE;
+    if (ax >= bx1 && ax <= bx2 && ay >= bz1 && ay <= bz2) continue;
+    if (tx >= bx1 && tx <= bx2 && ty >= bz1 && ty <= bz2) continue;
+    if (!lineIntersectsAabb(ax, ay, tx, ty, bx1 - pad, bz1 - pad, bx2 + pad, bz2 + pad)) continue;
+    const bcx = (bx1 + bx2) / 2;
+    const bcz = (bz1 + bz2) / 2;
+    obstructions.push({ bx1, bz1, bx2, bz2, bcx, bcz, dist: Math.hypot(ax - bcx, ay - bcz) });
+  }
+  if (!obstructions.length) return [{ x: tx, y: ty }];
+  obstructions.sort((a, b) => a.dist - b.dist);
+  const waypoints = [];
+  let curX = ax;
+  let curY = ay;
+  for (const obs of obstructions) {
+    if (!lineIntersectsAabb(curX, curY, tx, ty, obs.bx1 - pad, obs.bz1 - pad, obs.bx2 + pad, obs.bz2 + pad)) continue;
+    const corners = [
+      { x: obs.bx1 - pad, y: obs.bz1 - pad },
+      { x: obs.bx2 + pad, y: obs.bz1 - pad },
+      { x: obs.bx1 - pad, y: obs.bz2 + pad },
+      { x: obs.bx2 + pad, y: obs.bz2 + pad },
+    ];
+    let best = corners[0];
+    let bestCost = Infinity;
+    for (const corner of corners) {
+      const cost = Math.hypot(curX - corner.x, curY - corner.y) + Math.hypot(corner.x - tx, corner.y - ty) + (corner.y > obs.bcz ? -pad * 0.3 : 0);
+      if (cost < bestCost) {
+        best = corner;
+        bestCost = cost;
+      }
+    }
+    waypoints.push(best);
+    curX = best.x;
+    curY = best.y;
+  }
+  waypoints.push({ x: tx, y: ty });
+  return waypoints;
 }
 
 function canonicalWorldActionStatus(status) {
@@ -689,6 +1026,14 @@ function findInteriorBuildingAtApi(dataDir, apiX, apiY) {
   return null;
 }
 
+function findParkAtApi(dataDir, apiX, apiY) {
+  for (const building of listBuildingDocuments(dataDir)) {
+    if (!building || building.type !== 'park') continue;
+    if (buildingContainsApiPoint(building, apiX, apiY)) return building;
+  }
+  return null;
+}
+
 function getBuildingDoorSpec(building) {
   const width = Number(building?.widthTiles || 10) || 10;
   const height = Number(building?.heightTiles || 8) || 8;
@@ -726,6 +1071,11 @@ function buildingInteriorEntryPointApi(building) {
 function buildingOutsideDoorPointApi(building) {
   const spec = getBuildingDoorSpec(building);
   return apiPointFromBuildingLocal(building, spec.localCenterX, spec.localOutsideZ);
+}
+
+function buildingDoorwayReachApi(building) {
+  const spec = getBuildingDoorSpec(building);
+  return Math.max(numberOr(spec.doorwayReachWorld, 0.45) * LIVE_ACTION_API_TILE, LIVE_ACTION_API_TILE * 0.45);
 }
 
 function apiPointForBuilding(building) {
@@ -788,23 +1138,40 @@ function resolveObjectTargetPoint(dataDir, target = {}) {
         if (!entry || typeof entry !== 'object') return false;
         return [entry.id, entry.interactionSpotId, entry.activationSpotId, entry.spotId].filter(Boolean).map(String).includes(spotId);
       }) || locations[0] || null;
-      if (location?.world && Number.isFinite(Number(location.world.x)) && Number.isFinite(Number(location.world.z))) {
+      const local = location?.buildingLocal || location?.actionTarget || location?.activationTarget || object;
+      const localPoint = apiPointFromBuildingLocal(building, Number(local?.x), Number(local?.z));
+      const worldPoint = location?.world && Number.isFinite(Number(location.world.x)) && Number.isFinite(Number(location.world.z))
+        ? { x: Number(location.world.x) * LIVE_ACTION_API_TILE, y: Number(location.world.z) * LIVE_ACTION_API_TILE }
+        : null;
+      const coordinateSpace = String(location?.coordinateSpace || local?.coordinateSpace || '').trim().toLowerCase();
+      const preferLocalPoint = Boolean(
+        localPoint &&
+        (coordinateSpace === 'building-local' || !worldPoint || (worldPoint && !buildingContainsApiPoint(building, worldPoint.x, worldPoint.y)))
+      );
+      if (preferLocalPoint) {
         return {
-          x: Number(location.world.x) * LIVE_ACTION_API_TILE,
-          y: Number(location.world.z) * LIVE_ACTION_API_TILE,
+          ...localPoint,
+          floor: floorOr(local?.floor ?? location?.floor ?? object.floor ?? target.floor, 1),
+          buildingId: building.id || '',
+          roomId: safeText(target.roomId || object.room, ''),
+          objectInstanceId: Array.from(ids)[0] || wantedId,
+          interactionSpotId: spotId || location?.id || '',
+        };
+      }
+      if (worldPoint) {
+        return {
+          ...worldPoint,
           floor: floorOr(location.floor ?? object.floor ?? target.floor, 1),
           buildingId: building.id || '',
           roomId: safeText(target.roomId || object.room, ''),
           objectInstanceId: Array.from(ids)[0] || wantedId,
-          interactionSpotId: spotId || location.id || '',
+          interactionSpotId: spotId || location?.id || '',
         };
       }
-      const local = location?.buildingLocal || location?.actionTarget || location?.activationTarget || object;
-      const point = apiPointFromBuildingLocal(building, Number(local.x), Number(local.z));
-      if (point) {
+      if (localPoint) {
         return {
-          ...point,
-          floor: floorOr(local.floor ?? object.floor ?? target.floor, 1),
+          ...localPoint,
+          floor: floorOr(local?.floor ?? object.floor ?? target.floor, 1),
           buildingId: building.id || '',
           roomId: safeText(target.roomId || object.room, ''),
           objectInstanceId: Array.from(ids)[0] || wantedId,
@@ -943,31 +1310,85 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
     id: agentId,
     x: Number(current?.x || 0),
     y: Number(current?.y || 0),
+    floor: floorOr(current?.floor, finalTarget.floor),
   };
-  const targetBuilding = finalTarget.buildingId ? readBuildingDocument(dataDir, finalTarget.buildingId) : null;
+  const targetBuilding = finalTarget.buildingId
+    ? readBuildingDocument(dataDir, finalTarget.buildingId)
+    : findInteriorBuildingAtApi(dataDir, finalTarget.x, finalTarget.y);
   const currentBuilding = findInteriorBuildingAtApi(dataDir, currentPoint.x, currentPoint.y);
   let steeringTarget = finalTarget;
   let route = null;
   let phase = 'direct';
+  const arrival = Math.max(1, numberOr(arrivalRadius, 5));
+  const makeRoute = (source, reason, effectiveTarget, points = [], active = false, extra = {}) => ({
+    active,
+    source,
+    reason,
+    effectiveTarget,
+    routeIndex: 0,
+    route: points.length ? points : [effectiveTarget],
+    routePoints: [cloneRuntimePoint(currentPoint), ...points.map(cloneRuntimePoint), cloneRuntimePoint(finalTarget)].filter(Boolean),
+    finalPoint: finalTarget,
+    ...extra,
+  });
 
-  if (targetBuilding && targetBuilding.type !== 'park') {
+  const steerDoorTransition = (building, direction) => {
+    const doorway = buildingDoorwayPointApi(building);
+    const outside = buildingOutsideDoorPointApi(building) || doorway;
+    const inside = buildingInteriorEntryPointApi(building) || doorway;
+    const reach = buildingDoorwayReachApi(building);
+    if (direction === 'enter' && outside && inside) {
+      const distToOutside = Math.min(
+        Math.hypot(currentPoint.x - outside.x, currentPoint.y - outside.y),
+        doorway ? Math.hypot(currentPoint.x - doorway.x, currentPoint.y - doorway.y) : Infinity,
+      );
+      if (distToOutside <= Math.max(reach, arrival * 2)) {
+        steeringTarget = { ...finalTarget, ...inside, floor: finalTarget.floor, targetKind: 'building-door-entry' };
+        phase = 'door-crossing';
+        route = makeRoute('server-door-transition', 'enter-building-through-door', steeringTarget, [outside, doorway, inside].filter(Boolean));
+        return true;
+      }
+      return false;
+    }
+    if (direction === 'exit' && outside && inside) {
+      const distToInside = Math.min(
+        Math.hypot(currentPoint.x - inside.x, currentPoint.y - inside.y),
+        doorway ? Math.hypot(currentPoint.x - doorway.x, currentPoint.y - doorway.y) : Infinity,
+      );
+      steeringTarget = distToInside <= Math.max(reach, arrival * 2)
+        ? { ...outside, floor: finalTarget.floor, targetKind: 'building-door-exit' }
+        : { ...inside, floor: finalTarget.floor, targetKind: 'building-door-inside-approach' };
+      phase = distToInside <= Math.max(reach, arrival * 2) ? 'door-exit' : 'door-inside-approach';
+      route = makeRoute('server-door-transition', phase === 'door-exit' ? 'exit-building-through-door' : 'inside-to-building-door', steeringTarget, [inside, doorway, outside].filter(Boolean));
+      return true;
+    }
+    return false;
+  };
+
+  const useExteriorRoute = () => {
+    const dynamicRoute = updateDynamicExteriorRouting(currentPoint, finalTarget, tickMs, { debug: false });
+    if (dynamicRoute?.active && dynamicRoute.effectiveTarget) {
+      steeringTarget = { ...finalTarget, x: dynamicRoute.effectiveTarget.x, y: dynamicRoute.effectiveTarget.y };
+      phase = dynamicRoute.reason === 'door-approach' || dynamicRoute.reason === 'door-handoff'
+        ? 'door-approach'
+        : 'exterior-route';
+      route = {
+        ...dynamicRoute,
+        source: 'dynamic-exterior-routing.js',
+        finalPoint: finalTarget,
+      };
+      return true;
+    }
+    route = makeRoute('dynamic-exterior-routing.js', dynamicRoute?.reason || 'exterior-route-unavailable', finalTarget, [finalTarget]);
+    return false;
+  };
+
+  if (currentBuilding && currentBuilding.type !== 'park' && (!targetBuilding || currentBuilding.id !== targetBuilding.id)) {
+    steerDoorTransition(currentBuilding, 'exit');
+  } else if (targetBuilding && targetBuilding.type !== 'park') {
     const currentInsideTarget = currentBuilding?.id === targetBuilding.id;
     if (!currentInsideTarget) {
-      const door = buildingOutsideDoorPointApi(targetBuilding) || buildingDoorwayPointApi(targetBuilding);
-      if (door) {
-        steeringTarget = { ...finalTarget, ...door, floor: finalTarget.floor, targetKind: 'building-door-approach' };
-        phase = 'door-approach';
-        route = {
-          active: false,
-          source: 'server-door-handoff',
-          reason: 'outside-to-building-door',
-          effectiveTarget: steeringTarget,
-          routeIndex: 0,
-          route: [steeringTarget],
-          routePoints: [cloneRuntimePoint(currentPoint), cloneRuntimePoint(steeringTarget)].filter(Boolean),
-          finalPoint: steeringTarget,
-        };
-      }
+      if (!steerDoorTransition(targetBuilding, 'enter')) useExteriorRoute();
     } else {
       const dynamicRoute = updateDynamicInteriorRouting(currentPoint, finalTarget, tickMs, {
         building: targetBuilding,
@@ -982,18 +1403,11 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
           finalPoint: finalTarget,
         };
       } else {
-        route = {
-          active: false,
-          source: 'dynamic-interior-routing.js',
-          reason: dynamicRoute?.reason || 'interior-route-unavailable',
-          effectiveTarget: finalTarget,
-          routeIndex: 0,
-          route: [finalTarget],
-          routePoints: [cloneRuntimePoint(currentPoint), cloneRuntimePoint(finalTarget)].filter(Boolean),
-          finalPoint: finalTarget,
-        };
+        route = makeRoute('dynamic-interior-routing.js', dynamicRoute?.reason || 'interior-route-unavailable', finalTarget, [finalTarget]);
       }
     }
+  } else if (!currentBuilding) {
+    useExteriorRoute();
   }
 
   const dx = Number(steeringTarget.x) - Number(currentPoint.x || 0);
@@ -1003,7 +1417,7 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
   const finalDy = Number(finalTarget.y) - Number(currentPoint.y || 0);
   const distanceToFinal = Math.hypot(finalDx, finalDy);
   const step = Math.max(1, numberOr(speedUnitsPerSec, 72) * (Math.max(1, tickMs) / 1000));
-  const arrived = distanceToFinal <= Math.max(1, numberOr(arrivalRadius, 5)) && phase !== 'door-approach';
+  const arrived = distanceToFinal <= arrival && !String(phase || '').startsWith('door-');
   const ratio = arrived ? 1 : Math.min(1, step / Math.max(distanceToSteering, 0.001));
   const nextX = arrived ? Number(finalTarget.x) : Number(currentPoint.x || 0) + dx * ratio;
   const nextY = arrived ? Number(finalTarget.y) : Number(currentPoint.y || 0) + dy * ratio;
@@ -1372,9 +1786,16 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
   const world = location?.world && typeof location.world === 'object' && !Array.isArray(location.world) ? location.world : null;
   const worldX = numberOr(world?.x, NaN);
   const worldZ = numberOr(world?.z ?? world?.y, NaN);
-  const point = Number.isFinite(worldX) && Number.isFinite(worldZ)
+  const localPoint = apiPointFromBuildingLocal(building, local.x, local.z);
+  const worldPoint = Number.isFinite(worldX) && Number.isFinite(worldZ)
     ? { x: worldX * LIVE_ACTION_API_TILE, y: worldZ * LIVE_ACTION_API_TILE }
-    : apiPointFromBuildingLocal(building, local.x, local.z);
+    : null;
+  const coordinateSpace = String(location?.coordinateSpace || location?.actionTarget?.coordinateSpace || location?.activationTarget?.coordinateSpace || '').trim().toLowerCase();
+  const preferLocalPoint = Boolean(
+    localPoint &&
+    (coordinateSpace === 'building-local' || !worldPoint || (worldPoint && !buildingContainsApiPoint(building, worldPoint.x, worldPoint.y)))
+  );
+  const point = preferLocalPoint ? localPoint : (worldPoint || localPoint);
   if (!point) return null;
   const objectType = safeText(furniture.type, 'object') || 'object';
   const objectKey = normalizeWorldObjectKey(runtimeFurnitureObjectKey(building.id || 'building', index, objectType));
@@ -1596,6 +2017,19 @@ function resolveScriptedObjectRuntimeTargetFromRequest(dataDir, message = {}) {
     return requestedBuildingId && requestedFurnitureIndex !== undefined && requestedFurnitureIndex !== null;
   });
   return match || objectUseRequestTargetFromPoint(message);
+}
+
+function refreshScriptedObjectRuntimeTarget(dataDir, target = null) {
+  if (!target || typeof target !== 'object' || !target.objectKey) return target;
+  const refreshed = resolveScriptedObjectRuntimeTargetFromRequest(dataDir, { target });
+  if (!refreshed?.objectKey || refreshed.objectKey !== target.objectKey) return target;
+  return {
+    ...target,
+    ...refreshed,
+    runtimeStartedAt: target.runtimeStartedAt || refreshed.runtimeStartedAt || '',
+    runtimeActiveAt: target.runtimeActiveAt || refreshed.runtimeActiveAt || '',
+    runtimeSource: target.runtimeSource || refreshed.runtimeSource || 'idle',
+  };
 }
 
 function serverLiveActionShouldComplete(action, nowMs) {
@@ -2244,6 +2678,243 @@ function directionFromDelta(dx, dz, fallback = 0) {
   return dz >= 0 ? 2 : 3;
 }
 
+function buildServerRoadGraph(streets = []) {
+  const nodes = new Map();
+  const keyFor = (x, z) => `${x},${z}`;
+  const getNode = (x, z) => {
+    const key = keyFor(x, z);
+    if (!nodes.has(key)) nodes.set(key, { x, z, edges: [] });
+    return nodes.get(key);
+  };
+  const addEdge = (x1, z1, x2, z2) => {
+    const keyA = keyFor(x1, z1);
+    const keyB = keyFor(x2, z2);
+    if (keyA === keyB) return;
+    const a = getNode(x1, z1);
+    const b = getNode(x2, z2);
+    const dist = Math.abs(x2 - x1) + Math.abs(z2 - z1);
+    if (!a.edges.some(edge => edge.to === keyB)) a.edges.push({ to: keyB, dist });
+    if (!b.edges.some(edge => edge.to === keyA)) b.edges.push({ to: keyA, dist });
+  };
+
+  const segments = streets.map(normalizeStreetSegment).filter(Boolean);
+  for (const segment of segments) {
+    if (segment.type) getNode(segment.x1, segment.z1);
+  }
+  for (const segment of segments) {
+    if (!segment.type) addEdge(segment.x1, segment.z1, segment.x2, segment.z2);
+  }
+  const gap = SERVER_STREET_INTERSECTION_ROAD_RADIUS + 1;
+  for (const intersection of segments.filter(segment => segment.type)) {
+    for (const segment of segments.filter(entry => !entry.type)) {
+      for (const [x, z] of [[segment.x1, segment.z1], [segment.x2, segment.z2]]) {
+        const distance = Math.abs(x - intersection.x1) + Math.abs(z - intersection.z1);
+        if (distance > 0 && distance <= gap) addEdge(intersection.x1, intersection.z1, x, z);
+      }
+    }
+  }
+  return { nodes };
+}
+
+function pathfindServerRoadGraph(graph, sx, sz, gx, gz) {
+  if (!graph?.nodes?.size) return null;
+  const startKey = `${sx},${sz}`;
+  const goalKey = `${gx},${gz}`;
+  if (!graph.nodes.has(startKey) || !graph.nodes.has(goalKey)) return null;
+  if (startKey === goalKey) return [{ x: gx, z: gz }];
+  const open = new Map([[startKey, { f: Math.abs(sx - gx) + Math.abs(sz - gz), g: 0 }]]);
+  const closed = new Set();
+  const cameFrom = new Map();
+  const h = (key) => {
+    const node = graph.nodes.get(key);
+    return Math.abs((node?.x || 0) - gx) + Math.abs((node?.z || 0) - gz);
+  };
+  while (open.size > 0) {
+    let currentKey = null;
+    let lowest = Infinity;
+    for (const [key, entry] of open) {
+      if (entry.f < lowest) {
+        currentKey = key;
+        lowest = entry.f;
+      }
+    }
+    if (currentKey === goalKey) {
+      const path = [];
+      let key = goalKey;
+      while (key) {
+        const node = graph.nodes.get(key);
+        path.unshift({ x: node.x, z: node.z });
+        key = cameFrom.get(key) || null;
+      }
+      return path;
+    }
+    const current = open.get(currentKey);
+    open.delete(currentKey);
+    closed.add(currentKey);
+    const node = graph.nodes.get(currentKey);
+    for (const edge of node?.edges || []) {
+      if (closed.has(edge.to)) continue;
+      const g = current.g + edge.dist;
+      const existing = open.get(edge.to);
+      if (!existing || g < existing.g) {
+        cameFrom.set(edge.to, currentKey);
+        open.set(edge.to, { g, f: g + h(edge.to) });
+      }
+    }
+  }
+  return null;
+}
+
+function nearestServerRoadNode(graph, tileX, tileZ, dir = null) {
+  let best = null;
+  let bestScore = Infinity;
+  const dirVec = dir === 0 ? [1, 0] : dir === 1 ? [-1, 0] : dir === 2 ? [0, 1] : dir === 3 ? [0, -1] : null;
+  for (const node of graph?.nodes?.values?.() || []) {
+    const dx = node.x - tileX;
+    const dz = node.z - tileZ;
+    const aheadPenalty = dirVec && (dx * dirVec[0] + dz * dirVec[1]) < -0.5 ? 1000 : 0;
+    const score = Math.abs(dx) + Math.abs(dz) + aheadPenalty;
+    if (score < bestScore) {
+      best = node;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function cleanServerVehiclePath(tilePath = [], startTile = null) {
+  const source = Array.isArray(tilePath) ? tilePath.filter(Boolean) : [];
+  if (startTile) source.unshift(startTile);
+  if (source.length < 2) return [];
+  const simplified = [source[0]];
+  let previousHorizontal = null;
+  for (let i = 1; i < source.length; i++) {
+    const prev = simplified[simplified.length - 1];
+    const cur = source[i];
+    const dx = cur.x - prev.x;
+    const dz = cur.z - prev.z;
+    if (Math.abs(dx) < 0.5 && Math.abs(dz) < 0.5) continue;
+    const horizontal = Math.abs(dx) >= Math.abs(dz);
+    if (previousHorizontal === null) {
+      previousHorizontal = horizontal;
+    } else if (horizontal !== previousHorizontal && i - 1 > 0) {
+      const turn = source[i - 1];
+      const last = simplified[simplified.length - 1];
+      if (Math.abs(turn.x - last.x) > 0.5 || Math.abs(turn.z - last.z) > 0.5) simplified.push(turn);
+      previousHorizontal = horizontal;
+    }
+  }
+  const last = source[source.length - 1];
+  const previous = simplified[simplified.length - 1];
+  if (Math.abs(last.x - previous.x) > 0.5 || Math.abs(last.z - previous.z) > 0.5) simplified.push(last);
+  if (simplified.length < 2) return [];
+  const aligned = [{ x: simplified[0].x, z: simplified[0].z }];
+  for (let i = 1; i < simplified.length; i++) {
+    const prev = aligned[aligned.length - 1];
+    const cur = simplified[i];
+    if (Math.abs(cur.x - prev.x) >= Math.abs(cur.z - prev.z)) aligned.push({ x: cur.x, z: prev.z });
+    else aligned.push({ x: prev.x, z: cur.z });
+  }
+  return aligned
+    .filter((point, index, arr) => index === 0 || Math.abs(point.x - arr[index - 1].x) + Math.abs(point.z - arr[index - 1].z) >= 1)
+    .map(point => ({ x: point.x, z: point.z }));
+}
+
+function buildServerWorldTopology(dataDir) {
+  const streets = readStreetSegments(dataDir).map(normalizeStreetSegment).filter(Boolean);
+  const trafficLights = streets
+    .filter(segment => segment.type === 'x-int' || segment.type === 't-int')
+    .map(segment => ({
+      key: `${segment.x1},${segment.z1}`,
+      ix: segment.x1,
+      iz: segment.z1,
+      type: segment.type,
+      openEdges: segment.openEdges || { n: true, s: true, e: true, w: true },
+    }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+  const graph = buildServerRoadGraph(streets);
+  const roadSegments = streets.filter(segment => !segment.type);
+  const spawnCandidates = [];
+  const spacing = 8;
+  for (const segment of roadSegments) {
+    const dx = segment.x2 - segment.x1;
+    const dz = segment.z2 - segment.z1;
+    const length = Math.hypot(dx, dz);
+    const count = Math.max(2, Math.floor(length / spacing));
+    const horizontal = Math.abs(dx) >= Math.abs(dz);
+    for (let i = 0; i < count; i++) {
+      const t = (i + 0.5) / count;
+      const x = segment.x1 + dx * t;
+      const z = segment.z1 + dz * t;
+      let dir = horizontal ? (dx >= 0 ? 0 : 1) : (dz >= 0 ? 2 : 3);
+      if (i % 2 === 1) dir = horizontal ? (dir === 0 ? 1 : 0) : (dir === 2 ? 3 : 2);
+      spawnCandidates.push({ x, z, dir });
+    }
+  }
+  const totalRoadLength = roadSegments.reduce((sum, segment) => sum + Math.hypot(segment.x2 - segment.x1, segment.z2 - segment.z1), 0);
+  const vehicleCount = Math.min(Math.max(0, Math.floor(totalRoadLength / 15)), SERVER_WORLD_MAX_TRAFFIC_VEHICLES, spawnCandidates.length);
+  const trafficVehicles = [];
+  for (const candidate of spawnCandidates) {
+    if (trafficVehicles.length >= vehicleCount) break;
+    const tooClose = trafficVehicles.some(vehicle => Math.hypot(vehicle.x - candidate.x, vehicle.z - candidate.z) < 8);
+    if (tooClose) continue;
+    const startNode = nearestServerRoadNode(graph, candidate.x, candidate.z, candidate.dir);
+    const destinations = Array.from(graph.nodes.values())
+      .filter(node => node !== startNode)
+      .sort((a, b) => {
+        const da = Math.abs(a.x - candidate.x) + Math.abs(a.z - candidate.z);
+        const db = Math.abs(b.x - candidate.x) + Math.abs(b.z - candidate.z);
+        return db - da;
+      });
+    const destination = destinations[trafficVehicles.length % Math.max(1, destinations.length)] || null;
+    const tilePath = startNode && destination
+      ? pathfindServerRoadGraph(graph, startNode.x, startNode.z, destination.x, destination.z)
+      : null;
+    const cleanPath = cleanServerVehiclePath(tilePath || [], { x: candidate.x, z: candidate.z });
+    if (cleanPath.length < 2) continue;
+    const type = SERVER_VEHICLE_TYPES[trafficVehicles.length % SERVER_VEHICLE_TYPES.length] || 'car';
+    const path = cleanPath.map(point => ({ x: point.x, z: point.z }));
+    const firstMove = path[1] || path[0];
+    const dir = directionFromDelta(firstMove.x - path[0].x, firstMove.z - path[0].z, candidate.dir);
+    trafficVehicles.push({
+      vehicleId: `traffic-vehicle:${trafficVehicles.length}`,
+      vehicleType: type,
+      color: SERVER_VEHICLE_COLORS[trafficVehicles.length % SERVER_VEHICLE_COLORS.length],
+      x: path[0].x,
+      z: path[0].z,
+      dir,
+      rotationY: dirToRotationY(dir),
+      speed: SERVER_WORLD_TRAFFIC_SPEED,
+      speedMult: SERVER_VEHICLE_SPEED_MULT[type] || 1,
+      path,
+      pathIdx: 1,
+      state: 'moving',
+    });
+  }
+  let topologyHash = deterministicTopologyHash(trafficLights);
+  if (!topologyHash && streets.length > 0) {
+    const normalized = streets
+      .map(segment => `${segment.type || 'road'}:${segment.x1},${segment.z1}:${segment.x2},${segment.z2}`)
+      .sort()
+      .join('|');
+    let hash = 2166136261;
+    for (const char of normalized) {
+      hash ^= char.charCodeAt(0);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    topologyHash = `traffic:${streets.length}:${hash.toString(36)}`;
+  }
+  return {
+    owner: SERVER_WORLD_TOPOLOGY_OWNER,
+    topologyHash,
+    trafficCycleMs: WORLD_RUNTIME_TRAFFIC_CYCLE_MS,
+    trafficYellowMs: WORLD_RUNTIME_TRAFFIC_YELLOW_MS,
+    trafficAllRedMs: WORLD_RUNTIME_TRAFFIC_ALL_RED_MS,
+    trafficLights,
+    trafficVehicles,
+  };
+}
+
 function positiveModulo(value, divisor) {
   const d = Math.max(1, Number(divisor || 1));
   return ((Number(value || 0) % d) + d) % d;
@@ -2431,9 +3102,29 @@ export class AgentRuntimeRoom extends Room {
       apiToWorldScale: 1 / LIVE_ACTION_API_TILE,
       getInteriorBuildingAt: (x, y) => findInteriorBuildingAtApi(this.dataDir, x, y),
     });
+    configureDynamicExteriorRouting({
+      apiToWorldScale: 1 / LIVE_ACTION_API_TILE,
+      terrain: SERVER_TERRAIN,
+      getWorldTile: (wx, wz) => getServerWorldTile(this.dataDir, wx, wz),
+      findNearestSidewalk: (wx, wz, radius) => findNearestServerSidewalk(this.dataDir, wx, wz, radius),
+      pathfindSidewalk: (sx, sz, gx, gz) => pathfindServerSidewalk(this.dataDir, sx, sz, gx, gz),
+      isCrosswalk: (wx, wz) => isServerCrosswalk(this.dataDir, wx, wz),
+      getInteriorBuildingAt: (x, y) => findInteriorBuildingAtApi(this.dataDir, x, y),
+      getParkAt: (x, y) => findParkAtApi(this.dataDir, x, y),
+      getBuildingDoorSidewalkPos: (building) => buildingOutsideDoorPointApi(building),
+      getBuildingDoorPosAPI: (building) => buildingOutsideDoorPointApi(building),
+      getBuildingInteriorEntryPosAPI: (building) => buildingInteriorEntryPointApi(building),
+      getBuildingDoorwayPosAPI: (building) => buildingDoorwayPointApi(building),
+      getBuildingDoorwayReachApi: (building) => buildingDoorwayReachApi(building),
+      getVehicles: () => Array.from(this.state?.worldRuntime?.trafficVehicles?.values?.() || []).map(trafficVehicleToPlain),
+      getSmartWaypoints: (ax, ay, tx, ty) => getServerSmartWaypoints(this.dataDir, ax, ay, tx, ty),
+      probeObstacleAtWorld: () => null,
+      getAgentColliderHandle: () => null,
+    });
     const doc = readRuntimeDocument(this.dataDir);
     this.events = Array.isArray(doc.events) ? doc.events.slice(-MAX_RUNTIME_EVENTS) : [];
     this.setState(stateFromDocument(doc));
+    this.ensureServerWorldTopology(Date.now(), { force: true });
 
     this.onMessage('runtime:snapshot', (client, message) => this.handleSnapshot(client, message));
     this.onMessage('runtime:worldObject', (client, message) => this.handleWorldObject(client, message));
@@ -2458,6 +3149,22 @@ export class AgentRuntimeRoom extends Room {
 
   runtimeDocument() {
     return stateToPlain(this.state, this.events);
+  }
+
+  ensureServerWorldTopology(nowMs = Date.now(), { force = false } = {}) {
+    const topology = buildServerWorldTopology(this.dataDir);
+    if (!topology.topologyHash && !topology.trafficLights.length && !topology.trafficVehicles.length) return null;
+    const runtime = this.state.worldRuntime || new WorldRuntimeState();
+    if (!this.state.worldRuntime) this.state.worldRuntime = runtime;
+    const alreadyServerOwned = runtime.topologyOwner === SERVER_WORLD_TOPOLOGY_OWNER;
+    const sameTopology = runtime.topologyHash === topology.topologyHash;
+    const sameLightCount = Number(runtime.trafficLights?.size || 0) === topology.trafficLights.length;
+    const hasExpectedVehicles = topology.trafficVehicles.length === 0 || Number(runtime.trafficVehicles?.size || 0) > 0;
+    if (!force && alreadyServerOwned && sameTopology && sameLightCount && hasExpectedVehicles) return null;
+    return this.upsertWorldTopology({
+      ...topology,
+      tickMs: runtime.tickMs || DEFAULT_WORLD_RUNTIME_TICK_MS,
+    }, { sessionId: SERVER_WORLD_TOPOLOGY_OWNER }, 'server-world-topology-seeded');
   }
 
   handleSnapshot(client, message = {}) {
@@ -2657,6 +3364,7 @@ export class AgentRuntimeRoom extends Room {
       };
       if (Object.hasOwn(message, 'visualState')) releaseSnapshot.visualState = message.visualState;
       clearDynamicInteriorRoutingForAgent(agentId);
+      clearDynamicExteriorRoutingForAgent(agentId);
       const agent = this.upsertSnapshot(releaseSnapshot, 'route-released', {
         reason: safeText(message.reason, ''),
       });
@@ -2670,6 +3378,7 @@ export class AgentRuntimeRoom extends Room {
       if (!hasExpiredLease(existing, nowMs)) continue;
       const before = snapshotToPlain(existing);
       clearDynamicInteriorRoutingForAgent(agentId);
+      clearDynamicExteriorRoutingForAgent(agentId);
       this.upsertSnapshot({
         agentId,
         mode: 'scripted',
@@ -2970,6 +3679,8 @@ export class AgentRuntimeRoom extends Room {
             action = transitioned.action;
             changedActions = true;
           }
+          clearDynamicInteriorRoutingForAgent(agentId);
+          clearDynamicExteriorRoutingForAgent(agentId);
           this.upsertSnapshot({
             agentId,
             mode: 'scripted',
@@ -3028,6 +3739,7 @@ export class AgentRuntimeRoom extends Room {
       if (!target) {
         if (ownedByStatusRuntime) {
           clearDynamicInteriorRoutingForAgent(agentId);
+          clearDynamicExteriorRoutingForAgent(agentId);
           this.upsertSnapshot({
             agentId,
             mode: 'scripted',
@@ -3103,6 +3815,7 @@ export class AgentRuntimeRoom extends Room {
 
   releaseServerScriptedObjectRoute(agentId, current, target, nowMs, now, reason = 'completed') {
     clearDynamicInteriorRoutingForAgent(agentId);
+    clearDynamicExteriorRoutingForAgent(agentId);
     const objectKey = safeText(target?.objectKey, '');
     const x = Number.isFinite(Number(target?.x)) ? Number(target.x) : Number(current?.x || 0);
     const y = Number.isFinite(Number(target?.y)) ? Number(target.y) : Number(current?.y || 0);
@@ -3167,7 +3880,8 @@ export class AgentRuntimeRoom extends Room {
       const current = snapshotToPlain(existing);
       const ownedByScriptedObjectRuntime = current.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || current.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER;
       if (!ownedByScriptedObjectRuntime) continue;
-      const target = current.target && typeof current.target === 'object' ? current.target : null;
+      let target = current.target && typeof current.target === 'object' ? current.target : null;
+      target = refreshScriptedObjectRuntimeTarget(this.dataDir, target);
       const source = safeText(target?.runtimeSource, 'idle') || 'idle';
       if (!target?.objectKey || (source === 'idle' && !idleAgentIds.has(agentId))) {
         this.releaseServerScriptedObjectRoute(agentId, current, target || {}, nowMs, now, target?.objectKey ? 'presence-not-idle' : 'missing-target');
@@ -3349,10 +4063,19 @@ export class AgentRuntimeRoom extends Room {
     const nextTopologyHash = safeText(raw.topologyHash, '') || deterministicTopologyHash(trafficLights);
     const topologyOwnerUpdatedAtMs = Date.parse(runtime.topologyUpdatedAt || runtime.updatedAt || '');
     const topologyOwnerFresh = Number.isFinite(topologyOwnerUpdatedAtMs) && Date.now() - topologyOwnerUpdatedAtMs < WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS;
+    if (runtime.topologyOwner === SERVER_WORLD_TOPOLOGY_OWNER && owner !== SERVER_WORLD_TOPOLOGY_OWNER) {
+      const event = this.recordEvent('world-topology-skipped-server-authoritative', 'worldRuntime', worldRuntimeToPlain(runtime), {
+        topologyHash: runtime.topologyHash,
+        topologyOwner: runtime.topologyOwner,
+        skippedOwner: owner,
+      });
+      return { worldRuntime: runtime, event };
+    }
     if (runtime.topologyOwner &&
       runtime.topologyOwner !== owner &&
       runtime.topologyHash === nextTopologyHash &&
-      topologyOwnerFresh) {
+      topologyOwnerFresh &&
+      owner !== SERVER_WORLD_TOPOLOGY_OWNER) {
       const event = this.recordEvent('world-topology-skipped-owner-fresh', 'worldRuntime', worldRuntimeToPlain(runtime), {
         topologyHash: runtime.topologyHash,
         topologyOwner: runtime.topologyOwner,
@@ -3412,6 +4135,7 @@ export class AgentRuntimeRoom extends Room {
   }
 
   tickWorldRuntime(nowMs = Date.now()) {
+    this.ensureServerWorldTopology(nowMs);
     const runtime = this.state.worldRuntime;
     if (!runtime) return null;
     const tickMs = clampInteger(runtime.tickMs, DEFAULT_WORLD_RUNTIME_TICK_MS, 100, 5000);

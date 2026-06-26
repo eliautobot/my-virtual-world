@@ -11,6 +11,7 @@ import {
   AGENT_RUNTIME_ROOM_NAME,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+  SERVER_WORLD_TOPOLOGY_OWNER,
 } from '../src/realtime/agent-runtime-room.mjs';
 
 const root = process.cwd();
@@ -420,6 +421,13 @@ async function run() {
       agentProfiles: {
         adam: { agentLiveModeEnabled: true },
       },
+      streets: [
+        { x1: -20, z1: 24, x2: 30, z2: 24 },
+        { x1: 30, z1: 24, x2: 80, z2: 24 },
+        { x1: 30, z1: -30, x2: 30, z2: 24 },
+        { x1: 30, z1: 24, x2: 30, z2: 80 },
+        { x1: 30, z1: 24, type: 'x-int', openEdges: { n: true, s: true, e: true, w: true } },
+      ],
     }, null, 2)}\n`);
     writeFileSync(join(dataDir, 'presence-snapshot.json'), `${JSON.stringify({
       adam: { state: 'idle', agentLiveModeEnabled: true },
@@ -452,6 +460,25 @@ async function run() {
     }, null, 2)}\n`);
 
     const scriptedRoom = await connectRoom(port);
+    const serverRuntime = await waitForWorldRuntime(scriptedRoom, (runtime) =>
+      runtime.topologyOwner === SERVER_WORLD_TOPOLOGY_OWNER && runtime.trafficLights?.size >= 1
+    );
+    assert.equal(serverRuntime.topologyOwner, SERVER_WORLD_TOPOLOGY_OWNER);
+    assert.equal(serverRuntime.trafficLights?.size, 1);
+    assert(serverRuntime.trafficVehicles?.size > 0);
+    scriptedRoom.send('runtime:worldTopology', {
+      requestId: 'browser-topology-after-server-owner',
+      owner: 'main3d-world-topology:browser-smoke',
+      topologyHash: 'traffic:browser-should-not-own',
+      trafficLights: [
+        { key: 'traffic:99,99', ix: 99, iz: 99, type: 'x-int', openEdges: { n: true, s: true, e: true, w: true } },
+      ],
+      trafficVehicles: [],
+    });
+    const browserTopologyAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'browser-topology-after-server-owner');
+    assert.equal(browserTopologyAck.worldRuntime.topologyOwner, SERVER_WORLD_TOPOLOGY_OWNER);
+    assert.equal(browserTopologyAck.event.type, 'world-topology-skipped-server-authoritative');
+
     const scriptedAgent = await waitForAgent(scriptedRoom, 'adam', (agent) =>
       agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER ||
       agent.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER
@@ -459,7 +486,11 @@ async function run() {
     assert.equal(scriptedAgent.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(scriptedAgent.leaseOwner, SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER);
     assert(scriptedAgent.visualStateJson.includes('runtimeRoute'));
-    assert(scriptedAgent.visualStateJson.includes('dynamic-interior-routing.js') || scriptedAgent.visualStateJson.includes('server-door-handoff'));
+    assert(
+      scriptedAgent.visualStateJson.includes('dynamic-interior-routing.js') ||
+      scriptedAgent.visualStateJson.includes('dynamic-exterior-routing.js') ||
+      scriptedAgent.visualStateJson.includes('server-door-transition')
+    );
     const scriptedObjectKey = 'office:furniture:0:armchair';
     const scriptedObject = await waitForObject(scriptedRoom, scriptedObjectKey, (object) => object.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(scriptedObject.agentId, 'adam');
