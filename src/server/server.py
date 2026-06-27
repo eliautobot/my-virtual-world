@@ -211,11 +211,14 @@ def _load_vw_config():
     cfg["codex"]["registerNativeAgents"] = _env_bool("VW_CODEX_REGISTER_NATIVE_AGENTS", cfg["codex"].get("registerNativeAgents", True))
     cfg["browser"]["cdpUrl"] = _env_or("VW_BROWSER_CDP_URL", cfg["browser"].get("cdpUrl") or "")
     cfg["browser"]["viewerUrl"] = _env_or("VW_BROWSER_VIEWER_URL", cfg["browser"].get("viewerUrl") or "")
-    cfg["realtime"]["enabled"] = _env_bool("VW_REALTIME_ENABLED", cfg["realtime"].get("enabled", False))
-    cfg["realtime"]["url"] = _env_or(
+    realtime_url = _env_or(
         "VW_REALTIME_BROWSER_URL",
         _env_or("VW_REALTIME_URL", cfg["realtime"].get("url") or ""),
     )
+    realtime_url_from_env = bool(os.environ.get("VW_REALTIME_BROWSER_URL") or os.environ.get("VW_REALTIME_URL"))
+    realtime_enabled_default = True if realtime_url and realtime_url_from_env else cfg["realtime"].get("enabled", False)
+    cfg["realtime"]["enabled"] = _env_bool("VW_REALTIME_ENABLED", realtime_enabled_default)
+    cfg["realtime"]["url"] = realtime_url
     cfg["realtime"]["room"] = _env_or("VW_REALTIME_ROOM", cfg["realtime"].get("room") or "agent_runtime")
     cfg["sms"]["ownerAgentId"] = _env_or("VW_SMS_OWNER_AGENT_ID", cfg["sms"].get("ownerAgentId") or "")
     cfg["sms"]["twilioAccountSid"] = _env_or("VW_TWILIO_ACCOUNT_SID", cfg["sms"].get("twilioAccountSid") or "")
