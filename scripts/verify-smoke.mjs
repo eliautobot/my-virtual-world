@@ -283,7 +283,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260626-runtime-load-fix-r1',
+  'js/main3d.js?v=20260627-server-runtime-parity-r3',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -398,6 +398,7 @@ for (const token of [
   'function isRuntimeExecutorPageVisible()',
   "'runtime-hidden-page-observer'",
   "'server-authoritative-runtime-observer'",
+  'isServerAuthoritativeAgentRuntimeObserver() ||',
   'SERVER_AUTHORITATIVE_LIVE_ACTION_RUNTIME',
   "'runtime-route-foreign-owner'",
   'function abandonAgentRuntimeLocalRoute(agent',
@@ -411,6 +412,7 @@ for (const token of [
 
 for (const token of [
   'WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000',
+  'DEFAULT_WORLD_RUNTIME_TICK_MS = 500',
   'WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000',
   'RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000',
   'this.patchRate = 0',
@@ -420,9 +422,22 @@ for (const token of [
   'world-topology-skipped-owner-fresh',
   'topologyOwnerFresh',
   "LIVE_ACTION_RUNTIME_OWNER = 'server-live-action-runtime'",
+  "LIVE_STATUS_RUNTIME_OWNER = 'server-live-status-runtime'",
+  'SERVER_WORLD_OBJECT_RUNTIME_OWNERS = new Set([SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER, LIVE_STATUS_RUNTIME_OWNER])',
   "SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runtime'",
-  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 1',
-  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 1',
+  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3',
+  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 6',
+  'SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS = Object.freeze([8000, 20000])',
+  'SERVER_SCRIPTED_IDLE_RETRY_DELAY_MS = Object.freeze([3000, 8000])',
+  'SERVER_SCRIPTED_IDLE_OBJECT_COOLDOWN_MS = 240000',
+  'SERVER_SCRIPTED_IDLE_CATEGORY_WEIGHTS',
+  'normalizeRuntimeAngleRadians',
+  'authoredRuntimeFaceAngle',
+  'serverIdleCategoryOrder',
+  'makeServerRuntimeWanderTarget',
+  'SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG',
+  'listLiveStatusMeetingTargets',
+  'service-queue-wait',
   "SERVER_WORLD_TOPOLOGY_OWNER = 'server-world-topology-runtime'",
   'runtime:objectUseRequest',
   'tickScriptedObjectRuntime',
@@ -442,6 +457,8 @@ for (const token of [
 ]) {
   assert(agentRuntimeRoomJs.includes(token), `agent-runtime-room.mjs missing topology owner guard token: ${token}`);
 }
+assert(!agentRuntimeRoomJs.includes('Math.atan2(dx, dy) * 180 / Math.PI'), 'server runtime movement heading must stay in radians');
+assert(!agentRuntimeRoomJs.includes('Number(target.faceAngle) * 180 / Math.PI'), 'server runtime target faceAngle must stay in radians');
 for (const token of [
   'matchMaker.createRoom',
   'runtimeRoomId',
@@ -686,7 +703,7 @@ for (const token of [
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
   '__VWGetAgentRuntimeDebug',
-  'agent-runtime-client.mjs?v=20260626-runtime-load-fix-r1',
+  'agent-runtime-client.mjs?v=20260627-server-runtime-parity-r3',
   'runtime:worldRuntime',
   'runtime:worldTopology',
   'writeWorldTopology',

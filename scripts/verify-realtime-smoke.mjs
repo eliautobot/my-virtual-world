@@ -9,8 +9,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@colyseus/sdk';
 import {
   AGENT_RUNTIME_ROOM_NAME,
+  LIVE_STATUS_RUNTIME_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+  SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS,
   SERVER_WORLD_TOPOLOGY_OWNER,
 } from '../src/realtime/agent-runtime-room.mjs';
 
@@ -102,7 +104,7 @@ function waitForRoomMessage(room, type, predicate = () => true) {
 }
 
 async function waitForAgent(room, agentId, predicate = () => true) {
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + Math.max(5000, Number(SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS?.[1] || 0) + 8000);
   while (Date.now() < deadline) {
     const runtimeAgent = room.__runtimeDoc?.agents?.[agentId];
     const agent = runtimeAgent
@@ -128,6 +130,16 @@ function testWorldRuntimeFromDocument(doc) {
   };
 }
 
+function radiansClose(actual, expected, epsilon = 0.0001) {
+  const fullTurn = Math.PI * 2;
+  const delta = ((((Number(actual) - Number(expected) + Math.PI) % fullTurn) + fullTurn) % fullTurn) - Math.PI;
+  return Math.abs(delta) < epsilon;
+}
+
+function assertRadiansClose(actual, expected, message) {
+  assert(radiansClose(actual, expected), `${message}: expected ${expected}, got ${actual}`);
+}
+
 async function waitForWorldRuntime(room, predicate = () => true) {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
@@ -139,7 +151,7 @@ async function waitForWorldRuntime(room, predicate = () => true) {
 }
 
 async function waitForObject(room, objectKey, predicate = () => true) {
-  const deadline = Date.now() + 6000;
+  const deadline = Date.now() + Math.max(6000, Number(SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS?.[1] || 0) + 8000);
   while (Date.now() < deadline) {
     const runtimeObject = room.__runtimeDoc?.objects?.[objectKey];
     const object = runtimeObject
@@ -353,7 +365,8 @@ async function run() {
     const manualOverrideAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'manual-agent-override');
     assert.equal(manualOverrideAck.snapshot.mode, 'manual');
     assert.equal(manualOverrideAck.snapshot.owner, 'user-directed:smoke-client-b');
-    assert.equal(manualOverrideAck.snapshot.leaseOwner, '');
+    assert.equal(manualOverrideAck.snapshot.leaseOwner, 'user-directed');
+    assert(Date.parse(manualOverrideAck.snapshot.leaseExpiresAt) > Date.now());
     assert.equal(manualOverrideAck.snapshot.routeId, '');
     assert.equal(manualOverrideAck.snapshot.x, 33);
 
@@ -477,6 +490,13 @@ async function run() {
     }, null, 2)}\n`);
     writeFileSync(join(dataDir, 'presence-snapshot.json'), `${JSON.stringify({
       adam: { state: 'idle', agentLiveModeEnabled: true },
+      coder: { state: 'working' },
+      morgan: { state: 'meeting' },
+      _meetings: [{
+        id: 'smoke-meeting',
+        topic: 'Runtime parity',
+        participants: ['morgan'],
+      }],
     }, null, 2)}\n`);
     writeFileSync(join(dataDir, 'buildings', 'office.json'), `${JSON.stringify({
       id: 'office',
@@ -488,20 +508,50 @@ async function run() {
       heightTiles: 20,
       interior: {
         floors: [{ level: 1, name: 'Floor 1' }],
-        furniture: [{
-          type: 'armchair',
-          x: 5,
-          z: 5,
-          floor: 1,
-          room: 'lounge',
-          actionLocations: [{
-            id: 'seat',
-            roles: ['seat', 'rest'],
-            actionId: 'life.restAtArmchair',
-            actionTarget: { x: 5.25, z: 5.25, floor: 1 },
-            facing: 'south',
-          }],
-        }],
+        furniture: [
+          {
+            type: 'armchair',
+            x: 5,
+            z: 5,
+            floor: 1,
+            room: 'lounge',
+            actionLocations: [{
+              id: 'seat',
+              roles: ['seat', 'rest'],
+              actionId: 'life.restAtArmchair',
+              actionTarget: { x: 5.25, z: 5.25, floor: 1, faceAngle: Math.PI / 2 },
+              facing: 'south',
+            }],
+          },
+          {
+            type: 'desk',
+            x: 8,
+            z: 5,
+            floor: 1,
+            room: 'office',
+            actionLocations: [{
+              id: 'work-front',
+              roles: ['work', 'use'],
+              actionId: 'work.desk',
+              actionTarget: { x: 8, z: 5.8, floor: 1, faceAngle: Math.PI },
+              facing: 'north',
+            }],
+          },
+          {
+            type: 'meetingTable',
+            x: 11,
+            z: 5,
+            floor: 1,
+            room: 'conference',
+            actionLocations: [{
+              id: 'seat-s3',
+              roles: ['seat', 'meeting'],
+              actionId: 'planning.meeting',
+              actionTarget: { x: 11, z: 6.45, floor: 1, faceAngle: -Math.PI / 2 },
+              facing: 'north',
+            }],
+          },
+        ],
       },
     }, null, 2)}\n`);
 
@@ -537,10 +587,39 @@ async function run() {
       scriptedAgent.visualStateJson.includes('dynamic-exterior-routing.js') ||
       scriptedAgent.visualStateJson.includes('server-door-transition')
     );
-    const scriptedObjectKey = 'office:furniture:0:armchair';
+    assert(Math.abs(Number(scriptedAgent.heading || 0)) <= Math.PI, 'server scripted runtime heading should be radians');
+    assert(scriptedAgent.visualStateJson.includes('"activityActive":true'), 'server scripted routing should hydrate activity while moving');
+    assert(scriptedAgent.visualStateJson.includes('"defaultScriptedIdlePulse":true'), 'server scripted routing should identify VO-style idle pulse activity');
+    const scriptedTarget = JSON.parse(scriptedAgent.targetJson || '{}');
+    assert(scriptedTarget.objectKey, 'server scripted runtime should carry target object key');
+    assert(Math.abs(Number(scriptedTarget.faceAngle || 0)) <= Math.PI, 'server scripted target faceAngle should be radians');
+    if (scriptedTarget.objectKey === 'office:furniture:0:armchair') {
+      assertRadiansClose(scriptedTarget.faceAngle, Math.PI / 2, 'authored armchair faceAngle should be preserved');
+    }
+    const scriptedObjectKey = scriptedTarget.objectKey;
     const scriptedObject = await waitForObject(scriptedRoom, scriptedObjectKey, (object) => object.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(scriptedObject.agentId, 'adam');
     assert(['routing', 'active'].includes(scriptedObject.state));
+
+    const workAgent = await waitForAgent(scriptedRoom, 'coder', (agent) => agent.owner === LIVE_STATUS_RUNTIME_OWNER);
+    assert(['routing', 'working'].includes(workAgent.state));
+    assert(workAgent.visualStateJson.includes('live-status-work-desk'));
+    assert(Math.abs(Number(workAgent.heading || 0)) <= Math.PI, 'work runtime heading should be radians');
+    const workTarget = JSON.parse(workAgent.targetJson || '{}');
+    assertRadiansClose(workTarget.faceAngle, Math.PI, 'authored desk faceAngle should be preserved');
+    const workObject = await waitForObject(scriptedRoom, 'office:furniture:1:desk', (object) => object.owner === LIVE_STATUS_RUNTIME_OWNER);
+    assert.equal(workObject.agentId, 'coder');
+    assert(['routing', 'active'].includes(workObject.state));
+
+    const meetingAgent = await waitForAgent(scriptedRoom, 'morgan', (agent) => agent.owner === LIVE_STATUS_RUNTIME_OWNER);
+    assert(['routing', 'meeting'].includes(meetingAgent.state));
+    assert(meetingAgent.visualStateJson.includes('live-status-meeting-table'));
+    assert(Math.abs(Number(meetingAgent.heading || 0)) <= Math.PI, 'meeting runtime heading should be radians');
+    const meetingTarget = JSON.parse(meetingAgent.targetJson || '{}');
+    assertRadiansClose(meetingTarget.faceAngle, -Math.PI / 2, 'authored meeting faceAngle should be preserved');
+    const meetingObject = await waitForObject(scriptedRoom, 'office:furniture:2:meetingTable', (object) => object.owner === LIVE_STATUS_RUNTIME_OWNER);
+    assert.equal(meetingObject.agentId, 'morgan');
+    assert(['routing', 'active'].includes(meetingObject.state));
 
     scriptedRoom.send('runtime:worldObject', {
       requestId: 'server-object-browser-overwrite',
@@ -580,12 +659,15 @@ async function run() {
         x: 96,
         y: 104,
         floor: 1,
+        faceAngle: -Math.PI / 3,
       },
       agentPosition: { x: 40, y: 40, floor: 1 },
     });
     const objectUseAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'beth-backend-object-use');
     assert.equal(objectUseAck.type, 'runtime:objectUseRequest');
     assert.equal(objectUseAck.snapshot.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
+    assert(Math.abs(Number(objectUseAck.snapshot.heading || 0)) <= Math.PI, 'manual backend object route heading should be radians');
+    assertRadiansClose(objectUseAck.snapshot.target?.faceAngle, -Math.PI / 3, 'manual backend object faceAngle should remain radians');
     assert.equal(objectUseAck.object.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(objectUseAck.object.objectKey, 'manual-building:furniture:2:waterCooler');
     await waitForAgent(scriptedRoom, 'beth', (agent) => agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);

@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260626-runtime-load-fix-r1';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260627-server-runtime-parity-r3';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1110,6 +1110,7 @@ const AGENT_RUNTIME_TRAFFIC_TOPOLOGY_REQUEST_TIMEOUT_MS = 3500;
 const AGENT_RUNTIME_TRAFFIC_TOPOLOGY_OWNER_TTL_MS = 30000;
 const AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS = 650;
 const AGENT_RUNTIME_TRAFFIC_VEHICLE_SNAP_DISTANCE = API_TILE * 8;
+const SERVER_AUTHORITATIVE_AGENT_RUNTIME = true;
 let editMode = null;
 
 // ── Feature 1: Vehicles ──────────────────────────────────────────────
@@ -1396,6 +1397,14 @@ function isRuntimeExecutorPageVisible() {
   return typeof document === 'undefined' || document.visibilityState !== 'hidden';
 }
 
+function isBrowserAgentRuntimeWriterAllowed() {
+  return typeof window !== 'undefined' && window.__VWAllowBrowserAgentRuntimeWriter === true;
+}
+
+function isServerAuthoritativeAgentRuntimeObserver() {
+  return SERVER_AUTHORITATIVE_AGENT_RUNTIME && !isBrowserAgentRuntimeWriterAllowed();
+}
+
 function isAgentRuntimeUserDirectedIntent(intentOptions = {}) {
   const owner = String(intentOptions.owner || '').toLowerCase();
   const priorityName = String(intentOptions.priorityName || '').toLowerCase();
@@ -1497,6 +1506,9 @@ function getAgentRuntimeRouteBlock(agent, intentOptions = {}) {
     return { blocked: true, reason: 'runtime-hidden-page-observer', snapshot: getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null };
   }
   const snapshot = getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null;
+  if (isServerAuthoritativeAgentRuntimeObserver()) {
+    return { blocked: true, reason: 'server-authoritative-runtime-observer', snapshot };
+  }
   if (isAgentRuntimeSnapshotForeignLeaseActive(snapshot)) {
     return { blocked: true, reason: 'runtime-route-foreign-owner', snapshot };
   }
@@ -1608,6 +1620,7 @@ function shouldRequestBackendObjectUseForExplicitObjectAction(agent, metadata = 
   if (!_agentRuntimeClient?.connected || typeof _agentRuntimeClient.requestObjectUse !== 'function') return false;
   if (!getAgentRuntimeAgentId(agent)) return false;
   return metadata?.backendRuntimeObjectUse === true ||
+    isServerAuthoritativeAgentRuntimeObserver() ||
     normalizeAgentLiveModeEnabled(agent) ||
     metadata?.behaviorSourceKind === 'agent-live-mode' ||
     metadata?.behaviorMode === 'agent-live';
@@ -2087,6 +2100,7 @@ function makeAgentRuntimeWorldObjectStateForAgent(agent, state = 'idle') {
 }
 
 function publishAgentRuntimeWorldObjectStateForAgent(agent, state = 'idle', { force = false } = {}) {
+  if (isServerAuthoritativeAgentRuntimeObserver()) return null;
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || agent?._runtimeObserverOnly) return null;
   if (normalizeAgentLiveModeEnabled(agent) || agent?._runtimeBackendObjectUsePending) return null;
   const objectState = makeAgentRuntimeWorldObjectStateForAgent(agent, state);
@@ -2542,7 +2556,8 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
       }
     }
   }
-  agent._runtimeObserverOnly = (snapshot.mode === 'live' || leaseActive || remoteWriterActive) && !leaseOwnedByThisClient && !localLeaseActive;
+  agent._runtimeObserverOnly = isServerAuthoritativeAgentRuntimeObserver() ||
+    ((snapshot.mode === 'live' || leaseActive || remoteWriterActive) && !leaseOwnedByThisClient && !localLeaseActive);
   agent._runtimeRemoteWriterActive = remoteWriterActive;
 
   if (agent._runtimeObserverOnly) {
@@ -2639,6 +2654,7 @@ function getAgentRuntimeRouteOwner(target = null, intentOptions = {}) {
 
 function shouldUseAgentRuntimeRouteLease(agent, target = null, intentOptions = {}) {
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner) return false;
+  if (isServerAuthoritativeAgentRuntimeObserver()) return false;
   if (!agent || !target || intentOptions.runtimeLease === false || target.runtimeLease === false) return false;
   if (intentOptions.runtimeLease === true || target.runtimeLease === true) return true;
   const sourceKind = intentOptions.behaviorSourceKind || target.behaviorSourceKind || intentOptions.source?.behaviorSourceKind || '';
@@ -2940,6 +2956,7 @@ function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', options = {}) 
   const { force = false, visualState = null } = options;
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || !getAgentRuntimeAgentId(agent)) return false;
   const manualOverride = isAgentRuntimeManualSnapshotOverride(agent, options);
+  if (isServerAuthoritativeAgentRuntimeObserver() && !manualOverride) return false;
   if (agent?._manualPlacementPreview) return false;
   if (agent?._runtimeObserverOnly && !manualOverride) return false;
   if (agent?._runtimeRouteLease && ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease.state || '')) && !manualOverride) return false;
@@ -3003,9 +3020,10 @@ function publishAgentRuntimeMovementSnapshot(agent, state = 'idle', options = {}
     .then(ack => {
       agent._runtimeSnapshotPublish = { ...publishRecord, ackAtMs: Date.now(), version: ack?.snapshot?.version || null };
       if (ack?.snapshot) {
-        agent._runtimeSnapshot = ack.snapshot;
-        agent._runtimeVersion = ack.snapshot.version || agent._runtimeVersion || 0;
-        agent._runtimeUpdatedAt = ack.snapshot.updatedAt || agent._runtimeUpdatedAt || '';
+        applyAgentRuntimeSnapshotToAgent(agent, ack.snapshot, {
+          updateVisible: true,
+          source: options.reason || 'movement-snapshot-ack',
+        });
       }
       updateAgentRuntimeHydrationDebug({
         lastSource: options.reason || 'movement-snapshot',

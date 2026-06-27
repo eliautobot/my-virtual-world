@@ -371,6 +371,37 @@ function worldRuntimeFromRoomState(room) {
   });
 }
 
+function mergeRuntimeDelta(message = null, currentSnapshots = new Map(), currentWorldObjects = new Map(), currentWorldRuntime = null) {
+  let snapshots = currentSnapshots;
+  let worldObjects = currentWorldObjects;
+  let worldRuntime = currentWorldRuntime;
+  let changed = false;
+
+  const rawSnapshot = message?.snapshot || message?.agent || message?.event?.snapshot || null;
+  const snapshot = normalizeRuntimeSnapshot(rawSnapshot);
+  if (snapshot) {
+    snapshots = new Map(currentSnapshots);
+    snapshots.set(snapshot.agentId, snapshot);
+    changed = true;
+  }
+
+  const rawObject = message?.object || message?.worldObject || message?.event?.object || null;
+  const object = normalizeWorldObjectState(rawObject);
+  if (object) {
+    worldObjects = new Map(currentWorldObjects);
+    worldObjects.set(object.objectKey, object);
+    changed = true;
+  }
+
+  const runtime = normalizeWorldRuntimeState(message?.worldRuntime || message?.runtime || message?.event?.worldRuntime || null);
+  if (runtime) {
+    worldRuntime = runtime;
+    changed = true;
+  }
+
+  return { snapshots, worldObjects, worldRuntime, changed };
+}
+
 function waitForMessage(room, type, timeoutMs = 1500) {
   return new Promise(resolve => {
     const timer = setTimeout(() => {
@@ -457,48 +488,54 @@ export async function createAgentRuntimeClient({
     });
   };
 
+  const applyRuntimeDocument = (doc, source) => {
+    if (!doc) return false;
+    snapshots = snapshotsFromRuntimeDocument(doc);
+    worldObjects = worldObjectsFromRuntimeDocument(doc);
+    worldRuntime = worldRuntimeFromRuntimeDocument(doc);
+    notify(source);
+    return true;
+  };
+
+  const applyRoomState = source => {
+    const nextSnapshots = snapshotsFromRoomState(room);
+    const nextWorldObjects = worldObjectsFromRoomState(room);
+    const nextWorldRuntime = worldRuntimeFromRoomState(room);
+    if (nextSnapshots.size > 0 || snapshots.size === 0) snapshots = nextSnapshots;
+    if (nextWorldObjects.size > 0 || worldObjects.size === 0) worldObjects = nextWorldObjects;
+    if (nextWorldRuntime) worldRuntime = nextWorldRuntime;
+    notify(source);
+  };
+
+  const applyRuntimeDelta = (message, source) => {
+    const merged = mergeRuntimeDelta(message, snapshots, worldObjects, worldRuntime);
+    if (!merged.changed) return false;
+    snapshots = merged.snapshots;
+    worldObjects = merged.worldObjects;
+    worldRuntime = merged.worldRuntime;
+    notify(source);
+    return true;
+  };
+
   try {
     client = new Client(config.url);
     const joinPromise = client.joinOrCreate(config.room, { client: 'main3d-runtime-hydration' });
     joinPromise.catch(() => {});
     room = await withTimeout(joinPromise, DEFAULT_CONNECT_TIMEOUT_MS, 'agent runtime connect');
     unsubscribeState = room.onStateChange(() => {
-      snapshots = snapshotsFromRoomState(room);
-      worldObjects = worldObjectsFromRoomState(room);
-      worldRuntime = worldRuntimeFromRoomState(room);
-      notify('state');
+      applyRoomState('state');
     });
-    room.onMessage('runtime:event', () => {
-      snapshots = snapshotsFromRoomState(room);
-      worldObjects = worldObjectsFromRoomState(room);
-      worldRuntime = worldRuntimeFromRoomState(room);
-      notify('runtime:event');
+    room.onMessage('runtime:event', message => {
+      applyRuntimeDelta(message, 'runtime:event');
     });
-    room.onMessage('runtime:ack', () => {
-      snapshots = snapshotsFromRoomState(room);
-      worldObjects = worldObjectsFromRoomState(room);
-      worldRuntime = worldRuntimeFromRoomState(room);
-      notify('runtime:ack');
+    room.onMessage('runtime:ack', message => {
+      if (!applyRuntimeDelta(message, 'runtime:ack')) applyRoomState('runtime:ack');
     });
     room.onMessage('runtime:worldRuntime', message => {
-      snapshots = snapshotsFromRoomState(room);
-      worldObjects = worldObjectsFromRoomState(room);
-      worldRuntime = message?.worldRuntime
-        ? normalizeWorldRuntimeState(message.worldRuntime)
-        : worldRuntimeFromRoomState(room);
-      notify('runtime:worldRuntime');
+      if (!applyRuntimeDelta(message, 'runtime:worldRuntime')) applyRoomState('runtime:worldRuntime');
     });
     room.onMessage('runtime:state', message => {
-      snapshots = message?.snapshot
-        ? snapshotsFromRuntimeDocument(message.snapshot)
-        : snapshotsFromRoomState(room);
-      worldObjects = message?.snapshot
-        ? worldObjectsFromRuntimeDocument(message.snapshot)
-        : worldObjectsFromRoomState(room);
-      worldRuntime = message?.snapshot
-        ? worldRuntimeFromRuntimeDocument(message.snapshot)
-        : worldRuntimeFromRoomState(room);
-      notify('runtime:state');
+      if (!applyRuntimeDocument(message?.snapshot, 'runtime:state')) applyRoomState('runtime:state');
     });
     room.onMessage('runtime:error', message => {
       if (!pendingRequestIds.has(message?.requestId)) {
@@ -506,15 +543,7 @@ export async function createAgentRuntimeClient({
       }
     });
     const welcome = await waitForMessage(room, 'runtime:welcome');
-    snapshots = welcome?.snapshot
-      ? snapshotsFromRuntimeDocument(welcome.snapshot)
-      : snapshotsFromRoomState(room);
-    worldObjects = welcome?.snapshot
-      ? worldObjectsFromRuntimeDocument(welcome.snapshot)
-      : worldObjectsFromRoomState(room);
-    worldRuntime = welcome?.snapshot
-      ? worldRuntimeFromRuntimeDocument(welcome.snapshot)
-      : worldRuntimeFromRoomState(room);
+    if (!applyRuntimeDocument(welcome?.snapshot, 'runtime:welcome')) applyRoomState('runtime:welcome');
   } catch (error) {
     logger?.warn?.('Agent runtime connection failed', error);
     return agentRuntimeUnavailable('connection failed', config);
