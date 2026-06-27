@@ -52,7 +52,7 @@ export const USER_DIRECTED_RUNTIME_LEASE_OWNER = 'user-directed';
 export const USER_DIRECTED_RUNTIME_HOLD_MS = 60000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runtime';
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER = 'server-scripted-object';
-export const SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS = 1500;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS = 2000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC = 72;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS = 5;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS = 15000;
@@ -60,6 +60,7 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS = 8000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS = 7000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS = 12000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES = 8;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 4;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 6;
 export const SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS = Object.freeze([8000, 20000]);
@@ -104,6 +105,11 @@ const SAFE_TEXT_RE = /^[A-Za-z0-9_.:/@# -]{0,160}$/;
 const WORLD_OBJECT_KEY_RE = /^[A-Za-z0-9_.:/@#, -]{1,160}$/;
 const ACTIVE_WORLD_OBJECT_STATES = new Set(['reserved', 'routing', 'active', 'using', 'occupied', 'queued', 'cooldown']);
 const SERVER_WORLD_OBJECT_RUNTIME_OWNERS = new Set([SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER, LIVE_STATUS_RUNTIME_OWNER]);
+const SERVER_MANAGED_ROUTE_LEASE_OWNERS = new Set([
+  LIVE_ACTION_RUNTIME_LEASE_OWNER,
+  LIVE_STATUS_RUNTIME_LEASE_OWNER,
+  SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
+]);
 
 export class WorldRuntimeTrafficLightState extends Schema {
   constructor(seed = {}) {
@@ -3839,7 +3845,7 @@ function requestIdFrom(message) {
 export class AgentRuntimeRoom extends Room {
   onCreate(options = {}) {
     this.autoDispose = false;
-    this.patchRate = 0;
+    this.patchRate = DEFAULT_WORLD_RUNTIME_TICK_MS;
     this.dataDir = options.dataDir || process.env.VW_DATA_DIR || '.local-data';
     this.events = [];
     this.lastWorldRuntimePersistMs = 0;
@@ -4220,6 +4226,7 @@ export class AgentRuntimeRoom extends Room {
     let expired = 0;
     for (const [agentId, existing] of this.state.agents.entries()) {
       if (!hasExpiredLease(existing, nowMs)) continue;
+      if (SERVER_MANAGED_ROUTE_LEASE_OWNERS.has(safeText(existing.leaseOwner, ''))) continue;
       const before = snapshotToPlain(existing);
       clearDynamicInteriorRoutingForAgent(agentId);
       clearDynamicExteriorRoutingForAgent(agentId);
@@ -4876,6 +4883,7 @@ export class AgentRuntimeRoom extends Room {
       SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK,
       Math.min(18, Math.ceil(Math.max(1, idleAgentIds.size) * 0.5)),
     );
+    let activeRouteSteps = 0;
 
     for (const [agentId, existing] of this.state.agents.entries()) {
       const current = snapshotToPlain(existing);
@@ -4901,6 +4909,10 @@ export class AgentRuntimeRoom extends Room {
       }
 
       const alreadyActive = ['using', 'active', 'occupied', 'queued', 'waiting'].includes(String(current.state || '').toLowerCase());
+      if (!alreadyActive && activeRouteSteps >= SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK) {
+        continue;
+      }
+      if (!alreadyActive) activeRouteSteps++;
       const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, tickMs, {
         speedUnitsPerSec: SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC,
         arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,

@@ -620,6 +620,8 @@ async function run() {
     const meetingObject = await waitForObject(scriptedRoom, 'office:furniture:2:meetingTable', (object) => object.owner === LIVE_STATUS_RUNTIME_OWNER);
     assert.equal(meetingObject.agentId, 'morgan');
     assert(['routing', 'active'].includes(meetingObject.state));
+    const activeRuntimeHealth = await waitForHealth(port, server);
+    assert.equal(activeRuntimeHealth.ok, true, 'realtime health must respond while server-owned routes are active');
 
     scriptedRoom.send('runtime:worldObject', {
       requestId: 'server-object-browser-overwrite',

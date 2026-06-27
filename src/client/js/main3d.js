@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260627-server-runtime-parity-r3';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260627-single-runtime-instance-r2';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1405,6 +1405,47 @@ function isServerAuthoritativeAgentRuntimeObserver() {
   return SERVER_AUTHORITATIVE_AGENT_RUNTIME && !isBrowserAgentRuntimeWriterAllowed();
 }
 
+function stableAgentRuntimeUnit(agentLike = null, index = 0, salt = '') {
+  const key = `${agentLike?.agentId || agentLike?.id || agentLike?.statusKey || agentLike?.name || 'agent'}:${index}:${salt}`;
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 4294967295;
+}
+
+function stableAgentRuntimeJitter(agentLike = null, index = 0, salt = '', span = 1) {
+  return (stableAgentRuntimeUnit(agentLike, index, salt) - 0.5) * span;
+}
+
+function serverAuthoritativeRuntimeBlockReason() {
+  if (!isServerAuthoritativeAgentRuntimeObserver()) return '';
+  if (!_agentRuntimeClient) return 'server-authoritative-runtime-connecting';
+  if (_agentRuntimeClient.connected === true) return 'server-authoritative-runtime-observer';
+  const reason = String(_agentRuntimeClient.reason || 'unavailable')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'unavailable';
+  return `server-authoritative-runtime-${reason}`;
+}
+
+function clearBrowserOwnedAgentMotionForServerRuntime(agent, reason = serverAuthoritativeRuntimeBlockReason()) {
+  if (!agent) return;
+  agent._runtimeObserverOnly = true;
+  agent._serverAuthoritativeRuntimeHoldReason = reason || 'server-authoritative-runtime-observer';
+  agent._wanderTarget = null;
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  agent._idleActivity = null;
+  agent._curInteraction = null;
+  agent._curiosityTarget = null;
+  agent._socialState = null;
+  agent._stayTimer = 0;
+  agent._wanderTimer = 0;
+}
+
 function isAgentRuntimeUserDirectedIntent(intentOptions = {}) {
   const owner = String(intentOptions.owner || '').toLowerCase();
   const priorityName = String(intentOptions.priorityName || '').toLowerCase();
@@ -1500,14 +1541,15 @@ function abandonAgentRuntimeLocalRoute(agent, reason = 'runtime-route-abandoned'
 }
 
 function getAgentRuntimeRouteBlock(agent, intentOptions = {}) {
-  if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || !agent) return null;
+  if (!agent) return null;
   if (isAgentRuntimeUserDirectedIntent(intentOptions)) return null;
-  if (!isRuntimeExecutorPageVisible()) {
-    return { blocked: true, reason: 'runtime-hidden-page-observer', snapshot: getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null };
-  }
   const snapshot = getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null;
   if (isServerAuthoritativeAgentRuntimeObserver()) {
-    return { blocked: true, reason: 'server-authoritative-runtime-observer', snapshot };
+    return { blocked: true, reason: serverAuthoritativeRuntimeBlockReason(), snapshot };
+  }
+  if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner) return null;
+  if (!isRuntimeExecutorPageVisible()) {
+    return { blocked: true, reason: 'runtime-hidden-page-observer', snapshot };
   }
   if (isAgentRuntimeSnapshotForeignLeaseActive(snapshot)) {
     return { blocked: true, reason: 'runtime-route-foreign-owner', snapshot };
@@ -2617,6 +2659,27 @@ function subscribeAgentRuntimeSnapshots() {
     const hydrated = applyAgentRuntimeSnapshotsToAgents(meta.source || 'runtime:update', { updateVisible: true });
     if (hydrated > 0) updateAgentList();
   });
+}
+
+function holdAgentForServerAuthoritativeRuntimeObserver(agent, dt) {
+  if (!isServerAuthoritativeAgentRuntimeObserver() || isAgentRuntimeRouteLeaseOwned(agent)) return false;
+  const snapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
+  agent._runtimeObserverOnly = true;
+  if (snapshot) {
+    applyAgentRuntimeSnapshotToAgent(agent, snapshot, {
+      updateVisible: false,
+      source: 'server-authoritative-runtime-observer-frame',
+    });
+    const observerMoving = updateAgentRuntimeObserverMotion(agent, dt);
+    updateAgentAnimation(agent, dt, observerMoving, false);
+  } else {
+    clearBrowserOwnedAgentMotionForServerRuntime(agent);
+    updateAgentAnimation(agent, dt, false, false);
+  }
+  updateAgentAvoidanceDebug(agent);
+  updateDynamicInteriorRoutingDebug(agent);
+  updateDynamicExteriorRoutingDebug(agent);
+  return true;
 }
 
 function getAgentRuntimeAgentId(agent) {
@@ -20446,6 +20509,7 @@ function updateAgentAnimations(dt) {
     }
 
     if (holdAgentForRuntimeRouteLease(agent, dt)) return;
+    if (holdAgentForServerAuthoritativeRuntimeObserver(agent, dt)) return;
 
     if (agent._runtimeObserverOnly && agent._runtimeSnapshot && !isAgentRuntimeRouteLeaseOwned(agent)) {
       const observerMoving = updateAgentRuntimeObserverMotion(agent, dt);
@@ -30687,6 +30751,7 @@ async function loadAgents() {
     const bArr = Array.from(buildingsMap.values());
     const workBuildings = bArr.filter(b => b.type !== 'park');
     const n = list.length;
+    const serverRuntimeObserver = isServerAuthoritativeAgentRuntimeObserver();
 
     agentsList = list.map((a, i) => {
       // Get appearance from VO engine if available
@@ -30746,19 +30811,33 @@ async function loadAgents() {
         const _scale = T / API_TILE;
         const stx = Math.round(bx * _scale);
         const stz = Math.round(by * _scale);
-        const startSW = _findRandomSidewalkNear(stx, stz, 15);
+        const startSW = serverRuntimeObserver ? null : _findRandomSidewalkNear(stx, stz, 15);
         if (startSW) {
           startX = startSW.x / _scale;
           startY = startSW.z / _scale;
         } else {
-          startX = bx + (Math.random() - 0.5) * API_TILE * 2;
-          startY = by + (Math.random() - 0.5) * API_TILE * 2;
+          startX = bx + (serverRuntimeObserver
+            ? stableAgentRuntimeJitter(a, i, 'anchor-start-x', API_TILE * 2)
+            : (Math.random() - 0.5) * API_TILE * 2);
+          startY = by + (serverRuntimeObserver
+            ? stableAgentRuntimeJitter(a, i, 'anchor-start-y', API_TILE * 2)
+            : (Math.random() - 0.5) * API_TILE * 2);
         }
         homeX = bx + doorDir.x * API_TILE * 5 + doorTangent.x * (i % 5 - 2) * API_TILE * 3;
         homeY = by + doorDir.z * API_TILE * 5 + doorTangent.z * (i % 5 - 2) * API_TILE * 3 + Math.floor(i / 5) * API_TILE * 2;
       } else {
-        startX = -(cols * sp) / 2 + (i % cols) * sp + (Math.random() - 0.5) * 80;
-        startY = 120 + Math.floor(i / cols) * sp + (Math.random() - 0.5) * 80;
+        startX = -(cols * sp) / 2 + (i % cols) * sp + (serverRuntimeObserver
+          ? stableAgentRuntimeJitter(a, i, 'grid-start-x', 80)
+          : (Math.random() - 0.5) * 80);
+        startY = 120 + Math.floor(i / cols) * sp + (serverRuntimeObserver
+          ? stableAgentRuntimeJitter(a, i, 'grid-start-y', 80)
+          : (Math.random() - 0.5) * 80);
+        homeX = startX;
+        homeY = startY;
+      }
+      if (serverRuntimeObserver) {
+        startX = -(cols * sp) / 2 + (i % cols) * sp + stableAgentRuntimeJitter(a, i, 'server-observer-grid-x', 80);
+        startY = 120 + Math.floor(i / cols) * sp + stableAgentRuntimeJitter(a, i, 'server-observer-grid-y', 80);
         homeX = startX;
         homeY = startY;
       }
@@ -30772,13 +30851,15 @@ async function loadAgents() {
         y: startY,
         homeX: homeX,
         homeY: homeY,
-        _tick: Math.floor(Math.random() * 1000),
-        _wanderTimer: Math.random() * 3000,
+        _tick: serverRuntimeObserver ? 0 : Math.floor(Math.random() * 1000),
+        _wanderTimer: serverRuntimeObserver ? 0 : Math.random() * 3000,
         _wanderTarget: null,
         _workBuilding: workBuilding,
         _homeBuilding: savedHomeBuilding,
         _agentRole: agentRole,
-        _atDesk: !!(initialDeskSpot && isWorkPresenceStatus(a.status)),
+        _runtimeObserverOnly: serverRuntimeObserver,
+        _serverAuthoritativeRuntimeHoldReason: serverRuntimeObserver ? serverAuthoritativeRuntimeBlockReason() : '',
+        _atDesk: serverRuntimeObserver ? false : !!(initialDeskSpot && isWorkPresenceStatus(a.status)),
         _workPresenceHoldUntil: isWorkPresenceStatus(a.status) ? performance.now() + WORK_PRESENCE_CLIENT_HOLD_MS : 0,
         _floor: initialDeskSpot?.floor || 1,
         _targetFloor: initialDeskSpot?.floor || 1,
