@@ -632,6 +632,9 @@ async function run() {
     const workAgent = await waitForAgent(scriptedRoom, 'coder', (agent) => agent.owner === LIVE_STATUS_RUNTIME_OWNER);
     assert(['routing', 'working'].includes(workAgent.state));
     assert(workAgent.visualStateJson.includes('live-status-work-desk'));
+    if (workAgent.state === 'routing') {
+      assert(workAgent.visualStateJson.includes('"isRunning":true'), 'work desk routes should advertise running movement while en route');
+    }
     assert(Math.abs(Number(workAgent.heading || 0)) <= Math.PI, 'work runtime heading should be radians');
     const workTarget = JSON.parse(workAgent.targetJson || '{}');
     assertRadiansClose(workTarget.faceAngle, Math.PI, 'authored desk faceAngle should be preserved');
@@ -690,6 +693,8 @@ async function run() {
         y: 104,
         floor: 1,
         faceAngle: -Math.PI / 3,
+        stayMs: 1200,
+        consumeDurationMs: 1200,
       },
       agentPosition: { x: 40, y: 40, floor: 1 },
     });
@@ -700,6 +705,94 @@ async function run() {
     assertRadiansClose(objectUseAck.snapshot.target?.faceAngle, -Math.PI / 3, 'manual backend object faceAngle should remain radians');
     assert.equal(objectUseAck.object.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(objectUseAck.object.objectKey, 'manual-building:furniture:2:waterCooler');
+    const bethWaterDeskRoute = await waitForAgent(scriptedRoom, 'beth', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.visualStateJson.includes('water-desk-consume') &&
+      agent.visualStateJson.includes('Water Cup') &&
+      agent.visualStateJson.includes('"carrying":true')
+    );
+    assert(bethWaterDeskRoute.targetJson.includes('office:furniture:1:desk'), 'water handoff should target the work desk base object');
+    const bethWaterDeskTarget = JSON.parse(bethWaterDeskRoute.targetJson || '{}');
+    const bethWaterDeskVisual = JSON.parse(bethWaterDeskRoute.visualStateJson || '{}');
+    if (bethWaterDeskTarget.runtimePhase === 'desk-routing') {
+      assert(bethWaterDeskRoute.visualStateJson.includes('"isRunning":true'), 'water desk handoff should run while routing to desk');
+    }
+    assert.equal(bethWaterDeskTarget.sourceObjectKey, 'manual-building:furniture:2:waterCooler');
+    assert.equal(bethWaterDeskVisual.carriedItem?.label, 'Water Cup');
+    assert(bethWaterDeskTarget.objectKey.endsWith(':consume:beth'), 'desk consume should use a transient per-agent object key');
+    await waitForObject(scriptedRoom, 'manual-building:furniture:2:waterCooler', (object) =>
+      object.state === 'idle' &&
+      object.dataJson.includes('temporary-water-picked-up')
+    );
+    const bethWaterDone = await waitForAgent(scriptedRoom, 'beth', (agent) =>
+      agent.state === 'idle' &&
+      agent.routeId === '' &&
+      agent.visualStateJson.includes('"carrying":false') &&
+      !agent.visualStateJson.includes('Water Cup')
+    );
+    assert.equal(bethWaterDone.owner, 'agent-scripted-mode');
+
+    scriptedRoom.send('runtime:snapshot', {
+      requestId: 'cora-backend-object-snapshot',
+      agentId: 'cora',
+      mode: 'scripted',
+      owner: 'agent-scripted-mode',
+      x: 36,
+      y: 36,
+      floor: 1,
+      state: 'idle',
+    });
+    const coraSnapshotAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'cora-backend-object-snapshot');
+    assert.equal(coraSnapshotAck.snapshot.agentId, 'cora');
+    scriptedRoom.send('runtime:objectUseRequest', {
+      requestId: 'cora-backend-vending-use',
+      agentId: 'cora',
+      source: 'smoke-manual-vending-use',
+      target: {
+        objectKey: 'manual-building:furniture:5:vending',
+        buildingId: 'manual-building',
+        furnitureIndex: 5,
+        objectType: 'vending',
+        actionId: 'life.buyVendingSnackDrink',
+        spotId: 'use-front',
+        x: 92,
+        y: 106,
+        floor: 1,
+        faceAngle: -Math.PI / 4,
+        vendingItemId: 'soft-drink-can-red',
+        stayMs: 1200,
+        consumeDurationMs: 1200,
+      },
+      agentPosition: { x: 36, y: 36, floor: 1 },
+    });
+    const vendingUseAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'cora-backend-vending-use');
+    assert.equal(vendingUseAck.type, 'runtime:objectUseRequest');
+    assert.equal(vendingUseAck.object.objectKey, 'manual-building:furniture:5:vending');
+    const coraVendingDeskRoute = await waitForAgent(scriptedRoom, 'cora', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.visualStateJson.includes('vending-desk-consume') &&
+      agent.visualStateJson.includes('vendingItemId') &&
+      agent.visualStateJson.includes('"carrying":true')
+    );
+    const coraVendingDeskTarget = JSON.parse(coraVendingDeskRoute.targetJson || '{}');
+    const coraVendingDeskVisual = JSON.parse(coraVendingDeskRoute.visualStateJson || '{}');
+    if (coraVendingDeskTarget.runtimePhase === 'desk-routing') {
+      assert(coraVendingDeskRoute.visualStateJson.includes('"isRunning":true'), 'vending desk handoff should run while routing to desk');
+    }
+    assert.equal(coraVendingDeskTarget.sourceObjectKey, 'manual-building:furniture:5:vending');
+    assert.equal(coraVendingDeskVisual.carriedItem?.vendingItemId, 'soft-drink-can-red');
+    assert(coraVendingDeskTarget.objectKey.endsWith(':consume:cora'), 'vending desk consume should use a transient per-agent object key');
+    await waitForObject(scriptedRoom, 'manual-building:furniture:5:vending', (object) =>
+      object.state === 'idle' &&
+      object.dataJson.includes('temporary-vending-item-picked-up')
+    );
+    const coraVendingDone = await waitForAgent(scriptedRoom, 'cora', (agent) =>
+      agent.state === 'idle' &&
+      agent.routeId === '' &&
+      agent.visualStateJson.includes('"carrying":false') &&
+      !agent.visualStateJson.includes('vendingItemId')
+    );
+    assert.equal(coraVendingDone.owner, 'agent-scripted-mode');
 
     scriptedRoom.send('runtime:objectUseRequest', {
       requestId: 'adam-transformed-facing-object-use',
@@ -717,7 +810,6 @@ async function run() {
     assert.equal(transformedFacingAck.type, 'runtime:objectUseRequest');
     assert.equal(transformedFacingAck.object.objectKey, 'office:furniture:3:waterCooler');
     assertRadiansClose(transformedFacingAck.snapshot.target?.faceAngle, -Math.PI / 2, 'server object-use fallback should face the furniture center like browser-owned 8590');
-    await waitForAgent(scriptedRoom, 'beth', (agent) => agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     await scriptedRoom.leave(true);
 
     console.log('realtime smoke ok');
