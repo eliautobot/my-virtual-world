@@ -9,7 +9,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@colyseus/sdk';
 import {
   AGENT_RUNTIME_ROOM_NAME,
+  DEFAULT_WORLD_RUNTIME_TICK_MS,
+  LIVE_ACTION_RUNTIME_POLL_MS,
+  LIVE_STATUS_RUNTIME_POLL_MS,
   LIVE_STATUS_RUNTIME_OWNER,
+  RUNTIME_STATE_BROADCAST_INTERVAL_MS,
+  SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
   SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS,
@@ -188,6 +193,11 @@ async function run() {
   const port = await getOpenPort();
   let server = startServer({ port, dataDir });
   try {
+    assert.equal(LIVE_ACTION_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live action runtime should move at the world tick for smooth observer interpolation');
+    assert.equal(LIVE_STATUS_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live status runtime should move at the world tick for smooth observer interpolation');
+    assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'scripted object runtime should move at the world tick for smooth observer interpolation');
+    assert.equal(RUNTIME_STATE_BROADCAST_INTERVAL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'full runtime state broadcasts should not lag behind server movement ticks');
+
     const health = await waitForHealth(port, server);
     assert.equal(health.ok, true);
     assert.equal(health.room, AGENT_RUNTIME_ROOM_NAME);
@@ -551,6 +561,22 @@ async function run() {
               facing: 'north',
             }],
           },
+          {
+            type: 'waterCooler',
+            x: 14,
+            z: 5,
+            rotation: 90,
+            floor: 1,
+            room: 'breakroom',
+            actionLocations: [{
+              id: 'use-front',
+              roles: ['use', 'drink'],
+              actionId: 'life.getWater',
+              actionTarget: { x: 14.92, z: 5, floor: 1, facing: 'east' },
+              facing: 'east',
+              transformApplied: { itemRotation: 90, buildingRotation: 0, totalRotation: 90 },
+            }],
+          },
         ],
       },
     }, null, 2)}\n`);
@@ -582,6 +608,8 @@ async function run() {
     assert.equal(scriptedAgent.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(scriptedAgent.leaseOwner, SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER);
     assert(scriptedAgent.visualStateJson.includes('runtimeRoute'));
+    assert(scriptedAgent.visualStateJson.includes('"routePoints"'), 'server scripted route should expose route points for browser debug overlays');
+    assert(scriptedAgent.visualStateJson.includes('"rawPoints"'), 'server scripted route should expose raw preview points for browser debug overlays');
     assert(
       scriptedAgent.visualStateJson.includes('dynamic-interior-routing.js') ||
       scriptedAgent.visualStateJson.includes('dynamic-exterior-routing.js') ||
@@ -672,6 +700,23 @@ async function run() {
     assertRadiansClose(objectUseAck.snapshot.target?.faceAngle, -Math.PI / 3, 'manual backend object faceAngle should remain radians');
     assert.equal(objectUseAck.object.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(objectUseAck.object.objectKey, 'manual-building:furniture:2:waterCooler');
+
+    scriptedRoom.send('runtime:objectUseRequest', {
+      requestId: 'adam-transformed-facing-object-use',
+      agentId: 'adam',
+      source: 'smoke-transformed-action-location-facing',
+      target: {
+        buildingId: 'office',
+        furnitureIndex: 3,
+        objectType: 'waterCooler',
+        spotId: 'use-front',
+      },
+      agentPosition: { x: 40, y: 40, floor: 1 },
+    });
+    const transformedFacingAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'adam-transformed-facing-object-use');
+    assert.equal(transformedFacingAck.type, 'runtime:objectUseRequest');
+    assert.equal(transformedFacingAck.object.objectKey, 'office:furniture:3:waterCooler');
+    assertRadiansClose(transformedFacingAck.snapshot.target?.faceAngle, -Math.PI / 2, 'server object-use fallback should face the furniture center like browser-owned 8590');
     await waitForAgent(scriptedRoom, 'beth', (agent) => agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     await scriptedRoom.leave(true);
 

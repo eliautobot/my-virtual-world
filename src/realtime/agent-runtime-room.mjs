@@ -28,7 +28,7 @@ export const WORLD_RUNTIME_TRAFFIC_YELLOW_MS = 3000;
 export const WORLD_RUNTIME_TRAFFIC_ALL_RED_MS = 2000;
 export const WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000;
 export const WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000;
-export const RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000;
+export const RUNTIME_STATE_BROADCAST_INTERVAL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
 export const MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS = 500;
 export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
@@ -36,14 +36,14 @@ export const MAX_VISUAL_STATE_JSON_CHARS = 6000;
 export const MAX_WORLD_OBJECT_DATA_JSON_CHARS = 10000;
 export const LIVE_ACTION_RUNTIME_OWNER = 'server-live-action-runtime';
 export const LIVE_ACTION_RUNTIME_LEASE_OWNER = 'server-runtime';
-export const LIVE_ACTION_RUNTIME_POLL_MS = 1000;
+export const LIVE_ACTION_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
 export const LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC = 72;
 export const LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS = 3;
 export const LIVE_ACTION_RUNTIME_DWELL_MS = 5000;
 export const LIVE_ACTION_RUNTIME_LEASE_TTL_MS = 10000;
 export const LIVE_STATUS_RUNTIME_OWNER = 'server-live-status-runtime';
 export const LIVE_STATUS_RUNTIME_LEASE_OWNER = 'server-live-status';
-export const LIVE_STATUS_RUNTIME_POLL_MS = 1000;
+export const LIVE_STATUS_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
 export const LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC = 96;
 export const LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS = 6;
 export const LIVE_STATUS_RUNTIME_LEASE_TTL_MS = 15000;
@@ -52,7 +52,7 @@ export const USER_DIRECTED_RUNTIME_LEASE_OWNER = 'user-directed';
 export const USER_DIRECTED_RUNTIME_HOLD_MS = 60000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runtime';
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER = 'server-scripted-object';
-export const SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS = 2000;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC = 72;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS = 5;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS = 15000;
@@ -1293,6 +1293,12 @@ function summarizeServerRuntimeRoute(route = null) {
   const routePoints = Array.isArray(route.routePoints)
     ? route.routePoints.map(cloneRuntimePoint).filter(Boolean).slice(0, 32)
     : [];
+  const rawPoints = Array.isArray(route.rawPoints)
+    ? route.rawPoints.map(cloneRuntimePoint).filter(Boolean).slice(0, 80)
+    : [];
+  const rawCells = Array.isArray(route.rawCells)
+    ? route.rawCells.map(cloneRuntimePoint).filter(Boolean).slice(0, 96)
+    : [];
   const nextPoint = cloneRuntimePoint(route.effectiveTarget || route.pursuitTarget || route.route?.[route.routeIndex || 0] || null);
   return {
     schemaVersion: 'agent-runtime-server-route/v1',
@@ -1304,7 +1310,16 @@ function summarizeServerRuntimeRoute(route = null) {
     nextPoint,
     finalPoint: cloneRuntimePoint(route.finalPoint || routePoints[routePoints.length - 1] || null),
     targetAdjusted: route.targetAdjusted === true,
+    adjustedTarget: cloneRuntimePoint(route.adjustedTarget || null),
+    projectedPoint: cloneRuntimePoint(route.projectedPoint || null),
+    pursuitTarget: cloneRuntimePoint(route.pursuitTarget || null),
+    rerouteFrom: cloneRuntimePoint(route.rerouteFrom || null),
+    blockedPoint: cloneRuntimePoint(route.blockedPoint || null),
+    waitPoint: cloneRuntimePoint(route.waitPoint || null),
+    waitingForTraffic: route.waitingForTraffic === true,
     routePoints,
+    rawPoints,
+    rawCells,
   };
 }
 
@@ -1610,6 +1625,51 @@ function runtimeFacingAngle(building, furniture, localX, localZ, facing = 'north
   return Math.atan2(to.x - from.x, to.y - from.y);
 }
 
+function runtimeFurnitureCenterFaceAngle(building, furniture, localX, localZ, fromPoint = null) {
+  const from = fromPoint && Number.isFinite(Number(fromPoint.x)) && Number.isFinite(Number(fromPoint.y))
+    ? { x: Number(fromPoint.x), y: Number(fromPoint.y) }
+    : apiPointFromBuildingLocal(building, localX, localZ);
+  const to = apiPointFromBuildingLocal(building, furniture?.x, furniture?.z);
+  if (!from || !to) return null;
+  return normalizeRuntimeAngleRadians(Math.atan2(to.x - from.x, to.y - from.y), 0);
+}
+
+const RUNTIME_CARDINAL_FACINGS = Object.freeze(['north', 'east', 'south', 'west']);
+
+function normalizeRuntimeFacing(value = 'north', fallback = 'north') {
+  const key = String(value || fallback || 'north').trim().toLowerCase();
+  return RUNTIME_CARDINAL_FACINGS.includes(key) ? key : fallback;
+}
+
+function rotateRuntimeFacing(facing = 'north', rotationDeg = 0) {
+  const key = normalizeRuntimeFacing(facing, 'north');
+  const turns = positiveModulo(Math.round(Number(rotationDeg || 0) / 90), 4);
+  const index = RUNTIME_CARDINAL_FACINGS.indexOf(key);
+  return RUNTIME_CARDINAL_FACINGS[positiveModulo(index + turns, RUNTIME_CARDINAL_FACINGS.length)] || key;
+}
+
+function actionLocationAppliedFacingRotation(location = null) {
+  const transform = location?.transformApplied && typeof location.transformApplied === 'object'
+    ? location.transformApplied
+    : null;
+  if (!transform) return null;
+  const totalRotation = Number(transform.totalRotation);
+  if (Number.isFinite(totalRotation)) return totalRotation;
+  const itemRotation = Number(transform.itemRotation || 0);
+  const buildingRotation = Number(transform.buildingRotation || 0);
+  if (Number.isFinite(itemRotation) || Number.isFinite(buildingRotation)) {
+    return (Number.isFinite(itemRotation) ? itemRotation : 0) + (Number.isFinite(buildingRotation) ? buildingRotation : 0);
+  }
+  return null;
+}
+
+function authoredRuntimeFacing(location = null, explicit = null, fallback = 'north') {
+  const facing = normalizeRuntimeFacing(location?.facing || explicit?.facing || fallback, fallback);
+  const appliedRotation = actionLocationAppliedFacingRotation(location);
+  if (appliedRotation === null) return facing;
+  return rotateRuntimeFacing(facing, -appliedRotation);
+}
+
 function normalizeRuntimeAngleRadians(value, fallback = 0) {
   let angle = Number(value);
   if (!Number.isFinite(angle)) angle = Number(fallback);
@@ -1621,12 +1681,25 @@ function normalizeRuntimeAngleRadians(value, fallback = 0) {
   return ((((angle + Math.PI) % fullTurn) + fullTurn) % fullTurn) - Math.PI;
 }
 
+function isExplicitRuntimeNumber(value) {
+  return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+}
+
 function explicitRuntimeFaceAngle(...candidates) {
   for (const candidate of candidates) {
-    const value = Number(candidate);
-    if (Number.isFinite(value)) return normalizeRuntimeAngleRadians(value, 0);
+    if (isExplicitRuntimeNumber(candidate)) return normalizeRuntimeAngleRadians(candidate, 0);
   }
   return null;
+}
+
+function runtimeFurnitureActionFaceAngle(building, furniture, local, fromPoint = null, options = {}) {
+  const explicit = explicitRuntimeFaceAngle(local?.faceAngle);
+  if (explicit !== null) return explicit;
+  if (options?.deskFacesScreen && String(furniture?.type || '').toLowerCase() === 'desk') {
+    return runtimeFacingAngle(building, furniture, local?.x, local?.z, 'south');
+  }
+  return runtimeFurnitureCenterFaceAngle(building, furniture, local?.x, local?.z, fromPoint)
+    ?? runtimeFacingAngle(building, furniture, local?.x, local?.z, local?.facing);
 }
 
 function authoredRuntimeFaceAngle(location = null, explicit = null) {
@@ -1678,7 +1751,7 @@ function localPointFromWorkSpot(furniture, location) {
       x,
       z,
       spotId: safeText(location?.interactionSpotId || location?.spotId || location?.id, 'default') || 'default',
-      facing: safeText(location?.facing || explicit?.facing, 'north') || 'north',
+      facing: authoredRuntimeFacing(location, explicit, 'north'),
       faceAngle,
       floor: floorOr(location?.floor ?? explicit?.floor ?? furniture?.floor, 1),
     };
@@ -1716,9 +1789,7 @@ function workTargetFromFurniture(building, furniture, index) {
     objectType: safeText(furniture.type, 'desk') || 'desk',
     interactionSpotId: local.spotId,
     spotId: local.spotId,
-    faceAngle: Number.isFinite(Number(local.faceAngle))
-      ? normalizeRuntimeAngleRadians(local.faceAngle, 0)
-      : runtimeFacingAngle(building, furniture, local.x, local.z, local.facing),
+    faceAngle: runtimeFurnitureActionFaceAngle(building, furniture, local, point, { deskFacesScreen: true }),
   };
 }
 
@@ -1751,9 +1822,7 @@ function meetingTargetFromFurnitureSpot(building, furniture, index, location = n
     poseKind: 'seat',
     animationId: 'meeting-sit-talk',
     activityKind: objectType === 'conferenceChair' ? 'conference-chair-sit' : 'meeting-table',
-    faceAngle: Number.isFinite(Number(local.faceAngle))
-      ? normalizeRuntimeAngleRadians(local.faceAngle, 0)
-      : runtimeFacingAngle(building, furniture, local.x, local.z, local.facing),
+    faceAngle: runtimeFurnitureActionFaceAngle(building, furniture, local, point),
   };
 }
 
@@ -2277,7 +2346,7 @@ function localPointFromScriptedObjectSpot(furniture = null, location = null) {
       x,
       z,
       floor: floorOr(location?.floor ?? explicit?.floor ?? furniture?.floor, 1),
-      facing: safeText(location?.facing || explicit?.facing, fallback.facing) || fallback.facing,
+      facing: authoredRuntimeFacing(location, explicit, fallback.facing),
       faceAngle,
       poseKind: isQueue ? 'wait' : (roles.includes('seat') ? 'seat' : (config?.poseKind || fallback.poseKind)),
     };
@@ -2341,9 +2410,7 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
     animationId: isQueueUse ? 'bus-stop-wait' : (safeText(config?.animationId, '') || (local.poseKind === 'seat' ? 'sit' : 'stand-use')),
     activityKind: isQueueUse ? 'service-queue-wait' : (safeText(config?.kind, '') || 'server-scripted-object-use'),
     stayMs: scriptedObjectStayMs({ objectKey: baseObjectKey, objectType, spotId }),
-    faceAngle: Number.isFinite(Number(local.faceAngle))
-      ? normalizeRuntimeAngleRadians(local.faceAngle, 0)
-      : runtimeFacingAngle(building, furniture, local.x, local.z, local.facing),
+    faceAngle: runtimeFurnitureActionFaceAngle(building, furniture, local, point),
   };
 }
 

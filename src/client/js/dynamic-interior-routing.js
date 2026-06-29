@@ -961,6 +961,81 @@ export function getDynamicInteriorRoutingState(agentId) {
   return agentId != null ? (_agentState.get(agentId) || null) : null;
 }
 
+function cloneRuntimeRoutePoint(point = null) {
+  if (!point || typeof point !== 'object') return null;
+  const x = Number(point.x);
+  const y = Number(point.y ?? point.z);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function cloneRuntimeRouteCell(cell = null) {
+  if (!cell || typeof cell !== 'object') return null;
+  const x = Number(cell.x);
+  const z = Number(cell.z ?? cell.y);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  return { x, z };
+}
+
+function buildRuntimeRoutePoints(agent, runtimeRoute) {
+  const points = Array.isArray(runtimeRoute?.routePoints)
+    ? runtimeRoute.routePoints.map(cloneRuntimeRoutePoint).filter(Boolean)
+    : [];
+  const currentPoint = cloneRuntimeRoutePoint(agent);
+  const nextPoint = cloneRuntimeRoutePoint(runtimeRoute?.nextPoint || runtimeRoute?.effectiveTarget || runtimeRoute?.pursuitTarget);
+  const finalPoint = cloneRuntimeRoutePoint(runtimeRoute?.finalPoint);
+  if (points.length === 0 && currentPoint) points.push(currentPoint);
+  if (points.length <= 1 && nextPoint) points.push(nextPoint);
+  if (finalPoint && (!points.length || pointDistance(points[points.length - 1], finalPoint) > 0.001)) points.push(finalPoint);
+  return dedupePoints(points, 0.001);
+}
+
+export function hydrateDynamicInteriorRoutingDebugFromRuntimeRoute(agent, runtimeRoute = null) {
+  const agentId = agent?.id;
+  if (agentId == null) return false;
+  const active = runtimeRoute && runtimeRoute.active !== false;
+  const routePoints = active ? buildRuntimeRoutePoints(agent, runtimeRoute) : [];
+  const route = routePoints.slice(1);
+  if (!active || routePoints.length < 2 || route.length < 1) {
+    const existing = _agentState.get(agentId);
+    if (existing?.runtimeDebugHydrated) {
+      _agentState.delete(agentId);
+      const group = _debugGroups.get(agentId);
+      if (group) group.visible = false;
+    }
+    return false;
+  }
+
+  const state = ensureAgentState(agentId);
+  const rawPoints = Array.isArray(runtimeRoute.rawPoints)
+    ? runtimeRoute.rawPoints.map(cloneRuntimeRoutePoint).filter(Boolean)
+    : [];
+  const rawCells = Array.isArray(runtimeRoute.rawCells)
+    ? runtimeRoute.rawCells.map(cloneRuntimeRouteCell).filter(Boolean)
+    : [];
+  const routeIndex = clamp(Math.floor(Number(runtimeRoute.routeIndex) || 0), 0, Math.max(0, route.length - 1));
+  const nextPoint = cloneRuntimeRoutePoint(runtimeRoute.nextPoint || runtimeRoute.effectiveTarget || runtimeRoute.pursuitTarget) || route[routeIndex] || route[0] || routePoints[routePoints.length - 1];
+
+  state.route = route;
+  state.routePoints = routePoints;
+  state.routeSegments = null;
+  state.routeIndex = routeIndex;
+  state.segmentIndex = Math.max(0, routeIndex);
+  state.rawPoints = rawPoints.length ? rawPoints : routePoints;
+  state.rawCells = rawCells;
+  state.cells = rawCells;
+  state.projectedPoint = cloneRuntimeRoutePoint(runtimeRoute.projectedPoint) || routePoints[Math.min(routeIndex, routePoints.length - 1)] || routePoints[0];
+  state.pursuitTarget = nextPoint;
+  state.rerouteFrom = cloneRuntimeRoutePoint(runtimeRoute.rerouteFrom);
+  state.lastPlanReason = String(runtimeRoute.reason || runtimeRoute.source || 'server-runtime-route');
+  state.targetAdjusted = runtimeRoute.targetAdjusted === true;
+  state.adjustedTarget = cloneRuntimeRoutePoint(runtimeRoute.adjustedTarget || runtimeRoute.finalPoint);
+  state.active = true;
+  state.runtimeDebugHydrated = true;
+  state.revision = (Number(state.revision) || 0) + 1;
+  return true;
+}
+
 export function updateDynamicInteriorRouting(agent, target, dtMs = 16, options = {}) {
   const cfg = { ...DYNAMIC_INTERIOR_ROUTING, ...options };
   if (!cfg.enabled || !agent || !target || !_helpers.getInteriorBuildingAt) {
