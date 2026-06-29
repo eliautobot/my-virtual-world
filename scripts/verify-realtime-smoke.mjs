@@ -551,6 +551,22 @@ async function run() {
               facing: 'north',
             }],
           },
+          {
+            type: 'waterCooler',
+            x: 14,
+            z: 5,
+            rotation: 90,
+            floor: 1,
+            room: 'breakroom',
+            actionLocations: [{
+              id: 'use-front',
+              roles: ['use', 'drink'],
+              actionId: 'life.getWater',
+              actionTarget: { x: 14.92, z: 5, floor: 1, facing: 'east' },
+              facing: 'east',
+              transformApplied: { itemRotation: 90, buildingRotation: 0, totalRotation: 90 },
+            }],
+          },
         ],
       },
     }, null, 2)}\n`);
@@ -672,6 +688,23 @@ async function run() {
     assertRadiansClose(objectUseAck.snapshot.target?.faceAngle, -Math.PI / 3, 'manual backend object faceAngle should remain radians');
     assert.equal(objectUseAck.object.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(objectUseAck.object.objectKey, 'manual-building:furniture:2:waterCooler');
+
+    scriptedRoom.send('runtime:objectUseRequest', {
+      requestId: 'adam-transformed-facing-object-use',
+      agentId: 'adam',
+      source: 'smoke-transformed-action-location-facing',
+      target: {
+        buildingId: 'office',
+        furnitureIndex: 3,
+        objectType: 'waterCooler',
+        spotId: 'use-front',
+      },
+      agentPosition: { x: 40, y: 40, floor: 1 },
+    });
+    const transformedFacingAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'adam-transformed-facing-object-use');
+    assert.equal(transformedFacingAck.type, 'runtime:objectUseRequest');
+    assert.equal(transformedFacingAck.object.objectKey, 'office:furniture:3:waterCooler');
+    assertRadiansClose(transformedFacingAck.snapshot.target?.faceAngle, Math.PI / 2, 'transformed action-location facing should only rotate once');
     await waitForAgent(scriptedRoom, 'beth', (agent) => agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     await scriptedRoom.leave(true);
 
