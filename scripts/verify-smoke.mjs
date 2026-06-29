@@ -448,7 +448,13 @@ for (const token of [
   'runtime:objectUseRequest',
   'tickScriptedObjectRuntime',
   'selectCachedServerRuntimeRouteStep',
-  'active-route-replan-skipped',
+  'server-static-step-',
+  'SERVER_RUNTIME_AGENT_AVOID_RADIUS',
+  'SERVER_RUNTIME_AGENT_AVOID_PUSH_PER_TICK',
+  'serverRuntimeCrowdAgents',
+  'applyServerRuntimeCollisionGuards',
+  'isDynamicInteriorRouteSegmentClear',
+  'isDynamicExteriorRouteSegmentClear',
   'makeServerRuntimeStep',
   'dynamic-interior-routing.js',
   'configureDynamicExteriorRouting',
@@ -756,12 +762,14 @@ for (const token of [
 for (const token of [
   'hydrateDynamicInteriorRoutingDebugFromRuntimeRoute',
   'runtimeDebugHydrated',
+  'isDynamicInteriorRouteSegmentClear',
 ]) {
   assert(dynamicInteriorRoutingJs.includes(token), `dynamic interior routing missing runtime debug token: ${token}`);
 }
 for (const token of [
   'hydrateDynamicExteriorRoutingDebugFromRuntimeRoute',
   'runtimeDebugHydrated',
+  'isDynamicExteriorRouteSegmentClear',
 ]) {
   assert(dynamicExteriorRoutingJs.includes(token), `dynamic exterior routing missing runtime debug token: ${token}`);
 }

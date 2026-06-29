@@ -6,11 +6,13 @@ import { Encoder, MapSchema, Schema, defineTypes } from '@colyseus/schema';
 import {
   configureDynamicInteriorRouting,
   clearDynamicInteriorRoutingForAgent,
+  isDynamicInteriorRouteSegmentClear,
   updateDynamicInteriorRouting,
 } from '../client/js/dynamic-interior-routing.js';
 import {
   configureDynamicExteriorRouting,
   clearDynamicExteriorRoutingForAgent,
+  isDynamicExteriorRouteSegmentClear,
   updateDynamicExteriorRouting,
 } from '../client/js/dynamic-exterior-routing.js';
 
@@ -73,6 +75,11 @@ export const SERVER_SCRIPTED_IDLE_OBJECT_COOLDOWN_MS = 240000;
 export const SERVER_SCRIPTED_IDLE_CATEGORY_COOLDOWN_MS = 180000;
 export const SERVER_SCRIPTED_IDLE_FAILED_TARGET_THROTTLE_MS = 90000;
 export const LIVE_ACTION_API_TILE = 40;
+export const SERVER_RUNTIME_AGENT_AVOID_RADIUS = LIVE_ACTION_API_TILE * 2;
+export const SERVER_RUNTIME_AGENT_SEPARATION_RADIUS = LIVE_ACTION_API_TILE;
+export const SERVER_RUNTIME_AGENT_AVOID_FORCE_MULTIPLIER = 0.6;
+export const SERVER_RUNTIME_AGENT_AVOID_PUSH_PER_TICK = 6;
+export const SERVER_RUNTIME_AGENT_SEPARATION_PUSH_PER_TICK = 6;
 export const SERVER_WORLD_TOPOLOGY_OWNER = 'server-world-topology-runtime';
 export const SERVER_WORLD_TRAFFIC_SPEED = 7;
 export const SERVER_WORLD_MAX_TRAFFIC_VEHICLES = 30;
@@ -1319,6 +1326,14 @@ function summarizeServerRuntimeRoute(route = null) {
     pursuitTarget: cloneRuntimePoint(route.pursuitTarget || null),
     rerouteFrom: cloneRuntimePoint(route.rerouteFrom || null),
     blockedPoint: cloneRuntimePoint(route.blockedPoint || null),
+    blockedReason: safeText(route.blockedReason, ''),
+    crowdAvoidedAgents: Array.isArray(route.crowdAvoidedAgents)
+      ? route.crowdAvoidedAgents.slice(0, 8).map(entry => ({
+          agentId: safeText(entry?.agentId, ''),
+          distance: Number.isFinite(Number(entry?.distance)) ? Number(entry.distance) : 0,
+          mode: safeText(entry?.mode, ''),
+        })).filter(entry => entry.agentId)
+      : [],
     waitPoint: cloneRuntimePoint(route.waitPoint || null),
     waitingForTraffic: route.waitingForTraffic === true,
     routePoints,
@@ -1332,9 +1347,187 @@ function withRuntimeRouteVisualState(visualState, route = null) {
   return summary ? { ...visualState, runtimeRoute: summary } : visualState;
 }
 
+function normalizeServerRuntimePoint(point = null, fallbackFloor = 1) {
+  const x = numberOr(point?.x, NaN);
+  const y = numberOr(point?.y ?? point?.z, NaN);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return {
+    x,
+    y,
+    floor: floorOr(point?.floor, fallbackFloor),
+    buildingId: safeText(point?.buildingId || '', ''),
+  };
+}
+
+function serverRuntimeCrowdAgents(state, agentId) {
+  const crowd = [];
+  for (const [otherId, record] of state?.agents?.entries?.() || []) {
+    if (String(otherId) === String(agentId)) continue;
+    const plain = snapshotToPlain(record);
+    const point = normalizeServerRuntimePoint(plain, 1);
+    if (!point) continue;
+    crowd.push({
+      agentId: safeText(plain.agentId || otherId, '') || String(otherId),
+      x: point.x,
+      y: point.y,
+      floor: point.floor,
+      buildingId: point.buildingId,
+      state: safeText(plain.state, ''),
+    });
+  }
+  return crowd;
+}
+
+function isServerRuntimeDoorPhase(phase, route = null) {
+  const text = `${phase || ''}:${route?.source || ''}:${route?.reason || ''}`.toLowerCase();
+  return text.includes('door');
+}
+
+function isServerRuntimeUnvalidatedManualRoute(route = null) {
+  const text = `${route?.source || ''}:${route?.reason || ''}`.toLowerCase();
+  return text.includes('unknown-building');
+}
+
+function validateServerRuntimeStaticSegment(dataDir, currentPoint, proposedPoint, { phase = '', route = null } = {}) {
+  const current = normalizeServerRuntimePoint(currentPoint, proposedPoint?.floor || 1);
+  const proposed = normalizeServerRuntimePoint(proposedPoint, current?.floor || 1);
+  if (!current || !proposed) return { clear: true, reason: 'missing-segment-context' };
+  if (isServerRuntimeDoorPhase(phase, route)) return { clear: true, reason: 'door-transition' };
+  if (isServerRuntimeUnvalidatedManualRoute(route)) return { clear: true, reason: 'unknown-building-route' };
+
+  const currentCoordinateBuilding = findInteriorBuildingAtApi(dataDir, current.x, current.y);
+  const proposedCoordinateBuilding = findInteriorBuildingAtApi(dataDir, proposed.x, proposed.y);
+  const currentBuilding = currentCoordinateBuilding?.id
+    ? (readBuildingDocument(dataDir, currentCoordinateBuilding.id) || currentCoordinateBuilding)
+    : null;
+  const proposedBuilding = proposedCoordinateBuilding?.id
+    ? (readBuildingDocument(dataDir, proposedCoordinateBuilding.id) || proposedCoordinateBuilding)
+    : null;
+
+  if (currentBuilding && proposedBuilding && currentBuilding.id === proposedBuilding.id && currentBuilding.type !== 'park') {
+    const result = isDynamicInteriorRouteSegmentClear(currentBuilding, current, proposed);
+    return result.clear ? { ...result, buildingId: currentBuilding.id } : { ...result, buildingId: currentBuilding.id };
+  }
+
+  if (!currentBuilding && !proposedBuilding) {
+    const result = isDynamicExteriorRouteSegmentClear(current, proposed, { allowSoftFallback: true });
+    return result.clear ? result : { ...result, blockedReason: `exterior-${result.reason || 'blocked'}` };
+  }
+
+  return { clear: true, reason: 'building-handoff' };
+}
+
+function applyServerRuntimeAgentAvoidance(agentId, currentPoint, proposedPoint, crowdAgents = [], {
+  tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS,
+  speedUnitsPerSec = LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
+  finalTarget = null,
+  arrivalRadius = 5,
+} = {}) {
+  const current = normalizeServerRuntimePoint(currentPoint, proposedPoint?.floor || 1);
+  const proposed = normalizeServerRuntimePoint(proposedPoint, current?.floor || 1);
+  if (!current || !proposed) return { point: proposedPoint, adjusted: false, blockers: [] };
+  const destination = normalizeServerRuntimePoint(finalTarget, proposed.floor);
+  const destinationOccupantRadius = Math.max(SERVER_RUNTIME_AGENT_SEPARATION_RADIUS, numberOr(arrivalRadius, 5) * 2);
+
+  let moveX = proposed.x - current.x;
+  let moveY = proposed.y - current.y;
+  if (Math.hypot(moveX, moveY) <= 0.001) return { point: proposed, adjusted: false, blockers: [] };
+
+  const step = Math.max(1, numberOr(speedUnitsPerSec, LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC) * (Math.max(1, tickMs) / 1000));
+  const blockers = [];
+  for (const other of crowdAgents || []) {
+    if (!other || String(other.agentId || '') === String(agentId || '')) continue;
+    if (floorOr(other.floor, current.floor) !== current.floor) continue;
+    if (destination && Math.hypot(numberOr(other.x, destination.x) - destination.x, numberOr(other.y, destination.y) - destination.y) <= destinationOccupantRadius) continue;
+    const ox = current.x - numberOr(other.x, current.x);
+    const oy = current.y - numberOr(other.y, current.y);
+    const dist = Math.hypot(ox, oy);
+    if (dist < SERVER_RUNTIME_AGENT_AVOID_RADIUS && dist > 0.5) {
+      const force = Math.min(
+        SERVER_RUNTIME_AGENT_AVOID_PUSH_PER_TICK,
+        step * SERVER_RUNTIME_AGENT_AVOID_FORCE_MULTIPLIER * (1 - dist / SERVER_RUNTIME_AGENT_AVOID_RADIUS),
+      );
+      moveX += (ox / dist) * force;
+      moveY += (oy / dist) * force;
+      blockers.push({ agentId: other.agentId || '', distance: dist, mode: 'steer' });
+    }
+  }
+
+  const next = { ...proposed, x: current.x + moveX, y: current.y + moveY };
+  for (const other of crowdAgents || []) {
+    if (!other || String(other.agentId || '') === String(agentId || '')) continue;
+    if (floorOr(other.floor, current.floor) !== current.floor) continue;
+    if (destination && Math.hypot(numberOr(other.x, destination.x) - destination.x, numberOr(other.y, destination.y) - destination.y) <= destinationOccupantRadius) continue;
+    const ox = next.x - numberOr(other.x, next.x);
+    const oy = next.y - numberOr(other.y, next.y);
+    const dist = Math.hypot(ox, oy);
+    if (dist < SERVER_RUNTIME_AGENT_SEPARATION_RADIUS && dist > 0.1) {
+      const push = Math.min(
+        SERVER_RUNTIME_AGENT_SEPARATION_PUSH_PER_TICK,
+        step * 0.35,
+      ) * (1 - dist / SERVER_RUNTIME_AGENT_SEPARATION_RADIUS);
+      next.x += (ox / dist) * push;
+      next.y += (oy / dist) * push;
+      blockers.push({ agentId: other.agentId || '', distance: dist, mode: 'separate' });
+    }
+  }
+
+  return { point: next, adjusted: blockers.length > 0, blockers };
+}
+
+function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, proposedPoint, {
+  phase = '',
+  route = null,
+  crowdAgents = [],
+  tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS,
+  speedUnitsPerSec = LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
+  finalTarget = null,
+  arrivalRadius = 5,
+} = {}) {
+  const current = normalizeServerRuntimePoint(currentPoint, proposedPoint?.floor || 1);
+  const proposed = normalizeServerRuntimePoint(proposedPoint, current?.floor || 1);
+  if (!current || !proposed) return { point: proposedPoint, adjusted: false, routePatch: null };
+
+  const staticResult = validateServerRuntimeStaticSegment(dataDir, current, proposed, { phase, route });
+  if (!staticResult.clear) {
+    return {
+      point: current,
+      adjusted: true,
+      blocked: true,
+      routePatch: {
+        active: false,
+        blockedPoint: staticResult.blockedPoint || proposed,
+        blockedReason: `server-static-step-${staticResult.reason || staticResult.blockedReason || 'blocked'}`,
+      },
+    };
+  }
+
+  const crowdResult = applyServerRuntimeAgentAvoidance(agentId, current, proposed, crowdAgents, { tickMs, speedUnitsPerSec, finalTarget, arrivalRadius });
+  if (!crowdResult.adjusted) return { point: proposed, adjusted: false, routePatch: null };
+  const crowdStatic = validateServerRuntimeStaticSegment(dataDir, current, crowdResult.point, { phase, route });
+  if (!crowdStatic.clear) {
+    return {
+      point: proposed,
+      adjusted: false,
+      routePatch: {
+        blockedPoint: crowdStatic.blockedPoint || crowdResult.point,
+        blockedReason: `server-crowd-adjustment-${crowdStatic.reason || crowdStatic.blockedReason || 'blocked'}`,
+        crowdAvoidedAgents: crowdResult.blockers,
+      },
+    };
+  }
+
+  return {
+    point: crowdResult.point,
+    adjusted: true,
+    routePatch: { crowdAvoidedAgents: crowdResult.blockers },
+  };
+}
+
 function selectCachedServerRuntimeRouteStep(current, currentPoint, finalTarget, arrivalRadius = 5) {
   const runtimeRoute = current?.visualState?.runtimeRoute;
   if (!runtimeRoute || typeof runtimeRoute !== 'object' || runtimeRoute.active !== true) return null;
+  if (String(runtimeRoute.blockedReason || '').startsWith('server-static-step-')) return null;
   const routePoints = Array.isArray(runtimeRoute.routePoints)
     ? runtimeRoute.routePoints.map(cloneRuntimePoint).filter(Boolean)
     : [];
@@ -1346,7 +1539,8 @@ function selectCachedServerRuntimeRouteStep(current, currentPoint, finalTarget, 
     if (finalDist > finalTolerance) return null;
     if (Number.isFinite(Number(cachedFinal.floor)) && floorOr(cachedFinal.floor, finalTarget.floor) !== finalTarget.floor) return null;
   }
-  const startIndex = Math.max(0, Math.min(routePoints.length - 1, Math.floor(numberOr(runtimeRoute.routeIndex, 0))));
+  const firstSteeringIndex = routePoints.length > 1 ? 1 : 0;
+  const startIndex = Math.max(firstSteeringIndex, Math.min(routePoints.length - 1, Math.floor(numberOr(runtimeRoute.routeIndex, firstSteeringIndex))));
   const minStepDist = Math.max(1, numberOr(arrivalRadius, 5) * 0.5);
   const currentFinalDist = Math.hypot(Number(finalTarget.x) - Number(currentPoint.x), Number(finalTarget.y) - Number(currentPoint.y));
   let closestIndex = startIndex;
@@ -1397,6 +1591,7 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
   speedUnitsPerSec,
   arrivalRadius,
   routeSource = 'server-runtime',
+  crowdAgents = [],
 } = {}) {
   const finalTarget = {
     x: Number(target?.x ?? current?.x ?? 0),
@@ -1409,6 +1604,7 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
     x: Number(current?.x || 0),
     y: Number(current?.y || 0),
     floor: floorOr(current?.floor, finalTarget.floor),
+    buildingId: safeText(current?.buildingId || '', ''),
   };
   let steeringTarget = finalTarget;
   let route = null;
@@ -1478,24 +1674,21 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
     return false;
   };
 
-  const continueScriptedRouteWithoutReplan = !cachedRouteStep &&
-    routeSource === 'server-scripted-object-runtime' &&
-    (current?.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || current?.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER) &&
-    safeText(current?.routeId, '');
   if (cachedRouteStep) {
     steeringTarget = cachedRouteStep.steeringTarget;
     route = cachedRouteStep.route;
     phase = String(route.source || '').includes('interior') ? 'interior-route' : 'exterior-route';
-  } else if (continueScriptedRouteWithoutReplan) {
-    steeringTarget = finalTarget;
-    phase = 'scripted-object-route-continuation';
-    route = makeRoute('server-scripted-object-route-continuation', 'active-route-replan-skipped', finalTarget, [finalTarget], true);
   } else {
-    const targetBuilding = finalTarget.buildingId
-      ? readBuildingDocument(dataDir, finalTarget.buildingId)
-      : findInteriorBuildingAtApi(dataDir, finalTarget.x, finalTarget.y);
+    const coordinateTargetBuilding = findInteriorBuildingAtApi(dataDir, finalTarget.x, finalTarget.y);
+    const targetBuildingById = finalTarget.buildingId ? readBuildingDocument(dataDir, finalTarget.buildingId) : null;
+    const targetBuilding = targetBuildingById || (!finalTarget.buildingId ? coordinateTargetBuilding : null);
+    const unknownTargetBuilding = Boolean(finalTarget.buildingId && !targetBuildingById);
     const currentBuilding = findInteriorBuildingAtApi(dataDir, currentPoint.x, currentPoint.y);
-    if (currentBuilding && currentBuilding.type !== 'park' && (!targetBuilding || currentBuilding.id !== targetBuilding.id)) {
+    if (unknownTargetBuilding) {
+      steeringTarget = finalTarget;
+      phase = 'unknown-building-route';
+      route = makeRoute('server-scripted-object-unknown-building-route', 'unknown-building-direct-route', finalTarget, [finalTarget], true);
+    } else if (currentBuilding && currentBuilding.type !== 'park' && (!targetBuilding || currentBuilding.id !== targetBuilding.id)) {
       steerDoorTransition(currentBuilding, 'exit');
     } else if (targetBuilding && targetBuilding.type !== 'park') {
       const currentInsideTarget = currentBuilding?.id === targetBuilding.id;
@@ -1532,11 +1725,38 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
   const step = Math.max(1, numberOr(speedUnitsPerSec, 72) * (Math.max(1, tickMs) / 1000));
   const arrived = distanceToFinal <= arrival && !String(phase || '').startsWith('door-');
   const ratio = arrived ? 1 : Math.min(1, step / Math.max(distanceToSteering, 0.001));
-  const nextX = arrived ? Number(finalTarget.x) : Number(currentPoint.x || 0) + dx * ratio;
-  const nextY = arrived ? Number(finalTarget.y) : Number(currentPoint.y || 0) + dy * ratio;
-  const heading = distanceToSteering > 0.001
+  let nextX = arrived ? Number(finalTarget.x) : Number(currentPoint.x || 0) + dx * ratio;
+  let nextY = arrived ? Number(finalTarget.y) : Number(currentPoint.y || 0) + dy * ratio;
+  let heading = distanceToSteering > 0.001
     ? normalizeRuntimeAngleRadians(Math.atan2(dx, dy), 0)
     : normalizeRuntimeAngleRadians(current?.heading, 0);
+  let routePatch = null;
+  if (!arrived) {
+    const guarded = applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, {
+      x: nextX,
+      y: nextY,
+      floor: finalTarget.floor,
+      buildingId: finalTarget.buildingId || currentPoint.buildingId || '',
+    }, {
+      phase,
+      route,
+      crowdAgents,
+      tickMs,
+      speedUnitsPerSec,
+      finalTarget,
+      arrivalRadius: arrival,
+    });
+    if (guarded?.point) {
+      nextX = Number(guarded.point.x);
+      nextY = Number(guarded.point.y ?? guarded.point.z);
+      routePatch = guarded.routePatch || null;
+      const guardedDx = nextX - Number(currentPoint.x || 0);
+      const guardedDy = nextY - Number(currentPoint.y || 0);
+      if (Math.hypot(guardedDx, guardedDy) > 0.001) {
+        heading = normalizeRuntimeAngleRadians(Math.atan2(guardedDx, guardedDy), heading);
+      }
+    }
+  }
   return {
     x: nextX,
     y: nextY,
@@ -1547,7 +1767,7 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
     distanceToSteering,
     steeringTarget,
     finalTarget,
-    route: route ? { ...route, routeSource, phase } : null,
+    route: route ? { ...route, ...(routePatch || {}), routeSource, phase } : null,
     phase,
   };
 }
@@ -5384,6 +5604,7 @@ export class AgentRuntimeRoom extends Room {
       speedUnitsPerSec: serverScriptedObjectRuntimeSpeedUnitsPerSec(target, true),
       arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
       routeSource: 'server-scripted-object-runtime',
+      crowdAgents: serverRuntimeCrowdAgents(this.state, agentId),
     });
     const arrived = options.active === true || movement.arrived;
     if (arrived && target.runtimePhase === 'desk-routing') target.runtimePhase = 'desk-consuming';
@@ -5507,6 +5728,7 @@ export class AgentRuntimeRoom extends Room {
         speedUnitsPerSec: LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
         arrivalRadius: LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS,
         routeSource: 'server-live-action-runtime',
+        crowdAgents: serverRuntimeCrowdAgents(this.state, agentId),
       });
       const arrived = movement.arrived;
       const nextX = movement.x;
@@ -5729,6 +5951,7 @@ export class AgentRuntimeRoom extends Room {
         speedUnitsPerSec: statusKind === 'meeting' ? LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC : LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
         arrivalRadius: LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS,
         routeSource: 'server-live-status-runtime',
+        crowdAgents: serverRuntimeCrowdAgents(this.state, agentId),
       });
       const arrived = movement.arrived;
       const nextX = movement.x;
@@ -5910,6 +6133,7 @@ export class AgentRuntimeRoom extends Room {
         speedUnitsPerSec: serverScriptedObjectRuntimeSpeedUnitsPerSec(target, true),
         arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
         routeSource: 'server-scripted-object-runtime',
+        crowdAgents: serverRuntimeCrowdAgents(this.state, agentId),
       });
       const arrived = alreadyActive || movement.arrived;
       const nextX = arrived ? Number(target.x) : movement.x;

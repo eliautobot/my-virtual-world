@@ -707,6 +707,34 @@ function planRoute(building, startApi, targetApi, cfg) {
   return null;
 }
 
+export function isDynamicInteriorRouteSegmentClear(building, startApi, endApi, options = {}) {
+  if (!building || !startApi || !endApi) {
+    return { clear: true, reason: 'missing-segment-context' };
+  }
+  const cfg = { ...DYNAMIC_INTERIOR_ROUTING, ...(options.config || options || {}) };
+  try {
+    const grid = buildGrid(building, cfg);
+    const startWorld = { x: apiToWorld(startApi.x), z: apiToWorld(startApi.y ?? startApi.z) };
+    const endWorld = { x: apiToWorld(endApi.x), z: apiToWorld(endApi.y ?? endApi.z) };
+    const startLocal = getBuildingLocalPoint(building, startWorld.x, startWorld.z);
+    const endLocal = getBuildingLocalPoint(building, endWorld.x, endWorld.z);
+    const startBlocked = isBlockedLocal(building, grid.obstacles, startLocal.x, startLocal.z, cfg);
+    const endBlocked = isBlockedLocal(building, grid.obstacles, endLocal.x, endLocal.z, cfg);
+    const segmentClear = hasLineOfSightLocal(building, grid.obstacles, startLocal.x, startLocal.z, endLocal.x, endLocal.z, cfg);
+    const clear = !endBlocked && (startBlocked || segmentClear);
+    return {
+      clear,
+      startBlocked,
+      endBlocked,
+      segmentClear,
+      reason: startBlocked && clear ? 'start-blocked-recovery' : startBlocked ? 'start-blocked' : endBlocked ? 'end-blocked' : (segmentClear ? 'clear' : 'segment-blocked'),
+      blockedPoint: endApi ? { x: Number(endApi.x) || 0, y: Number(endApi.y ?? endApi.z) || 0 } : null,
+    };
+  } catch (error) {
+    return { clear: true, reason: 'validator-error', error: error?.message || String(error) };
+  }
+}
+
 function ensureAgentState(agentId) {
   if (!_agentState.has(agentId)) {
     _agentState.set(agentId, {
