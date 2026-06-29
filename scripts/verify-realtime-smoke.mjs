@@ -9,7 +9,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@colyseus/sdk';
 import {
   AGENT_RUNTIME_ROOM_NAME,
+  DEFAULT_WORLD_RUNTIME_TICK_MS,
+  LIVE_ACTION_RUNTIME_POLL_MS,
+  LIVE_STATUS_RUNTIME_POLL_MS,
   LIVE_STATUS_RUNTIME_OWNER,
+  RUNTIME_STATE_BROADCAST_INTERVAL_MS,
+  SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
   SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS,
@@ -188,6 +193,11 @@ async function run() {
   const port = await getOpenPort();
   let server = startServer({ port, dataDir });
   try {
+    assert.equal(LIVE_ACTION_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live action runtime should move at the world tick for smooth observer interpolation');
+    assert.equal(LIVE_STATUS_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live status runtime should move at the world tick for smooth observer interpolation');
+    assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'scripted object runtime should move at the world tick for smooth observer interpolation');
+    assert.equal(RUNTIME_STATE_BROADCAST_INTERVAL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'full runtime state broadcasts should not lag behind server movement ticks');
+
     const health = await waitForHealth(port, server);
     assert.equal(health.ok, true);
     assert.equal(health.room, AGENT_RUNTIME_ROOM_NAME);

@@ -1101,7 +1101,7 @@ const AGENT_RUNTIME_SNAPSHOT_INTERVAL_MS = 1200;
 const AGENT_RUNTIME_SNAPSHOT_KEEPALIVE_MS = 3000;
 const AGENT_RUNTIME_SNAPSHOT_MIN_DISTANCE = 1.5;
 const AGENT_RUNTIME_POSITION_WRITER_STALE_MS = 7000;
-const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 850;
+const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 650;
 const AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE = API_TILE * 6;
 const AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE = 0.05;
 const AGENT_RUNTIME_WORLD_OBJECT_TTL_MS = 15000;
@@ -2329,6 +2329,7 @@ function applyAgentRuntimeVisualState(agent, visualState = null) {
   } : null;
   const runtimeRoute = visualState.runtimeRoute && typeof visualState.runtimeRoute === 'object' ? visualState.runtimeRoute : null;
   const runtimeNextPoint = makeAgentRuntimeVisualPoint(runtimeRoute?.nextPoint || null);
+  const runtimeFinalPoint = makeAgentRuntimeVisualPoint(runtimeRoute?.finalPoint || null);
   if (runtimeNextPoint && runtimeRoute?.active !== false) {
     agent._movementDebugNextWaypoint = {
       x: runtimeNextPoint.x,
@@ -2338,8 +2339,16 @@ function applyAgentRuntimeVisualState(agent, visualState = null) {
       routeLength: agentRuntimeVisualNumber(runtimeRoute.routeLength, null),
       reason: agentRuntimeVisualText(runtimeRoute.reason || '', 120),
     };
+    agent._movementDebugDesiredTarget = { x: runtimeNextPoint.x, y: runtimeNextPoint.y };
+    agent._movementDebugFinalTarget = runtimeFinalPoint ? { x: runtimeFinalPoint.x, y: runtimeFinalPoint.y } : null;
   } else if (agent._runtimeObserverOnly && runtimeRoute) {
     agent._movementDebugNextWaypoint = null;
+    agent._movementDebugDesiredTarget = runtimeFinalPoint ? { x: runtimeFinalPoint.x, y: runtimeFinalPoint.y } : null;
+    agent._movementDebugFinalTarget = runtimeFinalPoint ? { x: runtimeFinalPoint.x, y: runtimeFinalPoint.y } : null;
+  } else if (agent._runtimeObserverOnly) {
+    agent._movementDebugNextWaypoint = null;
+    agent._movementDebugDesiredTarget = null;
+    agent._movementDebugFinalTarget = null;
   }
 
   if (visualState.activityActive === false) {
@@ -2666,10 +2675,15 @@ function holdAgentForServerAuthoritativeRuntimeObserver(agent, dt) {
   const snapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
   agent._runtimeObserverOnly = true;
   if (snapshot) {
-    applyAgentRuntimeSnapshotToAgent(agent, snapshot, {
-      updateVisible: false,
-      source: 'server-authoritative-runtime-observer-frame',
-    });
+    const snapshotChanged = !agent._runtimeSnapshot ||
+      Number(agent._runtimeSnapshot.version || 0) !== Number(snapshot.version || 0) ||
+      String(agent._runtimeSnapshot.updatedAt || '') !== String(snapshot.updatedAt || '');
+    if (snapshotChanged) {
+      applyAgentRuntimeSnapshotToAgent(agent, snapshot, {
+        updateVisible: true,
+        source: 'server-authoritative-runtime-observer-frame',
+      });
+    }
     const observerMoving = updateAgentRuntimeObserverMotion(agent, dt);
     updateAgentAnimation(agent, dt, observerMoving, false);
   } else {
