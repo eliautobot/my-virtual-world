@@ -1366,6 +1366,7 @@ function serverRuntimeCrowdAgents(state, agentId) {
     const plain = snapshotToPlain(record);
     const point = normalizeServerRuntimePoint(plain, 1);
     if (!point) continue;
+    const target = plain.target && typeof plain.target === 'object' ? plain.target : null;
     crowd.push({
       agentId: safeText(plain.agentId || otherId, '') || String(otherId),
       x: point.x,
@@ -1373,9 +1374,20 @@ function serverRuntimeCrowdAgents(state, agentId) {
       floor: point.floor,
       buildingId: point.buildingId,
       state: safeText(plain.state, ''),
+      targetObjectKey: String(target?.objectKey || '').slice(0, 180),
+      targetBaseObjectKey: String(target?.baseObjectKey || target?.objectKey || '').slice(0, 180),
+      targetIsQueueUse: target?.isQueueUse === true,
     });
   }
   return crowd;
+}
+
+function shouldIgnoreServerRuntimeCrowdAgent(other, routeTarget = null) {
+  if (!other || !routeTarget || typeof routeTarget !== 'object') return false;
+  const baseObjectKey = String(routeTarget.baseObjectKey || routeTarget.objectKey || '');
+  if (!baseObjectKey || String(other.targetBaseObjectKey || '') !== baseObjectKey) return false;
+  const otherWaiting = ['waiting', 'queued'].includes(String(other.state || '').toLowerCase());
+  return other.targetIsQueueUse === true && otherWaiting;
 }
 
 function isServerRuntimeDoorPhase(phase, route = null) {
@@ -1422,6 +1434,7 @@ function applyServerRuntimeAgentAvoidance(agentId, currentPoint, proposedPoint, 
   speedUnitsPerSec = LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
   finalTarget = null,
   arrivalRadius = 5,
+  routeTarget = null,
 } = {}) {
   const current = normalizeServerRuntimePoint(currentPoint, proposedPoint?.floor || 1);
   const proposed = normalizeServerRuntimePoint(proposedPoint, current?.floor || 1);
@@ -1438,6 +1451,7 @@ function applyServerRuntimeAgentAvoidance(agentId, currentPoint, proposedPoint, 
   for (const other of crowdAgents || []) {
     if (!other || String(other.agentId || '') === String(agentId || '')) continue;
     if (floorOr(other.floor, current.floor) !== current.floor) continue;
+    if (shouldIgnoreServerRuntimeCrowdAgent(other, routeTarget)) continue;
     if (destination && Math.hypot(numberOr(other.x, destination.x) - destination.x, numberOr(other.y, destination.y) - destination.y) <= destinationOccupantRadius) continue;
     const ox = current.x - numberOr(other.x, current.x);
     const oy = current.y - numberOr(other.y, current.y);
@@ -1457,6 +1471,7 @@ function applyServerRuntimeAgentAvoidance(agentId, currentPoint, proposedPoint, 
   for (const other of crowdAgents || []) {
     if (!other || String(other.agentId || '') === String(agentId || '')) continue;
     if (floorOr(other.floor, current.floor) !== current.floor) continue;
+    if (shouldIgnoreServerRuntimeCrowdAgent(other, routeTarget)) continue;
     if (destination && Math.hypot(numberOr(other.x, destination.x) - destination.x, numberOr(other.y, destination.y) - destination.y) <= destinationOccupantRadius) continue;
     const ox = next.x - numberOr(other.x, next.x);
     const oy = next.y - numberOr(other.y, next.y);
@@ -1483,6 +1498,7 @@ function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, propo
   speedUnitsPerSec = LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
   finalTarget = null,
   arrivalRadius = 5,
+  routeTarget = null,
 } = {}) {
   const current = normalizeServerRuntimePoint(currentPoint, proposedPoint?.floor || 1);
   const proposed = normalizeServerRuntimePoint(proposedPoint, current?.floor || 1);
@@ -1502,7 +1518,7 @@ function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, propo
     };
   }
 
-  const crowdResult = applyServerRuntimeAgentAvoidance(agentId, current, proposed, crowdAgents, { tickMs, speedUnitsPerSec, finalTarget, arrivalRadius });
+  const crowdResult = applyServerRuntimeAgentAvoidance(agentId, current, proposed, crowdAgents, { tickMs, speedUnitsPerSec, finalTarget, arrivalRadius, routeTarget });
   if (!crowdResult.adjusted) return { point: proposed, adjusted: false, routePatch: null };
   const crowdStatic = validateServerRuntimeStaticSegment(dataDir, current, crowdResult.point, { phase, route });
   if (!crowdStatic.clear) {
@@ -1745,6 +1761,7 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
       speedUnitsPerSec,
       finalTarget,
       arrivalRadius: arrival,
+      routeTarget: target,
     });
     if (guarded?.point) {
       nextX = Number(guarded.point.x);
