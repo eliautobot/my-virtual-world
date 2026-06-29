@@ -100,7 +100,10 @@ async function verifyCorsPreflight(port) {
 
 function waitForRoomMessage(room, type, predicate = () => true) {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`timed out waiting for ${type}`)), 5000);
+    const timeout = setTimeout(() => {
+      const lastError = room.__runtimeErrors?.[room.__runtimeErrors.length - 1] || null;
+      reject(new Error(`timed out waiting for ${type}${lastError ? `; last runtime error: ${JSON.stringify(lastError)}` : ''}`));
+    }, 5000);
     const unregister = room.onMessage(type, (message) => {
       if (!predicate(message)) return;
       clearTimeout(timeout);
@@ -176,7 +179,12 @@ async function waitForObject(room, objectKey, predicate = () => true) {
 async function connectRoom(port) {
   const client = new Client(`ws://127.0.0.1:${port}`);
   const room = await client.joinOrCreate(AGENT_RUNTIME_ROOM_NAME, { worldId: 'smoke' });
+  room.__runtimeErrors = [];
   room.onMessage('runtime:event', () => {});
+  room.onMessage('runtime:error', (message) => {
+    room.__runtimeErrors.push(message);
+    if (room.__runtimeErrors.length > 12) room.__runtimeErrors.shift();
+  });
   room.onMessage('runtime:state', (message) => {
     if (message?.snapshot) room.__runtimeDoc = message.snapshot;
   });
@@ -581,6 +589,36 @@ async function run() {
               transformApplied: { itemRotation: 90, buildingRotation: 0, totalRotation: 90 },
             }],
           },
+          {
+            type: 'checkoutCounter',
+            x: 15,
+            z: 9,
+            floor: 1,
+            room: 'shop',
+            actionLocations: [
+              {
+                id: 'customer',
+                roles: ['customer', 'use'],
+                actionId: 'shop.checkout',
+                actionTarget: { x: 15, z: 9.85, floor: 1, faceAngle: Math.PI },
+                facing: 'north',
+              },
+              {
+                id: 'queue',
+                roles: ['queue', 'wait'],
+                actionId: 'planning.schedule',
+                capacityKind: 'queue',
+                serviceQueue: true,
+                actionTarget: { x: 15, z: 10.85, floor: 1, faceAngle: Math.PI },
+                queueMaxPoints: 3,
+                queueLocations: [
+                  { id: 'queue:0', spotId: 'queue:0', actionTarget: { x: 15, z: 10.85, floor: 1, faceAngle: Math.PI }, queueIndex: 0 },
+                  { id: 'queue:1', spotId: 'queue:1', actionTarget: { x: 15, z: 11.85, floor: 1, faceAngle: Math.PI }, queueIndex: 1 },
+                  { id: 'queue:2', spotId: 'queue:2', actionTarget: { x: 15, z: 12.85, floor: 1, faceAngle: Math.PI }, queueIndex: 2 },
+                ],
+              },
+            ],
+          },
         ],
       },
     }, null, 2)}\n`);
@@ -831,6 +869,107 @@ async function run() {
       !agent.visualStateJson.includes('vendingItemId')
     );
     assert.equal(coraVendingDone.owner, 'agent-scripted-mode');
+
+    for (const [agentId, x, y] of [
+      ['queue-a', 560, 320],
+      ['queue-b', 548, 324],
+      ['queue-c', 536, 328],
+    ]) {
+      scriptedRoom.send('runtime:snapshot', {
+        requestId: `${agentId}-checkout-queue-snapshot`,
+        agentId,
+        mode: 'scripted',
+        owner: 'agent-scripted-mode',
+        x,
+        y,
+        floor: 1,
+        state: 'idle',
+      });
+      const queueSnapshotAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === `${agentId}-checkout-queue-snapshot`);
+      assert.equal(queueSnapshotAck.snapshot.agentId, agentId);
+    }
+    scriptedRoom.send('runtime:objectUseRequest', {
+      requestId: 'queue-a-checkout-use',
+      agentId: 'queue-a',
+      source: 'smoke-service-queue-use',
+      target: {
+        buildingId: 'office',
+        furnitureIndex: 4,
+        objectType: 'checkoutCounter',
+        spotId: 'customer',
+        stayMs: 1200,
+      },
+      agentPosition: { x: 560, y: 320, floor: 1 },
+    });
+    const queueAUseAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'queue-a-checkout-use');
+    assert.equal(queueAUseAck.object.objectKey, 'office:furniture:4:checkoutCounter');
+    for (const agentId of ['queue-b', 'queue-c']) {
+      scriptedRoom.send('runtime:objectUseRequest', {
+        requestId: `${agentId}-checkout-queue`,
+        agentId,
+        source: 'smoke-service-queue-wait',
+        target: {
+          buildingId: 'office',
+          furnitureIndex: 4,
+          objectType: 'checkoutCounter',
+          spotId: 'queue',
+        },
+        agentPosition: { x: agentId === 'queue-b' ? 548 : 536, y: agentId === 'queue-b' ? 324 : 328, floor: 1 },
+      });
+      const queueAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === `${agentId}-checkout-queue`);
+      assert.equal(queueAck.type, 'runtime:objectUseRequest');
+      assert(queueAck.object.objectKey.includes('office:furniture:4:checkoutCounter:queue:queue:'), 'queued object use should claim a per-slot queue object');
+    }
+    const checkoutQueueBase = await waitForObject(scriptedRoom, 'office:furniture:4:checkoutCounter', (object) =>
+      object.dataJson.includes('_scriptedServiceQueueStore') &&
+      object.dataJson.includes('queue-b') &&
+      object.dataJson.includes('queue-c')
+    );
+    assert(checkoutQueueBase.dataJson.includes('"queueIndex":0'));
+    assert(checkoutQueueBase.dataJson.includes('"queueIndex":1'));
+    const queueBWait = await waitForAgent(scriptedRoom, 'queue-b', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.state === 'waiting' &&
+      agent.targetJson.includes('"isQueueUse":true') &&
+      agent.targetJson.includes('"queueIndex":0') &&
+      agent.visualStateJson.includes('service-queue-wait') &&
+      agent.visualStateJson.includes('bus-stop-wait')
+    );
+    assert(queueBWait.targetJson.includes('office:furniture:4:checkoutCounter:queue:queue:0'));
+    const queueCWait = await waitForAgent(scriptedRoom, 'queue-c', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.state === 'waiting' &&
+      agent.targetJson.includes('"isQueueUse":true') &&
+      agent.targetJson.includes('"queueIndex":1') &&
+      agent.visualStateJson.includes('service-queue-wait')
+    );
+    assert(queueCWait.targetJson.includes('office:furniture:4:checkoutCounter:queue:queue:1'));
+    const queueBPromoted = await waitForAgent(scriptedRoom, 'queue-b', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.targetJson.includes('office:furniture:4:checkoutCounter') &&
+      agent.targetJson.includes('"isQueueUse":false') &&
+      agent.visualStateJson.includes('checkout-counter-customer')
+    );
+    assert(['routing', 'using'].includes(queueBPromoted.state));
+    const queueCShifted = await waitForAgent(scriptedRoom, 'queue-c', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.targetJson.includes('"isQueueUse":true') &&
+      agent.targetJson.includes('"queueIndex":0') &&
+      agent.targetJson.includes('office:furniture:4:checkoutCounter:queue:queue:0')
+    );
+    assert(['routing', 'waiting'].includes(queueCShifted.state));
+    await waitForObject(scriptedRoom, 'office:furniture:4:checkoutCounter', (object) => {
+      const reservations = object.data?._scriptedServiceQueueStore?.reservations || [];
+      return reservations.some(entry => entry.agentId === 'queue-c' && entry.queueIndex === 0) &&
+        !reservations.some(entry => entry.agentId === 'queue-b');
+    });
+    const queueCPromoted = await waitForAgent(scriptedRoom, 'queue-c', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.targetJson.includes('office:furniture:4:checkoutCounter') &&
+      agent.targetJson.includes('"isQueueUse":false') &&
+      agent.visualStateJson.includes('checkout-counter-customer')
+    );
+    assert(['routing', 'using'].includes(queueCPromoted.state));
 
     scriptedRoom.send('runtime:objectUseRequest', {
       requestId: 'adam-transformed-facing-object-use',

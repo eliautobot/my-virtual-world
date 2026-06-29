@@ -2062,6 +2062,9 @@ function makeLiveStatusObjectData(agentId, target, state, now, expiresAt) {
 }
 
 const SCRIPTED_OBJECT_IDLE_STATES = new Set(['idle', 'available', 'online']);
+const SERVER_SCRIPTED_OBJECT_QUEUE_SPACING_TILES = 0.8;
+const SERVER_SCRIPTED_OBJECT_QUEUE_DEFAULT_CAPACITY = 3;
+const SERVER_SCRIPTED_QUEUE_TERMINAL_STATES = new Set(['released', 'cancelled', 'complete', 'completed', 'failed']);
 const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   chair: Object.freeze({ kind: 'chair-sit', spotId: 'seat', animationId: 'sit', poseKind: 'seat', stayMs: [9000, 15000] }),
   officechair: Object.freeze({ kind: 'office-chair-sit', spotId: 'seat', animationId: 'sit', poseKind: 'seat', stayMs: [9000, 15000] }),
@@ -2572,6 +2575,160 @@ function isScriptedObjectQueueSpot(location = null, furniture = null) {
   );
 }
 
+function isLiveServerScriptedServiceQueueReservation(entry = null) {
+  return Boolean(entry && !SERVER_SCRIPTED_QUEUE_TERMINAL_STATES.has(String(entry.state || entry.status || '').toLowerCase()));
+}
+
+function normalizeServerScriptedServiceQueueReservations(store = null) {
+  if (!store || typeof store !== 'object') return [];
+  if (!Array.isArray(store.reservations)) store.reservations = [];
+  store.reservations = store.reservations
+    .filter(isLiveServerScriptedServiceQueueReservation)
+    .sort((a, b) =>
+      Number(a.queuePriority || 0) - Number(b.queuePriority || 0) ||
+      Number(a.queuedAtMs || 0) - Number(b.queuedAtMs || 0) ||
+      String(a.agentId || '').localeCompare(String(b.agentId || ''))
+    )
+    .map((entry, index) => {
+      const queueSpotId = safeText(String(entry.queueSpotId || entry.spotId || entry.slotId || 'queue').replace(/:\d+$/, ''), 'queue') || 'queue';
+      const queueTargetId = `${queueSpotId}:${index}`;
+      return {
+        ...entry,
+        state: safeText(entry.state, 'queued') || 'queued',
+        status: safeText(entry.status, 'queued') || 'queued',
+        queueSpotId,
+        queueIndex: index,
+        slotId: queueTargetId,
+        queueTargetId,
+        activationSpotId: queueTargetId,
+      };
+    });
+  return store.reservations;
+}
+
+function cloneServerScriptedServiceQueueStore(store = null) {
+  const next = { reservations: Array.isArray(store?.reservations) ? store.reservations.map(entry => ({ ...entry })) : [] };
+  normalizeServerScriptedServiceQueueReservations(next);
+  return next;
+}
+
+function hasServerScriptedServiceQueueStoreData(data = null) {
+  return Boolean(data && typeof data === 'object' && (data._scriptedServiceQueueStore || data.serviceQueueStore || data.scriptedServiceQueueStore));
+}
+
+function serverScriptedServiceQueueStoreFromWorldObject(object = null) {
+  const plain = object ? worldObjectToPlain(object) : null;
+  const data = plain?.data && typeof plain.data === 'object' ? plain.data : {};
+  const raw = data._scriptedServiceQueueStore || data.serviceQueueStore || data.scriptedServiceQueueStore || null;
+  return cloneServerScriptedServiceQueueStore(raw);
+}
+
+function serverScriptedServiceQueueStoreData(store = null, options = {}) {
+  const reservations = cloneServerScriptedServiceQueueStore(store).reservations;
+  return {
+    _scriptedServiceQueueStore: { reservations: reservations.map(entry => ({ ...entry })) },
+    serviceQueueStore: { reservations: reservations.map(entry => ({ ...entry })) },
+    clearServiceQueue: reservations.length === 0 && options.clearEmpty === true,
+  };
+}
+
+function serverScriptedQueueBaseObjectKey(target = null) {
+  const base = safeText(target?.baseObjectKey, '');
+  if (base) return base;
+  const objectKey = safeText(target?.objectKey, '');
+  const queueIndex = objectKey.indexOf(':queue:');
+  return queueIndex >= 0 ? objectKey.slice(0, queueIndex) : objectKey;
+}
+
+function serverScriptedQueueSpotId(target = null, fallback = 'queue') {
+  return safeText(String(target?.queueSpotId || target?.spotId || target?.interactionSpotId || target?.slotId || fallback || 'queue').replace(/:\d+$/, ''), 'queue') || 'queue';
+}
+
+function serverScriptedQueueObjectKey(baseObjectKey, reservation = null) {
+  const queueSpotId = safeText(reservation?.queueSpotId, 'queue') || 'queue';
+  const queueIndex = Math.max(0, Math.floor(numberOr(reservation?.queueIndex, 0)));
+  return normalizeWorldObjectKey(`${baseObjectKey}:queue:${queueSpotId}:${queueIndex}`);
+}
+
+function getServerAuthoredObjectQueueLocations(queueDef = {}, furniture = {}) {
+  queueDef = queueDef || {};
+  furniture = furniture || {};
+  const queueConfig = queueDef.queueConfig || furniture.queueConfig || furniture.serviceQueue || null;
+  const raw = Array.isArray(queueDef.queueLocations) ? queueDef.queueLocations
+    : Array.isArray(queueDef.queuePositions) ? queueDef.queuePositions
+      : Array.isArray(queueDef.queuePoints) ? queueDef.queuePoints
+        : Array.isArray(queueConfig?.locations) ? queueConfig.locations
+          : Array.isArray(queueConfig?.positions) ? queueConfig.positions
+            : Array.isArray(queueConfig?.points) ? queueConfig.points
+              : Array.isArray(furniture.queueLocations) ? furniture.queueLocations
+                : Array.isArray(furniture.queuePositions) ? furniture.queuePositions
+                  : Array.isArray(furniture.queuePoints) ? furniture.queuePoints
+                    : [];
+  return raw.map((spot, index) => ({
+    ...spot,
+    id: safeText(spot?.id || spot?.spotId || spot?.slotId || `${queueDef.id || queueDef.spotId || 'queue'}:${index}`, `${queueDef.id || queueDef.spotId || 'queue'}:${index}`),
+    spotId: safeText(spot?.spotId || spot?.id || spot?.slotId || `${queueDef.id || queueDef.spotId || 'queue'}:${index}`, `${queueDef.id || queueDef.spotId || 'queue'}:${index}`),
+    slotId: safeText(spot?.slotId || spot?.spotId || spot?.id || `${queueDef.id || queueDef.spotId || 'queue'}:${index}`, `${queueDef.id || queueDef.spotId || 'queue'}:${index}`),
+    queueIndex: Math.max(0, Math.floor(numberOr(spot?.queueIndex ?? spot?.index, index))),
+    roles: Array.isArray(spot?.roles) && spot.roles.length ? spot.roles : ['queue'],
+    capacityKind: spot?.capacityKind || 'queue',
+    serviceQueue: spot?.serviceQueue !== false,
+  })).sort((a, b) => a.queueIndex - b.queueIndex || String(a.id || '').localeCompare(String(b.id || '')));
+}
+
+function serverScriptedServiceQueueDefinitionsForFurniture(furniture = {}) {
+  if (!furniture) return [];
+  const authoredLocations = Array.isArray(furniture.actionLocations) ? furniture.actionLocations : [];
+  const configured = authoredLocations.filter(location => isScriptedObjectQueueSpot(location, furniture));
+  if (configured.length) return configured;
+  const explicit = furniture.queuePolicy ?? furniture.usePolicy ?? furniture.occupancyPolicy ?? furniture.servicePolicy ?? furniture.queueAddon;
+  const explicitEnabled = explicit === true || ['queue', 'service-queue', 'required-queue', 'first-come-first-served'].includes(String(explicit || '').toLowerCase());
+  const queueLocations = getServerAuthoredObjectQueueLocations({ id: 'queue', spotId: 'queue' }, furniture);
+  if ((explicitEnabled || furniture.queue === true || furniture.serviceQueue === true || furniture.queueConfig) && queueLocations.length) {
+    return [{
+      id: 'queue',
+      spotId: 'queue',
+      actionId: 'planning.schedule',
+      action: 'planning.schedule',
+      roles: ['queue'],
+      capacityKind: 'queue',
+      serviceQueue: true,
+      queueLocations,
+    }];
+  }
+  return [];
+}
+
+function serverScriptedServiceQueueDefinitionForFurniture(furniture = {}, preferredQueueSpotId = '') {
+  const preferred = safeText(String(preferredQueueSpotId || '').replace(/:\d+$/, ''), '');
+  return serverScriptedServiceQueueDefinitionsForFurniture(furniture).find(location => {
+    const spotId = serverScriptedQueueSpotId(location);
+    return preferred && spotId === preferred;
+  }) || serverScriptedServiceQueueDefinitionsForFurniture(furniture)[0] || null;
+}
+
+function findServerScriptedObjectFurniture(dataDir, target = null) {
+  const buildingId = safeText(target?.buildingId, '');
+  const furnitureIndex = Number(target?.furnitureIndex);
+  if (!buildingId || !Number.isFinite(furnitureIndex) || furnitureIndex < 0) return null;
+  const building = listBuildingDocuments(dataDir).find(item => item?.id === buildingId) || null;
+  const furniture = building?.interior?.furniture?.[Math.floor(furnitureIndex)] || null;
+  if (!building || !furniture) return null;
+  return { building, furniture, furnitureIndex: Math.floor(furnitureIndex) };
+}
+
+function getServerScriptedServiceQueueMaxPoints(dataDir, target = null) {
+  const found = findServerScriptedObjectFurniture(dataDir, target);
+  const furniture = found?.furniture || null;
+  const queueDef = serverScriptedServiceQueueDefinitionForFurniture(furniture, serverScriptedQueueSpotId(target));
+  const authoredQueueLocations = getServerAuthoredObjectQueueLocations(queueDef || {}, furniture || {});
+  const capacity = typeof queueDef?.capacity === 'number' ? queueDef.capacity : Number(queueDef?.capacity?.maxAgents || 0);
+  return Math.max(1, Math.floor(numberOr(
+    queueDef?.queueMaxPoints ?? queueDef?.maxQueuePoints ?? queueDef?.queueCapacity ?? capacity ?? target?.queueMaxPoints,
+    authoredQueueLocations.length || SERVER_SCRIPTED_OBJECT_QUEUE_DEFAULT_CAPACITY,
+  )));
+}
+
 function scriptedObjectStayMs(target = null) {
   const config = scriptedObjectActivityConfig(null, target);
   const stay = Array.isArray(config?.stayMs) ? config.stayMs : null;
@@ -2689,6 +2846,138 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
   };
 }
 
+function serverScriptedObjectPrimaryTargetForQueue(dataDir, queueTarget = null) {
+  const baseObjectKey = serverScriptedQueueBaseObjectKey(queueTarget);
+  return listScriptedObjectRuntimeTargets(dataDir).find(target =>
+    !target.isQueueUse &&
+    (safeText(target.baseObjectKey, '') || target.objectKey) === baseObjectKey
+  ) || null;
+}
+
+function serverScriptedQueueRuntimeTargetForBase(dataDir, baseTarget = null) {
+  const baseObjectKey = serverScriptedQueueBaseObjectKey(baseTarget);
+  return listScriptedObjectRuntimeTargets(dataDir).find(target =>
+    target.isQueueUse &&
+    (safeText(target.baseObjectKey, '') || serverScriptedQueueBaseObjectKey(target)) === baseObjectKey
+  ) || null;
+}
+
+function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null, reservation = null) {
+  if (!queueTarget || !reservation) return null;
+  const baseObjectKey = serverScriptedQueueBaseObjectKey(queueTarget);
+  if (!baseObjectKey) return null;
+  const found = findServerScriptedObjectFurniture(dataDir, queueTarget);
+  const building = found?.building || null;
+  const furniture = found?.furniture || null;
+  const furnitureIndex = found?.furnitureIndex ?? queueTarget.furnitureIndex;
+  const queueSpotId = safeText(reservation.queueSpotId || serverScriptedQueueSpotId(queueTarget), 'queue') || 'queue';
+  const queueIndex = Math.max(0, Math.floor(numberOr(reservation.queueIndex, 0)));
+  const slotId = `${queueSpotId}:${queueIndex}`;
+  const objectKey = serverScriptedQueueObjectKey(baseObjectKey, { ...reservation, queueSpotId, queueIndex });
+  const primaryTarget = serverScriptedObjectPrimaryTargetForQueue(dataDir, queueTarget);
+  if (building && furniture) {
+    const queueDef = serverScriptedServiceQueueDefinitionForFurniture(furniture, queueSpotId);
+    const authoredLocation = getServerAuthoredObjectQueueLocations(queueDef || {}, furniture)
+      .find(spot => Number(spot.queueIndex || 0) === queueIndex) || null;
+    if (authoredLocation) {
+      const authoredTarget = scriptedObjectTargetFromFurnitureSpot(building, furniture, furnitureIndex, {
+        ...authoredLocation,
+        id: authoredLocation.id || slotId,
+        spotId: authoredLocation.spotId || slotId,
+        slotId: authoredLocation.slotId || slotId,
+        actionId: reservation.actionId || queueDef?.actionId || queueDef?.action || 'planning.schedule',
+        roles: Array.isArray(authoredLocation.roles) && authoredLocation.roles.length ? authoredLocation.roles : ['queue'],
+        serviceQueue: true,
+        capacityKind: 'queue',
+      });
+      const authoredX = numberOr(authoredTarget?.x, NaN);
+      const authoredY = numberOr(authoredTarget?.y, NaN);
+      if (authoredTarget && Number.isFinite(authoredX) && Number.isFinite(authoredY)) {
+        const authoredFaceAngle = Number.isFinite(Number(authoredTarget.faceAngle))
+          ? normalizeRuntimeAngleRadians(authoredTarget.faceAngle, 0)
+          : (primaryTarget ? normalizeRuntimeAngleRadians(Math.atan2(Number(primaryTarget.x) - authoredX, Number(primaryTarget.y) - authoredY), queueTarget.faceAngle || 0) : normalizeRuntimeAngleRadians(queueTarget.faceAngle, 0));
+        return {
+          ...queueTarget,
+          ...authoredTarget,
+          x: authoredX,
+          y: authoredY,
+          objectKey,
+          baseObjectKey,
+          isQueueUse: true,
+          poseKind: 'wait',
+          animationId: 'bus-stop-wait',
+          activityKind: 'service-queue-wait',
+          interactionSpotId: slotId,
+          spotId: slotId,
+          slotId,
+          queueSpotId,
+          queueIndex,
+          queueTargetId: slotId,
+          routeSpotRole: 'serviceQueueSlot',
+          stayMs: Math.max(SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS, numberOr(queueTarget.stayMs, SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS)),
+          faceAngle: authoredFaceAngle,
+        };
+      }
+    }
+    const queueDefTarget = queueDef ? scriptedObjectTargetFromFurnitureSpot(building, furniture, furnitureIndex, queueDef) : null;
+    const primary = primaryTarget || scriptedObjectTargetFromFurnitureSpot(building, furniture, furnitureIndex, null);
+    const queueAnchor = queueDefTarget || queueTarget || primary;
+    const primaryX = numberOr(primary?.x, NaN);
+    const primaryY = numberOr(primary?.y, NaN);
+    const anchorX = numberOr(queueAnchor?.x, NaN);
+    const anchorY = numberOr(queueAnchor?.y, NaN);
+    if (primary && queueAnchor && Number.isFinite(primaryX) && Number.isFinite(primaryY) && Number.isFinite(anchorX) && Number.isFinite(anchorY)) {
+      const dx = anchorX - primaryX;
+      const dy = anchorY - primaryY;
+      const len = Math.hypot(dx, dy) || 1;
+      const spacing = (Number(queueDef?.queueSpacingTiles ?? queueDef?.spacingTiles ?? SERVER_SCRIPTED_OBJECT_QUEUE_SPACING_TILES) || SERVER_SCRIPTED_OBJECT_QUEUE_SPACING_TILES) * LIVE_ACTION_API_TILE;
+      const x = primaryX + (dx / len) * spacing * (queueIndex + 1);
+      const y = primaryY + (dy / len) * spacing * (queueIndex + 1);
+      return {
+        ...queueTarget,
+        x,
+        y,
+        floor: floorOr(queueTarget.floor ?? primary.floor, 1),
+        objectKey,
+        baseObjectKey,
+        isQueueUse: true,
+        poseKind: 'wait',
+        animationId: 'bus-stop-wait',
+        activityKind: 'service-queue-wait',
+        interactionSpotId: slotId,
+        spotId: slotId,
+        slotId,
+        queueSpotId,
+        queueIndex,
+        queueTargetId: slotId,
+        routeSpotRole: 'serviceQueueSlot',
+        actionId: safeText(reservation.actionId || queueDef?.actionId || queueDef?.action || queueTarget.actionId, 'planning.schedule') || 'planning.schedule',
+        stayMs: Math.max(SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS, numberOr(queueTarget.stayMs, SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS)),
+        faceAngle: normalizeRuntimeAngleRadians(Math.atan2(primaryX - x, primaryY - y), queueTarget.faceAngle || 0),
+      };
+    }
+  }
+  return {
+    ...queueTarget,
+    x: numberOr(queueTarget.x, primaryTarget?.x ?? 0),
+    y: numberOr(queueTarget.y, primaryTarget?.y ?? 0),
+    faceAngle: normalizeRuntimeAngleRadians(queueTarget.faceAngle, primaryTarget?.faceAngle || 0),
+    objectKey,
+    baseObjectKey,
+    isQueueUse: true,
+    poseKind: 'wait',
+    animationId: 'bus-stop-wait',
+    activityKind: 'service-queue-wait',
+    interactionSpotId: slotId,
+    spotId: slotId,
+    slotId,
+    queueSpotId,
+    queueIndex,
+    queueTargetId: slotId,
+    routeSpotRole: 'serviceQueueSlot',
+  };
+}
+
 function listScriptedObjectRuntimeTargets(dataDir) {
   const targets = [];
   for (const building of listBuildingDocuments(dataDir)) {
@@ -2697,8 +2986,11 @@ function listScriptedObjectRuntimeTargets(dataDir) {
       const item = furniture[index];
       if (!item || item.deleted || item.removed || item.enabled === false) continue;
       const locations = Array.isArray(item.actionLocations) && item.actionLocations.length > 0 ? item.actionLocations : [];
+      const syntheticQueueLocations = serverScriptedServiceQueueDefinitionsForFurniture(item)
+        .filter(location => !locations.some(existing => scriptedObjectSpotId(existing) === scriptedObjectSpotId(location)))
+        .filter(location => !locations.some(existing => isScriptedObjectQueueSpot(existing, item) && serverScriptedQueueSpotId(existing) === serverScriptedQueueSpotId(location)));
       const preferredSpotIds = scriptedObjectPreferredSpotIds(item);
-      const sortedLocations = locations.slice().sort((a, b) => {
+      const sortedLocations = [...locations, ...syntheticQueueLocations].sort((a, b) => {
         const aSpot = String(scriptedObjectSpotId(a) || '').toLowerCase();
         const bSpot = String(scriptedObjectSpotId(b) || '').toLowerCase();
         const aPreferred = preferredSpotIds.indexOf(aSpot);
@@ -2735,8 +3027,10 @@ function isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs = D
   const baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
   const baseObject = baseObjectKey !== target.objectKey ? state?.objects?.get?.(baseObjectKey) : object;
   const baseActiveForAnother = isWorldObjectActiveForAnotherAgent(baseObject, agentId, nowMs);
-  if (target.isQueueUse) return baseActiveForAnother;
-  return !baseActiveForAnother;
+  const queueStore = serverScriptedServiceQueueStoreFromWorldObject(baseObject);
+  const queueLength = normalizeServerScriptedServiceQueueReservations(queueStore).length;
+  if (target.isQueueUse) return baseActiveForAnother || queueLength > 0;
+  return !baseActiveForAnother && queueLength === 0;
 }
 
 function makeServerScriptedMemory() {
@@ -3063,6 +3357,9 @@ function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, so
       spotId,
       poseKind: safeText(target?.poseKind, ''),
       isQueueUse: target?.isQueueUse === true,
+      queueSpotId: target?.isQueueUse ? (safeText(target?.queueSpotId, '') || spotId.replace(/:\d+$/, '')) : '',
+      queueIndex: target?.isQueueUse ? Math.max(0, Math.floor(numberOr(target?.queueIndex, 0))) : null,
+      queueTargetId: target?.isQueueUse ? (safeText(target?.queueTargetId || target?.slotId || spotId, spotId) || spotId) : '',
       animationId: safeText(target?.animationId, ''),
       startedAt: safeIso(target?.runtimeStartedAt, now) || now,
       activeAt: safeIso(target?.runtimeActiveAt, ''),
@@ -3085,6 +3382,8 @@ function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, so
       actionId,
       spotId,
       slotId: safeText(target?.slotId || spotId, spotId) || spotId,
+      queueSpotId: target?.isQueueUse ? (safeText(target?.queueSpotId, '') || spotId.replace(/:\d+$/, '')) : '',
+      queueIndex: target?.isQueueUse ? Math.max(0, Math.floor(numberOr(target?.queueIndex, 0))) : null,
       status: active ? 'active' : 'held',
       state: target?.isQueueUse && active ? 'queued' : (active ? 'in_use' : 'reserved'),
       availabilityState: target?.isQueueUse && active ? 'queued' : (active ? 'in_use' : 'reserved'),
@@ -3101,6 +3400,8 @@ function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, so
       actionId,
       interactionSpotId: spotId,
       slotId: safeText(target?.slotId || spotId, spotId) || spotId,
+      queueSpotId: target?.isQueueUse ? (safeText(target?.queueSpotId, '') || spotId.replace(/:\d+$/, '')) : '',
+      queueIndex: target?.isQueueUse ? Math.max(0, Math.floor(numberOr(target?.queueIndex, 0))) : null,
       state: target?.isQueueUse ? 'queued' : 'active',
       status: target?.isQueueUse ? 'queued' : 'active',
       activeAt: safeIso(target?.runtimeActiveAt, now) || now,
@@ -4082,7 +4383,7 @@ function positiveModulo(value, divisor) {
 
 function normalizeWorldObjectData(value) {
   if (value === null || value === undefined || value === '') return null;
-  const normalized = sanitizeVisualValue(value, 0);
+  const normalized = sanitizeVisualValue(value, 0, 'data');
   if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) return null;
   const json = JSON.stringify(normalized);
   if (json.length > MAX_WORLD_OBJECT_DATA_JSON_CHARS) {
@@ -4093,7 +4394,7 @@ function normalizeWorldObjectData(value) {
 
 function normalizeVisualState(value) {
   if (value === null || value === undefined || value === '') return null;
-  const normalized = sanitizeVisualValue(value, 0);
+  const normalized = sanitizeVisualValue(value, 0, 'visualState');
   if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) return null;
   const json = JSON.stringify(normalized);
   if (json.length > MAX_VISUAL_STATE_JSON_CHARS) {
@@ -4102,20 +4403,33 @@ function normalizeVisualState(value) {
   return normalized;
 }
 
-function sanitizeVisualValue(value, depth = 0) {
+function sanitizeVisualValue(value, depth = 0, path = 'visual') {
   if (depth > 5) return null;
   if (value === null || value === undefined) return null;
   if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return coordinateOr(value, 0, 'visual');
+  if (typeof value === 'number') {
+    const number = Number(value);
+    const key = String(path || '').split('.').pop().toLowerCase();
+    const metadataNumber = /(?:ms|index|count|priority|capacity|color|version|floor|ttl|seq|level)$/.test(key) ||
+      key.includes('duration') ||
+      key.includes('timestamp');
+    if (metadataNumber) {
+      if (!Number.isFinite(number) || Math.abs(number) > Number.MAX_SAFE_INTEGER) {
+        throw apiError('invalid_coordinate', `${path} must be a finite number`);
+      }
+      return number;
+    }
+    return coordinateOr(number, 0, path);
+  }
   if (typeof value === 'string') return safeText(value, '');
   if (Array.isArray(value)) {
-    return value.slice(0, 24).map(item => sanitizeVisualValue(item, depth + 1)).filter(item => item !== null && item !== undefined);
+    return value.slice(0, 24).map((item, index) => sanitizeVisualValue(item, depth + 1, `${path}.${index}`)).filter(item => item !== null && item !== undefined);
   }
   if (typeof value === 'object') {
     const out = {};
     for (const [key, item] of Object.entries(value).slice(0, 80)) {
       if (!SAFE_TEXT_RE.test(key) || key.length > 80) continue;
-      const normalized = sanitizeVisualValue(item, depth + 1);
+      const normalized = sanitizeVisualValue(item, depth + 1, `${path}.${key}`);
       if (normalized !== null && normalized !== undefined) out[key] = normalized;
     }
     return out;
@@ -4466,16 +4780,26 @@ export class AgentRuntimeRoom extends Room {
     this.withErrors(client, message, 'runtime:objectUseRequest', () => {
       this.expireStaleRouteLeases();
       const agentId = normalizeAgentId(message.agentId);
-      const target = resolveScriptedObjectRuntimeTargetFromRequest(this.dataDir, message);
+      let target = resolveScriptedObjectRuntimeTargetFromRequest(this.dataDir, message);
       if (!target?.objectKey) {
         throw apiError('invalid_object_use_target', 'object use request requires a resolvable target object');
       }
-      const existingObject = this.state.objects.get(target.objectKey);
-      const baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
-      const existingBaseObject = baseObjectKey !== target.objectKey ? this.state.objects.get(baseObjectKey) : existingObject;
-      const blockingObject = isWorldObjectActiveForAnotherAgent(existingObject, agentId)
+      let existingObject = this.state.objects.get(target.objectKey);
+      let baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
+      let existingBaseObject = baseObjectKey !== target.objectKey ? this.state.objects.get(baseObjectKey) : existingObject;
+      let blockingObject = isWorldObjectActiveForAnotherAgent(existingObject, agentId)
         ? existingObject
         : (!target.isQueueUse && isWorldObjectActiveForAnotherAgent(existingBaseObject, agentId) ? existingBaseObject : null);
+      if (blockingObject && !target.isQueueUse) {
+        const queueTarget = serverScriptedQueueRuntimeTargetForBase(this.dataDir, target);
+        if (queueTarget) {
+          target = queueTarget;
+          existingObject = this.state.objects.get(target.objectKey);
+          baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
+          existingBaseObject = baseObjectKey !== target.objectKey ? this.state.objects.get(baseObjectKey) : existingObject;
+          blockingObject = isWorldObjectActiveForAnotherAgent(existingObject, agentId) ? existingObject : null;
+        }
+      }
       if (blockingObject) {
         const existingPlain = worldObjectToPlain(blockingObject);
         throw apiError('object_state_conflict', 'world object is active for another agent', {
@@ -4781,13 +5105,247 @@ export class AgentRuntimeRoom extends Room {
     }, 'server-runtime-agent-seeded', { reason }).agent;
   }
 
+  serverScriptedServiceQueueStoreFor(baseObjectKey) {
+    return serverScriptedServiceQueueStoreFromWorldObject(this.state.objects.get(baseObjectKey));
+  }
+
+  serverScriptedObjectDataWithQueueStore(target, data, options = {}) {
+    const objectKey = safeText(target?.objectKey, '');
+    const baseObjectKey = serverScriptedQueueBaseObjectKey(target);
+    if (!objectKey || !baseObjectKey || objectKey !== baseObjectKey) return data;
+    const existing = this.state.objects.get(baseObjectKey);
+    const existingPlain = existing ? worldObjectToPlain(existing) : null;
+    const store = this.serverScriptedServiceQueueStoreFor(baseObjectKey);
+    const reservations = normalizeServerScriptedServiceQueueReservations(store);
+    const includeEmpty = options.includeEmpty === true || hasServerScriptedServiceQueueStoreData(existingPlain?.data);
+    if (!reservations.length && !includeEmpty) return data;
+    return {
+      ...data,
+      ...serverScriptedServiceQueueStoreData(store, { clearEmpty: includeEmpty }),
+    };
+  }
+
+  upsertServerScriptedServiceQueueBaseObject(baseTarget, store, nowMs, now, reason = 'queue-store-updated') {
+    const baseObjectKey = serverScriptedQueueBaseObjectKey(baseTarget);
+    if (!baseObjectKey) return null;
+    const existing = this.state.objects.get(baseObjectKey);
+    const existingPlain = existing ? worldObjectToPlain(existing) : {};
+    const expiresAt = existingPlain.expiresAt || new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS).toISOString();
+    return this.upsertWorldObject({
+      objectKey: baseObjectKey,
+      owner: existingPlain.owner || SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+      objectType: existingPlain.objectType || baseTarget?.objectType || '',
+      buildingId: existingPlain.buildingId || baseTarget?.buildingId || '',
+      furnitureIndex: existingPlain.furnitureIndex ?? baseTarget?.furnitureIndex ?? -1,
+      state: existingPlain.state || 'idle',
+      agentId: existingPlain.agentId || '',
+      actionId: existingPlain.actionId || baseTarget?.actionId || '',
+      reservationId: existingPlain.reservationId || '',
+      activeUseId: existingPlain.activeUseId || '',
+      slotId: existingPlain.slotId || baseTarget?.slotId || baseTarget?.spotId || '',
+      expiresAt,
+      data: {
+        ...(existingPlain.data || {}),
+        ...serverScriptedServiceQueueStoreData(store, { clearEmpty: true }),
+      },
+    }, 'server-scripted-object-queue-store-updated', { objectKey: baseObjectKey, reason });
+  }
+
+  reserveServerScriptedServiceQueueTarget(agentId, rawTarget, nowMs, now, options = {}) {
+    const baseObjectKey = serverScriptedQueueBaseObjectKey(rawTarget);
+    if (!baseObjectKey) return { ok: false, reason: 'missing-base-object-key' };
+    const queueSpotId = serverScriptedQueueSpotId(rawTarget);
+    const store = this.serverScriptedServiceQueueStoreFor(baseObjectKey);
+    const live = normalizeServerScriptedServiceQueueReservations(store);
+    const existing = live.find(entry => String(entry.agentId || '') === String(agentId || ''));
+    let reservation = existing || null;
+    if (!reservation) {
+      const maxQueuePoints = getServerScriptedServiceQueueMaxPoints(this.dataDir, rawTarget);
+      if (live.length >= maxQueuePoints) return { ok: false, reason: 'queue-full', queueIndex: live.length, maxQueuePoints };
+      const queuedAtMs = Math.floor(numberOr(options.queuedAtMs, nowMs));
+      reservation = {
+        id: safeText(options.reservationId || `queue:scripted:${agentId}:${queueSpotId}:${queuedAtMs}`, '') || `queue:scripted:${agentId}`,
+        state: 'queued',
+        status: 'queued',
+        agentId,
+        actionId: safeText(options.actionId || rawTarget?.actionId || 'planning.schedule', 'planning.schedule') || 'planning.schedule',
+        slotId: `${queueSpotId}:${live.length}`,
+        queueSpotId,
+        activationSpotId: `${queueSpotId}:${live.length}`,
+        queuedAtMs,
+        queuePriority: Number(options.queuePriority || rawTarget?.queuePriority || 0),
+        queueIndex: live.length,
+        capacityKind: 'queue',
+        sourceKind: safeText(options.sourceKind || options.source || rawTarget?.runtimeSource || 'agent-scripted-mode', 'agent-scripted-mode') || 'agent-scripted-mode',
+      };
+      store.reservations = [...live, reservation];
+    }
+    normalizeServerScriptedServiceQueueReservations(store);
+    reservation = store.reservations.find(entry => String(entry.agentId || '') === String(agentId || '')) || reservation;
+    const queueTarget = serverScriptedServiceQueueSlotTarget(this.dataDir, { ...rawTarget, baseObjectKey, queueSpotId }, reservation);
+    if (!queueTarget) return { ok: false, reason: 'missing-queue-target' };
+    const baseObjectResult = this.upsertServerScriptedServiceQueueBaseObject(queueTarget, store, nowMs, now, 'queue-reserved');
+    return { ok: true, target: queueTarget, reservation, store, baseObject: baseObjectResult?.object || null, reused: Boolean(existing) };
+  }
+
+  syncServerScriptedServiceQueueLine(baseObjectKeyOrTarget, nowMs, now, reason = 'queue-sync') {
+    const baseObjectKey = typeof baseObjectKeyOrTarget === 'string'
+      ? safeText(baseObjectKeyOrTarget, '')
+      : serverScriptedQueueBaseObjectKey(baseObjectKeyOrTarget);
+    if (!baseObjectKey) return { synced: 0, changedSnapshots: 0, changedObjects: 0, reason: 'missing-base-object-key' };
+    const store = this.serverScriptedServiceQueueStoreFor(baseObjectKey);
+    const reservations = normalizeServerScriptedServiceQueueReservations(store);
+    this.upsertServerScriptedServiceQueueBaseObject({ ...(typeof baseObjectKeyOrTarget === 'object' ? baseObjectKeyOrTarget : {}), baseObjectKey, objectKey: baseObjectKey }, store, nowMs, now, reason);
+    let synced = 0;
+    let changedSnapshots = 0;
+    let changedObjects = 0;
+    for (const reservation of reservations) {
+      const queuedAgentId = normalizeAgentId(reservation.agentId);
+      const existing = this.state.agents.get(queuedAgentId);
+      if (!existing) continue;
+      const current = snapshotToPlain(existing);
+      const currentTarget = current.target && typeof current.target === 'object' ? current.target : null;
+      if (!currentTarget?.isQueueUse || serverScriptedQueueBaseObjectKey(currentTarget) !== baseObjectKey) continue;
+      const nextTarget = serverScriptedServiceQueueSlotTarget(this.dataDir, currentTarget, reservation);
+      if (!nextTarget) continue;
+      const sameSlot = currentTarget.objectKey === nextTarget.objectKey &&
+        Number(currentTarget.x) === Number(nextTarget.x) &&
+        Number(currentTarget.y) === Number(nextTarget.y);
+      if (sameSlot) continue;
+      const routeResult = this.startServerScriptedObjectRoute(queuedAgentId, {
+        ...nextTarget,
+        runtimeStartedAt: currentTarget.runtimeStartedAt || now,
+        runtimeActiveAt: '',
+        runtimeSource: reservation.sourceKind || currentTarget.runtimeSource || 'idle',
+      }, nowMs, now, { source: reservation.sourceKind || currentTarget.runtimeSource || 'idle', force: true });
+      synced++;
+      changedSnapshots += routeResult?.agent ? 1 : 0;
+      changedObjects += routeResult?.object ? 1 : 0;
+      if (currentTarget.objectKey && currentTarget.objectKey !== nextTarget.objectKey) {
+        this.releaseServerScriptedObjectWorldObject(queuedAgentId, currentTarget, nowMs, now, `${reason}:queue-slot-shift`);
+        changedObjects++;
+      }
+    }
+    return { synced, queueLength: reservations.length, changedSnapshots, changedObjects };
+  }
+
+  releaseServerScriptedServiceQueueReservation(agentId, target, nowMs, now, reason = 'queue-released') {
+    const baseObjectKey = serverScriptedQueueBaseObjectKey(target);
+    if (!baseObjectKey) return { released: false, changedSnapshots: 0, changedObjects: 0, reason: 'missing-base-object-key' };
+    const store = this.serverScriptedServiceQueueStoreFor(baseObjectKey);
+    const before = normalizeServerScriptedServiceQueueReservations(store).length;
+    store.reservations = store.reservations
+      .map(entry => String(entry.agentId || '') === String(agentId || '')
+        ? { ...entry, state: 'released', status: 'released', releasedAtMs: nowMs, releaseReason: reason }
+        : entry)
+      .filter(isLiveServerScriptedServiceQueueReservation);
+    normalizeServerScriptedServiceQueueReservations(store);
+    this.upsertServerScriptedServiceQueueBaseObject({ ...target, baseObjectKey, objectKey: baseObjectKey }, store, nowMs, now, reason);
+    const released = normalizeServerScriptedServiceQueueReservations(store).length !== before;
+    if (!released) return { released: false, changedSnapshots: 0, changedObjects: 1, reason: 'reservation-not-found' };
+    const promoted = this.promoteServerScriptedServiceQueueFrontIfReady(baseObjectKey, nowMs, now, `${reason}:promote-next`);
+    if (promoted.promoted) return { released: true, ...promoted };
+    const synced = this.syncServerScriptedServiceQueueLine({ ...target, baseObjectKey, objectKey: baseObjectKey }, nowMs, now, reason);
+    return {
+      released: true,
+      changedSnapshots: synced.changedSnapshots || 0,
+      changedObjects: 1 + (synced.changedObjects || 0),
+      reason,
+    };
+  }
+
+  promoteServerScriptedServiceQueueFrontIfReady(baseObjectKeyOrTarget, nowMs, now, reason = 'service-use-complete') {
+    const baseObjectKey = typeof baseObjectKeyOrTarget === 'string'
+      ? safeText(baseObjectKeyOrTarget, '')
+      : serverScriptedQueueBaseObjectKey(baseObjectKeyOrTarget);
+    if (!baseObjectKey) return { promoted: false, changedSnapshots: 0, changedObjects: 0, reason: 'missing-base-object-key' };
+    const baseObject = this.state.objects.get(baseObjectKey);
+    if (hasActiveWorldObjectState(baseObject, nowMs)) {
+      return { promoted: false, changedSnapshots: 0, changedObjects: 0, reason: 'service-object-busy' };
+    }
+    const store = this.serverScriptedServiceQueueStoreFor(baseObjectKey);
+    const queue = normalizeServerScriptedServiceQueueReservations(store);
+    const front = queue[0] || null;
+    if (!front) {
+      this.upsertServerScriptedServiceQueueBaseObject({ ...(typeof baseObjectKeyOrTarget === 'object' ? baseObjectKeyOrTarget : {}), baseObjectKey, objectKey: baseObjectKey }, store, nowMs, now, reason);
+      return { promoted: false, changedSnapshots: 0, changedObjects: 1, reason: 'empty-queue' };
+    }
+    const queuedAgentId = normalizeAgentId(front.agentId);
+    const agent = this.state.agents.get(queuedAgentId);
+    if (!agent) {
+      store.reservations = queue.slice(1);
+      normalizeServerScriptedServiceQueueReservations(store);
+      this.upsertServerScriptedServiceQueueBaseObject({ ...(typeof baseObjectKeyOrTarget === 'object' ? baseObjectKeyOrTarget : {}), baseObjectKey, objectKey: baseObjectKey }, store, nowMs, now, `${reason}:missing-front-agent`);
+      const synced = this.syncServerScriptedServiceQueueLine({ ...(typeof baseObjectKeyOrTarget === 'object' ? baseObjectKeyOrTarget : {}), baseObjectKey, objectKey: baseObjectKey }, nowMs, now, `${reason}:missing-front-agent`);
+      return {
+        promoted: false,
+        changedSnapshots: synced.changedSnapshots || 0,
+        changedObjects: 1 + (synced.changedObjects || 0),
+        reason: 'missing-front-agent',
+      };
+    }
+    const current = snapshotToPlain(agent);
+    const currentTarget = current.target && typeof current.target === 'object' ? current.target : { ...(typeof baseObjectKeyOrTarget === 'object' ? baseObjectKeyOrTarget : {}), baseObjectKey, objectKey: baseObjectKey };
+    const primaryTarget = serverScriptedObjectPrimaryTargetForQueue(this.dataDir, currentTarget);
+    if (!primaryTarget) return { promoted: false, changedSnapshots: 0, changedObjects: 0, reason: 'missing-service-use-target' };
+    const source = safeText(front.sourceKind || currentTarget.runtimeSource || 'agent-scripted-mode', 'agent-scripted-mode') || 'agent-scripted-mode';
+    let routeResult = null;
+    try {
+      routeResult = this.startServerScriptedObjectRoute(queuedAgentId, {
+        ...primaryTarget,
+        runtimeStartedAt: now,
+        runtimeActiveAt: '',
+        runtimeSource: source,
+      }, nowMs, now, { source, force: true });
+    } catch (error) {
+      return {
+        promoted: false,
+        changedSnapshots: 0,
+        changedObjects: 0,
+        reason: error?.code || error?.message || 'promotion-route-rejected',
+      };
+    }
+    let changedObjects = routeResult?.object ? 1 : 0;
+    if (currentTarget?.isQueueUse && currentTarget.objectKey) {
+      this.releaseServerScriptedObjectWorldObject(queuedAgentId, currentTarget, nowMs, now, `${reason}:front-promoted`);
+      changedObjects++;
+    }
+    store.reservations = normalizeServerScriptedServiceQueueReservations(store)
+      .filter(entry => String(entry.agentId || '') !== String(queuedAgentId));
+    normalizeServerScriptedServiceQueueReservations(store);
+    this.upsertServerScriptedServiceQueueBaseObject({ ...primaryTarget, baseObjectKey, objectKey: baseObjectKey }, store, nowMs, now, `${reason}:front-promoted`);
+    changedObjects++;
+    const synced = this.syncServerScriptedServiceQueueLine({ ...primaryTarget, baseObjectKey, objectKey: baseObjectKey }, nowMs, now, `${reason}:front-promoted`);
+    return {
+      promoted: true,
+      agentId: queuedAgentId,
+      changedSnapshots: (routeResult?.agent ? 1 : 0) + (synced.changedSnapshots || 0),
+      changedObjects: changedObjects + (synced.changedObjects || 0),
+      reason,
+    };
+  }
+
   startServerScriptedObjectRoute(agentId, rawTarget, nowMs = Date.now(), now = new Date(nowMs).toISOString(), options = {}) {
-    const target = {
+    let target = {
       ...rawTarget,
       runtimeStartedAt: rawTarget.runtimeStartedAt || now,
       runtimeActiveAt: options.active === true ? (rawTarget.runtimeActiveAt || now) : (rawTarget.runtimeActiveAt || ''),
       runtimeSource: options.source || rawTarget.runtimeSource || 'idle',
     };
+    if (target.isQueueUse) {
+      const queued = this.reserveServerScriptedServiceQueueTarget(agentId, target, nowMs, now, {
+        sourceKind: options.source || target.runtimeSource || 'agent-scripted-mode',
+        actionId: target.actionId,
+      });
+      if (!queued.ok) throw apiError(queued.reason || 'queue_rejected', `service queue rejected object use: ${queued.reason || 'unknown'}`, queued);
+      target = {
+        ...target,
+        ...queued.target,
+        runtimeStartedAt: target.runtimeStartedAt || now,
+        runtimeActiveAt: options.active === true ? (target.runtimeActiveAt || now) : (target.runtimeActiveAt || ''),
+        runtimeSource: options.source || target.runtimeSource || 'idle',
+      };
+    }
     const existing = this.ensureServerRuntimeAgentSeed(agentId, target, 'scripted-object-runtime-start');
     const current = snapshotToPlain(existing);
     const objectKey = normalizeWorldObjectKey(target.objectKey || runtimeFurnitureObjectKey(target.buildingId, target.furnitureIndex, target.objectType || 'object'));
@@ -4846,7 +5404,10 @@ export class AgentRuntimeRoom extends Room {
       activeUseId: arrived && !target.isQueueUse ? (safeText(`server-active:${objectKey}:${agentId}`, '') || `server-active:${agentId}`) : '',
       slotId: target.slotId || target.spotId || '',
       expiresAt: objectExpiresAt,
-      data: makeServerScriptedObjectData(agentId, target, objectState, now, objectExpiresAt, options.source || 'idle'),
+      data: this.serverScriptedObjectDataWithQueueStore(
+        target,
+        makeServerScriptedObjectData(agentId, target, objectState, now, objectExpiresAt, options.source || 'idle'),
+      ),
     }, arrived ? 'server-scripted-object-world-active' : 'server-scripted-object-world-routing', {
       routeId,
       source: options.source || 'idle',
@@ -5226,11 +5787,11 @@ export class AgentRuntimeRoom extends Room {
       activeUseId: '',
       slotId: target?.slotId || target?.spotId || '',
       expiresAt,
-      data: {
+      data: this.serverScriptedObjectDataWithQueueStore(target, {
         ...makeServerScriptedObjectData(agentId, target, 'idle', now, expiresAt, target?.runtimeSource || 'idle'),
         clearReservation: true,
         releaseReason: reason,
-      },
+      }, { includeEmpty: true }),
     }, 'server-scripted-object-world-released', { reason });
   }
 
@@ -5263,6 +5824,9 @@ export class AgentRuntimeRoom extends Room {
       reason,
     });
     const objectResult = objectKey ? this.releaseServerScriptedObjectWorldObject(agentId, target, nowMs, now, reason) : null;
+    if (target?.isQueueUse) {
+      this.releaseServerScriptedServiceQueueReservation(agentId, target, nowMs, now, reason);
+    }
     return { agent: snapshotResult.agent, object: objectResult?.object || null };
   }
 
@@ -5369,7 +5933,10 @@ export class AgentRuntimeRoom extends Room {
           activeUseId: '',
           slotId: target.slotId || target.spotId || '',
           expiresAt: objectExpiresAt,
-          data: makeServerScriptedObjectData(agentId, target, 'routing', now, objectExpiresAt, source),
+          data: this.serverScriptedObjectDataWithQueueStore(
+            target,
+            makeServerScriptedObjectData(agentId, target, 'routing', now, objectExpiresAt, source),
+          ),
         }, 'server-scripted-object-world-routing', { routeId });
         changedObjects++;
         continue;
@@ -5382,8 +5949,16 @@ export class AgentRuntimeRoom extends Room {
         runtimeActiveAt,
         runtimePhase: target.runtimePhase === 'desk-routing' ? 'desk-consuming' : target.runtimePhase,
       };
+      if (activeTarget.isQueueUse) {
+        const promoted = this.promoteServerScriptedServiceQueueFrontIfReady(activeTarget, nowMs, now, 'queue-front-wait');
+        if (promoted.promoted) {
+          changedSnapshots += promoted.changedSnapshots || 0;
+          changedObjects += promoted.changedObjects || 0;
+          continue;
+        }
+      }
       const dwellMs = Math.max(1000, Math.floor(numberOr(target.stayMs, scriptedObjectStayMs(target))));
-      if (Number.isFinite(activeAtMs) && nowMs - activeAtMs >= dwellMs) {
+      if (!activeTarget.isQueueUse && Number.isFinite(activeAtMs) && nowMs - activeAtMs >= dwellMs) {
         if (isServerScriptedObjectDeskConsumeTarget(activeTarget)) {
           this.releaseServerScriptedObjectRoute(agentId, current, activeTarget, nowMs, now, activeTarget.consumeEffect || 'temporary-item-consumed-at-desk');
           changedSnapshots++;
@@ -5393,15 +5968,21 @@ export class AgentRuntimeRoom extends Room {
         const deskTarget = makeServerScriptedDeskConsumeTarget(this.dataDir, agentId, activeTarget, nowMs);
         if (deskTarget) {
           const releaseResult = this.releaseServerScriptedObjectWorldObject(agentId, activeTarget, nowMs, now, deskTarget.pickupEffect || 'temporary-item-picked-up');
+          const promoted = this.promoteServerScriptedServiceQueueFrontIfReady(activeTarget, nowMs, now, deskTarget.pickupEffect || 'temporary-item-picked-up');
           const routeResult = this.startServerScriptedObjectRoute(agentId, deskTarget, nowMs, now, { source, force: true });
           changedSnapshots += routeResult?.agent ? 1 : 0;
           changedObjects += releaseResult?.object ? 1 : 0;
+          changedSnapshots += promoted.changedSnapshots || 0;
+          changedObjects += promoted.changedObjects || 0;
           changedObjects += routeResult?.object ? 1 : 0;
           continue;
         }
         this.releaseServerScriptedObjectRoute(agentId, current, activeTarget, nowMs, now, 'dwell-complete');
+        const promoted = this.promoteServerScriptedServiceQueueFrontIfReady(activeTarget, nowMs, now, 'dwell-complete');
         changedSnapshots++;
         changedObjects++;
+        changedSnapshots += promoted.changedSnapshots || 0;
+        changedObjects += promoted.changedObjects || 0;
         continue;
       }
 
@@ -5442,7 +6023,10 @@ export class AgentRuntimeRoom extends Room {
         activeUseId: target.isQueueUse ? '' : (safeText(`server-active:${target.objectKey}:${agentId}`, '') || `server-active:${agentId}`),
         slotId: target.slotId || target.spotId || '',
         expiresAt: objectExpiresAt,
-        data: makeServerScriptedObjectData(agentId, activeTarget, activeObjectState, now, objectExpiresAt, source),
+        data: this.serverScriptedObjectDataWithQueueStore(
+          activeTarget,
+          makeServerScriptedObjectData(agentId, activeTarget, activeObjectState, now, objectExpiresAt, source),
+        ),
       }, target.isQueueUse ? 'server-scripted-object-world-queued' : 'server-scripted-object-world-active', { routeId });
       changedObjects++;
     }
