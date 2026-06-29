@@ -704,7 +704,7 @@ async function run() {
     const transformedFacingAck = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'adam-transformed-facing-object-use');
     assert.equal(transformedFacingAck.type, 'runtime:objectUseRequest');
     assert.equal(transformedFacingAck.object.objectKey, 'office:furniture:3:waterCooler');
-    assertRadiansClose(transformedFacingAck.snapshot.target?.faceAngle, Math.PI / 2, 'transformed action-location facing should only rotate once');
+    assertRadiansClose(transformedFacingAck.snapshot.target?.faceAngle, -Math.PI / 2, 'server object-use fallback should face the furniture center like browser-owned 8590');
     await waitForAgent(scriptedRoom, 'beth', (agent) => agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     await scriptedRoom.leave(true);
 

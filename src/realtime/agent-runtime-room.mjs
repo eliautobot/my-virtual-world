@@ -1610,6 +1610,15 @@ function runtimeFacingAngle(building, furniture, localX, localZ, facing = 'north
   return Math.atan2(to.x - from.x, to.y - from.y);
 }
 
+function runtimeFurnitureCenterFaceAngle(building, furniture, localX, localZ, fromPoint = null) {
+  const from = fromPoint && Number.isFinite(Number(fromPoint.x)) && Number.isFinite(Number(fromPoint.y))
+    ? { x: Number(fromPoint.x), y: Number(fromPoint.y) }
+    : apiPointFromBuildingLocal(building, localX, localZ);
+  const to = apiPointFromBuildingLocal(building, furniture?.x, furniture?.z);
+  if (!from || !to) return null;
+  return normalizeRuntimeAngleRadians(Math.atan2(to.x - from.x, to.y - from.y), 0);
+}
+
 const RUNTIME_CARDINAL_FACINGS = Object.freeze(['north', 'east', 'south', 'west']);
 
 function normalizeRuntimeFacing(value = 'north', fallback = 'north') {
@@ -1666,6 +1675,16 @@ function explicitRuntimeFaceAngle(...candidates) {
     if (isExplicitRuntimeNumber(candidate)) return normalizeRuntimeAngleRadians(candidate, 0);
   }
   return null;
+}
+
+function runtimeFurnitureActionFaceAngle(building, furniture, local, fromPoint = null, options = {}) {
+  const explicit = explicitRuntimeFaceAngle(local?.faceAngle);
+  if (explicit !== null) return explicit;
+  if (options?.deskFacesScreen && String(furniture?.type || '').toLowerCase() === 'desk') {
+    return runtimeFacingAngle(building, furniture, local?.x, local?.z, 'south');
+  }
+  return runtimeFurnitureCenterFaceAngle(building, furniture, local?.x, local?.z, fromPoint)
+    ?? runtimeFacingAngle(building, furniture, local?.x, local?.z, local?.facing);
 }
 
 function authoredRuntimeFaceAngle(location = null, explicit = null) {
@@ -1755,9 +1774,7 @@ function workTargetFromFurniture(building, furniture, index) {
     objectType: safeText(furniture.type, 'desk') || 'desk',
     interactionSpotId: local.spotId,
     spotId: local.spotId,
-    faceAngle: isExplicitRuntimeNumber(local.faceAngle)
-      ? normalizeRuntimeAngleRadians(local.faceAngle, 0)
-      : runtimeFacingAngle(building, furniture, local.x, local.z, local.facing),
+    faceAngle: runtimeFurnitureActionFaceAngle(building, furniture, local, point, { deskFacesScreen: true }),
   };
 }
 
@@ -1790,9 +1807,7 @@ function meetingTargetFromFurnitureSpot(building, furniture, index, location = n
     poseKind: 'seat',
     animationId: 'meeting-sit-talk',
     activityKind: objectType === 'conferenceChair' ? 'conference-chair-sit' : 'meeting-table',
-    faceAngle: isExplicitRuntimeNumber(local.faceAngle)
-      ? normalizeRuntimeAngleRadians(local.faceAngle, 0)
-      : runtimeFacingAngle(building, furniture, local.x, local.z, local.facing),
+    faceAngle: runtimeFurnitureActionFaceAngle(building, furniture, local, point),
   };
 }
 
@@ -2380,9 +2395,7 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
     animationId: isQueueUse ? 'bus-stop-wait' : (safeText(config?.animationId, '') || (local.poseKind === 'seat' ? 'sit' : 'stand-use')),
     activityKind: isQueueUse ? 'service-queue-wait' : (safeText(config?.kind, '') || 'server-scripted-object-use'),
     stayMs: scriptedObjectStayMs({ objectKey: baseObjectKey, objectType, spotId }),
-    faceAngle: isExplicitRuntimeNumber(local.faceAngle)
-      ? normalizeRuntimeAngleRadians(local.faceAngle, 0)
-      : runtimeFacingAngle(building, furniture, local.x, local.z, local.facing),
+    faceAngle: runtimeFurnitureActionFaceAngle(building, furniture, local, point),
   };
 }
 
