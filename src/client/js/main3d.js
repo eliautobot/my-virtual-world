@@ -2345,10 +2345,14 @@ function applyAgentRuntimeVisualState(agent, visualState = null) {
     agent._movementDebugNextWaypoint = null;
     agent._movementDebugDesiredTarget = runtimeFinalPoint ? { x: runtimeFinalPoint.x, y: runtimeFinalPoint.y } : null;
     agent._movementDebugFinalTarget = runtimeFinalPoint ? { x: runtimeFinalPoint.x, y: runtimeFinalPoint.y } : null;
+    agent._movementDebugStableWaypoint = null;
+    agent._avoidDebugTarget = null;
   } else if (agent._runtimeObserverOnly) {
     agent._movementDebugNextWaypoint = null;
     agent._movementDebugDesiredTarget = null;
     agent._movementDebugFinalTarget = null;
+    agent._movementDebugStableWaypoint = null;
+    agent._avoidDebugTarget = null;
   }
 
   if (visualState.activityActive === false) {
