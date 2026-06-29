@@ -45,6 +45,7 @@ export const LIVE_STATUS_RUNTIME_OWNER = 'server-live-status-runtime';
 export const LIVE_STATUS_RUNTIME_LEASE_OWNER = 'server-live-status';
 export const LIVE_STATUS_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
 export const LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC = 96;
+export const LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC = 200;
 export const LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS = 6;
 export const LIVE_STATUS_RUNTIME_LEASE_TTL_MS = 15000;
 export const LIVE_STATUS_RUNTIME_LEASE_REFRESH_MS = 8000;
@@ -54,6 +55,7 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runt
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER = 'server-scripted-object';
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC = 72;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC = 200;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS = 5;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS = 15000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS = 8000;
@@ -1974,14 +1976,21 @@ function makeLiveStatusVisualState(isMoving, status = 'working', target = null) 
   const resolvedStatus = isMeeting ? 'meeting' : status;
   const activityKind = isMeeting ? 'live-status-meeting-table' : 'live-status-work-desk';
   const isRunning = Boolean(isMoving && !isMeeting);
+  const resolvedAnimationId = isMoving ? 'walk' : (isMeeting ? 'meeting-sit-talk' : 'typing');
+  const faceAngle = numberOr(target?.faceAngle, 0);
+  const dockTarget = Number.isFinite(Number(target?.x)) && Number.isFinite(Number(target?.y))
+    ? { x: Number(target.x), y: Number(target.y), floor: floorOr(target?.floor, 1), faceAngle }
+    : null;
   return {
     schemaVersion: 'agent-runtime-visual/v1',
     status: resolvedStatus,
     state: isMoving ? 'moving' : 'idle',
-    resolvedAnimationId: isMoving ? 'walk' : (isMeeting ? 'meeting-sit-talk' : 'typing'),
+    resolvedAnimationId,
     movement: { isMoving, isRunning },
     activityActive: Boolean(target),
     activityKind,
+    atDesk: Boolean(target && !isMoving && !isMeeting),
+    deskFacingAngle: faceAngle,
     activity: {
       kind: activityKind,
       phase: isMoving ? 'routing' : 'active',
@@ -1990,6 +1999,9 @@ function makeLiveStatusVisualState(isMoving, status = 'working', target = null) 
       spotId: safeText(target?.spotId || target?.interactionSpotId, ''),
       meetingId: safeText(target?.meetingId, ''),
       meetingTopic: safeText(target?.meetingTopic, ''),
+      animationId: resolvedAnimationId,
+      faceAngle,
+      dockTarget,
     },
     carrying: false,
   };
@@ -2329,6 +2341,12 @@ function isServerScriptedObjectDeskConsumeTarget(target = null) {
 
 function serverScriptedObjectRouteShouldRun(target = null, isMoving = false) {
   return Boolean(isMoving && isServerScriptedObjectDeskConsumeTarget(target));
+}
+
+function serverScriptedObjectRuntimeSpeedUnitsPerSec(target = null, isMoving = false) {
+  return serverScriptedObjectRouteShouldRun(target, isMoving)
+    ? SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC
+    : SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC;
 }
 
 function hydrateServerScriptedDeskConsumeTargetFromVisual(target = null, visualState = null) {
@@ -2935,6 +2953,11 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
   const poseKind = String(target?.poseKind || '').toLowerCase();
   const isRunning = serverScriptedObjectRouteShouldRun(target, isMoving);
   const temporaryItem = target?.temporaryItem && typeof target.temporaryItem === 'object' ? target.temporaryItem : null;
+  const isDeskConsume = isServerScriptedObjectDeskConsumeTarget(target);
+  const faceAngle = numberOr(target?.faceAngle, 0);
+  const dockTarget = Number.isFinite(Number(target?.x)) && Number.isFinite(Number(target?.y))
+    ? { x: Number(target.x), y: Number(target.y), floor: floorOr(target?.floor, 1), faceAngle }
+    : null;
   const animationId = isMoving ? 'walk' : (
     safeText(target?.animationId, '') ||
     (poseKind === 'seat' ? 'sit' : poseKind === 'wait' ? 'bus-stop-wait' : 'stand-use')
@@ -2956,12 +2979,17 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
     poseKind: safeText(target?.poseKind, ''),
     isQueueUse: target?.isQueueUse === true,
     animationId,
-    faceAngle: numberOr(target?.faceAngle, 0),
+    faceAngle,
+    dockTarget,
   };
   if (temporaryItem) {
+    const consumeDurationMs = Math.max(1000, Math.floor(numberOr(target?.consumeDurationMs, target?.stayMs || SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS)));
     activity.temporaryItem = temporaryItem;
     activity.carryAttachPoint = safeText(target?.carryAttachPoint, 'right-hand') || 'right-hand';
-    activity.consumeDurationMs = Math.max(1000, Math.floor(numberOr(target?.consumeDurationMs, target?.stayMs || SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS)));
+    activity.consumeDurationMs = consumeDurationMs;
+    activity.stayMs = consumeDurationMs;
+    activity.sipDurationMs = consumeDurationMs;
+    activity.sipCountTarget = 3;
     activity.sourceObject = {
       objectKey: safeText(target?.sourceObjectKey, ''),
       baseObjectKey: safeText(target?.sourceBaseObjectKey, ''),
@@ -2981,6 +3009,8 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
     movement: { isMoving, isRunning },
     activityActive: Boolean(target),
     activityKind,
+    atDesk: Boolean(target && !isMoving && isDeskConsume),
+    deskFacingAngle: faceAngle,
     activity,
     carrying: Boolean(temporaryItem),
   };
@@ -4772,7 +4802,7 @@ export class AgentRuntimeRoom extends Room {
     const routeId = safeText(`scripted-object:${agentId}:${target.buildingId || 'building'}:${target.furnitureIndex ?? 'object'}:${target.spotId || 'spot'}`, `scripted-object:${agentId}`);
     const targetHeading = targetFaceAngleRadians(target, current.heading);
     const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, DEFAULT_WORLD_RUNTIME_TICK_MS, {
-      speedUnitsPerSec: SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC,
+      speedUnitsPerSec: serverScriptedObjectRuntimeSpeedUnitsPerSec(target, true),
       arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
       routeSource: 'server-scripted-object-runtime',
     });
@@ -5112,8 +5142,9 @@ export class AgentRuntimeRoom extends Room {
 
       if (activeOtherLease) continue;
 
+      const statusKind = target.statusKind === 'meeting' ? 'meeting' : 'work';
       const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, tickMs, {
-        speedUnitsPerSec: LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC,
+        speedUnitsPerSec: statusKind === 'meeting' ? LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC : LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
         arrivalRadius: LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS,
         routeSource: 'server-live-status-runtime',
       });
@@ -5122,7 +5153,6 @@ export class AgentRuntimeRoom extends Room {
       const nextY = movement.y;
       const targetHeading = targetFaceAngleRadians(target, current.heading);
       const heading = arrived ? targetHeading : movement.heading;
-      const statusKind = target.statusKind === 'meeting' ? 'meeting' : 'work';
       const routeId = safeText(`live-status-${statusKind}:${agentId}:${target.buildingId || 'building'}:${target.furnitureIndex ?? 'object'}:${target.spotId || 'spot'}`, `live-status-${statusKind}:${agentId}`);
       const leaseExpiresAtMs = Date.parse(current.leaseExpiresAt || '');
       const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= LIVE_STATUS_RUNTIME_LEASE_REFRESH_MS;
@@ -5292,7 +5322,7 @@ export class AgentRuntimeRoom extends Room {
       }
       if (!alreadyActive) activeRouteSteps++;
       const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, tickMs, {
-        speedUnitsPerSec: SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC,
+        speedUnitsPerSec: serverScriptedObjectRuntimeSpeedUnitsPerSec(target, true),
         arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
         routeSource: 'server-scripted-object-runtime',
       });

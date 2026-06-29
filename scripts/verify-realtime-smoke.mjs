@@ -13,10 +13,12 @@ import {
   LIVE_ACTION_RUNTIME_POLL_MS,
   LIVE_STATUS_RUNTIME_POLL_MS,
   LIVE_STATUS_RUNTIME_OWNER,
+  LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
   RUNTIME_STATE_BROADCAST_INTERVAL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+  SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
   SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS,
   SERVER_WORLD_TOPOLOGY_OWNER,
 } from '../src/realtime/agent-runtime-room.mjs';
@@ -197,6 +199,8 @@ async function run() {
     assert.equal(LIVE_STATUS_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live status runtime should move at the world tick for smooth observer interpolation');
     assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'scripted object runtime should move at the world tick for smooth observer interpolation');
     assert.equal(RUNTIME_STATE_BROADCAST_INTERVAL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'full runtime state broadcasts should not lag behind server movement ticks');
+    assert.equal(LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC, 200, 'server-owned work routes should use the 8590 running displacement speed');
+    assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC, 200, 'server-owned desk-consume handoffs should use the 8590 running displacement speed');
 
     const health = await waitForHealth(port, server);
     assert.equal(health.ok, true);
@@ -641,6 +645,16 @@ async function run() {
     const workObject = await waitForObject(scriptedRoom, 'office:furniture:1:desk', (object) => object.owner === LIVE_STATUS_RUNTIME_OWNER);
     assert.equal(workObject.agentId, 'coder');
     assert(['routing', 'active'].includes(workObject.state));
+    const activeWorkAgent = await waitForAgent(scriptedRoom, 'coder', (agent) =>
+      agent.owner === LIVE_STATUS_RUNTIME_OWNER &&
+      agent.state === 'working' &&
+      agent.visualStateJson.includes('"atDesk":true') &&
+      agent.visualStateJson.includes('"animationId":"typing"') &&
+      agent.visualStateJson.includes('"phase":"active"')
+    );
+    const activeWorkVisual = JSON.parse(activeWorkAgent.visualStateJson || '{}');
+    assert.equal(activeWorkVisual.resolvedAnimationId, 'typing', 'work desk arrival should hydrate the typing animation for browser observers');
+    assert.equal(activeWorkVisual.activity?.kind, 'live-status-work-desk');
 
     const meetingAgent = await waitForAgent(scriptedRoom, 'morgan', (agent) => agent.owner === LIVE_STATUS_RUNTIME_OWNER);
     assert(['routing', 'meeting'].includes(meetingAgent.state));
@@ -719,6 +733,18 @@ async function run() {
     }
     assert.equal(bethWaterDeskTarget.sourceObjectKey, 'manual-building:furniture:2:waterCooler');
     assert.equal(bethWaterDeskVisual.carriedItem?.label, 'Water Cup');
+    const bethWaterDeskActive = await waitForAgent(scriptedRoom, 'beth', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.visualStateJson.includes('water-desk-consume') &&
+      agent.visualStateJson.includes('"phase":"active"') &&
+      agent.visualStateJson.includes('"animationId":"water-desk-sip"') &&
+      agent.visualStateJson.includes('"sipCountTarget":3') &&
+      agent.visualStateJson.includes('"atDesk":true')
+    );
+    const bethWaterDeskActiveVisual = JSON.parse(bethWaterDeskActive.visualStateJson || '{}');
+    assert.equal(bethWaterDeskActiveVisual.activity?.animationId, 'water-desk-sip');
+    assert.equal(bethWaterDeskActiveVisual.activity?.phase, 'active');
+    assert.equal(bethWaterDeskActiveVisual.activity?.temporaryItem?.label, 'Water Cup');
     assert(bethWaterDeskTarget.objectKey.endsWith(':consume:beth'), 'desk consume should use a transient per-agent object key');
     await waitForObject(scriptedRoom, 'manual-building:furniture:2:waterCooler', (object) =>
       object.state === 'idle' &&
@@ -781,6 +807,18 @@ async function run() {
     }
     assert.equal(coraVendingDeskTarget.sourceObjectKey, 'manual-building:furniture:5:vending');
     assert.equal(coraVendingDeskVisual.carriedItem?.vendingItemId, 'soft-drink-can-red');
+    const coraVendingDeskActive = await waitForAgent(scriptedRoom, 'cora', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.visualStateJson.includes('vending-desk-consume') &&
+      agent.visualStateJson.includes('"phase":"active"') &&
+      agent.visualStateJson.includes('"animationId":"vending-desk-consume"') &&
+      agent.visualStateJson.includes('"sipCountTarget":3') &&
+      agent.visualStateJson.includes('"atDesk":true')
+    );
+    const coraVendingDeskActiveVisual = JSON.parse(coraVendingDeskActive.visualStateJson || '{}');
+    assert.equal(coraVendingDeskActiveVisual.activity?.animationId, 'vending-desk-consume');
+    assert.equal(coraVendingDeskActiveVisual.activity?.phase, 'active');
+    assert.equal(coraVendingDeskActiveVisual.activity?.temporaryItem?.vendingItemId, 'soft-drink-can-red');
     assert(coraVendingDeskTarget.objectKey.endsWith(':consume:cora'), 'vending desk consume should use a transient per-agent object key');
     await waitForObject(scriptedRoom, 'manual-building:furniture:5:vending', (object) =>
       object.state === 'idle' &&

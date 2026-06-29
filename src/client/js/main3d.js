@@ -2356,11 +2356,117 @@ function syncAgentRuntimeRoutingDebugFromRuntimeRoute(agent, runtimeRoute = null
   return hydrated;
 }
 
-function applyAgentRuntimeVisualState(agent, visualState = null) {
+function isAgentRuntimeDeskConsumeActivityKind(kind = '') {
+  const normalized = String(kind || '').trim().toLowerCase();
+  return normalized.startsWith('coffee-desk-') ||
+    normalized.startsWith('water-desk-') ||
+    normalized.startsWith('vending-desk-') ||
+    normalized.startsWith('microwave-desk-');
+}
+
+function getAgentRuntimeDeskConsumeSchedulePhase(kind = '', animationId = '') {
+  const normalized = String(kind || '').trim().toLowerCase();
+  const explicit = agentRuntimeVisualText(animationId, 120);
+  if (normalized.startsWith('coffee-desk-')) return explicit || 'coffee-desk-sip';
+  if (normalized.startsWith('water-desk-')) return explicit || 'water-desk-sip';
+  if (normalized.startsWith('vending-desk-')) return explicit || 'vending-desk-consume';
+  if (normalized.startsWith('microwave-desk-')) return explicit || 'microwave-desk-consume';
+  return explicit;
+}
+
+function makeAgentRuntimeWorkSpotFromVisual(activity = null, snapshotTarget = null, visualState = null) {
+  const dockTarget = makeAgentRuntimeVisualPoint(activity?.dockTarget || null) ||
+    makeAgentRuntimeVisualPoint(activity?.target || null) ||
+    makeAgentRuntimeVisualPoint(snapshotTarget || null);
+  if (!dockTarget) return null;
+  const target = snapshotTarget && typeof snapshotTarget === 'object' ? snapshotTarget : {};
+  const buildingId = agentRuntimeVisualText(target.buildingId || activity?.buildingId || visualState?.buildingId || '', 80);
+  const faceAngle = agentRuntimeVisualNumber(activity?.faceAngle ?? visualState?.deskFacingAngle ?? target.faceAngle ?? dockTarget.faceAngle, null);
+  const workSpot = {
+    ...dockTarget,
+    apiX: dockTarget.x,
+    apiZ: dockTarget.y,
+    buildingId,
+    roomId: agentRuntimeVisualText(target.roomId || activity?.roomId || '', 80),
+    objectType: agentRuntimeVisualText(target.objectType || activity?.objectType || '', 80),
+    furnitureIndex: agentRuntimeVisualNumber(target.furnitureIndex ?? activity?.furnitureIndex, null),
+    spotId: agentRuntimeVisualText(target.spotId || target.interactionSpotId || activity?.spotId || '', 80),
+    kind: agentRuntimeVisualText(target.targetKind || activity?.kind || 'server-runtime-work-spot', 80) || 'server-runtime-work-spot',
+  };
+  if (faceAngle !== null) workSpot.faceAngle = faceAngle;
+  if (buildingId && buildingsMap?.has?.(buildingId)) workSpot.building = buildingsMap.get(buildingId);
+  return workSpot;
+}
+
+function makeAgentRuntimeHydratedVisualActivity(agent, incomingActivity = null, visualState = null) {
+  if (!incomingActivity || typeof incomingActivity !== 'object') return null;
+  const previous = agent?._idleActivity || {};
+  const activity = {
+    ...incomingActivity,
+    kind: agentRuntimeVisualText(incomingActivity.kind || visualState?.activityKind || '', 120),
+  };
+  const phase = String(activity.phase || '').trim().toLowerCase();
+  if (phase === 'active') {
+    const previousStillActive = previous.kind === activity.kind && previous.phase === 'active';
+    const previousStartedAt = previousStillActive ? Number(previous.activeStartedAt) : NaN;
+    const incomingStartedAt = Number(activity.activeStartedAt);
+    if (!Number.isFinite(incomingStartedAt)) {
+      activity.activeStartedAt = Number.isFinite(previousStartedAt)
+        ? previousStartedAt
+        : (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    }
+  }
+  return {
+    ...previous,
+    ...activity,
+    runtimeVisualOnly: true,
+  };
+}
+
+function syncAgentRuntimeVisualDeskState(agent, visualState = null, snapshotTarget = null) {
+  if (!agent?._runtimeObserverOnly) return false;
+  const activity = agent._idleActivity || null;
+  const kind = String(activity?.kind || visualState?.activityKind || '').trim().toLowerCase();
+  const phase = String(activity?.phase || '').trim().toLowerCase();
+  const active = phase === 'active';
+  const isWorkDesk = kind === 'live-status-work-desk';
+  const isDeskConsume = isAgentRuntimeDeskConsumeActivityKind(kind);
+  const deskActivityActive = active && (isWorkDesk || isDeskConsume);
+  if (!deskActivityActive) {
+    if (isWorkDesk || isDeskConsume || visualState?.activityActive === false) {
+      agent._atDesk = false;
+      agent._activeWorkSpot = null;
+      agent._deskFacingAngle = null;
+    }
+    return false;
+  }
+
+  const faceAngle = agentRuntimeVisualNumber(activity?.faceAngle ?? visualState?.deskFacingAngle ?? snapshotTarget?.faceAngle, null);
+  if (faceAngle !== null) agent._deskFacingAngle = faceAngle;
+  const workSpot = makeAgentRuntimeWorkSpotFromVisual(activity, snapshotTarget, visualState);
+  if (workSpot) {
+    agent._activeWorkSpot = workSpot;
+    if (faceAngle !== null && !Number.isFinite(Number(workSpot.faceAngle))) workSpot.faceAngle = faceAngle;
+  }
+  agent._atDesk = true;
+  agent._stayTimer = isWorkDesk
+    ? Math.max(Number(agent._stayTimer || 0), 999999)
+    : Math.max(Number(agent._stayTimer || 0), Number(activity.stayMs || activity.consumeDurationMs || 16000));
+  if (isWorkDesk) {
+    agent._schedPhase = activity.animationId || visualState?.resolvedAnimationId || 'work';
+  } else if (isDeskConsume) {
+    agent._schedPhase = getAgentRuntimeDeskConsumeSchedulePhase(kind, activity.animationId || visualState?.resolvedAnimationId);
+  }
+  return true;
+}
+
+function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null) {
   if (!agent || !visualState || typeof visualState !== 'object') return false;
   agent._runtimeVisualState = visualState;
   const status = agentRuntimeVisualText(visualState.status, 80);
   if (status) agent.status = status;
+  const resolvedAnimationId = agentRuntimeVisualText(visualState.resolvedAnimationId, 120);
+  if (resolvedAnimationId) agent._resolvedAnimationId = resolvedAnimationId;
   const movement = visualState.movement && typeof visualState.movement === 'object' ? visualState.movement : null;
   agent._runtimeVisualMovement = movement ? {
     isMoving: movement.isMoving === true,
@@ -2397,13 +2503,16 @@ function applyAgentRuntimeVisualState(agent, visualState = null) {
 
   if (visualState.activityActive === false) {
     agent._idleActivity = null;
+    if (agent._runtimeObserverOnly) {
+      agent._atDesk = false;
+      agent._activeWorkSpot = null;
+      agent._deskFacingAngle = null;
+    }
   } else if (visualState.activity && typeof visualState.activity === 'object') {
-    agent._idleActivity = {
-      ...(agent._idleActivity || {}),
-      ...visualState.activity,
-      runtimeVisualOnly: true,
-    };
+    agent._idleActivity = makeAgentRuntimeHydratedVisualActivity(agent, visualState.activity, visualState);
   }
+  const snapshotTarget = snapshot && typeof snapshot === 'object' ? agentRuntimePlainObject(snapshot.target, null) : null;
+  syncAgentRuntimeVisualDeskState(agent, visualState, snapshotTarget);
 
   if (visualState.carrying === false) {
     agent._carriedItem = null;
@@ -2659,7 +2768,7 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
     if (!wasObserverOnly || agent._wanderTarget || agent._waypointPath || agent._agentIntent) {
       clearAgentTransientMovement(agent);
     }
-    applyAgentRuntimeVisualState(agent, snapshot.visualState);
+    applyAgentRuntimeVisualState(agent, snapshot.visualState, snapshot);
     if (updateVisible) {
       beginAgentRuntimeObserverInterpolation(agent, snapshot, previousPosition, { source });
     } else {
