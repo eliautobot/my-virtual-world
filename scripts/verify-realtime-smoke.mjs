@@ -280,6 +280,7 @@ async function run() {
       requestId: 'world-topology-1',
       owner: 'main3d-world-topology:smoke-client-a',
       topologyHash: 'traffic:smoke',
+      tickMs: 500,
       trafficLights: [
         { key: 'traffic:0,0', ix: 0, iz: 0, type: 'x-int', openEdges: { n: true, s: true, e: true, w: true } },
         { key: 'traffic:1,0', ix: 1, iz: 0, type: 't-int', openEdges: { n: true, s: false, e: true, w: true } },
@@ -312,6 +313,7 @@ async function run() {
       runtime.trafficLights.get('traffic:0,0').phaseMs !== firstPhase &&
       runtime.trafficVehicles.get('traffic-vehicle:0').x !== firstVehicleX
     );
+    assert.equal(tickedWorldRuntime.tickMs, DEFAULT_WORLD_RUNTIME_TICK_MS, 'persisted/browser 500ms world tick should normalize back to the server runtime cadence');
     assert(tickedWorldRuntime.simTimeMs > firstSimTimeMs);
     assert(tickedWorldRuntime.trafficVehicles.get('traffic-vehicle:0').x > firstVehicleX);
 
@@ -391,6 +393,23 @@ async function run() {
     assert(Date.parse(manualOverrideAck.snapshot.leaseExpiresAt) > Date.now());
     assert.equal(manualOverrideAck.snapshot.routeId, '');
     assert.equal(manualOverrideAck.snapshot.x, 33);
+
+    room.send('runtime:claimRoute', {
+      requestId: 'manual-agent-route-after-override',
+      agentId: 'manual-agent',
+      mode: 'manual',
+      owner: 'user-directed:smoke-client-b',
+      leaseOwner: 'smoke-client-route-owner',
+      routeId: 'route-manual-agent-after-override',
+      target: { kind: 'world-point', x: 35, y: 36, floor: 1 },
+      ttlMs: 10000,
+    });
+    const manualRouteAfterOverrideAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'manual-agent-route-after-override');
+    assert.equal(manualRouteAfterOverrideAck.snapshot.mode, 'manual');
+    assert.equal(manualRouteAfterOverrideAck.snapshot.owner, 'user-directed:smoke-client-b');
+    assert.equal(manualRouteAfterOverrideAck.snapshot.leaseOwner, 'smoke-client-route-owner');
+    assert.equal(manualRouteAfterOverrideAck.snapshot.routeId, 'route-manual-agent-after-override');
+    assert.equal(manualRouteAfterOverrideAck.snapshot.target.x, 35);
 
     room.send('runtime:heartbeat', {
       requestId: 'heartbeat-1',
@@ -628,6 +647,7 @@ async function run() {
       runtime.topologyOwner === SERVER_WORLD_TOPOLOGY_OWNER && runtime.trafficLights?.size >= 1
     );
     assert.equal(serverRuntime.topologyOwner, SERVER_WORLD_TOPOLOGY_OWNER);
+    assert.equal(serverRuntime.tickMs, DEFAULT_WORLD_RUNTIME_TICK_MS, 'server-owned runtime should advertise the active 250ms tick cadence');
     assert.equal(serverRuntime.trafficLights?.size, 1);
     assert(serverRuntime.trafficVehicles?.size > 0);
     scriptedRoom.send('runtime:worldTopology', {

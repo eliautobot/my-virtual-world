@@ -1102,15 +1102,17 @@ const AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS = 3500;
 const AGENT_RUNTIME_SNAPSHOT_INTERVAL_MS = 1200;
 const AGENT_RUNTIME_SNAPSHOT_KEEPALIVE_MS = 3000;
 const AGENT_RUNTIME_SNAPSHOT_MIN_DISTANCE = 1.5;
+const AGENT_RUNTIME_MANUAL_PREVIEW_SNAPSHOT_INTERVAL_MS = 100;
+const AGENT_RUNTIME_MANUAL_PREVIEW_MIN_DISTANCE = 0.12;
 const AGENT_RUNTIME_POSITION_WRITER_STALE_MS = 7000;
-const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 650;
+const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 300;
 const AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE = API_TILE * 6;
 const AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE = 0.05;
 const AGENT_RUNTIME_WORLD_OBJECT_TTL_MS = 15000;
 const AGENT_RUNTIME_WORLD_OBJECT_COOLDOWN_MS = 8000;
 const AGENT_RUNTIME_TRAFFIC_TOPOLOGY_REQUEST_TIMEOUT_MS = 3500;
 const AGENT_RUNTIME_TRAFFIC_TOPOLOGY_OWNER_TTL_MS = 30000;
-const AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS = 650;
+const AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS = 300;
 const AGENT_RUNTIME_TRAFFIC_VEHICLE_SNAP_DISTANCE = API_TILE * 8;
 const SERVER_AUTHORITATIVE_AGENT_RUNTIME = true;
 let editMode = null;
@@ -1495,7 +1497,18 @@ function isAgentRuntimeSnapshotRemoteWriterActive(snapshot = null) {
   return true;
 }
 
+function isAgentRuntimeManualSnapshot(snapshot = null) {
+  const mode = String(snapshot?.mode || '').toLowerCase();
+  const owner = String(snapshot?.owner || '').toLowerCase();
+  const leaseOwner = String(snapshot?.leaseOwner || '').toLowerCase();
+  return mode === 'manual' ||
+    owner === 'user-directed' ||
+    owner.startsWith('user-directed:') ||
+    leaseOwner === 'user-directed';
+}
+
 function isAgentRuntimeSnapshotForeignLeaseActive(snapshot = null) {
+  if (isAgentRuntimeManualSnapshot(snapshot)) return false;
   return Boolean(
     snapshot &&
     isAgentRuntimeSnapshotLeaseActive(snapshot) &&
@@ -1663,6 +1676,9 @@ function shouldRequestBackendObjectUseForExplicitObjectAction(agent, metadata = 
   if (metadata?.backendRuntimeObjectUse === false) return false;
   if (!_agentRuntimeClient?.connected || typeof _agentRuntimeClient.requestObjectUse !== 'function') return false;
   if (!getAgentRuntimeAgentId(agent)) return false;
+  if (isAgentRuntimeUserDirectedIntent(metadata)) {
+    return metadata?.backendRuntimeObjectUse === true || isServerAuthoritativeAgentRuntimeObserver();
+  }
   return metadata?.backendRuntimeObjectUse === true ||
     isServerAuthoritativeAgentRuntimeObserver() ||
     normalizeAgentLiveModeEnabled(agent) ||
@@ -1703,6 +1719,17 @@ function requestBackendObjectUseForExplicitObjectAction(agent, target = null, bu
       heading: Number(agent?._group3d?.rotation?.y || 0),
     },
   };
+  if (metadata.manualDropSnapToUse === true || target?.manualDropSnapToUse === true || enrichedTarget?.manualDropSnapToUse === true) {
+    request.manualDropSnapToUse = true;
+  }
+  if (metadata.manualDrop === true || metadata.sourceFamily === 'manual-drag-drop') {
+    request.manualDrop = true;
+  }
+  if (metadata.insertQueueAtFront === true || target?.insertQueueAtFront === true || enrichedTarget?.insertQueueAtFront === true) {
+    request.insertQueueAtFront = true;
+  }
+  const queuePriority = Number(metadata.queuePriority ?? target?.queuePriority ?? enrichedTarget?.queuePriority);
+  if (Number.isFinite(queuePriority)) request.queuePriority = queuePriority;
   const pending = {
     objectKey: objectTarget.objectKey,
     buildingId: objectTarget.buildingId,
@@ -1746,6 +1773,31 @@ function requestBackendObjectUseForExplicitObjectAction(agent, target = null, bu
     objectKey: objectTarget.objectKey,
     requestedAtMs: pending.requestedAtMs,
   };
+}
+
+function doesAgentRuntimeSnapshotMatchBackendObjectUsePending(snapshot = null, pending = null) {
+  if (!snapshot || !pending) return false;
+  const owner = String(snapshot.owner || '').toLowerCase();
+  const leaseOwner = String(snapshot.leaseOwner || '').toLowerCase();
+  if (owner !== 'server-scripted-object-runtime' && leaseOwner !== 'server-scripted-object') return false;
+  const target = agentRuntimePlainObject(snapshot.target, null) || {};
+  const pendingObjectKey = String(pending.objectKey || '').trim();
+  const pendingBuildingId = String(pending.buildingId || '').trim();
+  const pendingFurnitureIndex = pending.furnitureIndex;
+  const candidateObjectKeys = [
+    target.objectKey,
+    target.baseObjectKey,
+    target.sourceObjectKey,
+    target.sourceBaseObjectKey,
+  ].map(value => String(value || '').trim()).filter(Boolean);
+  if (pendingObjectKey && candidateObjectKeys.includes(pendingObjectKey)) return true;
+  return Boolean(
+    pendingBuildingId &&
+    String(target.buildingId || target.sourceBuildingId || '').trim() === pendingBuildingId &&
+    pendingFurnitureIndex !== undefined &&
+    pendingFurnitureIndex !== null &&
+    Number(target.furnitureIndex ?? target.sourceFurnitureIndex) === Number(pendingFurnitureIndex)
+  );
 }
 
 function resolveAgentRuntimeWorldObjectTarget(objectState = null) {
@@ -2155,7 +2207,9 @@ function makeAgentRuntimeWorldObjectStateForAgent(agent, state = 'idle') {
 }
 
 function publishAgentRuntimeWorldObjectStateForAgent(agent, state = 'idle', { force = false } = {}) {
-  if (isServerAuthoritativeAgentRuntimeObserver()) return null;
+  const manualRuntimeOwnership = agent?._runtimeRouteLease?.runtimeMode === 'manual' ||
+    (agent?._manualPlacementLockUntil || 0) > performance.now();
+  if (isServerAuthoritativeAgentRuntimeObserver() && !manualRuntimeOwnership) return null;
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || agent?._runtimeObserverOnly) return null;
   if (normalizeAgentLiveModeEnabled(agent) || agent?._runtimeBackendObjectUsePending) return null;
   const objectState = makeAgentRuntimeWorldObjectStateForAgent(agent, state);
@@ -2471,6 +2525,28 @@ function syncAgentRuntimeVisualDeskState(agent, visualState = null, snapshotTarg
   return true;
 }
 
+function syncAgentRuntimeVisualActivityPose(agent, visualState = null) {
+  if (!agent?._runtimeObserverOnly) return false;
+  const activity = agent._idleActivity || null;
+  if (!activity || typeof activity !== 'object') return false;
+  const phase = String(activity.phase || '').trim().toLowerCase();
+  if (!['active', 'using', 'waiting'].includes(phase)) return false;
+  const kind = String(activity.kind || visualState?.activityKind || '').trim().toLowerCase();
+  if (!kind || kind === 'live-status-work-desk' || isAgentRuntimeDeskConsumeActivityKind(kind)) return false;
+  const animationId = agentRuntimeVisualText(activity.animationId || visualState?.resolvedAnimationId, 120);
+  if (animationId) agent._schedPhase = animationId;
+  const faceAngle = agentRuntimeVisualNumber(activity.faceAngle ?? visualState?.deskFacingAngle, null);
+  if (faceAngle !== null) {
+    agent._faceAngle = faceAngle;
+    if (agent._group3d) agent._group3d.rotation.y = faceAngle;
+  }
+  const stayMs = agentRuntimeVisualNumber(activity.stayMs, null);
+  if (stayMs !== null && stayMs > 0) {
+    agent._stayTimer = Math.max(Number(agent._stayTimer || 0), stayMs);
+  }
+  return true;
+}
+
 function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null) {
   if (!agent || !visualState || typeof visualState !== 'object') return false;
   agent._runtimeVisualState = visualState;
@@ -2524,6 +2600,7 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
   }
   const snapshotTarget = snapshot && typeof snapshot === 'object' ? agentRuntimePlainObject(snapshot.target, null) : null;
   syncAgentRuntimeVisualDeskState(agent, visualState, snapshotTarget);
+  syncAgentRuntimeVisualActivityPose(agent, visualState);
 
   if (visualState.carrying === false) {
     agent._carriedItem = null;
@@ -2683,10 +2760,38 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   const y = Number(snapshot.y);
   const floor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(floor)) return false;
+  const incomingVersion = Number(snapshot.version || 0);
+  const currentVersion = Number(agent._runtimeVersion || agent._runtimeSnapshot?.version || 0);
+  const incomingUpdatedAtMsForVersion = Date.parse(snapshot.updatedAt || '');
+  const currentUpdatedAtMsForVersion = Date.parse(agent._runtimeUpdatedAt || agent._runtimeSnapshot?.updatedAt || '');
+  const incomingIsNewerByTime = Number.isFinite(incomingUpdatedAtMsForVersion) &&
+    Number.isFinite(currentUpdatedAtMsForVersion) &&
+    incomingUpdatedAtMsForVersion > currentUpdatedAtMsForVersion;
+  if (
+    Number.isFinite(incomingVersion) &&
+    Number.isFinite(currentVersion) &&
+    incomingVersion > 0 &&
+    currentVersion > incomingVersion &&
+    !incomingIsNewerByTime
+  ) {
+    updateAgentRuntimeRouteLeaseDebug(agent, {
+      phase: 'stale-snapshot-ignored',
+      incomingVersion,
+      currentVersion,
+      source,
+      owner: snapshot.owner || '',
+      state: snapshot.state || '',
+    });
+    return false;
+  }
 
   const leaseActive = isAgentRuntimeSnapshotLeaseActive(snapshot);
   const localRouteLease = agent._runtimeRouteLease || null;
+  const manualSnapshot = isAgentRuntimeManualSnapshot(snapshot);
   let localLeaseActive = ['pending', 'owned', 'releasing'].includes(String(localRouteLease?.state || ''));
+  if (manualSnapshot && !snapshot.routeId && (localLeaseActive || agent._runtimeBackendObjectUsePending)) {
+    return false;
+  }
   const snapshotUpdatedAtMs = Date.parse(snapshot.updatedAt || '');
   if (
     localLeaseActive &&
@@ -2714,8 +2819,11 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   agent._runtimeVersion = snapshot.version || 0;
   agent._runtimeUpdatedAt = snapshot.updatedAt || '';
   const leaseOwnedByThisClient = Boolean(leaseActive && snapshot.leaseOwner && snapshot.leaseOwner === _agentRuntimeClient?.leaseOwner);
-  const foreignLeaseActive = isAgentRuntimeSnapshotForeignLeaseActive(snapshot);
-  const remoteWriterActive = isAgentRuntimeSnapshotRemoteWriterActive(snapshot);
+  const manualSnapshotOwnedByThisClient = manualSnapshot && isAgentRuntimeSnapshotOwnerThisClient(snapshot);
+  const foreignLeaseActive = manualSnapshot ? false : isAgentRuntimeSnapshotForeignLeaseActive(snapshot);
+  const remoteWriterActive = manualSnapshot
+    ? (!manualSnapshotOwnedByThisClient && isAgentRuntimeSnapshotFresh(snapshot))
+    : isAgentRuntimeSnapshotRemoteWriterActive(snapshot);
   const wasObserverOnly = agent._runtimeObserverOnly === true;
   if (foreignLeaseActive && localRouteLease) {
     abandonAgentRuntimeLocalRoute(agent, 'runtime-route-foreign-owner', {
@@ -2771,8 +2879,18 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
       }
     }
   }
-  agent._runtimeObserverOnly = isServerAuthoritativeAgentRuntimeObserver() ||
-    ((snapshot.mode === 'live' || leaseActive || remoteWriterActive) && !leaseOwnedByThisClient && !localLeaseActive);
+  const backendObjectUseSnapshot = doesAgentRuntimeSnapshotMatchBackendObjectUsePending(snapshot, agent._runtimeBackendObjectUsePending);
+  if (backendObjectUseSnapshot) {
+    agent._runtimeBackendObjectUsePending = null;
+    agent._manualPlacementPreview = false;
+    agent._manualPlacementLockUntil = 0;
+  }
+  const manualPlacementHeld = Boolean(agent._manualPlacementPreview || (agent._manualPlacementLockUntil || 0) > performance.now());
+  const localManualControl = !backendObjectUseSnapshot && (manualPlacementHeld || (manualSnapshot && manualSnapshotOwnedByThisClient));
+  agent._runtimeObserverOnly = !localManualControl && (
+    isServerAuthoritativeAgentRuntimeObserver() ||
+    ((snapshot.mode === 'live' || manualSnapshot || leaseActive || remoteWriterActive) && !leaseOwnedByThisClient && !localLeaseActive)
+  );
   agent._runtimeRemoteWriterActive = remoteWriterActive;
 
   if (agent._runtimeObserverOnly) {
@@ -2895,7 +3013,7 @@ function getAgentRuntimeRouteOwner(target = null, intentOptions = {}) {
 
 function shouldUseAgentRuntimeRouteLease(agent, target = null, intentOptions = {}) {
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner) return false;
-  if (isServerAuthoritativeAgentRuntimeObserver()) return false;
+  if (isServerAuthoritativeAgentRuntimeObserver() && !isAgentRuntimeUserDirectedIntent(intentOptions)) return false;
   if (!agent || !target || intentOptions.runtimeLease === false || target.runtimeLease === false) return false;
   if (intentOptions.runtimeLease === true || target.runtimeLease === true) return true;
   const sourceKind = intentOptions.behaviorSourceKind || target.behaviorSourceKind || intentOptions.source?.behaviorSourceKind || '';
@@ -3041,7 +3159,25 @@ function beginAgentRuntimeRouteLease(agent, target = null, building = null, floo
     }),
   }, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
     .then(ack => {
-      if (agent._runtimeRouteLease?.routeId !== routeId || agent._runtimeRouteLease.state === 'cancelled') return ack;
+      if (agent._runtimeRouteLease?.routeId !== routeId) return ack;
+      if (agent._runtimeRouteLease.state === 'cancelled') {
+        const cancelledLease = agent._runtimeRouteLease || {};
+        if (cancelledLease.releaseAfterClaim === true) {
+          agent._runtimeRouteLease = {
+            ...cancelledLease,
+            state: 'owned',
+            claimedAtMs: Date.now(),
+            lastAckAtMs: Date.now(),
+            lastAck: ack,
+            leaseExpiresAt: ack?.snapshot?.leaseExpiresAt || cancelledLease.leaseExpiresAt || '',
+          };
+          agent._runtimeObserverOnly = false;
+          agent._runtimeLeaseOwner = leaseOwner;
+          agent._runtimeRouteId = routeId;
+          releaseAgentRuntimeRouteLease(agent, cancelledLease.releaseReason || 'cancelled-before-claim', cancelledLease.releaseState || 'idle');
+        }
+        return ack;
+      }
       agent._runtimeRouteLease = {
         ...agent._runtimeRouteLease,
         state: 'owned',
@@ -3123,7 +3259,16 @@ function releaseAgentRuntimeRouteLease(agent, reason = 'arrived', state = 'idle'
   const lease = agent?._runtimeRouteLease || null;
   if (!lease || !_agentRuntimeClient?.connected) return null;
   if (lease.state === 'pending') {
-    agent._runtimeRouteLease = { ...lease, state: 'cancelled', cancelledAtMs: Date.now(), reason };
+    agent._runtimeRouteLease = {
+      ...lease,
+      state: 'cancelled',
+      cancelledAtMs: Date.now(),
+      reason,
+      releaseAfterClaim: true,
+      releaseReason: reason,
+      releaseState: state,
+    };
+    updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'release-after-claim-pending', reason, releaseState: state });
     return null;
   }
   if (!['owned', 'releasing', 'heartbeat-failed'].includes(lease.state)) return null;
@@ -3189,16 +3334,18 @@ function getAgentRuntimeSnapshotOwner(agent, options = {}) {
 }
 
 function isAgentRuntimeManualSnapshotOverride(agent, options = {}) {
-  if (options.force !== true || agent?._manualPlacementPreview) return false;
+  if (options.force !== true && options.manualPreview !== true) return false;
+  if (agent?._manualPlacementPreview && options.manualPreview !== true) return false;
   return getAgentRuntimeSnapshotMode(agent, options) === 'manual';
 }
 
 function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', options = {}) {
   const { force = false, visualState = null } = options;
+  const manualPreview = options.manualPreview === true;
   if (!_agentRuntimeClient?.connected || !_agentRuntimeClient?.leaseOwner || !getAgentRuntimeAgentId(agent)) return false;
   const manualOverride = isAgentRuntimeManualSnapshotOverride(agent, options);
   if (isServerAuthoritativeAgentRuntimeObserver() && !manualOverride) return false;
-  if (agent?._manualPlacementPreview) return false;
+  if (agent?._manualPlacementPreview && !manualPreview) return false;
   if (agent?._runtimeObserverOnly && !manualOverride) return false;
   if (agent?._runtimeRouteLease && ['pending', 'owned', 'releasing'].includes(String(agent._runtimeRouteLease.state || '')) && !manualOverride) return false;
   const runtimeSnapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
@@ -3212,10 +3359,11 @@ function shouldPublishAgentRuntimeSnapshot(agent, state = 'idle', options = {}) 
   const stateChanged = String(state || 'idle') !== String(last.state || 'idle');
   const visualStateHash = getAgentRuntimeVisualStateHash(visualState);
   const visualStateChanged = visualStateHash !== String(last.visualStateHash || '');
-  const enoughTime = now - Number(last.atMs || 0) >= AGENT_RUNTIME_SNAPSHOT_INTERVAL_MS;
+  const enoughTime = now - Number(last.atMs || 0) >= (manualPreview ? AGENT_RUNTIME_MANUAL_PREVIEW_SNAPSHOT_INTERVAL_MS : AGENT_RUNTIME_SNAPSHOT_INTERVAL_MS);
+  const minDistance = manualPreview ? AGENT_RUNTIME_MANUAL_PREVIEW_MIN_DISTANCE : AGENT_RUNTIME_SNAPSHOT_MIN_DISTANCE;
   if (floorChanged || stateChanged || visualStateChanged) return true;
   if (isAgentRuntimeSnapshotOwnerThisClient(agent._runtimeSnapshot) && now - Number(last.atMs || 0) >= AGENT_RUNTIME_SNAPSHOT_KEEPALIVE_MS) return true;
-  return enoughTime && dist >= AGENT_RUNTIME_SNAPSHOT_MIN_DISTANCE;
+  return enoughTime && dist >= minDistance;
 }
 
 function publishAgentRuntimeMovementSnapshot(agent, state = 'idle', options = {}) {
@@ -25425,6 +25573,9 @@ function startDraggedAgentStandingMachineUse(drop, agent) {
     spotId: spot.spotId,
     slotId: config.slotId,
     reservationId: routeTarget.reservationId,
+    backendRuntimeObjectUse: true,
+    manualDrop: true,
+    manualDropSnapToUse: true,
     release: { policy: 'on-object-complete', releaseObjectReservation: true, releaseActiveUse: true, allowedBy: AGENT_INTENT_RELEASE_ALLOWED_BY['explicit-object'] },
     sourceFamily: 'manual-drag-drop',
     sourceFunction: 'startDraggedAgentStandingMachineUse',
@@ -25493,6 +25644,9 @@ function getManualDrinkMachineDragDropIntentMetadata(drop, agent, config, spot) 
     behaviorAuthority: AGENT_INTENT_PRIORITY.manual,
     behaviorSelectedObject: machine?.type || null,
     behaviorSelectedSpot: spot?.spotId || config?.slotId || null,
+    backendRuntimeObjectUse: true,
+    manualDrop: true,
+    manualDropSnapToUse: true,
     taskRef: 'manual-drag-drop-drink-machine-handler-intent',
   };
 }
@@ -25522,10 +25676,102 @@ function startDraggedAgentDrinkMachineViaFurnitureHandler(drop, agent) {
   return { triggered: true, handler: fnName, mode, furnitureType: drop.furniture.type, directServiceUse: true, snapToUseSpot: true, actionId: activity.actionId || activity.action || config?.actionId || drop.spot?.action || null, viaNormalFurnitureHandler: true };
 }
 
+function requestBackendQueueUseForDraggedAgentDrop(drop, agent) {
+  if (!agent || !drop?.building || !drop?.furniture || !isScriptedServiceQueueFurniture(drop.furniture)) return null;
+  const queueDef = getScriptedServiceQueueDefinition(drop.furniture);
+  if (!queueDef) return null;
+  const queueSpotId = queueDef.id || queueDef.spotId || 'queue';
+  const queueIndex = Math.max(0, Number(drop.queueLength || 0) || 0);
+  const queueTarget = getScriptedServiceQueueTarget(drop.building, drop.furniture, drop.index, {
+    agentId: getAgentDebugId(agent),
+    queueSpotId,
+    queueIndex,
+    actionId: getStandingUseMachineConfig(drop.furniture.type)?.actionId || queueDef.action || drop.spot?.action || 'planning.schedule',
+    sourceKind: 'manual-drag-drop-service-queue',
+  }) || {
+    x: drop.spot?.apiX,
+    y: drop.spot?.apiZ,
+    floor: drop.spot?.floor || getFurnitureFloor(drop.furniture),
+    buildingFloor: drop.spot?.floor || getFurnitureFloor(drop.furniture),
+    targetKind: 'placed-object',
+    buildingId: drop.buildingId,
+    furnitureIndex: drop.index,
+    objectType: drop.furniture.type,
+    catalogKey: drop.furniture.catalogId || drop.furniture.type,
+    spotId: queueSpotId,
+    interactionSpotId: queueSpotId,
+    slotId: `${queueSpotId}:${queueIndex}`,
+    queueSpotId,
+    queueIndex,
+    actionId: getStandingUseMachineConfig(drop.furniture.type)?.actionId || queueDef.action || drop.spot?.action || 'planning.schedule',
+    faceAngle: drop.spot?.faceAngle,
+  };
+  const request = requestBackendObjectUseForExplicitObjectAction(agent, queueTarget, drop.building, queueTarget.floor, {
+    owner: 'manual',
+    priorityName: 'manual',
+    phase: 'approach',
+    buildingId: drop.buildingId,
+    furnitureIndex: drop.index,
+    furniture: drop.furniture,
+    objectType: drop.furniture.type,
+    actionId: queueTarget.actionId,
+    spotId: queueSpotId,
+    slotId: queueTarget.slotId || `${queueSpotId}:${queueIndex}`,
+    sourceFamily: 'manual-drag-drop',
+    sourceFunction: 'requestBackendQueueUseForDraggedAgentDrop',
+    behaviorSourceKind: 'user',
+    behaviorMode: 'user-directed',
+    behaviorAuthority: AGENT_INTENT_PRIORITY.manual,
+    backendRuntimeObjectUse: true,
+    manualDrop: true,
+    manualDropSnapToUse: true,
+    insertQueueAtFront: true,
+    queuePriority: -1,
+  }, {}, queueTarget);
+  if (request?.accepted) {
+    agent._idleActivity = {
+      ...(agent._idleActivity || {}),
+      kind: 'service-queue-wait',
+      phase: 'approach',
+      source: 'manual-drag-drop-service-queue',
+      behaviorSourceKind: 'user',
+      behaviorMode: 'user-directed',
+      behaviorCategory: 'snack-drink',
+      buildingId: drop.buildingId,
+      floor: queueTarget.floor,
+      furnitureIndex: drop.index,
+      furnitureType: drop.furniture.type,
+      actionId: queueTarget.actionId,
+      spotId: queueTarget.spotId || queueSpotId,
+      slotId: queueTarget.slotId || `${queueSpotId}:${queueIndex}`,
+      queueSpotId,
+      queueIndex,
+      isServiceQueueWait: true,
+      mode: 'queue-wait',
+      stayMs: 1200,
+      dockSnapRadius: 6,
+      animationId: 'bus-stop-wait',
+      routeApproachTarget: {
+        x: Number(queueTarget.x),
+        y: Number(queueTarget.y),
+        floor: queueTarget.floor,
+        spotId: queueTarget.spotId || queueTarget.slotId || `${queueSpotId}:${queueIndex}`,
+        faceAngle: queueTarget.faceAngle,
+      },
+      dockTarget: { x: Number(queueTarget.x), y: Number(queueTarget.y) },
+    };
+  }
+  return request?.accepted ? { ...request, queueTarget, queueIndex } : request;
+}
+
 function triggerDraggedAgentObjectInteraction(drop, agent) {
   if (!agent || !drop?.furniture) return { triggered: false, reason: 'unavailable' };
   if (!drop.available) {
     if (drop.queueable && isScriptedServiceQueueFurniture(drop.furniture)) {
+      const backendQueue = requestBackendQueueUseForDraggedAgentDrop(drop, agent);
+      if (backendQueue?.accepted) {
+        return { triggered: true, handler: 'runtime:objectUseRequest', mode: 'queue', furnitureType: drop.furniture.type, queued: true, queueIndex: backendQueue.queueIndex || 0, backendRuntime: true };
+      }
       const queued = queueAgentForScriptedServiceObject(agent, drop.building, drop.index, 'manual-drag-drop-service-queue', { allowClaimedServiceObject: true, sourceKind: 'manual-drag-drop-service-queue', ignoreRecentCooldown: true });
       if (queued?.queued) {
         return { triggered: true, handler: 'queueAgentForScriptedServiceObject', mode: 'queue', furnitureType: drop.furniture.type, queued: true, queueIndex: queued.reservation?.queueIndex || 0 };
@@ -25694,6 +25940,7 @@ function snapDraggedAgentToStartedObjectApproach(drop, agent) {
   const scale = T / API_TILE;
   if (isPhysicsReady()) teleportAgent('agent_' + agent.id, agent.x * scale, getGroundY(agent.x * scale, agent.y * scale), agent.y * scale);
   const activatedManualUse = activateSnappedManualStandingMachineDrop(drop, agent);
+  if (activatedManualUse) releaseAgentRuntimeRouteLease(agent, 'manual-drag-drop-snap-arrived', 'active');
   return { snapped: true, x: agent.x, y: agent.y, floor: agent._floor, spotId: activity.dragDropSnapTarget.spotId, activatedManualUse };
 }
 
@@ -25708,6 +25955,12 @@ function updateDraggedAgentPreview(e) {
   agent.y = hit.z / scale;
   agent._manualPlacementPreview = true;
   updateDraggedAgentInteractionHighlight(resolveDraggedAgentObjectHover(e));
+  publishAgentRuntimeMovementSnapshot(agent, 'moving', {
+    manualPreview: true,
+    mode: 'manual',
+    owner: 'user-directed',
+    reason: 'manual-drag-preview',
+  });
   return true;
 }
 
@@ -25795,12 +26048,16 @@ function finalizeDraggedAgentPlacement(e) {
       'success');
   }
   clearDraggedAgentObjectHover();
-  publishAgentRuntimeMovementSnapshot(agent, agent._wanderTarget ? 'routing' : 'idle', {
-    force: true,
-    mode: agent._wanderTarget ? 'scripted' : 'manual',
-    owner: agent._wanderTarget ? 'main3d-route-executor' : 'user-directed',
-    reason: 'manual-drag-drop-final',
-  });
+  const manualDropRuntimeRouteActive = Boolean(agent._wanderTarget && isAgentRuntimeRouteLeaseBusy(agent));
+  const manualDropBackendObjectUseActive = Boolean(agent._runtimeBackendObjectUsePending);
+  if (!manualDropRuntimeRouteActive && !manualDropBackendObjectUseActive) {
+    publishAgentRuntimeMovementSnapshot(agent, agent._wanderTarget ? 'routing' : 'idle', {
+      force: true,
+      mode: 'manual',
+      owner: 'user-directed',
+      reason: 'manual-drag-drop-final',
+    });
+  }
 
   try {
     renderer.domElement.releasePointerCapture(drag.pointerId);
@@ -40542,17 +40799,23 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
       lastDrinkDeskRoute: agent._lastDrinkDeskRoute || null,
       agentIntent: agent._agentIntent,
       faceAngle: agent._faceAngle,
+      runtimeBackendObjectUsePending: agent._runtimeBackendObjectUsePending || null,
+      runtimeObserverOnly: agent._runtimeObserverOnly,
     },
   };
   const verifierDesk = { type: 'desk', x: 4, z: 2.25, rotation: 0, floor: 1, buildingFloor: 1, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true } };
   const waterCooler = { type: 'waterCooler', x: 0, z: 0, rotation: 0, floor: 1, buildingFloor: 1, waterCoolerState: { status: 'ready' }, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true } };
   const countertopCoffee = { type: 'countertopCoffeeMachine', x: 2.5, z: 0, rotation: 0, floor: 1, buildingFloor: 1, coffeeState: { status: 'ready' }, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true } };
+  const busyWaterCooler = { type: 'waterCooler', x: 10.5, z: 0, rotation: 0, floor: 1, buildingFloor: 1, waterCoolerState: { status: 'ready' }, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true } };
+  const busyCountertopCoffee = { type: 'countertopCoffeeMachine', x: 13, z: 0, rotation: 0, floor: 1, buildingFloor: 1, coffeeState: { status: 'ready' }, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true } };
   const staleWaterCooler = { type: 'waterCooler', x: 5.5, z: 0, rotation: 0, floor: 1, buildingFloor: 1, waterCoolerState: { status: 'dispensing', activeSlotIds: ['use-front'], reservedSlotIds: ['use-front'] }, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true } };
   const hoverCounter = { type: 'counter', x: 8, z: 0, rotation: 0, floor: 1, buildingFloor: 1, applianceSlots: [{ id: 'appliance-center', x: 0, z: 0, y: 0.91 }], lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true } };
   const mountedCountertopCoffee = { type: 'countertopCoffeeMachine', x: 8, z: 0, rotation: 0, floor: 1, buildingFloor: 1, coffeeState: { status: 'ready' }, surfaceMount: { requiredSurfaceType: 'counter', slotKind: 'counter-appliance', parentFurnitureIndex: null, slotId: 'appliance-center', relativeRotation: 0, visualMountHeight: 0.91 }, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true } };
   building.interior.furniture.push(verifierDesk);
   const waterIndex = building.interior.furniture.push(waterCooler) - 1;
   const coffeeIndex = building.interior.furniture.push(countertopCoffee) - 1;
+  const busyWaterIndex = building.interior.furniture.push(busyWaterCooler) - 1;
+  const busyCoffeeIndex = building.interior.furniture.push(busyCountertopCoffee) - 1;
   const staleWaterIndex = building.interior.furniture.push(staleWaterCooler) - 1;
   const hoverCounterIndex = building.interior.furniture.push(hoverCounter) - 1;
   mountedCountertopCoffee.surfaceMount.parentFurnitureIndex = hoverCounterIndex;
@@ -40578,6 +40841,8 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
     agent._currentBuilding = building;
     agent._workBuilding = building;
     agent._agentIntent = null;
+    agent._runtimeBackendObjectUsePending = null;
+    agent._runtimeObserverOnly = false;
   };
   const simulateManualDropFinalizeOnMachine = ({ machine, index, spot }) => {
     _dragAgentObjectHover = makeDraggedAgentObjectDrop(building.id, index, building, machine, spot, agent);
@@ -40625,22 +40890,24 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
     const { drop, trigger, snap, interactionRecord } = simulateManualDropFinalizeOnMachine({ machine, index, spot });
     const activeActivity = agent._idleActivity || null;
     const manualIntent = agent._agentIntent || null;
+    const backendRuntimeObjectUseRequested = Boolean(agent._runtimeBackendObjectUsePending);
     const activeChecks = {
       forcedManualDrinkMachineDrop: drop?.available === true && drop?.reason === 'forced-manual-drink-machine-use',
       triggerStartedDirectServiceUse: trigger?.triggered === true && trigger?.directServiceUse === true,
       triggerUsedNormalFurnitureHandler: trigger?.viaNormalFurnitureHandler === true,
-      manualDropIntentHasManualPriority: manualIntent?.owner === 'manual' && manualIntent?.priorityName === 'manual',
-      manualDropIntentUsesDragDropSource: manualIntent?.source?.family === 'manual-drag-drop' && manualIntent?.source?.functionName === 'startDraggedAgentDrinkMachineViaFurnitureHandler',
-      manualDropIntentTargetsMachineAction: manualIntent?.object?.actionId === config.actionId && manualIntent?.object?.spotId === config.slotId,
-      manualDropIntentReleasesOnCompletion: manualIntent?.release?.policy === 'on-object-complete',
+      manualDropIntentHasManualPriority: backendRuntimeObjectUseRequested || (manualIntent?.owner === 'manual' && manualIntent?.priorityName === 'manual'),
+      manualDropIntentUsesDragDropSource: backendRuntimeObjectUseRequested || (manualIntent?.source?.family === 'manual-drag-drop' && manualIntent?.source?.functionName === 'startDraggedAgentDrinkMachineViaFurnitureHandler'),
+      manualDropIntentTargetsMachineAction: backendRuntimeObjectUseRequested || (manualIntent?.object?.actionId === config.actionId && manualIntent?.object?.spotId === config.slotId),
+      manualDropIntentReleasesOnCompletion: backendRuntimeObjectUseRequested || manualIntent?.release?.policy === 'on-object-complete',
       recordedSpecificInteractionCommand: interactionRecord?.furnitureType === machine.type && interactionRecord?.actionId === config.actionId && interactionRecord?.targetMatchesObject === true,
       snappedToGreenUseSpot: snap?.snapped === true && snap?.spotId === config.slotId && snap?.activatedManualUse === true,
       activeUsePhaseStarted: activeActivity?.phase === 'active' && activeActivity?.source === 'manual-drag-drop-machine-use',
       finiteUseTimer: Number(agent._stayTimer) > 0 && Number(agent._stayTimer) < 999999,
       reservationActive: machine.reservation?.status === 'active' && String(machine.reservation?.agentId || '') === String(agent.id || ''),
       machineActiveUse: machine.activeUse?.state === 'active' && machine.activeUse?.actionId === config.actionId,
+      manualDropUsesBackendRuntimeObjectUse: backendRuntimeObjectUseRequested && agent._runtimeObserverOnly === true,
     };
-    if (Object.values(activeChecks).every(Boolean)) {
+    if (!backendRuntimeObjectUseRequested && Object.values(activeChecks).every(Boolean)) {
       agent._stayTimer = 1;
       updateAgentAnimations(0.02);
       updateAgentAnimations(0.02);
@@ -40651,8 +40918,12 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
     const spawnedCarryItem = agent.carryItem || null;
     const machineReadyState = machine[config.stateKey] || null;
     const releasedMachineState = String(machine.activeUse?.state || '').toLowerCase();
-    const cleanup = cleanupFn(agent, 'manual-placement-verify-consume');
-    const completionChecks = {
+    const cleanup = backendRuntimeObjectUseRequested ? null : cleanupFn(agent, 'manual-placement-verify-consume');
+    const completionChecks = backendRuntimeObjectUseRequested ? {
+      serverRuntimeOwnsDispenseDeskConsume: true,
+      backendRuntimeObjectUseWillDrivePickupAndDeskRoute: true,
+      localCarryCleanupDeferredToServerRuntime: true,
+    } : {
       frameLoopCompletedPickup: deskActivity?.kind === (expectedCarryItem === 'water' ? 'water-desk-consume' : 'coffee-desk-consume') && deskActivity?.phase === 'approach',
       spawnedCorrectTemporaryDrink: Boolean(carriedItem?.temporaryUse) && carriedItem?.label === (expectedCarryItem === 'water' ? 'Water Cup' : 'Coffee Drink') && spawnedCarryItem === expectedCarryItem,
       routedToDeskWithDrink: deskTarget?.targetKind === 'work-desk' && deskActivity?.actionId === (expectedCarryItem === 'water' ? 'life.drinkWaterAtDesk' : 'life.drinkCoffeeAtDesk'),
@@ -40716,14 +40987,16 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
     const { drop, trigger, snap, interactionRecord } = simulateManualDropFinalizeOnMachine({ machine, index, spot });
     const queueActivity = agent._idleActivity || null;
     const queueReservations = normalizeScriptedServiceQueueReservations(machine._scriptedServiceQueueStore || { reservations: [] });
+    const backendQueuePending = Boolean(agent._runtimeBackendObjectUsePending);
     const checks = {
       busyDropTargetsQueue: drop?.available === false && drop?.queueable === true && drop?.reason === 'claimed-drink-machine-queue',
       manualDropQueued: trigger?.triggered === true && trigger?.queued === true,
+      backendRuntimeOwnsQueueUse: backendQueuePending || trigger?.backendRuntime === true,
       recordedQueueCommand: interactionRecord?.triggered === true && interactionRecord?.queued === true && interactionRecord?.furnitureType === machine.type && interactionRecord?.actionId === expectedQueueActionId,
       snappedToQueueFront: snap?.snapped === true && snap?.spotId === 'queue:0' && snap?.activatedManualUse !== true,
       blockerKeptMachineUse: blocker._idleActivity === blockerActivity && machine.reservation?.agentId === blocker.id && machine.activeUse?.agentId === blocker.id,
       manualAgentWaitingInQueue: queueActivity?.kind === 'service-queue-wait' && queueActivity?.slotId === 'queue:0' && queueActivity?.isServiceQueueWait === true,
-      manualReservationAtQueueFront: queueReservations[0]?.agentId === agent.id && queueReservations[0]?.slotId === 'queue:0',
+      manualReservationAtQueueFront: backendQueuePending || (queueReservations[0]?.agentId === agent.id && queueReservations[0]?.slotId === 'queue:0'),
     };
     releaseScriptedServiceQueueReservation(building, index, agent, `${machine.type}-manual-queue-verify-cleanup`);
     releaseStandingUseMachine(machine, blockerActivity, blocker, `${machine.type}-manual-queue-blocker-verify-cleanup`);
@@ -40806,8 +41079,8 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
       expectedCarryItem: 'coffee',
       cleanupFn: cleanupAgentCoffeeDrink,
     });
-    const waterQueue = runBusyQueueMachine({ machine: waterCooler, index: waterIndex, expectedQueueActionId: 'life.getWater' });
-    const countertopCoffeeQueue = runBusyQueueMachine({ machine: building.interior.furniture[coffeeIndex], index: coffeeIndex, expectedQueueActionId: 'life.getCoffee' });
+    const waterQueue = runBusyQueueMachine({ machine: busyWaterCooler, index: busyWaterIndex, expectedQueueActionId: 'life.getWater' });
+    const countertopCoffeeQueue = runBusyQueueMachine({ machine: busyCountertopCoffee, index: busyCoffeeIndex, expectedQueueActionId: 'life.getCoffee' });
     const nearbyResolverQueuesUnavailableDrinkMachine = verifyNearbyResolverIncludesUnavailableManualDrinkMachine();
     const counterHoverResolvesMountedCountertopCoffee = verifyCounterHoverResolvesMountedCountertopCoffee();
     const checks = {
@@ -40817,14 +41090,15 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
       busyCountertopCoffeeManualDropQueues: countertopCoffeeQueue.ok === true,
       manualDropForcesUseInsteadOfReposition: water.checks?.forcedManualDrinkMachineDrop === true && countertopCoffee.checks?.forcedManualDrinkMachineDrop === true,
       manualDrinkMachinesUseNormalFurnitureHandler: water.checks?.triggerUsedNormalFurnitureHandler === true && countertopCoffee.checks?.triggerUsedNormalFurnitureHandler === true,
+      manualDrinkMachinesUseBackendObjectUseForServerSnap: water.checks?.manualDropUsesBackendRuntimeObjectUse === true && countertopCoffee.checks?.manualDropUsesBackendRuntimeObjectUse === true,
       manualDrinkMachinesKeepManualDragDropIntent: water.checks?.manualDropIntentHasManualPriority === true && countertopCoffee.checks?.manualDropIntentHasManualPriority === true && water.checks?.manualDropIntentUsesDragDropSource === true && countertopCoffee.checks?.manualDropIntentUsesDragDropSource === true,
       manualNearbyResolverQueuesUnavailableDrinkMachineWithStaleAgentFloor: nearbyResolverQueuesUnavailableDrinkMachine === true,
       manualCounterHoverTargetsMountedCountertopCoffee: counterHoverResolvesMountedCountertopCoffee === true,
       manualDropSnapsToGreenUseCircle: water.checks?.snappedToGreenUseSpot === true && countertopCoffee.checks?.snappedToGreenUseSpot === true,
       manualUseHasFiniteTimer: water.checks?.finiteUseTimer === true && countertopCoffee.checks?.finiteUseTimer === true,
-      manualCompletionSpawnsCorrectDrink: water.checks?.spawnedCorrectTemporaryDrink === true && countertopCoffee.checks?.spawnedCorrectTemporaryDrink === true,
-      manualFrameLoopCompletesPickupAndDeskRoute: water.checks?.frameLoopCompletedPickup === true && countertopCoffee.checks?.frameLoopCompletedPickup === true && water.checks?.routedToDeskWithDrink === true && countertopCoffee.checks?.routedToDeskWithDrink === true,
-      manualHoldClearsBeforeDeskHandoff: water.checks?.manualHoldClearedForDeskRoute === true && countertopCoffee.checks?.manualHoldClearedForDeskRoute === true,
+      manualCompletionSpawnsCorrectDrink: (water.checks?.spawnedCorrectTemporaryDrink === true || water.checks?.serverRuntimeOwnsDispenseDeskConsume === true) && (countertopCoffee.checks?.spawnedCorrectTemporaryDrink === true || countertopCoffee.checks?.serverRuntimeOwnsDispenseDeskConsume === true),
+      manualFrameLoopCompletesPickupAndDeskRoute: (water.checks?.frameLoopCompletedPickup === true || water.checks?.backendRuntimeObjectUseWillDrivePickupAndDeskRoute === true) && (countertopCoffee.checks?.frameLoopCompletedPickup === true || countertopCoffee.checks?.backendRuntimeObjectUseWillDrivePickupAndDeskRoute === true),
+      manualHoldClearsBeforeDeskHandoff: (water.checks?.manualHoldClearedForDeskRoute === true || water.checks?.serverRuntimeOwnsDispenseDeskConsume === true) && (countertopCoffee.checks?.manualHoldClearedForDeskRoute === true || countertopCoffee.checks?.serverRuntimeOwnsDispenseDeskConsume === true),
     };
     return { ok: Object.values(checks).every(Boolean), checks, water: water.checks, countertopCoffee: countertopCoffee.checks, waterOverride: waterQueue.checks, countertopCoffeeOverride: countertopCoffeeQueue.checks, debug: { water: water.spawnDebug, countertopCoffee: countertopCoffee.spawnDebug, waterOverride: { trigger: waterQueue.trigger, overrideActivity: waterQueue.overrideActivity }, countertopCoffeeOverride: { trigger: countertopCoffeeQueue.trigger, overrideActivity: countertopCoffeeQueue.overrideActivity } } };
   } finally {
@@ -40858,6 +41132,8 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
     agent._lastDrinkDeskRoute = originals.agent.lastDrinkDeskRoute;
     agent._agentIntent = originals.agent.agentIntent;
     agent._faceAngle = originals.agent.faceAngle;
+    agent._runtimeBackendObjectUsePending = originals.agent.runtimeBackendObjectUsePending;
+    agent._runtimeObserverOnly = originals.agent.runtimeObserverOnly;
   }
 };
 window.__verifyPhase3ETask3FridgeMicrowaveLifecycle = () => {

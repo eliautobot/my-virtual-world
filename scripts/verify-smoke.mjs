@@ -404,6 +404,7 @@ for (const token of [
   'SERVER_AUTHORITATIVE_LIVE_ACTION_RUNTIME',
   "'runtime-route-foreign-owner'",
   'function abandonAgentRuntimeLocalRoute(agent',
+  "'stale-snapshot-ignored'",
   "AGENT_RUNTIME_MEMBER_SCHEMA = 'agent-runtime-member/v1'",
   'function makeAgentRuntimeMemberRecord(agent, runtimePositionOwner = \'\', options = {})',
   'runtimeMemberSchema: AGENT_RUNTIME_MEMBER_SCHEMA',
@@ -414,9 +415,10 @@ for (const token of [
 
 for (const token of [
   'WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000',
-  'DEFAULT_WORLD_RUNTIME_TICK_MS = 500',
+  'DEFAULT_WORLD_RUNTIME_TICK_MS = 250',
   'WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000',
   'RUNTIME_STATE_BROADCAST_INTERVAL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS',
+  'const tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS',
   'this.patchRate = DEFAULT_WORLD_RUNTIME_TICK_MS',
   'runWithDeferredRuntimeDocumentWrites',
   'broadcastRuntimeState',
