@@ -1400,6 +1400,16 @@ function isServerRuntimeUnvalidatedManualRoute(route = null) {
   return text.includes('unknown-building');
 }
 
+function isServerRuntimePathfinderRoute(route = null) {
+  const source = String(route?.source || '').toLowerCase();
+  if (!source.includes('dynamic-interior-routing.js') && !source.includes('dynamic-exterior-routing.js')) return false;
+  if (route?.active === false) return false;
+  const routePointCount = Array.isArray(route?.routePoints)
+    ? route.routePoints.length
+    : (Array.isArray(route?.route) ? route.route.length : 0);
+  return routePointCount > 1;
+}
+
 function validateServerRuntimeStaticSegment(dataDir, currentPoint, proposedPoint, { phase = '', route = null } = {}) {
   const current = normalizeServerRuntimePoint(currentPoint, proposedPoint?.floor || 1);
   const proposed = normalizeServerRuntimePoint(proposedPoint, current?.floor || 1);
@@ -1506,6 +1516,13 @@ function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, propo
 
   const staticResult = validateServerRuntimeStaticSegment(dataDir, current, proposed, { phase, route });
   if (!staticResult.clear) {
+    if (isServerRuntimePathfinderRoute(route)) {
+      return {
+        point: proposed,
+        adjusted: false,
+        routePatch: null,
+      };
+    }
     const dx = proposed.x - current.x;
     const dy = proposed.y - current.y;
     for (const scale of [0.5, 0.25, 0.125]) {
