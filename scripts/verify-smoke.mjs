@@ -188,6 +188,8 @@ const realtimeServerJs = read('src/realtime/server.mjs');
 const chatJs = read('src/client/js/chat.js');
 const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
+const dynamicInteriorRoutingJs = read('src/client/js/dynamic-interior-routing.js');
+const dynamicExteriorRoutingJs = read('src/client/js/dynamic-exterior-routing.js');
 const uiCss = read('src/client/css/ui-redesign.css');
 
 for (const token of [
@@ -699,6 +701,10 @@ for (const token of [
   'backend-runtime-object-use-requested',
   'runtimeRoute',
   '_movementDebugNextWaypoint',
+  'hydrateDynamicInteriorRoutingDebugFromRuntimeRoute',
+  'hydrateDynamicExteriorRoutingDebugFromRuntimeRoute',
+  'syncAgentRuntimeRoutingDebugFromRuntimeRoute',
+  '_runtimeRouteDebugLayer',
   'writeWorldObjectState',
   'requestObjectUse',
   'shouldBlockAgentRuntimeObjectAction',
@@ -744,6 +750,18 @@ for (const token of [
   'Encoder.BUFFER_SIZE',
 ]) {
   assert(agentRuntimeRoomJs.includes(token), `agent runtime room missing schema buffer token: ${token}`);
+}
+for (const token of [
+  'hydrateDynamicInteriorRoutingDebugFromRuntimeRoute',
+  'runtimeDebugHydrated',
+]) {
+  assert(dynamicInteriorRoutingJs.includes(token), `dynamic interior routing missing runtime debug token: ${token}`);
+}
+for (const token of [
+  'hydrateDynamicExteriorRoutingDebugFromRuntimeRoute',
+  'runtimeDebugHydrated',
+]) {
+  assert(dynamicExteriorRoutingJs.includes(token), `dynamic exterior routing missing runtime debug token: ${token}`);
 }
 for (const token of [
   'data-settings-tab="live-mode"',

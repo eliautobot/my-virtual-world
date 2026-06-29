@@ -608,6 +608,8 @@ async function run() {
     assert.equal(scriptedAgent.owner, SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER);
     assert.equal(scriptedAgent.leaseOwner, SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER);
     assert(scriptedAgent.visualStateJson.includes('runtimeRoute'));
+    assert(scriptedAgent.visualStateJson.includes('"routePoints"'), 'server scripted route should expose route points for browser debug overlays');
+    assert(scriptedAgent.visualStateJson.includes('"rawPoints"'), 'server scripted route should expose raw preview points for browser debug overlays');
     assert(
       scriptedAgent.visualStateJson.includes('dynamic-interior-routing.js') ||
       scriptedAgent.visualStateJson.includes('dynamic-exterior-routing.js') ||

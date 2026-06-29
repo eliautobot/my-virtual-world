@@ -62,6 +62,7 @@ import {
   invalidateDynamicInteriorRouting,
   clearDynamicInteriorRoutingForAgent,
   resolveInteriorTargetReachability,
+  hydrateDynamicInteriorRoutingDebugFromRuntimeRoute,
   updateDynamicInteriorRouting,
   updateDynamicInteriorRoutingDebug,
   clearDynamicInteriorRoutingDebug,
@@ -71,6 +72,7 @@ import {
   configureDynamicExteriorRouting,
   invalidateDynamicExteriorRouting,
   clearDynamicExteriorRoutingForAgent,
+  hydrateDynamicExteriorRoutingDebugFromRuntimeRoute,
   updateDynamicExteriorRouting,
   updateDynamicExteriorRoutingDebug,
   clearDynamicExteriorRoutingDebug,
@@ -2317,6 +2319,43 @@ function getAgentRuntimeVisualStateHash(visualState = null) {
   }
 }
 
+function inferAgentRuntimeRouteDebugLayer(agent, runtimeRoute = null) {
+  const source = String(runtimeRoute?.source || '').toLowerCase();
+  if (source.includes('dynamic-interior-routing')) return 'interior';
+  if (source.includes('dynamic-exterior-routing')) return 'exterior';
+
+  const finalPoint = makeAgentRuntimeVisualPoint(runtimeRoute?.finalPoint || runtimeRoute?.nextPoint || null);
+  const currentBuilding = getMovementInteriorBuildingAt(agent?.x, agent?.y) || null;
+  const targetBuilding = finalPoint ? getMovementInteriorBuildingAt(finalPoint.x, finalPoint.y) : null;
+  if (currentBuilding && targetBuilding && currentBuilding.id === targetBuilding.id && currentBuilding.type !== 'park') {
+    return 'interior';
+  }
+  return 'exterior';
+}
+
+function syncAgentRuntimeRoutingDebugFromRuntimeRoute(agent, runtimeRoute = null) {
+  if (!agent?._runtimeObserverOnly) return false;
+  if (!runtimeRoute || runtimeRoute.active === false) {
+    hydrateDynamicInteriorRoutingDebugFromRuntimeRoute(agent, null);
+    hydrateDynamicExteriorRoutingDebugFromRuntimeRoute(agent, null);
+    agent._runtimeRouteDebugLayer = null;
+    return false;
+  }
+
+  const layer = inferAgentRuntimeRouteDebugLayer(agent, runtimeRoute);
+  if (layer === 'interior') {
+    const hydrated = hydrateDynamicInteriorRoutingDebugFromRuntimeRoute(agent, runtimeRoute);
+    hydrateDynamicExteriorRoutingDebugFromRuntimeRoute(agent, null);
+    agent._runtimeRouteDebugLayer = hydrated ? 'interior' : null;
+    return hydrated;
+  }
+
+  const hydrated = hydrateDynamicExteriorRoutingDebugFromRuntimeRoute(agent, runtimeRoute);
+  hydrateDynamicInteriorRoutingDebugFromRuntimeRoute(agent, null);
+  agent._runtimeRouteDebugLayer = hydrated ? 'exterior' : null;
+  return hydrated;
+}
+
 function applyAgentRuntimeVisualState(agent, visualState = null) {
   if (!agent || !visualState || typeof visualState !== 'object') return false;
   agent._runtimeVisualState = visualState;
@@ -2354,6 +2393,7 @@ function applyAgentRuntimeVisualState(agent, visualState = null) {
     agent._movementDebugStableWaypoint = null;
     agent._avoidDebugTarget = null;
   }
+  syncAgentRuntimeRoutingDebugFromRuntimeRoute(agent, runtimeRoute);
 
   if (visualState.activityActive === false) {
     agent._idleActivity = null;

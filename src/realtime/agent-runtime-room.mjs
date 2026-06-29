@@ -1293,6 +1293,12 @@ function summarizeServerRuntimeRoute(route = null) {
   const routePoints = Array.isArray(route.routePoints)
     ? route.routePoints.map(cloneRuntimePoint).filter(Boolean).slice(0, 32)
     : [];
+  const rawPoints = Array.isArray(route.rawPoints)
+    ? route.rawPoints.map(cloneRuntimePoint).filter(Boolean).slice(0, 80)
+    : [];
+  const rawCells = Array.isArray(route.rawCells)
+    ? route.rawCells.map(cloneRuntimePoint).filter(Boolean).slice(0, 96)
+    : [];
   const nextPoint = cloneRuntimePoint(route.effectiveTarget || route.pursuitTarget || route.route?.[route.routeIndex || 0] || null);
   return {
     schemaVersion: 'agent-runtime-server-route/v1',
@@ -1304,7 +1310,16 @@ function summarizeServerRuntimeRoute(route = null) {
     nextPoint,
     finalPoint: cloneRuntimePoint(route.finalPoint || routePoints[routePoints.length - 1] || null),
     targetAdjusted: route.targetAdjusted === true,
+    adjustedTarget: cloneRuntimePoint(route.adjustedTarget || null),
+    projectedPoint: cloneRuntimePoint(route.projectedPoint || null),
+    pursuitTarget: cloneRuntimePoint(route.pursuitTarget || null),
+    rerouteFrom: cloneRuntimePoint(route.rerouteFrom || null),
+    blockedPoint: cloneRuntimePoint(route.blockedPoint || null),
+    waitPoint: cloneRuntimePoint(route.waitPoint || null),
+    waitingForTraffic: route.waitingForTraffic === true,
     routePoints,
+    rawPoints,
+    rawCells,
   };
 }
 
