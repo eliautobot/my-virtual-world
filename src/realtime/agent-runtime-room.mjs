@@ -45,6 +45,7 @@ export const LIVE_STATUS_RUNTIME_OWNER = 'server-live-status-runtime';
 export const LIVE_STATUS_RUNTIME_LEASE_OWNER = 'server-live-status';
 export const LIVE_STATUS_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
 export const LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC = 96;
+export const LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC = 200;
 export const LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS = 6;
 export const LIVE_STATUS_RUNTIME_LEASE_TTL_MS = 15000;
 export const LIVE_STATUS_RUNTIME_LEASE_REFRESH_MS = 8000;
@@ -54,11 +55,14 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runt
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER = 'server-scripted-object';
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC = 72;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC = 200;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS = 5;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS = 15000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS = 8000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS = 7000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS = 12000;
+export const SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS = 16000;
+export const SERVER_SCRIPTED_OBJECT_TEMPORARY_ITEM_CARRIED_TTL_MS = 90000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES = 8;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 4;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3;
@@ -1971,14 +1975,22 @@ function makeLiveStatusVisualState(isMoving, status = 'working', target = null) 
   const isMeeting = status === 'meeting' || target?.statusKind === 'meeting';
   const resolvedStatus = isMeeting ? 'meeting' : status;
   const activityKind = isMeeting ? 'live-status-meeting-table' : 'live-status-work-desk';
+  const isRunning = Boolean(isMoving && !isMeeting);
+  const resolvedAnimationId = isMoving ? 'walk' : (isMeeting ? 'meeting-sit-talk' : 'typing');
+  const faceAngle = numberOr(target?.faceAngle, 0);
+  const dockTarget = Number.isFinite(Number(target?.x)) && Number.isFinite(Number(target?.y))
+    ? { x: Number(target.x), y: Number(target.y), floor: floorOr(target?.floor, 1), faceAngle }
+    : null;
   return {
     schemaVersion: 'agent-runtime-visual/v1',
     status: resolvedStatus,
     state: isMoving ? 'moving' : 'idle',
-    resolvedAnimationId: isMoving ? 'walk' : (isMeeting ? 'meeting-sit-talk' : 'typing'),
-    movement: { isMoving, isRunning: false },
+    resolvedAnimationId,
+    movement: { isMoving, isRunning },
     activityActive: Boolean(target),
     activityKind,
+    atDesk: Boolean(target && !isMoving && !isMeeting),
+    deskFacingAngle: faceAngle,
     activity: {
       kind: activityKind,
       phase: isMoving ? 'routing' : 'active',
@@ -1987,6 +1999,9 @@ function makeLiveStatusVisualState(isMoving, status = 'working', target = null) 
       spotId: safeText(target?.spotId || target?.interactionSpotId, ''),
       meetingId: safeText(target?.meetingId, ''),
       meetingTopic: safeText(target?.meetingTopic, ''),
+      animationId: resolvedAnimationId,
+      faceAngle,
+      dockTarget,
     },
     carrying: false,
   };
@@ -2141,6 +2156,266 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   ponddock: Object.freeze({ kind: 'pond-dock-view', spotId: 'view-left', animationId: 'pond-dock-view-relax', poseKind: 'stand-use', stayMs: [12000, 22000] }),
   outdoorstage: Object.freeze({ kind: 'outdoor-stage-perform', spotId: 'perform-center', animationId: 'outdoor-stage-perform-watch-gather', poseKind: 'stand-use', stayMs: [14000, 26000] }),
 });
+const SERVER_SCRIPTED_VENDING_ITEM_OPTIONS = Object.freeze([
+  Object.freeze({ id: 'chocolate-cookie', label: 'Chocolate Cookie', kind: 'snack', visualKind: 'vending-chocolate-cookie', packageColor: 0x8b5a2b, accentColor: 0x3f2414, needEffects: Object.freeze({ hunger: -22, thirst: 0 }) }),
+  Object.freeze({ id: 'granola-bar', label: 'Granola Bar', kind: 'snack', visualKind: 'vending-granola-bar', packageColor: 0xd6a34a, accentColor: 0x7c4a14, needEffects: Object.freeze({ hunger: -20, thirst: 0 }) }),
+  Object.freeze({ id: 'soft-drink-can-blue', label: 'Soft Drink Can (Blue)', kind: 'drink', visualKind: 'vending-soft-drink-blue', packageColor: 0x2563eb, accentColor: 0xdbeafe, needEffects: Object.freeze({ hunger: 0, thirst: -22 }) }),
+  Object.freeze({ id: 'soft-drink-can-red', label: 'Soft Drink Can (Red)', kind: 'drink', visualKind: 'vending-soft-drink-red', packageColor: 0xdc2626, accentColor: 0xfee2e2, needEffects: Object.freeze({ hunger: 0, thirst: -22 }) }),
+  Object.freeze({ id: 'chocolate-bar', label: 'Chocolate Bar', kind: 'snack', visualKind: 'vending-chocolate-bar', packageColor: 0x4a2c18, accentColor: 0xfacc15, needEffects: Object.freeze({ hunger: -24, thirst: 0 }) }),
+]);
+const SERVER_SCRIPTED_MICROWAVE_FOOD_OPTIONS = Object.freeze([
+  Object.freeze({ id: 'popcorn', label: 'Popcorn', visualKind: 'microwave-popcorn', packageColor: 0xe53935, accentColor: 0xfff7d6 }),
+  Object.freeze({ id: 'pizza-slice', label: 'Pizza Slice', visualKind: 'microwave-pizza-slice', packageColor: 0xffc107, accentColor: 0xb91c1c }),
+  Object.freeze({ id: 'sandwich', label: 'Sandwich', visualKind: 'microwave-sandwich', packageColor: 0xd9a05b, accentColor: 0x65a30d }),
+]);
+const SERVER_SCRIPTED_DROP_OFFS = Object.freeze(['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter', 'cafeCounter']);
+const SERVER_SCRIPTED_DRINK_DROP_OFFS = Object.freeze(['desk', 'diningTable', 'counter']);
+
+function serverScriptedObjectDispenseSpec(target = null) {
+  const objectType = normalizeObjectTypeKey(target?.objectType || target?.catalogKey || target?.sourceObjectType);
+  const activityKind = String(target?.activityKind || target?.kind || '').trim().toLowerCase();
+  if (objectType === 'watercooler' || activityKind.startsWith('water-cooler-')) {
+    return {
+      kind: 'water',
+      idPrefix: 'water-cup',
+      label: 'Water Cup',
+      itemKind: 'consumable',
+      visualKind: 'water',
+      drinkKind: 'water',
+      carryItem: 'water',
+      persistenceOwner: 'water-cooler-runtime',
+      deskActivityKind: 'water-desk-consume',
+      deskAnimationId: 'water-desk-sip',
+      deskActionId: 'life.drinkWaterAtDesk',
+      deskCompletionState: 'done-drinking-water',
+      pickupEffect: 'temporary-water-picked-up',
+      consumeEffect: 'temporary-water-consumed-at-desk',
+      validDropOff: SERVER_SCRIPTED_DRINK_DROP_OFFS,
+    };
+  }
+  if (objectType === 'coffeemachine' || objectType === 'countertopcoffeemachine' || activityKind.startsWith('coffee-machine-')) {
+    return {
+      kind: 'coffee',
+      idPrefix: 'coffee-drink',
+      label: 'Coffee Drink',
+      itemKind: 'consumable',
+      visualKind: 'coffee',
+      carryItem: 'coffee',
+      persistenceOwner: 'coffee-machine-runtime',
+      deskActivityKind: 'coffee-desk-consume',
+      deskAnimationId: 'coffee-desk-sip',
+      deskActionId: 'life.drinkCoffeeAtDesk',
+      deskCompletionState: 'done-drinking-coffee',
+      pickupEffect: 'temporary-coffee-picked-up',
+      consumeEffect: 'temporary-coffee-consumed-at-desk',
+      validDropOff: SERVER_SCRIPTED_DRINK_DROP_OFFS,
+    };
+  }
+  if (objectType === 'vending' || objectType === 'vendingmachine' || activityKind.startsWith('vending-machine-')) {
+    return {
+      kind: 'vending',
+      idPrefix: 'vending',
+      label: 'Vending Snack / Drink',
+      itemKind: 'snack',
+      carryItem: 'snack',
+      persistenceOwner: 'vending-machine-runtime',
+      deskActivityKind: 'vending-desk-consume',
+      deskAnimationId: 'vending-desk-consume',
+      deskActionId: 'life.consumeVendingItemAtDesk',
+      deskCompletionState: 'done-consuming-vending-item',
+      pickupEffect: 'temporary-vending-item-picked-up',
+      consumeEffect: 'temporary-vending-item-consumed-at-desk',
+      validDropOff: SERVER_SCRIPTED_DROP_OFFS,
+    };
+  }
+  if (objectType === 'microwave' || activityKind.startsWith('microwave-')) {
+    return {
+      kind: 'microwave',
+      idPrefix: 'microwave',
+      label: 'Microwave Food',
+      itemKind: 'consumable',
+      carryItem: 'snack',
+      persistenceOwner: 'microwave-runtime',
+      deskActivityKind: 'microwave-desk-consume',
+      deskAnimationId: 'microwave-desk-consume',
+      deskActionId: 'life.eatMicrowaveFoodAtDesk',
+      deskCompletionState: 'done-consuming-microwave-food',
+      pickupEffect: 'temporary-microwave-food-picked-up',
+      consumeEffect: 'temporary-microwave-food-consumed-at-desk',
+      validDropOff: SERVER_SCRIPTED_DROP_OFFS,
+    };
+  }
+  return null;
+}
+
+function pickServerScriptedVendingItem(agentId, target = null) {
+  const forced = String(target?.vendingItemId || target?.itemId || '').trim().toLowerCase();
+  const forcedItem = SERVER_SCRIPTED_VENDING_ITEM_OPTIONS.find(item => item.id === forced || item.label.toLowerCase() === forced);
+  if (forcedItem) return forcedItem;
+  const index = stableTextHash(`${agentId || ''}:${target?.objectKey || ''}:${target?.spotId || ''}`) % SERVER_SCRIPTED_VENDING_ITEM_OPTIONS.length;
+  return SERVER_SCRIPTED_VENDING_ITEM_OPTIONS[index] || SERVER_SCRIPTED_VENDING_ITEM_OPTIONS[0];
+}
+
+function pickServerScriptedMicrowaveFood(agentId, target = null) {
+  const forced = String(target?.microwaveFoodId || target?.foodItemId || target?.foodType || '').trim().toLowerCase();
+  const forcedItem = SERVER_SCRIPTED_MICROWAVE_FOOD_OPTIONS.find(item => item.id === forced || item.label.toLowerCase() === forced);
+  if (forcedItem) return forcedItem;
+  const index = stableTextHash(`${agentId || ''}:${target?.objectKey || ''}:${target?.spotId || ''}`) % SERVER_SCRIPTED_MICROWAVE_FOOD_OPTIONS.length;
+  return SERVER_SCRIPTED_MICROWAVE_FOOD_OPTIONS[index] || SERVER_SCRIPTED_MICROWAVE_FOOD_OPTIONS[0];
+}
+
+function makeServerScriptedTemporaryItem(agentId, sourceTarget = null, spec = null, nowMs = Date.now()) {
+  if (!spec) return null;
+  const expiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_TEMPORARY_ITEM_CARRIED_TTL_MS).toISOString();
+  let itemPatch = {};
+  if (spec.kind === 'vending') {
+    const vendingItem = pickServerScriptedVendingItem(agentId, sourceTarget);
+    itemPatch = {
+      idPart: vendingItem.id,
+      label: vendingItem.label,
+      kind: vendingItem.kind,
+      visualKind: vendingItem.visualKind,
+      vendingItemId: vendingItem.id,
+      packageColor: vendingItem.packageColor,
+      accentColor: vendingItem.accentColor,
+      needEffects: vendingItem.needEffects,
+      satisfies: vendingItem.kind === 'drink' ? ['thirst'] : ['hunger'],
+    };
+  } else if (spec.kind === 'microwave') {
+    const foodItem = pickServerScriptedMicrowaveFood(agentId, sourceTarget);
+    itemPatch = {
+      idPart: foodItem.id,
+      label: foodItem.label,
+      visualKind: foodItem.visualKind,
+      microwaveFoodId: foodItem.id,
+      packageColor: foodItem.packageColor,
+      accentColor: foodItem.accentColor,
+      satisfies: ['food', 'heated-food', 'microwave-food'],
+    };
+  }
+  const idPart = safeText(itemPatch.idPart, spec.kind) || spec.kind;
+  const sourceFurnitureType = safeText(sourceTarget?.objectType || sourceTarget?.sourceFurnitureType, spec.kind) || spec.kind;
+  const item = {
+    id: `${spec.idPrefix}-${idPart}-${agentId || 'agent'}-${nowMs}`,
+    catalogId: 'temporaryFood',
+    label: safeText(itemPatch.label, spec.label) || spec.label,
+    kind: safeText(itemPatch.kind, spec.itemKind) || spec.itemKind,
+    state: 'carried',
+    consumable: true,
+    attachPoint: 'right-hand',
+    validDropOff: spec.validDropOff || SERVER_SCRIPTED_DROP_OFFS,
+    sourceFurnitureType,
+    sourceBuildingId: safeText(sourceTarget?.buildingId, '') || null,
+    sourceFurnitureIndex: Number.isFinite(Number(sourceTarget?.furnitureIndex)) ? Number(sourceTarget.furnitureIndex) : null,
+    temporaryUse: {
+      state: 'carried',
+      expiresAt,
+      persistence: { mode: 'omit-on-save', omitOnSave: true, owner: spec.persistenceOwner },
+    },
+    temporary: true,
+    carryable: true,
+    expiresAt,
+  };
+  const visualKind = safeText(itemPatch.visualKind, spec.visualKind || '');
+  const drinkKind = safeText(spec.drinkKind, '');
+  const carryItem = safeText(spec.carryItem, '');
+  if (visualKind) item.visualKind = visualKind;
+  if (drinkKind) item.drinkKind = drinkKind;
+  if (carryItem) item.carryItem = carryItem;
+  if (itemPatch.vendingItemId) item.vendingItemId = itemPatch.vendingItemId;
+  if (itemPatch.microwaveFoodId) item.microwaveFoodId = itemPatch.microwaveFoodId;
+  const packageColor = numberOr(itemPatch.packageColor, NaN);
+  const accentColor = numberOr(itemPatch.accentColor, NaN);
+  if (Number.isFinite(packageColor) && Math.abs(packageColor) <= 10000000) item.packageColor = packageColor;
+  if (Number.isFinite(accentColor) && Math.abs(accentColor) <= 10000000) item.accentColor = accentColor;
+  if (itemPatch.needEffects) item.needEffects = itemPatch.needEffects;
+  if (itemPatch.satisfies) item.satisfies = itemPatch.satisfies;
+  return item;
+}
+
+function isServerScriptedObjectDeskConsumeTarget(target = null) {
+  const phase = String(target?.runtimePhase || '').trim().toLowerCase();
+  const kind = String(target?.activityKind || target?.kind || '').trim().toLowerCase();
+  return phase === 'desk-routing' || phase === 'desk-consuming' || kind === 'coffee-desk-consume' || kind === 'water-desk-consume' || kind === 'vending-desk-consume' || kind === 'microwave-desk-consume';
+}
+
+function serverScriptedObjectRouteShouldRun(target = null, isMoving = false) {
+  return Boolean(isMoving && isServerScriptedObjectDeskConsumeTarget(target));
+}
+
+function serverScriptedObjectRuntimeSpeedUnitsPerSec(target = null, isMoving = false) {
+  return serverScriptedObjectRouteShouldRun(target, isMoving)
+    ? SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC
+    : SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC;
+}
+
+function hydrateServerScriptedDeskConsumeTargetFromVisual(target = null, visualState = null) {
+  if (!isServerScriptedObjectDeskConsumeTarget(target) || target?.temporaryItem) return target;
+  const carriedItem = visualState?.carriedItem && typeof visualState.carriedItem === 'object'
+    ? visualState.carriedItem
+    : (visualState?.activity?.temporaryItem && typeof visualState.activity.temporaryItem === 'object' ? visualState.activity.temporaryItem : null);
+  if (!carriedItem) return target;
+  return {
+    ...target,
+    temporaryItem: carriedItem,
+    carriedItem,
+    carrying: true,
+    carryAttachPoint: safeText(target?.carryAttachPoint, 'right-hand') || 'right-hand',
+    lifecycle: { stationary: false, carryable: false, temporary: true, consumesTemporary: true },
+  };
+}
+
+function makeServerScriptedDeskConsumeTarget(dataDir, agentId, sourceTarget = null, nowMs = Date.now()) {
+  const spec = serverScriptedObjectDispenseSpec(sourceTarget);
+  if (!spec) return null;
+  const meta = readWorldMetaDocument(dataDir);
+  const workTargets = listLiveStatusWorkTargets(dataDir);
+  if (!workTargets.length) return null;
+  let deskTarget = pickLiveStatusWorkTarget(agentId, { meta, targets: workTargets, workingAgentIds: [agentId] });
+  if (!deskTarget && sourceTarget?.buildingId) {
+    deskTarget = workTargets.find(entry => entry.buildingId === sourceTarget.buildingId)?.target || null;
+  }
+  if (!deskTarget && workTargets[0]) deskTarget = workTargets[0].target;
+  if (!deskTarget || !Number.isFinite(Number(deskTarget.x)) || !Number.isFinite(Number(deskTarget.y))) return null;
+  const baseObjectKey = liveStatusRuntimeObjectKey(deskTarget) || runtimeFurnitureObjectKey(deskTarget.buildingId, deskTarget.furnitureIndex, deskTarget.objectType || 'desk');
+  const objectKey = normalizeWorldObjectKey(`${baseObjectKey}:consume:${safeText(agentId, 'agent') || 'agent'}`);
+  const temporaryItem = makeServerScriptedTemporaryItem(agentId, sourceTarget, spec, nowMs);
+  const consumeDurationMs = Math.max(1000, Math.floor(numberOr(sourceTarget?.consumeDurationMs ?? sourceTarget?.deskConsumeMs, SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS)));
+  return {
+    ...deskTarget,
+    targetKind: 'work-desk',
+    objectKey,
+    baseObjectKey,
+    objectType: deskTarget.objectType || 'desk',
+    behaviorCategory: 'work-return',
+    actionId: spec.deskActionId,
+    activityKind: spec.deskActivityKind,
+    animationId: spec.deskAnimationId,
+    poseKind: 'seat',
+    stayMs: consumeDurationMs,
+    consumeDurationMs,
+    temporaryItem,
+    carriedItem: temporaryItem,
+    carryAttachPoint: 'right-hand',
+    carrying: true,
+    sourceObjectKey: safeText(sourceTarget?.objectKey, ''),
+    sourceBaseObjectKey: safeText(sourceTarget?.baseObjectKey, ''),
+    sourceObjectType: safeText(sourceTarget?.objectType, ''),
+    sourceBuildingId: safeText(sourceTarget?.buildingId, ''),
+    sourceFurnitureIndex: Number.isFinite(Number(sourceTarget?.furnitureIndex)) ? Number(sourceTarget.furnitureIndex) : null,
+    sourceActionId: safeText(sourceTarget?.actionId, ''),
+    sourceActivityKind: safeText(sourceTarget?.activityKind, ''),
+    runtimePhase: 'desk-routing',
+    runtimeSource: safeText(sourceTarget?.runtimeSource, 'idle') || 'idle',
+    runtimeStartedAt: new Date(nowMs).toISOString(),
+    runtimeActiveAt: '',
+    pickupEffect: spec.pickupEffect,
+    consumeEffect: spec.consumeEffect,
+    completionState: spec.deskCompletionState,
+    lifecycle: { stationary: false, carryable: false, temporary: true, consumesTemporary: true },
+  };
+}
+
 const SCRIPTED_OBJECT_SKIP_ACTIONS = new Set(['sit_work', 'work.desk']);
 const SCRIPTED_OBJECT_SKIP_TYPES = new Set(['desk', 'standingdesk', 'laptopmonitorprops']);
 const SCRIPTED_OBJECT_ALLOWED_TYPES = new Set(Object.keys(SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG));
@@ -2676,36 +2951,71 @@ function buildScriptedObjectRuntimePlan(dataDir) {
 
 function makeServerScriptedObjectVisualState(isMoving, target = null, status = 'idle') {
   const poseKind = String(target?.poseKind || '').toLowerCase();
+  const isRunning = serverScriptedObjectRouteShouldRun(target, isMoving);
+  const temporaryItem = target?.temporaryItem && typeof target.temporaryItem === 'object' ? target.temporaryItem : null;
+  const isDeskConsume = isServerScriptedObjectDeskConsumeTarget(target);
+  const faceAngle = numberOr(target?.faceAngle, 0);
+  const dockTarget = Number.isFinite(Number(target?.x)) && Number.isFinite(Number(target?.y))
+    ? { x: Number(target.x), y: Number(target.y), floor: floorOr(target?.floor, 1), faceAngle }
+    : null;
   const animationId = isMoving ? 'walk' : (
     safeText(target?.animationId, '') ||
     (poseKind === 'seat' ? 'sit' : poseKind === 'wait' ? 'bus-stop-wait' : 'stand-use')
   );
   const activityKind = safeText(target?.activityKind, '') || (target?.isQueueUse ? 'service-queue-wait' : 'server-scripted-object-use');
-  return {
+  const activity = {
+    kind: activityKind,
+    phase: target?.runtimePhase === 'desk-routing'
+      ? (isMoving ? 'approach' : 'active')
+      : (target?.runtimePhase === 'desk-consuming' ? 'active' : (isMoving ? 'routing' : 'active')),
+    objectKey: safeText(target?.objectKey, ''),
+    baseObjectKey: safeText(target?.baseObjectKey, ''),
+    objectType: safeText(target?.objectType, ''),
+    furnitureType: safeText(target?.objectType, ''),
+    behaviorCategory: safeText(target?.behaviorCategory || target?.runtimeCategory, ''),
+    defaultScriptedIdlePulse: target?.defaultScriptedIdlePulse === true,
+    actionId: safeText(target?.actionId, ''),
+    spotId: safeText(target?.spotId || target?.interactionSpotId, ''),
+    poseKind: safeText(target?.poseKind, ''),
+    isQueueUse: target?.isQueueUse === true,
+    animationId,
+    faceAngle,
+    dockTarget,
+  };
+  if (temporaryItem) {
+    const consumeDurationMs = Math.max(1000, Math.floor(numberOr(target?.consumeDurationMs, target?.stayMs || SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS)));
+    activity.temporaryItem = temporaryItem;
+    activity.carryAttachPoint = safeText(target?.carryAttachPoint, 'right-hand') || 'right-hand';
+    activity.consumeDurationMs = consumeDurationMs;
+    activity.stayMs = consumeDurationMs;
+    activity.sipDurationMs = consumeDurationMs;
+    activity.sipCountTarget = 3;
+    activity.sourceObject = {
+      objectKey: safeText(target?.sourceObjectKey, ''),
+      baseObjectKey: safeText(target?.sourceBaseObjectKey, ''),
+      objectType: safeText(target?.sourceObjectType, ''),
+      buildingId: safeText(target?.sourceBuildingId, ''),
+      furnitureIndex: Number.isFinite(Number(target?.sourceFurnitureIndex)) ? Number(target.sourceFurnitureIndex) : null,
+      actionId: safeText(target?.sourceActionId, ''),
+      activityKind: safeText(target?.sourceActivityKind, ''),
+    };
+    activity.lifecycle = { stationary: false, carryable: false, temporary: true, consumesTemporary: true };
+  }
+  const visualState = {
     schemaVersion: 'agent-runtime-visual/v1',
     status,
     state: isMoving ? 'moving' : 'idle',
     resolvedAnimationId: animationId,
-    movement: { isMoving, isRunning: false },
+    movement: { isMoving, isRunning },
     activityActive: Boolean(target),
     activityKind,
-    activity: {
-      kind: activityKind,
-      phase: isMoving ? 'routing' : 'active',
-      objectKey: safeText(target?.objectKey, ''),
-      baseObjectKey: safeText(target?.baseObjectKey, ''),
-      objectType: safeText(target?.objectType, ''),
-      behaviorCategory: safeText(target?.behaviorCategory || target?.runtimeCategory, ''),
-      defaultScriptedIdlePulse: target?.defaultScriptedIdlePulse === true,
-      actionId: safeText(target?.actionId, ''),
-      spotId: safeText(target?.spotId || target?.interactionSpotId, ''),
-      poseKind: safeText(target?.poseKind, ''),
-      isQueueUse: target?.isQueueUse === true,
-      animationId,
-      faceAngle: numberOr(target?.faceAngle, 0),
-    },
-    carrying: false,
+    atDesk: Boolean(target && !isMoving && isDeskConsume),
+    deskFacingAngle: faceAngle,
+    activity,
+    carrying: Boolean(temporaryItem),
   };
+  if (temporaryItem) visualState.carriedItem = temporaryItem;
+  return visualState;
 }
 
 function makeServerScriptedObjectIdleVisualState() {
@@ -2729,15 +3039,26 @@ function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, so
   const activeUseId = safeText(`server-active:${objectKey}:${agentId}`, '') || `server-active:${agentId}`;
   const active = ['active', 'using', 'occupied', 'queued'].includes(String(state || '').toLowerCase());
   const activityKind = safeText(target?.activityKind, '') || (target?.isQueueUse ? 'service-queue-wait' : 'server-scripted-object-use');
+  const temporaryItem = target?.temporaryItem && typeof target.temporaryItem === 'object' ? target.temporaryItem : null;
+  const sourceObject = target?.sourceObjectKey ? {
+    objectKey: safeText(target?.sourceObjectKey, ''),
+    baseObjectKey: safeText(target?.sourceBaseObjectKey, ''),
+    objectType: safeText(target?.sourceObjectType, ''),
+    buildingId: safeText(target?.sourceBuildingId, ''),
+    furnitureIndex: Number.isFinite(Number(target?.sourceFurnitureIndex)) ? Number(target.sourceFurnitureIndex) : null,
+    actionId: safeText(target?.sourceActionId, ''),
+    activityKind: safeText(target?.sourceActivityKind, ''),
+  } : null;
   return {
     activity: {
       schemaVersion: 'server-scripted-object-activity/v1',
       kind: activityKind,
-      phase: state,
+      phase: target?.runtimePhase === 'desk-routing' ? 'approach' : (target?.runtimePhase === 'desk-consuming' ? 'active' : state),
       source,
       objectKey,
       baseObjectKey,
       objectType: safeText(target?.objectType, ''),
+      furnitureType: safeText(target?.objectType, ''),
       actionId,
       spotId,
       poseKind: safeText(target?.poseKind, ''),
@@ -2746,6 +3067,14 @@ function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, so
       startedAt: safeIso(target?.runtimeStartedAt, now) || now,
       activeAt: safeIso(target?.runtimeActiveAt, ''),
       runtimeOwner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+      runtimePhase: safeText(target?.runtimePhase, ''),
+      carryAttachPoint: temporaryItem ? (safeText(target?.carryAttachPoint, 'right-hand') || 'right-hand') : '',
+      temporaryItem,
+      sourceObject,
+      pickupEffect: safeText(target?.pickupEffect, ''),
+      consumeEffect: safeText(target?.consumeEffect, ''),
+      completionState: safeText(target?.completionState, ''),
+      lifecycle: target?.lifecycle && typeof target.lifecycle === 'object' ? target.lifecycle : null,
     },
     reservation: {
       id: reservationId,
@@ -2820,7 +3149,10 @@ function objectUseRequestTargetFromPoint(message = {}) {
     poseKind,
     animationId: safeText(target?.animationId || config?.animationId, '') || (poseKind === 'seat' ? 'sit' : 'stand-use'),
     activityKind: safeText(target?.activityKind || config?.kind, '') || 'server-scripted-object-use',
-    stayMs: scriptedObjectStayMs({ objectKey, objectType, spotId }),
+    stayMs: Math.max(1000, Math.floor(numberOr(target?.stayMs ?? message?.stayMs, scriptedObjectStayMs({ objectKey, objectType, spotId })))),
+    consumeDurationMs: Math.max(1000, Math.floor(numberOr(target?.consumeDurationMs ?? message?.consumeDurationMs, SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS))),
+    vendingItemId: safeText(target?.vendingItemId || message?.vendingItemId, ''),
+    microwaveFoodId: safeText(target?.microwaveFoodId || target?.foodItemId || message?.microwaveFoodId || message?.foodItemId, ''),
     faceAngle: normalizeRuntimeAngleRadians(target?.faceAngle, 0),
   };
 }
@@ -2848,6 +3180,7 @@ function resolveScriptedObjectRuntimeTargetFromRequest(dataDir, message = {}) {
 
 function refreshScriptedObjectRuntimeTarget(dataDir, target = null) {
   if (!target || typeof target !== 'object' || !target.objectKey) return target;
+  if (isServerScriptedObjectDeskConsumeTarget(target)) return target;
   const refreshed = resolveScriptedObjectRuntimeTargetFromRequest(dataDir, { target });
   if (!refreshed?.objectKey || refreshed.objectKey !== target.objectKey) return target;
   return {
@@ -4469,11 +4802,13 @@ export class AgentRuntimeRoom extends Room {
     const routeId = safeText(`scripted-object:${agentId}:${target.buildingId || 'building'}:${target.furnitureIndex ?? 'object'}:${target.spotId || 'spot'}`, `scripted-object:${agentId}`);
     const targetHeading = targetFaceAngleRadians(target, current.heading);
     const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, DEFAULT_WORLD_RUNTIME_TICK_MS, {
-      speedUnitsPerSec: SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC,
+      speedUnitsPerSec: serverScriptedObjectRuntimeSpeedUnitsPerSec(target, true),
       arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
       routeSource: 'server-scripted-object-runtime',
     });
     const arrived = options.active === true || movement.arrived;
+    if (arrived && target.runtimePhase === 'desk-routing') target.runtimePhase = 'desk-consuming';
+    if (arrived && !target.runtimeActiveAt) target.runtimeActiveAt = now;
     const snapshotResult = this.upsertSnapshot({
       agentId,
       mode: 'live',
@@ -4496,7 +4831,7 @@ export class AgentRuntimeRoom extends Room {
       objectKey,
       source: options.source || 'idle',
     });
-    const objectExpiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS + SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS).toISOString();
+    const objectExpiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS + Math.max(SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS, numberOr(target.stayMs, SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS))).toISOString();
     const objectState = arrived ? (target.isQueueUse ? 'queued' : 'active') : 'routing';
     const objectResult = this.upsertWorldObject({
       objectKey,
@@ -4807,8 +5142,9 @@ export class AgentRuntimeRoom extends Room {
 
       if (activeOtherLease) continue;
 
+      const statusKind = target.statusKind === 'meeting' ? 'meeting' : 'work';
       const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, tickMs, {
-        speedUnitsPerSec: LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC,
+        speedUnitsPerSec: statusKind === 'meeting' ? LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC : LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
         arrivalRadius: LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS,
         routeSource: 'server-live-status-runtime',
       });
@@ -4817,7 +5153,6 @@ export class AgentRuntimeRoom extends Room {
       const nextY = movement.y;
       const targetHeading = targetFaceAngleRadians(target, current.heading);
       const heading = arrived ? targetHeading : movement.heading;
-      const statusKind = target.statusKind === 'meeting' ? 'meeting' : 'work';
       const routeId = safeText(`live-status-${statusKind}:${agentId}:${target.buildingId || 'building'}:${target.furnitureIndex ?? 'object'}:${target.spotId || 'spot'}`, `live-status-${statusKind}:${agentId}`);
       const leaseExpiresAtMs = Date.parse(current.leaseExpiresAt || '');
       const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= LIVE_STATUS_RUNTIME_LEASE_REFRESH_MS;
@@ -4874,6 +5209,31 @@ export class AgentRuntimeRoom extends Room {
     return { changedSnapshots };
   }
 
+  releaseServerScriptedObjectWorldObject(agentId, target, nowMs, now, reason = 'completed') {
+    const objectKey = safeText(target?.objectKey, '');
+    if (!objectKey) return null;
+    const expiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS).toISOString();
+    return this.upsertWorldObject({
+      objectKey,
+      owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+      objectType: target?.objectType || '',
+      buildingId: target?.buildingId || '',
+      furnitureIndex: target?.furnitureIndex ?? -1,
+      state: 'idle',
+      agentId,
+      actionId: target?.actionId || '',
+      reservationId: '',
+      activeUseId: '',
+      slotId: target?.slotId || target?.spotId || '',
+      expiresAt,
+      data: {
+        ...makeServerScriptedObjectData(agentId, target, 'idle', now, expiresAt, target?.runtimeSource || 'idle'),
+        clearReservation: true,
+        releaseReason: reason,
+      },
+    }, 'server-scripted-object-world-released', { reason });
+  }
+
   releaseServerScriptedObjectRoute(agentId, current, target, nowMs, now, reason = 'completed') {
     clearDynamicInteriorRoutingForAgent(agentId);
     clearDynamicExteriorRoutingForAgent(agentId);
@@ -4902,28 +5262,7 @@ export class AgentRuntimeRoom extends Room {
       objectKey,
       reason,
     });
-    let objectResult = null;
-    if (objectKey) {
-      objectResult = this.upsertWorldObject({
-        objectKey,
-        owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
-        objectType: target?.objectType || '',
-        buildingId: target?.buildingId || '',
-        furnitureIndex: target?.furnitureIndex ?? -1,
-        state: 'idle',
-        agentId,
-        actionId: target?.actionId || '',
-        reservationId: '',
-        activeUseId: '',
-        slotId: target?.slotId || target?.spotId || '',
-        expiresAt: new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS).toISOString(),
-        data: {
-          ...makeServerScriptedObjectData(agentId, target, 'idle', now, new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS).toISOString(), target?.runtimeSource || 'idle'),
-          clearReservation: true,
-          releaseReason: reason,
-        },
-      }, 'server-scripted-object-world-released', { reason });
-    }
+    const objectResult = objectKey ? this.releaseServerScriptedObjectWorldObject(agentId, target, nowMs, now, reason) : null;
     return { agent: snapshotResult.agent, object: objectResult?.object || null };
   }
 
@@ -4960,6 +5299,7 @@ export class AgentRuntimeRoom extends Room {
       if (activeScriptedRoutes > activeRouteLimit) {
         let target = current.target && typeof current.target === 'object' ? current.target : null;
         target = refreshScriptedObjectRuntimeTarget(this.dataDir, target);
+        target = hydrateServerScriptedDeskConsumeTargetFromVisual(target, current.visualState);
         this.releaseServerScriptedObjectRoute(agentId, current, target || {}, nowMs, now, 'active-route-cap');
         changedSnapshots++;
         changedObjects += target?.objectKey ? 1 : 0;
@@ -4967,6 +5307,7 @@ export class AgentRuntimeRoom extends Room {
       }
       let target = current.target && typeof current.target === 'object' ? current.target : null;
       target = refreshScriptedObjectRuntimeTarget(this.dataDir, target);
+      target = hydrateServerScriptedDeskConsumeTargetFromVisual(target, current.visualState);
       const source = safeText(target?.runtimeSource, 'idle') || 'idle';
       if (!target?.objectKey || (source === 'idle' && !idleAgentIds.has(agentId))) {
         this.releaseServerScriptedObjectRoute(agentId, current, target || {}, nowMs, now, target?.objectKey ? 'presence-not-idle' : 'missing-target');
@@ -4981,7 +5322,7 @@ export class AgentRuntimeRoom extends Room {
       }
       if (!alreadyActive) activeRouteSteps++;
       const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, tickMs, {
-        speedUnitsPerSec: SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC,
+        speedUnitsPerSec: serverScriptedObjectRuntimeSpeedUnitsPerSec(target, true),
         arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
         routeSource: 'server-scripted-object-runtime',
       });
@@ -4995,7 +5336,7 @@ export class AgentRuntimeRoom extends Room {
       const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS;
 
       if (!arrived) {
-        const objectExpiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS + SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS).toISOString();
+        const objectExpiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS + Math.max(SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS, numberOr(target.stayMs, SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS))).toISOString();
         this.upsertSnapshot({
           agentId,
           mode: 'live',
@@ -5036,20 +5377,39 @@ export class AgentRuntimeRoom extends Room {
 
       const runtimeActiveAt = safeIso(target.runtimeActiveAt, '') || now;
       const activeAtMs = Date.parse(runtimeActiveAt);
+      const activeTarget = {
+        ...target,
+        runtimeActiveAt,
+        runtimePhase: target.runtimePhase === 'desk-routing' ? 'desk-consuming' : target.runtimePhase,
+      };
       const dwellMs = Math.max(1000, Math.floor(numberOr(target.stayMs, scriptedObjectStayMs(target))));
       if (Number.isFinite(activeAtMs) && nowMs - activeAtMs >= dwellMs) {
-        this.releaseServerScriptedObjectRoute(agentId, current, { ...target, runtimeActiveAt }, nowMs, now, 'dwell-complete');
+        if (isServerScriptedObjectDeskConsumeTarget(activeTarget)) {
+          this.releaseServerScriptedObjectRoute(agentId, current, activeTarget, nowMs, now, activeTarget.consumeEffect || 'temporary-item-consumed-at-desk');
+          changedSnapshots++;
+          changedObjects++;
+          continue;
+        }
+        const deskTarget = makeServerScriptedDeskConsumeTarget(this.dataDir, agentId, activeTarget, nowMs);
+        if (deskTarget) {
+          const releaseResult = this.releaseServerScriptedObjectWorldObject(agentId, activeTarget, nowMs, now, deskTarget.pickupEffect || 'temporary-item-picked-up');
+          const routeResult = this.startServerScriptedObjectRoute(agentId, deskTarget, nowMs, now, { source, force: true });
+          changedSnapshots += routeResult?.agent ? 1 : 0;
+          changedObjects += releaseResult?.object ? 1 : 0;
+          changedObjects += routeResult?.object ? 1 : 0;
+          continue;
+        }
+        this.releaseServerScriptedObjectRoute(agentId, current, activeTarget, nowMs, now, 'dwell-complete');
         changedSnapshots++;
         changedObjects++;
         continue;
       }
 
-      const activeTarget = { ...target, runtimeActiveAt };
       const activeSnapshotState = target.isQueueUse ? 'waiting' : 'using';
       const activeObjectState = target.isQueueUse ? 'queued' : 'active';
       const shouldWrite = needsLeaseRefresh || current.state !== activeSnapshotState || current.x !== Number(target.x) || current.y !== Number(target.y);
       if (!shouldWrite) continue;
-      const objectExpiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS + SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS).toISOString();
+      const objectExpiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS + Math.max(SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS, numberOr(activeTarget.stayMs, SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS))).toISOString();
       this.upsertSnapshot({
         agentId,
         mode: 'live',
