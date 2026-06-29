@@ -1774,8 +1774,19 @@ function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
   if (data.activeUse && typeof data.activeUse === 'object') {
     furniture.activeUse = { ...(furniture.activeUse || {}), ...data.activeUse, runtimeWorldObject: true };
   }
+  const queueStore = data._scriptedServiceQueueStore || data.serviceQueueStore || data.scriptedServiceQueueStore || null;
+  if (queueStore && typeof queueStore === 'object') {
+    furniture._scriptedServiceQueueStore = {
+      ...(furniture._scriptedServiceQueueStore || {}),
+      ...queueStore,
+      reservations: Array.isArray(queueStore.reservations)
+        ? queueStore.reservations.map(entry => ({ ...entry }))
+        : [],
+    };
+  }
   const state = String(objectState.state || '').toLowerCase();
   if (state === 'idle' && data.clearReservation === true) furniture.reservation = null;
+  if (data.clearServiceQueue === true && !queueStore) furniture._scriptedServiceQueueStore = { reservations: [] };
   return true;
 }
 
