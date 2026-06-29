@@ -21,7 +21,7 @@ export const DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES = 256 * 1024;
 export const DEFAULT_ROUTE_LEASE_TTL_MS = 15000;
 export const MAX_ROUTE_LEASE_TTL_MS = 60000;
 export const STALE_ROUTE_LEASE_SWEEP_MS = 1000;
-export const DEFAULT_WORLD_RUNTIME_TICK_MS = 500;
+export const DEFAULT_WORLD_RUNTIME_TICK_MS = 250;
 export const WORLD_RUNTIME_PERSIST_INTERVAL_MS = 5000;
 export const WORLD_RUNTIME_TRAFFIC_CYCLE_MS = 40000;
 export const WORLD_RUNTIME_TRAFFIC_YELLOW_MS = 3000;
@@ -4830,9 +4830,16 @@ export class AgentRuntimeRoom extends Room {
           leaseExpiresAt: '',
         }, 'server-scripted-object-seeded', { reason: 'object-use-request' });
       }
+      const source = safeText(message.source, 'request') || 'request';
+      const manualDropSnapToUse = message.manualDropSnapToUse === true || message.target?.manualDropSnapToUse === true;
+      const insertQueueAtFront = message.insertQueueAtFront === true || message.target?.insertQueueAtFront === true;
+      const queuePriority = numberOr(message.queuePriority ?? message.target?.queuePriority, NaN);
       const result = this.startServerScriptedObjectRoute(agentId, target, Date.now(), new Date().toISOString(), {
-        source: safeText(message.source, 'request') || 'request',
+        source,
         force: true,
+        active: manualDropSnapToUse,
+        insertQueueAtFront,
+        queuePriority: Number.isFinite(queuePriority) ? queuePriority : undefined,
       });
       client.send('runtime:ack', {
         requestId: requestIdFrom(message),
@@ -4862,7 +4869,14 @@ export class AgentRuntimeRoom extends Room {
       const leaseOwner = safeText(message.leaseOwner, client.sessionId || '');
       if (!leaseOwner) throw apiError('invalid_lease_owner', 'leaseOwner is required');
       const existing = this.state.agents.get(agentId);
-      if (existing && hasActiveLease(existing) && existing.leaseOwner !== leaseOwner) {
+      const manualClaim = isManualSnapshotOverride(message);
+      const replacesManualHold = Boolean(
+        manualClaim &&
+        existing &&
+        hasActiveLease(existing) &&
+        existing.leaseOwner === USER_DIRECTED_RUNTIME_LEASE_OWNER
+      );
+      if (existing && hasActiveLease(existing) && existing.leaseOwner !== leaseOwner && !replacesManualHold) {
         throw apiError('lease_conflict', 'agent already has an active route lease', {
           agentId,
           leaseOwner: existing.leaseOwner,
@@ -5162,7 +5176,12 @@ export class AgentRuntimeRoom extends Room {
     if (!reservation) {
       const maxQueuePoints = getServerScriptedServiceQueueMaxPoints(this.dataDir, rawTarget);
       if (live.length >= maxQueuePoints) return { ok: false, reason: 'queue-full', queueIndex: live.length, maxQueuePoints };
-      const queuedAtMs = Math.floor(numberOr(options.queuedAtMs, nowMs));
+      const insertAtFront = options.insertQueueAtFront === true || rawTarget?.insertQueueAtFront === true;
+      const minQueuedAtMs = live.reduce((min, entry) => Math.min(min, Number(entry.queuedAtMs || nowMs)), nowMs);
+      const queuedAtMs = insertAtFront ? minQueuedAtMs - 1 : Math.floor(numberOr(options.queuedAtMs, nowMs));
+      const queuePriority = insertAtFront
+        ? Math.min(-1, numberOr(options.queuePriority ?? rawTarget?.queuePriority, -1))
+        : Number((options.queuePriority ?? rawTarget?.queuePriority) || 0);
       reservation = {
         id: safeText(options.reservationId || `queue:scripted:${agentId}:${queueSpotId}:${queuedAtMs}`, '') || `queue:scripted:${agentId}`,
         state: 'queued',
@@ -5173,7 +5192,7 @@ export class AgentRuntimeRoom extends Room {
         queueSpotId,
         activationSpotId: `${queueSpotId}:${live.length}`,
         queuedAtMs,
-        queuePriority: Number(options.queuePriority || rawTarget?.queuePriority || 0),
+        queuePriority,
         queueIndex: live.length,
         capacityKind: 'queue',
         sourceKind: safeText(options.sourceKind || options.source || rawTarget?.runtimeSource || 'agent-scripted-mode', 'agent-scripted-mode') || 'agent-scripted-mode',
@@ -5336,6 +5355,8 @@ export class AgentRuntimeRoom extends Room {
       const queued = this.reserveServerScriptedServiceQueueTarget(agentId, target, nowMs, now, {
         sourceKind: options.source || target.runtimeSource || 'agent-scripted-mode',
         actionId: target.actionId,
+        insertQueueAtFront: options.insertQueueAtFront === true || target.insertQueueAtFront === true,
+        queuePriority: options.queuePriority ?? target.queuePriority,
       });
       if (!queued.ok) throw apiError(queued.reason || 'queue_rejected', `service queue rejected object use: ${queued.reason || 'unknown'}`, queued);
       target = {
@@ -6207,8 +6228,7 @@ export class AgentRuntimeRoom extends Room {
     this.ensureServerWorldTopology(nowMs);
     const runtime = this.state.worldRuntime;
     if (!runtime) return null;
-    const persistedTickMs = clampInteger(runtime.tickMs, DEFAULT_WORLD_RUNTIME_TICK_MS, 100, 5000);
-    const tickMs = Math.max(DEFAULT_WORLD_RUNTIME_TICK_MS, persistedTickMs);
+    const tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS;
     const now = new Date(nowMs).toISOString();
     runtime.tickMs = tickMs;
     runtime.tickSeq = Number(runtime.tickSeq || 0) + 1;

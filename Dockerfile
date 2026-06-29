@@ -4,13 +4,35 @@ WORKDIR /deps
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-FROM python:3.12-slim
+FROM node:22-slim AS realtime
+
+WORKDIR /app
+
+COPY package.json package-lock.json /app/
+COPY src/client/ /app/client/
+COPY src/realtime/ /app/realtime/
+COPY --from=node-deps /deps/node_modules/ /app/node_modules/
+
+RUN mkdir -p /data/chunks /data/buildings
+
+ENV VW_REALTIME_HOST=0.0.0.0 \
+    VW_REALTIME_PORT=8591 \
+    VW_DATA_DIR=/data \
+    VW_REALTIME_ROOM=agent_runtime
+
+EXPOSE 8591
+
+CMD ["node", "/app/realtime/server.mjs"]
+
+FROM python:3.12-slim AS web
 
 WORKDIR /app
 
 # Copy application files
+COPY package.json package-lock.json /app/
 COPY src/server/ /app/server/
 COPY src/client/ /app/client/
+COPY src/realtime/ /app/realtime/
 COPY --from=node-deps /deps/node_modules/ /app/node_modules/
 
 # Runtime deps for live OpenClaw presence mirroring
