@@ -66,7 +66,7 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS = 12000;
 export const SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS = 16000;
 export const SERVER_SCRIPTED_OBJECT_TEMPORARY_ITEM_CARRIED_TTL_MS = 90000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES = 8;
-export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 4;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 12;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 6;
 export const SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS = Object.freeze([8000, 20000]);
@@ -1506,6 +1506,27 @@ function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, propo
 
   const staticResult = validateServerRuntimeStaticSegment(dataDir, current, proposed, { phase, route });
   if (!staticResult.clear) {
+    const dx = proposed.x - current.x;
+    const dy = proposed.y - current.y;
+    for (const scale of [0.5, 0.25, 0.125]) {
+      const partial = {
+        ...proposed,
+        x: current.x + dx * scale,
+        y: current.y + dy * scale,
+      };
+      if (Math.hypot(partial.x - current.x, partial.y - current.y) <= 0.5) continue;
+      const partialResult = validateServerRuntimeStaticSegment(dataDir, current, partial, { phase, route });
+      if (partialResult.clear) {
+        return {
+          point: partial,
+          adjusted: true,
+          routePatch: {
+            blockedPoint: staticResult.blockedPoint || proposed,
+            blockedReason: `server-static-step-reduced-${staticResult.reason || staticResult.blockedReason || 'blocked'}`,
+          },
+        };
+      }
+    }
     return {
       point: current,
       adjusted: true,
@@ -1520,6 +1541,26 @@ function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, propo
 
   const crowdResult = applyServerRuntimeAgentAvoidance(agentId, current, proposed, crowdAgents, { tickMs, speedUnitsPerSec, finalTarget, arrivalRadius, routeTarget });
   if (!crowdResult.adjusted) return { point: proposed, adjusted: false, routePatch: null };
+  const destination = normalizeServerRuntimePoint(finalTarget, proposed.floor);
+  if (destination) {
+    const proposedProgress = Math.hypot(destination.x - current.x, destination.y - current.y) - Math.hypot(destination.x - proposed.x, destination.y - proposed.y);
+    const crowdProgress = Math.hypot(destination.x - current.x, destination.y - current.y) - Math.hypot(destination.x - crowdResult.point.x, destination.y - crowdResult.point.y);
+    const proposedStep = Math.hypot(proposed.x - current.x, proposed.y - current.y);
+    const crowdStep = Math.hypot(crowdResult.point.x - current.x, crowdResult.point.y - current.y);
+    const noForwardProgress = proposedProgress > 0.05 && (
+      crowdProgress < Math.max(0.05, proposedProgress * 0.25) ||
+      crowdStep < Math.min(1, proposedStep * 0.2)
+    );
+    if (noForwardProgress) {
+      return {
+        point: proposed,
+        adjusted: false,
+        routePatch: {
+          crowdAvoidedAgents: crowdResult.blockers,
+        },
+      };
+    }
+  }
   const crowdStatic = validateServerRuntimeStaticSegment(dataDir, current, crowdResult.point, { phase, route });
   if (!crowdStatic.clear) {
     return {
@@ -6115,6 +6156,7 @@ export class AgentRuntimeRoom extends Room {
       Math.min(18, Math.ceil(Math.max(1, idleAgentIds.size) * 0.5)),
     );
     let activeRouteSteps = 0;
+    const activeRouteStepLimit = Math.max(SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK, activeRouteLimit);
 
     for (const [agentId, existing] of this.state.agents.entries()) {
       const current = snapshotToPlain(existing);
@@ -6142,7 +6184,7 @@ export class AgentRuntimeRoom extends Room {
       }
 
       const alreadyActive = ['using', 'active', 'occupied', 'queued', 'waiting'].includes(String(current.state || '').toLowerCase());
-      if (!alreadyActive && activeRouteSteps >= SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK) {
+      if (!alreadyActive && activeRouteSteps >= activeRouteStepLimit) {
         continue;
       }
       if (!alreadyActive) activeRouteSteps++;
