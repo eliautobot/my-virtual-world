@@ -1120,17 +1120,52 @@ function readBuildingDocument(dataDir, buildingId) {
   return building && typeof building === 'object' && !Array.isArray(building) ? building : null;
 }
 
+const _buildingDocsCache = new Map();
+const BUILDING_DOCS_CACHE_REVALIDATE_MS = 250;
+
 function listBuildingDocuments(dataDir) {
   const dir = buildingsDirPath(dataDir);
   if (!existsSync(dir)) return [];
+  const now = Date.now();
+  const cached = _buildingDocsCache.get(dir);
+  if (cached && now - cached.checkedAt < BUILDING_DOCS_CACHE_REVALIDATE_MS) return cached.docs;
+  let dirMtimeMs = 0;
+  let latestFileMtimeMs = 0;
+  let fileNames = [];
   try {
-    return readdirSync(dir)
-      .filter(name => name.endsWith('.json'))
-      .map(name => readJsonFile(join(dir, name), null))
-      .filter(building => building && typeof building === 'object' && !Array.isArray(building));
+    dirMtimeMs = statSync(dir).mtimeMs;
+    fileNames = readdirSync(dir).filter(name => name.endsWith('.json'));
+    for (const name of fileNames) {
+      try {
+        const mtimeMs = statSync(join(dir, name)).mtimeMs;
+        if (mtimeMs > latestFileMtimeMs) latestFileMtimeMs = mtimeMs;
+      } catch {
+        // Ignore transient stat failures (e.g. atomic rename races); content check below still applies.
+      }
+    }
   } catch {
     return [];
   }
+  if (
+    cached &&
+    cached.dirMtimeMs === dirMtimeMs &&
+    cached.latestFileMtimeMs === latestFileMtimeMs &&
+    cached.fileCount === fileNames.length
+  ) {
+    cached.checkedAt = now;
+    return cached.docs;
+  }
+  const docs = fileNames
+    .map(name => readJsonFile(join(dir, name), null))
+    .filter(building => building && typeof building === 'object' && !Array.isArray(building));
+  _buildingDocsCache.set(dir, {
+    dirMtimeMs,
+    latestFileMtimeMs,
+    fileCount: fileNames.length,
+    checkedAt: now,
+    docs,
+  });
+  return docs;
 }
 
 function objectIdsForBuildingItem(building, object, index) {
