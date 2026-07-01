@@ -431,7 +431,8 @@ for (const token of [
   'SERVER_MANAGED_ROUTE_LEASE_OWNERS',
   "SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runtime'",
   'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3',
-  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 4',
+  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 12',
+  'activeRouteStepLimit',
   'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 6',
   'SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS = Object.freeze([8000, 20000])',
   'SERVER_SCRIPTED_IDLE_RETRY_DELAY_MS = Object.freeze([3000, 8000])',
@@ -448,7 +449,13 @@ for (const token of [
   'runtime:objectUseRequest',
   'tickScriptedObjectRuntime',
   'selectCachedServerRuntimeRouteStep',
-  'active-route-replan-skipped',
+  'server-static-step-',
+  'SERVER_RUNTIME_AGENT_AVOID_RADIUS',
+  'SERVER_RUNTIME_AGENT_AVOID_PUSH_PER_TICK',
+  'serverRuntimeCrowdAgents',
+  'applyServerRuntimeCollisionGuards',
+  'isDynamicInteriorRouteSegmentClear',
+  'isDynamicExteriorRouteSegmentClear',
   'makeServerRuntimeStep',
   'dynamic-interior-routing.js',
   'configureDynamicExteriorRouting',
@@ -756,12 +763,14 @@ for (const token of [
 for (const token of [
   'hydrateDynamicInteriorRoutingDebugFromRuntimeRoute',
   'runtimeDebugHydrated',
+  'isDynamicInteriorRouteSegmentClear',
 ]) {
   assert(dynamicInteriorRoutingJs.includes(token), `dynamic interior routing missing runtime debug token: ${token}`);
 }
 for (const token of [
   'hydrateDynamicExteriorRoutingDebugFromRuntimeRoute',
   'runtimeDebugHydrated',
+  'isDynamicExteriorRouteSegmentClear',
 ]) {
   assert(dynamicExteriorRoutingJs.includes(token), `dynamic exterior routing missing runtime debug token: ${token}`);
 }

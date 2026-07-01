@@ -410,6 +410,33 @@ function hasOutdoorSurfaceLineOfSight(a, b, cfg, allowRoadFallback = true, optio
   return true;
 }
 
+export function isDynamicExteriorRouteSegmentClear(startApi, endApi, options = {}) {
+  if (!startApi || !endApi) {
+    return { clear: true, reason: 'missing-segment-context' };
+  }
+  const cfg = { ...DYNAMIC_EXTERIOR_ROUTING, ...(options.config || options || {}) };
+  const allowRoadFallback = options.allowRoadFallback !== false;
+  const allowSoftFallback = options.allowSoftFallback === true;
+  try {
+    const start = clonePoint2({ x: startApi.x, y: startApi.y ?? startApi.z });
+    const end = clonePoint2({ x: endApi.x, y: endApi.y ?? endApi.z });
+    const surfaceOptions = { allowSoftFallback };
+    const startWalkable = isOutdoorWalkableApi(start.x, start.y, cfg, allowRoadFallback, surfaceOptions);
+    const endWalkable = isOutdoorWalkableApi(end.x, end.y, cfg, allowRoadFallback, surfaceOptions);
+    const segmentClear = hasOutdoorLineOfSight(start, end, cfg, allowRoadFallback, null, surfaceOptions);
+    return {
+      clear: startWalkable && endWalkable && segmentClear,
+      startBlocked: !startWalkable,
+      endBlocked: !endWalkable,
+      segmentClear,
+      reason: !startWalkable ? 'start-blocked' : !endWalkable ? 'end-blocked' : (segmentClear ? 'clear' : 'segment-blocked'),
+      blockedPoint: { x: end.x, y: end.y },
+    };
+  } catch (error) {
+    return { clear: true, reason: 'validator-error', error: error?.message || String(error) };
+  }
+}
+
 function subdivideRoutePoints(points, maxStepApi) {
   if (!Array.isArray(points) || points.length <= 1) return points || [];
   const spacing = Math.max(1.5, Number(maxStepApi) || 4);
