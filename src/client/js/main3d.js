@@ -1105,12 +1105,12 @@ const AGENT_RUNTIME_SNAPSHOT_MIN_DISTANCE = 1.5;
 const AGENT_RUNTIME_MANUAL_PREVIEW_SNAPSHOT_INTERVAL_MS = 100;
 const AGENT_RUNTIME_MANUAL_PREVIEW_MIN_DISTANCE = 0.12;
 const AGENT_RUNTIME_POSITION_WRITER_STALE_MS = 7000;
-const AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS = 220;
-const AGENT_RUNTIME_OBSERVER_BUFFER_MIN_DELAY_MS = 140;
-const AGENT_RUNTIME_OBSERVER_BUFFER_MAX_DELAY_MS = 320;
+const AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS = 360;
 const AGENT_RUNTIME_OBSERVER_BUFFER_MAX_MS = 2000;
 const AGENT_RUNTIME_OBSERVER_BUFFER_MAX_SNAPSHOTS = 32;
-const AGENT_RUNTIME_OBSERVER_EXTRAPOLATION_MS = 120;
+const AGENT_RUNTIME_OBSERVER_CLOCK_OFFSET_RESET_MS = 750;
+const AGENT_RUNTIME_OBSERVER_CLOCK_OFFSET_SMOOTHING = 0.1;
+const AGENT_RUNTIME_OBSERVER_TIMELINE_FUTURE_TOLERANCE_MS = 80;
 const AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS = 70;
 const AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS = 500;
 const AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING = 0.2;
@@ -2662,17 +2662,38 @@ function placeRuntimeHydratedAgentMesh(agent, { force = false } = {}) {
   }
 }
 
-function makeAgentRuntimeObserverBufferSample(snapshot, source = 'runtime', receivedAtMs = performance.now()) {
+function makeAgentRuntimeObserverBufferSample(agent, snapshot, source = 'runtime', receivedAtMs = performance.now()) {
   if (!snapshot) return null;
   const x = Number(snapshot.x);
   const y = Number(snapshot.y);
   const floor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(floor)) return null;
+  const serverTimeMs = Date.parse(snapshot.updatedAt || '');
+  let timelineMs = receivedAtMs;
+  if (Number.isFinite(serverTimeMs)) {
+    const rawOffsetMs = receivedAtMs - serverTimeMs;
+    const currentOffsetMs = Number(agent?._runtimeObserverServerClockOffsetMs);
+    const nextOffsetMs = !Number.isFinite(currentOffsetMs) ||
+      Math.abs(rawOffsetMs - currentOffsetMs) > AGENT_RUNTIME_OBSERVER_CLOCK_OFFSET_RESET_MS
+      ? rawOffsetMs
+      : currentOffsetMs * (1 - AGENT_RUNTIME_OBSERVER_CLOCK_OFFSET_SMOOTHING) +
+        rawOffsetMs * AGENT_RUNTIME_OBSERVER_CLOCK_OFFSET_SMOOTHING;
+    if (agent) agent._runtimeObserverServerClockOffsetMs = nextOffsetMs;
+    timelineMs = serverTimeMs + nextOffsetMs;
+    if (
+      timelineMs > receivedAtMs + AGENT_RUNTIME_OBSERVER_TIMELINE_FUTURE_TOLERANCE_MS ||
+      timelineMs < receivedAtMs - AGENT_RUNTIME_OBSERVER_BUFFER_MAX_MS
+    ) {
+      timelineMs = receivedAtMs;
+      if (agent) agent._runtimeObserverServerClockOffsetMs = rawOffsetMs;
+    }
+  }
   return Object.freeze({
     snapshot,
     source,
     receivedAtMs,
-    serverTimeMs: Date.parse(snapshot.updatedAt || ''),
+    serverTimeMs,
+    timelineMs,
     version: Number(snapshot.version || 0),
     updatedAt: String(snapshot.updatedAt || ''),
     x,
@@ -2712,7 +2733,7 @@ function pruneAgentRuntimeObserverBuffer(agent, nowMs = performance.now()) {
 
 function queueAgentRuntimeObserverSnapshot(agent, snapshot, { source = 'runtime', updateVisible = false } = {}) {
   if (!agent || !snapshot) return { queued: false, reason: 'missing' };
-  const sample = makeAgentRuntimeObserverBufferSample(snapshot, source);
+  let sample = makeAgentRuntimeObserverBufferSample(agent, snapshot, source);
   if (!sample) return { queued: false, reason: 'invalid' };
   let buffer = Array.isArray(agent._runtimeObserverSnapshotBuffer)
     ? agent._runtimeObserverSnapshotBuffer
@@ -2741,12 +2762,26 @@ function queueAgentRuntimeObserverSnapshot(agent, snapshot, { source = 'runtime'
   }
 
   const previousReceivedAtMs = Number(last.receivedAtMs || 0);
+  const receiptGapMs = sample.receivedAtMs - previousReceivedAtMs;
   if (Number.isFinite(previousReceivedAtMs) && previousReceivedAtMs > 0) {
-    const gapMs = sample.receivedAtMs - previousReceivedAtMs;
-    if (gapMs >= AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS && gapMs <= AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS) {
-      const current = Number(agent._runtimeObserverIntervalMs || gapMs);
-      agent._runtimeObserverIntervalMs = current * (1 - AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING) + gapMs * AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING;
+    if (receiptGapMs >= AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS && receiptGapMs <= AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS) {
+      const current = Number(agent._runtimeObserverIntervalMs || receiptGapMs);
+      agent._runtimeObserverIntervalMs = current * (1 - AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING) + receiptGapMs * AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING;
     }
+  }
+  const lastTimelineMs = Number(last.timelineMs || last.receivedAtMs || 0);
+  const sampleTimelineMs = Number(sample.timelineMs || sample.receivedAtMs || 0);
+  if (Number.isFinite(lastTimelineMs) && Number.isFinite(sampleTimelineMs) && sampleTimelineMs <= lastTimelineMs) {
+    const fallbackGapMs = Math.max(
+      1,
+      Math.min(
+        AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS,
+        Number.isFinite(receiptGapMs) && receiptGapMs > 0
+          ? receiptGapMs
+          : Number(agent._runtimeObserverIntervalMs || AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS),
+      ),
+    );
+    sample = Object.freeze({ ...sample, timelineMs: lastTimelineMs + fallbackGapMs });
   }
   agent._runtimeObserverLastSnapshotAtMs = sample.receivedAtMs;
   buffer.push(sample);
@@ -2764,11 +2799,7 @@ function queueAgentRuntimeObserverSnapshot(agent, snapshot, { source = 'runtime'
 }
 
 function getAgentRuntimeObserverBufferDelayMs(agent) {
-  const interval = Number(agent?._runtimeObserverIntervalMs || 0);
-  const target = Number.isFinite(interval) && interval > 0
-    ? Math.max(AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS, interval * 2)
-    : AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS;
-  return Math.min(AGENT_RUNTIME_OBSERVER_BUFFER_MAX_DELAY_MS, Math.max(AGENT_RUNTIME_OBSERVER_BUFFER_MIN_DELAY_MS, target));
+  return AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS;
 }
 
 function interpolateRuntimeAngleRad(fromHeading, toHeading, t) {
@@ -2785,27 +2816,21 @@ function getAgentRuntimeObserverBufferedFrame(agent, nowMs = performance.now()) 
   if (!buffer.length) return null;
   const delayMs = getAgentRuntimeObserverBufferDelayMs(agent);
   const renderAtMs = nowMs - delayMs;
-  if (buffer.length === 1 || renderAtMs <= Number(buffer[0].receivedAtMs || 0)) {
+  if (buffer.length === 1 || renderAtMs <= Number(buffer[0].timelineMs || buffer[0].receivedAtMs || 0)) {
     const only = buffer[0];
     return { from: only, to: only, t: 1, delayMs, renderAtMs, mode: 'hold-first' };
   }
   for (let i = 1; i < buffer.length; i += 1) {
     const from = buffer[i - 1];
     const to = buffer[i];
-    const fromTime = Number(from.receivedAtMs || 0);
-    const toTime = Number(to.receivedAtMs || 0);
+    const fromTime = Number(from.timelineMs || from.receivedAtMs || 0);
+    const toTime = Number(to.timelineMs || to.receivedAtMs || 0);
     if (renderAtMs <= toTime) {
       const span = Math.max(1, toTime - fromTime);
       return { from, to, t: Math.min(1, Math.max(0, (renderAtMs - fromTime) / span)), delayMs, renderAtMs, mode: 'interpolate' };
     }
   }
   const to = buffer[buffer.length - 1];
-  const from = buffer[buffer.length - 2] || to;
-  const lateMs = renderAtMs - Number(to.receivedAtMs || 0);
-  const span = Math.max(1, Number(to.receivedAtMs || 0) - Number(from.receivedAtMs || 0));
-  if (lateMs > 0 && lateMs <= AGENT_RUNTIME_OBSERVER_EXTRAPOLATION_MS && from !== to) {
-    return { from, to, t: 1 + lateMs / span, delayMs, renderAtMs, mode: 'extrapolate' };
-  }
   return { from: to, to, t: 1, delayMs, renderAtMs, mode: 'hold-latest' };
 }
 

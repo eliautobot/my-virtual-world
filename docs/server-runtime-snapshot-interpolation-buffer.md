@@ -13,12 +13,12 @@ PR #59 fixes visible server-owned agent stutter by changing browser observers fr
 
 For each observed agent, the browser keeps a short ring buffer of authoritative samples:
 
-- `AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS = 220`
-- delay clamps between `140ms` and `320ms`
+- `AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS = 360`
+- delay is fixed so the playback cursor does not speed up or slow down while chasing packet arrival jitter
 - max buffer age `2000ms`
 - max samples `32`
 
-The render loop draws at `now - delay`, finds the two buffered samples around that render time, and linearly interpolates position plus shortest-path heading. If packets arrive late, the browser may extrapolate briefly for up to one small window, then holds the latest sample rather than repeatedly snapping.
+The render loop draws at `now - delay`, using `snapshot.updatedAt` to order and sanity-check the sample timeline, finds the two buffered samples around that render time, and linearly interpolates position plus shortest-path heading. Stale recovery snapshots cannot seed a future playback clock; fresh samples reset large clock-offset jumps, timelines are clamped near receipt time, and samples remain monotonic per agent. If packets arrive late, the browser holds the latest known sample instead of extrapolating forward and then snapping back.
 
 ## Snap Rules
 
