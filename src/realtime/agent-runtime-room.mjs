@@ -63,6 +63,8 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS = 15000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS = 8000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS = 7000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS = 12000;
+// Mirrors 8590's AGENT_INTENT_APPROACH_STALE_AFTER_MS (/tmp/8590-main3d.js:7387): abort routings stuck longer than this.
+export const SERVER_RUNTIME_ROUTE_STALE_AFTER_MS = 45000;
 export const SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS = 16000;
 export const SERVER_SCRIPTED_OBJECT_TEMPORARY_ITEM_CARRIED_TTL_MS = 90000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES = 8;
@@ -3817,6 +3819,7 @@ function refreshScriptedObjectRuntimeTarget(dataDir, target = null) {
   return {
     ...target,
     ...refreshed,
+    routeStartedAt: target.routeStartedAt || refreshed.routeStartedAt || '',
     runtimeStartedAt: target.runtimeStartedAt || refreshed.runtimeStartedAt || '',
     runtimeActiveAt: target.runtimeActiveAt || refreshed.runtimeActiveAt || '',
     runtimeSource: target.runtimeSource || refreshed.runtimeSource || 'idle',
@@ -4909,6 +4912,8 @@ export class AgentRuntimeRoom extends Room {
     this.lastScriptedObjectRuntimePollMs = 0;
     this.scriptedObjectRuntimePlan = null;
     this.scriptedObjectRuntimeCooldowns = new Map();
+    this.liveStatusRouteWatchdog = new Map();
+    this.liveStatusRouteCooldowns = new Map();
     this.scriptedObjectRuntimeMemory = new Map();
     this.scriptedObjectRuntimeNextPulseAtMs = new Map();
     this.scriptedObjectRuntimeIdleCursor = 0;
@@ -5678,6 +5683,7 @@ export class AgentRuntimeRoom extends Room {
     let target = {
       ...rawTarget,
       runtimeStartedAt: rawTarget.runtimeStartedAt || now,
+      routeStartedAt: rawTarget.routeStartedAt || now,
       runtimeActiveAt: options.active === true ? (rawTarget.runtimeActiveAt || now) : (rawTarget.runtimeActiveAt || ''),
       runtimeSource: options.source || rawTarget.runtimeSource || 'idle',
     };
@@ -5846,6 +5852,46 @@ export class AgentRuntimeRoom extends Room {
       const heading = movement.heading;
       const snapshotTarget = makeLiveActionSnapshotTarget(action, targetPoint);
       const routeId = safeText(action?.route?.id || action?.route?.routeId, `route-${actionId}`) || `route-${actionId}`;
+
+      if (!arrived && (status === 'routing' || status === 'route_pending')) {
+        const routeStartedAtMs = Date.parse(action?.timing?.startedAt || action?.timing?.routePendingAt || '');
+        if (Number.isFinite(routeStartedAtMs) && nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
+          const transitioned = this.transitionServerLiveAction(action, 'failed', {
+            now,
+            actor,
+            source,
+            reason: 'route-stale',
+            failureReason: 'route-stale',
+          });
+          if (transitioned.changed) {
+            action = transitioned.action;
+            changedActions = true;
+          }
+          clearDynamicInteriorRoutingForAgent(agentId);
+          clearDynamicExteriorRoutingForAgent(agentId);
+          this.upsertSnapshot({
+            agentId,
+            mode: 'scripted',
+            owner: 'agent-scripted-mode',
+            x: current.x,
+            y: current.y,
+            floor: current.floor,
+            buildingId: current.buildingId || '',
+            roomId: current.roomId || '',
+            heading: current.heading,
+            state: 'idle',
+            routeId: '',
+            worldActionId: '',
+            target: null,
+            leaseOwner: '',
+            leaseExpiresAt: '',
+            visualState: makeLiveActionVisualState(false),
+          }, 'server-live-action-route-stale', { actionId, routeId, reason: 'route-stale' });
+          changedSnapshots++;
+          nextHistory.unshift(action);
+          continue;
+        }
+      }
 
       if (status === 'routing' || status === 'route_pending') {
         this.upsertSnapshot({
@@ -6056,6 +6102,9 @@ export class AgentRuntimeRoom extends Room {
 
       if (activeOtherLease) continue;
 
+      const routeCooldownUntil = Number(this.liveStatusRouteCooldowns.get(agentId) || 0);
+      if (routeCooldownUntil > nowMs) continue;
+
       const statusKind = target.statusKind === 'meeting' ? 'meeting' : 'work';
       const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, tickMs, {
         speedUnitsPerSec: statusKind === 'meeting' ? LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC : LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
@@ -6072,6 +6121,42 @@ export class AgentRuntimeRoom extends Room {
       const leaseExpiresAtMs = Date.parse(current.leaseExpiresAt || '');
       const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= LIVE_STATUS_RUNTIME_LEASE_REFRESH_MS;
       const targetChanged = current.routeId !== routeId || current.target?.buildingId !== target.buildingId || current.target?.furnitureIndex !== target.furnitureIndex || current.target?.spotId !== target.spotId;
+
+      if (arrived) {
+        this.liveStatusRouteWatchdog.delete(agentId);
+      } else {
+        const watch = this.liveStatusRouteWatchdog.get(agentId);
+        const routeStartedAtMs = watch && watch.routeId === routeId ? Number(watch.startedAtMs) : NaN;
+        if (!Number.isFinite(routeStartedAtMs)) {
+          this.liveStatusRouteWatchdog.set(agentId, { routeId, startedAtMs: nowMs });
+        } else if (nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
+          this.liveStatusRouteWatchdog.delete(agentId);
+          this.liveStatusRouteCooldowns.set(agentId, nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS);
+          clearDynamicInteriorRoutingForAgent(agentId);
+          clearDynamicExteriorRoutingForAgent(agentId);
+          this.upsertSnapshot({
+            agentId,
+            mode: 'scripted',
+            owner: 'agent-scripted-mode',
+            x: current.x,
+            y: current.y,
+            floor: current.floor,
+            buildingId: current.buildingId || '',
+            roomId: current.roomId || '',
+            heading: current.heading,
+            state: 'idle',
+            routeId: '',
+            worldActionId: '',
+            target: null,
+            leaseOwner: '',
+            leaseExpiresAt: '',
+            visualState: makeLiveStatusVisualState(false, 'idle'),
+          }, 'server-live-status-route-stale', { routeId, reason: 'route-stale' });
+          changedSnapshots++;
+          continue;
+        }
+      }
+
       const state = arrived ? (statusKind === 'meeting' ? 'meeting' : 'working') : 'routing';
       const shouldWrite = !ownedByStatusRuntime || !arrived || needsLeaseRefresh || targetChanged || current.state !== state;
       if (!shouldWrite) continue;
@@ -6119,6 +6204,10 @@ export class AgentRuntimeRoom extends Room {
         }, arrived ? 'server-live-status-world-active' : 'server-live-status-world-routing', { routeId });
       }
       changedSnapshots++;
+    }
+
+    for (const [agentId, untilMs] of Array.from(this.liveStatusRouteCooldowns.entries())) {
+      if (Number(untilMs || 0) <= nowMs) this.liveStatusRouteCooldowns.delete(agentId);
     }
 
     return { changedSnapshots };
@@ -6236,6 +6325,25 @@ export class AgentRuntimeRoom extends Room {
       }
 
       const alreadyActive = ['using', 'active', 'occupied', 'queued', 'waiting'].includes(String(current.state || '').toLowerCase());
+      if (!alreadyActive) {
+        target.routeStartedAt = safeIso(target.routeStartedAt, '') || safeIso(target.runtimeStartedAt, '') || now;
+        const routeStartedAtMs = Date.parse(target.routeStartedAt);
+        if (Number.isFinite(routeStartedAtMs) && nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
+          this.releaseServerScriptedObjectRoute(agentId, current, {
+            ...target,
+            x: current.x,
+            y: current.y,
+            floor: current.floor,
+            buildingId: current.buildingId || '',
+            roomId: current.roomId || '',
+          }, nowMs, now, 'route-stale');
+          this.markServerScriptedRuntimeFailure(agentId, target, 'route-stale', nowMs);
+          this.scriptedObjectRuntimeCooldowns.set(agentId, nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS);
+          changedSnapshots++;
+          changedObjects++;
+          continue;
+        }
+      }
       if (!alreadyActive && activeRouteSteps >= activeRouteStepLimit) {
         continue;
       }
