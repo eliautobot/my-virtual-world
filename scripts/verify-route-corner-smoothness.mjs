@@ -27,6 +27,7 @@ let agent = {
   floor: 1,
   buildingId: '',
   heading: 0,
+  state: 'routing',
   visualState: {
     runtimeRoute: {
       active: true,
@@ -58,6 +59,7 @@ for (let tick = 0; tick < 40; tick += 1) {
     x: step.x,
     y: step.y,
     heading: step.heading,
+    state: 'routing',
     visualState: {
       runtimeRoute: step.route && step.route.active
         ? { ...agent.visualState.runtimeRoute, ...step.route }

@@ -1931,16 +1931,31 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
     tickWaypoints.push({ x: cursorX, y: cursorY });
   }
 
+  // M1.5b — smooth heading through turns: derive heading from the actual
+  // per-tick displacement vector and clamp the per-tick heading change to a
+  // max turn rate (~PI/2 per 250ms tick), except when starting from rest.
+  const previousHeading = normalizeRuntimeAngleRadians(current?.heading, 0);
+  const wasMoving = String(current?.state || '').toLowerCase() === 'routing';
+  const maxTurnPerTick = (Math.PI / 2) * (Math.max(1, tickMs) / 250);
+  const applyTurnRateLimit = (desiredHeading) => {
+    const desired = normalizeRuntimeAngleRadians(desiredHeading, previousHeading);
+    if (!wasMoving) return desired;
+    let delta = desired - previousHeading;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    if (Math.abs(delta) <= maxTurnPerTick) return desired;
+    return normalizeRuntimeAngleRadians(previousHeading + Math.sign(delta) * maxTurnPerTick, desired);
+  };
   let nextX = arrived ? Number(finalTarget.x) : tickWaypoints[0].x;
   let nextY = arrived ? Number(finalTarget.y) : tickWaypoints[0].y;
   let heading = distanceToSteering > 0.001
-    ? normalizeRuntimeAngleRadians(Math.atan2(dx, dy), 0)
-    : normalizeRuntimeAngleRadians(current?.heading, 0);
+    ? applyTurnRateLimit(Math.atan2(dx, dy))
+    : previousHeading;
   if (!arrived) {
     const tickDx = nextX - Number(currentPoint.x || 0);
     const tickDy = nextY - Number(currentPoint.y || 0);
     if (Math.hypot(tickDx, tickDy) > 0.001) {
-      heading = normalizeRuntimeAngleRadians(Math.atan2(tickDx, tickDy), heading);
+      heading = applyTurnRateLimit(Math.atan2(tickDx, tickDy));
     }
   }
   let routePatch = null;
@@ -1967,7 +1982,7 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       const guardedDx = nextX - Number(currentPoint.x || 0);
       const guardedDy = nextY - Number(currentPoint.y || 0);
       if (Math.hypot(guardedDx, guardedDy) > 0.001) {
-        heading = normalizeRuntimeAngleRadians(Math.atan2(guardedDx, guardedDy), heading);
+        heading = applyTurnRateLimit(Math.atan2(guardedDx, guardedDy));
       }
     }
   }
