@@ -46,7 +46,7 @@ export const LIVE_ACTION_RUNTIME_LEASE_TTL_MS = 10000;
 export const LIVE_STATUS_RUNTIME_OWNER = 'server-live-status-runtime';
 export const LIVE_STATUS_RUNTIME_LEASE_OWNER = 'server-live-status';
 export const LIVE_STATUS_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
-export const LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC = 96;
+export const LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC = 70;
 export const LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC = 200;
 export const LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS = 6;
 export const LIVE_STATUS_RUNTIME_LEASE_TTL_MS = 15000;
@@ -63,6 +63,8 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS = 15000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS = 8000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS = 7000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS = 12000;
+// Mirrors 8590's AGENT_INTENT_APPROACH_STALE_AFTER_MS (/tmp/8590-main3d.js:7387): abort routings stuck longer than this.
+export const SERVER_RUNTIME_ROUTE_STALE_AFTER_MS = 45000;
 export const SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS = 16000;
 export const SERVER_SCRIPTED_OBJECT_TEMPORARY_ITEM_CARRIED_TTL_MS = 90000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES = 8;
@@ -70,6 +72,18 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 12;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 6;
 export const SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS = Object.freeze([8000, 20000]);
+// M3.1 proximity conversations (8590 SCRIPTED_PROXIMITY_BEHAVIOR_RULES parity)
+export const SERVER_SOCIAL_RUNTIME_OWNER = 'server-social-runtime';
+export const SERVER_SOCIAL_RUNTIME_LEASE_OWNER = 'server-social';
+export const SERVER_SOCIAL_CONVERSATION_RADIUS_API = 5 * 40; // 5 tiles
+export const SERVER_SOCIAL_CONVERSATION_CHANCE = 0.22;
+export const SERVER_SOCIAL_CONVERSATION_COOLDOWN_MS = 45000;
+export const SERVER_SOCIAL_CONVERSATION_DURATION_MS = Object.freeze([7000, 14000]);
+export const SERVER_SOCIAL_ROLE_SWITCH_MS = Object.freeze([3000, 5000]);
+export const SERVER_SOCIAL_POST_COOLDOWN_MS = Object.freeze([20000, 40000]);
+export const SERVER_SOCIAL_MAX_PARTICIPANTS = 4;
+export const SERVER_SOCIAL_MAX_EVALS_PER_TICK = 6;
+export const SERVER_SOCIAL_LEASE_TTL_MS = 20000;
 export const SERVER_SCRIPTED_IDLE_RETRY_DELAY_MS = Object.freeze([3000, 8000]);
 export const SERVER_SCRIPTED_IDLE_OBJECT_COOLDOWN_MS = 240000;
 export const SERVER_SCRIPTED_IDLE_CATEGORY_COOLDOWN_MS = 180000;
@@ -385,17 +399,46 @@ function writeJsonFileAtomic(path, value) {
   return value;
 }
 
+// Hot-path document caches: revalidated by file mtime with a short time-based
+// window (same pattern as _buildingDocsCache; keeps the event loop off sync
+// disk I/O during per-tick planning).
+const _hotDocumentCache = new Map();
+const HOT_DOCUMENT_CACHE_REVALIDATE_MS = 250;
+
+function readCachedJsonDocument(path, fallbackFactory) {
+  const now = Date.now();
+  const cached = _hotDocumentCache.get(path);
+  if (cached && now - cached.checkedAt < HOT_DOCUMENT_CACHE_REVALIDATE_MS) return cached.value;
+  let mtimeMs = -1;
+  try {
+    mtimeMs = statSync(path).mtimeMs;
+  } catch {
+    mtimeMs = -1;
+  }
+  if (cached && cached.mtimeMs === mtimeMs) {
+    cached.checkedAt = now;
+    return cached.value;
+  }
+  const raw = mtimeMs >= 0 ? readJsonFile(path, null) : null;
+  const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : fallbackFactory();
+  _hotDocumentCache.set(path, { mtimeMs, checkedAt: now, value });
+  return value;
+}
+
+function invalidateCachedJsonDocument(path) {
+  _hotDocumentCache.delete(path);
+}
+
 function readWorldMetaDocument(dataDir) {
-  const meta = readJsonFile(worldMetaFilePath(dataDir), null);
-  return meta && typeof meta === 'object' && !Array.isArray(meta) ? meta : {};
+  return readCachedJsonDocument(worldMetaFilePath(dataDir), () => ({}));
 }
 
 function readPresenceSnapshotDocument(dataDir) {
-  const snapshot = readJsonFile(presenceSnapshotFilePath(dataDir), null);
-  return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot : {};
+  return readCachedJsonDocument(presenceSnapshotFilePath(dataDir), () => ({}));
 }
 
 function writeWorldMetaDocument(dataDir, meta) {
+  invalidateCachedJsonDocument(worldMetaFilePath(dataDir));
   return writeJsonFileAtomic(worldMetaFilePath(dataDir), meta && typeof meta === 'object' ? meta : {});
 }
 
@@ -1039,7 +1082,7 @@ function buildingLocalPointFromApi(building, apiX, apiY) {
   return { x: relX, z: relZ };
 }
 
-function buildingContainsApiPoint(building, apiX, apiY) {
+export function buildingContainsApiPoint(building, apiX, apiY) {
   const local = buildingLocalPointFromApi(building, apiX, apiY);
   if (!local) return false;
   const bw = Number(building?.widthTiles || 25) || 25;
@@ -1116,7 +1159,7 @@ function apiPointForBuilding(building) {
 
 function readBuildingDocument(dataDir, buildingId) {
   if (!buildingId) return null;
-  const building = readJsonFile(buildingFilePath(dataDir, buildingId), null);
+  const building = readCachedJsonDocument(buildingFilePath(dataDir, buildingId), () => null);
   return building && typeof building === 'object' && !Array.isArray(building) ? building : null;
 }
 
@@ -1696,7 +1739,7 @@ function selectCachedServerRuntimeRouteStep(current, currentPoint, finalTarget, 
   };
 }
 
-function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
+export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
   speedUnitsPerSec,
   arrivalRadius,
   routeSource = 'server-runtime',
@@ -1833,12 +1876,129 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
   const distanceToFinal = Math.hypot(finalDx, finalDy);
   const step = Math.max(1, numberOr(speedUnitsPerSec, 72) * (Math.max(1, tickMs) / 1000));
   const arrived = distanceToFinal <= arrival && !String(phase || '').startsWith('door-');
-  const ratio = arrived ? 1 : Math.min(1, step / Math.max(distanceToSteering, 0.001));
-  let nextX = arrived ? Number(finalTarget.x) : Number(currentPoint.x || 0) + dx * ratio;
-  let nextY = arrived ? Number(finalTarget.y) : Number(currentPoint.y || 0) + dy * ratio;
+
+  // M1.5a — continuous waypoint advance: consume the full per-tick step distance
+  // across successive route waypoints instead of stopping at each corner.
+  // Intermediate waypoints never trigger arrival/dwell; only finalTarget uses arrivalRadius.
+  const tickWaypoints = [];
+  if (!arrived) {
+    tickWaypoints.push({ x: Number(steeringTarget.x), y: Number(steeringTarget.y), final: false });
+    const routePoints = Array.isArray(route?.routePoints) && route.routePoints.length > 1
+      ? route.routePoints
+      : (Array.isArray(route?.route) ? route.route : []);
+    const canChainWaypoints = route?.active === true && routePoints.length > 1 && isServerRuntimePathfinderRoute(route);
+    let steeringIndex = -1;
+    if (canChainWaypoints) {
+      for (let index = 0; index < routePoints.length; index += 1) {
+        const point = routePoints[index];
+        if (!point) continue;
+        if (Math.hypot(Number(point.x) - Number(steeringTarget.x), Number(point.y) - Number(steeringTarget.y)) <= 0.5) {
+          steeringIndex = index;
+          break;
+        }
+      }
+      if (steeringIndex >= 0) {
+        for (let index = steeringIndex + 1; index < routePoints.length; index += 1) {
+          const point = routePoints[index];
+          if (!point) continue;
+          tickWaypoints.push({ x: Number(point.x), y: Number(point.y), final: false });
+        }
+      }
+    }
+    const lastWaypoint = tickWaypoints[tickWaypoints.length - 1];
+    if (lastWaypoint && Math.hypot(lastWaypoint.x - finalTarget.x, lastWaypoint.y - finalTarget.y) <= 0.001) {
+      lastWaypoint.final = true;
+    } else if (canChainWaypoints && steeringIndex >= 0) {
+      // Pathfinder routes may end short of the exact final target; finish the chain there.
+      tickWaypoints.push({ x: Number(finalTarget.x), y: Number(finalTarget.y), final: true });
+    }
+
+    // Consume the tick step measured as EUCLIDEAN distance from the tick-start
+    // position so consecutive snapshots keep constant displacement magnitude
+    // through corners (matches 8590's frame-based mover as sampled per tick).
+    // A path-distance budget caps hairpin traversal so agents cannot teleport
+    // along doubled-back polylines.
+    const startX = Number(currentPoint.x || 0);
+    const startY = Number(currentPoint.y || 0);
+    const maxPathBudget = step * 2;
+    let pathConsumed = 0;
+    let cursorX = startX;
+    let cursorY = startY;
+    let waypointsConsumed = 0;
+    for (const waypoint of tickWaypoints) {
+      const segDx = waypoint.x - cursorX;
+      const segDy = waypoint.y - cursorY;
+      const segDist = Math.hypot(segDx, segDy);
+      if (segDist <= 0.001) {
+        if (!waypoint.final) waypointsConsumed += 1;
+        continue;
+      }
+      const endEuclid = Math.hypot(waypoint.x - startX, waypoint.y - startY);
+      const pathBudgetLeft = maxPathBudget - pathConsumed;
+      if (endEuclid <= step + 0.0001 && segDist <= pathBudgetLeft) {
+        cursorX = waypoint.x;
+        cursorY = waypoint.y;
+        pathConsumed += segDist;
+        if (waypoint.final) break;
+        waypointsConsumed += 1;
+        continue;
+      }
+      // Find t in [0,1] along the segment where euclidean distance from the
+      // tick-start position reaches the step radius (larger quadratic root =
+      // forward crossing), clamped by the remaining path budget.
+      let t = 1;
+      if (endEuclid > step) {
+        const fx = cursorX - startX;
+        const fy = cursorY - startY;
+        const a = segDx * segDx + segDy * segDy;
+        const b = 2 * (fx * segDx + fy * segDy);
+        const c = fx * fx + fy * fy - step * step;
+        const disc = b * b - 4 * a * c;
+        t = disc >= 0 && a > 0 ? Math.max(0, Math.min(1, (-b + Math.sqrt(disc)) / (2 * a))) : 1;
+      }
+      if (pathBudgetLeft < segDist * t) t = Math.max(0, pathBudgetLeft / segDist);
+      cursorX += segDx * t;
+      cursorY += segDy * t;
+      break;
+    }
+    if (steeringIndex >= 0 && waypointsConsumed > 0 && route && Array.isArray(route.routePoints)) {
+      route.routeIndex = Math.min(route.routePoints.length - 1, steeringIndex + waypointsConsumed);
+      if (route.routePoints[route.routeIndex]) {
+        const advanced = route.routePoints[route.routeIndex];
+        route.effectiveTarget = { ...finalTarget, x: Number(advanced.x), y: Number(advanced.y), floor: floorOr(advanced.floor ?? finalTarget.floor, finalTarget.floor) };
+      }
+    }
+    tickWaypoints.length = 0;
+    tickWaypoints.push({ x: cursorX, y: cursorY });
+  }
+
+  // M1.5b — smooth heading through turns: derive heading from the actual
+  // per-tick displacement vector and clamp the per-tick heading change to a
+  // max turn rate (~PI/2 per 250ms tick), except when starting from rest.
+  const previousHeading = normalizeRuntimeAngleRadians(current?.heading, 0);
+  const wasMoving = String(current?.state || '').toLowerCase() === 'routing';
+  const maxTurnPerTick = (Math.PI / 2) * (Math.max(1, tickMs) / 250);
+  const applyTurnRateLimit = (desiredHeading) => {
+    const desired = normalizeRuntimeAngleRadians(desiredHeading, previousHeading);
+    if (!wasMoving) return desired;
+    let delta = desired - previousHeading;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    if (Math.abs(delta) <= maxTurnPerTick) return desired;
+    return normalizeRuntimeAngleRadians(previousHeading + Math.sign(delta) * maxTurnPerTick, desired);
+  };
+  let nextX = arrived ? Number(finalTarget.x) : tickWaypoints[0].x;
+  let nextY = arrived ? Number(finalTarget.y) : tickWaypoints[0].y;
   let heading = distanceToSteering > 0.001
-    ? normalizeRuntimeAngleRadians(Math.atan2(dx, dy), 0)
-    : normalizeRuntimeAngleRadians(current?.heading, 0);
+    ? applyTurnRateLimit(Math.atan2(dx, dy))
+    : previousHeading;
+  if (!arrived) {
+    const tickDx = nextX - Number(currentPoint.x || 0);
+    const tickDy = nextY - Number(currentPoint.y || 0);
+    if (Math.hypot(tickDx, tickDy) > 0.001) {
+      heading = applyTurnRateLimit(Math.atan2(tickDx, tickDy));
+    }
+  }
   let routePatch = null;
   if (!arrived) {
     const guarded = applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, {
@@ -1863,7 +2023,7 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
       const guardedDx = nextX - Number(currentPoint.x || 0);
       const guardedDy = nextY - Number(currentPoint.y || 0);
       if (Math.hypot(guardedDx, guardedDy) > 0.001) {
-        heading = normalizeRuntimeAngleRadians(Math.atan2(guardedDx, guardedDy), heading);
+        heading = applyTurnRateLimit(Math.atan2(guardedDx, guardedDy));
       }
     }
   }
@@ -2220,14 +2380,20 @@ function agentAssignmentFor(meta, agentId) {
   return direct && typeof direct === 'object' && !Array.isArray(direct) ? direct : {};
 }
 
-function pickLiveStatusWorkTarget(agentId, { meta, targets, workingAgentIds }) {
+export function pickLiveStatusWorkTarget(agentId, { meta, targets, workingAgentIds, claimedTargetIndexes = null }) {
   if (!agentId || !Array.isArray(targets) || targets.length === 0) return null;
   const assigned = targets.find(entry => liveStatusIdentityMatches(agentId, entry.assignedTo));
-  if (assigned) return assigned.target;
+  if (assigned) {
+    claimedTargetIndexes?.add(targets.indexOf(assigned));
+    return assigned.target;
+  }
 
   const assignment = agentAssignmentFor(meta, agentId);
   const workBuildingId = safeText(assignment.work || assignment.workBuilding || assignment.workBuildingId, '');
   let candidates = targets.filter(entry => !entry.assignedTo);
+  if (claimedTargetIndexes) {
+    candidates = candidates.filter(entry => !claimedTargetIndexes.has(targets.indexOf(entry)));
+  }
   if (workBuildingId) {
     const inAssignedBuilding = candidates.filter(entry => entry.buildingId === workBuildingId);
     if (inAssignedBuilding.length > 0) candidates = inAssignedBuilding;
@@ -2238,12 +2404,20 @@ function pickLiveStatusWorkTarget(agentId, { meta, targets, workingAgentIds }) {
     );
     if (officeTargets.length > 0) candidates = officeTargets;
   }
-  if (candidates.length === 0) candidates = targets;
+  if (candidates.length === 0) {
+    // With distinct claiming, no free desk means deskless fallback (8590
+    // parity: work-presence agents without a desk keep waiting/wandering
+    // near work instead of doubling up on an occupied desk).
+    if (claimedTargetIndexes) return null;
+    candidates = targets;
+  }
   if (candidates.length === 0) return null;
   const sortedWorkers = Array.isArray(workingAgentIds) ? workingAgentIds : [];
   const workerIndex = sortedWorkers.indexOf(agentId);
   const index = workerIndex >= 0 ? workerIndex : stableTextHash(agentId);
-  return candidates[index % candidates.length]?.target || null;
+  const picked = candidates[index % candidates.length];
+  if (picked && claimedTargetIndexes) claimedTargetIndexes.add(targets.indexOf(picked));
+  return picked?.target || null;
 }
 
 function pickLiveStatusMeetingTarget(agentId, { presence, targets, meetingAgentIds }) {
@@ -2294,11 +2468,13 @@ function buildLiveStatusRuntimePlan(dataDir) {
     const target = pickLiveStatusMeetingTarget(agentId, { presence, targets: meetingTargets, meetingAgentIds });
     if (target) targetsByAgent[agentId] = target;
   }
+  const claimedTargetIndexes = new Set();
   for (const agentId of workingAgentIds) {
-    const target = pickLiveStatusWorkTarget(agentId, { meta, targets: workTargets, workingAgentIds });
+    const target = pickLiveStatusWorkTarget(agentId, { meta, targets: workTargets, workingAgentIds, claimedTargetIndexes });
     if (target) targetsByAgent[agentId] = target;
   }
-  return { presence, meta, targets: workTargets, workTargets, meetingTargets, workingAgentIds, meetingAgentIds, targetsByAgent };
+  const desklessWorkingAgentIds = workingAgentIds.filter(agentId => !targetsByAgent[agentId]);
+  return { presence, meta, targets: workTargets, workTargets, meetingTargets, workingAgentIds, meetingAgentIds, targetsByAgent, desklessWorkingAgentIds };
 }
 
 function makeLiveStatusVisualState(isMoving, status = 'working', target = null) {
@@ -2488,6 +2664,10 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   playgroundswing: Object.freeze({ kind: 'playground-swing-swing', spotId: 'seat-use', animationId: 'playground-swing-sit-swing', poseKind: 'seat', stayMs: [10000, 18000] }),
   ponddock: Object.freeze({ kind: 'pond-dock-view', spotId: 'view-left', animationId: 'pond-dock-view-relax', poseKind: 'stand-use', stayMs: [12000, 22000] }),
   outdoorstage: Object.freeze({ kind: 'outdoor-stage-perform', spotId: 'perform-center', animationId: 'outdoor-stage-perform-watch-gather', poseKind: 'stand-use', stayMs: [14000, 26000] }),
+  fountain: Object.freeze({ kind: 'fountain-watch', spotId: 'watch-south', animationId: 'fountain-watch', poseKind: 'stand-use', stayMs: [10000, 18000] }),
+  gazebopavilion: Object.freeze({ kind: 'gazebo-pavilion-rest', spotId: 'rest-west', animationId: 'gazebo-pavilion-rest', poseKind: 'stand-use', stayMs: [12000, 22000] }),
+  busstop: Object.freeze({ kind: 'bus-stop-wait', spotId: 'seat-left', animationId: 'bus-stop-wait', poseKind: 'seat', stayMs: [10000, 18000] }),
+  foodtruckcounter: Object.freeze({ kind: 'food-truck-counter-order', spotId: 'customer', animationId: 'food-truck-counter-serve', poseKind: 'stand-use', stayMs: [9000, 15000] }),
 });
 const SERVER_SCRIPTED_VENDING_ITEM_OPTIONS = Object.freeze([
   Object.freeze({ id: 'chocolate-cookie', label: 'Chocolate Cookie', kind: 'snack', visualKind: 'vending-chocolate-cookie', packageColor: 0x8b5a2b, accentColor: 0x3f2414, needEffects: Object.freeze({ hunger: -22, thirst: 0 }) }),
@@ -3176,6 +3356,41 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
   };
 }
 
+// Mirrors 8590's resolveFurnitureSpotApiPoint (/tmp/8590-main3d.js:1574-1586): authored queue spots are
+// furniture-relative offsets (dx/dz, with x/z aliases), rotated with the furniture, clamped into the
+// building's local bounds, then transformed building-local -> world -> API units (same transform as the
+// desk path via apiPointFromBuildingLocal).
+export function resolveServerFurnitureSpotApiPoint(building, furniture, spot = {}) {
+  if (!building || !furniture || !spot) return null;
+  const offset = rotateRuntimeLocalOffset(
+    numberOr(spot.dx ?? spot.x ?? spot.offset?.x, 0),
+    numberOr(spot.dz ?? spot.z ?? spot.y ?? spot.offset?.z, 0),
+    numberOr(furniture.rotation, 0),
+  );
+  const rawLocalX = numberOr(furniture.x, 0) + offset.x;
+  const rawLocalZ = numberOr(furniture.z, 0) + offset.z;
+  const margin = 0.35;
+  const bw = Number(building.widthTiles || 25) || 25;
+  const bd = Number(building.heightTiles || 17) || 17;
+  const localX = Math.max(margin, Math.min(bw - margin, rawLocalX));
+  const localZ = Math.max(margin, Math.min(bd - margin, rawLocalZ));
+  const point = apiPointFromBuildingLocal(building, localX, localZ);
+  if (!point) return null;
+  return { localX, localZ, apiX: point.x, apiZ: point.y, floor: floorOr(spot.floor ?? furniture.floor, 1) };
+}
+
+// Clamp an API-space point into the building's world bbox (+margin) using the same
+// building-local <-> world transform as the desk/meeting target derivation.
+export function clampApiPointToBuildingBounds(building, apiX, apiY, marginTiles = 0.35) {
+  const local = buildingLocalPointFromApi(building, apiX, apiY);
+  if (!local) return null;
+  const bw = Number(building?.widthTiles || 25) || 25;
+  const bd = Number(building?.heightTiles || 17) || 17;
+  const localX = Math.max(marginTiles, Math.min(bw - marginTiles, local.x));
+  const localZ = Math.max(marginTiles, Math.min(bd - marginTiles, local.z));
+  return apiPointFromBuildingLocal(building, localX, localZ);
+}
+
 function serverScriptedObjectPrimaryTargetForQueue(dataDir, queueTarget = null) {
   const baseObjectKey = serverScriptedQueueBaseObjectKey(queueTarget);
   return listScriptedObjectRuntimeTargets(dataDir).find(target =>
@@ -3192,7 +3407,7 @@ function serverScriptedQueueRuntimeTargetForBase(dataDir, baseTarget = null) {
   ) || null;
 }
 
-function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null, reservation = null) {
+export function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null, reservation = null) {
   if (!queueTarget || !reservation) return null;
   const baseObjectKey = serverScriptedQueueBaseObjectKey(queueTarget);
   if (!baseObjectKey) return null;
@@ -3220,8 +3435,36 @@ function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null, reser
         serviceQueue: true,
         capacityKind: 'queue',
       });
-      const authoredX = numberOr(authoredTarget?.x, NaN);
-      const authoredY = numberOr(authoredTarget?.y, NaN);
+      let authoredX = numberOr(authoredTarget?.x, NaN);
+      let authoredY = numberOr(authoredTarget?.y, NaN);
+      // M1.2 coordinate-frame fix (8590 parity, /tmp/8590-main3d.js:1574-1586): authored queue
+      // locations are furniture-relative offsets (dx/dz) that must go through the same
+      // building-local -> world transform the desk path uses. Prefer that resolution when the spot is
+      // offset-style, or when the generic spot resolution produced a point outside the building's
+      // world bbox (interior-local/scaled coords leaking into world space).
+      const hasExplicitLocalPoint = Boolean(authoredLocation.actionTarget || authoredLocation.buildingLocal || authoredLocation.activationTarget);
+      const isOffsetStyleSpot = !hasExplicitLocalPoint && (
+        Number.isFinite(numberOr(authoredLocation.dx, NaN)) ||
+        Number.isFinite(numberOr(authoredLocation.dz, NaN)) ||
+        Number.isFinite(numberOr(authoredLocation.offset?.x, NaN)) ||
+        Number.isFinite(numberOr(authoredLocation.offset?.z, NaN)) ||
+        Number.isFinite(numberOr(authoredLocation.x, NaN)) ||
+        Number.isFinite(numberOr(authoredLocation.z ?? authoredLocation.y, NaN))
+      );
+      if (isOffsetStyleSpot || !Number.isFinite(authoredX) || !Number.isFinite(authoredY) || !buildingContainsApiPoint(building, authoredX, authoredY)) {
+        const resolvedSpot = resolveServerFurnitureSpotApiPoint(building, furniture, authoredLocation);
+        if (resolvedSpot) {
+          authoredX = resolvedSpot.apiX;
+          authoredY = resolvedSpot.apiZ;
+        }
+      }
+      if (Number.isFinite(authoredX) && Number.isFinite(authoredY) && !buildingContainsApiPoint(building, authoredX, authoredY)) {
+        const clamped = clampApiPointToBuildingBounds(building, authoredX, authoredY);
+        if (clamped) {
+          authoredX = clamped.x;
+          authoredY = clamped.y;
+        }
+      }
       if (authoredTarget && Number.isFinite(authoredX) && Number.isFinite(authoredY)) {
         const authoredFaceAngle = Number.isFinite(Number(authoredTarget.faceAngle))
           ? normalizeRuntimeAngleRadians(authoredTarget.faceAngle, 0)
@@ -3261,8 +3504,16 @@ function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null, reser
       const dy = anchorY - primaryY;
       const len = Math.hypot(dx, dy) || 1;
       const spacing = (Number(queueDef?.queueSpacingTiles ?? queueDef?.spacingTiles ?? SERVER_SCRIPTED_OBJECT_QUEUE_SPACING_TILES) || SERVER_SCRIPTED_OBJECT_QUEUE_SPACING_TILES) * LIVE_ACTION_API_TILE;
-      const x = primaryX + (dx / len) * spacing * (queueIndex + 1);
-      const y = primaryY + (dy / len) * spacing * (queueIndex + 1);
+      let x = primaryX + (dx / len) * spacing * (queueIndex + 1);
+      let y = primaryY + (dy / len) * spacing * (queueIndex + 1);
+      // Keep derived queue-line slots inside the building's world bbox (same frame as the desk path).
+      if (!buildingContainsApiPoint(building, x, y)) {
+        const clamped = clampApiPointToBuildingBounds(building, x, y);
+        if (clamped) {
+          x = clamped.x;
+          y = clamped.y;
+        }
+      }
       return {
         ...queueTarget,
         x,
@@ -3654,6 +3905,45 @@ function makeServerScriptedObjectIdleVisualState() {
   };
 }
 
+function randomInRangeMs(range, rand = Math.random) {
+  const [min, max] = Array.isArray(range) && range.length >= 2 ? range : [0, 0];
+  return Math.round(Number(min) + rand() * Math.max(0, Number(max) - Number(min)));
+}
+
+function makeServerSocialVisualState(role, faceAngle) {
+  return {
+    schemaVersion: 'agent-runtime-visual/v1',
+    status: 'idle',
+    state: 'social',
+    resolvedAnimationId: 'gather-talk',
+    movement: { isMoving: false, isRunning: false },
+    activityActive: true,
+    activityKind: 'social-conversation',
+    deskFacingAngle: faceAngle,
+    activity: {
+      kind: 'gather-talk',
+      phase: 'active',
+      role,
+      animationId: 'gather-talk',
+      faceAngle,
+    },
+    carrying: false,
+  };
+}
+
+function makeLiveStatusDesklessVisualState(isMoving) {
+  return {
+    schemaVersion: 'agent-runtime-visual/v1',
+    status: 'working',
+    state: isMoving ? 'moving' : 'idle',
+    resolvedAnimationId: isMoving ? 'walk' : 'idle',
+    movement: { isMoving: Boolean(isMoving), isRunning: false },
+    activityActive: false,
+    activityKind: 'live-status-deskless-wait',
+    carrying: false,
+  };
+}
+
 function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, source = 'idle') {
   const objectKey = safeText(target?.objectKey, '') || runtimeFurnitureObjectKey(target?.buildingId, target?.furnitureIndex, target?.objectType || 'object');
   const baseObjectKey = safeText(target?.baseObjectKey, '') || objectKey;
@@ -3817,6 +4107,7 @@ function refreshScriptedObjectRuntimeTarget(dataDir, target = null) {
   return {
     ...target,
     ...refreshed,
+    routeStartedAt: target.routeStartedAt || refreshed.routeStartedAt || '',
     runtimeStartedAt: target.runtimeStartedAt || refreshed.runtimeStartedAt || '',
     runtimeActiveAt: target.runtimeActiveAt || refreshed.runtimeActiveAt || '',
     runtimeSource: target.runtimeSource || refreshed.runtimeSource || 'idle',
@@ -4909,6 +5200,12 @@ export class AgentRuntimeRoom extends Room {
     this.lastScriptedObjectRuntimePollMs = 0;
     this.scriptedObjectRuntimePlan = null;
     this.scriptedObjectRuntimeCooldowns = new Map();
+    this.liveStatusRouteWatchdog = new Map();
+    this.liveStatusRouteCooldowns = new Map();
+    this.liveStatusDesklessWander = new Map();
+    this.socialConversations = new Map();
+    this.socialCooldowns = new Map();
+    this.socialEvalCursor = 0;
     this.scriptedObjectRuntimeMemory = new Map();
     this.scriptedObjectRuntimeNextPulseAtMs = new Map();
     this.scriptedObjectRuntimeIdleCursor = 0;
@@ -5678,6 +5975,7 @@ export class AgentRuntimeRoom extends Room {
     let target = {
       ...rawTarget,
       runtimeStartedAt: rawTarget.runtimeStartedAt || now,
+      routeStartedAt: rawTarget.routeStartedAt || now,
       runtimeActiveAt: options.active === true ? (rawTarget.runtimeActiveAt || now) : (rawTarget.runtimeActiveAt || ''),
       runtimeSource: options.source || rawTarget.runtimeSource || 'idle',
     };
@@ -5847,6 +6145,46 @@ export class AgentRuntimeRoom extends Room {
       const snapshotTarget = makeLiveActionSnapshotTarget(action, targetPoint);
       const routeId = safeText(action?.route?.id || action?.route?.routeId, `route-${actionId}`) || `route-${actionId}`;
 
+      if (!arrived && (status === 'routing' || status === 'route_pending')) {
+        const routeStartedAtMs = Date.parse(action?.timing?.startedAt || action?.timing?.routePendingAt || '');
+        if (Number.isFinite(routeStartedAtMs) && nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
+          const transitioned = this.transitionServerLiveAction(action, 'failed', {
+            now,
+            actor,
+            source,
+            reason: 'route-stale',
+            failureReason: 'route-stale',
+          });
+          if (transitioned.changed) {
+            action = transitioned.action;
+            changedActions = true;
+          }
+          clearDynamicInteriorRoutingForAgent(agentId);
+          clearDynamicExteriorRoutingForAgent(agentId);
+          this.upsertSnapshot({
+            agentId,
+            mode: 'scripted',
+            owner: 'agent-scripted-mode',
+            x: current.x,
+            y: current.y,
+            floor: current.floor,
+            buildingId: current.buildingId || '',
+            roomId: current.roomId || '',
+            heading: current.heading,
+            state: 'idle',
+            routeId: '',
+            worldActionId: '',
+            target: null,
+            leaseOwner: '',
+            leaseExpiresAt: '',
+            visualState: makeLiveActionVisualState(false),
+          }, 'server-live-action-route-stale', { actionId, routeId, reason: 'route-stale' });
+          changedSnapshots++;
+          nextHistory.unshift(action);
+          continue;
+        }
+      }
+
       if (status === 'routing' || status === 'route_pending') {
         this.upsertSnapshot({
           agentId,
@@ -5978,6 +6316,257 @@ export class AgentRuntimeRoom extends Room {
     return { changedActions, changedSnapshots };
   }
 
+  // M3.1 proximity conversations (8590 parity): idle agents near each other
+  // sometimes stop, face each other, and talk with speaker/listener role
+  // swaps. Server-owned so all clients render the same conversation.
+  socialAgentEligible(agentId, idleAgentIds, nowMs) {
+    if (!idleAgentIds.has(agentId)) return null;
+    if (Number(this.socialCooldowns.get(agentId) || 0) > nowMs) return null;
+    for (const convo of this.socialConversations.values()) {
+      if (convo.participants.includes(agentId)) return null;
+    }
+    const existing = this.state.agents.get(agentId);
+    if (!existing) return null;
+    const current = snapshotToPlain(existing);
+    if (hasActiveLease(existing, nowMs) && current.leaseOwner && current.leaseOwner !== SERVER_SOCIAL_RUNTIME_LEASE_OWNER) return null;
+    if (current.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || current.owner === LIVE_STATUS_RUNTIME_OWNER || current.owner === LIVE_ACTION_RUNTIME_OWNER) return null;
+    if (!['idle', 'scripted', ''].includes(String(current.state || '').toLowerCase())) return null;
+    return current;
+  }
+
+  applySocialConversationPose(convo, nowMs, now) {
+    const speakers = new Set([convo.participants[convo.speakerIndex % convo.participants.length]]);
+    for (const agentId of convo.participants) {
+      const existing = this.state.agents.get(agentId);
+      if (!existing) continue;
+      const current = snapshotToPlain(existing);
+      const partnerId = convo.participants.find(id => id !== agentId) || agentId;
+      const partner = this.state.agents.get(partnerId);
+      const partnerPlain = partner ? snapshotToPlain(partner) : current;
+      const faceAngle = Math.atan2(
+        numberOr(partnerPlain.y, 0) - numberOr(current.y, 0),
+        numberOr(partnerPlain.x, 0) - numberOr(current.x, 0)
+      );
+      const role = speakers.has(agentId) ? 'talking' : 'listening';
+      this.upsertSnapshot({
+        agentId,
+        mode: 'live',
+        owner: SERVER_SOCIAL_RUNTIME_OWNER,
+        x: current.x,
+        y: current.y,
+        floor: current.floor,
+        buildingId: current.buildingId || '',
+        roomId: current.roomId || '',
+        heading: faceAngle,
+        state: 'social',
+        routeId: `social:${convo.id}`,
+        worldActionId: '',
+        target: null,
+        leaseOwner: SERVER_SOCIAL_RUNTIME_LEASE_OWNER,
+        leaseExpiresAt: new Date(nowMs + SERVER_SOCIAL_LEASE_TTL_MS).toISOString(),
+        visualState: makeServerSocialVisualState(role, faceAngle),
+      }, 'server-social-conversation', { conversationId: convo.id, role });
+    }
+  }
+
+  endSocialConversation(convo, nowMs, now, reason = 'conversation-complete') {
+    this.socialConversations.delete(convo.id);
+    for (const agentId of convo.participants) {
+      this.socialCooldowns.set(agentId, nowMs + randomInRangeMs(SERVER_SOCIAL_POST_COOLDOWN_MS, this.socialRandom));
+      const existing = this.state.agents.get(agentId);
+      if (!existing) continue;
+      const current = snapshotToPlain(existing);
+      if (current.owner !== SERVER_SOCIAL_RUNTIME_OWNER && current.leaseOwner !== SERVER_SOCIAL_RUNTIME_LEASE_OWNER) continue;
+      this.upsertSnapshot({
+        agentId,
+        mode: 'scripted',
+        owner: 'agent-scripted-mode',
+        x: current.x,
+        y: current.y,
+        floor: current.floor,
+        buildingId: current.buildingId || '',
+        roomId: current.roomId || '',
+        heading: current.heading,
+        state: 'idle',
+        routeId: '',
+        worldActionId: '',
+        target: null,
+        leaseOwner: '',
+        leaseExpiresAt: '',
+        visualState: makeServerScriptedObjectIdleVisualState(),
+      }, 'server-social-conversation-ended', { conversationId: convo.id, reason });
+    }
+  }
+
+  tickSocialConversations(idleAgentIds, tickMs, nowMs, now) {
+    let changed = 0;
+    if (!this.socialConversations) this.socialConversations = new Map();
+    if (!this.socialCooldowns) this.socialCooldowns = new Map();
+    if (!Number.isFinite(Number(this.socialEvalCursor))) this.socialEvalCursor = 0;
+    const rand = this.socialRandom || Math.random;
+
+    // Advance/end active conversations.
+    for (const convo of Array.from(this.socialConversations.values())) {
+      if (nowMs >= convo.endsAtMs) {
+        this.endSocialConversation(convo, nowMs, now);
+        changed += convo.participants.length;
+        continue;
+      }
+      // Participant stolen by another runtime (user drag, live action) ends it.
+      const lost = convo.participants.some(agentId => {
+        const existing = this.state.agents.get(agentId);
+        if (!existing) return true;
+        const current = snapshotToPlain(existing);
+        return current.owner !== SERVER_SOCIAL_RUNTIME_OWNER && current.leaseOwner !== SERVER_SOCIAL_RUNTIME_LEASE_OWNER;
+      });
+      if (lost) {
+        this.endSocialConversation(convo, nowMs, now, 'participant-lost');
+        changed += convo.participants.length;
+        continue;
+      }
+      if (nowMs >= convo.nextRoleSwitchAtMs) {
+        convo.speakerIndex = (convo.speakerIndex + 1) % convo.participants.length;
+        convo.nextRoleSwitchAtMs = nowMs + randomInRangeMs(SERVER_SOCIAL_ROLE_SWITCH_MS, rand);
+        this.applySocialConversationPose(convo, nowMs, now);
+        changed += convo.participants.length;
+      }
+    }
+
+    // Coarse spatial buckets (O(n)) over idle-eligible agents.
+    const bucketSize = SERVER_SOCIAL_CONVERSATION_RADIUS_API;
+    const buckets = new Map();
+    const idleList = Array.from(idleAgentIds);
+    for (const agentId of idleList) {
+      const existing = this.state.agents.get(agentId);
+      if (!existing) continue;
+      const plain = snapshotToPlain(existing);
+      const key = `${Math.floor(numberOr(plain.x, 0) / bucketSize)}:${Math.floor(numberOr(plain.y, 0) / bucketSize)}:${floorOr(plain.floor, 1)}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push({ agentId, x: numberOr(plain.x, 0), y: numberOr(plain.y, 0), floor: floorOr(plain.floor, 1), buildingId: safeText(plain.buildingId, '') });
+    }
+
+    // Bounded round-robin evaluation.
+    let evals = 0;
+    for (let i = 0; i < idleList.length && evals < SERVER_SOCIAL_MAX_EVALS_PER_TICK; i++) {
+      const index = positiveModulo(this.socialEvalCursor + i, idleList.length);
+      const agentId = idleList[index];
+      const me = this.socialAgentEligible(agentId, idleAgentIds, nowMs);
+      if (!me) continue;
+      evals++;
+      const bx = Math.floor(numberOr(me.x, 0) / bucketSize);
+      const by = Math.floor(numberOr(me.y, 0) / bucketSize);
+      const myFloor = floorOr(me.floor, 1);
+      let partnerId = null;
+      for (let dx = -1; dx <= 1 && !partnerId; dx++) {
+        for (let dy = -1; dy <= 1 && !partnerId; dy++) {
+          for (const other of buckets.get(`${bx + dx}:${by + dy}:${myFloor}`) || []) {
+            if (other.agentId === agentId) continue;
+            if (safeText(me.buildingId, '') !== other.buildingId) continue;
+            if (Math.hypot(other.x - numberOr(me.x, 0), other.y - numberOr(me.y, 0)) > SERVER_SOCIAL_CONVERSATION_RADIUS_API) continue;
+            if (!this.socialAgentEligible(other.agentId, idleAgentIds, nowMs)) continue;
+            partnerId = other.agentId;
+            break;
+          }
+        }
+      }
+      if (!partnerId) continue;
+      if (rand() > SERVER_SOCIAL_CONVERSATION_CHANCE) {
+        // Failed roll still cools this agent briefly so pairs don't re-roll every tick.
+        this.socialCooldowns.set(agentId, nowMs + 5000);
+        continue;
+      }
+      const convoId = `convo-${nowMs}-${agentId}`;
+      const convo = {
+        id: convoId,
+        participants: [agentId, partnerId],
+        speakerIndex: 0,
+        endsAtMs: nowMs + randomInRangeMs(SERVER_SOCIAL_CONVERSATION_DURATION_MS, rand),
+        nextRoleSwitchAtMs: nowMs + randomInRangeMs(SERVER_SOCIAL_ROLE_SWITCH_MS, rand),
+      };
+      this.socialConversations.set(convoId, convo);
+      this.socialCooldowns.set(agentId, nowMs + SERVER_SOCIAL_CONVERSATION_COOLDOWN_MS);
+      this.socialCooldowns.set(partnerId, nowMs + SERVER_SOCIAL_CONVERSATION_COOLDOWN_MS);
+      this.applySocialConversationPose(convo, nowMs, now);
+      changed += convo.participants.length;
+    }
+    this.socialEvalCursor = positiveModulo(this.socialEvalCursor + Math.max(1, evals), Math.max(1, idleList.length));
+
+    for (const [agentId, untilMs] of Array.from(this.socialCooldowns.entries())) {
+      if (Number(untilMs || 0) <= nowMs) this.socialCooldowns.delete(agentId);
+    }
+    return changed;
+  }
+
+  // M1.4 deskless working-agent fallback (8590 parity): work-presence agents
+  // with no free desk wander/wait near their current position instead of
+  // freezing; the plan rebuild (every LIVE_STATUS_RUNTIME_POLL_MS) re-checks
+  // desk availability so they claim a desk as soon as one frees.
+  tickLiveStatusDesklessWander(desklessWorkingIds, tickMs, nowMs, now) {
+    let changed = 0;
+    for (const agentId of Array.from(this.liveStatusDesklessWander.keys())) {
+      if (!desklessWorkingIds.has(agentId)) this.liveStatusDesklessWander.delete(agentId);
+    }
+    for (const agentId of desklessWorkingIds) {
+      const existing = this.state.agents.get(agentId);
+      if (!existing) continue;
+      const current = snapshotToPlain(existing);
+      const ownedByStatusRuntime = current.owner === LIVE_STATUS_RUNTIME_OWNER || current.leaseOwner === LIVE_STATUS_RUNTIME_LEASE_OWNER;
+      const hasOtherLease = Boolean(
+        hasActiveLease(existing, nowMs) &&
+        current.leaseOwner &&
+        current.leaseOwner !== LIVE_STATUS_RUNTIME_LEASE_OWNER
+      );
+      if (hasOtherLease) {
+        this.liveStatusDesklessWander.delete(agentId);
+        continue;
+      }
+      let wander = this.liveStatusDesklessWander.get(agentId);
+      if (!wander || nowMs >= Number(wander.nextMoveAtMs || 0)) {
+        const anchor = wander?.anchor || { x: numberOr(current.x, 0), y: numberOr(current.y, 0) };
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 8 + Math.random() * 24;
+        wander = {
+          anchor,
+          target: { x: anchor.x + Math.cos(angle) * radius, y: anchor.y + Math.sin(angle) * radius },
+          nextMoveAtMs: nowMs + 5000 + Math.random() * 5000,
+        };
+        this.liveStatusDesklessWander.set(agentId, wander);
+      }
+      const dx = wander.target.x - numberOr(current.x, 0);
+      const dy = wander.target.y - numberOr(current.y, 0);
+      const dist = Math.hypot(dx, dy);
+      const stepLen = LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC * (Math.max(1, tickMs) / 1000);
+      const arrived = dist <= Math.max(2, stepLen);
+      const nextX = arrived ? wander.target.x : numberOr(current.x, 0) + (dx / dist) * stepLen;
+      const nextY = arrived ? wander.target.y : numberOr(current.y, 0) + (dy / dist) * stepLen;
+      const heading = dist > 0.001 ? Math.atan2(dy, dx) : numberOr(current.heading, 0);
+      const isMoving = !arrived;
+      const stateText = isMoving ? 'moving' : 'working';
+      const shouldWrite = !ownedByStatusRuntime || isMoving || current.state !== stateText;
+      if (!shouldWrite) continue;
+      this.upsertSnapshot({
+        agentId,
+        mode: 'live',
+        owner: LIVE_STATUS_RUNTIME_OWNER,
+        x: nextX,
+        y: nextY,
+        floor: current.floor,
+        buildingId: current.buildingId || '',
+        roomId: current.roomId || '',
+        heading,
+        state: stateText,
+        routeId: `live-status-deskless:${agentId}`,
+        worldActionId: '',
+        target: null,
+        leaseOwner: LIVE_STATUS_RUNTIME_LEASE_OWNER,
+        leaseExpiresAt: new Date(nowMs + LIVE_STATUS_RUNTIME_LEASE_TTL_MS).toISOString(),
+        visualState: makeLiveStatusDesklessVisualState(isMoving),
+      }, 'server-live-status-deskless-wait', { reason: 'no-free-desk' });
+      changed++;
+    }
+    return changed;
+  }
+
   tickLiveStatusRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
     if (nowMs - Number(this.lastLiveStatusRuntimeStepMs || 0) < LIVE_STATUS_RUNTIME_POLL_MS) {
       return { changedSnapshots: 0 };
@@ -5985,6 +6574,7 @@ export class AgentRuntimeRoom extends Room {
     this.lastLiveStatusRuntimeStepMs = nowMs;
     const plan = this.loadLiveStatusRuntimePlan(nowMs);
     const targetsByAgent = plan?.targetsByAgent && typeof plan.targetsByAgent === 'object' ? plan.targetsByAgent : {};
+    const desklessWorkingIds = new Set(Array.isArray(plan?.desklessWorkingAgentIds) ? plan.desklessWorkingAgentIds : []);
     let changedSnapshots = 0;
 
     for (const [agentId, target] of Object.entries(targetsByAgent)) {
@@ -5993,6 +6583,14 @@ export class AgentRuntimeRoom extends Room {
         changedSnapshots++;
       }
     }
+
+    for (const agentId of desklessWorkingIds) {
+      if (this.state.agents.has(agentId)) continue;
+      this.ensureServerRuntimeAgentSeed(agentId, null, 'live-status-deskless-seed');
+      changedSnapshots++;
+    }
+
+    changedSnapshots += this.tickLiveStatusDesklessWander(desklessWorkingIds, tickMs, nowMs, now);
 
     for (const [agentId, existing] of this.state.agents.entries()) {
       const current = snapshotToPlain(existing);
@@ -6003,6 +6601,8 @@ export class AgentRuntimeRoom extends Room {
         current.leaseOwner &&
         current.leaseOwner !== LIVE_STATUS_RUNTIME_LEASE_OWNER
       );
+
+      if (!target && desklessWorkingIds.has(agentId)) continue; // deskless fallback owns this agent
 
       if (!target) {
         if (ownedByStatusRuntime) {
@@ -6056,6 +6656,9 @@ export class AgentRuntimeRoom extends Room {
 
       if (activeOtherLease) continue;
 
+      const routeCooldownUntil = Number(this.liveStatusRouteCooldowns.get(agentId) || 0);
+      if (routeCooldownUntil > nowMs) continue;
+
       const statusKind = target.statusKind === 'meeting' ? 'meeting' : 'work';
       const movement = makeServerRuntimeStep(this.dataDir, agentId, current, target, tickMs, {
         speedUnitsPerSec: statusKind === 'meeting' ? LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC : LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
@@ -6072,6 +6675,42 @@ export class AgentRuntimeRoom extends Room {
       const leaseExpiresAtMs = Date.parse(current.leaseExpiresAt || '');
       const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= LIVE_STATUS_RUNTIME_LEASE_REFRESH_MS;
       const targetChanged = current.routeId !== routeId || current.target?.buildingId !== target.buildingId || current.target?.furnitureIndex !== target.furnitureIndex || current.target?.spotId !== target.spotId;
+
+      if (arrived) {
+        this.liveStatusRouteWatchdog.delete(agentId);
+      } else {
+        const watch = this.liveStatusRouteWatchdog.get(agentId);
+        const routeStartedAtMs = watch && watch.routeId === routeId ? Number(watch.startedAtMs) : NaN;
+        if (!Number.isFinite(routeStartedAtMs)) {
+          this.liveStatusRouteWatchdog.set(agentId, { routeId, startedAtMs: nowMs });
+        } else if (nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
+          this.liveStatusRouteWatchdog.delete(agentId);
+          this.liveStatusRouteCooldowns.set(agentId, nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS);
+          clearDynamicInteriorRoutingForAgent(agentId);
+          clearDynamicExteriorRoutingForAgent(agentId);
+          this.upsertSnapshot({
+            agentId,
+            mode: 'scripted',
+            owner: 'agent-scripted-mode',
+            x: current.x,
+            y: current.y,
+            floor: current.floor,
+            buildingId: current.buildingId || '',
+            roomId: current.roomId || '',
+            heading: current.heading,
+            state: 'idle',
+            routeId: '',
+            worldActionId: '',
+            target: null,
+            leaseOwner: '',
+            leaseExpiresAt: '',
+            visualState: makeLiveStatusVisualState(false, 'idle'),
+          }, 'server-live-status-route-stale', { routeId, reason: 'route-stale' });
+          changedSnapshots++;
+          continue;
+        }
+      }
+
       const state = arrived ? (statusKind === 'meeting' ? 'meeting' : 'working') : 'routing';
       const shouldWrite = !ownedByStatusRuntime || !arrived || needsLeaseRefresh || targetChanged || current.state !== state;
       if (!shouldWrite) continue;
@@ -6119,6 +6758,10 @@ export class AgentRuntimeRoom extends Room {
         }, arrived ? 'server-live-status-world-active' : 'server-live-status-world-routing', { routeId });
       }
       changedSnapshots++;
+    }
+
+    for (const [agentId, untilMs] of Array.from(this.liveStatusRouteCooldowns.entries())) {
+      if (Number(untilMs || 0) <= nowMs) this.liveStatusRouteCooldowns.delete(agentId);
     }
 
     return { changedSnapshots };
@@ -6194,6 +6837,7 @@ export class AgentRuntimeRoom extends Room {
     const targets = Array.isArray(plan?.targets) ? plan.targets : [];
     let changedSnapshots = 0;
     let changedObjects = 0;
+    changedSnapshots += this.tickSocialConversations(idleAgentIds, tickMs, nowMs, now);
     let activeScriptedRoutes = 0;
     const activeRouteLimit = Math.max(
       SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES,
@@ -6236,6 +6880,25 @@ export class AgentRuntimeRoom extends Room {
       }
 
       const alreadyActive = ['using', 'active', 'occupied', 'queued', 'waiting'].includes(String(current.state || '').toLowerCase());
+      if (!alreadyActive) {
+        target.routeStartedAt = safeIso(target.routeStartedAt, '') || safeIso(target.runtimeStartedAt, '') || now;
+        const routeStartedAtMs = Date.parse(target.routeStartedAt);
+        if (Number.isFinite(routeStartedAtMs) && nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
+          this.releaseServerScriptedObjectRoute(agentId, current, {
+            ...target,
+            x: current.x,
+            y: current.y,
+            floor: current.floor,
+            buildingId: current.buildingId || '',
+            roomId: current.roomId || '',
+          }, nowMs, now, 'route-stale');
+          this.markServerScriptedRuntimeFailure(agentId, target, 'route-stale', nowMs);
+          this.scriptedObjectRuntimeCooldowns.set(agentId, nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS);
+          changedSnapshots++;
+          changedObjects++;
+          continue;
+        }
+      }
       if (!alreadyActive && activeRouteSteps >= activeRouteStepLimit) {
         continue;
       }
