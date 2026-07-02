@@ -1105,7 +1105,12 @@ const AGENT_RUNTIME_SNAPSHOT_MIN_DISTANCE = 1.5;
 const AGENT_RUNTIME_MANUAL_PREVIEW_SNAPSHOT_INTERVAL_MS = 100;
 const AGENT_RUNTIME_MANUAL_PREVIEW_MIN_DISTANCE = 0.12;
 const AGENT_RUNTIME_POSITION_WRITER_STALE_MS = 7000;
-const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 120;
+const AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS = 220;
+const AGENT_RUNTIME_OBSERVER_BUFFER_MIN_DELAY_MS = 140;
+const AGENT_RUNTIME_OBSERVER_BUFFER_MAX_DELAY_MS = 320;
+const AGENT_RUNTIME_OBSERVER_BUFFER_MAX_MS = 2000;
+const AGENT_RUNTIME_OBSERVER_BUFFER_MAX_SNAPSHOTS = 32;
+const AGENT_RUNTIME_OBSERVER_EXTRAPOLATION_MS = 120;
 const AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS = 70;
 const AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS = 500;
 const AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING = 0.2;
@@ -2629,13 +2634,14 @@ function placeRuntimeHydratedAgentMesh(agent, { force = false } = {}) {
   const scale = T / API_TILE;
   const worldX = (agent.x || 0) * scale;
   const worldZ = (agent.y || 0) * scale;
-  const floorBuilding = getAgentRuntimeFloorBuilding(agent, agent._runtimeSnapshot);
+  const placementSnapshot = agent._runtimeRenderSnapshot || agent._runtimeSnapshot || null;
+  const floorBuilding = getAgentRuntimeFloorBuilding(agent, placementSnapshot);
   const floorY = floorBuilding && floorBuilding.type !== 'park'
     ? getRenderedFloorY(floorBuilding, agent._floor || 1)
     : 0;
   const groundY = getGroundY(worldX, worldZ) + floorY;
-  const heading = Number.isFinite(Number(agent._runtimeSnapshot?.heading))
-    ? Number(agent._runtimeSnapshot.heading)
+  const heading = Number.isFinite(Number(placementSnapshot?.heading))
+    ? Number(placementSnapshot.heading)
     : null;
   const last = agent._runtimeLastMeshPlacement || null;
   if (!force && last &&
@@ -2656,104 +2662,164 @@ function placeRuntimeHydratedAgentMesh(agent, { force = false } = {}) {
   }
 }
 
-function measureAgentRuntimeObserverIntervalMs(agent, nowMs) {
-  // Smoothed estimate of the real inter-snapshot interval (~100ms tick) so the
-  // observer interpolates over the actual cadence instead of a hardcoded value.
-  const lastArrivalMs = Number(agent._runtimeObserverLastSnapshotAtMs);
-  let intervalMs = Number(agent._runtimeObserverIntervalMs);
-  if (!Number.isFinite(intervalMs) || intervalMs <= 0) intervalMs = AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS;
-  if (Number.isFinite(lastArrivalMs) && lastArrivalMs > 0) {
-    const gapMs = nowMs - lastArrivalMs;
-    if (gapMs >= AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS && gapMs <= AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS) {
-      intervalMs = intervalMs * (1 - AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING) + gapMs * AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING;
-    }
-  }
-  intervalMs = Math.min(AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS, Math.max(AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS, intervalMs));
-  agent._runtimeObserverLastSnapshotAtMs = nowMs;
-  agent._runtimeObserverIntervalMs = intervalMs;
-  return intervalMs;
+function makeAgentRuntimeObserverBufferSample(snapshot, source = 'runtime', receivedAtMs = performance.now()) {
+  if (!snapshot) return null;
+  const x = Number(snapshot.x);
+  const y = Number(snapshot.y);
+  const floor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(floor)) return null;
+  return Object.freeze({
+    snapshot,
+    source,
+    receivedAtMs,
+    serverTimeMs: Date.parse(snapshot.updatedAt || ''),
+    version: Number(snapshot.version || 0),
+    updatedAt: String(snapshot.updatedAt || ''),
+    x,
+    y,
+    floor,
+    heading: Number.isFinite(Number(snapshot.heading)) ? Number(snapshot.heading) : null,
+  });
 }
 
-function beginAgentRuntimeObserverInterpolation(agent, snapshot, previous = {}, { source = 'runtime' } = {}) {
-  if (!agent || !snapshot) return false;
-  const targetX = Number(snapshot.x);
-  const targetY = Number(snapshot.y);
-  const targetFloor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
-  if (!Number.isFinite(targetX) || !Number.isFinite(targetY) || !Number.isFinite(targetFloor)) return false;
-  const nowMs = performance.now();
-  const intervalMs = measureAgentRuntimeObserverIntervalMs(agent, nowMs);
-  const startX = Number.isFinite(previous.x) ? previous.x : Number(agent.x || 0);
-  const startY = Number.isFinite(previous.y) ? previous.y : Number(agent.y || 0);
-  const startFloor = Math.max(1, Math.floor(Number.isFinite(previous.floor) ? previous.floor : (agent._floor || 1)));
-  const distance = Math.hypot(targetX - startX, targetY - startY);
-  const floorChanged = targetFloor !== startFloor;
-  const shouldSnap = floorChanged || distance > AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE || !agent._group3d;
-  const existingInterpolation = agent._runtimeObserverInterpolation || null;
-  // Identical-position snapshot targeting the same point as the in-flight
-  // interpolation: refresh metadata but do NOT reset motion mid-segment.
-  if (existingInterpolation && !shouldSnap &&
-    Math.abs(existingInterpolation.toX - targetX) <= AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE &&
-    Math.abs(existingInterpolation.toY - targetY) <= AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE &&
-    existingInterpolation.toFloor === targetFloor) {
-    existingInterpolation.version = snapshot.version || 0;
-    existingInterpolation.updatedAt = snapshot.updatedAt || '';
+function resetAgentRuntimeObserverBuffer(agent, sample = null) {
+  if (!agent) return;
+  agent._runtimeObserverSnapshotBuffer = sample ? [sample] : [];
+  agent._runtimeObserverInterpolation = null;
+  agent._runtimeObserverBufferLastRenderAtMs = 0;
+  agent._runtimeObserverBufferMode = sample ? 'reset' : 'empty';
+  agent._runtimeObserverRenderSnapshot = sample?.snapshot || null;
+  agent._runtimeRenderSnapshot = sample?.snapshot || null;
+  agent._runtimeRenderVisualVersion = sample?.version || 0;
+  if (sample) {
+    agent.x = sample.x;
+    agent.y = sample.y;
+    agent._floor = sample.floor;
+    agent._targetFloor = sample.floor;
+  }
+}
+
+function pruneAgentRuntimeObserverBuffer(agent, nowMs = performance.now()) {
+  const buffer = Array.isArray(agent?._runtimeObserverSnapshotBuffer)
+    ? agent._runtimeObserverSnapshotBuffer
+    : [];
+  if (!buffer.length) return buffer;
+  const minReceivedAt = nowMs - AGENT_RUNTIME_OBSERVER_BUFFER_MAX_MS;
+  while (buffer.length > AGENT_RUNTIME_OBSERVER_BUFFER_MAX_SNAPSHOTS) buffer.shift();
+  while (buffer.length > 2 && Number(buffer[1]?.receivedAtMs || 0) < minReceivedAt) buffer.shift();
+  return buffer;
+}
+
+function queueAgentRuntimeObserverSnapshot(agent, snapshot, { source = 'runtime', updateVisible = false } = {}) {
+  if (!agent || !snapshot) return { queued: false, reason: 'missing' };
+  const sample = makeAgentRuntimeObserverBufferSample(snapshot, source);
+  if (!sample) return { queued: false, reason: 'invalid' };
+  let buffer = Array.isArray(agent._runtimeObserverSnapshotBuffer)
+    ? agent._runtimeObserverSnapshotBuffer
+    : [];
+  const last = buffer[buffer.length - 1] || null;
+  if (last && last.version === sample.version && last.updatedAt === sample.updatedAt) {
     agent._runtimeObserverTarget = {
-      x: targetX,
-      y: targetY,
-      floor: targetFloor,
+      x: sample.x,
+      y: sample.y,
+      floor: sample.floor,
       source,
-      version: snapshot.version || 0,
-      updatedAt: snapshot.updatedAt || '',
+      version: sample.version,
+      updatedAt: sample.updatedAt,
+      buffered: true,
     };
-    return true;
+    return { queued: false, duplicate: true, sample };
+  }
+  const shouldReset = !last ||
+    last.floor !== sample.floor ||
+    Math.hypot(sample.x - last.x, sample.y - last.y) > AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE ||
+    agent._runtimeObserverOnly !== true;
+  if (shouldReset) {
+    resetAgentRuntimeObserverBuffer(agent, sample);
+    if (updateVisible) placeRuntimeHydratedAgentMesh(agent, { force: true });
+    return { queued: true, reset: true, sample };
   }
 
+  const previousReceivedAtMs = Number(last.receivedAtMs || 0);
+  if (Number.isFinite(previousReceivedAtMs) && previousReceivedAtMs > 0) {
+    const gapMs = sample.receivedAtMs - previousReceivedAtMs;
+    if (gapMs >= AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS && gapMs <= AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS) {
+      const current = Number(agent._runtimeObserverIntervalMs || gapMs);
+      agent._runtimeObserverIntervalMs = current * (1 - AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING) + gapMs * AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING;
+    }
+  }
+  agent._runtimeObserverLastSnapshotAtMs = sample.receivedAtMs;
+  buffer.push(sample);
+  agent._runtimeObserverSnapshotBuffer = pruneAgentRuntimeObserverBuffer(agent, sample.receivedAtMs);
   agent._runtimeObserverTarget = {
-    x: targetX,
-    y: targetY,
-    floor: targetFloor,
+    x: sample.x,
+    y: sample.y,
+    floor: sample.floor,
     source,
-    version: snapshot.version || 0,
-    updatedAt: snapshot.updatedAt || '',
+    version: sample.version,
+    updatedAt: sample.updatedAt,
+    buffered: true,
   };
+  return { queued: true, sample };
+}
 
-  if (shouldSnap || distance <= AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE) {
-    agent.x = targetX;
-    agent.y = targetY;
-    agent._floor = targetFloor;
-    agent._targetFloor = targetFloor;
-    agent._runtimeObserverInterpolation = null;
-    placeRuntimeHydratedAgentMesh(agent, { force: true });
-    return false;
+function getAgentRuntimeObserverBufferDelayMs(agent) {
+  const interval = Number(agent?._runtimeObserverIntervalMs || 0);
+  const target = Number.isFinite(interval) && interval > 0
+    ? Math.max(AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS, interval * 2)
+    : AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS;
+  return Math.min(AGENT_RUNTIME_OBSERVER_BUFFER_MAX_DELAY_MS, Math.max(AGENT_RUNTIME_OBSERVER_BUFFER_MIN_DELAY_MS, target));
+}
+
+function interpolateRuntimeAngleRad(fromHeading, toHeading, t) {
+  const from = Number(fromHeading);
+  const to = Number(toHeading);
+  if (!Number.isFinite(from) && !Number.isFinite(to)) return null;
+  if (!Number.isFinite(from)) return normalizeAngleRad(to);
+  if (!Number.isFinite(to)) return normalizeAngleRad(from);
+  return normalizeAngleRad(from + normalizeAngleRad(to - from) * t);
+}
+
+function getAgentRuntimeObserverBufferedFrame(agent, nowMs = performance.now()) {
+  const buffer = pruneAgentRuntimeObserverBuffer(agent, nowMs);
+  if (!buffer.length) return null;
+  const delayMs = getAgentRuntimeObserverBufferDelayMs(agent);
+  const renderAtMs = nowMs - delayMs;
+  if (buffer.length === 1 || renderAtMs <= Number(buffer[0].receivedAtMs || 0)) {
+    const only = buffer[0];
+    return { from: only, to: only, t: 1, delayMs, renderAtMs, mode: 'hold-first' };
   }
+  for (let i = 1; i < buffer.length; i += 1) {
+    const from = buffer[i - 1];
+    const to = buffer[i];
+    const fromTime = Number(from.receivedAtMs || 0);
+    const toTime = Number(to.receivedAtMs || 0);
+    if (renderAtMs <= toTime) {
+      const span = Math.max(1, toTime - fromTime);
+      return { from, to, t: Math.min(1, Math.max(0, (renderAtMs - fromTime) / span)), delayMs, renderAtMs, mode: 'interpolate' };
+    }
+  }
+  const to = buffer[buffer.length - 1];
+  const from = buffer[buffer.length - 2] || to;
+  const lateMs = renderAtMs - Number(to.receivedAtMs || 0);
+  const span = Math.max(1, Number(to.receivedAtMs || 0) - Number(from.receivedAtMs || 0));
+  if (lateMs > 0 && lateMs <= AGENT_RUNTIME_OBSERVER_EXTRAPOLATION_MS && from !== to) {
+    return { from, to, t: 1 + lateMs / span, delayMs, renderAtMs, mode: 'extrapolate' };
+  }
+  return { from: to, to, t: 1, delayMs, renderAtMs, mode: 'hold-latest' };
+}
 
-  agent.x = startX;
-  agent.y = startY;
-  agent._floor = startFloor;
-  agent._targetFloor = targetFloor;
-  agent._runtimeObserverInterpolation = {
-    fromX: startX,
-    fromY: startY,
-    fromFloor: startFloor,
-    toX: targetX,
-    toY: targetY,
-    toFloor: targetFloor,
-    startedAtMs: nowMs,
-    durationMs: intervalMs,
-    // Late next snapshot: keep moving at the same velocity for about one
-    // server tick so packet jitter does not create rhythmic pauses.
-    extrapolationMs: Math.min(intervalMs, AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS),
-    source,
-    version: snapshot.version || 0,
-    updatedAt: snapshot.updatedAt || '',
-  };
-  return true;
+function applyAgentRuntimeObserverRenderVisual(agent, sample) {
+  if (!agent || !sample?.snapshot) return;
+  if (agent._runtimeRenderVisualVersion === sample.version) return;
+  agent._runtimeRenderVisualVersion = sample.version;
+  applyAgentRuntimeVisualState(agent, sample.snapshot.visualState, sample.snapshot);
 }
 
 function updateAgentRuntimeObserverMotion(agent, dt = 0) {
   if (!agent?._runtimeObserverOnly || !agent._runtimeSnapshot || isAgentRuntimeRouteLeaseOwned(agent)) return false;
-  const interpolation = agent._runtimeObserverInterpolation || null;
-  if (!interpolation) {
+  const frame = getAgentRuntimeObserverBufferedFrame(agent);
+  if (!frame) {
     placeRuntimeHydratedAgentMesh(agent);
     agent._isRunning = false;
     return false;
@@ -2761,32 +2827,36 @@ function updateAgentRuntimeObserverMotion(agent, dt = 0) {
 
   const previousX = Number(agent.x || 0);
   const previousY = Number(agent.y || 0);
-  const elapsed = performance.now() - Number(interpolation.startedAtMs || 0);
-  const duration = Math.max(1, Number(interpolation.durationMs || AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS));
-  // Linear, velocity-consistent easing (no per-segment ease-in-out pulsing),
-  // with brief constant-velocity extrapolation past t=1 when the next
-  // snapshot is late (capped at ~1 tick).
-  const extrapolationMs = Math.max(0, Number(interpolation.extrapolationMs ?? duration));
-  const maxT = 1 + extrapolationMs / duration;
-  const t = Math.min(maxT, Math.max(0, elapsed / duration));
-  agent.x = interpolation.fromX + (interpolation.toX - interpolation.fromX) * t;
-  agent.y = interpolation.fromY + (interpolation.toY - interpolation.fromY) * t;
-  agent._floor = t >= 1 ? interpolation.toFloor : interpolation.fromFloor;
-  agent._targetFloor = interpolation.toFloor;
-  if (t >= maxT) {
-    // Extrapolation window expired with no fresh snapshot: the agent most
-    // likely stopped, so settle exactly on the last authoritative target.
-    agent.x = interpolation.toX;
-    agent.y = interpolation.toY;
-    agent._floor = interpolation.toFloor;
-    agent._runtimeObserverInterpolation = null;
-  }
+  const t = Number(frame.t || 0);
+  const from = frame.from;
+  const to = frame.to;
+  const renderedX = from.x + (to.x - from.x) * t;
+  const renderedY = from.y + (to.y - from.y) * t;
+  const renderedFloor = t >= 1 ? to.floor : from.floor;
+  const renderedHeading = interpolateRuntimeAngleRad(from.heading, to.heading, t);
+  const visualSample = t >= 0.5 ? to : from;
 
+  agent.x = renderedX;
+  agent.y = renderedY;
+  agent._floor = renderedFloor;
+  agent._targetFloor = to.floor;
+  agent._runtimeObserverBufferLastRenderAtMs = frame.renderAtMs;
+  agent._runtimeObserverBufferDelayMs = frame.delayMs;
+  agent._runtimeObserverBufferMode = frame.mode;
+  agent._runtimeRenderSnapshot = {
+    ...(visualSample.snapshot || agent._runtimeSnapshot || {}),
+    x: renderedX,
+    y: renderedY,
+    floor: renderedFloor,
+    heading: renderedHeading ?? visualSample.snapshot?.heading ?? agent._runtimeSnapshot?.heading ?? 0,
+  };
+  applyAgentRuntimeObserverRenderVisual(agent, visualSample);
   placeRuntimeHydratedAgentMesh(agent);
+
   const movedDistance = Math.hypot(agent.x - previousX, agent.y - previousY);
   const visualMovement = agent._runtimeVisualMovement || null;
   const moving = visualMovement?.isMoving === true || movedDistance > AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE * Math.max(1, dt * 60);
-  if (moving && agent._group3d) {
+  if (moving && agent._group3d && renderedHeading == null) {
     agent._group3d.rotation.y = Math.atan2(agent.x - previousX, agent.y - previousY);
     agent._runtimeLastMeshPlacement = {
       ...(agent._runtimeLastMeshPlacement || {}),
@@ -2847,11 +2917,6 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
     return false;
   }
 
-  const previousPosition = {
-    x: Number(agent.x || 0),
-    y: Number(agent.y || 0),
-    floor: Math.max(1, Math.floor(Number(agent._floor || agent._targetFloor || 1) || 1)),
-  };
   agent._runtimeSnapshot = snapshot;
   agent._runtimeHydrated = true;
   agent._runtimeHydrationSource = source;
@@ -2940,23 +3005,25 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
     if (!wasObserverOnly || agent._wanderTarget || agent._waypointPath || agent._agentIntent) {
       clearAgentTransientMovement(agent);
     }
-    applyAgentRuntimeVisualState(agent, snapshot.visualState, snapshot);
-    if (updateVisible) {
-      beginAgentRuntimeObserverInterpolation(agent, snapshot, previousPosition, { source });
-    } else {
+    const queued = queueAgentRuntimeObserverSnapshot(agent, snapshot, { source, updateVisible });
+    if (!updateVisible || queued.reset) {
       agent.x = x;
       agent.y = y;
       agent._floor = floor;
       agent._targetFloor = floor;
-      agent._runtimeObserverInterpolation = null;
+      agent._runtimeRenderSnapshot = snapshot;
+      applyAgentRuntimeVisualState(agent, snapshot.visualState, snapshot);
+    } else if (!agent._runtimeRenderSnapshot) {
+      agent._runtimeRenderSnapshot = snapshot;
     }
   } else {
     agent.x = x;
     agent.y = y;
     agent._floor = floor;
     agent._targetFloor = floor;
-    agent._runtimeObserverInterpolation = null;
+    resetAgentRuntimeObserverBuffer(agent);
     agent._runtimeVisualMovement = null;
+    agent._runtimeRenderSnapshot = snapshot;
   }
   if (updateVisible) placeRuntimeHydratedAgentMesh(agent);
   return true;
@@ -3539,6 +3606,13 @@ if (typeof window !== 'undefined') {
     runtimeOwner: agent._runtimeOwner || '',
     runtimeState: agent._runtimeState || '',
     runtimeUpdatedAt: agent._runtimeUpdatedAt || '',
+    runtimeObserverBuffer: {
+      length: Array.isArray(agent._runtimeObserverSnapshotBuffer) ? agent._runtimeObserverSnapshotBuffer.length : 0,
+      delayMs: Math.round(Number(agent._runtimeObserverBufferDelayMs || getAgentRuntimeObserverBufferDelayMs(agent) || 0)),
+      mode: agent._runtimeObserverBufferMode || '',
+      renderVersion: agent._runtimeRenderSnapshot?.version || 0,
+      latestVersion: agent._runtimeVersion || 0,
+    },
     routeLease: agent._runtimeRouteLease ? { ...agent._runtimeRouteLease } : null,
   }));
 }
