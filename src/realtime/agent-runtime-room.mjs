@@ -1159,7 +1159,7 @@ function apiPointForBuilding(building) {
 
 function readBuildingDocument(dataDir, buildingId) {
   if (!buildingId) return null;
-  const building = readJsonFile(buildingFilePath(dataDir, buildingId), null);
+  const building = readCachedJsonDocument(buildingFilePath(dataDir, buildingId), () => null);
   return building && typeof building === 'object' && !Array.isArray(building) ? building : null;
 }
 
