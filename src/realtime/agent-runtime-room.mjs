@@ -72,6 +72,18 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 12;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 6;
 export const SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS = Object.freeze([8000, 20000]);
+// M3.1 proximity conversations (8590 SCRIPTED_PROXIMITY_BEHAVIOR_RULES parity)
+export const SERVER_SOCIAL_RUNTIME_OWNER = 'server-social-runtime';
+export const SERVER_SOCIAL_RUNTIME_LEASE_OWNER = 'server-social';
+export const SERVER_SOCIAL_CONVERSATION_RADIUS_API = 5 * 40; // 5 tiles
+export const SERVER_SOCIAL_CONVERSATION_CHANCE = 0.22;
+export const SERVER_SOCIAL_CONVERSATION_COOLDOWN_MS = 45000;
+export const SERVER_SOCIAL_CONVERSATION_DURATION_MS = Object.freeze([7000, 14000]);
+export const SERVER_SOCIAL_ROLE_SWITCH_MS = Object.freeze([3000, 5000]);
+export const SERVER_SOCIAL_POST_COOLDOWN_MS = Object.freeze([20000, 40000]);
+export const SERVER_SOCIAL_MAX_PARTICIPANTS = 4;
+export const SERVER_SOCIAL_MAX_EVALS_PER_TICK = 6;
+export const SERVER_SOCIAL_LEASE_TTL_MS = 20000;
 export const SERVER_SCRIPTED_IDLE_RETRY_DELAY_MS = Object.freeze([3000, 8000]);
 export const SERVER_SCRIPTED_IDLE_OBJECT_COOLDOWN_MS = 240000;
 export const SERVER_SCRIPTED_IDLE_CATEGORY_COOLDOWN_MS = 180000;
@@ -3864,6 +3876,32 @@ function makeServerScriptedObjectIdleVisualState() {
   };
 }
 
+function randomInRangeMs(range, rand = Math.random) {
+  const [min, max] = Array.isArray(range) && range.length >= 2 ? range : [0, 0];
+  return Math.round(Number(min) + rand() * Math.max(0, Number(max) - Number(min)));
+}
+
+function makeServerSocialVisualState(role, faceAngle) {
+  return {
+    schemaVersion: 'agent-runtime-visual/v1',
+    status: 'idle',
+    state: 'social',
+    resolvedAnimationId: 'gather-talk',
+    movement: { isMoving: false, isRunning: false },
+    activityActive: true,
+    activityKind: 'social-conversation',
+    deskFacingAngle: faceAngle,
+    activity: {
+      kind: 'gather-talk',
+      phase: 'active',
+      role,
+      animationId: 'gather-talk',
+      faceAngle,
+    },
+    carrying: false,
+  };
+}
+
 function makeLiveStatusDesklessVisualState(isMoving) {
   return {
     schemaVersion: 'agent-runtime-visual/v1',
@@ -5136,6 +5174,9 @@ export class AgentRuntimeRoom extends Room {
     this.liveStatusRouteWatchdog = new Map();
     this.liveStatusRouteCooldowns = new Map();
     this.liveStatusDesklessWander = new Map();
+    this.socialConversations = new Map();
+    this.socialCooldowns = new Map();
+    this.socialEvalCursor = 0;
     this.scriptedObjectRuntimeMemory = new Map();
     this.scriptedObjectRuntimeNextPulseAtMs = new Map();
     this.scriptedObjectRuntimeIdleCursor = 0;
@@ -6246,6 +6287,187 @@ export class AgentRuntimeRoom extends Room {
     return { changedActions, changedSnapshots };
   }
 
+  // M3.1 proximity conversations (8590 parity): idle agents near each other
+  // sometimes stop, face each other, and talk with speaker/listener role
+  // swaps. Server-owned so all clients render the same conversation.
+  socialAgentEligible(agentId, idleAgentIds, nowMs) {
+    if (!idleAgentIds.has(agentId)) return null;
+    if (Number(this.socialCooldowns.get(agentId) || 0) > nowMs) return null;
+    for (const convo of this.socialConversations.values()) {
+      if (convo.participants.includes(agentId)) return null;
+    }
+    const existing = this.state.agents.get(agentId);
+    if (!existing) return null;
+    const current = snapshotToPlain(existing);
+    if (hasActiveLease(existing, nowMs) && current.leaseOwner && current.leaseOwner !== SERVER_SOCIAL_RUNTIME_LEASE_OWNER) return null;
+    if (current.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || current.owner === LIVE_STATUS_RUNTIME_OWNER || current.owner === LIVE_ACTION_RUNTIME_OWNER) return null;
+    if (!['idle', 'scripted', ''].includes(String(current.state || '').toLowerCase())) return null;
+    return current;
+  }
+
+  applySocialConversationPose(convo, nowMs, now) {
+    const speakers = new Set([convo.participants[convo.speakerIndex % convo.participants.length]]);
+    for (const agentId of convo.participants) {
+      const existing = this.state.agents.get(agentId);
+      if (!existing) continue;
+      const current = snapshotToPlain(existing);
+      const partnerId = convo.participants.find(id => id !== agentId) || agentId;
+      const partner = this.state.agents.get(partnerId);
+      const partnerPlain = partner ? snapshotToPlain(partner) : current;
+      const faceAngle = Math.atan2(
+        numberOr(partnerPlain.y, 0) - numberOr(current.y, 0),
+        numberOr(partnerPlain.x, 0) - numberOr(current.x, 0)
+      );
+      const role = speakers.has(agentId) ? 'talking' : 'listening';
+      this.upsertSnapshot({
+        agentId,
+        mode: 'live',
+        owner: SERVER_SOCIAL_RUNTIME_OWNER,
+        x: current.x,
+        y: current.y,
+        floor: current.floor,
+        buildingId: current.buildingId || '',
+        roomId: current.roomId || '',
+        heading: faceAngle,
+        state: 'social',
+        routeId: `social:${convo.id}`,
+        worldActionId: '',
+        target: null,
+        leaseOwner: SERVER_SOCIAL_RUNTIME_LEASE_OWNER,
+        leaseExpiresAt: new Date(nowMs + SERVER_SOCIAL_LEASE_TTL_MS).toISOString(),
+        visualState: makeServerSocialVisualState(role, faceAngle),
+      }, 'server-social-conversation', { conversationId: convo.id, role });
+    }
+  }
+
+  endSocialConversation(convo, nowMs, now, reason = 'conversation-complete') {
+    this.socialConversations.delete(convo.id);
+    for (const agentId of convo.participants) {
+      this.socialCooldowns.set(agentId, nowMs + randomInRangeMs(SERVER_SOCIAL_POST_COOLDOWN_MS, this.socialRandom));
+      const existing = this.state.agents.get(agentId);
+      if (!existing) continue;
+      const current = snapshotToPlain(existing);
+      if (current.owner !== SERVER_SOCIAL_RUNTIME_OWNER && current.leaseOwner !== SERVER_SOCIAL_RUNTIME_LEASE_OWNER) continue;
+      this.upsertSnapshot({
+        agentId,
+        mode: 'scripted',
+        owner: 'agent-scripted-mode',
+        x: current.x,
+        y: current.y,
+        floor: current.floor,
+        buildingId: current.buildingId || '',
+        roomId: current.roomId || '',
+        heading: current.heading,
+        state: 'idle',
+        routeId: '',
+        worldActionId: '',
+        target: null,
+        leaseOwner: '',
+        leaseExpiresAt: '',
+        visualState: makeServerScriptedObjectIdleVisualState(),
+      }, 'server-social-conversation-ended', { conversationId: convo.id, reason });
+    }
+  }
+
+  tickSocialConversations(idleAgentIds, tickMs, nowMs, now) {
+    let changed = 0;
+    if (!this.socialConversations) this.socialConversations = new Map();
+    if (!this.socialCooldowns) this.socialCooldowns = new Map();
+    if (!Number.isFinite(Number(this.socialEvalCursor))) this.socialEvalCursor = 0;
+    const rand = this.socialRandom || Math.random;
+
+    // Advance/end active conversations.
+    for (const convo of Array.from(this.socialConversations.values())) {
+      if (nowMs >= convo.endsAtMs) {
+        this.endSocialConversation(convo, nowMs, now);
+        changed += convo.participants.length;
+        continue;
+      }
+      // Participant stolen by another runtime (user drag, live action) ends it.
+      const lost = convo.participants.some(agentId => {
+        const existing = this.state.agents.get(agentId);
+        if (!existing) return true;
+        const current = snapshotToPlain(existing);
+        return current.owner !== SERVER_SOCIAL_RUNTIME_OWNER && current.leaseOwner !== SERVER_SOCIAL_RUNTIME_LEASE_OWNER;
+      });
+      if (lost) {
+        this.endSocialConversation(convo, nowMs, now, 'participant-lost');
+        changed += convo.participants.length;
+        continue;
+      }
+      if (nowMs >= convo.nextRoleSwitchAtMs) {
+        convo.speakerIndex = (convo.speakerIndex + 1) % convo.participants.length;
+        convo.nextRoleSwitchAtMs = nowMs + randomInRangeMs(SERVER_SOCIAL_ROLE_SWITCH_MS, rand);
+        this.applySocialConversationPose(convo, nowMs, now);
+        changed += convo.participants.length;
+      }
+    }
+
+    // Coarse spatial buckets (O(n)) over idle-eligible agents.
+    const bucketSize = SERVER_SOCIAL_CONVERSATION_RADIUS_API;
+    const buckets = new Map();
+    const idleList = Array.from(idleAgentIds);
+    for (const agentId of idleList) {
+      const existing = this.state.agents.get(agentId);
+      if (!existing) continue;
+      const plain = snapshotToPlain(existing);
+      const key = `${Math.floor(numberOr(plain.x, 0) / bucketSize)}:${Math.floor(numberOr(plain.y, 0) / bucketSize)}:${floorOr(plain.floor, 1)}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push({ agentId, x: numberOr(plain.x, 0), y: numberOr(plain.y, 0), floor: floorOr(plain.floor, 1), buildingId: safeText(plain.buildingId, '') });
+    }
+
+    // Bounded round-robin evaluation.
+    let evals = 0;
+    for (let i = 0; i < idleList.length && evals < SERVER_SOCIAL_MAX_EVALS_PER_TICK; i++) {
+      const index = positiveModulo(this.socialEvalCursor + i, idleList.length);
+      const agentId = idleList[index];
+      const me = this.socialAgentEligible(agentId, idleAgentIds, nowMs);
+      if (!me) continue;
+      evals++;
+      const bx = Math.floor(numberOr(me.x, 0) / bucketSize);
+      const by = Math.floor(numberOr(me.y, 0) / bucketSize);
+      const myFloor = floorOr(me.floor, 1);
+      let partnerId = null;
+      for (let dx = -1; dx <= 1 && !partnerId; dx++) {
+        for (let dy = -1; dy <= 1 && !partnerId; dy++) {
+          for (const other of buckets.get(`${bx + dx}:${by + dy}:${myFloor}`) || []) {
+            if (other.agentId === agentId) continue;
+            if (safeText(me.buildingId, '') !== other.buildingId) continue;
+            if (Math.hypot(other.x - numberOr(me.x, 0), other.y - numberOr(me.y, 0)) > SERVER_SOCIAL_CONVERSATION_RADIUS_API) continue;
+            if (!this.socialAgentEligible(other.agentId, idleAgentIds, nowMs)) continue;
+            partnerId = other.agentId;
+            break;
+          }
+        }
+      }
+      if (!partnerId) continue;
+      if (rand() > SERVER_SOCIAL_CONVERSATION_CHANCE) {
+        // Failed roll still cools this agent briefly so pairs don't re-roll every tick.
+        this.socialCooldowns.set(agentId, nowMs + 5000);
+        continue;
+      }
+      const convoId = `convo-${nowMs}-${agentId}`;
+      const convo = {
+        id: convoId,
+        participants: [agentId, partnerId],
+        speakerIndex: 0,
+        endsAtMs: nowMs + randomInRangeMs(SERVER_SOCIAL_CONVERSATION_DURATION_MS, rand),
+        nextRoleSwitchAtMs: nowMs + randomInRangeMs(SERVER_SOCIAL_ROLE_SWITCH_MS, rand),
+      };
+      this.socialConversations.set(convoId, convo);
+      this.socialCooldowns.set(agentId, nowMs + SERVER_SOCIAL_CONVERSATION_COOLDOWN_MS);
+      this.socialCooldowns.set(partnerId, nowMs + SERVER_SOCIAL_CONVERSATION_COOLDOWN_MS);
+      this.applySocialConversationPose(convo, nowMs, now);
+      changed += convo.participants.length;
+    }
+    this.socialEvalCursor = positiveModulo(this.socialEvalCursor + Math.max(1, evals), Math.max(1, idleList.length));
+
+    for (const [agentId, untilMs] of Array.from(this.socialCooldowns.entries())) {
+      if (Number(untilMs || 0) <= nowMs) this.socialCooldowns.delete(agentId);
+    }
+    return changed;
+  }
+
   // M1.4 deskless working-agent fallback (8590 parity): work-presence agents
   // with no free desk wander/wait near their current position instead of
   // freezing; the plan rebuild (every LIVE_STATUS_RUNTIME_POLL_MS) re-checks
@@ -6586,6 +6808,7 @@ export class AgentRuntimeRoom extends Room {
     const targets = Array.isArray(plan?.targets) ? plan.targets : [];
     let changedSnapshots = 0;
     let changedObjects = 0;
+    changedSnapshots += this.tickSocialConversations(idleAgentIds, tickMs, nowMs, now);
     let activeScriptedRoutes = 0;
     const activeRouteLimit = Math.max(
       SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES,
