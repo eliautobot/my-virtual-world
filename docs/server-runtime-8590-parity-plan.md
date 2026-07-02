@@ -15,7 +15,7 @@ Companion to `server-runtime-8590-parity-audit.md`. Ordered, implementable check
 ### M1.1 Route/activity watchdog (fixes `permi`-class hangs) — risk: low
 - **Build:** per-activity deadline. When a scripted-object target enters `routing`, record `routeStartedAt`; if not arrived within a stale window (8590 uses **45s**: `AGENT_INTENT_APPROACH_STALE_AFTER_MS`, main3d.js:7387), abort the activity: release reservation/queue slot/lease, clear target, set short cooldown, return agent to idle wander.
 - **Where:** scripted-object runtime tick in `agent-runtime-room.mjs` — alongside `expireStaleRouteLeases()` (:5293) which currently only sweeps leases, not activities. Add the check in the per-agent route-advance path (`makeServerRuntimeStep` callers, ~:1699+).
-- **Acceptance:** inject an unreachable target in a test; agent abandons within 50s and picks a new activity. Live: re-run `/tmp/vw-audit/sample-8587.py` for 10 min; no agent shows a single `routing` state for >60 consecutive seconds.
+- **Acceptance:** inject an unreachable target in a test; agent abandons within 50s and picks a new activity. Live: re-run `/tmp/vw-audit/sample-staging.py` for 10 min; no agent shows a single `routing` state for >60 consecutive seconds.
 
 ### M1.2 Fix queue-slot target coordinate frame — risk: medium
 - **Build:** diagnose why `permi`'s armchair queue target was `(1492,-1036)` while the agent/world position is `(≈500,-28)` — looks like interior/grid-scaled coords leaked into a world-space target (factor ≈3 + offset). Normalize queue/interaction spot targets to the same frame the movement integrator uses.
@@ -25,7 +25,7 @@ Companion to `server-runtime-8590-parity-audit.md`. Ordered, implementable check
 
 ### M1.3 Align live-status walk speed + run triggers — risk: low
 - **Build:** set `LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC` from 96 → 70–72 (line 49). Mirror 8590 run conditions: run when entering building, returning to desk, work-presence not at desk, or distance > 8 tiles (main3d.js:20255–:20262, baseSpeed 200 run / 70 walk).
-- **Acceptance:** side-by-side 8590 vs 8587: walking gait speed visually indistinguishable; working agents still run to desks.
+- **Acceptance:** side-by-side 8590 vs staging: walking gait speed visually indistinguishable; working agents still run to desks.
 
 ### M1.4 Deskless working-agent fallback — risk: low
 - **Build:** verify + fix behavior when a work-presence agent has no available desk: must fall back to wander/wait near work building, never freeze. 8590 gate: main3d.js:4895.
@@ -34,7 +34,7 @@ Companion to `server-runtime-8590-parity-audit.md`. Ordered, implementable check
 
 ## M1.5 — Movement smoothness parity (Eli-reported: choppy paths, corner slowdowns) — risk: medium
 
-Eli observed 8587 agents do not follow interior/exterior routes as smoothly as 8590: motion is choppy and agents visibly slow down at turns. Root causes to fix (all three):
+Eli observed staging agents do not follow interior/exterior routes as smoothly as 8590: motion is choppy and agents visibly slow down at turns. Root causes to fix (all three):
 
 ### M1.5a Continuous waypoint advance (no per-tick corner stalls)
 - **Build:** in the server route stepper (`makeServerRuntimeStep` / `selectCachedServerRuntimeRouteStep` and the segment-step integrators ~:1478–:1699), carry unused per-tick movement distance through waypoints: when the step reaches a waypoint with residual distance, immediately continue along the next segment within the same tick (loop until residual exhausted or final arrival). Do NOT treat intermediate waypoints as arrivals; only the final target uses arrivalRadius dwell logic. This is how 8590's frame-based mover flows through corners.
@@ -46,7 +46,7 @@ Eli observed 8587 agents do not follow interior/exterior routes as smoothly as 8
 
 ### M1.5c Observer-side interpolation tuning (browser render smoothness)
 - **Build:** verify `beginAgentRuntimeObserverInterpolation` in `src/client/js/main3d.js` interpolates over the full tick interval (250ms) with velocity-consistent easing, handles late/early snapshots without pauses (extrapolate briefly up to ~1 tick when the next snapshot is late), and does not reset mid-interpolation on identical-position updates. Compare rendered motion against 8590's frame-based movement side by side.
-- **Acceptance:** side-by-side viewing of the same walking agent on 8590 vs 8587 shows comparable visual smoothness at 60fps; no rhythmic 4Hz stutter; no pause-per-waypoint.
+- **Acceptance:** side-by-side viewing of the same walking agent on 8590 vs staging shows comparable visual smoothness at 60fps; no rhythmic 4Hz stutter; no pause-per-waypoint.
 - **Note:** crowd-avoidance impulses (`applyServerRuntimeAgentAvoidance`) should be damped/smoothed so per-tick corrections don't zigzag the path — cap lateral correction per tick and decay it near waypoints.
 
 ## M2 — Behavior vocabulary port
@@ -57,7 +57,7 @@ Eli observed 8587 agents do not follow interior/exterior routes as smoothly as 8
 
 ### M2.2 Worker + customer service roles (counters, barber) — risk: medium/high
 - **Build:** paired-role lifecycle: a staff-capable agent reserves the `service`/`staff-work` spot, customers queue and use `customer` spot; barber chair gets customer(seated) + stylist(standing service). Introduce a `serviceState` on the object (worker, customer, spot ids) with lease-safe assignment.
-- **8590 ref:** `counter.serviceState` (main3d.js:50652), reception routing lifecycle `staffSpotId/visitorSpotId/queueSpotId` (:40780), worker role assignment (:28212, :19622), barber kinds `barber-chair-standing-style-service` (Phase 3B tests :8587–:9075 show expected shapes).
+- **8590 ref:** `counter.serviceState` (main3d.js:50652), reception routing lifecycle `staffSpotId/visitorSpotId/queueSpotId` (:40780), worker role assignment (:28212, :19622), barber kinds `barber-chair-standing-style-service` (Phase 3B tests :staging–:9075 show expected shapes).
 - **Where:** extend scripted-object activation path (:3589–:3665) with a second role slot; reuse queue machinery for customers.
 - **Acceptance:** at a cafe counter: one agent stands behind (serve anim), another orders (`order-food-drink`), queue forms behind. Barber chair shows seated customer + standing stylist simultaneously.
 
@@ -95,7 +95,7 @@ Eli observed 8587 agents do not follow interior/exterior routes as smoothly as 8
 - **Acceptance:** browser obs shows wait anim for queued agents ≥80% of their queue time.
 
 ### M4.3 QA passes (no code)
-- Two-browser consistency check (same positions/anims both clients), reconnect mid-route, 25-agent tick-time telemetry before/after M3 (assert p95 tick < 50% of 250ms budget), and a fresh 8590-vs-8587 side-by-side video/sample diff as the parity sign-off.
+- Two-browser consistency check (same positions/anims both clients), reconnect mid-route, 25-agent tick-time telemetry before/after M3 (assert p95 tick < 50% of 250ms budget), and a fresh 8590-vs-staging side-by-side video/sample diff as the parity sign-off.
 
 ## Suggested PR #58 commit order
 1. M1.1 watchdog → 2. M1.2 queue coords → 3. M1.3 speeds → 4. M1.4 deskless → 5. M1.5 movement smoothness → 6. M2.1 configs → 7. M3.1 conversations → 8. M3.2/3.3 social approach + pingpong → 9. M2.2 service roles → 10. M2.3 bed/doors → 11. M4 polish + QA evidence.
