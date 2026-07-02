@@ -2339,14 +2339,20 @@ function agentAssignmentFor(meta, agentId) {
   return direct && typeof direct === 'object' && !Array.isArray(direct) ? direct : {};
 }
 
-function pickLiveStatusWorkTarget(agentId, { meta, targets, workingAgentIds }) {
+export function pickLiveStatusWorkTarget(agentId, { meta, targets, workingAgentIds, claimedTargetIndexes = null }) {
   if (!agentId || !Array.isArray(targets) || targets.length === 0) return null;
   const assigned = targets.find(entry => liveStatusIdentityMatches(agentId, entry.assignedTo));
-  if (assigned) return assigned.target;
+  if (assigned) {
+    claimedTargetIndexes?.add(targets.indexOf(assigned));
+    return assigned.target;
+  }
 
   const assignment = agentAssignmentFor(meta, agentId);
   const workBuildingId = safeText(assignment.work || assignment.workBuilding || assignment.workBuildingId, '');
   let candidates = targets.filter(entry => !entry.assignedTo);
+  if (claimedTargetIndexes) {
+    candidates = candidates.filter(entry => !claimedTargetIndexes.has(targets.indexOf(entry)));
+  }
   if (workBuildingId) {
     const inAssignedBuilding = candidates.filter(entry => entry.buildingId === workBuildingId);
     if (inAssignedBuilding.length > 0) candidates = inAssignedBuilding;
@@ -2357,12 +2363,20 @@ function pickLiveStatusWorkTarget(agentId, { meta, targets, workingAgentIds }) {
     );
     if (officeTargets.length > 0) candidates = officeTargets;
   }
-  if (candidates.length === 0) candidates = targets;
+  if (candidates.length === 0) {
+    // With distinct claiming, no free desk means deskless fallback (8590
+    // parity: work-presence agents without a desk keep waiting/wandering
+    // near work instead of doubling up on an occupied desk).
+    if (claimedTargetIndexes) return null;
+    candidates = targets;
+  }
   if (candidates.length === 0) return null;
   const sortedWorkers = Array.isArray(workingAgentIds) ? workingAgentIds : [];
   const workerIndex = sortedWorkers.indexOf(agentId);
   const index = workerIndex >= 0 ? workerIndex : stableTextHash(agentId);
-  return candidates[index % candidates.length]?.target || null;
+  const picked = candidates[index % candidates.length];
+  if (picked && claimedTargetIndexes) claimedTargetIndexes.add(targets.indexOf(picked));
+  return picked?.target || null;
 }
 
 function pickLiveStatusMeetingTarget(agentId, { presence, targets, meetingAgentIds }) {
@@ -2413,11 +2427,13 @@ function buildLiveStatusRuntimePlan(dataDir) {
     const target = pickLiveStatusMeetingTarget(agentId, { presence, targets: meetingTargets, meetingAgentIds });
     if (target) targetsByAgent[agentId] = target;
   }
+  const claimedTargetIndexes = new Set();
   for (const agentId of workingAgentIds) {
-    const target = pickLiveStatusWorkTarget(agentId, { meta, targets: workTargets, workingAgentIds });
+    const target = pickLiveStatusWorkTarget(agentId, { meta, targets: workTargets, workingAgentIds, claimedTargetIndexes });
     if (target) targetsByAgent[agentId] = target;
   }
-  return { presence, meta, targets: workTargets, workTargets, meetingTargets, workingAgentIds, meetingAgentIds, targetsByAgent };
+  const desklessWorkingAgentIds = workingAgentIds.filter(agentId => !targetsByAgent[agentId]);
+  return { presence, meta, targets: workTargets, workTargets, meetingTargets, workingAgentIds, meetingAgentIds, targetsByAgent, desklessWorkingAgentIds };
 }
 
 function makeLiveStatusVisualState(isMoving, status = 'working', target = null) {
@@ -3848,6 +3864,19 @@ function makeServerScriptedObjectIdleVisualState() {
   };
 }
 
+function makeLiveStatusDesklessVisualState(isMoving) {
+  return {
+    schemaVersion: 'agent-runtime-visual/v1',
+    status: 'working',
+    state: isMoving ? 'moving' : 'idle',
+    resolvedAnimationId: isMoving ? 'walk' : 'idle',
+    movement: { isMoving: Boolean(isMoving), isRunning: false },
+    activityActive: false,
+    activityKind: 'live-status-deskless-wait',
+    carrying: false,
+  };
+}
+
 function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, source = 'idle') {
   const objectKey = safeText(target?.objectKey, '') || runtimeFurnitureObjectKey(target?.buildingId, target?.furnitureIndex, target?.objectType || 'object');
   const baseObjectKey = safeText(target?.baseObjectKey, '') || objectKey;
@@ -5106,6 +5135,7 @@ export class AgentRuntimeRoom extends Room {
     this.scriptedObjectRuntimeCooldowns = new Map();
     this.liveStatusRouteWatchdog = new Map();
     this.liveStatusRouteCooldowns = new Map();
+    this.liveStatusDesklessWander = new Map();
     this.scriptedObjectRuntimeMemory = new Map();
     this.scriptedObjectRuntimeNextPulseAtMs = new Map();
     this.scriptedObjectRuntimeIdleCursor = 0;
@@ -6216,6 +6246,76 @@ export class AgentRuntimeRoom extends Room {
     return { changedActions, changedSnapshots };
   }
 
+  // M1.4 deskless working-agent fallback (8590 parity): work-presence agents
+  // with no free desk wander/wait near their current position instead of
+  // freezing; the plan rebuild (every LIVE_STATUS_RUNTIME_POLL_MS) re-checks
+  // desk availability so they claim a desk as soon as one frees.
+  tickLiveStatusDesklessWander(desklessWorkingIds, tickMs, nowMs, now) {
+    let changed = 0;
+    for (const agentId of Array.from(this.liveStatusDesklessWander.keys())) {
+      if (!desklessWorkingIds.has(agentId)) this.liveStatusDesklessWander.delete(agentId);
+    }
+    for (const agentId of desklessWorkingIds) {
+      const existing = this.state.agents.get(agentId);
+      if (!existing) continue;
+      const current = snapshotToPlain(existing);
+      const ownedByStatusRuntime = current.owner === LIVE_STATUS_RUNTIME_OWNER || current.leaseOwner === LIVE_STATUS_RUNTIME_LEASE_OWNER;
+      const hasOtherLease = Boolean(
+        hasActiveLease(existing, nowMs) &&
+        current.leaseOwner &&
+        current.leaseOwner !== LIVE_STATUS_RUNTIME_LEASE_OWNER
+      );
+      if (hasOtherLease) {
+        this.liveStatusDesklessWander.delete(agentId);
+        continue;
+      }
+      let wander = this.liveStatusDesklessWander.get(agentId);
+      if (!wander || nowMs >= Number(wander.nextMoveAtMs || 0)) {
+        const anchor = wander?.anchor || { x: numberOr(current.x, 0), y: numberOr(current.y, 0) };
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 8 + Math.random() * 24;
+        wander = {
+          anchor,
+          target: { x: anchor.x + Math.cos(angle) * radius, y: anchor.y + Math.sin(angle) * radius },
+          nextMoveAtMs: nowMs + 5000 + Math.random() * 5000,
+        };
+        this.liveStatusDesklessWander.set(agentId, wander);
+      }
+      const dx = wander.target.x - numberOr(current.x, 0);
+      const dy = wander.target.y - numberOr(current.y, 0);
+      const dist = Math.hypot(dx, dy);
+      const stepLen = LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC * (Math.max(1, tickMs) / 1000);
+      const arrived = dist <= Math.max(2, stepLen);
+      const nextX = arrived ? wander.target.x : numberOr(current.x, 0) + (dx / dist) * stepLen;
+      const nextY = arrived ? wander.target.y : numberOr(current.y, 0) + (dy / dist) * stepLen;
+      const heading = dist > 0.001 ? Math.atan2(dy, dx) : numberOr(current.heading, 0);
+      const isMoving = !arrived;
+      const stateText = isMoving ? 'moving' : 'working';
+      const shouldWrite = !ownedByStatusRuntime || isMoving || current.state !== stateText;
+      if (!shouldWrite) continue;
+      this.upsertSnapshot({
+        agentId,
+        mode: 'live',
+        owner: LIVE_STATUS_RUNTIME_OWNER,
+        x: nextX,
+        y: nextY,
+        floor: current.floor,
+        buildingId: current.buildingId || '',
+        roomId: current.roomId || '',
+        heading,
+        state: stateText,
+        routeId: `live-status-deskless:${agentId}`,
+        worldActionId: '',
+        target: null,
+        leaseOwner: LIVE_STATUS_RUNTIME_LEASE_OWNER,
+        leaseExpiresAt: new Date(nowMs + LIVE_STATUS_RUNTIME_LEASE_TTL_MS).toISOString(),
+        visualState: makeLiveStatusDesklessVisualState(isMoving),
+      }, 'server-live-status-deskless-wait', { reason: 'no-free-desk' });
+      changed++;
+    }
+    return changed;
+  }
+
   tickLiveStatusRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
     if (nowMs - Number(this.lastLiveStatusRuntimeStepMs || 0) < LIVE_STATUS_RUNTIME_POLL_MS) {
       return { changedSnapshots: 0 };
@@ -6223,6 +6323,7 @@ export class AgentRuntimeRoom extends Room {
     this.lastLiveStatusRuntimeStepMs = nowMs;
     const plan = this.loadLiveStatusRuntimePlan(nowMs);
     const targetsByAgent = plan?.targetsByAgent && typeof plan.targetsByAgent === 'object' ? plan.targetsByAgent : {};
+    const desklessWorkingIds = new Set(Array.isArray(plan?.desklessWorkingAgentIds) ? plan.desklessWorkingAgentIds : []);
     let changedSnapshots = 0;
 
     for (const [agentId, target] of Object.entries(targetsByAgent)) {
@@ -6231,6 +6332,14 @@ export class AgentRuntimeRoom extends Room {
         changedSnapshots++;
       }
     }
+
+    for (const agentId of desklessWorkingIds) {
+      if (this.state.agents.has(agentId)) continue;
+      this.ensureServerRuntimeAgentSeed(agentId, null, 'live-status-deskless-seed');
+      changedSnapshots++;
+    }
+
+    changedSnapshots += this.tickLiveStatusDesklessWander(desklessWorkingIds, tickMs, nowMs, now);
 
     for (const [agentId, existing] of this.state.agents.entries()) {
       const current = snapshotToPlain(existing);
@@ -6241,6 +6350,8 @@ export class AgentRuntimeRoom extends Room {
         current.leaseOwner &&
         current.leaseOwner !== LIVE_STATUS_RUNTIME_LEASE_OWNER
       );
+
+      if (!target && desklessWorkingIds.has(agentId)) continue; // deskless fallback owns this agent
 
       if (!target) {
         if (ownedByStatusRuntime) {
