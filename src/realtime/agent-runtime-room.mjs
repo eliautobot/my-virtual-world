@@ -1698,7 +1698,7 @@ function selectCachedServerRuntimeRouteStep(current, currentPoint, finalTarget, 
   };
 }
 
-function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
+export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
   speedUnitsPerSec,
   arrivalRadius,
   routeSource = 'server-runtime',
@@ -1835,12 +1835,114 @@ function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs, {
   const distanceToFinal = Math.hypot(finalDx, finalDy);
   const step = Math.max(1, numberOr(speedUnitsPerSec, 72) * (Math.max(1, tickMs) / 1000));
   const arrived = distanceToFinal <= arrival && !String(phase || '').startsWith('door-');
-  const ratio = arrived ? 1 : Math.min(1, step / Math.max(distanceToSteering, 0.001));
-  let nextX = arrived ? Number(finalTarget.x) : Number(currentPoint.x || 0) + dx * ratio;
-  let nextY = arrived ? Number(finalTarget.y) : Number(currentPoint.y || 0) + dy * ratio;
+
+  // M1.5a — continuous waypoint advance: consume the full per-tick step distance
+  // across successive route waypoints instead of stopping at each corner.
+  // Intermediate waypoints never trigger arrival/dwell; only finalTarget uses arrivalRadius.
+  const tickWaypoints = [];
+  if (!arrived) {
+    tickWaypoints.push({ x: Number(steeringTarget.x), y: Number(steeringTarget.y), final: false });
+    const routePoints = Array.isArray(route?.routePoints) && route.routePoints.length > 1
+      ? route.routePoints
+      : (Array.isArray(route?.route) ? route.route : []);
+    const canChainWaypoints = route?.active === true && routePoints.length > 1 && isServerRuntimePathfinderRoute(route);
+    let steeringIndex = -1;
+    if (canChainWaypoints) {
+      for (let index = 0; index < routePoints.length; index += 1) {
+        const point = routePoints[index];
+        if (!point) continue;
+        if (Math.hypot(Number(point.x) - Number(steeringTarget.x), Number(point.y) - Number(steeringTarget.y)) <= 0.5) {
+          steeringIndex = index;
+          break;
+        }
+      }
+      if (steeringIndex >= 0) {
+        for (let index = steeringIndex + 1; index < routePoints.length; index += 1) {
+          const point = routePoints[index];
+          if (!point) continue;
+          tickWaypoints.push({ x: Number(point.x), y: Number(point.y), final: false });
+        }
+      }
+    }
+    const lastWaypoint = tickWaypoints[tickWaypoints.length - 1];
+    if (lastWaypoint && Math.hypot(lastWaypoint.x - finalTarget.x, lastWaypoint.y - finalTarget.y) <= 0.001) {
+      lastWaypoint.final = true;
+    } else if (canChainWaypoints && steeringIndex >= 0) {
+      // Pathfinder routes may end short of the exact final target; finish the chain there.
+      tickWaypoints.push({ x: Number(finalTarget.x), y: Number(finalTarget.y), final: true });
+    }
+
+    // Consume the tick step measured as EUCLIDEAN distance from the tick-start
+    // position so consecutive snapshots keep constant displacement magnitude
+    // through corners (matches 8590's frame-based mover as sampled per tick).
+    // A path-distance budget caps hairpin traversal so agents cannot teleport
+    // along doubled-back polylines.
+    const startX = Number(currentPoint.x || 0);
+    const startY = Number(currentPoint.y || 0);
+    const maxPathBudget = step * 2;
+    let pathConsumed = 0;
+    let cursorX = startX;
+    let cursorY = startY;
+    let waypointsConsumed = 0;
+    for (const waypoint of tickWaypoints) {
+      const segDx = waypoint.x - cursorX;
+      const segDy = waypoint.y - cursorY;
+      const segDist = Math.hypot(segDx, segDy);
+      if (segDist <= 0.001) {
+        if (!waypoint.final) waypointsConsumed += 1;
+        continue;
+      }
+      const endEuclid = Math.hypot(waypoint.x - startX, waypoint.y - startY);
+      const pathBudgetLeft = maxPathBudget - pathConsumed;
+      if (endEuclid <= step + 0.0001 && segDist <= pathBudgetLeft) {
+        cursorX = waypoint.x;
+        cursorY = waypoint.y;
+        pathConsumed += segDist;
+        if (waypoint.final) break;
+        waypointsConsumed += 1;
+        continue;
+      }
+      // Find t in [0,1] along the segment where euclidean distance from the
+      // tick-start position reaches the step radius (larger quadratic root =
+      // forward crossing), clamped by the remaining path budget.
+      let t = 1;
+      if (endEuclid > step) {
+        const fx = cursorX - startX;
+        const fy = cursorY - startY;
+        const a = segDx * segDx + segDy * segDy;
+        const b = 2 * (fx * segDx + fy * segDy);
+        const c = fx * fx + fy * fy - step * step;
+        const disc = b * b - 4 * a * c;
+        t = disc >= 0 && a > 0 ? Math.max(0, Math.min(1, (-b + Math.sqrt(disc)) / (2 * a))) : 1;
+      }
+      if (pathBudgetLeft < segDist * t) t = Math.max(0, pathBudgetLeft / segDist);
+      cursorX += segDx * t;
+      cursorY += segDy * t;
+      break;
+    }
+    if (steeringIndex >= 0 && waypointsConsumed > 0 && route && Array.isArray(route.routePoints)) {
+      route.routeIndex = Math.min(route.routePoints.length - 1, steeringIndex + waypointsConsumed);
+      if (route.routePoints[route.routeIndex]) {
+        const advanced = route.routePoints[route.routeIndex];
+        route.effectiveTarget = { ...finalTarget, x: Number(advanced.x), y: Number(advanced.y), floor: floorOr(advanced.floor ?? finalTarget.floor, finalTarget.floor) };
+      }
+    }
+    tickWaypoints.length = 0;
+    tickWaypoints.push({ x: cursorX, y: cursorY });
+  }
+
+  let nextX = arrived ? Number(finalTarget.x) : tickWaypoints[0].x;
+  let nextY = arrived ? Number(finalTarget.y) : tickWaypoints[0].y;
   let heading = distanceToSteering > 0.001
     ? normalizeRuntimeAngleRadians(Math.atan2(dx, dy), 0)
     : normalizeRuntimeAngleRadians(current?.heading, 0);
+  if (!arrived) {
+    const tickDx = nextX - Number(currentPoint.x || 0);
+    const tickDy = nextY - Number(currentPoint.y || 0);
+    if (Math.hypot(tickDx, tickDy) > 0.001) {
+      heading = normalizeRuntimeAngleRadians(Math.atan2(tickDx, tickDy), heading);
+    }
+  }
   let routePatch = null;
   if (!arrived) {
     const guarded = applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, {
