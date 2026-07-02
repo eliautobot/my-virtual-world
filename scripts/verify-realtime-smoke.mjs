@@ -206,7 +206,7 @@ async function run() {
     assert.equal(LIVE_ACTION_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live action runtime should move at the world tick for smooth observer interpolation');
     assert.equal(LIVE_STATUS_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live status runtime should move at the world tick for smooth observer interpolation');
     assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'scripted object runtime should move at the world tick for smooth observer interpolation');
-    assert.equal(RUNTIME_STATE_BROADCAST_INTERVAL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'full runtime state broadcasts should not lag behind server movement ticks');
+    assert.equal(RUNTIME_STATE_BROADCAST_INTERVAL_MS, 1000, 'full runtime state broadcasts should be throttled; Colyseus patches carry movement ticks');
     assert.equal(LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC, 200, 'server-owned work routes should use the 8590 running displacement speed');
     assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC, 200, 'server-owned desk-consume handoffs should use the 8590 running displacement speed');
 
@@ -647,7 +647,7 @@ async function run() {
       runtime.topologyOwner === SERVER_WORLD_TOPOLOGY_OWNER && runtime.trafficLights?.size >= 1
     );
     assert.equal(serverRuntime.topologyOwner, SERVER_WORLD_TOPOLOGY_OWNER);
-    assert.equal(serverRuntime.tickMs, DEFAULT_WORLD_RUNTIME_TICK_MS, 'server-owned runtime should advertise the active 250ms tick cadence');
+    assert.equal(serverRuntime.tickMs, DEFAULT_WORLD_RUNTIME_TICK_MS, 'server-owned runtime should advertise the active 100ms tick cadence');
     assert.equal(serverRuntime.trafficLights?.size, 1);
     assert(serverRuntime.trafficVehicles?.size > 0);
     scriptedRoom.send('runtime:worldTopology', {

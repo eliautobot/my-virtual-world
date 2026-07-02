@@ -285,7 +285,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260701-observer-tick-interp-r1',
+  'js/main3d.js?v=20260702-runtime-tick-balance-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -415,9 +415,9 @@ for (const token of [
 
 for (const token of [
   'WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000',
-  'DEFAULT_WORLD_RUNTIME_TICK_MS = 250',
+  'DEFAULT_WORLD_RUNTIME_TICK_MS = 100',
   'WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000',
-  'RUNTIME_STATE_BROADCAST_INTERVAL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS',
+  'RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000',
   'const tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS',
   'this.patchRate = DEFAULT_WORLD_RUNTIME_TICK_MS',
   'runWithDeferredRuntimeDocumentWrites',

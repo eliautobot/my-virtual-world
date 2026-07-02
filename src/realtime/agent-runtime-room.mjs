@@ -23,14 +23,15 @@ export const DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES = 256 * 1024;
 export const DEFAULT_ROUTE_LEASE_TTL_MS = 15000;
 export const MAX_ROUTE_LEASE_TTL_MS = 60000;
 export const STALE_ROUTE_LEASE_SWEEP_MS = 1000;
-export const DEFAULT_WORLD_RUNTIME_TICK_MS = 250;
+export const DEFAULT_WORLD_RUNTIME_TICK_MS = 100;
+export const WORLD_RUNTIME_PLAN_POLL_MS = 250;
 export const WORLD_RUNTIME_PERSIST_INTERVAL_MS = 5000;
 export const WORLD_RUNTIME_TRAFFIC_CYCLE_MS = 40000;
 export const WORLD_RUNTIME_TRAFFIC_YELLOW_MS = 3000;
 export const WORLD_RUNTIME_TRAFFIC_ALL_RED_MS = 2000;
 export const WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000;
 export const WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000;
-export const RUNTIME_STATE_BROADCAST_INTERVAL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
+export const RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000;
 export const MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS = 500;
 export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
@@ -39,6 +40,7 @@ export const MAX_WORLD_OBJECT_DATA_JSON_CHARS = 10000;
 export const LIVE_ACTION_RUNTIME_OWNER = 'server-live-action-runtime';
 export const LIVE_ACTION_RUNTIME_LEASE_OWNER = 'server-runtime';
 export const LIVE_ACTION_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
+export const LIVE_ACTION_RUNTIME_PLAN_POLL_MS = WORLD_RUNTIME_PLAN_POLL_MS;
 export const LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC = 72;
 export const LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS = 3;
 export const LIVE_ACTION_RUNTIME_DWELL_MS = 5000;
@@ -46,6 +48,7 @@ export const LIVE_ACTION_RUNTIME_LEASE_TTL_MS = 10000;
 export const LIVE_STATUS_RUNTIME_OWNER = 'server-live-status-runtime';
 export const LIVE_STATUS_RUNTIME_LEASE_OWNER = 'server-live-status';
 export const LIVE_STATUS_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
+export const LIVE_STATUS_RUNTIME_PLAN_POLL_MS = WORLD_RUNTIME_PLAN_POLL_MS;
 export const LIVE_STATUS_RUNTIME_SPEED_UNITS_PER_SEC = 70;
 export const LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC = 200;
 export const LIVE_STATUS_RUNTIME_ARRIVAL_RADIUS = 6;
@@ -56,6 +59,7 @@ export const USER_DIRECTED_RUNTIME_HOLD_MS = 60000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runtime';
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER = 'server-scripted-object';
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
+export const SERVER_SCRIPTED_OBJECT_RUNTIME_PLAN_POLL_MS = WORLD_RUNTIME_PLAN_POLL_MS;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_SPEED_UNITS_PER_SEC = 72;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC = 200;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS = 5;
@@ -5615,7 +5619,7 @@ export class AgentRuntimeRoom extends Room {
   }
 
   loadLiveActionRuntimeStore(nowMs = Date.now()) {
-    if (this.liveActionRuntimeStore && nowMs - Number(this.lastLiveActionRuntimePollMs || 0) < LIVE_ACTION_RUNTIME_POLL_MS) {
+    if (this.liveActionRuntimeStore && nowMs - Number(this.lastLiveActionRuntimePollMs || 0) < LIVE_ACTION_RUNTIME_PLAN_POLL_MS) {
       return { meta: this.liveActionRuntimeMeta, store: this.liveActionRuntimeStore };
     }
     const loaded = readWorldActionsStore(this.dataDir);
@@ -5633,7 +5637,7 @@ export class AgentRuntimeRoom extends Room {
   }
 
   loadLiveStatusRuntimePlan(nowMs = Date.now()) {
-    if (this.liveStatusRuntimePlan && nowMs - Number(this.lastLiveStatusRuntimePollMs || 0) < LIVE_STATUS_RUNTIME_POLL_MS) {
+    if (this.liveStatusRuntimePlan && nowMs - Number(this.lastLiveStatusRuntimePollMs || 0) < LIVE_STATUS_RUNTIME_PLAN_POLL_MS) {
       return this.liveStatusRuntimePlan;
     }
     try {
@@ -5646,7 +5650,7 @@ export class AgentRuntimeRoom extends Room {
   }
 
   loadScriptedObjectRuntimePlan(nowMs = Date.now()) {
-    if (this.scriptedObjectRuntimePlan && nowMs - Number(this.lastScriptedObjectRuntimePollMs || 0) < SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS) {
+    if (this.scriptedObjectRuntimePlan && nowMs - Number(this.lastScriptedObjectRuntimePollMs || 0) < SERVER_SCRIPTED_OBJECT_RUNTIME_PLAN_POLL_MS) {
       return this.scriptedObjectRuntimePlan;
     }
     try {

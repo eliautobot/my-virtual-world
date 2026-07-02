@@ -45,7 +45,7 @@ Eli observed staging agents do not follow interior/exterior routes as smoothly a
 - **Acceptance:** heading deltas between consecutive snapshots along a corner are gradual (< ~60°/tick during normal walking).
 
 ### M1.5c Observer-side interpolation tuning (browser render smoothness)
-- **Build:** verify `beginAgentRuntimeObserverInterpolation` in `src/client/js/main3d.js` interpolates over the full tick interval (250ms) with velocity-consistent easing, handles late/early snapshots without pauses (extrapolate briefly up to ~1 tick when the next snapshot is late), and does not reset mid-interpolation on identical-position updates. Compare rendered motion against 8590's frame-based movement side by side.
+- **Build:** verify `beginAgentRuntimeObserverInterpolation` in `src/client/js/main3d.js` interpolates over the measured tick interval (100ms target) with velocity-consistent easing, handles late/early snapshots without pauses (briefly extrapolate up to about one tick when the next snapshot is late), and does not reset mid-interpolation on identical-position updates. Compare rendered motion against 8590's frame-based movement side by side.
 - **Acceptance:** side-by-side viewing of the same walking agent on 8590 vs staging shows comparable visual smoothness at 60fps; no rhythmic 4Hz stutter; no pause-per-waypoint.
 - **Note:** crowd-avoidance impulses (`applyServerRuntimeAgentAvoidance`) should be damped/smoothed so per-tick corrections don't zigzag the path — cap lateral correction per tick and decay it near waypoints.
 
@@ -95,7 +95,7 @@ Eli observed staging agents do not follow interior/exterior routes as smoothly a
 - **Acceptance:** browser obs shows wait anim for queued agents ≥80% of their queue time.
 
 ### M4.3 QA passes (no code)
-- Two-browser consistency check (same positions/anims both clients), reconnect mid-route, 25-agent tick-time telemetry before/after M3 (assert p95 tick < 50% of 250ms budget), and a fresh 8590-vs-staging side-by-side video/sample diff as the parity sign-off.
+- Two-browser consistency check (same positions/anims both clients), reconnect mid-route, 25-agent tick-time telemetry before/after M3 (assert p95 tick < 50% of the active tick budget), and a fresh 8590-vs-staging side-by-side video/sample diff as the parity sign-off.
 
 ## Suggested PR #58 commit order
 1. M1.1 watchdog → 2. M1.2 queue coords → 3. M1.3 speeds → 4. M1.4 deskless → 5. M1.5 movement smoothness → 6. M2.1 configs → 7. M3.1 conversations → 8. M3.2/3.3 social approach + pingpong → 9. M2.2 service roles → 10. M2.3 bed/doors → 11. M4 polish + QA evidence.

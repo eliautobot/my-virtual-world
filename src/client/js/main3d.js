@@ -1105,9 +1105,9 @@ const AGENT_RUNTIME_SNAPSHOT_MIN_DISTANCE = 1.5;
 const AGENT_RUNTIME_MANUAL_PREVIEW_SNAPSHOT_INTERVAL_MS = 100;
 const AGENT_RUNTIME_MANUAL_PREVIEW_MIN_DISTANCE = 0.12;
 const AGENT_RUNTIME_POSITION_WRITER_STALE_MS = 7000;
-const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 250;
-const AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS = 100;
-const AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS = 1000;
+const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 120;
+const AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS = 70;
+const AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS = 500;
 const AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING = 0.2;
 const AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE = API_TILE * 6;
 const AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE = 0.05;
@@ -2657,7 +2657,7 @@ function placeRuntimeHydratedAgentMesh(agent, { force = false } = {}) {
 }
 
 function measureAgentRuntimeObserverIntervalMs(agent, nowMs) {
-  // Smoothed estimate of the real inter-snapshot interval (~250ms tick) so the
+  // Smoothed estimate of the real inter-snapshot interval (~100ms tick) so the
   // observer interpolates over the actual cadence instead of a hardcoded value.
   const lastArrivalMs = Number(agent._runtimeObserverLastSnapshotAtMs);
   let intervalMs = Number(agent._runtimeObserverIntervalMs);
@@ -2740,9 +2740,9 @@ function beginAgentRuntimeObserverInterpolation(agent, snapshot, previous = {}, 
     toFloor: targetFloor,
     startedAtMs: nowMs,
     durationMs: intervalMs,
-    // Late next snapshot: keep moving at the same velocity for up to ~1 tick
-    // so motion doesn't freeze rhythmically between snapshots.
-    extrapolationMs: intervalMs,
+    // Late next snapshot: keep moving at the same velocity for about one
+    // server tick so packet jitter does not create rhythmic pauses.
+    extrapolationMs: Math.min(intervalMs, AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS),
     source,
     version: snapshot.version || 0,
     updatedAt: snapshot.updatedAt || '',
