@@ -399,17 +399,46 @@ function writeJsonFileAtomic(path, value) {
   return value;
 }
 
+// Hot-path document caches: revalidated by file mtime with a short time-based
+// window (same pattern as _buildingDocsCache; keeps the event loop off sync
+// disk I/O during per-tick planning).
+const _hotDocumentCache = new Map();
+const HOT_DOCUMENT_CACHE_REVALIDATE_MS = 250;
+
+function readCachedJsonDocument(path, fallbackFactory) {
+  const now = Date.now();
+  const cached = _hotDocumentCache.get(path);
+  if (cached && now - cached.checkedAt < HOT_DOCUMENT_CACHE_REVALIDATE_MS) return cached.value;
+  let mtimeMs = -1;
+  try {
+    mtimeMs = statSync(path).mtimeMs;
+  } catch {
+    mtimeMs = -1;
+  }
+  if (cached && cached.mtimeMs === mtimeMs) {
+    cached.checkedAt = now;
+    return cached.value;
+  }
+  const raw = mtimeMs >= 0 ? readJsonFile(path, null) : null;
+  const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : fallbackFactory();
+  _hotDocumentCache.set(path, { mtimeMs, checkedAt: now, value });
+  return value;
+}
+
+function invalidateCachedJsonDocument(path) {
+  _hotDocumentCache.delete(path);
+}
+
 function readWorldMetaDocument(dataDir) {
-  const meta = readJsonFile(worldMetaFilePath(dataDir), null);
-  return meta && typeof meta === 'object' && !Array.isArray(meta) ? meta : {};
+  return readCachedJsonDocument(worldMetaFilePath(dataDir), () => ({}));
 }
 
 function readPresenceSnapshotDocument(dataDir) {
-  const snapshot = readJsonFile(presenceSnapshotFilePath(dataDir), null);
-  return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot : {};
+  return readCachedJsonDocument(presenceSnapshotFilePath(dataDir), () => ({}));
 }
 
 function writeWorldMetaDocument(dataDir, meta) {
+  invalidateCachedJsonDocument(worldMetaFilePath(dataDir));
   return writeJsonFileAtomic(worldMetaFilePath(dataDir), meta && typeof meta === 'object' ? meta : {});
 }
 
