@@ -1105,7 +1105,10 @@ const AGENT_RUNTIME_SNAPSHOT_MIN_DISTANCE = 1.5;
 const AGENT_RUNTIME_MANUAL_PREVIEW_SNAPSHOT_INTERVAL_MS = 100;
 const AGENT_RUNTIME_MANUAL_PREVIEW_MIN_DISTANCE = 0.12;
 const AGENT_RUNTIME_POSITION_WRITER_STALE_MS = 7000;
-const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 300;
+const AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS = 250;
+const AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS = 100;
+const AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS = 1000;
+const AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING = 0.2;
 const AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE = API_TILE * 6;
 const AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE = 0.05;
 const AGENT_RUNTIME_WORLD_OBJECT_TTL_MS = 15000;
@@ -2653,12 +2656,32 @@ function placeRuntimeHydratedAgentMesh(agent, { force = false } = {}) {
   }
 }
 
+function measureAgentRuntimeObserverIntervalMs(agent, nowMs) {
+  // Smoothed estimate of the real inter-snapshot interval (~250ms tick) so the
+  // observer interpolates over the actual cadence instead of a hardcoded value.
+  const lastArrivalMs = Number(agent._runtimeObserverLastSnapshotAtMs);
+  let intervalMs = Number(agent._runtimeObserverIntervalMs);
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) intervalMs = AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS;
+  if (Number.isFinite(lastArrivalMs) && lastArrivalMs > 0) {
+    const gapMs = nowMs - lastArrivalMs;
+    if (gapMs >= AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS && gapMs <= AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS) {
+      intervalMs = intervalMs * (1 - AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING) + gapMs * AGENT_RUNTIME_OBSERVER_INTERVAL_SMOOTHING;
+    }
+  }
+  intervalMs = Math.min(AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS, Math.max(AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS, intervalMs));
+  agent._runtimeObserverLastSnapshotAtMs = nowMs;
+  agent._runtimeObserverIntervalMs = intervalMs;
+  return intervalMs;
+}
+
 function beginAgentRuntimeObserverInterpolation(agent, snapshot, previous = {}, { source = 'runtime' } = {}) {
   if (!agent || !snapshot) return false;
   const targetX = Number(snapshot.x);
   const targetY = Number(snapshot.y);
   const targetFloor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
   if (!Number.isFinite(targetX) || !Number.isFinite(targetY) || !Number.isFinite(targetFloor)) return false;
+  const nowMs = performance.now();
+  const intervalMs = measureAgentRuntimeObserverIntervalMs(agent, nowMs);
   const startX = Number.isFinite(previous.x) ? previous.x : Number(agent.x || 0);
   const startY = Number.isFinite(previous.y) ? previous.y : Number(agent.y || 0);
   const startFloor = Math.max(1, Math.floor(Number.isFinite(previous.floor) ? previous.floor : (agent._floor || 1)));
@@ -2666,12 +2689,22 @@ function beginAgentRuntimeObserverInterpolation(agent, snapshot, previous = {}, 
   const floorChanged = targetFloor !== startFloor;
   const shouldSnap = floorChanged || distance > AGENT_RUNTIME_OBSERVER_SNAP_DISTANCE || !agent._group3d;
   const existingInterpolation = agent._runtimeObserverInterpolation || null;
-  if (existingInterpolation &&
-    existingInterpolation.version === (snapshot.version || 0) &&
-    existingInterpolation.updatedAt === (snapshot.updatedAt || '') &&
+  // Identical-position snapshot targeting the same point as the in-flight
+  // interpolation: refresh metadata but do NOT reset motion mid-segment.
+  if (existingInterpolation && !shouldSnap &&
     Math.abs(existingInterpolation.toX - targetX) <= AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE &&
     Math.abs(existingInterpolation.toY - targetY) <= AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE &&
     existingInterpolation.toFloor === targetFloor) {
+    existingInterpolation.version = snapshot.version || 0;
+    existingInterpolation.updatedAt = snapshot.updatedAt || '';
+    agent._runtimeObserverTarget = {
+      x: targetX,
+      y: targetY,
+      floor: targetFloor,
+      source,
+      version: snapshot.version || 0,
+      updatedAt: snapshot.updatedAt || '',
+    };
     return true;
   }
 
@@ -2705,8 +2738,11 @@ function beginAgentRuntimeObserverInterpolation(agent, snapshot, previous = {}, 
     toX: targetX,
     toY: targetY,
     toFloor: targetFloor,
-    startedAtMs: performance.now(),
-    durationMs: AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS,
+    startedAtMs: nowMs,
+    durationMs: intervalMs,
+    // Late next snapshot: keep moving at the same velocity for up to ~1 tick
+    // so motion doesn't freeze rhythmically between snapshots.
+    extrapolationMs: intervalMs,
     source,
     version: snapshot.version || 0,
     updatedAt: snapshot.updatedAt || '',
@@ -2727,12 +2763,19 @@ function updateAgentRuntimeObserverMotion(agent, dt = 0) {
   const previousY = Number(agent.y || 0);
   const elapsed = performance.now() - Number(interpolation.startedAtMs || 0);
   const duration = Math.max(1, Number(interpolation.durationMs || AGENT_RUNTIME_OBSERVER_INTERPOLATION_MS));
-  const t = Math.min(1, Math.max(0, elapsed / duration));
+  // Linear, velocity-consistent easing (no per-segment ease-in-out pulsing),
+  // with brief constant-velocity extrapolation past t=1 when the next
+  // snapshot is late (capped at ~1 tick).
+  const extrapolationMs = Math.max(0, Number(interpolation.extrapolationMs ?? duration));
+  const maxT = 1 + extrapolationMs / duration;
+  const t = Math.min(maxT, Math.max(0, elapsed / duration));
   agent.x = interpolation.fromX + (interpolation.toX - interpolation.fromX) * t;
   agent.y = interpolation.fromY + (interpolation.toY - interpolation.fromY) * t;
   agent._floor = t >= 1 ? interpolation.toFloor : interpolation.fromFloor;
   agent._targetFloor = interpolation.toFloor;
-  if (t >= 1) {
+  if (t >= maxT) {
+    // Extrapolation window expired with no fresh snapshot: the agent most
+    // likely stopped, so settle exactly on the last authoritative target.
     agent.x = interpolation.toX;
     agent.y = interpolation.toY;
     agent._floor = interpolation.toFloor;
