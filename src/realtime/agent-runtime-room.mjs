@@ -2607,6 +2607,10 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   playgroundswing: Object.freeze({ kind: 'playground-swing-swing', spotId: 'seat-use', animationId: 'playground-swing-sit-swing', poseKind: 'seat', stayMs: [10000, 18000] }),
   ponddock: Object.freeze({ kind: 'pond-dock-view', spotId: 'view-left', animationId: 'pond-dock-view-relax', poseKind: 'stand-use', stayMs: [12000, 22000] }),
   outdoorstage: Object.freeze({ kind: 'outdoor-stage-perform', spotId: 'perform-center', animationId: 'outdoor-stage-perform-watch-gather', poseKind: 'stand-use', stayMs: [14000, 26000] }),
+  fountain: Object.freeze({ kind: 'fountain-watch', spotId: 'watch-south', animationId: 'fountain-watch', poseKind: 'stand-use', stayMs: [10000, 18000] }),
+  gazebopavilion: Object.freeze({ kind: 'gazebo-pavilion-rest', spotId: 'rest-west', animationId: 'gazebo-pavilion-rest', poseKind: 'stand-use', stayMs: [12000, 22000] }),
+  busstop: Object.freeze({ kind: 'bus-stop-wait', spotId: 'seat-left', animationId: 'bus-stop-wait', poseKind: 'seat', stayMs: [10000, 18000] }),
+  foodtruckcounter: Object.freeze({ kind: 'food-truck-counter-order', spotId: 'customer', animationId: 'food-truck-counter-serve', poseKind: 'stand-use', stayMs: [9000, 15000] }),
 });
 const SERVER_SCRIPTED_VENDING_ITEM_OPTIONS = Object.freeze([
   Object.freeze({ id: 'chocolate-cookie', label: 'Chocolate Cookie', kind: 'snack', visualKind: 'vending-chocolate-cookie', packageColor: 0x8b5a2b, accentColor: 0x3f2414, needEffects: Object.freeze({ hunger: -22, thirst: 0 }) }),
