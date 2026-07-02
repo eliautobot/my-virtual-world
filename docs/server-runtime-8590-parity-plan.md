@@ -32,6 +32,23 @@ Companion to `server-runtime-8590-parity-audit.md`. Ordered, implementable check
 - **Where:** live-status desk assignment `agent-runtime-room.mjs:2107+`.
 - **Acceptance:** test with more working agents than desks; surplus agents keep moving (idle-style) and grab a desk when freed.
 
+## M1.5 — Movement smoothness parity (Eli-reported: choppy paths, corner slowdowns) — risk: medium
+
+Eli observed 8587 agents do not follow interior/exterior routes as smoothly as 8590: motion is choppy and agents visibly slow down at turns. Root causes to fix (all three):
+
+### M1.5a Continuous waypoint advance (no per-tick corner stalls)
+- **Build:** in the server route stepper (`makeServerRuntimeStep` / `selectCachedServerRuntimeRouteStep` and the segment-step integrators ~:1478–:1699), carry unused per-tick movement distance through waypoints: when the step reaches a waypoint with residual distance, immediately continue along the next segment within the same tick (loop until residual exhausted or final arrival). Do NOT treat intermediate waypoints as arrivals; only the final target uses arrivalRadius dwell logic. This is how 8590's frame-based mover flows through corners.
+- **Acceptance:** an agent walking an L-shaped route shows constant speed magnitude across the corner in consecutive snapshots (no tick where displacement drops >20% at a waypoint, except final arrival).
+
+### M1.5b Heading blend through turns
+- **Build:** heading should turn smoothly through corners rather than snapping/aiming at each waypoint. Blend heading toward the direction of actual displacement across the tick (or slerp with a max turn rate similar to 8590's visual turn smoothing) so observers render natural turns.
+- **Acceptance:** heading deltas between consecutive snapshots along a corner are gradual (< ~60°/tick during normal walking).
+
+### M1.5c Observer-side interpolation tuning (browser render smoothness)
+- **Build:** verify `beginAgentRuntimeObserverInterpolation` in `src/client/js/main3d.js` interpolates over the full tick interval (250ms) with velocity-consistent easing, handles late/early snapshots without pauses (extrapolate briefly up to ~1 tick when the next snapshot is late), and does not reset mid-interpolation on identical-position updates. Compare rendered motion against 8590's frame-based movement side by side.
+- **Acceptance:** side-by-side viewing of the same walking agent on 8590 vs 8587 shows comparable visual smoothness at 60fps; no rhythmic 4Hz stutter; no pause-per-waypoint.
+- **Note:** crowd-avoidance impulses (`applyServerRuntimeAgentAvoidance`) should be damped/smoothed so per-tick corrections don't zigzag the path — cap lateral correction per tick and decay it near waypoints.
+
 ## M2 — Behavior vocabulary port
 
 ### M2.1 Fill missing object-type configs — risk: low
@@ -81,5 +98,5 @@ Companion to `server-runtime-8590-parity-audit.md`. Ordered, implementable check
 - Two-browser consistency check (same positions/anims both clients), reconnect mid-route, 25-agent tick-time telemetry before/after M3 (assert p95 tick < 50% of 250ms budget), and a fresh 8590-vs-8587 side-by-side video/sample diff as the parity sign-off.
 
 ## Suggested PR #58 commit order
-1. M1.1 watchdog → 2. M1.2 queue coords → 3. M1.3 speeds → 4. M1.4 deskless → 5. M2.1 configs → 6. M3.1 conversations → 7. M3.2/3.3 social approach + pingpong → 8. M2.2 service roles → 9. M2.3 bed/doors → 10. M4 polish + QA evidence.
+1. M1.1 watchdog → 2. M1.2 queue coords → 3. M1.3 speeds → 4. M1.4 deskless → 5. M1.5 movement smoothness → 6. M2.1 configs → 7. M3.1 conversations → 8. M3.2/3.3 social approach + pingpong → 9. M2.2 service roles → 10. M2.3 bed/doors → 11. M4 polish + QA evidence.
 (M2.2 deliberately after M3.1 — service roles reuse the paired-agent coordination built for conversations.)
