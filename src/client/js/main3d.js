@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260627-single-runtime-instance-r2';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260702-server-timeline-r1';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1109,7 +1109,6 @@ const AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS = 360;
 const AGENT_RUNTIME_OBSERVER_BUFFER_MAX_MS = 2000;
 const AGENT_RUNTIME_OBSERVER_BUFFER_MAX_SNAPSHOTS = 32;
 const AGENT_RUNTIME_OBSERVER_CLOCK_OFFSET_RESET_MS = 750;
-const AGENT_RUNTIME_OBSERVER_CLOCK_OFFSET_SMOOTHING = 0.1;
 const AGENT_RUNTIME_OBSERVER_TIMELINE_FUTURE_TOLERANCE_MS = 80;
 const AGENT_RUNTIME_OBSERVER_INTERVAL_MIN_MS = 70;
 const AGENT_RUNTIME_OBSERVER_INTERVAL_MAX_MS = 500;
@@ -2668,24 +2667,28 @@ function makeAgentRuntimeObserverBufferSample(agent, snapshot, source = 'runtime
   const y = Number(snapshot.y);
   const floor = Math.max(1, Math.floor(Number(snapshot.floor || 1)));
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(floor)) return null;
-  const serverTimeMs = Date.parse(snapshot.updatedAt || '');
+  const serverSimTimeMs = Number(snapshot.simTimeMs);
+  const hasServerSimTime = Number.isFinite(serverSimTimeMs) && serverSimTimeMs > 0;
+  const serverTimeMs = hasServerSimTime ? serverSimTimeMs : Date.parse(snapshot.updatedAt || '');
   let timelineMs = receivedAtMs;
   if (Number.isFinite(serverTimeMs)) {
     const rawOffsetMs = receivedAtMs - serverTimeMs;
-    const currentOffsetMs = Number(agent?._runtimeObserverServerClockOffsetMs);
+    const clockOffsetKey = hasServerSimTime
+      ? '_runtimeObserverServerSimClockOffsetMs'
+      : '_runtimeObserverServerClockOffsetMs';
+    const currentOffsetMs = Number(agent?.[clockOffsetKey]);
     const nextOffsetMs = !Number.isFinite(currentOffsetMs) ||
       Math.abs(rawOffsetMs - currentOffsetMs) > AGENT_RUNTIME_OBSERVER_CLOCK_OFFSET_RESET_MS
       ? rawOffsetMs
-      : currentOffsetMs * (1 - AGENT_RUNTIME_OBSERVER_CLOCK_OFFSET_SMOOTHING) +
-        rawOffsetMs * AGENT_RUNTIME_OBSERVER_CLOCK_OFFSET_SMOOTHING;
-    if (agent) agent._runtimeObserverServerClockOffsetMs = nextOffsetMs;
+      : currentOffsetMs;
+    if (agent) agent[clockOffsetKey] = nextOffsetMs;
     timelineMs = serverTimeMs + nextOffsetMs;
     if (
       timelineMs > receivedAtMs + AGENT_RUNTIME_OBSERVER_TIMELINE_FUTURE_TOLERANCE_MS ||
       timelineMs < receivedAtMs - AGENT_RUNTIME_OBSERVER_BUFFER_MAX_MS
     ) {
       timelineMs = receivedAtMs;
-      if (agent) agent._runtimeObserverServerClockOffsetMs = rawOffsetMs;
+      if (agent) agent[clockOffsetKey] = rawOffsetMs;
     }
   }
   return Object.freeze({
@@ -2693,8 +2696,11 @@ function makeAgentRuntimeObserverBufferSample(agent, snapshot, source = 'runtime
     source,
     receivedAtMs,
     serverTimeMs,
+    serverSimTimeMs: hasServerSimTime ? serverSimTimeMs : null,
     timelineMs,
     version: Number(snapshot.version || 0),
+    tickSeq: Number(snapshot.tickSeq || 0),
+    tickMs: Number(snapshot.tickMs || 0),
     updatedAt: String(snapshot.updatedAt || ''),
     x,
     y,
@@ -3637,6 +3643,8 @@ if (typeof window !== 'undefined') {
       mode: agent._runtimeObserverBufferMode || '',
       renderVersion: agent._runtimeRenderSnapshot?.version || 0,
       latestVersion: agent._runtimeVersion || 0,
+      renderTickSeq: agent._runtimeRenderSnapshot?.tickSeq || 0,
+      latestTickSeq: agent._runtimeSnapshot?.tickSeq || 0,
     },
     routeLease: agent._runtimeRouteLease ? { ...agent._runtimeRouteLease } : null,
   }));

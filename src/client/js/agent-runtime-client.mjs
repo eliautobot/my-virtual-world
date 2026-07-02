@@ -39,6 +39,9 @@ export function normalizeRuntimeSnapshot(raw = null) {
     leaseExpiresAt: String(raw.leaseExpiresAt || ''),
     updatedAt: String(raw.updatedAt || ''),
     version: Number.isFinite(Number(raw.version)) ? Number(raw.version) : 0,
+    tickSeq: Number.isFinite(Number(raw.tickSeq)) ? Number(raw.tickSeq) : 0,
+    simTimeMs: Number.isFinite(Number(raw.simTimeMs)) ? Number(raw.simTimeMs) : 0,
+    tickMs: Number.isFinite(Number(raw.tickMs)) ? Number(raw.tickMs) : 0,
   });
 }
 
@@ -252,6 +255,9 @@ function snapshotsFromRoomState(room) {
       leaseExpiresAt: raw.leaseExpiresAt,
       updatedAt: raw.updatedAt,
       version: raw.version,
+      tickSeq: raw.tickSeq,
+      simTimeMs: raw.simTimeMs,
+      tickMs: raw.tickMs,
     });
     if (snapshot) snapshots.set(snapshot.agentId, snapshot);
   }

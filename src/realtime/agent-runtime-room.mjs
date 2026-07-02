@@ -24,6 +24,7 @@ export const DEFAULT_ROUTE_LEASE_TTL_MS = 15000;
 export const MAX_ROUTE_LEASE_TTL_MS = 60000;
 export const STALE_ROUTE_LEASE_SWEEP_MS = 1000;
 export const DEFAULT_WORLD_RUNTIME_TICK_MS = 100;
+export const WORLD_RUNTIME_STEP_MAX_MS = 250;
 export const WORLD_RUNTIME_PLAN_POLL_MS = 250;
 export const WORLD_RUNTIME_PERSIST_INTERVAL_MS = 5000;
 export const WORLD_RUNTIME_TRAFFIC_CYCLE_MS = 40000;
@@ -269,6 +270,9 @@ export class AgentRuntimeSnapshot extends Schema {
     this.leaseExpiresAt = '';
     this.updatedAt = '';
     this.version = 0;
+    this.tickSeq = 0;
+    this.simTimeMs = 0;
+    this.tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS;
     Object.assign(this, seed);
   }
 }
@@ -292,6 +296,9 @@ defineTypes(AgentRuntimeSnapshot, {
   leaseExpiresAt: 'string',
   updatedAt: 'string',
   version: 'number',
+  tickSeq: 'number',
+  simTimeMs: 'number',
+  tickMs: 'number',
 });
 
 export class WorldRuntimeObjectState extends Schema {
@@ -4290,6 +4297,9 @@ export function snapshotToPlain(agent) {
     leaseExpiresAt: agent.leaseExpiresAt || '',
     updatedAt: agent.updatedAt || '',
     version: Number(agent.version || 0),
+    tickSeq: Number(agent.tickSeq || 0),
+    simTimeMs: Number(agent.simTimeMs || 0),
+    tickMs: Number(agent.tickMs || DEFAULT_WORLD_RUNTIME_TICK_MS),
   };
   if (agent.targetJson) {
     try {
@@ -4451,6 +4461,9 @@ function schemaSnapshotFromPlain(plain) {
     leaseExpiresAt: plain.leaseExpiresAt,
     updatedAt: plain.updatedAt,
     version: plain.version,
+    tickSeq: plain.tickSeq,
+    simTimeMs: plain.simTimeMs,
+    tickMs: plain.tickMs,
   });
 }
 
@@ -4563,6 +4576,9 @@ function normalizeSnapshot(raw, existing = null) {
     leaseExpiresAt: raw.leaseExpiresAt === '' ? '' : safeIso(raw.leaseExpiresAt, existingPlain.leaseExpiresAt || ''),
     updatedAt: safeIso(raw.updatedAt, now),
     version: Math.max(0, Math.floor(numberOr(raw.version, existingPlain.version || 0))),
+    tickSeq: Math.max(0, Math.floor(numberOr(raw.tickSeq, existingPlain.tickSeq || 0))),
+    simTimeMs: Math.max(0, Math.floor(numberOr(raw.simTimeMs, existingPlain.simTimeMs || 0))),
+    tickMs: Math.max(1, Math.floor(numberOr(raw.tickMs, existingPlain.tickMs || DEFAULT_WORLD_RUNTIME_TICK_MS))),
   };
 }
 
@@ -5195,6 +5211,8 @@ export class AgentRuntimeRoom extends Room {
     this.deferRuntimeDocumentWrites = false;
     this.runtimeDocumentDirty = false;
     this.runtimeStateBroadcastDirty = false;
+    this.worldRuntimeTickContext = null;
+    this.lastWorldRuntimeTickNowMs = 0;
     this.lastRuntimeStateBroadcastMs = 0;
     this.lastLiveActionRuntimePollMs = 0;
     this.liveActionRuntimeMeta = null;
@@ -6087,9 +6105,6 @@ export class AgentRuntimeRoom extends Room {
   }
 
   tickLiveActionRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
-    if (nowMs - Number(this.lastLiveActionRuntimeStepMs || 0) < LIVE_ACTION_RUNTIME_POLL_MS) {
-      return { changedActions: false, changedSnapshots: 0 };
-    }
     this.lastLiveActionRuntimeStepMs = nowMs;
     const { meta, store } = this.loadLiveActionRuntimeStore(nowMs);
     const active = Array.isArray(store.active) ? store.active : [];
@@ -6572,9 +6587,6 @@ export class AgentRuntimeRoom extends Room {
   }
 
   tickLiveStatusRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
-    if (nowMs - Number(this.lastLiveStatusRuntimeStepMs || 0) < LIVE_STATUS_RUNTIME_POLL_MS) {
-      return { changedSnapshots: 0 };
-    }
     this.lastLiveStatusRuntimeStepMs = nowMs;
     const plan = this.loadLiveStatusRuntimePlan(nowMs);
     const targetsByAgent = plan?.targetsByAgent && typeof plan.targetsByAgent === 'object' ? plan.targetsByAgent : {};
@@ -6832,9 +6844,6 @@ export class AgentRuntimeRoom extends Room {
   }
 
   tickScriptedObjectRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
-    if (nowMs - Number(this.lastScriptedObjectRuntimeStepMs || 0) < SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS) {
-      return { changedSnapshots: 0, changedObjects: 0 };
-    }
     this.lastScriptedObjectRuntimeStepMs = nowMs;
     const plan = this.loadScriptedObjectRuntimePlan(nowMs);
     const idleAgentIds = new Set(Array.isArray(plan?.idleAgentIds) ? plan.idleAgentIds : []);
@@ -7112,8 +7121,14 @@ export class AgentRuntimeRoom extends Room {
   upsertSnapshot(raw, eventType, extra = {}) {
     const existing = this.state.agents.get(raw.agentId);
     const normalized = normalizeSnapshot(raw, existing || null);
+    const tickContext = this.worldRuntimeTickContext || null;
     normalized.version = Number(existing?.version || 0) + 1;
-    normalized.updatedAt = new Date().toISOString();
+    normalized.updatedAt = tickContext?.updatedAt || new Date().toISOString();
+    if (tickContext) {
+      normalized.tickSeq = tickContext.tickSeq;
+      normalized.simTimeMs = tickContext.simTimeMs;
+      normalized.tickMs = tickContext.tickMs;
+    }
     const agent = schemaSnapshotFromPlain(normalized);
     this.state.agents.set(agent.agentId, agent);
     this.state.updatedAt = normalized.updatedAt;
@@ -7230,13 +7245,26 @@ export class AgentRuntimeRoom extends Room {
     this.ensureServerWorldTopology(nowMs);
     const runtime = this.state.worldRuntime;
     if (!runtime) return null;
-    const tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS;
+    const elapsedMs = this.lastWorldRuntimeTickNowMs > 0
+      ? nowMs - Number(this.lastWorldRuntimeTickNowMs || 0)
+      : DEFAULT_WORLD_RUNTIME_TICK_MS;
+    this.lastWorldRuntimeTickNowMs = nowMs;
+    const tickMs = Math.max(
+      DEFAULT_WORLD_RUNTIME_TICK_MS,
+      Math.min(WORLD_RUNTIME_STEP_MAX_MS, Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : DEFAULT_WORLD_RUNTIME_TICK_MS),
+    );
     const now = new Date(nowMs).toISOString();
-    runtime.tickMs = tickMs;
+    runtime.tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS;
     runtime.tickSeq = Number(runtime.tickSeq || 0) + 1;
     runtime.simTimeMs = Math.max(0, Number(runtime.simTimeMs || 0) + tickMs);
     runtime.updatedAt = now;
     this.state.updatedAt = now;
+    this.worldRuntimeTickContext = Object.freeze({
+      tickSeq: Number(runtime.tickSeq || 0),
+      simTimeMs: Number(runtime.simTimeMs || 0),
+      tickMs,
+      updatedAt: now,
+    });
 
     let changedLights = 0;
     for (const [, light] of runtime.trafficLights.entries()) {
@@ -7256,20 +7284,24 @@ export class AgentRuntimeRoom extends Room {
     let changedLiveActions = { changedActions: false, changedSnapshots: 0 };
     let changedLiveStatus = { changedSnapshots: 0 };
     let changedScriptedObjects = { changedSnapshots: 0, changedObjects: 0 };
-    this.runWithDeferredRuntimeDocumentWrites(() => {
-      changedVehicles = process.env.VW_REALTIME_DISABLE_TRAFFIC_TICK === 'true'
-        ? 0
-        : this.tickTrafficVehicles(runtime, tickMs, now);
-      changedLiveActions = process.env.VW_REALTIME_DISABLE_LIVE_ACTION_TICK === 'true'
-        ? { changedActions: false, changedSnapshots: 0 }
-        : this.tickLiveActionRuntime(tickMs, nowMs, now);
-      changedLiveStatus = process.env.VW_REALTIME_DISABLE_LIVE_STATUS_TICK === 'true'
-        ? { changedSnapshots: 0 }
-        : this.tickLiveStatusRuntime(tickMs, nowMs, now);
-      changedScriptedObjects = process.env.VW_REALTIME_DISABLE_SCRIPTED_OBJECT_TICK === 'true'
-        ? { changedSnapshots: 0, changedObjects: 0 }
-        : this.tickScriptedObjectRuntime(tickMs, nowMs, now);
-    });
+    try {
+      this.runWithDeferredRuntimeDocumentWrites(() => {
+        changedVehicles = process.env.VW_REALTIME_DISABLE_TRAFFIC_TICK === 'true'
+          ? 0
+          : this.tickTrafficVehicles(runtime, tickMs, now);
+        changedLiveActions = process.env.VW_REALTIME_DISABLE_LIVE_ACTION_TICK === 'true'
+          ? { changedActions: false, changedSnapshots: 0 }
+          : this.tickLiveActionRuntime(tickMs, nowMs, now);
+        changedLiveStatus = process.env.VW_REALTIME_DISABLE_LIVE_STATUS_TICK === 'true'
+          ? { changedSnapshots: 0 }
+          : this.tickLiveStatusRuntime(tickMs, nowMs, now);
+        changedScriptedObjects = process.env.VW_REALTIME_DISABLE_SCRIPTED_OBJECT_TICK === 'true'
+          ? { changedSnapshots: 0, changedObjects: 0 }
+          : this.tickScriptedObjectRuntime(tickMs, nowMs, now);
+      });
+    } finally {
+      this.worldRuntimeTickContext = null;
+    }
     if (this.runtimeStateBroadcastDirty) this.broadcastRuntimeState('world-runtime-state');
 
     if (changedLights > 0 || changedVehicles > 0) {
