@@ -1041,7 +1041,7 @@ function buildingLocalPointFromApi(building, apiX, apiY) {
   return { x: relX, z: relZ };
 }
 
-function buildingContainsApiPoint(building, apiX, apiY) {
+export function buildingContainsApiPoint(building, apiX, apiY) {
   const local = buildingLocalPointFromApi(building, apiX, apiY);
   if (!local) return false;
   const bw = Number(building?.widthTiles || 25) || 25;
@@ -3178,6 +3178,41 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
   };
 }
 
+// Mirrors 8590's resolveFurnitureSpotApiPoint (/tmp/8590-main3d.js:1574-1586): authored queue spots are
+// furniture-relative offsets (dx/dz, with x/z aliases), rotated with the furniture, clamped into the
+// building's local bounds, then transformed building-local -> world -> API units (same transform as the
+// desk path via apiPointFromBuildingLocal).
+export function resolveServerFurnitureSpotApiPoint(building, furniture, spot = {}) {
+  if (!building || !furniture || !spot) return null;
+  const offset = rotateRuntimeLocalOffset(
+    numberOr(spot.dx ?? spot.x ?? spot.offset?.x, 0),
+    numberOr(spot.dz ?? spot.z ?? spot.y ?? spot.offset?.z, 0),
+    numberOr(furniture.rotation, 0),
+  );
+  const rawLocalX = numberOr(furniture.x, 0) + offset.x;
+  const rawLocalZ = numberOr(furniture.z, 0) + offset.z;
+  const margin = 0.35;
+  const bw = Number(building.widthTiles || 25) || 25;
+  const bd = Number(building.heightTiles || 17) || 17;
+  const localX = Math.max(margin, Math.min(bw - margin, rawLocalX));
+  const localZ = Math.max(margin, Math.min(bd - margin, rawLocalZ));
+  const point = apiPointFromBuildingLocal(building, localX, localZ);
+  if (!point) return null;
+  return { localX, localZ, apiX: point.x, apiZ: point.y, floor: floorOr(spot.floor ?? furniture.floor, 1) };
+}
+
+// Clamp an API-space point into the building's world bbox (+margin) using the same
+// building-local <-> world transform as the desk/meeting target derivation.
+export function clampApiPointToBuildingBounds(building, apiX, apiY, marginTiles = 0.35) {
+  const local = buildingLocalPointFromApi(building, apiX, apiY);
+  if (!local) return null;
+  const bw = Number(building?.widthTiles || 25) || 25;
+  const bd = Number(building?.heightTiles || 17) || 17;
+  const localX = Math.max(marginTiles, Math.min(bw - marginTiles, local.x));
+  const localZ = Math.max(marginTiles, Math.min(bd - marginTiles, local.z));
+  return apiPointFromBuildingLocal(building, localX, localZ);
+}
+
 function serverScriptedObjectPrimaryTargetForQueue(dataDir, queueTarget = null) {
   const baseObjectKey = serverScriptedQueueBaseObjectKey(queueTarget);
   return listScriptedObjectRuntimeTargets(dataDir).find(target =>
@@ -3194,7 +3229,7 @@ function serverScriptedQueueRuntimeTargetForBase(dataDir, baseTarget = null) {
   ) || null;
 }
 
-function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null, reservation = null) {
+export function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null, reservation = null) {
   if (!queueTarget || !reservation) return null;
   const baseObjectKey = serverScriptedQueueBaseObjectKey(queueTarget);
   if (!baseObjectKey) return null;
@@ -3222,8 +3257,36 @@ function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null, reser
         serviceQueue: true,
         capacityKind: 'queue',
       });
-      const authoredX = numberOr(authoredTarget?.x, NaN);
-      const authoredY = numberOr(authoredTarget?.y, NaN);
+      let authoredX = numberOr(authoredTarget?.x, NaN);
+      let authoredY = numberOr(authoredTarget?.y, NaN);
+      // M1.2 coordinate-frame fix (8590 parity, /tmp/8590-main3d.js:1574-1586): authored queue
+      // locations are furniture-relative offsets (dx/dz) that must go through the same
+      // building-local -> world transform the desk path uses. Prefer that resolution when the spot is
+      // offset-style, or when the generic spot resolution produced a point outside the building's
+      // world bbox (interior-local/scaled coords leaking into world space).
+      const hasExplicitLocalPoint = Boolean(authoredLocation.actionTarget || authoredLocation.buildingLocal || authoredLocation.activationTarget);
+      const isOffsetStyleSpot = !hasExplicitLocalPoint && (
+        Number.isFinite(numberOr(authoredLocation.dx, NaN)) ||
+        Number.isFinite(numberOr(authoredLocation.dz, NaN)) ||
+        Number.isFinite(numberOr(authoredLocation.offset?.x, NaN)) ||
+        Number.isFinite(numberOr(authoredLocation.offset?.z, NaN)) ||
+        Number.isFinite(numberOr(authoredLocation.x, NaN)) ||
+        Number.isFinite(numberOr(authoredLocation.z ?? authoredLocation.y, NaN))
+      );
+      if (isOffsetStyleSpot || !Number.isFinite(authoredX) || !Number.isFinite(authoredY) || !buildingContainsApiPoint(building, authoredX, authoredY)) {
+        const resolvedSpot = resolveServerFurnitureSpotApiPoint(building, furniture, authoredLocation);
+        if (resolvedSpot) {
+          authoredX = resolvedSpot.apiX;
+          authoredY = resolvedSpot.apiZ;
+        }
+      }
+      if (Number.isFinite(authoredX) && Number.isFinite(authoredY) && !buildingContainsApiPoint(building, authoredX, authoredY)) {
+        const clamped = clampApiPointToBuildingBounds(building, authoredX, authoredY);
+        if (clamped) {
+          authoredX = clamped.x;
+          authoredY = clamped.y;
+        }
+      }
       if (authoredTarget && Number.isFinite(authoredX) && Number.isFinite(authoredY)) {
         const authoredFaceAngle = Number.isFinite(Number(authoredTarget.faceAngle))
           ? normalizeRuntimeAngleRadians(authoredTarget.faceAngle, 0)
@@ -3263,8 +3326,16 @@ function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null, reser
       const dy = anchorY - primaryY;
       const len = Math.hypot(dx, dy) || 1;
       const spacing = (Number(queueDef?.queueSpacingTiles ?? queueDef?.spacingTiles ?? SERVER_SCRIPTED_OBJECT_QUEUE_SPACING_TILES) || SERVER_SCRIPTED_OBJECT_QUEUE_SPACING_TILES) * LIVE_ACTION_API_TILE;
-      const x = primaryX + (dx / len) * spacing * (queueIndex + 1);
-      const y = primaryY + (dy / len) * spacing * (queueIndex + 1);
+      let x = primaryX + (dx / len) * spacing * (queueIndex + 1);
+      let y = primaryY + (dy / len) * spacing * (queueIndex + 1);
+      // Keep derived queue-line slots inside the building's world bbox (same frame as the desk path).
+      if (!buildingContainsApiPoint(building, x, y)) {
+        const clamped = clampApiPointToBuildingBounds(building, x, y);
+        if (clamped) {
+          x = clamped.x;
+          y = clamped.y;
+        }
+      }
       return {
         ...queueTarget,
         x,
