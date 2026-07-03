@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260703-pr59-server-pingpong-r2';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260703-server-runtime-r1';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {

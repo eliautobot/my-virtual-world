@@ -1,7 +1,7 @@
 # Live Agent Mode Colyseus Sidecar
 
-Status: stacked implementation path for the online-game foundation
-Scope: phases 1-3 of the Live Agent Mode restart plan
+Status: implementation notes for the online-game foundation
+Scope: Live Agent Mode realtime runtime
 
 This document defines how My Virtual World uses Colyseus without replacing the existing Python server.
 
@@ -27,7 +27,7 @@ Three.js remains the renderer. Colyseus does not replace the visual world, pathf
 | Browser client | Three.js rendering, current interior/exterior route execution, object action animation, vehicle mesh rendering. |
 | Colyseus sidecar | Realtime agent runtime snapshots, route leases, heartbeat state, worldRuntime clock, traffic-light phases, multi-client broadcast, runtime persistence. |
 
-The parent PR starts the sidecar. The first child PR wires the browser to hydrate and observe agent locations from it.
+The Docker Compose install starts the sidecar next to the Python app. Browsers hydrate and observe agent locations from that shared runtime.
 
 ## Runtime Room
 
@@ -198,15 +198,18 @@ Configuration variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `VW_REALTIME_ENABLED` | `false` | Exposes the realtime config to the browser config payload. |
+| `VW_REALTIME_ENABLED` | `true` in Docker Compose, otherwise `false` unless a realtime URL is configured | Exposes the realtime config to the browser config payload. |
 | `VW_REALTIME_BROWSER_URL` | empty in app config | Browser-reachable Colyseus WebSocket URL for this self-hosted runtime. |
 | `VW_REALTIME_URL` | empty | Backwards-compatible alias for `VW_REALTIME_BROWSER_URL`. |
 | `VW_REALTIME_ROOM` | `agent_runtime` | Colyseus room name. |
+| `VW_REALTIME_HOST_PORT` | `8591` | Docker host port for the sidecar. |
 | `VW_REALTIME_PORT` | `8591` | Sidecar HTTP/WebSocket port. |
 
 ## Self-Hosted Runtime Address
 
 The realtime URL is not a hosted My Virtual World service. It is the address that a browser uses to reach the user's own Colyseus sidecar.
+
+Keep the sidecar on a trusted machine, LAN, VPN, Tailnet, or authenticated reverse proxy. Connected clients can read and update live runtime state.
 
 Examples:
 
@@ -402,7 +405,7 @@ server tick.
 
 ## Next PRs
 
-The sidecar parent PR starts the runtime server. The hydration child PR changes initial/observed placement. The route-heartbeat child PR proves route claim/heartbeat/release. The visible persistence child PR wires ordinary route movement and stale-lease recovery into that runtime.
+The runtime server owns the shared realtime state, browser hydration uses that state for initial and observed placement, route heartbeats keep route leases alive, and stale-lease recovery clears abandoned movement.
 
 Follow-up work:
 

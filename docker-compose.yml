@@ -3,6 +3,8 @@ services:
     build: .
     image: my-virtual-world:local
     container_name: my-virtual-world
+    depends_on:
+      - virtual-world-realtime
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -26,8 +28,8 @@ services:
       - VW_OPENCLAW_PATH=/openclaw
       - VW_OPENCLAW_HOST_PATH=${VW_OPENCLAW_HOST_PATH:-${HOME}/.openclaw}
       - VW_GATEWAY_URL=${VW_GATEWAY_URL:-ws://host.docker.internal:18789}
-      - VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-false}
-      - VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-}
+      - VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-true}
+      - VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-ws://127.0.0.1:8591}
       - VW_REALTIME_URL=${VW_REALTIME_URL:-}
       - VW_REALTIME_ROOM=${VW_REALTIME_ROOM:-agent_runtime}
       - VW_REALTIME_PORT=${VW_REALTIME_PORT:-8591}
@@ -62,6 +64,24 @@ services:
       # - VW_AGENT_PLATFORM_PROVIDER_URL=http://host.docker.internal:PORT
       # - VW_TIMEZONE=America/New_York  # Optional server fallback only; UI renders browser-local time.
       # - VW_STATUS_FILE=              # Optional local status-file fallback path.
+    restart: unless-stopped
+
+  virtual-world-realtime:
+    build:
+      context: .
+      target: realtime
+    image: my-virtual-world-realtime:local
+    container_name: my-virtual-world-realtime
+    ports:
+      - "${VW_REALTIME_HOST_PORT:-8591}:${VW_REALTIME_PORT:-8591}"
+    volumes:
+      - vw-data:/data
+    environment:
+      - VW_DATA_DIR=/data
+      - VW_REALTIME_HOST=0.0.0.0
+      - VW_REALTIME_PORT=${VW_REALTIME_PORT:-8591}
+      - VW_REALTIME_ROOM=${VW_REALTIME_ROOM:-agent_runtime}
+      - VW_REALTIME_MAX_PAYLOAD_BYTES=${VW_REALTIME_MAX_PAYLOAD_BYTES:-1048576}
     restart: unless-stopped
 
   # Optional: Agent Browser (uncomment to enable only on trusted networks)

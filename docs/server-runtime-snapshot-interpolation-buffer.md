@@ -1,6 +1,6 @@
 # Server Runtime Snapshot Interpolation Buffer
 
-PR #59 fixes visible server-owned agent stutter by changing browser observers from latest-snapshot chasing to buffered playback.
+Server-owned runtime playback uses buffered observer samples instead of chasing the latest snapshot directly.
 
 ## Runtime Shape
 

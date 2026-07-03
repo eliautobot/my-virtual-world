@@ -84,6 +84,8 @@ const forbiddenStagingReferences = [
   ['my-vw-github-', stagingPort].join(''),
   [stagingPort, '-live-agent-loop'].join(''),
   ['Living in My Virtual World ', stagingPort].join(''),
+  'pr59-server-pingpong',
+  '/tmp/8590-main3d.js',
 ];
 const productReferenceFiles = [
   'README.md',
@@ -113,6 +115,13 @@ assert(!/(^|[^A-Za-z0-9_])\/home\/(?!vw\b|kasm-user\b)[A-Za-z0-9._-]+/i.test(doc
 assert(!/\b100\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(dockerCompose), 'docker-compose.yml must not contain private tailnet addresses');
 assert(dockerCompose.includes('${VW_HOST_PORT:-8590}:${VW_PORT:-8590}'), 'docker-compose.yml should support a configurable Docker host port');
 assert(envExample.includes('VW_HOST_PORT=8590'), '.env.example should document the Docker host port');
+assert(dockerCompose.includes('virtual-world-realtime:'), 'docker-compose.yml should start the realtime sidecar by default');
+assert(dockerCompose.includes('target: realtime'), 'docker-compose.yml realtime service should build the Docker realtime target');
+assert(dockerCompose.includes('${VW_REALTIME_HOST_PORT:-8591}:${VW_REALTIME_PORT:-8591}'), 'docker-compose.yml should expose a configurable private realtime sidecar port');
+assert(dockerCompose.includes('VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-true}'), 'docker-compose.yml should enable realtime for the default Docker install');
+assert(dockerCompose.includes('VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-ws://127.0.0.1:8591}'), 'docker-compose.yml should provide a browser-reachable realtime URL by default');
+assert(envExample.includes('VW_REALTIME_HOST_PORT=8591'), '.env.example should document the realtime Docker host port');
+assert(envExample.includes('VW_REALTIME_ENABLED=true'), '.env.example should enable realtime for the default Docker install');
 assert(dockerCompose.includes('VW_LICENSE_STORE_ID=${VW_LICENSE_STORE_ID:-321733}'), 'docker-compose.yml should pass the My Virtual World Lemon Squeezy store ID');
 assert(dockerCompose.includes('VW_LICENSE_PRODUCT_IDS=${VW_LICENSE_PRODUCT_IDS:-1140366}'), 'docker-compose.yml should pass the My Virtual World Lemon Squeezy product ID');
 assert(envExample.includes('VW_LICENSE_STORE_ID=321733'), '.env.example should document the My Virtual World Lemon Squeezy store ID');
@@ -285,7 +294,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260703-pr59-server-pingpong-r3',
+  'js/main3d.js?v=20260703-server-runtime-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -719,12 +728,14 @@ for (const token of [
   'VW_REALTIME_BROWSER_URL=ws://127.0.0.1:8591',
   'Browser-reachable Colyseus WebSocket URL for this self-hosted runtime',
   'Self-Hosted Runtime Address',
+  'Keep the sidecar on a trusted machine, LAN, VPN, Tailnet, or authenticated reverse proxy',
 ]) {
   assert(`${envExample}\n${read('docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md')}`.includes(token), `realtime self-host docs missing token: ${token}`);
 }
 for (const token of [
-  'VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-}',
-  'VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-false}',
+  'VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-ws://127.0.0.1:8591}',
+  'VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-true}',
+  'virtual-world-realtime',
 ]) {
   assert(dockerCompose.includes(token), `docker-compose.yml missing realtime env token: ${token}`);
 }
@@ -781,7 +792,7 @@ for (const token of [
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
   '__VWGetAgentRuntimeDebug',
-  'agent-runtime-client.mjs?v=20260703-pr59-server-pingpong-r2',
+  'agent-runtime-client.mjs?v=20260703-server-runtime-r1',
   'serverAuthoritativeRuntimeBlockReason',
   'clearBrowserOwnedAgentMotionForServerRuntime',
   'holdAgentForServerAuthoritativeRuntimeObserver',

@@ -68,6 +68,8 @@ docker compose up --build -d
 docker compose ps
 ```
 
+You should see both `virtual-world` and `virtual-world-realtime`.
+
 6. Open the app in your browser:
 
 ```text
@@ -256,7 +258,7 @@ http://100.x.y.z:8590
 Recommended remote-access rules:
 
 - Use Tailscale or another private VPN instead of router port forwarding.
-- Do not expose `8590` directly to the public internet.
+- Do not expose `8590` or the realtime sidecar port `8591` directly to the public internet.
 - Do not expose OpenClaw gateway ports, CDP port `9222`, or browser/VNC ports publicly.
 - Only share the Tailnet or device with people you trust.
 - Use Tailscale ACLs if you need to limit which users or devices can reach the app.
@@ -274,6 +276,12 @@ If something looks wrong after an update:
 
 ```bash
 docker compose logs -f virtual-world
+```
+
+For realtime sidecar logs:
+
+```bash
+docker compose logs -f virtual-world-realtime
 ```
 
 Your world data is stored in the Docker volume `vw-data`, so rebuilding the image does not erase the saved world.

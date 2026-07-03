@@ -71,7 +71,7 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS = 15000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS = 8000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS = 7000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS = 12000;
-// Mirrors 8590's AGENT_INTENT_APPROACH_STALE_AFTER_MS (/tmp/8590-main3d.js:7387): abort routings stuck longer than this.
+// Mirrors the browser-owned route stale timeout: abort routings stuck longer than this.
 export const SERVER_RUNTIME_ROUTE_STALE_AFTER_MS = 45000;
 export const SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS = 16000;
 export const SERVER_SCRIPTED_OBJECT_TEMPORARY_ITEM_CARRIED_TTL_MS = 90000;
@@ -4848,7 +4848,7 @@ function serverRuntimeReleasePointForTarget(dataDir, target = null, current = nu
   return authored || fallback;
 }
 
-// Mirrors 8590's resolveFurnitureSpotApiPoint (/tmp/8590-main3d.js:1574-1586): authored queue spots are
+// Mirrors the browser furniture-spot resolver: authored queue spots are
 // furniture-relative offsets (dx/dz, with x/z aliases), rotated with the furniture, clamped into the
 // building's local bounds, then transformed building-local -> world -> API units (same transform as the
 // desk path via apiPointFromBuildingLocal).
@@ -4929,7 +4929,7 @@ export function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null
       });
       let authoredX = numberOr(authoredTarget?.x, NaN);
       let authoredY = numberOr(authoredTarget?.y, NaN);
-      // M1.2 coordinate-frame fix (8590 parity, /tmp/8590-main3d.js:1574-1586): authored queue
+      // Coordinate-frame fix: authored queue
       // locations are furniture-relative offsets (dx/dz) that must go through the same
       // building-local -> world transform the desk path uses. Prefer that resolution when the spot is
       // offset-style, or when the generic spot resolution produced a point outside the building's
