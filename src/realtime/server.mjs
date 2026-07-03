@@ -11,7 +11,7 @@ import {
 } from './agent-runtime-room.mjs';
 
 const DEFAULT_REALTIME_PORT = 8591;
-const DEFAULT_MAX_PAYLOAD_BYTES = 256 * 1024;
+const DEFAULT_MAX_PAYLOAD_BYTES = 1024 * 1024;
 
 function intEnv(name, fallback) {
   const value = Number(process.env[name]);

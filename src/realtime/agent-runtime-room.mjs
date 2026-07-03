@@ -19,7 +19,7 @@ import {
 export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
 export const WORLD_RUNTIME_SCHEMA_VERSION = 'world-runtime/v1';
 export const AGENT_RUNTIME_ROOM_NAME = 'agent_runtime';
-export const DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES = 256 * 1024;
+export const DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES = 1024 * 1024;
 export const DEFAULT_ROUTE_LEASE_TTL_MS = 15000;
 export const MAX_ROUTE_LEASE_TTL_MS = 60000;
 export const STALE_ROUTE_LEASE_SWEEP_MS = 1000;
@@ -37,6 +37,9 @@ export const MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS = 500;
 export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
 export const MAX_VISUAL_STATE_JSON_CHARS = 6000;
+const SERVER_RUNTIME_ROUTE_POINTS_SUMMARY_LIMIT = 18;
+const SERVER_RUNTIME_RAW_POINTS_SUMMARY_LIMIT = 18;
+const SERVER_RUNTIME_RAW_CELLS_SUMMARY_LIMIT = 18;
 export const MAX_WORLD_OBJECT_DATA_JSON_CHARS = 10000;
 export const LIVE_ACTION_RUNTIME_OWNER = 'server-live-action-runtime';
 export const LIVE_ACTION_RUNTIME_LEASE_OWNER = 'server-runtime';
@@ -76,6 +79,19 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES = 8;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 12;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 6;
+export const SERVER_PINGPONG_RUNTIME_OWNER = 'server-pingpong-runtime';
+export const SERVER_PINGPONG_RUNTIME_LEASE_OWNER = 'server-pingpong-match';
+export const SERVER_PINGPONG_RUNTIME_SPEED_UNITS_PER_SEC = 72;
+export const SERVER_PINGPONG_RUNTIME_ARRIVAL_RADIUS = 5;
+export const SERVER_PINGPONG_RUNTIME_LEASE_TTL_MS = 15000;
+export const SERVER_PINGPONG_RUNTIME_LEASE_REFRESH_MS = 8000;
+export const SERVER_PINGPONG_RUNTIME_MATCH_MS = 24000;
+export const SERVER_PINGPONG_RUNTIME_RESULT_MS = 150;
+export const SERVER_PINGPONG_RUNTIME_COOLDOWN_MS = 45000;
+export const SERVER_PINGPONG_RUNTIME_TABLE_COOLDOWN_MS = 15000;
+export const SERVER_PINGPONG_RUNTIME_TARGET_SCORE = 5;
+export const SERVER_PINGPONG_RUNTIME_MAX_ACTIVE_MATCHES = 2;
+export const SERVER_PINGPONG_RUNTIME_TABLE_POLL_MS = 5000;
 export const SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS = Object.freeze([8000, 20000]);
 // M3.1 proximity conversations (8590 SCRIPTED_PROXIMITY_BEHAVIOR_RULES parity)
 export const SERVER_SOCIAL_RUNTIME_OWNER = 'server-social-runtime';
@@ -94,11 +110,18 @@ export const SERVER_SCRIPTED_IDLE_OBJECT_COOLDOWN_MS = 240000;
 export const SERVER_SCRIPTED_IDLE_CATEGORY_COOLDOWN_MS = 180000;
 export const SERVER_SCRIPTED_IDLE_FAILED_TARGET_THROTTLE_MS = 90000;
 export const LIVE_ACTION_API_TILE = 40;
-export const SERVER_RUNTIME_AGENT_AVOID_RADIUS = LIVE_ACTION_API_TILE * 2;
-export const SERVER_RUNTIME_AGENT_SEPARATION_RADIUS = LIVE_ACTION_API_TILE;
+export const SERVER_RUNTIME_AGENT_AVOID_RADIUS = LIVE_ACTION_API_TILE * 1.5;
+export const SERVER_RUNTIME_AGENT_SEPARATION_RADIUS = LIVE_ACTION_API_TILE * 0.75;
+export const SERVER_RUNTIME_AGENT_HARD_SEPARATION_RADIUS = LIVE_ACTION_API_TILE * 0.615;
 export const SERVER_RUNTIME_AGENT_AVOID_FORCE_MULTIPLIER = 0.6;
 export const SERVER_RUNTIME_AGENT_AVOID_PUSH_PER_TICK = 6;
 export const SERVER_RUNTIME_AGENT_SEPARATION_PUSH_PER_TICK = 6;
+export const SERVER_RUNTIME_BLOCKER_YIELD_COOLDOWN_MS = 1500;
+export const SERVER_RUNTIME_BLOCKER_YIELD_DISTANCE = LIVE_ACTION_API_TILE * 0.9;
+export const SERVER_RUNTIME_DYNAMIC_AVOID_MAX_ZONES = 8;
+export const SERVER_RUNTIME_DYNAMIC_AVOID_RADIUS_WORLD = 0.7875;
+export const SERVER_RUNTIME_DYNAMIC_AVOID_HARD_RADIUS_WORLD = 0.39;
+export const SERVER_RUNTIME_DYNAMIC_AVOID_COST = 9;
 export const SERVER_WORLD_TOPOLOGY_OWNER = 'server-world-topology-runtime';
 export const SERVER_WORLD_TRAFFIC_SPEED = 7;
 export const SERVER_WORLD_MAX_TRAFFIC_VEHICLES = 30;
@@ -134,11 +157,12 @@ const AGENT_ID_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 const SAFE_TEXT_RE = /^[A-Za-z0-9_.:/@# -]{0,160}$/;
 const WORLD_OBJECT_KEY_RE = /^[A-Za-z0-9_.:/@#, -]{1,160}$/;
 const ACTIVE_WORLD_OBJECT_STATES = new Set(['reserved', 'routing', 'active', 'using', 'occupied', 'queued', 'cooldown']);
-const SERVER_WORLD_OBJECT_RUNTIME_OWNERS = new Set([SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER, LIVE_STATUS_RUNTIME_OWNER]);
+const SERVER_WORLD_OBJECT_RUNTIME_OWNERS = new Set([SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER, LIVE_STATUS_RUNTIME_OWNER, SERVER_PINGPONG_RUNTIME_OWNER]);
 const SERVER_MANAGED_ROUTE_LEASE_OWNERS = new Set([
   LIVE_ACTION_RUNTIME_LEASE_OWNER,
   LIVE_STATUS_RUNTIME_LEASE_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
+  SERVER_PINGPONG_RUNTIME_LEASE_OWNER,
 ]);
 
 export class WorldRuntimeTrafficLightState extends Schema {
@@ -1120,25 +1144,44 @@ function findParkAtApi(dataDir, apiX, apiY) {
 function getBuildingDoorSpec(building) {
   const width = Number(building?.widthTiles || 10) || 10;
   const height = Number(building?.heightTiles || 8) || 8;
+  const wallThickness = 0.25;
+  const openingWidth = 2.4;
   const fallback = {
     localCenterX: Math.max(1, Math.min(width - 1, width / 2)),
-    localThresholdZ: height + 0.5,
-    localOutsideZ: height + 1.2,
-    localInteriorZ: Math.max(0.75, height - 1.2),
-    localDoorwayZ: height + 0.05,
-    doorwayReachWorld: 0.55,
+    localThresholdZ: height + wallThickness / 2 + 0.01,
+    localOutsideZ: height + 0.2,
+    localInteriorZ: Math.max(0.45, height - 1.2),
+    localDoorwayZ: Math.max(0.45, height - Math.max(0.45, wallThickness * 1.2)),
+    doorwayReachWorld: Math.min(0.65, Math.max(0.4, openingWidth * 0.22)),
   };
   const spec = building?.doorSpec && typeof building.doorSpec === 'object' && !Array.isArray(building.doorSpec)
     ? building.doorSpec
     : {};
-  return {
-    localCenterX: numberOr(spec.localCenterX, fallback.localCenterX),
-    localThresholdZ: numberOr(spec.localThresholdZ, fallback.localThresholdZ),
-    localOutsideZ: numberOr(spec.localOutsideZ, fallback.localOutsideZ),
-    localInteriorZ: numberOr(spec.localInteriorZ, fallback.localInteriorZ),
-    localDoorwayZ: numberOr(spec.localDoorwayZ, fallback.localDoorwayZ),
-    doorwayReachWorld: Math.max(0.25, numberOr(spec.doorwayReachWorld, fallback.doorwayReachWorld)),
+  const clampNum = (value, min, max, fb) => Number.isFinite(Number(value))
+    ? Math.min(max, Math.max(min, Number(value)))
+    : fb;
+  const normalized = {
+    localCenterX: clampNum(spec.localCenterX, 0, width, fallback.localCenterX),
+    localThresholdZ: clampNum(spec.localThresholdZ, height, height + 1.5, fallback.localThresholdZ),
+    localOutsideZ: clampNum(spec.localOutsideZ, height - 0.2, height + 1.5, fallback.localOutsideZ),
+    localInteriorZ: clampNum(spec.localInteriorZ, 0.2, height - 0.2, fallback.localInteriorZ),
+    localDoorwayZ: clampNum(spec.localDoorwayZ, 0.25, height - 0.05, fallback.localDoorwayZ),
+    doorwayReachWorld: clampNum(spec.doorwayReachWorld, 0.25, 0.9, fallback.doorwayReachWorld),
   };
+  const doorDepth = normalized.localOutsideZ - normalized.localInteriorZ;
+  const doorwayDepth = normalized.localOutsideZ - normalized.localDoorwayZ;
+  if (
+    normalized.localOutsideZ >= height - 0.25 &&
+    (doorDepth > 3 || doorwayDepth > 2.5 || normalized.localInteriorZ > normalized.localDoorwayZ)
+  ) {
+    normalized.localCenterX = fallback.localCenterX;
+    normalized.localThresholdZ = fallback.localThresholdZ;
+    normalized.localOutsideZ = fallback.localOutsideZ;
+    normalized.localInteriorZ = fallback.localInteriorZ;
+    normalized.localDoorwayZ = fallback.localDoorwayZ;
+    normalized.doorwayReachWorld = fallback.doorwayReachWorld;
+  }
+  return normalized;
 }
 
 function buildingDoorwayPointApi(building) {
@@ -1391,13 +1434,13 @@ function cloneRuntimePoint(point = null) {
 function summarizeServerRuntimeRoute(route = null) {
   if (!route || typeof route !== 'object') return null;
   const routePoints = Array.isArray(route.routePoints)
-    ? route.routePoints.map(cloneRuntimePoint).filter(Boolean).slice(0, 32)
+    ? route.routePoints.map(cloneRuntimePoint).filter(Boolean).slice(0, SERVER_RUNTIME_ROUTE_POINTS_SUMMARY_LIMIT)
     : [];
   const rawPoints = Array.isArray(route.rawPoints)
-    ? route.rawPoints.map(cloneRuntimePoint).filter(Boolean).slice(0, 80)
+    ? route.rawPoints.map(cloneRuntimePoint).filter(Boolean).slice(0, SERVER_RUNTIME_RAW_POINTS_SUMMARY_LIMIT)
     : [];
   const rawCells = Array.isArray(route.rawCells)
-    ? route.rawCells.map(cloneRuntimePoint).filter(Boolean).slice(0, 96)
+    ? route.rawCells.map(cloneRuntimePoint).filter(Boolean).slice(0, SERVER_RUNTIME_RAW_CELLS_SUMMARY_LIMIT)
     : [];
   const nextPoint = cloneRuntimePoint(route.effectiveTarget || route.pursuitTarget || route.route?.[route.routeIndex || 0] || null);
   return {
@@ -1405,6 +1448,10 @@ function summarizeServerRuntimeRoute(route = null) {
     source: safeText(route.source || 'dynamic-interior-routing.js', 'dynamic-interior-routing.js') || 'dynamic-interior-routing.js',
     active: route.active === true,
     reason: safeText(route.reason, ''),
+    phase: safeText(route.phase, ''),
+    routeSource: safeText(route.routeSource, ''),
+    doorBuildingId: safeText(route.doorBuildingId, ''),
+    doorFinalTarget: cloneRuntimePoint(route.doorFinalTarget || null),
     routeIndex: Math.max(0, Math.floor(numberOr(route.routeIndex, 0))),
     routeLength: Array.isArray(route.route) ? route.route.length : routePoints.length,
     nextPoint,
@@ -1416,6 +1463,10 @@ function summarizeServerRuntimeRoute(route = null) {
     rerouteFrom: cloneRuntimePoint(route.rerouteFrom || null),
     blockedPoint: cloneRuntimePoint(route.blockedPoint || null),
     blockedReason: safeText(route.blockedReason, ''),
+    recoveryAvoidPoint: cloneRuntimePoint(route.recoveryAvoidPoint || null),
+    recoveryAvoidRadiusWorld: Number.isFinite(Number(route.recoveryAvoidRadiusWorld))
+      ? Number(route.recoveryAvoidRadiusWorld)
+      : 0,
     crowdAvoidedAgents: Array.isArray(route.crowdAvoidedAgents)
       ? route.crowdAvoidedAgents.slice(0, 8).map(entry => ({
           agentId: safeText(entry?.agentId, ''),
@@ -1456,6 +1507,12 @@ function serverRuntimeCrowdAgents(state, agentId) {
     const point = normalizeServerRuntimePoint(plain, 1);
     if (!point) continue;
     const target = plain.target && typeof plain.target === 'object' ? plain.target : null;
+    const targetObjectKey = String(target?.objectKey || (
+      target?.buildingId && target?.furnitureIndex != null
+        ? runtimeFurnitureObjectKey(target.buildingId, target.furnitureIndex, target.objectType || 'object')
+        : ''
+    )).slice(0, 180);
+    const targetBaseObjectKey = String(target?.baseObjectKey || targetObjectKey || '').slice(0, 180);
     crowd.push({
       agentId: safeText(plain.agentId || otherId, '') || String(otherId),
       x: point.x,
@@ -1463,8 +1520,8 @@ function serverRuntimeCrowdAgents(state, agentId) {
       floor: point.floor,
       buildingId: point.buildingId,
       state: safeText(plain.state, ''),
-      targetObjectKey: String(target?.objectKey || '').slice(0, 180),
-      targetBaseObjectKey: String(target?.baseObjectKey || target?.objectKey || '').slice(0, 180),
+      targetObjectKey,
+      targetBaseObjectKey,
       targetIsQueueUse: target?.isQueueUse === true,
     });
   }
@@ -1477,6 +1534,214 @@ function shouldIgnoreServerRuntimeCrowdAgent(other, routeTarget = null) {
   if (!baseObjectKey || String(other.targetBaseObjectKey || '') !== baseObjectKey) return false;
   const otherWaiting = ['waiting', 'queued'].includes(String(other.state || '').toLowerCase());
   return other.targetIsQueueUse === true && otherWaiting;
+}
+
+function shouldIgnoreServerRuntimeDockOccupant(other, routeTarget = null, finalTarget = null, candidatePoint = null, arrivalRadius = 5) {
+  if (!other || !routeTarget || typeof routeTarget !== 'object' || !finalTarget || !candidatePoint) return false;
+  const baseObjectKey = String(routeTarget.baseObjectKey || routeTarget.objectKey || '');
+  const state = String(other.state || '').toLowerCase();
+  const otherDistToFinal = Math.hypot(numberOr(other.x, finalTarget.x) - finalTarget.x, numberOr(other.y, finalTarget.y) - finalTarget.y);
+  const candidateDistToFinal = Math.hypot(numberOr(candidatePoint.x, finalTarget.x) - finalTarget.x, numberOr(candidatePoint.y ?? candidatePoint.z, finalTarget.y) - finalTarget.y);
+  const dockRadius = Math.max(SERVER_RUNTIME_AGENT_SEPARATION_RADIUS, numberOr(arrivalRadius, 5) * 2);
+  if (otherDistToFinal > dockRadius || candidateDistToFinal > dockRadius) return false;
+  if (baseObjectKey && String(other.targetBaseObjectKey || '') === baseObjectKey) {
+    return ['working', 'using', 'active', 'waiting', 'queued', 'meeting'].includes(state);
+  }
+  const committedObjectDock = Boolean(
+    routeTarget.sourceObjectKey ||
+    routeTarget.objectKey ||
+    routeTarget.baseObjectKey ||
+    routeTarget.furnitureIndex != null ||
+    routeTarget.objectInstanceId
+  );
+  return committedObjectDock && state === 'idle' && otherDistToFinal <= dockRadius * 0.8;
+}
+
+function pointToSegmentDistanceApi(point, segA, segB) {
+  if (!point || !segA || !segB) return Infinity;
+  const vx = Number(segB.x || 0) - Number(segA.x || 0);
+  const vy = Number(segB.y || 0) - Number(segA.y || 0);
+  const wx = Number(point.x || 0) - Number(segA.x || 0);
+  const wy = Number(point.y || 0) - Number(segA.y || 0);
+  const len2 = vx * vx + vy * vy;
+  if (len2 <= 0.000001) return Math.hypot(wx, wy);
+  const t = Math.max(0, Math.min(1, (wx * vx + wy * vy) / len2));
+  return Math.hypot(Number(segA.x || 0) + vx * t - Number(point.x || 0), Number(segA.y || 0) + vy * t - Number(point.y || 0));
+}
+
+function projectPointOntoServerRuntimeRoute(currentPoint, routePoints = []) {
+  if (!currentPoint || !Array.isArray(routePoints) || routePoints.length === 0) return null;
+  if (routePoints.length === 1) {
+    const point = routePoints[0];
+    return {
+      segmentIndex: 0,
+      t: 1,
+      distance: Math.hypot(Number(point.x) - Number(currentPoint.x), Number(point.y) - Number(currentPoint.y)),
+      projectedPoint: cloneRuntimePoint(point),
+    };
+  }
+  let best = null;
+  for (let index = 0; index < routePoints.length - 1; index += 1) {
+    const a = routePoints[index];
+    const b = routePoints[index + 1];
+    if (!a || !b) continue;
+    const ax = Number(a.x);
+    const ay = Number(a.y);
+    const bx = Number(b.x);
+    const by = Number(b.y);
+    if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
+    const vx = bx - ax;
+    const vy = by - ay;
+    const len2 = vx * vx + vy * vy;
+    const wx = Number(currentPoint.x) - ax;
+    const wy = Number(currentPoint.y) - ay;
+    const t = len2 > 0.000001 ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / len2)) : 0;
+    const px = ax + vx * t;
+    const py = ay + vy * t;
+    const distance = Math.hypot(px - Number(currentPoint.x), py - Number(currentPoint.y));
+    const score = distance + index * 0.0001;
+    if (!best || score < best.score) {
+      best = {
+        segmentIndex: index,
+        t,
+        distance,
+        score,
+        projectedPoint: { x: px, y: py, floor: floorOr(a.floor ?? b.floor ?? currentPoint.floor, currentPoint.floor) },
+      };
+    }
+  }
+  return best;
+}
+
+function findServerRuntimeCrowdConflict(agentId, currentPoint, candidatePoint, crowdAgents = [], {
+  routeTarget = null,
+  finalTarget = null,
+  arrivalRadius = 5,
+  hardRadius = SERVER_RUNTIME_AGENT_HARD_SEPARATION_RADIUS,
+} = {}) {
+  const current = normalizeServerRuntimePoint(currentPoint, candidatePoint?.floor || 1);
+  const candidate = normalizeServerRuntimePoint(candidatePoint, current?.floor || 1);
+  if (!current || !candidate) return null;
+  const destination = normalizeServerRuntimePoint(finalTarget, candidate.floor);
+  let best = null;
+  for (const other of crowdAgents || []) {
+    if (!other || String(other.agentId || '') === String(agentId || '')) continue;
+    if (floorOr(other.floor, current.floor) !== current.floor) continue;
+    if (shouldIgnoreServerRuntimeCrowdAgent(other, routeTarget)) continue;
+    const otherPoint = { x: numberOr(other.x, candidate.x), y: numberOr(other.y, candidate.y) };
+    if (shouldIgnoreServerRuntimeDockOccupant(other, routeTarget, destination, candidate, arrivalRadius)) continue;
+    const currentDist = Math.hypot(current.x - otherPoint.x, current.y - otherPoint.y);
+    const candidateDist = Math.hypot(candidate.x - otherPoint.x, candidate.y - otherPoint.y);
+    const segmentDist = pointToSegmentDistanceApi(otherPoint, current, candidate);
+    const startsOverlapped = currentDist < hardRadius;
+    const blocked = startsOverlapped
+      ? candidateDist <= currentDist + 0.35
+      : (candidateDist < hardRadius || segmentDist < hardRadius);
+    if (!blocked) continue;
+    const distance = Math.min(candidateDist, segmentDist);
+    if (!best || distance < best.distance) {
+      best = {
+        agentId: safeText(other.agentId, '') || String(other.agentId || ''),
+        x: otherPoint.x,
+        y: otherPoint.y,
+        distance,
+        candidateDistance: candidateDist,
+        segmentDistance: segmentDist,
+        currentDistance: currentDist,
+        mode: startsOverlapped ? 'separate-block' : 'path-block',
+      };
+    }
+  }
+  return best;
+}
+
+function tryServerRuntimeCrowdSlide(dataDir, agentId, current, proposed, crowdConflict, {
+  phase = '',
+  route = null,
+  crowdAgents = [],
+  finalTarget = null,
+  arrivalRadius = 5,
+  routeTarget = null,
+} = {}) {
+  if (!crowdConflict) return null;
+  const dx = proposed.x - current.x;
+  const dy = proposed.y - current.y;
+  const len = Math.hypot(dx, dy);
+  if (len <= 0.001) return null;
+  const normalX = -dy / len;
+  const normalY = dx / len;
+  const offsets = [
+    LIVE_ACTION_API_TILE * 0.35,
+    LIVE_ACTION_API_TILE * 0.6,
+    LIVE_ACTION_API_TILE * 0.9,
+  ];
+  const scales = [1, 0.82, 0.62, 0.42, 0.24];
+  for (const scale of scales) {
+    const baseX = current.x + dx * scale;
+    const baseY = current.y + dy * scale;
+    for (const offset of offsets) {
+      for (const side of [1, -1]) {
+        const candidate = {
+          ...proposed,
+          x: baseX + normalX * offset * side,
+          y: baseY + normalY * offset * side,
+        };
+        const forwardProgress = ((candidate.x - current.x) * dx + (candidate.y - current.y) * dy) / len;
+        if (forwardProgress <= 0.2) continue;
+        const staticResult = validateServerRuntimeStaticSegment(dataDir, current, candidate, { phase, route });
+        if (!staticResult.clear) continue;
+        const nextCrowdConflict = findServerRuntimeCrowdConflict(agentId, current, candidate, crowdAgents, {
+          routeTarget,
+          finalTarget,
+          arrivalRadius,
+        });
+        if (nextCrowdConflict) continue;
+        return {
+          point: candidate,
+          adjusted: true,
+          routePatch: {
+            blockedReason: `server-crowd-slide-${crowdConflict.mode || 'blocked'}`,
+            blockedPoint: { x: numberOr(crowdConflict.x, proposed.x), y: numberOr(crowdConflict.y, proposed.y), floor: proposed.floor },
+            crowdAvoidedAgents: [crowdConflict],
+          },
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function makeServerRuntimeDynamicAvoidZones(agentId, currentPoint, finalTarget, crowdAgents = [], routeTarget = null) {
+  const current = normalizeServerRuntimePoint(currentPoint, finalTarget?.floor || 1);
+  const final = normalizeServerRuntimePoint(finalTarget, current?.floor || 1);
+  if (!current || !final || !Array.isArray(crowdAgents) || crowdAgents.length === 0) return [];
+  const routeLength = Math.max(1, Math.hypot(final.x - current.x, final.y - current.y));
+  const relevanceRadiusApi = Math.max(LIVE_ACTION_API_TILE * 3.25, routeLength * 0.18);
+  const zones = [];
+  for (const other of crowdAgents) {
+    if (!other || String(other.agentId || '') === String(agentId || '')) continue;
+    if (floorOr(other.floor, current.floor) !== current.floor) continue;
+    if (shouldIgnoreServerRuntimeDockOccupant(other, routeTarget, final, final, 5)) continue;
+    const point = { x: numberOr(other.x, NaN), y: numberOr(other.y, NaN) };
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    const distToCurrent = Math.hypot(point.x - current.x, point.y - current.y);
+    const distToRoute = pointToSegmentDistanceApi(point, current, final);
+    const distToFinal = Math.hypot(point.x - final.x, point.y - final.y);
+    if (Math.min(distToCurrent, distToRoute, distToFinal) > relevanceRadiusApi) continue;
+    const state = String(other.state || '').toLowerCase();
+    const stationaryBoost = ['idle', 'waiting', 'queued', 'working', 'using', 'active', 'meeting'].includes(state) ? 1.25 : 1;
+    zones.push({
+      x: point.x,
+      y: point.y,
+      radiusWorld: SERVER_RUNTIME_DYNAMIC_AVOID_RADIUS_WORLD,
+      hardRadiusWorld: SERVER_RUNTIME_DYNAMIC_AVOID_HARD_RADIUS_WORLD,
+      weight: SERVER_RUNTIME_DYNAMIC_AVOID_COST * stationaryBoost,
+      score: Math.min(distToCurrent, distToRoute + LIVE_ACTION_API_TILE * 0.35, distToFinal + LIVE_ACTION_API_TILE * 0.65),
+      agentId: safeText(other.agentId, '') || String(other.agentId || ''),
+    });
+  }
+  zones.sort((a, b) => a.score - b.score);
+  return zones.slice(0, SERVER_RUNTIME_DYNAMIC_AVOID_MAX_ZONES).map(({ score, ...zone }) => zone);
 }
 
 function isServerRuntimeDoorPhase(phase, route = null) {
@@ -1499,11 +1764,47 @@ function isServerRuntimePathfinderRoute(route = null) {
   return routePointCount > 1;
 }
 
+function isServerRuntimeAdjustedArrivalTarget(target = null) {
+  if (!target || typeof target !== 'object') return false;
+  const kind = String(target.targetKind || target.kind || '').toLowerCase();
+  return Boolean(
+    target.objectKey ||
+    target.baseObjectKey ||
+    target.objectId ||
+    target.objectInstanceId ||
+    target.furnitureIndex != null ||
+    target.objectType ||
+    target.actionId ||
+    ['placed-object', 'interior-object', 'interior-action-spot', 'agent-desk', 'desk', 'work-desk'].includes(kind)
+  );
+}
+
+function isServerRuntimeDoorwaySegment(building, aPoint, bPoint) {
+  if (!building || building.type === 'park' || !aPoint || !bPoint) return false;
+  const a = buildingLocalPointFromApi(building, aPoint.x, aPoint.y ?? aPoint.z);
+  const b = buildingLocalPointFromApi(building, bPoint.x, bPoint.y ?? bPoint.z);
+  if (!a || !b) return false;
+  const spec = getBuildingDoorSpec(building);
+  const centerX = numberOr(spec.localCenterX, Number(building.widthTiles || 10) / 2);
+  const height = Number(building.heightTiles || 8) || 8;
+  const halfWidth = Math.max(1.55, numberOr(spec.doorwayReachWorld, 0.55) * 2.2);
+  const minZ = Math.max(0, Math.min(spec.localInteriorZ, spec.localDoorwayZ) - 0.65);
+  const maxZ = Math.max(height + 0.35, Math.max(spec.localOutsideZ, spec.localThresholdZ) + 0.65);
+  const inDoorX = (point) => Math.abs(Number(point.x) - centerX) <= halfWidth;
+  const inDoorZ = (point) => Number(point.z) >= minZ && Number(point.z) <= maxZ;
+  return inDoorX(a) && inDoorX(b) && inDoorZ(a) && inDoorZ(b);
+}
+
+function clearServerRuntimePathfinderStateForRoute(agentId, route = null) {
+  const source = String(route?.source || '').toLowerCase();
+  if (source.includes('dynamic-interior-routing.js')) clearDynamicInteriorRoutingForAgent(agentId);
+  if (source.includes('dynamic-exterior-routing.js')) clearDynamicExteriorRoutingForAgent(agentId);
+}
+
 function validateServerRuntimeStaticSegment(dataDir, currentPoint, proposedPoint, { phase = '', route = null } = {}) {
   const current = normalizeServerRuntimePoint(currentPoint, proposedPoint?.floor || 1);
   const proposed = normalizeServerRuntimePoint(proposedPoint, current?.floor || 1);
   if (!current || !proposed) return { clear: true, reason: 'missing-segment-context' };
-  if (isServerRuntimeDoorPhase(phase, route)) return { clear: true, reason: 'door-transition' };
   if (isServerRuntimeUnvalidatedManualRoute(route)) return { clear: true, reason: 'unknown-building-route' };
 
   const currentCoordinateBuilding = findInteriorBuildingAtApi(dataDir, current.x, current.y);
@@ -1516,6 +1817,13 @@ function validateServerRuntimeStaticSegment(dataDir, currentPoint, proposedPoint
     : null;
 
   if (currentBuilding && proposedBuilding && currentBuilding.id === proposedBuilding.id && currentBuilding.type !== 'park') {
+    if (isServerRuntimeDoorPhase(phase, route) && isServerRuntimeDoorwaySegment(currentBuilding, current, proposed)) {
+      return {
+        clear: true,
+        reason: 'door-transition',
+        buildingId: currentBuilding.id,
+      };
+    }
     const result = isDynamicInteriorRouteSegmentClear(currentBuilding, current, proposed);
     return result.clear ? { ...result, buildingId: currentBuilding.id } : { ...result, buildingId: currentBuilding.id };
   }
@@ -1523,6 +1831,23 @@ function validateServerRuntimeStaticSegment(dataDir, currentPoint, proposedPoint
   if (!currentBuilding && !proposedBuilding) {
     const result = isDynamicExteriorRouteSegmentClear(current, proposed, { allowSoftFallback: true });
     return result.clear ? result : { ...result, blockedReason: `exterior-${result.reason || 'blocked'}` };
+  }
+
+  const handoffBuilding = currentBuilding || proposedBuilding;
+  if (handoffBuilding && handoffBuilding.type !== 'park') {
+    if (isServerRuntimeDoorwaySegment(handoffBuilding, current, proposed)) {
+      return {
+        clear: true,
+        reason: isServerRuntimeDoorPhase(phase, route) ? 'door-transition' : 'doorway-handoff',
+        buildingId: handoffBuilding.id,
+      };
+    }
+    return {
+      clear: false,
+      reason: 'building-wall-handoff',
+      blockedPoint: proposed,
+      buildingId: handoffBuilding.id,
+    };
   }
 
   return { clear: true, reason: 'building-handoff' };
@@ -1539,8 +1864,6 @@ function applyServerRuntimeAgentAvoidance(agentId, currentPoint, proposedPoint, 
   const proposed = normalizeServerRuntimePoint(proposedPoint, current?.floor || 1);
   if (!current || !proposed) return { point: proposedPoint, adjusted: false, blockers: [] };
   const destination = normalizeServerRuntimePoint(finalTarget, proposed.floor);
-  const destinationOccupantRadius = Math.max(SERVER_RUNTIME_AGENT_SEPARATION_RADIUS, numberOr(arrivalRadius, 5) * 2);
-
   let moveX = proposed.x - current.x;
   let moveY = proposed.y - current.y;
   if (Math.hypot(moveX, moveY) <= 0.001) return { point: proposed, adjusted: false, blockers: [] };
@@ -1551,7 +1874,7 @@ function applyServerRuntimeAgentAvoidance(agentId, currentPoint, proposedPoint, 
     if (!other || String(other.agentId || '') === String(agentId || '')) continue;
     if (floorOr(other.floor, current.floor) !== current.floor) continue;
     if (shouldIgnoreServerRuntimeCrowdAgent(other, routeTarget)) continue;
-    if (destination && Math.hypot(numberOr(other.x, destination.x) - destination.x, numberOr(other.y, destination.y) - destination.y) <= destinationOccupantRadius) continue;
+    if (shouldIgnoreServerRuntimeDockOccupant(other, routeTarget, destination, proposed, arrivalRadius)) continue;
     const ox = current.x - numberOr(other.x, current.x);
     const oy = current.y - numberOr(other.y, current.y);
     const dist = Math.hypot(ox, oy);
@@ -1571,7 +1894,7 @@ function applyServerRuntimeAgentAvoidance(agentId, currentPoint, proposedPoint, 
     if (!other || String(other.agentId || '') === String(agentId || '')) continue;
     if (floorOr(other.floor, current.floor) !== current.floor) continue;
     if (shouldIgnoreServerRuntimeCrowdAgent(other, routeTarget)) continue;
-    if (destination && Math.hypot(numberOr(other.x, destination.x) - destination.x, numberOr(other.y, destination.y) - destination.y) <= destinationOccupantRadius) continue;
+    if (shouldIgnoreServerRuntimeDockOccupant(other, routeTarget, destination, next, arrivalRadius)) continue;
     const ox = next.x - numberOr(other.x, next.x);
     const oy = next.y - numberOr(other.y, next.y);
     const dist = Math.hypot(ox, oy);
@@ -1587,6 +1910,52 @@ function applyServerRuntimeAgentAvoidance(agentId, currentPoint, proposedPoint, 
   }
 
   return { point: next, adjusted: blockers.length > 0, blockers };
+}
+
+function tryServerRuntimePathfinderStaticSlide(dataDir, current, proposed, staticResult, {
+  phase = '',
+  route = null,
+} = {}) {
+  if (!isServerRuntimePathfinderRoute(route)) return null;
+  const dx = proposed.x - current.x;
+  const dy = proposed.y - current.y;
+  const len = Math.hypot(dx, dy);
+  if (len <= 0.001) return null;
+  const normalX = -dy / len;
+  const normalY = dx / len;
+  const offsets = [
+    LIVE_ACTION_API_TILE * 0.15,
+    LIVE_ACTION_API_TILE * 0.3,
+    LIVE_ACTION_API_TILE * 0.5,
+  ];
+  const scales = [1, 0.75, 0.5, 0.25];
+  for (const scale of scales) {
+    const baseX = current.x + dx * scale;
+    const baseY = current.y + dy * scale;
+    for (const offset of offsets) {
+      for (const side of [1, -1]) {
+        const candidate = {
+          ...proposed,
+          x: baseX + normalX * offset * side,
+          y: baseY + normalY * offset * side,
+        };
+        const forwardProgress = ((candidate.x - current.x) * dx + (candidate.y - current.y) * dy) / len;
+        if (forwardProgress <= 0.25) continue;
+        const result = validateServerRuntimeStaticSegment(dataDir, current, candidate, { phase, route });
+        if (result.clear) {
+          return {
+            point: candidate,
+            adjusted: true,
+            routePatch: {
+              blockedPoint: staticResult.blockedPoint || proposed,
+              blockedReason: `server-static-slide-${staticResult.reason || staticResult.blockedReason || 'blocked'}`,
+            },
+          };
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, proposedPoint, {
@@ -1605,13 +1974,6 @@ function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, propo
 
   const staticResult = validateServerRuntimeStaticSegment(dataDir, current, proposed, { phase, route });
   if (!staticResult.clear) {
-    if (isServerRuntimePathfinderRoute(route)) {
-      return {
-        point: proposed,
-        adjusted: false,
-        routePatch: null,
-      };
-    }
     const dx = proposed.x - current.x;
     const dy = proposed.y - current.y;
     for (const scale of [0.5, 0.25, 0.125]) {
@@ -1633,6 +1995,9 @@ function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, propo
         };
       }
     }
+    const slideResult = tryServerRuntimePathfinderStaticSlide(dataDir, current, proposed, staticResult, { phase, route });
+    if (slideResult) return slideResult;
+    clearServerRuntimePathfinderStateForRoute(agentId, route);
     return {
       point: current,
       adjusted: true,
@@ -1641,6 +2006,34 @@ function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, propo
         active: false,
         blockedPoint: staticResult.blockedPoint || proposed,
         blockedReason: `server-static-step-${staticResult.reason || staticResult.blockedReason || 'blocked'}`,
+      },
+    };
+  }
+
+  const hardCrowdConflict = findServerRuntimeCrowdConflict(agentId, current, proposed, crowdAgents, {
+    routeTarget,
+    finalTarget,
+    arrivalRadius,
+  });
+  if (hardCrowdConflict) {
+    const crowdSlide = tryServerRuntimeCrowdSlide(dataDir, agentId, current, proposed, hardCrowdConflict, {
+      phase,
+      route,
+      crowdAgents,
+      finalTarget,
+      arrivalRadius,
+      routeTarget,
+    });
+    if (crowdSlide) return crowdSlide;
+    return {
+      point: current,
+      adjusted: true,
+      blocked: true,
+      routePatch: {
+        active: route?.active === true,
+        blockedPoint: proposed,
+        blockedReason: `server-crowd-wait-${hardCrowdConflict.mode || 'blocked'}`,
+        crowdAvoidedAgents: [hardCrowdConflict],
       },
     };
   }
@@ -1659,9 +2052,11 @@ function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, propo
     );
     if (noForwardProgress) {
       return {
-        point: proposed,
-        adjusted: false,
+        point: current,
+        adjusted: true,
         routePatch: {
+          blockedPoint: proposed,
+          blockedReason: 'server-crowd-wait-no-forward-progress',
           crowdAvoidedAgents: crowdResult.blockers,
         },
       };
@@ -1690,7 +2085,10 @@ function applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, propo
 function selectCachedServerRuntimeRouteStep(current, currentPoint, finalTarget, arrivalRadius = 5) {
   const runtimeRoute = current?.visualState?.runtimeRoute;
   if (!runtimeRoute || typeof runtimeRoute !== 'object' || runtimeRoute.active !== true) return null;
-  if (String(runtimeRoute.blockedReason || '').startsWith('server-static-step-')) return null;
+  if (String(runtimeRoute.blockedReason || '').startsWith('server-static-')) return null;
+  if (String(runtimeRoute.blockedReason || '').startsWith('server-crowd-wait-')) return null;
+  if (String(runtimeRoute.blockedReason || '').startsWith('server-crowd-slide-')) return null;
+  if (String(runtimeRoute.blockedReason || '').startsWith('server-crowd-adjustment-')) return null;
   const routePoints = Array.isArray(runtimeRoute.routePoints)
     ? runtimeRoute.routePoints.map(cloneRuntimePoint).filter(Boolean)
     : [];
@@ -1702,32 +2100,39 @@ function selectCachedServerRuntimeRouteStep(current, currentPoint, finalTarget, 
     if (finalDist > finalTolerance) return null;
     if (Number.isFinite(Number(cachedFinal.floor)) && floorOr(cachedFinal.floor, finalTarget.floor) !== finalTarget.floor) return null;
   }
+  const routeEndpoint = routePoints[routePoints.length - 1];
+  const acceptedEndpoint = runtimeRoute.targetAdjusted === true
+    ? (cloneRuntimePoint(runtimeRoute.adjustedTarget || cachedFinal || finalTarget) || finalTarget)
+    : finalTarget;
+  if (routeEndpoint && acceptedEndpoint) {
+    const endpointDist = Math.hypot(Number(routeEndpoint.x) - Number(acceptedEndpoint.x), Number(routeEndpoint.y) - Number(acceptedEndpoint.y));
+    if (endpointDist > finalTolerance) return null;
+    if (Number.isFinite(Number(routeEndpoint.floor)) && floorOr(routeEndpoint.floor, acceptedEndpoint.floor ?? finalTarget.floor) !== floorOr(acceptedEndpoint.floor ?? finalTarget.floor, finalTarget.floor)) return null;
+  }
   const firstSteeringIndex = routePoints.length > 1 ? 1 : 0;
-  const startIndex = Math.max(firstSteeringIndex, Math.min(routePoints.length - 1, Math.floor(numberOr(runtimeRoute.routeIndex, firstSteeringIndex))));
+  const projection = projectPointOntoServerRuntimeRoute(currentPoint, routePoints);
+  const corridorTolerance = Math.max(LIVE_ACTION_API_TILE * 1.35, finalTolerance, numberOr(arrivalRadius, 5) * 6);
+  if (projection && projection.distance > corridorTolerance) return null;
+  const projectedIndex = projection
+    ? Math.max(firstSteeringIndex, Math.min(routePoints.length - 1, projection.segmentIndex + (projection.t > 0.72 ? 2 : 1)))
+    : firstSteeringIndex;
+  const storedIndex = Math.max(firstSteeringIndex, Math.min(routePoints.length - 1, Math.floor(numberOr(runtimeRoute.routeIndex, firstSteeringIndex))));
+  const startIndex = storedIndex > projectedIndex + 1
+    ? projectedIndex
+    : Math.max(projectedIndex, storedIndex);
   const minStepDist = Math.max(1, numberOr(arrivalRadius, 5) * 0.5);
   const currentFinalDist = Math.hypot(Number(finalTarget.x) - Number(currentPoint.x), Number(finalTarget.y) - Number(currentPoint.y));
-  let closestIndex = startIndex;
-  let closestDist = Infinity;
+  let routeIndex = startIndex;
+  let steeringTarget = null;
   for (let index = startIndex; index < routePoints.length; index += 1) {
     const point = routePoints[index];
     const dist = Math.hypot(Number(point.x) - Number(currentPoint.x), Number(point.y) - Number(currentPoint.y));
-    if (dist < closestDist) {
-      closestDist = dist;
-      closestIndex = index;
-    }
-  }
-  let routeIndex = startIndex;
-  let steeringTarget = null;
-  for (let index = Math.max(startIndex, closestIndex); index < routePoints.length; index += 1) {
-    const point = routePoints[index];
-    const dist = Math.hypot(Number(point.x) - Number(currentPoint.x), Number(point.y) - Number(currentPoint.y));
-    const pointFinalDist = Math.hypot(Number(finalTarget.x) - Number(point.x), Number(finalTarget.y) - Number(point.y));
-    const isForwardProgress = index > closestIndex || pointFinalDist < currentFinalDist + minStepDist;
-    if (dist > minStepDist && isForwardProgress) {
+    if (dist > minStepDist) {
       routeIndex = index;
       steeringTarget = { ...finalTarget, x: Number(point.x), y: Number(point.y), floor: floorOr(point.floor ?? finalTarget.floor, finalTarget.floor) };
       break;
     }
+    routeIndex = index;
   }
   if (!steeringTarget) {
     if (currentFinalDist <= Math.max(1, numberOr(arrivalRadius, 5))) return null;
@@ -1746,6 +2151,10 @@ function selectCachedServerRuntimeRouteStep(current, currentPoint, finalTarget, 
       route: routePoints,
       routePoints,
       finalPoint: finalTarget,
+      projectedPoint: projection?.projectedPoint || null,
+      blockedPoint: null,
+      blockedReason: '',
+      crowdAvoidedAgents: [],
     },
   };
 }
@@ -1773,7 +2182,65 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
   let route = null;
   let phase = 'direct';
   const arrival = Math.max(1, numberOr(arrivalRadius, 5));
-  const cachedRouteStep = selectCachedServerRuntimeRouteStep(current, currentPoint, finalTarget, arrival);
+  const routeApproachSource = target?.routeApproachTarget && typeof target.routeApproachTarget === 'object'
+    ? target.routeApproachTarget
+    : null;
+  const routeApproachTarget = routeApproachSource &&
+    Number.isFinite(Number(routeApproachSource.x)) &&
+    Number.isFinite(Number(routeApproachSource.y ?? routeApproachSource.z))
+    ? {
+        ...finalTarget,
+        x: Number(routeApproachSource.x),
+        y: Number(routeApproachSource.y ?? routeApproachSource.z),
+        floor: floorOr(routeApproachSource.floor ?? finalTarget.floor, finalTarget.floor),
+        buildingId: safeText(routeApproachSource.buildingId || finalTarget.buildingId, ''),
+        targetKind: 'scripted-object-route-approach',
+        spotId: safeText(routeApproachSource.spotId || target?.approachSpotId || 'approach-front', 'approach-front') || 'approach-front',
+      }
+    : null;
+  const routeApproachSnapRadius = routeApproachTarget
+    ? Math.max(arrival, numberOr(target?.dockSnapRadius ?? target?.activationRadius ?? target?.snapRadius, arrival))
+    : arrival;
+  const distanceToRouteApproach = routeApproachTarget
+    ? Math.hypot(routeApproachTarget.x - currentPoint.x, routeApproachTarget.y - currentPoint.y)
+    : Infinity;
+  const routeViaApproach = Boolean(routeApproachTarget && distanceToRouteApproach > routeApproachSnapRadius);
+  const movementTarget = routeViaApproach ? routeApproachTarget : finalTarget;
+  const previousRuntimeRoute = current?.visualState?.runtimeRoute;
+  const previousBlockedReason = String(previousRuntimeRoute?.blockedReason || '');
+  const previousStaticBlock = previousBlockedReason.startsWith('server-static-');
+  const previousCrowdBlock = previousBlockedReason.startsWith('server-crowd-wait-') ||
+    previousBlockedReason.startsWith('server-crowd-slide-') ||
+    previousBlockedReason.startsWith('server-crowd-adjustment-');
+  const previousReplanBlock = previousStaticBlock || previousCrowdBlock;
+  if (previousReplanBlock) clearServerRuntimePathfinderStateForRoute(agentId, previousRuntimeRoute);
+  const recoveryAvoidPoint = previousReplanBlock
+    ? cloneRuntimePoint(previousRuntimeRoute?.blockedPoint || previousRuntimeRoute?.recoveryAvoidPoint || null)
+    : null;
+  const dynamicAvoidZones = makeServerRuntimeDynamicAvoidZones(agentId, currentPoint, movementTarget, crowdAgents, target);
+  const dynamicAvoidRoutePatch = dynamicAvoidZones.length
+    ? {
+        dynamicAvoidZoneCount: dynamicAvoidZones.length,
+        dynamicAvoidZones: dynamicAvoidZones.slice(0, 4).map(zone => ({
+          x: numberOr(zone.x, 0),
+          y: numberOr(zone.y, 0),
+          radiusWorld: numberOr(zone.radiusWorld, 0),
+          hardRadiusWorld: numberOr(zone.hardRadiusWorld, 0),
+          agentId: safeText(zone.agentId, ''),
+        })),
+      }
+    : null;
+  const recoveryRouteOptions = recoveryAvoidPoint
+    ? {
+        forceRecoveryReplan: true,
+        recoveryAvoidPoint,
+        recoveryReason: safeText(previousRuntimeRoute?.blockedReason, previousStaticBlock ? 'server-static-recovery' : 'server-crowd-recovery') || (previousStaticBlock ? 'server-static-recovery' : 'server-crowd-recovery'),
+        ...(dynamicAvoidZones.length ? { dynamicAvoidZones } : {}),
+      }
+    : (dynamicAvoidZones.length ? { dynamicAvoidZones } : {});
+  const cachedRouteStep = previousReplanBlock
+    ? null
+    : selectCachedServerRuntimeRouteStep(current, currentPoint, movementTarget, arrival);
   const makeRoute = (source, reason, effectiveTarget, points = [], active = false, extra = {}) => ({
     active,
     source,
@@ -1781,10 +2248,65 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
     effectiveTarget,
     routeIndex: 0,
     route: points.length ? points : [effectiveTarget],
-    routePoints: [cloneRuntimePoint(currentPoint), ...points.map(cloneRuntimePoint), cloneRuntimePoint(finalTarget)].filter(Boolean),
-    finalPoint: finalTarget,
+    routePoints: [cloneRuntimePoint(currentPoint), ...points.map(cloneRuntimePoint), cloneRuntimePoint(movementTarget)].filter(Boolean),
+    finalPoint: movementTarget,
     ...extra,
   });
+
+  const makeDoorTransitionRoute = (reason, effectiveTarget, points = [], extra = {}) => {
+    const routePoints = [cloneRuntimePoint(currentPoint), ...points.map(cloneRuntimePoint)].filter(Boolean);
+    return makeRoute('server-door-transition', reason, effectiveTarget, points, true, {
+      routeIndex: Math.min(1, Math.max(0, routePoints.length - 1)),
+      route: routePoints.slice(1),
+      routePoints,
+      finalPoint: cloneRuntimePoint(effectiveTarget) || finalTarget,
+      ...extra,
+    });
+  };
+
+  const useDoorApproachRoute = (building, approachTarget, source, reason, routePhase, options = {}) => {
+    const routeTarget = { ...approachTarget, floor: finalTarget.floor, targetKind: options.targetKind || 'building-door-approach' };
+    steeringTarget = routeTarget;
+    phase = routePhase;
+    const dynamicRoute = source === 'interior'
+      ? updateDynamicInteriorRouting(currentPoint, routeTarget, tickMs, {
+          building,
+          debug: false,
+          ...recoveryRouteOptions,
+        })
+      : updateDynamicExteriorRouting(currentPoint, routeTarget, tickMs, {
+          debug: false,
+          ...recoveryRouteOptions,
+        });
+    if (dynamicRoute?.active && dynamicRoute.effectiveTarget) {
+      steeringTarget = { ...routeTarget, x: dynamicRoute.effectiveTarget.x, y: dynamicRoute.effectiveTarget.y };
+      route = {
+        ...dynamicRoute,
+        source: source === 'interior' ? 'dynamic-interior-routing.js' : 'dynamic-exterior-routing.js',
+        reason,
+        effectiveTarget: steeringTarget,
+        finalPoint: routeTarget,
+        doorFinalTarget: finalTarget,
+        doorBuildingId: safeText(building?.id, ''),
+      };
+      return true;
+    }
+    route = makeRoute(
+      source === 'interior' ? 'dynamic-interior-routing.js' : 'dynamic-exterior-routing.js',
+      dynamicRoute?.reason || `${reason}-unavailable`,
+      routeTarget,
+      [routeTarget],
+      false,
+      {
+        route: [cloneRuntimePoint(routeTarget)].filter(Boolean),
+        routePoints: [cloneRuntimePoint(currentPoint), cloneRuntimePoint(routeTarget)].filter(Boolean),
+        finalPoint: routeTarget,
+        doorFinalTarget: finalTarget,
+        doorBuildingId: safeText(building?.id, ''),
+      },
+    );
+    return false;
+  };
 
   const steerDoorTransition = (building, direction) => {
     const doorway = buildingDoorwayPointApi(building);
@@ -1799,41 +2321,49 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       if (distToOutside <= Math.max(reach, arrival * 2)) {
         steeringTarget = { ...finalTarget, ...inside, floor: finalTarget.floor, targetKind: 'building-door-entry' };
         phase = 'door-crossing';
-        route = makeRoute('server-door-transition', 'enter-building-through-door', steeringTarget, [outside, doorway, inside].filter(Boolean));
+        route = makeDoorTransitionRoute('enter-building-through-door', steeringTarget, [outside, doorway, inside].filter(Boolean), {
+          doorFinalTarget: finalTarget,
+          doorBuildingId: safeText(building?.id, ''),
+        });
         return true;
       }
-      return false;
+      useDoorApproachRoute(building, outside, 'exterior', 'door-enter-approach', 'door-enter-approach', { targetKind: 'building-door-outside-approach' });
+      return true;
     }
     if (direction === 'exit' && outside && inside) {
-      const distToInside = Math.min(
-        Math.hypot(currentPoint.x - inside.x, currentPoint.y - inside.y),
-        doorway ? Math.hypot(currentPoint.x - doorway.x, currentPoint.y - doorway.y) : Infinity,
-      );
-      steeringTarget = distToInside <= Math.max(reach, arrival * 2)
-        ? { ...outside, floor: finalTarget.floor, targetKind: 'building-door-exit' }
-        : { ...inside, floor: finalTarget.floor, targetKind: 'building-door-inside-approach' };
-      phase = distToInside <= Math.max(reach, arrival * 2) ? 'door-exit' : 'door-inside-approach';
-      route = makeRoute('server-door-transition', phase === 'door-exit' ? 'exit-building-through-door' : 'inside-to-building-door', steeringTarget, [inside, doorway, outside].filter(Boolean));
+      const distToDoorway = doorway
+        ? Math.hypot(currentPoint.x - doorway.x, currentPoint.y - doorway.y)
+        : Math.hypot(currentPoint.x - inside.x, currentPoint.y - inside.y);
+      if (distToDoorway <= Math.max(reach, arrival * 2)) {
+        steeringTarget = { ...outside, floor: finalTarget.floor, targetKind: 'building-door-exit' };
+        phase = 'door-exit';
+        route = makeDoorTransitionRoute('exit-building-through-door', steeringTarget, [doorway, outside].filter(Boolean), {
+          doorFinalTarget: finalTarget,
+          doorBuildingId: safeText(building?.id, ''),
+        });
+        return true;
+      }
+      useDoorApproachRoute(building, { ...doorway, floor: finalTarget.floor, targetKind: 'building-door-threshold' }, 'interior', 'inside-to-building-door', 'door-inside-approach', { targetKind: 'building-door-threshold' });
       return true;
     }
     return false;
   };
 
   const useExteriorRoute = () => {
-    const dynamicRoute = updateDynamicExteriorRouting(currentPoint, finalTarget, tickMs, { debug: false });
+    const dynamicRoute = updateDynamicExteriorRouting(currentPoint, movementTarget, tickMs, { debug: false, ...recoveryRouteOptions });
     if (dynamicRoute?.active && dynamicRoute.effectiveTarget) {
-      steeringTarget = { ...finalTarget, x: dynamicRoute.effectiveTarget.x, y: dynamicRoute.effectiveTarget.y };
+      steeringTarget = { ...movementTarget, x: dynamicRoute.effectiveTarget.x, y: dynamicRoute.effectiveTarget.y };
       phase = dynamicRoute.reason === 'door-approach' || dynamicRoute.reason === 'door-handoff'
         ? 'door-approach'
         : 'exterior-route';
       route = {
         ...dynamicRoute,
         source: 'dynamic-exterior-routing.js',
-        finalPoint: finalTarget,
+        finalPoint: movementTarget,
       };
       return true;
     }
-    route = makeRoute('dynamic-exterior-routing.js', dynamicRoute?.reason || 'exterior-route-unavailable', finalTarget, [finalTarget]);
+    route = makeRoute('dynamic-exterior-routing.js', dynamicRoute?.reason || 'exterior-route-unavailable', movementTarget, [movementTarget]);
     return false;
   };
 
@@ -1842,15 +2372,15 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
     route = cachedRouteStep.route;
     phase = String(route.source || '').includes('interior') ? 'interior-route' : 'exterior-route';
   } else {
-    const coordinateTargetBuilding = findInteriorBuildingAtApi(dataDir, finalTarget.x, finalTarget.y);
-    const targetBuildingById = finalTarget.buildingId ? readBuildingDocument(dataDir, finalTarget.buildingId) : null;
-    const targetBuilding = targetBuildingById || (!finalTarget.buildingId ? coordinateTargetBuilding : null);
-    const unknownTargetBuilding = Boolean(finalTarget.buildingId && !targetBuildingById);
+    const coordinateTargetBuilding = findInteriorBuildingAtApi(dataDir, movementTarget.x, movementTarget.y);
+    const targetBuildingById = movementTarget.buildingId ? readBuildingDocument(dataDir, movementTarget.buildingId) : null;
+    const targetBuilding = targetBuildingById || (!movementTarget.buildingId ? coordinateTargetBuilding : null);
+    const unknownTargetBuilding = Boolean(movementTarget.buildingId && !targetBuildingById);
     const currentBuilding = findInteriorBuildingAtApi(dataDir, currentPoint.x, currentPoint.y);
     if (unknownTargetBuilding) {
-      steeringTarget = finalTarget;
+      steeringTarget = movementTarget;
       phase = 'unknown-building-route';
-      route = makeRoute('server-scripted-object-unknown-building-route', 'unknown-building-direct-route', finalTarget, [finalTarget], true);
+      route = makeRoute('server-scripted-object-unknown-building-route', 'unknown-building-direct-route', movementTarget, [movementTarget], true);
     } else if (currentBuilding && currentBuilding.type !== 'park' && (!targetBuilding || currentBuilding.id !== targetBuilding.id)) {
       steerDoorTransition(currentBuilding, 'exit');
     } else if (targetBuilding && targetBuilding.type !== 'park') {
@@ -1858,20 +2388,21 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       if (!currentInsideTarget) {
         if (!steerDoorTransition(targetBuilding, 'enter')) useExteriorRoute();
       } else {
-        const dynamicRoute = updateDynamicInteriorRouting(currentPoint, finalTarget, tickMs, {
+        const dynamicRoute = updateDynamicInteriorRouting(currentPoint, movementTarget, tickMs, {
           building: targetBuilding,
           debug: false,
+          ...recoveryRouteOptions,
         });
         if (dynamicRoute?.active && dynamicRoute.effectiveTarget) {
-          steeringTarget = { ...finalTarget, x: dynamicRoute.effectiveTarget.x, y: dynamicRoute.effectiveTarget.y };
+          steeringTarget = { ...movementTarget, x: dynamicRoute.effectiveTarget.x, y: dynamicRoute.effectiveTarget.y };
           phase = 'interior-route';
           route = {
             ...dynamicRoute,
             source: 'dynamic-interior-routing.js',
-            finalPoint: finalTarget,
+            finalPoint: movementTarget,
           };
         } else {
-          route = makeRoute('dynamic-interior-routing.js', dynamicRoute?.reason || 'interior-route-unavailable', finalTarget, [finalTarget]);
+          route = makeRoute('dynamic-interior-routing.js', dynamicRoute?.reason || 'interior-route-unavailable', movementTarget, [movementTarget]);
         }
       }
     } else if (!currentBuilding) {
@@ -1886,12 +2417,55 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
   const finalDy = Number(finalTarget.y) - Number(currentPoint.y || 0);
   const distanceToFinal = Math.hypot(finalDx, finalDy);
   const step = Math.max(1, numberOr(speedUnitsPerSec, 72) * (Math.max(1, tickMs) / 1000));
-  const arrived = distanceToFinal <= arrival && !String(phase || '').startsWith('door-');
+  const adjustedArrivalPoint = route?.targetAdjusted === true
+    ? cloneRuntimePoint(route.adjustedTarget || null)
+    : null;
+  const distanceToAdjustedArrival = adjustedArrivalPoint
+    ? Math.hypot(Number(adjustedArrivalPoint.x) - Number(currentPoint.x || 0), Number(adjustedArrivalPoint.y) - Number(currentPoint.y || 0))
+    : Infinity;
+  const arrivedAtAdjustedDock = Boolean(
+    adjustedArrivalPoint &&
+    isServerRuntimeAdjustedArrivalTarget(target) &&
+    distanceToAdjustedArrival <= Math.max(arrival, 8)
+  );
+  const arrivedAtRouteApproachDock = Boolean(
+    routeApproachTarget &&
+    !routeViaApproach &&
+    distanceToRouteApproach <= routeApproachSnapRadius &&
+    isServerRuntimeAdjustedArrivalTarget(target)
+  );
+  const arrived = (distanceToFinal <= arrival || arrivedAtAdjustedDock || arrivedAtRouteApproachDock) && !String(phase || '').startsWith('door-');
+  let arrivalPublishTarget = finalTarget;
+  let arrivalRoutePatch = arrivedAtRouteApproachDock
+    ? {
+        routeApproachTarget,
+        dockTarget: finalTarget,
+        dockSnapReason: 'seat-route-approach-complete',
+      }
+    : null;
+  if (arrivedAtAdjustedDock && adjustedArrivalPoint) {
+    const arrivalSnapCheck = validateServerRuntimeStaticSegment(dataDir, currentPoint, finalTarget, { phase, route });
+    if (!arrivalSnapCheck.clear) {
+      arrivalPublishTarget = {
+        ...finalTarget,
+        x: Number(adjustedArrivalPoint.x),
+        y: Number(adjustedArrivalPoint.y),
+        floor: floorOr(adjustedArrivalPoint.floor ?? finalTarget.floor, finalTarget.floor),
+      };
+      arrivalRoutePatch = {
+        blockedPoint: arrivalSnapCheck.blockedPoint || finalTarget,
+        blockedReason: `server-static-arrival-snap-${arrivalSnapCheck.reason || arrivalSnapCheck.blockedReason || 'blocked'}`,
+        adjustedTarget: adjustedArrivalPoint,
+        arrivalSnapSuppressed: true,
+      };
+    }
+  }
 
   // M1.5a — continuous waypoint advance: consume the full per-tick step distance
   // across successive route waypoints instead of stopping at each corner.
   // Intermediate waypoints never trigger arrival/dwell; only finalTarget uses arrivalRadius.
   const tickWaypoints = [];
+  const tickCollisionPath = [];
   if (!arrived) {
     tickWaypoints.push({ x: Number(steeringTarget.x), y: Number(steeringTarget.y), final: false });
     const routePoints = Array.isArray(route?.routePoints) && route.routePoints.length > 1
@@ -1917,11 +2491,11 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       }
     }
     const lastWaypoint = tickWaypoints[tickWaypoints.length - 1];
-    if (lastWaypoint && Math.hypot(lastWaypoint.x - finalTarget.x, lastWaypoint.y - finalTarget.y) <= 0.001) {
+    if (lastWaypoint && Math.hypot(lastWaypoint.x - movementTarget.x, lastWaypoint.y - movementTarget.y) <= 0.001) {
       lastWaypoint.final = true;
-    } else if (canChainWaypoints && steeringIndex >= 0) {
+    } else if (canChainWaypoints && steeringIndex >= 0 && route?.targetAdjusted !== true) {
       // Pathfinder routes may end short of the exact final target; finish the chain there.
-      tickWaypoints.push({ x: Number(finalTarget.x), y: Number(finalTarget.y), final: true });
+      tickWaypoints.push({ x: Number(movementTarget.x), y: Number(movementTarget.y), final: true });
     }
 
     // Consume the tick step measured as EUCLIDEAN distance from the tick-start
@@ -1936,6 +2510,12 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
     let cursorX = startX;
     let cursorY = startY;
     let waypointsConsumed = 0;
+    const pushTickCollisionPoint = () => {
+      const last = tickCollisionPath[tickCollisionPath.length - 1] || { x: startX, y: startY };
+      if (Math.hypot(cursorX - last.x, cursorY - last.y) > 0.001) {
+        tickCollisionPath.push({ x: cursorX, y: cursorY });
+      }
+    };
     for (const waypoint of tickWaypoints) {
       const segDx = waypoint.x - cursorX;
       const segDy = waypoint.y - cursorY;
@@ -1949,6 +2529,7 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       if (endEuclid <= step + 0.0001 && segDist <= pathBudgetLeft) {
         cursorX = waypoint.x;
         cursorY = waypoint.y;
+        pushTickCollisionPoint();
         pathConsumed += segDist;
         if (waypoint.final) break;
         waypointsConsumed += 1;
@@ -1970,13 +2551,14 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       if (pathBudgetLeft < segDist * t) t = Math.max(0, pathBudgetLeft / segDist);
       cursorX += segDx * t;
       cursorY += segDy * t;
+      pushTickCollisionPoint();
       break;
     }
     if (steeringIndex >= 0 && waypointsConsumed > 0 && route && Array.isArray(route.routePoints)) {
       route.routeIndex = Math.min(route.routePoints.length - 1, steeringIndex + waypointsConsumed);
       if (route.routePoints[route.routeIndex]) {
         const advanced = route.routePoints[route.routeIndex];
-        route.effectiveTarget = { ...finalTarget, x: Number(advanced.x), y: Number(advanced.y), floor: floorOr(advanced.floor ?? finalTarget.floor, finalTarget.floor) };
+        route.effectiveTarget = { ...movementTarget, x: Number(advanced.x), y: Number(advanced.y), floor: floorOr(advanced.floor ?? movementTarget.floor, movementTarget.floor) };
       }
     }
     tickWaypoints.length = 0;
@@ -1998,8 +2580,8 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
     if (Math.abs(delta) <= maxTurnPerTick) return desired;
     return normalizeRuntimeAngleRadians(previousHeading + Math.sign(delta) * maxTurnPerTick, desired);
   };
-  let nextX = arrived ? Number(finalTarget.x) : tickWaypoints[0].x;
-  let nextY = arrived ? Number(finalTarget.y) : tickWaypoints[0].y;
+  let nextX = arrived ? Number(arrivalPublishTarget.x) : tickWaypoints[0].x;
+  let nextY = arrived ? Number(arrivalPublishTarget.y) : tickWaypoints[0].y;
   let heading = distanceToSteering > 0.001
     ? applyTurnRateLimit(Math.atan2(dx, dy))
     : previousHeading;
@@ -2010,32 +2592,61 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       heading = applyTurnRateLimit(Math.atan2(tickDx, tickDy));
     }
   }
-  let routePatch = null;
+  let routePatch = arrivalRoutePatch || dynamicAvoidRoutePatch;
+  const mergeRoutePatch = (patch) => {
+    if (!patch) return;
+    const existingCrowd = Array.isArray(routePatch?.crowdAvoidedAgents) ? routePatch.crowdAvoidedAgents : [];
+    const nextCrowd = Array.isArray(patch.crowdAvoidedAgents) ? patch.crowdAvoidedAgents : [];
+    routePatch = {
+      ...(routePatch || {}),
+      ...patch,
+      ...(existingCrowd.length || nextCrowd.length ? { crowdAvoidedAgents: [...existingCrowd, ...nextCrowd].slice(0, 8) } : {}),
+    };
+  };
   if (!arrived) {
-    const guarded = applyServerRuntimeCollisionGuards(dataDir, agentId, currentPoint, {
-      x: nextX,
-      y: nextY,
-      floor: finalTarget.floor,
-      buildingId: finalTarget.buildingId || currentPoint.buildingId || '',
-    }, {
-      phase,
-      route,
-      crowdAgents,
-      tickMs,
-      speedUnitsPerSec,
-      finalTarget,
-      arrivalRadius: arrival,
-      routeTarget: target,
-    });
-    if (guarded?.point) {
+    const guardTargets = tickCollisionPath.length ? tickCollisionPath : [{ x: nextX, y: nextY }];
+    let guardCurrent = { ...currentPoint };
+    for (const guardTarget of guardTargets) {
+      const segmentTarget = {
+        x: Number(guardTarget.x),
+        y: Number(guardTarget.y),
+        floor: movementTarget.floor,
+        buildingId: movementTarget.buildingId || currentPoint.buildingId || '',
+      };
+      if (Math.hypot(segmentTarget.x - Number(guardCurrent.x || 0), segmentTarget.y - Number(guardCurrent.y || 0)) <= 0.001) {
+        guardCurrent = { ...guardCurrent, ...segmentTarget };
+        continue;
+      }
+      const guarded = applyServerRuntimeCollisionGuards(dataDir, agentId, guardCurrent, segmentTarget, {
+        phase,
+        route,
+        crowdAgents,
+        tickMs,
+        speedUnitsPerSec,
+        finalTarget: movementTarget,
+        arrivalRadius: arrival,
+        routeTarget: target,
+      });
+      if (!guarded?.point) break;
       nextX = Number(guarded.point.x);
       nextY = Number(guarded.point.y ?? guarded.point.z);
-      routePatch = guarded.routePatch || null;
-      const guardedDx = nextX - Number(currentPoint.x || 0);
-      const guardedDy = nextY - Number(currentPoint.y || 0);
-      if (Math.hypot(guardedDx, guardedDy) > 0.001) {
-        heading = applyTurnRateLimit(Math.atan2(guardedDx, guardedDy));
+      mergeRoutePatch(guarded.routePatch || null);
+      const reachedSegmentTarget = Math.hypot(nextX - segmentTarget.x, nextY - segmentTarget.y) <= 0.001;
+      guardCurrent = {
+        ...guardCurrent,
+        x: nextX,
+        y: nextY,
+        floor: segmentTarget.floor,
+        buildingId: segmentTarget.buildingId,
+      };
+      if (guarded.blocked || guarded.adjusted || !reachedSegmentTarget) {
+        break;
       }
+    }
+    const guardedDx = nextX - Number(currentPoint.x || 0);
+    const guardedDy = nextY - Number(currentPoint.y || 0);
+    if (Math.hypot(guardedDx, guardedDy) > 0.001) {
+      heading = applyTurnRateLimit(Math.atan2(guardedDx, guardedDy));
     }
   }
   return {
@@ -2048,7 +2659,13 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
     distanceToSteering,
     steeringTarget,
     finalTarget,
-    route: route ? { ...route, ...(routePatch || {}), routeSource, phase } : null,
+    route: route ? {
+      ...route,
+      ...(routeApproachTarget ? { routeApproachTarget, dockFinalTarget: finalTarget } : {}),
+      ...(routePatch || {}),
+      routeSource,
+      phase,
+    } : null,
     phase,
   };
 }
@@ -2105,6 +2722,10 @@ function stableTextHash(value) {
     hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
   }
   return Math.abs(hash);
+}
+
+function stableUnitFloat(seed = '') {
+  return (stableTextHash(String(seed || '')) % 1_000_000) / 1_000_000;
 }
 
 function rotateRuntimeLocalOffset(dx, dz, rotationDeg = 0) {
@@ -2202,6 +2823,9 @@ function runtimeFurnitureActionFaceAngle(building, furniture, local, fromPoint =
   if (explicit !== null) return explicit;
   if (options?.deskFacesScreen && String(furniture?.type || '').toLowerCase() === 'desk') {
     return runtimeFacingAngle(building, furniture, local?.x, local?.z, 'south');
+  }
+  if (String(local?.poseKind || '').toLowerCase() === 'seat') {
+    return runtimeFacingAngle(building, furniture, local?.x, local?.z, local?.facing || 'north');
   }
   return runtimeFurnitureCenterFaceAngle(building, furniture, local?.x, local?.z, fromPoint)
     ?? runtimeFacingAngle(building, furniture, local?.x, local?.z, local?.facing);
@@ -2582,6 +3206,33 @@ const SCRIPTED_OBJECT_IDLE_STATES = new Set(['idle', 'available', 'online']);
 const SERVER_SCRIPTED_OBJECT_QUEUE_SPACING_TILES = 0.8;
 const SERVER_SCRIPTED_OBJECT_QUEUE_DEFAULT_CAPACITY = 3;
 const SERVER_SCRIPTED_QUEUE_TERMINAL_STATES = new Set(['released', 'cancelled', 'complete', 'completed', 'failed']);
+const SERVER_SCRIPTED_RUNTIME_OCCUPIED_STATES = new Set(['routing', 'working', 'using', 'active', 'arrived', 'in_progress', 'waiting', 'queued', 'meeting']);
+const SERVER_SCRIPTED_SEAT_OBJECT_TYPES = new Set([
+  'chair',
+  'officechair',
+  'conferencechair',
+  'barberchair',
+  'couch',
+  'sectionalsofa',
+  'loveseat',
+  'armchair',
+  'parkbench',
+  'hallwaybench',
+  'barstool',
+  'diningchair',
+  'patiochair',
+  'bed',
+  'clinicbed',
+  'examchair',
+  'smallcafetable',
+  'outdoorcafetable',
+  'picnictable',
+  'smallroundmeetingtable',
+  'meetingtable',
+  'gamingstation',
+  'playgroundswing',
+  'busstop',
+]);
 const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   chair: Object.freeze({ kind: 'chair-sit', spotId: 'seat', animationId: 'sit', poseKind: 'seat', stayMs: [9000, 15000] }),
   officechair: Object.freeze({ kind: 'office-chair-sit', spotId: 'seat', animationId: 'sit', poseKind: 'seat', stayMs: [9000, 15000] }),
@@ -2655,7 +3306,7 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   arcademachine: Object.freeze({ kind: 'arcade-machine-play', spotId: 'play-front', animationId: 'play-arcade', poseKind: 'stand-use', stayMs: [12000, 22000] }),
   gamingstation: Object.freeze({ kind: 'gaming-station-play', spotId: 'seat-play', animationId: 'play-game', poseKind: 'seat', stayMs: [12000, 22000] }),
   pooltable: Object.freeze({ kind: 'pool-table-play', spotId: 'break-end', animationId: 'pool-table-play', poseKind: 'stand-use', stayMs: [12000, 22000] }),
-  pingpong: Object.freeze({ kind: 'pingpong-play', spotId: 'player-left', animationId: 'play-pingpong', poseKind: 'stand-use', stayMs: [18000, 28000] }),
+  pingpong: Object.freeze({ kind: 'pingpong-play', spotId: 'player-left', animationId: 'play-pingpong', poseKind: 'stand-use', stayMs: [24000, 24000] }),
   printer: Object.freeze({ kind: 'printer-scanner-print', spotId: 'use-front', animationId: 'printer-scanner-use', poseKind: 'stand-use', stayMs: [8000, 14000] }),
   printercopier: Object.freeze({ kind: 'printer-scanner-print', spotId: 'use-front', animationId: 'printer-scanner-use', poseKind: 'stand-use', stayMs: [8000, 14000] }),
   toolcart: Object.freeze({ kind: 'tool-cart-select-tool', spotId: 'select-front', animationId: 'tool-cart-select', poseKind: 'stand-use', stayMs: [8000, 14000] }),
@@ -2889,17 +3540,58 @@ function hydrateServerScriptedDeskConsumeTargetFromVisual(target = null, visualS
   };
 }
 
-function makeServerScriptedDeskConsumeTarget(dataDir, agentId, sourceTarget = null, nowMs = Date.now()) {
+function claimedLiveStatusWorkTargetIndexesFromRuntime(state = null, workTargets = [], agentId = '') {
+  const claimed = new Set();
+  if (!state?.agents?.entries || !Array.isArray(workTargets) || workTargets.length === 0) return claimed;
+  for (const [otherId, record] of state.agents.entries()) {
+    if (String(otherId || '') === String(agentId || '')) continue;
+    const plain = snapshotToPlain(record);
+    const target = plain.target && typeof plain.target === 'object' ? plain.target : null;
+    if (!target) continue;
+    const stateKey = String(plain.state || '').toLowerCase();
+    if (!['routing', 'working', 'using', 'active', 'arrived', 'in_progress', 'waiting', 'queued', 'meeting'].includes(stateKey)) continue;
+    const isTemporaryConsumeClaim = isServerScriptedObjectDeskConsumeTarget(target) ||
+      Boolean(target.sourceObjectKey || String(target.objectKey || '').includes(':consume:'));
+    if (!isTemporaryConsumeClaim) continue;
+    const claimedKey = safeText(target.baseObjectKey, '') || liveStatusRuntimeObjectKey(target);
+    if (!claimedKey) continue;
+    const index = workTargets.findIndex(entry => liveStatusRuntimeObjectKey(entry?.target) === claimedKey);
+    if (index >= 0) claimed.add(index);
+  }
+  return claimed;
+}
+
+export function makeServerScriptedDeskConsumeTarget(dataDir, agentId, sourceTarget = null, nowMs = Date.now(), runtimeState = null) {
   const spec = serverScriptedObjectDispenseSpec(sourceTarget);
   if (!spec) return null;
   const meta = readWorldMetaDocument(dataDir);
   const workTargets = listLiveStatusWorkTargets(dataDir);
   if (!workTargets.length) return null;
-  let deskTarget = pickLiveStatusWorkTarget(agentId, { meta, targets: workTargets, workingAgentIds: [agentId] });
-  if (!deskTarget && sourceTarget?.buildingId) {
-    deskTarget = workTargets.find(entry => entry.buildingId === sourceTarget.buildingId)?.target || null;
+  const claimedTargetIndexes = claimedLiveStatusWorkTargetIndexesFromRuntime(runtimeState, workTargets, agentId);
+  const claimedByOtherAgentIndexes = new Set(claimedTargetIndexes);
+  const hasRuntimeClaimContext = Boolean(runtimeState?.agents?.entries);
+  const runtimeAgentIds = runtimeState?.agents?.keys
+    ? Array.from(runtimeState.agents.keys()).map(id => safeText(id, '')).filter(Boolean).sort()
+    : [agentId];
+  let deskTarget = pickLiveStatusWorkTarget(agentId, {
+    meta,
+    targets: workTargets,
+    workingAgentIds: runtimeAgentIds.length ? runtimeAgentIds : [agentId],
+    claimedTargetIndexes,
+  });
+  if (deskTarget) {
+    const pickedIndex = workTargets.findIndex(entry => liveStatusRuntimeObjectKey(entry?.target) === liveStatusRuntimeObjectKey(deskTarget));
+    if (pickedIndex >= 0 && claimedByOtherAgentIndexes.has(pickedIndex)) deskTarget = null;
   }
-  if (!deskTarget && workTargets[0]) deskTarget = workTargets[0].target;
+  const isClaimed = (entry) => claimedTargetIndexes.has(workTargets.indexOf(entry));
+  if (!deskTarget && sourceTarget?.buildingId) {
+    deskTarget = workTargets.find(entry => entry.buildingId === sourceTarget.buildingId && !isClaimed(entry))?.target || null;
+  }
+  if (!deskTarget) deskTarget = workTargets.find(entry => !isClaimed(entry))?.target || null;
+  if (!deskTarget && !hasRuntimeClaimContext && workTargets[0]) {
+    const fallbackIndex = stableTextHash(`${agentId}:desk-consume`) % workTargets.length;
+    deskTarget = workTargets[fallbackIndex]?.target || workTargets[0].target;
+  }
   if (!deskTarget || !Number.isFinite(Number(deskTarget.x)) || !Number.isFinite(Number(deskTarget.y))) return null;
   const baseObjectKey = liveStatusRuntimeObjectKey(deskTarget) || runtimeFurnitureObjectKey(deskTarget.buildingId, deskTarget.furnitureIndex, deskTarget.objectType || 'desk');
   const objectKey = normalizeWorldObjectKey(`${baseObjectKey}:consume:${safeText(agentId, 'agent') || 'agent'}`);
@@ -2957,13 +3649,12 @@ const SERVER_SCRIPTED_IDLE_CATEGORY_OBJECT_TYPES = Object.freeze({
   rest: Object.freeze(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'hallwayBench', 'smallCafeTable', 'patioTable', 'smallRoundMeetingTable', 'chair', 'officeChair']),
   'snack-drink': Object.freeze(['waterCooler', 'countertopCoffeeMachine', 'vending', 'fridge', 'microwave', 'cafeCounter', 'counter', 'kitchenIsland', 'pantryShelf', 'displayCase']),
   'browse-read': Object.freeze(['bookshelf', 'bulletinBoard', 'menuBoard', 'whiteboard', 'wallArt', 'shopShelf', 'supplyCabinet', 'medicalSupplyCabinet', 'pantryShelf', 'displayCase', 'displayMannequin', 'tvStand', 'mirror', 'storageBoxes', 'serverRack', 'toolCart', 'workbench']),
-  play: Object.freeze(['pingpong', 'poolTable', 'arcadeMachine', 'gamingStation', 'treadmill', 'trainingMat', 'gymBench', 'dumbbellRack']),
+  play: Object.freeze(['poolTable', 'arcadeMachine', 'gamingStation', 'treadmill', 'trainingMat', 'gymBench', 'dumbbellRack']),
 });
 const SERVER_SCRIPTED_IDLE_SOCIAL_OBJECT_TYPES = new Set([
   ...SERVER_SCRIPTED_IDLE_CATEGORY_OBJECT_TYPES.rest,
   'meetingTable',
   'conferenceChair',
-  'pingpong',
   'poolTable',
   'arcadeMachine',
 ]);
@@ -3054,6 +3745,410 @@ function normalizeObjectTypeKey(value = '') {
   return String(value || '').trim().toLowerCase();
 }
 
+function isPingPongObjectType(objectType = '') {
+  const key = normalizeObjectTypeKey(objectType);
+  return key === 'pingpong' || key === 'pingpongtable';
+}
+
+function isServerScriptedMultiSlotPlayObjectType(objectType = '') {
+  return normalizeObjectTypeKey(objectType) === 'pingpong';
+}
+
+function isServerScriptedMultiSlotPlaySpot(objectType = '', spotId = '', actionId = '') {
+  if (!isServerScriptedMultiSlotPlayObjectType(objectType)) return false;
+  const spot = String(spotId || '').trim().toLowerCase();
+  const action = String(actionId || '').trim().toLowerCase();
+  return action === 'life.playpingpong' && (spot === 'player-left' || spot === 'player-right');
+}
+
+function isServerScriptedMultiSlotPlayTarget(target = null) {
+  if (!target || target.isQueueUse) return false;
+  return isServerScriptedMultiSlotPlaySpot(
+    target.objectType || target.catalogKey || target.sourceObjectType || '',
+    target.slotId || target.spotId || target.interactionSpotId || '',
+    target.actionId || '',
+  );
+}
+
+function serverScriptedMultiSlotObjectKey(baseObjectKey = '', slotId = '') {
+  const base = safeText(baseObjectKey, '');
+  const slot = safeText(slotId, '');
+  return base && slot ? normalizeWorldObjectKey(`${base}:slot:${slot}`) : base;
+}
+
+function serverScriptedPingPongSide(target = null) {
+  if (!isServerScriptedMultiSlotPlayTarget(target)) return '';
+  const explicit = String(target?.pingPongSide || target?.side || '').trim().toLowerCase();
+  if (explicit === 'left' || explicit === 'right') return explicit;
+  const slot = String(target?.slotId || target?.spotId || target?.interactionSpotId || '').trim().toLowerCase();
+  if (slot.includes('right')) return 'right';
+  if (slot.includes('left')) return 'left';
+  return '';
+}
+
+function serverScriptedPingPongOppositeSide(side = '') {
+  return side === 'left' ? 'right' : (side === 'right' ? 'left' : '');
+}
+
+function findServerScriptedPingPongPartnerTarget(targets = [], target = null) {
+  if (!isServerScriptedMultiSlotPlayTarget(target)) return null;
+  const baseObjectKey = safeText(target?.baseObjectKey || target?.objectKey, '');
+  const oppositeSide = serverScriptedPingPongOppositeSide(serverScriptedPingPongSide(target));
+  if (!baseObjectKey || !oppositeSide) return null;
+  return (Array.isArray(targets) ? targets : []).find(candidate =>
+    candidate !== target &&
+    isServerScriptedMultiSlotPlayTarget(candidate) &&
+    safeText(candidate.baseObjectKey || candidate.objectKey, '') === baseObjectKey &&
+    serverScriptedPingPongSide(candidate) === oppositeSide
+  ) || null;
+}
+
+function serverScriptedPingPongPaddleColor(side = '') {
+  return side === 'right' ? 0x2196f3 : 0xf44336;
+}
+
+function makeServerScriptedPingPongRacketItem(target = null, side = '') {
+  const objectKey = safeText(target?.objectKey, 'pingpong') || 'pingpong';
+  const color = numberOr(target?.paddleColor, serverScriptedPingPongPaddleColor(side));
+  return {
+    id: `pingpong-racket-${side || 'player'}-${stableTextHash(objectKey)}`,
+    catalogId: 'temporaryGameEquipment',
+    label: 'Ping Pong Racket',
+    kind: 'pingpong-racket',
+    attachPoint: 'right-hand',
+    state: 'carried',
+    color,
+    sourceFurnitureType: 'pingpong',
+    temporaryUse: {
+      state: 'carried',
+      persistence: { mode: 'omit-on-save', omitOnSave: true, owner: 'pingpong-runtime' },
+    },
+    temporary: true,
+    carryable: true,
+  };
+}
+
+function serverPingPongObjectKey(buildingId, furnitureIndex) {
+  return normalizeWorldObjectKey(runtimeFurnitureObjectKey(buildingId, furnitureIndex, 'pingpong'));
+}
+
+function serverPingPongPointFromTable(tableTarget, side = 'left', trackZ = 0) {
+  const building = tableTarget?.building || null;
+  const furniture = tableTarget?.furniture || null;
+  if (!building || !furniture) return null;
+  const sideKey = side === 'right' ? 'right' : 'left';
+  const dx = sideKey === 'right' ? 1.82 : -1.82;
+  const dz = Math.max(-0.42, Math.min(0.42, numberOr(trackZ, 0)));
+  const offset = rotateRuntimeLocalOffset(dx, dz, furniture.rotation || 0);
+  const localX = numberOr(furniture.x, 0) + offset.x;
+  const localZ = numberOr(furniture.z, 0) + offset.z;
+  const point = apiPointFromBuildingLocal(building, localX, localZ);
+  if (!point) return null;
+  return {
+    x: point.x,
+    y: point.y,
+    floor: floorOr(furniture.floor ?? tableTarget.floor, 1),
+    buildingId: safeText(building.id, ''),
+    roomId: safeText(furniture.room, ''),
+    furnitureIndex: tableTarget.furnitureIndex,
+    objectKey: tableTarget.objectKey,
+    objectType: 'pingpong',
+    actionId: 'life.playPingPong',
+    side: sideKey,
+    slotId: sideKey === 'right' ? 'player-right' : 'player-left',
+    spotId: sideKey === 'right' ? 'player-right' : 'player-left',
+    faceAngle: runtimeFacingAngle(building, furniture, localX, localZ, sideKey === 'right' ? 'west' : 'east'),
+  };
+}
+
+function serverPingPongReleasePointFromTable(tableTarget, side = 'left', seed = '') {
+  const building = tableTarget?.building || null;
+  const furniture = tableTarget?.furniture || null;
+  if (!building || !furniture) return serverPingPongPointFromTable(tableTarget, side, 0);
+  const sideKey = side === 'right' ? 'right' : 'left';
+  const lateral = stableTextHash(`${seed}:${sideKey}:release`) % 2 === 0 ? 0.72 : -0.72;
+  const dx = sideKey === 'right' ? 2.55 : -2.55;
+  const offset = rotateRuntimeLocalOffset(dx, lateral, furniture.rotation || 0);
+  const localX = numberOr(furniture.x, 0) + offset.x;
+  const localZ = numberOr(furniture.z, 0) + offset.z;
+  const point = apiPointFromBuildingLocal(building, localX, localZ);
+  if (!point) return serverPingPongPointFromTable(tableTarget, side, 0);
+  return {
+    x: point.x,
+    y: point.y,
+    floor: floorOr(furniture.floor ?? tableTarget.floor, 1),
+    buildingId: safeText(building.id, ''),
+    roomId: safeText(furniture.room, ''),
+    heading: runtimeFacingAngle(building, furniture, localX, localZ, lateral >= 0 ? 'north' : 'south'),
+  };
+}
+
+function listServerPingPongTableTargets(dataDir) {
+  const tables = [];
+  for (const building of listBuildingDocuments(dataDir)) {
+    const furniture = Array.isArray(building?.interior?.furniture) ? building.interior.furniture : [];
+    for (let index = 0; index < furniture.length; index += 1) {
+      const item = furniture[index];
+      if (!item || item.deleted || item.removed || item.enabled === false || !isPingPongObjectType(item.type)) continue;
+      const objectKey = serverPingPongObjectKey(building.id || 'building', index);
+      const tableTarget = {
+        building,
+        furniture: item,
+        buildingId: safeText(building.id, ''),
+        roomId: safeText(item.room, ''),
+        furnitureIndex: index,
+        objectKey,
+        baseObjectKey: objectKey,
+        objectType: 'pingpong',
+        floor: floorOr(item.floor, 1),
+      };
+      const left = serverPingPongPointFromTable(tableTarget, 'left', 0);
+      const right = serverPingPongPointFromTable(tableTarget, 'right', 0);
+      if (left && right) tables.push({ ...tableTarget, left, right });
+    }
+  }
+  return tables;
+}
+
+function resetServerPingPongBallForServe(match) {
+  if (!match) return;
+  const server = match.nextServe === 'p2' ? 'p2' : 'p1';
+  match.ballX = server === 'p1' ? -0.72 : 0.72;
+  match.ballZ = (Math.random() - 0.5) * 0.12;
+  match.ballVX = (server === 'p1' ? 1 : -1) * (0.52 + Math.random() * 0.08);
+  match.ballVZ = (Math.random() - 0.5) * 0.18;
+  match.rallyHits = 0;
+  match.pointTimerMs = 0;
+  match.lastHit = '';
+  match.servePauseMs = 900;
+  match.servingPlayer = server;
+}
+
+function makeServerPingPongMatch(tableTarget, p1Id, p2Id, nowMs = Date.now(), source = 'idle') {
+  const objectKey = tableTarget.objectKey;
+  const matchId = safeText(`server-pingpong:${objectKey}:${nowMs}`, `server-pingpong:${nowMs}`) || `server-pingpong:${nowMs}`;
+  const match = {
+    matchId,
+    objectKey,
+    buildingId: tableTarget.buildingId,
+    roomId: tableTarget.roomId,
+    furnitureIndex: tableTarget.furnitureIndex,
+    p1Id,
+    p2Id,
+    p1Score: 0,
+    p2Score: 0,
+    p1TrackZ: 0,
+    p2TrackZ: 0,
+    p1Skill: 0.58 + stableUnitFloat(`${matchId}:${p1Id}:skill`) * 0.30,
+    p2Skill: 0.58 + stableUnitFloat(`${matchId}:${p2Id}:skill`) * 0.30,
+    p1SwingPulseId: 0,
+    p2SwingPulseId: 0,
+    phase: 'approach',
+    startedAtMs: nowMs,
+    phaseStartedAtMs: nowMs,
+    activeAtMs: 0,
+    pointTimerMs: 0,
+    targetScore: SERVER_PINGPONG_RUNTIME_TARGET_SCORE,
+    nextServe: stableTextHash(matchId) % 2 === 0 ? 'p1' : 'p2',
+    servePauseMs: 900,
+    servingPlayer: null,
+    source,
+    lastPoint: null,
+    lastHit: '',
+  };
+  resetServerPingPongBallForServe(match);
+  return match;
+}
+
+function serverPingPongGameForClient(match = null) {
+  if (!match) return null;
+  const rawLastPoint = match.lastPoint && typeof match.lastPoint === 'object' ? match.lastPoint : null;
+  const lastPointAtMs = Number(rawLastPoint?.atMs || 0);
+  const lastPoint = rawLastPoint ? {
+    winner: rawLastPoint.winner === 'p2' ? 'p2' : 'p1',
+    loser: rawLastPoint.loser === 'p1' ? 'p1' : 'p2',
+    reason: safeText(rawLastPoint.reason, ''),
+    at: Number.isFinite(lastPointAtMs) && lastPointAtMs > 0 ? new Date(lastPointAtMs).toISOString() : '',
+  } : null;
+  return {
+    phase: match.phase,
+    timer: Math.max(0, (Date.now() - Number(match.phaseStartedAtMs || match.startedAtMs || Date.now())) / 1000),
+    pointTimer: Math.max(0, Number(match.pointTimerMs || 0) / 1000),
+    targetScore: SERVER_PINGPONG_RUNTIME_TARGET_SCORE,
+    p1Id: safeText(match.p1Id, ''),
+    p2Id: safeText(match.p2Id, ''),
+    p1Score: Math.max(0, Math.floor(numberOr(match.p1Score, 0))),
+    p2Score: Math.max(0, Math.floor(numberOr(match.p2Score, 0))),
+    rallyHits: Math.max(0, Math.floor(numberOr(match.rallyHits, 0))),
+    ballX: numberOr(match.ballX, 0),
+    ballZ: numberOr(match.ballZ, 0),
+    ballVX: numberOr(match.ballVX, 0),
+    ballVZ: numberOr(match.ballVZ, 0),
+    p1TrackZ: numberOr(match.p1TrackZ, 0),
+    p2TrackZ: numberOr(match.p2TrackZ, 0),
+    nextServe: match.nextServe === 'p2' ? 'p2' : 'p1',
+    servePauseMs: Math.max(0, numberOr(match.servePauseMs, 0)),
+    servingPlayer: safeText(match.servingPlayer, ''),
+    lastHit: safeText(match.lastHit, ''),
+    lastPoint,
+    source: SERVER_PINGPONG_RUNTIME_OWNER,
+  };
+}
+
+function makeServerPingPongTarget(tableTarget, side, agentId, partnerAgentId, match, point = null, now = new Date().toISOString()) {
+  const sideKey = side === 'right' ? 'right' : 'left';
+  const targetPoint = point || serverPingPongPointFromTable(tableTarget, sideKey, 0);
+  if (!targetPoint) return null;
+  return {
+    x: targetPoint.x,
+    y: targetPoint.y,
+    floor: targetPoint.floor,
+    buildingId: tableTarget.buildingId,
+    roomId: tableTarget.roomId,
+    targetKind: 'server-pingpong-player',
+    objectKey: tableTarget.objectKey,
+    baseObjectKey: tableTarget.objectKey,
+    objectInstanceId: tableTarget.objectKey,
+    furnitureIndex: tableTarget.furnitureIndex,
+    objectType: 'pingpong',
+    behaviorCategory: 'play',
+    runtimeCategory: 'play',
+    actionId: 'life.playPingPong',
+    interactionSpotId: targetPoint.spotId,
+    spotId: targetPoint.spotId,
+    slotId: targetPoint.slotId,
+    activeUseSlotId: targetPoint.slotId,
+    poseKind: 'stand-use',
+    animationId: 'play-pingpong',
+    activityKind: `pingpong-${sideKey}`,
+    stayMs: SERVER_PINGPONG_RUNTIME_MATCH_MS,
+    faceAngle: normalizeRuntimeAngleRadians(targetPoint.faceAngle, 0),
+    matchId: match.matchId,
+    side: sideKey,
+    agentId,
+    partnerAgentId,
+    runtimeSource: match.source || 'idle',
+    runtimeStartedAt: now,
+    runtimeActiveAt: match.activeAtMs ? new Date(match.activeAtMs).toISOString() : '',
+  };
+}
+
+function makeServerPingPongVisualState(isMoving, target, match = null, nowMs = Date.now()) {
+  const side = target?.side === 'right' ? 'right' : 'left';
+  const playerKey = side === 'right' ? 'p2' : 'p1';
+  const trackZ = playerKey === 'p1' ? numberOr(match?.p1TrackZ, 0) : numberOr(match?.p2TrackZ, 0);
+  const phase = String(match?.phase || '');
+  const playing = !isMoving && !!match && phase === 'playing';
+  const resultHold = !isMoving && !!match && phase === 'result';
+  const animationId = isMoving ? 'walk' : (playing ? 'play-pingpong' : 'idle');
+  return {
+    schemaVersion: 'agent-runtime-visual/v1',
+    status: 'idle',
+    state: isMoving ? 'moving' : 'idle',
+    resolvedAnimationId: animationId,
+    movement: { isMoving, isRunning: false, suppressLocomotion: playing || resultHold },
+    activityActive: Boolean(target) && !resultHold,
+    activityKind: target?.activityKind || `pingpong-${side}`,
+    activity: {
+      kind: target?.activityKind || `pingpong-${side}`,
+      phase: isMoving ? 'routing' : (playing ? 'active' : (resultHold ? 'complete' : 'ready')),
+      source: SERVER_PINGPONG_RUNTIME_OWNER,
+      objectKey: target?.objectKey || '',
+      baseObjectKey: target?.baseObjectKey || target?.objectKey || '',
+      objectType: 'pingpong',
+      behaviorCategory: 'play',
+      actionId: 'life.playPingPong',
+      spotId: target?.spotId || target?.interactionSpotId || '',
+      slotId: target?.slotId || target?.activeUseSlotId || '',
+      activeUseSlotId: target?.activeUseSlotId || target?.slotId || '',
+      poseKind: 'stand-use',
+      animationId,
+      faceAngle: numberOr(target?.faceAngle, 0),
+      matchId: match?.matchId || target?.matchId || '',
+      partnerAgentId: target?.partnerAgentId || '',
+      runtimeOwner: SERVER_PINGPONG_RUNTIME_OWNER,
+    },
+    carrying: playing,
+    carriedItem: playing ? {
+      kind: 'pingpong-racket',
+      label: 'Ping Pong Racket',
+      temporary: true,
+      runtimeVisualOnly: true,
+    } : null,
+    pingPong: playing ? {
+      matchId: match.matchId,
+      side,
+      trackZ,
+      ballZ: numberOr(match.ballZ, 0),
+      ballX: numberOr(match.ballX, 0),
+      lastHit: safeText(match.lastHit, ''),
+      swingPulseId: playerKey === 'p1' ? Math.max(0, Math.floor(numberOr(match.p1SwingPulseId, 0))) : Math.max(0, Math.floor(numberOr(match.p2SwingPulseId, 0))),
+    } : null,
+  };
+}
+
+function makeServerPingPongObjectData(match, tableTarget, state, now, expiresAt) {
+  const game = serverPingPongGameForClient(match);
+  const p1Id = safeText(match?.p1Id, '');
+  const p2Id = safeText(match?.p2Id, '');
+  const reservationId = safeText(`server-pingpong-res:${match?.objectKey || tableTarget?.objectKey || 'table'}`, '') || `server-pingpong-res:${Date.now()}`;
+  const activeUseId = safeText(`server-pingpong-active:${match?.objectKey || tableTarget?.objectKey || 'table'}`, '') || `server-pingpong-active:${Date.now()}`;
+  const activeSlots = {
+    'player-left': { agentId: p1Id, reservationId, activeUseId, actionId: 'life.playPingPong', interactionSpotId: 'player-left', spotId: 'player-left', side: 'left' },
+    'player-right': { agentId: p2Id, reservationId, activeUseId, actionId: 'life.playPingPong', interactionSpotId: 'player-right', spotId: 'player-right', side: 'right' },
+  };
+  if (state === 'idle' || state === 'cooldown') {
+    return {
+      clearReservation: true,
+      activeUse: {
+        state,
+        mode: 'match-complete',
+        lastScore: game ? `${game.p1Score || 0}-${game.p2Score || 0}` : null,
+        runtimeWorldObject: true,
+        runtimeOwner: SERVER_PINGPONG_RUNTIME_OWNER,
+      },
+      pingPongGame: null,
+      writer: 'agent-runtime-room.mjs#serverPingPongRuntime',
+    };
+  }
+  return {
+    reservation: {
+      id: reservationId,
+      reservationId,
+      objectKey: match.objectKey,
+      agentIds: [p1Id, p2Id].filter(Boolean),
+      actionId: 'life.playPingPong',
+      spotIds: ['player-left', 'player-right'],
+      slotIds: ['player-left', 'player-right'],
+      status: state === 'routing' ? 'held' : 'active',
+      state,
+      reservedAt: new Date(match.startedAtMs || Date.now()).toISOString(),
+      expiresAt,
+      runtimeWorldObject: true,
+      runtimeOwner: SERVER_PINGPONG_RUNTIME_OWNER,
+    },
+    activeUse: {
+      id: activeUseId,
+      activeUseId,
+      objectKey: match.objectKey,
+      state: state === 'routing' ? 'approach' : (match.phase === 'result' ? 'result' : 'playing'),
+      mode: 'match',
+      actionId: 'life.playPingPong',
+      agentIds: [p1Id, p2Id].filter(Boolean),
+      activeSlots,
+      source: SERVER_PINGPONG_RUNTIME_OWNER,
+      startedAt: new Date(match.startedAtMs || Date.now()).toISOString(),
+      activeAt: match.activeAtMs ? new Date(match.activeAtMs).toISOString() : '',
+      lastScore: game ? `${game.p1Score || 0}-${game.p2Score || 0}` : '0-0',
+      lastPoint: game?.lastPoint?.reason || '',
+      runtimeWorldObject: true,
+      runtimeOwner: SERVER_PINGPONG_RUNTIME_OWNER,
+    },
+    pingPongGame: game,
+    writer: 'agent-runtime-room.mjs#serverPingPongRuntime',
+  };
+}
+
 function scriptedIdleObjectTypeSet(category) {
   if (category === 'socialize') return SERVER_SCRIPTED_IDLE_SOCIAL_OBJECT_TYPE_KEYS;
   const types = SERVER_SCRIPTED_IDLE_CATEGORY_OBJECT_TYPES[category] || [];
@@ -3091,6 +4186,7 @@ function isScriptedObjectQueueSpot(location = null, furniture = null) {
     location?.serviceQueue === true ||
     location?.queueAddon === true ||
     location?.capacityKind === 'queue' ||
+    String(location?.capacity?.kind || '').toLowerCase() === 'queue' ||
     spotId.includes('queue') ||
     actionId === 'planning.schedule'
   );
@@ -3228,6 +4324,17 @@ function serverScriptedServiceQueueDefinitionForFurniture(furniture = {}, prefer
   }) || serverScriptedServiceQueueDefinitionsForFurniture(furniture)[0] || null;
 }
 
+function isScriptedObjectArmchairRouteOnlySpot(furniture = null, location = null) {
+  if (String(furniture?.type || '').trim().toLowerCase() !== 'armchair' || !location) return false;
+  const roles = scriptedObjectRoles(location);
+  if (roles.some(role => ['seat', 'use', 'rest', 'social', 'service', 'work'].includes(role))) return false;
+  const spotId = String(scriptedObjectSpotId(location) || '').toLowerCase();
+  return (
+    ['approach-front', 'stand-front'].includes(spotId) ||
+    roles.some(role => ['approach', 'staging', 'dismount', 'exit', 'stand'].includes(role))
+  );
+}
+
 function findServerScriptedObjectFurniture(dataDir, target = null) {
   const buildingId = safeText(target?.buildingId, '');
   const furnitureIndex = Number(target?.furnitureIndex);
@@ -3243,7 +4350,8 @@ function getServerScriptedServiceQueueMaxPoints(dataDir, target = null) {
   const furniture = found?.furniture || null;
   const queueDef = serverScriptedServiceQueueDefinitionForFurniture(furniture, serverScriptedQueueSpotId(target));
   const authoredQueueLocations = getServerAuthoredObjectQueueLocations(queueDef || {}, furniture || {});
-  const capacity = typeof queueDef?.capacity === 'number' ? queueDef.capacity : Number(queueDef?.capacity?.maxAgents || 0);
+  const rawCapacity = typeof queueDef?.capacity === 'number' ? queueDef.capacity : Number(queueDef?.capacity?.maxAgents || 0);
+  const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? rawCapacity : undefined;
   return Math.max(1, Math.floor(numberOr(
     queueDef?.queueMaxPoints ?? queueDef?.maxQueuePoints ?? queueDef?.queueCapacity ?? capacity ?? target?.queueMaxPoints,
     authoredQueueLocations.length || SERVER_SCRIPTED_OBJECT_QUEUE_DEFAULT_CAPACITY,
@@ -3268,6 +4376,7 @@ function isScriptedObjectSpotUsable(furniture = null, location = null) {
   const roles = scriptedObjectRoles(location);
   const spotId = String(scriptedObjectSpotId(location) || '').toLowerCase();
   if (roles.includes('work') && actionId === 'work.desk') return false;
+  if (isScriptedObjectArmchairRouteOnlySpot(furniture, location)) return false;
   if (isScriptedObjectQueueSpot(location, furniture)) return true;
   const config = scriptedObjectActivityConfig(furniture);
   const preferredSpotIds = scriptedObjectPreferredSpotIds(furniture);
@@ -3286,15 +4395,27 @@ function scriptedObjectFallbackOffset(furniture = null) {
 }
 
 function localPointFromScriptedObjectSpot(furniture = null, location = null) {
-  const explicit = location?.actionTarget || location?.buildingLocal || location?.activationTarget || null;
-  const x = numberOr(explicit?.x, NaN);
-  const z = numberOr(explicit?.z, NaN);
+  const roles = scriptedObjectRoles(location);
   const fallback = scriptedObjectFallbackOffset(furniture);
   const config = scriptedObjectActivityConfig(furniture);
   const isQueue = isScriptedObjectQueueSpot(location, furniture);
+  const spotId = String(scriptedObjectSpotId(location) || '').toLowerCase();
+  const activationTarget = location?.activationTarget && typeof location.activationTarget === 'object' ? location.activationTarget : null;
+  const useActivationTarget = Boolean(
+    activationTarget &&
+    !isQueue &&
+    (
+      roles.includes('seat') ||
+      config?.poseKind === 'seat' ||
+      spotId.includes('seat') ||
+      String(location?.dockMode || '').toLowerCase() === 'snap-to-activation'
+    )
+  );
+  const explicit = (useActivationTarget ? activationTarget : null) || location?.actionTarget || location?.buildingLocal || activationTarget || null;
+  const x = numberOr(explicit?.x, NaN);
+  const z = numberOr(explicit?.z, NaN);
   const faceAngle = authoredRuntimeFaceAngle(location, explicit);
   if (Number.isFinite(x) && Number.isFinite(z)) {
-    const roles = scriptedObjectRoles(location);
     return {
       x,
       z,
@@ -3315,14 +4436,92 @@ function localPointFromScriptedObjectSpot(furniture = null, location = null) {
   };
 }
 
+function localPointFromScriptedObjectRouteApproachSpot(furniture = null, location = null, finalLocal = null) {
+  if (!location || finalLocal?.poseKind !== 'seat') return null;
+  const actionTarget = location?.actionTarget && typeof location.actionTarget === 'object' ? location.actionTarget : null;
+  const activationTarget = location?.activationTarget && typeof location.activationTarget === 'object' ? location.activationTarget : null;
+  if (!actionTarget || !activationTarget) return null;
+  const approachSpotId = safeText(
+    actionTarget.spotId ||
+    actionTarget.interactionSpotId ||
+    location.approachSpotId ||
+    '',
+    '',
+  );
+  const activationSpotId = safeText(
+    activationTarget.spotId ||
+    activationTarget.interactionSpotId ||
+    location.activationSpotId ||
+    location.id ||
+    '',
+    '',
+  );
+  if (!approachSpotId || approachSpotId === activationSpotId || approachSpotId === scriptedObjectSpotId(location)) return null;
+  const x = numberOr(actionTarget.x, NaN);
+  const z = numberOr(actionTarget.z, NaN);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  if (Math.hypot(x - numberOr(finalLocal.x, x), z - numberOr(finalLocal.z, z)) <= 0.01) return null;
+  return {
+    x,
+    z,
+    floor: floorOr(actionTarget.floor ?? location.floor ?? furniture?.floor, finalLocal.floor || 1),
+    spotId: approachSpotId,
+    activationSpotId,
+    facing: authoredRuntimeFacing(location, actionTarget, finalLocal.facing || 'north'),
+    faceAngle: authoredRuntimeFaceAngle(location, actionTarget),
+  };
+}
+
+export function listScriptedObjectRuntimeTargets(dataDir) {
+  const targets = [];
+  for (const building of listBuildingDocuments(dataDir)) {
+    const furniture = Array.isArray(building?.interior?.furniture) ? building.interior.furniture : [];
+    for (let index = 0; index < furniture.length; index += 1) {
+      const item = furniture[index];
+      if (!item || item.deleted || item.removed || item.enabled === false) continue;
+      if (isPingPongObjectType(item.type)) continue;
+      const locations = Array.isArray(item.actionLocations) && item.actionLocations.length > 0 ? item.actionLocations : [];
+      const syntheticQueueLocations = serverScriptedServiceQueueDefinitionsForFurniture(item)
+        .filter(location => !locations.some(existing => scriptedObjectSpotId(existing) === scriptedObjectSpotId(location)))
+        .filter(location => !locations.some(existing => isScriptedObjectQueueSpot(existing, item) && serverScriptedQueueSpotId(existing) === serverScriptedQueueSpotId(location)));
+      const preferredSpotIds = scriptedObjectPreferredSpotIds(item);
+      const sortedLocations = [...locations, ...syntheticQueueLocations].sort((a, b) => {
+        const aSpot = String(scriptedObjectSpotId(a) || '').toLowerCase();
+        const bSpot = String(scriptedObjectSpotId(b) || '').toLowerCase();
+        const aPreferred = preferredSpotIds.indexOf(aSpot);
+        const bPreferred = preferredSpotIds.indexOf(bSpot);
+        const aQueue = isScriptedObjectQueueSpot(a, item) ? 1 : 0;
+        const bQueue = isScriptedObjectQueueSpot(b, item) ? 1 : 0;
+        if (aQueue !== bQueue) return aQueue - bQueue;
+        if (aPreferred !== bPreferred) return (aPreferred < 0 ? 999 : aPreferred) - (bPreferred < 0 ? 999 : bPreferred);
+        return aSpot.localeCompare(bSpot);
+      });
+      const targetLocations = sortedLocations.length > 0 ? sortedLocations : [null];
+      if (sortedLocations.length > 0 && scriptedObjectActivityConfig(item) && !isServerScriptedMultiSlotPlayObjectType(item.type)) targetLocations.push(null);
+      const seen = new Set();
+      for (const location of targetLocations) {
+        const target = scriptedObjectTargetFromFurnitureSpot(building, item, index, location);
+        if (!target || seen.has(target.objectKey)) continue;
+        seen.add(target.objectKey);
+        targets.push(target);
+      }
+    }
+  }
+  return targets.sort((a, b) => `${a.buildingId}:${a.furnitureIndex}:${a.spotId}`.localeCompare(`${b.buildingId}:${b.furnitureIndex}:${b.spotId}`));
+}
+
 function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null, index = -1, location = null) {
   if (!building || !furniture || !isScriptedObjectSpotUsable(furniture, location)) return null;
   const config = scriptedObjectActivityConfig(furniture);
   const local = localPointFromScriptedObjectSpot(furniture, location);
+  const routeApproachLocal = localPointFromScriptedObjectRouteApproachSpot(furniture, location, local);
   const world = location?.world && typeof location.world === 'object' && !Array.isArray(location.world) ? location.world : null;
   const worldX = numberOr(world?.x, NaN);
   const worldZ = numberOr(world?.z ?? world?.y, NaN);
   const localPoint = apiPointFromBuildingLocal(building, local.x, local.z);
+  const routeApproachPoint = routeApproachLocal
+    ? apiPointFromBuildingLocal(building, routeApproachLocal.x, routeApproachLocal.z)
+    : null;
   const worldPoint = Number.isFinite(worldX) && Number.isFinite(worldZ)
     ? { x: worldX * LIVE_ACTION_API_TILE, y: worldZ * LIVE_ACTION_API_TILE }
     : null;
@@ -3338,8 +4537,14 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
   const baseObjectKey = normalizeWorldObjectKey(runtimeFurnitureObjectKey(building.id || 'building', index, objectType));
   const spotId = scriptedObjectSpotId(location);
   const actionId = scriptedObjectActionId(furniture, location);
+  const slotId = safeText(location?.slotId || location?.seatId || spotId, spotId) || spotId;
+  const exitSpotId = safeText(location?.exitSpotId, '');
+  const dismountSpotId = safeText(location?.dismountSpotId, '');
+  const standSpotId = safeText(location?.standSpotId, '');
   const isQueueUse = isScriptedObjectQueueSpot(location, furniture);
-  const objectKey = isQueueUse ? normalizeWorldObjectKey(`${baseObjectKey}:queue:${spotId}`) : baseObjectKey;
+  const objectKey = isQueueUse
+    ? normalizeWorldObjectKey(`${baseObjectKey}:queue:${spotId}`)
+    : (isServerScriptedMultiSlotPlaySpot(objectType, slotId || spotId, actionId) ? serverScriptedMultiSlotObjectKey(baseObjectKey, slotId || spotId) : baseObjectKey);
   const objectInstanceId = safeText(furniture.objectInstanceId || furniture.instanceId || furniture.id || `${building.id}:furniture:${index}`, '');
   return {
     x: point.x,
@@ -3357,14 +4562,290 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
     actionId,
     interactionSpotId: spotId,
     spotId,
-    slotId: safeText(location?.slotId || location?.seatId || spotId, spotId) || spotId,
+    slotId,
     poseKind: local.poseKind,
     isQueueUse,
     animationId: isQueueUse ? 'bus-stop-wait' : (safeText(config?.animationId, '') || (local.poseKind === 'seat' ? 'sit' : 'stand-use')),
     activityKind: isQueueUse ? 'service-queue-wait' : (safeText(config?.kind, '') || 'server-scripted-object-use'),
     stayMs: scriptedObjectStayMs({ objectKey: baseObjectKey, objectType, spotId }),
     faceAngle: runtimeFurnitureActionFaceAngle(building, furniture, local, point),
+    ...(exitSpotId ? { exitSpotId } : {}),
+    ...(dismountSpotId ? { dismountSpotId } : {}),
+    ...(standSpotId ? { standSpotId } : {}),
+    ...(routeApproachPoint ? {
+      routeApproachTarget: {
+        x: routeApproachPoint.x,
+        y: routeApproachPoint.y,
+        floor: routeApproachLocal.floor,
+        spotId: routeApproachLocal.spotId,
+      },
+      approachSpotId: routeApproachLocal.spotId,
+      activationSpotId: routeApproachLocal.activationSpotId,
+      dockSnapRadius: Math.max(1, numberOr(location?.snapRadius ?? location?.activationRadius, 7)),
+      routeSpotRole: 'seat-approach',
+    } : {}),
   };
+}
+
+function isServerRuntimeSeatedOrWorkReleaseTarget(target = null) {
+  if (!target || typeof target !== 'object') return false;
+  const kind = String(target.targetKind || target.kind || '').toLowerCase();
+  const poseKind = String(target.poseKind || '').toLowerCase();
+  const animationId = String(target.animationId || target.activityKind || '').toLowerCase();
+  return Boolean(
+    isServerScriptedMultiSlotPlayTarget(target) ||
+    poseKind === 'seat' ||
+    kind === 'work-desk' ||
+    kind === 'meeting-table' ||
+    animationId.includes('sit') ||
+    animationId.includes('seat') ||
+    animationId.includes('bed-rest')
+  );
+}
+
+function serverRuntimeReleasePointFromRouteTarget(point = null, target = null, current = null) {
+  if (!point || typeof point !== 'object') return null;
+  const x = Number(point.x);
+  const y = Number(point.y ?? point.z);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return {
+    x,
+    y,
+    floor: floorOr(point.floor ?? target?.floor ?? current?.floor, 1),
+    buildingId: safeText(point.buildingId || target?.buildingId || current?.buildingId || '', ''),
+    roomId: safeText(point.roomId || target?.roomId || current?.roomId || '', ''),
+    heading: Number.isFinite(Number(point.faceAngle ?? point.heading))
+      ? normalizeRuntimeAngleRadians(point.faceAngle ?? point.heading, targetFaceAngleRadians(target, current?.heading))
+      : targetFaceAngleRadians(target, current?.heading),
+  };
+}
+
+function serverRuntimeReleaseSpotIds(target = null) {
+  const blockedFrontSpots = new Set([
+    'approach-front',
+    'stand-front',
+    safeText(target?.approachSpotId, '').toLowerCase(),
+    safeText(target?.routeApproachTarget?.spotId, '').toLowerCase(),
+  ].filter(Boolean));
+  return Array.from(new Set([
+    target?.dismountSpotId,
+    'dismount',
+    'dismount-side',
+    'dismount-left',
+    'dismount-right',
+    target?.exitSpotId,
+    target?.standSpotId,
+    'stand-side',
+    'exit-side',
+    'wake-stand',
+  ].map(item => safeText(item, '')).filter(Boolean))).filter(spotId => !blockedFrontSpots.has(spotId.toLowerCase()));
+}
+
+function serverRuntimeAuthoredReleasePoint(dataDir, target = null, current = null) {
+  const found = findServerScriptedObjectFurniture(dataDir, target);
+  const building = found?.building || null;
+  const furniture = found?.furniture || null;
+  if (!building || !furniture) return null;
+  const locations = Array.isArray(furniture.actionLocations) ? furniture.actionLocations : [];
+  const wanted = serverRuntimeReleaseSpotIds(target);
+  for (const spotId of wanted) {
+    const location = locations.find(item => String(scriptedObjectSpotId(item) || '').toLowerCase() === spotId.toLowerCase()) || null;
+    if (!location) continue;
+    const local = localPointFromScriptedObjectSpot(furniture, location);
+    const point = apiPointFromBuildingLocal(building, local.x, local.z);
+    if (!point) continue;
+    return {
+      x: point.x,
+      y: point.y,
+      floor: local.floor,
+      buildingId: safeText(building.id, ''),
+      roomId: safeText(furniture.room || target?.roomId || current?.roomId || '', ''),
+      heading: runtimeFacingAngle(building, furniture, local.x, local.z, local.facing || 'north'),
+      spotId,
+    };
+  }
+  return null;
+}
+
+function serverRuntimeReleasePointCrowdConflict(agentId, candidate = null, crowdAgents = [], target = null) {
+  if (!candidate || !Array.isArray(crowdAgents) || crowdAgents.length === 0) return null;
+  return findServerRuntimeCrowdConflict(agentId, candidate, candidate, crowdAgents, {
+    finalTarget: candidate,
+    routeTarget: target,
+    arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
+    hardRadius: SERVER_RUNTIME_AGENT_HARD_SEPARATION_RADIUS,
+  });
+}
+
+function serverRuntimeReleaseCandidateClear(dataDir, building, candidate = null, options = {}) {
+  if (!building || !candidate) return true;
+  const local = buildingLocalPointFromApi(building, candidate.x, candidate.y);
+  if (!local) return false;
+  const width = Number(building?.widthTiles || 25) || 25;
+  const depth = Number(building?.heightTiles || 17) || 17;
+  const margin = 0.35;
+  if (local.x < margin || local.x > width - margin || local.z < margin || local.z > depth - margin) return false;
+  const staticResult = validateServerRuntimeStaticSegment(dataDir, candidate, candidate, { phase: 'server-runtime-dismount' });
+  if (staticResult.clear === false) return false;
+  return !serverRuntimeReleasePointCrowdConflict(options.agentId, candidate, options.crowdAgents, options.routeTarget);
+}
+
+function serverRuntimeSyntheticDismountPoint(dataDir, target = null, current = null, options = {}) {
+  const found = findServerScriptedObjectFurniture(dataDir, target);
+  const building = found?.building || null;
+  const furniture = found?.furniture || null;
+  if (!building || !furniture) return null;
+  const x = Number(target?.x ?? current?.x);
+  const y = Number(target?.y ?? target?.z ?? current?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const heading = targetFaceAngleRadians(target, current?.heading);
+  const sideAngles = [
+    normalizeRuntimeAngleRadians(heading + Math.PI / 2, heading),
+    normalizeRuntimeAngleRadians(heading - Math.PI / 2, heading),
+  ];
+  const distances = [
+    LIVE_ACTION_API_TILE * 1.05,
+    LIVE_ACTION_API_TILE * 1.25,
+    LIVE_ACTION_API_TILE * 1.5,
+  ];
+  for (const distance of distances) {
+    for (const angle of sideAngles) {
+      const candidate = {
+        x: x + Math.sin(angle) * distance,
+        y: y + Math.cos(angle) * distance,
+        floor: floorOr(target?.floor ?? current?.floor, 1),
+        buildingId: safeText(building.id, ''),
+        roomId: safeText(furniture.room || target?.roomId || current?.roomId || '', ''),
+        heading,
+        spotId: 'dismount',
+      };
+      if (serverRuntimeReleaseCandidateClear(dataDir, building, candidate, options)) return candidate;
+    }
+  }
+  return null;
+}
+
+function serverRuntimeFallbackReleasePoint(target = null, current = null) {
+  const x = Number(target?.x ?? current?.x);
+  const y = Number(target?.y ?? target?.z ?? current?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const heading = targetFaceAngleRadians(target, current?.heading);
+  const dismountAngle = normalizeRuntimeAngleRadians(heading + Math.PI / 2, heading);
+  const distance = LIVE_ACTION_API_TILE * 1.05;
+  return {
+    x: x + Math.sin(dismountAngle) * distance,
+    y: y + Math.cos(dismountAngle) * distance,
+    floor: floorOr(target?.floor ?? current?.floor, 1),
+    buildingId: safeText(target?.buildingId || current?.buildingId || '', ''),
+    roomId: safeText(target?.roomId || current?.roomId || '', ''),
+    heading,
+  };
+}
+
+function serverRuntimeDismountClearanceTarget(dataDir, agentId, releasePoint = null, target = null, current = null, state = null, nowMs = Date.now()) {
+  const start = normalizeServerRuntimePoint(releasePoint, target?.floor ?? current?.floor ?? 1);
+  if (!start) return null;
+  const seatX = Number(target?.x ?? current?.x ?? start.x);
+  const seatY = Number(target?.y ?? target?.z ?? current?.y ?? start.y);
+  const awayDx = start.x - seatX;
+  const awayDy = start.y - seatY;
+  const awayLen = Math.hypot(awayDx, awayDy);
+  const heading = targetFaceAngleRadians(target, current?.heading);
+  const primary = awayLen > 0.001
+    ? { x: awayDx / awayLen, y: awayDy / awayLen }
+    : { x: Math.sin(heading + Math.PI / 2), y: Math.cos(heading + Math.PI / 2) };
+  const candidates = [
+    primary,
+    { x: Math.sin(heading + Math.PI / 2), y: Math.cos(heading + Math.PI / 2) },
+    { x: Math.sin(heading - Math.PI / 2), y: Math.cos(heading - Math.PI / 2) },
+    { x: Math.sin(heading), y: Math.cos(heading) },
+    { x: -Math.sin(heading), y: -Math.cos(heading) },
+  ];
+  const crowdAgents = state ? serverRuntimeCrowdAgents(state, agentId) : [];
+  const distances = [
+    LIVE_ACTION_API_TILE * 1.15,
+    LIVE_ACTION_API_TILE * 1.45,
+    LIVE_ACTION_API_TILE * 1.8,
+  ];
+  let picked = null;
+  for (const distance of distances) {
+    for (const direction of candidates) {
+      const len = Math.hypot(direction.x, direction.y);
+      if (len <= 0.001) continue;
+      const candidate = {
+        x: start.x + (direction.x / len) * distance,
+        y: start.y + (direction.y / len) * distance,
+        floor: start.floor,
+        buildingId: safeText(releasePoint?.buildingId || target?.buildingId || current?.buildingId || '', ''),
+        roomId: safeText(releasePoint?.roomId || target?.roomId || current?.roomId || '', ''),
+      };
+      const staticResult = validateServerRuntimeStaticSegment(dataDir, start, candidate, { phase: 'server-runtime-dismount-clearance' });
+      if (!staticResult.clear) continue;
+      const crowdConflict = findServerRuntimeCrowdConflict(agentId, start, candidate, crowdAgents, {
+        finalTarget: candidate,
+        routeTarget: null,
+        arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
+        hardRadius: SERVER_RUNTIME_AGENT_HARD_SEPARATION_RADIUS,
+      });
+      if (crowdConflict) continue;
+      picked = candidate;
+      break;
+    }
+    if (picked) break;
+  }
+  if (!picked) return null;
+  const objectKey = normalizeWorldObjectKey(`runtime-dismount-clearance:${agentId}`);
+  const faceAngle = normalizeRuntimeAngleRadians(Math.atan2(picked.x - start.x, picked.y - start.y), heading);
+  return {
+    x: picked.x,
+    y: picked.y,
+    floor: picked.floor,
+    buildingId: picked.buildingId,
+    roomId: picked.roomId,
+    targetKind: 'server-runtime-dismount-clearance',
+    objectKey,
+    baseObjectKey: objectKey,
+    objectInstanceId: objectKey,
+    furnitureIndex: -1,
+    objectType: 'dismountClearance',
+    behaviorCategory: 'wander',
+    runtimeCategory: 'dismount-clearance',
+    runtimeSource: 'dismount-clearance',
+    runtimeStartedAt: new Date(nowMs).toISOString(),
+    actionId: 'idle.dismountClearance',
+    interactionSpotId: 'dismount-clearance',
+    spotId: 'dismount-clearance',
+    slotId: 'dismount-clearance',
+    poseKind: 'stand-use',
+    isQueueUse: false,
+    animationId: 'walk',
+    activityKind: 'dismount-clearance',
+    stayMs: 150,
+    faceAngle,
+    releasePoint: {
+      x: start.x,
+      y: start.y,
+      floor: start.floor,
+      buildingId: start.buildingId,
+    },
+  };
+}
+
+function serverRuntimeReleasePointForTarget(dataDir, target = null, current = null, options = {}) {
+  if (!isServerRuntimeSeatedOrWorkReleaseTarget(target)) return null;
+  const crowdAgents = options?.state ? serverRuntimeCrowdAgents(options.state, options.agentId) : [];
+  const occupancyOptions = {
+    agentId: options?.agentId,
+    crowdAgents,
+    routeTarget: target,
+  };
+  const authored = serverRuntimeAuthoredReleasePoint(dataDir, target, current);
+  if (authored && !serverRuntimeReleasePointCrowdConflict(options?.agentId, authored, crowdAgents, target)) return authored;
+  const synthetic = serverRuntimeSyntheticDismountPoint(dataDir, target, current, occupancyOptions);
+  if (synthetic) return synthetic;
+  const fallback = serverRuntimeFallbackReleasePoint(target, current);
+  if (fallback && !serverRuntimeReleasePointCrowdConflict(options?.agentId, fallback, crowdAgents, target)) return fallback;
+  return authored || fallback;
 }
 
 // Mirrors 8590's resolveFurnitureSpotApiPoint (/tmp/8590-main3d.js:1574-1586): authored queue spots are
@@ -3570,58 +5051,116 @@ export function serverScriptedServiceQueueSlotTarget(dataDir, queueTarget = null
   };
 }
 
-function listScriptedObjectRuntimeTargets(dataDir) {
-  const targets = [];
-  for (const building of listBuildingDocuments(dataDir)) {
-    const furniture = Array.isArray(building?.interior?.furniture) ? building.interior.furniture : [];
-    for (let index = 0; index < furniture.length; index += 1) {
-      const item = furniture[index];
-      if (!item || item.deleted || item.removed || item.enabled === false) continue;
-      const locations = Array.isArray(item.actionLocations) && item.actionLocations.length > 0 ? item.actionLocations : [];
-      const syntheticQueueLocations = serverScriptedServiceQueueDefinitionsForFurniture(item)
-        .filter(location => !locations.some(existing => scriptedObjectSpotId(existing) === scriptedObjectSpotId(location)))
-        .filter(location => !locations.some(existing => isScriptedObjectQueueSpot(existing, item) && serverScriptedQueueSpotId(existing) === serverScriptedQueueSpotId(location)));
-      const preferredSpotIds = scriptedObjectPreferredSpotIds(item);
-      const sortedLocations = [...locations, ...syntheticQueueLocations].sort((a, b) => {
-        const aSpot = String(scriptedObjectSpotId(a) || '').toLowerCase();
-        const bSpot = String(scriptedObjectSpotId(b) || '').toLowerCase();
-        const aPreferred = preferredSpotIds.indexOf(aSpot);
-        const bPreferred = preferredSpotIds.indexOf(bSpot);
-        const aQueue = isScriptedObjectQueueSpot(a, item) ? 1 : 0;
-        const bQueue = isScriptedObjectQueueSpot(b, item) ? 1 : 0;
-        if (aQueue !== bQueue) return aQueue - bQueue;
-        if (aPreferred !== bPreferred) return (aPreferred < 0 ? 999 : aPreferred) - (bPreferred < 0 ? 999 : bPreferred);
-        return aSpot.localeCompare(bSpot);
-      });
-      const targetLocations = sortedLocations.length > 0 ? sortedLocations : [null];
-      if (sortedLocations.length > 0 && scriptedObjectActivityConfig(item)) targetLocations.push(null);
-      const seen = new Set();
-      for (const location of targetLocations) {
-        const target = scriptedObjectTargetFromFurnitureSpot(building, item, index, location);
-        if (!target || seen.has(target.objectKey)) continue;
-        seen.add(target.objectKey);
-        targets.push(target);
-      }
-    }
-  }
-  return targets.sort((a, b) => `${a.buildingId}:${a.furnitureIndex}:${a.spotId}`.localeCompare(`${b.buildingId}:${b.furnitureIndex}:${b.spotId}`));
-}
-
 function isWorldObjectActiveForAnotherAgent(object = null, agentId = '', nowMs = Date.now()) {
   if (!hasActiveWorldObjectState(object, nowMs)) return false;
   return Boolean(object.agentId && agentId && object.agentId !== agentId);
 }
 
-function isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs = Date.now()) {
+function isServerScriptedSeatLikeTarget(target = null) {
+  if (!target || typeof target !== 'object') return false;
+  if (isServerScriptedObjectDeskConsumeTarget(target)) return false;
+  if (String(target.objectKey || '').includes(':consume:')) return false;
+  const poseKind = String(target.poseKind || '').trim().toLowerCase();
+  if (poseKind === 'seat') return true;
+  const objectType = normalizeObjectTypeKey(target.objectType || target.catalogKey || target.sourceObjectType);
+  if (SERVER_SCRIPTED_SEAT_OBJECT_TYPES.has(objectType)) return true;
+  const animationId = String(target.animationId || target.activityKind || target.kind || '').trim().toLowerCase();
+  return animationId.includes('sit') || animationId.includes('seat') || animationId.includes('bed-rest');
+}
+
+function runtimeAgentEntries(state = null) {
+  const agents = state?.agents;
+  if (!agents) return [];
+  if (typeof agents.entries === 'function') return Array.from(agents.entries());
+  if (Array.isArray(agents)) return agents.map((record, index) => [record?.agentId || String(index), record]);
+  if (typeof agents === 'object') return Object.entries(agents);
+  return [];
+}
+
+function parseRuntimeAgentTarget(plain = null) {
+  if (plain?.target && typeof plain.target === 'object') return plain.target;
+  const activity = plain?.visualState?.activity;
+  if (activity && typeof activity === 'object') return activity;
+  return null;
+}
+
+function runtimeAgentSnapshotIsCurrent(plain = null, nowMs = Date.now()) {
+  const stateKey = String(plain?.state || '').trim().toLowerCase();
+  if (!SERVER_SCRIPTED_RUNTIME_OCCUPIED_STATES.has(stateKey)) return false;
+  const expiresAt = Date.parse(String(plain?.leaseExpiresAt || ''));
+  if (Number.isFinite(expiresAt) && expiresAt + 2500 < nowMs) return false;
+  return true;
+}
+
+function serverScriptedTargetSpotKey(target = null) {
+  return safeText(target?.slotId || target?.spotId || target?.interactionSpotId || target?.activationSpotId || '', '');
+}
+
+function serverScriptedTargetBaseKey(target = null) {
+  return safeText(target?.baseObjectKey, '') ||
+    safeText(target?.objectKey, '') ||
+    (target?.buildingId && target?.furnitureIndex !== undefined
+      ? runtimeFurnitureObjectKey(target.buildingId, target.furnitureIndex, target.objectType || 'object')
+      : '');
+}
+
+function serverScriptedSeatTargetsMatch(target = null, otherTarget = null) {
+  if (!target || !otherTarget) return false;
+  const objectKey = safeText(target.objectKey, '');
+  const otherObjectKey = safeText(otherTarget.objectKey, '');
+  if (objectKey && otherObjectKey && objectKey === otherObjectKey) return true;
+  const baseKey = serverScriptedTargetBaseKey(target);
+  const otherBaseKey = serverScriptedTargetBaseKey(otherTarget);
+  if (!baseKey || !otherBaseKey || baseKey !== otherBaseKey) return false;
+  const spotKey = serverScriptedTargetSpotKey(target);
+  const otherSpotKey = serverScriptedTargetSpotKey(otherTarget);
+  if (spotKey && otherSpotKey) return spotKey === otherSpotKey;
+  return isServerScriptedSeatLikeTarget(target) || isServerScriptedSeatLikeTarget(otherTarget);
+}
+
+function isServerScriptedSeatTargetClaimedByRuntimeAgent(state = null, target = null, agentId = '', nowMs = Date.now()) {
+  if (!isServerScriptedSeatLikeTarget(target)) return false;
+  const targetX = Number(target.x);
+  const targetY = Number(target.y ?? target.z);
+  const positionRadius = Math.max(LIVE_ACTION_API_TILE * 0.6, SERVER_RUNTIME_AGENT_HARD_SEPARATION_RADIUS * 0.85);
+  for (const [otherId, record] of runtimeAgentEntries(state)) {
+    const plain = snapshotToPlain(record);
+    const otherAgentId = safeText(otherId || plain.agentId, '');
+    if (String(otherAgentId || '') === String(agentId || '')) continue;
+    if (!runtimeAgentSnapshotIsCurrent(plain, nowMs)) continue;
+    const otherTarget = parseRuntimeAgentTarget(plain);
+    if (serverScriptedSeatTargetsMatch(target, otherTarget)) return true;
+    if (!otherTarget || !isServerScriptedSeatLikeTarget(otherTarget)) continue;
+    if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) continue;
+    const otherX = Number(plain.x);
+    const otherY = Number(plain.y);
+    if (!Number.isFinite(otherX) || !Number.isFinite(otherY)) continue;
+    if (target.buildingId && plain.buildingId && String(target.buildingId) !== String(plain.buildingId)) continue;
+    if (Math.hypot(otherX - targetX, otherY - targetY) <= positionRadius) return true;
+  }
+  return false;
+}
+
+export function isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs = Date.now(), dataDir = '') {
   if (!target?.objectKey) return false;
   const object = state?.objects?.get?.(target.objectKey);
   if (isWorldObjectActiveForAnotherAgent(object, agentId, nowMs)) return false;
   const baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
   const baseObject = baseObjectKey !== target.objectKey ? state?.objects?.get?.(baseObjectKey) : object;
-  const baseActiveForAnother = isWorldObjectActiveForAnotherAgent(baseObject, agentId, nowMs);
+  const allowSharedBase = isServerScriptedMultiSlotPlayTarget(target);
+  const baseActiveForAnother = !allowSharedBase && isWorldObjectActiveForAnotherAgent(baseObject, agentId, nowMs);
   const queueStore = serverScriptedServiceQueueStoreFromWorldObject(baseObject);
-  const queueLength = normalizeServerScriptedServiceQueueReservations(queueStore).length;
-  if (target.isQueueUse) return baseActiveForAnother || queueLength > 0;
+  const reservations = normalizeServerScriptedServiceQueueReservations(queueStore);
+  const queueLength = reservations.length;
+  if (target.isQueueUse) {
+    if (!baseActiveForAnother && queueLength <= 0) return false;
+    const existingReservation = reservations.some(entry => String(entry.agentId || '') === String(agentId || ''));
+    if (existingReservation) return true;
+    const maxQueuePoints = getServerScriptedServiceQueueMaxPoints(dataDir, target);
+    return queueLength < maxQueuePoints;
+  }
+  if (isServerScriptedSeatTargetClaimedByRuntimeAgent(state, target, agentId, nowMs)) return false;
+  if (allowSharedBase) return true;
   return !baseActiveForAnother && queueLength === 0;
 }
 
@@ -3795,12 +5334,12 @@ function makeServerRuntimeWanderTarget(dataDir, agentId, current = null, nowMs =
 function pickScriptedObjectRuntimeTarget(agentId, targets, state, nowMs = Date.now(), options = {}) {
   const memory = pruneServerScriptedMemory(options.memory || makeServerScriptedMemory(), nowMs);
   const available = (Array.isArray(targets) ? targets : [])
-    .filter(target => isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs))
+    .filter(target => isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs, options.dataDir))
     .filter(target => !SCRIPTED_OBJECT_SKIP_TYPES.has(String(target.objectType || '').toLowerCase()))
     .filter(target => !hasRecentServerRuntimeObject(memory, target, nowMs))
     .filter(target => !hasRecentServerRuntimeFailure(memory, target, nowMs));
   const fallbackAvailable = (Array.isArray(targets) ? targets : [])
-    .filter(target => isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs))
+    .filter(target => isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs, options.dataDir))
     .filter(target => !SCRIPTED_OBJECT_SKIP_TYPES.has(String(target.objectType || '').toLowerCase()))
     .filter(target => !hasRecentServerRuntimeFailure(memory, target, nowMs));
   const categories = serverIdleCategoryOrder(agentId, memory, nowMs);
@@ -3838,7 +5377,11 @@ function buildScriptedObjectRuntimePlan(dataDir) {
 function makeServerScriptedObjectVisualState(isMoving, target = null, status = 'idle') {
   const poseKind = String(target?.poseKind || '').toLowerCase();
   const isRunning = serverScriptedObjectRouteShouldRun(target, isMoving);
+  const pingPongSide = serverScriptedPingPongSide(target);
+  const pingPongPaddleColor = pingPongSide ? numberOr(target?.paddleColor, serverScriptedPingPongPaddleColor(pingPongSide)) : null;
+  const pingPongRacket = pingPongSide ? makeServerScriptedPingPongRacketItem(target, pingPongSide) : null;
   const temporaryItem = target?.temporaryItem && typeof target.temporaryItem === 'object' ? target.temporaryItem : null;
+  const carriedItem = pingPongRacket || temporaryItem;
   const isDeskConsume = isServerScriptedObjectDeskConsumeTarget(target);
   const faceAngle = numberOr(target?.faceAngle, 0);
   const dockTarget = Number.isFinite(Number(target?.x)) && Number.isFinite(Number(target?.y))
@@ -3846,14 +5389,19 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
     : null;
   const animationId = isMoving ? 'walk' : (
     safeText(target?.animationId, '') ||
+    (pingPongSide ? 'play-pingpong' : '') ||
     (poseKind === 'seat' ? 'sit' : poseKind === 'wait' ? 'bus-stop-wait' : 'stand-use')
   );
-  const activityKind = safeText(target?.activityKind, '') || (target?.isQueueUse ? 'service-queue-wait' : 'server-scripted-object-use');
+  const activityKind = pingPongSide
+    ? `pingpong-${pingPongSide}`
+    : (safeText(target?.activityKind, '') || (target?.isQueueUse ? 'service-queue-wait' : 'server-scripted-object-use'));
   const activity = {
     kind: activityKind,
-    phase: target?.runtimePhase === 'desk-routing'
+    phase: pingPongSide
+      ? (isMoving ? 'approach' : 'ready')
+      : (target?.runtimePhase === 'desk-routing'
       ? (isMoving ? 'approach' : 'active')
-      : (target?.runtimePhase === 'desk-consuming' ? 'active' : (isMoving ? 'routing' : 'active')),
+      : (target?.runtimePhase === 'desk-consuming' ? 'active' : (isMoving ? 'routing' : 'active'))),
     objectKey: safeText(target?.objectKey, ''),
     baseObjectKey: safeText(target?.baseObjectKey, ''),
     objectType: safeText(target?.objectType, ''),
@@ -3868,6 +5416,27 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
     faceAngle,
     dockTarget,
   };
+  const slotId = safeText(target?.slotId || target?.spotId || target?.interactionSpotId, '');
+  if (slotId) {
+    activity.slotId = slotId;
+    activity.activeUseSlotId = slotId;
+  }
+  if (Number.isFinite(Number(target?.stayMs))) activity.stayMs = Math.max(1000, Math.floor(Number(target.stayMs)));
+  if (pingPongSide) {
+    activity.source = 'pingpong-runtime-table';
+    activity.mode = 'match';
+    activity.pingPongSide = pingPongSide;
+    activity.paddleColor = pingPongPaddleColor;
+    activity.lifecycle = { stationary: true, carryable: false, temporary: false, spawnsTemporary: true };
+    activity.spawnedItem = {
+      label: 'Ping Pong Racket',
+      catalogId: 'temporaryGameEquipment',
+      temporary: true,
+      carryable: true,
+      attachPoint: 'right-hand',
+      color: pingPongPaddleColor,
+    };
+  }
   if (temporaryItem) {
     const consumeDurationMs = Math.max(1000, Math.floor(numberOr(target?.consumeDurationMs, target?.stayMs || SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS)));
     activity.temporaryItem = temporaryItem;
@@ -3887,6 +5456,7 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
     };
     activity.lifecycle = { stationary: false, carryable: false, temporary: true, consumesTemporary: true };
   }
+  if (pingPongRacket) activity.temporaryItem = pingPongRacket;
   const visualState = {
     schemaVersion: 'agent-runtime-visual/v1',
     status,
@@ -3898,9 +5468,9 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
     atDesk: Boolean(target && !isMoving && isDeskConsume),
     deskFacingAngle: faceAngle,
     activity,
-    carrying: Boolean(temporaryItem),
+    carrying: Boolean(carriedItem),
   };
-  if (temporaryItem) visualState.carriedItem = temporaryItem;
+  if (carriedItem) visualState.carriedItem = carriedItem;
   return visualState;
 }
 
@@ -3963,7 +5533,11 @@ function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, so
   const reservationId = safeText(`server-res:${objectKey}:${agentId}`, '') || `server-res:${agentId}`;
   const activeUseId = safeText(`server-active:${objectKey}:${agentId}`, '') || `server-active:${agentId}`;
   const active = ['active', 'using', 'occupied', 'queued'].includes(String(state || '').toLowerCase());
-  const activityKind = safeText(target?.activityKind, '') || (target?.isQueueUse ? 'service-queue-wait' : 'server-scripted-object-use');
+  const pingPongSide = serverScriptedPingPongSide(target);
+  const pingPongPaddleColor = pingPongSide ? numberOr(target?.paddleColor, serverScriptedPingPongPaddleColor(pingPongSide)) : null;
+  const activityKind = pingPongSide
+    ? `pingpong-${pingPongSide}`
+    : (safeText(target?.activityKind, '') || (target?.isQueueUse ? 'service-queue-wait' : 'server-scripted-object-use'));
   const temporaryItem = target?.temporaryItem && typeof target.temporaryItem === 'object' ? target.temporaryItem : null;
   const sourceObject = target?.sourceObjectKey ? {
     objectKey: safeText(target?.sourceObjectKey, ''),
@@ -3999,6 +5573,10 @@ function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, so
       carryAttachPoint: temporaryItem ? (safeText(target?.carryAttachPoint, 'right-hand') || 'right-hand') : '',
       temporaryItem,
       sourceObject,
+      activeUseSlotId: safeText(target?.slotId || spotId, spotId) || spotId,
+      pingPongSide,
+      paddleColor: pingPongPaddleColor,
+      stayMs: Number.isFinite(Number(target?.stayMs)) ? Math.max(1000, Math.floor(Number(target.stayMs))) : null,
       pickupEffect: safeText(target?.pickupEffect, ''),
       consumeEffect: safeText(target?.consumeEffect, ''),
       completionState: safeText(target?.completionState, ''),
@@ -4061,7 +5639,7 @@ function objectUseRequestTargetFromPoint(message = {}) {
   const spotId = safeText(target?.spotId || target?.interactionSpotId || message?.spotId, 'default') || 'default';
   const config = scriptedObjectActivityConfig(null, { objectType });
   const poseKind = safeText(target?.poseKind, '') || safeText(config?.poseKind, '') || '';
-  return {
+  const out = {
     x,
     y,
     floor: floorOr(target?.floor ?? message?.floor, 1),
@@ -4078,6 +5656,7 @@ function objectUseRequestTargetFromPoint(message = {}) {
     interactionSpotId: spotId,
     spotId,
     slotId: safeText(target?.slotId || target?.seatId || spotId, spotId) || spotId,
+    activeUseSlotId: safeText(target?.activeUseSlotId || target?.slotId || target?.seatId || spotId, spotId) || spotId,
     poseKind,
     animationId: safeText(target?.animationId || config?.animationId, '') || (poseKind === 'seat' ? 'sit' : 'stand-use'),
     activityKind: safeText(target?.activityKind || config?.kind, '') || 'server-scripted-object-use',
@@ -4085,8 +5664,27 @@ function objectUseRequestTargetFromPoint(message = {}) {
     consumeDurationMs: Math.max(1000, Math.floor(numberOr(target?.consumeDurationMs ?? message?.consumeDurationMs, SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS))),
     vendingItemId: safeText(target?.vendingItemId || message?.vendingItemId, ''),
     microwaveFoodId: safeText(target?.microwaveFoodId || target?.foodItemId || message?.microwaveFoodId || message?.foodItemId, ''),
+    pingPongSide: safeText(target?.pingPongSide || message?.pingPongSide, ''),
     faceAngle: normalizeRuntimeAngleRadians(target?.faceAngle, 0),
   };
+  const paddleColor = numberOr(target?.paddleColor ?? message?.paddleColor, NaN);
+  if (Number.isFinite(paddleColor)) out.paddleColor = paddleColor;
+  return out;
+}
+
+function mergeScriptedObjectRequestRuntimeOverrides(match = null, message = {}) {
+  if (!match) return match;
+  const rawTarget = message?.target && typeof message.target === 'object' ? message.target : message;
+  const overrides = {};
+  for (const key of ['activityKind', 'animationId', 'pingPongSide', 'activeUseSlotId']) {
+    const value = safeText(rawTarget?.[key] ?? message?.[key], '');
+    if (value) overrides[key] = value;
+  }
+  const stayMs = numberOr(rawTarget?.stayMs ?? message?.stayMs, NaN);
+  if (Number.isFinite(stayMs)) overrides.stayMs = Math.max(1000, Math.floor(stayMs));
+  const paddleColor = numberOr(rawTarget?.paddleColor ?? message?.paddleColor, NaN);
+  if (Number.isFinite(paddleColor)) overrides.paddleColor = paddleColor;
+  return Object.keys(overrides).length ? { ...match, ...overrides } : match;
 }
 
 function resolveScriptedObjectRuntimeTargetFromRequest(dataDir, message = {}) {
@@ -4107,11 +5705,12 @@ function resolveScriptedObjectRuntimeTargetFromRequest(dataDir, message = {}) {
     if (requestedActionId && requestedActionId !== target.actionId) return false;
     return requestedBuildingId && requestedFurnitureIndex !== undefined && requestedFurnitureIndex !== null;
   });
-  return match || objectUseRequestTargetFromPoint(message);
+  return mergeScriptedObjectRequestRuntimeOverrides(match, message) || objectUseRequestTargetFromPoint(message);
 }
 
 function refreshScriptedObjectRuntimeTarget(dataDir, target = null) {
   if (!target || typeof target !== 'object' || !target.objectKey) return target;
+  if (isPingPongObjectType(target.objectType)) return null;
   if (isServerScriptedObjectDeskConsumeTarget(target)) return target;
   const refreshed = resolveScriptedObjectRuntimeTargetFromRequest(dataDir, { target });
   if (!refreshed?.objectKey || refreshed.objectKey !== target.objectKey) return target;
@@ -5035,9 +6634,26 @@ function normalizeWorldObjectData(value) {
 
 function normalizeVisualState(value) {
   if (value === null || value === undefined || value === '') return null;
-  const normalized = sanitizeVisualValue(value, 0, 'visualState');
+  let normalized = sanitizeVisualValue(value, 0, 'visualState');
   if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) return null;
-  const json = JSON.stringify(normalized);
+  let json = JSON.stringify(normalized);
+  if (json.length > MAX_VISUAL_STATE_JSON_CHARS && normalized.runtimeRoute && typeof normalized.runtimeRoute === 'object') {
+    normalized = {
+      ...normalized,
+      runtimeRoute: {
+        ...normalized.runtimeRoute,
+        routePoints: Array.isArray(normalized.runtimeRoute.routePoints) ? normalized.runtimeRoute.routePoints.slice(0, 12) : [],
+        rawPoints: Array.isArray(normalized.runtimeRoute.rawPoints) ? normalized.runtimeRoute.rawPoints.slice(0, 8) : [],
+        rawCells: Array.isArray(normalized.runtimeRoute.rawCells) ? normalized.runtimeRoute.rawCells.slice(0, 8) : [],
+      },
+    };
+    json = JSON.stringify(normalized);
+  }
+  if (json.length > MAX_VISUAL_STATE_JSON_CHARS && normalized.runtimeRoute && typeof normalized.runtimeRoute === 'object') {
+    const { rawPoints, rawCells, routePoints, ...routeMeta } = normalized.runtimeRoute;
+    normalized = { ...normalized, runtimeRoute: routeMeta };
+    json = JSON.stringify(normalized);
+  }
   if (json.length > MAX_VISUAL_STATE_JSON_CHARS) {
     throw apiError('invalid_visual_state', 'visualState is too large');
   }
@@ -5231,6 +6847,12 @@ export class AgentRuntimeRoom extends Room {
     this.scriptedObjectRuntimeMemory = new Map();
     this.scriptedObjectRuntimeNextPulseAtMs = new Map();
     this.scriptedObjectRuntimeIdleCursor = 0;
+    this.serverPingPongMatches = new Map();
+    this.serverPingPongCooldowns = new Map();
+    this.serverPingPongTableCooldowns = new Map();
+    this.serverPingPongTableTargets = [];
+    this.lastServerPingPongTablePollMs = 0;
+    this.serverRuntimeBlockerYieldCooldowns = new Map();
     configureDynamicInteriorRouting({
       apiToWorldScale: 1 / LIVE_ACTION_API_TILE,
       getInteriorBuildingAt: (x, y) => findInteriorBuildingAtApi(this.dataDir, x, y),
@@ -5262,6 +6884,8 @@ export class AgentRuntimeRoom extends Room {
     this.onMessage('runtime:snapshot', (client, message) => this.handleSnapshot(client, message));
     this.onMessage('runtime:worldObject', (client, message) => this.handleWorldObject(client, message));
     this.onMessage('runtime:objectUseRequest', (client, message) => this.handleObjectUseRequest(client, message));
+    this.onMessage('runtime:pingPongMatchRequest', (client, message) => this.handlePingPongMatchRequest(client, message));
+    this.onMessage('runtime:objectUseRelease', (client, message) => this.handleObjectUseRelease(client, message));
     this.onMessage('runtime:worldTopology', (client, message) => this.handleWorldTopology(client, message));
     this.onMessage('runtime:claimRoute', (client, message) => this.handleClaimRoute(client, message));
     this.onMessage('runtime:heartbeat', (client, message) => this.handleHeartbeat(client, message));
@@ -5436,16 +7060,20 @@ export class AgentRuntimeRoom extends Room {
       let existingObject = this.state.objects.get(target.objectKey);
       let baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
       let existingBaseObject = baseObjectKey !== target.objectKey ? this.state.objects.get(baseObjectKey) : existingObject;
+      let allowSharedBase = isServerScriptedMultiSlotPlayTarget(target);
       let blockingObject = isWorldObjectActiveForAnotherAgent(existingObject, agentId)
         ? existingObject
-        : (!target.isQueueUse && isWorldObjectActiveForAnotherAgent(existingBaseObject, agentId) ? existingBaseObject : null);
-      if (blockingObject && !target.isQueueUse) {
+        : (!target.isQueueUse && !allowSharedBase && isWorldObjectActiveForAnotherAgent(existingBaseObject, agentId) ? existingBaseObject : null);
+      let baseQueueLength = normalizeServerScriptedServiceQueueReservations(serverScriptedServiceQueueStoreFromWorldObject(existingBaseObject)).length;
+      if ((blockingObject || baseQueueLength > 0) && !target.isQueueUse && !allowSharedBase) {
         const queueTarget = serverScriptedQueueRuntimeTargetForBase(this.dataDir, target);
         if (queueTarget) {
           target = queueTarget;
           existingObject = this.state.objects.get(target.objectKey);
           baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
           existingBaseObject = baseObjectKey !== target.objectKey ? this.state.objects.get(baseObjectKey) : existingObject;
+          allowSharedBase = isServerScriptedMultiSlotPlayTarget(target);
+          baseQueueLength = normalizeServerScriptedServiceQueueReservations(serverScriptedServiceQueueStoreFromWorldObject(existingBaseObject)).length;
           blockingObject = isWorldObjectActiveForAnotherAgent(existingObject, agentId) ? existingObject : null;
         }
       }
@@ -5499,6 +7127,99 @@ export class AgentRuntimeRoom extends Room {
         snapshot: snapshotToPlain(result.agent),
         object: worldObjectToPlain(result.object),
         event: result.snapshotEvent,
+      });
+    });
+  }
+
+  handleObjectUseRelease(client, message = {}) {
+    this.withErrors(client, message, 'runtime:objectUseRelease', () => {
+      this.expireStaleRouteLeases();
+      const agentId = normalizeAgentId(message.agentId);
+      const nowMs = Date.now();
+      const now = new Date(nowMs).toISOString();
+      const requestedTarget = resolveScriptedObjectRuntimeTargetFromRequest(this.dataDir, message) || {};
+      const requestedObjectKey = safeText(message.objectKey || message.target?.objectKey || requestedTarget.objectKey, '');
+      const requestedBaseObjectKey = safeText(message.baseObjectKey || message.target?.baseObjectKey || requestedTarget.baseObjectKey, '');
+      const requestedSlotId = safeText(message.slotId || message.target?.slotId || requestedTarget.slotId || requestedTarget.spotId, '');
+      const reason = safeText(message.reason, 'object-use-released') || 'object-use-released';
+      const existing = this.state.agents.get(agentId);
+      const current = existing ? snapshotToPlain(existing) : null;
+      const currentTarget = current?.target && typeof current.target === 'object' ? current.target : null;
+      const currentObjectKeys = [
+        currentTarget?.objectKey,
+        currentTarget?.baseObjectKey,
+        currentTarget?.sourceObjectKey,
+        currentTarget?.sourceBaseObjectKey,
+      ].map(value => safeText(value, '')).filter(Boolean);
+      const currentSlotIds = [
+        currentTarget?.slotId,
+        currentTarget?.spotId,
+        currentTarget?.interactionSpotId,
+        currentTarget?.activeUseSlotId,
+      ].map(value => safeText(value, '')).filter(Boolean);
+      const objectMatches = Boolean(
+        !requestedObjectKey ||
+        currentObjectKeys.includes(requestedObjectKey) ||
+        (requestedBaseObjectKey && currentObjectKeys.includes(requestedBaseObjectKey))
+      );
+      const slotMatches = Boolean(!requestedSlotId || currentSlotIds.includes(requestedSlotId));
+      const ownedByScriptedObjectRuntime = current && (
+        current.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER ||
+        current.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER
+      );
+      if (current && currentTarget && ownedByScriptedObjectRuntime && objectMatches && slotMatches) {
+        const releaseTarget = mergeScriptedObjectRequestRuntimeOverrides(currentTarget, message);
+        const result = this.releaseServerScriptedObjectRoute(agentId, current, releaseTarget, nowMs, now, reason);
+        client.send('runtime:ack', {
+          requestId: requestIdFrom(message),
+          type: 'runtime:objectUseRelease',
+          ok: true,
+          agentId,
+          objectKey: releaseTarget.objectKey || requestedObjectKey,
+          snapshot: snapshotToPlain(result.agent),
+          object: result.object ? worldObjectToPlain(result.object) : null,
+          event: { reason },
+        });
+        return;
+      }
+
+      const object = requestedObjectKey ? this.state.objects.get(requestedObjectKey) : null;
+      const plainObject = object ? worldObjectToPlain(object) : null;
+      if (plainObject && plainObject.agentId === agentId && plainObject.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER) {
+        const releaseTarget = {
+          ...requestedTarget,
+          objectKey: requestedObjectKey,
+          baseObjectKey: requestedBaseObjectKey || requestedTarget.baseObjectKey || requestedObjectKey,
+          objectType: requestedTarget.objectType || plainObject.objectType || '',
+          buildingId: requestedTarget.buildingId || plainObject.buildingId || '',
+          furnitureIndex: requestedTarget.furnitureIndex ?? plainObject.furnitureIndex,
+          slotId: requestedSlotId || requestedTarget.slotId || plainObject.slotId || '',
+          spotId: requestedTarget.spotId || requestedSlotId || plainObject.slotId || '',
+          actionId: requestedTarget.actionId || plainObject.actionId || '',
+        };
+        const objectResult = this.releaseServerScriptedObjectWorldObject(agentId, releaseTarget, nowMs, now, reason);
+        client.send('runtime:ack', {
+          requestId: requestIdFrom(message),
+          type: 'runtime:objectUseRelease',
+          ok: true,
+          agentId,
+          objectKey: requestedObjectKey,
+          snapshot: current,
+          object: objectResult?.object ? worldObjectToPlain(objectResult.object) : null,
+          event: { reason, objectOnly: true },
+        });
+        return;
+      }
+
+      client.send('runtime:ack', {
+        requestId: requestIdFrom(message),
+        type: 'runtime:objectUseRelease',
+        ok: true,
+        agentId,
+        objectKey: requestedObjectKey,
+        snapshot: current,
+        object: plainObject,
+        event: { reason, noop: true },
       });
     });
   }
@@ -5768,6 +7489,88 @@ export class AgentRuntimeRoom extends Room {
     }, 'server-runtime-agent-seeded', { reason }).agent;
   }
 
+  serverScriptedAgentCanStartObject(agentId, idleAgentIds, nowMs = Date.now()) {
+    const key = normalizeAgentId(agentId);
+    if (!key || !idleAgentIds?.has?.(key)) return false;
+    const existing = this.state.agents.get(key);
+    if (!existing) return true;
+    const current = snapshotToPlain(existing);
+    if (current.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || current.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER) return false;
+    if (hasActiveLease(existing, nowMs)) return false;
+    const state = String(current.state || '').toLowerCase();
+    return !state || state === 'idle' || state === 'scripted';
+  }
+
+  serverScriptedPingPongPartnerCandidates(agentId, target, idleAgentIds, targets, nowMs = Date.now()) {
+    const partnerTarget = findServerScriptedPingPongPartnerTarget(targets, target);
+    if (!partnerTarget) return [];
+    return Array.from(idleAgentIds || [])
+      .map(candidateId => normalizeAgentId(candidateId))
+      .filter(candidateId => candidateId && candidateId !== normalizeAgentId(agentId))
+      .filter(candidateId => this.serverScriptedAgentCanStartObject(candidateId, idleAgentIds, nowMs))
+      .filter(candidateId => isServerScriptedObjectTargetAvailable(this.state, partnerTarget, candidateId, nowMs, this.dataDir))
+      .map(candidateId => {
+        const existing = this.state.agents.get(candidateId);
+        const current = existing ? snapshotToPlain(existing) : null;
+        const stable = stableTextHash(`${candidateId}:pingpong-partner:${partnerTarget.objectKey || ''}:${Math.floor(nowMs / 1000)}`) % 1000;
+        return {
+          agentId: candidateId,
+          target: partnerTarget,
+          score: serverRuntimeDistanceScore(current, partnerTarget) + (stable / 1000) * 4,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+  }
+
+  tryStartServerScriptedPingPongPartner(agentId, target, idleAgentIds, targets, nowMs = Date.now(), now = new Date(nowMs).toISOString(), options = {}) {
+    if (!isServerScriptedMultiSlotPlayTarget(target)) return { started: false, reason: 'not-pingpong' };
+    const source = safeText(options.source || target?.runtimeSource, 'idle') || 'idle';
+    const candidates = this.serverScriptedPingPongPartnerCandidates(agentId, target, idleAgentIds, targets, nowMs);
+    if (candidates.length <= 0) return { started: false, reason: 'no-partner-candidate' };
+    for (const candidate of candidates) {
+      const partnerTarget = {
+        ...candidate.target,
+        runtimeStartedAt: now,
+        runtimeActiveAt: '',
+        runtimeSource: source,
+      };
+      try {
+        const routeResult = this.startServerScriptedObjectRoute(candidate.agentId, partnerTarget, nowMs, now, {
+          source,
+          force: false,
+          pingPongPartner: true,
+        });
+        this.markServerScriptedRuntimeChoice(candidate.agentId, partnerTarget, nowMs);
+        return {
+          started: true,
+          agentId: candidate.agentId,
+          target: partnerTarget,
+          changedSnapshots: routeResult?.agent ? 1 : 0,
+          changedObjects: routeResult?.object ? 1 : 0,
+        };
+      } catch (error) {
+        this.markServerScriptedRuntimeFailure(candidate.agentId, partnerTarget, error?.code || error?.message || 'pingpong-partner-start-failed', nowMs);
+      }
+    }
+    return { started: false, reason: 'partner-start-failed' };
+  }
+
+  serverScriptedPingPongPartnerClaimed(agentId, target, targets, nowMs = Date.now()) {
+    const partnerTarget = findServerScriptedPingPongPartnerTarget(targets, target);
+    if (!partnerTarget?.objectKey) return false;
+    const partnerObject = this.state.objects.get(partnerTarget.objectKey);
+    if (isWorldObjectActiveForAnotherAgent(partnerObject, agentId, nowMs)) return true;
+    for (const [otherAgentId, record] of this.state.agents.entries()) {
+      const otherId = normalizeAgentId(otherAgentId);
+      if (!otherId || otherId === normalizeAgentId(agentId)) continue;
+      const current = snapshotToPlain(record);
+      const otherTarget = current.target && typeof current.target === 'object' ? current.target : null;
+      if (otherTarget?.objectKey !== partnerTarget.objectKey) continue;
+      if (current.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || current.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER) return true;
+    }
+    return false;
+  }
+
   serverScriptedServiceQueueStoreFor(baseObjectKey) {
     return serverScriptedServiceQueueStoreFromWorldObject(this.state.objects.get(baseObjectKey));
   }
@@ -5964,7 +7767,7 @@ export class AgentRuntimeRoom extends Room {
         runtimeStartedAt: now,
         runtimeActiveAt: '',
         runtimeSource: source,
-      }, nowMs, now, { source, force: true });
+      }, nowMs, now, { source, force: true, queuePromotion: true });
     } catch (error) {
       return {
         promoted: false,
@@ -5993,6 +7796,23 @@ export class AgentRuntimeRoom extends Room {
     };
   }
 
+  promoteFreeServerScriptedServiceQueues(nowMs, now, reason = 'free-service-queue-promote-front') {
+    let changedSnapshots = 0;
+    let changedObjects = 0;
+    let promotedCount = 0;
+    for (const [objectKey, object] of this.state.objects.entries()) {
+      if (String(objectKey || '').includes(':queue:')) continue;
+      const store = serverScriptedServiceQueueStoreFromWorldObject(object);
+      if (normalizeServerScriptedServiceQueueReservations(store).length <= 0) continue;
+      if (hasActiveWorldObjectState(object, nowMs)) continue;
+      const promoted = this.promoteServerScriptedServiceQueueFrontIfReady(objectKey, nowMs, now, reason);
+      changedSnapshots += promoted.changedSnapshots || 0;
+      changedObjects += promoted.changedObjects || 0;
+      if (promoted.promoted) promotedCount++;
+    }
+    return { changedSnapshots, changedObjects, promotedCount };
+  }
+
   startServerScriptedObjectRoute(agentId, rawTarget, nowMs = Date.now(), now = new Date(nowMs).toISOString(), options = {}) {
     let target = {
       ...rawTarget,
@@ -6001,6 +7821,9 @@ export class AgentRuntimeRoom extends Room {
       runtimeActiveAt: options.active === true ? (rawTarget.runtimeActiveAt || now) : (rawTarget.runtimeActiveAt || ''),
       runtimeSource: options.source || rawTarget.runtimeSource || 'idle',
     };
+    if (isPingPongObjectType(target.objectType)) {
+      throw apiError('pingpong_server_runtime_required', 'ping-pong is owned by the dedicated server ping-pong runtime', { objectKey: target.objectKey || '' });
+    }
     if (target.isQueueUse) {
       const queued = this.reserveServerScriptedServiceQueueTarget(agentId, target, nowMs, now, {
         sourceKind: options.source || target.runtimeSource || 'agent-scripted-mode',
@@ -6024,7 +7847,26 @@ export class AgentRuntimeRoom extends Room {
     target.baseObjectKey = safeText(target.baseObjectKey, '') || objectKey;
     const existingObject = this.state.objects.get(objectKey);
     const existingBaseObject = target.baseObjectKey !== objectKey ? this.state.objects.get(target.baseObjectKey) : existingObject;
-    const baseBlocked = target.isQueueUse ? false : isWorldObjectActiveForAnotherAgent(existingBaseObject, agentId, nowMs);
+    const allowSharedBase = isServerScriptedMultiSlotPlayTarget(target);
+    if (allowSharedBase && isWorldObjectActiveForAnotherAgent(existingObject, agentId, nowMs)) {
+      throw apiError('object_state_conflict', 'scripted object slot is already active for another agent', { objectKey, agentId });
+    }
+    if (!target.isQueueUse && isServerScriptedSeatTargetClaimedByRuntimeAgent(this.state, target, agentId, nowMs)) {
+      throw apiError('object_state_conflict', 'seated object is already claimed by another agent', { objectKey, agentId });
+    }
+    const seatObjectBlocked = !target.isQueueUse && isServerScriptedSeatLikeTarget(target) && (
+      isWorldObjectActiveForAnotherAgent(existingObject, agentId, nowMs) ||
+      (!allowSharedBase && isWorldObjectActiveForAnotherAgent(existingBaseObject, agentId, nowMs))
+    );
+    if (seatObjectBlocked) {
+      throw apiError('object_state_conflict', 'seated object is already active for another agent', { objectKey, agentId });
+    }
+    const baseBlocked = target.isQueueUse || allowSharedBase ? false : isWorldObjectActiveForAnotherAgent(existingBaseObject, agentId, nowMs);
+    const baseQueueLength = normalizeServerScriptedServiceQueueReservations(serverScriptedServiceQueueStoreFromWorldObject(existingBaseObject)).length;
+    const pendingQueueBlocksDirectUse = !target.isQueueUse && !allowSharedBase && baseQueueLength > 0 && options.queuePromotion !== true;
+    if (pendingQueueBlocksDirectUse) {
+      throw apiError('service_queue_pending', 'service object has a pending queue; direct use must wait for queue promotion', { objectKey: target.baseObjectKey || objectKey, agentId, queueLength: baseQueueLength });
+    }
     if (!options.force && (isWorldObjectActiveForAnotherAgent(existingObject, agentId, nowMs) || baseBlocked)) {
       throw apiError('object_state_conflict', 'world object is active for another agent', { objectKey, agentId });
     }
@@ -6224,6 +8066,10 @@ export class AgentRuntimeRoom extends Room {
           visualState: withRuntimeRouteVisualState(makeLiveActionVisualState(!arrived), movement.route),
         }, arrived ? 'server-live-action-arrived' : 'server-live-action-routing', { actionId, routeId });
         changedSnapshots++;
+        if (!arrived) {
+          const yieldResult = this.tryNudgeServerRuntimeCrowdBlocker(agentId, current, targetPoint, movement.route, nowMs, now);
+          if (yieldResult.nudged) changedSnapshots++;
+        }
         if (arrived && status === 'routing') {
           const transitioned = this.transitionServerLiveAction(action, 'arrived', {
             now,
@@ -6586,6 +8432,719 @@ export class AgentRuntimeRoom extends Room {
     return changed;
   }
 
+  loadServerPingPongTableTargets(nowMs = Date.now(), { force = false } = {}) {
+    if (!force && Array.isArray(this.serverPingPongTableTargets) && nowMs - Number(this.lastServerPingPongTablePollMs || 0) < SERVER_PINGPONG_RUNTIME_TABLE_POLL_MS) {
+      return this.serverPingPongTableTargets;
+    }
+    try {
+      this.serverPingPongTableTargets = listServerPingPongTableTargets(this.dataDir);
+    } catch {
+      this.serverPingPongTableTargets = [];
+    }
+    this.lastServerPingPongTablePollMs = nowMs;
+    return this.serverPingPongTableTargets;
+  }
+
+  serverPingPongTableTargetForObjectKey(objectKey, nowMs = Date.now()) {
+    const key = safeText(objectKey, '');
+    return this.loadServerPingPongTableTargets(nowMs).find(table => table.objectKey === key) || null;
+  }
+
+  isAgentAvailableForServerPingPong(agentId, plan, nowMs = Date.now(), { requirePulse = true, requireSnapshot = false } = {}) {
+    const id = safeText(agentId, '');
+    if (!id || !plan?.idleAgentIds?.includes?.(id)) return false;
+    if (Number(this.serverPingPongCooldowns.get(id) || 0) > nowMs) return false;
+    if (requirePulse && !this.ensureServerScriptedIdlePulseDue(id, nowMs)) return false;
+    for (const match of this.serverPingPongMatches.values()) {
+      if (match.p1Id === id || match.p2Id === id) return false;
+    }
+    const existing = this.state.agents.get(id);
+    if (!existing && requireSnapshot) return false;
+    if (!existing) return true;
+    const current = snapshotToPlain(existing);
+    if (current.owner === SERVER_PINGPONG_RUNTIME_OWNER || current.leaseOwner === SERVER_PINGPONG_RUNTIME_LEASE_OWNER) return false;
+    if (hasActiveLease(existing, nowMs)) return false;
+    const state = String(current.state || '').toLowerCase();
+    if (state && !['idle', 'scripted'].includes(state)) return false;
+    return true;
+  }
+
+  isServerPingPongTableAvailable(tableTarget, nowMs = Date.now()) {
+    if (!tableTarget?.objectKey) return false;
+    if (this.serverPingPongMatches.has(tableTarget.objectKey)) return false;
+    if (Number(this.serverPingPongTableCooldowns.get(tableTarget.objectKey) || 0) > nowMs) return false;
+    const object = this.state.objects.get(tableTarget.objectKey);
+    if (!object) return true;
+    const plain = worldObjectToPlain(object);
+    if (plain.owner === SERVER_PINGPONG_RUNTIME_OWNER && hasActiveWorldObjectState(object, nowMs)) return false;
+    return !hasActiveWorldObjectState(object, nowMs);
+  }
+
+  pickServerPingPongPair(tableTarget, plan, nowMs = Date.now(), { requirePulse = true, requireSnapshot = false } = {}) {
+    const idleAgentIds = Array.isArray(plan?.idleAgentIds) ? plan.idleAgentIds : [];
+    const centerX = (numberOr(tableTarget?.left?.x, 0) + numberOr(tableTarget?.right?.x, 0)) / 2;
+    const centerY = (numberOr(tableTarget?.left?.y, 0) + numberOr(tableTarget?.right?.y, 0)) / 2;
+    const candidates = idleAgentIds
+      .filter(agentId => this.isAgentAvailableForServerPingPong(agentId, plan, nowMs, { requirePulse, requireSnapshot }))
+      .map(agentId => {
+        const existing = this.state.agents.get(agentId);
+        const current = existing ? snapshotToPlain(existing) : {};
+        const distance = Number.isFinite(Number(current.x)) && Number.isFinite(Number(current.y))
+          ? Math.hypot(Number(current.x) - centerX, Number(current.y) - centerY)
+          : LIVE_ACTION_API_TILE * 30;
+        const stable = stableTextHash(`${tableTarget.objectKey}:${agentId}:${Math.floor(nowMs / 10000)}`) % 1000;
+        return { agentId, score: distance + stable / 1000 };
+      })
+      .sort((a, b) => a.score - b.score);
+    if (candidates.length < 2) return null;
+    return [candidates[0].agentId, candidates[1].agentId];
+  }
+
+  upsertServerPingPongAgent(match, tableTarget, agentId, side, point, nowMs, now, { isMoving = false, movement = null, state = 'using' } = {}) {
+    const partnerAgentId = side === 'right' ? match.p1Id : match.p2Id;
+    const target = makeServerPingPongTarget(tableTarget, side, agentId, partnerAgentId, match, point, now);
+    if (!target) return null;
+    const routeId = safeText(`server-pingpong:${match.matchId}:${agentId}`, `server-pingpong:${agentId}`) || `server-pingpong:${agentId}`;
+    return this.upsertSnapshot({
+      agentId,
+      mode: 'live',
+      owner: SERVER_PINGPONG_RUNTIME_OWNER,
+      x: isMoving ? numberOr(movement?.x, point.x) : point.x,
+      y: isMoving ? numberOr(movement?.y, point.y) : point.y,
+      floor: point.floor,
+      buildingId: tableTarget.buildingId || '',
+      roomId: tableTarget.roomId || '',
+      heading: isMoving ? numberOr(movement?.heading, point.faceAngle) : point.faceAngle,
+      state,
+      routeId,
+      worldActionId: '',
+      target,
+      leaseOwner: SERVER_PINGPONG_RUNTIME_LEASE_OWNER,
+      leaseExpiresAt: new Date(nowMs + SERVER_PINGPONG_RUNTIME_LEASE_TTL_MS).toISOString(),
+      visualState: isMoving
+        ? withRuntimeRouteVisualState(makeServerPingPongVisualState(true, target, match, nowMs), movement?.route || null)
+        : makeServerPingPongVisualState(false, target, match, nowMs),
+    }, `server-pingpong-${state}`, {
+      routeId,
+      objectKey: match.objectKey,
+      matchId: match.matchId,
+      side,
+    });
+  }
+
+  upsertServerPingPongWorldObject(match, tableTarget, state, nowMs, now) {
+    const expiresAt = new Date(nowMs + SERVER_PINGPONG_RUNTIME_LEASE_TTL_MS + SERVER_PINGPONG_RUNTIME_MATCH_MS).toISOString();
+    return this.upsertWorldObject({
+      objectKey: match.objectKey,
+      owner: SERVER_PINGPONG_RUNTIME_OWNER,
+      objectType: 'pingpong',
+      buildingId: tableTarget.buildingId || '',
+      furnitureIndex: tableTarget.furnitureIndex ?? -1,
+      state,
+      agentId: match.p1Id || '',
+      actionId: 'life.playPingPong',
+      reservationId: safeText(`server-pingpong-res:${match.objectKey}`, '') || `server-pingpong-res:${match.matchId}`,
+      activeUseId: state === 'routing' ? '' : (safeText(`server-pingpong-active:${match.objectKey}`, '') || `server-pingpong-active:${match.matchId}`),
+      slotId: 'player-left,player-right',
+      expiresAt,
+      data: makeServerPingPongObjectData(match, tableTarget, state, now, expiresAt),
+    }, `server-pingpong-world-${state}`, {
+      objectKey: match.objectKey,
+      matchId: match.matchId,
+    });
+  }
+
+  releaseServerPingPongAgent(agentId, tableTarget, side = 'left', matchId = '', objectKey = '', nowMs = Date.now(), now = new Date(nowMs).toISOString(), reason = 'complete') {
+    const id = safeText(agentId, '');
+    if (!id) return 0;
+    const sideKey = side === 'right' ? 'right' : 'left';
+    const existing = this.state.agents.get(id);
+    const current = existing ? snapshotToPlain(existing) : {};
+    const releasePoint = tableTarget ? serverPingPongReleasePointFromTable(tableTarget, sideKey, `${matchId || objectKey}:${id}`) : null;
+    this.upsertSnapshot({
+      agentId: id,
+      mode: 'scripted',
+      owner: 'agent-scripted-mode',
+      x: numberOr(releasePoint?.x, current.x || 0),
+      y: numberOr(releasePoint?.y, current.y || 0),
+      floor: floorOr(releasePoint?.floor ?? current.floor, 1),
+      buildingId: safeText(releasePoint?.buildingId || current.buildingId || '', ''),
+      roomId: safeText(releasePoint?.roomId || current.roomId || '', ''),
+      heading: headingOr(releasePoint?.heading ?? current.heading, current.heading || 0),
+      state: 'idle',
+      routeId: '',
+      worldActionId: '',
+      target: null,
+      leaseOwner: '',
+      leaseExpiresAt: '',
+      visualState: makeServerScriptedObjectIdleVisualState(),
+    }, 'server-pingpong-released', {
+      objectKey,
+      matchId,
+      reason,
+      side: sideKey,
+    });
+    this.serverPingPongCooldowns.set(id, nowMs + SERVER_PINGPONG_RUNTIME_COOLDOWN_MS);
+    this.scheduleServerScriptedIdlePulse(id, [2500, 7000], 'pingpong-complete', nowMs);
+    return 1;
+  }
+
+  startServerPingPongMatch(tableTarget, p1Id, p2Id, nowMs = Date.now(), now = new Date(nowMs).toISOString(), options = {}) {
+    const match = makeServerPingPongMatch(tableTarget, p1Id, p2Id, nowMs, options.source || 'idle');
+    this.serverPingPongMatches.set(match.objectKey, match);
+    this.scheduleServerScriptedIdlePulse(p1Id, SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS, 'success:server-pingpong', nowMs);
+    this.scheduleServerScriptedIdlePulse(p2Id, SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS, 'success:server-pingpong', nowMs);
+    const players = [
+      { agentId: p1Id, side: 'left', point: tableTarget.left },
+      { agentId: p2Id, side: 'right', point: tableTarget.right },
+    ];
+    for (const player of players) {
+      const existing = this.ensureServerRuntimeAgentSeed(player.agentId, player.point, 'server-pingpong-start');
+      const current = snapshotToPlain(existing);
+      const movement = makeServerRuntimeStep(this.dataDir, player.agentId, current, player.point, DEFAULT_WORLD_RUNTIME_TICK_MS, {
+        speedUnitsPerSec: SERVER_PINGPONG_RUNTIME_SPEED_UNITS_PER_SEC,
+        arrivalRadius: SERVER_PINGPONG_RUNTIME_ARRIVAL_RADIUS,
+        routeSource: SERVER_PINGPONG_RUNTIME_OWNER,
+      });
+      const arrived = movement.arrived;
+      this.upsertServerPingPongAgent(match, tableTarget, player.agentId, player.side, player.point, nowMs, now, {
+        isMoving: !arrived,
+        movement,
+        state: arrived ? 'waiting' : 'routing',
+      });
+    }
+    this.upsertServerPingPongWorldObject(match, tableTarget, 'routing', nowMs, now);
+    return { changedSnapshots: 2, changedObjects: 1, match };
+  }
+
+  releaseServerPingPongMatch(match, tableTarget, nowMs = Date.now(), now = new Date(nowMs).toISOString(), reason = 'complete') {
+    if (!match) return { changedSnapshots: 0, changedObjects: 0 };
+    const table = tableTarget || this.serverPingPongTableTargetForObjectKey(match.objectKey, nowMs);
+    const players = [
+      { agentId: match.p1Id, side: 'left' },
+      { agentId: match.p2Id, side: 'right' },
+    ];
+    let changedSnapshots = 0;
+    for (const player of players) {
+      if (!player.agentId) continue;
+      changedSnapshots += this.releaseServerPingPongAgent(player.agentId, table, player.side, match.matchId, match.objectKey, nowMs, now, reason);
+    }
+    this.serverPingPongMatches.delete(match.objectKey);
+    this.serverPingPongTableCooldowns.set(match.objectKey, nowMs + SERVER_PINGPONG_RUNTIME_TABLE_COOLDOWN_MS);
+    let changedObjects = 0;
+    if (table) {
+      const expiresAt = new Date(nowMs + 1000).toISOString();
+      this.upsertWorldObject({
+        objectKey: match.objectKey,
+        owner: SERVER_PINGPONG_RUNTIME_OWNER,
+        objectType: 'pingpong',
+        buildingId: table.buildingId || '',
+        furnitureIndex: table.furnitureIndex ?? -1,
+        state: 'idle',
+        agentId: '',
+        actionId: 'life.playPingPong',
+        reservationId: '',
+        activeUseId: '',
+        slotId: '',
+        expiresAt,
+        data: makeServerPingPongObjectData(match, table, 'idle', now, expiresAt),
+      }, 'server-pingpong-world-idle', {
+        objectKey: match.objectKey,
+        matchId: match.matchId,
+        reason,
+      });
+      changedObjects = 1;
+    }
+    return { changedSnapshots, changedObjects };
+  }
+
+  sweepServerPingPongRuntime(tables = [], nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
+    const tableByKey = new Map((Array.isArray(tables) ? tables : []).map(table => [table.objectKey, table]));
+    let changedSnapshots = 0;
+    let changedObjects = 0;
+
+    for (const [agentId, existing] of Array.from(this.state.agents.entries())) {
+      const current = snapshotToPlain(existing);
+      const target = current.target && typeof current.target === 'object' ? current.target : null;
+      const objectKey = safeText(target?.objectKey || target?.baseObjectKey, '');
+      const ownedByPingPong = current.owner === SERVER_PINGPONG_RUNTIME_OWNER || current.leaseOwner === SERVER_PINGPONG_RUNTIME_LEASE_OWNER || isPingPongObjectType(target?.objectType);
+      if (!ownedByPingPong) continue;
+      const match = objectKey ? this.serverPingPongMatches.get(objectKey) : null;
+      if (match && (match.p1Id === agentId || match.p2Id === agentId)) continue;
+      const table = objectKey ? (tableByKey.get(objectKey) || this.serverPingPongTableTargetForObjectKey(objectKey, nowMs)) : null;
+      changedSnapshots += this.releaseServerPingPongAgent(agentId, table, target?.side === 'right' ? 'right' : 'left', match?.matchId || '', objectKey, nowMs, now, match ? 'stray-player-released' : 'orphan-player-released');
+    }
+
+    for (const [objectKey, existing] of Array.from(this.state.objects.entries())) {
+      const plain = worldObjectToPlain(existing);
+      if (plain.owner !== SERVER_PINGPONG_RUNTIME_OWNER || !isPingPongObjectType(plain.objectType)) continue;
+      if (this.serverPingPongMatches.has(objectKey)) continue;
+      const hasRuntimeState = hasActiveWorldObjectState(existing, nowMs) || Boolean(plain.reservationId || plain.activeUseId || plain.data?.pingPongGame);
+      if (!hasRuntimeState && String(plain.state || '').toLowerCase() === 'idle') continue;
+      const table = tableByKey.get(objectKey) || this.serverPingPongTableTargetForObjectKey(objectKey, nowMs);
+      const game = plain.data?.pingPongGame && typeof plain.data.pingPongGame === 'object' ? plain.data.pingPongGame : {};
+      const playerIds = new Set([
+        plain.agentId,
+        game.p1Id,
+        game.p2Id,
+        ...(Array.isArray(plain.data?.reservation?.agentIds) ? plain.data.reservation.agentIds : []),
+        ...(Array.isArray(plain.data?.activeUse?.agentIds) ? plain.data.activeUse.agentIds : []),
+      ].map(id => safeText(id, '')).filter(Boolean));
+      for (const playerId of playerIds) {
+        const current = this.state.agents.get(playerId);
+        if (!current) continue;
+        const snapshot = snapshotToPlain(current);
+        const target = snapshot.target && typeof snapshot.target === 'object' ? snapshot.target : null;
+        if (snapshot.owner !== SERVER_PINGPONG_RUNTIME_OWNER && snapshot.leaseOwner !== SERVER_PINGPONG_RUNTIME_LEASE_OWNER && target?.objectKey !== objectKey) continue;
+        changedSnapshots += this.releaseServerPingPongAgent(playerId, table, target?.side === 'right' ? 'right' : 'left', safeText(game.matchId, ''), objectKey, nowMs, now, 'orphan-object-released');
+      }
+      const expiresAt = new Date(nowMs + 1000).toISOString();
+      this.upsertWorldObject({
+        objectKey,
+        owner: SERVER_PINGPONG_RUNTIME_OWNER,
+        objectType: 'pingpong',
+        buildingId: plain.buildingId || table?.buildingId || '',
+        furnitureIndex: plain.furnitureIndex ?? table?.furnitureIndex ?? -1,
+        state: 'idle',
+        agentId: '',
+        actionId: 'life.playPingPong',
+        reservationId: '',
+        activeUseId: '',
+        slotId: '',
+        expiresAt,
+        data: {
+          clearReservation: true,
+          activeUse: {
+            state: 'idle',
+            mode: 'orphan-cleared',
+            runtimeWorldObject: true,
+            runtimeOwner: SERVER_PINGPONG_RUNTIME_OWNER,
+          },
+          pingPongGame: null,
+          writer: 'agent-runtime-room.mjs#serverPingPongRuntime',
+        },
+      }, 'server-pingpong-world-orphan-cleared', {
+        objectKey,
+        reason: 'orphaned-server-pingpong-object',
+      });
+      this.serverPingPongTableCooldowns.set(objectKey, nowMs + SERVER_PINGPONG_RUNTIME_TABLE_COOLDOWN_MS);
+      changedObjects++;
+    }
+
+    return { changedSnapshots, changedObjects };
+  }
+
+  advanceServerPingPongMatch(match, tableTarget, tickMs, nowMs, now) {
+    if (!match || !tableTarget) return this.releaseServerPingPongMatch(match, tableTarget, nowMs, now, 'missing-table');
+    const p1Existing = this.state.agents.get(match.p1Id);
+    const p2Existing = this.state.agents.get(match.p2Id);
+    if (!p1Existing || !p2Existing) return this.releaseServerPingPongMatch(match, tableTarget, nowMs, now, 'missing-player');
+    const p1 = snapshotToPlain(p1Existing);
+    const p2 = snapshotToPlain(p2Existing);
+    let changedSnapshots = 0;
+    let changedObjects = 0;
+    if (match.phase === 'approach') {
+      const players = [
+        { current: p1, agentId: match.p1Id, side: 'left', point: tableTarget.left },
+        { current: p2, agentId: match.p2Id, side: 'right', point: tableTarget.right },
+      ];
+      let allArrived = true;
+      for (const player of players) {
+        const distance = Math.hypot(numberOr(player.current.x, 0) - player.point.x, numberOr(player.current.y, 0) - player.point.y);
+        const alreadyArrived = ['waiting', 'using'].includes(String(player.current.state || '').toLowerCase()) && distance <= SERVER_PINGPONG_RUNTIME_ARRIVAL_RADIUS;
+        const movement = alreadyArrived ? { arrived: true, x: player.point.x, y: player.point.y, heading: player.point.faceAngle, route: null } : makeServerRuntimeStep(this.dataDir, player.agentId, player.current, player.point, tickMs, {
+          speedUnitsPerSec: SERVER_PINGPONG_RUNTIME_SPEED_UNITS_PER_SEC,
+          arrivalRadius: SERVER_PINGPONG_RUNTIME_ARRIVAL_RADIUS,
+          routeSource: SERVER_PINGPONG_RUNTIME_OWNER,
+        });
+        const arrived = alreadyArrived || movement.arrived;
+        allArrived = allArrived && arrived;
+        this.upsertServerPingPongAgent(match, tableTarget, player.agentId, player.side, player.point, nowMs, now, {
+          isMoving: !arrived,
+          movement,
+          state: arrived ? 'waiting' : 'routing',
+        });
+        changedSnapshots++;
+      }
+      this.upsertServerPingPongWorldObject(match, tableTarget, 'routing', nowMs, now);
+      changedObjects++;
+      if (allArrived) {
+        match.phase = 'playing';
+        match.phaseStartedAtMs = nowMs;
+        match.activeAtMs = nowMs;
+        resetServerPingPongBallForServe(match);
+      } else if (nowMs - Number(match.startedAtMs || nowMs) > 60000) {
+        return this.releaseServerPingPongMatch(match, tableTarget, nowMs, now, 'approach-timeout');
+      }
+      return { changedSnapshots, changedObjects };
+    }
+
+    if (match.phase === 'playing') {
+      const dt = tickMs / 1000;
+      const tableHalfX = 1.12;
+      const tableHalfZ = 0.48;
+      const hitPlaneX = 1.04;
+      const paddleReachZ = 0.24;
+      match.pointTimerMs = Math.max(0, numberOr(match.pointTimerMs, 0) + tickMs);
+      match.servePauseMs = Math.max(0, numberOr(match.servePauseMs, 0) - tickMs);
+      const serving = match.servePauseMs > 0;
+      if (!serving) {
+        match.ballX += numberOr(match.ballVX, 0) * dt * 3.05;
+        match.ballZ += numberOr(match.ballVZ, 0) * dt * 3.05;
+        if (Math.abs(match.ballZ) > tableHalfZ) {
+          match.ballZ = Math.sign(match.ballZ || 1) * tableHalfZ;
+          match.ballVZ = -numberOr(match.ballVZ, 0) * 0.92;
+        }
+      }
+      const elapsedSec = Math.max(0, (nowMs - Number(match.phaseStartedAtMs || nowMs)) / 1000);
+      const p1Skill = Math.max(0.35, Math.min(0.95, numberOr(match.p1Skill, 0.7)));
+      const p2Skill = Math.max(0.35, Math.min(0.95, numberOr(match.p2Skill, 0.7)));
+      const p1AimError = (1 - p1Skill) * Math.sin(elapsedSec * 2.3 + 0.4) * 0.42;
+      const p2AimError = (1 - p2Skill) * Math.sin(elapsedSec * 2.1 + 1.7) * 0.42;
+      match.p1TrackZ += (((match.ballVX || 0) < 0 ? match.ballZ + p1AimError : match.ballZ * 0.28) - (match.p1TrackZ || 0)) * (0.12 + p1Skill * 0.10);
+      match.p2TrackZ += (((match.ballVX || 0) > 0 ? match.ballZ + p2AimError : match.ballZ * 0.28) - (match.p2TrackZ || 0)) * (0.12 + p2Skill * 0.10);
+      match.p1TrackZ = Math.max(-0.42, Math.min(0.42, match.p1TrackZ || 0));
+      match.p2TrackZ = Math.max(-0.42, Math.min(0.42, match.p2TrackZ || 0));
+      const scorePoint = (winner, loser, reason) => {
+        if (winner === 'p1') match.p1Score = Math.min(SERVER_PINGPONG_RUNTIME_TARGET_SCORE, (match.p1Score || 0) + 1);
+        else match.p2Score = Math.min(SERVER_PINGPONG_RUNTIME_TARGET_SCORE, (match.p2Score || 0) + 1);
+        match.lastPoint = { winner, loser, reason, atMs: nowMs };
+        match.nextServe = loser;
+        resetServerPingPongBallForServe(match);
+        if (winner === 'p1') match.p1SwingPulseId = Number(match.p1SwingPulseId || 0) + 1;
+        else match.p2SwingPulseId = Number(match.p2SwingPulseId || 0) + 1;
+        if ((match.p1Score || 0) >= SERVER_PINGPONG_RUNTIME_TARGET_SCORE || (match.p2Score || 0) >= SERVER_PINGPONG_RUNTIME_TARGET_SCORE) {
+          match.phase = 'result';
+          match.phaseStartedAtMs = nowMs;
+        }
+      };
+      const p1Incoming = !serving && match.ballX <= -hitPlaneX && (match.ballVX || 0) < 0;
+      const p2Incoming = !serving && match.ballX >= hitPlaneX && (match.ballVX || 0) > 0;
+      if (p1Incoming || p2Incoming) {
+        const isP1 = !!p1Incoming;
+        const paddleZ = isP1 ? match.p1TrackZ : match.p2TrackZ;
+        const skill = isP1 ? p1Skill : p2Skill;
+        const missDistance = Math.abs((match.ballZ || 0) - (paddleZ || 0));
+        const pressure = Math.min(0.22, Math.max(0, (Math.abs(match.ballVZ || 0) - 0.22) * 0.18 + (match.rallyHits || 0) * 0.008));
+        const randomMiss = Math.random() > Math.max(0.08, skill - pressure);
+        if (missDistance > paddleReachZ || randomMiss) {
+          scorePoint(isP1 ? 'p2' : 'p1', isP1 ? 'p1' : 'p2', missDistance > paddleReachZ ? 'missed wide' : 'forced error');
+        } else {
+          match.ballX = isP1 ? -hitPlaneX : hitPlaneX;
+          match.ballVX = Math.abs(match.ballVX || 0.62) * (isP1 ? 1 : -1) * (1.00 + Math.random() * 0.06);
+          match.ballVZ = ((match.ballZ || 0) - paddleZ) * 1.25 + (Math.random() - 0.5) * (0.18 + (1 - skill) * 0.16);
+          match.lastHit = isP1 ? 'p1' : 'p2';
+          match.rallyHits = (match.rallyHits || 0) + 1;
+          if (isP1) match.p1SwingPulseId = Number(match.p1SwingPulseId || 0) + 1;
+          else match.p2SwingPulseId = Number(match.p2SwingPulseId || 0) + 1;
+        }
+      }
+      if (match.phase === 'playing' && !serving && Math.abs(match.ballX) > tableHalfX) {
+        scorePoint(match.ballX > 0 ? 'p1' : 'p2', match.ballX > 0 ? 'p2' : 'p1', 'missed return');
+      }
+      match.ballVX = Math.max(-1.05, Math.min(1.05, match.ballVX || 0.62));
+      match.ballVZ = Math.max(-0.62, Math.min(0.62, match.ballVZ || 0));
+      const activeAtMs = Number(match.activeAtMs || match.phaseStartedAtMs || nowMs);
+      if (match.phase === 'playing' && nowMs - activeAtMs > SERVER_PINGPONG_RUNTIME_MATCH_MS) {
+        match.phase = 'result';
+        match.phaseStartedAtMs = nowMs;
+        match.lastPoint = match.lastPoint || { winner: (match.p1Score || 0) >= (match.p2Score || 0) ? 'p1' : 'p2', loser: (match.p1Score || 0) >= (match.p2Score || 0) ? 'p2' : 'p1', reason: 'time', atMs: nowMs };
+      }
+    }
+
+    const leftPoint = serverPingPongPointFromTable(tableTarget, 'left', match.p1TrackZ || 0) || tableTarget.left;
+    const rightPoint = serverPingPongPointFromTable(tableTarget, 'right', match.p2TrackZ || 0) || tableTarget.right;
+    this.upsertServerPingPongAgent(match, tableTarget, match.p1Id, 'left', leftPoint, nowMs, now, { isMoving: false, state: match.phase === 'result' ? 'waiting' : 'using' });
+    this.upsertServerPingPongAgent(match, tableTarget, match.p2Id, 'right', rightPoint, nowMs, now, { isMoving: false, state: match.phase === 'result' ? 'waiting' : 'using' });
+    changedSnapshots += 2;
+    this.upsertServerPingPongWorldObject(match, tableTarget, match.phase === 'result' ? 'active' : 'active', nowMs, now);
+    changedObjects++;
+    if (match.phase === 'result' && nowMs - Number(match.phaseStartedAtMs || nowMs) > SERVER_PINGPONG_RUNTIME_RESULT_MS) {
+      const released = this.releaseServerPingPongMatch(match, tableTarget, nowMs, now, 'complete');
+      changedSnapshots += released.changedSnapshots;
+      changedObjects += released.changedObjects;
+    }
+    return { changedSnapshots, changedObjects };
+  }
+
+  tickServerPingPongRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString(), plan = null) {
+    const runtimePlan = plan || this.loadScriptedObjectRuntimePlan(nowMs);
+    const tables = this.loadServerPingPongTableTargets(nowMs);
+    let changedSnapshots = 0;
+    let changedObjects = 0;
+
+    for (const [objectKey, match] of Array.from(this.serverPingPongMatches.entries())) {
+      const tableTarget = tables.find(table => table.objectKey === objectKey) || this.serverPingPongTableTargetForObjectKey(objectKey);
+      const changed = this.advanceServerPingPongMatch(match, tableTarget, tickMs, nowMs, now);
+      changedSnapshots += changed.changedSnapshots;
+      changedObjects += changed.changedObjects;
+    }
+
+    const swept = this.sweepServerPingPongRuntime(tables, nowMs, now);
+    changedSnapshots += swept.changedSnapshots;
+    changedObjects += swept.changedObjects;
+
+    for (const [agentId, untilMs] of Array.from(this.serverPingPongCooldowns.entries())) {
+      if (Number(untilMs || 0) <= nowMs) this.serverPingPongCooldowns.delete(agentId);
+    }
+    for (const [objectKey, untilMs] of Array.from(this.serverPingPongTableCooldowns.entries())) {
+      if (Number(untilMs || 0) <= nowMs) this.serverPingPongTableCooldowns.delete(objectKey);
+    }
+
+    if (this.serverPingPongMatches.size >= SERVER_PINGPONG_RUNTIME_MAX_ACTIVE_MATCHES) {
+      return { changedSnapshots, changedObjects };
+    }
+
+    for (const tableTarget of tables) {
+      if (this.serverPingPongMatches.size >= SERVER_PINGPONG_RUNTIME_MAX_ACTIVE_MATCHES) break;
+      if (!this.isServerPingPongTableAvailable(tableTarget, nowMs)) continue;
+      const pair = this.pickServerPingPongPair(tableTarget, runtimePlan, nowMs, { requirePulse: true, requireSnapshot: true });
+      if (!pair) continue;
+      const started = this.startServerPingPongMatch(tableTarget, pair[0], pair[1], nowMs, now, { source: 'idle' });
+      changedSnapshots += started.changedSnapshots;
+      changedObjects += started.changedObjects;
+    }
+
+    return { changedSnapshots, changedObjects };
+  }
+
+  handlePingPongMatchRequest(client, message = {}) {
+    this.withErrors(client, message, 'runtime:pingPongMatchRequest', () => {
+      this.expireStaleRouteLeases();
+      const nowMs = Date.now();
+      const now = new Date(nowMs).toISOString();
+      const buildingId = safeText(message.buildingId || message?.target?.buildingId, '');
+      const furnitureIndex = Math.floor(numberOr(message.furnitureIndex ?? message?.target?.furnitureIndex, -1));
+      const objectKey = safeText(message.objectKey || message?.target?.objectKey, '') || (buildingId && furnitureIndex >= 0 ? serverPingPongObjectKey(buildingId, furnitureIndex) : '');
+      const tableTarget = this.serverPingPongTableTargetForObjectKey(objectKey);
+      if (!tableTarget) throw apiError('invalid_pingpong_table', 'ping-pong match request requires a resolvable ping-pong table');
+      if (!this.isServerPingPongTableAvailable(tableTarget, nowMs)) {
+        throw apiError('object_state_conflict', 'ping-pong table already has an active match', { objectKey });
+      }
+      const plan = this.loadScriptedObjectRuntimePlan(nowMs);
+      const requestedAgents = Array.isArray(message.agentIds) ? message.agentIds.map(id => safeText(id, '')).filter(Boolean) : [];
+      const pair = requestedAgents.length >= 2 &&
+        requestedAgents.slice(0, 2).every(agentId => this.isAgentAvailableForServerPingPong(agentId, plan, nowMs, { requirePulse: false }))
+        ? requestedAgents.slice(0, 2)
+        : this.pickServerPingPongPair(tableTarget, plan, nowMs, { requirePulse: false });
+      if (!pair) throw apiError('no_pingpong_pair', 'ping-pong needs two idle agents');
+      const result = this.startServerPingPongMatch(tableTarget, pair[0], pair[1], nowMs, now, { source: safeText(message.source, 'request') || 'request' });
+      client.send('runtime:ack', {
+        requestId: requestIdFrom(message),
+        type: 'runtime:pingPongMatchRequest',
+        ok: true,
+        objectKey,
+        matchId: result.match.matchId,
+        agentIds: pair,
+      });
+    });
+  }
+
+  transitionServerLiveAction(action, toStatus, options = {}) {
+    const transitioned = transitionWorldActionRecord(action, toStatus, {
+      actor: options.actor || 'agent-runtime-room.mjs#tickLiveActionRuntime',
+      source: options.source || 'server-runtime',
+      now: options.now || new Date().toISOString(),
+      reason: options.reason || `server-authoritative-${toStatus}`,
+      result: options.result,
+      failureReason: options.failureReason,
+    });
+    return transitioned;
+  }
+
+  tickLiveActionRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
+    if (nowMs - Number(this.lastLiveActionRuntimeStepMs || 0) < LIVE_ACTION_RUNTIME_POLL_MS) {
+      return { changedActions: false, changedSnapshots: 0 };
+    }
+    this.lastLiveActionRuntimeStepMs = nowMs;
+    const { meta, store } = this.loadLiveActionRuntimeStore(nowMs);
+    const active = Array.isArray(store.active) ? store.active : [];
+    if (active.length === 0) return { changedActions: false, changedSnapshots: 0 };
+
+    let changedActions = false;
+    let changedSnapshots = 0;
+    const nextActive = [];
+    const nextHistory = Array.isArray(store.history) ? [...store.history] : [];
+
+    for (const originalAction of active) {
+      let action = cloneJson(originalAction, originalAction) || originalAction;
+      const actionId = safeText(action?.id || action?.worldActionId, '');
+      const agentId = safeText(action?.agentId, '');
+      let status = canonicalWorldActionStatus(action?.status);
+      if (!actionId || !agentId || !WORLD_ACTION_ACTIVE_STATUSES.has(status)) {
+        nextActive.push(action);
+        continue;
+      }
+
+      const targetPoint = resolveActionTargetPoint(this.dataDir, action, this.state);
+      const existing = this.state.agents.get(agentId);
+      if (!targetPoint || !existing) {
+        nextActive.push(action);
+        continue;
+      }
+
+      const actor = 'agent-runtime-room.mjs#tickLiveActionRuntime';
+      const source = worldActionSourceKind(action, 'server-runtime');
+      for (const nextStatus of ['created', 'reserved', 'route_pending', 'routing']) {
+        status = canonicalWorldActionStatus(action.status);
+        if (!worldActionTransitionAllowed(status, nextStatus)) continue;
+        const transitioned = this.transitionServerLiveAction(action, nextStatus, {
+          now,
+          actor,
+          source,
+          reason: nextStatus === 'routing' ? 'server-runtime-route-started' : `server-runtime-${nextStatus}`,
+        });
+        if (transitioned.changed) {
+          action = transitioned.action;
+          changedActions = true;
+        }
+      }
+
+      status = canonicalWorldActionStatus(action.status);
+      const current = snapshotToPlain(existing);
+      const movement = makeServerRuntimeStep(this.dataDir, agentId, current, targetPoint, tickMs, {
+        speedUnitsPerSec: LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
+        arrivalRadius: LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS,
+        routeSource: 'server-live-action-runtime',
+      });
+      const arrived = movement.arrived;
+      const nextX = movement.x;
+      const nextY = movement.y;
+      const heading = movement.heading;
+      const snapshotTarget = makeLiveActionSnapshotTarget(action, targetPoint);
+      const routeId = safeText(action?.route?.id || action?.route?.routeId, `route-${actionId}`) || `route-${actionId}`;
+
+      if (status === 'routing' || status === 'route_pending') {
+        this.upsertSnapshot({
+          agentId,
+          mode: 'live',
+          owner: LIVE_ACTION_RUNTIME_OWNER,
+          x: nextX,
+          y: nextY,
+          floor: targetPoint.floor,
+          buildingId: targetPoint.buildingId || '',
+          roomId: targetPoint.roomId || '',
+          heading,
+          state: arrived ? 'arrived' : 'routing',
+          routeId,
+          worldActionId: actionId,
+          target: snapshotTarget,
+          leaseOwner: LIVE_ACTION_RUNTIME_LEASE_OWNER,
+          leaseExpiresAt: new Date(nowMs + LIVE_ACTION_RUNTIME_LEASE_TTL_MS).toISOString(),
+          visualState: withRuntimeRouteVisualState(makeLiveActionVisualState(!arrived), movement.route),
+        }, arrived ? 'server-live-action-arrived' : 'server-live-action-routing', { actionId, routeId });
+        changedSnapshots++;
+        if (arrived && status === 'routing') {
+          const transitioned = this.transitionServerLiveAction(action, 'arrived', {
+            now,
+            actor,
+            source,
+            reason: 'server-runtime-arrived-at-target',
+          });
+          if (transitioned.changed) {
+            action = transitioned.action;
+            changedActions = true;
+          }
+        }
+      }
+
+      status = canonicalWorldActionStatus(action.status);
+      if (status === 'arrived') {
+        const transitioned = this.transitionServerLiveAction(action, 'in_progress', {
+          now,
+          actor,
+          source,
+          reason: 'server-runtime-activity-started',
+        });
+        if (transitioned.changed) {
+          action = transitioned.action;
+          changedActions = true;
+        }
+      }
+
+      status = canonicalWorldActionStatus(action.status);
+      if (status === 'in_progress') {
+        this.upsertSnapshot({
+          agentId,
+          mode: 'live',
+          owner: LIVE_ACTION_RUNTIME_OWNER,
+          x: Number(targetPoint.x),
+          y: Number(targetPoint.y),
+          floor: targetPoint.floor,
+          buildingId: targetPoint.buildingId || '',
+          roomId: targetPoint.roomId || '',
+          heading,
+          state: 'in_progress',
+          routeId,
+          worldActionId: actionId,
+          target: snapshotTarget,
+          leaseOwner: LIVE_ACTION_RUNTIME_LEASE_OWNER,
+          leaseExpiresAt: new Date(nowMs + LIVE_ACTION_RUNTIME_LEASE_TTL_MS).toISOString(),
+          visualState: makeLiveActionVisualState(false),
+        }, 'server-live-action-in-progress', { actionId, routeId });
+        changedSnapshots++;
+        if (serverLiveActionShouldComplete(action, nowMs)) {
+          const sideEffect = writeServerBuiltHomeIfNeeded(this.dataDir, action, now);
+          const result = {
+            status: 'completed',
+            applied: true,
+            reason: 'server_authoritative_live_action_completed',
+            runtime: LIVE_ACTION_RUNTIME_OWNER,
+            ...(sideEffect ? { objectEffect: sideEffect.status === 'created' ? 'visible-home-built' : 'visible-home-already-built', buildingId: sideEffect.buildingId } : {}),
+          };
+          const transitioned = this.transitionServerLiveAction(action, 'completed', {
+            now,
+            actor,
+            source,
+            reason: 'server-authoritative-live-action-completed',
+            result,
+          });
+          if (transitioned.changed) {
+            action = transitioned.action;
+            changedActions = true;
+          }
+          clearDynamicInteriorRoutingForAgent(agentId);
+          clearDynamicExteriorRoutingForAgent(agentId);
+          this.upsertSnapshot({
+            agentId,
+            mode: 'scripted',
+            owner: 'agent-scripted-mode',
+            x: Number(targetPoint.x),
+            y: Number(targetPoint.y),
+            floor: targetPoint.floor,
+            buildingId: targetPoint.buildingId || '',
+            roomId: targetPoint.roomId || '',
+            heading,
+            state: 'idle',
+            routeId: '',
+            worldActionId: '',
+            target: null,
+            leaseOwner: '',
+            leaseExpiresAt: '',
+            visualState: makeLiveActionVisualState(false, 'working'),
+          }, 'server-live-action-completed', { actionId, routeId });
+          changedSnapshots++;
+        }
+      }
+
+      status = canonicalWorldActionStatus(action.status);
+      if (WORLD_ACTION_TERMINAL_STATUSES.has(status)) {
+        nextHistory.unshift(action);
+      } else {
+        nextActive.push(action);
+      }
+    }
+
+    if (changedActions) {
+      this.saveLiveActionRuntimeStore(meta, {
+        ...store,
+        active: nextActive,
+        history: nextHistory.slice(0, 1000),
+      }, nowMs);
+    }
+    return { changedActions, changedSnapshots };
+  }
+
   tickLiveStatusRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
     this.lastLiveStatusRuntimeStepMs = nowMs;
     const plan = this.loadLiveStatusRuntimePlan(nowMs);
@@ -6625,17 +9184,21 @@ export class AgentRuntimeRoom extends Room {
           clearDynamicInteriorRoutingForAgent(agentId);
           clearDynamicExteriorRoutingForAgent(agentId);
           const previousTarget = current.target && typeof current.target === 'object' ? current.target : null;
+          const releasePoint = serverRuntimeReleasePointForTarget(this.dataDir, previousTarget, current, {
+            agentId,
+            state: this.state,
+          });
           const objectKey = liveStatusRuntimeObjectKey(previousTarget);
           this.upsertSnapshot({
             agentId,
             mode: 'scripted',
             owner: 'agent-scripted-mode',
-            x: current.x,
-            y: current.y,
-            floor: current.floor,
-            buildingId: current.buildingId || '',
-            roomId: current.roomId || '',
-            heading: current.heading,
+            x: releasePoint?.x ?? current.x,
+            y: releasePoint?.y ?? current.y,
+            floor: releasePoint?.floor ?? current.floor,
+            buildingId: releasePoint?.buildingId || current.buildingId || '',
+            roomId: releasePoint?.roomId || current.roomId || '',
+            heading: releasePoint?.heading ?? current.heading,
             state: 'idle',
             routeId: '',
             worldActionId: '',
@@ -6774,6 +9337,10 @@ export class AgentRuntimeRoom extends Room {
         }, arrived ? 'server-live-status-world-active' : 'server-live-status-world-routing', { routeId });
       }
       changedSnapshots++;
+      if (!arrived) {
+        const yieldResult = this.tryNudgeServerRuntimeCrowdBlocker(agentId, current, target, movement.route, nowMs, now);
+        if (yieldResult.nudged) changedSnapshots++;
+      }
     }
 
     for (const [agentId, untilMs] of Array.from(this.liveStatusRouteCooldowns.entries())) {
@@ -6812,35 +9379,236 @@ export class AgentRuntimeRoom extends Room {
     clearDynamicInteriorRoutingForAgent(agentId);
     clearDynamicExteriorRoutingForAgent(agentId);
     const objectKey = safeText(target?.objectKey, '');
-    const x = Number.isFinite(Number(target?.x)) ? Number(target.x) : Number(current?.x || 0);
-    const y = Number.isFinite(Number(target?.y)) ? Number(target.y) : Number(current?.y || 0);
-    const heading = targetFaceAngleRadians(target, current?.heading);
+    const releasePoint = serverRuntimeReleasePointForTarget(this.dataDir, target, current, {
+      agentId,
+      state: this.state,
+    });
+    const x = releasePoint?.x ?? (Number.isFinite(Number(target?.x)) ? Number(target.x) : Number(current?.x || 0));
+    const y = releasePoint?.y ?? (Number.isFinite(Number(target?.y)) ? Number(target.y) : Number(current?.y || 0));
+    const floor = releasePoint?.floor ?? floorOr(target?.floor ?? current?.floor, 1);
+    const buildingId = releasePoint?.buildingId || target?.buildingId || current?.buildingId || '';
+    const roomId = releasePoint?.roomId || target?.roomId || current?.roomId || '';
+    const heading = releasePoint?.heading ?? targetFaceAngleRadians(target, current?.heading);
+    const clearanceTarget = releasePoint
+      ? serverRuntimeDismountClearanceTarget(this.dataDir, agentId, { ...releasePoint, x, y, floor, buildingId, roomId }, target, current, this.state, nowMs)
+      : null;
+    const clearanceRoute = clearanceTarget ? {
+      active: true,
+      source: 'server-dismount-clearance',
+      reason: 'dismount-clearance',
+      effectiveTarget: clearanceTarget,
+      finalPoint: clearanceTarget,
+      routeIndex: 1,
+      route: [cloneRuntimePoint(clearanceTarget)].filter(Boolean),
+      routePoints: [
+        { x, y, floor, buildingId },
+        cloneRuntimePoint(clearanceTarget),
+      ].filter(Boolean),
+    } : null;
     const snapshotResult = this.upsertSnapshot({
       agentId,
-      mode: 'scripted',
-      owner: 'agent-scripted-mode',
+      mode: clearanceTarget ? 'live' : 'scripted',
+      owner: clearanceTarget ? SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER : 'agent-scripted-mode',
       x,
       y,
-      floor: floorOr(target?.floor ?? current?.floor, 1),
-      buildingId: target?.buildingId || current?.buildingId || '',
-      roomId: target?.roomId || current?.roomId || '',
+      floor,
+      buildingId,
+      roomId,
       heading,
-      state: 'idle',
-      routeId: '',
+      state: clearanceTarget ? 'routing' : 'idle',
+      routeId: clearanceTarget ? safeText(`dismount-clearance:${agentId}`, `dismount-clearance:${agentId}`) : '',
       worldActionId: '',
-      target: null,
-      leaseOwner: '',
-      leaseExpiresAt: '',
-      visualState: makeServerScriptedObjectIdleVisualState(),
+      target: clearanceTarget || null,
+      leaseOwner: clearanceTarget ? SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER : '',
+      leaseExpiresAt: clearanceTarget ? new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS).toISOString() : '',
+      visualState: clearanceTarget
+        ? withRuntimeRouteVisualState(makeServerScriptedObjectVisualState(true, clearanceTarget, 'idle'), clearanceRoute)
+        : makeServerScriptedObjectIdleVisualState(),
     }, 'server-scripted-object-released', {
       objectKey,
       reason,
+      clearanceTarget: clearanceTarget ? true : false,
     });
     const objectResult = objectKey ? this.releaseServerScriptedObjectWorldObject(agentId, target, nowMs, now, reason) : null;
     if (target?.isQueueUse) {
       this.releaseServerScriptedServiceQueueReservation(agentId, target, nowMs, now, reason);
     }
     return { agent: snapshotResult.agent, object: objectResult?.object || null };
+  }
+
+  tryNudgeServerRuntimeCrowdBlocker(movingAgentId, movingCurrent, movingTarget, route = null, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
+    if (!(this.serverRuntimeBlockerYieldCooldowns instanceof Map)) this.serverRuntimeBlockerYieldCooldowns = new Map();
+    const blockedReason = String(route?.blockedReason || '');
+    if (!blockedReason.startsWith('server-crowd-wait-')) return { nudged: false, reason: 'not-crowd-wait' };
+    const blockers = Array.isArray(route?.crowdAvoidedAgents) ? route.crowdAvoidedAgents : [];
+    for (const blocker of blockers) {
+      const blockerAgentId = normalizeAgentId(blocker?.agentId);
+      if (!blockerAgentId || blockerAgentId === movingAgentId) continue;
+      const cooldownUntil = Number(this.serverRuntimeBlockerYieldCooldowns.get(blockerAgentId) || 0);
+      if (cooldownUntil > nowMs) continue;
+      const record = this.state.agents.get(blockerAgentId);
+      if (!record || hasActiveLease(record, nowMs)) continue;
+      const plain = snapshotToPlain(record);
+      const state = String(plain.state || '').toLowerCase();
+      if (!['idle', 'scripted'].includes(state)) continue;
+      if (plain.target && typeof plain.target === 'object' && Object.keys(plain.target).length > 0) continue;
+      const blockerPoint = normalizeServerRuntimePoint(plain, floorOr(plain.floor, movingCurrent?.floor ?? movingTarget?.floor ?? 1));
+      if (!blockerPoint) continue;
+      const start = normalizeServerRuntimePoint(movingCurrent, blockerPoint.floor);
+      const end = normalizeServerRuntimePoint(movingTarget, blockerPoint.floor);
+      const pathDx = Number(end?.x ?? blockerPoint.x) - Number(start?.x ?? blockerPoint.x);
+      const pathDy = Number(end?.y ?? blockerPoint.y) - Number(start?.y ?? blockerPoint.y);
+      const pathLen = Math.hypot(pathDx, pathDy);
+      const awayDx = blockerPoint.x - Number(start?.x ?? blockerPoint.x);
+      const awayDy = blockerPoint.y - Number(start?.y ?? blockerPoint.y);
+      const awayLen = Math.hypot(awayDx, awayDy);
+      const normalX = pathLen > 0.001 ? -pathDy / pathLen : 1;
+      const normalY = pathLen > 0.001 ? pathDx / pathLen : 0;
+      const awayX = awayLen > 0.001 ? awayDx / awayLen : normalX;
+      const awayY = awayLen > 0.001 ? awayDy / awayLen : normalY;
+      const directions = [
+        { x: normalX, y: normalY },
+        { x: -normalX, y: -normalY },
+        { x: awayX, y: awayY },
+        { x: -awayY, y: awayX },
+        { x: awayY, y: -awayX },
+      ];
+      for (const distance of [SERVER_RUNTIME_BLOCKER_YIELD_DISTANCE, SERVER_RUNTIME_BLOCKER_YIELD_DISTANCE * 1.35]) {
+        for (const direction of directions) {
+          const candidate = {
+            ...blockerPoint,
+            x: blockerPoint.x + direction.x * distance,
+            y: blockerPoint.y + direction.y * distance,
+          };
+          const staticResult = validateServerRuntimeStaticSegment(this.dataDir, blockerPoint, candidate, { phase: 'server-blocker-yield' });
+          if (!staticResult.clear) continue;
+          const crowdConflict = findServerRuntimeCrowdConflict(blockerAgentId, blockerPoint, candidate, serverRuntimeCrowdAgents(this.state, blockerAgentId), {
+            finalTarget: candidate,
+            arrivalRadius: SERVER_SCRIPTED_OBJECT_RUNTIME_ARRIVAL_RADIUS,
+            routeTarget: plain.target,
+          });
+          if (crowdConflict) continue;
+          const heading = normalizeRuntimeAngleRadians(Math.atan2(candidate.x - blockerPoint.x, candidate.y - blockerPoint.y), plain.heading || 0);
+          const routePatch = {
+            active: false,
+            source: 'server-blocker-yield',
+            reason: 'crowd-blocker-yield',
+            effectiveTarget: candidate,
+            finalPoint: candidate,
+            routeIndex: 1,
+            route: [blockerPoint, candidate],
+            routePoints: [blockerPoint, candidate],
+            crowdAvoidedAgents: [{ agentId: movingAgentId, distance: numberOr(blocker?.distance, 0), mode: 'yield-to-routing-agent' }],
+          };
+          this.upsertSnapshot({
+            ...plain,
+            x: candidate.x,
+            y: candidate.y,
+            floor: candidate.floor,
+            heading,
+            state: plain.state || 'idle',
+            routeId: '',
+            worldActionId: '',
+            target: null,
+            leaseOwner: '',
+            leaseExpiresAt: '',
+            visualState: withRuntimeRouteVisualState(makeServerScriptedObjectIdleVisualState(), routePatch),
+          }, 'server-runtime-blocker-yield', {
+            movingAgentId,
+            blockerAgentId,
+            blockedReason,
+          });
+          this.serverRuntimeBlockerYieldCooldowns.set(blockerAgentId, nowMs + SERVER_RUNTIME_BLOCKER_YIELD_COOLDOWN_MS);
+          return { nudged: true, blockerAgentId };
+        }
+      }
+    }
+    return { nudged: false, reason: 'no-clearance-point' };
+  }
+
+  sweepLegacyServerScriptedPingPongObjects(nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
+    let changedSnapshots = 0;
+    let changedObjects = 0;
+    const maybeAgentId = (value) => {
+      const text = safeText(value, '');
+      return text && AGENT_ID_RE.test(text) ? normalizeAgentId(text) : '';
+    };
+    for (const [rawObjectKey, existing] of Array.from(this.state.objects.entries())) {
+      const plain = worldObjectToPlain(existing);
+      const objectKey = safeText(plain.objectKey || rawObjectKey, '') || String(rawObjectKey || '');
+      if (plain.owner !== SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || !isPingPongObjectType(plain.objectType)) continue;
+      if (String(plain.state || '').toLowerCase() === 'idle' && plain.data?.releaseReason === 'legacy-scripted-pingpong-cleared') continue;
+      const data = plain.data && typeof plain.data === 'object' ? plain.data : {};
+      const activity = data.activity && typeof data.activity === 'object' ? data.activity : {};
+      const reservation = data.reservation && typeof data.reservation === 'object' ? data.reservation : {};
+      const activeUse = data.activeUse && typeof data.activeUse === 'object' ? data.activeUse : {};
+      const anchor = data.anchor && typeof data.anchor === 'object' ? data.anchor : {};
+      const target = {
+        objectKey,
+        baseObjectKey: safeText(activity.baseObjectKey || reservation.baseObjectKey || activeUse.baseObjectKey || objectKey.replace(/:(slot|queue):.*$/, ''), ''),
+        objectType: 'pingpong',
+        buildingId: plain.buildingId || activity.buildingId || reservation.buildingId || activeUse.buildingId || '',
+        furnitureIndex: plain.furnitureIndex ?? activity.furnitureIndex ?? reservation.furnitureIndex ?? activeUse.furnitureIndex ?? -1,
+        actionId: activity.actionId || plain.actionId || 'life.playPingPong',
+        slotId: plain.slotId || activity.slotId || reservation.slotId || activeUse.slotId || activity.spotId || '',
+        spotId: activity.spotId || reservation.spotId || activeUse.spotId || plain.slotId || '',
+        x: Number.isFinite(Number(anchor.x)) ? Number(anchor.x) : NaN,
+        y: Number.isFinite(Number(anchor.y)) ? Number(anchor.y) : NaN,
+        floor: floorOr(anchor.floor ?? activity.floor, 1),
+        runtimeSource: 'legacy-scripted-pingpong-cleanup',
+      };
+      const releaseIds = new Set([
+        plain.agentId,
+        reservation.agentId,
+        activeUse.agentId,
+        ...(Array.isArray(reservation.agentIds) ? reservation.agentIds : []),
+        ...(Array.isArray(activeUse.agentIds) ? activeUse.agentIds : []),
+      ].map(maybeAgentId).filter(Boolean));
+      for (const [agentId, record] of this.state.agents.entries()) {
+        const current = snapshotToPlain(record);
+        if (current.owner !== SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER && current.leaseOwner !== SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER) continue;
+        const agentTarget = current.target && typeof current.target === 'object' ? current.target : null;
+        if (!isPingPongObjectType(agentTarget?.objectType)) continue;
+        const agentObjectKey = safeText(agentTarget.objectKey, '');
+        const agentBaseObjectKey = safeText(agentTarget.baseObjectKey, '');
+        if (agentObjectKey === objectKey || (target.baseObjectKey && agentBaseObjectKey === target.baseObjectKey)) {
+          const normalizedAgentId = maybeAgentId(agentId);
+          if (normalizedAgentId) releaseIds.add(normalizedAgentId);
+        }
+      }
+      for (const agentId of releaseIds) {
+        const record = this.state.agents.get(agentId);
+        if (!record) continue;
+        const current = snapshotToPlain(record);
+        if (current.owner !== SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER && current.leaseOwner !== SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER) continue;
+        const agentTarget = current.target && typeof current.target === 'object' ? current.target : target;
+        this.releaseServerScriptedObjectRoute(agentId, current, agentTarget || target, nowMs, now, 'legacy-scripted-pingpong-cleared');
+        changedSnapshots++;
+        changedObjects++;
+      }
+      const expiresAt = new Date(nowMs + 1000).toISOString();
+      this.upsertWorldObject({
+        objectKey,
+        owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+        objectType: 'pingpong',
+        buildingId: target.buildingId,
+        furnitureIndex: target.furnitureIndex,
+        state: 'idle',
+        agentId: '',
+        actionId: target.actionId,
+        reservationId: '',
+        activeUseId: '',
+        slotId: target.slotId,
+        expiresAt,
+        data: {
+          clearReservation: true,
+          releaseReason: 'legacy-scripted-pingpong-cleared',
+          writer: 'agent-runtime-room.mjs#legacyPingPongCleanup',
+        },
+      }, 'legacy-scripted-pingpong-cleared', { objectKey });
+      changedObjects++;
+    }
+    return { changedSnapshots, changedObjects };
   }
 
   tickScriptedObjectRuntime(tickMs, nowMs = Date.now(), now = new Date(nowMs).toISOString()) {
@@ -6851,6 +9619,12 @@ export class AgentRuntimeRoom extends Room {
     let changedSnapshots = 0;
     let changedObjects = 0;
     changedSnapshots += this.tickSocialConversations(idleAgentIds, tickMs, nowMs, now);
+    const freeQueuePromotions = this.promoteFreeServerScriptedServiceQueues(nowMs, now, 'runtime-free-service-queue-promote-front');
+    changedSnapshots += freeQueuePromotions.changedSnapshots || 0;
+    changedObjects += freeQueuePromotions.changedObjects || 0;
+    const legacyPingPongSweep = this.sweepLegacyServerScriptedPingPongObjects(nowMs, now);
+    changedSnapshots += legacyPingPongSweep.changedSnapshots || 0;
+    changedObjects += legacyPingPongSweep.changedObjects || 0;
     let activeScriptedRoutes = 0;
     const activeRouteLimit = Math.max(
       SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES,
@@ -6873,22 +9647,44 @@ export class AgentRuntimeRoom extends Room {
       if (!ownedByScriptedObjectRuntime) continue;
       activeScriptedRoutes++;
       if (activeScriptedRoutes > activeRouteLimit) {
-        let target = current.target && typeof current.target === 'object' ? current.target : null;
+        const originalTarget = current.target && typeof current.target === 'object' ? current.target : null;
+        let target = originalTarget;
         target = refreshScriptedObjectRuntimeTarget(this.dataDir, target);
         target = hydrateServerScriptedDeskConsumeTargetFromVisual(target, current.visualState);
-        this.releaseServerScriptedObjectRoute(agentId, current, target || {}, nowMs, now, 'active-route-cap');
+        const releaseTarget = target || originalTarget || {};
+        this.releaseServerScriptedObjectRoute(agentId, current, releaseTarget, nowMs, now, 'active-route-cap');
         changedSnapshots++;
-        changedObjects += target?.objectKey ? 1 : 0;
+        changedObjects += releaseTarget?.objectKey ? 1 : 0;
         continue;
       }
-      let target = current.target && typeof current.target === 'object' ? current.target : null;
+      const originalTarget = current.target && typeof current.target === 'object' ? current.target : null;
+      let target = originalTarget;
       target = refreshScriptedObjectRuntimeTarget(this.dataDir, target);
       target = hydrateServerScriptedDeskConsumeTargetFromVisual(target, current.visualState);
       const source = safeText(target?.runtimeSource, 'idle') || 'idle';
       if (!target?.objectKey || (source === 'idle' && !idleAgentIds.has(agentId))) {
-        this.releaseServerScriptedObjectRoute(agentId, current, target || {}, nowMs, now, target?.objectKey ? 'presence-not-idle' : 'missing-target');
+        const releaseTarget = target || originalTarget || {};
+        this.releaseServerScriptedObjectRoute(agentId, current, releaseTarget, nowMs, now, target?.objectKey ? 'presence-not-idle' : 'missing-target');
         changedSnapshots++;
-        changedObjects += target?.objectKey ? 1 : 0;
+        changedObjects += releaseTarget?.objectKey ? 1 : 0;
+        continue;
+      }
+      const pingPongPartnerStart = this.tryStartServerScriptedPingPongPartner(agentId, target, idleAgentIds, targets, nowMs, now, { source });
+      if (pingPongPartnerStart.started) {
+        idleAgentIds.delete(pingPongPartnerStart.agentId);
+        changedSnapshots += pingPongPartnerStart.changedSnapshots || 0;
+        changedObjects += pingPongPartnerStart.changedObjects || 0;
+      }
+      if (
+        isServerScriptedMultiSlotPlayTarget(target) &&
+        !pingPongPartnerStart.started &&
+        !this.serverScriptedPingPongPartnerClaimed(agentId, target, targets, nowMs)
+      ) {
+        this.releaseServerScriptedObjectRoute(agentId, current, target, nowMs, now, 'pingpong-no-partner');
+        this.markServerScriptedRuntimeFailure(agentId, target, 'pingpong-no-partner', nowMs);
+        this.scriptedObjectRuntimeCooldowns.set(agentId, nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS);
+        changedSnapshots++;
+        changedObjects++;
         continue;
       }
 
@@ -6971,6 +9767,8 @@ export class AgentRuntimeRoom extends Room {
           ),
         }, 'server-scripted-object-world-routing', { routeId });
         changedObjects++;
+        const yieldResult = this.tryNudgeServerRuntimeCrowdBlocker(agentId, current, target, movement.route, nowMs, now);
+        if (yieldResult.nudged) changedSnapshots++;
         continue;
       }
 
@@ -6997,7 +9795,7 @@ export class AgentRuntimeRoom extends Room {
           changedObjects++;
           continue;
         }
-        const deskTarget = makeServerScriptedDeskConsumeTarget(this.dataDir, agentId, activeTarget, nowMs);
+        const deskTarget = makeServerScriptedDeskConsumeTarget(this.dataDir, agentId, activeTarget, nowMs, this.state);
         if (deskTarget) {
           const releaseResult = this.releaseServerScriptedObjectWorldObject(agentId, activeTarget, nowMs, now, deskTarget.pickupEffect || 'temporary-item-picked-up');
           const promoted = this.promoteServerScriptedServiceQueueFrontIfReady(activeTarget, nowMs, now, deskTarget.pickupEffect || 'temporary-item-picked-up');
@@ -7099,9 +9897,20 @@ export class AgentRuntimeRoom extends Room {
         this.scheduleServerScriptedIdlePulse(agentId, SERVER_SCRIPTED_IDLE_RETRY_DELAY_MS, 'no-target', nowMs);
         continue;
       }
+      if (isServerScriptedMultiSlotPlayTarget(target) && this.serverScriptedPingPongPartnerCandidates(agentId, target, idleAgentIds, targets, nowMs).length <= 0) {
+        this.markServerScriptedRuntimeFailure(agentId, target, 'pingpong-no-partner', nowMs);
+        continue;
+      }
       try {
         this.startServerScriptedObjectRoute(agentId, target, nowMs, now, { source: 'idle' });
         this.markServerScriptedRuntimeChoice(agentId, target, nowMs);
+        const pingPongPartnerStart = this.tryStartServerScriptedPingPongPartner(agentId, target, idleAgentIds, targets, nowMs, now, { source: 'idle' });
+        if (pingPongPartnerStart.started) {
+          idleAgentIds.delete(pingPongPartnerStart.agentId);
+          idleStarts++;
+          changedSnapshots += pingPongPartnerStart.changedSnapshots || 0;
+          changedObjects += pingPongPartnerStart.changedObjects || 0;
+        }
       } catch (error) {
         this.markServerScriptedRuntimeFailure(agentId, target, error?.code || error?.message || 'start-failed', nowMs);
         continue;
@@ -7113,6 +9922,10 @@ export class AgentRuntimeRoom extends Room {
 
     for (const [agentId, untilMs] of Array.from(this.scriptedObjectRuntimeCooldowns.entries())) {
       if (Number(untilMs || 0) <= nowMs) this.scriptedObjectRuntimeCooldowns.delete(agentId);
+    }
+    if (!(this.serverRuntimeBlockerYieldCooldowns instanceof Map)) this.serverRuntimeBlockerYieldCooldowns = new Map();
+    for (const [agentId, untilMs] of Array.from(this.serverRuntimeBlockerYieldCooldowns.entries())) {
+      if (Number(untilMs || 0) <= nowMs) this.serverRuntimeBlockerYieldCooldowns.delete(agentId);
     }
 
     return { changedSnapshots, changedObjects };
@@ -7283,6 +10096,7 @@ export class AgentRuntimeRoom extends Room {
     let changedVehicles = 0;
     let changedLiveActions = { changedActions: false, changedSnapshots: 0 };
     let changedLiveStatus = { changedSnapshots: 0 };
+    let changedPingPong = { changedSnapshots: 0, changedObjects: 0 };
     let changedScriptedObjects = { changedSnapshots: 0, changedObjects: 0 };
     try {
       this.runWithDeferredRuntimeDocumentWrites(() => {
@@ -7295,9 +10109,13 @@ export class AgentRuntimeRoom extends Room {
         changedLiveStatus = process.env.VW_REALTIME_DISABLE_LIVE_STATUS_TICK === 'true'
           ? { changedSnapshots: 0 }
           : this.tickLiveStatusRuntime(tickMs, nowMs, now);
+        const scriptedPlan = this.loadScriptedObjectRuntimePlan(nowMs);
+        changedPingPong = process.env.VW_REALTIME_DISABLE_PINGPONG_TICK === 'true'
+          ? { changedSnapshots: 0, changedObjects: 0 }
+          : this.tickServerPingPongRuntime(tickMs, nowMs, now, scriptedPlan);
         changedScriptedObjects = process.env.VW_REALTIME_DISABLE_SCRIPTED_OBJECT_TICK === 'true'
           ? { changedSnapshots: 0, changedObjects: 0 }
-          : this.tickScriptedObjectRuntime(tickMs, nowMs, now);
+          : this.tickScriptedObjectRuntime(tickMs, nowMs, now, scriptedPlan);
       });
     } finally {
       this.worldRuntimeTickContext = null;
@@ -7313,12 +10131,14 @@ export class AgentRuntimeRoom extends Room {
         changedLiveActions: changedLiveActions.changedActions ? 1 : 0,
         changedLiveActionSnapshots: changedLiveActions.changedSnapshots,
         changedLiveStatusSnapshots: changedLiveStatus.changedSnapshots,
+        changedPingPongSnapshots: changedPingPong.changedSnapshots,
+        changedPingPongObjects: changedPingPong.changedObjects,
         changedScriptedObjectSnapshots: changedScriptedObjects.changedSnapshots,
         changedScriptedObjects: changedScriptedObjects.changedObjects,
       });
     }
 
-    if (changedLights > 0 || changedVehicles > 0 || changedLiveActions.changedActions || changedLiveStatus.changedSnapshots > 0 || changedScriptedObjects.changedSnapshots > 0 || changedScriptedObjects.changedObjects > 0 || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
+    if (changedLights > 0 || changedVehicles > 0 || changedLiveActions.changedActions || changedLiveStatus.changedSnapshots > 0 || changedPingPong.changedSnapshots > 0 || changedPingPong.changedObjects > 0 || changedScriptedObjects.changedSnapshots > 0 || changedScriptedObjects.changedObjects > 0 || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
       this.lastWorldRuntimePersistMs = nowMs;
       this.persistRuntimeDocument();
     }

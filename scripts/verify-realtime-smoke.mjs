@@ -115,6 +115,7 @@ function waitForRoomMessage(room, type, predicate = () => true) {
 
 async function waitForAgent(room, agentId, predicate = () => true) {
   const deadline = Date.now() + Math.max(5000, Number(SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS?.[1] || 0) + 8000);
+  let lastSeen = null;
   while (Date.now() < deadline) {
     const runtimeAgent = room.__runtimeDoc?.agents?.[agentId];
     const agent = runtimeAgent
@@ -124,10 +125,23 @@ async function waitForAgent(room, agentId, predicate = () => true) {
           visualStateJson: runtimeAgent.visualState ? JSON.stringify(runtimeAgent.visualState) : '',
         }
       : room.state?.agents?.get?.(agentId);
+    if (agent) {
+      lastSeen = {
+        agentId: agent.agentId,
+        owner: agent.owner,
+        leaseOwner: agent.leaseOwner,
+        state: agent.state,
+        x: agent.x,
+        y: agent.y,
+        targetJson: String(agent.targetJson || '').slice(0, 1800),
+        visualStateJson: String(agent.visualStateJson || '').slice(0, 1200),
+      };
+    }
     if (agent && predicate(agent)) return agent;
     await delay(50);
   }
-  throw new Error(`timed out waiting for agent ${agentId}`);
+  const serverOutput = String(room.__server?.output || '').slice(-2000);
+  throw new Error(`timed out waiting for agent ${agentId}${lastSeen ? `; last seen ${JSON.stringify(lastSeen)}` : ''}${serverOutput ? `; server output ${JSON.stringify(serverOutput)}` : ''}`);
 }
 
 function testWorldRuntimeFromDocument(doc) {
@@ -216,6 +230,7 @@ async function run() {
     await verifyCorsPreflight(port);
 
     const room = await connectRoom(port);
+    room.__server = server;
     room.send('runtime:snapshot', {
       requestId: 'snapshot-1',
       agentId: 'adam',
@@ -504,6 +519,7 @@ async function run() {
     server = startServer({ port, dataDir });
     await waitForHealth(port, server);
     const resumedRoom = await connectRoom(port);
+    resumedRoom.__server = server;
     const resumedAgent = await waitForAgent(resumedRoom, 'adam', (agent) => agent.x === 7.5 && agent.y === 8.25);
     assert.equal(resumedAgent.state, 'idle');
     assert(resumedAgent.visualStateJson.includes('Coffee Drink'));
@@ -643,6 +659,7 @@ async function run() {
     }, null, 2)}\n`);
 
     const scriptedRoom = await connectRoom(port);
+    scriptedRoom.__server = server;
     const serverRuntime = await waitForWorldRuntime(scriptedRoom, (runtime) =>
       runtime.topologyOwner === SERVER_WORLD_TOPOLOGY_OWNER && runtime.trafficLights?.size >= 1
     );

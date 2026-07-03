@@ -285,7 +285,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260702-snapshot-buffer-r5',
+  'js/main3d.js?v=20260703-pr59-server-pingpong-r3',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -381,10 +381,59 @@ for (const token of [
   "releaseRouteReason: 'pingpong-runtime-position-owner'",
   'ping-pong match routes with explicit table runtime ownership',
   "releaseAgentIntent(admittedAgent, 'route-failed'",
-  'reservationId = `reservation:${objectKey}:${actionId}:${Date.now()}`',
+  'function getPingPongPlayerRuntimeObjectKey(baseObjectKey = \'\', slotId = \'\')',
+  'reservationId = `reservation:${baseObjectKey}:${actionId}:${Date.now()}`',
+  'plan.objectKey = getPingPongPlayerRuntimeObjectKey(baseObjectKey, plan.slotId)',
+  'baseObjectKey,',
+  'requestPingPongRuntimeObjectUseRelease',
+  'isPingPongPlayerReadyForTable',
+  'adoptRuntimePingPongGameForTable(building, table, index)',
+  'shouldAdoptRuntimePingPongGameForTable(building, table, index)',
+  'isServerOwnedPingPongTable(table, game)',
+  'syncServerOwnedPingPongGameForRender(game, p1, p2, leftBase, rightBase)',
+  "String(objectState.owner || '').trim() !== 'server-pingpong-runtime'",
+  'function holdAgentForPingPongRuntimePosition(agent, dt = 0)',
+  'agent._runtimePingPongPositionOverride = true',
+  'PING_PONG_MATCH_STAY_MS = 24000',
+  'PING_PONG_MATCH_TARGET_SCORE = 5',
+  'PING_PONG_RESULT_HOLD_SECONDS = 0.1',
+  'PING_PONG_ORPHAN_READY_TIMEOUT_SECONDS = 60',
+  'playersTrackingBall',
+  'window.__verifyPingPongRuntimeAdoption',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing ping-pong runtime ownership token: ${token}`);
 }
+
+assert(
+  agentCharactersJs.includes('right-hand paddle follows the ball height/side and snaps on hit') &&
+    agentCharactersJs.includes('hitSwing * 0.95'),
+  'agent-characters.js ping-pong animation must keep the 8595 paddle hit',
+);
+assert(
+  agentRuntimeRoomJs.includes("pingpong: Object.freeze({ kind: 'pingpong-play', spotId: 'player-left', animationId: 'play-pingpong', poseKind: 'stand-use', stayMs: [24000, 24000] })"),
+  'agent-runtime-room.mjs ping-pong dwell must stay on the 8595-style match window',
+);
+assert(
+  agentRuntimeRoomJs.includes('isServerScriptedMultiSlotPlayTarget(target) ||'),
+  'agent-runtime-room.mjs ping-pong release must route players away from play slots',
+);
+for (const token of [
+  'findServerScriptedPingPongPartnerTarget(targets, target)',
+  'serverScriptedPingPongPartnerCandidates(agentId, target, idleAgentIds, targets, nowMs)',
+  'tryStartServerScriptedPingPongPartner(agentId, target, idleAgentIds, targets, nowMs, now, { source',
+  'serverScriptedPingPongPartnerClaimed(agentId, target, targets, nowMs)',
+  "'pingpong-no-partner'",
+  'if (isPingPongObjectType(item.type)) continue;',
+  "'pingpong_server_runtime_required'",
+  'sweepLegacyServerScriptedPingPongObjects(nowMs, now)',
+  "'legacy-scripted-pingpong-cleared'",
+]) {
+  assert(agentRuntimeRoomJs.includes(token), `agent-runtime-room.mjs missing ping-pong pairing token: ${token}`);
+}
+assert(
+  !agentRuntimeRoomJs.includes("play: Object.freeze(['pingpong'"),
+  'agent-runtime-room.mjs generic scripted-object play pool must not claim ping-pong; dedicated server-pingpong-runtime owns it',
+);
 
 for (const token of [
   'AGENT_RUNTIME_TRAFFIC_TOPOLOGY_OWNER_TTL_MS = 30000',
@@ -432,7 +481,7 @@ for (const token of [
   'topologyOwnerFresh',
   "LIVE_ACTION_RUNTIME_OWNER = 'server-live-action-runtime'",
   "LIVE_STATUS_RUNTIME_OWNER = 'server-live-status-runtime'",
-  'SERVER_WORLD_OBJECT_RUNTIME_OWNERS = new Set([SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER, LIVE_STATUS_RUNTIME_OWNER])',
+  'SERVER_WORLD_OBJECT_RUNTIME_OWNERS = new Set([SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER, LIVE_STATUS_RUNTIME_OWNER, SERVER_PINGPONG_RUNTIME_OWNER])',
   'SERVER_MANAGED_ROUTE_LEASE_OWNERS',
   "SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runtime'",
   'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3',
@@ -724,6 +773,7 @@ for (const token of [
   '_runtimeRouteDebugLayer',
   'writeWorldObjectState',
   'requestObjectUse',
+  'releaseObjectUse',
   'shouldBlockAgentRuntimeObjectAction',
   'applyAgentRuntimeWorldObjectStatesToWorld',
   'AGENT_RUNTIME_WORLD_OBJECT_TTL_MS',
@@ -731,7 +781,7 @@ for (const token of [
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
   '__VWGetAgentRuntimeDebug',
-  'agent-runtime-client.mjs?v=20260702-server-timeline-r1',
+  'agent-runtime-client.mjs?v=20260703-pr59-server-pingpong-r2',
   'serverAuthoritativeRuntimeBlockReason',
   'clearBrowserOwnedAgentMotionForServerRuntime',
   'holdAgentForServerAuthoritativeRuntimeObserver',

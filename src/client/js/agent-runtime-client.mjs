@@ -635,6 +635,12 @@ export async function createAgentRuntimeClient({
     requestObjectUse(payload, options) {
       return sendRequest('runtime:objectUseRequest', payload, options);
     },
+    releaseObjectUse(payload, options) {
+      return sendRequest('runtime:objectUseRelease', payload, options);
+    },
+    requestPingPongMatch(payload, options) {
+      return sendRequest('runtime:pingPongMatchRequest', payload, options);
+    },
     writeWorldTopology(payload, options) {
       return sendRequest('runtime:worldTopology', payload, options);
     },
@@ -673,6 +679,8 @@ function agentRuntimeUnavailable(reason, config = DEFAULT_CONFIG) {
     writeSnapshot() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     writeWorldObjectState() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     requestObjectUse() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
+    releaseObjectUse() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
+    requestPingPongMatch() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     writeWorldTopology() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     claimRoute() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },
     heartbeat() { return Promise.reject(new Error(`agent runtime unavailable: ${reason}`)); },

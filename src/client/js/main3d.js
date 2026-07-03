@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260702-server-timeline-r1';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260703-pr59-server-pingpong-r2';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1624,6 +1624,12 @@ function getAgentRuntimeFurnitureObjectKey(buildingId, furnitureIndex, furniture
   return `${bid}:furniture:${index}:${type}`;
 }
 
+function getPingPongPlayerRuntimeObjectKey(baseObjectKey = '', slotId = '') {
+  const base = String(baseObjectKey || '').trim();
+  const slot = String(slotId || '').trim();
+  return base && slot ? `${base}:slot:${slot}` : base;
+}
+
 function getAgentRuntimeObjectKeyFromMeta(meta = {}, target = null, building = null) {
   const explicit = target?.objectKey || meta.objectKey || meta.activeUseObjectKey || meta.reservationObjectKey;
   if (explicit) return String(explicit).trim();
@@ -1704,6 +1710,7 @@ function requestBackendObjectUseForExplicitObjectAction(agent, target = null, bu
     buildingId: objectMeta.buildingId || routeTarget.buildingId || building?.id || '',
     furnitureIndex: objectMeta.furnitureIndex,
     objectKey: objectMeta.objectKey || enrichedTarget?.objectKey || target?.objectKey || '',
+    baseObjectKey: metadata.baseObjectKey || enrichedTarget?.baseObjectKey || target?.baseObjectKey || '',
     objectId: objectMeta.objectId || enrichedTarget?.objectId || target?.objectId || '',
     objectInstanceId: enrichedTarget?.objectInstanceId || target?.objectInstanceId || objectMeta.objectId || '',
     objectType: objectMeta.objectType || enrichedTarget?.objectType || target?.objectType || '',
@@ -1712,8 +1719,16 @@ function requestBackendObjectUseForExplicitObjectAction(agent, target = null, bu
     spotId: objectMeta.spotId || enrichedTarget?.spotId || target?.spotId || target?.interactionSpotId || '',
     interactionSpotId: enrichedTarget?.interactionSpotId || target?.interactionSpotId || objectMeta.spotId || '',
     slotId: metadata.slotId || target?.slotId || target?.seatId || objectMeta.spotId || '',
+    activeUseSlotId: metadata.activeUseSlotId || metadata.slotId || target?.activeUseSlotId || target?.slotId || target?.seatId || objectMeta.spotId || '',
+    activityKind: metadata.activityKind || target?.activityKind || '',
+    animationId: metadata.animationId || target?.animationId || '',
+    pingPongSide: metadata.pingPongSide || target?.pingPongSide || '',
     faceAngle: Number.isFinite(Number(target?.faceAngle ?? metadata.faceAngle)) ? Number(target?.faceAngle ?? metadata.faceAngle) : 0,
   };
+  const stayMs = Number(metadata.stayMs ?? target?.stayMs);
+  if (Number.isFinite(stayMs)) objectTarget.stayMs = Math.max(1000, Math.floor(stayMs));
+  const paddleColor = Number(metadata.paddleColor ?? target?.paddleColor);
+  if (Number.isFinite(paddleColor)) objectTarget.paddleColor = paddleColor;
   const request = {
     agentId,
     source: metadata.sourceFunction || metadata.owner || 'explicit-object',
@@ -1820,6 +1835,13 @@ function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
   if (!objectState?.objectKey) return false;
   const { furniture } = resolveAgentRuntimeWorldObjectTarget(objectState);
   if (!furniture) return false;
+  if (
+    String(furniture.type || '').trim().toLowerCase() === 'pingpong' &&
+    String(objectState.objectType || '').trim().toLowerCase() === 'pingpong' &&
+    String(objectState.owner || '').trim() !== 'server-pingpong-runtime'
+  ) {
+    return false;
+  }
   if (furniture._runtimeWorldObjectVersion && Number(furniture._runtimeWorldObjectVersion) > Number(objectState.version || 0)) {
     return false;
   }
@@ -1833,6 +1855,9 @@ function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
   if (data.activeUse && typeof data.activeUse === 'object') {
     furniture.activeUse = { ...(furniture.activeUse || {}), ...data.activeUse, runtimeWorldObject: true };
   }
+  if (Object.hasOwn(data, 'pingPongGame')) {
+    furniture.pingPongGame = data.pingPongGame && typeof data.pingPongGame === 'object' ? data.pingPongGame : null;
+  }
   const queueStore = data._scriptedServiceQueueStore || data.serviceQueueStore || data.scriptedServiceQueueStore || null;
   if (queueStore && typeof queueStore === 'object') {
     furniture._scriptedServiceQueueStore = {
@@ -1844,7 +1869,10 @@ function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
     };
   }
   const state = String(objectState.state || '').toLowerCase();
-  if (state === 'idle' && data.clearReservation === true) furniture.reservation = null;
+  if (state === 'idle' && data.clearReservation === true) {
+    furniture.reservation = null;
+    if (data.activeUse && typeof data.activeUse === 'object') furniture.activeUse = { ...data.activeUse, runtimeWorldObject: true };
+  }
   if (data.clearServiceQueue === true && !queueStore) furniture._scriptedServiceQueueStore = { reservations: [] };
   return true;
 }
@@ -2308,6 +2336,7 @@ function makeAgentRuntimeVisualActivity(agent) {
     'kind',
     'phase',
     'source',
+    'baseObjectKey',
     'behaviorSourceKind',
     'behaviorMode',
     'behaviorCategory',
@@ -2326,6 +2355,7 @@ function makeAgentRuntimeVisualActivity(agent) {
     'outdoorNodeType',
     'barberRole',
     'mirrorRole',
+    'pingPongSide',
   ].forEach(key => {
     const text = agentRuntimeVisualText(activity[key], 120);
     if (text) out[key] = text;
@@ -2338,6 +2368,7 @@ function makeAgentRuntimeVisualActivity(agent) {
     'seatSurfaceLift',
     'faceAngle',
     'durationMs',
+    'paddleColor',
   ].forEach(key => {
     const number = agentRuntimeVisualNumber(activity[key], null);
     if (number !== null) out[key] = number;
@@ -2395,6 +2426,10 @@ function inferAgentRuntimeRouteDebugLayer(agent, runtimeRoute = null) {
   const source = String(runtimeRoute?.source || '').toLowerCase();
   if (source.includes('dynamic-interior-routing')) return 'interior';
   if (source.includes('dynamic-exterior-routing')) return 'exterior';
+  if (source.includes('server-door-transition')) {
+    const reason = String(runtimeRoute?.reason || runtimeRoute?.phase || '').toLowerCase();
+    if (reason.includes('inside') || reason.includes('exit')) return 'interior';
+  }
 
   const finalPoint = makeAgentRuntimeVisualPoint(runtimeRoute?.finalPoint || runtimeRoute?.nextPoint || null);
   const currentBuilding = getMovementInteriorBuildingAt(agent?.x, agent?.y) || null;
@@ -2405,9 +2440,20 @@ function inferAgentRuntimeRouteDebugLayer(agent, runtimeRoute = null) {
   return 'exterior';
 }
 
+function shouldShowAgentRuntimeRouteDebug(runtimeRoute = null) {
+  if (!runtimeRoute || typeof runtimeRoute !== 'object') return false;
+  if (runtimeRoute.active !== false) return true;
+  if (agentRuntimeVisualText(runtimeRoute.blockedReason || '', 160)) return true;
+  const source = String(runtimeRoute.source || '').toLowerCase();
+  if (source.includes('server-door-transition')) return true;
+  if (Array.isArray(runtimeRoute.routePoints) && runtimeRoute.routePoints.length > 1) return true;
+  if (Array.isArray(runtimeRoute.route) && runtimeRoute.route.length > 1) return true;
+  return false;
+}
+
 function syncAgentRuntimeRoutingDebugFromRuntimeRoute(agent, runtimeRoute = null) {
   if (!agent?._runtimeObserverOnly) return false;
-  if (!runtimeRoute || runtimeRoute.active === false) {
+  if (!shouldShowAgentRuntimeRouteDebug(runtimeRoute)) {
     hydrateDynamicInteriorRoutingDebugFromRuntimeRoute(agent, null);
     hydrateDynamicExteriorRoutingDebugFromRuntimeRoute(agent, null);
     agent._runtimeRouteDebugLayer = null;
@@ -2426,6 +2472,68 @@ function syncAgentRuntimeRoutingDebugFromRuntimeRoute(agent, runtimeRoute = null
   hydrateDynamicInteriorRoutingDebugFromRuntimeRoute(agent, null);
   agent._runtimeRouteDebugLayer = hydrated ? 'exterior' : null;
   return hydrated;
+}
+
+function inferAgentRuntimeDoorPhase(runtimeRoute = null) {
+  const text = [
+    runtimeRoute?.phase,
+    runtimeRoute?.reason,
+    runtimeRoute?.source,
+    runtimeRoute?.routeSource,
+  ].map(value => String(value || '').toLowerCase()).join(' ');
+  if (text.includes('exit-building-through-door') || text.includes('door-exit')) return 'exit-crossing';
+  if (text.includes('inside-to-building-door') || text.includes('door-inside-approach')) return 'exit-approach';
+  if (text.includes('enter-building-through-door') || text.includes('door-crossing')) return 'enter-crossing';
+  if (text.includes('door-enter-approach')) return 'enter-approach';
+  if (text.includes('exit')) return 'exit-approach';
+  return 'enter-approach';
+}
+
+function syncAgentRuntimeDoorVisualFromRuntimeRoute(agent, runtimeRoute = null) {
+  if (!agent?._runtimeObserverOnly) return false;
+  const doorBuildingId = agentRuntimeVisualText(runtimeRoute?.doorBuildingId || '', 120);
+  const isDoorRoute = Boolean(
+    runtimeRoute && doorBuildingId && (
+      String(runtimeRoute.source || '').includes('server-door-transition') ||
+      String(runtimeRoute.phase || '').toLowerCase().startsWith('door-') ||
+      String(runtimeRoute.reason || '').toLowerCase().includes('door')
+    )
+  );
+  if (!isDoorRoute) {
+    if (agent._runtimeDoorTransitionVisualOnly) {
+      agent._doorTransition = null;
+      agent._doorTransitionWaitSinceMs = null;
+      agent._runtimeDoorTransitionVisualOnly = false;
+    }
+    return false;
+  }
+
+  const building = buildingsMap.get(doorBuildingId) || null;
+  animateDoorOpen(doorBuildingId);
+  const phase = inferAgentRuntimeDoorPhase(runtimeRoute);
+  const existing = agent._runtimeDoorTransitionVisualOnly ? (agent._doorTransition || {}) : {};
+  const finalTarget = makeAgentRuntimeVisualPoint(runtimeRoute.doorFinalTarget || runtimeRoute.finalPoint || null);
+  const reachApi = Math.max(
+    building ? getBuildingDoorwayReachApi(building) : 0,
+    agentRuntimeVisualNumber(runtimeRoute.reachApi, 0),
+    API_TILE * 0.45,
+  );
+  const waitingPhase = phase === 'enter-approach' || phase === 'exit-approach';
+  const waitSinceMs = waitingPhase
+    ? Number(existing.waitSinceMs || agent._doorTransitionWaitSinceMs || Date.now()) || Date.now()
+    : null;
+  agent._doorTransition = {
+    ...existing,
+    phase,
+    buildingId: doorBuildingId,
+    reachApi,
+    finalTarget,
+    serverRuntimeVisual: true,
+    ...(waitingPhase ? { waitSinceMs } : {}),
+  };
+  agent._doorTransitionWaitSinceMs = waitingPhase ? waitSinceMs : null;
+  agent._runtimeDoorTransitionVisualOnly = true;
+  return true;
 }
 
 function isAgentRuntimeDeskConsumeActivityKind(kind = '') {
@@ -2470,6 +2578,37 @@ function makeAgentRuntimeWorkSpotFromVisual(activity = null, snapshotTarget = nu
   return workSpot;
 }
 
+function inferAgentRuntimePingPongSide(activity = null, visualState = null) {
+  const explicit = String(activity?.pingPongSide || activity?.side || visualState?.pingPongSide || '').trim().toLowerCase();
+  if (explicit === 'left' || explicit === 'right') return explicit;
+  const text = [
+    activity?.kind,
+    activity?.slotId,
+    activity?.activeUseSlotId,
+    activity?.spotId,
+    activity?.objectKey,
+    visualState?.activityKind,
+  ].filter(Boolean).join(' ').toLowerCase();
+  if (text.includes('right')) return 'right';
+  if (text.includes('left')) return 'left';
+  return '';
+}
+
+function isAgentRuntimePingPongActivity(activity = null, visualState = null) {
+  const text = [
+    activity?.kind,
+    activity?.objectType,
+    activity?.furnitureType,
+    activity?.actionId,
+    visualState?.activityKind,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return text.includes('pingpong') || text.includes('playpingpong');
+}
+
+function pingPongPaddleColorForSide(side = '') {
+  return side === 'right' ? 0x2196f3 : 0xf44336;
+}
+
 function makeAgentRuntimeHydratedVisualActivity(agent, incomingActivity = null, visualState = null) {
   if (!incomingActivity || typeof incomingActivity !== 'object') return null;
   const previous = agent?._idleActivity || {};
@@ -2477,6 +2616,16 @@ function makeAgentRuntimeHydratedVisualActivity(agent, incomingActivity = null, 
     ...incomingActivity,
     kind: agentRuntimeVisualText(incomingActivity.kind || visualState?.activityKind || '', 120),
   };
+  const pingPongSide = isAgentRuntimePingPongActivity(activity, visualState)
+    ? inferAgentRuntimePingPongSide(activity, visualState)
+    : '';
+  if (pingPongSide) {
+    activity.kind = `pingpong-${pingPongSide}`;
+    activity.pingPongSide = pingPongSide;
+    activity.paddleColor = agentRuntimeVisualNumber(activity.paddleColor ?? visualState?.carriedItem?.color, pingPongPaddleColorForSide(pingPongSide));
+    activity.animationId = agentRuntimeVisualText(activity.animationId || 'play-pingpong', 120) || 'play-pingpong';
+    activity.furnitureType = agentRuntimeVisualText(activity.furnitureType || activity.objectType || 'pingpong', 120) || 'pingpong';
+  }
   const phase = String(activity.phase || '').trim().toLowerCase();
   if (phase === 'active') {
     const previousStillActive = previous.kind === activity.kind && previous.phase === 'active';
@@ -2488,11 +2637,37 @@ function makeAgentRuntimeHydratedVisualActivity(agent, incomingActivity = null, 
         : (typeof performance !== 'undefined' ? performance.now() : Date.now());
     }
   }
-  return {
-    ...previous,
-    ...activity,
-    runtimeVisualOnly: true,
-  };
+	  return {
+	    ...previous,
+	    ...activity,
+	    runtimeVisualOnly: true,
+	  };
+	}
+
+function syncAgentRuntimePingPongVisualMetadata(agent, visualState = null) {
+  if (!agent) return false;
+  const activity = agent._idleActivity || null;
+  const carried = visualState?.carriedItem && typeof visualState.carriedItem === 'object' ? visualState.carriedItem : agent._carriedItem;
+  const isPingPong = isAgentRuntimePingPongActivity(activity, visualState) ||
+    String(carried?.kind || carried?.label || '').toLowerCase().includes('pingpong');
+  if (!isPingPong) {
+    if (visualState?.activityActive === false || visualState?.carrying === false) {
+      agent._pingPongSide = null;
+      agent._pingPongPaddleColor = null;
+      removeVisiblePingPongPaddle(agent);
+    }
+    return false;
+  }
+  const side = inferAgentRuntimePingPongSide(activity, visualState) || agent._pingPongSide || 'left';
+  const color = agentRuntimeVisualNumber(activity?.paddleColor ?? carried?.color ?? visualState?.paddleColor, pingPongPaddleColorForSide(side));
+  agent._pingPongSide = side;
+  agent._pingPongPaddleColor = color;
+  if (activity) {
+    activity.pingPongSide = side;
+    activity.paddleColor = color;
+    if (!String(activity.kind || '').startsWith('pingpong-')) activity.kind = `pingpong-${side}`;
+  }
+  return true;
 }
 
 function syncAgentRuntimeVisualDeskState(agent, visualState = null, snapshotTarget = null) {
@@ -2569,7 +2744,8 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
   const runtimeRoute = visualState.runtimeRoute && typeof visualState.runtimeRoute === 'object' ? visualState.runtimeRoute : null;
   const runtimeNextPoint = makeAgentRuntimeVisualPoint(runtimeRoute?.nextPoint || null);
   const runtimeFinalPoint = makeAgentRuntimeVisualPoint(runtimeRoute?.finalPoint || null);
-  if (runtimeNextPoint && runtimeRoute?.active !== false) {
+  const showRuntimeRouteDebug = shouldShowAgentRuntimeRouteDebug(runtimeRoute);
+  if (runtimeNextPoint && showRuntimeRouteDebug) {
     agent._movementDebugNextWaypoint = {
       x: runtimeNextPoint.x,
       y: runtimeNextPoint.y,
@@ -2594,9 +2770,13 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
     agent._avoidDebugTarget = null;
   }
   syncAgentRuntimeRoutingDebugFromRuntimeRoute(agent, runtimeRoute);
+  syncAgentRuntimeDoorVisualFromRuntimeRoute(agent, runtimeRoute);
 
   if (visualState.activityActive === false) {
     agent._idleActivity = null;
+    agent._pingPongSide = null;
+    agent._pingPongPaddleColor = null;
+    removeVisiblePingPongPaddle(agent);
     if (agent._runtimeObserverOnly) {
       agent._atDesk = false;
       agent._activeWorkSpot = null;
@@ -2605,6 +2785,7 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
   } else if (visualState.activity && typeof visualState.activity === 'object') {
     agent._idleActivity = makeAgentRuntimeHydratedVisualActivity(agent, visualState.activity, visualState);
   }
+  syncAgentRuntimePingPongVisualMetadata(agent, visualState);
   const snapshotTarget = snapshot && typeof snapshot === 'object' ? agentRuntimePlainObject(snapshot.target, null) : null;
   syncAgentRuntimeVisualDeskState(agent, visualState, snapshotTarget);
   syncAgentRuntimeVisualActivityPose(agent, visualState);
@@ -2614,6 +2795,7 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
     agent._carrying = null;
     agent._carryItem = null;
     agent.carryItem = null;
+    syncAgentRuntimePingPongVisualMetadata(agent, visualState);
   } else if (visualState.carriedItem && typeof visualState.carriedItem === 'object') {
     const carriedItem = { ...visualState.carriedItem, runtimeVisualOnly: true };
     const carryLabel = agentRuntimeVisualText(
@@ -2624,6 +2806,7 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
     agent._carrying = carriedItem;
     agent._carryItem = carriedItem;
     agent.carryItem = carryLabel || null;
+    syncAgentRuntimePingPongVisualMetadata(agent, visualState);
   }
   return true;
 }
@@ -2848,7 +3031,7 @@ function applyAgentRuntimeObserverRenderVisual(agent, sample) {
 }
 
 function updateAgentRuntimeObserverMotion(agent, dt = 0) {
-  if (!agent?._runtimeObserverOnly || !agent._runtimeSnapshot || isAgentRuntimeRouteLeaseOwned(agent)) return false;
+  if (!agent?._runtimeObserverOnly || !agent._runtimeSnapshot || (isAgentRuntimeRouteLeaseOwned(agent) && !isServerOwnedPingPongAgent(agent))) return false;
   const frame = getAgentRuntimeObserverBufferedFrame(agent);
   if (!frame) {
     placeRuntimeHydratedAgentMesh(agent);
@@ -3094,7 +3277,13 @@ function subscribeAgentRuntimeSnapshots() {
 }
 
 function holdAgentForServerAuthoritativeRuntimeObserver(agent, dt) {
-  if (!isServerAuthoritativeAgentRuntimeObserver() || isAgentRuntimeRouteLeaseOwned(agent)) return false;
+  const serverOwnedPingPong = isServerOwnedPingPongAgent(agent);
+  if (!isServerAuthoritativeAgentRuntimeObserver() || (isAgentRuntimeRouteLeaseOwned(agent) && !serverOwnedPingPong)) return false;
+  if (serverOwnedPingPong && agent._runtimeRouteLease) {
+    agent._runtimeRouteLease = null;
+    agent._runtimeLeaseOwner = '';
+    agent._runtimeRouteId = '';
+  }
   const snapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
   agent._runtimeObserverOnly = true;
   if (snapshot) {
@@ -3183,12 +3372,21 @@ function makeAgentRuntimeRouteTarget(target = null, building = null, floor = nul
   [
     'actionId',
     'worldActionId',
+    'objectKey',
+    'baseObjectKey',
     'objectId',
     'objectInstanceId',
     'objectType',
     'catalogKey',
     'spotId',
     'interactionSpotId',
+    'slotId',
+    'activeUseSlotId',
+    'reservationId',
+    'activeUseId',
+    'activityKind',
+    'animationId',
+    'pingPongSide',
     'routeOwner',
     'constructionSiteId',
     'constructionBuildingId',
@@ -3196,6 +3394,10 @@ function makeAgentRuntimeRouteTarget(target = null, building = null, floor = nul
   ].forEach(key => {
     if (target?.[key] != null && String(target[key]).trim()) plain[key] = String(target[key]).trim();
   });
+  const stayMs = Number(target?.stayMs);
+  if (Number.isFinite(stayMs)) plain.stayMs = Math.max(1000, Math.floor(stayMs));
+  const paddleColor = Number(target?.paddleColor);
+  if (Number.isFinite(paddleColor)) plain.paddleColor = paddleColor;
   return plain;
 }
 
@@ -3251,6 +3453,7 @@ function isAgentRuntimeRouteLeasePending(agent) {
 }
 
 function holdAgentForRuntimeRouteLease(agent, dt) {
+  if (isServerOwnedPingPongAgent(agent)) return false;
   if (!isAgentRuntimeRouteLeasePending(agent)) return false;
   agent._isRunning = false;
   updateAgentAnimation(agent, dt, false, false);
@@ -4108,6 +4311,40 @@ function getActionDebugSpotLocal(item = {}, spot = {}) {
   };
 }
 
+function getSyntheticDismountDebugSpots(item = {}, spots = []) {
+  if (!item || !Array.isArray(spots) || !spots.length) return [];
+  const hasExplicitSideDismount = spots.some((spot) => {
+    const id = String(spot?.id || spot?.spotId || '').toLowerCase();
+    const roles = Array.isArray(spot?.roles) ? spot.roles.map(role => String(role || '').toLowerCase()) : [];
+    if (!roles.some(role => ['dismount', 'exit', 'stand'].includes(role)) && !id.includes('dismount')) return false;
+    return id.includes('dismount') || id.includes('side') || id.includes('exit');
+  });
+  if (hasExplicitSideDismount) return [];
+  const seat = spots.find((spot) => {
+    const id = String(spot?.id || spot?.spotId || '').toLowerCase();
+    const roles = Array.isArray(spot?.roles) ? spot.roles.map(role => String(role || '').toLowerCase()) : [];
+    return roles.includes('seat') || id.includes('seat');
+  });
+  if (!seat) return [];
+  const seatDx = Number(seat.dx ?? seat.offset?.x ?? seat.x ?? 0);
+  const seatDz = Number(seat.dz ?? seat.offset?.z ?? seat.z ?? seat.y ?? 0);
+  const facing = String(seat.facing || 'north').toLowerCase();
+  const side = facing === 'south' ? { dx: -1.05, dz: 0 }
+    : facing === 'east' ? { dx: 0, dz: -1.05 }
+      : facing === 'west' ? { dx: 0, dz: 1.05 }
+        : { dx: 1.05, dz: 0 };
+  return [{
+    id: 'dismount',
+    spotId: 'dismount',
+    dx: seatDx + side.dx,
+    dz: seatDz + side.dz,
+    facing: seat.facing || 'north',
+    action: 'idle.dismountClearance',
+    roles: ['dismount', 'exit', 'debug-generated'],
+    generatedDismount: true,
+  }];
+}
+
 function getPrimaryActionDebugSpot(spots = [], queueSpot = null) {
   const scored = spots
     .filter(spot => spot && spot !== queueSpot && !isQueueActionDebugSpot(spot))
@@ -4298,8 +4535,9 @@ function addObjectActionPointDebugOverlays(group, building) {
     if (isBuildingFloorFocusActive(building) && floor !== getActiveBuildingFloor(building)) continue;
     const floorY = getInteriorFloorSurfaceY(building, floor);
     const spots = FURNITURE_INTERACTION_SPOTS[item.type] || [];
+    const debugSpots = [...spots, ...getSyntheticDismountDebugSpots(item, spots)];
     const serviceQueueFurniture = isScriptedServiceQueueFurniture(item);
-    for (const spot of spots) {
+    for (const spot of debugSpots) {
       const local = getActionDebugSpotLocal(item, spot);
       const queueLike = isQueueActionDebugSpot(spot);
       const serviceQueueSpot = serviceQueueFurniture && serviceQueueSpotOptIn(spot, item);
@@ -4330,7 +4568,8 @@ function addObjectActionPointDebugOverlays(group, building) {
     const local = getOutdoorNodeLocalPoint(node, building);
     const item = { ...node, type, x: local.x, z: local.z, rotation: node.rotation || 0 };
     const floorY = PARK_GRASS_SURFACE_Y + 0.04;
-    for (const spot of spots) {
+    const debugSpots = [...spots, ...getSyntheticDismountDebugSpots(item, spots)];
+    for (const spot of debugSpots) {
       const spotLocal = getActionDebugSpotLocal(item, spot);
       const queueLike = isQueueActionDebugSpot(spot);
       addActionDebugMarker(overlay, {
@@ -5490,7 +5729,7 @@ const LOCAL_IDLE_FURNITURE_ACTIVITY_CONFIG = Object.freeze({
   playgroundSwing: Object.freeze({ kind: 'playground-swing-swing', spotId: 'seat-use', animationId: 'playground-swing-sit-swing', dockSnapRadius: 7, stayMs: [10000, 18000] }),
   pondDock: Object.freeze({ kind: 'pond-dock-view', spotId: 'view-left', animationId: 'pond-dock-view-relax', dockSnapRadius: 7, stayMs: [12000, 22000] }),
   outdoorStage: Object.freeze({ kind: 'outdoor-stage-perform', spotId: 'perform-center', animationId: 'outdoor-stage-perform-watch-gather', dockSnapRadius: 7, stayMs: [14000, 26000] }),
-  pingpong: Object.freeze({ kind: 'pingpong-play', spotId: 'player-left', animationId: 'play-pingpong', dockSnapRadius: 7, stayMs: [18000, 28000] }),
+  pingpong: Object.freeze({ kind: 'pingpong-play', spotId: 'player-left', animationId: 'play-pingpong', dockSnapRadius: 7, stayMs: [24000, 24000] }),
   poolTable: Object.freeze({ kind: 'pool-table-play', spotId: 'break-end', animationId: 'pool-table-play', dockSnapRadius: 7, stayMs: [12000, 22000] }),
   meetingTable: Object.freeze({ kind: 'meeting-table', spotId: 'seat-s3', animationId: 'meeting-sit-talk', dockSnapRadius: 7, stayMs: [12000, 20000] }),
 });
@@ -10818,6 +11057,7 @@ function setAgentTargetForExplicitObjectAction(agent, target, building = null, f
     buildingId: objectMeta.buildingId,
     furnitureIndex: objectMeta.furnitureIndex,
     objectKey: objectMeta.objectKey,
+    baseObjectKey: target?.baseObjectKey || metadata.baseObjectKey || null,
     objectId: objectMeta.objectId,
     objectInstanceId: target?.objectInstanceId || objectMeta.objectId,
     objectType: objectMeta.objectType,
@@ -10825,8 +11065,15 @@ function setAgentTargetForExplicitObjectAction(agent, target, building = null, f
     actionId: objectMeta.actionId,
     spotId: objectMeta.spotId,
     interactionSpotId: target?.interactionSpotId || objectMeta.spotId,
+    slotId: metadata.slotId || target?.slotId || target?.seatId || null,
+    activeUseSlotId: metadata.activeUseSlotId || metadata.slotId || target?.activeUseSlotId || target?.slotId || target?.seatId || null,
     reservationId: objectMeta.reservationId,
     activeUseId: objectMeta.activeUseId,
+    activityKind: metadata.activityKind || target?.activityKind || null,
+    animationId: metadata.animationId || target?.animationId || null,
+    stayMs: metadata.stayMs || target?.stayMs || null,
+    pingPongSide: metadata.pingPongSide || target?.pingPongSide || null,
+    paddleColor: metadata.paddleColor ?? target?.paddleColor ?? null,
     preserveUntilRelease: true,
   };
   const backendObjectUse = requestBackendObjectUseForExplicitObjectAction(agent, target, building, floor, metadata, objectMeta, enrichedTarget);
@@ -20984,6 +21231,7 @@ function updateAgentAnimations(dt) {
       return;
     }
 
+    if (holdAgentForPingPongRuntimePosition(agent, dt)) return;
     if (holdAgentForRuntimeRouteLease(agent, dt)) return;
     if (holdAgentForServerAuthoritativeRuntimeObserver(agent, dt)) return;
 
@@ -34381,7 +34629,7 @@ function normalizeBuildingDoorSpec(building, spec) {
   };
   const src = spec || fallback;
   const clampNum = (value, min, max, fb) => Number.isFinite(Number(value)) ? Math.min(max, Math.max(min, Number(value))) : fb;
-  return {
+  const normalized = {
     localCenterX: clampNum(src.localCenterX, 0, bw, fallback.localCenterX),
     localThresholdZ: clampNum(src.localThresholdZ, bd, bd + 1.5, fallback.localThresholdZ),
     localOutsideZ: clampNum(src.localOutsideZ, bd - 0.2, bd + 1.5, fallback.localOutsideZ),
@@ -34391,6 +34639,20 @@ function normalizeBuildingDoorSpec(building, spec) {
     openingWidth: clampNum(src.openingWidth, T * 0.8, bw, fallback.openingWidth),
     wallThickness: clampNum(src.wallThickness, 0.08, 0.8, fallback.wallThickness),
   };
+  const doorDepth = normalized.localOutsideZ - normalized.localInteriorZ;
+  const doorwayDepth = normalized.localOutsideZ - normalized.localDoorwayZ;
+  if (
+    normalized.localOutsideZ >= bd - 0.25 &&
+    (doorDepth > 3 || doorwayDepth > 2.5 || normalized.localInteriorZ > normalized.localDoorwayZ)
+  ) {
+    normalized.localCenterX = fallback.localCenterX;
+    normalized.localThresholdZ = fallback.localThresholdZ;
+    normalized.localOutsideZ = fallback.localOutsideZ;
+    normalized.localInteriorZ = fallback.localInteriorZ;
+    normalized.localDoorwayZ = fallback.localDoorwayZ;
+    normalized.doorwayReachWorld = fallback.doorwayReachWorld;
+  }
+  return normalized;
 }
 
 function getBuildingDoorSpec(building) {
@@ -56142,6 +56404,14 @@ window._useOutdoorStageFurniture = (mode = 'perform') => {
   setTimeout(() => _showFurnitureActions(buildingId, index), 80);
 };
 
+const PING_PONG_MATCH_STAY_MS = 24000;
+const PING_PONG_MATCH_MAX_MS = 24000;
+const PING_PONG_MATCH_TARGET_SCORE = 5;
+const PING_PONG_RESULT_HOLD_SECONDS = 0.1;
+const PING_PONG_ORPHAN_READY_TIMEOUT_SECONDS = 60;
+const SERVER_PINGPONG_RUNTIME_OWNER_TOKEN = 'server-pingpong-runtime';
+const SERVER_PINGPONG_RUNTIME_LEASE_OWNER_TOKEN = 'server-pingpong-match';
+
 function setPingPongRacket(agent, color, activity) {
   const item = {
     id: `pingpong-racket-${agent?.id || 'agent'}-${Date.now()}`,
@@ -56158,7 +56428,7 @@ function setPingPongRacket(agent, color, activity) {
   agent._carrying = item;
   agent._carryItem = item;
   agent.carryItem = 'pingpong-racket';
-  agent.carryItemTimer = Math.max(agent.carryItemTimer || 0, activity?.stayMs || 18000);
+  agent.carryItemTimer = Math.max(agent.carryItemTimer || 0, activity?.stayMs || PING_PONG_MATCH_STAY_MS);
   return item;
 }
 
@@ -56221,21 +56491,41 @@ function resetPingPongBallForServe(game) {
   game.servingPlayer = server;
 }
 
-function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'match', stayMs = 24000, source = 'manual' } = {}) {
+function makePingPongGameState(p1, p2, { source = 'manual', mode = 'match', targetScore = PING_PONG_MATCH_TARGET_SCORE, maxPlayMs = PING_PONG_MATCH_MAX_MS } = {}) {
+  return {
+    phase: 'approach', timer: 0, pointTimer: 0, targetScore, maxPlayMs,
+    p1Id: p1?.id, p2Id: p2?.id,
+    p1Score: 0, p2Score: 0, rallyHits: 0,
+    ballX: 0, ballZ: 0, ballVX: 0.62, ballVZ: 0.14,
+    p1TrackZ: 0, p2TrackZ: 0,
+    p1Skill: 0.58 + Math.random() * 0.30,
+    p2Skill: 0.58 + Math.random() * 0.30,
+    nextServe: Math.random() < 0.5 ? 'p1' : 'p2',
+    servePauseMs: 900, servingPlayer: null,
+    mode,
+    source,
+  };
+}
+
+function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'match', stayMs = PING_PONG_MATCH_STAY_MS, source = 'manual' } = {}) {
   if (!building || !table || table.type !== 'pingpong' || !p1 || !p2 || p1 === p2) return false;
   if (!isPingPongEligibleIdleAgent(p1) || !isPingPongEligibleIdleAgent(p2)) return false;
+  stayMs = Math.max(1000, Number(stayMs || PING_PONG_MATCH_STAY_MS) || PING_PONG_MATCH_STAY_MS);
   const buildingId = building.id;
   const leftSpot = getFurnitureActionSpot(building, table, 'player-left') || getFurnitureActionSpot(building, table);
   const rightSpot = getFurnitureActionSpot(building, table, 'player-right') || getFurnitureActionSpot(building, table);
   if (!leftSpot || !rightSpot) return false;
-  const objectKey = getAgentRuntimeFurnitureObjectKey(buildingId, index, 'pingpong');
+  const baseObjectKey = getAgentRuntimeFurnitureObjectKey(buildingId, index, 'pingpong');
   const actionId = 'life.playPingPong';
-  const reservationId = `reservation:${objectKey}:${actionId}:${Date.now()}`;
-  const activeUseId = `active-use:${objectKey}:${actionId}:${Date.now()}`;
+  const reservationId = `reservation:${baseObjectKey}:${actionId}:${Date.now()}`;
+  const activeUseId = `active-use:${baseObjectKey}:${actionId}:${Date.now()}`;
   const playerPlans = [
     { agent: p1, spot: leftSpot, side: 'left', slotId: 'player-left', color: 0xf44336 },
     { agent: p2, spot: rightSpot, side: 'right', slotId: 'player-right', color: 0x2196f3 },
   ];
+  playerPlans.forEach(plan => {
+    plan.objectKey = getPingPongPlayerRuntimeObjectKey(baseObjectKey, plan.slotId);
+  });
   const admittedAgents = [];
   for (const plan of playerPlans) {
     const routeTarget = {
@@ -56245,29 +56535,42 @@ function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'mat
       buildingId,
       furnitureIndex: index,
       objectType: 'pingpong',
-      objectKey,
+      objectKey: plan.objectKey,
+      baseObjectKey,
       actionId,
       spotId: plan.spot.spotId,
-      interactionSpotId: plan.spot.spotId,
-      slotId: plan.slotId,
-      activeUseSlotId: plan.slotId,
-      reservationId,
-      activeUseId,
-      preserveUntilRelease: true,
-    };
+	      interactionSpotId: plan.spot.spotId,
+	      slotId: plan.slotId,
+	      activeUseSlotId: plan.slotId,
+	      reservationId,
+	      activeUseId,
+	      activityKind: `pingpong-${plan.side}`,
+	      animationId: 'play-pingpong',
+	      stayMs,
+	      pingPongSide: plan.side,
+	      paddleColor: plan.color,
+	      preserveUntilRelease: true,
+	    };
     const routeAdmission = setAgentTargetForExplicitObjectAction(plan.agent, routeTarget, building, plan.spot.floor, {
       sourceFunction: 'startPingPongMatchOnTable',
       sourceSummary: 'ping-pong match routes with explicit table runtime ownership',
       objectType: 'pingpong',
-      objectKey,
-      furnitureIndex: index,
-      actionId,
-      spotId: plan.spot.spotId,
-      slotId: plan.slotId,
-      reservationId,
-      activeUseId,
-      release: { policy: 'on-object-complete', releaseObjectReservation: true, releaseActiveUse: true, allowedBy: AGENT_INTENT_RELEASE_ALLOWED_BY['explicit-object'] },
-    });
+      objectKey: plan.objectKey,
+      baseObjectKey,
+	      furnitureIndex: index,
+	      actionId,
+	      spotId: plan.spot.spotId,
+	      slotId: plan.slotId,
+	      activeUseSlotId: plan.slotId,
+	      reservationId,
+	      activeUseId,
+	      activityKind: `pingpong-${plan.side}`,
+	      animationId: 'play-pingpong',
+	      stayMs,
+	      pingPongSide: plan.side,
+	      paddleColor: plan.color,
+	      release: { policy: 'on-object-complete', releaseObjectReservation: true, releaseActiveUse: true, allowedBy: AGENT_INTENT_RELEASE_ALLOWED_BY['explicit-object'] },
+	    });
     if (routeAdmission?.accepted === false) {
       for (const admittedAgent of admittedAgents) {
         releaseAgentIntent(admittedAgent, 'route-failed', {
@@ -56286,6 +56589,8 @@ function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'mat
     agentId: plan.agent.id || plan.agent.name || null,
     reservationId,
     activeUseId,
+    objectKey: plan.objectKey,
+    baseObjectKey,
     actionId,
     interactionSpotId: plan.spot.spotId,
     spotId: plan.spot.spotId,
@@ -56296,20 +56601,9 @@ function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'mat
   table.reservation = { id: reservationId, reservationId, agentIds: [p1.id, p2.id], actionId, spotIds: [leftSpot.spotId, rightSpot.spotId], slotIds: playerPlans.map(plan => plan.slotId), status: 'held', source };
   table.activeUse = { id: activeUseId, activeUseId, state: 'approach', mode, actionId, agentIds: [p1.id, p2.id], activeSlots, source };
   table.pingPongScriptedState = { state: 'match-active', maxParticipants: 2, participants: [p1.id || p1.name, p2.id || p2.name].filter(Boolean), startedAtMs: Date.now(), source };
-  table.pingPongGame = {
-    phase: 'approach', timer: 0, pointTimer: 0, targetScore: 5,
-    p1Id: p1.id, p2Id: p2.id,
-    p1Score: 0, p2Score: 0, rallyHits: 0,
-    ballX: 0, ballZ: 0, ballVX: 0.62, ballVZ: 0.14,
-    p1TrackZ: 0, p2TrackZ: 0,
-    p1Skill: 0.58 + Math.random() * 0.30,
-    p2Skill: 0.58 + Math.random() * 0.30,
-    nextServe: Math.random() < 0.5 ? 'p1' : 'p2',
-    servePauseMs: 900, servingPlayer: null,
-    source,
-  };
+  table.pingPongGame = makePingPongGameState(p1, p2, { source, mode, targetScore: PING_PONG_MATCH_TARGET_SCORE, maxPlayMs: stayMs });
   resetPingPongBallForServe(table.pingPongGame);
-  for (const { agent, spot, side, slotId, color } of playerPlans) {
+  for (const { agent, spot, side, slotId, color, objectKey } of playerPlans) {
     agent._idleActivity = {
       kind: `pingpong-${side}`,
       phase: 'approach',
@@ -56317,13 +56611,16 @@ function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'mat
       buildingId,
       furnitureIndex: index,
       objectKey,
-      reservationId,
-      activeUseId,
-      activeUseSlotId: slotId,
-      slotId,
-      stayMs,
-      faceAngle: spot.faceAngle,
-      dockTarget: { x: spot.apiX, y: spot.apiZ },
+	      baseObjectKey,
+	      reservationId,
+	      activeUseId,
+	      activeUseSlotId: slotId,
+	      slotId,
+	      stayMs,
+	      pingPongSide: side,
+	      paddleColor: color,
+	      faceAngle: spot.faceAngle,
+	      dockTarget: { x: spot.apiX, y: spot.apiZ },
       dockSnapRadius: 7,
       furnitureType: 'pingpong',
       spotId: spot.spotId,
@@ -56336,6 +56633,7 @@ function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'mat
     stampAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER, {
       activity: agent._idleActivity,
       objectKey,
+      baseObjectKey,
       objectType: 'pingpong',
       buildingId,
       furnitureIndex: index,
@@ -56353,18 +56651,266 @@ function startPingPongMatchOnTable(building, table, index, p1, p2, { mode = 'mat
     agent._wanderTimer = 150;
     agent._stayTimer = 0;
   }
-  return { leftSpot, rightSpot };
+	  return { leftSpot, rightSpot };
+	}
+
+function getAgentPingPongRuntimeTarget(agent) {
+  const snapshotTarget = agent?._runtimeRenderSnapshot?.target || agent?._runtimeSnapshot?.target || null;
+  return snapshotTarget && typeof snapshotTarget === 'object' ? snapshotTarget : null;
+}
+
+function includesServerPingPongRuntimeOwner(...values) {
+  return values.some(value => {
+    const text = String(value || '').trim().toLowerCase();
+    return text === SERVER_PINGPONG_RUNTIME_OWNER_TOKEN ||
+      text === SERVER_PINGPONG_RUNTIME_LEASE_OWNER_TOKEN ||
+      text.includes(SERVER_PINGPONG_RUNTIME_OWNER_TOKEN);
+  });
+}
+
+function isServerOwnedPingPongGame(game = null) {
+  if (!game || typeof game !== 'object') return false;
+  return includesServerPingPongRuntimeOwner(
+    game.source,
+    game.owner,
+    game.runtimeOwner,
+    game.leaseOwner,
+    game.writer,
+    game.runtimeSource,
+  );
+}
+
+function isServerOwnedPingPongTable(table = null, game = table?.pingPongGame || null) {
+  if (!table || table.type !== 'pingpong') return false;
+  const objectState = table._runtimeWorldObjectState || null;
+  const data = objectState?.data || {};
+  return isServerOwnedPingPongGame(game) ||
+    includesServerPingPongRuntimeOwner(
+      table.activeUse?.source,
+      table.activeUse?.runtimeOwner,
+      table.reservation?.source,
+      table.reservation?.runtimeOwner,
+      objectState?.owner,
+      objectState?.leaseOwner,
+      data.writer,
+      data.activeUse?.source,
+      data.activeUse?.runtimeOwner,
+      data.reservation?.source,
+      data.reservation?.runtimeOwner,
+    );
+}
+
+function isServerOwnedPingPongActivity(activity = null, visualState = null, target = null, snapshot = null) {
+  const isPingPong = isAgentRuntimePingPongActivity(activity, visualState) ||
+    String(target?.objectType || target?.furnitureType || '').toLowerCase() === 'pingpong' ||
+    String(target?.targetKind || '').toLowerCase() === 'server-pingpong-player';
+  if (!isPingPong) return false;
+  return includesServerPingPongRuntimeOwner(
+    activity?.source,
+    activity?.runtimeOwner,
+    activity?.owner,
+    visualState?.source,
+    visualState?.runtimeOwner,
+    target?.runtimeSource,
+    target?.runtimeOwner,
+    target?.owner,
+    target?.leaseOwner,
+    target?.targetKind,
+    snapshot?.owner,
+    snapshot?.leaseOwner,
+  );
+}
+
+function isServerOwnedPingPongAgent(agent = null) {
+  if (!agent) return false;
+  const snapshot = agent._runtimeRenderSnapshot || agent._runtimeSnapshot || null;
+  const visualState = agent._runtimeVisualState || snapshot?.visualState || null;
+  const activity = agent._idleActivity || visualState?.activity || null;
+  const target = getAgentPingPongRuntimeTarget(agent);
+  return isServerOwnedPingPongActivity(activity, visualState, target, snapshot);
+}
+
+function serverOwnedPingPongAgentMatchesTable(agent, building, table, index) {
+  if (!isServerOwnedPingPongAgent(agent) || !building || !table) return false;
+  const activity = agent._idleActivity || agent._runtimeVisualState?.activity || null;
+  const target = getAgentPingPongRuntimeTarget(agent);
+  const activityBuildingId = activity?.buildingId || target?.buildingId || '';
+  const activityFurnitureIndex = activity?.furnitureIndex ?? target?.furnitureIndex;
+  if (activityBuildingId === building.id && Number(activityFurnitureIndex) === Number(index)) return true;
+  const baseObjectKey = getAgentRuntimeFurnitureObjectKey(building.id, index, 'pingpong');
+  const keys = [
+    activity?.baseObjectKey,
+    activity?.objectKey,
+    target?.baseObjectKey,
+    target?.objectKey,
+  ].map(value => String(value || '').trim()).filter(Boolean);
+  return keys.some(key => key === baseObjectKey || key.startsWith(`${baseObjectKey}:slot:`));
+}
+
+function hasServerOwnedPingPongPlayersForTable(building, table, index) {
+  if (!building || !table || table.type !== 'pingpong') return false;
+  return (agentsList || []).some(agent => serverOwnedPingPongAgentMatchesTable(agent, building, table, index));
+}
+
+function shouldAdoptRuntimePingPongGameForTable(building, table, index) {
+  if (!building || !table || table.type !== 'pingpong' || table.pingPongGame) return false;
+  if (isServerOwnedPingPongTable(table) || hasServerOwnedPingPongPlayersForTable(building, table, index)) return false;
+  return !(_agentRuntimeClient?.connected && isServerAuthoritativeAgentRuntimeObserver());
+}
+
+function pingPongAgentMatchesTable(agent, building, table, index, side, spot) {
+  if (!agent || !building || !table || !spot) return false;
+  const activity = agent._idleActivity || null;
+  if (!isAgentRuntimePingPongActivity(activity, agent._runtimeVisualState)) return false;
+  if ((inferAgentRuntimePingPongSide(activity, agent._runtimeVisualState) || '') !== side) return false;
+  if (activity?.isQueueUse) return false;
+  const runtimeTarget = getAgentPingPongRuntimeTarget(agent);
+  const activityBuildingId = activity?.buildingId || runtimeTarget?.buildingId || '';
+  const activityFurnitureIndex = activity?.furnitureIndex ?? runtimeTarget?.furnitureIndex;
+  if (activityBuildingId === building.id && Number(activityFurnitureIndex) === Number(index)) return true;
+  const baseObjectKey = getAgentRuntimeFurnitureObjectKey(building.id, index, 'pingpong');
+  const keys = [
+    activity?.baseObjectKey,
+    activity?.objectKey,
+    runtimeTarget?.baseObjectKey,
+    runtimeTarget?.objectKey,
+  ].map(value => String(value || '').trim()).filter(Boolean);
+  if (keys.some(key => key === baseObjectKey || key.startsWith(`${baseObjectKey}:slot:`))) return true;
+  const distance = Math.hypot((agent.x || 0) - spot.apiX, (agent.y || 0) - spot.apiZ);
+  return distance <= API_TILE * 0.75;
+}
+
+function prepareRuntimePingPongAgentForTable(agent, building, table, index, side, spot, stayMs = PING_PONG_MATCH_STAY_MS) {
+  if (!agent || !building || !table || !spot) return null;
+  const baseObjectKey = getAgentRuntimeFurnitureObjectKey(building.id, index, 'pingpong');
+  const slotId = spot.spotId || `player-${side}`;
+  const activity = agent._idleActivity && typeof agent._idleActivity === 'object' ? agent._idleActivity : {};
+  activity.kind = `pingpong-${side}`;
+  activity.phase = ['active', 'ready', 'using', 'waiting'].includes(String(activity.phase || '').toLowerCase()) ? activity.phase : 'ready';
+  activity.buildingId = building.id;
+  activity.furnitureIndex = index;
+  activity.mode = 'match';
+  activity.source = activity.source || 'server-runtime-adopted-table';
+  activity.objectKey = activity.objectKey || getPingPongPlayerRuntimeObjectKey(baseObjectKey, slotId);
+  activity.baseObjectKey = activity.baseObjectKey || baseObjectKey;
+  activity.objectType = 'pingpong';
+  activity.furnitureType = 'pingpong';
+  activity.spotId = slotId;
+  activity.slotId = activity.slotId || slotId;
+  activity.activeUseSlotId = activity.activeUseSlotId || slotId;
+  activity.action = activity.action || activity.actionId || 'life.playPingPong';
+  activity.actionId = activity.actionId || activity.action || 'life.playPingPong';
+  activity.animationId = 'play-pingpong';
+  activity.faceAngle = Number.isFinite(Number(activity.faceAngle)) ? Number(activity.faceAngle) : spot.faceAngle;
+  activity.dockTarget = activity.dockTarget || { x: spot.apiX, y: spot.apiZ, floor: spot.floor };
+  activity.dockSnapRadius = Math.max(7, Number(activity.dockSnapRadius || 0) || 0);
+  activity.stayMs = Math.max(1000, Number(activity.stayMs || stayMs) || stayMs);
+  activity.pingPongSide = side;
+  activity.paddleColor = pingPongPaddleColorForSide(side);
+  activity.lifecycle = { ...(activity.lifecycle || {}), stationary: true, carryable: false, temporary: false, spawnsTemporary: true };
+  activity.spawnedItem = {
+    ...(activity.spawnedItem || {}),
+    label: 'Ping Pong Racket',
+    catalogId: 'temporaryGameEquipment',
+    temporary: true,
+    carryable: true,
+    attachPoint: 'right-hand',
+    color: activity.paddleColor,
+  };
+  agent._idleActivity = activity;
+  agent._pingPongSide = side;
+  agent._pingPongPaddleColor = activity.paddleColor;
+  if (!agent._carriedItem || String(agent._carriedItem.kind || '').toLowerCase() !== 'pingpong-racket') {
+    setPingPongRacket(agent, activity.paddleColor, activity);
+  }
+  ensureVisiblePingPongPaddle(agent, activity.paddleColor, side);
+  return activity;
+}
+
+function adoptRuntimePingPongGameForTable(building, table, index) {
+  if (!building || !table || table.type !== 'pingpong' || table.pingPongGame) return false;
+  const leftSpot = getFurnitureActionSpot(building, table, 'player-left') || getFurnitureActionSpot(building, table);
+  const rightSpot = getFurnitureActionSpot(building, table, 'player-right') || getFurnitureActionSpot(building, table);
+  if (!leftSpot || !rightSpot) return false;
+  const picked = { left: null, right: null };
+  const scores = { left: Infinity, right: Infinity };
+  for (const agent of agentsList || []) {
+    for (const [side, spot] of [['left', leftSpot], ['right', rightSpot]]) {
+      if (!pingPongAgentMatchesTable(agent, building, table, index, side, spot)) continue;
+      const distance = Math.hypot((agent.x || 0) - spot.apiX, (agent.y || 0) - spot.apiZ);
+      if (distance < scores[side]) {
+        picked[side] = agent;
+        scores[side] = distance;
+      }
+    }
+  }
+  if (!picked.left || !picked.right || picked.left === picked.right) return false;
+  const source = 'server-runtime-adopted-table';
+  table.reservation = { agentIds: [picked.left.id, picked.right.id], actionId: 'life.playPingPong', spotIds: [leftSpot.spotId, rightSpot.spotId], status: 'held', source };
+  table.activeUse = { state: 'approach', mode: 'match', actionId: 'life.playPingPong', agentIds: [picked.left.id, picked.right.id], source };
+  table.pingPongScriptedState = { state: 'match-active', maxParticipants: 2, participants: [picked.left.id || picked.left.name, picked.right.id || picked.right.name].filter(Boolean), startedAtMs: Date.now(), source };
+  table.pingPongGame = makePingPongGameState(picked.left, picked.right, { source, mode: 'match', targetScore: PING_PONG_MATCH_TARGET_SCORE, maxPlayMs: PING_PONG_MATCH_MAX_MS });
+  resetPingPongBallForServe(table.pingPongGame);
+  prepareRuntimePingPongAgentForTable(picked.left, building, table, index, 'left', leftSpot);
+  prepareRuntimePingPongAgentForTable(picked.right, building, table, index, 'right', rightSpot);
+  return true;
+}
+
+function requestPingPongRuntimeObjectUseRelease(agent, activity = null, reason = 'pingpong-game-ended') {
+  if (!_agentRuntimeClient?.connected || typeof _agentRuntimeClient.releaseObjectUse !== 'function') return null;
+  const agentId = getAgentRuntimeAgentId(agent);
+  if (!agentId) return null;
+  const objectKey = activity?.objectKey || getAgentRuntimeActivityObjectKey(activity) || agent?._agentIntent?.object?.objectKey || '';
+  const baseObjectKey = activity?.baseObjectKey || agent?._agentIntent?.object?.baseObjectKey || '';
+  const slotId = activity?.activeUseSlotId || activity?.slotId || activity?.spotId || agent?._agentIntent?.object?.slotId || '';
+  const payload = {
+    agentId,
+    objectKey,
+    baseObjectKey,
+    slotId,
+    reason,
+    target: {
+      objectKey,
+      baseObjectKey,
+      objectType: 'pingpong',
+      furnitureType: 'pingpong',
+      buildingId: activity?.buildingId || agent?._agentIntent?.object?.buildingId || '',
+      furnitureIndex: activity?.furnitureIndex ?? agent?._agentIntent?.object?.furnitureIndex ?? null,
+      actionId: activity?.actionId || activity?.action || 'life.playPingPong',
+      spotId: activity?.spotId || slotId,
+      slotId,
+      activeUseSlotId: slotId,
+      activityKind: activity?.kind || '',
+      animationId: 'play-pingpong',
+      pingPongSide: activity?.pingPongSide || inferAgentRuntimePingPongSide(activity, null) || '',
+      paddleColor: activity?.paddleColor ?? agent?._pingPongPaddleColor ?? null,
+      stayMs: activity?.stayMs || PING_PONG_MATCH_STAY_MS,
+    },
+  };
+  return _agentRuntimeClient.releaseObjectUse(payload, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
+    .then(ack => {
+      updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'pingpong-object-use-released', ok: true, ack });
+      return ack;
+    })
+    .catch(error => {
+      updateAgentRuntimeRouteLeaseDebug(agent, { phase: 'pingpong-object-use-release-failed', ok: false, error: error?.message || String(error), code: error?.code || null });
+      return null;
+    });
 }
 
 function endPingPongGame(table, reason = 'complete') {
   const game = table?.pingPongGame;
+  if (isServerOwnedPingPongTable(table, game)) return false;
   const ids = [game?.p1Id, game?.p2Id].filter(Boolean);
   for (const id of ids) {
     const agent = agentsList.find(candidate => candidate?.id === id);
+    const activity = agent?._idleActivity && String(agent._idleActivity.kind || '').startsWith('pingpong-')
+      ? { ...agent._idleActivity }
+      : null;
+    if (activity) requestPingPongRuntimeObjectUseRelease(agent, activity, 'pingpong-game-ended');
     clearPingPongRacket(agent);
     if (agent) {
-      if (agent._idleActivity?.kind?.startsWith('pingpong-')) {
-        agent._idleActivity = { ...agent._idleActivity, phase: 'complete' };
+      if (activity) {
         releaseAgentIntent(agent, 'object-complete', {
           releaseBy: 'object-complete',
           phase: 'complete',
@@ -56378,24 +56924,26 @@ function endPingPongGame(table, reason = 'complete') {
           phase: 'complete',
           clearRoute: true,
           clearLifecycle: true,
-          releaseSummary: 'ping-pong match ended and released table ownership',
-        });
-      }
-      clearAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER);
-      releaseAgentRuntimeRouteLease(agent, 'pingpong-game-ended', 'idle');
-      agent._schedPhase = reason === 'complete' ? 'pingpong-complete' : 'idle-local';
-      agent._wanderTimer = 1400 + Math.random() * 2200;
-      agent._stayTimer = 0;
+	          releaseSummary: 'ping-pong match ended and released table ownership',
+	        });
+	      }
+	      clearAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER);
+	      releaseAgentRuntimeRouteLease(agent, 'pingpong-game-ended', 'idle');
+	      if (activity) agent._idleActivity = null;
+	      agent._schedPhase = 'idle-local';
+	      agent._wanderTimer = 0;
+	      agent._stayTimer = 0;
       agent._pingPongSide = null;
       agent._pingPongPaddleColor = null;
     }
   }
-  if (table) {
-    table.reservation = null;
-    table.activeUse = { state: reason, lastScore: game ? `${game.p1Score || 0}-${game.p2Score || 0}` : null };
-    table.pingPongGame = null;
-  }
-}
+	  if (table) {
+	    table.reservation = null;
+	    table.activeUse = { state: reason, lastScore: game ? `${game.p1Score || 0}-${game.p2Score || 0}` : null };
+	    table.pingPongScriptedState = { ...(table.pingPongScriptedState || {}), state: 'idle', completedAtMs: Date.now(), reason };
+	    table.pingPongGame = null;
+	  }
+	}
 
 window._usePingPongFurniture = (mode = 'match') => {
   if (!_selectedFurniture) return;
@@ -56407,6 +56955,20 @@ window._usePingPongFurniture = (mode = 'match') => {
   if (state.players.length || table.pingPongGame) {
     showToast(`🏓 ${state.label}`, 'warning');
     _showFurnitureActions(buildingId, index);
+    return;
+  }
+  if (_agentRuntimeClient?.connected && isServerAuthoritativeAgentRuntimeObserver() && typeof _agentRuntimeClient.requestPingPongMatch === 'function') {
+    const objectKey = getAgentRuntimeFurnitureObjectKey(buildingId, index, 'pingpong');
+    _agentRuntimeClient.requestPingPongMatch({ buildingId, furnitureIndex: index, objectKey, source: 'manual-action' }, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
+      .then(ack => {
+        showToast(`🏓 Server started ping-pong for ${Array.isArray(ack?.agentIds) ? ack.agentIds.join(' and ') : 'two agents'}`, 'success');
+        setTimeout(() => _showFurnitureActions(buildingId, index), 80);
+        return ack;
+      })
+      .catch(error => {
+        showToast(error?.message || 'Could not start server ping-pong match', 'warning');
+        return null;
+      });
     return;
   }
   const leftSpot = getFurnitureActionSpot(building, table, 'player-left') || getFurnitureActionSpot(building, table);
@@ -56427,7 +56989,7 @@ window._usePingPongFurniture = (mode = 'match') => {
     showToast('Need two idle agents for ping-pong', 'warning');
     return;
   }
-  const match = startPingPongMatchOnTable(building, table, index, p1, p2, { mode, stayMs: 24000, source: 'manual-action' });
+  const match = startPingPongMatchOnTable(building, table, index, p1, p2, { mode, stayMs: PING_PONG_MATCH_STAY_MS, source: 'manual-action' });
   if (!match) {
     showToast('Could not route two idle agents to this ping-pong table', 'warning');
     return;
@@ -56911,6 +57473,7 @@ function doesAgentIntentMatchPingPongActivity(intent = null, activity = null) {
 
 function holdPingPongRuntimePosition(agent, pose = {}) {
   if (!agent) return;
+  if (isServerOwnedPingPongAgent(agent)) return;
   const activity = agent._idleActivity || null;
   if (activity && String(activity.kind || '').startsWith('pingpong-')) {
     activity.dockTarget = Number.isFinite(Number(pose.apiX)) && Number.isFinite(Number(pose.apiZ))
@@ -56918,7 +57481,7 @@ function holdPingPongRuntimePosition(agent, pose = {}) {
       : activity.dockTarget;
     activity.lifecycle = {
       ...(activity.lifecycle || {}),
-      stationary: false,
+      stationary: true,
     };
     stampAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER, {
       activity,
@@ -56960,8 +57523,119 @@ function holdPingPongRuntimePosition(agent, pose = {}) {
   });
   agent._isReturningToDesk = false;
   agent._isRunning = false;
+	  agent._stayTimer = Math.max(agent._stayTimer || 0, 1200);
+	  agent._wanderTimer = Math.max(agent._wanderTimer || 0, 1200);
+	}
+
+function holdAgentForPingPongRuntimePosition(agent, dt = 0) {
+  const activity = agent?._idleActivity || null;
+  if (!agent?._group3d || !activity || !String(activity.kind || '').startsWith('pingpong-')) return false;
+  if (isServerOwnedPingPongAgent(agent)) {
+    clearAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER);
+    agent._runtimePingPongPositionOverride = false;
+    return false;
+  }
+  if (!getAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER)) return false;
+  const scale = T / API_TILE;
+  agent._runtimePingPongPositionOverride = true;
+  agent._runtimeObserverOnly = false;
+  agent._wanderTarget = null;
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  agent._waypointPathIdx = 0;
+  agent._atDoor = false;
+  agent._isReturningToDesk = false;
+  agent._isRunning = false;
+  agent._schedPhase = activity.animationId || 'play-pingpong';
   agent._stayTimer = Math.max(agent._stayTimer || 0, 1200);
   agent._wanderTimer = Math.max(agent._wanderTimer || 0, 1200);
+  const building = activity.buildingId ? buildingsMap.get(activity.buildingId) || null : getMovementInteriorBuildingAt(agent.x, agent.y);
+  const agentFloor = Math.max(1, Number(activity.floor || agent._floor || agent._targetFloor || 1) || 1);
+  agent._floor = agentFloor;
+  agent._targetFloor = agentFloor;
+  const worldX = agent.x * scale;
+  const worldZ = agent.y * scale;
+  const floorY = building && building.type !== 'park' ? getRenderedFloorY(building, agentFloor) : 0;
+  const groundY = getGroundY(worldX, worldZ) + floorY;
+  agent._group3d.userData._groundY = groundY;
+  updateAgentAnimation(agent, dt, false, false);
+  agent._group3d.position.x = worldX;
+  agent._group3d.position.z = worldZ;
+  agent._group3d.position.y = groundY;
+  if (Number.isFinite(Number(activity.faceAngle))) agent._group3d.rotation.y = Number(activity.faceAngle);
+  updateAgentAvoidanceDebug(agent);
+  updateDynamicInteriorRoutingDebug(agent);
+  updateDynamicExteriorRoutingDebug(agent);
+  if (isPhysicsReady()) {
+    const lastSync = agent._lastPhysicsSync;
+    if (!lastSync || lastSync.x !== worldX || lastSync.y !== groundY || lastSync.z !== worldZ) {
+      teleportAgent('agent_' + agent.id, worldX, groundY, worldZ);
+      agent._lastPhysicsSync = { x: worldX, y: groundY, z: worldZ };
+    }
+  }
+  return true;
+}
+
+function isPingPongPlayerReadyForTable(agent, expectedSide = 'left', spot = null) {
+  if (!agent || !spot) return false;
+  const activity = agent._idleActivity || null;
+  const side = inferAgentRuntimePingPongSide(activity, agent._runtimeVisualState) || expectedSide;
+  if (side !== expectedSide) return false;
+  if (!isAgentRuntimePingPongActivity(activity, agent._runtimeVisualState)) return false;
+  const distance = Math.hypot((agent.x || 0) - spot.apiX, (agent.y || 0) - spot.apiZ);
+  const phase = String(activity?.phase || '').trim().toLowerCase();
+  const snapshotState = String(agent._runtimeSnapshot?.state || agent._runtimeRenderSnapshot?.state || '').trim().toLowerCase();
+  const arrivedByServer = ['using', 'active', 'waiting'].includes(snapshotState);
+  const readyPhase = ['ready', 'active', 'using', 'waiting'].includes(phase);
+  return distance <= 8 && (readyPhase || arrivedByServer);
+}
+
+function syncServerOwnedPingPongAgentForRender(agent, game, side = 'left', spot = null) {
+  if (!agent || !game) return false;
+  const playing = game.phase === 'playing';
+  const visualPingPong = agent._runtimeVisualState?.pingPong && typeof agent._runtimeVisualState.pingPong === 'object'
+    ? agent._runtimeVisualState.pingPong
+    : null;
+  const playerKey = side === 'right' ? 'p2' : 'p1';
+  const trackKey = side === 'right' ? 'p2TrackZ' : 'p1TrackZ';
+  const color = pingPongPaddleColorForSide(side);
+  agent._pingPongSide = side;
+  agent._pingPongPaddleColor = color;
+  agent._pingPongTrackZ = Number.isFinite(Number(visualPingPong?.trackZ))
+    ? Number(visualPingPong.trackZ)
+    : Number(game?.[trackKey] || 0);
+  agent._pingPongBallZ = Number(game.ballZ || 0);
+  agent._pingPongBallX = Number(game.ballX || 0);
+  agent._pingPongLastHit = game.lastHit || visualPingPong?.lastHit || null;
+  const swingPulseId = Number(visualPingPong?.swingPulseId ?? game?.[`${playerKey}SwingPulseId`] ?? 0);
+  if (playing && Number.isFinite(swingPulseId) && swingPulseId > Number(agent._serverPingPongSwingPulseId || 0)) {
+    agent._pingPongSwingPulse = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    agent._serverPingPongSwingPulseId = swingPulseId;
+  }
+  if (agent._idleActivity && String(agent._idleActivity.kind || '').startsWith('pingpong-')) {
+    agent._idleActivity.phase = playing ? 'active' : (game.phase || agent._idleActivity.phase || 'ready');
+    agent._idleActivity.animationId = playing ? 'play-pingpong' : 'idle';
+    agent._idleActivity.pingPongSide = side;
+    agent._idleActivity.paddleColor = color;
+    if (spot && Number.isFinite(Number(spot.faceAngle))) agent._idleActivity.faceAngle = spot.faceAngle;
+  }
+  if (playing) {
+    const carried = agent._carriedItem || agent._carrying || null;
+    if (!carried || String(carried.kind || '').toLowerCase() !== 'pingpong-racket') {
+      setPingPongRacket(agent, color, agent._idleActivity);
+    }
+    ensureVisiblePingPongPaddle(agent, color, side);
+  } else {
+    clearPingPongRacket(agent);
+  }
+  return true;
+}
+
+function syncServerOwnedPingPongGameForRender(game, p1, p2, leftSpot, rightSpot) {
+  if (!game) return false;
+  if (p1) syncServerOwnedPingPongAgentForRender(p1, game, 'left', leftSpot);
+  if (p2) syncServerOwnedPingPongAgentForRender(p2, game, 'right', rightSpot);
+  return true;
 }
 
 function updatePingPongGames(dt = 0) {
@@ -56969,20 +57643,23 @@ function updatePingPongGames(dt = 0) {
     const furniture = building?.interior?.furniture || [];
     for (let index = 0; index < furniture.length; index++) {
       const table = furniture[index];
+      if (shouldAdoptRuntimePingPongGameForTable(building, table, index)) adoptRuntimePingPongGameForTable(building, table, index);
       const game = table?.type === 'pingpong' ? table.pingPongGame : null;
       if (!game) continue;
       const p1 = agentsList.find(agent => agent?.id === game.p1Id);
       const p2 = agentsList.find(agent => agent?.id === game.p2Id);
-      if (!p1 || !p2) { endPingPongGame(table, 'missing-player'); continue; }
-      game.timer = (game.timer || 0) + dt;
       const leftBase = getFurnitureActionSpot(building, table, 'player-left') || getFurnitureActionSpot(building, table);
       const rightBase = getFurnitureActionSpot(building, table, 'player-right') || getFurnitureActionSpot(building, table);
+      if (isServerOwnedPingPongTable(table, game)) {
+        syncServerOwnedPingPongGameForRender(game, p1, p2, leftBase, rightBase);
+        continue;
+      }
+      if (!p1 || !p2) { endPingPongGame(table, 'missing-player'); continue; }
+      game.timer = (game.timer || 0) + dt;
       if (!leftBase || !rightBase) { endPingPongGame(table, 'missing-spot'); continue; }
       if (game.phase === 'approach') {
-        const d1 = Math.hypot((p1.x || 0) - leftBase.apiX, (p1.y || 0) - leftBase.apiZ);
-        const d2 = Math.hypot((p2.x || 0) - rightBase.apiX, (p2.y || 0) - rightBase.apiZ);
-        const p1Ready = p1._idleActivity?.kind === 'pingpong-left' && p1._idleActivity?.phase === 'ready' && d1 <= 6;
-        const p2Ready = p2._idleActivity?.kind === 'pingpong-right' && p2._idleActivity?.phase === 'ready' && d2 <= 6;
+        const p1Ready = isPingPongPlayerReadyForTable(p1, 'left', leftBase);
+        const p2Ready = isPingPongPlayerReadyForTable(p2, 'right', rightBase);
         const bothPlayersPhysicallyPresent = p1Ready && p2Ready && p1._group3d && p2._group3d;
         if (bothPlayersPhysicallyPresent) {
           game.phase = 'playing';
@@ -56992,13 +57669,13 @@ function updatePingPongGames(dt = 0) {
           for (const [agent, spot] of [[p1, leftBase], [p2, rightBase]]) {
             agent._idleActivity.phase = 'active';
             agent._idleActivity.startedAt = performance.now();
-            agent._idleActivity.endsAt = performance.now() + (agent._idleActivity.stayMs || 24000);
+            agent._idleActivity.endsAt = performance.now() + (agent._idleActivity.stayMs || PING_PONG_MATCH_STAY_MS);
             agent.x = spot.apiX;
             agent.y = spot.apiZ;
             holdPingPongRuntimePosition(agent, spot);
             if (agent._group3d) agent._group3d.rotation.y = spot.faceAngle;
           }
-        } else if (game.timer > 60) {
+        } else if (game.timer > PING_PONG_ORPHAN_READY_TIMEOUT_SECONDS) {
           endPingPongGame(table, 'approach-timeout');
         }
         continue;
@@ -57029,8 +57706,12 @@ function updatePingPongGames(dt = 0) {
         game.p2TrackZ = Math.max(-0.42, Math.min(0.42, game.p2TrackZ || 0));
         const p1Pos = getPingPongLocalSpot(building, table, -1.82, game.p1TrackZ);
         const p2Pos = getPingPongLocalSpot(building, table, 1.82, game.p2TrackZ);
-        for (const [agent, pos, spot, trackZ] of [[p1, p1Pos, leftBase, game.p1TrackZ], [p2, p2Pos, rightBase, game.p2TrackZ]]) {
-          agent.x = pos.apiX;
+	        for (const [agent, pos, spot, trackZ] of [[p1, p1Pos, leftBase, game.p1TrackZ], [p2, p2Pos, rightBase, game.p2TrackZ]]) {
+	          if (agent._idleActivity && String(agent._idleActivity.kind || '').startsWith('pingpong-')) {
+	            agent._idleActivity.phase = 'active';
+	            agent._idleActivity.animationId = 'play-pingpong';
+	          }
+	          agent.x = pos.apiX;
           agent.y = pos.apiZ;
           agent._pingPongTrackZ = trackZ;
           agent._pingPongBallZ = game.ballZ || 0;
@@ -57046,15 +57727,15 @@ function updatePingPongGames(dt = 0) {
           ensureVisiblePingPongPaddle(agent, paddleColor, agent === p1 ? 'left' : 'right');
         }
         const scorePoint = (winner, loser, reason) => {
-          if (winner === 'p1') game.p1Score = Math.min(Number(game.targetScore || 5), (game.p1Score || 0) + 1);
-          else game.p2Score = Math.min(Number(game.targetScore || 5), (game.p2Score || 0) + 1);
+          if (winner === 'p1') game.p1Score = Math.min(Number(game.targetScore || PING_PONG_MATCH_TARGET_SCORE), (game.p1Score || 0) + 1);
+          else game.p2Score = Math.min(Number(game.targetScore || PING_PONG_MATCH_TARGET_SCORE), (game.p2Score || 0) + 1);
           game.lastPoint = { winner, loser, reason, atMs: performance.now() };
           game.nextServe = loser;
           resetPingPongBallForServe(game);
           p1._pingPongSwingPulse = winner === 'p1' ? performance.now() : p1._pingPongSwingPulse;
           p2._pingPongSwingPulse = winner === 'p2' ? performance.now() : p2._pingPongSwingPulse;
           table.activeUse = { ...(table.activeUse || {}), state: 'playing', lastPoint: `${winner} scored: ${reason}`, lastScore: `${game.p1Score || 0}-${game.p2Score || 0}` };
-          if ((game.p1Score || 0) >= (game.targetScore || 5) || (game.p2Score || 0) >= (game.targetScore || 5)) {
+          if ((game.p1Score || 0) >= (game.targetScore || PING_PONG_MATCH_TARGET_SCORE) || (game.p2Score || 0) >= (game.targetScore || PING_PONG_MATCH_TARGET_SCORE)) {
             game.phase = 'result';
             game.timer = 0;
             table.activeUse = { ...(table.activeUse || {}), state: 'result', winner, lastScore: `${game.p1Score || 0}-${game.p2Score || 0}` };
@@ -57095,12 +57776,124 @@ function updatePingPongGames(dt = 0) {
             : ((game.p1Score || 0) > (game.p2Score || 0) ? 'p1' : 'p2');
           table.activeUse = { ...(table.activeUse || {}), state: 'result', winner, lastScore: `${game.p1Score || 0}-${game.p2Score || 0}` };
         }
-      } else if (game.phase === 'result' && game.timer > 2.8) {
+      } else if (game.phase === 'result' && game.timer > PING_PONG_RESULT_HOLD_SECONDS) {
         endPingPongGame(table, 'complete');
       }
     }
   }
   updatePingPongGameMeshes();
+}
+
+if (typeof window !== 'undefined') {
+  window.__verifyPingPongRuntimeAdoption = () => {
+    const tempBuildingId = 'verify-pingpong-runtime-adoption-building';
+    const tempBuilding = {
+      id: tempBuildingId,
+      type: 'lounge',
+      x: 0,
+      z: 0,
+      widthTiles: 24,
+      heightTiles: 18,
+      activeFloor: 1,
+      interior: {
+        furniture: [{ id: 'verify-pingpong-table', type: 'pingpong', catalogId: 'pingpong', x: 8, z: 7, buildingFloor: 1 }],
+      },
+    };
+    const table = tempBuilding.interior.furniture[0];
+    const previousBuilding = buildingsMap.get(tempBuildingId) || null;
+    const hadBuilding = buildingsMap.has(tempBuildingId);
+    const savedAgents = agentsList;
+    const baseObjectKey = getAgentRuntimeFurnitureObjectKey(tempBuildingId, 0, 'pingpong');
+    const makeGroup = () => ({ rotation: { y: 0 }, userData: {}, getObjectByName: () => null, remove: () => {} });
+    const makeAgent = (id, side, spot) => {
+      const slotId = `player-${side}`;
+      const objectKey = getPingPongPlayerRuntimeObjectKey(baseObjectKey, slotId);
+      const activity = {
+        kind: `pingpong-${side}`,
+        phase: 'ready',
+        source: 'verify-server-runtime-adoption',
+        objectKey,
+        baseObjectKey,
+        objectType: 'pingpong',
+        furnitureType: 'pingpong',
+        actionId: 'life.playPingPong',
+        spotId: slotId,
+        slotId,
+        activeUseSlotId: slotId,
+        pingPongSide: side,
+        paddleColor: pingPongPaddleColorForSide(side),
+        stayMs: PING_PONG_MATCH_STAY_MS,
+      };
+      const target = {
+        x: spot.apiX,
+        y: spot.apiZ,
+        floor: spot.floor,
+        buildingId: tempBuildingId,
+        furnitureIndex: 0,
+        objectType: 'pingpong',
+        objectKey,
+        baseObjectKey,
+        actionId: 'life.playPingPong',
+        spotId: slotId,
+        slotId,
+      };
+      return {
+        id,
+        name: id,
+        status: 'idle',
+        x: spot.apiX,
+        y: spot.apiZ,
+        _floor: spot.floor || 1,
+        _targetFloor: spot.floor || 1,
+        _group3d: makeGroup(),
+        _idleActivity: activity,
+        _runtimeVisualState: { activityActive: true, activityKind: `pingpong-${side}`, activity, carrying: true },
+        _runtimeSnapshot: { state: 'using', target, visualState: { activity } },
+      };
+    };
+    let adopted = false;
+    try {
+      buildingsMap.set(tempBuildingId, tempBuilding);
+      const leftSpot = getFurnitureActionSpot(tempBuilding, table, 'player-left') || getFurnitureActionSpot(tempBuilding, table);
+      const rightSpot = getFurnitureActionSpot(tempBuilding, table, 'player-right') || getFurnitureActionSpot(tempBuilding, table);
+      agentsList = [makeAgent('verify-pingpong-left', 'left', leftSpot), makeAgent('verify-pingpong-right', 'right', rightSpot)];
+      adopted = adoptRuntimePingPongGameForTable(tempBuilding, table, 0);
+      updatePingPongGames(0.016);
+      const game = table.pingPongGame || null;
+      if (game) {
+        game.servePauseMs = 0;
+        game.ballX = 0;
+        game.ballZ = 0.35;
+        game.ballVX = 0.22;
+        game.ballVZ = 0.04;
+        updatePingPongGames(0.25);
+      }
+      const playersTrackingBall = agentsList.every(agent => Number.isFinite(Number(agent._pingPongTrackZ)) && Number.isFinite(Number(agent._pingPongBallZ)));
+      return {
+        ok: Boolean(adopted && game?.phase === 'playing' && game?.targetScore === PING_PONG_MATCH_TARGET_SCORE && game?.maxPlayMs === PING_PONG_MATCH_MAX_MS && playersTrackingBall && Number.isFinite(Number(game.ballX)) && Number.isFinite(Number(game.ballZ)) && agentsList.every(agent => getAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER))),
+        adopted,
+        phase: game?.phase || null,
+        source: game?.source || null,
+        targetScore: game?.targetScore || null,
+        maxPlayMs: game?.maxPlayMs || null,
+        playersTrackingBall,
+        ball: game ? { x: Number(game.ballX || 0), z: Number(game.ballZ || 0), vx: Number(game.ballVX || 0), vz: Number(game.ballVZ || 0) } : null,
+        players: agentsList.map(agent => ({
+          id: agent.id,
+          activity: agent._idleActivity?.kind || null,
+          phase: agent._idleActivity?.phase || null,
+          side: agent._pingPongSide || null,
+          paddleColor: agent._pingPongPaddleColor || null,
+          runtimeOwner: getAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER)?.runtimePositionOwner || '',
+        })),
+      };
+    } finally {
+      agentsList = savedAgents;
+      if (hadBuilding) buildingsMap.set(tempBuildingId, previousBuilding);
+      else buildingsMap.delete(tempBuildingId);
+      table.pingPongGame = null;
+    }
+  };
 }
 
 // Pool Table — one stationary recreation/social asset with integrated rail, pockets, balls, and play surface details.

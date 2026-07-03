@@ -3,36 +3,49 @@
 // through intermediate waypoints so corner ticks keep near-constant speed
 // (M1.5a, 8590 parity). Pattern-matches scripts/verify-route-watchdog.mjs.
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeServerRuntimeStep } from '../src/realtime/agent-runtime-room.mjs';
 
 const dataDir = mkdtempSync(join(tmpdir(), 'vw-corner-'));
+mkdirSync(join(dataDir, 'buildings'), { recursive: true });
+writeFileSync(join(dataDir, 'buildings', 'corner-office.json'), JSON.stringify({
+  id: 'corner-office',
+  type: 'office',
+  worldX: 0,
+  worldY: 0,
+  widthTiles: 10,
+  heightTiles: 10,
+  interior: { walls: [], furniture: [] },
+}, null, 2));
+
 const TICK_MS = 250;
 const SPEED = 18; // units/sec -> 4.5 units per tick
 const ARRIVAL = 5;
 
-// L-shaped exterior pathfinder route: (0,0) -> (0,30) -> (30,30)
-const finalTarget = { x: 30, y: 30, floor: 1, buildingId: '' };
+// L-shaped pathfinder route inside an open building:
+// (40,40) -> (40,70) -> (70,70). The route context keeps the static
+// collision guard active while this test focuses on corner speed.
+const finalTarget = { x: 70, y: 70, floor: 1, buildingId: 'corner-office' };
 const routePoints = [
-  { x: 0, y: 0, floor: 1 },
-  { x: 0, y: 30, floor: 1 },
-  { x: 30, y: 30, floor: 1 },
+  { x: 40, y: 40, floor: 1, buildingId: 'corner-office' },
+  { x: 40, y: 70, floor: 1, buildingId: 'corner-office' },
+  { x: 70, y: 70, floor: 1, buildingId: 'corner-office' },
 ];
 
 let agent = {
-  x: 0,
-  y: 0,
+  x: 40,
+  y: 40,
   floor: 1,
-  buildingId: '',
+  buildingId: 'corner-office',
   heading: 0,
   state: 'routing',
   visualState: {
     runtimeRoute: {
       active: true,
-      source: 'dynamic-exterior-routing.js',
-      reason: 'exterior-route',
+      source: 'dynamic-interior-routing.js',
+      reason: 'interior-route',
       routeIndex: 1,
       route: routePoints,
       routePoints,

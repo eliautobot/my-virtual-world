@@ -40,6 +40,10 @@ export const DYNAMIC_EXTERIOR_ROUTING = {
   stuckAvoidRadiusWorld: 0.6,
   stuckAvoidRadiusGrowthWorld: 0.22,
   stuckAvoidMaxRadiusWorld: 1.5,
+  dynamicAvoidMaxZones: 8,
+  dynamicAvoidRadiusWorld: 0.7875,
+  dynamicAvoidHardRadiusWorld: 0.39,
+  dynamicAvoidCost: 7.5,
   vehicleYieldRadiusWorld: 4.5,
   vehicleYieldApproachDot: 0.12,
   roadEntryHoldApi: 4,
@@ -232,11 +236,39 @@ function worldPointToGridCell(grid, worldX, worldZ) {
   return { x, z };
 }
 
+function normalizePlanDynamicAvoidZones(options = {}, cfg = DYNAMIC_EXTERIOR_ROUTING) {
+  const rawZones = Array.isArray(options?.dynamicAvoidZones) ? options.dynamicAvoidZones : [];
+  const maxZones = Math.max(0, Math.min(12, Math.round(Number(cfg.dynamicAvoidMaxZones) || 8)));
+  if (!rawZones.length || maxZones <= 0) return [];
+  return rawZones
+    .map((zone) => {
+      const apiX = Number(zone?.x);
+      const apiY = Number(zone?.y ?? zone?.z);
+      if (!Number.isFinite(apiX) || !Number.isFinite(apiY)) return null;
+      return {
+        x: apiToWorld(apiX),
+        z: apiToWorld(apiY),
+        radiusWorld: Math.max(
+          Number(cfg.gridCellSizeWorld) || 0.58,
+          Number(zone?.radiusWorld) || Number(cfg.dynamicAvoidRadiusWorld) || 0.7875,
+        ),
+        hardRadiusWorld: Math.max(0, Math.min(
+          Number(zone?.radiusWorld) || Number(cfg.dynamicAvoidRadiusWorld) || 0.7875,
+          Number(zone?.hardRadiusWorld) || Number(cfg.dynamicAvoidHardRadiusWorld) || 0.39,
+        )),
+        weight: Math.max(0, Number(zone?.weight) || Number(cfg.dynamicAvoidCost) || 7.5),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, maxZones);
+}
+
 function buildOutdoorGrid(startApi, endApi, cfg, agentId = null, options = {}) {
   const startWorld = { x: apiToWorld(startApi.x), z: apiToWorld(startApi.y) };
   const endWorld = { x: apiToWorld(endApi.x), z: apiToWorld(endApi.y) };
   const avoidPointWorld = options.avoidPoint ? { x: apiToWorld(options.avoidPoint.x), z: apiToWorld(options.avoidPoint.y) } : null;
   const avoidRadiusWorld = Math.max(0, Number(options.avoidRadiusWorld) || 0);
+  const dynamicAvoidZones = normalizePlanDynamicAvoidZones(options, cfg);
   const distWorld = Math.hypot(endWorld.x - startWorld.x, endWorld.z - startWorld.z);
   let cellSize = Math.max(0.45, Number(cfg.gridCellSizeWorld) || 0.75);
   const margin = Math.max(Number(cfg.gridMarginWorld) || 10, distWorld * 0.16);
@@ -278,6 +310,22 @@ function buildOutdoorGrid(startApi, endApi, cfg, agentId = null, options = {}) {
     ignoreHandles,
     allowRoadFallback: options.allowRoadFallback === true,
     allowSoftFallback: options.allowSoftFallback === true,
+    hasDynamicAvoid: dynamicAvoidZones.length > 0,
+    dynamicAvoidCost: (x, z) => {
+      if (!dynamicAvoidZones.length) return 0;
+      const center = grid.center(x, z);
+      let penalty = 0;
+      for (const zone of dynamicAvoidZones) {
+        const nearStart = Math.hypot(center.x - startWorld.x, center.z - startWorld.z) <= Math.max(grid.cellSize * 1.1, zone.radiusWorld * 0.45);
+        const nearEnd = Math.hypot(center.x - endWorld.x, center.z - endWorld.z) <= Math.max(grid.cellSize * 1.1, zone.radiusWorld * 0.45);
+        if (nearStart || nearEnd) continue;
+        const dist = Math.hypot(center.x - zone.x, center.z - zone.z);
+        if (dist >= zone.radiusWorld) continue;
+        const pressure = 1 - (dist / zone.radiusWorld);
+        penalty += zone.weight * pressure * pressure;
+      }
+      return penalty;
+    },
   };
 
   for (let z = 0; z < rows; z++) {
@@ -296,6 +344,18 @@ function buildOutdoorGrid(startApi, endApi, cfg, agentId = null, options = {}) {
         const nearStart = Math.hypot(center.x - startWorld.x, center.z - startWorld.z) <= Math.max(grid.cellSize * 1.1, avoidRadiusWorld * 0.55);
         const nearEnd = Math.hypot(center.x - endWorld.x, center.z - endWorld.z) <= Math.max(grid.cellSize * 1.1, avoidRadiusWorld * 0.55);
         if (avoidDist < avoidRadiusWorld && !nearStart && !nearEnd) blocked[idx] = 1;
+      }
+      if (!blocked[idx] && dynamicAvoidZones.length) {
+        for (const zone of dynamicAvoidZones) {
+          if (zone.hardRadiusWorld <= 0) continue;
+          const nearStart = Math.hypot(center.x - startWorld.x, center.z - startWorld.z) <= Math.max(grid.cellSize * 1.1, zone.hardRadiusWorld * 0.75);
+          const nearEnd = Math.hypot(center.x - endWorld.x, center.z - endWorld.z) <= Math.max(grid.cellSize * 1.1, zone.hardRadiusWorld * 0.75);
+          if (nearStart || nearEnd) continue;
+          if (Math.hypot(center.x - zone.x, center.z - zone.z) < zone.hardRadiusWorld) {
+            blocked[idx] = 1;
+            break;
+          }
+        }
       }
     }
   }
@@ -766,7 +826,8 @@ function runOutdoorGridSearch(start, end, startNetwork, endNetwork, cfg, agentId
       const terrainCost = getSurfaceTraversalCost(nextKind);
       if (!Number.isFinite(terrainCost)) continue;
       const stepCost = (dx === 0 || dz === 0) ? 1 : Math.SQRT2;
-      const tentativeG = bestNode.g + stepCost * terrainCost + surfaceTransitionPenalty;
+      const avoidPenalty = typeof grid.dynamicAvoidCost === 'function' ? grid.dynamicAvoidCost(nx, nz) : 0;
+      const tentativeG = bestNode.g + stepCost * terrainCost + surfaceTransitionPenalty + avoidPenalty;
       const existing = open.get(nKey);
       if (!existing || tentativeG < existing.g) {
         cameFrom.set(nKey, bestKey);
@@ -825,8 +886,9 @@ function planRoute(startApi, targetApi, cfg, agentId = null, planOptions = {}) {
   (core?.points || []).slice(1).forEach((pt) => points.push(clonePoint2(pt)));
   endTransition.anchorsAfter.forEach((pt) => points.push(clonePoint2(pt)));
   const simplified = simplifyPointPath(points);
-  const stringPulled = stringPullRoute(simplified, cfg, false, core?.grid || null, { ignoreHandles: core?.grid?.ignoreHandles || [] });
-  const rounded = roundRouteCorners(stringPulled, cfg, false, core?.grid || null, { ignoreHandles: core?.grid?.ignoreHandles || [] });
+  const routeOptions = { ignoreHandles: core?.grid?.ignoreHandles || [] };
+  const stringPulled = stringPullRoute(simplified, cfg, false, core?.grid || null, routeOptions);
+  const rounded = roundRouteCorners(stringPulled, cfg, false, core?.grid || null, routeOptions);
   const routePoints = dedupePoints(subdivideRoutePoints(rounded, Math.max(4, Number(cfg.waypointReachApi) || 6)), 0.5);
   return {
     rawPoints: simplified,
@@ -1179,6 +1241,19 @@ export function updateDynamicExteriorRouting(agent, target, dtMs = 16, options =
   const state = ensureAgentState(agent.id);
   const targetKey = makeTargetKey(target);
   const goalDistance = pointDistance(agent, target);
+  const recoveryAvoidPoint = cloneRuntimeRoutePoint(options.recoveryAvoidPoint || options.blockedPoint || null);
+  const dynamicAvoidZones = Array.isArray(options.dynamicAvoidZones) ? options.dynamicAvoidZones : [];
+  const forcedRecoveryReason = options.forceRecoveryReplan === true && recoveryAvoidPoint
+    ? String(options.recoveryReason || options.blockedReason || 'server-static-recovery')
+    : null;
+  if (recoveryAvoidPoint) {
+    const blockageKey = `${forcedRecoveryReason || 'server-recovery'}:${Number(recoveryAvoidPoint.x || 0).toFixed(1)}:${Number(recoveryAvoidPoint.y || 0).toFixed(1)}`;
+    state.blockedReasonMs = state.blockedReasonKey === blockageKey ? state.blockedReasonMs + dtMs : dtMs;
+    state.blockedReasonKey = blockageKey;
+    state.blockedPoint = clonePoint2(recoveryAvoidPoint);
+    state.blockedReason = forcedRecoveryReason || String(options.blockedReason || 'server-static-recovery');
+    if (forcedRecoveryReason) state.replanSettleUntilMs = 0;
+  }
   const progressWindowMs = Math.max(120, Number(cfg.progressSampleWindowMs) || 280);
   const progressSampleMinGainApi = Math.max(0.15, Number(cfg.progressSampleMinGainApi) || 0.8);
   if (state.progressWindowStartDistance == null) {
@@ -1215,7 +1290,7 @@ export function updateDynamicExteriorRouting(agent, target, dtMs = 16, options =
   }
   state.lastMotionSample = currentPos;
 
-  const replanReason = shouldReplan(state, nowMs, targetKey, goalDistance, cfg);
+  const replanReason = forcedRecoveryReason || shouldReplan(state, nowMs, targetKey, goalDistance, cfg);
   if (replanReason) {
     const isRecoveryReplan = replanReason !== 'initial-route' && replanReason !== 'target-changed' && replanReason !== 'route-stale';
     if (isRecoveryReplan) {
@@ -1240,6 +1315,7 @@ export function updateDynamicExteriorRouting(agent, target, dtMs = 16, options =
     const planned = planRoute({ x: agent.x, y: agent.y }, target, cfg, agent.id, {
       avoidPoint: state.rerouteAvoidPoint,
       avoidRadiusWorld: state.rerouteAvoidRadiusWorld,
+      dynamicAvoidZones,
     });
     if (!planned?.route?.length || !planned.routeSegments?.length) {
       state.lastPlanAtMs = nowMs;
@@ -1397,6 +1473,8 @@ export function updateDynamicExteriorRouting(agent, target, dtMs = 16, options =
     stalledRouteProgressMs: state.stalledRouteProgressMs,
     blockedPoint: state.blockedPoint,
     blockedReason: state.blockedReason,
+    recoveryAvoidPoint: state.rerouteAvoidPoint,
+    recoveryAvoidRadiusWorld: state.rerouteAvoidRadiusWorld,
     waitingForTraffic: state.waitingForTraffic,
     waitPoint: state.waitPoint,
     destinationHandoff: state.destinationHandoff,
