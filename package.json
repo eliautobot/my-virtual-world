@@ -1,6 +1,6 @@
 {
   "name": "my-virtual-world",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "description": "A self-hosted 3D AI virtual world for agent harnesses like OpenClaw and Hermes.",
   "homepage": "https://myvirtualworld.ai/",
   "repository": {
@@ -25,11 +25,19 @@
   "scripts": {
     "start": "python3 src/server/server.py",
     "dev": "VW_PORT=${VW_PORT:-8590} VW_DATA_DIR=${VW_DATA_DIR:-.local-data} python3 src/server/server.py",
+    "dev:realtime": "node scripts/dev-with-realtime.mjs",
+    "realtime": "node src/realtime/server.mjs",
     "test": "npm run verify:smoke",
-    "verify:smoke": "node scripts/verify-smoke.mjs"
+    "verify:smoke": "node scripts/verify-smoke.mjs",
+    "verify:realtime": "node scripts/verify-realtime-smoke.mjs"
   },
   "dependencies": {
+    "@colyseus/core": "^0.17.44",
+    "@colyseus/schema": "^4.0.26",
+    "@colyseus/sdk": "^0.17.43",
+    "@colyseus/ws-transport": "^0.17.13",
     "@dimforge/rapier3d-compat": "^0.19.3",
+    "express": "^5.2.1",
     "three": "^0.183.2",
     "yuka": "^0.7.8"
   }

@@ -84,6 +84,8 @@ const forbiddenStagingReferences = [
   ['my-vw-github-', stagingPort].join(''),
   [stagingPort, '-live-agent-loop'].join(''),
   ['Living in My Virtual World ', stagingPort].join(''),
+  'pr59-server-pingpong',
+  '/tmp/8590-main3d.js',
 ];
 const productReferenceFiles = [
   'README.md',
@@ -108,14 +110,22 @@ assert(dockerfile.includes('VW_LICENSE_STORE_ID=321733'), 'Dockerfile should def
 assert(dockerfile.includes('VW_LICENSE_PRODUCT_IDS=1140366'), 'Dockerfile should default to the My Virtual World Lemon Squeezy product ID');
 
 const dockerCompose = read('docker-compose.yml');
+const envExample = read('.env.example');
 assert(!/(^|[^A-Za-z0-9_])\/home\/(?!vw\b|kasm-user\b)[A-Za-z0-9._-]+/i.test(dockerCompose), 'docker-compose.yml must not contain host home paths');
 assert(!/\b100\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(dockerCompose), 'docker-compose.yml must not contain private tailnet addresses');
 assert(dockerCompose.includes('${VW_HOST_PORT:-8590}:${VW_PORT:-8590}'), 'docker-compose.yml should support a configurable Docker host port');
-assert(read('.env.example').includes('VW_HOST_PORT=8590'), '.env.example should document the Docker host port');
+assert(envExample.includes('VW_HOST_PORT=8590'), '.env.example should document the Docker host port');
+assert(dockerCompose.includes('virtual-world-realtime:'), 'docker-compose.yml should start the realtime sidecar by default');
+assert(dockerCompose.includes('target: realtime'), 'docker-compose.yml realtime service should build the Docker realtime target');
+assert(dockerCompose.includes('${VW_REALTIME_HOST_PORT:-8591}:${VW_REALTIME_PORT:-8591}'), 'docker-compose.yml should expose a configurable private realtime sidecar port');
+assert(dockerCompose.includes('VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-true}'), 'docker-compose.yml should enable realtime for the default Docker install');
+assert(dockerCompose.includes('VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-ws://127.0.0.1:8591}'), 'docker-compose.yml should provide a browser-reachable realtime URL by default');
+assert(envExample.includes('VW_REALTIME_HOST_PORT=8591'), '.env.example should document the realtime Docker host port');
+assert(envExample.includes('VW_REALTIME_ENABLED=true'), '.env.example should enable realtime for the default Docker install');
 assert(dockerCompose.includes('VW_LICENSE_STORE_ID=${VW_LICENSE_STORE_ID:-321733}'), 'docker-compose.yml should pass the My Virtual World Lemon Squeezy store ID');
 assert(dockerCompose.includes('VW_LICENSE_PRODUCT_IDS=${VW_LICENSE_PRODUCT_IDS:-1140366}'), 'docker-compose.yml should pass the My Virtual World Lemon Squeezy product ID');
-assert(read('.env.example').includes('VW_LICENSE_STORE_ID=321733'), '.env.example should document the My Virtual World Lemon Squeezy store ID');
-assert(read('.env.example').includes('VW_LICENSE_PRODUCT_IDS=1140366'), '.env.example should document the My Virtual World Lemon Squeezy product ID');
+assert(envExample.includes('VW_LICENSE_STORE_ID=321733'), '.env.example should document the My Virtual World Lemon Squeezy store ID');
+assert(envExample.includes('VW_LICENSE_PRODUCT_IDS=1140366'), '.env.example should document the My Virtual World Lemon Squeezy product ID');
 
 const gitignore = read('.gitignore');
 for (const token of ['.env', 'node_modules/', '.tmp-data/', 'backups/', 'memory/', '*.py[cod]', '__pycache__/']) {
@@ -144,6 +154,11 @@ const jsSyntaxTargets = [
   'src/client/js/dynamic-exterior-routing.js',
   'src/client/js/physics.js',
   'src/client/js/vo-engine.js',
+  'src/client/js/agent-runtime-client.mjs',
+  'src/realtime/agent-runtime-room.mjs',
+  'src/realtime/server.mjs',
+  'scripts/dev-with-realtime.mjs',
+  'scripts/verify-realtime-smoke.mjs',
 ];
 
 for (const path of jsSyntaxTargets) {
@@ -176,9 +191,14 @@ const indexHtml = read('src/client/index.html');
 const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
+const agentRuntimeClientJs = read('src/client/js/agent-runtime-client.mjs');
+const agentRuntimeRoomJs = read('src/realtime/agent-runtime-room.mjs');
+const realtimeServerJs = read('src/realtime/server.mjs');
 const chatJs = read('src/client/js/chat.js');
 const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
+const dynamicInteriorRoutingJs = read('src/client/js/dynamic-interior-routing.js');
+const dynamicExteriorRoutingJs = read('src/client/js/dynamic-exterior-routing.js');
 const uiCss = read('src/client/css/ui-redesign.css');
 
 for (const token of [
@@ -274,7 +294,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260617-road-draw-r26',
+  'js/main3d.js?v=20260703-server-runtime-r1',
   'js/chat.js?v=20260617-codex-context-r2',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
@@ -363,6 +383,169 @@ for (const token of [
 }
 
 for (const token of [
+  "PING_PONG_RUNTIME_POSITION_OWNER = 'pingpong-game-loop'",
+  'updatePingPongGames(dt);\n    updateAgentAnimations(dt);',
+  'function holdPingPongRuntimePosition(agent, pose = {})',
+  'stampAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER',
+  "releaseRouteReason: 'pingpong-runtime-position-owner'",
+  'ping-pong match routes with explicit table runtime ownership',
+  "releaseAgentIntent(admittedAgent, 'route-failed'",
+  'function getPingPongPlayerRuntimeObjectKey(baseObjectKey = \'\', slotId = \'\')',
+  'reservationId = `reservation:${baseObjectKey}:${actionId}:${Date.now()}`',
+  'plan.objectKey = getPingPongPlayerRuntimeObjectKey(baseObjectKey, plan.slotId)',
+  'baseObjectKey,',
+  'requestPingPongRuntimeObjectUseRelease',
+  'isPingPongPlayerReadyForTable',
+  'adoptRuntimePingPongGameForTable(building, table, index)',
+  'shouldAdoptRuntimePingPongGameForTable(building, table, index)',
+  'isServerOwnedPingPongTable(table, game)',
+  'syncServerOwnedPingPongGameForRender(game, p1, p2, leftBase, rightBase)',
+  "String(objectState.owner || '').trim() !== 'server-pingpong-runtime'",
+  'function holdAgentForPingPongRuntimePosition(agent, dt = 0)',
+  'agent._runtimePingPongPositionOverride = true',
+  'PING_PONG_MATCH_STAY_MS = 24000',
+  'PING_PONG_MATCH_TARGET_SCORE = 5',
+  'PING_PONG_RESULT_HOLD_SECONDS = 0.1',
+  'PING_PONG_ORPHAN_READY_TIMEOUT_SECONDS = 60',
+  'playersTrackingBall',
+  'window.__verifyPingPongRuntimeAdoption',
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing ping-pong runtime ownership token: ${token}`);
+}
+
+assert(
+  agentCharactersJs.includes('right-hand paddle follows the ball height/side and snaps on hit') &&
+    agentCharactersJs.includes('hitSwing * 0.95'),
+  'agent-characters.js ping-pong animation must keep the 8595 paddle hit',
+);
+assert(
+  agentRuntimeRoomJs.includes("pingpong: Object.freeze({ kind: 'pingpong-play', spotId: 'player-left', animationId: 'play-pingpong', poseKind: 'stand-use', stayMs: [24000, 24000] })"),
+  'agent-runtime-room.mjs ping-pong dwell must stay on the 8595-style match window',
+);
+assert(
+  agentRuntimeRoomJs.includes('isServerScriptedMultiSlotPlayTarget(target) ||'),
+  'agent-runtime-room.mjs ping-pong release must route players away from play slots',
+);
+for (const token of [
+  'findServerScriptedPingPongPartnerTarget(targets, target)',
+  'serverScriptedPingPongPartnerCandidates(agentId, target, idleAgentIds, targets, nowMs)',
+  'tryStartServerScriptedPingPongPartner(agentId, target, idleAgentIds, targets, nowMs, now, { source',
+  'serverScriptedPingPongPartnerClaimed(agentId, target, targets, nowMs)',
+  "'pingpong-no-partner'",
+  'if (isPingPongObjectType(item.type)) continue;',
+  "'pingpong_server_runtime_required'",
+  'sweepLegacyServerScriptedPingPongObjects(nowMs, now)',
+  "'legacy-scripted-pingpong-cleared'",
+]) {
+  assert(agentRuntimeRoomJs.includes(token), `agent-runtime-room.mjs missing ping-pong pairing token: ${token}`);
+}
+assert(
+  !agentRuntimeRoomJs.includes("play: Object.freeze(['pingpong'"),
+  'agent-runtime-room.mjs generic scripted-object play pool must not claim ping-pong; dedicated server-pingpong-runtime owns it',
+);
+
+for (const token of [
+  'AGENT_RUNTIME_TRAFFIC_TOPOLOGY_OWNER_TTL_MS = 30000',
+  'fresh-runtime-topology-owned-by-another-client',
+  'inferExplicitObjectActionMetadataFromRouteTarget',
+  "TAG_GAME_RUNTIME_POSITION_OWNER = 'tag-game-loop'",
+  "owner: 'tag-game'",
+  'function setTagGameRuntimeTarget(agent, target = null)',
+  'clearAgentRuntimeMemberMovement(agent, TAG_GAME_RUNTIME_POSITION_OWNER',
+  "LIVE_STATUS_RUNTIME_POSITION_OWNER = 'live-status-dock'",
+  'function holdLiveStatusRuntimeObjectDock(agent, workTarget = null',
+  'stampAgentRuntimeMember(agent, LIVE_STATUS_RUNTIME_POSITION_OWNER',
+  'function isRuntimeExecutorPageVisible()',
+  "'runtime-hidden-page-observer'",
+  "'server-authoritative-runtime-observer'",
+  'isServerAuthoritativeAgentRuntimeObserver() ||',
+  'SERVER_AUTHORITATIVE_LIVE_ACTION_RUNTIME',
+  "'runtime-route-foreign-owner'",
+  'function abandonAgentRuntimeLocalRoute(agent',
+  "'stale-snapshot-ignored'",
+  "AGENT_RUNTIME_MEMBER_SCHEMA = 'agent-runtime-member/v1'",
+  'function makeAgentRuntimeMemberRecord(agent, runtimePositionOwner = \'\', options = {})',
+  'runtimeMemberSchema: AGENT_RUNTIME_MEMBER_SCHEMA',
+  'runtimeMember,',
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing runtime conflict containment token: ${token}`);
+}
+
+for (const token of [
+  'WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000',
+  'DEFAULT_WORLD_RUNTIME_TICK_MS = 100',
+  'WORLD_RUNTIME_STEP_MAX_MS = 250',
+  'WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000',
+  'RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000',
+  'worldRuntimeTickContext',
+  'runtime.tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS',
+  'this.patchRate = DEFAULT_WORLD_RUNTIME_TICK_MS',
+  'tickSeq: plain.tickSeq',
+  'simTimeMs: plain.simTimeMs',
+  'tickMs: plain.tickMs',
+  'runWithDeferredRuntimeDocumentWrites',
+  'broadcastRuntimeState',
+  'runtime:state',
+  'world-topology-skipped-owner-fresh',
+  'topologyOwnerFresh',
+  "LIVE_ACTION_RUNTIME_OWNER = 'server-live-action-runtime'",
+  "LIVE_STATUS_RUNTIME_OWNER = 'server-live-status-runtime'",
+  'SERVER_WORLD_OBJECT_RUNTIME_OWNERS = new Set([SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER, LIVE_STATUS_RUNTIME_OWNER, SERVER_PINGPONG_RUNTIME_OWNER])',
+  'SERVER_MANAGED_ROUTE_LEASE_OWNERS',
+  "SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER = 'server-scripted-object-runtime'",
+  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3',
+  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 12',
+  'activeRouteStepLimit',
+  'SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_IDLE_CHECKS_PER_TICK = 6',
+  'SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS = Object.freeze([8000, 20000])',
+  'SERVER_SCRIPTED_IDLE_RETRY_DELAY_MS = Object.freeze([3000, 8000])',
+  'SERVER_SCRIPTED_IDLE_OBJECT_COOLDOWN_MS = 240000',
+  'SERVER_SCRIPTED_IDLE_CATEGORY_WEIGHTS',
+  'normalizeRuntimeAngleRadians',
+  'authoredRuntimeFaceAngle',
+  'serverIdleCategoryOrder',
+  'makeServerRuntimeWanderTarget',
+  'SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG',
+  'listLiveStatusMeetingTargets',
+  'service-queue-wait',
+  "SERVER_WORLD_TOPOLOGY_OWNER = 'server-world-topology-runtime'",
+  'runtime:objectUseRequest',
+  'tickScriptedObjectRuntime',
+  'selectCachedServerRuntimeRouteStep',
+  'server-static-step-',
+  'SERVER_RUNTIME_AGENT_AVOID_RADIUS',
+  'SERVER_RUNTIME_AGENT_AVOID_PUSH_PER_TICK',
+  'serverRuntimeCrowdAgents',
+  'applyServerRuntimeCollisionGuards',
+  'isDynamicInteriorRouteSegmentClear',
+  'isDynamicExteriorRouteSegmentClear',
+  'makeServerRuntimeStep',
+  'dynamic-interior-routing.js',
+  'configureDynamicExteriorRouting',
+  'dynamic-exterior-routing.js',
+  'server-door-transition',
+  'clearDynamicExteriorRoutingForAgent',
+  'server-world-topology-seeded',
+  'world-topology-skipped-server-authoritative',
+  'this.autoDispose = false',
+  'tickLiveActionRuntime',
+  'writeServerBuiltHomeIfNeeded',
+]) {
+  assert(agentRuntimeRoomJs.includes(token), `agent-runtime-room.mjs missing topology owner guard token: ${token}`);
+}
+assert(!agentRuntimeRoomJs.includes('Math.atan2(dx, dy) * 180 / Math.PI'), 'server runtime movement heading must stay in radians');
+assert(!agentRuntimeRoomJs.includes('Number(target.faceAngle) * 180 / Math.PI'), 'server runtime target faceAngle must stay in radians');
+for (const token of [
+  'matchMaker.createRoom',
+  'runtimeRoomId',
+  'prewarmedAt',
+  'Access-Control-Allow-Origin',
+  "req.method === 'OPTIONS'",
+]) {
+  assert(realtimeServerJs.includes(token), `realtime server missing authoritative room prewarm token: ${token}`);
+}
+
+for (const token of [
   'repair_starter_office_appliance_metadata',
   'STARTER_OFFICE_COUNTER_INDEX = 17',
   'STARTER_OFFICE_MICROWAVE_INDEX = 18',
@@ -387,6 +570,12 @@ for (const token of [
   'def start_live_agent_loop',
   'def note_live_agent_loop_world_client_activity',
   'def clear_live_agent_loop_world_client_activity',
+  'WORLD_ACTION_SERVER_RUNTIME_OWNER = "agent-runtime-room.mjs#tickLiveActionRuntime"',
+  '"serverRuntimeAuthority": True',
+  '"serverExecutor": WORLD_ACTION_SERVER_RUNTIME_OWNER',
+  'client_visibility == "hidden"',
+  'world_client_claimed',
+  'current_session != incoming_session',
   'def _live_agent_loop_pause_status',
   'LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION = "20260614-live-mode-social-r28"',
   '_live_agent_loop_last_client_info',
@@ -527,6 +716,30 @@ for (const token of [
   assert(main3dJs.includes(token), `main3d.js missing Live Mode construction token: ${token}`);
 }
 for (const token of [
+  'VW_REALTIME_BROWSER_URL',
+  '_env_or("VW_REALTIME_URL", cfg["realtime"].get("url") or "")',
+  'realtime_url_from_env',
+  'realtime_enabled_default = True if realtime_url and realtime_url_from_env',
+  'cfg["realtime"]["enabled"] = _env_bool("VW_REALTIME_ENABLED", realtime_enabled_default)',
+]) {
+  assert(serverPy.includes(token), `server.py missing realtime browser URL token: ${token}`);
+}
+for (const token of [
+  'VW_REALTIME_BROWSER_URL=ws://127.0.0.1:8591',
+  'Browser-reachable Colyseus WebSocket URL for this self-hosted runtime',
+  'Self-Hosted Runtime Address',
+  'Keep the sidecar on a trusted machine, LAN, VPN, Tailnet, or authenticated reverse proxy',
+]) {
+  assert(`${envExample}\n${read('docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md')}`.includes(token), `realtime self-host docs missing token: ${token}`);
+}
+for (const token of [
+  'VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-ws://127.0.0.1:8591}',
+  'VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-true}',
+  'virtual-world-realtime',
+]) {
+  assert(dockerCompose.includes(token), `docker-compose.yml missing realtime env token: ${token}`);
+}
+for (const token of [
   'isAgentLiveModeScriptedSuppressed',
   'isAgentLiveModeAmbientIntent',
   'hasAgentLiveModeWorldActionControl',
@@ -549,17 +762,99 @@ for (const token of [
   "completeIdleWorldAction(printerActivity",
   'whiteboard-planning-complete',
   'printer-scanner-use-complete',
+  'AGENT_RUNTIME_POSITION_WRITER_STALE_MS',
+  'AGENT_RUNTIME_OBSERVER_BUFFER_DELAY_MS',
+  'AGENT_RUNTIME_OBSERVER_BUFFER_MAX_SNAPSHOTS',
+  'queueAgentRuntimeObserverSnapshot',
+  'getAgentRuntimeObserverBufferedFrame',
+  'updateAgentRuntimeObserverMotion',
+  'runtimeObserverBuffer',
+  'agent-runtime-visual/v1',
+  'makeAgentRuntimeVisualState',
+  'applyAgentRuntimeVisualState',
+  'visualStateHash',
+  'runtime:worldObject',
+  'requestBackendObjectUseForExplicitObjectAction',
+  'backend-runtime-object-use-requested',
+  'runtimeRoute',
+  '_movementDebugNextWaypoint',
+  'hydrateDynamicInteriorRoutingDebugFromRuntimeRoute',
+  'hydrateDynamicExteriorRoutingDebugFromRuntimeRoute',
+  'syncAgentRuntimeRoutingDebugFromRuntimeRoute',
+  '_runtimeRouteDebugLayer',
+  'writeWorldObjectState',
+  'requestObjectUse',
+  'releaseObjectUse',
+  'shouldBlockAgentRuntimeObjectAction',
+  'applyAgentRuntimeWorldObjectStatesToWorld',
+  'AGENT_RUNTIME_WORLD_OBJECT_TTL_MS',
+  'makeAgentRuntimeClientOwner',
+  'isAgentRuntimeSnapshotRemoteWriterActive',
+  '_runtimeRemoteWriterActive',
+  '__VWGetAgentRuntimeDebug',
+  'agent-runtime-client.mjs?v=20260703-server-runtime-r1',
+  'serverAuthoritativeRuntimeBlockReason',
+  'clearBrowserOwnedAgentMotionForServerRuntime',
+  'holdAgentForServerAuthoritativeRuntimeObserver',
+  'stableAgentRuntimeJitter',
+  'server-observer-grid-x',
+  'server-authoritative-runtime-connecting',
+  'runtime:worldRuntime',
+  'runtime:worldTopology',
+  'writeWorldTopology',
+  'applyAgentRuntimeTrafficLights',
+  'applyAgentRuntimeTrafficVehicles',
+  'updateRuntimeTrafficVehicles',
+  'AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS',
+  'server-authoritative-world-topology-observer',
+  'shouldPersistWorldAutosave',
+  '__VWWorldRuntimeTraffic',
+  '__VWWorldRuntimeVehicles',
 ]) {
-  assert(`${main3dJs}\n${agentCharactersJs}`.includes(token), `Live Mode head indicator missing token: ${token}`);
+  assert(`${main3dJs}\n${agentCharactersJs}\n${agentRuntimeClientJs}`.includes(token), `Live Mode head indicator missing token: ${token}`);
+}
+for (const token of [
+  'resolveRuntimeUrlForPage',
+  'isLoopbackHost',
+  'parsed.hostname = pageHost',
+  'DEFAULT_CONNECT_TIMEOUT_MS',
+  'agent runtime connect',
+  'tickSeq: raw.tickSeq',
+  'simTimeMs: raw.simTimeMs',
+  'tickMs: raw.tickMs',
+]) {
+  assert(agentRuntimeClientJs.includes(token), `agent runtime client missing URL resolution token: ${token}`);
+}
+for (const token of [
+  'DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES',
+  'VW_REALTIME_SCHEMA_BUFFER_SIZE_BYTES',
+  'Encoder.BUFFER_SIZE',
+]) {
+  assert(agentRuntimeRoomJs.includes(token), `agent runtime room missing schema buffer token: ${token}`);
+}
+for (const token of [
+  'hydrateDynamicInteriorRoutingDebugFromRuntimeRoute',
+  'runtimeDebugHydrated',
+  'isDynamicInteriorRouteSegmentClear',
+]) {
+  assert(dynamicInteriorRoutingJs.includes(token), `dynamic interior routing missing runtime debug token: ${token}`);
+}
+for (const token of [
+  'hydrateDynamicExteriorRoutingDebugFromRuntimeRoute',
+  'runtimeDebugHydrated',
+  'isDynamicExteriorRouteSegmentClear',
+]) {
+  assert(dynamicExteriorRoutingJs.includes(token), `dynamic exterior routing missing runtime debug token: ${token}`);
 }
 for (const token of [
   'data-settings-tab="live-mode"',
-  'Live Agent Mode Coming Soon',
-  'settings-live-mode-coming-soon',
-  'setting-featureAgentLiveMode" disabled',
-  'agentLiveMode: false',
+  'setting-featureAgentLiveMode',
+  'liveModeLoopStatus',
+  'liveModeAgentList',
+  'btn-saveLiveAgents',
+  'agentLiveMode: !trial && checked',
   'saveLiveModeAgents',
-  'applyLiveAgentModeComingSoonUi',
+  'applyLiveAgentModeAvailabilityUi',
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
@@ -588,10 +883,10 @@ for (const token of [
 }
 
 for (const token of [
-  'Live Agent Mode Coming Soon',
-  'Editing, Agent Browser, and SMS / Twilio are locked. Live Agent Mode is coming soon.',
+  'Enable Agent Live Mode',
+  'Editing, Agent Browser, SMS / Twilio, and Agent Live Mode are locked.',
   'applyLocks',
-  "features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:false",
+  "features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:!locked&&chk('agentLiveMode')",
 ]) {
   assert(setupHtml.includes(token), `setup.html missing demo setup token: ${token}`);
 }

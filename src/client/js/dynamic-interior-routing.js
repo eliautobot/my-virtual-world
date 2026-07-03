@@ -16,6 +16,18 @@ export const DYNAMIC_INTERIOR_ROUTING = {
   staleRouteMs: 5000,
   poorProgressMs: 900,
   progressEpsilonApi: 3,
+  rerouteRetryMs: 850,
+  recoveryReplanSettleMs: 950,
+  blockedReplanPersistMs: 420,
+  rerouteAvoidStickMs: 1800,
+  rerouteAvoidStickDistanceWorld: 0.85,
+  stuckAvoidRadiusWorld: 0.65,
+  stuckAvoidRadiusGrowthWorld: 0.25,
+  stuckAvoidMaxRadiusWorld: 1.65,
+  dynamicAvoidMaxZones: 8,
+  dynamicAvoidRadiusWorld: 0.7125,
+  dynamicAvoidHardRadiusWorld: 0.39,
+  dynamicAvoidCost: 8.5,
   maxPreviewCells: 48,
   maxPreviewWaypoints: 24,
   rerouteMarkerMs: 1400,
@@ -427,10 +439,13 @@ function buildGrid(building, cfg) {
   return payload;
 }
 
-function findNearestOpenCell(grid, localX, localZ) {
+function findNearestOpenCell(grid, localX, localZ, isBlocked = null) {
+  const blocked = typeof isBlocked === 'function'
+    ? isBlocked
+    : ((x, z) => !!grid.blocked[grid.index(x, z)]);
   const startX = clamp(Math.floor(localX / grid.cellSize), 0, grid.cols - 1);
   const startZ = clamp(Math.floor(localZ / grid.cellSize), 0, grid.rows - 1);
-  if (!grid.blocked[grid.index(startX, startZ)]) return { x: startX, z: startZ };
+  if (!blocked(startX, startZ)) return { x: startX, z: startZ };
 
   const maxRadius = Math.max(grid.cols, grid.rows);
   for (let r = 1; r <= maxRadius; r++) {
@@ -440,7 +455,7 @@ function findNearestOpenCell(grid, localX, localZ) {
         const x = startX + dx;
         const z = startZ + dz;
         if (x < 0 || z < 0 || x >= grid.cols || z >= grid.rows) continue;
-        if (!grid.blocked[grid.index(x, z)]) return { x, z };
+        if (!blocked(x, z)) return { x, z };
       }
     }
   }
@@ -478,6 +493,36 @@ function hasLineOfSightLocal(building, obstacles, ax, az, bx, bz, cfg) {
   return true;
 }
 
+function isPlanCellBlockedLocal(grid, planBlocker, localX, localZ) {
+  if (!grid || !planBlocker?.hasAvoid || typeof planBlocker.isBlocked !== 'function') return false;
+  const x = clamp(Math.floor(localX / grid.cellSize), 0, grid.cols - 1);
+  const z = clamp(Math.floor(localZ / grid.cellSize), 0, grid.rows - 1);
+  return !!planBlocker.isBlocked(x, z);
+}
+
+function isPlanBlockedLocal(building, grid, localX, localZ, cfg, planBlocker = null) {
+  if (isBlockedLocal(building, grid?.obstacles || [], localX, localZ, cfg)) return true;
+  return isPlanCellBlockedLocal(grid, planBlocker, localX, localZ);
+}
+
+function hasPlanLineOfSightLocal(building, grid, ax, az, bx, bz, cfg, planBlocker = null) {
+  if (!hasLineOfSightLocal(building, grid?.obstacles || [], ax, az, bx, bz, cfg)) return false;
+  if (!planBlocker?.hasAvoid || typeof planBlocker.isBlocked !== 'function') return true;
+  const dist = Math.hypot(bx - ax, bz - az);
+  if (dist <= 0.0001) return true;
+  const losStep = Number(cfg.lineOfSightStepWorld) || 0.16;
+  const cellStep = Number(grid?.cellSize) > 0 ? Number(grid.cellSize) * 0.5 : losStep;
+  const step = Math.max(0.05, Math.min(losStep, cellStep));
+  const steps = Math.max(2, Math.ceil(dist / step));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const px = ax + (bx - ax) * t;
+    const pz = az + (bz - az) * t;
+    if (isPlanCellBlockedLocal(grid, planBlocker, px, pz)) return false;
+  }
+  return true;
+}
+
 function buildLocalAnchorPath(grid, cells, startLocal, targetLocal) {
   const anchors = [
     { x: Number(startLocal?.x) || 0, y: Number(startLocal?.z) || 0 },
@@ -491,7 +536,7 @@ function buildLocalAnchorPath(grid, cells, startLocal, targetLocal) {
   return dedupePoints(anchors, 0.001);
 }
 
-function stringPullRoute(building, grid, anchors, cfg) {
+function stringPullRoute(building, grid, anchors, cfg, planBlocker = null) {
   if (!Array.isArray(anchors) || anchors.length <= 2) return anchors || [];
   const out = [clonePoint2(anchors[0])];
   let anchorIdx = 0;
@@ -500,14 +545,15 @@ function stringPullRoute(building, grid, anchors, cfg) {
     let furthest = anchorIdx + 1;
     const maxTarget = Math.min(anchors.length - 1, anchorIdx + maxSkip);
     for (let j = anchorIdx + 1; j <= maxTarget; j++) {
-      const visible = hasLineOfSightLocal(
+      const visible = hasPlanLineOfSightLocal(
         building,
-        grid.obstacles,
+        grid,
         anchors[anchorIdx].x,
         anchors[anchorIdx].y,
         anchors[j].x,
         anchors[j].y,
         cfg,
+        planBlocker,
       );
       if (!visible) break;
       furthest = j;
@@ -519,7 +565,7 @@ function stringPullRoute(building, grid, anchors, cfg) {
   return dedupePoints(out, 0.001);
 }
 
-function roundRouteCorners(building, grid, points, cfg) {
+function roundRouteCorners(building, grid, points, cfg, planBlocker = null) {
   if (!Array.isArray(points) || points.length <= 2) return points || [];
   const radius = Math.max(0, Number(cfg.cornerRoundRadiusWorld) || 0.42);
   const minTurnDeg = Math.max(0, Number(cfg.cornerRoundMinAngleDeg) || 22);
@@ -557,12 +603,12 @@ function roundRouteCorners(building, grid, points, cfg) {
       y: curr.y + outVec.y * trim,
     };
 
-    const validEntry = !isBlockedLocal(building, grid.obstacles, entry.x, entry.y, cfg);
-    const validExit = !isBlockedLocal(building, grid.obstacles, exit.x, exit.y, cfg);
+    const validEntry = !isPlanBlockedLocal(building, grid, entry.x, entry.y, cfg, planBlocker);
+    const validExit = !isPlanBlockedLocal(building, grid, exit.x, exit.y, cfg, planBlocker);
     const validJoin = validEntry && validExit &&
-      hasLineOfSightLocal(building, grid.obstacles, out[out.length - 1].x, out[out.length - 1].y, entry.x, entry.y, cfg) &&
-      hasLineOfSightLocal(building, grid.obstacles, entry.x, entry.y, exit.x, exit.y, cfg) &&
-      hasLineOfSightLocal(building, grid.obstacles, exit.x, exit.y, next.x, next.y, cfg);
+      hasPlanLineOfSightLocal(building, grid, out[out.length - 1].x, out[out.length - 1].y, entry.x, entry.y, cfg, planBlocker) &&
+      hasPlanLineOfSightLocal(building, grid, entry.x, entry.y, exit.x, exit.y, cfg, planBlocker) &&
+      hasPlanLineOfSightLocal(building, grid, exit.x, exit.y, next.x, next.y, cfg, planBlocker);
 
     if (!validJoin) {
       out.push(clonePoint2(curr));
@@ -620,15 +666,92 @@ function isLocalPointCellBlocked(grid, localX, localZ) {
   return !!grid.blocked[grid.index(x, z)];
 }
 
-function planRoute(building, startApi, targetApi, cfg) {
+function normalizePlanDynamicAvoidZones(building, planOptions = {}, cfg = DYNAMIC_INTERIOR_ROUTING) {
+  const rawZones = Array.isArray(planOptions?.dynamicAvoidZones) ? planOptions.dynamicAvoidZones : [];
+  const maxZones = Math.max(0, Math.min(12, Math.round(Number(cfg.dynamicAvoidMaxZones) || 8)));
+  if (!building || !rawZones.length || maxZones <= 0) return [];
+  return rawZones
+    .map((zone) => {
+      const apiX = Number(zone?.x);
+      const apiY = Number(zone?.y ?? zone?.z);
+      if (!Number.isFinite(apiX) || !Number.isFinite(apiY)) return null;
+      const radiusWorld = Math.max(
+        Number(cfg.gridCellSizeWorld) || 0.55,
+        Number(zone?.radiusWorld) || Number(cfg.dynamicAvoidRadiusWorld) || 0.7125,
+      );
+      const hardRadiusWorld = Math.max(0, Math.min(radiusWorld, Number(zone?.hardRadiusWorld) || Number(cfg.dynamicAvoidHardRadiusWorld) || 0.39));
+      const local = getBuildingLocalPoint(building, apiToWorld(apiX), apiToWorld(apiY));
+      return {
+        x: local.x,
+        z: local.z,
+        radiusWorld,
+        hardRadiusWorld,
+        weight: Math.max(0, Number(zone?.weight) || Number(cfg.dynamicAvoidCost) || 8.5),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, maxZones);
+}
+
+function makePlanBlockedPredicate(building, grid, startLocal, targetLocal, cfg = DYNAMIC_INTERIOR_ROUTING, planOptions = {}) {
+  const avoidPointApi = planOptions?.avoidPoint || null;
+  const avoidRadiusWorld = Math.max(0, Number(planOptions?.avoidRadiusWorld) || 0);
+  const avoidPointWorld = avoidPointApi && avoidRadiusWorld > 0
+    ? { x: apiToWorld(avoidPointApi.x), z: apiToWorld(avoidPointApi.y ?? avoidPointApi.z) }
+    : null;
+  const avoidLocal = avoidPointWorld
+    ? getBuildingLocalPoint(building, avoidPointWorld.x, avoidPointWorld.z)
+    : null;
+  const nearRadius = Math.max(grid.cellSize * 1.15, avoidRadiusWorld * 0.55);
+  const hasAvoid = !!(avoidLocal && avoidRadiusWorld > 0);
+  const dynamicAvoidZones = normalizePlanDynamicAvoidZones(building, planOptions, cfg);
+  return {
+    hasAvoid: hasAvoid || dynamicAvoidZones.length > 0,
+    isBlocked: (x, z) => {
+      if (grid.blocked[grid.index(x, z)]) return true;
+      const center = grid.center(x, z);
+      if (hasAvoid) {
+        const nearStart = Math.hypot(center.x - startLocal.x, center.z - startLocal.z) <= nearRadius;
+        const nearEnd = Math.hypot(center.x - targetLocal.x, center.z - targetLocal.z) <= nearRadius;
+        if (!nearStart && !nearEnd && Math.hypot(center.x - avoidLocal.x, center.z - avoidLocal.z) < avoidRadiusWorld) return true;
+      }
+      for (const zone of dynamicAvoidZones) {
+        if (zone.hardRadiusWorld <= 0) continue;
+        const nearStart = Math.hypot(center.x - startLocal.x, center.z - startLocal.z) <= Math.max(grid.cellSize * 1.1, zone.hardRadiusWorld * 0.75);
+        const nearEnd = Math.hypot(center.x - targetLocal.x, center.z - targetLocal.z) <= Math.max(grid.cellSize * 1.1, zone.hardRadiusWorld * 0.75);
+        if (nearStart || nearEnd) continue;
+        if (Math.hypot(center.x - zone.x, center.z - zone.z) < zone.hardRadiusWorld) return true;
+      }
+      return false;
+    },
+    cost: (x, z) => {
+      if (!dynamicAvoidZones.length) return 0;
+      const center = grid.center(x, z);
+      let penalty = 0;
+      for (const zone of dynamicAvoidZones) {
+        const nearStart = Math.hypot(center.x - startLocal.x, center.z - startLocal.z) <= Math.max(grid.cellSize * 1.1, zone.radiusWorld * 0.45);
+        const nearEnd = Math.hypot(center.x - targetLocal.x, center.z - targetLocal.z) <= Math.max(grid.cellSize * 1.1, zone.radiusWorld * 0.45);
+        if (nearStart || nearEnd) continue;
+        const dist = Math.hypot(center.x - zone.x, center.z - zone.z);
+        if (dist >= zone.radiusWorld) continue;
+        const pressure = 1 - (dist / zone.radiusWorld);
+        penalty += zone.weight * pressure * pressure;
+      }
+      return penalty;
+    },
+  };
+}
+
+function planRoute(building, startApi, targetApi, cfg, planOptions = {}) {
   const grid = buildGrid(building, cfg);
   const startWorld = { x: apiToWorld(startApi.x), z: apiToWorld(startApi.y) };
   const targetWorld = { x: apiToWorld(targetApi.x), z: apiToWorld(targetApi.y) };
   const startLocal = getBuildingLocalPoint(building, startWorld.x, startWorld.z);
   const targetLocal = getBuildingLocalPoint(building, targetWorld.x, targetWorld.z);
+  const planBlocker = makePlanBlockedPredicate(building, grid, startLocal, targetLocal, cfg, planOptions);
   const targetCellBlocked = isLocalPointCellBlocked(grid, targetLocal.x, targetLocal.z);
-  const start = findNearestOpenCell(grid, startLocal.x, startLocal.z);
-  const goal = findNearestOpenCell(grid, targetLocal.x, targetLocal.z);
+  const start = findNearestOpenCell(grid, startLocal.x, startLocal.z, planBlocker.isBlocked);
+  const goal = findNearestOpenCell(grid, targetLocal.x, targetLocal.z, planBlocker.isBlocked);
   if (!start || !goal) return null;
   const goalCenter = grid.center(goal.x, goal.z);
   const goalAnchorLocal = targetCellBlocked || !hasLineOfSightLocal(building, grid.obstacles, goalCenter.x, goalCenter.z, targetLocal.x, targetLocal.z, cfg)
@@ -664,8 +787,8 @@ function planRoute(building, startApi, targetApi, cfg) {
       }
       const simplifiedCells = simplifyCellPath(rawCells);
       const rawAnchorsLocal = buildLocalAnchorPath(grid, simplifiedCells, startLocal, goalAnchorLocal);
-      const stringPulledLocal = stringPullRoute(building, grid, rawAnchorsLocal, cfg);
-      const roundedLocal = roundRouteCorners(building, grid, stringPulledLocal, cfg);
+      const stringPulledLocal = stringPullRoute(building, grid, rawAnchorsLocal, cfg, planBlocker);
+      const roundedLocal = roundRouteCorners(building, grid, stringPulledLocal, cfg, planBlocker);
       const rawPoints = convertLocalAnchorsToApiPoints(building, rawAnchorsLocal);
       const points = convertLocalAnchorsToApiPoints(building, roundedLocal);
       const segments = buildRouteSegments(points);
@@ -689,22 +812,52 @@ function planRoute(building, startApi, targetApi, cfg) {
       const nx = bestNode.x + dx;
       const nz = bestNode.z + dz;
       if (nx < 0 || nz < 0 || nx >= grid.cols || nz >= grid.rows) continue;
-      if (grid.blocked[grid.index(nx, nz)]) continue;
+      if (planBlocker.isBlocked(nx, nz)) continue;
       const nKey = `${nx},${nz}`;
       if (closed.has(nKey)) continue;
       if (dx !== 0 && dz !== 0) {
-        if (grid.blocked[grid.index(bestNode.x + dx, bestNode.z)] || grid.blocked[grid.index(bestNode.x, bestNode.z + dz)]) continue;
+        if (planBlocker.isBlocked(bestNode.x + dx, bestNode.z) || planBlocker.isBlocked(bestNode.x, bestNode.z + dz)) continue;
       }
       const stepCost = (dx === 0 || dz === 0) ? 1 : Math.SQRT2;
+      const avoidPenalty = typeof planBlocker.cost === 'function' ? planBlocker.cost(nx, nz) : 0;
       const tentativeG = bestNode.g + stepCost;
+      const tentativeCost = tentativeG + avoidPenalty;
       const existing = open.get(nKey);
-      if (!existing || tentativeG < existing.g) {
+      if (!existing || tentativeCost < existing.g) {
         cameFrom.set(nKey, bestKey);
-        open.set(nKey, { x: nx, z: nz, g: tentativeG, f: tentativeG + heuristic(nx, nz) });
+        open.set(nKey, { x: nx, z: nz, g: tentativeCost, f: tentativeCost + heuristic(nx, nz) });
       }
     }
   }
   return null;
+}
+
+export function isDynamicInteriorRouteSegmentClear(building, startApi, endApi, options = {}) {
+  if (!building || !startApi || !endApi) {
+    return { clear: true, reason: 'missing-segment-context' };
+  }
+  const cfg = { ...DYNAMIC_INTERIOR_ROUTING, ...(options.config || options || {}) };
+  try {
+    const grid = buildGrid(building, cfg);
+    const startWorld = { x: apiToWorld(startApi.x), z: apiToWorld(startApi.y ?? startApi.z) };
+    const endWorld = { x: apiToWorld(endApi.x), z: apiToWorld(endApi.y ?? endApi.z) };
+    const startLocal = getBuildingLocalPoint(building, startWorld.x, startWorld.z);
+    const endLocal = getBuildingLocalPoint(building, endWorld.x, endWorld.z);
+    const startBlocked = isBlockedLocal(building, grid.obstacles, startLocal.x, startLocal.z, cfg);
+    const endBlocked = isBlockedLocal(building, grid.obstacles, endLocal.x, endLocal.z, cfg);
+    const segmentClear = hasLineOfSightLocal(building, grid.obstacles, startLocal.x, startLocal.z, endLocal.x, endLocal.z, cfg);
+    const clear = !endBlocked && (startBlocked || segmentClear);
+    return {
+      clear,
+      startBlocked,
+      endBlocked,
+      segmentClear,
+      reason: startBlocked && clear ? 'start-blocked-recovery' : startBlocked ? 'start-blocked' : endBlocked ? 'end-blocked' : (segmentClear ? 'clear' : 'segment-blocked'),
+      blockedPoint: endApi ? { x: Number(endApi.x) || 0, y: Number(endApi.y ?? endApi.z) || 0 } : null,
+    };
+  } catch (error) {
+    return { clear: true, reason: 'validator-error', error: error?.message || String(error) };
+  }
 }
 
 function ensureAgentState(agentId) {
@@ -725,6 +878,15 @@ function ensureAgentState(agentId) {
       lastRouteProgressAtMs: 0,
       rerouteFrom: null,
       rerouteUntilMs: 0,
+      blockedPoint: null,
+      blockedReason: null,
+      blockedReasonKey: null,
+      blockedReasonMs: 0,
+      rerouteAttempts: 0,
+      rerouteAvoidPoint: null,
+      rerouteAvoidRadiusWorld: 0,
+      lastRecoveryPlanAtMs: 0,
+      replanSettleUntilMs: 0,
       projectedPoint: null,
       projectedDistance: 0,
       projectedDistanceAlong: 0,
@@ -811,10 +973,21 @@ function pointAtDistanceOnSegments(segments, distanceAlong) {
 
 function shouldReplan(state, nowMs, buildingRouteKey, targetKey, currentDistance, cfg) {
   const corridorHalfWidthApi = worldToApi(Number(cfg.corridorHalfWidthWorld) || 0.42);
+  const replanRetryMs = Math.max(350, Number(cfg.rerouteRetryMs) || 850);
   if (!state.route || !state.route.length || !state.routeSegments?.length) return 'initial-route';
   if (state.buildingId !== buildingRouteKey) return 'building-or-floor-changed';
   if (state.targetKey !== targetKey) return 'target-changed';
   if ((nowMs - state.lastPlanAtMs) >= cfg.staleRouteMs && currentDistance > cfg.waypointReachApi * 1.5) return 'route-stale';
+
+  const inRecoverySettle = nowMs < (Number(state.replanSettleUntilMs) || 0);
+  if (inRecoverySettle) {
+    if (state.projectedDistance > corridorHalfWidthApi * 2.7 && (nowMs - state.lastPlanAtMs) >= Math.max(replanRetryMs, Number(cfg.replanCooldownMs) || 350)) {
+      return 'route-abandoned';
+    }
+    return null;
+  }
+
+  if (state.blockedReason && (state.blockedReasonMs || 0) >= Math.max(120, Number(cfg.blockedReplanPersistMs) || 420) && (nowMs - state.lastPlanAtMs) >= replanRetryMs) return state.blockedReason;
   if (state.poorProgressMs >= cfg.poorProgressMs && (nowMs - state.lastPlanAtMs) >= cfg.replanCooldownMs) return 'poor-progress';
   if (state.corridorViolationMs >= Math.max(500, cfg.poorProgressMs * 0.8) && (nowMs - state.lastPlanAtMs) >= cfg.replanCooldownMs) return 'corridor-drift';
   if (state.projectedDistance > corridorHalfWidthApi * 2.35) return 'route-abandoned';
@@ -961,6 +1134,81 @@ export function getDynamicInteriorRoutingState(agentId) {
   return agentId != null ? (_agentState.get(agentId) || null) : null;
 }
 
+function cloneRuntimeRoutePoint(point = null) {
+  if (!point || typeof point !== 'object') return null;
+  const x = Number(point.x);
+  const y = Number(point.y ?? point.z);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+function cloneRuntimeRouteCell(cell = null) {
+  if (!cell || typeof cell !== 'object') return null;
+  const x = Number(cell.x);
+  const z = Number(cell.z ?? cell.y);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  return { x, z };
+}
+
+function buildRuntimeRoutePoints(agent, runtimeRoute) {
+  const points = Array.isArray(runtimeRoute?.routePoints)
+    ? runtimeRoute.routePoints.map(cloneRuntimeRoutePoint).filter(Boolean)
+    : [];
+  const currentPoint = cloneRuntimeRoutePoint(agent);
+  const nextPoint = cloneRuntimeRoutePoint(runtimeRoute?.nextPoint || runtimeRoute?.effectiveTarget || runtimeRoute?.pursuitTarget);
+  const finalPoint = cloneRuntimeRoutePoint(runtimeRoute?.finalPoint);
+  if (points.length === 0 && currentPoint) points.push(currentPoint);
+  if (points.length <= 1 && nextPoint) points.push(nextPoint);
+  if (finalPoint && (!points.length || pointDistance(points[points.length - 1], finalPoint) > 0.001)) points.push(finalPoint);
+  return dedupePoints(points, 0.001);
+}
+
+export function hydrateDynamicInteriorRoutingDebugFromRuntimeRoute(agent, runtimeRoute = null) {
+  const agentId = agent?.id;
+  if (agentId == null) return false;
+  const active = runtimeRoute && runtimeRoute.active !== false;
+  const routePoints = active ? buildRuntimeRoutePoints(agent, runtimeRoute) : [];
+  const route = routePoints.slice(1);
+  if (!active || routePoints.length < 2 || route.length < 1) {
+    const existing = _agentState.get(agentId);
+    if (existing?.runtimeDebugHydrated) {
+      _agentState.delete(agentId);
+      const group = _debugGroups.get(agentId);
+      if (group) group.visible = false;
+    }
+    return false;
+  }
+
+  const state = ensureAgentState(agentId);
+  const rawPoints = Array.isArray(runtimeRoute.rawPoints)
+    ? runtimeRoute.rawPoints.map(cloneRuntimeRoutePoint).filter(Boolean)
+    : [];
+  const rawCells = Array.isArray(runtimeRoute.rawCells)
+    ? runtimeRoute.rawCells.map(cloneRuntimeRouteCell).filter(Boolean)
+    : [];
+  const routeIndex = clamp(Math.floor(Number(runtimeRoute.routeIndex) || 0), 0, Math.max(0, route.length - 1));
+  const nextPoint = cloneRuntimeRoutePoint(runtimeRoute.nextPoint || runtimeRoute.effectiveTarget || runtimeRoute.pursuitTarget) || route[routeIndex] || route[0] || routePoints[routePoints.length - 1];
+
+  state.route = route;
+  state.routePoints = routePoints;
+  state.routeSegments = null;
+  state.routeIndex = routeIndex;
+  state.segmentIndex = Math.max(0, routeIndex);
+  state.rawPoints = rawPoints.length ? rawPoints : routePoints;
+  state.rawCells = rawCells;
+  state.cells = rawCells;
+  state.projectedPoint = cloneRuntimeRoutePoint(runtimeRoute.projectedPoint) || routePoints[Math.min(routeIndex, routePoints.length - 1)] || routePoints[0];
+  state.pursuitTarget = nextPoint;
+  state.rerouteFrom = cloneRuntimeRoutePoint(runtimeRoute.rerouteFrom);
+  state.lastPlanReason = String(runtimeRoute.reason || runtimeRoute.source || 'server-runtime-route');
+  state.targetAdjusted = runtimeRoute.targetAdjusted === true;
+  state.adjustedTarget = cloneRuntimeRoutePoint(runtimeRoute.adjustedTarget || runtimeRoute.finalPoint);
+  state.active = true;
+  state.runtimeDebugHydrated = true;
+  state.revision = (Number(state.revision) || 0) + 1;
+  return true;
+}
+
 export function updateDynamicInteriorRouting(agent, target, dtMs = 16, options = {}) {
   const cfg = { ...DYNAMIC_INTERIOR_ROUTING, ...options };
   if (!cfg.enabled || !agent || !target || !_helpers.getInteriorBuildingAt) {
@@ -980,6 +1228,19 @@ export function updateDynamicInteriorRouting(agent, target, dtMs = 16, options =
   const buildingRouteKey = makeBuildingRouteKey(building);
   const targetKey = makeTargetKey(building, target);
   const goalDistance = pointDistance(agent, target);
+  const recoveryAvoidPoint = cloneRuntimeRoutePoint(options.recoveryAvoidPoint || options.blockedPoint || null);
+  const dynamicAvoidZones = Array.isArray(options.dynamicAvoidZones) ? options.dynamicAvoidZones : [];
+  const forcedRecoveryReason = options.forceRecoveryReplan === true && recoveryAvoidPoint
+    ? String(options.recoveryReason || options.blockedReason || 'server-static-recovery')
+    : null;
+  if (recoveryAvoidPoint) {
+    const blockageKey = `${forcedRecoveryReason || 'server-recovery'}:${Number(recoveryAvoidPoint.x || 0).toFixed(1)}:${Number(recoveryAvoidPoint.y || 0).toFixed(1)}`;
+    state.blockedReasonMs = state.blockedReasonKey === blockageKey ? state.blockedReasonMs + dtMs : dtMs;
+    state.blockedReasonKey = blockageKey;
+    state.blockedPoint = clonePoint2(recoveryAvoidPoint);
+    state.blockedReason = forcedRecoveryReason || String(options.blockedReason || 'server-static-recovery');
+    if (forcedRecoveryReason) state.replanSettleUntilMs = 0;
+  }
 
   if (state.lastGoalDistance != null) {
     const progress = state.lastGoalDistance - goalDistance;
@@ -989,9 +1250,33 @@ export function updateDynamicInteriorRouting(agent, target, dtMs = 16, options =
   }
   state.lastGoalDistance = goalDistance;
 
-  const replanReason = shouldReplan(state, nowMs, buildingRouteKey, targetKey, goalDistance, cfg);
+  const replanReason = forcedRecoveryReason || shouldReplan(state, nowMs, buildingRouteKey, targetKey, goalDistance, cfg);
   if (replanReason) {
-    const planned = planRoute(building, { x: agent.x, y: agent.y }, target, cfg);
+    const isRecoveryReplan = replanReason !== 'initial-route' && replanReason !== 'target-changed' && replanReason !== 'route-stale' && replanReason !== 'building-or-floor-changed';
+    if (isRecoveryReplan) {
+      state.rerouteAttempts = Math.max(1, (state.rerouteAttempts || 0) + 1);
+      const candidateAvoidPoint = clonePoint2(state.blockedPoint || recoveryAvoidPoint || { x: agent.x, y: agent.y });
+      const keepExistingAvoid = !!(
+        state.rerouteAvoidPoint &&
+        (nowMs - (Number(state.lastRecoveryPlanAtMs) || 0)) <= Math.max(250, Number(cfg.rerouteAvoidStickMs) || 1800) &&
+        pointDistance(candidateAvoidPoint, state.rerouteAvoidPoint) <= worldToApi(Math.max(0.2, Number(cfg.rerouteAvoidStickDistanceWorld) || 0.85))
+      );
+      state.rerouteAvoidPoint = keepExistingAvoid ? clonePoint2(state.rerouteAvoidPoint) : candidateAvoidPoint;
+      const baseRadius = Math.max(0.3, Number(cfg.stuckAvoidRadiusWorld) || 0.65);
+      const growth = Math.max(0, Number(cfg.stuckAvoidRadiusGrowthWorld) || 0.25);
+      const maxRadius = Math.max(baseRadius, Number(cfg.stuckAvoidMaxRadiusWorld) || 1.65);
+      state.rerouteAvoidRadiusWorld = Math.min(maxRadius, baseRadius + growth * Math.max(0, state.rerouteAttempts - 1));
+    } else {
+      state.rerouteAttempts = 0;
+      state.rerouteAvoidPoint = null;
+      state.rerouteAvoidRadiusWorld = 0;
+    }
+
+    const planned = planRoute(building, { x: agent.x, y: agent.y }, target, cfg, {
+      avoidPoint: state.rerouteAvoidPoint,
+      avoidRadiusWorld: state.rerouteAvoidRadiusWorld,
+      dynamicAvoidZones,
+    });
     if (planned && Array.isArray(planned.points) && planned.points.length >= 2) {
       state.routePoints = planned.points;
       state.route = planned.points.slice(1);
@@ -1014,6 +1299,12 @@ export function updateDynamicInteriorRouting(agent, target, dtMs = 16, options =
       state.pursuitTarget = planned.points[Math.min(1, planned.points.length - 1)] || clonePoint2(target);
       state.lateralOffset = 0;
       state.corridorViolationMs = 0;
+      state.blockedPoint = null;
+      state.blockedReason = null;
+      state.blockedReasonKey = null;
+      state.blockedReasonMs = 0;
+      state.lastRecoveryPlanAtMs = isRecoveryReplan ? nowMs : 0;
+      state.replanSettleUntilMs = isRecoveryReplan ? (nowMs + Math.max(250, Number(cfg.recoveryReplanSettleMs) || 950)) : 0;
       state.revision += 1;
       state.active = true;
       if (replanReason !== 'initial-route') {
@@ -1072,6 +1363,10 @@ export function updateDynamicInteriorRouting(agent, target, dtMs = 16, options =
     targetAdjusted: !!state.targetAdjusted,
     adjustedTarget: state.adjustedTarget || null,
     rerouteFrom: (state.rerouteUntilMs > nowMs) ? state.rerouteFrom : null,
+    blockedPoint: state.blockedPoint,
+    blockedReason: state.blockedReason,
+    recoveryAvoidPoint: state.rerouteAvoidPoint,
+    recoveryAvoidRadiusWorld: state.rerouteAvoidRadiusWorld,
     lateralOffset: state.lateralOffset,
     corridorViolationMs: state.corridorViolationMs,
     projection,

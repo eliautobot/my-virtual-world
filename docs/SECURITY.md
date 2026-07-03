@@ -5,7 +5,8 @@ My Virtual World is a local control surface for agent systems. Treat it like an 
 ## Recommended Deployment
 
 - Run it on a trusted local machine, LAN, VPN, or private network.
-- Keep `8590`, OpenClaw gateway ports, browser CDP ports, and VNC ports closed to the public internet.
+- Keep `8590`, the realtime sidecar port `8591`, OpenClaw gateway ports, browser CDP ports, and VNC ports closed to the public internet.
+- Treat the realtime sidecar as part of the admin surface: connected clients can read and update live runtime state.
 - Use a reverse proxy with authentication before any internet exposure.
 - Prefer Tailscale for private remote access instead of router port forwarding.
 - Keep secrets in `.env`, OpenClaw config, Hermes config, or your deployment secret store.

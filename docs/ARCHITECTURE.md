@@ -15,6 +15,7 @@ The app is designed for local machines, LANs, and private VPNs. It is not a publ
 | --- | --- | --- |
 | Client UI | `src/client/` | Three.js world, setup page, settings, chat, movement, and interactions. |
 | Server | `src/server/server.py` | Static file serving, JSON APIs, license state, OpenClaw/Hermes adapters, persistence. |
+| Realtime sidecar | `src/realtime/server.mjs` | Optional Colyseus runtime for live agent snapshots, route leases, and heartbeat broadcast. |
 | Hermes provider | `src/server/providers/hermes.py` | Optional Hermes profile discovery and chat relay. |
 | Persistent data | `VW_DATA_DIR`, usually Docker volume `vw-data` | World metadata, chunks, buildings, license receipt, config, communication logs. |
 | Docker deployment | `Dockerfile`, `docker-compose.yml` | Production-style local deployment. |
@@ -47,6 +48,12 @@ The server is the durable store and guardrail layer:
 - repairs narrow compatibility issues
 - preserves saved user data during updates
 - exposes agent integration APIs
+
+## Realtime Sidecar
+
+Live Agent Mode uses an optional Colyseus sidecar for online-game runtime state. The sidecar does not replace the Python server or Three.js renderer. It owns only realtime live-agent snapshots, route leases, heartbeat state, and broadcast to connected clients. Each self-hosted install runs its own sidecar; browsers connect through that install's browser-reachable realtime URL.
+
+See [LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md](LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md).
 
 ## Starter World
 

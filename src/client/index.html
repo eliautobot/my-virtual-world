@@ -446,15 +446,35 @@
                 <section class="settings-pane" data-settings-pane="features">
                     <label class="settings-check"><input type="checkbox" id="setting-featureBrowser"> Agent Browser</label>
                     <label class="settings-check"><input type="checkbox" id="setting-featureSms"> SMS / Twilio</label>
-                    <label class="settings-check settings-check-disabled"><input type="checkbox" id="setting-featureAgentLiveMode" disabled aria-disabled="true"> Agent Live Mode <span class="settings-feature-note">Coming Soon</span></label>
+                    <label class="settings-check"><input type="checkbox" id="setting-featureAgentLiveMode"> Agent Live Mode <span class="settings-feature-note">Preview</span></label>
                     <label class="settings-check"><input type="checkbox" id="setting-featureDebugTools" checked> Debug Tools</label>
                     <div id="featureLockNotice" class="settings-status-card"></div>
                 </section>
 
                 <section class="settings-pane" data-settings-pane="live-mode">
-                    <div id="liveModeComingSoon" class="settings-status-card settings-live-mode-coming-soon">
-                        <strong>Live Agent Mode Coming Soon</strong>
+                    <div id="liveModeLoopStatus" class="settings-status-card settings-live-loop-status">
+                        <strong>Loop off</strong><span>Turn on Agent Live Mode in Features to manage loop controls.</span>
                     </div>
+                    <div class="settings-live-loop-controls">
+                        <div class="form-group settings-live-loop-duration">
+                            <label>Pause Seconds</label>
+                            <input type="number" id="setting-liveLoopPauseSec" min="30" max="3600" value="600" step="30">
+                        </div>
+                        <button class="btn-secondary" id="btn-refreshLiveLoop">Refresh Loop</button>
+                        <button class="btn-secondary" id="btn-pauseLiveLoop">Pause</button>
+                        <button class="btn-secondary" id="btn-resumeLiveLoop">Resume</button>
+                        <button class="btn-secondary" id="btn-clearLiveClient">Clear Client</button>
+                    </div>
+                    <div id="liveModeLoopActionStatus" class="settings-inline-status"></div>
+                    <div id="liveModeSummary" class="settings-status-card locked">
+                        <strong>Agent Live Mode off</strong><span>Turn on Agent Live Mode in Features before applying agent selection.</span>
+                    </div>
+                    <div id="liveModeAgentList" class="settings-live-agent-list"></div>
+                    <div class="settings-live-agent-toolbar">
+                        <button class="btn-secondary" id="btn-refreshLiveAgents">Refresh Agents</button>
+                        <button class="btn-primary" id="btn-saveLiveAgents">Apply Agent Selection</button>
+                    </div>
+                    <div id="liveModeAgentStatus" class="settings-inline-status"></div>
                 </section>
 
                 <section class="settings-pane" data-settings-pane="browser">
@@ -704,8 +724,9 @@
     }
     </script>
     <script src="js/vo-engine.js?v=printer-copier-asset-v1"></script>
+    <script src="/node_modules/@colyseus/sdk/dist/colyseus.js?v=20260623-live-agent-runtime-hydration"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script type="module" src="js/main3d.js?v=20260617-road-draw-r26"></script>
+    <script type="module" src="js/main3d.js?v=20260703-server-runtime-r1"></script>
     <script src="js/chat.js?v=20260617-codex-context-r2"></script>
     <script src="js/settings.js?v=20260615-location-settings-r1"></script>
 </body>

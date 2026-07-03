@@ -88,6 +88,9 @@ The repo includes internal documentation for both people and AI agents:
 - [docs/API.md](docs/API.md) - HTTP endpoint reference.
 - [docs/WORLD-DATA.md](docs/WORLD-DATA.md) - saved world JSON, buildings, chunks, roads, agents, and world actions.
 - [docs/AGENT-INTEGRATION.md](docs/AGENT-INTEGRATION.md) - OpenClaw, Hermes, agent presence, chat, and Agent Live Mode.
+- [docs/LIVE-AGENT-MODE-RESTART-SPEC.md](docs/LIVE-AGENT-MODE-RESTART-SPEC.md) - fresh Live Agent Mode architecture and Generative Agents adaptation.
+- [docs/LIVE-AGENT-MODE-RESTART-PHASES.md](docs/LIVE-AGENT-MODE-RESTART-PHASES.md) - ordered phase plan for building Live Agent Mode progressively.
+- [docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md](docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md) - Colyseus sidecar architecture for the online-game runtime foundation.
 - [docs/AGENT_PLATFORM_COMMUNICATIONS.md](docs/AGENT_PLATFORM_COMMUNICATIONS.md) - visible agent-to-agent messaging through My Virtual World.
 - [docs/VIRTUAL_WORLD_AGENT_TOOLS.md](docs/VIRTUAL_WORLD_AGENT_TOOLS.md) - canonical agent-facing tool index.
 - [docs/SKILLS.md](docs/SKILLS.md) - reusable skill files under `docs/skills/`.
@@ -132,6 +135,9 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_OPENCLAW_PATH` | `/openclaw` | Mounted OpenClaw home path |
 | `VW_OPENCLAW_HOST_PATH` | `~/.openclaw` | Host OpenClaw home path used when Gateway creates agent workspaces |
 | `VW_GATEWAY_URL` | `ws://host.docker.internal:18789` | OpenClaw gateway WebSocket URL |
+| `VW_REALTIME_ENABLED` | `true` | Enable the Colyseus realtime runtime config used by Agent Live Mode |
+| `VW_REALTIME_BROWSER_URL` | `ws://127.0.0.1:8591` | Browser-reachable realtime URL for this self-hosted install |
+| `VW_REALTIME_HOST_PORT` | `8591` | Outside Docker host port for the realtime sidecar |
 | `VW_HERMES_ENABLED` | `true` | Enable local Hermes profile support |
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker |
 | `VW_HERMES_BIN` | `/home/vw/.hermes/hermes-agent/hermes` | Hermes CLI path inside Docker |
@@ -220,7 +226,7 @@ http://<your-tailscale-ip>:8590
 
 If you changed `VW_HOST_PORT`, use that port in the remote URL. For example, `VW_HOST_PORT=8586` means `http://<your-tailscale-device-name>:8586`.
 
-Do not port-forward `8590` to the public internet. Also keep `18789`, `9222`, and browser/VNC ports private. See [docs/SECURITY.md](docs/SECURITY.md#remote-access-with-tailscale) for the recommended remote-access setup.
+Do not port-forward `8590` or the realtime sidecar port `8591` to the public internet. Also keep `18789`, `9222`, and browser/VNC ports private. See [docs/SECURITY.md](docs/SECURITY.md#remote-access-with-tailscale) for the recommended remote-access setup.
 
 ## Updating Docker Later
 
@@ -258,7 +264,7 @@ http://localhost:8590
 
 My Virtual World is a control surface for local agent systems. Keep it on a trusted machine, LAN, VPN, or private network.
 
-Do not port-forward `8590`, `18789`, `9222`, or browser/VNC ports to the public internet without authentication and network hardening.
+Do not port-forward `8590`, `8591`, `18789`, `9222`, or browser/VNC ports to the public internet without authentication and network hardening.
 
 See [docs/SECURITY.md](docs/SECURITY.md).
 
