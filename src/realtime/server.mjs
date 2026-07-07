@@ -1,5 +1,7 @@
 // Colyseus sidecar entrypoint for Live Agent Mode realtime state.
 import { createServer } from 'node:http';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import express from 'express';
 import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
@@ -90,7 +92,8 @@ export async function createRealtimeServer({
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const invokedModuleUrl = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : '';
+if (import.meta.url === invokedModuleUrl) {
   const server = await createRealtimeServer();
   console.log(`Virtual World realtime sidecar listening on ${server.host}:${server.port}`);
   console.log(`Runtime room: ${server.runtimeRoomId || 'not-created'}`);

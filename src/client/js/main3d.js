@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260703-server-runtime-r1';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260704-runtime-chat-opt-r2';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -822,7 +822,14 @@ if (typeof window !== 'undefined') {
 const CHUNK = 32;
 const CHUNK_W = CHUNK * T;
 const WALL_H = 3.0;
-const LOAD_R = 3; // chunk load radius (balanced for 8+ buildings spread)
+const IS_MOBILE_VIEWPORT = (() => {
+  try {
+    return window.innerWidth <= 700 || window.matchMedia?.('(pointer: coarse)')?.matches;
+  } catch (_) {
+    return false;
+  }
+})();
+const LOAD_R = IS_MOBILE_VIEWPORT ? 2 : 3; // Mobile loads 25 chunks instead of 49 for faster first paint.
 const API_TILE = 40;
 
 const TERRAIN = { GRASS:0, DIRT:1, ROAD:2, SIDEWALK:3, WATER:4, SAND:5, PARKING:6 };
@@ -1087,6 +1094,8 @@ let agentsList = [];
 let _agentRuntimeClientPromise = null;
 let _agentRuntimeClient = null;
 let _agentRuntimeUnsubscribe = null;
+let _agentRuntimeResumePromise = null;
+let _agentRuntimeResumeTimer = null;
 let _agentRuntimeHydrationStatus = {
   enabled: false,
   connected: false,
@@ -3274,6 +3283,87 @@ function subscribeAgentRuntimeSnapshots() {
     const hydrated = applyAgentRuntimeSnapshotsToAgents(meta.source || 'runtime:update', { updateVisible: true });
     if (hydrated > 0) updateAgentList();
   });
+}
+
+function resetAgentRuntimeRenderTimingForResume(source = 'runtime-page-resume') {
+  try {
+    if (clock && typeof clock.getDelta === 'function') clock.getDelta();
+  } catch {}
+  let reset = 0;
+  for (const agent of agentsList) {
+    const snapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
+    if (!agent || !snapshot) continue;
+    const sample = makeAgentRuntimeObserverBufferSample(agent, snapshot, source);
+    resetAgentRuntimeObserverBuffer(agent, sample);
+    agent._runtimeObserverOnly = true;
+    placeRuntimeHydratedAgentMesh(agent, { force: true });
+    reset++;
+  }
+  return reset;
+}
+
+async function resumeAgentRuntimeAfterPageResume(source = 'page-resume', { force = false } = {}) {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false;
+  if (_agentRuntimeResumePromise) return _agentRuntimeResumePromise;
+  _agentRuntimeResumePromise = (async () => {
+    const client = await ensureAgentRuntimeClient();
+    if (!client?.enabled || typeof client.resume !== 'function') return false;
+    const stale = typeof client.isStale === 'function' ? client.isStale(1500) : !client.connected;
+    const ok = await client.resume({ force: force || stale, staleAfterMs: 1500, source });
+    _agentRuntimeClient = client;
+    if (ok) {
+      subscribeAgentRuntimeSnapshots();
+      applyAgentRuntimeWorldObjectStatesToWorld();
+      publishAgentRuntimeTrafficTopology();
+      applyAgentRuntimeTrafficLights();
+      applyAgentRuntimeTrafficVehicles();
+      const hydrated = applyAgentRuntimeSnapshotsToAgents(`${source}:resume`, { updateVisible: true });
+      const reset = resetAgentRuntimeRenderTimingForResume(`${source}:resume`);
+      if (hydrated > 0 || reset > 0) updateAgentList();
+      updateAgentRuntimeHydrationDebug({
+        enabled: client.enabled === true,
+        connected: client.connected === true,
+        reason: client.reason || '',
+        hydrated,
+        resumedBuffers: reset,
+        snapshots: client.snapshots?.size || 0,
+        lastSource: `${source}:resume`,
+      });
+    } else {
+      updateAgentRuntimeHydrationDebug({
+        enabled: client.enabled === true,
+        connected: client.connected === true,
+        reason: client.reason || 'resume failed',
+        snapshots: client.snapshots?.size || 0,
+        lastSource: `${source}:resume-failed`,
+      });
+    }
+    return ok;
+  })()
+    .catch(error => {
+      console.warn('Agent runtime resume failed', error);
+      updateAgentRuntimeHydrationDebug({
+        enabled: _agentRuntimeClient?.enabled === true,
+        connected: false,
+        reason: error?.message || 'resume failed',
+        snapshots: _agentRuntimeClient?.snapshots?.size || 0,
+        lastSource: `${source}:resume-error`,
+      });
+      return false;
+    })
+    .finally(() => {
+      _agentRuntimeResumePromise = null;
+    });
+  return _agentRuntimeResumePromise;
+}
+
+function scheduleAgentRuntimePageResume(source = 'page-resume', { force = false, delayMs = 80 } = {}) {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  if (_agentRuntimeResumeTimer) clearTimeout(_agentRuntimeResumeTimer);
+  _agentRuntimeResumeTimer = setTimeout(() => {
+    _agentRuntimeResumeTimer = null;
+    resumeAgentRuntimeAfterPageResume(source, { force });
+  }, Math.max(0, Number(delayMs) || 0));
 }
 
 function holdAgentForServerAuthoritativeRuntimeObserver(agent, dt) {
@@ -9332,15 +9422,12 @@ function createChunk(cx, cz) {
     }
     // Repaint street terrain even when the server has no saved chunk yet.
     // Fresh GitHub installs start with only /api/streets, so missing chunks
-    // must still become road/sidewalk terrain instead of grass with trees.
-    if (shouldPersistWorldAutosave()) {
-      _repaintStreetTerrainForChunk(cx, cz);
-    } else {
-      await withWorldAutosaveSuppressed(async () => _repaintStreetTerrainForChunk(cx, cz));
-      data.dirty = false;
-    }
+    // still need road/sidewalk terrain instead of grass with trees.
+    // Keep startup hydration read-only; otherwise mobile clients POST every
+    // visible chunk just because road terrain was derived from /api/streets.
+    await withWorldAutosaveSuppressed(async () => _repaintStreetTerrainForChunk(cx, cz));
+    data.dirty = false;
     rebuildChunk(data);
-    if (data.dirty && shouldPersistWorldAutosave()) _debounceSaveStreets();
   });
 }
 
@@ -30479,6 +30566,101 @@ async function showCreateAgentDialog() {
   }
 }
 
+function agentPickerLabel(agent) {
+  if (!agent) return 'Choose an agent...';
+  return `${agent.emoji || '🤖'} ${agent.name || agent.id} ${getPresenceStateIcon(agent.status)} — ${agent.status || 'offline'}`;
+}
+
+function updateAgentPickerTriggerLabel() {
+  const trigger = document.getElementById('agentSelectPicker-open');
+  if (!trigger) return;
+  const agentId = document.getElementById('agentList')?.value || selectedAgentId || '';
+  const agent = agentsList.find(candidate => candidate?.id === agentId);
+  trigger.textContent = agentPickerLabel(agent);
+}
+
+function setSelectedAgentFromPicker(agentId, options = {}) {
+  const agent = agentsList.find(candidate => candidate?.id === agentId);
+  const select = document.getElementById('agentList');
+  selectedAgentId = agent ? agent.id : null;
+  if (select) select.value = selectedAgentId || '';
+  updateSelectedAgentLaunchState();
+  updateAgentPickerTriggerLabel();
+  if (options.close !== false) closeAgentSelectPicker();
+}
+
+function bindAgentPickerChrome() {
+  const modal = document.getElementById('agentSelectPickerModal');
+  if (!modal || modal.dataset.boundAgentSelectPicker) return;
+  modal.dataset.boundAgentSelectPicker = 'true';
+  modal.addEventListener('click', event => {
+    if (event.target === modal) closeAgentSelectPicker();
+  });
+  modal.querySelector('#agentSelectPicker-search')?.addEventListener('input', renderAgentPickerList);
+  modal.addEventListener('keydown', event => {
+    if (event.key === 'Escape') closeAgentSelectPicker();
+  });
+}
+
+function renderAgentPickerList() {
+  const list = document.getElementById('agentSelectPicker-list');
+  const count = document.getElementById('agentSelectPicker-count');
+  const search = String(document.getElementById('agentSelectPicker-search')?.value || '').trim().toLowerCase();
+  if (!list) return;
+  const selected = document.getElementById('agentList')?.value || selectedAgentId || '';
+  const filtered = agentsList.filter(agent => {
+    if (!search) return true;
+    const haystack = [
+      agent.id,
+      agent.statusKey,
+      agent.name,
+      agent.providerKind,
+      agent.providerType,
+      agent.providerAgentId,
+      agent.status,
+    ].map(value => String(value || '').toLowerCase()).join(' ');
+    return haystack.includes(search);
+  });
+  if (count) count.textContent = `${filtered.length} of ${agentsList.length} agent${agentsList.length === 1 ? '' : 's'}`;
+  list.innerHTML = filtered.length ? filtered.map(agent => `
+    <button class="agent-select-picker-row ${agent.id === selected ? 'active' : ''}" type="button" data-agent-select-picker-id="${escapeAttr(agent.id)}">
+      <span class="agent-select-picker-avatar">${escapeHtml(agent.emoji || '🤖')}</span>
+      <span>
+        <span class="agent-select-picker-name">${escapeHtml(agent.name || agent.id)}</span>
+        <span class="agent-select-picker-meta">${escapeHtml(agent.id || '')} · ${escapeHtml(agent.providerKind || 'agent')}</span>
+      </span>
+      <span class="agent-select-picker-status">${escapeHtml(getPresenceStateIcon(agent.status))} ${escapeHtml(agent.status || 'offline')}</span>
+    </button>
+  `).join('') : '<div class="settings-inline-status">No matching agents.</div>';
+  list.querySelectorAll('[data-agent-select-picker-id]').forEach(button => {
+    button.addEventListener('click', () => setSelectedAgentFromPicker(button.dataset.agentSelectPickerId || ''));
+  });
+}
+
+function openAgentSelectPicker() {
+  const modal = document.getElementById('agentSelectPickerModal');
+  if (!modal) return;
+  bindAgentPickerChrome();
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('agent-select-picker-open');
+  const search = modal.querySelector('#agentSelectPicker-search');
+  if (search) search.value = '';
+  renderAgentPickerList();
+  setTimeout(() => search?.focus(), 0);
+}
+
+function closeAgentSelectPicker() {
+  const modal = document.getElementById('agentSelectPickerModal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+  }
+  document.body.classList.remove('agent-select-picker-open');
+}
+
+window.closeAgentSelectPicker = closeAgentSelectPicker;
+
 function updateAgentList() {
   const l = document.getElementById('agentList');
   if (!l) return;
@@ -30491,19 +30673,50 @@ function updateAgentList() {
     option.textContent = `${a.emoji || '🤖'} ${a.name || a.id} ${sc} — ${a.status || 'offline'}`;
     l.appendChild(option);
   });
-  if (previousValue && agentsList.some(a => a.id === previousValue)) l.value = previousValue;
+  if (previousValue && agentsList.some(a => a.id === previousValue)) {
+    l.value = previousValue;
+    selectedAgentId = selectedAgentId || previousValue;
+  }
   else selectedAgentId = null;
 
   if (!l.dataset.boundAgentSelect) {
     l.dataset.boundAgentSelect = 'true';
     l.addEventListener('change', () => {
-      if (l.value) openAgentPanel(l.value);
-      else {
-        selectedAgentId = null;
-        const panel = document.getElementById('agentPanel');
-        if (panel) panel.style.display = 'none';
-      }
+      selectedAgentId = l.value || null;
+      updateSelectedAgentLaunchState();
+      updateAgentPickerTriggerLabel();
     });
+  }
+
+  const agentPickerBtn = document.getElementById('agentSelectPicker-open');
+  if (agentPickerBtn && !agentPickerBtn.dataset.boundAgentPickerOpen) {
+    agentPickerBtn.dataset.boundAgentPickerOpen = 'true';
+    agentPickerBtn.addEventListener('click', openAgentSelectPicker);
+  }
+
+  updateSelectedAgentLaunchState();
+  updateAgentPickerTriggerLabel();
+
+  const editAgentBtn = document.getElementById('agentPanel-open');
+  if (editAgentBtn && !editAgentBtn.dataset.boundAgentBuilderOpen) {
+    editAgentBtn.dataset.boundAgentBuilderOpen = 'true';
+    editAgentBtn.addEventListener('click', () => {
+      const agentId = document.getElementById('agentList')?.value || selectedAgentId;
+      if (!agentId) return showToast('Select an agent first', 'warning');
+      openAgentPanel(agentId);
+    });
+  }
+
+  const skillsLibraryBtn = document.getElementById('agentSkillsLibrary-open');
+  if (skillsLibraryBtn && !skillsLibraryBtn.dataset.boundSkillsLibraryOpen) {
+    skillsLibraryBtn.dataset.boundSkillsLibraryOpen = 'true';
+    skillsLibraryBtn.addEventListener('click', () => openAgentSkillsLibrary());
+  }
+
+  const modelsProvidersBtn = document.getElementById('modelsProviders-open');
+  if (modelsProvidersBtn && !modelsProvidersBtn.dataset.boundModelsProvidersOpen) {
+    modelsProvidersBtn.dataset.boundModelsProvidersOpen = 'true';
+    modelsProvidersBtn.addEventListener('click', () => openModelsProvidersWindow());
   }
 
   const newAgentBtn = document.getElementById('btn-newAgent');
@@ -30521,19 +30734,48 @@ function updateAgentList() {
     });
   }
 
-  if (selectedAgentId && l.value === selectedAgentId) openAgentPanel(selectedAgentId, { preserveCamera: true });
+  const panel = document.getElementById('agentPanel');
+  const panelOpen = panel && panel.style.display !== 'none' && panel.getAttribute('aria-hidden') !== 'true';
+  if (selectedAgentId && l.value === selectedAgentId && panelOpen) {
+    const agent = agentsList.find(candidate => candidate?.id === selectedAgentId);
+    if (agent) renderAgentBuilderSummary(agent);
+  }
+}
+
+function updateSelectedAgentLaunchState() {
+  const agentSelect = document.getElementById('agentList');
+  const editAgentBtn = document.getElementById('agentPanel-open');
+  const agentId = agentSelect?.value || selectedAgentId || '';
+  const agent = agentsList.find(candidate => candidate?.id === agentId);
+  if (editAgentBtn) {
+    editAgentBtn.disabled = !agent;
+    editAgentBtn.textContent = agent ? `Edit ${agent.name || agent.id}` : 'Edit Selected Agent';
+  }
+}
+
+function isEditorOverlayOpen(id) {
+  const modal = document.getElementById(id);
+  return Boolean(modal && modal.style.display !== 'none' && modal.getAttribute('aria-hidden') !== 'true');
+}
+
+function updateAgentEditorBodyLock() {
+  const anyOpen = ['agentPanel', 'skillsLibraryModal', 'modelsProvidersModal'].some(isEditorOverlayOpen);
+  document.body.classList.toggle('agent-builder-open', anyOpen);
 }
 
 function closeAgentEditor() {
-  selectedAgentId = null;
-  const agentSelect = document.getElementById('agentList');
-  if (agentSelect) agentSelect.value = '';
   const panel = document.getElementById('agentPanel');
-  if (panel) panel.style.display = 'none';
+  if (panel) {
+    panel.style.display = 'none';
+    panel.setAttribute('aria-hidden', 'true');
+  }
+  updateAgentEditorBodyLock();
   if (_agentFollowTransparentBldId) {
     setBuildingTransparent(_agentFollowTransparentBldId, false);
     _agentFollowTransparentBldId = null;
   }
+  stopAgentBuilderPreviewLoop();
+  updateSelectedAgentLaunchState();
 }
 
 window.closeAgentEditor = closeAgentEditor;
@@ -33115,6 +33357,11 @@ window.zoomFitAll = zoomFitAll;
 // AGENT DASHBOARD PANEL
 // ═══════════════════════════════════════════════════════════════
 let selectedAgentId = null;
+let _agentBuilderState = null;
+let _agentBuilderPreview = null;
+let _agentBuilderPreviewDrag = null;
+let _agentSkillsState = null;
+let _skillsLibraryState = null;
 let _appearanceEditorState = null;
 let _appearancePreview = null;
 let _appearancePreviewDrag = null;
@@ -33209,6 +33456,793 @@ async function setAgentLiveModeEnabled(agentOrId, enabled, options = {}) {
   renderAgentIntentDebugReadout();
   if (selectedAgentId === agent.id && options.refreshPanel !== false) openAgentPanel(agent.id, { preserveCamera: true });
   return Object.freeze({ ok: true, agentId: agent.id, agentLiveModeEnabled: nextEnabled, previousAgentLiveModeEnabled: previous, response: responseBody });
+}
+
+const _agentWorkspaceEditorState = new Map();
+const _agentResidentProfileEditorState = new Map();
+
+function escapeTextareaValue(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function readJsonResponse(response, fallbackMessage) {
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body?.error?.message || body?.message || body?.error || fallbackMessage || `Request failed (${response.status})`);
+  }
+  return body;
+}
+
+function agentEditorApiKey(agent) {
+  return encodeURIComponent(agentProfileKey(agent) || agent?.id || '');
+}
+
+function compactWorkspacePath(path) {
+  const text = String(path || '');
+  if (!text) return '';
+  const parts = text.split('/').filter(Boolean);
+  return parts.length > 3 ? `.../${parts.slice(-3).join('/')}` : text;
+}
+
+function renderAgentWorkspaceSection(agent, options = {}) {
+  const container = document.getElementById('agentPanel-workspace');
+  if (!container || !agent) return;
+  const key = String(agent.id || agentProfileKey(agent) || '');
+  if (container.dataset.agentId !== key || options.reload) {
+    container.dataset.agentId = key;
+    container.innerHTML = '<div class="settings-inline-status">Loading workspace...</div>';
+    loadAgentWorkspaceSection(agent);
+    return;
+  }
+  renderAgentWorkspaceEditor(agent);
+}
+
+async function loadAgentWorkspaceSection(agent) {
+  const container = document.getElementById('agentPanel-workspace');
+  if (!container || !agent) return;
+  const key = String(agent.id || agentProfileKey(agent) || '');
+  try {
+    const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/workspace`);
+    const data = await readJsonResponse(response, 'Could not load workspace.');
+    const previous = _agentWorkspaceEditorState.get(key) || {};
+    _agentWorkspaceEditorState.set(key, {
+      data,
+      selectedName: previous.selectedName || data.files?.find(file => file.exists)?.name || data.files?.[0]?.name || '',
+    });
+    if (selectedAgentId === agent.id) renderAgentWorkspaceEditor(agent);
+  } catch (error) {
+    container.innerHTML = `<div class="settings-status-card locked"><strong>Workspace unavailable</strong><span>${escapeHtml(error?.message || 'Could not load workspace.')}</span></div>`;
+  }
+}
+
+function renderAgentWorkspaceEditor(agent) {
+  const container = document.getElementById('agentPanel-workspace');
+  if (!container || !agent) return;
+  const key = String(agent.id || agentProfileKey(agent) || '');
+  const state = _agentWorkspaceEditorState.get(key);
+  if (!state?.data) {
+    container.innerHTML = '<div class="settings-inline-status">Loading workspace...</div>';
+    loadAgentWorkspaceSection(agent);
+    return;
+  }
+  const data = state.data;
+  if (!data.workspaceAvailable) {
+    container.innerHTML = `<div class="settings-status-card locked"><strong>${escapeHtml(data.providerKind || 'agent')}</strong><span>${escapeHtml(data.unsupportedReason || 'Workspace editing is not available.')}</span></div>`;
+    return;
+  }
+  const files = Array.isArray(data.files) ? data.files : [];
+  const selectedName = files.some(file => file.name === state.selectedName) ? state.selectedName : (files[0]?.name || '');
+  state.selectedName = selectedName;
+  const file = files.find(item => item.name === selectedName) || {};
+  const locked = isLicenseFeatureLocked('advancedEditor') || !data.editable || !file.editable;
+  const rootLabel = compactWorkspacePath(data.workspaceRoot);
+  container.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <select id="agentWorkspace-file" style="flex:1;min-width:0">
+        ${files.map(item => `<option value="${escapeAttr(item.name)}" ${item.name === selectedName ? 'selected' : ''}>${escapeHtml(item.name)}${item.exists ? '' : ' (new)'}</option>`).join('')}
+      </select>
+      <button id="agentWorkspace-refresh" class="btn-secondary" type="button" style="padding:8px 10px">Refresh</button>
+    </div>
+    ${rootLabel ? `<div style="font-size:9px;color:var(--text-secondary);margin-bottom:6px">${escapeHtml(rootLabel)}</div>` : ''}
+    ${file.error ? `<div class="settings-inline-status error">${escapeHtml(file.error)}</div>` : ''}
+    <textarea id="agentWorkspace-content" rows="9" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;line-height:1.4">${escapeTextareaValue(file.content || '')}</textarea>
+    <button id="agentWorkspace-save" class="btn-primary" type="button" ${locked ? 'disabled' : ''} style="width:100%;margin-top:8px">Save Workspace File</button>
+  `;
+  container.querySelector('#agentWorkspace-file')?.addEventListener('change', event => {
+    state.selectedName = event.target.value;
+    renderAgentWorkspaceEditor(agent);
+  });
+  container.querySelector('#agentWorkspace-refresh')?.addEventListener('click', () => renderAgentWorkspaceSection(agent, { reload: true }));
+  container.querySelector('#agentWorkspace-save')?.addEventListener('click', async () => {
+    if (isLicenseFeatureLocked('advancedEditor')) {
+      showLicenseLockedToast('Agent editing');
+      return;
+    }
+    const textarea = container.querySelector('#agentWorkspace-content');
+    const button = container.querySelector('#agentWorkspace-save');
+    if (!textarea || !selectedName) return;
+    if (button) { button.disabled = true; button.textContent = 'Saving...'; }
+    try {
+      const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/workspace`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: { [selectedName]: textarea.value } }),
+      });
+      await readJsonResponse(response, 'Could not save workspace file.');
+      const current = files.find(item => item.name === selectedName);
+      if (current) {
+        current.content = textarea.value;
+        current.exists = true;
+        current.size = new Blob([textarea.value]).size;
+      }
+      showToast(`Saved ${selectedName}`, 'success');
+    } catch (error) {
+      showToast(error?.message || 'Could not save workspace file', 'error');
+    } finally {
+      if (button) { button.disabled = isLicenseFeatureLocked('advancedEditor'); button.textContent = 'Save Workspace File'; }
+    }
+  });
+}
+
+function modelOptionRows(models = [], current = '') {
+  const seen = new Set();
+  const rows = [];
+  for (const item of models || []) {
+    const id = String(item?.id || item?.model || item?.name || '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const label = item?.label || item?.name || id;
+    const provider = item?.provider ? ` · ${item.provider}` : '';
+    rows.push(`<option value="${escapeAttr(id)}" ${id === current ? 'selected' : ''}>${escapeHtml(label)}${escapeHtml(provider)}</option>`);
+  }
+  return rows.join('');
+}
+
+function updateCachedAgentModel(agent, model) {
+  const nextModel = String(model || '').trim();
+  const nextProvider = nextModel.includes('/') ? nextModel.split('/', 1)[0] : '';
+  const aliases = new Set([
+    String(agent?.id || ''),
+    String(agent?.statusKey || ''),
+    String(agent?.providerAgentId || ''),
+    String(agentProfileKey(agent) || ''),
+  ].filter(Boolean));
+  for (const item of agentsList || []) {
+    const itemAliases = new Set([
+      String(item?.id || ''),
+      String(item?.statusKey || ''),
+      String(item?.providerAgentId || ''),
+      String(agentProfileKey(item) || ''),
+    ].filter(Boolean));
+    if ([...aliases].some(alias => itemAliases.has(alias))) {
+      item.model = nextModel;
+      if (nextProvider) item.provider = nextProvider;
+    }
+  }
+  if (agent) {
+    agent.model = nextModel;
+    if (nextProvider) agent.provider = nextProvider;
+  }
+}
+
+async function renderAgentFrameworkSection(agent) {
+  const container = document.getElementById('agentPanel-framework');
+  if (!container || !agent) return;
+  const agentKey = agentEditorApiKey(agent);
+  const providerKind = String(agent.providerKind || 'openclaw').toLowerCase();
+  container.innerHTML = '<div class="settings-inline-status">Loading framework settings...</div>';
+  let sessionInfo = {};
+  let modelState = {};
+  try {
+    const params = new URLSearchParams({ agent: agent.id || '', providerKind });
+    const [sessionRes, modelRes] = await Promise.all([
+      fetch(`/session-info?${params.toString()}`).catch(() => null),
+      fetch(`/api/agent-models?${params.toString()}`).catch(() => null),
+    ]);
+    if (sessionRes) sessionInfo = await sessionRes.json().catch(() => ({}));
+    if (modelRes) modelState = await modelRes.json().catch(() => ({}));
+  } catch (error) {
+    sessionInfo = {};
+    modelState = {};
+  }
+  const currentModel = modelState.agentModel || agent.model || sessionInfo.model || modelState.defaultModel || '';
+  const currentProvider = agent.provider || sessionInfo.provider || (currentModel.includes('/') ? currentModel.split('/', 1)[0] : providerKind);
+  const editableModel = providerKind === 'openclaw' && Array.isArray(modelState.models) && modelState.models.length;
+  const locked = isLicenseFeatureLocked('advancedEditor') || modelState.editable === false;
+  container.innerHTML = `
+    <div class="agent-framework-card">
+      <div class="agent-framework-header">
+        <div>
+          <strong>${escapeHtml(providerKind)}</strong>
+          <span>${escapeHtml(agent.providerType || 'runtime')}</span>
+        </div>
+        <div>${escapeHtml(agent.providerAgentId || agent.profile || agent.id || '')}</div>
+      </div>
+      <div class="agent-builder-field-grid">
+        <label>
+          <span>Framework</span>
+          <input value="${escapeAttr(providerKind)}" disabled>
+        </label>
+        <label>
+          <span>Provider</span>
+          <input value="${escapeAttr(currentProvider || providerKind)}" disabled>
+        </label>
+        <label class="agent-builder-wide-field">
+          <span>Model</span>
+          ${editableModel
+            ? `<select id="agentFramework-model" ${locked ? 'disabled' : ''}><option value="">Default (${escapeHtml(modelState.defaultModel || 'none')})</option>${modelOptionRows(modelState.models, currentModel)}</select>`
+            : `<input value="${escapeAttr(currentModel || 'Framework default')}" disabled>`}
+        </label>
+      </div>
+      <div class="agent-framework-actions">
+        <span>${escapeHtml(modelState.unsupportedReason || (sessionInfo.contextWindow ? `${Number(sessionInfo.contextWindow).toLocaleString()} context window` : 'Model context follows framework configuration'))}</span>
+        ${editableModel ? `<button id="agentFramework-saveModel" class="btn-secondary" type="button" ${locked ? 'disabled' : ''}>Apply Model</button>` : ''}
+      </div>
+    </div>
+  `;
+  container.querySelector('#agentFramework-saveModel')?.addEventListener('click', async () => {
+    if (isLicenseFeatureLocked('advancedEditor')) {
+      showLicenseLockedToast('Agent editing');
+      return;
+    }
+    const select = container.querySelector('#agentFramework-model');
+    const button = container.querySelector('#agentFramework-saveModel');
+    if (button) { button.disabled = true; button.textContent = 'Applying...'; }
+    try {
+      const selectedModel = select?.value || '';
+      const response = await fetch('/api/native-models/openclaw/agent-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: decodeURIComponent(agentKey), model: selectedModel }),
+      });
+      const body = await readJsonResponse(response, 'Could not save agent model.');
+      updateCachedAgentModel(agent, body.model || selectedModel);
+      window.dispatchEvent(new CustomEvent('vw:agent-model-changed', {
+        detail: {
+          agentId: agent.id || '',
+          statusKey: agent.statusKey || '',
+          providerAgentId: agent.providerAgentId || '',
+          providerKind,
+          model: body.model || selectedModel || '',
+          defaulted: Boolean(body.defaulted),
+        },
+      }));
+      window.dispatchEvent(new CustomEvent('vw:agents-changed', { detail: { reason: 'model-changed', agentId: agent.id || '' } }));
+      const gatewayStatus = body.gatewaySignal?.status || body.gatewaySignal?.result || '';
+      if (body.gatewaySignal && body.gatewaySignal.ok === false) {
+        showToast('Saved model, but gateway reload was not confirmed', 'warning');
+      } else if (gatewayStatus === 'deferred') {
+        showToast('Saved model; gateway will apply it after active work drains', 'warning');
+      } else {
+        showToast(`Saved model for ${agent.name || agent.id}`, 'success');
+      }
+      renderAgentFrameworkSection(agent);
+    } catch (error) {
+      showToast(error?.message || 'Could not save agent model', 'error');
+    } finally {
+      if (button) { button.disabled = false; button.textContent = 'Apply Model'; }
+    }
+  });
+}
+
+function defaultSkillContent(name = '') {
+  const clean = String(name || '').trim() || 'new-skill';
+  return `---\nname: ${clean}\ndescription: \n---\n\n# ${clean}\n\nInstructions here.\n`;
+}
+
+function renderAgentSkillsSection(agent, options = {}) {
+  const container = document.getElementById('agentPanel-skills');
+  if (!container || !agent) return;
+  const key = String(agent.id || agentProfileKey(agent) || '');
+  if (!_agentSkillsState || _agentSkillsState.agentId !== key || options.reload) {
+    _agentSkillsState = { agentId: key, skills: [], selectedName: '', loaded: false, error: '' };
+    container.innerHTML = '<div class="settings-inline-status">Loading skills...</div>';
+    loadAgentSkillsSection(agent);
+    return;
+  }
+  renderAgentSkillsEditor(agent);
+}
+
+async function loadAgentSkillsSection(agent) {
+  const container = document.getElementById('agentPanel-skills');
+  if (!container || !agent || !_agentSkillsState) return;
+  try {
+    const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/skills`);
+    const data = await readJsonResponse(response, 'Could not load agent skills.');
+    _agentSkillsState.skills = Array.isArray(data.skills) ? data.skills : [];
+    _agentSkillsState.loaded = true;
+    _agentSkillsState.error = data.unsupportedReason || '';
+    if (!_agentSkillsState.selectedName && _agentSkillsState.skills[0]) _agentSkillsState.selectedName = _agentSkillsState.skills[0].name;
+    if (selectedAgentId === agent.id) renderAgentSkillsEditor(agent);
+  } catch (error) {
+    _agentSkillsState.loaded = true;
+    _agentSkillsState.error = error?.message || 'Could not load skills.';
+    renderAgentSkillsEditor(agent);
+  }
+}
+
+function renderAgentSkillsEditor(agent) {
+  const container = document.getElementById('agentPanel-skills');
+  if (!container || !agent || !_agentSkillsState) return;
+  const skills = _agentSkillsState.skills || [];
+  const selected = skills.find(skill => skill.name === _agentSkillsState.selectedName) || skills[0] || null;
+  const locked = isLicenseFeatureLocked('advancedEditor');
+  container.innerHTML = `
+    <div class="agent-skills-layout">
+      <div class="agent-skills-list">
+        <div class="agent-builder-section-title-row">
+          <strong>${skills.length} skill${skills.length === 1 ? '' : 's'}</strong>
+          <button id="agentSkill-new" class="btn-secondary" type="button" ${locked ? 'disabled' : ''}>Add</button>
+        </div>
+        ${_agentSkillsState.error ? `<div class="settings-inline-status error">${escapeHtml(_agentSkillsState.error)}</div>` : ''}
+        <div class="agent-skills-rows">
+          ${skills.length ? skills.map(skill => `
+            <button type="button" class="agent-skill-row ${skill.name === selected?.name ? 'active' : ''}" data-agent-skill-name="${escapeAttr(skill.name)}">
+              <span>${escapeHtml(skill.name)}</span>
+              <small>${escapeHtml((skill.description || '').slice(0, 80))}</small>
+            </button>
+          `).join('') : '<div class="settings-inline-status">No skills configured for this agent.</div>'}
+        </div>
+      </div>
+      <div class="agent-skill-editor">
+        <label class="form-group">
+          <span>Skill name</span>
+          <input id="agentSkill-name" value="${escapeAttr(selected?.name || '')}" ${selected ? 'disabled' : ''} ${locked ? 'disabled' : ''}>
+        </label>
+        <label class="form-group">
+          <span>Skill content</span>
+          <textarea id="agentSkill-content" rows="12" spellcheck="false" ${locked ? 'disabled' : ''}>${escapeTextareaValue(selected?.content || defaultSkillContent(selected?.name || ''))}</textarea>
+        </label>
+        <div class="agent-skill-actions">
+          <button id="agentSkill-save" class="btn-primary" type="button" ${locked ? 'disabled' : ''}>Save Skill</button>
+          <button id="agentSkill-saveLibrary" class="btn-secondary" type="button" ${locked || !selected ? 'disabled' : ''}>Save To Library</button>
+          <button id="agentSkill-delete" class="btn-secondary" type="button" ${locked || !selected ? 'disabled' : ''}>Delete</button>
+        </div>
+      </div>
+    </div>
+  `;
+  container.querySelectorAll('[data-agent-skill-name]').forEach(button => {
+    button.addEventListener('click', () => {
+      _agentSkillsState.selectedName = button.dataset.agentSkillName || '';
+      renderAgentSkillsEditor(agent);
+    });
+  });
+  container.querySelector('#agentSkill-new')?.addEventListener('click', () => {
+    _agentSkillsState.selectedName = '';
+    renderAgentSkillsEditor(agent);
+    container.querySelector('#agentSkill-name')?.focus();
+  });
+  container.querySelector('#agentSkill-save')?.addEventListener('click', () => saveAgentSkillFromBuilder(agent));
+  container.querySelector('#agentSkill-saveLibrary')?.addEventListener('click', () => saveAgentSkillToLibrary(agent, selected?.name || ''));
+  container.querySelector('#agentSkill-delete')?.addEventListener('click', () => deleteAgentSkillFromBuilder(agent, selected?.name || ''));
+}
+
+async function saveAgentSkillFromBuilder(agent) {
+  const container = document.getElementById('agentPanel-skills');
+  const name = (container?.querySelector('#agentSkill-name')?.value || '').trim();
+  const content = container?.querySelector('#agentSkill-content')?.value || '';
+  if (!name) return showToast('Skill name is required', 'error');
+  try {
+    const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/skills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, content }),
+    });
+    await readJsonResponse(response, 'Could not save skill.');
+    _agentSkillsState.selectedName = name;
+    showToast(`Saved skill: ${name}`, 'success');
+    renderAgentSkillsSection(agent, { reload: true });
+  } catch (error) {
+    showToast(error?.message || 'Could not save skill', 'error');
+  }
+}
+
+async function saveAgentSkillToLibrary(agent, skillName) {
+  if (!skillName) return;
+  async function requestSave(overwrite = false) {
+    const response = await fetch('/api/skills-library/save-from-agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: agent.id, skill: skillName, overwrite }),
+    });
+    return response.json().then(body => ({ response, body }));
+  }
+  try {
+    let { response, body } = await requestSave(false);
+    if (response.ok && body.ok) {
+      showToast(`Saved ${skillName} to Skill Library`, 'success');
+      return;
+    }
+    if (body.exists && body.different && confirm(`"${skillName}" already exists in the library. Update the library copy?`)) {
+      ({ response, body } = await requestSave(true));
+      if (response.ok && body.ok) {
+        showToast(`Updated ${skillName} in Skill Library`, 'success');
+        return;
+      }
+    }
+    showToast(body?.error || body?.message || 'Could not save skill to library', 'error');
+  } catch (error) {
+    showToast(error?.message || 'Could not save skill to library', 'error');
+  }
+}
+
+async function deleteAgentSkillFromBuilder(agent, skillName) {
+  if (!skillName || !confirm(`Remove skill "${skillName}" from ${agent.name || agent.id}?`)) return;
+  try {
+    const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/skills/${encodeURIComponent(skillName)}`, { method: 'DELETE' });
+    await readJsonResponse(response, 'Could not delete skill.');
+    _agentSkillsState.selectedName = '';
+    showToast(`Deleted skill: ${skillName}`, 'success');
+    renderAgentSkillsSection(agent, { reload: true });
+  } catch (error) {
+    showToast(error?.message || 'Could not delete skill', 'error');
+  }
+}
+
+function bindSkillsLibraryChrome() {
+  const modal = document.getElementById('skillsLibraryModal');
+  if (!modal || modal.dataset.boundSkillsLibraryChrome) return;
+  modal.dataset.boundSkillsLibraryChrome = 'true';
+  modal.querySelector('#skillsLibrary-refresh')?.addEventListener('click', () => refreshSkillsLibrary());
+  modal.querySelector('#skillsLibrary-new')?.addEventListener('click', () => selectLibrarySkill(null));
+  modal.querySelector('#skillsLibrary-save')?.addEventListener('click', () => saveLibrarySkill());
+  modal.querySelector('#skillsLibrary-delete')?.addEventListener('click', () => deleteLibrarySkill());
+  modal.querySelector('#skillsLibrary-apply')?.addEventListener('click', () => applyLibrarySkillToAgent());
+  modal.addEventListener('click', event => {
+    if (event.target === modal) closeAgentSkillsLibrary();
+  });
+}
+
+function openAgentSkillsLibrary(preferredAgentId = '') {
+  const modal = document.getElementById('skillsLibraryModal');
+  if (!modal) return;
+  bindSkillsLibraryChrome();
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('agent-builder-open');
+  _skillsLibraryState = _skillsLibraryState || { skills: [], selectedName: '', preferredAgentId: '' };
+  _skillsLibraryState.preferredAgentId = preferredAgentId || selectedAgentId || _skillsLibraryState.preferredAgentId || '';
+  refreshSkillsLibrary();
+}
+
+function closeAgentSkillsLibrary() {
+  const modal = document.getElementById('skillsLibraryModal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+  }
+  updateAgentEditorBodyLock();
+}
+
+window.closeAgentSkillsLibrary = closeAgentSkillsLibrary;
+
+const MODELS_PROVIDERS_PAGE_VERSION = '20260706-models-providers-r4';
+
+function bindModelsProvidersChrome() {
+  const modal = document.getElementById('modelsProvidersModal');
+  if (!modal || modal.dataset.boundModelsProvidersChrome) return;
+  modal.dataset.boundModelsProvidersChrome = 'true';
+  modal.addEventListener('click', event => {
+    if (event.target === modal) closeModelsProvidersWindow();
+  });
+}
+
+function openModelsProvidersWindow() {
+  const modal = document.getElementById('modelsProvidersModal');
+  const frame = document.getElementById('modelsProvidersFrame');
+  if (!modal || !frame) return;
+  bindModelsProvidersChrome();
+  const agentId = document.getElementById('agentList')?.value || selectedAgentId || 'main';
+  const frameSrc = `models.html?agent=${encodeURIComponent(agentId)}&v=${MODELS_PROVIDERS_PAGE_VERSION}`;
+  if (frame.getAttribute('src') !== frameSrc) frame.setAttribute('src', frameSrc);
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('agent-builder-open');
+}
+
+function closeModelsProvidersWindow() {
+  const modal = document.getElementById('modelsProvidersModal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+  }
+  updateAgentEditorBodyLock();
+}
+
+window.openModelsProvidersWindow = openModelsProvidersWindow;
+window.closeModelsProvidersWindow = closeModelsProvidersWindow;
+
+async function refreshSkillsLibrary() {
+  const list = document.getElementById('skillsLibrary-list');
+  const status = document.getElementById('skillsLibrary-status');
+  if (list) list.innerHTML = '<div class="settings-inline-status">Loading skills...</div>';
+  try {
+    const [skillsResponse, agentsResponse] = await Promise.all([
+      fetch('/api/skills-library'),
+      fetch('/api/agents'),
+    ]);
+    const skillsBody = await readJsonResponse(skillsResponse, 'Could not load skill library.');
+    const agentsBody = await agentsResponse.json().catch(() => []);
+    _skillsLibraryState = _skillsLibraryState || {};
+    _skillsLibraryState.skills = Array.isArray(skillsBody) ? skillsBody : (skillsBody.skills || []);
+    _skillsLibraryState.agents = Array.isArray(agentsBody) ? agentsBody : [];
+    if (!_skillsLibraryState.selectedName && _skillsLibraryState.skills[0]) _skillsLibraryState.selectedName = _skillsLibraryState.skills[0].name;
+    renderSkillsLibrary();
+  } catch (error) {
+    if (list) list.innerHTML = `<div class="settings-inline-status error">${escapeHtml(error?.message || 'Could not load skills.')}</div>`;
+    if (status) status.textContent = '';
+  }
+}
+
+function renderSkillsLibrary() {
+  const list = document.getElementById('skillsLibrary-list');
+  const agentSelect = document.getElementById('skillsLibrary-agentSelect');
+  if (!_skillsLibraryState) _skillsLibraryState = { skills: [], agents: [] };
+  const skills = _skillsLibraryState.skills || [];
+  const selected = skills.find(skill => skill.name === _skillsLibraryState.selectedName) || null;
+  const locked = isLicenseFeatureLocked('advancedEditor');
+  if (list) {
+    list.innerHTML = skills.length ? skills.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))).map(skill => `
+      <button class="skills-library-row ${skill.name === selected?.name ? 'active' : ''}" type="button" data-library-skill="${escapeAttr(skill.name)}">
+        <span>${escapeHtml(skill.name)}</span>
+        <small>${escapeHtml((skill.description || '').slice(0, 100))}</small>
+      </button>
+    `).join('') : '<div class="settings-inline-status">No skills in the library yet.</div>';
+    list.querySelectorAll('[data-library-skill]').forEach(button => {
+      button.addEventListener('click', () => selectLibrarySkill(button.dataset.librarySkill || ''));
+    });
+  }
+  if (agentSelect) {
+    const options = (_skillsLibraryState.agents || []).map(agent => {
+      const id = agent.id || agent.statusKey || agent.agentId || '';
+      return `<option value="${escapeAttr(id)}" ${id === _skillsLibraryState.preferredAgentId ? 'selected' : ''}>${escapeHtml(`${agent.emoji || '🤖'} ${agent.name || id}`)}</option>`;
+    }).join('');
+    agentSelect.innerHTML = options || '<option value="">No agents</option>';
+    agentSelect.disabled = locked;
+  }
+  for (const [id, disabled] of Object.entries({
+    'skillsLibrary-new': locked,
+    'skillsLibrary-save': locked,
+    'skillsLibrary-apply': locked || !skills.length,
+    'skillsLibrary-delete': locked || !selected,
+  })) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = Boolean(disabled);
+  }
+  selectLibrarySkill(selected?.name || null, { renderList: false });
+}
+
+async function selectLibrarySkill(skillName, options = {}) {
+  const nameInput = document.getElementById('skillsLibrary-name');
+  const contentInput = document.getElementById('skillsLibrary-content');
+  const title = document.getElementById('skillsLibrary-editorTitle');
+  const status = document.getElementById('skillsLibrary-status');
+  const deleteBtn = document.getElementById('skillsLibrary-delete');
+  const saveBtn = document.getElementById('skillsLibrary-save');
+  const applyBtn = document.getElementById('skillsLibrary-apply');
+  const locked = isLicenseFeatureLocked('advancedEditor');
+  _skillsLibraryState = _skillsLibraryState || { skills: [] };
+  _skillsLibraryState.selectedName = skillName || '';
+  if (options.renderList !== false) renderSkillsLibrary();
+  if (!skillName) {
+    if (title) title.textContent = 'Add Skill';
+    if (nameInput) { nameInput.value = ''; nameInput.disabled = locked; }
+    if (contentInput) { contentInput.value = defaultSkillContent(''); contentInput.disabled = locked; }
+    if (deleteBtn) deleteBtn.disabled = true;
+    if (saveBtn) saveBtn.disabled = locked;
+    if (applyBtn) applyBtn.disabled = true;
+    if (status) status.textContent = '';
+    return;
+  }
+  if (title) title.textContent = `Edit ${skillName}`;
+  if (nameInput) { nameInput.value = skillName; nameInput.disabled = true; }
+  if (deleteBtn) deleteBtn.disabled = locked;
+  if (saveBtn) saveBtn.disabled = locked;
+  if (applyBtn) applyBtn.disabled = locked;
+  if (contentInput) { contentInput.value = 'Loading...'; contentInput.disabled = locked; }
+  try {
+    const response = await fetch(`/api/skills-library/${encodeURIComponent(skillName)}`);
+    const data = await readJsonResponse(response, 'Could not load skill.');
+    if (contentInput) contentInput.value = data.content || '';
+    if (status) status.textContent = data.description || '';
+  } catch (error) {
+    if (contentInput) contentInput.value = '';
+    if (status) status.textContent = error?.message || 'Could not load skill.';
+  }
+}
+
+async function saveLibrarySkill() {
+  const name = (document.getElementById('skillsLibrary-name')?.value || '').trim();
+  const content = document.getElementById('skillsLibrary-content')?.value || '';
+  if (!name) return showToast('Skill name is required', 'error');
+  try {
+    const response = await fetch('/api/skills-library', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, content }),
+    });
+    await readJsonResponse(response, 'Could not save library skill.');
+    showToast(`Saved library skill: ${name}`, 'success');
+    _skillsLibraryState.selectedName = name;
+    refreshSkillsLibrary();
+  } catch (error) {
+    showToast(error?.message || 'Could not save skill', 'error');
+  }
+}
+
+async function deleteLibrarySkill() {
+  const name = _skillsLibraryState?.selectedName || '';
+  if (!name || !confirm(`Delete "${name}" from the Skill Library? Agent copies are not affected.`)) return;
+  try {
+    const response = await fetch(`/api/skills-library/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await readJsonResponse(response, 'Could not delete library skill.');
+    showToast(`Deleted library skill: ${name}`, 'success');
+    _skillsLibraryState.selectedName = '';
+    refreshSkillsLibrary();
+  } catch (error) {
+    showToast(error?.message || 'Could not delete skill', 'error');
+  }
+}
+
+async function applyLibrarySkillToAgent() {
+  const skill = _skillsLibraryState?.selectedName || '';
+  const agentId = document.getElementById('skillsLibrary-agentSelect')?.value || '';
+  if (!skill || !agentId) return showToast('Choose a skill and an agent first', 'warning');
+  async function requestApply(overwrite = false) {
+    const response = await fetch('/api/skills-library/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skill, agentId, overwrite }),
+    });
+    return response.json().then(body => ({ response, body }));
+  }
+  try {
+    let { response, body } = await requestApply(false);
+    if (response.ok && body.ok) {
+      showToast(`Applied ${skill} to ${agentId}`, 'success');
+      if (_agentSkillsState?.agentId === agentId) renderAgentSkillsSection(agentsList.find(agent => agent.id === agentId), { reload: true });
+      return;
+    }
+    if (body.exists && confirm(`${agentId} already has "${skill}". Overwrite it?`)) {
+      ({ response, body } = await requestApply(true));
+      if (response.ok && body.ok) {
+        showToast(`Overwrote ${skill} on ${agentId}`, 'success');
+        return;
+      }
+    }
+    showToast(body?.error || body?.warning || 'Could not apply skill', 'error');
+  } catch (error) {
+    showToast(error?.message || 'Could not apply skill', 'error');
+  }
+}
+
+function profileListToLines(values) {
+  if (!Array.isArray(values)) return '';
+  return values.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
+}
+
+function linesToProfileList(value) {
+  return String(value || '').split('\n').map(line => line.trim()).filter(Boolean);
+}
+
+function cloneResidentProfile(profile) {
+  return JSON.parse(JSON.stringify(profile || {}));
+}
+
+function renderAgentResidentProfileSection(agent, options = {}) {
+  const container = document.getElementById('agentPanel-residentProfile');
+  if (!container || !agent) return;
+  const key = String(agent.id || agentProfileKey(agent) || '');
+  if (container.dataset.agentId !== key || options.reload) {
+    container.dataset.agentId = key;
+    container.innerHTML = '<div class="settings-inline-status">Loading resident profile...</div>';
+    loadAgentResidentProfileSection(agent);
+    return;
+  }
+  renderAgentResidentProfileEditor(agent);
+}
+
+async function loadAgentResidentProfileSection(agent) {
+  const container = document.getElementById('agentPanel-residentProfile');
+  if (!container || !agent) return;
+  const key = String(agent.id || agentProfileKey(agent) || '');
+  try {
+    const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/resident-profile`);
+    const data = await readJsonResponse(response, 'Could not load resident profile.');
+    _agentResidentProfileEditorState.set(key, { data, profile: data.residentProfile || {} });
+    agent.residentProfile = data.residentProfile || null;
+    if (selectedAgentId === agent.id) renderAgentResidentProfileEditor(agent);
+  } catch (error) {
+    container.innerHTML = `<div class="settings-status-card locked"><strong>Profile unavailable</strong><span>${escapeHtml(error?.message || 'Could not load resident profile.')}</span></div>`;
+  }
+}
+
+function renderAgentResidentProfileEditor(agent) {
+  const container = document.getElementById('agentPanel-residentProfile');
+  if (!container || !agent) return;
+  const key = String(agent.id || agentProfileKey(agent) || '');
+  const state = _agentResidentProfileEditorState.get(key);
+  if (!state?.profile) {
+    container.innerHTML = '<div class="settings-inline-status">Loading resident profile...</div>';
+    loadAgentResidentProfileSection(agent);
+    return;
+  }
+  const profile = state.profile;
+  const identity = profile.identity || {};
+  const goals = profile.goals || {};
+  const memory = profile.memory || {};
+  const locked = isLicenseFeatureLocked('advancedEditor');
+  container.innerHTML = `
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Role</label>
+      <input id="residentProfile-role" type="text" value="${escapeAttr(identity.role || '')}" maxlength="160" ${locked ? 'disabled' : ''}>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Life Purpose</label>
+      <textarea id="residentProfile-purpose" rows="3" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(identity.lifePurpose || '')}</textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Current Goals</label>
+      <textarea id="residentProfile-currentGoals" rows="3" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(profileListToLines(goals.current))}</textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Long-Term Goals</label>
+      <textarea id="residentProfile-longGoals" rows="3" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(profileListToLines(goals.longTerm))}</textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Memory Summary</label>
+      <textarea id="residentProfile-memorySummary" rows="4" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(memory.summary || '')}</textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Short-Term Memory</label>
+      <textarea id="residentProfile-shortMemory" rows="4" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(profileListToLines(memory.shortTerm))}</textarea>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button id="residentProfile-refresh" class="btn-secondary" type="button" style="flex:0 0 auto;padding:8px 10px">Refresh</button>
+      <button id="residentProfile-save" class="btn-primary" type="button" ${locked ? 'disabled' : ''} style="flex:1">Save Resident Profile</button>
+    </div>
+    <div style="font-size:9px;color:var(--text-secondary);margin-top:6px">${escapeHtml(profile.schemaVersion || 'resident profile')}</div>
+  `;
+  container.querySelector('#residentProfile-refresh')?.addEventListener('click', () => renderAgentResidentProfileSection(agent, { reload: true }));
+  container.querySelector('#residentProfile-save')?.addEventListener('click', async () => {
+    if (isLicenseFeatureLocked('advancedEditor')) {
+      showLicenseLockedToast('Agent editing');
+      return;
+    }
+    const button = container.querySelector('#residentProfile-save');
+    const next = cloneResidentProfile(profile);
+    next.identity = {
+      ...(next.identity || {}),
+      role: container.querySelector('#residentProfile-role')?.value || '',
+      lifePurpose: container.querySelector('#residentProfile-purpose')?.value || '',
+    };
+    next.goals = {
+      ...(next.goals || {}),
+      current: linesToProfileList(container.querySelector('#residentProfile-currentGoals')?.value || ''),
+      longTerm: linesToProfileList(container.querySelector('#residentProfile-longGoals')?.value || ''),
+    };
+    next.memory = {
+      ...(next.memory || {}),
+      summary: container.querySelector('#residentProfile-memorySummary')?.value || '',
+      shortTerm: linesToProfileList(container.querySelector('#residentProfile-shortMemory')?.value || ''),
+    };
+    if (button) { button.disabled = true; button.textContent = 'Saving...'; }
+    try {
+      const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/resident-profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ residentProfile: next }),
+      });
+      const body = await readJsonResponse(response, 'Could not save resident profile.');
+      state.profile = body.residentProfile || next;
+      agent.residentProfile = state.profile;
+      showToast(`Saved resident profile for ${agent.name || agent.id}`, 'success');
+    } catch (error) {
+      showToast(error?.message || 'Could not save resident profile', 'error');
+    } finally {
+      if (button) { button.disabled = isLicenseFeatureLocked('advancedEditor'); button.textContent = 'Save Resident Profile'; }
+    }
+  });
 }
 
 function isBarberChairCatalogKey(value) {
@@ -33551,80 +34585,68 @@ function openAgentPanel(agentId, _opts = {}) {
   if (!panel) return;
   // Showing agent details should not force-open the left edit sidebar.
   updateMiniMapPosition();
-  panel.style.display = 'block';
+  bindAgentBuilderChrome();
+  prepareAgentBuilderState(agent);
+  panel.style.display = 'flex';
+  panel.setAttribute('aria-hidden', 'false');
+  panel.dataset.agentId = agent.id;
+  document.body.classList.add('agent-builder-open');
 
-  document.getElementById('agentPanel-title').textContent = (agent.emoji || '🤖') + ' ' + agent.name;
+  document.getElementById('agentPanel-title').textContent = `${agent.emoji || '🤖'} ${agent.name || agent.id}`;
 
-  // Info card with appearance
+  // Identity and framework details
   const normalizedPanelStatus = normalizeLiveAgentStatus(agent.status) || 'offline';
   const statusClass = ['working', 'finishing', 'meeting', 'idle', 'break'].includes(normalizedPanelStatus) ? normalizedPanelStatus : 'offline';
   const agentLiveModeEnabled = normalizeAgentLiveModeEnabled(agent);
   const agentLiveModeLocked = isLicenseFeatureLocked('agentLiveMode');
-  const ap = agent._appearance || {};
-  const shirtHex = ap.shirtColor || '#1565c0';
-  const hairHex = ap.hairColor || '#333333';
-  const skinHex = ap.skinTone || '#ffcc80';
-  // Determine hat/glasses based on agent seed (same logic as createAgent3D)
-  const agentSeed = (agent.id || agent.name || 'x').split('').reduce((s, c) => s + c.charCodeAt(0), 0);
-  const rng1 = pseudoRandom(agentSeed);
-  const rng2 = pseudoRandom(agentSeed + 7);
-  const hasHat = rng1 < 0.20;
-  const hasGlasses = rng2 < 0.10;
-  const genderLabel = ap.gender === 'F' ? 'Female' : 'Male';
-  const hairStyle = ap.gender === 'F' ? 'Long' : 'Short';
+  const providerLabel = agent.providerKind || agent.framework || 'openclaw';
 
   document.getElementById('agentPanel-info').innerHTML = `
-    <div class="agent-info-card">
-      <div class="agent-emoji">${agent.emoji || '🤖'}</div>
-      <div class="agent-details">
-        <label class="agent-name-edit-label">Name</label>
-        <div class="agent-name-edit-row">
-          <input id="agentPanel-name" class="agent-name-input" value="${escapeAttr(agent.name || agent.id)}" maxlength="60">
-          <button id="agentPanel-saveName" class="btn-primary agent-name-save">Save</button>
+    <div class="agent-builder-identity-card">
+      <div class="agent-builder-avatar-token">${agent.emoji || '🤖'}</div>
+      <div class="agent-builder-identity-form">
+        <div class="agent-builder-field-grid">
+          <label>
+            <span>Agent ID</span>
+            <input value="${escapeAttr(agent.id || '')}" disabled>
+          </label>
+          <label>
+            <span>Display name</span>
+            <input id="agentPanel-name" class="agent-name-input" value="${escapeAttr(agent.name || agent.id)}" maxlength="60" autocomplete="off">
+          </label>
+          <label>
+            <span>Emoji</span>
+            <input id="agentPanel-emoji" value="${escapeAttr(agent.emoji || '🤖')}" maxlength="8" autocomplete="off">
+          </label>
         </div>
-        <div class="agent-role">${agent.id}</div>
+        <div class="agent-builder-framework-line">
+          <span>${escapeHtml(providerLabel)}</span>
+          <span>${escapeHtml(agent.id || '')}</span>
+        </div>
+        <button id="agentPanel-saveName" class="btn-primary agent-name-save" type="button">Save Identity</button>
       </div>
-    </div>
-    <div class="agent-appearance-card" style="background:${shirtHex}22;border:2px solid ${shirtHex};border-radius:8px;padding:10px;margin-top:8px">
-      <div style="font-size:10px;color:var(--text-secondary);margin-bottom:6px;font-weight:600">👔 Appearance</div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <div style="display:flex;align-items:center;gap:4px;font-size:11px">
-          <div style="width:18px;height:18px;background:${shirtHex};border-radius:3px;border:1px solid rgba(255,255,255,0.3)"></div>
-          Shirt
-        </div>
-        <div style="display:flex;align-items:center;gap:4px;font-size:11px">
-          <div style="width:18px;height:18px;background:${hairHex};border-radius:3px;border:1px solid rgba(255,255,255,0.3)"></div>
-          Hair
-        </div>
-        <div style="display:flex;align-items:center;gap:4px;font-size:11px">
-          <div style="width:18px;height:18px;background:${skinHex};border-radius:50%;border:1px solid rgba(255,255,255,0.3)"></div>
-          Skin
-        </div>
-      </div>
-      <div style="margin-top:8px;font-size:11px;color:var(--text-secondary);line-height:1.8">
-        <span style="color:var(--text-primary)">Gender:</span> ${genderLabel} &nbsp;
-        <span style="color:var(--text-primary)">Hair:</span> ${hairStyle}<br>
-        <span style="color:var(--text-primary)">Glasses:</span> ${hasGlasses ? '✅ Yes' : '❌ No'} &nbsp;
-        <span style="color:var(--text-primary)">Hat:</span> ${hasHat ? '✅ Yes' : '❌ No'}
-      </div>
-      <button id="agentPanel-editAppearance" class="btn-primary" style="width:100%;margin-top:10px">🎨 Edit Appearance</button>
     </div>
   `;
 
   document.getElementById('agentPanel-saveName')?.addEventListener('click', async () => {
     const input = document.getElementById('agentPanel-name');
+    const emojiInput = document.getElementById('agentPanel-emoji');
     const name = (input?.value || '').trim();
+    const emoji = (emojiInput?.value || agent.emoji || '🤖').trim() || '🤖';
     if (!name) return showToast('Name cannot be empty', 'error');
     try {
-      await persistAgentProfile(agent, { name, emoji: agent.emoji || '🤖' });
+      await persistAgentProfile(agent, { name, emoji });
       agent.name = name;
+      agent.emoji = emoji;
       refreshAgentCharacter(agent);
-      showToast(`Saved name: ${name}`, 'success');
+      showToast(`Saved identity: ${name}`, 'success');
     } catch (e) {
-      showToast('Could not save agent name', 'error');
+      showToast('Could not save agent identity', 'error');
     }
   });
-  document.getElementById('agentPanel-editAppearance')?.addEventListener('click', () => openAppearanceEditor(agent.id));
+  renderAgentBuilderSummary(agent);
+  renderAgentBuilderPreview();
+  setAgentBuilderTab(_agentBuilderState?.activeTab || 'settings');
 
   // "Go To" button — fly camera to agent + brief scale highlight
   const gotoBtn = document.getElementById('agentPanel-goto');
@@ -33718,14 +34740,14 @@ function openAgentPanel(agentId, _opts = {}) {
   }
 
   if (isLicenseFeatureLocked('advancedEditor')) {
-    for (const id of ['agentPanel-name', 'agentPanel-saveName', 'agentPanel-editAppearance', 'agentPanel-work', 'agentPanel-home', 'agentPanel-assign']) {
+    for (const id of ['agentPanel-name', 'agentPanel-emoji', 'agentPanel-saveName', 'agentPanel-work', 'agentPanel-home', 'agentPanel-assign', 'agentBuilder-saveAppearance']) {
       const el = document.getElementById(id);
       if (!el) continue;
       el.disabled = true;
       el.classList.add('feature-locked-control');
       el.title = 'Activation required for agent editing.';
     }
-    const body = panel.querySelector('.agent-panel-body');
+    const body = panel.querySelector('.agent-builder-main');
     if (body && !body.querySelector('[data-demo-agent-lock-notice]')) {
       const notice = document.createElement('div');
       notice.className = 'settings-status-card locked';
@@ -33737,6 +34759,12 @@ function openAgentPanel(agentId, _opts = {}) {
 
   renderAgentNeedsSection(agent);
   renderAgentPersonalitySection(agent);
+  renderAgentFrameworkSection(agent);
+  renderAgentWorkspaceSection(agent);
+  renderAgentResidentProfileSection(agent);
+  renderAgentSkillsSection(agent);
+  renderAgentBuilderSummary(agent);
+  if (_agentBuilderState?.activeTab === 'appearance') renderAgentBuilderAppearanceTab(agent);
   ensureAgentNeedsRefreshTimer();
 }
 
@@ -33890,6 +34918,354 @@ function renderAgentPersonalitySection(agent) {
 function appearanceOptionsHtml(options, includeAuto = false) {
   const auto = includeAuto ? '<option value="">Auto</option>' : '';
   return auto + options.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+}
+
+function bindAgentBuilderChrome() {
+  const modal = document.getElementById('agentPanel');
+  if (!modal || modal.dataset.boundAgentBuilderChrome) return;
+  modal.dataset.boundAgentBuilderChrome = 'true';
+  modal.querySelectorAll('[data-agent-builder-tab]').forEach(button => {
+    button.addEventListener('click', () => setAgentBuilderTab(button.dataset.agentBuilderTab || 'settings'));
+  });
+  modal.querySelector('#agentBuilder-cancel')?.addEventListener('click', closeAgentEditor);
+  modal.querySelector('#agentBuilder-saveAppearance')?.addEventListener('click', saveAgentBuilderAppearance);
+  modal.querySelector('#agentPanel-openSkillsLibrary')?.addEventListener('click', () => openAgentSkillsLibrary(_agentBuilderState?.agentId || selectedAgentId || ''));
+  modal.querySelector('#agentBuilderRotateLeft')?.addEventListener('click', () => {
+    if (_agentBuilderState) _agentBuilderState.targetRotation -= Math.PI / 4;
+  });
+  modal.querySelector('#agentBuilderRotateRight')?.addEventListener('click', () => {
+    if (_agentBuilderState) _agentBuilderState.targetRotation += Math.PI / 4;
+  });
+  modal.querySelector('#agentBuilderZoom')?.addEventListener('input', event => {
+    if (!_agentBuilderState) return;
+    _agentBuilderState.zoom = Number(event.target.value) || 1.12;
+    renderAgentBuilderPreview();
+  });
+  const previewCanvas = modal.querySelector('#agentBuilderPreviewCanvas');
+  previewCanvas?.addEventListener('pointerdown', event => {
+    if (!_agentBuilderState) return;
+    previewCanvas.setPointerCapture?.(event.pointerId);
+    _agentBuilderPreviewDrag = {
+      x: event.clientX,
+      rotation: _agentBuilderState.targetRotation ?? _agentBuilderState.rotation ?? 0,
+    };
+  });
+  previewCanvas?.addEventListener('pointermove', event => {
+    if (!_agentBuilderState || !_agentBuilderPreviewDrag) return;
+    _agentBuilderState.targetRotation = _agentBuilderPreviewDrag.rotation + (event.clientX - _agentBuilderPreviewDrag.x) * 0.018;
+  });
+  previewCanvas?.addEventListener('pointerup', () => { _agentBuilderPreviewDrag = null; });
+  previewCanvas?.addEventListener('pointercancel', () => { _agentBuilderPreviewDrag = null; });
+}
+
+function setAgentBuilderTab(tab = 'settings') {
+  const modal = document.getElementById('agentPanel');
+  if (!modal) return;
+  const normalized = ['settings', 'profile', 'skills', 'appearance'].includes(tab) ? tab : 'settings';
+  if (_agentBuilderState) _agentBuilderState.activeTab = normalized;
+  modal.querySelectorAll('[data-agent-builder-tab]').forEach(button => {
+    const active = button.dataset.agentBuilderTab === normalized;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  modal.querySelectorAll('[data-agent-builder-pane]').forEach(pane => {
+    pane.classList.toggle('active', pane.dataset.agentBuilderPane === normalized);
+  });
+  const saveAppearance = modal.querySelector('#agentBuilder-saveAppearance');
+  if (saveAppearance) saveAppearance.hidden = normalized !== 'appearance';
+  if (normalized === 'appearance') {
+    const agent = agentsList.find(candidate => candidate?.id === _agentBuilderState?.agentId);
+    if (agent) renderAgentBuilderAppearanceTab(agent);
+  }
+  if (normalized === 'skills') {
+    const agent = agentsList.find(candidate => candidate?.id === _agentBuilderState?.agentId);
+    if (agent) renderAgentSkillsSection(agent);
+  }
+}
+
+function getAgentBuilderStartingAppearance(agent) {
+  const det = getAgentAppearance(agent.id || agent.name || 'x', agent._appearance?.gender || agent.gender);
+  const appearance = { ...det, ...(agent._appearance || {}) };
+  if (appearance.pantsStyle === 'cargo') appearance.pantsStyle = 'jeans';
+  return appearance;
+}
+
+function prepareAgentBuilderState(agent) {
+  const previousTab = _agentBuilderState?.agentId === agent.id ? _agentBuilderState.activeTab : 'settings';
+  _agentBuilderState = {
+    agentId: agent.id,
+    activeTab: previousTab || 'settings',
+    appearance: getAgentBuilderStartingAppearance(agent),
+    rotation: Math.PI / 7,
+    targetRotation: Math.PI / 7,
+    zoom: Number(document.getElementById('agentBuilderZoom')?.value || 1.12),
+    previewAgent: null,
+    lastPreviewTime: performance.now(),
+  };
+}
+
+function renderAgentBuilderSummary(agent) {
+  const container = document.getElementById('agentBuilder-summary');
+  const icon = document.getElementById('agentBuilder-icon');
+  const subtitle = document.getElementById('agentBuilder-subtitle');
+  const previewStatus = document.getElementById('agentBuilder-previewStatus');
+  if (icon) icon.textContent = agent.emoji || '🤖';
+  if (subtitle) subtitle.textContent = `${agent.id || 'agent'} · ${agent.providerKind || 'openclaw'}`;
+  if (previewStatus) previewStatus.textContent = normalizeLiveAgentStatus(agent.status) || 'offline';
+  if (!container) return;
+  const work = agent._workBuilding?.name || buildingsMap.get(agent.workBuilding)?.name || agent.workBuilding || 'No work building';
+  const home = agent._homeBuilding?.name || buildingsMap.get(agent.homeBuilding)?.name || agent.homeBuilding || 'No home building';
+  container.innerHTML = `
+    <div class="agent-builder-summary-name">${escapeHtml(agent.name || agent.id)}</div>
+    <div class="agent-builder-summary-id">${escapeHtml(agent.id || '')}</div>
+    <div class="agent-builder-summary-meta">
+      <span>${escapeHtml(agent.providerKind || 'openclaw')}</span>
+      <span>${escapeHtml(normalizeLiveAgentStatus(agent.status) || agent.status || 'offline')}</span>
+    </div>
+    <div class="agent-builder-summary-assignments">
+      <div><strong>Work</strong><span>${escapeHtml(work)}</span></div>
+      <div><strong>Home</strong><span>${escapeHtml(home)}</span></div>
+    </div>
+  `;
+}
+
+function renderAgentBuilderAppearanceTab(agent) {
+  const container = document.getElementById('agentBuilder-appearanceControls');
+  if (!container || !_agentBuilderState) return;
+  container.innerHTML = `
+    <div class="appearance-controls agent-builder-appearance-controls">
+      <div class="appearance-controls-title">
+        <span>Customize Character</span>
+        <small>Preview updates live</small>
+      </div>
+      <div class="appearance-control-group"><h4>Body</h4>
+        <label>Gender<select data-builder-appearance-field="gender"><option value="M">Male</option><option value="F">Female</option></select></label>
+        <label>Height<input type="range" min="0.80" max="1.20" step="0.01" data-builder-appearance-field="heightScale"></label>
+        <label>Build<input type="range" min="0.82" max="1.20" step="0.01" data-builder-appearance-field="bodyScale"></label>
+        <label>Skin<input type="color" data-builder-appearance-field="skinTone"></label>
+      </div>
+      <div class="appearance-control-group"><h4>Face</h4>
+        <label>Eyebrows<select data-builder-appearance-field="eyebrowStyle">${appearanceOptionsHtml(APPEARANCE_CATALOG.eyebrowStyles)}</select></label>
+        <label>Eye size<select data-builder-appearance-field="eyeSize">${appearanceOptionsHtml(APPEARANCE_CATALOG.eyeSizes)}</select></label>
+        <label class="appearance-check"><input type="checkbox" data-builder-appearance-field="showCheeks"> Cheeks</label>
+        <label>Cheek color<input type="color" data-builder-appearance-field="cheekColor"></label>
+        <label>Eyes<input type="color" data-builder-appearance-field="eyeColor"></label>
+        <label>Lips<input type="color" data-builder-appearance-field="lipColor"></label>
+      </div>
+      <div class="appearance-control-group"><h4>Hair</h4>
+        <label>Male styles<select data-builder-appearance-field="hairStyle" data-builder-hair-gender="M">${appearanceOptionsHtml(APPEARANCE_CATALOG.maleHairStyles)}</select></label>
+        <label>Female styles<select data-builder-appearance-field="hairStyle" data-builder-hair-gender="F">${appearanceOptionsHtml(APPEARANCE_CATALOG.femaleHairStyles)}</select></label>
+        <label>Hair color<input type="color" data-builder-appearance-field="hairColor"></label>
+      </div>
+      <div class="appearance-control-group"><h4>Clothes</h4>
+        <label>Shirt<select data-builder-appearance-field="shirtStyle">${appearanceOptionsHtml(APPEARANCE_CATALOG.shirtStyles)}</select></label>
+        <label>Shirt color<input type="color" data-builder-appearance-field="shirtColor"></label>
+        <label>Pants<select data-builder-appearance-field="pantsStyle">${appearanceOptionsHtml(APPEARANCE_CATALOG.pantsStyles)}</select></label>
+        <label>Pants color<input type="color" data-builder-appearance-field="pantsColor"></label>
+        <label>Shoes<select data-builder-appearance-field="shoeStyle">${appearanceOptionsHtml(APPEARANCE_CATALOG.shoeStyles)}</select></label>
+        <label>Shoe color<input type="color" data-builder-appearance-field="shoeColor"></label>
+      </div>
+      <div class="appearance-control-group"><h4>Accessories</h4>
+        <label>Clothing<select data-builder-appearance-field="clothingAccessory">${appearanceOptionsHtml(APPEARANCE_CATALOG.clothingAccessories)}</select></label>
+        <label>Accessory color<input type="color" data-builder-appearance-field="accessoryColor"></label>
+        <label>Hat / eyewear<select data-builder-appearance-field="accessoryStyle">${appearanceOptionsHtml(APPEARANCE_CATALOG.accessories)}</select></label>
+        <label>Glasses color<input type="color" data-builder-appearance-field="glassColor"></label>
+        <label>Hat color<input type="color" data-builder-appearance-field="hatColor"></label>
+      </div>
+    </div>
+  `;
+  container.querySelectorAll('[data-builder-appearance-field]').forEach(input => {
+    input.addEventListener('input', () => {
+      updateAgentBuilderAppearanceFromControls();
+      renderAgentBuilderPreview();
+    });
+  });
+  syncAgentBuilderAppearanceControls();
+}
+
+function syncAgentBuilderAppearanceControls() {
+  const container = document.getElementById('agentBuilder-appearanceControls');
+  const appearance = _agentBuilderState?.appearance || {};
+  if (!container) return;
+  const gender = appearance.gender || 'M';
+  container.querySelectorAll('[data-builder-hair-gender]').forEach(select => {
+    const active = select.dataset.builderHairGender === gender;
+    select.closest('label')?.classList.toggle('appearance-hidden-control', !active);
+    select.disabled = !active;
+  });
+  container.querySelectorAll('[data-builder-appearance-field]').forEach(input => {
+    const field = input.dataset.builderAppearanceField;
+    const value = appearance[field];
+    if (input.type === 'checkbox') input.checked = field === 'showCheeks' ? value !== false : !!value;
+    else if (input.type === 'color') input.value = toHexColor(value, field === 'lipColor' ? '#8b3a3a' : '#ffffff');
+    else input.value = value ?? input.value;
+  });
+  const activeHair = container.querySelector(`[data-builder-hair-gender="${gender}"]`);
+  if (activeHair) {
+    const hasStyle = appearance.hairStyle && [...activeHair.options].some(option => option.value === appearance.hairStyle);
+    if (hasStyle) activeHair.value = appearance.hairStyle;
+    else if (activeHair.options.length) {
+      activeHair.selectedIndex = 0;
+      appearance.hairStyle = activeHair.value;
+    }
+  }
+}
+
+function updateAgentBuilderAppearanceFromControls() {
+  const container = document.getElementById('agentBuilder-appearanceControls');
+  const appearance = _agentBuilderState?.appearance;
+  if (!container || !appearance) return;
+  container.querySelectorAll('[data-builder-appearance-field]').forEach(input => {
+    if (input.disabled) return;
+    const field = input.dataset.builderAppearanceField;
+    if (input.type === 'checkbox') appearance[field] = input.checked;
+    else if (input.type === 'range') appearance[field] = Number(input.value);
+    else if (field === 'eyeColor' || field === 'glassColor' || field === 'hatColor') appearance[field] = parseInt(input.value.replace('#', ''), 16);
+    else appearance[field] = input.value;
+  });
+  appearance.hasHat = ['cap', 'beanie', 'fedora', 'visor'].includes(appearance.accessoryStyle);
+  appearance.hasGlasses = ['glasses', 'sunglasses'].includes(appearance.accessoryStyle);
+  syncAgentBuilderAppearanceControls();
+}
+
+function ensureAgentBuilderPreview() {
+  const canvas = document.getElementById('agentBuilderPreviewCanvas');
+  if (!canvas) return null;
+  if (_agentBuilderPreview) return _agentBuilderPreview;
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const scenePreview = new THREE.Scene();
+  const cameraPreview = new THREE.PerspectiveCamera(30, canvas.width / canvas.height, 0.1, 20);
+  cameraPreview.position.set(0, 0.20, 5.35);
+  cameraPreview.lookAt(0, 0.05, 0);
+  scenePreview.add(new THREE.HemisphereLight(0xffffff, 0x24304b, 2.2));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.4);
+  dir.position.set(3, 5, 4);
+  scenePreview.add(dir);
+  _agentBuilderPreview = { renderer, scene: scenePreview, camera: cameraPreview, group: null, raf: null };
+  return _agentBuilderPreview;
+}
+
+function renderAgentBuilderPreview() {
+  const preview = ensureAgentBuilderPreview();
+  if (!preview || !_agentBuilderState) return;
+  if (preview.group) preview.scene.remove(preview.group);
+  const agent = agentsList.find(candidate => candidate?.id === _agentBuilderState.agentId);
+  const previewAgent = { ...(agent || {}), _appearance: { ..._agentBuilderState.appearance }, name: agent?.name || 'Agent', emoji: agent?.emoji || '🤖' };
+  const group = createAgentCharacter(previewAgent);
+  const previewOnlyRemovals = [];
+  group.traverse(obj => {
+    if (obj.name === 'nameLabel' || obj.name === 'statusDot' || obj.name === 'speechBubble') previewOnlyRemovals.push(obj);
+  });
+  previewOnlyRemovals.forEach(obj => obj.parent?.remove(obj));
+  const box = new THREE.Box3().setFromObject(group);
+  const center = box.getCenter(new THREE.Vector3());
+  group.position.sub(center);
+  group.rotation.y = _agentBuilderState.rotation;
+  group.scale.multiplyScalar(_agentBuilderState.zoom || 1.12);
+  previewAgent._group3d = group;
+  previewAgent._tick = 0;
+  preview.group = group;
+  _agentBuilderState.previewAgent = previewAgent;
+  preview.scene.add(group);
+  resizeAgentBuilderPreviewRenderer();
+  alignAgentBuilderPreviewFeet(group);
+  startAgentBuilderPreviewLoop();
+}
+
+function getAgentBuilderPreviewFeetY(group) {
+  if (!_agentBuilderPreview) return null;
+  group.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(group);
+  const bottom = new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2);
+  const canvas = document.getElementById('agentBuilderPreviewCanvas');
+  const height = canvas?.clientHeight || canvas?.height || 420;
+  return getProjectedScreenY(bottom, _agentBuilderPreview.camera, height);
+}
+
+function alignAgentBuilderPreviewFeet(group) {
+  if (!_agentBuilderPreview || !group) return;
+  const canvas = document.getElementById('agentBuilderPreviewCanvas');
+  const height = canvas?.clientHeight || canvas?.height || 420;
+  const desiredY = height * 0.88;
+  let currentY = getAgentBuilderPreviewFeetY(group);
+  if (!Number.isFinite(currentY)) return;
+  group.position.y += 0.25;
+  const testY = getAgentBuilderPreviewFeetY(group);
+  group.position.y -= 0.25;
+  const pixelsPerWorldY = Number.isFinite(testY) ? (testY - currentY) / 0.25 : 0;
+  if (Math.abs(pixelsPerWorldY) > 0.001) {
+    group.position.y += (desiredY - currentY) / pixelsPerWorldY;
+    currentY = getAgentBuilderPreviewFeetY(group);
+  }
+  group.userData._groundY = group.position.y;
+}
+
+function resizeAgentBuilderPreviewRenderer() {
+  if (!_agentBuilderPreview) return;
+  const canvas = document.getElementById('agentBuilderPreviewCanvas');
+  if (!canvas) return;
+  const width = Math.max(260, canvas.clientWidth || canvas.width);
+  const height = Math.max(300, canvas.clientHeight || canvas.height);
+  _agentBuilderPreview.renderer.setSize(width, height, false);
+  _agentBuilderPreview.camera.aspect = width / height;
+  _agentBuilderPreview.camera.updateProjectionMatrix();
+}
+
+function startAgentBuilderPreviewLoop() {
+  if (!_agentBuilderPreview || _agentBuilderPreview.raf) return;
+  const tick = (now) => {
+    _agentBuilderPreview.raf = null;
+    const modal = document.getElementById('agentPanel');
+    if (!_agentBuilderState || !modal || modal.style.display === 'none') return;
+    resizeAgentBuilderPreviewRenderer();
+    const state = _agentBuilderState;
+    const dt = Math.min(0.05, Math.max(0.001, (now - (state.lastPreviewTime || now)) / 1000));
+    state.lastPreviewTime = now;
+    const target = state.targetRotation ?? state.rotation ?? 0;
+    state.rotation = (state.rotation ?? 0) + (target - (state.rotation ?? 0)) * Math.min(1, dt * 9);
+    if (_agentBuilderPreview.group) {
+      _agentBuilderPreview.group.rotation.y = state.rotation;
+      if (state.previewAgent) {
+        state.previewAgent._tick = (state.previewAgent._tick || 0) + 1;
+        updateAgentAnimation(state.previewAgent, dt, false, false);
+      }
+    }
+    _agentBuilderPreview.renderer.render(_agentBuilderPreview.scene, _agentBuilderPreview.camera);
+    _agentBuilderPreview.raf = requestAnimationFrame(tick);
+  };
+  _agentBuilderPreview.raf = requestAnimationFrame(tick);
+}
+
+function stopAgentBuilderPreviewLoop() {
+  if (_agentBuilderPreview?.raf) cancelAnimationFrame(_agentBuilderPreview.raf);
+  if (_agentBuilderPreview) _agentBuilderPreview.raf = null;
+  _agentBuilderPreviewDrag = null;
+}
+
+async function saveAgentBuilderAppearance() {
+  const state = _agentBuilderState;
+  const agent = agentsList.find(candidate => candidate?.id === state?.agentId);
+  if (!state || !agent) return;
+  if (isLicenseFeatureLocked('advancedEditor')) {
+    showLicenseLockedToast('Agent editing');
+    return;
+  }
+  updateAgentBuilderAppearanceFromControls();
+  const button = document.getElementById('agentBuilder-saveAppearance');
+  if (button) { button.disabled = true; button.textContent = 'Saving...'; }
+  try {
+    const savedAppearance = { ...state.appearance };
+    await persistAgentProfile(agent, { name: agent.name, emoji: agent.emoji || '🤖', appearance: savedAppearance });
+    agent._appearance = { ...savedAppearance };
+    refreshAgentCharacter(agent);
+    renderAgentBuilderPreview();
+    showToast('Appearance saved', 'success');
+  } catch (error) {
+    showToast(error?.message || 'Could not save appearance', 'error');
+  } finally {
+    if (button) { button.disabled = isLicenseFeatureLocked('advancedEditor'); button.textContent = 'Save Appearance'; }
+  }
 }
 
 function ensureAppearanceEditorModal() {
@@ -38525,8 +39901,21 @@ function surrenderRuntimeRoutesForHiddenPage() {
 
 startBarberChairWorldActionSync();
 document.addEventListener('visibilitychange', surrenderRuntimeRoutesForHiddenPage);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden') scheduleAgentRuntimePageResume('visibilitychange', { force: true });
+});
+window.addEventListener('pageshow', event => {
+  scheduleAgentRuntimePageResume('pageshow', { force: Boolean(event?.persisted), delayMs: 0 });
+});
+window.addEventListener('focus', () => {
+  scheduleAgentRuntimePageResume('focus', { delayMs: 120 });
+});
+window.addEventListener('online', () => {
+  scheduleAgentRuntimePageResume('online', { force: true });
+});
 window.__VWSyncActiveBarberChairWorldActions = syncActiveBarberChairWorldActions;
 window.__VWSyncActiveLiveModeWorldActions = syncActiveBarberChairWorldActions;
+window.__VWResumeAgentRuntime = resumeAgentRuntimeAfterPageResume;
 
 function makeCapabilityContextMenuItem({ buildingId, furnitureIndex, action }) {
   const presentation = getContextMenuCapabilityPresentation(action.worldAction?.capabilityTag);
@@ -60195,6 +61584,8 @@ function updateBirds(dt) {
 // ═══════════════════════════════════════════════════════════════
 // CHAT BUBBLES — Agent conversation overlays (HTML div + 3D projection)
 // ═══════════════════════════════════════════════════════════════
+const CHAT_BUBBLE_VISIBLE_MESSAGE_LIMIT = 18;
+const CHAT_BUBBLE_MINI_SIZE = 28;
 const _chatBubbles = new Map(); // agentId -> { el, miniEl, messages, expanded, scrollOffset, typewriterIdx, lastMsgCount }
 let _chatData = {};             // agentId -> [{role, text, time, from}]
 let _chatFirstPoll = true;
@@ -60506,15 +61897,14 @@ function _bubbleMessageHtml(m, isLast, state) {
   const displayText = isTypewriter ? text.substring(0, state.typewriterCharIdx) : text;
   const timeText = formatChatBubbleMessageTime(m);
   const timeHtml = timeText ? `<span class="chat-time">${escapeHtml(timeText)}</span>` : '';
-  return `<div class="chat-msg ${roleClass}">${escapeHtml(displayText)}${timeHtml}</div>`;
+  return `<div class="chat-msg ${roleClass}"><span class="chat-msg-text">${escapeHtml(displayText)}</span>${timeHtml}</div>`;
 }
 
 function renderBubbleMessages(agentId, state) {
   const body = state.el.querySelector('.chat-bubble-body');
   if (!body) return;
   const msgs = state.messages;
-  // Render last 30 messages
-  const visible = msgs.slice(-30);
+  const visible = msgs.slice(-CHAT_BUBBLE_VISIBLE_MESSAGE_LIMIT);
   body.innerHTML = visible.map((m, i) => _bubbleMessageHtml(m, i === visible.length - 1, state)).join('');
   body._vwMsgCount = visible.length;
   // Auto-scroll to bottom
@@ -60526,7 +61916,7 @@ function renderBubbleMessages(agentId, state) {
 function renderBubbleLastMessage(agentId, state) {
   const body = state.el.querySelector('.chat-bubble-body');
   if (!body) return;
-  const visibleCount = Math.min(state.messages.length, 30);
+  const visibleCount = Math.min(state.messages.length, CHAT_BUBBLE_VISIBLE_MESSAGE_LIMIT);
   const lastEl = body.lastElementChild;
   if (!lastEl || body._vwMsgCount !== visibleCount) {
     // Structure changed (new message arrived / first render) — full render.
@@ -60534,7 +61924,37 @@ function renderBubbleLastMessage(agentId, state) {
     return;
   }
   const m = state.messages[state.messages.length - 1];
-  lastEl.outerHTML = _bubbleMessageHtml(m, true, state);
+  const roleClass = m.role === 'user' ? 'user' : 'assistant';
+  if (!lastEl.classList.contains(roleClass)) {
+    lastEl.outerHTML = _bubbleMessageHtml(m, true, state);
+    body.scrollTop = body.scrollHeight;
+    return;
+  }
+  const activityLines = getAgentChatActivityLines(m);
+  const text = String(m?.text ?? '') + (activityLines.length ? ((m?.text ? '\n' : '') + activityLines.join('\n')) : '');
+  const displayText = state.typewriterCharIdx !== undefined && state.typewriterCharIdx < text.length
+    ? text.substring(0, state.typewriterCharIdx)
+    : text;
+  const textEl = lastEl.querySelector('.chat-msg-text');
+  if (textEl) {
+    textEl.innerHTML = escapeHtml(displayText);
+  } else {
+    lastEl.outerHTML = _bubbleMessageHtml(m, true, state);
+    body.scrollTop = body.scrollHeight;
+    return;
+  }
+  const timeText = formatChatBubbleMessageTime(m);
+  let timeEl = lastEl.querySelector('.chat-time');
+  if (timeText && timeEl) {
+    timeEl.textContent = timeText;
+  } else if (timeText && !timeEl) {
+    timeEl = document.createElement('span');
+    timeEl.className = 'chat-time';
+    timeEl.textContent = timeText;
+    lastEl.appendChild(timeEl);
+  } else if (!timeText && timeEl) {
+    timeEl.remove();
+  }
   body.scrollTop = body.scrollHeight;
 }
 
@@ -60799,6 +62219,7 @@ function updateChatBubblePositions() {
   );
 
   const bubbleRects = [];
+  const miniRects = [];
 
   for (const [agentId, state] of _chatBubbles) {
     const agent = agentsList.find(a => a.id === agentId);
@@ -60845,18 +62266,21 @@ function updateChatBubblePositions() {
       bubbleRects.push({ agentId, x: bx, y: by, w: bw, h: bh, state, anchorX: sx, anchorY: sy, color: getAgentColor(agent) });
     } else {
       // Mini icon — keep clear of the name label.
-      state.miniEl.style.left = (sx - 14) + 'px';
-      state.miniEl.style.top = (sy - 42) + 'px';
+      const miniX = sx - CHAT_BUBBLE_MINI_SIZE / 2;
+      const miniY = sy - 42;
+      state.miniEl.style.left = miniX + 'px';
+      state.miniEl.style.top = miniY + 'px';
       state.miniEl.style.display = 'flex';
       state.el.style.display = 'none';
       hideChatBubbleConnector(state);
+      miniRects.push({ x: miniX, y: miniY, w: CHAT_BUBBLE_MINI_SIZE, h: CHAT_BUBBLE_MINI_SIZE, state });
     }
 
-    // Typewriter effect — advance 2 chars per frame
+    // Typewriter effect — keep visual motion smooth; renderBubbleLastMessage only mutates the final text node.
     if (state.typewriterCharIdx !== undefined && state.messages.length > 0) {
       const lastMsg = state.messages[state.messages.length - 1];
       if (state.typewriterCharIdx < lastMsg.text.length) {
-        state.typewriterCharIdx += 2;
+        state.typewriterCharIdx = Math.min(lastMsg.text.length, state.typewriterCharIdx + 2);
         renderBubbleLastMessage(agentId, state); // PERF: incremental last-message update
       }
     }
@@ -60888,6 +62312,13 @@ function updateChatBubblePositions() {
   }
 
   for (const rect of bubbleRects) applyExpandedChatBubbleLayout(rect, bubbleLayout);
+  if (bubbleRects.length && miniRects.length) {
+    for (const miniRect of miniRects) {
+      if (bubbleRects.some(rect => chatBubbleRectsOverlap(miniRect, rect))) {
+        miniRect.state.miniEl.style.display = 'none';
+      }
+    }
+  }
 }
 
 // Expand/minimize all controls

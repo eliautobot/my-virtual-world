@@ -40,6 +40,7 @@
 
   const MAX_INPUT_LINES = 15;
   const TOOL_RENDER_INTERVAL_MS = 80;
+  const STREAMING_TEXT_RENDER_INTERVAL_MS = 50;
   const MAX_LIVE_TOOL_CARDS = 24;
   const CHAT_STACK_GAP = 12;
   const CHAT_BOTTOM_OFFSET = 36;
@@ -110,6 +111,7 @@
       this.hasExplicitAgentSelection = !!savedSelection || !!options.selectedAgentKey || !!options.sessionKey;
       this.currentRunId = null;
       this.streamingMsg = null;
+      this.failedRunIds = new Set();
       this.liveToolCards = new Map();
       this.pendingToolEvents = new Map();
       this.toolFlushTimer = null;
@@ -122,6 +124,9 @@
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
       this.scrollFrame = null;
+      this.inputResizeFrame = null;
+      this.streamingRenderTimer = null;
+      this.streamingPendingContent = '';
       this.lastLiveEventAt = 0;
       this.sessionModel = '—';
       this.contextWindow = 0;
@@ -166,10 +171,9 @@
           this.sendMessage();
         }
       });
-      this.input?.addEventListener('input', () => this.autoResizeInput());
-      this.input?.addEventListener('keyup', () => this.autoResizeInput());
-      this.input?.addEventListener('change', () => this.autoResizeInput());
-      this.input?.addEventListener('compositionend', () => this.autoResizeInput());
+      this.input?.addEventListener('input', () => this.scheduleAutoResizeInput());
+      this.input?.addEventListener('change', () => this.scheduleAutoResizeInput());
+      this.input?.addEventListener('compositionend', () => this.scheduleAutoResizeInput());
       this.input?.addEventListener('paste', (e) => this.handlePaste(e));
 
       this.attachBtn?.addEventListener('click', () => this.fileInput?.click());
@@ -212,8 +216,10 @@
       this.messages.innerHTML = '';
       this.streamingMsg = null;
       this.currentRunId = null;
+      this.failedRunIds.clear();
       this.closeHermesEventSource();
       this.stopHermesLivePolling();
+      this.cancelStreamingRender();
       if (this.toolFlushTimer) { clearTimeout(this.toolFlushTimer); this.toolFlushTimer = null; }
       this.pendingToolEvents.clear();
       this.liveToolCards.clear();
@@ -247,6 +253,14 @@
       }
     }
 
+    scheduleAutoResizeInput() {
+      if (!this.input || this.inputResizeFrame) return;
+      this.inputResizeFrame = requestAnimationFrame(() => {
+        this.inputResizeFrame = null;
+        this.autoResizeInput();
+      });
+    }
+
     autoResizeInput() {
       if (!this.input) return;
       const styles = getComputedStyle(this.input);
@@ -254,9 +268,10 @@
       const lineHeight = (parseFloat(styles.lineHeight) || fontSize * 1.4);
       const inputMaxHeight = lineHeight * MAX_INPUT_LINES;
       this.input.style.setProperty('height', 'auto', 'important');
-      const newHeight = Math.min(this.input.scrollHeight, inputMaxHeight);
+      const scrollHeight = this.input.scrollHeight;
+      const newHeight = Math.min(scrollHeight, inputMaxHeight);
       this.input.style.setProperty('height', newHeight + 'px', 'important');
-      this.input.style.overflowY = this.input.scrollHeight > inputMaxHeight ? 'auto' : 'hidden';
+      this.input.style.overflowY = scrollHeight > inputMaxHeight ? 'auto' : 'hidden';
     }
 
     syncAgentSelect() {
@@ -343,6 +358,7 @@
       this.closeCodexEventSource();
       this.currentRunId = null;
       this.streamingMsg = null;
+      this.failedRunIds.clear();
       this.syncAgentSelect();
       this.resetConversation(`${systemPrefix} ${opt.textContent.trim()}`);
       if (this.isHermesSelected()) this.startHermesApprovalPolling();
@@ -687,6 +703,7 @@
           this.messages.innerHTML = '';
           this.streamingMsg = null;
           this.currentRunId = null;
+          this.failedRunIds.clear();
           this.liveToolCards.clear();
           this.appendSystem('New session started');
         } else {
@@ -990,11 +1007,20 @@
 
       const sendSessionKey = this.sessionKey;
       rpc('chat.send', params).then(res => {
-        if (res.ok && res.payload?.runId) {
+        if (!res?.ok) throw new Error(extractRunError(res));
+        if (res.payload?.runId) {
           this.currentRunId = res.payload.runId;
           runOwners.set(res.payload.runId, { slotId: this.slotId, sessionKey: sendSessionKey });
+        } else {
+          this.removeTypingIndicator();
+          this.appendSystem('OpenClaw send failed: gateway accepted the request but did not return a run id.');
+          this.setStatus('OpenClaw error', 'disconnected');
         }
-      }).catch(e => this.appendSystem('Failed to send: ' + e.message));
+      }).catch(e => {
+        this.removeTypingIndicator();
+        this.appendSystem('OpenClaw send failed: ' + (e?.message || String(e)));
+        this.setStatus('OpenClaw error', 'disconnected');
+      });
     }
 
     async sendStop() {
@@ -1075,7 +1101,7 @@
         const data = await resp.json();
         if (data.text) {
           this.input.value = (this.input.value ? this.input.value + ' ' : '') + data.text;
-          this.autoResizeInput();
+          this.scheduleAutoResizeInput();
           this.input.focus();
         } else if (data.error) {
           this.appendSystem('Transcription error: ' + data.error);
@@ -1098,8 +1124,13 @@
 
     handleChatEvent(payload) {
       if (!this.ownsPayload(payload)) return;
+      const state = String(payload?.state || '').toLowerCase();
+      if (isTerminalOpenClawErrorState(state) || payload?.ok === false) {
+        this.finishOpenClawRunError(payload);
+        return;
+      }
       const text = extractText(payload);
-      if (payload?.state === 'delta' || payload?.state === 'streaming') {
+      if (state === 'delta' || state === 'streaming') {
         if (!this.streamingMsg || this.streamingMsg.id !== payload.runId) {
           this.streamingMsg = { id: payload.runId, role: 'assistant', content: '' };
           this.appendStreamingMessage();
@@ -1109,8 +1140,9 @@
           this.updateStreamingMessage(this.streamingMsg.content);
         }
         this.scrollBottom();
-      } else if (payload?.state === 'final' || payload?.state === 'done') {
+      } else if (state === 'final' || state === 'done') {
         const finalText = text || (this.streamingMsg ? this.streamingMsg.content : '');
+        this.removeTypingIndicator();
         this.flushToolEvents(true);
         this.clearActivityFeed();
         if (this.streamingMsg) {
@@ -1146,9 +1178,49 @@
         return;
       }
 
+      const lifecyclePhase = String(phase || '').toLowerCase();
+      const eventType = String(payload?.type || data.type || '').toLowerCase();
+      if (
+        stream === 'lifecycle' && isTerminalOpenClawErrorState(lifecyclePhase)
+        || eventType === 'error'
+        || eventType === 'run_error'
+        || eventType === 'run.failed'
+      ) {
+        this.finishOpenClawRunError(payload);
+        return;
+      }
+
       if (payload?.type === 'thinking' || stream === 'lifecycle' && phase === 'start') {
         this.updateTypingIndicator('Thinking...');
       }
+    }
+
+    finishOpenClawRunError(payload) {
+      const runId = payload?.runId || payload?.clientRunId || this.currentRunId || '';
+      const streamingText = this.streamingMsg?.content || '';
+      const message = extractRunError(payload);
+      const alreadyReported = runId && this.failedRunIds.has(runId);
+      this.cancelStreamingRender();
+      this.flushToolEvents(true);
+      this.clearActivityFeed();
+      this.removeTypingIndicator();
+      if (this.streamingMsg) {
+        if (streamingText.trim()) this.finalizeStreamingMessage(streamingText);
+        else this.discardStreamingMessage();
+        this.streamingMsg = null;
+      } else {
+        this.discardStreamingMessage();
+      }
+      if (!alreadyReported) this.appendSystem('OpenClaw run failed: ' + message);
+      this.setStatus('Model error', 'disconnected');
+      if (runId) {
+        this.failedRunIds.add(runId);
+        this.finalizeRunToolCards(runId);
+        runOwners.delete(runId);
+      }
+      this.currentRunId = null;
+      this.fetchSessionInfo();
+      this.scrollBottom();
     }
 
     markLiveEvent() {
@@ -1250,19 +1322,58 @@
       div.className = 'chat-msg assistant streaming-msg';
       const bubble = document.createElement('div');
       bubble.className = 'chat-bubble streaming';
-      bubble.innerHTML = '<span class="cursor">▊</span>';
+      const text = document.createElement('span');
+      text.className = 'streaming-text';
+      const cursor = document.createElement('span');
+      cursor.className = 'cursor';
+      cursor.textContent = '▊';
+      bubble.appendChild(text);
+      bubble.appendChild(cursor);
       div.appendChild(bubble);
       this.messages.appendChild(div);
     }
 
+    cancelStreamingRender() {
+      if (this.streamingRenderTimer) clearTimeout(this.streamingRenderTimer);
+      this.streamingRenderTimer = null;
+      this.streamingPendingContent = '';
+    }
+
+    discardStreamingMessage() {
+      this.cancelStreamingRender();
+      const div = this.messages.querySelector('.streaming-msg');
+      if (div) div.remove();
+    }
+
     updateStreamingMessage(content) {
+      this.streamingPendingContent = content || '';
+      if (this.streamingRenderTimer) return;
+      this.streamingRenderTimer = setTimeout(() => {
+        this.streamingRenderTimer = null;
+        this.renderStreamingMessageText(this.streamingPendingContent);
+      }, STREAMING_TEXT_RENDER_INTERVAL_MS);
+    }
+
+    renderStreamingMessageText(content) {
       const div = this.messages.querySelector('.streaming-msg');
       if (!div) return;
       const bubble = div.querySelector('.chat-bubble');
-      bubble.innerHTML = formatContent(content) + '<span class="cursor">▊</span>';
+      let text = bubble.querySelector('.streaming-text');
+      if (!text) {
+        bubble.textContent = '';
+        text = document.createElement('span');
+        text.className = 'streaming-text';
+        const cursor = document.createElement('span');
+        cursor.className = 'cursor';
+        cursor.textContent = '▊';
+        bubble.appendChild(text);
+        bubble.appendChild(cursor);
+      }
+      text.textContent = content || '';
     }
 
     finalizeStreamingMessage(content, mediaItems) {
+      this.cancelStreamingRender();
       const div = this.messages.querySelector('.streaming-msg');
       if (!div) return this.appendMessage('assistant', content, Date.now(), mediaItems);
       const bubble = div.querySelector('.chat-bubble');
@@ -2665,6 +2776,59 @@
     return '';
   }
 
+  function isTerminalOpenClawErrorState(state) {
+    return state === 'error'
+      || state === 'failed'
+      || state === 'failure'
+      || state === 'cancelled'
+      || state === 'canceled';
+  }
+
+  function stringifyGatewayError(value) {
+    if (value == null || value === '') return '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (typeof value === 'object') {
+      for (const key of ['message', 'errorMessage', 'error', 'detail', 'details', 'reason', 'description', 'providerErrorMessagePreview']) {
+        const nested = stringifyGatewayError(value[key]);
+        if (nested) return nested;
+      }
+      try {
+        const json = JSON.stringify(value);
+        return json === '{}' ? '' : json;
+      } catch {
+        return String(value);
+      }
+    }
+    return String(value);
+  }
+
+  function extractRunError(payload) {
+    const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
+    const nestedPayload = payload?.payload && typeof payload.payload === 'object' ? payload.payload : {};
+    const candidates = [
+      payload?.errorMessage,
+      payload?.error,
+      typeof payload?.message === 'string' ? payload.message : '',
+      data.errorMessage,
+      data.error,
+      data.message,
+      data.providerErrorMessagePreview,
+      nestedPayload.errorMessage,
+      nestedPayload.error,
+      nestedPayload.message,
+      extractText(payload),
+      extractText(nestedPayload)
+    ];
+    let message = '';
+    for (const candidate of candidates) {
+      message = stringifyGatewayError(candidate);
+      if (message) break;
+    }
+    message = message.replace(/^Error:\s*/i, '').trim();
+    return message || 'The model/provider run failed before returning a reply.';
+  }
+
   function extractMedia(msg, text) {
     const media = [];
     const c = msg?.message?.content ?? msg?.content;
@@ -2917,6 +3081,9 @@
   const agentListsReady = Promise.all(chatWindows.map(w => w.loadAgentList()));
   window.addEventListener('vw:agents-changed', () => {
     chatWindows.forEach(w => w.loadAgentList().catch(() => {}));
+  });
+  window.addEventListener('vw:agent-model-changed', () => {
+    chatWindows.forEach(w => w.fetchSessionInfo().catch(() => {}));
   });
   syncSecondaryChatControls();
   // Virtual World shows the chat dock in the HUD even before the panel is expanded.

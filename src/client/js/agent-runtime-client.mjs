@@ -2,6 +2,7 @@ const DEFAULT_ROOM = 'agent_runtime';
 const DEFAULT_CONFIG = Object.freeze({ enabled: false, url: '', room: DEFAULT_ROOM });
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 4500;
+const DEFAULT_RESUME_STALE_MS = 7000;
 
 export function getRuntimeIdentityKeys(agent = {}) {
   const keys = new Set();
@@ -480,7 +481,16 @@ export async function createAgentRuntimeClient({
   let room = null;
   let client = null;
   let unsubscribeState = null;
+  let messageUnsubscribes = [];
+  let signalUnsubscribes = [];
   let requestSeq = 0;
+  let connectSeq = 0;
+  let connected = false;
+  let reason = 'connecting';
+  let lastMessageAt = 0;
+  let reconnectPromise = null;
+  let disposed = false;
+  let leaseOwner = '';
   const pendingRequestIds = new Set();
 
   const notify = source => {
@@ -494,11 +504,16 @@ export async function createAgentRuntimeClient({
     });
   };
 
+  const touchRuntime = () => {
+    lastMessageAt = Date.now();
+  };
+
   const applyRuntimeDocument = (doc, source) => {
     if (!doc) return false;
     snapshots = snapshotsFromRuntimeDocument(doc);
     worldObjects = worldObjectsFromRuntimeDocument(doc);
     worldRuntime = worldRuntimeFromRuntimeDocument(doc);
+    touchRuntime();
     notify(source);
     return true;
   };
@@ -510,6 +525,7 @@ export async function createAgentRuntimeClient({
     if (nextSnapshots.size > 0 || snapshots.size === 0) snapshots = nextSnapshots;
     if (nextWorldObjects.size > 0 || worldObjects.size === 0) worldObjects = nextWorldObjects;
     if (nextWorldRuntime) worldRuntime = nextWorldRuntime;
+    touchRuntime();
     notify(source);
   };
 
@@ -519,46 +535,182 @@ export async function createAgentRuntimeClient({
     snapshots = merged.snapshots;
     worldObjects = merged.worldObjects;
     worldRuntime = merged.worldRuntime;
+    touchRuntime();
     notify(source);
     return true;
   };
 
-  try {
+  const isRoomOpen = () => Boolean(room?.connection?.isOpen);
+
+  const markConnectionState = (nextConnected, nextReason, source) => {
+    connected = Boolean(nextConnected);
+    reason = connected ? '' : String(nextReason || 'disconnected');
+    notify(source);
+  };
+
+  const clearRoomHandlers = () => {
+    if (typeof unsubscribeState === 'function') unsubscribeState();
+    unsubscribeState = null;
+    for (const unsubscribe of messageUnsubscribes) {
+      try {
+        if (typeof unsubscribe === 'function') unsubscribe();
+      } catch {}
+    }
+    messageUnsubscribes = [];
+    for (const unsubscribe of signalUnsubscribes) {
+      try {
+        if (typeof unsubscribe === 'function') unsubscribe();
+      } catch {}
+    }
+    signalUnsubscribes = [];
+  };
+
+  const closeRoom = ({ consented = true } = {}) => {
+    clearRoomHandlers();
+    const closingRoom = room;
+    room = null;
+    leaseOwner = '';
+    if (closingRoom?.reconnection && typeof closingRoom.reconnection === 'object') {
+      closingRoom.reconnection.enabled = false;
+      closingRoom.reconnection.maxRetries = 0;
+      closingRoom.reconnection.enqueuedMessages = [];
+    }
+    try {
+      closingRoom?.leave?.(consented).catch?.(() => {});
+    } catch {}
+    try {
+      closingRoom?.connection?.close?.();
+    } catch {}
+  };
+
+  const addRoomSignal = (nextRoom, signalName, callback) => {
+    const signal = nextRoom?.[signalName];
+    if (typeof signal !== 'function') return;
+    signal(callback);
+    if (typeof signal.remove === 'function') {
+      signalUnsubscribes.push(() => signal.remove(callback));
+    }
+  };
+
+  const attachRoomHandlers = nextRoom => {
+    clearRoomHandlers();
+    const stateCallback = () => {
+      applyRoomState('state');
+    };
+    unsubscribeState = nextRoom.onStateChange(stateCallback);
+    if (typeof unsubscribeState !== 'function' && typeof nextRoom.onStateChange?.remove === 'function') {
+      unsubscribeState = () => nextRoom.onStateChange.remove(stateCallback);
+    }
+    messageUnsubscribes.push(
+      nextRoom.onMessage('runtime:event', message => {
+        applyRuntimeDelta(message, 'runtime:event');
+      }),
+      nextRoom.onMessage('runtime:ack', message => {
+        if (!applyRuntimeDelta(message, 'runtime:ack')) applyRoomState('runtime:ack');
+      }),
+      nextRoom.onMessage('runtime:worldRuntime', message => {
+        if (!applyRuntimeDelta(message, 'runtime:worldRuntime')) applyRoomState('runtime:worldRuntime');
+      }),
+      nextRoom.onMessage('runtime:state', message => {
+        if (!applyRuntimeDocument(message?.snapshot, 'runtime:state')) applyRoomState('runtime:state');
+      }),
+      nextRoom.onMessage('runtime:error', message => {
+        if (!pendingRequestIds.has(message?.requestId)) {
+          logger?.warn?.('Agent runtime sidecar error', message);
+        }
+      }),
+    );
+    addRoomSignal(nextRoom, 'onDrop', (code, droppedReason) => {
+      if (room !== nextRoom) return;
+      markConnectionState(false, droppedReason || `dropped:${code || 'unknown'}`, 'runtime:drop');
+    });
+    addRoomSignal(nextRoom, 'onReconnect', () => {
+      if (room !== nextRoom) return;
+      connected = true;
+      reason = '';
+      touchRuntime();
+      applyRoomState('runtime:reconnect');
+    });
+    addRoomSignal(nextRoom, 'onLeave', (code, leaveReason) => {
+      if (room !== nextRoom) return;
+      markConnectionState(false, leaveReason || `left:${code || 'unknown'}`, 'runtime:leave');
+    });
+    addRoomSignal(nextRoom, 'onError', (code, errorReason) => {
+      if (room !== nextRoom) return;
+      markConnectionState(false, errorReason || `error:${code || 'unknown'}`, 'runtime:error');
+    });
+  };
+
+  const connectRoom = async (source = 'connect') => {
+    if (disposed) return false;
+    const seq = ++connectSeq;
+    closeRoom({ consented: true });
+    connected = false;
+    reason = source === 'connect' ? 'connecting' : 'reconnecting';
     client = new Client(config.url);
     const joinPromise = client.joinOrCreate(config.room, { client: 'main3d-runtime-hydration' });
     joinPromise.catch(() => {});
-    room = await withTimeout(joinPromise, DEFAULT_CONNECT_TIMEOUT_MS, 'agent runtime connect');
-    unsubscribeState = room.onStateChange(() => {
-      applyRoomState('state');
-    });
-    room.onMessage('runtime:event', message => {
-      applyRuntimeDelta(message, 'runtime:event');
-    });
-    room.onMessage('runtime:ack', message => {
-      if (!applyRuntimeDelta(message, 'runtime:ack')) applyRoomState('runtime:ack');
-    });
-    room.onMessage('runtime:worldRuntime', message => {
-      if (!applyRuntimeDelta(message, 'runtime:worldRuntime')) applyRoomState('runtime:worldRuntime');
-    });
-    room.onMessage('runtime:state', message => {
-      if (!applyRuntimeDocument(message?.snapshot, 'runtime:state')) applyRoomState('runtime:state');
-    });
-    room.onMessage('runtime:error', message => {
-      if (!pendingRequestIds.has(message?.requestId)) {
-        logger?.warn?.('Agent runtime sidecar error', message);
-      }
-    });
+    const nextRoom = await withTimeout(joinPromise, DEFAULT_CONNECT_TIMEOUT_MS, 'agent runtime connect');
+    if (disposed || seq !== connectSeq) {
+      try {
+        nextRoom.leave?.(true).catch?.(() => {});
+      } catch {}
+      return false;
+    }
+    room = nextRoom;
+    connected = true;
+    reason = '';
+    leaseOwner = `main3d:${room.sessionId}`;
+    attachRoomHandlers(room);
     const welcome = await waitForMessage(room, 'runtime:welcome');
-    if (!applyRuntimeDocument(welcome?.snapshot, 'runtime:welcome')) applyRoomState('runtime:welcome');
+    if (!applyRuntimeDocument(welcome?.snapshot, source === 'connect' ? 'runtime:welcome' : 'runtime:resume')) {
+      applyRoomState(source === 'connect' ? 'runtime:welcome' : 'runtime:resume');
+    }
+    return true;
+  };
+
+  const isStale = (staleAfterMs = DEFAULT_RESUME_STALE_MS) => {
+    if (!connected || !isRoomOpen()) return true;
+    if (!lastMessageAt) return true;
+    return Date.now() - lastMessageAt > Math.max(1000, Number(staleAfterMs) || DEFAULT_RESUME_STALE_MS);
+  };
+
+  const resume = async ({ force = false, staleAfterMs = DEFAULT_RESUME_STALE_MS, source = 'resume' } = {}) => {
+    if (disposed) return false;
+    if (!force && !isStale(staleAfterMs)) {
+      applyRoomState(`${source}:fresh`);
+      return true;
+    }
+    if (reconnectPromise) return reconnectPromise;
+    reconnectPromise = connectRoom(source)
+      .catch(error => {
+        logger?.warn?.('Agent runtime reconnect failed', error);
+        connected = false;
+        reason = error?.message || 'reconnect failed';
+        notify(`${source}:failed`);
+        return false;
+      })
+      .finally(() => {
+        reconnectPromise = null;
+      });
+    return reconnectPromise;
+  };
+
+  try {
+    await connectRoom('connect');
   } catch (error) {
     logger?.warn?.('Agent runtime connection failed', error);
     return agentRuntimeUnavailable('connection failed', config);
   }
 
-  const leaseOwner = `main3d:${room.sessionId}`;
-
-  const sendRequest = (type, payload = {}, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {}) => {
-    if (!room) return Promise.reject(new Error('runtime room unavailable'));
+  const sendRequest = async (type, payload = {}, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {}) => {
+    if (!room || !connected || !isRoomOpen()) {
+      const resumed = await resume({ source: `${type}:request`, force: true });
+      if (!resumed || !room || !connected || !isRoomOpen()) {
+        throw new Error('runtime room unavailable');
+      }
+    }
+    const activeRoom = room;
     const requestId = `${type}:${Date.now()}:${++requestSeq}`;
     return new Promise((resolve, reject) => {
       let done = false;
@@ -589,18 +741,31 @@ export async function createAgentRuntimeClient({
         reject(error);
       });
       pendingRequestIds.add(requestId);
-      room.send(type, { ...(payload || {}), requestId });
+      activeRoom.send(type, { ...(payload || {}), requestId });
     });
   };
 
   return Object.freeze({
     enabled: true,
-    connected: true,
-    reason: '',
+    get connected() {
+      return connected && isRoomOpen();
+    },
+    get reason() {
+      return connected && isRoomOpen() ? '' : reason;
+    },
     config,
-    room,
-    client,
-    leaseOwner,
+    get room() {
+      return room;
+    },
+    get client() {
+      return client;
+    },
+    get leaseOwner() {
+      return leaseOwner;
+    },
+    get lastMessageAt() {
+      return lastMessageAt;
+    },
     get snapshots() {
       return new Map(snapshots);
     },
@@ -625,6 +790,8 @@ export async function createAgentRuntimeClient({
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    isStale,
+    resume,
     sendRequest,
     writeSnapshot(payload, options) {
       return sendRequest('runtime:snapshot', payload, options);
@@ -654,9 +821,9 @@ export async function createAgentRuntimeClient({
       return sendRequest('runtime:releaseRoute', { leaseOwner, ...(payload || {}) }, options);
     },
     dispose() {
+      disposed = true;
       listeners.clear();
-      if (typeof unsubscribeState === 'function') unsubscribeState();
-      room?.leave?.(true);
+      closeRoom({ consented: true });
     },
   });
 }

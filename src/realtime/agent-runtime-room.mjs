@@ -37,6 +37,8 @@ export const MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS = 500;
 export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
 export const MAX_VISUAL_STATE_JSON_CHARS = 6000;
+export const RUNTIME_WIRE_EVENTS_LIMIT = 0;
+export const RUNTIME_SCHEMA_PATCH_RATE_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
 const SERVER_RUNTIME_ROUTE_POINTS_SUMMARY_LIMIT = 18;
 const SERVER_RUNTIME_RAW_POINTS_SUMMARY_LIMIT = 18;
 const SERVER_RUNTIME_RAW_CELLS_SUMMARY_LIMIT = 18;
@@ -5797,6 +5799,51 @@ export function stateToPlain(state, events = []) {
   };
 }
 
+function selectRealtimeWorldObjectData(data) {
+  if (!data || typeof data !== 'object') return null;
+  const selected = {};
+  if (data.reservation && typeof data.reservation === 'object') selected.reservation = data.reservation;
+  if (data.activeUse && typeof data.activeUse === 'object') selected.activeUse = data.activeUse;
+  if (Object.hasOwn(data, 'pingPongGame')) selected.pingPongGame = data.pingPongGame;
+  const queueStore = data._scriptedServiceQueueStore || data.serviceQueueStore || data.scriptedServiceQueueStore || null;
+  if (queueStore && typeof queueStore === 'object') selected._scriptedServiceQueueStore = queueStore;
+  if (data.clearReservation === true) selected.clearReservation = true;
+  if (data.clearServiceQueue === true) selected.clearServiceQueue = true;
+  return Object.keys(selected).length ? selected : null;
+}
+
+export function worldObjectToRealtimePlain(object) {
+  const plain = worldObjectToPlain(object);
+  const data = selectRealtimeWorldObjectData(plain.data);
+  if (data) {
+    plain.data = data;
+  } else {
+    delete plain.data;
+  }
+  return plain;
+}
+
+export function stateToRealtimePlain(state, events = []) {
+  const agents = {};
+  for (const [agentId, agent] of state.agents.entries()) {
+    agents[agentId] = snapshotToPlain(agent);
+  }
+  const objects = {};
+  for (const [objectKey, object] of state.objects.entries()) {
+    objects[objectKey] = worldObjectToRealtimePlain(object);
+  }
+  return {
+    schemaVersion: AGENT_RUNTIME_SCHEMA_VERSION,
+    worldId: state.worldId || 'default',
+    updatedAt: state.updatedAt || new Date().toISOString(),
+    eventSeq: Number(state.eventSeq || 0),
+    worldRuntime: worldRuntimeToPlain(state.worldRuntime),
+    agents,
+    objects,
+    events: RUNTIME_WIRE_EVENTS_LIMIT > 0 ? events.slice(-RUNTIME_WIRE_EVENTS_LIMIT) : [],
+  };
+}
+
 export function worldRuntimeToPlain(worldRuntime) {
   const trafficLights = {};
   for (const [key, light] of (worldRuntime?.trafficLights?.entries?.() || [])) {
@@ -6816,7 +6863,7 @@ function requestIdFrom(message) {
 export class AgentRuntimeRoom extends Room {
   onCreate(options = {}) {
     this.autoDispose = false;
-    this.patchRate = DEFAULT_WORLD_RUNTIME_TICK_MS;
+    this.patchRate = RUNTIME_SCHEMA_PATCH_RATE_MS;
     this.dataDir = options.dataDir || process.env.VW_DATA_DIR || '.local-data';
     this.events = [];
     this.lastWorldRuntimePersistMs = 0;
@@ -6904,7 +6951,7 @@ export class AgentRuntimeRoom extends Room {
       sessionId: client.sessionId,
       room: AGENT_RUNTIME_ROOM_NAME,
       serverTime: new Date().toISOString(),
-      snapshot: stateToPlain(this.state, this.events),
+      snapshot: this.runtimeWireDocument(),
     };
     client.send('runtime:welcome', welcome);
     this.clock.setTimeout(() => {
@@ -6913,7 +6960,7 @@ export class AgentRuntimeRoom extends Room {
           ...welcome,
           replay: true,
           serverTime: new Date().toISOString(),
-          snapshot: stateToPlain(this.state, this.events),
+          snapshot: this.runtimeWireDocument(),
         });
       } catch {
         // Client left before the delayed initial snapshot replay.
@@ -6924,6 +6971,10 @@ export class AgentRuntimeRoom extends Room {
 
   runtimeDocument() {
     return stateToPlain(this.state, this.events);
+  }
+
+  runtimeWireDocument() {
+    return stateToRealtimePlain(this.state, this.events);
   }
 
   persistRuntimeDocument() {
@@ -6951,7 +7002,7 @@ export class AgentRuntimeRoom extends Room {
     this.broadcast('runtime:state', {
       type: 'runtime-state',
       source,
-      snapshot: this.runtimeDocument(),
+      snapshot: this.runtimeWireDocument(),
     });
     return true;
   }
@@ -7125,7 +7176,7 @@ export class AgentRuntimeRoom extends Room {
         agentId,
         objectKey: target.objectKey,
         snapshot: snapshotToPlain(result.agent),
-        object: worldObjectToPlain(result.object),
+        object: worldObjectToRealtimePlain(result.object),
         event: result.snapshotEvent,
       });
     });
@@ -7177,7 +7228,7 @@ export class AgentRuntimeRoom extends Room {
           agentId,
           objectKey: releaseTarget.objectKey || requestedObjectKey,
           snapshot: snapshotToPlain(result.agent),
-          object: result.object ? worldObjectToPlain(result.object) : null,
+          object: result.object ? worldObjectToRealtimePlain(result.object) : null,
           event: { reason },
         });
         return;
@@ -7205,7 +7256,7 @@ export class AgentRuntimeRoom extends Room {
           agentId,
           objectKey: requestedObjectKey,
           snapshot: current,
-          object: objectResult?.object ? worldObjectToPlain(objectResult.object) : null,
+          object: objectResult?.object ? worldObjectToRealtimePlain(objectResult.object) : null,
           event: { reason, objectOnly: true },
         });
         return;
@@ -10232,7 +10283,7 @@ export class AgentRuntimeRoom extends Room {
       type,
       ok: true,
       objectKey: result.object.objectKey,
-      object: worldObjectToPlain(result.object),
+      object: worldObjectToRealtimePlain(result.object),
       event: result.event,
     });
   }

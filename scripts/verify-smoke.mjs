@@ -47,6 +47,7 @@ const requiredFiles = [
   'docs/SECURITY.md',
   'docs/assets/my-virtual-world-setup-preview.png',
   'src/client/index.html',
+  'src/client/models.html',
   'src/client/setup.html',
   'src/client/favicon.png',
   'src/client/assets/logo-transparent.png',
@@ -122,6 +123,10 @@ assert(dockerCompose.includes('VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-true}'
 assert(dockerCompose.includes('VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-ws://127.0.0.1:8591}'), 'docker-compose.yml should provide a browser-reachable realtime URL by default');
 assert(envExample.includes('VW_REALTIME_HOST_PORT=8591'), '.env.example should document the realtime Docker host port');
 assert(envExample.includes('VW_REALTIME_ENABLED=true'), '.env.example should enable realtime for the default Docker install');
+assert(dockerCompose.includes('CLAUDE_CONFIG_DIR=${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}'), 'docker-compose.yml should pass Claude Code config dir');
+assert(dockerCompose.includes('VW_CLAUDE_CODE_HOME=${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}'), 'docker-compose.yml should pass Claude Code home path');
+assert(envExample.includes('VW_CLAUDE_CODE_HOME=/home/vw/.claude'), '.env.example should document the Claude Code home path');
+assert(envExample.includes('VW_CLAUDE_CODE_ENABLED=false'), '.env.example should document Claude Code provider status');
 assert(dockerCompose.includes('VW_LICENSE_STORE_ID=${VW_LICENSE_STORE_ID:-321733}'), 'docker-compose.yml should pass the My Virtual World Lemon Squeezy store ID');
 assert(dockerCompose.includes('VW_LICENSE_PRODUCT_IDS=${VW_LICENSE_PRODUCT_IDS:-1140366}'), 'docker-compose.yml should pass the My Virtual World Lemon Squeezy product ID');
 assert(envExample.includes('VW_LICENSE_STORE_ID=321733'), '.env.example should document the My Virtual World Lemon Squeezy store ID');
@@ -188,6 +193,7 @@ assert.equal(pyCheck.status, 0, `Python syntax check failed\n${pyCheck.stderr ||
 const licensePy = read('src/server/license.py');
 const serverPy = read('src/server/server.py');
 const indexHtml = read('src/client/index.html');
+const modelsHtml = read('src/client/models.html');
 const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
@@ -273,6 +279,68 @@ for (const token of [
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing edit lock token: ${token}`);
 }
+for (const token of [
+  'Models & Providers',
+  'modelsProviders-open',
+  'modelsProvidersModal',
+  'modelsProvidersFrame',
+]) {
+  assert(indexHtml.includes(token), `index.html missing models/providers editor token: ${token}`);
+}
+for (const token of [
+  'MODELS_PROVIDERS_PAGE_VERSION',
+  'openModelsProvidersWindow',
+  'closeModelsProvidersWindow',
+  'models.html?agent=',
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing models/providers editor token: ${token}`);
+}
+for (const token of [
+  'models-providers-window',
+  'models-providers-frame',
+]) {
+  assert(uiCss.includes(token), `ui-redesign.css missing models/providers editor token: ${token}`);
+}
+for (const token of [
+  'Models & Providers - My Virtual World',
+  'OpenClaw Models',
+  'Hermes Models',
+  'Codex CLI',
+  'Claude Code',
+  'MVW Global Auth',
+  'Save API Key Globally',
+  'copies the managed static profiles from <code>main</code>',
+  'Agent Auth Stores',
+  'OAuth profiles are left alone',
+  'mvw-confirm-overlay',
+  'confirmAction',
+  'refreshNativeSoon',
+  'syncOpenClawStaticAuth',
+  'resetOpenClawAuthOverrides',
+  '/api/native-models/openclaw/auth/api-key',
+  '/api/native-models/openclaw/auth/sync-static',
+  '/api/native-models/openclaw/auth/reset-overrides',
+  '/api/native-models/hermes/profile-model',
+]) {
+  assert(modelsHtml.includes(token), `models.html missing models/providers token: ${token}`);
+}
+assert(!modelsHtml.includes('confirm('), 'models.html should use the MVW confirmation dialog instead of browser confirm()');
+for (const token of [
+  'def _get_openclaw_native_models',
+  'def _openclaw_managed_auth_report',
+  'def _sync_openclaw_static_auth_from_main',
+  'def _reset_openclaw_static_auth_overrides',
+  'def _get_hermes_native_models',
+  'def _get_codex_native_setup_state',
+  'def _get_claude_code_native_setup_state',
+  'path == "/api/native-models/openclaw/auth/api-key"',
+  'path == "/api/native-models/openclaw/auth/sync-static"',
+  'path == "/api/native-models/openclaw/auth/reset-overrides"',
+  'path == "/api/native-models/hermes/profile-model"',
+  'path == "/api/claude-code/test"',
+]) {
+  assert(serverPy.includes(token), `server.py missing models/providers endpoint token: ${token}`);
+}
 assert(
   main3dJs.includes('applyBuildingViewMode(building, getEffectiveBuildingViewMode(building))'),
   'main3d.js must preserve the effective selected/entered building view after createBuilding3D rebuilds',
@@ -294,8 +362,8 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260703-server-runtime-r1',
-  'js/chat.js?v=20260617-codex-context-r2',
+  'js/main3d.js?v=20260706-model-switch-r4',
+  'js/chat.js?v=20260706-model-switch-r4',
   'css/style.css?v=20260617-codex-context-r2',
   'btn-newAgent',
   'Agent Platform',
@@ -347,6 +415,15 @@ for (const token of [
   assert(chatJs.includes(token), `chat.js missing agent picker persistence token: ${token}`);
 }
 for (const token of [
+  'finishOpenClawRunError',
+  'isTerminalOpenClawErrorState',
+  'extractRunError',
+  'OpenClaw run failed:',
+  'OpenClaw send failed:',
+]) {
+  assert(chatJs.includes(token), `chat.js missing OpenClaw chat error token: ${token}`);
+}
+for (const token of [
   'def _handle_codex_run_start',
   'def _handle_codex_run_events',
   'path.startswith("/api/codex/runs/") and path.endswith("/events")',
@@ -367,7 +444,8 @@ for (const token of [
 }
 for (const token of [
   "agent-characters.js?v=20260615-desk-carry-rest-r1",
-  "state.miniEl.style.top = (sy - 42) + 'px'",
+  "state.miniEl.style.top = miniY + 'px'",
+  'CHAT_BUBBLE_MINI_SIZE = 28',
   'if (dist > 100)',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing chat bubble/desk carry token: ${token}`);
@@ -479,7 +557,11 @@ for (const token of [
   'RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000',
   'worldRuntimeTickContext',
   'runtime.tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS',
-  'this.patchRate = DEFAULT_WORLD_RUNTIME_TICK_MS',
+  'this.patchRate = RUNTIME_SCHEMA_PATCH_RATE_MS',
+  'RUNTIME_SCHEMA_PATCH_RATE_MS = DEFAULT_WORLD_RUNTIME_TICK_MS',
+  'stateToRealtimePlain',
+  'worldObjectToRealtimePlain',
+  'RUNTIME_WIRE_EVENTS_LIMIT = 0',
   'tickSeq: plain.tickSeq',
   'simTimeMs: plain.simTimeMs',
   'tickMs: plain.tickMs',
@@ -792,7 +874,7 @@ for (const token of [
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
   '__VWGetAgentRuntimeDebug',
-  'agent-runtime-client.mjs?v=20260703-server-runtime-r1',
+  'agent-runtime-client.mjs?v=20260704-runtime-chat-opt-r2',
   'serverAuthoritativeRuntimeBlockReason',
   'clearBrowserOwnedAgentMotionForServerRuntime',
   'holdAgentForServerAuthoritativeRuntimeObserver',
@@ -804,6 +886,11 @@ for (const token of [
   'writeWorldTopology',
   'applyAgentRuntimeTrafficLights',
   'applyAgentRuntimeTrafficVehicles',
+  'resumeAgentRuntimeAfterPageResume',
+  'scheduleAgentRuntimePageResume',
+  'resetAgentRuntimeRenderTimingForResume',
+  "window.addEventListener('pageshow'",
+  "window.addEventListener('online'",
   'updateRuntimeTrafficVehicles',
   'AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS',
   'server-authoritative-world-topology-observer',
@@ -818,7 +905,10 @@ for (const token of [
   'isLoopbackHost',
   'parsed.hostname = pageHost',
   'DEFAULT_CONNECT_TIMEOUT_MS',
+  'DEFAULT_RESUME_STALE_MS',
   'agent runtime connect',
+  'resume',
+  'isStale',
   'tickSeq: raw.tickSeq',
   'simTimeMs: raw.simTimeMs',
   'tickMs: raw.tickMs',

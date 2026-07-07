@@ -14,6 +14,7 @@ import {
   LIVE_STATUS_RUNTIME_POLL_MS,
   LIVE_STATUS_RUNTIME_OWNER,
   LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
+  RUNTIME_SCHEMA_PATCH_RATE_MS,
   RUNTIME_STATE_BROADCAST_INTERVAL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
@@ -105,6 +106,7 @@ function waitForRoomMessage(room, type, predicate = () => true) {
       reject(new Error(`timed out waiting for ${type}${lastError ? `; last runtime error: ${JSON.stringify(lastError)}` : ''}`));
     }, 5000);
     const unregister = room.onMessage(type, (message) => {
+      mergeRuntimeMessage(room, message);
       if (!predicate(message)) return;
       clearTimeout(timeout);
       unregister();
@@ -190,11 +192,36 @@ async function waitForObject(room, objectKey, predicate = () => true) {
   throw new Error(`timed out waiting for object ${objectKey}`);
 }
 
+function ensureRuntimeDoc(room) {
+  if (!room.__runtimeDoc || typeof room.__runtimeDoc !== 'object') {
+    room.__runtimeDoc = { agents: {}, objects: {}, worldRuntime: null, events: [] };
+  }
+  if (!room.__runtimeDoc.agents || typeof room.__runtimeDoc.agents !== 'object') room.__runtimeDoc.agents = {};
+  if (!room.__runtimeDoc.objects || typeof room.__runtimeDoc.objects !== 'object') room.__runtimeDoc.objects = {};
+  return room.__runtimeDoc;
+}
+
+function mergeRuntimeMessage(room, message = null) {
+  if (!message || typeof message !== 'object') return;
+  const doc = ensureRuntimeDoc(room);
+  const snapshot = message.snapshot || message.agent || message.event?.snapshot || null;
+  if (snapshot?.agentId) doc.agents[snapshot.agentId] = snapshot;
+  const object = message.object || message.worldObject || message.event?.object || null;
+  if (object?.objectKey) doc.objects[object.objectKey] = object;
+  const worldRuntime = message.worldRuntime || message.runtime || message.event?.worldRuntime || null;
+  if (worldRuntime) doc.worldRuntime = worldRuntime;
+}
+
 async function connectRoom(port) {
   const client = new Client(`ws://127.0.0.1:${port}`);
   const room = await client.joinOrCreate(AGENT_RUNTIME_ROOM_NAME, { worldId: 'smoke' });
   room.__runtimeErrors = [];
-  room.onMessage('runtime:event', () => {});
+  room.onMessage('runtime:event', (message) => {
+    mergeRuntimeMessage(room, message);
+  });
+  room.onMessage('runtime:ack', (message) => {
+    mergeRuntimeMessage(room, message);
+  });
   room.onMessage('runtime:error', (message) => {
     room.__runtimeErrors.push(message);
     if (room.__runtimeErrors.length > 12) room.__runtimeErrors.shift();
@@ -203,6 +230,7 @@ async function connectRoom(port) {
     if (message?.snapshot) room.__runtimeDoc = message.snapshot;
   });
   room.onMessage('runtime:worldRuntime', (message) => {
+    mergeRuntimeMessage(room, message);
     if (message?.worldRuntime && room.__runtimeDoc) {
       room.__runtimeDoc = { ...room.__runtimeDoc, worldRuntime: message.worldRuntime };
     }
@@ -220,7 +248,8 @@ async function run() {
     assert.equal(LIVE_ACTION_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live action runtime should move at the world tick for smooth observer interpolation');
     assert.equal(LIVE_STATUS_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live status runtime should move at the world tick for smooth observer interpolation');
     assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'scripted object runtime should move at the world tick for smooth observer interpolation');
-    assert.equal(RUNTIME_STATE_BROADCAST_INTERVAL_MS, 1000, 'full runtime state broadcasts should be throttled; Colyseus patches carry movement ticks');
+    assert.equal(RUNTIME_STATE_BROADCAST_INTERVAL_MS, 1000, 'lean runtime state broadcasts should be throttled');
+    assert.equal(RUNTIME_SCHEMA_PATCH_RATE_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'schema patches should stay at the world tick for smooth observer interpolation');
     assert.equal(LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC, 200, 'server-owned work routes should use the 8590 running displacement speed');
     assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC, 200, 'server-owned desk-consume handoffs should use the 8590 running displacement speed');
 
@@ -823,7 +852,7 @@ async function run() {
     assert(bethWaterDeskTarget.objectKey.endsWith(':consume:beth'), 'desk consume should use a transient per-agent object key');
     await waitForObject(scriptedRoom, 'manual-building:furniture:2:waterCooler', (object) =>
       object.state === 'idle' &&
-      object.dataJson.includes('temporary-water-picked-up')
+      object.dataJson.includes('clearReservation')
     );
     const bethWaterDone = await waitForAgent(scriptedRoom, 'beth', (agent) =>
       agent.state === 'idle' &&
@@ -897,7 +926,7 @@ async function run() {
     assert(coraVendingDeskTarget.objectKey.endsWith(':consume:cora'), 'vending desk consume should use a transient per-agent object key');
     await waitForObject(scriptedRoom, 'manual-building:furniture:5:vending', (object) =>
       object.state === 'idle' &&
-      object.dataJson.includes('temporary-vending-item-picked-up')
+      object.dataJson.includes('clearReservation')
     );
     const coraVendingDone = await waitForAgent(scriptedRoom, 'cora', (agent) =>
       agent.state === 'idle' &&

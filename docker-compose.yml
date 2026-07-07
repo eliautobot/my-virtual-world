@@ -11,7 +11,8 @@ services:
       - "${VW_HOST_PORT:-8590}:${VW_PORT:-8590}"
     volumes:
       - vw-data:/data
-      - ~/.openclaw:/openclaw:ro
+      # Agent editing/model switching needs write access to openclaw.json and agent workspace docs.
+      - ~/.openclaw:/openclaw
       - ~/.openclaw/workspace/uploads:/openclaw/workspace/uploads
       # Optional native Hermes integration.
       # If your Hermes launcher stores absolute paths, set VW_HERMES_HOME,
@@ -21,6 +22,8 @@ services:
       - ${VW_HERMES_HOST_UV:-~/.local/share/uv}:${VW_HERMES_CONTAINER_UV:-/home/vw/.local/share/uv}:ro
       # Optional native Codex integration. Override VW_CODEX_* if your Codex install lives elsewhere.
       - ~/.codex:/home/vw/.codex
+      # Optional native Claude Code setup fields. Claude Code provider runtime is not enabled yet.
+      - ${VW_CLAUDE_CODE_HOST_HOME:-~/.claude}:${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}
     environment:
       - VW_PORT=${VW_PORT:-8590}
       - VW_HOST_PORT=${VW_HOST_PORT:-8590}
@@ -57,6 +60,18 @@ services:
       - VW_CODEX_INCLUDE_MAIN=${VW_CODEX_INCLUDE_MAIN:-true}
       - VW_CODEX_INCLUDE_NATIVE_AGENTS=${VW_CODEX_INCLUDE_NATIVE_AGENTS:-true}
       - VW_CODEX_REGISTER_NATIVE_AGENTS=${VW_CODEX_REGISTER_NATIVE_AGENTS:-true}
+      - CLAUDE_CONFIG_DIR=${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}
+      - VW_CLAUDE_CODE_ENABLED=${VW_CLAUDE_CODE_ENABLED:-false}
+      - VW_CLAUDE_CODE_HOME=${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}
+      - VW_CLAUDE_CODE_BIN=${VW_CLAUDE_CODE_BIN:-claude}
+      - VW_CLAUDE_CODE_WORKSPACE_ROOT=${VW_CLAUDE_CODE_WORKSPACE_ROOT:-/data/claude-code-agents}
+      - VW_CLAUDE_CODE_MAIN_WORKSPACE=${VW_CLAUDE_CODE_MAIN_WORKSPACE:-/data/claude-code-main}
+      - VW_CLAUDE_CODE_TIMEOUT_SEC=${VW_CLAUDE_CODE_TIMEOUT_SEC:-900}
+      - VW_CLAUDE_CODE_MODEL=${VW_CLAUDE_CODE_MODEL:-}
+      - VW_CLAUDE_CODE_PERMISSION_MODE=${VW_CLAUDE_CODE_PERMISSION_MODE:-acceptEdits}
+      - VW_CLAUDE_CODE_INCLUDE_MAIN=${VW_CLAUDE_CODE_INCLUDE_MAIN:-true}
+      - VW_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS=${VW_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS:-true}
+      - VW_CLAUDE_CODE_REGISTER_NATIVE_AGENTS=${VW_CLAUDE_CODE_REGISTER_NATIVE_AGENTS:-true}
       - VW_LICENSE_STORE_ID=${VW_LICENSE_STORE_ID:-321733}
       - VW_LICENSE_PRODUCT_IDS=${VW_LICENSE_PRODUCT_IDS:-1140366}
       # Optional external provider relay for future non-Hermes providers.

@@ -142,9 +142,17 @@ Status records are used for visual presence only. They do not grant tool access.
 | POST | `/api/decorations` | Save world decorations. |
 | GET | `/api/agent/<agent-id>/live-mode` | Read Agent Live Mode setting. |
 | POST | `/api/agent/<agent-id>/live-mode` | Enable or disable Agent Live Mode. |
+| GET | `/api/agent/<agent-id>/workspace` | Read editable provider workspace files for the agent. |
+| POST | `/api/agent/<agent-id>/workspace` | Save editable provider workspace files for the agent. |
+| GET | `/api/agent/<agent-id>/resident-profile` | Read or create the Virtual World Resident Profile. |
+| POST | `/api/agent/<agent-id>/resident-profile` | Save the Virtual World Resident Profile. |
 | POST | `/api/agent/<agent-id>/profile` | Save name, appearance, personality, or profile docs. |
 
 Profile writes may update local agent identity files when configured. Do not write private user data into profile documentation.
+
+Workspace editing currently supports OpenClaw markdown files under the resolved agent workspace, limited to built-in agent files such as `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, and `HEARTBEAT.md`. Non-OpenClaw providers return an unsupported-provider payload until their adapters are implemented.
+
+Resident profiles live in `world-meta.json` under `agentProfiles[agentId].residentProfile`. They are Virtual World-specific roleplay/autonomy profiles with identity, life purpose, goals, needs, short-term memory, long-term memory, and Live Mode behavior settings.
 
 ## World Actions
 

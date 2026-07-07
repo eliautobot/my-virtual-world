@@ -10,7 +10,7 @@
     <link rel="icon" href="favicon.png" type="image/png">
     <title>My Virtual World</title>
     <link rel="stylesheet" href="css/style.css?v=20260617-codex-context-r2">
-    <link rel="stylesheet" href="css/ui-redesign.css?v=20260615-new-agent-menu-r2">
+    <link rel="stylesheet" href="css/ui-redesign.css?v=20260706-mobile-load-r4">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
@@ -144,47 +144,11 @@
                         <select id="agentList" class="agent-editor-select">
                             <option value="">Choose an agent…</option>
                         </select>
+                        <button id="agentSelectPicker-open" class="agent-select-picker-trigger" type="button">Choose an agent…</button>
                     </label>
-                    <div id="agentPanel" class="agent-panel agent-panel-inline" style="display:none">
-                        <div class="agent-panel-header">
-                            <span id="agentPanel-title">🤖 Agent</span>
-                            <button class="modal-close" onclick="window.closeAgentEditor?.()">✕</button>
-                        </div>
-                        <div class="agent-panel-body">
-                            <div id="agentPanel-info"></div>
-                            <div class="agent-panel-section">
-                                <h4>Assignment</h4>
-                                <div class="form-group">
-                                    <label>Work Building</label>
-                                    <select id="agentPanel-work"><option value="">None</option></select>
-                                </div>
-                                <div class="form-group">
-                                    <label>Home Building</label>
-                                    <select id="agentPanel-home"><option value="">None</option></select>
-                                </div>
-                                <div style="display:flex;gap:8px;margin-top:8px">
-                                    <button class="btn-primary" id="agentPanel-assign" style="flex:1">💾 Save Assignment</button>
-                                    <button class="btn-secondary" id="agentPanel-goto" style="flex:0 0 auto;padding:10px 14px">📍 Go To</button>
-                                </div>
-                            </div>
-                            <div class="agent-panel-section">
-                                <h4>Status</h4>
-                                <div id="agentPanel-status"></div>
-                            </div>
-                            <div class="agent-panel-section">
-                                <h4>🧠 Needs</h4>
-                                <div id="agentPanel-needs"></div>
-                            </div>
-                            <div class="agent-panel-section">
-                                <h4>🎭 Personality</h4>
-                                <div id="agentPanel-personality"></div>
-                            </div>
-                            <div class="agent-panel-section">
-                                <h4>Activity</h4>
-                                <div id="agentPanel-activity"></div>
-                            </div>
-                        </div>
-                    </div>
+                    <button id="agentPanel-open" class="sidebar-action-btn" type="button" disabled>Edit Selected Agent</button>
+                    <button id="modelsProviders-open" class="sidebar-action-btn" type="button" onclick="window.openModelsProvidersWindow?.()">Models & Providers</button>
+                    <button id="agentSkillsLibrary-open" class="sidebar-action-btn" type="button">Skill Library</button>
                 </div>
 
                 <!-- Outside spaces moved into the Edit Mode accordion above. -->
@@ -229,6 +193,196 @@
                 <h3>📋 Activity Log</h3>
                 <div id="activityLogList" class="sidebar-list activity-log-list" style="max-height:200px;overflow-y:auto;font-size:10px;line-height:1.6"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- Mobile Agent Picker -->
+    <div id="agentSelectPickerModal" class="agent-select-picker-modal" style="display:none" aria-hidden="true">
+        <div class="agent-select-picker-window" role="dialog" aria-modal="true" aria-labelledby="agentSelectPicker-title">
+            <div class="agent-select-picker-header">
+                <div>
+                    <h2 id="agentSelectPicker-title">Select Agent</h2>
+                    <span id="agentSelectPicker-count">Agents</span>
+                </div>
+                <button class="modal-close" type="button" onclick="window.closeAgentSelectPicker?.()">✕</button>
+            </div>
+            <div class="agent-select-picker-search-wrap">
+                <input id="agentSelectPicker-search" type="search" autocomplete="off" placeholder="Search agents">
+            </div>
+            <div id="agentSelectPicker-list" class="agent-select-picker-list"></div>
+        </div>
+    </div>
+
+    <!-- Agent Character Builder -->
+    <div id="agentPanel" class="agent-builder-modal" style="display:none" aria-hidden="true">
+        <div class="agent-builder-window" role="dialog" aria-modal="true" aria-labelledby="agentPanel-title">
+            <div class="agent-builder-header">
+                <div class="agent-builder-title-lockup">
+                    <div class="agent-builder-icon" id="agentBuilder-icon">🤖</div>
+                    <div>
+                        <h2 id="agentPanel-title">Edit Agent</h2>
+                        <div id="agentBuilder-subtitle" class="agent-builder-subtitle">Agent Character Builder</div>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="window.closeAgentEditor?.()">✕</button>
+            </div>
+            <div class="agent-builder-tabs" role="tablist" aria-label="Agent editor sections">
+                <button class="agent-builder-tab active" type="button" data-agent-builder-tab="settings">Agent Settings</button>
+                <button class="agent-builder-tab" type="button" data-agent-builder-tab="profile">Profile</button>
+                <button class="agent-builder-tab" type="button" data-agent-builder-tab="skills">Skills</button>
+                <button class="agent-builder-tab" type="button" data-agent-builder-tab="appearance">Appearance</button>
+            </div>
+            <div class="agent-builder-body">
+                <aside class="agent-builder-preview-pane">
+                    <div class="agent-builder-preview-card">
+                        <div class="agent-builder-preview-topline">
+                            <span>Live Character</span>
+                            <small id="agentBuilder-previewStatus">Ready</small>
+                        </div>
+                        <div class="agent-builder-preview-stage">
+                            <canvas id="agentBuilderPreviewCanvas" width="520" height="620"></canvas>
+                        </div>
+                        <div class="agent-builder-preview-tools">
+                            <button id="agentBuilderRotateLeft" class="btn-secondary" type="button">↶</button>
+                            <input id="agentBuilderZoom" type="range" min="0.75" max="1.8" step="0.05" value="1.12">
+                            <button id="agentBuilderRotateRight" class="btn-secondary" type="button">↷</button>
+                        </div>
+                    </div>
+                    <div class="agent-builder-summary-card">
+                        <div id="agentBuilder-summary"></div>
+                    </div>
+                </aside>
+                <main class="agent-builder-main">
+                    <section class="agent-builder-pane active" data-agent-builder-pane="settings">
+                        <div class="agent-builder-section">
+                            <h3>Identity</h3>
+                            <div id="agentPanel-info"></div>
+                        </div>
+                        <div class="agent-builder-grid">
+                            <div class="agent-builder-section">
+                                <h3>Assignment</h3>
+                                <div class="form-group">
+                                    <label>Work Building</label>
+                                    <select id="agentPanel-work"><option value="">None</option></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Home Building</label>
+                                    <select id="agentPanel-home"><option value="">None</option></select>
+                                </div>
+                                <div class="agent-builder-inline-actions">
+                                    <button class="btn-primary" id="agentPanel-assign">Save Assignment</button>
+                                    <button class="btn-secondary" id="agentPanel-goto">Go To</button>
+                                </div>
+                            </div>
+                            <div class="agent-builder-section">
+                                <h3>Status</h3>
+                                <div id="agentPanel-status"></div>
+                                <div id="agentPanel-activity"></div>
+                            </div>
+                        </div>
+                        <div class="agent-builder-section">
+                            <h3>Needs</h3>
+                            <div id="agentPanel-needs"></div>
+                        </div>
+                        <div class="agent-builder-section">
+                            <h3>Agent Settings</h3>
+                            <div id="agentPanel-framework"></div>
+                            <div id="agentPanel-workspace"></div>
+                        </div>
+                    </section>
+                    <section class="agent-builder-pane" data-agent-builder-pane="profile">
+                        <div class="agent-builder-section">
+                            <h3>Resident Profile</h3>
+                            <div id="agentPanel-residentProfile"></div>
+                        </div>
+                        <div class="agent-builder-section">
+                            <h3>Personality</h3>
+                            <div id="agentPanel-personality"></div>
+                        </div>
+                    </section>
+                    <section class="agent-builder-pane" data-agent-builder-pane="skills">
+                        <div class="agent-builder-section">
+                            <div class="agent-builder-section-title-row">
+                                <h3>Skills</h3>
+                                <button id="agentPanel-openSkillsLibrary" class="btn-secondary" type="button">Skill Library</button>
+                            </div>
+                            <div id="agentPanel-skills"></div>
+                        </div>
+                    </section>
+                    <section class="agent-builder-pane" data-agent-builder-pane="appearance">
+                        <div class="agent-builder-section">
+                            <h3>Appearance</h3>
+                            <div id="agentBuilder-appearanceControls"></div>
+                        </div>
+                    </section>
+                </main>
+            </div>
+            <div class="agent-builder-footer">
+                <button id="agentBuilder-cancel" class="btn-secondary" type="button">Cancel</button>
+                <button id="agentBuilder-saveAppearance" class="btn-primary" type="button">Save Appearance</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skills Library -->
+    <div id="skillsLibraryModal" class="agent-builder-modal skills-library-modal" style="display:none" aria-hidden="true">
+        <div class="agent-builder-window skills-library-window" role="dialog" aria-modal="true" aria-labelledby="skillsLibrary-title">
+            <div class="agent-builder-header">
+                <div class="agent-builder-title-lockup">
+                    <div class="agent-builder-icon">📚</div>
+                    <div>
+                        <h2 id="skillsLibrary-title">Skill Library</h2>
+                        <div class="agent-builder-subtitle">Reusable skills for agent workspaces</div>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="window.closeAgentSkillsLibrary?.()">✕</button>
+            </div>
+            <div class="skills-library-body">
+                <aside class="skills-library-sidebar">
+                    <div class="agent-builder-section-title-row">
+                        <h3>Library</h3>
+                        <button id="skillsLibrary-refresh" class="btn-secondary" type="button">Refresh</button>
+                    </div>
+                    <div id="skillsLibrary-list" class="skills-library-list"></div>
+                    <button id="skillsLibrary-new" class="btn-primary" type="button">Add Skill</button>
+                </aside>
+                <main class="skills-library-editor">
+                    <div class="agent-builder-section-title-row">
+                        <h3 id="skillsLibrary-editorTitle">Skill</h3>
+                        <button id="skillsLibrary-delete" class="btn-secondary" type="button">Delete</button>
+                    </div>
+                    <label class="form-group">
+                        <span>Name</span>
+                        <input id="skillsLibrary-name" autocomplete="off">
+                    </label>
+                    <label class="form-group">
+                        <span>Content</span>
+                        <textarea id="skillsLibrary-content" rows="18" spellcheck="false"></textarea>
+                    </label>
+                    <div class="skills-library-apply-row">
+                        <select id="skillsLibrary-agentSelect"></select>
+                        <button id="skillsLibrary-apply" class="btn-secondary" type="button">Apply To Agent</button>
+                        <button id="skillsLibrary-save" class="btn-primary" type="button">Save Skill</button>
+                    </div>
+                    <div id="skillsLibrary-status" class="settings-inline-status"></div>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <div id="modelsProvidersModal" class="agent-builder-modal models-providers-modal" style="display:none" aria-hidden="true">
+        <div class="agent-builder-window models-providers-window" role="dialog" aria-modal="true" aria-labelledby="modelsProviders-title">
+            <div class="agent-builder-header">
+                <div class="agent-builder-title-lockup">
+                    <div class="agent-builder-icon">⚙️</div>
+                    <div>
+                        <h2 id="modelsProviders-title">Models & Providers</h2>
+                        <div class="agent-builder-subtitle">OpenClaw, Hermes, Codex CLI, and native provider setup</div>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="window.closeModelsProvidersWindow?.()">✕</button>
+            </div>
+            <iframe id="modelsProvidersFrame" class="models-providers-frame" title="Models & Providers"></iframe>
         </div>
     </div>
 
@@ -726,8 +880,8 @@
     <script src="js/vo-engine.js?v=printer-copier-asset-v1"></script>
     <script src="/node_modules/@colyseus/sdk/dist/colyseus.js?v=20260623-live-agent-runtime-hydration"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script type="module" src="js/main3d.js?v=20260703-server-runtime-r1"></script>
-    <script src="js/chat.js?v=20260617-codex-context-r2"></script>
+    <script type="module" src="js/main3d.js?v=20260706-model-switch-r4"></script>
+    <script src="js/chat.js?v=20260706-model-switch-r4"></script>
     <script src="js/settings.js?v=20260615-location-settings-r1"></script>
 </body>
 </html>

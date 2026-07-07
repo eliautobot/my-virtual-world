@@ -136,10 +136,26 @@ Agents come from connected provider systems such as OpenClaw or Hermes. The worl
 - home/work building assignments
 - appearance
 - personality
+- Virtual World Resident Profile
 - profile docs
 - Agent Live Mode setting
 
 Provider-owned runtime details stay with the provider. My Virtual World stores only the world-facing metadata it needs to render and coordinate agents.
+
+### Agent Workspace vs Resident Profile
+
+Agent framework files are provider-owned documents. For OpenClaw agents these are markdown files such as `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, and `HEARTBEAT.md` under the resolved OpenClaw agent workspace. My Virtual World exposes these through the agent workspace editor, but the files remain source-of-truth documents for the agent framework.
+
+The Virtual World Resident Profile is separate. It is stored under:
+
+```text
+world-meta.json
+  agentProfiles
+    <agent-id>
+      residentProfile
+```
+
+Resident profiles are the world-facing roleplay/autonomy layer. They contain identity, life purpose, world home/work references, goals, needs, personality, short-term memory, long-term memory, relationships, reflections, and Live Mode behavior settings. New agents are seeded with the default resident template so Live Agent Mode has a purpose/memory layer without hardcoding individual agents.
 
 ## World Actions
 

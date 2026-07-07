@@ -36,6 +36,20 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_HERMES_AUTO_START_PROFILE_APIS` | `true` | Allow Virtual World to start profile-scoped local Hermes API servers. Only localhost URLs and configured API keys are eligible. |
 | `VW_HERMES_AUTO_START_DEFAULT_API` | `true` | Allow auto-start for the default Hermes profile. |
 | `VW_HERMES_API_PROFILE_PORT_BASE` | `8643` | Base port used to derive profile-specific local API ports. |
+| `VW_CODEX_ENABLED` | `true` | Enables Codex CLI discovery and chat relay. |
+| `VW_CODEX_HOME` | `/home/vw/.codex` | Codex home path inside Docker. |
+| `VW_CODEX_BIN` | `/home/vw/.codex/packages/standalone/current/bin/codex` | Codex CLI path inside Docker. |
+| `VW_CODEX_WORKSPACE_ROOT` | `/data/codex-agents` | Workspace root for standard Codex-backed agents. |
+| `VW_CODEX_MAIN_WORKSPACE` | `/data/codex-main` | Workspace for the main Codex agent. |
+| `VW_CODEX_MODEL` | empty | Optional default model override passed into Codex runs. |
+| `VW_CODEX_SANDBOX` | `workspace-write` | Codex sandbox mode used for native runs. |
+| `VW_CODEX_APPROVAL_POLICY` | `never` | Codex approval policy used for native runs. |
+| `VW_CLAUDE_CODE_ENABLED` | `false` | Saves Claude Code setup fields. Live Claude Code agents are not implemented in My Virtual World yet. |
+| `VW_CLAUDE_CODE_HOME` | `/home/vw/.claude` | Claude Code config directory inside Docker. |
+| `VW_CLAUDE_CODE_BIN` | `claude` | Claude Code CLI path or command name. |
+| `VW_CLAUDE_CODE_WORKSPACE_ROOT` | `/data/claude-code-agents` | Future workspace root for standard Claude Code-backed agents. |
+| `VW_CLAUDE_CODE_MAIN_WORKSPACE` | `/data/claude-code-main` | Future workspace for the main Claude Code agent. |
+| `VW_CLAUDE_CODE_PERMISSION_MODE` | `acceptEdits` | Claude Code permission mode setting saved by the Models & Providers window. |
 | `VW_REALTIME_ENABLED` | `true` in Docker Compose, otherwise `false` unless a realtime URL is configured | Enable the Colyseus sidecar config for Live Agent Mode runtime state. |
 | `VW_REALTIME_BROWSER_URL` | empty | Browser-reachable websocket URL for this install's realtime sidecar, such as `ws://127.0.0.1:8591`, `ws://my-world-pc:8591`, or `wss://world.example.com/realtime`. |
 | `VW_REALTIME_URL` | empty | Backwards-compatible alias for `VW_REALTIME_BROWSER_URL`. |

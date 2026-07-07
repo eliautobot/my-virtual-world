@@ -6,12 +6,15 @@ Self-contained Virtual World server; Virtual Office is reference/inspiration onl
 import asyncio
 import base64
 import copy
+import gzip
 import hashlib
 import http.server
 import importlib.util
 import json
 import os
+import signal
 import shutil
+import sqlite3
 import sys
 import threading
 import time
@@ -56,6 +59,11 @@ try:
 except Exception as e:
     ws_connect = None
     print(f"⚠️  Virtual World Gateway RPC client unavailable: {e}")
+
+try:
+    import yaml
+except Exception:
+    yaml = None
 
 # ─── CONFIGURATION ───────────────────────────────────────────────
 def _env_or(key, fallback):
@@ -158,6 +166,19 @@ def _default_vw_config():
             "includeNativeAgents": True,
             "registerNativeAgents": True,
         },
+        "claudeCode": {
+            "enabled": False,
+            "homePath": "",
+            "binary": "",
+            "workspaceRoot": "",
+            "mainWorkspace": "",
+            "timeoutSec": 900,
+            "model": "",
+            "permissionMode": "acceptEdits",
+            "includeMain": True,
+            "includeNativeAgents": True,
+            "registerNativeAgents": True,
+        },
         "features": {"agentBrowser": False, "sms": False, "weather": True, "agentLiveMode": False, "debugTools": True},
         "realtime": {"enabled": False, "url": "", "room": "agent_runtime"},
         "browser": {"cdpUrl": "", "viewerUrl": ""},
@@ -172,6 +193,7 @@ def _load_vw_config():
     cfg.setdefault("openclaw", {})
     cfg.setdefault("hermes", {})
     cfg.setdefault("codex", {})
+    cfg.setdefault("claudeCode", {})
     cfg.setdefault("browser", {})
     cfg.setdefault("sms", {})
     cfg.setdefault("features", {})
@@ -209,6 +231,17 @@ def _load_vw_config():
     cfg["codex"]["includeMain"] = _env_bool("VW_CODEX_INCLUDE_MAIN", cfg["codex"].get("includeMain", True))
     cfg["codex"]["includeNativeAgents"] = _env_bool("VW_CODEX_INCLUDE_NATIVE_AGENTS", cfg["codex"].get("includeNativeAgents", True))
     cfg["codex"]["registerNativeAgents"] = _env_bool("VW_CODEX_REGISTER_NATIVE_AGENTS", cfg["codex"].get("registerNativeAgents", True))
+    cfg["claudeCode"]["enabled"] = _env_bool("VW_CLAUDE_CODE_ENABLED", cfg["claudeCode"].get("enabled", False))
+    cfg["claudeCode"]["homePath"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_HOME", _env_or("CLAUDE_CONFIG_DIR", cfg["claudeCode"].get("homePath") or "~/.claude")))
+    cfg["claudeCode"]["binary"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_BIN", cfg["claudeCode"].get("binary") or "claude"))
+    cfg["claudeCode"]["workspaceRoot"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_WORKSPACE_ROOT", cfg["claudeCode"].get("workspaceRoot") or os.path.join(DATA_DIR, "claude-code-agents")))
+    cfg["claudeCode"]["mainWorkspace"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_MAIN_WORKSPACE", cfg["claudeCode"].get("mainWorkspace") or os.path.join(DATA_DIR, "claude-code-main")))
+    cfg["claudeCode"]["timeoutSec"] = int(_env_or("VW_CLAUDE_CODE_TIMEOUT_SEC", cfg["claudeCode"].get("timeoutSec", 900)))
+    cfg["claudeCode"]["model"] = _env_or("VW_CLAUDE_CODE_MODEL", cfg["claudeCode"].get("model") or "")
+    cfg["claudeCode"]["permissionMode"] = _env_or("VW_CLAUDE_CODE_PERMISSION_MODE", cfg["claudeCode"].get("permissionMode") or "acceptEdits")
+    cfg["claudeCode"]["includeMain"] = _env_bool("VW_CLAUDE_CODE_INCLUDE_MAIN", cfg["claudeCode"].get("includeMain", True))
+    cfg["claudeCode"]["includeNativeAgents"] = _env_bool("VW_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", cfg["claudeCode"].get("includeNativeAgents", True))
+    cfg["claudeCode"]["registerNativeAgents"] = _env_bool("VW_CLAUDE_CODE_REGISTER_NATIVE_AGENTS", cfg["claudeCode"].get("registerNativeAgents", True))
     cfg["browser"]["cdpUrl"] = _env_or("VW_BROWSER_CDP_URL", cfg["browser"].get("cdpUrl") or "")
     cfg["browser"]["viewerUrl"] = _env_or("VW_BROWSER_VIEWER_URL", cfg["browser"].get("viewerUrl") or "")
     realtime_url = _env_or(
@@ -281,6 +314,42 @@ def _default_openclaw_model(cfg=None):
         if isinstance(agent_cfg, dict) and agent_cfg.get("default") and agent_cfg.get("model"):
             return str(agent_cfg["model"])
     return str(cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("primary") or "")
+
+
+def _primary_openclaw_model(cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _load_openclaw_model_config()
+    return str(cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("primary") or "")
+
+
+def _openclaw_config_agent_for(agent_id, agent=None, cfg=None):
+    cfg = cfg if isinstance(cfg, dict) else _load_openclaw_model_config()
+    aliases = {
+        str(agent_id or "").strip(),
+        str((agent or {}).get("id") or "").strip(),
+        str((agent or {}).get("statusKey") or "").strip(),
+        str((agent or {}).get("providerAgentId") or "").strip(),
+        str((agent or {}).get("profile") or "").strip(),
+    }
+    aliases.discard("")
+    if not aliases:
+        return None
+    for item in cfg.get("agents", {}).get("list", []) or []:
+        if not isinstance(item, dict):
+            continue
+        item_aliases = {
+            str(item.get("id") or "").strip(),
+            str(item.get("name") or "").strip(),
+            str(item.get("profile") or "").strip(),
+        }
+        workspace = str(item.get("workspace") or "").strip()
+        if workspace:
+            item_aliases.add(os.path.basename(workspace.rstrip(os.sep)))
+            if os.path.basename(workspace.rstrip(os.sep)).startswith("workspace-"):
+                item_aliases.add(os.path.basename(workspace.rstrip(os.sep))[len("workspace-"):])
+        item_aliases.discard("")
+        if aliases & item_aliases:
+            return item
+    return None
 
 
 def _configured_context_window(model, cfg=None):
@@ -369,6 +438,7 @@ def _safe_vw_config():
     sms_cfg = VW_CONFIG.get("sms", {}) or {}
     hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
     codex_cfg = VW_CONFIG.get("codex", {}) or {}
+    claude_code_cfg = VW_CONFIG.get("claudeCode", {}) or {}
     openclaw_cfg = VW_CONFIG.get("openclaw", {}) or {}
     realtime_cfg = VW_CONFIG.get("realtime", {}) or {}
     return {
@@ -409,6 +479,19 @@ def _safe_vw_config():
             "includeMain": codex_cfg.get("includeMain", True),
             "includeNativeAgents": codex_cfg.get("includeNativeAgents", True),
             "registerNativeAgents": codex_cfg.get("registerNativeAgents", True),
+        },
+        "claudeCode": {
+            "enabled": claude_code_cfg.get("enabled", False),
+            "homePath": _display_user_home_path(claude_code_cfg.get("homePath")),
+            "binary": _display_user_home_path(claude_code_cfg.get("binary")),
+            "workspaceRoot": _display_user_home_path(claude_code_cfg.get("workspaceRoot")),
+            "mainWorkspace": _display_user_home_path(claude_code_cfg.get("mainWorkspace")),
+            "timeoutSec": claude_code_cfg.get("timeoutSec", 900),
+            "model": claude_code_cfg.get("model"),
+            "permissionMode": claude_code_cfg.get("permissionMode", "acceptEdits"),
+            "includeMain": claude_code_cfg.get("includeMain", True),
+            "includeNativeAgents": claude_code_cfg.get("includeNativeAgents", True),
+            "registerNativeAgents": claude_code_cfg.get("registerNativeAgents", True),
         },
         "browser": {
             "cdpUrl": (VW_CONFIG.get("browser") or {}).get("cdpUrl"),
@@ -1446,6 +1529,24 @@ LIVE_AGENT_LOOP_PERSONALITY_NEED_WEIGHTS = {
     "shelter": {"easygoing": 0.20},
     "social": {"outgoing": 0.62, "easygoing": 0.12},
 }
+AGENT_WORKSPACE_SCHEMA_VERSION = "agent-framework-workspace/v1"
+AGENT_WORKSPACE_ALLOWED_FILES = (
+    "AGENTS.md",
+    "SOUL.md",
+    "IDENTITY.md",
+    "USER.md",
+    "MEMORY.md",
+    "TOOLS.md",
+    "HEARTBEAT.md",
+)
+AGENT_WORKSPACE_FILE_MAX_BYTES = 160 * 1024
+AGENT_SKILL_FILE_MAX_BYTES = 256 * 1024
+AGENT_SKILL_SCHEMA_VERSION = "agent-skills/v1"
+SKILLS_LIBRARY_SCHEMA_VERSION = "skills-library/v1"
+RESIDENT_PROFILE_SCHEMA_VERSION = "virtual-world-resident-profile/v1"
+RESIDENT_PROFILE_TEXT_LIMIT = 4000
+RESIDENT_PROFILE_LIST_LIMIT = 40
+RESIDENT_PROFILE_MEMORY_LIMIT = 80
 LIVE_AGENT_LOOP_ACTIONS = [
     {
         "id": "hydrate-water-cooler",
@@ -9490,6 +9591,7 @@ def _handle_agent_create(body):
                 return {"error": f"Agent created but failed to write {filename}: {file_result.get('error', 'unknown error')}", "_status": 500}
 
         _refresh_agent_roster_after_create()
+        _ensure_resident_profile_for_agent(agent_id)
         return {
             "ok": True,
             "agentId": agent_id,
@@ -9519,6 +9621,7 @@ def _handle_hermes_agent_create(body, name):
     if not result.get("ok"):
         return {"error": result.get("error", "Hermes agent creation failed"), "_status": 500}
     _refresh_agent_roster_after_create()
+    _ensure_resident_profile_for_agent(result.get("agentId") or result.get("profile") or profile)
     return {
         "ok": True,
         "agentId": result.get("agentId"),
@@ -9558,6 +9661,7 @@ def _handle_codex_agent_create(body, name):
     if not result.get("ok"):
         return {"error": result.get("error", "Codex agent creation failed"), "_status": 500}
     _refresh_agent_roster_after_create()
+    _ensure_resident_profile_for_agent(result.get("agentId") or result.get("profile") or profile)
     return {
         "ok": True,
         "agentId": result.get("agentId"),
@@ -9848,6 +9952,7 @@ def _apply_identities_to_roster(roster):
 def discover_agents():
     """Discover agents from OpenClaw using Virtual World's own local scanner."""
     agents_dir = os.path.join(WORKSPACE_BASE, "agents")
+    model_cfg = _load_openclaw_model_config()
     agents = []
     if os.path.isdir(agents_dir):
         for name in sorted(os.listdir(agents_dir)):
@@ -9855,6 +9960,10 @@ def discover_agents():
             if not os.path.isdir(agent_dir):
                 continue
             agent_info = {"id": name, "statusKey": name, "name": name.capitalize(), "emoji": "🤖", "providerKind": "openclaw", "providerType": "runtime", "providerAgentId": name}
+            cfg_agent = _openclaw_config_agent_for(name, agent_info, model_cfg)
+            if isinstance(cfg_agent, dict):
+                agent_info["model"] = str(cfg_agent.get("model") or "")
+                agent_info["provider"] = str(cfg_agent.get("provider") or "")
             agents.append(_apply_identity_to_agent(agent_info))
     agents.extend(_discover_hermes_agents())
     agents.extend(_discover_codex_agents())
@@ -9882,7 +9991,7 @@ def _update_identity_field(file_path, label, value):
     if not file_path or value is None:
         return False
     try:
-        with open(file_path, "r") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
         pattern = re.compile(rf"^- \*\*{re.escape(label)}:\*\*.*$", re.MULTILINE)
         replacement = f"- **{label}:** {value}"
@@ -9890,11 +9999,2219 @@ def _update_identity_field(file_path, label, value):
             content = pattern.sub(replacement, content, count=1)
         else:
             content = content.rstrip() + "\n" + replacement + "\n"
-        with open(file_path, "w") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
         return True
     except OSError:
         return False
+
+
+def _agent_record_for(agent_id):
+    wanted = str(agent_id or "").strip()
+    if not wanted:
+        return None
+    for agent in get_roster():
+        aliases = {
+            str(agent.get("id") or ""),
+            str(agent.get("statusKey") or ""),
+            str(agent.get("providerAgentId") or ""),
+            str(agent.get("profile") or ""),
+        }
+        if wanted in aliases:
+            return dict(agent)
+    return None
+
+
+def _safe_agent_file_name(name):
+    raw = str(name or "").strip()
+    if not raw or raw != os.path.basename(raw):
+        return ""
+    return raw if raw in AGENT_WORKSPACE_ALLOWED_FILES else ""
+
+
+def _agent_workspace_file_path(root, name):
+    safe_name = _safe_agent_file_name(name)
+    if not root or not safe_name:
+        return None
+    root_real = os.path.realpath(root)
+    candidate = os.path.realpath(os.path.join(root_real, safe_name))
+    try:
+        if os.path.commonpath([root_real, candidate]) != root_real:
+            return None
+    except ValueError:
+        return None
+    return candidate
+
+
+def _openclaw_workspace_root_for_agent(agent_id, agent=None):
+    raw_ids = [
+        agent_id,
+        (agent or {}).get("id"),
+        (agent or {}).get("statusKey"),
+        (agent or {}).get("providerAgentId"),
+        (agent or {}).get("profile"),
+    ]
+    safe_ids = []
+    for raw_id in raw_ids:
+        safe_id = re.sub(r"[^A-Za-z0-9_.-]", "", str(raw_id or ""))
+        if safe_id and safe_id not in safe_ids:
+            safe_ids.append(safe_id)
+    candidates = []
+    for safe_id in safe_ids:
+        candidates.extend([
+            os.path.join(WORKSPACE_BASE, "agents", safe_id, "agent"),
+            os.path.join(WORKSPACE_BASE, f"workspace-{safe_id}"),
+            os.path.join(WORKSPACE_BASE, "workspace", safe_id),
+        ])
+        if safe_id == "main":
+            candidates.append(os.path.join(WORKSPACE_BASE, "workspace"))
+    for candidate in candidates:
+        if os.path.isdir(candidate) and any(os.path.isfile(os.path.join(candidate, name)) for name in AGENT_WORKSPACE_ALLOWED_FILES):
+            return candidate
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return candidate
+    return None
+
+
+def _atomic_write_text(path, content):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    existing_stat = None
+    try:
+        existing_stat = os.stat(path)
+    except OSError:
+        existing_stat = None
+    tmp_path = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(content)
+        f.flush()
+        if existing_stat is not None:
+            try:
+                os.fchmod(f.fileno(), existing_stat.st_mode & 0o777)
+            except OSError:
+                pass
+            try:
+                os.fchown(f.fileno(), existing_stat.st_uid, existing_stat.st_gid)
+            except OSError:
+                pass
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+
+
+def _is_openclaw_gateway_cmdline(cmdline):
+    text = str(cmdline or "").replace("\x00", " ").strip().lower()
+    if not text:
+        return False
+    if any(token in text for token in (" pgrep ", " rg ", " grep ", " sed ", " tail ")):
+        return False
+    return "openclaw" in text and "gateway" in text
+
+
+def _signal_openclaw_gateway(restart=False):
+    last_error = ""
+    try:
+        rpc_result = _gateway_rpc_call(
+            "gateway.restart.request",
+            {"reason": "virtual-world.config-changed", "skipDeferral": False},
+            timeout=12,
+        )
+        if rpc_result.get("ok"):
+            return {
+                "ok": True,
+                "method": "gateway-rpc-restart-request",
+                "status": rpc_result.get("status") or rpc_result.get("result"),
+                "preflight": rpc_result.get("preflight"),
+                "restart": rpc_result.get("restart"),
+                "restartRequested": bool(restart),
+            }
+        last_error = rpc_result.get("error") or "Gateway RPC restart request failed."
+    except Exception as exc:
+        last_error = str(exc)
+
+    try:
+        if restart:
+            result = subprocess.run(["systemctl", "--user", "restart", "openclaw-gateway.service"], capture_output=True, timeout=10)
+        else:
+            result = subprocess.run(["systemctl", "--user", "kill", "-s", "USR1", "openclaw-gateway.service"], capture_output=True, timeout=5)
+        if result.returncode == 0:
+            return {"ok": True, "method": "systemctl-restart" if restart else "systemctl-usr1"}
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    except Exception as exc:
+        last_error = str(exc)
+
+    try:
+        current_pid = os.getpid()
+        for pid_dir in os.listdir("/proc"):
+            if not pid_dir.isdigit():
+                continue
+            try:
+                pid = int(pid_dir)
+                if pid == current_pid:
+                    continue
+                with open(f"/proc/{pid_dir}/cmdline", "rb") as f:
+                    cmdline = f.read().decode("utf-8", errors="ignore")
+                if _is_openclaw_gateway_cmdline(cmdline):
+                    # OpenClaw uses SIGUSR1 for gateway reload/restart intents.
+                    os.kill(pid, signal.SIGUSR1)
+                    return {"ok": True, "method": "proc-signal", "signal": "SIGUSR1", "pid": pid, "restartRequested": bool(restart)}
+            except PermissionError as exc:
+                last_error = str(exc)
+                continue
+            except (ProcessLookupError, FileNotFoundError):
+                continue
+    except Exception as exc:
+        last_error = str(exc)
+
+    try:
+        result = subprocess.run(["pgrep", "-af", "openclaw.*gateway"], capture_output=True, text=True, timeout=5)
+        for line in result.stdout.strip().splitlines():
+            pid_text, _, cmdline = line.partition(" ")
+            if not pid_text.strip() or not _is_openclaw_gateway_cmdline(cmdline):
+                continue
+            pid = int(pid_text.strip())
+            if pid == os.getpid():
+                continue
+            os.kill(pid, signal.SIGUSR1)
+            return {"ok": True, "method": "pgrep-signal", "signal": "SIGUSR1", "pid": pid, "restartRequested": bool(restart)}
+        if result.returncode != 0 and result.stderr:
+            last_error = result.stderr.strip()
+    except Exception as exc:
+        if not last_error:
+            last_error = str(exc)
+
+    return {"ok": False, "method": "none", "error": last_error or "Gateway signal unavailable; saved config will apply on gateway restart."}
+
+
+def get_agent_framework_workspace(agent_id):
+    agent = _agent_record_for(agent_id)
+    resolved_agent_id = (agent or {}).get("statusKey") or (agent or {}).get("id") or _resolve_agent_id(agent_id)
+    if not resolved_agent_id:
+        return False, _api_error("agent_not_found", "Unknown agent id for workspace editor.", details={"agentId": agent_id}), 404
+    provider_kind = str((agent or {}).get("providerKind") or "openclaw").lower()
+    if provider_kind != "openclaw":
+        return True, {
+            "ok": True,
+            "schemaVersion": AGENT_WORKSPACE_SCHEMA_VERSION,
+            "agentId": resolved_agent_id,
+            "providerKind": provider_kind,
+            "workspaceAvailable": False,
+            "editable": False,
+            "files": [],
+            "unsupportedReason": f"{provider_kind} workspace editing is not implemented in My Virtual World yet.",
+        }, 200
+
+    root = _openclaw_workspace_root_for_agent(resolved_agent_id, agent)
+    if not root:
+        return True, {
+            "ok": True,
+            "schemaVersion": AGENT_WORKSPACE_SCHEMA_VERSION,
+            "agentId": resolved_agent_id,
+            "providerKind": "openclaw",
+            "workspaceAvailable": False,
+            "editable": False,
+            "files": [],
+            "unsupportedReason": "OpenClaw workspace root was not found for this agent.",
+        }, 200
+
+    files = []
+    for name in AGENT_WORKSPACE_ALLOWED_FILES:
+        file_path = _agent_workspace_file_path(root, name)
+        exists = bool(file_path and os.path.isfile(file_path))
+        size = os.path.getsize(file_path) if exists else 0
+        content = ""
+        too_large = exists and size > AGENT_WORKSPACE_FILE_MAX_BYTES
+        if exists and not too_large:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                too_large = True
+            except OSError:
+                content = ""
+        files.append({
+            "name": name,
+            "path": file_path,
+            "exists": exists,
+            "size": size,
+            "editable": not too_large,
+            "maxBytes": AGENT_WORKSPACE_FILE_MAX_BYTES,
+            "content": content,
+            "error": "File is too large or not valid UTF-8." if too_large else "",
+        })
+    return True, {
+        "ok": True,
+        "schemaVersion": AGENT_WORKSPACE_SCHEMA_VERSION,
+        "agentId": resolved_agent_id,
+        "providerKind": "openclaw",
+        "workspaceAvailable": True,
+        "workspaceRoot": root,
+        "editable": True,
+        "allowedFiles": list(AGENT_WORKSPACE_ALLOWED_FILES),
+        "files": files,
+    }, 200
+
+
+def save_agent_framework_workspace(agent_id, payload):
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "workspace payload must be an object."), 400
+    agent = _agent_record_for(agent_id)
+    resolved_agent_id = (agent or {}).get("statusKey") or (agent or {}).get("id") or _resolve_agent_id(agent_id)
+    if not resolved_agent_id:
+        return False, _api_error("agent_not_found", "Unknown agent id for workspace editor.", details={"agentId": agent_id}), 404
+    provider_kind = str((agent or {}).get("providerKind") or "openclaw").lower()
+    if provider_kind != "openclaw":
+        return False, _api_error("unsupported_provider", f"{provider_kind} workspace editing is not implemented yet.", details={"providerKind": provider_kind}), 400
+    root = _openclaw_workspace_root_for_agent(resolved_agent_id, agent)
+    if not root:
+        return False, _api_error("workspace_not_found", "OpenClaw workspace root was not found for this agent.", details={"agentId": resolved_agent_id}), 404
+
+    raw_files = payload.get("files")
+    if isinstance(raw_files, dict):
+        file_updates = raw_files.items()
+    elif isinstance(payload.get("name"), str):
+        file_updates = [(payload.get("name"), payload.get("content", ""))]
+    else:
+        return False, _api_error("invalid_payload", "Provide files as { name: content } or a single name/content pair."), 400
+
+    saved = []
+    for raw_name, raw_content in file_updates:
+        safe_name = _safe_agent_file_name(raw_name)
+        if not safe_name:
+            return False, _api_error("invalid_file", "Only built-in agent markdown files can be edited.", details={"name": raw_name}), 400
+        content = str(raw_content or "")
+        byte_count = len(content.encode("utf-8"))
+        if byte_count > AGENT_WORKSPACE_FILE_MAX_BYTES:
+            return False, _api_error("file_too_large", f"{safe_name} is larger than the workspace editor limit.", details={"name": safe_name, "maxBytes": AGENT_WORKSPACE_FILE_MAX_BYTES}), 413
+        file_path = _agent_workspace_file_path(root, safe_name)
+        if not file_path:
+            return False, _api_error("invalid_file", "Invalid workspace file path.", details={"name": raw_name}), 400
+        try:
+            _atomic_write_text(file_path, content)
+            saved.append({"name": safe_name, "path": file_path, "bytes": byte_count})
+        except OSError as exc:
+            return False, _api_error("write_failed", f"Could not save {safe_name}.", details={"error": str(exc)}), 500
+
+    if any(item.get("name") == "IDENTITY.md" for item in saved):
+        global _agent_roster, _roster_time
+        _agent_roster = discover_agents()
+        _roster_time = time.time()
+    return True, {
+        "ok": True,
+        "schemaVersion": AGENT_WORKSPACE_SCHEMA_VERSION,
+        "agentId": resolved_agent_id,
+        "providerKind": "openclaw",
+        "workspaceRoot": root,
+        "saved": saved,
+    }, 200
+
+
+def _openclaw_model_entries(cfg):
+    models = []
+    seen = set()
+
+    def add_model(model_id, *, provider="", name="", source="", context_window=0):
+        model_id = str(model_id or "").strip()
+        if not model_id or model_id in seen:
+            return
+        seen.add(model_id)
+        provider_id = str(provider or (model_id.split("/", 1)[0] if "/" in model_id else "")).strip()
+        models.append({
+            "id": model_id,
+            "key": model_id,
+            "name": str(name or (model_id.split("/", 1)[-1] if "/" in model_id else model_id)),
+            "label": model_id,
+            "provider": provider_id,
+            "source": source,
+            "contextWindow": _context_window_for_model(model_id, provider_id, cfg) or context_window or 0,
+            "available": True,
+            "missing": False,
+        })
+
+    default_model = cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("primary", "")
+    add_model(default_model, source="agents.defaults.model.primary")
+    defaults_models = cfg.get("agents", {}).get("defaults", {}).get("models", {})
+    if isinstance(defaults_models, dict):
+        for model_id, meta in defaults_models.items():
+            context_window = 0
+            if isinstance(meta, dict):
+                params = meta.get("params") if isinstance(meta.get("params"), dict) else {}
+                context_window = meta.get("contextWindow") or params.get("contextWindow") or 0
+            add_model(model_id, source="agents.defaults.models", context_window=context_window)
+    providers = cfg.get("models", {}).get("providers", {})
+    if isinstance(providers, dict):
+        for provider_id, pdata in providers.items():
+            for model in (pdata.get("models", []) if isinstance(pdata, dict) else []):
+                if isinstance(model, dict):
+                    raw_id = str(model.get("id") or model.get("model") or model.get("name") or "").strip()
+                    model_id = raw_id if "/" in raw_id else f"{provider_id}/{raw_id}" if raw_id else ""
+                    add_model(model_id, provider=provider_id, name=model.get("name") or raw_id, source="models.providers", context_window=model.get("contextWindow") or 0)
+                else:
+                    raw_id = str(model or "").strip()
+                    model_id = raw_id if "/" in raw_id else f"{provider_id}/{raw_id}" if raw_id else ""
+                    add_model(model_id, provider=provider_id, source="models.providers")
+    return sorted(models, key=lambda item: (item.get("provider") or "", item.get("id") or ""))
+
+
+def _provider_from_model_id(model_id):
+    value = str(model_id or "").strip()
+    return value.split("/", 1)[0] if "/" in value else ""
+
+
+def _safe_provider_id(value):
+    return re.sub(r"[^A-Za-z0-9_.:-]+", "-", str(value or "").strip()).strip("-.")
+
+
+def _mask_secret(value):
+    value = str(value or "")
+    if len(value) <= 8:
+        return "****" if value else ""
+    return value[:4] + "••••••••" + value[-4:]
+
+
+def _parse_model_entries(value):
+    if isinstance(value, str):
+        raw_items = [line.strip() for line in value.splitlines()]
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = []
+    entries = []
+    seen = set()
+    for item in raw_items:
+        if isinstance(item, dict):
+            model_id = str(item.get("id") or item.get("model") or item.get("name") or "").strip()
+            entry = dict(item)
+        else:
+            model_id = str(item or "").strip()
+            entry = {"id": model_id, "name": model_id}
+        if not model_id or model_id.startswith("#") or model_id in seen:
+            continue
+        seen.add(model_id)
+        entry["id"] = model_id
+        entry.setdefault("name", model_id)
+        entries.append(entry)
+    return entries
+
+
+def _run_json_command(args, timeout=30, input_text=None, env=None):
+    try:
+        result = subprocess.run(args, input=input_text, capture_output=True, text=True, timeout=timeout, env=env)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "data": None}
+    raw = (result.stdout or "").strip()
+    if result.returncode != 0:
+        return {"ok": False, "error": (result.stderr or result.stdout or f"{args[0]} failed").strip()[:2000], "data": None}
+    try:
+        return {"ok": True, "data": json.loads(raw or "{}")}
+    except json.JSONDecodeError:
+        return {"ok": False, "error": "Command did not return JSON", "data": None, "stdout": raw[:2000]}
+
+
+def _run_text_command(args, timeout=30, input_text=None, env=None):
+    try:
+        result = subprocess.run(args, input=input_text, capture_output=True, text=True, timeout=timeout, env=env)
+    except Exception as exc:
+        return {"ok": False, "text": str(exc), "exitCode": None}
+    text_out = ((result.stdout or "") + ("\n" + result.stderr if result.stderr else "")).strip()
+    return {"ok": result.returncode == 0, "text": text_out[:4000], "exitCode": result.returncode}
+
+
+def _openclaw_config_path():
+    return os.path.join(WORKSPACE_BASE, "openclaw.json")
+
+
+def _safe_openclaw_agent_id(agent_id=None):
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]", "", str(agent_id or "").strip())
+    return safe_id or "main"
+
+
+def _openclaw_agent_dir(agent_id=None):
+    return os.path.join(WORKSPACE_BASE, "agents", _safe_openclaw_agent_id(agent_id), "agent")
+
+
+def _openclaw_auth_profiles_path(agent_id=None):
+    return os.path.join(_openclaw_agent_dir(agent_id), "auth-profiles.json")
+
+
+def _openclaw_binary():
+    configured = os.environ.get("OPENCLAW_BIN") or os.environ.get("VW_OPENCLAW_BIN") or ""
+    candidates = [
+        configured,
+        shutil.which("openclaw"),
+        os.path.expanduser("~/.npm-global/bin/openclaw"),
+        os.path.expanduser("~/.local/bin/openclaw"),
+        "/usr/local/bin/openclaw",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        expanded = os.path.expanduser(candidate)
+        if os.path.isfile(expanded) and os.access(expanded, os.X_OK):
+            return expanded
+    return ""
+
+
+def _quote_sqlite_identifier(name):
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _read_openclaw_auth_sqlite(agent_id=None):
+    db_path = os.path.join(_openclaw_agent_dir(agent_id), "openclaw-agent.sqlite")
+    profiles = []
+    if not os.path.exists(db_path):
+        return profiles
+    try:
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        tables = [r[0] for r in con.execute("select name from sqlite_master where type='table'")]
+        for table in tables:
+            qtable = _quote_sqlite_identifier(table)
+            cols = [r[1] for r in con.execute(f"pragma table_info({qtable})")]
+            if "store_json" in cols:
+                for row in con.execute(f"select store_json from {qtable}").fetchall():
+                    try:
+                        data = json.loads(row["store_json"] or "{}")
+                    except Exception:
+                        continue
+                    for profile_id, profile in (data.get("profiles") or {}).items():
+                        if not isinstance(profile, dict):
+                            continue
+                        provider = profile.get("provider") or profile_id.split(":", 1)[0]
+                        ptype = profile.get("type") or profile.get("mode") or "profile"
+                        email = profile.get("email") or ""
+                        profiles.append({
+                            "id": profile_id,
+                            "provider": provider,
+                            "type": ptype,
+                            "label": profile_id + (f" ({email})" if email else ""),
+                            "source": "sqlite",
+                        })
+                continue
+            if not {"id", "provider"}.issubset(set(cols)):
+                continue
+            type_col = "type" if "type" in cols else ("mode" if "mode" in cols else None)
+            for row in con.execute(f"select * from {qtable}").fetchall():
+                provider = row["provider"]
+                profile_id = row["id"]
+                if not provider or not profile_id:
+                    continue
+                ptype = row[type_col] if type_col else ""
+                email = row["email"] if "email" in cols else ""
+                profiles.append({
+                    "id": profile_id,
+                    "provider": provider,
+                    "type": ptype or "profile",
+                    "label": profile_id + (f" ({email})" if email else ""),
+                    "source": "sqlite",
+                })
+    except Exception:
+        return profiles
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+    seen = set()
+    unique = []
+    for profile in profiles:
+        key = (profile["id"], profile["provider"], profile["type"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(profile)
+    return unique
+
+
+def _read_openclaw_auth_json(agent_id=None):
+    profiles = []
+    try:
+        with open(_openclaw_auth_profiles_path(agent_id), "r") as f:
+            data = json.load(f)
+    except Exception:
+        return profiles
+    for profile_id, profile in (data.get("profiles") or {}).items():
+        if not isinstance(profile, dict):
+            continue
+        provider = profile.get("provider") or profile_id.split(":", 1)[0]
+        ptype = profile.get("type") or profile.get("mode") or "profile"
+        email = profile.get("email") or ""
+        profiles.append({
+            "id": profile_id,
+            "provider": provider,
+            "type": ptype,
+            "label": profile_id + (f" ({email})" if email else ""),
+            "source": "auth-profiles.json",
+        })
+    return profiles
+
+
+def _read_openclaw_auth_profiles(agent_id=None):
+    sqlite_profiles = _read_openclaw_auth_sqlite(agent_id)
+    if sqlite_profiles:
+        return sqlite_profiles
+    return _read_openclaw_auth_json(agent_id)
+
+
+def _openclaw_agent_ids():
+    ids = ["main"]
+    cfg = _load_openclaw_model_config()
+    for item in cfg.get("agents", {}).get("list", []) or []:
+        if isinstance(item, dict) and item.get("id"):
+            safe_id = _safe_openclaw_agent_id(item.get("id"))
+            if safe_id and safe_id not in ids:
+                ids.append(safe_id)
+    agents_dir = os.path.join(WORKSPACE_BASE, "agents")
+    try:
+        for name in sorted(os.listdir(agents_dir)):
+            if not os.path.isdir(os.path.join(agents_dir, name, "agent")):
+                continue
+            safe_id = _safe_openclaw_agent_id(name)
+            if safe_id and safe_id not in ids:
+                ids.append(safe_id)
+    except OSError:
+        pass
+    return ids
+
+
+def _openclaw_profile_provider(profile_id, profile):
+    profile = profile if isinstance(profile, dict) else {}
+    return profile.get("provider") or str(profile_id or "").split(":", 1)[0]
+
+
+def _openclaw_profile_type(profile):
+    profile = profile if isinstance(profile, dict) else {}
+    return str(profile.get("type") or profile.get("mode") or "").lower()
+
+
+def _is_openclaw_portable_static_profile(profile):
+    if not isinstance(profile, dict) or profile.get("copyToAgents") is False:
+        return False
+    ptype = _openclaw_profile_type(profile)
+    if ptype in {"api_key", "key"} or "key" in profile:
+        return True
+    if ptype == "token" and (profile.get("token") or profile.get("tokenRef")):
+        return True
+    return False
+
+
+def _read_openclaw_auth_profile_map(agent_id=None):
+    db_path = os.path.join(_openclaw_agent_dir(agent_id), "openclaw-agent.sqlite")
+    if os.path.exists(db_path):
+        con = None
+        try:
+            con = sqlite3.connect(db_path)
+            con.row_factory = sqlite3.Row
+            tables = [r[0] for r in con.execute("select name from sqlite_master where type='table'")]
+            for table in tables:
+                qtable = _quote_sqlite_identifier(table)
+                cols = [r[1] for r in con.execute(f"pragma table_info({qtable})")]
+                if not {"store_key", "store_json"}.issubset(set(cols)):
+                    continue
+                row = con.execute(f"select store_json from {qtable} where store_key = ?", ("primary",)).fetchone()
+                if not row:
+                    continue
+                data = json.loads(row["store_json"] or "{}")
+                profiles = data.get("profiles") if isinstance(data, dict) else {}
+                if isinstance(profiles, dict):
+                    return {pid: dict(profile) for pid, profile in profiles.items() if isinstance(profile, dict)}
+        except Exception:
+            pass
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
+    try:
+        with open(_openclaw_auth_profiles_path(agent_id), "r") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    profiles = data.get("profiles") if isinstance(data, dict) else {}
+    return {pid: dict(profile) for pid, profile in profiles.items() if isinstance(profile, dict)}
+
+
+def _openclaw_profile_public(profile_id, profile, *, agent_id=None, main_profiles=None):
+    profile = profile if isinstance(profile, dict) else {}
+    ptype = _openclaw_profile_type(profile) or "profile"
+    email = profile.get("email") or ""
+    provider = _openclaw_profile_provider(profile_id, profile)
+    main_profile = (main_profiles or {}).get(profile_id) if isinstance(main_profiles, dict) else None
+    return {
+        "id": profile_id,
+        "provider": provider,
+        "type": ptype,
+        "label": profile_id + (f" ({email})" if email else ""),
+        "agent": agent_id,
+        "portableStatic": _is_openclaw_portable_static_profile(profile),
+        "localOverride": agent_id not in {None, "main"},
+        "matchesMain": main_profile == profile if main_profile is not None else False,
+        "inMain": main_profile is not None,
+    }
+
+
+def _openclaw_managed_auth_report():
+    agent_ids = _openclaw_agent_ids()
+    main_profiles = _read_openclaw_auth_profile_map("main")
+    managed_profiles = {
+        pid: profile
+        for pid, profile in main_profiles.items()
+        if _is_openclaw_portable_static_profile(profile)
+    }
+    agent_rows = []
+    for agent_id in agent_ids:
+        profiles = _read_openclaw_auth_profile_map(agent_id)
+        if agent_id == "main":
+            missing = []
+            divergent = []
+            extra_static = []
+        else:
+            missing = [pid for pid in managed_profiles if pid not in profiles]
+            divergent = [
+                pid for pid, profile in managed_profiles.items()
+                if pid in profiles and profiles.get(pid) != profile
+            ]
+            extra_static = [
+                pid for pid, profile in profiles.items()
+                if _is_openclaw_portable_static_profile(profile)
+                and pid not in managed_profiles
+            ]
+        local_oauth = [
+            pid for pid, profile in profiles.items()
+            if _openclaw_profile_type(profile) == "oauth"
+        ]
+        agent_rows.append({
+            "agent": agent_id,
+            "profileCount": len(profiles),
+            "profiles": [
+                _openclaw_profile_public(pid, profile, agent_id=agent_id, main_profiles=main_profiles)
+                for pid, profile in sorted(profiles.items())
+            ],
+            "missingManagedStatic": missing,
+            "divergentManagedStatic": divergent,
+            "extraStaticProfiles": extra_static,
+            "localOAuthProfiles": local_oauth,
+            "staticInSync": not missing and not divergent and not extra_static,
+        })
+    return {
+        "sourceAgent": "main",
+        "managedStaticProfiles": [
+            _openclaw_profile_public(pid, profile, agent_id="main", main_profiles=main_profiles)
+            for pid, profile in sorted(managed_profiles.items())
+        ],
+        "agentRows": agent_rows,
+    }
+
+
+def _update_openclaw_sqlite_auth_stores(updater, agent_id=None):
+    db_path = os.path.join(_openclaw_agent_dir(agent_id), "openclaw-agent.sqlite")
+    if not os.path.exists(db_path):
+        return 0, None
+    updated = 0
+    con = None
+    try:
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        tables = [r[0] for r in con.execute("select name from sqlite_master where type='table'")]
+        now_ms = int(time.time() * 1000)
+        for table in tables:
+            qtable = _quote_sqlite_identifier(table)
+            cols = [r[1] for r in con.execute(f"pragma table_info({qtable})")]
+            if not {"store_key", "store_json", "updated_at"}.issubset(set(cols)):
+                continue
+            rows = con.execute(f"select store_key, store_json from {qtable}").fetchall()
+            for row in rows:
+                try:
+                    data = json.loads(row["store_json"] or "{}")
+                except Exception:
+                    continue
+                if not isinstance(data.get("profiles"), dict):
+                    continue
+                changed = updater(data)
+                if not changed:
+                    continue
+                con.execute(
+                    f"update {qtable} set store_json = ?, updated_at = ? where store_key = ?",
+                    (json.dumps(data, separators=(",", ":")), now_ms, row["store_key"]),
+                )
+                updated += 1
+        con.commit()
+        return updated, None
+    except Exception as exc:
+        return updated, str(exc)
+    finally:
+        try:
+            if con:
+                con.close()
+        except Exception:
+            pass
+
+
+def _update_openclaw_auth_profiles_json(updater, create_if_missing=False, agent_id=None):
+    path = _openclaw_auth_profiles_path(agent_id)
+    if not os.path.exists(path) and not create_if_missing:
+        return False, None
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {"version": 1, "profiles": {}, "lastGood": {}}
+        data.setdefault("version", 1)
+        data.setdefault("profiles", {})
+        data.setdefault("lastGood", {})
+        changed = updater(data)
+        if not changed:
+            return False, None
+        _atomic_write_text(path, json.dumps(data, indent=2) + "\n")
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _cleanup_openclaw_sqlite_auth_state(agent_id, provider, profile_ids):
+    profile_ids = {str(pid) for pid in (profile_ids or []) if pid}
+    if not profile_ids:
+        return 0, None
+    db_path = os.path.join(_openclaw_agent_dir(agent_id), "openclaw-agent.sqlite")
+    if not os.path.exists(db_path):
+        return 0, None
+    updated = 0
+    con = None
+    try:
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        tables = [r[0] for r in con.execute("select name from sqlite_master where type='table'")]
+        now_ms = int(time.time() * 1000)
+        for table in tables:
+            qtable = _quote_sqlite_identifier(table)
+            cols = [r[1] for r in con.execute(f"pragma table_info({qtable})")]
+            if not {"state_key", "state_json", "updated_at"}.issubset(set(cols)):
+                continue
+            rows = con.execute(f"select state_key, state_json from {qtable}").fetchall()
+            for row in rows:
+                try:
+                    data = json.loads(row["state_json"] or "{}")
+                except Exception:
+                    continue
+                changed = False
+                last_good = data.get("lastGood")
+                if isinstance(last_good, dict):
+                    for key, value in list(last_good.items()):
+                        if value in profile_ids:
+                            last_good.pop(key, None)
+                            changed = True
+                order = data.get("order")
+                if isinstance(order, dict):
+                    for key, values in list(order.items()):
+                        if isinstance(values, list):
+                            kept = [value for value in values if value not in profile_ids]
+                            if kept != values:
+                                order[key] = kept
+                                changed = True
+                usage_stats = data.get("usageStats")
+                if isinstance(usage_stats, dict):
+                    for profile_id in profile_ids:
+                        if profile_id in usage_stats:
+                            usage_stats.pop(profile_id, None)
+                            changed = True
+                if not changed:
+                    continue
+                con.execute(
+                    f"update {qtable} set state_json = ?, updated_at = ? where state_key = ?",
+                    (json.dumps(data, separators=(",", ":")), now_ms, row["state_key"]),
+                )
+                updated += 1
+        con.commit()
+        return updated, None
+    except Exception as exc:
+        return updated, str(exc)
+    finally:
+        try:
+            if con:
+                con.close()
+        except Exception:
+            pass
+
+
+def _sync_openclaw_static_auth_from_main(provider=None, profile_id=None, target_agent=None, prune=False):
+    provider = _safe_provider_id(provider) if provider else ""
+    profile_id = str(profile_id or "").strip()
+    target_agent = _safe_openclaw_agent_id(target_agent) if target_agent else ""
+    main_profiles = _read_openclaw_auth_profile_map("main")
+    managed_profiles = {
+        pid: dict(profile)
+        for pid, profile in main_profiles.items()
+        if _is_openclaw_portable_static_profile(profile)
+        and (not provider or _openclaw_profile_provider(pid, profile) == provider)
+        and (not profile_id or pid == profile_id)
+    }
+    if profile_id and not managed_profiles:
+        return {"ok": False, "error": f"Portable static profile not found in main: {profile_id}"}
+
+    agent_ids = [target_agent] if target_agent else _openclaw_agent_ids()
+    summary = []
+    touched = 0
+    removed_by_agent = {}
+    for agent_id in agent_ids:
+        if agent_id == "main":
+            continue
+        removed = []
+
+        def updater(data):
+            profiles = data.setdefault("profiles", {})
+            changed = False
+            for pid, profile in managed_profiles.items():
+                if profiles.get(pid) != profile:
+                    profiles[pid] = dict(profile)
+                    changed = True
+            if prune:
+                remove = [
+                    pid for pid, profile in list(profiles.items())
+                    if isinstance(profile, dict)
+                    and _is_openclaw_portable_static_profile(profile)
+                    and (not provider or _openclaw_profile_provider(pid, profile) == provider)
+                    and (not profile_id or pid == profile_id or pid not in managed_profiles)
+                    and (pid not in managed_profiles or profiles.get(pid) != managed_profiles.get(pid))
+                ]
+                for pid in remove:
+                    profiles.pop(pid, None)
+                    removed.append(pid)
+                    changed = True
+                last_good = data.get("lastGood")
+                if isinstance(last_good, dict):
+                    for key, value in list(last_good.items()):
+                        if value in remove:
+                            last_good.pop(key, None)
+            return changed
+
+        sqlite_updates, sqlite_err = _update_openclaw_sqlite_auth_stores(updater, agent_id=agent_id)
+        json_updated, json_err = _update_openclaw_auth_profiles_json(updater, create_if_missing=(sqlite_updates == 0 and not sqlite_err), agent_id=agent_id)
+        if removed:
+            removed_by_agent[agent_id] = removed
+            _cleanup_openclaw_sqlite_auth_state(agent_id, provider, removed)
+        ok = not ((sqlite_err and not json_updated) or (json_err and sqlite_updates == 0))
+        if ok and (sqlite_updates or json_updated or removed):
+            touched += 1
+        summary.append({
+            "agent": agent_id,
+            "ok": ok,
+            "sqliteUpdates": sqlite_updates,
+            "jsonUpdated": bool(json_updated),
+            "removedProfiles": removed,
+            "error": sqlite_err or json_err or "",
+        })
+    _signal_openclaw_gateway(restart=False)
+    return {
+        "ok": all(item["ok"] for item in summary),
+        "sourceAgent": "main",
+        "provider": provider,
+        "profileId": profile_id,
+        "syncedProfiles": sorted(managed_profiles.keys()),
+        "touchedAgents": touched,
+        "agents": summary,
+        "removedProfilesByAgent": removed_by_agent,
+    }
+
+
+def _reset_openclaw_static_auth_overrides(agent_id=None, provider=None):
+    agent_id = _safe_openclaw_agent_id(agent_id) if agent_id else ""
+    if agent_id == "main":
+        return {"ok": False, "error": "main is the MVW global auth source and cannot be reset to itself"}
+    return _sync_openclaw_static_auth_from_main(provider=provider, target_agent=agent_id or None, prune=True)
+
+
+def _mirror_openclaw_config_auth_profile(provider, profile_id):
+    cfg_path = _openclaw_config_path()
+    cfg = _load_openclaw_model_config()
+    cfg.setdefault("auth", {}).setdefault("profiles", {})[profile_id] = {
+        "provider": provider,
+        "mode": "api_key",
+    }
+    try:
+        _atomic_write_text(cfg_path, json.dumps(cfg, indent=2) + "\n")
+        return True, None
+    except OSError as exc:
+        return False, str(exc)
+
+
+def _remove_openclaw_config_auth_profiles(profile_ids):
+    if not profile_ids:
+        return True, None
+    cfg_path = _openclaw_config_path()
+    cfg = _load_openclaw_model_config()
+    profiles = cfg.setdefault("auth", {}).setdefault("profiles", {})
+    changed = False
+    for profile_id in profile_ids:
+        if profile_id in profiles:
+            profiles.pop(profile_id, None)
+            changed = True
+    if not changed:
+        return True, None
+    try:
+        _atomic_write_text(cfg_path, json.dumps(cfg, indent=2) + "\n")
+        return True, None
+    except OSError as exc:
+        return False, str(exc)
+
+
+def _save_openclaw_api_key_direct(provider, profile_id, api_key, agent_id=None):
+    profile = {"type": "api_key", "provider": provider, "key": api_key}
+    agent_id = _safe_openclaw_agent_id(agent_id)
+
+    def updater(data):
+        profiles = data.setdefault("profiles", {})
+        if profiles.get(profile_id) == profile:
+            return False
+        profiles[profile_id] = dict(profile)
+        last_good = data.get("lastGood")
+        if isinstance(last_good, dict):
+            last_good[provider] = profile_id
+        return True
+
+    sqlite_updates, sqlite_err = _update_openclaw_sqlite_auth_stores(updater, agent_id=agent_id)
+    json_updated, json_err = _update_openclaw_auth_profiles_json(updater, create_if_missing=(sqlite_updates == 0 and not sqlite_err), agent_id=agent_id)
+    if sqlite_err and not json_updated:
+        return {"ok": False, "error": f"Cannot write OpenClaw auth store: {sqlite_err}"}
+    if json_err and sqlite_updates == 0:
+        return {"ok": False, "error": f"Cannot write auth-profiles.json: {json_err}"}
+    _mirror_openclaw_config_auth_profile(provider, profile_id)
+    _signal_openclaw_gateway(restart=False)
+    return {"ok": True, "provider": provider, "profileId": profile_id, "agent": agent_id, "maskedKey": _mask_secret(api_key), "source": "direct-auth-store"}
+
+
+def _delete_openclaw_auth_direct(provider, profile_id="", agent_id=None):
+    deleted = set()
+    agent_id = _safe_openclaw_agent_id(agent_id)
+
+    def should_delete(pid, profile):
+        if profile_id:
+            return pid == profile_id
+        if (profile.get("provider") or pid.split(":", 1)[0]) != provider:
+            return False
+        ptype = str(profile.get("type") or profile.get("mode") or "").lower()
+        return ptype in {"api_key", "key"} or "key" in profile
+
+    def updater(data):
+        profiles = data.setdefault("profiles", {})
+        remove = [pid for pid, profile in profiles.items() if isinstance(profile, dict) and should_delete(pid, profile)]
+        for pid in remove:
+            profiles.pop(pid, None)
+            deleted.add(pid)
+        last_good = data.get("lastGood")
+        if isinstance(last_good, dict):
+            for key, value in list(last_good.items()):
+                if value in remove:
+                    last_good.pop(key, None)
+        return bool(remove)
+
+    sqlite_updates, sqlite_err = _update_openclaw_sqlite_auth_stores(updater, agent_id=agent_id)
+    json_updated, json_err = _update_openclaw_auth_profiles_json(updater, create_if_missing=False, agent_id=agent_id)
+    if sqlite_err and not json_updated:
+        return {"ok": False, "error": f"Cannot write OpenClaw auth store: {sqlite_err}"}
+    if json_err and sqlite_updates == 0:
+        return {"ok": False, "error": f"Cannot write auth-profiles.json: {json_err}"}
+    state_updates, state_err = _cleanup_openclaw_sqlite_auth_state(agent_id, provider, deleted)
+    if state_err and not deleted:
+        return {"ok": False, "error": f"Cannot update OpenClaw auth state: {state_err}"}
+    _remove_openclaw_config_auth_profiles(deleted)
+    _signal_openclaw_gateway(restart=False)
+    return {"ok": True, "provider": provider, "agent": agent_id, "deletedProfiles": sorted(deleted), "stateUpdates": state_updates, "source": "direct-auth-store"}
+
+
+_OPENCLAW_CLOUD_PROVIDER_IDS = {
+    "anthropic",
+    "openai",
+    "openai-codex",
+    "google",
+    "gemini",
+    "groq",
+    "openrouter",
+    "mistral",
+    "cohere",
+    "xai",
+    "github-copilot",
+    "copilot",
+}
+
+
+def _openclaw_provider_kind(provider, pdata):
+    provider = _safe_provider_id(provider)
+    pdata = pdata if isinstance(pdata, dict) else {}
+    api = str(pdata.get("api") or "").lower()
+    base_url = str(pdata.get("baseUrl") or "").strip()
+    if provider in {"ollama", "lmstudio"} or api == "ollama":
+        return "local"
+    if base_url:
+        return "local" if provider not in _OPENCLAW_CLOUD_PROVIDER_IDS else "cloud"
+    if provider in _OPENCLAW_CLOUD_PROVIDER_IDS:
+        return "cloud"
+    return "local"
+
+
+def _openclaw_local_providers_from_config(cfg):
+    providers = []
+    for provider, pdata in (cfg.get("models", {}).get("providers", {}) or {}).items():
+        if not isinstance(pdata, dict) or _openclaw_provider_kind(provider, pdata) != "local":
+            continue
+        model_rows = []
+        for model in pdata.get("models", []) or []:
+            if isinstance(model, dict):
+                model_id = str(model.get("id") or model.get("model") or model.get("name") or "").strip()
+                name = model.get("name") or model_id
+                context_window = model.get("contextWindow", 0)
+                max_tokens = model.get("maxTokens", 0)
+            else:
+                model_id = str(model or "").strip()
+                name = model_id
+                context_window = 0
+                max_tokens = 0
+            if not model_id:
+                continue
+            model_rows.append({"id": model_id, "name": name, "contextWindow": context_window, "maxTokens": max_tokens})
+        providers.append({
+            "id": provider,
+            "provider": provider,
+            "baseUrl": pdata.get("baseUrl", ""),
+            "api": pdata.get("api", ""),
+            "apiKeyConfigured": bool(pdata.get("apiKey")),
+            "timeoutSeconds": pdata.get("timeoutSeconds"),
+            "models": model_rows,
+            "modelCount": len(model_rows),
+            "source": "openclaw-config",
+        })
+    return sorted(providers, key=lambda item: item.get("provider", ""))
+
+
+def _openclaw_cloud_providers_from_config(cfg, auth_profiles=None):
+    auth_profiles = auth_profiles or []
+    configured = {}
+    for model_id, data in (cfg.get("agents", {}).get("defaults", {}).get("models", {}) or {}).items():
+        provider = _provider_from_model_id(model_id)
+        if provider in _OPENCLAW_CLOUD_PROVIDER_IDS:
+            params = data.get("params") if isinstance(data, dict) and isinstance(data.get("params"), dict) else {}
+            configured.setdefault(provider, []).append({
+                "id": model_id,
+                "name": model_id.split("/", 1)[-1],
+                "contextWindow": params.get("contextWindow") or (data.get("contextWindow") if isinstance(data, dict) else 0) or 0,
+                "source": "agents.defaults.models",
+            })
+    for provider, pdata in (cfg.get("models", {}).get("providers", {}) or {}).items():
+        if not isinstance(pdata, dict) or _openclaw_provider_kind(provider, pdata) != "cloud":
+            continue
+        for model in pdata.get("models", []) or []:
+            raw_id = str((model.get("id") if isinstance(model, dict) else model) or "").strip()
+            if not raw_id:
+                continue
+            configured.setdefault(provider, []).append({
+                "id": raw_id if "/" in raw_id else f"{provider}/{raw_id}",
+                "name": (model.get("name") if isinstance(model, dict) else raw_id) or raw_id,
+                "contextWindow": model.get("contextWindow", 0) if isinstance(model, dict) else 0,
+                "source": "models.providers",
+            })
+    for profile in auth_profiles:
+        provider = profile.get("provider") or _provider_from_model_id(profile.get("id", ""))
+        if provider in _OPENCLAW_CLOUD_PROVIDER_IDS:
+            configured.setdefault(provider, [])
+    cloud_providers = []
+    for provider, models in configured.items():
+        seen = set()
+        model_rows = []
+        for model in models:
+            mid = model.get("id")
+            if not mid or mid in seen:
+                continue
+            seen.add(mid)
+            model_rows.append(model)
+        profiles = [p for p in auth_profiles if (p.get("provider") or _provider_from_model_id(p.get("id", ""))) == provider]
+        cloud_providers.append({
+            "id": provider,
+            "provider": provider,
+            "authProfiles": profiles,
+            "authTypes": sorted({str(p.get("type") or p.get("mode") or "profile") for p in profiles if p}),
+            "models": sorted(model_rows, key=lambda item: item.get("id", "")),
+            "modelCount": len(model_rows),
+            "source": "openclaw-cloud",
+        })
+    return sorted(cloud_providers, key=lambda item: item.get("provider", ""))
+
+
+def _get_openclaw_native_models(agent_id=None):
+    auth_agent_id = _safe_openclaw_agent_id(agent_id)
+    cfg = _load_openclaw_model_config()
+    auth_profiles = _read_openclaw_auth_profiles(auth_agent_id)
+    models = _openclaw_model_entries(cfg)
+    agents = {}
+    for item in cfg.get("agents", {}).get("list", []) or []:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        agents[str(item.get("id"))] = {
+            "id": item.get("id"),
+            "workspace": item.get("workspace"),
+            "model": item.get("model", ""),
+        }
+    cli = _openclaw_binary()
+    if cli:
+        listed = _run_json_command([cli, "models", "list", "--all", "--json"], timeout=45)
+        if listed.get("ok") and isinstance(listed.get("data"), dict):
+            cli_models = []
+            for m in (listed.get("data") or {}).get("models", []) or []:
+                key = m.get("key") or m.get("id") or ""
+                if not key:
+                    continue
+                cli_models.append({
+                    "id": key,
+                    "key": key,
+                    "name": m.get("name") or key.split("/", 1)[-1],
+                    "label": key,
+                    "provider": m.get("provider") or _provider_from_model_id(key),
+                    "input": m.get("input"),
+                    "contextWindow": m.get("contextWindow") or _context_window_for_model(key, m.get("provider") or "", cfg) or 0,
+                    "available": bool(m.get("available", not m.get("missing", False))),
+                    "missing": bool(m.get("missing", False)),
+                    "local": bool(m.get("local", False)),
+                    "tags": m.get("tags") or [],
+                    "source": "openclaw",
+                })
+            if cli_models:
+                by_id = {m["id"]: m for m in models}
+                for model in cli_models:
+                    by_id[model["id"]] = {**by_id.get(model["id"], {}), **model}
+                models = sorted(by_id.values(), key=lambda item: (item.get("provider") or "", item.get("id") or ""))
+        auth_listed = _run_json_command([cli, "models", "auth", "list", "--agent", auth_agent_id, "--json"], timeout=30)
+        if auth_listed.get("ok") and isinstance(auth_listed.get("data"), dict) and auth_listed["data"].get("profiles"):
+            auth_profiles = auth_listed["data"]["profiles"]
+    return {
+        "ok": True,
+        "models": models,
+        "authProfiles": auth_profiles,
+        "authAgent": auth_agent_id,
+        "authStatus": {"agent": auth_agent_id, "storePath": os.path.join(_openclaw_agent_dir(auth_agent_id), "openclaw-agent.sqlite"), "source": "native-store"},
+        "managedAuth": _openclaw_managed_auth_report(),
+        "agents": agents,
+        "defaultModel": _primary_openclaw_model(cfg),
+        "runtimeDefaultModel": _default_openclaw_model(cfg),
+        "providers": sorted({m["provider"] for m in models if m.get("provider")}),
+        "localProviders": _openclaw_local_providers_from_config(cfg),
+        "cloudProviders": _openclaw_cloud_providers_from_config(cfg, auth_profiles),
+        "nativeCommands": {
+            "list": "openclaw models list --all --json",
+            "auth": "openclaw models auth list --json",
+            "status": "openclaw models status --json",
+            "assign": "openclaw config patch / agents.list[].model",
+        },
+    }
+
+
+def _save_openclaw_api_key(provider, api_key, profile_id="", agent_id=None, sync_all=False):
+    provider = _safe_provider_id(provider)
+    agent_id = _safe_openclaw_agent_id(agent_id)
+    api_key = str(api_key or "").strip()
+    profile_id = str(profile_id or f"{provider}:manual").strip()
+    if not provider or not api_key:
+        return {"ok": False, "error": "provider and API key are required"}
+    if sync_all:
+        saved = _save_openclaw_api_key(provider, api_key, profile_id, agent_id="main", sync_all=False)
+        if not saved.get("ok"):
+            return saved
+        sync_result = _sync_openclaw_static_auth_from_main(provider=provider, profile_id=profile_id)
+        return {
+            **saved,
+            "agent": "main",
+            "scope": "global",
+            "sync": sync_result,
+            "ok": bool(saved.get("ok") and sync_result.get("ok")),
+        }
+    cli = _openclaw_binary()
+    if cli:
+        result = _run_json_command(
+            [cli, "models", "auth", "paste-api-key", "--agent", agent_id, "--provider", provider, "--profile-id", profile_id],
+            input_text=api_key + "\n",
+            timeout=30,
+        )
+        if result.get("ok"):
+            return {"ok": True, "provider": provider, "profileId": profile_id, "agent": agent_id, "maskedKey": _mask_secret(api_key)}
+    return _save_openclaw_api_key_direct(provider, profile_id, api_key, agent_id=agent_id)
+
+
+def _delete_openclaw_auth(provider, profile_id="", agent_id=None, sync_all=False):
+    provider = _safe_provider_id(provider)
+    agent_id = _safe_openclaw_agent_id(agent_id)
+    profile_id = str(profile_id or "").strip()
+    if not provider and not profile_id:
+        return {"ok": False, "error": "provider or profileId is required"}
+    if sync_all:
+        results = []
+        deleted = set()
+        for target in _openclaw_agent_ids():
+            result = _delete_openclaw_auth_direct(provider, profile_id, agent_id=target)
+            results.append(result)
+            deleted.update(result.get("deletedProfiles") or [])
+        return {
+            "ok": all(item.get("ok") for item in results),
+            "provider": provider,
+            "profileId": profile_id,
+            "scope": "global",
+            "deletedProfiles": sorted(deleted),
+            "agents": results,
+            "source": "global-auth-store",
+        }
+    return _delete_openclaw_auth_direct(provider, profile_id, agent_id=agent_id)
+
+
+def _save_openclaw_provider(provider, base_url, models, api="", api_key="", timeout_seconds=None):
+    provider = _safe_provider_id(provider)
+    base_url = str(base_url or "").strip()
+    entries = _parse_model_entries(models)
+    if not provider:
+        return {"ok": False, "error": "provider is required"}
+    if not base_url:
+        return {"ok": False, "error": "base URL is required"}
+    if not entries:
+        return {"ok": False, "error": "at least one model is required"}
+    cfg_path = _openclaw_config_path()
+    cfg = _load_openclaw_model_config()
+    providers = cfg.setdefault("models", {}).setdefault("providers", {})
+    existing = providers.get(provider, {}) if isinstance(providers.get(provider), dict) else {}
+    if provider == "ollama":
+        base_url = re.sub(r"/v1/?$", "", base_url)
+        api = api or "ollama"
+        timeout_seconds = timeout_seconds or existing.get("timeoutSeconds") or 300
+    existing["baseUrl"] = base_url
+    existing["api"] = api or existing.get("api") or "openai-completions"
+    if api_key:
+        existing["apiKey"] = str(api_key)
+    if timeout_seconds:
+        try:
+            existing["timeoutSeconds"] = int(timeout_seconds)
+        except (TypeError, ValueError):
+            pass
+    old_models = {str(m.get("id") or ""): m for m in existing.get("models", []) if isinstance(m, dict)}
+    new_models = []
+    for entry in entries:
+        model_id = entry["id"]
+        updated = dict(old_models.get(model_id, {}))
+        updated.update({
+            "id": model_id,
+            "name": entry.get("name") or model_id,
+            "reasoning": updated.get("reasoning", False),
+            "input": updated.get("input", ["text"]),
+            "cost": updated.get("cost", {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}),
+            "contextWindow": entry.get("contextWindow") or updated.get("contextWindow") or 100000,
+            "maxTokens": entry.get("maxTokens") or updated.get("maxTokens") or 8192,
+        })
+        new_models.append(updated)
+    existing["models"] = new_models
+    providers[provider] = existing
+    try:
+        _atomic_write_text(cfg_path, json.dumps(cfg, indent=2) + "\n")
+    except OSError as exc:
+        return {"ok": False, "error": f"Could not save OpenClaw provider: {exc}"}
+    gateway_signal = _signal_openclaw_gateway(restart=False)
+    return {"ok": True, "provider": provider, "modelCount": len(new_models), "gatewaySignal": gateway_signal}
+
+
+def _delete_openclaw_provider(provider):
+    provider = _safe_provider_id(provider)
+    if not provider:
+        return {"ok": False, "error": "provider is required"}
+    cfg_path = _openclaw_config_path()
+    cfg = _load_openclaw_model_config()
+    providers = cfg.setdefault("models", {}).setdefault("providers", {})
+    if provider not in providers:
+        return {"ok": False, "error": f"Provider {provider} is not configured"}
+    providers.pop(provider, None)
+    defaults_models = cfg.setdefault("agents", {}).setdefault("defaults", {}).setdefault("models", {})
+    for model_id in list(defaults_models.keys()):
+        if str(model_id).startswith(provider + "/"):
+            defaults_models.pop(model_id, None)
+    for agent in cfg.get("agents", {}).get("list", []) or []:
+        if isinstance(agent, dict) and str(agent.get("model") or "").startswith(provider + "/"):
+            agent.pop("model", None)
+    try:
+        _atomic_write_text(cfg_path, json.dumps(cfg, indent=2) + "\n")
+    except OSError as exc:
+        return {"ok": False, "error": f"Could not delete OpenClaw provider: {exc}"}
+    gateway_signal = _signal_openclaw_gateway(restart=False)
+    return {"ok": True, "provider": provider, "gatewaySignal": gateway_signal}
+
+
+def _load_yaml_file(path):
+    if not os.path.exists(path):
+        return {}
+    if yaml:
+        try:
+            with open(path, "r") as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            return {}
+    data = {}
+    current = None
+    current_alias = None
+    try:
+        with open(path, "r") as f:
+            for raw in f:
+                line = raw.rstrip("\n")
+                if not line.strip() or line.lstrip().startswith("#"):
+                    continue
+                if not line.startswith(" ") and line.endswith(":"):
+                    current = line[:-1].strip()
+                    current_alias = None
+                    data.setdefault(current, {})
+                    continue
+                if current and line.startswith("  ") and ":" in line:
+                    key, value = line.strip().split(":", 1)
+                    value = value.strip().strip("\"'")
+                    if current == "model_aliases" and not raw.startswith("    ") and not value:
+                        current_alias = key.strip()
+                        data.setdefault(current, {}).setdefault(current_alias, {})
+                    elif current == "model_aliases" and current_alias and raw.startswith("    "):
+                        data.setdefault(current, {}).setdefault(current_alias, {})[key.strip()] = value
+                    else:
+                        data.setdefault(current, {})[key.strip()] = value
+    except Exception:
+        return {}
+    return data
+
+
+def _write_yaml_file(path, data):
+    if not yaml:
+        return False, "PyYAML is not available"
+    try:
+        with open(path, "w") as f:
+            yaml.safe_dump(data, f, sort_keys=False)
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _yaml_scalar(value):
+    return json.dumps(str(value or ""))
+
+
+def _hermes_profile_config_path(profile_id):
+    profile_id = str(profile_id or "default")
+    if profile_id in ("", "default"):
+        return os.path.join(HERMES_HOME, "config.yaml")
+    return os.path.join(HERMES_HOME, "profiles", profile_id, "config.yaml")
+
+
+def _hermes_env():
+    provider = _hermes_provider()
+    if provider and hasattr(provider, "_subprocess_env"):
+        return provider._subprocess_env()
+    env = dict(os.environ)
+    env["VW_HERMES_HOME"] = HERMES_HOME
+    if os.path.basename(HERMES_HOME.rstrip(os.sep)) == ".hermes":
+        env["HOME"] = os.path.dirname(HERMES_HOME.rstrip(os.sep)) or env.get("HOME", "")
+    return env
+
+
+def _get_hermes_profile_auth(profile_id):
+    paths = []
+    if profile_id and profile_id != "default":
+        paths.append(os.path.join(HERMES_HOME, "profiles", profile_id, "auth.json"))
+    paths.append(os.path.join(HERMES_HOME, "auth.json"))
+    merged = {}
+    for path in paths:
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        for provider, state in (data.get("providers") or {}).items():
+            merged.setdefault(provider, {"provider": provider, "credentials": []})
+            if state:
+                mode = state.get("auth_mode") or state.get("type") or "oauth"
+                merged[provider]["credentials"].append({"label": provider, "type": mode, "source": "auth.json"})
+        for provider, entries in (data.get("credential_pool") or {}).items():
+            if not entries:
+                continue
+            merged.setdefault(provider, {"provider": provider, "credentials": []})
+            for entry in entries:
+                merged[provider]["credentials"].append({
+                    "label": entry.get("label") or entry.get("id") or provider,
+                    "type": entry.get("auth_type") or "",
+                    "source": entry.get("source") or "credential_pool",
+                })
+    return list(merged.values())
+
+
+def _get_hermes_native_models():
+    profiles = []
+    default_cfg_path = os.path.join(HERMES_HOME, "config.yaml")
+    if os.path.exists(default_cfg_path):
+        profiles.append(("default", default_cfg_path))
+    profiles_dir = os.path.join(HERMES_HOME, "profiles")
+    if os.path.isdir(profiles_dir):
+        for name in sorted(os.listdir(profiles_dir)):
+            cfg_path = os.path.join(profiles_dir, name, "config.yaml")
+            if os.path.exists(cfg_path):
+                profiles.append((name, cfg_path))
+    if not profiles and os.path.isdir(HERMES_HOME):
+        profiles.append(("default", default_cfg_path))
+
+    provider_cache = {}
+    try:
+        with open(os.path.join(HERMES_HOME, "provider_models_cache.json"), "r") as f:
+            cache_data = json.load(f)
+        for provider, entry in cache_data.items():
+            provider_cache[provider] = entry.get("models", []) if isinstance(entry, dict) else []
+    except Exception:
+        pass
+
+    result_profiles = []
+    models = []
+    model_aliases = {}
+    local_provider_map = {}
+    for profile_id, cfg_path in profiles:
+        cfg = _load_yaml_file(cfg_path)
+        model_cfg = cfg.get("model", {}) if isinstance(cfg, dict) else {}
+        result_profiles.append({
+            "id": profile_id,
+            "configPath": cfg_path,
+            "provider": model_cfg.get("provider") or "",
+            "model": model_cfg.get("default") or model_cfg.get("model") or "",
+            "baseUrl": model_cfg.get("base_url") or "",
+            "auth": _get_hermes_profile_auth(profile_id),
+            "authOk": True,
+        })
+        aliases = cfg.get("model_aliases", {}) if isinstance(cfg, dict) else {}
+        if not isinstance(aliases, dict):
+            continue
+        for alias, entry in aliases.items():
+            if not isinstance(entry, dict):
+                continue
+            provider = entry.get("provider") or "custom"
+            model = entry.get("model") or alias
+            base_url = entry.get("base_url") or ""
+            model_aliases[alias] = {"alias": alias, "profile": profile_id, "provider": provider, "model": model, "baseUrl": base_url}
+            local_key = (profile_id, provider, base_url)
+            local_provider_map.setdefault(local_key, {
+                "id": f"{profile_id}:{provider}:{base_url}",
+                "profile": profile_id,
+                "provider": provider,
+                "baseUrl": base_url,
+                "models": [],
+                "source": "hermes-model-aliases",
+            })
+            local_provider_map[local_key]["models"].append({"id": model, "name": model, "alias": alias})
+            mid = f"{provider}/{model}"
+            if not any(m.get("id") == mid for m in models):
+                models.append({"id": mid, "provider": provider, "name": model, "source": "hermes-alias", "available": True, "baseUrl": base_url})
+    for provider, names in provider_cache.items():
+        for name in names:
+            mid = f"{provider}/{name}"
+            if not any(m.get("id") == mid for m in models):
+                models.append({"id": mid, "provider": provider, "name": name, "source": "hermes", "available": True})
+    return {
+        "ok": bool(profiles),
+        "profiles": result_profiles,
+        "models": models,
+        "providers": sorted(set(provider_cache.keys()) | {m.get("provider") for m in models if m.get("provider")}),
+        "modelAliases": list(model_aliases.values()),
+        "localProviders": [
+            {**provider, "modelCount": len(provider.get("models", []))}
+            for provider in sorted(local_provider_map.values(), key=lambda item: (item.get("profile", ""), item.get("provider", ""), item.get("baseUrl", "")))
+        ],
+        "nativeCommands": {
+            "setup": "hermes model",
+            "auth": "hermes auth list",
+            "assign": "hermes config set model.provider <provider>; hermes config set model.default <model>",
+        },
+    }
+
+
+def _set_hermes_profile_model(profile_id, provider, model, base_url=""):
+    profile_id = str(profile_id or "default").strip() or "default"
+    provider = _safe_provider_id(provider)
+    model = str(model or "").strip()
+    if not provider or not model:
+        return {"ok": False, "error": "provider and model are required"}
+    cfg_path = _hermes_profile_config_path(profile_id)
+    if not os.path.exists(cfg_path):
+        return {"ok": False, "error": f"Hermes profile config not found: {cfg_path}"}
+    if yaml:
+        cfg = _load_yaml_file(cfg_path)
+        if not isinstance(cfg, dict):
+            cfg = {}
+        model_cfg = cfg.setdefault("model", {})
+        model_cfg["default"] = model
+        model_cfg["provider"] = provider
+        if base_url:
+            model_cfg["base_url"] = str(base_url).strip()
+        ok, err = _write_yaml_file(cfg_path, cfg)
+        if not ok:
+            return {"ok": False, "error": err}
+        return {"ok": True, "profile": profile_id, "provider": provider, "model": model}
+    try:
+        with open(cfg_path, "r") as f:
+            lines = f.read().splitlines()
+        output = []
+        in_model = False
+        seen_model = False
+        wrote = {"provider": False, "default": False, "base_url": False}
+        for line in lines:
+            stripped = line.strip()
+            if not line.startswith(" ") and stripped.endswith(":"):
+                if in_model:
+                    if not wrote["default"]:
+                        output.append(f"  default: {model}")
+                    if not wrote["provider"]:
+                        output.append(f"  provider: {provider}")
+                    if base_url and not wrote["base_url"]:
+                        output.append(f"  base_url: {str(base_url).strip()}")
+                in_model = stripped == "model:"
+                seen_model = seen_model or in_model
+                output.append(line)
+                continue
+            if in_model and line.startswith("  ") and ":" in line:
+                key = stripped.split(":", 1)[0]
+                if key == "default":
+                    output.append(f"  default: {model}")
+                    wrote["default"] = True
+                    continue
+                if key == "provider":
+                    output.append(f"  provider: {provider}")
+                    wrote["provider"] = True
+                    continue
+                if key == "base_url" and base_url:
+                    output.append(f"  base_url: {str(base_url).strip()}")
+                    wrote["base_url"] = True
+                    continue
+            output.append(line)
+        if in_model:
+            if not wrote["default"]:
+                output.append(f"  default: {model}")
+            if not wrote["provider"]:
+                output.append(f"  provider: {provider}")
+            if base_url and not wrote["base_url"]:
+                output.append(f"  base_url: {str(base_url).strip()}")
+        if not seen_model:
+            output.extend(["model:", f"  default: {model}", f"  provider: {provider}"])
+            if base_url:
+                output.append(f"  base_url: {str(base_url).strip()}")
+        _atomic_write_text(cfg_path, "\n".join(output) + "\n")
+        return {"ok": True, "profile": profile_id, "provider": provider, "model": model}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _read_hermes_aliases_text(lines):
+    aliases = {}
+    start = None
+    end = None
+    for i, line in enumerate(lines):
+        if line.strip() == "model_aliases:" and not line.startswith(" "):
+            start = i
+            end = len(lines)
+            for j in range(i + 1, len(lines)):
+                nxt = lines[j]
+                if nxt.strip() and not nxt.startswith(" ") and not nxt.lstrip().startswith("#"):
+                    end = j
+                    break
+            break
+    if start is None:
+        return aliases, None, None
+    current = None
+    for line in lines[start + 1:end]:
+        if line.startswith("  ") and not line.startswith("    ") and line.strip().endswith(":"):
+            current = line.strip()[:-1]
+            aliases.setdefault(current, {})
+            continue
+        if current and line.startswith("    ") and ":" in line:
+            key, value = line.strip().split(":", 1)
+            aliases[current][key.strip()] = value.strip().strip("\"'")
+    return aliases, start, end
+
+
+def _write_hermes_aliases_text(path, aliases):
+    try:
+        with open(path, "r") as f:
+            lines = f.read().splitlines()
+    except Exception as exc:
+        return False, str(exc)
+    _, start, end = _read_hermes_aliases_text(lines)
+    block = []
+    if aliases:
+        block.append("model_aliases:")
+        for alias in sorted(aliases):
+            entry = aliases[alias] or {}
+            block.append(f"  {alias}:")
+            block.append(f"    model: {_yaml_scalar(entry.get('model') or alias)}")
+            block.append(f"    provider: {_yaml_scalar(entry.get('provider') or 'custom')}")
+            if entry.get("base_url"):
+                block.append(f"    base_url: {_yaml_scalar(entry.get('base_url'))}")
+    if start is None:
+        new_lines = lines + ([""] if lines and lines[-1].strip() else []) + block
+    else:
+        new_lines = lines[:start] + block + lines[end:]
+    try:
+        _atomic_write_text(path, "\n".join(new_lines).rstrip() + "\n")
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _save_hermes_api_key(provider, api_key, label=""):
+    provider = _safe_provider_id(provider)
+    api_key = str(api_key or "").strip()
+    label = str(label or "Virtual World").strip()[:80]
+    if not provider or not api_key:
+        return {"ok": False, "error": "provider and API key are required"}
+    if not HERMES_BIN:
+        return {"ok": False, "error": "Hermes CLI is not configured"}
+    result = _run_text_command([HERMES_BIN, "auth", "add", provider, "--type", "api-key", "--label", label, "--api-key", api_key], timeout=30, env=_hermes_env())
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("text") or "Hermes auth add failed"}
+    return {"ok": True, "provider": provider, "label": label, "maskedKey": _mask_secret(api_key)}
+
+
+def _delete_hermes_auth(provider, target):
+    provider = _safe_provider_id(provider)
+    target = str(target or "").strip()
+    if not provider or not target:
+        return {"ok": False, "error": "provider and credential label/id/index are required"}
+    if not HERMES_BIN:
+        return {"ok": False, "error": "Hermes CLI is not configured"}
+    result = _run_text_command([HERMES_BIN, "auth", "remove", provider, target], timeout=30, env=_hermes_env())
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("text") or "Hermes auth remove failed"}
+    return {"ok": True, "provider": provider, "target": target}
+
+
+def _save_hermes_custom_provider(profile_id, provider, base_url, models):
+    profile_id = str(profile_id or "default").strip() or "default"
+    provider = _safe_provider_id(provider) or "custom"
+    base_url = str(base_url or "").strip()
+    entries = _parse_model_entries(models)
+    if not base_url:
+        return {"ok": False, "error": "base URL is required"}
+    if not entries:
+        return {"ok": False, "error": "at least one model is required"}
+    cfg_path = _hermes_profile_config_path(profile_id)
+    if not os.path.exists(cfg_path):
+        return {"ok": False, "error": f"Hermes profile config not found: {cfg_path}"}
+
+    def update_aliases(aliases):
+        for alias, entry in list(aliases.items()):
+            if isinstance(entry, dict) and _safe_provider_id(entry.get("provider")) == provider:
+                aliases.pop(alias, None)
+        for entry in entries:
+            alias = re.sub(r"[^A-Za-z0-9_.:-]+", "-", entry["id"]).strip("-")[:100]
+            aliases[alias] = {"model": entry["id"], "provider": provider, "base_url": base_url}
+        return aliases
+
+    if yaml:
+        cfg = _load_yaml_file(cfg_path)
+        if not isinstance(cfg, dict):
+            cfg = {}
+        aliases = cfg.setdefault("model_aliases", {})
+        if not isinstance(aliases, dict):
+            aliases = {}
+            cfg["model_aliases"] = aliases
+        update_aliases(aliases)
+        ok, err = _write_yaml_file(cfg_path, cfg)
+        if not ok:
+            return {"ok": False, "error": err}
+    else:
+        try:
+            with open(cfg_path, "r") as f:
+                lines = f.read().splitlines()
+            aliases, _, _ = _read_hermes_aliases_text(lines)
+            update_aliases(aliases)
+            ok, err = _write_hermes_aliases_text(cfg_path, aliases)
+            if not ok:
+                return {"ok": False, "error": err}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    cache_path = os.path.join(HERMES_HOME, "provider_models_cache.json")
+    try:
+        cache_data = {}
+        if os.path.exists(cache_path):
+            with open(cache_path, "r") as f:
+                cache_data = json.load(f)
+        cache_data[provider] = {"models": [e["id"] for e in entries], "ts": int(time.time())}
+        _atomic_write_text(cache_path, json.dumps(cache_data, indent=2) + "\n")
+    except Exception:
+        pass
+    return {"ok": True, "profile": profile_id, "provider": provider, "modelCount": len(entries)}
+
+
+def _delete_hermes_custom_provider(profile_id, provider):
+    profile_id = str(profile_id or "default").strip() or "default"
+    provider = _safe_provider_id(provider)
+    if not provider:
+        return {"ok": False, "error": "provider is required"}
+    cfg_path = _hermes_profile_config_path(profile_id)
+    if not os.path.exists(cfg_path):
+        return {"ok": False, "error": f"Hermes profile config not found: {cfg_path}"}
+    removed = []
+
+    def remove_aliases(aliases):
+        for alias, entry in list(aliases.items()):
+            if isinstance(entry, dict) and _safe_provider_id(entry.get("provider")) == provider:
+                removed.append(alias)
+                aliases.pop(alias, None)
+        return aliases
+
+    if yaml:
+        cfg = _load_yaml_file(cfg_path)
+        aliases = cfg.get("model_aliases", {}) if isinstance(cfg, dict) else {}
+        if isinstance(aliases, dict):
+            remove_aliases(aliases)
+        ok, err = _write_yaml_file(cfg_path, cfg if isinstance(cfg, dict) else {})
+        if not ok:
+            return {"ok": False, "error": err}
+    else:
+        try:
+            with open(cfg_path, "r") as f:
+                lines = f.read().splitlines()
+            aliases, _, _ = _read_hermes_aliases_text(lines)
+            remove_aliases(aliases)
+            ok, err = _write_hermes_aliases_text(cfg_path, aliases)
+            if not ok:
+                return {"ok": False, "error": err}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    try:
+        cache_path = os.path.join(HERMES_HOME, "provider_models_cache.json")
+        if os.path.exists(cache_path):
+            with open(cache_path, "r") as f:
+                cache_data = json.load(f)
+            cache_data.pop(provider, None)
+            _atomic_write_text(cache_path, json.dumps(cache_data, indent=2) + "\n")
+    except Exception:
+        pass
+    return {"ok": True, "profile": profile_id, "provider": provider, "removedAliases": removed}
+
+
+def _get_codex_native_setup_state():
+    cfg = VW_CONFIG.get("codex", {}) or {}
+    home_path = cfg.get("homePath") or os.path.expanduser("~/.codex")
+    return {
+        "ok": True,
+        "enabled": bool(cfg.get("enabled", True)),
+        "binary": cfg.get("binary") or "",
+        "homePath": home_path,
+        "workspaceRoot": cfg.get("workspaceRoot") or "",
+        "mainWorkspace": cfg.get("mainWorkspace") or "",
+        "model": cfg.get("model") or "",
+        "sandbox": cfg.get("sandbox") or "workspace-write",
+        "approvalPolicy": cfg.get("approvalPolicy") or "never",
+        "preferAppServer": bool(cfg.get("preferAppServer", True)),
+        "includeMain": bool(cfg.get("includeMain", True)),
+        "includeNativeAgents": bool(cfg.get("includeNativeAgents", True)),
+        "registerNativeAgents": bool(cfg.get("registerNativeAgents", True)),
+        "nativeAgentsDir": os.path.join(home_path, "agents") if home_path else "",
+        "nativeCommands": {
+            "login": "codex login",
+            "appServer": "codex app-server --stdio",
+            "exec": "codex exec",
+            "agents": "$CODEX_HOME/agents/*.toml",
+        },
+    }
+
+
+def _get_claude_code_native_setup_state():
+    cfg = VW_CONFIG.get("claudeCode", {}) or {}
+    home_path = cfg.get("homePath") or os.path.expanduser("~/.claude")
+    return {
+        "ok": False,
+        "enabled": bool(cfg.get("enabled", False)),
+        "binary": cfg.get("binary") or "",
+        "homePath": home_path,
+        "workspaceRoot": cfg.get("workspaceRoot") or "",
+        "mainWorkspace": cfg.get("mainWorkspace") or "",
+        "model": cfg.get("model") or "",
+        "permissionMode": cfg.get("permissionMode") or "acceptEdits",
+        "includeMain": bool(cfg.get("includeMain", True)),
+        "includeNativeAgents": bool(cfg.get("includeNativeAgents", True)),
+        "registerNativeAgents": bool(cfg.get("registerNativeAgents", True)),
+        "nativeAgentsDir": os.path.join(home_path, "agents") if home_path else "",
+        "unsupportedReason": "Claude Code provider support is not implemented in My Virtual World yet.",
+        "nativeCommands": {
+            "login": "claude auth login",
+            "status": "claude auth status --json",
+            "stream": "claude -p --output-format stream-json --include-partial-messages",
+            "agents": "$CLAUDE_CONFIG_DIR/agents/*.md",
+        },
+    }
+
+
+def _handle_claude_code_test(body=None):
+    cfg = dict(VW_CONFIG.get("claudeCode", {}) or {})
+    if isinstance(body, dict):
+        cfg.update({k: v for k, v in body.items() if v is not None})
+    binary = os.path.expanduser(str(cfg.get("binary") or "claude"))
+    resolved_binary = binary if os.path.isabs(binary) and os.path.isfile(binary) else (shutil.which(binary) or "")
+    home_path = os.path.expanduser(str(cfg.get("homePath") or "~/.claude"))
+    workspace_root = os.path.expanduser(str(cfg.get("workspaceRoot") or os.path.join(DATA_DIR, "claude-code-agents")))
+    return {
+        "ok": False,
+        "error": "Claude Code provider support is not implemented in My Virtual World yet.",
+        "enabled": bool(cfg.get("enabled", False)),
+        "binary": binary,
+        "binaryDetected": bool(resolved_binary),
+        "resolvedBinary": resolved_binary,
+        "homePath": home_path,
+        "homeDetected": os.path.isdir(home_path),
+        "workspaceRoot": workspace_root,
+        "workspaceDetected": os.path.isdir(workspace_root),
+        "agents": [],
+        "unsupportedReason": "Settings can be saved now; live Claude Code agents still need the provider runtime ported from My Virtual Office.",
+    }
+
+
+def get_native_model_state(openclaw_agent_id=None):
+    return {
+        "openclaw": _get_openclaw_native_models(openclaw_agent_id),
+        "hermes": _get_hermes_native_models(),
+        "codex": _get_codex_native_setup_state(),
+        "claudeCode": _get_claude_code_native_setup_state(),
+    }
+
+
+def get_agent_model_settings(agent_id):
+    agent = _agent_record_for(agent_id)
+    resolved_agent_id = (agent or {}).get("statusKey") or (agent or {}).get("id") or _resolve_agent_id(agent_id)
+    if not resolved_agent_id:
+        return False, _api_error("agent_not_found", "Unknown agent id for model settings.", details={"agentId": agent_id}), 404
+    provider_kind = str((agent or {}).get("providerKind") or "openclaw").lower()
+    cfg = _load_openclaw_model_config()
+    default_model = _default_openclaw_model(cfg)
+    agent_model = str((agent or {}).get("model") or "")
+    if provider_kind == "openclaw":
+        cfg_agent = _openclaw_config_agent_for(resolved_agent_id, agent, cfg)
+        if isinstance(cfg_agent, dict):
+            agent_model = str(cfg_agent.get("model") or agent_model or "")
+    return True, {
+        "ok": True,
+        "schemaVersion": "agent-model-settings/v1",
+        "agentId": resolved_agent_id,
+        "providerKind": provider_kind,
+        "providerAgentId": (agent or {}).get("providerAgentId") or resolved_agent_id,
+        "editable": provider_kind == "openclaw",
+        "unsupportedReason": "" if provider_kind == "openclaw" else f"{provider_kind} model switching is read-only in this first Virtual World pass.",
+        "agentModel": agent_model,
+        "defaultModel": default_model,
+        "primaryDefaultModel": _primary_openclaw_model(cfg),
+        "models": _openclaw_model_entries(cfg),
+    }, 200
+
+
+def save_agent_model_settings(agent_id, payload):
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "model settings payload must be an object."), 400
+    agent = _agent_record_for(agent_id)
+    resolved_agent_id = (agent or {}).get("statusKey") or (agent or {}).get("id") or _resolve_agent_id(agent_id)
+    if not resolved_agent_id:
+        return False, _api_error("agent_not_found", "Unknown agent id for model settings.", details={"agentId": agent_id}), 404
+    provider_kind = str((agent or {}).get("providerKind") or "openclaw").lower()
+    if provider_kind != "openclaw":
+        return False, _api_error("unsupported_provider", f"{provider_kind} model switching is not implemented yet.", details={"providerKind": provider_kind}), 400
+    model = str(payload.get("model") or "").strip()
+    if model and "/" not in model:
+        return False, _api_error("invalid_model", f"Invalid model format: {model}. Expected provider/model.", details={"model": model}), 400
+    cfg_path = os.path.join(WORKSPACE_BASE, "openclaw.json")
+    cfg = _load_openclaw_model_config()
+    agents_cfg = cfg.setdefault("agents", {}).setdefault("list", [])
+    if not isinstance(agents_cfg, list):
+        agents_cfg = []
+        cfg["agents"]["list"] = agents_cfg
+    matched = _openclaw_config_agent_for(resolved_agent_id, agent, cfg)
+    if matched is None:
+        matched = {"id": resolved_agent_id}
+        agents_cfg.append(matched)
+    if model:
+        matched["model"] = model
+    else:
+        matched.pop("model", None)
+    try:
+        _atomic_write_text(cfg_path, json.dumps(cfg, indent=2) + "\n")
+    except OSError as exc:
+        return False, _api_error("write_failed", "Could not save OpenClaw model setting.", details={"error": str(exc), "path": cfg_path}), 500
+    gateway_signal = _signal_openclaw_gateway(restart=False)
+    global _agent_roster, _roster_time
+    _agent_roster = discover_agents()
+    _roster_time = time.time()
+    return True, {
+        "ok": True,
+        "agentId": resolved_agent_id,
+        "providerKind": provider_kind,
+        "model": model,
+        "defaulted": not bool(model),
+        "configPath": cfg_path,
+        "gatewaySignal": gateway_signal,
+    }, 200
+
+
+def _parse_skill_frontmatter(content):
+    name = ""
+    description = ""
+    text = str(content or "")
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) >= 3:
+            for line in parts[1].strip().splitlines():
+                key, sep, value = line.partition(":")
+                if not sep:
+                    continue
+                key = key.strip().lower()
+                value = value.strip().strip("'\"")
+                if key == "name":
+                    name = value
+                elif key == "description":
+                    description = value
+    if not description:
+        for line in text.splitlines():
+            clean = line.strip().lstrip("#").strip()
+            if clean and not clean.startswith("---") and not clean.startswith("name:"):
+                description = clean[:180]
+                break
+    return name, description
+
+
+def _skill_slug(name):
+    return re.sub(r"[^A-Za-z0-9_-]+", "-", str(name or "").strip()).strip("-").lower()
+
+
+def _skills_library_dir():
+    root = os.path.join(WORKSPACE_BASE, "skills-library")
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def _agent_skills_root_for_agent(agent_id):
+    agent = _agent_record_for(agent_id)
+    resolved_agent_id = (agent or {}).get("statusKey") or (agent or {}).get("id") or _resolve_agent_id(agent_id)
+    if not resolved_agent_id:
+        return None, "", _api_error("agent_not_found", "Unknown agent id for skills.", details={"agentId": agent_id}), 404
+    provider_kind = str((agent or {}).get("providerKind") or "openclaw").lower()
+    if provider_kind != "openclaw":
+        return None, resolved_agent_id, {
+            "ok": True,
+            "schemaVersion": AGENT_SKILL_SCHEMA_VERSION,
+            "agentId": resolved_agent_id,
+            "providerKind": provider_kind,
+            "skillsAvailable": False,
+            "editable": False,
+            "skills": [],
+            "unsupportedReason": f"{provider_kind} skills are not implemented in My Virtual World yet.",
+        }, 200
+    workspace_root = _openclaw_workspace_root_for_agent(resolved_agent_id, agent)
+    if not workspace_root:
+        return None, resolved_agent_id, _api_error("workspace_not_found", "OpenClaw workspace root was not found for this agent.", details={"agentId": resolved_agent_id}), 404
+    return os.path.join(workspace_root, "skills"), resolved_agent_id, None, 200
+
+
+def _skill_file_for(root, skill_name):
+    raw_name = str(skill_name or "").strip().strip("/\\")
+    slug = _skill_slug(skill_name)
+    if not root or not slug:
+        return None, ""
+    root_real = os.path.realpath(root)
+    dirname = slug
+    if os.path.isdir(root_real):
+        try:
+            for entry in os.listdir(root_real):
+                skill_file = os.path.join(root_real, entry, "SKILL.md")
+                if os.path.isfile(skill_file) and (entry == raw_name or _skill_slug(entry) == slug):
+                    dirname = entry
+                    break
+        except OSError:
+            pass
+    skill_dir = os.path.realpath(os.path.join(root_real, dirname))
+    try:
+        if os.path.commonpath([root_real, skill_dir]) != root_real:
+            return None, ""
+    except ValueError:
+        return None, ""
+    return os.path.join(skill_dir, "SKILL.md"), dirname
+
+
+def _read_skill_file(skill_file, fallback_name):
+    try:
+        size = os.path.getsize(skill_file)
+        if size > AGENT_SKILL_FILE_MAX_BYTES:
+            return {"name": fallback_name, "description": "Skill file is too large to preview.", "content": "", "path": skill_file, "editable": False, "size": size}
+        with open(skill_file, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError):
+        content = ""
+        size = 0
+    parsed_name, description = _parse_skill_frontmatter(content)
+    return {"name": fallback_name, "title": parsed_name or fallback_name, "description": description, "content": content, "path": skill_file, "editable": True, "size": size}
+
+
+def handle_agent_skills_list(agent_id):
+    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
+    if error:
+        return True, error, status
+    skills = []
+    if os.path.isdir(root):
+        for entry in sorted(os.listdir(root)):
+            skill_file = os.path.join(root, entry, "SKILL.md")
+            if os.path.isfile(skill_file):
+                skills.append(_read_skill_file(skill_file, entry))
+    return True, {
+        "ok": True,
+        "schemaVersion": AGENT_SKILL_SCHEMA_VERSION,
+        "agentId": resolved_agent_id,
+        "providerKind": "openclaw",
+        "skillsAvailable": True,
+        "editable": True,
+        "skillsRoot": root,
+        "skills": skills,
+    }, 200
+
+
+def handle_agent_skill_save(agent_id, payload):
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "skill payload must be an object."), 400
+    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
+    if error and not error.get("ok"):
+        return False, error, status
+    if error:
+        return False, _api_error("unsupported_provider", error.get("unsupportedReason") or "Skills are unavailable for this provider."), 400
+    skill_file, slug = _skill_file_for(root, payload.get("name") or payload.get("skill"))
+    if not skill_file or not slug:
+        return False, _api_error("invalid_skill", "Skill name is required and may only contain letters, numbers, dashes, and underscores."), 400
+    content = str(payload.get("content") or "")
+    if not content.strip():
+        content = f"---\nname: {slug}\ndescription: \n---\n\n# {slug}\n\nInstructions here.\n"
+    if len(content.encode("utf-8")) > AGENT_SKILL_FILE_MAX_BYTES:
+        return False, _api_error("file_too_large", "Skill file is larger than the editor limit.", details={"maxBytes": AGENT_SKILL_FILE_MAX_BYTES}), 413
+    try:
+        _atomic_write_text(skill_file, content)
+    except OSError as exc:
+        return False, _api_error("write_failed", "Could not save skill.", details={"error": str(exc)}), 500
+    return True, {"ok": True, "agentId": resolved_agent_id, "skill": slug, "path": skill_file}, 200
+
+
+def handle_agent_skill_delete(agent_id, skill_name):
+    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
+    if error and not error.get("ok"):
+        return False, error, status
+    if error:
+        return False, _api_error("unsupported_provider", error.get("unsupportedReason") or "Skills are unavailable for this provider."), 400
+    skill_file, slug = _skill_file_for(root, skill_name)
+    if not skill_file or not os.path.isfile(skill_file):
+        return False, _api_error("not_found", "Skill not found.", details={"skill": skill_name}), 404
+    try:
+        shutil.rmtree(os.path.dirname(skill_file))
+    except OSError as exc:
+        return False, _api_error("delete_failed", "Could not delete skill.", details={"error": str(exc)}), 500
+    return True, {"ok": True, "agentId": resolved_agent_id, "deleted": slug}, 200
+
+
+def handle_skills_library_list():
+    skills = []
+    root = _skills_library_dir()
+    for entry in sorted(os.listdir(root)):
+        skill_file = os.path.join(root, entry, "SKILL.md")
+        if os.path.isfile(skill_file):
+            item = _read_skill_file(skill_file, entry)
+            item.pop("content", None)
+            skills.append(item)
+    return True, {"ok": True, "schemaVersion": SKILLS_LIBRARY_SCHEMA_VERSION, "skillsRoot": root, "skills": skills}, 200
+
+
+def handle_skills_library_get(skill_name):
+    skill_file, slug = _skill_file_for(_skills_library_dir(), skill_name)
+    if not skill_file or not os.path.isfile(skill_file):
+        return False, _api_error("not_found", "Skill not found in library.", details={"skill": skill_name}), 404
+    return True, {"ok": True, **_read_skill_file(skill_file, slug)}, 200
+
+
+def handle_skills_library_save(payload):
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "skill payload must be an object."), 400
+    skill_file, slug = _skill_file_for(_skills_library_dir(), payload.get("name") or payload.get("skill"))
+    if not skill_file or not slug:
+        return False, _api_error("invalid_skill", "Skill name is required."), 400
+    content = str(payload.get("content") or "")
+    if not content.strip():
+        content = f"---\nname: {slug}\ndescription: \n---\n\n# {slug}\n\nInstructions here.\n"
+    if len(content.encode("utf-8")) > AGENT_SKILL_FILE_MAX_BYTES:
+        return False, _api_error("file_too_large", "Skill file is larger than the editor limit.", details={"maxBytes": AGENT_SKILL_FILE_MAX_BYTES}), 413
+    try:
+        _atomic_write_text(skill_file, content)
+    except OSError as exc:
+        return False, _api_error("write_failed", "Could not save library skill.", details={"error": str(exc)}), 500
+    parsed_name, description = _parse_skill_frontmatter(content)
+    return True, {"ok": True, "skill": slug, "name": parsed_name or slug, "description": description, "path": skill_file}, 200
+
+
+def handle_skills_library_delete(skill_name):
+    skill_file, slug = _skill_file_for(_skills_library_dir(), skill_name)
+    if not skill_file or not os.path.isdir(os.path.dirname(skill_file)):
+        return False, _api_error("not_found", "Skill not found in library.", details={"skill": skill_name}), 404
+    try:
+        shutil.rmtree(os.path.dirname(skill_file))
+    except OSError as exc:
+        return False, _api_error("delete_failed", "Could not delete library skill.", details={"error": str(exc)}), 500
+    return True, {"ok": True, "deleted": slug}, 200
+
+
+def handle_skills_library_apply(payload):
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "apply payload must be an object."), 400
+    skill_name = str(payload.get("skill") or "").strip()
+    agent_id = str(payload.get("agentId") or "").strip()
+    overwrite = bool(payload.get("overwrite"))
+    lib_file, slug = _skill_file_for(_skills_library_dir(), skill_name)
+    if not lib_file or not os.path.isfile(lib_file):
+        return False, _api_error("not_found", "Skill not found in library.", details={"skill": skill_name}), 404
+    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
+    if error and not error.get("ok"):
+        return False, error, status
+    if error:
+        return False, _api_error("unsupported_provider", error.get("unsupportedReason") or "Skills are unavailable for this provider."), 400
+    dest_file, _ = _skill_file_for(root, slug)
+    if os.path.isfile(dest_file) and not overwrite:
+        return True, {"ok": False, "exists": True, "warning": f"Agent already has skill '{slug}'.", "skill": slug, "agentId": resolved_agent_id}, 200
+    try:
+        os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+        shutil.copy2(lib_file, dest_file)
+    except OSError as exc:
+        return False, _api_error("write_failed", "Could not apply skill.", details={"error": str(exc)}), 500
+    return True, {"ok": True, "skill": slug, "agentId": resolved_agent_id, "path": dest_file, "overwritten": overwrite}, 200
+
+
+def handle_skills_library_save_from_agent(payload):
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "save-from-agent payload must be an object."), 400
+    agent_id = str(payload.get("agentId") or "").strip()
+    skill_name = str(payload.get("skill") or payload.get("name") or "").strip()
+    overwrite = bool(payload.get("overwrite"))
+    ok, data, status = handle_agent_skills_list(agent_id)
+    if not ok or status >= 400:
+        return ok, data, status
+    source = None
+    for skill in data.get("skills", []):
+        if skill.get("name") == skill_name:
+            source = skill
+            break
+    if not source:
+        return False, _api_error("not_found", "Skill not found on agent.", details={"skill": skill_name, "agentId": agent_id}), 404
+    skill_file, slug = _skill_file_for(_skills_library_dir(), skill_name)
+    content = source.get("content") or ""
+    if os.path.isfile(skill_file):
+        try:
+            with open(skill_file, "r", encoding="utf-8") as f:
+                existing = f.read()
+        except OSError:
+            existing = ""
+        if existing == content:
+            return True, {"ok": True, "status": "identical", "exists": True, "different": False, "skill": slug}, 200
+        if not overwrite:
+            return True, {"ok": False, "status": "exists_different", "exists": True, "different": True, "skill": slug}, 200
+    try:
+        _atomic_write_text(skill_file, content)
+    except OSError as exc:
+        return False, _api_error("write_failed", "Could not save skill to library.", details={"error": str(exc)}), 500
+    return True, {"ok": True, "status": "updated" if overwrite else "created", "skill": slug, "path": skill_file}, 200
 
 
 def _agent_profile_for(meta, agent_id):
@@ -9904,6 +12221,300 @@ def _agent_profile_for(meta, agent_id):
         return None, None, None
     profile = profiles.get(resolved_id, {}) if isinstance(profiles.get(resolved_id), dict) else {}
     return profiles, resolved_id, profile
+
+
+def _limit_profile_text(value, limit=RESIDENT_PROFILE_TEXT_LIMIT):
+    return str(value or "").strip()[:limit]
+
+
+def _limit_profile_list(values, *, limit=RESIDENT_PROFILE_LIST_LIMIT, item_limit=1200):
+    if not isinstance(values, list):
+        return []
+    items = []
+    for item in values:
+        if isinstance(item, dict):
+            clean = {}
+            for key, value in list(item.items())[:12]:
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    clean[str(key)[:60]] = _limit_profile_text(value, item_limit) if isinstance(value, str) else value
+            if clean:
+                items.append(clean)
+        else:
+            text = _limit_profile_text(item, item_limit)
+            if text:
+                items.append(text)
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _clamp_float(value, fallback, minimum=0.0, maximum=1.0):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = fallback
+    return round(min(maximum, max(minimum, number)), 3)
+
+
+def _assignment_for_agent(meta, agent):
+    assignments = meta.get("agentAssignments", {}) if isinstance(meta.get("agentAssignments"), dict) else {}
+    for key in (agent.get("statusKey"), agent.get("id"), agent.get("providerAgentId")):
+        if key and isinstance(assignments.get(key), dict):
+            return dict(assignments.get(key))
+    return {}
+
+
+def _desk_assignment_for_agent(agent):
+    aliases = {
+        str(agent.get("id") or ""),
+        str(agent.get("statusKey") or ""),
+        str(agent.get("providerAgentId") or ""),
+        str(agent.get("name") or ""),
+    }
+    aliases.discard("")
+    try:
+        buildings = list_buildings()
+    except Exception:
+        buildings = []
+    for building in buildings:
+        furniture = ((building.get("interior") or {}).get("furniture") or []) if isinstance(building, dict) else []
+        for index, item in enumerate(furniture):
+            if not isinstance(item, dict):
+                continue
+            assigned_to = str(item.get("assignedTo") or item.get("assignedAgentId") or "").strip()
+            if assigned_to and assigned_to in aliases:
+                return {
+                    "buildingId": building.get("id") or "",
+                    "buildingName": building.get("name") or "",
+                    "furnitureIndex": index,
+                    "objectInstanceId": item.get("id") or item.get("objectInstanceId") or "",
+                    "label": item.get("name") or item.get("label") or item.get("type") or "desk",
+                }
+    return None
+
+
+def _default_resident_profile(agent_id, meta, profile=None):
+    agent = _agent_record_for(agent_id) or {"id": agent_id, "statusKey": agent_id, "providerKind": "openclaw", "providerAgentId": agent_id}
+    assignment = _assignment_for_agent(meta, agent)
+    desk = _desk_assignment_for_agent(agent)
+    now = _utc_now_iso()
+    display_name = (profile or {}).get("name") or agent.get("name") or agent.get("id") or agent_id
+    role = agent.get("role") or agent.get("providerKind") or "resident"
+    personality = (profile or {}).get("personality") if isinstance((profile or {}).get("personality"), dict) else {}
+    return {
+        "schemaVersion": RESIDENT_PROFILE_SCHEMA_VERSION,
+        "templateId": "resident-default/v1",
+        "agentId": str(agent.get("statusKey") or agent.get("id") or agent_id),
+        "providerKind": str(agent.get("providerKind") or "openclaw"),
+        "providerAgentId": str(agent.get("providerAgentId") or agent.get("id") or agent_id),
+        "createdAt": now,
+        "updatedAt": now,
+        "identity": {
+            "displayName": str(display_name),
+            "role": str(role),
+            "archetype": "Virtual World resident",
+            "lifePurpose": "Live as a believable autonomous resident, help when directly addressed, and keep world actions aligned with the agent's framework instructions.",
+            "backstory": "",
+        },
+        "world": {
+            "homeBuildingId": assignment.get("home") or "",
+            "workBuildingId": assignment.get("work") or "",
+            "desk": desk,
+        },
+        "goals": {
+            "current": [],
+            "daily": [],
+            "longTerm": [],
+        },
+        "needs": dict(LIVE_AGENT_LOOP_NEED_DEFAULTS),
+        "personality": {
+            "outgoing": _clamp_float(personality.get("outgoing"), 1.0, 0.5, 2.0),
+            "curious": _clamp_float(personality.get("curious"), 1.0, 0.5, 2.0),
+            "easygoing": _clamp_float(personality.get("easygoing"), 1.0, 0.5, 2.0),
+        },
+        "memory": {
+            "summary": "",
+            "shortTerm": [],
+            "longTerm": [],
+            "relationships": {},
+            "reflections": [],
+            "compaction": {
+                "shortTermLimit": RESIDENT_PROFILE_LIST_LIMIT,
+                "longTermLimit": RESIDENT_PROFILE_MEMORY_LIMIT,
+                "strategy": "summarize older short-term entries into memory.summary before promoting durable facts to longTerm",
+            },
+        },
+        "liveMode": {
+            "autonomyWhenIdle": True,
+            "pauseForDirectChat": True,
+            "fallbackBehavior": "scripted-idle",
+        },
+    }
+
+
+def _sanitize_resident_profile(raw, template, *, touch=False):
+    data = raw if isinstance(raw, dict) else {}
+    base = template if isinstance(template, dict) else {}
+    now = _utc_now_iso()
+    out = {
+        "schemaVersion": RESIDENT_PROFILE_SCHEMA_VERSION,
+        "templateId": _limit_profile_text(data.get("templateId") or base.get("templateId") or "resident-default/v1", 80),
+        "agentId": str(base.get("agentId") or data.get("agentId") or ""),
+        "providerKind": str(base.get("providerKind") or data.get("providerKind") or "openclaw"),
+        "providerAgentId": str(base.get("providerAgentId") or data.get("providerAgentId") or ""),
+        "createdAt": _limit_profile_text(data.get("createdAt") or base.get("createdAt") or now, 80),
+        "updatedAt": now if touch else _limit_profile_text(data.get("updatedAt") or base.get("updatedAt") or now, 80),
+    }
+
+    data_identity = data.get("identity") if isinstance(data.get("identity"), dict) else {}
+    base_identity = base.get("identity") if isinstance(base.get("identity"), dict) else {}
+    out["identity"] = {
+        "displayName": _limit_profile_text(data_identity.get("displayName") or base_identity.get("displayName"), 120),
+        "role": _limit_profile_text(data_identity.get("role") or base_identity.get("role"), 160),
+        "archetype": _limit_profile_text(data_identity.get("archetype") or base_identity.get("archetype") or "Virtual World resident", 160),
+        "lifePurpose": _limit_profile_text(data_identity.get("lifePurpose") or base_identity.get("lifePurpose"), RESIDENT_PROFILE_TEXT_LIMIT),
+        "backstory": _limit_profile_text(data_identity.get("backstory") or base_identity.get("backstory"), RESIDENT_PROFILE_TEXT_LIMIT),
+    }
+
+    data_world = data.get("world") if isinstance(data.get("world"), dict) else {}
+    base_world = base.get("world") if isinstance(base.get("world"), dict) else {}
+    out["world"] = {
+        "homeBuildingId": _limit_profile_text(data_world.get("homeBuildingId") or base_world.get("homeBuildingId"), 120),
+        "workBuildingId": _limit_profile_text(data_world.get("workBuildingId") or base_world.get("workBuildingId"), 120),
+        "desk": data_world.get("desk") if isinstance(data_world.get("desk"), dict) else base_world.get("desk"),
+    }
+
+    data_goals = data.get("goals") if isinstance(data.get("goals"), dict) else {}
+    base_goals = base.get("goals") if isinstance(base.get("goals"), dict) else {}
+    out["goals"] = {
+        "current": _limit_profile_list(data_goals.get("current", base_goals.get("current", [])), limit=20, item_limit=800),
+        "daily": _limit_profile_list(data_goals.get("daily", base_goals.get("daily", [])), limit=20, item_limit=800),
+        "longTerm": _limit_profile_list(data_goals.get("longTerm", base_goals.get("longTerm", [])), limit=20, item_limit=800),
+    }
+
+    data_needs = data.get("needs") if isinstance(data.get("needs"), dict) else {}
+    base_needs = base.get("needs") if isinstance(base.get("needs"), dict) else LIVE_AGENT_LOOP_NEED_DEFAULTS
+    out["needs"] = {
+        key: _clamp_float(data_needs.get(key, base_needs.get(key, default)), default, 0.0, 1.0)
+        for key, default in LIVE_AGENT_LOOP_NEED_DEFAULTS.items()
+    }
+
+    data_personality = data.get("personality") if isinstance(data.get("personality"), dict) else {}
+    base_personality = base.get("personality") if isinstance(base.get("personality"), dict) else {}
+    out["personality"] = {
+        trait: _clamp_float(data_personality.get(trait, base_personality.get(trait, 1.0)), 1.0, 0.5, 2.0)
+        for trait in LIVE_AGENT_LOOP_PERSONALITY_TRAITS
+    }
+
+    data_memory = data.get("memory") if isinstance(data.get("memory"), dict) else {}
+    base_memory = base.get("memory") if isinstance(base.get("memory"), dict) else {}
+    relationships = data_memory.get("relationships", base_memory.get("relationships", {}))
+    clean_relationships = {}
+    if isinstance(relationships, dict):
+        for key, value in list(relationships.items())[:RESIDENT_PROFILE_MEMORY_LIMIT]:
+            clean_relationships[_limit_profile_text(key, 120)] = _limit_profile_text(value, 1200) if not isinstance(value, dict) else {
+                _limit_profile_text(k, 60): _limit_profile_text(v, 800) for k, v in list(value.items())[:8]
+            }
+    out["memory"] = {
+        "summary": _limit_profile_text(data_memory.get("summary", base_memory.get("summary", "")), RESIDENT_PROFILE_TEXT_LIMIT),
+        "shortTerm": _limit_profile_list(data_memory.get("shortTerm", base_memory.get("shortTerm", [])), limit=RESIDENT_PROFILE_LIST_LIMIT, item_limit=1200),
+        "longTerm": _limit_profile_list(data_memory.get("longTerm", base_memory.get("longTerm", [])), limit=RESIDENT_PROFILE_MEMORY_LIMIT, item_limit=1400),
+        "relationships": clean_relationships,
+        "reflections": _limit_profile_list(data_memory.get("reflections", base_memory.get("reflections", [])), limit=RESIDENT_PROFILE_MEMORY_LIMIT, item_limit=1200),
+        "compaction": {
+            "shortTermLimit": RESIDENT_PROFILE_LIST_LIMIT,
+            "longTermLimit": RESIDENT_PROFILE_MEMORY_LIMIT,
+            "strategy": _limit_profile_text(((data_memory.get("compaction") if isinstance(data_memory.get("compaction"), dict) else {}) or {}).get("strategy") or ((base_memory.get("compaction") if isinstance(base_memory.get("compaction"), dict) else {}) or {}).get("strategy") or "summarize older short-term entries into memory.summary before promoting durable facts to longTerm", 300),
+        },
+    }
+
+    data_live = data.get("liveMode") if isinstance(data.get("liveMode"), dict) else {}
+    base_live = base.get("liveMode") if isinstance(base.get("liveMode"), dict) else {}
+    out["liveMode"] = {
+        "autonomyWhenIdle": bool(data_live.get("autonomyWhenIdle", base_live.get("autonomyWhenIdle", True))),
+        "pauseForDirectChat": bool(data_live.get("pauseForDirectChat", base_live.get("pauseForDirectChat", True))),
+        "fallbackBehavior": _limit_profile_text(data_live.get("fallbackBehavior") or base_live.get("fallbackBehavior") or "scripted-idle", 120),
+    }
+    if isinstance(data.get("custom"), dict):
+        custom = {}
+        for key, value in list(data["custom"].items())[:30]:
+            clean_key = _limit_profile_text(key, 80)
+            if isinstance(value, list):
+                custom[clean_key] = _limit_profile_list(value, limit=20, item_limit=800)
+            elif isinstance(value, dict):
+                custom[clean_key] = {
+                    _limit_profile_text(k, 60): _limit_profile_text(v, 800)
+                    for k, v in list(value.items())[:20]
+                }
+            else:
+                custom[clean_key] = _limit_profile_text(value, 1200)
+        out["custom"] = custom
+    elif isinstance(base.get("custom"), dict):
+        out["custom"] = base["custom"]
+    return out
+
+
+def get_agent_resident_profile(agent_id, *, persist=True):
+    meta = load_world_meta()
+    profiles, resolved_agent_id, profile = _agent_profile_for(meta, agent_id)
+    if not resolved_agent_id:
+        return False, _api_error("agent_not_found", "Unknown agent id for resident profile.", details={"agentId": agent_id}), 404
+    profile = dict(profile or {})
+    template = _default_resident_profile(resolved_agent_id, meta, profile)
+    current = profile.get("residentProfile") if isinstance(profile.get("residentProfile"), dict) else None
+    resident_profile = _sanitize_resident_profile(current or template, template, touch=False)
+    defaulted = current is None
+    if persist and (defaulted or resident_profile != current):
+        profile["residentProfile"] = resident_profile
+        profiles[resolved_agent_id] = profile
+        meta["agentProfiles"] = profiles
+        save_world_meta(meta)
+    return True, {
+        "ok": True,
+        "schemaVersion": RESIDENT_PROFILE_SCHEMA_VERSION,
+        "agentId": resolved_agent_id,
+        "defaulted": defaulted,
+        "residentProfile": resident_profile,
+        "storage": "world-meta.json agentProfiles[agentId].residentProfile",
+    }, 200
+
+
+def save_agent_resident_profile(agent_id, payload):
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "resident profile payload must be an object."), 400
+    meta = load_world_meta()
+    profiles, resolved_agent_id, profile = _agent_profile_for(meta, agent_id)
+    if not resolved_agent_id:
+        return False, _api_error("agent_not_found", "Unknown agent id for resident profile.", details={"agentId": agent_id}), 404
+    profile = dict(profile or {})
+    template = _default_resident_profile(resolved_agent_id, meta, profile)
+    existing = profile.get("residentProfile") if isinstance(profile.get("residentProfile"), dict) else template
+    raw_profile = payload.get("residentProfile") if isinstance(payload.get("residentProfile"), dict) else payload
+    base = _sanitize_resident_profile(existing, template, touch=False)
+    merged = dict(base)
+    for key, value in raw_profile.items():
+        if key in {"schemaVersion", "templateId", "agentId", "providerKind", "providerAgentId", "createdAt", "updatedAt"}:
+            continue
+        merged[key] = value
+    resident_profile = _sanitize_resident_profile(merged, template, touch=True)
+    profile["residentProfile"] = resident_profile
+    profiles[resolved_agent_id] = profile
+    meta["agentProfiles"] = profiles
+    save_world_meta(meta)
+    return True, {
+        "ok": True,
+        "schemaVersion": RESIDENT_PROFILE_SCHEMA_VERSION,
+        "agentId": resolved_agent_id,
+        "residentProfile": resident_profile,
+        "storage": "world-meta.json agentProfiles[agentId].residentProfile",
+    }, 200
+
+
+def _ensure_resident_profile_for_agent(agent_id):
+    try:
+        get_agent_resident_profile(agent_id, persist=True)
+    except Exception as exc:
+        print(f"⚠️  Virtual World resident profile seed failed for {agent_id}: {exc}")
 
 
 def _agent_live_mode_enabled_from_profile(profile):
@@ -10327,6 +12938,8 @@ def _resolve_node_modules_dir():
     return candidates[0] if candidates else os.path.abspath(os.path.join(CLIENT_DIR, "..", "node_modules"))
 
 NODE_MODULES_DIR = _resolve_node_modules_dir()
+GZIP_STATIC_EXTENSIONS = (".css", ".html", ".js", ".json", ".mjs", ".svg", ".wasm")
+GZIP_STATIC_MIN_BYTES = 1024
 
 class VWHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -10352,6 +12965,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if getattr(self, "_vw_send_error_status", None):
             # Do not let a transient missing static asset poison browser caches.
             self.send_header("Cache-Control", "no-store")
+        elif getattr(self, "_vw_cache_control_sent", False):
+            pass
         elif request_path in {"/", "/index.html"}:
             # Public-app cache policy: always revalidate HTML so new versioned
             # asset URLs reach every user, while static files can be cached.
@@ -10381,6 +12996,46 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             return None
         body = self.rfile.read(length)
         return json.loads(body)
+
+    def _client_accepts_gzip(self):
+        accepted = self.headers.get("Accept-Encoding", "")
+        return any(token.strip().split(";", 1)[0].lower() == "gzip" for token in accepted.split(","))
+
+    def _static_cache_control(self, request_path):
+        if request_path in {"/", "/index.html"}:
+            return "no-cache, must-revalidate"
+        if request_path.endswith((".css", ".js", ".mjs", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".wasm")):
+            return "public, max-age=31536000, immutable"
+        return None
+
+    def _send_static_file_response(self, real_path, request_path=None, cache_control=None):
+        if not os.path.isfile(real_path):
+            self.send_error(404)
+            return True
+        ctype = mimetypes.guess_type(real_path)[0] or "application/octet-stream"
+        with open(real_path, "rb") as f:
+            data = f.read()
+        should_gzip = (
+            self._client_accepts_gzip()
+            and len(data) >= GZIP_STATIC_MIN_BYTES
+            and real_path.endswith(GZIP_STATIC_EXTENSIONS)
+        )
+        if should_gzip:
+            data = gzip.compress(data, compresslevel=6)
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Vary", "Accept-Encoding")
+        if should_gzip:
+            self.send_header("Content-Encoding", "gzip")
+        if cache_control is None and request_path:
+            cache_control = self._static_cache_control(request_path)
+        if cache_control:
+            self.send_header("Cache-Control", cache_control)
+            self._vw_cache_control_sent = True
+        self.end_headers()
+        self.wfile.write(data)
+        return True
 
     def _serve_chat_media(self, query):
         params = urllib.parse.parse_qs(query)
@@ -10621,6 +13276,26 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/agent-platforms":
             return self._send_json(_handle_agent_platforms())
 
+        if path == "/api/agent-models":
+            qs = urllib.parse.parse_qs(parsed.query)
+            agent_id = (qs.get("agent") or qs.get("agentId") or [""])[0]
+            ok, result, status = get_agent_model_settings(agent_id)
+            return self._send_json(result, status)
+
+        if path == "/api/native-models":
+            qs = urllib.parse.parse_qs(parsed.query)
+            openclaw_agent_id = (qs.get("agent") or qs.get("agentId") or ["main"])[0]
+            return self._send_json(get_native_model_state(openclaw_agent_id))
+
+        if path == "/api/skills-library":
+            ok, result, status = handle_skills_library_list()
+            return self._send_json(result, status)
+
+        if path.startswith("/api/skills-library/"):
+            skill_name = urllib.parse.unquote(path[len("/api/skills-library/"):].strip("/"))
+            ok, result, status = handle_skills_library_get(skill_name)
+            return self._send_json(result, status)
+
         if path.startswith("/api/agent/") and path.endswith("/live-mode"):
             parts = path.strip("/").split("/")
             agent_id = urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
@@ -10628,6 +13303,24 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if not setting:
                 return self._send_json(_api_error("agent_not_found", "Unknown agent id for Agent Live Mode setting.", details={"agentId": agent_id}), 404)
             return self._send_json(setting)
+
+        if path.startswith("/api/agent/") and path.endswith("/workspace"):
+            parts = path.strip("/").split("/")
+            agent_id = urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
+            ok, result, status = get_agent_framework_workspace(agent_id)
+            return self._send_json(result, status)
+
+        if path.startswith("/api/agent/") and path.endswith("/skills"):
+            parts = path.strip("/").split("/")
+            agent_id = urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
+            ok, result, status = handle_agent_skills_list(agent_id)
+            return self._send_json(result, status)
+
+        if path.startswith("/api/agent/") and path.endswith("/resident-profile"):
+            parts = path.strip("/").split("/")
+            agent_id = urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
+            ok, result, status = get_agent_resident_profile(agent_id, persist=True)
+            return self._send_json(result, status)
 
         if path == "/api/assignments":
             meta = load_world_meta()
@@ -10765,6 +13458,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             provider = _codex_provider()
             return self._send_json(provider.test() if provider else {"ok": False, "error": "Codex provider module unavailable", "agents": []})
 
+        if path == "/api/claude-code/test":
+            return self._send_json(_handle_claude_code_test())
+
         if path == "/chat-media":
             return self._serve_chat_media(parsed.query)
 
@@ -10858,20 +13554,25 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                     "contextWindow": _context_window_for_model(model, provider, model_cfg),
                 })
 
-            model = _default_openclaw_model(model_cfg) or "unknown"
-            context_window = 0
-            provider = ""
-            try:
-                provider = model_cfg.get("agents", {}).get("defaults", {}).get("model", {}).get("provider", "")
-                for a_cfg in model_cfg.get("agents", {}).get("list", []):
-                    if a_cfg.get("default") and a_cfg.get("model"):
-                        model = a_cfg["model"]
-                        provider = a_cfg.get("provider", provider)
-                        break
-                context_window = _context_window_for_model(model, provider, model_cfg)
-            except Exception:
-                pass
-            return self._send_json({"model": model, "provider": provider, "contextWindow": context_window})
+            requested_agent = _agent_record_for(agent_key) if agent_key else None
+            cfg_agent = _openclaw_config_agent_for(agent_key, requested_agent, model_cfg) if agent_key else None
+            defaults = model_cfg.get("agents", {}).get("defaults", {}).get("model", {}) if isinstance(model_cfg, dict) else {}
+            provider = str(defaults.get("provider") or "")
+            model = ""
+            if isinstance(cfg_agent, dict):
+                model = str(cfg_agent.get("model") or "")
+                provider = str(cfg_agent.get("provider") or provider or "")
+            if not model:
+                model = _default_openclaw_model(model_cfg) or "unknown"
+                try:
+                    for a_cfg in model_cfg.get("agents", {}).get("list", []):
+                        if isinstance(a_cfg, dict) and a_cfg.get("default") and a_cfg.get("model"):
+                            provider = str(a_cfg.get("provider") or provider or "")
+                            break
+                except Exception:
+                    pass
+            context_window = _context_window_for_model(model, provider, model_cfg)
+            return self._send_json({"model": model, "provider": provider, "providerKind": "openclaw", "contextWindow": context_window})
 
         # Serve node_modules for pixi.js
         if path.startswith("/node_modules/"):
@@ -10890,25 +13591,14 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(404)
                 return
             if os.path.isfile(nm_path):
-                self.send_response(200)
-                if nm_path.endswith(".js") or nm_path.endswith(".mjs"):
-                    self.send_header("Content-Type", "application/javascript")
-                elif nm_path.endswith(".json"):
-                    self.send_header("Content-Type", "application/json")
-                elif nm_path.endswith(".css"):
-                    self.send_header("Content-Type", "text/css")
-                elif nm_path.endswith(".wasm"):
-                    self.send_header("Content-Type", "application/wasm")
-                else:
-                    self.send_header("Content-Type", "application/octet-stream")
-                with open(nm_path, "rb") as f:
-                    data = f.read()
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                self._send_static_file_response(nm_path, request_path=path, cache_control="public, max-age=31536000, immutable")
                 return
 
         # --- Static files ---
+        real_static_path = self.translate_path(path)
+        if os.path.isfile(real_static_path):
+            self._send_static_file_response(real_static_path, request_path=path)
+            return
         super().do_GET()
 
     def do_POST(self):
@@ -11029,6 +13719,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/codex/test":
             provider = _codex_provider()
             return self._send_json(provider.test() if provider else {"ok": False, "error": "Codex provider module unavailable", "agents": []})
+
+        if path == "/api/claude-code/test":
+            return self._send_json(_handle_claude_code_test(self._read_body() or {}))
 
         if path == "/api/world-actions":
             if not check_feature("agentLiveMode"):
@@ -11179,6 +13872,164 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 return self._send_json({"error": "No data"}, 400)
             enabled = data.get("agentLiveModeEnabled") if isinstance(data, dict) else None
             ok, result, status = set_agent_live_mode_setting(agent_id, enabled)
+            return self._send_json(result, status)
+
+        if path.startswith("/api/agent/") and path.endswith("/workspace"):
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            parts = path.strip("/").split("/")
+            agent_id = urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
+            ok, result, status = save_agent_framework_workspace(agent_id, self._read_body())
+            return self._send_json(result, status)
+
+        if path.startswith("/api/agent/") and path.endswith("/model"):
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            parts = path.strip("/").split("/")
+            agent_id = urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
+            ok, result, status = save_agent_model_settings(agent_id, self._read_body())
+            return self._send_json(result, status)
+
+        if path == "/api/native-models/openclaw/agent-model":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            agent_id = body.get("agent") or body.get("agentId") or body.get("id") or ""
+            ok, result, status = save_agent_model_settings(agent_id, {"model": body.get("model") or ""})
+            return self._send_json(result, status)
+
+        if path == "/api/native-models/openclaw/auth/api-key":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _save_openclaw_api_key(
+                body.get("provider"),
+                body.get("apiKey"),
+                body.get("profileId") or body.get("profile"),
+                body.get("agent") or body.get("agentId") or "main",
+                sync_all=str(body.get("scope") or "global").lower() != "agent",
+            )
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path == "/api/native-models/openclaw/auth/delete":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _delete_openclaw_auth(
+                body.get("provider"),
+                body.get("profileId") or body.get("profile"),
+                body.get("agent") or body.get("agentId") or "main",
+                sync_all=str(body.get("scope") or "global").lower() != "agent",
+            )
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path == "/api/native-models/openclaw/auth/sync-static":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _sync_openclaw_static_auth_from_main(body.get("provider"), body.get("profileId") or body.get("profile"))
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path == "/api/native-models/openclaw/auth/reset-overrides":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _reset_openclaw_static_auth_overrides(body.get("agent") or body.get("agentId"), body.get("provider"))
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path == "/api/native-models/openclaw/provider":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _save_openclaw_provider(
+                body.get("provider"),
+                body.get("baseUrl") or body.get("baseURL") or body.get("url"),
+                body.get("models"),
+                api=body.get("api") or "",
+                api_key=body.get("apiKey") or "",
+                timeout_seconds=body.get("timeoutSeconds"),
+            )
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path == "/api/native-models/openclaw/provider/delete":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _delete_openclaw_provider(body.get("provider"))
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path == "/api/native-models/hermes/profile-model":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _set_hermes_profile_model(body.get("profile") or body.get("profileId"), body.get("provider"), body.get("model"), body.get("baseUrl") or "")
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path == "/api/native-models/hermes/auth/api-key":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _save_hermes_api_key(body.get("provider"), body.get("apiKey"), body.get("label") or "")
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path == "/api/native-models/hermes/auth/delete":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _delete_hermes_auth(body.get("provider"), body.get("target") or body.get("label") or body.get("id"))
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path == "/api/native-models/hermes/provider":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _save_hermes_custom_provider(
+                body.get("profile") or body.get("profileId") or "default",
+                body.get("provider"),
+                body.get("baseUrl") or body.get("baseURL") or body.get("url"),
+                body.get("models"),
+            )
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path == "/api/native-models/hermes/provider/delete":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            body = self._read_body() or {}
+            result = _delete_hermes_custom_provider(body.get("profile") or body.get("profileId") or "default", body.get("provider"))
+            return self._send_json(result, 200 if result.get("ok") else 400)
+
+        if path.startswith("/api/agent/") and path.endswith("/skills"):
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            parts = path.strip("/").split("/")
+            agent_id = urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
+            ok, result, status = handle_agent_skill_save(agent_id, self._read_body())
+            return self._send_json(result, status)
+
+        if path == "/api/skills-library":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            ok, result, status = handle_skills_library_save(self._read_body())
+            return self._send_json(result, status)
+
+        if path == "/api/skills-library/apply":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            ok, result, status = handle_skills_library_apply(self._read_body())
+            return self._send_json(result, status)
+
+        if path == "/api/skills-library/save-from-agent":
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            ok, result, status = handle_skills_library_save_from_agent(self._read_body())
+            return self._send_json(result, status)
+
+        if path.startswith("/api/agent/") and path.endswith("/resident-profile"):
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            parts = path.strip("/").split("/")
+            agent_id = urllib.parse.unquote(parts[2]) if len(parts) >= 3 else ""
+            ok, result, status = save_agent_resident_profile(agent_id, self._read_body())
             return self._send_json(result, status)
 
         if path.startswith("/api/agent/") and path.endswith("/profile"):
@@ -11377,6 +14228,24 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+
+        if path.startswith("/api/agent/") and "/skills/" in path:
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            rest = path[len("/api/agent/"):]
+            agent_part, _, skill_part = rest.partition("/skills/")
+            ok, result, status = handle_agent_skill_delete(
+                urllib.parse.unquote(agent_part.strip("/")),
+                urllib.parse.unquote(skill_part.strip("/")),
+            )
+            return self._send_json(result, status)
+
+        if path.startswith("/api/skills-library/"):
+            if _demo_feature_locked("advancedEditor"):
+                return self._send_json(_demo_edit_locked_response(), 403)
+            skill_name = urllib.parse.unquote(path[len("/api/skills-library/"):].strip("/"))
+            ok, result, status = handle_skills_library_delete(skill_name)
+            return self._send_json(result, status)
 
         if path.startswith("/api/building/"):
             if _demo_feature_locked("advancedEditor"):
