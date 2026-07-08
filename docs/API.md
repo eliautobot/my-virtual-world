@@ -99,6 +99,7 @@ The server guards against accidental empty street saves by restoring the known s
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/buildings` | List building summaries. |
+| GET | `/api/building-placement-rules` | Read server-enforced building placement constraints. |
 | POST | `/api/buildings` | Save a building. |
 | POST | `/api/building` | Save a building. |
 | GET | `/api/building/<building-id>` | Read a building. |
@@ -113,6 +114,8 @@ Building records include:
 - `interior.furniture[]`
 - `interior.walls[]`
 - exterior/outdoor node data when present
+
+Placement rule: building footprints may snap next to streets, but cannot intersect any roadway, curb/gutter, or sidewalk surface. The server enforces this on `POST /api/buildings`, `POST /api/building`, and `POST /api/building/<building-id>`. A rejected placement returns HTTP `409` with error code `building_roadway_overlap` and details about the building footprint and street surface that overlapped.
 
 The starter Office appliance repair is narrow. It only restores mount metadata when the original starter counter, microwave, and coffee machine are still present in their expected furniture positions.
 

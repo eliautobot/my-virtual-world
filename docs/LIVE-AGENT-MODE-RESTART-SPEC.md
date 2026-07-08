@@ -314,10 +314,10 @@ Every meaningful experience writes a bounded memory record:
 
 ```json
 {
-  "id": "mem-adam-001",
-  "agentId": "adam",
+  "id": "mem-resident-001",
+  "agentId": "resident-1",
   "kind": "observation",
-  "text": "Adam reached the break room coffee machine and made coffee.",
+  "text": "The resident reached the break room coffee machine and made coffee.",
   "location": {"buildingId": "office-1", "roomId": "break-room", "floor": 1},
   "importance": 0.62,
   "tags": ["coffee", "break-room", "success"],

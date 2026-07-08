@@ -15,6 +15,7 @@ This is the organized index for APIs and repo skills that agents can use through
 - `POST /api/meta`
 - `GET /api/buildings`
 - `GET /api/building/<building-id>`
+- `GET /api/building-placement-rules`
 - `POST /api/building`
 - `POST /api/buildings`
 - `DELETE /api/building/<building-id>`
@@ -25,7 +26,7 @@ This is the organized index for APIs and repo skills that agents can use through
 - `GET /api/streets`
 - `POST /api/streets`
 
-Use these only when the user wants world inspection or editing. Demo mode may block writes.
+Use these only when the user wants world inspection or editing. Demo mode may block writes. Building footprints can snap next to streets, but must not intersect roadways, curbs/gutters, or sidewalks. Query `GET /api/building-placement-rules` before placing or moving buildings; save calls reject violations with `building_roadway_overlap`.
 
 ### Agents and Presence
 

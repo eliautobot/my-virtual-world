@@ -3,7 +3,9 @@
   let originalSaveSettings = null;
   let liveModeAgents = [];
   let liveModeLoopStatus = null;
+  let liveModeInitialRefreshScheduled = false;
   const liveModeAgentEdits = new Map();
+  const liveModeAgentFields = ['agentLiveModeEnabled', 'agentLoopEnabled', 'scriptedAmbientEnabled'];
 
   const $ = (id) => document.getElementById(id);
   const setText = (id, text) => { const el = $(id); if (el) el.textContent = text; };
@@ -49,7 +51,13 @@
   async function fetchJson(url, options) {
     const res = await fetch(url, options);
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (!res.ok) {
+      const message = data?.error?.message || data?.message || (typeof data?.error === 'string' ? data.error : '') || `HTTP ${res.status}`;
+      const err = new Error(message);
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
     return data;
   }
 
@@ -139,25 +147,138 @@
     return String(agent?.id || agent?.statusKey || agent?.agentId || '').trim();
   }
 
+  function agentLoopRow(agent) {
+    const id = agentLiveModeId(agent);
+    const fromLoopStatus = liveModeLoopStatus?.state?.agents?.[id];
+    if (fromLoopStatus && typeof fromLoopStatus === 'object') return fromLoopStatus;
+    return agent?.agentLiveModeLoop && typeof agent.agentLiveModeLoop === 'object' ? agent.agentLiveModeLoop : {};
+  }
+
+  function agentLoopEnabled(agent) {
+    const loop = agentLoopRow(agent);
+    return typeof agent?.agentLiveModeLoopEnabled === 'boolean'
+      ? agent.agentLiveModeLoopEnabled
+      : loop.enabled !== false;
+  }
+
+  function agentAmbientEnabled(agent) {
+    if (typeof agent?.scriptedAmbientEnabled === 'boolean') return agent.scriptedAmbientEnabled;
+    if (typeof agent?.ambientEnabled === 'boolean') return agent.ambientEnabled;
+    return true;
+  }
+
+  function agentEditedValue(agent, field) {
+    const id = agentLiveModeId(agent);
+    const edits = liveModeAgentEdits.get(id) || {};
+    if (Object.prototype.hasOwnProperty.call(edits, field)) return edits[field];
+    if (field === 'agentLiveModeEnabled') return agent?.agentLiveModeEnabled === true;
+    if (field === 'agentLoopEnabled') return agentLoopEnabled(agent);
+    if (field === 'scriptedAmbientEnabled') return agentAmbientEnabled(agent);
+    return false;
+  }
+
+  function setAgentEdit(agentId, field, value) {
+    if (!agentId || !liveModeAgentFields.includes(field)) return;
+    liveModeAgentEdits.set(agentId, {
+      ...(liveModeAgentEdits.get(agentId) || {}),
+      [field]: Boolean(value),
+    });
+  }
+
+  function liveWorldNotice(agent) {
+    const liveWorld = agent?.liveWorld || {};
+    if (liveWorld.notice) return liveWorld.notice;
+    const claim = liveWorld.claim || {};
+    if (claim.currentWorld === false) {
+      const world = claim.worldName || claim.publicOrigin || 'another Virtual World';
+      return claim.port ? `This agent is currently live in ${world} on port ${claim.port}.` : `This agent is currently live in ${world}.`;
+    }
+    return '';
+  }
+
   function setLiveModeControlsDisabled(disabled) {
     $('btn-saveLiveAgents')?.toggleAttribute('disabled', disabled);
+    $('btn-saveLiveLoopSettings')?.toggleAttribute('disabled', disabled);
     $('btn-refreshLiveLoop')?.toggleAttribute('disabled', disabled);
     $('btn-pauseLiveLoop')?.toggleAttribute('disabled', disabled);
     $('btn-resumeLiveLoop')?.toggleAttribute('disabled', disabled);
     $('btn-clearLiveClient')?.toggleAttribute('disabled', disabled);
-    $('setting-liveLoopPauseSec')?.toggleAttribute('disabled', disabled);
-    document.querySelectorAll('[data-live-agent-toggle]').forEach(input => {
-      input.disabled = disabled;
+    [
+      'setting-liveLoopEnabled',
+      'setting-liveLoopModelDecisionEnabled',
+      'setting-liveLoopUserPreemptionEnabled',
+      'setting-liveLoopIntervalSec',
+      'setting-liveLoopMinActionIntervalSec',
+      'setting-liveLoopMaxActionsPerTick',
+      'setting-liveLoopModelTimeoutSec',
+      'setting-liveLoopModelMinIntervalSec',
+      'setting-liveLoopUserHoldSec',
+      'setting-liveLoopPauseSec',
+    ].forEach(id => $(id)?.toggleAttribute('disabled', disabled));
+    document.querySelectorAll('[data-live-agent-field]').forEach(input => {
+      input.disabled = disabled || input.dataset.liveAgentWorldBlocked === 'true';
     });
   }
 
   function applyLiveAgentModeAvailabilityUi() {
     const feature = $('setting-featureAgentLiveMode');
+    const liveModeFeature = $('setting-liveModeFeatureEnabled');
+    if (feature && liveModeFeature && liveModeFeature.checked !== feature.checked) {
+      liveModeFeature.checked = feature.checked;
+    }
     if (feature) {
       const trial = isTrialLicense(vwConfig?.license || {});
       feature.closest('.settings-check')?.classList.toggle('settings-check-disabled', trial);
+      liveModeFeature?.closest('.settings-check')?.classList.toggle('settings-check-disabled', trial);
+      liveModeFeature?.toggleAttribute('disabled', trial);
     }
     setLiveModeControlsDisabled(isTrialLicense(vwConfig?.license || {}) || !checked('setting-featureAgentLiveMode'));
+  }
+
+  function setCheckboxValue(id, checkedValue) {
+    const el = $(id);
+    if (el) el.checked = checkedValue === true;
+  }
+
+  function setNumberInputValue(id, numberValue) {
+    const el = $(id);
+    if (!el || document.activeElement === el) return;
+    const value = Number(numberValue);
+    el.value = Number.isFinite(value) ? String(Math.round(value)) : '';
+  }
+
+  function remainingSecondsUntil(value) {
+    const at = Date.parse(value || '');
+    if (!Number.isFinite(at)) return 0;
+    return Math.max(0, Math.ceil((at - Date.now()) / 1000));
+  }
+
+  function liveModeAgentRuntimeLabel(agent, loop) {
+    const id = agentLiveModeId(agent);
+    const attention = loop?.userAttention || liveModeLoopStatus?.runtime?.userAttention?.[id] || null;
+    const attentionRemaining = Number(attention?.remainingSec || 0);
+    if (attention?.active) return `attending user ${Math.max(0, Math.ceil(attentionRemaining))}s`;
+    if (loop?.activeActionId) return 'active action';
+    const cooldown = remainingSecondsUntil(loop?.nextAllowedAt);
+    if (cooldown > 0) return `cooldown ${cooldown}s`;
+    const outcome = loop?.lastOutcome || {};
+    if (outcome.status === 'completed') return 'last completed';
+    if (outcome.reason) return `last ${outcome.reason}`;
+    if (loop?.lastHeartbeatAt) return 'ready';
+    return '';
+  }
+
+  function renderLiveModeLoopControls() {
+    const state = liveModeLoopStatus?.state || {};
+    setCheckboxValue('setting-liveLoopEnabled', state.enabled !== false);
+    setCheckboxValue('setting-liveLoopModelDecisionEnabled', state.modelDecisionEnabled !== false);
+    setCheckboxValue('setting-liveLoopUserPreemptionEnabled', state.userChatPreemptionEnabled !== false);
+    setNumberInputValue('setting-liveLoopIntervalSec', state.intervalSec ?? 30);
+    setNumberInputValue('setting-liveLoopMinActionIntervalSec', state.minActionIntervalSec ?? 120);
+    setNumberInputValue('setting-liveLoopMaxActionsPerTick', state.maxActionsPerTick ?? 1);
+    setNumberInputValue('setting-liveLoopModelTimeoutSec', state.modelDecisionTimeoutSec ?? 45);
+    setNumberInputValue('setting-liveLoopModelMinIntervalSec', state.modelDecisionMinIntervalSec ?? 90);
+    setNumberInputValue('setting-liveLoopUserHoldSec', state.userChatPreemptionHoldSec ?? 180);
   }
 
   function renderLiveModeLoopStatus() {
@@ -175,6 +296,7 @@
 
     const runtime = liveModeLoopStatus?.runtime || {};
     const state = liveModeLoopStatus?.state || {};
+    renderLiveModeLoopControls();
     const pause = runtime.pause || {};
     const worldClient = runtime.worldClient || {};
     const client = worldClient.client || {};
@@ -211,14 +333,14 @@
     const trial = isTrialLicense(vwConfig?.license || {});
     const globalEnabled = checked('setting-featureAgentLiveMode');
     const enabledCount = liveModeAgents.filter(agent => {
-      const id = agentLiveModeId(agent);
-      return liveModeAgentEdits.has(id) ? liveModeAgentEdits.get(id) : agent.agentLiveModeEnabled === true;
+      return agentEditedValue(agent, 'agentLiveModeEnabled');
     }).length;
+    const loopCount = liveModeAgents.filter(agent => agentEditedValue(agent, 'agentLoopEnabled')).length;
     summary.classList.toggle('locked', trial || !globalEnabled);
     summary.innerHTML = trial
       ? '<strong>Agent Live Mode locked</strong><span>Activate a License Key to manage live agents.</span>'
       : globalEnabled
-        ? `<strong>${enabledCount} live agent${enabledCount === 1 ? '' : 's'} selected</strong><span>Head dots show presence: green idle, red working.</span>`
+        ? `<strong>${enabledCount} live agent${enabledCount === 1 ? '' : 's'} selected · ${loopCount} loop executor${loopCount === 1 ? '' : 's'} on</strong><span>Each row shows the profile, executor, and ambient switches.</span>`
         : '<strong>Agent Live Mode off</strong><span>Turn on Agent Live Mode in Features before applying agent selection.</span>';
 
     list.innerHTML = '';
@@ -234,35 +356,88 @@
 
     liveModeAgents.forEach(agent => {
       const id = agentLiveModeId(agent);
-      const enabled = liveModeAgentEdits.has(id) ? liveModeAgentEdits.get(id) : agent.agentLiveModeEnabled === true;
-      const row = document.createElement('label');
-      row.className = `settings-live-agent-row ${enabled ? 'live' : 'off'}`;
+      const enabled = agentEditedValue(agent, 'agentLiveModeEnabled');
+      const loopEnabled = agentEditedValue(agent, 'agentLoopEnabled');
+      const ambientEnabled = agentEditedValue(agent, 'scriptedAmbientEnabled');
+      const loop = agentLoopRow(agent);
+      const stats = loop?.stats || {};
+      const notice = liveWorldNotice(agent);
+      const blockedByOtherWorld = Boolean(notice && !enabled);
+      const row = document.createElement('div');
+      row.className = `settings-live-agent-row ${enabled && loopEnabled ? 'live' : 'off'} ${notice ? 'world-conflict' : ''}`;
       row.dataset.agentId = id;
-
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = enabled;
-      checkbox.disabled = trial || !globalEnabled || !id;
-      checkbox.dataset.liveAgentToggle = id;
-      checkbox.addEventListener('change', () => {
-        liveModeAgentEdits.set(id, checkbox.checked);
-        renderLiveModeAgents();
-        setStatus('liveModeAgentStatus', 'Selection changed. Apply to save.', 'info');
-      });
+      if (notice) row.title = notice;
 
       const dot = document.createElement('span');
-      dot.className = `settings-live-agent-dot ${enabled ? 'live' : 'off'}`;
+      dot.className = `settings-live-agent-dot ${enabled && loopEnabled ? 'live' : 'off'}`;
       dot.setAttribute('aria-hidden', 'true');
 
+      const identity = document.createElement('div');
+      identity.className = 'settings-live-agent-identity';
       const name = document.createElement('span');
       name.className = 'settings-live-agent-name';
       name.textContent = `${agent.emoji || '🤖'} ${agent.name || id || 'Agent'}`;
 
       const meta = document.createElement('span');
       meta.className = 'settings-live-agent-meta';
-      meta.textContent = [agent.providerKind || agent.provider || 'agent', agent.status || 'offline'].filter(Boolean).join(' · ');
+      const runtimeLabel = liveModeAgentRuntimeLabel(agent, loop);
+      meta.textContent = [
+        agent.providerKind || agent.provider || 'agent',
+        agent.status || 'offline',
+        `ticks ${Number(stats.ticks || 0)}`,
+        runtimeLabel,
+        notice || '',
+      ].filter(Boolean).join(' · ');
+      identity.append(name, meta);
 
-      row.append(checkbox, dot, name, meta);
+      const controls = document.createElement('div');
+      controls.className = 'settings-live-agent-switches';
+
+      [
+        {
+          field: 'agentLiveModeEnabled',
+          label: 'Live',
+          checked: enabled,
+          blocked: blockedByOtherWorld,
+          title: 'Claims this agent for this world and allows Live Mode actions.',
+        },
+        {
+          field: 'agentLoopEnabled',
+          label: 'Loop',
+          checked: loopEnabled,
+          blocked: false,
+          title: 'Runs the Live Agent brain so it can choose and execute actions.',
+        },
+        {
+          field: 'scriptedAmbientEnabled',
+          label: 'Ambient',
+          checked: ambientEnabled,
+          blocked: false,
+          title: 'Lets regular idle background behavior include this agent.',
+        },
+      ].forEach(item => {
+        const control = document.createElement('label');
+        control.className = 'settings-live-agent-switch';
+        control.title = item.title;
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = item.checked;
+        checkbox.disabled = trial || !globalEnabled || !id || item.blocked;
+        checkbox.dataset.liveAgentField = item.field;
+        checkbox.dataset.liveAgentId = id;
+        checkbox.dataset.liveAgentWorldBlocked = item.blocked ? 'true' : 'false';
+        checkbox.addEventListener('change', () => {
+          setAgentEdit(id, item.field, checkbox.checked);
+          renderLiveModeAgents();
+          setStatus('liveModeAgentStatus', checkbox.checked && item.blocked && notice ? notice : 'Selection changed. Apply to save.', checkbox.checked && item.blocked && notice ? 'warn' : 'info');
+        });
+        const label = document.createElement('span');
+        label.textContent = item.label;
+        control.append(checkbox, label);
+        controls.appendChild(control);
+      });
+
+      row.append(dot, identity, controls);
       list.appendChild(row);
     });
 
@@ -274,6 +449,7 @@
     try {
       liveModeLoopStatus = await fetchJson('/api/agent-live-loop');
       renderLiveModeLoopStatus();
+      renderLiveModeAgents();
       if (!quiet) setStatus('liveModeLoopActionStatus', 'Loop status refreshed.', 'success');
       return liveModeLoopStatus;
     } catch (err) {
@@ -302,8 +478,27 @@
       runtime: result.runtime,
     };
     renderLiveModeLoopStatus();
+    renderLiveModeAgents();
     setStatus('liveModeLoopActionStatus', successText, 'success');
     return result;
+  }
+
+  async function saveLiveModeLoopSettings() {
+    const payload = {
+      enabled: checked('setting-liveLoopEnabled'),
+      modelDecisionEnabled: checked('setting-liveLoopModelDecisionEnabled'),
+      userChatPreemptionEnabled: checked('setting-liveLoopUserPreemptionEnabled'),
+      intervalSec: optionalNumber('setting-liveLoopIntervalSec'),
+      minActionIntervalSec: optionalNumber('setting-liveLoopMinActionIntervalSec'),
+      maxActionsPerTick: optionalNumber('setting-liveLoopMaxActionsPerTick'),
+      modelDecisionTimeoutSec: optionalNumber('setting-liveLoopModelTimeoutSec'),
+      modelDecisionMinIntervalSec: optionalNumber('setting-liveLoopModelMinIntervalSec'),
+      userChatPreemptionHoldSec: optionalNumber('setting-liveLoopUserHoldSec'),
+    };
+    Object.keys(payload).forEach(key => {
+      if (payload[key] === null) delete payload[key];
+    });
+    await updateLiveModeLoop(payload, 'Loop settings applied.');
   }
 
   async function pauseLiveModeLoop() {
@@ -331,16 +526,49 @@
     const list = $('liveModeAgentList');
     if (list) list.innerHTML = '<div class="settings-live-agent-empty">Loading...</div>';
     try {
-      const agents = await fetchJson('/api/agents');
+      const [agents] = await Promise.all([
+        fetchJson('/api/agents'),
+        refreshLiveModeLoopStatus({ quiet: true }).catch(() => null),
+      ]);
       liveModeAgents = Array.isArray(agents) ? agents : [];
       liveModeAgentEdits.clear();
       renderLiveModeAgents();
-      setStatus('liveModeAgentStatus', `${liveModeAgents.length} agents loaded.`, liveModeAgents.length ? 'success' : 'warn');
+      const conflictCount = liveModeAgents.filter(agent => agent?.liveWorld?.conflict || liveWorldNotice(agent)).length;
+      setStatus(
+        'liveModeAgentStatus',
+        conflictCount
+          ? `${liveModeAgents.length} agents loaded. ${conflictCount} already live in another world.`
+          : `${liveModeAgents.length} agents loaded.`,
+        conflictCount ? 'warn' : (liveModeAgents.length ? 'success' : 'warn')
+      );
       window.dispatchEvent(new CustomEvent('vw:live-mode-agents-updated', { detail: { agents: liveModeAgents } }));
     } catch (err) {
       liveModeAgents = [];
       renderLiveModeAgents();
       setStatus('liveModeAgentStatus', err.message || 'Could not load agents.', 'warn');
+    }
+  }
+
+  function scheduleInitialLiveModeRefresh() {
+    if (liveModeInitialRefreshScheduled) return;
+    liveModeInitialRefreshScheduled = true;
+
+    let started = false;
+    const start = () => {
+      if (started) return;
+      started = true;
+      setTimeout(() => {
+        refreshLiveModeAgents().catch(() => {
+          refreshLiveModeLoopStatus({ quiet: true }).catch(() => {});
+        });
+      }, 1200);
+    };
+
+    if (window.__vwBootStage === 'hide loading screen') {
+      start();
+    } else {
+      window.addEventListener('vw:world-loaded', start, { once: true });
+      setTimeout(start, 10000);
     }
   }
 
@@ -380,6 +608,7 @@
     if ($('setting-featureBrowser')) $('setting-featureBrowser').checked = !trial && !!features.agentBrowser;
     if ($('setting-featureSms')) $('setting-featureSms').checked = !trial && !!features.sms;
     if ($('setting-featureAgentLiveMode')) $('setting-featureAgentLiveMode').checked = !trial && !!features.agentLiveMode;
+    if ($('setting-liveModeFeatureEnabled')) $('setting-liveModeFeatureEnabled').checked = !trial && !!features.agentLiveMode;
     if ($('setting-featureDebugTools')) $('setting-featureDebugTools').checked = features.debugTools !== false;
     if ($('setting-browserCdpUrl')) $('setting-browserCdpUrl').value = browser.cdpUrl || '';
     if ($('setting-browserViewerUrl')) $('setting-browserViewerUrl').value = browser.viewerUrl || '';
@@ -395,8 +624,7 @@
     renderLiveModeAgents();
     renderLiveModeLoopStatus();
     if (!trial && !!features.agentLiveMode) {
-      refreshLiveModeAgents().catch(() => {});
-      refreshLiveModeLoopStatus({ quiet: true }).catch(() => {});
+      scheduleInitialLiveModeRefresh();
     }
   }
 
@@ -493,16 +721,37 @@
     }
     setStatus('liveModeAgentStatus', 'Applying Live Mode selection...');
     const changed = [];
-    for (const [agentId, enabled] of liveModeAgentEdits.entries()) {
-      const result = await fetchJson(`/api/agent/${encodeURIComponent(agentId)}/live-mode`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentLiveModeEnabled: enabled }),
-      });
-      changed.push(result);
+    for (const [agentId, edits] of liveModeAgentEdits.entries()) {
+      const agent = liveModeAgents.find(item => agentLiveModeId(item) === agentId) || {};
+      const profileEnabled = Object.prototype.hasOwnProperty.call(edits, 'agentLiveModeEnabled')
+        ? edits.agentLiveModeEnabled
+        : agentEditedValue(agent, 'agentLiveModeEnabled');
+      const loopEnabled = Object.prototype.hasOwnProperty.call(edits, 'agentLoopEnabled')
+        ? edits.agentLoopEnabled
+        : agentEditedValue(agent, 'agentLoopEnabled');
+      const ambientEnabled = Object.prototype.hasOwnProperty.call(edits, 'scriptedAmbientEnabled')
+        ? edits.scriptedAmbientEnabled
+        : agentEditedValue(agent, 'scriptedAmbientEnabled');
+      try {
+        const result = await fetchJson(`/api/agent/${encodeURIComponent(agentId)}/live-mode`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentLiveModeEnabled: profileEnabled,
+            agentLoopEnabled: loopEnabled,
+            scriptedAmbientEnabled: ambientEnabled,
+            ambientEnabled,
+          }),
+        });
+        changed.push(result);
+      } catch (err) {
+        await refreshLiveModeAgents();
+        setStatus('liveModeAgentStatus', err?.message || 'Could not apply Live Mode selection.', err?.status === 409 ? 'warn' : 'error');
+        return;
+      }
     }
     await refreshLiveModeAgents();
-    setStatus('liveModeAgentStatus', `Applied ${changed.length} Live Mode change${changed.length === 1 ? '' : 's'}.`, 'success');
+    setStatus('liveModeAgentStatus', `Applied ${changed.length} agent Live Mode setting${changed.length === 1 ? '' : 's'}.`, 'success');
   }
 
   async function refreshConfig() {
@@ -611,18 +860,23 @@
 
   function bind() {
     document.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.settingsTab)));
-    $('setting-featureAgentLiveMode')?.addEventListener('change', () => {
+    const syncLiveModeFeature = (checkedValue) => {
+      if ($('setting-featureAgentLiveMode')) $('setting-featureAgentLiveMode').checked = checkedValue;
+      if ($('setting-liveModeFeatureEnabled')) $('setting-liveModeFeatureEnabled').checked = checkedValue;
       applyLiveAgentModeAvailabilityUi();
       renderLiveModeAgents();
       renderLiveModeLoopStatus();
-      if (checked('setting-featureAgentLiveMode')) {
+      if (checkedValue) {
         refreshLiveModeAgents().catch(err => setStatus('liveModeAgentStatus', err.message, 'warn'));
         refreshLiveModeLoopStatus({ quiet: true }).catch(() => {});
       }
-    });
+    };
+    $('setting-featureAgentLiveMode')?.addEventListener('change', () => syncLiveModeFeature(checked('setting-featureAgentLiveMode')));
+    $('setting-liveModeFeatureEnabled')?.addEventListener('change', () => syncLiveModeFeature(checked('setting-liveModeFeatureEnabled')));
     $('btn-refreshLiveAgents')?.addEventListener('click', () => refreshLiveModeAgents().catch(err => setStatus('liveModeAgentStatus', err.message, 'warn')));
     $('btn-saveLiveAgents')?.addEventListener('click', () => saveLiveModeAgents().catch(err => setStatus('liveModeAgentStatus', err.message, 'warn')));
     $('btn-refreshLiveLoop')?.addEventListener('click', () => refreshLiveModeLoopStatus().catch(() => {}));
+    $('btn-saveLiveLoopSettings')?.addEventListener('click', () => saveLiveModeLoopSettings().catch(err => setStatus('liveModeLoopActionStatus', err.message, 'warn')));
     $('btn-pauseLiveLoop')?.addEventListener('click', () => pauseLiveModeLoop().catch(err => setStatus('liveModeLoopActionStatus', err.message, 'warn')));
     $('btn-resumeLiveLoop')?.addEventListener('click', () => resumeLiveModeLoop().catch(err => setStatus('liveModeLoopActionStatus', err.message, 'warn')));
     $('btn-clearLiveClient')?.addEventListener('click', () => clearLiveModeClientActivity().catch(err => setStatus('liveModeLoopActionStatus', err.message, 'warn')));

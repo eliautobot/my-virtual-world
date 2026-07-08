@@ -26,6 +26,7 @@ GET /vw-config
 GET /api/meta
 GET /api/streets
 GET /api/buildings
+GET /api/building-placement-rules
 GET /api/chunks
 GET /api/agents
 GET /api/status
@@ -58,6 +59,8 @@ POST /api/streets
 POST /api/assignments
 POST /api/decorations
 ```
+
+Before saving a building, query `GET /api/building-placement-rules`. Building footprints may snap next to streets, but must not intersect roadway, curb/gutter, or sidewalk surfaces. If a save returns HTTP `409` with `building_roadway_overlap`, move or resize the footprint to a nearby non-overlapping location before retrying.
 
 Destructive endpoints:
 

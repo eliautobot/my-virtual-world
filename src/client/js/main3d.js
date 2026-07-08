@@ -8662,6 +8662,9 @@ async function init() {
   window.__vwBootStage = 'hide loading screen';
   console.log('[VW init] hide loading screen');
   hideLoadingScreen();
+  window.dispatchEvent(new CustomEvent('vw:world-loaded', {
+    detail: { agents: agentsList.length, buildings: buildingsMap.size },
+  }));
 
   // Auto-fit camera to show all buildings on load
   setTimeout(() => zoomFitAll(), 500);
@@ -11405,6 +11408,17 @@ function getAllAgentIntentSnapshots() {
 
 function normalizeAgentLiveModeEnabled(agent = null) {
   return Boolean(agent?.agentLiveModeEnabled);
+}
+
+function getAgentLiveWorldNotice(agent = null) {
+  const liveWorld = agent?.liveWorld || {};
+  if (liveWorld.notice) return String(liveWorld.notice);
+  const claim = liveWorld.claim || {};
+  if (claim.currentWorld === false) {
+    const world = claim.worldName || claim.publicOrigin || 'another Virtual World';
+    return claim.port ? `This agent is currently live in ${world} on port ${claim.port}.` : `This agent is currently live in ${world}.`;
+  }
+  return '';
 }
 
 function isAgentLiveModeScriptedSuppressed(agent = null) {
@@ -25137,14 +25151,14 @@ function setupInput() {
         placementData._snappedGz = gz;
         placementData._snappedElev = elevY;
 
-        // Check collision with existing buildings only — natural items (trees/rocks) are auto-removed on placement
-        const colliding = checkBuildingCollision(gx, gz, bw, bd);
-        if (colliding !== _placementColliding) {
-          _placementColliding = colliding;
+        const blocker = getBuildingPlacementBlocker(gx, gz, bw, bd);
+        if (blocker.blocked !== _placementColliding || blocker.reason !== _placementCollisionReason) {
+          _placementColliding = blocker.blocked;
+          _placementCollisionReason = blocker.reason;
           const ghostBox = placementGhost.getObjectByName('ghostBox');
           const ghostOutline = placementGhost.getObjectByName('ghostOutline');
-          if (ghostBox) ghostBox.material.color.setHex(colliding ? 0xf44336 : 0x4caf50);
-          if (ghostOutline) ghostOutline.material.color.setHex(colliding ? 0xf44336 : 0x4caf50);
+          if (ghostBox) ghostBox.material.color.setHex(blocker.blocked ? 0xf44336 : 0x4caf50);
+          if (ghostOutline) ghostOutline.material.color.setHex(blocker.blocked ? 0xf44336 : 0x4caf50);
         }
       }
     }
@@ -28109,8 +28123,8 @@ const ST = {
   CURB_RISE: 0.12,   // how far curb rises above road
 };
 // Total half-width: SIDEWALK + CURB + GUTTER + LANE + CENTER/2
-ST.HALF_W = ST.SIDEWALK_W + ST.CURB_W + ST.GUTTER_W + ST.LANE_W + ST.CENTER_W / 2; // ~3.85
-ST.FULL_W = ST.HALF_W * 2; // ~7.7 tiles total width
+ST.HALF_W = ST.SIDEWALK_W + ST.CURB_W + ST.GUTTER_W + ST.LANE_W + ST.CENTER_W / 2; // ~5.3
+ST.FULL_W = ST.HALF_W * 2; // ~10.6 tiles total width
 const STREET_LINE_SNAP_RADIUS = 8;
 const STREET_LINE_AXIS_ALIGN_RADIUS = Math.ceil(ST.HALF_W) + 2;
 const STREET_HANDLE_Y = ST.BASE + ST.SIDEWALK_H + 0.32;
@@ -30897,6 +30911,7 @@ function setupBuildingModal() {
 
 // Track whether placement ghost is currently colliding
 let _placementColliding = false;
+let _placementCollisionReason = null;
 
 
 // Helper: strip Three.js objects before saving building to server
@@ -30928,6 +30943,7 @@ function startPlacement(data) {
   placementMode = 'building';
   placementData = data;
   _placementColliding = false;
+  _placementCollisionReason = null;
   showToast('Click to place building. Red = overlapping!', 'warning');
 
   // Ghost preview — uses a unique material so we can change color per-frame
@@ -31196,6 +31212,27 @@ function checkBuildingCollision(wx, wz, widthTiles, heightTiles, excludeId) {
   return false;
 }
 
+function checkBuildingRoadwayOverlap(wx, wz, widthTiles, heightTiles) {
+  const rect = getTileRect(wx, wz, widthTiles, heightTiles);
+  for (const street of _streetSegments) {
+    const streetRect = getStreetMeshTileRect(street);
+    if (streetRect && rectsOverlap(rect, streetRect, RESIZE_COLLISION_EPSILON)) {
+      return { blocked: true, street };
+    }
+  }
+  return { blocked: false };
+}
+
+function getBuildingPlacementBlocker(wx, wz, widthTiles, heightTiles, excludeId) {
+  if (checkBuildingCollision(wx, wz, widthTiles, heightTiles, excludeId)) {
+    return { blocked: true, reason: 'building-overlap', message: 'Cannot place here — overlaps another building!' };
+  }
+  if (checkBuildingRoadwayOverlap(wx, wz, widthTiles, heightTiles).blocked) {
+    return { blocked: true, reason: 'roadway-overlap', message: 'Cannot place here — buildings may snap next to roads, but cannot cover roadways or sidewalks.' };
+  }
+  return { blocked: false, reason: null, message: '' };
+}
+
 function finalizePlacement(e) {
   if (!placementMode || !placementData) return;
 
@@ -31216,9 +31253,9 @@ function finalizePlacement(e) {
     elevY = 0;
   }
 
-  // Block placement if overlapping another building
-  if (checkBuildingCollision(wx, wz, bw, bd)) {
-    showToast('❌ Cannot place here — overlaps another building!', 'error');
+  const placementBlocker = getBuildingPlacementBlocker(wx, wz, bw, bd);
+  if (placementBlocker.blocked) {
+    showToast(`❌ ${placementBlocker.message}`, 'error');
     return;
   }
 
@@ -31285,6 +31322,8 @@ function finalizePlacement(e) {
 
 function cancelPlacement() {
   placementMode = null;
+  _placementColliding = false;
+  _placementCollisionReason = null;
   if (placementData) {
     delete placementData._snappedGx;
     delete placementData._snappedGz;
@@ -31745,7 +31784,7 @@ function applyWorldMetaSettings(meta = {}) {
 
 async function loadWorldMeta() {
   try {
-    const r = await fetch('/api/meta');
+    const r = await fetch('/api/meta?boot=1');
     const m = await r.json();
     _worldMetaCache = m;
     if (m.name) {
@@ -31800,9 +31839,9 @@ async function loadBuildings() {
     const r = await fetch('/api/buildings');
     const list = await r.json();
     for (const s of list) {
-      if (buildingsMap.has(s.id)) continue;
+      if (!s?.id || buildingsMap.has(s.id)) continue;
       try {
-        const f = await (await fetch(`/api/building/${s.id}`)).json();
+        const f = s;
         const parkTreeMigrationChanged = f?.type === 'park' ? ensureParkGeneratedTrees(f) : false;
         const actionTargetMigrationChanged = ensureBuildingPlacedObjectActionTargets(f);
         const transientAssignmentCleanupChanged = clearBuildingTransientObjectAssignments(f);
@@ -31813,6 +31852,23 @@ async function loadBuildings() {
     }
     updateBuildingList();
   } catch (e) { console.error('Building load error:', e); showToast('⚠️ Could not load buildings from server', 'warning'); }
+}
+
+function hydrateLoadedAgentsFromRuntime(runtimeClientPromise) {
+  runtimeClientPromise
+    .then(client => {
+      if (!client?.connected) return;
+      applyAgentRuntimeWorldObjectStatesToWorld();
+      publishAgentRuntimeTrafficTopology({ force: true });
+      applyAgentRuntimeTrafficLights();
+      applyAgentRuntimeTrafficVehicles();
+      const hydrated = applyAgentRuntimeSnapshotsToAgents('loadAgents:deferred-runtime', { updateVisible: true });
+      subscribeAgentRuntimeSnapshots();
+      if (hydrated > 0) updateAgentList();
+    })
+    .catch(error => {
+      console.warn('Deferred agent runtime hydration failed', error);
+    });
 }
 
 async function loadAgents() {
@@ -31943,20 +31999,13 @@ async function loadAgents() {
       };
     });
 
-    await runtimeClientPromise;
-    applyAgentRuntimeWorldObjectStatesToWorld();
-    publishAgentRuntimeTrafficTopology({ force: true });
-    applyAgentRuntimeTrafficLights();
-    applyAgentRuntimeSnapshotsToAgents('loadAgents', { updateVisible: false });
-
     agentsList.forEach(a => {
       createAgent3D(a);
-      if (a._runtimeHydrated) placeRuntimeHydratedAgentMesh(a);
       _agentLastStatus.set(a.id, a.status || 'offline'); // seed initial status
     });
     updateAgentList();
     window.agents = agentsList; // re-export after population
-    subscribeAgentRuntimeSnapshots();
+    hydrateLoadedAgentsFromRuntime(runtimeClientPromise);
 
     // Seed initial activity log entries
     agentsList.forEach(a => {
@@ -32047,6 +32096,9 @@ async function loadAgents() {
           if (rosterMatch && typeof rosterMatch.agentLiveModeEnabled === 'boolean') {
             a.agentLiveModeEnabled = rosterMatch.agentLiveModeEnabled;
           }
+          if (rosterMatch && rosterMatch.liveWorld) {
+            a.liveWorld = rosterMatch.liveWorld;
+          }
         });
         updateAgentList();
       } catch (e) { /* silent */ }
@@ -32062,9 +32114,13 @@ window.addEventListener('vw:live-mode-agents-updated', event => {
   const agents = Array.isArray(event.detail?.agents) ? event.detail.agents : [];
   if (!agents.length) return;
   const liveModeById = new Map();
+  const liveWorldById = new Map();
   agents.forEach(agent => {
     const keys = [agent.id, agent.statusKey, agent.agentId].filter(Boolean).map(String);
-    keys.forEach(key => liveModeById.set(key, agent.agentLiveModeEnabled === true));
+    keys.forEach(key => {
+      liveModeById.set(key, agent.agentLiveModeEnabled === true);
+      if (agent.liveWorld) liveWorldById.set(key, agent.liveWorld);
+    });
   });
   let changed = false;
   agentsList.forEach(agent => {
@@ -32072,6 +32128,7 @@ window.addEventListener('vw:live-mode-agents-updated', event => {
     for (const key of keys) {
       if (!liveModeById.has(key)) continue;
       agent.agentLiveModeEnabled = liveModeById.get(key);
+      if (liveWorldById.has(key)) agent.liveWorld = liveWorldById.get(key);
       changed = true;
       break;
     }
@@ -33059,10 +33116,11 @@ function updateBuildingMove(e) {
   b._pendingY = elevY;
   b._snapped = snapped;
 
-  // Collision check — tint red if overlapping another building
-  const moveColliding = checkBuildingCollision(newX, newZ, bw, bd, _movingBuildingId);
-  b._moveColliding = moveColliding;
-  updateBuildingMovePreviewState(b, moveColliding);
+  const blocker = getBuildingPlacementBlocker(newX, newZ, bw, bd, _movingBuildingId);
+  b._moveColliding = blocker.blocked;
+  b._moveCollisionReason = blocker.reason;
+  b._moveCollisionMessage = blocker.message;
+  updateBuildingMovePreviewState(b, blocker.blocked);
 }
 
 function confirmBuildingMove() {
@@ -33072,7 +33130,7 @@ function confirmBuildingMove() {
 
   // Block move if colliding
   if (b._moveColliding) {
-    showToast('❌ Cannot place here — overlaps another building!', 'error');
+    showToast(`❌ ${b._moveCollisionMessage || 'Cannot place here.'}`, 'error');
     return; // Keep in move mode so user can pick another spot
   }
 
@@ -33125,6 +33183,8 @@ function confirmBuildingMove() {
   delete b._pendingZ;
   delete b._pendingY;
   delete b._moveColliding;
+  delete b._moveCollisionReason;
+  delete b._moveCollisionMessage;
   delete b._snapped;
   _movingBuildingId = null;
 }
@@ -33137,6 +33197,8 @@ function cancelBuildingMove() {
     delete b._pendingZ;
     delete b._pendingY;
     delete b._moveColliding;
+    delete b._moveCollisionReason;
+    delete b._moveCollisionMessage;
     delete b._snapped;
     // Restore to original position
     createBuilding3D(b);
@@ -33450,8 +33512,19 @@ async function setAgentLiveModeEnabled(agentOrId, enabled, options = {}) {
     responseBody = await response.json().catch(() => ({}));
     if (!response.ok) {
       agent.agentLiveModeEnabled = previous;
+      const details = responseBody?.error?.details || {};
+      if (details.activeWorld || details.notice) {
+        agent.liveWorld = {
+          ...(agent.liveWorld || {}),
+          currentWorld: details.currentWorld || agent.liveWorld?.currentWorld || null,
+          claim: details.activeWorld || agent.liveWorld?.claim || null,
+          conflict: true,
+          notice: details.notice || responseBody?.error?.message || '',
+        };
+      }
       throw new Error(responseBody?.error?.message || `Agent Live Mode save failed (${response.status})`);
     }
+    if (responseBody?.liveWorld) agent.liveWorld = responseBody.liveWorld;
   }
   renderAgentIntentDebugReadout();
   if (selectedAgentId === agent.id && options.refreshPanel !== false) openAgentPanel(agent.id, { preserveCamera: true });
@@ -34598,7 +34671,10 @@ function openAgentPanel(agentId, _opts = {}) {
   const normalizedPanelStatus = normalizeLiveAgentStatus(agent.status) || 'offline';
   const statusClass = ['working', 'finishing', 'meeting', 'idle', 'break'].includes(normalizedPanelStatus) ? normalizedPanelStatus : 'offline';
   const agentLiveModeEnabled = normalizeAgentLiveModeEnabled(agent);
+  const agentLiveWorldNotice = getAgentLiveWorldNotice(agent);
   const agentLiveModeLocked = isLicenseFeatureLocked('agentLiveMode');
+  const agentLiveModeWorldBlocked = Boolean(agentLiveWorldNotice && !agentLiveModeEnabled);
+  const agentLiveModeDisabled = agentLiveModeLocked || agentLiveModeWorldBlocked;
   const providerLabel = agent.providerKind || agent.framework || 'openclaw';
 
   document.getElementById('agentPanel-info').innerHTML = `
@@ -34674,11 +34750,12 @@ function openAgentPanel(agentId, _opts = {}) {
     <span class="agent-status-badge ${statusClass}">${getPresenceStateIcon(agent.status)} ${agent.status || 'offline'}</span>
     ${agent.task ? `<div class="agent-task-text">${escapeHtml(agent.task)}</div>` : ''}
     ${agent.presenceSource ? `<div class="agent-task-text">source: ${escapeHtml(agent.presenceSource)}</div>` : ''}
-    <label class="agent-live-mode-toggle ${agentLiveModeLocked ? 'agent-live-mode-toggle-disabled' : ''}" title="${agentLiveModeLocked ? 'Activation required for Agent Live Mode.' : 'Agent Live Mode'}">
+    <label class="agent-live-mode-toggle ${agentLiveModeDisabled ? 'agent-live-mode-toggle-disabled' : ''}" title="${agentLiveModeLocked ? 'Activation required for Agent Live Mode.' : (agentLiveWorldNotice || 'Agent Live Mode')}">
       <span>Agent Live Mode</span>
-      <input id="agentPanel-liveMode" type="checkbox" ${agentLiveModeEnabled ? 'checked' : ''} ${agentLiveModeLocked ? 'disabled aria-disabled="true"' : ''}>
+      <input id="agentPanel-liveMode" type="checkbox" ${agentLiveModeEnabled ? 'checked' : ''} ${agentLiveModeDisabled ? 'disabled aria-disabled="true"' : ''}>
       <strong>${agentLiveModeEnabled ? 'enabled' : 'disabled'}</strong>
     </label>
+    ${agentLiveWorldNotice ? `<div class="agent-task-text">${escapeHtml(agentLiveWorldNotice)}</div>` : ''}
   `;
   const liveModeToggle = document.getElementById('agentPanel-liveMode');
   liveModeToggle?.addEventListener('change', async () => {
@@ -34692,7 +34769,7 @@ function openAgentPanel(agentId, _opts = {}) {
       liveModeToggle.checked = normalizeAgentLiveModeEnabled(agent);
       showToast(error?.message || 'Could not update Agent Live Mode', 'error');
     } finally {
-      liveModeToggle.disabled = isLicenseFeatureLocked('agentLiveMode');
+      liveModeToggle.disabled = isLicenseFeatureLocked('agentLiveMode') || Boolean(getAgentLiveWorldNotice(agent) && !normalizeAgentLiveModeEnabled(agent));
       renderAgentIntentDebugReadout();
     }
   });
@@ -38537,6 +38614,8 @@ function normalizeLiveModeBuildSite(action = {}) {
     worldY,
     widthTiles,
     heightTiles,
+    _rotation: Number.isFinite(Number(rawSite._rotation ?? rawSite.rotation)) ? Number(rawSite._rotation ?? rawSite.rotation) : 0,
+    streetApproach: rawSite.streetApproach || target.streetApproach || null,
     approachX,
     approachY,
     ownerAgentId: rawSite.ownerAgentId || agentId,
@@ -38545,6 +38624,37 @@ function normalizeLiveModeBuildSite(action = {}) {
       wallColor: rawSite.exterior?.wallColor || '#c8b89a',
       roofColor: rawSite.exterior?.roofColor || '#795548',
     },
+  };
+}
+
+function resolveLiveModeConstructionApproachPoint(site = {}) {
+  const streetApproach = site.streetApproach && typeof site.streetApproach === 'object' ? site.streetApproach : null;
+  const approachTile = streetApproach?.approachTile && typeof streetApproach.approachTile === 'object'
+    ? streetApproach.approachTile
+    : null;
+  const tileX = Number(approachTile?.x);
+  const tileY = Number(approachTile?.y ?? approachTile?.z);
+  if (Number.isFinite(tileX) && Number.isFinite(tileY)) {
+    return {
+      x: tileX * API_TILE,
+      y: tileY * API_TILE,
+      tileX,
+      tileY,
+      source: streetApproach?.source || 'street-approach',
+    };
+  }
+
+  const rawX = Number(site.approachX);
+  const rawY = Number(site.approachY);
+  if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) return null;
+  const sw = _findNearestSidewalk(Math.round(rawX / API_TILE), Math.round(rawY / API_TILE), 96);
+  if (!sw) return { x: rawX, y: rawY, source: 'raw-construction-target' };
+  return {
+    x: sw.x * API_TILE,
+    y: sw.z * API_TILE,
+    tileX: sw.x,
+    tileY: sw.z,
+    source: 'nearest-sidewalk-construction-route',
   };
 }
 
@@ -38682,6 +38792,7 @@ function makeLiveModeHomeBuilding(agent, site = {}, worldActionId = null) {
     worldY: Number(site.worldY || 0),
     widthTiles: Number(site.widthTiles || 10),
     heightTiles: Number(site.heightTiles || 8),
+    _rotation: Number.isFinite(Number(site._rotation ?? site.rotation)) ? Number(site._rotation ?? site.rotation) : 0,
     exterior: {
       wallColor: site.exterior?.wallColor || '#c8b89a',
       roofColor: site.exterior?.roofColor || '#795548',
@@ -38695,6 +38806,7 @@ function makeLiveModeHomeBuilding(agent, site = {}, worldActionId = null) {
       status: 'complete',
       completedAt: now,
       visibleExecutor: 'main3d.js#routeLiveModeConstructionSiteWorldAction',
+      streetApproach: site.streetApproach || null,
     },
     interior: {
       floors: [{ level: 1, name: 'Floor 1' }],
@@ -38830,18 +38942,27 @@ function routeLiveModeConstructionSiteWorldAction(action = {}) {
     return true;
   }
   ensureLiveModeConstructionSiteMarker(site, action, agent);
+  const constructionApproach = resolveLiveModeConstructionApproachPoint(site) || { x: site.approachX, y: site.approachY, source: 'raw-construction-target' };
+  if (!site.streetApproach && constructionApproach.source === 'nearest-sidewalk-construction-route') {
+    site.streetApproach = {
+      schemaVersion: 'agent-live-mode-build-site-approach/v1',
+      source: constructionApproach.source,
+      approachTile: { x: constructionApproach.tileX, y: constructionApproach.tileY },
+      guidance: 'Route to this nearest street-side walkable point before constructing the new home.',
+    };
+  }
   const routeTarget = {
     kind: 'world-point',
     targetKind: 'scripted-world-point',
     siteKind: site.siteKind || 'agent-home',
-    x: site.approachX,
-    y: site.approachY,
-    z: site.approachY,
+    x: constructionApproach.x,
+    y: constructionApproach.y,
+    z: constructionApproach.y,
     floor: 1,
     buildingId: null,
     constructionBuildingId: site.buildingId,
     constructionSiteId: site.buildingId,
-    disableDynamicExteriorRouting: true,
+    disableDynamicExteriorRouting: false,
     actionId: actionType,
     capabilityTag: action.capabilityTag || 'world.build',
     worldActionId,
@@ -38866,7 +38987,7 @@ function routeLiveModeConstructionSiteWorldAction(action = {}) {
     behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
     behaviorAuthority: action.behaviorAuthority || action.source?.behaviorAuthority || 900,
     behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
-    debug: { label: 'agent-live:world.buildStructure', buildSite: site, exteriorHandoff },
+    debug: { label: 'agent-live:world.buildStructure', buildSite: site, exteriorHandoff, constructionApproach },
     source: { family: 'world-action-sync', functionName: 'routeLiveModeConstructionSiteWorldAction' },
   });
   if (routeAdmission?.accepted === false) {
@@ -38880,7 +39001,7 @@ function routeLiveModeConstructionSiteWorldAction(action = {}) {
     phase: 'approach',
     approachStartedAt: performance.now(),
     stayMs,
-    dockTarget: { x: site.approachX, y: site.approachY },
+    dockTarget: { x: constructionApproach.x, y: constructionApproach.y },
     dockSnapRadius: 18,
     faceAngle: Number.isFinite(Number(action.params?.faceAngle)) ? Number(action.params.faceAngle) : Math.PI,
     siteKind: site.siteKind || 'agent-home',
@@ -38893,7 +39014,7 @@ function routeLiveModeConstructionSiteWorldAction(action = {}) {
     behaviorSourceKind: 'agent-live-mode',
     behaviorMode: action.behaviorMode || action.source?.behaviorMode || 'agent-live',
     behaviorCategory: action.behaviorCategory || action.source?.behaviorCategory || null,
-    routeApproachTarget: { x: site.approachX, y: site.approachY, floor: 1, spotId: 'construction-front', faceAngle: Math.PI },
+    routeApproachTarget: { x: constructionApproach.x, y: constructionApproach.y, floor: 1, spotId: 'construction-front', faceAngle: Math.PI },
     routeMetadata: routeTarget,
     worldActionId,
     objectInstanceId: site.buildingId,
@@ -61221,8 +61342,8 @@ function hideLoadingScreen() {
     const screen = document.getElementById('loadingScreen');
     if (!screen) return;
     screen.classList.add('fade-out');
-    setTimeout(() => { screen.style.display = 'none'; }, 700);
-  }, 300);
+    setTimeout(() => { screen.style.display = 'none'; }, 220);
+  }, 40);
 }
 
 // Animated dots for loading text
@@ -61663,6 +61784,7 @@ function createBubbleEl(agent) {
     <div class="chat-bubble-header">
       <span class="live-dot"></span>
       <span class="agent-name">${agent.emoji || '🤖'} ${agent.name || agent.id}</span>
+      <span class="session-name"></span>
       <button class="minimize-btn" title="Minimize">−</button>
     </div>
     <div class="chat-bubble-body"></div>
@@ -61706,6 +61828,37 @@ function createBubbleEl(agent) {
   return { el, miniEl, connectorEl, anchorEl };
 }
 
+function getChatBubbleSessionMeta(messages) {
+  if (!Array.isArray(messages)) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (!msg || typeof msg !== 'object') continue;
+    const title = String(msg.sessionTitle || '').trim();
+    const sessionId = String(msg.sessionId || msg.sessionKey || '').trim();
+    const sessionKind = String(msg.sessionKind || '').trim();
+    if (title || sessionId || sessionKind || msg.liveMode || msg.activeSession) {
+      return {
+        title: title || (msg.liveMode ? 'Live Agent Mode' : (sessionKind || 'Session')),
+        sessionId,
+        sessionKind,
+        liveMode: Boolean(msg.liveMode),
+        activeSession: Boolean(msg.activeSession),
+      };
+    }
+  }
+  return null;
+}
+
+function applyChatBubbleSessionMeta(state, sessionMeta) {
+  const sessionEl = state?.el?.querySelector('.session-name');
+  if (!sessionEl) return;
+  const title = String(sessionMeta?.title || '').trim();
+  sessionEl.textContent = title;
+  sessionEl.title = title;
+  sessionEl.style.display = title ? 'inline-flex' : 'none';
+  state.el?.classList.toggle('chat-bubble-live-session', Boolean(sessionMeta?.liveMode));
+}
+
 function updateChatBubbles() {
   const scale = T / API_TILE;
 
@@ -61737,9 +61890,11 @@ function updateChatBubbles() {
     applyChatBubbleAccent(state.miniEl, color);
     if (state.connectorEl) state.connectorEl.style.background = color;
     if (state.anchorEl) state.anchorEl.style.background = color;
+    const sessionMeta = getChatBubbleSessionMeta(messages);
+    applyChatBubbleSessionMeta(state, sessionMeta);
     const newCount = messages.length;
     const hadMessages = state.lastMsgCount > 0;
-    const newSignature = JSON.stringify(messages.map(m => [m.role || '', m.text || '', m.time || '', m.from || '', getAgentChatActivitySignature(m)]));
+    const newSignature = JSON.stringify(messages.map(m => [m.role || '', m.text || '', m.time || '', m.from || '', m.sessionTitle || '', m.sessionId || '', m.sessionKind || '', m.liveMode ? 'live' : '', getAgentChatActivitySignature(m)]));
     const newestChanged = newSignature !== state.lastSignature;
 
     // Detect new messages OR streaming updates to the current message

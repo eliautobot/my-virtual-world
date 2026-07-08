@@ -564,7 +564,10 @@ async function run() {
     mkdirSync(join(dataDir, 'buildings'), { recursive: true });
     writeFileSync(join(dataDir, 'world-meta.json'), `${JSON.stringify({
       agentProfiles: {
-        adam: { agentLiveModeEnabled: true },
+        // Live Mode on + explicit Ambient opt-in: layer separation only lets
+        // the scripted object runtime drive live-mode agents when
+        // scriptedAmbientEnabled is explicitly true.
+        adam: { agentLiveModeEnabled: true, scriptedAmbientEnabled: true },
       },
       streets: [
         { x1: -20, z1: 24, x2: 30, z2: 24 },
@@ -575,7 +578,7 @@ async function run() {
       ],
     }, null, 2)}\n`);
     writeFileSync(join(dataDir, 'presence-snapshot.json'), `${JSON.stringify({
-      adam: { state: 'idle', agentLiveModeEnabled: true },
+      adam: { state: 'idle', agentLiveModeEnabled: true, scriptedAmbientEnabled: true },
       coder: { state: 'working' },
       morgan: { state: 'meeting' },
       _meetings: [{

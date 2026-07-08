@@ -391,6 +391,81 @@ class CodexProvider:
             client.close()
             raise
 
+    def _app_server_simple_request(self, profile: str, method: str, params: dict[str, Any], timeout_sec: int = 30) -> dict[str, Any]:
+        """Run one JSON-RPC request against a short-lived app-server instance.
+
+        Used for thread management calls (`thread/list`, `thread/read`,
+        `thread/delete`, `thread/archive`) per the official app-server
+        protocol schema (codex app-server generate-json-schema).
+        """
+        if not self.is_available():
+            return {"ok": False, "error": f"Codex CLI is not available at {self.binary}"}
+        self._ensure_paths()
+        safe_profile = self._safe_profile_name(profile)
+        agent_dir = self._runtime_workspace(safe_profile)
+        if not os.path.isdir(agent_dir):
+            return {"ok": False, "error": f"Codex agent workspace not found: {agent_dir}"}
+        client = CodexAppServerClient(self, cwd=agent_dir, timeout_sec=timeout_sec + 15)
+        try:
+            client.initialize()
+            response = client.request(method, params, timeout_sec=timeout_sec)
+            if isinstance(response, dict) and response.get("error"):
+                err = response["error"]
+                return {"ok": False, "error": str(err.get("message") or err)[:1000]}
+            result = (response or {}).get("result") if isinstance(response, dict) else None
+            return {"ok": True, "result": result if isinstance(result, (dict, list)) else {}, "profile": safe_profile, "cwd": agent_dir}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:1000]}
+        finally:
+            client.close()
+
+    def list_threads(self, profile: str, limit: int = 40, timeout_sec: int = 30) -> dict[str, Any]:
+        """List saved Codex threads for this agent workspace via thread/list."""
+        safe_profile = self._safe_profile_name(profile)
+        agent_dir = self._runtime_workspace(safe_profile)
+        outcome = self._app_server_simple_request(profile, "thread/list", {
+            "cwd": agent_dir,
+            "limit": max(1, int(limit)),
+        }, timeout_sec=timeout_sec)
+        if not outcome.get("ok"):
+            return {"ok": False, "error": outcome.get("error"), "sessions": []}
+        rows = (outcome.get("result") or {}).get("data")
+        sessions: list[dict[str, Any]] = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            preview = str(row.get("preview") or "")
+            sessions.append({
+                "id": str(row.get("id") or ""),
+                "title": str(row.get("name") or "").strip() or preview[:80] or str(row.get("id") or "")[:24],
+                "preview": preview[:300],
+                "updatedAt": row.get("updatedAt"),
+                "createdAt": row.get("createdAt"),
+                "archived": bool(row.get("archived")),
+            })
+        return {"ok": True, "sessions": sessions, "profile": self._safe_profile_name(profile)}
+
+    def read_thread(self, profile: str, thread_id: str, timeout_sec: int = 30) -> dict[str, Any]:
+        """Read one thread's turns/items via thread/read (includeTurns)."""
+        if not thread_id:
+            return {"ok": False, "error": "thread_id is required"}
+        outcome = self._app_server_simple_request(profile, "thread/read", {
+            "threadId": str(thread_id),
+            "includeTurns": True,
+        }, timeout_sec=timeout_sec)
+        if not outcome.get("ok"):
+            return {"ok": False, "error": outcome.get("error"), "thread": None}
+        result = outcome.get("result") or {}
+        thread = result.get("thread") if isinstance(result, dict) else None
+        return {"ok": True, "thread": thread if isinstance(thread, dict) else result}
+
+    def delete_thread(self, profile: str, thread_id: str, timeout_sec: int = 30) -> dict[str, Any]:
+        """Permanently delete a saved thread via thread/delete."""
+        if not thread_id:
+            return {"ok": False, "error": "thread_id is required"}
+        outcome = self._app_server_simple_request(profile, "thread/delete", {"threadId": str(thread_id)}, timeout_sec=timeout_sec)
+        return {"ok": bool(outcome.get("ok")), "error": outcome.get("error", ""), "deleted": bool(outcome.get("ok"))}
+
     def interrupt(self, profile: str) -> dict[str, Any]:
         safe_profile = self._safe_profile_name(profile)
         with _ACTIVE_RUNS_LOCK:

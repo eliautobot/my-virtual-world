@@ -56,6 +56,8 @@ Common fields:
 
 `interior.walls[]` stores walls and structural interior layout.
 
+Building placement is constrained by the saved street surface model. A building footprint may sit next to a street snap point, but it must not overlap any roadway, curb/gutter, or sidewalk surface derived from `/api/streets`. The server rejects violating building saves with `building_roadway_overlap`.
+
 ## Furniture and Object Use
 
 Furniture records usually include:

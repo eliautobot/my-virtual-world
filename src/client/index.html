@@ -9,8 +9,8 @@
     <meta name="theme-color" content="#1a1a2e">
     <link rel="icon" href="favicon.png" type="image/png">
     <title>My Virtual World</title>
-    <link rel="stylesheet" href="css/style.css?v=20260617-codex-context-r2">
-    <link rel="stylesheet" href="css/ui-redesign.css?v=20260706-mobile-load-r4">
+    <link rel="stylesheet" href="css/style.css?v=20260707-live-planner-r2">
+    <link rel="stylesheet" href="css/ui-redesign.css?v=20260707-chat-sessions-r2">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
@@ -606,8 +606,39 @@
                 </section>
 
                 <section class="settings-pane" data-settings-pane="live-mode">
+                    <label class="settings-check"><input type="checkbox" id="setting-liveModeFeatureEnabled"> Agent Live Mode Feature <span class="settings-feature-note">Global</span></label>
                     <div id="liveModeLoopStatus" class="settings-status-card settings-live-loop-status">
                         <strong>Loop off</strong><span>Turn on Agent Live Mode in Features to manage loop controls.</span>
+                    </div>
+                    <div class="settings-live-loop-settings">
+                        <label class="settings-check"><input type="checkbox" id="setting-liveLoopEnabled"> Loop Engine</label>
+                        <label class="settings-check"><input type="checkbox" id="setting-liveLoopModelDecisionEnabled"> Model Decisions</label>
+                        <label class="settings-check"><input type="checkbox" id="setting-liveLoopUserPreemptionEnabled"> Pause On Chat</label>
+                        <div class="form-group">
+                            <label>Tick Seconds</label>
+                            <input type="number" id="setting-liveLoopIntervalSec" min="10" max="300" value="30" step="10">
+                        </div>
+                        <div class="form-group">
+                            <label>Action Cooldown</label>
+                            <input type="number" id="setting-liveLoopMinActionIntervalSec" min="30" max="3600" value="120" step="30">
+                        </div>
+                        <div class="form-group">
+                            <label>Actions / Tick</label>
+                            <input type="number" id="setting-liveLoopMaxActionsPerTick" min="1" max="5" value="1" step="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Model Timeout</label>
+                            <input type="number" id="setting-liveLoopModelTimeoutSec" min="10" max="180" value="45" step="5">
+                        </div>
+                        <div class="form-group">
+                            <label>Model Cooldown</label>
+                            <input type="number" id="setting-liveLoopModelMinIntervalSec" min="30" max="3600" value="90" step="30">
+                        </div>
+                        <div class="form-group">
+                            <label>Chat Hold Seconds</label>
+                            <input type="number" id="setting-liveLoopUserHoldSec" min="30" max="1800" value="180" step="30">
+                        </div>
+                        <button class="btn-primary" id="btn-saveLiveLoopSettings">Apply Loop Settings</button>
                     </div>
                     <div class="settings-live-loop-controls">
                         <div class="form-group settings-live-loop-duration">
@@ -622,6 +653,11 @@
                     <div id="liveModeLoopActionStatus" class="settings-inline-status"></div>
                     <div id="liveModeSummary" class="settings-status-card locked">
                         <strong>Agent Live Mode off</strong><span>Turn on Agent Live Mode in Features before applying agent selection.</span>
+                    </div>
+                    <div class="settings-live-agent-legend">
+                        <div><strong>Live</strong><span>Claims this agent for this world and allows Live Mode actions.</span></div>
+                        <div><strong>Loop</strong><span>Runs the Live Agent brain so it can choose and execute actions.</span></div>
+                        <div><strong>Ambient</strong><span>Lets regular idle background behavior include this agent.</span></div>
                     </div>
                     <div id="liveModeAgentList" class="settings-live-agent-list"></div>
                     <div class="settings-live-agent-toolbar">
@@ -828,6 +864,7 @@
         <div id="chat-resize-handle-bottom-left" class="chat-resize-handle bottom-left"></div>
         <div id="chat-resize-handle-left" class="chat-resize-handle left"></div>
         <div class="chat-header">
+            <button id="chat-sessions-toggle" class="chat-sessions-toggle" title="Sessions">☰</button>
             <select id="chat-agent-select" class="chat-agent-select" title="Switch agent">
                 <option>Loading...</option>
             </select>
@@ -843,7 +880,16 @@
             <span id="chat-model-name" class="chat-model-name">—</span>
             <span id="chat-context-info" class="chat-context-info">— / —</span>
         </div>
-        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-body">
+            <div id="chat-sessions-panel" class="chat-sessions-panel" aria-label="Sessions">
+                <div class="chat-sessions-head">
+                    <span class="chat-sessions-title">Sessions</span>
+                    <button id="chat-sessions-new" class="chat-sessions-new" title="New session">＋</button>
+                </div>
+                <div id="chat-sessions-list" class="chat-sessions-list"></div>
+            </div>
+            <div id="chat-messages" class="chat-messages"></div>
+        </div>
         <div id="chat-attachments-preview" class="chat-attachments-preview"></div>
         <div class="chat-input-row">
             <button id="chat-attach" class="chat-attach-btn" title="Attach file">📎</button>
@@ -881,7 +927,7 @@
     <script src="/node_modules/@colyseus/sdk/dist/colyseus.js?v=20260623-live-agent-runtime-hydration"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script type="module" src="js/main3d.js?v=20260706-model-switch-r4"></script>
-    <script src="js/chat.js?v=20260706-model-switch-r4"></script>
-    <script src="js/settings.js?v=20260615-location-settings-r1"></script>
+    <script src="js/chat.js?v=20260707-live-planner-r1"></script>
+    <script src="js/settings.js?v=20260707-live-mode-status-r1"></script>
 </body>
 </html>

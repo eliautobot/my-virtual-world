@@ -242,6 +242,9 @@ for (const token of [
   'bld_1781275602998',
   'bld_1781275645157',
   'Current 8590 desktop starter street layout',
+  'BUILDING_PLACEMENT_RULES_SCHEMA_VERSION',
+  '/api/building-placement-rules',
+  'building_roadway_overlap',
 ]) {
   assert(serverPy.includes(token), `server.py missing starter map token: ${token}`);
 }
@@ -363,8 +366,8 @@ for (const token of [
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
   'js/main3d.js?v=20260706-model-switch-r4',
-  'js/chat.js?v=20260706-model-switch-r4',
-  'css/style.css?v=20260617-codex-context-r2',
+  'js/chat.js?v=20260707-live-planner-r1',
+  'css/style.css?v=20260707-live-planner-r2',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-codexOptions',
@@ -378,6 +381,8 @@ for (const token of [
   'Fresh GitHub installs start with only /api/streets',
   'reroute one in place instead of teleporting it to a different road',
   'Do not recycle it across the map while the user watches',
+  'checkBuildingRoadwayOverlap',
+  'buildings may snap next to roads, but cannot cover roadways or sidewalks',
 ]) {
   assert(`${main3dJs}\n${indexHtml}`.includes(token), `client starter map wiring missing token: ${token}`);
 }
@@ -768,6 +773,8 @@ assert(main3dJs.includes('main3d-live-sync'), 'main3d.js missing Live Agent loop
 assert(main3dJs.includes('20260614-live-mode-social-r28'), 'main3d.js missing Live Agent loop client marker version');
 assert(main3dJs.includes('vw-live-mode-world-client-session-id'), 'main3d.js missing stable Live Mode client session id');
 assert(main3dJs.includes('getLiveModeWorldClientMarkerUrl'), 'main3d.js missing Live Mode client diagnostic marker helper');
+assert(main3dJs.includes('streetApproach: rawSite.streetApproach || target.streetApproach || null'), 'Live Mode construction sites should preserve street-approach metadata');
+assert(main3dJs.includes('disableDynamicExteriorRouting: false,\n    actionId: actionType'), 'Live Mode construction routes must use dynamic exterior routing');
 for (const token of [
   'routeLiveModeConstructionSiteWorldAction',
   'routeLiveModeHomeWorldAction',
@@ -796,6 +803,16 @@ for (const token of [
   'liveModeHomeForAgentId',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing Live Mode construction token: ${token}`);
+}
+for (const token of [
+  '_rotation: numberOr(site._rotation ?? site.rotation, 0)',
+  'streetApproach: site.streetApproach',
+  'return buildingInteriorEntryPointApi(building) || buildingDoorwayPointApi(building) || buildingOutsideDoorPointApi(building)',
+  'function isInsideResolvedBuildingTarget(dataDir, current, targetPoint)',
+  "reason: 'already-inside-target-building'",
+  "status: 'updated-existing'",
+]) {
+  assert(agentRuntimeRoomJs.includes(token), `agent-runtime-room.mjs missing Live Mode construction token: ${token}`);
 }
 for (const token of [
   'VW_REALTIME_BROWSER_URL',
@@ -942,13 +959,31 @@ for (const token of [
   'liveModeLoopStatus',
   'liveModeAgentList',
   'btn-saveLiveAgents',
+  'setting-liveModeFeatureEnabled',
+  'setting-liveLoopEnabled',
+  'setting-liveLoopModelDecisionEnabled',
+  'setting-liveLoopUserPreemptionEnabled',
+  'setting-liveLoopIntervalSec',
+  'setting-liveLoopMinActionIntervalSec',
+  'setting-liveLoopMaxActionsPerTick',
+  'setting-liveLoopModelTimeoutSec',
+  'setting-liveLoopModelMinIntervalSec',
+  'setting-liveLoopUserHoldSec',
+  'btn-saveLiveLoopSettings',
+  'agentLiveModeLoopEnabled',
+  'scriptedAmbientEnabled',
+  'agentLoopEnabled',
+  'Claims this agent for this world and allows Live Mode actions.',
+  'Runs the Live Agent brain so it can choose and execute actions.',
+  'Lets regular idle background behavior include this agent.',
   'agentLiveMode: !trial && checked',
   'saveLiveModeAgents',
+  'saveLiveModeLoopSettings',
   'applyLiveAgentModeAvailabilityUi',
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260615-location-settings-r1',
+  'js/settings.js?v=20260707-live-mode-status-r1',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);
