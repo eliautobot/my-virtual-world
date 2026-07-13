@@ -113,6 +113,12 @@ export const SERVER_SCRIPTED_IDLE_OBJECT_COOLDOWN_MS = 240000;
 export const SERVER_SCRIPTED_IDLE_CATEGORY_COOLDOWN_MS = 180000;
 export const SERVER_SCRIPTED_IDLE_FAILED_TARGET_THROTTLE_MS = 90000;
 export const LIVE_ACTION_API_TILE = 40;
+const SERVER_RUNTIME_ELEVATOR_SIZE_TILES = 2.8;
+const SERVER_RUNTIME_ELEVATOR_QUEUE_SPACING_TILES = 0.72;
+const SERVER_RUNTIME_ELEVATOR_SLOT_OFFSETS = Object.freeze([
+  Object.freeze({ x: -0.42, z: 0 }),
+  Object.freeze({ x: 0.42, z: 0 }),
+]);
 export const SERVER_RUNTIME_AGENT_AVOID_RADIUS = LIVE_ACTION_API_TILE * 1.5;
 export const SERVER_RUNTIME_AGENT_SEPARATION_RADIUS = LIVE_ACTION_API_TILE * 0.75;
 export const SERVER_RUNTIME_AGENT_HARD_SEPARATION_RADIUS = LIVE_ACTION_API_TILE * 0.615;
@@ -1144,6 +1150,236 @@ function findParkAtApi(dataDir, apiX, apiY) {
   return null;
 }
 
+function serverRuntimeBuildingFloorCount(building = null) {
+  if (!building || building.type === 'park') return 1;
+  return Math.max(1, Math.floor(numberOr(
+    building.floorCount ?? building.floors?.length ?? building.interior?.floors,
+    1,
+  )));
+}
+
+function clampServerRuntimeFloorForBuilding(building = null, floor = 1) {
+  return Math.max(1, Math.min(serverRuntimeBuildingFloorCount(building), floorOr(floor, 1)));
+}
+
+function serverRuntimeItemFloor(item = null) {
+  return Math.max(1, floorOr(item?.floor ?? item?.buildingFloor, 1));
+}
+
+function serverRuntimeNormalizeElevator(building = null) {
+  if (!building || building.type === 'park' || serverRuntimeBuildingFloorCount(building) <= 1) return null;
+  const width = Math.max(1, numberOr(building.widthTiles, 25));
+  const depth = Math.max(1, numberOr(building.heightTiles, 17));
+  const raw = building.elevator && typeof building.elevator === 'object' && !Array.isArray(building.elevator)
+    ? building.elevator
+    : {};
+  const elevatorWidth = Math.max(1.2, numberOr(raw.width, SERVER_RUNTIME_ELEVATOR_SIZE_TILES));
+  const elevatorDepth = Math.max(1.2, numberOr(raw.depth, SERVER_RUNTIME_ELEVATOR_SIZE_TILES));
+  const minX = elevatorWidth / 2 + 0.25;
+  const maxX = Math.max(minX, width - elevatorWidth / 2 - 0.25);
+  const minZ = elevatorDepth / 2 + 0.25;
+  const maxZ = Math.max(minZ, depth - elevatorDepth / 2 - 0.25);
+  return {
+    x: Math.max(minX, Math.min(maxX, numberOr(raw.x, width * 0.18))),
+    z: Math.max(minZ, Math.min(maxZ, numberOr(raw.z, depth * 0.35))),
+    width: elevatorWidth,
+    depth: elevatorDepth,
+  };
+}
+
+function serverRuntimeFloorScopedBuilding(building = null, floor = 1) {
+  if (!building || building.type === 'park') return building;
+  const routingFloor = clampServerRuntimeFloorForBuilding(building, floor);
+  const interior = building.interior && typeof building.interior === 'object' && !Array.isArray(building.interior)
+    ? building.interior
+    : {};
+  return {
+    ...building,
+    _routingFloor: routingFloor,
+    elevator: serverRuntimeNormalizeElevator(building),
+    interior: {
+      ...interior,
+      walls: Array.isArray(interior.walls)
+        ? interior.walls.filter(wall => serverRuntimeItemFloor(wall) === routingFloor)
+        : [],
+      furniture: Array.isArray(interior.furniture)
+        ? interior.furniture.filter(item => serverRuntimeItemFloor(item) === routingFloor)
+        : [],
+    },
+  };
+}
+
+function serverRuntimeElevatorApiPoint(building = null, slotIndex = null) {
+  const elevator = serverRuntimeNormalizeElevator(building);
+  if (!elevator) return null;
+  const index = Number.isInteger(slotIndex)
+    ? Math.max(0, Math.min(SERVER_RUNTIME_ELEVATOR_SLOT_OFFSETS.length - 1, slotIndex))
+    : null;
+  const slot = index == null ? null : SERVER_RUNTIME_ELEVATOR_SLOT_OFFSETS[index];
+  const point = apiPointFromBuildingLocal(building, elevator.x + numberOr(slot?.x, 0), elevator.z + numberOr(slot?.z, 0));
+  return point ? { ...point, elevatorSlotIndex: index } : null;
+}
+
+function serverRuntimeElevatorQueueApiPoint(building = null, queueIndex = 0) {
+  const elevator = serverRuntimeNormalizeElevator(building);
+  if (!elevator) return null;
+  const width = Math.max(1, numberOr(building.widthTiles, 25));
+  const depth = Math.max(1, numberOr(building.heightTiles, 17));
+  const index = Math.max(0, Math.floor(numberOr(queueIndex, 0)));
+  const localX = Math.max(0.55, Math.min(width - 0.55, elevator.x));
+  const localZ = Math.max(
+    0.55,
+    Math.min(depth - 0.55, elevator.z + elevator.depth / 2 + 0.95 + index * SERVER_RUNTIME_ELEVATOR_QUEUE_SPACING_TILES),
+  );
+  const point = apiPointFromBuildingLocal(building, localX, localZ);
+  return point ? { ...point, elevatorQueueIndex: index } : null;
+}
+
+function serverRuntimeElevatorExitApiPoint(building = null) {
+  const elevator = serverRuntimeNormalizeElevator(building);
+  if (!elevator) return null;
+  const width = Math.max(1, numberOr(building.widthTiles, 25));
+  const depth = Math.max(1, numberOr(building.heightTiles, 17));
+  const localX = Math.max(0.55, Math.min(width - 0.55, elevator.x));
+  const localZ = Math.max(0.55, Math.min(depth - 0.55, elevator.z + elevator.depth / 2 + 0.75));
+  return apiPointFromBuildingLocal(building, localX, localZ);
+}
+
+function serverRuntimePointBuilding(dataDir, point = null) {
+  const building = findInteriorBuildingAtApi(dataDir, point?.x, point?.y);
+  if (!building || building.type === 'park') return null;
+  return readBuildingDocument(dataDir, building.id) || building;
+}
+
+function serverRuntimeLocationAtPoint(dataDir, x, y, target = null, {
+  arrived = false,
+  fallbackFloor = 1,
+} = {}) {
+  const targetBuildingId = safeText(target?.buildingId, '');
+  if (arrived && targetBuildingId) {
+    const targetBuilding = readBuildingDocument(dataDir, targetBuildingId);
+    if (!targetBuilding || targetBuilding.type !== 'park') {
+      return {
+        floor: floorOr(target?.floor, fallbackFloor),
+        buildingId: targetBuildingId,
+        roomId: safeText(target?.roomId, ''),
+      };
+    }
+  }
+  const building = serverRuntimePointBuilding(dataDir, { x, y, floor: fallbackFloor });
+  if (building) {
+    return {
+      floor: clampServerRuntimeFloorForBuilding(building, fallbackFloor),
+      buildingId: safeText(building.id, ''),
+      roomId: targetBuildingId && targetBuildingId === building.id ? safeText(target?.roomId, '') : '',
+    };
+  }
+  return { floor: 1, buildingId: '', roomId: '' };
+}
+
+function summarizeServerRuntimeElevatorTrip(trip = null) {
+  if (!trip || typeof trip !== 'object' || trip.active === false) return null;
+  const buildingId = safeText(trip.buildingId, '');
+  if (!buildingId) return null;
+  const out = {
+    active: true,
+    buildingId,
+    fromFloor: Math.max(1, floorOr(trip.fromFloor, 1)),
+    toFloor: Math.max(1, floorOr(trip.toFloor, 1)),
+    state: safeText(trip.state, 'boarding') || 'boarding',
+    finalTarget: cloneRuntimePoint(trip.finalTarget || null),
+  };
+  if (Number.isInteger(trip.slotIndex)) out.slotIndex = Math.max(0, trip.slotIndex);
+  if (Number.isInteger(trip.queueIndex)) out.queueIndex = Math.max(0, trip.queueIndex);
+  if (Number.isFinite(Number(trip.queuedAtMs))) out.queuedAtMs = Math.max(0, Math.floor(Number(trip.queuedAtMs)));
+  if (Number.isFinite(Number(trip.startedAtMs))) out.startedAtMs = Math.max(0, Math.floor(Number(trip.startedAtMs)));
+  return out;
+}
+
+function isServerRuntimeAtElevatorBoardingPoint(currentPoint = null, building = null, boardingTarget = null) {
+  if (!currentPoint || !serverRuntimeNormalizeElevator(building)) return false;
+  const targets = [];
+  if (boardingTarget) targets.push(boardingTarget);
+  const center = serverRuntimeElevatorApiPoint(building);
+  if (center) targets.push(center);
+  for (let index = 0; index < SERVER_RUNTIME_ELEVATOR_SLOT_OFFSETS.length; index += 1) {
+    const slot = serverRuntimeElevatorApiPoint(building, index);
+    if (slot) targets.push(slot);
+  }
+  const reach = LIVE_ACTION_API_TILE * 0.95;
+  return targets.some(target => Math.hypot(
+    numberOr(currentPoint.x, 0) - numberOr(target.x, 0),
+    numberOr(currentPoint.y, 0) - numberOr(target.y, 0),
+  ) <= reach);
+}
+
+function serverRuntimeElevatorAccessPlan(agentId, building, fromFloor, toFloor, finalTarget = null, crowdAgents = [], previousTrip = null) {
+  const elevator = serverRuntimeNormalizeElevator(building);
+  const buildingId = safeText(building?.id, '');
+  if (!buildingId || !elevator) {
+    return { mode: 'none', target: serverRuntimeElevatorApiPoint(building), slotIndex: null, queueIndex: null };
+  }
+  const currentTrip = previousTrip?.buildingId === buildingId &&
+    floorOr(previousTrip.fromFloor, fromFloor) === fromFloor &&
+    floorOr(previousTrip.toFloor, toFloor) === toFloor &&
+    previousTrip.state !== 'arrived'
+      ? previousTrip
+      : null;
+  const occupiedSlots = new Set();
+  const queue = [];
+  const matchesTrip = (trip = null) => trip &&
+    trip.active !== false &&
+    trip.buildingId === buildingId &&
+    floorOr(trip.fromFloor, fromFloor) === fromFloor &&
+    floorOr(trip.toFloor, toFloor) === toFloor;
+  for (const other of crowdAgents || []) {
+    if (!other || String(other.agentId || '') === String(agentId || '')) continue;
+    const trip = summarizeServerRuntimeElevatorTrip(other.elevatorTrip || null);
+    if (!matchesTrip(trip)) continue;
+    if (trip.state === 'arrived') continue;
+    if (Number.isInteger(trip.slotIndex)) occupiedSlots.add(trip.slotIndex);
+    else queue.push({
+      agentId: safeText(other.agentId, '') || String(other.agentId || ''),
+      queuedAtMs: Number(trip.queuedAtMs || trip.startedAtMs || 0) || 0,
+    });
+  }
+  if (currentTrip && Number.isInteger(currentTrip.slotIndex) && !occupiedSlots.has(currentTrip.slotIndex)) {
+    return { mode: 'board', target: serverRuntimeElevatorApiPoint(building, currentTrip.slotIndex), slotIndex: currentTrip.slotIndex, queueIndex: null };
+  }
+  const openSlots = SERVER_RUNTIME_ELEVATOR_SLOT_OFFSETS
+    .map((_, index) => index)
+    .filter(index => !occupiedSlots.has(index));
+  const queuedAtMs = Number(currentTrip?.queuedAtMs || Date.now()) || Date.now();
+  if (currentTrip && !Number.isInteger(currentTrip.slotIndex)) {
+    queue.push({ agentId: safeText(agentId, '') || String(agentId || ''), queuedAtMs });
+  }
+  queue.sort((a, b) => a.queuedAtMs - b.queuedAtMs || String(a.agentId).localeCompare(String(b.agentId)));
+  let queueRank = queue.findIndex(entry => String(entry.agentId) === String(agentId || ''));
+  if (openSlots.length && (!currentTrip || queueRank < 0 || queueRank < openSlots.length)) {
+    const slotIndex = openSlots[Math.max(0, queueRank < 0 ? 0 : queueRank)];
+    return {
+      mode: 'board',
+      target: serverRuntimeElevatorApiPoint(building, slotIndex),
+      slotIndex,
+      queueIndex: null,
+      queuedAtMs,
+    };
+  }
+  if (queueRank < 0) {
+    queue.push({ agentId: safeText(agentId, '') || String(agentId || ''), queuedAtMs });
+    queue.sort((a, b) => a.queuedAtMs - b.queuedAtMs || String(a.agentId).localeCompare(String(b.agentId)));
+    queueRank = queue.findIndex(entry => String(entry.agentId) === String(agentId || ''));
+  }
+  const queueIndex = Math.max(0, queueRank - openSlots.length);
+  return {
+    mode: 'queue',
+    target: serverRuntimeElevatorQueueApiPoint(building, queueIndex),
+    slotIndex: null,
+    queueIndex,
+    queuedAtMs,
+  };
+}
+
 function getBuildingDoorSpec(building) {
   const width = Number(building?.widthTiles || 10) || 10;
   const height = Number(building?.heightTiles || 8) || 8;
@@ -1637,6 +1873,7 @@ function summarizeServerRuntimeRoute(route = null) {
     projectedPoint: cloneRuntimePoint(route.projectedPoint || null),
     pursuitTarget: cloneRuntimePoint(route.pursuitTarget || null),
     rerouteFrom: cloneRuntimePoint(route.rerouteFrom || null),
+    elevatorTrip: summarizeServerRuntimeElevatorTrip(route.elevatorTrip || null),
     blockedPoint: cloneRuntimePoint(route.blockedPoint || null),
     blockedReason: safeText(route.blockedReason, ''),
     recoveryAvoidPoint: cloneRuntimePoint(route.recoveryAvoidPoint || null),
@@ -1683,6 +1920,9 @@ function serverRuntimeCrowdAgents(state, agentId) {
     const point = normalizeServerRuntimePoint(plain, 1);
     if (!point) continue;
     const target = plain.target && typeof plain.target === 'object' ? plain.target : null;
+    const runtimeRoute = plain.visualState && typeof plain.visualState === 'object'
+      ? plain.visualState.runtimeRoute
+      : null;
     const targetObjectKey = String(target?.objectKey || (
       target?.buildingId && target?.furnitureIndex != null
         ? runtimeFurnitureObjectKey(target.buildingId, target.furnitureIndex, target.objectType || 'object')
@@ -1699,6 +1939,7 @@ function serverRuntimeCrowdAgents(state, agentId) {
       targetObjectKey,
       targetBaseObjectKey,
       targetIsQueueUse: target?.isQueueUse === true,
+      elevatorTrip: summarizeServerRuntimeElevatorTrip(runtimeRoute?.elevatorTrip || null),
     });
   }
   return crowd;
@@ -2000,7 +2241,15 @@ function validateServerRuntimeStaticSegment(dataDir, currentPoint, proposedPoint
         buildingId: currentBuilding.id,
       };
     }
-    const result = isDynamicInteriorRouteSegmentClear(currentBuilding, current, proposed);
+    const segmentFloor = clampServerRuntimeFloorForBuilding(
+      currentBuilding,
+      current.floor ?? proposed.floor ?? 1,
+    );
+    const result = isDynamicInteriorRouteSegmentClear(
+      serverRuntimeFloorScopedBuilding(currentBuilding, segmentFloor),
+      { ...current, floor: segmentFloor },
+      { ...proposed, floor: segmentFloor },
+    );
     return result.clear ? { ...result, buildingId: currentBuilding.id } : { ...result, buildingId: currentBuilding.id };
   }
 
@@ -2346,13 +2595,27 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
     y: Number(target?.y ?? target?.z ?? current?.y ?? 0),
     floor: floorOr(target?.floor ?? current?.floor, 1),
     buildingId: safeText(target?.buildingId || '', ''),
+    roomId: safeText(target?.roomId || '', ''),
   };
-  const currentPoint = {
+  const rawCurrentPoint = {
     id: agentId,
     x: Number(current?.x || 0),
     y: Number(current?.y || 0),
-    floor: floorOr(current?.floor, finalTarget.floor),
+    floor: floorOr(current?.floor, 1),
     buildingId: safeText(current?.buildingId || '', ''),
+    roomId: safeText(current?.roomId || '', ''),
+  };
+  const currentCoordinateBuilding = serverRuntimePointBuilding(dataDir, rawCurrentPoint);
+  const currentFloor = currentCoordinateBuilding
+    ? clampServerRuntimeFloorForBuilding(currentCoordinateBuilding, rawCurrentPoint.floor)
+    : 1;
+  const currentPoint = {
+    id: agentId,
+    x: rawCurrentPoint.x,
+    y: rawCurrentPoint.y,
+    floor: currentFloor,
+    buildingId: currentCoordinateBuilding ? safeText(currentCoordinateBuilding.id, '') : '',
+    roomId: currentCoordinateBuilding && currentCoordinateBuilding.id === finalTarget.buildingId ? finalTarget.roomId : '',
   };
   let steeringTarget = finalTarget;
   let route = null;
@@ -2383,6 +2646,7 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
   const routeViaApproach = Boolean(routeApproachTarget && distanceToRouteApproach > routeApproachSnapRadius);
   const movementTarget = routeViaApproach ? routeApproachTarget : finalTarget;
   const previousRuntimeRoute = current?.visualState?.runtimeRoute;
+  const previousElevatorTrip = summarizeServerRuntimeElevatorTrip(previousRuntimeRoute?.elevatorTrip || null);
   const previousBlockedReason = String(previousRuntimeRoute?.blockedReason || '');
   const previousStaticBlock = previousBlockedReason.startsWith('server-static-');
   const previousCrowdBlock = previousBlockedReason.startsWith('server-crowd-wait-') ||
@@ -2414,6 +2678,11 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
         ...(dynamicAvoidZones.length ? { dynamicAvoidZones } : {}),
       }
     : (dynamicAvoidZones.length ? { dynamicAvoidZones } : {});
+  const coordinateTargetBuilding = findInteriorBuildingAtApi(dataDir, movementTarget.x, movementTarget.y);
+  const targetBuildingById = movementTarget.buildingId ? readBuildingDocument(dataDir, movementTarget.buildingId) : null;
+  const targetBuilding = targetBuildingById || (!movementTarget.buildingId ? coordinateTargetBuilding : null);
+  const unknownTargetBuilding = Boolean(movementTarget.buildingId && !targetBuildingById);
+  const currentBuilding = currentCoordinateBuilding;
   const cachedRouteStep = previousReplanBlock
     ? null
     : selectCachedServerRuntimeRouteStep(current, currentPoint, movementTarget, arrival);
@@ -2441,12 +2710,16 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
   };
 
   const useDoorApproachRoute = (building, approachTarget, source, reason, routePhase, options = {}) => {
-    const routeTarget = { ...approachTarget, floor: finalTarget.floor, targetKind: options.targetKind || 'building-door-approach' };
+    const routeFloor = clampServerRuntimeFloorForBuilding(
+      building,
+      approachTarget?.floor ?? currentPoint.floor,
+    );
+    const routeTarget = { ...approachTarget, floor: routeFloor, targetKind: options.targetKind || 'building-door-approach' };
     steeringTarget = routeTarget;
     phase = routePhase;
     const dynamicRoute = source === 'interior'
       ? updateDynamicInteriorRouting(currentPoint, routeTarget, tickMs, {
-          building,
+          building: serverRuntimeFloorScopedBuilding(building, routeFloor),
           debug: false,
           ...recoveryRouteOptions,
         })
@@ -2489,15 +2762,16 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
     const outside = buildingOutsideDoorPointApi(building) || doorway;
     const inside = buildingInteriorEntryPointApi(building) || doorway;
     const reach = buildingDoorwayReachApi(building);
+    const doorFloor = clampServerRuntimeFloorForBuilding(building, currentPoint.floor);
     if (direction === 'enter' && outside && inside) {
       const distToOutside = Math.min(
         Math.hypot(currentPoint.x - outside.x, currentPoint.y - outside.y),
         doorway ? Math.hypot(currentPoint.x - doorway.x, currentPoint.y - doorway.y) : Infinity,
       );
       if (distToOutside <= Math.max(reach, arrival * 2)) {
-        steeringTarget = { ...finalTarget, ...inside, floor: finalTarget.floor, targetKind: 'building-door-entry' };
+        steeringTarget = { ...inside, floor: 1, buildingId: safeText(building?.id, ''), targetKind: 'building-door-entry' };
         phase = 'door-crossing';
-        route = makeDoorTransitionRoute('enter-building-through-door', steeringTarget, [outside, doorway, inside].filter(Boolean), {
+        route = makeDoorTransitionRoute('enter-building-through-door', steeringTarget, [outside, doorway, inside].filter(Boolean).map(point => ({ ...point, floor: 1 })), {
           doorFinalTarget: finalTarget,
           doorBuildingId: safeText(building?.id, ''),
         });
@@ -2511,15 +2785,15 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
         ? Math.hypot(currentPoint.x - doorway.x, currentPoint.y - doorway.y)
         : Math.hypot(currentPoint.x - inside.x, currentPoint.y - inside.y);
       if (distToDoorway <= Math.max(reach, arrival * 2)) {
-        steeringTarget = { ...outside, floor: finalTarget.floor, targetKind: 'building-door-exit' };
+        steeringTarget = { ...outside, floor: doorFloor, targetKind: 'building-door-exit' };
         phase = 'door-exit';
-        route = makeDoorTransitionRoute('exit-building-through-door', steeringTarget, [doorway, outside].filter(Boolean), {
+        route = makeDoorTransitionRoute('exit-building-through-door', steeringTarget, [doorway, outside].filter(Boolean).map(point => ({ ...point, floor: doorFloor })), {
           doorFinalTarget: finalTarget,
           doorBuildingId: safeText(building?.id, ''),
         });
         return true;
       }
-      useDoorApproachRoute(building, { ...doorway, floor: finalTarget.floor, targetKind: 'building-door-threshold' }, 'interior', 'inside-to-building-door', 'door-inside-approach', { targetKind: 'building-door-threshold' });
+      useDoorApproachRoute(building, { ...doorway, floor: doorFloor, targetKind: 'building-door-threshold' }, 'interior', 'inside-to-building-door', 'door-inside-approach', { targetKind: 'building-door-threshold' });
       return true;
     }
     return false;
@@ -2543,16 +2817,133 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
     return false;
   };
 
-  if (cachedRouteStep) {
+  const steerElevatorTransition = (building, toFloor, reason = 'floor-change') => {
+    const fromFloor = clampServerRuntimeFloorForBuilding(building, currentPoint.floor);
+    const destinationFloor = clampServerRuntimeFloorForBuilding(building, toFloor);
+    const elevatorPoint = serverRuntimeElevatorApiPoint(building);
+    if (!elevatorPoint || fromFloor === destinationFloor) return null;
+    const accessPlan = serverRuntimeElevatorAccessPlan(
+      agentId,
+      building,
+      fromFloor,
+      destinationFloor,
+      finalTarget,
+      crowdAgents,
+      previousElevatorTrip,
+    );
+    const accessTarget = {
+      ...(accessPlan.target || elevatorPoint),
+      floor: fromFloor,
+      buildingId: safeText(building?.id, ''),
+      targetKind: accessPlan.mode === 'queue' ? 'elevator-queue' : 'elevator-pad',
+      ...(Number.isInteger(accessPlan.slotIndex) ? { elevatorSlotIndex: accessPlan.slotIndex } : {}),
+      ...(Number.isInteger(accessPlan.queueIndex) ? { elevatorQueueIndex: accessPlan.queueIndex } : {}),
+    };
+    const startedAtMs = previousElevatorTrip?.startedAtMs || Date.now();
+    const queuedAtMs = previousElevatorTrip?.queuedAtMs || accessPlan.queuedAtMs || startedAtMs;
+    const trip = {
+      active: true,
+      buildingId: safeText(building?.id, ''),
+      fromFloor,
+      toFloor: destinationFloor,
+      state: accessPlan.mode === 'queue' ? 'queue' : 'boarding',
+      finalTarget,
+      queuedAtMs,
+      startedAtMs,
+      ...(Number.isInteger(accessPlan.slotIndex) ? { slotIndex: accessPlan.slotIndex } : {}),
+      ...(Number.isInteger(accessPlan.queueIndex) ? { queueIndex: accessPlan.queueIndex } : {}),
+    };
+    const atBoardingPoint = accessPlan.mode !== 'queue' && isServerRuntimeAtElevatorBoardingPoint(currentPoint, building, accessTarget);
+    if (atBoardingPoint) {
+      const exitPoint = serverRuntimeElevatorExitApiPoint(building) || elevatorPoint;
+      const exitTarget = {
+        ...exitPoint,
+        floor: destinationFloor,
+        buildingId: safeText(building?.id, ''),
+        roomId: movementTarget.buildingId === building.id ? safeText(movementTarget.roomId, '') : '',
+        targetKind: 'elevator-exit',
+      };
+      const heading = normalizeRuntimeAngleRadians(current?.heading, 0);
+      const elevatorRoute = makeRoute('server-elevator-runtime', `elevator-${reason}-arrived`, exitTarget, [exitTarget], true, {
+        routeIndex: 1,
+        route: [cloneRuntimePoint(exitTarget)].filter(Boolean),
+        routePoints: [cloneRuntimePoint(currentPoint), cloneRuntimePoint(exitTarget)].filter(Boolean),
+        finalPoint: exitTarget,
+        elevatorTrip: { ...trip, state: 'arrived' },
+        elevatorFinalTarget: cloneRuntimePoint(finalTarget),
+        routeSource,
+        phase: 'elevator-arrive',
+      });
+      const distanceToFinal = Math.hypot(finalTarget.x - exitTarget.x, finalTarget.y - exitTarget.y);
+      return {
+        x: exitTarget.x,
+        y: exitTarget.y,
+        floor: destinationFloor,
+        buildingId: safeText(building?.id, ''),
+        roomId: exitTarget.roomId || '',
+        heading,
+        arrived: false,
+        distanceToFinal,
+        distanceToSteering: 0,
+        steeringTarget: exitTarget,
+        finalTarget,
+        route: elevatorRoute,
+        phase: 'elevator-arrive',
+      };
+    }
+
+    steeringTarget = accessTarget;
+    phase = accessPlan.mode === 'queue' ? 'elevator-queue' : 'elevator-boarding';
+    const floorScopedBuilding = serverRuntimeFloorScopedBuilding(building, fromFloor);
+    const dynamicRoute = updateDynamicInteriorRouting(currentPoint, accessTarget, tickMs, {
+      building: floorScopedBuilding,
+      debug: false,
+      ...recoveryRouteOptions,
+    });
+    if (dynamicRoute?.active && dynamicRoute.effectiveTarget) {
+      steeringTarget = { ...accessTarget, x: dynamicRoute.effectiveTarget.x, y: dynamicRoute.effectiveTarget.y };
+      route = {
+        ...dynamicRoute,
+        source: 'dynamic-interior-routing.js',
+        reason: `elevator-${accessPlan.mode}-${reason}`,
+        effectiveTarget: steeringTarget,
+        finalPoint: accessTarget,
+        elevatorTrip: trip,
+      };
+      return true;
+    }
+    route = makeRoute('dynamic-interior-routing.js', dynamicRoute?.reason || `elevator-${accessPlan.mode}-${reason}-unavailable`, accessTarget, [accessTarget], false, {
+      route: [cloneRuntimePoint(accessTarget)].filter(Boolean),
+      routePoints: [cloneRuntimePoint(currentPoint), cloneRuntimePoint(accessTarget)].filter(Boolean),
+      finalPoint: accessTarget,
+      elevatorTrip: trip,
+    });
+    return true;
+  };
+
+  const currentInsideBuilding = Boolean(currentBuilding && currentBuilding.type !== 'park');
+  const targetInsideCurrentBuilding = Boolean(
+    currentInsideBuilding &&
+    targetBuilding &&
+    targetBuilding.type !== 'park' &&
+    targetBuilding.id === currentBuilding.id
+  );
+  const elevatorTargetFloor = targetInsideCurrentBuilding
+    ? clampServerRuntimeFloorForBuilding(currentBuilding, movementTarget.floor ?? finalTarget.floor)
+    : 1;
+  const elevatorHandled = currentInsideBuilding &&
+    serverRuntimeBuildingFloorCount(currentBuilding) > 1 &&
+    serverRuntimeNormalizeElevator(currentBuilding) &&
+    elevatorTargetFloor !== currentPoint.floor
+      ? steerElevatorTransition(currentBuilding, elevatorTargetFloor, targetInsideCurrentBuilding ? 'same-building-floor' : 'exit-to-ground-floor')
+      : null;
+  if (elevatorHandled && typeof elevatorHandled === 'object') return elevatorHandled;
+
+  if (!elevatorHandled && cachedRouteStep) {
     steeringTarget = cachedRouteStep.steeringTarget;
     route = cachedRouteStep.route;
     phase = String(route.source || '').includes('interior') ? 'interior-route' : 'exterior-route';
-  } else {
-    const coordinateTargetBuilding = findInteriorBuildingAtApi(dataDir, movementTarget.x, movementTarget.y);
-    const targetBuildingById = movementTarget.buildingId ? readBuildingDocument(dataDir, movementTarget.buildingId) : null;
-    const targetBuilding = targetBuildingById || (!movementTarget.buildingId ? coordinateTargetBuilding : null);
-    const unknownTargetBuilding = Boolean(movementTarget.buildingId && !targetBuildingById);
-    const currentBuilding = findInteriorBuildingAtApi(dataDir, currentPoint.x, currentPoint.y);
+  } else if (!elevatorHandled) {
     if (unknownTargetBuilding) {
       steeringTarget = movementTarget;
       phase = 'unknown-building-route';
@@ -2564,8 +2955,9 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       if (!currentInsideTarget) {
         if (!steerDoorTransition(targetBuilding, 'enter')) useExteriorRoute();
       } else {
+        const routeFloor = clampServerRuntimeFloorForBuilding(targetBuilding, currentPoint.floor);
         const dynamicRoute = updateDynamicInteriorRouting(currentPoint, movementTarget, tickMs, {
-          building: targetBuilding,
+          building: serverRuntimeFloorScopedBuilding(targetBuilding, routeFloor),
           debug: false,
           ...recoveryRouteOptions,
         });
@@ -2643,7 +3035,12 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
   const tickWaypoints = [];
   const tickCollisionPath = [];
   if (!arrived) {
-    tickWaypoints.push({ x: Number(steeringTarget.x), y: Number(steeringTarget.y), final: false });
+    tickWaypoints.push({
+      x: Number(steeringTarget.x),
+      y: Number(steeringTarget.y),
+      floor: floorOr(steeringTarget.floor ?? currentPoint.floor, currentPoint.floor),
+      final: false,
+    });
     const routePoints = Array.isArray(route?.routePoints) && route.routePoints.length > 1
       ? route.routePoints
       : (Array.isArray(route?.route) ? route.route : []);
@@ -2662,7 +3059,12 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
         for (let index = steeringIndex + 1; index < routePoints.length; index += 1) {
           const point = routePoints[index];
           if (!point) continue;
-          tickWaypoints.push({ x: Number(point.x), y: Number(point.y), final: false });
+          tickWaypoints.push({
+            x: Number(point.x),
+            y: Number(point.y),
+            floor: floorOr(point.floor ?? steeringTarget.floor ?? currentPoint.floor, currentPoint.floor),
+            final: false,
+          });
         }
       }
     }
@@ -2671,7 +3073,12 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       lastWaypoint.final = true;
     } else if (canChainWaypoints && steeringIndex >= 0 && route?.targetAdjusted !== true) {
       // Pathfinder routes may end short of the exact final target; finish the chain there.
-      tickWaypoints.push({ x: Number(movementTarget.x), y: Number(movementTarget.y), final: true });
+      tickWaypoints.push({
+        x: Number(movementTarget.x),
+        y: Number(movementTarget.y),
+        floor: floorOr(movementTarget.floor ?? steeringTarget.floor ?? currentPoint.floor, currentPoint.floor),
+        final: true,
+      });
     }
 
     // Consume the tick step measured as EUCLIDEAN distance from the tick-start
@@ -2685,11 +3092,12 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
     let pathConsumed = 0;
     let cursorX = startX;
     let cursorY = startY;
+    let cursorFloor = currentPoint.floor;
     let waypointsConsumed = 0;
-    const pushTickCollisionPoint = () => {
+    const pushTickCollisionPoint = (floor = cursorFloor) => {
       const last = tickCollisionPath[tickCollisionPath.length - 1] || { x: startX, y: startY };
       if (Math.hypot(cursorX - last.x, cursorY - last.y) > 0.001) {
-        tickCollisionPath.push({ x: cursorX, y: cursorY });
+        tickCollisionPath.push({ x: cursorX, y: cursorY, floor: floorOr(floor, currentPoint.floor) });
       }
     };
     for (const waypoint of tickWaypoints) {
@@ -2705,7 +3113,8 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       if (endEuclid <= step + 0.0001 && segDist <= pathBudgetLeft) {
         cursorX = waypoint.x;
         cursorY = waypoint.y;
-        pushTickCollisionPoint();
+        cursorFloor = floorOr(waypoint.floor ?? cursorFloor, cursorFloor);
+        pushTickCollisionPoint(cursorFloor);
         pathConsumed += segDist;
         if (waypoint.final) break;
         waypointsConsumed += 1;
@@ -2727,7 +3136,8 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       if (pathBudgetLeft < segDist * t) t = Math.max(0, pathBudgetLeft / segDist);
       cursorX += segDx * t;
       cursorY += segDy * t;
-      pushTickCollisionPoint();
+      cursorFloor = floorOr(waypoint.floor ?? cursorFloor, cursorFloor);
+      pushTickCollisionPoint(cursorFloor);
       break;
     }
     if (steeringIndex >= 0 && waypointsConsumed > 0 && route && Array.isArray(route.routePoints)) {
@@ -2738,7 +3148,7 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       }
     }
     tickWaypoints.length = 0;
-    tickWaypoints.push({ x: cursorX, y: cursorY });
+    tickWaypoints.push({ x: cursorX, y: cursorY, floor: cursorFloor });
   }
 
   // M1.5b — smooth heading through turns: derive heading from the actual
@@ -2758,6 +3168,9 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
   };
   let nextX = arrived ? Number(arrivalPublishTarget.x) : tickWaypoints[0].x;
   let nextY = arrived ? Number(arrivalPublishTarget.y) : tickWaypoints[0].y;
+  let nextFloorFallback = arrived
+    ? floorOr(arrivalPublishTarget.floor ?? finalTarget.floor, finalTarget.floor)
+    : floorOr(tickWaypoints[0]?.floor ?? steeringTarget.floor ?? currentPoint.floor, currentPoint.floor);
   let heading = distanceToSteering > 0.001
     ? applyTurnRateLimit(Math.atan2(dx, dy))
     : previousHeading;
@@ -2786,7 +3199,7 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       const segmentTarget = {
         x: Number(guardTarget.x),
         y: Number(guardTarget.y),
-        floor: movementTarget.floor,
+        floor: floorOr(guardTarget.floor ?? steeringTarget.floor ?? currentPoint.floor, currentPoint.floor),
         buildingId: movementTarget.buildingId || currentPoint.buildingId || '',
       };
       if (Math.hypot(segmentTarget.x - Number(guardCurrent.x || 0), segmentTarget.y - Number(guardCurrent.y || 0)) <= 0.001) {
@@ -2806,6 +3219,7 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       if (!guarded?.point) break;
       nextX = Number(guarded.point.x);
       nextY = Number(guarded.point.y ?? guarded.point.z);
+      nextFloorFallback = floorOr(guarded.point.floor ?? segmentTarget.floor, segmentTarget.floor);
       mergeRoutePatch(guarded.routePatch || null);
       const reachedSegmentTarget = Math.hypot(nextX - segmentTarget.x, nextY - segmentTarget.y) <= 0.001;
       guardCurrent = {
@@ -2825,10 +3239,16 @@ export function makeServerRuntimeStep(dataDir, agentId, current, target, tickMs,
       heading = applyTurnRateLimit(Math.atan2(guardedDx, guardedDy));
     }
   }
+  const nextLocation = serverRuntimeLocationAtPoint(dataDir, nextX, nextY, arrived ? finalTarget : movementTarget, {
+    arrived,
+    fallbackFloor: nextFloorFallback,
+  });
   return {
     x: nextX,
     y: nextY,
-    floor: finalTarget.floor,
+    floor: nextLocation.floor,
+    buildingId: nextLocation.buildingId,
+    roomId: nextLocation.roomId,
     heading,
     arrived,
     distanceToFinal,
@@ -8258,9 +8678,9 @@ export class AgentRuntimeRoom extends Room {
       owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
       x: arrived ? Number(target.x) : movement.x,
       y: arrived ? Number(target.y) : movement.y,
-      floor: target.floor,
-      buildingId: target.buildingId || '',
-      roomId: target.roomId || '',
+      floor: arrived ? floorOr(target.floor, 1) : movement.floor,
+      buildingId: arrived ? (target.buildingId || '') : movement.buildingId,
+      roomId: arrived ? (target.roomId || '') : movement.roomId,
       heading: arrived ? targetHeading : movement.heading,
       state: arrived ? (target.isQueueUse ? 'waiting' : 'using') : 'routing',
       routeId,
@@ -8370,6 +8790,8 @@ export class AgentRuntimeRoom extends Room {
 	            x: Number(current.x),
 	            y: Number(current.y),
 	            floor: targetPoint.floor,
+	            buildingId: targetPoint.buildingId || '',
+	            roomId: targetPoint.roomId || '',
 	            heading: normalizeRuntimeAngleRadians(current.heading, 0),
 	            arrived: true,
 	            distanceToFinal: 0,
@@ -8446,9 +8868,9 @@ export class AgentRuntimeRoom extends Room {
           owner: LIVE_ACTION_RUNTIME_OWNER,
           x: nextX,
           y: nextY,
-          floor: targetPoint.floor,
-          buildingId: targetPoint.buildingId || '',
-          roomId: targetPoint.roomId || '',
+          floor: movement.floor,
+          buildingId: movement.buildingId || '',
+          roomId: movement.roomId || '',
           heading,
           state: arrived ? 'arrived' : 'routing',
           routeId,
@@ -8906,9 +9328,9 @@ export class AgentRuntimeRoom extends Room {
       owner: SERVER_PINGPONG_RUNTIME_OWNER,
       x: isMoving ? numberOr(movement?.x, point.x) : point.x,
       y: isMoving ? numberOr(movement?.y, point.y) : point.y,
-      floor: point.floor,
-      buildingId: tableTarget.buildingId || '',
-      roomId: tableTarget.roomId || '',
+      floor: isMoving ? floorOr(movement?.floor, point.floor) : point.floor,
+      buildingId: isMoving ? safeText(movement?.buildingId || '', '') : (tableTarget.buildingId || ''),
+      roomId: isMoving ? safeText(movement?.roomId || '', '') : (tableTarget.roomId || ''),
       heading: isMoving ? numberOr(movement?.heading, point.faceAngle) : point.faceAngle,
       state,
       routeId,
@@ -9403,6 +9825,8 @@ export class AgentRuntimeRoom extends Room {
 	            x: Number(current.x),
 	            y: Number(current.y),
 	            floor: targetPoint.floor,
+	            buildingId: targetPoint.buildingId || '',
+	            roomId: targetPoint.roomId || '',
 	            heading: normalizeRuntimeAngleRadians(current.heading, 0),
 	            arrived: true,
 	            distanceToFinal: 0,
@@ -9438,9 +9862,9 @@ export class AgentRuntimeRoom extends Room {
           owner: LIVE_ACTION_RUNTIME_OWNER,
           x: nextX,
           y: nextY,
-          floor: targetPoint.floor,
-          buildingId: targetPoint.buildingId || '',
-          roomId: targetPoint.roomId || '',
+          floor: movement.floor,
+          buildingId: movement.buildingId || '',
+          roomId: movement.roomId || '',
           heading,
           state: arrived ? 'arrived' : 'routing',
           routeId,
@@ -9722,9 +10146,9 @@ export class AgentRuntimeRoom extends Room {
         owner: LIVE_STATUS_RUNTIME_OWNER,
         x: nextX,
         y: nextY,
-        floor: target.floor,
-        buildingId: target.buildingId || '',
-        roomId: target.roomId || '',
+        floor: arrived ? floorOr(target.floor, 1) : movement.floor,
+        buildingId: arrived ? (target.buildingId || '') : movement.buildingId,
+        roomId: arrived ? (target.roomId || '') : movement.roomId,
         heading,
         state,
         routeId,
@@ -10154,9 +10578,9 @@ export class AgentRuntimeRoom extends Room {
           owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
           x: nextX,
           y: nextY,
-          floor: target.floor,
-          buildingId: target.buildingId || '',
-          roomId: target.roomId || '',
+          floor: movement.floor,
+          buildingId: movement.buildingId,
+          roomId: movement.roomId,
           heading,
           state: 'routing',
           routeId,

@@ -66,7 +66,7 @@ import {
   updateDynamicInteriorRouting,
   updateDynamicInteriorRoutingDebug,
   clearDynamicInteriorRoutingDebug,
-} from './dynamic-interior-routing.js?v=20260610-perf-debug-off';
+} from './dynamic-interior-routing.js?v=20260711-runtime-routing-hydrate';
 import {
   DYNAMIC_EXTERIOR_ROUTING,
   configureDynamicExteriorRouting,
@@ -76,7 +76,7 @@ import {
   updateDynamicExteriorRouting,
   updateDynamicExteriorRoutingDebug,
   clearDynamicExteriorRoutingDebug,
-} from './dynamic-exterior-routing.js?v=20260610-perf-debug-off';
+} from './dynamic-exterior-routing.js?v=20260711-runtime-routing-hydrate';
 import {
   STARTER_MAP_NAME,
   cloneStarterMapBuildings,

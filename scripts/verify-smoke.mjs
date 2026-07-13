@@ -365,7 +365,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260706-model-switch-r4',
+  'js/main3d.js?v=20260711-runtime-routing-hydrate',
   'js/chat.js?v=20260707-live-planner-r1',
   'css/style.css?v=20260707-live-planner-r2',
   'btn-newAgent',
