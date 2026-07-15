@@ -179,6 +179,10 @@ Lifecycle states include:
 
 Use the API instead of editing world-action JSON by hand.
 
+Terminal world-action history and Live Agent runtime collections are bounded by both record counts and encoded byte budgets. The defaults and deployment overrides are documented in `docs/CONFIGURATION.md`. Internal notes and planner transcript copies are separate bounded files under `VW_DATA_DIR`; they are not agent-framework memory.
+
+`POST /api/agent/<agent-id>/live-mode/reset` clears only that resident's transient Live Agent runtime state. It preserves provider-owned workspace files, the Virtual World Resident Profile, assignments, constructed homes, buildings, furniture, and all unrelated residents.
+
 ## Update Behavior
 
 Code updates do not wipe saved world data. A normal update changes the repo and rebuilds the container while keeping the Docker volume.

@@ -85,6 +85,18 @@ def _env_bool(key, fallback=False):
     return str(val).strip().lower() not in ("0", "false", "no", "off")
 
 
+def _env_int(key, fallback, *, minimum=None, maximum=None):
+    try:
+        value = int(os.environ.get(key, fallback))
+    except (TypeError, ValueError):
+        value = int(fallback)
+    if minimum is not None:
+        value = max(int(minimum), value)
+    if maximum is not None:
+        value = min(int(maximum), value)
+    return value
+
+
 PORT = int(_env_or("VW_PORT", "8590"))
 PUBLIC_HOST_PORT = _env_or("VW_HOST_PORT", str(PORT))
 PUBLIC_ORIGIN = _env_or("VW_PUBLIC_ORIGIN", f"http://127.0.0.1:{PUBLIC_HOST_PORT}")
@@ -594,6 +606,12 @@ def _save_vw_config_update(body):
     UPLOADS_HOST_DIR = _env_or("VW_UPLOADS_HOST_DIR", os.path.join(HOST_WORKSPACE_BASE, "workspace", "uploads"))
     if _gateway_config_key() != old_gateway_config:
         restart_gateway_presence()
+    live_mode_runtime = None
+    if isinstance(body.get("features"), dict) and "agentLiveMode" in body["features"]:
+        if _agent_live_mode_runtime_enabled():
+            live_mode_runtime = clear_live_agent_feature_kill(reason="agent-live-mode-feature-enabled")
+        else:
+            live_mode_runtime = enforce_live_agent_feature_kill(reason="agent-live-mode-feature-disabled")
     world = body.get("world") if isinstance(body.get("world"), dict) else {}
     if world:
         meta_patch = {k: v for k, v in world.items() if k in {"name", "showMinimap", "dayNightCycleEnabled", "weatherEnabled", "location"}}
@@ -601,7 +619,10 @@ def _save_vw_config_update(body):
             meta = load_world_meta()
             meta.update(meta_patch)
             save_world_meta(meta)
-    return {"ok": True, "config": _safe_vw_config()}, 200
+    result = {"ok": True, "config": _safe_vw_config()}
+    if isinstance(live_mode_runtime, dict):
+        result["liveAgentModeRuntime"] = {key: value for key, value in live_mode_runtime.items() if key != "state"}
+    return result, 200
 
 
 def _limited(items, limit):
@@ -622,6 +643,27 @@ def _locked_response(feature, message=None):
 
 def _demo_feature_locked(feature):
     return not check_feature(feature)
+
+
+def _agent_live_mode_runtime_enabled():
+    return bool(check_feature("agentLiveMode") and (VW_CONFIG.get("features") or {}).get("agentLiveMode"))
+
+
+def _agent_live_mode_feature_disabled_error():
+    licensed = bool(check_feature("agentLiveMode"))
+    return _api_error(
+        "agent_live_mode_feature_disabled",
+        "Agent Live Mode is locked by the license." if not licensed else "Agent Live Mode is disabled by the global feature switch.",
+        details={
+            "licensed": licensed,
+            "featureEnabled": bool((VW_CONFIG.get("features") or {}).get("agentLiveMode")),
+            "serverEnforced": True,
+        },
+    )
+
+
+def _agent_live_mode_feature_disabled_status():
+    return 403 if not check_feature("agentLiveMode") else 409
 
 
 def _demo_edit_locked_response():
@@ -812,6 +854,7 @@ _live_agent_user_attention_lock = threading.RLock()
 _live_agent_user_attention = {}
 _live_agent_model_decision_lock = threading.RLock()
 _live_agent_model_decision_state = {}
+_live_agent_internal_notes_lock = threading.RLock()
 _live_agent_planner_transcript_lock = threading.RLock()
 HERMES_APPROVAL_LOCK = threading.Lock()
 HERMES_APPROVAL_PENDING = {}
@@ -1109,10 +1152,34 @@ WORLD_ACTION_HISTORY_RETENTION = {
     "failedDays": 30,
     "maxHistoryRecords": 1000,
 }
+WORLD_ACTION_HISTORY_MAX_BYTES = _env_int(
+    "VW_WORLD_ACTION_HISTORY_MAX_BYTES",
+    8 * 1024 * 1024,
+    minimum=256 * 1024,
+    maximum=256 * 1024 * 1024,
+)
+WORLD_ACTION_HISTORY_RECORD_MAX_BYTES = _env_int(
+    "VW_WORLD_ACTION_HISTORY_RECORD_MAX_BYTES",
+    256 * 1024,
+    minimum=16 * 1024,
+    maximum=8 * 1024 * 1024,
+)
+WORLD_META_BACKUP_INTERVAL_SEC = _env_int(
+    "VW_WORLD_META_BACKUP_INTERVAL_SEC",
+    5 * 60,
+    minimum=0,
+    maximum=24 * 60 * 60,
+)
+WORLD_META_STALE_TMP_MAX_AGE_SEC = _env_int(
+    "VW_WORLD_META_STALE_TMP_MAX_AGE_SEC",
+    60 * 60,
+    minimum=60,
+    maximum=7 * 24 * 60 * 60,
+)
 
 _WORLD_META_LOCK = threading.RLock()
 META_BACKUP_FILE = META_FILE + ".bak"
-_WORLD_META_FAST_CACHE = {"sig": None, "data": None}
+_WORLD_META_FAST_CACHE = {"sig": None, "data": None, "digest": None}
 _WORLD_META_BOOT_KEYS = {
     "version",
     "name",
@@ -1140,6 +1207,39 @@ def _default_world_meta():
 def _read_json_file(path):
     with open(path, "r") as f:
         return json.load(f)
+
+
+def _json_compact_bytes(value):
+    return (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _json_size_bytes(value):
+    try:
+        return len(_json_compact_bytes(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _cleanup_stale_atomic_files(path, *, max_age_sec=WORLD_META_STALE_TMP_MAX_AGE_SEC):
+    removed = []
+    cutoff = time.time() - max(60, int(max_age_sec))
+    for candidate in glob.glob(f"{path}.tmp-*"):
+        try:
+            if os.path.isfile(candidate) and os.path.getmtime(candidate) < cutoff:
+                os.unlink(candidate)
+                removed.append(candidate)
+        except OSError:
+            continue
+    return removed
+
+
+def _world_meta_backup_due():
+    if WORLD_META_BACKUP_INTERVAL_SEC <= 0:
+        return True
+    try:
+        return (time.time() - os.path.getmtime(META_BACKUP_FILE)) >= WORLD_META_BACKUP_INTERVAL_SEC
+    except OSError:
+        return True
 
 
 def load_world_meta():
@@ -1180,6 +1280,11 @@ def load_world_meta_fast():
             meta = _read_json_file(META_FILE)
             _WORLD_META_FAST_CACHE["sig"] = _world_meta_file_sig()
             _WORLD_META_FAST_CACHE["data"] = meta
+            try:
+                with open(META_FILE, "rb") as f:
+                    _WORLD_META_FAST_CACHE["digest"] = hashlib.sha256(f.read()).hexdigest()
+            except OSError:
+                _WORLD_META_FAST_CACHE["digest"] = None
             return meta
         except FileNotFoundError:
             meta = _default_world_meta()
@@ -1203,25 +1308,60 @@ def world_meta_boot_payload(meta=None):
 
 
 def save_world_meta(meta):
+    """Atomically persist changed metadata in compact form.
+
+    The hot Live Agent loop previously copied and rewrote the full metadata
+    document on every timer tick. A content digest makes identical saves a
+    no-op, compact JSON reduces disk and write amplification, and the
+    last-known-good backup is throttled independently from atomic writes.
+    """
     os.makedirs(os.path.dirname(META_FILE), exist_ok=True)
     with _WORLD_META_LOCK:
+        encoded = _json_compact_bytes(meta)
+        digest = hashlib.sha256(encoded).hexdigest()
+        current_sig = _world_meta_file_sig()
+        current_digest = None
+        if current_sig and _WORLD_META_FAST_CACHE.get("sig") == current_sig:
+            current_digest = _WORLD_META_FAST_CACHE.get("digest")
+        if current_digest is None and current_sig:
+            try:
+                with open(META_FILE, "rb") as f:
+                    current_digest = hashlib.sha256(f.read()).hexdigest()
+            except OSError:
+                current_digest = None
+        if current_digest == digest:
+            _WORLD_META_FAST_CACHE["sig"] = current_sig
+            _WORLD_META_FAST_CACHE["data"] = meta
+            _WORLD_META_FAST_CACHE["digest"] = digest
+            return False
+
+        _cleanup_stale_atomic_files(META_FILE)
         # Keep a last-known-good backup, but never replace it with malformed
-        # current contents. This is intentionally not a lock file.
-        try:
-            _read_json_file(META_FILE)
-            shutil.copy2(META_FILE, META_BACKUP_FILE)
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            pass
+        # current contents. Backups are periodic so a high-frequency runtime
+        # update cannot copy a large world file every few seconds.
+        if _world_meta_backup_due():
+            try:
+                _read_json_file(META_FILE)
+                shutil.copy2(META_FILE, META_BACKUP_FILE)
+            except (FileNotFoundError, json.JSONDecodeError, OSError):
+                pass
 
         tmp_path = f"{META_FILE}.tmp-{os.getpid()}-{threading.get_ident()}"
-        with open(tmp_path, "w") as f:
-            json.dump(meta, f, indent=2)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, META_FILE)
+        try:
+            with open(tmp_path, "wb") as f:
+                f.write(encoded)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, META_FILE)
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
         _WORLD_META_FAST_CACHE["sig"] = _world_meta_file_sig()
         _WORLD_META_FAST_CACHE["data"] = meta
+        _WORLD_META_FAST_CACHE["digest"] = digest
         try:
             dir_fd = os.open(os.path.dirname(META_FILE) or ".", os.O_DIRECTORY)
             try:
@@ -1230,6 +1370,7 @@ def save_world_meta(meta):
                 os.close(dir_fd)
         except OSError:
             pass
+        return True
 
 # ─── WORLD ACTION PERSISTENCE ─────────────────────────────────────
 def _utc_now_iso():
@@ -1241,6 +1382,10 @@ def default_world_actions_store():
         "schemaVersion": WORLD_ACTION_SCHEMA_VERSION,
         "persistenceVersion": WORLD_ACTION_PERSISTENCE_VERSION,
         "retention": dict(WORLD_ACTION_HISTORY_RETENTION),
+        "storageBudget": {
+            "historyMaxBytes": WORLD_ACTION_HISTORY_MAX_BYTES,
+            "historyRecordMaxBytes": WORLD_ACTION_HISTORY_RECORD_MAX_BYTES,
+        },
         "active": [],
         "history": [],
     }
@@ -1530,6 +1675,102 @@ def _retention_cutoff_seconds(status, now_epoch):
     return now_epoch - (WORLD_ACTION_HISTORY_RETENTION["failedDays"] * 86400)
 
 
+def _compact_json_value_for_storage(value, *, depth=0, max_depth=4, max_items=24, string_limit=1600):
+    if isinstance(value, str):
+        if len(value) <= string_limit:
+            return value
+        return value[:string_limit].rstrip() + f" [truncated from {len(value)} chars]"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if depth >= max_depth:
+        return {"storageCompacted": True, "type": type(value).__name__}
+    if isinstance(value, list):
+        rows = value[-max_items:]
+        compacted = [
+            _compact_json_value_for_storage(
+                item,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_items=max_items,
+                string_limit=string_limit,
+            )
+            for item in rows
+        ]
+        if len(value) > len(rows):
+            compacted.insert(0, {"storageCompacted": True, "omittedItems": len(value) - len(rows)})
+        return compacted
+    if isinstance(value, dict):
+        result = {}
+        items = list(value.items())
+        for key, item in items[:max_items]:
+            result[str(key)[:160]] = _compact_json_value_for_storage(
+                item,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_items=max_items,
+                string_limit=string_limit,
+            )
+        if len(items) > max_items:
+            result["storageCompacted"] = True
+            result["omittedFields"] = len(items) - max_items
+        return result
+    return str(value)[:string_limit]
+
+
+def _compact_world_action_history_record(record):
+    action = _copy_world_action_record(record)
+    if _json_size_bytes(action) <= WORLD_ACTION_HISTORY_RECORD_MAX_BYTES:
+        return action
+    lifecycle = action.get("lifecycle") if isinstance(action.get("lifecycle"), dict) else {}
+    transition_log = [item for item in (lifecycle.get("transitionLog") or []) if isinstance(item, dict)]
+    if transition_log:
+        lifecycle = dict(lifecycle)
+        lifecycle["transitionLog"] = transition_log[-16:]
+        lifecycle["storageCompactedTransitions"] = max(0, len(transition_log) - len(lifecycle["transitionLog"]))
+        action["lifecycle"] = lifecycle
+    for key in ("params", "result", "audit"):
+        if isinstance(action.get(key), (dict, list)):
+            action[key] = _compact_json_value_for_storage(action[key], max_depth=3, max_items=16, string_limit=800)
+    if _json_size_bytes(action) > WORLD_ACTION_HISTORY_RECORD_MAX_BYTES:
+        original_result = record.get("result") if isinstance(record.get("result"), dict) else {}
+        action["params"] = {
+            "storageCompacted": True,
+            **{
+                key: record.get("params", {}).get(key)
+                for key in ("loopActionId", "planId", "planStepId", "decisionMode")
+                if isinstance(record.get("params"), dict) and record.get("params", {}).get(key) is not None
+            },
+        }
+        action["result"] = {
+            "status": action.get("status"),
+            "reason": action.get("failureReason") or original_result.get("reason"),
+            "storageCompacted": True,
+        }
+        action["audit"] = {"storageCompacted": True, "originalBytes": _json_size_bytes(record)}
+    return action
+
+
+def _trim_world_action_history_to_byte_budget(history):
+    compacted = [_compact_world_action_history_record(record) for record in history]
+    ranked = []
+    for index, record in enumerate(compacted):
+        timing = record.get("timing") if isinstance(record.get("timing"), dict) else {}
+        epoch = _parse_isoish_epoch(timing.get("terminalAt") or timing.get("completedAt") or timing.get("updatedAt") or timing.get("createdAt")) or 0
+        ranked.append((epoch, index, record, _json_size_bytes(record)))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    selected_indexes = set()
+    used = 2
+    removed = []
+    for _, index, record, size in ranked:
+        extra = size + (1 if selected_indexes else 0)
+        if size <= WORLD_ACTION_HISTORY_RECORD_MAX_BYTES and used + extra <= WORLD_ACTION_HISTORY_MAX_BYTES:
+            selected_indexes.add(index)
+            used += extra
+        else:
+            removed.append(record.get("id"))
+    return [record for index, record in enumerate(compacted) if index in selected_indexes], removed
+
+
 def cleanup_world_action_history(history):
     now_epoch = time.time()
     kept = []
@@ -1547,6 +1788,8 @@ def cleanup_world_action_history(history):
         kept.sort(key=lambda item: _parse_isoish_epoch((item.get("timing") or {}).get("updatedAt")) or 0, reverse=True)
         removed.extend([item.get("id") for item in kept[max_records:]])
         kept = kept[:max_records]
+    kept, byte_removed = _trim_world_action_history_to_byte_budget(kept)
+    removed.extend(byte_removed)
     return kept, removed
 
 
@@ -1658,6 +1901,7 @@ WORLD_ACTION_EVENT_REUSE_NOTES = [
 WORLD_ACTION_EVENT_ROUTE_GUARDRAILS = MOVE_INTENT_ROUTE_GUARDRAILS
 LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"
 LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION = "agent-live-mode-plan/v1"
+LIVE_AGENT_EPISODE_SCHEMA_VERSION = "agent-live-mode-episode/v1"
 LIVE_AGENT_OPERATOR_PROPOSAL_SCHEMA_VERSION = "agent-live-mode-operator-proposal/v1"
 LIVE_AGENT_OPERATOR_TIMELINE_SCHEMA_VERSION = "agent-live-mode-operator-timeline/v1"
 LIVE_AGENT_LOOP_DEFAULTS = {
@@ -1674,6 +1918,7 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "feedbackRetention": 24,
     "settledActionRetention": 120,
     "planRetention": 12,
+    "episodeRetention": 18,
     "planMaxRetries": 2,
     "operatorProposalRetention": 24,
     "decisionMode": "planner-v2",
@@ -1683,6 +1928,36 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "userChatPreemptionEnabled": True,
     "userChatPreemptionHoldSec": 180,
 }
+LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES = _env_int(
+    "VW_LIVE_AGENT_COLLECTION_MAX_BYTES",
+    256 * 1024,
+    minimum=16 * 1024,
+    maximum=16 * 1024 * 1024,
+)
+LIVE_AGENT_LOOP_STATE_MAX_BYTES = _env_int(
+    "VW_LIVE_AGENT_LOOP_STATE_MAX_BYTES",
+    8 * 1024 * 1024,
+    minimum=512 * 1024,
+    maximum=256 * 1024 * 1024,
+)
+LIVE_AGENT_INTERNAL_NOTES_MAX_BYTES = _env_int(
+    "VW_LIVE_AGENT_INTERNAL_NOTES_MAX_BYTES",
+    1024 * 1024,
+    minimum=128 * 1024,
+    maximum=64 * 1024 * 1024,
+)
+LIVE_AGENT_INTERNAL_NOTE_DETAILS_MAX_BYTES = _env_int(
+    "VW_LIVE_AGENT_INTERNAL_NOTE_DETAILS_MAX_BYTES",
+    24 * 1024,
+    minimum=4 * 1024,
+    maximum=1024 * 1024,
+)
+LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES = _env_int(
+    "VW_LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES",
+    2 * 1024 * 1024,
+    minimum=256 * 1024,
+    maximum=128 * 1024 * 1024,
+)
 LIVE_AGENT_LOOP_MODEL_DECISION_MODE = "model-autonomy-v3"
 LIVE_AGENT_LOOP_MODEL_DECISION_SOURCES = {"openclaw"}
 LIVE_AGENT_MODEL_PROMPT_CHAR_BUDGET = 12000
@@ -1691,6 +1966,13 @@ LIVE_AGENT_PLANNER_TRANSCRIPT_SCHEMA_VERSION = "agent-live-mode-planner-transcri
 LIVE_AGENT_PLANNER_TRANSCRIPT_FILE = os.path.join(DATA_DIR, "live-agent-planner-transcripts.json")
 LIVE_AGENT_PLANNER_TRANSCRIPT_RETENTION = 120
 LIVE_AGENT_PLANNER_TRANSCRIPT_TEXT_LIMIT = 20000
+LIVE_AGENT_INTERNAL_NOTE_SCHEMA_VERSION = "agent-internal-notes/v1"
+LIVE_AGENT_INTERNAL_NOTES_FILE = os.path.join(DATA_DIR, "agent-internal-notes.json")
+LIVE_AGENT_SUPPORT_ACTION_SCHEMA_VERSION = "agent-live-mode-support-action/v1"
+LIVE_AGENT_SUPPORT_REQUEST_TTL_SEC = 15 * 60
+LIVE_AGENT_SUPPORT_REPORT_COOLDOWN_SEC = 20 * 60
+LIVE_AGENT_AUTONOMY_PLAN_NOTE_COOLDOWN_SEC = 20 * 60
+LIVE_AGENT_OBSERVABILITY_LOCK_TIMEOUT_SEC = 0.75
 LIVE_AGENT_CRITICAL_NEED_THRESHOLD = 0.82
 LIVE_AGENT_HIGH_NEED_THRESHOLD = 0.65
 LIVE_AGENT_ISSUE_PRIORITY = 0.88
@@ -1763,6 +2045,8 @@ LIVE_AGENT_PROFILE_ACTION_KEYWORDS = {
     "brainstorm-whiteboard": ("brainstorm", "plan", "idea", "learn", "curious", "create"),
     "work-on-active-goal": ("goal", "work", "task", "finish", "complete", "progress", "test"),
     "investigate-blocking-issue": ("issue", "bug", "broken", "fix", "failed", "blocked", "not working"),
+    "record-internal-note": ("note", "remember", "record", "log", "plan", "lesson", "journal"),
+    "report-issue-to-coder": ("coder", "report", "tell", "communicate", "message", "handoff", "issue", "blocked", "shelter"),
     "use-seating-object": ("seat", "seating", "chair", "chairs", "furniture", "couch", "bench", "interactive", "sit"),
     "print-copy-document": ("print", "copy", "document", "maintenance", "paperwork"),
     "build-small-home-site": ("home", "house", "shelter", "settle", "build"),
@@ -1802,9 +2086,9 @@ LIVE_AGENT_PROFILE_GOAL_INTENT_KEYWORDS = {
     "maintenance": ("maintain", "maintenance", "paperwork", "print", "copy", "document"),
 }
 LIVE_AGENT_GOAL_INTENT_ACTION_BOOSTS = {
-    "seating-test": {"use-seating-object": 0.82, "work-on-active-goal": 0.30, "brainstorm-whiteboard": 0.12},
-    "issue-investigation": {"investigate-blocking-issue": 0.86, "work-on-active-goal": 0.20, "brainstorm-whiteboard": 0.10},
-    "building": {"build-small-home-site": 0.46, "work-on-active-goal": 0.18, "brainstorm-whiteboard": 0.10},
+    "seating-test": {"use-seating-object": 0.82, "work-on-active-goal": 0.30, "brainstorm-whiteboard": 0.12, "record-internal-note": 0.08},
+    "issue-investigation": {"report-issue-to-coder": 0.94, "investigate-blocking-issue": 0.74, "work-on-active-goal": 0.20, "record-internal-note": 0.18, "brainstorm-whiteboard": 0.06},
+    "building": {"build-small-home-site": 0.46, "report-issue-to-coder": 0.28, "work-on-active-goal": 0.18, "record-internal-note": 0.12, "brainstorm-whiteboard": 0.08},
     "social": {"talk-with-nearby-agent": 0.40, "work-on-active-goal": 0.08},
     "maintenance": {"print-copy-document": 0.26, "investigate-blocking-issue": 0.18, "work-on-active-goal": 0.12},
 }
@@ -1938,6 +2222,28 @@ LIVE_AGENT_LOOP_ACTIONS = [
         "experience": "review a recent failure or broken behavior and form a visible recovery plan",
     },
     {
+        "id": "record-internal-note",
+        "targetKind": "support-tool",
+        "supportTool": "internal-note",
+        "actionType": "live.note.internal",
+        "capabilityTag": "agent.note",
+        "need": "curiosity",
+        "autonomyKind": "support-note",
+        "label": "write internal note",
+        "experience": "write a durable internal note so the plan, lesson, or concern survives beyond the visible action",
+    },
+    {
+        "id": "report-issue-to-coder",
+        "targetKind": "support-tool",
+        "supportTool": "coder-report",
+        "actionType": "live.report.coder",
+        "capabilityTag": "agent.communication",
+        "need": "maintenance",
+        "autonomyKind": "support-report",
+        "label": "report issue to Coder",
+        "experience": "send an actionable Live Agent field report to Coder and log it in the world communication history",
+    },
+    {
         "id": "print-copy-document",
         "catalogIds": ["printerCopier", "all-in-one-printer-scanner"],
         "actionType": "maintenance.printCopy",
@@ -1962,9 +2268,10 @@ LIVE_AGENT_LOOP_ACTIONS = [
         "targetKind": "agent-home-building",
         "actionType": "life.restAtHome",
         "capabilityTag": "life.rest",
-        "need": "energy",
+        "need": "shelter",
+        "satisfiesNeeds": ["shelter", "energy"],
         "label": "rest at home",
-        "experience": "go home and rest at their visible home",
+        "experience": "go home, feel sheltered, and rest at their visible home",
     },
     {
         "id": "talk-with-nearby-agent",
@@ -3039,6 +3346,8 @@ def _validate_create_world_action_payload(payload):
         if behavior_error:
             return None, behavior_error
         source = _source_snapshot_with_behavior(source, behavior)
+    if isinstance(source, dict) and source.get("kind") == "agent-live-mode" and not _agent_live_mode_runtime_enabled():
+        return None, _agent_live_mode_feature_disabled_error()
     agent_id = _resolve_agent_id(payload.get("agentId"))
     if not agent_id:
         errors.append("agentId must reference an existing agent id or statusKey")
@@ -3238,6 +3547,7 @@ def create_world_action(payload):
             "target_deleted": 410,
             "permission_denied": 403,
             "agent_live_mode_disabled": 403,
+            "agent_live_mode_feature_disabled": _agent_live_mode_feature_disabled_status(),
             "duplicate_action": 409,
             "object_reserved": 409,
             "invalid_action_record": 500,
@@ -3547,6 +3857,8 @@ def create_agent_live_mode_action_request(payload):
     source = payload.get("source") if isinstance(payload.get("source"), dict) else None
     if not source or source.get("kind") != "agent-live-mode":
         return False, _api_error("invalid_behavior_source", "Agent Live Mode action caller requires source.kind to be agent-live-mode.", details={"required": "agent-live-mode"}), 400
+    if not _agent_live_mode_runtime_enabled():
+        return False, _agent_live_mode_feature_disabled_error(), 409
     agent_id = _resolve_agent_id(payload.get("agentId"))
     if not agent_id:
         return False, _api_error("agent_not_found", "agentId must reference an existing agent id or statusKey"), 404
@@ -3650,6 +3962,8 @@ def default_live_agent_loop_state():
         "pauseReason": None,
         "pausedAt": None,
         "pausedBy": None,
+        "schedulerCursorAgentId": None,
+        "featureKill": None,
         "intervalSec": LIVE_AGENT_LOOP_DEFAULTS["intervalSec"],
         "minActionIntervalSec": LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"],
         "clientActiveTtlSec": LIVE_AGENT_LOOP_DEFAULTS["clientActiveTtlSec"],
@@ -3664,6 +3978,10 @@ def default_live_agent_loop_state():
         "agents": {},
         "events": [],
         "stats": {"ticks": 0, "actionsCreated": 0, "dryRuns": 0, "errors": 0},
+        "storageBudget": {
+            "stateMaxBytes": LIVE_AGENT_LOOP_STATE_MAX_BYTES,
+            "collectionMaxBytes": LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES,
+        },
     }
 
 
@@ -3682,7 +4000,7 @@ def _normalize_int(value, fallback, *, minimum=None, maximum=None):
 def _normalize_live_agent_loop_state(raw):
     state = default_live_agent_loop_state()
     if isinstance(raw, dict):
-        for key in ("enabled", "createdAt", "updatedAt", "lastTickAt", "worldClientRequired", "serverRuntimeAuthority", "pausedUntil", "pauseReason", "pausedAt", "pausedBy"):
+        for key in ("enabled", "createdAt", "updatedAt", "lastTickAt", "worldClientRequired", "serverRuntimeAuthority", "pausedUntil", "pauseReason", "pausedAt", "pausedBy", "schedulerCursorAgentId", "featureKill"):
             if key in raw:
                 state[key] = raw[key]
         state["intervalSec"] = _normalize_int(raw.get("intervalSec"), state["intervalSec"], minimum=10, maximum=300)
@@ -3699,22 +4017,280 @@ def _normalize_live_agent_loop_state(raw):
         if isinstance(raw.get("agents"), dict):
             state["agents"] = {str(k): v for k, v in raw["agents"].items() if isinstance(v, dict)}
         if isinstance(raw.get("events"), list):
-            state["events"] = [event for event in raw["events"] if isinstance(event, dict)][-LIVE_AGENT_LOOP_DEFAULTS["eventRetention"]:]
+            state["events"] = _live_agent_loop_trim_list(raw["events"], LIVE_AGENT_LOOP_DEFAULTS["eventRetention"])
         if isinstance(raw.get("operatorProposals"), list):
-            state["operatorProposals"] = [proposal for proposal in raw["operatorProposals"] if isinstance(proposal, dict)][-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
+            state["operatorProposals"] = _live_agent_loop_trim_list(raw["operatorProposals"], LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"])
         if isinstance(raw.get("stats"), dict):
             state["stats"].update({k: v for k, v in raw["stats"].items() if isinstance(v, (int, float))})
     state["schemaVersion"] = LIVE_AGENT_LOOP_SCHEMA_VERSION
     state["enabled"] = bool(state.get("enabled"))
     state["serverRuntimeAuthority"] = True
     state["worldClientRequired"] = False
+    if state.get("schedulerCursorAgentId") is not None:
+        state["schedulerCursorAgentId"] = str(state.get("schedulerCursorAgentId") or "").strip() or None
+    if not isinstance(state.get("featureKill"), dict):
+        state["featureKill"] = None
+    state["storageBudget"] = {
+        "stateMaxBytes": LIVE_AGENT_LOOP_STATE_MAX_BYTES,
+        "collectionMaxBytes": LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES,
+    }
     if state.get("pausedUntil") and not _parse_isoish_epoch(state.get("pausedUntil")):
         state["pausedUntil"] = None
         state["pauseReason"] = None
         state["pausedAt"] = None
         state["pausedBy"] = None
     _live_agent_loop_normalize_operator_proposals(state)
-    return state
+    normalized_agents = {}
+    for agent_id, row in (state.get("agents") or {}).items():
+        if not isinstance(row, dict):
+            continue
+        agent_row = dict(row)
+        agent_row.setdefault("enabled", True)
+        normalized_agents[str(agent_id)] = _live_agent_loop_normalize_memory(agent_row)
+    state["agents"] = normalized_agents
+    return _live_agent_loop_enforce_state_budget(state)
+
+
+def _live_agent_loop_event_key(event):
+    if not isinstance(event, dict):
+        return ""
+    return json.dumps({
+        "at": event.get("at"),
+        "type": event.get("type"),
+        "agentId": event.get("agentId"),
+        "details": event.get("details") if isinstance(event.get("details"), dict) else {},
+    }, sort_keys=True, default=str)
+
+
+def _live_agent_loop_merge_events(existing_events, incoming_events):
+    rows = []
+    seen = set()
+    for event in [*(existing_events or []), *(incoming_events or [])]:
+        if not isinstance(event, dict):
+            continue
+        key = _live_agent_loop_event_key(event)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        rows.append(event)
+    rows.sort(key=lambda item: _parse_isoish_epoch(item.get("at")) or 0)
+    return _live_agent_loop_trim_list(rows, LIVE_AGENT_LOOP_DEFAULTS["eventRetention"])
+
+
+def _live_agent_loop_prefer_episode_candidate(current, candidate):
+    if not current:
+        return candidate
+    if not candidate:
+        return current
+    current_active = _live_agent_loop_episode_is_active(current)
+    candidate_active = _live_agent_loop_episode_is_active(candidate)
+    if current_active and not candidate_active:
+        return candidate
+    if candidate_active and not current_active:
+        return current
+    current_epoch = _parse_isoish_epoch(current.get("updatedAt")) or 0
+    candidate_epoch = _parse_isoish_epoch(candidate.get("updatedAt")) or 0
+    return candidate if candidate_epoch >= current_epoch else current
+
+
+def _live_agent_loop_prefer_plan_candidate(current, candidate):
+    if not current:
+        return candidate
+    if not candidate:
+        return current
+    current_active = _live_agent_loop_plan_is_active(current)
+    candidate_active = _live_agent_loop_plan_is_active(candidate)
+    if current_active and not candidate_active:
+        return candidate
+    if candidate_active and not current_active:
+        return current
+    current_epoch = _parse_isoish_epoch(current.get("updatedAt")) or 0
+    candidate_epoch = _parse_isoish_epoch(candidate.get("updatedAt")) or 0
+    return candidate if candidate_epoch >= current_epoch else current
+
+
+def _live_agent_loop_merge_agent_episodes(existing_agent, incoming_agent):
+    by_id = {}
+    for raw in [
+        *((existing_agent or {}).get("episodes") or []),
+        (existing_agent or {}).get("activeEpisode"),
+        *((incoming_agent or {}).get("episodes") or []),
+        (incoming_agent or {}).get("activeEpisode"),
+    ]:
+        episode = _live_agent_loop_normalize_episode(raw)
+        if not episode:
+            continue
+        episode_id = episode.get("id")
+        by_id[episode_id] = _live_agent_loop_prefer_episode_candidate(by_id.get(episode_id), episode)
+    episodes = sorted(by_id.values(), key=lambda item: _parse_isoish_epoch(item.get("updatedAt")) or 0)
+    episodes = _live_agent_loop_trim_list(episodes, LIVE_AGENT_LOOP_DEFAULTS["episodeRetention"])
+    active = [item for item in episodes if _live_agent_loop_episode_is_active(item)]
+    active.sort(key=lambda item: _parse_isoish_epoch(item.get("updatedAt")) or 0, reverse=True)
+    return episodes, (active[0] if active else None)
+
+
+def _live_agent_loop_merge_agent_plans(existing_agent, incoming_agent):
+    by_id = {}
+    for raw in [
+        *((existing_agent or {}).get("plans") or []),
+        (existing_agent or {}).get("activePlan"),
+        *((incoming_agent or {}).get("plans") or []),
+        (incoming_agent or {}).get("activePlan"),
+    ]:
+        plan = _live_agent_loop_normalize_plan(raw)
+        if not plan:
+            continue
+        plan_id = plan.get("id")
+        by_id[plan_id] = _live_agent_loop_prefer_plan_candidate(by_id.get(plan_id), plan)
+    plans = sorted(by_id.values(), key=lambda item: _parse_isoish_epoch(item.get("updatedAt")) or 0)
+    plans = _live_agent_loop_trim_list(plans, LIVE_AGENT_LOOP_DEFAULTS["planRetention"])
+    active = [item for item in plans if _live_agent_loop_plan_is_active(item)]
+    active.sort(key=lambda item: _parse_isoish_epoch(item.get("updatedAt")) or 0, reverse=True)
+    return plans, (active[0] if active else None)
+
+
+def _live_agent_loop_reconcile_agent_records_from_events(agents, events):
+    episode_events = {}
+    plan_events = {}
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        details = event.get("details") if isinstance(event.get("details"), dict) else {}
+        event_type = event.get("type")
+        at = event.get("at") if _parse_isoish_epoch(event.get("at")) else _utc_now_iso()
+        if event_type in {"episode-verified", "episode-verification-failed"} and details.get("episodeId"):
+            episode_id = details.get("episodeId")
+            current = episode_events.get(episode_id)
+            if not current or (_parse_isoish_epoch(at) or 0) >= (_parse_isoish_epoch(current.get("at")) or 0):
+                episode_events[episode_id] = {"type": event_type, "at": at, "details": details}
+        if event_type in {"plan-completed", "plan-failed"} and details.get("planId"):
+            plan_id = details.get("planId")
+            current = plan_events.get(plan_id)
+            if not current or (_parse_isoish_epoch(at) or 0) >= (_parse_isoish_epoch(current.get("at")) or 0):
+                plan_events[plan_id] = {"type": event_type, "at": at, "details": details}
+
+    for row in agents.values():
+        if not isinstance(row, dict):
+            continue
+        reconciled_episodes = []
+        for raw in row.get("episodes") or []:
+            episode = _live_agent_loop_normalize_episode(raw)
+            if not episode:
+                continue
+            event = episode_events.get(episode.get("id"))
+            if event and (_parse_isoish_epoch(event.get("at")) or 0) >= (_parse_isoish_epoch(episode.get("updatedAt")) or 0):
+                details = event.get("details") or {}
+                verification = episode.get("verification") if isinstance(episode.get("verification"), dict) else {}
+                verification = {
+                    **verification,
+                    "id": verification.get("id") or details.get("verificationId"),
+                    "ok": details.get("ok") is True,
+                    "status": "verified" if details.get("ok") is True else "failed",
+                    "at": verification.get("at") or event.get("at"),
+                }
+                episode["verification"] = verification
+                episode["updatedAt"] = event.get("at")
+                if event.get("type") == "episode-verified":
+                    episode["status"] = "completed"
+                    episode["phase"] = "continue"
+                    episode["verifiedAt"] = episode.get("verifiedAt") or event.get("at")
+                    episode["completedAt"] = episode.get("completedAt") or event.get("at")
+                    episode["operatorSummary"] = "Episode verified; planner can continue with evidence in memory."
+                    history_event = "verification-passed"
+                else:
+                    reportable_failure = details.get("reportableFailure") is not False
+                    if reportable_failure:
+                        episode["status"] = "awaiting_report"
+                        episode["phase"] = "report"
+                        if details.get("issueId"):
+                            episode["issueId"] = details.get("issueId")
+                        episode["operatorSummary"] = "Verification failed; report to Coder before treating this loop as learned."
+                        history_event = "verification-failed"
+                    else:
+                        episode["status"] = "failed"
+                        episode["phase"] = "continue"
+                        episode.pop("issueId", None)
+                        episode["failedAt"] = episode.get("failedAt") or event.get("at")
+                        episode["operatorSummary"] = "Verification failed after a benign system cancellation; planner can retry when route, target, or conditions change."
+                        history_event = "verification-failed-nonreportable"
+                existing_history = {
+                    (item.get("event"), item.get("verificationId"))
+                    for item in (episode.get("history") or [])
+                    if isinstance(item, dict)
+                }
+                history_key = (history_event, details.get("verificationId"))
+                if history_key not in existing_history:
+                    episode.setdefault("history", []).append({
+                        "at": event.get("at"),
+                        "phase": "verify",
+                        "event": history_event,
+                        "verificationId": details.get("verificationId"),
+                    })
+            reconciled_episodes.append(_live_agent_loop_normalize_episode(episode))
+        row["episodes"] = _live_agent_loop_trim_list(reconciled_episodes, LIVE_AGENT_LOOP_DEFAULTS["episodeRetention"])
+        active_episodes = [item for item in row["episodes"] if _live_agent_loop_episode_is_active(item)]
+        active_episodes.sort(key=lambda item: _parse_isoish_epoch(item.get("updatedAt")) or 0, reverse=True)
+        if active_episodes:
+            row["activeEpisode"] = active_episodes[0]
+        else:
+            row.pop("activeEpisode", None)
+
+        reconciled_plans = []
+        for raw in row.get("plans") or []:
+            plan = _live_agent_loop_normalize_plan(raw)
+            if not plan:
+                continue
+            event = plan_events.get(plan.get("id"))
+            if event and (_parse_isoish_epoch(event.get("at")) or 0) >= (_parse_isoish_epoch(plan.get("updatedAt")) or 0):
+                details = event.get("details") or {}
+                plan["updatedAt"] = event.get("at")
+                if event.get("type") == "plan-completed":
+                    plan["status"] = "completed"
+                    plan["completedAt"] = plan.get("completedAt") or event.get("at")
+                    plan["operatorSummary"] = f"Verified and completed plan: {plan.get('title')}."
+                else:
+                    plan["status"] = "failed"
+                    plan["failedAt"] = plan.get("failedAt") or event.get("at")
+                    plan["failureReason"] = _live_agent_loop_clean_plan_text(details.get("status") or "verification failed", limit=240)
+                    plan["operatorSummary"] = f"Plan failed verification: {plan.get('failureReason') or 'verification failed'}."
+            reconciled_plans.append(_live_agent_loop_normalize_plan(plan))
+        row["plans"] = _live_agent_loop_trim_list(reconciled_plans, LIVE_AGENT_LOOP_DEFAULTS["planRetention"])
+        active_plans = [item for item in row["plans"] if _live_agent_loop_plan_is_active(item)]
+        active_plans.sort(key=lambda item: _parse_isoish_epoch(item.get("updatedAt")) or 0, reverse=True)
+        if active_plans:
+            row["activePlan"] = active_plans[0]
+        else:
+            row.pop("activePlan", None)
+    return agents
+
+
+def _live_agent_loop_merge_state_for_save(existing, incoming):
+    if not isinstance(existing, dict):
+        return incoming
+    merged = dict(incoming if isinstance(incoming, dict) else {})
+    merged["events"] = _live_agent_loop_merge_events(existing.get("events"), merged.get("events"))
+    existing_agents = existing.get("agents") if isinstance(existing.get("agents"), dict) else {}
+    incoming_agents = merged.get("agents") if isinstance(merged.get("agents"), dict) else {}
+    agents = {}
+    for agent_id in sorted({*existing_agents.keys(), *incoming_agents.keys()}):
+        existing_agent = existing_agents.get(agent_id) if isinstance(existing_agents.get(agent_id), dict) else {}
+        incoming_agent = incoming_agents.get(agent_id) if isinstance(incoming_agents.get(agent_id), dict) else {}
+        row = {**existing_agent, **incoming_agent}
+        episodes, active_episode = _live_agent_loop_merge_agent_episodes(existing_agent, incoming_agent)
+        row["episodes"] = episodes
+        if active_episode:
+            row["activeEpisode"] = active_episode
+        else:
+            row.pop("activeEpisode", None)
+        plans, active_plan = _live_agent_loop_merge_agent_plans(existing_agent, incoming_agent)
+        row["plans"] = plans
+        if active_plan:
+            row["activePlan"] = active_plan
+        else:
+            row.pop("activePlan", None)
+        agents[agent_id] = row
+    merged["agents"] = _live_agent_loop_reconcile_agent_records_from_events(agents, merged.get("events") or [])
+    return merged
 
 
 def get_live_agent_loop_state(*, persist_migration=False, meta=None):
@@ -3729,15 +4305,37 @@ def get_live_agent_loop_state(*, persist_migration=False, meta=None):
     return state
 
 
-def save_live_agent_loop_state(state):
+def save_live_agent_loop_state(state, *, merge_existing=True):
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    if merge_existing:
+        state = _live_agent_loop_merge_state_for_save(agent_life.get("liveModeLoop"), state)
     state = _normalize_live_agent_loop_state(state)
     state["updatedAt"] = _utc_now_iso()
     agent_life["liveModeLoop"] = state
     meta["agentLife"] = agent_life
     save_world_meta(meta)
     return state
+
+
+@contextlib.contextmanager
+def _live_agent_loop_observability_lock(timeout_sec=LIVE_AGENT_OBSERVABILITY_LOCK_TIMEOUT_SEC):
+    try:
+        acquired = _live_agent_loop_lock.acquire(timeout=max(0.0, float(timeout_sec)))
+    except (TypeError, ValueError):
+        acquired = _live_agent_loop_lock.acquire(blocking=False)
+    try:
+        yield bool(acquired)
+    finally:
+        if acquired:
+            _live_agent_loop_lock.release()
+
+
+def _live_agent_loop_readonly_state_snapshot():
+    try:
+        return get_live_agent_loop_state(persist_migration=False, meta=load_world_meta_fast())
+    except Exception:
+        return default_live_agent_loop_state()
 
 
 def _clean_live_agent_loop_client_detail(value, limit=160):
@@ -3751,6 +4349,8 @@ def _clean_live_agent_loop_client_detail(value, limit=160):
 
 def note_live_agent_loop_world_client_activity(source="/api/world-actions/active", client_version=None, client_info=None):
     global _live_agent_loop_last_client_at, _live_agent_loop_last_client_info
+    if not _agent_live_mode_runtime_enabled():
+        return False
     if client_version != LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION:
         return False
     now_epoch = time.time()
@@ -3850,6 +4450,8 @@ def _live_agent_user_attention_hold_sec():
 def live_agent_note_user_attention(agent_id, *, source="chat", message_preview="", hold_sec=None):
     """Mark an agent as attending to the user. Live Mode halts current live task and
     will not create new live actions for this agent until the hold expires or is cleared."""
+    if not _agent_live_mode_runtime_enabled():
+        return None
     resolved = _resolve_agent_id(agent_id) or str(agent_id or "").strip()
     if not resolved:
         return None
@@ -3871,11 +4473,20 @@ def live_agent_note_user_attention(agent_id, *, source="chat", message_preview="
         interrupted = _live_agent_halt_live_actions_for_user(resolved)
     except Exception as exc:
         print(f"⚠️  Live Mode user preemption halt failed for {resolved}: {exc}")
+    _live_agent_model_decision_cancel(resolved, reason="user-chat-preemption")
     record["interrupted"] = interrupted
 
     def _log_attention_event():
         try:
+            with _live_agent_user_attention_lock:
+                if _live_agent_user_attention.get(resolved) is not record:
+                    return
             with _live_agent_loop_lock:
+                if not _agent_live_mode_runtime_enabled():
+                    return
+                with _live_agent_user_attention_lock:
+                    if _live_agent_user_attention.get(resolved) is not record:
+                        return
                 state = get_live_agent_loop_state(persist_migration=True)
                 if state.get("userChatPreemptionEnabled", True):
                     _live_agent_loop_add_event(state, "user-attention", agent_id=resolved, details={"source": record["source"], "holdSec": hold, "interrupted": interrupted})
@@ -3921,26 +4532,54 @@ def live_agent_user_attention_status(agent_id, now_epoch=None):
         }
 
 
-def _live_agent_halt_live_actions_for_user(agent_id):
-    """Cancel active live-mode world actions and live-loop move intents for this agent
-    so it can attend to the user. User-directed and scripted work of other sources is untouched."""
+def handle_live_agent_user_attention(payload):
+    if not _agent_live_mode_runtime_enabled():
+        return False, _agent_live_mode_feature_disabled_error(), _agent_live_mode_feature_disabled_status()
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "user-attention payload must be an object."), 400
+    agent_id = payload.get("agentId") or payload.get("agent")
+    if not agent_id:
+        return False, _api_error("invalid_payload", "agentId is required."), 400
+    if payload.get("clear") is True:
+        cleared = live_agent_clear_user_attention(agent_id)
+        return True, {"ok": True, "cleared": cleared, "agentId": _resolve_agent_id(agent_id) or agent_id}, 200
+    record = live_agent_note_user_attention(
+        agent_id,
+        source=str(payload.get("source") or "api"),
+        message_preview=str(payload.get("messagePreview") or "")[:160],
+        hold_sec=payload.get("holdSec"),
+    )
+    if not record:
+        if not _agent_live_mode_runtime_enabled():
+            return False, _agent_live_mode_feature_disabled_error(), _agent_live_mode_feature_disabled_status()
+        return False, _api_error("agent_not_found", "agentId must reference an existing agent."), 404
+    return True, {"ok": True, "userAttention": {key: value for key, value in record.items() if key != "holdUntilEpoch"}}, 200
+
+
+def _live_agent_cancel_live_actions(agent_id, *, actor="agent-live-mode", move_reason="interrupted_by_live_mode", failure_reason="cancelled_by_system"):
     interrupted = []
     for active in _active_behavior_records_for_agent(agent_id):
         if active.get("behaviorSourceKind") != "agent-live-mode":
             continue
         if active.get("type") == "world-action":
             ok, result, status = cancel_world_action(active.get("id"), {
-                "failureReason": "cancelled_by_system",
-                "reason": "cancelled_by_system",
-                "actor": "user-chat-preemption",
+                "failureReason": failure_reason,
+                "reason": failure_reason,
+                "actor": actor,
                 "source": "agent-live-mode",
             })
             interrupted.append({"type": "world-action", "id": active.get("id"), "cancelled": bool(ok), "status": status})
         elif active.get("type") == "move-intent":
-            released = _interrupt_scripted_move_intent(active.get("id"), reason="interrupted_by_user_chat")
+            released = _interrupt_scripted_move_intent(active.get("id"), reason=move_reason)
             if released:
                 interrupted.append(released)
     return interrupted
+
+
+def _live_agent_halt_live_actions_for_user(agent_id):
+    """Cancel active live-mode world actions and live-loop move intents for this agent
+    so it can attend to the user. User-directed and scripted work of other sources is untouched."""
+    return _live_agent_cancel_live_actions(agent_id, actor="user-chat-preemption", move_reason="interrupted_by_user_chat")
 
 
 def _live_agent_loop_stat(container, key, amount=1):
@@ -3961,8 +4600,181 @@ def _live_agent_loop_add_event(state, event_type, *, agent_id=None, details=None
         event["details"] = details
     events = [event for event in (state.get("events") or []) if isinstance(event, dict)]
     events.append(event)
-    state["events"] = events[-retention:]
+    state["events"] = _live_agent_loop_trim_list(events, retention)
     return event
+
+
+def _live_agent_internal_notes_default():
+    now = _utc_now_iso()
+    return {
+        "schemaVersion": LIVE_AGENT_INTERNAL_NOTE_SCHEMA_VERSION,
+        "createdAt": now,
+        "updatedAt": now,
+        "agents": {},
+    }
+
+
+def _trim_agent_document_records(data, collection_key, *, max_records_per_agent, max_bytes):
+    data = data if isinstance(data, dict) else {}
+    agents = data.get("agents") if isinstance(data.get("agents"), dict) else {}
+    base = {**data, "agents": {}}
+    candidates = []
+    for agent_id, raw_row in agents.items():
+        row = raw_row if isinstance(raw_row, dict) else {}
+        records = [item for item in (row.get(collection_key) or []) if isinstance(item, dict)][-max(1, int(max_records_per_agent)):]
+        base["agents"][str(agent_id)] = {**row, collection_key: []}
+        for index, item in enumerate(records):
+            stamp = item.get("createdAt") or item.get("startedAt") or item.get("completedAt") or item.get("updatedAt") or item.get("at")
+            candidates.append({
+                "agentId": str(agent_id),
+                "index": index,
+                "epoch": _parse_isoish_epoch(stamp) or 0,
+                "item": item,
+                "bytes": _json_size_bytes(item),
+            })
+    candidates.sort(key=lambda row: (row["epoch"], row["index"]), reverse=True)
+    selected = []
+    selected_keys = set()
+    used = _json_size_bytes(base) + 512  # reserve envelope/storageBudget overhead
+
+    # Keep the newest record for each agent first, then spend the remaining
+    # budget on the newest records globally. This prevents a noisy agent from
+    # evicting every trace of quieter residents.
+    newest_per_agent = []
+    seen_agents = set()
+    for row in candidates:
+        if row["agentId"] not in seen_agents:
+            seen_agents.add(row["agentId"])
+            newest_per_agent.append(row)
+    for row in [*newest_per_agent, *candidates]:
+        key = (row["agentId"], row["index"])
+        if key in selected_keys:
+            continue
+        extra = row["bytes"] + 1
+        if row["bytes"] and used + extra <= max_bytes:
+            selected_keys.add(key)
+            selected.append(row)
+            used += extra
+
+    for row in sorted(selected, key=lambda item: (item["agentId"], item["index"])):
+        base["agents"][row["agentId"]][collection_key].append(row["item"])
+    for agent_id, row in list(base["agents"].items()):
+        if not row.get(collection_key):
+            base["agents"].pop(agent_id, None)
+    base["storageBudget"] = {
+        "maxBytes": max_bytes,
+        "currentBytes": _json_size_bytes(base),
+        "recordCount": len(selected),
+        "recordsDropped": max(0, len(candidates) - len(selected)),
+    }
+    return base
+
+
+def _load_live_agent_internal_notes():
+    try:
+        data = _read_json_file(LIVE_AGENT_INTERNAL_NOTES_FILE)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        data = _live_agent_internal_notes_default()
+    if not isinstance(data, dict):
+        data = _live_agent_internal_notes_default()
+    if not isinstance(data.get("agents"), dict):
+        data["agents"] = {}
+    data["schemaVersion"] = LIVE_AGENT_INTERNAL_NOTE_SCHEMA_VERSION
+    return data
+
+
+def _save_live_agent_internal_notes(data):
+    data = data if isinstance(data, dict) else _live_agent_internal_notes_default()
+    data["schemaVersion"] = LIVE_AGENT_INTERNAL_NOTE_SCHEMA_VERSION
+    data["updatedAt"] = _utc_now_iso()
+    data = _trim_agent_document_records(
+        data,
+        "notes",
+        max_records_per_agent=LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"] * 2,
+        max_bytes=LIVE_AGENT_INTERNAL_NOTES_MAX_BYTES,
+    )
+    data["schemaVersion"] = LIVE_AGENT_INTERNAL_NOTE_SCHEMA_VERSION
+    data["updatedAt"] = _utc_now_iso()
+    _atomic_write_text(LIVE_AGENT_INTERNAL_NOTES_FILE, _json_compact_bytes(data).decode("utf-8"))
+    return data
+
+
+def _live_agent_internal_note_id(agent_id, note_type, title, text, details=None):
+    basis = json.dumps({
+        "agentId": agent_id,
+        "type": note_type,
+        "title": title,
+        "text": text,
+        "details": _copy_jsonable(details) if isinstance(details, dict) else {},
+    }, sort_keys=True, default=str)
+    return f"note-{hashlib.sha256(basis.encode('utf-8', errors='ignore')).hexdigest()[:16]}"
+
+
+def _live_agent_loop_append_internal_note(agent_id, *, note_type="note", title="", text="", details=None, state=None, agent_state=None):
+    resolved = _resolve_agent_id(agent_id) or str(agent_id or "").strip()
+    if not resolved:
+        return None
+    title = _live_agent_loop_clean_plan_text(title or note_type, limit=180) or "Live Agent note"
+    text = _live_agent_loop_clean_plan_text(text, limit=1600) or ""
+    if not text:
+        return None
+    details = _copy_jsonable(details) if isinstance(details, dict) else {}
+    if _json_size_bytes(details) > LIVE_AGENT_INTERNAL_NOTE_DETAILS_MAX_BYTES:
+        original_bytes = _json_size_bytes(details)
+        details = _compact_json_value_for_storage(details, max_depth=4, max_items=20, string_limit=900)
+        if not isinstance(details, dict) or _json_size_bytes(details) > LIVE_AGENT_INTERNAL_NOTE_DETAILS_MAX_BYTES:
+            details = {"storageCompacted": True, "originalBytes": original_bytes}
+        else:
+            details["storageCompacted"] = True
+            details["originalBytes"] = original_bytes
+    now_iso = _utc_now_iso()
+    note = {
+        "id": _live_agent_internal_note_id(resolved, note_type, title, text, details),
+        "schemaVersion": LIVE_AGENT_INTERNAL_NOTE_SCHEMA_VERSION,
+        "agentId": resolved,
+        "type": str(note_type or "note")[:80],
+        "title": title,
+        "text": text,
+        "createdAt": now_iso,
+        "updatedAt": now_iso,
+        "source": "live-agent-mode",
+    }
+    if details:
+        note["details"] = details
+
+    with _live_agent_internal_notes_lock:
+        data = _load_live_agent_internal_notes()
+        agents = data.setdefault("agents", {})
+        row = agents.setdefault(resolved, {"notes": []})
+        if not isinstance(row, dict):
+            row = {"notes": []}
+            agents[resolved] = row
+        notes = [item for item in (row.get("notes") or []) if isinstance(item, dict) and item.get("id") != note["id"]]
+        notes.append(note)
+        notes.sort(key=lambda item: _parse_isoish_epoch(item.get("createdAt")) or 0)
+        row["notes"] = notes[-LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"] * 2:]
+        row["updatedAt"] = now_iso
+        _save_live_agent_internal_notes(data)
+
+    if isinstance(agent_state, dict):
+        memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+        memory["internalNotes"] = _live_agent_loop_trim_list([*(memory.get("internalNotes") or []), note], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
+        agent_state["memory"] = memory
+    if isinstance(state, dict):
+        _live_agent_loop_add_event(state, "internal-note-written", agent_id=resolved, details={"noteId": note["id"], "type": note["type"], "title": note["title"]})
+    return note
+
+
+def _live_agent_loop_recent_internal_notes(agent_id, limit=6):
+    resolved = _resolve_agent_id(agent_id) or str(agent_id or "").strip()
+    if not resolved:
+        return []
+    data = _load_live_agent_internal_notes()
+    row = (data.get("agents") or {}).get(resolved) if isinstance(data.get("agents"), dict) else {}
+    row = row if isinstance(row, dict) else {}
+    notes = [item for item in (row.get("notes") or []) if isinstance(item, dict)]
+    notes.sort(key=lambda item: _parse_isoish_epoch(item.get("createdAt")) or 0, reverse=True)
+    return notes[:max(1, int(limit))]
 
 
 def _live_agent_loop_clamp_need(value):
@@ -3971,6 +4783,97 @@ def _live_agent_loop_clamp_need(value):
     except (TypeError, ValueError):
         number = 0
     return round(max(0, min(1.25, number)), 3)
+
+
+def _live_agent_loop_is_benign_system_cancel(status, reason):
+    return _canonical_world_action_status(status) == "cancelled" and str(reason or "").strip() in {
+        "cancelled_by_system",
+        "superseded-by-new-plan",
+        "preempted-by-higher-priority",
+    }
+
+
+def _live_agent_loop_normalize_recent_action_record(record):
+    if not isinstance(record, dict):
+        return None
+    normalized = _copy_jsonable(record)
+    failure = normalized.get("failure") if isinstance(normalized.get("failure"), dict) else {}
+    status = _canonical_world_action_status(normalized.get("status") or failure.get("status"))
+    reason = (
+        failure.get("reason")
+        or failure.get("resultReason")
+        or failure.get("failureReason")
+        or normalized.get("resultReason")
+        or normalized.get("failureReason")
+        or status
+    )
+    if _live_agent_loop_is_benign_system_cancel(status, reason):
+        failure = dict(failure)
+        failure["status"] = failure.get("status") or status
+        failure["reason"] = failure.get("reason") or reason
+        failure["reportable"] = False
+        failure["benignSystemCancel"] = True
+        normalized["failure"] = failure
+    return normalized
+
+
+def _live_agent_loop_episode_matches_nonreportable_failure(agent_state, episode):
+    if not isinstance(agent_state, dict) or not isinstance(episode, dict):
+        return False
+    if episode.get("status") not in {"awaiting_report", "reported", "awaiting_coder"}:
+        return False
+    verification = episode.get("verification") if isinstance(episode.get("verification"), dict) else {}
+    if verification.get("ok") is True:
+        return False
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    loop_action_id = episode.get("loopActionId")
+    target_key = episode.get("targetKey")
+    matched = False
+    for item in memory.get("recentActions") or []:
+        if not isinstance(item, dict):
+            continue
+        if loop_action_id and item.get("loopActionId") != loop_action_id:
+            continue
+        failure = item.get("failure") if isinstance(item.get("failure"), dict) else {}
+        if failure.get("reportable") is not False:
+            continue
+        item_target_key = item.get("targetKey") or failure.get("targetKey") or _live_agent_loop_target_key(item.get("target"))
+        if not _live_agent_loop_target_keys_compatible(target_key, item_target_key):
+            continue
+        matched = True
+        break
+    if not matched:
+        return False
+    recent = _live_agent_loop_recent_outcome_summary(agent_state)
+    for issue in recent.get("issues") or []:
+        if not isinstance(issue, dict):
+            continue
+        if loop_action_id and issue.get("loopActionId") != loop_action_id:
+            continue
+        if not _live_agent_loop_target_keys_compatible(target_key, issue.get("targetKey")):
+            continue
+        return False
+    return True
+
+
+def _live_agent_loop_clear_nonreportable_episode(episode):
+    episode = _copy_jsonable(episode) if isinstance(episode, dict) else {}
+    if not episode:
+        return None
+    now_iso = _utc_now_iso()
+    verification = episode.get("verification") if isinstance(episode.get("verification"), dict) else {}
+    verification = dict(verification)
+    verification["reportableFailure"] = False
+    episode["verification"] = verification
+    episode["status"] = "failed"
+    episode["phase"] = "continue"
+    episode["failedAt"] = episode.get("failedAt") or episode.get("reportedAt") or episode.get("updatedAt") or now_iso
+    episode["updatedAt"] = episode.get("reportedAt") or episode.get("updatedAt") or now_iso
+    episode["operatorSummary"] = "Verification failed after a benign system cancellation; no Coder follow-up is required unless failures repeat or conditions change."
+    history = episode.setdefault("history", [])
+    if not any(isinstance(item, dict) and item.get("event") == "verification-failed-nonreportable" for item in history):
+        history.append({"at": episode["updatedAt"], "phase": "verify", "event": "verification-failed-nonreportable", "verificationId": verification.get("id")})
+    return episode
 
 
 def _live_agent_loop_normalize_memory(agent_state):
@@ -3984,9 +4887,10 @@ def _live_agent_loop_normalize_memory(agent_state):
     memory.setdefault("recentActions", [])
     memory.setdefault("observations", [])
     memory.setdefault("reflections", [])
+    memory.setdefault("internalNotes", [])
     memory["recentActions"] = _live_agent_loop_trim_list(
         _live_agent_loop_dedupe_settled_records(
-            memory.get("recentActions"),
+            [_live_agent_loop_normalize_recent_action_record(item) for item in (memory.get("recentActions") or []) if isinstance(item, dict)],
             lambda item: _live_agent_loop_settled_action_key(item.get("actionId"), item.get("status")),
         ),
         LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
@@ -4002,7 +4906,71 @@ def _live_agent_loop_normalize_memory(agent_state):
         _live_agent_loop_dedupe_settled_records(memory.get("reflections"), lambda item: item.get("actionId")),
         LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"],
     )
+    memory["internalNotes"] = _live_agent_loop_trim_list(
+        _live_agent_loop_dedupe_settled_records(memory.get("internalNotes"), lambda item: item.get("id")),
+        LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+    )
     agent_state["memory"] = memory
+    now_epoch = time.time()
+    support_requests = []
+    for item in agent_state.get("supportRequests") or []:
+        if not isinstance(item, dict):
+            continue
+        at_epoch = _parse_isoish_epoch(item.get("at")) or _parse_isoish_epoch(item.get("createdAt")) or now_epoch
+        if now_epoch - at_epoch > LIVE_AGENT_SUPPORT_REQUEST_TTL_SEC:
+            continue
+        kind = str(item.get("kind") or "note")[:80]
+        text = _live_agent_loop_clean_plan_text(item.get("text"), limit=500) or ""
+        if not text:
+            continue
+        issue_id = str(item.get("issueId") or "").strip()[:160]
+        if kind == "coder-report" and not issue_id:
+            issue_id = _live_agent_loop_support_request_issue_id({"kind": kind, "text": text})
+        if kind == "coder-report" and (not issue_id or issue_id.startswith("support.")) and _live_agent_loop_support_request_kind(text) != "coder-report":
+            continue
+        request_id = str(item.get("id") or "").strip()[:120] or _live_agent_loop_support_request_id(kind, text, issue_id=issue_id)
+        if str(item.get("status") or "").strip().lower() in {"handled", "completed", "consumed"}:
+            continue
+        if kind == "coder-report" and issue_id and _live_agent_loop_recent_support_report(agent_state, issue_id):
+            continue
+        if kind == "coder-report" and issue_id.startswith("support.") and _live_agent_loop_successful_support_outcome_after(agent_state, "coder-report", at_epoch):
+            continue
+        clean = {
+            "id": request_id,
+            "at": item.get("at") if _parse_isoish_epoch(item.get("at")) else _epoch_to_utc_iso(at_epoch),
+            "kind": kind,
+            "text": text,
+            "source": str(item.get("source") or "live-agent-mode")[:120],
+        }
+        if issue_id:
+            clean["issueId"] = issue_id
+        support_requests.append(clean)
+    agent_state["supportRequests"] = support_requests[-12:]
+    if not isinstance(agent_state.get("supportOutcomes"), list):
+        agent_state["supportOutcomes"] = []
+    else:
+        agent_state["supportOutcomes"] = _live_agent_loop_trim_list(
+            _live_agent_loop_dedupe_settled_records(agent_state.get("supportOutcomes"), lambda item: item.get("id")),
+            LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"],
+        )
+    normalized_episodes = []
+    for episode in agent_state.get("episodes") or []:
+        normalized = _live_agent_loop_normalize_episode(episode)
+        if normalized:
+            if _live_agent_loop_episode_matches_nonreportable_failure(agent_state, normalized):
+                normalized = _live_agent_loop_clear_nonreportable_episode(normalized)
+            normalized_episodes.append(normalized)
+    active_episode = _live_agent_loop_normalize_episode(agent_state.get("activeEpisode"))
+    if active_episode:
+        if _live_agent_loop_episode_matches_nonreportable_failure(agent_state, active_episode):
+            active_episode = _live_agent_loop_clear_nonreportable_episode(active_episode)
+        normalized_episodes = [episode for episode in normalized_episodes if episode.get("id") != active_episode.get("id")]
+        normalized_episodes.append(active_episode)
+    agent_state["episodes"] = _live_agent_loop_trim_list(normalized_episodes, LIVE_AGENT_LOOP_DEFAULTS["episodeRetention"])
+    if active_episode and _live_agent_loop_episode_is_active(active_episode):
+        agent_state["activeEpisode"] = active_episode
+    elif "activeEpisode" in agent_state:
+        agent_state.pop("activeEpisode", None)
     goal_progress = agent_state.get("goalProgress") if isinstance(agent_state.get("goalProgress"), dict) else {}
     cleaned_progress = {}
     for key, row in list(goal_progress.items())[-8:]:
@@ -4037,8 +5005,8 @@ def _live_agent_loop_normalize_memory(agent_state):
     if active_plan:
         normalized_plans = [plan for plan in normalized_plans if plan.get("id") != active_plan.get("id")]
         normalized_plans.append(active_plan)
-    agent_state["plans"] = normalized_plans[-LIVE_AGENT_LOOP_DEFAULTS["planRetention"]:]
-    if active_plan:
+    agent_state["plans"] = _live_agent_loop_trim_list(normalized_plans, LIVE_AGENT_LOOP_DEFAULTS["planRetention"])
+    if active_plan and _live_agent_loop_plan_is_active(active_plan):
         agent_state["activePlan"] = active_plan
     elif "activePlan" in agent_state:
         agent_state.pop("activePlan", None)
@@ -4076,19 +5044,117 @@ def _live_agent_loop_update_needs(agent_state, now_epoch=None):
     return needs
 
 
-def _live_agent_loop_decay_need_after_action(agent_state, need_key, completed=True):
+def _live_agent_loop_decay_need_after_action(agent_state, need_key, completed=True, *, bump_curiosity=True):
     needs = dict((agent_state or {}).get("needs") or LIVE_AGENT_LOOP_NEED_DEFAULTS)
     if need_key in needs:
         needs[need_key] = _live_agent_loop_clamp_need(0.12 if completed else min(1.25, needs.get(need_key, 0.5) + 0.12))
-    if completed and need_key != "curiosity":
+    if completed and bump_curiosity and need_key != "curiosity":
         needs["curiosity"] = _live_agent_loop_clamp_need(needs.get("curiosity", LIVE_AGENT_LOOP_NEED_DEFAULTS["curiosity"]) + 0.04)
     agent_state["needs"] = needs
     return needs
 
 
-def _live_agent_loop_trim_list(values, limit):
-    values = [item for item in (values or []) if isinstance(item, dict)]
-    return values[-max(1, int(limit)):]
+def _live_agent_loop_action_satisfied_needs(action_def):
+    if not isinstance(action_def, dict):
+        return []
+    needs = []
+    for value in [action_def.get("need"), *(action_def.get("satisfiesNeeds") or [])]:
+        key = str(value or "").strip()
+        if key and key in LIVE_AGENT_LOOP_NEED_DEFAULTS and key not in needs:
+            needs.append(key)
+    return needs
+
+
+def _live_agent_loop_trim_list(values, limit, *, max_bytes=LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES):
+    values = [item for item in (values or []) if isinstance(item, dict)][-max(1, int(limit)):]
+    selected = []
+    used = 2
+    for item in reversed(values):
+        candidate = item
+        size = _json_size_bytes(candidate)
+        if size > max_bytes:
+            compacted = _compact_json_value_for_storage(candidate, max_depth=4, max_items=20, string_limit=1000)
+            if isinstance(compacted, dict):
+                for key in ("id", "actionId", "loopActionId", "status", "at", "createdAt", "updatedAt"):
+                    if key in candidate:
+                        compacted[key] = candidate[key]
+                compacted["storageCompacted"] = True
+                compacted["originalBytes"] = size
+                candidate = compacted
+                size = _json_size_bytes(candidate)
+        extra = size + (1 if selected else 0)
+        if size and used + extra <= max_bytes:
+            selected.append(candidate)
+            used += extra
+    selected.reverse()
+    return selected
+
+
+def _live_agent_loop_compact_snapshot(value, *, max_bytes=64 * 1024):
+    if not isinstance(value, dict) or _json_size_bytes(value) <= max_bytes:
+        return value
+    compacted = _compact_json_value_for_storage(value, max_depth=4, max_items=24, string_limit=900)
+    if isinstance(compacted, dict):
+        compacted["storageCompacted"] = True
+        compacted["originalBytes"] = _json_size_bytes(value)
+    return compacted
+
+
+def _live_agent_loop_enforce_state_budget(state):
+    if not isinstance(state, dict):
+        return state
+    if _json_size_bytes(state) > LIVE_AGENT_LOOP_STATE_MAX_BYTES:
+        state["events"] = _live_agent_loop_trim_list(
+            state.get("events"),
+            min(20, LIVE_AGENT_LOOP_DEFAULTS["eventRetention"]),
+            max_bytes=min(128 * 1024, LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES),
+        )
+        proposals = [item for item in (state.get("operatorProposals") or []) if isinstance(item, dict)]
+        unresolved = [item for item in proposals if item.get("status") in {None, "pending"}]
+        resolved = [item for item in proposals if item not in unresolved]
+        state["operatorProposals"] = _live_agent_loop_trim_list(
+            [*resolved[-8:], *unresolved],
+            LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"],
+            max_bytes=min(192 * 1024, LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES),
+        )
+        for agent_state in (state.get("agents") or {}).values():
+            if not isinstance(agent_state, dict):
+                continue
+            memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+            for key, count in (
+                ("recentActions", 12),
+                ("observations", 12),
+                ("reflections", 10),
+                ("internalNotes", 8),
+            ):
+                memory[key] = _live_agent_loop_trim_list(
+                    memory.get(key),
+                    count,
+                    max_bytes=min(96 * 1024, LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES),
+                )
+            agent_state["memory"] = memory
+            for key, count in (
+                ("episodes", 8),
+                ("plans", 6),
+                ("feedbackReports", 10),
+                ("supportOutcomes", 10),
+            ):
+                agent_state[key] = _live_agent_loop_trim_list(
+                    agent_state.get(key),
+                    count,
+                    max_bytes=min(128 * 1024, LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES),
+                )
+            for key in ("lastPerception", "lastDecision", "lastOutcome", "autonomyPlan"):
+                if isinstance(agent_state.get(key), dict):
+                    agent_state[key] = _live_agent_loop_compact_snapshot(agent_state[key])
+    current_bytes = _json_size_bytes(state)
+    state["storageBudget"] = {
+        "stateMaxBytes": LIVE_AGENT_LOOP_STATE_MAX_BYTES,
+        "collectionMaxBytes": LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES,
+        "currentBytes": current_bytes,
+        "overBudget": current_bytes > LIVE_AGENT_LOOP_STATE_MAX_BYTES,
+    }
+    return state
 
 
 def _live_agent_loop_clean_plan_text(value, limit=220):
@@ -4270,7 +5336,7 @@ def _live_agent_loop_normalize_operator_proposals(state):
         proposal = _live_agent_loop_normalize_operator_proposal(item)
         if proposal:
             proposals.append(proposal)
-    state["operatorProposals"] = proposals[-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
+    state["operatorProposals"] = _live_agent_loop_trim_list(proposals, LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"])
     return state["operatorProposals"]
 
 
@@ -4323,7 +5389,7 @@ def _live_agent_loop_record_operator_proposal_from_rejection(state, agent_id, pa
         },
         "rejection": _copy_jsonable(rejection.get("error")) if isinstance(rejection.get("error"), dict) else _copy_jsonable(rejection),
     })
-    state["operatorProposals"] = [*existing, proposal][-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
+    state["operatorProposals"] = _live_agent_loop_trim_list([*existing, proposal], LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"])
     _live_agent_loop_add_event(state, "operator-proposal-created", agent_id=agent_id, details={"proposalId": proposal_id, "actionType": action_type, "capabilityId": capability.get("id")})
     return proposal
 
@@ -4338,6 +5404,147 @@ def _live_agent_loop_step_status(value, default="pending"):
     status = str(value or default).strip().lower().replace("-", "_")
     allowed = {"pending", "in_progress", "completed", "failed", "skipped"}
     return status if status in allowed else default
+
+
+def _live_agent_loop_episode_status(value, default="in_progress"):
+    status = str(value or default).strip().lower().replace("-", "_")
+    allowed = {
+        "in_progress",
+        "executing",
+        "verifying",
+        "verified",
+        "failed",
+        "awaiting_report",
+        "reported",
+        "awaiting_coder",
+        "coder_responded",
+        "completed",
+        "cancelled",
+    }
+    return status if status in allowed else default
+
+
+def _live_agent_loop_episode_phase(value, default="observe"):
+    phase = str(value or default).strip().lower().replace("_", "-")
+    allowed = {"observe", "reflect", "decide", "execute", "verify", "report", "await-coder", "learn", "continue"}
+    return phase if phase in allowed else default
+
+
+def _live_agent_loop_episode_is_active(episode):
+    return isinstance(episode, dict) and _live_agent_loop_episode_status(episode.get("status")) in {
+        "in_progress",
+        "executing",
+        "verifying",
+        "awaiting_report",
+        "reported",
+        "awaiting_coder",
+        "coder_responded",
+    }
+
+
+def _live_agent_loop_episode_id(agent_id, plan_id, loop_action_id, now_iso=None):
+    seed = f"{agent_id}:{plan_id}:{loop_action_id}:{now_iso or _utc_now_iso()}"
+    return "episode-" + hashlib.sha1(seed.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def _live_agent_loop_normalize_episode(episode):
+    if not isinstance(episode, dict):
+        return None
+    episode_id = _live_agent_loop_clean_plan_text(episode.get("id"), limit=140)
+    if not episode_id:
+        return None
+    now_iso = _utc_now_iso()
+    normalized = {
+        "schemaVersion": LIVE_AGENT_EPISODE_SCHEMA_VERSION,
+        "id": episode_id,
+        "status": _live_agent_loop_episode_status(episode.get("status")),
+        "phase": _live_agent_loop_episode_phase(episode.get("phase")),
+        "createdAt": episode.get("createdAt") if _parse_isoish_epoch(episode.get("createdAt")) else now_iso,
+        "updatedAt": episode.get("updatedAt") if _parse_isoish_epoch(episode.get("updatedAt")) else now_iso,
+    }
+    for key, limit in (
+        ("agentId", 120),
+        ("planId", 160),
+        ("loopActionId", 120),
+        ("actionType", 120),
+        ("actionId", 160),
+        ("issueId", 180),
+        ("title", 220),
+        ("currentGoal", 500),
+        ("hypothesis", 700),
+        ("operatorSummary", 700),
+        ("targetKey", 220),
+        ("conversationId", 220),
+    ):
+        cleaned = _live_agent_loop_clean_plan_text(episode.get(key), limit=limit)
+        if cleaned:
+            normalized[key] = cleaned
+    for key in ("completedAt", "failedAt", "reportedAt", "coderRespondedAt", "verifiedAt"):
+        if _parse_isoish_epoch(episode.get(key)):
+            normalized[key] = episode.get(key)
+    for key in ("target", "decision", "verification"):
+        value = episode.get(key)
+        if isinstance(value, dict):
+            normalized[key] = _copy_jsonable(value)
+    for key, limit in (("evidence", 10), ("reports", 8), ("coderResponses", 8), ("history", 18)):
+        value = episode.get(key)
+        if isinstance(value, list):
+            normalized[key] = [_copy_jsonable(item) for item in value if isinstance(item, dict)][-limit:]
+    successful_reports = [
+        item for item in (normalized.get("reports") or [])
+        if item.get("ok") is True or str(item.get("status") or "").strip().lower() in {"delivered", "sent", "reported", "completed"}
+    ]
+    if normalized.get("status") == "awaiting_report" and successful_reports:
+        successful_reports.sort(key=lambda item: _parse_isoish_epoch(item.get("at")) or 0)
+        latest_report = successful_reports[-1]
+        report_at = latest_report.get("at")
+        normalized["status"] = "awaiting_coder"
+        normalized["phase"] = "await-coder"
+        if _parse_isoish_epoch(report_at):
+            normalized["reportedAt"] = report_at
+            if (_parse_isoish_epoch(report_at) or 0) >= (_parse_isoish_epoch(normalized.get("updatedAt")) or 0):
+                normalized["updatedAt"] = report_at
+        normalized["operatorSummary"] = "Reported to Coder; waiting for Coder feedback before marking the issue resolved."
+    return normalized
+
+
+def _live_agent_loop_store_episode(agent_state, episode):
+    normalized = _live_agent_loop_normalize_episode(episode)
+    if not normalized:
+        return None
+    episodes = []
+    for item in agent_state.get("episodes") or []:
+        existing = _live_agent_loop_normalize_episode(item)
+        if existing and existing.get("id") != normalized.get("id"):
+            episodes.append(existing)
+    episodes.append(normalized)
+    agent_state["episodes"] = _live_agent_loop_trim_list(episodes, LIVE_AGENT_LOOP_DEFAULTS["episodeRetention"])
+    if _live_agent_loop_episode_is_active(normalized):
+        agent_state["activeEpisode"] = normalized
+    elif isinstance(agent_state.get("activeEpisode"), dict) and agent_state["activeEpisode"].get("id") == normalized.get("id"):
+        agent_state.pop("activeEpisode", None)
+    return normalized
+
+
+def _live_agent_loop_find_episode(agent_state, *, episode_id=None, plan_id=None, action_id=None, issue_id=None):
+    candidates = []
+    active = _live_agent_loop_normalize_episode(agent_state.get("activeEpisode")) if isinstance(agent_state, dict) else None
+    if active:
+        candidates.append(active)
+    for item in (agent_state.get("episodes") or []) if isinstance(agent_state, dict) else []:
+        episode = _live_agent_loop_normalize_episode(item)
+        if episode and all(episode.get("id") != existing.get("id") for existing in candidates):
+            candidates.append(episode)
+    for episode in reversed(candidates):
+        if episode_id and episode.get("id") == episode_id:
+            return episode
+        if plan_id and episode.get("planId") == plan_id:
+            return episode
+        if action_id and episode.get("actionId") == action_id:
+            return episode
+        if issue_id and episode.get("issueId") == issue_id:
+            return episode
+    return None
 
 
 def _live_agent_loop_normalize_plan(plan):
@@ -4422,12 +5629,80 @@ def _live_agent_loop_store_plan(agent_state, plan):
         if existing and existing.get("id") != normalized.get("id"):
             plans.append(existing)
     plans.append(normalized)
-    agent_state["plans"] = plans[-LIVE_AGENT_LOOP_DEFAULTS["planRetention"]:]
+    agent_state["plans"] = _live_agent_loop_trim_list(plans, LIVE_AGENT_LOOP_DEFAULTS["planRetention"])
     if _live_agent_loop_plan_is_active(normalized):
         agent_state["activePlan"] = normalized
     elif isinstance(agent_state.get("activePlan"), dict) and agent_state["activePlan"].get("id") == normalized.get("id"):
-        agent_state["activePlan"] = normalized
+        agent_state.pop("activePlan", None)
     return normalized
+
+
+def _live_agent_loop_begin_episode(state, agent_id, agent_state, plan, action_def, decision, selected, now_iso):
+    plan = _live_agent_loop_normalize_plan(plan)
+    if not plan:
+        return None
+    existing = _live_agent_loop_find_episode(agent_state, plan_id=plan.get("id"))
+    if existing:
+        existing["updatedAt"] = now_iso
+        existing.setdefault("history", []).append({"at": now_iso, "phase": existing.get("phase"), "event": "episode-resumed"})
+        return _live_agent_loop_store_episode(agent_state, existing)
+    action_def = action_def if isinstance(action_def, dict) else {}
+    decision = decision if isinstance(decision, dict) else {}
+    selected = selected if isinstance(selected, dict) else {}
+    target = selected.get("target") if isinstance(selected.get("target"), dict) else {}
+    goal_frame = decision.get("goalFrame") if isinstance(decision.get("goalFrame"), dict) else {}
+    top_goal = next((item for item in (goal_frame.get("goals") or []) if isinstance(item, dict)), {})
+    episode = {
+        "schemaVersion": LIVE_AGENT_EPISODE_SCHEMA_VERSION,
+        "id": _live_agent_loop_episode_id(agent_id, plan.get("id"), plan.get("loopActionId"), now_iso),
+        "agentId": agent_id,
+        "planId": plan.get("id"),
+        "loopActionId": plan.get("loopActionId"),
+        "actionType": plan.get("actionType"),
+        "title": plan.get("title"),
+        "status": "in_progress",
+        "phase": "decide",
+        "createdAt": now_iso,
+        "updatedAt": now_iso,
+        "currentGoal": _live_agent_loop_clean_plan_text(top_goal.get("text") or top_goal.get("reason") or decision.get("reason"), limit=500) or plan.get("title"),
+        "hypothesis": _live_agent_loop_clean_plan_text(
+            f"{plan.get('title')} should address {action_def.get('need') or plan.get('need') or 'the selected goal'} and produce verifiable evidence before the loop moves on.",
+            limit=700,
+        ),
+        "target": _copy_jsonable(target),
+        "targetKey": _live_agent_loop_target_key(target),
+        "decision": {
+            "selectedActionId": decision.get("selectedActionId"),
+            "reason": decision.get("reason"),
+            "score": decision.get("score"),
+            "mode": decision.get("mode"),
+        },
+        "evidence": [],
+        "reports": [],
+        "coderResponses": [],
+        "history": [{"at": now_iso, "phase": "decide", "event": "episode-created", "planId": plan.get("id")}],
+        "operatorSummary": "Episode created; waiting for execution evidence.",
+    }
+    stored = _live_agent_loop_store_episode(agent_state, episode)
+    if isinstance(state, dict):
+        _live_agent_loop_add_event(state, "episode-created", agent_id=agent_id, details={"episodeId": stored.get("id"), "planId": plan.get("id"), "loopActionId": plan.get("loopActionId")})
+    return stored
+
+
+def _live_agent_loop_mark_episode_executing(state, agent_id, agent_state, plan, action_id, now_iso):
+    episode = _live_agent_loop_find_episode(agent_state, plan_id=(plan or {}).get("id"))
+    if not episode:
+        return None
+    episode["status"] = "executing"
+    episode["phase"] = "execute"
+    episode["actionId"] = action_id
+    episode["updatedAt"] = now_iso
+    episode.setdefault("history", []).append({"at": now_iso, "phase": "execute", "event": "action-created", "actionId": action_id})
+    episode["operatorSummary"] = "Executing visible/support action; verification will run after terminal outcome."
+    stored = _live_agent_loop_store_episode(agent_state, episode)
+    if isinstance(state, dict):
+        _live_agent_loop_add_event(state, "episode-executing", agent_id=agent_id, details={"episodeId": stored.get("id"), "actionId": action_id, "planId": (plan or {}).get("id")})
+    return stored
 
 
 def _live_agent_loop_settled_action_key(action_id, status):
@@ -4504,6 +5779,8 @@ def _live_agent_loop_add_feedback(state, agent_id, level, message, details=None)
 
 
 def _live_agent_loop_enabled_roster():
+    if not _agent_live_mode_runtime_enabled():
+        return []
     roster = _merge_agent_profiles(get_roster())
     enabled = []
     for agent in roster:
@@ -4513,6 +5790,22 @@ def _live_agent_loop_enabled_roster():
         if agent.get("agentLiveModeEnabled") is True:
             enabled.append({**agent, "agentId": agent_id})
     return enabled
+
+
+def _live_agent_loop_round_robin_roster(roster, cursor_agent_id=None):
+    rows = [row for row in (roster or []) if isinstance(row, dict) and row.get("agentId")]
+    cursor = str(cursor_agent_id or "").strip()
+    if not rows or not cursor:
+        return rows
+    for index, row in enumerate(rows):
+        if str(row.get("agentId") or "") == cursor:
+            return [*rows[index + 1:], *rows[:index + 1]]
+    return rows
+
+
+def _live_agent_loop_note_scheduled(state, agent_id):
+    if isinstance(state, dict) and agent_id:
+        state["schedulerCursorAgentId"] = str(agent_id)
 
 
 def _live_agent_loop_presence(agent_id, state, task):
@@ -4806,6 +6099,12 @@ def _live_agent_loop_find_home_build_site(agent_id):
 
 
 def _live_agent_loop_unavailable_reason(action_def, agent_id):
+    if action_def.get("targetKind") == "support-tool":
+        if action_def.get("supportTool") == "coder-report":
+            return "no-unreported-issue-or-support-request"
+        if action_def.get("supportTool") == "internal-note":
+            return "no-new-note-material"
+        return "support-tool-unavailable"
     if action_def.get("id") == "build-small-home-site" and _live_agent_loop_existing_home_for_agent(agent_id):
         return "agent-home-already-built"
     if action_def.get("id") == "rest-at-home" and not _live_agent_loop_existing_home_for_agent(agent_id):
@@ -5019,7 +6318,6 @@ def _live_agent_loop_progress_target_keys(agent_state, category):
 
 def _live_agent_loop_find_seating_target(action_def, *, agent_id=None, agent_state=None):
     tested_keys = _live_agent_loop_progress_target_keys(agent_state, (action_def or {}).get("category") or "seating")
-    fallback = None
     for building in list_buildings():
         if not isinstance(building, dict) or _building_unavailable(building):
             continue
@@ -5084,15 +6382,53 @@ def _live_agent_loop_find_seating_target(action_def, *, agent_id=None, agent_sta
                 }
                 # Prefer untested targets so category goal work makes real
                 # progress across the world instead of reusing one object.
+                # If every available seat has already been verified, report
+                # the category as unavailable instead of cycling a completed
+                # target and making the loop look busy without new evidence.
                 if _live_agent_loop_target_key(target) in tested_keys:
-                    if fallback is None:
-                        fallback = selected
                     continue
                 return selected
-    return fallback
+    return None
 
 
 def _live_agent_loop_find_action_target(action_def, *, agent_id=None, agent_state=None):
+    if action_def.get("targetKind") == "support-tool":
+        tool = action_def.get("supportTool")
+        if tool == "coder-report":
+            context = _live_agent_loop_report_context(agent_id, agent_state if isinstance(agent_state, dict) else {})
+            if not context:
+                return None
+            return {
+                "target": {
+                    "kind": "support-tool",
+                    "supportTool": "coder-report",
+                    "toAgentId": "coder",
+                    "issueId": context.get("issueId"),
+                    "contextKind": context.get("kind"),
+                },
+                "buildingName": "",
+                "objectType": "agent-communication",
+                "availability": {"state": "available", "reason": context.get("kind"), "context": _copy_jsonable(context)},
+                "action": action_def,
+                "supportContext": context,
+            }
+        if tool == "internal-note":
+            context = _live_agent_loop_note_context(agent_id, agent_state if isinstance(agent_state, dict) else {})
+            if not context:
+                return None
+            return {
+                "target": {
+                    "kind": "support-tool",
+                    "supportTool": "internal-note",
+                    "contextKind": context.get("kind"),
+                },
+                "buildingName": "",
+                "objectType": "internal-note",
+                "availability": {"state": "available", "reason": context.get("kind"), "context": _copy_jsonable(context)},
+                "action": action_def,
+                "supportContext": context,
+            }
+        return None
     if action_def.get("targetKind") == "agent":
         social = _live_agent_loop_social_perception(agent_id)
         nearby = social.get("nearbyAgents") if isinstance(social.get("nearbyAgents"), list) else []
@@ -5585,12 +6921,14 @@ def _live_agent_loop_requested_categories(agent_id, now_epoch=None):
     }
 
 
-def _live_agent_loop_note_requested_category(agent_id, category):
+def _live_agent_loop_note_requested_category(agent_id, category, *, generation=None):
     resolved = LIVE_AGENT_INTENTION_CATEGORY_ALIASES.get(_normalize_token(category) or "")
     if not resolved or resolved not in LIVE_AGENT_DYNAMIC_OBJECT_AFFORDANCES:
         return None
     with _live_agent_model_decision_lock:
         row = _live_agent_model_decision_state.setdefault(agent_id, {})
+        if generation is not None and int(row.get("generation") or 0) != int(generation):
+            return None
         requested = row.setdefault("requestedCategories", {})
         requested[resolved] = time.time()
     return resolved
@@ -5780,6 +7118,22 @@ def _live_agent_loop_target_key(target):
     return ""
 
 
+def _live_agent_loop_target_keys_compatible(left, right):
+    left = str(left or "").strip()
+    right = str(right or "").strip()
+    if not left or not right:
+        return True
+    if left == right:
+        return True
+    for building_key, object_key in ((left, right), (right, left)):
+        if not building_key.startswith("building:") or not object_key.startswith("object:"):
+            continue
+        building_id = building_key.split(":", 1)[1]
+        if object_key == f"object:{building_id}:building":
+            return True
+    return False
+
+
 def _live_agent_loop_target_phrase(target):
     target = target if isinstance(target, dict) else {}
     if not target:
@@ -5814,6 +7168,7 @@ def _live_agent_loop_failure_learning(action, summary):
     result_reason = str(result.get("reason") or "").strip()
     failure_reason = str(summary.get("failureReason") or "").strip()
     reason = result_reason or failure_reason or status
+    benign_system_cancel = _live_agent_loop_is_benign_system_cancel(status, reason)
     evidence = {}
     if watchdog:
         for key in ("distance", "improvement", "windowSec", "samples"):
@@ -5847,6 +7202,8 @@ def _live_agent_loop_failure_learning(action, summary):
         "reason": reason,
         "failureReason": failure_reason,
         "resultReason": result_reason,
+        "reportable": not benign_system_cancel,
+        "benignSystemCancel": benign_system_cancel,
         "target": target,
         "targetKey": target_key,
         "evidence": evidence,
@@ -5894,6 +7251,7 @@ def _live_agent_loop_recent_outcome_summary(agent_state, perception=None, limit=
             continue
         failed_item = last_failure_by_action.get(loop_id) or {}
         failure = failed_item.get("failure") if isinstance(failed_item.get("failure"), dict) else {}
+        reportable_failure = failure.get("reportable") is not False
         reason = (
             failure.get("learningText")
             or failed_item.get("failureReason")
@@ -5902,6 +7260,8 @@ def _live_agent_loop_recent_outcome_summary(agent_state, perception=None, limit=
             or "recent action did not complete"
         )
         target_key = failed_item.get("targetKey") or failure.get("targetKey") or _live_agent_loop_target_key(failed_item.get("target"))
+        if not reportable_failure and int(bucket.get("recentFailureStreak") or 0) < 2:
+            continue
         issue_seed = f"{loop_id}:{target_key or ''}:{reason}"
         issues.append({
             "id": f"issue.{loop_id}.{hashlib.sha1(issue_seed.encode('utf-8')).hexdigest()[:8]}",
@@ -5924,15 +7284,445 @@ def _live_agent_loop_recent_outcome_summary(agent_state, perception=None, limit=
     }
 
 
+def _live_agent_loop_recent_episode_summary(agent_state, limit=6):
+    episodes = []
+    for item in agent_state.get("episodes") or []:
+        episode = _live_agent_loop_normalize_episode(item)
+        if episode:
+            episodes.append(episode)
+    active = _live_agent_loop_normalize_episode(agent_state.get("activeEpisode"))
+    if active and all(active.get("id") != item.get("id") for item in episodes):
+        episodes.append(active)
+    episodes.sort(key=lambda item: _parse_isoish_epoch(item.get("updatedAt")) or 0, reverse=True)
+    summaries = []
+    for episode in episodes[:max(1, int(limit))]:
+        verification = episode.get("verification") if isinstance(episode.get("verification"), dict) else {}
+        summaries.append({
+            "id": episode.get("id"),
+            "status": episode.get("status"),
+            "phase": episode.get("phase"),
+            "planId": episode.get("planId"),
+            "loopActionId": episode.get("loopActionId"),
+            "actionId": episode.get("actionId"),
+            "issueId": episode.get("issueId"),
+            "title": episode.get("title"),
+            "targetKey": episode.get("targetKey"),
+            "verificationOk": verification.get("ok") if verification else None,
+            "verificationReason": verification.get("reason") if verification else "",
+            "reportedAt": episode.get("reportedAt"),
+            "coderResponseCount": len(episode.get("coderResponses") or []),
+            "lastCoderResponse": (episode.get("coderResponses") or [{}])[-1].get("text") if episode.get("coderResponses") else "",
+            "operatorSummary": episode.get("operatorSummary"),
+            "updatedAt": episode.get("updatedAt"),
+        })
+    return summaries
+
+
+def _live_agent_loop_verified_episode_counts(agent_state, *, loop_action_id=None, target_key=None, limit=12):
+    counts = {"sameAction": 0, "sameTarget": 0}
+    if not isinstance(agent_state, dict):
+        return counts
+    episodes = []
+    for item in agent_state.get("episodes") or []:
+        episode = _live_agent_loop_normalize_episode(item)
+        if episode:
+            episodes.append(episode)
+    active = _live_agent_loop_normalize_episode(agent_state.get("activeEpisode"))
+    if active and all(active.get("id") != item.get("id") for item in episodes):
+        episodes.append(active)
+    episodes.sort(key=lambda item: _parse_isoish_epoch(item.get("updatedAt")) or 0, reverse=True)
+    for episode in episodes[:max(1, int(limit))]:
+        verification = episode.get("verification") if isinstance(episode.get("verification"), dict) else {}
+        verified = episode.get("status") == "completed" and verification.get("ok") is True
+        if not verified:
+            continue
+        if loop_action_id and episode.get("loopActionId") == loop_action_id:
+            counts["sameAction"] += 1
+        if target_key and episode.get("targetKey") == target_key:
+            counts["sameTarget"] += 1
+    return counts
+
+
+def _live_agent_loop_is_success_status_update(text):
+    value = str(text or "").lower()
+    if not value:
+        return False
+    success_terms = (
+        "completed successfully",
+        "completed cleanly",
+        "verified successfully",
+        "verified completion",
+        "has been verified",
+        "was verified",
+        "success report",
+        "successful interaction",
+    )
+    progress_terms = (
+        "avoid repeating",
+        "do not repeat",
+        "do not retest",
+        "ready to continue",
+        "continue testing",
+        "future loops can advance",
+        "next object",
+        "advance to",
+    )
+    if not any(term in value for term in success_terms):
+        return False
+    if not any(term in value for term in progress_terms):
+        return False
+    active_problem_patterns = (
+        r"\b(?:but|however|still|currently)\b.{0,90}\b(?:fail|failed|failure|error|blocked|blocker|stuck|unable|cannot|can't|broken|bug|fix|mismatch|problem|issue)\b",
+        r"\b(?:needs?|requires?)\b.{0,50}\b(?:coder|developer|fix|investigation|help)\b",
+    )
+    return not any(re.search(pattern, value) for pattern in active_problem_patterns)
+
+
+def _live_agent_loop_support_request_kind(text):
+    value = str(text or "").lower()
+    if not value:
+        return ""
+    if _live_agent_loop_is_success_status_update(value):
+        return ""
+    report_patterns = (
+        r"\b(report|tell|message|handoff|communicat(?:e|ion)?|notify|send|ask|contact|alert|escalate|file)\b.{0,80}\b(coder|developer)\b",
+        r"\b(coder|developer)\b.{0,80}\b(help request|needs? help|assistance needed|action needed|please investigate|please fix)\b",
+        r"\b(file|open|create|make|send|submit|write)\b.{0,30}\b(field report|support request)\b",
+        r"\b(report issue|escalate (?:this |the )?issue)\b",
+    )
+    if any(re.search(pattern, value) for pattern in report_patterns):
+        return "coder-report"
+    anti_note_patterns = (
+        r"\b(?:do not|don't|avoid|stop|instead of|rather than|not)\b.{0,80}\b(?:write|record|log|make|save)\b.{0,40}\bnotes?\b",
+        r"\b(?:do not|don't|avoid|stop|instead of|rather than|not)\b.{0,80}\b(?:recording|logging|writing|saving)\b.{0,40}\bnotes?\b",
+    )
+    if any(re.search(pattern, value) for pattern in anti_note_patterns):
+        return ""
+    note_patterns = (
+        r"\binternal note\b",
+        r"\b(write down|record|log|journal|remember|save|preserve)\b.{0,100}\b(plan|lesson|note|blocker|concern|issue|memory|finding|observation)\b",
+        r"\b(write down|record|log|journal)\b.{0,80}\b(?:the|this|a|an)?\s*(blocker|concern|issue|lesson|plan|finding|observation)\b",
+    )
+    if any(re.search(pattern, value) for pattern in note_patterns):
+        return "internal-note"
+    return ""
+
+
+def _live_agent_loop_support_request_issue_id(request):
+    if not isinstance(request, dict):
+        return ""
+    explicit = str(request.get("issueId") or "").strip()
+    if explicit:
+        return explicit[:160]
+    text = str(request.get("text") or "").strip()
+    if not text:
+        return ""
+    return f"support.{hashlib.sha1(text.encode('utf-8', errors='ignore')).hexdigest()[:8]}"
+
+
+def _live_agent_loop_support_request_id(kind, text, *, issue_id=None):
+    clean_kind = str(kind or "").strip()[:80]
+    clean_text = _live_agent_loop_clean_plan_text(text, limit=500) or ""
+    clean_issue = str(issue_id or "").strip()[:160]
+    basis = json.dumps({"kind": clean_kind, "text": clean_text, "issueId": clean_issue}, sort_keys=True, default=str)
+    return "support-request-" + hashlib.sha1(basis.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def _live_agent_loop_add_support_request(agent_state, kind, text, *, source="", issue_id=None):
+    if not isinstance(agent_state, dict):
+        return None
+    kind = str(kind or "").strip()[:80]
+    text = _live_agent_loop_clean_plan_text(text, limit=500)
+    if kind not in {"coder-report", "internal-note"} or not text:
+        return None
+    request = {
+        "id": _live_agent_loop_support_request_id(kind, text, issue_id=issue_id),
+        "at": _utc_now_iso(),
+        "kind": kind,
+        "text": text,
+        "source": str(source or "live-agent-mode")[:120],
+    }
+    if issue_id:
+        request["issueId"] = str(issue_id)[:160]
+    elif kind == "coder-report":
+        request["issueId"] = _live_agent_loop_support_request_issue_id(request)
+    existing = [
+        item for item in (agent_state.get("supportRequests") or [])
+        if isinstance(item, dict) and not (
+            (item.get("id") and item.get("id") == request["id"])
+            or (
+                item.get("kind") == request["kind"]
+                and str(item.get("text") or "")[:180] == request["text"][:180]
+            )
+        )
+    ]
+    agent_state["supportRequests"] = [*existing, request][-12:]
+    return request
+
+
+def _live_agent_loop_complete_support_request(agent_state, support_context, outcome, now_iso):
+    if not isinstance(agent_state, dict) or not isinstance(outcome, dict) or outcome.get("ok") is not True:
+        return None
+    support_context = support_context if isinstance(support_context, dict) else {}
+    request = support_context.get("supportRequest") if isinstance(support_context.get("supportRequest"), dict) else {}
+    expected_kind = request.get("kind")
+    if not expected_kind:
+        expected_kind = "coder-report" if outcome.get("supportTool") == "coder-report" else "internal-note" if outcome.get("supportTool") == "internal-note" else ""
+    expected_issue_id = (
+        str(outcome.get("issueId") or "").strip()
+        or str(support_context.get("issueId") or "").strip()
+        or _live_agent_loop_support_request_issue_id(request)
+    )
+    expected_id = (
+        str(outcome.get("supportRequestId") or "").strip()
+        or str(support_context.get("supportRequestId") or "").strip()
+        or str(request.get("id") or "").strip()
+    )
+    expected_text = str(request.get("text") or support_context.get("summary") or "").strip()
+    remaining = []
+    consumed = None
+    for item in agent_state.get("supportRequests") or []:
+        if not isinstance(item, dict):
+            continue
+        item_kind = str(item.get("kind") or "").strip()
+        item_text = str(item.get("text") or "").strip()
+        item_issue_id = _live_agent_loop_support_request_issue_id(item)
+        item_id = str(item.get("id") or "").strip() or _live_agent_loop_support_request_id(item_kind, item_text, issue_id=item_issue_id)
+        match = False
+        if expected_id and item_id == expected_id:
+            match = True
+        elif expected_issue_id and item_issue_id == expected_issue_id and item_kind == expected_kind:
+            match = True
+        elif expected_text and item_kind == expected_kind and item_text[:180] == expected_text[:180]:
+            match = True
+        if match and consumed is None:
+            consumed = {**item, "id": item_id, "issueId": item_issue_id, "handledAt": now_iso, "handledByActionId": outcome.get("id")}
+            continue
+        remaining.append(item)
+    if consumed:
+        agent_state["supportRequests"] = remaining[-12:]
+        outcome["consumedSupportRequestId"] = consumed.get("id")
+        outcome["consumedSupportRequest"] = {
+            "id": consumed.get("id"),
+            "kind": consumed.get("kind"),
+            "issueId": consumed.get("issueId"),
+            "handledAt": consumed.get("handledAt"),
+        }
+    return consumed
+
+
+def _live_agent_loop_note_planner_support_requests(agent_state, planner_turn, model_detail=None):
+    if not isinstance(agent_state, dict) or not isinstance(planner_turn, dict):
+        return []
+    added = []
+    chunks = []
+    chunks.extend(planner_turn.get("toolRequests") or [])
+    chunks.extend(planner_turn.get("eventRequests") or [])
+    next_step = planner_turn.get("nextStep") if isinstance(planner_turn.get("nextStep"), dict) else {}
+    for key in ("intent", "targetCriteria", "successCriteria", "failureCriteria"):
+        if next_step.get(key):
+            chunks.append(next_step.get(key))
+    memory_update = planner_turn.get("memoryUpdate") if isinstance(planner_turn.get("memoryUpdate"), dict) else {}
+    for key in ("lesson", "text", "note"):
+        if memory_update.get(key):
+            chunks.append(memory_update.get(key))
+    chunks_by_kind = {"coder-report": [], "internal-note": []}
+    for chunk in chunks:
+        kind = _live_agent_loop_support_request_kind(chunk)
+        if not kind:
+            continue
+        text = _live_agent_loop_clean_plan_text(chunk, limit=260)
+        if text and text not in chunks_by_kind[kind]:
+            chunks_by_kind[kind].append(text)
+    for kind, values in chunks_by_kind.items():
+        if not values:
+            continue
+        chunk = " | ".join(values)[:500]
+        request = _live_agent_loop_add_support_request(
+            agent_state,
+            kind,
+            chunk,
+            source=(model_detail or {}).get("status") or LIVE_AGENT_LOOP_MODEL_DECISION_MODE,
+        )
+        if request:
+            added.append(request)
+    return added
+
+
+def _live_agent_loop_recent_support_report(agent_state, issue_id):
+    issue_id = str(issue_id or "").strip()
+    if not issue_id:
+        return None
+    now_epoch = time.time()
+    for item in reversed(agent_state.get("supportOutcomes") or []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("loopActionId") != "report-issue-to-coder":
+            continue
+        if str(item.get("issueId") or "") != issue_id:
+            continue
+        at_epoch = _parse_isoish_epoch(item.get("at")) or 0
+        if at_epoch and now_epoch - at_epoch <= LIVE_AGENT_SUPPORT_REPORT_COOLDOWN_SEC:
+            return item
+    return None
+
+
+def _live_agent_loop_note_matches_kind(note, kind):
+    if not isinstance(note, dict) or not kind:
+        return False
+    if str(note.get("type") or "") == kind:
+        return True
+    details = note.get("details") if isinstance(note.get("details"), dict) else {}
+    support_context = details.get("supportContext") if isinstance(details.get("supportContext"), dict) else {}
+    return str(support_context.get("kind") or "") == kind
+
+
+def _live_agent_loop_recent_internal_note_of_kind(agent_id, agent_state, kind, *, window_sec=None, now_epoch=None):
+    kind = str(kind or "").strip()
+    if not kind:
+        return None
+    try:
+        window = float(window_sec) if window_sec is not None else 0
+    except (TypeError, ValueError):
+        window = 0
+    now_epoch = float(now_epoch or time.time())
+    notes = []
+    memory = agent_state.get("memory") if isinstance(agent_state, dict) and isinstance(agent_state.get("memory"), dict) else {}
+    notes.extend(item for item in (memory.get("internalNotes") or []) if isinstance(item, dict))
+    notes.extend(_live_agent_loop_recent_internal_notes(agent_id, limit=12))
+    notes.sort(key=lambda item: _parse_isoish_epoch(item.get("createdAt") or item.get("at") or item.get("updatedAt")) or 0, reverse=True)
+    seen = set()
+    for note in notes:
+        note_id = str(note.get("id") or "")
+        if note_id and note_id in seen:
+            continue
+        if note_id:
+            seen.add(note_id)
+        if not _live_agent_loop_note_matches_kind(note, kind):
+            continue
+        at_epoch = _parse_isoish_epoch(note.get("createdAt") or note.get("at") or note.get("updatedAt")) or 0
+        if window > 0 and at_epoch and now_epoch - at_epoch > window:
+            continue
+        return note
+    return None
+
+
+def _live_agent_loop_successful_support_outcome_after(agent_state, support_tool, at_epoch):
+    if not isinstance(agent_state, dict) or not support_tool:
+        return None
+    try:
+        request_epoch = float(at_epoch or 0)
+    except (TypeError, ValueError):
+        request_epoch = 0
+    for item in reversed(agent_state.get("supportOutcomes") or []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("supportTool") != support_tool or item.get("ok") is not True:
+            continue
+        outcome_epoch = _parse_isoish_epoch(item.get("at")) or 0
+        if outcome_epoch and outcome_epoch >= request_epoch:
+            return item
+    return None
+
+
+def _live_agent_loop_report_context(agent_id, agent_state):
+    for episode in reversed(_live_agent_loop_recent_episode_summary(agent_state, limit=8)):
+        if episode.get("status") != "awaiting_report" or not episode.get("issueId"):
+            continue
+        if _live_agent_loop_recent_support_report(agent_state, episode.get("issueId")):
+            continue
+        return {
+            "kind": "verification-issue",
+            "issueId": episode.get("issueId"),
+            "summary": episode.get("verificationReason") or episode.get("operatorSummary") or "Live Agent verification failed.",
+            "episode": episode,
+        }
+    recent = _live_agent_loop_recent_outcome_summary(agent_state)
+    for issue in recent.get("issues") or []:
+        if not isinstance(issue, dict):
+            continue
+        issue_id = issue.get("id") or f"issue.{issue.get('loopActionId')}"
+        if _live_agent_loop_recent_support_report(agent_state, issue_id):
+            continue
+        return {
+            "kind": "recent-issue",
+            "issueId": issue_id,
+            "summary": issue.get("reason") or "Recent Live Agent action did not complete.",
+            "issue": issue,
+        }
+    for request in reversed(agent_state.get("supportRequests") or []):
+        if not isinstance(request, dict) or request.get("kind") != "coder-report":
+            continue
+        issue_id = _live_agent_loop_support_request_issue_id(request)
+        if _live_agent_loop_recent_support_report(agent_state, issue_id):
+            continue
+        return {
+            "kind": "support-request",
+            "issueId": issue_id,
+            "summary": request.get("text"),
+            "supportRequestId": request.get("id") or _live_agent_loop_support_request_id(request.get("kind"), request.get("text"), issue_id=issue_id),
+            "supportRequest": request,
+        }
+    needs = agent_state.get("needs") if isinstance(agent_state.get("needs"), dict) else {}
+    try:
+        shelter_value = float(needs.get("shelter") or 0)
+    except (TypeError, ValueError):
+        shelter_value = 0
+    if shelter_value >= LIVE_AGENT_CRITICAL_NEED_THRESHOLD and not _live_agent_loop_existing_home_for_agent(agent_id):
+        issue_id = f"need.shelter.{agent_id}"
+        if not _live_agent_loop_recent_support_report(agent_state, issue_id):
+            return {
+                "kind": "critical-need",
+                "issueId": issue_id,
+                "summary": f"shelter need is critical ({round(shelter_value, 3)}) and no owned home exists yet",
+                "need": {"id": "shelter", "value": round(shelter_value, 3)},
+            }
+    return None
+
+
+def _live_agent_loop_note_context(agent_id, agent_state):
+    for request in reversed(agent_state.get("supportRequests") or []):
+        if isinstance(request, dict) and request.get("kind") == "internal-note" and request.get("text"):
+            return {
+                "kind": "support-request",
+                "summary": request.get("text"),
+                "supportRequestId": request.get("id") or _live_agent_loop_support_request_id(request.get("kind"), request.get("text"), issue_id=request.get("issueId")),
+                "supportRequest": request,
+            }
+    plan = _live_agent_loop_normalize_autonomy_plan(agent_state.get("autonomyPlan"))
+    if plan:
+        if _live_agent_loop_recent_internal_note_of_kind(
+            agent_id,
+            agent_state,
+            "autonomy-plan",
+            window_sec=LIVE_AGENT_AUTONOMY_PLAN_NOTE_COOLDOWN_SEC,
+        ):
+            plan = None
+    if plan:
+        pieces = [plan.get("currentGoal"), plan.get("reflection"), plan.get("lesson")]
+        pieces.extend(plan.get("steps") or [])
+        next_step = plan.get("nextStep") if isinstance(plan.get("nextStep"), dict) else {}
+        pieces.extend(next_step.get(key) for key in ("intent", "successCriteria", "failureCriteria") if next_step.get(key))
+        text = " ".join(str(item) for item in pieces if item)
+        if text:
+            return {"kind": "autonomy-plan", "summary": text[:700], "autonomyPlan": plan}
+    recent = _live_agent_loop_recent_outcome_summary(agent_state)
+    issue = next((item for item in recent.get("issues") or [] if isinstance(item, dict)), None)
+    if issue:
+        return {"kind": "recent-issue", "summary": issue.get("reason") or "recent issue", "issue": issue}
+    return None
+
+
 def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso):
     action_def = action_def if isinstance(action_def, dict) else {}
     decision = decision if isinstance(decision, dict) else {}
     selected = selected if isinstance(selected, dict) else {}
     loop_action_id = str(action_def.get("id") or decision.get("selectedActionId") or "visible-action")
     title = f"{action_def.get('label') or loop_action_id}"
+    is_support = _live_agent_loop_is_support_action(action_def)
     plan_id = f"plan-{agent_id}-{loop_action_id}-{int(time.time())}"
     target = selected.get("target") if isinstance(selected.get("target"), dict) else {}
-    target_label = target.get("buildingId") or target.get("catalogId") or target.get("kind") or "visible target"
+    target_label = target.get("buildingId") or target.get("catalogId") or target.get("supportTool") or target.get("kind") or ("support tool" if is_support else "visible target")
     plan = {
         "schemaVersion": LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION,
         "id": plan_id,
@@ -5947,7 +7737,7 @@ def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso)
         "currentStepIndex": 1,
         "retries": 0,
         "maxRetries": LIVE_AGENT_LOOP_DEFAULTS["planMaxRetries"],
-        "operatorSummary": f"Planning to {title} through a visible in-world executor.",
+        "operatorSummary": f"Planning to {title} through an explicit support tool." if is_support else f"Planning to {title} through a visible in-world executor.",
         "steps": [
             {
                 "id": "choose-goal",
@@ -5956,11 +7746,12 @@ def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso)
                 "updatedAt": now_iso,
             },
             {
-                "id": "execute-visible-action",
+                "id": "execute-support-tool" if is_support else "execute-visible-action",
                 "label": f"Execute {title}",
                 "status": "pending",
                 "loopActionId": loop_action_id,
                 "actionType": action_def.get("actionType"),
+                "executionKind": "support-tool" if is_support else "visible-world-action",
                 "attempts": 0,
                 "updatedAt": now_iso,
             },
@@ -5985,7 +7776,9 @@ def _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, s
             active_plan["updatedAt"] = now_iso
             active_plan["operatorSummary"] = f"Resuming plan step {step.get('label') or loop_action_id}."
             if persist:
-                return _live_agent_loop_store_plan(agent_state, active_plan)
+                stored = _live_agent_loop_store_plan(agent_state, active_plan)
+                _live_agent_loop_begin_episode(None, agent_id, agent_state, stored, action_def, decision, selected, now_iso)
+                return stored
             return active_plan
         if persist:
             active_plan["status"] = "cancelled"
@@ -5996,11 +7789,13 @@ def _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, s
             _live_agent_loop_store_plan(agent_state, active_plan)
     plan = _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso)
     if persist:
-        return _live_agent_loop_store_plan(agent_state, plan)
+        stored = _live_agent_loop_store_plan(agent_state, plan)
+        _live_agent_loop_begin_episode(None, agent_id, agent_state, stored, action_def, decision, selected, now_iso)
+        return stored
     return plan
 
 
-def _live_agent_loop_mark_plan_action_created(state, agent_id, agent_state, plan, action_id, now_iso):
+def _live_agent_loop_mark_plan_action_created(state, agent_id, agent_state, plan, action_id, now_iso, *, action_def=None, decision=None, selected=None):
     plan = _live_agent_loop_normalize_plan(plan)
     if not plan:
         return None
@@ -6015,8 +7810,13 @@ def _live_agent_loop_mark_plan_action_created(state, agent_id, agent_state, plan
     plan["startedAt"] = plan.get("startedAt") or now_iso
     plan["updatedAt"] = now_iso
     plan["lastActionId"] = action_id
-    plan["operatorSummary"] = f"Running visible plan step {step.get('label') if isinstance(step, dict) else plan.get('title')}."
+    execution_kind = (step or {}).get("executionKind") if isinstance(step, dict) else ""
+    prefix = "Running support tool step" if execution_kind == "support-tool" else "Running visible plan step"
+    plan["operatorSummary"] = f"{prefix} {step.get('label') if isinstance(step, dict) else plan.get('title')}."
     stored = _live_agent_loop_store_plan(agent_state, plan)
+    if not _live_agent_loop_find_episode(agent_state, plan_id=(stored or plan).get("id")):
+        _live_agent_loop_begin_episode(state, agent_id, agent_state, stored or plan, action_def or {}, decision or {}, selected or {}, now_iso)
+    _live_agent_loop_mark_episode_executing(state, agent_id, agent_state, stored or plan, action_id, now_iso)
     _live_agent_loop_add_event(state, "plan-step-started", agent_id=agent_id, details={"planId": plan.get("id"), "actionId": action_id, "stepId": (step or {}).get("id") if isinstance(step, dict) else None})
     return stored
 
@@ -6085,38 +7885,256 @@ def _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_stat
             step["failureReason"] = _live_agent_loop_clean_plan_text(summary.get("failureReason") or action_status, limit=220)
     plan["lastActionId"] = summary.get("id") or plan.get("lastActionId")
     plan["updatedAt"] = now_iso
-    if completed:
-        for next_step in plan.get("steps") or []:
-            if next_step.get("id") == "observe-outcome":
-                next_step["status"] = "completed"
-                next_step["updatedAt"] = now_iso
-                next_step["settledAt"] = now_iso
-        plan["status"] = "completed"
-        plan["completedAt"] = now_iso
-        plan["currentStepIndex"] = max(0, len(plan.get("steps") or []) - 1)
-        plan["operatorSummary"] = f"Completed plan: {plan.get('title')}."
-        event_type = "plan-completed"
-        details = {"planId": plan.get("id"), "actionId": summary.get("id"), "status": action_status}
-    else:
-        retries = _normalize_int(plan.get("retries"), 0, minimum=0, maximum=20) + 1
-        max_retries = _normalize_int(plan.get("maxRetries"), LIVE_AGENT_LOOP_DEFAULTS["planMaxRetries"], minimum=0, maximum=5)
-        plan["retries"] = retries
-        plan["failureReason"] = _live_agent_loop_clean_plan_text(summary.get("failureReason") or action_status, limit=240)
-        if retries <= max_retries:
-            if isinstance(step, dict):
-                step["status"] = "pending"
-            plan["status"] = "retrying"
-            plan["operatorSummary"] = f"Retrying plan {plan.get('title')} after {action_status} ({retries}/{max_retries})."
-            event_type = "plan-retrying"
-        else:
-            plan["status"] = "failed"
-            plan["failedAt"] = now_iso
-            plan["operatorSummary"] = f"Plan failed after {retries} unsuccessful attempt(s): {plan.get('failureReason')}."
-            event_type = "plan-failed"
-        details = {"planId": plan.get("id"), "actionId": summary.get("id"), "status": action_status, "retries": retries, "maxRetries": max_retries}
+    observe_index = None
+    for index, next_step in enumerate(plan.get("steps") or []):
+        if next_step.get("id") == "observe-outcome":
+            observe_index = index
+            next_step["status"] = "in_progress"
+            next_step["updatedAt"] = now_iso
+            next_step["startedAt"] = next_step.get("startedAt") or now_iso
+            next_step["attempts"] = _normalize_int(next_step.get("attempts"), 0, minimum=0, maximum=20) + 1
+            break
+    if observe_index is not None:
+        plan["currentStepIndex"] = observe_index
+    plan["status"] = "in_progress"
+    plan["operatorSummary"] = f"Verifying outcome for {plan.get('title')} before the loop can learn or continue."
+    event_type = "plan-verifying"
+    details = {"planId": plan.get("id"), "actionId": summary.get("id"), "status": action_status, "completedAction": completed}
     stored = _live_agent_loop_store_plan(agent_state, plan)
     _live_agent_loop_add_event(state, event_type, agent_id=agent_id, details=details)
     return stored
+
+
+def _live_agent_loop_finish_plan_after_verification(state, agent_id, agent_state, plan, verification, now_iso):
+    plan = _live_agent_loop_normalize_plan(plan)
+    if not plan:
+        return None
+    verification = verification if isinstance(verification, dict) else {}
+    ok = verification.get("ok") is True
+    step = _live_agent_loop_plan_current_step(plan)
+    if isinstance(step, dict) and step.get("id") == "observe-outcome":
+        step["status"] = "completed" if ok else "failed"
+        step["settledAt"] = now_iso
+        step["updatedAt"] = now_iso
+        if not ok:
+            step["failureReason"] = _live_agent_loop_clean_plan_text(verification.get("reason"), limit=220) or "verification failed"
+    plan["updatedAt"] = now_iso
+    if ok:
+        plan["status"] = "completed"
+        plan["completedAt"] = now_iso
+        plan["currentStepIndex"] = max(0, len(plan.get("steps") or []) - 1)
+        plan["operatorSummary"] = f"Verified and completed plan: {plan.get('title')}."
+        event_type = "plan-completed"
+        details = {"planId": plan.get("id"), "actionId": verification.get("actionId"), "status": "verified", "verificationId": verification.get("id")}
+    else:
+        reportable_failure = verification.get("reportableFailure") is not False
+        retries = _normalize_int(plan.get("retries"), 0, minimum=0, maximum=20) + 1
+        max_retries = _normalize_int(plan.get("maxRetries"), LIVE_AGENT_LOOP_DEFAULTS["planMaxRetries"], minimum=0, maximum=5)
+        plan["retries"] = retries
+        plan["failureReason"] = _live_agent_loop_clean_plan_text(verification.get("reason"), limit=240) or "verification failed"
+        plan["status"] = "failed"
+        plan["failedAt"] = now_iso
+        if reportable_failure:
+            plan["operatorSummary"] = f"Plan failed verification: {plan.get('failureReason')}. plan-retrying is gated until the issue is reported or new evidence exists."
+            retry_gate = "plan-retrying requires verification evidence or Coder feedback"
+        else:
+            plan["operatorSummary"] = f"Plan failed verification after a benign system cancellation: {plan.get('failureReason')}. The planner can retry when route, target, or conditions change."
+            retry_gate = "benign system cancellation can retry when route, target, or conditions change"
+        event_type = "plan-failed"
+        details = {"planId": plan.get("id"), "actionId": verification.get("actionId"), "status": "verification-failed", "verificationId": verification.get("id"), "retries": retries, "maxRetries": max_retries, "retryEvent": "plan-retrying", "retryGate": retry_gate, "reportableFailure": reportable_failure}
+    stored = _live_agent_loop_store_plan(agent_state, plan)
+    _live_agent_loop_add_event(state, event_type, agent_id=agent_id, details=details)
+    return stored
+
+
+def _live_agent_loop_verification_id(agent_id, action_id, status, now_iso):
+    basis = f"{agent_id}:{action_id}:{status}:{now_iso}"
+    return "verify-" + hashlib.sha1(basis.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def _live_agent_loop_verification_from_settled_action(agent_id, action, summary, recent_entry, now_iso):
+    summary = summary if isinstance(summary, dict) else {}
+    recent_entry = recent_entry if isinstance(recent_entry, dict) else {}
+    action_status = _canonical_world_action_status(summary.get("status"))
+    completion_validation = recent_entry.get("completionValidation") if isinstance(recent_entry.get("completionValidation"), dict) else {}
+    failure = recent_entry.get("failure") if isinstance(recent_entry.get("failure"), dict) else {}
+    result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
+    target = recent_entry.get("target") if isinstance(recent_entry.get("target"), dict) else _live_agent_loop_memory_target(action.get("target") if isinstance(action, dict) else None)
+    evidence = {
+        "method": "world-action-result",
+        "actionStatus": action_status,
+        "actionType": summary.get("actionType"),
+        "loopActionId": summary.get("loopActionId"),
+        "target": _copy_jsonable(target) if isinstance(target, dict) else None,
+        "targetKey": recent_entry.get("targetKey") or _live_agent_loop_target_key(target),
+        "terminalAt": summary.get("terminalAt"),
+        "completedAt": summary.get("completedAt"),
+        "resultStatus": result.get("status"),
+        "resultReason": result.get("reason"),
+        "visualVerification": {
+            "available": bool((VW_CONFIG.get("browser") or {}).get("cdpUrl")),
+            "status": "not-requested",
+            "reason": "server-side action evidence was used; browser capture is not yet automated for this action type",
+        },
+    }
+    if completion_validation:
+        evidence["completionValidation"] = _copy_jsonable(completion_validation)
+    if failure:
+        evidence["failure"] = _copy_jsonable(failure)
+    ok = action_status == "completed" and completion_validation.get("ok") is not False and not failure
+    reason = ""
+    if not ok:
+        reason = (
+            failure.get("learningText")
+            or completion_validation.get("reason")
+            or summary.get("failureReason")
+            or action_status
+            or "verification failed"
+        )
+    return {
+        "id": _live_agent_loop_verification_id(agent_id, summary.get("id"), action_status, now_iso),
+        "schemaVersion": "agent-live-mode-verification/v1",
+        "at": now_iso,
+        "agentId": agent_id,
+        "actionId": summary.get("id"),
+        "loopActionId": summary.get("loopActionId"),
+        "planId": summary.get("planId"),
+        "planStepId": summary.get("planStepId"),
+        "ok": bool(ok),
+        "status": "verified" if ok else "failed",
+        "reason": _live_agent_loop_clean_plan_text(reason, limit=700) if reason else "",
+        "evidence": evidence,
+    }
+
+
+def _live_agent_loop_verification_failure_reportable(agent_state, recent_entry):
+    recent_entry = recent_entry if isinstance(recent_entry, dict) else {}
+    failure = recent_entry.get("failure") if isinstance(recent_entry.get("failure"), dict) else {}
+    if failure.get("reportable") is not False:
+        return True
+    loop_action_id = recent_entry.get("loopActionId") or failure.get("loopActionId")
+    target_key = recent_entry.get("targetKey") or failure.get("targetKey") or _live_agent_loop_target_key(recent_entry.get("target"))
+    recent = _live_agent_loop_recent_outcome_summary(agent_state)
+    for issue in recent.get("issues") or []:
+        if not isinstance(issue, dict):
+            continue
+        if loop_action_id and issue.get("loopActionId") != loop_action_id:
+            continue
+        if target_key and issue.get("targetKey") and not _live_agent_loop_target_keys_compatible(target_key, issue.get("targetKey")):
+            continue
+        return True
+    return False
+
+
+def _live_agent_loop_record_episode_verification(state, agent_id, agent_state, action, summary, recent_entry, plan, now_iso):
+    verification = _live_agent_loop_verification_from_settled_action(agent_id, action, summary, recent_entry, now_iso)
+    verification_ok = verification.get("ok") is True
+    reportable_failure = True if verification_ok else _live_agent_loop_verification_failure_reportable(agent_state, recent_entry)
+    verification["reportableFailure"] = reportable_failure
+    episode = _live_agent_loop_find_episode(agent_state, plan_id=verification.get("planId"), action_id=verification.get("actionId"))
+    if not episode:
+        plan_id = verification.get("planId") or f"ad-hoc-{verification.get('actionId')}"
+        episode = {
+            "id": _live_agent_loop_episode_id(agent_id, plan_id, verification.get("loopActionId"), now_iso),
+            "agentId": agent_id,
+            "planId": plan_id,
+            "loopActionId": verification.get("loopActionId"),
+            "actionType": summary.get("actionType") if isinstance(summary, dict) else "",
+            "title": verification.get("loopActionId") or "Live Agent action",
+            "status": "verifying",
+            "phase": "verify",
+            "createdAt": now_iso,
+            "updatedAt": now_iso,
+            "evidence": [],
+            "reports": [],
+            "coderResponses": [],
+            "history": [],
+        }
+    if verification_ok:
+        episode["phase"] = "learn"
+        episode["status"] = "verified"
+    elif reportable_failure:
+        episode["phase"] = "report"
+        episode["status"] = "awaiting_report"
+    else:
+        episode["phase"] = "continue"
+        episode["status"] = "failed"
+    episode["updatedAt"] = now_iso
+    episode["verifiedAt"] = now_iso if verification_ok else episode.get("verifiedAt")
+    episode["verification"] = _copy_jsonable(verification)
+    episode["actionId"] = verification.get("actionId") or episode.get("actionId")
+    episode["targetKey"] = (verification.get("evidence") or {}).get("targetKey") or episode.get("targetKey")
+    episode.setdefault("evidence", []).append({"at": now_iso, "type": "verification", "verification": _copy_jsonable(verification)})
+    history_event = "verification-passed" if verification_ok else "verification-failed" if reportable_failure else "verification-failed-nonreportable"
+    episode.setdefault("history", []).append({"at": now_iso, "phase": "verify", "event": history_event, "verificationId": verification.get("id")})
+    if verification_ok:
+        episode["status"] = "completed"
+        episode["phase"] = "continue"
+        episode["completedAt"] = now_iso
+        episode["operatorSummary"] = "Episode verified; planner can continue with evidence in memory."
+    elif reportable_failure:
+        issue_id = f"episode.issue.{hashlib.sha1(json.dumps(verification, sort_keys=True, default=str).encode('utf-8')).hexdigest()[:10]}"
+        episode["issueId"] = issue_id
+        episode["operatorSummary"] = "Verification failed; report to Coder before treating this loop as learned."
+        _live_agent_loop_add_support_request(
+            agent_state,
+            "coder-report",
+            f"Verification failed for {verification.get('loopActionId')}: {verification.get('reason') or 'no reason recorded'}",
+            source="episode-verification",
+            issue_id=issue_id,
+        )
+    else:
+        episode.pop("issueId", None)
+        episode["failedAt"] = now_iso
+        episode["operatorSummary"] = "Verification failed after a benign system cancellation; planner can retry when route, target, or conditions change."
+    stored = _live_agent_loop_store_episode(agent_state, episode)
+    _live_agent_loop_finish_plan_after_verification(state, agent_id, agent_state, plan, verification, now_iso)
+    _live_agent_loop_add_event(
+        state,
+        "episode-verified" if verification_ok else "episode-verification-failed",
+        agent_id=agent_id,
+        details={"episodeId": stored.get("id"), "issueId": stored.get("issueId"), "verificationId": verification.get("id"), "ok": verification_ok, "reportableFailure": reportable_failure},
+    )
+    return stored
+
+
+def _live_agent_loop_record_support_episode_verification(state, agent_id, agent_state, outcome, plan, now_iso):
+    outcome = outcome if isinstance(outcome, dict) else {}
+    plan = _live_agent_loop_normalize_plan(plan)
+    verification = {
+        "id": _live_agent_loop_verification_id(agent_id, outcome.get("id"), outcome.get("status"), now_iso),
+        "schemaVersion": "agent-live-mode-verification/v1",
+        "at": now_iso,
+        "agentId": agent_id,
+        "actionId": outcome.get("id"),
+        "loopActionId": outcome.get("loopActionId"),
+        "planId": (plan or {}).get("id"),
+        "ok": outcome.get("ok") is True,
+        "status": "verified" if outcome.get("ok") else "failed",
+        "reason": "" if outcome.get("ok") else _live_agent_loop_clean_plan_text(outcome.get("error") or outcome.get("status"), limit=700),
+        "evidence": {
+            "method": "support-tool-result",
+            "supportTool": outcome.get("supportTool"),
+            "supportActionId": outcome.get("id"),
+            "communication": _copy_jsonable(outcome.get("communication")) if isinstance(outcome.get("communication"), dict) else None,
+            "noteId": outcome.get("noteId"),
+        },
+    }
+    episode = _live_agent_loop_find_episode(agent_state, plan_id=(plan or {}).get("id"), action_id=outcome.get("id"))
+    if episode:
+        episode["status"] = "completed" if verification.get("ok") else "failed"
+        episode["phase"] = "continue" if verification.get("ok") else "report"
+        episode["updatedAt"] = now_iso
+        episode["completedAt" if verification.get("ok") else "failedAt"] = now_iso
+        episode["verification"] = _copy_jsonable(verification)
+        episode.setdefault("evidence", []).append({"at": now_iso, "type": "support-verification", "verification": _copy_jsonable(verification)})
+        episode.setdefault("history", []).append({"at": now_iso, "phase": "verify", "event": "support-verification-passed" if verification.get("ok") else "support-verification-failed", "verificationId": verification.get("id")})
+        episode["operatorSummary"] = "Support tool verified." if verification.get("ok") else "Support tool failed verification."
+        _live_agent_loop_store_episode(agent_state, episode)
+    _live_agent_loop_finish_plan_after_verification(state, agent_id, agent_state, plan, verification, now_iso)
+    if outcome.get("supportTool") == "coder-report":
+        _live_agent_loop_mark_episode_reported(state, agent_id, agent_state, {"issueId": outcome.get("issueId")}, outcome, now_iso)
+    return verification
 
 
 def _live_agent_loop_build_goal_frame(agent_id, perception, agent_state):
@@ -6125,6 +8143,7 @@ def _live_agent_loop_build_goal_frame(agent_id, perception, agent_state):
     if isinstance(perception, dict) and isinstance(perception.get("social"), dict):
         context["social"] = perception.get("social")
     recent = _live_agent_loop_recent_outcome_summary(agent_state, perception)
+    recent_episodes = _live_agent_loop_recent_episode_summary(agent_state)
     active_plan = _live_agent_loop_normalize_plan(agent_state.get("activePlan"))
     goals = []
     for need_id, value in sorted((needs or {}).items(), key=lambda item: item[1], reverse=True)[:3]:
@@ -6213,6 +8232,7 @@ def _live_agent_loop_build_goal_frame(agent_id, perception, agent_state):
         "agentId": agent_id,
         "context": context,
         "recentOutcomes": recent,
+        "episodes": recent_episodes,
         "activePlan": active_plan,
         "goals": goals,
     }
@@ -6232,6 +8252,7 @@ def _live_agent_loop_action_affordances(agent_id, agent_state):
         selected = _live_agent_loop_find_action_target(action_def, agent_id=agent_id, agent_state=agent_state)
         selected_action = selected.get("action") if isinstance(selected, dict) and isinstance(selected.get("action"), dict) else action_def
         visible_contract = _live_agent_visible_action_contract(selected_action.get("actionType"))
+        is_support_tool = selected_action.get("targetKind") == "support-tool"
         affordance = {
             "id": action_def.get("id"),
             "label": selected_action.get("label") or action_def.get("label"),
@@ -6239,16 +8260,18 @@ def _live_agent_loop_action_affordances(agent_id, agent_state):
             "actionType": selected_action.get("actionType"),
             "capabilityTag": selected_action.get("capabilityTag"),
             "need": selected_action.get("need") or action_def.get("need"),
+            "satisfiesNeeds": _live_agent_loop_action_satisfied_needs(selected_action or action_def),
             "autonomyKind": selected_action.get("autonomyKind") or action_def.get("autonomyKind"),
             "available": bool(selected),
             "visibility": {
                 "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
-                "policy": "visible-world-execution-required",
+                "policy": "support-tool-execution" if is_support_tool else "visible-world-execution-required",
                 "visibleInWorld": bool(visible_contract),
                 "hiddenWorldMutationAllowed": False,
                 "clientExecutor": visible_contract.get("clientExecutor") if visible_contract else None,
                 "requiresMoveIntent": bool(visible_contract and visible_contract.get("requiresMoveIntent")),
                 "requiresPhysicalAgentPresence": bool(visible_contract),
+                "supportTool": selected_action.get("supportTool") if is_support_tool else None,
             },
         }
         if selected:
@@ -6616,6 +8639,7 @@ def _live_agent_loop_monitor_route_progress(state, agent_id, agent_state, active
 
 def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, now_epoch=None):
     now_epoch = float(now_epoch or time.time())
+    _live_agent_loop_ingest_coder_feedback(agent_id, agent_state)
     needs = _live_agent_loop_update_needs(agent_state, now_epoch)
     active = _active_behavior_records_for_agent(agent_id)
     affordances = _live_agent_loop_action_affordances(agent_id, agent_state)
@@ -6642,6 +8666,7 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
             "recentActions": _live_agent_loop_trim_list(memory.get("recentActions"), 8),
             "observations": _live_agent_loop_trim_list(memory.get("observations"), 6),
             "reflections": _live_agent_loop_trim_list(memory.get("reflections"), 6),
+            "internalNotes": _live_agent_loop_recent_internal_notes(agent_id, limit=6),
         },
         "residentProfile": resident_context,
         "world": _live_agent_loop_world_summary(),
@@ -6687,6 +8712,7 @@ def _live_agent_loop_decision_score(affordance, agent_state, goal_frame=None):
         "plan": 0,
         "recentMemory": 0,
         "reliability": 0,
+        "episodeSaturation": 0,
     }
     if top_need_value >= LIVE_AGENT_CRITICAL_NEED_THRESHOLD:
         if need_key == top_need_key:
@@ -6709,9 +8735,50 @@ def _live_agent_loop_decision_score(affordance, agent_state, goal_frame=None):
     elif loop_action_id in recent_ids:
         score -= 0.18
         breakdown["recentMemory"] -= 0.18
+    target_key = _live_agent_loop_target_key(affordance.get("target"))
+    is_support_tool = (
+        affordance.get("targetKind") == "support-tool"
+        or ((affordance.get("target") if isinstance(affordance.get("target"), dict) else {}).get("kind") == "support-tool")
+    )
+    repeat_sensitive = (
+        not is_support_tool
+        and bool(target_key)
+        and (
+            affordance.get("category")
+            or affordance.get("autonomyKind") in {"goal-work", "issue-investigation"}
+            or loop_action_id in {"use-seating-object", "work-on-active-goal", "investigate-blocking-issue"}
+        )
+    )
+    if repeat_sensitive:
+        episode_counts = _live_agent_loop_verified_episode_counts(agent_state, loop_action_id=loop_action_id, target_key=target_key)
+        if int(episode_counts.get("sameTarget") or 0) > 0:
+            penalty = min(1.15, 0.62 + (0.18 * (int(episode_counts.get("sameTarget") or 0) - 1)))
+            score -= penalty
+            breakdown["episodeSaturation"] -= penalty
+            breakdown["reliability"] -= penalty
+        elif int(episode_counts.get("sameAction") or 0) >= 3:
+            penalty = min(0.45, 0.12 * (int(episode_counts.get("sameAction") or 0) - 2))
+            score -= penalty
+            breakdown["episodeSaturation"] -= penalty
+            breakdown["reliability"] -= penalty
     if need_key in {"curiosity", "maintenance"}:
         score += 0.08
         breakdown["context"] += 0.08
+    availability = affordance.get("availability") if isinstance(affordance.get("availability"), dict) else {}
+    support_context = availability.get("context") if isinstance(availability.get("context"), dict) else {}
+    if loop_action_id == "report-issue-to-coder" and support_context:
+        boost = 0.62
+        if support_context.get("kind") == "recent-issue":
+            issue = support_context.get("issue") if isinstance(support_context.get("issue"), dict) else {}
+            boost += min(0.32, 0.08 * int(issue.get("failureStreak") or 0))
+        elif support_context.get("kind") == "critical-need":
+            boost += 0.16
+        score += boost
+        breakdown["issues"] += boost
+    if loop_action_id == "record-internal-note" and support_context:
+        boost = 0.24 if support_context.get("kind") == "autonomy-plan" else 0.18
+        score += boost
+        breakdown["plan"] += boost
     for goal in goal_frame.get("goals") or []:
         if not isinstance(goal, dict):
             continue
@@ -6726,8 +8793,11 @@ def _live_agent_loop_decision_score(affordance, agent_state, goal_frame=None):
                 score += boost
                 breakdown["goalAlignment"] += boost
         if goal.get("kind") == "issue":
-            if loop_action_id == "investigate-blocking-issue":
-                boost = min(0.95, max(0.58, priority))
+            if loop_action_id in {"report-issue-to-coder", "investigate-blocking-issue"}:
+                if loop_action_id == "report-issue-to-coder":
+                    boost = min(1.08, max(0.72, priority + 0.10))
+                else:
+                    boost = min(0.78, max(0.42, priority * 0.72))
                 if top_need_value >= LIVE_AGENT_CRITICAL_NEED_THRESHOLD and top_need_key in {"hydration", "food", "energy"}:
                     boost *= 0.55
                 score += boost
@@ -6764,7 +8834,6 @@ def _live_agent_loop_decision_score(affordance, agent_state, goal_frame=None):
         completed = int(action_summary.get("completed") or 0)
         unsuccessful = int(action_summary.get("failed") or 0) + int(action_summary.get("expired") or 0) + int(action_summary.get("cancelled") or 0)
         failure_streak = int(action_summary.get("recentFailureStreak") or 0)
-        target_key = _live_agent_loop_target_key(affordance.get("target"))
         target_failures = (action_summary.get("targetFailures") or {}).get(target_key) if target_key and isinstance(action_summary.get("targetFailures"), dict) else None
         if isinstance(target_failures, dict) and int(target_failures.get("total") or 0) > 0:
             penalty = min(1.35, 0.55 + (0.25 * int(target_failures.get("total") or 0)))
@@ -6803,16 +8872,17 @@ def _live_agent_loop_build_decision_frame(agent_id, perception, agent_state):
         "goalFrame": goal_frame,
         "visibleActionContract": {
             "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
-            "policy": "visible-world-execution-required",
+            "policy": "visible-world-execution-required-or-explicit-support-tool",
             "hiddenWorldMutationAllowed": False,
             "proposalOnlyCapabilityIds": [item.get("id") for item in LIVE_AGENT_PROPOSAL_ONLY_CAPABILITIES],
+            "supportToolCapabilityIds": ["live.note.internal", "live.report.coder"],
         },
         "topNeed": {"id": top_need[0], "value": top_need[1]},
         "selectedActionId": selected.get("id") if selected else None,
         "selectedActionLabel": selected.get("label") if selected else None,
         "score": selected.get("score") if selected else 0,
         "candidates": candidates,
-        "prompt": "Choose one available visible in-world action for the agent from this planner-v2 frame. Consider needs, personality, Resident Profile identity/goals/memory, relationships, home/work context, recent outcomes, active plans, physical presence, visible executor availability, and safe pacing. Return a loopActionId from candidates or skip. Social talk is executable only when social perception reports a nearby visible agent target. Home rest is executable only by physically routing to the agent-owned home. Small-home construction is executable only through the visible construction-site executor; arbitrary build/modify/move/delete world changes remain proposal-only until typed visible executors exist.",
+        "prompt": "Choose one available visible in-world action or explicit support tool from this planner-v2 frame. Consider needs, personality, Resident Profile identity/goals/memory, internal notes, relationships, home/work context, recent outcomes, active plans, physical presence, visible executor availability, and safe pacing. Return a loopActionId from candidates or skip. Social talk is executable only when social perception reports a nearby visible agent target. Home rest is executable only by physically routing to the agent-owned home. Small-home construction is executable only through the visible construction-site executor. Support tools may write internal notes or send Coder a report; arbitrary build/modify/move/delete world changes remain proposal-only until typed visible executors exist.",
         "reason": f"{selected.get('label')} best matches planner-v2 goals for {selected.get('need')}" if selected else "no available candidates",
     }
     agent_state["lastDecision"] = {k: frame.get(k) for k in ("at", "mode", "topNeed", "selectedActionId", "selectedActionLabel", "score", "reason")}
@@ -6906,11 +8976,11 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
         "",
         "You are living as your Virtual World resident body. This is your continuous autonomy loop: observe, reflect, plan, execute, learn, and replan across many ticks.",
         "Do not treat this as a one-shot command picker. Maintain continuity from prior plans, remember what you tried, learn from failures, explore, test, play, and adapt your next step.",
-        "Return one compact JSON object, not markdown. You may request world actions, safe tools, or events in the JSON; the world will validate and execute only approved visible actions/tools.",
+        "Return one compact JSON object, not markdown. You may request world actions, safe tools, or events in the JSON; the world will validate and execute only approved visible actions or explicit support tools.",
         "Preferred JSON shape:",
         "  {\"reflection\":\"what just happened / what you learned\",\"currentGoal\":\"what you are pursuing now\",\"plan\":[\"step 1\",\"step 2\",\"step 3\"],\"nextStep\":{\"intent\":\"what to do next and why\",\"action\":\"<available interaction id, if one fits>\",\"category\":\"<needed object/tool category if not listed>\",\"targetCriteria\":\"what kind of target to find\",\"successCriteria\":\"how to know it worked\"},\"memoryUpdate\":{\"lesson\":\"what should carry forward\"}}",
         "Legacy fallback still works if needed: INTENTION: {\"activity\":\"...\",\"action\":\"<available id>\",\"category\":\"<object category>\"} or ACTION: <interactionId> or ACTION: skip.",
-        "How this works: you decide the plan and next step; the world resolves it into safe visible interactions. If an available interaction fits your next step, name it in nextStep.action. If your plan needs a kind of world object/tool/event that is not listed, name it in nextStep.category, toolRequests, or eventRequests. If nothing is worth doing, set nextStep.action to skip and explain why in reflection.",
+        "How this works: you decide the plan and next step; the world resolves it into safe visible interactions or support tools. If an available interaction/tool fits your next step, name it in nextStep.action. If your plan needs a kind of world object/tool/event that is not listed, name it in nextStep.category, toolRequests, or eventRequests. If you notice a blocker that needs Coder, choose report-issue-to-coder when it is available; if you need to preserve a plan or lesson, choose record-internal-note when it is available. If nothing is worth doing, set nextStep.action to skip and explain why in reflection.",
         "Weigh your priorities like a real resident: a critical body need (>=0.82) comes first; unresolved failures or broken things you noticed should be dealt with before routine comfort; your own active goals come next and deserve steady progress across many loops; then routine needs, relationships, and variety. Never pretend a goal is done.",
         "",
         f"Resident: {identity.get('displayName') or agent_id}",
@@ -6957,6 +9027,24 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
         lines.append("Important short-term memory (treat failures as learning constraints; avoid same failed target unless conditions changed):")
         for line in memory_lines:
             lines.append(f"- {line}")
+    internal_notes = _live_agent_loop_recent_internal_notes(agent_id, limit=5)
+    if internal_notes:
+        lines.append("Recent internal notes (durable agent note file, not a decorative board):")
+        for note in internal_notes:
+            title = str(note.get("title") or note.get("type") or "note")[:160]
+            text = str(note.get("text") or "")[:360].replace("\n", " ")
+            lines.append(f"- {title}: {text}")
+    episodes = [item for item in (goal_frame.get("episodes") or []) if isinstance(item, dict)]
+    if episodes:
+        lines.append("Recent verification episodes (build on these; do not repeat a failed target without new evidence or Coder feedback):")
+        for episode in episodes[:6]:
+            status = episode.get("status")
+            phase = episode.get("phase")
+            action_id = episode.get("loopActionId") or episode.get("title")
+            reason = episode.get("verificationReason") or episode.get("operatorSummary") or ""
+            coder = episode.get("lastCoderResponse") or ""
+            suffix = f" Coder: {coder[:260]}" if coder else ""
+            lines.append(f"- {episode.get('id')} {status}/{phase} action={action_id} target={episode.get('targetKey') or 'n/a'} verified={episode.get('verificationOk')}: {str(reason)[:320]}{suffix}")
     goal_progress = agent_state.get("goalProgress") if isinstance(agent_state.get("goalProgress"), dict) else {}
     progress_lines = []
     for key, row in list(goal_progress.items())[:4]:
@@ -6982,7 +9070,7 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
         if next_step:
             lines.append(f"- Previous next step: {next_step.get('intent') or next_step.get('action') or next_step.get('category')}")
     lines.append("")
-    lines.append("Available interactions right now (real reachable targets; you may also request a category instead):")
+    lines.append("Available interactions/tools right now (world actions have real reachable targets; support tools have durable side effects):")
     for c in candidates[:12]:
         breakdown = c.get("scoreBreakdown") if isinstance(c.get("scoreBreakdown"), dict) else {}
         reason_bits = []
@@ -6996,7 +9084,9 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
         if target:
             target_label = target.get("catalogId") or target.get("buildingId") or target.get("kind")
             target_text = f", target: {target_label}" if target_label else ""
-        lines.append(f"- {c.get('id')}: {c.get('label')} (need: {c.get('need')}, actionType: {c.get('actionType')}, planner score: {c.get('score')}{target_text}{why})")
+        visibility = c.get("visibility") if isinstance(c.get("visibility"), dict) else {}
+        tool_text = f", supportTool: {visibility.get('supportTool')}" if visibility.get("supportTool") else ""
+        lines.append(f"- {c.get('id')}: {c.get('label')} (need: {c.get('need')}, actionType: {c.get('actionType')}{tool_text}, planner score: {c.get('score')}{target_text}{why})")
     lines.append("")
     lines.append("Decide as yourself. Return one compact JSON planner turn with reflection, currentGoal, plan, nextStep, and memoryUpdate. Keep it concise but preserve continuity.")
     return _live_agent_model_prompt_trim("\n".join(lines))
@@ -7182,9 +9272,10 @@ def _live_agent_model_decision_allowed(agent_id, now_epoch=None):
         return True, None
 
 
-def _live_agent_loop_apply_planner_turn(agent_state, model_detail):
+def _live_agent_loop_apply_planner_turn(agent_state, model_detail, agent_id=None):
     if not isinstance(agent_state, dict) or not isinstance(model_detail, dict):
         return False
+    agent_id = agent_id or model_detail.get("agentId")
     intention = model_detail.get("intention") if isinstance(model_detail.get("intention"), dict) else {}
     planner_turn = model_detail.get("plannerTurn") if isinstance(model_detail.get("plannerTurn"), dict) else intention.get("plannerTurn")
     if not isinstance(planner_turn, dict):
@@ -7216,13 +9307,40 @@ def _live_agent_loop_apply_planner_turn(agent_state, model_detail):
         }
         memory["reflections"] = _live_agent_loop_trim_list([*(memory.get("reflections") or []), entry], LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
         agent_state["memory"] = memory
+    _live_agent_loop_note_planner_support_requests(agent_state, planner_turn, model_detail)
+    if agent_id and (planner_turn.get("reflection") or planner_turn.get("currentGoal") or planner_turn.get("plan") or planner_turn.get("memoryUpdate")):
+        note_text_parts = []
+        if planner_turn.get("reflection"):
+            note_text_parts.append(f"Reflection: {planner_turn.get('reflection')}")
+        if planner_turn.get("currentGoal"):
+            note_text_parts.append(f"Goal: {planner_turn.get('currentGoal')}")
+        if planner_turn.get("plan"):
+            note_text_parts.append("Plan: " + "; ".join(str(item) for item in (planner_turn.get("plan") or [])[:6]))
+        memory_update = planner_turn.get("memoryUpdate") if isinstance(planner_turn.get("memoryUpdate"), dict) else {}
+        if memory_update:
+            note_text_parts.append("Memory: " + "; ".join(f"{key}: {value}" for key, value in list(memory_update.items())[:4]))
+        _live_agent_loop_append_internal_note(
+            agent_id,
+            note_type="planner-turn",
+            title=planner_turn.get("currentGoal") or "Live Agent planner turn",
+            text="\n".join(note_text_parts),
+            details={
+                "modelStatus": model_detail.get("status"),
+                "chosen": model_detail.get("chosen"),
+                "toolRequests": planner_turn.get("toolRequests"),
+                "eventRequests": planner_turn.get("eventRequests"),
+            },
+            agent_state=agent_state,
+        )
     _live_agent_loop_normalize_memory(agent_state)
     return True
 
 
-def _live_agent_model_decision_mark(agent_id, *, in_flight=None, min_interval_sec=None, outcome=None):
+def _live_agent_model_decision_mark(agent_id, *, in_flight=None, min_interval_sec=None, outcome=None, generation=None):
     with _live_agent_model_decision_lock:
         row = _live_agent_model_decision_state.setdefault(agent_id, {})
+        if generation is not None and int(row.get("generation") or 0) != int(generation):
+            return False
         if in_flight is not None:
             row["inFlight"] = bool(in_flight)
         if min_interval_sec is not None:
@@ -7230,6 +9348,59 @@ def _live_agent_model_decision_mark(agent_id, *, in_flight=None, min_interval_se
         if outcome is not None:
             row["lastOutcome"] = outcome
             row["lastOutcomeAt"] = _utc_now_iso()
+        return True
+
+
+def _live_agent_model_decision_start(agent_id):
+    with _live_agent_model_decision_lock:
+        row = _live_agent_model_decision_state.setdefault(agent_id, {})
+        generation = int(row.get("generation") or 0) + 1
+        row["generation"] = generation
+        row["inFlight"] = True
+        row.pop("pendingChoice", None)
+        return generation
+
+
+def _live_agent_model_decision_cancel(agent_id, reason="agent-live-mode-disabled"):
+    with _live_agent_model_decision_lock:
+        row = _live_agent_model_decision_state.setdefault(agent_id, {})
+        row["generation"] = int(row.get("generation") or 0) + 1
+        row["inFlight"] = False
+        row["cancelBeforeEpoch"] = time.time()
+        row.pop("pendingChoice", None)
+        row.pop("requestedCategories", None)
+        row["lastOutcome"] = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "cancelled", "reason": reason}
+        row["lastOutcomeAt"] = _utc_now_iso()
+
+
+def _live_agent_model_decision_generation_current(agent_id, generation):
+    with _live_agent_model_decision_lock:
+        row = _live_agent_model_decision_state.get(agent_id) or {}
+        return int(row.get("generation") or 0) == int(generation or 0)
+
+
+def _live_agent_model_decision_cancelled(agent_id, started_epoch, generation=None):
+    with _live_agent_model_decision_lock:
+        row = _live_agent_model_decision_state.get(agent_id) or {}
+        if generation is not None and int(row.get("generation") or 0) != int(generation):
+            return True
+        try:
+            cancel_epoch = float(row.get("cancelBeforeEpoch") or 0)
+            started = float(started_epoch or 0)
+        except (TypeError, ValueError):
+            return False
+        return bool(cancel_epoch and started and cancel_epoch >= started)
+
+
+def _live_agent_model_decision_publish(agent_id, generation, pending):
+    if not isinstance(pending, dict) or not _agent_live_mode_runtime_enabled():
+        return False
+    with _live_agent_model_decision_lock:
+        row = _live_agent_model_decision_state.setdefault(agent_id, {})
+        if int(row.get("generation") or 0) != int(generation or 0) or not row.get("inFlight"):
+            return False
+        row["pendingChoice"] = {**pending, "generation": generation}
+        return True
 
 
 def _live_agent_model_decision_take_completed(agent_id):
@@ -7240,8 +9411,10 @@ def _live_agent_model_decision_take_completed(agent_id):
         return pending if isinstance(pending, dict) else None
 
 
-def _live_agent_model_planner_session_key(agent_id):
-    return f"agent:{agent_id}:vw-live-mode-planner"
+def _live_agent_model_planner_session_key(agent_id, generation=None):
+    if generation is None:
+        return f"agent:{agent_id}:vw-live-mode-planner"
+    return f"agent:{agent_id}:g{int(generation)}:vw-live-mode-planner"
 
 
 def _live_agent_planner_trim_text(value, limit=LIVE_AGENT_PLANNER_TRANSCRIPT_TEXT_LIMIT):
@@ -7279,7 +9452,15 @@ def _save_live_agent_planner_transcripts(data):
     data = data if isinstance(data, dict) else _live_agent_planner_transcript_default()
     data["schemaVersion"] = LIVE_AGENT_PLANNER_TRANSCRIPT_SCHEMA_VERSION
     data["updatedAt"] = _utc_now_iso()
-    _atomic_write_text(LIVE_AGENT_PLANNER_TRANSCRIPT_FILE, json.dumps(data, indent=2, sort_keys=True) + "\n")
+    data = _trim_agent_document_records(
+        data,
+        "turns",
+        max_records_per_agent=LIVE_AGENT_PLANNER_TRANSCRIPT_RETENTION,
+        max_bytes=LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES,
+    )
+    data["schemaVersion"] = LIVE_AGENT_PLANNER_TRANSCRIPT_SCHEMA_VERSION
+    data["updatedAt"] = _utc_now_iso()
+    _atomic_write_text(LIVE_AGENT_PLANNER_TRANSCRIPT_FILE, _json_compact_bytes(data).decode("utf-8"))
     return data
 
 
@@ -7337,13 +9518,13 @@ def _live_agent_planner_transcript_record(agent_id, *, session_key, started_epoc
     return turn
 
 
-def _live_agent_model_planner_session_cleanup(agent_id):
+def _live_agent_model_planner_session_cleanup(agent_id, generation=None):
     """Delete the ephemeral planner session so internal decision prompts do not
     accumulate in the agent's session history or leak into its long-term
     memory/dreaming pipeline. Best-effort: failures never break the loop."""
     try:
         _gateway_rpc_call("sessions.delete", {
-            "key": _live_agent_model_planner_session_key(agent_id),
+            "key": _live_agent_model_planner_session_key(agent_id, generation),
             "deleteTranscript": True,
         }, timeout=10)
         return True
@@ -7351,11 +9532,11 @@ def _live_agent_model_planner_session_cleanup(agent_id):
         return False
 
 
-def _live_agent_model_decision_worker(agent_id, prompt, candidate_ids, config):
+def _live_agent_model_decision_worker(agent_id, prompt, candidate_ids, config, generation):
     """Background worker: send the decision prompt to the agent's own model via the
     gateway, wait for the reply, and cache the parsed choice for the next tick.
     Never holds the live loop lock."""
-    session_key = _live_agent_model_planner_session_key(agent_id)
+    session_key = _live_agent_model_planner_session_key(agent_id, generation)
     started = time.time()
     detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "error"}
     reply_text = ""
@@ -7381,6 +9562,7 @@ def _live_agent_model_decision_worker(agent_id, prompt, candidate_ids, config):
                 chosen, parse_status, intention = _live_agent_model_decision_parse(reply_text, candidate_ids)
                 detail = {
                     "mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE,
+                    "agentId": agent_id,
                     "status": parse_status,
                     "chosen": chosen,
                     "latencySec": round(time.time() - started, 2),
@@ -7391,30 +9573,42 @@ def _live_agent_model_decision_worker(agent_id, prompt, candidate_ids, config):
                     if isinstance(intention.get("plannerTurn"), dict):
                         detail["plannerTurn"] = intention.get("plannerTurn")
                     if intention.get("category"):
-                        resolved_category = _live_agent_loop_note_requested_category(agent_id, intention.get("category"))
+                        resolved_category = LIVE_AGENT_INTENTION_CATEGORY_ALIASES.get(_normalize_token(intention.get("category")) or "")
                         detail["requestedCategory"] = resolved_category or intention.get("category")
                         detail["categoryResolved"] = bool(resolved_category)
                 if chosen or (isinstance(intention, dict) and (intention.get("category") or isinstance(intention.get("plannerTurn"), dict))):
-                    with _live_agent_model_decision_lock:
-                        row = _live_agent_model_decision_state.setdefault(agent_id, {})
-                        row["pendingChoice"] = {"chosen": chosen, "detail": detail, "at": _utc_now_iso(), "candidateIds": candidate_ids, "intention": intention}
+                    if _live_agent_model_decision_cancelled(agent_id, started, generation):
+                        detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "discarded-after-disable", "latencySec": round(time.time() - started, 2)}
+                    else:
+                        if isinstance(intention, dict) and intention.get("category"):
+                            _live_agent_loop_note_requested_category(agent_id, intention.get("category"), generation=generation)
+                        published = _live_agent_model_decision_publish(
+                            agent_id,
+                            generation,
+                            {"chosen": chosen, "detail": detail, "at": _utc_now_iso(), "candidateIds": candidate_ids, "intention": intention},
+                        )
+                        if not published:
+                            detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "discarded-after-disable", "latencySec": round(time.time() - started, 2)}
     except Exception as exc:
         detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "gateway-error", "error": str(exc)[:300]}
     finally:
-        _live_agent_model_decision_mark(agent_id, in_flight=False, min_interval_sec=config["minIntervalSec"], outcome=detail)
-        try:
-            _live_agent_planner_transcript_record(
-                agent_id,
-                session_key=session_key,
-                started_epoch=started,
-                prompt=prompt,
-                reply_text=reply_text,
-                detail=detail,
-                candidate_ids=candidate_ids,
-            )
-        except Exception as exc:
-            print(f"[live-agent] Could not record planner transcript for {agent_id}: {exc}")
-        _live_agent_model_planner_session_cleanup(agent_id)
+        if _live_agent_model_decision_cancelled(agent_id, started, generation):
+            detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "discarded-after-disable", "latencySec": round(time.time() - started, 2)}
+        marked_current = _live_agent_model_decision_mark(agent_id, in_flight=False, min_interval_sec=config["minIntervalSec"], outcome=detail, generation=generation)
+        if marked_current and _live_agent_model_decision_generation_current(agent_id, generation):
+            try:
+                _live_agent_planner_transcript_record(
+                    agent_id,
+                    session_key=session_key,
+                    started_epoch=started,
+                    prompt=prompt,
+                    reply_text=reply_text,
+                    detail=detail,
+                    candidate_ids=candidate_ids,
+                )
+            except Exception as exc:
+                print(f"[live-agent] Could not record planner transcript for {agent_id}: {exc}")
+            _live_agent_model_planner_session_cleanup(agent_id, generation)
 
 
 def _live_agent_model_decide(agent_id, decision_frame, agent_state, config):
@@ -7436,7 +9630,7 @@ def _live_agent_model_decide(agent_id, decision_frame, agent_state, config):
         chosen = completed.get("chosen")
         detail = dict(completed.get("detail") or {})
         detail["applied"] = "async-previous-request"
-        _live_agent_loop_apply_planner_turn(agent_state, detail)
+        _live_agent_loop_apply_planner_turn(agent_state, detail, agent_id=agent_id)
         if chosen == "skip" or chosen in candidate_ids:
             return chosen, detail
         if isinstance(completed.get("intention"), dict) and completed["intention"].get("category"):
@@ -7454,10 +9648,10 @@ def _live_agent_model_decide(agent_id, decision_frame, agent_state, config):
     if not allowed:
         return None, {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": blocked_reason}
     prompt = _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state)
-    _live_agent_model_decision_mark(agent_id, in_flight=True)
+    generation = _live_agent_model_decision_start(agent_id)
     threading.Thread(
         target=_live_agent_model_decision_worker,
-        args=(agent_id, prompt, candidate_ids, config),
+        args=(agent_id, prompt, candidate_ids, config, generation),
         daemon=True,
         name=f"vw-live-model-decide-{agent_id}",
     ).start()
@@ -7504,6 +9698,19 @@ def _live_agent_loop_select_next_action(agent_id, agent_state, perception=None, 
     if config["enabled"]:
         chosen, model_detail = _live_agent_model_decide(agent_id, decision, agent_state, config)
         decision["modelDecision"] = model_detail
+        if model_detail.get("status") in {"model-request-started", "model-decision-in-flight"}:
+            decision["selectedActionId"] = None
+            decision["selectedActionLabel"] = None
+            decision["reason"] = "waiting for the agent model decision; no deterministic action is started against the same perception frame"
+            agent_state["lastDecision"] = {
+                **(agent_state.get("lastDecision") or {}),
+                "mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE,
+                "selectedActionId": None,
+                "selectedActionLabel": None,
+                "reason": decision["reason"],
+                "modelDecision": model_detail,
+            }
+            return None, decision
         if chosen == "skip":
             decision["mode"] = LIVE_AGENT_LOOP_MODEL_DECISION_MODE
             decision["selectedActionId"] = None
@@ -7849,8 +10056,8 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
     completion_validation = _live_agent_loop_seating_completion_validation(action, summary, action_def)
     completed = action_status == "completed" and completion_validation.get("ok") is not False
     memory_status = action_status if completed or action_status != "completed" else "failed"
-    if need_key:
-        _live_agent_loop_decay_need_after_action(agent_state, need_key, completed=completed)
+    for index, satisfied_need in enumerate(_live_agent_loop_action_satisfied_needs(action_def)):
+        _live_agent_loop_decay_need_after_action(agent_state, satisfied_need, completed=completed, bump_curiosity=index == 0)
     memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
     target_memory = _live_agent_loop_memory_target(action.get("target") if isinstance(action, dict) else None)
     failure_learning = _live_agent_loop_failure_learning(action, summary) or _live_agent_loop_completion_validation_failure(action, summary, completion_validation)
@@ -7915,8 +10122,21 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
     memory["reflections"] = _live_agent_loop_trim_list([*(memory.get("reflections") or []), reflection], LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
     agent_state["memory"] = memory
     _live_agent_loop_remember_resident_profile_action(agent_id, recent_entry, observation, reflection, social_relationship)
+    planning_note = None
+    if completed and summary.get("loopActionId") in {"brainstorm-whiteboard", "work-on-active-goal", "investigate-blocking-issue"}:
+        planning_note = _live_agent_loop_append_internal_note(
+            agent_id,
+            note_type=summary.get("loopActionId") or "planning",
+            title=label,
+            text=f"{observation_text}\n{reflection.get('text') or reflection_text}",
+            details={"actionId": action_id, "loopActionId": summary.get("loopActionId"), "target": _copy_jsonable(target_memory)},
+            state=state,
+            agent_state=agent_state,
+        )
     _live_agent_loop_mark_settled_action(agent_state, action_id, action_status)
     details = {"actionId": action_id, "loopActionId": summary.get("loopActionId"), "status": memory_status}
+    if planning_note:
+        details["noteId"] = planning_note.get("id")
     if completion_validation.get("required"):
         details["completionValidation"] = _copy_jsonable(completion_validation)
     if completed:
@@ -7989,7 +10209,9 @@ def _live_agent_loop_refresh_completed_outcomes(state):
         if action_status == "completed":
             agent_state["lastCompletedActionAt"] = now
         remembered = _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary)
-        _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_state, summary, action_status, now)
+        plan = _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_state, summary, action_status, now)
+        if isinstance(remembered, dict) and not remembered.get("duplicate"):
+            _live_agent_loop_record_episode_verification(state, agent_id, agent_state, action, summary, remembered, plan, now)
         if not (isinstance(remembered, dict) and remembered.get("duplicate")):
             _live_agent_loop_add_event(state, "action-settled", agent_id=agent_id, details={"actionId": action_id, "status": action_status})
         changed = True
@@ -8011,15 +10233,300 @@ def _live_agent_loop_cooldown_for_decision(base_cooldown, decision):
     return _normalize_int(round(base_cooldown * multiplier), base_cooldown, minimum=45, maximum=3600)
 
 
+def _live_agent_loop_is_support_action(action_def):
+    return isinstance(action_def, dict) and action_def.get("targetKind") == "support-tool"
+
+
+def _live_agent_loop_support_action_id(agent_id, loop_action_id, now_epoch=None):
+    stamp = int(float(now_epoch or time.time()) * 1000)
+    token = re.sub(r"[^a-z0-9_-]+", "-", str(loop_action_id or "support").lower()).strip("-") or "support"
+    agent_token = re.sub(r"[^a-z0-9_-]+", "-", str(agent_id or "agent").lower()).strip("-") or "agent"
+    return f"lsa-{stamp}-{agent_token}-{token}"
+
+
+def _live_agent_loop_support_report_message(agent_id, context, decision=None):
+    context = context if isinstance(context, dict) else {}
+    decision = decision if isinstance(decision, dict) else {}
+    agent_name = _live_agent_loop_agent_display_name(agent_id)
+    lines = [
+        f"Live Agent field report from {agent_name} ({agent_id}).",
+        "",
+        f"Reason: {context.get('summary') or 'Live Agent Mode selected report-issue-to-coder.'}",
+    ]
+    issue = context.get("issue") if isinstance(context.get("issue"), dict) else {}
+    if issue:
+        lines.extend([
+            f"Issue id: {issue.get('id')}",
+            f"Loop action: {issue.get('loopActionId')}",
+            f"Failure streak: {issue.get('failureStreak')}",
+            f"Target key: {issue.get('targetKey') or 'n/a'}",
+        ])
+    episode = context.get("episode") if isinstance(context.get("episode"), dict) else {}
+    if episode:
+        lines.extend([
+            f"Episode id: {episode.get('id')}",
+            f"Loop action: {episode.get('loopActionId')}",
+            f"Verification ok: {episode.get('verificationOk')}",
+            f"Verification reason: {episode.get('verificationReason') or episode.get('operatorSummary')}",
+            f"Target key: {episode.get('targetKey') or 'n/a'}",
+        ])
+    need = context.get("need") if isinstance(context.get("need"), dict) else {}
+    if need:
+        lines.append(f"Need: {need.get('id')}={need.get('value')}")
+    if decision.get("reason"):
+        lines.append(f"Planner reason: {decision.get('reason')}")
+    lines.append("")
+    lines.append("Please audit the root cause and fix the shared Live Agent behavior if this is a product issue. The report is also stored in Virtual World communication history and internal notes.")
+    return "\n".join(str(line) for line in lines if line is not None)[:4000]
+
+
+def _live_agent_loop_mark_episode_reported(state, agent_id, agent_state, support_context, outcome, now_iso):
+    support_context = support_context if isinstance(support_context, dict) else {}
+    outcome = outcome if isinstance(outcome, dict) else {}
+    issue_id = support_context.get("issueId") or outcome.get("issueId")
+    episode = _live_agent_loop_find_episode(agent_state, issue_id=issue_id)
+    if not episode:
+        candidates = []
+        active = _live_agent_loop_normalize_episode(agent_state.get("activeEpisode")) if isinstance(agent_state, dict) else None
+        if active:
+            candidates.append(active)
+        for item in (agent_state.get("episodes") or []) if isinstance(agent_state, dict) else []:
+            current = _live_agent_loop_normalize_episode(item)
+            if current and all(current.get("id") != existing.get("id") for existing in candidates):
+                candidates.append(current)
+        episode = next((item for item in reversed(candidates) if item.get("status") == "awaiting_report"), None)
+    if not episode:
+        return None
+    communication = outcome.get("communication") if isinstance(outcome.get("communication"), dict) else {}
+    report = {
+        "at": now_iso,
+        "supportActionId": outcome.get("id"),
+        "issueId": issue_id,
+        "conversationId": communication.get("conversationId"),
+        "messageId": communication.get("messageId"),
+        "deliveryMessageId": communication.get("deliveryMessageId"),
+        "status": outcome.get("status"),
+        "ok": outcome.get("ok") is True,
+    }
+    episode.setdefault("reports", []).append(report)
+    episode.setdefault("history", []).append({"at": now_iso, "phase": "report", "event": "reported-to-coder", "supportActionId": outcome.get("id")})
+    episode["status"] = "awaiting_coder"
+    episode["phase"] = "await-coder"
+    episode["reportedAt"] = now_iso
+    episode["updatedAt"] = now_iso
+    episode["conversationId"] = communication.get("conversationId") or episode.get("conversationId")
+    if issue_id:
+        episode["issueId"] = issue_id
+    episode["operatorSummary"] = "Reported to Coder; waiting for Coder feedback before marking the issue resolved."
+    stored = _live_agent_loop_store_episode(agent_state, episode)
+    if isinstance(state, dict):
+        _live_agent_loop_add_event(state, "episode-reported-to-coder", agent_id=agent_id, details={"episodeId": stored.get("id"), "issueId": stored.get("issueId"), "conversationId": stored.get("conversationId")})
+    return stored
+
+
+def _live_agent_loop_ingest_coder_feedback(agent_id, agent_state):
+    if not isinstance(agent_state, dict):
+        return []
+    changed = []
+    episodes = []
+    active = _live_agent_loop_normalize_episode(agent_state.get("activeEpisode"))
+    if active:
+        episodes.append(active)
+    for item in agent_state.get("episodes") or []:
+        episode = _live_agent_loop_normalize_episode(item)
+        if episode and all(episode.get("id") != existing.get("id") for existing in episodes):
+            episodes.append(episode)
+    for episode in episodes:
+        if _live_agent_loop_episode_status(episode.get("status")) not in {"awaiting_coder", "reported"}:
+            continue
+        conversation_id = episode.get("conversationId")
+        if not conversation_id:
+            continue
+        events = _load_comm_history(limit=100, conversation_id=conversation_id)
+        seen_ids = {item.get("eventId") or item.get("messageId") for item in (episode.get("coderResponses") or []) if isinstance(item, dict)}
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            src = event.get("from") if isinstance(event.get("from"), dict) else {}
+            dst = event.get("to") if isinstance(event.get("to"), dict) else {}
+            if src.get("id") != "coder" or dst.get("id") != agent_id:
+                continue
+            event_id = event.get("id")
+            if event_id in seen_ids:
+                continue
+            text = _live_agent_loop_clean_plan_text(event.get("text"), limit=1200)
+            if not text:
+                continue
+            response = {
+                "at": _epoch_to_utc_iso((float(event.get("ts") or 0) / 1000.0)) if event.get("ts") else _utc_now_iso(),
+                "eventId": event_id,
+                "messageId": event_id,
+                "conversationId": conversation_id,
+                "text": text,
+            }
+            episode.setdefault("coderResponses", []).append(response)
+            episode.setdefault("history", []).append({"at": response["at"], "phase": "continue", "event": "coder-response-received", "eventId": event_id})
+            episode["status"] = "coder_responded"
+            episode["phase"] = "continue"
+            episode["coderRespondedAt"] = response["at"]
+            episode["operatorSummary"] = "Coder feedback received; next planner frame must incorporate it before retrying."
+            changed.append(_live_agent_loop_store_episode(agent_state, episode))
+            _live_agent_loop_append_internal_note(
+                agent_id,
+                note_type="coder-feedback",
+                title=f"Coder feedback for {episode.get('issueId') or episode.get('title') or 'Live Agent issue'}",
+                text=text,
+                details={"episodeId": episode.get("id"), "conversationId": conversation_id, "eventId": event_id},
+                agent_state=agent_state,
+            )
+    return changed
+
+
+def _live_agent_loop_execute_support_action(state, agent_id, agent_state, action_def, decision, selected, plan, *, now_epoch=None, now_iso=None):
+    now_epoch = float(now_epoch or time.time())
+    now_iso = now_iso or _utc_now_iso()
+    loop_action_id = action_def.get("id")
+    support_id = _live_agent_loop_support_action_id(agent_id, loop_action_id, now_epoch)
+    selected = selected if isinstance(selected, dict) else {}
+    support_context = selected.get("supportContext") if isinstance(selected, dict) and isinstance(selected.get("supportContext"), dict) else {}
+    if not support_context and isinstance(decision, dict):
+        for candidate in decision.get("candidates") or []:
+            if not isinstance(candidate, dict) or candidate.get("id") != loop_action_id:
+                continue
+            availability = candidate.get("availability") if isinstance(candidate.get("availability"), dict) else {}
+            context = availability.get("context") if isinstance(availability.get("context"), dict) else {}
+            if context:
+                support_context = context
+                break
+    support_tool = action_def.get("supportTool")
+    support_request = support_context.get("supportRequest") if isinstance(support_context.get("supportRequest"), dict) else {}
+    support_request_id = (
+        str(support_context.get("supportRequestId") or "").strip()
+        or str(support_request.get("id") or "").strip()
+    )
+    outcome = {
+        "id": support_id,
+        "schemaVersion": LIVE_AGENT_SUPPORT_ACTION_SCHEMA_VERSION,
+        "at": now_iso,
+        "agentId": agent_id,
+        "loopActionId": loop_action_id,
+        "actionType": action_def.get("actionType"),
+        "supportTool": support_tool,
+        "status": "completed",
+        "issueId": support_context.get("issueId"),
+        "supportRequestId": support_request_id or None,
+        "contextKind": support_context.get("kind"),
+    }
+    if support_tool == "internal-note":
+        note = _live_agent_loop_append_internal_note(
+            agent_id,
+            note_type=support_context.get("kind") or "internal-note",
+            title=action_def.get("label") or "Live Agent internal note",
+            text=support_context.get("summary") or "Live Agent recorded an internal note.",
+            details={"loopActionId": loop_action_id, "decision": _copy_jsonable(decision), "supportContext": _copy_jsonable(support_context)},
+            state=state,
+            agent_state=agent_state,
+        )
+        outcome["noteId"] = (note or {}).get("id")
+        outcome["ok"] = bool(note)
+        if not note:
+            outcome["status"] = "failed"
+            outcome["error"] = "no note text was available"
+    elif support_tool == "coder-report":
+        message = _live_agent_loop_support_report_message(agent_id, support_context, decision)
+        note = _live_agent_loop_append_internal_note(
+            agent_id,
+            note_type="coder-report",
+            title=f"Report to Coder: {support_context.get('issueId') or support_context.get('kind') or 'Live Agent issue'}",
+            text=message,
+            details={"loopActionId": loop_action_id, "supportContext": _copy_jsonable(support_context)},
+            state=state,
+            agent_state=agent_state,
+        )
+        payload = {
+            "fromAgentId": agent_id,
+            "toAgentId": "coder",
+            "message": message,
+            "conversationId": f"live-agent-report:{agent_id}:coder",
+            "fromType": "agent",
+            "sourceApp": "virtual-world",
+            "sourceSurface": "live-agent-mode",
+            "sourceLabel": "Live Agent Mode",
+            "timeoutSec": 20,
+            "metadata": {
+                "schemaVersion": LIVE_AGENT_SUPPORT_ACTION_SCHEMA_VERSION,
+                "supportActionId": support_id,
+                "loopActionId": loop_action_id,
+                "issueId": support_context.get("issueId"),
+                "contextKind": support_context.get("kind"),
+            },
+        }
+        delivery, status = _handle_agent_platform_comm_send(payload)
+        outcome["noteId"] = (note or {}).get("id")
+        outcome["communication"] = {
+            "ok": bool(isinstance(delivery, dict) and delivery.get("ok")),
+            "httpStatus": status,
+            "messageId": delivery.get("messageId") if isinstance(delivery, dict) else None,
+            "deliveryMessageId": delivery.get("deliveryMessageId") or delivery.get("replyMessageId") if isinstance(delivery, dict) else None,
+            "conversationId": delivery.get("conversationId") if isinstance(delivery, dict) else payload["conversationId"],
+            "sessionKey": delivery.get("sessionKey") if isinstance(delivery, dict) else None,
+            "error": str(delivery.get("error") or "")[:500] if isinstance(delivery, dict) else "",
+        }
+        outcome["ok"] = bool(outcome["communication"].get("messageId") or outcome["communication"].get("ok"))
+        if not outcome["communication"].get("ok"):
+            outcome["status"] = "logged-delivery-pending" if outcome["ok"] else "failed"
+    else:
+        outcome["status"] = "failed"
+        outcome["ok"] = False
+        outcome["error"] = f"unknown support tool: {support_tool}"
+
+    _live_agent_loop_complete_support_request(agent_state, support_context, outcome, now_iso)
+    agent_state["supportOutcomes"] = _live_agent_loop_trim_list([*(agent_state.get("supportOutcomes") or []), outcome], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
+    agent_state["lastOutcome"] = {"at": now_iso, "status": outcome["status"], "supportAction": outcome, "decision": agent_state.get("lastDecision")}
+    agent_state["lastActionAt"] = now_iso
+    agent_state["lastActionId"] = support_id
+    agent_state["lastSettledActionAt"] = now_iso
+    if outcome.get("ok"):
+        _live_agent_loop_stat(agent_state, "supportActionsCreated")
+        _live_agent_loop_stat(state, "supportActionsCreated")
+        stored_plan = _live_agent_loop_mark_plan_action_created(
+            state,
+            agent_id,
+            agent_state,
+            plan,
+            support_id,
+            now_iso,
+            action_def=action_def,
+            decision=decision,
+            selected=selected,
+        )
+        verifying_plan = _live_agent_loop_update_plan_from_settled_action(state, agent_id, agent_state, {
+            "id": support_id,
+            "status": "completed",
+            "loopActionId": loop_action_id,
+            "actionType": action_def.get("actionType"),
+            "planId": (stored_plan or plan or {}).get("id"),
+            "planStepId": (_live_agent_loop_plan_current_step(stored_plan or plan) or {}).get("id") if isinstance(stored_plan or plan, dict) else None,
+        }, "completed", now_iso)
+        _live_agent_loop_record_support_episode_verification(state, agent_id, agent_state, outcome, verifying_plan or stored_plan or plan, now_iso)
+        _live_agent_loop_add_feedback(state, agent_id, "info", f"Completed support tool: {action_def.get('label')}.", {"supportActionId": support_id, "loopActionId": loop_action_id, "status": outcome["status"]})
+        _live_agent_loop_add_event(state, "support-action-completed", agent_id=agent_id, details=outcome)
+    else:
+        _live_agent_loop_stat(agent_state, "errors")
+        _live_agent_loop_stat(state, "errors")
+        _live_agent_loop_mark_plan_action_request_failed(state, agent_id, agent_state, plan, outcome.get("error") or outcome.get("status"), now_iso)
+        _live_agent_loop_add_feedback(state, agent_id, "error", f"Support tool failed: {action_def.get('label')}.", outcome)
+        _live_agent_loop_add_event(state, "support-action-failed", agent_id=agent_id, details=outcome)
+    return outcome
+
+
 def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
     with _live_agent_loop_lock:
-        state = get_live_agent_loop_state(persist_migration=True)
+        state = get_live_agent_loop_state(persist_migration=False)
         now_epoch = time.time()
         now_iso = _utc_now_iso()
         world_client = _live_agent_loop_world_client_status(state)
         pause = _live_agent_loop_pause_status(state, now_epoch=now_epoch)
-        stale_expired = [] if dry_run else _live_agent_loop_reconcile_stale_active_behaviors(state, now_epoch=now_epoch)
-        settled_refreshed = False if dry_run else _live_agent_loop_refresh_completed_outcomes(state)
         result = {
             "ok": True,
             "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
@@ -8029,43 +10536,49 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             "worldClient": world_client,
             "serverRuntimeAuthority": True,
             "pause": pause,
-            "staleExpired": stale_expired,
-            "settledRefreshed": settled_refreshed,
+            "staleExpired": [],
+            "settledRefreshed": False,
             "enabledAgents": [],
             "actionsCreated": [],
             "skipped": [],
             "decisions": [],
             "errors": [],
         }
-        state["lastTickAt"] = now_iso
-        _live_agent_loop_stat(state, "ticks")
-        if dry_run:
-            _live_agent_loop_stat(state, "dryRuns")
-
-        if not check_feature("agentLiveMode"):
+        if not _agent_live_mode_runtime_enabled():
+            kill = enforce_live_agent_feature_kill(reason="agent-live-mode-runtime-disabled")
             result["ok"] = False
-            result["disabledReason"] = "agentLiveMode feature is disabled or locked"
-            _live_agent_loop_add_event(state, "feature-disabled", details={"reason": result["disabledReason"]})
-            if not dry_run:
-                save_live_agent_loop_state(state)
+            result["disabledReason"] = (_agent_live_mode_feature_disabled_error().get("error") or {}).get("message")
+            result["featureKill"] = {key: value for key, value in kill.items() if key != "state"}
             return result
 
         if not state.get("enabled") and not force:
             result["disabledReason"] = "live agent loop is disabled"
-            _live_agent_loop_add_event(state, "loop-disabled")
-            if not dry_run:
-                save_live_agent_loop_state(state)
             return result
 
         if pause.get("active") and not force:
             result["disabledReason"] = "live agent loop is paused"
             result["skipped"].append({"reason": "loop-paused", "pause": pause})
-            if not dry_run:
-                save_live_agent_loop_state(state)
             return result
 
         enabled_agents = _live_agent_loop_enabled_roster()
+        if not enabled_agents:
+            result["disabledReason"] = "no agents have Agent Live Mode enabled"
+            return result
+        enabled_agents = _live_agent_loop_round_robin_roster(enabled_agents, state.get("schedulerCursorAgentId"))
         result["enabledAgents"] = [{"agentId": a.get("agentId"), "name": a.get("name"), "providerKind": a.get("providerKind")} for a in enabled_agents]
+        result["scheduler"] = {
+            "policy": "round-robin",
+            "cursorAgentId": state.get("schedulerCursorAgentId"),
+            "order": [item.get("agentId") for item in enabled_agents],
+        }
+        stale_expired = [] if dry_run else _live_agent_loop_reconcile_stale_active_behaviors(state, now_epoch=now_epoch)
+        settled_refreshed = False if dry_run else _live_agent_loop_refresh_completed_outcomes(state)
+        result["staleExpired"] = stale_expired
+        result["settledRefreshed"] = settled_refreshed
+        state["lastTickAt"] = now_iso
+        _live_agent_loop_stat(state, "ticks")
+        if dry_run:
+            _live_agent_loop_stat(state, "dryRuns")
         actions_created_this_tick = 0
         max_actions = _normalize_int(state.get("maxActionsPerTick"), LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"], minimum=1, maximum=5)
         cooldown = _normalize_int(state.get("minActionIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"], minimum=30, maximum=3600)
@@ -8146,6 +10659,39 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             plan = _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, persist=not dry_run)
             plan_step = _live_agent_loop_plan_current_step(plan)
             request_id = f"live-loop-{agent_id}-{int(now_epoch)}"
+            if _live_agent_loop_is_support_action(action_def):
+                if dry_run:
+                    agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRunSupportAction": {"action": action_def, "target": selected.get("target"), "context": selected.get("supportContext")}, "wouldPlan": plan, "decision": decision, "perception": perception}
+                    result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "supportAction": True, "loopActionId": action_def["id"], "target": selected.get("target"), "decision": agent_state.get("lastDecision"), "plan": plan})
+                    _live_agent_loop_note_scheduled(state, agent_id)
+                    actions_created_this_tick += 1
+                    if actions_created_this_tick >= max_actions:
+                        break
+                    continue
+                outcome = _live_agent_loop_execute_support_action(
+                    state,
+                    agent_id,
+                    agent_state,
+                    action_def,
+                    decision,
+                    selected,
+                    plan,
+                    now_epoch=now_epoch,
+                    now_iso=now_iso,
+                )
+                agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
+                _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
+                if outcome.get("ok"):
+                    _live_agent_loop_stat(state, "actionsCreated")
+                    _live_agent_loop_stat(agent_state, "actionsCreated")
+                    result["actionsCreated"].append({"agentId": agent_id, "supportActionId": outcome.get("id"), "loopActionId": action_def["id"], "planId": (plan or {}).get("id"), "status": outcome.get("status"), "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown})
+                    _live_agent_loop_note_scheduled(state, agent_id)
+                    actions_created_this_tick += 1
+                else:
+                    result["errors"].append({"agentId": agent_id, "supportActionId": outcome.get("id"), "loopActionId": action_def["id"], "error": outcome})
+                if actions_created_this_tick >= max_actions:
+                    break
+                continue
             payload = {
                 "agentId": agent_id,
                 "source": {
@@ -8187,6 +10733,10 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             if dry_run:
                 agent_state["lastOutcome"] = {"at": now_iso, "status": "dry-run", "wouldRequest": payload, "wouldPlan": plan, "decision": decision, "perception": perception}
                 result["actionsCreated"].append({"agentId": agent_id, "dryRun": True, "request": payload, "target": selected, "decision": agent_state.get("lastDecision"), "plan": plan})
+                _live_agent_loop_note_scheduled(state, agent_id)
+                actions_created_this_tick += 1
+                if actions_created_this_tick >= max_actions:
+                    break
                 continue
 
             ok, created, status = create_agent_live_mode_action_request(payload)
@@ -8198,11 +10748,22 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 agent_state["lastActionAt"] = now_iso
                 agent_state["lastActionId"] = action_id
                 agent_state["nextAllowedAt"] = _epoch_to_utc_iso(now_epoch + adaptive_cooldown)
-                stored_plan = _live_agent_loop_mark_plan_action_created(state, agent_id, agent_state, plan, action_id, now_iso)
+                stored_plan = _live_agent_loop_mark_plan_action_created(
+                    state,
+                    agent_id,
+                    agent_state,
+                    plan,
+                    action_id,
+                    now_iso,
+                    action_def=action_def,
+                    decision=decision,
+                    selected=selected,
+                )
                 agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown}
                 _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
                 _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "target": selected["target"], "decision": agent_state.get("lastDecision")})
                 result["actionsCreated"].append({"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown})
+                _live_agent_loop_note_scheduled(state, agent_id)
                 actions_created_this_tick += 1
             else:
                 _live_agent_loop_stat(agent_state, "errors")
@@ -8222,59 +10783,101 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
         return result
 
 
+def _live_agent_loop_status_payload(state, *, stale_expired=None, busy=False, read_only_snapshot=False):
+    state = state if isinstance(state, dict) else default_live_agent_loop_state()
+    thread_alive = bool(_live_agent_loop_thread and _live_agent_loop_thread.is_alive())
+    pause = _live_agent_loop_pause_status(state)
+    return {
+        "ok": True,
+        "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
+        "state": state,
+        "runtime": {
+            "threadAlive": thread_alive,
+            "busy": bool(busy),
+            "readOnlySnapshot": bool(read_only_snapshot),
+            "featureEnabled": _agent_live_mode_runtime_enabled(),
+            "featureKill": state.get("featureKill"),
+            "scheduler": {
+                "policy": "round-robin",
+                "cursorAgentId": state.get("schedulerCursorAgentId"),
+            },
+            "storageBudget": state.get("storageBudget"),
+            "worldClient": _live_agent_loop_world_client_status(state),
+            "pause": pause,
+            "staleExpired": stale_expired or [],
+            "guardrails": {
+                "worldClientRequired": state.get("worldClientRequired"),
+                "maxActionsPerTick": state.get("maxActionsPerTick"),
+                "minActionIntervalSec": state.get("minActionIntervalSec"),
+                "onlyAgentsWithAgentLiveModeEnabled": True,
+                "userChatPreemptionEnabled": state.get("userChatPreemptionEnabled", True),
+                "userChatPreemptionHoldSec": state.get("userChatPreemptionHoldSec"),
+            },
+            "modelDecision": {
+                "enabled": state.get("modelDecisionEnabled", True),
+                "mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE,
+                "timeoutSec": state.get("modelDecisionTimeoutSec"),
+                "minIntervalSec": state.get("modelDecisionMinIntervalSec"),
+                "supportedProviders": sorted(LIVE_AGENT_LOOP_MODEL_DECISION_SOURCES),
+            },
+            "userAttention": {
+                agent_id: live_agent_user_attention_status(agent_id)
+                for agent_id in list((state.get("agents") or {}).keys())[:32]
+                if live_agent_user_attention_status(agent_id).get("active")
+            },
+        },
+    }
+
+
 def get_live_agent_loop_status():
-    with _live_agent_loop_lock:
-        state = get_live_agent_loop_state(persist_migration=True)
+    with _live_agent_loop_observability_lock() as locked:
+        if not locked:
+            return _live_agent_loop_status_payload(
+                _live_agent_loop_readonly_state_snapshot(),
+                busy=True,
+                read_only_snapshot=True,
+            )
+        runtime_enabled = _agent_live_mode_runtime_enabled()
+        state = get_live_agent_loop_state(persist_migration=runtime_enabled)
+        if not runtime_enabled:
+            return _live_agent_loop_status_payload(state, read_only_snapshot=True)
         stale_expired = _live_agent_loop_reconcile_stale_active_behaviors(state)
         if _live_agent_loop_refresh_completed_outcomes(state) or stale_expired:
             state = save_live_agent_loop_state(state)
-        thread_alive = bool(_live_agent_loop_thread and _live_agent_loop_thread.is_alive())
-        pause = _live_agent_loop_pause_status(state)
-        return {
-            "ok": True,
-            "schemaVersion": LIVE_AGENT_LOOP_SCHEMA_VERSION,
-            "state": state,
-            "runtime": {
-                "threadAlive": thread_alive,
-                "worldClient": _live_agent_loop_world_client_status(state),
-                "pause": pause,
-                "staleExpired": stale_expired,
-                "guardrails": {
-                    "worldClientRequired": state.get("worldClientRequired"),
-                    "maxActionsPerTick": state.get("maxActionsPerTick"),
-                    "minActionIntervalSec": state.get("minActionIntervalSec"),
-                    "onlyAgentsWithAgentLiveModeEnabled": True,
-                    "userChatPreemptionEnabled": state.get("userChatPreemptionEnabled", True),
-                    "userChatPreemptionHoldSec": state.get("userChatPreemptionHoldSec"),
-                },
-                "modelDecision": {
-                    "enabled": state.get("modelDecisionEnabled", True),
-                    "mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE,
-                    "timeoutSec": state.get("modelDecisionTimeoutSec"),
-                    "minIntervalSec": state.get("modelDecisionMinIntervalSec"),
-                    "supportedProviders": sorted(LIVE_AGENT_LOOP_MODEL_DECISION_SOURCES),
-                },
-                "userAttention": {
-                    agent_id: live_agent_user_attention_status(agent_id)
-                    for agent_id in list((state.get("agents") or {}).keys())[:32]
-                    if live_agent_user_attention_status(agent_id).get("active")
-                },
-            },
-        }
+        return _live_agent_loop_status_payload(state, stale_expired=stale_expired)
 
 
 def get_live_agent_loop_perception(agent_id):
-    with _live_agent_loop_lock:
+    with _live_agent_loop_observability_lock() as locked:
         resolved_agent_id = _resolve_agent_id(agent_id)
         if not resolved_agent_id:
             return False, _api_error("agent_not_found", "agentId must reference an existing live-mode-capable agent.", details={"agentId": agent_id}), 404
-        state = get_live_agent_loop_state(persist_migration=True)
+        state = get_live_agent_loop_state(persist_migration=False) if locked else _live_agent_loop_readonly_state_snapshot()
         agent_state = _live_agent_loop_agent_state(state, resolved_agent_id)
+        if not locked:
+            last_perception = agent_state.get("lastPerception") if isinstance(agent_state.get("lastPerception"), dict) else {}
+            last_decision = agent_state.get("lastDecision") if isinstance(agent_state.get("lastDecision"), dict) else {}
+            return True, {
+                "ok": True,
+                "agentId": resolved_agent_id,
+                "busy": True,
+                "readOnlySnapshot": True,
+                "perception": last_perception,
+                "decision": last_decision,
+                "state": agent_state,
+            }, 200
         world_client = _live_agent_loop_world_client_status(state)
         perception = _live_agent_loop_build_perception(resolved_agent_id, agent_state, world_client=world_client)
         decision = _live_agent_loop_build_decision_frame(resolved_agent_id, perception, agent_state)
-        saved = save_live_agent_loop_state(state)
-        return True, {"ok": True, "agentId": resolved_agent_id, "perception": perception, "decision": decision, "state": (saved.get("agents") or {}).get(resolved_agent_id, agent_state)}, 200
+        return True, {
+            "ok": True,
+            "agentId": resolved_agent_id,
+            "busy": not locked,
+            "readOnlySnapshot": not locked,
+            "perception": perception,
+            "decision": decision,
+            "state": (state.get("agents") or {}).get(resolved_agent_id, agent_state),
+        }, 200
 
 
 def _live_agent_loop_limited_feedback_reports(agent_state, limit=None):
@@ -8348,8 +10951,26 @@ def _live_agent_loop_plan_timeline_entries(agent_id, agent_state):
     return entries
 
 
-def _live_agent_loop_world_action_timeline_entries(agent_id, limit):
-    store = get_world_actions_store(persist_migration=True)
+def _live_agent_loop_episode_timeline_entries(agent_id, agent_state):
+    entries = []
+    for episode in _live_agent_loop_recent_episode_summary(agent_state, limit=12):
+        title = f"Episode {episode.get('status')}: {episode.get('title') or episode.get('loopActionId') or episode.get('id')}"
+        summary = episode.get("operatorSummary") or episode.get("verificationReason") or ""
+        severity = "error" if episode.get("status") in {"failed", "awaiting_report"} else "warning" if episode.get("status") in {"awaiting_coder", "reported"} else "info"
+        entries.append(_live_agent_loop_timeline_entry(
+            "episode",
+            episode.get("updatedAt"),
+            title,
+            agent_id=agent_id,
+            summary=summary,
+            severity=severity,
+            details=episode,
+        ))
+    return entries
+
+
+def _live_agent_loop_world_action_timeline_entries(agent_id, limit, *, persist_migration=True):
+    store = get_world_actions_store(persist_migration=persist_migration)
     actions = []
     for bucket in ("active", "history"):
         for action in store.get(bucket, []):
@@ -8386,11 +11007,12 @@ def _live_agent_loop_world_action_timeline_entries(agent_id, limit):
 
 
 def get_live_agent_loop_operator_timeline(agent_id=None, limit=None, include_resolved=True):
-    with _live_agent_loop_lock:
-        state = get_live_agent_loop_state(persist_migration=True)
-        stale_expired = _live_agent_loop_reconcile_stale_active_behaviors(state)
-        changed = _live_agent_loop_refresh_completed_outcomes(state)
-        if changed or stale_expired:
+    with _live_agent_loop_observability_lock() as locked:
+        persist_runtime = bool(locked and _agent_live_mode_runtime_enabled())
+        state = get_live_agent_loop_state(persist_migration=persist_runtime) if locked else _live_agent_loop_readonly_state_snapshot()
+        stale_expired = _live_agent_loop_reconcile_stale_active_behaviors(state) if persist_runtime else []
+        changed = _live_agent_loop_refresh_completed_outcomes(state) if persist_runtime else False
+        if persist_runtime and (changed or stale_expired):
             state = save_live_agent_loop_state(state)
         resolved_agent_id = None
         if agent_id:
@@ -8443,6 +11065,7 @@ def get_live_agent_loop_operator_timeline(agent_id=None, limit=None, include_res
                     details=report.get("details") if isinstance(report.get("details"), dict) else {},
                 ))
             entries.extend(_live_agent_loop_plan_timeline_entries(current_agent_id, agent_state))
+            entries.extend(_live_agent_loop_episode_timeline_entries(current_agent_id, agent_state))
         for proposal in _live_agent_loop_limited_operator_proposals(
             state,
             agent_id=resolved_agent_id,
@@ -8465,7 +11088,7 @@ def get_live_agent_loop_operator_timeline(agent_id=None, limit=None, include_res
                     "executesOnApproval": False,
                 },
             ))
-        entries.extend(_live_agent_loop_world_action_timeline_entries(resolved_agent_id, limit_value))
+        entries.extend(_live_agent_loop_world_action_timeline_entries(resolved_agent_id, limit_value, persist_migration=persist_runtime))
         entries.sort(key=_live_agent_loop_timeline_sort_key, reverse=True)
         entries = entries[:limit_value]
         pending_count = len(_live_agent_loop_limited_operator_proposals(state, include_resolved=False, limit=LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]))
@@ -8478,8 +11101,10 @@ def get_live_agent_loop_operator_timeline(agent_id=None, limit=None, include_res
             "summary": {
                 "entryCount": len(entries),
                 "pendingProposalCount": pending_count,
-                "activeWorldActionCount": len(get_world_actions_store(persist_migration=True).get("active", [])),
+                "activeWorldActionCount": len(get_world_actions_store(persist_migration=persist_runtime).get("active", [])),
                 "threadAlive": bool(_live_agent_loop_thread and _live_agent_loop_thread.is_alive()),
+                "busy": not locked,
+                "readOnlySnapshot": not locked,
                 "worldClientActive": _live_agent_loop_world_client_status(state).get("active"),
                 "pause": _live_agent_loop_pause_status(state),
             },
@@ -8493,8 +11118,9 @@ def get_live_agent_loop_operator_timeline(agent_id=None, limit=None, include_res
 
 
 def get_live_agent_loop_feedback(agent_id=None, limit=None):
-    with _live_agent_loop_lock:
-        state = get_live_agent_loop_state(persist_migration=True)
+    with _live_agent_loop_observability_lock() as locked:
+        persist_runtime = bool(locked and _agent_live_mode_runtime_enabled())
+        state = get_live_agent_loop_state(persist_migration=persist_runtime) if locked else _live_agent_loop_readonly_state_snapshot()
         limit_value = None
         if limit not in (None, ""):
             limit_value = _normalize_int(limit, LIVE_AGENT_LOOP_DEFAULTS["feedbackRetention"], minimum=1, maximum=LIVE_AGENT_LOOP_DEFAULTS["feedbackRetention"])
@@ -8509,12 +11135,13 @@ def get_live_agent_loop_feedback(agent_id=None, limit=None):
             for resolved_agent_id, agent_state in (state.get("agents") or {}).items():
                 if isinstance(agent_state, dict):
                     reports[resolved_agent_id] = _live_agent_loop_limited_feedback_reports(agent_state, limit_value)
-        return True, {"ok": True, "feedbackReports": reports, **({"limit": limit_value} if limit_value is not None else {})}, 200
+        return True, {"ok": True, "busy": not locked, "readOnlySnapshot": not locked, "feedbackReports": reports, **({"limit": limit_value} if limit_value is not None else {})}, 200
 
 
 def get_live_agent_loop_operator_proposals(agent_id=None, include_resolved=False, limit=None):
-    with _live_agent_loop_lock:
-        state = get_live_agent_loop_state(persist_migration=True)
+    with _live_agent_loop_observability_lock() as locked:
+        persist_runtime = bool(locked and _agent_live_mode_runtime_enabled())
+        state = get_live_agent_loop_state(persist_migration=persist_runtime) if locked else _live_agent_loop_readonly_state_snapshot()
         resolved_agent_id = None
         if agent_id:
             resolved_agent_id = _resolve_agent_id(agent_id)
@@ -8530,6 +11157,8 @@ def get_live_agent_loop_operator_proposals(agent_id=None, include_resolved=False
         return True, {
             "ok": True,
             "schemaVersion": LIVE_AGENT_OPERATOR_PROPOSAL_SCHEMA_VERSION,
+            "busy": not locked,
+            "readOnlySnapshot": not locked,
             "pendingCount": pending_count,
             "proposals": proposals,
             "policy": {
@@ -8541,6 +11170,8 @@ def get_live_agent_loop_operator_proposals(agent_id=None, include_resolved=False
 
 
 def resolve_live_agent_loop_operator_proposal(payload):
+    if not _agent_live_mode_runtime_enabled():
+        return False, _agent_live_mode_feature_disabled_error(), _agent_live_mode_feature_disabled_status()
     if not isinstance(payload, dict):
         return False, _api_error("invalid_payload", "Operator proposal payload must be an object."), 400
     proposal_id = _live_agent_loop_clean_plan_text(payload.get("proposalId") or payload.get("id"), limit=160)
@@ -8571,7 +11202,7 @@ def resolve_live_agent_loop_operator_proposal(payload):
             proposals.append(proposal)
         if not resolved:
             return False, _api_error("proposal_not_found", "Unknown Live Mode operator proposal.", details={"proposalId": proposal_id}), 404
-        state["operatorProposals"] = proposals[-LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]:]
+        state["operatorProposals"] = _live_agent_loop_trim_list(proposals, LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"])
         _live_agent_loop_add_event(state, "operator-proposal-resolved", agent_id=resolved.get("agentId"), details={"proposalId": proposal_id, "status": status, "resolvedBy": actor})
         saved = save_live_agent_loop_state(state)
         pending_count = len(_live_agent_loop_limited_operator_proposals(saved, include_resolved=False, limit=LIVE_AGENT_LOOP_DEFAULTS["operatorProposalRetention"]))
@@ -8588,6 +11219,8 @@ def resolve_live_agent_loop_operator_proposal(payload):
 
 
 def update_live_agent_loop_settings(payload):
+    if not _agent_live_mode_runtime_enabled():
+        return False, _agent_live_mode_feature_disabled_error(), _agent_live_mode_feature_disabled_status()
     if not isinstance(payload, dict):
         return False, _api_error("invalid_payload", "Live agent loop settings payload must be an object."), 400
     with _live_agent_loop_lock:
@@ -8601,6 +11234,19 @@ def update_live_agent_loop_settings(payload):
                     return False, _api_error("invalid_payload", f"{key} must be a boolean."), 400
                 state[key] = False if key == "worldClientRequired" else payload[key]
                 changed[key] = state[key]
+        if changed.get("enabled") is False:
+            shutdowns = {}
+            for agent_id in list((state.get("agents") or {}).keys()):
+                shutdowns[agent_id] = _live_agent_loop_shutdown_agent(
+                    state,
+                    agent_id,
+                    disable_agent_row=False,
+                    reason="live-agent-loop-disabled",
+                )
+            changed["agentShutdowns"] = shutdowns
+        elif changed.get("modelDecisionEnabled") is False:
+            for agent_id in list((state.get("agents") or {}).keys()):
+                _live_agent_model_decision_cancel(agent_id, reason="live-agent-model-decision-disabled")
         state["serverRuntimeAuthority"] = True
         if "clearWorldClientActivity" in payload:
             if not isinstance(payload.get("clearWorldClientActivity"), bool):
@@ -8859,6 +11505,8 @@ def create_move_intent(path_agent_id, payload):
         return False, behavior_error, 400
     source = _source_snapshot_with_behavior(raw_source, behavior)
     if source.get("kind") == "agent-live-mode":
+        if not _agent_live_mode_runtime_enabled():
+            return False, _agent_live_mode_feature_disabled_error(), _agent_live_mode_feature_disabled_status()
         setting = get_agent_live_mode_setting(agent_id)
         if not setting or setting.get("agentLiveModeEnabled") is not True:
             return False, _agent_live_mode_disabled_error(agent_id), 403
@@ -11948,7 +14596,24 @@ def _agent_ref(agent_id):
                 "name": agent.get("name") or agent.get("id"),
                 "emoji": agent.get("emoji") or "",
             }
-    return {"id": aid, "nativeId": aid, "providerKind": "unknown", "name": aid, "emoji": ""}
+    fallback_kind = "openclaw" if re.match(r"^[A-Za-z][A-Za-z0-9_-]{1,80}$", aid or "") else "unknown"
+    return {"id": aid, "nativeId": aid, "providerKind": fallback_kind, "name": aid, "emoji": ""}
+
+
+def _is_openclaw_agent_ref(ref):
+    if not isinstance(ref, dict):
+        return False
+    provider = str(ref.get("providerKind") or "").lower()
+    if provider == "openclaw":
+        return True
+    agent_id = str(ref.get("id") or ref.get("nativeId") or "").strip()
+    agent = _agent_record_for(agent_id)
+    return bool(agent and str(agent.get("providerKind") or "").lower() == "openclaw")
+
+
+def _openclaw_agent_main_session_key(agent_id):
+    token = str(agent_id or "").strip()
+    return f"agent:{token}:main" if token else ""
 
 
 def _handle_agent_platform_comm_send(data):
@@ -12053,6 +14718,24 @@ def _handle_agent_platform_comm_send(data):
             result.setdefault("conversationId", conversation_id)
             return result, int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 502) or 502)
         return {"ok": False, "error": "Invalid Codex response", "messageId": inbound["id"], "replyMessageId": outbound["id"]}, 502
+    if _is_openclaw_agent_ref(to_ref):
+        session_key = str(data.get("sessionKey") or _openclaw_agent_main_session_key(to_ref.get("id"))).strip()
+        result = _gateway_rpc_call("chat.send", {
+            "sessionKey": session_key,
+            "message": message,
+            "idempotencyKey": str(data.get("idempotencyKey") or f"vw-comm-{inbound['id']}"),
+        }, timeout=int(data.get("timeoutSec") or 30))
+        ok = bool(isinstance(result, dict) and result.get("ok") is not False and not result.get("error"))
+        outbound = _append_comm_event({
+            "type": "message", "direction": "delivery", "conversationId": conversation_id,
+            "from": from_ref, "to": to_ref, "text": message,
+            "inReplyTo": inbound["id"], "ok": ok, "via": "openclaw-gateway-chat.send",
+            "sessionKey": session_key,
+            "error": str((result or {}).get("error") or "")[:500] if isinstance(result, dict) and result.get("error") else "",
+        })
+        if ok:
+            return {"ok": True, "providerKind": "openclaw", "messageId": inbound["id"], "deliveryMessageId": outbound["id"], "conversationId": conversation_id, "sessionKey": session_key}, 200
+        return {"ok": False, "error": str((result or {}).get("error") or "OpenClaw delivery failed; message was logged locally."), "messageId": inbound["id"], "deliveryMessageId": outbound["id"], "conversationId": conversation_id, "sessionKey": session_key}, 502
     if not AGENT_PLATFORM_PROVIDER_URL:
         return {
             "ok": False,
@@ -16396,7 +19079,9 @@ def _agent_live_world_claim(agent_id, agent_name="", *, meta=None):
     }
 
 
-def _enabled_live_agent_rows(meta=None, roster=None):
+def _enabled_live_agent_rows(meta=None, roster=None, *, require_runtime_enabled=True):
+    if require_runtime_enabled and not _agent_live_mode_runtime_enabled():
+        return []
     meta = meta if isinstance(meta, dict) else load_world_meta_fast()
     profiles = meta.get("agentProfiles", {}) if isinstance(meta.get("agentProfiles"), dict) else {}
     rows = []
@@ -16490,6 +19175,313 @@ def _release_live_agent_world_claim(agent_id, *, meta=None):
         return False
 
 
+def _live_agent_loop_shutdown_agent(state, agent_id, *, disable_agent_row=True, reason="agent-live-mode-disabled"):
+    resolved = _resolve_agent_id(agent_id) or str(agent_id or "").strip()
+    if not resolved or not isinstance(state, dict):
+        return {}
+    now_iso = _utc_now_iso()
+    agent_state = _live_agent_loop_agent_state(state, resolved)
+    if disable_agent_row:
+        agent_state["enabled"] = False
+    interrupted = _live_agent_cancel_live_actions(
+        resolved,
+        actor=reason,
+        move_reason=reason,
+        failure_reason="cancelled_by_system",
+    )
+    active_plan = _live_agent_loop_normalize_plan(agent_state.get("activePlan"))
+    cancelled_plan_id = None
+    if active_plan and _live_agent_loop_plan_is_active(active_plan):
+        active_plan["status"] = "cancelled"
+        active_plan["cancelledAt"] = now_iso
+        active_plan["updatedAt"] = now_iso
+        active_plan["failureReason"] = reason
+        active_plan["operatorSummary"] = "Plan cancelled because Agent Live Mode was disabled."
+        stored_plan = _live_agent_loop_store_plan(agent_state, active_plan)
+        cancelled_plan_id = (stored_plan or active_plan).get("id")
+    else:
+        agent_state.pop("activePlan", None)
+    active_episode = _live_agent_loop_normalize_episode(agent_state.get("activeEpisode"))
+    cancelled_episode_id = None
+    if active_episode and _live_agent_loop_episode_is_active(active_episode):
+        active_episode["status"] = "cancelled"
+        active_episode["phase"] = "continue"
+        active_episode["updatedAt"] = now_iso
+        active_episode["operatorSummary"] = "Episode cancelled because Agent Live Mode was disabled."
+        stored_episode = _live_agent_loop_store_episode(agent_state, active_episode)
+        cancelled_episode_id = (stored_episode or active_episode).get("id")
+    else:
+        agent_state.pop("activeEpisode", None)
+    cancelled_autonomy_plan = bool(agent_state.get("autonomyPlan"))
+    agent_state["autonomyPlan"] = None
+    agent_state["supportRequests"] = []
+    _live_agent_model_decision_cancel(resolved, reason=reason)
+    live_agent_clear_user_attention(resolved)
+    last_decision = agent_state.get("lastDecision") if isinstance(agent_state.get("lastDecision"), dict) else {}
+    if last_decision:
+        model_detail = last_decision.get("modelDecision") if isinstance(last_decision.get("modelDecision"), dict) else {}
+        if model_detail.get("status") == "model-request-started":
+            last_decision["modelDecision"] = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "cancelled", "reason": reason, "at": now_iso}
+            agent_state["lastDecision"] = last_decision
+    agent_state["lastOutcome"] = {
+        "at": now_iso,
+        "status": "disabled" if disable_agent_row else "loop-disabled",
+        "reason": reason,
+        "interrupted": interrupted,
+        "cancelledPlanId": cancelled_plan_id,
+        "cancelledEpisodeId": cancelled_episode_id,
+        "cancelledAutonomyPlan": cancelled_autonomy_plan,
+    }
+    _live_agent_loop_add_event(
+        state,
+        "agent-loop-disabled" if disable_agent_row else "loop-agent-shutdown",
+        agent_id=resolved,
+        details={
+            "reason": reason,
+            "interrupted": interrupted,
+            "cancelledPlanId": cancelled_plan_id,
+            "cancelledEpisodeId": cancelled_episode_id,
+            "cancelledAutonomyPlan": cancelled_autonomy_plan,
+        },
+    )
+    return agent_state["lastOutcome"]
+
+
+def _live_agent_feature_kill_agent_ids(state, meta=None):
+    ids = {
+        str(agent_id)
+        for agent_id in ((state or {}).get("agents") or {}).keys()
+        if str(agent_id or "").strip()
+    }
+    for row in _enabled_live_agent_rows(meta=meta, require_runtime_enabled=False):
+        if row.get("agentId"):
+            ids.add(str(row["agentId"]))
+    try:
+        for action in get_world_actions_store(meta=meta).get("active", []):
+            source = action.get("source") if isinstance(action.get("source"), dict) else {}
+            if source.get("kind") == "agent-live-mode" and action.get("agentId"):
+                ids.add(str(action["agentId"]))
+    except Exception:
+        pass
+    with _live_agent_model_decision_lock:
+        for agent_id, row in _live_agent_model_decision_state.items():
+            if isinstance(row, dict) and (row.get("inFlight") or row.get("pendingChoice")):
+                ids.add(str(agent_id))
+    return sorted(ids)
+
+
+def _live_agent_feature_runtime_artifacts(state, agent_ids, meta=None):
+    for agent_id in agent_ids:
+        row = ((state or {}).get("agents") or {}).get(agent_id) or {}
+        if _live_agent_loop_plan_is_active(row.get("activePlan")) or _live_agent_loop_episode_is_active(row.get("activeEpisode")):
+            return True
+    try:
+        if any(
+            isinstance(action, dict)
+            and (action.get("source") or {}).get("kind") == "agent-live-mode"
+            for action in get_world_actions_store(meta=meta).get("active", [])
+        ):
+            return True
+    except Exception:
+        pass
+    with _live_agent_model_decision_lock:
+        if any(isinstance(row, dict) and (row.get("inFlight") or row.get("pendingChoice")) for row in _live_agent_model_decision_state.values()):
+            return True
+    try:
+        registry = _read_live_agent_world_registry()
+        current_world_id = _current_live_agent_world(meta).get("worldId")
+        if any(
+            isinstance((registry.get("agents") or {}).get(agent_id), dict)
+            and (registry.get("agents") or {}).get(agent_id, {}).get("worldId") == current_world_id
+            for agent_id in agent_ids
+        ):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def enforce_live_agent_feature_kill(*, reason="agent-live-mode-feature-disabled"):
+    """Stop every Live Agent execution surface while preserving selections.
+
+    This is idempotent and intentionally does not clear resident profiles,
+    goals, homes, or the per-agent enable choices. Re-enabling the global
+    feature can therefore resume cleanly without reconstructing user data.
+    """
+    with _live_agent_loop_lock:
+        meta = load_world_meta()
+        state = get_live_agent_loop_state(persist_migration=False, meta=meta)
+        marker = state.get("featureKill") if isinstance(state.get("featureKill"), dict) else {}
+        agent_ids = _live_agent_feature_kill_agent_ids(state, meta=meta)
+        active_runtime = marker.get("active") is not True or _live_agent_feature_runtime_artifacts(state, agent_ids, meta=meta)
+        if marker.get("active") is not True and not agent_ids:
+            return {"ok": True, "active": True, "changed": False, "reason": reason, "agentCount": 0}
+        if marker.get("active") is True and not active_runtime:
+            return {
+                "ok": True,
+                "active": True,
+                "changed": False,
+                "reason": marker.get("reason") or reason,
+                "agentCount": len(agent_ids),
+            }
+
+        shutdowns = {}
+        for agent_id in agent_ids:
+            shutdowns[agent_id] = _live_agent_loop_shutdown_agent(
+                state,
+                agent_id,
+                disable_agent_row=False,
+                reason=reason,
+            )
+            _release_live_agent_world_claim(agent_id, meta=meta)
+        clear_live_agent_loop_world_client_activity()
+        now_iso = _utc_now_iso()
+        state["featureKill"] = {
+            "active": True,
+            "at": now_iso,
+            "reason": reason,
+            "serverEnforced": True,
+        }
+        _live_agent_loop_add_event(
+            state,
+            "feature-kill-enforced",
+            details={"reason": reason, "agentIds": agent_ids, "serverEnforced": True},
+        )
+        saved = save_live_agent_loop_state(state)
+        return {
+            "ok": True,
+            "active": True,
+            "changed": True,
+            "reason": reason,
+            "agentCount": len(agent_ids),
+            "shutdowns": shutdowns,
+            "state": saved,
+        }
+
+
+def clear_live_agent_feature_kill(*, reason="agent-live-mode-feature-enabled"):
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=False)
+        marker = state.get("featureKill") if isinstance(state.get("featureKill"), dict) else {}
+        if marker.get("active") is not True:
+            return {"ok": True, "active": False, "changed": False, "reason": reason}
+        now_iso = _utc_now_iso()
+        state["featureKill"] = {
+            **marker,
+            "active": False,
+            "clearedAt": now_iso,
+            "clearReason": reason,
+        }
+        _live_agent_loop_add_event(state, "feature-kill-cleared", details={"reason": reason})
+        saved = save_live_agent_loop_state(state)
+        return {"ok": True, "active": False, "changed": True, "reason": reason, "state": saved}
+
+
+def _reset_live_agent_document_rows(agent_id):
+    removed = {"internalNotes": 0, "plannerTurns": 0}
+    with _live_agent_internal_notes_lock:
+        notes = _load_live_agent_internal_notes()
+        note_row = (notes.get("agents") or {}).pop(agent_id, None)
+        removed["internalNotes"] = len((note_row or {}).get("notes") or []) if isinstance(note_row, dict) else 0
+        if note_row is not None:
+            _save_live_agent_internal_notes(notes)
+    with _live_agent_planner_transcript_lock:
+        transcripts = _load_live_agent_planner_transcripts()
+        transcript_row = (transcripts.get("agents") or {}).pop(agent_id, None)
+        removed["plannerTurns"] = len((transcript_row or {}).get("turns") or []) if isinstance(transcript_row, dict) else 0
+        if transcript_row is not None:
+            _save_live_agent_planner_transcripts(transcripts)
+    return removed
+
+
+def reset_agent_live_mode_state(agent_id, *, actor="operator"):
+    resolved = _resolve_agent_id(agent_id)
+    if not resolved:
+        return False, _api_error("agent_not_found", "Unknown agent id for Live Agent state reset.", details={"agentId": agent_id}), 404
+    setting = get_agent_live_mode_setting(resolved) or {}
+    preserve_loop_enabled = setting.get("agentLiveModeLoopEnabled") is not False
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=False)
+        previous = _copy_jsonable((state.get("agents") or {}).get(resolved) or {})
+        shutdown = _live_agent_loop_shutdown_agent(
+            state,
+            resolved,
+            disable_agent_row=True,
+            reason="agent-live-state-reset",
+        )
+        state.setdefault("agents", {})[resolved] = {
+            "enabled": preserve_loop_enabled,
+            "resetAt": _utc_now_iso(),
+            "resetBy": str(actor or "operator")[:80],
+            "stats": {
+                "ticks": 0,
+                "actionsCreated": 0,
+                "skippedActive": 0,
+                "skippedCooldown": 0,
+                "skippedNoClient": 0,
+                "targetMisses": 0,
+                "errors": 0,
+            },
+            "lastOutcome": {
+                "at": _utc_now_iso(),
+                "status": "reset",
+                "reason": "agent-live-state-reset",
+            },
+        }
+        state["events"] = [
+            event
+            for event in (state.get("events") or [])
+            if not isinstance(event, dict) or event.get("agentId") != resolved
+        ]
+        state["operatorProposals"] = [
+            proposal
+            for proposal in (state.get("operatorProposals") or [])
+            if not isinstance(proposal, dict) or proposal.get("agentId") != resolved
+        ]
+        if state.get("schedulerCursorAgentId") == resolved:
+            state["schedulerCursorAgentId"] = None
+        _live_agent_loop_add_event(
+            state,
+            "agent-state-reset",
+            agent_id=resolved,
+            details={"actor": str(actor or "operator")[:80], "preservedSettings": True},
+        )
+        saved = save_live_agent_loop_state(state, merge_existing=False)
+    with _live_agent_model_decision_lock:
+        model_row = _live_agent_model_decision_state.setdefault(resolved, {})
+        generation = int(model_row.get("generation") or 0)
+        _live_agent_model_decision_state[resolved] = {
+            "generation": generation,
+            "inFlight": False,
+            "lastOutcome": {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "reset"},
+            "lastOutcomeAt": _utc_now_iso(),
+        }
+    removed_documents = _reset_live_agent_document_rows(resolved)
+    _live_agent_model_planner_session_cleanup(resolved)
+    if generation > 0:
+        _live_agent_model_planner_session_cleanup(resolved, generation)
+        _live_agent_model_planner_session_cleanup(resolved, generation - 1)
+    saved_agent = ((saved.get("agents") or {}).get(resolved) or {}) if isinstance(saved, dict) else {}
+    return True, {
+        "ok": True,
+        "agentId": resolved,
+        "resetAt": saved_agent.get("resetAt"),
+        "preserved": {
+            "agentLiveModeEnabled": setting.get("agentLiveModeEnabled") is True,
+            "agentLiveModeLoopEnabled": preserve_loop_enabled,
+            "residentProfile": True,
+            "worldAssignments": True,
+            "buildingsAndObjects": True,
+        },
+        "cleared": {
+            "activeRuntime": shutdown,
+            "previousStateBytes": _json_size_bytes(previous),
+            **removed_documents,
+        },
+        "state": saved_agent,
+    }, 200
+
+
 def get_live_agent_world_status(agent_id=None):
     meta = load_world_meta()
     _refresh_local_live_agent_world_claims(meta=meta)
@@ -16542,6 +19534,8 @@ def get_agent_live_mode_setting(agent_id):
 
 
 def set_agent_live_mode_setting(agent_id, enabled=None, *, agent_loop_enabled=None, scripted_ambient_enabled=None, ambient_enabled=None):
+    if not _agent_live_mode_runtime_enabled():
+        return False, _agent_live_mode_feature_disabled_error(), _agent_live_mode_feature_disabled_status()
     if enabled is not None and not isinstance(enabled, bool):
         return False, _api_error("invalid_payload", "agentLiveModeEnabled must be a boolean"), 400
     if agent_loop_enabled is not None and not isinstance(agent_loop_enabled, bool):
@@ -16557,13 +19551,15 @@ def set_agent_live_mode_setting(agent_id, enabled=None, *, agent_loop_enabled=No
     enabled_provided = enabled is not None
     if enabled is None:
         enabled = _agent_live_mode_enabled_from_profile(profile)
+    if enabled is True and enabled_provided and not _agent_live_mode_runtime_enabled():
+        return False, _agent_live_mode_feature_disabled_error(), 409
     agent_name = resolved_id
     for agent in get_roster():
         if agent.get("statusKey") == resolved_id or agent.get("id") == resolved_id:
             agent_name = agent.get("name") or agent.get("id") or resolved_id
             break
     live_world_claim = None
-    if enabled:
+    if enabled and _agent_live_mode_runtime_enabled():
         try:
             claimed, live_world_claim = _claim_live_agent_world_or_conflict(resolved_id, agent_name, meta=meta)
         except Exception as exc:
@@ -16599,6 +19595,8 @@ def set_agent_live_mode_setting(agent_id, enabled=None, *, agent_loop_enabled=No
     if not enabled:
         _release_live_agent_world_claim(resolved_id, meta=meta)
     next_loop_enabled = agent_loop_enabled
+    if enabled is False:
+        next_loop_enabled = False
     if next_loop_enabled is None and enabled_provided:
         next_loop_enabled = enabled
     if next_loop_enabled is not None:
@@ -16606,8 +19604,19 @@ def set_agent_live_mode_setting(agent_id, enabled=None, *, agent_loop_enabled=No
             loop_state = get_live_agent_loop_state(persist_migration=True)
             agent_state = _live_agent_loop_agent_state(loop_state, resolved_id)
             agent_state["enabled"] = bool(next_loop_enabled)
+            shutdown = None
+            if not next_loop_enabled:
+                shutdown = _live_agent_loop_shutdown_agent(
+                    loop_state,
+                    resolved_id,
+                    disable_agent_row=True,
+                    reason="agent-live-mode-disabled" if enabled is False else "agent-live-loop-disabled",
+                )
             _live_agent_loop_add_event(loop_state, "settings-updated", agent_id=resolved_id, details={"agentEnabled": {"agentId": resolved_id, "enabled": bool(next_loop_enabled), "source": "agent-live-mode-setting"}})
-            save_live_agent_loop_state(loop_state)
+            saved_loop = save_live_agent_loop_state(loop_state)
+            saved_agent = ((saved_loop.get("agents") or {}).get(resolved_id) or {}) if isinstance(saved_loop, dict) else {}
+            if isinstance(saved_agent.get("enabled"), bool):
+                next_loop_enabled = saved_agent.get("enabled")
     live_world = _agent_live_world_claim_payload(resolved_id, meta=meta)
     if live_world_claim and isinstance(live_world.get("claim"), dict):
         live_world["claim"] = live_world.get("claim") or live_world_claim
@@ -17387,7 +20396,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             client_visibility = str((query.get("visibility") or [""])[0] or "").strip().lower()
             if client_visibility == "hidden":
                 return self._send_json([])
-            if "main3d-live-sync" in client_markers:
+            if "main3d-live-sync" in client_markers and _agent_live_mode_runtime_enabled():
                 world_client_claimed = note_live_agent_loop_world_client_activity(
                     client_version=next(iter(client_versions), None),
                     client_info={
@@ -17854,10 +20863,18 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/license/activate":
             body = self._read_body() or {}
-            return self._send_json(activate_license(body.get("key") or ""))
+            result = activate_license(body.get("key") or "")
+            if result.get("ok") and _agent_live_mode_runtime_enabled():
+                runtime = clear_live_agent_feature_kill(reason="agent-live-mode-license-activated")
+                result["liveAgentModeRuntime"] = {key: value for key, value in runtime.items() if key != "state"}
+            return self._send_json(result)
 
         if path == "/api/license/deactivate":
-            return self._send_json(deactivate_license())
+            result = deactivate_license()
+            if result.get("ok"):
+                runtime = enforce_live_agent_feature_kill(reason="agent-live-mode-license-deactivated")
+                result["liveAgentModeRuntime"] = {key: value for key, value in runtime.items() if key != "state"}
+            return self._send_json(result)
 
         if path == "/sms-send":
             result, status = _send_sms(self._read_body() or {})
@@ -17982,15 +20999,17 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             return self._send_json(payload, status)
 
         if path == "/api/world-actions":
-            if not check_feature("agentLiveMode"):
-                data_preview = self._read_body()
-                source = (data_preview or {}).get("source") if isinstance(data_preview, dict) else None
-                source_kind = (source or {}).get("kind") if isinstance(source, dict) else ""
-                if source_kind == "agent-live-mode":
-                    return self._send_json(_locked_response("agentLiveMode"), 403)
-                data = data_preview
-            else:
-                data = self._read_body()
+            data = self._read_body()
+            if not _agent_live_mode_runtime_enabled() and isinstance(data, dict):
+                source = data.get("source") if isinstance(data.get("source"), dict) else {}
+                incoming_active = data.get("active") if isinstance(data.get("active"), list) else []
+                has_live_source = source.get("kind") == "agent-live-mode" or any(
+                    isinstance(item, dict) and isinstance(item.get("source"), dict) and item["source"].get("kind") == "agent-live-mode"
+                    for item in incoming_active
+                )
+                if has_live_source:
+                    status = 403 if not check_feature("agentLiveMode") else 409
+                    return self._send_json(_agent_live_mode_feature_disabled_error(), status)
             if not isinstance(data, dict):
                 return self._send_json({"error": "world-actions payload must be an object"}, 400)
             # Backward-compatible bulk replace from Task 2. A create request is
@@ -18029,24 +21048,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/agent-live-loop/user-attention":
             if _demo_feature_locked("agentLiveMode"):
                 return self._send_json(_locked_response("agentLiveMode"), 403)
-            data = self._read_body() or {}
-            if not isinstance(data, dict):
-                return self._send_json(_api_error("invalid_payload", "user-attention payload must be an object."), 400)
-            agent_id = data.get("agentId") or data.get("agent")
-            if not agent_id:
-                return self._send_json(_api_error("invalid_payload", "agentId is required."), 400)
-            if data.get("clear") is True:
-                cleared = live_agent_clear_user_attention(agent_id)
-                return self._send_json({"ok": True, "cleared": cleared, "agentId": _resolve_agent_id(agent_id) or agent_id})
-            record = live_agent_note_user_attention(
-                agent_id,
-                source=str(data.get("source") or "api"),
-                message_preview=str(data.get("messagePreview") or "")[:160],
-                hold_sec=data.get("holdSec"),
-            )
-            if not record:
-                return self._send_json(_api_error("agent_not_found", "agentId must reference an existing agent."), 404)
-            return self._send_json({"ok": True, "userAttention": {k: v for k, v in record.items() if k != "holdUntilEpoch"}})
+            ok, result, status = handle_live_agent_user_attention(self._read_body())
+            return self._send_json(result, status)
 
         if path == "/api/agent-live-loop/tick":
             if _demo_feature_locked("agentLiveMode"):
@@ -18099,6 +21102,13 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             records = data if isinstance(data, list) else (data.get("active") if isinstance(data, dict) else None)
             if records is None:
                 return self._send_json({"error": "active payload must be an array or { active: [] }"}, 400)
+            if not _agent_live_mode_runtime_enabled() and any(
+                isinstance(item, dict)
+                and isinstance(item.get("source"), dict)
+                and item["source"].get("kind") == "agent-live-mode"
+                for item in records
+            ):
+                return self._send_json(_agent_live_mode_feature_disabled_error(), _agent_live_mode_feature_disabled_status())
             current = get_world_actions_store()
             ok, result = save_world_actions_store({"active": records, "history": current.get("history", [])})
             if not ok:
@@ -18141,6 +21151,17 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 save_world_meta(meta)
                 return self._send_json({"ok": True})
             return self._send_json({"error": "No data"}, 400)
+
+        if path.startswith("/api/agent/") and path.endswith("/live-mode/reset"):
+            if _demo_feature_locked("agentLiveMode"):
+                return self._send_json(_locked_response("agentLiveMode"), 403)
+            parts = path.strip("/").split("/")
+            agent_id = urllib.parse.unquote(parts[2]) if len(parts) >= 5 else ""
+            data = self._read_body() or {}
+            if not isinstance(data, dict):
+                return self._send_json(_api_error("invalid_payload", "Live Agent reset payload must be an object."), 400)
+            ok, result, status = reset_agent_live_mode_state(agent_id, actor=data.get("actor") or "api")
+            return self._send_json(result, status)
 
         if path.startswith("/api/agent/") and path.endswith("/live-mode"):
             if _demo_feature_locked("agentLiveMode"):
@@ -18342,7 +21363,12 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if "agentLiveModeEnabled" in data:
                 if not isinstance(data.get("agentLiveModeEnabled"), bool):
                     return self._send_json(_api_error("invalid_payload", "agentLiveModeEnabled must be a boolean"), 400)
-                profile["agentLiveModeEnabled"] = data["agentLiveModeEnabled"]
+                ok, live_result, live_status = set_agent_live_mode_setting(resolved_agent_id, data["agentLiveModeEnabled"])
+                if not ok:
+                    return self._send_json(live_result, live_status)
+                meta = load_world_meta()
+                profiles, resolved_agent_id, profile = _agent_profile_for(meta, resolved_agent_id)
+                profile = dict(profile or {})
             if "name" in data:
                 profile["name"] = str(data.get("name") or "").strip()
             if "emoji" in data:

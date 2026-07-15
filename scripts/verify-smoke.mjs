@@ -429,6 +429,12 @@ for (const token of [
   assert(chatJs.includes(token), `chat.js missing OpenClaw chat error token: ${token}`);
 }
 for (const token of [
+  "window.__VWConfig?.features?.agentLiveMode !== true",
+  '/api/agent-live-loop/user-attention',
+]) {
+  assert(chatJs.includes(token), `chat.js missing global-off Live Agent attention guard: ${token}`);
+}
+for (const token of [
   'def _handle_codex_run_start',
   'def _handle_codex_run_events',
   'path.startswith("/api/codex/runs/") and path.endswith("/events")',
@@ -657,6 +663,8 @@ for (const token of [
   'def start_live_agent_loop',
   'def note_live_agent_loop_world_client_activity',
   'def clear_live_agent_loop_world_client_activity',
+  'def handle_live_agent_user_attention',
+  'def _agent_live_mode_feature_disabled_status',
   'WORLD_ACTION_SERVER_RUNTIME_OWNER = "agent-runtime-room.mjs#tickLiveActionRuntime"',
   '"serverRuntimeAuthority": True',
   '"serverExecutor": WORLD_ACTION_SERVER_RUNTIME_OWNER',
@@ -983,7 +991,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260707-live-mode-status-r1',
+  'js/settings.js?v=20260713-live-agent-p0-r2',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);

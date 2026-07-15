@@ -261,6 +261,7 @@
     }
 
     noteLiveAgentUserAttention(messagePreview = '') {
+      if (window.__VWConfig?.features?.agentLiveMode !== true) return '';
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
       if (!agentId) return '';
       try {
@@ -285,7 +286,7 @@
     }
 
     clearLiveAgentUserAttention(agentId) {
-      if (!agentId) return;
+      if (!agentId || window.__VWConfig?.features?.agentLiveMode !== true) return;
       try {
         fetch('/api/agent-live-loop/user-attention', {
           method: 'POST',

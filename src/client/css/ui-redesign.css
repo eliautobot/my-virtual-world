@@ -754,6 +754,26 @@ body.vw-demo-locked .feature-locked-control {
     color: #bbf7d0;
     background: rgba(34,197,94,.09);
 }
+.settings-live-agent-reset {
+    min-height: 30px;
+    padding: 4px 8px;
+    border: 1px solid rgba(245,158,11,.42);
+    border-radius: 7px;
+    background: rgba(245,158,11,.09);
+    color: #fde68a;
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.settings-live-agent-reset:hover:not(:disabled) {
+    border-color: rgba(245,158,11,.72);
+    background: rgba(245,158,11,.16);
+}
+.settings-live-agent-reset:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
 .settings-live-agent-empty {
     padding: 12px;
     color: var(--text-secondary);

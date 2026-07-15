@@ -44,6 +44,8 @@ The update changes:
 
 Existing user data remains unless a migration or narrow repair intentionally updates compatible metadata.
 
+`world-meta.json` uses atomic compact writes. Identical saves do not rewrite the file, stale abandoned temp files are cleaned after a configurable age, and the last-known-good backup is throttled separately from primary writes. Live Agent and world-action histories are compacted within configurable byte budgets while preserving active state and the newest retained records.
+
 ## Fresh Install vs Existing Install
 
 Fresh install:

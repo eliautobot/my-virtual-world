@@ -11,9 +11,11 @@ Runs against an isolated temp world; no live data or gateway required.
 """
 
 import importlib.util
+import hashlib
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 import tempfile
@@ -30,6 +32,15 @@ def check(name, condition, detail=""):
     marker = "PASS" if condition else "FAIL"
     print(f"[{marker}] {name}" + (f" — {detail}" if detail and not condition else ""))
     return bool(condition)
+
+
+def snapshot_tree(root):
+    root = Path(root)
+    snapshot = {}
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        relative = str(path.relative_to(root))
+        snapshot[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return snapshot
 
 
 def load_server(tmpdir):
@@ -56,6 +67,7 @@ def load_server(tmpdir):
 
 
 def seed_live_mode(server, agent_id="tester"):
+    server.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
     meta = server.load_world_meta()
     profiles = meta.get("agentProfiles") or {}
     profiles[agent_id] = {**(profiles.get(agent_id) or {}), "agentLiveModeEnabled": True}
@@ -252,11 +264,17 @@ def main():
 
         # Re-enable and confirm the failure path still yields a decision frame with model detail.
         server.update_live_agent_loop_settings({"modelDecisionEnabled": True, "modelDecisionMinIntervalSec": 30})
+        server._live_agent_model_decision_cancel("tester", reason="verify-two-phase-model-decision")
+        with server._live_agent_model_decision_lock:
+            server._live_agent_model_decision_state.setdefault("tester", {})["nextAllowedEpoch"] = 0
         agent_state2 = {}
         selected2, decision2 = server._live_agent_loop_select_next_action("tester", agent_state2)
         check(
-            "model-enabled selection still returns a decision frame without gateway",
-            isinstance(decision2, dict) and (decision2.get("modelDecision") is not None or decision2.get("mode") == "planner-v2"),
+            "model request waits without starting a stale deterministic action",
+            isinstance(decision2, dict)
+            and (decision2.get("modelDecision") or {}).get("status") == "model-request-started"
+            and selected2 is None
+            and decision2.get("selectedActionId") is None,
             json.dumps(decision2.get("modelDecision") or {})[:300],
         )
 
@@ -338,7 +356,8 @@ def main():
         check("model prompt labels planner frame as ephemeral", "LIVE MODE PLANNER FRAME - EPHEMERAL LOOP CONTEXT" in prompt_goal and "not a life event" in prompt_goal and "Remember only your intention" in prompt_goal, prompt_goal[:700])
 
         # Goal progress: completed seating targets are remembered and the
-        # resolver prefers untested seats, while the prompt shows progress.
+        # resolver stops returning already-verified seats, while the prompt
+        # shows progress for the next loop.
         seating_def = server.LIVE_AGENT_DYNAMIC_OBJECT_AFFORDANCES["seating"]
         progress_state = dict(goal_agent_state)
         first_pick = server._live_agent_loop_find_seating_target(seating_def, agent_id="tester", agent_state=progress_state)
@@ -348,8 +367,7 @@ def main():
         row = (progress_state.get("goalProgress") or {}).get("category:seating") or {}
         check("goal progress records completed target", first_key in (row.get("completedTargets") or []), json.dumps(row, default=str))
         second_pick = server._live_agent_loop_find_seating_target(seating_def, agent_id="tester", agent_state=progress_state)
-        second_key = server._live_agent_loop_target_key(second_pick.get("target")) if second_pick else None
-        check("resolver still returns a target after progress (fallback ok)", bool(second_key), json.dumps(second_pick, default=str)[:300])
+        check("resolver does not repeat the only verified seating target", second_pick is None, json.dumps(second_pick, default=str)[:300])
         progress_prompt = server._live_agent_model_decision_prompt("tester", decision_goal, progress_state)
         check("model prompt shows goal progress", "Goal progress so far" in progress_prompt and "category:seating" in progress_prompt, progress_prompt[:600])
         check("goal progress survives normalization", (server._live_agent_loop_normalize_memory(progress_state).get("goalProgress") or {}).get("category:seating", {}).get("completedTargets"), json.dumps(progress_state.get("goalProgress"), default=str))
@@ -429,6 +447,38 @@ def main():
             remembered_embodied.get("status") == "completed" and seating_key in (seating_progress.get("completedTargets") or []) and seating_key not in (seating_progress.get("failedTargets") or []),
             json.dumps({"remembered": remembered_embodied, "progress": seating_progress}, default=str)[:700],
         )
+        saturated_state = {
+            "needs": dict(goal_agent_state["needs"]),
+            "episodes": [
+                {
+                    "schemaVersion": server.LIVE_AGENT_EPISODE_SCHEMA_VERSION,
+                    "id": "episode-verified-armchair-repeat",
+                    "agentId": "tester",
+                    "planId": "plan-verified-armchair-repeat",
+                    "loopActionId": "use-seating-object",
+                    "status": "completed",
+                    "phase": "continue",
+                    "createdAt": server._utc_now_iso(),
+                    "updatedAt": server._utc_now_iso(),
+                    "completedAt": server._utc_now_iso(),
+                    "targetKey": seating_key,
+                    "verification": {"id": "verify-verified-armchair-repeat", "ok": True},
+                }
+            ],
+        }
+        repeat_affordance = {
+            **seating_def,
+            "available": True,
+            "target": dict(seating_target),
+            "autonomyKind": "goal-work",
+        }
+        fresh_score, fresh_breakdown = server._live_agent_loop_decision_score(repeat_affordance, {"needs": dict(goal_agent_state["needs"])}, goal_frame)
+        saturated_score, saturated_breakdown = server._live_agent_loop_decision_score(repeat_affordance, saturated_state, goal_frame)
+        check(
+            "verified episode history penalizes repeating the same seating target",
+            saturated_score < fresh_score - 0.5 and saturated_breakdown.get("episodeSaturation", 0) < 0,
+            json.dumps({"fresh": [fresh_score, fresh_breakdown], "saturated": [saturated_score, saturated_breakdown]}, default=str)[:900],
+        )
 
         thirsty_state = {**goal_agent_state, "needs": {**goal_agent_state["needs"], "hydration": 0.93}}
         thirsty_perception = server._live_agent_loop_build_perception("tester", thirsty_state)
@@ -459,7 +509,707 @@ def main():
         issue_perception = server._live_agent_loop_build_perception("tester", issue_state)
         issue_decision = server._live_agent_loop_build_decision_frame("tester", issue_perception, issue_state)
         issue_candidates = {item.get("id"): item for item in issue_decision.get("candidates") or []}
-        check("unresolved issue prioritizes investigation over retry", issue_decision.get("selectedActionId") == "investigate-blocking-issue" and issue_candidates.get("use-seating-object", {}).get("score", 0) < issue_candidates.get("investigate-blocking-issue", {}).get("score", 0), json.dumps(issue_candidates, default=str)[:900])
+        check(
+            "unresolved repeated issue escalates to Coder report over decorative investigation",
+            issue_decision.get("selectedActionId") == "report-issue-to-coder"
+            and issue_candidates.get("report-issue-to-coder", {}).get("score", 0) > issue_candidates.get("investigate-blocking-issue", {}).get("score", 0)
+            and issue_candidates.get("use-seating-object", {}).get("score", 0) < issue_candidates.get("report-issue-to-coder", {}).get("score", 0),
+            json.dumps({k: issue_candidates.get(k) for k in ("report-issue-to-coder", "investigate-blocking-issue", "use-seating-object")}, default=str)[:900],
+        )
+        planner_turn = {
+            "reflection": "The shelter issue keeps coming back and I need Coder to know.",
+            "currentGoal": "Escalate blocked shelter work instead of only standing at the board.",
+            "plan": ["write down the blocker", "send Coder an actionable report"],
+            "nextStep": {
+                "intent": "tell Coder about the repeated shelter blocker",
+                "successCriteria": "Coder receives a report and the note is durable",
+            },
+            "memoryUpdate": {"lesson": "When I need help from Coder, I must use the report tool, not just the whiteboard."},
+            "toolRequests": ["message Coder about shelter and routing failures"],
+        }
+        planner_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        applied = server._live_agent_loop_apply_planner_turn(
+            planner_state,
+            {"agentId": "tester", "status": "planner-tool-or-event-request", "plannerTurn": planner_turn, "chosen": None},
+            agent_id="tester",
+        )
+        support_requests = planner_state.get("supportRequests") or []
+        notes_after_planner = server._live_agent_loop_recent_internal_notes("tester", limit=4)
+        check(
+            "planner tool request creates support request and internal note",
+            applied
+            and any(item.get("kind") == "coder-report" for item in support_requests)
+            and any("Escalate blocked shelter" in (item.get("title") or item.get("text") or "") for item in notes_after_planner),
+            json.dumps({"requests": support_requests, "notes": notes_after_planner}, default=str)[:900],
+        )
+        support_perception = server._live_agent_loop_build_perception("tester", planner_state)
+        support_decision = server._live_agent_loop_build_decision_frame("tester", support_perception, planner_state)
+        support_candidates = {item.get("id"): item for item in support_decision.get("candidates") or []}
+        check(
+            "support request exposes report and note tools to planner",
+            support_candidates.get("report-issue-to-coder", {}).get("available") is True
+            and support_candidates.get("record-internal-note", {}).get("available") is True,
+            json.dumps({k: support_candidates.get(k) for k in ("report-issue-to-coder", "record-internal-note")}, default=str)[:900],
+        )
+        autonomy_note_agent_id = "tester-note-cooldown"
+        autonomy_note_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        autonomy_note_turn = {
+            "reflection": "Social is highest, but no concrete social target is listed.",
+            "currentGoal": "Find a real social target instead of repeating utility objects.",
+            "plan": ["request a social target", "avoid replaying verified utility actions"],
+            "nextStep": {
+                "intent": "Ask the world for a social target.",
+                "category": "social",
+                "successCriteria": "A reachable social interaction target is resolved.",
+            },
+            "memoryUpdate": {"lesson": "Do not write repeated notes when the same social-target plan is already saved."},
+        }
+        autonomy_note_applied = server._live_agent_loop_apply_planner_turn(
+            autonomy_note_state,
+            {"agentId": autonomy_note_agent_id, "status": "planner-step-unresolved", "plannerTurn": autonomy_note_turn, "chosen": None},
+            agent_id=autonomy_note_agent_id,
+        )
+        autonomy_note_context = server._live_agent_loop_note_context(autonomy_note_agent_id, autonomy_note_state)
+        autonomy_note_record = server._live_agent_loop_append_internal_note(
+            autonomy_note_agent_id,
+            note_type="autonomy-plan",
+            title="write internal note",
+            text=(autonomy_note_context or {}).get("summary") or "Autonomy plan note.",
+            details={"supportContext": {"kind": "autonomy-plan"}},
+            agent_state=autonomy_note_state,
+        )
+        cooled_note_context = server._live_agent_loop_note_context(autonomy_note_agent_id, autonomy_note_state)
+        cooled_note_decision = server._live_agent_loop_build_decision_frame(
+            autonomy_note_agent_id,
+            server._live_agent_loop_build_perception(autonomy_note_agent_id, autonomy_note_state),
+            autonomy_note_state,
+        )
+        cooled_note_candidates = {item.get("id"): item for item in cooled_note_decision.get("candidates") or []}
+        check(
+            "recent autonomy-plan note suppresses repeated internal-note action",
+            autonomy_note_applied
+            and not autonomy_note_state.get("supportRequests")
+            and autonomy_note_context
+            and autonomy_note_record
+            and (not cooled_note_context or cooled_note_context.get("kind") != "autonomy-plan")
+            and cooled_note_candidates.get("record-internal-note", {}).get("available") is not True,
+            json.dumps({"context": cooled_note_context, "candidate": cooled_note_candidates.get("record-internal-note")}, default=str)[:900],
+        )
+        selected_report = (support_candidates.get("report-issue-to-coder") or {}).get("selected")
+        support_loop_state = {"agents": {"tester": planner_state}, "events": []}
+        support_plan = server._live_agent_loop_new_plan("tester", server._live_agent_loop_action_definition("report-issue-to-coder"), support_decision, selected_report, server._utc_now_iso())
+        report_outcome = server._live_agent_loop_execute_support_action(
+            support_loop_state,
+            "tester",
+            planner_state,
+            server._live_agent_loop_action_definition("report-issue-to-coder"),
+            support_decision,
+            selected_report,
+            support_plan,
+        )
+        comm_history = server._load_comm_history(limit=20, conversation_id="live-agent-report:tester:coder")
+        notes_after_report = server._live_agent_loop_recent_internal_notes("tester", limit=8)
+        check(
+            "report support action logs communication and durable note without fake world action",
+            report_outcome.get("ok") is True
+            and report_outcome.get("supportTool") == "coder-report"
+            and any(event.get("direction") == "request" and "Live Agent field report" in (event.get("text") or "") for event in comm_history)
+            and any(item.get("type") == "coder-report" for item in notes_after_report),
+            json.dumps({"outcome": report_outcome, "comm": comm_history[-3:], "notes": notes_after_report[:3]}, default=str)[:1200],
+        )
+        check(
+            "successful Coder report consumes matching support request",
+            report_outcome.get("consumedSupportRequestId")
+            and not any(item.get("kind") == "coder-report" and "message Coder about shelter" in (item.get("text") or "") for item in planner_state.get("supportRequests") or []),
+            json.dumps({"outcome": report_outcome, "requests": planner_state.get("supportRequests")}, default=str)[:900],
+        )
+        lesson_only_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        lesson_only_turn = {
+            "reflection": "The water cooler completed cleanly.",
+            "currentGoal": "Move to the next object.",
+            "plan": ["avoid repeating completed objects", "continue validation"],
+            "memoryUpdate": {
+                "lesson": "Water cooler hydration completed successfully; do not retest it unless new evidence or Coder feedback calls for it."
+            },
+        }
+        lesson_applied = server._live_agent_loop_apply_planner_turn(
+            lesson_only_state,
+            {"agentId": "tester", "status": "planner-step-action", "plannerTurn": lesson_only_turn, "chosen": "print-copy-document"},
+            agent_id="tester",
+        )
+        check(
+            "Coder feedback mention in memory lesson does not create report request",
+            lesson_applied
+            and server._live_agent_loop_support_request_kind(lesson_only_turn["memoryUpdate"]["lesson"]) == ""
+            and not any(item.get("kind") == "coder-report" for item in lesson_only_state.get("supportRequests") or []),
+            json.dumps({"requests": lesson_only_state.get("supportRequests"), "memory": lesson_only_state.get("memory")}, default=str)[:900],
+        )
+        water_cooler_lesson = "Water cooler hydration completed successfully in building bld_1781275645157; do not retest it unless new evidence or Coder feedback calls for it. Next object to validate is the printer/copier."
+        water_cooler_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        water_cooler_turn = {
+            "reflection": "The water cooler already has successful hydration evidence.",
+            "currentGoal": "Move on to printer/copier validation.",
+            "memoryUpdate": {"lesson": water_cooler_lesson},
+        }
+        water_cooler_applied = server._live_agent_loop_apply_planner_turn(
+            water_cooler_state,
+            {"agentId": "tester", "status": "planner-step-action", "plannerTurn": water_cooler_turn, "chosen": "print-copy-document"},
+            agent_id="tester",
+        )
+        check(
+            "water cooler success lesson does not create report request",
+            water_cooler_applied
+            and server._live_agent_loop_support_request_kind(water_cooler_lesson) == ""
+            and not any(item.get("kind") == "coder-report" for item in water_cooler_state.get("supportRequests") or []),
+            json.dumps({"requests": water_cooler_state.get("supportRequests"), "memory": water_cooler_state.get("memory")}, default=str)[:900],
+        )
+        printer_success_report = (
+            "Send Coder a concise field report that the printer/copier interaction completed successfully and left me ready to continue testing other objects. "
+            "| Coder report about verified printer/copier in building bld_1781275645157 on active world port 8590 "
+            "| Coder receives a practical success report and future loops can advance to the whiteboard instead of retesting the printer/copier. "
+            "| Printer/copier in building bld_1781275645157 has been verified successfully; avoid repeating it unless Coder asks or new evidence suggests a problem."
+        )
+        printer_success_report_truncated = (
+            "Send Coder a concise field report that the printer/copier interaction completed successfully and left me ready to continue testing other objects. "
+            "| Coder report about verified printer/copier in building bld_1781275645157 on active world port 8590 "
+            "| Coder receives a practical success report and future loops can advance to the whiteboard instead of retesting the printer/copier. "
+            "| Printer/copier in building bld_1781275645157 has been verified successfully; avoid repeating it unless Coder asks or ne"
+        )
+        printer_success_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        printer_success_turn = {
+            "reflection": "The printer/copier already completed successfully.",
+            "currentGoal": "Continue testing other objects.",
+            "toolRequests": [printer_success_report],
+        }
+        printer_success_applied = server._live_agent_loop_apply_planner_turn(
+            printer_success_state,
+            {"agentId": "tester", "status": "planner-tool-or-event-request", "plannerTurn": printer_success_turn, "chosen": None},
+            agent_id="tester",
+        )
+        check(
+            "explicit Coder success report does not create issue report request",
+            printer_success_applied
+            and server._live_agent_loop_support_request_kind(printer_success_report) == ""
+            and not any(item.get("kind") == "coder-report" for item in printer_success_state.get("supportRequests") or []),
+            json.dumps({"requests": printer_success_state.get("supportRequests"), "memory": printer_success_state.get("memory")}, default=str)[:900],
+        )
+        check(
+            "truncated production Coder success report does not create issue report request",
+            server._live_agent_loop_support_request_kind(printer_success_report_truncated) == "",
+            printer_success_report_truncated[:900],
+        )
+        armchair_lesson = "Do not repeat the verified armchair unless new visual evidence or Coder feedback shows a posture, facing, placement, or recovery problem; proceed to microwave validation."
+        armchair_lesson_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        armchair_lesson_turn = {
+            "reflection": "The armchair already has verification evidence.",
+            "currentGoal": "Proceed to the next object.",
+            "plan": ["skip repeated armchair", "validate microwave"],
+            "memoryUpdate": {"lesson": armchair_lesson},
+        }
+        armchair_lesson_applied = server._live_agent_loop_apply_planner_turn(
+            armchair_lesson_state,
+            {"agentId": "tester", "status": "planner-step-action", "plannerTurn": armchair_lesson_turn, "chosen": "heat-microwave-food"},
+            agent_id="tester",
+        )
+        check(
+            "verified armchair skip lesson does not create report request",
+            armchair_lesson_applied
+            and server._live_agent_loop_support_request_kind(armchair_lesson) == ""
+            and not any(item.get("kind") == "coder-report" for item in armchair_lesson_state.get("supportRequests") or []),
+            json.dumps({"requests": armchair_lesson_state.get("supportRequests"), "memory": armchair_lesson_state.get("memory")}, default=str)[:900],
+        )
+        port_guidance_lesson = "Coder receives a field report noting active world port 8590, older 8587-only guidance, and that I am following the live frame as instructed."
+        port_guidance_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        port_guidance_turn = {
+            "reflection": "The live frame already identifies the active world.",
+            "currentGoal": "Follow the live frame instead of stale port guidance.",
+            "nextStep": {"successCriteria": port_guidance_lesson},
+            "memoryUpdate": {"lesson": port_guidance_lesson},
+        }
+        port_guidance_applied = server._live_agent_loop_apply_planner_turn(
+            port_guidance_state,
+            {"agentId": "tester", "status": "planner-step-action", "plannerTurn": port_guidance_turn, "chosen": "work-on-active-goal"},
+            agent_id="tester",
+        )
+        check(
+            "passive port field-report guidance does not create report request",
+            port_guidance_applied
+            and server._live_agent_loop_support_request_kind(port_guidance_lesson) == ""
+            and not any(item.get("kind") == "coder-report" for item in port_guidance_state.get("supportRequests") or []),
+            json.dumps({"requests": port_guidance_state.get("supportRequests"), "memory": port_guidance_state.get("memory")}, default=str)[:900],
+        )
+        legacy_false_report_state = {
+            "needs": dict(goal_agent_state["needs"]),
+            "supportRequests": [
+                {
+                    "at": server._utc_now_iso(),
+                    "kind": "coder-report",
+                    "issueId": "support.false-positive",
+                    "text": lesson_only_turn["memoryUpdate"]["lesson"],
+                    "source": "planner-step-action",
+                }
+            ],
+        }
+        server._live_agent_loop_normalize_memory(legacy_false_report_state)
+        check(
+            "normalization drops legacy false-positive Coder feedback report request",
+            not legacy_false_report_state.get("supportRequests"),
+            json.dumps(legacy_false_report_state.get("supportRequests"), default=str)[:900],
+        )
+        legacy_water_false_report_state = {
+            "needs": dict(goal_agent_state["needs"]),
+            "supportRequests": [
+                {
+                    "at": server._utc_now_iso(),
+                    "kind": "coder-report",
+                    "issueId": "support.water-cooler-false-positive",
+                    "text": water_cooler_lesson,
+                    "source": "planner-step-action",
+                }
+            ],
+        }
+        server._live_agent_loop_normalize_memory(legacy_water_false_report_state)
+        check(
+            "normalization drops legacy water cooler success report request",
+            not legacy_water_false_report_state.get("supportRequests"),
+            json.dumps(legacy_water_false_report_state.get("supportRequests"), default=str)[:900],
+        )
+        legacy_printer_success_report_state = {
+            "needs": dict(goal_agent_state["needs"]),
+            "supportRequests": [
+                {
+                    "at": server._utc_now_iso(),
+                    "kind": "coder-report",
+                    "issueId": "support.printer-success-false-positive",
+                    "text": printer_success_report,
+                    "source": "planner-tool-or-event-request",
+                }
+            ],
+        }
+        server._live_agent_loop_normalize_memory(legacy_printer_success_report_state)
+        check(
+            "normalization drops legacy explicit Coder success report request",
+            not legacy_printer_success_report_state.get("supportRequests"),
+            json.dumps(legacy_printer_success_report_state.get("supportRequests"), default=str)[:900],
+        )
+        legacy_truncated_printer_success_report_state = {
+            "needs": dict(goal_agent_state["needs"]),
+            "supportRequests": [
+                {
+                    "at": server._utc_now_iso(),
+                    "kind": "coder-report",
+                    "issueId": "support.printer-success-truncated-false-positive",
+                    "text": printer_success_report_truncated,
+                    "source": "planner-tool-or-event-request",
+                }
+            ],
+        }
+        server._live_agent_loop_normalize_memory(legacy_truncated_printer_success_report_state)
+        check(
+            "normalization drops legacy truncated Coder success report request",
+            not legacy_truncated_printer_success_report_state.get("supportRequests"),
+            json.dumps(legacy_truncated_printer_success_report_state.get("supportRequests"), default=str)[:900],
+        )
+        legacy_armchair_false_report_state = {
+            "needs": dict(goal_agent_state["needs"]),
+            "supportRequests": [
+                {
+                    "at": server._utc_now_iso(),
+                    "kind": "coder-report",
+                    "issueId": "support.armchair-false-positive",
+                    "text": armchair_lesson,
+                    "source": "planner-step-action",
+                }
+            ],
+        }
+        server._live_agent_loop_normalize_memory(legacy_armchair_false_report_state)
+        check(
+            "normalization drops legacy verified armchair skip report request",
+            not legacy_armchair_false_report_state.get("supportRequests"),
+            json.dumps(legacy_armchair_false_report_state.get("supportRequests"), default=str)[:900],
+        )
+        legacy_port_false_report_state = {
+            "needs": dict(goal_agent_state["needs"]),
+            "supportRequests": [
+                {
+                    "at": server._utc_now_iso(),
+                    "kind": "coder-report",
+                    "issueId": "support.port-guidance-false-positive",
+                    "text": port_guidance_lesson,
+                    "source": "planner-step-action",
+                }
+            ],
+        }
+        server._live_agent_loop_normalize_memory(legacy_port_false_report_state)
+        check(
+            "normalization drops legacy passive port field-report request",
+            not legacy_port_false_report_state.get("supportRequests"),
+            json.dumps(legacy_port_false_report_state.get("supportRequests"), default=str)[:900],
+        )
+
+        episode_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        episode_loop_state = {"agents": {"tester": episode_state}, "events": []}
+        episode_action_def = server._live_agent_loop_action_definition("use-seating-object")
+        episode_decision = {
+            "selectedActionId": "use-seating-object",
+            "selectedActionLabel": "test seating on an armchair",
+            "mode": "planner-v2",
+            "score": 1.0,
+            "reason": "verify the armchair end to end",
+            "goalFrame": {"goals": [{"kind": "resident-profile", "priority": 0.9, "reason": "verify armchair use loop"}]},
+        }
+        episode_selected = {"action": episode_action_def, "target": dict(seating_target)}
+        episode_plan = server._live_agent_loop_prepare_plan(
+            episode_state,
+            "tester",
+            episode_action_def,
+            episode_decision,
+            episode_selected,
+            server._utc_now_iso(),
+            persist=True,
+        )
+        started_episode = episode_state.get("activeEpisode") or {}
+        check(
+            "feedback loop starts durable episode before execution",
+            started_episode.get("phase") == "decide"
+            and started_episode.get("planId") == episode_plan.get("id")
+            and started_episode.get("loopActionId") == "use-seating-object",
+            json.dumps(started_episode, default=str)[:900],
+        )
+        episode_plan = server._live_agent_loop_mark_plan_action_created(
+            episode_loop_state,
+            "tester",
+            episode_state,
+            episode_plan,
+            "wa-episode-armchair-arrival-only",
+            server._utc_now_iso(),
+        )
+        executing_episode = episode_state.get("activeEpisode") or {}
+        check(
+            "feedback loop records execute phase with action id",
+            executing_episode.get("phase") == "execute" and executing_episode.get("actionId") == "wa-episode-armchair-arrival-only",
+            json.dumps(executing_episode, default=str)[:900],
+        )
+        episode_action = completed_seating_action("wa-episode-armchair-arrival-only", {
+            "status": "completed",
+            "applied": True,
+            "reason": "server_authoritative_live_action_completed",
+            "route": {"arrived": True, "distanceToTarget": 0},
+        })
+        episode_action["params"] = {
+            **episode_action["params"],
+            "planId": episode_plan.get("id"),
+            "planStepId": "execute-visible-action",
+        }
+        episode_summary = server._live_agent_loop_action_summary(episode_action)
+        episode_recent = server._live_agent_loop_remember_settled_action(episode_loop_state, "tester", episode_state, episode_action, episode_summary)
+        verifying_plan = server._live_agent_loop_update_plan_from_settled_action(
+            episode_loop_state,
+            "tester",
+            episode_state,
+            episode_summary,
+            "completed",
+            server._utc_now_iso(),
+        )
+        verify_step = server._live_agent_loop_plan_current_step(verifying_plan)
+        check(
+            "settled action opens observe-outcome verification step",
+            verify_step.get("id") == "observe-outcome" and verify_step.get("status") == "in_progress" and verifying_plan.get("status") == "in_progress",
+            json.dumps(verifying_plan, default=str)[:900],
+        )
+        verified_episode = server._live_agent_loop_record_episode_verification(
+            episode_loop_state,
+            "tester",
+            episode_state,
+            episode_action,
+            episode_summary,
+            episode_recent,
+            verifying_plan,
+            server._utc_now_iso(),
+        )
+        failed_episode_plan = server._live_agent_loop_find_plan_for_action(episode_state, {"planId": episode_plan.get("id"), "planStepId": "observe-outcome", "id": "wa-episode-armchair-arrival-only"})
+        check(
+            "failed verification creates issue and Coder report request",
+            verified_episode.get("status") == "awaiting_report"
+            and verified_episode.get("phase") == "report"
+            and (verified_episode.get("verification") or {}).get("ok") is False
+            and failed_episode_plan.get("status") == "failed"
+            and any(req.get("kind") == "coder-report" and req.get("issueId") == verified_episode.get("issueId") for req in episode_state.get("supportRequests") or []),
+            json.dumps({"episode": verified_episode, "plan": failed_episode_plan, "requests": episode_state.get("supportRequests")}, default=str)[:1400],
+        )
+        episode_support_perception = server._live_agent_loop_build_perception("tester", episode_state)
+        episode_support_decision = server._live_agent_loop_build_decision_frame("tester", episode_support_perception, episode_state)
+        episode_support_candidate = next((item for item in episode_support_decision.get("candidates") or [] if item.get("id") == "report-issue-to-coder"), {})
+        episode_report_plan = server._live_agent_loop_prepare_plan(
+            episode_state,
+            "tester",
+            server._live_agent_loop_action_definition("report-issue-to-coder"),
+            episode_support_decision,
+            episode_support_candidate.get("selected"),
+            server._utc_now_iso(),
+            persist=True,
+        )
+        episode_report_outcome = server._live_agent_loop_execute_support_action(
+            episode_loop_state,
+            "tester",
+            episode_state,
+            server._live_agent_loop_action_definition("report-issue-to-coder"),
+            episode_support_decision,
+            episode_support_candidate.get("selected"),
+            episode_report_plan,
+        )
+        reported_episode = server._live_agent_loop_find_episode(episode_state, issue_id=verified_episode.get("issueId")) or {}
+        check(
+            "Coder report marks failed episode awaiting Coder",
+            episode_report_outcome.get("ok") is True
+            and reported_episode.get("status") == "awaiting_coder"
+            and reported_episode.get("phase") == "await-coder"
+            and reported_episode.get("updatedAt") == reported_episode.get("reportedAt")
+            and reported_episode.get("conversationId"),
+            json.dumps({"outcome": episode_report_outcome, "episode": reported_episode}, default=str)[:1400],
+        )
+        stale_reported_episode = server._live_agent_loop_normalize_episode({
+            **reported_episode,
+            "status": "awaiting_report",
+            "phase": "report",
+            "updatedAt": verified_episode.get("updatedAt"),
+        })
+        check(
+            "reported episodes do not normalize back to awaiting report",
+            stale_reported_episode.get("status") == "awaiting_coder"
+            and stale_reported_episode.get("phase") == "await-coder"
+            and stale_reported_episode.get("updatedAt") == stale_reported_episode.get("reportedAt"),
+            json.dumps({"stale": stale_reported_episode, "reported": reported_episode}, default=str)[:1200],
+        )
+        server._append_comm_event({
+            "type": "message",
+            "direction": "request",
+            "conversationId": reported_episode.get("conversationId"),
+            "from": {"id": "coder", "providerKind": "openclaw", "name": "Coder"},
+            "to": {"id": "tester", "providerKind": "openclaw", "name": "Test Resident"},
+            "text": "Coder reviewed the armchair issue: do not count arrival as success; retry only after verifying seated pose and use-state evidence.",
+        })
+        ingested_feedback = server._live_agent_loop_ingest_coder_feedback("tester", episode_state)
+        responded_episode = server._live_agent_loop_find_episode(episode_state, issue_id=verified_episode.get("issueId")) or {}
+        episode_prompt = server._live_agent_model_decision_prompt(
+            "tester",
+            {
+                "goalFrame": {
+                    "context": {"residentProfile": {"identity": {"displayName": "Tester"}}},
+                    "goals": [],
+                    "episodes": server._live_agent_loop_recent_episode_summary(episode_state),
+                },
+                "topNeed": {"id": "curiosity", "value": 0.4},
+                "candidates": [{"id": "use-seating-object", "decision": "candidate", "label": "test seating", "need": "curiosity", "score": 0.8}],
+            },
+            episode_state,
+        )
+        check(
+            "Coder feedback is ingested into episode and next planner prompt",
+            ingested_feedback
+            and responded_episode.get("status") == "coder_responded"
+            and "Coder reviewed the armchair issue" in episode_prompt
+            and "Recent verification episodes" in episode_prompt,
+            json.dumps({"episode": responded_episode, "prompt": episode_prompt[-1200:]}, default=str)[:1400],
+        )
+        legacy_episode_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        legacy_loop_state = {"agents": {"tester": legacy_episode_state}, "events": []}
+        legacy_plan = server._live_agent_loop_new_plan("tester", episode_action_def, episode_decision, episode_selected, server._utc_now_iso())
+        legacy_plan["status"] = "in_progress"
+        legacy_plan["operatorSummary"] = "Legacy active plan from before episode ledger migration."
+        legacy_episode_state["activePlan"] = legacy_plan
+        legacy_episode_state["plans"] = [legacy_plan]
+        legacy_resumed_plan = server._live_agent_loop_prepare_plan(
+            legacy_episode_state,
+            "tester",
+            episode_action_def,
+            episode_decision,
+            episode_selected,
+            server._utc_now_iso(),
+            persist=True,
+        )
+        legacy_started_episode = legacy_episode_state.get("activeEpisode") or {}
+        legacy_marked_plan = server._live_agent_loop_mark_plan_action_created(
+            legacy_loop_state,
+            "tester",
+            legacy_episode_state,
+            legacy_resumed_plan,
+            "wa-legacy-episode-armchair",
+            server._utc_now_iso(),
+            action_def=episode_action_def,
+            decision=episode_decision,
+            selected=episode_selected,
+        )
+        legacy_action = completed_seating_action("wa-legacy-episode-armchair", {
+            "status": "completed",
+            "applied": True,
+            "reason": "server_authoritative_live_action_completed",
+            "embodiedState": {
+                "useState": "completed",
+                "poseKind": "seat",
+                "posture": "seated",
+                "seated": True,
+                "animationId": "sit",
+                "activeUseState": "completed",
+                "finalPlacement": {"x": 10, "y": 20, "floor": 1},
+            },
+        })
+        legacy_action["params"] = {
+            **legacy_action["params"],
+            "planId": legacy_marked_plan.get("id"),
+            "planStepId": "execute-visible-action",
+        }
+        legacy_summary = server._live_agent_loop_action_summary(legacy_action)
+        legacy_recent = server._live_agent_loop_remember_settled_action(legacy_loop_state, "tester", legacy_episode_state, legacy_action, legacy_summary)
+        legacy_verifying_plan = server._live_agent_loop_update_plan_from_settled_action(
+            legacy_loop_state,
+            "tester",
+            legacy_episode_state,
+            legacy_summary,
+            "completed",
+            server._utc_now_iso(),
+        )
+        legacy_completed_episode = server._live_agent_loop_record_episode_verification(
+            legacy_loop_state,
+            "tester",
+            legacy_episode_state,
+            legacy_action,
+            legacy_summary,
+            legacy_recent,
+            legacy_verifying_plan,
+            server._utc_now_iso(),
+        )
+        legacy_episodes = legacy_episode_state.get("episodes") or []
+        check(
+            "legacy active plan gets durable episode and clears active pointers after verification",
+            legacy_started_episode.get("planId") == legacy_resumed_plan.get("id")
+            and legacy_completed_episode.get("status") == "completed"
+            and len(legacy_episodes) == 1
+            and (legacy_episodes[-1].get("verification") or {}).get("ok") is True
+            and not legacy_episode_state.get("activeEpisode")
+            and not legacy_episode_state.get("activePlan"),
+            json.dumps({"started": legacy_started_episode, "completed": legacy_completed_episode, "state": legacy_episode_state}, default=str)[:1500],
+        )
+        merge_plan = server._live_agent_loop_new_plan("merge-tester", episode_action_def, episode_decision, episode_selected, "2026-07-08T00:00:00Z")
+        merge_plan["id"] = "plan-merge-race"
+        merge_completed_plan = {**merge_plan, "status": "completed", "updatedAt": "2026-07-08T00:00:10Z", "completedAt": "2026-07-08T00:00:10Z"}
+        merge_stale_plan = {**merge_plan, "status": "in_progress", "updatedAt": "2026-07-08T00:00:01Z"}
+        merge_completed_episode = {
+            "schemaVersion": server.LIVE_AGENT_EPISODE_SCHEMA_VERSION,
+            "id": "episode-merge-race",
+            "agentId": "merge-tester",
+            "planId": "plan-merge-race",
+            "loopActionId": "use-seating-object",
+            "status": "completed",
+            "phase": "continue",
+            "createdAt": "2026-07-08T00:00:00Z",
+            "updatedAt": "2026-07-08T00:00:10Z",
+            "verifiedAt": "2026-07-08T00:00:10Z",
+            "verification": {"id": "verify-merge-race", "ok": True},
+        }
+        merge_stale_episode = {
+            **merge_completed_episode,
+            "status": "executing",
+            "phase": "execute",
+            "updatedAt": "2026-07-08T00:00:01Z",
+            "actionId": "wa-stale-save-copy",
+        }
+        server.save_live_agent_loop_state({
+            "schemaVersion": server.LIVE_AGENT_LOOP_SCHEMA_VERSION,
+            "agents": {"merge-tester": {"episodes": [merge_completed_episode], "plans": [merge_completed_plan]}},
+            "events": [],
+        })
+        server.save_live_agent_loop_state({
+            "schemaVersion": server.LIVE_AGENT_LOOP_SCHEMA_VERSION,
+            "agents": {"merge-tester": {"episodes": [merge_stale_episode], "activeEpisode": merge_stale_episode, "plans": [merge_stale_plan], "activePlan": merge_stale_plan}},
+            "events": [],
+        })
+        merged_loop_state = server.get_live_agent_loop_state()
+        merge_row = (merged_loop_state.get("agents") or {}).get("merge-tester") or {}
+        merge_episode_after = (merge_row.get("episodes") or [{}])[-1]
+        merge_plan_after = (merge_row.get("plans") or [{}])[-1]
+        check(
+            "save merge preserves verified episode and completed plan over stale active copy",
+            merge_episode_after.get("status") == "completed"
+            and merge_plan_after.get("status") == "completed"
+            and not merge_row.get("activeEpisode")
+            and not merge_row.get("activePlan"),
+            json.dumps(merge_row, default=str)[:1500],
+        )
+        event_episode = {
+            **merge_completed_episode,
+            "id": "episode-event-reconcile",
+            "agentId": "event-reconcile",
+            "planId": "plan-event-reconcile",
+            "status": "executing",
+            "phase": "execute",
+            "updatedAt": "2026-07-08T00:01:00Z",
+        }
+        event_plan = {
+            **merge_plan,
+            "id": "plan-event-reconcile",
+            "agentId": "event-reconcile",
+            "status": "in_progress",
+            "updatedAt": "2026-07-08T00:01:00Z",
+        }
+        server.save_live_agent_loop_state({
+            "schemaVersion": server.LIVE_AGENT_LOOP_SCHEMA_VERSION,
+            "agents": {
+                "event-reconcile": {
+                    "episodes": [event_episode],
+                    "activeEpisode": event_episode,
+                    "plans": [event_plan],
+                    "activePlan": event_plan,
+                }
+            },
+            "events": [
+                {
+                    "at": "2026-07-08T00:01:10Z",
+                    "type": "plan-completed",
+                    "agentId": "event-reconcile",
+                    "details": {"planId": "plan-event-reconcile", "verificationId": "verify-event-reconcile", "status": "verified"},
+                },
+                {
+                    "at": "2026-07-08T00:01:10Z",
+                    "type": "episode-verified",
+                    "agentId": "event-reconcile",
+                    "details": {"episodeId": "episode-event-reconcile", "verificationId": "verify-event-reconcile", "ok": True},
+                },
+            ],
+        })
+        event_loop_state = server.get_live_agent_loop_state()
+        event_row = (event_loop_state.get("agents") or {}).get("event-reconcile") or {}
+        event_episode_after = (event_row.get("episodes") or [{}])[-1]
+        event_plan_after = (event_row.get("plans") or [{}])[-1]
+        check(
+            "verified events reconcile stale active episode and plan records",
+            event_episode_after.get("status") == "completed"
+            and event_plan_after.get("status") == "completed"
+            and not event_row.get("activeEpisode")
+            and not event_row.get("activePlan"),
+            json.dumps(event_row, default=str)[:1500],
+        )
+        board_action = {
+            "id": "wa-board-note-regression",
+            "status": "completed",
+            "actionType": "planning.brainstorm",
+            "agentId": "tester",
+            "target": {"kind": "object-instance", "buildingId": "autonomy-lab", "objectInstanceId": "autonomy-whiteboard", "catalogId": "whiteboard", "floor": 1},
+            "params": {"loopActionId": "investigate-blocking-issue"},
+            "timing": {"updatedAt": server._utc_now_iso(), "completedAt": server._utc_now_iso(), "terminalAt": server._utc_now_iso()},
+            "result": {"status": "completed", "applied": True, "reason": "server_authoritative_live_action_completed"},
+        }
+        board_state = {"needs": dict(goal_agent_state["needs"]), "memory": {}}
+        board_loop_state = {"agents": {"tester": board_state}, "events": []}
+        board_summary = server._live_agent_loop_action_summary(board_action)
+        remembered_board = server._live_agent_loop_remember_settled_action(board_loop_state, "tester", board_state, board_action, board_summary)
+        board_notes = server._live_agent_loop_recent_internal_notes("tester", limit=12)
+        check(
+            "completed planning board action writes real internal note",
+            remembered_board.get("status") == "completed"
+            and any(item.get("type") == "investigate-blocking-issue" and "whiteboard" in json.dumps(item).lower() for item in board_notes),
+            json.dumps({"remembered": remembered_board, "notes": board_notes[:5]}, default=str)[:1000],
+        )
 
         home_site = server._live_agent_loop_find_home_build_site("tester")
         home_target = home_site.get("target") if isinstance(home_site, dict) else {}
@@ -508,6 +1258,293 @@ def main():
             and abs(home_action_point["y"] - expected_home_point["y"]) < 0.001
             and home_action_point.get("buildingId") == "live-home-tester",
             json.dumps({"actual": home_action_point, "expected": expected_home_point}, default=str),
+        )
+        shelter_state = {
+            "needs": {
+                "hydration": 0.24,
+                "food": 0.20,
+                "energy": 0.82,
+                "curiosity": 0.10,
+                "maintenance": 0.12,
+                "shelter": 1.25,
+                "social": 0.08,
+            }
+        }
+        shelter_perception = server._live_agent_loop_build_perception("tester", shelter_state)
+        shelter_decision = server._live_agent_loop_build_decision_frame("tester", shelter_perception, shelter_state)
+        rest_candidate = next((item for item in shelter_decision.get("candidates") or [] if item.get("id") == "rest-at-home"), {})
+        check(
+            "critical shelter with owned home selects rest-at-home",
+            shelter_decision.get("selectedActionId") == "rest-at-home"
+            and rest_candidate.get("need") == "shelter"
+            and {"shelter", "energy"}.issubset(set(rest_candidate.get("satisfiesNeeds") or [])),
+            json.dumps({"selected": shelter_decision.get("selectedActionId"), "rest": rest_candidate}, default=str)[:700],
+        )
+        rest_action = {
+            "id": "wa-rest-home-regression",
+            "status": "completed",
+            "actionType": "life.restAtHome",
+            "agentId": "tester",
+            "target": {"kind": "building", "buildingId": "live-home-tester", "floor": 1},
+            "params": {"loopActionId": "rest-at-home"},
+            "timing": {"updatedAt": server._utc_now_iso(), "completedAt": server._utc_now_iso(), "terminalAt": server._utc_now_iso()},
+            "result": {"status": "completed", "applied": True, "reason": "server_authoritative_live_action_completed"},
+        }
+        rest_summary = server._live_agent_loop_action_summary(rest_action)
+        rest_memory_state = {
+            "needs": {
+                "hydration": 0.24,
+                "food": 0.20,
+                "energy": 0.82,
+                "curiosity": 0.10,
+                "maintenance": 0.12,
+                "shelter": 1.25,
+                "social": 0.08,
+            },
+            "memory": {},
+        }
+        rest_loop_state = {"agents": {"tester": rest_memory_state}}
+        remembered_rest = server._live_agent_loop_remember_settled_action(rest_loop_state, "tester", rest_memory_state, rest_action, rest_summary)
+        rest_needs_after = rest_memory_state.get("needs") or {}
+        check(
+            "completed home rest clears shelter and energy needs",
+            remembered_rest.get("status") == "completed"
+            and rest_needs_after.get("shelter") == 0.12
+            and rest_needs_after.get("energy") == 0.12
+            and rest_needs_after.get("curiosity") == 0.14,
+            json.dumps({"remembered": remembered_rest, "needs": rest_needs_after}, default=str)[:700],
+        )
+        rest_cancel_action = {
+            **rest_action,
+            "id": "wa-rest-home-cancelled-once",
+            "status": "cancelled",
+            "timing": {"updatedAt": server._utc_now_iso(), "cancelledAt": server._utc_now_iso(), "terminalAt": server._utc_now_iso()},
+            "failureReason": "cancelled_by_system",
+            "result": {"status": "cancelled", "reason": "cancelled_by_system"},
+        }
+        rest_cancel_state = {"needs": dict(rest_memory_state["needs"]), "memory": {}}
+        server._live_agent_loop_remember_settled_action(
+            {"agents": {"tester": rest_cancel_state}},
+            "tester",
+            rest_cancel_state,
+            rest_cancel_action,
+            server._live_agent_loop_action_summary(rest_cancel_action),
+        )
+        single_cancel_recent = server._live_agent_loop_recent_outcome_summary(rest_cancel_state)
+        single_cancel_report = server._live_agent_loop_report_context("tester", rest_cancel_state)
+        check(
+            "single benign rest-at-home system cancel does not escalate to Coder",
+            not single_cancel_recent.get("issues")
+            and not single_cancel_report,
+            json.dumps({"recent": single_cancel_recent, "report": single_cancel_report}, default=str)[:900],
+        )
+        legacy_single_cancel_state = {
+            "needs": dict(rest_memory_state["needs"]),
+            "memory": {
+                "recentActions": [
+                    {
+                        "actionId": "wa-rest-home-legacy-cancelled-once",
+                        "loopActionId": "rest-at-home",
+                        "status": "cancelled",
+                        "targetKey": "object:live-home-tester:building",
+                        "failure": {
+                            "status": "cancelled",
+                            "reason": "cancelled_by_system",
+                            "failureReason": "cancelled_by_system",
+                            "targetKey": "object:live-home-tester:building",
+                            "learningText": "reason cancelled_by_system; target building in building live-home-tester; avoid retrying the same target unless the route, target, or conditions change.",
+                        },
+                    }
+                ]
+            },
+        }
+        server._live_agent_loop_normalize_memory(legacy_single_cancel_state)
+        legacy_single_cancel_recent = server._live_agent_loop_recent_outcome_summary(legacy_single_cancel_state)
+        legacy_single_cancel_failure = (((legacy_single_cancel_state.get("memory") or {}).get("recentActions") or [{}])[-1].get("failure") or {})
+        check(
+            "legacy single rest-at-home system cancel normalizes as non-reportable",
+            legacy_single_cancel_failure.get("reportable") is False
+            and legacy_single_cancel_failure.get("benignSystemCancel") is True
+            and not legacy_single_cancel_recent.get("issues"),
+            json.dumps({"failure": legacy_single_cancel_failure, "recent": legacy_single_cancel_recent}, default=str)[:900],
+        )
+        rest_episode_state = {
+            "needs": dict(rest_memory_state["needs"]),
+            "memory": {},
+        }
+        rest_episode_loop_state = {"agents": {"tester": rest_episode_state}, "events": []}
+        rest_action_def = server._live_agent_loop_action_definition("rest-at-home")
+        rest_episode_decision = {
+            "selectedActionId": "rest-at-home",
+            "reason": "rest at home best matches planner-v2 goals for shelter",
+            "score": 0.91,
+            "mode": "deterministic",
+            "goalFrame": {"goals": [{"text": "restore shelter at owned home"}]},
+        }
+        rest_episode_selected = {"target": {"kind": "building", "buildingId": "live-home-tester", "floor": 1}}
+        rest_episode_plan = server._live_agent_loop_prepare_plan(
+            rest_episode_state,
+            "tester",
+            rest_action_def,
+            rest_episode_decision,
+            rest_episode_selected,
+            server._utc_now_iso(),
+            persist=True,
+        )
+        rest_episode_plan = server._live_agent_loop_mark_plan_action_created(
+            rest_episode_loop_state,
+            "tester",
+            rest_episode_state,
+            rest_episode_plan,
+            "wa-rest-home-verification-cancelled-once",
+            server._utc_now_iso(),
+            action_def=rest_action_def,
+            decision=rest_episode_decision,
+            selected=rest_episode_selected,
+        )
+        rest_cancel_verification_action = {
+            **rest_cancel_action,
+            "id": "wa-rest-home-verification-cancelled-once",
+            "params": {
+                **(rest_cancel_action.get("params") or {}),
+                "planId": rest_episode_plan.get("id"),
+                "planStepId": "execute-visible-action",
+            },
+            "timing": {"updatedAt": server._utc_now_iso(), "cancelledAt": server._utc_now_iso(), "terminalAt": server._utc_now_iso()},
+        }
+        rest_cancel_verification_summary = server._live_agent_loop_action_summary(rest_cancel_verification_action)
+        rest_cancel_verification_recent = server._live_agent_loop_remember_settled_action(
+            rest_episode_loop_state,
+            "tester",
+            rest_episode_state,
+            rest_cancel_verification_action,
+            rest_cancel_verification_summary,
+        )
+        rest_cancel_verifying_plan = server._live_agent_loop_update_plan_from_settled_action(
+            rest_episode_loop_state,
+            "tester",
+            rest_episode_state,
+            rest_cancel_verification_summary,
+            "cancelled",
+            server._utc_now_iso(),
+        )
+        rest_cancel_failed_episode = server._live_agent_loop_record_episode_verification(
+            rest_episode_loop_state,
+            "tester",
+            rest_episode_state,
+            rest_cancel_verification_action,
+            rest_cancel_verification_summary,
+            rest_cancel_verification_recent,
+            rest_cancel_verifying_plan,
+            server._utc_now_iso(),
+        )
+        rest_cancel_verification_report = server._live_agent_loop_report_context("tester", rest_episode_state)
+        check(
+            "single benign rest-at-home verification failure does not escalate to Coder",
+            rest_cancel_failed_episode.get("status") == "failed"
+            and rest_cancel_failed_episode.get("phase") == "continue"
+            and not rest_cancel_failed_episode.get("issueId")
+            and (rest_cancel_failed_episode.get("verification") or {}).get("reportableFailure") is False
+            and not any(item.get("kind") == "coder-report" for item in rest_episode_state.get("supportRequests") or [])
+            and not rest_cancel_verification_report,
+            json.dumps({"episode": rest_cancel_failed_episode, "requests": rest_episode_state.get("supportRequests"), "report": rest_cancel_verification_report}, default=str)[:1400],
+        )
+        legacy_false_episode = {
+            "id": "episode-legacy-benign-rest-awaiting-coder",
+            "status": "awaiting_coder",
+            "phase": "await-coder",
+            "loopActionId": "rest-at-home",
+            "issueId": "episode.issue.legacy-rest",
+            "targetKey": "building:live-home-tester",
+            "createdAt": server._utc_now_iso(),
+            "updatedAt": "2026-07-08T12:40:27Z",
+            "reportedAt": "2026-07-08T12:42:14Z",
+            "verification": {"id": "verify-legacy-rest", "ok": False, "status": "failed"},
+            "reports": [{"at": "2026-07-08T12:42:14Z", "supportActionId": "lsa-legacy-rest-report", "status": "completed", "ok": True}],
+        }
+        legacy_false_episode_state = {
+            "needs": dict(rest_memory_state["needs"]),
+            "memory": {
+                "recentActions": [
+                    {
+                        "actionId": "wa-rest-home-legacy-episode-cancelled-once",
+                        "loopActionId": "rest-at-home",
+                        "status": "cancelled",
+                        "targetKey": "object:live-home-tester:building",
+                        "failure": {
+                            "status": "cancelled",
+                            "reason": "cancelled_by_system",
+                            "targetKey": "object:live-home-tester:building",
+                        },
+                    }
+                ]
+            },
+            "episodes": [legacy_false_episode],
+            "activeEpisode": legacy_false_episode,
+        }
+        server._live_agent_loop_normalize_memory(legacy_false_episode_state)
+        cleared_false_episode = (legacy_false_episode_state.get("episodes") or [{}])[-1]
+        check(
+            "legacy false rest-at-home report episode retires after normalization",
+            cleared_false_episode.get("status") == "failed"
+            and cleared_false_episode.get("phase") == "continue"
+            and (cleared_false_episode.get("verification") or {}).get("reportableFailure") is False
+            and not legacy_false_episode_state.get("activeEpisode"),
+            json.dumps({"episode": cleared_false_episode, "active": legacy_false_episode_state.get("activeEpisode")}, default=str)[:1200],
+        )
+        legacy_loop_normalized = server._normalize_live_agent_loop_state({
+            "agents": {
+                "tester": {
+                    "needs": dict(rest_memory_state["needs"]),
+                    "memory": {
+                        "recentActions": [
+                            {
+                                "actionId": "wa-rest-home-legacy-loop-cancelled-once",
+                                "loopActionId": "rest-at-home",
+                                "status": "cancelled",
+                                "targetKey": "object:live-home-tester:building",
+                                "failure": {
+                                    "status": "cancelled",
+                                    "reason": "cancelled_by_system",
+                                    "targetKey": "object:live-home-tester:building",
+                                },
+                            }
+                        ]
+                    },
+                    "episodes": [legacy_false_episode],
+                    "activeEpisode": legacy_false_episode,
+                }
+            }
+        })
+        legacy_loop_agent = (legacy_loop_normalized.get("agents") or {}).get("tester") or {}
+        legacy_loop_episode = (legacy_loop_agent.get("episodes") or [{}])[-1]
+        legacy_loop_failure = ((((legacy_loop_agent.get("memory") or {}).get("recentActions") or [{}])[-1]).get("failure") or {})
+        check(
+            "top-level loop normalization retires legacy false rest issue",
+            legacy_loop_failure.get("reportable") is False
+            and legacy_loop_episode.get("status") == "failed"
+            and not legacy_loop_agent.get("activeEpisode"),
+            json.dumps({"failure": legacy_loop_failure, "episode": legacy_loop_episode, "active": legacy_loop_agent.get("activeEpisode")}, default=str)[:1200],
+        )
+        rest_cancel_action_2 = {
+            **rest_cancel_action,
+            "id": "wa-rest-home-cancelled-twice",
+            "timing": {"updatedAt": server._utc_now_iso(), "cancelledAt": server._utc_now_iso(), "terminalAt": server._utc_now_iso()},
+        }
+        server._live_agent_loop_remember_settled_action(
+            {"agents": {"tester": rest_cancel_state}},
+            "tester",
+            rest_cancel_state,
+            rest_cancel_action_2,
+            server._live_agent_loop_action_summary(rest_cancel_action_2),
+        )
+        repeated_cancel_recent = server._live_agent_loop_recent_outcome_summary(rest_cancel_state)
+        repeated_cancel_report = server._live_agent_loop_report_context("tester", rest_cancel_state)
+        check(
+            "repeated rest-at-home system cancels can still escalate",
+            any(item.get("loopActionId") == "rest-at-home" for item in repeated_cancel_recent.get("issues") or [])
+            and (repeated_cancel_report or {}).get("kind") == "recent-issue",
+            json.dumps({"recent": repeated_cancel_recent, "report": repeated_cancel_report}, default=str)[:900],
         )
 
         # ------------------------------------------------------------------
@@ -690,6 +1727,104 @@ def main():
             json.dumps(result_action_conflict, default=str)[:300],
         )
 
+        shutdown_state = server.get_live_agent_loop_state(persist_migration=True)
+        shutdown_agent = server._live_agent_loop_agent_state(shutdown_state, "tester")
+        shutdown_agent["enabled"] = True
+        shutdown_agent["autonomyPlan"] = {"status": "active", "currentGoal": "stale shutdown goal", "plan": ["stale shutdown step"]}
+        shutdown_action_def = server._live_agent_loop_action_definition("brainstorm-whiteboard")
+        shutdown_decision = {
+            "selectedActionId": "brainstorm-whiteboard",
+            "reason": "verify shutdown cleanup",
+            "score": 0.9,
+            "goalFrame": {"goals": [{"text": "verify shutdown cleanup"}]},
+        }
+        shutdown_selected = {"target": {"kind": "object-instance", "buildingId": "autonomy-lab", "objectInstanceId": "autonomy-whiteboard", "catalogId": "whiteboard", "floor": 1}}
+        shutdown_plan = server._live_agent_loop_prepare_plan(
+            shutdown_agent,
+            "tester",
+            shutdown_action_def,
+            shutdown_decision,
+            shutdown_selected,
+            server._utc_now_iso(),
+            persist=True,
+        )
+        with server._live_agent_model_decision_lock:
+            row = server._live_agent_model_decision_state.setdefault("tester", {})
+            row["inFlight"] = True
+            row["pendingChoice"] = {"chosen": "brainstorm-whiteboard", "detail": {"status": "planner-step-action"}, "candidateIds": ["brainstorm-whiteboard"]}
+        server.save_live_agent_loop_state(shutdown_state)
+        ok_disable, disable_result, _ = server.set_agent_live_mode_setting("tester", False, agent_loop_enabled=True)
+        disabled_setting = server.get_agent_live_mode_setting("tester")
+        disabled_loop_state = server.get_live_agent_loop_state(persist_migration=True)
+        disabled_agent = (disabled_loop_state.get("agents") or {}).get("tester") or {}
+        with server._live_agent_model_decision_lock:
+            disabled_model_row = dict(server._live_agent_model_decision_state.get("tester") or {})
+        check(
+            "disabling Agent Live Mode also disables planner loop",
+            ok_disable
+            and disable_result.get("agentLiveModeEnabled") is False
+            and disable_result.get("agentLiveModeLoopEnabled") is False
+            and disabled_setting.get("agentLiveModeEnabled") is False
+            and disabled_setting.get("agentLiveModeLoopEnabled") is False
+            and disabled_agent.get("enabled") is False,
+            json.dumps({"result": disable_result, "setting": disabled_setting, "agent": disabled_agent}, default=str)[:900],
+        )
+        check(
+            "disabling Agent Live Mode clears active planner state",
+            not disabled_agent.get("activePlan")
+            and not disabled_agent.get("activeEpisode")
+            and not disabled_agent.get("autonomyPlan")
+            and disabled_model_row.get("inFlight") is False
+            and not disabled_model_row.get("pendingChoice"),
+            json.dumps({"agent": disabled_agent, "model": disabled_model_row}, default=str)[:900],
+        )
+        disabled_world = server.get_live_agent_world_status("tester")
+        check(
+            "disabling Agent Live Mode releases live world claim",
+            not disabled_world.get("claim"),
+            json.dumps(disabled_world, default=str)[:500],
+        )
+        ok_reenable, reenable_result, _ = server.set_agent_live_mode_setting("tester", True, agent_loop_enabled=True)
+        check(
+            "Agent Live Mode can be re-enabled after shutdown cleanup",
+            ok_reenable and reenable_result.get("agentLiveModeEnabled") is True and reenable_result.get("agentLiveModeLoopEnabled") is True,
+            json.dumps(reenable_result, default=str)[:500],
+        )
+
+        global_shutdown_state = server.get_live_agent_loop_state(persist_migration=True)
+        global_agent = server._live_agent_loop_agent_state(global_shutdown_state, "tester")
+        global_agent["enabled"] = True
+        global_plan = server._live_agent_loop_prepare_plan(
+            global_agent,
+            "tester",
+            shutdown_action_def,
+            shutdown_decision,
+            shutdown_selected,
+            server._utc_now_iso(),
+            persist=True,
+        )
+        with server._live_agent_model_decision_lock:
+            row = server._live_agent_model_decision_state.setdefault("tester", {})
+            row["inFlight"] = True
+            row["pendingChoice"] = {"chosen": "brainstorm-whiteboard", "detail": {"status": "planner-step-action"}, "candidateIds": ["brainstorm-whiteboard"]}
+        server.save_live_agent_loop_state(global_shutdown_state)
+        ok_loop_off, loop_off_result, _ = server.update_live_agent_loop_settings({"enabled": False})
+        loop_off_agent = ((loop_off_result.get("state") or {}).get("agents") or {}).get("tester") or {}
+        with server._live_agent_model_decision_lock:
+            loop_off_model_row = dict(server._live_agent_model_decision_state.get("tester") or {})
+        check(
+            "global live-agent loop disable clears planner state without disabling agent selection",
+            ok_loop_off
+            and loop_off_result["state"].get("enabled") is False
+            and loop_off_agent.get("enabled") is True
+            and not loop_off_agent.get("activePlan")
+            and not loop_off_agent.get("activeEpisode")
+            and loop_off_model_row.get("inFlight") is False
+            and not loop_off_model_row.get("pendingChoice"),
+            json.dumps({"agent": loop_off_agent, "model": loop_off_model_row}, default=str)[:900],
+        )
+        server.update_live_agent_loop_settings({"enabled": True})
+
         ok3, result3, _ = server.update_live_agent_loop_settings({
             "userChatPreemptionEnabled": True,
             "userChatPreemptionHoldSec": 240,
@@ -702,6 +1837,376 @@ def main():
         runtime = status_payload.get("runtime") or {}
         check("status exposes modelDecision runtime", isinstance(runtime.get("modelDecision"), dict))
         check("status exposes preemption guardrail", runtime.get("guardrails", {}).get("userChatPreemptionEnabled") is True)
+        busy_reads = {}
+
+        def read_observability_while_busy():
+            busy_reads["status"] = server.get_live_agent_loop_status()
+            _, busy_reads["perception"], _ = server.get_live_agent_loop_perception("tester")
+            _, busy_reads["proposals"], _ = server.get_live_agent_loop_operator_proposals("tester")
+
+        server._live_agent_loop_lock.acquire()
+        try:
+            started_busy_read = time.time()
+            busy_thread = threading.Thread(target=read_observability_while_busy)
+            busy_thread.start()
+            busy_thread.join(4)
+            elapsed_busy_read = time.time() - started_busy_read
+        finally:
+            server._live_agent_loop_lock.release()
+        if busy_thread.is_alive():
+            busy_thread.join(2)
+        check(
+            "observability endpoints return read-only snapshots while loop lock is busy",
+            not busy_thread.is_alive()
+            and elapsed_busy_read < 4
+            and busy_reads.get("status", {}).get("runtime", {}).get("readOnlySnapshot") is True
+            and busy_reads.get("perception", {}).get("readOnlySnapshot") is True
+            and busy_reads.get("proposals", {}).get("readOnlySnapshot") is True,
+            json.dumps(busy_reads, default=str)[:900],
+        )
+
+        # ------------------------------------------------------------------
+        # 4) P0 PRODUCTION HARDENING
+        # ------------------------------------------------------------------
+        round_robin_fixture = [
+            {"agentId": "resident-a"},
+            {"agentId": "resident-b"},
+            {"agentId": "resident-c"},
+        ]
+        order_after_a = [item["agentId"] for item in server._live_agent_loop_round_robin_roster(round_robin_fixture, "resident-a")]
+        order_after_b = [item["agentId"] for item in server._live_agent_loop_round_robin_roster(round_robin_fixture, "resident-b")]
+        check("round-robin scheduler rotates after last served resident", order_after_a == ["resident-b", "resident-c", "resident-a"] and order_after_b == ["resident-c", "resident-a", "resident-b"], json.dumps({"afterA": order_after_a, "afterB": order_after_b}))
+
+        fence_agent = "generation-fence-resident"
+        old_generation = server._live_agent_model_decision_start(fence_agent)
+        server._live_agent_model_decision_cancel(fence_agent, reason="verification-cancel")
+        new_generation = server._live_agent_model_decision_start(fence_agent)
+        old_publish = server._live_agent_model_decision_publish(fence_agent, old_generation, {"chosen": "hydrate-water-cooler"})
+        old_finish = server._live_agent_model_decision_mark(fence_agent, in_flight=False, outcome={"status": "late-old-worker"}, generation=old_generation)
+        with server._live_agent_model_decision_lock:
+            fenced_row = dict(server._live_agent_model_decision_state.get(fence_agent) or {})
+        check(
+            "generation fence rejects late model reply without clearing newer worker",
+            old_publish is False
+            and old_finish is False
+            and new_generation > old_generation
+            and fenced_row.get("generation") == new_generation
+            and fenced_row.get("inFlight") is True
+            and not fenced_row.get("pendingChoice"),
+            json.dumps(fenced_row, default=str),
+        )
+        server._live_agent_model_decision_cancel(fence_agent, reason="verification-complete")
+
+        # Seed one active request and planner worker, then prove the global
+        # feature switch cancels both while preserving the resident selection.
+        feature_action = {
+            "id": "wa-feature-kill-verification",
+            "agentId": "tester",
+            "status": "routing",
+            "actionType": "life.getWater",
+            "capabilityTag": "life.hydration",
+            "source": {"kind": "agent-live-mode", "requestedBy": "verify"},
+            "params": {"loopActionId": "hydrate-water-cooler"},
+            "priority": "normal",
+            "target": {"kind": "world-point", "x": 0, "y": 0, "z": 0},
+            "timing": {"createdAt": server._utc_now_iso(), "updatedAt": server._utc_now_iso()},
+            "lifecycle": {
+                "previousStatus": "route_pending",
+                "allowedNext": server._world_action_allowed_next("routing"),
+                "transitionLog": [],
+            },
+        }
+        feature_store = server.get_world_actions_store()
+        feature_store.setdefault("active", []).append(feature_action)
+        saved_feature_action, saved_feature_detail = server.save_world_actions_store(feature_store)
+        check("feature-kill fixture action saved", saved_feature_action, json.dumps(saved_feature_detail, default=str)[:500] if not saved_feature_action else "")
+        feature_generation = server._live_agent_model_decision_start("tester")
+        config_off_result, config_off_status = server._save_vw_config_update({"features": {"agentLiveMode": False}})
+        kill_result = config_off_result.get("liveAgentModeRuntime") or {}
+        killed_state = server.get_live_agent_loop_state(persist_migration=False)
+        killed_store = server.get_world_actions_store()
+        with server._live_agent_model_decision_lock:
+            killed_model = dict(server._live_agent_model_decision_state.get("tester") or {})
+        tester_profile_after_kill = (server.load_world_meta().get("agentProfiles") or {}).get("tester") or {}
+        check(
+            "global feature switch is a server-enforced kill switch",
+            config_off_status == 200
+            and config_off_result.get("config", {}).get("features", {}).get("agentLiveMode") is False
+            and kill_result.get("active") is True
+            and (killed_state.get("featureKill") or {}).get("active") is True
+            and not any(item.get("id") == feature_action["id"] for item in killed_store.get("active") or [])
+            and killed_model.get("inFlight") is False
+            and int(killed_model.get("generation") or 0) > feature_generation
+            and tester_profile_after_kill.get("agentLiveModeEnabled") is True,
+            json.dumps({"kill": kill_result, "model": killed_model, "profile": tester_profile_after_kill}, default=str)[:1400],
+        )
+        blocked_ok, blocked_result, blocked_status = server.create_agent_live_mode_action_request({
+            "agentId": "tester",
+            "actionType": "life.getWater",
+            "capabilityTag": "life.hydration",
+            "source": {"kind": "agent-live-mode", "requestedBy": "verify"},
+            "target": {"kind": "world-point", "x": 1, "y": 2},
+        })
+        check(
+            "global feature switch rejects direct Live Agent action calls",
+            blocked_ok is False and blocked_status == 409 and blocked_result.get("error", {}).get("code") == "agent_live_mode_feature_disabled",
+            json.dumps(blocked_result, default=str)[:500],
+        )
+        sig_before_disabled_tick = server._world_meta_file_sig()
+        disabled_tick = server.live_agent_loop_tick(reason="verification-disabled", force=True)
+        sig_after_disabled_tick = server._world_meta_file_sig()
+        check(
+            "disabled timer tick is read-only even when force is requested",
+            disabled_tick.get("ok") is False and sig_after_disabled_tick == sig_before_disabled_tick,
+            json.dumps({"tick": disabled_tick, "before": sig_before_disabled_tick, "after": sig_after_disabled_tick}, default=str)[:900],
+        )
+
+        # The global-off state is an authority boundary, not merely a scheduler
+        # pause. Exercise every externally reachable Live Agent mutation helper
+        # and prove the complete isolated runtime tree remains byte-identical.
+        disabled_tree_before = snapshot_tree(tmpdir)
+        attention_ok, attention_result, attention_status = server.handle_live_agent_user_attention({
+            "agentId": "tester",
+            "source": "verification-disabled-chat",
+            "messagePreview": "this normal chat must not touch Live Agent state",
+        })
+        direct_attention = server.live_agent_note_user_attention(
+            "tester",
+            source="verification-disabled-direct",
+            message_preview="direct helper bypass attempt",
+        )
+        world_client_claimed = server.note_live_agent_loop_world_client_activity(
+            client_version=server.LIVE_AGENT_LOOP_CLIENT_MARKER_VERSION,
+            client_info={"sessionId": "disabled-client", "client": "main3d-live-sync"},
+        )
+        loop_update_ok, loop_update_result, loop_update_status = server.update_live_agent_loop_settings({"intervalSec": 77})
+        proposal_ok, proposal_result, proposal_status = server.resolve_live_agent_loop_operator_proposal({
+            "proposalId": "disabled-proposal",
+            "status": "acknowledged",
+        })
+        world_action_ok, world_action_result, world_action_status = server.create_world_action({
+            "agentId": "tester",
+            "actionType": "life.getWater",
+            "capabilityTag": "life.hydration",
+            "source": {"kind": "agent-live-mode", "requestedBy": "verify-disabled", "requestId": "disabled-world-action"},
+            "target": {"kind": "world-point", "x": 1, "y": 0, "z": 2},
+        })
+        move_ok, move_result, move_status = server.create_move_intent("tester", {
+            "source": {"kind": "agent-live-mode", "requestedBy": "verify-disabled", "requestId": "disabled-move"},
+            "target": {"kind": "world-point", "x": 1, "y": 0, "z": 2},
+        })
+        setting_ok, setting_result, setting_status = server.set_agent_live_mode_setting(
+            "tester",
+            agent_loop_enabled=True,
+        )
+        disabled_status_payload = server.get_live_agent_loop_status()
+        server.get_live_agent_loop_feedback("tester")
+        server.get_live_agent_loop_operator_proposals("tester")
+        server.get_live_agent_loop_operator_timeline("tester")
+        time.sleep(0.1)
+        disabled_tree_after = snapshot_tree(tmpdir)
+        disabled_codes = {
+            "attention": (attention_result.get("error") or {}).get("code"),
+            "loop": (loop_update_result.get("error") or {}).get("code"),
+            "proposal": (proposal_result.get("error") or {}).get("code"),
+            "worldAction": (world_action_result.get("error") or {}).get("code"),
+            "move": (move_result.get("error") or {}).get("code"),
+            "agentSetting": (setting_result.get("error") or {}).get("code"),
+        }
+        check(
+            "global-off rejects chat attention and all Live Agent mutation helpers",
+            attention_ok is False
+            and attention_status == 409
+            and direct_attention is None
+            and world_client_claimed is False
+            and loop_update_ok is False
+            and loop_update_status == 409
+            and proposal_ok is False
+            and proposal_status == 409
+            and world_action_ok is False
+            and world_action_status == 409
+            and move_ok is False
+            and move_status == 409
+            and setting_ok is False
+            and setting_status == 409
+            and set(disabled_codes.values()) == {"agent_live_mode_feature_disabled"}
+            and server.live_agent_user_attention_status("tester").get("active") is False,
+            json.dumps({"codes": disabled_codes, "statuses": [attention_status, loop_update_status, proposal_status, world_action_status, move_status, setting_status]}, default=str),
+        )
+        check(
+            "global-off chat, API attempts, and observability reads perform zero file writes",
+            disabled_tree_after == disabled_tree_before
+            and disabled_status_payload.get("runtime", {}).get("readOnlySnapshot") is True,
+            json.dumps({
+                "added": sorted(set(disabled_tree_after) - set(disabled_tree_before)),
+                "removed": sorted(set(disabled_tree_before) - set(disabled_tree_after)),
+                "changed": sorted(path for path in set(disabled_tree_before) & set(disabled_tree_after) if disabled_tree_before[path] != disabled_tree_after[path]),
+                "statusReadOnly": disabled_status_payload.get("runtime", {}).get("readOnlySnapshot"),
+            }),
+        )
+        config_on_result, config_on_status = server._save_vw_config_update({"features": {"agentLiveMode": True}})
+        clear_kill = config_on_result.get("liveAgentModeRuntime") or {}
+        check("global feature kill clears explicitly on re-enable", config_on_status == 200 and config_on_result.get("config", {}).get("features", {}).get("agentLiveMode") is True and clear_kill.get("active") is False and clear_kill.get("changed") is True, json.dumps(clear_kill, default=str)[:500])
+
+        unchanged_meta = server.load_world_meta()
+        server.save_world_meta(unchanged_meta)
+        unchanged_sig_before = server._world_meta_file_sig()
+        time.sleep(0.02)
+        unchanged_write = server.save_world_meta(unchanged_meta)
+        unchanged_sig_after = server._world_meta_file_sig()
+        check(
+            "identical world metadata save performs no disk write",
+            unchanged_write is False and unchanged_sig_after == unchanged_sig_before,
+            json.dumps({"write": unchanged_write, "before": unchanged_sig_before, "after": unchanged_sig_after}),
+        )
+
+        # Reset isolation: clear one resident's runtime state and separate note
+        # files without changing the other resident or durable world/profile data.
+        meta_before_reset = server.load_world_meta()
+        profiles_before_reset = meta_before_reset.setdefault("agentProfiles", {})
+        tester_profile = dict(profiles_before_reset.get("tester") or {})
+        tester_profile["residentProfile"] = {
+            **(tester_profile.get("residentProfile") or {}),
+            "identity": {"displayName": "Reset Verification Resident", "continuityMarker": "preserve-me"},
+        }
+        profiles_before_reset["tester"] = tester_profile
+        meta_before_reset["agentProfiles"] = profiles_before_reset
+        server.save_world_meta(meta_before_reset)
+        server._live_agent_loop_append_internal_note("tester", title="Reset fixture", text="Clear this runtime note.")
+        server._live_agent_loop_append_internal_note("hermie", title="Isolation fixture", text="Keep this other resident note.")
+        server._live_agent_planner_transcript_record("tester", session_key="verify-reset", started_epoch=time.time(), prompt="reset fixture prompt", reply_text="reset fixture reply", detail={"status": "complete"})
+        server._live_agent_planner_transcript_record("hermie", session_key="verify-isolation", started_epoch=time.time(), prompt="other fixture prompt", reply_text="other fixture reply", detail={"status": "complete"})
+        reset_seed_state = server.get_live_agent_loop_state(persist_migration=False)
+        reset_tester = server._live_agent_loop_agent_state(reset_seed_state, "tester")
+        reset_tester["autonomyPlan"] = {"currentGoal": "stale goal", "plan": ["stale step"], "nextStep": {"intent": "stale"}}
+        reset_tester["memory"] = {"recentActions": [{"actionId": "stale-runtime-action", "status": "failed", "text": "stale"}]}
+        reset_hermie = server._live_agent_loop_agent_state(reset_seed_state, "hermie")
+        reset_hermie["memory"] = {"recentActions": [{"actionId": "other-resident-sentinel", "status": "completed", "text": "preserve"}]}
+        server.save_live_agent_loop_state(reset_seed_state)
+        ok_disable_for_reset, _, _ = server.set_agent_live_mode_setting("tester", False)
+        building_ids_before_reset = sorted(str(item.get("id")) for item in server.list_buildings() if isinstance(item, dict))
+        ok_reset, reset_result, reset_status = server.reset_agent_live_mode_state("tester", actor="verification")
+        state_after_reset = server.get_live_agent_loop_state(persist_migration=False)
+        tester_after_reset = (state_after_reset.get("agents") or {}).get("tester") or {}
+        hermie_after_reset = (state_after_reset.get("agents") or {}).get("hermie") or {}
+        profile_after_reset = ((server.load_world_meta().get("agentProfiles") or {}).get("tester") or {}).get("residentProfile") or {}
+        notes_after_reset = server._load_live_agent_internal_notes().get("agents") or {}
+        transcripts_after_reset = server._load_live_agent_planner_transcripts().get("agents") or {}
+        building_ids_after_reset = sorted(str(item.get("id")) for item in server.list_buildings() if isinstance(item, dict))
+        check(
+            "selected-agent reset clears runtime state and preserves settings/profile/world isolation",
+            ok_disable_for_reset
+            and ok_reset
+            and reset_status == 200
+            and tester_after_reset.get("enabled") is False
+            and not tester_after_reset.get("activePlan")
+            and not tester_after_reset.get("activeEpisode")
+            and not tester_after_reset.get("autonomyPlan")
+            and not (tester_after_reset.get("memory") or {}).get("recentActions")
+            and ((hermie_after_reset.get("memory") or {}).get("recentActions") or [{}])[-1].get("actionId") == "other-resident-sentinel"
+            and (profile_after_reset.get("identity") or {}).get("continuityMarker") == "preserve-me"
+            and "tester" not in notes_after_reset
+            and "hermie" in notes_after_reset
+            and "tester" not in transcripts_after_reset
+            and "hermie" in transcripts_after_reset
+            and building_ids_after_reset == building_ids_before_reset,
+            json.dumps({"result": reset_result, "tester": tester_after_reset, "hermie": hermie_after_reset, "profile": profile_after_reset}, default=str)[:1800],
+        )
+        ok_clean_reenable, clean_reenable, _ = server.set_agent_live_mode_setting("tester", True, agent_loop_enabled=True)
+        reenabled_state = (server.get_live_agent_loop_state(persist_migration=False).get("agents") or {}).get("tester") or {}
+        check(
+            "resident cleanly re-enables after disable and reset",
+            ok_clean_reenable
+            and clean_reenable.get("agentLiveModeEnabled") is True
+            and reenabled_state.get("enabled") is True
+            and not reenabled_state.get("activePlan")
+            and not reenabled_state.get("autonomyPlan"),
+            json.dumps({"setting": clean_reenable, "state": reenabled_state}, default=str)[:900],
+        )
+
+        restart_state = server.get_live_agent_loop_state(persist_migration=False)
+        restart_state["schedulerCursorAgentId"] = "tester"
+        server.save_live_agent_loop_state(restart_state)
+        restarted_server = load_server(tmpdir)
+        restarted_server.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
+        restarted_state = restarted_server.get_live_agent_loop_state(persist_migration=False)
+        check(
+            "scheduler cursor and clean reset state survive process restart",
+            restarted_state.get("schedulerCursorAgentId") == "tester"
+            and not (((restarted_state.get("agents") or {}).get("tester") or {}).get("activePlan"))
+            and not (((restarted_state.get("agents") or {}).get("tester") or {}).get("autonomyPlan")),
+            json.dumps(restarted_state, default=str)[:900],
+        )
+
+        server.set_agent_live_mode_setting("tester", False)
+        server.set_agent_live_mode_setting("hermie", False)
+        no_agent_sig_before = server._world_meta_file_sig()
+        no_agent_tick = server.live_agent_loop_tick(reason="verification-no-enabled-agents")
+        no_agent_sig_after = server._world_meta_file_sig()
+        check(
+            "enabled scheduler with no selected residents performs no persistence write",
+            no_agent_tick.get("disabledReason") == "no agents have Agent Live Mode enabled"
+            and no_agent_sig_after == no_agent_sig_before,
+            json.dumps({"tick": no_agent_tick, "before": no_agent_sig_before, "after": no_agent_sig_after}, default=str)[:700],
+        )
+        server.set_agent_live_mode_setting("tester", True, agent_loop_enabled=True)
+
+        # Byte-budget soak with intentionally small test budgets. Production
+        # defaults remain configurable through environment variables.
+        original_history_budget = server.WORLD_ACTION_HISTORY_MAX_BYTES
+        original_record_budget = server.WORLD_ACTION_HISTORY_RECORD_MAX_BYTES
+        original_notes_budget = server.LIVE_AGENT_INTERNAL_NOTES_MAX_BYTES
+        original_transcript_budget = server.LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES
+        try:
+            server.WORLD_ACTION_HISTORY_MAX_BYTES = 24 * 1024
+            server.WORLD_ACTION_HISTORY_RECORD_MAX_BYTES = 8 * 1024
+            soak_store = server.get_world_actions_store()
+            history = list(soak_store.get("history") or [])
+            now_iso = server._utc_now_iso()
+            for index in range(80):
+                history.append({
+                    "id": f"wa-storage-soak-{index}",
+                    "agentId": "tester",
+                    "status": "completed",
+                    "actionType": "life.getWater",
+                    "capabilityTag": "life.hydration",
+                    "source": {"kind": "agent-live-mode", "requestedBy": "verify", "requestId": f"storage-{index}"},
+                    "params": {"loopActionId": "hydrate-water-cooler", "diagnostic": "x" * 2200},
+                    "priority": "normal",
+                    "target": {"kind": "world-point", "x": 0, "y": 0, "z": 0},
+                    "result": {"status": "completed", "diagnostic": "y" * 2200},
+                    "timing": {"createdAt": now_iso, "updatedAt": now_iso, "completedAt": now_iso, "terminalAt": now_iso},
+                    "lifecycle": {"previousStatus": "in_progress", "allowedNext": [], "terminalReason": "completed", "transitionLog": [{"from": "in_progress", "to": "completed", "at": now_iso, "actor": "verify"}]},
+                })
+            soak_ok, soak_saved = server.save_world_actions_store({"active": soak_store.get("active") or [], "history": history})
+            check(
+                "world-action history byte budget bounds storage soak",
+                soak_ok
+                and server._json_size_bytes(soak_saved.get("history") or []) <= server.WORLD_ACTION_HISTORY_MAX_BYTES
+                and any(item.get("id") == "wa-storage-soak-79" for item in soak_saved.get("history") or []),
+                json.dumps({"ok": soak_ok, "bytes": server._json_size_bytes((soak_saved or {}).get("history") or []), "count": len((soak_saved or {}).get("history") or [])}, default=str),
+            )
+
+            server.LIVE_AGENT_INTERNAL_NOTES_MAX_BYTES = 20 * 1024
+            server.LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES = 28 * 1024
+            for index in range(50):
+                server._live_agent_loop_append_internal_note("tester", title=f"Storage note {index}", text=f"note {index} " + ("n" * 1800), details={"frame": "d" * 1800})
+                server._live_agent_planner_transcript_record("tester", session_key=f"storage-{index}", started_epoch=time.time() + index, prompt="p" * 2200, reply_text="r" * 1800, detail={"status": "soak"})
+            notes_size = os.path.getsize(server.LIVE_AGENT_INTERNAL_NOTES_FILE)
+            transcripts_size = os.path.getsize(server.LIVE_AGENT_PLANNER_TRANSCRIPT_FILE)
+            stale_temp_files = list(Path(server.DATA_DIR).glob("*.tmp-*"))
+            check(
+                "note/transcript byte budgets stabilize repeated writes without temp leaks",
+                notes_size <= server.LIVE_AGENT_INTERNAL_NOTES_MAX_BYTES
+                and transcripts_size <= server.LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES
+                and not stale_temp_files,
+                json.dumps({"notesBytes": notes_size, "transcriptsBytes": transcripts_size, "tmp": [str(item) for item in stale_temp_files]}),
+            )
+        finally:
+            server.WORLD_ACTION_HISTORY_MAX_BYTES = original_history_budget
+            server.WORLD_ACTION_HISTORY_RECORD_MAX_BYTES = original_record_budget
+            server.LIVE_AGENT_INTERNAL_NOTES_MAX_BYTES = original_notes_budget
+            server.LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES = original_transcript_budget
 
     failed = [name for name, passed, _ in CHECKS if not passed]
     print()

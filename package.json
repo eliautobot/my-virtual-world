@@ -1,6 +1,6 @@
 {
   "name": "my-virtual-world",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "description": "A self-hosted 3D AI virtual world for agent harnesses like OpenClaw and Hermes.",
   "homepage": "https://myvirtualworld.ai/",
   "repository": {

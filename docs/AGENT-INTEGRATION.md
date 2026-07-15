@@ -123,12 +123,21 @@ Relevant endpoints:
 ```text
 GET /api/agent/<agent-id>/live-mode
 POST /api/agent/<agent-id>/live-mode
+POST /api/agent/<agent-id>/live-mode/reset
 POST /api/agent-model/actions
 POST /api/world-actions
 POST /api/agents/<agent-id>/move
 ```
 
 Agent Live Mode is license-gated. Agents must not bypass or weaken that gate.
+
+The in-app global feature switch is also a server-side authority boundary. Turning it off cancels active Live Agent work, fences late model replies, releases local world claims, and prevents API callers from forcing a tick or creating a new Live Agent action. Per-agent selections remain saved for a clean later re-enable.
+
+Normal chat does not create Live Agent attention records while the global switch is off. The server independently rejects disabled-mode per-agent settings, attention, loop-setting, proposal-resolution, world-action, and move-intent writes, while observability endpoints remain read-only. The explicit selected-agent reset remains available for operator cleanup.
+
+OpenClaw model decisions use a two-phase asynchronous handoff: while a model request is in flight, that resident does not also start a deterministic action from the same perception frame. A later tick either applies the fenced model choice against the current candidate surface or falls back safely after the model request fails or cools down.
+
+The selected-agent reset endpoint is narrower than a world reset: it clears transient loop state, notes, transcript copies, pending decisions, and active Live Agent actions for one resident only. It preserves provider workspace files, the Resident Profile, assignments, buildings, objects, and other residents.
 
 Fresh restart specs:
 

@@ -145,6 +145,7 @@ Status records are used for visual presence only. They do not grant tool access.
 | POST | `/api/decorations` | Save world decorations. |
 | GET | `/api/agent/<agent-id>/live-mode` | Read Agent Live Mode setting. |
 | POST | `/api/agent/<agent-id>/live-mode` | Enable or disable Agent Live Mode. |
+| POST | `/api/agent/<agent-id>/live-mode/reset` | Cancel and clear one resident's Live Agent runtime state while preserving profile, assignments, buildings, and objects. |
 | GET | `/api/agent/<agent-id>/workspace` | Read editable provider workspace files for the agent. |
 | POST | `/api/agent/<agent-id>/workspace` | Save editable provider workspace files for the agent. |
 | GET | `/api/agent/<agent-id>/resident-profile` | Read or create the Virtual World Resident Profile. |
@@ -156,6 +157,34 @@ Profile writes may update local agent identity files when configured. Do not wri
 Workspace editing currently supports OpenClaw markdown files under the resolved agent workspace, limited to built-in agent files such as `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, and `HEARTBEAT.md`. Non-OpenClaw providers return an unsupported-provider payload until their adapters are implemented.
 
 Resident profiles live in `world-meta.json` under `agentProfiles[agentId].residentProfile`. They are Virtual World-specific roleplay/autonomy profiles with identity, life purpose, goals, needs, short-term memory, long-term memory, and Live Mode behavior settings.
+
+The global Agent Live Mode feature switch is server-enforced. When it is turned off or the license no longer permits Agent Live Mode, the server cancels active Live Agent actions and planner work, releases local world claims, and rejects new Live Agent action requests. Re-enabling the feature preserves the per-agent selections.
+
+Reset body:
+
+```json
+{
+  "actor": "operator-ui"
+}
+```
+
+Reset clears only the selected resident's loop memory, plans, episodes, proposals, internal notes, planner transcript copies, pending model reply, and active Live Agent actions. It does not delete the resident profile, agent framework files, assignments, homes, buildings, furniture, or other world data.
+
+## Live Agent Loop
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/agent-live-loop` | Read loop state, scheduler cursor, feature-kill state, runtime status, and storage budgets. |
+| POST | `/api/agent-live-loop` | Update loop, model, preemption, pause, cooldown, and scheduling settings. |
+| POST | `/api/agent-live-loop/tick` | Request one loop tick; the global feature switch cannot be bypassed with `force`. |
+| POST | `/api/agent-live-loop/user-attention` | Mark or clear user-chat preemption while Agent Live Mode is globally enabled. |
+| GET | `/api/agent-live-loop/perception` | Read one resident's latest perception/decision surface. |
+| GET | `/api/agent-live-loop/proposals` | Read operator proposals. |
+| POST | `/api/agent-live-loop/proposals` | Resolve an operator proposal without executing hidden world mutations. |
+
+The scheduler uses a persisted round-robin cursor when the per-tick action limit is smaller than the enabled roster. Disabled, paused, and no-agent timer ticks are read-only. Model-backed residents use a two-phase decision: the tick that starts an asynchronous model request does not also start a deterministic action from the same perception frame.
+
+When the global Agent Live Mode feature switch is off, the server returns `agent_live_mode_feature_disabled` for per-agent settings, attention, loop-setting, proposal-resolution, Live Agent world-action, and Live Agent move-intent writes. The explicit selected-agent reset remains available for operator cleanup. Live Agent status, feedback, proposal, and timeline reads remain available as read-only snapshots and do not migrate or reconcile persisted Live Agent state.
 
 ## World Actions
 

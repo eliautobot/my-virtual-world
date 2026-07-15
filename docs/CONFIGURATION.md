@@ -56,6 +56,15 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_REALTIME_ROOM` | `agent_runtime` | Colyseus room name used by the browser runtime client. |
 | `VW_REALTIME_HOST_PORT` | `8591` | Docker host port published for the realtime sidecar. Keep it private to your machine, LAN, or VPN unless an authenticated proxy is in front. |
 | `VW_REALTIME_PORT` | `8591` | Sidecar HTTP/WebSocket port when running the local realtime server. |
+| `VW_WORLD_ACTION_HISTORY_MAX_BYTES` | `8388608` | Maximum encoded size of retained terminal world-action history. Oldest records are compacted or pruned first. |
+| `VW_WORLD_ACTION_HISTORY_RECORD_MAX_BYTES` | `262144` | Maximum encoded size of one retained terminal world-action record before optional diagnostic fields are compacted. |
+| `VW_WORLD_META_BACKUP_INTERVAL_SEC` | `300` | Minimum interval between full `world-meta.json.bak` copies. Atomic primary writes still happen whenever metadata changes. |
+| `VW_WORLD_META_STALE_TMP_MAX_AGE_SEC` | `3600` | Age at which abandoned `world-meta.json.tmp-*` files are removed during a later save. |
+| `VW_LIVE_AGENT_COLLECTION_MAX_BYTES` | `262144` | Per-collection byte budget for Live Agent memory, events, plans, episodes, feedback, and proposals. |
+| `VW_LIVE_AGENT_LOOP_STATE_MAX_BYTES` | `8388608` | Overall byte budget for the persisted Live Agent loop state. |
+| `VW_LIVE_AGENT_INTERNAL_NOTES_MAX_BYTES` | `1048576` | Global byte budget for Virtual-World-owned Live Agent internal notes. |
+| `VW_LIVE_AGENT_INTERNAL_NOTE_DETAILS_MAX_BYTES` | `24576` | Maximum diagnostic detail stored on one internal note before compaction. |
+| `VW_LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES` | `2097152` | Global byte budget for Virtual-World-owned planner transcript copies. |
 | `VW_LICENSE_STORE_ID` | `321733` | Lemon Squeezy store ID used to verify keys belong to My Virtual World. |
 | `VW_LICENSE_PRODUCT_IDS` | `1140366` | Comma-separated Lemon Squeezy product IDs accepted by this app. |
 
@@ -74,6 +83,8 @@ The default Docker Compose setup starts the realtime sidecar as `virtual-world-r
 World data is stored under `VW_DATA_DIR`.
 
 Do not commit runtime data to source control. The `.gitignore` excludes local data, backups, generated screenshots, and temporary verification files.
+
+World metadata is written atomically as compact JSON. Saving identical content is a no-op, and the last-known-good backup is refreshed on a configurable interval instead of being recopied for every high-frequency runtime update. Live Agent histories use both record-count retention and byte budgets so a small number of unusually large planner frames or diagnostics cannot grow storage without bound.
 
 ## Agent Connections
 

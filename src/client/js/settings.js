@@ -64,6 +64,9 @@
   function switchTab(name) {
     document.querySelectorAll('.settings-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.settingsTab === name));
     document.querySelectorAll('.settings-pane').forEach(pane => pane.classList.toggle('visible', pane.dataset.settingsPane === name));
+    if (name === 'live-mode' && !isTrialLicense(vwConfig?.license || {})) {
+      refreshLiveModeAgents().catch(err => setStatus('liveModeAgentStatus', err.message || 'Could not load agents.', 'warn'));
+    }
   }
 
   function updateLicenseUi(config) {
@@ -437,6 +440,18 @@
         controls.appendChild(control);
       });
 
+      const resetButton = document.createElement('button');
+      resetButton.type = 'button';
+      resetButton.className = 'settings-live-agent-reset';
+      resetButton.textContent = 'Reset State';
+      resetButton.title = 'Cancel active Live Agent work and clear this resident\'s runtime plans, short-term loop memory, notes, and planner turns. Profile, assignments, and world objects are preserved.';
+      resetButton.disabled = trial || !id;
+      resetButton.dataset.liveAgentReset = id;
+      resetButton.addEventListener('click', () => {
+        resetLiveModeAgent(agent).catch(err => setStatus('liveModeAgentStatus', err.message || 'Could not reset Live Agent state.', 'error'));
+      });
+      controls.appendChild(resetButton);
+
       row.append(dot, identity, controls);
       list.appendChild(row);
     });
@@ -623,7 +638,7 @@
     applyLiveAgentModeAvailabilityUi();
     renderLiveModeAgents();
     renderLiveModeLoopStatus();
-    if (!trial && !!features.agentLiveMode) {
+    if (!trial) {
       scheduleInitialLiveModeRefresh();
     }
   }
@@ -752,6 +767,30 @@
     }
     await refreshLiveModeAgents();
     setStatus('liveModeAgentStatus', `Applied ${changed.length} agent Live Mode setting${changed.length === 1 ? '' : 's'}.`, 'success');
+  }
+
+  async function resetLiveModeAgent(agent) {
+    const agentId = agentLiveModeId(agent);
+    if (!agentId || isTrialLicense(vwConfig?.license || {})) return;
+    const name = agent?.name || agentId;
+    const confirmed = window.confirm(
+      `Reset Live Agent state for ${name}?\n\nThis cancels active Live Agent work and clears runtime plans, loop memory, internal notes, and planner turns. The resident profile, assignments, buildings, and objects are preserved.`
+    );
+    if (!confirmed) return;
+    setStatus('liveModeAgentStatus', `Resetting Live Agent state for ${name}...`, 'info');
+    const result = await fetchJson(`/api/agent/${encodeURIComponent(agentId)}/live-mode/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actor: 'settings-ui' }),
+    });
+    liveModeAgentEdits.delete(agentId);
+    await refreshLiveModeAgents();
+    const cleared = result?.cleared || {};
+    setStatus(
+      'liveModeAgentStatus',
+      `Reset ${name}. Cleared ${Number(cleared.internalNotes || 0)} note${Number(cleared.internalNotes || 0) === 1 ? '' : 's'} and ${Number(cleared.plannerTurns || 0)} planner turn${Number(cleared.plannerTurns || 0) === 1 ? '' : 's'}; profile and world data were preserved.`,
+      'success'
+    );
   }
 
   async function refreshConfig() {
