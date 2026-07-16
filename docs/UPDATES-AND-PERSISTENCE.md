@@ -46,6 +46,32 @@ Existing user data remains unless a migration or narrow repair intentionally upd
 
 `world-meta.json` uses atomic compact writes. Identical saves do not rewrite the file, stale abandoned temp files are cleaned after a configurable age, and the last-known-good backup is throttled separately from primary writes. Live Agent and world-action histories are compacted within configurable byte budgets while preserving active state and the newest retained records.
 
+Live Agent storage separates cognitive memory from operational telemetry. Resident Profile memories are consolidated into durable semantic experiences before short-term records age out. Terminal move paths, event diagnostics, and planner scaffolding are compacted independently, so storage control does not depend on erasing identity, relationships, lessons, or important failures.
+
+## Live Agent Storage Migration
+
+Preview the deterministic migration against an existing Docker volume:
+
+```bash
+docker compose exec virtual-world python3 /app/scripts/migrate-live-agent-storage.py --data-dir /data
+```
+
+Apply it while the app service is stopped:
+
+```bash
+docker compose stop virtual-world
+docker compose run --rm --no-deps virtual-world python3 /app/scripts/migrate-live-agent-storage.py --data-dir /data --apply
+docker compose start virtual-world
+```
+
+The apply step creates one compressed pre-migration archive in `/data/storage-migration-backups`, rewrites changed files atomically, refreshes the normal compact `world-meta.json.bak`, and records `live-agent-storage-v2` in world metadata. Re-running the migration is a no-op. It does not open or modify provider-owned chat transcripts, workspaces, or framework memory.
+
+Verify the compaction behavior with:
+
+```bash
+python3 scripts/verify-live-agent-storage-limits.py
+```
+
 ## Fresh Install vs Existing Install
 
 Fresh install:

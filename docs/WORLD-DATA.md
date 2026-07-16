@@ -159,6 +159,10 @@ world-meta.json
 
 Resident profiles are the world-facing roleplay/autonomy layer. They contain identity, life purpose, world home/work references, goals, needs, personality, short-term memory, long-term memory, relationships, reflections, and Live Mode behavior settings. New agents are seeded with the default resident template so Live Agent Mode has a purpose/memory layer without hardcoding individual agents.
 
+Resident memory uses semantic consolidation rather than blind FIFO deletion. Recent experiences remain in `memory.shortTerm`; important failures, goal work, user-relevant events, social experiences, and aging records are promoted into `memory.longTerm`. Repeated routine outcomes merge into counted memories, and a bounded generated capsule is added to `memory.summary`. Explicit resident-authored long-term memories are pinned ahead of generated aggregates. Relationships remain in their dedicated map.
+
+Move-intent history, world-action events, and planner transcripts are operational telemetry, not cognitive memory. Compacting those collections does not erase a resident's learned experience. The loop records verified outcomes in the Resident Profile before old telemetry reaches its storage ceiling.
+
 ## World Actions
 
 World actions are durable interaction requests. They are stored under `world-meta.json` in the Agent Life section and exposed through `/api/world-actions`.
@@ -179,7 +183,7 @@ Lifecycle states include:
 
 Use the API instead of editing world-action JSON by hand.
 
-Terminal world-action history and Live Agent runtime collections are bounded by both record counts and encoded byte budgets. The defaults and deployment overrides are documented in `docs/CONFIGURATION.md`. Internal notes and planner transcript copies are separate bounded files under `VW_DATA_DIR`; they are not agent-framework memory.
+Terminal world-action history, terminal move intents, world-action events, and Live Agent runtime collections are bounded by both record counts and encoded byte budgets. Active action/move state is never evicted; an abnormally oversized new active move record is rejected. Internal notes preserve semantic text while removing legacy planner frames and merging duplicates. Only the newest planner turns remain full; older Virtual-World-owned copies retain hashes and semantic summaries. Defaults and deployment overrides are documented in `docs/CONFIGURATION.md`.
 
 `POST /api/agent/<agent-id>/live-mode/reset` clears only that resident's transient Live Agent runtime state. It preserves provider-owned workspace files, the Virtual World Resident Profile, assignments, constructed homes, buildings, furniture, and all unrelated residents.
 

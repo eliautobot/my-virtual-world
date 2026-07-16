@@ -58,13 +58,23 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_REALTIME_PORT` | `8591` | Sidecar HTTP/WebSocket port when running the local realtime server. |
 | `VW_WORLD_ACTION_HISTORY_MAX_BYTES` | `8388608` | Maximum encoded size of retained terminal world-action history. Oldest records are compacted or pruned first. |
 | `VW_WORLD_ACTION_HISTORY_RECORD_MAX_BYTES` | `262144` | Maximum encoded size of one retained terminal world-action record before optional diagnostic fields are compacted. |
+| `VW_MOVE_INTENT_HISTORY_MAX_RECORDS` | `1000` | Maximum retained terminal move-intent summaries. Active intents are stored separately and are never pruned by this limit. |
+| `VW_MOVE_INTENT_HISTORY_MAX_BYTES` | `2097152` | Maximum encoded size of terminal move-intent history after duplicated route payloads are removed. |
+| `VW_MOVE_INTENT_HISTORY_RECORD_MAX_BYTES` | `8192` | Maximum encoded size of one terminal move-intent summary. |
+| `VW_MOVE_INTENT_ACTIVE_RECORD_MAX_BYTES` | `262144` | Maximum encoded size accepted for one active move intent. Oversized active records are rejected rather than partially stored. |
+| `VW_WORLD_ACTION_EVENTS_MAX_EVENTS` | `1000` | Maximum retained world-action event records. |
+| `VW_WORLD_ACTION_EVENTS_MAX_BYTES` | `2097152` | Maximum encoded size of retained world-action events. Newest-per-resident fairness is applied before global newest-first retention. |
+| `VW_WORLD_ACTION_EVENT_RECORD_MAX_BYTES` | `8192` | Maximum encoded size of one world-action event before optional diagnostics are compacted. |
 | `VW_WORLD_META_BACKUP_INTERVAL_SEC` | `300` | Minimum interval between full `world-meta.json.bak` copies. Atomic primary writes still happen whenever metadata changes. |
 | `VW_WORLD_META_STALE_TMP_MAX_AGE_SEC` | `3600` | Age at which abandoned `world-meta.json.tmp-*` files are removed during a later save. |
 | `VW_LIVE_AGENT_COLLECTION_MAX_BYTES` | `262144` | Per-collection byte budget for Live Agent memory, events, plans, episodes, feedback, and proposals. |
 | `VW_LIVE_AGENT_LOOP_STATE_MAX_BYTES` | `8388608` | Overall byte budget for the persisted Live Agent loop state. |
 | `VW_LIVE_AGENT_INTERNAL_NOTES_MAX_BYTES` | `1048576` | Global byte budget for Virtual-World-owned Live Agent internal notes. |
 | `VW_LIVE_AGENT_INTERNAL_NOTE_DETAILS_MAX_BYTES` | `24576` | Maximum diagnostic detail stored on one internal note before compaction. |
+| `VW_LIVE_AGENT_INTERNAL_NOTE_RECORD_MAX_BYTES` | `32768` | Maximum encoded size of one internal note. Semantic title/text/lesson fields are preserved when diagnostics are removed. |
 | `VW_LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES` | `2097152` | Global byte budget for Virtual-World-owned planner transcript copies. |
+| `VW_LIVE_AGENT_PLANNER_TRANSCRIPT_RECORD_MAX_BYTES` | `49152` | Maximum encoded size of one Virtual-World-owned planner turn. Recent full turns are trimmed to this ceiling when necessary. |
+| `VW_LIVE_AGENT_PLANNER_FULL_TURNS_PER_AGENT` | `8` | Newest full planner turns retained per resident before older turns become hashed semantic summaries. |
 | `VW_LICENSE_STORE_ID` | `321733` | Lemon Squeezy store ID used to verify keys belong to My Virtual World. |
 | `VW_LICENSE_PRODUCT_IDS` | `1140366` | Comma-separated Lemon Squeezy product IDs accepted by this app. |
 

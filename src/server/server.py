@@ -1164,6 +1164,48 @@ WORLD_ACTION_HISTORY_RECORD_MAX_BYTES = _env_int(
     minimum=16 * 1024,
     maximum=8 * 1024 * 1024,
 )
+MOVE_INTENT_HISTORY_MAX_RECORDS = _env_int(
+    "VW_MOVE_INTENT_HISTORY_MAX_RECORDS",
+    1000,
+    minimum=10,
+    maximum=100000,
+)
+MOVE_INTENT_HISTORY_MAX_BYTES = _env_int(
+    "VW_MOVE_INTENT_HISTORY_MAX_BYTES",
+    2 * 1024 * 1024,
+    minimum=64 * 1024,
+    maximum=128 * 1024 * 1024,
+)
+MOVE_INTENT_HISTORY_RECORD_MAX_BYTES = _env_int(
+    "VW_MOVE_INTENT_HISTORY_RECORD_MAX_BYTES",
+    8 * 1024,
+    minimum=2 * 1024,
+    maximum=1024 * 1024,
+)
+MOVE_INTENT_ACTIVE_RECORD_MAX_BYTES = _env_int(
+    "VW_MOVE_INTENT_ACTIVE_RECORD_MAX_BYTES",
+    256 * 1024,
+    minimum=16 * 1024,
+    maximum=8 * 1024 * 1024,
+)
+WORLD_ACTION_EVENTS_MAX_EVENTS = _env_int(
+    "VW_WORLD_ACTION_EVENTS_MAX_EVENTS",
+    1000,
+    minimum=10,
+    maximum=100000,
+)
+WORLD_ACTION_EVENTS_MAX_BYTES = _env_int(
+    "VW_WORLD_ACTION_EVENTS_MAX_BYTES",
+    2 * 1024 * 1024,
+    minimum=64 * 1024,
+    maximum=128 * 1024 * 1024,
+)
+WORLD_ACTION_EVENT_RECORD_MAX_BYTES = _env_int(
+    "VW_WORLD_ACTION_EVENT_RECORD_MAX_BYTES",
+    8 * 1024,
+    minimum=2 * 1024,
+    maximum=1024 * 1024,
+)
 WORLD_META_BACKUP_INTERVAL_SEC = _env_int(
     "VW_WORLD_META_BACKUP_INTERVAL_SEC",
     5 * 60,
@@ -1717,6 +1759,130 @@ def _compact_json_value_for_storage(value, *, depth=0, max_depth=4, max_items=24
     return str(value)[:string_limit]
 
 
+def _storage_record_epoch(record):
+    if not isinstance(record, dict):
+        return 0
+    timing = record.get("timing") if isinstance(record.get("timing"), dict) else {}
+    route = record.get("route") if isinstance(record.get("route"), dict) else {}
+    for value in (
+        record.get("terminalAt"),
+        record.get("completedAt"),
+        record.get("updatedAt"),
+        record.get("createdAt"),
+        record.get("at"),
+        record.get("timestamp"),
+        timing.get("terminalAt"),
+        timing.get("completedAt"),
+        timing.get("updatedAt"),
+        timing.get("createdAt"),
+        route.get("arrivedAt"),
+        route.get("failedAt"),
+        route.get("cancelledAt"),
+    ):
+        epoch = _parse_isoish_epoch(value)
+        if epoch is not None:
+            return epoch
+    try:
+        return float(record.get("sequence") or record.get("cursor") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _trim_storage_records(records, *, compact_record, max_records, max_bytes, record_max_bytes):
+    """Compact and bound a telemetry collection without letting one noisy
+    resident erase the newest record for every quieter resident."""
+    candidates = []
+    for index, raw in enumerate(records if isinstance(records, list) else []):
+        if not isinstance(raw, dict):
+            continue
+        compacted = compact_record(raw)
+        if not isinstance(compacted, dict):
+            continue
+        size = _json_size_bytes(compacted)
+        candidates.append({
+            "index": index,
+            "agentId": str(compacted.get("agentId") or ""),
+            "epoch": _storage_record_epoch(compacted),
+            "record": compacted,
+            "bytes": size,
+            "id": compacted.get("id") or compacted.get("actionId") or compacted.get("sequence"),
+        })
+    ranked = sorted(candidates, key=lambda row: (row["epoch"], row["index"]), reverse=True)
+    selected_indexes = set()
+    used = 2
+
+    # A newest-per-agent pass gives every resident a fair minimum. Empty
+    # agent ids (system events) are treated as one shared source.
+    newest_per_agent = []
+    seen_agents = set()
+    for row in ranked:
+        if row["agentId"] in seen_agents:
+            continue
+        seen_agents.add(row["agentId"])
+        newest_per_agent.append(row)
+    for row in [*newest_per_agent, *ranked]:
+        if row["index"] in selected_indexes:
+            continue
+        if len(selected_indexes) >= max(1, int(max_records)):
+            break
+        extra = row["bytes"] + (1 if selected_indexes else 0)
+        if row["bytes"] <= record_max_bytes and used + extra <= max_bytes:
+            selected_indexes.add(row["index"])
+            used += extra
+
+    selected = [row["record"] for row in candidates if row["index"] in selected_indexes]
+    removed = [row["id"] for row in candidates if row["index"] not in selected_indexes]
+    return selected, {
+        "maxBytes": max_bytes,
+        "recordMaxBytes": record_max_bytes,
+        "maxRecords": max_records,
+        "currentBytes": _json_size_bytes(selected),
+        "recordCount": len(selected),
+        "recordsDropped": max(0, len(candidates) - len(selected)),
+        "removedIds": removed,
+    }
+
+
+def _compact_storage_target(target):
+    if not isinstance(target, dict):
+        return None
+    keys = (
+        "kind",
+        "id",
+        "targetAgentId",
+        "objectInstanceId",
+        "catalogId",
+        "interactionSpotId",
+        "spotId",
+        "buildingId",
+        "floor",
+        "roomId",
+        "x",
+        "y",
+        "z",
+        "actionId",
+        "worldActionId",
+        "targetKind",
+    )
+    return {key: target.get(key) for key in keys if target.get(key) is not None}
+
+
+def _compact_storage_source(source):
+    if not isinstance(source, dict):
+        return source if isinstance(source, str) else None
+    keys = (
+        "kind",
+        "requestedBy",
+        "requestId",
+        "surface",
+        "caller",
+        "behaviorSourceKind",
+        "behaviorMode",
+        "behaviorCategory",
+    )
+    return {key: source.get(key) for key in keys if source.get(key) is not None}
+
+
 def _compact_world_action_history_record(record):
     action = _copy_world_action_record(record)
     if _json_size_bytes(action) <= WORLD_ACTION_HISTORY_RECORD_MAX_BYTES:
@@ -1952,11 +2118,29 @@ LIVE_AGENT_INTERNAL_NOTE_DETAILS_MAX_BYTES = _env_int(
     minimum=4 * 1024,
     maximum=1024 * 1024,
 )
+LIVE_AGENT_INTERNAL_NOTE_RECORD_MAX_BYTES = _env_int(
+    "VW_LIVE_AGENT_INTERNAL_NOTE_RECORD_MAX_BYTES",
+    32 * 1024,
+    minimum=8 * 1024,
+    maximum=2 * 1024 * 1024,
+)
 LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES = _env_int(
     "VW_LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES",
     2 * 1024 * 1024,
     minimum=256 * 1024,
     maximum=128 * 1024 * 1024,
+)
+LIVE_AGENT_PLANNER_TRANSCRIPT_RECORD_MAX_BYTES = _env_int(
+    "VW_LIVE_AGENT_PLANNER_TRANSCRIPT_RECORD_MAX_BYTES",
+    48 * 1024,
+    minimum=8 * 1024,
+    maximum=2 * 1024 * 1024,
+)
+LIVE_AGENT_PLANNER_FULL_TURNS_PER_AGENT = _env_int(
+    "VW_LIVE_AGENT_PLANNER_FULL_TURNS_PER_AGENT",
+    8,
+    minimum=1,
+    maximum=40,
 )
 LIVE_AGENT_LOOP_MODEL_DECISION_MODE = "model-autonomy-v3"
 LIVE_AGENT_LOOP_MODEL_DECISION_SOURCES = {"openclaw"}
@@ -2682,23 +2866,88 @@ def _source_snapshot_with_behavior(source, behavior):
     return snap
 
 
+def _compact_world_action_event_record(record):
+    event = _copy_jsonable(record) if isinstance(record, dict) else None
+    if not isinstance(event, dict):
+        return None
+    if _json_size_bytes(event) <= WORLD_ACTION_EVENT_RECORD_MAX_BYTES:
+        return event
+    compacted = {
+        key: event.get(key)
+        for key in (
+            "schemaVersion",
+            "name",
+            "type",
+            "id",
+            "at",
+            "timestamp",
+            "sequence",
+            "cursor",
+            "actionId",
+            "actionType",
+            "status",
+            "fromStatus",
+            "toStatus",
+            "from",
+            "to",
+            "agentId",
+            "targetId",
+            "targetKind",
+            "routeId",
+            "reservationId",
+            "source",
+            "behaviorSourceKind",
+            "behaviorMode",
+            "behaviorCategory",
+            "actor",
+            "reason",
+        )
+        if event.get(key) is not None
+    }
+    target = _compact_storage_target(event.get("target"))
+    if target:
+        compacted["target"] = target
+    for key in ("behavior", "result", "error"):
+        if event.get(key) is not None:
+            compacted[key] = _compact_json_value_for_storage(
+                event.get(key), max_depth=2, max_items=12, string_limit=600
+            )
+    compacted["storageCompaction"] = {
+        "compacted": True,
+        "originalBytes": _json_size_bytes(event),
+    }
+    if _json_size_bytes(compacted) > WORLD_ACTION_EVENT_RECORD_MAX_BYTES:
+        compacted.pop("behavior", None)
+        compacted["result"] = {
+            "storageCompacted": True,
+            "status": event.get("status") or event.get("toStatus"),
+        }
+        compacted["error"] = {
+            "storageCompacted": True,
+            "code": (event.get("error") or {}).get("code") if isinstance(event.get("error"), dict) else None,
+        }
+    return compacted
+
+
 def default_world_action_events_store():
     return {
         "schemaVersion": WORLD_ACTION_EVENT_HOOKS_VERSION,
         "nextSequence": 1,
         "events": [],
-        "retention": {"maxEvents": 1000},
+        "retention": {"maxEvents": WORLD_ACTION_EVENTS_MAX_EVENTS},
+        "storageBudget": {
+            "maxBytes": WORLD_ACTION_EVENTS_MAX_BYTES,
+            "recordMaxBytes": WORLD_ACTION_EVENT_RECORD_MAX_BYTES,
+            "currentBytes": 2,
+            "recordCount": 0,
+            "recordsDropped": 0,
+        },
         "subscription": {"mode": "poll", "endpoint": "/api/world-action-events", "cursorField": "sequence"},
     }
 
 
-def get_world_action_events_store(*, persist_migration=False):
-    meta = load_world_meta()
-    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
-    store = agent_life.get("worldActionEvents") if isinstance(agent_life.get("worldActionEvents"), dict) else None
-    changed = store is None
-    if not store:
-        store = default_world_action_events_store()
+def _normalize_world_action_events_store(store):
+    store = store if isinstance(store, dict) else {}
     raw_events = store.get("events") if isinstance(store.get("events"), list) else []
     events = [event for event in raw_events if isinstance(event, dict) and event.get("name") in WORLD_ACTION_EVENT_NAMES]
     try:
@@ -2708,11 +2957,35 @@ def get_world_action_events_store(*, persist_migration=False):
     if events:
         next_sequence = max(next_sequence, max(int(event.get("sequence") or 0) for event in events) + 1)
     next_store = default_world_action_events_store()
+    stored_max = (store.get("retention") or {}).get("maxEvents") if isinstance(store.get("retention"), dict) else None
+    try:
+        max_events = min(WORLD_ACTION_EVENTS_MAX_EVENTS, max(1, int(stored_max or WORLD_ACTION_EVENTS_MAX_EVENTS)))
+    except (TypeError, ValueError):
+        max_events = WORLD_ACTION_EVENTS_MAX_EVENTS
+    events, budget = _trim_storage_records(
+        events,
+        compact_record=_compact_world_action_event_record,
+        max_records=max_events,
+        max_bytes=WORLD_ACTION_EVENTS_MAX_BYTES,
+        record_max_bytes=WORLD_ACTION_EVENT_RECORD_MAX_BYTES,
+    )
+    budget.pop("removedIds", None)
     next_store.update({
         "nextSequence": next_sequence,
-        "events": events[-int((store.get("retention") or {}).get("maxEvents") or 1000):],
-        "retention": {**next_store["retention"], **(store.get("retention") if isinstance(store.get("retention"), dict) else {})},
+        "events": events,
+        "retention": {"maxEvents": max_events},
+        "storageBudget": budget,
+        "subscription": store.get("subscription") if isinstance(store.get("subscription"), dict) else next_store["subscription"],
     })
+    return next_store
+
+
+def get_world_action_events_store(*, persist_migration=False):
+    meta = load_world_meta()
+    agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+    store = agent_life.get("worldActionEvents") if isinstance(agent_life.get("worldActionEvents"), dict) else None
+    next_store = _normalize_world_action_events_store(store)
+    changed = _json_compact_bytes(store or {}) != _json_compact_bytes(next_store)
     if persist_migration and changed:
         agent_life["worldActionEvents"] = next_store
         meta["agentLife"] = agent_life
@@ -2723,15 +2996,7 @@ def get_world_action_events_store(*, persist_migration=False):
 def save_world_action_events_store(store):
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
-    next_store = default_world_action_events_store()
-    if isinstance(store, dict):
-        next_store.update({k: v for k, v in store.items() if k in {"nextSequence", "events", "retention", "subscription"}})
-    max_events = int((next_store.get("retention") or {}).get("maxEvents") or 1000)
-    next_store["events"] = [event for event in (next_store.get("events") or []) if isinstance(event, dict) and event.get("name") in WORLD_ACTION_EVENT_NAMES][-max_events:]
-    try:
-        next_store["nextSequence"] = int(next_store.get("nextSequence") or 1)
-    except (TypeError, ValueError):
-        next_store["nextSequence"] = 1
+    next_store = _normalize_world_action_events_store(store)
     agent_life["worldActionEvents"] = next_store
     meta["agentLife"] = agent_life
     save_world_meta(meta)
@@ -3565,20 +3830,180 @@ def create_world_action(payload):
     return True, {"ok": True, "action": action, "worldActions": {"activeCount": len(saved.get("active", [])), "historyCount": len(saved.get("history", []))}, "routeHandoff": action.get("route")}, 201
 
 # ─── AGENT MOVE INTENT API ───────────────────────────────────────
+def _compact_move_intent_history_record(record):
+    if not isinstance(record, dict):
+        return None
+    storage_compaction = record.get("storageCompaction") if isinstance(record.get("storageCompaction"), dict) else {}
+    if storage_compaction.get("compacted") and storage_compaction.get("removedDuplicatedRoutePayload"):
+        return _copy_jsonable(record)
+    route = record.get("route") if isinstance(record.get("route"), dict) else {}
+    metadata = record.get("targetMetadata") if isinstance(record.get("targetMetadata"), dict) else {}
+    compacted = {
+        key: record.get(key)
+        for key in (
+            "id",
+            "schemaVersion",
+            "agentId",
+            "actionId",
+            "worldActionId",
+            "status",
+            "routeStatus",
+            "failureReason",
+            "behaviorSourceKind",
+            "behaviorMode",
+            "behaviorAuthority",
+            "behaviorCategory",
+            "createdAt",
+            "updatedAt",
+            "arrivedAt",
+            "completedAt",
+            "failedAt",
+            "cancelledAt",
+            "expiredAt",
+            "invalidatedAt",
+            "interruptedAt",
+            "interruptedBy",
+        )
+        if record.get(key) is not None
+    }
+    target = _compact_storage_target(record.get("target") or route.get("target"))
+    if target:
+        compacted["target"] = target
+    compact_metadata = {
+        key: metadata.get(key)
+        for key in (
+            "objectInstanceId",
+            "catalogId",
+            "interactionSpotId",
+            "buildingId",
+            "buildingName",
+            "floor",
+            "roomId",
+            "collection",
+            "routingPlan",
+        )
+        if metadata.get(key) is not None
+    }
+    if compact_metadata:
+        compacted["targetMetadata"] = compact_metadata
+    compact_route = {
+        key: route.get(key)
+        for key in (
+            "id",
+            "state",
+            "status",
+            "routeOwner",
+            "routingOwner",
+            "serverExecutor",
+            "serverRuntimeAuthority",
+            "worldActionId",
+            "failureReason",
+            "arrivedAt",
+            "failedAt",
+            "cancelledAt",
+            "distanceTravelled",
+            "distanceRemaining",
+            "durationSec",
+            "attempts",
+        )
+        if route.get(key) is not None
+    }
+    planner = route.get("planner") if isinstance(route.get("planner"), dict) else {}
+    if planner:
+        compact_route["planner"] = {
+            key: planner.get(key)
+            for key in ("kind", "strategy", "buildingId", "floor", "roomId")
+            if planner.get(key) is not None
+        }
+    if compact_route:
+        compacted["route"] = compact_route
+    source = _compact_storage_source(record.get("source") or route.get("source"))
+    if source:
+        compacted["source"] = source
+    behavior = record.get("behavior") if isinstance(record.get("behavior"), dict) else {}
+    if behavior:
+        compacted["behavior"] = {
+            key: behavior.get(key)
+            for key in (
+                "behaviorSourceKind",
+                "behaviorMode",
+                "behaviorAuthority",
+                "behaviorSelectedCategory",
+                "behaviorFallbackReason",
+            )
+            if behavior.get(key) is not None
+        }
+    for key in ("result", "error"):
+        if record.get(key) is not None:
+            compacted[key] = _compact_json_value_for_storage(
+                record.get(key), max_depth=2, max_items=10, string_limit=500
+            )
+    compacted["storageCompaction"] = {
+        "compacted": True,
+        "originalBytes": _json_size_bytes(record),
+        "removedDuplicatedRoutePayload": True,
+    }
+    if _json_size_bytes(compacted) > MOVE_INTENT_HISTORY_RECORD_MAX_BYTES:
+        compacted.pop("behavior", None)
+        compacted.pop("targetMetadata", None)
+        compacted["result"] = {
+            "storageCompacted": True,
+            "status": record.get("routeStatus") or record.get("status"),
+        }
+        compacted.pop("error", None)
+    return compacted
+
+
 def default_move_intents_store():
-    return {"schemaVersion": MOVE_INTENT_SCHEMA_VERSION, "active": [], "history": []}
+    return {
+        "schemaVersion": MOVE_INTENT_SCHEMA_VERSION,
+        "active": [],
+        "history": [],
+        "retention": {"maxHistoryRecords": MOVE_INTENT_HISTORY_MAX_RECORDS},
+        "storageBudget": {
+            "historyMaxBytes": MOVE_INTENT_HISTORY_MAX_BYTES,
+            "historyRecordMaxBytes": MOVE_INTENT_HISTORY_RECORD_MAX_BYTES,
+            "activeRecordMaxBytes": MOVE_INTENT_ACTIVE_RECORD_MAX_BYTES,
+            "historyCurrentBytes": 2,
+            "historyRecordCount": 0,
+            "historyRecordsDropped": 0,
+        },
+    }
+
+
+def _normalize_move_intents_store(store):
+    store = store if isinstance(store, dict) else {}
+    active = [row for row in store.get("active", []) if isinstance(row, dict)]
+    history = [row for row in store.get("history", []) if isinstance(row, dict)]
+    history, budget = _trim_storage_records(
+        history,
+        compact_record=_compact_move_intent_history_record,
+        max_records=MOVE_INTENT_HISTORY_MAX_RECORDS,
+        max_bytes=MOVE_INTENT_HISTORY_MAX_BYTES,
+        record_max_bytes=MOVE_INTENT_HISTORY_RECORD_MAX_BYTES,
+    )
+    next_store = default_move_intents_store()
+    next_store["active"] = active
+    next_store["history"] = history
+    next_store["storageBudget"].update({
+        "historyCurrentBytes": budget.get("currentBytes"),
+        "historyRecordCount": budget.get("recordCount"),
+        "historyRecordsDropped": budget.get("recordsDropped"),
+        "oversizedActiveRecords": sum(
+            1 for row in active if _json_size_bytes(row) > MOVE_INTENT_ACTIVE_RECORD_MAX_BYTES
+        ),
+    })
+    if store.get("lastSavedAt"):
+        next_store["lastSavedAt"] = store.get("lastSavedAt")
+    return next_store
 
 
 def get_move_intents_store(*, persist_migration=False):
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
     store = agent_life.get("moveIntents") if isinstance(agent_life.get("moveIntents"), dict) else None
-    changed = store is None
-    if not store:
-        store = default_move_intents_store()
-    active = [row for row in store.get("active", []) if isinstance(row, dict)]
-    history = [row for row in store.get("history", []) if isinstance(row, dict)]
-    next_store = {"schemaVersion": MOVE_INTENT_SCHEMA_VERSION, "active": active, "history": history[-1000:]}
+    next_store = _normalize_move_intents_store(store)
+    changed = _json_compact_bytes(store or {}) != _json_compact_bytes(next_store)
     if persist_migration and changed:
         agent_life["moveIntents"] = next_store
         meta["agentLife"] = agent_life
@@ -3589,9 +4014,18 @@ def get_move_intents_store(*, persist_migration=False):
 def save_move_intents_store(store):
     meta = load_world_meta()
     agent_life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
-    next_store = default_move_intents_store()
-    next_store["active"] = [row for row in (store.get("active") if isinstance(store, dict) else []) if isinstance(row, dict)]
-    next_store["history"] = [row for row in (store.get("history") if isinstance(store, dict) else []) if isinstance(row, dict)][-1000:]
+    next_store = _normalize_move_intents_store(store)
+    oversized_active = [
+        {"id": row.get("id"), "bytes": _json_size_bytes(row)}
+        for row in next_store.get("active", [])
+        if _json_size_bytes(row) > MOVE_INTENT_ACTIVE_RECORD_MAX_BYTES
+    ]
+    if oversized_active:
+        return False, {
+            "error": "move_intent_active_record_too_large",
+            "maxBytes": MOVE_INTENT_ACTIVE_RECORD_MAX_BYTES,
+            "records": oversized_active,
+        }
     next_store["lastSavedAt"] = _utc_now_iso()
     agent_life["moveIntents"] = next_store
     meta["agentLife"] = agent_life
@@ -4618,6 +5052,7 @@ def _trim_agent_document_records(data, collection_key, *, max_records_per_agent,
     data = data if isinstance(data, dict) else {}
     agents = data.get("agents") if isinstance(data.get("agents"), dict) else {}
     base = {**data, "agents": {}}
+    base.pop("storageBudget", None)
     candidates = []
     for agent_id, raw_row in agents.items():
         row = raw_row if isinstance(raw_row, dict) else {}
@@ -4683,10 +5118,149 @@ def _load_live_agent_internal_notes():
     return data
 
 
+def _live_agent_internal_note_semantic_key(note):
+    if not isinstance(note, dict):
+        return ""
+    basis = "|".join(
+        re.sub(r"\s+", " ", str(note.get(key) or "").strip().lower())
+        for key in ("agentId", "type", "title", "text")
+    )
+    return hashlib.sha256(basis.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _live_agent_note_details_has_planner_frame(value, *, depth=0):
+    if depth > 5:
+        return False
+    if isinstance(value, dict):
+        planner_keys = {
+            "prompt",
+            "reply",
+            "decisionframe",
+            "goalframe",
+            "perception",
+            "candidates",
+            "affordances",
+            "plannerframe",
+            "rawresponse",
+        }
+        if any(str(key).replace("_", "").lower() in planner_keys for key in value):
+            return True
+        return any(_live_agent_note_details_has_planner_frame(item, depth=depth + 1) for item in value.values())
+    if isinstance(value, list):
+        return any(_live_agent_note_details_has_planner_frame(item, depth=depth + 1) for item in value[:40])
+    return False
+
+
+def _live_agent_note_semantic_details(details):
+    if not isinstance(details, dict):
+        return {}
+    semantic = {}
+    for key in (
+        "actionId",
+        "worldActionId",
+        "loopActionId",
+        "planId",
+        "planStepId",
+        "status",
+        "failureReason",
+        "targetKey",
+        "issueId",
+        "relationshipId",
+        "otherAgentId",
+        "lesson",
+        "reflection",
+        "currentGoal",
+    ):
+        if details.get(key) is not None:
+            semantic[key] = _compact_json_value_for_storage(
+                details.get(key), max_depth=2, max_items=8, string_limit=900
+            )
+    target = _compact_storage_target(details.get("target"))
+    if target:
+        semantic["target"] = target
+    return semantic
+
+
+def _compact_live_agent_internal_note_record(note):
+    if not isinstance(note, dict):
+        return None
+    compacted = _copy_jsonable(note)
+    compacted["title"] = _live_agent_loop_clean_plan_text(compacted.get("title"), limit=180) or "Live Agent note"
+    compacted["text"] = _live_agent_loop_clean_plan_text(compacted.get("text"), limit=1600) or ""
+    details = compacted.get("details") if isinstance(compacted.get("details"), dict) else {}
+    original_bytes = _json_size_bytes(note)
+    planner_details = _live_agent_note_details_has_planner_frame(details)
+    if planner_details:
+        details = {
+            **_live_agent_note_semantic_details(details),
+            "storageCompacted": True,
+            "legacyPlannerFrameRemoved": True,
+            "originalDetailsBytes": _json_size_bytes(compacted.get("details")),
+        }
+    elif _json_size_bytes(details) > LIVE_AGENT_INTERNAL_NOTE_DETAILS_MAX_BYTES:
+        details = _compact_json_value_for_storage(details, max_depth=4, max_items=20, string_limit=900)
+        if not isinstance(details, dict) or _json_size_bytes(details) > LIVE_AGENT_INTERNAL_NOTE_DETAILS_MAX_BYTES:
+            details = {
+                **_live_agent_note_semantic_details(compacted.get("details")),
+                "storageCompacted": True,
+                "originalDetailsBytes": _json_size_bytes(compacted.get("details")),
+            }
+        else:
+            details["storageCompacted"] = True
+            details["originalDetailsBytes"] = _json_size_bytes(compacted.get("details"))
+    if details:
+        compacted["details"] = details
+    else:
+        compacted.pop("details", None)
+    if _json_size_bytes(compacted) > LIVE_AGENT_INTERNAL_NOTE_RECORD_MAX_BYTES:
+        semantic = _live_agent_note_semantic_details(compacted.get("details"))
+        compacted["details"] = {
+            **semantic,
+            "storageCompacted": True,
+            "originalRecordBytes": original_bytes,
+        }
+    return compacted
+
+
+def _compact_live_agent_internal_notes_document(data):
+    data = _copy_jsonable(data) if isinstance(data, dict) else _live_agent_internal_notes_default()
+    agents = data.get("agents") if isinstance(data.get("agents"), dict) else {}
+    next_agents = {}
+    for agent_id, raw_row in agents.items():
+        row = raw_row if isinstance(raw_row, dict) else {}
+        deduped = {}
+        order = []
+        for note in [item for item in (row.get("notes") or []) if isinstance(item, dict)]:
+            compacted = _compact_live_agent_internal_note_record(note)
+            if not compacted or not compacted.get("text"):
+                continue
+            key = _live_agent_internal_note_semantic_key(compacted)
+            if key not in deduped:
+                deduped[key] = compacted
+                order.append(key)
+                continue
+            previous = deduped[key]
+            previous_epoch = _storage_record_epoch(previous)
+            current_epoch = _storage_record_epoch(compacted)
+            newest = compacted if current_epoch >= previous_epoch else previous
+            oldest = previous if current_epoch >= previous_epoch else compacted
+            newest["repeatCount"] = int(previous.get("repeatCount") or 1) + int(compacted.get("repeatCount") or 1)
+            newest["firstCreatedAt"] = oldest.get("firstCreatedAt") or oldest.get("createdAt")
+            newest["lastRepeatedAt"] = newest.get("updatedAt") or newest.get("createdAt")
+            deduped[key] = newest
+        notes = [deduped[key] for key in order if key in deduped]
+        notes.sort(key=_storage_record_epoch)
+        if notes:
+            next_agents[str(agent_id)] = {**row, "notes": notes}
+    data["agents"] = next_agents
+    return data
+
+
 def _save_live_agent_internal_notes(data):
     data = data if isinstance(data, dict) else _live_agent_internal_notes_default()
     data["schemaVersion"] = LIVE_AGENT_INTERNAL_NOTE_SCHEMA_VERSION
     data["updatedAt"] = _utc_now_iso()
+    data = _compact_live_agent_internal_notes_document(data)
     data = _trim_agent_document_records(
         data,
         "notes",
@@ -9448,10 +10022,136 @@ def _load_live_agent_planner_transcripts():
     return data
 
 
+def _live_agent_planner_turn_semantic_summary(turn):
+    turn = turn if isinstance(turn, dict) else {}
+    parsed = _live_agent_model_json_object_parse(turn.get("reply"))
+    parsed = parsed if isinstance(parsed, dict) else {}
+    memory_update = parsed.get("memoryUpdate") if isinstance(parsed.get("memoryUpdate"), dict) else {}
+    next_step = parsed.get("nextStep") if isinstance(parsed.get("nextStep"), dict) else {}
+    semantic = {
+        "reflection": _live_agent_loop_clean_plan_text(parsed.get("reflection"), limit=700),
+        "currentGoal": _live_agent_loop_clean_plan_text(parsed.get("currentGoal"), limit=500),
+        "plan": [
+            _live_agent_loop_clean_plan_text(item, limit=300)
+            for item in (parsed.get("plan") or [])[:6]
+            if _live_agent_loop_clean_plan_text(item, limit=300)
+        ] if isinstance(parsed.get("plan"), list) else [],
+        "nextStep": {
+            key: _live_agent_loop_clean_plan_text(next_step.get(key), limit=360)
+            for key in ("intent", "action", "category", "targetCriteria", "successCriteria")
+            if _live_agent_loop_clean_plan_text(next_step.get(key), limit=360)
+        },
+        "lesson": _live_agent_loop_clean_plan_text(
+            memory_update.get("lesson") or parsed.get("lesson"), limit=700
+        ),
+    }
+    if isinstance(turn.get("intention"), dict):
+        semantic["intention"] = _compact_json_value_for_storage(
+            turn.get("intention"), max_depth=2, max_items=10, string_limit=500
+        )
+    return {key: value for key, value in semantic.items() if value not in (None, "", [], {})}
+
+
+def _compact_live_agent_planner_turn(turn, *, keep_full):
+    if not isinstance(turn, dict):
+        return None
+    compacted = _copy_jsonable(turn)
+    original_prompt = str(compacted.get("prompt") or "")
+    original_reply = str(compacted.get("reply") or "")
+    original_bytes = _json_size_bytes(compacted)
+    already_compacted = bool((compacted.get("storageCompaction") or {}).get("olderTurnSummarized")) if isinstance(compacted.get("storageCompaction"), dict) else False
+    if already_compacted:
+        return compacted
+    if keep_full and not already_compacted:
+        compacted["prompt"] = _live_agent_planner_trim_text(original_prompt)
+        compacted["reply"] = _live_agent_planner_trim_text(original_reply, limit=8000)
+        if _json_size_bytes(compacted) <= LIVE_AGENT_PLANNER_TRANSCRIPT_RECORD_MAX_BYTES:
+            return compacted
+        envelope = {**compacted, "prompt": "", "reply": ""}
+        available = max(1600, LIVE_AGENT_PLANNER_TRANSCRIPT_RECORD_MAX_BYTES - _json_size_bytes(envelope) - 512)
+        reply_limit = min(8000, max(600, available // 3))
+        compacted["reply"] = _live_agent_planner_trim_text(original_reply, limit=reply_limit)
+        prompt_limit = max(800, available - _json_size_bytes(compacted["reply"]))
+        compacted["prompt"] = _live_agent_planner_trim_text(original_prompt, limit=prompt_limit)
+        compacted["storageCompaction"] = {
+            "recentFullTurnTruncated": True,
+            "originalBytes": original_bytes,
+            "originalPromptChars": len(original_prompt),
+            "originalReplyChars": len(original_reply),
+        }
+        while _json_size_bytes(compacted) > LIVE_AGENT_PLANNER_TRANSCRIPT_RECORD_MAX_BYTES and len(compacted.get("prompt") or "") > 200:
+            compacted["prompt"] = compacted["prompt"][:max(200, len(compacted["prompt"]) - 512)]
+        while _json_size_bytes(compacted) > LIVE_AGENT_PLANNER_TRANSCRIPT_RECORD_MAX_BYTES and len(compacted.get("reply") or "") > 200:
+            compacted["reply"] = compacted["reply"][:max(200, len(compacted["reply"]) - 256)]
+        if _json_size_bytes(compacted) <= LIVE_AGENT_PLANNER_TRANSCRIPT_RECORD_MAX_BYTES:
+            return compacted
+
+    semantic = _live_agent_planner_turn_semantic_summary(compacted)
+    prompt_hash = hashlib.sha256(original_prompt.encode("utf-8", errors="ignore")).hexdigest()
+    reply_hash = hashlib.sha256(original_reply.encode("utf-8", errors="ignore")).hexdigest()
+    compacted["prompt"] = (
+        "[Older Live Mode planner frame compacted for storage. "
+        f"Original: {len(original_prompt)} characters; SHA-256: {prompt_hash}.]"
+    )
+    compacted["reply"] = json.dumps(
+        {
+            "storageCompacted": True,
+            "semanticSummary": semantic,
+            "originalReplyChars": len(original_reply),
+            "originalReplySha256": reply_hash,
+        },
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    compacted["semanticSummary"] = semantic
+    compacted["storageCompaction"] = {
+        "olderTurnSummarized": True,
+        "originalBytes": original_bytes,
+        "originalPromptChars": len(original_prompt),
+        "originalReplyChars": len(original_reply),
+        "promptSha256": prompt_hash,
+        "replySha256": reply_hash,
+    }
+    compacted.pop("candidateIds", None)
+    if _json_size_bytes(compacted) > LIVE_AGENT_PLANNER_TRANSCRIPT_RECORD_MAX_BYTES:
+        compacted["semanticSummary"] = _compact_json_value_for_storage(
+            semantic, max_depth=3, max_items=12, string_limit=400
+        )
+        compacted["reply"] = json.dumps(
+            {"storageCompacted": True, "semanticSummary": compacted["semanticSummary"]},
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        compacted.pop("intention", None)
+    return compacted
+
+
+def _compact_live_agent_planner_transcripts_document(data):
+    data = _copy_jsonable(data) if isinstance(data, dict) else _live_agent_planner_transcript_default()
+    agents = data.get("agents") if isinstance(data.get("agents"), dict) else {}
+    next_agents = {}
+    for agent_id, raw_row in agents.items():
+        row = raw_row if isinstance(raw_row, dict) else {}
+        turns = [item for item in (row.get("turns") or []) if isinstance(item, dict)]
+        ranked = sorted(range(len(turns)), key=lambda index: (_storage_record_epoch(turns[index]), index), reverse=True)
+        full_indexes = set(ranked[:LIVE_AGENT_PLANNER_FULL_TURNS_PER_AGENT])
+        compacted_turns = [
+            _compact_live_agent_planner_turn(turn, keep_full=index in full_indexes)
+            for index, turn in enumerate(turns)
+        ]
+        compacted_turns = [turn for turn in compacted_turns if isinstance(turn, dict)]
+        compacted_turns.sort(key=_storage_record_epoch)
+        if compacted_turns:
+            next_agents[str(agent_id)] = {**row, "turns": compacted_turns}
+    data["agents"] = next_agents
+    return data
+
+
 def _save_live_agent_planner_transcripts(data):
     data = data if isinstance(data, dict) else _live_agent_planner_transcript_default()
     data["schemaVersion"] = LIVE_AGENT_PLANNER_TRANSCRIPT_SCHEMA_VERSION
     data["updatedAt"] = _utc_now_iso()
+    data = _compact_live_agent_planner_transcripts_document(data)
     data = _trim_agent_document_records(
         data,
         "turns",
@@ -9929,6 +10629,268 @@ def _live_agent_loop_append_resident_memory(values, entry, limit):
     return _limit_profile_list(next_values, limit=limit, item_limit=1200)
 
 
+def _resident_memory_record_text(record):
+    if not isinstance(record, dict):
+        return _live_agent_loop_clean_plan_text(record, limit=700) or ""
+    failure = record.get("failure") if isinstance(record.get("failure"), dict) else {}
+    for value in (
+        record.get("lesson"),
+        record.get("text"),
+        record.get("summary"),
+        failure.get("lesson"),
+        failure.get("reason"),
+        record.get("failureReason"),
+        record.get("label"),
+    ):
+        text = _live_agent_loop_clean_plan_text(value, limit=700)
+        if text:
+            return text
+    return "Live Agent experience"
+
+
+def _normalize_legacy_resident_memory_record(record, *, source):
+    if isinstance(record, dict):
+        return _copy_jsonable(record)
+    text = _live_agent_loop_clean_plan_text(record, limit=1200)
+    if not text:
+        return None
+    return {
+        "id": f"legacy-memory-{hashlib.sha256(text.encode('utf-8', errors='ignore')).hexdigest()[:16]}",
+        "text": text,
+        "source": source,
+        "importance": 0.58,
+        "legacyTextPromoted": True,
+    }
+
+
+def _resident_memory_evidence_key(record):
+    if not isinstance(record, dict):
+        return hashlib.sha256(str(record).encode("utf-8", errors="ignore")).hexdigest()[:20]
+    for key in ("settledActionKey", "actionId", "id"):
+        if record.get(key):
+            return str(record.get(key))[:180]
+    basis = json.dumps(record, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(basis.encode("utf-8", errors="ignore")).hexdigest()[:20]
+
+
+def _resident_memory_semantic_key(record):
+    if not isinstance(record, dict):
+        basis = re.sub(r"\s+", " ", str(record or "").strip().lower())
+        return hashlib.sha256(basis.encode("utf-8", errors="ignore")).hexdigest()[:20]
+    failure = record.get("failure") if isinstance(record.get("failure"), dict) else {}
+    status = _canonical_world_action_status(record.get("status") or failure.get("status"))
+    outcome_class = "failure" if status in {"failed", "expired", "cancelled", "invalidated"} or failure else "success" if status in {"completed", "arrived"} else "experience"
+    target = record.get("target") if isinstance(record.get("target"), dict) else {}
+    target_key = record.get("targetKey") or _live_agent_loop_target_key(target)
+    other_agent = record.get("otherAgentId") or target.get("targetAgentId")
+    action_key = record.get("loopActionId") or record.get("actionType") or record.get("type")
+    if action_key:
+        basis = "|".join(str(value or "").strip().lower() for value in (action_key, outcome_class, target_key, other_agent))
+    else:
+        basis = "|".join((outcome_class, _resident_memory_record_text(record).lower()))
+    return hashlib.sha256(basis.encode("utf-8", errors="ignore")).hexdigest()[:20]
+
+
+def _resident_memory_importance(record):
+    if not isinstance(record, dict):
+        return 0.45
+    failure = record.get("failure") if isinstance(record.get("failure"), dict) else {}
+    status = _canonical_world_action_status(record.get("status") or failure.get("status"))
+    score = 0.24
+    if status in {"failed", "expired", "invalidated"} or failure:
+        score += 0.46
+    elif status == "cancelled" and failure.get("reportable") is not False:
+        score += 0.30
+    if failure.get("reportable") is True or record.get("unresolved") is True:
+        score += 0.16
+    if record.get("loopActionId") in {"work-on-active-goal", "investigate-blocking-issue", "report-issue-to-coder"}:
+        score += 0.20
+    target = record.get("target") if isinstance(record.get("target"), dict) else {}
+    if record.get("actionType") == "life.social" or record.get("otherAgentId") or target.get("targetAgentId"):
+        score += 0.18
+    source = str(record.get("source") or "").lower()
+    if "user" in source:
+        score += 0.26
+    if record.get("lesson") or failure.get("lesson"):
+        score += 0.12
+    try:
+        score = max(score, float(record.get("importance") or 0))
+    except (TypeError, ValueError):
+        pass
+    return round(min(1.0, score), 3)
+
+
+def _resident_long_term_memory_from_record(record):
+    record = record if isinstance(record, dict) else {"text": str(record or "")}
+    failure = record.get("failure") if isinstance(record.get("failure"), dict) else {}
+    status = _canonical_world_action_status(record.get("status") or failure.get("status"))
+    semantic_key = _resident_memory_semantic_key(record)
+    evidence_key = _resident_memory_evidence_key(record)
+    at = record.get("at") or record.get("updatedAt") or record.get("createdAt") or "1970-01-01T00:00:00Z"
+    memory = {
+        "id": f"resident-memory-{semantic_key}",
+        "memoryKey": semantic_key,
+        "firstAt": at,
+        "lastAt": at,
+        "count": 1,
+        "importance": _resident_memory_importance(record),
+        "text": _resident_memory_record_text(record),
+        "source": "live-agent-consolidation",
+        "evidenceKeys": [evidence_key],
+    }
+    for key in ("loopActionId", "actionType", "status", "targetKey", "otherAgentId"):
+        value = record.get(key)
+        if value is not None:
+            memory[key] = _copy_jsonable(value)
+    if not memory.get("targetKey") and isinstance(record.get("target"), dict):
+        memory["targetKey"] = _live_agent_loop_target_key(record.get("target"))
+    if not memory.get("otherAgentId") and isinstance(record.get("target"), dict):
+        memory["otherAgentId"] = record["target"].get("targetAgentId")
+    if failure:
+        memory["failureReason"] = failure.get("reason") or failure.get("failureReason") or record.get("failureReason")
+        memory["unresolved"] = failure.get("reportable") is not False
+    elif status in {"failed", "expired", "invalidated"}:
+        memory["failureReason"] = record.get("failureReason") or status
+        memory["unresolved"] = True
+    return memory
+
+
+def _merge_resident_long_term_memory(existing, incoming):
+    if not isinstance(existing, dict):
+        return incoming
+    if not isinstance(incoming, dict):
+        return existing
+    old_evidence = [str(item) for item in (existing.get("evidenceKeys") or []) if str(item or "")]
+    new_evidence = [str(item) for item in (incoming.get("evidenceKeys") or []) if str(item or "")]
+    unseen = [item for item in new_evidence if item not in old_evidence]
+    existing_epoch = _parse_isoish_epoch(existing.get("lastAt")) or 0
+    incoming_epoch = _parse_isoish_epoch(incoming.get("lastAt")) or 0
+    newest = incoming if incoming_epoch >= existing_epoch else existing
+    merged = {**existing, **newest}
+    merged["firstAt"] = min(
+        [value for value in (existing.get("firstAt"), incoming.get("firstAt")) if value],
+        key=lambda value: _parse_isoish_epoch(value) or 0,
+        default=existing.get("firstAt") or incoming.get("firstAt"),
+    )
+    merged["lastAt"] = newest.get("lastAt") or existing.get("lastAt") or incoming.get("lastAt")
+    is_newer_evidence = incoming_epoch > existing_epoch
+    merged["count"] = int(existing.get("count") or 1) + (int(incoming.get("count") or 1) if unseen and is_newer_evidence else 0)
+    merged["importance"] = max(_resident_memory_importance(existing), _resident_memory_importance(incoming))
+    merged["evidenceKeys"] = [*old_evidence, *unseen][-16:]
+    if existing.get("unresolved") is True or incoming.get("unresolved") is True:
+        merged["unresolved"] = True
+    return merged
+
+
+def _resident_memory_generated_summary(long_term):
+    ranked = sorted(
+        [item for item in long_term if isinstance(item, dict)],
+        key=lambda item: (
+            bool(item.get("unresolved")),
+            float(item.get("importance") or 0),
+            _parse_isoish_epoch(item.get("lastAt")) or 0,
+        ),
+        reverse=True,
+    )
+    lines = []
+    for item in ranked[:12]:
+        text = _resident_memory_record_text(item)
+        count = int(item.get("count") or 1)
+        suffix = f" (experienced {count} times)" if count > 1 else ""
+        if item.get("unresolved"):
+            suffix += " [unresolved]"
+        lines.append(f"- {text}{suffix}"[:520])
+    return "\n".join(lines)
+
+
+def _consolidate_resident_memory(memory):
+    memory = _copy_jsonable(memory) if isinstance(memory, dict) else {}
+    short_term = [
+        normalized
+        for item in (memory.get("shortTerm") or [])
+        if (normalized := _normalize_legacy_resident_memory_record(item, source="resident-profile-short-term"))
+    ]
+    reflections = [
+        normalized
+        for item in (memory.get("reflections") or [])
+        if (normalized := _normalize_legacy_resident_memory_record(item, source="resident-profile-reflection"))
+    ]
+    short_term.sort(key=_storage_record_epoch)
+    reflections.sort(key=_storage_record_epoch)
+    retained_short = short_term[-RESIDENT_PROFILE_LIST_LIMIT:]
+    retained_reflections = reflections[-RESIDENT_PROFILE_LIST_LIMIT:]
+    candidates = [*short_term[:-RESIDENT_PROFILE_LIST_LIMIT], *reflections[:-RESIDENT_PROFILE_LIST_LIMIT]]
+    if retained_short and _resident_memory_importance(retained_short[-1]) >= 0.65:
+        candidates.append(retained_short[-1])
+    if retained_reflections and _resident_memory_importance(retained_reflections[-1]) >= 0.65:
+        candidates.append(retained_reflections[-1])
+
+    merged = {}
+    pinned = []
+    for item in memory.get("longTerm") or []:
+        normalized = item if isinstance(item, dict) else {
+            "id": f"resident-memory-manual-{_resident_memory_semantic_key(item)}",
+            "memoryKey": _resident_memory_semantic_key(item),
+            "text": _resident_memory_record_text(item),
+            "importance": 1.0,
+            "source": "resident-profile",
+            "count": 1,
+        }
+        key = normalized.get("memoryKey") or _resident_memory_semantic_key(normalized)
+        normalized["memoryKey"] = key
+        merged[key] = normalized
+        if normalized.get("source") != "live-agent-consolidation":
+            pinned.append(key)
+    seen_candidate_evidence = set()
+    for record in candidates:
+        evidence_key = _resident_memory_evidence_key(record)
+        if evidence_key in seen_candidate_evidence:
+            continue
+        seen_candidate_evidence.add(evidence_key)
+        incoming = _resident_long_term_memory_from_record(record)
+        key = incoming["memoryKey"]
+        merged[key] = _merge_resident_long_term_memory(merged.get(key), incoming) if key in merged else incoming
+
+    all_long_term = list(merged.values())
+    pinned_items = [merged[key] for key in pinned if key in merged]
+    ranked_generated = sorted(
+        [item for key, item in merged.items() if key not in set(pinned)],
+        key=lambda item: (
+            bool(item.get("unresolved")),
+            float(item.get("importance") or 0),
+            _parse_isoish_epoch(item.get("lastAt")) or 0,
+        ),
+        reverse=True,
+    )
+    available = max(0, RESIDENT_PROFILE_MEMORY_LIMIT - len(pinned_items))
+    long_term = [*pinned_items[:RESIDENT_PROFILE_MEMORY_LIMIT], *ranked_generated[:available]]
+    long_term.sort(key=lambda item: _parse_isoish_epoch(item.get("lastAt") or item.get("firstAt")) or 0)
+
+    marker = "[Consolidated Live Agent experiences]"
+    existing_summary = str(memory.get("summary") or "")
+    preserved_summary = existing_summary.split(marker, 1)[0].rstrip()
+    generated = _resident_memory_generated_summary(long_term)
+    next_summary = preserved_summary
+    if generated:
+        next_summary = f"{preserved_summary}\n\n{marker}\n{generated}".strip()
+    memory["summary"] = _limit_profile_text(next_summary, RESIDENT_PROFILE_TEXT_LIMIT)
+    memory["shortTerm"] = retained_short
+    memory["reflections"] = retained_reflections
+    memory["longTerm"] = long_term
+    compaction = memory.get("compaction") if isinstance(memory.get("compaction"), dict) else {}
+    memory["compaction"] = {
+        **compaction,
+        "shortTermLimit": RESIDENT_PROFILE_LIST_LIMIT,
+        "longTermLimit": RESIDENT_PROFILE_MEMORY_LIMIT,
+        "strategy": "promote important or aging experiences; merge repeated routines; preserve semantic summaries",
+        "consolidationVersion": "resident-memory-consolidation/v1",
+        "promotedMemoryCount": len([item for item in long_term if isinstance(item, dict) and item.get("source") == "live-agent-consolidation"]),
+        "aggregateExperienceCount": sum(int(item.get("count") or 1) for item in long_term if isinstance(item, dict)),
+        "discardedAggregateCount": max(0, len(all_long_term) - len(long_term)),
+    }
+    return memory
+
+
 def _live_agent_loop_remember_resident_profile_action(agent_id, recent_entry, observation, reflection, social_relationship=None):
     if not isinstance(recent_entry, dict) or not recent_entry.get("actionId"):
         return None
@@ -9956,7 +10918,7 @@ def _live_agent_loop_remember_resident_profile_action(agent_id, recent_entry, ob
     for key in ("target", "targetKey", "failure"):
         if recent_entry.get(key) is not None:
             short_term[key] = _copy_jsonable(recent_entry.get(key))
-    memory["shortTerm"] = _live_agent_loop_append_resident_memory(memory.get("shortTerm"), short_term, RESIDENT_PROFILE_LIST_LIMIT)
+    memory["shortTerm"] = [*(memory.get("shortTerm") or []), short_term]
     reflection_entry = {
         "at": reflection.get("at") if isinstance(reflection, dict) else recent_entry.get("at"),
         "actionId": recent_entry.get("actionId"),
@@ -9967,7 +10929,7 @@ def _live_agent_loop_remember_resident_profile_action(agent_id, recent_entry, ob
     }
     if recent_entry.get("failure") is not None:
         reflection_entry["failure"] = _copy_jsonable(recent_entry.get("failure"))
-    memory["reflections"] = _live_agent_loop_append_resident_memory(memory.get("reflections"), reflection_entry, RESIDENT_PROFILE_MEMORY_LIMIT)
+    memory["reflections"] = [*(memory.get("reflections") or []), reflection_entry]
     if isinstance(social_relationship, dict) and social_relationship.get("relationshipId"):
         relationships = memory.get("relationships") if isinstance(memory.get("relationships"), dict) else {}
         relationships[social_relationship["relationshipId"]] = {
@@ -9981,7 +10943,7 @@ def _live_agent_loop_remember_resident_profile_action(agent_id, recent_entry, ob
             "source": "live-agent-loop",
         }
         memory["relationships"] = relationships
-    resident_profile["memory"] = memory
+    resident_profile["memory"] = _consolidate_resident_memory(memory)
     profile["residentProfile"] = _sanitize_resident_profile(resident_profile, template, touch=True)
     profiles[resolved_agent_id] = profile
     meta["agentProfiles"] = profiles
@@ -18753,6 +19715,8 @@ def _sanitize_resident_profile(raw, template, *, touch=False):
 
     data_memory = data.get("memory") if isinstance(data.get("memory"), dict) else {}
     base_memory = base.get("memory") if isinstance(base.get("memory"), dict) else {}
+    data_compaction = data_memory.get("compaction") if isinstance(data_memory.get("compaction"), dict) else {}
+    base_compaction = base_memory.get("compaction") if isinstance(base_memory.get("compaction"), dict) else {}
     relationships = data_memory.get("relationships", base_memory.get("relationships", {}))
     clean_relationships = {}
     if isinstance(relationships, dict):
@@ -18769,7 +19733,11 @@ def _sanitize_resident_profile(raw, template, *, touch=False):
         "compaction": {
             "shortTermLimit": RESIDENT_PROFILE_LIST_LIMIT,
             "longTermLimit": RESIDENT_PROFILE_MEMORY_LIMIT,
-            "strategy": _limit_profile_text(((data_memory.get("compaction") if isinstance(data_memory.get("compaction"), dict) else {}) or {}).get("strategy") or ((base_memory.get("compaction") if isinstance(base_memory.get("compaction"), dict) else {}) or {}).get("strategy") or "summarize older short-term entries into memory.summary before promoting durable facts to longTerm", 300),
+            "strategy": _limit_profile_text(data_compaction.get("strategy") or base_compaction.get("strategy") or "summarize older short-term entries into memory.summary before promoting durable facts to longTerm", 300),
+            "consolidationVersion": _limit_profile_text(data_compaction.get("consolidationVersion") or base_compaction.get("consolidationVersion"), 120),
+            "promotedMemoryCount": _normalize_int(data_compaction.get("promotedMemoryCount"), 0, minimum=0, maximum=RESIDENT_PROFILE_MEMORY_LIMIT),
+            "aggregateExperienceCount": _normalize_int(data_compaction.get("aggregateExperienceCount"), 0, minimum=0, maximum=1000000000),
+            "discardedAggregateCount": _normalize_int(data_compaction.get("discardedAggregateCount"), 0, minimum=0, maximum=1000000000),
         },
     }
 
