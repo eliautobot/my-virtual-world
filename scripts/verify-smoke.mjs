@@ -53,6 +53,7 @@ const requiredFiles = [
   'src/client/assets/logo-transparent.png',
   'src/client/js/starter-map.mjs',
   'src/server/server.py',
+  'src/server/live_agent_goals.py',
   'src/server/gateway_presence.py',
   'src/server/providers/codex.py',
   'src/server/providers/hermes.py',
@@ -173,6 +174,7 @@ for (const path of jsSyntaxTargets) {
 
 const pyTargets = [
   'src/server/server.py',
+  'src/server/live_agent_goals.py',
   'src/server/gateway_presence.py',
   'src/server/license.py',
   'src/server/providers/__init__.py',
@@ -774,6 +776,10 @@ for (const token of [
   'WORLD_ACTION_CATALOG_ID_ALIASES',
   '"printercopier": "all-in-one-printer-scanner"',
   '"worldActionId": action_id',
+  '"/api/agent/"',
+  'get_live_agent_goals(agent_id)',
+  'update_live_agent_goals(agent_id, self._read_body())',
+  'LIVE_AGENT_DURABLE_GOAL_SCHEMA_VERSION',
 ]) {
   assert(serverPy.includes(token), `server.py missing Live Agent loop token: ${token}`);
 }

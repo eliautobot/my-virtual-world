@@ -30,6 +30,7 @@ The Docker volume preserves:
 - license receipt
 - local app settings
 - runtime communication history
+- Live Agent durable goal/task/step ledgers
 
 ## What Changes
 
@@ -47,6 +48,8 @@ Existing user data remains unless a migration or narrow repair intentionally upd
 `world-meta.json` uses atomic compact writes. Identical saves do not rewrite the file, stale abandoned temp files are cleaned after a configurable age, and the last-known-good backup is throttled separately from primary writes. Live Agent and world-action histories are compacted within configurable byte budgets while preserving active state and the newest retained records.
 
 Live Agent storage separates cognitive memory from operational telemetry. Resident Profile memories are consolidated into durable semantic experiences before short-term records age out. Terminal move paths, event diagnostics, and planner scaffolding are compacted independently, so storage control does not depend on erasing identity, relationships, lessons, or important failures.
+
+Live Agent durable goals are orchestration state stored in `world-meta.json`. Normal rebuilds and restarts preserve goal/task/step dependencies, retries, and verified outcomes. The selected-agent Live Mode reset is the explicit operation that clears one resident's ledger.
 
 ## Live Agent Storage Migration
 

@@ -84,6 +84,30 @@ def main():
         server = load_server(tmpdir)
         seed_live_mode(server, "tester")
 
+        # Presence crash snapshots must not resurrect agents that have been
+        # removed from the authoritative roster. Stale records used to feed the
+        # realtime ambient planner forever after endurance tests or deletions.
+        presence_snapshot = tmpdir / "data" / "presence-snapshot.json"
+        presence_snapshot.write_text(json.dumps({
+            "tester": {"state": "working", "task": "current", "updated": 123},
+            "vw-endurance-stale": {"state": "working", "task": "deleted", "updated": 456},
+            "_meetings": [],
+        }))
+        server._gateway_presence.init_agents(["tester", "hermie", "vw-endurance-stale"], prune=True)
+        server._gateway_presence.init_agents(["tester", "hermie"], prune=True)
+        server._gateway_presence.load_snapshot(
+            presence_snapshot,
+            allowed_agent_ids=["tester", "hermie"],
+        )
+        presence_state = server._gateway_presence.get_state()
+        check(
+            "presence snapshot excludes agents removed from roster",
+            "vw-endurance-stale" not in presence_state
+            and presence_state.get("tester", {}).get("source") == "snapshot"
+            and "hermie" in presence_state,
+            json.dumps(presence_state, default=str)[:700],
+        )
+
         # ------------------------------------------------------------------
         # 1) USER CHAT PREEMPTION
         # ------------------------------------------------------------------
@@ -179,6 +203,61 @@ def main():
         })
         chosen_p, status_p, intent_p = parse(planner_reply, ids)
         check("planner JSON direct action resolves", chosen_p == "talk-with-nearby-agent" and status_p == "planner-step-action" and isinstance(intent_p.get("plannerTurn"), dict), json.dumps(intent_p or {})[:500])
+        structured_planner_reply = json.dumps({
+            "reflection": "Hydration is complete only after world verification, then I should rest.",
+            "goal": {
+                "id": "goal-verify-recovery",
+                "title": "Hydrate and recover with verified outcomes",
+                "successCriteria": ["water action verified", "rest action verified"],
+            },
+            "tasks": [
+                {
+                    "id": "task-hydrate",
+                    "title": "Hydrate",
+                    "dependsOn": [],
+                    "steps": [{
+                        "id": "step-hydrate",
+                        "title": "Use the water cooler",
+                        "dependsOn": [],
+                        "loopActionId": "hydrate-water-cooler",
+                        "successCriteria": ["server verification reports completed"],
+                        "maxRetries": 1,
+                    }],
+                },
+                {
+                    "id": "task-rest",
+                    "title": "Rest after hydration",
+                    "dependsOn": ["task-hydrate"],
+                    "steps": [{
+                        "id": "step-rest",
+                        "title": "Use a seat",
+                        "loopActionId": "use-seating-object",
+                        "successCriteria": ["server verification reports completed"],
+                        "failureCriteria": ["target disappears"],
+                        "maxRetries": 1,
+                    }],
+                },
+            ],
+            "nextStep": {
+                "taskId": "task-hydrate",
+                "stepId": "step-hydrate",
+                "intent": "Use the reachable water cooler",
+                "action": "hydrate-water-cooler",
+                "successCriteria": "server verification reports completed",
+            },
+            "memoryUpdate": {"lesson": "Preserve verified steps when replanning."},
+        })
+        chosen_structured, status_structured, intent_structured = parse(structured_planner_reply, [*ids, "use-seating-object"])
+        structured_turn = (intent_structured or {}).get("plannerTurn") or {}
+        check(
+            "structured planner JSON preserves stable goal task and step ids",
+            chosen_structured == "hydrate-water-cooler"
+            and status_structured == "planner-step-action"
+            and (structured_turn.get("goal") or {}).get("id") == "goal-verify-recovery"
+            and (structured_turn.get("tasks") or [{}])[0].get("id") == "task-hydrate"
+            and (structured_turn.get("nextStep") or {}).get("stepId") == "step-hydrate",
+            json.dumps(structured_turn, default=str)[:900],
+        )
         planner_category = json.dumps({
             "reflection": "The same chair was repeated; broaden coverage.",
             "currentGoal": "Test varied seating.",
@@ -1897,6 +1976,77 @@ def main():
         )
         server._live_agent_model_decision_cancel(fence_agent, reason="verification-complete")
 
+        # Gateway cleanup is mandatory even when an old generation is fenced.
+        # A cancelled worker must delete its own generation-scoped session, and
+        # restart recovery must only delete planner sessions for locally owned
+        # residents.
+        original_gateway_rpc = server._gateway_rpc_call
+        original_recover_reply = server._live_agent_model_decision_recover_reply
+        original_sleep = server.time.sleep
+        gateway_calls = []
+
+        def cleanup_gateway_rpc(method, params=None, timeout=20):
+            gateway_calls.append((method, dict(params or {})))
+            if method == "chat.send":
+                return {"ok": True}
+            if method == "sessions.list":
+                return {
+                    "ok": True,
+                    "sessions": [
+                        {"key": "agent:tester:g7:vw-live-mode-planner"},
+                        {"key": "agent:tester:vw-live-mode-planner"},
+                        {"key": "agent:hermie:g2:vw-live-mode-planner"},
+                        {"key": "agent:tester:main"},
+                    ],
+                }
+            if method == "sessions.delete":
+                return {"ok": True}
+            return {"ok": False, "error": f"unexpected method: {method}"}
+
+        try:
+            server._gateway_rpc_call = cleanup_gateway_rpc
+            server._live_agent_model_decision_recover_reply = lambda *_args, **_kwargs: '{"reflection":"done","currentGoal":"stay safe","plan":["wait"],"nextStep":{"action":"skip"},"memoryUpdate":{"lesson":"cleanup"}}'
+            server.time.sleep = lambda _seconds: None
+            cleanup_agent = "cleanup-fenced-resident"
+            cleanup_generation = server._live_agent_model_decision_start(cleanup_agent)
+            server._live_agent_model_decision_cancel(cleanup_agent, reason="verification-fence-before-worker")
+            server._live_agent_model_decision_worker(
+                cleanup_agent,
+                "cleanup verification prompt",
+                ["hydrate-water-cooler"],
+                {"timeoutSec": 10, "minIntervalSec": 30},
+                cleanup_generation,
+            )
+            fenced_key = server._live_agent_model_planner_session_key(cleanup_agent, cleanup_generation)
+            check(
+                "fenced model worker still deletes its Gateway planner session",
+                any(method == "sessions.delete" and params.get("key") == fenced_key for method, params in gateway_calls),
+                json.dumps(gateway_calls, default=str),
+            )
+
+            gateway_calls.clear()
+            orphan_cleanup = server._cleanup_orphaned_live_agent_model_planner_sessions(["tester"])
+            deleted_keys = [params.get("key") for method, params in gateway_calls if method == "sessions.delete"]
+            check(
+                "restart cleanup deletes only locally owned planner sessions",
+                orphan_cleanup.get("ok") is True
+                and set(deleted_keys) == {
+                    "agent:tester:g7:vw-live-mode-planner",
+                    "agent:tester:vw-live-mode-planner",
+                },
+                json.dumps({"result": orphan_cleanup, "deleted": deleted_keys}, default=str),
+            )
+
+            server._gateway_rpc_call = lambda *_args, **_kwargs: {"ok": False, "error": "verification failure"}
+            check(
+                "Gateway planner cleanup reports delete failures",
+                server._live_agent_model_planner_session_cleanup("tester", 99) is False,
+            )
+        finally:
+            server._gateway_rpc_call = original_gateway_rpc
+            server._live_agent_model_decision_recover_reply = original_recover_reply
+            server.time.sleep = original_sleep
+
         # Seed one active request and planner worker, then prove the global
         # feature switch cancels both while preserving the resident selection.
         feature_action = {
@@ -1999,7 +2149,12 @@ def main():
             "tester",
             agent_loop_enabled=True,
         )
+        goal_write_ok, goal_write_result, goal_write_status = server.update_live_agent_goals("tester", {
+            "operation": "create",
+            "goal": {"id": "disabled-goal", "title": "Must not be created while globally disabled"},
+        })
         disabled_status_payload = server.get_live_agent_loop_status()
+        server.get_live_agent_goals("tester")
         server.get_live_agent_loop_feedback("tester")
         server.get_live_agent_loop_operator_proposals("tester")
         server.get_live_agent_loop_operator_timeline("tester")
@@ -2012,6 +2167,7 @@ def main():
             "worldAction": (world_action_result.get("error") or {}).get("code"),
             "move": (move_result.get("error") or {}).get("code"),
             "agentSetting": (setting_result.get("error") or {}).get("code"),
+            "goalWrite": (goal_write_result.get("error") or {}).get("code"),
         }
         check(
             "global-off rejects chat attention and all Live Agent mutation helpers",
@@ -2029,9 +2185,11 @@ def main():
             and move_status == 409
             and setting_ok is False
             and setting_status == 409
+            and goal_write_ok is False
+            and goal_write_status == 409
             and set(disabled_codes.values()) == {"agent_live_mode_feature_disabled"}
             and server.live_agent_user_attention_status("tester").get("active") is False,
-            json.dumps({"codes": disabled_codes, "statuses": [attention_status, loop_update_status, proposal_status, world_action_status, move_status, setting_status]}, default=str),
+            json.dumps({"codes": disabled_codes, "statuses": [attention_status, loop_update_status, proposal_status, world_action_status, move_status, setting_status, goal_write_status]}, default=str),
         )
         check(
             "global-off chat, API attempts, and observability reads perform zero file writes",
@@ -2058,6 +2216,175 @@ def main():
             "identical world metadata save performs no disk write",
             unchanged_write is False and unchanged_sig_after == unchanged_sig_before,
             json.dumps({"write": unchanged_write, "before": unchanged_sig_before, "after": unchanged_sig_after}),
+        )
+
+        # Durable goal ledger: ordered dependencies, bounded retries, verified
+        # outcomes, world-change replanning, API control, and restart recovery.
+        durable_state = server.get_live_agent_loop_state(persist_migration=False)
+        durable_agent = server._live_agent_loop_agent_state(durable_state, "tester")
+        durable_detail = {
+            "agentId": "tester",
+            "status": "planner-step-action",
+            "chosen": "hydrate-water-cooler",
+            "plannerTurn": structured_turn,
+            "intention": {"action": "hydrate-water-cooler", "plannerTurn": structured_turn},
+        }
+        applied_durable = server._live_agent_loop_apply_planner_turn(durable_agent, durable_detail, agent_id="tester")
+        durable_goal = durable_agent.get("activeGoal") or {}
+        check(
+            "planner turn creates ordered durable goal task and step ledger",
+            applied_durable
+            and durable_goal.get("schemaVersion") == server.LIVE_AGENT_DURABLE_GOAL_SCHEMA_VERSION
+            and durable_goal.get("currentTaskId") == "task-hydrate"
+            and durable_goal.get("currentStepId") == "step-hydrate"
+            and (durable_goal.get("tasks") or [{}, {}])[1].get("dependsOn") == ["task-hydrate"],
+            json.dumps(durable_goal, default=str)[:1400],
+        )
+        server.save_live_agent_loop_state(durable_state)
+        server = load_server(tmpdir)
+        server.VW_CONFIG.setdefault("features", {})["agentLiveMode"] = True
+        restarted_goal_state = server.get_live_agent_loop_state(persist_migration=False)
+        restarted_goal_agent = server._live_agent_loop_agent_state(restarted_goal_state, "tester")
+        restarted_goal = restarted_goal_agent.get("activeGoal") or {}
+        check(
+            "durable goal ledger survives process restart with current ids",
+            restarted_goal.get("id") == "goal-verify-recovery"
+            and restarted_goal.get("currentTaskId") == "task-hydrate"
+            and restarted_goal.get("currentStepId") == "step-hydrate",
+            json.dumps(restarted_goal, default=str)[:1000],
+        )
+
+        selected_target = {"target": {"kind": "world-point", "buildingId": "autonomy-lab", "x": 200, "y": 200, "z": 0}}
+        goal_context = server._live_agent_loop_bind_durable_goal_action(restarted_goal_agent, "hydrate-water-cooler", selected_target, now_iso=server._utc_now_iso())
+        server._live_agent_loop_mark_durable_goal_action_started(restarted_goal_state, "tester", restarted_goal_agent, goal_context, "wa-goal-hydrate", "hydrate-water-cooler", server._utc_now_iso())
+        server._live_agent_loop_record_durable_goal_verification(restarted_goal_state, "tester", restarted_goal_agent, {
+            "id": "verify-goal-hydrate",
+            "actionId": "wa-goal-hydrate",
+            "loopActionId": "hydrate-water-cooler",
+            "goalId": goal_context.get("goalId"),
+            "goalTaskId": goal_context.get("goalTaskId"),
+            "goalStepId": goal_context.get("goalStepId"),
+            "ok": True,
+            "evidence": {"method": "verification-test", "status": "completed"},
+        }, server._utc_now_iso())
+        advanced_goal = restarted_goal_agent.get("activeGoal") or {}
+        check(
+            "verified outcome advances dependency to the next ordered task",
+            advanced_goal.get("currentTaskId") == "task-rest"
+            and advanced_goal.get("currentStepId") == "step-rest"
+            and ((advanced_goal.get("tasks") or [{}])[0].get("outcome") or {}).get("verified") is True,
+            json.dumps(advanced_goal, default=str)[:1200],
+        )
+
+        retry_context = server._live_agent_loop_bind_durable_goal_action(restarted_goal_agent, "use-seating-object", selected_target, now_iso=server._utc_now_iso())
+        server._live_agent_loop_mark_durable_goal_action_started(restarted_goal_state, "tester", restarted_goal_agent, retry_context, "wa-goal-rest-1", "use-seating-object", server._utc_now_iso())
+        server._live_agent_loop_record_durable_goal_verification(restarted_goal_state, "tester", restarted_goal_agent, {
+            "id": "verify-goal-rest-1",
+            "actionId": "wa-goal-rest-1",
+            "goalId": retry_context.get("goalId"),
+            "goalTaskId": retry_context.get("goalTaskId"),
+            "goalStepId": retry_context.get("goalStepId"),
+            "ok": False,
+            "reason": "seat target disappeared",
+            "evidence": {"method": "verification-test", "status": "failed"},
+        }, server._utc_now_iso())
+        retry_goal = restarted_goal_agent.get("activeGoal") or {}
+        retry_step = ((retry_goal.get("tasks") or [{}, {}])[1].get("steps") or [{}])[0]
+        check(
+            "failed verification schedules bounded durable step retry",
+            retry_step.get("status") == "retry_wait"
+            and (retry_step.get("retry") or {}).get("attempts") == 1
+            and (retry_step.get("retry") or {}).get("maxRetries") == 1,
+            json.dumps(retry_step, default=str),
+        )
+        retry_step.setdefault("retry", {})["nextRetryAt"] = "2000-01-01T00:00:00Z"
+        retry_goal = server._live_agent_goals.recompute_goal(retry_goal, now_iso=server._utc_now_iso())
+        server._live_agent_loop_store_durable_goal(restarted_goal_agent, retry_goal)
+        retry_context = server._live_agent_loop_bind_durable_goal_action(restarted_goal_agent, "use-seating-object", selected_target, now_iso=server._utc_now_iso())
+        server._live_agent_loop_mark_durable_goal_action_started(restarted_goal_state, "tester", restarted_goal_agent, retry_context, "wa-goal-rest-2", "use-seating-object", server._utc_now_iso())
+        server._live_agent_loop_record_durable_goal_verification(restarted_goal_state, "tester", restarted_goal_agent, {
+            "id": "verify-goal-rest-2",
+            "actionId": "wa-goal-rest-2",
+            "goalId": retry_context.get("goalId"),
+            "goalTaskId": retry_context.get("goalTaskId"),
+            "goalStepId": retry_context.get("goalStepId"),
+            "ok": False,
+            "reason": "seat target disappeared again",
+        }, server._utc_now_iso())
+        exhausted_goal = restarted_goal_agent.get("activeGoal") or {}
+        check(
+            "retry exhaustion blocks goal and requests replanning",
+            exhausted_goal.get("status") == "blocked"
+            and exhausted_goal.get("replanRequired") is True
+            and "retries exhausted" in (exhausted_goal.get("replanReason") or ""),
+            json.dumps(exhausted_goal, default=str)[:1200],
+        )
+        server.save_live_agent_loop_state(restarted_goal_state)
+        ok_retry_goal, retry_goal_result, retry_goal_status = server.update_live_agent_goals("tester", {
+            "operation": "retry",
+            "goalId": "goal-verify-recovery",
+            "loopActionId": "rest-at-home",
+            "reason": "replace missing seat with owned home rest",
+        })
+        replanned_goal = (retry_goal_result or {}).get("goal") or {}
+        check(
+            "durable goal API replans only unfinished work and preserves verified work",
+            ok_retry_goal
+            and retry_goal_status == 200
+            and replanned_goal.get("replanRequired") is False
+            and (((replanned_goal.get("tasks") or [{}])[0].get("steps") or [{}])[0].get("outcome") or {}).get("verified") is True
+            and (((replanned_goal.get("tasks") or [{}, {}])[1].get("steps") or [{}])[0].get("loopActionId") == "rest-at-home"),
+            json.dumps(retry_goal_result, default=str)[:1500],
+        )
+
+        ok_goal_get, goal_get_result, goal_get_status = server.get_live_agent_goals("tester")
+        check(
+            "durable goals API exposes active ledger and status summary",
+            ok_goal_get and goal_get_status == 200
+            and (goal_get_result.get("activeGoal") or {}).get("id") == "goal-verify-recovery"
+            and goal_get_result.get("schemaVersion") == server.LIVE_AGENT_GOAL_LEDGER_SCHEMA_VERSION,
+            json.dumps(goal_get_result, default=str)[:1200],
+        )
+
+        world_state = server.get_live_agent_loop_state(persist_migration=False)
+        world_agent = server._live_agent_loop_agent_state(world_state, "tester")
+        available_frame = {"affordances": [{"id": "rest-at-home", "available": True, "target": selected_target["target"]}]}
+        server._live_agent_loop_reconcile_durable_goal_world(world_state, "tester", world_agent, available_frame, server._utc_now_iso())
+        missing_frame = {"affordances": [{"id": "rest-at-home", "available": False, "reason": "home removed"}]}
+        changed_goal = server._live_agent_loop_reconcile_durable_goal_world(world_state, "tester", world_agent, missing_frame, server._utc_now_iso())
+        check(
+            "world affordance change blocks unfinished step and triggers replan",
+            changed_goal.get("status") == "blocked"
+            and changed_goal.get("replanRequired") is True
+            and "no longer available" in (changed_goal.get("replanReason") or ""),
+            json.dumps(changed_goal, default=str)[:1200],
+        )
+        server.save_live_agent_loop_state(world_state)
+        ok_retry_world, _, _ = server.update_live_agent_goals("tester", {"operation": "retry", "goalId": "goal-verify-recovery", "loopActionId": "use-seating-object", "reason": "world changed"})
+        check("operator can resume blocked durable goal after world replan", ok_retry_world)
+
+        # A nonterminal goal pauses on disable and resumes on re-enable without
+        # losing its task/step ledger.
+        ok_create_pause, create_pause_result, _ = server.update_live_agent_goals("tester", {
+            "operation": "create",
+            "goal": {
+                "id": "goal-pause-resume",
+                "title": "Persist through a Live Mode restart",
+                "tasks": [{"id": "task-persist", "title": "Continue after restart", "steps": [{"id": "step-persist", "title": "Use water", "loopActionId": "hydrate-water-cooler"}]}],
+            },
+        })
+        ok_pause_disable, _, _ = server.set_agent_live_mode_setting("tester", False)
+        paused_ledger = (server.get_live_agent_goals("tester")[1].get("goals") or [])
+        paused_goal = next((item for item in paused_ledger if item.get("id") == "goal-pause-resume"), {})
+        ok_pause_enable, _, _ = server.set_agent_live_mode_setting("tester", True, agent_loop_enabled=True)
+        resumed_goal = (server.get_live_agent_goals("tester")[1].get("activeGoal") or {})
+        check(
+            "disable pauses and re-enable resumes durable goal without deleting progress",
+            ok_create_pause and ok_pause_disable and ok_pause_enable
+            and paused_goal.get("status") == "paused"
+            and resumed_goal.get("id") == "goal-pause-resume"
+            and resumed_goal.get("currentStepId") == "step-persist",
+            json.dumps({"created": create_pause_result, "paused": paused_goal, "resumed": resumed_goal}, default=str)[:1500],
         )
 
         # Reset isolation: clear one resident's runtime state and separate note
@@ -2102,6 +2429,8 @@ def main():
             and not tester_after_reset.get("activePlan")
             and not tester_after_reset.get("activeEpisode")
             and not tester_after_reset.get("autonomyPlan")
+            and not tester_after_reset.get("activeGoal")
+            and not tester_after_reset.get("durableGoals")
             and not (tester_after_reset.get("memory") or {}).get("recentActions")
             and ((hermie_after_reset.get("memory") or {}).get("recentActions") or [{}])[-1].get("actionId") == "other-resident-sentinel"
             and (profile_after_reset.get("identity") or {}).get("continuityMarker") == "preserve-me"
@@ -2120,7 +2449,9 @@ def main():
             and clean_reenable.get("agentLiveModeEnabled") is True
             and reenabled_state.get("enabled") is True
             and not reenabled_state.get("activePlan")
-            and not reenabled_state.get("autonomyPlan"),
+            and not reenabled_state.get("autonomyPlan")
+            and not reenabled_state.get("activeGoal")
+            and not reenabled_state.get("durableGoals"),
             json.dumps({"setting": clean_reenable, "state": reenabled_state}, default=str)[:900],
         )
 
@@ -2134,7 +2465,9 @@ def main():
             "scheduler cursor and clean reset state survive process restart",
             restarted_state.get("schedulerCursorAgentId") == "tester"
             and not (((restarted_state.get("agents") or {}).get("tester") or {}).get("activePlan"))
-            and not (((restarted_state.get("agents") or {}).get("tester") or {}).get("autonomyPlan")),
+            and not (((restarted_state.get("agents") or {}).get("tester") or {}).get("autonomyPlan"))
+            and not (((restarted_state.get("agents") or {}).get("tester") or {}).get("activeGoal"))
+            and not (((restarted_state.get("agents") or {}).get("tester") or {}).get("durableGoals")),
             json.dumps(restarted_state, default=str)[:900],
         )
 

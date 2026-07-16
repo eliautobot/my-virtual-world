@@ -28,6 +28,7 @@
     "dev:realtime": "node scripts/dev-with-realtime.mjs",
     "realtime": "node src/realtime/server.mjs",
     "test": "npm run verify:smoke",
+    "verify:endurance": "python3 scripts/verify-live-agent-endurance.py",
     "verify:smoke": "node scripts/verify-smoke.mjs",
     "verify:realtime": "node scripts/verify-realtime-smoke.mjs"
   },

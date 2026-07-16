@@ -8125,8 +8125,8 @@ export class AgentRuntimeRoom extends Room {
     let expired = 0;
     for (const [agentId, existing] of this.state.agents.entries()) {
       if (!hasExpiredLease(existing, nowMs)) continue;
-      if (SERVER_MANAGED_ROUTE_LEASE_OWNERS.has(safeText(existing.leaseOwner, ''))) continue;
       const before = snapshotToPlain(existing);
+      const expiredServerManaged = SERVER_MANAGED_ROUTE_LEASE_OWNERS.has(safeText(before.leaseOwner, ''));
       clearDynamicInteriorRoutingForAgent(agentId);
       clearDynamicExteriorRoutingForAgent(agentId);
       this.upsertSnapshot({
@@ -8142,6 +8142,7 @@ export class AgentRuntimeRoom extends Room {
       }, 'route-lease-expired', {
         expiredLeaseOwner: before.leaseOwner || '',
         expiredLeaseExpiresAt: before.leaseExpiresAt || '',
+        expiredServerManaged,
       });
       expired++;
     }
@@ -8246,13 +8247,43 @@ export class AgentRuntimeRoom extends Room {
     const hash = stableTextHash(agentId || 'agent');
     const angle = ((hash % 360) / 180) * Math.PI;
     const radius = 120 + (hash % 4) * 40;
+    const floor = floorOr(target?.floor, 1);
+    const heading = targetFaceAngleRadians(target, 0);
+    const candidates = [];
+    for (const candidateRadius of [radius, radius + 40, Math.max(80, radius - 40), radius + 80]) {
+      for (const angleOffset of [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, Math.PI]) {
+        candidates.push({
+          x: targetX + Math.cos(angle + angleOffset) * candidateRadius,
+          y: targetY + Math.sin(angle + angleOffset) * candidateRadius,
+          floor,
+        });
+      }
+    }
+    candidates.push({ x: targetX, y: targetY, floor });
+
+    for (const candidate of candidates) {
+      const validation = validateServerRuntimeStaticSegment(this.dataDir, candidate, candidate, {
+        phase: 'server-runtime-seed',
+        route: { source: 'dynamic-interior-routing.js' },
+      });
+      if (!validation.clear) continue;
+      const building = findInteriorBuildingAtApi(this.dataDir, candidate.x, candidate.y);
+      const buildingId = safeText(building?.id, '');
+      return {
+        ...candidate,
+        buildingId,
+        roomId: buildingId && buildingId === safeText(target?.buildingId, '') ? safeText(target?.roomId, '') : '',
+        heading,
+      };
+    }
+
     return {
-      x: targetX + Math.cos(angle) * radius,
-      y: targetY + Math.sin(angle) * radius,
-      floor: floorOr(target?.floor, 1),
+      x: targetX,
+      y: targetY,
+      floor,
       buildingId: safeText(target?.buildingId, ''),
       roomId: safeText(target?.roomId, ''),
-      heading: targetFaceAngleRadians(target, 0),
+      heading,
     };
   }
 
@@ -8759,7 +8790,11 @@ export class AgentRuntimeRoom extends Room {
       }
 
       const targetPoint = resolveActionTargetPoint(this.dataDir, action, this.state);
-      const existing = this.state.agents.get(agentId);
+      let existing = this.state.agents.get(agentId);
+      if (targetPoint && !existing) {
+        existing = this.ensureServerRuntimeAgentSeed(agentId, targetPoint, 'live-action-runtime-start');
+        changedSnapshots++;
+      }
       if (!targetPoint || !existing) {
         nextActive.push(action);
         continue;
@@ -8829,7 +8864,7 @@ export class AgentRuntimeRoom extends Room {
             actor,
             source,
             reason: 'route-stale',
-            failureReason: 'route-stale',
+            failureReason: 'route_unreachable',
           });
           if (transitioned.changed) {
             action = transitioned.action;
@@ -9794,7 +9829,11 @@ export class AgentRuntimeRoom extends Room {
       }
 
       const targetPoint = resolveActionTargetPoint(this.dataDir, action, this.state);
-      const existing = this.state.agents.get(agentId);
+      let existing = this.state.agents.get(agentId);
+      if (targetPoint && !existing) {
+        existing = this.ensureServerRuntimeAgentSeed(agentId, targetPoint, 'live-action-runtime-start');
+        changedSnapshots++;
+      }
       if (!targetPoint || !existing) {
         nextActive.push(action);
         continue;
@@ -9847,6 +9886,7 @@ export class AgentRuntimeRoom extends Room {
 	            speedUnitsPerSec: LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
 	            arrivalRadius: LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS,
 	            routeSource: 'server-live-action-runtime',
+	            crowdAgents: serverRuntimeCrowdAgents(this.state, agentId),
 	          });
       const arrived = movement.arrived;
       const nextX = movement.x;
@@ -9854,6 +9894,46 @@ export class AgentRuntimeRoom extends Room {
       const heading = movement.heading;
       const snapshotTarget = makeLiveActionSnapshotTarget(action, targetPoint);
       const routeId = safeText(action?.route?.id || action?.route?.routeId, `route-${actionId}`) || `route-${actionId}`;
+
+      if (!arrived && (status === 'routing' || status === 'route_pending')) {
+        const routeStartedAtMs = Date.parse(action?.timing?.startedAt || action?.timing?.routePendingAt || '');
+        if (Number.isFinite(routeStartedAtMs) && nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
+          const transitioned = this.transitionServerLiveAction(action, 'failed', {
+            now,
+            actor,
+            source,
+            reason: 'route-stale',
+            failureReason: 'route_unreachable',
+          });
+          if (transitioned.changed) {
+            action = transitioned.action;
+            changedActions = true;
+          }
+          clearDynamicInteriorRoutingForAgent(agentId);
+          clearDynamicExteriorRoutingForAgent(agentId);
+          this.upsertSnapshot({
+            agentId,
+            mode: 'scripted',
+            owner: 'agent-scripted-mode',
+            x: current.x,
+            y: current.y,
+            floor: current.floor,
+            buildingId: current.buildingId || '',
+            roomId: current.roomId || '',
+            heading: current.heading,
+            state: 'idle',
+            routeId: '',
+            worldActionId: '',
+            target: null,
+            leaseOwner: '',
+            leaseExpiresAt: '',
+            visualState: makeLiveActionVisualState(false, 'working', action, targetPoint),
+          }, 'server-live-action-route-stale', { actionId, routeId, reason: 'route-stale' });
+          changedSnapshots++;
+          nextHistory.unshift(action);
+          continue;
+        }
+      }
 
       if (status === 'routing' || status === 'route_pending') {
         this.upsertSnapshot({
@@ -9875,6 +9955,10 @@ export class AgentRuntimeRoom extends Room {
           visualState: withRuntimeRouteVisualState(makeLiveActionVisualState(!arrived, 'working', action, targetPoint), movement.route),
         }, arrived ? 'server-live-action-arrived' : 'server-live-action-routing', { actionId, routeId });
         changedSnapshots++;
+        if (!arrived) {
+          const yieldResult = this.tryNudgeServerRuntimeCrowdBlocker(agentId, current, targetPoint, movement.route, nowMs, now);
+          if (yieldResult.nudged) changedSnapshots++;
+        }
         if (arrived && status === 'routing') {
           const transitioned = this.transitionServerLiveAction(action, 'arrived', {
             now,

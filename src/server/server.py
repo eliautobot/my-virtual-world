@@ -48,6 +48,8 @@ from license import (
     get_license_status,
 )
 
+import live_agent_goals as _live_agent_goals
+
 try:
     from providers.hermes import HermesApiClient, HermesProvider
 except Exception as e:
@@ -1903,7 +1905,10 @@ def _compact_world_action_history_record(record):
             "storageCompacted": True,
             **{
                 key: record.get("params", {}).get(key)
-                for key in ("loopActionId", "planId", "planStepId", "decisionMode")
+                for key in (
+                    "loopActionId", "planId", "planStepId", "decisionMode",
+                    "goalSchemaVersion", "goalId", "goalRevision", "goalTaskId", "goalStepId",
+                )
                 if isinstance(record.get("params"), dict) and record.get("params", {}).get(key) is not None
             },
         }
@@ -2068,6 +2073,8 @@ WORLD_ACTION_EVENT_ROUTE_GUARDRAILS = MOVE_INTENT_ROUTE_GUARDRAILS
 LIVE_AGENT_LOOP_SCHEMA_VERSION = "agent-live-mode-loop/v1"
 LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION = "agent-live-mode-plan/v1"
 LIVE_AGENT_EPISODE_SCHEMA_VERSION = "agent-live-mode-episode/v1"
+LIVE_AGENT_DURABLE_GOAL_SCHEMA_VERSION = _live_agent_goals.GOAL_SCHEMA_VERSION
+LIVE_AGENT_GOAL_LEDGER_SCHEMA_VERSION = _live_agent_goals.LEDGER_SCHEMA_VERSION
 LIVE_AGENT_OPERATOR_PROPOSAL_SCHEMA_VERSION = "agent-live-mode-operator-proposal/v1"
 LIVE_AGENT_OPERATOR_TIMELINE_SCHEMA_VERSION = "agent-live-mode-operator-timeline/v1"
 LIVE_AGENT_LOOP_DEFAULTS = {
@@ -2084,6 +2091,7 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "feedbackRetention": 24,
     "settledActionRetention": 120,
     "planRetention": 12,
+    "durableGoalRetention": 12,
     "episodeRetention": 18,
     "planMaxRetries": 2,
     "operatorProposalRetention": 24,
@@ -4583,6 +4591,14 @@ def _live_agent_loop_merge_agent_plans(existing_agent, incoming_agent):
     return plans, (active[0] if active else None)
 
 
+def _live_agent_loop_merge_agent_goals(existing_agent, incoming_agent):
+    return _live_agent_goals.merge_goals(
+        existing_agent,
+        incoming_agent,
+        retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"],
+    )
+
+
 def _live_agent_loop_reconcile_agent_records_from_events(agents, events):
     episode_events = {}
     plan_events = {}
@@ -4722,6 +4738,13 @@ def _live_agent_loop_merge_state_for_save(existing, incoming):
             row["activePlan"] = active_plan
         else:
             row.pop("activePlan", None)
+        goals, active_goal = _live_agent_loop_merge_agent_goals(existing_agent, incoming_agent)
+        row["goalLedgerSchemaVersion"] = LIVE_AGENT_GOAL_LEDGER_SCHEMA_VERSION
+        row["durableGoals"] = goals
+        if active_goal:
+            row["activeGoal"] = active_goal
+        else:
+            row.pop("activeGoal", None)
         agents[agent_id] = row
     merged["agents"] = _live_agent_loop_reconcile_agent_records_from_events(agents, merged.get("events") or [])
     return merged
@@ -5561,6 +5584,10 @@ def _live_agent_loop_normalize_memory(agent_state):
         agent_state["autonomyPlan"] = autonomy_plan
     else:
         agent_state.pop("autonomyPlan", None)
+    _live_agent_goals.normalize_agent_goals(
+        agent_state,
+        retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"],
+    )
     if not isinstance(agent_state.get("feedbackReports"), list):
         agent_state["feedbackReports"] = []
     else:
@@ -5710,6 +5737,7 @@ def _live_agent_loop_enforce_state_budget(state):
             for key, count in (
                 ("episodes", 8),
                 ("plans", 6),
+                ("durableGoals", 8),
                 ("feedbackReports", 10),
                 ("supportOutcomes", 10),
             ):
@@ -5770,6 +5798,8 @@ def _live_agent_loop_normalize_next_step(value):
         target_value = json.dumps(_copy_jsonable(target_value), sort_keys=True, default=str)
     normalized = {}
     for key, raw, limit in (
+        ("taskId", value.get("taskId") or value.get("task_id"), 140),
+        ("stepId", value.get("stepId") or value.get("step_id"), 140),
         ("intent", value.get("intent") or value.get("activity") or value.get("goal") or value.get("description"), 420),
         ("action", action_value, 120),
         ("category", value.get("category") or value.get("objectCategory") or value.get("targetCategory"), 80),
@@ -5802,6 +5832,7 @@ def _live_agent_loop_normalize_autonomy_plan(plan):
         ("status", 80),
         ("lesson", 500),
         ("lastOutcome", 500),
+        ("durableGoalId", 140),
     ):
         clean = _live_agent_loop_clean_plan_text(plan.get(key), limit=limit)
         if clean:
@@ -5837,6 +5868,401 @@ def _live_agent_loop_autonomy_plan_from_planner_turn(planner_turn, now_iso=None)
         "eventRequests": planner_turn.get("eventRequests") or planner_turn.get("events") or planner_turn.get("requestedEvents"),
     }
     return _live_agent_loop_normalize_autonomy_plan(plan)
+
+
+def _live_agent_loop_active_durable_goal(agent_state):
+    _, active = _live_agent_goals.normalize_agent_goals(
+        agent_state,
+        retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"],
+    )
+    return active
+
+
+def _live_agent_loop_store_durable_goal(agent_state, goal):
+    return _live_agent_goals.store_goal(
+        agent_state,
+        goal,
+        retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"],
+    )
+
+
+def _live_agent_loop_find_durable_goal(agent_state, goal_id):
+    goal_id = str(goal_id or "").strip()
+    if not goal_id:
+        return None
+    _live_agent_goals.normalize_agent_goals(
+        agent_state,
+        retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"],
+    )
+    active = agent_state.get("activeGoal") if isinstance(agent_state.get("activeGoal"), dict) else None
+    if active and active.get("id") == goal_id:
+        return active
+    return next((goal for goal in agent_state.get("durableGoals") or [] if isinstance(goal, dict) and goal.get("id") == goal_id), None)
+
+
+def _live_agent_loop_ensure_durable_goal(agent_state, agent_id):
+    active = _live_agent_loop_active_durable_goal(agent_state)
+    if active:
+        return active
+    legacy = _live_agent_loop_normalize_autonomy_plan(agent_state.get("autonomyPlan"))
+    if not legacy:
+        return None
+    linked_goal_id = legacy.get("durableGoalId")
+    if linked_goal_id:
+        linked_goal = _live_agent_loop_find_durable_goal(agent_state, linked_goal_id)
+        if linked_goal:
+            return linked_goal if linked_goal.get("status") not in _live_agent_goals.TERMINAL_GOAL_STATUSES else None
+    planner_turn = {
+        "currentGoal": legacy.get("currentGoal"),
+        "plan": legacy.get("steps") or [],
+        "nextStep": legacy.get("nextStep") or {},
+        "memoryUpdate": {"lesson": legacy.get("lesson")},
+    }
+    goal = _live_agent_goals.goal_from_planner_turn(agent_id, planner_turn, now_iso=_utc_now_iso())
+    if not goal:
+        return None
+    goal["source"] = "legacy-autonomy-plan-migration"
+    goal.setdefault("history", []).append({"at": _utc_now_iso(), "event": "migrated-from-autonomy-plan"})
+    return _live_agent_loop_store_durable_goal(agent_state, goal)
+
+
+def _live_agent_loop_upsert_durable_goal_from_planner(agent_state, agent_id, planner_turn, *, chosen_action=None):
+    if not isinstance(planner_turn, dict):
+        return None
+    now_iso = _utc_now_iso()
+    current = _live_agent_loop_active_durable_goal(agent_state)
+    incoming = _live_agent_goals.goal_from_planner_turn(
+        agent_id,
+        planner_turn,
+        previous_goal=current,
+        chosen_action=chosen_action,
+        now_iso=now_iso,
+    )
+    if not incoming:
+        return None
+    existing_same_id = _live_agent_loop_find_durable_goal(agent_state, incoming.get("id"))
+    if existing_same_id and existing_same_id.get("status") in _live_agent_goals.TERMINAL_GOAL_STATUSES:
+        raw_goal = planner_turn.get("goal") if isinstance(planner_turn.get("goal"), dict) else {}
+        if raw_goal.get("id"):
+            return None
+        replacement_turn = _copy_jsonable(planner_turn)
+        replacement_goal = replacement_turn.get("goal") if isinstance(replacement_turn.get("goal"), dict) else {}
+        replacement_goal = {
+            **replacement_goal,
+            "id": f"{incoming.get('id')}.run-{hashlib.sha1(now_iso.encode('utf-8')).hexdigest()[:10]}",
+            "title": incoming.get("title"),
+        }
+        replacement_turn["goal"] = replacement_goal
+        incoming = _live_agent_goals.goal_from_planner_turn(
+            agent_id,
+            replacement_turn,
+            previous_goal=None,
+            chosen_action=chosen_action,
+            now_iso=now_iso,
+        )
+        if not incoming:
+            return None
+    if current and current.get("id") != incoming.get("id") and current.get("status") not in _live_agent_goals.TERMINAL_GOAL_STATUSES:
+        current["status"] = "superseded"
+        current["updatedAt"] = now_iso
+        current["operatorSummary"] = f"Superseded by durable goal: {incoming.get('title')}."
+        current.setdefault("history", []).append({"at": now_iso, "event": "goal-superseded", "supersededBy": incoming.get("id")})
+        _live_agent_loop_store_durable_goal(agent_state, current)
+    stored = _live_agent_loop_store_durable_goal(agent_state, incoming)
+    return stored
+
+
+def _live_agent_loop_durable_goal_context(agent_state):
+    active = _live_agent_loop_active_durable_goal(agent_state)
+    if not active:
+        return {"goal": None, "task": None, "step": None}
+    return _live_agent_goals.current_context(active)
+
+
+def _live_agent_loop_bind_durable_goal_action(agent_state, loop_action_id, selected, *, allow_replan=False, now_iso=None):
+    context = _live_agent_loop_durable_goal_context(agent_state)
+    goal = context.get("goal")
+    step = context.get("step")
+    if not goal:
+        return None
+    selected = selected if isinstance(selected, dict) else {}
+    target = selected.get("target") if isinstance(selected.get("target"), dict) else {}
+    target_key = _live_agent_loop_target_key(target)
+    if goal.get("replanRequired"):
+        if not allow_replan:
+            return None
+        stored_goal, _ = _live_agent_goals.replan_with_action(
+            goal,
+            loop_action_id,
+            target=target,
+            target_key=target_key,
+            reason=goal.get("replanReason") or "planner selected a replacement action",
+            now_iso=now_iso or _utc_now_iso(),
+        )
+    else:
+        assigned = (step or {}).get("loopActionId") if isinstance(step, dict) else None
+        if assigned and assigned != loop_action_id:
+            return None
+        stored_goal, _ = _live_agent_goals.bind_selected_action(
+            goal,
+            loop_action_id,
+            target=target,
+            target_key=target_key,
+            now_iso=now_iso or _utc_now_iso(),
+        )
+    if not stored_goal:
+        return None
+    stored_goal = _live_agent_loop_store_durable_goal(agent_state, stored_goal)
+    stored_context = _live_agent_goals.current_context(stored_goal)
+    task = stored_context.get("task") or {}
+    step = stored_context.get("step") or {}
+    return {
+        "goalId": stored_goal.get("id"),
+        "goalRevision": stored_goal.get("revision"),
+        "goalTaskId": task.get("id"),
+        "goalStepId": step.get("id"),
+        "goalTitle": stored_goal.get("title"),
+    }
+
+
+def _live_agent_loop_mark_durable_goal_action_started(state, agent_id, agent_state, goal_context, action_id, loop_action_id, now_iso):
+    if not isinstance(goal_context, dict) or not goal_context.get("goalId"):
+        return None
+    goal = _live_agent_loop_find_durable_goal(agent_state, goal_context.get("goalId"))
+    if not goal:
+        return None
+    stored, step = _live_agent_goals.mark_step_started(
+        goal,
+        action_id=action_id,
+        loop_action_id=loop_action_id,
+        now_iso=now_iso,
+    )
+    stored = _live_agent_loop_store_durable_goal(agent_state, stored)
+    _live_agent_loop_add_event(
+        state,
+        "durable-goal-step-started",
+        agent_id=agent_id,
+        details={
+            **goal_context,
+            "actionId": action_id,
+            "loopActionId": loop_action_id,
+            "attempt": ((step or {}).get("retry") or {}).get("attempts"),
+        },
+    )
+    return stored
+
+
+def _live_agent_loop_record_durable_goal_verification(state, agent_id, agent_state, verification, now_iso):
+    if not isinstance(verification, dict):
+        return None
+    goal = _live_agent_loop_find_durable_goal(agent_state, verification.get("goalId"))
+    if not goal:
+        return None
+    stored, outcome = _live_agent_goals.record_verified_outcome(goal, verification, now_iso=now_iso)
+    stored = _live_agent_loop_store_durable_goal(agent_state, stored)
+    event_type = "durable-goal-step-verified" if verification.get("ok") is True else "durable-goal-step-retry"
+    if stored.get("status") in {"blocked", "failed"}:
+        event_type = "durable-goal-replan-required"
+    elif stored.get("status") == "completed":
+        event_type = "durable-goal-completed"
+    _live_agent_loop_add_event(
+        state,
+        event_type,
+        agent_id=agent_id,
+        details={
+            "goalId": stored.get("id"),
+            "goalTaskId": verification.get("goalTaskId"),
+            "goalStepId": verification.get("goalStepId"),
+            "actionId": verification.get("actionId"),
+            "verificationId": verification.get("id"),
+            "ok": verification.get("ok") is True,
+            "goalStatus": stored.get("status"),
+            "replanRequired": stored.get("replanRequired"),
+            "outcome": outcome,
+        },
+    )
+    return stored
+
+
+def _live_agent_loop_reconcile_durable_goal_world(state, agent_id, agent_state, perception, now_iso):
+    goal = _live_agent_loop_ensure_durable_goal(agent_state, agent_id)
+    if not goal:
+        return None
+    affordances = [item for item in (perception or {}).get("affordances") or [] if isinstance(item, dict)]
+    available = {item.get("id") for item in affordances if item.get("id") and item.get("available")}
+    target_keys = {
+        item.get("id"): _live_agent_loop_target_key(item.get("target"))
+        for item in affordances
+        if item.get("id") and item.get("available") and isinstance(item.get("target"), dict)
+    }
+    reconciled, reason = _live_agent_goals.reconcile_world(
+        goal,
+        world_revision=_live_agent_goals.world_revision(affordances),
+        available_actions=available,
+        target_keys=target_keys,
+        now_iso=now_iso,
+    )
+    stored = _live_agent_loop_store_durable_goal(agent_state, reconciled)
+    if reason:
+        _live_agent_loop_add_event(
+            state,
+            "durable-goal-world-changed",
+            agent_id=agent_id,
+            details={
+                "goalId": stored.get("id"),
+                "reason": reason,
+                "worldRevision": stored.get("worldRevision"),
+                "replanCount": stored.get("replanCount"),
+            },
+        )
+        try:
+            _live_agent_model_decision_allow_immediate(agent_id, reason="durable-goal-world-changed")
+        except Exception:
+            pass
+    return stored
+
+
+def get_live_agent_goals(agent_id):
+    with _live_agent_loop_observability_lock() as locked:
+        resolved = _resolve_agent_id(agent_id)
+        if not resolved:
+            return False, _api_error("agent_not_found", "Unknown agent id for durable goals.", details={"agentId": agent_id}), 404
+        state = get_live_agent_loop_state(persist_migration=False) if locked else _live_agent_loop_readonly_state_snapshot()
+        agent_state = _live_agent_loop_agent_state(state, resolved)
+        goals, active = _live_agent_goals.normalize_agent_goals(
+            agent_state,
+            retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"],
+        )
+        summary = {
+            status: sum(1 for goal in goals if goal.get("status") == status)
+            for status in sorted(_live_agent_goals.GOAL_STATUSES)
+            if any(goal.get("status") == status for goal in goals)
+        }
+        return True, {
+            "ok": True,
+            "schemaVersion": LIVE_AGENT_GOAL_LEDGER_SCHEMA_VERSION,
+            "agentId": resolved,
+            "busy": not locked,
+            "readOnlySnapshot": not locked,
+            "activeGoal": active,
+            "goals": goals,
+            "summary": {"total": len(goals), "byStatus": summary},
+        }, 200
+
+
+def update_live_agent_goals(agent_id, payload):
+    if not _agent_live_mode_runtime_enabled():
+        return False, _agent_live_mode_feature_disabled_error(), _agent_live_mode_feature_disabled_status()
+    resolved = _resolve_agent_id(agent_id)
+    if not resolved:
+        return False, _api_error("agent_not_found", "Unknown agent id for durable goals.", details={"agentId": agent_id}), 404
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "Durable goal payload must be an object."), 400
+    operation = str(payload.get("operation") or ("upsert" if payload.get("goal") else "create")).strip().lower().replace("-", "_")
+    now_iso = _utc_now_iso()
+    with _live_agent_loop_lock:
+        state = get_live_agent_loop_state(persist_migration=False)
+        agent_state = _live_agent_loop_agent_state(state, resolved)
+        goals, active = _live_agent_goals.normalize_agent_goals(agent_state, retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"])
+        stored = None
+        event_type = "durable-goal-updated"
+        if operation in {"create", "upsert"}:
+            raw_goal = payload.get("goal") if isinstance(payload.get("goal"), dict) else payload
+            errors = _live_agent_goals.validate_goal_payload(raw_goal)
+            if errors:
+                return False, _api_error("invalid_durable_goal", "Durable goal validation failed.", details={"errors": errors}), 400
+            normalized = _live_agent_goals.normalize_goal(raw_goal, agent_id=resolved, now_iso=now_iso)
+            existing = next((goal for goal in goals if goal.get("id") == normalized.get("id")), None)
+            if operation == "create" and existing:
+                return False, _api_error("durable_goal_exists", "A durable goal with this id already exists.", details={"goalId": normalized.get("id")}), 409
+            if operation == "upsert" and existing and existing.get("status") in _live_agent_goals.TERMINAL_GOAL_STATUSES:
+                return False, _api_error(
+                    "durable_goal_terminal",
+                    "A terminal durable goal cannot be replaced in place; create a new goal id.",
+                    details={"goalId": normalized.get("id"), "status": existing.get("status")},
+                ), 409
+            if operation == "upsert" and existing:
+                normalized = _live_agent_goals.goal_from_planner_turn(
+                    resolved,
+                    {
+                        "goal": raw_goal,
+                        "currentGoal": raw_goal.get("title") or raw_goal.get("currentGoal"),
+                        "tasks": raw_goal.get("tasks") or [],
+                        "successCriteria": raw_goal.get("successCriteria") or [],
+                        "nextStep": raw_goal.get("nextStep") or {},
+                    },
+                    previous_goal=existing,
+                    now_iso=now_iso,
+                )
+                normalized["source"] = str(raw_goal.get("source") or "operator-api")[:120]
+            if active and active.get("id") != normalized.get("id") and normalized.get("status") == "active":
+                active["status"] = "paused"
+                active["pausedAt"] = now_iso
+                active["updatedAt"] = now_iso
+                active["operatorSummary"] = f"Paused while operator activated {normalized.get('title')}."
+                _live_agent_loop_store_durable_goal(agent_state, active)
+            stored = _live_agent_loop_store_durable_goal(agent_state, normalized)
+            event_type = "durable-goal-created" if not existing else "durable-goal-updated"
+        else:
+            goal_id = str(payload.get("goalId") or "").strip()
+            goal = _live_agent_loop_find_durable_goal(agent_state, goal_id)
+            if not goal:
+                return False, _api_error("durable_goal_not_found", "Unknown durable goal id.", details={"goalId": goal_id}), 404
+            if operation in {"activate", "resume"}:
+                if goal.get("status") in _live_agent_goals.TERMINAL_GOAL_STATUSES:
+                    return False, _api_error(
+                        "durable_goal_terminal",
+                        "A terminal durable goal cannot be reactivated; create a new goal or retry an unfinished goal.",
+                        details={"goalId": goal_id, "status": goal.get("status")},
+                    ), 409
+                if active and active.get("id") != goal_id:
+                    active["status"] = "paused"
+                    active["pausedAt"] = now_iso
+                    active["updatedAt"] = now_iso
+                    _live_agent_loop_store_durable_goal(agent_state, active)
+                goal["status"] = "active"
+                goal["activatedAt"] = goal.get("activatedAt") or now_iso
+                goal.pop("pausedAt", None)
+                event_type = "durable-goal-activated"
+            elif operation == "pause":
+                goal["status"] = "paused"
+                goal["pausedAt"] = now_iso
+                event_type = "durable-goal-paused"
+            elif operation == "cancel":
+                goal["status"] = "cancelled"
+                goal["cancelledAt"] = now_iso
+                goal["outcome"] = {"status": "cancelled", "verified": False, "at": now_iso, "reason": str(payload.get("reason") or "operator cancelled")[:500]}
+                event_type = "durable-goal-cancelled"
+            elif operation == "replan":
+                goal["status"] = "blocked"
+                goal["replanRequired"] = True
+                goal["replanReason"] = str(payload.get("reason") or "operator requested replan")[:500]
+                goal["replanCount"] = int(goal.get("replanCount") or 0) + 1
+                goal["lastReplannedAt"] = now_iso
+                event_type = "durable-goal-replan-required"
+                try:
+                    _live_agent_model_decision_allow_immediate(resolved, reason="operator-requested-replan")
+                except Exception:
+                    pass
+            elif operation == "retry":
+                replacement = str(payload.get("loopActionId") or "").strip()
+                goal, _ = _live_agent_goals.replan_with_action(
+                    goal,
+                    replacement or ((_live_agent_goals.current_context(goal).get("step") or {}).get("loopActionId")),
+                    reason=str(payload.get("reason") or "operator requested retry")[:500],
+                    now_iso=now_iso,
+                )
+                event_type = "durable-goal-retried"
+            else:
+                return False, _api_error("invalid_operation", "Unsupported durable goal operation.", details={"operation": operation, "allowed": ["create", "upsert", "activate", "resume", "pause", "cancel", "replan", "retry"]}), 400
+            goal["updatedAt"] = now_iso
+            goal.setdefault("history", []).append({"at": now_iso, "event": event_type, "actor": str(payload.get("actor") or "api")[:120]})
+            stored = _live_agent_loop_store_durable_goal(agent_state, goal)
+        _live_agent_loop_add_event(state, event_type, agent_id=resolved, details={"goalId": stored.get("id"), "status": stored.get("status"), "revision": stored.get("revision")})
+        saved = save_live_agent_loop_state(state)
+        saved_agent = ((saved.get("agents") or {}).get(resolved) or {})
+        saved_goal = next((goal for goal in saved_agent.get("durableGoals") or [] if goal.get("id") == stored.get("id")), stored)
+        return True, {"ok": True, "agentId": resolved, "operation": operation, "goal": saved_goal, "activeGoal": saved_agent.get("activeGoal")}, 200
 
 
 def _live_agent_loop_operator_proposal_status(value, default="pending"):
@@ -6138,7 +6564,11 @@ def _live_agent_loop_normalize_plan(plan):
             "status": _live_agent_loop_step_status(step.get("status")),
             "attempts": _normalize_int(step.get("attempts"), 0, minimum=0, maximum=20),
         }
-        for key, limit in (("loopActionId", 120), ("actionType", 120), ("actionId", 160), ("failureReason", 220)):
+        for key, limit in (
+            ("loopActionId", 120), ("actionType", 120), ("actionId", 160),
+            ("failureReason", 220), ("goalId", 140), ("goalTaskId", 140),
+            ("goalStepId", 140), ("executionKind", 80),
+        ):
             cleaned = _live_agent_loop_clean_plan_text(step.get(key), limit=limit)
             if cleaned:
                 normalized_step[key] = cleaned
@@ -6159,10 +6589,17 @@ def _live_agent_loop_normalize_plan(plan):
         "retries": _normalize_int(plan.get("retries"), 0, minimum=0, maximum=20),
         "maxRetries": _normalize_int(plan.get("maxRetries"), LIVE_AGENT_LOOP_DEFAULTS["planMaxRetries"], minimum=0, maximum=5),
     }
-    for key, limit in (("agentId", 120), ("loopActionId", 120), ("actionType", 120), ("need", 80), ("lastActionId", 160), ("failureReason", 240), ("operatorSummary", 500)):
+    for key, limit in (
+        ("agentId", 120), ("loopActionId", 120), ("actionType", 120),
+        ("need", 80), ("lastActionId", 160), ("failureReason", 240),
+        ("operatorSummary", 500), ("goalId", 140), ("goalTaskId", 140),
+        ("goalStepId", 140), ("goalTitle", 500),
+    ):
         cleaned = _live_agent_loop_clean_plan_text(plan.get(key), limit=limit)
         if cleaned:
             normalized[key] = cleaned
+    if plan.get("goalRevision") is not None:
+        normalized["goalRevision"] = _normalize_int(plan.get("goalRevision"), 1, minimum=1, maximum=100000)
     for key in ("startedAt", "completedAt", "failedAt", "cancelledAt"):
         if _parse_isoish_epoch(plan.get(key)):
             normalized[key] = plan.get(key)
@@ -8263,6 +8700,40 @@ def _live_agent_loop_note_context(agent_id, agent_state):
                 "supportRequestId": request.get("id") or _live_agent_loop_support_request_id(request.get("kind"), request.get("text"), issue_id=request.get("issueId")),
                 "supportRequest": request,
             }
+    durable_goal = _live_agent_loop_active_durable_goal(agent_state)
+    if durable_goal:
+        durable_context = _live_agent_goals.current_context(durable_goal)
+        task = durable_context.get("task") or {}
+        step = durable_context.get("step") or {}
+        pieces = [
+            durable_goal.get("title"),
+            durable_goal.get("operatorSummary"),
+            durable_goal.get("replanReason"),
+            task.get("title"),
+            step.get("title"),
+            *list(step.get("successCriteria") or []),
+        ]
+        text = " ".join(str(item) for item in pieces if item)
+        recent_durable_note = _live_agent_loop_recent_internal_note_of_kind(
+            agent_id,
+            agent_state,
+            "durable-goal",
+            window_sec=LIVE_AGENT_AUTONOMY_PLAN_NOTE_COOLDOWN_SEC,
+        )
+        recent_legacy_plan_note = _live_agent_loop_recent_internal_note_of_kind(
+            agent_id,
+            agent_state,
+            "autonomy-plan",
+            window_sec=LIVE_AGENT_AUTONOMY_PLAN_NOTE_COOLDOWN_SEC,
+        )
+        if text and not recent_durable_note and not recent_legacy_plan_note:
+            return {
+                "kind": "durable-goal",
+                "summary": text[:700],
+                "goalId": durable_goal.get("id"),
+                "goalRevision": durable_goal.get("revision"),
+                "durableGoal": durable_goal,
+            }
     plan = _live_agent_loop_normalize_autonomy_plan(agent_state.get("autonomyPlan"))
     if plan:
         if _live_agent_loop_recent_internal_note_of_kind(
@@ -8287,7 +8758,7 @@ def _live_agent_loop_note_context(agent_id, agent_state):
     return None
 
 
-def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso):
+def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso, goal_context=None):
     action_def = action_def if isinstance(action_def, dict) else {}
     decision = decision if isinstance(decision, dict) else {}
     selected = selected if isinstance(selected, dict) else {}
@@ -8337,15 +8808,33 @@ def _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso)
             },
         ],
     }
+    goal_context = goal_context if isinstance(goal_context, dict) else {}
+    if goal_context.get("goalId"):
+        for key in ("goalId", "goalRevision", "goalTaskId", "goalStepId", "goalTitle"):
+            if goal_context.get(key) is not None:
+                plan[key] = goal_context.get(key)
+        execute_step = plan["steps"][1]
+        for key in ("goalId", "goalTaskId", "goalStepId"):
+            if goal_context.get(key):
+                execute_step[key] = goal_context.get(key)
     return _live_agent_loop_normalize_plan(plan)
 
 
-def _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, *, persist=True):
+def _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, *, persist=True, goal_context=None):
     loop_action_id = (action_def or {}).get("id")
     active_plan = _live_agent_loop_normalize_plan(agent_state.get("activePlan"))
     if _live_agent_loop_plan_is_active(active_plan):
         step = _live_agent_loop_plan_current_step(active_plan)
-        if isinstance(step, dict) and step.get("loopActionId") == loop_action_id:
+        goal_context = goal_context if isinstance(goal_context, dict) else {}
+        same_goal_step = (
+            not goal_context.get("goalId")
+            or (
+                active_plan.get("goalId") == goal_context.get("goalId")
+                and active_plan.get("goalTaskId") == goal_context.get("goalTaskId")
+                and active_plan.get("goalStepId") == goal_context.get("goalStepId")
+            )
+        )
+        if isinstance(step, dict) and step.get("loopActionId") == loop_action_id and same_goal_step:
             active_plan["status"] = "in_progress" if active_plan.get("status") == "planned" else active_plan.get("status")
             active_plan["updatedAt"] = now_iso
             active_plan["operatorSummary"] = f"Resuming plan step {step.get('label') or loop_action_id}."
@@ -8361,7 +8850,7 @@ def _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, s
             active_plan["failureReason"] = "superseded-by-new-plan"
             active_plan["operatorSummary"] = "Previous active plan was cancelled because its current visible step was no longer selected."
             _live_agent_loop_store_plan(agent_state, active_plan)
-    plan = _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso)
+    plan = _live_agent_loop_new_plan(agent_id, action_def, decision, selected, now_iso, goal_context=goal_context)
     if persist:
         stored = _live_agent_loop_store_plan(agent_state, plan)
         _live_agent_loop_begin_episode(None, agent_id, agent_state, stored, action_def, decision, selected, now_iso)
@@ -8391,6 +8880,21 @@ def _live_agent_loop_mark_plan_action_created(state, agent_id, agent_state, plan
     if not _live_agent_loop_find_episode(agent_state, plan_id=(stored or plan).get("id")):
         _live_agent_loop_begin_episode(state, agent_id, agent_state, stored or plan, action_def or {}, decision or {}, selected or {}, now_iso)
     _live_agent_loop_mark_episode_executing(state, agent_id, agent_state, stored or plan, action_id, now_iso)
+    goal_context = {
+        key: plan.get(key)
+        for key in ("goalId", "goalRevision", "goalTaskId", "goalStepId", "goalTitle")
+        if plan.get(key) is not None
+    }
+    if goal_context.get("goalId"):
+        _live_agent_loop_mark_durable_goal_action_started(
+            state,
+            agent_id,
+            agent_state,
+            goal_context,
+            action_id,
+            plan.get("loopActionId"),
+            now_iso,
+        )
     _live_agent_loop_add_event(state, "plan-step-started", agent_id=agent_id, details={"planId": plan.get("id"), "actionId": action_id, "stepId": (step or {}).get("id") if isinstance(step, dict) else None})
     return stored
 
@@ -8411,6 +8915,41 @@ def _live_agent_loop_mark_plan_action_request_failed(state, agent_id, agent_stat
     plan["updatedAt"] = now_iso
     plan["operatorSummary"] = f"Plan failed before the visible action could be created: {plan.get('failureReason')}."
     stored = _live_agent_loop_store_plan(agent_state, plan)
+    goal_context = {
+        key: plan.get(key)
+        for key in ("goalId", "goalRevision", "goalTaskId", "goalStepId", "goalTitle")
+        if plan.get(key) is not None
+    }
+    if goal_context.get("goalId"):
+        synthetic_action_id = f"request-failed-{hashlib.sha1(f'{agent_id}:{plan.get('id')}:{now_iso}'.encode('utf-8')).hexdigest()[:12]}"
+        _live_agent_loop_mark_durable_goal_action_started(
+            state,
+            agent_id,
+            agent_state,
+            goal_context,
+            synthetic_action_id,
+            plan.get("loopActionId"),
+            now_iso,
+        )
+        _live_agent_loop_record_durable_goal_verification(
+            state,
+            agent_id,
+            agent_state,
+            {
+                "id": _live_agent_loop_verification_id(agent_id, synthetic_action_id, "request-failed", now_iso),
+                "schemaVersion": "agent-live-mode-verification/v1",
+                "at": now_iso,
+                "agentId": agent_id,
+                "actionId": synthetic_action_id,
+                "loopActionId": plan.get("loopActionId"),
+                "ok": False,
+                "status": "failed",
+                "reason": plan.get("failureReason"),
+                "evidence": {"method": "action-request-result", "created": False},
+                **goal_context,
+            },
+            now_iso,
+        )
     _live_agent_loop_add_event(state, "plan-failed", agent_id=agent_id, details={"planId": plan.get("id"), "failureReason": plan.get("failureReason")})
     return stored
 
@@ -8574,6 +9113,10 @@ def _live_agent_loop_verification_from_settled_action(agent_id, action, summary,
         "loopActionId": summary.get("loopActionId"),
         "planId": summary.get("planId"),
         "planStepId": summary.get("planStepId"),
+        "goalId": summary.get("goalId"),
+        "goalRevision": summary.get("goalRevision"),
+        "goalTaskId": summary.get("goalTaskId"),
+        "goalStepId": summary.get("goalStepId"),
         "ok": bool(ok),
         "status": "verified" if ok else "failed",
         "reason": _live_agent_loop_clean_plan_text(reason, limit=700) if reason else "",
@@ -8663,6 +9206,7 @@ def _live_agent_loop_record_episode_verification(state, agent_id, agent_state, a
         episode["operatorSummary"] = "Verification failed after a benign system cancellation; planner can retry when route, target, or conditions change."
     stored = _live_agent_loop_store_episode(agent_state, episode)
     _live_agent_loop_finish_plan_after_verification(state, agent_id, agent_state, plan, verification, now_iso)
+    _live_agent_loop_record_durable_goal_verification(state, agent_id, agent_state, verification, now_iso)
     _live_agent_loop_add_event(
         state,
         "episode-verified" if verification_ok else "episode-verification-failed",
@@ -8683,6 +9227,10 @@ def _live_agent_loop_record_support_episode_verification(state, agent_id, agent_
         "actionId": outcome.get("id"),
         "loopActionId": outcome.get("loopActionId"),
         "planId": (plan or {}).get("id"),
+        "goalId": (plan or {}).get("goalId"),
+        "goalRevision": (plan or {}).get("goalRevision"),
+        "goalTaskId": (plan or {}).get("goalTaskId"),
+        "goalStepId": (plan or {}).get("goalStepId"),
         "ok": outcome.get("ok") is True,
         "status": "verified" if outcome.get("ok") else "failed",
         "reason": "" if outcome.get("ok") else _live_agent_loop_clean_plan_text(outcome.get("error") or outcome.get("status"), limit=700),
@@ -8706,6 +9254,7 @@ def _live_agent_loop_record_support_episode_verification(state, agent_id, agent_
         episode["operatorSummary"] = "Support tool verified." if verification.get("ok") else "Support tool failed verification."
         _live_agent_loop_store_episode(agent_state, episode)
     _live_agent_loop_finish_plan_after_verification(state, agent_id, agent_state, plan, verification, now_iso)
+    _live_agent_loop_record_durable_goal_verification(state, agent_id, agent_state, verification, now_iso)
     if outcome.get("supportTool") == "coder-report":
         _live_agent_loop_mark_episode_reported(state, agent_id, agent_state, {"issueId": outcome.get("issueId")}, outcome, now_iso)
     return verification
@@ -8719,6 +9268,7 @@ def _live_agent_loop_build_goal_frame(agent_id, perception, agent_state):
     recent = _live_agent_loop_recent_outcome_summary(agent_state, perception)
     recent_episodes = _live_agent_loop_recent_episode_summary(agent_state)
     active_plan = _live_agent_loop_normalize_plan(agent_state.get("activePlan"))
+    durable_goal = _live_agent_loop_ensure_durable_goal(agent_state, agent_id)
     goals = []
     for need_id, value in sorted((needs or {}).items(), key=lambda item: item[1], reverse=True)[:3]:
         goals.append({
@@ -8774,6 +9324,26 @@ def _live_agent_loop_build_goal_frame(agent_id, perception, agent_state):
             "priority": 0.58 if active_plan.get("status") == "retrying" else 0.48,
             "reason": active_plan.get("operatorSummary") or "resume the active Live Mode plan",
         })
+    if durable_goal:
+        durable_context = _live_agent_goals.current_context(durable_goal)
+        durable_task = durable_context.get("task") or {}
+        durable_step = durable_context.get("step") or {}
+        durable_priority = 0.84 if durable_goal.get("replanRequired") else max(0.58, min(0.88, float(durable_goal.get("priority") or 0.74)))
+        goals.append({
+            "id": f"durable.{durable_goal.get('id')}",
+            "kind": "durable-goal",
+            "goalId": durable_goal.get("id"),
+            "goalRevision": durable_goal.get("revision"),
+            "goalTaskId": durable_task.get("id"),
+            "goalStepId": durable_step.get("id"),
+            "status": durable_goal.get("status"),
+            "replanRequired": bool(durable_goal.get("replanRequired")),
+            "loopActionId": durable_step.get("loopActionId"),
+            "priority": round(durable_priority, 3),
+            "priorityClass": "blocking-replan" if durable_goal.get("replanRequired") else "active-durable-goal",
+            "reason": durable_goal.get("replanReason") or durable_step.get("title") or durable_goal.get("title"),
+            "text": durable_goal.get("title"),
+        })
     for issue in (recent.get("issues") or [])[:4]:
         if not isinstance(issue, dict):
             continue
@@ -8808,6 +9378,7 @@ def _live_agent_loop_build_goal_frame(agent_id, perception, agent_state):
         "recentOutcomes": recent,
         "episodes": recent_episodes,
         "activePlan": active_plan,
+        "durableGoal": durable_goal,
         "goals": goals,
     }
 
@@ -9403,6 +9974,12 @@ def _live_agent_loop_decision_score(affordance, agent_state, goal_frame=None):
             boost = min(0.70, max(0.24, priority))
             score += boost
             breakdown["plan"] += boost
+        if goal.get("kind") == "durable-goal" and goal.get("loopActionId") == loop_action_id:
+            boost = min(0.86, max(0.38, priority))
+            if top_need_value >= LIVE_AGENT_CRITICAL_NEED_THRESHOLD and need_key != top_need_key:
+                boost *= 0.45
+            score += boost
+            breakdown["plan"] += boost
     action_summary = (recent.get("byAction") or {}).get(loop_action_id) if isinstance(recent.get("byAction"), dict) else None
     if isinstance(action_summary, dict):
         completed = int(action_summary.get("completed") or 0)
@@ -9531,7 +10108,7 @@ def _live_agent_model_prompt_trim(prompt):
     text = str(prompt or "")
     if len(text) <= LIVE_AGENT_MODEL_PROMPT_CHAR_BUDGET:
         return text
-    suffix = "\n\nReturn one compact JSON planner turn with reflection, currentGoal, plan, nextStep, and memoryUpdate. Legacy fallback: INTENTION: {...} or ACTION: <interactionId>."
+    suffix = "\n\nReturn one compact JSON planner turn with reflection, goal, tasks, nextStep, and memoryUpdate. Preserve stable goal/task/step ids. Legacy fallback: INTENTION: {...} or ACTION: <interactionId>."
     budget = max(1000, LIVE_AGENT_MODEL_PROMPT_CHAR_BUDGET - len(suffix) - 20)
     return text[:budget].rstrip() + suffix
 
@@ -9552,7 +10129,8 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
         "Do not treat this as a one-shot command picker. Maintain continuity from prior plans, remember what you tried, learn from failures, explore, test, play, and adapt your next step.",
         "Return one compact JSON object, not markdown. You may request world actions, safe tools, or events in the JSON; the world will validate and execute only approved visible actions or explicit support tools.",
         "Preferred JSON shape:",
-        "  {\"reflection\":\"what just happened / what you learned\",\"currentGoal\":\"what you are pursuing now\",\"plan\":[\"step 1\",\"step 2\",\"step 3\"],\"nextStep\":{\"intent\":\"what to do next and why\",\"action\":\"<available interaction id, if one fits>\",\"category\":\"<needed object/tool category if not listed>\",\"targetCriteria\":\"what kind of target to find\",\"successCriteria\":\"how to know it worked\"},\"memoryUpdate\":{\"lesson\":\"what should carry forward\"}}",
+        "  {\"reflection\":\"what happened / what changed\",\"goal\":{\"id\":\"stable-goal-id\",\"title\":\"outcome to pursue\",\"successCriteria\":[\"verified finish condition\"]},\"currentGoal\":\"same goal title\",\"tasks\":[{\"id\":\"stable-task-id\",\"title\":\"ordered task\",\"dependsOn\":[],\"steps\":[{\"id\":\"stable-step-id\",\"title\":\"executable step\",\"dependsOn\":[],\"loopActionId\":\"<available interaction id>\",\"successCriteria\":[\"verified evidence\"],\"failureCriteria\":[\"failure evidence\"],\"maxRetries\":2}]}],\"nextStep\":{\"taskId\":\"stable-task-id\",\"stepId\":\"stable-step-id\",\"intent\":\"what to do next and why\",\"action\":\"<available interaction id, if one fits>\",\"category\":\"<needed object/tool category if not listed>\",\"targetCriteria\":\"what kind of target to find\",\"successCriteria\":\"how to know it worked\",\"failureCriteria\":\"how to know it failed\"},\"memoryUpdate\":{\"lesson\":\"what should carry forward\"}}",
+        "Use stable ids across replans. Preserve every completed step whose outcome is already verified. Express dependencies by id. Never mark a task, step, or goal complete without verification evidence. If the active durable goal says replanning is required, repair only the blocked unfinished portion and keep verified work intact.",
         "Legacy fallback still works if needed: INTENTION: {\"activity\":\"...\",\"action\":\"<available id>\",\"category\":\"<object category>\"} or ACTION: <interactionId> or ACTION: skip.",
         "How this works: you decide the plan and next step; the world resolves it into safe visible interactions or support tools. If an available interaction/tool fits your next step, name it in nextStep.action. If your plan needs a kind of world object/tool/event that is not listed, name it in nextStep.category, toolRequests, or eventRequests. If you notice a blocker that needs Coder, choose report-issue-to-coder when it is available; if you need to preserve a plan or lesson, choose record-internal-note when it is available. If nothing is worth doing, set nextStep.action to skip and explain why in reflection.",
         "Weigh your priorities like a real resident: a critical body need (>=0.82) comes first; unresolved failures or broken things you noticed should be dealt with before routine comfort; your own active goals come next and deserve steady progress across many loops; then routine needs, relationships, and variety. Never pretend a goal is done.",
@@ -9643,6 +10221,33 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
         next_step = autonomy_plan.get("nextStep") if isinstance(autonomy_plan.get("nextStep"), dict) else {}
         if next_step:
             lines.append(f"- Previous next step: {next_step.get('intent') or next_step.get('action') or next_step.get('category')}")
+    durable_goal = goal_frame.get("durableGoal") if isinstance(goal_frame.get("durableGoal"), dict) else _live_agent_loop_active_durable_goal(agent_state)
+    if durable_goal:
+        durable_context = _live_agent_goals.current_context(durable_goal)
+        durable_task = durable_context.get("task") or {}
+        durable_step = durable_context.get("step") or {}
+        lines.append("Active durable goal ledger (authoritative across restarts):")
+        lines.append(
+            f"- Goal {durable_goal.get('id')} revision={durable_goal.get('revision')} status={durable_goal.get('status')} "
+            f"replanRequired={bool(durable_goal.get('replanRequired'))}: {durable_goal.get('title')}"
+        )
+        if durable_goal.get("replanReason"):
+            lines.append(f"- Replan reason: {durable_goal.get('replanReason')[:500]}")
+        if durable_task:
+            lines.append(f"- Current task {durable_task.get('id')} status={durable_task.get('status')} dependsOn={durable_task.get('dependsOn') or []}: {durable_task.get('title')}")
+        if durable_step:
+            retry = durable_step.get("retry") if isinstance(durable_step.get("retry"), dict) else {}
+            lines.append(
+                f"- Current step {durable_step.get('id')} status={durable_step.get('status')} dependsOn={durable_step.get('dependsOn') or []} "
+                f"action={durable_step.get('loopActionId') or 'unassigned'} attempts={retry.get('attempts', 0)}/{retry.get('maxRetries', 0)}: {durable_step.get('title')}"
+            )
+        verified_steps = []
+        for task in durable_goal.get("tasks") or []:
+            for step in task.get("steps") or []:
+                if step.get("status") == "completed" and (step.get("outcome") or {}).get("verified") is True:
+                    verified_steps.append(f"{task.get('id')}/{step.get('id')}")
+        if verified_steps:
+            lines.append(f"- Verified completed steps to preserve: {', '.join(verified_steps[:12])}")
     lines.append("")
     lines.append("Available interactions/tools right now (world actions have real reachable targets; support tools have durable side effects):")
     for c in candidates[:12]:
@@ -9662,7 +10267,7 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
         tool_text = f", supportTool: {visibility.get('supportTool')}" if visibility.get("supportTool") else ""
         lines.append(f"- {c.get('id')}: {c.get('label')} (need: {c.get('need')}, actionType: {c.get('actionType')}{tool_text}, planner score: {c.get('score')}{target_text}{why})")
     lines.append("")
-    lines.append("Decide as yourself. Return one compact JSON planner turn with reflection, currentGoal, plan, nextStep, and memoryUpdate. Keep it concise but preserve continuity.")
+    lines.append("Decide as yourself. Return one compact JSON planner turn with reflection, goal, tasks, nextStep, and memoryUpdate. Keep it concise, use stable ids, and preserve verified continuity.")
     return _live_agent_model_prompt_trim("\n".join(lines))
 
 
@@ -9702,15 +10307,25 @@ def _live_agent_model_planner_turn_parse(reply_text):
         return None
     next_step = parsed.get("nextStep") or parsed.get("next_step") or parsed.get("next") or {}
     next_step = _live_agent_loop_normalize_next_step(next_step)
+    raw_goal = parsed.get("goal") if isinstance(parsed.get("goal"), dict) else {}
+    current_goal_value = parsed.get("currentGoal") or parsed.get("current_goal") or raw_goal.get("title") or (parsed.get("goal") if isinstance(parsed.get("goal"), str) else None)
+    raw_tasks = parsed.get("tasks") if isinstance(parsed.get("tasks"), list) else raw_goal.get("tasks") if isinstance(raw_goal.get("tasks"), list) else []
     planner_turn = {
         "reflection": _live_agent_loop_clean_plan_text(parsed.get("reflection") or parsed.get("reflect"), limit=900) or "",
-        "currentGoal": _live_agent_loop_clean_plan_text(parsed.get("currentGoal") or parsed.get("current_goal") or parsed.get("goal"), limit=700) or "",
+        "currentGoal": _live_agent_loop_clean_plan_text(current_goal_value, limit=700) or "",
         "plan": _live_agent_loop_normalize_text_list(parsed.get("plan") or parsed.get("steps"), limit=10, item_limit=320),
         "nextStep": next_step,
         "memoryUpdate": parsed.get("memoryUpdate") if isinstance(parsed.get("memoryUpdate"), dict) else {},
         "toolRequests": _live_agent_loop_normalize_text_list(parsed.get("toolRequests") or parsed.get("requestedTools") or parsed.get("tools"), limit=5, item_limit=260),
         "eventRequests": _live_agent_loop_normalize_text_list(parsed.get("eventRequests") or parsed.get("requestedEvents") or parsed.get("events"), limit=5, item_limit=260),
     }
+    if raw_goal:
+        planner_turn["goal"] = _copy_jsonable(raw_goal)
+    if raw_tasks:
+        planner_turn["tasks"] = _copy_jsonable(raw_tasks[:16])
+    success_criteria = _live_agent_loop_normalize_text_list(parsed.get("successCriteria") or raw_goal.get("successCriteria"), limit=12, item_limit=420)
+    if success_criteria:
+        planner_turn["successCriteria"] = success_criteria
     if isinstance(planner_turn["memoryUpdate"], dict):
         planner_turn["memoryUpdate"] = {
             key: _live_agent_loop_clean_plan_text(value, limit=700)
@@ -9725,6 +10340,8 @@ def _live_agent_model_planner_turn_parse(reply_text):
         planner_turn.get("memoryUpdate"),
         planner_turn.get("toolRequests"),
         planner_turn.get("eventRequests"),
+        planner_turn.get("goal"),
+        planner_turn.get("tasks"),
     ]):
         return None
     return planner_turn
@@ -9846,6 +10463,15 @@ def _live_agent_model_decision_allowed(agent_id, now_epoch=None):
         return True, None
 
 
+def _live_agent_model_decision_allow_immediate(agent_id, reason=None):
+    with _live_agent_model_decision_lock:
+        row = _live_agent_model_decision_state.setdefault(agent_id, {})
+        row.pop("nextAllowedEpoch", None)
+        row["forceReason"] = _live_agent_loop_clean_plan_text(reason, limit=240) or "durable-goal-replan"
+        row["forceRequestedAt"] = _utc_now_iso()
+        return True
+
+
 def _live_agent_loop_apply_planner_turn(agent_state, model_detail, agent_id=None):
     if not isinstance(agent_state, dict) or not isinstance(model_detail, dict):
         return False
@@ -9861,6 +10487,19 @@ def _live_agent_loop_apply_planner_turn(agent_state, model_detail, agent_id=None
         if previous and previous.get("currentGoal") and previous.get("currentGoal") == autonomy_plan.get("currentGoal") and previous.get("createdAt"):
             autonomy_plan["createdAt"] = previous["createdAt"]
         agent_state["autonomyPlan"] = autonomy_plan
+    durable_goal = None
+    if agent_id:
+        durable_goal = _live_agent_loop_upsert_durable_goal_from_planner(
+            agent_state,
+            agent_id,
+            planner_turn,
+            chosen_action=model_detail.get("chosen") or intention.get("action"),
+        )
+        linked_goal_id = (durable_goal or {}).get("id")
+        if not linked_goal_id and isinstance(planner_turn.get("goal"), dict):
+            linked_goal_id = planner_turn["goal"].get("id")
+        if linked_goal_id and isinstance(agent_state.get("autonomyPlan"), dict):
+            agent_state["autonomyPlan"]["durableGoalId"] = str(linked_goal_id)[:140]
     reflection_text = _live_agent_loop_clean_plan_text(planner_turn.get("reflection"), limit=900)
     lesson = ""
     memory_update = planner_turn.get("memoryUpdate") if isinstance(planner_turn.get("memoryUpdate"), dict) else {}
@@ -9882,7 +10521,7 @@ def _live_agent_loop_apply_planner_turn(agent_state, model_detail, agent_id=None
         memory["reflections"] = _live_agent_loop_trim_list([*(memory.get("reflections") or []), entry], LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
         agent_state["memory"] = memory
     _live_agent_loop_note_planner_support_requests(agent_state, planner_turn, model_detail)
-    if agent_id and (planner_turn.get("reflection") or planner_turn.get("currentGoal") or planner_turn.get("plan") or planner_turn.get("memoryUpdate")):
+    if agent_id and (planner_turn.get("reflection") or planner_turn.get("currentGoal") or planner_turn.get("plan") or planner_turn.get("tasks") or planner_turn.get("memoryUpdate")):
         note_text_parts = []
         if planner_turn.get("reflection"):
             note_text_parts.append(f"Reflection: {planner_turn.get('reflection')}")
@@ -9903,6 +10542,8 @@ def _live_agent_loop_apply_planner_turn(agent_state, model_detail, agent_id=None
                 "chosen": model_detail.get("chosen"),
                 "toolRequests": planner_turn.get("toolRequests"),
                 "eventRequests": planner_turn.get("eventRequests"),
+                "durableGoalId": (durable_goal or {}).get("id"),
+                "durableGoalRevision": (durable_goal or {}).get("revision"),
             },
             agent_state=agent_state,
         )
@@ -10223,13 +10864,86 @@ def _live_agent_model_planner_session_cleanup(agent_id, generation=None):
     accumulate in the agent's session history or leak into its long-term
     memory/dreaming pipeline. Best-effort: failures never break the loop."""
     try:
-        _gateway_rpc_call("sessions.delete", {
+        result = _gateway_rpc_call("sessions.delete", {
             "key": _live_agent_model_planner_session_key(agent_id, generation),
             "deleteTranscript": True,
         }, timeout=10)
-        return True
+        return isinstance(result, dict) and result.get("ok") is True
     except Exception:
         return False
+
+
+def _live_agent_model_planner_session_agent_id(session_key):
+    """Return the agent id for a Virtual-World planner session key only."""
+    match = re.fullmatch(r"agent:([^:]+):(?:g\d+:)?vw-live-mode-planner", str(session_key or "").strip())
+    return match.group(1) if match else None
+
+
+def _cleanup_orphaned_live_agent_model_planner_sessions(agent_ids=None, *, max_pages=10):
+    """Remove stale planner sessions left behind by an interrupted server.
+
+    Cleanup is deliberately scoped to locally enabled residents that this
+    world currently owns. This avoids deleting a planner session owned by
+    another Virtual World port while still recovering sessions whose worker
+    disappeared during a process restart.
+    """
+    if agent_ids is None:
+        try:
+            meta = load_world_meta_fast()
+            rows = _enabled_live_agent_rows(meta)
+            _refresh_local_live_agent_world_claims(meta=meta)
+            registry_agents = (_read_live_agent_world_registry().get("agents") or {})
+            current_world_id = _current_live_agent_world(meta).get("worldId")
+            agent_ids = [
+                row.get("agentId")
+                for row in rows
+                if isinstance(registry_agents.get(row.get("agentId")), dict)
+                and registry_agents[row.get("agentId")].get("worldId") == current_world_id
+            ]
+        except Exception:
+            agent_ids = []
+    allowed = {str(agent_id or "").strip() for agent_id in (agent_ids or []) if str(agent_id or "").strip()}
+    result = {"ok": True, "checked": 0, "deleted": [], "failed": []}
+    if not allowed:
+        return result
+
+    offset = 0
+    for _page in range(max(1, int(max_pages or 1))):
+        response = _gateway_rpc_call("sessions.list", {"limit": 200, "offset": offset}, timeout=15)
+        if not isinstance(response, dict) or response.get("ok") is False:
+            result["ok"] = False
+            result["failed"].append({"stage": "list", "error": str((response or {}).get("error") or "sessions.list failed")[:300]})
+            break
+        rows = response.get("sessions")
+        if not isinstance(rows, list):
+            payload = response.get("payload") if isinstance(response.get("payload"), dict) else {}
+            rows = payload.get("sessions") if isinstance(payload.get("sessions"), list) else []
+        result["checked"] += len(rows)
+        for row in rows:
+            key = str((row or {}).get("key") or (row or {}).get("sessionKey") or "") if isinstance(row, dict) else ""
+            agent_id = _live_agent_model_planner_session_agent_id(key)
+            if not agent_id or agent_id not in allowed:
+                continue
+            deleted = _gateway_rpc_call("sessions.delete", {"key": key, "deleteTranscript": True}, timeout=10)
+            if isinstance(deleted, dict) and deleted.get("ok") is True:
+                result["deleted"].append(key)
+            else:
+                result["ok"] = False
+                result["failed"].append({"stage": "delete", "key": key, "error": str((deleted or {}).get("error") or "sessions.delete failed")[:300]})
+        next_offset = response.get("nextOffset")
+        if next_offset in (None, ""):
+            payload = response.get("payload") if isinstance(response.get("payload"), dict) else {}
+            next_offset = payload.get("nextOffset")
+        if next_offset in (None, "") or not rows:
+            break
+        try:
+            next_offset = int(next_offset)
+        except (TypeError, ValueError):
+            break
+        if next_offset <= offset:
+            break
+        offset = next_offset
+    return result
 
 
 def _live_agent_model_decision_worker(agent_id, prompt, candidate_ids, config, generation):
@@ -10308,7 +11022,8 @@ def _live_agent_model_decision_worker(agent_id, prompt, candidate_ids, config, g
                 )
             except Exception as exc:
                 print(f"[live-agent] Could not record planner transcript for {agent_id}: {exc}")
-            _live_agent_model_planner_session_cleanup(agent_id, generation)
+        if not _live_agent_model_planner_session_cleanup(agent_id, generation):
+            print(f"[live-agent] Could not clean up planner session for {agent_id} generation {generation}")
 
 
 def _live_agent_model_decide(agent_id, decision_frame, agent_state, config):
@@ -10467,6 +11182,10 @@ def _live_agent_loop_action_summary(action):
         "loopActionId": params.get("loopActionId"),
         "planId": params.get("planId"),
         "planStepId": params.get("planStepId"),
+        "goalId": params.get("goalId"),
+        "goalRevision": params.get("goalRevision"),
+        "goalTaskId": params.get("goalTaskId"),
+        "goalStepId": params.get("goalStepId"),
         "requestId": source.get("requestId"),
         "updatedAt": timing.get("updatedAt"),
         "terminalAt": timing.get("terminalAt"),
@@ -11595,6 +12314,8 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 result["skipped"].append({"agentId": agent_id, "reason": "active-behavior", "active": agent_state["lastOutcome"]["active"]})
                 continue
 
+            _live_agent_loop_reconcile_durable_goal_world(state, agent_id, agent_state, perception, now_iso)
+
             if state.get("worldClientRequired") and not world_client.get("active") and not force:
                 _live_agent_loop_stat(agent_state, "skippedNoClient")
                 agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "world-client-inactive", "worldClient": world_client, "perceptionAt": perception.get("at")}
@@ -11618,7 +12339,25 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             action_def = selected["action"]
             visible_action_contract = _live_agent_visible_action_contract(action_def.get("actionType")) or {}
             adaptive_cooldown = _live_agent_loop_cooldown_for_decision(cooldown, decision)
-            plan = _live_agent_loop_prepare_plan(agent_state, agent_id, action_def, decision, selected, now_iso, persist=not dry_run)
+            model_detail = decision.get("modelDecision") if isinstance(decision, dict) and isinstance(decision.get("modelDecision"), dict) else {}
+            allow_goal_replan = state.get("modelDecisionEnabled") is False or model_detail.get("applied") == "async-previous-request"
+            goal_context = _live_agent_loop_bind_durable_goal_action(
+                agent_state,
+                action_def.get("id"),
+                selected,
+                allow_replan=allow_goal_replan,
+                now_iso=now_iso,
+            )
+            plan = _live_agent_loop_prepare_plan(
+                agent_state,
+                agent_id,
+                action_def,
+                decision,
+                selected,
+                now_iso,
+                persist=not dry_run,
+                goal_context=goal_context,
+            )
             plan_step = _live_agent_loop_plan_current_step(plan)
             request_id = f"live-loop-{agent_id}-{int(now_epoch)}"
             if _live_agent_loop_is_support_action(action_def):
@@ -11676,6 +12415,11 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     "planSchemaVersion": LIVE_AGENT_LOOP_PLAN_SCHEMA_VERSION,
                     "planId": plan.get("id") if isinstance(plan, dict) else None,
                     "planStepId": plan_step.get("id") if isinstance(plan_step, dict) else None,
+                    "goalSchemaVersion": LIVE_AGENT_DURABLE_GOAL_SCHEMA_VERSION if goal_context else None,
+                    "goalId": (goal_context or {}).get("goalId"),
+                    "goalRevision": (goal_context or {}).get("goalRevision"),
+                    "goalTaskId": (goal_context or {}).get("goalTaskId"),
+                    "goalStepId": (goal_context or {}).get("goalStepId"),
                     "decisionMode": decision.get("mode") if isinstance(decision, dict) else LIVE_AGENT_LOOP_DEFAULTS["decisionMode"],
                     "decisionReason": decision.get("reason") if isinstance(decision, dict) else None,
                     "perceptionAt": perception.get("at"),
@@ -11721,10 +12465,10 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     decision=decision,
                     selected=selected,
                 )
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown}
+                agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "goal": goal_context, "httpStatus": status, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown}
                 _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
-                _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "target": selected["target"], "decision": agent_state.get("lastDecision")})
-                result["actionsCreated"].append({"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "httpStatus": status, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown})
+                _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "goal": goal_context, "target": selected["target"], "decision": agent_state.get("lastDecision")})
+                result["actionsCreated"].append({"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "goal": goal_context, "httpStatus": status, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown})
                 _live_agent_loop_note_scheduled(state, agent_id)
                 actions_created_this_tick += 1
             else:
@@ -11913,6 +12657,43 @@ def _live_agent_loop_plan_timeline_entries(agent_id, agent_state):
     return entries
 
 
+def _live_agent_loop_goal_timeline_entries(agent_id, agent_state):
+    goals, active = _live_agent_goals.normalize_agent_goals(
+        agent_state,
+        retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"],
+    )
+    entries = []
+    for goal in goals:
+        context = _live_agent_goals.current_context(goal)
+        task = context.get("task") or {}
+        step = context.get("step") or {}
+        retry = step.get("retry") if isinstance(step.get("retry"), dict) else {}
+        severity = "error" if goal.get("status") in {"failed", "blocked"} else "warning" if goal.get("status") == "paused" else "info"
+        entries.append(_live_agent_loop_timeline_entry(
+            "durable-goal",
+            _live_agent_loop_timeline_timestamp(goal.get("updatedAt"), goal.get("completedAt"), goal.get("createdAt")),
+            f"Goal {goal.get('status')}: {goal.get('title')}",
+            agent_id=agent_id,
+            summary=goal.get("operatorSummary") or goal.get("replanReason") or step.get("title"),
+            severity=severity,
+            details={
+                "goalId": goal.get("id"),
+                "revision": goal.get("revision"),
+                "status": goal.get("status"),
+                "active": bool(active and active.get("id") == goal.get("id")),
+                "replanRequired": bool(goal.get("replanRequired")),
+                "replanCount": goal.get("replanCount"),
+                "replanReason": goal.get("replanReason"),
+                "currentTask": task,
+                "currentStep": step,
+                "attempts": retry.get("attempts"),
+                "maxRetries": retry.get("maxRetries"),
+                "outcome": goal.get("outcome"),
+            },
+        ))
+    return entries
+
+
 def _live_agent_loop_episode_timeline_entries(agent_id, agent_state):
     entries = []
     for episode in _live_agent_loop_recent_episode_summary(agent_state, limit=12):
@@ -12027,6 +12808,7 @@ def get_live_agent_loop_operator_timeline(agent_id=None, limit=None, include_res
                     details=report.get("details") if isinstance(report.get("details"), dict) else {},
                 ))
             entries.extend(_live_agent_loop_plan_timeline_entries(current_agent_id, agent_state))
+            entries.extend(_live_agent_loop_goal_timeline_entries(current_agent_id, agent_state))
             entries.extend(_live_agent_loop_episode_timeline_entries(current_agent_id, agent_state))
         for proposal in _live_agent_loop_limited_operator_proposals(
             state,
@@ -12069,6 +12851,11 @@ def get_live_agent_loop_operator_timeline(agent_id=None, limit=None, include_res
                 "readOnlySnapshot": not locked,
                 "worldClientActive": _live_agent_loop_world_client_status(state).get("active"),
                 "pause": _live_agent_loop_pause_status(state),
+                "activeDurableGoalCount": sum(
+                    1
+                    for candidate in (state.get("agents") or {}).values()
+                    if isinstance(candidate, dict) and isinstance(candidate.get("activeGoal"), dict)
+                ),
             },
             "policy": {
                 "readOnly": True,
@@ -15959,7 +16746,7 @@ def _refresh_agent_roster_after_create():
                 a.get("statusKey") or a.get("id")
                 for a in _agent_roster
                 if a.get("statusKey") or a.get("id")
-            ])
+            ], prune=True)
     except Exception as exc:
         print(f"⚠️  Virtual World agent roster refresh failed: {exc}")
 
@@ -16192,8 +16979,7 @@ def initialize_live_presence():
         return
 
     agent_ids = [a.get("statusKey") or a.get("id") for a in get_roster() if a.get("statusKey") or a.get("id")]
-    if agent_ids:
-        _gateway_presence.init_agents(agent_ids)
+    _gateway_presence.init_agents(agent_ids, prune=True)
 
     try:
         _gateway_presence.set_meetings_file(STATUS_FILE)
@@ -16201,7 +16987,7 @@ def initialize_live_presence():
         pass
 
     try:
-        _gateway_presence.load_snapshot(_presence_snapshot_path)
+        _gateway_presence.load_snapshot(_presence_snapshot_path, allowed_agent_ids=agent_ids)
     except Exception as e:
         print(f"⚠️  Virtual World presence: could not load snapshot: {e}")
 
@@ -20151,6 +20937,16 @@ def _live_agent_loop_shutdown_agent(state, agent_id, *, disable_agent_row=True, 
     agent_state = _live_agent_loop_agent_state(state, resolved)
     if disable_agent_row:
         agent_state["enabled"] = False
+    active_durable_goal = _live_agent_loop_active_durable_goal(agent_state)
+    paused_goal_id = None
+    if active_durable_goal and active_durable_goal.get("status") not in _live_agent_goals.TERMINAL_GOAL_STATUSES:
+        active_durable_goal["status"] = "paused"
+        active_durable_goal["pausedAt"] = now_iso
+        active_durable_goal["updatedAt"] = now_iso
+        active_durable_goal["operatorSummary"] = "Durable goal paused because Agent Live Mode stopped; verified progress is preserved."
+        active_durable_goal.setdefault("history", []).append({"at": now_iso, "event": "goal-paused", "reason": reason})
+        stored_goal = _live_agent_loop_store_durable_goal(agent_state, active_durable_goal)
+        paused_goal_id = (stored_goal or active_durable_goal).get("id")
     interrupted = _live_agent_cancel_live_actions(
         resolved,
         actor=reason,
@@ -20199,6 +20995,7 @@ def _live_agent_loop_shutdown_agent(state, agent_id, *, disable_agent_row=True, 
         "cancelledPlanId": cancelled_plan_id,
         "cancelledEpisodeId": cancelled_episode_id,
         "cancelledAutonomyPlan": cancelled_autonomy_plan,
+        "pausedGoalId": paused_goal_id,
     }
     _live_agent_loop_add_event(
         state,
@@ -20210,6 +21007,7 @@ def _live_agent_loop_shutdown_agent(state, agent_id, *, disable_agent_row=True, 
             "cancelledPlanId": cancelled_plan_id,
             "cancelledEpisodeId": cancelled_episode_id,
             "cancelledAutonomyPlan": cancelled_autonomy_plan,
+            "pausedGoalId": paused_goal_id,
         },
     )
     return agent_state["lastOutcome"]
@@ -20483,6 +21281,7 @@ def get_agent_live_mode_setting(agent_id):
         )
     )
     enabled = _agent_live_mode_enabled_from_profile(profile)
+    active_goal = _live_agent_loop_active_durable_goal(loop_agent) if isinstance(loop_agent, dict) else None
     return {
         "agentId": resolved_id,
         "agentLiveModeEnabled": enabled,
@@ -20494,6 +21293,7 @@ def get_agent_live_mode_setting(agent_id):
             "lastHeartbeatAt": loop_agent.get("lastHeartbeatAt") if isinstance(loop_agent, dict) else None,
             "lastOutcome": loop_agent.get("lastOutcome") if isinstance(loop_agent, dict) else None,
             "stats": loop_agent.get("stats", {}) if isinstance(loop_agent, dict) else {},
+            "activeGoal": active_goal,
         },
         "storage": "world-meta.json agentProfiles[agentId].agentLiveModeEnabled",
         "defaulted": not (isinstance(profile, dict) and isinstance(profile.get("agentLiveModeEnabled"), bool)),
@@ -20580,6 +21380,34 @@ def set_agent_live_mode_setting(agent_id, enabled=None, *, agent_loop_enabled=No
                     disable_agent_row=True,
                     reason="agent-live-mode-disabled" if enabled is False else "agent-live-loop-disabled",
                 )
+            else:
+                goals, active_goal = _live_agent_goals.normalize_agent_goals(
+                    agent_state,
+                    retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"],
+                )
+                if not active_goal:
+                    paused_goals = [goal for goal in goals if goal.get("status") == "paused"]
+                    paused_goals = list(enumerate(paused_goals))
+                    paused_goals.sort(
+                        key=lambda item: (
+                            bool(
+                                (item[1].get("history") or [])
+                                and (item[1].get("history") or [])[-1].get("event") == "goal-paused"
+                                and (item[1].get("history") or [])[-1].get("reason") in {"agent-live-mode-disabled", "agent-live-loop-disabled"}
+                            ),
+                            _parse_isoish_epoch(item[1].get("pausedAt") or item[1].get("updatedAt")) or 0,
+                            item[0],
+                        ),
+                        reverse=True,
+                    )
+                    if paused_goals:
+                        resume_goal = paused_goals[0][1]
+                        resume_goal["status"] = "active"
+                        resume_goal.pop("pausedAt", None)
+                        resume_goal["updatedAt"] = _utc_now_iso()
+                        resume_goal["operatorSummary"] = "Durable goal resumed after Agent Live Mode restarted."
+                        resume_goal.setdefault("history", []).append({"at": resume_goal["updatedAt"], "event": "goal-resumed", "reason": "agent-live-mode-enabled"})
+                        _live_agent_loop_store_durable_goal(agent_state, resume_goal)
             _live_agent_loop_add_event(loop_state, "settings-updated", agent_id=resolved_id, details={"agentEnabled": {"agentId": resolved_id, "enabled": bool(next_loop_enabled), "source": "agent-live-mode-setting"}})
             saved_loop = save_live_agent_loop_state(loop_state)
             saved_agent = ((saved_loop.get("agents") or {}).get(resolved_id) or {}) if isinstance(saved_loop, dict) else {}
@@ -20642,6 +21470,7 @@ def _merge_agent_profiles(roster, meta=None):
             "lastHeartbeatAt": loop_agent.get("lastHeartbeatAt") if isinstance(loop_agent, dict) else None,
             "lastOutcome": loop_agent.get("lastOutcome") if isinstance(loop_agent, dict) else None,
             "stats": loop_agent.get("stats", {}) if isinstance(loop_agent, dict) else {},
+            "activeGoal": _live_agent_loop_active_durable_goal(loop_agent) if isinstance(loop_agent, dict) else None,
         }
         if isinstance(profile, dict):
             if profile.get("name"):
@@ -21092,7 +21921,7 @@ def get_roster(meta=None):
             try:
                 _gateway_presence.init_agents([
                     a.get("statusKey") or a.get("id") for a in _agent_roster if a.get("statusKey") or a.get("id")
-                ])
+                ], prune=True)
             except Exception:
                 pass
     return _merge_agent_profiles(_agent_roster, meta=meta)
@@ -21508,6 +22337,13 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if not setting:
                 return self._send_json(_api_error("agent_not_found", "Unknown agent id for Agent Live Mode setting.", details={"agentId": agent_id}), 404)
             return self._send_json(setting)
+
+        if path.startswith("/api/agent/") and path.endswith("/goals"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "api" and parts[1] == "agent" and parts[3] == "goals":
+                agent_id = urllib.parse.unquote(parts[2])
+                ok, result, status = get_live_agent_goals(agent_id)
+                return self._send_json(result, status)
 
         if path == "/api/agent-live-world":
             qs = urllib.parse.parse_qs(parsed.query)
@@ -22131,6 +22967,15 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             ok, result, status = reset_agent_live_mode_state(agent_id, actor=data.get("actor") or "api")
             return self._send_json(result, status)
 
+        if path.startswith("/api/agent/") and path.endswith("/goals"):
+            if _demo_feature_locked("agentLiveMode"):
+                return self._send_json(_locked_response("agentLiveMode"), 403)
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "api" and parts[1] == "agent" and parts[3] == "goals":
+                agent_id = urllib.parse.unquote(parts[2])
+                ok, result, status = update_live_agent_goals(agent_id, self._read_body())
+                return self._send_json(result, status)
+
         if path.startswith("/api/agent/") and path.endswith("/live-mode"):
             if _demo_feature_locked("agentLiveMode"):
                 return self._send_json(_locked_response("agentLiveMode"), 403)
@@ -22613,6 +23458,16 @@ def main():
 
     # Derive working/idle from Virtual World's own live OpenClaw gateway state.
     initialize_live_presence()
+
+    # A hard process stop cannot run a model worker's finally block. Remove
+    # planner sessions for residents this world still owns before starting new
+    # generations, so restart recovery never leaks planner scaffolding into the
+    # Gateway session store.
+    planner_cleanup = _cleanup_orphaned_live_agent_model_planner_sessions()
+    if planner_cleanup.get("deleted"):
+        print(f"🧹 Cleaned {len(planner_cleanup['deleted'])} orphaned Live Mode planner session(s)")
+    if not planner_cleanup.get("ok"):
+        print(f"⚠️  Live Mode planner session startup cleanup was incomplete: {planner_cleanup.get('failed')}")
 
     # Keep enabled Live Mode agents present across restarts; action creation stays
     # gated by an active world client polling /api/world-actions/active.

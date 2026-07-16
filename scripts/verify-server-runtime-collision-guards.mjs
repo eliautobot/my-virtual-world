@@ -2,7 +2,7 @@
 // Regression test: cached server pathfinder routes must still obey the static
 // segment guard before publishing authoritative positions.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -13,6 +13,7 @@ import {
   makeServerScriptedDeskConsumeTarget,
   makeServerRuntimeStep,
   SERVER_RUNTIME_AGENT_HARD_SEPARATION_RADIUS,
+  SERVER_RUNTIME_ROUTE_STALE_AFTER_MS,
   serverScriptedServiceQueueSlotTarget,
   snapshotToPlain,
   worldObjectToPlain,
@@ -365,6 +366,142 @@ assert.match(
   /^server-static-arrival-snap-/,
   `blocked adjusted arrival snaps should be visible in route debug state: ${JSON.stringify(adjustedArrival.route)}`,
 );
+
+const seedOffice = {
+  id: 'seed-office',
+  type: 'office',
+  worldX: 0,
+  worldY: -13,
+  widthTiles: 30,
+  heightTiles: 22,
+  interior: {
+    walls: [],
+    furniture: [
+      { type: 'counter', x: 24.187948209976394, z: 0.7904121338362842, floor: 1 },
+      { type: 'microwave', x: 25.048, z: 0.79, floor: 1 },
+    ],
+  },
+};
+const seedDataDir = mkdtempSync(join(tmpdir(), 'vw-runtime-collision-seed-'));
+mkdirSync(join(seedDataDir, 'buildings'), { recursive: true });
+writeFileSync(join(seedDataDir, 'buildings', 'seed-office.json'), JSON.stringify(seedOffice, null, 2));
+configureDynamicInteriorRouting({
+  apiToWorldScale: 1 / 40,
+  getInteriorBuildingAt: (apiX, apiY) => {
+    const x = Number(apiX) / 40;
+    const z = Number(apiY) / 40;
+    return x >= seedOffice.worldX && x <= seedOffice.worldX + seedOffice.widthTiles &&
+      z >= seedOffice.worldY && z <= seedOffice.worldY + seedOffice.heightTiles
+      ? seedOffice
+      : null;
+  },
+});
+const seedTarget = {
+  x: 1001.92,
+  y: -457.2,
+  floor: 1,
+  buildingId: seedOffice.id,
+  targetKind: 'object-instance',
+};
+const blockedLegacySeed = {
+  x: 884.5422879119433,
+  y: -482.1494028981311,
+  floor: 1,
+  buildingId: seedOffice.id,
+  heading: 0,
+  state: 'idle',
+  visualState: null,
+};
+const blockedLegacySeedStep = makeServerRuntimeStep(
+  seedDataDir,
+  'vw-endurance-8b661c7c-3',
+  blockedLegacySeed,
+  seedTarget,
+  100,
+  { speedUnitsPerSec: 72, arrivalRadius: 3, crowdAgents: [] },
+);
+assert.match(
+  blockedLegacySeedStep.route?.blockedReason || '',
+  /^server-static-step-start-blocked/,
+  `seed regression fixture must reproduce the blocked interior start: ${JSON.stringify(blockedLegacySeedStep)}`,
+);
+
+const seedRoom = makeFakeRuntimeRoom(seedDataDir);
+const safeSeed = seedRoom.serverRuntimeSeedPosition('vw-endurance-8b661c7c-3', seedTarget);
+const safeSeedStep = makeServerRuntimeStep(
+  seedDataDir,
+  'vw-endurance-8b661c7c-3',
+  { ...safeSeed, state: 'idle', visualState: null },
+  seedTarget,
+  100,
+  { speedUnitsPerSec: 72, arrivalRadius: 3, crowdAgents: [] },
+);
+assert.doesNotMatch(
+  safeSeedStep.route?.blockedReason || '',
+  /^server-static-step-start-blocked/,
+  `missing runtime residents must be seeded onto a statically valid point: ${JSON.stringify({ safeSeed, safeSeedStep })}`,
+);
+assert.ok(
+  safeSeedStep.arrived || Math.hypot(safeSeedStep.x - safeSeed.x, safeSeedStep.y - safeSeed.y) > 0.01,
+  `safe runtime seed must be able to make immediate route progress: ${JSON.stringify({ safeSeed, safeSeedStep })}`,
+);
+
+const staleNowMs = Date.now();
+const staleStartedAt = new Date(staleNowMs - SERVER_RUNTIME_ROUTE_STALE_AFTER_MS - 5000).toISOString();
+writeFileSync(join(seedDataDir, 'world-meta.json'), JSON.stringify({
+  agentLife: {
+    worldActions: {
+      active: [{
+        id: 'stale-live-action',
+        agentId: 'stale-live-agent',
+        status: 'routing',
+        actionType: 'life.heatFood',
+        capabilityTag: 'life.food',
+        priority: 'normal',
+        source: { kind: 'agent-live-mode', requestId: 'stale-live-action' },
+        target: { kind: 'world-point', x: seedTarget.x, y: seedTarget.y, floor: seedTarget.floor },
+        timing: {
+          createdAt: staleStartedAt,
+          updatedAt: staleStartedAt,
+          startedAt: staleStartedAt,
+        },
+        lifecycle: {
+          previousStatus: 'route_pending',
+          allowedNext: ['arrived', 'cancelled', 'expired', 'failed'],
+          transitionLog: [],
+        },
+      }],
+      history: [],
+    },
+  },
+}, null, 2));
+const staleRoom = makeFakeRuntimeRoom(seedDataDir);
+staleRoom.state.agents.set('stale-live-agent', {
+  agentId: 'stale-live-agent',
+  mode: 'live',
+  owner: 'server-live-action-runtime',
+  ...safeSeed,
+  state: 'routing',
+  routeId: 'route-stale-live-action',
+  worldActionId: 'stale-live-action',
+  leaseOwner: 'server-runtime',
+  leaseExpiresAt: new Date(staleNowMs + 10000).toISOString(),
+  visualState: null,
+});
+const staleTick = staleRoom.tickLiveActionRuntime(100, staleNowMs, new Date(staleNowMs).toISOString());
+const staleWorldActions = JSON.parse(readFileSync(join(seedDataDir, 'world-meta.json'), 'utf8')).agentLife.worldActions;
+assert.equal(
+  staleWorldActions.active.length,
+  0,
+  `stale Live Agent routes must leave the active action store: ${JSON.stringify({ staleNowMs, staleStartedAt, staleAfterMs: SERVER_RUNTIME_ROUTE_STALE_AFTER_MS, staleTick, staleWorldActions, cached: staleRoom.liveActionRuntimeStore })}`,
+);
+assert.equal(staleWorldActions.history[0]?.status, 'failed', 'stale Live Agent routes must settle as failed history');
+assert.equal(
+  staleWorldActions.history[0]?.failureReason,
+  'route_unreachable',
+  'stale Live Agent routes must use a server-valid failure reason so reconciliation cannot resurrect them',
+);
+assert.equal(staleWorldActions.history[0]?.result?.reason, 'route-stale', 'stale route diagnostics should preserve the watchdog reason');
 
 const queueOffice = {
   id: 'queue-office',

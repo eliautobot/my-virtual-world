@@ -146,6 +146,8 @@ Status records are used for visual presence only. They do not grant tool access.
 | GET | `/api/agent/<agent-id>/live-mode` | Read Agent Live Mode setting. |
 | POST | `/api/agent/<agent-id>/live-mode` | Enable or disable Agent Live Mode. |
 | POST | `/api/agent/<agent-id>/live-mode/reset` | Cancel and clear one resident's Live Agent runtime state while preserving profile, assignments, buildings, and objects. |
+| GET | `/api/agent/<agent-id>/goals` | Read the resident's restart-safe goal/task/step ledger and status counts. |
+| POST | `/api/agent/<agent-id>/goals` | Create, update, activate, pause, cancel, replan, or retry a durable goal. |
 | GET | `/api/agent/<agent-id>/workspace` | Read editable provider workspace files for the agent. |
 | POST | `/api/agent/<agent-id>/workspace` | Save editable provider workspace files for the agent. |
 | GET | `/api/agent/<agent-id>/resident-profile` | Read or create the Virtual World Resident Profile. |
@@ -168,7 +170,9 @@ Reset body:
 }
 ```
 
-Reset clears only the selected resident's loop memory, plans, episodes, proposals, internal notes, planner transcript copies, pending model reply, and active Live Agent actions. It does not delete the resident profile, agent framework files, assignments, homes, buildings, furniture, or other world data.
+Reset clears only the selected resident's loop memory, durable goals, short execution plans, episodes, proposals, internal notes, planner transcript copies, pending model reply, and active Live Agent actions. It does not delete the resident profile, agent framework files, assignments, homes, buildings, furniture, or other world data.
+
+Durable goal POST operations are `create`, `upsert`, `activate`, `resume`, `pause`, `cancel`, `replan`, and `retry`. Goal payloads contain stable task and step ids, `dependsOn` arrays, success/failure criteria, and per-step retry settings. Verified terminal outcomes cannot be overwritten by stale active saves. See `docs/LIVE-AGENT-MODE-DURABLE-GOALS.md`.
 
 ## Live Agent Loop
 
@@ -184,7 +188,7 @@ Reset clears only the selected resident's loop memory, plans, episodes, proposal
 
 The scheduler uses a persisted round-robin cursor when the per-tick action limit is smaller than the enabled roster. Disabled, paused, and no-agent timer ticks are read-only. Model-backed residents use a two-phase decision: the tick that starts an asynchronous model request does not also start a deterministic action from the same perception frame.
 
-When the global Agent Live Mode feature switch is off, the server returns `agent_live_mode_feature_disabled` for per-agent settings, attention, loop-setting, proposal-resolution, Live Agent world-action, and Live Agent move-intent writes. The explicit selected-agent reset remains available for operator cleanup. Live Agent status, feedback, proposal, and timeline reads remain available as read-only snapshots and do not migrate or reconcile persisted Live Agent state.
+When the global Agent Live Mode feature switch is off, the server returns `agent_live_mode_feature_disabled` for per-agent settings, durable-goal writes, attention, loop-setting, proposal-resolution, Live Agent world-action, and Live Agent move-intent writes. The explicit selected-agent reset remains available for operator cleanup. Live Agent status, durable-goal, feedback, proposal, and timeline reads remain available as read-only snapshots and do not migrate or reconcile persisted Live Agent state.
 
 ## World Actions
 

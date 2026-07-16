@@ -163,12 +163,47 @@ def get_connection_status():
     }
 
 
-def init_agents(agent_ids):
-    """Initialize state for discovered agents."""
+def init_agents(agent_ids, prune=False):
+    """Initialize state for discovered agents.
+
+    When ``prune`` is true, treat ``agent_ids`` as the authoritative roster and
+    remove state/tracking for agents that no longer exist. This keeps crash
+    snapshots from retaining deleted agents indefinitely.
+    """
+    agent_ids = {str(agent_id) for agent_id in agent_ids if str(agent_id or "").strip()}
+    stale_agent_ids = set()
     with _state_lock:
+        if prune:
+            stale_agent_ids = set(_state) - agent_ids
+            for agent_id in stale_agent_ids:
+                _state.pop(agent_id, None)
         for aid in agent_ids:
             if aid not in _state:
                 _state[aid] = {"state": "idle", "task": "", "updated": 0, "source": "init"}
+
+    if not stale_agent_ids:
+        return
+
+    removed_run_ids = set()
+    removed_tool_ids = set()
+    for agent_id in stale_agent_ids:
+        removed_run_ids.update(_active_runs_by_agent.pop(agent_id, set()))
+        removed_tool_ids.update(_active_tools_by_agent.pop(agent_id, set()))
+        _last_event_at.pop(agent_id, None)
+        _last_event_task.pop(agent_id, None)
+        _finish_idle_at.pop(agent_id, None)
+        _manual_overrides.pop(agent_id, None)
+    for run_id, agent_id in list(_run_agents.items()):
+        if agent_id in stale_agent_ids:
+            removed_run_ids.add(run_id)
+            _run_agents.pop(run_id, None)
+    for run_id in removed_run_ids:
+        _active_run_last_seen.pop(run_id, None)
+    for tool_id in removed_tool_ids:
+        _active_tool_last_seen.pop(tool_id, None)
+    for session_key in list(_last_updated_at):
+        if _extract_agent_id(session_key) in stale_agent_ids:
+            _last_updated_at.pop(session_key, None)
 
 
 # ─── Event Processing ────────────────────────────────────────────
@@ -882,18 +917,28 @@ def save_snapshot(filepath):
         print(f"⚠️  Gateway presence: snapshot save error: {e}")
 
 
-def load_snapshot(filepath):
-    """Load state from disk snapshot (on startup)."""
+def load_snapshot(filepath, allowed_agent_ids=None):
+    """Load state from disk snapshot (on startup).
+
+    If ``allowed_agent_ids`` is provided, ignore records for agents outside the
+    current roster. Old snapshots may otherwise resurrect deleted agents.
+    """
+    allowed = None
+    if allowed_agent_ids is not None:
+        allowed = {str(agent_id) for agent_id in allowed_agent_ids if str(agent_id or "").strip()}
     try:
         with open(filepath, "r") as f:
             data = json.load(f)
         with _state_lock:
+            if allowed is not None:
+                for key in set(_state) - allowed:
+                    _state.pop(key, None)
             for key, val in data.items():
                 if key == "_meetings":
                     with _meetings_lock:
                         _meetings.clear()
                         _meetings.extend(val if isinstance(val, list) else [])
-                elif isinstance(val, dict):
+                elif isinstance(val, dict) and (allowed is None or key in allowed):
                     # Reset to idle on load (we don't know if they're still working)
                     _state[key] = {
                         "state": "idle",

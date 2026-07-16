@@ -36,6 +36,7 @@ Do not commit this data. It can contain private user world state, local configur
 - agent profiles
 - decorations
 - Agent Life world action state
+- Agent Life durable goal/task/step ledgers
 
 The `initialized` flag prevents starter buildings from being recreated after users delete them.
 
@@ -162,6 +163,12 @@ Resident profiles are the world-facing roleplay/autonomy layer. They contain ide
 Resident memory uses semantic consolidation rather than blind FIFO deletion. Recent experiences remain in `memory.shortTerm`; important failures, goal work, user-relevant events, social experiences, and aging records are promoted into `memory.longTerm`. Repeated routine outcomes merge into counted memories, and a bounded generated capsule is added to `memory.summary`. Explicit resident-authored long-term memories are pinned ahead of generated aggregates. Relationships remain in their dedicated map.
 
 Move-intent history, world-action events, and planner transcripts are operational telemetry, not cognitive memory. Compacting those collections does not erase a resident's learned experience. The loop records verified outcomes in the Resident Profile before old telemetry reaches its storage ceiling.
+
+### Durable Live Agent Goals
+
+Restart-safe autonomy work lives under `agentLife.liveModeLoop.agents[agentId]` as `activeGoal` plus bounded `durableGoals`. Each goal owns ordered tasks and steps with stable ids, dependency ids, statuses, retry counters, success/failure criteria, and verified outcomes. The ledger survives normal code/container restarts because it shares the persistent world volume. Disabling Live Mode pauses the active goal; the selected-agent reset intentionally clears that resident's goal ledger.
+
+World actions created for a durable step carry `goalId`, `goalRevision`, `goalTaskId`, and `goalStepId` in their parameters so completion evidence advances the correct step. See `docs/LIVE-AGENT-MODE-DURABLE-GOALS.md`.
 
 ## World Actions
 

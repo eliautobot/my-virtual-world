@@ -91,6 +91,7 @@ The repo includes internal documentation for both people and AI agents:
 - [docs/LIVE-AGENT-MODE-RESTART-SPEC.md](docs/LIVE-AGENT-MODE-RESTART-SPEC.md) - fresh Live Agent Mode architecture and Generative Agents adaptation.
 - [docs/LIVE-AGENT-MODE-RESTART-PHASES.md](docs/LIVE-AGENT-MODE-RESTART-PHASES.md) - ordered phase plan for building Live Agent Mode progressively.
 - [docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md](docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md) - Colyseus sidecar architecture for the online-game runtime foundation.
+- [docs/LIVE-AGENT-MODE-DURABLE-GOALS.md](docs/LIVE-AGENT-MODE-DURABLE-GOALS.md) - restart-safe goals, ordered tasks/steps, verified outcomes, retries, and replanning.
 - [docs/AGENT_PLATFORM_COMMUNICATIONS.md](docs/AGENT_PLATFORM_COMMUNICATIONS.md) - visible agent-to-agent messaging through My Virtual World.
 - [docs/VIRTUAL_WORLD_AGENT_TOOLS.md](docs/VIRTUAL_WORLD_AGENT_TOOLS.md) - canonical agent-facing tool index.
 - [docs/SKILLS.md](docs/SKILLS.md) - reusable skill files under `docs/skills/`.

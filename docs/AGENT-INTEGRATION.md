@@ -124,6 +124,8 @@ Relevant endpoints:
 GET /api/agent/<agent-id>/live-mode
 POST /api/agent/<agent-id>/live-mode
 POST /api/agent/<agent-id>/live-mode/reset
+GET /api/agent/<agent-id>/goals
+POST /api/agent/<agent-id>/goals
 POST /api/agent-model/actions
 POST /api/world-actions
 POST /api/agents/<agent-id>/move
@@ -137,6 +139,8 @@ Normal chat does not create Live Agent attention records while the global switch
 
 OpenClaw model decisions use a two-phase asynchronous handoff: while a model request is in flight, that resident does not also start a deterministic action from the same perception frame. A later tick either applies the fenced model choice against the current candidate surface or falls back safely after the model request fails or cools down.
 
+Planner turns can produce a durable hierarchy of stable goal, task, and step ids. The server persists dependency state and verified outcomes, schedules bounded retries, and asks the planner to repair only unfinished work when an action or target disappears. These ledgers survive normal restarts; disabling Live Mode pauses them, and re-enabling resumes them.
+
 The selected-agent reset endpoint is narrower than a world reset: it clears transient loop state, notes, transcript copies, pending decisions, and active Live Agent actions for one resident only. It preserves provider workspace files, the Resident Profile, assignments, buildings, objects, and other residents.
 
 Fresh restart specs:
@@ -144,6 +148,7 @@ Fresh restart specs:
 - `docs/LIVE-AGENT-MODE-RESTART-SPEC.md`
 - `docs/LIVE-AGENT-MODE-RESTART-PHASES.md`
 - `docs/LIVE-AGENT-MODE-COLYSEUS-SIDECAR.md`
+- `docs/LIVE-AGENT-MODE-DURABLE-GOALS.md`
 
 ## World Actions and Movement
 
