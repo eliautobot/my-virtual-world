@@ -3,8 +3,8 @@
 
 1. User chat preemption: marking user attention cancels live-mode actions and
    the loop skips the agent while the hold is active.
-2. Model decision layer: model choice/skip/invalid parsing, provider gating,
-   and fallback to planner-v2 when the model is unavailable.
+2. Resident autonomy kernel: model choice/skip/invalid parsing, provider-neutral
+   inference, Resident Profile authority, and no deterministic action fallback.
 3. Settings: new toggles persist through the settings endpoint.
 
 Runs against an isolated temp world; no live data or gateway required.
@@ -61,6 +61,7 @@ def load_server(tmpdir):
     module._agent_roster = [
         {"id": "tester", "statusKey": "tester", "name": "Test Resident", "providerKind": "openclaw", "providerAgentId": "tester"},
         {"id": "hermie", "statusKey": "hermie", "name": "Hermes Resident", "providerKind": "hermes", "providerAgentId": "hermie"},
+        {"id": "codie", "statusKey": "codie", "name": "Codex Resident", "providerKind": "codex", "providerAgentId": "codie"},
     ]
     module._roster_time = time.time()
     return module
@@ -267,6 +268,53 @@ def main():
         })
         chosen_pc, status_pc, intent_pc = parse(planner_category, ids)
         check("planner JSON category request parsed", chosen_pc is None and status_pc == "planner-step-category-request" and intent_pc.get("category") == "seating", json.dumps(intent_pc or {})[:500])
+        executable_surface = [
+            {
+                "id": "use-seating-object",
+                "actionType": "life.restAtArmchair",
+                "category": "seating",
+                "objectType": "armchair",
+                "target": {"catalogId": "armchair"},
+                "score": 1.2,
+            },
+            {
+                "id": "world-use-brainstorm-test",
+                "actionType": "planning.brainstorm",
+                "objectType": "whiteboard",
+                "target": {"catalogId": "whiteboard"},
+                "score": 0.8,
+            },
+        ]
+        planner_action_alias = json.dumps({
+            "currentGoal": "Rest in a real chair",
+            "nextStep": {"intent": "Use the armchair now", "action": "life.restAtArmchair", "category": "armchair"},
+        })
+        chosen_alias, status_alias, _ = parse(planner_action_alias, executable_surface)
+        check(
+            "typed action alias resolves to its current safe executable candidate",
+            chosen_alias == "use-seating-object" and status_alias == "planner-step-action-alias",
+            json.dumps({"chosen": chosen_alias, "status": status_alias}),
+        )
+        planner_generic_alias = json.dumps({
+            "currentGoal": "Use a perceived object",
+            "nextStep": {"intent": "Brainstorm at the board", "action": "planning.brainstorm"},
+        })
+        chosen_generic_alias, status_generic_alias, _ = parse(planner_generic_alias, executable_surface)
+        check(
+            "generic birth-world action type resolves to its opaque affordance id",
+            chosen_generic_alias == "world-use-brainstorm-test" and status_generic_alias == "planner-step-action-alias",
+            json.dumps({"chosen": chosen_generic_alias, "status": status_generic_alias}),
+        )
+        unsupported_pingpong = json.dumps({
+            "currentGoal": "Play a game",
+            "nextStep": {"intent": "Play ping-pong", "action": "life.playPingPong", "category": "pingpong"},
+        })
+        chosen_unsupported, status_unsupported, _ = parse(unsupported_pingpong, executable_surface)
+        check(
+            "unsupported nearby interaction never resolves outside the safe candidate surface",
+            chosen_unsupported is None and status_unsupported == "planner-step-category-request",
+            json.dumps({"chosen": chosen_unsupported, "status": status_unsupported}),
+        )
         planner_tool = json.dumps({
             "reflection": "I need more information before acting.",
             "currentGoal": "Inspect available objects.",
@@ -285,22 +333,131 @@ def main():
         with server._live_agent_model_decision_lock:
             server._live_agent_model_decision_state.get("tester", {}).pop("requestedCategories", None)
         check("requested category cleared", "seating" not in server._live_agent_loop_requested_categories("tester"))
+        raw_armchair_turn = {
+            "goal": {"id": "goal-armchair-normalization", "title": "Verify home comfort"},
+            "tasks": [{
+                "id": "task-comfort",
+                "title": "Use a comfort anchor",
+                "steps": [{"id": "step-armchair", "title": "Rest in the armchair", "loopActionId": "life.restAtArmchair"}],
+            }],
+            "nextStep": {
+                "taskId": "task-comfort",
+                "stepId": "step-armchair",
+                "intent": "Reach and rest in the armchair",
+                "action": "life.restAtArmchair",
+            },
+        }
+        normalized_armchair_turn = server._live_agent_loop_normalize_planner_turn_actions(raw_armchair_turn)
+        normalized_armchair_step = (((normalized_armchair_turn.get("tasks") or [{}])[0].get("steps") or [{}])[0])
+        check(
+            "raw armchair action type normalizes to durable seating affordance",
+            normalized_armchair_step.get("loopActionId") == "use-seating-object"
+            and (normalized_armchair_turn.get("nextStep") or {}).get("action") == "use-seating-object"
+            and (normalized_armchair_turn.get("nextStep") or {}).get("requestedAction") == "life.restAtArmchair",
+            json.dumps(normalized_armchair_turn, default=str),
+        )
 
         check("provider kind resolves openclaw", server._live_agent_model_decision_provider_kind("tester") == "openclaw")
         check("provider kind resolves hermes", server._live_agent_model_decision_provider_kind("hermie") == "hermes")
+        check("provider kind resolves codex", server._live_agent_model_decision_provider_kind("codie") == "codex")
 
-        # Provider gating: hermes agent should be refused by the model layer.
+        # OpenClaw, Hermes, and Codex are inference transports for the same
+        # Resident Profile-controlled autonomy kernel.
         state = server.get_live_agent_loop_state()
         config = server._live_agent_model_decision_config(state)
         frame = {"candidates": [{"id": "hydrate-water-cooler", "label": "get water", "need": "hydration", "score": 1, "decision": "candidate"}]}
-        chosen, detail = server._live_agent_model_decide("hermie", frame, {}, config)
-        check("non-openclaw provider skipped by model layer", chosen is None and detail.get("status") == "provider-not-supported", json.dumps(detail))
+        check(
+            "Live Mode inference supports OpenClaw Hermes and Codex",
+            {"openclaw", "hermes", "codex"}.issubset(server.LIVE_AGENT_LOOP_MODEL_DECISION_SOURCES),
+            json.dumps(sorted(server.LIVE_AGENT_LOOP_MODEL_DECISION_SOURCES)),
+        )
 
-        # Async request path: first call starts a background request and falls back
-        # to planner-v2 for this tick; the worker then fails gracefully without a gateway.
+        class FakeInferenceProvider:
+            def __init__(self, session_id):
+                self.session_id = session_id
+                self.sent = []
+                self.deleted = []
+
+            def is_available(self):
+                return True
+
+            def send_chat_message(self, profile, message, session_id=None, **kwargs):
+                self.sent.append({"profile": profile, "message": message, "sessionId": session_id, "kwargs": kwargs})
+                return {"ok": True, "reply": 'ACTION: skip', "sessionId": session_id or self.session_id}
+
+            def list_sessions(self, profile, limit=40):
+                return {"ok": True, "sessions": []}
+
+            def list_threads(self, profile, limit=40):
+                return {"ok": True, "sessions": []}
+
+            def delete_session(self, profile, session_id):
+                self.deleted.append((profile, session_id))
+                return {"ok": True}
+
+            def delete_thread(self, profile, session_id):
+                self.deleted.append((profile, session_id))
+                return {"ok": True}
+
+        fake_hermes = FakeInferenceProvider("hermes-live-turn")
+        fake_codex = FakeInferenceProvider("codex-live-turn")
+        original_hermes_provider = server._hermes_provider
+        original_codex_provider = server._codex_provider
+        original_live_session_active = server._agent_live_mode_session_active
+        try:
+            server._hermes_provider = lambda: fake_hermes
+            server._codex_provider = lambda: fake_codex
+            server._agent_live_mode_session_active = lambda *_args, **_kwargs: True
+            hermes_exchange = server._live_agent_model_provider_request("hermie", "resident turn", config, 1)
+            codex_exchange = server._live_agent_model_provider_request("codie", "resident turn", config, 1)
+            check("Hermes executes a Resident turn as inference transport", hermes_exchange.get("ok") and hermes_exchange.get("sessionId") == "hermes-live-turn", json.dumps(hermes_exchange))
+            check("Codex executes a Resident turn as inference transport", codex_exchange.get("ok") and codex_exchange.get("sessionId") == "codex-live-turn", json.dumps(codex_exchange))
+            check("Hermes Resident turn omits framework rules and provider-native YOLO tools", fake_hermes.sent and fake_hermes.sent[0]["kwargs"].get("yolo_once") is False and fake_hermes.sent[0]["kwargs"].get("isolated") is True, json.dumps(fake_hermes.sent))
+            check("Codex Resident turn uses isolated read-only world runtime context", fake_codex.sent and fake_codex.sent[0]["kwargs"].get("isolated") is True and "VIRTUAL WORLD LIVE MODE INFERENCE TRANSPORT" in fake_codex.sent[0]["kwargs"].get("developer_instructions", "") and "live-agent-inference" in fake_codex.sent[0]["kwargs"].get("isolated_cwd", ""), json.dumps(fake_codex.sent))
+            check("Hermes ephemeral inference session cleans up", server._live_agent_model_provider_session_cleanup("hermie", "hermes", "hermes-live-turn") and fake_hermes.deleted[-1][1] == "hermes-live-turn")
+            check("Codex ephemeral inference thread cleans up", server._live_agent_model_provider_session_cleanup("codie", "codex", "codex-live-turn") and fake_codex.deleted[-1][1] == "codex-live-turn")
+            hermes_sessions = server._chat_sessions_list_hermes(server._chat_sessions_agent("hermie"))
+            codex_sessions = server._chat_sessions_list_codex(server._chat_sessions_agent("codie"))
+            switched_live, switched_status = server.handle_chat_session_switch("hermie", "vw-live-mode:hermie", {"limit": 10})
+            check("Hermes and Codex expose the provider-neutral Live Mode session", (hermes_sessions.get("sessions") or [{}])[0].get("liveMode") is True and (codex_sessions.get("sessions") or [{}])[0].get("liveMode") is True, json.dumps({"hermes": hermes_sessions, "codex": codex_sessions}, default=str))
+            check("provider-neutral Live Mode session opens decision history", switched_status == 200 and switched_live.get("liveMode") is True and switched_live.get("providerKind") == "hermes" and isinstance(switched_live.get("messages"), list), json.dumps(switched_live, default=str)[:1000])
+        finally:
+            server._hermes_provider = original_hermes_provider
+            server._codex_provider = original_codex_provider
+            server._agent_live_mode_session_active = original_live_session_active
+
+        # OpenClaw must use its raw-model gateway path. An ordinary chat.send
+        # would load the framework workspace persona above the Resident frame.
+        original_gateway_rpc_for_isolation = server._gateway_rpc_call
+        original_recover_for_isolation = server._live_agent_model_decision_recover_reply
+        original_sleep_for_isolation = server.time.sleep
+        openclaw_isolation_calls = []
+        try:
+            server._gateway_rpc_call = lambda method, params=None, timeout=20: openclaw_isolation_calls.append((method, dict(params or {}))) or {"ok": True}
+            server._live_agent_model_decision_recover_reply = lambda *_args, **_kwargs: "ACTION: skip"
+            server.time.sleep = lambda _seconds: None
+            isolated_openclaw = server._live_agent_model_provider_request("tester", "resident turn", config, 17)
+            isolation_method, isolation_params = openclaw_isolation_calls[0]
+            check(
+                "OpenClaw Resident inference omits framework persona bootstrap",
+                isolated_openclaw.get("ok")
+                and isolation_method == "agent"
+                and isolation_params.get("promptMode") == "none"
+                and isolation_params.get("modelRun") is True
+                and isolation_params.get("disableMessageTool") is True
+                and isolation_params.get("agentId") == "tester",
+                json.dumps({"result": isolated_openclaw, "calls": openclaw_isolation_calls}, default=str),
+            )
+        finally:
+            server._gateway_rpc_call = original_gateway_rpc_for_isolation
+            server._live_agent_model_decision_recover_reply = original_recover_for_isolation
+            server.time.sleep = original_sleep_for_isolation
+
+        # Async request path: first call starts a background request and waits
+        # without inventing an action; the worker fails gracefully without a gateway.
         chosen2, detail2 = server._live_agent_model_decide("tester", frame, {}, config)
         check(
-            "model decide is non-blocking and falls back gracefully",
+            "model decide is non-blocking and waits safely",
             chosen2 in (None, "skip") and detail2.get("status") in {"model-request-started", "gateway-error", "gateway-rejected", "model-decision-cooldown", "model-decision-in-flight", "reply-timeout"},
             json.dumps(detail2)[:300],
         )
@@ -333,13 +490,41 @@ def main():
         chosen4, detail4 = server._live_agent_model_decide("tester", frame, {}, config)
         check("stale async model choice discarded", chosen4 is None and detail4.get("status") == "stale-choice-discarded", json.dumps(detail4)[:200])
 
-        # Selection integration: with model decisions disabled the planner-v2 path is used untouched.
+        with server._live_agent_model_decision_lock:
+            row = server._live_agent_model_decision_state.setdefault("tester", {})
+            row["pendingChoice"] = {
+                "chosen": None,
+                "detail": {
+                    "mode": server.LIVE_AGENT_LOOP_MODEL_DECISION_MODE,
+                    "status": "planner-step-category-request",
+                    "providerKind": "openclaw",
+                    "requestedCategory": "pingpong",
+                    "categoryResolved": False,
+                },
+                "candidateIds": ["hydrate-water-cooler"],
+                "intention": {"activity": "Play ping-pong", "action": "life.playPingPong", "category": "pingpong"},
+            }
+            row["inFlight"] = False
+        rejected_state = {}
+        chosen_rejected, detail_rejected = server._live_agent_model_decide("tester", frame, rejected_state, config)
+        rejected_evidence = rejected_state.get("lastRejectedIntention") or {}
+        check(
+            "unsupported model category returns structured world evidence instead of looping as applied",
+            chosen_rejected is None
+            and detail_rejected.get("status") == "intention-category-unavailable"
+            and rejected_evidence.get("requestedCategory") == "pingpong"
+            and "hydrate-water-cooler" in (rejected_evidence.get("availableActionIds") or []),
+            json.dumps({"detail": detail_rejected, "evidence": rejected_evidence}, default=str)[:900],
+        )
+
+        # Selection integration: disabling cognition must never silently run a
+        # deterministic scripted action under the resident's name.
         ok, result, status_code = server.update_live_agent_loop_settings({"modelDecisionEnabled": False})
         check("modelDecisionEnabled=false persists", ok and result["state"].get("modelDecisionEnabled") is False)
         agent_state = {}
         selected, decision = server._live_agent_loop_select_next_action("tester", agent_state)
-        check("planner-v2 decision produced when model disabled", isinstance(decision, dict) and decision.get("mode") == "planner-v2")
-        check("model decision detail absent when disabled", "modelDecision" not in decision)
+        check("model-disabled Live Mode never substitutes a planner-v2 action", selected is None and decision.get("selectedActionId") is None and decision.get("mode") == server.LIVE_AGENT_LOOP_MODEL_DECISION_MODE, json.dumps(decision)[:500])
+        check("model-disabled reason is explicit and inspectable", (decision.get("modelDecision") or {}).get("status") == "model-autonomy-required", json.dumps(decision)[:500])
 
         # Re-enable and confirm the failure path still yields a decision frame with model detail.
         server.update_live_agent_loop_settings({"modelDecisionEnabled": True, "modelDecisionMinIntervalSec": 30})
@@ -382,7 +567,7 @@ def main():
         profile_goal = profiles_goal.get("tester") or {}
         profile_goal["residentProfile"] = {
             "schemaVersion": server.RESIDENT_PROFILE_SCHEMA_VERSION,
-            "identity": {"displayName": "Test Resident", "role": "world tester"},
+            "identity": {"displayName": "Test Resident", "role": "world tester", "archetype": "curious furniture explorer", "backstory": "I came here to learn how this world feels from the inside."},
             "goals": {
                 "current": [
                     "Test chairs and seating furniture. Make sure they are seats, are interactive, and feel good to use."
@@ -392,7 +577,8 @@ def main():
             },
             "needs": {},
             "personality": {"curious": 0.9, "easygoing": 0.3, "outgoing": 0.2},
-            "memory": {},
+            "preferences": {"likes": ["armchairs"], "dislikes": ["broken routes"], "favoriteActivities": ["testing furniture"], "favoritePlaces": ["Autonomy Lab"], "socialStyle": "warm but observant", "noveltySeeking": 0.8},
+            "memory": {"longTerm": [{"text": "The armchair in Autonomy Lab felt comfortable.", "importance": 0.9}]},
         }
         profiles_goal["tester"] = profile_goal
         meta_goal["agentProfiles"] = profiles_goal
@@ -423,6 +609,19 @@ def main():
         check("model category request activates dynamic affordance", "use-seating-object" in withreq_defs, json.dumps(withreq_defs))
         with server._live_agent_model_decision_lock:
             server._live_agent_model_decision_state.get("hermie", {}).pop("requestedCategories", None)
+        durable_category_state = {}
+        durable_category_goal = server._live_agent_goals.goal_from_planner_turn(
+            "hermie",
+            raw_armchair_turn,
+            now_iso=server._utc_now_iso(),
+        )
+        server._live_agent_loop_store_durable_goal(durable_category_state, durable_category_goal)
+        durable_category_defs = [d.get("id") for d in server._live_agent_loop_action_defs_for_agent("hermie", durable_category_state)]
+        check(
+            "persisted raw armchair goal restores dynamic seating affordance",
+            "use-seating-object" in durable_category_defs,
+            json.dumps({"goal": durable_category_goal, "defs": durable_category_defs}, default=str)[:1200],
+        )
         goal_frame = server._live_agent_loop_build_goal_frame("tester", perception_goal, goal_agent_state)
         top_goal = next((item for item in goal_frame.get("goals") or [] if item.get("kind") == "resident-profile"), {})
         check("profile goal frame preserves goal text and seating intent", top_goal.get("intent") == "seating-test" and "chairs" in top_goal.get("text", "").lower(), json.dumps(top_goal, default=str)[:500])
@@ -432,7 +631,89 @@ def main():
         prompt_goal = server._live_agent_model_decision_prompt("tester", decision_goal, goal_agent_state)
         check("model prompt includes real goal text and planner JSON format", "Test chairs and seating furniture" in prompt_goal and "nextStep" in prompt_goal and "memoryUpdate" in prompt_goal and "use-seating-object" in prompt_goal and "category" in prompt_goal, prompt_goal[:900])
         check("model prompt presents continuous autonomy not one-shot command", "continuous autonomy loop" in prompt_goal.lower() and "observe, reflect, plan, execute, learn, and replan" in prompt_goal and "Reply with EXACTLY one line" not in prompt_goal, prompt_goal[:700])
-        check("model prompt labels planner frame as ephemeral", "LIVE MODE PLANNER FRAME - EPHEMERAL LOOP CONTEXT" in prompt_goal and "not a life event" in prompt_goal and "Remember only your intention" in prompt_goal, prompt_goal[:700])
+        check("model prompt labels Resident turn as ephemeral", "LIVE MODE RESIDENT TURN - EPHEMERAL WORLD CONTEXT" in prompt_goal and "not a life event" in prompt_goal and "Remember only your intention" in prompt_goal, prompt_goal[:700])
+        check("Resident Profile is authoritative over provider framework persona", "RESIDENT PROFILE AUTHORITY - REQUIRED" in prompt_goal and '"frameworkPersonaFallbackAllowed":false' in prompt_goal and "Do not fall back to, impersonate, or prioritize its framework SOUL" in prompt_goal, prompt_goal[:1300])
+        check("Resident preferences and ranked memories reach inference", "testing furniture" in prompt_goal and "warm but observant" in prompt_goal and "ranked by relevance, recency, and importance" in prompt_goal and "felt comfortable" in prompt_goal, prompt_goal[:1600])
+        context_results = server._live_agent_execute_context_tool_requests("tester", ["world.inspectLastOutcome", "world.recall", "filesystem.read"])
+        check("same-turn context tools are bounded and world-read-only", len(context_results) == 3 and context_results[0].get("ok") and context_results[1].get("ok") and context_results[2].get("ok") is False and "read-only context registry" in context_results[2].get("error", ""), json.dumps(context_results, default=str)[:1000])
+        trace_state = {}
+        first_trace = server._live_agent_loop_trace(trace_state, "observe", {"room": "Autonomy Lab"})
+        duplicate_trace = server._live_agent_loop_trace(trace_state, "observe", {"room": "Autonomy Lab"})
+        check("causal decision trace preserves phases without redundant duplicates", first_trace.get("id") == duplicate_trace.get("id") and len(trace_state.get("decisionTrace") or []) == 1, json.dumps(trace_state, default=str))
+        lived = server._live_agent_loop_update_experience_state("tester", trace_state, {"at": server._utc_now_iso(), "actionId": "experience-1", "loopActionId": "use-seating-object", "label": "Test armchairs"}, True)
+        check("Resident preferences shape lived enjoyment and mood", lived.get("likedByProfile") is True and lived.get("enjoyment", 0) >= 0.75 and (trace_state.get("experienceState") or {}).get("mood") == "delighted", json.dumps(trace_state.get("experienceState"), default=str))
+        generic_affordances = server._live_agent_loop_generic_spatial_affordances("tester", {}, {
+            "nearbyObjects": [{
+                "perceived": True,
+                "buildingId": "autonomy-lab",
+                "buildingName": "Autonomy Lab",
+                "objectInstanceId": "autonomy-armchair",
+                "catalogId": "armchair",
+                "objectType": "armchair",
+                "floor": 1,
+                "furnitureIndex": 1,
+                "distanceTiles": 2.1,
+                "visible": True,
+                "lineOfSight": True,
+                "interactions": [{"actionId": "life.restAtArmchair", "interactionSpotId": "seat-0", "availability": {"state": "available"}}],
+            }],
+        })
+        check("birth-world objects dynamically expose safe visible affordances", len(generic_affordances) == 1 and generic_affordances[0].get("genericWorldAffordance") is not False and (generic_affordances[0].get("target") or {}).get("objectInstanceId") == "autonomy-armchair", json.dumps(generic_affordances, default=str)[:1000])
+        compact_spatial = server._live_agent_loop_compact_spatial_for_planner({
+            "nearbyObjects": [
+                {
+                    "perceived": True,
+                    "objectInstanceId": "autonomy-pingpong",
+                    "catalogId": "pingpong",
+                    "objectType": "pingpong",
+                    "interactions": [{"actionId": "life.playPingPong", "interactionSpotId": "player-left", "availability": {"state": "available"}}],
+                },
+                {
+                    "perceived": True,
+                    "objectInstanceId": "autonomy-armchair",
+                    "catalogId": "armchair",
+                    "objectType": "armchair",
+                    "interactions": [{"actionId": "life.restAtArmchair", "interactionSpotId": "seat", "availability": {"state": "available"}}],
+                },
+            ],
+        })
+        compact_objects = {item.get("objectInstanceId"): item for item in (compact_spatial.get("nearbyObjects") or [])}
+        check(
+            "planner spatial facts label only typed Live Mode interactions executable",
+            compact_objects["autonomy-pingpong"].get("nearestExecutableInteraction") is None
+            and compact_objects["autonomy-pingpong"].get("liveModeExecutable") is False
+            and (compact_objects["autonomy-armchair"].get("nearestExecutableInteraction") or {}).get("actionId") == "life.restAtArmchair",
+            json.dumps(compact_objects, default=str)[:1200],
+        )
+        with server._live_agent_model_decision_lock:
+            model_row = server._live_agent_model_decision_state.setdefault("tester", {})
+            model_row["pendingChoice"] = {
+                "chosen": None,
+                "detail": {
+                    "mode": server.LIVE_AGENT_LOOP_MODEL_DECISION_MODE,
+                    "status": "planner-step-unresolved",
+                    "plannerTurn": raw_armchair_turn,
+                    "intention": {"action": "life.restAtArmchair", "plannerTurn": raw_armchair_turn},
+                },
+                "candidateIds": [item.get("id") for item in decision_goal.get("candidates") or [] if item.get("decision") == "candidate"],
+                "intention": {"action": "life.restAtArmchair", "plannerTurn": raw_armchair_turn},
+            }
+            model_row["inFlight"] = False
+        repaired_state = server._copy_jsonable(goal_agent_state)
+        repaired_selected, repaired_decision = server._live_agent_loop_select_next_action(
+            "tester",
+            repaired_state,
+            perception_goal,
+            loop_state={"modelDecisionEnabled": True},
+        )
+        check(
+            "unresolved armchair turn updates durable intent without inventing a physical choice",
+            (repaired_decision.get("modelDecision") or {}).get("applied") == "async-previous-request"
+            and repaired_decision.get("selectedActionId") is None
+            and repaired_selected is None
+            and (((repaired_state.get("activeGoal") or {}).get("tasks") or [{}])[0].get("steps") or [{}])[0].get("loopActionId") == "use-seating-object",
+            json.dumps({"decision": repaired_decision, "selected": repaired_selected, "goal": repaired_state.get("activeGoal")}, default=str)[:1800],
+        )
 
         # Goal progress: completed seating targets are remembered and the
         # resolver stops returning already-verified seats, while the prompt
@@ -1569,6 +1850,17 @@ def main():
             "_rotation": 270,
             "liveModeHomeForAgentId": "tester",
         })
+        profile_ok, profile_result, profile_status = server.get_agent_resident_profile("tester", persist=True)
+        reconciled_profile = (profile_result.get("residentProfile") or {}) if isinstance(profile_result, dict) else {}
+        stored_profile = (((server.load_world_meta().get("agentProfiles") or {}).get("tester") or {}).get("residentProfile") or {})
+        check(
+            "owned visible home reconciles into resident profile",
+            profile_ok
+            and profile_status == 200
+            and (reconciled_profile.get("world") or {}).get("homeBuildingId") == "live-home-tester"
+            and (stored_profile.get("world") or {}).get("homeBuildingId") == "live-home-tester",
+            json.dumps({"result": profile_result, "stored": stored_profile}, default=str)[:900],
+        )
         home_action_point = server._live_agent_action_target_point({
             "target": {"kind": "building", "buildingId": "live-home-tester", "floor": 1}
         })
@@ -2224,13 +2516,14 @@ def main():
         # restart recovery must only delete planner sessions for locally owned
         # residents.
         original_gateway_rpc = server._gateway_rpc_call
+        original_provider_kind = server._live_agent_model_decision_provider_kind
         original_recover_reply = server._live_agent_model_decision_recover_reply
         original_sleep = server.time.sleep
         gateway_calls = []
 
         def cleanup_gateway_rpc(method, params=None, timeout=20):
             gateway_calls.append((method, dict(params or {})))
-            if method == "chat.send":
+            if method == "agent":
                 return {"ok": True}
             if method == "sessions.list":
                 return {
@@ -2248,6 +2541,7 @@ def main():
 
         try:
             server._gateway_rpc_call = cleanup_gateway_rpc
+            server._live_agent_model_decision_provider_kind = lambda _agent_id: "openclaw"
             server._live_agent_model_decision_recover_reply = lambda *_args, **_kwargs: '{"reflection":"done","currentGoal":"stay safe","plan":["wait"],"nextStep":{"action":"skip"},"memoryUpdate":{"lesson":"cleanup"}}'
             server.time.sleep = lambda _seconds: None
             cleanup_agent = "cleanup-fenced-resident"
@@ -2287,6 +2581,7 @@ def main():
             )
         finally:
             server._gateway_rpc_call = original_gateway_rpc
+            server._live_agent_model_decision_provider_kind = original_provider_kind
             server._live_agent_model_decision_recover_reply = original_recover_reply
             server.time.sleep = original_sleep
 
@@ -2500,6 +2795,7 @@ def main():
         selected_target = {"target": {"kind": "world-point", "buildingId": "autonomy-lab", "x": 200, "y": 200, "z": 0}}
         goal_context = server._live_agent_loop_bind_durable_goal_action(restarted_goal_agent, "hydrate-water-cooler", selected_target, now_iso=server._utc_now_iso())
         server._live_agent_loop_mark_durable_goal_action_started(restarted_goal_state, "tester", restarted_goal_agent, goal_context, "wa-goal-hydrate", "hydrate-water-cooler", server._utc_now_iso())
+        stale_goal_before_verification = server._copy_jsonable(restarted_goal_agent.get("activeGoal") or {})
         server._live_agent_loop_record_durable_goal_verification(restarted_goal_state, "tester", restarted_goal_agent, {
             "id": "verify-goal-hydrate",
             "actionId": "wa-goal-hydrate",
@@ -2517,6 +2813,48 @@ def main():
             and advanced_goal.get("currentStepId") == "step-rest"
             and ((advanced_goal.get("tasks") or [{}])[0].get("outcome") or {}).get("verified") is True,
             json.dumps(advanced_goal, default=str)[:1200],
+        )
+
+        replayed_rows = server._live_agent_loop_reconcile_agent_records_from_events(
+            {
+                "tester": {
+                    "durableGoals": [server._copy_jsonable(stale_goal_before_verification)],
+                    "activeGoal": server._copy_jsonable(stale_goal_before_verification),
+                    "episodes": [],
+                    "plans": [],
+                },
+            },
+            [{
+                "at": "2099-01-01T00:00:00Z",
+                "type": "durable-goal-step-verified",
+                "agentId": "tester",
+                "details": {
+                    "goalId": goal_context.get("goalId"),
+                    "goalTaskId": goal_context.get("goalTaskId"),
+                    "goalStepId": goal_context.get("goalStepId"),
+                    "actionId": "wa-goal-hydrate",
+                    "verificationId": "verify-goal-hydrate",
+                    "ok": True,
+                    "outcome": {
+                        "status": "completed",
+                        "verified": True,
+                        "verificationId": "verify-goal-hydrate",
+                        "actionId": "wa-goal-hydrate",
+                        "reason": "",
+                        "evidence": {"method": "verification-event-replay-test"},
+                    },
+                },
+            }],
+        )
+        replayed_goal = (replayed_rows.get("tester") or {}).get("activeGoal") or {}
+        replayed_first_step = (((replayed_goal.get("tasks") or [{}])[0].get("steps") or [{}])[0])
+        check(
+            "successful durable-step event repairs a regressed pre-verification snapshot",
+            (replayed_first_step.get("outcome") or {}).get("verified") is True
+            and replayed_first_step.get("status") == "completed"
+            and replayed_goal.get("currentTaskId") == "task-rest"
+            and replayed_goal.get("currentStepId") == "step-rest",
+            json.dumps(replayed_goal, default=str)[:1400],
         )
 
         retry_context = server._live_agent_loop_bind_durable_goal_action(restarted_goal_agent, "use-seating-object", selected_target, now_iso=server._utc_now_iso())
@@ -2562,6 +2900,42 @@ def main():
             and "retries exhausted" in (exhausted_goal.get("replanReason") or ""),
             json.dumps(exhausted_goal, default=str)[:1200],
         )
+        guarded_replan_agent = {
+            "durableGoals": [server._copy_jsonable(exhausted_goal)],
+            "activeGoal": server._copy_jsonable(exhausted_goal),
+        }
+        rejected_support_replan = server._live_agent_loop_bind_durable_goal_action(
+            guarded_replan_agent,
+            "record-internal-note",
+            {"target": {"kind": "support-tool", "supportTool": "internal-note"}},
+            allow_replan=True,
+            replan_action_ids={"use-seating-object"},
+            now_iso=server._utc_now_iso(),
+        )
+        guarded_goal_after = guarded_replan_agent.get("activeGoal") or {}
+        guarded_step_after = (((guarded_goal_after.get("tasks") or [{}, {}])[1].get("steps") or [{}])[0])
+        check(
+            "unrelated support tool cannot replace blocked embodied durable step",
+            rejected_support_replan is None
+            and guarded_goal_after.get("replanRequired") is True
+            and guarded_step_after.get("loopActionId") == "use-seating-object"
+            and guarded_step_after.get("status") == "failed",
+            json.dumps(guarded_goal_after, default=str)[:1500],
+        )
+        authorized_replan_ids = server._live_agent_loop_model_replan_action_ids({
+            "applied": "async-previous-request",
+            "chosen": None,
+            "intention": {
+                "action": "life.restAtArmchair",
+                "plannerTurn": raw_armchair_turn,
+            },
+            "plannerTurn": raw_armchair_turn,
+        })
+        check(
+            "applied armchair repair turn authorizes seating affordance only",
+            authorized_replan_ids == {"use-seating-object"},
+            json.dumps(sorted(authorized_replan_ids)),
+        )
         server.save_live_agent_loop_state(restarted_goal_state)
         ok_retry_goal, retry_goal_result, retry_goal_status = server.update_live_agent_goals("tester", {
             "operation": "retry",
@@ -2601,6 +2975,30 @@ def main():
             and changed_goal.get("replanRequired") is True
             and "no longer available" in (changed_goal.get("replanReason") or ""),
             json.dumps(changed_goal, default=str)[:1200],
+        )
+        invalid_authored_goal = server._live_agent_goals.goal_from_planner_turn(
+            "tester",
+            {
+                "currentGoal": "Play an unsupported game",
+                "nextStep": {"intent": "Play ping-pong", "action": "life.playPingPong"},
+            },
+            now_iso=server._utc_now_iso(),
+        )
+        unchanged_revision = server._live_agent_goals.world_revision(available_frame.get("affordances"))
+        invalid_authored_goal["worldRevision"] = unchanged_revision
+        validated_invalid_goal, invalid_reason = server._live_agent_goals.reconcile_world(
+            invalid_authored_goal,
+            world_revision=unchanged_revision,
+            available_actions={"rest-at-home"},
+            target_keys={"rest-at-home": server._live_agent_loop_target_key(selected_target["target"])},
+            now_iso=server._utc_now_iso(),
+        )
+        check(
+            "newly authored unavailable step is blocked even when the world revision is unchanged",
+            validated_invalid_goal.get("replanRequired") is True
+            and "life.playPingPong" in (invalid_reason or "")
+            and (((validated_invalid_goal.get("tasks") or [{}])[0].get("steps") or [{}])[0].get("status") == "blocked"),
+            json.dumps(validated_invalid_goal, default=str)[:1200],
         )
         server.save_live_agent_loop_state(world_state)
         ok_retry_world, _, _ = server.update_live_agent_goals("tester", {"operation": "retry", "goalId": "goal-verify-recovery", "loopActionId": "use-seating-object", "reason": "world changed"})

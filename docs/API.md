@@ -187,7 +187,7 @@ Durable goal POST operations are `create`, `upsert`, `activate`, `resume`, `paus
 | GET | `/api/agent-live-loop/proposals` | Read operator proposals. |
 | POST | `/api/agent-live-loop/proposals` | Resolve an operator proposal without executing hidden world mutations. |
 
-The scheduler uses a persisted round-robin cursor when the per-tick action limit is smaller than the enabled roster. Disabled, paused, and no-agent timer ticks are read-only. Model-backed residents use a two-phase decision: the tick that starts an asynchronous model request does not also start a deterministic action from the same perception frame.
+The scheduler uses a persisted round-robin cursor when the per-tick action limit is smaller than the enabled roster. Disabled, paused, and no-agent timer ticks are read-only. Model-backed residents use a two-phase decision: the tick that starts an asynchronous model request does not also start a deterministic action from the same perception frame. Typed action aliases resolve only within the current safe executable surface; unsupported categories, unavailable actions, and stale choices return structured evidence and do not trigger a server-ranked substitute.
 
 When the global Agent Live Mode feature switch is off, the server returns `agent_live_mode_feature_disabled` for per-agent settings, durable-goal writes, attention, loop-setting, proposal-resolution, Live Agent world-action, and Live Agent move-intent writes. The explicit selected-agent reset remains available for operator cleanup. Live Agent status, durable-goal, feedback, proposal, and timeline reads remain available as read-only snapshots and do not migrate or reconcile persisted Live Agent state.
 

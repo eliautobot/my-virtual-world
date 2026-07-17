@@ -137,7 +137,7 @@ The in-app global feature switch is also a server-side authority boundary. Turni
 
 Normal chat does not create Live Agent attention records while the global switch is off. The server independently rejects disabled-mode per-agent settings, attention, loop-setting, proposal-resolution, world-action, and move-intent writes, while observability endpoints remain read-only. The explicit selected-agent reset remains available for operator cleanup.
 
-OpenClaw model decisions use a two-phase asynchronous handoff: while a model request is in flight, that resident does not also start a deterministic action from the same perception frame. A later tick either applies the fenced model choice against the current candidate surface or falls back safely after the model request fails or cools down.
+Model decisions use a two-phase asynchronous handoff: while a provider request is in flight, that resident does not also start a deterministic action from the same perception frame. A later tick applies a fenced choice only when it still maps to the current safe executable candidate surface. Provider failures/cooldowns remain in an inspectable wait state, while unsupported categories, unavailable typed actions, and stale choices return structured evidence to the next Resident turn; no unrelated deterministic action is substituted.
 
 Planner turns can produce a durable hierarchy of stable goal, task, and step ids. The server persists dependency state and verified outcomes, schedules bounded retries, and asks the planner to repair only unfinished work when an action or target disappears. These ledgers survive normal restarts; disabling Live Mode pauses them, and re-enabling resumes them.
 

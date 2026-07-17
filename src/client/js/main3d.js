@@ -34244,23 +34244,70 @@ function renderAgentResidentProfileEditor(agent) {
   const identity = profile.identity || {};
   const goals = profile.goals || {};
   const memory = profile.memory || {};
+  const personality = profile.personality || {};
+  const preferences = profile.preferences || {};
   const locked = isLicenseFeatureLocked('advancedEditor');
   container.innerHTML = `
+    <div class="settings-status-card" style="margin-bottom:10px;border-color:rgba(78,205,196,.45);background:rgba(78,205,196,.08)">
+      <strong>Authoritative in Live Agent Mode</strong>
+      <span>While Live Mode is active, this Resident Profile—not the connected OpenClaw, Hermes, or Codex framework persona—controls this resident's identity, preferences, goals, and world memory.</span>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Resident Display Name</label>
+      <input id="residentProfile-displayName" type="text" value="${escapeAttr(identity.displayName || agent.name || '')}" maxlength="120" ${locked ? 'disabled' : ''}>
+    </div>
     <div class="form-group" style="margin-bottom:8px">
       <label>Role</label>
       <input id="residentProfile-role" type="text" value="${escapeAttr(identity.role || '')}" maxlength="160" ${locked ? 'disabled' : ''}>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Archetype</label>
+      <input id="residentProfile-archetype" type="text" value="${escapeAttr(identity.archetype || '')}" maxlength="160" ${locked ? 'disabled' : ''}>
     </div>
     <div class="form-group" style="margin-bottom:8px">
       <label>Life Purpose</label>
       <textarea id="residentProfile-purpose" rows="3" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(identity.lifePurpose || '')}</textarea>
     </div>
     <div class="form-group" style="margin-bottom:8px">
+      <label>Backstory</label>
+      <textarea id="residentProfile-backstory" rows="3" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(identity.backstory || '')}</textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
       <label>Current Goals</label>
       <textarea id="residentProfile-currentGoals" rows="3" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(profileListToLines(goals.current))}</textarea>
     </div>
     <div class="form-group" style="margin-bottom:8px">
+      <label>Daily Goals</label>
+      <textarea id="residentProfile-dailyGoals" rows="3" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(profileListToLines(goals.daily))}</textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
       <label>Long-Term Goals</label>
       <textarea id="residentProfile-longGoals" rows="3" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(profileListToLines(goals.longTerm))}</textarea>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:8px">
+      <div class="form-group" style="margin:0"><label>Outgoing</label><input id="residentProfile-outgoing" type="number" min="0.5" max="2" step="0.1" value="${escapeAttr(personality.outgoing ?? 1)}" ${locked ? 'disabled' : ''}></div>
+      <div class="form-group" style="margin:0"><label>Curious</label><input id="residentProfile-curious" type="number" min="0.5" max="2" step="0.1" value="${escapeAttr(personality.curious ?? 1)}" ${locked ? 'disabled' : ''}></div>
+      <div class="form-group" style="margin:0"><label>Easygoing</label><input id="residentProfile-easygoing" type="number" min="0.5" max="2" step="0.1" value="${escapeAttr(personality.easygoing ?? 1)}" ${locked ? 'disabled' : ''}></div>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Likes (one per line)</label>
+      <textarea id="residentProfile-likes" rows="2" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(profileListToLines(preferences.likes))}</textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Dislikes (one per line)</label>
+      <textarea id="residentProfile-dislikes" rows="2" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(profileListToLines(preferences.dislikes))}</textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Favorite Activities (one per line)</label>
+      <textarea id="residentProfile-favoriteActivities" rows="2" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(profileListToLines(preferences.favoriteActivities))}</textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Favorite Places (one per line)</label>
+      <textarea id="residentProfile-favoritePlaces" rows="2" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical">${escapeTextareaValue(profileListToLines(preferences.favoritePlaces))}</textarea>
+    </div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:6px;margin-bottom:8px">
+      <div class="form-group" style="margin:0"><label>Social Style</label><input id="residentProfile-socialStyle" type="text" value="${escapeAttr(preferences.socialStyle || '')}" maxlength="600" ${locked ? 'disabled' : ''}></div>
+      <div class="form-group" style="margin:0"><label>Novelty (0–1)</label><input id="residentProfile-novelty" type="number" min="0" max="1" step="0.1" value="${escapeAttr(preferences.noveltySeeking ?? 0.5)}" ${locked ? 'disabled' : ''}></div>
     </div>
     <div class="form-group" style="margin-bottom:8px">
       <label>Memory Summary</label>
@@ -34284,15 +34331,38 @@ function renderAgentResidentProfileEditor(agent) {
     }
     const button = container.querySelector('#residentProfile-save');
     const next = cloneResidentProfile(profile);
+    const numericValue = (selector, fallback) => {
+      const value = Number.parseFloat(container.querySelector(selector)?.value);
+      return Number.isFinite(value) ? value : fallback;
+    };
     next.identity = {
       ...(next.identity || {}),
+      displayName: container.querySelector('#residentProfile-displayName')?.value || '',
       role: container.querySelector('#residentProfile-role')?.value || '',
+      archetype: container.querySelector('#residentProfile-archetype')?.value || '',
       lifePurpose: container.querySelector('#residentProfile-purpose')?.value || '',
+      backstory: container.querySelector('#residentProfile-backstory')?.value || '',
     };
     next.goals = {
       ...(next.goals || {}),
       current: linesToProfileList(container.querySelector('#residentProfile-currentGoals')?.value || ''),
+      daily: linesToProfileList(container.querySelector('#residentProfile-dailyGoals')?.value || ''),
       longTerm: linesToProfileList(container.querySelector('#residentProfile-longGoals')?.value || ''),
+    };
+    next.personality = {
+      ...(next.personality || {}),
+      outgoing: numericValue('#residentProfile-outgoing', 1),
+      curious: numericValue('#residentProfile-curious', 1),
+      easygoing: numericValue('#residentProfile-easygoing', 1),
+    };
+    next.preferences = {
+      ...(next.preferences || {}),
+      likes: linesToProfileList(container.querySelector('#residentProfile-likes')?.value || ''),
+      dislikes: linesToProfileList(container.querySelector('#residentProfile-dislikes')?.value || ''),
+      favoriteActivities: linesToProfileList(container.querySelector('#residentProfile-favoriteActivities')?.value || ''),
+      favoritePlaces: linesToProfileList(container.querySelector('#residentProfile-favoritePlaces')?.value || ''),
+      socialStyle: container.querySelector('#residentProfile-socialStyle')?.value || '',
+      noveltySeeking: numericValue('#residentProfile-novelty', 0.5),
     };
     next.memory = {
       ...(next.memory || {}),

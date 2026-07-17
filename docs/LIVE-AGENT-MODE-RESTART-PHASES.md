@@ -295,7 +295,7 @@ Acceptance:
 
 - model can choose a routeable object action
 - invalid model output does not mutate state
-- provider timeout falls back safely
+- provider timeout enters an inspectable wait/retry state without starting a deterministic action
 - operator can inspect current goal/tool/result
 
 ## Phase 9 - Social Behavior and Conversations

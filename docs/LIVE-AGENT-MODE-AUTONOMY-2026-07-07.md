@@ -25,15 +25,20 @@ changes: `v1.0.22` (`192f95d`).
 - `src/server/server.py`
 - The live loop still builds the deterministic `planner-v2` decision frame
   (needs, goals, Resident Profile, memory, reliability scoring).
-- When `modelDecisionEnabled` is on and the agent's provider is OpenClaw, the
-  loop asks the agent's own model (via gateway RPC `chat.send` on session
-  `agent:<id>:vw-live-mode-planner`) to pick ONE candidate action or skip.
-- The model cannot invent actions. Reply must be `ACTION: <loopActionId>` or
-  `ACTION: skip`; anything else falls back to the planner-v2 selection.
-- Per-agent cooldown (`modelDecisionMinIntervalSec`, default 90s) and timeout
+- When `modelDecisionEnabled` is on, the loop uses the resident's configured
+  OpenClaw, Hermes, or Codex model as inference transport while the Virtual
+  World Resident Profile remains the authoritative persona.
+- The model cannot invent actions. Reply must resolve to a visible world
+  affordance or skip; anything else waits for a valid resident-model decision
+  instead of silently substituting the planner-v2 ranked choice.
+- Per-agent cooldown (`modelDecisionMinIntervalSec`, default 20s) and timeout
   (`modelDecisionTimeoutSec`, default 45s) keep token usage bounded.
 - All world execution still flows through the validated visible-action
   contract — the model only chooses WHICH safe action runs.
+
+This earlier design note is superseded by
+`LIVE-AGENT-MODE-RESIDENT-AUTONOMY-KERNEL.md` for the current authority,
+memory, dynamic-affordance, and observability contract.
 - New functions: `_live_agent_model_decision_config`, `_live_agent_model_decide`,
   `_live_agent_model_decision_parse`, `_live_agent_model_decision_prompt`,
   `_live_agent_model_decision_recover_reply`, plus in-memory cooldown state.

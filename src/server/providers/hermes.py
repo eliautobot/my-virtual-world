@@ -154,7 +154,16 @@ class HermesProvider:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "exitCode": None, "reply": ""}
 
-    def send_chat_message(self, profile: str, message: str, session_id: str | None = None, timeout_sec: int | None = None, yolo_once: bool = False, approval_bridge_dir: str | None = None) -> dict[str, Any]:
+    def send_chat_message(
+        self,
+        profile: str,
+        message: str,
+        session_id: str | None = None,
+        timeout_sec: int | None = None,
+        yolo_once: bool = False,
+        approval_bridge_dir: str | None = None,
+        isolated: bool = False,
+    ) -> dict[str, Any]:
         """Send a message through Hermes chat, optionally resuming a session.
 
         Unlike ``send_message``/``hermes -z``, this uses the public
@@ -171,6 +180,11 @@ class HermesProvider:
         if profile and profile != "default":
             cmd.extend(["--profile", profile])
         cmd.extend(["chat", "-Q"])
+        if isolated:
+            # Live Agent Mode uses the Hermes profile for model/auth transport,
+            # but its framework rules, SOUL, memory, and preloaded skills must
+            # not compete with the Virtual World Resident Profile.
+            cmd.extend(["--ignore-rules", "--max-turns", "1", "--source", "tool"])
         if session_id:
             cmd.extend(["--resume", session_id])
         if yolo_once:

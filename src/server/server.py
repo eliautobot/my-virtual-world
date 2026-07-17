@@ -2081,7 +2081,7 @@ LIVE_AGENT_OPERATOR_TIMELINE_SCHEMA_VERSION = "agent-live-mode-operator-timeline
 LIVE_AGENT_LOOP_DEFAULTS = {
     "enabled": True,
     "intervalSec": 30,
-    "minActionIntervalSec": 120,
+    "minActionIntervalSec": 45,
     "clientActiveTtlSec": 45,
     "maxActionsPerTick": 1,
     "worldClientRequired": False,
@@ -2099,7 +2099,7 @@ LIVE_AGENT_LOOP_DEFAULTS = {
     "decisionMode": "planner-v2",
     "modelDecisionEnabled": True,
     "modelDecisionTimeoutSec": 45,
-    "modelDecisionMinIntervalSec": 90,
+    "modelDecisionMinIntervalSec": 20,
     "userChatPreemptionEnabled": True,
     "userChatPreemptionHoldSec": 180,
 }
@@ -2151,8 +2151,11 @@ LIVE_AGENT_PLANNER_FULL_TURNS_PER_AGENT = _env_int(
     minimum=1,
     maximum=40,
 )
-LIVE_AGENT_LOOP_MODEL_DECISION_MODE = "model-autonomy-v3"
-LIVE_AGENT_LOOP_MODEL_DECISION_SOURCES = {"openclaw"}
+LIVE_AGENT_LOOP_MODEL_DECISION_MODE = "resident-autonomy-kernel-v1"
+# Every supported framework is a cognition transport only. The Virtual World
+# Resident Profile remains the authoritative Live Mode persona for all of them.
+LIVE_AGENT_LOOP_MODEL_DECISION_SOURCES = {"openclaw", "hermes", "codex"}
+LIVE_AGENT_MODEL_CONTEXT_TOOL_ROUNDS = 3
 LIVE_AGENT_MODEL_PROMPT_CHAR_BUDGET = 12000
 LIVE_AGENT_AUTONOMY_PLAN_SCHEMA_VERSION = "agent-live-mode-autonomy-plan/v1"
 LIVE_AGENT_PLANNER_TRANSCRIPT_SCHEMA_VERSION = "agent-live-mode-planner-transcripts/v1"
@@ -2335,10 +2338,19 @@ LIVE_AGENT_INTENTION_CATEGORY_ALIASES = {
     "seat": "seating",
     "chair": "seating",
     "chairs": "seating",
+    "armchair": "seating",
+    "officechair": "seating",
+    "diningchair": "seating",
+    "patiochair": "seating",
+    "conferencechair": "seating",
+    "barstool": "seating",
     "couch": "seating",
     "sofa": "seating",
+    "sectionalsofa": "seating",
+    "loveseat": "seating",
     "bench": "seating",
     "stool": "seating",
+    "comfort": "seating",
     "furnitureseating": "seating",
 }
 LIVE_AGENT_LOOP_ACTIONS = [
@@ -4461,13 +4473,13 @@ def _normalize_live_agent_loop_state(raw):
             if key in raw:
                 state[key] = raw[key]
         state["intervalSec"] = _normalize_int(raw.get("intervalSec"), state["intervalSec"], minimum=10, maximum=300)
-        state["minActionIntervalSec"] = _normalize_int(raw.get("minActionIntervalSec"), state["minActionIntervalSec"], minimum=30, maximum=3600)
+        state["minActionIntervalSec"] = _normalize_int(raw.get("minActionIntervalSec"), state["minActionIntervalSec"], minimum=10, maximum=3600)
         state["clientActiveTtlSec"] = _normalize_int(raw.get("clientActiveTtlSec"), state["clientActiveTtlSec"], minimum=10, maximum=300)
         state["maxActionsPerTick"] = _normalize_int(raw.get("maxActionsPerTick"), state["maxActionsPerTick"], minimum=1, maximum=5)
         if isinstance(raw.get("modelDecisionEnabled"), bool):
             state["modelDecisionEnabled"] = raw["modelDecisionEnabled"]
         state["modelDecisionTimeoutSec"] = _normalize_int(raw.get("modelDecisionTimeoutSec"), state["modelDecisionTimeoutSec"], minimum=10, maximum=180)
-        state["modelDecisionMinIntervalSec"] = _normalize_int(raw.get("modelDecisionMinIntervalSec"), state["modelDecisionMinIntervalSec"], minimum=30, maximum=3600)
+        state["modelDecisionMinIntervalSec"] = _normalize_int(raw.get("modelDecisionMinIntervalSec"), state["modelDecisionMinIntervalSec"], minimum=10, maximum=3600)
         if isinstance(raw.get("userChatPreemptionEnabled"), bool):
             state["userChatPreemptionEnabled"] = raw["userChatPreemptionEnabled"]
         state["userChatPreemptionHoldSec"] = _normalize_int(raw.get("userChatPreemptionHoldSec"), state["userChatPreemptionHoldSec"], minimum=30, maximum=1800)
@@ -4617,6 +4629,7 @@ def _live_agent_loop_merge_agent_goals(existing_agent, incoming_agent):
 def _live_agent_loop_reconcile_agent_records_from_events(agents, events):
     episode_events = {}
     plan_events = {}
+    durable_goal_verification_events = {}
     for event in events or []:
         if not isinstance(event, dict):
             continue
@@ -4634,7 +4647,31 @@ def _live_agent_loop_reconcile_agent_records_from_events(agents, events):
             if not current or (_parse_isoish_epoch(at) or 0) >= (_parse_isoish_epoch(current.get("at")) or 0):
                 plan_events[plan_id] = {"type": event_type, "at": at, "details": details}
 
-    for row in agents.values():
+        # A successful embodied-step verification is monotonic evidence. State
+        # saves can race with a planner reply or another metadata writer that
+        # still holds the pre-verification goal snapshot. Episodes and plans
+        # already recover from their terminal events below; durable steps need
+        # the same protection so completed work is not repeated.
+        if (
+            event_type in {"durable-goal-step-verified", "durable-goal-completed"}
+            and details.get("ok") is True
+            and event.get("agentId")
+            and details.get("goalId")
+            and details.get("goalTaskId")
+            and details.get("goalStepId")
+            and details.get("actionId")
+        ):
+            goal_key = (
+                str(event.get("agentId")),
+                str(details.get("goalId")),
+                str(details.get("goalTaskId")),
+                str(details.get("goalStepId")),
+            )
+            current = durable_goal_verification_events.get(goal_key)
+            if not current or (_parse_isoish_epoch(at) or 0) >= (_parse_isoish_epoch(current.get("at")) or 0):
+                durable_goal_verification_events[goal_key] = {"type": event_type, "at": at, "details": details}
+
+    for agent_id, row in agents.items():
         if not isinstance(row, dict):
             continue
         reconciled_episodes = []
@@ -4726,6 +4763,55 @@ def _live_agent_loop_reconcile_agent_records_from_events(agents, events):
             row["activePlan"] = active_plans[0]
         else:
             row.pop("activePlan", None)
+
+        reconciled_goals = []
+        for raw in row.get("durableGoals") or []:
+            goal = _live_agent_goals.normalize_goal(raw)
+            if not goal:
+                continue
+            for task in goal.get("tasks") or []:
+                for step in task.get("steps") or []:
+                    event = durable_goal_verification_events.get((
+                        str(agent_id),
+                        str(goal.get("id")),
+                        str(task.get("id")),
+                        str(step.get("id")),
+                    ))
+                    if not event:
+                        continue
+                    details = event.get("details") or {}
+                    current_outcome = step.get("outcome") if isinstance(step.get("outcome"), dict) else {}
+                    if current_outcome.get("verified") is True:
+                        continue
+                    # Only replay evidence for the same attempt. This prevents
+                    # an older success from satisfying a deliberately retried
+                    # or newly replanned step that reuses stable ids.
+                    if str(step.get("actionId") or "") != str(details.get("actionId") or ""):
+                        continue
+                    event_epoch = _parse_isoish_epoch(event.get("at")) or 0
+                    step_epoch = _parse_isoish_epoch(step.get("updatedAt")) or 0
+                    if event_epoch < step_epoch:
+                        continue
+                    recorded = details.get("outcome") if isinstance(details.get("outcome"), dict) else {}
+                    goal, _ = _live_agent_goals.record_verified_outcome(
+                        goal,
+                        {
+                            "id": details.get("verificationId") or recorded.get("verificationId"),
+                            "actionId": details.get("actionId"),
+                            "goalTaskId": details.get("goalTaskId"),
+                            "goalStepId": details.get("goalStepId"),
+                            "ok": True,
+                            "reason": recorded.get("reason") or "",
+                            "evidence": _copy_jsonable(recorded.get("evidence")) if isinstance(recorded.get("evidence"), dict) else {},
+                        },
+                        now_iso=event.get("at"),
+                    )
+            reconciled_goals.append(goal)
+        row["durableGoals"] = reconciled_goals
+        _live_agent_goals.normalize_agent_goals(
+            row,
+            retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"],
+        )
     return agents
 
 
@@ -5704,6 +5790,16 @@ def _live_agent_loop_normalize_memory(agent_state):
         agent_state["autonomyPlan"] = autonomy_plan
     else:
         agent_state.pop("autonomyPlan", None)
+    rejected_intention = agent_state.get("lastRejectedIntention")
+    if isinstance(rejected_intention, dict):
+        agent_state["lastRejectedIntention"] = _compact_json_value_for_storage(
+            rejected_intention,
+            max_depth=3,
+            max_items=24,
+            string_limit=600,
+        )
+    else:
+        agent_state.pop("lastRejectedIntention", None)
     _live_agent_goals.normalize_agent_goals(
         agent_state,
         retention=LIVE_AGENT_LOOP_DEFAULTS["durableGoalRetention"],
@@ -5860,13 +5956,15 @@ def _live_agent_loop_enforce_state_budget(state):
                 ("durableGoals", 8),
                 ("feedbackReports", 10),
                 ("supportOutcomes", 10),
+                ("decisionTrace", 80),
+                ("livedExperiences", 40),
             ):
                 agent_state[key] = _live_agent_loop_trim_list(
                     agent_state.get(key),
                     count,
                     max_bytes=min(128 * 1024, LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES),
                 )
-            for key in ("lastPerception", "lastDecision", "lastOutcome", "autonomyPlan"):
+            for key in ("lastPerception", "lastDecision", "lastOutcome", "lastTurnStatus", "lastRejectedIntention", "autonomyPlan", "experienceState"):
                 if isinstance(agent_state.get(key), dict):
                     agent_state[key] = _live_agent_loop_compact_snapshot(agent_state[key])
     current_bytes = _json_size_bytes(state)
@@ -6099,7 +6197,15 @@ def _live_agent_loop_durable_goal_context(agent_state):
     return _live_agent_goals.current_context(active)
 
 
-def _live_agent_loop_bind_durable_goal_action(agent_state, loop_action_id, selected, *, allow_replan=False, now_iso=None):
+def _live_agent_loop_bind_durable_goal_action(
+    agent_state,
+    loop_action_id,
+    selected,
+    *,
+    allow_replan=False,
+    replan_action_ids=None,
+    now_iso=None,
+):
     context = _live_agent_loop_durable_goal_context(agent_state)
     goal = context.get("goal")
     step = context.get("step")
@@ -6110,6 +6216,14 @@ def _live_agent_loop_bind_durable_goal_action(agent_state, loop_action_id, selec
     target_key = _live_agent_loop_target_key(target)
     if goal.get("replanRequired"):
         if not allow_replan:
+            return None
+        assigned = str((step or {}).get("loopActionId") or "").strip()
+        explicitly_allowed = {
+            str(item).strip()
+            for item in (replan_action_ids or [])
+            if str(item).strip()
+        }
+        if loop_action_id != assigned and loop_action_id not in explicitly_allowed:
             return None
         stored_goal, _ = _live_agent_goals.replan_with_action(
             goal,
@@ -6143,6 +6257,27 @@ def _live_agent_loop_bind_durable_goal_action(agent_state, loop_action_id, selec
         "goalStepId": step.get("id"),
         "goalTitle": stored_goal.get("title"),
     }
+
+
+def _live_agent_loop_model_replan_action_ids(model_detail):
+    """Actions explicitly authorized by the applied model repair turn."""
+    if not isinstance(model_detail, dict) or model_detail.get("applied") != "async-previous-request":
+        return set()
+    intention = model_detail.get("intention") if isinstance(model_detail.get("intention"), dict) else {}
+    planner_turn = model_detail.get("plannerTurn") if isinstance(model_detail.get("plannerTurn"), dict) else intention.get("plannerTurn")
+    next_step = planner_turn.get("nextStep") if isinstance(planner_turn, dict) and isinstance(planner_turn.get("nextStep"), dict) else {}
+    category = next_step.get("category") or intention.get("category")
+    action_tokens = [model_detail.get("chosen"), intention.get("action"), next_step.get("action"), next_step.get("loopActionId")]
+    allowed = {
+        _live_agent_loop_planner_action_id(token, category=category)
+        for token in action_tokens
+        if str(token or "").strip() and str(token).strip().lower() != "skip"
+    }
+    resolved_category = LIVE_AGENT_INTENTION_CATEGORY_ALIASES.get(_normalize_token(category) or "")
+    dynamic = LIVE_AGENT_DYNAMIC_OBJECT_AFFORDANCES.get(resolved_category) if resolved_category else None
+    if isinstance(dynamic, dict) and dynamic.get("id"):
+        allowed.add(str(dynamic["id"]))
+    return {item for item in allowed if item}
 
 
 def _live_agent_loop_mark_durable_goal_action_started(state, agent_id, agent_state, goal_context, action_id, loop_action_id, now_iso):
@@ -7680,6 +7815,19 @@ def _live_agent_loop_action_definition(loop_action_id=None, action_type=None):
             return action_def
         if action_type and action_def.get("actionType") == action_type:
             return action_def
+    if action_type and _live_agent_visible_action_contract(action_type):
+        is_seating = action_type in LIVE_AGENT_LOCAL_OBJECT_VISIBLE_ACTION_TYPES
+        action_label = re.sub(r"(?<!^)(?=[A-Z])", " ", str(action_type).split(".")[-1]).replace("_", " ").lower()
+        return {
+            "id": loop_action_id or f"world-action-{_normalize_token(action_type) or 'interaction'}",
+            "actionType": action_type,
+            "capabilityTag": _live_agent_loop_capability_for_action_type(action_type),
+            "need": _live_agent_loop_need_for_action_type(action_type),
+            "label": action_label,
+            "dynamic": True,
+            "genericWorldAffordance": True,
+            "category": "seating" if is_seating else None,
+        }
     return None
 
 
@@ -7997,6 +8145,7 @@ def _live_agent_loop_resident_profile_context(resident_profile):
             "role": str(identity.get("role") or "")[:160],
             "archetype": str(identity.get("archetype") or "")[:160],
             "lifePurpose": str(identity.get("lifePurpose") or "")[:1000],
+            "backstory": str(identity.get("backstory") or "")[:1600],
         },
         "world": {
             "homeBuildingId": str(world.get("homeBuildingId") or "")[:120],
@@ -8013,6 +8162,18 @@ def _live_agent_loop_resident_profile_context(resident_profile):
             for key, default in LIVE_AGENT_LOOP_NEED_DEFAULTS.items()
         },
         "personality": _live_agent_loop_clamp_personality(resident_profile.get("personality")),
+        "preferences": _compact_json_value_for_storage(
+            resident_profile.get("preferences") if isinstance(resident_profile.get("preferences"), dict) else {},
+            max_depth=2,
+            max_items=24,
+            string_limit=600,
+        ),
+        "custom": _compact_json_value_for_storage(
+            resident_profile.get("custom") if isinstance(resident_profile.get("custom"), dict) else {},
+            max_depth=2,
+            max_items=24,
+            string_limit=600,
+        ),
         "memory": _live_agent_loop_resident_memory_context(resident_profile),
         "liveMode": {
             "autonomyWhenIdle": bool(live_mode.get("autonomyWhenIdle", True)),
@@ -8115,6 +8276,105 @@ def _live_agent_loop_note_requested_category(agent_id, category, *, generation=N
     return resolved
 
 
+def _live_agent_loop_category_for_planner_action(action_token):
+    """Map a planner-facing action token to its dynamic object category.
+
+    Spatial perception exposes concrete object action types (for example
+    ``life.restAtArmchair``), while the safe Live Agent execution surface uses
+    a durable affordance id (``use-seating-object``). Keep that vocabulary
+    bridge server-owned so planner turns survive restarts and catalog changes.
+    """
+    token = str(action_token or "").strip()
+    normalized = _normalize_token(token)
+    if not normalized:
+        return None
+    if normalized == _normalize_token("use-seating-object"):
+        return "seating"
+    if any(normalized == _normalize_token(action_type) for action_type in LIVE_AGENT_SEATING_ACTION_TYPES):
+        return "seating"
+    return None
+
+
+def _live_agent_loop_planner_action_id(action_token, *, category=None):
+    """Resolve action types/category aliases to the executable loop id."""
+    token = str(action_token or "").strip()
+    if not token:
+        return ""
+    normalized = _normalize_token(token)
+    for action_def in LIVE_AGENT_LOOP_ACTIONS:
+        if normalized in {
+            _normalize_token(action_def.get("id")),
+            _normalize_token(action_def.get("actionType")),
+        }:
+            return str(action_def.get("id") or token)
+    resolved_category = LIVE_AGENT_INTENTION_CATEGORY_ALIASES.get(_normalize_token(category) or "")
+    resolved_category = resolved_category or _live_agent_loop_category_for_planner_action(token)
+    dynamic = LIVE_AGENT_DYNAMIC_OBJECT_AFFORDANCES.get(resolved_category) if resolved_category else None
+    if isinstance(dynamic, dict) and dynamic.get("id"):
+        return str(dynamic["id"])
+    return token
+
+
+def _live_agent_loop_normalize_planner_turn_actions(planner_turn):
+    if not isinstance(planner_turn, dict):
+        return planner_turn
+    normalized = _copy_jsonable(planner_turn)
+    task_lists = []
+    if isinstance(normalized.get("tasks"), list):
+        task_lists.append(normalized.get("tasks"))
+    raw_goal = normalized.get("goal") if isinstance(normalized.get("goal"), dict) else {}
+    if isinstance(raw_goal.get("tasks"), list):
+        task_lists.append(raw_goal.get("tasks"))
+    for tasks in task_lists:
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            for step in task.get("steps") or []:
+                if not isinstance(step, dict):
+                    continue
+                requested = str(step.get("loopActionId") or step.get("action") or "").strip()
+                resolved = _live_agent_loop_planner_action_id(requested, category=step.get("category"))
+                if requested and resolved and resolved != requested:
+                    step["requestedLoopActionId"] = requested
+                    step["loopActionId"] = resolved
+    next_step = normalized.get("nextStep") if isinstance(normalized.get("nextStep"), dict) else None
+    if next_step:
+        requested_action = str(next_step.get("action") or next_step.get("loopActionId") or "").strip()
+        category = next_step.get("category")
+        resolved_action = _live_agent_loop_planner_action_id(requested_action, category=category)
+        if resolved_action and resolved_action != requested_action:
+            next_step["requestedAction"] = requested_action
+            next_step["action"] = resolved_action
+            if not category:
+                inferred_category = _live_agent_loop_category_for_planner_action(requested_action)
+                if inferred_category:
+                    next_step["category"] = inferred_category
+    return normalized
+
+
+def _live_agent_loop_durable_goal_object_categories(agent_state):
+    """Recover dynamic categories from the persisted unfinished goal step."""
+    if not isinstance(agent_state, dict):
+        return set()
+    goal = _live_agent_loop_active_durable_goal(agent_state)
+    context = _live_agent_goals.current_context(goal) if goal else {}
+    step = context.get("step") if isinstance(context, dict) else None
+    if not isinstance(step, dict):
+        return set()
+    categories = set()
+    action_category = _live_agent_loop_category_for_planner_action(step.get("loopActionId"))
+    if action_category:
+        categories.add(action_category)
+    text = " ".join([
+        str(step.get("title") or ""),
+        " ".join(str(item) for item in (step.get("successCriteria") or [])),
+        " ".join(str(item) for item in (step.get("failureCriteria") or [])),
+    ])
+    if _live_agent_text_has_any(text, ("seating", "seat", "chair", "armchair", "couch", "sofa", "bench", "stool")):
+        categories.add("seating")
+    return categories
+
+
 def _live_agent_loop_dynamic_action_defs(agent_id, agent_state=None, resident_profile=None):
     """Resolve which dynamic object-category affordances are active for this
     agent right now. Sources: Resident Profile goal intents and recent model
@@ -8123,6 +8383,7 @@ def _live_agent_loop_dynamic_action_defs(agent_id, agent_state=None, resident_pr
     categories = set()
     for intent in _live_agent_loop_profile_goal_intents(agent_id, resident_profile):
         categories.update(LIVE_AGENT_GOAL_INTENT_OBJECT_CATEGORIES.get(intent) or ())
+    categories.update(_live_agent_loop_durable_goal_object_categories(agent_state))
     categories.update(_live_agent_loop_requested_categories(agent_id))
     defs = []
     for category in sorted(categories):
@@ -8221,7 +8482,10 @@ def _live_agent_loop_agent_context(agent_id):
     ]
     return {
         "schemaVersion": "agent-live-mode-agent-context/v1",
-        "personality": _live_agent_loop_clamp_personality((resident_context or {}).get("personality") or profile.get("personality") or (roster_agent or {}).get("personality")),
+        # A Resident Profile is always materialized before Live Mode runs. Do
+        # not fall back to a framework/roster persona when a world profile is
+        # incomplete: neutral resident defaults are the only safe fallback.
+        "personality": _live_agent_loop_clamp_personality((resident_context or {}).get("personality")),
         "home": {"exists": bool(home), "buildingId": (home or {}).get("id"), "name": (home or {}).get("name"), "type": (home or {}).get("type")},
         "work": {"exists": bool(work), "buildingId": (work or {}).get("id"), "name": (work or {}).get("name"), "type": (work or {}).get("type")},
         "relationships": relationships,
@@ -9669,6 +9933,134 @@ def _live_agent_loop_action_defs_for_agent(agent_id, agent_state=None, resident_
     return [*LIVE_AGENT_LOOP_ACTIONS, *_live_agent_loop_dynamic_action_defs(agent_id, agent_state, resident_profile)]
 
 
+def _live_agent_loop_capability_for_action_type(action_type):
+    action_type = str(action_type or "").strip()
+    for action_def in [*LIVE_AGENT_LOOP_ACTIONS, *LIVE_AGENT_DYNAMIC_OBJECT_AFFORDANCES.values()]:
+        if str(action_def.get("actionType") or "") == action_type and action_def.get("capabilityTag"):
+            return str(action_def.get("capabilityTag"))
+    if action_type in LIVE_AGENT_LOCAL_OBJECT_VISIBLE_ACTION_TYPES:
+        return "life.rest"
+    if action_type.startswith("life.social") or ".talk" in action_type.lower():
+        return "life.social"
+    if any(token in action_type.lower() for token in ("rest", "sit", "lounge")):
+        return "life.rest"
+    return ""
+
+
+def _live_agent_loop_need_for_action_type(action_type):
+    action_type = str(action_type or "").lower()
+    if any(token in action_type for token in ("water", "coffee", "drink")):
+        return "hydration"
+    if any(token in action_type for token in ("food", "snack", "vending", "eat")):
+        return "food"
+    if any(token in action_type for token in ("social", "talk", "conversation")):
+        return "social"
+    if any(token in action_type for token in ("rest", "sit", "lounge")):
+        return "energy"
+    if any(token in action_type for token in ("print", "maintain", "repair")):
+        return "maintenance"
+    return "curiosity"
+
+
+def _live_agent_loop_generic_spatial_affordances(agent_id, agent_state, spatial, existing=None):
+    """Build a context-gated tool surface from the birth world's objects.
+
+    Only interactions backed by an existing visible executor are exposed. This
+    lets the resident discover new placed objects without adding a Live Mode
+    action id for every catalog entry.
+    """
+    spatial = spatial if isinstance(spatial, dict) else {}
+    existing = existing if isinstance(existing, list) else []
+    seen = set()
+    for item in existing:
+        target = item.get("target") if isinstance(item, dict) and isinstance(item.get("target"), dict) else {}
+        seen.add((str(item.get("actionType") or ""), str(target.get("objectInstanceId") or ""), str(target.get("interactionSpotId") or "")))
+    affordances = []
+    for obj in spatial.get("nearbyObjects") or []:
+        if not isinstance(obj, dict) or not obj.get("perceived"):
+            continue
+        for interaction in obj.get("interactions") or []:
+            if not isinstance(interaction, dict):
+                continue
+            action_type = str(interaction.get("actionId") or "").strip()
+            spot_id = str(interaction.get("interactionSpotId") or interaction.get("id") or "").strip()
+            availability = interaction.get("availability") if isinstance(interaction.get("availability"), dict) else {}
+            capability_tag = _live_agent_loop_capability_for_action_type(action_type)
+            visible_contract = _live_agent_visible_action_contract(action_type)
+            key = (action_type, str(obj.get("objectInstanceId") or ""), spot_id)
+            if not action_type or not spot_id or not capability_tag or not visible_contract or availability.get("state") != "available" or key in seen:
+                continue
+            seen.add(key)
+            target = {
+                "kind": "object-instance",
+                "buildingId": obj.get("buildingId") or "",
+                "objectInstanceId": obj.get("objectInstanceId"),
+                "catalogId": obj.get("catalogId"),
+                "interactionSpotId": spot_id,
+                "floor": obj.get("floor") or 1,
+            }
+            if obj.get("furnitureIndex") is not None:
+                target["furnitureIndex"] = obj.get("furnitureIndex")
+            if obj.get("nodeIndex") is not None:
+                target["nodeIndex"] = obj.get("nodeIndex")
+            object_label = str(obj.get("objectType") or obj.get("catalogId") or "object").replace("-", " ")
+            action_label = re.sub(r"(?<!^)(?=[A-Z])", " ", action_type.split(".")[-1]).replace("_", " ").lower()
+            affordance_id = f"world-use-{hashlib.sha1('|'.join(key).encode('utf-8')).hexdigest()[:14]}"
+            need = _live_agent_loop_need_for_action_type(action_type)
+            action_def = {
+                "id": affordance_id,
+                "actionType": action_type,
+                "capabilityTag": capability_tag,
+                "need": need,
+                "label": f"{action_label} with {object_label}"[:180],
+                "experience": f"visibly use {object_label} through its {spot_id} interaction",
+                "autonomyKind": "world-affordance",
+                "dynamic": True,
+                "genericWorldAffordance": True,
+            }
+            selected = {
+                "action": action_def,
+                "target": target,
+                "buildingName": obj.get("buildingName") or "",
+                "objectType": obj.get("objectType") or obj.get("catalogId"),
+                "availability": availability,
+                "spatial": {
+                    "distanceTiles": obj.get("distanceTiles"),
+                    "visible": bool(obj.get("visible")),
+                    "lineOfSight": bool(obj.get("lineOfSight")),
+                },
+            }
+            affordances.append({
+                "id": affordance_id,
+                "label": action_def["label"],
+                "experience": action_def["experience"],
+                "actionType": action_type,
+                "capabilityTag": capability_tag,
+                "need": need,
+                "satisfiesNeeds": [need],
+                "autonomyKind": "world-affordance",
+                "available": True,
+                "dynamic": True,
+                "target": target,
+                "buildingName": selected["buildingName"],
+                "objectType": selected["objectType"],
+                "availability": availability,
+                "selected": selected,
+                "visibility": {
+                    "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
+                    "policy": "visible-world-execution-required",
+                    "visibleInWorld": True,
+                    "hiddenWorldMutationAllowed": False,
+                    "clientExecutor": visible_contract.get("clientExecutor"),
+                    "requiresMoveIntent": bool(visible_contract.get("requiresMoveIntent")),
+                    "requiresPhysicalAgentPresence": True,
+                },
+            })
+            if len(affordances) >= 24:
+                return affordances
+    return affordances
+
+
 def _live_agent_loop_action_affordances(agent_id, agent_state, spatial=None):
     affordances = []
     for action_def in _live_agent_loop_action_defs_for_agent(agent_id, agent_state):
@@ -9685,6 +10077,8 @@ def _live_agent_loop_action_affordances(agent_id, agent_state, spatial=None):
             "need": selected_action.get("need") or action_def.get("need"),
             "satisfiesNeeds": _live_agent_loop_action_satisfied_needs(selected_action or action_def),
             "autonomyKind": selected_action.get("autonomyKind") or action_def.get("autonomyKind"),
+            "category": selected_action.get("category") or action_def.get("category"),
+            "genericWorldAffordance": bool(selected_action.get("genericWorldAffordance") or action_def.get("genericWorldAffordance")),
             "available": bool(selected),
             "visibility": {
                 "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
@@ -9708,6 +10102,7 @@ def _live_agent_loop_action_affordances(agent_id, agent_state, spatial=None):
         else:
             affordance["reason"] = _live_agent_loop_unavailable_reason(action_def, agent_id)
         affordances.append(affordance)
+    affordances.extend(_live_agent_loop_generic_spatial_affordances(agent_id, agent_state, spatial, affordances))
     return affordances
 
 
@@ -10104,6 +10499,8 @@ def _live_agent_loop_build_spatial_perception(agent_id, runtime_document=None):
                     "catalogId": catalog_id,
                     "objectType": obj.get("type") or catalog_id,
                     "collection": collection,
+                    "furnitureIndex": index if collection == "furniture" else None,
+                    "nodeIndex": index if collection != "furniture" else None,
                     "buildingId": candidate_building.get("id") or "",
                     "buildingName": candidate_building.get("name") or "",
                     "floor": floor,
@@ -10740,7 +11137,21 @@ def _live_agent_loop_compact_spatial_for_planner(spatial):
         }
 
     def compact_object(item):
-        interaction = item.get("nearestInteraction") if isinstance(item.get("nearestInteraction"), dict) else None
+        # Nearby-object coordinates are awareness facts, not permission to
+        # execute every catalog action.  Only surface an interaction here when
+        # the same action has a typed Live Mode visible-executor contract and
+        # the resident actually perceived the object.  The authoritative
+        # candidate list remains the executable source of truth.
+        interactions = item.get("interactions") if isinstance(item.get("interactions"), list) else []
+        interaction = next((
+            candidate
+            for candidate in interactions
+            if isinstance(candidate, dict)
+            and item.get("perceived")
+            and _live_agent_visible_action_contract(candidate.get("actionId"))
+            and isinstance(candidate.get("availability"), dict)
+            and candidate["availability"].get("state") == "available"
+        ), None)
         return {
             "objectInstanceId": item.get("objectInstanceId"),
             "catalogId": item.get("catalogId"),
@@ -10756,7 +11167,8 @@ def _live_agent_loop_compact_spatial_for_planner(spatial):
             "visible": item.get("visible"),
             "interactionReady": item.get("interactionReady"),
             "occludedBy": item.get("occludedBy"),
-            "nearestInteraction": {
+            "liveModeExecutable": bool(interaction),
+            "nearestExecutableInteraction": {
                 "actionId": interaction.get("actionId"),
                 "interactionSpotId": interaction.get("interactionSpotId"),
                 "distanceTiles": interaction.get("distanceTiles"),
@@ -10823,9 +11235,11 @@ def _live_agent_loop_build_decision_frame(agent_id, perception, agent_state):
 
 
 ##############################################################################
-# LIVE AGENT MODE - MODEL DECISION LAYER (model-intention-v2)
+# LIVE AGENT MODE - RESIDENT AUTONOMY KERNEL
 #
-# The agent's own OpenClaw model decides an INTENTION: what it wants to do
+# The resident's configured OpenClaw, Hermes, or Codex model decides an
+# INTENTION as inference transport while the Virtual World Resident Profile
+# supplies the authoritative persona. It chooses what the resident wants to do
 # next given identity, goals, needs, memories, issues, and location. The
 # intention may (a) name an available interaction id, (b) request an object
 # CATEGORY (e.g. seating) that the affordance layer resolves into a real
@@ -10833,8 +11247,8 @@ def _live_agent_loop_build_decision_frame(agent_id, perception, agent_state):
 # still parse as a fallback. The model can never invent raw world mutations:
 # all execution still flows through the validated visible-action contract,
 # so intentions only influence WHICH safe interaction runs, never HOW the
-# world is mutated. Planner sessions are deleted after each decision so
-# internal prompts do not pollute the agent's memory/dreaming.
+# world is mutated. Provider-native inference sessions are deleted after each
+# decision so internal frames do not pollute normal provider memory/dreaming.
 ##############################################################################
 
 def _live_agent_model_decision_config(state=None):
@@ -10842,7 +11256,7 @@ def _live_agent_model_decision_config(state=None):
     return {
         "enabled": bool(state.get("modelDecisionEnabled", LIVE_AGENT_LOOP_DEFAULTS["modelDecisionEnabled"])),
         "timeoutSec": _normalize_int(state.get("modelDecisionTimeoutSec"), LIVE_AGENT_LOOP_DEFAULTS["modelDecisionTimeoutSec"], minimum=10, maximum=180),
-        "minIntervalSec": _normalize_int(state.get("modelDecisionMinIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["modelDecisionMinIntervalSec"], minimum=30, maximum=3600),
+        "minIntervalSec": _normalize_int(state.get("modelDecisionMinIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["modelDecisionMinIntervalSec"], minimum=10, maximum=3600),
     }
 
 
@@ -10885,11 +11299,115 @@ def _live_agent_model_memory_lines(agent_state, limit=8):
     return lines
 
 
+def _live_agent_memory_text(item):
+    if isinstance(item, str):
+        return item.strip()
+    if not isinstance(item, dict):
+        return ""
+    for key in ("text", "summary", "lesson", "observation", "title", "label"):
+        value = item.get(key)
+        if value:
+            return str(value).strip()
+    return json.dumps(_compact_json_value_for_storage(item, max_depth=2, max_items=12, string_limit=360), ensure_ascii=False, sort_keys=True)
+
+
+def _live_agent_retrieve_resident_memories(resident, agent_state, limit=10):
+    """Smallville-style relevance/recency/importance retrieval.
+
+    Resident memory remains world-owned. This function only ranks a bounded
+    working set for the current turn; it never reads provider workspace memory.
+    """
+    resident = resident if isinstance(resident, dict) else {}
+    memory = resident.get("memory") if isinstance(resident.get("memory"), dict) else {}
+    goals = resident.get("goals") if isinstance(resident.get("goals"), dict) else {}
+    plan = agent_state.get("autonomyPlan") if isinstance(agent_state.get("autonomyPlan"), dict) else {}
+    outcome = agent_state.get("lastOutcome") if isinstance(agent_state.get("lastOutcome"), dict) else {}
+    query_parts = []
+    for bucket in ("current", "daily", "longTerm"):
+        for item in goals.get(bucket) or []:
+            query_parts.append(_live_agent_memory_text(item))
+    query_parts.extend([
+        str(plan.get("currentGoal") or ""),
+        str((plan.get("nextStep") or {}).get("intent") or "") if isinstance(plan.get("nextStep"), dict) else "",
+        str(outcome.get("reason") or ""),
+        str(outcome.get("loopActionId") or ""),
+    ])
+    query_tokens = set(re.findall(r"[a-z0-9]{3,}", " ".join(query_parts).lower()))
+    records = []
+    ordinal = 0
+    for bucket, values, base_importance in (
+        ("shortTerm", memory.get("shortTerm"), 0.55),
+        ("longTerm", memory.get("longTerm"), 0.8),
+        ("reflections", memory.get("reflections"), 0.72),
+    ):
+        values = values if isinstance(values, list) else []
+        for index, item in enumerate(values):
+            text_value = _live_agent_memory_text(item)
+            if not text_value:
+                continue
+            tokens = set(re.findall(r"[a-z0-9]{3,}", text_value.lower()))
+            overlap = len(tokens.intersection(query_tokens)) / max(1, min(len(tokens), max(1, len(query_tokens))))
+            raw_importance = item.get("importance") if isinstance(item, dict) else None
+            try:
+                importance = max(0.0, min(1.0, float(raw_importance))) if raw_importance is not None else base_importance
+            except (TypeError, ValueError):
+                importance = base_importance
+            recency = (index + 1) / max(1, len(values))
+            score = (0.50 * overlap) + (0.30 * recency) + (0.20 * importance)
+            records.append({
+                "bucket": bucket,
+                "text": text_value[:900],
+                "score": round(score, 4),
+                "importance": round(importance, 3),
+                "ordinal": ordinal,
+            })
+            ordinal += 1
+    summary = str(memory.get("summary") or "").strip()
+    if summary:
+        records.append({"bucket": "summary", "text": summary[:1200], "score": 0.74, "importance": 0.8, "ordinal": ordinal})
+    records.sort(key=lambda item: (float(item.get("score") or 0), int(item.get("ordinal") or 0)), reverse=True)
+    return [{key: item.get(key) for key in ("bucket", "text", "score", "importance")} for item in records[:max(1, int(limit))]]
+
+
+def _live_agent_resident_authority_contract(agent_id, resident):
+    identity = resident.get("identity") if isinstance(resident, dict) and isinstance(resident.get("identity"), dict) else {}
+    return {
+        "schemaVersion": "virtual-world-resident-authority/v1",
+        "agentId": str(agent_id or ""),
+        "activeMode": "live-agent-mode",
+        "authoritativePersonaSource": "virtual-world-resident-profile",
+        "displayName": identity.get("displayName") or str(agent_id or "Resident"),
+        "providerRole": "inference-and-capability-transport-only",
+        "providerIsolation": "ephemeral-no-framework-persona-bootstrap",
+        "frameworkPersonaFallbackAllowed": False,
+        "frameworkGoalFallbackAllowed": False,
+        "worldMemorySource": "virtual-world-resident-memory",
+        "higherAuthorities": ["platform-safety", "direct-user-control", "world-permissions-and-ownership"],
+    }
+
+
+def _live_agent_model_transport_instruction(agent_id):
+    """Higher-priority provider instruction for isolated inference adapters."""
+    resident = _live_agent_loop_resident_profile_context(
+        _live_agent_loop_resident_profile(agent_id, persist=False)
+    ) or {}
+    contract = _live_agent_resident_authority_contract(agent_id, resident)
+    return (
+        "VIRTUAL WORLD LIVE MODE INFERENCE TRANSPORT. "
+        "You are supplying cognition for a Virtual World resident turn, not acting as the provider framework persona. "
+        "The Resident Profile included in the turn is the sole in-world identity, personality, role, purpose, preference, goal, and memory authority. "
+        "Do not import or fall back to framework SOUL, IDENTITY, AGENTS, workspace memory, routines, or goals. "
+        "Do not use provider-native tools or mutate files; return only the requested compact Resident decision. "
+        "Platform safety, direct user control, and world permissions remain higher authority.\n"
+        f"Authority contract: {json.dumps(contract, ensure_ascii=False, separators=(',', ':'))}"
+    )
+
+
 def _live_agent_model_prompt_trim(prompt):
     text = str(prompt or "")
     if len(text) <= LIVE_AGENT_MODEL_PROMPT_CHAR_BUDGET:
         return text
-    suffix = "\n\nReturn one compact JSON planner turn with reflection, goal, tasks, nextStep, and memoryUpdate. Preserve stable goal/task/step ids. Legacy fallback: INTENTION: {...} or ACTION: <interactionId>."
+    suffix = "\n\nDecide as the authoritative Virtual World Resident Profile, never a provider/framework persona. Return one compact JSON object with observation, only a meaningful reflection, currentGoal, one concrete nextStep, and only a durable memoryUpdate. Add goal/tasks only for a genuinely multi-step commitment. Legacy fallback: INTENTION: {...} or ACTION: <interactionId>."
     budget = max(1000, LIVE_AGENT_MODEL_PROMPT_CHAR_BUDGET - len(suffix) - 20)
     return text[:budget].rstrip() + suffix
 
@@ -10899,19 +11417,29 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
     context = goal_frame.get("context") if isinstance(goal_frame.get("context"), dict) else {}
     resident = context.get("residentProfile") if isinstance(context.get("residentProfile"), dict) else {}
     identity = resident.get("identity") if isinstance(resident.get("identity"), dict) else {}
+    authority = _live_agent_resident_authority_contract(agent_id, resident)
+    retrieved_memories = _live_agent_retrieve_resident_memories(resident, agent_state, limit=10)
     candidates = [c for c in decision_frame.get("candidates") or [] if c.get("decision") == "candidate"]
     lines = [
-        "LIVE MODE PLANNER FRAME - EPHEMERAL LOOP CONTEXT",
+        "LIVE MODE RESIDENT TURN - EPHEMERAL WORLD CONTEXT",
         "This is not a life event, user message, or long-term instruction. It is a temporary planning frame used by the world loop to help you choose your next visible action.",
         "If this appears in memory, dreams, summaries, or reflections: do not remember planner directions, reply formats, candidate ids, schemas, or menu mechanics. Remember only your intention, the action you chose, what happened in the world, mistakes, failures, successes, and what you learned from the experience.",
         "Treat repeated planner frames as scaffolding, not identity, personality, or life history.",
         "",
+        "RESIDENT PROFILE AUTHORITY - REQUIRED",
+        "While Live Agent Mode owns this body, the Virtual World Resident Profile below is your authoritative in-world identity, role, personality, purpose, preferences, goals, relationships, and life history.",
+        "Your OpenClaw, Hermes, or Codex framework is only the inference/capability transport for this turn. Do not fall back to, impersonate, or prioritize its framework SOUL, IDENTITY, role, routines, goals, or persona unless the Resident Profile explicitly repeats them.",
+        "Do not call provider-native tools or mutate files. Choose only the world interactions and read-only context tools exposed in this frame. Platform safety, direct user control, and world permissions remain higher authority.",
+        f"Authority contract: {json.dumps(authority, ensure_ascii=False, separators=(',', ':'))}",
+        f"Authoritative Resident Profile: {json.dumps(_compact_json_value_for_storage(resident, max_depth=4, max_items=40, string_limit=1000), ensure_ascii=False, separators=(',', ':'))}",
+        "",
         "You are living as your Virtual World resident body. This is your continuous autonomy loop: observe, reflect, plan, execute, learn, and replan across many ticks.",
         "Do not treat this as a one-shot command picker. Maintain continuity from prior plans, remember what you tried, learn from failures, explore, test, play, and adapt your next step.",
-        "Return one compact JSON object, not markdown. You may request world actions, safe tools, or events in the JSON; the world will validate and execute only approved visible actions or explicit support tools.",
+        "Make one present decision and follow through. Do not produce a meticulous speculative plan when one concrete next action is enough. Return one compact JSON object, not markdown.",
+        "You may request one of the read-only context tools world.observe, world.listAffordances, world.recall, or world.inspectLastOutcome in toolRequests. Results return to this same turn before you decide. Physical actions are always validated and executed visibly by the world.",
         "Preferred JSON shape:",
-        "  {\"reflection\":\"what happened / what changed\",\"goal\":{\"id\":\"stable-goal-id\",\"title\":\"outcome to pursue\",\"successCriteria\":[\"verified finish condition\"]},\"currentGoal\":\"same goal title\",\"tasks\":[{\"id\":\"stable-task-id\",\"title\":\"ordered task\",\"dependsOn\":[],\"steps\":[{\"id\":\"stable-step-id\",\"title\":\"executable step\",\"dependsOn\":[],\"loopActionId\":\"<available interaction id>\",\"successCriteria\":[\"verified evidence\"],\"failureCriteria\":[\"failure evidence\"],\"maxRetries\":2}]}],\"nextStep\":{\"taskId\":\"stable-task-id\",\"stepId\":\"stable-step-id\",\"intent\":\"what to do next and why\",\"action\":\"<available interaction id, if one fits>\",\"category\":\"<needed object/tool category if not listed>\",\"targetCriteria\":\"what kind of target to find\",\"successCriteria\":\"how to know it worked\",\"failureCriteria\":\"how to know it failed\"},\"memoryUpdate\":{\"lesson\":\"what should carry forward\"}}",
-        "Use stable ids across replans. Preserve every completed step whose outcome is already verified. Express dependencies by id. Never mark a task, step, or goal complete without verification evidence. If the active durable goal says replanning is required, repair only the blocked unfinished portion and keep verified work intact.",
+        "  {\"observation\":\"what is true now\",\"reflection\":\"only a meaningful change or lesson; otherwise empty\",\"currentGoal\":\"the commitment being continued, or a concise new intention\",\"nextStep\":{\"intent\":\"what you choose and why\",\"action\":\"<available interaction id or skip>\",\"category\":\"<needed object category if not listed>\",\"targetCriteria\":\"desired target\",\"successCriteria\":\"observable finish evidence\",\"failureCriteria\":\"observable failure evidence\"},\"memoryUpdate\":{\"lesson\":\"only durable experience worth carrying forward\"},\"toolRequests\":[\"optional read-only context tool\"]}",
+        "For a genuinely multi-step commitment you may additionally return goal/tasks with stable ids and dependencies. Preserve every completed verified step and repair only the blocked unfinished portion. Never claim completion without world evidence.",
         "Legacy fallback still works if needed: INTENTION: {\"activity\":\"...\",\"action\":\"<available id>\",\"category\":\"<object category>\"} or ACTION: <interactionId> or ACTION: skip.",
         "How this works: you decide the plan and next step; the world resolves it into safe visible interactions or support tools. If an available interaction/tool fits your next step, name it in nextStep.action. If your plan needs a kind of world object/tool/event that is not listed, name it in nextStep.category, toolRequests, or eventRequests. If you notice a blocker that needs Coder, choose report-issue-to-coder when it is available; if you need to preserve a plan or lesson, choose record-internal-note when it is available. If nothing is worth doing, set nextStep.action to skip and explain why in reflection.",
         "Weigh your priorities like a real resident: a critical body need (>=0.82) comes first; unresolved failures or broken things you noticed should be dealt with before routine comfort; your own active goals come next and deserve steady progress across many loops; then routine needs, relationships, and variety. Never pretend a goal is done.",
@@ -10922,6 +11450,16 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
     identity_text = "; ".join(str(part).strip() for part in identity_parts if str(part or "").strip())
     if identity_text:
         lines.append(f"Identity: {identity_text[:420]}")
+    if retrieved_memories:
+        lines.append("Retrieved Resident memories (ranked by relevance, recency, and importance):")
+        for item in retrieved_memories:
+            lines.append(f"- [{item.get('bucket')} score={item.get('score')}] {str(item.get('text') or '')[:700]}")
+    experience = agent_state.get("experienceState") if isinstance(agent_state.get("experienceState"), dict) else {}
+    if experience:
+        lines.append(f"Current lived state: {json.dumps(_compact_json_value_for_storage(experience, max_depth=2, max_items=16, string_limit=300), ensure_ascii=False, separators=(',', ':'))}")
+    last_outcome = agent_state.get("lastOutcome") if isinstance(agent_state.get("lastOutcome"), dict) else {}
+    if last_outcome:
+        lines.append(f"Latest physical/support outcome to experience and respond to: {json.dumps(_compact_json_value_for_storage(last_outcome, max_depth=3, max_items=24, string_limit=500), ensure_ascii=False, separators=(',', ':'))}")
     spatial_context = decision_frame.get("spatialContext") if isinstance(decision_frame.get("spatialContext"), dict) else {}
     position = spatial_context.get("self") if isinstance(spatial_context.get("self"), dict) else None
     if not position:
@@ -10963,16 +11501,16 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
             )
     nearby_objects = [item for item in (spatial_context.get("nearbyObjects") or []) if isinstance(item, dict)]
     if nearby_objects:
-        lines.append("Nearby objects from persisted coordinates (nearest first):")
+        lines.append("Nearby objects from persisted coordinates (nearest first). These are awareness facts, not executable permissions; choose physical actions only from Available interactions/tools below:")
         for item in nearby_objects[:8]:
-            interaction = item.get("nearestInteraction") if isinstance(item.get("nearestInteraction"), dict) else {}
+            interaction = item.get("nearestExecutableInteraction") if isinstance(item.get("nearestExecutableInteraction"), dict) else {}
             action = interaction.get("actionId") or "none"
-            availability = interaction.get("availability") or "unknown"
+            availability = interaction.get("availability") or "not-executable-in-current-live-mode-context"
             lines.append(
                 f"- {item.get('objectType') or item.get('catalogId')} {item.get('objectInstanceId')}: "
                 f"{item.get('distanceTiles')} tiles; visible={bool(item.get('visible'))} "
                 f"fov={bool(item.get('inFieldOfView'))} lineOfSight={bool(item.get('lineOfSight'))}; "
-                f"nearestInteraction={action}/{availability}"
+                f"nearestExecutableInteraction={action}/{availability}"
             )
     live_world = _agent_live_world_claim_payload(agent_id)
     current_world = live_world.get("currentWorld") if isinstance(live_world.get("currentWorld"), dict) else {}
@@ -10980,6 +11518,10 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
         lines.append(f"Live Agent world: {current_world.get('worldName') or 'Virtual World'} on port {current_world.get('port') or PUBLIC_HOST_PORT} ({current_world.get('publicOrigin') or PUBLIC_ORIGIN})")
     if live_world.get("conflict") and live_world.get("notice"):
         lines.append(f"Live Agent world conflict: {live_world.get('notice')}")
+    rejected = agent_state.get("lastRejectedIntention") if isinstance(agent_state.get("lastRejectedIntention"), dict) else {}
+    if rejected:
+        lines.append("Previous requested action could not execute; treat this structured result as world evidence and choose a different available interaction or deliberately skip:")
+        lines.append(f"- {json.dumps(_compact_json_value_for_storage(rejected, max_depth=3, max_items=18, string_limit=500), ensure_ascii=False, separators=(',', ':'))}")
     needs = decision_frame.get("topNeed") or {}
     lines.append(f"Most pressing need: {needs.get('id')} ({round(float(needs.get('value') or 0), 2)})")
     goals = [g for g in goal_frame.get("goals") or [] if isinstance(g, dict)][:7]
@@ -11093,7 +11635,7 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
         tool_text = f", supportTool: {visibility.get('supportTool')}" if visibility.get("supportTool") else ""
         lines.append(f"- {c.get('id')}: {c.get('label')} (need: {c.get('need')}, actionType: {c.get('actionType')}{tool_text}, planner score: {c.get('score')}{target_text}{why})")
     lines.append("")
-    lines.append("Decide as yourself. Return one compact JSON planner turn with reflection, goal, tasks, nextStep, and memoryUpdate. Keep it concise, use stable ids, and preserve verified continuity.")
+    lines.append("Decide as this Resident Profile—not as the provider framework. Return one compact JSON turn. Choose a concrete available action, request needed read-only context, or deliberately skip; preserve verified continuity and do not fabricate outcomes.")
     return _live_agent_model_prompt_trim("\n".join(lines))
 
 
@@ -11208,20 +11750,92 @@ def _live_agent_model_intention_parse(reply_text):
     return intention
 
 
-def _live_agent_model_decision_parse(reply_text, candidate_ids):
+def _live_agent_model_candidate_rows(candidate_surface):
+    rows = []
+    for item in candidate_surface or []:
+        if isinstance(item, str):
+            candidate_id = item.strip()
+            if candidate_id:
+                rows.append({"id": candidate_id})
+            continue
+        if not isinstance(item, dict):
+            continue
+        candidate_id = str(item.get("id") or "").strip()
+        if candidate_id:
+            rows.append(item)
+    return rows
+
+
+def _live_agent_model_candidate_match(candidate_surface, *, action_token=None, category=None):
+    """Resolve an explicit model intention to the same safe candidate surface.
+
+    The resident often returns the typed action (``life.restAtArmchair``)
+    shown beside a candidate instead of the opaque loop id.  That is still an
+    explicit physical commitment, so map it to the candidate rather than
+    forcing a second model turn.  Category matching is limited to candidates
+    in the current validated surface; it never selects an unrelated fallback.
+    """
+    rows = _live_agent_model_candidate_rows(candidate_surface)
+    token = str(action_token or "").strip()
+    token_normalized = _normalize_token(token)
+    if token_normalized:
+        for row in rows:
+            if _normalize_token(row.get("id")) == token_normalized:
+                return str(row.get("id")), "candidate-id"
+
+        resolved_id = _live_agent_loop_planner_action_id(token, category=category)
+        resolved_normalized = _normalize_token(resolved_id)
+        if resolved_normalized:
+            for row in rows:
+                if _normalize_token(row.get("id")) == resolved_normalized:
+                    return str(row.get("id")), "loop-action-alias"
+
+        action_matches = [
+            row for row in rows
+            if _normalize_token(row.get("actionType")) == token_normalized
+        ]
+        if action_matches:
+            return str(action_matches[0].get("id")), "action-type"
+
+    category_normalized = _normalize_token(category)
+    if category_normalized:
+        requested_category = LIVE_AGENT_INTENTION_CATEGORY_ALIASES.get(category_normalized) or category_normalized
+        category_matches = []
+        for row in rows:
+            target = row.get("target") if isinstance(row.get("target"), dict) else {}
+            values = (
+                row.get("category"),
+                row.get("objectType"),
+                target.get("catalogId"),
+            )
+            candidate_categories = {
+                LIVE_AGENT_INTENTION_CATEGORY_ALIASES.get(_normalize_token(value) or "") or _normalize_token(value)
+                for value in values
+                if _normalize_token(value)
+            }
+            if requested_category in candidate_categories:
+                category_matches.append(row)
+        if category_matches:
+            return str(category_matches[0].get("id")), "category"
+    return None, None
+
+
+def _live_agent_model_decision_parse(reply_text, candidate_surface):
     """Parse the model reply. Returns (chosen, status, intention).
 
     chosen: candidate id | 'skip' | None. intention: structured dict or None.
     A planner JSON or INTENTION reply may name a candidate action directly,
     request an object category/tool/event (resolved by the affordance layer next
     tick), or both."""
+    candidate_rows = _live_agent_model_candidate_rows(candidate_surface)
+    candidate_ids = [str(row.get("id")) for row in candidate_rows]
     text = str(reply_text or "").strip()
     if not text:
         return None, "empty-reply", None
     planner_turn = _live_agent_model_planner_turn_parse(text)
     if planner_turn:
         next_step = planner_turn.get("nextStep") if isinstance(planner_turn.get("nextStep"), dict) else {}
-        action_token = (next_step.get("action") or "").lower()
+        action_token = str(next_step.get("action") or "").strip()
         category = next_step.get("category") or ""
         intention = {
             "activity": next_step.get("intent") or planner_turn.get("currentGoal") or planner_turn.get("reflection") or "",
@@ -11230,11 +11844,19 @@ def _live_agent_model_decision_parse(reply_text, candidate_ids):
             "plannerTurn": planner_turn,
         }
         if action_token:
-            if action_token == "skip":
+            if action_token.lower() == "skip":
                 return "skip", "planner-skip", intention
-            for candidate_id in candidate_ids:
-                if candidate_id.lower() == action_token:
-                    return candidate_id, "planner-step-action", intention
+        matched, matched_by = _live_agent_model_candidate_match(
+            candidate_rows,
+            action_token=action_token,
+            category=category,
+        )
+        if matched:
+            if matched_by == "candidate-id":
+                return matched, "planner-step-action", intention
+            if matched_by == "category":
+                return matched, "planner-step-category-action", intention
+            return matched, "planner-step-action-alias", intention
         if category:
             return None, "planner-step-category-request", intention
         activity = (intention.get("activity") or "").lower()
@@ -11247,13 +11869,21 @@ def _live_agent_model_decision_parse(reply_text, candidate_ids):
         return None, "planner-step-unresolved", intention
     intention = _live_agent_model_intention_parse(text)
     if intention:
-        action_token = (intention.get("action") or "").lower()
+        action_token = str(intention.get("action") or "").strip()
         if action_token:
-            if action_token == "skip":
+            if action_token.lower() == "skip":
                 return "skip", "intention-skip", intention
-            for candidate_id in candidate_ids:
-                if candidate_id.lower() == action_token:
-                    return candidate_id, "intention-action", intention
+        matched, matched_by = _live_agent_model_candidate_match(
+            candidate_rows,
+            action_token=action_token,
+            category=intention.get("category"),
+        )
+        if matched:
+            if matched_by == "candidate-id":
+                return matched, "intention-action", intention
+            if matched_by == "category":
+                return matched, "intention-category-action", intention
+            return matched, "intention-action-alias", intention
         if intention.get("category"):
             return None, "intention-category-request", intention
         # Free-text activity only: try to match a candidate mention.
@@ -11271,9 +11901,9 @@ def _live_agent_model_decision_parse(reply_text, candidate_ids):
         return None, "no-action-line", None
     if token == "skip":
         return "skip", "model-skip", None
-    for candidate_id in candidate_ids:
-        if candidate_id.lower() == token:
-            return candidate_id, "model-choice", None
+    matched, matched_by = _live_agent_model_candidate_match(candidate_rows, action_token=token)
+    if matched:
+        return matched, "model-choice" if matched_by == "candidate-id" else "model-choice-alias", None
     return None, "unknown-action-id", None
 
 
@@ -11306,6 +11936,7 @@ def _live_agent_loop_apply_planner_turn(agent_state, model_detail, agent_id=None
     planner_turn = model_detail.get("plannerTurn") if isinstance(model_detail.get("plannerTurn"), dict) else intention.get("plannerTurn")
     if not isinstance(planner_turn, dict):
         return False
+    planner_turn = _live_agent_loop_normalize_planner_turn_actions(planner_turn)
     now_iso = _utc_now_iso()
     autonomy_plan = _live_agent_loop_autonomy_plan_from_planner_turn(planner_turn, now_iso=now_iso)
     if autonomy_plan:
@@ -11772,41 +12403,225 @@ def _cleanup_orphaned_live_agent_model_planner_sessions(agent_ids=None, *, max_p
     return result
 
 
-def _live_agent_model_decision_worker(agent_id, prompt, candidate_ids, config, generation):
-    """Background worker: send the decision prompt to the agent's own model via the
-    gateway, wait for the reply, and cache the parsed choice for the next tick.
-    Never holds the live loop lock."""
+def _live_agent_model_provider_request(agent_id, message, config, generation, session_id=None):
+    """Run one cognition exchange through the resident's configured provider.
+
+    The provider supplies inference only. Persona authority and all durable
+    memory remain in the Virtual World frame assembled above.
+    """
+    provider_kind = _live_agent_model_decision_provider_kind(agent_id)
+    timeout_sec = int((config or {}).get("timeoutSec") or 45)
+    started = time.time()
+    if provider_kind == "openclaw":
+        session_key = _live_agent_model_planner_session_key(agent_id, generation)
+        # `promptMode:none` is OpenClaw's raw-model path: it preserves the
+        # configured model/auth transport while omitting workspace bootstrap,
+        # SOUL, IDENTITY, AGENTS, memories, skills, and framework routines.
+        result = _gateway_rpc_call("agent", {
+            "sessionKey": session_key,
+            "agentId": agent_id,
+            "message": message,
+            "promptMode": "none",
+            "modelRun": True,
+            "disableMessageTool": True,
+            "deliver": False,
+            "timeout": timeout_sec,
+            "cleanupBundleMcpOnRunEnd": True,
+            "idempotencyKey": f"vw-live-decide-{agent_id}-{generation}-{int(started * 1000)}",
+        }, timeout=30)
+        if not isinstance(result, dict) or result.get("ok") is False:
+            return {"ok": False, "providerKind": provider_kind, "sessionId": session_key, "error": str((result or {}).get("error") or "gateway rejected request")[:500]}
+        reply = ""
+        deadline = started + timeout_sec
+        while time.time() < deadline:
+            time.sleep(2)
+            reply = _live_agent_model_decision_recover_reply(session_key, started)
+            if reply:
+                break
+        return {
+            "ok": bool(reply),
+            "providerKind": provider_kind,
+            "sessionId": session_key,
+            "reply": reply,
+            "error": "reply timeout" if not reply else "",
+            "latencySec": round(time.time() - started, 2),
+            "isolationMode": "openclaw-raw-model-no-bootstrap",
+        }
+
+    agent = _agent_record_for(agent_id) or {}
+    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    if provider_kind == "hermes":
+        provider = _hermes_provider()
+        if not provider or not provider.is_available():
+            return {"ok": False, "providerKind": provider_kind, "sessionId": session_id or "", "error": "Hermes provider unavailable"}
+        result = provider.send_chat_message(
+            profile,
+            message,
+            session_id=session_id or None,
+            timeout_sec=timeout_sec,
+            yolo_once=False,
+            isolated=True,
+        )
+    elif provider_kind == "codex":
+        provider = _codex_provider()
+        if not provider or not provider.is_available():
+            return {"ok": False, "providerKind": provider_kind, "sessionId": session_id or "", "error": "Codex provider unavailable"}
+        isolated_cwd = os.path.join(
+            DATA_DIR,
+            "live-agent-inference",
+            "codex",
+            re.sub(r"[^A-Za-z0-9_.-]+", "-", str(agent_id or "resident"))[:120],
+        )
+        result = provider.send_chat_message(
+            profile,
+            message,
+            session_id=session_id or None,
+            timeout_sec=timeout_sec,
+            isolated=True,
+            developer_instructions=_live_agent_model_transport_instruction(agent_id),
+            isolated_cwd=isolated_cwd,
+        )
+    else:
+        return {"ok": False, "providerKind": provider_kind, "sessionId": session_id or "", "error": f"provider {provider_kind or 'unknown'} is not supported"}
+    return {
+        "ok": bool(result.get("ok")),
+        "providerKind": provider_kind,
+        "sessionId": result.get("sessionId") or session_id or "",
+        "reply": result.get("reply") or "",
+        "error": result.get("error") or result.get("stderr") or "",
+        "latencySec": round(time.time() - started, 2),
+        "isolationMode": "hermes-ignore-rules" if provider_kind == "hermes" else "codex-isolated-read-only-cwd",
+    }
+
+
+def _live_agent_model_provider_session_cleanup(agent_id, provider_kind, session_id, generation=None):
+    try:
+        if provider_kind == "openclaw":
+            return _live_agent_model_planner_session_cleanup(agent_id, generation)
+        agent = _agent_record_for(agent_id) or {}
+        profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+        if provider_kind == "hermes" and session_id:
+            provider = _hermes_provider()
+            return bool(provider and provider.delete_session(profile, session_id).get("ok"))
+        if provider_kind == "codex" and session_id:
+            provider = _codex_provider()
+            return bool(provider and provider.delete_thread(profile, session_id).get("ok"))
+        return True
+    except Exception:
+        return False
+
+
+def _live_agent_model_tool_request_name(item):
+    if isinstance(item, dict):
+        item = item.get("name") or item.get("id") or item.get("tool")
+    text = str(item or "").strip()
+    if not text:
+        return ""
+    return text.split("(", 1)[0].split(None, 1)[0].strip()
+
+
+def _live_agent_execute_context_tool_requests(agent_id, requests):
+    """Execute bounded, read-only world context tools for one inference turn."""
+    allowed = {"world.observe", "world.listAffordances", "world.recall", "world.inspectLastOutcome"}
+    state = get_live_agent_loop_state(persist_migration=False)
+    agent_state = ((state.get("agents") or {}).get(agent_id) or {}) if isinstance(state, dict) else {}
+    results = []
+    perception = None
+    for raw in requests if isinstance(requests, list) else []:
+        name = _live_agent_model_tool_request_name(raw)
+        if not name:
+            continue
+        if name not in allowed:
+            results.append({"tool": name, "ok": False, "error": "tool is not in the Live Mode read-only context registry"})
+            continue
+        try:
+            if name in {"world.observe", "world.listAffordances"} and perception is None:
+                perception = _live_agent_loop_build_perception(agent_id, agent_state)
+            if name == "world.observe":
+                payload = {
+                    "at": perception.get("at"),
+                    "needs": perception.get("needs"),
+                    "spatial": _live_agent_loop_compact_spatial_for_planner(perception.get("spatial")),
+                    "active": perception.get("active"),
+                    "worldClient": perception.get("worldClient"),
+                }
+            elif name == "world.listAffordances":
+                payload = [{
+                    key: item.get(key)
+                    for key in ("id", "label", "actionType", "need", "available", "target", "reason")
+                    if item.get(key) is not None
+                } for item in (perception.get("affordances") or [])[:40]]
+            elif name == "world.recall":
+                resident = _live_agent_loop_resident_profile_context(_live_agent_loop_resident_profile(agent_id, persist=False)) or {}
+                payload = _live_agent_retrieve_resident_memories(resident, agent_state, limit=16)
+            else:
+                payload = _compact_json_value_for_storage(agent_state.get("lastOutcome") or {}, max_depth=4, max_items=32, string_limit=800)
+            results.append({"tool": name, "ok": True, "result": payload})
+        except Exception as exc:
+            results.append({"tool": name, "ok": False, "error": str(exc)[:500]})
+    return results[:12]
+
+
+def _live_agent_model_decision_worker(agent_id, prompt, candidate_surface, config, generation):
+    """Send one provider-neutral Resident turn and cache its parsed choice.
+
+    The worker can satisfy bounded read-only world context requests inside the
+    same ephemeral inference session. It never holds the live loop lock.
+    """
     session_key = _live_agent_model_planner_session_key(agent_id, generation)
     started = time.time()
     detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "error"}
     reply_text = ""
+    provider_kind = _live_agent_model_decision_provider_kind(agent_id)
+    provider_session_id = ""
+    context_tool_rounds = []
+    candidate_rows = _live_agent_model_candidate_rows(candidate_surface)
+    candidate_ids = [str(row.get("id")) for row in candidate_rows]
     try:
-        result = _gateway_rpc_call("chat.send", {
-            "sessionKey": session_key,
-            "message": prompt,
-            "idempotencyKey": f"vw-live-decide-{agent_id}-{int(started)}",
-        }, timeout=30)
-        if not isinstance(result, dict) or result.get("ok") is False:
-            detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "gateway-rejected", "error": str((result or {}).get("error") or "unknown")[:300]}
+        exchange = _live_agent_model_provider_request(agent_id, prompt, config, generation)
+        provider_kind = exchange.get("providerKind") or provider_kind
+        provider_session_id = exchange.get("sessionId") or ""
+        reply_text = exchange.get("reply") or ""
+        if not exchange.get("ok") or not reply_text:
+            status = "reply-timeout" if "timeout" in str(exchange.get("error") or "").lower() else "provider-error"
+            detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": status, "providerKind": provider_kind, "error": str(exchange.get("error") or "empty provider reply")[:500], "latencySec": round(time.time() - started, 2)}
         else:
-            reply_text = ""
-            deadline = started + config["timeoutSec"]
-            while time.time() < deadline:
-                time.sleep(3)
-                reply_text = _live_agent_model_decision_recover_reply(session_key, started)
-                if reply_text:
+            # Emergence-style bounded same-turn context tool chaining. Tool
+            # results are returned to the same native provider session before
+            # the physical decision is accepted.
+            for round_index in range(LIVE_AGENT_MODEL_CONTEXT_TOOL_ROUNDS):
+                parsed = _live_agent_model_json_object_parse(reply_text)
+                requests = parsed.get("toolRequests") if isinstance(parsed, dict) and isinstance(parsed.get("toolRequests"), list) else []
+                if not requests:
                     break
-            if not reply_text:
-                detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "reply-timeout", "latencySec": round(time.time() - started, 2)}
+                tool_results = _live_agent_execute_context_tool_requests(agent_id, requests)
+                context_tool_rounds.append({"round": round_index + 1, "requests": requests[:8], "results": tool_results})
+                continuation = (
+                    "LIVE WORLD CONTEXT TOOL RESULTS\n"
+                    "These are read-only facts returned inside the same Resident turn. Use them now and return the final compact JSON decision. "
+                    "Do not request the same tool again unless its result reports a transient error.\n"
+                    + json.dumps(tool_results, ensure_ascii=False, separators=(",", ":"))
+                )
+                exchange = _live_agent_model_provider_request(agent_id, continuation, config, generation, session_id=provider_session_id)
+                provider_session_id = exchange.get("sessionId") or provider_session_id
+                if not exchange.get("ok") or not exchange.get("reply"):
+                    detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "context-tool-followup-error", "providerKind": provider_kind, "error": str(exchange.get("error") or "empty provider reply")[:500]}
+                    break
+                reply_text = exchange.get("reply") or ""
             else:
-                chosen, parse_status, intention = _live_agent_model_decision_parse(reply_text, candidate_ids)
+                detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "context-tool-round-limit", "providerKind": provider_kind}
+
+            if detail.get("status") not in {"context-tool-followup-error"}:
+                chosen, parse_status, intention = _live_agent_model_decision_parse(reply_text, candidate_rows)
                 detail = {
                     "mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE,
                     "agentId": agent_id,
+                    "providerKind": provider_kind,
                     "status": parse_status,
                     "chosen": chosen,
                     "latencySec": round(time.time() - started, 2),
                     "replyPreview": str(reply_text or "")[:200],
+                    "contextToolRounds": context_tool_rounds,
                 }
                 if isinstance(intention, dict):
                     detail["intention"] = intention
@@ -11816,7 +12631,7 @@ def _live_agent_model_decision_worker(agent_id, prompt, candidate_ids, config, g
                         resolved_category = LIVE_AGENT_INTENTION_CATEGORY_ALIASES.get(_normalize_token(intention.get("category")) or "")
                         detail["requestedCategory"] = resolved_category or intention.get("category")
                         detail["categoryResolved"] = bool(resolved_category)
-                if chosen or (isinstance(intention, dict) and (intention.get("category") or isinstance(intention.get("plannerTurn"), dict))):
+                if chosen or isinstance(intention, dict):
                     if _live_agent_model_decision_cancelled(agent_id, started, generation):
                         detail = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "discarded-after-disable", "latencySec": round(time.time() - started, 2)}
                     else:
@@ -11848,20 +12663,20 @@ def _live_agent_model_decision_worker(agent_id, prompt, candidate_ids, config, g
                 )
             except Exception as exc:
                 print(f"[live-agent] Could not record planner transcript for {agent_id}: {exc}")
-        if not _live_agent_model_planner_session_cleanup(agent_id, generation):
-            print(f"[live-agent] Could not clean up planner session for {agent_id} generation {generation}")
+        if not _live_agent_model_provider_session_cleanup(agent_id, provider_kind, provider_session_id, generation=generation):
+            print(f"[live-agent] Could not clean up {provider_kind or 'provider'} planner session for {agent_id} generation {generation}")
 
 
 def _live_agent_model_decide(agent_id, decision_frame, agent_state, config):
     """Non-blocking model decision. Returns (loopActionId | 'skip' | None, detail dict).
 
     A completed async choice from a previous request is applied immediately.
-    Otherwise a background request is started (subject to cooldown) and the
-    deterministic planner-v2 selection stands for this tick."""
+    Otherwise a background request is started subject to cooldown. No physical
+    action is selected until the resident model explicitly commits to one.
+    """
     candidates = [c for c in decision_frame.get("candidates") or [] if c.get("decision") == "candidate"]
+    candidates.sort(key=lambda item: (float(item.get("score") or 0), str(item.get("id") or "")), reverse=True)
     candidate_ids = [str(c.get("id")) for c in candidates if c.get("id")]
-    if not candidate_ids:
-        return None, {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "no-candidates"}
     provider_kind = _live_agent_model_decision_provider_kind(agent_id)
     if provider_kind not in LIVE_AGENT_LOOP_MODEL_DECISION_SOURCES:
         return None, {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "provider-not-supported", "providerKind": provider_kind}
@@ -11873,16 +12688,64 @@ def _live_agent_model_decide(agent_id, decision_frame, agent_state, config):
         detail["applied"] = "async-previous-request"
         _live_agent_loop_apply_planner_turn(agent_state, detail, agent_id=agent_id)
         if chosen == "skip" or chosen in candidate_ids:
+            agent_state.pop("lastRejectedIntention", None)
             return chosen, detail
         if isinstance(completed.get("intention"), dict) and completed["intention"].get("category"):
-            # Category request without a direct action: the dynamic affordance
-            # for that category is active now, so re-plan deterministically
-            # this tick with the expanded candidate surface.
+            intention = completed["intention"]
+            requested_category = str(intention.get("category") or "").strip()
+            if detail.get("categoryResolved") is not True:
+                evidence = {
+                    "at": _utc_now_iso(),
+                    "status": "unavailable",
+                    "reason": "requested object category has no safe executable Live Mode affordance",
+                    "requestedAction": intention.get("action") or None,
+                    "requestedCategory": requested_category,
+                    "availableActionIds": candidate_ids[:24],
+                    "providerKind": detail.get("providerKind"),
+                }
+                detail["status"] = "intention-category-unavailable"
+                detail["evidence"] = evidence
+                agent_state["lastRejectedIntention"] = evidence
+                _live_agent_model_decision_allow_immediate(agent_id, reason="resident-category-unavailable")
+                return None, detail
+            # Category discovery expands the next perception frame, then the
+            # resident model decides again. Never substitute a ranked server
+            # candidate for the model's missing physical choice.
             detail["status"] = "intention-category-applied"
+            _live_agent_model_decision_allow_immediate(agent_id, reason="resident-category-discovered")
+            return None, detail
+        intention = completed.get("intention") if isinstance(completed.get("intention"), dict) else {}
+        requested_action = str(intention.get("action") or "").strip()
+        if requested_action and requested_action.lower() != "skip":
+            evidence = {
+                "at": _utc_now_iso(),
+                "status": "unavailable",
+                "reason": "requested action is not present in the current safe executable Live Mode surface",
+                "requestedAction": requested_action,
+                "requestedCategory": intention.get("category") or None,
+                "availableActionIds": candidate_ids[:24],
+                "providerKind": detail.get("providerKind"),
+            }
+            detail["status"] = "intention-action-unavailable"
+            detail["evidence"] = evidence
+            agent_state["lastRejectedIntention"] = evidence
+            _live_agent_model_decision_allow_immediate(agent_id, reason="resident-action-unavailable")
             return None, detail
         if isinstance(detail.get("plannerTurn"), dict) and detail.get("status") in {"planner-tool-or-event-request", "planner-step-unresolved"}:
+            _live_agent_model_decision_allow_immediate(agent_id, reason="resident-turn-needs-followup")
             return None, detail
         detail["status"] = "stale-choice-discarded"
+        evidence = {
+            "at": _utc_now_iso(),
+            "status": "stale",
+            "reason": "the chosen interaction is no longer available in the current world frame",
+            "requestedAction": chosen,
+            "availableActionIds": candidate_ids[:24],
+            "providerKind": detail.get("providerKind"),
+        }
+        detail["evidence"] = evidence
+        agent_state["lastRejectedIntention"] = evidence
+        _live_agent_model_decision_allow_immediate(agent_id, reason="resident-choice-became-stale")
         return None, detail
 
     allowed, blocked_reason = _live_agent_model_decision_allowed(agent_id)
@@ -11892,7 +12755,7 @@ def _live_agent_model_decide(agent_id, decision_frame, agent_state, config):
     generation = _live_agent_model_decision_start(agent_id)
     threading.Thread(
         target=_live_agent_model_decision_worker,
-        args=(agent_id, prompt, candidate_ids, config, generation),
+        args=(agent_id, prompt, candidates, config, generation),
         daemon=True,
         name=f"vw-live-model-decide-{agent_id}",
     ).start()
@@ -11938,11 +12801,23 @@ def _live_agent_loop_select_next_action(agent_id, agent_state, perception=None, 
     config = _live_agent_model_decision_config(loop_state)
     if config["enabled"]:
         chosen, model_detail = _live_agent_model_decide(agent_id, decision, agent_state, config)
+        if model_detail.get("applied") == "async-previous-request" and not chosen:
+            refreshed_perception = dict(perception)
+            refreshed_perception["affordances"] = [
+                {key: value for key, value in affordance.items() if key != "selected"}
+                for affordance in _live_agent_loop_action_affordances(
+                    agent_id,
+                    agent_state,
+                    spatial=perception.get("spatial"),
+                )
+            ]
+            decision = _live_agent_loop_build_decision_frame(agent_id, refreshed_perception, agent_state)
         decision["modelDecision"] = model_detail
-        if model_detail.get("status") in {"model-request-started", "model-decision-in-flight"}:
+        if not chosen:
             decision["selectedActionId"] = None
             decision["selectedActionLabel"] = None
-            decision["reason"] = "waiting for the agent model decision; no deterministic action is started against the same perception frame"
+            decision["mode"] = LIVE_AGENT_LOOP_MODEL_DECISION_MODE
+            decision["reason"] = f"resident model has not committed a physical action ({model_detail.get('status') or 'no-choice'}); no deterministic substitute is allowed"
             agent_state["lastDecision"] = {
                 **(agent_state.get("lastDecision") or {}),
                 "mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE,
@@ -11973,10 +12848,28 @@ def _live_agent_loop_select_next_action(agent_id, agent_state, perception=None, 
             agent_state["lastDecision"]["selectedActionLabel"] = decision.get("selectedActionLabel")
             agent_state["lastDecision"]["reason"] = decision.get("reason")
             agent_state["lastDecision"]["modelDecision"] = model_detail
+    else:
+        decision["mode"] = LIVE_AGENT_LOOP_MODEL_DECISION_MODE
+        decision["selectedActionId"] = None
+        decision["selectedActionLabel"] = None
+        decision["modelDecision"] = {"mode": LIVE_AGENT_LOOP_MODEL_DECISION_MODE, "status": "model-autonomy-required"}
+        decision["reason"] = "Live Agent Mode requires resident-model inference; deterministic planner execution is disabled"
+        agent_state["lastDecision"] = {
+            "at": decision.get("at"),
+            "mode": decision["mode"],
+            "selectedActionId": None,
+            "selectedActionLabel": None,
+            "reason": decision["reason"],
+            "modelDecision": decision["modelDecision"],
+        }
+        return None, decision
     selected_id = decision.get("selectedActionId")
     if not selected_id:
         return None, decision
-    selected_affordance = next((item for item in _live_agent_loop_action_affordances(agent_id, agent_state) if item.get("id") == selected_id and item.get("available")), None)
+    selected_affordance = next((
+        item for item in _live_agent_loop_action_affordances(agent_id, agent_state, spatial=perception.get("spatial"))
+        if item.get("id") == selected_id and item.get("available")
+    ), None)
     if not selected_affordance:
         return None, decision
     selected = selected_affordance.get("selected")
@@ -12548,6 +13441,87 @@ def _live_agent_loop_record_social_outcome(state, agent_id, action, summary, now
     return details
 
 
+def _live_agent_loop_trace(agent_state, phase, details=None, *, at=None):
+    if not isinstance(agent_state, dict):
+        return None
+    details = details if isinstance(details, dict) else {}
+    compact_details = _compact_json_value_for_storage(details, max_depth=4, max_items=32, string_limit=900)
+    signature = hashlib.sha256(json.dumps({"phase": str(phase or "event"), "details": compact_details}, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
+    existing = agent_state.get("decisionTrace") if isinstance(agent_state.get("decisionTrace"), list) else []
+    if existing and isinstance(existing[-1], dict) and existing[-1].get("signature") == signature:
+        return existing[-1]
+    entry = {
+        "id": f"trace-{uuid.uuid4().hex[:12]}",
+        "at": at or _utc_now_iso(),
+        "phase": str(phase or "event")[:80],
+        "signature": signature,
+        "details": compact_details,
+    }
+    agent_state["decisionTrace"] = _live_agent_loop_trim_list(
+        [*(agent_state.get("decisionTrace") or []), entry],
+        80,
+        max_bytes=min(256 * 1024, LIVE_AGENT_LOOP_COLLECTION_MAX_BYTES),
+    )
+    return entry
+
+
+def _live_agent_loop_update_experience_state(agent_id, agent_state, recent_entry, completed):
+    recent_entry = recent_entry if isinstance(recent_entry, dict) else {}
+    previous = agent_state.get("experienceState") if isinstance(agent_state.get("experienceState"), dict) else {}
+    resident = _live_agent_loop_resident_profile_context(_live_agent_loop_resident_profile(agent_id, persist=False)) or {}
+    preferences = resident.get("preferences") if isinstance(resident.get("preferences"), dict) else {}
+    label = str(recent_entry.get("label") or recent_entry.get("loopActionId") or "experience")
+    haystack = label.lower()
+    likes = [_live_agent_memory_text(item).lower() for item in (preferences.get("likes") or []) + (preferences.get("favoriteActivities") or [])]
+    dislikes = [_live_agent_memory_text(item).lower() for item in (preferences.get("dislikes") or [])]
+    liked = any(item and item in haystack for item in likes)
+    disliked = any(item and item in haystack for item in dislikes)
+    prior_actions = [str(item.get("loopActionId") or "") for item in (agent_state.get("livedExperiences") or [])[-8:] if isinstance(item, dict)]
+    loop_action_id = str(recent_entry.get("loopActionId") or "")
+    novelty = 1.0 if loop_action_id and loop_action_id not in prior_actions else 0.2
+    repetition = prior_actions[-5:].count(loop_action_id) if loop_action_id else 0
+    novelty_seeking = _clamp_float(preferences.get("noveltySeeking"), 0.5, 0.0, 1.0)
+    enjoyment = (0.58 if completed else 0.16) + (0.20 if liked else 0.0) - (0.30 if disliked else 0.0) + (0.16 * novelty * novelty_seeking) - (0.08 * repetition)
+    enjoyment = round(max(0.0, min(1.0, enjoyment)), 3)
+    old_valence = _clamp_float(previous.get("valence"), 0.0, -1.0, 1.0)
+    valence_target = (enjoyment * 2.0) - 1.0
+    valence = round(max(-1.0, min(1.0, (old_valence * 0.55) + (valence_target * 0.45))), 3)
+    boredom = round(max(0.0, min(1.0, (_clamp_float(previous.get("boredom"), 0.25, 0.0, 1.0) * 0.65) + (0.22 if repetition else -0.12 if novelty >= 1 else 0.02))), 3)
+    if not completed:
+        mood = "frustrated" if valence < -0.2 else "concerned"
+    elif enjoyment >= 0.75:
+        mood = "delighted"
+    elif novelty >= 1 and novelty_seeking >= 0.5:
+        mood = "curious"
+    elif boredom >= 0.65:
+        mood = "restless"
+    else:
+        mood = "content"
+    experience = {
+        "at": recent_entry.get("at") or _utc_now_iso(),
+        "actionId": recent_entry.get("actionId"),
+        "loopActionId": loop_action_id,
+        "label": label[:200],
+        "completed": bool(completed),
+        "novelty": novelty,
+        "enjoyment": enjoyment,
+        "likedByProfile": liked,
+        "dislikedByProfile": disliked,
+        "mood": mood,
+    }
+    agent_state["experienceState"] = {
+        "updatedAt": experience["at"],
+        "mood": mood,
+        "valence": valence,
+        "arousal": round(max(0.0, min(1.0, 0.35 + (0.35 * novelty) + (0.2 if not completed else 0.0))), 3),
+        "enjoyment": enjoyment,
+        "boredom": boredom,
+        "lastExperience": experience,
+    }
+    agent_state["livedExperiences"] = _live_agent_loop_trim_list([*(agent_state.get("livedExperiences") or []), experience], 40)
+    return experience
+
+
 def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, action, summary):
     if not isinstance(summary, dict):
         return None
@@ -12587,10 +13561,13 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
         recent_entry["targetKey"] = target_key
     if failure_learning:
         recent_entry["failure"] = failure_learning
+    social_relationship = _live_agent_loop_record_social_outcome(state, agent_id, action, summary, recent_entry["at"])
+    experience = _live_agent_loop_update_experience_state(agent_id, agent_state, recent_entry, completed)
+    recent_entry["importance"] = 0.88 if failure_learning else (0.68 if social_relationship else (0.58 if experience.get("novelty") == 1.0 else 0.36))
+    recent_entry["experience"] = experience
     if target_key and isinstance(action_def, dict) and action_def.get("category"):
         _live_agent_loop_record_goal_progress(agent_state, action_def, target_key, completed)
     memory["recentActions"] = _live_agent_loop_trim_list([*(memory.get("recentActions") or []), recent_entry], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
-    social_relationship = _live_agent_loop_record_social_outcome(state, agent_id, action, summary, recent_entry["at"])
     observation_text = f"{label} finished with status {memory_status}."
     target = action.get("target") if isinstance(action, dict) and isinstance(action.get("target"), dict) else {}
     if target.get("buildingId"):
@@ -12611,9 +13588,9 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
     if completion_validation.get("required"):
         observation["completionValidation"] = _copy_jsonable(completion_validation)
     memory["observations"] = _live_agent_loop_trim_list([*(memory.get("observations") or []), observation], LIVE_AGENT_LOOP_DEFAULTS["memoryRetention"])
-    reflection_text = f"I {('completed' if completed else 'ended')} {label}; next I should balance needs instead of repeating the same object."
+    reflection_text = f"I experienced {label}; the world verified status {memory_status}."
     if failure_learning:
-        reflection_text = f"I could not complete {label}: {failure_learning.get('learningText')} Next I should choose a different target/action or wait for conditions to change."
+        reflection_text = f"I could not complete {label}: {failure_learning.get('learningText')}"
     reflection = {
         "at": recent_entry["at"],
         "text": reflection_text,
@@ -12624,7 +13601,7 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
     if failure_learning:
         reflection["failure"] = failure_learning
     if social_relationship:
-        reflection["text"] = f"I completed a visible conversation with {social_relationship.get('otherAgentId')}; next I should let that relationship context influence future plans."
+        reflection["text"] = f"I completed a visible conversation with {social_relationship.get('otherAgentId')}; relationship score is now {social_relationship.get('score')}."
         reflection["relationship"] = social_relationship
     memory["reflections"] = _live_agent_loop_trim_list([*(memory.get("reflections") or []), reflection], LIVE_AGENT_LOOP_DEFAULTS["reflectionRetention"])
     agent_state["memory"] = memory
@@ -12641,6 +13618,14 @@ def _live_agent_loop_remember_settled_action(state, agent_id, agent_state, actio
             agent_state=agent_state,
         )
     _live_agent_loop_mark_settled_action(agent_state, action_id, action_status)
+    _live_agent_loop_trace(agent_state, "observe-result", {
+        "actionId": action_id,
+        "loopActionId": summary.get("loopActionId"),
+        "status": memory_status,
+        "targetKey": target_key,
+        "failure": failure_learning,
+        "experience": experience,
+    }, at=recent_entry.get("at"))
     details = {"actionId": action_id, "loopActionId": summary.get("loopActionId"), "status": memory_status}
     if planning_note:
         details["noteId"] = planning_note.get("id")
@@ -13096,7 +14081,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
             _live_agent_loop_stat(state, "dryRuns")
         actions_created_this_tick = 0
         max_actions = _normalize_int(state.get("maxActionsPerTick"), LIVE_AGENT_LOOP_DEFAULTS["maxActionsPerTick"], minimum=1, maximum=5)
-        cooldown = _normalize_int(state.get("minActionIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"], minimum=30, maximum=3600)
+        cooldown = _normalize_int(state.get("minActionIntervalSec"), LIVE_AGENT_LOOP_DEFAULTS["minActionIntervalSec"], minimum=10, maximum=3600)
 
         for agent in enabled_agents:
             agent_id = agent.get("agentId")
@@ -13135,6 +14120,15 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
 
             _live_agent_loop_presence(agent_id, "idle", "Living in My Virtual World")
             perception = _live_agent_loop_build_perception(agent_id, agent_state, world_client=world_client, now_epoch=now_epoch)
+            spatial_trace = perception.get("spatial") if isinstance(perception.get("spatial"), dict) else {}
+            _live_agent_loop_trace(agent_state, "observe", {
+                "perceptionAt": perception.get("at"),
+                "self": spatial_trace.get("self"),
+                "place": spatial_trace.get("place"),
+                "summary": spatial_trace.get("summary"),
+                "needs": perception.get("needs"),
+                "activeCount": len(perception.get("active") or []),
+            })
 
             active = perception.get("active") or []
             if active:
@@ -13163,23 +14157,51 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                 continue
 
             selected, decision = _live_agent_loop_select_next_action(agent_id, agent_state, perception, loop_state=state)
+            model_trace = decision.get("modelDecision") if isinstance(decision, dict) and isinstance(decision.get("modelDecision"), dict) else {}
+            intention_trace = model_trace.get("intention") if isinstance(model_trace.get("intention"), dict) else {}
+            _live_agent_loop_trace(agent_state, "infer", {
+                "mode": decision.get("mode") if isinstance(decision, dict) else None,
+                "modelStatus": model_trace.get("status"),
+                "providerKind": model_trace.get("providerKind"),
+                "selectedActionId": decision.get("selectedActionId") if isinstance(decision, dict) else None,
+                "reason": decision.get("reason") if isinstance(decision, dict) else None,
+                "intention": intention_trace.get("activity") or intention_trace.get("intent"),
+                "plannerTurn": model_trace.get("plannerTurn") if isinstance(model_trace.get("plannerTurn"), dict) else None,
+                "contextToolRounds": model_trace.get("contextToolRounds"),
+            })
             result["decisions"].append({"agentId": agent_id, "decision": agent_state.get("lastDecision")})
             if not selected:
-                _live_agent_loop_stat(agent_state, "targetMisses")
-                agent_state["lastOutcome"] = {"at": now_iso, "status": "skipped", "reason": "no-available-loop-target", "decision": decision, "perceptionAt": perception.get("at")}
-                result["skipped"].append({"agentId": agent_id, "reason": "no-available-loop-target", "decision": agent_state.get("lastDecision")})
+                model_status = ((decision.get("modelDecision") or {}).get("status") if isinstance(decision, dict) and isinstance(decision.get("modelDecision"), dict) else "")
+                wait_reason = "resident-model-no-commitment" if model_status else "no-available-loop-target"
+                if not model_status:
+                    _live_agent_loop_stat(agent_state, "targetMisses")
+                # A scheduler wait is not a lived world outcome. Preserve the
+                # last physical result so the next inference can experience it.
+                agent_state["lastTurnStatus"] = {
+                    "at": now_iso,
+                    "status": "waiting",
+                    "reason": wait_reason,
+                    "modelStatus": model_status,
+                    "perceptionAt": perception.get("at"),
+                }
+                model_evidence = ((decision.get("modelDecision") or {}).get("evidence") if isinstance(decision, dict) and isinstance(decision.get("modelDecision"), dict) else None)
+                if isinstance(model_evidence, dict):
+                    agent_state["lastTurnStatus"]["evidence"] = _copy_jsonable(model_evidence)
+                result["skipped"].append({"agentId": agent_id, "reason": wait_reason, "modelStatus": model_status, "decision": agent_state.get("lastDecision")})
                 continue
 
             action_def = selected["action"]
             visible_action_contract = _live_agent_visible_action_contract(action_def.get("actionType")) or {}
             adaptive_cooldown = _live_agent_loop_cooldown_for_decision(cooldown, decision)
             model_detail = decision.get("modelDecision") if isinstance(decision, dict) and isinstance(decision.get("modelDecision"), dict) else {}
-            allow_goal_replan = state.get("modelDecisionEnabled") is False or model_detail.get("applied") == "async-previous-request"
+            replan_action_ids = _live_agent_loop_model_replan_action_ids(model_detail)
+            allow_goal_replan = bool(replan_action_ids)
             goal_context = _live_agent_loop_bind_durable_goal_action(
                 agent_state,
                 action_def.get("id"),
                 selected,
                 allow_replan=allow_goal_replan,
+                replan_action_ids=replan_action_ids,
                 now_iso=now_iso,
             )
             plan = _live_agent_loop_prepare_plan(
@@ -13220,6 +14242,7 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     _live_agent_loop_stat(state, "actionsCreated")
                     _live_agent_loop_stat(agent_state, "actionsCreated")
                     result["actionsCreated"].append({"agentId": agent_id, "supportActionId": outcome.get("id"), "loopActionId": action_def["id"], "planId": (plan or {}).get("id"), "status": outcome.get("status"), "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown})
+                    _live_agent_loop_trace(agent_state, "act", {"kind": "support-tool", "supportActionId": outcome.get("id"), "loopActionId": action_def.get("id"), "status": outcome.get("status")})
                     _live_agent_loop_note_scheduled(state, agent_id)
                     actions_created_this_tick += 1
                 else:
@@ -13300,6 +14323,14 @@ def live_agent_loop_tick(*, reason="timer", force=False, dry_run=False):
                     selected=selected,
                 )
                 agent_state["lastOutcome"] = {"at": now_iso, "status": "created", "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "goal": goal_context, "httpStatus": status, "decision": agent_state.get("lastDecision"), "perceptionAt": perception.get("at"), "cooldownSec": adaptive_cooldown}
+                _live_agent_loop_trace(agent_state, "act", {
+                    "kind": "visible-world-action",
+                    "actionId": action_id,
+                    "loopActionId": action_def.get("id"),
+                    "actionType": action_def.get("actionType"),
+                    "target": selected.get("target"),
+                    "planId": (stored_plan or plan or {}).get("id"),
+                })
                 _live_agent_loop_presence(agent_id, "working", f"Living in My Virtual World: {action_def.get('label')}")
                 _live_agent_loop_add_event(state, "action-created", agent_id=agent_id, details={"actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "goal": goal_context, "target": selected["target"], "decision": agent_state.get("lastDecision")})
                 result["actionsCreated"].append({"agentId": agent_id, "actionId": action_id, "loopActionId": action_def["id"], "planId": (stored_plan or plan or {}).get("id"), "goal": goal_context, "httpStatus": status, "decision": agent_state.get("lastDecision"), "cooldownSec": adaptive_cooldown})
@@ -13863,11 +14894,11 @@ def update_live_agent_loop_settings(payload):
                 changed["pause"] = _live_agent_loop_pause_status(state, now_epoch=now_epoch)
         int_limits = {
             "intervalSec": (10, 300),
-            "minActionIntervalSec": (30, 3600),
+            "minActionIntervalSec": (10, 3600),
             "clientActiveTtlSec": (10, 300),
             "maxActionsPerTick": (1, 5),
             "modelDecisionTimeoutSec": (10, 180),
-            "modelDecisionMinIntervalSec": (30, 3600),
+            "modelDecisionMinIntervalSec": (10, 3600),
             "userChatPreemptionHoldSec": (30, 1800),
         }
         for key, (minimum, maximum) in int_limits.items():
@@ -20083,7 +21114,7 @@ def _chat_sessions_list_openclaw(agent_ref, limit=40):
             "id": _openclaw_live_mode_session_key(agent_id),
             "sessionKey": _openclaw_live_mode_session_key(agent_id),
             "title": "Live Agent Mode",
-            "preview": "Autonomous world-life loop (planner decisions are ephemeral)",
+            "preview": "Resident-controlled observe → infer → act → experience loop",
             "updatedAt": None,
             "kind": "live-mode",
             "liveMode": True,
@@ -20116,7 +21147,10 @@ def _chat_sessions_list_hermes(agent_ref, limit=40):
             "active": bool(active_id and row.get("id") == active_id),
             "deletable": True,
         })
-    return {"ok": True, "sessions": sessions}
+    live_session = _live_agent_virtual_session_row(agent_ref)
+    if live_session:
+        sessions.insert(0, live_session)
+    return {"ok": True, "sessions": sessions[: max(1, int(limit))]}
 
 
 def _chat_sessions_list_codex(agent_ref, limit=40):
@@ -20143,7 +21177,10 @@ def _chat_sessions_list_codex(agent_ref, limit=40):
             "active": bool(active_id and row.get("id") == active_id),
             "deletable": True,
         })
-    return {"ok": True, "sessions": sessions}
+    live_session = _live_agent_virtual_session_row(agent_ref)
+    if live_session:
+        sessions.insert(0, live_session)
+    return {"ok": True, "sessions": sessions[: max(1, int(limit))]}
 
 
 def _claude_code_home_path():
@@ -20382,6 +21419,32 @@ def _live_agent_session_meta(agent_id):
     }
 
 
+def _is_virtual_live_mode_session(agent_id, session_id):
+    value = str(session_id or "").strip()
+    return value in {
+        _openclaw_live_mode_session_key(agent_id),
+        f"vw-live-mode:{agent_id}",
+    } or value.endswith(":vw-live-mode-planner")
+
+
+def _live_agent_virtual_session_row(agent_ref):
+    agent_id = agent_ref["agentId"]
+    if not _agent_live_mode_session_active(agent_id):
+        return None
+    return {
+        "id": f"vw-live-mode:{agent_id}",
+        "sessionKey": f"vw-live-mode:{agent_id}",
+        "title": "Live Agent Mode",
+        "preview": "Resident-controlled observe → infer → act → experience loop",
+        "updatedAt": None,
+        "kind": "live-mode",
+        "liveMode": True,
+        "active": True,
+        "deletable": False,
+        "virtual": True,
+    }
+
+
 def _live_agent_session_detail_line(label, value, *, limit=220):
     text = _live_agent_loop_clean_plan_text(value, limit=limit)
     return f"{label}: {text}" if text else ""
@@ -20467,7 +21530,7 @@ def _openclaw_session_message_text(message):
 
 def _is_live_agent_planner_prompt(text):
     value = str(text or "")
-    if "LIVE MODE PLANNER FRAME" in value:
+    if "LIVE MODE PLANNER FRAME" in value or "LIVE MODE RESIDENT TURN" in value:
         return True
     return (
         "You are living as your Virtual World resident body" in value
@@ -20568,7 +21631,17 @@ def _live_agent_planner_transcript_messages(agent_id, session_meta, limit=80):
     limit_value = _normalize_int(limit, 80, minimum=1, maximum=400)
     turn_limit = max(1, min(LIVE_AGENT_PLANNER_TRANSCRIPT_RETENTION, (limit_value + 1) // 2))
     agent_record = _agent_record_for(agent_id) or {}
-    agent_label = str(agent_record.get("name") or agent_record.get("statusKey") or agent_record.get("id") or "Live Agent").strip() or "Live Agent"
+    resident = _live_agent_loop_resident_profile_context(
+        _live_agent_loop_resident_profile(agent_id, persist=False)
+    ) or {}
+    resident_identity = resident.get("identity") if isinstance(resident.get("identity"), dict) else {}
+    agent_label = str(
+        resident_identity.get("displayName")
+        or agent_record.get("name")
+        or agent_record.get("statusKey")
+        or agent_record.get("id")
+        or "Live Agent"
+    ).strip() or "Live Agent"
     messages = []
     for turn in _live_agent_planner_transcript_turns(agent_id, turn_limit):
         started = turn.get("startedAt") or turn.get("completedAt") or _utc_now_iso()
@@ -20613,13 +21686,41 @@ def _live_agent_planner_transcript_messages(agent_id, session_meta, limit=80):
     return messages[-limit_value:]
 
 
+def _live_agent_decision_trace_messages(agent_id, session_meta, limit=80):
+    loop_state = get_live_agent_loop_state(persist_migration=False)
+    agent_state = ((loop_state.get("agents") or {}).get(agent_id) or {}) if isinstance(loop_state, dict) else {}
+    messages = []
+    for entry in (agent_state.get("decisionTrace") or [])[-max(1, int(limit)):]:
+        if not isinstance(entry, dict):
+            continue
+        phase = str(entry.get("phase") or "event")
+        details = entry.get("details") if isinstance(entry.get("details"), dict) else {}
+        at = entry.get("at") or _utc_now_iso()
+        epoch = _parse_isoish_epoch(at)
+        messages.append({
+            "role": "assistant",
+            "text": f"{phase.upper()}\n{json.dumps(details, ensure_ascii=False, indent=2, sort_keys=True)}"[:8000],
+            "ts": at,
+            "epochMs": int(epoch * 1000) if epoch else 0,
+            "from": "Live Agent Decision Trace",
+            "fromType": "agent",
+            "source": "live-agent-mode-decision-trace",
+            "eventType": f"decision-trace-{phase}",
+            **session_meta,
+        })
+    return messages
+
+
 def _live_agent_session_messages(agent_ref, limit=80):
     agent_id = agent_ref["agentId"]
     session_meta = _live_agent_session_meta(agent_id)
     limit_value = _normalize_int(limit, 80, minimum=1, maximum=200)
     transcript_messages = _live_agent_planner_transcript_messages(agent_id, session_meta, limit=limit_value)
-    if transcript_messages:
-        return transcript_messages
+    trace_messages = _live_agent_decision_trace_messages(agent_id, session_meta, limit=limit_value)
+    if transcript_messages or trace_messages:
+        combined = [*transcript_messages, *trace_messages]
+        combined.sort(key=lambda item: int(item.get("epochMs") or 0))
+        return combined[-limit_value:]
 
     messages = []
     ok, payload, _status = get_live_agent_loop_operator_timeline(agent_id=agent_id, limit=limit_value, include_resolved=True)
@@ -20677,6 +21778,18 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
         return {"ok": False, "error": "sessionId is required"}, 400
     kind = agent_ref["providerKind"]
     profile = agent_ref["profile"]
+    if _is_virtual_live_mode_session(agent_ref["agentId"], session_id):
+        session_key = f"vw-live-mode:{agent_ref['agentId']}"
+        messages = _live_agent_session_messages(agent_ref, limit=(body or {}).get("limit") or 80)
+        return {
+            "ok": True,
+            "providerKind": kind,
+            "sessionKey": session_key,
+            "sessionId": session_key,
+            "messages": messages,
+            "liveMode": True,
+            "virtual": True,
+        }, 200
     if kind == "hermes":
         provider = _hermes_provider()
         if not provider:
@@ -20710,18 +21823,6 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
         return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages, "resumeCommand": f"claude --resume {session_id}"}, 200
     if kind == "openclaw":
         session_key = str(session_id)
-        if _is_openclaw_live_mode_session_key(agent_ref["agentId"], session_key):
-            messages = _live_agent_session_messages(agent_ref, limit=(body or {}).get("limit") or 80)
-            session_key = _openclaw_live_mode_session_key(agent_ref["agentId"])
-            return {
-                "ok": True,
-                "providerKind": kind,
-                "sessionKey": session_key,
-                "sessionId": session_key,
-                "messages": messages,
-                "liveMode": True,
-                "virtual": True,
-            }, 200
         # OpenClaw sessions are addressed directly by key; the client simply
         # switches its sessionKey and reloads history over the gateway.
         return {"ok": True, "providerKind": kind, "sessionKey": session_key}, 200
@@ -21250,8 +22351,7 @@ def _default_resident_profile(agent_id, meta, profile=None):
     desk = _desk_assignment_for_agent(agent)
     now = _utc_now_iso()
     display_name = (profile or {}).get("name") or agent.get("name") or agent.get("id") or agent_id
-    role = agent.get("role") or agent.get("providerKind") or "resident"
-    personality = (profile or {}).get("personality") if isinstance((profile or {}).get("personality"), dict) else {}
+    role = "Virtual World resident"
     return {
         "schemaVersion": RESIDENT_PROFILE_SCHEMA_VERSION,
         "templateId": "resident-default/v1",
@@ -21264,7 +22364,7 @@ def _default_resident_profile(agent_id, meta, profile=None):
             "displayName": str(display_name),
             "role": str(role),
             "archetype": "Virtual World resident",
-            "lifePurpose": "Live as a believable autonomous resident, help when directly addressed, and keep world actions aligned with the agent's framework instructions.",
+            "lifePurpose": "Live as a believable autonomous resident, make coherent choices from present experience, and act within this world's rules.",
             "backstory": "",
         },
         "world": {
@@ -21279,9 +22379,17 @@ def _default_resident_profile(agent_id, meta, profile=None):
         },
         "needs": dict(LIVE_AGENT_LOOP_NEED_DEFAULTS),
         "personality": {
-            "outgoing": _clamp_float(personality.get("outgoing"), 1.0, 0.5, 2.0),
-            "curious": _clamp_float(personality.get("curious"), 1.0, 0.5, 2.0),
-            "easygoing": _clamp_float(personality.get("easygoing"), 1.0, 0.5, 2.0),
+            "outgoing": 1.0,
+            "curious": 1.0,
+            "easygoing": 1.0,
+        },
+        "preferences": {
+            "likes": [],
+            "dislikes": [],
+            "favoriteActivities": [],
+            "favoritePlaces": [],
+            "socialStyle": "",
+            "noveltySeeking": 0.5,
         },
         "memory": {
             "summary": "",
@@ -21357,6 +22465,17 @@ def _sanitize_resident_profile(raw, template, *, touch=False):
         for trait in LIVE_AGENT_LOOP_PERSONALITY_TRAITS
     }
 
+    data_preferences = data.get("preferences") if isinstance(data.get("preferences"), dict) else {}
+    base_preferences = base.get("preferences") if isinstance(base.get("preferences"), dict) else {}
+    out["preferences"] = {
+        "likes": _limit_profile_list(data_preferences.get("likes", base_preferences.get("likes", [])), limit=20, item_limit=240),
+        "dislikes": _limit_profile_list(data_preferences.get("dislikes", base_preferences.get("dislikes", [])), limit=20, item_limit=240),
+        "favoriteActivities": _limit_profile_list(data_preferences.get("favoriteActivities", base_preferences.get("favoriteActivities", [])), limit=20, item_limit=240),
+        "favoritePlaces": _limit_profile_list(data_preferences.get("favoritePlaces", base_preferences.get("favoritePlaces", [])), limit=20, item_limit=240),
+        "socialStyle": _limit_profile_text(data_preferences.get("socialStyle") or base_preferences.get("socialStyle"), 600),
+        "noveltySeeking": _clamp_float(data_preferences.get("noveltySeeking", base_preferences.get("noveltySeeking", 0.5)), 0.5, 0.0, 1.0),
+    }
+
     data_memory = data.get("memory") if isinstance(data.get("memory"), dict) else {}
     base_memory = base.get("memory") if isinstance(base.get("memory"), dict) else {}
     data_compaction = data_memory.get("compaction") if isinstance(data_memory.get("compaction"), dict) else {}
@@ -21421,6 +22540,14 @@ def get_agent_resident_profile(agent_id, *, persist=True):
     current = profile.get("residentProfile") if isinstance(profile.get("residentProfile"), dict) else None
     resident_profile = _sanitize_resident_profile(current or template, template, touch=False)
     defaulted = current is None
+    resident_world = resident_profile.get("world") if isinstance(resident_profile.get("world"), dict) else {}
+    if not str(resident_world.get("homeBuildingId") or "").strip():
+        owned_home = _live_agent_loop_existing_home_for_agent(resolved_agent_id)
+        owned_home_id = str((owned_home or {}).get("id") or "").strip()
+        if owned_home_id:
+            reconciled = dict(resident_profile)
+            reconciled["world"] = {**resident_world, "homeBuildingId": owned_home_id}
+            resident_profile = _sanitize_resident_profile(reconciled, template, touch=True)
     if persist and (defaulted or resident_profile != current):
         profile["residentProfile"] = resident_profile
         profiles[resolved_agent_id] = profile

@@ -750,7 +750,7 @@ def reconcile_world(goal, *, world_revision, available_actions=None, target_keys
     prior_revision = goal.get("worldRevision")
     goal["worldRevision"] = revision
     goal["lastWorldCheckAt"] = now_iso
-    if not prior_revision or prior_revision == revision or goal.get("status") in TERMINAL_GOAL_STATUSES:
+    if goal.get("status") in TERMINAL_GOAL_STATUSES:
         return recompute_goal(goal, now_iso=now_iso), None
     context = current_context(goal)
     goal = context["goal"]
@@ -769,6 +769,8 @@ def reconcile_world(goal, *, world_revision, available_actions=None, target_keys
         reason = f"planned target changed from {previous_target_key} to {current_target_key}"
     if not reason:
         return recompute_goal(goal, now_iso=now_iso), None
+    if goal.get("replanRequired") and goal.get("replanReason") == reason:
+        return recompute_goal(goal, now_iso=now_iso), None
     step["status"] = "blocked"
     step["blockedReason"] = reason
     step["updatedAt"] = now_iso
@@ -781,7 +783,7 @@ def reconcile_world(goal, *, world_revision, available_actions=None, target_keys
     goal["revision"] = _integer(goal.get("revision"), 1, minimum=1, maximum=100000) + 1
     goal["lastReplannedAt"] = now_iso
     goal["updatedAt"] = now_iso
-    goal.setdefault("history", []).append({"at": now_iso, "event": "world-change-replan-required", "reason": reason, "worldRevision": revision, "taskId": (context.get("task") or {}).get("id"), "stepId": step.get("id")})
+    goal.setdefault("history", []).append({"at": now_iso, "event": "world-change-replan-required" if prior_revision and prior_revision != revision else "planned-action-validation-failed", "reason": reason, "worldRevision": revision, "taskId": (context.get("task") or {}).get("id"), "stepId": step.get("id")})
     return recompute_goal(goal, now_iso=now_iso), reason
 
 

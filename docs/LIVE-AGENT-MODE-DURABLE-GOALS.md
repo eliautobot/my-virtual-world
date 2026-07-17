@@ -58,6 +58,15 @@ Retries default to two and can be set per step with `maxRetries` and `retryDelay
 
 The loop fingerprints its current action affordances. If the current action disappears or its selected target changes, the unfinished step is blocked and the goal requests an immediate planner turn. A replacement action increments the goal revision, clears the blocked state, and preserves verified steps and task outcomes.
 
+Planner-facing object action types are normalized to the durable affordance
+vocabulary before they enter the ledger. For example,
+`life.restAtArmchair` is stored as `use-seating-object`, and the unfinished
+goal step keeps the seating category active after a server restart. A repair
+turn may attach a replacement action to the blocked step only when that turn
+explicitly selected the action or its supported object category. An unrelated
+support tool cannot inherit an embodied step's goal ids or verify its physical
+success criteria.
+
 Critical body needs can interrupt execution without overwriting the current durable step. The selected action is linked to the goal only when it matches the assigned step or an authorized replan.
 
 ## Restart and Operator Behavior
@@ -115,4 +124,3 @@ Example:
   }
 }
 ```
-

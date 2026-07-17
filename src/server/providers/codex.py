@@ -298,10 +298,30 @@ class CodexProvider:
         session_id: str | None = None,
         timeout_sec: int | None = None,
         on_progress: ProgressCallback | None = None,
+        isolated: bool = False,
+        developer_instructions: str | None = None,
+        isolated_cwd: str | None = None,
     ) -> dict[str, Any]:
         if self.prefer_app_server:
-            return self._send_app_server_message(profile, message, session_id=session_id, timeout_sec=timeout_sec, on_progress=on_progress)
-        return self._send_exec_message(profile, message, session_id=session_id, timeout_sec=timeout_sec)
+            return self._send_app_server_message(
+                profile,
+                message,
+                session_id=session_id,
+                timeout_sec=timeout_sec,
+                on_progress=on_progress,
+                isolated=isolated,
+                developer_instructions=developer_instructions,
+                isolated_cwd=isolated_cwd,
+            )
+        return self._send_exec_message(
+            profile,
+            message,
+            session_id=session_id,
+            timeout_sec=timeout_sec,
+            isolated=isolated,
+            developer_instructions=developer_instructions,
+            isolated_cwd=isolated_cwd,
+        )
 
     def start_chat_stream(
         self,
@@ -481,6 +501,9 @@ class CodexProvider:
         session_id: str | None = None,
         timeout_sec: int | None = None,
         on_progress: ProgressCallback | None = None,
+        isolated: bool = False,
+        developer_instructions: str | None = None,
+        isolated_cwd: str | None = None,
     ) -> dict[str, Any]:
         if not self.is_available():
             return {"ok": False, "error": f"Codex CLI is not available at {self.binary}", "reply": "", "sessionId": session_id or ""}
@@ -489,7 +512,9 @@ class CodexProvider:
 
         self._ensure_paths()
         safe_profile = self._safe_profile_name(profile)
-        agent_dir = self._runtime_workspace(safe_profile)
+        agent_dir = os.path.abspath(os.path.expanduser(isolated_cwd)) if isolated and isolated_cwd else self._runtime_workspace(safe_profile)
+        if isolated and isolated_cwd:
+            os.makedirs(agent_dir, exist_ok=True)
         if not os.path.isdir(agent_dir):
             return {"ok": False, "error": f"Codex agent workspace not found: {agent_dir}", "reply": "", "sessionId": session_id or ""}
 
@@ -513,12 +538,12 @@ class CodexProvider:
             thread_params = {
                 "cwd": agent_dir,
                 "approvalPolicy": self.approval_policy,
-                "sandbox": self.sandbox,
+                "sandbox": "read-only" if isolated else self.sandbox,
                 "threadSource": "user",
             }
-            developer_instructions = self._thread_instructions(agent_dir, safe_profile)
-            if developer_instructions:
-                thread_params["developerInstructions"] = developer_instructions
+            effective_instructions = developer_instructions if developer_instructions is not None else ("" if isolated else self._thread_instructions(agent_dir, safe_profile))
+            if effective_instructions:
+                thread_params["developerInstructions"] = effective_instructions
             if self.model:
                 thread_params["model"] = self.model
             if session_id:
@@ -591,18 +616,32 @@ class CodexProvider:
                     _ACTIVE_RUNS.pop(safe_profile, None)
             client.close()
 
-    def _send_exec_message(self, profile: str, message: str, session_id: str | None = None, timeout_sec: int | None = None) -> dict[str, Any]:
+    def _send_exec_message(
+        self,
+        profile: str,
+        message: str,
+        session_id: str | None = None,
+        timeout_sec: int | None = None,
+        isolated: bool = False,
+        developer_instructions: str | None = None,
+        isolated_cwd: str | None = None,
+    ) -> dict[str, Any]:
         if not self.is_available():
             return {"ok": False, "error": f"Codex CLI is not available at {self.binary}", "reply": "", "sessionId": session_id or ""}
         if not message.strip():
             return {"ok": False, "error": "message is required", "reply": "", "sessionId": session_id or ""}
 
         safe_profile = self._safe_profile_name(profile)
-        agent_dir = self._runtime_workspace(safe_profile)
+        agent_dir = os.path.abspath(os.path.expanduser(isolated_cwd)) if isolated and isolated_cwd else self._runtime_workspace(safe_profile)
+        if isolated and isolated_cwd:
+            os.makedirs(agent_dir, exist_ok=True)
         if not os.path.isdir(agent_dir):
             return {"ok": False, "error": f"Codex agent workspace not found: {agent_dir}", "reply": "", "sessionId": session_id or ""}
 
-        prompt = self._delivery_prompt(agent_dir, message, safe_profile)
+        if isolated:
+            prompt = f"{developer_instructions.strip()}\n\n{message}" if developer_instructions and developer_instructions.strip() else message
+        else:
+            prompt = self._delivery_prompt(agent_dir, message, safe_profile)
         cmd = [self.binary, "exec"]
         if session_id:
             cmd.extend(["resume", "--json", "--skip-git-repo-check"])
@@ -610,7 +649,7 @@ class CodexProvider:
                 cmd.extend(["-m", self.model])
             cmd.extend([session_id, "-"])
         else:
-            cmd.extend(["--json", "--skip-git-repo-check", "-C", agent_dir, "--sandbox", self.sandbox])
+            cmd.extend(["--json", "--skip-git-repo-check", "-C", agent_dir, "--sandbox", "read-only" if isolated else self.sandbox])
             if self.model:
                 cmd.extend(["-m", self.model])
             cmd.append("-")
