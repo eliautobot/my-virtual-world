@@ -13,6 +13,7 @@ import {
   makeServerScriptedDeskConsumeTarget,
   makeServerRuntimeStep,
   observeServerRuntimeRouteProgress,
+  resolveActionTargetPoint,
   SERVER_RUNTIME_AGENT_HARD_SEPARATION_RADIUS,
   SERVER_RUNTIME_ROUTE_STALE_AFTER_MS,
   serverScriptedServiceQueueSlotTarget,
@@ -41,6 +42,30 @@ writeFileSync(join(dataDir, 'buildings', 'office.json'), JSON.stringify({
 }, null, 2));
 
 const api = (tile) => tile * 40;
+
+// Live social actions route against the target resident's authoritative
+// realtime coordinates. The route target intentionally omits catalogId so it
+// cannot be misclassified as a furniture object.
+{
+  const targetState = {
+    agents: new Map([[
+      'social-peer',
+      { agentId: 'social-peer', x: 240, y: 320, floor: 1, buildingId: 'office', roomId: 'lobby', heading: 0 },
+    ]]),
+  };
+  const point = resolveActionTargetPoint(dataDir, {
+    id: 'social-live-action',
+    actionType: 'life.social',
+    target: { kind: 'agent', targetAgentId: 'social-peer', catalogId: 'agent' },
+    route: { target: { kind: 'agent', targetAgentId: 'social-peer', floor: 2, targetKind: 'agent' } },
+  }, targetState);
+  assert.equal(point?.targetKind, 'agent', `social route should resolve as an agent target: ${JSON.stringify(point)}`);
+  assert.equal(point?.targetAgentId, 'social-peer', `social route should preserve target agent identity: ${JSON.stringify(point)}`);
+  assert.equal(point?.x, 240, `social route should use authoritative target x: ${JSON.stringify(point)}`);
+  assert.equal(point?.y, 296, `social route should approach behind the target heading: ${JSON.stringify(point)}`);
+  assert.equal(point?.floor, 1, `social route should follow the authoritative target floor instead of a stale route hint: ${JSON.stringify(point)}`);
+  assert.equal(point?.buildingId, 'office', `social route should use authoritative target building: ${JSON.stringify(point)}`);
+}
 
 // Long routes remain healthy for any total duration while authoritative
 // coordinates continue moving. A route only becomes stale after a full

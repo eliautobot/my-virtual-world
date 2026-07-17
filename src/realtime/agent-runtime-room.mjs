@@ -1768,7 +1768,7 @@ export function resolveActionTargetPoint(dataDir, action, state) {
     return {
       x: Number(agent.x || 0) - Math.sin(heading) * 24,
       y: Number(agent.y || 0) - Math.cos(heading) * 24,
-      floor: floorOr(target.floor ?? agent.floor, 1),
+      floor: floorOr(agent.floor ?? target.floor, 1),
       buildingId: safeText(agent.buildingId, ''),
       roomId: safeText(agent.roomId, ''),
       targetKind: 'agent',

@@ -4127,6 +4127,8 @@ def _move_target_invalid_reason(target):
     resolved = _find_world_action_target(target)
     if not resolved:
         return "target_missing"
+    if kind == "agent":
+        return None
     building_reason = _building_unavailable(resolved.get("building"))
     if building_reason:
         return building_reason
@@ -5486,6 +5488,91 @@ def _live_agent_loop_clear_nonreportable_episode(episode):
     return episode
 
 
+def _live_agent_loop_resolve_reported_episode_from_recent_actions(agent_state, episode):
+    if not isinstance(agent_state, dict) or not isinstance(episode, dict):
+        return episode, None
+    if _live_agent_loop_episode_status(episode.get("status")) not in {
+        "awaiting_report",
+        "reported",
+        "awaiting_coder",
+        "coder_responded",
+    }:
+        return episode, None
+    memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
+    episode_target_key = str(episode.get("targetKey") or "").strip()
+    episode_loop_action_id = str(episode.get("loopActionId") or "").strip()
+    episode_action_type = str(episode.get("actionType") or "").strip()
+    failed_action_id = str(episode.get("actionId") or "").strip()
+    verification = episode.get("verification") if isinstance(episode.get("verification"), dict) else {}
+    episode_epoch = max(
+        (
+            _parse_isoish_epoch(value) or 0
+            for value in (
+                verification.get("at"),
+                episode.get("failedAt"),
+                episode.get("reportedAt"),
+                episode.get("coderRespondedAt"),
+                episode.get("updatedAt"),
+                episode.get("createdAt"),
+            )
+        ),
+        default=0,
+    )
+    candidates = []
+    for item in memory.get("recentActions") or []:
+        if not isinstance(item, dict) or _canonical_world_action_status(item.get("status")) != "completed":
+            continue
+        action_id = str(item.get("actionId") or "").strip()
+        if not action_id or action_id == failed_action_id:
+            continue
+        action_epoch = _parse_isoish_epoch(item.get("at")) or 0
+        if not action_epoch or action_epoch <= episode_epoch:
+            continue
+        item_target_key = str(item.get("targetKey") or _live_agent_loop_target_key(item.get("target")) or "").strip()
+        if episode_target_key or item_target_key:
+            if not episode_target_key or not item_target_key:
+                continue
+            if not _live_agent_loop_target_keys_compatible(episode_target_key, item_target_key):
+                continue
+        same_loop_action = bool(episode_loop_action_id and item.get("loopActionId") == episode_loop_action_id)
+        same_action_type = bool(episode_action_type and item.get("actionType") == episode_action_type)
+        if not same_loop_action and not same_action_type:
+            continue
+        candidates.append((action_epoch, item, item_target_key))
+    if not candidates:
+        return episode, None
+
+    _, verified_action, verified_target_key = max(candidates, key=lambda candidate: candidate[0])
+    resolved_at = verified_action.get("at") or _utc_now_iso()
+    resolved = _copy_jsonable(episode)
+    resolved["status"] = "completed"
+    resolved["phase"] = "continue"
+    resolved["updatedAt"] = resolved_at
+    resolved["completedAt"] = resolved_at
+    resolved["resolution"] = {
+        "kind": "later-verified-action-history",
+        "at": resolved_at,
+        "actionId": verified_action.get("actionId"),
+        "loopActionId": verified_action.get("loopActionId"),
+        "targetKey": verified_target_key,
+    }
+    resolved["operatorSummary"] = "Resolved by a later verified action after route, target, or conditions changed."
+    history = resolved.setdefault("history", [])
+    if not any(
+        isinstance(item, dict)
+        and item.get("event") == "resolved-by-later-verification"
+        and item.get("actionId") == verified_action.get("actionId")
+        for item in history
+    ):
+        history.append({
+            "at": resolved_at,
+            "phase": "continue",
+            "event": "resolved-by-later-verification",
+            "actionId": verified_action.get("actionId"),
+        })
+    return resolved, resolved.get("issueId")
+
+
 def _live_agent_loop_normalize_memory(agent_state):
     if not isinstance(agent_state.get("needs"), dict):
         agent_state["needs"] = dict(LIVE_AGENT_LOOP_NEED_DEFAULTS)
@@ -5576,6 +5663,25 @@ def _live_agent_loop_normalize_memory(agent_state):
             active_episode = _live_agent_loop_clear_nonreportable_episode(active_episode)
         normalized_episodes = [episode for episode in normalized_episodes if episode.get("id") != active_episode.get("id")]
         normalized_episodes.append(active_episode)
+    resolved_issue_ids = set()
+    reconciled_episodes = []
+    for episode in normalized_episodes:
+        reconciled, issue_id = _live_agent_loop_resolve_reported_episode_from_recent_actions(agent_state, episode)
+        reconciled_episodes.append(reconciled)
+        if issue_id:
+            resolved_issue_ids.add(issue_id)
+    normalized_episodes = reconciled_episodes
+    if active_episode:
+        active_episode = next(
+            (episode for episode in normalized_episodes if episode.get("id") == active_episode.get("id")),
+            active_episode,
+        )
+    if resolved_issue_ids:
+        agent_state["supportRequests"] = [
+            item
+            for item in (agent_state.get("supportRequests") or [])
+            if not isinstance(item, dict) or item.get("issueId") not in resolved_issue_ids
+        ]
     agent_state["episodes"] = _live_agent_loop_trim_list(normalized_episodes, LIVE_AGENT_LOOP_DEFAULTS["episodeRetention"])
     if active_episode and _live_agent_loop_episode_is_active(active_episode):
         agent_state["activeEpisode"] = active_episode
@@ -6495,7 +6601,7 @@ def _live_agent_loop_normalize_episode(episode):
     for key in ("completedAt", "failedAt", "reportedAt", "coderRespondedAt", "verifiedAt"):
         if _parse_isoish_epoch(episode.get(key)):
             normalized[key] = episode.get(key)
-    for key in ("target", "decision", "verification"):
+    for key in ("target", "decision", "verification", "resolution"):
         value = episode.get(key)
         if isinstance(value, dict):
             normalized[key] = _copy_jsonable(value)
@@ -8149,6 +8255,9 @@ def _live_agent_loop_target_key(target):
     target = target if isinstance(target, dict) else {}
     if not target:
         return ""
+    target_agent = str(target.get("targetAgentId") or "").strip()
+    if target_agent:
+        return f"agent:{target_agent}"
     building_id = str(target.get("buildingId") or "").strip()
     object_id = str(target.get("objectInstanceId") or target.get("catalogId") or "").strip()
     if building_id and object_id:
@@ -8163,9 +8272,6 @@ def _live_agent_loop_target_key(target):
     build_id = str(build_site.get("buildingId") or "").strip()
     if build_id:
         return f"build-site:{build_id}"
-    target_agent = str(target.get("targetAgentId") or "").strip()
-    if target_agent:
-        return f"agent:{target_agent}"
     return ""
 
 
@@ -8176,6 +8282,9 @@ def _live_agent_loop_target_keys_compatible(left, right):
         return True
     if left == right:
         return True
+    for agent_key, legacy_key in ((left, right), (right, left)):
+        if agent_key.startswith("agent:") and legacy_key.startswith("object:") and legacy_key.endswith(":agent"):
+            return True
     for building_key, object_key in ((left, right), (right, left)):
         if not building_key.startswith("building:") or not object_key.startswith("object:"):
             continue
@@ -9183,6 +9292,100 @@ def _live_agent_loop_verification_failure_reportable(agent_state, recent_entry):
     return False
 
 
+def _live_agent_loop_resolve_reported_episodes_from_verification(
+    state,
+    agent_id,
+    agent_state,
+    verification,
+    *,
+    action_type="",
+    now_iso=None,
+    exclude_episode_id=None,
+):
+    if not isinstance(agent_state, dict) or not isinstance(verification, dict) or verification.get("ok") is not True:
+        return []
+    now_iso = now_iso or _utc_now_iso()
+    verified_target_key = ((verification.get("evidence") or {}).get("targetKey") or "").strip()
+    verified_loop_action_id = str(verification.get("loopActionId") or "").strip()
+    verified_action_type = str(action_type or "").strip()
+    candidates = []
+    active = _live_agent_loop_normalize_episode(agent_state.get("activeEpisode"))
+    if active:
+        candidates.append(active)
+    for raw in agent_state.get("episodes") or []:
+        episode = _live_agent_loop_normalize_episode(raw)
+        if episode and all(episode.get("id") != item.get("id") for item in candidates):
+            candidates.append(episode)
+
+    resolved = []
+    resolved_issue_ids = set()
+    for episode in candidates:
+        if episode.get("id") == exclude_episode_id:
+            continue
+        if _live_agent_loop_episode_status(episode.get("status")) not in {
+            "awaiting_report",
+            "reported",
+            "awaiting_coder",
+            "coder_responded",
+        }:
+            continue
+        episode_target_key = str(episode.get("targetKey") or "").strip()
+        if verified_target_key or episode_target_key:
+            if not verified_target_key or not episode_target_key:
+                continue
+            if not _live_agent_loop_target_keys_compatible(verified_target_key, episode_target_key):
+                continue
+        same_loop_action = bool(verified_loop_action_id and episode.get("loopActionId") == verified_loop_action_id)
+        same_action_type = bool(verified_action_type and episode.get("actionType") == verified_action_type)
+        if not same_loop_action and not same_action_type:
+            continue
+
+        episode["status"] = "completed"
+        episode["phase"] = "continue"
+        episode["updatedAt"] = now_iso
+        episode["completedAt"] = now_iso
+        episode["resolution"] = {
+            "kind": "later-verified-action",
+            "at": now_iso,
+            "actionId": verification.get("actionId"),
+            "verificationId": verification.get("id"),
+            "loopActionId": verified_loop_action_id,
+            "targetKey": verified_target_key,
+        }
+        episode["operatorSummary"] = "Resolved by a later verified action after route, target, or conditions changed."
+        episode.setdefault("history", []).append({
+            "at": now_iso,
+            "phase": "continue",
+            "event": "resolved-by-later-verification",
+            "actionId": verification.get("actionId"),
+            "verificationId": verification.get("id"),
+        })
+        stored = _live_agent_loop_store_episode(agent_state, episode)
+        if stored:
+            resolved.append(stored)
+            if stored.get("issueId"):
+                resolved_issue_ids.add(stored.get("issueId"))
+            if isinstance(state, dict):
+                _live_agent_loop_add_event(
+                    state,
+                    "episode-resolved-by-verification",
+                    agent_id=agent_id,
+                    details={
+                        "episodeId": stored.get("id"),
+                        "issueId": stored.get("issueId"),
+                        "actionId": verification.get("actionId"),
+                        "verificationId": verification.get("id"),
+                    },
+                )
+    if resolved_issue_ids:
+        agent_state["supportRequests"] = [
+            item
+            for item in (agent_state.get("supportRequests") or [])
+            if not isinstance(item, dict) or item.get("issueId") not in resolved_issue_ids
+        ]
+    return resolved
+
+
 def _live_agent_loop_record_episode_verification(state, agent_id, agent_state, action, summary, recent_entry, plan, now_iso):
     verification = _live_agent_loop_verification_from_settled_action(agent_id, action, summary, recent_entry, now_iso)
     verification_ok = verification.get("ok") is True
@@ -9245,6 +9448,16 @@ def _live_agent_loop_record_episode_verification(state, agent_id, agent_state, a
         episode["failedAt"] = now_iso
         episode["operatorSummary"] = "Verification failed after a benign system cancellation; planner can retry when route, target, or conditions change."
     stored = _live_agent_loop_store_episode(agent_state, episode)
+    if verification_ok:
+        _live_agent_loop_resolve_reported_episodes_from_verification(
+            state,
+            agent_id,
+            agent_state,
+            verification,
+            action_type=summary.get("actionType") if isinstance(summary, dict) else "",
+            now_iso=now_iso,
+            exclude_episode_id=stored.get("id") if isinstance(stored, dict) else None,
+        )
     _live_agent_loop_finish_plan_after_verification(state, agent_id, agent_state, plan, verification, now_iso)
     _live_agent_loop_record_durable_goal_verification(state, agent_id, agent_state, verification, now_iso)
     _live_agent_loop_add_event(
@@ -13678,8 +13891,6 @@ def _normalize_move_target(target, agent_id, action_id=None):
     kind = target.get("kind") or ("object-instance" if (target.get("objectInstanceId") or target.get("id") or target.get("catalogId")) else "world-point")
     if kind not in WORLD_ACTION_TARGET_KINDS:
         return None, None, _api_error("invalid_request", f"target.kind must be one of {sorted(WORLD_ACTION_TARGET_KINDS)}")
-    if kind == "agent":
-        return None, None, _api_error("unsupported_target", "agent targets are reserved for later phases")
 
     supplied_floor = _number_or_none(target.get("floor") if target.get("floor") is not None else target.get("buildingFloor"))
     floor = max(1, int(supplied_floor or 1))
@@ -13687,6 +13898,32 @@ def _normalize_move_target(target, agent_id, action_id=None):
     target_action_id = action_id or target.get("worldActionId") or target.get("actionId")
     resolved = None
     metadata = {"kind": kind, "floor": floor, "roomId": room_id, "actionId": target_action_id, "worldActionId": target_action_id, "guardrails": MOVE_INTENT_ROUTE_GUARDRAILS}
+
+    if kind == "agent":
+        target_agent_id = _resolve_agent_id(target.get("targetAgentId"))
+        if not target_agent_id:
+            return None, None, _api_error("target_missing", "Target agent does not exist.", details={"targetAgentId": target.get("targetAgentId")})
+        if target_agent_id == agent_id:
+            return None, None, _api_error("unsupported_target", "An agent cannot route to itself.", details={"agentId": agent_id, "targetAgentId": target_agent_id})
+        normalized = {
+            "kind": "agent",
+            "targetAgentId": target_agent_id,
+            "targetAgentName": _live_agent_loop_agent_display_name(target_agent_id),
+            "buildingId": target.get("buildingId"),
+            "floor": floor,
+            "roomId": room_id,
+            "actionId": target_action_id,
+            "worldActionId": target_action_id,
+            "targetKind": "agent",
+        }
+        metadata.update({
+            "targetAgentId": target_agent_id,
+            "targetAgentName": normalized.get("targetAgentName"),
+            "buildingId": normalized.get("buildingId"),
+            "routingPlan": "authoritative-realtime-agent-position",
+            "dynamicTarget": True,
+        })
+        return normalized, metadata, None
 
     if kind == "world-point":
         x = _number_or_none(target.get("x") if target.get("x") is not None else target.get("worldX"))

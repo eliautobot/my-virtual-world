@@ -1091,6 +1091,99 @@ def main():
             and "Recent verification episodes" in episode_prompt,
             json.dumps({"episode": responded_episode, "prompt": episode_prompt[-1200:]}, default=str)[:1400],
         )
+        resolved_retry_action = completed_seating_action("wa-episode-armchair-verified-retry", {
+            "status": "completed",
+            "applied": True,
+            "reason": "server_authoritative_live_action_completed",
+            "runtime": "agent-runtime-room.mjs#tickLiveActionRuntime",
+            "embodiedState": {
+                "useState": "completed",
+                "activeUseState": "completed",
+                "seated": True,
+                "poseKind": "seat",
+                "posture": "seated",
+                "animationId": "sit",
+                "docked": True,
+                "finalPlacement": {"x": 200.0, "y": 200.0, "floor": 1, "buildingId": "autonomy-lab"},
+            },
+        })
+        resolved_retry_summary = server._live_agent_loop_action_summary(resolved_retry_action)
+        resolved_retry_recent = server._live_agent_loop_remember_settled_action(
+            episode_loop_state,
+            "tester",
+            episode_state,
+            resolved_retry_action,
+            resolved_retry_summary,
+        )
+        resolved_retry_episode = server._live_agent_loop_record_episode_verification(
+            episode_loop_state,
+            "tester",
+            episode_state,
+            resolved_retry_action,
+            resolved_retry_summary,
+            resolved_retry_recent,
+            None,
+            server._utc_now_iso(),
+        )
+        resolved_reported_episode = server._live_agent_loop_find_episode(episode_state, issue_id=verified_episode.get("issueId")) or {}
+        check(
+            "later verified retry resolves the matching reported episode",
+            resolved_retry_episode.get("status") == "completed"
+            and resolved_reported_episode.get("status") == "completed"
+            and (resolved_reported_episode.get("resolution") or {}).get("actionId") == resolved_retry_action.get("id")
+            and (episode_state.get("activeEpisode") or {}).get("id") != resolved_reported_episode.get("id")
+            and not any(req.get("issueId") == verified_episode.get("issueId") for req in episode_state.get("supportRequests") or []),
+            json.dumps({
+                "retryEpisode": resolved_retry_episode,
+                "reportedEpisode": resolved_reported_episode,
+                "activeEpisode": episode_state.get("activeEpisode"),
+                "requests": episode_state.get("supportRequests"),
+            }, default=str)[:1800],
+        )
+        historical_reported_episode = server._copy_jsonable(responded_episode)
+        historical_recent_success = server._copy_jsonable(resolved_retry_recent)
+        historical_recent_success["at"] = server._epoch_to_utc_iso(
+            max(
+                time.time() + 5,
+                (server._parse_isoish_epoch(responded_episode.get("coderRespondedAt")) or 0) + 5,
+            )
+        )
+        historical_reconciliation_state = {
+            "needs": dict(goal_agent_state["needs"]),
+            "memory": {
+                "recentActions": [historical_recent_success],
+                "observations": [],
+                "reflections": [],
+                "internalNotes": [],
+            },
+            "episodes": [historical_reported_episode],
+            "activeEpisode": historical_reported_episode,
+            "supportRequests": [{
+                "id": "support-historical-episode",
+                "at": responded_episode.get("updatedAt"),
+                "kind": "coder-report",
+                "issueId": responded_episode.get("issueId"),
+                "text": "Historical failure awaiting reconciliation.",
+            }],
+        }
+        server._live_agent_loop_normalize_memory(historical_reconciliation_state)
+        historical_resolved_episode = server._live_agent_loop_find_episode(
+            historical_reconciliation_state,
+            issue_id=responded_episode.get("issueId"),
+        ) or {}
+        check(
+            "restart normalization reconciles historical reports from later verified action history",
+            historical_resolved_episode.get("status") == "completed"
+            and (historical_resolved_episode.get("resolution") or {}).get("kind") == "later-verified-action-history"
+            and (historical_resolved_episode.get("resolution") or {}).get("actionId") == resolved_retry_action.get("id")
+            and not historical_reconciliation_state.get("activeEpisode")
+            and not historical_reconciliation_state.get("supportRequests"),
+            json.dumps({
+                "episode": historical_resolved_episode,
+                "activeEpisode": historical_reconciliation_state.get("activeEpisode"),
+                "requests": historical_reconciliation_state.get("supportRequests"),
+            }, default=str)[:1800],
+        )
         legacy_episode_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
         legacy_loop_state = {"agents": {"tester": legacy_episode_state}, "events": []}
         legacy_plan = server._live_agent_loop_new_plan("tester", episode_action_def, episode_decision, episode_selected, server._utc_now_iso())
@@ -1289,6 +1382,84 @@ def main():
             and any(item.get("type") == "investigate-blocking-issue" and "whiteboard" in json.dumps(item).lower() for item in board_notes),
             json.dumps({"remembered": remembered_board, "notes": board_notes[:5]}, default=str)[:1000],
         )
+
+        social_target = {
+            "kind": "agent",
+            "targetAgentId": "hermie",
+            "targetAgentName": "Hermes Resident",
+            "buildingId": "autonomy-lab",
+            "floor": 1,
+        }
+        normalized_social_target, social_target_metadata, social_target_error = server._normalize_move_target(
+            social_target,
+            "tester",
+            "wa-social-agent-route",
+        )
+        check(
+            "social move target uses authoritative realtime agent routing",
+            not social_target_error
+            and normalized_social_target.get("kind") == "agent"
+            and normalized_social_target.get("targetAgentId") == "hermie"
+            and "catalogId" not in normalized_social_target
+            and social_target_metadata.get("routingPlan") == "authoritative-realtime-agent-position"
+            and social_target_metadata.get("dynamicTarget") is True
+            and server._move_target_invalid_reason(normalized_social_target) is None
+            and server._live_agent_loop_target_key(social_target) == "agent:hermie"
+            and server._live_agent_loop_target_keys_compatible("object:autonomy-lab:agent", "agent:hermie"),
+            json.dumps({
+                "target": normalized_social_target,
+                "metadata": social_target_metadata,
+                "error": social_target_error,
+            }, default=str)[:1400],
+        )
+        social_request_ok, social_request_result, social_request_status = server.create_agent_live_mode_action_request({
+            "agentId": "tester",
+            "source": {
+                "kind": "agent-live-mode",
+                "requestedBy": "verify-live-agent-autonomy",
+                "requestId": "verify-social-agent-route",
+                "surface": "agent-live-loop",
+                "roles": ["participant"],
+            },
+            "actionType": "life.social",
+            "capabilityTag": "life.social",
+            "target": social_target,
+            "priority": "normal",
+            "params": {
+                "loopActionId": "talk-with-nearby-agent",
+                "serverRuntimeAuthority": True,
+                "serverExecutor": server.WORLD_ACTION_SERVER_RUNTIME_OWNER,
+            },
+        })
+        social_world_action = (social_request_result.get("action") or {}) if isinstance(social_request_result, dict) else {}
+        social_linked_action = (social_request_result.get("linkedAction") or {}) if isinstance(social_request_result, dict) else {}
+        social_move_intent = (social_request_result.get("moveIntent") or {}) if isinstance(social_request_result, dict) else {}
+        check(
+            "Live Agent social request completes world-action to move-intent handoff",
+            social_request_ok
+            and social_request_status == 202
+            and social_world_action.get("status") == "reserved"
+            and social_linked_action.get("status") == "route_pending"
+            and (social_linked_action.get("route") or {}).get("routeOwner") == "server-authoritative-runtime"
+            and (social_move_intent.get("target") or {}).get("targetAgentId") == "hermie"
+            and (social_move_intent.get("targetMetadata") or {}).get("dynamicTarget") is True,
+            json.dumps({
+                "ok": social_request_ok,
+                "status": social_request_status,
+                "action": social_world_action,
+                "linkedAction": social_linked_action,
+                "moveIntent": social_move_intent,
+                "result": social_request_result,
+            }, default=str)[:1800],
+        )
+        if social_world_action.get("id"):
+            server.cancel_world_action(social_world_action.get("id"), {
+                "failureReason": "cancelled_by_system",
+                "reason": "cancelled_by_system",
+                "actor": "verify-live-agent-autonomy",
+                "source": "agent-live-mode",
+            })
+            server.reconcile_move_intents()
 
         home_site = server._live_agent_loop_find_home_build_site("tester")
         home_target = home_site.get("target") if isinstance(home_site, dict) else {}
