@@ -31,7 +31,7 @@ GET /api/agent/<agent-id>/spatial-perception
 
 The same snapshot is embedded as `spatial` in
 `GET /api/agent-live-loop/perception?agentId=<agent-id>`. A bounded
-`spatialContext` is also included in the ephemeral planner frame and model
+`spatialContext` is also included in each temporary evidence frame inside the persistent Live session and model
 prompt.
 
 Collections are returned in stable nearest-first order, including valid

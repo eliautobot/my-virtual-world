@@ -183,6 +183,8 @@ Durable goal POST operations are `create`, `upsert`, `activate`, `resume`, `paus
 | POST | `/api/agent-live-loop/tick` | Request one loop tick; the global feature switch cannot be bypassed with `force`. |
 | POST | `/api/agent-live-loop/user-attention` | Mark or clear user-chat preemption while Agent Live Mode is globally enabled. |
 | GET | `/api/agent-live-loop/perception` | Read one resident's latest perception/decision surface. |
+| GET | `/api/agent-live-sessions?agentId=<id>` | Read the resident's current durable Live activation, checkpoint, working memory, and lived journal. |
+| POST | `/api/agent-live-sessions/message` | Send user speech into the same Live activation; questions preserve physical work while stop/resume/redirect update its checkpoint. |
 | GET | `/api/agent/<agent-id>/spatial-perception` | Read authoritative coordinates, distances, place/occupancy, field-of-view, route, nearby agent, and nearby object context. |
 | GET | `/api/agent-live-loop/proposals` | Read operator proposals. |
 | POST | `/api/agent-live-loop/proposals` | Resolve an operator proposal without executing hidden world mutations. |

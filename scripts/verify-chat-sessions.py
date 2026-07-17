@@ -216,18 +216,18 @@ def main():
         openclaw_sessions = openclaw_payload.get("sessions") or []
         check("OpenClaw main session is listed", any(s.get("id") == "agent:resident-a:main" for s in openclaw_sessions))
         live_session = next((s for s in openclaw_sessions if s.get("liveMode")), None)
-        check("Live Mode appears as active virtual session", bool(live_session and live_session.get("active") and live_session.get("virtual")))
+        check("Live Mode appears as active durable session", bool(live_session and live_session.get("active") and live_session.get("durable") and not live_session.get("virtual")))
         coder_payload, coder_status = server.handle_chat_sessions_list("coder")
         check("non-live OpenClaw agent does not get virtual Live Mode session", coder_status == 200 and not any(s.get("liveMode") for s in (coder_payload.get("sessions") or [])), json.dumps(coder_payload, default=str))
 
         created, status = server.handle_chat_session_create("resident-a", {"sessionKey": "agent:resident-a:main"})
         check("OpenClaw create/reset uses gateway sessions.reset", status == 200 and created.get("ok") and gateway_calls[-1][0] == "sessions.reset")
-        switched, status = server.handle_chat_session_switch("resident-a", "agent:resident-a:vw-live-mode-planner")
-        check("OpenClaw switch returns requested session key", status == 200 and switched.get("sessionKey") == "agent:resident-a:vw-live-mode-planner")
-        check("OpenClaw live session switch returns visible messages", bool(switched.get("liveMode") and switched.get("messages") and any("Get coffee" in (m.get("text") or "") or "coffee" in (m.get("text") or "") for m in switched.get("messages", []))))
-        check("OpenClaw live session switch returns raw planner prompt", bool(any("LIVE MODE PLANNER FRAME" in (m.get("text") or "") and m.get("eventType") == "planner-prompt" for m in switched.get("messages", []))), json.dumps(switched.get("messages", [])[:2], default=str))
-        check("OpenClaw live session switch returns raw planner reply", bool(any("ACTION: hydrate-coffee-machine" in (m.get("text") or "") and m.get("eventType") == "planner-reply" for m in switched.get("messages", []))), json.dumps(switched.get("messages", [])[:2], default=str))
-        check("OpenClaw live session reply uses agent display name", bool(any(m.get("from") == "Resident A" and m.get("eventType") == "planner-reply" for m in switched.get("messages", []))), json.dumps(switched.get("messages", [])[:4], default=str))
+        switched, status = server.handle_chat_session_switch("resident-a", live_session.get("sessionKey"))
+        check("OpenClaw switch returns stable lived session key", status == 200 and switched.get("sessionKey") == "vw-live-mode:resident-a")
+        check("OpenClaw live session switch returns visible structured messages", bool(switched.get("liveMode") and switched.get("messages") and any(m.get("eventType") == "activation" for m in switched.get("messages", []))))
+        check("OpenClaw live session hides raw planner prompt", not any("LIVE MODE PLANNER FRAME" in (m.get("text") or "") or m.get("eventType") == "planner-prompt" for m in switched.get("messages", [])), json.dumps(switched.get("messages", [])[:2], default=str))
+        check("OpenClaw live session hides raw planner reply", not any("ACTION: hydrate-coffee-machine" in (m.get("text") or "") or m.get("eventType") == "planner-reply" for m in switched.get("messages", [])), json.dumps(switched.get("messages", [])[:2], default=str))
+        check("OpenClaw lived session uses agent display name", bool(any(m.get("from") == "Resident A" and m.get("eventType") == "activation" for m in switched.get("messages", []))), json.dumps(switched.get("messages", [])[:4], default=str))
         deleted, status = server.handle_chat_session_delete("resident-a", "agent:resident-a:old-session")
         check("OpenClaw delete uses gateway sessions.delete", status == 200 and deleted.get("deleted") and gateway_calls[-1][0] == "sessions.delete")
 
@@ -238,7 +238,7 @@ def main():
         chat = server.get_agent_chat()
         resident_chat = chat.get("resident-a") or []
         check("agent chat synthesizes live-mode bubble row", bool(resident_chat and resident_chat[-1].get("sessionTitle") == "Live Agent Mode"))
-        check("live-mode bubble row carries active session metadata", bool(resident_chat and resident_chat[-1].get("activeSession") and resident_chat[-1].get("liveMode") and resident_chat[-1].get("sessionKey") == "agent:resident-a:vw-live-mode-planner"))
+        check("live-mode bubble row carries active durable session metadata", bool(resident_chat and resident_chat[-1].get("activeSession") and resident_chat[-1].get("liveMode") and resident_chat[-1].get("sessionKey") == "vw-live-mode:resident-a" and resident_chat[-1].get("activationId")))
 
         resident_session_file = resident_sessions_dir / "resident-main-session.jsonl"
         resident_session_file.write_text(json.dumps({

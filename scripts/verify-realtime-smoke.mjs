@@ -14,6 +14,8 @@ import {
   LIVE_STATUS_RUNTIME_POLL_MS,
   LIVE_STATUS_RUNTIME_OWNER,
   LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
+  makeLiveActionEmbodiedState,
+  resolveObjectTargetPoint,
   RUNTIME_SCHEMA_PATCH_RATE_MS,
   RUNTIME_STATE_BROADCAST_INTERVAL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS,
@@ -688,7 +690,53 @@ async function run() {
           },
         ],
       },
+      outdoorArea: {
+        nodes: [{
+          id: 'smoke-gazebo-node',
+          type: 'gazeboPavilion',
+          catalogId: 'gazeboPavilion',
+          x: 17,
+          z: 14,
+          floor: 1,
+          actionLocations: [
+            {
+              id: 'rest-west',
+              roles: ['rest', 'wait', 'use'],
+              actionId: 'life.restAtGazeboPavilion',
+              buildingLocal: { x: 16.22, z: 13.82, floor: 1 },
+            },
+            {
+              id: 'sit-north-bench',
+              roles: ['seat', 'rest', 'social'],
+              actionId: 'life.sitAtGazeboPavilion',
+              buildingLocal: { x: 17, z: 13.08, floor: 1 },
+            },
+          ],
+        }],
+      },
     }, null, 2)}\n`);
+
+    const gazeboTarget = {
+      kind: 'object-instance',
+      buildingId: 'office',
+      objectInstanceId: 'smoke-gazebo-node',
+      catalogId: 'gazeboPavilion',
+      interactionSpotId: 'sit-north-bench',
+      actionType: 'life.sitAtGazeboPavilion',
+      floor: 1,
+    };
+    const gazeboPoint = resolveObjectTargetPoint(dataDir, gazeboTarget);
+    assert(gazeboPoint, 'gazebo seated bench target should resolve');
+    assert.equal(gazeboPoint.interactionSpotId, 'sit-north-bench');
+    assert.equal(gazeboPoint.poseKind, 'seat', 'gazebo sit action must resolve seated posture instead of the standing rest pose');
+    const gazeboEmbodied = makeLiveActionEmbodiedState(
+      { id: 'wa-smoke-gazebo-seat', actionType: 'life.sitAtGazeboPavilion', target: gazeboTarget },
+      { ...gazeboPoint, targetKind: 'object-instance' },
+      'completed',
+    );
+    assert.equal(gazeboEmbodied.seated, true);
+    assert.equal(gazeboEmbodied.posture, 'seated');
+    assert.equal(gazeboEmbodied.interactionSpotId, 'sit-north-bench');
 
     const scriptedRoom = await connectRoom(port);
     scriptedRoom.__server = server;

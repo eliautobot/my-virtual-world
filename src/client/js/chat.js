@@ -174,6 +174,7 @@
       this.sessionsNewBtn = root.querySelector('.chat-sessions-new');
       this.sessionsPanelOpen = false;
       this.sessionsRefreshTimer = null;
+      this.liveSessionRefreshTimer = null;
       this.sessionsRefreshSeq = 0;
       this.currentSessions = [];
 
@@ -441,6 +442,8 @@
       if (this.sessionsPanelOpen) this.refreshSessionsList({ showLoading: true });
       if (this.isHermesSelected()) this.startHermesApprovalPolling();
       else this.stopHermesApprovalPolling();
+      if (this.isLiveModeSessionSelected()) this.startLiveSessionPolling();
+      else this.stopLiveSessionPolling();
       if (connected) {
         this.loadHistory();
         this.fetchSessionInfo();
@@ -537,7 +540,22 @@
     }
 
     isLiveModeSessionSelected(sessionKey = this.sessionKey) {
-      return String(sessionKey || '').endsWith(':vw-live-mode-planner');
+      const value = String(sessionKey || '');
+      return value.startsWith('vw-live-mode:') || value.endsWith(':vw-live-mode-planner');
+    }
+
+    startLiveSessionPolling() {
+      if (!this.isLiveModeSessionSelected() || this.liveSessionRefreshTimer) return;
+      this.liveSessionRefreshTimer = setInterval(() => {
+        if (!this.isLiveModeSessionSelected() || !this.isVisibleForPolling()) return;
+        this.loadLiveModeSessionHistory().catch(error => console.warn('[chat] Live session refresh failed:', error));
+      }, 4000);
+    }
+
+    stopLiveSessionPolling() {
+      if (!this.liveSessionRefreshTimer) return;
+      clearInterval(this.liveSessionRefreshTimer);
+      this.liveSessionRefreshTimer = null;
     }
 
     startHermesApprovalPolling() {
@@ -667,6 +685,7 @@
     async loadHistory() {
       try {
         if (this.isLiveModeSessionSelected()) {
+          this.startLiveSessionPolling();
           await this.loadLiveModeSessionHistory();
           return;
         }
@@ -1149,6 +1168,31 @@
       const params = { sessionKey: this.sessionKey, message: text || '(attached files)', idempotencyKey: `vw-${Date.now()}-${Math.random().toString(36).slice(2)}` };
       if (attachments?.length) params.attachments = attachments;
 
+      if (this.isLiveModeSessionSelected()) {
+        const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+        this.setStatus('Resident is responding…', 'connecting');
+        try {
+          const response = await fetch('/api/agent-live-sessions/message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agentId,
+              sessionId: this.sessionKey,
+              message: text || '(attached files)'
+            })
+          });
+          const data = await response.json();
+          if (!response.ok || data.ok === false) throw new Error(data?.error?.message || data.error || response.statusText);
+          await this.loadLiveModeSessionHistory();
+          this.setStatus('Live session active', 'connected');
+          this.scrollBottom();
+        } catch (error) {
+          this.appendSystem('Live session send failed: ' + error.message);
+          this.setStatus('Live session error', 'disconnected');
+        }
+        return;
+      }
+
       // Live Agent Mode: the user has top priority while the chat run is active.
       // The hold is cleared when the run finishes so Live Mode does not look off.
       const liveAttentionAgentId = this.noteLiveAgentUserAttention(text || '');
@@ -1332,6 +1376,22 @@
 
     async sendStop() {
       try {
+        if (this.isLiveModeSessionSelected()) {
+          const resp = await fetch('/api/agent-live-sessions/message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+              sessionId: this.sessionKey,
+              message: 'Stop and wait for me.'
+            })
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || data.ok === false) throw new Error(data?.error?.message || data.error || resp.statusText);
+          await this.loadLiveModeSessionHistory();
+          this.setStatus('Live session paused', 'connected');
+          return;
+        }
         if (this.isHermesSelected()) {
           const resp = await fetch('/api/hermes/interrupt', {
             method: 'POST',

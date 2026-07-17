@@ -317,6 +317,22 @@ def planner_session_keys(agent_ids: list[str]):
     return sorted(set(keys))
 
 
+def active_live_session_keys(data_dir: Path, agent_ids: list[str]):
+    try:
+        document = json.loads((data_dir / "live-agent-sessions.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    rows = document.get("agents") if isinstance(document.get("agents"), dict) else {}
+    wanted = set(agent_ids)
+    keys = []
+    for agent_id, row in rows.items():
+        active = row.get("active") if isinstance(row, dict) and isinstance(row.get("active"), dict) else {}
+        key = str(active.get("providerSessionKey") or "")
+        if agent_id in wanted and active.get("status") == "active" and PLANNER_SESSION_RE.fullmatch(key):
+            keys.append(key)
+    return sorted(set(keys))
+
+
 def cleanup_planner_sessions(agent_ids: list[str]):
     failures = []
     for key in planner_session_keys(agent_ids):
@@ -832,7 +848,7 @@ def run(args):
             keys = planner_session_keys(agent_ids)
             return keys if len(keys) >= 2 else None
 
-        wait_for("concurrent Gateway planner sessions", concurrent_planner_sessions, timeout=60, interval=0.5)
+        activation_session_keys = wait_for("concurrent Gateway planner sessions", concurrent_planner_sessions, timeout=60, interval=0.5)
 
         transcript_file = data_a / "live-agent-planner-transcripts.json"
         expected_transcripts = set(agent_ids[1:])
@@ -861,8 +877,18 @@ def run(args):
             observed_delay >= 2.5 and all(status and status not in bad_statuses for status in statuses.values()),
             {"delaySec": round(observed_delay, 2), "statuses": statuses},
         )
-        wait_for("Gateway cleanup after normal and interrupted decisions", lambda: planner_session_keys(agent_ids) == [], timeout=120, interval=1)
-        checks.check("Gateway planner cleanup is mandatory after interruption", planner_session_keys(agent_ids) == [])
+        stable_session_keys = wait_for(
+            "activation-scoped Gateway sessions after normal and interrupted decisions",
+            lambda: planner_session_keys(agent_ids) if set(activation_session_keys).issubset(set(planner_session_keys(agent_ids))) else None,
+            timeout=120,
+            interval=1,
+        )
+        checks.check(
+            "normal and interrupted turns preserve one durable activation session per resident",
+            set(activation_session_keys).issubset(set(stable_session_keys))
+            and {PLANNER_SESSION_RE.fullmatch(key).group(1) for key in stable_session_keys if PLANNER_SESSION_RE.fullmatch(key)} == set(agent_ids),
+            {"before": activation_session_keys, "after": stable_session_keys},
+        )
 
         # Cleanly transfer one resident to the other port and back.
         http_json(base_a, f"/api/agent/{interrupted_agent}/live-mode", method="POST", payload={"agentLiveModeEnabled": False}, expected=200)
@@ -873,16 +899,40 @@ def run(args):
         http_json(base_a, "/api/agent-live-loop/user-attention", method="POST", payload={"agentId": interrupted_agent, "clear": True}, expected=200)
 
         # Start another real generation and kill the Python server while its
-        # planner session exists. Startup recovery must remove that session.
+        # activation session exists. The activation session is durable and
+        # must survive restart; only sessions not referenced by an active
+        # activation are eligible for startup cleanup.
         for agent_id in agent_ids:
             http_json(base_a, f"/api/agent/{agent_id}/live-mode/reset", method="POST", payload={"actor": "endurance-before-restart"}, expected=200)
             http_json(base_a, f"/api/agent/{agent_id}/live-mode", method="POST", payload={"agentLiveModeEnabled": True, "agentLoopEnabled": True, "scriptedAmbientEnabled": False}, expected=200)
         http_json(base_a, "/api/agent-live-loop/tick", method="POST", payload={"force": True, "dryRun": True, "reason": "restart-with-model-in-flight"}, expected=200)
-        wait_for("planner session before server restart", lambda: planner_session_keys(agent_ids), timeout=45, interval=0.5)
+        expected_active_sessions = wait_for(
+            "activation session ledger before server restart",
+            lambda: active_live_session_keys(data_a, agent_ids) if len(active_live_session_keys(data_a, agent_ids)) == len(agent_ids) else None,
+            timeout=45,
+            interval=0.5,
+        )
+        sessions_before_restart = wait_for(
+            "planner session before server restart",
+            lambda: planner_session_keys(agent_ids) if set(expected_active_sessions).issubset(set(planner_session_keys(agent_ids))) else None,
+            timeout=45,
+            interval=0.5,
+        )
         app_a.restart()
         wait_for("World A health after model-time restart", lambda: http_json(base_a, "/healthz", expected=200)[1].get("ok"), timeout=45)
-        wait_for("startup cleanup of orphaned planner sessions", lambda: planner_session_keys(agent_ids) == [], timeout=60, interval=1)
-        checks.check("server restart recovers and deletes orphaned Gateway sessions", app_a.alive() and planner_session_keys(agent_ids) == [])
+        sessions_after_restart = wait_for(
+            "activation-scoped planner sessions after server restart",
+            lambda: planner_session_keys(agent_ids) if set(expected_active_sessions).issubset(set(planner_session_keys(agent_ids))) else None,
+            timeout=60,
+            interval=1,
+        )
+        checks.check(
+            "server restart preserves active Resident sessions and removes only stale activation sessions",
+            app_a.alive()
+            and set(sessions_after_restart) == set(expected_active_sessions)
+            and set(expected_active_sessions).issubset(set(sessions_before_restart)),
+            {"expectedActive": expected_active_sessions, "before": sessions_before_restart, "after": sessions_after_restart},
+        )
 
         # Create real Live Agent world actions. Interrupt one manually, restart
         # the app while the others run, and let the realtime server settle them.

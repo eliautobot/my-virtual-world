@@ -29,6 +29,7 @@
     "realtime": "node src/realtime/server.mjs",
     "test": "npm run verify:smoke",
     "verify:endurance": "python3 scripts/verify-live-agent-endurance.py",
+    "verify:lived-session": "python3 scripts/verify-live-agent-lived-session.py",
     "verify:spatial": "python3 scripts/verify-live-agent-spatial-perception.py",
     "verify:smoke": "node scripts/verify-smoke.mjs",
     "verify:realtime": "node scripts/verify-realtime-smoke.mjs"

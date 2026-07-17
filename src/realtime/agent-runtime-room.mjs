@@ -1582,7 +1582,17 @@ function objectIdsForBuildingItem(building, object, index) {
   ].filter(Boolean).map(String));
 }
 
-function resolveObjectTargetPoint(dataDir, target = {}) {
+function resolvedObjectTargetPoseKind(target = {}, location = null, local = null) {
+  const explicit = safeText(location?.poseKind || location?.pose?.poseKind || local?.poseKind || target?.poseKind, '');
+  if (explicit) return explicit;
+  const roles = Array.isArray(location?.roles) ? location.roles.map(role => String(role || '').trim().toLowerCase()) : [];
+  const spotId = String(target?.interactionSpotId || target?.spotId || location?.id || location?.spotId || '').trim().toLowerCase();
+  const actionId = String(target?.actionId || target?.actionType || location?.actionId || location?.action || '').trim().toLowerCase();
+  if (roles.includes('seat') || /(^|[-_.])sit(?:at|$|[-_.])/.test(actionId) || /(^|[-_.])(seat|sit)($|[-_.])/.test(spotId)) return 'seat';
+  return '';
+}
+
+export function resolveObjectTargetPoint(dataDir, target = {}) {
   const buildingId = safeText(target.buildingId, '');
   const buildings = buildingId ? [readBuildingDocument(dataDir, buildingId)].filter(Boolean) : listBuildingDocuments(dataDir);
   const wantedId = String(target.objectInstanceId || target.id || '').trim();
@@ -1628,7 +1638,7 @@ function resolveObjectTargetPoint(dataDir, target = {}) {
           catalogId: object.catalogId || object.type || target.catalogId || '',
           interactionSpotId: spotId || location?.id || '',
           actionId: safeText(target.actionId || location?.actionId, ''),
-          poseKind: safeText(location?.poseKind || location?.pose?.poseKind || local?.poseKind, ''),
+          poseKind: resolvedObjectTargetPoseKind(target, location, local),
           animationId: safeText(location?.animationId || location?.poseAnimationId || location?.pose?.animationId, ''),
           activityKind: safeText(location?.activityKind || location?.kind, ''),
           faceAngle: runtimeFurnitureActionFaceAngle(building, object, local),
@@ -1645,7 +1655,7 @@ function resolveObjectTargetPoint(dataDir, target = {}) {
           catalogId: object.catalogId || object.type || target.catalogId || '',
           interactionSpotId: spotId || location?.id || '',
           actionId: safeText(target.actionId || location?.actionId, ''),
-          poseKind: safeText(location?.poseKind || location?.pose?.poseKind || local?.poseKind, ''),
+          poseKind: resolvedObjectTargetPoseKind(target, location, local),
           animationId: safeText(location?.animationId || location?.poseAnimationId || location?.pose?.animationId, ''),
           activityKind: safeText(location?.activityKind || location?.kind, ''),
           faceAngle: runtimeFurnitureActionFaceAngle(building, object, local),
@@ -1662,7 +1672,7 @@ function resolveObjectTargetPoint(dataDir, target = {}) {
           catalogId: object.catalogId || object.type || target.catalogId || '',
           interactionSpotId: spotId || location?.id || '',
           actionId: safeText(target.actionId || location?.actionId, ''),
-          poseKind: safeText(location?.poseKind || location?.pose?.poseKind || local?.poseKind, ''),
+          poseKind: resolvedObjectTargetPoseKind(target, location, local),
           animationId: safeText(location?.animationId || location?.poseAnimationId || location?.pose?.animationId, ''),
           activityKind: safeText(location?.activityKind || location?.kind, ''),
           faceAngle: runtimeFurnitureActionFaceAngle(building, object, local),
@@ -1920,10 +1930,13 @@ function liveActionObjectUseSpec(action, point, status = 'active') {
   };
 }
 
-function makeLiveActionEmbodiedState(action, point, status = 'active') {
+export function makeLiveActionEmbodiedState(action, point, status = 'active') {
   const kind = safeText(point?.targetKind || action?.target?.kind || '', '');
   if (!point || !['object-instance', 'interior-object', 'outdoor-area-node', 'seating-object'].includes(kind)) return null;
   const spec = liveActionObjectUseSpec(action, point, status);
+  const carriedItem = action?.params?.carriedItem && typeof action.params.carriedItem === 'object'
+    ? { ...action.params.carriedItem }
+    : null;
   return {
     schemaVersion: 'agent-live-action-embodied-state/v1',
     useState: spec.useState,
@@ -1937,6 +1950,8 @@ function makeLiveActionEmbodiedState(action, point, status = 'active') {
     interactionSpotId: spec.interactionSpotId,
     docked: true,
     activeUseState: status === 'completed' ? 'completed' : 'active',
+    carrying: Boolean(carriedItem && !(status === 'completed' && spec.seated)),
+    ...(carriedItem ? { carriedItem } : {}),
     finalPlacement: {
       x: spec.dockTarget.x,
       y: spec.dockTarget.y,
@@ -1950,6 +1965,10 @@ function makeLiveActionEmbodiedState(action, point, status = 'active') {
 
 function makeLiveActionVisualState(isMoving, status = 'working', action = null, point = null) {
   const embodied = !isMoving && point ? makeLiveActionEmbodiedState(action, point, status) : null;
+  const carriedItem = action?.params?.carriedItem && typeof action.params.carriedItem === 'object'
+    ? { ...action.params.carriedItem }
+    : null;
+  const carrying = Boolean(carriedItem && !(status === 'completed' && embodied?.seated));
   const animationId = embodied?.animationId || (isMoving ? 'walk' : 'stand-use');
   const activity = embodied ? {
     kind: embodied.activityKind,
@@ -1976,7 +1995,8 @@ function makeLiveActionVisualState(isMoving, status = 'working', action = null, 
     movement: { isMoving, isRunning: false },
     activityActive: Boolean(activity),
     ...(activity ? { activityKind: activity.kind, activity } : {}),
-    carrying: false,
+    carrying,
+    ...(carriedItem ? { carriedItem } : {}),
   };
 }
 
@@ -8310,9 +8330,63 @@ export class AgentRuntimeRoom extends Room {
   }
 
   saveLiveActionRuntimeStore(meta, store, nowMs = Date.now()) {
-    writeWorldActionsStore(this.dataDir, meta, store);
-    this.liveActionRuntimeMeta = meta;
-    this.liveActionRuntimeStore = store;
+    // The web server can cancel/redirect a Live action while this process is
+    // between runtime ticks. Merge against the latest shared store so a stale
+    // in-memory tick can never resurrect or complete an action that is already
+    // terminal (especially cancelled) in authoritative history.
+    let nextMeta = meta;
+    let nextStore = store;
+    try {
+      const latest = readWorldActionsStore(this.dataDir);
+      const recordId = record => safeText(record?.id || record?.worldActionId, '');
+      const latestHistory = Array.isArray(latest?.store?.history) ? latest.store.history : [];
+      const latestActive = Array.isArray(latest?.store?.active) ? latest.store.active : [];
+      const latestTerminalById = new Map(
+        latestHistory
+          .filter(record => recordId(record) && WORLD_ACTION_TERMINAL_STATUSES.has(canonicalWorldActionStatus(record?.status)))
+          .map(record => [recordId(record), record]),
+      );
+      const proposedHistory = Array.isArray(store?.history) ? store.history : [];
+      const mergedHistory = [];
+      const historyIds = new Set();
+      for (const proposed of proposedHistory) {
+        const id = recordId(proposed);
+        const chosen = id && latestTerminalById.has(id) ? latestTerminalById.get(id) : proposed;
+        const chosenId = recordId(chosen);
+        if (!chosenId || historyIds.has(chosenId)) continue;
+        historyIds.add(chosenId);
+        mergedHistory.push(chosen);
+      }
+      for (const current of latestHistory) {
+        const id = recordId(current);
+        if (!id || historyIds.has(id)) continue;
+        historyIds.add(id);
+        mergedHistory.push(current);
+      }
+      const proposedActive = (Array.isArray(store?.active) ? store.active : [])
+        .filter(record => {
+          const id = recordId(record);
+          return id && !latestTerminalById.has(id) && !historyIds.has(id);
+        });
+      const activeIds = new Set(proposedActive.map(recordId));
+      for (const current of latestActive) {
+        const id = recordId(current);
+        if (!id || activeIds.has(id) || historyIds.has(id) || latestTerminalById.has(id)) continue;
+        activeIds.add(id);
+        proposedActive.push(current);
+      }
+      nextMeta = latest?.meta || meta;
+      nextStore = {
+        ...(store || {}),
+        active: proposedActive,
+        history: mergedHistory.slice(0, 1000),
+      };
+    } catch (error) {
+      console.warn('Live action runtime store merge failed; using current tick snapshot:', error?.message || error);
+    }
+    writeWorldActionsStore(this.dataDir, nextMeta, nextStore);
+    this.liveActionRuntimeMeta = nextMeta;
+    this.liveActionRuntimeStore = nextStore;
     this.lastLiveActionRuntimePollMs = nowMs;
   }
 
@@ -9074,15 +9148,19 @@ export class AgentRuntimeRoom extends Room {
 
       status = canonicalWorldActionStatus(action.status);
       if (status === 'arrived') {
-        const transitioned = this.transitionServerLiveAction(action, 'in_progress', {
-          now,
-          actor,
-          source,
-          reason: 'server-runtime-activity-started',
-        });
-        if (transitioned.changed) {
-          action = transitioned.action;
-          changedActions = true;
+        const arrivedAtMs = Date.parse(action?.timing?.arrivedAt || action?.timing?.updatedAt || '');
+        const arrivalDwellMs = Math.max(1000, Math.floor(numberOr(action?.params?.microstepArrivalDwellMs, 5000)));
+        if (Number.isFinite(arrivedAtMs) && nowMs - arrivedAtMs >= arrivalDwellMs) {
+          const transitioned = this.transitionServerLiveAction(action, 'in_progress', {
+            now,
+            actor,
+            source,
+            reason: 'server-runtime-arrival-revalidated-activity-started',
+          });
+          if (transitioned.changed) {
+            action = transitioned.action;
+            changedActions = true;
+          }
         }
       }
 
@@ -10103,15 +10181,19 @@ export class AgentRuntimeRoom extends Room {
 
       status = canonicalWorldActionStatus(action.status);
       if (status === 'arrived') {
-        const transitioned = this.transitionServerLiveAction(action, 'in_progress', {
-          now,
-          actor,
-          source,
-          reason: 'server-runtime-activity-started',
-        });
-        if (transitioned.changed) {
-          action = transitioned.action;
-          changedActions = true;
+        const arrivedAtMs = Date.parse(action?.timing?.arrivedAt || action?.timing?.updatedAt || '');
+        const arrivalDwellMs = Math.max(1000, Math.floor(numberOr(action?.params?.microstepArrivalDwellMs, 5000)));
+        if (Number.isFinite(arrivedAtMs) && nowMs - arrivedAtMs >= arrivalDwellMs) {
+          const transitioned = this.transitionServerLiveAction(action, 'in_progress', {
+            now,
+            actor,
+            source,
+            reason: 'server-runtime-arrival-revalidated-activity-started',
+          });
+          if (transitioned.changed) {
+            action = transitioned.action;
+            changedActions = true;
+          }
         }
       }
 

@@ -631,7 +631,7 @@ def main():
         prompt_goal = server._live_agent_model_decision_prompt("tester", decision_goal, goal_agent_state)
         check("model prompt includes real goal text and planner JSON format", "Test chairs and seating furniture" in prompt_goal and "nextStep" in prompt_goal and "memoryUpdate" in prompt_goal and "use-seating-object" in prompt_goal and "category" in prompt_goal, prompt_goal[:900])
         check("model prompt presents continuous autonomy not one-shot command", "continuous autonomy loop" in prompt_goal.lower() and "observe, reflect, plan, execute, learn, and replan" in prompt_goal and "Reply with EXACTLY one line" not in prompt_goal, prompt_goal[:700])
-        check("model prompt labels Resident turn as ephemeral", "LIVE MODE RESIDENT TURN - EPHEMERAL WORLD CONTEXT" in prompt_goal and "not a life event" in prompt_goal and "Remember only your intention" in prompt_goal, prompt_goal[:700])
+        check("model prompt labels recurrent lived session with temporary evidence frames", "LIVE MODE RESIDENT TURN - RECURRENT WORLD SESSION" in prompt_goal and "real continuing session" in prompt_goal and "Remember only your intention" in prompt_goal, prompt_goal[:700])
         check("Resident Profile is authoritative over provider framework persona", "RESIDENT PROFILE AUTHORITY - REQUIRED" in prompt_goal and '"frameworkPersonaFallbackAllowed":false' in prompt_goal and "Do not fall back to, impersonate, or prioritize its framework SOUL" in prompt_goal, prompt_goal[:1300])
         check("Resident preferences and ranked memories reach inference", "testing furniture" in prompt_goal and "warm but observant" in prompt_goal and "ranked by relevance, recency, and importance" in prompt_goal and "felt comfortable" in prompt_goal, prompt_goal[:1600])
         context_results = server._live_agent_execute_context_tool_requests("tester", ["world.inspectLastOutcome", "world.recall", "filesystem.read"])
@@ -719,6 +719,13 @@ def main():
         # resolver stops returning already-verified seats, while the prompt
         # shows progress for the next loop.
         seating_def = server.LIVE_AGENT_DYNAMIC_OBJECT_AFFORDANCES["seating"]
+        gazebo_seating = server._live_agent_loop_seating_action_for_catalog("gazeboPavilion")
+        check(
+            "gazebo seating uses its real seated bench interaction",
+            gazebo_seating.get("actionType") == "life.sitAtGazeboPavilion"
+            and gazebo_seating.get("spotId") == "sit-north-bench",
+            json.dumps(gazebo_seating, default=str),
+        )
         progress_state = dict(goal_agent_state)
         first_pick = server._live_agent_loop_find_seating_target(seating_def, agent_id="tester", agent_state=progress_state)
         first_key = server._live_agent_loop_target_key(first_pick.get("target")) if first_pick else None
@@ -2161,6 +2168,90 @@ def main():
             json.dumps({"recent": repeated_cancel_recent, "report": repeated_cancel_report}, default=str)[:900],
         )
 
+        redirect_cancel_action = {
+            **rest_cancel_action,
+            "id": "wa-user-redirect-neutral-settlement",
+            "actionType": "life.useObject",
+            "target": {
+                "kind": "object-instance",
+                "buildingId": "office-test",
+                "objectInstanceId": "whiteboard-test",
+                "catalogId": "whiteboard",
+                "interactionSpotId": "use-front",
+                "floor": 1,
+            },
+            "params": {"loopActionId": "investigate-blocking-issue"},
+            "failureReason": "cancelled_by_user",
+            "result": {
+                "status": "cancelled",
+                "reason": "cancelled_by_user_redirect",
+                "lifecycleReason": "cancelled_by_user",
+                "actor": "live-session-user-redirect",
+            },
+        }
+        redirect_state = {
+            "needs": {
+                "hydration": 0.31,
+                "food": 0.32,
+                "energy": 0.33,
+                "curiosity": 0.34,
+                "maintenance": 0.35,
+                "shelter": 0.36,
+                "social": 0.37,
+            },
+            "memory": {},
+            "experienceState": {"mood": "content", "valence": 0.4},
+            "goalProgress": {},
+        }
+        redirect_loop_state = {"agents": {"tester": redirect_state}, "events": []}
+        redirect_needs_before = dict(redirect_state["needs"])
+        redirect_experience_before = dict(redirect_state["experienceState"])
+        redirect_summary = server._live_agent_loop_action_summary(redirect_cancel_action)
+        redirect_recent = server._live_agent_loop_remember_settled_action(
+            redirect_loop_state,
+            "tester",
+            redirect_state,
+            redirect_cancel_action,
+            redirect_summary,
+        )
+        redirect_verification = server._live_agent_loop_record_episode_verification(
+            redirect_loop_state,
+            "tester",
+            redirect_state,
+            redirect_cancel_action,
+            redirect_summary,
+            redirect_recent,
+            None,
+            server._utc_now_iso(),
+        )
+        redirect_outcomes = server._live_agent_loop_recent_outcome_summary(redirect_state)
+        redirect_report = server._live_agent_loop_report_context("tester", redirect_state)
+        check(
+            "user redirect is a neutral supersession, not a Live Agent product failure",
+            (redirect_recent.get("failure") or {}).get("userControlCancel") is True
+            and (redirect_recent.get("failure") or {}).get("reportable") is False
+            and redirect_state.get("needs") == redirect_needs_before
+            and redirect_state.get("experienceState") == redirect_experience_before
+            and not redirect_state.get("goalProgress")
+            and ((redirect_outcomes.get("byAction") or {}).get("investigate-blocking-issue") or {}).get("superseded") == 1
+            and not redirect_outcomes.get("issues")
+            and redirect_verification.get("status") == "cancelled"
+            and (redirect_verification.get("verification") or {}).get("status") == "superseded"
+            and (redirect_verification.get("verification") or {}).get("reportableFailure") is False
+            and not redirect_verification.get("issueId")
+            and not any(item.get("kind") == "coder-report" for item in redirect_state.get("supportRequests") or [])
+            and not redirect_report,
+            json.dumps({
+                "recent": redirect_recent,
+                "outcomes": redirect_outcomes,
+                "episode": redirect_verification,
+                "report": redirect_report,
+                "needs": redirect_state.get("needs"),
+                "experience": redirect_state.get("experienceState"),
+                "progress": redirect_state.get("goalProgress"),
+            }, default=str)[:2200],
+        )
+
         # ------------------------------------------------------------------
         # 3) SETTINGS PERSISTENCE
         # ------------------------------------------------------------------
@@ -2554,10 +2645,9 @@ def main():
                 {"timeoutSec": 10, "minIntervalSec": 30},
                 cleanup_generation,
             )
-            fenced_key = server._live_agent_model_planner_session_key(cleanup_agent, cleanup_generation)
             check(
-                "fenced model worker still deletes its Gateway planner session",
-                any(method == "sessions.delete" and params.get("key") == fenced_key for method, params in gateway_calls),
+                "fenced model worker preserves its activation-scoped Gateway session",
+                not any(method == "sessions.delete" for method, params in gateway_calls),
                 json.dumps(gateway_calls, default=str),
             )
 
