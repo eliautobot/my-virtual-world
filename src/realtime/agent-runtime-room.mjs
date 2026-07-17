@@ -76,6 +76,7 @@ export const SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS = 7000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS = 12000;
 // Mirrors the browser-owned route stale timeout: abort routings stuck longer than this.
 export const SERVER_RUNTIME_ROUTE_STALE_AFTER_MS = 45000;
+export const SERVER_RUNTIME_ROUTE_PROGRESS_EPSILON = 1;
 export const SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS = 16000;
 export const SERVER_SCRIPTED_OBJECT_TEMPORARY_ITEM_CARRIED_TTL_MS = 90000;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES = 8;
@@ -1025,7 +1026,7 @@ function transitionWorldActionRecord(action, toStatus, { now = new Date().toISOS
     ? { ...result, status: result.status || nextStatus }
     : { ...(next.result && typeof next.result === 'object' && !Array.isArray(next.result) ? next.result : {}), status: nextStatus };
   if (nextStatus === 'completed') nextResult.applied = nextResult.applied !== false;
-  if (reason && !nextResult.reason) nextResult.reason = reason;
+  if (reason && (!nextResult.reason || WORLD_ACTION_TERMINAL_STATUSES.has(nextStatus))) nextResult.reason = reason;
   next.result = nextResult;
   const timing = next.timing && typeof next.timing === 'object' && !Array.isArray(next.timing) ? { ...next.timing } : {};
   timing.updatedAt = now;
@@ -1082,6 +1083,68 @@ function transitionWorldActionRecord(action, toStatus, { now = new Date().toISOS
     });
   }
   return { action: next, changed: true };
+}
+
+export function observeServerRuntimeRouteProgress(watchdog, actionId, {
+  routeId = '',
+  nowMs = Date.now(),
+  x = 0,
+  y = 0,
+  distanceToFinal = Number.POSITIVE_INFINITY,
+  arrived = false,
+  staleAfterMs = SERVER_RUNTIME_ROUTE_STALE_AFTER_MS,
+  progressEpsilon = SERVER_RUNTIME_ROUTE_PROGRESS_EPSILON,
+} = {}) {
+  if (!(watchdog instanceof Map) || !actionId) return { stale: false, progressed: false, initialized: false };
+  if (arrived) {
+    watchdog.delete(actionId);
+    return { stale: false, progressed: true, initialized: false };
+  }
+
+  const observedAtMs = Number(nowMs);
+  const observedX = Number(x);
+  const observedY = Number(y);
+  const observedDistance = Number(distanceToFinal);
+  const previous = watchdog.get(actionId);
+  if (!previous || previous.routeId !== routeId || !Number.isFinite(Number(previous.lastProgressAtMs))) {
+    const initialized = {
+      routeId,
+      lastProgressAtMs: observedAtMs,
+      progressX: observedX,
+      progressY: observedY,
+      bestDistance: observedDistance,
+    };
+    watchdog.set(actionId, initialized);
+    return { stale: false, progressed: false, initialized: true, watch: initialized };
+  }
+
+  const displacement = Math.hypot(
+    observedX - Number(previous.progressX),
+    observedY - Number(previous.progressY),
+  );
+  const distanceImprovement = Number(previous.bestDistance) - observedDistance;
+  const progressed = displacement >= progressEpsilon || distanceImprovement >= progressEpsilon;
+  const next = {
+    ...previous,
+    routeId,
+    bestDistance: Number.isFinite(observedDistance)
+      ? Math.min(Number(previous.bestDistance), observedDistance)
+      : Number(previous.bestDistance),
+  };
+  if (progressed) {
+    next.lastProgressAtMs = observedAtMs;
+    next.progressX = observedX;
+    next.progressY = observedY;
+  }
+  watchdog.set(actionId, next);
+  return {
+    stale: !progressed && observedAtMs - Number(next.lastProgressAtMs) >= staleAfterMs,
+    progressed,
+    initialized: false,
+    displacement,
+    distanceImprovement,
+    watch: next,
+  };
 }
 
 function apiPointFromBuildingLocal(building, localX, localZ) {
@@ -7620,11 +7683,13 @@ export class AgentRuntimeRoom extends Room {
     this.lastLiveActionRuntimePollMs = 0;
     this.liveActionRuntimeMeta = null;
     this.liveActionRuntimeStore = null;
+    this.liveActionRouteWatchdog = new Map();
     this.lastLiveStatusRuntimePollMs = 0;
     this.liveStatusRuntimePlan = null;
     this.lastScriptedObjectRuntimePollMs = 0;
     this.scriptedObjectRuntimePlan = null;
     this.scriptedObjectRuntimeCooldowns = new Map();
+    this.scriptedObjectRouteWatchdog = new Map();
     this.liveStatusRouteWatchdog = new Map();
     this.liveStatusRouteCooldowns = new Map();
     this.liveStatusDesklessWander = new Map();
@@ -8772,7 +8837,15 @@ export class AgentRuntimeRoom extends Room {
     this.lastLiveActionRuntimeStepMs = nowMs;
     const { meta, store } = this.loadLiveActionRuntimeStore(nowMs);
     const active = Array.isArray(store.active) ? store.active : [];
-    if (active.length === 0) return { changedActions: false, changedSnapshots: 0 };
+    if (active.length === 0) {
+      this.liveActionRouteWatchdog?.clear?.();
+      return { changedActions: false, changedSnapshots: 0 };
+    }
+    if (!(this.liveActionRouteWatchdog instanceof Map)) this.liveActionRouteWatchdog = new Map();
+    const activeActionIds = new Set(active.map(item => safeText(item?.id || item?.worldActionId, '')).filter(Boolean));
+    for (const trackedActionId of this.liveActionRouteWatchdog.keys()) {
+      if (!activeActionIds.has(trackedActionId)) this.liveActionRouteWatchdog.delete(trackedActionId);
+    }
 
     let changedActions = false;
     let changedSnapshots = 0;
@@ -8856,9 +8929,16 @@ export class AgentRuntimeRoom extends Room {
       const snapshotTarget = makeLiveActionSnapshotTarget(action, targetPoint);
       const routeId = safeText(action?.route?.id || action?.route?.routeId, `route-${actionId}`) || `route-${actionId}`;
 
+      const routeProgress = observeServerRuntimeRouteProgress(this.liveActionRouteWatchdog, actionId, {
+        routeId,
+        nowMs,
+        x: nextX,
+        y: nextY,
+        distanceToFinal: movement.distanceToFinal,
+        arrived,
+      });
       if (!arrived && (status === 'routing' || status === 'route_pending')) {
-        const routeStartedAtMs = Date.parse(action?.timing?.startedAt || action?.timing?.routePendingAt || '');
-        if (Number.isFinite(routeStartedAtMs) && nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
+        if (routeProgress.stale) {
           const transitioned = this.transitionServerLiveAction(action, 'failed', {
             now,
             actor,
@@ -8892,6 +8972,7 @@ export class AgentRuntimeRoom extends Room {
           }, 'server-live-action-route-stale', { actionId, routeId, reason: 'route-stale' });
           changedSnapshots++;
           nextHistory.unshift(action);
+          this.liveActionRouteWatchdog.delete(actionId);
           continue;
         }
       }
@@ -9017,6 +9098,7 @@ export class AgentRuntimeRoom extends Room {
 
       status = canonicalWorldActionStatus(action.status);
       if (WORLD_ACTION_TERMINAL_STATUSES.has(status)) {
+        this.liveActionRouteWatchdog.delete(actionId);
         nextHistory.unshift(action);
       } else {
         nextActive.push(action);
@@ -9811,7 +9893,15 @@ export class AgentRuntimeRoom extends Room {
     this.lastLiveActionRuntimeStepMs = nowMs;
     const { meta, store } = this.loadLiveActionRuntimeStore(nowMs);
     const active = Array.isArray(store.active) ? store.active : [];
-    if (active.length === 0) return { changedActions: false, changedSnapshots: 0 };
+    if (active.length === 0) {
+      this.liveActionRouteWatchdog?.clear?.();
+      return { changedActions: false, changedSnapshots: 0 };
+    }
+    if (!(this.liveActionRouteWatchdog instanceof Map)) this.liveActionRouteWatchdog = new Map();
+    const activeActionIds = new Set(active.map(item => safeText(item?.id || item?.worldActionId, '')).filter(Boolean));
+    for (const trackedActionId of this.liveActionRouteWatchdog.keys()) {
+      if (!activeActionIds.has(trackedActionId)) this.liveActionRouteWatchdog.delete(trackedActionId);
+    }
 
     let changedActions = false;
     let changedSnapshots = 0;
@@ -9895,9 +9985,16 @@ export class AgentRuntimeRoom extends Room {
       const snapshotTarget = makeLiveActionSnapshotTarget(action, targetPoint);
       const routeId = safeText(action?.route?.id || action?.route?.routeId, `route-${actionId}`) || `route-${actionId}`;
 
+      const routeProgress = observeServerRuntimeRouteProgress(this.liveActionRouteWatchdog, actionId, {
+        routeId,
+        nowMs,
+        x: nextX,
+        y: nextY,
+        distanceToFinal: movement.distanceToFinal,
+        arrived,
+      });
       if (!arrived && (status === 'routing' || status === 'route_pending')) {
-        const routeStartedAtMs = Date.parse(action?.timing?.startedAt || action?.timing?.routePendingAt || '');
-        if (Number.isFinite(routeStartedAtMs) && nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
+        if (routeProgress.stale) {
           const transitioned = this.transitionServerLiveAction(action, 'failed', {
             now,
             actor,
@@ -9931,6 +10028,7 @@ export class AgentRuntimeRoom extends Room {
           }, 'server-live-action-route-stale', { actionId, routeId, reason: 'route-stale' });
           changedSnapshots++;
           nextHistory.unshift(action);
+          this.liveActionRouteWatchdog.delete(actionId);
           continue;
         }
       }
@@ -10056,6 +10154,7 @@ export class AgentRuntimeRoom extends Room {
 
       status = canonicalWorldActionStatus(action.status);
       if (WORLD_ACTION_TERMINAL_STATUSES.has(status)) {
+        this.liveActionRouteWatchdog.delete(actionId);
         nextHistory.unshift(action);
       } else {
         nextActive.push(action);
@@ -10182,14 +10281,15 @@ export class AgentRuntimeRoom extends Room {
       const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= LIVE_STATUS_RUNTIME_LEASE_REFRESH_MS;
       const targetChanged = current.routeId !== routeId || current.target?.buildingId !== target.buildingId || current.target?.furnitureIndex !== target.furnitureIndex || current.target?.spotId !== target.spotId;
 
-      if (arrived) {
-        this.liveStatusRouteWatchdog.delete(agentId);
-      } else {
-        const watch = this.liveStatusRouteWatchdog.get(agentId);
-        const routeStartedAtMs = watch && watch.routeId === routeId ? Number(watch.startedAtMs) : NaN;
-        if (!Number.isFinite(routeStartedAtMs)) {
-          this.liveStatusRouteWatchdog.set(agentId, { routeId, startedAtMs: nowMs });
-        } else if (nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
+      const routeProgress = observeServerRuntimeRouteProgress(this.liveStatusRouteWatchdog, agentId, {
+        routeId,
+        nowMs,
+        x: nextX,
+        y: nextY,
+        distanceToFinal: movement.distanceToFinal,
+        arrived,
+      });
+      if (!arrived && routeProgress.stale) {
           this.liveStatusRouteWatchdog.delete(agentId);
           this.liveStatusRouteCooldowns.set(agentId, nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS);
           clearDynamicInteriorRoutingForAgent(agentId);
@@ -10214,7 +10314,6 @@ export class AgentRuntimeRoom extends Room {
           }, 'server-live-status-route-stale', { routeId, reason: 'route-stale' });
           changedSnapshots++;
           continue;
-        }
       }
 
       const state = arrived ? (statusKind === 'meeting' ? 'meeting' : 'working') : 'routing';
@@ -10303,6 +10402,7 @@ export class AgentRuntimeRoom extends Room {
   }
 
   releaseServerScriptedObjectRoute(agentId, current, target, nowMs, now, reason = 'completed') {
+    this.scriptedObjectRouteWatchdog?.delete?.(agentId);
     clearDynamicInteriorRoutingForAgent(agentId);
     clearDynamicExteriorRoutingForAgent(agentId);
     const objectKey = safeText(target?.objectKey, '');
@@ -10616,25 +10716,6 @@ export class AgentRuntimeRoom extends Room {
       }
 
       const alreadyActive = ['using', 'active', 'occupied', 'queued', 'waiting'].includes(String(current.state || '').toLowerCase());
-      if (!alreadyActive) {
-        target.routeStartedAt = safeIso(target.routeStartedAt, '') || safeIso(target.runtimeStartedAt, '') || now;
-        const routeStartedAtMs = Date.parse(target.routeStartedAt);
-        if (Number.isFinite(routeStartedAtMs) && nowMs - routeStartedAtMs >= SERVER_RUNTIME_ROUTE_STALE_AFTER_MS) {
-          this.releaseServerScriptedObjectRoute(agentId, current, {
-            ...target,
-            x: current.x,
-            y: current.y,
-            floor: current.floor,
-            buildingId: current.buildingId || '',
-            roomId: current.roomId || '',
-          }, nowMs, now, 'route-stale');
-          this.markServerScriptedRuntimeFailure(agentId, target, 'route-stale', nowMs);
-          this.scriptedObjectRuntimeCooldowns.set(agentId, nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS);
-          changedSnapshots++;
-          changedObjects++;
-          continue;
-        }
-      }
       if (!alreadyActive && activeRouteSteps >= activeRouteStepLimit) {
         continue;
       }
@@ -10653,6 +10734,31 @@ export class AgentRuntimeRoom extends Room {
       const routeId = current.routeId || safeText(`scripted-object:${agentId}:${target.buildingId || 'building'}:${target.furnitureIndex ?? 'object'}:${target.spotId || 'spot'}`, `scripted-object:${agentId}`);
       const leaseExpiresAtMs = Date.parse(current.leaseExpiresAt || '');
       const needsLeaseRefresh = !Number.isFinite(leaseExpiresAtMs) || leaseExpiresAtMs - nowMs <= SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_REFRESH_MS;
+
+      if (!(this.scriptedObjectRouteWatchdog instanceof Map)) this.scriptedObjectRouteWatchdog = new Map();
+      const routeProgress = observeServerRuntimeRouteProgress(this.scriptedObjectRouteWatchdog, agentId, {
+        routeId,
+        nowMs,
+        x: nextX,
+        y: nextY,
+        distanceToFinal: movement.distanceToFinal,
+        arrived,
+      });
+      if (!arrived && routeProgress.stale) {
+        this.releaseServerScriptedObjectRoute(agentId, current, {
+          ...target,
+          x: current.x,
+          y: current.y,
+          floor: current.floor,
+          buildingId: current.buildingId || '',
+          roomId: current.roomId || '',
+        }, nowMs, now, 'route-stale');
+        this.markServerScriptedRuntimeFailure(agentId, target, 'route-stale', nowMs);
+        this.scriptedObjectRuntimeCooldowns.set(agentId, nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_COOLDOWN_MS);
+        changedSnapshots++;
+        changedObjects++;
+        continue;
+      }
 
       if (!arrived) {
         const objectExpiresAt = new Date(nowMs + SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_TTL_MS + Math.max(SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS, numberOr(target.stayMs, SERVER_SCRIPTED_OBJECT_RUNTIME_DWELL_MS))).toISOString();

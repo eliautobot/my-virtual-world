@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Targeted unit test: scripted-object route watchdog aborts routings stuck
-// longer than SERVER_RUNTIME_ROUTE_STALE_AFTER_MS (M1.1, 8590 parity).
+// Targeted unit test: scripted-object route watchdog allows long advancing
+// routes while aborting routes with no authoritative coordinate progress.
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,6 +19,7 @@ function makeRoom({ nowMs, routeStartedAt }) {
   room.dataDir = mkdtempSync(join(tmpdir(), 'vw-watchdog-'));
   room.lastScriptedObjectRuntimeStepMs = 0;
   room.scriptedObjectRuntimeCooldowns = new Map();
+  room.scriptedObjectRouteWatchdog = new Map();
   room.scriptedObjectRuntimeMemory = new Map();
   room.scriptedObjectRuntimeNextPulseAtMs = new Map();
   room.scriptedObjectRuntimeIdleCursor = 0;
@@ -85,12 +86,25 @@ function makeRoom({ nowMs, routeStartedAt }) {
   return room;
 }
 
-// Case 1: routing older than the stale window -> aborted with route-stale + cooldown.
+// Case 1: total route age alone does not abort a route.
 {
   const nowMs = Date.now();
   const room = makeRoom({ nowMs, routeStartedAt: nowMs - SERVER_RUNTIME_ROUTE_STALE_AFTER_MS - 5000 });
   room.tickScriptedObjectRuntime(200, nowMs);
-  assert.equal(room.calls.released.length, 1, 'stale routing must be released');
+  assert.equal(room.calls.released.length, 0, 'an old route gets a fresh progress observation instead of an absolute timeout');
+  assert.equal(room.scriptedObjectRuntimeCooldowns.size, 0);
+}
+
+// Case 2: unchanged authoritative coordinates for the full window -> aborted.
+{
+  const nowMs = Date.now();
+  const firstObservedAt = nowMs - SERVER_RUNTIME_ROUTE_STALE_AFTER_MS - 5000;
+  const room = makeRoom({ nowMs, routeStartedAt: firstObservedAt - 10000 });
+  room.tickScriptedObjectRuntime(200, firstObservedAt);
+  room.calls.released.length = 0;
+  room.calls.failures.length = 0;
+  room.tickScriptedObjectRuntime(200, nowMs);
+  assert.equal(room.calls.released.length, 1, 'a route with no coordinate progress must be released');
   assert.equal(room.calls.released[0].reason, 'route-stale');
   assert.equal(room.calls.released[0].agentId, 'permi');
   assert.equal(room.calls.failures[0]?.reason, 'route-stale', 'failure memory recorded');
@@ -98,7 +112,7 @@ function makeRoom({ nowMs, routeStartedAt }) {
   assert.ok(cooldownUntil > nowMs, 'agent gets a re-pick cooldown');
 }
 
-// Case 2: routing within the stale window -> not aborted.
+// Case 3: routing within the no-progress window -> not aborted.
 {
   const nowMs = Date.now();
   const room = makeRoom({ nowMs, routeStartedAt: nowMs - 10000 });

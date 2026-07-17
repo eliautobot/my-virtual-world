@@ -12,6 +12,7 @@ import {
   listScriptedObjectRuntimeTargets,
   makeServerScriptedDeskConsumeTarget,
   makeServerRuntimeStep,
+  observeServerRuntimeRouteProgress,
   SERVER_RUNTIME_AGENT_HARD_SEPARATION_RADIUS,
   SERVER_RUNTIME_ROUTE_STALE_AFTER_MS,
   serverScriptedServiceQueueSlotTarget,
@@ -40,6 +41,42 @@ writeFileSync(join(dataDir, 'buildings', 'office.json'), JSON.stringify({
 }, null, 2));
 
 const api = (tile) => tile * 40;
+
+// Long routes remain healthy for any total duration while authoritative
+// coordinates continue moving. A route only becomes stale after a full
+// watchdog window without meaningful progress.
+{
+  const watchdog = new Map();
+  const routeId = 'route-long-live-action';
+  const actionId = 'long-live-action';
+  const startMs = Date.now();
+  const first = observeServerRuntimeRouteProgress(watchdog, actionId, {
+    routeId,
+    nowMs: startMs,
+    x: 0,
+    y: 0,
+    distanceToFinal: 6000,
+  });
+  assert.equal(first.initialized, true, 'first authoritative route observation starts the progress watchdog');
+  const afterLongTravel = observeServerRuntimeRouteProgress(watchdog, actionId, {
+    routeId,
+    nowMs: startMs + SERVER_RUNTIME_ROUTE_STALE_AFTER_MS + 5000,
+    x: 3600,
+    y: 0,
+    distanceToFinal: 2400,
+  });
+  assert.equal(afterLongTravel.progressed, true, 'authoritative movement refreshes a route older than the stale window');
+  assert.equal(afterLongTravel.stale, false, 'long advancing routes must not be failed by total trip duration');
+  const actuallyStalled = observeServerRuntimeRouteProgress(watchdog, actionId, {
+    routeId,
+    nowMs: startMs + (SERVER_RUNTIME_ROUTE_STALE_AFTER_MS * 2) + 5001,
+    x: 3600,
+    y: 0,
+    distanceToFinal: 2400,
+  });
+  assert.equal(actuallyStalled.stale, true, 'a route with no coordinate progress for the full watchdog window must fail');
+}
+
 function makeFakeRuntimeRoom(dataDirForRoom) {
   const room = Object.create(AgentRuntimeRoom.prototype);
   room.dataDir = dataDirForRoom;
@@ -50,6 +87,7 @@ function makeFakeRuntimeRoom(dataDirForRoom) {
   room.scriptedObjectRuntimeMemory = new Map();
   room.scriptedObjectRuntimeNextPulseAtMs = new Map();
   room.scriptedObjectRuntimeCooldowns = new Map();
+  room.liveActionRouteWatchdog = new Map();
   room.recordEvent = () => ({});
   room.persistRuntimeDocument = () => {};
   room.broadcastRuntimeState = () => {};
@@ -460,6 +498,7 @@ writeFileSync(join(seedDataDir, 'world-meta.json'), JSON.stringify({
         priority: 'normal',
         source: { kind: 'agent-live-mode', requestId: 'stale-live-action' },
         target: { kind: 'world-point', x: seedTarget.x, y: seedTarget.y, floor: seedTarget.floor },
+        result: { status: 'routing', reason: 'server-runtime-route-started' },
         timing: {
           createdAt: staleStartedAt,
           updatedAt: staleStartedAt,
@@ -487,6 +526,13 @@ staleRoom.state.agents.set('stale-live-agent', {
   leaseOwner: 'server-runtime',
   leaseExpiresAt: new Date(staleNowMs + 10000).toISOString(),
   visualState: null,
+});
+staleRoom.liveActionRouteWatchdog.set('stale-live-action', {
+  routeId: 'route-stale-live-action',
+  lastProgressAtMs: staleNowMs - SERVER_RUNTIME_ROUTE_STALE_AFTER_MS - 5000,
+  progressX: safeSeedStep.x,
+  progressY: safeSeedStep.y,
+  bestDistance: safeSeedStep.distanceToFinal,
 });
 const staleTick = staleRoom.tickLiveActionRuntime(100, staleNowMs, new Date(staleNowMs).toISOString());
 const staleWorldActions = JSON.parse(readFileSync(join(seedDataDir, 'world-meta.json'), 'utf8')).agentLife.worldActions;
