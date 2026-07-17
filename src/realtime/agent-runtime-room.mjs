@@ -49,6 +49,10 @@ export const LIVE_ACTION_RUNTIME_POLL_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
 export const LIVE_ACTION_RUNTIME_PLAN_POLL_MS = WORLD_RUNTIME_PLAN_POLL_MS;
 export const LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC = 72;
 export const LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS = 3;
+// A moving resident is an interaction target, not a furniture docking point.
+// Two tiles is close enough for an embodied conversation while still requiring
+// the agents to share a floor/place and have an unobstructed segment.
+export const LIVE_ACTION_RUNTIME_AGENT_INTERACTION_RADIUS = 2 * 40;
 export const LIVE_ACTION_RUNTIME_DWELL_MS = 20000;
 export const LIVE_ACTION_RUNTIME_COMPLETION_VISIBLE_MS = 12000;
 export const LIVE_ACTION_RUNTIME_LEASE_TTL_MS = 10000;
@@ -1807,6 +1811,86 @@ function isInsideResolvedBuildingTarget(dataDir, current, targetPoint) {
   const building = readBuildingDocument(dataDir, buildingId);
   if (!building || building.type === 'park') return false;
   return buildingContainsApiPoint(building, Number(current?.x), Number(current?.y));
+}
+
+export function isLiveActionAgentTargetWithinInteractionRange(current, targetPoint, radius = LIVE_ACTION_RUNTIME_AGENT_INTERACTION_RADIUS) {
+  if (safeText(targetPoint?.targetKind, '').toLowerCase() !== 'agent') return false;
+  if (!safeText(targetPoint?.targetAgentId, '')) return false;
+  if (![current?.x, current?.y, targetPoint?.x, targetPoint?.y].every(Number.isFinite)) return false;
+  if (floorOr(current?.floor, 1) !== floorOr(targetPoint?.floor, 1)) return false;
+  if (safeText(current?.buildingId, '') !== safeText(targetPoint?.buildingId, '')) return false;
+  const currentRoomId = safeText(current?.roomId, '');
+  const targetRoomId = safeText(targetPoint?.roomId, '');
+  if (currentRoomId && targetRoomId && currentRoomId !== targetRoomId) return false;
+  return Math.hypot(Number(targetPoint.x) - Number(current.x), Number(targetPoint.y) - Number(current.y))
+    <= Math.max(1, numberOr(radius, LIVE_ACTION_RUNTIME_AGENT_INTERACTION_RADIUS));
+}
+
+export function makeLiveActionRuntimeMovement(dataDir, agentId, current, targetPoint, tickMs, { crowdAgents = [] } = {}) {
+  const alreadyInsideTargetBuilding = isInsideResolvedBuildingTarget(dataDir, current, targetPoint);
+  if (alreadyInsideTargetBuilding) {
+    return {
+      x: Number(current.x),
+      y: Number(current.y),
+      floor: targetPoint.floor,
+      buildingId: targetPoint.buildingId || '',
+      roomId: targetPoint.roomId || '',
+      heading: normalizeRuntimeAngleRadians(current.heading, 0),
+      arrived: true,
+      distanceToFinal: 0,
+      distanceToSteering: 0,
+      steeringTarget: targetPoint,
+      finalTarget: targetPoint,
+      route: {
+        active: false,
+        source: 'server-live-action-runtime',
+        reason: 'already-inside-target-building',
+        finalPoint: targetPoint,
+        routeSource: 'server-live-action-runtime',
+        phase: 'building-presence-arrival',
+      },
+      phase: 'building-presence-arrival',
+    };
+  }
+
+  const agentTargetInRange = isLiveActionAgentTargetWithinInteractionRange(current, targetPoint)
+    && validateServerRuntimeStaticSegment(dataDir, current, targetPoint, {
+      phase: 'agent-interaction-arrival',
+      route: null,
+    }).clear;
+  if (agentTargetInRange) {
+    const distanceToFinal = Math.hypot(Number(targetPoint.x) - Number(current.x), Number(targetPoint.y) - Number(current.y));
+    return {
+      x: Number(current.x),
+      y: Number(current.y),
+      floor: floorOr(current.floor, targetPoint.floor),
+      buildingId: safeText(current.buildingId, ''),
+      roomId: safeText(current.roomId, ''),
+      heading: Math.atan2(Number(targetPoint.x) - Number(current.x), Number(targetPoint.y) - Number(current.y)),
+      arrived: true,
+      distanceToFinal,
+      distanceToSteering: distanceToFinal,
+      steeringTarget: targetPoint,
+      finalTarget: targetPoint,
+      route: {
+        active: false,
+        source: 'server-live-action-runtime',
+        reason: 'agent-within-interaction-range',
+        finalPoint: targetPoint,
+        routeSource: 'server-live-action-runtime',
+        phase: 'agent-interaction-arrival',
+        interactionRadius: LIVE_ACTION_RUNTIME_AGENT_INTERACTION_RADIUS,
+      },
+      phase: 'agent-interaction-arrival',
+    };
+  }
+
+  return makeServerRuntimeStep(dataDir, agentId, current, targetPoint, tickMs, {
+    speedUnitsPerSec: LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
+    arrivalRadius: LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS,
+    routeSource: 'server-live-action-runtime',
+    crowdAgents,
+  });
 }
 
 function liveActionObjectUseSpec(action, point, status = 'active') {
@@ -8892,36 +8976,9 @@ export class AgentRuntimeRoom extends Room {
 
 	      status = canonicalWorldActionStatus(action.status);
 	      const current = snapshotToPlain(existing);
-	      const alreadyInsideTargetBuilding = isInsideResolvedBuildingTarget(this.dataDir, current, targetPoint);
-	      const movement = alreadyInsideTargetBuilding
-	        ? {
-	            x: Number(current.x),
-	            y: Number(current.y),
-	            floor: targetPoint.floor,
-	            buildingId: targetPoint.buildingId || '',
-	            roomId: targetPoint.roomId || '',
-	            heading: normalizeRuntimeAngleRadians(current.heading, 0),
-	            arrived: true,
-	            distanceToFinal: 0,
-	            distanceToSteering: 0,
-	            steeringTarget: targetPoint,
-	            finalTarget: targetPoint,
-	            route: {
-	              active: false,
-	              source: 'server-live-action-runtime',
-	              reason: 'already-inside-target-building',
-	              finalPoint: targetPoint,
-	              routeSource: 'server-live-action-runtime',
-	              phase: 'building-presence-arrival',
-	            },
-	            phase: 'building-presence-arrival',
-	          }
-	        : makeServerRuntimeStep(this.dataDir, agentId, current, targetPoint, tickMs, {
-	            speedUnitsPerSec: LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
-	            arrivalRadius: LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS,
-	            routeSource: 'server-live-action-runtime',
-	            crowdAgents: serverRuntimeCrowdAgents(this.state, agentId),
-	          });
+	      const movement = makeLiveActionRuntimeMovement(this.dataDir, agentId, current, targetPoint, tickMs, {
+	        crowdAgents: serverRuntimeCrowdAgents(this.state, agentId),
+	      });
       const arrived = movement.arrived;
       const nextX = movement.x;
       const nextY = movement.y;
@@ -9948,36 +10005,9 @@ export class AgentRuntimeRoom extends Room {
 
 	      status = canonicalWorldActionStatus(action.status);
 	      const current = snapshotToPlain(existing);
-	      const alreadyInsideTargetBuilding = isInsideResolvedBuildingTarget(this.dataDir, current, targetPoint);
-	      const movement = alreadyInsideTargetBuilding
-	        ? {
-	            x: Number(current.x),
-	            y: Number(current.y),
-	            floor: targetPoint.floor,
-	            buildingId: targetPoint.buildingId || '',
-	            roomId: targetPoint.roomId || '',
-	            heading: normalizeRuntimeAngleRadians(current.heading, 0),
-	            arrived: true,
-	            distanceToFinal: 0,
-	            distanceToSteering: 0,
-	            steeringTarget: targetPoint,
-	            finalTarget: targetPoint,
-	            route: {
-	              active: false,
-	              source: 'server-live-action-runtime',
-	              reason: 'already-inside-target-building',
-	              finalPoint: targetPoint,
-	              routeSource: 'server-live-action-runtime',
-	              phase: 'building-presence-arrival',
-	            },
-	            phase: 'building-presence-arrival',
-	          }
-	        : makeServerRuntimeStep(this.dataDir, agentId, current, targetPoint, tickMs, {
-	            speedUnitsPerSec: LIVE_ACTION_RUNTIME_SPEED_UNITS_PER_SEC,
-	            arrivalRadius: LIVE_ACTION_RUNTIME_ARRIVAL_RADIUS,
-	            routeSource: 'server-live-action-runtime',
-	            crowdAgents: serverRuntimeCrowdAgents(this.state, agentId),
-	          });
+	      const movement = makeLiveActionRuntimeMovement(this.dataDir, agentId, current, targetPoint, tickMs, {
+	        crowdAgents: serverRuntimeCrowdAgents(this.state, agentId),
+	      });
       const arrived = movement.arrived;
       const nextX = movement.x;
       const nextY = movement.y;

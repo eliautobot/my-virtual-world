@@ -9,7 +9,9 @@ import {
   AgentRuntimeRoom,
   MAX_VISUAL_STATE_JSON_CHARS,
   isServerScriptedObjectTargetAvailable,
+  isLiveActionAgentTargetWithinInteractionRange,
   listScriptedObjectRuntimeTargets,
+  makeLiveActionRuntimeMovement,
   makeServerScriptedDeskConsumeTarget,
   makeServerRuntimeStep,
   observeServerRuntimeRouteProgress,
@@ -65,6 +67,24 @@ const api = (tile) => tile * 40;
   assert.equal(point?.y, 296, `social route should approach behind the target heading: ${JSON.stringify(point)}`);
   assert.equal(point?.floor, 1, `social route should follow the authoritative target floor instead of a stale route hint: ${JSON.stringify(point)}`);
   assert.equal(point?.buildingId, 'office', `social route should use authoritative target building: ${JSON.stringify(point)}`);
+}
+
+// Social actions complete on embodied interaction proximity instead of trying
+// to dock on the exact, continuously moving resident coordinate.
+{
+  const current = { x: 200, y: 240, floor: 1, buildingId: 'office', roomId: 'lobby', heading: 0 };
+  const target = { x: 252, y: 240, floor: 1, buildingId: 'office', roomId: 'lobby', targetKind: 'agent', targetAgentId: 'social-peer' };
+  assert.equal(isLiveActionAgentTargetWithinInteractionRange(current, target), true, 'two nearby residents should be within social interaction range');
+  const movement = makeLiveActionRuntimeMovement(dataDir, 'social-actor', current, target, 100, { crowdAgents: [] });
+  assert.equal(movement.arrived, true, 'nearby social target should arrive without exact coordinate docking');
+  assert.equal(movement.x, current.x, 'social arrival must preserve the actor x instead of teleporting onto the target');
+  assert.equal(movement.y, current.y, 'social arrival must preserve the actor y instead of teleporting onto the target');
+  assert.equal(movement.route?.reason, 'agent-within-interaction-range', 'social arrival should expose its proximity reason');
+
+  const otherFloor = { ...target, floor: 2 };
+  assert.equal(isLiveActionAgentTargetWithinInteractionRange(current, otherFloor), false, 'social interaction cannot cross floors');
+  const tooFar = { ...target, x: current.x + 81 };
+  assert.equal(isLiveActionAgentTargetWithinInteractionRange(current, tooFar), false, 'social interaction cannot exceed the two-tile radius');
 }
 
 // Long routes remain healthy for any total duration while authoritative
