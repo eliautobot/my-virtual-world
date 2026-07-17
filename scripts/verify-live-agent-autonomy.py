@@ -1060,6 +1060,32 @@ def main():
             and stale_reported_episode.get("updatedAt") == stale_reported_episode.get("reportedAt"),
             json.dumps({"stale": stale_reported_episode, "reported": reported_episode}, default=str)[:1200],
         )
+        stale_feedback_episode = server._live_agent_loop_normalize_episode({
+            **reported_episode,
+            "status": "coder_responded",
+            "phase": "continue",
+            "coderRespondedAt": "2026-01-01T00:00:00Z",
+            "coderResponses": [{
+                "at": "2026-01-01T00:00:00Z",
+                "eventId": "old-coder-reply",
+                "messageId": "old-coder-reply",
+                "conversationId": reported_episode.get("conversationId"),
+                "text": "Reply for an older issue in the shared conversation.",
+            }],
+            "history": [
+                *(reported_episode.get("history") or []),
+                {"at": "2026-01-01T00:00:00Z", "phase": "continue", "event": "coder-response-received", "eventId": "old-coder-reply"},
+            ],
+        })
+        check(
+            "shared conversation feedback older than the episode report is ignored",
+            stale_feedback_episode.get("status") == "awaiting_coder"
+            and stale_feedback_episode.get("phase") == "await-coder"
+            and not stale_feedback_episode.get("coderResponses")
+            and not stale_feedback_episode.get("coderRespondedAt")
+            and not any(item.get("eventId") == "old-coder-reply" for item in stale_feedback_episode.get("history") or []),
+            json.dumps(stale_feedback_episode, default=str)[:1500],
+        )
         server._append_comm_event({
             "type": "message",
             "direction": "request",
@@ -1183,6 +1209,52 @@ def main():
                 "activeEpisode": historical_reconciliation_state.get("activeEpisode"),
                 "requests": historical_reconciliation_state.get("supportRequests"),
             }, default=str)[:1800],
+        )
+        historical_social_episode = {
+            "id": "episode-historical-social-route",
+            "agentId": "tester",
+            "planId": "plan-historical-social-route",
+            "loopActionId": "talk-with-nearby-agent",
+            "actionType": "life.social",
+            "actionId": "wa-historical-social-failed",
+            "issueId": "episode.issue.historical-social",
+            "status": "awaiting_coder",
+            "phase": "await-coder",
+            "createdAt": "2026-07-08T00:00:00Z",
+            "updatedAt": "2026-07-08T00:01:00Z",
+            "reportedAt": "2026-07-08T00:01:00Z",
+            "targetKey": "building:autonomy-lab",
+            "target": {"kind": "agent", "targetAgentId": "old-social-peer", "buildingId": "autonomy-lab", "floor": 1},
+            "verification": {"id": "verify-historical-social-failed", "ok": False, "status": "failed", "at": "2026-07-08T00:00:30Z"},
+        }
+        historical_social_state = {
+            "needs": dict(goal_agent_state["needs"]),
+            "memory": {
+                "recentActions": [{
+                    "at": "2026-07-08T00:02:00Z",
+                    "actionId": "wa-historical-social-success",
+                    "loopActionId": "talk-with-nearby-agent",
+                    "actionType": "life.social",
+                    "status": "completed",
+                    "targetKey": "agent:hermie",
+                    "target": {"kind": "agent", "targetAgentId": "hermie", "buildingId": "autonomy-lab", "floor": 1},
+                }],
+            },
+            "episodes": [historical_social_episode],
+            "activeEpisode": historical_social_episode,
+            "supportRequests": [],
+        }
+        server._live_agent_loop_normalize_memory(historical_social_state)
+        historical_social_resolved = server._live_agent_loop_find_episode(
+            historical_social_state,
+            issue_id="episode.issue.historical-social",
+        ) or {}
+        check(
+            "verified social retry resolves legacy generic target report after target changes",
+            historical_social_resolved.get("status") == "completed"
+            and (historical_social_resolved.get("resolution") or {}).get("actionId") == "wa-historical-social-success"
+            and not historical_social_state.get("activeEpisode"),
+            json.dumps(historical_social_state, default=str)[:1600],
         )
         legacy_episode_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
         legacy_loop_state = {"agents": {"tester": legacy_episode_state}, "events": []}

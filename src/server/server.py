@@ -5529,7 +5529,8 @@ def _live_agent_loop_resolve_reported_episode_from_recent_actions(agent_state, e
         if not action_epoch or action_epoch <= episode_epoch:
             continue
         item_target_key = str(item.get("targetKey") or _live_agent_loop_target_key(item.get("target")) or "").strip()
-        if episode_target_key or item_target_key:
+        same_social_action = episode_action_type == "life.social" and item.get("actionType") == "life.social"
+        if not same_social_action and (episode_target_key or item_target_key):
             if not episode_target_key or not item_target_key:
                 continue
             if not _live_agent_loop_target_keys_compatible(episode_target_key, item_target_key):
@@ -6609,6 +6610,29 @@ def _live_agent_loop_normalize_episode(episode):
         value = episode.get(key)
         if isinstance(value, list):
             normalized[key] = [_copy_jsonable(item) for item in value if isinstance(item, dict)][-limit:]
+    response_floor_epoch = (
+        _parse_isoish_epoch(normalized.get("reportedAt"))
+        or _parse_isoish_epoch(normalized.get("createdAt"))
+        or 0
+    )
+    if normalized.get("coderResponses"):
+        normalized["coderResponses"] = [
+            item
+            for item in normalized.get("coderResponses") or []
+            if (_parse_isoish_epoch(item.get("at")) or 0) >= response_floor_epoch
+        ]
+    if normalized.get("history"):
+        normalized["history"] = [
+            item
+            for item in normalized.get("history") or []
+            if item.get("event") != "coder-response-received"
+            or (_parse_isoish_epoch(item.get("at")) or 0) >= response_floor_epoch
+        ][-18:]
+    if normalized.get("status") == "coder_responded" and not normalized.get("coderResponses"):
+        normalized["status"] = "awaiting_coder"
+        normalized["phase"] = "await-coder"
+        normalized.pop("coderRespondedAt", None)
+        normalized["operatorSummary"] = "Reported to Coder; waiting for feedback tied to this episode."
     successful_reports = [
         item for item in (normalized.get("reports") or [])
         if item.get("ok") is True or str(item.get("status") or "").strip().lower() in {"delivered", "sent", "reported", "completed"}
@@ -9330,7 +9354,8 @@ def _live_agent_loop_resolve_reported_episodes_from_verification(
         }:
             continue
         episode_target_key = str(episode.get("targetKey") or "").strip()
-        if verified_target_key or episode_target_key:
+        same_social_action = episode.get("actionType") == "life.social" and verified_action_type == "life.social"
+        if not same_social_action and (verified_target_key or episode_target_key):
             if not verified_target_key or not episode_target_key:
                 continue
             if not _live_agent_loop_target_keys_compatible(verified_target_key, episode_target_key):
@@ -12826,6 +12851,11 @@ def _live_agent_loop_ingest_coder_feedback(agent_id, agent_state):
             continue
         events = _load_comm_history(limit=100, conversation_id=conversation_id)
         seen_ids = {item.get("eventId") or item.get("messageId") for item in (episode.get("coderResponses") or []) if isinstance(item, dict)}
+        response_floor_epoch = (
+            _parse_isoish_epoch(episode.get("reportedAt"))
+            or _parse_isoish_epoch(episode.get("createdAt"))
+            or 0
+        )
         for event in events:
             if not isinstance(event, dict):
                 continue
@@ -12836,11 +12866,14 @@ def _live_agent_loop_ingest_coder_feedback(agent_id, agent_state):
             event_id = event.get("id")
             if event_id in seen_ids:
                 continue
+            event_epoch = (float(event.get("ts") or 0) / 1000.0) if event.get("ts") else 0
+            if not event_epoch or event_epoch < response_floor_epoch:
+                continue
             text = _live_agent_loop_clean_plan_text(event.get("text"), limit=1200)
             if not text:
                 continue
             response = {
-                "at": _epoch_to_utc_iso((float(event.get("ts") or 0) / 1000.0)) if event.get("ts") else _utc_now_iso(),
+                "at": _epoch_to_utc_iso(event_epoch),
                 "eventId": event_id,
                 "messageId": event_id,
                 "conversationId": conversation_id,
