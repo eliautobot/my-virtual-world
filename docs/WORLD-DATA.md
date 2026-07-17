@@ -170,6 +170,17 @@ Restart-safe autonomy work lives under `agentLife.liveModeLoop.agents[agentId]` 
 
 World actions created for a durable step carry `goalId`, `goalRevision`, `goalTaskId`, and `goalStepId` in their parameters so completion evidence advances the correct step. See `docs/LIVE-AGENT-MODE-DURABLE-GOALS.md`.
 
+### Authoritative Spatial Perception
+
+Live Agent spatial frames read body coordinates, floor, building, room,
+heading, route, and lease state from the realtime sidecar's persisted
+`agent-runtime.json`. Persisted building-local furniture and outdoor-node
+coordinates are transformed into that same API coordinate system. The frame
+adds exact distance, hybrid field-of-view, interior-wall visibility,
+occupancy, route blockers, and interaction availability without persisting a
+duplicate spatial database. See
+`docs/LIVE-AGENT-MODE-SPATIAL-PERCEPTION.md`.
+
 ## World Actions
 
 World actions are durable interaction requests. They are stored under `world-meta.json` in the Agent Life section and exposed through `/api/world-actions`.

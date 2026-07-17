@@ -49,6 +49,7 @@ from license import (
 )
 
 import live_agent_goals as _live_agent_goals
+import live_agent_spatial as _live_agent_spatial
 
 try:
     from providers.hermes import HermesApiClient, HermesProvider
@@ -3140,7 +3141,17 @@ def _normalize_capability_tag(tag):
     return aliases.get(raw) or aliases.get(raw.lower()) or aliases.get(_normalize_token(raw))
 
 
+_CATALOG_BLOCKS_CACHE = {"sig": None, "blocks": {}}
+
+
 def _catalog_blocks():
+    try:
+        stat = os.stat(CATALOG_SCHEMA_FILE)
+        signature = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        signature = None
+    if signature is not None and _CATALOG_BLOCKS_CACHE.get("sig") == signature:
+        return _CATALOG_BLOCKS_CACHE.get("blocks") or {}
     text = _load_text_file(CATALOG_SCHEMA_FILE)
     blocks = {}
     starts = [m.start() for m in re.finditer(r"\n\s*Object\.freeze\(\{\s*\n\s*id:\s*'", text)]
@@ -3150,6 +3161,8 @@ def _catalog_blocks():
         match = re.search(r"id:\s*'([^']+)'", block)
         if match:
             blocks[_normalize_token(match.group(1))] = {"id": match.group(1), "block": block}
+    _CATALOG_BLOCKS_CACHE["sig"] = signature
+    _CATALOG_BLOCKS_CACHE["blocks"] = blocks
     return blocks
 
 
@@ -7402,7 +7415,7 @@ def _live_agent_loop_find_seating_target(action_def, *, agent_id=None, agent_sta
     return None
 
 
-def _live_agent_loop_find_action_target(action_def, *, agent_id=None, agent_state=None):
+def _live_agent_loop_find_action_target(action_def, *, agent_id=None, agent_state=None, spatial=None):
     if action_def.get("targetKind") == "support-tool":
         tool = action_def.get("supportTool")
         if tool == "coder-report":
@@ -7441,7 +7454,7 @@ def _live_agent_loop_find_action_target(action_def, *, agent_id=None, agent_stat
             }
         return None
     if action_def.get("targetKind") == "agent":
-        social = _live_agent_loop_social_perception(agent_id)
+        social = _live_agent_loop_social_perception(agent_id, spatial=spatial)
         nearby = social.get("nearbyAgents") if isinstance(social.get("nearbyAgents"), list) else []
         selected_peer = next((item for item in nearby if isinstance(item, dict) and item.get("agentId")), None)
         if not selected_peer:
@@ -7666,13 +7679,19 @@ def _live_agent_loop_assignment_location(agent_id):
     return None
 
 
-def _live_agent_loop_social_perception(agent_id):
+def _live_agent_loop_social_perception(agent_id, spatial=None):
     status = load_agent_status()
     meta = load_world_meta()
     profiles = meta.get("agentProfiles") if isinstance(meta.get("agentProfiles"), dict) else {}
     relationships = meta.get("agentRelationships") if isinstance(meta.get("agentRelationships"), dict) else {}
     roster = get_roster()
     aliases = _live_agent_loop_agent_aliases(agent_id)
+    spatial = spatial if isinstance(spatial, dict) else _live_agent_loop_build_spatial_perception(agent_id)
+    spatial_agents = {
+        str(item.get("agentId") or ""): item
+        for item in (spatial.get("nearbyAgents") or [])
+        if isinstance(item, dict) and item.get("agentId")
+    }
     alias_map = {}
     for agent in roster:
         if not isinstance(agent, dict):
@@ -7683,8 +7702,7 @@ def _live_agent_loop_social_perception(agent_id):
         agent_aliases = {str(agent.get("id") or "").strip(), str(agent.get("statusKey") or "").strip()}
         agent_aliases.discard("")
         alias_map[resolved] = agent_aliases or {resolved}
-    active_locations = _live_agent_loop_active_locations_by_agent()
-    self_location = active_locations.get(agent_id) or _live_agent_loop_assignment_location(agent_id)
+    self_location = spatial.get("self") if isinstance(spatial.get("self"), dict) else None
     known = []
     live_enabled = []
     nearby = []
@@ -7702,7 +7720,8 @@ def _live_agent_loop_social_perception(agent_id):
         live_mode_enabled = bool(agent.get("agentLiveModeEnabled") or _agent_live_mode_enabled_from_profile(profile))
         rel_key = next((key for key in relationships.keys() if isinstance(key, str) and any(alias and alias in key for alias in aliases) and any(alias and alias in key for alias in other_aliases)), None)
         relationship = relationships.get(rel_key) if rel_key and isinstance(relationships.get(rel_key), dict) else {}
-        location = active_locations.get(other_id)
+        spatial_row = spatial_agents.get(other_id)
+        location = spatial_row.get("position") if isinstance(spatial_row, dict) and isinstance(spatial_row.get("position"), dict) else None
         row = {
             "agentId": other_id,
             "name": agent.get("name"),
@@ -7712,16 +7731,37 @@ def _live_agent_loop_social_perception(agent_id):
             "relationship": {k: relationship.get(k) for k in ("summary", "score", "updatedAt") if k in relationship},
             "location": location,
         }
+        if spatial_row:
+            row["spatial"] = {
+                key: spatial_row.get(key)
+                for key in (
+                    "distance", "distanceTiles", "proximityBand", "sameFloor", "sameBuilding",
+                    "sameRoom", "perceived", "inFieldOfView", "lineOfSight", "visible", "interactionReady",
+                    "relativeBearingDegrees", "occludedBy",
+                )
+            }
         known.append(row)
         if live_mode_enabled:
             live_enabled.append(row)
-        if self_location and location and self_location.get("buildingId") == location.get("buildingId") and int(self_location.get("floor") or 1) == int(location.get("floor") or 1):
-            nearby.append({**row, "nearbyReason": "same-building-floor", "buildingId": location.get("buildingId"), "floor": location.get("floor") or 1})
+        if spatial_row and spatial_row.get("interactionReady"):
+            nearby.append({
+                **row,
+                "nearbyReason": "authoritative-distance-and-visibility",
+                "buildingId": location.get("buildingId") if location else "",
+                "roomId": location.get("roomId") if location else "",
+                "floor": location.get("floor") if location else 1,
+                "distance": spatial_row.get("distance"),
+                "distanceTiles": spatial_row.get("distanceTiles"),
+                "inFieldOfView": spatial_row.get("inFieldOfView"),
+                "lineOfSight": spatial_row.get("lineOfSight"),
+            })
     known.sort(key=lambda item: (not item.get("liveModeEnabled"), item.get("name") or item.get("agentId") or ""))
     return {
-        "schemaVersion": "agent-live-mode-social-perception/v1",
+        "schemaVersion": "agent-live-mode-social-perception/v2",
         "agentId": agent_id,
         "selfLocation": self_location,
+        "spatialSchemaVersion": spatial.get("schemaVersion"),
+        "nearbyPolicy": "authoritative distance + floor/place compatibility + line of sight + hybrid field of view",
         "knownAgentCount": len(known),
         "liveEnabledPeerCount": len(live_enabled),
         "nearbyAgentCount": len(nearby),
@@ -9391,10 +9431,10 @@ def _live_agent_loop_action_defs_for_agent(agent_id, agent_state=None, resident_
     return [*LIVE_AGENT_LOOP_ACTIONS, *_live_agent_loop_dynamic_action_defs(agent_id, agent_state, resident_profile)]
 
 
-def _live_agent_loop_action_affordances(agent_id, agent_state):
+def _live_agent_loop_action_affordances(agent_id, agent_state, spatial=None):
     affordances = []
     for action_def in _live_agent_loop_action_defs_for_agent(agent_id, agent_state):
-        selected = _live_agent_loop_find_action_target(action_def, agent_id=agent_id, agent_state=agent_state)
+        selected = _live_agent_loop_find_action_target(action_def, agent_id=agent_id, agent_state=agent_state, spatial=spatial)
         selected_action = selected.get("action") if isinstance(selected, dict) and isinstance(selected.get("action"), dict) else action_def
         visible_contract = _live_agent_visible_action_contract(selected_action.get("actionType"))
         is_support_tool = selected_action.get("targetKind") == "support-tool"
@@ -9448,12 +9488,20 @@ LIVE_AGENT_ROUTE_PROGRESS_MIN_IMPROVEMENT = 12.0  # API units (~1/3 tile)
 LIVE_AGENT_ROUTE_ARRIVAL_RADIUS = 60.0
 
 
-def _live_agent_runtime_positions():
-    """Read live body positions from the realtime runtime document (shared /data mount)."""
+def _live_agent_runtime_document():
+    """Read one atomic snapshot from the realtime sidecar's shared document."""
     try:
         with open(os.path.join(DATA_DIR, "agent-runtime.json"), "r") as f:
             doc = json.load(f)
     except Exception:
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _live_agent_runtime_positions(runtime_document=None):
+    """Read authoritative body positions and route context from realtime."""
+    doc = runtime_document if isinstance(runtime_document, dict) else _live_agent_runtime_document()
+    if not isinstance(doc, dict):
         return {}
     agents = doc.get("agents") if isinstance(doc.get("agents"), dict) else {}
     positions = {}
@@ -9468,16 +9516,451 @@ def _live_agent_runtime_positions():
             "y": round(float(y), 2),
             "floor": row.get("floor"),
             "buildingId": row.get("buildingId") or "",
+            "roomId": row.get("roomId") or "",
             "state": row.get("state"),
             "mode": row.get("mode"),
             "heading": row.get("heading"),
+            "owner": row.get("owner") or "",
+            "routeId": row.get("routeId") or "",
+            "worldActionId": row.get("worldActionId") or "",
+            "leaseOwner": row.get("leaseOwner") or "",
+            "leaseExpiresAt": row.get("leaseExpiresAt") or "",
+            "target": _copy_jsonable(row.get("target")) if isinstance(row.get("target"), dict) else None,
             "updatedAt": row.get("updatedAt"),
+            "version": row.get("version"),
         }
     return positions
 
 
-def _live_agent_runtime_position(agent_id):
-    return _live_agent_runtime_positions().get(str(agent_id))
+def _live_agent_runtime_position(agent_id, runtime_document=None):
+    positions = _live_agent_runtime_positions(runtime_document)
+    wanted = str(agent_id or "").strip()
+    if wanted in positions:
+        return positions[wanted]
+    for alias in _live_agent_loop_agent_aliases(wanted):
+        if alias in positions:
+            return positions[alias]
+    return None
+
+
+def _live_agent_spatial_building_local_point(building, point):
+    """Inverse of _live_agent_building_local_api_point (API units -> tiles)."""
+    if not isinstance(building, dict) or not isinstance(point, dict):
+        return None
+    base_x = _float_or_none(building.get("worldX") if building.get("worldX") is not None else building.get("x"))
+    base_z = _float_or_none(building.get("worldY") if building.get("worldY") is not None else building.get("z"))
+    width = _float_or_none(building.get("widthTiles") if building.get("widthTiles") is not None else building.get("width"))
+    depth = _float_or_none(building.get("heightTiles") if building.get("heightTiles") is not None else building.get("depth"))
+    x = _float_or_none(point.get("x"))
+    y = _float_or_none(point.get("y") if point.get("y") is not None else point.get("z"))
+    if None in (base_x, base_z, width, depth, x, y):
+        return None
+    world_x = x / LIVE_AGENT_LOOP_API_TILE
+    world_z = y / LIVE_AGENT_LOOP_API_TILE
+    dx = world_x - base_x
+    dz = world_z - base_z
+    rotation = int(round(_float_or_none(building.get("_rotation") if building.get("_rotation") is not None else building.get("rotation")) or 0)) % 360
+    if rotation == 90:
+        local_x, local_z = dz, depth - dx
+    elif rotation == 180:
+        local_x, local_z = width - dx, depth - dz
+    elif rotation == 270:
+        local_x, local_z = width - dz, dx
+    else:
+        local_x, local_z = dx, dz
+    return {"x": local_x, "z": local_z}
+
+
+def _live_agent_spatial_segments_cross(a, b, c, d):
+    """Return true for a proper sight-line/wall crossing, excluding endpoints."""
+    denominator = (b[0] - a[0]) * (d[1] - c[1]) - (b[1] - a[1]) * (d[0] - c[0])
+    if abs(denominator) <= 1e-9:
+        return False
+    t = ((c[0] - a[0]) * (d[1] - c[1]) - (c[1] - a[1]) * (d[0] - c[0])) / denominator
+    u = ((c[0] - a[0]) * (b[1] - a[1]) - (c[1] - a[1]) * (b[0] - a[0])) / denominator
+    return 0.015 < t < 0.985 and -1e-6 <= u <= 1.000001
+
+
+def _live_agent_spatial_line_of_sight(building, origin, target, floor=1):
+    if not isinstance(building, dict):
+        return True
+    local_origin = _live_agent_spatial_building_local_point(building, origin)
+    local_target = _live_agent_spatial_building_local_point(building, target)
+    if not local_origin or not local_target:
+        return True
+    a = (local_origin["x"], local_origin["z"])
+    b = (local_target["x"], local_target["z"])
+    walls = ((building.get("interior") or {}).get("walls") or [])
+    for wall in walls if isinstance(walls, list) else []:
+        if not isinstance(wall, dict):
+            continue
+        try:
+            wall_floor = int(wall.get("floor") or wall.get("buildingFloor") or 1)
+        except (TypeError, ValueError):
+            wall_floor = 1
+        if wall_floor != int(floor or 1):
+            continue
+        values = [_float_or_none(wall.get(key)) for key in ("x1", "z1", "x2", "z2")]
+        if any(value is None for value in values):
+            continue
+        if _live_agent_spatial_segments_cross(a, b, (values[0], values[1]), (values[2], values[3])):
+            return False
+    return True
+
+
+def _live_agent_spatial_object_id(building, obj, index, collection):
+    explicit = next((obj.get(key) for key in ("objectInstanceId", "instanceId", "id", "nodeId") if obj.get(key)), None)
+    if explicit:
+        return str(explicit)
+    return f"{building.get('id')}:{collection}:{index}"
+
+
+def _live_agent_spatial_location_point(building, obj, location=None):
+    location = location if isinstance(location, dict) else {}
+    coordinate_space = str(location.get("coordinateSpace") or "").strip().lower()
+    local = location.get("buildingLocal") if isinstance(location.get("buildingLocal"), dict) else None
+    if not local:
+        local = location.get("actionTarget") if isinstance(location.get("actionTarget"), dict) else None
+    if not local:
+        local = location.get("activationTarget") if isinstance(location.get("activationTarget"), dict) else None
+    world = location.get("world") if isinstance(location.get("world"), dict) else None
+    if coordinate_space in {"world", "world-tile", "world-tiles"} and world:
+        wx = _float_or_none(world.get("x"))
+        wz = _float_or_none(world.get("z") if world.get("z") is not None else world.get("y"))
+        if wx is not None and wz is not None:
+            return {"x": wx * LIVE_AGENT_LOOP_API_TILE, "y": wz * LIVE_AGENT_LOOP_API_TILE}
+    source = local or obj
+    x = _float_or_none(source.get("x")) if isinstance(source, dict) else None
+    z = _float_or_none(source.get("z") if source.get("z") is not None else source.get("y")) if isinstance(source, dict) else None
+    return _live_agent_building_local_api_point(building, x, z) if x is not None and z is not None else None
+
+
+def _live_agent_spatial_runtime_objects_for(runtime_objects, building_id, collection, index, object_type, object_id):
+    matches = []
+    for object_key, row in (runtime_objects or {}).items():
+        if not isinstance(row, dict):
+            continue
+        key = str(object_key or "")
+        row_building = str(row.get("buildingId") or "")
+        row_index = row.get("furnitureIndex")
+        row_type = _normalize_token(row.get("objectType") or "")
+        direct = str(row.get("objectInstanceId") or "") == str(object_id or "")
+        try:
+            same_index = row_index is not None and int(row_index) == int(index)
+        except (TypeError, ValueError):
+            same_index = False
+        indexed = (
+            collection == "furniture"
+            and row_building == str(building_id or "")
+            and same_index
+            and (not row_type or row_type == _normalize_token(object_type))
+        )
+        key_match = bool(object_id and (key == str(object_id) or key.startswith(f"{object_id}:") or key.endswith(f":{object_id}")))
+        if direct or indexed or key_match:
+            matches.append({
+                "objectKey": key,
+                "state": row.get("state"),
+                "agentId": row.get("agentId") or "",
+                "actionId": row.get("actionId") or "",
+                "reservationId": row.get("reservationId") or "",
+                "activeUseId": row.get("activeUseId") or "",
+                "slotId": row.get("slotId") or "",
+                "expiresAt": row.get("expiresAt") or "",
+                "updatedAt": row.get("updatedAt") or "",
+            })
+    matches.sort(key=lambda item: (item.get("state") not in {"active", "in_use", "reserved"}, item.get("objectKey") or ""))
+    return matches[:6]
+
+
+def _live_agent_spatial_object_interactions(agent_id, building, obj, collection, index, object_id, catalog_id, origin, resolved, action_store):
+    locations = obj.get("actionLocations") if isinstance(obj.get("actionLocations"), list) else []
+    interactions = []
+    for location in locations[:12]:
+        if not isinstance(location, dict):
+            continue
+        point = _live_agent_spatial_location_point(building, obj, location)
+        if not point:
+            continue
+        spot_id = location.get("interactionSpotId") or location.get("activationSpotId") or location.get("spotId") or location.get("id")
+        target = {
+            "kind": "object-instance",
+            "buildingId": building.get("id"),
+            "objectInstanceId": object_id,
+            "catalogId": catalog_id,
+            "interactionSpotId": spot_id,
+            "floor": location.get("floor") or obj.get("floor") or obj.get("buildingFloor") or 1,
+        }
+        target["furnitureIndex" if collection == "furniture" else "nodeIndex"] = index
+        availability = get_object_availability(target, agent_id=agent_id, store=action_store, resolved=resolved)
+        distance = math.hypot(float(point["x"]) - float(origin["x"]), float(point["y"]) - float(origin["y"]))
+        interactions.append({
+            "id": location.get("id") or spot_id,
+            "actionId": location.get("actionId") or "",
+            "interactionSpotId": spot_id or "",
+            "roles": [str(item) for item in (location.get("roles") or [])[:8]],
+            "position": {"x": round(float(point["x"]), 2), "y": round(float(point["y"]), 2), "floor": int(target["floor"])},
+            "distance": round(distance, 2),
+            "distanceTiles": round(distance / LIVE_AGENT_LOOP_API_TILE, 3),
+            "availability": {k: availability.get(k) for k in ("state", "reason", "capacity", "reservationSlot")},
+        })
+    interactions.sort(key=lambda item: (item["distance"], item.get("id") or ""))
+    return interactions[:6]
+
+
+def _live_agent_loop_build_spatial_perception(agent_id, runtime_document=None):
+    """Build a compact authoritative spatial snapshot for one resident."""
+    runtime_doc = runtime_document if isinstance(runtime_document, dict) else _live_agent_runtime_document()
+    positions = _live_agent_runtime_positions(runtime_doc)
+    origin = _live_agent_runtime_position(agent_id, runtime_doc)
+    now_iso = _utc_now_iso()
+    base = {
+        "schemaVersion": _live_agent_spatial.SPATIAL_SCHEMA_VERSION,
+        "at": now_iso,
+        "agentId": agent_id,
+        "authority": {
+            "source": "realtime-runtime-document",
+            "available": bool(runtime_doc and origin),
+            "runtimeSchemaVersion": (runtime_doc or {}).get("schemaVersion"),
+            "runtimeUpdatedAt": (runtime_doc or {}).get("updatedAt"),
+            "coordinateSystem": "api-units (1 tile = 40 units, +Y is world +Z)",
+        },
+        "config": {
+            "awarenessRadiusTiles": _live_agent_spatial.DEFAULT_AWARENESS_RADIUS_TILES,
+            "visualRadiusTiles": _live_agent_spatial.DEFAULT_VISUAL_RADIUS_TILES,
+            "interactionRadiusTiles": _live_agent_spatial.DEFAULT_INTERACTION_RADIUS_TILES,
+            "closeAwarenessRadiusTiles": _live_agent_spatial.DEFAULT_CLOSE_AWARENESS_RADIUS_TILES,
+            "fieldOfViewDegrees": _live_agent_spatial.DEFAULT_FIELD_OF_VIEW_DEGREES,
+            "conePolicy": "forward-attention-with-omnidirectional-close-awareness",
+        },
+        "self": origin,
+        "place": None,
+        "occupancy": {"buildingFloor": 0, "room": 0, "nearby": 0, "visible": 0},
+        "route": {"active": False, "nearbyAgentBlockers": []},
+        "nearbyAgents": [],
+        "nearbyObjects": [],
+        "visibleAgents": [],
+        "visibleObjects": [],
+        "interactableObjects": [],
+        "summary": {"nearbyAgentCount": 0, "visibleAgentCount": 0, "nearbyObjectCount": 0, "visibleObjectCount": 0, "interactableObjectCount": 0},
+        "resultSets": {
+            key: {"total": 0, "returned": 0, "truncated": False}
+            for key in ("nearbyAgents", "visibleAgents", "nearbyObjects", "visibleObjects", "interactableObjects")
+        },
+    }
+    if not origin:
+        base["authority"]["reason"] = "authoritative-runtime-position-unavailable"
+        return base
+
+    origin = {**origin, "floor": int(origin.get("floor") or 1), "roomId": origin.get("roomId") or ""}
+    base["self"] = origin
+    building = load_building(origin.get("buildingId")) if origin.get("buildingId") else None
+    base["place"] = {
+        "kind": "building" if origin.get("buildingId") else "outdoors",
+        "buildingId": origin.get("buildingId") or "",
+        "buildingName": (building or {}).get("name") or "",
+        "floor": origin["floor"],
+        "roomId": origin.get("roomId") or "",
+    }
+
+    status = load_agent_status()
+    roster = [item for item in get_roster() if isinstance(item, dict)]
+    seen_runtime_ids = set()
+    agent_rows = []
+    building_floor_occupants = []
+    room_occupants = []
+    for agent in roster:
+        other_id = str(agent.get("statusKey") or agent.get("id") or "").strip()
+        if not other_id:
+            continue
+        candidate_ids = [other_id, str(agent.get("id") or "").strip()]
+        runtime_id = next((candidate for candidate in candidate_ids if candidate and candidate in positions), None)
+        if not runtime_id or runtime_id in seen_runtime_ids:
+            continue
+        seen_runtime_ids.add(runtime_id)
+        other = positions[runtime_id]
+        same_building_floor = (
+            int(other.get("floor") or 1) == origin["floor"]
+            and str(other.get("buildingId") or "") == str(origin.get("buildingId") or "")
+        )
+        if same_building_floor:
+            building_floor_occupants.append(other_id)
+        same_room = same_building_floor and str(other.get("roomId") or "") == str(origin.get("roomId") or "")
+        if same_room:
+            room_occupants.append(other_id)
+        if other_id == agent_id or str(agent.get("id") or "") == str(agent_id):
+            continue
+        line_of_sight = _live_agent_spatial_line_of_sight(building, origin, other, origin["floor"]) if same_building_floor and origin.get("buildingId") else True
+        relation = _live_agent_spatial.spatial_relation(origin, other, line_of_sight=line_of_sight)
+        if not relation.get("withinAwareness"):
+            continue
+        other_status = status.get(other_id, {}) or status.get(agent.get("id"), {}) or {}
+        row = {
+            "agentId": other_id,
+            "name": agent.get("name") or other_id,
+            "status": other_status.get("state", other_status.get("status", "offline")),
+            "task": other_status.get("task", ""),
+            "position": {k: other.get(k) for k in ("x", "y", "floor", "buildingId", "roomId", "heading", "state", "mode", "updatedAt")},
+            **relation,
+        }
+        agent_rows.append(row)
+    # A zero-distance resident/object is valid (for example two residents
+    # restored to the same spawn point).  Do not use truthiness here: treating
+    # 0.0 as infinity produces unstable ordering while bodies are moving.
+    agent_rows.sort(key=lambda item: (
+        float(item["distance"]) if item.get("distance") is not None else float("inf"),
+        item.get("agentId") or "",
+    ))
+    base["nearbyAgents"] = agent_rows[:64]
+    base["visibleAgents"] = [item for item in agent_rows if item.get("visible")][:32]
+
+    runtime_objects = (runtime_doc or {}).get("objects") if isinstance((runtime_doc or {}).get("objects"), dict) else {}
+    action_store = get_world_actions_store(persist_migration=True)
+    object_rows = []
+    for candidate_building in list_buildings():
+        if not isinstance(candidate_building, dict) or _building_unavailable(candidate_building):
+            continue
+        collections = (
+            ("furniture", ((candidate_building.get("interior") or {}).get("furniture") or [])),
+            ("outdoor-node", ((candidate_building.get("outdoorArea") or {}).get("nodes") or [])),
+        )
+        for collection, records in collections:
+            if not isinstance(records, list):
+                continue
+            outdoors = collection == "outdoor-node" or candidate_building.get("type") in {"park", "outdoor"}
+            if outdoors and origin.get("buildingId"):
+                continue
+            if not outdoors and str(candidate_building.get("id") or "") != str(origin.get("buildingId") or ""):
+                continue
+            for index, obj in enumerate(records):
+                if not isinstance(obj, dict):
+                    continue
+                floor = int(obj.get("floor") or obj.get("buildingFloor") or 1)
+                point = _live_agent_spatial_location_point(candidate_building, obj)
+                if not point:
+                    continue
+                target_position = {
+                    "x": point["x"], "y": point["y"], "floor": floor,
+                    "buildingId": "" if outdoors else candidate_building.get("id") or "",
+                    "roomId": "" if outdoors else obj.get("room") or "",
+                    "heading": 0,
+                }
+                same_building_floor = (not outdoors and origin.get("buildingId") == candidate_building.get("id") and origin["floor"] == floor)
+                line_of_sight = _live_agent_spatial_line_of_sight(candidate_building, origin, target_position, floor) if same_building_floor else True
+                relation = _live_agent_spatial.spatial_relation(origin, target_position, line_of_sight=line_of_sight)
+                if not relation.get("withinAwareness"):
+                    continue
+                object_id = _live_agent_spatial_object_id(candidate_building, obj, index, collection)
+                catalog_id = _object_catalog_id(obj) or "object"
+                resolved = {"kind": "object-instance", "building": candidate_building, "object": obj, "collection": collection, "index": index, "candidateIds": sorted(_candidate_object_ids(candidate_building, obj, index, collection))}
+                interactions = _live_agent_spatial_object_interactions(agent_id, candidate_building, obj, collection, index, object_id, catalog_id, origin, resolved, action_store)
+                runtime_states = _live_agent_spatial_runtime_objects_for(runtime_objects, candidate_building.get("id"), collection, index, catalog_id, object_id)
+                runtime_occupied_by = sorted({
+                    item.get("agentId")
+                    for item in runtime_states
+                    if item.get("agentId")
+                    and item.get("agentId") != agent_id
+                    and str(item.get("state") or "").lower() in {"active", "in_use", "reserved", "using", "occupied"}
+                })
+                row = {
+                    "objectInstanceId": object_id,
+                    "catalogId": catalog_id,
+                    "objectType": obj.get("type") or catalog_id,
+                    "collection": collection,
+                    "buildingId": candidate_building.get("id") or "",
+                    "buildingName": candidate_building.get("name") or "",
+                    "floor": floor,
+                    "roomId": obj.get("room") or "",
+                    "position": {"x": round(float(point["x"]), 2), "y": round(float(point["y"]), 2), "floor": floor},
+                    "interactions": interactions,
+                    "runtimeStates": runtime_states,
+                    "occupiedByAgentIds": sorted({item.get("agentId") for item in runtime_states if item.get("agentId")}),
+                    "runtimeOccupied": bool(runtime_occupied_by),
+                    "runtimeOccupiedByAgentIds": runtime_occupied_by,
+                    **relation,
+                }
+                row["nearestInteraction"] = interactions[0] if interactions else None
+                row["interactionReady"] = bool(
+                    relation.get("interactionReady")
+                    and not runtime_occupied_by
+                    and any((item.get("availability") or {}).get("state") == "available" for item in interactions)
+                )
+                object_rows.append(row)
+    object_rows.sort(key=lambda item: (
+        float(item["distance"]) if item.get("distance") is not None else float("inf"),
+        item.get("objectInstanceId") or "",
+    ))
+    base["nearbyObjects"] = object_rows[:128]
+    base["visibleObjects"] = [item for item in object_rows if item.get("visible")][:64]
+    base["interactableObjects"] = [item for item in object_rows if item.get("interactionReady")][:32]
+
+    route_target = origin.get("target") if isinstance(origin.get("target"), dict) else None
+    route_target_position = None
+    if route_target and _float_or_none(route_target.get("x")) is not None:
+        route_target_position = {
+            "x": float(route_target.get("x")),
+            "y": float(route_target.get("y") if route_target.get("y") is not None else route_target.get("z")),
+            "floor": int(route_target.get("floor") or origin["floor"]),
+            "buildingId": route_target.get("buildingId") or "",
+            "roomId": route_target.get("roomId") or "",
+            "heading": route_target.get("heading") or 0,
+        }
+    route = {
+        "active": bool(origin.get("routeId") or origin.get("leaseOwner") or route_target_position),
+        "routeId": origin.get("routeId") or "",
+        "worldActionId": origin.get("worldActionId") or "",
+        "state": origin.get("state") or "",
+        "mode": origin.get("mode") or "",
+        "owner": origin.get("owner") or "",
+        "leaseOwner": origin.get("leaseOwner") or "",
+        "leaseExpiresAt": origin.get("leaseExpiresAt") or "",
+        "target": route_target,
+        "distanceToTarget": None,
+        "distanceToTargetTiles": None,
+        "nearbyAgentBlockers": [],
+    }
+    if route_target_position:
+        route_distance = math.hypot(origin["x"] - route_target_position["x"], origin["y"] - route_target_position["y"])
+        route["distanceToTarget"] = round(route_distance, 2)
+        route["distanceToTargetTiles"] = round(route_distance / LIVE_AGENT_LOOP_API_TILE, 3)
+        blockers = []
+        for item in agent_rows:
+            distance_to_route = _live_agent_spatial.point_to_segment_distance(item.get("position"), origin, route_target_position)
+            if distance_to_route is None or distance_to_route > LIVE_AGENT_LOOP_API_TILE * 0.9:
+                continue
+            blockers.append({"agentId": item.get("agentId"), "name": item.get("name"), "distanceToRoute": round(distance_to_route, 2), "distanceToRouteTiles": round(distance_to_route / LIVE_AGENT_LOOP_API_TILE, 3), "distance": item.get("distance")})
+        blockers.sort(key=lambda item: (item.get("distanceToRoute"), item.get("distance")))
+        route["nearbyAgentBlockers"] = blockers[:8]
+    base["route"] = route
+    base["occupancy"] = {
+        "buildingFloor": len(set(building_floor_occupants)),
+        "room": len(set(room_occupants)),
+        "nearby": len(agent_rows),
+        "visible": sum(bool(item.get("visible")) for item in agent_rows),
+        "buildingFloorAgentIds": sorted(set(building_floor_occupants))[:32],
+        "roomAgentIds": sorted(set(room_occupants))[:32],
+    }
+    base["summary"] = {
+        "nearbyAgentCount": len(agent_rows),
+        "visibleAgentCount": sum(bool(item.get("visible")) for item in agent_rows),
+        "nearbyObjectCount": len(object_rows),
+        "visibleObjectCount": sum(bool(item.get("visible")) for item in object_rows),
+        "interactableObjectCount": sum(bool(item.get("interactionReady")) for item in object_rows),
+    }
+    base["resultSets"] = {
+        "nearbyAgents": {"total": len(agent_rows), "returned": len(base["nearbyAgents"]), "truncated": len(agent_rows) > len(base["nearbyAgents"])},
+        "visibleAgents": {"total": base["summary"]["visibleAgentCount"], "returned": len(base["visibleAgents"]), "truncated": base["summary"]["visibleAgentCount"] > len(base["visibleAgents"])},
+        "nearbyObjects": {"total": len(object_rows), "returned": len(base["nearbyObjects"]), "truncated": len(object_rows) > len(base["nearbyObjects"])},
+        "visibleObjects": {"total": base["summary"]["visibleObjectCount"], "returned": len(base["visibleObjects"]), "truncated": base["summary"]["visibleObjectCount"] > len(base["visibleObjects"])},
+        "interactableObjects": {"total": base["summary"]["interactableObjectCount"], "returned": len(base["interactableObjects"]), "truncated": base["summary"]["interactableObjectCount"] > len(base["interactableObjects"])},
+    }
+    return base
+
+
+def get_live_agent_spatial_perception(agent_id):
+    resolved_agent_id = _resolve_agent_id(agent_id)
+    if not resolved_agent_id:
+        return False, _api_error("agent_not_found", "Agent was not found.", details={"agentId": agent_id}), 404
+    return True, {"ok": True, "spatialPerception": _live_agent_loop_build_spatial_perception(resolved_agent_id)}, 200
 
 
 def _live_agent_building_local_api_point(building, local_x, local_z):
@@ -9787,10 +10270,12 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
     _live_agent_loop_ingest_coder_feedback(agent_id, agent_state)
     needs = _live_agent_loop_update_needs(agent_state, now_epoch)
     active = _active_behavior_records_for_agent(agent_id)
-    affordances = _live_agent_loop_action_affordances(agent_id, agent_state)
+    runtime_document = _live_agent_runtime_document()
+    spatial = _live_agent_loop_build_spatial_perception(agent_id, runtime_document=runtime_document)
+    affordances = _live_agent_loop_action_affordances(agent_id, agent_state, spatial=spatial)
     recent_actions = _live_agent_loop_recent_world_actions(agent_id)
     memory = agent_state.get("memory") if isinstance(agent_state.get("memory"), dict) else {}
-    social = _live_agent_loop_social_perception(agent_id)
+    social = _live_agent_loop_social_perception(agent_id, spatial=spatial)
     resident_context = _live_agent_loop_resident_profile_context(_live_agent_loop_resident_profile(agent_id, persist=True))
     location = _live_agent_loop_location_frame(agent_id, active)
     live_world = _agent_live_world_claim_payload(agent_id)
@@ -9806,6 +10291,7 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
         "affordances": [{k: v for k, v in affordance.items() if k != "selected"} for affordance in affordances],
         "recentWorldActions": recent_actions,
         "visibleActionContract": _live_agent_visible_action_policy(),
+        "spatial": spatial,
         "social": social,
         "memory": {
             "recentActions": _live_agent_loop_trim_list(memory.get("recentActions"), 8),
@@ -9823,6 +10309,7 @@ def _live_agent_loop_build_perception(agent_id, agent_state, world_client=None, 
         "activeCount": len(active),
         "recentWorldActionIds": [item.get("id") for item in recent_actions[:4]],
         "social": {k: social.get(k) for k in ("knownAgentCount", "liveEnabledPeerCount", "nearbyAgentCount")},
+        "spatial": _copy_jsonable(spatial.get("summary") or {}),
         "liveWorld": {k: live_world.get(k) for k in ("currentWorld", "conflict", "notice")},
     }
     return perception
@@ -10001,6 +10488,61 @@ def _live_agent_loop_decision_score(affordance, agent_state, goal_frame=None):
     return round(score, 3), breakdown
 
 
+def _live_agent_loop_compact_spatial_for_planner(spatial):
+    if not isinstance(spatial, dict):
+        return None
+
+    def compact_agent(item):
+        return {
+            key: item.get(key)
+            for key in (
+                "agentId", "name", "status", "distanceTiles", "proximityBand", "sameRoom",
+                "perceived", "inFieldOfView", "lineOfSight", "visible", "interactionReady", "occludedBy",
+            )
+        }
+
+    def compact_object(item):
+        interaction = item.get("nearestInteraction") if isinstance(item.get("nearestInteraction"), dict) else None
+        return {
+            "objectInstanceId": item.get("objectInstanceId"),
+            "catalogId": item.get("catalogId"),
+            "objectType": item.get("objectType"),
+            "buildingId": item.get("buildingId"),
+            "floor": item.get("floor"),
+            "roomId": item.get("roomId"),
+            "distanceTiles": item.get("distanceTiles"),
+            "proximityBand": item.get("proximityBand"),
+            "inFieldOfView": item.get("inFieldOfView"),
+            "perceived": item.get("perceived"),
+            "lineOfSight": item.get("lineOfSight"),
+            "visible": item.get("visible"),
+            "interactionReady": item.get("interactionReady"),
+            "occludedBy": item.get("occludedBy"),
+            "nearestInteraction": {
+                "actionId": interaction.get("actionId"),
+                "interactionSpotId": interaction.get("interactionSpotId"),
+                "distanceTiles": interaction.get("distanceTiles"),
+                "availability": (interaction.get("availability") or {}).get("state"),
+            } if interaction else None,
+        }
+
+    route = spatial.get("route") if isinstance(spatial.get("route"), dict) else {}
+    return {
+        "schemaVersion": spatial.get("schemaVersion"),
+        "authority": spatial.get("authority"),
+        "self": spatial.get("self"),
+        "place": spatial.get("place"),
+        "occupancy": spatial.get("occupancy"),
+        "summary": spatial.get("summary"),
+        "route": {
+            key: route.get(key)
+            for key in ("active", "routeId", "worldActionId", "state", "mode", "owner", "leaseOwner", "distanceToTargetTiles", "nearbyAgentBlockers")
+        },
+        "nearbyAgents": [compact_agent(item) for item in (spatial.get("nearbyAgents") or [])[:8] if isinstance(item, dict)],
+        "nearbyObjects": [compact_object(item) for item in (spatial.get("nearbyObjects") or [])[:12] if isinstance(item, dict)],
+    }
+
+
 def _live_agent_loop_build_decision_frame(agent_id, perception, agent_state):
     goal_frame = _live_agent_loop_build_goal_frame(agent_id, perception, agent_state)
     candidates = []
@@ -10021,6 +10563,7 @@ def _live_agent_loop_build_decision_frame(agent_id, perception, agent_state):
         "mode": LIVE_AGENT_LOOP_DEFAULTS["decisionMode"],
         "modelReady": True,
         "goalFrame": goal_frame,
+        "spatialContext": _live_agent_loop_compact_spatial_for_planner(perception.get("spatial")),
         "visibleActionContract": {
             "schemaVersion": LIVE_AGENT_VISIBLE_ACTION_CONTRACT_VERSION,
             "policy": "visible-world-execution-required-or-explicit-support-tool",
@@ -10033,7 +10576,7 @@ def _live_agent_loop_build_decision_frame(agent_id, perception, agent_state):
         "selectedActionLabel": selected.get("label") if selected else None,
         "score": selected.get("score") if selected else 0,
         "candidates": candidates,
-        "prompt": "Choose one available visible in-world action or explicit support tool from this planner-v2 frame. Consider needs, personality, Resident Profile identity/goals/memory, internal notes, relationships, home/work context, recent outcomes, active plans, physical presence, visible executor availability, and safe pacing. Return a loopActionId from candidates or skip. Social talk is executable only when social perception reports a nearby visible agent target. Home rest is executable only by physically routing to the agent-owned home. Small-home construction is executable only through the visible construction-site executor. Support tools may write internal notes or send Coder a report; arbitrary build/modify/move/delete world changes remain proposal-only until typed visible executors exist.",
+        "prompt": "Choose one available visible in-world action or explicit support tool from this planner-v2 frame. Consider needs, personality, Resident Profile identity/goals/memory, internal notes, relationships, home/work context, recent outcomes, active plans, authoritative spatial distance/occupancy/route context, visible executor availability, and safe pacing. Return a loopActionId from candidates or skip. Social talk is executable only when social perception reports a nearby visible agent target. Home rest is executable only by physically routing to the agent-owned home. Small-home construction is executable only through the visible construction-site executor. Support tools may write internal notes or send Coder a report; arbitrary build/modify/move/delete world changes remain proposal-only until typed visible executors exist.",
         "reason": f"{selected.get('label')} best matches planner-v2 goals for {selected.get('need')}" if selected else "no available candidates",
     }
     agent_state["lastDecision"] = {k: frame.get(k) for k in ("at", "mode", "topNeed", "selectedActionId", "selectedActionLabel", "score", "reason")}
@@ -10141,13 +10684,58 @@ def _live_agent_model_decision_prompt(agent_id, decision_frame, agent_state):
     identity_text = "; ".join(str(part).strip() for part in identity_parts if str(part or "").strip())
     if identity_text:
         lines.append(f"Identity: {identity_text[:420]}")
-    location = _live_agent_loop_location_frame(agent_id)
-    position = location.get("position")
+    spatial_context = decision_frame.get("spatialContext") if isinstance(decision_frame.get("spatialContext"), dict) else {}
+    position = spatial_context.get("self") if isinstance(spatial_context.get("self"), dict) else None
+    if not position:
+        position = _live_agent_loop_location_frame(agent_id).get("position")
     if position:
         where = f"({position['x']}, {position['y']})"
         if position.get("buildingId"):
             where += f" inside building {position['buildingId']}"
-        lines.append(f"Current body position: {where} (api-units; 1 tile = 40 units)")
+        where += f" floor {int(position.get('floor') or 1)}"
+        if position.get("roomId"):
+            where += f" room {position.get('roomId')}"
+        lines.append(f"Current authoritative body position: {where} (api-units; 1 tile = 40 units)")
+    spatial_authority = spatial_context.get("authority") if isinstance(spatial_context.get("authority"), dict) else {}
+    if spatial_context and not spatial_authority.get("available"):
+        lines.append("Spatial perception warning: authoritative realtime position is unavailable; do not guess proximity, visibility, floor, room, or occupancy.")
+    occupancy = spatial_context.get("occupancy") if isinstance(spatial_context.get("occupancy"), dict) else {}
+    if occupancy:
+        lines.append(
+            "Occupancy: "
+            f"{occupancy.get('buildingFloor', 0)} resident(s) on this building/floor, "
+            f"{occupancy.get('room', 0)} in this room, {occupancy.get('visible', 0)} visible."
+        )
+    route_context = spatial_context.get("route") if isinstance(spatial_context.get("route"), dict) else {}
+    if route_context.get("active"):
+        lines.append(
+            "Active route: "
+            f"state={route_context.get('state') or 'unknown'} owner={route_context.get('leaseOwner') or route_context.get('owner') or 'unknown'} "
+            f"distance={route_context.get('distanceToTargetTiles')} tiles blockers={len(route_context.get('nearbyAgentBlockers') or [])}."
+        )
+    nearby_agents = [item for item in (spatial_context.get("nearbyAgents") or []) if isinstance(item, dict)]
+    if nearby_agents:
+        lines.append("Nearby residents from authoritative coordinates:")
+        for item in nearby_agents[:6]:
+            lines.append(
+                f"- {item.get('name') or item.get('agentId')}: {item.get('distanceTiles')} tiles; "
+                f"visible={bool(item.get('visible'))} fov={bool(item.get('inFieldOfView'))} "
+                f"lineOfSight={bool(item.get('lineOfSight'))} interactionReady={bool(item.get('interactionReady'))}"
+                + (f" occludedBy={item.get('occludedBy')}" if item.get("occludedBy") else "")
+            )
+    nearby_objects = [item for item in (spatial_context.get("nearbyObjects") or []) if isinstance(item, dict)]
+    if nearby_objects:
+        lines.append("Nearby objects from persisted coordinates (nearest first):")
+        for item in nearby_objects[:8]:
+            interaction = item.get("nearestInteraction") if isinstance(item.get("nearestInteraction"), dict) else {}
+            action = interaction.get("actionId") or "none"
+            availability = interaction.get("availability") or "unknown"
+            lines.append(
+                f"- {item.get('objectType') or item.get('catalogId')} {item.get('objectInstanceId')}: "
+                f"{item.get('distanceTiles')} tiles; visible={bool(item.get('visible'))} "
+                f"fov={bool(item.get('inFieldOfView'))} lineOfSight={bool(item.get('lineOfSight'))}; "
+                f"nearestInteraction={action}/{availability}"
+            )
     live_world = _agent_live_world_claim_payload(agent_id)
     current_world = live_world.get("currentWorld") if isinstance(live_world.get("currentWorld"), dict) else {}
     if current_world:
@@ -22343,6 +22931,13 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             if len(parts) == 4 and parts[0] == "api" and parts[1] == "agent" and parts[3] == "goals":
                 agent_id = urllib.parse.unquote(parts[2])
                 ok, result, status = get_live_agent_goals(agent_id)
+                return self._send_json(result, status)
+
+        if path.startswith("/api/agent/") and path.endswith("/spatial-perception"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "api" and parts[1] == "agent" and parts[3] == "spatial-perception":
+                agent_id = urllib.parse.unquote(parts[2])
+                ok, result, status = get_live_agent_spatial_perception(agent_id)
                 return self._send_json(result, status)
 
         if path == "/api/agent-live-world":
