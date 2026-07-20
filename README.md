@@ -283,6 +283,23 @@ Build the production image:
 docker build -t my-virtual-world:local .
 ```
 
+## Source Availability and Licensing
+
+My Virtual World is **source-available**, not OSI-approved open source.
+
+- Software source code and related technical documentation are available
+  under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+- Project-owned creative assets are available under
+  [CC BY-NC-SA 4.0](ASSETS-LICENSE.md).
+- The My Virtual World name, logos, wordmarks, and other brand identifiers are
+  reserved under the [trademark policy](TRADEMARKS.md).
+- Third-party components and material remain under their respective licenses.
+
+The default licenses permit noncommercial use, modification, and sharing, but
+do not permit resale or other commercial use. Commercial use requires a
+separate written license. See [docs/LICENSING.md](docs/LICENSING.md) for scope,
+redistribution requirements, and commercial licensing information.
+
 ## Repository Hygiene
 
 The repository intentionally excludes local runtime data, backups, generated caches, installed dependencies, and private agent state. Keep secrets in `.env` or your local agent-system config, never in source control.
