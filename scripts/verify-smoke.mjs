@@ -281,7 +281,7 @@ for (const token of [
   "isLicenseFeatureLocked('advancedEditor')",
   "isLicenseFeatureLocked('agentLiveMode')",
   'Activation required for agent editing.',
-  'Activation required for Agent Live Mode.',
+  'Activation required for Live Agent Mode.',
   'Importing a world',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing edit lock token: ${token}`);
@@ -369,8 +369,8 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260711-runtime-routing-hydrate',
-  'js/chat.js?v=20260707-live-planner-r1',
+  'js/main3d.js?v=20260719-live-agent-toggle-sync-r4',
+  'js/chat.js?v=20260717-live-controller-r1',
   'css/style.css?v=20260707-live-planner-r2',
   'btn-newAgent',
   'Agent Platform',
@@ -910,7 +910,7 @@ for (const token of [
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
   '__VWGetAgentRuntimeDebug',
-  'agent-runtime-client.mjs?v=20260704-runtime-chat-opt-r2',
+  'agent-runtime-client.mjs?v=20260717-live-controller-r1',
   'serverAuthoritativeRuntimeBlockReason',
   'clearBrowserOwnedAgentMotionForServerRuntime',
   'holdAgentForServerAuthoritativeRuntimeObserver',
@@ -925,6 +925,10 @@ for (const token of [
   'resumeAgentRuntimeAfterPageResume',
   'scheduleAgentRuntimePageResume',
   'resetAgentRuntimeRenderTimingForResume',
+  'startAgentRuntimeConnectionWatchdog',
+  'checkAgentRuntimeConnectionHealth',
+  'agentRuntimeConnectionBanner',
+  '__VWAgentRuntimeConnectionStatus',
   "window.addEventListener('pageshow'",
   "window.addEventListener('online'",
   'updateRuntimeTrafficVehicles',
@@ -945,6 +949,7 @@ for (const token of [
   'agent runtime connect',
   'resume',
   'isStale',
+  "nextRoom.onMessage('runtime:health'",
   'tickSeq: raw.tickSeq',
   'simTimeMs: raw.simTimeMs',
   'tickMs: raw.tickMs',
@@ -955,6 +960,8 @@ for (const token of [
   'DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES',
   'VW_REALTIME_SCHEMA_BUFFER_SIZE_BYTES',
   'Encoder.BUFFER_SIZE',
+  'RUNTIME_HEALTH_BROADCAST_INTERVAL_MS',
+  "this.broadcast('runtime:health'",
 ]) {
   assert(agentRuntimeRoomJs.includes(token), `agent runtime room missing schema buffer token: ${token}`);
 }
@@ -974,11 +981,17 @@ for (const token of [
 }
 for (const token of [
   'data-settings-tab="live-mode"',
-  'setting-featureAgentLiveMode',
   'liveModeLoopStatus',
   'liveModeAgentList',
-  'btn-saveLiveAgents',
   'setting-liveModeFeatureEnabled',
+  'role="switch"',
+  'liveModeFeatureToggleLabel',
+  'liveAgentModeWarningModal',
+  'liveAgentModeWarningApply',
+  'liveAgentModeWarningCancel',
+  'Live Agent Mode will use inference for agents to make decisions and interact.',
+  'highly experimental and in early development',
+  'subscription or usage-based API billing',
   'setting-liveLoopEnabled',
   'setting-liveLoopModelDecisionEnabled',
   'setting-liveLoopUserPreemptionEnabled',
@@ -992,21 +1005,31 @@ for (const token of [
   'agentLiveModeLoopEnabled',
   'scriptedAmbientEnabled',
   'agentLoopEnabled',
-  'Claims this agent for this world and allows Live Mode actions.',
-  'Runs the Live Agent brain so it can choose and execute actions.',
+  'Claims this agent for this world and starts its autonomous Live Agent controller.',
+  'Turning Live on starts autonomy; Ambient controls only Default Mode behavior.',
   'Lets regular idle background behavior include this agent.',
   'agentLiveMode: !trial && checked',
-  'saveLiveModeAgents',
+  'saveLiveModeAgentControl',
+  'vw:agent-live-mode-changed',
+  'Agent toggles save immediately',
   'saveLiveModeLoopSettings',
+  'saveGlobalLiveAgentMode',
+  'handleGlobalLiveAgentModeToggleChange',
+  "JSON.stringify({ features: { agentLiveMode: Boolean(enabled) } })",
   'applyLiveAgentModeAvailabilityUi',
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260713-live-agent-p0-r2',
+  'js/settings.js?v=20260719-live-agent-toggle-sync-r3',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);
 }
+assert(!indexHtml.includes('setting-featureAgentLiveMode'), 'Features tab must not expose a duplicate Live Agent Mode control');
+assert(!indexHtml.includes('btn-saveLiveAgents'), 'per-agent Live toggles must save immediately without a separate Apply button');
+assert(!settingsJs.includes('Paid integrations and Live Agent Mode are available when configured.'), 'Features tab status must not mention Live Agent Mode');
+assert(main3dJs.includes('Turn on Live Agent Mode in Settings > Live Agent Mode before changing an agent selection.'), 'agent editor must require the global Live Agent Mode control');
+assert(main3dJs.includes('agentLiveModeGloballyOff'), 'agent editor must disable per-agent Live Agent Mode while the global mode is off');
 
 for (const token of [
   'STARTER_MAP_BUILDINGS',
@@ -1027,13 +1050,14 @@ for (const token of [
 }
 
 for (const token of [
-  'Enable Agent Live Mode',
-  'Editing, Agent Browser, SMS / Twilio, and Agent Live Mode are locked.',
+  'Editing, Agent Browser, SMS / Twilio, and Live Agent Mode are locked.',
+  'Live Agent Mode can be enabled later from Settings > Live Agent Mode.',
   'applyLocks',
-  "features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),agentLiveMode:!locked&&chk('agentLiveMode')",
+  "features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),debugTools:chk('debugTools')",
 ]) {
   assert(setupHtml.includes(token), `setup.html missing demo setup token: ${token}`);
 }
+assert(!setupHtml.includes('id="agentLiveMode"'), 'setup Features step must not expose a duplicate Live Agent Mode control');
 
 const scanRoots = [
   'README.md',

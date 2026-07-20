@@ -126,6 +126,18 @@ def main():
     with tempfile.TemporaryDirectory(prefix="mvw-chat-sessions-") as raw_tmp:
         server, data_dir = load_server(Path(raw_tmp))
 
+        original_merge_profiles = server._merge_agent_profiles
+        merge_calls = []
+        server._merge_agent_profiles = lambda roster, meta=None: merge_calls.append(True) or original_merge_profiles(roster, meta=meta)
+        server._merged_roster_cache_key = None
+        server._merged_roster_cache = []
+        server.get_roster()
+        merge_calls.clear()
+        server.get_roster()
+        server.get_roster()
+        check("hot roster lookups normalize Live state only once per world revision", len(merge_calls) <= 1, str(len(merge_calls)))
+        server._merge_agent_profiles = original_merge_profiles
+
         # Seed live mode + presence so /api/agent-chat can synthesize the live
         # session even when the ephemeral planner transcript is deleted.
         server.save_live_agent_loop_state({
@@ -222,12 +234,26 @@ def main():
 
         created, status = server.handle_chat_session_create("resident-a", {"sessionKey": "agent:resident-a:main"})
         check("OpenClaw create/reset uses gateway sessions.reset", status == 200 and created.get("ok") and gateway_calls[-1][0] == "sessions.reset")
+        server._live_agent_session_append(
+            "resident-a",
+            kind="observation",
+            phase="observe",
+            role="system",
+            text="The nearby chair is currently in use.",
+            source="world-resource-telemetry",
+        )
         switched, status = server.handle_chat_session_switch("resident-a", live_session.get("sessionKey"))
         check("OpenClaw switch returns stable lived session key", status == 200 and switched.get("sessionKey") == "vw-live-mode:resident-a")
         check("OpenClaw live session switch returns visible structured messages", bool(switched.get("liveMode") and switched.get("messages") and any(m.get("eventType") == "activation" for m in switched.get("messages", []))))
         check("OpenClaw live session hides raw planner prompt", not any("LIVE MODE PLANNER FRAME" in (m.get("text") or "") or m.get("eventType") == "planner-prompt" for m in switched.get("messages", [])), json.dumps(switched.get("messages", [])[:2], default=str))
         check("OpenClaw live session hides raw planner reply", not any("ACTION: hydrate-coffee-machine" in (m.get("text") or "") or m.get("eventType") == "planner-reply" for m in switched.get("messages", [])), json.dumps(switched.get("messages", [])[:2], default=str))
-        check("OpenClaw lived session uses agent display name", bool(any(m.get("from") == "Resident A" and m.get("eventType") == "activation" for m in switched.get("messages", []))), json.dumps(switched.get("messages", [])[:4], default=str))
+        check("Live lifecycle telemetry uses the World sender", bool(any(m.get("from") == "World" and m.get("fromType") == "system" and m.get("eventType") == "activation" for m in switched.get("messages", []))), json.dumps(switched.get("messages", [])[:4], default=str))
+        world_observation = next((m for m in switched.get("messages", []) if m.get("eventSource") == "world-resource-telemetry"), {})
+        check(
+            "world resource telemetry stays visibly separate from Resident speech",
+            world_observation.get("role") == "system" and world_observation.get("from") == "World" and world_observation.get("fromType") == "system",
+            json.dumps(world_observation, default=str),
+        )
         deleted, status = server.handle_chat_session_delete("resident-a", "agent:resident-a:old-session")
         check("OpenClaw delete uses gateway sessions.delete", status == 200 and deleted.get("deleted") and gateway_calls[-1][0] == "sessions.delete")
 
@@ -258,7 +284,17 @@ def main():
         server._chat_cache_time = 0
         chat_with_main = server.get_agent_chat()
         resident_main_chat = chat_with_main.get("resident-a") or []
-        check("agent chat keeps actual main session metadata when Live Mode is also active", bool(resident_main_chat and resident_main_chat[-1].get("sessionTitle") == "Main chat" and resident_main_chat[-1].get("sessionKey") == "agent:resident-a:main" and not resident_main_chat[-1].get("liveMode")), json.dumps(resident_main_chat[-2:], default=str))
+        check(
+            "active Live Mode bubble overrides stale main-session content",
+            bool(
+                resident_main_chat
+                and resident_main_chat[-1].get("sessionTitle") == "Live Agent Mode"
+                and resident_main_chat[-1].get("sessionKey") == "vw-live-mode:resident-a"
+                and resident_main_chat[-1].get("liveMode") is True
+                and not any(row.get("text") == "main chat answer" for row in resident_main_chat)
+            ),
+            json.dumps(resident_main_chat[-4:], default=str),
+        )
 
         hermes_payload, hermes_status = server.handle_chat_sessions_list("hermes-default")
         check("Hermes sessions list uses provider", hermes_status == 200 and hermes_payload.get("sessions", [{}])[0].get("active") is True)

@@ -4,7 +4,7 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260704-runtime-chat-opt-r2';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260717-live-controller-r1';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -1096,6 +1096,12 @@ let _agentRuntimeClient = null;
 let _agentRuntimeUnsubscribe = null;
 let _agentRuntimeResumePromise = null;
 let _agentRuntimeResumeTimer = null;
+let _agentRuntimeWatchdogTimer = null;
+let _agentRuntimeReconnectAttempt = 0;
+let _agentRuntimeNextReconnectAt = 0;
+const AGENT_RUNTIME_WATCHDOG_INTERVAL_MS = 2000;
+const AGENT_RUNTIME_VISIBLE_STALE_AFTER_MS = 5000;
+const AGENT_RUNTIME_RECONNECT_MAX_DELAY_MS = 30000;
 let _agentRuntimeHydrationStatus = {
   enabled: false,
   connected: false,
@@ -3364,6 +3370,124 @@ function scheduleAgentRuntimePageResume(source = 'page-resume', { force = false,
     _agentRuntimeResumeTimer = null;
     resumeAgentRuntimeAfterPageResume(source, { force });
   }, Math.max(0, Number(delayMs) || 0));
+}
+
+function ensureAgentRuntimeConnectionBanner() {
+  if (typeof document === 'undefined' || !document.body) return null;
+  let banner = document.getElementById('agentRuntimeConnectionBanner');
+  if (banner) return banner;
+  banner = document.createElement('div');
+  banner.id = 'agentRuntimeConnectionBanner';
+  banner.setAttribute('role', 'status');
+  banner.setAttribute('aria-live', 'polite');
+  Object.assign(banner.style, {
+    position: 'fixed',
+    left: '50%',
+    top: '12px',
+    transform: 'translateX(-50%)',
+    zIndex: '10050',
+    padding: '8px 12px',
+    borderRadius: '9px',
+    background: 'rgba(120, 35, 25, 0.94)',
+    color: '#fff',
+    font: '600 12px/1.3 system-ui, sans-serif',
+    boxShadow: '0 4px 18px rgba(0,0,0,.28)',
+    pointerEvents: 'none',
+    display: 'none',
+  });
+  document.body.appendChild(banner);
+  return banner;
+}
+
+function setAgentRuntimeConnectionState(state, detail = '') {
+  const client = _agentRuntimeClient;
+  const lastMessageAt = Number(client?.lastMessageAt || 0);
+  const snapshotAgeMs = lastMessageAt ? Math.max(0, Date.now() - lastMessageAt) : null;
+  const status = Object.freeze({
+    state,
+    detail: String(detail || ''),
+    connected: client?.connected === true,
+    lastMessageAt: lastMessageAt ? new Date(lastMessageAt).toISOString() : null,
+    snapshotAgeMs,
+    reconnectAttempt: _agentRuntimeReconnectAttempt,
+    checkedAt: new Date().toISOString(),
+  });
+  window.__VWAgentRuntimeConnectionStatus = status;
+  updateAgentRuntimeHydrationDebug({
+    connected: status.connected && state === 'connected',
+    reason: state === 'connected' ? '' : (status.detail || state),
+    snapshotAgeMs,
+    connectionState: state,
+    lastSource: `watchdog:${state}`,
+  });
+  const banner = ensureAgentRuntimeConnectionBanner();
+  if (banner) {
+    const hidden = state === 'connected' || state === 'disabled';
+    banner.style.display = hidden ? 'none' : 'block';
+    banner.textContent = state === 'reconnecting'
+      ? 'Live world connection interrupted — reconnecting…'
+      : state === 'stale'
+        ? 'Live world updates are stale — movement shown may be out of date.'
+        : 'Live world disconnected — waiting to resynchronize.';
+  }
+  return status;
+}
+
+async function checkAgentRuntimeConnectionHealth() {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  const client = await ensureAgentRuntimeClient();
+  if (!client?.enabled) {
+    const configured = client?.config?.enabled === true && Boolean(client?.config?.url);
+    if (!configured) {
+      setAgentRuntimeConnectionState('disabled', client?.reason || 'runtime disabled');
+      return;
+    }
+    setAgentRuntimeConnectionState('disconnected', client?.reason || 'runtime unavailable');
+    const now = Date.now();
+    if (now < _agentRuntimeNextReconnectAt) return;
+    _agentRuntimeReconnectAttempt++;
+    _agentRuntimeNextReconnectAt = now + Math.min(
+      AGENT_RUNTIME_RECONNECT_MAX_DELAY_MS,
+      1000 * (2 ** Math.max(0, _agentRuntimeReconnectAttempt - 1)),
+    );
+    _agentRuntimeClientPromise = null;
+    _agentRuntimeClient = null;
+    setAgentRuntimeConnectionState('reconnecting', client?.reason || 'runtime unavailable');
+    await ensureAgentRuntimeClient();
+    return;
+  }
+  const stale = typeof client.isStale === 'function'
+    ? client.isStale(AGENT_RUNTIME_VISIBLE_STALE_AFTER_MS)
+    : !client.connected;
+  if (client.connected && !stale) {
+    _agentRuntimeReconnectAttempt = 0;
+    _agentRuntimeNextReconnectAt = 0;
+    setAgentRuntimeConnectionState('connected');
+    return;
+  }
+  const initialState = client.connected ? 'stale' : 'disconnected';
+  setAgentRuntimeConnectionState(initialState, client.reason || initialState);
+  const now = Date.now();
+  if (_agentRuntimeResumePromise || now < _agentRuntimeNextReconnectAt) return;
+  _agentRuntimeReconnectAttempt++;
+  const retryDelay = Math.min(
+    AGENT_RUNTIME_RECONNECT_MAX_DELAY_MS,
+    1000 * (2 ** Math.max(0, _agentRuntimeReconnectAttempt - 1)),
+  );
+  _agentRuntimeNextReconnectAt = now + retryDelay;
+  setAgentRuntimeConnectionState('reconnecting', client.reason || initialState);
+  const resumed = await resumeAgentRuntimeAfterPageResume('visible-runtime-watchdog', { force: true });
+  if (resumed) {
+    _agentRuntimeReconnectAttempt = 0;
+    _agentRuntimeNextReconnectAt = 0;
+    setAgentRuntimeConnectionState('connected');
+  }
+}
+
+function startAgentRuntimeConnectionWatchdog() {
+  if (_agentRuntimeWatchdogTimer) return;
+  _agentRuntimeWatchdogTimer = setInterval(checkAgentRuntimeConnectionHealth, AGENT_RUNTIME_WATCHDOG_INTERVAL_MS);
+  setTimeout(checkAgentRuntimeConnectionHealth, 0);
 }
 
 function holdAgentForServerAuthoritativeRuntimeObserver(agent, dt) {
@@ -11410,6 +11534,10 @@ function normalizeAgentLiveModeEnabled(agent = null) {
   return Boolean(agent?.agentLiveModeEnabled);
 }
 
+function isGlobalLiveAgentModeEnabled() {
+  return window.__VWConfig?.features?.agentLiveMode === true;
+}
+
 function getAgentLiveWorldNotice(agent = null) {
   const liveWorld = agent?.liveWorld || {};
   if (liveWorld.notice) return String(liveWorld.notice);
@@ -11422,7 +11550,11 @@ function getAgentLiveWorldNotice(agent = null) {
 }
 
 function isAgentLiveModeScriptedSuppressed(agent = null) {
-  return normalizeAgentLiveModeEnabled(agent);
+  // Preserve the per-agent selection while letting the global switch return
+  // the body to Default Mode. Before config hydration, retain the previous
+  // selection behavior so startup does not briefly admit both controllers.
+  const globallyEnabled = window.__VWConfig?.features?.agentLiveMode !== false;
+  return globallyEnabled && normalizeAgentLiveModeEnabled(agent);
 }
 
 function isAgentLiveModeAmbientIntent(intent = null) {
@@ -21370,7 +21502,7 @@ function updateAgentAnimations(dt) {
           releaseBy: 'higher-priority',
           clearRoute: true,
           clearLifecycle: false,
-          releaseSummary: 'Agent Live Mode suppresses ambient status, schedule, and scripted routing',
+          releaseSummary: 'Live Agent Mode suppresses ambient status, schedule, and scripted routing',
         });
       }
     }
@@ -32136,6 +32268,33 @@ window.addEventListener('vw:live-mode-agents-updated', event => {
   if (changed) updateAgentList();
 });
 
+window.addEventListener('vw:agent-live-mode-changed', event => {
+  const saved = event.detail?.agent;
+  if (!saved || typeof saved !== 'object') return;
+  const savedKeys = [saved.id, saved.statusKey, saved.agentId].filter(Boolean).map(String);
+  const agent = agentsList.find(candidate => (
+    [...getAgentIdentityKeys(candidate)].some(key => savedKeys.includes(String(key)))
+  ));
+  if (!agent) return;
+  if (typeof saved.agentLiveModeEnabled === 'boolean') agent.agentLiveModeEnabled = saved.agentLiveModeEnabled;
+  if (typeof saved.agentLiveModeLoopEnabled === 'boolean') agent.agentLiveModeLoopEnabled = saved.agentLiveModeLoopEnabled;
+  if (typeof saved.scriptedAmbientEnabled === 'boolean') agent.scriptedAmbientEnabled = saved.scriptedAmbientEnabled;
+  if (typeof saved.ambientEnabled === 'boolean') agent.ambientEnabled = saved.ambientEnabled;
+  if (saved.liveWorld && typeof saved.liveWorld === 'object') agent.liveWorld = saved.liveWorld;
+  updateAgentList();
+
+  const panel = document.getElementById('agentPanel');
+  const toggle = document.getElementById('agentPanel-liveMode');
+  if (panel?.dataset.agentId !== agent.id || !toggle) return;
+  toggle.checked = agent.agentLiveModeEnabled === true;
+  toggle.disabled = isLicenseFeatureLocked('agentLiveMode')
+    || !isGlobalLiveAgentModeEnabled()
+    || Boolean(getAgentLiveWorldNotice(agent) && !normalizeAgentLiveModeEnabled(agent));
+  toggle.setAttribute('aria-checked', toggle.checked ? 'true' : 'false');
+  const label = toggle.closest('.agent-live-mode-toggle')?.querySelector('strong');
+  if (label) label.textContent = toggle.checked ? 'enabled' : 'disabled';
+});
+
 // ── Desk Notification: flash + "!" icon ─────────────────────────────
 function findDeskMesh(entry) {
   if (!entry?.building?._group) return null;
@@ -33493,8 +33652,11 @@ async function persistAgentProfile(agent, patch) {
 
 async function setAgentLiveModeEnabled(agentOrId, enabled, options = {}) {
   if (isLicenseFeatureLocked('agentLiveMode')) {
-    showLicenseLockedToast('Agent Live Mode');
-    throw new Error('Activation required for Agent Live Mode.');
+    showLicenseLockedToast('Live Agent Mode');
+    throw new Error('Activation required for Live Agent Mode.');
+  }
+  if (options.persist !== false && window.__VWConfig?.features?.agentLiveMode === false) {
+    throw new Error('Turn on Live Agent Mode in Settings > Live Agent Mode before changing an agent selection.');
   }
   const agent = typeof agentOrId === 'string' ? agentsList.find(candidate => candidate?.id === agentOrId || candidate?.statusKey === agentOrId) : agentOrId;
   if (!agent) return Object.freeze({ ok: false, reason: 'agent-not-found', agentId: typeof agentOrId === 'string' ? agentOrId : null });
@@ -33522,10 +33684,16 @@ async function setAgentLiveModeEnabled(agentOrId, enabled, options = {}) {
           notice: details.notice || responseBody?.error?.message || '',
         };
       }
-      throw new Error(responseBody?.error?.message || `Agent Live Mode save failed (${response.status})`);
+      throw new Error(responseBody?.error?.message || `Live Agent Mode save failed (${response.status})`);
     }
     if (responseBody?.liveWorld) agent.liveWorld = responseBody.liveWorld;
+    if (typeof responseBody?.agentLiveModeLoopEnabled === 'boolean') agent.agentLiveModeLoopEnabled = responseBody.agentLiveModeLoopEnabled;
+    if (typeof responseBody?.scriptedAmbientEnabled === 'boolean') agent.scriptedAmbientEnabled = responseBody.scriptedAmbientEnabled;
+    if (typeof responseBody?.ambientEnabled === 'boolean') agent.ambientEnabled = responseBody.ambientEnabled;
   }
+  window.dispatchEvent(new CustomEvent('vw:agent-live-mode-changed', {
+    detail: { agent: { ...agent, ...(responseBody || {}), id: agent.id, statusKey: agent.statusKey } },
+  }));
   renderAgentIntentDebugReadout();
   if (selectedAgentId === agent.id && options.refreshPanel !== false) openAgentPanel(agent.id, { preserveCamera: true });
   return Object.freeze({ ok: true, agentId: agent.id, agentLiveModeEnabled: nextEnabled, previousAgentLiveModeEnabled: previous, response: responseBody });
@@ -34249,8 +34417,8 @@ function renderAgentResidentProfileEditor(agent) {
   const locked = isLicenseFeatureLocked('advancedEditor');
   container.innerHTML = `
     <div class="settings-status-card" style="margin-bottom:10px;border-color:rgba(78,205,196,.45);background:rgba(78,205,196,.08)">
-      <strong>Authoritative in Live Agent Mode</strong>
-      <span>While Live Mode is active, this Resident Profile—not the connected OpenClaw, Hermes, or Codex framework persona—controls this resident's identity, preferences, goals, and world memory.</span>
+      <strong>Embodiment context in Live Agent Mode</strong>
+      <span>While Live Mode is active, the connected framework agent remains the mind. This Resident Profile and My Virtual World memory manager supply its in-world identity, role, relationships, needs, commitments, and lived memory.</span>
     </div>
     <div class="form-group" style="margin-bottom:8px">
       <label>Resident Display Name</label>
@@ -34743,8 +34911,15 @@ function openAgentPanel(agentId, _opts = {}) {
   const agentLiveModeEnabled = normalizeAgentLiveModeEnabled(agent);
   const agentLiveWorldNotice = getAgentLiveWorldNotice(agent);
   const agentLiveModeLocked = isLicenseFeatureLocked('agentLiveMode');
+  const agentLiveModeGloballyEnabled = isGlobalLiveAgentModeEnabled();
+  const agentLiveModeGloballyOff = !agentLiveModeLocked && !agentLiveModeGloballyEnabled;
   const agentLiveModeWorldBlocked = Boolean(agentLiveWorldNotice && !agentLiveModeEnabled);
-  const agentLiveModeDisabled = agentLiveModeLocked || agentLiveModeWorldBlocked;
+  const agentLiveModeDisabled = agentLiveModeLocked || agentLiveModeGloballyOff || agentLiveModeWorldBlocked;
+  const agentLiveModeTitle = agentLiveModeLocked
+    ? 'Activation required for Live Agent Mode.'
+    : agentLiveModeGloballyOff
+      ? 'Turn on Live Agent Mode in Settings > Live Agent Mode first.'
+      : (agentLiveWorldNotice || 'Live Agent Mode');
   const providerLabel = agent.providerKind || agent.framework || 'openclaw';
 
   document.getElementById('agentPanel-info').innerHTML = `
@@ -34820,11 +34995,12 @@ function openAgentPanel(agentId, _opts = {}) {
     <span class="agent-status-badge ${statusClass}">${getPresenceStateIcon(agent.status)} ${agent.status || 'offline'}</span>
     ${agent.task ? `<div class="agent-task-text">${escapeHtml(agent.task)}</div>` : ''}
     ${agent.presenceSource ? `<div class="agent-task-text">source: ${escapeHtml(agent.presenceSource)}</div>` : ''}
-    <label class="agent-live-mode-toggle ${agentLiveModeDisabled ? 'agent-live-mode-toggle-disabled' : ''}" title="${agentLiveModeLocked ? 'Activation required for Agent Live Mode.' : (agentLiveWorldNotice || 'Agent Live Mode')}">
-      <span>Agent Live Mode</span>
+    <label class="agent-live-mode-toggle ${agentLiveModeDisabled ? 'agent-live-mode-toggle-disabled' : ''}" title="${escapeAttr(agentLiveModeTitle)}">
+      <span>Live Agent Mode</span>
       <input id="agentPanel-liveMode" type="checkbox" ${agentLiveModeEnabled ? 'checked' : ''} ${agentLiveModeDisabled ? 'disabled aria-disabled="true"' : ''}>
-      <strong>${agentLiveModeEnabled ? 'enabled' : 'disabled'}</strong>
+      <strong>${agentLiveModeGloballyOff ? 'globally off' : (agentLiveModeEnabled ? 'enabled' : 'disabled')}</strong>
     </label>
+    ${agentLiveModeGloballyOff ? '<div class="agent-task-text">Turn on Live Agent Mode in Settings &gt; Live Agent Mode to change this agent.</div>' : ''}
     ${agentLiveWorldNotice ? `<div class="agent-task-text">${escapeHtml(agentLiveWorldNotice)}</div>` : ''}
   `;
   const liveModeToggle = document.getElementById('agentPanel-liveMode');
@@ -34834,12 +35010,12 @@ function openAgentPanel(agentId, _opts = {}) {
       const result = await setAgentLiveModeEnabled(agent, liveModeToggle.checked, { refreshPanel: false });
       const label = liveModeToggle.closest('.agent-live-mode-toggle')?.querySelector('strong');
       if (label) label.textContent = result.agentLiveModeEnabled ? 'enabled' : 'disabled';
-      showToast(`Agent Live Mode ${result.agentLiveModeEnabled ? 'enabled' : 'disabled'} for ${agent.name || agent.id}`, 'success');
+      showToast(`Live Agent Mode ${result.agentLiveModeEnabled ? 'enabled' : 'disabled'} for ${agent.name || agent.id}`, 'success');
     } catch (error) {
       liveModeToggle.checked = normalizeAgentLiveModeEnabled(agent);
-      showToast(error?.message || 'Could not update Agent Live Mode', 'error');
+      showToast(error?.message || 'Could not update Live Agent Mode', 'error');
     } finally {
-      liveModeToggle.disabled = isLicenseFeatureLocked('agentLiveMode') || Boolean(getAgentLiveWorldNotice(agent) && !normalizeAgentLiveModeEnabled(agent));
+      liveModeToggle.disabled = isLicenseFeatureLocked('agentLiveMode') || !isGlobalLiveAgentModeEnabled() || Boolean(getAgentLiveWorldNotice(agent) && !normalizeAgentLiveModeEnabled(agent));
       renderAgentIntentDebugReadout();
     }
   });
@@ -39719,7 +39895,7 @@ function routeLiveModeLocalObjectWorldAction(action = {}) {
       active: true,
       mode: config.mode,
       topic: action.params?.topic || object.boardSession?.topic || 'Live Mode planning',
-      context: action.params?.context || object.boardSession?.context || 'Agent Live Mode curiosity',
+      context: action.params?.context || object.boardSession?.context || 'Live Agent Mode curiosity',
       actionId: config.actionId,
       agentId: agent.id || null,
       objectInstanceId: routeTarget.objectInstanceId,
@@ -40013,12 +40189,16 @@ function getLiveModeWorldClientSessionId() {
 }
 
 function getLiveModeWorldClientMarkerUrl() {
+  const runtimeHealth = window.__VWAgentRuntimeConnectionStatus || {};
   const params = new URLSearchParams({
     client: 'main3d-live-sync',
     version: '20260614-live-mode-social-r28',
     sessionId: getLiveModeWorldClientSessionId(),
     page: `${window.location.pathname || '/'}${window.location.search || ''}`,
     visibility: document.visibilityState || 'unknown',
+    runtimeState: runtimeHealth.state || 'connecting',
+    runtimeConnected: runtimeHealth.connected === true ? 'true' : 'false',
+    snapshotAgeMs: runtimeHealth.snapshotAgeMs == null ? '' : String(runtimeHealth.snapshotAgeMs),
   });
   return `/api/world-actions/active?${params.toString()}`;
 }
@@ -40027,14 +40207,26 @@ const SERVER_AUTHORITATIVE_LIVE_ACTION_RUNTIME = true;
 
 async function syncActiveBarberChairWorldActions() {
   if (SERVER_AUTHORITATIVE_LIVE_ACTION_RUNTIME && window.__VWAllowBrowserWorldActionExecutor !== true) {
-    window.__VWLastBarberChairWorldActionSync = {
-      ok: true,
-      routed: 0,
-      skipped: true,
-      reason: 'server-authoritative-runtime-observer',
-      visible: isRuntimeExecutorPageVisible(),
-      checkedAt: new Date().toISOString(),
-    };
+    try {
+      const response = await fetch(getLiveModeWorldClientMarkerUrl());
+      window.__VWLastBarberChairWorldActionSync = {
+        ok: response.ok,
+        routed: 0,
+        skipped: true,
+        reason: 'server-authoritative-runtime-observer',
+        visible: isRuntimeExecutorPageVisible(),
+        checkedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      window.__VWLastBarberChairWorldActionSync = {
+        ok: false,
+        routed: 0,
+        skipped: true,
+        reason: 'world-client-marker-failed',
+        error: error?.message || String(error),
+        checkedAt: new Date().toISOString(),
+      };
+    }
     return false;
   }
   if (!isRuntimeExecutorPageVisible()) {
@@ -40091,9 +40283,13 @@ function surrenderRuntimeRoutesForHiddenPage() {
 }
 
 startBarberChairWorldActionSync();
+startAgentRuntimeConnectionWatchdog();
 document.addEventListener('visibilitychange', surrenderRuntimeRoutesForHiddenPage);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'hidden') scheduleAgentRuntimePageResume('visibilitychange', { force: true });
+  if (document.visibilityState !== 'hidden') {
+    scheduleAgentRuntimePageResume('visibilitychange', { force: true });
+    checkAgentRuntimeConnectionHealth();
+  }
 });
 window.addEventListener('pageshow', event => {
   scheduleAgentRuntimePageResume('pageshow', { force: Boolean(event?.persisted), delayMs: 0 });
@@ -40107,6 +40303,7 @@ window.addEventListener('online', () => {
 window.__VWSyncActiveBarberChairWorldActions = syncActiveBarberChairWorldActions;
 window.__VWSyncActiveLiveModeWorldActions = syncActiveBarberChairWorldActions;
 window.__VWResumeAgentRuntime = resumeAgentRuntimeAfterPageResume;
+window.__VWCheckAgentRuntimeConnectionHealth = checkAgentRuntimeConnectionHealth;
 
 function makeCapabilityContextMenuItem({ buildingId, furnitureIndex, action }) {
   const presentation = getContextMenuCapabilityPresentation(action.worldAction?.capabilityTag);
@@ -61964,7 +62161,7 @@ function updateChatBubbles() {
     applyChatBubbleSessionMeta(state, sessionMeta);
     const newCount = messages.length;
     const hadMessages = state.lastMsgCount > 0;
-    const newSignature = JSON.stringify(messages.map(m => [m.role || '', m.text || '', m.time || '', m.from || '', m.sessionTitle || '', m.sessionId || '', m.sessionKind || '', m.liveMode ? 'live' : '', getAgentChatActivitySignature(m)]));
+    const newSignature = JSON.stringify(messages.map(m => [m.role || '', m.text || '', m.time || '', m.from || '', m.eventSource || '', m.sessionTitle || '', m.sessionId || '', m.sessionKind || '', m.liveMode ? 'live' : '', getAgentChatActivitySignature(m)]));
     const newestChanged = newSignature !== state.lastSignature;
 
     // Detect new messages OR streaming updates to the current message
@@ -61972,11 +62169,14 @@ function updateChatBubbles() {
       const previousMessages = state.messages || [];
       const previousNewest = previousMessages[previousMessages.length - 1]?.text || '';
       const currentNewest = messages[messages.length - 1]?.text || '';
+      const currentNewestMessage = messages[messages.length - 1] || {};
+      const resourceTelemetryOnly = currentNewestMessage.role === 'system'
+        && currentNewestMessage.eventSource === 'world-resource-telemetry';
       state.messages = messages;
 
       // Auto-expand when the live session stream updates.
       // First active working message should also open so the hover window is visible.
-      if (((hadMessages && !_chatFirstPoll) || (!hadMessages && isWorkPresenceStatus(agent.status))) && !state.expanded) {
+      if (!resourceTelemetryOnly && ((hadMessages && !_chatFirstPoll) || (!hadMessages && isWorkPresenceStatus(agent.status))) && !state.expanded) {
         state.expanded = true;
         state.el.style.display = 'flex';
         state.miniEl.style.display = 'none';
@@ -62115,7 +62315,7 @@ function getAgentChatActivitySignature(msg) {
 }
 
 function _bubbleMessageHtml(m, isLast, state) {
-  const roleClass = m.role === 'user' ? 'user' : 'assistant';
+  const roleClass = m.role === 'user' ? 'user' : (m.role === 'system' ? 'system' : 'assistant');
   const activityLines = getAgentChatActivityLines(m);
   const text = String(m?.text ?? '') + (activityLines.length ? ((m?.text ? '\n' : '') + activityLines.join('\n')) : '');
   const isTypewriter = (isLast && state.typewriterCharIdx !== undefined && state.typewriterCharIdx < text.length);
@@ -62149,7 +62349,7 @@ function renderBubbleLastMessage(agentId, state) {
     return;
   }
   const m = state.messages[state.messages.length - 1];
-  const roleClass = m.role === 'user' ? 'user' : 'assistant';
+  const roleClass = m.role === 'user' ? 'user' : (m.role === 'system' ? 'system' : 'assistant');
   if (!lastEl.classList.contains(roleClass)) {
     lastEl.outerHTML = _bubbleMessageHtml(m, true, state);
     body.scrollTop = body.scrollHeight;

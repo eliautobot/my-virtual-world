@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
 
 
@@ -149,6 +150,48 @@ def main():
         check("quiet resident keeps a fair-share move record", any(item.get("agentId") == "quiet" for item in moves.get("history") or []))
         check("terminal move records remove duplicated route payloads", all("targetMetadata" not in (item.get("route") or {}) for item in moves.get("history") or []))
 
+        # Reproduce the old full-document race deterministically. A Resident
+        # Profile writer loads world-meta and pauses. The production move-intent
+        # writer must wait for that whole transaction, then reload the latest
+        # document before saving its own subtree. Both writes must survive.
+        writer_started = threading.Event()
+        release_writer = threading.Event()
+
+        @server._world_meta_transaction
+        def delayed_profile_write():
+            meta = server.load_world_meta()
+            writer_started.set()
+            release_writer.wait(timeout=3)
+            profiles = meta.get("agentProfiles") if isinstance(meta.get("agentProfiles"), dict) else {}
+            profiles["alpha"] = {"name": "Alpha", "transactionMarker": "profile-write-survived"}
+            meta["agentProfiles"] = profiles
+            server.save_world_meta(meta)
+
+        delayed_thread = threading.Thread(target=delayed_profile_write, daemon=True)
+        move_result = {}
+
+        def write_move_intent():
+            move_result["value"] = server.save_move_intents_store({"active": [active_before], "history": []})
+
+        move_thread = threading.Thread(target=write_move_intent, daemon=True)
+        delayed_thread.start()
+        check("world-meta race fixture acquired transaction lock", writer_started.wait(timeout=2))
+        move_thread.start()
+        time.sleep(0.05)
+        check("concurrent Live write waits for the complete world-meta transaction", move_thread.is_alive())
+        release_writer.set()
+        delayed_thread.join(timeout=3)
+        move_thread.join(timeout=3)
+        transaction_meta = server.load_world_meta()
+        transaction_moves = (((transaction_meta.get("agentLife") or {}).get("moveIntents") or {}).get("active") or [])
+        check(
+            "serialized world-meta writers preserve both Resident memory/profile and embodied action state",
+            ((transaction_meta.get("agentProfiles") or {}).get("alpha") or {}).get("transactionMarker") == "profile-write-survived"
+            and any(item.get("id") == active_before.get("id") for item in transaction_moves)
+            and bool((move_result.get("value") or (False,))[0]),
+            json.dumps({"profile": (transaction_meta.get("agentProfiles") or {}).get("alpha"), "moves": transaction_moves}, default=str)[:900],
+        )
+
         oversized_active = {**active, "id": "oversized-active", "diagnostic": "x" * (server.MOVE_INTENT_ACTIVE_RECORD_MAX_BYTES + 1000)}
         rejected, detail = server.save_move_intents_store({"active": [oversized_active], "history": moves.get("history")})
         check("oversized active move intent is rejected", not rejected and detail.get("error") == "move_intent_active_record_too_large")
@@ -272,6 +315,39 @@ def main():
         reloaded_events = server.get_world_action_events_store()
         check("repeated move writes converge below ceiling", ok and json_bytes(reloaded_moves.get("history")) <= server.MOVE_INTENT_HISTORY_MAX_BYTES)
         check("repeated event writes converge below ceiling", json_bytes(reloaded_events.get("events")) <= server.WORLD_ACTION_EVENTS_MAX_BYTES)
+
+        atomic_target = Path(server.DATA_DIR) / "atomic-cleanup-regression.json"
+        original_replace = server.os.replace
+        try:
+            server.os.replace = lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("forced replace failure"))
+            try:
+                server._atomic_write_text(str(atomic_target), "{}\n")
+            except OSError:
+                pass
+        finally:
+            server.os.replace = original_replace
+        check(
+            "failed atomic writes remove their unique temporary file",
+            not list(Path(server.DATA_DIR).glob("atomic-cleanup-regression.json.tmp-*")),
+        )
+
+        restart_target = Path(server.DATA_DIR) / "atomic-restart-cleanup.json"
+        stale_temp = Path(f"{restart_target}.tmp-crashed-process")
+        recent_temp = Path(f"{restart_target}.tmp-active-writer")
+        stale_temp.write_text("stale\n", encoding="utf-8")
+        recent_temp.write_text("recent\n", encoding="utf-8")
+        stale_epoch = time.time() - 120
+        os.utime(stale_temp, (stale_epoch, stale_epoch))
+        server._atomic_write_text(str(restart_target), "{}\n")
+        check(
+            "next atomic write sweeps a stale crash orphan",
+            not stale_temp.exists() and restart_target.read_text(encoding="utf-8") == "{}\n",
+        )
+        check(
+            "atomic recovery preserves a recent in-flight sibling",
+            recent_temp.exists(),
+        )
+        recent_temp.unlink(missing_ok=True)
         check("no abandoned migration temp files remain", not list(Path(server.DATA_DIR).glob("*.migration-*")))
 
     failures = [name for name, passed, _ in CHECKS if not passed]

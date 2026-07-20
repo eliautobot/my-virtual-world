@@ -154,14 +154,22 @@ def _normalize_step(raw, index, task_id, previous_step_id=None, now_iso=None):
         "dependsOn": list(dict.fromkeys(dependencies))[:12],
         "successCriteria": _text_list(raw.get("successCriteria") or raw.get("doneWhen"), limit=8),
         "failureCriteria": _text_list(raw.get("failureCriteria") or raw.get("watchFor"), limit=8),
+        "successPostconditions": _text_list(
+            raw.get("successPostconditions") or raw.get("successCriteria") or raw.get("doneWhen"), limit=8
+        ),
+        "failurePostconditions": _text_list(
+            raw.get("failurePostconditions") or raw.get("failureCriteria") or raw.get("watchFor"), limit=8
+        ),
         "retry": _normalize_retry(raw.get("retry"), default_max=_integer(raw.get("maxRetries"), 2, maximum=10)),
         "createdAt": _valid_iso(raw.get("createdAt"), now_iso),
         "updatedAt": _valid_iso(raw.get("updatedAt"), now_iso),
         "history": _history(raw.get("history"), limit=24),
     }
     for key, limit in (
-        ("loopActionId", 120), ("actionType", 120), ("actionId", 180),
-        ("targetKey", 260), ("blockedReason", 500), ("failureReason", 500),
+        ("loopActionId", 120), ("actionType", 120), ("actionFamily", 120), ("actionId", 180),
+        ("targetKey", 260), ("targetIdentity", 260), ("targetCriteria", 420), ("category", 120),
+        ("evidenceDomain", 160),
+        ("blockedReason", 500), ("failureReason", 500),
         ("operatorSummary", 700),
     ):
         value = _clean(raw.get(key), limit)
@@ -175,6 +183,9 @@ def _normalize_step(raw, index, task_id, previous_step_id=None, now_iso=None):
         normalized["target"] = copy.deepcopy(raw["target"])
     if isinstance(raw.get("outcome"), dict):
         normalized["outcome"] = copy.deepcopy(raw["outcome"])
+    normalized["actionFamily"] = normalized.get("actionFamily") or normalized.get("loopActionId") or normalized.get("actionType") or "unassigned"
+    normalized["targetIdentity"] = normalized.get("targetIdentity") or normalized.get("targetKey") or normalized.get("targetCriteria") or "unassigned"
+    normalized["evidenceDomain"] = normalized.get("evidenceDomain") or normalized.get("category") or normalized.get("actionFamily") or "world-action"
     return normalized
 
 
@@ -549,9 +560,20 @@ def goal_from_planner_turn(agent_id, planner_turn, *, previous_goal=None, chosen
     target_step = next((step for step in (target_task or {}).get("steps") or [] if wanted_step and step.get("id") == wanted_step), None) or context.get("step")
     if target_step and next_action and next_action != "skip":
         target_step["loopActionId"] = next_action
+        target_step["actionFamily"] = _clean(next_step.get("actionFamily") or next_action, 120)
         target_step["title"] = _clean(next_step.get("intent"), 320) or target_step.get("title")
         target_step["successCriteria"] = _text_list(next_step.get("successCriteria"), limit=8) or target_step.get("successCriteria") or []
         target_step["failureCriteria"] = _text_list(next_step.get("failureCriteria"), limit=8) or target_step.get("failureCriteria") or []
+        target_step["successPostconditions"] = _text_list(next_step.get("successPostconditions") or next_step.get("successCriteria"), limit=8) or target_step.get("successPostconditions") or []
+        target_step["failurePostconditions"] = _text_list(next_step.get("failurePostconditions") or next_step.get("failureCriteria"), limit=8) or target_step.get("failurePostconditions") or []
+        target_criteria = _clean(next_step.get("targetCriteria"), 420)
+        category = _clean(next_step.get("category"), 120)
+        if target_criteria:
+            target_step["targetCriteria"] = target_criteria
+            target_step["targetIdentity"] = _clean(next_step.get("targetIdentity") or target_criteria, 260)
+        if category:
+            target_step["category"] = category
+        target_step["evidenceDomain"] = _clean(next_step.get("evidenceDomain") or category or next_action, 160)
         target_step["status"] = "ready"
         target_step["updatedAt"] = now_iso
     incoming["operatorSummary"] = f"Working durable goal revision {incoming.get('revision')}: {title}."
@@ -572,10 +594,12 @@ def bind_selected_action(goal, loop_action_id, *, target=None, target_key=None, 
     if step.get("status") in {"retry_wait", "blocked", "failed"}:
         return goal, None
     step["loopActionId"] = _clean(loop_action_id, 120)
+    step["actionFamily"] = step.get("actionFamily") or step["loopActionId"]
     if isinstance(target, dict):
         step["target"] = copy.deepcopy(target)
     if _clean(target_key, 260):
         step["targetKey"] = _clean(target_key, 260)
+        step["targetIdentity"] = _clean(target_key, 260)
         goal["worldTargetKey"] = _clean(target_key, 260)
     step["updatedAt"] = now_iso
     goal["updatedAt"] = now_iso
@@ -605,6 +629,7 @@ def replan_with_action(goal, loop_action_id, *, target=None, target_key=None, re
     prior_reason = goal.get("replanReason") or step.get("failureReason") or step.get("blockedReason")
     step["status"] = "ready"
     step["loopActionId"] = _clean(loop_action_id, 120)
+    step["actionFamily"] = step["loopActionId"]
     step["updatedAt"] = now_iso
     step.pop("actionId", None)
     step.pop("blockedReason", None)
@@ -613,6 +638,7 @@ def replan_with_action(goal, loop_action_id, *, target=None, target_key=None, re
         step["target"] = copy.deepcopy(target)
     if _clean(target_key, 260):
         step["targetKey"] = _clean(target_key, 260)
+        step["targetIdentity"] = _clean(target_key, 260)
         goal["worldTargetKey"] = _clean(target_key, 260)
     step.setdefault("history", []).append({"at": now_iso, "event": "step-replanned", "reason": _clean(reason, 500), "previousReason": _clean(prior_reason, 500), "loopActionId": step.get("loopActionId")})
     if task:
@@ -763,6 +789,14 @@ def reconcile_world(goal, *, world_revision, available_actions=None, target_keys
     previous_target_key = step.get("targetKey") or goal.get("worldTargetKey")
     current_target_key = target_keys.get(loop_action_id) if loop_action_id else None
     reason = None
+    # Once an attempt has started, the action ledger—not the next perception
+    # frame's affordance list—owns its outcome. Acquisition actions commonly
+    # disappear while their terminal result is being settled (for example,
+    # getCoffee is suppressed after coffee is acquired). Treating that normal
+    # disappearance as a world change can overwrite verified completion and
+    # make the resident repeat an action it already performed.
+    if step.get("status") == "active" and step.get("actionId"):
+        return recompute_goal(goal, now_iso=now_iso), None
     if loop_action_id and loop_action_id not in available_actions:
         reason = f"planned action {loop_action_id} is no longer available"
     elif previous_target_key and current_target_key and previous_target_key != current_target_key:

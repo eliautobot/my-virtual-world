@@ -1,12 +1,14 @@
 # Live Agent Mode Restart Phases
 
-Status: fresh-start phased build plan
+Status: historical fresh-start build sequence; use the Resident Autonomy Kernel for current improvement order
 Date: 2026-06-23
 Companion spec: `docs/LIVE-AGENT-MODE-RESTART-SPEC.md`
 
 This plan builds Live Agent Mode progressively. Each phase must be small enough to review, test, and roll back.
 
 The order matters: persistent runtime state comes before agent intelligence.
+
+The foundation phases in this document have since been implemented. Current work must follow the consolidated improvement order in `docs/LIVE-AGENT-MODE-RESIDENT-AUTONOMY-KERNEL.md`. That current order preserves Default Mode as the scripted simulation, treats Live Agent Mode as a reversible activation-scoped owner, and keeps direct user/chat control above Live autonomy. Do not rerun this historical plan as a second architecture.
 
 ## Phase 0 - Baseline and Guardrails
 

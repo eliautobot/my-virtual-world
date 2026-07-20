@@ -592,10 +592,137 @@ body.vw-demo-locked .feature-locked-control {
     text-decoration: none;
     flex-shrink: 0;
 }
+.settings-live-mode-global-control {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 15px 16px;
+    border: 1px solid rgba(96,165,250,.42);
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(59,130,246,.13), rgba(34,197,94,.07));
+}
+.settings-live-mode-global-copy {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+}
+.settings-live-mode-global-copy strong {
+    color: var(--text-primary);
+    font-size: 14px;
+}
+.settings-live-mode-global-copy span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+}
+.settings-live-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    flex: 0 0 auto;
+    min-width: 98px;
+    cursor: pointer;
+    user-select: none;
+}
+.settings-live-mode-toggle input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+.settings-live-mode-toggle-track {
+    position: relative;
+    width: 48px;
+    height: 26px;
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 999px;
+    background: rgba(15,23,42,.85);
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.32);
+    transition: background .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.settings-live-mode-toggle-track span {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #cbd5e1;
+    box-shadow: 0 2px 5px rgba(0,0,0,.42);
+    transition: transform .18s ease, background .18s ease;
+}
+.settings-live-mode-toggle input:checked + .settings-live-mode-toggle-track {
+    border-color: rgba(74,222,128,.72);
+    background: rgba(22,163,74,.88);
+    box-shadow: 0 0 14px rgba(34,197,94,.32), inset 0 2px 6px rgba(0,0,0,.18);
+}
+.settings-live-mode-toggle input:checked + .settings-live-mode-toggle-track span {
+    transform: translateX(22px);
+    background: #fff;
+}
+.settings-live-mode-toggle input:focus-visible + .settings-live-mode-toggle-track {
+    outline: 2px solid #ffd600;
+    outline-offset: 3px;
+}
+.settings-live-mode-toggle strong {
+    min-width: 24px;
+    color: #cbd5e1;
+    font-size: 12px;
+}
+.settings-live-mode-toggle:has(input:checked) strong {
+    color: #86efac;
+}
+.settings-live-mode-toggle:has(input:disabled) {
+    opacity: .52;
+    cursor: not-allowed;
+}
+.live-agent-mode-warning-modal {
+    z-index: 22050 !important;
+    background: rgba(3,7,18,.78);
+}
+.live-agent-mode-warning-content {
+    width: min(560px, 92vw) !important;
+    overflow: hidden;
+    border-color: rgba(245,158,11,.62) !important;
+}
+.live-agent-mode-warning-body {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    padding: 20px;
+}
+.live-agent-mode-warning-icon {
+    font-size: 30px;
+    line-height: 1;
+}
+.live-agent-mode-warning-body p {
+    margin: 0;
+    color: #dbe5ff;
+    font-size: 13px;
+    line-height: 1.65;
+}
+.live-agent-mode-warning-body strong {
+    color: #fde68a;
+}
+.live-agent-mode-warning-actions {
+    justify-content: flex-end;
+    padding: 0 20px 20px;
+}
 .settings-live-agent-toolbar {
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
     gap: 8px;
+}
+.settings-live-agent-auto-save {
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.4;
 }
 .settings-live-loop-status {
     border-color: rgba(96,165,250,.34);
@@ -635,7 +762,7 @@ body.vw-demo-locked .feature-locked-control {
 }
 .settings-live-agent-legend {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
 }
 .settings-live-agent-legend > div {
@@ -682,6 +809,13 @@ body.vw-demo-locked .feature-locked-control {
 .settings-live-agent-row.world-conflict {
     border-color: rgba(245,158,11,.52);
     background: rgba(245,158,11,.08);
+}
+.settings-live-agent-row.saving {
+    opacity: .72;
+}
+.settings-live-agent-row.saving .settings-live-agent-meta::after {
+    content: ' · saving';
+    color: #93c5fd;
 }
 .settings-live-agent-row.world-conflict .settings-live-agent-meta {
     color: #fbbf24;
@@ -786,6 +920,10 @@ body.vw-demo-locked .feature-locked-control {
     50% { transform: scale(1.38); opacity: 1; }
 }
 @media (max-width: 640px) {
+    .settings-live-mode-global-control {
+        align-items: flex-start;
+        flex-direction: column;
+    }
     .settings-resource-card {
         align-items: flex-start;
         flex-direction: column;

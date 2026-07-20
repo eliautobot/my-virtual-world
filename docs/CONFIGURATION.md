@@ -75,6 +75,10 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_LIVE_AGENT_PLANNER_TRANSCRIPTS_MAX_BYTES` | `2097152` | Global byte budget for Virtual-World-owned planner transcript copies. |
 | `VW_LIVE_AGENT_PLANNER_TRANSCRIPT_RECORD_MAX_BYTES` | `49152` | Maximum encoded size of one Virtual-World-owned planner turn. Recent full turns are trimmed to this ceiling when necessary. |
 | `VW_LIVE_AGENT_PLANNER_FULL_TURNS_PER_AGENT` | `8` | Newest full planner turns retained per resident before older turns become hashed semantic summaries. |
+| `VW_LIVE_AGENT_PROMPT_CHAR_BUDGET` | `6000` | Maximum characters in one bounded Live Agent event prompt before lower-priority context is omitted. |
+| `VW_LIVE_AGENT_MODEL_CIRCUIT_FAILURE_THRESHOLD` | `2` | Consecutive provider failures that open the Live cognition circuit breaker. |
+| `VW_LIVE_AGENT_MODEL_CIRCUIT_BASE_SEC` | `180` | Initial provider circuit-breaker cooldown in seconds. |
+| `VW_LIVE_AGENT_MODEL_CIRCUIT_MAX_SEC` | `1800` | Maximum exponential provider circuit-breaker cooldown in seconds. |
 | `VW_LICENSE_STORE_ID` | `321733` | Lemon Squeezy store ID used to verify keys belong to My Virtual World. |
 | `VW_LICENSE_PRODUCT_IDS` | `1140366` | Comma-separated Lemon Squeezy product IDs accepted by this app. |
 

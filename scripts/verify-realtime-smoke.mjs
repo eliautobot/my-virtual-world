@@ -17,6 +17,7 @@ import {
   makeLiveActionEmbodiedState,
   resolveObjectTargetPoint,
   RUNTIME_SCHEMA_PATCH_RATE_MS,
+  RUNTIME_HEALTH_BROADCAST_INTERVAL_MS,
   RUNTIME_STATE_BROADCAST_INTERVAL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
@@ -237,6 +238,9 @@ async function connectRoom(port) {
       room.__runtimeDoc = { ...room.__runtimeDoc, worldRuntime: message.worldRuntime };
     }
   });
+  room.onMessage('runtime:health', (message) => {
+    room.__runtimeHealth = message;
+  });
   const welcome = await waitForRoomMessage(room, 'runtime:welcome');
   if (welcome?.snapshot) room.__runtimeDoc = welcome.snapshot;
   return room;
@@ -251,6 +255,7 @@ async function run() {
     assert.equal(LIVE_STATUS_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live status runtime should move at the world tick for smooth observer interpolation');
     assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'scripted object runtime should move at the world tick for smooth observer interpolation');
     assert.equal(RUNTIME_STATE_BROADCAST_INTERVAL_MS, 1000, 'lean runtime state broadcasts should be throttled');
+    assert.equal(RUNTIME_HEALTH_BROADCAST_INTERVAL_MS, 2000, 'runtime health heartbeat should support visible-page stale detection');
     assert.equal(RUNTIME_SCHEMA_PATCH_RATE_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'schema patches should stay at the world tick for smooth observer interpolation');
     assert.equal(LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC, 200, 'server-owned work routes should use the 8590 running displacement speed');
     assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC, 200, 'server-owned desk-consume handoffs should use the 8590 running displacement speed');
@@ -262,6 +267,9 @@ async function run() {
 
     const room = await connectRoom(port);
     room.__server = server;
+    const runtimeHealth = await waitForRoomMessage(room, 'runtime:health');
+    assert.equal(runtimeHealth.type, 'runtime-health', 'realtime sidecar should continuously prove connection health');
+    assert(runtimeHealth.serverTime, 'runtime health should include authoritative server time');
     room.send('runtime:snapshot', {
       requestId: 'snapshot-1',
       agentId: 'adam',
@@ -544,6 +552,35 @@ async function run() {
     assert.equal(expiredAgent.mode, 'scripted');
     assert.equal(expiredAgent.owner, 'agent-scripted-mode');
     assert.equal(expiredAgent.worldActionId, '');
+
+    writeFileSync(join(dataDir, 'world-meta.json'), `${JSON.stringify({
+      agentProfiles: {
+        adam: { agentLiveModeEnabled: true, scriptedAmbientEnabled: true },
+      },
+    }, null, 2)}\n`);
+    room.send('runtime:claimRoute', {
+      requestId: 'claim-live-idle-owner',
+      agentId: 'adam',
+      mode: 'live',
+      owner: 'agent-live-mode',
+      leaseOwner: 'smoke-client-live-owner',
+      routeId: 'route-live-idle-owner',
+      target: { kind: 'world-point', x: 12, y: 13, floor: 1 },
+      ttlMs: 10000,
+    });
+    const liveClaimAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'claim-live-idle-owner');
+    assert.equal(liveClaimAck.snapshot.mode, 'live');
+    room.send('runtime:releaseRoute', {
+      requestId: 'release-live-idle-owner',
+      agentId: 'adam',
+      leaseOwner: 'smoke-client-live-owner',
+      state: 'idle',
+      reason: 'live-mode-remains-authoritative',
+    });
+    const liveReleaseAck = await waitForRoomMessage(room, 'runtime:ack', (msg) => msg.requestId === 'release-live-idle-owner');
+    assert.equal(liveReleaseAck.snapshot.mode, 'live');
+    assert.equal(liveReleaseAck.snapshot.owner, 'agent-live-mode');
+    assert.equal(liveReleaseAck.snapshot.leaseOwner, '');
     await room.leave(true);
 
     await stopServer(server);
@@ -553,6 +590,8 @@ async function run() {
     resumedRoom.__server = server;
     const resumedAgent = await waitForAgent(resumedRoom, 'adam', (agent) => agent.x === 7.5 && agent.y === 8.25);
     assert.equal(resumedAgent.state, 'idle');
+    assert.equal(resumedAgent.mode, 'live');
+    assert.equal(resumedAgent.owner, 'agent-live-mode');
     assert(resumedAgent.visualStateJson.includes('Coffee Drink'));
     assert(resumedAgent.visualStateJson.includes('"activityActive":false'));
     const resumedObject = resumedRoom.state?.objects?.get?.('office:furniture:19:countertopCoffeeMachine');
@@ -566,10 +605,10 @@ async function run() {
     mkdirSync(join(dataDir, 'buildings'), { recursive: true });
     writeFileSync(join(dataDir, 'world-meta.json'), `${JSON.stringify({
       agentProfiles: {
-        // Live Mode on + explicit Ambient opt-in: layer separation only lets
-        // the scripted object runtime drive live-mode agents when
-        // scriptedAmbientEnabled is explicitly true.
-        adam: { agentLiveModeEnabled: true, scriptedAmbientEnabled: true },
+        // Adam is in Default Mode for the scripted-runtime parity section.
+        // A Live-enabled resident is never eligible for this layer, even if a
+        // stored ambient preference will resume after Live is disabled.
+        adam: { agentLiveModeEnabled: false, scriptedAmbientEnabled: true },
       },
       streets: [
         { x1: -20, z1: 24, x2: 30, z2: 24 },
@@ -580,7 +619,7 @@ async function run() {
       ],
     }, null, 2)}\n`);
     writeFileSync(join(dataDir, 'presence-snapshot.json'), `${JSON.stringify({
-      adam: { state: 'idle', agentLiveModeEnabled: true, scriptedAmbientEnabled: true },
+      adam: { state: 'idle', agentLiveModeEnabled: false, scriptedAmbientEnabled: true },
       coder: { state: 'working' },
       morgan: { state: 'meeting' },
       _meetings: [{

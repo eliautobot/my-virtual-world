@@ -175,6 +175,7 @@
       this.sessionsPanelOpen = false;
       this.sessionsRefreshTimer = null;
       this.liveSessionRefreshTimer = null;
+      this.liveResponsePendingAt = 0;
       this.sessionsRefreshSeq = 0;
       this.currentSessions = [];
 
@@ -272,7 +273,8 @@
           body: JSON.stringify({
             agentId,
             source: 'chat-window',
-            holdSec: 45,
+            holdSec: 180,
+            mode: 'conversation',
             messagePreview: String(messagePreview || '').slice(0, 160)
           })
         }).catch(() => {});
@@ -286,13 +288,19 @@
       this.pendingLiveAttentionAgentId = '';
     }
 
-    clearLiveAgentUserAttention(agentId) {
+    settleLiveAgentUserAttention(agentId) {
       if (!agentId || window.__VWConfig?.features?.agentLiveMode !== true) return;
       try {
         fetch('/api/agent-live-loop/user-attention', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agentId, clear: true, source: 'chat-window' })
+          body: JSON.stringify({
+            agentId,
+            source: 'chat-window-response-settled',
+            holdSec: 60,
+            mode: 'conversation',
+            messagePreview: 'Conversation response completed; wait for the user before resuming.'
+          })
         }).catch(() => {});
       } catch (_) {}
     }
@@ -302,7 +310,7 @@
       const agentId = (key && this.liveAttentionByRunId.get(key)) || this.pendingLiveAttentionAgentId || '';
       if (key) this.liveAttentionByRunId.delete(key);
       if (agentId && agentId === this.pendingLiveAttentionAgentId) this.pendingLiveAttentionAgentId = '';
-      this.clearLiveAgentUserAttention(agentId);
+      this.settleLiveAgentUserAttention(agentId);
     }
 
     setStatus(text, cls) {
@@ -549,7 +557,7 @@
       this.liveSessionRefreshTimer = setInterval(() => {
         if (!this.isLiveModeSessionSelected() || !this.isVisibleForPolling()) return;
         this.loadLiveModeSessionHistory().catch(error => console.warn('[chat] Live session refresh failed:', error));
-      }, 4000);
+      }, 1000);
     }
 
     stopLiveSessionPolling() {
@@ -809,6 +817,17 @@
             };
         if (msg.text || tools.length || msg.thinking || msg.reasoningTokens || msg.approval) {
           this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, tools);
+        }
+      }
+      if (this.liveResponsePendingAt) {
+        const receivedReply = msgs.some(msg => {
+          if (msg.role !== 'assistant' || msg.eventType !== 'reply') return false;
+          const timestamp = Number(msg.epochMs || msg.ts) || Date.parse(msg.ts || msg.at || '') || 0;
+          return timestamp >= this.liveResponsePendingAt;
+        });
+        if (receivedReply) {
+          this.liveResponsePendingAt = 0;
+          this.setStatus('Live session active', 'connected');
         }
       }
       if (!msgs.length) this.appendSystem('Live Agent Mode has no visible events yet.');
@@ -1183,8 +1202,9 @@
           });
           const data = await response.json();
           if (!response.ok || data.ok === false) throw new Error(data?.error?.message || data.error || response.statusText);
+          if (data.pending) this.liveResponsePendingAt = Date.now() - 1000;
           await this.loadLiveModeSessionHistory();
-          this.setStatus('Live session active', 'connected');
+          this.setStatus(data.pending ? 'Resident is responding…' : 'Live session active', data.pending ? 'connecting' : 'connected');
           this.scrollBottom();
         } catch (error) {
           this.appendSystem('Live session send failed: ' + error.message);
@@ -1193,8 +1213,9 @@
         return;
       }
 
-      // Live Agent Mode: the user has top priority while the chat run is active.
-      // The hold is cleared when the run finishes so Live Mode does not look off.
+      // User attention outranks Live autonomy. Keep the lease through the
+      // provider run, then shorten it to a conversational grace period so the
+      // Resident does not immediately walk away after replying.
       const liveAttentionAgentId = this.noteLiveAgentUserAttention(text || '');
       this.pendingLiveAttentionAgentId = liveAttentionAgentId;
 
@@ -1222,7 +1243,7 @@
           if (!resp.ok || data.ok === false) {
             if (data.fallback) {
               await this.sendHermesBlockingMessage({ ...hermesBody, liveRunId: hermesProgress?.runId || '', forceCliFallback: true }, hermesProgress);
-              this.clearLiveAgentUserAttention(liveAttentionAgentId);
+              this.settleLiveAgentUserAttention(liveAttentionAgentId);
               return;
             }
             throw new Error(data.error || data.reply || resp.statusText);
@@ -1244,14 +1265,14 @@
           if (recovered) {
             await this.pollHermesApproval().catch(() => {});
             this.setStatus('Hermes ready', 'connected');
-            this.clearLiveAgentUserAttention(liveAttentionAgentId);
+            this.settleLiveAgentUserAttention(liveAttentionAgentId);
             return;
           }
           this.appendSystem('Hermes send failed: ' + e.message);
           this.setStatus('Hermes error', 'disconnected');
         } finally {
           this.clearLiveAttentionForRun(this.currentRunId);
-          this.clearLiveAgentUserAttention(liveAttentionAgentId);
+          this.settleLiveAgentUserAttention(liveAttentionAgentId);
         }
         return;
       }
@@ -1279,7 +1300,7 @@
           if (!resp.ok || data.ok === false) {
             if (data.fallback) {
               await this.sendCodexBlockingMessage(codexBody, codexLabel);
-              this.clearLiveAgentUserAttention(liveAttentionAgentId);
+              this.settleLiveAgentUserAttention(liveAttentionAgentId);
               return;
             }
             throw new Error(data.error || data.reply || resp.statusText);
@@ -1299,7 +1320,7 @@
           this.setStatus('Codex error', 'disconnected');
         } finally {
           this.clearLiveAttentionForRun(this.currentRunId);
-          this.clearLiveAgentUserAttention(liveAttentionAgentId);
+          this.settleLiveAgentUserAttention(liveAttentionAgentId);
         }
         return;
       }
@@ -1348,7 +1369,7 @@
           this.appendSystem('Provider send failed: ' + e.message);
           this.setStatus('Error', 'disconnected');
         } finally {
-          this.clearLiveAgentUserAttention(liveAttentionAgentId);
+          this.settleLiveAgentUserAttention(liveAttentionAgentId);
         }
         return;
       }
@@ -1364,13 +1385,13 @@
           this.removeTypingIndicator();
           this.appendSystem('OpenClaw send failed: gateway accepted the request but did not return a run id.');
           this.setStatus('OpenClaw error', 'disconnected');
-          this.clearLiveAgentUserAttention(liveAttentionAgentId);
+          this.settleLiveAgentUserAttention(liveAttentionAgentId);
         }
       }).catch(e => {
         this.removeTypingIndicator();
         this.appendSystem('OpenClaw send failed: ' + (e?.message || String(e)));
         this.setStatus('OpenClaw error', 'disconnected');
-        this.clearLiveAgentUserAttention(liveAttentionAgentId);
+        this.settleLiveAgentUserAttention(liveAttentionAgentId);
       });
     }
 

@@ -38,8 +38,15 @@ def snapshot_tree(root):
     root = Path(root)
     snapshot = {}
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        if ".tmp-" in path.name:
+            continue
         relative = str(path.relative_to(root))
-        snapshot[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+        try:
+            snapshot[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+        except FileNotFoundError:
+            # Atomic writers can rename their temp file between rglob() and
+            # read_bytes(); those transient files are not persisted state.
+            continue
     return snapshot
 
 
@@ -131,7 +138,39 @@ def main():
         status_after = server.live_agent_user_attention_status("tester")
         check("user attention inactive after clear", status_after.get("active") is False)
 
-        # Halt path: fabricate an active live-mode world action, then preempt.
+        scripted_allowed, scripted_error = server._live_agent_behavior_authority_admission("tester", "agent-scripted-mode")
+        user_allowed, _ = server._live_agent_behavior_authority_admission("tester", "user")
+        check(
+            "Live activation suppresses Default scripted admission through one authority gate",
+            scripted_allowed is False
+            and scripted_error.get("error", {}).get("code") == "behavior_owner_conflict"
+            and user_allowed is True,
+            json.dumps(scripted_error, default=str)[:600],
+        )
+
+        normalized_wait = server._live_agent_loop_normalize_next_step({
+            "action": "skip", "intent": "watch the room", "waitSeconds": 20,
+            "wakeConditions": ["a resident approaches", "user speaks"],
+        })
+        wait_state = {}
+        waiting = server._live_agent_loop_waiting_state_from_decision(wait_state, {
+            "reason": "deliberate observation",
+            "modelDecision": {"plannerTurn": {"nextStep": normalized_wait}},
+        }, now_epoch=1000)
+        still_waiting = server._live_agent_loop_waiting_status(wait_state, now_epoch=1005, perception_delta={"changed": False})
+        woke_waiting = server._live_agent_loop_waiting_status(wait_state, now_epoch=1006, perception_delta={"changed": True, "reason": "nearby residents changed"})
+        check(
+            "deliberate waiting persists until an executable wake condition",
+            normalized_wait.get("waitSeconds") == 20
+            and waiting.get("expiresAt") == server._epoch_to_utc_iso(1020)
+            and still_waiting.get("active") is True
+            and woke_waiting.get("active") is False
+            and woke_waiting.get("reason") == "semantic-world-change",
+            json.dumps({"wait": waiting, "active": still_waiting, "wake": woke_waiting}, default=str),
+        )
+
+        # Conversation blocks the next autonomous action but lets a safe
+        # physical action finish. Explicit stop/redirect interrupts it.
         store = server.get_world_actions_store()
         now_iso = server._utc_now_iso()
         store.setdefault("active", []).append({
@@ -155,7 +194,23 @@ def main():
         })
         saved_ok, saved_detail = server.save_world_actions_store(store)
         check("fabricated live world action saved", saved_ok, json.dumps(saved_detail, default=str)[:300] if not saved_ok else "")
-        record2 = server.live_agent_note_user_attention("tester", source="verify-halt", message_preview="drop everything")
+        conversation_record = server.live_agent_note_user_attention(
+            "tester", source="verify-conversation", message_preview="hello while walking"
+        )
+        conversation_active = [
+            a for a in server.get_world_actions_store().get("active", [])
+            if a.get("id") == "wa-live-test-1"
+            and server._canonical_world_action_status(a.get("status")) in server.WORLD_ACTION_ACTIVE_STATES
+        ]
+        check(
+            "ordinary conversation does not cancel a safe current action",
+            bool(conversation_active) and not (conversation_record.get("interrupted") or []),
+            json.dumps(conversation_record, default=str)[:500],
+        )
+        record2 = server.live_agent_note_user_attention(
+            "tester", source="verify-halt", message_preview="drop everything",
+            interrupt_current=True, mode="paused",
+        )
         interrupted = record2.get("interrupted") or []
         check(
             "active live world action cancelled on preemption",
@@ -413,7 +468,7 @@ def main():
             check("Hermes executes a Resident turn as inference transport", hermes_exchange.get("ok") and hermes_exchange.get("sessionId") == "hermes-live-turn", json.dumps(hermes_exchange))
             check("Codex executes a Resident turn as inference transport", codex_exchange.get("ok") and codex_exchange.get("sessionId") == "codex-live-turn", json.dumps(codex_exchange))
             check("Hermes Resident turn omits framework rules and provider-native YOLO tools", fake_hermes.sent and fake_hermes.sent[0]["kwargs"].get("yolo_once") is False and fake_hermes.sent[0]["kwargs"].get("isolated") is True, json.dumps(fake_hermes.sent))
-            check("Codex Resident turn uses isolated read-only world runtime context", fake_codex.sent and fake_codex.sent[0]["kwargs"].get("isolated") is True and "VIRTUAL WORLD LIVE MODE INFERENCE TRANSPORT" in fake_codex.sent[0]["kwargs"].get("developer_instructions", "") and "live-agent-inference" in fake_codex.sent[0]["kwargs"].get("isolated_cwd", ""), json.dumps(fake_codex.sent))
+            check("Codex Resident turn uses isolated embodied world runtime context", fake_codex.sent and fake_codex.sent[0]["kwargs"].get("isolated") is True and "MY VIRTUAL WORLD LIVE AGENT EMBODIMENT" in fake_codex.sent[0]["kwargs"].get("developer_instructions", "") and "Remain the same fully configured agent" in fake_codex.sent[0]["kwargs"].get("developer_instructions", "") and "live-agent-inference" in fake_codex.sent[0]["kwargs"].get("isolated_cwd", ""), json.dumps(fake_codex.sent))
             check("Hermes ephemeral inference session cleans up", server._live_agent_model_provider_session_cleanup("hermie", "hermes", "hermes-live-turn") and fake_hermes.deleted[-1][1] == "hermes-live-turn")
             check("Codex ephemeral inference thread cleans up", server._live_agent_model_provider_session_cleanup("codie", "codex", "codex-live-turn") and fake_codex.deleted[-1][1] == "codex-live-turn")
             hermes_sessions = server._chat_sessions_list_hermes(server._chat_sessions_agent("hermie"))
@@ -426,8 +481,9 @@ def main():
             server._codex_provider = original_codex_provider
             server._agent_live_mode_session_active = original_live_session_active
 
-        # OpenClaw must use its raw-model gateway path. An ordinary chat.send
-        # would load the framework workspace persona above the Resident frame.
+        # OpenClaw must use its normal full-agent gateway path. My Virtual
+        # World supplies embodiment context without stripping the framework
+        # workspace persona, instructions, memory, or skills.
         original_gateway_rpc_for_isolation = server._gateway_rpc_call
         original_recover_for_isolation = server._live_agent_model_decision_recover_reply
         original_sleep_for_isolation = server.time.sleep
@@ -439,11 +495,11 @@ def main():
             isolated_openclaw = server._live_agent_model_provider_request("tester", "resident turn", config, 17)
             isolation_method, isolation_params = openclaw_isolation_calls[0]
             check(
-                "OpenClaw Resident inference omits framework persona bootstrap",
+                "OpenClaw Resident inference retains full framework bootstrap",
                 isolated_openclaw.get("ok")
                 and isolation_method == "agent"
-                and isolation_params.get("promptMode") == "none"
-                and isolation_params.get("modelRun") is True
+                and "promptMode" not in isolation_params
+                and "modelRun" not in isolation_params
                 and isolation_params.get("disableMessageTool") is True
                 and isolation_params.get("agentId") == "tester",
                 json.dumps({"result": isolated_openclaw, "calls": openclaw_isolation_calls}, default=str),
@@ -629,13 +685,85 @@ def main():
         by_id = {item.get("id"): item for item in decision_goal.get("candidates") or []}
         check("seating goal outranks printer paperwork", by_id.get("use-seating-object", {}).get("score", 0) > by_id.get("print-copy-document", {}).get("score", 999), json.dumps({k: by_id.get(k) for k in ("use-seating-object", "print-copy-document")}, default=str)[:700])
         prompt_goal = server._live_agent_model_decision_prompt("tester", decision_goal, goal_agent_state)
-        check("model prompt includes real goal text and planner JSON format", "Test chairs and seating furniture" in prompt_goal and "nextStep" in prompt_goal and "memoryUpdate" in prompt_goal and "use-seating-object" in prompt_goal and "category" in prompt_goal, prompt_goal[:900])
-        check("model prompt presents continuous autonomy not one-shot command", "continuous autonomy loop" in prompt_goal.lower() and "observe, reflect, plan, execute, learn, and replan" in prompt_goal and "Reply with EXACTLY one line" not in prompt_goal, prompt_goal[:700])
-        check("model prompt labels recurrent lived session with temporary evidence frames", "LIVE MODE RESIDENT TURN - RECURRENT WORLD SESSION" in prompt_goal and "real continuing session" in prompt_goal and "Remember only your intention" in prompt_goal, prompt_goal[:700])
-        check("Resident Profile is authoritative over provider framework persona", "RESIDENT PROFILE AUTHORITY - REQUIRED" in prompt_goal and '"frameworkPersonaFallbackAllowed":false' in prompt_goal and "Do not fall back to, impersonate, or prioritize its framework SOUL" in prompt_goal, prompt_goal[:1300])
+        check("model prompt includes real goal text and native world-tool surface", "Test chairs and seating furniture" in prompt_goal and "virtual_world_list_affordances" in prompt_goal and "virtual_world_act" in prompt_goal and "use-seating-object" in prompt_goal, prompt_goal[:1100])
+        check("model prompt presents bounded grounded autonomy not one-shot command", "bounded current working set" in prompt_goal and "virtual_world_observe" in prompt_goal and "Reply with EXACTLY one line" not in prompt_goal, prompt_goal[:900])
+        check("model prompt labels one disposable embodied event turn", "MY VIRTUAL WORLD - LIVE EVENT TURN" in prompt_goal and "not conversation history" in prompt_goal and "one meaningful next step" in prompt_goal, prompt_goal[:900])
+        check(
+            "model prompt carries structured object coverage instead of an armchair-specific script",
+            '"objectCoverage"' in prompt_goal
+            and "do-not-repeat-verified-targets-unless-new-evidence-invalidates-them" in prompt_goal
+            and '"nextUntestedTarget"' in prompt_goal,
+            prompt_goal[:1800],
+        )
+        check(
+            "representative OpenClaw working set fits the prompt budget without structural trimming",
+            len(prompt_goal) <= server.LIVE_AGENT_MODEL_PROMPT_CHAR_BUDGET
+            and "[Older lower-priority context omitted" not in prompt_goal
+            and prompt_goal.count("CURRENT WORKING SET") == 1,
+            json.dumps({"chars": len(prompt_goal), "budget": server.LIVE_AGENT_MODEL_PROMPT_CHAR_BUDGET}),
+        )
+        check("Resident Profile composes with the full framework agent", "normally configured OpenClaw agent" in prompt_goal and '"displayName":"Test Resident"' in prompt_goal and '"role":"world tester"' in prompt_goal, prompt_goal[:1500])
+        check(
+            "OpenClaw prompt never falls back to the legacy raw planner persona",
+            "Decide as this Resident Profile—not as the provider framework" not in prompt_goal
+            and "Return one compact JSON turn" not in prompt_goal
+            and "normally configured OpenClaw agent" in prompt_goal
+            and "CURRENT WORKING SET" in prompt_goal,
+            prompt_goal[-1800:],
+        )
         check("Resident preferences and ranked memories reach inference", "testing furniture" in prompt_goal and "warm but observant" in prompt_goal and "ranked by relevance, recency, and importance" in prompt_goal and "felt comfortable" in prompt_goal, prompt_goal[:1600])
         context_results = server._live_agent_execute_context_tool_requests("tester", ["world.inspectLastOutcome", "world.recall", "filesystem.read"])
         check("same-turn context tools are bounded and world-read-only", len(context_results) == 3 and context_results[0].get("ok") and context_results[1].get("ok") and context_results[2].get("ok") is False and "read-only context registry" in context_results[2].get("error", ""), json.dumps(context_results, default=str)[:1000])
+        gate_agent = "event-gate-tester"
+        with server._live_agent_model_decision_lock:
+            server._live_agent_model_decision_state[gate_agent] = {
+                "generation": 7,
+                "startedEpoch": time.time() - 20,
+                "lastOutcome": {"status": "native-agent-turn-complete"},
+            }
+        quiet_gate = server._live_agent_model_cognition_event_status(
+            gate_agent,
+            {},
+            {"delta": {"changed": False, "reason": "no meaningful semantic change"}},
+        )
+        changed_gate = server._live_agent_model_cognition_event_status(
+            gate_agent,
+            {},
+            {"delta": {"changed": True, "reason": "carried item changed"}},
+        )
+        check(
+            "timer heartbeat does not invoke cognition without a meaningful event",
+            quiet_gate.get("ready") is False
+            and quiet_gate.get("reason") == "no-meaningful-cognition-event"
+            and changed_gate.get("ready") is True,
+            json.dumps({"quiet": quiet_gate, "changed": changed_gate}, default=str),
+        )
+        server._live_agent_model_decision_mark(
+            gate_agent,
+            in_flight=False,
+            min_interval_sec=10,
+            outcome={"status": "provider-context-overflow", "error": "prompt too large"},
+            generation=7,
+        )
+        server._live_agent_model_decision_mark(
+            gate_agent,
+            in_flight=False,
+            min_interval_sec=10,
+            outcome={"status": "provider-context-overflow", "error": "prompt too large again"},
+            generation=7,
+        )
+        allowed_after_overflow, blocked_after_overflow = server._live_agent_model_decision_allowed(gate_agent)
+        with server._live_agent_model_decision_lock:
+            circuit_row = dict(server._live_agent_model_decision_state.get(gate_agent) or {})
+            server._live_agent_model_decision_state.pop(gate_agent, None)
+        check(
+            "repeated provider failures open a bounded cognition circuit breaker",
+            allowed_after_overflow is False
+            and blocked_after_overflow == "model-provider-circuit-open"
+            and circuit_row.get("providerFailureStreak") == 2
+            and float(circuit_row.get("circuitOpenUntilEpoch") or 0) > time.time(),
+            json.dumps(circuit_row, default=str)[:1000],
+        )
         trace_state = {}
         first_trace = server._live_agent_loop_trace(trace_state, "observe", {"room": "Autonomy Lab"})
         duplicate_trace = server._live_agent_loop_trace(trace_state, "observe", {"room": "Autonomy Lab"})
@@ -659,6 +787,157 @@ def main():
             }],
         })
         check("birth-world objects dynamically expose safe visible affordances", len(generic_affordances) == 1 and generic_affordances[0].get("genericWorldAffordance") is not False and (generic_affordances[0].get("target") or {}).get("objectInstanceId") == "autonomy-armchair", json.dumps(generic_affordances, default=str)[:1000])
+        generic_target_key = server._live_agent_loop_target_key(generic_affordances[0].get("target"))
+        coverage_state = {
+            "goalProgress": {
+                "category:seating": {
+                    "completedTargets": [generic_target_key],
+                    "failedTargets": [],
+                    "updatedAt": server._utc_now_iso(),
+                }
+            }
+        }
+        saturated_generic = server._live_agent_loop_generic_spatial_affordances(
+            "tester",
+            coverage_state,
+            {
+                "nearbyObjects": [{
+                    "perceived": True,
+                    "buildingId": "autonomy-lab",
+                    "buildingName": "Autonomy Lab",
+                    "objectInstanceId": "autonomy-armchair",
+                    "catalogId": "armchair",
+                    "objectType": "armchair",
+                    "floor": 1,
+                    "furnitureIndex": 1,
+                    "distanceTiles": 2.1,
+                    "visible": True,
+                    "lineOfSight": True,
+                    "interactions": [{"actionId": "life.restAtArmchair", "interactionSpotId": "seat-0", "availability": {"state": "available"}}],
+                }],
+            },
+            existing=[{"id": "use-seating-object", "category": "seating", "available": False}],
+        )
+        check(
+            "generic object discovery cannot bypass completed category coverage",
+            saturated_generic == [],
+            json.dumps(saturated_generic, default=str)[:1000],
+        )
+        coverage_working_set = server._live_agent_model_coverage_working_set(coverage_state, [
+            generic_affordances[0],
+            {
+                **generic_affordances[0],
+                "id": "world-use-new-seat",
+                "target": {**generic_affordances[0]["target"], "objectInstanceId": "autonomy-couch", "catalogId": "couch"},
+                "category": "seating",
+            },
+        ])
+        check(
+            "bounded cognition receives a structured coverage ledger and explicit next untested target",
+            coverage_working_set.get("categories", [{}])[0].get("completedCount") == 1
+            and (coverage_working_set.get("nextUntestedTarget") or {}).get("actionId") == "world-use-new-seat",
+            json.dumps(coverage_working_set, default=str),
+        )
+        verified_printer_target = {
+            "kind": "object-instance",
+            "buildingId": "autonomy-lab",
+            "objectInstanceId": "autonomy-printer",
+            "catalogId": "printerCopier",
+            "floor": 1,
+        }
+        verified_printer_key = server._live_agent_loop_target_key(verified_printer_target)
+        historical_coverage_state = {
+            "proceduralMemory": {
+                "print-copy-document": {
+                    "attempts": 4,
+                    "successes": 4,
+                    "lastTargetKey": verified_printer_key,
+                }
+            },
+            "memory": {"recentActions": []},
+        }
+        check(
+            "legacy procedural success participates in unified verified-target coverage",
+            server._live_agent_loop_target_verified(
+                historical_coverage_state,
+                verified_printer_key,
+                loop_action_id="print-copy-document",
+            ),
+            json.dumps(historical_coverage_state, default=str),
+        )
+        reuse_working_set = server._live_agent_model_openclaw_working_set(
+            "tester",
+            {
+                "goalFrame": {"goals": [], "episodes": []},
+                "topNeed": {"id": "maintenance", "value": 1.0},
+                "spatialContext": {},
+                "candidates": [{
+                    "id": "print-copy-document",
+                    "label": "print or copy",
+                    "actionType": "maintenance.printCopy",
+                    "decision": "candidate",
+                    "score": 1.0,
+                    "target": verified_printer_target,
+                }],
+            },
+            historical_coverage_state,
+            {},
+            {},
+            [],
+        )
+        check(
+            "bounded action context labels verified need-driven reuse honestly",
+            (reuse_working_set.get("availableActions") or [{}])[0].get("coverageStatus") == "verified-reuse-for-current-need",
+            json.dumps(reuse_working_set.get("availableActions"), default=str),
+        )
+        new_printer_target = {**verified_printer_target, "objectInstanceId": "autonomy-printer-new"}
+        original_goal_frame_builder = server._live_agent_loop_build_goal_frame
+        server._live_agent_loop_build_goal_frame = lambda *_args, **_kwargs: {
+            "context": {"residentProfile": {"custom": {"objectCoveragePolicy": "next untested object"}}},
+            "goals": [],
+            "recentOutcomes": {},
+            "episodes": [],
+        }
+        try:
+            historical_coverage_frame = server._live_agent_loop_build_decision_frame(
+                "tester",
+                {
+                    "at": server._utc_now_iso(),
+                    "needs": {"curiosity": 0.55, "maintenance": 0.2},
+                    "spatial": {},
+                    "affordances": [
+                        {
+                            "id": "print-copy-document",
+                            "label": "print or copy",
+                            "actionType": "maintenance.printCopy",
+                            "need": "maintenance",
+                            "category": "printercopier",
+                            "available": True,
+                            "target": verified_printer_target,
+                        },
+                        {
+                            "id": "world-use-new-printer",
+                            "label": "use new printer",
+                            "actionType": "maintenance.printCopy",
+                            "need": "maintenance",
+                            "category": "printercopier",
+                            "available": True,
+                            "target": new_printer_target,
+                        },
+                    ],
+                },
+                historical_coverage_state,
+            )
+        finally:
+            server._live_agent_loop_build_goal_frame = original_goal_frame_builder
+        historical_candidates = {row.get("id"): row for row in historical_coverage_frame.get("candidates") or []}
+        check(
+            "object-coverage mission removes historically verified printer while preserving a new target",
+            (historical_candidates.get("print-copy-document") or {}).get("reason") == "target-already-verified-for-object-coverage"
+            and (historical_candidates.get("world-use-new-printer") or {}).get("decision") == "candidate"
+            and historical_coverage_frame.get("selectedActionId") == "world-use-new-printer",
+            json.dumps(historical_coverage_frame, default=str)[:2000],
+        )
         compact_spatial = server._live_agent_loop_compact_spatial_for_planner({
             "nearbyObjects": [
                 {
@@ -736,11 +1015,11 @@ def main():
         second_pick = server._live_agent_loop_find_seating_target(seating_def, agent_id="tester", agent_state=progress_state)
         check("resolver does not repeat the only verified seating target", second_pick is None, json.dumps(second_pick, default=str)[:300])
         progress_prompt = server._live_agent_model_decision_prompt("tester", decision_goal, progress_state)
-        check("model prompt shows goal progress", "Goal progress so far" in progress_prompt and "category:seating" in progress_prompt, progress_prompt[:600])
+        check("model prompt shows bounded goal progress", '"progress"' in progress_prompt and "category:seating" in progress_prompt, progress_prompt[:900])
         check("goal progress survives normalization", (server._live_agent_loop_normalize_memory(progress_state).get("goalProgress") or {}).get("category:seating", {}).get("completedTargets"), json.dumps(progress_state.get("goalProgress"), default=str))
         progress_state["autonomyPlan"] = planner_state.get("autonomyPlan")
         plan_prompt = server._live_agent_model_decision_prompt("tester", decision_goal, progress_state)
-        check("model prompt carries active autonomy plan", "Active autonomy plan carried from prior loop" in plan_prompt and "Explore and verify seating objects" in plan_prompt, plan_prompt[:900])
+        check("model prompt carries compact active autonomy plan", '"commitment"' in plan_prompt and "Explore and verify seating objects" in plan_prompt, plan_prompt[:1200])
 
         # Seating validation must not treat route/arrival completion as proof
         # that the agent actually entered a seated use state.
@@ -894,7 +1173,8 @@ def main():
             "memoryUpdate": {"lesson": "When I need help from Coder, I must use the report tool, not just the whiteboard."},
             "toolRequests": ["message Coder about shelter and routing failures"],
         }
-        planner_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        planner_state = server._copy_jsonable(issue_state)
+        planner_state["needs"] = dict(goal_agent_state["needs"])
         applied = server._live_agent_loop_apply_planner_turn(
             planner_state,
             {"agentId": "tester", "status": "planner-tool-or-event-request", "plannerTurn": planner_turn, "chosen": None},
@@ -906,6 +1186,7 @@ def main():
             "planner tool request creates support request and internal note",
             applied
             and any(item.get("kind") == "coder-report" for item in support_requests)
+            and all(item.get("evidenceKind") for item in support_requests if item.get("kind") == "coder-report")
             and any("Escalate blocked shelter" in (item.get("title") or item.get("text") or "") for item in notes_after_planner),
             json.dumps({"requests": support_requests, "notes": notes_after_planner}, default=str)[:900],
         )
@@ -989,6 +1270,81 @@ def main():
             report_outcome.get("consumedSupportRequestId")
             and not any(item.get("kind") == "coder-report" and "message Coder about shelter" in (item.get("text") or "") for item in planner_state.get("supportRequests") or []),
             json.dumps({"outcome": report_outcome, "requests": planner_state.get("supportRequests")}, default=str)[:900],
+        )
+        false_blocker_state = {
+            "memory": {"recentActions": [{
+                "at": server._utc_now_iso(),
+                "actionId": "wa-coffee-proven",
+                "loopActionId": "hydrate-coffee-machine",
+                "actionType": "life.getCoffee",
+                "label": "get coffee",
+                "status": "completed",
+                "target": {"catalogId": "countertopCoffeeMachine"},
+            }]},
+            "inventory": {"held": {
+                "id": "carried-coffee-proof",
+                "kind": "coffee",
+                "label": "coffee",
+                "acquiredAt": server._utc_now_iso(),
+                "sourceActionId": "wa-coffee-proven",
+                "sourceActionType": "life.getCoffee",
+                "state": "carried",
+            }},
+            "needs": dict(goal_agent_state["needs"]),
+        }
+        false_blocker_turn = {
+            "observation": "The coffee-machine action is absent while I am carrying coffee.",
+            "reflection": "I should send Coder a blocker report about a missing coffee-machine executor.",
+            "currentGoal": "Unblock and verify the countertop coffee machine.",
+            "nextStep": {"action": "report-issue-to-coder", "intent": "Report the missing coffee-machine interaction to Coder."},
+            "toolRequests": ["send Coder a blocker report about the coffee machine"],
+        }
+        server._live_agent_loop_apply_planner_turn(
+            false_blocker_state,
+            {"agentId": "tester-false-report", "status": "planner-step-unresolved", "chosen": None, "plannerTurn": false_blocker_turn},
+            agent_id="tester-false-report",
+        )
+        false_report_decision = server._live_agent_loop_build_decision_frame(
+            "tester-false-report",
+            server._live_agent_loop_build_perception("tester-false-report", false_blocker_state),
+            false_blocker_state,
+        )
+        false_report_candidates = {item.get("id"): item for item in false_report_decision.get("candidates") or []}
+        check(
+            "planner prose cannot manufacture a Coder incident without world failure evidence",
+            not any(item.get("kind") == "coder-report" for item in false_blocker_state.get("supportRequests") or [])
+            and false_report_candidates.get("report-issue-to-coder", {}).get("available") is not True,
+            json.dumps({"requests": false_blocker_state.get("supportRequests"), "report": false_report_candidates.get("report-issue-to-coder")}, default=str)[:1200],
+        )
+        false_prompt = server._live_agent_model_decision_prompt("tester", false_report_decision, false_blocker_state)
+        check(
+            "carried-item working set preserves item and acquisition blocker",
+            '"label":"coffee"' in false_prompt
+            and '"actionId":"hydrate-coffee-machine"' in false_prompt
+            and "carrying_item_requires_seating_follow_up" in false_prompt,
+            false_prompt[-2600:],
+        )
+        authoritative_verification = server._live_agent_loop_verification_from_settled_action(
+            "tester-false-report",
+            {"target": {"kind": "object-instance", "catalogId": "countertopCoffeeMachine", "objectInstanceId": "coffee-proof"}},
+            {
+                "id": "wa-coffee-proven",
+                "status": "completed",
+                "actionType": "life.getCoffee",
+                "loopActionId": "hydrate-coffee-machine",
+                "completedAt": server._utc_now_iso(),
+                "result": {"status": "completed", "reason": "server-authoritative-live-action-completed"},
+            },
+            false_blocker_state["memory"]["recentActions"][0],
+            server._utc_now_iso(),
+        )
+        visual_evidence = (authoritative_verification.get("evidence") or {}).get("visualVerification") or {}
+        check(
+            "optional browser capture is not represented as missing action verification",
+            authoritative_verification.get("ok") is True
+            and visual_evidence.get("required") is False
+            and visual_evidence.get("status") == "authoritative-world-evidence",
+            json.dumps(authoritative_verification, default=str)[:1200],
         )
         lesson_only_state = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
         lesson_only_turn = {
@@ -1335,6 +1691,14 @@ def main():
             and reported_episode.get("conversationId"),
             json.dumps({"outcome": episode_report_outcome, "episode": reported_episode}, default=str)[:1400],
         )
+        duplicate_report_context = server._live_agent_loop_report_context("tester", episode_state)
+        check(
+            "reported verification episode suppresses aggregate duplicate Coder report",
+            not duplicate_report_context
+            or duplicate_report_context.get("kind") != "recent-issue"
+            or (duplicate_report_context.get("issue") or {}).get("loopActionId") != reported_episode.get("loopActionId"),
+            json.dumps(duplicate_report_context, default=str)[:1000],
+        )
         stale_reported_episode = server._live_agent_loop_normalize_episode({
             **reported_episode,
             "status": "awaiting_report",
@@ -1374,14 +1738,16 @@ def main():
             and not any(item.get("eventId") == "old-coder-reply" for item in stale_feedback_episode.get("history") or []),
             json.dumps(stale_feedback_episode, default=str)[:1500],
         )
-        server._append_comm_event({
+        coder_feedback_event = {
             "type": "message",
             "direction": "request",
             "conversationId": reported_episode.get("conversationId"),
             "from": {"id": "coder", "providerKind": "openclaw", "name": "Coder"},
             "to": {"id": "tester", "providerKind": "openclaw", "name": "Test Resident"},
             "text": "Coder reviewed the armchair issue: do not count arrival as success; retry only after verifying seated pose and use-state evidence.",
-        })
+        }
+        server._append_comm_event(coder_feedback_event)
+        server._append_comm_event({**coder_feedback_event, "direction": "delivery"})
         ingested_feedback = server._live_agent_loop_ingest_coder_feedback("tester", episode_state)
         responded_episode = server._live_agent_loop_find_episode(episode_state, issue_id=verified_episode.get("issueId")) or {}
         episode_prompt = server._live_agent_model_decision_prompt(
@@ -1401,8 +1767,9 @@ def main():
             "Coder feedback is ingested into episode and next planner prompt",
             ingested_feedback
             and responded_episode.get("status") == "coder_responded"
+            and len(responded_episode.get("coderResponses") or []) == 1
             and "Coder reviewed the armchair issue" in episode_prompt
-            and "Recent verification episodes" in episode_prompt,
+            and '"actionableFeedback"' in episode_prompt,
             json.dumps({"episode": responded_episode, "prompt": episode_prompt[-1200:]}, default=str)[:1400],
         )
         resolved_retry_action = completed_seating_action("wa-episode-armchair-verified-retry", {
@@ -1750,6 +2117,65 @@ def main():
             "buildingId": "autonomy-lab",
             "floor": 1,
         }
+        original_social_perception = server._live_agent_loop_social_perception
+        server._live_agent_loop_social_perception = lambda agent_id, spatial=None: {
+            "schemaVersion": "agent-live-mode-social-perception/v2",
+            "nearbyAgents": [{
+                "agentId": "hermie",
+                "name": "Hermes Resident",
+                "buildingId": "autonomy-lab",
+                "floor": 1,
+                "nearbyReason": "authoritative-distance-and-visibility",
+                "location": {"x": 320.5, "y": -80.25, "floor": 1, "buildingId": "autonomy-lab", "roomId": "lounge"},
+            }],
+        }
+        social_candidate = server._live_agent_loop_find_action_target(
+            {"id": "talk-with-nearby-agent", "targetKind": "agent"},
+            agent_id="tester",
+            agent_state={},
+            spatial={},
+        )
+        server._live_agent_loop_social_perception = original_social_perception
+        candidate_target = (social_candidate or {}).get("target") or {}
+        check(
+            "social target persists observed coordinates for restart-safe routing",
+            candidate_target.get("targetAgentId") == "hermie"
+            and candidate_target.get("x") == 320.5
+            and candidate_target.get("y") == -80.25
+            and candidate_target.get("roomId") == "lounge"
+            and server.LIVE_AGENT_LOOP_STALE_ACTIVE_ACTION_SECONDS.get("reserved") <= 90,
+            json.dumps(candidate_target, default=str)[:900],
+        )
+        server._live_agent_loop_social_perception = lambda agent_id, spatial=None: {
+            "schemaVersion": "agent-live-mode-social-perception/v2",
+            "nearbyAgents": [{
+                "agentId": "outdoor-peer",
+                "name": "Outdoor Peer",
+                "buildingId": "",
+                "roomId": "",
+                "floor": 1,
+                "nearbyReason": "authoritative-distance-and-visibility",
+                "location": {"x": 55.0, "y": 80.0, "floor": 1, "buildingId": "", "roomId": ""},
+            }],
+        }
+        outdoor_social_candidate = server._live_agent_loop_find_action_target(
+            {"id": "talk-with-nearby-agent", "targetKind": "agent"},
+            agent_id="tester",
+            agent_state={},
+            spatial={},
+        )
+        server._live_agent_loop_social_perception = original_social_perception
+        outdoor_social_target = (outdoor_social_candidate or {}).get("target") or {}
+        outdoor_social_errors = []
+        server._validate_world_action_target(outdoor_social_target, outdoor_social_errors)
+        check(
+            "outdoor social target omits blank room and building identifiers",
+            outdoor_social_target.get("targetAgentId") == "outdoor-peer"
+            and "roomId" not in outdoor_social_target
+            and "buildingId" not in outdoor_social_target
+            and not outdoor_social_errors,
+            json.dumps({"target": outdoor_social_target, "errors": outdoor_social_errors}, default=str)[:900],
+        )
         normalized_social_target, social_target_metadata, social_target_error = server._normalize_move_target(
             social_target,
             "tester",
@@ -1958,6 +2384,189 @@ def main():
             not single_cancel_recent.get("issues")
             and not single_cancel_report,
             json.dumps({"recent": single_cancel_recent, "report": single_cancel_report}, default=str)[:900],
+        )
+        route_stale_target = {
+            "kind": "object-instance",
+            "buildingId": "office",
+            "catalogId": "armchair",
+            "objectInstanceId": "armchair-restart-bridge",
+            "interactionSpotId": "seat",
+            "floor": 1,
+        }
+        route_stale_action = {
+            **rest_action,
+            "id": "wa-seat-route-stale-once",
+            "status": "failed",
+            "actionType": "life.restAtArmchair",
+            "target": route_stale_target,
+            "params": {"loopActionId": "use-seating-object"},
+            "timing": {"updatedAt": server._utc_now_iso(), "failedAt": server._utc_now_iso(), "terminalAt": server._utc_now_iso()},
+            "failureReason": "route_unreachable",
+            "result": {"status": "failed", "reason": "route-stale"},
+        }
+        route_stale_state = {"needs": dict(rest_memory_state["needs"]), "memory": {}}
+        server._live_agent_loop_remember_settled_action(
+            {"agents": {"tester": route_stale_state}},
+            "tester",
+            route_stale_state,
+            route_stale_action,
+            server._live_agent_loop_action_summary(route_stale_action),
+        )
+        route_stale_recent = server._live_agent_loop_recent_outcome_summary(route_stale_state)
+        route_stale_failure = (((route_stale_state.get("memory") or {}).get("recentActions") or [{}])[-1].get("failure") or {})
+        check(
+            "single route-stale failure replans without a false Coder report",
+            route_stale_failure.get("reportable") is False
+            and route_stale_failure.get("retryableWorldFailure") is True
+            and not route_stale_recent.get("issues")
+            and not server._live_agent_loop_report_context("tester", route_stale_state),
+            json.dumps({"failure": route_stale_failure, "recent": route_stale_recent}, default=str)[:1100],
+        )
+        different_route_stale_target = {
+            **route_stale_target,
+            "objectInstanceId": "armchair-different-target",
+        }
+        different_route_stale_action = {
+            **route_stale_action,
+            "id": "wa-seat-route-stale-different-target",
+            "target": different_route_stale_target,
+            "timing": {"updatedAt": server._utc_now_iso(), "failedAt": server._utc_now_iso(), "terminalAt": server._utc_now_iso()},
+        }
+        server._live_agent_loop_remember_settled_action(
+            {"agents": {"tester": route_stale_state}},
+            "tester",
+            route_stale_state,
+            different_route_stale_action,
+            server._live_agent_loop_action_summary(different_route_stale_action),
+        )
+        different_target_route_stale = server._live_agent_loop_recent_outcome_summary(route_stale_state)
+        check(
+            "route-stale failures at different targets do not manufacture a shared product issue",
+            not different_target_route_stale.get("issues"),
+            json.dumps(different_target_route_stale, default=str)[:1000],
+        )
+        stale_episode = {
+            "id": "episode-legacy-route-stale-report",
+            "status": "awaiting_coder",
+            "phase": "await-coder",
+            "loopActionId": "use-seating-object",
+            "actionType": "life.restAtArmchair",
+            "actionId": "wa-seat-route-stale-once",
+            "issueId": "episode.issue.route-stale",
+            "targetKey": server._live_agent_loop_target_key(route_stale_target),
+            "createdAt": server._utc_now_iso(),
+            "updatedAt": server._utc_now_iso(),
+            "verification": {"id": "verify-route-stale", "ok": False, "status": "failed"},
+            "reports": [{"at": server._utc_now_iso(), "status": "completed", "ok": True}],
+        }
+        route_stale_state["episodes"] = [stale_episode]
+        route_stale_state["activeEpisode"] = stale_episode
+        server._live_agent_loop_normalize_memory(route_stale_state)
+        repaired_stale_episode = (route_stale_state.get("episodes") or [{}])[-1]
+        check(
+            "legacy false route-stale report is retired during normalization",
+            repaired_stale_episode.get("status") == "failed"
+            and repaired_stale_episode.get("phase") == "continue"
+            and (repaired_stale_episode.get("verification") or {}).get("reportableFailure") is False
+            and not route_stale_state.get("activeEpisode"),
+            json.dumps(repaired_stale_episode, default=str)[:1000],
+        )
+        route_stale_action_twice = {
+            **route_stale_action,
+            "id": "wa-seat-route-stale-twice",
+            "timing": {"updatedAt": server._utc_now_iso(), "failedAt": server._utc_now_iso(), "terminalAt": server._utc_now_iso()},
+        }
+        server._live_agent_loop_remember_settled_action(
+            {"agents": {"tester": route_stale_state}},
+            "tester",
+            route_stale_state,
+            route_stale_action_twice,
+            server._live_agent_loop_action_summary(route_stale_action_twice),
+        )
+        repeated_route_stale = server._live_agent_loop_recent_outcome_summary(route_stale_state)
+        check(
+            "repeated matching route-stale failures still become reportable evidence",
+            any(item.get("loopActionId") == "use-seating-object" for item in repeated_route_stale.get("issues") or []),
+            json.dumps(repeated_route_stale, default=str)[:1000],
+        )
+        request_failed_now = server._utc_now_iso()
+        request_failed_plan = {
+            "id": "plan-request-rejected-regression",
+            "status": "planned",
+            "title": "Use a chair",
+            "loopActionId": "use-seating-object",
+            "actionType": "life.restAtArmchair",
+            "createdAt": request_failed_now,
+            "updatedAt": request_failed_now,
+            "steps": [{
+                "id": "step-use-chair",
+                "label": "Use a chair",
+                "status": "pending",
+                "executionKind": "world-action",
+            }],
+        }
+        request_failed_episode = {
+            "id": "episode-request-rejected-regression",
+            "status": "in_progress",
+            "phase": "decide",
+            "planId": request_failed_plan["id"],
+            "loopActionId": "use-seating-object",
+            "actionType": "life.restAtArmchair",
+            "title": "Use a chair",
+            "createdAt": request_failed_now,
+            "updatedAt": request_failed_now,
+        }
+        request_failed_state = {
+            "activePlan": request_failed_plan,
+            "plans": [request_failed_plan],
+            "activeEpisode": request_failed_episode,
+            "episodes": [request_failed_episode],
+            "skillExecution": {"skillId": "skill-use-chair", "status": "committed"},
+        }
+        server._live_agent_loop_mark_plan_action_request_failed(
+            {"agents": {"tester": request_failed_state}, "events": []},
+            "tester",
+            request_failed_state,
+            request_failed_plan,
+            "move_intent_handoff_failed",
+            request_failed_now,
+        )
+        failed_episode = (request_failed_state.get("episodes") or [{}])[-1]
+        check(
+            "pre-execution action rejection settles plan episode and skill without a false report",
+            not request_failed_state.get("activePlan")
+            and not request_failed_state.get("activeEpisode")
+            and failed_episode.get("status") == "failed"
+            and failed_episode.get("phase") == "continue"
+            and (failed_episode.get("verification") or {}).get("reportableFailure") is False
+            and (request_failed_state.get("skillExecution") or {}).get("status") == "failed"
+            and (request_failed_state.get("controller") or {}).get("state") == "observing",
+            json.dumps(request_failed_state, default=str)[:1400],
+        )
+        legacy_orphan_state = {
+            "plans": [{
+                **request_failed_plan,
+                "status": "failed",
+                "failedAt": request_failed_now,
+                "failureReason": "move_intent_handoff_failed",
+                "steps": [{
+                    **request_failed_plan["steps"][0],
+                    "status": "failed",
+                    "failureReason": "move_intent_handoff_failed",
+                }],
+            }],
+            "activeEpisode": request_failed_episode,
+            "episodes": [request_failed_episode],
+        }
+        server._live_agent_loop_normalize_memory(legacy_orphan_state)
+        repaired_orphan = (legacy_orphan_state.get("episodes") or [{}])[-1]
+        check(
+            "normalization retires a legacy pre-execution orphan episode",
+            not legacy_orphan_state.get("activeEpisode")
+            and repaired_orphan.get("status") == "failed"
+            and repaired_orphan.get("phase") == "continue"
+            and (repaired_orphan.get("verification") or {}).get("reportableFailure") is False,
+            json.dumps(legacy_orphan_state, default=str)[:1400],
         )
         legacy_single_cancel_state = {
             "needs": dict(rest_memory_state["needs"]),
@@ -2332,6 +2941,40 @@ def main():
             "no_route_progress" in memory_blob and "900" in memory_blob and "avoid retrying the same target" in memory_blob,
             memory_blob[-800:],
         )
+        first_settled_event_count = len([
+            event for event in state_wd.get("events") or []
+            if isinstance(event, dict)
+            and event.get("type") == "action-settled"
+            and (event.get("details") or {}).get("actionId") == "wa-route-stuck-1"
+        ])
+        first_memory_count = len([
+            item for item in (agent_state_wd.get("memory") or {}).get("recentActions") or []
+            if isinstance(item, dict) and item.get("actionId") == "wa-route-stuck-1"
+        ])
+        agent_state_wd["lastOutcome"] = {"status": "waiting", "reason": "provider-wait"}
+        duplicate_changed = server._live_agent_loop_refresh_completed_outcomes(state_wd)
+        second_settled_event_count = len([
+            event for event in state_wd.get("events") or []
+            if isinstance(event, dict)
+            and event.get("type") == "action-settled"
+            and (event.get("details") or {}).get("actionId") == "wa-route-stuck-1"
+        ])
+        second_memory_count = len([
+            item for item in (agent_state_wd.get("memory") or {}).get("recentActions") or []
+            if isinstance(item, dict) and item.get("actionId") == "wa-route-stuck-1"
+        ])
+        check(
+            "settled world action is not reprocessed after a non-physical status projection",
+            duplicate_changed is False
+            and first_settled_event_count == second_settled_event_count == 1
+            and first_memory_count == second_memory_count == 1,
+            json.dumps({
+                "changed": duplicate_changed,
+                "eventCounts": [first_settled_event_count, second_settled_event_count],
+                "memoryCounts": [first_memory_count, second_memory_count],
+                "settledKeys": agent_state_wd.get("settledActionKeys"),
+            }, default=str),
+        )
         failed_affordance = {"id": "hydrate-water-cooler", "need": "hydration", "label": "get water", "target": {"kind": "world-point", "x": 900.0, "y": 900.0}}
         failure_score, failure_breakdown = server._live_agent_loop_decision_score(
             failed_affordance,
@@ -2354,7 +2997,7 @@ def main():
         )
         check(
             "model prompt includes short-term failure learning",
-            "Important short-term memory" in memory_prompt and "no_route_progress" in memory_prompt and "900" in memory_prompt,
+            '"recentOperationalLessons"' in memory_prompt and "no_route_progress" in memory_prompt and "900" in memory_prompt,
             memory_prompt,
         )
 
@@ -2489,11 +3132,25 @@ def main():
             not disabled_world.get("claim"),
             json.dumps(disabled_world, default=str)[:500],
         )
-        ok_reenable, reenable_result, _ = server.set_agent_live_mode_setting("tester", True, agent_loop_enabled=True)
+        ok_reenable, reenable_result, _ = server.set_agent_live_mode_setting("tester", True, agent_loop_enabled=False)
         check(
-            "Agent Live Mode can be re-enabled after shutdown cleanup",
+            "activating Agent Live Mode starts autonomy despite a stale disabled loop value",
             ok_reenable and reenable_result.get("agentLiveModeEnabled") is True and reenable_result.get("agentLiveModeLoopEnabled") is True,
             json.dumps(reenable_result, default=str)[:500],
+        )
+        ok_live_pause, live_pause_result, _ = server.set_agent_live_mode_setting("tester", True, agent_loop_enabled=False)
+        check(
+            "an already-live resident can still be paused explicitly for operator maintenance",
+            ok_live_pause
+            and live_pause_result.get("agentLiveModeEnabled") is True
+            and live_pause_result.get("agentLiveModeLoopEnabled") is False,
+            json.dumps(live_pause_result, default=str)[:500],
+        )
+        ok_live_resume, live_resume_result, _ = server.set_agent_live_mode_setting("tester", True, agent_loop_enabled=True)
+        check(
+            "an explicitly paused live resident can resume its autonomous controller",
+            ok_live_resume and live_resume_result.get("agentLiveModeLoopEnabled") is True,
+            json.dumps(live_resume_result, default=str)[:500],
         )
 
         global_shutdown_state = server.get_live_agent_loop_state(persist_migration=True)
@@ -2646,8 +3303,8 @@ def main():
                 cleanup_generation,
             )
             check(
-                "fenced model worker preserves its activation-scoped Gateway session",
-                not any(method == "sessions.delete" for method, params in gateway_calls),
+                "fenced model worker cleans its disposable Gateway session",
+                any(method == "sessions.delete" and server._live_agent_model_planner_session_agent_id(params.get("key")) == cleanup_agent for method, params in gateway_calls),
                 json.dumps(gateway_calls, default=str),
             )
 
@@ -2667,7 +3324,9 @@ def main():
             server._gateway_rpc_call = lambda *_args, **_kwargs: {"ok": False, "error": "verification failure"}
             check(
                 "Gateway planner cleanup reports delete failures",
-                server._live_agent_model_planner_session_cleanup("tester", 99) is False,
+                server._live_agent_model_planner_session_cleanup(
+                    "tester", 99, session_key="agent:tester:g99:vw-live-mode-planner"
+                ) is False,
             )
         finally:
             server._gateway_rpc_call = original_gateway_rpc
@@ -2730,6 +3389,10 @@ def main():
             blocked_ok is False and blocked_status == 409 and blocked_result.get("error", {}).get("code") == "agent_live_mode_feature_disabled",
             json.dumps(blocked_result, default=str)[:500],
         )
+        # The feature kill fences worker generations immediately; allow a
+        # write already in the atomic-rename phase to settle before asserting
+        # that the disabled tick itself is read-only.
+        time.sleep(0.3)
         sig_before_disabled_tick = server._world_meta_file_sig()
         disabled_tick = server.live_agent_loop_tick(reason="verification-disabled", force=True)
         sig_after_disabled_tick = server._world_meta_file_sig()
@@ -2742,6 +3405,9 @@ def main():
         # The global-off state is an authority boundary, not merely a scheduler
         # pause. Exercise every externally reachable Live Agent mutation helper
         # and prove the complete isolated runtime tree remains byte-identical.
+        # Let writes already queued before the generation fence finish before
+        # taking the baseline; the calls below must remain read-only.
+        time.sleep(0.3)
         disabled_tree_before = snapshot_tree(tmpdir)
         attention_ok, attention_result, attention_status = server.handle_live_agent_user_attention({
             "agentId": "tester",
@@ -2867,6 +3533,195 @@ def main():
             and durable_goal.get("currentStepId") == "step-hydrate"
             and (durable_goal.get("tasks") or [{}, {}])[1].get("dependsOn") == ["task-hydrate"],
             json.dumps(durable_goal, default=str)[:1400],
+        )
+        durable_step = server._live_agent_goals.current_context(durable_goal).get("step") or {}
+        check(
+            "durable steps carry one semantic action/target/evidence contract",
+            durable_step.get("actionFamily") == "hydrate-water-cooler"
+            and durable_step.get("targetIdentity")
+            and durable_step.get("evidenceDomain")
+            and isinstance(durable_step.get("successPostconditions"), list)
+            and isinstance(durable_step.get("failurePostconditions"), list),
+            json.dumps(durable_step, default=str)[:1200],
+        )
+
+        skill_state = {
+            "skillExecution": {
+                **server._live_agent_loop_skill_template({"actionType": "life.getCoffee", "id": "hydrate-coffee-machine"}),
+                "status": "awaiting-follow-up",
+                "startedAt": server._utc_now_iso(),
+            }
+        }
+        resumed_skill = server._live_agent_loop_skill_template(
+            {"actionType": "life.restAtArmchair", "id": "use-seating-object"}, skill_state
+        )
+        check(
+            "composable carried-item skill resumes its seating follow-up instead of spawning a parallel plan",
+            resumed_skill.get("skillId") == "acquire-consumable-then-dwell"
+            and resumed_skill.get("resumed") is True
+            and resumed_skill.get("currentStepIndex") == 1,
+            json.dumps(resumed_skill, default=str),
+        )
+
+        coffee_goal_turn = {
+            "observation": "The countertop coffee machine should be verified.",
+            "reflection": "Use matching world evidence.",
+            "currentGoal": "Unblock and verify the countertop coffee machine.",
+            "nextStep": {"intent": "Investigate the blocker", "action": "investigate-blocking-issue"},
+        }
+        mismatch_agent = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        server._live_agent_loop_apply_planner_turn(
+            mismatch_agent,
+            {"agentId": "tester-goal-evidence", "status": "planner-step-action", "chosen": "investigate-blocking-issue", "plannerTurn": coffee_goal_turn},
+            agent_id="tester-goal-evidence",
+        )
+        mismatch_context = server._live_agent_loop_bind_durable_goal_action(
+            mismatch_agent,
+            "investigate-blocking-issue",
+            {
+                "action": server._live_agent_loop_action_definition("investigate-blocking-issue"),
+                "target": {"kind": "object-instance", "catalogId": "whiteboard", "objectInstanceId": "whiteboard-proof"},
+                "objectType": "whiteboard",
+            },
+            now_iso=server._utc_now_iso(),
+        )
+        mismatched_goal = mismatch_agent.get("activeGoal") or {}
+        check(
+            "cross-object action evidence cannot complete an unrelated durable goal",
+            mismatch_context is None
+            and mismatched_goal.get("status") == "blocked"
+            and mismatched_goal.get("replanRequired") is True
+            and (mismatch_agent.get("lastGoalEvidenceMismatch") or {}).get("goalDomains") == ["coffee"]
+            and "whiteboard" in ((mismatch_agent.get("lastGoalEvidenceMismatch") or {}).get("actionDomains") or []),
+            json.dumps({"goal": mismatched_goal, "mismatch": mismatch_agent.get("lastGoalEvidenceMismatch")}, default=str)[:1600],
+        )
+
+        seating_followup_agent = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        seating_followup_turn = {
+            **coffee_goal_turn,
+            "currentGoal": "Complete and verify the countertop coffee machine flow.",
+            # A discovered dynamic affordance id is intentionally opaque; the
+            # typed target criteria must survive into the durable step.
+            "nextStep": {"action": "world-use-seating-proof", "targetCriteria": "armchair"},
+        }
+        server._live_agent_loop_apply_planner_turn(
+            seating_followup_agent,
+            {"agentId": "tester-goal-seating", "status": "planner-step-action", "chosen": "world-use-seating-proof", "plannerTurn": seating_followup_turn},
+            agent_id="tester-goal-seating",
+        )
+        seating_followup_context = server._live_agent_loop_bind_durable_goal_action(
+            seating_followup_agent,
+            "world-use-seating-proof",
+            {
+                "action": server._live_agent_loop_action_definition("use-seating-object"),
+                "target": {"kind": "object-instance", "catalogId": "armchair", "objectInstanceId": "armchair-proof"},
+                "objectType": "armchair",
+            },
+            now_iso=server._utc_now_iso(),
+        )
+        check(
+            "declared seating follow-up remains valid inside a coffee-machine flow",
+            seating_followup_context is not None and not seating_followup_agent.get("lastGoalEvidenceMismatch"),
+            json.dumps({"context": seating_followup_context, "goal": seating_followup_agent.get("activeGoal")}, default=str)[:1600],
+        )
+
+        direct_coffee_agent = {"memory": {}, "needs": dict(goal_agent_state["needs"])}
+        direct_coffee_turn = {
+            **coffee_goal_turn,
+            "nextStep": {"intent": "Use the countertop coffee machine", "action": "hydrate-coffee-machine", "successCriteria": "coffee-machine world action completes"},
+        }
+        server._live_agent_loop_apply_planner_turn(
+            direct_coffee_agent,
+            {"agentId": "tester-goal-direct", "status": "planner-step-action", "chosen": "hydrate-coffee-machine", "plannerTurn": direct_coffee_turn},
+            agent_id="tester-goal-direct",
+        )
+        direct_context = server._live_agent_loop_bind_durable_goal_action(
+            direct_coffee_agent,
+            "hydrate-coffee-machine",
+            {
+                "action": server._live_agent_loop_action_definition("hydrate-coffee-machine"),
+                "target": {"kind": "object-instance", "catalogId": "countertopCoffeeMachine", "objectInstanceId": "coffee-proof"},
+                "objectType": "countertopCoffeeMachine",
+            },
+            now_iso=server._utc_now_iso(),
+        )
+        check(
+            "matching coffee-machine evidence binds to the coffee-machine durable goal",
+            direct_context and direct_context.get("goalId") == (direct_coffee_agent.get("activeGoal") or {}).get("id"),
+            json.dumps({"context": direct_context, "goal": direct_coffee_agent.get("activeGoal")}, default=str)[:1400],
+        )
+        terminal_goal = server._copy_jsonable(direct_coffee_agent.get("activeGoal") or {})
+        for task in terminal_goal.get("tasks") or []:
+            for step in task.get("steps") or []:
+                step["status"] = "completed"
+                step["outcome"] = {"status": "completed", "verified": True, "at": server._utc_now_iso()}
+                step["completedAt"] = server._utc_now_iso()
+            task["status"] = "completed"
+            task["outcome"] = {"status": "completed", "verified": True, "at": server._utc_now_iso()}
+            task["completedAt"] = server._utc_now_iso()
+        terminal_goal["status"] = "completed"
+        terminal_goal["completedAt"] = server._utc_now_iso()
+        terminal_goal["outcome"] = {"status": "completed", "verified": True, "at": server._utc_now_iso()}
+        server._live_agent_loop_store_durable_goal(direct_coffee_agent, terminal_goal)
+        stale_revival = server._live_agent_goals.goal_from_planner_turn(
+            "tester-goal-direct",
+            direct_coffee_turn,
+            chosen_action="hydrate-coffee-machine",
+            now_iso=server._utc_now_iso(),
+        )
+        stale_revival_result = server._live_agent_loop_store_durable_goal(direct_coffee_agent, stale_revival)
+        check(
+            "terminal goal tombstone rejects a stale active snapshot with the same id",
+            stale_revival_result.get("status") == "completed"
+            and not direct_coffee_agent.get("activeGoal")
+            and any(item.get("goalId") == terminal_goal.get("id") for item in direct_coffee_agent.get("terminalGoalTombstones") or []),
+            json.dumps({"stored": stale_revival_result, "tombstones": direct_coffee_agent.get("terminalGoalTombstones")}, default=str)[:1600],
+        )
+        server._live_agent_loop_apply_planner_turn(
+            direct_coffee_agent,
+            {"agentId": "tester-goal-direct", "status": "planner-step-action", "chosen": "hydrate-coffee-machine", "plannerTurn": direct_coffee_turn},
+            agent_id="tester-goal-direct",
+        )
+        terminal_ids = [item.get("id") for item in direct_coffee_agent.get("durableGoals") or []]
+        check(
+            "terminal natural-language goal is not recreated as an automatic run clone",
+            not direct_coffee_agent.get("activeGoal")
+            and not any(".run-" in str(item or "") for item in terminal_ids)
+            and (direct_coffee_agent.get("autonomyPlan") or {}).get("status") == "completed",
+            json.dumps({"ids": terminal_ids, "active": direct_coffee_agent.get("activeGoal"), "plan": direct_coffee_agent.get("autonomyPlan")}, default=str)[:1500],
+        )
+        replay_agent_id = "tester-goal-direct"
+        original_provider_kind = server._live_agent_model_decision_provider_kind
+        server._live_agent_model_decision_provider_kind = (
+            lambda agent_id: "openclaw" if agent_id == replay_agent_id else original_provider_kind(agent_id)
+        )
+        server._live_agent_model_decision_state[replay_agent_id] = {
+            "generation": 1,
+            "inFlight": False,
+            "pendingChoice": {
+                "generation": 1,
+                "chosen": "hydrate-coffee-machine",
+                "detail": {
+                    "agentId": replay_agent_id,
+                    "status": "planner-step-action",
+                    "chosen": "hydrate-coffee-machine",
+                    "plannerTurn": direct_coffee_turn,
+                },
+                "intention": {"action": "hydrate-coffee-machine", "plannerTurn": direct_coffee_turn},
+            },
+        }
+        replay_choice, replay_detail = server._live_agent_model_decide(
+            replay_agent_id,
+            {"candidates": [{"id": "hydrate-coffee-machine", "decision": "candidate", "score": 1.0}]},
+            direct_coffee_agent,
+            {"minIntervalSec": 20},
+        )
+        server._live_agent_model_decision_state.pop(replay_agent_id, None)
+        server._live_agent_model_decision_provider_kind = original_provider_kind
+        check(
+            "replayed terminal-goal turn cannot launch another physical action",
+            replay_choice is None and replay_detail.get("status") == "terminal-goal-replay-suppressed",
+            json.dumps({"choice": replay_choice, "detail": replay_detail}, default=str)[:1200],
         )
         server.save_live_agent_loop_state(durable_state)
         server = load_server(tmpdir)
@@ -3053,6 +3908,44 @@ def main():
             json.dumps(goal_get_result, default=str)[:1200],
         )
 
+        settling_goal = server._live_agent_goals.goal_from_planner_turn(
+            "tester",
+            {
+                "currentGoal": "Acquire and verify a coffee",
+                "nextStep": {"intent": "Get the coffee", "action": "hydrate-coffee-machine"},
+            },
+            now_iso=server._utc_now_iso(),
+        )
+        settling_goal, _ = server._live_agent_goals.bind_selected_action(
+            settling_goal,
+            "hydrate-coffee-machine",
+            target={"kind": "object-instance", "catalogId": "countertopCoffeeMachine", "objectInstanceId": "settling-coffee"},
+            target_key="object:settling-coffee",
+            now_iso=server._utc_now_iso(),
+        )
+        settling_goal, _ = server._live_agent_goals.mark_step_started(
+            settling_goal,
+            action_id="wa-settling-coffee",
+            loop_action_id="hydrate-coffee-machine",
+            now_iso=server._utc_now_iso(),
+        )
+        settling_reconciled, settling_reason = server._live_agent_goals.reconcile_world(
+            settling_goal,
+            world_revision="world-after-acquisition",
+            available_actions=set(),
+            target_keys={},
+            now_iso=server._utc_now_iso(),
+        )
+        settling_step = ((settling_reconciled.get("tasks") or [{}])[0].get("steps") or [{}])[0]
+        check(
+            "started durable action waits for terminal evidence when its affordance disappears",
+            settling_reason is None
+            and settling_reconciled.get("status") == "active"
+            and settling_reconciled.get("replanRequired") is False
+            and settling_step.get("actionId") == "wa-settling-coffee",
+            json.dumps(settling_reconciled, default=str)[:1500],
+        )
+
         world_state = server.get_live_agent_loop_state(persist_migration=False)
         world_agent = server._live_agent_loop_agent_state(world_state, "tester")
         available_frame = {"affordances": [{"id": "rest-at-home", "available": True, "target": selected_target["target"]}]}
@@ -3120,12 +4013,13 @@ def main():
 
         # Reset isolation: clear one resident's runtime state and separate note
         # files without changing the other resident or durable world/profile data.
+        ok_disable_for_reset, _, _ = server.set_agent_live_mode_setting("tester", False)
         meta_before_reset = server.load_world_meta()
         profiles_before_reset = meta_before_reset.setdefault("agentProfiles", {})
         tester_profile = dict(profiles_before_reset.get("tester") or {})
         tester_profile["residentProfile"] = {
             **(tester_profile.get("residentProfile") or {}),
-            "identity": {"displayName": "Reset Verification Resident", "continuityMarker": "preserve-me"},
+            "identity": {"displayName": "Reset Verification Resident", "backstory": "preserve-me"},
         }
         profiles_before_reset["tester"] = tester_profile
         meta_before_reset["agentProfiles"] = profiles_before_reset
@@ -3134,14 +4028,17 @@ def main():
         server._live_agent_loop_append_internal_note("hermie", title="Isolation fixture", text="Keep this other resident note.")
         server._live_agent_planner_transcript_record("tester", session_key="verify-reset", started_epoch=time.time(), prompt="reset fixture prompt", reply_text="reset fixture reply", detail={"status": "complete"})
         server._live_agent_planner_transcript_record("hermie", session_key="verify-isolation", started_epoch=time.time(), prompt="other fixture prompt", reply_text="other fixture reply", detail={"status": "complete"})
-        reset_seed_state = server.get_live_agent_loop_state(persist_migration=False)
-        reset_tester = server._live_agent_loop_agent_state(reset_seed_state, "tester")
-        reset_tester["autonomyPlan"] = {"currentGoal": "stale goal", "plan": ["stale step"], "nextStep": {"intent": "stale"}}
-        reset_tester["memory"] = {"recentActions": [{"actionId": "stale-runtime-action", "status": "failed", "text": "stale"}]}
-        reset_hermie = server._live_agent_loop_agent_state(reset_seed_state, "hermie")
-        reset_hermie["memory"] = {"recentActions": [{"actionId": "other-resident-sentinel", "status": "completed", "text": "preserve"}]}
-        server.save_live_agent_loop_state(reset_seed_state)
-        ok_disable_for_reset, _, _ = server.set_agent_live_mode_setting("tester", False)
+        # Event-driven scheduler wake-ups may run concurrently with this
+        # fixture. Seed the reset state under the same product lock used by a
+        # real Live mutation so the test does not manufacture a stale write.
+        with server._live_agent_loop_lock:
+            reset_seed_state = server.get_live_agent_loop_state(persist_migration=False)
+            reset_tester = server._live_agent_loop_agent_state(reset_seed_state, "tester")
+            reset_tester["autonomyPlan"] = {"currentGoal": "stale goal", "plan": ["stale step"], "nextStep": {"intent": "stale"}}
+            reset_tester["memory"] = {"recentActions": [{"actionId": "stale-runtime-action", "status": "failed", "text": "stale"}]}
+            reset_hermie = server._live_agent_loop_agent_state(reset_seed_state, "hermie")
+            reset_hermie["memory"] = {"recentActions": [{"actionId": "other-resident-sentinel", "status": "completed", "text": "preserve"}]}
+            server.save_live_agent_loop_state(reset_seed_state)
         building_ids_before_reset = sorted(str(item.get("id")) for item in server.list_buildings() if isinstance(item, dict))
         ok_reset, reset_result, reset_status = server.reset_agent_live_mode_state("tester", actor="verification")
         state_after_reset = server.get_live_agent_loop_state(persist_migration=False)
@@ -3151,26 +4048,37 @@ def main():
         notes_after_reset = server._load_live_agent_internal_notes().get("agents") or {}
         transcripts_after_reset = server._load_live_agent_planner_transcripts().get("agents") or {}
         building_ids_after_reset = sorted(str(item.get("id")) for item in server.list_buildings() if isinstance(item, dict))
+        reset_contract = {
+            "disable": ok_disable_for_reset,
+            "reset": ok_reset,
+            "status": reset_status == 200,
+            "disabled": tester_after_reset.get("enabled") is False,
+            "noPlan": not tester_after_reset.get("activePlan"),
+            "noEpisode": not tester_after_reset.get("activeEpisode"),
+            "noAutonomyPlan": not tester_after_reset.get("autonomyPlan"),
+            "noGoal": not tester_after_reset.get("activeGoal"),
+            "noDurableGoals": not tester_after_reset.get("durableGoals"),
+            "noRecentActions": not (tester_after_reset.get("memory") or {}).get("recentActions"),
+            # The event-driven scheduler may legitimately append new activity
+            # for another enabled Resident while this reset is verified. The
+            # isolation contract is that the sentinel is preserved, not that
+            # it remains the newest unrelated event.
+            "otherResidentPreserved": any(
+                item.get("actionId") == "other-resident-sentinel"
+                for item in ((hermie_after_reset.get("memory") or {}).get("recentActions") or [])
+                if isinstance(item, dict)
+            ),
+            "profilePreserved": (profile_after_reset.get("identity") or {}).get("backstory") == "preserve-me",
+            "ownNotesCleared": "tester" not in notes_after_reset,
+            "peerNotesPreserved": "hermie" in notes_after_reset,
+            "ownTranscriptsCleared": "tester" not in transcripts_after_reset,
+            "peerTranscriptsPreserved": "hermie" in transcripts_after_reset,
+            "worldPreserved": building_ids_after_reset == building_ids_before_reset,
+        }
         check(
             "selected-agent reset clears runtime state and preserves settings/profile/world isolation",
-            ok_disable_for_reset
-            and ok_reset
-            and reset_status == 200
-            and tester_after_reset.get("enabled") is False
-            and not tester_after_reset.get("activePlan")
-            and not tester_after_reset.get("activeEpisode")
-            and not tester_after_reset.get("autonomyPlan")
-            and not tester_after_reset.get("activeGoal")
-            and not tester_after_reset.get("durableGoals")
-            and not (tester_after_reset.get("memory") or {}).get("recentActions")
-            and ((hermie_after_reset.get("memory") or {}).get("recentActions") or [{}])[-1].get("actionId") == "other-resident-sentinel"
-            and (profile_after_reset.get("identity") or {}).get("continuityMarker") == "preserve-me"
-            and "tester" not in notes_after_reset
-            and "hermie" in notes_after_reset
-            and "tester" not in transcripts_after_reset
-            and "hermie" in transcripts_after_reset
-            and building_ids_after_reset == building_ids_before_reset,
-            json.dumps({"result": reset_result, "tester": tester_after_reset, "hermie": hermie_after_reset, "profile": profile_after_reset}, default=str)[:1800],
+            all(reset_contract.values()),
+            json.dumps({"failed": [key for key, value in reset_contract.items() if not value], "contract": reset_contract, "result": reset_result}, default=str)[:2200],
         )
         ok_clean_reenable, clean_reenable, _ = server.set_agent_live_mode_setting("tester", True, agent_loop_enabled=True)
         reenabled_state = (server.get_live_agent_loop_state(persist_migration=False).get("agents") or {}).get("tester") or {}

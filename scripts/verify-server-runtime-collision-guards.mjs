@@ -138,6 +138,23 @@ function makeFakeRuntimeRoom(dataDirForRoom) {
   room.broadcastRuntimeState = () => {};
   return room;
 }
+
+// The realtime writer must merge against a fresh shared world-action store.
+// A just-created Python action can arrive inside the normal 250 ms hot-cache
+// window and must not be erased by a stale runtime tick write.
+{
+  const mergeDataDir = mkdtempSync(join(tmpdir(), 'vw-runtime-fresh-merge-'));
+  const metaPath = join(mergeDataDir, 'world-meta.json');
+  const oldAction = { id: 'old-action', agentId: 'old-agent', status: 'routing' };
+  const newAction = { id: 'new-python-action', agentId: 'new-agent', status: 'reserved' };
+  writeFileSync(metaPath, JSON.stringify({ agentLife: { worldActions: { active: [oldAction], history: [] } } }, null, 2));
+  const mergeRoom = makeFakeRuntimeRoom(mergeDataDir);
+  const stale = mergeRoom.loadLiveActionRuntimeStore(1000);
+  writeFileSync(metaPath, JSON.stringify({ agentLife: { worldActions: { active: [oldAction, newAction], history: [] } } }, null, 2));
+  mergeRoom.saveLiveActionRuntimeStore(stale.meta, stale.store, 1001);
+  const savedActions = JSON.parse(readFileSync(metaPath, 'utf8')).agentLife.worldActions.active;
+  assert.ok(savedActions.some(action => action.id === newAction.id), `fresh runtime merge must preserve a just-created action: ${JSON.stringify(savedActions)}`);
+}
 configureDynamicInteriorRouting({
   apiToWorldScale: 1 / 40,
   getInteriorBuildingAt: (apiX, apiY) => {

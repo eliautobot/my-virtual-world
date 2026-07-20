@@ -1,14 +1,18 @@
 # Live Agent Mode Restart Spec
 
-Status: fresh-start architecture spec
+Status: foundational architecture spec; original restart baseline is historical, mode/ownership constraints remain normative
 Date: 2026-06-23
 Scope: My Virtual World runtime, API, browser sync, and agent cognition
 
 This is the clean source of truth for the restarted Live Agent Mode. It intentionally does not inherit older Live Agent Mode spec text or old staging harness plans.
 
+The runtime foundation described here has since been implemented. The current post-foundation improvement order is maintained in `LIVE-AGENT-MODE-RESIDENT-AUTONOMY-KERNEL.md`; new work must extend that implementation rather than restarting these phases or creating parallel systems.
+
 ## Goal
 
 Live Agent Mode makes selected AI agents act like persistent residents inside My Virtual World.
+
+My Virtual World's existing scripted simulation is **Default Mode**. Live Agent Mode is a reversible, per-resident AI behavior owner layered over the same world/body runtime. The two modes intentionally have different decision systems, but they must never control one resident concurrently.
 
 A live agent must:
 
@@ -33,9 +37,9 @@ The first working version must prove persistence and synchronization before adva
 - Do not make Live Agent Mode depend on old staging specs or old PR #1 implementation decisions.
 - Do not expose the feature as production-ready until the acceptance gates in the phased plan pass.
 
-## Current Repo Foundation
+## Original Repo Foundation (historical baseline)
 
-The current repo already has useful pieces that should be reused:
+At the start of the June 23 restart, the repo already had useful pieces that were to be reused:
 
 - per-agent Agent Live Mode setting endpoints
 - `POST /api/agent-model/actions`
@@ -48,13 +52,15 @@ The current repo already has useful pieces that should be reused:
 - browser-side action executors for visible world actions
 - OpenClaw/Hermes/Codex presence and communication surfaces
 
-The main missing foundation is authoritative runtime state:
+At that baseline, the main missing foundation was authoritative runtime state:
 
 - no dedicated server-owned position snapshot API
 - no route executor lease API
 - no heartbeat API for live coordinates
 - no guaranteed multi-client same-location rendering
 - no reliable refresh/new-device placement from current persisted runtime state
+
+Those gaps are now served by the existing Colyseus sidecar, `agent-runtime.json`, runtime snapshots, route leases, heartbeats, and observer-client rendering. They remain the one shared body/runtime foundation for Default Mode and Live Agent Mode.
 
 ## Online Runtime Foundation
 
@@ -129,16 +135,18 @@ Every agent has one active behavior owner.
 
 Allowed owners:
 
-- `manual`: user-directed action, highest priority
+- `manual`: user-directed action, including conversation/directives inside an active Live activation; highest priority
 - `agent-live-mode`: AI resident loop owns behavior
-- `agent-scripted-mode`: existing normal scripted behavior
+- `agent-scripted-mode`: existing scripted **Default Mode** behavior
 - `paused`: no autonomous action may start
 
 Precedence:
 
 ```text
-manual/user > agent-live-mode > agent-scripted-mode > idle
+manual/user (including Live conversation/directive) > agent-live-mode > agent-scripted-mode (Default Mode) > idle
 ```
+
+Conversation is a higher-priority controller state, not a new behavior-source kind. It preempts Live autonomy without implicitly deactivating Live Agent Mode. Greetings, questions, and ordinary conversation suspend admission of new Live autonomous actions under a renewable attention lease. Explicit stop/pause interrupts Live-owned work; redirect supersedes incompatible Live work; resume/continue returns control to the Live controller. Default Mode resumes only after explicit Live deactivation.
 
 Enable behavior:
 

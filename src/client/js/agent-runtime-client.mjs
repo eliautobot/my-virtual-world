@@ -614,6 +614,9 @@ export async function createAgentRuntimeClient({
       nextRoom.onMessage('runtime:state', message => {
         if (!applyRuntimeDocument(message?.snapshot, 'runtime:state')) applyRoomState('runtime:state');
       }),
+      nextRoom.onMessage('runtime:health', () => {
+        touchRuntime();
+      }),
       nextRoom.onMessage('runtime:error', message => {
         if (!pendingRequestIds.has(message?.requestId)) {
           logger?.warn?.('Agent runtime sidecar error', message);

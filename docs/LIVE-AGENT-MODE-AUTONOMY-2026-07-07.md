@@ -1,5 +1,11 @@
 # Live Agent Mode Autonomy Upgrade — 2026-07-07
 
+> Historical implementation note. Its planner-based identity/execution model
+> is superseded by `LIVE-AGENT-MODE-RESIDENT-AUTONOMY-KERNEL.md`: OpenClaw now
+> remains the fully bootstrapped agent mind, the Resident Profile is additive
+> embodiment context, My Virtual World owns world memory/body truth, and native
+> Virtual World tools replace planner-shaped OpenClaw command parsing.
+
 Implements the Live Agent Mode autonomy upgrade for OpenClaw agents.
 All changes documented here for revert safety. Baseline release before these
 changes: `v1.0.22` (`192f95d`).
@@ -25,9 +31,9 @@ changes: `v1.0.22` (`192f95d`).
 - `src/server/server.py`
 - The live loop still builds the deterministic `planner-v2` decision frame
   (needs, goals, Resident Profile, memory, reliability scoring).
-- When `modelDecisionEnabled` is on, the loop uses the resident's configured
-  OpenClaw, Hermes, or Codex model as inference transport while the Virtual
-  World Resident Profile remains the authoritative persona.
+- When `modelDecisionEnabled` is on, the resident's configured OpenClaw,
+  Hermes, or Codex agent remains the cognitive authority while the Virtual
+  World Resident Profile supplies authoritative embodiment context.
 - The model cannot invent actions. Reply must resolve to a visible world
   affordance or skip; anything else waits for a valid resident-model decision
   instead of silently substituting the planner-v2 ranked choice.

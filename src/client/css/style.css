@@ -2102,6 +2102,7 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
 #chatBubbleContainer .chat-msg:last-child { border-bottom: none; }
 #chatBubbleContainer .chat-msg.user { color: #4466aa; }
 #chatBubbleContainer .chat-msg.assistant { color: #222; }
+#chatBubbleContainer .chat-msg.system { color: #6b7280; font-style: italic; }
 #chatBubbleContainer .chat-msg .chat-time { font-size: 10px; color: #999; margin-left: 6px; }
 #chatBubbleContainer .chat-bubble-tail {
     position: absolute;

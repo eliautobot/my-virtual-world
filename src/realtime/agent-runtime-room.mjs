@@ -33,6 +33,7 @@ export const WORLD_RUNTIME_TRAFFIC_ALL_RED_MS = 2000;
 export const WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000;
 export const WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000;
 export const RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000;
+export const RUNTIME_HEALTH_BROADCAST_INTERVAL_MS = 2000;
 export const MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS = 500;
 export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
@@ -478,7 +479,21 @@ function invalidateCachedJsonDocument(path) {
   _hotDocumentCache.delete(path);
 }
 
-function readWorldMetaDocument(dataDir) {
+function readWorldMetaDocument(dataDir, { fresh = false } = {}) {
+  if (fresh) {
+    const path = worldMetaFilePath(dataDir);
+    invalidateCachedJsonDocument(path);
+    const raw = readJsonFile(path, null);
+    const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    let mtimeMs = -1;
+    try {
+      mtimeMs = statSync(path).mtimeMs;
+    } catch {
+      mtimeMs = -1;
+    }
+    _hotDocumentCache.set(path, { mtimeMs, checkedAt: Date.now(), value });
+    return value;
+  }
   return readCachedJsonDocument(worldMetaFilePath(dataDir), () => ({}));
 }
 
@@ -501,8 +516,8 @@ function defaultWorldActionsStore() {
   };
 }
 
-function readWorldActionsStore(dataDir) {
-  const meta = readWorldMetaDocument(dataDir);
+function readWorldActionsStore(dataDir, { fresh = false } = {}) {
+  const meta = readWorldMetaDocument(dataDir, { fresh });
   const agentLife = meta.agentLife && typeof meta.agentLife === 'object' && !Array.isArray(meta.agentLife)
     ? meta.agentLife
     : {};
@@ -4528,6 +4543,12 @@ function isAgentLiveModeEnabledForServer(meta, agentId, presenceRecord = null) {
   );
 }
 
+function idleRuntimeOwnershipForAgent(meta, agentId) {
+  return isAgentLiveModeEnabledForServer(meta, agentId)
+    ? { mode: 'live', owner: 'agent-live-mode' }
+    : { mode: 'scripted', owner: 'agent-scripted-mode' };
+}
+
 // Behavior layer contract (bottom to top):
 //   Layer 1: scripted/idle/ambient presence theater (live-status desk runtime,
 //            scripted object runtime, deskless wander).
@@ -4536,18 +4557,11 @@ function isAgentLiveModeEnabledForServer(meta, agentId, presenceRecord = null) {
 // Layer 1 must NEVER claim an agent that is enabled for Layer 2 in THIS world.
 // A live-mode agent whose gateway presence flips to "working" (e.g. while its
 // model runs inference) must not be desk-routed by the scripted layer; Live
-// Mode decides where the body goes. Ambient behavior for live agents is only
-// allowed when the profile explicitly opts in (scriptedAmbientEnabled === true).
+// Mode decides where the body goes. A configured Ambient preference is kept
+// for Default Mode, but it is never an opt-in to concurrent scripted body
+// control while Live Mode is active.
 function isAgentScriptedLayerAllowedForServer(meta, agentId, presenceRecord = null) {
-  if (!isAgentLiveModeEnabledForServer(meta, agentId, presenceRecord)) return true;
-  const profiles = meta?.agentProfiles && typeof meta.agentProfiles === 'object' && !Array.isArray(meta.agentProfiles)
-    ? meta.agentProfiles
-    : {};
-  const profile = profiles[agentId] && typeof profiles[agentId] === 'object' && !Array.isArray(profiles[agentId])
-    ? profiles[agentId]
-    : {};
-  const record = presenceRecord && typeof presenceRecord === 'object' && !Array.isArray(presenceRecord) ? presenceRecord : {};
-  return profile.scriptedAmbientEnabled === true || record.scriptedAmbientEnabled === true;
+  return !isAgentLiveModeEnabledForServer(meta, agentId, presenceRecord);
 }
 
 function isAgentScriptedAmbientEnabledForServer(meta, agentId, presenceRecord = null) {
@@ -6239,8 +6253,9 @@ export function buildScriptedObjectRuntimePlan(dataDir) {
   const targets = listScriptedObjectRuntimeTargets(dataDir);
   const idleAgentIds = Object.entries(presence)
     .filter(([agentId, record]) => agentId && !agentId.startsWith('_') && isPresenceIdleForScriptedObjectRuntime(record) && isAgentScriptedAmbientEnabledForServer(meta, agentId, record)
-      // Layer separation: live-mode agents only join scripted ambient idle
-      // behavior when the profile explicitly opts in (Ambient switch on).
+      // Layer separation: Live ownership always suppresses Default scripted
+      // idle behavior. The Ambient preference becomes effective again only
+      // after Live Mode is explicitly disabled.
       && isAgentScriptedLayerAllowedForServer(meta, agentId, record))
     .map(([agentId]) => safeText(agentId, ''))
     .filter(Boolean)
@@ -7835,6 +7850,7 @@ export class AgentRuntimeRoom extends Room {
     const doc = readRuntimeDocument(this.dataDir);
     this.events = Array.isArray(doc.events) ? doc.events.slice(-MAX_RUNTIME_EVENTS) : [];
     this.setState(stateFromDocument(doc));
+    this.reconcileIdleBehaviorOwnership('runtime-hydration');
     this.ensureServerWorldTopology(Date.now(), { force: true });
 
     this.onMessage('runtime:snapshot', (client, message) => this.handleSnapshot(client, message));
@@ -7852,6 +7868,32 @@ export class AgentRuntimeRoom extends Room {
     if (process.env.VW_REALTIME_DISABLE_WORLD_TICK !== 'true') {
       this.clock.setInterval(() => this.tickWorldRuntime(), DEFAULT_WORLD_RUNTIME_TICK_MS);
     }
+    this.clock.setInterval(() => {
+      this.broadcast('runtime:health', {
+        type: 'runtime-health',
+        serverTime: new Date().toISOString(),
+        revision: Number(this.state?.revision || 0),
+      });
+    }, RUNTIME_HEALTH_BROADCAST_INTERVAL_MS);
+  }
+
+  reconcileIdleBehaviorOwnership(reason = 'runtime-reconcile') {
+    const meta = readWorldMetaDocument(this.dataDir, { fresh: true });
+    let changed = 0;
+    for (const [agentId, existing] of this.state.agents.entries()) {
+      if (hasActiveLease(existing)) continue;
+      const current = snapshotToPlain(existing);
+      if (current.routeId || current.worldActionId) continue;
+      if (current.mode === 'manual' || String(current.owner || '').startsWith('user-directed')) continue;
+      const idleOwnership = idleRuntimeOwnershipForAgent(meta, agentId);
+      if (current.mode === idleOwnership.mode && current.owner === idleOwnership.owner) continue;
+      this.upsertSnapshot({
+        ...current,
+        ...idleOwnership,
+      }, 'idle-behavior-ownership-reconciled', { reason });
+      changed++;
+    }
+    return changed;
   }
 
   onJoin(client) {
@@ -8269,10 +8311,13 @@ export class AgentRuntimeRoom extends Room {
           leaseExpiresAt: existing.leaseExpiresAt,
         });
       }
+      const idleOwnership = idleRuntimeOwnershipForAgent(
+        readWorldMetaDocument(this.dataDir, { fresh: true }),
+        agentId,
+      );
       const releaseSnapshot = {
         agentId,
-        mode: 'scripted',
-        owner: 'agent-scripted-mode',
+        ...idleOwnership,
         state: message.state || 'idle',
         routeId: '',
         worldActionId: '',
@@ -8292,16 +8337,17 @@ export class AgentRuntimeRoom extends Room {
 
   expireStaleRouteLeases(nowMs = Date.now()) {
     let expired = 0;
+    const meta = readWorldMetaDocument(this.dataDir, { fresh: true });
     for (const [agentId, existing] of this.state.agents.entries()) {
       if (!hasExpiredLease(existing, nowMs)) continue;
       const before = snapshotToPlain(existing);
       const expiredServerManaged = SERVER_MANAGED_ROUTE_LEASE_OWNERS.has(safeText(before.leaseOwner, ''));
+      const idleOwnership = idleRuntimeOwnershipForAgent(meta, agentId);
       clearDynamicInteriorRoutingForAgent(agentId);
       clearDynamicExteriorRoutingForAgent(agentId);
       this.upsertSnapshot({
         agentId,
-        mode: 'scripted',
-        owner: 'agent-scripted-mode',
+        ...idleOwnership,
         state: 'idle',
         routeId: '',
         worldActionId: '',
@@ -8337,7 +8383,10 @@ export class AgentRuntimeRoom extends Room {
     let nextMeta = meta;
     let nextStore = store;
     try {
-      const latest = readWorldActionsStore(this.dataDir);
+      // A Python request can create/reserve an action between runtime polls.
+      // This merge is a write barrier, so bypass the 250 ms hot-read cache;
+      // otherwise an old cached store can erase that newly accepted action.
+      const latest = readWorldActionsStore(this.dataDir, { fresh: true });
       const recordId = record => safeText(record?.id || record?.worldActionId, '');
       const latestHistory = Array.isArray(latest?.store?.history) ? latest.store.history : [];
       const latestActive = Array.isArray(latest?.store?.active) ? latest.store.active : [];

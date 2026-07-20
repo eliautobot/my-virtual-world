@@ -238,7 +238,11 @@ def main():
         decision = server._live_agent_loop_build_decision_frame("tester", full_perception, agent_state)
         prompt = server._live_agent_model_decision_prompt("tester", decision, agent_state)
         check("planner frame receives compact authoritative spatial context", decision.get("spatialContext", {}).get("summary", {}).get("nearbyAgentCount") == perception["summary"]["nearbyAgentCount"])
-        check("model prompt explains occupancy, route, nearby agents, and objects", all(token in prompt for token in ("Occupancy:", "Active route:", "Nearby residents from authoritative coordinates:", "Nearby objects from persisted coordinates")), prompt[-3000:])
+        check(
+            "model prompt preserves compact occupancy, route, nearby residents, and nearby objects",
+            all(token in prompt for token in ('"spatial":', '"occupancy":', '"route":', '"nearbyResidents":', '"nearbyObjects":')),
+            prompt[-3000:],
+        )
         ok_get, api_result, api_status = server.get_live_agent_spatial_perception("tester")
         check("spatial read API returns versioned snapshot", ok_get and api_status == 200 and api_result["spatialPerception"]["schemaVersion"] == spatial.SPATIAL_SCHEMA_VERSION, json.dumps(api_result)[:500])
 

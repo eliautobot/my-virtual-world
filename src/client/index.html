@@ -521,7 +521,7 @@
                 <button class="settings-tab" data-settings-tab="general">General</button>
                 <button class="settings-tab" data-settings-tab="connections">Connections</button>
                 <button class="settings-tab" data-settings-tab="features">Features</button>
-                <button class="settings-tab" data-settings-tab="live-mode">Live Mode</button>
+                <button class="settings-tab" data-settings-tab="live-mode">Live Agent Mode</button>
                 <button class="settings-tab" data-settings-tab="browser">Browser</button>
                 <button class="settings-tab" data-settings-tab="sms">SMS</button>
                 <button class="settings-tab" data-settings-tab="debug">Debug</button>
@@ -600,15 +600,25 @@
                 <section class="settings-pane" data-settings-pane="features">
                     <label class="settings-check"><input type="checkbox" id="setting-featureBrowser"> Agent Browser</label>
                     <label class="settings-check"><input type="checkbox" id="setting-featureSms"> SMS / Twilio</label>
-                    <label class="settings-check"><input type="checkbox" id="setting-featureAgentLiveMode"> Agent Live Mode <span class="settings-feature-note">Preview</span></label>
                     <label class="settings-check"><input type="checkbox" id="setting-featureDebugTools" checked> Debug Tools</label>
                     <div id="featureLockNotice" class="settings-status-card"></div>
                 </section>
 
                 <section class="settings-pane" data-settings-pane="live-mode">
-                    <label class="settings-check"><input type="checkbox" id="setting-liveModeFeatureEnabled"> Agent Live Mode Feature <span class="settings-feature-note">Global</span></label>
+                    <div class="settings-live-mode-global-control">
+                        <div class="settings-live-mode-global-copy">
+                            <strong>Live Agent Mode</strong>
+                            <span>This is the global On/Off control. Turn it on to make Live Agent Mode available to the agents selected below.</span>
+                        </div>
+                        <label class="settings-live-mode-toggle" for="setting-liveModeFeatureEnabled">
+                            <input type="checkbox" role="switch" id="setting-liveModeFeatureEnabled" aria-describedby="liveModeFeatureDescription">
+                            <span class="settings-live-mode-toggle-track" aria-hidden="true"><span></span></span>
+                            <strong id="liveModeFeatureToggleLabel">Off</strong>
+                        </label>
+                    </div>
+                    <div id="liveModeFeatureDescription" class="settings-inline-status">Live Agent Mode is globally disabled.</div>
                     <div id="liveModeLoopStatus" class="settings-status-card settings-live-loop-status">
-                        <strong>Loop off</strong><span>Turn on Agent Live Mode in Features to manage loop controls.</span>
+                        <strong>Loop off</strong><span>Turn on Live Agent Mode above to manage loop controls.</span>
                     </div>
                     <div class="settings-live-loop-settings">
                         <label class="settings-check"><input type="checkbox" id="setting-liveLoopEnabled"> Loop Engine</label>
@@ -652,17 +662,16 @@
                     </div>
                     <div id="liveModeLoopActionStatus" class="settings-inline-status"></div>
                     <div id="liveModeSummary" class="settings-status-card locked">
-                        <strong>Agent Live Mode off</strong><span>Turn on Agent Live Mode in Features before applying agent selection.</span>
+                        <strong>Live Agent Mode off</strong><span>Turn on Live Agent Mode above before selecting agents.</span>
                     </div>
                     <div class="settings-live-agent-legend">
-                        <div><strong>Live</strong><span>Claims this agent for this world and allows Live Mode actions.</span></div>
-                        <div><strong>Loop</strong><span>Runs the Live Agent brain so it can choose and execute actions.</span></div>
+                        <div><strong>Live</strong><span>Selects this agent for Live Agent Mode and starts its autonomous controller when the global mode is on.</span></div>
                         <div><strong>Ambient</strong><span>Lets regular idle background behavior include this agent.</span></div>
                     </div>
                     <div id="liveModeAgentList" class="settings-live-agent-list"></div>
                     <div class="settings-live-agent-toolbar">
                         <button class="btn-secondary" id="btn-refreshLiveAgents">Refresh Agents</button>
-                        <button class="btn-primary" id="btn-saveLiveAgents">Apply Agent Selection</button>
+                        <span class="settings-live-agent-auto-save">Agent toggles save immediately and match the same controls in each agent's editor.</span>
                     </div>
                     <div id="liveModeAgentStatus" class="settings-inline-status"></div>
                 </section>
@@ -714,6 +723,23 @@
                     <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
                     <button class="btn-secondary" onclick="closeSettingsModal()">Cancel</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="liveAgentModeWarningModal" class="modal live-agent-mode-warning-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="liveAgentModeWarningTitle" aria-describedby="liveAgentModeWarningText" aria-hidden="true">
+        <div class="modal-content live-agent-mode-warning-content">
+            <div class="modal-header">
+                <h2 id="liveAgentModeWarningTitle">Enable Live Agent Mode?</h2>
+                <button class="modal-close" id="liveAgentModeWarningClose" type="button" aria-label="Cancel">✕</button>
+            </div>
+            <div class="live-agent-mode-warning-body">
+                <div class="live-agent-mode-warning-icon" aria-hidden="true">⚠️</div>
+                <p id="liveAgentModeWarningText"><strong>Warning:</strong> Live Agent Mode will use inference for agents to make decisions and interact. Live Agent Mode is highly experimental and in early development. It consumes inference, so if an agent model uses a subscription or usage-based API billing, enabling this mode will consume those resources.</p>
+            </div>
+            <div class="form-row live-agent-mode-warning-actions">
+                <button class="btn-secondary" id="liveAgentModeWarningCancel" type="button">Cancel</button>
+                <button class="btn-primary" id="liveAgentModeWarningApply" type="button">Apply</button>
             </div>
         </div>
     </div>
@@ -926,8 +952,8 @@
     <script src="js/vo-engine.js?v=printer-copier-asset-v1"></script>
     <script src="/node_modules/@colyseus/sdk/dist/colyseus.js?v=20260623-live-agent-runtime-hydration"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script type="module" src="js/main3d.js?v=20260711-runtime-routing-hydrate"></script>
-    <script src="js/chat.js?v=20260707-live-planner-r1"></script>
-    <script src="js/settings.js?v=20260713-live-agent-p0-r2"></script>
+    <script type="module" src="js/main3d.js?v=20260719-live-agent-toggle-sync-r4"></script>
+    <script src="js/chat.js?v=20260717-live-controller-r1"></script>
+    <script src="js/settings.js?v=20260719-live-agent-toggle-sync-r3"></script>
 </body>
 </html>

@@ -3,8 +3,8 @@
 //   Layer 1 (scripted live-status desk runtime, scripted object runtime,
 //   deskless wander) must never claim an agent that has Agent Live Mode
 //   enabled (Layer 2), even when gateway presence reports "working" during
-//   model inference. Ambient participation is only allowed with an explicit
-//   scriptedAmbientEnabled === true opt-in.
+//   model inference. Ambient preferences are Default Mode settings and never
+//   authorize concurrent scripted body control while Live Mode is active.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -100,8 +100,8 @@ check(
   JSON.stringify(scriptedPlan.idleAgentIds),
 );
 check(
-  'live-mode agent WITH ambient opt-in still allowed in scripted idle objects',
-  scriptedPlan.idleAgentIds.includes('ambientLiveAgent'),
+  'live-mode agent remains excluded even when Default ambient preference is configured',
+  !scriptedPlan.idleAgentIds.includes('ambientLiveAgent'),
   JSON.stringify(scriptedPlan.idleAgentIds),
 );
 check(

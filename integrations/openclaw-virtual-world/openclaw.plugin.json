@@ -1,0 +1,37 @@
+{
+  "id": "my-virtual-world",
+  "name": "My Virtual World",
+  "description": "Native embodiment, perception, memory, and action tools for Live Agent Mode.",
+  "version": "0.1.0",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "Optional fixed My Virtual World HTTP origin. By default the active world is resolved from the shared Live ownership registry."
+      },
+      "requestTimeoutMs": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 120000
+      }
+    }
+  },
+  "contracts": {
+    "tools": [
+      "virtual_world_observe",
+      "virtual_world_list_affordances",
+      "virtual_world_act",
+      "virtual_world_inspect_action",
+      "virtual_world_cancel_action",
+      "virtual_world_wait",
+      "virtual_world_recall",
+      "virtual_world_remember",
+      "virtual_world_commit",
+      "virtual_world_say"
+    ]
+  }
+}
