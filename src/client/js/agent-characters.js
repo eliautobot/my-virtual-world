@@ -3419,6 +3419,7 @@ function _applyExpression(parts, expr, lipColor) {
         parent.remove(parts.mouthGroup);
         const newMouth = buildMouth(expr.mouthType, lipColor);
         newMouth.position.copy(pos);
+        newMouth.visible = parts.mouthGroup.visible;
         newMouth.userData._mouthType = expr.mouthType;
         parent.add(newMouth);
         parts.mouthGroup = newMouth;

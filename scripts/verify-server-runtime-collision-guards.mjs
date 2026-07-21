@@ -1402,6 +1402,7 @@ fakeRoom.upsertSnapshot({
   leaseExpiresAt: '',
 }, 'seed-blocker');
 const beforeBlocker = fakeRoom.state.agents.get('agent-idle-blocker');
+const beforeBlockerPosition = { x: Number(beforeBlocker.x), y: Number(beforeBlocker.y) };
 const nudged = fakeRoom.tryNudgeServerRuntimeCrowdBlocker('agent-crowd-mover', {
   x: cx(2),
   y: cy(7),
@@ -1419,7 +1420,7 @@ const nudged = fakeRoom.tryNudgeServerRuntimeCrowdBlocker('agent-crowd-mover', {
 const afterBlocker = fakeRoom.state.agents.get('agent-idle-blocker');
 assert.equal(nudged.nudged, true, `idle blocker should be nudged out of the moving agent path: ${JSON.stringify(nudged)}`);
 assert.ok(
-  Math.hypot(Number(afterBlocker.x) - Number(beforeBlocker.x), Number(afterBlocker.y) - Number(beforeBlocker.y)) > 1,
+  Math.hypot(Number(afterBlocker.x) - beforeBlockerPosition.x, Number(afterBlocker.y) - beforeBlockerPosition.y) > 1,
   'idle blocker nudge should update the blocker position',
 );
 

@@ -4,12 +4,12 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260717-live-controller-r1';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260720-colyseus-performance-r3';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
   createAgentCharacter, updateAgentAnimation, getAgentAppearance, APPEARANCE_CATALOG,
-} from './agent-characters.js?v=20260615-desk-carry-rest-r1';
+} from './agent-characters.js?v=20260721-fluidity-r2';
 import {
   listObjectUseActiveCandidates,
   chooseAndReserveObjectUseActiveSlot,
@@ -881,6 +881,7 @@ const _sphereGeo = new THREE.SphereGeometry(0.5, 8, 6);
 const _cylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
 const _coneGeo = new THREE.ConeGeometry(0.5, 1, 8);
 const _matCache = {};
+const _sharedVertexColorMatCache = new Map();
 
 function getMat(color, opts) {
   const key = color + (opts ? JSON.stringify(opts) : '');
@@ -891,6 +892,55 @@ function getMat(color, opts) {
   // instance so runtime color/opacity/emissive changes on one object cannot
   // bleed into another object that started with the same color.
   return _matCache[key].clone();
+}
+
+function getLambertBatchSignature(material, mesh) {
+  return [
+    material.emissive?.getHex?.() ?? 0,
+    Number(material.emissiveIntensity || 0),
+    material.transparent ? 1 : 0,
+    Number(material.opacity ?? 1),
+    material.depthTest ? 1 : 0,
+    material.depthWrite ? 1 : 0,
+    Number(material.side ?? THREE.FrontSide),
+    Number(material.alphaTest || 0),
+    material.flatShading ? 1 : 0,
+    mesh.castShadow ? 1 : 0,
+    mesh.receiveShadow ? 1 : 0,
+  ].join('|');
+}
+
+function getSharedVertexColorMaterial(material) {
+  const key = [
+    material.emissive?.getHex?.() ?? 0,
+    Number(material.emissiveIntensity || 0),
+    material.transparent ? 1 : 0,
+    Number(material.opacity ?? 1),
+    material.depthTest ? 1 : 0,
+    material.depthWrite ? 1 : 0,
+    Number(material.side ?? THREE.FrontSide),
+    Number(material.alphaTest || 0),
+    material.flatShading ? 1 : 0,
+  ].join('|');
+  let shared = _sharedVertexColorMatCache.get(key);
+  if (!shared) {
+    shared = new THREE.MeshLambertMaterial({
+      color: 0xffffff,
+      emissive: material.emissive?.getHex?.() ?? 0,
+      emissiveIntensity: Number(material.emissiveIntensity || 0),
+      vertexColors: true,
+      flatShading: material.flatShading === true,
+      transparent: material.transparent === true,
+      opacity: Number(material.opacity ?? 1),
+      depthTest: material.depthTest !== false,
+      depthWrite: material.depthWrite !== false,
+      side: material.side ?? THREE.FrontSide,
+      alphaTest: Number(material.alphaTest || 0),
+    });
+    shared.userData.vwSharedStaticMaterial = true;
+    _sharedVertexColorMatCache.set(key, shared);
+  }
+  return shared;
 }
 
 function vox(w, h, d, color) {
@@ -938,13 +988,13 @@ function mergeFurnitureItemVoxels(item) {
   });
   if (candidates.length < 2) return item;
 
-  // Group by material signature so each merged mesh keeps an exact look.
+  // Batch all compatible colors together using vertex colors. This preserves
+  // the exact palette while collapsing a typical item from one draw per color
+  // to one draw per render-state/shadow combination.
   const groups = new Map();
   for (const mesh of candidates) {
     const mat = mesh.material;
-    const key = mat.color.getHex() + '|' + mat.emissive.getHex() + '|' +
-      (mat.transparent ? 1 : 0) + '|' + mat.opacity + '|' +
-      (mesh.castShadow ? 1 : 0) + (mesh.receiveShadow ? 1 : 0);
+    const key = getLambertBatchSignature(mat, mesh);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(mesh);
   }
@@ -955,6 +1005,7 @@ function mergeFurnitureItemVoxels(item) {
     if (meshes.length < 2) continue; // leave singletons untouched
     const positionArrays = [];
     const normalArrays = [];
+    const colorArrays = [];
     let vertexCount = 0;
     for (const mesh of meshes) {
       mesh.updateMatrixWorld(true);
@@ -964,22 +1015,37 @@ function mergeFurnitureItemVoxels(item) {
       geo.applyMatrix4(relMatrix); // bake transform relative to furniture root
       positionArrays.push(geo.getAttribute('position').array);
       normalArrays.push(geo.getAttribute('normal').array);
-      vertexCount += geo.getAttribute('position').count;
+      const count = geo.getAttribute('position').count;
+      const colors = new Float32Array(count * 3);
+      const color = mesh.material.color;
+      for (let i = 0; i < count; i++) {
+        const offset = i * 3;
+        colors[offset] = color.r;
+        colors[offset + 1] = color.g;
+        colors[offset + 2] = color.b;
+      }
+      colorArrays.push(colors);
+      vertexCount += count;
       geo.dispose();
     }
     const posArr = new Float32Array(vertexCount * 3);
     const normArr = new Float32Array(vertexCount * 3);
+    const colorArr = new Float32Array(vertexCount * 3);
     let offset = 0;
     for (let i = 0; i < positionArrays.length; i++) {
       posArr.set(positionArrays[i], offset);
       normArr.set(normalArrays[i], offset);
+      colorArr.set(colorArrays[i], offset);
       offset += positionArrays[i].length;
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
     geometry.setAttribute('normal', new THREE.BufferAttribute(normArr, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colorArr, 3));
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
     const sample = meshes[0];
-    const mergedMesh = new THREE.Mesh(geometry, sample.material);
+    const mergedMesh = new THREE.Mesh(geometry, getSharedVertexColorMaterial(sample.material));
     mergedMesh.castShadow = sample.castShadow;
     mergedMesh.receiveShadow = sample.receiveShadow;
     mergedMesh.userData.mergedFurnitureVoxels = meshes.length;
@@ -1017,9 +1083,7 @@ function mergeStaticGroupMeshes(rootGroup) {
   const groups = new Map();
   for (const mesh of candidates) {
     const mat = mesh.material;
-    const key = mat.color.getHex() + '|' + mat.emissive.getHex() + '|' +
-      (mat.transparent ? 1 : 0) + '|' + mat.opacity + '|' +
-      (mesh.castShadow ? 1 : 0) + (mesh.receiveShadow ? 1 : 0);
+    const key = getLambertBatchSignature(mat, mesh);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(mesh);
   }
@@ -1029,6 +1093,7 @@ function mergeStaticGroupMeshes(rootGroup) {
     if (meshes.length < 2) continue; // singletons stay as-is
     const positionArrays = [];
     const normalArrays = [];
+    const colorArrays = [];
     let vertexCount = 0;
     for (const mesh of meshes) {
       const geo = mesh.geometry.toNonIndexed();
@@ -1037,21 +1102,37 @@ function mergeStaticGroupMeshes(rootGroup) {
       geo.applyMatrix4(relMatrix); // bake transform relative to chunk group
       positionArrays.push(geo.getAttribute('position').array);
       normalArrays.push(geo.getAttribute('normal').array);
-      vertexCount += geo.getAttribute('position').count;
+      const count = geo.getAttribute('position').count;
+      const colors = new Float32Array(count * 3);
+      const color = mesh.material.color;
+      for (let i = 0; i < count; i++) {
+        const offset = i * 3;
+        colors[offset] = color.r;
+        colors[offset + 1] = color.g;
+        colors[offset + 2] = color.b;
+      }
+      colorArrays.push(colors);
+      vertexCount += count;
+      geo.dispose();
     }
     const posArr = new Float32Array(vertexCount * 3);
     const normArr = new Float32Array(vertexCount * 3);
+    const colorArr = new Float32Array(vertexCount * 3);
     let offset = 0;
     for (let i = 0; i < positionArrays.length; i++) {
       posArr.set(positionArrays[i], offset);
       normArr.set(normalArrays[i], offset);
+      colorArr.set(colorArrays[i], offset);
       offset += positionArrays[i].length;
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
     geometry.setAttribute('normal', new THREE.BufferAttribute(normArr, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colorArr, 3));
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
     const sample = meshes[0];
-    const mergedMesh = new THREE.Mesh(geometry, sample.material);
+    const mergedMesh = new THREE.Mesh(geometry, getSharedVertexColorMaterial(sample.material));
     mergedMesh.castShadow = sample.castShadow;
     mergedMesh.receiveShadow = sample.receiveShadow;
     mergedMesh.userData.mergedStaticMeshes = meshes.length;
@@ -1892,10 +1973,13 @@ function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
   return true;
 }
 
-function applyAgentRuntimeWorldObjectStatesToWorld() {
+function applyAgentRuntimeWorldObjectStatesToWorld(objectKeys = null) {
   if (!_agentRuntimeClient?.connected) return 0;
   let applied = 0;
-  for (const objectState of _agentRuntimeClient.worldObjects.values()) {
+  const states = Array.isArray(objectKeys)
+    ? objectKeys.map(key => _agentRuntimeClient.worldObjects.get(key)).filter(Boolean)
+    : _agentRuntimeClient.worldObjects.values();
+  for (const objectState of states) {
     if (applyAgentRuntimeWorldObjectStateToWorld(objectState)) applied++;
   }
   return applied;
@@ -3258,10 +3342,12 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   return true;
 }
 
-function applyAgentRuntimeSnapshotsToAgents(source = 'runtime', { updateVisible = false } = {}) {
+function applyAgentRuntimeSnapshotsToAgents(source = 'runtime', { updateVisible = false, changedAgentIds = null } = {}) {
   if (!_agentRuntimeClient?.connected || !agentsList.length) return 0;
+  const changedIds = Array.isArray(changedAgentIds) ? new Set(changedAgentIds.map(String)) : null;
   let hydrated = 0;
   agentsList.forEach(agent => {
+    if (changedIds && ![...getAgentIdentityKeys(agent)].some(key => changedIds.has(String(key)))) return;
     const snapshot = getAgentRuntimeSnapshot(agent);
     if (applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible, source })) {
       hydrated++;
@@ -3282,12 +3368,20 @@ function subscribeAgentRuntimeSnapshots() {
   if (!_agentRuntimeClient?.connected) return;
   if (_agentRuntimeUnsubscribe) _agentRuntimeUnsubscribe();
   _agentRuntimeUnsubscribe = _agentRuntimeClient.onSnapshots((snapshots, meta = {}) => {
-    applyAgentRuntimeWorldObjectStatesToWorld();
-    publishAgentRuntimeTrafficTopology();
-    applyAgentRuntimeTrafficLights();
-    applyAgentRuntimeTrafficVehicles();
-    const hydrated = applyAgentRuntimeSnapshotsToAgents(meta.source || 'runtime:update', { updateVisible: true });
-    if (hydrated > 0) updateAgentList();
+    const fullSync = meta.fullSync === true;
+    if (fullSync || meta.changedObjectKeys?.length) {
+      applyAgentRuntimeWorldObjectStatesToWorld(fullSync ? null : meta.changedObjectKeys);
+    }
+    if (fullSync) publishAgentRuntimeTrafficTopology();
+    if (fullSync || meta.worldRuntimeChanged === true) {
+      applyAgentRuntimeTrafficLights();
+      applyAgentRuntimeTrafficVehicles();
+    }
+    const hydrated = applyAgentRuntimeSnapshotsToAgents(meta.source || 'runtime:update', {
+      updateVisible: true,
+      changedAgentIds: fullSync ? null : (meta.changedAgentIds || []),
+    });
+    if (fullSync && hydrated > 0) updateAgentList();
   });
 }
 
@@ -15255,6 +15349,7 @@ function tagFurniture(item, type = null, meta = null) {
       if (meta && typeof meta === 'object') Object.assign(obj.userData, meta);
     }
   });
+  if (type === 'pingpong') registerPingPongVisualRoot(item);
   return item;
 }
 
@@ -27967,6 +28062,50 @@ function updateBuildingLOD() {
       }
     });
   }
+  updateAgentDetailLOD();
+}
+
+const AGENT_DETAIL_LOD_MEDIUM_DISTANCE = 24;
+const AGENT_DETAIL_LOD_FAR_DISTANCE = 50;
+const AGENT_DETAIL_LOD_MEDIUM_PARTS = Object.freeze([
+  'leftEyebrow',
+  'rightEyebrow',
+  'nose',
+  'mouth',
+  'leftEyelashes',
+  'rightEyelashes',
+]);
+const AGENT_DETAIL_LOD_FAR_PARTS = Object.freeze([
+  'leftEye',
+  'rightEye',
+  'glasses',
+]);
+
+function setAgentDetailPartVisible(root, name, visible) {
+  const part = root?.getObjectByName?.(name);
+  if (part && part.visible !== visible) part.visible = visible;
+}
+
+function updateAgentDetailLOD() {
+  const zoomPenalty = Math.max(0, Number(camDist || 0) - 24) * 0.6;
+  for (const agent of agentsList) {
+    const root = agent?._group3d;
+    if (!root) continue;
+    const dx = Number(root.position.x || 0) - Number(camTarget.x || 0);
+    const dz = Number(root.position.z || 0) - Number(camTarget.z || 0);
+    const effectiveDistance = Math.hypot(dx, dz) + zoomPenalty;
+    const lod = agent.id === selectedAgentId
+      ? 0
+      : (effectiveDistance > AGENT_DETAIL_LOD_FAR_DISTANCE ? 2
+        : (effectiveDistance > AGENT_DETAIL_LOD_MEDIUM_DISTANCE ? 1 : 0));
+    agent._renderDetailLod = lod;
+    for (const name of AGENT_DETAIL_LOD_MEDIUM_PARTS) {
+      setAgentDetailPartVisible(root, name, lod === 0);
+    }
+    for (const name of AGENT_DETAIL_LOD_FAR_PARTS) {
+      setAgentDetailPartVisible(root, name, lod < 2);
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -32155,15 +32294,27 @@ async function loadAgents() {
     });
     addActivityLog('🌍 My Virtual World loaded');
 
-    // Poll live agent status every 5s, using /api/status as the authoritative source.
+    // Presence changes quickly; roster/profile metadata does not. Keep the
+    // lightweight status poll at 5s and refresh the expensive roster at 30s.
+    let cachedLiveRoster = list;
+    let lastRosterFetchAtMs = Date.now();
+    let statusPollInFlight = false;
     setInterval(async () => {
+      if (statusPollInFlight || document.visibilityState === 'hidden') return;
+      statusPollInFlight = true;
       try {
+        const shouldRefreshRoster = Date.now() - lastRosterFetchAtMs >= 30000;
         const [statusResponse, rosterResponse] = await Promise.all([
           fetch('/api/status'),
-          fetch('/api/agents').catch(() => null),
+          shouldRefreshRoster ? fetch('/api/agents').catch(() => null) : Promise.resolve(null),
         ]);
         const liveStatusMap = await statusResponse.json();
-        const liveRoster = rosterResponse?.ok ? await rosterResponse.json() : [];
+        if (rosterResponse?.ok) {
+          cachedLiveRoster = await rosterResponse.json();
+          lastRosterFetchAtMs = Date.now();
+        }
+        const liveRoster = cachedLiveRoster;
+        let agentListChanged = false;
 
         agentsList.forEach(a => {
           const snapshot = getLiveStatusSnapshotForAgent(a, liveStatusMap);
@@ -32188,6 +32339,7 @@ async function loadAgents() {
           }
 
           if (prevStatus !== undefined && prevStatus !== newStatus) {
+            agentListChanged = true;
             const emoji = a.emoji || '🤖';
             const name = a.name || a.id;
             if (newStatus === 'working') addActivityLog(`${emoji} ${name} started working`);
@@ -32218,6 +32370,7 @@ async function loadAgents() {
 
           if (rosterMatch && (a.workBuilding !== rosterMatch.workBuilding || a.homeBuilding !== rosterMatch.homeBuilding)) {
             applyAgentAssignment(a, rosterMatch.workBuilding, rosterMatch.homeBuilding);
+            agentListChanged = true;
           }
 
           // Sync saved personality from the roster profile (server-authoritative).
@@ -32232,8 +32385,9 @@ async function loadAgents() {
             a.liveWorld = rosterMatch.liveWorld;
           }
         });
-        updateAgentList();
+        if (agentListChanged) updateAgentList();
       } catch (e) { /* silent */ }
+      finally { statusPollInFlight = false; }
     }, 5000);
   } catch (e) {
     showToast('⚠️ Agents offline — world still active', 'warning');
@@ -40206,6 +40360,16 @@ function getLiveModeWorldClientMarkerUrl() {
 const SERVER_AUTHORITATIVE_LIVE_ACTION_RUNTIME = true;
 
 async function syncActiveBarberChairWorldActions() {
+  if (!isRuntimeExecutorPageVisible()) {
+    window.__VWLastBarberChairWorldActionSync = {
+      ok: true,
+      routed: 0,
+      skipped: true,
+      reason: 'runtime-hidden-page-observer',
+      checkedAt: new Date().toISOString(),
+    };
+    return false;
+  }
   if (SERVER_AUTHORITATIVE_LIVE_ACTION_RUNTIME && window.__VWAllowBrowserWorldActionExecutor !== true) {
     try {
       const response = await fetch(getLiveModeWorldClientMarkerUrl());
@@ -40227,16 +40391,6 @@ async function syncActiveBarberChairWorldActions() {
         checkedAt: new Date().toISOString(),
       };
     }
-    return false;
-  }
-  if (!isRuntimeExecutorPageVisible()) {
-    window.__VWLastBarberChairWorldActionSync = {
-      ok: true,
-      routed: 0,
-      skipped: true,
-      reason: 'runtime-hidden-page-observer',
-      checkedAt: new Date().toISOString(),
-    };
     return false;
   }
   try {
@@ -40261,7 +40415,7 @@ async function syncActiveBarberChairWorldActions() {
 
 function startBarberChairWorldActionSync() {
   if (_barberChairWorldActionSyncTimer) return;
-  _barberChairWorldActionSyncTimer = setInterval(syncActiveBarberChairWorldActions, 1500);
+  _barberChairWorldActionSyncTimer = setInterval(syncActiveBarberChairWorldActions, 5000);
   setTimeout(syncActiveBarberChairWorldActions, 0);
 }
 
@@ -59194,10 +59348,29 @@ function isPingPongGameVisuallyLive(game, building = null, table = null) {
   return !!(p1 && p2);
 }
 
+const _pingPongVisualRoots = new Set();
+
+function registerPingPongVisualRoot(root) {
+  if (!root?.getObjectByName) return false;
+  const ball = root.getObjectByName('pingpongBall');
+  if (!ball) return false;
+  const scorePips = { left: [], right: [] };
+  for (const side of ['left', 'right']) {
+    for (let i = 0; i < 5; i++) {
+      scorePips[side].push(root.getObjectByName(`pingpongScore-${side}-${i}`) || null);
+    }
+  }
+  root.userData.pingPongVisualParts = { ball, scorePips };
+  _pingPongVisualRoots.add(root);
+  return true;
+}
+
 function updatePingPongMeshVisual(mesh, game, building = null, table = null) {
   if (!mesh?.getObjectByName) return;
   const visualsActive = isPingPongGameVisuallyLive(game, building, table);
-  const ball = mesh.getObjectByName('pingpongBall');
+  if (!mesh.userData?.pingPongVisualParts) registerPingPongVisualRoot(mesh);
+  const parts = mesh.userData?.pingPongVisualParts || {};
+  const ball = parts.ball || null;
   if (ball) {
     ball.visible = visualsActive;
     if (visualsActive) ball.position.set((game.ballX || 0) * T, 0.82 * T, (game.ballZ || 0) * T);
@@ -59206,13 +59379,12 @@ function updatePingPongMeshVisual(mesh, game, building = null, table = null) {
   for (const side of ['left', 'right']) {
     const score = visualsActive ? Math.max(0, Math.min(5, Number(game?.[side === 'left' ? 'p1Score' : 'p2Score'] || 0))) : 0;
     for (let i = 0; i < 5; i++) {
-      const pip = mesh.getObjectByName(`pingpongScore-${side}-${i}`);
+      const pip = parts.scorePips?.[side]?.[i] || null;
       if (pip) {
         pip.visible = visualsActive;
         if (pip.material) {
-          pip.material.transparent = visualsActive;
-          pip.material.opacity = visualsActive ? (i < score ? 1 : 0.26) : 1;
-          pip.material.needsUpdate = true;
+          const opacity = visualsActive ? (i < score ? 1 : 0.26) : 1;
+          if (pip.material.opacity !== opacity) pip.material.opacity = opacity;
         }
       }
     }
@@ -59220,18 +59392,15 @@ function updatePingPongMeshVisual(mesh, game, building = null, table = null) {
 }
 
 function updatePingPongGameMeshes() {
-  scene.traverse(obj => {
-    if (!obj?.getObjectByName || !obj.getObjectByName('pingpongBall')) return;
-    let furnitureRoot = obj;
-    while (furnitureRoot && !(furnitureRoot.userData?.furniture && furnitureRoot.userData?.furnitureType === 'pingpong')) {
-      furnitureRoot = furnitureRoot.parent;
+  for (const root of _pingPongVisualRoots) {
+    if (!root?.parent || !isObjectAttachedToScene(root)) {
+      _pingPongVisualRoots.delete(root);
+      continue;
     }
-    if (!furnitureRoot) return;
-    obj = furnitureRoot;
-    const building = buildingsMap.get(obj.userData.buildingId);
-    const table = building?.interior?.furniture?.[obj.userData.furnitureIndex];
-    updatePingPongMeshVisual(obj, table?.pingPongGame || null, building, table);
-  });
+    const building = buildingsMap.get(root.userData.buildingId);
+    const table = building?.interior?.furniture?.[root.userData.furnitureIndex];
+    updatePingPongMeshVisual(root, table?.pingPongGame || null, building, table);
+  }
 }
 
 const PING_PONG_RUNTIME_POSITION_OWNER = 'pingpong-game-loop';
@@ -59740,6 +59909,7 @@ function makePingPongTable(x, z, s) {
       const pip = posVox((side === 'left' ? -0.92 + i * 0.10 : 0.92 - i * 0.10) * s, 0.64 * s, -0.72 * s, 0.065 * s, 0.065 * s, 0.065 * s, side === 'left' ? 0xf44336 : 0x2196f3);
       pip.name = `pingpongScore-${side}-${i}`;
       pip.userData.pingPongRuntimeVisual = true;
+      pip.material.transparent = true;
       pip.visible = false;
       g.add(pip);
     }
@@ -61974,6 +62144,8 @@ function updateBirds(dt) {
 // ═══════════════════════════════════════════════════════════════
 const CHAT_BUBBLE_VISIBLE_MESSAGE_LIMIT = 18;
 const CHAT_BUBBLE_MINI_SIZE = 28;
+const CHAT_BUBBLE_TYPEWRITER_INTERVAL_MS = 50;
+const CHAT_BUBBLE_TYPEWRITER_CHARS_PER_STEP = 6;
 const _chatBubbles = new Map(); // agentId -> { el, miniEl, messages, expanded, scrollOffset, typewriterIdx, lastMsgCount }
 let _chatData = {};             // agentId -> [{role, text, time, from}]
 let _chatFirstPoll = true;
@@ -61981,14 +62153,25 @@ let _packedChatBubbleOrder = [];
 let _packedChatBubbleKey = '';
 
 function initChatBubbles() {
-  // Poll agent chat every 3 seconds
-  setInterval(async () => {
+  let chatPollInFlight = false;
+  let chatEtag = '';
+  const pollAgentChat = async () => {
+    if (chatPollInFlight || document.visibilityState === 'hidden') return;
+    chatPollInFlight = true;
     try {
-      const r = await fetch('/api/agent-chat');
+      const r = await fetch('/api/agent-chat', {
+        headers: chatEtag ? { 'If-None-Match': chatEtag } : {},
+      });
+      if (r.status === 304) return;
+      if (!r.ok) return;
+      chatEtag = r.headers.get('ETag') || chatEtag;
       _chatData = await r.json();
       updateChatBubbles();
     } catch (e) { /* silent */ }
-  }, 3000);
+    finally { chatPollInFlight = false; }
+  };
+  pollAgentChat();
+  setInterval(pollAgentChat, 5000);
   // Also update positions every frame in animate loop
 }
 
@@ -62061,9 +62244,10 @@ function createBubbleEl(agent) {
   el.querySelector('.minimize-btn').addEventListener('click', (ev) => {
     ev.stopPropagation();
     const state = _chatBubbles.get(agent.id);
-    if (state) {
-      state.expanded = false;
-      el.style.display = 'none';
+      if (state) {
+        state.expanded = false;
+        finishChatBubbleTypewriter(state);
+        el.style.display = 'none';
       state.miniEl.style.display = 'flex';
       if (state.connectorEl) state.connectorEl.style.display = 'none';
       if (state.anchorEl) state.anchorEl.style.display = 'none';
@@ -62088,7 +62272,12 @@ function createBubbleEl(agent) {
   miniEl.addEventListener('click', (ev) => {
     ev.stopPropagation();
     const state = _chatBubbles.get(agent.id);
-    if (state) { state.expanded = true; el.style.display = 'flex'; miniEl.style.display = 'none'; }
+    if (state) {
+      state.expanded = true;
+      renderBubbleLastMessage(agent.id, state);
+      el.style.display = 'flex';
+      miniEl.style.display = 'none';
+    }
   });
   container.appendChild(miniEl);
 
@@ -62148,6 +62337,7 @@ function updateChatBubbles() {
         typewriterIdx: 0,
         lastMsgCount: 0,
         lastSignature: '',
+        nextTypewriterAtMs: 0,
       });
     }
 
@@ -62191,6 +62381,8 @@ function updateChatBubbles() {
       } else {
         state.typewriterCharIdx = Math.max(0, Math.min(state.typewriterCharIdx || 0, currentNewest.length));
       }
+      state.nextTypewriterAtMs = 0;
+      if (!state.expanded) finishChatBubbleTypewriter(state);
 
       renderBubbleMessages(agent.id, state);
     }
@@ -62314,10 +62506,35 @@ function getAgentChatActivitySignature(msg) {
   return toolSig + '|' + (msg.thinking || '') + '|' + (msg.reasoningTokens || 0) + '|' + approval;
 }
 
+function getChatBubbleMessageDisplayText(message) {
+  const activityLines = getAgentChatActivityLines(message);
+  return String(message?.text ?? '') + (activityLines.length ? ((message?.text ? '\n' : '') + activityLines.join('\n')) : '');
+}
+
+function finishChatBubbleTypewriter(state) {
+  const message = state?.messages?.[state.messages.length - 1];
+  if (!message) return false;
+  state.typewriterCharIdx = getChatBubbleMessageDisplayText(message).length;
+  state.nextTypewriterAtMs = 0;
+  return true;
+}
+
+function advanceChatBubbleTypewriter(agentId, state, nowMs) {
+  const message = state?.messages?.[state.messages.length - 1];
+  if (!state?.expanded || !message) return false;
+  const text = getChatBubbleMessageDisplayText(message);
+  const charIdx = Math.max(0, Number(state.typewriterCharIdx || 0));
+  if (charIdx >= text.length) return false;
+  if (nowMs < Number(state.nextTypewriterAtMs || 0)) return false;
+  state.typewriterCharIdx = Math.min(text.length, charIdx + CHAT_BUBBLE_TYPEWRITER_CHARS_PER_STEP);
+  state.nextTypewriterAtMs = nowMs + CHAT_BUBBLE_TYPEWRITER_INTERVAL_MS;
+  renderBubbleLastMessage(agentId, state);
+  return true;
+}
+
 function _bubbleMessageHtml(m, isLast, state) {
   const roleClass = m.role === 'user' ? 'user' : (m.role === 'system' ? 'system' : 'assistant');
-  const activityLines = getAgentChatActivityLines(m);
-  const text = String(m?.text ?? '') + (activityLines.length ? ((m?.text ? '\n' : '') + activityLines.join('\n')) : '');
+  const text = getChatBubbleMessageDisplayText(m);
   const isTypewriter = (isLast && state.typewriterCharIdx !== undefined && state.typewriterCharIdx < text.length);
   const displayText = isTypewriter ? text.substring(0, state.typewriterCharIdx) : text;
   const timeText = formatChatBubbleMessageTime(m);
@@ -62355,14 +62572,13 @@ function renderBubbleLastMessage(agentId, state) {
     body.scrollTop = body.scrollHeight;
     return;
   }
-  const activityLines = getAgentChatActivityLines(m);
-  const text = String(m?.text ?? '') + (activityLines.length ? ((m?.text ? '\n' : '') + activityLines.join('\n')) : '');
+  const text = getChatBubbleMessageDisplayText(m);
   const displayText = state.typewriterCharIdx !== undefined && state.typewriterCharIdx < text.length
     ? text.substring(0, state.typewriterCharIdx)
     : text;
   const textEl = lastEl.querySelector('.chat-msg-text');
   if (textEl) {
-    textEl.innerHTML = escapeHtml(displayText);
+    if (textEl.textContent !== displayText) textEl.textContent = displayText;
   } else {
     lastEl.outerHTML = _bubbleMessageHtml(m, true, state);
     body.scrollTop = body.scrollHeight;
@@ -62689,6 +62905,7 @@ function updateChatBubblePositions() {
       by = Math.max(topBound, Math.min(bottomBound - bh, by));
 
       bubbleRects.push({ agentId, x: bx, y: by, w: bw, h: bh, state, anchorX: sx, anchorY: sy, color: getAgentColor(agent) });
+      advanceChatBubbleTypewriter(agentId, state, performance.now());
     } else {
       // Mini icon — keep clear of the name label.
       const miniX = sx - CHAT_BUBBLE_MINI_SIZE / 2;
@@ -62701,14 +62918,6 @@ function updateChatBubblePositions() {
       miniRects.push({ x: miniX, y: miniY, w: CHAT_BUBBLE_MINI_SIZE, h: CHAT_BUBBLE_MINI_SIZE, state });
     }
 
-    // Typewriter effect — keep visual motion smooth; renderBubbleLastMessage only mutates the final text node.
-    if (state.typewriterCharIdx !== undefined && state.messages.length > 0) {
-      const lastMsg = state.messages[state.messages.length - 1];
-      if (state.typewriterCharIdx < lastMsg.text.length) {
-        state.typewriterCharIdx = Math.min(lastMsg.text.length, state.typewriterCharIdx + 2);
-        renderBubbleLastMessage(agentId, state); // PERF: incremental last-message update
-      }
-    }
   }
 
   const availableBubbleWidth = Math.max(200, w - leftInset - rightInset - 10);

@@ -1,6 +1,7 @@
 // File-backed Colyseus room for authoritative live-agent runtime snapshots.
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { Room } from '@colyseus/core';
 import { Encoder, MapSchema, Schema, defineTypes } from '@colyseus/schema';
 import {
@@ -17,6 +18,7 @@ import {
 } from '../client/js/dynamic-exterior-routing.js';
 
 export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
+export const RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION = 'agent-runtime-lifecycle-journal/v1';
 export const WORLD_RUNTIME_SCHEMA_VERSION = 'world-runtime/v1';
 export const AGENT_RUNTIME_ROOM_NAME = 'agent_runtime';
 export const DEFAULT_AGENT_RUNTIME_SCHEMA_BUFFER_SIZE_BYTES = 1024 * 1024;
@@ -26,17 +28,25 @@ export const STALE_ROUTE_LEASE_SWEEP_MS = 1000;
 export const DEFAULT_WORLD_RUNTIME_TICK_MS = 100;
 export const WORLD_RUNTIME_STEP_MAX_MS = 250;
 export const WORLD_RUNTIME_PLAN_POLL_MS = 250;
-export const WORLD_RUNTIME_PERSIST_INTERVAL_MS = 5000;
+export const DEFAULT_WORLD_RUNTIME_PERSIST_INTERVAL_MS = 5000;
+const configuredPersistIntervalMs = Number(process.env.VW_REALTIME_CHECKPOINT_INTERVAL_MS || DEFAULT_WORLD_RUNTIME_PERSIST_INTERVAL_MS);
+export const WORLD_RUNTIME_PERSIST_INTERVAL_MS = Number.isFinite(configuredPersistIntervalMs)
+  ? Math.max(1000, Math.min(60000, Math.floor(configuredPersistIntervalMs)))
+  : DEFAULT_WORLD_RUNTIME_PERSIST_INTERVAL_MS;
 export const WORLD_RUNTIME_TRAFFIC_CYCLE_MS = 40000;
 export const WORLD_RUNTIME_TRAFFIC_YELLOW_MS = 3000;
 export const WORLD_RUNTIME_TRAFFIC_ALL_RED_MS = 2000;
 export const WORLD_RUNTIME_TOPOLOGY_OWNER_TTL_MS = 30000;
 export const WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000;
-export const RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000;
+// Schema patches are the only steady-state transport. Full runtime documents
+// are never broadcast on a timer; this export remains for compatibility with
+// diagnostics that previously inspected the old interval.
+export const RUNTIME_STATE_BROADCAST_INTERVAL_MS = 0;
 export const RUNTIME_HEALTH_BROADCAST_INTERVAL_MS = 2000;
 export const MAX_WORLD_RUNTIME_TRAFFIC_LIGHTS = 500;
 export const MAX_WORLD_RUNTIME_TRAFFIC_VEHICLES = 80;
 export const MAX_RUNTIME_EVENTS = 500;
+export const MAX_PERSISTED_RUNTIME_EVENTS = 100;
 export const MAX_VISUAL_STATE_JSON_CHARS = 6000;
 export const RUNTIME_WIRE_EVENTS_LIMIT = 0;
 export const RUNTIME_SCHEMA_PATCH_RATE_MS = DEFAULT_WORLD_RUNTIME_TICK_MS;
@@ -140,6 +150,20 @@ export const SERVER_RUNTIME_DYNAMIC_AVOID_COST = 9;
 export const SERVER_WORLD_TOPOLOGY_OWNER = 'server-world-topology-runtime';
 export const SERVER_WORLD_TRAFFIC_SPEED = 7;
 export const SERVER_WORLD_MAX_TRAFFIC_VEHICLES = 30;
+
+const TRANSIENT_RUNTIME_EVENT_TYPES = new Set([
+  'heartbeat',
+  'server-live-status-deskless-wait',
+  'server-live-status-routing',
+  'server-scripted-object-routing',
+  'server-scripted-object-world-routing',
+  'server-pingpong-routing',
+  'server-pingpong-using',
+  'server-pingpong-world-routing',
+  'server-pingpong-world-active',
+  'server-runtime-blocker-yield',
+]);
+const EPHEMERAL_RUNTIME_AGENT_ID_RE = /^vw-(?:endurance|provider-probe)(?:-|$)/i;
 
 const WORLD_ACTION_SCHEMA_VERSION = 'agent-life-world-action/v1';
 const WORLD_ACTION_PERSISTENCE_VERSION = 'agent-life-world-action-persistence/v1';
@@ -406,6 +430,10 @@ defineTypes(AgentRuntimeState, {
 
 export function runtimeFilePath(dataDir = process.env.VW_DATA_DIR || '.local-data') {
   return join(dataDir || '.local-data', 'agent-runtime.json');
+}
+
+export function runtimeLifecycleJournalFilePath(dataDir = process.env.VW_DATA_DIR || '.local-data') {
+  return join(dataDir || '.local-data', 'agent-runtime.lifecycle.jsonl');
 }
 
 export function worldMetaFilePath(dataDir = process.env.VW_DATA_DIR || '.local-data') {
@@ -6717,7 +6745,7 @@ export function stateToPlain(state, events = []) {
     worldRuntime: worldRuntimeToPlain(state.worldRuntime),
     agents,
     objects,
-    events: events.slice(-MAX_RUNTIME_EVENTS),
+    events: events.slice(-MAX_PERSISTED_RUNTIME_EVENTS),
   };
 }
 
@@ -6920,22 +6948,79 @@ export function worldObjectToPlain(object) {
   return plain;
 }
 
+export function applyRuntimeLifecycleJournal(doc, journalText = '') {
+  const recovered = normalizeRuntimeDocument(doc);
+  let applied = 0;
+  let ignored = 0;
+  for (const line of String(journalText || '').split('\n')) {
+    if (!line.trim()) continue;
+    let entry = null;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      // A crash can leave only the final append partially written. Earlier
+      // complete entries are still safe to replay.
+      ignored++;
+      continue;
+    }
+    const eventSeq = Math.max(0, Math.floor(numberOr(entry?.eventSeq, 0)));
+    if (entry?.schemaVersion !== RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION || eventSeq <= recovered.eventSeq) {
+      ignored++;
+      continue;
+    }
+    try {
+      if (entry.operation === 'agent-upsert') {
+        const snapshot = normalizeSnapshot(entry.entity || {});
+        recovered.agents[snapshot.agentId] = snapshot;
+        recovered.updatedAt = safeIso(snapshot.updatedAt, entry.at || recovered.updatedAt);
+      } else if (entry.operation === 'object-upsert') {
+        const object = normalizeWorldObjectState(entry.entity || {});
+        recovered.objects[object.objectKey] = object;
+        recovered.updatedAt = safeIso(object.updatedAt, entry.at || recovered.updatedAt);
+      } else {
+        ignored++;
+        continue;
+      }
+      recovered.eventSeq = eventSeq;
+      if (entry.event && typeof entry.event === 'object') {
+        recovered.events.push(entry.event);
+        recovered.events = recovered.events.slice(-MAX_PERSISTED_RUNTIME_EVENTS);
+      }
+      applied++;
+    } catch {
+      ignored++;
+    }
+  }
+  return { document: recovered, applied, ignored };
+}
+
 export function readRuntimeDocument(dataDir = process.env.VW_DATA_DIR || '.local-data') {
   const file = runtimeFilePath(dataDir);
-  if (!existsSync(file)) {
-    return emptyRuntimeDocument();
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    return normalizeRuntimeDocument(parsed);
-  } catch (error) {
-    const suffix = new Date().toISOString().replace(/[:.]/g, '-');
+  let doc = emptyRuntimeDocument();
+  if (existsSync(file)) {
     try {
-      renameSync(file, `${file}.corrupt-${suffix}`);
-    } catch {
-      // Best effort only. The sidecar can still recover with an empty state.
+      doc = normalizeRuntimeDocument(JSON.parse(readFileSync(file, 'utf8')));
+    } catch (error) {
+      const suffix = new Date().toISOString().replace(/[:.]/g, '-');
+      try {
+        renameSync(file, `${file}.corrupt-${suffix}`);
+      } catch {
+        // Best effort only. The sidecar can still recover from its journal.
+      }
+      doc = { ...emptyRuntimeDocument(), recoveredFromCorruptFile: true, recoveryError: String(error?.message || error) };
     }
-    return { ...emptyRuntimeDocument(), recoveredFromCorruptFile: true, recoveryError: String(error?.message || error) };
+  }
+  const journalFile = runtimeLifecycleJournalFilePath(dataDir);
+  if (!existsSync(journalFile)) return doc;
+  try {
+    const replay = applyRuntimeLifecycleJournal(doc, readFileSync(journalFile, 'utf8'));
+    return {
+      ...replay.document,
+      lifecycleJournalApplied: replay.applied,
+      lifecycleJournalIgnored: replay.ignored,
+    };
+  } catch (error) {
+    return { ...doc, lifecycleJournalRecoveryError: String(error?.message || error) };
   }
 }
 
@@ -6946,7 +7031,177 @@ export function writeRuntimeDocument(dataDir, state, events = []) {
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, `${JSON.stringify(doc, null, 2)}\n`);
   renameSync(tmp, file);
+  writeFileSync(runtimeLifecycleJournalFilePath(dataDir), '');
   return doc;
+}
+
+export function appendRuntimeLifecycleJournal(dataDir, entry) {
+  const file = runtimeLifecycleJournalFilePath(dataDir);
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `${JSON.stringify(entry)}\n`);
+  return entry;
+}
+
+export function isTransientRuntimeEventType(type = '') {
+  return TRANSIENT_RUNTIME_EVENT_TYPES.has(String(type || ''));
+}
+
+export function compactRuntimeDocument(doc, presenceSnapshot = {}, nowMs = Date.now()) {
+  const canonicalAgentIds = new Set(
+    Object.keys(presenceSnapshot && typeof presenceSnapshot === 'object' ? presenceSnapshot : {})
+      .filter(agentId => agentId && !agentId.startsWith('_')),
+  );
+  const agents = {};
+  const removedAgentIds = [];
+  for (const [agentId, snapshot] of Object.entries(doc?.agents || {})) {
+    if (EPHEMERAL_RUNTIME_AGENT_ID_RE.test(agentId) && !canonicalAgentIds.has(agentId)) {
+      removedAgentIds.push(agentId);
+      continue;
+    }
+    agents[agentId] = snapshot;
+  }
+
+  const objects = {};
+  const removedObjectKeys = [];
+  for (const [objectKey, object] of Object.entries(doc?.objects || {})) {
+    const expiresAtMs = Date.parse(object?.expiresAt || '');
+    if (Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs) {
+      removedObjectKeys.push(objectKey);
+      continue;
+    }
+    objects[objectKey] = object;
+  }
+
+  const sourceEvents = Array.isArray(doc?.events) ? doc.events : [];
+  const events = sourceEvents
+    .filter(event => event && !isTransientRuntimeEventType(event.type))
+    .slice(-MAX_PERSISTED_RUNTIME_EVENTS);
+  const stats = {
+    removedAgents: removedAgentIds.length,
+    removedAgentIds,
+    removedObjects: removedObjectKeys.length,
+    removedObjectKeys,
+    removedEvents: Math.max(0, sourceEvents.length - events.length),
+  };
+  return {
+    document: { ...doc, agents, objects, events },
+    stats,
+    changed: stats.removedAgents > 0 || stats.removedObjects > 0 || stats.removedEvents > 0,
+  };
+}
+
+export class RuntimeDocumentWriter {
+  constructor(dataDir, { logger = console } = {}) {
+    this.logger = logger;
+    this.sequence = 0;
+    this.completedSequence = 0;
+    this.inFlight = null;
+    this.queue = [];
+    this.drainWaiters = [];
+    this.closed = false;
+    this.worker = new Worker(new URL('./runtime-document-writer.mjs', import.meta.url), {
+      workerData: { dataDir },
+      execArgv: process.execArgv.filter(argument => !argument.startsWith('--input-type')),
+    });
+    this.worker.on('message', message => this.handleMessage(message));
+    this.worker.on('error', error => this.handleFatalError(error));
+    this.worker.on('exit', code => {
+      if (!this.closed && code !== 0) this.handleFatalError(new Error(`runtime document writer exited with code ${code}`));
+    });
+  }
+
+  enqueue(document) {
+    return this.enqueueOperation({ operation: 'checkpoint', document });
+  }
+
+  appendLifecycle(entry) {
+    return this.enqueueOperation({ operation: 'append-lifecycle', entry });
+  }
+
+  get pending() {
+    return this.queue.length ? this.queue[this.queue.length - 1] : null;
+  }
+
+  enqueueOperation(payload) {
+    if (this.closed || !this.worker) return Promise.reject(new Error('runtime document writer is closed'));
+    const operation = {
+      ...payload,
+      sequence: ++this.sequence,
+      waiters: [],
+    };
+    const completion = new Promise((resolve, reject) => operation.waiters.push({ resolve, reject }));
+    if (payload.operation === 'checkpoint') {
+      // A newer checkpoint includes all state represented by any queued
+      // checkpoint. Keep lifecycle appends ordered ahead of it, transfer the
+      // superseded promises, and write only the newest document.
+      const retained = [];
+      for (const queued of this.queue) {
+        if (queued.operation === 'checkpoint') operation.waiters.push(...queued.waiters);
+        else retained.push(queued);
+      }
+      this.queue = retained;
+    }
+    this.queue.push(operation);
+    this.pump();
+    return completion;
+  }
+
+  pump() {
+    if (this.closed || !this.worker || this.inFlight || !this.queue.length) {
+      this.resolveDrainWaitersIfIdle();
+      return;
+    }
+    this.inFlight = this.queue.shift();
+    const { waiters, ...message } = this.inFlight;
+    this.worker.postMessage(message);
+  }
+
+  handleMessage(message = {}) {
+    const sequence = Number(message.sequence || 0);
+    const operation = this.inFlight?.sequence === sequence ? this.inFlight : null;
+    if (message.type === 'error') {
+      const error = new Error(message.error || `runtime checkpoint ${sequence} failed`);
+      for (const waiter of operation?.waiters || []) waiter.reject(error);
+      this.logger?.error?.('Runtime checkpoint write failed', error);
+    } else if (message.type === 'written') {
+      this.completedSequence = Math.max(this.completedSequence, sequence);
+      for (const waiter of operation?.waiters || []) waiter.resolve(message);
+    }
+    if (operation) this.inFlight = null;
+    this.pump();
+  }
+
+  resolveDrainWaitersIfIdle(error = null) {
+    if (this.inFlight || this.queue.length) return;
+    for (const waiter of this.drainWaiters.splice(0)) {
+      if (error) waiter.reject(error);
+      else waiter.resolve();
+    }
+  }
+
+  handleFatalError(error) {
+    if (!this.worker) return;
+    this.logger?.error?.('Runtime document writer failed', error);
+    for (const waiter of this.inFlight?.waiters || []) waiter.reject(error);
+    for (const operation of this.queue.splice(0)) {
+      for (const waiter of operation.waiters || []) waiter.reject(error);
+    }
+    this.inFlight = null;
+    this.worker = null;
+    this.closed = true;
+    this.resolveDrainWaitersIfIdle(error);
+  }
+
+  async close() {
+    if (this.closed) return;
+    if (this.inFlight || this.queue.length) {
+      await new Promise((resolve, reject) => this.drainWaiters.push({ resolve, reject }));
+    }
+    this.closed = true;
+    const worker = this.worker;
+    this.worker = null;
+    if (worker) await worker.terminate();
+  }
 }
 
 function emptyRuntimeDocument() {
@@ -7010,49 +7265,55 @@ function stateFromDocument(doc) {
 }
 
 function schemaSnapshotFromPlain(plain) {
-  return new AgentRuntimeSnapshot({
-    agentId: plain.agentId,
-    mode: plain.mode,
-    owner: plain.owner,
-    x: plain.x,
-    y: plain.y,
-    floor: plain.floor,
-    buildingId: plain.buildingId,
-    roomId: plain.roomId,
-    heading: plain.heading,
-    state: plain.state,
-    targetJson: plain.target ? JSON.stringify(plain.target) : '',
-    visualStateJson: plain.visualState ? JSON.stringify(plain.visualState) : '',
-    routeId: plain.routeId,
-    worldActionId: plain.worldActionId,
-    leaseOwner: plain.leaseOwner,
-    leaseExpiresAt: plain.leaseExpiresAt,
-    updatedAt: plain.updatedAt,
-    version: plain.version,
-    tickSeq: plain.tickSeq,
-    simTimeMs: plain.simTimeMs,
-    tickMs: plain.tickMs,
-  });
+  return applySnapshotPlainToSchema(new AgentRuntimeSnapshot(), plain);
 }
 
 function schemaWorldObjectFromPlain(plain) {
-  return new WorldRuntimeObjectState({
-    objectKey: plain.objectKey,
-    owner: plain.owner,
-    objectType: plain.objectType,
-    buildingId: plain.buildingId,
-    furnitureIndex: plain.furnitureIndex,
-    state: plain.state,
-    agentId: plain.agentId,
-    actionId: plain.actionId,
-    reservationId: plain.reservationId,
-    activeUseId: plain.activeUseId,
-    slotId: plain.slotId,
-    dataJson: plain.data ? JSON.stringify(plain.data) : '',
-    expiresAt: plain.expiresAt,
-    updatedAt: plain.updatedAt,
-    version: plain.version,
-  });
+  return applyWorldObjectPlainToSchema(new WorldRuntimeObjectState(), plain);
+}
+
+export function applySnapshotPlainToSchema(schema, plain) {
+  schema.agentId = plain.agentId;
+  schema.mode = plain.mode;
+  schema.owner = plain.owner;
+  schema.x = plain.x;
+  schema.y = plain.y;
+  schema.floor = plain.floor;
+  schema.buildingId = plain.buildingId;
+  schema.roomId = plain.roomId;
+  schema.heading = plain.heading;
+  schema.state = plain.state;
+  schema.targetJson = plain.target ? JSON.stringify(plain.target) : '';
+  schema.visualStateJson = plain.visualState ? JSON.stringify(plain.visualState) : '';
+  schema.routeId = plain.routeId;
+  schema.worldActionId = plain.worldActionId;
+  schema.leaseOwner = plain.leaseOwner;
+  schema.leaseExpiresAt = plain.leaseExpiresAt;
+  schema.updatedAt = plain.updatedAt;
+  schema.version = plain.version;
+  schema.tickSeq = plain.tickSeq;
+  schema.simTimeMs = plain.simTimeMs;
+  schema.tickMs = plain.tickMs;
+  return schema;
+}
+
+export function applyWorldObjectPlainToSchema(schema, plain) {
+  schema.objectKey = plain.objectKey;
+  schema.owner = plain.owner;
+  schema.objectType = plain.objectType;
+  schema.buildingId = plain.buildingId;
+  schema.furnitureIndex = plain.furnitureIndex;
+  schema.state = plain.state;
+  schema.agentId = plain.agentId;
+  schema.actionId = plain.actionId;
+  schema.reservationId = plain.reservationId;
+  schema.activeUseId = plain.activeUseId;
+  schema.slotId = plain.slotId;
+  schema.dataJson = plain.data ? JSON.stringify(plain.data) : '';
+  schema.expiresAt = plain.expiresAt;
+  schema.updatedAt = plain.updatedAt;
+  schema.version = plain.version;
+  return schema;
 }
 
 function schemaWorldRuntimeFromPlain(plain) {
@@ -7782,6 +8043,41 @@ function requestIdFrom(message) {
   return safeText(message?.requestId, '');
 }
 
+function fieldsChanged(previous, next, fields) {
+  if (!previous) return true;
+  return fields.some(field => previous[field] !== next[field]);
+}
+
+function hasAgentLifecycleChange(existing, normalized) {
+  return fieldsChanged(existing ? snapshotToPlain(existing) : null, normalized, [
+    'mode',
+    'owner',
+    'floor',
+    'buildingId',
+    'roomId',
+    'state',
+    'routeId',
+    'worldActionId',
+    'leaseOwner',
+  ]);
+}
+
+function hasWorldObjectLifecycleChange(existing, normalized, eventType = '') {
+  if (eventType === 'world-object-updated' || eventType === 'server-scripted-object-queue-store-updated') return true;
+  return fieldsChanged(existing ? worldObjectToPlain(existing) : null, normalized, [
+    'owner',
+    'objectType',
+    'buildingId',
+    'furnitureIndex',
+    'state',
+    'agentId',
+    'actionId',
+    'reservationId',
+    'activeUseId',
+    'slotId',
+  ]);
+}
+
 export class AgentRuntimeRoom extends Room {
   onCreate(options = {}) {
     this.autoDispose = false;
@@ -7795,10 +8091,8 @@ export class AgentRuntimeRoom extends Room {
     this.lastScriptedObjectRuntimeStepMs = 0;
     this.deferRuntimeDocumentWrites = false;
     this.runtimeDocumentDirty = false;
-    this.runtimeStateBroadcastDirty = false;
     this.worldRuntimeTickContext = null;
     this.lastWorldRuntimeTickNowMs = 0;
-    this.lastRuntimeStateBroadcastMs = 0;
     this.lastLiveActionRuntimePollMs = 0;
     this.liveActionRuntimeMeta = null;
     this.liveActionRuntimeStore = null;
@@ -7847,9 +8141,14 @@ export class AgentRuntimeRoom extends Room {
       probeObstacleAtWorld: () => null,
       getAgentColliderHandle: () => null,
     });
-    const doc = readRuntimeDocument(this.dataDir);
-    this.events = Array.isArray(doc.events) ? doc.events.slice(-MAX_RUNTIME_EVENTS) : [];
+    const loadedDocument = readRuntimeDocument(this.dataDir);
+    const compacted = compactRuntimeDocument(loadedDocument, readPresenceSnapshotDocument(this.dataDir));
+    const doc = compacted.document;
+    this.events = Array.isArray(doc.events) ? doc.events.slice(-MAX_PERSISTED_RUNTIME_EVENTS) : [];
     this.setState(stateFromDocument(doc));
+    this.runtimeDocumentWriter = new RuntimeDocumentWriter(this.dataDir);
+    this.runtimeCompactionStats = compacted.stats;
+    if (compacted.changed) this.persistRuntimeDocument({ urgent: true });
     this.reconcileIdleBehaviorOwnership('runtime-hydration');
     this.ensureServerWorldTopology(Date.now(), { force: true });
 
@@ -7873,6 +8172,8 @@ export class AgentRuntimeRoom extends Room {
         type: 'runtime-health',
         serverTime: new Date().toISOString(),
         revision: Number(this.state?.revision || 0),
+        checkpointIntervalMs: WORLD_RUNTIME_PERSIST_INTERVAL_MS,
+        checkpointPending: Boolean(this.runtimeDocumentDirty || this.runtimeDocumentWriter?.pending || this.runtimeDocumentWriter?.inFlight),
       });
     }, RUNTIME_HEALTH_BROADCAST_INTERVAL_MS);
   }
@@ -7898,26 +8199,21 @@ export class AgentRuntimeRoom extends Room {
 
   onJoin(client) {
     this.expireStaleRouteLeases();
-    const welcome = {
-      sessionId: client.sessionId,
-      room: AGENT_RUNTIME_ROOM_NAME,
-      serverTime: new Date().toISOString(),
-      snapshot: this.runtimeWireDocument(),
-    };
-    client.send('runtime:welcome', welcome);
+    // Cached pre-optimization clients wait for this signal before reading the
+    // room schema. Keep one tiny delayed welcome for rolling-update
+    // compatibility, but never attach a duplicate full runtime document.
     this.clock.setTimeout(() => {
       try {
         client.send('runtime:welcome', {
-          ...welcome,
-          replay: true,
+          sessionId: client.sessionId,
+          room: AGENT_RUNTIME_ROOM_NAME,
           serverTime: new Date().toISOString(),
-          snapshot: this.runtimeWireDocument(),
+          transport: 'schema',
         });
       } catch {
-        // Client left before the delayed initial snapshot replay.
+        // Client left before the compatibility signal was due.
       }
     }, 50);
-    this.broadcastRuntimeState('client-joined');
   }
 
   runtimeDocument() {
@@ -7928,34 +8224,84 @@ export class AgentRuntimeRoom extends Room {
     return stateToRealtimePlain(this.state, this.events);
   }
 
-  persistRuntimeDocument() {
-    if (this.deferRuntimeDocumentWrites) {
-      this.runtimeDocumentDirty = true;
+  persistRuntimeDocument({ urgent = false, force = false } = {}) {
+    const nowMs = Date.now();
+    this.runtimeDocumentDirty = true;
+    if (urgent && !force) {
+      if (!this.runtimeUrgentCheckpointScheduled) {
+        this.runtimeUrgentCheckpointScheduled = true;
+        queueMicrotask(() => {
+          this.runtimeUrgentCheckpointScheduled = false;
+          if (this.runtimeDocumentDirty) this.persistRuntimeDocument({ force: true });
+        });
+      }
+      return true;
+    }
+    if (!force && !urgent && (
+      this.deferRuntimeDocumentWrites ||
+      nowMs - Number(this.lastWorldRuntimePersistMs || 0) < WORLD_RUNTIME_PERSIST_INTERVAL_MS
+    )) {
       return false;
     }
+    if (!this.runtimeDocumentWriter?.worker) {
+      this.runtimeDocumentDirty = false;
+      this.lastWorldRuntimePersistMs = nowMs;
+      writeRuntimeDocument(this.dataDir, this.state, this.events);
+      return true;
+    }
+    const document = this.runtimeDocument();
     this.runtimeDocumentDirty = false;
-    writeRuntimeDocument(this.dataDir, this.state, this.events);
+    this.lastWorldRuntimePersistMs = nowMs;
+    this.lastRuntimeDocumentWrite = this.runtimeDocumentWriter.enqueue(document).catch(error => {
+      this.runtimeDocumentDirty = true;
+      console.error('Runtime checkpoint failed', error);
+      return null;
+    });
     return true;
   }
 
-  broadcastRuntimeState(source = 'runtime-state', { force = false } = {}) {
-    if (this.deferRuntimeDocumentWrites) {
-      this.runtimeStateBroadcastDirty = true;
-      return false;
+  persistLifecycleMutation(operation, entity, event) {
+    this.runtimeDocumentDirty = true;
+    const entry = {
+      schemaVersion: RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION,
+      operation,
+      eventSeq: Number(event?.seq || this.state?.eventSeq || 0),
+      at: event?.at || new Date().toISOString(),
+      entity,
+      event: event && !event.transient ? event : null,
+    };
+    if (!this.runtimeDocumentWriter?.worker) {
+      try {
+        appendRuntimeLifecycleJournal(this.dataDir, entry);
+      } catch (error) {
+        // A complete synchronous checkpoint is the safe fallback when the
+        // background journal cannot accept a lifecycle transition.
+        console.error('Runtime lifecycle journal fallback failed', error);
+        writeRuntimeDocument(this.dataDir, this.state, this.events);
+        this.runtimeDocumentDirty = false;
+        this.lastWorldRuntimePersistMs = Date.now();
+      }
+      return true;
     }
-    const nowMs = Date.now();
-    if (!force && this.lastRuntimeStateBroadcastMs && nowMs - this.lastRuntimeStateBroadcastMs < RUNTIME_STATE_BROADCAST_INTERVAL_MS) {
-      this.runtimeStateBroadcastDirty = true;
-      return false;
-    }
-    this.runtimeStateBroadcastDirty = false;
-    this.lastRuntimeStateBroadcastMs = nowMs;
-    this.broadcast('runtime:state', {
-      type: 'runtime-state',
-      source,
-      snapshot: this.runtimeWireDocument(),
+    this.lastRuntimeLifecycleWrite = this.runtimeDocumentWriter.appendLifecycle(entry).catch(error => {
+      console.error('Runtime lifecycle journal append failed', error);
+      try {
+        writeRuntimeDocument(this.dataDir, this.state, this.events);
+        this.runtimeDocumentDirty = false;
+        this.lastWorldRuntimePersistMs = Date.now();
+      } catch (fallbackError) {
+        this.runtimeDocumentDirty = true;
+        console.error('Runtime lifecycle checkpoint fallback failed', fallbackError);
+      }
+      return null;
     });
     return true;
+  }
+
+  broadcastRuntimeState() {
+    // Colyseus schema patches are the authoritative transport. Retained as a
+    // no-op for older call sites and third-party extensions.
+    return false;
   }
 
   runWithDeferredRuntimeDocumentWrites(callback) {
@@ -11129,6 +11475,7 @@ export class AgentRuntimeRoom extends Room {
   upsertSnapshot(raw, eventType, extra = {}) {
     const existing = this.state.agents.get(raw.agentId);
     const normalized = normalizeSnapshot(raw, existing || null);
+    const lifecycleChanged = hasAgentLifecycleChange(existing, normalized) || isManualSnapshotOverride(raw);
     const tickContext = this.worldRuntimeTickContext || null;
     normalized.version = Number(existing?.version || 0) + 1;
     normalized.updatedAt = tickContext?.updatedAt || new Date().toISOString();
@@ -11137,26 +11484,44 @@ export class AgentRuntimeRoom extends Room {
       normalized.simTimeMs = tickContext.simTimeMs;
       normalized.tickMs = tickContext.tickMs;
     }
-    const agent = schemaSnapshotFromPlain(normalized);
-    this.state.agents.set(agent.agentId, agent);
+    // Keep the Schema instance stable so Colyseus emits only changed scalar
+    // fields. Replacing the MapSchema entry retransmits bulky target/visual
+    // JSON even when a 100 ms movement tick only changes x/y/tick metadata.
+    const agent = existing
+      ? applySnapshotPlainToSchema(existing, normalized)
+      : schemaSnapshotFromPlain(normalized);
+    if (!existing) this.state.agents.set(agent.agentId, agent);
     this.state.updatedAt = normalized.updatedAt;
-    const event = this.recordEvent(eventType, agent.agentId, snapshotToPlain(agent), extra);
-    this.persistRuntimeDocument();
-    this.broadcastRuntimeState(eventType);
+    const event = this.recordEvent(eventType, agent.agentId, snapshotToPlain(agent), extra, {
+      durable: lifecycleChanged && eventType !== 'heartbeat',
+    });
+    if (lifecycleChanged) {
+      this.persistLifecycleMutation('agent-upsert', snapshotToPlain(agent), event);
+    } else {
+      this.persistRuntimeDocument();
+    }
     return { agent, event };
   }
 
   upsertWorldObject(raw, eventType, extra = {}) {
     const existing = this.state.objects.get(raw.objectKey);
     const normalized = normalizeWorldObjectState(raw, existing || null);
+    const lifecycleChanged = hasWorldObjectLifecycleChange(existing, normalized, eventType);
     normalized.version = Number(existing?.version || 0) + 1;
     normalized.updatedAt = new Date().toISOString();
-    const object = schemaWorldObjectFromPlain(normalized);
-    this.state.objects.set(object.objectKey, object);
+    const object = existing
+      ? applyWorldObjectPlainToSchema(existing, normalized)
+      : schemaWorldObjectFromPlain(normalized);
+    if (!existing) this.state.objects.set(object.objectKey, object);
     this.state.updatedAt = normalized.updatedAt;
-    const event = this.recordEvent(eventType, object.objectKey, worldObjectToPlain(object), extra);
-    this.persistRuntimeDocument();
-    this.broadcastRuntimeState(eventType);
+    const event = this.recordEvent(eventType, object.objectKey, worldObjectToPlain(object), extra, {
+      durable: lifecycleChanged,
+    });
+    if (lifecycleChanged) {
+      this.persistLifecycleMutation('object-upsert', worldObjectToPlain(object), event);
+    } else {
+      this.persistRuntimeDocument();
+    }
     return { object, event };
   }
 
@@ -11244,8 +11609,7 @@ export class AgentRuntimeRoom extends Room {
       trafficLightCount: runtime.trafficLights.size,
       trafficVehicleCount: runtime.trafficVehicles.size,
     });
-    this.persistRuntimeDocument();
-    this.broadcastRuntimeState(eventType, { force: true });
+    this.persistRuntimeDocument({ urgent: true });
     return { worldRuntime: runtime, event };
   }
 
@@ -11315,27 +11679,9 @@ export class AgentRuntimeRoom extends Room {
     } finally {
       this.worldRuntimeTickContext = null;
     }
-    if (this.runtimeStateBroadcastDirty) this.broadcastRuntimeState('world-runtime-state');
-
-    if (changedLights > 0 || changedVehicles > 0) {
-      this.broadcast('runtime:worldRuntime', {
-        type: 'world-runtime-tick',
-        worldRuntime: worldRuntimeToPlain(runtime),
-        changedLights,
-        changedVehicles,
-        changedLiveActions: changedLiveActions.changedActions ? 1 : 0,
-        changedLiveActionSnapshots: changedLiveActions.changedSnapshots,
-        changedLiveStatusSnapshots: changedLiveStatus.changedSnapshots,
-        changedPingPongSnapshots: changedPingPong.changedSnapshots,
-        changedPingPongObjects: changedPingPong.changedObjects,
-        changedScriptedObjectSnapshots: changedScriptedObjects.changedSnapshots,
-        changedScriptedObjects: changedScriptedObjects.changedObjects,
-      });
-    }
-
-    if (changedLights > 0 || changedVehicles > 0 || changedLiveActions.changedActions || changedLiveStatus.changedSnapshots > 0 || changedPingPong.changedSnapshots > 0 || changedPingPong.changedObjects > 0 || changedScriptedObjects.changedSnapshots > 0 || changedScriptedObjects.changedObjects > 0 || nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
-      this.lastWorldRuntimePersistMs = nowMs;
-      this.persistRuntimeDocument();
+    this.runtimeDocumentDirty = true;
+    if (nowMs - Number(this.lastWorldRuntimePersistMs || 0) >= WORLD_RUNTIME_PERSIST_INTERVAL_MS) {
+      this.persistRuntimeDocument({ force: true });
     }
     return runtime;
   }
@@ -11394,20 +11740,34 @@ export class AgentRuntimeRoom extends Room {
     return changed;
   }
 
-  recordEvent(type, agentId, snapshot, extra = {}) {
-    this.state.eventSeq = Number(this.state.eventSeq || 0) + 1;
+  recordEvent(type, agentId, snapshot, extra = {}, { durable = true } = {}) {
+    if (durable) this.state.eventSeq = Number(this.state.eventSeq || 0) + 1;
     const event = {
       seq: this.state.eventSeq,
       type,
       agentId,
       at: new Date().toISOString(),
       snapshotVersion: snapshot.version,
+      ...(durable ? {} : { transient: true }),
       ...extra,
     };
-    this.events.push(event);
-    this.events = this.events.slice(-MAX_RUNTIME_EVENTS);
-    this.broadcast('runtime:event', event);
+    if (durable) {
+      this.events.push(event);
+      this.events = this.events.slice(-MAX_PERSISTED_RUNTIME_EVENTS);
+      this.broadcast('runtime:event', event);
+    }
     return event;
+  }
+
+  async onDispose() {
+    try {
+      this.persistRuntimeDocument({ urgent: true, force: true });
+      await this.lastRuntimeLifecycleWrite;
+      await this.lastRuntimeDocumentWrite;
+      await this.runtimeDocumentWriter?.close?.();
+    } catch (error) {
+      console.error('Final runtime checkpoint failed during shutdown', error);
+    }
   }
 
   ack(client, message, type, result) {

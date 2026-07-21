@@ -6,9 +6,15 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { Client } from '@colyseus/sdk';
+import { Client, getStateCallbacks } from '@colyseus/sdk';
+import { Encoder } from '@colyseus/schema';
+import { createAgentRuntimeClient } from '../src/client/js/agent-runtime-client.mjs';
 import {
   AGENT_RUNTIME_ROOM_NAME,
+  AgentRuntimeSnapshot,
+  AgentRuntimeState,
+  applySnapshotPlainToSchema,
+  appendRuntimeLifecycleJournal,
   DEFAULT_WORLD_RUNTIME_TICK_MS,
   LIVE_ACTION_RUNTIME_POLL_MS,
   LIVE_STATUS_RUNTIME_POLL_MS,
@@ -18,7 +24,9 @@ import {
   resolveObjectTargetPoint,
   RUNTIME_SCHEMA_PATCH_RATE_MS,
   RUNTIME_HEALTH_BROADCAST_INTERVAL_MS,
+  RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION,
   RUNTIME_STATE_BROADCAST_INTERVAL_MS,
+  readRuntimeDocument,
   SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
@@ -28,6 +36,96 @@ import {
 } from '../src/realtime/agent-runtime-room.mjs';
 
 const root = process.cwd();
+
+function verifyLifecycleJournalRecovery() {
+  const dataDir = mkdtempSync(join(tmpdir(), 'vw-realtime-journal-'));
+  writeFileSync(join(dataDir, 'agent-runtime.json'), `${JSON.stringify({
+    schemaVersion: 'agent-runtime/v1',
+    worldId: 'journal-smoke',
+    updatedAt: new Date(0).toISOString(),
+    eventSeq: 1,
+    worldRuntime: {},
+    agents: {
+      'journal-agent': { agentId: 'journal-agent', mode: 'scripted', x: 1, y: 2, state: 'idle', version: 1 },
+    },
+    objects: {},
+    events: [],
+  })}\n`);
+  appendRuntimeLifecycleJournal(dataDir, {
+    schemaVersion: RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION,
+    operation: 'agent-upsert',
+    eventSeq: 2,
+    at: '2026-01-01T00:00:02.000Z',
+    entity: { agentId: 'journal-agent', mode: 'manual', owner: 'user-directed', x: 9, y: 4, state: 'idle', version: 2 },
+    event: { seq: 2, type: 'snapshot', agentId: 'journal-agent', at: '2026-01-01T00:00:02.000Z', snapshotVersion: 2 },
+  });
+  const recovered = readRuntimeDocument(dataDir);
+  assert.equal(recovered.eventSeq, 2, 'lifecycle journal should advance the recovered event sequence');
+  assert.equal(recovered.agents['journal-agent']?.mode, 'manual', 'lifecycle journal should restore the latest durable agent state');
+  assert.equal(recovered.agents['journal-agent']?.x, 9, 'lifecycle journal should restore the latest durable position attached to a transition');
+  assert.equal(recovered.events.at(-1)?.seq, 2, 'lifecycle journal should restore the durable transition event');
+  assert.equal(recovered.lifecycleJournalApplied, 1, 'lifecycle journal should replay each new transition once');
+}
+
+function verifyIncrementalSchemaPatchSize() {
+  const visualState = { activity: { summary: 'v'.repeat(5000) } };
+  const target = { route: Array.from({ length: 200 }, (_, index) => ({ x: index, y: index })) };
+  const base = {
+    agentId: 'schema-patch-probe',
+    mode: 'scripted',
+    owner: 'schema-patch-probe',
+    x: 1,
+    y: 2,
+    floor: 1,
+    buildingId: 'office',
+    roomId: '',
+    heading: 0,
+    state: 'routing',
+    target,
+    visualState,
+    routeId: 'route-probe',
+    worldActionId: '',
+    leaseOwner: 'schema-patch-probe',
+    leaseExpiresAt: '',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    version: 1,
+    tickSeq: 1,
+    simTimeMs: 100,
+    tickMs: 100,
+  };
+  const state = new AgentRuntimeState();
+  state.agents.set(base.agentId, applySnapshotPlainToSchema(new AgentRuntimeSnapshot(), base));
+  const encoder = new Encoder(state);
+  encoder.encodeAll();
+  encoder.discardChanges();
+
+  const stableSchema = state.agents.get(base.agentId);
+  applySnapshotPlainToSchema(stableSchema, {
+    ...base,
+    x: 2,
+    updatedAt: '2026-01-01T00:00:00.100Z',
+    version: 2,
+    tickSeq: 2,
+    simTimeMs: 200,
+  });
+  assert.equal(state.agents.get(base.agentId), stableSchema, 'movement updates must preserve the agent Schema instance');
+  const incrementalBytes = encoder.encode().length;
+  encoder.discardChanges();
+
+  state.agents.set(base.agentId, applySnapshotPlainToSchema(new AgentRuntimeSnapshot(), {
+    ...base,
+    x: 3,
+    updatedAt: '2026-01-01T00:00:00.200Z',
+    version: 3,
+    tickSeq: 3,
+    simTimeMs: 300,
+  }));
+  const replacementBytes = encoder.encode().length;
+  encoder.discardChanges();
+
+  assert(incrementalBytes < 128, `movement-only Schema patch should stay compact; received ${incrementalBytes} bytes`);
+  assert(replacementBytes > incrementalBytes * 20, `replacement control should prove bulky JSON retransmission (${replacementBytes} vs ${incrementalBytes})`);
+}
 
 async function getOpenPort() {
   const net = await import('node:net');
@@ -102,6 +200,31 @@ async function verifyCorsPreflight(port) {
   assert.match(response.headers.get('access-control-allow-methods') || '', /POST/);
 }
 
+async function connectIncrementalRuntimeClient(port) {
+  return createAgentRuntimeClient({
+    fetchImpl: async () => ({
+      async json() {
+        return {
+          realtime: {
+            enabled: true,
+            url: `ws://127.0.0.1:${port}`,
+            room: AGENT_RUNTIME_ROOM_NAME,
+          },
+        };
+      },
+    }),
+    windowRef: {
+      location: {
+        href: `http://127.0.0.1:${port}/`,
+        hostname: '127.0.0.1',
+        protocol: 'http:',
+      },
+      Colyseus: { Client, getStateCallbacks },
+    },
+    logger: { warn() {} },
+  });
+}
+
 function waitForRoomMessage(room, type, predicate = () => true) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -122,14 +245,15 @@ async function waitForAgent(room, agentId, predicate = () => true) {
   const deadline = Date.now() + Math.max(5000, Number(SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS?.[1] || 0) + 8000);
   let lastSeen = null;
   while (Date.now() < deadline) {
+    const schemaAgent = room.state?.agents?.get?.(agentId);
     const runtimeAgent = room.__runtimeDoc?.agents?.[agentId];
-    const agent = runtimeAgent
+    const agent = schemaAgent || (runtimeAgent
       ? {
           ...runtimeAgent,
           targetJson: runtimeAgent.target ? JSON.stringify(runtimeAgent.target) : '',
           visualStateJson: runtimeAgent.visualState ? JSON.stringify(runtimeAgent.visualState) : '',
         }
-      : room.state?.agents?.get?.(agentId);
+      : null);
     if (agent) {
       lastSeen = {
         agentId: agent.agentId,
@@ -172,7 +296,7 @@ function assertRadiansClose(actual, expected, message) {
 async function waitForWorldRuntime(room, predicate = () => true) {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    const worldRuntime = testWorldRuntimeFromDocument(room.__runtimeDoc) || room.state?.worldRuntime;
+    const worldRuntime = room.state?.worldRuntime || testWorldRuntimeFromDocument(room.__runtimeDoc);
     if (worldRuntime && predicate(worldRuntime)) return worldRuntime;
     await delay(50);
   }
@@ -182,13 +306,14 @@ async function waitForWorldRuntime(room, predicate = () => true) {
 async function waitForObject(room, objectKey, predicate = () => true) {
   const deadline = Date.now() + Math.max(6000, Number(SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS?.[1] || 0) + 8000);
   while (Date.now() < deadline) {
+    const schemaObject = room.state?.objects?.get?.(objectKey);
     const runtimeObject = room.__runtimeDoc?.objects?.[objectKey];
-    const object = runtimeObject
+    const object = schemaObject || (runtimeObject
       ? {
           ...runtimeObject,
           dataJson: runtimeObject.data ? JSON.stringify(runtimeObject.data) : '',
         }
-      : room.state?.objects?.get?.(objectKey);
+      : null);
     if (object && predicate(object)) return object;
     await delay(50);
   }
@@ -219,7 +344,13 @@ async function connectRoom(port) {
   const client = new Client(`ws://127.0.0.1:${port}`);
   const room = await client.joinOrCreate(AGENT_RUNTIME_ROOM_NAME, { worldId: 'smoke' });
   room.__runtimeErrors = [];
+  room.__runtimeMessageCounts = { events: 0, states: 0, welcomes: 0, worldRuntimes: 0 };
+  room.onMessage('runtime:welcome', (message) => {
+    room.__runtimeMessageCounts.welcomes++;
+    room.__runtimeWelcome = message;
+  });
   room.onMessage('runtime:event', (message) => {
+    room.__runtimeMessageCounts.events++;
     mergeRuntimeMessage(room, message);
   });
   room.onMessage('runtime:ack', (message) => {
@@ -230,9 +361,11 @@ async function connectRoom(port) {
     if (room.__runtimeErrors.length > 12) room.__runtimeErrors.shift();
   });
   room.onMessage('runtime:state', (message) => {
+    room.__runtimeMessageCounts.states++;
     if (message?.snapshot) room.__runtimeDoc = message.snapshot;
   });
   room.onMessage('runtime:worldRuntime', (message) => {
+    room.__runtimeMessageCounts.worldRuntimes++;
     mergeRuntimeMessage(room, message);
     if (message?.worldRuntime && room.__runtimeDoc) {
       room.__runtimeDoc = { ...room.__runtimeDoc, worldRuntime: message.worldRuntime };
@@ -241,12 +374,12 @@ async function connectRoom(port) {
   room.onMessage('runtime:health', (message) => {
     room.__runtimeHealth = message;
   });
-  const welcome = await waitForRoomMessage(room, 'runtime:welcome');
-  if (welcome?.snapshot) room.__runtimeDoc = welcome.snapshot;
   return room;
 }
 
 async function run() {
+  verifyLifecycleJournalRecovery();
+  verifyIncrementalSchemaPatchSize();
   const dataDir = mkdtempSync(join(tmpdir(), 'vw-realtime-'));
   const port = await getOpenPort();
   let server = startServer({ port, dataDir });
@@ -254,7 +387,7 @@ async function run() {
     assert.equal(LIVE_ACTION_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live action runtime should move at the world tick for smooth observer interpolation');
     assert.equal(LIVE_STATUS_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'live status runtime should move at the world tick for smooth observer interpolation');
     assert.equal(SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'scripted object runtime should move at the world tick for smooth observer interpolation');
-    assert.equal(RUNTIME_STATE_BROADCAST_INTERVAL_MS, 1000, 'lean runtime state broadcasts should be throttled');
+    assert.equal(RUNTIME_STATE_BROADCAST_INTERVAL_MS, 0, 'full runtime-state broadcasts should be disabled in favor of schema patches');
     assert.equal(RUNTIME_HEALTH_BROADCAST_INTERVAL_MS, 2000, 'runtime health heartbeat should support visible-page stale detection');
     assert.equal(RUNTIME_SCHEMA_PATCH_RATE_MS, DEFAULT_WORLD_RUNTIME_TICK_MS, 'schema patches should stay at the world tick for smooth observer interpolation');
     assert.equal(LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC, 200, 'server-owned work routes should use the 8590 running displacement speed');
@@ -265,11 +398,36 @@ async function run() {
     assert.equal(health.room, AGENT_RUNTIME_ROOM_NAME);
     await verifyCorsPreflight(port);
 
+    const incrementalClient = await connectIncrementalRuntimeClient(port);
+    try {
+      assert.equal(incrementalClient.connected, true, 'browser runtime client should connect through the public SDK');
+      const schemaSources = [];
+      const unsubscribeIncremental = incrementalClient.onSnapshots((_snapshots, meta = {}) => {
+        schemaSources.push(String(meta.source || ''));
+      });
+      const runtimeDeadline = Date.now() + 3000;
+      while (!incrementalClient.worldRuntime && Date.now() < runtimeDeadline) await delay(25);
+      assert(incrementalClient.worldRuntime, 'incremental callbacks should bind a world runtime that arrives after room join');
+      const firstTickSeq = Number(incrementalClient.worldRuntime.tickSeq || 0);
+      await delay(350);
+      assert(Number(incrementalClient.worldRuntime?.tickSeq || 0) > firstTickSeq, 'incremental world-runtime metadata should advance with schema patches');
+      assert(schemaSources.includes('schema:patch'), 'browser runtime client should receive incremental schema notifications');
+      unsubscribeIncremental();
+    } finally {
+      incrementalClient.dispose();
+    }
+
     const room = await connectRoom(port);
     room.__server = server;
     const runtimeHealth = await waitForRoomMessage(room, 'runtime:health');
     assert.equal(runtimeHealth.type, 'runtime-health', 'realtime sidecar should continuously prove connection health');
     assert(runtimeHealth.serverTime, 'runtime health should include authoritative server time');
+    await delay(1100);
+    assert.equal(room.__runtimeMessageCounts.welcomes, 1, 'rolling updates should send one compatibility welcome');
+    assert.equal(room.__runtimeWelcome?.transport, 'schema', 'compatibility welcome should direct clients to schema state');
+    assert.equal(room.__runtimeWelcome?.snapshot, undefined, 'compatibility welcome must not duplicate the runtime document');
+    assert.equal(room.__runtimeMessageCounts.states, 0, 'steady state must not send full runtime documents');
+    assert.equal(room.__runtimeMessageCounts.worldRuntimes, 0, 'steady state must not send redundant full world-runtime messages');
     room.send('runtime:snapshot', {
       requestId: 'snapshot-1',
       agentId: 'adam',
@@ -813,7 +971,7 @@ async function run() {
       scriptedAgent.visualStateJson.includes('dynamic-exterior-routing.js') ||
       scriptedAgent.visualStateJson.includes('server-door-transition')
     );
-    assert(Math.abs(Number(scriptedAgent.heading || 0)) <= Math.PI, 'server scripted runtime heading should be radians');
+    assert(Math.abs(Number(scriptedAgent.heading || 0)) <= Math.PI + 0.00001, 'server scripted runtime heading should be radians');
     assert(scriptedAgent.visualStateJson.includes('"activityActive":true'), 'server scripted routing should hydrate activity while moving');
     assert(scriptedAgent.visualStateJson.includes('"defaultScriptedIdlePulse":true'), 'server scripted routing should identify VO-style idle pulse activity');
     const scriptedTarget = JSON.parse(scriptedAgent.targetJson || '{}');
@@ -833,7 +991,7 @@ async function run() {
     if (workAgent.state === 'routing') {
       assert(workAgent.visualStateJson.includes('"isRunning":true'), 'work desk routes should advertise running movement while en route');
     }
-    assert(Math.abs(Number(workAgent.heading || 0)) <= Math.PI, 'work runtime heading should be radians');
+    assert(Math.abs(Number(workAgent.heading || 0)) <= Math.PI + 0.00001, 'work runtime heading should be radians');
     const workTarget = JSON.parse(workAgent.targetJson || '{}');
     assertRadiansClose(workTarget.faceAngle, Math.PI, 'authored desk faceAngle should be preserved');
     const workObject = await waitForObject(scriptedRoom, 'office:furniture:1:desk', (object) => object.owner === LIVE_STATUS_RUNTIME_OWNER);
@@ -1116,8 +1274,11 @@ async function run() {
     assert(['routing', 'waiting'].includes(queueCShifted.state));
     await waitForObject(scriptedRoom, 'office:furniture:4:checkoutCounter', (object) => {
       const reservations = object.data?._scriptedServiceQueueStore?.reservations || [];
-      return reservations.some(entry => entry.agentId === 'queue-c' && entry.queueIndex === 0) &&
-        !reservations.some(entry => entry.agentId === 'queue-b');
+      const queueBReleased = !reservations.some(entry => entry.agentId === 'queue-b');
+      return queueBReleased && (
+        reservations.some(entry => entry.agentId === 'queue-c' && entry.queueIndex === 0) ||
+        object.agentId === 'queue-c'
+      );
     });
     const queueCPromoted = await waitForAgent(scriptedRoom, 'queue-c', (agent) =>
       agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&

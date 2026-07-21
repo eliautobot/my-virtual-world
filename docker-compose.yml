@@ -120,6 +120,7 @@ services:
       - VW_REALTIME_PORT=${VW_REALTIME_PORT:-8591}
       - VW_REALTIME_ROOM=${VW_REALTIME_ROOM:-agent_runtime}
       - VW_REALTIME_MAX_PAYLOAD_BYTES=${VW_REALTIME_MAX_PAYLOAD_BYTES:-1048576}
+      - VW_REALTIME_CHECKPOINT_INTERVAL_MS=${VW_REALTIME_CHECKPOINT_INTERVAL_MS:-5000}
     restart: unless-stopped
 
   # Optional: Agent Browser (uncomment to enable only on trusted networks)

@@ -123,8 +123,10 @@ assert(dockerCompose.includes('target: realtime'), 'docker-compose.yml realtime 
 assert(dockerCompose.includes('${VW_REALTIME_HOST_PORT:-8591}:${VW_REALTIME_PORT:-8591}'), 'docker-compose.yml should expose a configurable private realtime sidecar port');
 assert(dockerCompose.includes('VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-true}'), 'docker-compose.yml should enable realtime for the default Docker install');
 assert(dockerCompose.includes('VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-ws://127.0.0.1:8591}'), 'docker-compose.yml should provide a browser-reachable realtime URL by default');
+assert(dockerCompose.includes('VW_REALTIME_CHECKPOINT_INTERVAL_MS=${VW_REALTIME_CHECKPOINT_INTERVAL_MS:-5000}'), 'docker-compose.yml should configure background runtime checkpoints');
 assert(envExample.includes('VW_REALTIME_HOST_PORT=8591'), '.env.example should document the realtime Docker host port');
 assert(envExample.includes('VW_REALTIME_ENABLED=true'), '.env.example should enable realtime for the default Docker install');
+assert(envExample.includes('VW_REALTIME_CHECKPOINT_INTERVAL_MS=5000'), '.env.example should document the runtime checkpoint interval');
 assert(dockerCompose.includes('CLAUDE_CONFIG_DIR=${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}'), 'docker-compose.yml should pass Claude Code config dir');
 assert(dockerCompose.includes('VW_CLAUDE_CODE_HOME=${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}'), 'docker-compose.yml should pass Claude Code home path');
 assert(envExample.includes('VW_CLAUDE_CODE_HOME=/home/vw/.claude'), '.env.example should document the Claude Code home path');
@@ -163,6 +165,7 @@ const jsSyntaxTargets = [
   'src/client/js/vo-engine.js',
   'src/client/js/agent-runtime-client.mjs',
   'src/realtime/agent-runtime-room.mjs',
+  'src/realtime/runtime-document-writer.mjs',
   'src/realtime/server.mjs',
   'scripts/dev-with-realtime.mjs',
   'scripts/verify-realtime-smoke.mjs',
@@ -369,9 +372,9 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260719-live-agent-toggle-sync-r4',
+  'js/main3d.js?v=20260721-fluidity-r5',
   'js/chat.js?v=20260717-live-controller-r1',
-  'css/style.css?v=20260707-live-planner-r2',
+  'css/style.css?v=20260721-fluidity-r5',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-codexOptions',
@@ -458,7 +461,7 @@ for (const token of [
   assert(read('src/server/providers/codex.py').includes(token), `codex.py missing stream token: ${token}`);
 }
 for (const token of [
-  "agent-characters.js?v=20260615-desk-carry-rest-r1",
+  "agent-characters.js?v=20260721-fluidity-r2",
   "state.miniEl.style.top = miniY + 'px'",
   'CHAT_BUBBLE_MINI_SIZE = 28',
   'if (dist > 100)',
@@ -569,7 +572,7 @@ for (const token of [
   'DEFAULT_WORLD_RUNTIME_TICK_MS = 100',
   'WORLD_RUNTIME_STEP_MAX_MS = 250',
   'WORLD_RUNTIME_TOPOLOGY_REFRESH_MS = 10000',
-  'RUNTIME_STATE_BROADCAST_INTERVAL_MS = 1000',
+  'RUNTIME_STATE_BROADCAST_INTERVAL_MS = 0',
   'worldRuntimeTickContext',
   'runtime.tickMs = DEFAULT_WORLD_RUNTIME_TICK_MS',
   'this.patchRate = RUNTIME_SCHEMA_PATCH_RATE_MS',
@@ -577,12 +580,13 @@ for (const token of [
   'stateToRealtimePlain',
   'worldObjectToRealtimePlain',
   'RUNTIME_WIRE_EVENTS_LIMIT = 0',
-  'tickSeq: plain.tickSeq',
-  'simTimeMs: plain.simTimeMs',
-  'tickMs: plain.tickMs',
+  'schema.tickSeq = plain.tickSeq',
+  'schema.simTimeMs = plain.simTimeMs',
+  'schema.tickMs = plain.tickMs',
   'runWithDeferredRuntimeDocumentWrites',
   'broadcastRuntimeState',
-  'runtime:state',
+  'RuntimeDocumentWriter',
+  'compactRuntimeDocument',
   'world-topology-skipped-owner-fresh',
   'topologyOwnerFresh',
   "LIVE_ACTION_RUNTIME_OWNER = 'server-live-action-runtime'",
@@ -868,7 +872,7 @@ for (const token of [
   'ambient-schedule-routing-suppressed',
   'status-change-movement-clear-skipped',
   '__VWGetLiveModeScriptedSuppressionState',
-  "agent-characters.js?v=20260615-desk-carry-rest-r1",
+  "agent-characters.js?v=20260721-fluidity-r2",
   'function getAgentPresenceDotColor(statusValue)',
   'statusDot.userData.presenceStatusIndicator = true',
   'parts.statusDot.material.color.setHex(getAgentPresenceDotColor(normalizedStatus))',
@@ -910,14 +914,15 @@ for (const token of [
   'isAgentRuntimeSnapshotRemoteWriterActive',
   '_runtimeRemoteWriterActive',
   '__VWGetAgentRuntimeDebug',
-  'agent-runtime-client.mjs?v=20260717-live-controller-r1',
+  'agent-runtime-client.mjs?v=20260720-colyseus-performance-r3',
   'serverAuthoritativeRuntimeBlockReason',
   'clearBrowserOwnedAgentMotionForServerRuntime',
   'holdAgentForServerAuthoritativeRuntimeObserver',
   'stableAgentRuntimeJitter',
   'server-observer-grid-x',
   'server-authoritative-runtime-connecting',
-  'runtime:worldRuntime',
+  'schema:patch',
+  'getStateCallbacks',
   'runtime:worldTopology',
   'writeWorldTopology',
   'applyAgentRuntimeTrafficLights',

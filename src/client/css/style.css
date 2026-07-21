@@ -2099,6 +2099,7 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
 #chatBubbleContainer .chat-bubble-body::-webkit-scrollbar { width: 3px; }
 #chatBubbleContainer .chat-bubble-body::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 2px; }
 #chatBubbleContainer .chat-msg { margin-bottom: 3px; padding-bottom: 3px; border-bottom: 1px solid rgba(0,0,0,0.06); word-wrap: break-word; }
+#chatBubbleContainer .chat-msg-text { white-space: pre-wrap; }
 #chatBubbleContainer .chat-msg:last-child { border-bottom: none; }
 #chatBubbleContainer .chat-msg.user { color: #4466aa; }
 #chatBubbleContainer .chat-msg.assistant { color: #222; }

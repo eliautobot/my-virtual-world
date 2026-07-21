@@ -204,6 +204,7 @@ Configuration variables:
 | `VW_REALTIME_ROOM` | `agent_runtime` | Colyseus room name. |
 | `VW_REALTIME_HOST_PORT` | `8591` | Docker host port for the sidecar. |
 | `VW_REALTIME_PORT` | `8591` | Sidecar HTTP/WebSocket port. |
+| `VW_REALTIME_CHECKPOINT_INTERVAL_MS` | `5000` | Background position checkpoint cadence. Lifecycle transitions still queue an immediate durable checkpoint. |
 
 ## Self-Hosted Runtime Address
 

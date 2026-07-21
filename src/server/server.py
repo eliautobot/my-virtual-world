@@ -28417,7 +28417,7 @@ def get_agent_chat():
     global _chat_cache, _chat_cache_time
     gateway_connected = _gateway_presence_connected()
     now = time.time()
-    if gateway_connected and now - _chat_cache_time < 4:  # spans the 3-second bubble poll
+    if now - _chat_cache_time < 8:  # bound expensive session scans while keeping bubbles near-realtime
         return _chat_cache
 
     result = {}
@@ -28862,6 +28862,25 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_json_cached(self, data):
+        body = json.dumps(data).encode("utf-8")
+        etag = '"' + hashlib.sha256(body).hexdigest()[:24] + '"'
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("ETag", etag)
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _read_body(self):
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
@@ -29280,7 +29299,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             return self._send_json(status.get(agent_id, {"state": "offline", "task": "", "updated": 0, "source": "not-found"}))
 
         if path == "/api/agent-chat":
-            return self._send_json(get_agent_chat())
+            return self._send_json_cached(get_agent_chat())
 
         if path == "/api/agent-live-loop/perception":
             qs = urllib.parse.parse_qs(parsed.query)

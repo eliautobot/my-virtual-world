@@ -216,50 +216,116 @@ function resolveRuntimeUrlForPage(rawUrl = '', windowRef = globalThis.window || 
   }
 }
 
+function runtimeSnapshotFromSchema(raw, fallbackId = '') {
+  if (!raw) return null;
+  let target = null;
+  if (raw.targetJson) {
+    try { target = JSON.parse(raw.targetJson); } catch { target = null; }
+  }
+  let visualState = null;
+  if (raw.visualStateJson) {
+    try { visualState = JSON.parse(raw.visualStateJson); } catch { visualState = null; }
+  }
+  return normalizeRuntimeSnapshot({
+    agentId: raw.agentId || fallbackId,
+    mode: raw.mode,
+    owner: raw.owner,
+    x: raw.x,
+    y: raw.y,
+    floor: raw.floor,
+    buildingId: raw.buildingId,
+    roomId: raw.roomId,
+    heading: raw.heading,
+    state: raw.state,
+    target,
+    visualState,
+    routeId: raw.routeId,
+    worldActionId: raw.worldActionId,
+    leaseOwner: raw.leaseOwner,
+    leaseExpiresAt: raw.leaseExpiresAt,
+    updatedAt: raw.updatedAt,
+    version: raw.version,
+    tickSeq: raw.tickSeq,
+    simTimeMs: raw.simTimeMs,
+    tickMs: raw.tickMs,
+  });
+}
+
+function worldObjectFromSchema(raw, fallbackKey = '') {
+  if (!raw) return null;
+  let data = null;
+  if (raw.dataJson) {
+    try { data = JSON.parse(raw.dataJson); } catch { data = null; }
+  }
+  return normalizeWorldObjectState({
+    objectKey: raw.objectKey || fallbackKey,
+    owner: raw.owner,
+    objectType: raw.objectType,
+    buildingId: raw.buildingId,
+    furnitureIndex: raw.furnitureIndex,
+    state: raw.state,
+    agentId: raw.agentId,
+    actionId: raw.actionId,
+    reservationId: raw.reservationId,
+    activeUseId: raw.activeUseId,
+    slotId: raw.slotId,
+    data,
+    expiresAt: raw.expiresAt,
+    updatedAt: raw.updatedAt,
+    version: raw.version,
+  });
+}
+
+function trafficLightFromSchema(raw, fallbackKey = '') {
+  if (!raw) return null;
+  let openEdges = null;
+  if (raw.openEdgesJson) {
+    try { openEdges = JSON.parse(raw.openEdgesJson); } catch { openEdges = null; }
+  }
+  return normalizeTrafficLightState({
+    key: raw.key || fallbackKey,
+    ix: raw.ix,
+    iz: raw.iz,
+    type: raw.type,
+    openEdges,
+    phaseMs: raw.phaseMs,
+    ns: raw.ns,
+    ew: raw.ew,
+    updatedAt: raw.updatedAt,
+    version: raw.version,
+  });
+}
+
+function trafficVehicleFromSchema(raw, fallbackId = '') {
+  if (!raw) return null;
+  let path = [];
+  if (raw.pathJson) {
+    try { path = JSON.parse(raw.pathJson); } catch { path = []; }
+  }
+  return normalizeTrafficVehicleState({
+    vehicleId: raw.vehicleId || fallbackId,
+    vehicleType: raw.vehicleType,
+    color: raw.color,
+    x: raw.x,
+    z: raw.z,
+    dir: raw.dir,
+    rotationY: raw.rotationY,
+    speed: raw.speed,
+    speedMult: raw.speedMult,
+    path,
+    pathIdx: raw.pathIdx,
+    state: raw.state,
+    updatedAt: raw.updatedAt,
+    version: raw.version,
+  });
+}
+
 function snapshotsFromRoomState(room) {
   const snapshots = new Map();
   const agents = room?.state?.agents;
   if (!agents || typeof agents.entries !== 'function') return snapshots;
   for (const [agentId, raw] of agents.entries()) {
-    let target = null;
-    if (raw.targetJson) {
-      try {
-        target = JSON.parse(raw.targetJson);
-      } catch {
-        target = null;
-      }
-    }
-    let visualState = null;
-    if (raw.visualStateJson) {
-      try {
-        visualState = JSON.parse(raw.visualStateJson);
-      } catch {
-        visualState = null;
-      }
-    }
-    const snapshot = normalizeRuntimeSnapshot({
-      agentId: raw.agentId || agentId,
-      mode: raw.mode,
-      owner: raw.owner,
-      x: raw.x,
-      y: raw.y,
-      floor: raw.floor,
-      buildingId: raw.buildingId,
-      roomId: raw.roomId,
-      heading: raw.heading,
-      state: raw.state,
-      target,
-      visualState,
-      routeId: raw.routeId,
-      worldActionId: raw.worldActionId,
-      leaseOwner: raw.leaseOwner,
-      leaseExpiresAt: raw.leaseExpiresAt,
-      updatedAt: raw.updatedAt,
-      version: raw.version,
-      tickSeq: raw.tickSeq,
-      simTimeMs: raw.simTimeMs,
-      tickMs: raw.tickMs,
-    });
+    const snapshot = runtimeSnapshotFromSchema(raw, agentId);
     if (snapshot) snapshots.set(snapshot.agentId, snapshot);
   }
   return snapshots;
@@ -270,31 +336,7 @@ function worldObjectsFromRoomState(room) {
   const rawObjects = room?.state?.objects;
   if (!rawObjects || typeof rawObjects.entries !== 'function') return objects;
   for (const [objectKey, raw] of rawObjects.entries()) {
-    let data = null;
-    if (raw.dataJson) {
-      try {
-        data = JSON.parse(raw.dataJson);
-      } catch {
-        data = null;
-      }
-    }
-    const object = normalizeWorldObjectState({
-      objectKey: raw.objectKey || objectKey,
-      owner: raw.owner,
-      objectType: raw.objectType,
-      buildingId: raw.buildingId,
-      furnitureIndex: raw.furnitureIndex,
-      state: raw.state,
-      agentId: raw.agentId,
-      actionId: raw.actionId,
-      reservationId: raw.reservationId,
-      activeUseId: raw.activeUseId,
-      slotId: raw.slotId,
-      data,
-      expiresAt: raw.expiresAt,
-      updatedAt: raw.updatedAt,
-      version: raw.version,
-    });
+    const object = worldObjectFromSchema(raw, objectKey);
     if (object) objects.set(object.objectKey, object);
   }
   return objects;
@@ -378,6 +420,27 @@ function worldRuntimeFromRoomState(room) {
   });
 }
 
+function worldRuntimeFromSchemaParts(raw, previous = null, trafficLights = previous?.trafficLights || new Map(), trafficVehicles = previous?.trafficVehicles || new Map()) {
+  if (!raw) return previous;
+  return Object.freeze({
+    schemaVersion: String(raw.schemaVersion || previous?.schemaVersion || 'world-runtime/v1'),
+    mode: String(raw.mode || previous?.mode || 'server-authoritative'),
+    tickMs: Number.isFinite(Number(raw.tickMs)) ? Number(raw.tickMs) : Number(previous?.tickMs || 100),
+    tickSeq: Number.isFinite(Number(raw.tickSeq)) ? Number(raw.tickSeq) : Number(previous?.tickSeq || 0),
+    simTimeMs: Number.isFinite(Number(raw.simTimeMs)) ? Number(raw.simTimeMs) : Number(previous?.simTimeMs || 0),
+    startedAt: String(raw.startedAt || previous?.startedAt || ''),
+    updatedAt: String(raw.updatedAt || previous?.updatedAt || ''),
+    topologyHash: String(raw.topologyHash || previous?.topologyHash || ''),
+    topologyOwner: String(raw.topologyOwner || previous?.topologyOwner || ''),
+    topologyUpdatedAt: String(raw.topologyUpdatedAt || previous?.topologyUpdatedAt || ''),
+    trafficCycleMs: Number.isFinite(Number(raw.trafficCycleMs)) ? Number(raw.trafficCycleMs) : Number(previous?.trafficCycleMs || 40000),
+    trafficYellowMs: Number.isFinite(Number(raw.trafficYellowMs)) ? Number(raw.trafficYellowMs) : Number(previous?.trafficYellowMs || 3000),
+    trafficAllRedMs: Number.isFinite(Number(raw.trafficAllRedMs)) ? Number(raw.trafficAllRedMs) : Number(previous?.trafficAllRedMs || 2000),
+    trafficLights,
+    trafficVehicles,
+  });
+}
+
 function mergeRuntimeDelta(message = null, currentSnapshots = new Map(), currentWorldObjects = new Map(), currentWorldRuntime = null) {
   let snapshots = currentSnapshots;
   let worldObjects = currentWorldObjects;
@@ -407,24 +470,6 @@ function mergeRuntimeDelta(message = null, currentSnapshots = new Map(), current
   }
 
   return { snapshots, worldObjects, worldRuntime, changed };
-}
-
-function waitForMessage(room, type, timeoutMs = 1500) {
-  return new Promise(resolve => {
-    const timer = setTimeout(() => {
-      cleanup();
-      resolve(null);
-    }, timeoutMs);
-    let cleanup = () => clearTimeout(timer);
-    const unsubscribe = room.onMessage(type, message => {
-      cleanup();
-      resolve(message);
-    });
-    cleanup = () => {
-      clearTimeout(timer);
-      if (typeof unsubscribe === 'function') unsubscribe();
-    };
-  });
 }
 
 function withTimeout(promise, timeoutMs = DEFAULT_CONNECT_TIMEOUT_MS, label = 'operation') {
@@ -481,6 +526,7 @@ export async function createAgentRuntimeClient({
   let room = null;
   let client = null;
   let unsubscribeState = null;
+  let schemaUnsubscribes = [];
   let messageUnsubscribes = [];
   let signalUnsubscribes = [];
   let requestSeq = 0;
@@ -493,11 +539,10 @@ export async function createAgentRuntimeClient({
   let leaseOwner = '';
   const pendingRequestIds = new Set();
 
-  const notify = source => {
-    const frozen = new Map(snapshots);
+  const notify = (source, meta = {}) => {
     listeners.forEach(listener => {
       try {
-        listener(frozen, { source, config, room });
+        listener(snapshots, { source, config, room, ...meta });
       } catch (error) {
         logger?.warn?.('Agent runtime listener failed', error);
       }
@@ -508,35 +553,35 @@ export async function createAgentRuntimeClient({
     lastMessageAt = Date.now();
   };
 
-  const applyRuntimeDocument = (doc, source) => {
-    if (!doc) return false;
-    snapshots = snapshotsFromRuntimeDocument(doc);
-    worldObjects = worldObjectsFromRuntimeDocument(doc);
-    worldRuntime = worldRuntimeFromRuntimeDocument(doc);
-    touchRuntime();
-    notify(source);
-    return true;
-  };
-
   const applyRoomState = source => {
     const nextSnapshots = snapshotsFromRoomState(room);
     const nextWorldObjects = worldObjectsFromRoomState(room);
     const nextWorldRuntime = worldRuntimeFromRoomState(room);
-    if (nextSnapshots.size > 0 || snapshots.size === 0) snapshots = nextSnapshots;
-    if (nextWorldObjects.size > 0 || worldObjects.size === 0) worldObjects = nextWorldObjects;
+    snapshots = nextSnapshots;
+    worldObjects = nextWorldObjects;
     if (nextWorldRuntime) worldRuntime = nextWorldRuntime;
     touchRuntime();
-    notify(source);
+    notify(source, { fullSync: true });
   };
 
   const applyRuntimeDelta = (message, source) => {
     const merged = mergeRuntimeDelta(message, snapshots, worldObjects, worldRuntime);
     if (!merged.changed) return false;
+    const snapshotsChanged = merged.snapshots !== snapshots;
+    const objectsChanged = merged.worldObjects !== worldObjects;
+    const worldRuntimeChanged = merged.worldRuntime !== worldRuntime;
+    const changedSnapshot = normalizeRuntimeSnapshot(message?.snapshot || message?.agent || null);
+    const changedObject = normalizeWorldObjectState(message?.object || message?.worldObject || null);
     snapshots = merged.snapshots;
     worldObjects = merged.worldObjects;
     worldRuntime = merged.worldRuntime;
     touchRuntime();
-    notify(source);
+    notify(source, {
+      changedAgentIds: snapshotsChanged && changedSnapshot ? [changedSnapshot.agentId] : [],
+      changedObjectKeys: objectsChanged && changedObject ? [changedObject.objectKey] : [],
+      worldRuntimeChanged,
+      fullSync: false,
+    });
     return true;
   };
 
@@ -551,6 +596,12 @@ export async function createAgentRuntimeClient({
   const clearRoomHandlers = () => {
     if (typeof unsubscribeState === 'function') unsubscribeState();
     unsubscribeState = null;
+    for (const unsubscribe of schemaUnsubscribes) {
+      try {
+        if (typeof unsubscribe === 'function') unsubscribe();
+      } catch {}
+    }
+    schemaUnsubscribes = [];
     for (const unsubscribe of messageUnsubscribes) {
       try {
         if (typeof unsubscribe === 'function') unsubscribe();
@@ -592,27 +643,178 @@ export async function createAgentRuntimeClient({
     }
   };
 
+  const attachSchemaHandlers = nextRoom => {
+    const getStateCallbacks = windowRef?.Colyseus?.getStateCallbacks;
+    if (typeof getStateCallbacks !== 'function') return false;
+    const callbacks = getStateCallbacks(nextRoom);
+    if (typeof callbacks !== 'function') return false;
+
+    const agentItemUnsubscribes = new Map();
+    const objectItemUnsubscribes = new Map();
+    const lightItemUnsubscribes = new Map();
+    const vehicleItemUnsubscribes = new Map();
+    let runtimeSchemaUnsubscribes = [];
+    const pending = {
+      agentIds: new Set(),
+      objectKeys: new Set(),
+      lightKeys: new Set(),
+      vehicleIds: new Set(),
+      worldRuntime: false,
+    };
+    let flushScheduled = false;
+
+    const queueFlush = (kind, key = '') => {
+      if (kind === 'agent') pending.agentIds.add(String(key));
+      else if (kind === 'object') pending.objectKeys.add(String(key));
+      else if (kind === 'light') pending.lightKeys.add(String(key));
+      else if (kind === 'vehicle') pending.vehicleIds.add(String(key));
+      else if (kind === 'worldRuntime') pending.worldRuntime = true;
+      if (flushScheduled) return;
+      flushScheduled = true;
+      queueMicrotask(() => {
+        flushScheduled = false;
+        if (room !== nextRoom) return;
+        const changedAgentIds = Array.from(pending.agentIds);
+        const changedObjectKeys = Array.from(pending.objectKeys);
+        const changedLightKeys = Array.from(pending.lightKeys);
+        const changedVehicleIds = Array.from(pending.vehicleIds);
+        const runtimeMetadataChanged = pending.worldRuntime;
+        pending.agentIds.clear();
+        pending.objectKeys.clear();
+        pending.lightKeys.clear();
+        pending.vehicleIds.clear();
+        pending.worldRuntime = false;
+
+        if (changedAgentIds.length) {
+          const nextSnapshots = new Map(snapshots);
+          for (const agentId of changedAgentIds) {
+            const snapshot = runtimeSnapshotFromSchema(nextRoom.state?.agents?.get?.(agentId), agentId);
+            if (snapshot) nextSnapshots.set(agentId, snapshot);
+            else nextSnapshots.delete(agentId);
+          }
+          snapshots = nextSnapshots;
+        }
+        if (changedObjectKeys.length) {
+          const nextObjects = new Map(worldObjects);
+          for (const objectKey of changedObjectKeys) {
+            const object = worldObjectFromSchema(nextRoom.state?.objects?.get?.(objectKey), objectKey);
+            if (object) nextObjects.set(objectKey, object);
+            else nextObjects.delete(objectKey);
+          }
+          worldObjects = nextObjects;
+        }
+
+        const runtimeSchema = nextRoom.state?.worldRuntime || null;
+        let trafficLights = worldRuntime?.trafficLights || new Map();
+        let trafficVehicles = worldRuntime?.trafficVehicles || new Map();
+        if (changedLightKeys.length) {
+          trafficLights = new Map(trafficLights);
+          for (const key of changedLightKeys) {
+            const light = trafficLightFromSchema(runtimeSchema?.trafficLights?.get?.(key), key);
+            if (light) trafficLights.set(key, light);
+            else trafficLights.delete(key);
+          }
+        }
+        if (changedVehicleIds.length) {
+          trafficVehicles = new Map(trafficVehicles);
+          for (const vehicleId of changedVehicleIds) {
+            const vehicle = trafficVehicleFromSchema(runtimeSchema?.trafficVehicles?.get?.(vehicleId), vehicleId);
+            if (vehicle) trafficVehicles.set(vehicleId, vehicle);
+            else trafficVehicles.delete(vehicleId);
+          }
+        }
+        const worldRuntimeChanged = runtimeMetadataChanged || changedLightKeys.length > 0 || changedVehicleIds.length > 0;
+        if (worldRuntimeChanged) {
+          worldRuntime = worldRuntimeFromSchemaParts(runtimeSchema, worldRuntime, trafficLights, trafficVehicles);
+        }
+        touchRuntime();
+        notify('schema:patch', {
+          changedAgentIds,
+          changedObjectKeys,
+          worldRuntimeChanged,
+          fullSync: false,
+        });
+      });
+    };
+
+    const bindItem = (item, key, kind, registry) => {
+      const normalizedKey = String(key);
+      registry.get(normalizedKey)?.();
+      const unsubscribe = callbacks(item).onChange(() => queueFlush(kind, normalizedKey));
+      registry.set(normalizedKey, unsubscribe);
+      queueFlush(kind, normalizedKey);
+    };
+    const removeItem = (key, kind, registry) => {
+      const normalizedKey = String(key);
+      registry.get(normalizedKey)?.();
+      registry.delete(normalizedKey);
+      queueFlush(kind, normalizedKey);
+    };
+
+    const clearItemRegistry = registry => {
+      for (const unsubscribe of registry.values()) unsubscribe?.();
+      registry.clear();
+    };
+
+    const bindWorldRuntime = runtimeSchema => {
+      for (const unsubscribe of runtimeSchemaUnsubscribes.splice(0)) unsubscribe?.();
+      clearItemRegistry(lightItemUnsubscribes);
+      clearItemRegistry(vehicleItemUnsubscribes);
+      if (!runtimeSchema) {
+        worldRuntime = null;
+        queueFlush('worldRuntime');
+        return;
+      }
+      const runtimeCallbacks = callbacks(runtimeSchema);
+      runtimeSchemaUnsubscribes = [
+        runtimeCallbacks.onChange(() => queueFlush('worldRuntime')),
+        runtimeCallbacks.trafficLights.onAdd((item, key) => bindItem(item, key, 'light', lightItemUnsubscribes), true),
+        runtimeCallbacks.trafficLights.onRemove((_item, key) => removeItem(key, 'light', lightItemUnsubscribes)),
+        runtimeCallbacks.trafficVehicles.onAdd((item, key) => bindItem(item, key, 'vehicle', vehicleItemUnsubscribes), true),
+        runtimeCallbacks.trafficVehicles.onRemove((_item, key) => removeItem(key, 'vehicle', vehicleItemUnsubscribes)),
+      ];
+      queueFlush('worldRuntime');
+    };
+
+    try {
+      const stateCallbacks = callbacks(nextRoom.state);
+      schemaUnsubscribes.push(
+        stateCallbacks.agents.onAdd((item, key) => bindItem(item, key, 'agent', agentItemUnsubscribes), true),
+        stateCallbacks.agents.onRemove((_item, key) => removeItem(key, 'agent', agentItemUnsubscribes)),
+        stateCallbacks.objects.onAdd((item, key) => bindItem(item, key, 'object', objectItemUnsubscribes), true),
+        stateCallbacks.objects.onRemove((_item, key) => removeItem(key, 'object', objectItemUnsubscribes)),
+        stateCallbacks.listen('worldRuntime', runtimeSchema => bindWorldRuntime(runtimeSchema), true),
+      );
+      schemaUnsubscribes.push(() => {
+        for (const unsubscribe of runtimeSchemaUnsubscribes.splice(0)) unsubscribe?.();
+        for (const registry of [agentItemUnsubscribes, objectItemUnsubscribes, lightItemUnsubscribes, vehicleItemUnsubscribes]) {
+          clearItemRegistry(registry);
+        }
+      });
+      return true;
+    } catch (error) {
+      logger?.warn?.('Incremental runtime schema callbacks unavailable; using state snapshots.', error);
+      for (const unsubscribe of schemaUnsubscribes.splice(0)) {
+        try { unsubscribe?.(); } catch {}
+      }
+      return false;
+    }
+  };
+
   const attachRoomHandlers = nextRoom => {
     clearRoomHandlers();
-    const stateCallback = () => {
-      applyRoomState('state');
-    };
-    unsubscribeState = nextRoom.onStateChange(stateCallback);
-    if (typeof unsubscribeState !== 'function' && typeof nextRoom.onStateChange?.remove === 'function') {
-      unsubscribeState = () => nextRoom.onStateChange.remove(stateCallback);
+    if (!attachSchemaHandlers(nextRoom)) {
+      const stateCallback = () => applyRoomState('state');
+      unsubscribeState = nextRoom.onStateChange(stateCallback);
+      if (typeof unsubscribeState !== 'function' && typeof nextRoom.onStateChange?.remove === 'function') {
+        unsubscribeState = () => nextRoom.onStateChange.remove(stateCallback);
+      }
     }
     messageUnsubscribes.push(
-      nextRoom.onMessage('runtime:event', message => {
-        applyRuntimeDelta(message, 'runtime:event');
-      }),
+      nextRoom.onMessage('runtime:welcome', () => touchRuntime()),
+      nextRoom.onMessage('runtime:event', () => touchRuntime()),
       nextRoom.onMessage('runtime:ack', message => {
-        if (!applyRuntimeDelta(message, 'runtime:ack')) applyRoomState('runtime:ack');
-      }),
-      nextRoom.onMessage('runtime:worldRuntime', message => {
-        if (!applyRuntimeDelta(message, 'runtime:worldRuntime')) applyRoomState('runtime:worldRuntime');
-      }),
-      nextRoom.onMessage('runtime:state', message => {
-        if (!applyRuntimeDocument(message?.snapshot, 'runtime:state')) applyRoomState('runtime:state');
+        if (!applyRuntimeDelta(message, 'runtime:ack')) touchRuntime();
       }),
       nextRoom.onMessage('runtime:health', () => {
         touchRuntime();
@@ -665,10 +867,7 @@ export async function createAgentRuntimeClient({
     reason = '';
     leaseOwner = `main3d:${room.sessionId}`;
     attachRoomHandlers(room);
-    const welcome = await waitForMessage(room, 'runtime:welcome');
-    if (!applyRuntimeDocument(welcome?.snapshot, source === 'connect' ? 'runtime:welcome' : 'runtime:resume')) {
-      applyRoomState(source === 'connect' ? 'runtime:welcome' : 'runtime:resume');
-    }
+    applyRoomState(source === 'connect' ? 'runtime:connect' : 'runtime:resume');
     return true;
   };
 
