@@ -9,8 +9,8 @@
     <meta name="theme-color" content="#1a1a2e">
     <link rel="icon" href="favicon.png" type="image/png">
     <title>My Virtual World</title>
-    <link rel="stylesheet" href="css/style.css?v=20260727-connection-status-r1">
-    <link rel="stylesheet" href="css/ui-redesign.css?v=20260727-chat-responsive-r1">
+    <link rel="stylesheet" href="css/style.css?v=20260727-fixed-bubble-chrome-r8">
+    <link rel="stylesheet" href="css/ui-redesign.css?v=20260727-chat-bubble-display-r1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
@@ -572,6 +572,54 @@
                             <div class="field-example">Optional, for precise sunrise/sunset and weather lookup.</div>
                         </div>
                     </div>
+                    <fieldset class="settings-chat-bubbles">
+                        <legend>Chat Bubbles</legend>
+                        <div class="settings-choice-group">
+                            <span class="settings-choice-group-label">Display behavior</span>
+                            <div class="settings-choice-grid settings-choice-grid-two">
+                                <div class="settings-choice">
+                                    <label for="setting-chatBubbleDisplayMode-consistent">
+                                        <input type="radio" id="setting-chatBubbleDisplayMode-consistent" name="setting-chatBubbleDisplayMode" value="consistent" checked>
+                                        <span>Consistent size</span>
+                                    </label>
+                                    <button type="button" class="settings-info-button" aria-label="About Consistent size" title="Keeps the bubble and its text at the selected screen size at every camera zoom level." data-tooltip="Keeps the bubble and its text at the selected screen size at every camera zoom level.">i</button>
+                                </div>
+                                <div class="settings-choice">
+                                    <label for="setting-chatBubbleDisplayMode-world">
+                                        <input type="radio" id="setting-chatBubbleDisplayMode-world" name="setting-chatBubbleDisplayMode" value="world">
+                                        <span>Fixed size</span>
+                                    </label>
+                                    <button type="button" class="settings-info-button" aria-label="About Fixed size" title="Keeps one rigid bubble at a fixed size in the world. Moving the camera closer or farther scales the complete bubble like any other world object, without changing its internal text layout or wrapping." data-tooltip="Keeps one rigid bubble at a fixed size in the world. Moving the camera closer or farther scales the complete bubble like any other world object, without changing its internal text layout or wrapping.">i</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="settings-choice-group">
+                            <span class="settings-choice-group-label">Display size</span>
+                            <div class="settings-choice-grid settings-choice-grid-three">
+                                <div class="settings-choice">
+                                    <label for="setting-chatBubbleSize-large">
+                                        <input type="radio" id="setting-chatBubbleSize-large" name="setting-chatBubbleSize" value="large" checked>
+                                        <span>Large</span>
+                                    </label>
+                                    <button type="button" class="settings-info-button" aria-label="About Large chat bubbles" title="Consistent: original size. Fixed size: the largest rigid world-anchored bubble." data-tooltip="Consistent: original size. Fixed size: the largest rigid world-anchored bubble.">i</button>
+                                </div>
+                                <div class="settings-choice">
+                                    <label for="setting-chatBubbleSize-medium">
+                                        <input type="radio" id="setting-chatBubbleSize-medium" name="setting-chatBubbleSize" value="medium">
+                                        <span>Medium</span>
+                                    </label>
+                                    <button type="button" class="settings-info-button" aria-label="About Medium chat bubbles" title="Consistent: 20% smaller than Large. Fixed size: 30% smaller than its Large size." data-tooltip="Consistent: 20% smaller than Large. Fixed size: 30% smaller than its Large size.">i</button>
+                                </div>
+                                <div class="settings-choice">
+                                    <label for="setting-chatBubbleSize-small">
+                                        <input type="radio" id="setting-chatBubbleSize-small" name="setting-chatBubbleSize" value="small">
+                                        <span>Small</span>
+                                    </label>
+                                    <button type="button" class="settings-info-button" aria-label="About Small chat bubbles" title="Consistent: 15% smaller than Medium. Fixed size: 30% smaller than its Medium size." data-tooltip="Consistent: 15% smaller than Medium. Fixed size: 30% smaller than its Medium size.">i</button>
+                                </div>
+                            </div>
+                        </div>
+                    </fieldset>
                     <label class="settings-check"><input type="checkbox" id="setting-showGrid" checked> Show Grid Lines</label>
                     <label class="settings-check"><input type="checkbox" id="setting-showMinimap" checked> Show Mini-Map</label>
                     <label class="settings-check"><input type="checkbox" id="setting-showCoords" checked> Show Coordinates</label>
@@ -959,10 +1007,10 @@
     <script src="js/vo-engine.js?v=printer-copier-asset-v1"></script>
     <script src="/node_modules/@colyseus/sdk/dist/colyseus.js?v=20260623-live-agent-runtime-hydration"></script>
     <script src="/node_modules/marked/lib/marked.umd.js?v=16.4.2"></script>
-    <script type="module" src="js/main3d.js?v=20260721-fluidity-r5"></script>
+    <script type="module" src="js/main3d.js?v=20260727-fixed-bubble-chrome-r8"></script>
     <script src="js/openclaw-run-state.js?v=20260727-connection-status-r1"></script>
     <script src="js/chat-markdown.js?v=20260727-chat-markdown-r1"></script>
     <script src="js/chat.js?v=20260727-connection-status-r1"></script>
-    <script src="js/settings.js?v=20260719-live-agent-toggle-sync-r3"></script>
+    <script src="js/settings.js?v=20260727-chat-bubble-display-r1"></script>
 </body>
 </html>

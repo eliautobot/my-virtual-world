@@ -83,6 +83,14 @@ import {
   cloneStarterMapStreets,
 } from './starter-map.mjs?v=20260613-road-terrain-r1';
 import {
+  clampChatBubbleX,
+  getChatBubbleChromeMetrics,
+  getChatBubbleDisplayScale,
+  getRigidWorldChatBubbleLayout,
+  getChatBubbleSideInsets,
+  normalizeChatBubbleDisplaySettings,
+} from './chat-bubble-layout.mjs?v=20260727-fixed-bubble-chrome-r8';
+import {
   CAPABILITY_TAG_GROUPS,
   CAPABILITY_TAG_DEFINITIONS,
   CAPABILITY_TAGS,
@@ -32959,6 +32967,8 @@ window.saveSettings = () => {
   const weatherEnabled = document.getElementById('setting-enableWeather')?.checked !== false;
   const movementDebugOverlaysEnabled = document.getElementById('setting-movementDebugOverlays')?.checked !== false;
   const objectActionPointDebugEnabled = document.getElementById('setting-objectActionPointDebug')?.checked === true;
+  const chatBubbleDisplayMode = document.querySelector('input[name="setting-chatBubbleDisplayMode"]:checked')?.value;
+  const chatBubbleSize = document.querySelector('input[name="setting-chatBubbleSize"]:checked')?.value;
 
   if (name) {
     setWorldTitleName(name);
@@ -32969,6 +32979,10 @@ window.saveSettings = () => {
   setWeatherEnabled(weatherEnabled);
   setMovementDebugOverlaysEnabled(movementDebugOverlaysEnabled);
   setObjectActionPointDebugEnabled(objectActionPointDebugEnabled);
+  applyChatBubbleDisplaySettings({
+    displayMode: chatBubbleDisplayMode,
+    size: chatBubbleSize,
+  });
 
   const metaPatch = { name, showMinimap, dayNightCycleEnabled, weatherEnabled };
   _worldMetaCache = { ...(_worldMetaCache || {}), ...metaPatch };
@@ -62151,8 +62165,33 @@ let _chatData = {};             // agentId -> [{role, text, time, from}]
 let _chatFirstPoll = true;
 let _packedChatBubbleOrder = [];
 let _packedChatBubbleKey = '';
+let _chatBubbleDisplaySettings = normalizeChatBubbleDisplaySettings();
+
+function applyChatBubbleDisplaySettings(value) {
+  _chatBubbleDisplaySettings = normalizeChatBubbleDisplaySettings(value);
+  return _chatBubbleDisplaySettings;
+}
+
+function getCurrentChatBubbleDisplayScale() {
+  return getChatBubbleDisplayScale(_chatBubbleDisplaySettings, camDist);
+}
+
+async function loadChatBubbleDisplaySettings() {
+  try {
+    const response = await fetch('/vw-config');
+    if (!response.ok) return;
+    const config = await response.json();
+    applyChatBubbleDisplaySettings(config?.world?.chatBubbles);
+  } catch (error) {
+    // Keep the backwards-compatible Consistent / Large defaults.
+  }
+}
 
 function initChatBubbles() {
+  loadChatBubbleDisplaySettings();
+  window.addEventListener('vw:settings-saved', event => {
+    applyChatBubbleDisplaySettings(event.detail?.config?.world?.chatBubbles);
+  });
   let chatPollInFlight = false;
   let chatEtag = '';
   const pollAgentChat = async () => {
@@ -62174,6 +62213,8 @@ function initChatBubbles() {
   setInterval(pollAgentChat, 5000);
   // Also update positions every frame in animate loop
 }
+
+window.__getChatBubbleDisplayState = () => getCurrentChatBubbleDisplayScale();
 
 function getAgentColor(agent) {
   const det = getAgentAppearance(agent.id || agent.name || 'x', agent._appearance?.gender || agent.gender);
@@ -62549,6 +62590,7 @@ function renderBubbleMessages(agentId, state) {
   const visible = msgs.slice(-CHAT_BUBBLE_VISIBLE_MESSAGE_LIMIT);
   body.innerHTML = visible.map((m, i) => _bubbleMessageHtml(m, i === visible.length - 1, state)).join('');
   body._vwMsgCount = visible.length;
+  body.scrollLeft = 0;
   // Auto-scroll to bottom
   body.scrollTop = body.scrollHeight;
 }
@@ -62596,6 +62638,7 @@ function renderBubbleLastMessage(agentId, state) {
   } else if (!timeText && timeEl) {
     timeEl.remove();
   }
+  body.scrollLeft = 0;
   body.scrollTop = body.scrollHeight;
 }
 
@@ -62611,15 +62654,31 @@ function clampChatBubbleValue(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function getExpandedChatBubbleLayout(expandedCount, availableWidth, availableHeight) {
-  const maxW = 320;
-  const maxH = 280;
-  const minW = 140;
-  const minH = 108;
-  const gap = 10;
+function getExpandedChatBubbleLayout(expandedCount, availableWidth, availableHeight, requestedScale = 1) {
+  const baseW = 320;
+  const baseH = 280;
+  const safeRequestedScale = Math.max(0.05, Number(requestedScale) || 1);
+  const maxW = baseW * safeRequestedScale;
+  const maxH = baseH * safeRequestedScale;
+  const minW = Math.min(maxW, 140 * safeRequestedScale);
+  const minH = Math.min(maxH, 108 * safeRequestedScale);
+  const gap = Math.max(4, 10 * Math.min(1, safeRequestedScale));
 
   if (expandedCount <= 1) {
-    return { w: maxW, h: maxH, scale: 1, gap, columns: 1, rows: 1 };
+    const fitScale = Math.min(
+      1,
+      Math.max(0.05, availableWidth / maxW),
+      Math.max(0.05, availableHeight / maxH)
+    );
+    const scale = safeRequestedScale * fitScale;
+    return {
+      w: Math.max(1, Math.round(baseW * scale)),
+      h: Math.max(1, Math.round(baseH * scale)),
+      scale,
+      gap,
+      columns: 1,
+      rows: 1,
+    };
   }
 
   let best = null;
@@ -62631,32 +62690,89 @@ function getExpandedChatBubbleLayout(expandedCount, availableWidth, availableHei
 
     const w = Math.min(maxW, rawW);
     const h = Math.min(maxH, rawH);
-    const scale = Math.max(0.62, Math.min(w / maxW, h / maxH, 1));
+    const scale = Math.min(w / baseW, h / baseH, safeRequestedScale);
     const fitsReadable = rawW >= minW && rawH >= minH;
     const score = (fitsReadable ? 1_000_000 : 0) + w * h;
 
     if (!best || score > best.score) {
-      best = { w: Math.max(110, w), h: Math.max(92, h), scale, gap, columns, rows, score };
+      best = {
+        w: Math.max(1, Math.round(baseW * scale)),
+        h: Math.max(1, Math.round(baseH * scale)),
+        scale,
+        gap,
+        columns,
+        rows,
+        score,
+      };
     }
   }
 
   if (!best) {
-    return { w: 220, h: 160, scale: 0.72, gap, columns: 1, rows: expandedCount };
+    const scale = Math.min(
+      safeRequestedScale,
+      Math.max(0.05, availableWidth / baseW),
+      Math.max(0.05, availableHeight / (baseH * Math.max(1, expandedCount)))
+    );
+    return {
+      w: Math.max(1, Math.round(baseW * scale)),
+      h: Math.max(1, Math.round(baseH * scale)),
+      scale,
+      gap,
+      columns: 1,
+      rows: expandedCount,
+    };
   }
 
   return best;
 }
 
-function applyChatBubbleSize(state, layout) {
+function applyChatBubbleSize(
+  state,
+  layout,
+  typographyScale = layout?.scale,
+  chromeScale = typographyScale,
+  displayMode = 'consistent'
+) {
   if (!state?.el || !layout) return;
-  state.el.style.width = layout.w + 'px';
-  state.el.style.height = layout.h + 'px';
-  state.el.style.setProperty('--bubble-header-font-size', Math.round(12 * layout.scale) + 'px');
-  state.el.style.setProperty('--bubble-body-font-size', Math.round(12 * layout.scale) + 'px');
-  state.el.style.setProperty('--bubble-header-padding-y', Math.round(5 * layout.scale) + 'px');
-  state.el.style.setProperty('--bubble-header-padding-x', Math.round(8 * layout.scale) + 'px');
-  state.el.style.setProperty('--bubble-body-padding-y', Math.round(6 * layout.scale) + 'px');
-  state.el.style.setProperty('--bubble-body-padding-x', Math.round(10 * layout.scale) + 'px');
+  const safeTypographyScale = Math.max(0.05, Number(typographyScale) || 1);
+  const safeChromeScale = Math.max(0.05, Number(chromeScale) || 1);
+  const transformScale = Math.max(0.05, Number(layout.transformScale) || 1);
+  const intrinsicW = Math.max(1, Number(layout.intrinsicW) || layout.w);
+  const intrinsicH = Math.max(1, Number(layout.intrinsicH) || layout.h);
+  const textPx = value => `${Math.max(0.5, value * safeTypographyScale).toFixed(2)}px`;
+  const chromePx = value => `${Math.max(0.5, value * safeChromeScale).toFixed(2)}px`;
+  const metricPx = value => `${Math.max(0.05, Number(value) || 0).toFixed(3)}px`;
+  const chromeMetrics = getChatBubbleChromeMetrics(displayMode, safeChromeScale);
+  state.el.style.width = intrinsicW + 'px';
+  state.el.style.height = intrinsicH + 'px';
+  state.el.style.transformOrigin = 'top left';
+  state.el.style.transform = transformScale === 1 ? '' : `scale(${transformScale})`;
+  state.el.style.setProperty('--bubble-header-font-size', textPx(12));
+  state.el.style.setProperty('--bubble-body-font-size', textPx(12));
+  state.el.style.setProperty('--bubble-time-font-size', textPx(10));
+  state.el.style.setProperty('--bubble-minimize-font-size', chromePx(12));
+  state.el.style.setProperty('--bubble-header-min-height', chromePx(24));
+  state.el.style.setProperty('--bubble-header-gap', chromePx(6));
+  state.el.style.setProperty('--bubble-live-dot-size', chromePx(6));
+  state.el.style.setProperty('--bubble-header-padding-y', chromePx(5));
+  state.el.style.setProperty('--bubble-header-padding-x', chromePx(8));
+  state.el.style.setProperty('--bubble-body-padding-y', chromePx(6));
+  state.el.style.setProperty('--bubble-body-padding-x', chromePx(10));
+  state.el.style.setProperty('--bubble-session-padding-y', metricPx(chromeMetrics.sessionPaddingY));
+  state.el.style.setProperty('--bubble-session-padding-x', metricPx(chromeMetrics.sessionPaddingX));
+  state.el.style.setProperty('--bubble-session-border-width', metricPx(chromeMetrics.sessionBorderWidth));
+  state.el.style.setProperty('--bubble-session-radius', metricPx(chromeMetrics.sessionRadius));
+  state.el.style.setProperty('--bubble-scrollbar-width', metricPx(chromeMetrics.scrollbarWidth));
+  state.el.style.setProperty('--bubble-scrollbar-thumb-radius', metricPx(chromeMetrics.scrollbarThumbRadius));
+  state.el.dataset.displayScale = layout.scale.toFixed(4);
+  state.el.dataset.displayMode = displayMode === 'world' ? 'world' : 'consistent';
+  state.el.dataset.typographyScale = safeTypographyScale.toFixed(4);
+  state.el.dataset.chromeScale = safeChromeScale.toFixed(4);
+  state.el.dataset.transformScale = transformScale.toFixed(4);
+  state.el.dataset.intrinsicWidth = intrinsicW.toFixed(2);
+  state.el.dataset.intrinsicHeight = intrinsicH.toFixed(2);
+  const body = state.el.querySelector('.chat-bubble-body');
+  if (body?.scrollLeft) body.scrollLeft = 0;
 }
 
 function getChatBubbleAgentSetKey(rects) {
@@ -62844,20 +62960,36 @@ function updateChatBubblePositions() {
   const h = viewport.height;
   const leftSB = document.getElementById('leftSidebar');
   const rightSB = document.getElementById('sidebar');
-  const leftInset = (leftSB && !leftSB.classList.contains('left-sidebar-collapsed')) ? 260 + 5 : 5;
-  const rightInset = (rightSB && !rightSB.classList.contains('sidebar-collapsed'))
-    ? (parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width')) || 280) + 5 : 5;
-  const leftBound = viewport.left + leftInset;
-  const rightBound = viewport.left + w - rightInset;
+  const {
+    leftInset,
+    rightInset,
+    leftBound,
+    rightBound,
+  } = getChatBubbleSideInsets({
+    viewport,
+    leftPanel: leftSB,
+    rightPanel: rightSB,
+  });
   const topBound = viewport.top + 5;
   const bottomBound = viewport.top + h - 5;
+  const displayScale = getCurrentChatBubbleDisplayScale();
+  const availableBubbleWidth = Math.max(40, w - leftInset - rightInset - 10);
+  const availableBubbleHeight = Math.max(40, h - 10);
 
   const expandedStates = Array.from(_chatBubbles.values()).filter(state => state.expanded && state.messages?.length > 0);
-  const bubbleLayout = getExpandedChatBubbleLayout(
-    expandedStates.length,
-    Math.max(200, w - leftInset - rightInset - 10),
-    Math.max(160, h - 10)
-  );
+  const bubbleLayout = displayScale.displayMode === 'world'
+    ? getRigidWorldChatBubbleLayout({
+        expandedCount: expandedStates.length,
+        availableWidth: availableBubbleWidth,
+        baseScale: displayScale.baseScale,
+        zoomScale: displayScale.zoomScale,
+      })
+    : getExpandedChatBubbleLayout(
+        expandedStates.length,
+        availableBubbleWidth,
+        availableBubbleHeight,
+        displayScale.effectiveScale
+      );
 
   const bubbleRects = [];
   const miniRects = [];
@@ -62896,9 +63028,15 @@ function updateChatBubblePositions() {
     if (state.expanded) {
       const bw = bubbleLayout.w;
       const bh = bubbleLayout.h;
-      applyChatBubbleSize(state, bubbleLayout);
+      applyChatBubbleSize(
+        state,
+        bubbleLayout,
+        displayScale.typographyScale,
+        displayScale.baseScale,
+        displayScale.displayMode
+      );
       let bx = sx - bw / 2;
-      let by = sy - bh - 10; // above agent
+      let by = sy - bh - (10 * bubbleLayout.scale); // above agent
 
       // Clamp to viewport minus sidebar areas
       bx = Math.max(leftBound, Math.min(rightBound - bw, bx));
@@ -62908,20 +63046,28 @@ function updateChatBubblePositions() {
       advanceChatBubbleTypewriter(agentId, state, performance.now());
     } else {
       // Mini icon — keep clear of the name label.
-      const miniX = sx - CHAT_BUBBLE_MINI_SIZE / 2;
-      const miniY = sy - 42;
+      const miniScale = displayScale.effectiveScale;
+      const miniSize = Math.max(1, CHAT_BUBBLE_MINI_SIZE * miniScale);
+      const miniX = clampChatBubbleX(
+        sx - miniSize / 2,
+        miniSize,
+        leftBound,
+        rightBound
+      );
+      const miniY = sy - (42 * miniScale);
+      state.miniEl.style.width = miniSize + 'px';
+      state.miniEl.style.height = miniSize + 'px';
+      state.miniEl.style.fontSize = Math.max(0.5, 14 * miniScale) + 'px';
+      state.miniEl.dataset.displayScale = miniScale.toFixed(4);
       state.miniEl.style.left = miniX + 'px';
       state.miniEl.style.top = miniY + 'px';
       state.miniEl.style.display = 'flex';
       state.el.style.display = 'none';
       hideChatBubbleConnector(state);
-      miniRects.push({ x: miniX, y: miniY, w: CHAT_BUBBLE_MINI_SIZE, h: CHAT_BUBBLE_MINI_SIZE, state });
+      miniRects.push({ x: miniX, y: miniY, w: miniSize, h: miniSize, state });
     }
 
   }
-
-  const availableBubbleWidth = Math.max(200, w - leftInset - rightInset - 10);
-  const availableBubbleHeight = Math.max(160, h - 10);
 
   if (bubbleRects.length > 1) {
     const packKey = getChatBubbleAgentSetKey(bubbleRects);

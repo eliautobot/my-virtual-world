@@ -52,6 +52,7 @@ const requiredFiles = [
   'src/client/favicon.png',
   'src/client/assets/logo-transparent.png',
   'src/client/js/chat-markdown.js',
+  'src/client/js/chat-bubble-layout.mjs',
   'src/client/js/openclaw-run-state.js',
   'src/client/js/starter-map.mjs',
   'src/server/server.py',
@@ -163,6 +164,7 @@ const jsSyntaxTargets = [
   'src/client/js/starter-map.mjs',
   'src/client/js/chat.js',
   'src/client/js/chat-markdown.js',
+  'src/client/js/chat-bubble-layout.mjs',
   'src/client/js/openclaw-run-state.js',
   'src/client/js/dynamic-interior-routing.js',
   'src/client/js/dynamic-exterior-routing.js',
@@ -217,6 +219,7 @@ const agentCharactersJs = read('src/client/js/agent-characters.js');
 const starterMapJs = read('src/client/js/starter-map.mjs');
 const dynamicInteriorRoutingJs = read('src/client/js/dynamic-interior-routing.js');
 const dynamicExteriorRoutingJs = read('src/client/js/dynamic-exterior-routing.js');
+const styleCss = read('src/client/css/style.css');
 const uiCss = read('src/client/css/ui-redesign.css');
 
 for (const token of [
@@ -377,12 +380,12 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260721-fluidity-r5',
+  'js/main3d.js?v=20260727-fixed-bubble-chrome-r8',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
   'js/chat.js?v=20260727-connection-status-r1',
-  'css/style.css?v=20260727-connection-status-r1',
-  'css/ui-redesign.css?v=20260727-chat-responsive-r1',
+  'css/style.css?v=20260727-fixed-bubble-chrome-r8',
+  'css/ui-redesign.css?v=20260727-chat-bubble-display-r1',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-codexOptions',
@@ -493,11 +496,89 @@ for (const token of [
 }
 for (const token of [
   "agent-characters.js?v=20260721-fluidity-r2",
+  "chat-bubble-layout.mjs?v=20260727-fixed-bubble-chrome-r8",
+  'getChatBubbleSideInsets',
+  'getChatBubbleChromeMetrics',
+  'clampChatBubbleX',
+  'getCurrentChatBubbleDisplayScale',
+  'getRigidWorldChatBubbleLayout',
+  'displayScale.effectiveScale',
+  'displayScale.typographyScale',
+  'layout.transformScale',
+  'dataset.intrinsicWidth',
+  'dataset.displayMode',
+  'dataset.typographyScale',
   "state.miniEl.style.top = miniY + 'px'",
   'CHAT_BUBBLE_MINI_SIZE = 28',
   'if (dist > 100)',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing chat bubble/desk carry token: ${token}`);
+}
+for (const token of [
+  'overflow-x: hidden',
+  'overflow-wrap: anywhere',
+  'word-break: break-word',
+  '#chatBubbleContainer .chat-msg .chat-time',
+  'width: max-content',
+  'white-space: nowrap',
+  '.chat-bubble[data-display-mode="world"]',
+  'border-width: 1px',
+  'border-radius: 6px',
+  '--bubble-session-padding-x',
+  '--bubble-session-border-width',
+  '--bubble-session-radius',
+  'box-shadow: inset 0 0 0 var(--bubble-session-border-width',
+  '--bubble-scrollbar-width',
+  '--bubble-scrollbar-thumb-radius',
+  'scrollbar-width: auto',
+  'scrollbar-color: auto',
+  '::-webkit-scrollbar-button',
+  'display: none',
+]) {
+  assert(styleCss.includes(token), `style.css missing chat bubble text wrapping token: ${token}`);
+}
+assert(
+  !main3dJs.includes("? 260 + 5 : 5"),
+  'chat bubbles must not use the stale 260px Edit World panel width'
+);
+const chatBubbleLayoutCheck = spawnSync(process.execPath, ['scripts/verify-chat-bubble-layout.mjs'], {
+  cwd: root,
+  encoding: 'utf8',
+});
+assert.equal(
+  chatBubbleLayoutCheck.status,
+  0,
+  `chat bubble side-panel layout regression check failed\n${chatBubbleLayoutCheck.stderr || chatBubbleLayoutCheck.stdout}`,
+);
+for (const token of [
+  'setting-chatBubbleDisplayMode-consistent',
+  'setting-chatBubbleDisplayMode-world',
+  'setting-chatBubbleSize-large',
+  'setting-chatBubbleSize-medium',
+  'setting-chatBubbleSize-small',
+  'settings-info-button',
+  'Fixed size',
+]) {
+  assert(indexHtml.includes(token), `General settings missing chat bubble option: ${token}`);
+}
+assert(
+  !indexHtml.includes('>Zoom dependent<'),
+  'the world-anchored chat bubble option must use the Fixed size label'
+);
+for (const token of [
+  "selectedRadio('setting-chatBubbleDisplayMode', 'consistent')",
+  "selectedRadio('setting-chatBubbleSize', 'large')",
+  "setSelectedRadio('setting-chatBubbleDisplayMode'",
+  "setSelectedRadio('setting-chatBubbleSize'",
+]) {
+  assert(settingsJs.includes(token), `settings.js missing persisted chat bubble option: ${token}`);
+}
+for (const token of [
+  'def _normalize_chat_bubble_settings',
+  '"displayMode": display_mode if display_mode in ("consistent", "world") else "consistent"',
+  '"size": size if size in ("large", "medium", "small") else "large"',
+]) {
+  assert(serverPy.includes(token), `server.py missing normalized chat bubble setting: ${token}`);
 }
 for (const token of [
   'function isAgentDeskCarrySurfaceActive(agent)',
@@ -1056,7 +1137,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260719-live-agent-toggle-sync-r3',
+  'js/settings.js?v=20260727-chat-bubble-display-r1',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);

@@ -127,6 +127,16 @@ def _deep_merge(base, update):
     return merged
 
 
+def _normalize_chat_bubble_settings(value):
+    value = value if isinstance(value, dict) else {}
+    display_mode = value.get("displayMode")
+    size = value.get("size")
+    return {
+        "displayMode": display_mode if display_mode in ("consistent", "world") else "consistent",
+        "size": size if size in ("large", "medium", "small") else "large",
+    }
+
+
 def _resolve_vw_config_path():
     if os.environ.get("VW_CONFIG"):
         return os.environ["VW_CONFIG"]
@@ -159,6 +169,7 @@ def _default_vw_config():
             "showCoords": True,
             "dayNightCycleEnabled": True,
             "weatherEnabled": True,
+            "chatBubbles": {"displayMode": "consistent", "size": "large"},
             "location": {"label": "", "timeZone": "", "latitude": None, "longitude": None},
         },
         "openclaw": {"homePath": "", "hostHomePath": "", "gatewayUrl": "", "gatewayToken": ""},
@@ -226,6 +237,7 @@ def _load_vw_config():
     cfg.setdefault("debug", {})
     if not isinstance(cfg["world"].get("location"), dict):
         cfg["world"]["location"] = {"label": "", "timeZone": "", "latitude": None, "longitude": None}
+    cfg["world"]["chatBubbles"] = _normalize_chat_bubble_settings(cfg["world"].get("chatBubbles"))
     cfg["openclaw"]["homePath"] = os.path.expanduser(_env_or("VW_OPENCLAW_PATH", cfg["openclaw"].get("homePath") or "~/.openclaw"))
     cfg["openclaw"]["hostHomePath"] = os.path.expanduser(_env_or("VW_OPENCLAW_HOST_PATH", cfg["openclaw"].get("hostHomePath") or cfg["openclaw"]["homePath"]))
     cfg["openclaw"]["gatewayUrl"] = _env_or("VW_GATEWAY_URL", cfg["openclaw"].get("gatewayUrl") or "")
@@ -579,6 +591,8 @@ def _save_vw_config_update(body):
     old_gateway_config = _gateway_config_key()
     existing = _deep_merge(_default_vw_config(), _load_config_file(_resolve_vw_config_path()))
     _preserve_secret_updates(existing, body)
+    if isinstance(body.get("world"), dict) and "chatBubbles" in body["world"]:
+        body["world"]["chatBubbles"] = _normalize_chat_bubble_settings(body["world"]["chatBubbles"])
     if isinstance(body.get("features"), dict):
         for feature in ("agentBrowser", "sms", "agentLiveMode"):
             if _demo_feature_locked(feature):

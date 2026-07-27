@@ -26,6 +26,15 @@
   };
   const checked = (id) => $(id)?.checked === true;
   const value = (id) => ($(id)?.value || '').trim();
+  const selectedRadio = (name, fallback) => (
+    document.querySelector(`input[name="${name}"]:checked`)?.value || fallback
+  );
+  const setSelectedRadio = (name, selectedValue, fallback) => {
+    const radios = Array.from(document.querySelectorAll(`input[name="${name}"]`));
+    const target = radios.find(radio => radio.value === selectedValue)
+      || radios.find(radio => radio.value === fallback);
+    radios.forEach(radio => { radio.checked = radio === target; });
+  };
   const optionalNumber = (id) => {
     const raw = value(id);
     if (!raw) return null;
@@ -802,11 +811,14 @@
     const sms = config.sms || {};
     const debug = config.debug || {};
     const location = world.location || {};
+    const chatBubbles = world.chatBubbles || {};
     if ($('setting-worldName')) $('setting-worldName').value = world.name || 'My Virtual World';
     if ($('setting-locationLabel')) $('setting-locationLabel').value = location.label || '';
     if ($('setting-timeZone')) $('setting-timeZone').value = location.timeZone || '';
     if ($('setting-latitude')) $('setting-latitude').value = location.latitude ?? '';
     if ($('setting-longitude')) $('setting-longitude').value = location.longitude ?? '';
+    setSelectedRadio('setting-chatBubbleDisplayMode', chatBubbles.displayMode, 'consistent');
+    setSelectedRadio('setting-chatBubbleSize', chatBubbles.size, 'large');
     if ($('setting-showGrid')) $('setting-showGrid').checked = world.showGrid !== false;
     if ($('setting-showMinimap')) $('setting-showMinimap').checked = world.showMinimap !== false;
     if ($('setting-showCoords')) $('setting-showCoords').checked = world.showCoords !== false;
@@ -858,6 +870,10 @@
         showCoords: checked('setting-showCoords'),
         dayNightCycleEnabled: checked('setting-enableDayNightCycle'),
         weatherEnabled: checked('setting-enableWeather'),
+        chatBubbles: {
+          displayMode: selectedRadio('setting-chatBubbleDisplayMode', 'consistent'),
+          size: selectedRadio('setting-chatBubbleSize', 'large'),
+        },
         location: {
           label: value('setting-locationLabel'),
           timeZone: value('setting-timeZone'),

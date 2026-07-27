@@ -2004,7 +2004,7 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
     position: absolute;
     width: var(--bubble-width, 320px);
     height: var(--bubble-height, 280px);
-    max-height: 280px;
+    max-height: none;
     background: rgba(255,255,230,0.95);
     border: 2px solid var(--agent-accent, #78909c);
     border-radius: 12px;
@@ -2015,6 +2015,10 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
     overflow: hidden;
     transition: opacity 0.2s, width 0.18s, height 0.18s;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+#chatBubbleContainer .chat-bubble[data-display-mode="world"] {
+    border-width: 1px;
+    border-radius: 6px;
 }
 #chatBubbleContainer .chat-bubble-connector {
     position: absolute;
@@ -2036,17 +2040,19 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
 #chatBubbleContainer .chat-bubble-header {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--bubble-header-gap, 6px);
     padding: var(--bubble-header-padding-y, 5px) var(--bubble-header-padding-x, 8px);
     font-size: var(--bubble-header-font-size, 12px);
     font-weight: 700;
     color: #fff;
     background: linear-gradient(180deg, rgba(20,24,34,0.96), rgba(12,15,24,0.94));
     border-bottom: 1px solid var(--agent-accent, #78909c);
-    min-height: 24px;
+    min-height: var(--bubble-header-min-height, 24px);
 }
 #chatBubbleContainer .chat-bubble-header .live-dot {
-    width: 6px; height: 6px;
+    width: var(--bubble-live-dot-size, 6px);
+    height: var(--bubble-live-dot-size, 6px);
+    flex: 0 0 var(--bubble-live-dot-size, 6px);
     background: #4caf50;
     border-radius: 50%;
     animation: livePulse 1.5s infinite;
@@ -2057,21 +2063,25 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
 }
 #chatBubbleContainer .chat-bubble-header .agent-name {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    line-height: 1.15;
     color: var(--agent-accent, #ffd600);
     text-shadow: 0 1px 2px rgba(0,0,0,0.65);
 }
 #chatBubbleContainer .chat-bubble-header .session-name {
     display: none;
+    min-width: 0;
     max-width: 42%;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding: 1px 5px;
-    border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 4px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    line-height: 1.15;
+    padding: var(--bubble-session-padding-y, 1px) var(--bubble-session-padding-x, 5px);
+    border: var(--bubble-session-border-width, 1px) solid rgba(255,255,255,0.18);
+    border-radius: var(--bubble-session-radius, 4px);
     color: #cfd8dc;
     background: rgba(255,255,255,0.08);
     font-size: calc(var(--bubble-header-font-size, 12px) * 0.78);
@@ -2082,29 +2092,75 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
     border-color: rgba(124,252,124,0.35);
     background: rgba(67,209,94,0.12);
 }
+#chatBubbleContainer .chat-bubble[data-display-mode="world"] .chat-bubble-header .session-name {
+    border: 0;
+    box-shadow: inset 0 0 0 var(--bubble-session-border-width, 1px) rgba(255,255,255,0.18);
+}
+#chatBubbleContainer .chat-bubble[data-display-mode="world"].chat-bubble-live-session .chat-bubble-header .session-name {
+    box-shadow: inset 0 0 0 var(--bubble-session-border-width, 1px) rgba(124,252,124,0.35);
+}
 #chatBubbleContainer .chat-bubble-header .minimize-btn {
-    cursor: pointer; font-size: 12px; opacity: 0.7;
+    cursor: pointer; font-size: var(--bubble-minimize-font-size, 12px); opacity: 0.7;
     background: none; border: none; color: #fff; padding: 0 2px;
 }
 #chatBubbleContainer .chat-bubble-header .minimize-btn:hover { opacity: 1; }
 #chatBubbleContainer .chat-bubble-body {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
+    min-width: 0;
     padding: var(--bubble-body-padding-y, 6px) var(--bubble-body-padding-x, 10px);
     font-size: var(--bubble-body-font-size, 12px);
     line-height: 1.5;
     scrollbar-width: thin;
     scrollbar-color: rgba(0,0,0,0.15) transparent;
 }
-#chatBubbleContainer .chat-bubble-body::-webkit-scrollbar { width: 3px; }
-#chatBubbleContainer .chat-bubble-body::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 2px; }
-#chatBubbleContainer .chat-msg { margin-bottom: 3px; padding-bottom: 3px; border-bottom: 1px solid rgba(0,0,0,0.06); word-wrap: break-word; }
-#chatBubbleContainer .chat-msg-text { white-space: pre-wrap; }
+#chatBubbleContainer .chat-bubble[data-display-mode="world"] .chat-bubble-body {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+}
+#chatBubbleContainer .chat-bubble-body::-webkit-scrollbar {
+    width: var(--bubble-scrollbar-width, 3px);
+}
+#chatBubbleContainer .chat-bubble-body::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,0.2);
+    border-radius: var(--bubble-scrollbar-thumb-radius, 2px);
+}
+#chatBubbleContainer .chat-bubble[data-display-mode="world"] .chat-bubble-body::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+#chatBubbleContainer .chat-msg {
+    min-width: 0;
+    max-width: 100%;
+    margin-bottom: 3px;
+    padding-bottom: 3px;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+#chatBubbleContainer .chat-msg-text {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: pre-wrap;
+}
 #chatBubbleContainer .chat-msg:last-child { border-bottom: none; }
 #chatBubbleContainer .chat-msg.user { color: #4466aa; }
 #chatBubbleContainer .chat-msg.assistant { color: #222; }
 #chatBubbleContainer .chat-msg.system { color: #6b7280; font-style: italic; }
-#chatBubbleContainer .chat-msg .chat-time { font-size: 10px; color: #999; margin-left: 6px; }
+#chatBubbleContainer .chat-msg .chat-time {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    font-size: var(--bubble-time-font-size, 10px);
+    color: #999;
+    margin: var(--bubble-header-gap, 6px) 0 0 auto;
+    overflow-wrap: normal;
+    word-break: normal;
+    white-space: nowrap;
+}
 #chatBubbleContainer .chat-bubble-tail {
     position: absolute;
     bottom: -8px;
