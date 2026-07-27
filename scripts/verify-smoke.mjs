@@ -51,6 +51,8 @@ const requiredFiles = [
   'src/client/setup.html',
   'src/client/favicon.png',
   'src/client/assets/logo-transparent.png',
+  'src/client/js/chat-markdown.js',
+  'src/client/js/openclaw-run-state.js',
   'src/client/js/starter-map.mjs',
   'src/server/server.py',
   'src/server/live_agent_goals.py',
@@ -149,6 +151,7 @@ for (const token of ['.env', 'node_modules/', '.tmp-data/', 'backups/', 'memory/
 const packageJson = JSON.parse(read('package.json'));
 assert.equal(packageJson.scripts.test, 'npm run verify:smoke', 'package test script should run the public smoke suite');
 assert.equal(packageJson.scripts['verify:smoke'], 'node scripts/verify-smoke.mjs', 'verify:smoke should use the public verifier');
+assert.equal(packageJson.scripts['verify:chat-ui'], 'node scripts/verify-chat-ui.mjs', 'chat UI verifier should be available');
 for (const scriptName of Object.keys(packageJson.scripts)) {
   assert(!scriptName.includes('phase'), `public package script should not expose internal phase verifier: ${scriptName}`);
 }
@@ -159,6 +162,8 @@ const jsSyntaxTargets = [
   'src/client/js/settings.js',
   'src/client/js/starter-map.mjs',
   'src/client/js/chat.js',
+  'src/client/js/chat-markdown.js',
+  'src/client/js/openclaw-run-state.js',
   'src/client/js/dynamic-interior-routing.js',
   'src/client/js/dynamic-exterior-routing.js',
   'src/client/js/physics.js',
@@ -373,8 +378,11 @@ for (const token of [
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
   'js/main3d.js?v=20260721-fluidity-r5',
-  'js/chat.js?v=20260717-live-controller-r1',
-  'css/style.css?v=20260721-fluidity-r5',
+  'js/openclaw-run-state.js?v=20260727-connection-status-r1',
+  'js/chat-markdown.js?v=20260727-chat-markdown-r1',
+  'js/chat.js?v=20260727-connection-status-r1',
+  'css/style.css?v=20260727-connection-status-r1',
+  'css/ui-redesign.css?v=20260727-chat-responsive-r1',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-codexOptions',
@@ -428,13 +436,36 @@ for (const token of [
 }
 for (const token of [
   'finishOpenClawRunError',
-  'isTerminalOpenClawErrorState',
   'extractRunError',
-  'OpenClaw run failed:',
-  'OpenClaw send failed:',
+  'openClawRunTracker',
+  'classifyAgentEvent',
+  'classifyChatEvent',
+  'classifyFailureStatus',
+  'isHistoricalToolError',
+  'showRunNotice',
+  'markSucceeded',
+  'setConnectionStatus',
 ]) {
   assert(chatJs.includes(token), `chat.js missing OpenClaw chat error token: ${token}`);
 }
+const chatOpenClawCheck = spawnSync(process.execPath, ['scripts/verify-chat-openclaw-events.mjs'], {
+  cwd: root,
+  encoding: 'utf8',
+});
+assert.equal(
+  chatOpenClawCheck.status,
+  0,
+  `OpenClaw chat run-event regression check failed\n${chatOpenClawCheck.stderr || chatOpenClawCheck.stdout}`,
+);
+const chatUiCheck = spawnSync(process.execPath, ['scripts/verify-chat-ui.mjs'], {
+  cwd: root,
+  encoding: 'utf8',
+});
+assert.equal(
+  chatUiCheck.status,
+  0,
+  `Chat UI regression check failed\n${chatUiCheck.stderr || chatUiCheck.stdout}`,
+);
 for (const token of [
   "window.__VWConfig?.features?.agentLiveMode !== true",
   '/api/agent-live-loop/user-attention',

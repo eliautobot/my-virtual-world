@@ -2916,7 +2916,6 @@ body.agent-builder-open #canvasWrapper { pointer-events: none; }
 .chat-panel.chat-panel-secondary.snap-right[data-chat-slot] { transform: none !important; }
 .chat-panel-active { z-index: 10003 !important; box-shadow: 0 0 0 1px rgba(255,214,0,.5), var(--vw-shadow) !important; }
 .chat-secondary-header { gap: 8px; }
-.chat-panel-secondary .chat-move-btn { display: none !important; }
 .chat-panel-secondary .chat-header-btns { display: flex !important; }
 .chat-panel-secondary .chat-close,
 .chat-panel-secondary .chat-new-session { display: inline-flex; }
@@ -2984,7 +2983,6 @@ body.agent-builder-open #canvasWrapper { pointer-events: none; }
     margin-left: 4px !important;
 }
 .chat-new-session,
-.chat-move-btn,
 .chat-close {
     width: 30px;
     height: 30px;
@@ -3066,107 +3064,6 @@ body.agent-builder-open #canvasWrapper { pointer-events: none; }
     background: linear-gradient(135deg, #ffd600, #ff9f1a) !important;
     color: #120d00 !important;
 }
-.chat-panel[style*="width: 2"],
-.chat-panel[style*="width: 3"] {
-    --chat-compact-input: 1;
-}
-@media (max-width: 420px) {
-    .chat-input-row {
-        grid-template-columns: 30px minmax(0, 1fr) 30px 30px 34px;
-        gap: 4px !important;
-        padding: 7px !important;
-    }
-    .chat-attach-btn,
-    .chat-mic-btn,
-    .chat-stop-btn { width: 30px !important; height: 30px !important; min-width: 30px !important; flex-basis: 30px !important; }
-    .chat-send-btn { width: 34px !important; height: 30px !important; min-width: 34px !important; flex-basis: 34px !important; }
-    .chat-input { min-height: 36px !important; padding: 8px !important; }
-}
-
-/* Ultra-narrow chat composer: wrap actions below before the text box becomes unusable. */
-.chat-panel[style*="width: 22"],
-.chat-panel[style*="width: 23"],
-.chat-panel[style*="width: 24"],
-.chat-panel[style*="width: 25"],
-.chat-panel[style*="width: 26"],
-.chat-panel[style*="width: 27"],
-.chat-panel[style*="width: 28"],
-.chat-panel[style*="width: 29"] {
-    min-width: 260px !important;
-}
-.chat-panel[style*="width: 22"] .chat-input-row,
-.chat-panel[style*="width: 23"] .chat-input-row,
-.chat-panel[style*="width: 24"] .chat-input-row,
-.chat-panel[style*="width: 25"] .chat-input-row,
-.chat-panel[style*="width: 26"] .chat-input-row,
-.chat-panel[style*="width: 27"] .chat-input-row,
-.chat-panel[style*="width: 28"] .chat-input-row,
-.chat-panel[style*="width: 29"] .chat-input-row,
-.chat-panel[style*="width: 30"] .chat-input-row,
-.chat-panel[style*="width: 31"] .chat-input-row,
-.chat-panel[style*="width: 32"] .chat-input-row {
-    grid-template-columns: 32px minmax(0, 1fr) 32px 36px;
-    grid-template-areas:
-        "attach input input send"
-        ". mic stop .";
-    row-gap: 4px !important;
-}
-.chat-panel[style*="width: 22"] .chat-attach-btn,
-.chat-panel[style*="width: 23"] .chat-attach-btn,
-.chat-panel[style*="width: 24"] .chat-attach-btn,
-.chat-panel[style*="width: 25"] .chat-attach-btn,
-.chat-panel[style*="width: 26"] .chat-attach-btn,
-.chat-panel[style*="width: 27"] .chat-attach-btn,
-.chat-panel[style*="width: 28"] .chat-attach-btn,
-.chat-panel[style*="width: 29"] .chat-attach-btn,
-.chat-panel[style*="width: 30"] .chat-attach-btn,
-.chat-panel[style*="width: 31"] .chat-attach-btn,
-.chat-panel[style*="width: 32"] .chat-attach-btn { grid-area: attach; }
-.chat-panel[style*="width: 22"] .chat-input,
-.chat-panel[style*="width: 23"] .chat-input,
-.chat-panel[style*="width: 24"] .chat-input,
-.chat-panel[style*="width: 25"] .chat-input,
-.chat-panel[style*="width: 26"] .chat-input,
-.chat-panel[style*="width: 27"] .chat-input,
-.chat-panel[style*="width: 28"] .chat-input,
-.chat-panel[style*="width: 29"] .chat-input,
-.chat-panel[style*="width: 30"] .chat-input,
-.chat-panel[style*="width: 31"] .chat-input,
-.chat-panel[style*="width: 32"] .chat-input { grid-area: input; }
-.chat-panel[style*="width: 22"] .chat-mic-btn,
-.chat-panel[style*="width: 23"] .chat-mic-btn,
-.chat-panel[style*="width: 24"] .chat-mic-btn,
-.chat-panel[style*="width: 25"] .chat-mic-btn,
-.chat-panel[style*="width: 26"] .chat-mic-btn,
-.chat-panel[style*="width: 27"] .chat-mic-btn,
-.chat-panel[style*="width: 28"] .chat-mic-btn,
-.chat-panel[style*="width: 29"] .chat-mic-btn,
-.chat-panel[style*="width: 30"] .chat-mic-btn,
-.chat-panel[style*="width: 31"] .chat-mic-btn,
-.chat-panel[style*="width: 32"] .chat-mic-btn { grid-area: mic; justify-self: end; }
-.chat-panel[style*="width: 22"] .chat-stop-btn,
-.chat-panel[style*="width: 23"] .chat-stop-btn,
-.chat-panel[style*="width: 24"] .chat-stop-btn,
-.chat-panel[style*="width: 25"] .chat-stop-btn,
-.chat-panel[style*="width: 26"] .chat-stop-btn,
-.chat-panel[style*="width: 27"] .chat-stop-btn,
-.chat-panel[style*="width: 28"] .chat-stop-btn,
-.chat-panel[style*="width: 29"] .chat-stop-btn,
-.chat-panel[style*="width: 30"] .chat-stop-btn,
-.chat-panel[style*="width: 31"] .chat-stop-btn,
-.chat-panel[style*="width: 32"] .chat-stop-btn { grid-area: stop; }
-.chat-panel[style*="width: 22"] .chat-send-btn,
-.chat-panel[style*="width: 23"] .chat-send-btn,
-.chat-panel[style*="width: 24"] .chat-send-btn,
-.chat-panel[style*="width: 25"] .chat-send-btn,
-.chat-panel[style*="width: 26"] .chat-send-btn,
-.chat-panel[style*="width: 27"] .chat-send-btn,
-.chat-panel[style*="width: 28"] .chat-send-btn,
-.chat-panel[style*="width: 29"] .chat-send-btn,
-.chat-panel[style*="width: 30"] .chat-send-btn,
-.chat-panel[style*="width: 31"] .chat-send-btn,
-.chat-panel[style*="width: 32"] .chat-send-btn { grid-area: send; }
-
 /* Resize handle correction: make all four sides + four corners real, visible grab zones. */
 .chat-panel .chat-resize-handle {
     position: absolute !important;
@@ -3862,7 +3759,6 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
 
     .chat-sessions-toggle,
     .chat-new-session,
-    .chat-move-btn,
     .chat-close {
         width: 28px !important;
         height: 28px !important;
@@ -3984,5 +3880,128 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
         -webkit-overflow-scrolling: touch !important;
         overscroll-behavior: contain !important;
         touch-action: pan-y !important;
+    }
+}
+
+/* Chat panels respond to their own resized width instead of the viewport. */
+.chat-panel {
+    container-name: chat-panel;
+    container-type: inline-size;
+}
+
+#chat-panel > .chat-header {
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+#chat-panel.dragging > .chat-header {
+    cursor: grabbing;
+}
+
+#chat-panel > .chat-header :is(button, select, input, textarea, a, [role="button"]) {
+    cursor: pointer;
+    touch-action: auto;
+    user-select: auto;
+}
+
+@container chat-panel (max-width: 410px) {
+    .chat-header {
+        display: grid !important;
+        grid-template-columns: 28px minmax(0, 1fr) auto !important;
+        grid-template-areas:
+            "sessions agent actions"
+            "status status status";
+        align-items: center !important;
+        gap: 5px !important;
+        height: auto !important;
+        min-height: 0 !important;
+        padding: 7px !important;
+        overflow: visible !important;
+    }
+
+    .chat-sessions-toggle {
+        grid-area: sessions;
+    }
+
+    .chat-agent-select,
+    .chat-panel select.chat-agent-select {
+        grid-area: agent;
+        width: auto !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        height: 30px !important;
+        min-height: 30px !important;
+        flex: 1 1 auto !important;
+    }
+
+    .chat-status {
+        grid-area: status;
+        justify-self: start;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere;
+        line-height: 1.35 !important;
+    }
+
+    .chat-header-btns {
+        grid-area: actions;
+        justify-self: end;
+        gap: 3px !important;
+        margin-left: 0 !important;
+    }
+
+    .chat-new-session,
+    .chat-close {
+        width: 28px !important;
+        height: 28px !important;
+        min-width: 28px !important;
+    }
+
+    .chat-secondary-header {
+        grid-template-areas:
+            "sessions agent actions"
+            "status status badge";
+    }
+
+    .chat-secondary-badge {
+        grid-area: badge;
+        justify-self: end;
+    }
+}
+
+@container chat-panel (max-width: 340px) {
+    .chat-input-row {
+        grid-template-columns: 30px minmax(0, 1fr) 30px 34px !important;
+        grid-template-areas:
+            "attach input input send"
+            ". mic stop ." !important;
+        gap: 4px !important;
+        padding: 7px !important;
+    }
+
+    .chat-attach-btn { grid-area: attach; }
+    .chat-input { grid-area: input; min-height: 36px !important; padding: 8px !important; }
+    .chat-mic-btn { grid-area: mic; justify-self: end; }
+    .chat-stop-btn { grid-area: stop; }
+    .chat-send-btn { grid-area: send; }
+
+    .chat-attach-btn,
+    .chat-mic-btn,
+    .chat-stop-btn {
+        width: 30px !important;
+        height: 30px !important;
+        min-width: 30px !important;
+        flex-basis: 30px !important;
+    }
+
+    .chat-send-btn {
+        width: 34px !important;
+        height: 30px !important;
+        min-width: 34px !important;
+        flex-basis: 34px !important;
     }
 }

@@ -1,5 +1,17 @@
 // Virtual World Chat — Gateway WebSocket Client (Multi-Window, ported from Virtual Office)
 (() => {
+  const {
+    OpenClawRunTracker,
+    classifyAgentEvent,
+    classifyChatEvent,
+    classifyFailureStatus,
+    getRunId: getOpenClawRunId,
+    isHistoricalToolError
+  } = globalThis.VirtualWorldOpenClawRunState;
+  const {
+    escapeHtml: escHtml,
+    renderMarkdown: formatContent
+  } = globalThis.VirtualWorldChatMarkdown;
   let GATEWAY_TOKEN = '';
   let GATEWAY_URL = '';
   let ws = null;
@@ -127,7 +139,7 @@
       this.hasExplicitAgentSelection = !!savedSelection || !!options.selectedAgentKey || !!options.sessionKey;
       this.currentRunId = null;
       this.streamingMsg = null;
-      this.failedRunIds = new Set();
+      this.openClawRunTracker = new OpenClawRunTracker();
       this.liveToolCards = new Map();
       this.pendingToolEvents = new Map();
       this.toolFlushTimer = null;
@@ -143,6 +155,7 @@
       this.inputResizeFrame = null;
       this.streamingRenderTimer = null;
       this.streamingPendingContent = '';
+      this.streamingRenderedContent = '';
       this.lastLiveEventAt = 0;
       this.liveAttentionByRunId = new Map();
       this.pendingLiveAttentionAgentId = '';
@@ -156,6 +169,10 @@
 
       this.messages = root.querySelector('.chat-messages');
       this.status = root.querySelector('.chat-status');
+      this.runNotice = root.querySelector('.chat-run-notice');
+      this.runNoticeTitle = root.querySelector('.chat-run-notice-title');
+      this.runNoticeMessage = root.querySelector('.chat-run-notice-message');
+      this.runNoticeDismiss = root.querySelector('.chat-run-notice-dismiss');
       this.agentSelect = root.querySelector('.chat-agent-select');
       this.modelName = root.querySelector('.chat-model-name, #chat-model-name');
       this.contextInfo = root.querySelector('.chat-context-info, #chat-context-info');
@@ -193,6 +210,7 @@
 
       this.sendBtn?.addEventListener('click', () => this.sendMessage());
       this.stopBtn?.addEventListener('click', () => this.sendStop());
+      this.runNoticeDismiss?.addEventListener('click', () => this.clearRunNotice());
       this.input?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
@@ -246,7 +264,8 @@
       this.messages.innerHTML = '';
       this.streamingMsg = null;
       this.currentRunId = null;
-      this.failedRunIds.clear();
+      this.openClawRunTracker.reset();
+      this.clearRunNotice();
       this.liveAttentionByRunId.clear();
       this.pendingLiveAttentionAgentId = '';
       this.closeHermesEventSource();
@@ -313,10 +332,33 @@
       this.settleLiveAgentUserAttention(agentId);
     }
 
-    setStatus(text, cls) {
+    setConnectionStatus(text, cls) {
       if (!this.status) return;
       this.status.textContent = text;
       this.status.className = 'chat-status ' + (cls || '');
+    }
+
+    showRunNotice(title, message, runId = '') {
+      if (!this.runNotice) return;
+      this.runNotice.dataset.runId = String(runId || '');
+      if (this.runNoticeTitle) this.runNoticeTitle.textContent = title || 'Response not completed';
+      if (this.runNoticeMessage) {
+        const detail = String(message || 'The agent did not return a final response.');
+        this.runNoticeMessage.textContent = detail;
+        this.runNoticeMessage.title = detail;
+      }
+      this.runNotice.hidden = false;
+    }
+
+    clearRunNotice(runId = '') {
+      if (!this.runNotice) return;
+      if (runId && this.runNotice.dataset.runId && this.runNotice.dataset.runId !== String(runId)) return;
+      this.runNotice.hidden = true;
+      this.runNotice.dataset.runId = '';
+      if (this.runNoticeMessage) {
+        this.runNoticeMessage.textContent = '';
+        this.runNoticeMessage.removeAttribute('title');
+      }
     }
 
     formatTokens(n) {
@@ -444,7 +486,8 @@
       this.closeCodexEventSource();
       this.currentRunId = null;
       this.streamingMsg = null;
-      this.failedRunIds.clear();
+      this.openClawRunTracker.reset();
+      this.clearRunNotice();
       this.syncAgentSelect();
       this.resetConversation(`${systemPrefix} ${opt.textContent.trim()}`);
       if (this.sessionsPanelOpen) this.refreshSessionsList({ showLoading: true });
@@ -827,7 +870,6 @@
         });
         if (receivedReply) {
           this.liveResponsePendingAt = 0;
-          this.setStatus('Live session active', 'connected');
         }
       }
       if (!msgs.length) this.appendSystem('Live Agent Mode has no visible events yet.');
@@ -1102,6 +1144,7 @@
       const hasAttachments = this.pendingAttachments.length > 0;
       if ((!text && !hasAttachments) || (!connected && !this.isProviderAgentSelected())) return;
 
+      this.clearRunNotice();
       this.input.value = '';
       this.input.style.setProperty('height', 'auto', 'important');
       this.input.style.overflowY = 'hidden';
@@ -1189,7 +1232,6 @@
 
       if (this.isLiveModeSessionSelected()) {
         const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
-        this.setStatus('Resident is responding…', 'connecting');
         try {
           const response = await fetch('/api/agent-live-sessions/message', {
             method: 'POST',
@@ -1204,11 +1246,9 @@
           if (!response.ok || data.ok === false) throw new Error(data?.error?.message || data.error || response.statusText);
           if (data.pending) this.liveResponsePendingAt = Date.now() - 1000;
           await this.loadLiveModeSessionHistory();
-          this.setStatus(data.pending ? 'Resident is responding…' : 'Live session active', data.pending ? 'connecting' : 'connected');
           this.scrollBottom();
         } catch (error) {
-          this.appendSystem('Live session send failed: ' + error.message);
-          this.setStatus('Live session error', 'disconnected');
+          this.showRunNotice('Response not completed', error.message);
         }
         return;
       }
@@ -1255,7 +1295,6 @@
           this.finishHermesProgress(hermesProgress, true);
           await this.loadHistory({ recoverFinal: true, startedAt: hermesSendStartedAt });
           await this.pollHermesApproval().catch(() => {});
-          this.setStatus('Hermes ready', 'connected');
           this.scrollBottom();
         } catch (e) {
           this.closeHermesEventSource();
@@ -1264,12 +1303,10 @@
           const recovered = await this.recoverHermesFinalFromHistory(hermesSendStartedAt).catch(() => false);
           if (recovered) {
             await this.pollHermesApproval().catch(() => {});
-            this.setStatus('Hermes ready', 'connected');
             this.settleLiveAgentUserAttention(liveAttentionAgentId);
             return;
           }
-          this.appendSystem('Hermes send failed: ' + e.message);
-          this.setStatus('Hermes error', 'disconnected');
+          this.showRunNotice('Response not completed', e.message, this.currentRunId);
         } finally {
           this.clearLiveAttentionForRun(this.currentRunId);
           this.settleLiveAgentUserAttention(liveAttentionAgentId);
@@ -1311,13 +1348,11 @@
           this.removeTypingIndicator();
           await this.loadHistory({ recoverFinal: true, startedAt: codexSendStartedAt });
           await this.fetchSessionInfo();
-          this.setStatus('Codex ready', 'connected');
           this.scrollBottom();
         } catch (e) {
           this.closeCodexEventSource();
           this.removeTypingIndicator();
-          this.appendSystem('Codex send failed: ' + e.message);
-          this.setStatus('Codex error', 'disconnected');
+          this.showRunNotice('Response not completed', e.message, this.currentRunId);
         } finally {
           this.clearLiveAttentionForRun(this.currentRunId);
           this.settleLiveAgentUserAttention(liveAttentionAgentId);
@@ -1327,7 +1362,6 @@
 
       if (this.isProviderAgentSelected()) {
         const providerLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Agent';
-        this.setStatus('Sending via Virtual World...', 'connecting');
         try {
           const resp = await fetch('/api/agent-platform-communications/send', {
             method: 'POST',
@@ -1362,12 +1396,10 @@
             },
             normalizeHermesTools(data.tools || [])
           );
-          this.setStatus('Connected', 'connected');
           this.scrollBottom();
         } catch (e) {
           this.removeTypingIndicator();
-          this.appendSystem('Provider send failed: ' + e.message);
-          this.setStatus('Error', 'disconnected');
+          this.showRunNotice('Response not completed', e.message);
         } finally {
           this.settleLiveAgentUserAttention(liveAttentionAgentId);
         }
@@ -1383,14 +1415,12 @@
           this.rememberLiveAttentionForRun(res.payload.runId, liveAttentionAgentId);
         } else {
           this.removeTypingIndicator();
-          this.appendSystem('OpenClaw send failed: gateway accepted the request but did not return a run id.');
-          this.setStatus('OpenClaw error', 'disconnected');
+          this.showRunNotice('Response not started', 'The agent framework accepted the request but did not return a run id.');
           this.settleLiveAgentUserAttention(liveAttentionAgentId);
         }
       }).catch(e => {
         this.removeTypingIndicator();
-        this.appendSystem('OpenClaw send failed: ' + (e?.message || String(e)));
-        this.setStatus('OpenClaw error', 'disconnected');
+        this.showRunNotice('Response not started', e?.message || String(e));
         this.settleLiveAgentUserAttention(liveAttentionAgentId);
       });
     }
@@ -1410,7 +1440,6 @@
           const data = await resp.json().catch(() => ({}));
           if (!resp.ok || data.ok === false) throw new Error(data?.error?.message || data.error || resp.statusText);
           await this.loadLiveModeSessionHistory();
-          this.setStatus('Live session paused', 'connected');
           return;
         }
         if (this.isHermesSelected()) {
@@ -1422,7 +1451,6 @@
           const data = await resp.json().catch(() => ({}));
           if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
           this.appendSystem('Stop sent');
-          this.setStatus('Hermes stopping...', 'connecting');
           return;
         }
         if (this.isCodexSelected()) {
@@ -1434,7 +1462,6 @@
           const data = await resp.json().catch(() => ({}));
           if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
           this.appendSystem('Stop sent');
-          this.setStatus('Codex stopping...', 'connecting');
           return;
         }
         if (this.streamingMsg) {
@@ -1512,13 +1539,18 @@
 
     handleChatEvent(payload) {
       if (!this.ownsPayload(payload)) return;
-      const state = String(payload?.state || '').toLowerCase();
-      if (isTerminalOpenClawErrorState(state) || payload?.ok === false) {
+      const disposition = classifyChatEvent(payload);
+      const eventRunId = getOpenClawRunId(payload, this.currentRunId);
+      if (eventRunId && this.openClawRunTracker.isSucceeded(eventRunId)) return;
+      if (disposition === 'terminal-error') {
+        // A terminal event without an active/identified run cannot safely be
+        // attributed to this conversation and must not become a global error.
+        if (!eventRunId) return;
         this.finishOpenClawRunError(payload);
         return;
       }
       const text = extractText(payload);
-      if (state === 'delta' || state === 'streaming') {
+      if (disposition === 'streaming') {
         if (!this.streamingMsg || this.streamingMsg.id !== payload.runId) {
           this.streamingMsg = { id: payload.runId, role: 'assistant', content: '' };
           this.appendStreamingMessage();
@@ -1528,8 +1560,11 @@
           this.updateStreamingMessage(this.streamingMsg.content);
         }
         this.scrollBottom();
-      } else if (state === 'final' || state === 'done') {
+      } else if (disposition === 'success') {
+        const runId = eventRunId;
         const finalText = text || (this.streamingMsg ? this.streamingMsg.content : '');
+        this.openClawRunTracker.markSucceeded(runId);
+        this.clearRunNotice(runId);
         this.removeTypingIndicator();
         this.flushToolEvents(true);
         this.clearActivityFeed();
@@ -1540,9 +1575,9 @@
           this.appendMessage('assistant', finalText);
         }
         this.fetchContextUsage();
-        if (payload?.runId) this.finalizeRunToolCards(payload.runId);
-        if (payload?.runId) runOwners.delete(payload.runId);
-        this.clearLiveAttentionForRun(payload?.runId);
+        if (runId) this.finalizeRunToolCards(runId);
+        if (runId) runOwners.delete(runId);
+        this.clearLiveAttentionForRun(runId);
         this.currentRunId = null;
         this.scrollBottom();
       }
@@ -1550,15 +1585,16 @@
 
     handleAgentEvent(payload) {
       if (!this.ownsPayload(payload)) return;
+      const eventRunId = getOpenClawRunId(payload, this.currentRunId);
+      if (eventRunId && this.openClawRunTracker.isSucceeded(eventRunId)) return;
 
       const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
-      const stream = payload?.stream || data.stream || '';
       const phase = data.phase || payload?.phase || '';
-      const isToolLikeItem = stream === 'item' && data.kind === 'command';
+      const disposition = classifyAgentEvent(payload);
 
       // Current OpenClaw emits tool activity as agent events:
       // { stream:"tool", data:{ phase:"start|update|result", name, toolCallId, args, result } }
-      if (stream === 'tool' || isToolLikeItem || payload?.type === 'tool_start' || payload?.type === 'tool_end' || payload?.type === 'tool_result') {
+      if (disposition === 'tool') {
         this.markLiveEvent();
         const tool = normalizeToolEvent(payload, phase === 'result' ? 'done' : 'running');
         const label = formatToolLabel(tool.name, coerceToolArgs(tool.arguments));
@@ -1567,28 +1603,31 @@
         return;
       }
 
-      const lifecyclePhase = String(phase || '').toLowerCase();
-      const eventType = String(payload?.type || data.type || '').toLowerCase();
-      if (
-        stream === 'lifecycle' && isTerminalOpenClawErrorState(lifecyclePhase)
-        || eventType === 'error'
-        || eventType === 'run_error'
-        || eventType === 'run.failed'
-      ) {
+      if (disposition === 'terminal-error') {
         this.finishOpenClawRunError(payload);
         return;
       }
 
-      if (payload?.type === 'thinking' || stream === 'lifecycle' && phase === 'start') {
+      // Generic agent/lifecycle errors can describe a failed tool inside a run
+      // that later completes successfully. Keep them only as fallback details
+      // until an authoritative chat terminal event resolves the run.
+      if (disposition === 'pending-error') {
+        this.openClawRunTracker.notePending(payload, this.currentRunId);
+        return;
+      }
+
+      if (disposition === 'thinking') {
         this.updateTypingIndicator('Thinking...');
       }
     }
 
     finishOpenClawRunError(payload) {
-      const runId = payload?.runId || payload?.clientRunId || this.currentRunId || '';
+      const runId = getOpenClawRunId(payload, this.currentRunId);
       const streamingText = this.streamingMsg?.content || '';
-      const message = extractRunError(payload);
-      const alreadyReported = runId && this.failedRunIds.has(runId);
+      const pendingPayload = this.openClawRunTracker.consumePending(runId);
+      if (!this.openClawRunTracker.markFailed(runId)) return;
+      const message = extractRunError(payload, '') || extractRunError(pendingPayload, '') || 'The run failed before returning a reply.';
+      const failureStatus = classifyFailureStatus(message, payload);
       this.cancelStreamingRender();
       this.flushToolEvents(true);
       this.clearActivityFeed();
@@ -1600,10 +1639,8 @@
       } else {
         this.discardStreamingMessage();
       }
-      if (!alreadyReported) this.appendSystem('OpenClaw run failed: ' + message);
-      this.setStatus('Model error', 'disconnected');
+      this.showRunNotice(failureStatus, message, runId);
       if (runId) {
-        this.failedRunIds.add(runId);
         this.finalizeRunToolCards(runId);
         runOwners.delete(runId);
       }
@@ -1696,6 +1733,7 @@
           bubble.appendChild(plannerTurn);
         } else {
           const textDiv = document.createElement('div');
+          textDiv.className = 'chat-markdown';
           textDiv.innerHTML = formatContent(displayContent);
           bubble.appendChild(textDiv);
         }
@@ -1720,8 +1758,8 @@
       div.className = 'chat-msg assistant streaming-msg';
       const bubble = document.createElement('div');
       bubble.className = 'chat-bubble streaming';
-      const text = document.createElement('span');
-      text.className = 'streaming-text';
+      const text = document.createElement('div');
+      text.className = 'chat-markdown streaming-text';
       const cursor = document.createElement('span');
       cursor.className = 'cursor';
       cursor.textContent = '▊';
@@ -1729,6 +1767,7 @@
       bubble.appendChild(cursor);
       div.appendChild(bubble);
       this.messages.appendChild(div);
+      this.streamingRenderedContent = '';
     }
 
     cancelStreamingRender() {
@@ -1758,16 +1797,18 @@
       const bubble = div.querySelector('.chat-bubble');
       let text = bubble.querySelector('.streaming-text');
       if (!text) {
-        bubble.textContent = '';
-        text = document.createElement('span');
-        text.className = 'streaming-text';
+        text = document.createElement('div');
+        text.className = 'chat-markdown streaming-text';
         const cursor = document.createElement('span');
         cursor.className = 'cursor';
         cursor.textContent = '▊';
         bubble.appendChild(text);
         bubble.appendChild(cursor);
       }
-      text.textContent = content || '';
+      const nextContent = content || '';
+      if (nextContent === this.streamingRenderedContent) return;
+      text.innerHTML = formatContent(nextContent);
+      this.streamingRenderedContent = nextContent;
     }
 
     finalizeStreamingMessage(content, mediaItems) {
@@ -1776,15 +1817,29 @@
       if (!div) return this.appendMessage('assistant', content, Date.now(), mediaItems);
       const bubble = div.querySelector('.chat-bubble');
       bubble.classList.remove('streaming');
-      bubble.innerHTML = '';
+      const textDiv = bubble.querySelector('.streaming-text');
+      const cursor = bubble.querySelector('.cursor');
+      const finalContent = content || '';
+      if (textDiv && finalContent !== this.streamingRenderedContent) {
+        textDiv.innerHTML = formatContent(finalContent);
+      }
+      this.streamingRenderedContent = finalContent;
+      cursor?.remove();
+      textDiv?.classList.remove('streaming-text');
       const senderHeader = renderSenderHeader(normalizeSenderMeta({}, 'assistant', this), 'assistant');
-      if (senderHeader) bubble.appendChild(senderHeader);
+      if (senderHeader) bubble.insertBefore(senderHeader, textDiv || bubble.firstChild);
       const media = normalizeChatMedia(mediaItems || extractMedia({ content }, content));
-      if (media.length) bubble.appendChild(renderChatMedia(media));
-      if ((content || '').trim()) {
-        const textDiv = document.createElement('div');
-        textDiv.innerHTML = formatContent(content || '');
-        bubble.appendChild(textDiv);
+      if (media.length) {
+        const renderedMedia = renderChatMedia(media);
+        bubble.insertBefore(renderedMedia, textDiv || bubble.querySelector('.chat-time'));
+      }
+      if (!finalContent.trim()) {
+        textDiv?.remove();
+      } else if (!textDiv) {
+        const finalText = document.createElement('div');
+        finalText.className = 'chat-markdown';
+        finalText.innerHTML = formatContent(finalContent);
+        bubble.appendChild(finalText);
       }
       const time = document.createElement('span');
       time.className = 'chat-time';
@@ -1871,7 +1926,6 @@
         const hasRenderableHermesReply = !!(data.reply || data.thinking || data.reasoningTokens || data.approval || hermesTools.length);
         if (!resp.ok || data.ok === false) {
           if (!hasRenderableHermesReply) throw new Error(data.error || data.reply || resp.statusText);
-          if (!data.approval) this.appendSystem('Hermes returned an error response: ' + (data.error || resp.statusText));
         }
         this.finishHermesProgress(hermesProgress, true);
         this.appendMessage(
@@ -1889,7 +1943,6 @@
           hermesTools
         );
         await this.pollHermesApproval().catch(() => {});
-        this.setStatus('Hermes ready', 'connected');
       } catch (e) {
         this.stopHermesLivePolling();
         throw e;
@@ -1897,7 +1950,6 @@
     }
 
     async sendCodexBlockingMessage(codexBody, codexLabel = 'Codex') {
-      this.setStatus('Sending via Codex...', 'connecting');
       const resp = await fetch('/api/codex/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1909,7 +1961,6 @@
       const hasRenderableReply = !!(data.reply || data.thinking || data.reasoningTokens || codexTools.length);
       if (!resp.ok || data.ok === false) {
         if (!hasRenderableReply) throw new Error(data.error || data.reply || resp.statusText);
-        this.appendSystem('Codex returned an error response: ' + (data.error || resp.statusText));
       }
       this.appendMessage(
         'assistant',
@@ -1925,7 +1976,6 @@
         },
         codexTools
       );
-      this.setStatus('Codex ready', 'connected');
     }
 
     streamHermesRunEvents(runId, hermesProgress) {
@@ -1933,7 +1983,6 @@
       this.closeHermesEventSource();
       this.hermesCompletedToolKeys = new Set();
       this.currentRunId = runId;
-      this.setStatus('Hermes stream active...', 'connecting');
       this.markLiveEvent();
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
       const url = '/api/hermes/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
@@ -2062,7 +2111,6 @@
       if (!runId) return Promise.reject(new Error('Codex run did not return a run id'));
       this.closeCodexEventSource();
       this.currentRunId = runId;
-      this.setStatus('Codex stream active...', 'connecting');
       this.markLiveEvent();
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
       const url = '/api/codex/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
@@ -2294,7 +2342,6 @@
       this.stopHermesProgressTimers();
       const runId = 'hermes-' + Date.now() + '-' + Math.random().toString(36).slice(2);
       this.currentRunId = runId;
-      this.setStatus('Hermes stream active...', 'connecting');
       this.updateTypingIndicator(label + ' is running Hermes');
       return { runId, label };
     }
@@ -2360,7 +2407,6 @@
           this.appendSystem('Hermes approval denied.');
           await this.pollHermesApproval().catch(() => {});
         }
-        this.setStatus('Hermes ready', 'connected');
         this.scrollBottom();
       } catch (e) {
         buttons.forEach(btn => btn.disabled = false);
@@ -2369,8 +2415,7 @@
           const status = card.querySelector('.chat-approval-status');
           if (status) status.textContent = 'error';
         }
-        this.appendSystem('Hermes approval failed: ' + e.message);
-        this.setStatus('Hermes error', 'disconnected');
+        this.showRunNotice('Approval failed', e.message, this.currentRunId);
       }
     }
 
@@ -2489,9 +2534,6 @@
       badge.className = 'chat-secondary-badge';
       badge.textContent = `W${slotNum}`;
       header.insertBefore(badge, headerBtns);
-      // Remove the move button — secondary panels are always tiled, not movable
-      const existingMoveBtn = headerBtns.querySelector('.chat-move-btn');
-      if (existingMoveBtn) existingMoveBtn.remove();
     }
     const closeBtn = panel.querySelector('.chat-close');
     if (closeBtn) {
@@ -2588,7 +2630,6 @@
     mainPanel.style.bottom = CHAT_BOTTOM_OFFSET + 'px';
     mainPanel.style.height = '500px';
     mainPanel.style.transform = '';
-    if (chatMoveBtn) chatMoveBtn.classList.remove('active');
 
     // Count open panels (main + open secondaries)
     const openSecondaries = [];
@@ -2766,22 +2807,22 @@
 
   async function connectGateway() {
     if (ws) return;
-    chatWindows.forEach(w => w.setStatus('Connecting...', 'connecting'));
+    chatWindows.forEach(w => w.setConnectionStatus('Connecting...', 'connecting'));
     await loadGatewayInfo();
     if (ws) return;
     if (!GATEWAY_URL && !_chatWsPort) {
-      chatWindows.forEach(w => w.setStatus('Gateway URL unavailable', 'disconnected'));
+      chatWindows.forEach(w => w.setConnectionStatus('Gateway unavailable', 'disconnected'));
       return;
     }
     const gatewayUrl = getGatewayUrl();
     if (!gatewayUrl) {
-      chatWindows.forEach(w => w.setStatus('Gateway URL unavailable', 'disconnected'));
+      chatWindows.forEach(w => w.setConnectionStatus('Gateway unavailable', 'disconnected'));
       return;
     }
     try {
       ws = new WebSocket(gatewayUrl);
     } catch (err) {
-      chatWindows.forEach(w => w.setStatus('Gateway URL invalid', 'disconnected'));
+      chatWindows.forEach(w => w.setConnectionStatus('Gateway unavailable', 'disconnected'));
       return;
     }
     const socket = ws;
@@ -2801,11 +2842,11 @@
       connected = false;
       ws = null;
       const message = gatewayAuthFailed && gatewayAuthFailureMessage ? gatewayAuthFailureMessage : `Disconnected (${evt.code})`;
-      chatWindows.forEach(w => w.setStatus(message, 'disconnected'));
+      chatWindows.forEach(w => w.setConnectionStatus(message, 'disconnected'));
       if (!gatewayAuthFailed && primaryWindow.root.classList.contains('open')) setTimeout(connectGateway, 3000);
     };
     socket.onerror = () => {
-      if (ws === socket) chatWindows.forEach(w => w.setStatus('Connection error', 'disconnected'));
+      if (ws === socket) chatWindows.forEach(w => w.setConnectionStatus('Connection error', 'disconnected'));
     };
   }
 
@@ -2825,7 +2866,7 @@
       if (res.ok) {
         connected = true;
         chatWindows.forEach(w => {
-          w.setStatus('Connected ⚡', 'connected');
+          w.setConnectionStatus('Connected ⚡', 'connected');
           if (w.isPrimary || w.root.classList.contains('open')) {
             w.fetchSessionInfo();
             w.loadHistory();
@@ -2836,7 +2877,7 @@
         gatewayAuthFailed = true;
         gatewayAuthFailureMessage = `Auth failed: ${res.error?.message || 'unknown'}`;
         connected = false;
-        chatWindows.forEach(w => w.setStatus(gatewayAuthFailureMessage, 'disconnected'));
+        chatWindows.forEach(w => w.setConnectionStatus(gatewayAuthFailureMessage, 'disconnected'));
         if (ws === socket) ws = null;
         try { socket.close(1008, 'auth failed'); } catch {}
       }
@@ -3138,11 +3179,12 @@
       } else if (type === 'toolResult' || type === 'tool_result') {
         const last = tools[tools.length - 1];
         const result = b.result ?? b.output ?? b.content ?? b.text ?? b.error ?? '';
+        const isError = isHistoricalToolError(b, msg);
         if (last && (!b.toolCallId || b.toolCallId === last.id)) {
           last.result = result;
-          last.status = b.error ? 'error' : 'done';
+          last.status = isError ? 'error' : 'done';
         } else {
-          tools.push({ status: b.error ? 'error' : 'done', name: b.name || 'tool result', result, id: b.toolCallId || b.id || '' });
+          tools.push({ status: isError ? 'error' : 'done', name: b.name || 'tool result', result, id: b.toolCallId || b.id || '' });
         }
       }
     }
@@ -3346,14 +3388,6 @@
     return '';
   }
 
-  function isTerminalOpenClawErrorState(state) {
-    return state === 'error'
-      || state === 'failed'
-      || state === 'failure'
-      || state === 'cancelled'
-      || state === 'canceled';
-  }
-
   function stringifyGatewayError(value) {
     if (value == null || value === '') return '';
     if (typeof value === 'string') return value.trim();
@@ -3373,7 +3407,7 @@
     return String(value);
   }
 
-  function extractRunError(payload) {
+  function extractRunError(payload, fallback = 'The run failed before returning a reply.') {
     const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
     const nestedPayload = payload?.payload && typeof payload.payload === 'object' ? payload.payload : {};
     const candidates = [
@@ -3396,7 +3430,7 @@
       if (message) break;
     }
     message = message.replace(/^Error:\s*/i, '').trim();
-    return message || 'The model/provider run failed before returning a reply.';
+    return message || fallback;
   }
 
   function extractMedia(msg, text) {
@@ -3567,50 +3601,6 @@
     overlay.querySelector('.lightbox-img').src = src;
     overlay.classList.add('active');
   }
-
-  const _SAFE_TAGS = new Set(['p','br','strong','b','em','i','u','s','del','mark','h1','h2','h3','h4','h5','h6','ul','ol','li','blockquote','hr','pre','code','span','a','img','table','thead','tbody','tr','th','td','sup','sub','small','details','summary']);
-  const _SAFE_ATTRS = { 'a': ['href','title','target','rel'], 'img': ['src','alt','title','class','width','height'], 'code': ['class'], 'span': ['class'], 'pre': ['class'], 'td': ['align'], 'th': ['align'] };
-  function _sanitizeHtml(html) {
-    return html.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*\/?>/g, function(match, tag) {
-      var lower = tag.toLowerCase();
-      if (!_SAFE_TAGS.has(lower)) return '';
-      var allowed = _SAFE_ATTRS[lower];
-      if (!allowed) {
-        if (match.charAt(1) === '/') return '</' + lower + '>';
-        if (match.slice(-2) === '/>') return '<' + lower + ' />';
-        return '<' + lower + '>';
-      }
-      var attrsStr = '';
-      var attrRe = /\s([a-zA-Z\-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/g;
-      var m;
-      while ((m = attrRe.exec(match)) !== null) {
-        var attrName = m[1].toLowerCase();
-        var attrVal = m[2] !== undefined ? m[2] : (m[3] !== undefined ? m[3] : m[4]);
-        if (allowed.indexOf(attrName) !== -1) {
-          if ((attrName === 'href' || attrName === 'src') && /^\s*javascript\s*:/i.test(attrVal)) continue;
-          attrsStr += ' ' + attrName + '="' + attrVal.replace(/"/g, '&quot;') + '"';
-        }
-      }
-      if (match.charAt(1) === '/') return '</' + lower + '>';
-      if (match.slice(-2) === '/>') return '<' + lower + attrsStr + ' />';
-      return '<' + lower + attrsStr + '>';
-    });
-  }
-  function formatContent(text) {
-    if (!text) return '';
-    const safeText = escHtml(text);
-    let html;
-    if (typeof marked !== 'undefined') {
-      marked.setOptions({ breaks: true, gfm: true, sanitize: false });
-      html = marked.parse(safeText);
-    } else {
-      html = safeText.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\n/g, '<br>');
-    }
-    html = _sanitizeHtml(html);
-    html = html.replace(/<img ([^>]*)>/g, '<img $1 class="chat-image-thumb chat-image-clickable">');
-    return html;
-  }
-  function escHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
   function formatToolLabel(name, args) {
     const truncate = (s, n) => s && s.length > n ? s.slice(0, n) + '...' : (s || '');
@@ -3803,14 +3793,15 @@
   // Gateway info is refreshed on connect and after settings saves so token changes
   // apply without a full browser reload.
 
-  // --- MOVE / SNAP SYSTEM (primary window only) ---
+  // --- DIRECT HEADER DRAG / SNAP SYSTEM (primary window only) ---
   const chatPanel = primaryWindow.root;
-  const chatMoveBtn = document.getElementById('chat-move');
-  let _chatMoveMode = false;
   let _chatDragging = false;
+  let _chatDragCandidate = false;
+  let _chatDragPointerId = null;
   let _chatDragStartX = 0, _chatDragStartY = 0;
   let _chatOrigLeft = 0, _chatOrigTop = 0;
   let _chatSnapZoneL = null, _chatSnapZoneR = null;
+  const CHAT_DRAG_THRESHOLD = 5;
 
   function _chatCreateSnapZones() {
     if (_chatSnapZoneL) return;
@@ -3843,18 +3834,23 @@
     var sidebarWidth = _getSidebarWidth();
     return sidebarWidth ? sidebarWidth + 88 : 92;
   }
-  function _chatEnterMoveMode() {
-    _chatMoveMode = true; chatMoveBtn.classList.add('active'); chatPanel.classList.add('move-active');
-    // Exit move mode for all secondary windows
+  function _chatBeginDrag() {
+    // Exit move mode for all secondary windows.
     [1, 2, 3].forEach((sn) => _secExitMoveMode(sn));
     var rect = chatPanel.getBoundingClientRect();
     chatPanel.classList.remove('snap-left', 'snap-right'); chatPanel.classList.add('floating');
+    chatPanel.classList.add('dragging');
     chatPanel.style.left = rect.left + 'px'; chatPanel.style.top = rect.top + 'px';
     chatPanel.style.right = 'auto'; chatPanel.style.bottom = 'auto'; chatPanel.style.width = rect.width + 'px'; chatPanel.style.height = rect.height + 'px';
+    _chatOrigLeft = rect.left;
+    _chatOrigTop = rect.top;
+    _chatDragging = true;
+    _chatCreateSnapZones();
   }
   function _chatExitMoveMode() {
-    _chatMoveMode = false; _chatDragging = false;
-    if (chatMoveBtn) chatMoveBtn.classList.remove('active');
+    _chatDragCandidate = false;
+    _chatDragPointerId = null;
+    _chatDragging = false;
     chatPanel.classList.remove('floating', 'dragging', 'move-active');
     chatPanel.style.removeProperty('transform');
     _chatRemoveSnapZones();
@@ -3870,8 +3866,9 @@
     chatPanel.style.top = wRect.top + 'px'; chatPanel.style.height = wRect.height + 'px';
     if (side === 'left') { chatPanel.classList.remove('snap-right'); chatPanel.classList.add('snap-left'); }
     else { chatPanel.classList.remove('snap-left'); chatPanel.classList.add('snap-right'); chatPanel.style.right = _getChatDockRightOffset() + 'px'; }
-    _chatMoveMode = false; _chatDragging = false;
-    if (chatMoveBtn) chatMoveBtn.classList.remove('active');
+    _chatDragCandidate = false;
+    _chatDragPointerId = null;
+    _chatDragging = false;
     _chatRemoveSnapZones();
     setTimeout(() => { _tileSecondaryPanels(); _positionExteriorTabs(); _resolveOverlaps(chatPanel); }, 50);
   }
@@ -3896,18 +3893,22 @@
   if (_sidebarEdge) _sidebarEdge.addEventListener('click', _scheduleDockRefresh);
   if (_vwSidebarToggle) _vwSidebarToggle.addEventListener('click', _scheduleDockRefresh);
   window.addEventListener('resize', () => { updateChatStackLayout(); _chatUpdateSnapPosition(); _positionExteriorTabs(); });
-  if (chatMoveBtn) chatMoveBtn.addEventListener('click', (e) => { e.stopPropagation(); _chatMoveMode ? _chatExitMoveMode() : _chatEnterMoveMode(); });
   const chatHeader = chatPanel.querySelector('.chat-header');
-  chatHeader.addEventListener('mousedown', (e) => {
-    if (!_chatMoveMode) return;
-    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT') return;
-    e.preventDefault(); _chatDragging = true; chatPanel.classList.add('dragging');
-    _chatDragStartX = e.clientX; _chatDragStartY = e.clientY;
-    var rect = chatPanel.getBoundingClientRect(); _chatOrigLeft = rect.left; _chatOrigTop = rect.top; _chatCreateSnapZones();
+  chatHeader.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.isPrimary === false) return;
+    if (e.target.closest('button, select, input, textarea, a, [role="button"]')) return;
+    _chatDragCandidate = true;
+    _chatDragPointerId = e.pointerId;
+    _chatDragStartX = e.clientX;
+    _chatDragStartY = e.clientY;
   });
-  window.addEventListener('mousemove', (e) => {
-    if (!_chatDragging) return;
+  window.addEventListener('pointermove', (e) => {
+    if (!_chatDragCandidate || e.pointerId !== _chatDragPointerId) return;
     var dx = e.clientX - _chatDragStartX; var dy = e.clientY - _chatDragStartY;
+    if (!_chatDragging && Math.hypot(dx, dy) < CHAT_DRAG_THRESHOLD) return;
+    if (!_chatDragging) _chatBeginDrag();
+    if (!_chatDragging) return;
+    e.preventDefault();
     chatPanel.style.left = (_chatOrigLeft + dx) + 'px'; chatPanel.style.top = (_chatOrigTop + dy) + 'px';
     _tileSecondaryPanels();
     _positionExteriorTabs();
@@ -3915,16 +3916,22 @@
     if (_chatSnapZoneL) _chatSnapZoneL.classList.toggle('active', e.clientX < 80);
     if (_chatSnapZoneR) { _chatSnapZoneR.style.right = sbW + 'px'; _chatSnapZoneR.classList.toggle('active', e.clientX > rightEdge - 80); }
   });
-  window.addEventListener('mouseup', (e) => {
+  function _chatFinishPointerDrag(e, cancelled = false) {
+    if (!_chatDragCandidate || e.pointerId !== _chatDragPointerId) return;
+    _chatDragCandidate = false;
+    _chatDragPointerId = null;
     if (!_chatDragging) return;
     _chatDragging = false; chatPanel.classList.remove('dragging');
     var sbW = _getChatDockRightOffset(); var rightEdge = window.innerWidth - sbW;
-    if (e.clientX < 80) _chatSnapTo('left'); else if (e.clientX > rightEdge - 80) _chatSnapTo('right');
+    if (!cancelled && e.clientX < 80) _chatSnapTo('left');
+    else if (!cancelled && e.clientX > rightEdge - 80) _chatSnapTo('right');
     _chatRemoveSnapZones();
     _tileSecondaryPanels();
     _positionExteriorTabs();
     _resolveOverlaps(chatPanel);
-  });
+  }
+  window.addEventListener('pointerup', _chatFinishPointerDrag);
+  window.addEventListener('pointercancel', (e) => _chatFinishPointerDrag(e, true));
 
   // ─── SHARED CHAT RESIZE SYSTEM (primary + secondary, all directions) ───
   const CHAT_MIN_W = 220;
