@@ -90,7 +90,7 @@ import {
   getChatBubbleSideInsets,
   normalizeChatBubbleDisplaySettings,
   shouldGroupChatBubbles,
-} from './chat-bubble-layout.mjs?v=20260728-fixed-bubble-radius-r2';
+} from './chat-bubble-layout.mjs?v=20260728-fixed-session-field-r3';
 import {
   CAPABILITY_TAG_GROUPS,
   CAPABILITY_TAG_DEFINITIONS,
@@ -62284,7 +62284,7 @@ function createBubbleEl(agent) {
     <div class="chat-bubble-header">
       <span class="live-dot"></span>
       <span class="agent-name">${agent.emoji || '🤖'} ${agent.name || agent.id}</span>
-      <span class="session-name"></span>
+      <span class="session-name"><span class="session-name-text"></span></span>
       <button class="minimize-btn" title="Minimize">−</button>
     </div>
     <div class="chat-bubble-body"></div>
@@ -62358,8 +62358,9 @@ function getChatBubbleSessionMeta(messages) {
 function applyChatBubbleSessionMeta(state, sessionMeta) {
   const sessionEl = state?.el?.querySelector('.session-name');
   if (!sessionEl) return;
+  const sessionTextEl = sessionEl.querySelector('.session-name-text') || sessionEl;
   const title = String(sessionMeta?.title || '').trim();
-  sessionEl.textContent = title;
+  sessionTextEl.textContent = title;
   sessionEl.title = title;
   sessionEl.style.display = title ? 'inline-flex' : 'none';
   state.el?.classList.toggle('chat-bubble-live-session', Boolean(sessionMeta?.liveMode));

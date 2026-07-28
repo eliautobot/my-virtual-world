@@ -26,11 +26,12 @@ This release gives users direct control over when expanded agent chat bubbles sw
 - Kept Fixed Large at a `6px` outer corner radius.
 - Scaled Fixed Medium to `4.2px`.
 - Scaled Fixed Small to `2.94px`.
+- Kept Fixed session fields centered inside their shape and constrained long session names to one ellipsized line.
 - Kept Consistent-size corner radii unchanged.
 
 ## Verification
 
-- Extended chat-bubble layout regressions for grouping defaults, custom thresholds, disabled grouping, all reduced Fixed scales, and proportional outer radii.
+- Extended chat-bubble layout regressions for grouping defaults, custom thresholds, disabled grouping, all reduced Fixed scales, proportional outer radii, and Fixed session-field alignment.
 - Extended the public smoke suite for the new Settings controls, persistence wiring, server normalization, asset versions, and styling contract.
 - Passed the complete public smoke suite, chat UI verification, JavaScript and Python syntax checks, Docker Compose validation, dependency audit, and whitespace checks.
 - Verified the live 8590 deployment with 28 agents, 3 buildings, saved settings, persistent world data, and the realtime service preserved.

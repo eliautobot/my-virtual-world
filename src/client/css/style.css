@@ -2095,6 +2095,19 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
 #chatBubbleContainer .chat-bubble[data-display-mode="world"] .chat-bubble-header .session-name {
     border: 0;
     box-shadow: inset 0 0 0 var(--bubble-session-border-width, 1px) rgba(255,255,255,0.18);
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    line-height: 1;
+}
+#chatBubbleContainer .chat-bubble[data-display-mode="world"] .chat-bubble-header .session-name-text {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 #chatBubbleContainer .chat-bubble[data-display-mode="world"].chat-bubble-live-session .chat-bubble-header .session-name {
     box-shadow: inset 0 0 0 var(--bubble-session-border-width, 1px) rgba(124,252,124,0.35);
