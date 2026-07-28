@@ -179,11 +179,13 @@ assertScale(fixedLargeChrome.scrollbarWidth, 1.428, 'Fixed Large scrollbar must 
 const fixedMediumChrome = getChatBubbleChromeMetrics('world', 0.3332);
 assertScale(fixedMediumChrome.sessionPaddingX, 1.666, 'Fixed Medium session padding must follow its selected size');
 assertScale(fixedMediumChrome.sessionRadius, 1.3328, 'Fixed Medium session radius must follow its selected size');
-assertScale(fixedMediumChrome.scrollbarWidth, 0.9996, 'Fixed Medium scrollbar must follow its selected size');
+assertScale(fixedMediumChrome.scrollbarWidth, 1.25, 'Fixed Medium scrollbar must retain a usable minimum width');
+assertScale(fixedMediumChrome.scrollbarThumbRadius, 1.25 * (2 / 3), 'Fixed Medium thumb radius must follow its wider scrollbar');
 const fixedSmallChrome = getChatBubbleChromeMetrics('world', 0.23324);
 assertScale(fixedSmallChrome.sessionPaddingX, 1.1662, 'Fixed Small session padding must follow its selected size');
 assertScale(fixedSmallChrome.sessionRadius, 0.93296, 'Fixed Small session radius must follow its selected size');
-assertScale(fixedSmallChrome.scrollbarWidth, 0.69972, 'Fixed Small scrollbar must follow its selected size');
+assertScale(fixedSmallChrome.scrollbarWidth, 1.25, 'Fixed Small scrollbar must retain a usable minimum width');
+assertScale(fixedSmallChrome.scrollbarThumbRadius, 1.25 * (2 / 3), 'Fixed Small thumb radius must follow its wider scrollbar');
 
 const worldFarLayout = getRigidWorldChatBubbleLayout({
   expandedCount: 1,

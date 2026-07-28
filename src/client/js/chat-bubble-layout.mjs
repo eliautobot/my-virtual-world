@@ -102,14 +102,17 @@ export function getChatBubbleChromeMetrics(displayMode = 'consistent', chromeSca
   const metricScale = displayMode === 'world'
     ? Math.max(0.05, finiteNumber(chromeScale, 1))
     : 1;
+  const scrollbarWidth = displayMode === 'world'
+    ? Math.max(1.25, 3 * metricScale)
+    : 3;
 
   return {
     sessionPaddingY: metricScale,
     sessionPaddingX: 5 * metricScale,
     sessionBorderWidth: metricScale,
     sessionRadius: 4 * metricScale,
-    scrollbarWidth: 3 * metricScale,
-    scrollbarThumbRadius: 2 * metricScale,
+    scrollbarWidth,
+    scrollbarThumbRadius: scrollbarWidth * (2 / 3),
   };
 }
 

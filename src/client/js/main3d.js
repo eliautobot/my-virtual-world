@@ -89,7 +89,7 @@ import {
   getRigidWorldChatBubbleLayout,
   getChatBubbleSideInsets,
   normalizeChatBubbleDisplaySettings,
-} from './chat-bubble-layout.mjs?v=20260727-fixed-bubble-chrome-r8';
+} from './chat-bubble-layout.mjs?v=20260727-fixed-scrollbar-r9';
 import {
   CAPABILITY_TAG_GROUPS,
   CAPABILITY_TAG_DEFINITIONS,

@@ -380,7 +380,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260727-fixed-bubble-chrome-r8',
+  'js/main3d.js?v=20260727-fixed-scrollbar-r9',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
   'js/chat.js?v=20260727-connection-status-r1',
@@ -496,7 +496,7 @@ for (const token of [
 }
 for (const token of [
   "agent-characters.js?v=20260721-fluidity-r2",
-  "chat-bubble-layout.mjs?v=20260727-fixed-bubble-chrome-r8",
+  "chat-bubble-layout.mjs?v=20260727-fixed-scrollbar-r9",
   'getChatBubbleSideInsets',
   'getChatBubbleChromeMetrics',
   'clampChatBubbleX',
