@@ -10,7 +10,7 @@
     <link rel="icon" href="favicon.png" type="image/png">
     <title>My Virtual World</title>
     <link rel="stylesheet" href="css/style.css?v=20260728-chat-bubble-consistency-r4">
-    <link rel="stylesheet" href="css/ui-redesign.css?v=20260728-chat-bubble-grouping-r1">
+    <link rel="stylesheet" href="css/ui-redesign.css?v=20260728-chat-window-scroll-r4">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
@@ -986,6 +986,8 @@
                 <div id="chat-sessions-list" class="chat-sessions-list"></div>
             </div>
             <div id="chat-messages" class="chat-messages"></div>
+            <button class="chat-scroll-latest" type="button" title="Jump to latest message" aria-label="Jump to latest message" hidden>↓</button>
+            <div class="chat-middle-scroll-origin" aria-hidden="true" hidden>↕</div>
         </div>
         <div id="chat-attachments-preview" class="chat-attachments-preview"></div>
         <div id="chat-run-notice" class="chat-run-notice" role="alert" aria-live="polite" hidden>
@@ -1034,7 +1036,7 @@
     <script type="module" src="js/main3d.js?v=20260728-chat-bubble-consistency-r4"></script>
     <script src="js/openclaw-run-state.js?v=20260727-connection-status-r1"></script>
     <script src="js/chat-markdown.js?v=20260727-chat-markdown-r1"></script>
-    <script src="js/chat.js?v=20260727-connection-status-r1"></script>
+    <script src="js/chat.js?v=20260728-chat-scroll-controls-r4"></script>
     <script src="js/settings.js?v=20260728-chat-bubble-grouping-r1"></script>
 </body>
 </html>

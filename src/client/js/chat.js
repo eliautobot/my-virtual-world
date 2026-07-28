@@ -56,10 +56,14 @@
   const MAX_LIVE_TOOL_CARDS = 24;
   const CHAT_STACK_GAP = 12;
   const CHAT_BOTTOM_OFFSET = 36;
+  const CHAT_BOTTOM_FOLLOW_THRESHOLD = 28;
+  const CHAT_MIDDLE_SCROLL_DEAD_ZONE = 8;
+  const CHAT_MIDDLE_SCROLL_MAX_SPEED = 26;
   const HERMES_APPROVAL_POLL_MS = 1500;
   const CHAT_SELECTION_STORAGE_KEY = 'vw-chat-selection-v1';
   const DEFAULT_CHAT_AGENT_KEY = 'main';
   const DEFAULT_CHAT_SESSION_KEY = 'agent:main:main';
+  let activeMiddleScrollWindow = null;
   const secondarySlotButtons = Array.from(document.querySelectorAll('[data-chat-slot-toggle]'));
   let activeSecondarySlot = null;
   const secondaryPanelPlaceholders = {
@@ -152,6 +156,18 @@
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
       this.scrollFrame = null;
+      this.followLatest = true;
+      this.scrollTrackingSuspended = false;
+      this.restoringLatest = false;
+      this.restoreLatestTimer = null;
+      this.middleScrollActive = false;
+      this.middleScrollPointerDown = false;
+      this.middleScrollGestureMoved = false;
+      this.middleScrollAnchorX = 0;
+      this.middleScrollAnchorY = 0;
+      this.middleScrollPointerX = 0;
+      this.middleScrollPointerY = 0;
+      this.middleScrollFrame = null;
       this.inputResizeFrame = null;
       this.streamingRenderTimer = null;
       this.streamingPendingContent = '';
@@ -168,6 +184,8 @@
       this.audioChunks = [];
 
       this.messages = root.querySelector('.chat-messages');
+      this.scrollLatestBtn = root.querySelector('.chat-scroll-latest');
+      this.middleScrollOrigin = root.querySelector('.chat-middle-scroll-origin');
       this.status = root.querySelector('.chat-status');
       this.runNotice = root.querySelector('.chat-run-notice');
       this.runNoticeTitle = root.querySelector('.chat-run-notice-title');
@@ -200,6 +218,47 @@
         if (e.target.classList.contains('chat-image-clickable') || e.target.classList.contains('chat-image-thumb')) {
           openImageLightbox(e.target.src);
         }
+      });
+      this.messages.addEventListener('scroll', () => this.handleMessagesScroll(), { passive: true });
+      this.messages.addEventListener('mousedown', (e) => {
+        if (e.button !== 1) return;
+        e.preventDefault();
+        if (this.middleScrollActive) {
+          this.stopMiddleAutoScroll();
+          return;
+        }
+        this.middleScrollPointerDown = true;
+        this.middleScrollGestureMoved = false;
+        this.startMiddleAutoScroll(e);
+      });
+      this.messages.addEventListener('auxclick', (e) => {
+        if (e.button === 1) e.preventDefault();
+      });
+      this.scrollLatestBtn?.addEventListener('click', () => this.resumeLatest());
+      window.addEventListener('mousemove', (e) => {
+        if (!this.middleScrollActive) return;
+        this.middleScrollPointerX = e.clientX;
+        this.middleScrollPointerY = e.clientY;
+        if (
+          this.middleScrollPointerDown &&
+          Math.hypot(
+            this.middleScrollPointerX - this.middleScrollAnchorX,
+            this.middleScrollPointerY - this.middleScrollAnchorY
+          ) > CHAT_MIDDLE_SCROLL_DEAD_ZONE
+        ) {
+          this.middleScrollGestureMoved = true;
+        }
+      }, { passive: true });
+      window.addEventListener('mouseup', (e) => {
+        if (e.button !== 1 || !this.middleScrollPointerDown) return;
+        this.middleScrollPointerDown = false;
+        if (this.middleScrollGestureMoved) this.stopMiddleAutoScroll();
+      });
+      window.addEventListener('mousedown', (e) => {
+        if (this.middleScrollActive && e.button !== 1) this.stopMiddleAutoScroll();
+      }, true);
+      window.addEventListener('keydown', (e) => {
+        if (this.middleScrollActive && e.key === 'Escape') this.stopMiddleAutoScroll();
       });
 
       this.agentSelect?.addEventListener('change', () => {
@@ -261,6 +320,9 @@
     }
 
     resetConversation(systemText) {
+      this.stopMiddleAutoScroll();
+      this.cancelLatestRestore();
+      this.followLatest = true;
       this.messages.innerHTML = '';
       this.streamingMsg = null;
       this.currentRunId = null;
@@ -279,6 +341,7 @@
       this.contextUsed = 0;
       this.updateModelBar();
       if (systemText) this.appendSystem(systemText);
+      else this.updateScrollLatestButton();
     }
 
     noteLiveAgentUserAttention(messagePreview = '') {
@@ -745,20 +808,21 @@
           const res = await fetch('/api/hermes/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
           if (data.ok && Array.isArray(data.messages)) {
-            this.messages.innerHTML = '';
-            for (const msg of data.messages) {
-              if (msg.text || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length)) {
-                const meta = msg.role === 'assistant'
-                  ? {
-                      ...resolveMessageSender(msg, this),
-                      thinking: msg.thinking || '',
-                      reasoningTokens: msg.reasoningTokens || 0,
-                      approval: msg.approval || null
-                    }
-                  : { label: 'You', kind: 'human' };
-                this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, normalizeHermesTools(msg.tools || []));
+            this.replaceHistoryMessages(() => {
+              for (const msg of data.messages) {
+                if (msg.text || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length)) {
+                  const meta = msg.role === 'assistant'
+                    ? {
+                        ...resolveMessageSender(msg, this),
+                        thinking: msg.thinking || '',
+                        reasoningTokens: msg.reasoningTokens || 0,
+                        approval: msg.approval || null
+                      }
+                    : { label: 'You', kind: 'human' };
+                  this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, normalizeHermesTools(msg.tools || []));
+                }
               }
-            }
+            });
             this.scrollBottom();
           }
           await this.pollHermesApproval().catch(() => {});
@@ -768,13 +832,38 @@
           const res = await fetch('/api/codex/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
           if (data.ok && Array.isArray(data.messages)) {
-            this.messages.innerHTML = '';
-            for (const msg of data.messages) {
+            this.replaceHistoryMessages(() => {
+              for (const msg of data.messages) {
+                const tools = normalizeHermesTools(msg.tools || []);
+                const meta = msg.role === 'user'
+                  ? { label: msg.from || 'You', kind: msg.fromType === 'human' ? 'human' : 'agent' }
+                  : {
+                      label: msg.from || this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex',
+                      kind: 'agent',
+                      thinking: msg.thinking || '',
+                      reasoningTokens: msg.reasoningTokens || 0,
+                      approval: msg.approval || null
+                    };
+                if (msg.text || tools.length || msg.thinking || msg.reasoningTokens || msg.approval) {
+                  this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, tools);
+                }
+              }
+            });
+            this.scrollBottom();
+          }
+          return;
+        }
+        if (this.isProviderAgentSelected()) {
+          const res = await fetch('/api/agent-chat');
+          const data = await res.json();
+          const msgs = data[this.selectedAgentKey] || [];
+          this.replaceHistoryMessages(() => {
+            for (const msg of msgs) {
               const tools = normalizeHermesTools(msg.tools || []);
               const meta = msg.role === 'user'
-                ? { label: msg.from || 'You', kind: msg.fromType === 'human' ? 'human' : 'agent' }
+                ? { label: msg.from || 'Agent', kind: msg.fromType === 'human' ? 'human' : 'agent' }
                 : {
-                    label: msg.from || this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex',
+                    label: msg.from || this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Agent',
                     kind: 'agent',
                     thinking: msg.thinking || '',
                     reasoningTokens: msg.reasoningTokens || 0,
@@ -784,43 +873,21 @@
                 this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, tools);
               }
             }
-            this.scrollBottom();
-          }
-          return;
-        }
-        if (this.isProviderAgentSelected()) {
-          const res = await fetch('/api/agent-chat');
-          const data = await res.json();
-          const msgs = data[this.selectedAgentKey] || [];
-          this.messages.innerHTML = '';
-          for (const msg of msgs) {
-            const tools = normalizeHermesTools(msg.tools || []);
-            const meta = msg.role === 'user'
-              ? { label: msg.from || 'Agent', kind: msg.fromType === 'human' ? 'human' : 'agent' }
-              : {
-                  label: msg.from || this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Agent',
-                  kind: 'agent',
-                  thinking: msg.thinking || '',
-                  reasoningTokens: msg.reasoningTokens || 0,
-                  approval: msg.approval || null
-                };
-            if (msg.text || tools.length || msg.thinking || msg.reasoningTokens || msg.approval) {
-              this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, tools);
-            }
-          }
+          });
           this.scrollBottom();
           return;
         }
         const res = await rpc('chat.history', { sessionKey: this.sessionKey, limit: 500 });
         if (res.ok && res.payload?.messages) {
-          this.messages.innerHTML = '';
-          for (const msg of res.payload.messages) {
-            const t = extractText(msg) || (typeof msg.content === 'string' ? msg.content : '');
-            const ts = msg.timestamp || msg.ts || msg.message?.timestamp || null;
-            const media = extractMedia(msg, t);
-            const tools = extractToolItems(msg);
-            if (t || media.length || tools.length) this.appendMessage(msg.role, t, ts, media, resolveMessageSender(msg, this), tools);
-          }
+          this.replaceHistoryMessages(() => {
+            for (const msg of res.payload.messages) {
+              const t = extractText(msg) || (typeof msg.content === 'string' ? msg.content : '');
+              const ts = msg.timestamp || msg.ts || msg.message?.timestamp || null;
+              const media = extractMedia(msg, t);
+              const tools = extractToolItems(msg);
+              if (t || media.length || tools.length) this.appendMessage(msg.role, t, ts, media, resolveMessageSender(msg, this), tools);
+            }
+          });
           this.scrollBottom();
         }
       } catch (e) {
@@ -837,31 +904,33 @@
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
-      this.messages.innerHTML = '';
       const msgs = Array.isArray(data.messages) ? data.messages : [];
-      for (const msg of msgs) {
-        const tools = normalizeHermesTools(msg.tools || []);
-        const meta = msg.role === 'user'
-          ? {
-              label: msg.from || 'You',
-              kind: msg.fromType === 'human' ? 'human' : 'agent',
-              source: msg.source || '',
-              eventType: msg.eventType || ''
-            }
-          : {
-              label: msg.from || 'Live Agent Mode',
-              kind: 'agent',
-              thinking: msg.thinking || '',
-              reasoningTokens: msg.reasoningTokens || 0,
-              approval: msg.approval || null,
-              source: msg.source || '',
-              eventType: msg.eventType || '',
-              modelDecision: msg.modelDecision || null
-            };
-        if (msg.text || tools.length || msg.thinking || msg.reasoningTokens || msg.approval) {
-          this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, tools);
+      this.replaceHistoryMessages(() => {
+        for (const msg of msgs) {
+          const tools = normalizeHermesTools(msg.tools || []);
+          const meta = msg.role === 'user'
+            ? {
+                label: msg.from || 'You',
+                kind: msg.fromType === 'human' ? 'human' : 'agent',
+                source: msg.source || '',
+                eventType: msg.eventType || ''
+              }
+            : {
+                label: msg.from || 'Live Agent Mode',
+                kind: 'agent',
+                thinking: msg.thinking || '',
+                reasoningTokens: msg.reasoningTokens || 0,
+                approval: msg.approval || null,
+                source: msg.source || '',
+                eventType: msg.eventType || '',
+                modelDecision: msg.modelDecision || null
+              };
+          if (msg.text || tools.length || msg.thinking || msg.reasoningTokens || msg.approval) {
+            this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, tools);
+          }
         }
-      }
+        if (!msgs.length) this.appendSystem('Live Agent Mode has no visible events yet.');
+      });
       if (this.liveResponsePendingAt) {
         const receivedReply = msgs.some(msg => {
           if (msg.role !== 'assistant' || msg.eventType !== 'reply') return false;
@@ -872,7 +941,6 @@
           this.liveResponsePendingAt = 0;
         }
       }
-      if (!msgs.length) this.appendSystem('Live Agent Mode has no visible events yet.');
       this.scrollBottom();
     }
 
@@ -1809,6 +1877,7 @@
       if (nextContent === this.streamingRenderedContent) return;
       text.innerHTML = formatContent(nextContent);
       this.streamingRenderedContent = nextContent;
+      this.scrollBottom();
     }
 
     finalizeStreamingMessage(content, mediaItems) {
@@ -1890,19 +1959,144 @@
       }
     }
 
-    scrollBottom() {
-      if (this.scrollFrame) return;
+    isNearMessagesBottom() {
+      const remaining = this.messages.scrollHeight - this.messages.clientHeight - this.messages.scrollTop;
+      return remaining <= CHAT_BOTTOM_FOLLOW_THRESHOLD;
+    }
+
+    handleMessagesScroll() {
+      if (this.scrollTrackingSuspended || this.restoringLatest) return;
+      this.followLatest = this.isNearMessagesBottom();
+      this.updateScrollLatestButton();
+    }
+
+    replaceHistoryMessages(renderMessages) {
+      const scrollState = {
+        followLatest: this.followLatest,
+        scrollTop: this.messages.scrollTop
+      };
+      this.scrollTrackingSuspended = true;
+      this.messages.innerHTML = '';
+      try {
+        renderMessages();
+      } finally {
+        if (scrollState.followLatest) {
+          this.followLatest = true;
+          this.messages.scrollTop = this.messages.scrollHeight;
+          this.scrollTrackingSuspended = false;
+          this.scrollBottom({ force: true });
+        } else {
+          const maxScrollTop = Math.max(0, this.messages.scrollHeight - this.messages.clientHeight);
+          this.messages.scrollTop = Math.min(scrollState.scrollTop, maxScrollTop);
+          this.followLatest = !maxScrollTop || this.isNearMessagesBottom();
+          this.scrollTrackingSuspended = false;
+          this.updateScrollLatestButton();
+        }
+      }
+    }
+
+    updateScrollLatestButton() {
+      if (!this.scrollLatestBtn) return;
+      const hasOverflow = this.messages.scrollHeight > this.messages.clientHeight + CHAT_BOTTOM_FOLLOW_THRESHOLD;
+      this.scrollLatestBtn.hidden = this.followLatest || !hasOverflow;
+    }
+
+    resumeLatest() {
+      this.stopMiddleAutoScroll();
+      this.cancelLatestRestore();
+      this.restoringLatest = true;
+      this.followLatest = true;
+      this.updateScrollLatestButton();
+      this.scrollBottom({ force: true });
+      this.restoreLatestTimer = setTimeout(() => {
+        this.messages.scrollTop = this.messages.scrollHeight;
+        this.restoringLatest = false;
+        this.restoreLatestTimer = null;
+        this.followLatest = this.isNearMessagesBottom();
+        this.updateScrollLatestButton();
+      }, 140);
+    }
+
+    cancelLatestRestore() {
+      if (this.restoreLatestTimer) clearTimeout(this.restoreLatestTimer);
+      this.restoreLatestTimer = null;
+      this.restoringLatest = false;
+    }
+
+    scrollBottom({ force = false } = {}) {
+      if (force) this.followLatest = true;
+      if (this.scrollTrackingSuspended) return;
+      if (!this.followLatest) {
+        this.updateScrollLatestButton();
+        return;
+      }
       const scrollToEnd = () => {
+        if (!force && !this.followLatest) return;
+        if (force) this.followLatest = true;
         this.messages.scrollTop = this.messages.scrollHeight;
         const last = this.messages.lastElementChild;
         if (last) last.scrollIntoView({ block: 'end' });
+        this.updateScrollLatestButton();
       };
+      if (force) scrollToEnd();
+      if (this.scrollFrame) return;
       this.scrollFrame = requestAnimationFrame(() => {
         this.scrollFrame = null;
         scrollToEnd();
         requestAnimationFrame(scrollToEnd);
         setTimeout(scrollToEnd, 80);
       });
+    }
+
+    startMiddleAutoScroll(event) {
+      this.cancelLatestRestore();
+      if (activeMiddleScrollWindow && activeMiddleScrollWindow !== this) {
+        activeMiddleScrollWindow.stopMiddleAutoScroll();
+      }
+      activeMiddleScrollWindow = this;
+      this.middleScrollActive = true;
+      this.middleScrollAnchorX = event.clientX;
+      this.middleScrollAnchorY = event.clientY;
+      this.middleScrollPointerX = event.clientX;
+      this.middleScrollPointerY = event.clientY;
+      this.root.classList.add('chat-middle-autoscrolling');
+      document.body.classList.add('chat-middle-autoscroll-active');
+      if (this.middleScrollOrigin) {
+        const bodyRect = this.messages.parentElement.getBoundingClientRect();
+        this.middleScrollOrigin.style.left = `${event.clientX - bodyRect.left}px`;
+        this.middleScrollOrigin.style.top = `${event.clientY - bodyRect.top}px`;
+        this.middleScrollOrigin.hidden = false;
+      }
+
+      const tick = () => {
+        if (!this.middleScrollActive) return;
+        const distance = this.middleScrollPointerY - this.middleScrollAnchorY;
+        if (Math.abs(distance) > CHAT_MIDDLE_SCROLL_DEAD_ZONE) {
+          const direction = Math.sign(distance);
+          const magnitude = Math.min(
+            CHAT_MIDDLE_SCROLL_MAX_SPEED,
+            (Math.abs(distance) - CHAT_MIDDLE_SCROLL_DEAD_ZONE) / 5
+          );
+          this.messages.scrollTop += direction * magnitude;
+        }
+        this.middleScrollFrame = requestAnimationFrame(tick);
+      };
+      this.middleScrollFrame = requestAnimationFrame(tick);
+    }
+
+    stopMiddleAutoScroll() {
+      if (!this.middleScrollActive) return;
+      this.middleScrollActive = false;
+      this.middleScrollPointerDown = false;
+      this.middleScrollGestureMoved = false;
+      if (this.middleScrollFrame) cancelAnimationFrame(this.middleScrollFrame);
+      this.middleScrollFrame = null;
+      this.root.classList.remove('chat-middle-autoscrolling');
+      if (this.middleScrollOrigin) this.middleScrollOrigin.hidden = true;
+      if (activeMiddleScrollWindow === this) {
+        activeMiddleScrollWindow = null;
+        document.body.classList.remove('chat-middle-autoscroll-active');
+      }
     }
 
     stopHermesProgressTimers() {

@@ -96,5 +96,58 @@ assert(redesignCss.includes('@container chat-panel (max-width: 410px)'), 'header
 assert(!redesignCss.includes('[style*="width:'), 'resized chat layout must not use brittle inline-style selectors');
 assert(styleCss.includes('.chat-panel .chat-markdown table'), 'chat tables must have scoped styling');
 assert(styleCss.includes('.chat-panel .chat-markdown blockquote'), 'chat blockquotes must have scoped styling');
+assert(indexHtml.includes('class="chat-scroll-latest"'), 'chat windows need a jump-to-latest control');
+assert(
+  chatSource.includes("this.messages.addEventListener('scroll'") &&
+  chatSource.includes('this.followLatest = this.isNearMessagesBottom();'),
+  'manual message scrolling must suspend bottom-follow mode'
+);
+assert(
+  chatSource.includes('this.restoringLatest = true;') &&
+  chatSource.includes('if (this.scrollTrackingSuspended || this.restoringLatest) return;') &&
+  chatSource.includes('if (force) scrollToEnd();'),
+  'forced latest-message restoration must survive stale scroll events before the animation frame'
+);
+assert(
+  chatSource.includes('replaceHistoryMessages(renderMessages)') &&
+  chatSource.includes('scrollTrackingSuspended'),
+  'history refreshes must preserve paused scroll positions without re-enabling bottom-follow'
+);
+assert(
+  chatSource.includes("this.messages.addEventListener('mousedown'") &&
+  chatSource.includes('this.middleScrollPointerDown = true;') &&
+  chatSource.includes('if (this.middleScrollGestureMoved) this.stopMiddleAutoScroll();'),
+  'message panes must support hold-and-drag middle-button scrolling'
+);
+assert(
+  chatSource.includes("this.messages.addEventListener('auxclick'") &&
+  chatSource.includes('startMiddleAutoScroll(event)'),
+  'a normal middle click must still support hands-free autoscroll'
+);
+assert(
+  chatSource.includes("const panel = primaryPanel.cloneNode(true);") &&
+  chatSource.includes("const w = new ChatWindow(panel, { slot: Number(slot) });"),
+  'secondary chat panels must inherit the shared scroll controls and behavior'
+);
+for (const token of [
+  'top: -7px !important;',
+  'bottom: -7px !important;',
+  'left: -7px !important;',
+  'right: -7px !important;'
+]) {
+  assert(redesignCss.includes(token), `resize hit zones must sit outside the panel: ${token}`);
+}
+assert(
+  redesignCss.includes('top: -6px !important;') &&
+  redesignCss.includes('left: -6px !important;') &&
+  redesignCss.includes('border-radius: 50% !important;'),
+  'corner resize zones must be centered tightly on the panel curve'
+);
+assert(
+  redesignCss.includes('border-bottom-left-radius: inherit !important;') &&
+  redesignCss.includes('border-bottom-right-radius: inherit !important;') &&
+  redesignCss.includes('.chat-panel > .chat-input-row'),
+  'the composer background must follow the panel bottom corners without rectangular bleed'
+);
 
-console.log('PASS: chat streaming Markdown, responsive header, and direct-drag regressions verified.');
+console.log('PASS: chat Markdown, bottom-follow, middle-click/drag scrolling, curved resize, and multi-window regressions verified.');

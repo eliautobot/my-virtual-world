@@ -4134,3 +4134,177 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
         flex-basis: 34px !important;
     }
 }
+
+/* Chat scrolling controls and external-only resize hit zones. */
+.chat-body {
+    position: relative;
+}
+
+.chat-scroll-latest {
+    position: absolute;
+    right: 18px;
+    bottom: 14px;
+    z-index: 8;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid rgba(255, 214, 0, .62);
+    border-radius: 50%;
+    background: rgba(18, 24, 39, .96);
+    color: #ffd600;
+    box-shadow: 0 5px 18px rgba(0, 0, 0, .42);
+    font: 700 22px/1 sans-serif;
+    cursor: pointer;
+}
+
+.chat-scroll-latest:hover {
+    border-color: #ffd600;
+    background: #2a3041;
+    color: #fff;
+    transform: translateY(1px);
+}
+
+.chat-scroll-latest[hidden],
+.chat-middle-scroll-origin[hidden] {
+    display: none !important;
+}
+
+.chat-middle-scroll-origin {
+    position: absolute;
+    z-index: 9;
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgba(255, 214, 0, .72);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    background: rgba(18, 24, 39, .94);
+    color: #ffd600;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .38);
+    font: 700 16px/1 sans-serif;
+}
+
+.chat-middle-autoscrolling .chat-messages,
+body.chat-middle-autoscroll-active {
+    cursor: ns-resize !important;
+}
+
+.chat-panel > .chat-input-row {
+    border-bottom-left-radius: inherit !important;
+    border-bottom-right-radius: inherit !important;
+    overflow: hidden !important;
+}
+
+.chat-panel {
+    overflow: visible !important;
+}
+
+.chat-panel .chat-resize-handle {
+    opacity: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.chat-panel:hover .chat-resize-handle {
+    opacity: .35;
+}
+
+.chat-panel .chat-resize-handle:hover,
+.chat-panel .chat-resize-handle.dragging {
+    opacity: 1;
+    background: rgba(255, 214, 0, .30) !important;
+}
+
+.chat-panel .chat-resize-handle.top {
+    top: -7px !important;
+    left: 0 !important;
+    right: 0 !important;
+    height: 6px !important;
+    background: transparent !important;
+}
+
+.chat-panel .chat-resize-handle.bottom {
+    bottom: -7px !important;
+    left: 0 !important;
+    right: 0 !important;
+    height: 6px !important;
+    background: transparent !important;
+}
+
+.chat-panel .chat-resize-handle.left {
+    left: -7px !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 6px !important;
+    background: transparent !important;
+}
+
+.chat-panel .chat-resize-handle.right {
+    right: -7px !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 6px !important;
+    background: transparent !important;
+}
+
+.chat-panel .chat-resize-handle.top-left,
+.chat-panel .chat-resize-handle.top-right,
+.chat-panel .chat-resize-handle.bottom-left,
+.chat-panel .chat-resize-handle.bottom-right {
+    width: 12px !important;
+    height: 12px !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.chat-panel .chat-resize-handle.top-left {
+    top: -6px !important;
+    left: -6px !important;
+}
+
+.chat-panel .chat-resize-handle.top-right {
+    top: -6px !important;
+    right: -6px !important;
+}
+
+.chat-panel .chat-resize-handle.bottom-left {
+    bottom: -6px !important;
+    left: -6px !important;
+}
+
+.chat-panel .chat-resize-handle.bottom-right {
+    right: -6px !important;
+    bottom: -6px !important;
+}
+
+@media (max-width: 560px) {
+    .chat-panel:not(.floating):not(.snap-left):not(.snap-right) {
+        overflow: visible !important;
+    }
+
+    .chat-panel .chat-resize-handle.top,
+    .chat-panel .chat-resize-handle.bottom {
+        left: 54px !important;
+        right: 54px !important;
+        height: 10px !important;
+    }
+
+    .chat-panel .chat-resize-handle.top {
+        top: -11px !important;
+    }
+
+    .chat-panel .chat-resize-handle.bottom {
+        bottom: -11px !important;
+    }
+
+    .chat-scroll-latest {
+        right: 14px;
+        bottom: 12px;
+        width: 40px;
+        height: 40px;
+    }
+}
