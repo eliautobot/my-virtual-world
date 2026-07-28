@@ -130,9 +130,11 @@ export function getChatBubbleChromeMetrics(displayMode = 'consistent', chromeSca
     : 3;
 
   return {
+    outerBorderWidth: displayMode === 'world' ? 2 * metricScale : 2,
+    headerBorderWidth: displayMode === 'world' ? metricScale : 1,
     outerRadius,
     sessionPaddingY: displayMode === 'world' ? 2 * metricScale : 1,
-    sessionPaddingX: 5 * metricScale,
+    sessionPaddingX: (displayMode === 'world' ? 6 : 5) * metricScale,
     sessionBorderWidth: metricScale,
     sessionRadius: 4 * metricScale,
     scrollbarWidth,

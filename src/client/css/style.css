@@ -2006,7 +2006,7 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
     height: var(--bubble-height, 280px);
     max-height: none;
     background: rgba(255,255,230,0.95);
-    border: 2px solid var(--agent-accent, #78909c);
+    border: var(--bubble-outer-border-width, 2px) solid var(--agent-accent, #78909c);
     border-radius: 12px;
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     pointer-events: auto;
@@ -2017,8 +2017,11 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 #chatBubbleContainer .chat-bubble[data-display-mode="world"] {
-    border-width: 1px;
+    border-width: 0;
     border-radius: var(--bubble-outer-radius, 6px);
+    box-shadow:
+        inset 0 0 0 var(--bubble-outer-border-width, 2px) var(--agent-accent, #78909c),
+        0 4px 16px rgba(0,0,0,0.4);
 }
 #chatBubbleContainer .chat-bubble-connector {
     position: absolute;
@@ -2046,16 +2049,35 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
     font-weight: 700;
     color: #fff;
     background: linear-gradient(180deg, rgba(20,24,34,0.96), rgba(12,15,24,0.94));
-    border-bottom: 1px solid var(--agent-accent, #78909c);
+    border-bottom: var(--bubble-header-border-width, 1px) solid var(--agent-accent, #78909c);
     min-height: var(--bubble-header-min-height, 24px);
 }
+#chatBubbleContainer .chat-bubble[data-display-mode="world"] .chat-bubble-header {
+    border-bottom: 0;
+    box-shadow: inset 0 calc(0px - var(--bubble-header-border-width, 1px)) 0 0 var(--agent-accent, #78909c);
+}
 #chatBubbleContainer .chat-bubble-header .live-dot {
+    position: relative;
     width: var(--bubble-live-dot-size, 6px);
     height: var(--bubble-live-dot-size, 6px);
+    aspect-ratio: 1 / 1;
     flex: 0 0 var(--bubble-live-dot-size, 6px);
-    background: #4caf50;
+    background: transparent;
     border-radius: 50%;
     animation: livePulse 1.5s infinite;
+}
+#chatBubbleContainer .chat-bubble-header .live-dot::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    aspect-ratio: 1 / 1;
+    background: #4caf50;
+    border-radius: 50%;
+    clip-path: circle(50% at 50% 50%);
+    transform: translate(-50%, -50%) scale(var(--bubble-live-dot-render-scale, 1));
 }
 @keyframes livePulse {
     0%,100% { opacity: 1; }
@@ -2073,6 +2095,7 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
 }
 #chatBubbleContainer .chat-bubble-header .session-name {
     display: none;
+    align-items: center;
     min-width: 0;
     max-width: 42%;
     overflow: hidden;
@@ -2095,19 +2118,6 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
 #chatBubbleContainer .chat-bubble[data-display-mode="world"] .chat-bubble-header .session-name {
     border: 0;
     box-shadow: inset 0 0 0 var(--bubble-session-border-width, 1px) rgba(255,255,255,0.18);
-    align-items: center;
-    justify-content: center;
-    white-space: nowrap;
-    overflow-wrap: normal;
-    line-height: 1;
-}
-#chatBubbleContainer .chat-bubble[data-display-mode="world"] .chat-bubble-header .session-name-text {
-    display: block;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 #chatBubbleContainer .chat-bubble[data-display-mode="world"].chat-bubble-live-session .chat-bubble-header .session-name {
     box-shadow: inset 0 0 0 var(--bubble-session-border-width, 1px) rgba(124,252,124,0.35);

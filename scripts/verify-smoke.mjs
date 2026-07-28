@@ -380,11 +380,11 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260728-fixed-session-field-r3',
+  'js/main3d.js?v=20260728-chat-bubble-consistency-r4',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
   'js/chat.js?v=20260727-connection-status-r1',
-  'css/style.css?v=20260728-fixed-session-field-r3',
+  'css/style.css?v=20260728-chat-bubble-consistency-r4',
   'css/ui-redesign.css?v=20260728-chat-bubble-grouping-r1',
   'btn-newAgent',
   'Agent Platform',
@@ -496,7 +496,7 @@ for (const token of [
 }
 for (const token of [
   "agent-characters.js?v=20260721-fluidity-r2",
-  "chat-bubble-layout.mjs?v=20260728-fixed-session-field-r3",
+  "chat-bubble-layout.mjs?v=20260728-chat-bubble-consistency-r4",
   'getChatBubbleSideInsets',
   'getChatBubbleChromeMetrics',
   'clampChatBubbleX',
@@ -522,15 +522,21 @@ for (const token of [
   'width: max-content',
   'white-space: nowrap',
   '.chat-bubble[data-display-mode="world"]',
-  'border-width: 1px',
+  '--bubble-outer-border-width',
+  '--bubble-header-border-width',
   'border-radius: var(--bubble-outer-radius, 6px)',
   '--bubble-outer-radius',
+  '--bubble-live-dot-render-scale',
   '--bubble-session-padding-x',
   '--bubble-session-border-width',
   '--bubble-session-radius',
-  'session-name-text',
-  'text-overflow: ellipsis',
-  'box-shadow: inset 0 0 0 var(--bubble-session-border-width',
+  'inset 0 0 0 var(--bubble-outer-border-width',
+  'inset 0 calc(0px - var(--bubble-header-border-width',
+  'inset 0 0 0 var(--bubble-session-border-width',
+  'aspect-ratio: 1 / 1',
+  '.chat-bubble-header .live-dot::before',
+  'clip-path: circle(50% at 50% 50%)',
+  'transform: translate(-50%, -50%) scale(var(--bubble-live-dot-render-scale, 1))',
   '--bubble-scrollbar-width',
   '--bubble-scrollbar-thumb-radius',
   'scrollbar-width: auto',
@@ -540,6 +546,10 @@ for (const token of [
 ]) {
   assert(styleCss.includes(token), `style.css missing chat bubble text wrapping token: ${token}`);
 }
+assert(
+  !styleCss.includes('.chat-bubble[data-display-mode="world"] .chat-bubble-header .session-name-text'),
+  'Fixed-size session title text must inherit the same wrapping and centering rules as Consistent mode'
+);
 assert(
   !main3dJs.includes("? 260 + 5 : 5"),
   'chat bubbles must not use the stale 260px Edit World panel width'

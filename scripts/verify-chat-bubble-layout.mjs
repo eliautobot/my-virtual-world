@@ -203,6 +203,8 @@ const consistentChrome = getChatBubbleChromeMetrics('consistent', 0.17493);
 assert.deepEqual(
   consistentChrome,
   {
+    outerBorderWidth: 2,
+    headerBorderWidth: 1,
     outerRadius: 12,
     sessionPaddingY: 1,
     sessionPaddingX: 5,
@@ -214,23 +216,29 @@ assert.deepEqual(
   'Consistent bubble session and scrollbar chrome must retain their existing measurements'
 );
 const fixedLargeChrome = getChatBubbleChromeMetrics('world', 0.357);
+assertScale(fixedLargeChrome.outerBorderWidth, 0.714, 'Fixed Large outer border must scale from the Consistent 2px baseline');
+assertScale(fixedLargeChrome.headerBorderWidth, 0.357, 'Fixed Large header divider must scale from the Consistent 1px baseline');
 assertScale(fixedLargeChrome.outerRadius, 6, 'Fixed Large outer radius must retain its current baseline');
-assertScale(fixedLargeChrome.sessionPaddingY, 0.714, 'Fixed Large session padding must keep its text vertically centered');
-assertScale(fixedLargeChrome.sessionPaddingX, 1.785, 'Fixed Large session padding must follow its selected size');
+assertScale(fixedLargeChrome.sessionPaddingY, 0.714, 'Fixed Large session padding must reserve the Consistent border footprint');
+assertScale(fixedLargeChrome.sessionPaddingX, 2.142, 'Fixed Large session padding must reserve the Consistent border footprint');
 assertScale(fixedLargeChrome.sessionBorderWidth, 0.357, 'Fixed Large session border must follow its selected size');
 assertScale(fixedLargeChrome.sessionRadius, 1.428, 'Fixed Large session radius must follow its selected size');
 assertScale(fixedLargeChrome.scrollbarWidth, 1.25, 'Fixed Large scrollbar must retain a usable minimum width');
 const fixedMediumChrome = getChatBubbleChromeMetrics('world', 0.2499);
+assertScale(fixedMediumChrome.outerBorderWidth, 0.4998, 'Fixed Medium outer border must scale from the Consistent 2px baseline');
+assertScale(fixedMediumChrome.headerBorderWidth, 0.2499, 'Fixed Medium header divider must scale from the Consistent 1px baseline');
 assertScale(fixedMediumChrome.outerRadius, 4.2, 'Fixed Medium outer radius must be 30% smaller than Large');
-assertScale(fixedMediumChrome.sessionPaddingY, 0.4998, 'Fixed Medium session padding must follow its selected size');
-assertScale(fixedMediumChrome.sessionPaddingX, 1.2495, 'Fixed Medium session padding must follow its selected size');
+assertScale(fixedMediumChrome.sessionPaddingY, 0.4998, 'Fixed Medium session padding must reserve the Consistent border footprint');
+assertScale(fixedMediumChrome.sessionPaddingX, 1.4994, 'Fixed Medium session padding must reserve the Consistent border footprint');
 assertScale(fixedMediumChrome.sessionRadius, 0.9996, 'Fixed Medium session radius must follow its selected size');
 assertScale(fixedMediumChrome.scrollbarWidth, 1.25, 'Fixed Medium scrollbar must retain a usable minimum width');
 assertScale(fixedMediumChrome.scrollbarThumbRadius, 1.25 * (2 / 3), 'Fixed Medium thumb radius must follow its wider scrollbar');
 const fixedSmallChrome = getChatBubbleChromeMetrics('world', 0.17493);
+assertScale(fixedSmallChrome.outerBorderWidth, 0.34986, 'Fixed Small outer border must scale from the Consistent 2px baseline');
+assertScale(fixedSmallChrome.headerBorderWidth, 0.17493, 'Fixed Small header divider must scale from the Consistent 1px baseline');
 assertScale(fixedSmallChrome.outerRadius, 2.94, 'Fixed Small outer radius must be 30% smaller than Medium');
-assertScale(fixedSmallChrome.sessionPaddingY, 0.34986, 'Fixed Small session padding must follow its selected size');
-assertScale(fixedSmallChrome.sessionPaddingX, 0.87465, 'Fixed Small session padding must follow its selected size');
+assertScale(fixedSmallChrome.sessionPaddingY, 0.34986, 'Fixed Small session padding must reserve the Consistent border footprint');
+assertScale(fixedSmallChrome.sessionPaddingX, 1.04958, 'Fixed Small session padding must reserve the Consistent border footprint');
 assertScale(fixedSmallChrome.sessionRadius, 0.69972, 'Fixed Small session radius must follow its selected size');
 assertScale(fixedSmallChrome.scrollbarWidth, 1.25, 'Fixed Small scrollbar must retain a usable minimum width');
 assertScale(fixedSmallChrome.scrollbarThumbRadius, 1.25 * (2 / 3), 'Fixed Small thumb radius must follow its wider scrollbar');

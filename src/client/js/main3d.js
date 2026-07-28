@@ -90,7 +90,7 @@ import {
   getChatBubbleSideInsets,
   normalizeChatBubbleDisplaySettings,
   shouldGroupChatBubbles,
-} from './chat-bubble-layout.mjs?v=20260728-fixed-session-field-r3';
+} from './chat-bubble-layout.mjs?v=20260728-chat-bubble-consistency-r4';
 import {
   CAPABILITY_TAG_GROUPS,
   CAPABILITY_TAG_DEFINITIONS,
@@ -62764,10 +62764,13 @@ function applyChatBubbleSize(
   state.el.style.setProperty('--bubble-header-min-height', chromePx(24));
   state.el.style.setProperty('--bubble-header-gap', chromePx(6));
   state.el.style.setProperty('--bubble-live-dot-size', chromePx(6));
+  state.el.style.setProperty('--bubble-live-dot-render-scale', safeChromeScale.toFixed(5));
   state.el.style.setProperty('--bubble-header-padding-y', chromePx(5));
   state.el.style.setProperty('--bubble-header-padding-x', chromePx(8));
   state.el.style.setProperty('--bubble-body-padding-y', chromePx(6));
   state.el.style.setProperty('--bubble-body-padding-x', chromePx(10));
+  state.el.style.setProperty('--bubble-outer-border-width', metricPx(chromeMetrics.outerBorderWidth));
+  state.el.style.setProperty('--bubble-header-border-width', metricPx(chromeMetrics.headerBorderWidth));
   state.el.style.setProperty('--bubble-outer-radius', metricPx(chromeMetrics.outerRadius));
   state.el.style.setProperty('--bubble-session-padding-y', metricPx(chromeMetrics.sessionPaddingY));
   state.el.style.setProperty('--bubble-session-padding-x', metricPx(chromeMetrics.sessionPaddingX));
