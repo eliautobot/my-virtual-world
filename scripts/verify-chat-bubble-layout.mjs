@@ -7,6 +7,7 @@ import {
   getRigidWorldChatBubbleLayout,
   getChatBubbleSideInsets,
   normalizeChatBubbleDisplaySettings,
+  shouldGroupChatBubbles,
 } from '../src/client/js/chat-bubble-layout.mjs';
 
 function mockPanel(rect, collapsedClass = '') {
@@ -74,13 +75,53 @@ assert.equal(
 
 assert.deepEqual(
   normalizeChatBubbleDisplaySettings(),
-  { displayMode: 'consistent', size: 'large' },
-  'existing worlds must retain the current Consistent / Large behavior'
+  {
+    displayMode: 'consistent',
+    size: 'large',
+    groupingEnabled: true,
+    groupingMinimum: 5,
+  },
+  'existing worlds must retain the current Consistent / Large behavior and group at five bubbles'
 );
 assert.deepEqual(
-  normalizeChatBubbleDisplaySettings({ displayMode: 'invalid', size: 'huge' }),
-  { displayMode: 'consistent', size: 'large' },
+  normalizeChatBubbleDisplaySettings({
+    displayMode: 'invalid',
+    size: 'huge',
+    groupingEnabled: 'yes',
+    groupingMinimum: 'invalid',
+  }),
+  {
+    displayMode: 'consistent',
+    size: 'large',
+    groupingEnabled: true,
+    groupingMinimum: 5,
+  },
   'invalid persisted values must fall back safely'
+);
+assert.equal(
+  shouldGroupChatBubbles(4),
+  false,
+  'the backwards-compatible default must not group fewer than five expanded bubbles'
+);
+assert.equal(
+  shouldGroupChatBubbles(5),
+  true,
+  'the backwards-compatible default must group five expanded bubbles'
+);
+assert.equal(
+  shouldGroupChatBubbles(3, { groupingEnabled: true, groupingMinimum: 3 }),
+  true,
+  'a custom grouping minimum must take effect'
+);
+assert.equal(
+  shouldGroupChatBubbles(20, { groupingEnabled: false, groupingMinimum: 3 }),
+  false,
+  'disabled grouping must keep expanded bubbles out of the packed layout'
+);
+assert.equal(
+  normalizeChatBubbleDisplaySettings({ groupingMinimum: 1 }).groupingMinimum,
+  2,
+  'grouping minimums below two must normalize to the smallest meaningful group'
 );
 assert.equal(
   getChatBubbleDisplayScale({ displayMode: 'consistent', size: 'large' }, 120).effectiveScale,
@@ -99,32 +140,32 @@ assertScale(
 );
 assertScale(
   getChatBubbleDisplayScale({ displayMode: 'world', size: 'large' }, 40).effectiveScale,
-  0.476,
-  'Fixed-size Large must be 30% smaller than the prior world Large size'
+  0.357,
+  'Fixed-size Large must be 25% smaller than its prior size'
 );
 assertScale(
   getChatBubbleDisplayScale({ displayMode: 'world', size: 'medium' }, 40).effectiveScale,
-  0.3332,
-  'Fixed-size Medium must be 30% smaller than its Large size'
+  0.2499,
+  'Fixed-size Medium must be 25% smaller than its prior size'
 );
 assertScale(
   getChatBubbleDisplayScale({ displayMode: 'world', size: 'small' }, 40).effectiveScale,
-  0.23324,
-  'Fixed-size Small must be 30% smaller than its Medium size'
+  0.17493,
+  'Fixed-size Small must be 25% smaller than its prior size'
 );
 assertScale(
   getChatBubbleDisplayScale({ displayMode: 'world', size: 'large' }, 80).effectiveScale,
-  0.238,
+  0.1785,
   'Fixed-size bubbles must shrink when the camera zooms out'
 );
 assertScale(
   getChatBubbleDisplayScale({ displayMode: 'world', size: 'large' }, 20).effectiveScale,
-  0.952,
+  0.714,
   'Fixed-size bubbles must grow when the camera zooms in'
 );
 assertScale(
   getChatBubbleDisplayScale({ displayMode: 'world', size: 'small' }, 80).effectiveScale,
-  0.11662,
+  0.087465,
   'size selection and world zoom must compose'
 );
 assertScale(
@@ -139,29 +180,30 @@ assertScale(
 );
 assertScale(
   getChatBubbleDisplayScale({ displayMode: 'world', size: 'large' }, 80).typographyScale,
-  0.476,
+  0.357,
   'Fixed-size intrinsic typography must not change when zooming out'
 );
 assertScale(
   getChatBubbleDisplayScale({ displayMode: 'world', size: 'large' }, 20).typographyScale,
-  0.476,
+  0.357,
   'Fixed-size intrinsic typography must not change when zooming in'
 );
 assertScale(
   getChatBubbleDisplayScale({ displayMode: 'world', size: 'medium' }, 40).typographyScale,
-  0.3332,
+  0.2499,
   'Fixed-size Medium must use its intrinsic world typography'
 );
 assertScale(
   getChatBubbleDisplayScale({ displayMode: 'world', size: 'small' }, 40).typographyScale,
-  0.23324,
+  0.17493,
   'Fixed-size Small must use its intrinsic world typography'
 );
 
-const consistentChrome = getChatBubbleChromeMetrics('consistent', 0.23324);
+const consistentChrome = getChatBubbleChromeMetrics('consistent', 0.17493);
 assert.deepEqual(
   consistentChrome,
   {
+    outerRadius: 12,
     sessionPaddingY: 1,
     sessionPaddingX: 5,
     sessionBorderWidth: 1,
@@ -171,50 +213,53 @@ assert.deepEqual(
   },
   'Consistent bubble session and scrollbar chrome must retain their existing measurements'
 );
-const fixedLargeChrome = getChatBubbleChromeMetrics('world', 0.476);
-assertScale(fixedLargeChrome.sessionPaddingX, 2.38, 'Fixed Large session padding must follow its selected size');
-assertScale(fixedLargeChrome.sessionBorderWidth, 0.476, 'Fixed Large session border must follow its selected size');
-assertScale(fixedLargeChrome.sessionRadius, 1.904, 'Fixed Large session radius must follow its selected size');
-assertScale(fixedLargeChrome.scrollbarWidth, 1.428, 'Fixed Large scrollbar must follow its selected size');
-const fixedMediumChrome = getChatBubbleChromeMetrics('world', 0.3332);
-assertScale(fixedMediumChrome.sessionPaddingX, 1.666, 'Fixed Medium session padding must follow its selected size');
-assertScale(fixedMediumChrome.sessionRadius, 1.3328, 'Fixed Medium session radius must follow its selected size');
+const fixedLargeChrome = getChatBubbleChromeMetrics('world', 0.357);
+assertScale(fixedLargeChrome.outerRadius, 6, 'Fixed Large outer radius must retain its current baseline');
+assertScale(fixedLargeChrome.sessionPaddingX, 1.785, 'Fixed Large session padding must follow its selected size');
+assertScale(fixedLargeChrome.sessionBorderWidth, 0.357, 'Fixed Large session border must follow its selected size');
+assertScale(fixedLargeChrome.sessionRadius, 1.428, 'Fixed Large session radius must follow its selected size');
+assertScale(fixedLargeChrome.scrollbarWidth, 1.25, 'Fixed Large scrollbar must retain a usable minimum width');
+const fixedMediumChrome = getChatBubbleChromeMetrics('world', 0.2499);
+assertScale(fixedMediumChrome.outerRadius, 4.2, 'Fixed Medium outer radius must be 30% smaller than Large');
+assertScale(fixedMediumChrome.sessionPaddingX, 1.2495, 'Fixed Medium session padding must follow its selected size');
+assertScale(fixedMediumChrome.sessionRadius, 0.9996, 'Fixed Medium session radius must follow its selected size');
 assertScale(fixedMediumChrome.scrollbarWidth, 1.25, 'Fixed Medium scrollbar must retain a usable minimum width');
 assertScale(fixedMediumChrome.scrollbarThumbRadius, 1.25 * (2 / 3), 'Fixed Medium thumb radius must follow its wider scrollbar');
-const fixedSmallChrome = getChatBubbleChromeMetrics('world', 0.23324);
-assertScale(fixedSmallChrome.sessionPaddingX, 1.1662, 'Fixed Small session padding must follow its selected size');
-assertScale(fixedSmallChrome.sessionRadius, 0.93296, 'Fixed Small session radius must follow its selected size');
+const fixedSmallChrome = getChatBubbleChromeMetrics('world', 0.17493);
+assertScale(fixedSmallChrome.outerRadius, 2.94, 'Fixed Small outer radius must be 30% smaller than Medium');
+assertScale(fixedSmallChrome.sessionPaddingX, 0.87465, 'Fixed Small session padding must follow its selected size');
+assertScale(fixedSmallChrome.sessionRadius, 0.69972, 'Fixed Small session radius must follow its selected size');
 assertScale(fixedSmallChrome.scrollbarWidth, 1.25, 'Fixed Small scrollbar must retain a usable minimum width');
 assertScale(fixedSmallChrome.scrollbarThumbRadius, 1.25 * (2 / 3), 'Fixed Small thumb radius must follow its wider scrollbar');
 
 const worldFarLayout = getRigidWorldChatBubbleLayout({
   expandedCount: 1,
   availableWidth: 1200,
-  baseScale: 0.476,
+  baseScale: 0.357,
   zoomScale: 0.5,
 });
 const worldNearLayout = getRigidWorldChatBubbleLayout({
   expandedCount: 1,
   availableWidth: 1200,
-  baseScale: 0.476,
+  baseScale: 0.357,
   zoomScale: 2,
 });
 const worldVeryNearLayout = getRigidWorldChatBubbleLayout({
   expandedCount: 1,
   availableWidth: 1200,
-  baseScale: 0.476,
+  baseScale: 0.357,
   zoomScale: 4,
 });
-assert.equal(worldFarLayout.intrinsicW, 152, 'world layout must have a fixed intrinsic width');
-assert.equal(worldFarLayout.intrinsicH, 133, 'world layout must have a fixed intrinsic height');
+assert.equal(worldFarLayout.intrinsicW, 114, 'world layout must have a fixed intrinsic width');
+assert.equal(worldFarLayout.intrinsicH, 100, 'world layout must have a fixed intrinsic height');
 assert.equal(worldNearLayout.intrinsicW, worldFarLayout.intrinsicW, 'camera zoom must not change intrinsic width');
 assert.equal(worldNearLayout.intrinsicH, worldFarLayout.intrinsicH, 'camera zoom must not change intrinsic height');
-assertScale(worldFarLayout.w, 76, 'far camera must transform the complete rigid bubble down');
-assertScale(worldFarLayout.h, 66.5, 'far camera must transform the complete rigid bubble down');
-assertScale(worldNearLayout.w, 304, 'near camera must transform the complete rigid bubble up');
-assertScale(worldNearLayout.h, 266, 'near camera must transform the complete rigid bubble up');
-assertScale(worldVeryNearLayout.w, 608, 'camera zoom beyond 3x must keep transforming the complete bubble');
-assertScale(worldVeryNearLayout.h, 532, 'camera zoom beyond 3x must keep transforming the complete bubble');
+assertScale(worldFarLayout.w, 57, 'far camera must transform the complete rigid bubble down');
+assertScale(worldFarLayout.h, 50, 'far camera must transform the complete rigid bubble down');
+assertScale(worldNearLayout.w, 228, 'near camera must transform the complete rigid bubble up');
+assertScale(worldNearLayout.h, 200, 'near camera must transform the complete rigid bubble up');
+assertScale(worldVeryNearLayout.w, 456, 'camera zoom beyond 3x must keep transforming the complete bubble');
+assertScale(worldVeryNearLayout.h, 400, 'camera zoom beyond 3x must keep transforming the complete bubble');
 assertScale(worldFarLayout.transformScale, 0.5, 'far layout must expose one uniform transform');
 assertScale(worldNearLayout.transformScale, 2, 'near layout must expose one uniform transform');
 assertScale(worldVeryNearLayout.transformScale, 4, 'very near layout must expose its uncapped uniform transform');

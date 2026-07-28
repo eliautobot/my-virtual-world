@@ -9,7 +9,9 @@
     "weatherEnabled": true,
     "chatBubbles": {
       "displayMode": "consistent",
-      "size": "large"
+      "size": "large",
+      "groupingEnabled": true,
+      "groupingMinimum": 5
     },
     "location": {
       "label": "",

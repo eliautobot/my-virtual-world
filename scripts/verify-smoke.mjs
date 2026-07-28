@@ -380,12 +380,12 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260727-fixed-scrollbar-r9',
+  'js/main3d.js?v=20260728-fixed-bubble-radius-r2',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
   'js/chat.js?v=20260727-connection-status-r1',
-  'css/style.css?v=20260727-fixed-bubble-chrome-r8',
-  'css/ui-redesign.css?v=20260727-chat-bubble-display-r1',
+  'css/style.css?v=20260728-fixed-bubble-radius-r2',
+  'css/ui-redesign.css?v=20260728-chat-bubble-grouping-r1',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-codexOptions',
@@ -496,7 +496,7 @@ for (const token of [
 }
 for (const token of [
   "agent-characters.js?v=20260721-fluidity-r2",
-  "chat-bubble-layout.mjs?v=20260727-fixed-scrollbar-r9",
+  "chat-bubble-layout.mjs?v=20260728-fixed-bubble-radius-r2",
   'getChatBubbleSideInsets',
   'getChatBubbleChromeMetrics',
   'clampChatBubbleX',
@@ -523,7 +523,8 @@ for (const token of [
   'white-space: nowrap',
   '.chat-bubble[data-display-mode="world"]',
   'border-width: 1px',
-  'border-radius: 6px',
+  'border-radius: var(--bubble-outer-radius, 6px)',
+  '--bubble-outer-radius',
   '--bubble-session-padding-x',
   '--bubble-session-border-width',
   '--bubble-session-radius',
@@ -556,6 +557,10 @@ for (const token of [
   'setting-chatBubbleSize-large',
   'setting-chatBubbleSize-medium',
   'setting-chatBubbleSize-small',
+  'setting-chatBubbleGrouping-enabled',
+  'setting-chatBubbleGrouping-disabled',
+  'setting-chatBubbleGroupingMinimum',
+  'Minimum chat bubbles to start grouping',
   'settings-info-button',
   'Fixed size',
 ]) {
@@ -570,6 +575,9 @@ for (const token of [
   "selectedRadio('setting-chatBubbleSize', 'large')",
   "setSelectedRadio('setting-chatBubbleDisplayMode'",
   "setSelectedRadio('setting-chatBubbleSize'",
+  "selectedRadio('setting-chatBubbleGrouping', 'enabled')",
+  "setSelectedRadio(\n      'setting-chatBubbleGrouping'",
+  "integerAtLeast('setting-chatBubbleGroupingMinimum', 5, 2)",
 ]) {
   assert(settingsJs.includes(token), `settings.js missing persisted chat bubble option: ${token}`);
 }
@@ -577,6 +585,8 @@ for (const token of [
   'def _normalize_chat_bubble_settings',
   '"displayMode": display_mode if display_mode in ("consistent", "world") else "consistent"',
   '"size": size if size in ("large", "medium", "small") else "large"',
+  '"groupingEnabled": grouping_enabled if isinstance(grouping_enabled, bool) else True',
+  '"groupingMinimum": grouping_minimum',
 ]) {
   assert(serverPy.includes(token), `server.py missing normalized chat bubble setting: ${token}`);
 }
@@ -1137,7 +1147,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260727-chat-bubble-display-r1',
+  'js/settings.js?v=20260728-chat-bubble-grouping-r1',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);

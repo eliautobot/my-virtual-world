@@ -2,6 +2,8 @@ const DEFAULT_PANEL_GAP = 5;
 const DEFAULT_CHAT_BUBBLE_SETTINGS = Object.freeze({
   displayMode: 'consistent',
   size: 'large',
+  groupingEnabled: true,
+  groupingMinimum: 5,
 });
 
 export const CHAT_BUBBLE_CONSISTENT_SIZE_SCALES = Object.freeze({
@@ -10,10 +12,12 @@ export const CHAT_BUBBLE_CONSISTENT_SIZE_SCALES = Object.freeze({
   small: 0.68,
 });
 
+const CHAT_BUBBLE_FIXED_SIZE_REDUCTION_SCALE = 0.75;
+
 export const CHAT_BUBBLE_WORLD_SIZE_SCALES = Object.freeze({
-  large: CHAT_BUBBLE_CONSISTENT_SIZE_SCALES.small * 0.7,
-  medium: CHAT_BUBBLE_CONSISTENT_SIZE_SCALES.small * 0.7 * 0.7,
-  small: CHAT_BUBBLE_CONSISTENT_SIZE_SCALES.small * 0.7 * 0.7 * 0.7,
+  large: CHAT_BUBBLE_CONSISTENT_SIZE_SCALES.small * 0.7 * CHAT_BUBBLE_FIXED_SIZE_REDUCTION_SCALE,
+  medium: CHAT_BUBBLE_CONSISTENT_SIZE_SCALES.small * 0.7 * 0.7 * CHAT_BUBBLE_FIXED_SIZE_REDUCTION_SCALE,
+  small: CHAT_BUBBLE_CONSISTENT_SIZE_SCALES.small * 0.7 * 0.7 * 0.7 * CHAT_BUBBLE_FIXED_SIZE_REDUCTION_SCALE,
 });
 
 function finiteNumber(value, fallback = 0) {
@@ -74,7 +78,23 @@ export function normalizeChatBubbleDisplaySettings(value = {}) {
   const size = Object.prototype.hasOwnProperty.call(CHAT_BUBBLE_CONSISTENT_SIZE_SCALES, value?.size)
     ? value.size
     : DEFAULT_CHAT_BUBBLE_SETTINGS.size;
-  return { displayMode, size };
+  const groupingEnabled = typeof value?.groupingEnabled === 'boolean'
+    ? value.groupingEnabled
+    : DEFAULT_CHAT_BUBBLE_SETTINGS.groupingEnabled;
+  const rawGroupingMinimum = value?.groupingMinimum;
+  const requestedGroupingMinimum = rawGroupingMinimum === null || rawGroupingMinimum === ''
+    ? Number.NaN
+    : Number(rawGroupingMinimum);
+  const groupingMinimum = Number.isFinite(requestedGroupingMinimum)
+    ? Math.max(2, Math.floor(requestedGroupingMinimum))
+    : DEFAULT_CHAT_BUBBLE_SETTINGS.groupingMinimum;
+  return { displayMode, size, groupingEnabled, groupingMinimum };
+}
+
+export function shouldGroupChatBubbles(expandedCount, value = {}) {
+  const settings = normalizeChatBubbleDisplaySettings(value);
+  const count = Math.max(0, Math.floor(finiteNumber(expandedCount)));
+  return settings.groupingEnabled && count >= settings.groupingMinimum;
 }
 
 export function getChatBubbleDisplayScale(value = {}, cameraDistance = 40) {
@@ -102,11 +122,15 @@ export function getChatBubbleChromeMetrics(displayMode = 'consistent', chromeSca
   const metricScale = displayMode === 'world'
     ? Math.max(0.05, finiteNumber(chromeScale, 1))
     : 1;
+  const outerRadius = displayMode === 'world'
+    ? 6 * (metricScale / CHAT_BUBBLE_WORLD_SIZE_SCALES.large)
+    : 12;
   const scrollbarWidth = displayMode === 'world'
     ? Math.max(1.25, 3 * metricScale)
     : 3;
 
   return {
+    outerRadius,
     sessionPaddingY: metricScale,
     sessionPaddingX: 5 * metricScale,
     sessionBorderWidth: metricScale,

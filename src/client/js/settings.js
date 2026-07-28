@@ -41,6 +41,10 @@
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? parsed : null;
   };
+  const integerAtLeast = (id, fallback, minimum) => {
+    const parsed = optionalNumber(id);
+    return parsed === null ? fallback : Math.max(minimum, Math.floor(parsed));
+  };
   const DEMO_MESSAGE = 'DEMO: 3 agents max, some features are locked. Get a License Key to activate all features.';
 
   function isTrialLicense(lic) {
@@ -819,6 +823,18 @@
     if ($('setting-longitude')) $('setting-longitude').value = location.longitude ?? '';
     setSelectedRadio('setting-chatBubbleDisplayMode', chatBubbles.displayMode, 'consistent');
     setSelectedRadio('setting-chatBubbleSize', chatBubbles.size, 'large');
+    setSelectedRadio(
+      'setting-chatBubbleGrouping',
+      chatBubbles.groupingEnabled === false ? 'disabled' : 'enabled',
+      'enabled'
+    );
+    if ($('setting-chatBubbleGroupingMinimum')) {
+      const configuredMinimum = Number(chatBubbles.groupingMinimum);
+      $('setting-chatBubbleGroupingMinimum').value = Number.isFinite(configuredMinimum)
+        ? Math.max(2, Math.floor(configuredMinimum))
+        : 5;
+    }
+    updateChatBubbleGroupingUi();
     if ($('setting-showGrid')) $('setting-showGrid').checked = world.showGrid !== false;
     if ($('setting-showMinimap')) $('setting-showMinimap').checked = world.showMinimap !== false;
     if ($('setting-showCoords')) $('setting-showCoords').checked = world.showCoords !== false;
@@ -873,6 +889,8 @@
         chatBubbles: {
           displayMode: selectedRadio('setting-chatBubbleDisplayMode', 'consistent'),
           size: selectedRadio('setting-chatBubbleSize', 'large'),
+          groupingEnabled: selectedRadio('setting-chatBubbleGrouping', 'enabled') === 'enabled',
+          groupingMinimum: integerAtLeast('setting-chatBubbleGroupingMinimum', 5, 2),
         },
         location: {
           label: value('setting-locationLabel'),
@@ -1067,8 +1085,17 @@
     await refreshConfig();
   }
 
+  function updateChatBubbleGroupingUi() {
+    const minimumInput = $('setting-chatBubbleGroupingMinimum');
+    if (!minimumInput) return;
+    minimumInput.disabled = selectedRadio('setting-chatBubbleGrouping', 'enabled') !== 'enabled';
+  }
+
   function bind() {
     document.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.settingsTab)));
+    document.querySelectorAll('input[name="setting-chatBubbleGrouping"]').forEach(radio => {
+      radio.addEventListener('change', updateChatBubbleGroupingUi);
+    });
     $('setting-liveModeFeatureEnabled')?.addEventListener('change', () => handleGlobalLiveAgentModeToggleChange());
     $('liveAgentModeWarningApply')?.addEventListener('click', () => closeLiveAgentModeWarning(true));
     $('liveAgentModeWarningCancel')?.addEventListener('click', () => closeLiveAgentModeWarning(false));

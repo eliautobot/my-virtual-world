@@ -89,7 +89,8 @@ import {
   getRigidWorldChatBubbleLayout,
   getChatBubbleSideInsets,
   normalizeChatBubbleDisplaySettings,
-} from './chat-bubble-layout.mjs?v=20260727-fixed-scrollbar-r9';
+  shouldGroupChatBubbles,
+} from './chat-bubble-layout.mjs?v=20260728-fixed-bubble-radius-r2';
 import {
   CAPABILITY_TAG_GROUPS,
   CAPABILITY_TAG_DEFINITIONS,
@@ -62168,7 +62169,15 @@ let _packedChatBubbleKey = '';
 let _chatBubbleDisplaySettings = normalizeChatBubbleDisplaySettings();
 
 function applyChatBubbleDisplaySettings(value) {
+  const previous = _chatBubbleDisplaySettings;
   _chatBubbleDisplaySettings = normalizeChatBubbleDisplaySettings(value);
+  if (
+    previous.groupingEnabled !== _chatBubbleDisplaySettings.groupingEnabled
+    || previous.groupingMinimum !== _chatBubbleDisplaySettings.groupingMinimum
+  ) {
+    _packedChatBubbleKey = '';
+    _packedChatBubbleOrder = [];
+  }
   return _chatBubbleDisplaySettings;
 }
 
@@ -62758,6 +62767,7 @@ function applyChatBubbleSize(
   state.el.style.setProperty('--bubble-header-padding-x', chromePx(8));
   state.el.style.setProperty('--bubble-body-padding-y', chromePx(6));
   state.el.style.setProperty('--bubble-body-padding-x', chromePx(10));
+  state.el.style.setProperty('--bubble-outer-radius', metricPx(chromeMetrics.outerRadius));
   state.el.style.setProperty('--bubble-session-padding-y', metricPx(chromeMetrics.sessionPaddingY));
   state.el.style.setProperty('--bubble-session-padding-x', metricPx(chromeMetrics.sessionPaddingX));
   state.el.style.setProperty('--bubble-session-border-width', metricPx(chromeMetrics.sessionBorderWidth));
@@ -62834,10 +62844,6 @@ function countChatBubbleOverlaps(rects) {
     }
   }
   return overlaps;
-}
-
-function shouldPackChatBubbles(rects) {
-  return rects.length >= 5;
 }
 
 function resolveFreeChatBubbleCollisions(rects, leftBound, rightBound, topBound, bottomBound) {
@@ -63071,7 +63077,7 @@ function updateChatBubblePositions() {
 
   if (bubbleRects.length > 1) {
     const packKey = getChatBubbleAgentSetKey(bubbleRects);
-    const shouldPack = shouldPackChatBubbles(bubbleRects, bubbleLayout, availableBubbleWidth, availableBubbleHeight) || packKey === _packedChatBubbleKey;
+    const shouldPack = shouldGroupChatBubbles(bubbleRects.length, _chatBubbleDisplaySettings);
     if (shouldPack) {
     const sortedRects = getStablePackedChatBubbleRects(bubbleRects);
     const slots = getPackedChatBubbleSlots(sortedRects.length, bubbleLayout, leftInset, rightInset, w, h);

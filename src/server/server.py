@@ -131,9 +131,16 @@ def _normalize_chat_bubble_settings(value):
     value = value if isinstance(value, dict) else {}
     display_mode = value.get("displayMode")
     size = value.get("size")
+    grouping_enabled = value.get("groupingEnabled")
+    try:
+        grouping_minimum = max(2, int(value.get("groupingMinimum", 5)))
+    except (TypeError, ValueError, OverflowError):
+        grouping_minimum = 5
     return {
         "displayMode": display_mode if display_mode in ("consistent", "world") else "consistent",
         "size": size if size in ("large", "medium", "small") else "large",
+        "groupingEnabled": grouping_enabled if isinstance(grouping_enabled, bool) else True,
+        "groupingMinimum": grouping_minimum,
     }
 
 
@@ -169,7 +176,12 @@ def _default_vw_config():
             "showCoords": True,
             "dayNightCycleEnabled": True,
             "weatherEnabled": True,
-            "chatBubbles": {"displayMode": "consistent", "size": "large"},
+            "chatBubbles": {
+                "displayMode": "consistent",
+                "size": "large",
+                "groupingEnabled": True,
+                "groupingMinimum": 5,
+            },
             "location": {"label": "", "timeZone": "", "latitude": None, "longitude": None},
         },
         "openclaw": {"homePath": "", "hostHomePath": "", "gatewayUrl": "", "gatewayToken": ""},

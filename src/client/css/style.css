@@ -2018,7 +2018,7 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
 }
 #chatBubbleContainer .chat-bubble[data-display-mode="world"] {
     border-width: 1px;
-    border-radius: 6px;
+    border-radius: var(--bubble-outer-radius, 6px);
 }
 #chatBubbleContainer .chat-bubble-connector {
     position: absolute;

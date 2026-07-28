@@ -586,6 +586,16 @@ body.vw-demo-locked .feature-locked-control {
     flex: 0 0 auto;
     accent-color: #ffd600;
 }
+.settings-chat-bubble-group-minimum {
+    margin: 0;
+    transition: opacity .15s ease;
+}
+.settings-chat-bubble-group-minimum:has(input:disabled) {
+    opacity: .55;
+}
+.settings-chat-bubble-group-minimum input:disabled {
+    cursor: not-allowed;
+}
 .settings-info-button {
     position: relative;
     z-index: 3;
