@@ -8,7 +8,10 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client, getStateCallbacks } from '@colyseus/sdk';
 import { Encoder } from '@colyseus/schema';
-import { createAgentRuntimeClient } from '../src/client/js/agent-runtime-client.mjs';
+import {
+  createAgentRuntimeClient,
+  resolveRuntimeUrlForPage,
+} from '../src/client/js/agent-runtime-client.mjs';
 import {
   AGENT_RUNTIME_ROOM_NAME,
   AgentRuntimeSnapshot,
@@ -21,12 +24,18 @@ import {
   LIVE_STATUS_RUNTIME_OWNER,
   LIVE_STATUS_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
   makeLiveActionEmbodiedState,
+  resolveScriptedObjectRuntimeTargetFromRequest,
   resolveObjectTargetPoint,
   RUNTIME_SCHEMA_PATCH_RATE_MS,
   RUNTIME_HEALTH_BROADCAST_INTERVAL_MS,
   RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION,
   RUNTIME_STATE_BROADCAST_INTERVAL_MS,
   readRuntimeDocument,
+  isServerManualObjectOccupancyTarget,
+  isServerAutomaticSeatApproachPreemptibleForManualDrop,
+  isServerScriptedObjectTargetAvailable,
+  listScriptedObjectRuntimeTargets,
+  SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
@@ -36,6 +45,38 @@ import {
 } from '../src/realtime/agent-runtime-room.mjs';
 
 const root = process.cwd();
+
+function verifyBrowserRelativeRuntimeUrl() {
+  const makeWindow = (href) => {
+    const location = new URL(href);
+    return { location };
+  };
+  assert.equal(
+    resolveRuntimeUrlForPage('ws://browser-host:8594', makeWindow('http://127.0.0.1:8593/')),
+    'ws://127.0.0.1:8594',
+    'automatic runtime URLs should use the loopback hostname used to open the app',
+  );
+  assert.equal(
+    resolveRuntimeUrlForPage('ws://browser-host:8594', makeWindow('http://localhost:8593/')),
+    'ws://localhost:8594',
+    'automatic runtime URLs should preserve localhost access',
+  );
+  assert.equal(
+    resolveRuntimeUrlForPage('ws://browser-host:8594', makeWindow('http://100.77.124.77:8593/')),
+    'ws://100.77.124.77:8594',
+    'automatic runtime URLs should follow a LAN or Tailnet page hostname',
+  );
+  assert.equal(
+    resolveRuntimeUrlForPage('ws://browser-host:8594', makeWindow('https://office.example.test/')),
+    'wss://office.example.test:8594',
+    'automatic runtime URLs should upgrade to secure WebSockets on HTTPS pages',
+  );
+  assert.equal(
+    resolveRuntimeUrlForPage('wss://runtime.example.test/realtime', makeWindow('https://office.example.test/')),
+    'wss://runtime.example.test/realtime',
+    'explicit remote runtime URLs should remain unchanged',
+  );
+}
 
 function verifyLifecycleJournalRecovery() {
   const dataDir = mkdtempSync(join(tmpdir(), 'vw-realtime-journal-'));
@@ -125,6 +166,45 @@ function verifyIncrementalSchemaPatchSize() {
 
   assert(incrementalBytes < 128, `movement-only Schema patch should stay compact; received ${incrementalBytes} bytes`);
   assert(replacementBytes > incrementalBytes * 20, `replacement control should prove bulky JSON retransmission (${replacementBytes} vs ${incrementalBytes})`);
+}
+
+function verifyManualObjectOccupancyPolicy() {
+  assert.equal(
+    SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+    5 * 60 * 1000,
+    'manual object occupancy should remain stable for five minutes unless the user moves or releases the agent',
+  );
+  for (const objectType of ['barberChair', 'bed', 'chair', 'treadmill', 'trainingMat', 'gymBench', 'outdoorExerciseStation']) {
+    assert.equal(
+      isServerManualObjectOccupancyTarget({
+        objectType,
+        manualDrop: true,
+        isQueueUse: false,
+      }),
+      true,
+      `${objectType} should receive protected manual occupancy`,
+    );
+  }
+  for (const objectType of ['waterCooler', 'vending', 'countertopCoffeeMachine', 'sink']) {
+    assert.equal(
+      isServerManualObjectOccupancyTarget({
+        objectType,
+        manualDrop: true,
+        isQueueUse: false,
+      }),
+      false,
+      `${objectType} should retain its finite transactional service lifecycle`,
+    );
+  }
+  assert.equal(
+    isServerManualObjectOccupancyTarget({
+      objectType: 'barberChair',
+      manualDrop: true,
+      isQueueUse: true,
+    }),
+    false,
+    'waiting in a barber queue must not be mistaken for active chair occupancy',
+  );
 }
 
 async function getOpenPort() {
@@ -378,8 +458,10 @@ async function connectRoom(port) {
 }
 
 async function run() {
+  verifyBrowserRelativeRuntimeUrl();
   verifyLifecycleJournalRecovery();
   verifyIncrementalSchemaPatchSize();
+  verifyManualObjectOccupancyPolicy();
   const dataDir = mkdtempSync(join(tmpdir(), 'vw-realtime-'));
   const port = await getOpenPort();
   let server = startServer({ port, dataDir });
@@ -885,6 +967,77 @@ async function run() {
               },
             ],
           },
+          {
+            type: 'couch',
+            x: 5,
+            z: 12,
+            floor: 1,
+            room: 'lounge',
+            actionLocations: [
+              {
+                id: 'stand-left',
+                activationSpotId: 'stand-left',
+                roles: ['approach', 'dismount', 'exit', 'stand', 'seat'],
+                actionId: 'life.standFromCouch',
+                actionTarget: { x: 4.05, z: 13.18, floor: 1, faceAngle: 0 },
+                activationTarget: { x: 4.05, z: 13.18, floor: 1, faceAngle: 0 },
+              },
+              {
+                id: 'stand-center',
+                activationSpotId: 'stand-center',
+                roles: ['approach', 'dismount', 'exit', 'stand', 'seat'],
+                actionId: 'life.standFromCouch',
+                actionTarget: { x: 5, z: 13.18, floor: 1, faceAngle: 0 },
+                activationTarget: { x: 5, z: 13.18, floor: 1, faceAngle: 0 },
+              },
+              {
+                id: 'stand-right',
+                activationSpotId: 'stand-right',
+                roles: ['approach', 'dismount', 'exit', 'stand', 'seat'],
+                actionId: 'life.standFromCouch',
+                actionTarget: { x: 5.95, z: 13.18, floor: 1, faceAngle: 0 },
+                activationTarget: { x: 5.95, z: 13.18, floor: 1, faceAngle: 0 },
+              },
+              {
+                id: 'sit-left',
+                slotId: 'sit-left',
+                activationSpotId: 'sit-left',
+                approachSpotId: 'stand-left',
+                roles: ['seat', 'rest', 'use'],
+                actionId: 'life.sitAtCouch',
+                actionTarget: { spotId: 'stand-left', x: 4.05, z: 13.18, floor: 1, faceAngle: 0 },
+                activationTarget: { spotId: 'sit-left', x: 4.05, z: 12.44, floor: 1, faceAngle: 0 },
+              },
+              {
+                id: 'sit-center',
+                slotId: 'sit-center',
+                activationSpotId: 'sit-center',
+                approachSpotId: 'stand-center',
+                roles: ['seat', 'rest', 'use'],
+                actionId: 'life.restAtCouch',
+                actionTarget: { spotId: 'stand-center', x: 5, z: 13.18, floor: 1, faceAngle: 0 },
+                activationTarget: { spotId: 'sit-center', x: 5, z: 12.44, floor: 1, faceAngle: 0 },
+              },
+              {
+                id: 'sit-right',
+                slotId: 'sit-right',
+                activationSpotId: 'sit-right',
+                approachSpotId: 'stand-right',
+                roles: ['seat', 'social', 'use'],
+                actionId: 'life.socialAtCouch',
+                actionTarget: { spotId: 'stand-right', x: 5.95, z: 13.18, floor: 1, faceAngle: 0 },
+                activationTarget: { spotId: 'sit-right', x: 5.95, z: 12.44, floor: 1, faceAngle: 0 },
+              },
+              {
+                id: 'talk-front',
+                activationSpotId: 'talk-front',
+                roles: ['social', 'staging', 'seat'],
+                actionId: 'life.socialAtCouch',
+                actionTarget: { x: 5, z: 13.58, floor: 1, faceAngle: 0 },
+                activationTarget: { x: 5, z: 13.58, floor: 1, faceAngle: 0 },
+              },
+            ],
+          },
         ],
       },
       outdoorArea: {
@@ -912,6 +1065,153 @@ async function run() {
         }],
       },
     }, null, 2)}\n`);
+
+    const couchTargets = listScriptedObjectRuntimeTargets(dataDir)
+      .filter(target => target.buildingId === 'office' && target.furnitureIndex === 5 && target.objectType === 'couch')
+      .sort((a, b) => a.slotId.localeCompare(b.slotId));
+    assert.deepEqual(
+      couchTargets.map(target => target.slotId),
+      ['sit-center', 'sit-left', 'sit-right'],
+      'server runtime should expose all three couch cushions as independent seat slots',
+    );
+    assert.equal(
+      new Set(couchTargets.map(target => target.objectKey)).size,
+      3,
+      'each couch cushion must receive its own authoritative world-object key',
+    );
+    assert(couchTargets.every(target => target.objectKey.endsWith(`:slot:${target.slotId}`)));
+    assert(couchTargets.every(target => Math.abs(target.y - 12.44 * 40) < 0.01), 'automatic couch targets must end on the forward cushion docks, never the stand markers');
+    assert(couchTargets.every(target => Math.abs(target.routeApproachTarget.y - 13.18 * 40) < 0.01), 'automatic couch routes must preserve the separate front stand approach');
+    const couchLeftTarget = couchTargets.find(target => target.slotId === 'sit-left');
+    const couchCenterTarget = couchTargets.find(target => target.slotId === 'sit-center');
+    const couchRightTarget = couchTargets.find(target => target.slotId === 'sit-right');
+    const manualCenterTarget = resolveScriptedObjectRuntimeTargetFromRequest(dataDir, {
+      target: {
+        x: couchCenterTarget.x,
+        y: couchCenterTarget.y,
+        floor: couchCenterTarget.floor,
+        buildingId: couchCenterTarget.buildingId,
+        furnitureIndex: couchCenterTarget.furnitureIndex,
+        objectType: 'couch',
+        objectKey: couchCenterTarget.baseObjectKey,
+        baseObjectKey: couchCenterTarget.baseObjectKey,
+        spotId: 'sit-center',
+        slotId: 'sit-center',
+        actionId: 'life.sitAtCouch',
+        activityKind: 'couch-sit',
+        manualDrop: true,
+      },
+    });
+    assert.equal(
+      manualCenterTarget?.objectKey,
+      couchCenterTarget.objectKey,
+      'manual sit on the center cushion must retain the center per-seat object key even though its catalog action is rest',
+    );
+    assert.equal(
+      manualCenterTarget?.actionId,
+      'life.sitAtCouch',
+      'manual center-seat resolution should preserve the explicitly chosen sit action',
+    );
+    const manualRightTarget = resolveScriptedObjectRuntimeTargetFromRequest(dataDir, {
+      target: {
+        x: couchRightTarget.x,
+        y: couchRightTarget.y,
+        floor: couchRightTarget.floor,
+        buildingId: couchRightTarget.buildingId,
+        furnitureIndex: couchRightTarget.furnitureIndex,
+        objectType: 'couch',
+        objectKey: couchRightTarget.baseObjectKey,
+        baseObjectKey: couchRightTarget.baseObjectKey,
+        spotId: 'sit-right',
+        slotId: 'sit-right',
+        actionId: 'life.sitAtCouch',
+        activityKind: 'couch-sit',
+        manualDrop: true,
+      },
+    });
+    assert.equal(
+      manualRightTarget?.objectKey,
+      couchRightTarget.objectKey,
+      'manual sit on the right cushion must retain the right per-seat object key even though its catalog action is socialize',
+    );
+    const couchSeatState = {
+      objects: new Map(),
+      agents: new Map([['couch-left-agent', {
+        agentId: 'couch-left-agent',
+        state: 'using',
+        x: couchLeftTarget.x,
+        y: couchLeftTarget.y,
+        buildingId: couchLeftTarget.buildingId,
+        targetJson: JSON.stringify(couchLeftTarget),
+      }]]),
+    };
+    assert.equal(
+      isServerScriptedObjectTargetAvailable(couchSeatState, couchLeftTarget, 'couch-second-agent', Date.now(), dataDir),
+      false,
+      'the occupied couch cushion must reject a second agent',
+    );
+    assert.equal(
+      isServerScriptedObjectTargetAvailable(couchSeatState, couchRightTarget, 'couch-second-agent', Date.now(), dataDir),
+      true,
+      'occupying one couch cushion must leave the other cushion available',
+    );
+    const protectedManualRightTarget = {
+      ...couchRightTarget,
+      manualDrop: true,
+      manualOccupancyHold: true,
+      runtimeSource: 'manual-drag-drop:_useCouchFurniture',
+    };
+    const automaticRightApproachState = {
+      objects: new Map(),
+      agents: new Map([['automatic-couch-agent', {
+        agentId: 'automatic-couch-agent',
+        owner: SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
+        state: 'routing',
+        leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(),
+        x: couchRightTarget.routeApproachTarget.x,
+        y: couchRightTarget.routeApproachTarget.y,
+        buildingId: couchRightTarget.buildingId,
+        targetJson: JSON.stringify({ ...couchRightTarget, runtimeSource: 'idle' }),
+      }]]),
+    };
+    assert.equal(
+      isServerAutomaticSeatApproachPreemptibleForManualDrop(
+        automaticRightApproachState,
+        protectedManualRightTarget,
+        'manual-couch-agent',
+        Date.now(),
+      ),
+      true,
+      'a manual couch drop must preempt an automatic agent that is only approaching the selected cushion',
+    );
+    automaticRightApproachState.agents.get('automatic-couch-agent').state = 'using';
+    assert.equal(
+      isServerAutomaticSeatApproachPreemptibleForManualDrop(
+        automaticRightApproachState,
+        protectedManualRightTarget,
+        'manual-couch-agent',
+        Date.now(),
+      ),
+      false,
+      'a manual couch drop must not preempt an agent that is already seated',
+    );
+    automaticRightApproachState.agents.get('automatic-couch-agent').state = 'routing';
+    automaticRightApproachState.agents.get('automatic-couch-agent').targetJson = JSON.stringify({
+      ...couchRightTarget,
+      manualDrop: true,
+      manualOccupancyHold: true,
+      runtimeSource: 'manual-drag-drop:_useCouchFurniture',
+    });
+    assert.equal(
+      isServerAutomaticSeatApproachPreemptibleForManualDrop(
+        automaticRightApproachState,
+        protectedManualRightTarget,
+        'manual-couch-agent',
+        Date.now(),
+      ),
+      false,
+      'one manual couch placement must never preempt another manual placement',
+    );
 
     const gazeboTarget = {
       kind: 'object-instance',

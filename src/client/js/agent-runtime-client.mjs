@@ -197,14 +197,23 @@ function isLoopbackHost(hostname = '') {
   return ['127.0.0.1', 'localhost', '0.0.0.0', '::1'].includes(String(hostname || '').toLowerCase());
 }
 
-function resolveRuntimeUrlForPage(rawUrl = '', windowRef = globalThis.window || globalThis) {
+const PAGE_HOST_RUNTIME_ALIASES = new Set([
+  'browser-host',
+  'page-host',
+  '__page_host__',
+]);
+
+export function resolveRuntimeUrlForPage(rawUrl = '', windowRef = globalThis.window || globalThis) {
   const text = String(rawUrl || '').trim();
   if (!text) return '';
   const pageLocation = windowRef?.location || null;
   try {
     const parsed = new URL(text, pageLocation?.href || 'http://127.0.0.1/');
     const pageHost = String(pageLocation?.hostname || '').trim();
-    if (pageHost && isLoopbackHost(parsed.hostname) && !isLoopbackHost(pageHost)) {
+    const configuredHost = String(parsed.hostname || '').toLowerCase();
+    const followsPageHost = PAGE_HOST_RUNTIME_ALIASES.has(configuredHost);
+    const loopbackNeedsRemoteHost = isLoopbackHost(configuredHost) && !isLoopbackHost(pageHost);
+    if (pageHost && (followsPageHost || loopbackNeedsRemoteHost)) {
       parsed.hostname = pageHost;
     }
     if (pageLocation?.protocol === 'https:' && parsed.protocol === 'ws:') {

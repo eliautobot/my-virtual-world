@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import {
   resolveAgentAnimationState,
-} from './agent-life-animation-registry.mjs?v=20260428-bar-stool-asset';
+} from './agent-life-animation-registry.mjs?v=20260725-furniture-interactions-r2';
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -1439,6 +1439,12 @@ export function createAgentCharacter(agent) {
   // ── Root group ──────────────────────────────────────────────
   const agentGroup = new THREE.Group();
   agentGroup.name = 'agentRoot';
+  // Keep the character body/head on a dedicated pose pivot. Whole-body poses
+  // such as sleeping and bench work must rotate the complete character, while
+  // the name/status UI remains upright and readable.
+  const poseGroup = new THREE.Group();
+  poseGroup.name = 'agentPose';
+  agentGroup.add(poseGroup);
 
   // ── BODY GROUP ─────────────────────────────────────────────
   // Offset slightly up so breathing animation looks natural
@@ -1546,7 +1552,7 @@ export function createAgentCharacter(agent) {
   bodyGroup.add(buildClothingDetails(a, skin, shirt, pants, shoe, isFem, torsoProfile));
   bodyGroup.add(buildClothingAccessory(a.clothingAccessory || 'none', a.accessoryColor || '#ffd700', isFem, torsoProfile));
 
-  agentGroup.add(bodyGroup);
+  poseGroup.add(bodyGroup);
 
   // ── HEAD GROUP ────────────────────────────────────────────
   // Big chibi head — the star of the show
@@ -1640,7 +1646,7 @@ export function createAgentCharacter(agent) {
   headGroup.add(box(-0.29, 0.02, 0, 0.06, 0.10, 0.10, skin));
   headGroup.add(box(0.29, 0.02, 0, 0.06, 0.10, 0.10, skin));
 
-  agentGroup.add(headGroup);
+  poseGroup.add(headGroup);
 
   mergeAgentCharacterVoxelParts(agentGroup);
 
@@ -1695,6 +1701,7 @@ export function createAgentCharacter(agent) {
 
   // Store references for fast access during animation
   agentGroup.userData.parts = {
+    poseGroup,
     bodyGroup,
     headGroup,
     headBaseY: headGroup.position.y,
@@ -1741,6 +1748,12 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const cs = g.userData.charState;
   const parts = g.userData.parts;
   if (!cs || !parts) return;
+  if (parts.poseGroup) {
+    parts.poseGroup.rotation.x = _lerp(parts.poseGroup.rotation.x, 0, 0.18);
+    parts.poseGroup.rotation.z = _lerp(parts.poseGroup.rotation.z, 0, 0.18);
+    parts.poseGroup.position.y = _lerp(parts.poseGroup.position.y, 0, 0.18);
+    parts.poseGroup.position.z = _lerp(parts.poseGroup.position.z, 0, 0.18);
+  }
 
   const status = normalizeAgentAnimationStatus(agent.status);
   const bedActivityKind = String(agent._idleActivity?.kind || '');
@@ -1754,6 +1767,11 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const isSmallCafeTableUse = bedActivityKind.startsWith('small-cafe-table-') && agent._idleActivity?.phase === 'active';
   const isSmallCafeTableSocial = isSmallCafeTableUse && bedActivityKind === 'small-cafe-table-talk';
   const isSmallCafeTableSetDown = isSmallCafeTableUse && bedActivityKind === 'small-cafe-table-setdown';
+  const isCounterPrep = bedActivityKind.startsWith('counter-') && agent._idleActivity?.phase === 'active';
+  const isDiningTableUse = bedActivityKind.startsWith('dining-table-') && agent._idleActivity?.phase === 'active';
+  const isSinkUse = bedActivityKind.startsWith('sink-') && agent._idleActivity?.phase === 'active';
+  const isStoveUse = bedActivityKind.startsWith('stove-') && agent._idleActivity?.phase === 'active';
+  const isTvWatch = bedActivityKind.startsWith('tv-watch-') && agent._idleActivity?.phase === 'active';
   const isOutdoorCafeTableUse = (bedActivityKind.startsWith('outdoor-cafe-table-') || bedActivityKind.startsWith('picnic-table-')) && agent._idleActivity?.phase === 'active';
   const isOutdoorCafeTableSocial = isOutdoorCafeTableUse && (bedActivityKind === 'outdoor-cafe-table-socialize' || bedActivityKind === 'picnic-table-socialize');
   const isOutdoorCafeTableSetDown = isOutdoorCafeTableUse && (bedActivityKind === 'outdoor-cafe-table-setdown' || bedActivityKind === 'picnic-table-setdown');
@@ -1903,7 +1921,9 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   else if (isCafeCounterService || isFoodTruckCounterService || isCheckoutCounterCashier || isCheckoutRegisterCashier) targetExpr = 'working';
   else if (isCafeCounterUse || isFoodTruckCounterUse || isCheckoutCounterUse || isCheckoutRegisterUse) targetExpr = 'talking';
   else if (isTrashBinDispose) targetExpr = 'working';
-  else if (isSmallCafeTableUse || isOutdoorCafeTableUse || isPatioTableUse) targetExpr = (isSmallCafeTableSocial || isOutdoorCafeTableSocial || isPatioTableSocial) ? 'talking' : 'happy';
+  else if (isSmallCafeTableUse || isDiningTableUse || isOutdoorCafeTableUse || isPatioTableUse) targetExpr = (isSmallCafeTableSocial || isOutdoorCafeTableSocial || isPatioTableSocial) ? 'talking' : 'happy';
+  else if (isCounterPrep || isSinkUse || isStoveUse) targetExpr = 'working';
+  else if (isTvWatch) targetExpr = 'happy';
   else if (isCoffeeMachineUse || isVendingMachineUse || isFridgeUse || isKitchenIslandUse || isGrillUse || isOutdoorPlanterUse || isFlowerBedUse || isFountainUse || isShadeTreeUse || isGazeboPavilionUse || isPondDockUse || isOutdoorStageUse || isMicrowaveUse || isCoffeePickupShelfUse) targetExpr = isShadeTreeRead ? 'focused' : ((isShadeTreeGather || (isGazeboPavilionUse && bedActivityKind === 'gazebo-pavilion-gather') || (isOutdoorStageUse && bedActivityKind !== 'outdoor-stage-watch')) ? 'talking' : 'happy');
   else if (isArcadeMachinePlay || isGamingStationPlay) targetExpr = tick % 180 < 120 ? 'happy' : 'working';
   else if (isPingPongPlay || isPoolTablePlay) targetExpr = tick % 180 < 120 ? 'happy' : 'working';
@@ -1976,6 +1996,11 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const isRunning = agent._isRunning || false;
   let requestedAnimationId = agent._idleActivity?.animationId;
   if (isArcadeMachinePlay || isGamingStationPlay) requestedAnimationId = 'play-game';
+  else if (isCounterPrep) requestedAnimationId = 'counter-prep';
+  else if (isDiningTableUse) requestedAnimationId = 'dining-table-eat-talk';
+  else if (isSinkUse) requestedAnimationId = 'sink-wash-drink';
+  else if (isStoveUse) requestedAnimationId = 'stove-cook';
+  else if (isTvWatch) requestedAnimationId = 'tv-watch';
   else if (isPingPongPlay) requestedAnimationId = 'play-pingpong';
   else if (isPoolTablePlay) requestedAnimationId = isPoolTableWatch ? 'gather-talk' : 'pool-table-play';
   else if (isOfficeChairWork) requestedAnimationId = 'office-chair-work';
@@ -1997,7 +2022,8 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   else if (isShadeTreeUse) requestedAnimationId = 'shade-tree-relax-read-gather';
   else if (isPondDockUse) requestedAnimationId = 'pond-dock-view-relax';
   else if (isOutdoorStageUse) requestedAnimationId = 'outdoor-stage-perform-watch-gather';
-  else if (isOutdoorPlanterUse || isFlowerBedUse || isFountainUse || isServerRackUse || isMedicalSupplyCabinetBrowse || isSupplyCabinetBrowse || isDresserBrowse || isWardrobeBrowse || isNightstandInspect || isTvStandUse || isMirrorInspect || isAccessoryDisplayStandBrowse || isDisplayCaseBrowse || isShopShelfBrowse || isPantryShelfBrowse || isDisplayMannequinPreview || (isSalonMirrorStationUse && !isSalonMirrorStationService) || isClothingRackBrowse || isBookshelfBrowse || isBulletinBoardRead || isOutdoorNoticeBoardRead || isMenuBoardRead) requestedAnimationId = 'inspect-browse';
+  else if (isOutdoorPlanterUse) requestedAnimationId = bedActivityKind.includes('water') ? 'outdoor-planter-water' : 'inspect-browse';
+  else if (isFlowerBedUse || isFountainUse || isServerRackUse || isMedicalSupplyCabinetBrowse || isSupplyCabinetBrowse || isDresserBrowse || isWardrobeBrowse || isNightstandInspect || isTvStandUse || isMirrorInspect || isAccessoryDisplayStandBrowse || isDisplayCaseBrowse || isShopShelfBrowse || isPantryShelfBrowse || isDisplayMannequinPreview || (isSalonMirrorStationUse && !isSalonMirrorStationService) || isClothingRackBrowse || isBookshelfBrowse || isBulletinBoardRead || isOutdoorNoticeBoardRead || isMenuBoardRead) requestedAnimationId = 'inspect-browse';
   else if (isCheckoutCounterUse || isCheckoutRegisterUse) requestedAnimationId = 'checkout-service';
   else if (isFoodTruckCounterUse) requestedAnimationId = isFoodTruckCounterService ? 'service-checkup' : 'order-food-drink';
   else if (isCoffeeDeskConsume) requestedAnimationId = agent._idleActivity?.animationId || 'coffee-desk-sip';
@@ -2309,21 +2335,75 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.02, 0.16);
     g.position.y = (g.userData._groundY || 0) + Math.abs(mix) * 0.007;
 
+  } else if (isCounterPrep || isSinkUse || isStoveUse || isTvWatch) {
+    // ── CORE COUNTER / SINK / STOVE / TV INTERACTIONS ────────
+    // Each legacy object now has a readable, purpose-specific active pose.
+    cs.workPhase = (cs.workPhase || 0) + dt * 2.35;
+    const beat = Math.sin(cs.workPhase);
+    const reach = Math.max(0, Math.sin(cs.workPhase * 1.65));
+    const alternate = Math.max(0, Math.sin(cs.workPhase * 1.65 + Math.PI));
+    if (isTvWatch) {
+      parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, 0.035, 0.14);
+      parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, beat * 0.018, 0.12);
+      parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, -0.025, 0.12);
+      parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, beat * 0.08, 0.12);
+      parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.12, 0.16);
+      parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.62 - reach * 0.24, 0.20);
+      parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.16, 0.14);
+      parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.20 - reach * 0.08, 0.16);
+    } else if (isSinkUse) {
+      const wash = Math.sin(cs.workPhase * 3.4);
+      parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, 0.19 + reach * 0.05, 0.18);
+      parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.11, 0.14);
+      parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -1.02 + wash * 0.10, 0.24);
+      parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -1.02 - wash * 0.10, 0.24);
+      parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.28 + wash * 0.08, 0.18);
+      parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.28 + wash * 0.08, 0.18);
+    } else {
+      const stoveMultiplier = isStoveUse ? 1 : 0.72;
+      parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, 0.13 + reach * 0.07, 0.18);
+      parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, beat * 0.022, 0.12);
+      parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.08 + reach * 0.03, 0.14);
+      parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.52 - alternate * 0.42, 0.22);
+      parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.72 - reach * 0.70 * stoveMultiplier, 0.26);
+      parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.20 + beat * 0.08, 0.16);
+      parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.24 - beat * 0.12, 0.18);
+    }
+    parts.leftLeg.rotation.x = _lerp(parts.leftLeg.rotation.x, 0.02, 0.16);
+    parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.02, 0.16);
+    g.position.y = (g.userData._groundY || 0) + Math.abs(beat) * 0.006;
+
+  } else if (isDiningTableUse) {
+    // ── DINING TABLE SEATED EAT / TALK ───────────────────────
+    cs.workPhase = (cs.workPhase || 0) + dt * 1.9;
+    const bite = Math.max(0, Math.sin(cs.workPhase * 2.7));
+    const talk = Math.sin(cs.workPhase * 1.35) * 0.55;
+    const lift = Number.isFinite(agent._idleActivity?.seatSurfaceLift) ? agent._idleActivity.seatSurfaceLift : 1.48;
+    applySeatedBasePose({ lift, lean: 0.14 + bite * 0.06, headForward: 0.12, talk, bob: Math.abs(talk) * 0.004 });
+    parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.04 + bite * 0.06, 0.14);
+    parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, talk * 0.15, 0.12);
+    parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.34 - Math.max(0, talk) * 0.22, 0.20);
+    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.48 - bite * 0.82, 0.24);
+    parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.24 + talk * 0.12, 0.16);
+    parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.22 - bite * 0.10, 0.16);
+
   } else if (isOutdoorPlanterUse || isFlowerBedUse) {
     // ── OUTDOOR PLANTER / FLOWER BED WATER / INSPECT / SMELL ─────
     // Stand just outside the solid greenery footprint, lean toward the plants,
     // and make a gentle water/inspect/smell reach without spawning a prop.
     cs.workPhase = (cs.workPhase || 0) + dt * 2.2;
     const reach = Math.max(0, Math.sin(cs.workPhase * 1.8));
+    const watering = isOutdoorPlanterUse && bedActivityKind.includes('water') ? 1 : 0;
     const inspect = bedActivityKind === 'outdoor-planter-inspect' || bedActivityKind === 'flower-bed-inspect' ? 0.35 : 0;
     const smell = bedActivityKind === 'flower-bed-smell' ? 0.32 : 0;
     const lean = 0.10 + reach * 0.16 + inspect * 0.08 + smell * 0.10;
     parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, lean, 0.18);
     parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, Math.sin(cs.workPhase * 0.9) * 0.025, 0.12);
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.08 + reach * 0.05 + inspect * 0.04 + smell * 0.08, 0.14);
-    parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, -0.16 - inspect * 0.20 + smell * 0.08, 0.18);
-    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.48 - reach * 0.72 - inspect * 0.20 + smell * 0.14, 0.24);
-    parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.18 - reach * 0.18, 0.18);
+    parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, watering ? -0.82 - reach * 0.30 : (-0.16 - inspect * 0.20 + smell * 0.08), 0.18);
+    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, watering ? -1.08 - reach * 0.42 : (-0.48 - reach * 0.72 - inspect * 0.20 + smell * 0.14), 0.24);
+    parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, watering ? 0.36 + reach * 0.08 : 0.12, 0.18);
+    parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, watering ? -0.42 - reach * 0.12 : (-0.18 - reach * 0.18), 0.18);
     parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, 0.02, 0.16);
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.02, 0.16);
     g.position.y = (g.userData._groundY || 0) + Math.abs(Math.sin(cs.workPhase)) * 0.006;
@@ -2391,7 +2471,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.16 - fishLike * 0.18, 0.16);
     parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, 0.015, 0.16);
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.015, 0.16);
-    g.position.y = (g.userData._groundY || 0) + Math.abs(sway) * 0.003;
+    g.position.y = (g.userData._groundY || 0) + (Number(agent._idleActivity?.surfaceLift) || 0.34) + Math.abs(sway) * 0.003;
 
   } else if (isGazeboPavilionUse) {
     // ── GAZEBO / PAVILION GATHER-REST-SIT UNDER COVER ─────────
@@ -2494,7 +2574,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.24 - (performing ? wave * 0.18 : applause * 0.10), 0.16);
     parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, performing ? 0.04 : 0.02, 0.16);
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, performing ? -0.04 : -0.02, 0.16);
-    g.position.y = (g.userData._groundY || 0) + (performing ? Math.abs(wave) * 0.018 : Math.abs(applause) * 0.006);
+    g.position.y = (g.userData._groundY || 0) + (performing ? (Number(agent._idleActivity?.surfaceLift) || 0.39) : 0) + (performing ? Math.abs(wave) * 0.018 : Math.abs(applause) * 0.006);
 
   } else if (isOutdoorCafeTableUse) {
     // ── OUTDOOR CAFE / PICNIC TABLE SIT / EAT / DRINK / TALK ────
@@ -2505,7 +2585,10 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     const talk = isOutdoorCafeTableSocial ? Math.max(0, Math.sin(cs.workPhase * 1.5)) : 0;
     const biteSip = isOutdoorCafeTableEatDrink ? Math.max(0, Math.sin(cs.workPhase * 2.4)) : 0;
     const setdown = isOutdoorCafeTableSetDown ? Math.max(0, Math.sin(cs.workPhase * 2.2)) : 0;
-    applySeatedBasePose({ lift: 0.76, lean: 0.14 + biteSip * 0.04 + setdown * 0.08, headForward: 0.12, talk, bob: Math.abs(Math.sin(cs.workPhase)) * 0.004 });
+    const outdoorSeatLift = Number.isFinite(agent._idleActivity?.seatSurfaceLift)
+      ? agent._idleActivity.seatSurfaceLift
+      : (bedActivityKind.startsWith('picnic-table-') ? 1.60 : 1.48);
+    applySeatedBasePose({ lift: outdoorSeatLift, lean: 0.14 + biteSip * 0.04 + setdown * 0.08, headForward: 0.12, talk, bob: Math.abs(Math.sin(cs.workPhase)) * 0.004 });
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.04 + biteSip * 0.05, 0.14);
     parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, talk * 0.14, 0.14);
     parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, -0.22 - talk * 0.18 - biteSip * 0.22, 0.18);
@@ -2580,7 +2663,10 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     cs.workPhase = (cs.workPhase || 0) + dt * 1.9;
     const talk = Math.sin(cs.workPhase * 2.8);
     const listen = Math.max(0, Math.sin(cs.workPhase * 0.9));
-    applySeatedBasePose({ lift: 0.76, lean: 0.20 + listen * 0.04, headForward: 0.12, talk, bob: 0.02 });
+    const meetingSeatLift = Number.isFinite(agent._idleActivity?.seatSurfaceLift)
+      ? agent._idleActivity.seatSurfaceLift
+      : (isSmallRoundMeetingTable ? 1.48 : 0.76);
+    applySeatedBasePose({ lift: meetingSeatLift, lean: 0.20 + listen * 0.04, headForward: 0.12, talk, bob: 0.02 });
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.05 + listen * 0.04, 0.12);
     parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, talk * 0.18, 0.14);
     parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, -0.26 - Math.max(0, talk) * 0.24, 0.22);
@@ -2641,7 +2727,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     const tap = Math.max(0, Math.sin(cs.workPhase * 4.1));
     const aim = Math.sin(cs.workPhase * 1.9);
     const focusBob = Math.abs(Math.sin(cs.workPhase * 1.2)) * 0.01;
-    applySeatedBasePose({ lift: 0.78, lean: 0.24 + tap * 0.04, headForward: 0.16, talk: aim * 0.35, bob: focusBob });
+    applySeatedBasePose({ lift: Number(agent._idleActivity?.seatSurfaceLift) || 1.48, lean: 0.24 + tap * 0.04, headForward: 0.16, talk: aim * 0.35, bob: focusBob });
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.10 + tap * 0.03, 0.14);
     parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, aim * 0.10, 0.12);
     parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, -1.25 + aim * 0.10, 0.28);
@@ -2856,18 +2942,21 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     const stride = Math.abs(Math.sin(cs.walkPhase));
     const exert = Math.sin(cs.workPhase);
     const cooldown = Math.max(0, Math.sin(cs.workPhase * 0.55));
-    const lean = isOutdoorExerciseStationTraining ? 0.10 + cooldown * 0.04 : (isTrainingMatTraining ? 0.22 + cooldown * 0.10 : (isTreadmillPractice ? 0.08 + cooldown * 0.06 : 0.16 + stride * 0.035));
+    const lean = isOutdoorExerciseStationTraining ? 0.12 + cooldown * 0.05 : (isTrainingMatTraining ? 0.34 + cooldown * 0.12 : (isTreadmillPractice ? 0.08 + cooldown * 0.06 : 0.16 + stride * 0.035));
     parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, lean, 0.18);
     parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, isOutdoorExerciseStationTraining ? exert * 0.035 : (isTrainingMatTraining ? exert * 0.10 : (isTreadmillPractice ? exert * 0.045 : exert * 0.018)), 0.12);
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, isOutdoorExerciseStationTraining ? -0.03 + cooldown * 0.05 : (0.06 + stride * (isTrainingMatTraining ? 0.02 : 0.04)), 0.14);
     parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, (isTreadmillPractice || isTrainingMatTraining || isOutdoorExerciseStationTraining) ? exert * 0.16 : 0, 0.12);
-    parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, isOutdoorExerciseStationTraining ? -0.08 + step * 0.10 : (isTrainingMatTraining ? -0.18 + step * 0.18 : step * (isTreadmillPractice ? 0.48 : 0.72)), 0.34);
-    parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, isOutdoorExerciseStationTraining ? 0.08 - step * 0.10 : (isTrainingMatTraining ? 0.18 - step * 0.18 : -step * (isTreadmillPractice ? 0.48 : 0.72)), 0.34);
-    parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, isOutdoorExerciseStationTraining ? -2.35 + cooldown * 0.30 : (isTrainingMatTraining ? -0.85 + exert * 0.28 : -step * (isTreadmillPractice ? 0.38 : 0.62) - (isTreadmillPractice ? 0.20 : 0)), 0.30);
-    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, isOutdoorExerciseStationTraining ? -2.25 - cooldown * 0.28 : (isTrainingMatTraining ? -0.65 - exert * 0.26 : step * (isTreadmillPractice ? 0.38 : 0.62) - (isTreadmillPractice ? 0.20 : 0)), 0.30);
+    parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, isOutdoorExerciseStationTraining ? -0.08 + step * 0.10 : (isTrainingMatTraining ? -0.62 + cooldown * 0.18 : step * (isTreadmillPractice ? 0.48 : 0.72)), 0.34);
+    parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, isOutdoorExerciseStationTraining ? 0.08 - step * 0.10 : (isTrainingMatTraining ? 0.34 - cooldown * 0.14 : -step * (isTreadmillPractice ? 0.48 : 0.72)), 0.34);
+    parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, isOutdoorExerciseStationTraining ? -2.35 + cooldown * 0.30 : (isTrainingMatTraining ? -2.10 + exert * 0.24 : -step * (isTreadmillPractice ? 0.38 : 0.62) - (isTreadmillPractice ? 0.20 : 0)), 0.30);
+    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, isOutdoorExerciseStationTraining ? -2.25 - cooldown * 0.28 : (isTrainingMatTraining ? -0.72 - exert * 0.22 : step * (isTreadmillPractice ? 0.38 : 0.62) - (isTreadmillPractice ? 0.20 : 0)), 0.30);
     parts.leftArm.rotation.z  = _lerp(parts.leftArm.rotation.z || 0, isOutdoorExerciseStationTraining ? 0.48 + exert * 0.10 : (isTrainingMatTraining ? 0.34 + exert * 0.18 : (isTreadmillPractice ? 0.22 + exert * 0.12 : 0.08)), 0.16);
     parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, isOutdoorExerciseStationTraining ? -0.48 - exert * 0.10 : (isTrainingMatTraining ? -0.34 - exert * 0.18 : (isTreadmillPractice ? -0.22 - exert * 0.12 : -0.08)), 0.16);
-    g.position.y = (g.userData._groundY || 0) + stride * (isOutdoorExerciseStationTraining ? 0.035 : (isTrainingMatTraining ? 0.025 : (isTreadmillPractice ? 0.055 : 0.075)));
+    const equipmentSurfaceLift = isOutdoorExerciseStationTraining
+      ? 0.20
+      : (isTrainingMatTraining ? 0 : (Number.isFinite(agent._idleActivity?.surfaceLift) ? agent._idleActivity.surfaceLift : 0.22));
+    g.position.y = (g.userData._groundY || 0) + equipmentSurfaceLift + stride * (isOutdoorExerciseStationTraining ? 0.025 : (isTrainingMatTraining ? 0.012 : (isTreadmillPractice ? 0.055 : 0.075)));
 
   } else if (isServerRackUse || isMedicalSupplyCabinetBrowse || isDresserBrowse || isWardrobeBrowse || isNightstandInspect || isSideTableInspect || isAccessoryDisplayStandBrowse || isDisplayCaseBrowse || isShopShelfBrowse || isPantryShelfBrowse || isDisplayMannequinPreview || isDumbbellRackUse || (isSalonMirrorStationUse && !isSalonMirrorStationService) || isClothingRackBrowse || isBookshelfBrowse || isCurtainsAdjust || isBulletinBoardRead || isOutdoorNoticeBoardRead || isWallArtInspect || isMenuBoardRead) {
     // ── SERVER RACK / MEDICAL SUPPLY CABINET / DRESSER / WARDROBE / NIGHTSTAND / DISPLAY CASE / SHOP SHELF / PANTRY SHELF / DISPLAY / MIRROR / RACK / SHELF / CURTAINS / BOARD / WALL ART / MENU BOARD BROWSE & READ ─
@@ -2922,7 +3011,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     parts.leftArm.rotation.z  = _lerp(parts.leftArm.rotation.z || 0, 0.30 + wristTap * 0.08, 0.20);
     parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.30 - wristTap * 0.08, 0.20);
 
-  } else if (isPlainChairSitting || isCouchLounging || isArmchairLounging || isHallwayBenchWaiting || isBarStoolSitting || isDiningChairSitting || isPatioChairSitting || isConferenceChairSitting || isBarberChairSitting || isExamChairPatient || isSmallRoundMeetingTable || (isSmallCafeTableUse && !isSmallCafeTableSetDown)) {
+  } else if (isPlainChairSitting || isCouchLounging || isLoveseatLounging || isArmchairLounging || isHallwayBenchWaiting || isBarStoolSitting || isDiningChairSitting || isPatioChairSitting || isConferenceChairSitting || isBarberChairSitting || isExamChairPatient || isSmallRoundMeetingTable || (isSmallCafeTableUse && !isSmallCafeTableSetDown)) {
     // ── COUCH / LOUNGE SEAT INTERACTION; ARMCHAIR / BAR STOOL / OFFICE CHAIR / DINING CHAIR / CONFERENCE CHAIR / BARBER CHAIR / EXAM CHAIR SEATED INTERACTION ──
     // BARBER CHAIR SEATED INTERACTION compatibility marker for asset tests.
     // BAR STOOL SEATED INTERACTION compatibility marker for asset tests.
@@ -2939,11 +3028,22 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     const normalReferenceScale = 0.8;
     const currentScale = Number.isFinite(g.scale?.y) && g.scale.y > 0 ? g.scale.y : normalReferenceScale;
     const liftForAgentScale = (referenceLift) => referenceLift * (normalReferenceScale / currentScale);
-    const softSeatLift = isArmchairLounging ? 1.84 : ((isCouchLounging || isLoveseatLounging) ? 1.52 : null);
-    const benchSeatLift = (isHallwayBenchWaiting || isParkBenchSeated || isSmallCafeTableUse || isOutdoorCafeTableUse || isSmallRoundMeetingTable) ? 1.34 : null;
-    const referenceSeatLift = Number.isFinite(agent._idleActivity?.seatSurfaceLift)
-      ? agent._idleActivity.seatSurfaceLift
-      : (isBarStoolSitting ? 4.2 : (softSeatLift ?? benchSeatLift ?? 1.20));
+    const softSeatLift = isArmchairLounging
+      ? 2.08
+      : (isCouchLounging && !isSectionalSofaLounging
+        ? 2.117
+        : (isSectionalSofaLounging ? 2.08 : (isLoveseatLounging ? 2.117 : null)));
+    const benchSeatLift = (isSmallCafeTableUse || isOutdoorCafeTableUse || isSmallRoundMeetingTable) ? 1.48 : (isHallwayBenchWaiting ? 2.071 : null);
+    // Authored per-furniture lift wins over any activity-supplied value that is
+    // too low to reach the cushion. Some autonomous/scripted paths historically
+    // shipped a stale or missing seatSurfaceLift, which dropped seated agents
+    // to floor level inside the couch body; the soft-seat floor below prevents
+    // that regardless of which code path started the activity.
+    const activityLift = Number(agent._idleActivity?.seatSurfaceLift);
+    const authoredLift = isBarStoolSitting ? 4.2 : (isPatioChairSitting ? 1.52 : (softSeatLift ?? benchSeatLift ?? null));
+    const referenceSeatLift = Number.isFinite(activityLift)
+      ? (Number.isFinite(authoredLift) ? Math.max(activityLift, authoredLift) : activityLift)
+      : (authoredLift ?? 1.20);
     const seatedLift = liftForAgentScale(referenceSeatLift);
     applySeatedBasePose({ lift: seatedLift, lean: recline, headForward: 0.16, talk, bob: 0.006 + loungeBreath * 0.18 });
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, talkingFromSeat ? 0.04 : -0.02, 0.12);
@@ -2986,7 +3086,12 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     const talk = isParkBenchSocializing ? Math.sin(cs.workPhase * 3.2) : 0;
     const readLean = isParkBenchReading ? 0.08 : 0;
     const standT = isParkBenchStandingUp ? Math.min(1, (cs.workPhase % 1.2) / 1.2) : 0;
-    applySeatedBasePose({ lift: 0.46 + standT * 0.22, lean: 0.08 + readLean - standT * 0.08, headForward: 0.08 + readLean, talk, bob: Math.abs(Math.sin(cs.workPhase * 1.6)) * 0.006 });
+    const normalReferenceScale = 0.8;
+    const currentScale = Number.isFinite(g.scale?.y) && g.scale.y > 0 ? g.scale.y : normalReferenceScale;
+    const activityLift = Number(agent._idleActivity?.seatSurfaceLift);
+    const referenceLift = Number.isFinite(activityLift) ? Math.max(activityLift, 1.662) : 1.662;
+    const parkBenchLift = referenceLift * (normalReferenceScale / currentScale);
+    applySeatedBasePose({ lift: parkBenchLift + standT * 0.22, lean: 0.08 + readLean - standT * 0.08, headForward: 0.08 + readLean, talk, bob: Math.abs(Math.sin(cs.workPhase * 1.6)) * 0.006 });
     if (isParkBenchReading) {
       parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.78, 0.18);
       parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.76, 0.18);
@@ -3071,15 +3176,21 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
 
   } else if (isBedResting) {
     // ── BED / SLEEP POD INTERACTION ─────────────────────────
-    // Lie down on the pod, keep a slow breathing loop, and add a tiny dream sway.
+    // Rotate the complete visible character onto the mattress. Rotating only
+    // bodyGroup left the sibling head upright and made the agent look as though
+    // they were standing inside the bed.
     cs.sleepPhase += dt * (isDreaming ? 0.9 : 0.55);
     const breath = Math.sin(cs.sleepPhase * 2.2) * 0.018;
     const dreamSway = isDreaming ? Math.sin(cs.sleepPhase * 3.0) * 0.05 : 0;
-    const lieAngle = Math.PI / 2;
-    parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, lieAngle, 0.16);
+    if (parts.poseGroup) {
+      // Pillow/headboard are authored at local -Z for beds and clinic beds.
+      parts.poseGroup.rotation.x = -Math.PI / 2;
+      parts.poseGroup.rotation.z = _lerp(parts.poseGroup.rotation.z, dreamSway * 0.35, 0.12);
+    }
+    parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, 0.02, 0.16);
     parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, dreamSway, 0.12);
-    parts.headGroup.position.y = _lerp(parts.headGroup.position.y, parts.headBaseY * 0.35, 0.12);
-    parts.headGroup.position.z = _lerp(parts.headGroup.position.z, parts.headBaseZ + 0.46, 0.12);
+    parts.headGroup.position.y = _lerp(parts.headGroup.position.y, parts.headBaseY, 0.12);
+    parts.headGroup.position.z = _lerp(parts.headGroup.position.z, parts.headBaseZ, 0.12);
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.05, 0.12);
     parts.headGroup.rotation.z = _lerp(parts.headGroup.rotation.z, dreamSway * 1.4, 0.12);
     parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, 0.65, 0.2);
@@ -3088,7 +3199,10 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.18, 0.16);
     parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, 0.08, 0.16);
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.08, 0.16);
-    g.position.y = (g.userData._groundY || 0) + 0.18 + breath;
+    const bedSurfaceLift = Number.isFinite(agent._idleActivity?.surfaceLift)
+      ? agent._idleActivity.surfaceLift
+      : (bedActivityKind.startsWith('bed-clinic-') ? 0.86 : 0.88);
+    g.position.y = (g.userData._groundY || 0) + bedSurfaceLift + breath;
 
   } else if (isGymBenchExercise) {
     // ── GYM BENCH SIT/LIE EXERCISE POSE ─────────────────────
@@ -3099,9 +3213,11 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     const press = Math.max(0, Math.sin(cs.workPhase * 1.9));
     const brace = Math.sin(cs.workPhase * 0.9);
     const isRest = bedActivityKind === 'gym-bench-rest';
-    const recline = isRest ? 1.02 : 1.24;
-    parts.bodyGroup.position.y = _lerp(parts.bodyGroup.position.y, 0.44, 0.18);
-    parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, recline, 0.16);
+    if (parts.poseGroup) {
+      parts.poseGroup.rotation.x = -Math.PI / 2;
+    }
+    parts.bodyGroup.position.y = _lerp(parts.bodyGroup.position.y, 0.02, 0.18);
+    parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, isRest ? 0.03 : 0.08, 0.16);
     parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, brace * 0.035, 0.12);
     parts.headGroup.position.y = _lerp(parts.headGroup.position.y, parts.headBaseY - 0.18, 0.14);
     parts.headGroup.position.z = _lerp(parts.headGroup.position.z, parts.headBaseZ + 0.32, 0.14);
@@ -3115,7 +3231,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.72 - press * 0.10, 0.20);
     parts.leftLeg.rotation.z  = _lerp(parts.leftLeg.rotation.z || 0, 0.10, 0.16);
     parts.rightLeg.rotation.z = _lerp(parts.rightLeg.rotation.z || 0, -0.10, 0.16);
-    g.position.y = (g.userData._groundY || 0) + 0.24 + (isRest ? Math.abs(brace) * 0.006 : press * 0.018);
+    g.position.y = (g.userData._groundY || 0) + 0.72 + (isRest ? Math.abs(brace) * 0.006 : press * 0.018);
 
   } else if (isWaking || isCouchStandingUp || isLoveseatStandingUp || isArmchairStandingUp || isHallwayBenchStandingUp || isBarStoolStandingUp || isDiningChairStandingUp || isPatioChairStandingUp || isConferenceChairStandingUp || agent._schedPhase === 'office-chair-stand-up' || isBarberChairStandingUp || isGymBenchStandingUp) {
     // Wake / stand transition out of a sleep-pod rest or couch/loveseat/armchair/bar-stool/dining-chair/patio-chair/conference-chair seat.

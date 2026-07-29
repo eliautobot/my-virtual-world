@@ -1167,6 +1167,12 @@ html, body {
 .ctx-card-action:hover, .ctx-list-action:hover { border-color:var(--accent-gold); background:rgba(255,214,0,0.10); }
 .ctx-list-action.danger { border-color:rgba(244,67,54,0.42); background:rgba(127,29,29,0.30); }
 .ctx-list-action:disabled { opacity:0.5; cursor:not-allowed; }
+.ctx-couch-color-editor { display:grid; gap:8px; padding:10px; border:1px solid rgba(121,134,203,0.42); border-radius:10px; background:rgba(40,53,147,0.14); }
+.ctx-couch-color-hint { color:var(--text-secondary); font-size:10px; line-height:1.4; }
+.ctx-couch-color-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.ctx-couch-color-grid label { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; padding:7px 8px; border:1px solid rgba(255,255,255,0.10); border-radius:8px; color:var(--text-primary); font-size:10px; background:rgba(255,255,255,0.04); }
+.ctx-couch-color-grid label span { min-width:0; line-height:1.25; }
+.ctx-couch-color-grid input[type="color"] { width:34px; height:28px; flex:0 0 34px; padding:2px; border:1px solid rgba(255,255,255,0.24); border-radius:6px; background:#141428; cursor:pointer; }
 .ctx-inline-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .ctx-inline-actions > span { flex:1 1 100%; }
 .ctx-inline-actions button { padding:7px 10px !important; border-radius:8px !important; font-size:11px; }

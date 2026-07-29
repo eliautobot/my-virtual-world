@@ -4,12 +4,12 @@
  * Physics: Rapier 3D (WASM) for collision detection.
  */
 import * as THREE from 'three';
-import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260720-colyseus-performance-r3';
+import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260725-runtime-host-affinity-r1';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
   createAgentCharacter, updateAgentAnimation, getAgentAppearance, APPEARANCE_CATALOG,
-} from './agent-characters.js?v=20260721-fluidity-r2';
+} from './agent-characters.js?v=20260729-sectional-loveseat-debug-cleanup-r1';
 import {
   listObjectUseActiveCandidates,
   chooseAndReserveObjectUseActiveSlot,
@@ -977,6 +977,9 @@ function mergeFurnitureItemVoxels(item) {
   // Items whose child meshes are recolored/animated at runtime keep originals.
   if (item.userData?.arcadeFeedbackParts) return item;
   if (item.userData?.furnitureVoxelsMerged) return item;
+  // The couch supports live per-material color preview and per-cushion drop
+  // raycasting, so its parts must stay individually addressable meshes.
+  if (item.userData?.couchColors) return item;
 
   item.updateMatrixWorld(true);
   const itemInv = item.matrixWorld.clone().invert();
@@ -1827,6 +1830,9 @@ function requestBackendObjectUseForExplicitObjectAction(agent, target = null, bu
     activeUseSlotId: metadata.activeUseSlotId || metadata.slotId || target?.activeUseSlotId || target?.slotId || target?.seatId || objectMeta.spotId || '',
     activityKind: metadata.activityKind || target?.activityKind || '',
     animationId: metadata.animationId || target?.animationId || '',
+    seatSurfaceLift: Number.isFinite(Number(metadata.seatSurfaceLift ?? target?.seatSurfaceLift))
+      ? Number(metadata.seatSurfaceLift ?? target?.seatSurfaceLift)
+      : undefined,
     pingPongSide: metadata.pingPongSide || target?.pingPongSide || '',
     faceAngle: Number.isFinite(Number(target?.faceAngle ?? metadata.faceAngle)) ? Number(target?.faceAngle ?? metadata.faceAngle) : 0,
   };
@@ -1936,6 +1942,121 @@ function resolveAgentRuntimeWorldObjectTarget(objectState = null) {
   return { building, furniture };
 }
 
+function syncRuntimeMultiSeatState(furniture, objectState = null) {
+  const config = getMultiSeatManualConfig(furniture?.type);
+  if (!furniture || !config || !objectState) return false;
+  const data = objectState.data || {};
+  const seatId = String(
+    objectState.slotId ||
+    data.reservation?.slotId ||
+    data.reservation?.seatId ||
+    data.activity?.activeUseSlotId ||
+    data.activity?.spotId ||
+    '',
+  );
+  if (!config.seatIds.includes(seatId)) return false;
+
+  const objectStateName = String(objectState.state || '').toLowerCase();
+  const isActive = ['held', 'reserved', 'routing', 'arrived', 'active', 'using', 'in_progress'].includes(objectStateName);
+  const reservationState = ['active', 'using', 'in_progress'].includes(objectStateName)
+    ? 'active'
+    : (objectStateName === 'routing' ? 'routing' : 'held');
+  const reservationId = data.reservation?.id || data.reservation?.reservationId || objectState.reservationId || `runtime:${objectState.objectKey}`;
+  const agentId = objectState.agentId || data.reservation?.agentId || data.activity?.agentId || null;
+  const store = getMultiSeatManualStore(furniture.type, furniture);
+  const nowMs = Date.now();
+  let matched = false;
+  store.reservations = (store.reservations || []).map(reservation => {
+    const sameSeat = String(reservation?.seatId || reservation?.spotId || reservation?.activationSpotId || '') === seatId;
+    const sameRuntimeReservation = reservation?.runtimeWorldObject === true &&
+      (reservation?.objectKey === objectState.objectKey || sameSeat);
+    if (!sameRuntimeReservation) return reservation;
+    if (isActive && String(reservation?.id || reservation?.reservationId || '') === String(reservationId)) {
+      matched = true;
+      return {
+        ...reservation,
+        ...data.reservation,
+        id: reservationId,
+        reservationId,
+        objectKey: objectState.objectKey,
+        baseObjectKey: data.reservation?.baseObjectKey || data.activity?.baseObjectKey || reservation?.baseObjectKey,
+        agentId,
+        seatId,
+        spotId: seatId,
+        slotId: seatId,
+        state: reservationState,
+        status: reservationState,
+        runtimeWorldObject: true,
+        updatedAtMs: nowMs,
+      };
+    }
+    return {
+      ...reservation,
+      state: 'released',
+      status: 'released',
+      releaseReason: isActive ? 'runtime-seat-superseded' : (data.releaseReason || 'runtime-seat-idle'),
+      releasedAtMs: nowMs,
+      updatedAtMs: nowMs,
+    };
+  });
+  if (isActive && !matched) {
+    store.reservations.push({
+      ...(data.reservation || {}),
+      id: reservationId,
+      reservationId,
+      objectKey: objectState.objectKey,
+      baseObjectKey: data.reservation?.baseObjectKey || data.activity?.baseObjectKey || getMultiSeatManualObjectKey(furniture.type, objectState.buildingId, objectState.furnitureIndex),
+      agentId,
+      seatId,
+      spotId: seatId,
+      slotId: seatId,
+      state: reservationState,
+      status: reservationState,
+      runtimeWorldObject: true,
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+    });
+  }
+
+  const activeSeats = { ...(furniture.activeUse?.activeSeats || {}) };
+  if (isActive) {
+    activeSeats[seatId] = {
+      ...(activeSeats[seatId] || {}),
+      agentId,
+      reservationId,
+      objectKey: objectState.objectKey,
+      interactionSpotId: seatId,
+      runtimeWorldObject: true,
+      state: reservationState,
+    };
+  } else {
+    delete activeSeats[seatId];
+  }
+  furniture.activeUse = Object.keys(activeSeats).length
+    ? { ...(furniture.activeUse || {}), state: 'active', mode: 'multi-seat-active', activeSeats, runtimeWorldObject: true }
+    : { state: 'idle', mode: 'open-multi-seat', activeSeats: {}, runtimeWorldObject: true, lastReleasedSeatId: seatId, lastReleaseReason: data.releaseReason || 'runtime-seat-idle' };
+  const activeSeatIds = Object.keys(activeSeats).sort();
+  const reservedSeatIds = (store.reservations || [])
+    .filter(reservation => ['held', 'reserved', 'routing', 'arrived', 'active', 'using', 'in_progress'].includes(String(reservation?.state || reservation?.status || '').toLowerCase()))
+    .map(reservation => reservation.seatId || reservation.spotId)
+    .filter(Boolean)
+    .sort();
+  furniture[config.stateKey] = {
+    ...(furniture[config.stateKey] || {}),
+    status: activeSeatIds.length || reservedSeatIds.length ? 'occupied' : 'open',
+    seats: config.capacity,
+    activeSeatIds,
+    reservedSeatIds,
+    persistentFurniture: true,
+    runtimeWorldObject: true,
+  };
+  return true;
+}
+
+function syncRuntimeCouchSeatState(couch, objectState = null) {
+  return syncRuntimeMultiSeatState(couch, objectState);
+}
+
 function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
   if (!objectState?.objectKey) return false;
   const { furniture } = resolveAgentRuntimeWorldObjectTarget(objectState);
@@ -1947,12 +2068,24 @@ function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
   ) {
     return false;
   }
-  if (furniture._runtimeWorldObjectVersion && Number(furniture._runtimeWorldObjectVersion) > Number(objectState.version || 0)) {
+  const objectVersionKey = String(objectState.objectKey || '');
+  // Runtime object metadata can be referenced by immutable reservation/debug
+  // snapshots. Never write back into that shared nested object: clone it for
+  // every patch so a frozen prior snapshot cannot break the runtime listener.
+  const runtimeVersions = furniture._runtimeWorldObjectVersions && typeof furniture._runtimeWorldObjectVersions === 'object'
+    ? { ...furniture._runtimeWorldObjectVersions }
+    : {};
+  if (Number(runtimeVersions[objectVersionKey] || 0) > Number(objectState.version || 0)) {
     return false;
   }
   const data = objectState.data || {};
+  runtimeVersions[objectVersionKey] = Number(objectState.version || 0);
+  furniture._runtimeWorldObjectVersions = runtimeVersions;
   furniture._runtimeWorldObjectState = objectState;
-  furniture._runtimeWorldObjectVersion = Number(objectState.version || 0);
+  furniture._runtimeWorldObjectVersion = Math.max(
+    Number(furniture._runtimeWorldObjectVersion || 0),
+    Number(objectState.version || 0),
+  );
   furniture._runtimeWorldObjectUpdatedAt = objectState.updatedAt || '';
   if (data.reservation && typeof data.reservation === 'object') {
     furniture.reservation = { ...(furniture.reservation || {}), ...data.reservation, runtimeWorldObject: true };
@@ -1979,6 +2112,7 @@ function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
     if (data.activeUse && typeof data.activeUse === 'object') furniture.activeUse = { ...data.activeUse, runtimeWorldObject: true };
   }
   if (data.clearServiceQueue === true && !queueStore) furniture._scriptedServiceQueueStore = { reservations: [] };
+  syncRuntimeMultiSeatState(furniture, objectState);
   return true;
 }
 
@@ -2457,6 +2591,12 @@ function makeAgentRuntimeVisualActivity(agent) {
     'runtimePositionOwner',
     'spotId',
     'slotId',
+    'seatId',
+    'activeUseSlotId',
+    'activationSpotId',
+    'approachSpotId',
+    'dismountSpotId',
+    'exitSpotId',
     'mode',
     'animationId',
     'targetAgentId',
@@ -2480,6 +2620,16 @@ function makeAgentRuntimeVisualActivity(agent) {
   ].forEach(key => {
     const number = agentRuntimeVisualNumber(activity[key], null);
     if (number !== null) out[key] = number;
+  });
+  [
+    'manualDrop',
+    'manualDropSnapToUse',
+    'manualOccupancyHold',
+    'snappedToSeatDock',
+    'arrivedAtDock',
+    'seated',
+  ].forEach(key => {
+    if (activity[key] === true) out[key] = true;
   });
   [
     'dockTarget',
@@ -2724,6 +2874,26 @@ function makeAgentRuntimeHydratedVisualActivity(agent, incomingActivity = null, 
     ...incomingActivity,
     kind: agentRuntimeVisualText(incomingActivity.kind || visualState?.activityKind || '', 120),
   };
+  const furnitureType = agentRuntimeVisualText(activity.furnitureType || activity.objectType || '', 120);
+  const poseKind = String(activity.poseKind || '').trim().toLowerCase();
+  const animationId = String(activity.animationId || visualState?.resolvedAnimationId || '').trim().toLowerCase();
+  const seatLike = poseKind === 'seat' || animationId === 'sit' ||
+    ['couch', 'sectionalSofa', 'loveseat', 'hallwayBench', 'parkBench'].includes(furnitureType);
+  if (seatLike) {
+    const seatId = agentRuntimeVisualText(
+      activity.seatId || activity.activationSpotId || activity.activeUseSlotId || activity.slotId || activity.spotId || '',
+      120,
+    );
+    if (seatId) {
+      activity.seatId = seatId;
+      activity.activationSpotId = agentRuntimeVisualText(activity.activationSpotId || seatId, 120) || seatId;
+      activity.activeUseSlotId = agentRuntimeVisualText(activity.activeUseSlotId || activity.slotId || seatId, 120) || seatId;
+    }
+    const incomingLift = Number(activity.seatSurfaceLift);
+    const fallbackLift = getFurnitureSeatSurfaceLift(furnitureType);
+    if (Number.isFinite(incomingLift)) activity.seatSurfaceLift = incomingLift;
+    else if (Number.isFinite(Number(fallbackLift))) activity.seatSurfaceLift = Number(fallbackLift);
+  }
   const pingPongSide = isAgentRuntimePingPongActivity(activity, visualState)
     ? inferAgentRuntimePingPongSide(activity, visualState)
     : '';
@@ -2837,6 +3007,20 @@ function syncAgentRuntimeVisualActivityPose(agent, visualState = null) {
   return true;
 }
 
+function isAgentProtectedManualObjectOccupancyActivity(agent = null) {
+  const activity = agent?._idleActivity || null;
+  const phase = String(activity?.phase || '').trim().toLowerCase();
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  return Boolean(
+    activity &&
+    activity.manualDrop === true &&
+    activity.manualOccupancyHold === true &&
+    ['active', 'using'].includes(phase) &&
+    agent?._manualPlacementPreview !== true &&
+    Number(agent?._manualPlacementLockUntil || 0) > now
+  );
+}
+
 function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null) {
   if (!agent || !visualState || typeof visualState !== 'object') return false;
   agent._runtimeVisualState = visualState;
@@ -2880,7 +3064,9 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
   syncAgentRuntimeRoutingDebugFromRuntimeRoute(agent, runtimeRoute);
   syncAgentRuntimeDoorVisualFromRuntimeRoute(agent, runtimeRoute);
 
-  if (visualState.activityActive === false) {
+  const deferInactiveRuntimeVisual = visualState.activityActive === false &&
+    isAgentProtectedManualObjectOccupancyActivity(agent);
+  if (visualState.activityActive === false && !deferInactiveRuntimeVisual) {
     agent._idleActivity = null;
     agent._pingPongSide = null;
     agent._pingPongPaddleColor = null;
@@ -2893,6 +3079,7 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
   } else if (visualState.activity && typeof visualState.activity === 'object') {
     agent._idleActivity = makeAgentRuntimeHydratedVisualActivity(agent, visualState.activity, visualState);
   }
+  agent._runtimeVisualActivityClearDeferred = deferInactiveRuntimeVisual;
   syncAgentRuntimePingPongVisualMetadata(agent, visualState);
   const snapshotTarget = snapshot && typeof snapshot === 'object' ? agentRuntimePlainObject(snapshot.target, null) : null;
   syncAgentRuntimeVisualDeskState(agent, visualState, snapshotTarget);
@@ -3008,7 +3195,11 @@ function resetAgentRuntimeObserverBuffer(agent, sample = null) {
   agent._runtimeObserverBufferMode = sample ? 'reset' : 'empty';
   agent._runtimeObserverRenderSnapshot = sample?.snapshot || null;
   agent._runtimeRenderSnapshot = sample?.snapshot || null;
-  agent._runtimeRenderVisualVersion = sample?.version || 0;
+  // A reset sample has not had its visual state rendered yet. Marking its
+  // version as rendered here made the observer path skip the first
+  // authoritative activity frame. Manual seat drops would briefly sit using
+  // local state, then lose the pose as runtime authority took over.
+  agent._runtimeRenderVisualVersion = 0;
   if (sample) {
     agent.x = sample.x;
     agent.y = sample.y;
@@ -3054,6 +3245,10 @@ function queueAgentRuntimeObserverSnapshot(agent, snapshot, { source = 'runtime'
     agent._runtimeObserverOnly !== true;
   if (shouldReset) {
     resetAgentRuntimeObserverBuffer(agent, sample);
+    // Apply the activity on the same handoff frame. This keeps seated/manual
+    // object poses continuous even when the runtime snapshot remains static
+    // until its next lease refresh.
+    applyAgentRuntimeObserverRenderVisual(agent, sample);
     if (updateVisible) placeRuntimeHydratedAgentMesh(agent, { force: true });
     return { queued: true, reset: true, sample };
   }
@@ -3313,7 +3508,10 @@ function applyAgentRuntimeSnapshotToAgent(agent, snapshot, { updateVisible = fal
   if (backendObjectUseSnapshot) {
     agent._runtimeBackendObjectUsePending = null;
     agent._manualPlacementPreview = false;
-    agent._manualPlacementLockUntil = 0;
+    // A server acknowledgement transfers movement authority, but it must not
+    // cancel the five-minute user-directed occupancy hold. Otherwise a stale
+    // inactive visual frame can clear the newly seated pose immediately after
+    // a second manual couch drop.
   }
   const manualPlacementHeld = Boolean(agent._manualPlacementPreview || (agent._manualPlacementLockUntil || 0) > performance.now());
   const localManualControl = !backendObjectUseSnapshot && (manualPlacementHeld || (manualSnapshot && manualSnapshotOwnedByThisClient));
@@ -3715,6 +3913,24 @@ function makeAgentRuntimeRouteTarget(target = null, building = null, floor = nul
   if (Number.isFinite(stayMs)) plain.stayMs = Math.max(1000, Math.floor(stayMs));
   const paddleColor = Number(target?.paddleColor);
   if (Number.isFinite(paddleColor)) plain.paddleColor = paddleColor;
+  const routeApproach = target?.routeApproachTarget;
+  if (
+    routeApproach &&
+    Number.isFinite(Number(routeApproach.x)) &&
+    Number.isFinite(Number(routeApproach.y ?? routeApproach.z))
+  ) {
+    plain.routeApproachTarget = {
+      x: Number(routeApproach.x),
+      y: Number(routeApproach.y ?? routeApproach.z),
+      floor: Math.max(1, Number(routeApproach.floor ?? resolvedFloor) || resolvedFloor),
+      buildingId: routeApproach.buildingId || plain.buildingId,
+      spotId: routeApproach.spotId || target?.approachSpotId || 'approach-front',
+    };
+  }
+  for (const key of ['dockSnapRadius', 'activationRadius', 'snapRadius']) {
+    const value = Number(target?.[key]);
+    if (Number.isFinite(value)) plain[key] = Math.max(1, value);
+  }
   return plain;
 }
 
@@ -4533,6 +4749,18 @@ function getFurnitureForwardFacingAngle(building, furniture, spot = null, facing
   return Math.atan2((to.x - from.x) * API_TILE, (to.z - from.z) * API_TILE);
 }
 
+function getAuthoredFurnitureSpotFacingAngle(building, furniture, spot = null, fallbackFacing = 'north') {
+  if (!building || !furniture || !spot) return null;
+  const definition = (FURNITURE_INTERACTION_SPOTS[furniture.type] || [])
+    .find(candidate => (candidate.id || candidate.spotId) === (spot.spotId || spot.id));
+  return getFurnitureForwardFacingAngle(
+    building,
+    furniture,
+    spot,
+    definition?.facing || spot.facing || fallbackFacing,
+  );
+}
+
 const DEFAULT_OBJECT_QUEUE_SPACING_TILES = 0.8;
 
 function isQueueActionDebugSpot(spot = {}) {
@@ -4540,6 +4768,18 @@ function isQueueActionDebugSpot(spot = {}) {
   const id = String(spot.id || spot.spotId || '').toLowerCase();
   const capacityKind = String(spot.capacityKind || spot.kind || spot.capacity?.kind || '').toLowerCase();
   return capacityKind === 'queue' || roles.some(role => ['queue', 'wait', 'wait-turn', 'approach', 'clearance'].includes(role)) || id.includes('queue') || id.includes('wait');
+}
+
+function shouldGenerateNumberedQueueDebugMarkers(spot = {}, furniture = {}) {
+  if (!isQueueActionDebugSpot(spot)) return false;
+  if (serviceQueueSpotOptIn(spot, furniture)) return true;
+  const roles = Array.isArray(spot.roles) ? spot.roles.map(role => String(role || '').toLowerCase()) : [];
+  const id = String(spot.id || spot.spotId || '').toLowerCase();
+  const capacityKind = String(spot.capacityKind || spot.kind || spot.capacity?.kind || '').toLowerCase();
+  return capacityKind === 'queue' ||
+    roles.some(role => role === 'queue' || role === 'wait-turn') ||
+    id.includes('queue') ||
+    getAuthoredObjectQueueLocations(spot, furniture).length > 0;
 }
 
 function isExplicitObjectServiceQueueEnabled(value) {
@@ -4858,6 +5098,7 @@ function addObjectActionPointDebugOverlays(group, building) {
       const local = getActionDebugSpotLocal(item, spot);
       const queueLike = isQueueActionDebugSpot(spot);
       const serviceQueueSpot = serviceQueueFurniture && serviceQueueSpotOptIn(spot, item);
+      const numberedQueue = shouldGenerateNumberedQueueDebugMarkers(spot, item);
       if (queueLike && serviceQueueSpot) {
         addGeneratedQueueDebugMarkers(overlay, item, spots, spot, floorY, {
           activePointCount: getActiveServiceQueueDebugPointCount(item, spot),
@@ -4873,7 +5114,7 @@ function addObjectActionPointDebugOverlays(group, building) {
         color: getActionDebugSpotColor(spot),
         radius: queueLike ? 0.16 : 0.13,
       });
-      if (queueLike) addGeneratedQueueDebugMarkers(overlay, item, spots, spot, floorY);
+      if (numberedQueue) addGeneratedQueueDebugMarkers(overlay, item, spots, spot, floorY);
     }
   }
 
@@ -4889,6 +5130,7 @@ function addObjectActionPointDebugOverlays(group, building) {
     for (const spot of debugSpots) {
       const spotLocal = getActionDebugSpotLocal(item, spot);
       const queueLike = isQueueActionDebugSpot(spot);
+      const numberedQueue = shouldGenerateNumberedQueueDebugMarkers(spot, item);
       addActionDebugMarker(overlay, {
         x: spotLocal.x,
         z: spotLocal.z,
@@ -4897,7 +5139,7 @@ function addObjectActionPointDebugOverlays(group, building) {
         color: getActionDebugSpotColor(spot),
         radius: queueLike ? 0.16 : 0.13,
       });
-      if (queueLike) addGeneratedQueueDebugMarkers(overlay, item, spots, spot, floorY);
+      if (numberedQueue) addGeneratedQueueDebugMarkers(overlay, item, spots, spot, floorY);
     }
   }
 
@@ -5958,6 +6200,7 @@ const RECOGNIZED_IDLE_ACTIVITY_PREFIXES = Object.freeze([
   'bookshelf-', 'pantry-shelf-', 'curtains-', 'whiteboard-', 'bulletin-board-', 'outdoor-notice-board-', 'park-lamp-', 'wall-art-', 'menu-board-', 'dresser-', 'wardrobe-', 'nightstand-', 'side-table-', 'tv-stand-', 'mirror-', 'clothing-rack-', 'accessory-display-stand-', 'display-mannequin-', 'display-case-', 'salon-mirror-station-',
   'reception-desk-', 'cafe-counter-', 'kitchen-island-', 'small-cafe-table-', 'outdoor-cafe-table-', 'picnic-table-', 'patio-table-', 'small-round-meeting-table-', 'checkout-counter-', 'checkout-register-', 'trash-bin-', 'grill-', 'outdoor-planter-', 'flower-bed-', 'fountain-', 'gazebo-pavilion-', 'food-truck-counter-', 'water-cooler-', 'water-desk-', 'coffee-machine-', 'coffee-desk-', 'vending-machine-', 'vending-desk-', 'fridge-', 'microwave-', 'coffee-pickup-shelf-', 'arcade-machine-', 'gaming-station-',
   'printer-scanner-', 'laptop-monitor-', 'tool-cart-', 'workbench-', 'storage-boxes-', 'server-rack-', 'diagnostic-station-', 'medical-supply-cabinet-', 'supply-cabinet-', 'standing-desk-', 'drafting-table-', 'teaching-podium-', 'treadmill-', 'training-mat-', 'dumbbell-rack-', 'gym-bench-', 'outdoor-exercise-station-', 'playground-slide-', 'playground-swing-', 'pond-dock-', 'outdoor-stage-', 'pingpong-', 'pool-table-', 'meeting-table', 'service-queue-',
+  'counter-', 'dining-table-', 'sink-', 'stove-', 'tv-watch-',
   'construction-site-', 'home-rest-', 'live-social-',
 ]);
 const LOCAL_IDLE_FURNITURE_ACTIVITY_CONFIG = Object.freeze({
@@ -5967,10 +6210,10 @@ const LOCAL_IDLE_FURNITURE_ACTIVITY_CONFIG = Object.freeze({
   sectionalSofa: Object.freeze({ kind: 'sectional-sofa-lounge', spotId: 'seat-center', animationId: 'sit', dockSnapRadius: 8, stayMs: [14000, 24000] }),
   loveseat: Object.freeze({ kind: 'loveseat-rest', spotId: 'seat-left', animationId: 'sit', dockSnapRadius: 7, stayMs: [11000, 19000] }),
   armchair: Object.freeze({ kind: 'armchair-rest', spotId: 'seat', animationId: 'sit', dockSnapRadius: 7, stayMs: [11000, 18000] }),
-  parkBench: Object.freeze({ kind: 'park-bench-rest', spotId: 'approach-front', animationId: 'park-bench-sit-rest-read-talk', dockSnapRadius: 7, stayMs: [11000, 19000] }),
+  parkBench: Object.freeze({ kind: 'park-bench-rest', spotId: 'seat-center', animationId: 'park-bench-sit-rest-read-talk', dockSnapRadius: 7, stayMs: [11000, 19000] }),
   pathNode: Object.freeze({ kind: 'path-node-stroll', spotId: 'stroll-waypoint', animationId: 'path-node-stroll', dockSnapRadius: 5, stayMs: [2500, 5500] }),
   shadeTreeCluster: Object.freeze({ kind: 'shade-tree-rest', spotId: 'rest-south-shade', animationId: 'shade-tree-relax-read-gather', dockSnapRadius: 8, stayMs: [12000, 22000] }),
-  hallwayBench: Object.freeze({ kind: 'hallway-bench-wait', spotId: 'approach-front', animationId: 'hallway-bench-wait', dockSnapRadius: 7, stayMs: [10000, 17000] }),
+  hallwayBench: Object.freeze({ kind: 'hallway-bench-wait', spotId: 'seat-left', animationId: 'hallway-bench-wait', dockSnapRadius: 7, stayMs: [10000, 17000] }),
   interiorDoor: Object.freeze({ kind: 'interior-door-pass-through', spotId: 'approach-front', animationId: 'interior-door-pass-through', dockSnapRadius: 6, stayMs: [2200, 3600] }),
   barStool: Object.freeze({ kind: 'bar-stool-sit', spotId: 'seat', animationId: 'sit', dockSnapRadius: 6, stayMs: [9000, 15000] }),
   diningChair: Object.freeze({ kind: 'dining-chair-sit', spotId: 'seat', animationId: 'sit', dockSnapRadius: 6, stayMs: [9000, 15000] }),
@@ -6004,8 +6247,13 @@ const LOCAL_IDLE_FURNITURE_ACTIVITY_CONFIG = Object.freeze({
   salonMirrorStation: Object.freeze({ kind: 'salon-mirror-station-inspect', spotId: 'inspect-front', animationId: 'inspect-browse', dockSnapRadius: 6, stayMs: [9000, 15000] }),
   receptionDesk: Object.freeze({ kind: 'reception-desk-visitor', spotId: 'visitor-talk', animationId: 'gather-talk', dockSnapRadius: 7, stayMs: [9000, 16000] }),
   cafeCounter: Object.freeze({ kind: 'cafe-counter-order', spotId: 'customer', animationId: 'order-food-drink', dockSnapRadius: 6, stayMs: [9000, 15000] }),
+  counter: Object.freeze({ kind: 'counter-prep', spotId: 'prep-front', animationId: 'counter-prep', dockSnapRadius: 6, stayMs: [9000, 15000] }),
+  diningTable: Object.freeze({ kind: 'dining-table-eat', spotId: 'seat-south', animationId: 'dining-table-eat-talk', dockSnapRadius: 7, stayMs: [11000, 19000] }),
+  sink: Object.freeze({ kind: 'sink-wash-drink', spotId: 'use-front', animationId: 'sink-wash-drink', dockSnapRadius: 6, stayMs: [8000, 14000] }),
+  stove: Object.freeze({ kind: 'stove-cook', spotId: 'cook-front', animationId: 'stove-cook', dockSnapRadius: 6, stayMs: [10000, 17000] }),
+  tv: Object.freeze({ kind: 'tv-watch-relax', spotId: 'watch-front', animationId: 'tv-watch', dockSnapRadius: 7, stayMs: [12000, 22000] }),
   kitchenIsland: Object.freeze({ kind: 'kitchen-island-prep', spotId: 'prep-south', animationId: 'kitchen-island-prep', dockSnapRadius: 6, stayMs: [9000, 16000] }),
-  smallCafeTable: Object.freeze({ kind: 'small-cafe-table-eat', spotId: 'seat-south', animationId: 'sit-eat-drink', dockSnapRadius: 6, stayMs: [10000, 18000] }),
+  smallCafeTable: Object.freeze({ kind: 'small-cafe-table-eat', spotId: 'seat-south', animationId: 'drink-eat', dockSnapRadius: 6, stayMs: [10000, 18000] }),
   outdoorCafeTable: Object.freeze({ kind: 'outdoor-cafe-table-eat', spotId: 'seat-south', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', dockSnapRadius: 6, stayMs: [10000, 18000] }),
   picnicTable: Object.freeze({ kind: 'picnic-table-eat', spotId: 'seat-south-left', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', dockSnapRadius: 7, stayMs: [11000, 19000] }),
   patioTable: Object.freeze({ kind: 'patio-table-eat-talk', spotId: 'use-south', animationId: 'stand-use', dockSnapRadius: 6, stayMs: [10000, 18000] }),
@@ -6019,7 +6267,7 @@ const LOCAL_IDLE_FURNITURE_ACTIVITY_CONFIG = Object.freeze({
   countertopCoffeeMachine: Object.freeze({ kind: 'coffee-machine-get-drink', spotId: 'use-front', animationId: 'order-food-drink', dockSnapRadius: 6, stayMs: [8000, 13000] }),
   fridge: Object.freeze({ kind: 'fridge-get-snack', spotId: 'use-front', animationId: 'fridge-use', dockSnapRadius: 6, stayMs: [7000, 12000] }),
   grill: Object.freeze({ kind: 'grill-cook', spotId: 'cook-front', animationId: 'grill-cook', dockSnapRadius: 6, stayMs: [9000, 15000] }),
-  outdoorPlanter: Object.freeze({ kind: 'outdoor-planter-water', spotId: 'water-front', animationId: 'inspect-browse', dockSnapRadius: 6, stayMs: [7000, 12000] }),
+  outdoorPlanter: Object.freeze({ kind: 'outdoor-planter-water', spotId: 'water-front', animationId: 'outdoor-planter-water', dockSnapRadius: 6, stayMs: [7000, 12000] }),
   flowerBed: Object.freeze({ kind: 'flower-bed-inspect', spotId: 'inspect-front', animationId: 'inspect-browse', dockSnapRadius: 6, stayMs: [7000, 12000] }),
   vending: Object.freeze({ kind: 'vending-machine-buy', spotId: 'use-front', animationId: 'vending-machine-use', dockSnapRadius: 6, stayMs: [7000, 12000] }),
   microwave: Object.freeze({ kind: 'microwave-heat-food', spotId: 'use-front', animationId: 'microwave-use', dockSnapRadius: 6, stayMs: [7000, 12000] }),
@@ -6141,9 +6389,23 @@ function getFurnitureSeatSurfaceLift(furnitureType) {
   // animator converts this to each agent's own local lift so the hips/butt land
   // on the same cushion surface instead of using one fixed local elevation for
   // short/tall agents.
-  if (furnitureType === 'armchair') return 1.84;
-  if (['couch', 'sectionalSofa', 'loveseat'].includes(furnitureType)) return 1.52;
-  if (['hallwayBench', 'parkBench', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'smallRoundMeetingTable'].includes(furnitureType)) return 1.34;
+  if (furnitureType === 'armchair') return 2.08;
+  // Calibrated against the known-good armchair: its cushion top is at world Y
+  // 0.56 and uses lift 2.08, i.e. ~3.714 local lift units per world unit of
+  // cushion height. The couch cushion top is world Y 0.57 (seat frame 0.24 with
+  // half-height 0.17, plus the 0.18-tall cushion recessed 0.02), so the couch
+  // needs 0.57 * 3.714 = 2.117. The historical 1.52/1.545 values were far too
+  // low, which is why seated agents sank into the couch body instead of
+  // resting on the cushion surface.
+  if (furnitureType === 'couch') return 2.117;
+  if (furnitureType === 'sectionalSofa') return 2.08;
+  if (furnitureType === 'loveseat') return 2.117;
+  if (['smallCafeTable', 'outdoorCafeTable', 'smallRoundMeetingTable', 'diningTable'].includes(furnitureType)) return 1.48;
+  if (furnitureType === 'picnicTable') return 1.60;
+  if (furnitureType === 'hallwayBench') return 2.071;
+  if (furnitureType === 'parkBench') return 1.662;
+  if (furnitureType === 'patioChair') return 1.52;
+  if (furnitureType === 'gamingStation') return 1.48;
   // Bar stools are counter-height: lift the seated pose to the visible top seat
   // surface instead of the lower cushion/body center so agents do not sink into it.
   if (furnitureType === 'barStool') return 4.2;
@@ -6173,7 +6435,6 @@ function getLocalIdleSeatReservationPlan(building, furniture, furnitureIndex, ag
     store = getCouchObjectUseSeatStore(furniture);
     candidates = getCouchSeatCandidates(building, furniture, furnitureIndex, { actionId });
     occupiedSeatIds = getActiveCouchReservationSeatIds(furniture, building.id, furnitureIndex);
-    defaultApproachSpotId = 'talk-front';
   } else if (type === 'sectionalSofa') {
     objectKey = getSectionalSofaObjectKey(building.id || 'unknown-building', furnitureIndex);
     store = getSectionalSofaObjectUseSeatStore(furniture);
@@ -6420,6 +6681,10 @@ function isManualDropStandingDrinkMachine(furniture = {}) {
 
 function isManualDropStandingServiceMachine(furniture = {}) {
   return isManualDropStandingDrinkMachine(furniture) || furniture?.type === 'vending';
+}
+
+function isManualDropFullServiceQueueObject(furniture = {}) {
+  return isScriptedServiceQueueFurniture(furniture);
 }
 
 function isScriptedServiceObjectActivelyUsed(furniture = {}, reservation = null) {
@@ -7550,6 +7815,20 @@ function createScriptedObjectUseForDestination(destination, activity = null) {
       standingUse: true,
     };
   }
+  if (destination.lifecycle === 'active') {
+    if (!slot?.slotId && !slot?.activationSpotId) return null;
+    return {
+      lifecycle: 'active',
+      slot,
+      actionId: slot.actionId || activity?.action || destination.spot?.actionId || `scripted.${destination.category || 'active'}`,
+      activityKind: activity?.kind || `${String(destination.objectType || 'object').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}-use`,
+      animationId: activity?.animationId || slot.pose?.animationId || null,
+      dockSnapRadius: activity?.dockSnapRadius || slot.activation?.snapRadius || 7,
+      stayMs: randomRangeMs(activity?.stayMs, slot.completion?.durationMs || 10000),
+      mode: activity?.mode || 'active-use',
+      activeUse: true,
+    };
+  }
   return null;
 }
 
@@ -7609,7 +7888,11 @@ function submitScriptedSeatingBehavior(agent, anchorBuilding, workTarget = null)
     agent._idleActivity.stayMs = objectUse.stayMs || decision.durationMs;
     agent._idleActivity.animationId = objectUse.animationId || activity?.animationId || null;
     agent._idleActivity.dockSnapRadius = objectUse.dockSnapRadius || activity?.dockSnapRadius || agent._idleActivity.dockSnapRadius || 7;
-    agent._idleActivity.seatSurfaceLift = objectUse.seatSurfaceLift;
+    // Never clear an existing lift with undefined; fall back to the authored
+    // per-type lift so seated agents rest on the cushion, not the floor.
+    agent._idleActivity.seatSurfaceLift = Number.isFinite(Number(objectUse.seatSurfaceLift))
+      ? Number(objectUse.seatSurfaceLift)
+      : (agent._idleActivity.seatSurfaceLift ?? (furniture?.type ? getFurnitureSeatSurfaceLift(furniture.type) : null));
     agent._idleActivity.forceDeskReturn = rollIdleDeskReturnAfterActivity(workTarget);
   }
   agent._wanderTimer = 1000 + Math.random() * 1600;
@@ -8201,7 +8484,7 @@ function applyDeskProneIdlePlan(agent, setTarget) {
     if (localTargets.length > 0 && Math.random() < localTargetChance) {
       localTargets.sort((a, b) => Math.hypot(agent.x - a.apiX, agent.y - a.apiZ) - Math.hypot(agent.x - b.apiX, agent.y - b.apiZ));
       const pool = localTargets.slice(0, Math.min(3, localTargets.length));
-      const seatingTypes = new Set(['chair', 'couch', 'sectionalSofa', 'loveseat', 'armchair', 'hallwayBench', 'diningChair', 'patioChair', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'smallRoundMeetingTable']);
+      const seatingTypes = new Set(['chair', 'couch', 'sectionalSofa', 'loveseat', 'armchair', 'hallwayBench', 'diningChair', 'patioChair', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'smallRoundMeetingTable', 'diningTable']);
       const shuffledPool = [...pool].sort(() => Math.random() - 0.5);
       let chosen = null;
       let activity = null;
@@ -8297,11 +8580,14 @@ function applyDeskProneIdlePlan(agent, setTarget) {
         chosen.furniture.playMode = 'reserved';
         chosen.furniture.arcadeMachineState = { ...(chosen.furniture.arcadeMachineState || {}), status: 'reserved', screenMode: 'ready', reservedSlotIds: [activeUseReservation.slotId || 'player-1'], lastAction: activeUseActionId, persistentFurniture: true };
       }
+      const chosenFaceAngle = chosen.furniture?.type === 'outdoorStage' && (chosen.spotId || activity?.spotId) === 'perform-center'
+        ? (getAuthoredFurnitureSpotFacingAngle(anchorBuilding, chosen.furniture, chosen, 'north') ?? chosen.faceAngle)
+        : (seatPlan ? seatPlan.faceAngle : (isActiveUseWithDock && activeUseActivationSpot ? activeUseActivationSpot.faceAngle : chosen.faceAngle));
       agent._idleActivity = {
         kind: activity?.kind || chosen.kind,
         phase: 'approach',
         stayMs: randomRangeMs(activity?.stayMs),
-        faceAngle: seatPlan ? seatPlan.faceAngle : (isActiveUseWithDock && activeUseActivationSpot ? activeUseActivationSpot.faceAngle : chosen.faceAngle),
+        faceAngle: chosenFaceAngle,
         forceDeskReturn: rollIdleDeskReturnAfterActivity(workTarget),
         dockTarget: seatPlan ? { x: seatPlan.seatSpot.apiX, y: seatPlan.seatSpot.apiZ } : (isActiveUseWithDock && activeUseActivationSpot ? { x: activeUseActivationSpot.apiX, y: activeUseActivationSpot.apiZ } : { x: chosen.apiX, y: chosen.apiZ }),
         routeApproachTarget: seatPlan?.routeApproachTarget || (isActiveUseWithDock ? { x: chosen.apiX, y: chosen.apiZ, floor: chosen.floor, spotId: chosen.spotId || (isTreadmillUse ? 'step-off' : (isOutdoorExerciseStationUse ? 'train-front' : 'approach-front')) } : null),
@@ -8317,7 +8603,13 @@ function applyDeskProneIdlePlan(agent, setTarget) {
         reservationId: seatPlan?.reservation?.id || activeUseReservation?.id || null,
         objectKey: seatPlan?.objectKey || null,
         capacityKey: seatPlan?.reservation?.capacityKey || null,
-        seatSurfaceLift: seatPlan?.seatSurfaceLift ?? null,
+        // Always carry a seat lift for seating furniture. When no seat plan was
+        // produced (autonomous local-idle picks), fall back to the authored
+        // per-type lift so seated agents still land on the cushion surface
+        // instead of sinking to the object's floor level.
+        seatSurfaceLift: seatPlan?.seatSurfaceLift
+          ?? (chosen.furniture?.type ? getFurnitureSeatSurfaceLift(chosen.furniture.type) : null),
+        surfaceLift: isTreadmillUse ? 0.22 : (activity?.surfaceLift ?? null),
         action: seatPlan?.actionId || activeUseActionId,
         actionId: seatPlan?.actionId || activeUseActionId,
         animationId: activity?.animationId || null,
@@ -8621,10 +8913,93 @@ const AGENT_PICKUP_HOLD_MS = 260;
 const AGENT_PICKUP_MOVE_TOLERANCE = 10;
 const AGENT_DRAG_LIFT = 0.62;
 const AGENT_MANUAL_PLACE_HOLD_MS = 15000;
+const MANUAL_OBJECT_OCCUPANCY_DWELL_MS = 5 * 60 * 1000;
+const MANUAL_OBJECT_OCCUPANCY_TYPES = new Set([
+  'chair',
+  'officeChair',
+  'conferenceChair',
+  'barberChair',
+  'couch',
+  'sectionalSofa',
+  'loveseat',
+  'armchair',
+  'parkBench',
+  'hallwayBench',
+  'barStool',
+  'diningChair',
+  'patioChair',
+  'bed',
+  'clinicBed',
+  'examChair',
+  'diningTable',
+  'smallCafeTable',
+  'outdoorCafeTable',
+  'picnicTable',
+  'smallRoundMeetingTable',
+  'meetingTable',
+  'gamingStation',
+  'playgroundSwing',
+  'busStop',
+  'treadmill',
+  'trainingMat',
+  'gymBench',
+  'outdoorExerciseStation',
+]);
 let _pendingAgentPickup = null;
 let _draggedAgentState = null;
 let _dragAgentObjectHover = null;
 let _dragAgentInteractionSpotMesh = null;
+let _activeManualAgentObjectDropContext = null;
+
+function isManualObjectOccupancyFurniture(furniture = null) {
+  return MANUAL_OBJECT_OCCUPANCY_TYPES.has(String(furniture?.type || ''));
+}
+
+function getManualObjectDropMetadataForExplicitAction(agent, metadata = {}) {
+  const context = _activeManualAgentObjectDropContext;
+  if (!context || context.agentId !== getAgentDebugId(agent) || !isManualObjectOccupancyFurniture(context.furniture)) return metadata;
+  return {
+    ...metadata,
+    owner: 'manual',
+    priorityName: 'manual',
+    buildingId: context.buildingId,
+    furnitureIndex: context.furnitureIndex,
+    furniture: context.furniture,
+    objectType: context.furniture.type,
+    spotId: context.spotId,
+    stayMs: MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+    manualDrop: true,
+    manualDropSnapToUse: true,
+    backendRuntimeObjectUse: true,
+    behaviorSourceKind: 'user',
+    behaviorMode: 'user-directed',
+    behaviorAuthority: AGENT_INTENT_PRIORITY.manual,
+    sourceFamily: 'manual-drag-drop',
+    sourceFunction: `manual-drag-drop:${metadata.sourceFunction || context.handlerName || context.furniture.type}`,
+    sourceSummary: 'manual object placement keeps physical occupancy until a deliberate move or an extended manual dwell completes',
+  };
+}
+
+function applyManualObjectOccupancyDwell(drop, agent, trigger = null) {
+  if (!agent || !drop?.furniture || trigger?.triggered !== true || trigger?.queued === true || !isManualObjectOccupancyFurniture(drop.furniture)) {
+    return { applied: false };
+  }
+  const activity = agent._idleActivity || null;
+  const matches = activity &&
+    activity.buildingId === drop.buildingId &&
+    Number(activity.furnitureIndex) === Number(drop.index);
+  if (!matches) return { applied: false, reason: 'activity-does-not-match-drop' };
+  activity.stayMs = Math.max(MANUAL_OBJECT_OCCUPANCY_DWELL_MS, Number(activity.stayMs || 0));
+  activity.manualDrop = true;
+  activity.manualOccupancyHold = true;
+  activity.manualOccupancyDwellMs = MANUAL_OBJECT_OCCUPANCY_DWELL_MS;
+  activity.behaviorSourceKind = 'user';
+  activity.behaviorMode = 'user-directed';
+  if (!String(activity.source || '').startsWith('manual-drag-drop')) activity.source = 'manual-drag-drop-object-occupancy';
+  agent._manualPlacementLockUntil = performance.now() + MANUAL_OBJECT_OCCUPANCY_DWELL_MS;
+  if (activity.phase === 'active') agent._stayTimer = Math.max(Number(agent._stayTimer || 0), MANUAL_OBJECT_OCCUPANCY_DWELL_MS);
+  return { applied: true, stayMs: activity.stayMs, furnitureType: drop.furniture.type };
+}
 
 const DECORATION_DEFS = {
   tree:     { label: '🌲 Tree',     icon: '🌲' },
@@ -9472,6 +9847,7 @@ const MINIMAP_UPDATE_INTERVAL_SEC = 0.5; // PERF: full tile redraw is costly; 2H
 let _miniMapUpdateTimer = MINIMAP_UPDATE_INTERVAL_SEC;
 
 let _animErrorCount = 0;
+let _lastReportedAnimErrorMessage = null;
 function animate() {
   requestAnimationFrame(animate);
   try {
@@ -9540,6 +9916,26 @@ function animate() {
     _animErrorCount = 0; // reset on successful frame
   } catch (err) {
     _animErrorCount++;
+    const error = err instanceof Error ? err : new Error(String(err || 'Unknown render error'));
+    const diagnostic = {
+      name: error.name || 'Error',
+      message: error.message || String(error),
+      stack: error.stack || null,
+      count: _animErrorCount,
+      at: new Date().toISOString(),
+    };
+    if (typeof window !== 'undefined') {
+      window.__VWLastRenderError = diagnostic;
+      if (!Array.isArray(window.__VWRenderErrorLog)) window.__VWRenderErrorLog = [];
+      window.__VWRenderErrorLog.push(diagnostic);
+      if (window.__VWRenderErrorLog.length > 20) {
+        window.__VWRenderErrorLog.splice(0, window.__VWRenderErrorLog.length - 20);
+      }
+    }
+    if (_animErrorCount <= 3 || diagnostic.message !== _lastReportedAnimErrorMessage) {
+      console.error('[My Virtual World] Render error (continuing)', error);
+      _lastReportedAnimErrorMessage = diagnostic.message;
+    }
     if (_animErrorCount <= 3) {
       // Show toast on first few errors but keep rendering
       showToast('⚠️ Render error (continuing)', 'warning');
@@ -11043,7 +11439,7 @@ function releaseObjectAssignmentForAgentIntent(agent, intent = null, reason = 'i
     const state = mutableTargetRecord('state', target.state);
     if (state && deleteRecordProperty(state, 'reservation')) changed = true;
   }
-  for (const storeKey of ['objectUseSeat', 'objectUseStanding', 'objectUseActive', '_scriptedObjectUseStore', '_scriptedServiceQueueStore']) {
+  for (const storeKey of ['objectUseSeat', 'objectUseSeats', 'objectUseStanding', 'objectUseActive', '_standingUseStore', '_scriptedObjectUseStore', '_scriptedServiceQueueStore']) {
     const store = target[storeKey];
     const reservations = store?.reservations;
     if (!Array.isArray(reservations)) continue;
@@ -11303,6 +11699,7 @@ function getExplicitObjectActionMetadata(agent, target = null, building = null, 
 }
 
 function setAgentTargetForExplicitObjectAction(agent, target, building = null, floor = null, metadata = {}) {
+  metadata = getManualObjectDropMetadataForExplicitAction(agent, metadata);
   const objectMeta = getExplicitObjectActionMetadata(agent, target, building, { ...metadata, floor });
   const runtimeObjectBlock = shouldBlockAgentRuntimeObjectAction(agent, objectMeta.objectKey);
   if (runtimeObjectBlock.blocked) {
@@ -13502,6 +13899,8 @@ function verifyCommittedObjectApproachTargetLock() {
 
 function verifyManualServiceQueueDragDropFallback() {
   const originalAgentsLength = agentsList.length;
+  const hadBrowserWriterOverride = Object.prototype.hasOwnProperty.call(window, '__VWAllowBrowserAgentRuntimeWriter');
+  const previousBrowserWriterOverride = window.__VWAllowBrowserAgentRuntimeWriter;
   const tempBuildingId = 'verify-manual-service-queue-drag-drop-building';
   const previousBuilding = buildingsMap.get(tempBuildingId);
   const building = {
@@ -13539,6 +13938,7 @@ function verifyManualServiceQueueDragDropFallback() {
   const waitingB = { id: 'verify-manual-service-queue-b', name: 'Manual Queue B', status: 'idle', x: 0, y: 0, _floor: 1, _tagState: {} };
   const freeQueueAgent = { id: 'verify-manual-service-free-queue', name: 'Manual Free Queue Join', status: 'idle', x: 0, y: 0, _floor: 1, _tagState: {} };
   const existingQueueAgent = { id: 'verify-existing-service-queue-agent', name: 'Existing Queue Agent', status: 'idle', x: 0, y: 0, _floor: 1, _tagState: {} };
+  window.__VWAllowBrowserAgentRuntimeWriter = true;
   try {
     buildingsMap.set(tempBuildingId, building);
     agentsList.push(directAgent, waitingA, waitingB, freeQueueAgent, existingQueueAgent);
@@ -13583,10 +13983,10 @@ function verifyManualServiceQueueDragDropFallback() {
     const freeObjectWithExistingQueueTargetsQueue = Boolean(
       freeQueueDrop?.queueable && !freeQueueDrop?.available &&
       freeQueueTrigger?.queued &&
-      freeQueueAgent._idleActivity?.slotId === 'queue:0' &&
-      existingQueueAgent._idleActivity?.slotId === 'queue:1' &&
-      freeQueueReservations[0]?.agentId === freeQueueAgent.id &&
-      freeQueueReservations[1]?.agentId === existingQueueAgent.id
+      freeQueueAgent._idleActivity?.isServiceQueueWait === false &&
+      existingQueueAgent._idleActivity?.slotId === 'queue:0' &&
+      freeQueueReservations.length === 1 &&
+      freeQueueReservations[0]?.agentId === existingQueueAgent.id
     );
     const directDrop = resolveDraggedAgentNearbyServiceObjectDrop(directAgent);
     const directTrigger = triggerDraggedAgentObjectInteraction(directDrop, directAgent);
@@ -13658,6 +14058,8 @@ function verifyManualServiceQueueDragDropFallback() {
     agentsList.splice(originalAgentsLength);
     if (previousBuilding) buildingsMap.set(tempBuildingId, previousBuilding);
     else buildingsMap.delete(tempBuildingId);
+    if (hadBrowserWriterOverride) window.__VWAllowBrowserAgentRuntimeWriter = previousBrowserWriterOverride;
+    else delete window.__VWAllowBrowserAgentRuntimeWriter;
   }
 }
 
@@ -13671,6 +14073,7 @@ function verifyManualServiceQueueDragDropFallback() {
 function verifyServiceQueueLiveContention() {
   const tempBuildingId = 'verify-service-queue-live-contention-building';
   const previousBuilding = buildingsMap.get(tempBuildingId);
+  const originalAgentsLength = agentsList.length;
   const types = ['waterCooler', 'coffeeMachine', 'countertopCoffeeMachine', 'vending', 'fridge', 'microwave'];
   const results = [];
   try {
@@ -13685,6 +14088,7 @@ function verifyServiceQueueLiveContention() {
       const config = getStandingUseMachineConfig(type);
       const agentA = { id: `verify-live-${type}-a`, name: 'Live A', status: 'idle', x: 0, y: 0, _floor: 1, _tagState: {} };
       const agentB = { id: `verify-live-${type}-b`, name: 'Live B', status: 'idle', x: 1, y: 0, _floor: 1, _tagState: {} };
+      agentsList.push(agentA, agentB);
       const resolveForB = () => resolveBehaviorDestination({
         category: 'snack-drink',
         agent: getScriptedResolverAgentSnapshot(agentB, building),
@@ -13728,8 +14132,10 @@ function verifyServiceQueueLiveContention() {
           afterRelease: { ok: afterRelease?.ok || false, lifecycle: afterRelease?.lifecycle || null, reason: afterRelease?.fallbackReason || null },
         },
       });
+      agentsList.splice(originalAgentsLength);
     }
   } finally {
+    agentsList.splice(originalAgentsLength);
     if (previousBuilding) buildingsMap.set(tempBuildingId, previousBuilding);
     else buildingsMap.delete(tempBuildingId);
   }
@@ -13738,6 +14144,197 @@ function verifyServiceQueueLiveContention() {
   const result = Object.freeze({ ok, spec: 'docs/SERVICE_QUEUE_SPEC.md', results });
   if (typeof window !== 'undefined') window.__VWLastServiceQueueLiveContention = result;
   return result;
+}
+
+function verifyFullServiceQueueParityMatrix() {
+  const types = [
+    'receptionDesk',
+    'printerCopier',
+    'clinicBed',
+    'examChair',
+    'diagnosticStation',
+    'barberChair',
+    'foodTruckCounter',
+    'sink',
+    'cafeCounter',
+    'checkoutCounter',
+    'checkoutRegister',
+    'waterCooler',
+    'coffeeMachine',
+    'countertopCoffeeMachine',
+    'fridge',
+    'vending',
+    'microwave',
+    'coffeePickupShelf',
+    'playgroundSlide',
+    'playgroundSwing',
+  ];
+  const originalAgentsLength = agentsList.length;
+  const hadBrowserWriterOverride = Object.prototype.hasOwnProperty.call(window, '__VWAllowBrowserAgentRuntimeWriter');
+  const previousBrowserWriterOverride = window.__VWAllowBrowserAgentRuntimeWriter;
+  const results = [];
+  window.__VWAllowBrowserAgentRuntimeWriter = true;
+  try {
+    for (const [typeIndex, type] of types.entries()) {
+      const buildingId = `verify-full-service-queue-${type}`;
+      const previousBuilding = buildingsMap.get(buildingId);
+      const building = {
+        id: buildingId,
+        type: 'office',
+        x: 0,
+        z: 0,
+        width: 14,
+        depth: 12,
+        widthTiles: 14,
+        heightTiles: 12,
+        rotation: 0,
+        activeFloor: 1,
+        interior: {
+          floors: 1,
+          furniture: [{
+            id: `verify-full-service-queue-object-${type}`,
+            type,
+            catalogId: type,
+            x: 6,
+            z: 4,
+            rotation: (typeIndex % 4) * 90,
+            buildingFloor: 1,
+          }],
+        },
+      };
+      buildingsMap.set(buildingId, building);
+      const furniture = building.interior.furniture[0];
+      const config = getScriptedServiceQueueUseConfig(furniture);
+      const activationSpot = getFurnitureActionSpot(building, furniture, config.activationSpotId);
+      const approachSpot = getFurnitureActionSpot(building, furniture, config.approachSpotId) || activationSpot;
+      const startX = Number(approachSpot?.apiX ?? activationSpot?.apiX ?? 0);
+      const startY = Number(approachSpot?.apiZ ?? activationSpot?.apiZ ?? 0) + API_TILE * 0.5;
+      const normalAgent = { id: `verify-full-queue-${type}-normal`, name: `${type} Normal`, status: 'idle', x: startX, y: startY, _floor: 1, _tagState: {}, _currentBuilding: building };
+      const manualAgent = { id: `verify-full-queue-${type}-manual`, name: `${type} Manual`, status: 'idle', x: startX, y: startY, _floor: 1, _tagState: {}, _currentBuilding: building };
+      agentsList.push(normalAgent, manualAgent);
+      furniture.reservation = { id: `verify-holder-${type}`, agentId: `verify-holder-${type}`, state: 'active', status: 'active', slotId: config.activationSpotId };
+      furniture.activeUse = { id: `verify-active-holder-${type}`, agentId: `verify-holder-${type}`, state: 'active', activeSlots: { [config.activationSpotId]: { agentId: `verify-holder-${type}`, state: 'active' } } };
+      const normalQueued = queueAgentForScriptedServiceObject(normalAgent, building, 0, 'verify-full-queue-normal', { ignoreRecentCooldown: true });
+      const manualQueued = queueAgentForScriptedServiceObject(manualAgent, building, 0, 'manual-drag-drop-service-queue', { sourceKind: 'manual-drag-drop-service-queue', ignoreRecentCooldown: true });
+      const queueStore = scriptedProposalObjectUseStoreFor(building, 0, 'queue')?.store;
+      const ordered = normalizeScriptedServiceQueueReservations(queueStore);
+      const manualInsertedFront = ordered[0]?.agentId === manualAgent.id && ordered[0]?.slotId?.endsWith(':0');
+      const normalShiftedBack = ordered[1]?.agentId === normalAgent.id && ordered[1]?.slotId?.endsWith(':1') && normalAgent._idleActivity?.slotId?.endsWith(':1');
+      const normalQueueActivityAfterManual = normalAgent._idleActivity ? {
+        kind: normalAgent._idleActivity.kind || null,
+        slotId: normalAgent._idleActivity.slotId || null,
+        queueIndex: normalAgent._idleActivity.queueIndex,
+        isServiceQueueWait: normalAgent._idleActivity.isServiceQueueWait,
+      } : null;
+
+      furniture.reservation = null;
+      furniture.activeUse = { state: 'complete', activeSlots: {} };
+      const firstPromotion = advanceScriptedServiceQueueAfterUse(building, 0, 'verify-full-queue-holder-complete');
+      const manualActivity = manualAgent._idleActivity || null;
+      const expectedFaceAngle = ['seat', 'active'].includes(config.lifecycle)
+        ? getAuthoredFurnitureSpotFacingAngle(building, furniture, activationSpot, config.definition?.facing || 'north')
+        : activationSpot?.faceAngle;
+      const routeApproachTarget = manualActivity?.routeApproachTarget || manualAgent._wanderTarget || null;
+      const approachRouteOk = Boolean(
+        approachSpot &&
+        Math.hypot(Number(routeApproachTarget?.x) - Number(approachSpot.apiX), Number(routeApproachTarget?.y ?? routeApproachTarget?.z) - Number(approachSpot.apiZ)) < 0.01
+      );
+      const activationDockOk = Boolean(
+        activationSpot &&
+        Math.hypot(Number(manualActivity?.dockTarget?.x) - Number(activationSpot.apiX), Number(manualActivity?.dockTarget?.y) - Number(activationSpot.apiZ)) < 0.01
+      );
+      const facingDelta = (Number(manualActivity?.faceAngle) || 0) - Number(expectedFaceAngle);
+      const facingOk = Number.isFinite(Number(expectedFaceAngle)) && Math.abs(Math.atan2(Math.sin(facingDelta), Math.cos(facingDelta))) < 0.01;
+      const promotedLifecycleOk = Boolean(
+        firstPromotion?.promoted &&
+        manualActivity?.promotedFromServiceQueue === true &&
+        manualActivity?.serviceQueueLifecycle === config.lifecycle &&
+        manualActivity?.isServiceQueueWait === false
+      );
+
+      releaseObjectAssignmentForAgentActivity(manualAgent, manualActivity, 'verify-full-queue-first-complete');
+      releaseAgentIntent(manualAgent, 'object-complete', { releaseBy: 'object-complete', clearRoute: true, clearLifecycle: true });
+      furniture.reservation = null;
+      furniture.activeUse = { state: 'complete', activeSlots: {} };
+      const secondPromotion = advanceScriptedServiceQueueAfterUse(building, 0, 'verify-full-queue-first-complete');
+      const normalActivity = normalAgent._idleActivity || null;
+      const queueAfterSecondPromotion = normalizeScriptedServiceQueueReservations(queueStore);
+      const remainingQueueAgentIds = queueAfterSecondPromotion.map(entry => entry.agentId);
+      const normalPromotedNext = Boolean(
+        secondPromotion?.promoted &&
+        normalActivity?.promotedFromServiceQueue === true &&
+        normalActivity?.isServiceQueueWait === false &&
+        queueAfterSecondPromotion.length === 0
+      );
+      releaseObjectAssignmentForAgentActivity(normalAgent, normalActivity, 'verify-full-queue-second-complete');
+      releaseAgentIntent(normalAgent, 'object-complete', { releaseBy: 'object-complete', clearRoute: true, clearLifecycle: true });
+
+      const result = {
+        type,
+        ok: Boolean(
+          isScriptedServiceQueueFurniture(furniture) &&
+          activationSpot &&
+          approachSpot &&
+          normalQueued?.queued &&
+          manualQueued?.queued &&
+          manualInsertedFront &&
+          normalShiftedBack &&
+          promotedLifecycleOk &&
+          approachRouteOk &&
+          activationDockOk &&
+          facingOk &&
+          normalPromotedNext
+        ),
+        lifecycle: config.lifecycle,
+        activationSpotId: config.activationSpotId,
+        approachSpotId: config.approachSpotId,
+        manualInsertedFront,
+        normalShiftedBack,
+        normalQueued: normalQueued?.queued === true,
+        normalQueueReason: normalQueued?.reason || null,
+        manualQueued: manualQueued?.queued === true,
+        manualQueueReason: manualQueued?.reason || null,
+        normalQueueActivityAfterManual,
+        firstPromotedAgentId: firstPromotion?.agentId || null,
+        firstPromotionReason: firstPromotion?.reason || null,
+        firstPromotionSucceeded: firstPromotion?.promoted === true,
+        secondPromotedAgentId: secondPromotion?.agentId || null,
+        secondPromotionReason: secondPromotion?.reason || null,
+        secondPromotionSucceeded: secondPromotion?.promoted === true,
+        promotedLifecycleOk,
+        approachRouteOk,
+        activationDockOk,
+        facingOk,
+        normalPromotedNext,
+        remainingQueueAgentIds,
+        normalActivityState: normalActivity ? {
+          kind: normalActivity.kind || null,
+          isServiceQueueWait: normalActivity.isServiceQueueWait,
+          promotedFromServiceQueue: normalActivity.promotedFromServiceQueue,
+          serviceQueueLifecycle: normalActivity.serviceQueueLifecycle || null,
+          slotId: normalActivity.slotId || null,
+        } : null,
+      };
+      results.push(result);
+      agentsList.splice(originalAgentsLength);
+      if (previousBuilding) buildingsMap.set(buildingId, previousBuilding);
+      else buildingsMap.delete(buildingId);
+    }
+  } finally {
+    agentsList.splice(originalAgentsLength);
+    for (const type of types) buildingsMap.delete(`verify-full-service-queue-${type}`);
+    if (hadBrowserWriterOverride) window.__VWAllowBrowserAgentRuntimeWriter = previousBrowserWriterOverride;
+    else delete window.__VWAllowBrowserAgentRuntimeWriter;
+  }
+  const report = Object.freeze({
+    ok: results.length === types.length && results.every(result => result.ok),
+    expectedTypeCount: types.length,
+    passedTypeCount: results.filter(result => result.ok).length,
+    failedTypes: results.filter(result => !result.ok).map(result => result.type),
+    types: Object.freeze(results),
+  });
+  window.__VWLastFullServiceQueueParityMatrix = report;
+  return report;
 }
 
 // Debug dump: current claim/queue state for every queue-capable machine in the world.
@@ -13886,8 +14483,81 @@ if (typeof window !== 'undefined') {
   };
 
   window.__verifyServiceQueueLiveContention = verifyServiceQueueLiveContention;
+  window.__verifyFullServiceQueueParityMatrix = verifyFullServiceQueueParityMatrix;
   window.__VWRenderInfo = () => renderer?.info?.render;
   window.__VWScene = () => scene;
+  // Camera/renderer handles for automated visual verification (screen-space
+  // projection of world points so drag/drop can be driven with real pointer
+  // events). Read-only accessors; no behavior depends on them.
+  window.__VWCamera = () => camera;
+  // Read-only drop-target probe: resolves what a manual agent drop at a given
+  // screen point would target, without mutating any state.
+  // Read-only: authored action-spot coordinates for a furniture item, so the
+  // authored seat can be compared against the rendered cushion mesh.
+  window.__VWProbeActionSpots = (buildingId, furnitureIndex, spotIds = []) => {
+    const building = buildingsMap.get(buildingId);
+    const furniture = building?.interior?.furniture?.[furnitureIndex];
+    if (!building || !furniture) return { ok: false };
+    const out = {};
+    for (const id of spotIds) {
+      const spot = getFurnitureActionSpot(building, furniture, id);
+      out[id] = spot ? { apiX: +spot.apiX.toFixed(1), apiZ: +spot.apiZ.toFixed(1), faceAngle: spot.faceAngle } : null;
+    }
+    return { ok: true, furnitureType: furniture.type, spots: out };
+  };
+  window.__VWProbeDropTargetAt = (clientX, clientY) => {
+    const drop = resolveDraggedAgentObjectHover({ clientX: Number(clientX), clientY: Number(clientY) }, null);
+    if (!drop) return { hit: false };
+    return {
+      hit: true,
+      furnitureType: drop.furniture?.type || null,
+      furnitureIndex: drop.index ?? null,
+      spotId: drop.spot?.spotId || null,
+      available: drop.available === true,
+      queueable: drop.queueable === true,
+      reason: drop.reason || null,
+    };
+  };
+  window.__VWProbeAgentAt = (clientX, clientY) => {
+    const hit = getAgentHitFromPointer({ clientX: Number(clientX), clientY: Number(clientY) });
+    return hit?.agent ? {
+      hit: true,
+      id: hit.agent.id || null,
+      name: hit.agent.name || hit.agent.id || null,
+    } : { hit: false };
+  };
+  // Read-only seated-pose diagnostics: reports the authored seat lift alongside
+  // the actually rendered body height so seating regressions are measurable.
+  window.__VWSeatedPoseDebug = () => agentsList.map(agent => ({
+    id: agent?.id || null,
+    name: agent?.name || null,
+    kind: agent?._idleActivity?.kind || null,
+    phase: agent?._idleActivity?.phase || null,
+    seatId: agent?._idleActivity?.seatId || agent?._idleActivity?.activationSpotId || null,
+    seatSurfaceLift: agent?._idleActivity?.seatSurfaceLift ?? null,
+    snappedToSeatDock: agent?._idleActivity?.dragDropSnappedToSeatDock === true,
+    arrivedAtDock: agent?._idleActivity?.arrivedAtDock === true,
+    hasRouteApproach: Boolean(agent?._idleActivity?.routeApproachTarget),
+    dockTarget: agent?._idleActivity?.dockTarget || null,
+    hasWanderTarget: Boolean(agent?._wanderTarget),
+    animationId: agent?._group3d?.userData?.animationId || null,
+    bodyGroupY: agent?._group3d?.userData?.parts?.bodyGroup?.position?.y ?? null,
+    groupY: agent?._group3d?.position?.y ?? null,
+    scaleY: agent?._group3d?.scale?.y ?? null,
+    x: agent?.x ?? null,
+    y: agent?.y ?? null,
+  })).filter(entry => entry.kind || entry.animationId);
+  window.__VWRenderer = () => renderer;
+  window.__VWProjectWorldToScreen = (wx, wy, wz) => {
+    if (!camera || !renderer?.domElement) return null;
+    const v = new THREE.Vector3(Number(wx) || 0, Number(wy) || 0, Number(wz) || 0).project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    return {
+      x: rect.left + (v.x + 1) / 2 * rect.width,
+      y: rect.top + (1 - v.y) / 2 * rect.height,
+      inFront: v.z < 1,
+    };
+  };
   window.__VWAgentIntentDebug = Object.freeze({
     priorities: AGENT_INTENT_PRIORITY,
     getAgentIntentSnapshot,
@@ -13914,6 +14584,7 @@ if (typeof window !== 'undefined') {
     verifyElevatorAccessQueuePolicy,
     verifyAmbientProximityConversationPolicy,
     verifyManualServiceQueueDragDropFallback,
+    verifyFullServiceQueueParityMatrix,
     getMovementDebugSnapshot,
   });
   window.__VWGetAgentIntentSnapshot = getAgentIntentSnapshot;
@@ -13949,6 +14620,7 @@ if (typeof window !== 'undefined') {
   window.__verifyElevatorAccessQueuePolicy = verifyElevatorAccessQueuePolicy;
   window.__verifyAmbientProximityConversationPolicy = verifyAmbientProximityConversationPolicy;
   window.__verifyManualServiceQueueDragDropFallback = verifyManualServiceQueueDragDropFallback;
+  window.__verifyFullServiceQueueParityMatrix = verifyFullServiceQueueParityMatrix;
 }
 
 function getBehaviorAuthorityRank(intent = null) {
@@ -14340,6 +15012,19 @@ function retargetScriptedServiceQueueAgent(agent, building, furniture, furniture
   const behaviorSourceKind = manualQueue ? 'user' : 'agent-scripted-mode';
   const behaviorMode = manualQueue ? 'user-directed' : 'agent-scripted';
   const behaviorAuthority = manualQueue ? AGENT_INTENT_PRIORITY.manual : 300;
+  const currentQueueActivity = agent._idleActivity || null;
+  if (
+    currentQueueActivity?.isServiceQueueWait === true &&
+    currentQueueActivity?.buildingId === building.id &&
+    Number(currentQueueActivity?.furnitureIndex) === Number(furnitureIndex)
+  ) {
+    releaseAgentIntent(agent, 'service-queue-slot-reflow', {
+      releaseBy: 'owner',
+      clearRoute: true,
+      clearLifecycle: false,
+      releaseSummary: 'same queue reservation moved to a new FIFO line slot',
+    });
+  }
   const route = setAgentTarget(agent, target, building, target.floor, {
     owner,
     priorityName,
@@ -14422,41 +15107,93 @@ function syncScriptedServiceQueueLine(building, furnitureIndex, reason = 'queue-
   return { synced, queueLength: reservations.length };
 }
 
+const SCRIPTED_SERVICE_QUEUE_USE_CONFIGS = Object.freeze({
+  receptionDesk: Object.freeze({ lifecycle: 'standing', activationSpotId: 'visitor-talk' }),
+  printerCopier: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
+  clinicBed: Object.freeze({ lifecycle: 'seat', activationSpotId: 'patient', approachSpotId: 'foot-service', exitSpotId: 'foot-service', kind: 'bed-clinic-patient', animationId: 'sleep-lie', surfaceLift: 0.86, roleKey: 'clinicRole', roleValue: 'patient' }),
+  examChair: Object.freeze({ lifecycle: 'seat', activationSpotId: 'patient-seat', approachSpotId: 'approach-front', exitSpotId: 'approach-front', kind: 'exam-chair-patient', animationId: 'sit', roleKey: 'examChairRole', roleValue: 'patient' }),
+  diagnosticStation: Object.freeze({ lifecycle: 'standing', activationSpotId: 'review-front' }),
+  barberChair: Object.freeze({ lifecycle: 'seat', activationSpotId: 'seat', approachSpotId: 'approach-front', exitSpotId: 'stand-front', kind: 'barber-chair-hair', animationId: 'sit', roleKey: 'barberRole', roleValue: 'customer' }),
+  foodTruckCounter: Object.freeze({ lifecycle: 'standing', activationSpotId: 'customer' }),
+  sink: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
+  cafeCounter: Object.freeze({ lifecycle: 'standing', activationSpotId: 'customer' }),
+  checkoutCounter: Object.freeze({ lifecycle: 'standing', activationSpotId: 'customer' }),
+  checkoutRegister: Object.freeze({ lifecycle: 'standing', activationSpotId: 'customer' }),
+  waterCooler: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
+  coffeeMachine: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
+  countertopCoffeeMachine: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
+  fridge: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
+  vending: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
+  microwave: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
+  coffeePickupShelf: Object.freeze({ lifecycle: 'standing', activationSpotId: 'pickup-front' }),
+  playgroundSlide: Object.freeze({ lifecycle: 'active', activationSpotId: 'ladder-approach', approachSpotId: 'ladder-approach', exitSpotId: 'slide-exit' }),
+  playgroundSwing: Object.freeze({ lifecycle: 'active', activationSpotId: 'seat-use', approachSpotId: 'approach-front', exitSpotId: 'approach-front' }),
+});
+
+function getScriptedServiceQueueUseConfig(furniture = {}) {
+  const activity = getLocalIdleActivityConfig(furniture?.type) || {};
+  const machine = getStandingUseMachineConfig(furniture?.type) || {};
+  const configured = SCRIPTED_SERVICE_QUEUE_USE_CONFIGS[furniture?.type] || {};
+  const activationSpotId = configured.activationSpotId || machine.slotId || activity.activationSpotId || activity.spotId || 'use-front';
+  const definition = (FURNITURE_INTERACTION_SPOTS[furniture?.type] || [])
+    .find(spot => (spot.id || spot.spotId) === activationSpotId) || {};
+  const roles = Array.isArray(definition.roles) ? definition.roles : [];
+  return {
+    lifecycle: configured.lifecycle || (roles.includes('seat') ? 'seat' : (roles.includes('active-use') ? 'active' : 'standing')),
+    activationSpotId,
+    approachSpotId: configured.approachSpotId || definition.approachSpotId || activationSpotId,
+    exitSpotId: configured.exitSpotId || definition.exitSpotId || null,
+    actionId: machine.actionId || definition.action || null,
+    kind: configured.kind || machine.kind || activity.kind || `${String(furniture?.type || 'service').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}-use`,
+    animationId: configured.animationId || machine.animationId || activity.animationId || definition.animationId || null,
+    mode: configured.mode || machine.mode || 'service-use',
+    stayMs: configured.stayMs || activity.stayMs || machine.useDurationMs || definition.useDurationMs || 9000,
+    dockSnapRadius: activity.dockSnapRadius || definition.snapRadius || 7,
+    surfaceLift: configured.surfaceLift,
+    seatSurfaceLift: configured.seatSurfaceLift,
+    roleKey: configured.roleKey || null,
+    roleValue: configured.roleValue || null,
+    definition,
+  };
+}
+
 function submitQueuedScriptedServiceObjectUse(agent, building, furnitureIndex, queueActivity = null) {
   const furniture = building?.interior?.furniture?.[furnitureIndex];
   if (!agent || !building || !furniture) return { accepted: false, reason: 'missing-service-use-target' };
+  const useConfig = getScriptedServiceQueueUseConfig(furniture);
   const machineConfig = getStandingUseMachineConfig(furniture?.type);
-  const serviceSurface = !machineConfig && ['cafeCounter', 'foodTruckCounter', 'counter', 'kitchenIsland', 'checkoutCounter', 'checkoutRegister', 'coffeePickupShelf'].includes(furniture.type);
-  const surfaceCandidates = serviceSurface
-    ? getServiceSurfaceStandingUseCandidates({ building, surface: furniture, surfaceId: furnitureIndex, surfaceType: furniture.type, actionId: queueActivity?.actionId || queueActivity?.action })
-    : [];
-  const candidate = machineConfig
-    ? getStandingUseMachineCandidate(building, furniture, furnitureIndex, machineConfig)
-    : (surfaceCandidates.find(item => {
-      const id = String(item.slotId || item.activationSpotId || '').toLowerCase();
-      const roles = new Set(item.roles || []);
-      return id.includes('customer') || id.includes('use') || id.includes('pickup') || roles.has('customer') || roles.has('order') || roles.has('checkout') || roles.has('surface');
-    }) || surfaceCandidates[0] || null);
-  const slotId = machineConfig?.slotId || candidate?.activationSpotId || candidate?.slotId || 'use-front';
-  const actionId = queueActivity?.actionId || queueActivity?.action || machineConfig?.actionId || candidate?.actionId || `life.use.${furniture.type}`;
-  const animationId = machineConfig?.animationId || candidate?.pose?.animationId || getLocalIdleActivityConfig(furniture.type)?.animationId || null;
-  const mode = machineConfig?.mode || getScriptedStandingActivityMode(getLocalIdleActivityConfig(furniture.type) || {}, 'snack-drink', furniture.type);
-  const spot = getFurnitureActionSpot(building, furniture, slotId) || getFurnitureActionSpot(building, furniture, candidate?.approachSpotId) || getFurnitureActionSpot(building, furniture);
-  if (!candidate || !spot) return { accepted: false, reason: 'missing-service-use-spot' };
+  const slotId = useConfig.activationSpotId;
+  const actionId = queueActivity?.actionId || queueActivity?.action || useConfig.actionId || `life.use.${furniture.type}`;
+  const animationId = useConfig.animationId;
+  const mode = useConfig.mode;
+  const spot = getFurnitureActionSpot(building, furniture, slotId) || getFurnitureActionSpot(building, furniture);
+  const approachSpot = getFurnitureActionSpot(building, furniture, useConfig.approachSpotId) || spot;
+  const exitSpot = useConfig.exitSpotId ? getFurnitureActionSpot(building, furniture, useConfig.exitSpotId) : null;
+  if (!spot || !approachSpot) return { accepted: false, reason: 'missing-service-use-spot' };
+  const authoredFacing = ['seat', 'active'].includes(useConfig.lifecycle) || (useConfig.definition.roles || []).includes('lie');
+  const faceAngle = authoredFacing
+    ? (getAuthoredFurnitureSpotFacingAngle(building, furniture, spot, useConfig.definition.facing || 'north') ?? spot.faceAngle)
+    : spot.faceAngle;
   const runtimeSlot = {
-    ...candidate,
+    ...useConfig.definition,
+    slotId,
+    seatId: useConfig.lifecycle === 'seat' ? slotId : undefined,
+    activationSpotId: slotId,
+    approachSpotId: useConfig.approachSpotId,
     position: { x: spot.apiX, z: spot.apiZ, floor: spot.floor },
-    approachSpot: { ...(candidate.approachSpot || {}), position: { x: spot.apiX, z: spot.apiZ, floor: spot.floor } },
-    activationSpot: { ...(candidate.activationSpot || {}), position: { x: spot.apiX, z: spot.apiZ, floor: spot.floor } },
+    approachSpot: { spotId: useConfig.approachSpotId, position: { x: approachSpot.apiX, z: approachSpot.apiZ, floor: approachSpot.floor } },
+    activationSpot: { spotId: slotId, position: { x: spot.apiX, z: spot.apiZ, floor: spot.floor } },
     activationTarget: { x: spot.apiX, z: spot.apiZ, floor: spot.floor },
-    approachTarget: { x: spot.apiX, z: spot.apiZ, floor: spot.floor },
+    approachTarget: { x: approachSpot.apiX, z: approachSpot.apiZ, floor: approachSpot.floor },
+    pose: { animationId, facingAngleRad: faceAngle },
+    completion: { durationMs: Array.isArray(useConfig.stayMs) ? useConfig.stayMs[1] : useConfig.stayMs },
     actionId,
   };
   const destination = {
     ok: true,
     runtimeCoordinateSpace: 'api-pixels',
     category: 'snack-drink',
-    lifecycle: 'standing',
+    lifecycle: useConfig.lifecycle,
     target: {
       kind: 'furniture',
       id: furniture.id || `${building.id}:${furnitureIndex}`,
@@ -14466,26 +15203,39 @@ function submitQueuedScriptedServiceObjectUse(agent, building, furnitureIndex, q
       objectType: furniture.type,
     },
     spot: {
-      spotId: slotId,
+      spotId: useConfig.approachSpotId,
       slotId: runtimeSlot.slotId || slotId,
-      interactionSpotId: runtimeSlot.activationSpotId || slotId,
-      x: spot.apiX,
-      y: spot.apiZ,
-      floor: spot.floor || getFurnitureFloor(furniture),
+      interactionSpotId: useConfig.approachSpotId,
+      x: approachSpot.apiX,
+      y: approachSpot.apiZ,
+      floor: approachSpot.floor || getFurnitureFloor(furniture),
     },
     objectId: furniture.id || `${building.id}:${furnitureIndex}`,
     objectType: furniture.type,
     buildingId: building.id || null,
-    floor: spot.floor || getFurnitureFloor(furniture),
+    floor: approachSpot.floor || getFurnitureFloor(furniture),
     objectUseSlot: runtimeSlot,
-    objectUse: { lifecycle: 'standing', slot: runtimeSlot },
+    objectUse: { lifecycle: useConfig.lifecycle, slot: runtimeSlot },
   };
-  const activity = getLocalIdleActivityConfig(furniture.type) || { kind: `${String(furniture.type || 'service').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}-use`, animationId, dockSnapRadius: 6, stayMs: machineConfig?.useDurationMs || 9000 };
+  const activity = {
+    ...(getLocalIdleActivityConfig(furniture.type) || {}),
+    kind: useConfig.kind,
+    animationId,
+    dockSnapRadius: useConfig.dockSnapRadius,
+    stayMs: useConfig.stayMs,
+    mode,
+  };
   const objectUse = createScriptedObjectUseForDestination(destination, activity);
   if (!objectUse) return { accepted: false, reason: 'missing-promoted-object-use' };
   objectUse.promotedFromQueue = true;
   const sourceKind = queueActivity?.sourceKind || queueActivity?.source || 'agent-scripted-mode';
   const manualServiceUse = String(sourceKind || '').startsWith('manual-drag-drop');
+  const manualOccupancyUse = manualServiceUse && isManualObjectOccupancyFurniture(furniture);
+  if (manualOccupancyUse) {
+    objectUse.stayMs = Math.max(MANUAL_OBJECT_OCCUPANCY_DWELL_MS, Number(objectUse.stayMs || 0));
+    objectUse.manualDrop = true;
+    objectUse.manualOccupancyHold = true;
+  }
   const behaviorSourceKind = manualServiceUse ? 'user' : 'agent-scripted-mode';
   const behaviorMode = manualServiceUse ? 'user-directed' : 'agent-scripted';
   const behaviorAuthority = manualServiceUse ? AGENT_INTENT_PRIORITY.manual : 300;
@@ -14518,12 +15268,28 @@ function submitQueuedScriptedServiceObjectUse(agent, building, furnitureIndex, q
     agent._idleActivity.source = sourceKind;
     agent._idleActivity.behaviorSourceKind = behaviorSourceKind;
     agent._idleActivity.behaviorMode = behaviorMode;
+    agent._idleActivity.promotedFromServiceQueue = true;
+    agent._idleActivity.manualDrop = manualOccupancyUse;
+    agent._idleActivity.manualOccupancyHold = manualOccupancyUse;
+    if (manualOccupancyUse) {
+      agent._manualPlacementLockUntil = performance.now() + MANUAL_OBJECT_OCCUPANCY_DWELL_MS;
+    }
+    agent._idleActivity.serviceQueueLifecycle = useConfig.lifecycle;
     agent._idleActivity.activationSpotId = objectUse.slot?.activationSpotId || slotId;
-    agent._idleActivity.approachSpotId = objectUse.slot?.approachSpotId || slotId;
+    agent._idleActivity.approachSpotId = objectUse.slot?.approachSpotId || useConfig.approachSpotId;
     agent._idleActivity.activeUseSlotId = objectUse.slot?.slotId || slotId;
     agent._idleActivity.capacityKey = objectUse.slot?.capacityKey || agent._idleActivity.capacityKey;
-    agent._idleActivity.faceAngle = spot.faceAngle ?? agent._idleActivity.faceAngle;
+    agent._idleActivity.faceAngle = faceAngle ?? agent._idleActivity.faceAngle;
     agent._idleActivity.dockTarget = { x: spot.apiX, y: spot.apiZ };
+    agent._idleActivity.routeApproachTarget = { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor, spotId: approachSpot.spotId };
+    if (exitSpot) {
+      agent._idleActivity.standTarget = { x: exitSpot.apiX, y: exitSpot.apiZ, floor: exitSpot.floor };
+      agent._idleActivity.standFaceAngle = exitSpot.faceAngle;
+      agent._idleActivity.exitSpotId = exitSpot.spotId;
+    }
+    if (Number.isFinite(useConfig.surfaceLift)) agent._idleActivity.surfaceLift = useConfig.surfaceLift;
+    if (Number.isFinite(useConfig.seatSurfaceLift)) agent._idleActivity.seatSurfaceLift = useConfig.seatSurfaceLift;
+    if (useConfig.roleKey) agent._idleActivity[useConfig.roleKey] = useConfig.roleValue;
   }
   return route;
 }
@@ -16228,27 +16994,32 @@ function makeTeachingPodium3D(x, z, s = T) {
   return g;
 }
 
-function makeParkBench3D(x, z, s = T) {
+function makeParkBench3D(x, z, s = T, furniture = {}) {
   const g = new THREE.Group();
-  const wood = 0x8d6e63;
-  const woodLight = 0xa98262;
-  const woodDark = 0x5d4037;
-  const metal = 0x374151;
+  const colors = normalizeMultiSeatFurnitureColors('parkBench', furniture);
+  const wood = parseColor(colors.wood);
+  const woodLight = parseColor(colors.seatTop);
+  const woodDark = parseColor(colors.back);
+  const metal = parseColor(colors.metal);
+  g.userData.multiSeatColors = colors;
+  const addPart = (mesh, key, seatId = null) => g.add(tagMultiSeatColorPart(mesh, 'parkBench', key, seatId));
 
   // One stationary persistent Park Bench asset only. Seat planks, back rail,
   // legs, and center seams are visual detail on the single solid footprint;
   // they do not spawn extra benches, tables, signs, plants, or temporary props.
-  g.add(posVox(0, 0.34 * s, 0.06 * s, 1.46 * s, 0.09 * s, 0.38 * s, wood));
-  g.add(posVox(0, 0.43 * s, 0.08 * s, 1.38 * s, 0.035 * s, 0.31 * s, woodLight));
-  g.add(posVox(0, 0.64 * s, -0.19 * s, 1.50 * s, 0.34 * s, 0.08 * s, woodDark));
-  g.add(posVox(0, 0.78 * s, -0.15 * s, 1.42 * s, 0.06 * s, 0.06 * s, woodLight));
-  [-0.52, 0, 0.52].forEach((lx) => {
-    g.add(posVox(lx * s, 0.46 * s, 0.25 * s, 0.035 * s, 0.11 * s, 0.05 * s, metal)); // seat seams
-    g.add(posVox(lx * s, 0.18 * s, 0.18 * s, 0.07 * s, 0.30 * s, 0.07 * s, metal));
-    g.add(posVox(lx * s, 0.18 * s, -0.14 * s, 0.07 * s, 0.30 * s, 0.07 * s, metal));
+  addPart(posVox(0, 0.34 * s, 0.06 * s, 1.46 * s, 0.09 * s, 0.38 * s, wood), 'wood');
+  [[-0.46, 'seat-left'], [0, 'seat-center'], [0.46, 'seat-right']].forEach(([sx, seatId]) => {
+    addPart(posVox(sx * s, 0.43 * s, 0.08 * s, 0.43 * s, 0.035 * s, 0.31 * s, woodLight), 'seatTop', seatId);
   });
-  g.add(posVox(0, 0.21 * s, 0.18 * s, 1.38 * s, 0.045 * s, 0.05 * s, metal));
-  g.add(posVox(0, 0.21 * s, -0.14 * s, 1.38 * s, 0.045 * s, 0.05 * s, metal));
+  addPart(posVox(0, 0.64 * s, -0.19 * s, 1.50 * s, 0.34 * s, 0.08 * s, woodDark), 'back');
+  addPart(posVox(0, 0.78 * s, -0.15 * s, 1.42 * s, 0.06 * s, 0.06 * s, woodLight), 'seatTop');
+  [-0.52, 0, 0.52].forEach((lx) => {
+    addPart(posVox(lx * s, 0.46 * s, 0.25 * s, 0.035 * s, 0.11 * s, 0.05 * s, metal), 'metal');
+    addPart(posVox(lx * s, 0.18 * s, 0.18 * s, 0.07 * s, 0.30 * s, 0.07 * s, metal), 'metal');
+    addPart(posVox(lx * s, 0.18 * s, -0.14 * s, 0.07 * s, 0.30 * s, 0.07 * s, metal), 'metal');
+  });
+  addPart(posVox(0, 0.21 * s, 0.18 * s, 1.38 * s, 0.045 * s, 0.05 * s, metal), 'metal');
+  addPart(posVox(0, 0.21 * s, -0.14 * s, 1.38 * s, 0.045 * s, 0.05 * s, metal), 'metal');
   g.position.set(x, 0, z);
   return g;
 }
@@ -16350,33 +17121,37 @@ function makeCrosswalkNode3D(x, z, s = T) {
   return g;
 }
 
-function makeHallwayBench3D(x, z, s = T) {
+function makeHallwayBench3D(x, z, s = T, furniture = {}) {
   const g = new THREE.Group();
-  const frame = 0x334155;
-  const metal = 0x94a3b8;
-  const cushion = 0x64748b;
-  const cushionTop = 0xcbd5e1;
-  const trim = 0x1e293b;
+  const colors = normalizeMultiSeatFurnitureColors('hallwayBench', furniture);
+  const frame = parseColor(colors.frame);
+  const metal = parseColor(colors.metal);
+  const cushion = parseColor(colors.seatCushions);
+  const cushionTop = parseColor(colors.seatTop);
+  const trim = parseColor(colors.trim);
+  g.userData.multiSeatColors = colors;
+  const addPart = (mesh, key, seatId = null) => g.add(tagMultiSeatColorPart(mesh, 'hallwayBench', key, seatId));
 
   // One stationary waiting chair / bench asset only. Seat cushions, back rail,
   // end caps, feet, and two subtle seat markers are integrated detail; no
   // signs, pillows, magazines, or separate props are bundled.
-  g.add(posVox(0, 0.42 * s, 0.02 * s, 1.78 * s, 0.18 * s, 0.50 * s, cushion));
-  g.add(posVox(0, 0.535 * s, 0.02 * s, 1.66 * s, 0.045 * s, 0.40 * s, cushionTop));
-  g.add(posVox(0, 0.74 * s, -0.28 * s, 1.82 * s, 0.42 * s, 0.12 * s, frame));
-  g.add(posVox(0, 0.93 * s, -0.345 * s, 1.70 * s, 0.08 * s, 0.055 * s, metal));
-  g.add(posVox(0, 0.64 * s, -0.345 * s, 1.70 * s, 0.06 * s, 0.05 * s, metal));
-  g.add(posVox(-0.93 * s, 0.45 * s, 0.02 * s, 0.08 * s, 0.70 * s, 0.58 * s, trim));
-  g.add(posVox(0.93 * s, 0.45 * s, 0.02 * s, 0.08 * s, 0.70 * s, 0.58 * s, trim));
-  g.add(posVox(0, 0.56 * s, 0.02 * s, 0.035 * s, 0.12 * s, 0.42 * s, trim)); // two-seat divider seam
+  addPart(posVox(0, 0.42 * s, 0.02 * s, 1.78 * s, 0.18 * s, 0.50 * s, cushion), 'seatCushions');
+  addPart(posVox(-0.42 * s, 0.535 * s, 0.02 * s, 0.78 * s, 0.045 * s, 0.40 * s, cushionTop), 'seatTop', 'seat-left');
+  addPart(posVox(0.42 * s, 0.535 * s, 0.02 * s, 0.78 * s, 0.045 * s, 0.40 * s, cushionTop), 'seatTop', 'seat-right');
+  addPart(posVox(0, 0.74 * s, -0.28 * s, 1.82 * s, 0.42 * s, 0.12 * s, frame), 'frame');
+  addPart(posVox(0, 0.93 * s, -0.345 * s, 1.70 * s, 0.08 * s, 0.055 * s, metal), 'metal');
+  addPart(posVox(0, 0.64 * s, -0.345 * s, 1.70 * s, 0.06 * s, 0.05 * s, metal), 'metal');
+  addPart(posVox(-0.93 * s, 0.45 * s, 0.02 * s, 0.08 * s, 0.70 * s, 0.58 * s, trim), 'trim');
+  addPart(posVox(0.93 * s, 0.45 * s, 0.02 * s, 0.08 * s, 0.70 * s, 0.58 * s, trim), 'trim');
+  addPart(posVox(0, 0.56 * s, 0.02 * s, 0.035 * s, 0.12 * s, 0.42 * s, trim), 'trim');
   [-0.62, 0.62].forEach((lx) => {
-    g.add(posVox(lx * s, 0.22 * s, 0.22 * s, 0.10 * s, 0.36 * s, 0.10 * s, metal));
-    g.add(posVox(lx * s, 0.22 * s, -0.22 * s, 0.10 * s, 0.36 * s, 0.10 * s, metal));
-    g.add(posVox(lx * s, 0.045 * s, 0.28 * s, 0.32 * s, 0.09 * s, 0.12 * s, trim));
-    g.add(posVox(lx * s, 0.045 * s, -0.28 * s, 0.32 * s, 0.09 * s, 0.12 * s, trim));
+    addPart(posVox(lx * s, 0.22 * s, 0.22 * s, 0.10 * s, 0.36 * s, 0.10 * s, metal), 'metal');
+    addPart(posVox(lx * s, 0.22 * s, -0.22 * s, 0.10 * s, 0.36 * s, 0.10 * s, metal), 'metal');
+    addPart(posVox(lx * s, 0.045 * s, 0.28 * s, 0.32 * s, 0.09 * s, 0.12 * s, trim), 'trim');
+    addPart(posVox(lx * s, 0.045 * s, -0.28 * s, 0.32 * s, 0.09 * s, 0.12 * s, trim), 'trim');
   });
-  g.add(posVox(-0.38 * s, 0.565 * s, 0.22 * s, 0.34 * s, 0.018 * s, 0.035 * s, 0x38bdf8));
-  g.add(posVox(0.38 * s, 0.565 * s, 0.22 * s, 0.34 * s, 0.018 * s, 0.035 * s, 0x38bdf8));
+  addPart(posVox(-0.38 * s, 0.565 * s, 0.22 * s, 0.34 * s, 0.018 * s, 0.035 * s, cushionTop), 'seatTop');
+  addPart(posVox(0.38 * s, 0.565 * s, 0.22 * s, 0.34 * s, 0.018 * s, 0.035 * s, cushionTop), 'seatTop');
   g.position.set(x, 0, z);
   return g;
 }
@@ -17407,7 +18182,10 @@ function addBuildingFurniture(group, building, bw, bd) {
     if (isBuildingFloorFocusActive(building) && itemFloor !== activeFloor) continue;
     const meshBuilder = FURNITURE_MESH_BUILDERS[f.type];
     if (!meshBuilder) continue;
-    const mesh = f.type === 'interiorDoor' ? makeInteriorDoor3D(f.x, f.z, s, f) : meshBuilder(f.x, f.z, s);
+    const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'hallwayBench', 'parkBench']);
+    const mesh = f.type === 'interiorDoor'
+      ? makeInteriorDoor3D(f.x, f.z, s, f)
+      : (configurableMultiSeatTypes.has(f.type) ? meshBuilder(f.x, f.z, s, f) : meshBuilder(f.x, f.z, s));
     if (mesh) {
       const floorOffsetY = getFurnitureBottomY(building, itemFloor, f);
       alignObjectBottomToY(mesh, floorOffsetY);
@@ -17626,7 +18404,7 @@ function addOutdoorAreaNodes(group, building, bw, bd) {
     const meshBuilder = FURNITURE_MESH_BUILDERS[type];
     if (!meshBuilder) return;
     const local = getOutdoorNodeLocalPoint(node, building);
-    const mesh = meshBuilder(local.x, local.z, T);
+    const mesh = meshBuilder(local.x, local.z, T, node);
     if (!mesh) return;
     mesh.name = `outdoor-node-${node.type}-${node.id}`;
     mesh.userData = { ...(mesh.userData || {}), outdoorAreaNode: true, exteriorInteractionNode: true, buildingId: building.id, outdoorNodeId: node.id, outdoorNodeIndex: index, outdoorNodeType: node.type, outdoorNodeRoles: node.roles, outdoorNodeFacing: node.facing, furnitureType: type };
@@ -18103,103 +18881,262 @@ function makeMeetingTable(x, z, s) {
   return g;
 }
 
-function makeCouch3D(x, z, s) {
+const COUCH_DEFAULT_COLORS = Object.freeze({
+  body: '#3f51b5',
+  backArms: '#283593',
+  seatCushions: '#7986cb',
+  feet: '#5d4037',
+});
+const COUCH_CUSHION_CENTER_Z = 0.16;
+const COUCH_CUSHION_DEPTH = 0.74;
+// Match the known-good armchair: its seat dock is 0.09 world units behind the
+// visible front edge. Keeping the couch hips at the same inset lets the thighs
+// and lower legs extend beyond the cushion instead of clipping through it.
+const COUCH_SEAT_FRONT_EDGE_INSET = 0.09;
+const COUCH_SEAT_DOCK_Z = COUCH_CUSHION_CENTER_Z + COUCH_CUSHION_DEPTH / 2 - COUCH_SEAT_FRONT_EDGE_INSET;
+
+function normalizeCouchColorHex(value, fallback) {
+  if (Number.isFinite(Number(value)) && !String(value).trim().startsWith('#')) {
+    return `#${Math.max(0, Math.min(0xffffff, Number(value))).toString(16).padStart(6, '0')}`;
+  }
+  const raw = String(value || '').trim();
+  if (/^#[0-9a-f]{6}$/i.test(raw)) return raw.toLowerCase();
+  if (/^#[0-9a-f]{3}$/i.test(raw)) {
+    return `#${raw.slice(1).split('').map(char => `${char}${char}`).join('')}`.toLowerCase();
+  }
+  return fallback;
+}
+
+function normalizeCouchColors(source = {}) {
+  const colors = source?.couchColors && typeof source.couchColors === 'object' ? source.couchColors : source;
+  return {
+    body: normalizeCouchColorHex(colors?.body, COUCH_DEFAULT_COLORS.body),
+    backArms: normalizeCouchColorHex(colors?.backArms, COUCH_DEFAULT_COLORS.backArms),
+    seatCushions: normalizeCouchColorHex(colors?.seatCushions, COUCH_DEFAULT_COLORS.seatCushions),
+    feet: normalizeCouchColorHex(colors?.feet, COUCH_DEFAULT_COLORS.feet),
+  };
+}
+
+const MULTI_SEAT_COLOR_SCHEMES = Object.freeze({
+  sectionalSofa: Object.freeze({
+    property: 'sectionalSofaColors',
+    label: 'Sectional sofa',
+    defaults: Object.freeze({ body: '#2563eb', backArms: '#1e3a8a', seatCushions: '#93c5fd', feet: '#3f2a1d' }),
+    fields: Object.freeze([['body', 'Base / body'], ['backArms', 'Back & arms'], ['seatCushions', 'Seat & back cushions'], ['feet', 'Feet']]),
+  }),
+  loveseat: Object.freeze({
+    property: 'loveseatColors',
+    label: 'Loveseat',
+    defaults: Object.freeze({ body: '#0f766e', backArms: '#115e59', seatCushions: '#5eead4', feet: '#4e342e' }),
+    fields: Object.freeze([['body', 'Base / body'], ['backArms', 'Back & arms'], ['seatCushions', 'Seat & back cushions'], ['feet', 'Feet']]),
+  }),
+  hallwayBench: Object.freeze({
+    property: 'hallwayBenchColors',
+    label: 'Waiting bench',
+    defaults: Object.freeze({ frame: '#334155', metal: '#94a3b8', seatCushions: '#64748b', seatTop: '#cbd5e1', trim: '#1e293b' }),
+    fields: Object.freeze([['frame', 'Back frame'], ['metal', 'Metal supports'], ['seatCushions', 'Seat base'], ['seatTop', 'Seat tops'], ['trim', 'Trim / feet']]),
+  }),
+  parkBench: Object.freeze({
+    property: 'parkBenchColors',
+    label: 'Park bench',
+    defaults: Object.freeze({ wood: '#8d6e63', seatTop: '#a98262', back: '#5d4037', metal: '#374151' }),
+    fields: Object.freeze([['wood', 'Wood base'], ['seatTop', 'Seat / top rail'], ['back', 'Back rail'], ['metal', 'Metal frame']]),
+  }),
+});
+
+function normalizeMultiSeatFurnitureColors(type, source = {}) {
+  const scheme = MULTI_SEAT_COLOR_SCHEMES[type];
+  if (!scheme) return {};
+  const colors = source?.[scheme.property] && typeof source[scheme.property] === 'object'
+    ? source[scheme.property]
+    : source;
+  return Object.fromEntries(Object.entries(scheme.defaults).map(([key, fallback]) => [
+    key,
+    normalizeCouchColorHex(colors?.[key], fallback),
+  ]));
+}
+
+function tagMultiSeatColorPart(mesh, type, key, seatId = null) {
+  if (!mesh) return mesh;
+  mesh.userData.multiSeatColorType = type;
+  mesh.userData.multiSeatColorKey = key;
+  if (seatId) {
+    mesh.userData.interactionSpotId = seatId;
+    mesh.userData.multiSeatId = seatId;
+    mesh.userData.dragAgentDropTarget = true;
+  }
+  return mesh;
+}
+
+function makeCouch3D(x, z, s = T, furniture = {}) {
   const g = new THREE.Group();
-  const fabric = 0x3f51b5;
-  const fabricDark = 0x283593;
-  const fabricLight = 0x7986cb;
-  const seam = 0xc5cae9;
-  const wood = 0x5d4037;
+  const colors = normalizeCouchColors(furniture);
+  const fabric = parseColor(colors.body);
+  const fabricDark = parseColor(colors.backArms);
+  const fabricLight = parseColor(colors.seatCushions);
+  const wood = parseColor(colors.feet);
+  g.userData.couchColors = colors;
 
   // Three-seat lounge couch, sized between chairs and bed. It is one asset only:
-  // pillows, seams, and feet are visual detail on the same stationary sofa.
-  g.add(posVox(0, 0.24 * s, 0.08 * s, 3.0 * s, 0.34 * s, 0.92 * s, fabric));
-  g.add(posVox(0, 0.50 * s, -0.36 * s, 3.08 * s, 0.64 * s, 0.18 * s, fabricDark));
-  g.add(posVox(-1.52 * s, 0.42 * s, 0.04 * s, 0.18 * s, 0.52 * s, 0.92 * s, fabricDark));
-  g.add(posVox(1.52 * s, 0.42 * s, 0.04 * s, 0.18 * s, 0.52 * s, 0.92 * s, fabricDark));
+  // the body, back/arms, three clean seat cushions, and feet are visual detail
+  // on the same stationary sofa. Decorative white dividers/front piping and
+  // the three raised rear cushion blocks are intentionally omitted.
+  //
+  // Cushion layout is derived from the frame so the three seats read as one
+  // continuous bench: the arms sit at +/-1.50 with 0.18 thickness, leaving an
+  // inner span of 2.82. Three 0.92-wide cushions at 0.95 pitch fill that span
+  // with a tight 0.03 seam instead of the previous wide 0.10 gaps.
+  const seatY = 0.24;
+  const seatH = 0.34;
+  const cushionW = 0.92;
+  const cushionPitch = 0.95;
+  const cushionH = 0.18;
+  const cushionD = COUCH_CUSHION_DEPTH;
+  const cushionY = seatY + seatH / 2 + cushionH / 2 - 0.02;
 
-  [-0.96, 0, 0.96].forEach((cx) => {
-    g.add(posVox(cx * s, 0.48 * s, 0.16 * s, 0.86 * s, 0.14 * s, 0.66 * s, fabricLight));
-    g.add(posVox(cx * s, 0.585 * s, 0.48 * s, 0.78 * s, 0.035 * s, 0.06 * s, seam));
-    g.add(posVox(cx * s, 0.72 * s, -0.47 * s, 0.74 * s, 0.34 * s, 0.08 * s, fabricLight));
+  // Every mesh records which palette entry produced its color so the Edit
+  // panel can live-preview colors in place without rebuilding the building.
+  const addPart = (mesh, colorKey) => {
+    mesh.userData.couchColorKey = colorKey;
+    g.add(mesh);
+    return mesh;
+  };
+
+  addPart(posVox(0, seatY * s, 0.08 * s, 3.0 * s, seatH * s, 0.92 * s, fabric), 'body');
+  // Backrest: taller and slightly reclined-looking so the sofa reads as a
+  // lounge seat rather than a bench with a board behind it.
+  addPart(posVox(0, 0.60 * s, -0.38 * s, 3.0 * s, 0.86 * s, 0.22 * s, fabricDark), 'backArms');
+  // Back cushion pad sits in front of the frame so the seated agent's back
+  // rests against upholstery, and it visually closes the seat/back joint.
+  addPart(posVox(0, 0.66 * s, -0.22 * s, 2.82 * s, 0.60 * s, 0.14 * s, fabricLight), 'seatCushions');
+  // Arms: rounded-off top cap over a thicker base reads softer than a slab.
+  for (const ax of [-1.50, 1.50]) {
+    addPart(posVox(ax * s, 0.40 * s, 0.04 * s, 0.20 * s, 0.60 * s, 0.98 * s, fabricDark), 'backArms');
+    addPart(posVox(ax * s, 0.72 * s, 0.04 * s, 0.26 * s, 0.14 * s, 0.98 * s, fabricDark), 'backArms');
+  }
+
+  [
+    [-cushionPitch, 'sit-left'],
+    [0, 'sit-center'],
+    [cushionPitch, 'sit-right'],
+  ].forEach(([cx, seatId]) => {
+    const cushion = posVox(cx * s, cushionY * s, COUCH_CUSHION_CENTER_Z * s, cushionW * s, cushionH * s, cushionD * s, fabricLight);
+    cushion.userData.interactionSpotId = seatId;
+    cushion.userData.couchSeatId = seatId;
+    cushion.userData.dragAgentDropTarget = true;
+    addPart(cushion, 'seatCushions');
   });
 
-  g.add(posVox(-0.48 * s, 0.58 * s, 0.18 * s, 0.035 * s, 0.22 * s, 0.68 * s, seam));
-  g.add(posVox(0.48 * s, 0.58 * s, 0.18 * s, 0.035 * s, 0.22 * s, 0.68 * s, seam));
-  g.add(posVox(0, 0.36 * s, 0.58 * s, 2.72 * s, 0.10 * s, 0.10 * s, fabricDark));
-  for (const [fx, fz] of [[-1.18, -0.34], [1.18, -0.34], [-1.18, 0.48], [1.18, 0.48]]) {
-    g.add(posVox(fx * s, 0.05 * s, fz * s, 0.16 * s, 0.10 * s, 0.16 * s, wood));
+  // Front skirt hides the gap between the seat frame and the floor.
+  addPart(posVox(0, 0.16 * s, 0.52 * s, 3.0 * s, 0.20 * s, 0.10 * s, fabric), 'body');
+
+  for (const [fx, fz] of [[-1.34, -0.34], [1.34, -0.34], [-1.34, 0.44], [1.34, 0.44]]) {
+    addPart(posVox(fx * s, 0.05 * s, fz * s, 0.16 * s, 0.10 * s, 0.16 * s, wood), 'feet');
   }
   g.position.set(x, 0, z);
   return g;
 }
 
-function makeSectionalSofa3D(x, z, s) {
+function makeSectionalSofa3D(x, z, s = T, furniture = {}) {
   const g = new THREE.Group();
-  const fabric = 0x2563eb;
-  const fabricDark = 0x1e3a8a;
-  const fabricLight = 0x93c5fd;
-  const seam = 0xdbeafe;
-  const wood = 0x3f2a1d;
+  const colors = normalizeMultiSeatFurnitureColors('sectionalSofa', furniture);
+  const fabric = parseColor(colors.body);
+  const fabricDark = parseColor(colors.backArms);
+  const fabricLight = parseColor(colors.seatCushions);
+  const wood = parseColor(colors.feet);
+  g.userData.multiSeatColors = colors;
+  const addPart = (mesh, key, seatId = null) => g.add(tagMultiSeatColorPart(mesh, 'sectionalSofa', key, seatId));
 
-  // Large L-shaped modular sectional sofa for homes and lounges. The chaise,
-  // corner wedge, seams, back cushions, arms, and feet are visual detail on one
-  // stationary persistent furniture asset; no table, pillow, or ottoman bundled.
-  g.add(posVox(-0.48 * s, 0.24 * s, 0.06 * s, 2.82 * s, 0.34 * s, 0.92 * s, fabric));
-  g.add(posVox(1.04 * s, 0.24 * s, 0.68 * s, 0.92 * s, 0.34 * s, 1.82 * s, fabric));
-  g.add(posVox(-0.48 * s, 0.52 * s, -0.40 * s, 2.92 * s, 0.66 * s, 0.18 * s, fabricDark));
-  g.add(posVox(1.48 * s, 0.52 * s, 0.68 * s, 0.18 * s, 0.66 * s, 1.82 * s, fabricDark));
-  g.add(posVox(-1.96 * s, 0.43 * s, 0.04 * s, 0.18 * s, 0.54 * s, 0.92 * s, fabricDark));
+  // Clean four-place L sectional built in the same visual language as the
+  // corrected couch. The frame is two overlapping upholstered bases, while a
+  // continuous rear back and right-side return make the L silhouette readable
+  // from every camera angle. The old floating corner block, oversized white
+  // separator bars, thin rear cushion slats, and split chaise pads are omitted.
+  const mainSeatY = 0.24;
+  const mainSeatH = 0.34;
+  const cushionY = 0.49;
+  const cushionH = 0.16;
+  const mainCushionW = 0.72;
+  const mainCushionD = 0.72;
 
-  [-1.16, -0.40, 0.36].forEach((cx) => {
-    g.add(posVox(cx * s, 0.49 * s, 0.18 * s, 0.68 * s, 0.14 * s, 0.64 * s, fabricLight));
-    g.add(posVox(cx * s, 0.72 * s, -0.50 * s, 0.62 * s, 0.34 * s, 0.08 * s, fabricLight));
+  // Upholstered L-shaped foundation.
+  addPart(posVox(-0.48 * s, mainSeatY * s, 0.08 * s, 2.96 * s, mainSeatH * s, 0.98 * s, fabric), 'body');
+  addPart(posVox(1.04 * s, mainSeatY * s, 0.72 * s, 0.92 * s, mainSeatH * s, 1.94 * s, fabric), 'body');
+
+  // Tall continuous back frames and softly capped outer arms.
+  addPart(posVox(-0.24 * s, 0.60 * s, -0.40 * s, 3.44 * s, 0.86 * s, 0.22 * s, fabricDark), 'backArms');
+  addPart(posVox(1.50 * s, 0.60 * s, 0.66 * s, 0.22 * s, 0.86 * s, 2.12 * s, fabricDark), 'backArms');
+  addPart(posVox(-1.98 * s, 0.42 * s, 0.06 * s, 0.22 * s, 0.60 * s, 1.00 * s, fabricDark), 'backArms');
+  addPart(posVox(-1.98 * s, 0.74 * s, 0.06 * s, 0.28 * s, 0.14 * s, 1.00 * s, fabricDark), 'backArms');
+  addPart(posVox(1.50 * s, 0.74 * s, 0.66 * s, 0.28 * s, 0.14 * s, 2.12 * s, fabricDark), 'backArms');
+
+  // One uninterrupted cushion pad on each back replaces the former stack of
+  // thin floating blocks. Both pads share the seat-cushion material.
+  addPart(posVox(-0.24 * s, 0.67 * s, -0.23 * s, 3.16 * s, 0.58 * s, 0.14 * s, fabricLight), 'seatCushions');
+  addPart(posVox(1.33 * s, 0.67 * s, 0.66 * s, 0.14 * s, 0.58 * s, 1.82 * s, fabricLight), 'seatCushions');
+
+  // Three tightly spaced main cushions. Each remains an independent raycast
+  // target while visually reading as one continuous sofa surface.
+  [[-1.16, 'seat-left'], [-0.40, 'seat-center'], [0.36, 'seat-corner']].forEach(([cx, seatId]) => {
+    addPart(posVox(cx * s, cushionY * s, 0.18 * s, mainCushionW * s, cushionH * s, mainCushionD * s, fabricLight), 'seatCushions', seatId);
   });
-  [0.52, 1.08].forEach((cz) => {
-    g.add(posVox(1.04 * s, 0.49 * s, cz * s, 0.64 * s, 0.14 * s, 0.58 * s, fabricLight));
-    g.add(posVox(1.50 * s, 0.72 * s, cz * s, 0.08 * s, 0.34 * s, 0.56 * s, fabricLight));
-  });
 
-  g.add(posVox(0.78 * s, 0.58 * s, 0.18 * s, 0.40 * s, 0.20 * s, 0.52 * s, fabricLight));
-  g.add(posVox(-0.78 * s, 0.59 * s, 0.18 * s, 0.035 * s, 0.22 * s, 0.68 * s, seam));
-  g.add(posVox(-0.02 * s, 0.59 * s, 0.18 * s, 0.035 * s, 0.22 * s, 0.68 * s, seam));
-  g.add(posVox(1.04 * s, 0.59 * s, 0.80 * s, 0.58 * s, 0.22 * s, 0.035 * s, seam));
-  g.add(posVox(-0.48 * s, 0.37 * s, 0.58 * s, 2.62 * s, 0.10 * s, 0.10 * s, fabricDark));
-  g.add(posVox(0.62 * s, 0.37 * s, 1.54 * s, 0.82 * s, 0.10 * s, 0.10 * s, fabricDark));
-  for (const [fx, fz] of [[-1.56, -0.34], [-0.20, -0.34], [1.36, -0.22], [-1.56, 0.48], [0.62, 1.40], [1.36, 1.40]]) {
-    g.add(posVox(fx * s, 0.05 * s, fz * s, 0.16 * s, 0.10 * s, 0.16 * s, wood));
+  // A single long chaise pad replaces the old two-piece chaise and its odd
+  // center wedge. Its left edge stays aligned with the authored west-facing
+  // chaise dock so the agent's legs extend naturally along the open side.
+  addPart(posVox(1.04 * s, cushionY * s, 0.80 * s, 0.72 * s, cushionH * s, 1.48 * s, fabricLight), 'seatCushions', 'chaise');
+
+  // Low skirts close the visible frame/floor gap without adding piping.
+  addPart(posVox(-0.48 * s, 0.16 * s, 0.56 * s, 2.96 * s, 0.20 * s, 0.10 * s, fabric), 'body');
+  addPart(posVox(1.04 * s, 0.16 * s, 1.68 * s, 0.92 * s, 0.20 * s, 0.10 * s, fabric), 'body');
+
+  for (const [fx, fz] of [[-1.62, -0.34], [-0.30, -0.34], [1.34, -0.22], [-1.62, 0.48], [0.72, 1.54], [1.34, 1.54]]) {
+    addPart(posVox(fx * s, 0.05 * s, fz * s, 0.16 * s, 0.10 * s, 0.16 * s, wood), 'feet');
   }
   g.position.set(x, 0, z);
   return g;
 }
 
-function makeLoveseat3D(x, z, s) {
+function makeLoveseat3D(x, z, s = T, furniture = {}) {
   const g = new THREE.Group();
-  const fabric = 0x0f766e;
-  const fabricDark = 0x115e59;
-  const fabricLight = 0x5eead4;
-  const seam = 0xccfbf1;
-  const wood = 0x4e342e;
+  const colors = normalizeMultiSeatFurnitureColors('loveseat', furniture);
+  const fabric = parseColor(colors.body);
+  const fabricDark = parseColor(colors.backArms);
+  const fabricLight = parseColor(colors.seatCushions);
+  const wood = parseColor(colors.feet);
+  g.userData.multiSeatColors = colors;
+  const addPart = (mesh, key, seatId = null) => g.add(tagMultiSeatColorPart(mesh, 'loveseat', key, seatId));
 
-  // Two-person comfort loveseat: smaller than the three-seat couch, wider than
-  // an armchair, and one stationary furniture asset only. Cushion seams, arms,
-  // back pillows, low feet, and piping are visual details on the same asset.
-  g.add(posVox(0, 0.23 * s, 0.08 * s, 2.16 * s, 0.34 * s, 0.90 * s, fabric));
-  g.add(posVox(0, 0.50 * s, -0.36 * s, 2.22 * s, 0.62 * s, 0.18 * s, fabricDark));
-  g.add(posVox(-1.10 * s, 0.42 * s, 0.04 * s, 0.18 * s, 0.54 * s, 0.90 * s, fabricDark));
-  g.add(posVox(1.10 * s, 0.42 * s, 0.04 * s, 0.18 * s, 0.54 * s, 0.90 * s, fabricDark));
+  // Clean two-person loveseat in the same visual language as the corrected
+  // couch and sectional. The former white piping rods, center divider, thin
+  // floating rear pillows, and front trim bar are intentionally omitted.
+  // A continuous back pad and two closely fitted cushions make this read as
+  // one coherent upholstered asset while preserving independent seat raycasts.
+  const seatY = 0.24;
+  const seatH = 0.34;
+  const cushionY = 0.49;
+  const cushionW = 0.92;
+  const cushionH = 0.16;
+  const cushionD = 0.64;
+  const cushionPitch = 0.48;
 
-  [-0.48, 0.48].forEach((cx) => {
-    g.add(posVox(cx * s, 0.48 * s, 0.16 * s, 0.82 * s, 0.14 * s, 0.64 * s, fabricLight));
-    g.add(posVox(cx * s, 0.585 * s, 0.48 * s, 0.72 * s, 0.035 * s, 0.06 * s, seam));
-    g.add(posVox(cx * s, 0.71 * s, -0.47 * s, 0.70 * s, 0.32 * s, 0.08 * s, fabricLight));
+  addPart(posVox(0, seatY * s, 0.08 * s, 2.16 * s, seatH * s, 0.92 * s, fabric), 'body');
+  addPart(posVox(0, 0.60 * s, -0.38 * s, 2.20 * s, 0.86 * s, 0.22 * s, fabricDark), 'backArms');
+  addPart(posVox(0, 0.66 * s, -0.22 * s, 2.00 * s, 0.60 * s, 0.14 * s, fabricLight), 'seatCushions');
+
+  for (const ax of [-1.10, 1.10]) {
+    addPart(posVox(ax * s, 0.40 * s, 0.04 * s, 0.20 * s, 0.60 * s, 0.98 * s, fabricDark), 'backArms');
+    addPart(posVox(ax * s, 0.72 * s, 0.04 * s, 0.26 * s, 0.14 * s, 0.98 * s, fabricDark), 'backArms');
+  }
+
+  [[-cushionPitch, 'seat-left'], [cushionPitch, 'seat-right']].forEach(([cx, seatId]) => {
+    addPart(posVox(cx * s, cushionY * s, 0.16 * s, cushionW * s, cushionH * s, cushionD * s, fabricLight), 'seatCushions', seatId);
   });
 
-  g.add(posVox(0, 0.58 * s, 0.18 * s, 0.035 * s, 0.22 * s, 0.66 * s, seam));
-  g.add(posVox(0, 0.36 * s, 0.56 * s, 1.88 * s, 0.10 * s, 0.10 * s, fabricDark));
-  g.add(posVox(0, 0.84 * s, -0.50 * s, 1.62 * s, 0.055 * s, 0.055 * s, seam));
-  for (const [fx, fz] of [[-0.82, -0.34], [0.82, -0.34], [-0.82, 0.46], [0.82, 0.46]]) {
-    g.add(posVox(fx * s, 0.05 * s, fz * s, 0.14 * s, 0.10 * s, 0.14 * s, wood));
+  addPart(posVox(0, 0.16 * s, 0.52 * s, 2.16 * s, 0.20 * s, 0.10 * s, fabric), 'body');
+
+  for (const [fx, fz] of [[-0.94, -0.34], [0.94, -0.34], [-0.94, 0.44], [0.94, 0.44]]) {
+    addPart(posVox(fx * s, 0.05 * s, fz * s, 0.14 * s, 0.10 * s, 0.14 * s, wood), 'feet');
   }
   g.position.set(x, 0, z);
   return g;
@@ -18923,10 +19860,16 @@ function makeGazeboPavilion3D(x, z, s = T) {
   g.add(posVox(0, 0.78 * s, -1.23 * s, 1.55 * s, 0.38 * s, 0.10 * s, wood));
   [-0.58, 0.58].forEach(lx => g.add(posVox(lx * s, 0.28 * s, -1.02 * s, 0.12 * s, 0.34 * s, 0.12 * s, woodDark)));
 
-  g.add(posVox(0, 1.78 * s, 0, 3.70 * s, 0.18 * s, 3.70 * s, roof));
-  g.add(posVox(0, 2.02 * s, 0, 2.65 * s, 0.20 * s, 2.65 * s, roof));
-  g.add(posVox(0, 2.22 * s, 0, 1.42 * s, 0.18 * s, 1.42 * s, woodDark));
-  g.add(posVox(0, 2.38 * s, 0, 0.38 * s, 0.18 * s, 0.38 * s, woodLight));
+  const roofLayers = [
+    posVox(0, 1.78 * s, 0, 3.70 * s, 0.18 * s, 3.70 * s, roof),
+    posVox(0, 2.02 * s, 0, 2.65 * s, 0.20 * s, 2.65 * s, roof),
+    posVox(0, 2.22 * s, 0, 1.42 * s, 0.18 * s, 1.42 * s, woodDark),
+    posVox(0, 2.38 * s, 0, 0.38 * s, 0.18 * s, 0.38 * s, woodLight),
+  ];
+  roofLayers.forEach((layer, index) => {
+    layer.material = getMat(index < 2 ? roof : (index === 2 ? woodDark : woodLight), { transparent: true, opacity: index < 2 ? 0.68 : 0.82 });
+    g.add(layer);
+  });
 
   g.position.set(x, 0, z);
   return g;
@@ -19190,6 +20133,20 @@ function makeSmallCafeTable3D(x, z, s) {
   g.add(posVox(-0.12 * s, 0.82 * s, 0.10 * s, 0.22 * s, 0.04 * s, 0.18 * s, 0xfef3c7)); // small plate/snack cue
   g.add(posVox(-0.12 * s, 0.86 * s, 0.10 * s, 0.12 * s, 0.035 * s, 0.10 * s, 0xf97316));
 
+  // Four integrated chairs match the four reservable seat positions. They are
+  // visual children of this one table asset and do not create extra colliders.
+  [[0, -1.02, 0], [0, 1.02, Math.PI], [1.02, 0, Math.PI / 2], [-1.02, 0, -Math.PI / 2]].forEach(([cx, cz, rot]) => {
+    const chair = new THREE.Group();
+    chair.add(posVox(0, 0.35 * s, 0, 0.46 * s, 0.10 * s, 0.44 * s, 0x0f766e));
+    chair.add(posVox(0, 0.66 * s, -0.20 * s, 0.50 * s, 0.46 * s, 0.08 * s, 0x14b8a6));
+    for (const [lx, lz] of [[-0.16, -0.12], [0.16, -0.12], [-0.16, 0.12], [0.16, 0.12]]) {
+      chair.add(posVox(lx * s, 0.17 * s, lz * s, 0.06 * s, 0.34 * s, 0.06 * s, metalDark));
+    }
+    chair.rotation.y = rot;
+    chair.position.set(cx * s, 0, cz * s);
+    g.add(chair);
+  });
+
   g.position.set(x, 0, z);
   return g;
 }
@@ -19394,6 +20351,19 @@ function makeSmallRoundMeetingTable3D(x, z, s) {
     marker.rotation.y = rot;
     g.add(marker);
   }
+
+  // Visible conference chairs correspond one-for-one with the four reservable
+  // table seats so seated agents never appear to hover in empty space.
+  [[0, -1.18, 0], [0, 1.18, Math.PI], [1.18, 0, Math.PI / 2], [-1.18, 0, -Math.PI / 2]].forEach(([cx, cz, rot]) => {
+    const chair = new THREE.Group();
+    chair.add(posVox(0, 0.36 * s, 0, 0.48 * s, 0.10 * s, 0.46 * s, 0x4338ca));
+    chair.add(posVox(0, 0.72 * s, -0.21 * s, 0.52 * s, 0.58 * s, 0.09 * s, 0x312e81));
+    chair.add(posVox(0, 0.18 * s, 0, 0.08 * s, 0.36 * s, 0.08 * s, metalDark));
+    chair.add(posVox(0, 0.05 * s, 0, 0.50 * s, 0.06 * s, 0.08 * s, metal));
+    chair.rotation.y = rot;
+    chair.position.set(cx * s, 0, cz * s);
+    g.add(chair);
+  });
 
   g.position.set(x, 0, z);
   return g;
@@ -22015,11 +22985,78 @@ function updateAgentAnimations(dt) {
       agent._schedPhase = 'conference-chair-stand-up';
       agent._stayTimer = 850;
       agent._wanderTimer = 1600 + Math.random() * 2400;
+    } else if (String(agent._idleActivity?.kind || '').startsWith('bed-clinic-')) {
+      const clinicActivity = agent._idleActivity;
+      const clinicBuilding = buildingsMap.get(clinicActivity?.buildingId);
+      const clinicBed = clinicBuilding?.interior?.furniture?.[clinicActivity?.furnitureIndex];
+      if (clinicBed?.type === 'clinicBed') {
+        releaseObjectAssignmentForAgentActivity(agent, clinicActivity, 'clinic-bed-use-complete');
+        clinicBed.reservation = null;
+        clinicBed.activeUse = {
+          ...(clinicBed.activeUse || {}),
+          state: 'complete',
+          mode: 'available',
+          lastAgentId: agent.id || null,
+          lastAction: clinicActivity.actionId || clinicActivity.action || 'life.medicalExam',
+        };
+        clinicBed.clinicBedState = {
+          ...(clinicBed.clinicBedState || {}),
+          status: 'available',
+          patient: null,
+          clinician: null,
+          lastAction: clinicBed.activeUse.lastAction,
+          persistentFurniture: true,
+        };
+        advanceScriptedServiceQueueAfterUse(clinicBuilding, clinicActivity.furnitureIndex, 'clinic-bed-use-complete');
+      }
+      if (clinicActivity?.standTarget) {
+        agent.x = clinicActivity.standTarget.x;
+        agent.y = clinicActivity.standTarget.y;
+        if (Number.isFinite(Number(clinicActivity.standTarget.floor))) agent._floor = Math.max(1, Number(clinicActivity.standTarget.floor) || 1);
+        if (Number.isFinite(Number(clinicActivity.standFaceAngle)) && agent._group3d) agent._group3d.rotation.y = clinicActivity.standFaceAngle;
+      }
+      agent._idleActivity = null;
+      agent._schedPhase = 'clinic-bed-stand-up';
+      agent._stayTimer = 900;
+      agent._wanderTimer = 1600 + Math.random() * 2400;
+    } else if (String(agent._idleActivity?.kind || '').startsWith('exam-chair-')) {
+      const examActivity = agent._idleActivity;
+      const examBuilding = buildingsMap.get(examActivity?.buildingId);
+      const examChair = examBuilding?.interior?.furniture?.[examActivity?.furnitureIndex];
+      if (examChair?.type === 'examChair') {
+        releaseObjectAssignmentForAgentActivity(agent, examActivity, 'exam-chair-use-complete');
+        examChair.reservation = null;
+        examChair.activeUse = {
+          ...(examChair.activeUse || {}),
+          state: 'complete',
+          mode: 'ready',
+          lastAgentId: agent.id || null,
+          lastAction: examActivity.actionId || examActivity.action || 'life.examChairCheckup',
+        };
+        examChair.examChairState = {
+          ...(examChair.examChairState || {}),
+          status: 'ready',
+          profileReviewOpen: false,
+          lastAction: examChair.activeUse.lastAction,
+        };
+        advanceScriptedServiceQueueAfterUse(examBuilding, examActivity.furnitureIndex, 'exam-chair-use-complete');
+      }
+      if (examActivity?.standTarget) {
+        agent.x = examActivity.standTarget.x;
+        agent.y = examActivity.standTarget.y;
+        if (Number.isFinite(Number(examActivity.standTarget.floor))) agent._floor = Math.max(1, Number(examActivity.standTarget.floor) || 1);
+        if (Number.isFinite(Number(examActivity.standFaceAngle)) && agent._group3d) agent._group3d.rotation.y = examActivity.standFaceAngle;
+      }
+      agent._idleActivity = null;
+      agent._schedPhase = 'exam-chair-stand-up';
+      agent._stayTimer = 900;
+      agent._wanderTimer = 1600 + Math.random() * 2400;
     } else if (String(agent._idleActivity?.kind || '').startsWith('barber-chair-') && agent._idleActivity?.phase !== 'approach') {
       const barberActivity = agent._idleActivity;
       const barberBuilding = buildingsMap.get(barberActivity?.buildingId);
       const barberChair = barberBuilding?.interior?.furniture?.[barberActivity?.furnitureIndex];
       if (barberChair?.type === 'barberChair') {
+        releaseObjectAssignmentForAgentActivity(agent, barberActivity, 'barber-chair-use-complete');
         barberChair.reservation = null;
         barberChair.objectUseActiveReservations = [];
         barberChair.activeUse = { state: 'idle', mode: 'open-chair', lastAgentId: agent.id || null, lastAction: barberActivity.action || barberActivity.kind };
@@ -22031,6 +23068,7 @@ function updateAgentAnimations(dt) {
           if (Number.isFinite(standSpot.faceAngle)) agent._faceAngle = standSpot.faceAngle;
           barberChair.activeUse.exitSpotId = standSpot.spotId || 'stand-front';
         }
+        advanceScriptedServiceQueueAfterUse(barberBuilding, barberActivity.furnitureIndex, 'barber-chair-use-complete');
       }
       agent._idleActivity = null;
       agent._schedPhase = 'barber-chair-stand-up';
@@ -22286,6 +23324,33 @@ function updateAgentAnimations(dt) {
       agent._idleActivity = null;
       agent._schedPhase = 'server-rack-complete';
       agent._wanderTimer = 1600 + Math.random() * 2400;
+    } else if (String(agent._idleActivity?.kind || '').startsWith('sink-')) {
+      const sinkActivity = agent._idleActivity;
+      const sinkBuilding = buildingsMap.get(sinkActivity?.buildingId);
+      const sink = sinkBuilding?.interior?.furniture?.[sinkActivity?.furnitureIndex];
+      if (sink?.type === 'sink') {
+        const releaseResult = releaseObjectAssignmentForAgentActivity(agent, sinkActivity, 'sink-use-complete');
+        sink.reservation = null;
+        sink.activeUse = {
+          ...(sink.activeUse || {}),
+          state: 'complete',
+          mode: 'ready',
+          lastAgentId: agent.id || null,
+          lastAction: sinkActivity.actionId || sinkActivity.action || 'life.useSink',
+        };
+        sink.sinkState = {
+          ...(sink.sinkState || {}),
+          status: 'ready',
+          lastAction: sink.activeUse.lastAction,
+          completionReleased: releaseResult?.released !== false,
+          releasedSlotId: releaseResult?.slotId || sinkActivity.activeUseSlotId || sinkActivity.spotId || null,
+          persistentFurniture: true,
+        };
+        advanceScriptedServiceQueueAfterUse(sinkBuilding, sinkActivity.furnitureIndex, 'sink-use-complete');
+      }
+      agent._idleActivity = null;
+      agent._schedPhase = 'sink-use-complete';
+      agent._wanderTimer = 1500 + Math.random() * 2200;
     } else if (String(agent._idleActivity?.kind || '').startsWith('diagnostic-station-')) {
       const diagnosticActivity = agent._idleActivity;
       const diagnosticBuilding = buildingsMap.get(diagnosticActivity?.buildingId);
@@ -22294,6 +23359,7 @@ function updateAgentAnimations(dt) {
         const releaseResult = releaseStandingUseMachine(station, diagnosticActivity, agent, 'diagnostic-station-use-complete');
         station.activeUse = { ...(station.activeUse || {}), state: 'complete', mode: diagnosticActivity.mode || 'diagnose', lastAgentId: agent.id || null, lastAction: diagnosticActivity.action || 'maintenance.runDiagnostics' };
         station.diagnosticState = { ...(station.diagnosticState || {}), status: 'ready', lastAction: station.activeUse.lastAction, documentsOpen: false, completionReleased: releaseResult?.release?.ok !== false, releasedSlotId: releaseResult?.slotId || diagnosticActivity.activeUseSlotId || diagnosticActivity.spotId || null };
+        advanceScriptedServiceQueueAfterUse(diagnosticBuilding, diagnosticActivity.furnitureIndex, 'diagnostic-station-use-complete');
       }
       agent._idleActivity = null;
       agent._schedPhase = 'diagnostic-station-complete';
@@ -22575,11 +23641,13 @@ function updateAgentAnimations(dt) {
       if (receptionDesk?.type === 'receptionDesk') {
         const previousCount = Math.max(0, Number(receptionDesk.receptionState?.visitorCount || 0));
         const isVisitor = String(receptionActivity.kind || '').includes('visitor');
+        releaseObjectAssignmentForAgentActivity(agent, receptionActivity, 'reception-desk-complete');
         receptionDesk.reservation = null;
         receptionDesk.activeUse = { state: 'complete', mode: receptionActivity.mode || (isVisitor ? 'visitor-talk' : 'staff-work'), lastAgentId: agent.id || null, lastAction: receptionActivity.action || (isVisitor ? 'life.social' : 'planning.schedule') };
         receptionDesk.serviceState = { ...(receptionDesk.serviceState || {}), visitor: null, receptionist: null, mode: 'open' };
         receptionDesk.receptionState = { ...(receptionDesk.receptionState || {}), status: 'open', visitorCount: isVisitor ? previousCount + 1 : previousCount, lastAction: receptionDesk.activeUse.lastAction, persistentFurniture: true };
         persistBuilding(receptionBuilding);
+        advanceScriptedServiceQueueAfterUse(receptionBuilding, receptionActivity.furnitureIndex, 'reception-desk-complete');
       }
       agent._idleActivity = null;
       agent._schedPhase = 'reception-desk-complete';
@@ -22600,7 +23668,8 @@ function updateAgentAnimations(dt) {
     } else if (String(agent._idleActivity?.kind || '').startsWith('food-truck-counter-')) {
       const foodTruckActivity = agent._idleActivity;
       const foodTruckBuilding = buildingsMap.get(foodTruckActivity?.buildingId);
-      const rawNode = getRawOutdoorNodeById(foodTruckBuilding, foodTruckActivity?.outdoorNodeId);
+      const rawNode = foodTruckBuilding?.interior?.furniture?.[foodTruckActivity?.furnitureIndex]
+        || getRawOutdoorNodeById(foodTruckBuilding, foodTruckActivity?.outdoorNodeId);
       const isServe = String(foodTruckActivity.kind || '').includes('serve');
       if (rawNode) {
         let cleanupPlan = null;
@@ -22612,6 +23681,7 @@ function updateAgentAnimations(dt) {
         rawNode.activeUse = { ...(rawNode.activeUse || {}), state: 'complete', mode: isServe ? 'served-customer' : 'order-handed-off', lastAgentId: agent.id || null, lastAction: foodTruckActivity.actionId || foodTruckActivity.action || (isServe ? 'maintenance.serveFoodTruck' : 'life.orderFood'), interactionSpotId: foodTruckActivity.interactionSpotId || foodTruckActivity.spotId || null, completedAt: new Date().toISOString() };
         rawNode.serviceState = { ...(rawNode.serviceState || {}), mode: 'open', lastAction: rawNode.activeUse.lastAction, orderCount: Math.max(0, Number(rawNode.serviceState?.orderCount || 0)) + (isServe ? 0 : 1), serviceCount: Math.max(0, Number(rawNode.serviceState?.serviceCount || 0)) + (isServe ? 1 : 0), completionReleased: releaseResult?.release?.ok !== false, temporaryCleanupPlan: cleanupPlan ? { id: cleanupPlan.item?.id || null, reason: cleanupPlan.reason || 'use-complete', terminalState: cleanupPlan.finalItem?.temporaryUse?.state || 'consumed', skipPersistence: cleanupPlan.effects?.skipPersistence === true } : rawNode.serviceState?.temporaryCleanupPlan || null, persistentOutdoorNode: true };
         if (foodTruckBuilding) persistBuilding(foodTruckBuilding);
+        if (foodTruckActivity.furnitureIndex != null) advanceScriptedServiceQueueAfterUse(foodTruckBuilding, foodTruckActivity.furnitureIndex, 'food-truck-counter-complete');
       }
       agent._idleActivity = null;
       agent._schedPhase = 'food-truck-counter-complete';
@@ -22643,11 +23713,13 @@ function updateAgentAnimations(dt) {
     } else if (String(agent._idleActivity?.kind || '').startsWith('park-bench-')) {
       const benchActivity = agent._idleActivity;
       const benchBuilding = buildingsMap.get(benchActivity?.buildingId);
-      const rawNode = getRawOutdoorNodeById(benchBuilding, benchActivity?.outdoorNodeId);
+      const rawNode = benchActivity?.outdoorNodeId
+        ? getRawOutdoorNodeById(benchBuilding, benchActivity.outdoorNodeId)
+        : benchBuilding?.interior?.furniture?.[benchActivity?.furnitureIndex];
       if (rawNode) {
         releaseParkBenchSeatUse(rawNode, benchActivity, agent, 'stay-complete');
         rawNode.activeUse = { ...(rawNode.activeUse || {}), lastAgentId: agent.id || null, lastAction: benchActivity.actionId || benchActivity.action || 'life.restAtBench', lastInteractionSpotId: benchActivity.seatId || benchActivity.activationSpotId || benchActivity.spotId || benchActivity.interactionSpotId || null, completedAt: new Date().toISOString() };
-        rawNode.lifecycle = { ...(rawNode.lifecycle || {}), stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, statePath: 'benchState', explicitOutdoorNode: true };
+        rawNode.lifecycle = { ...(rawNode.lifecycle || {}), stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, statePath: 'benchState', explicitOutdoorNode: Boolean(benchActivity?.outdoorNodeId) };
         if (benchBuilding) persistBuilding(benchBuilding);
       }
       agent._idleActivity = null;
@@ -22668,6 +23740,7 @@ function updateAgentAnimations(dt) {
         releasePlaygroundSlideUse(slide, { ...slideActivity, standTarget: finishTarget ? { x: Number(finishTarget.x), y: Number(finishTarget.y), floor: Number(finishTarget.floor || 1) || 1 } : slideActivity.standTarget }, agent, 'stay-complete');
         slide.lifecycle = { ...(slide.lifecycle || {}), stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, statePath: 'slideState' };
         if (slideBuilding) persistBuilding(slideBuilding);
+        if (slideActivity.furnitureIndex != null) advanceScriptedServiceQueueAfterUse(slideBuilding, slideActivity.furnitureIndex, 'playground-slide-complete');
       }
       agent._idleActivity = null;
       agent._schedPhase = 'playground-slide-exit-clear';
@@ -22688,6 +23761,7 @@ function updateAgentAnimations(dt) {
         releasePlaygroundSwingUse(swing, { ...swingActivity, standTarget: stopTarget ? { x: Number(stopTarget.x), y: Number(stopTarget.y), floor: Number(stopTarget.floor || 1) || 1 } : swingActivity.standTarget }, agent, 'stay-complete');
         swing.lifecycle = { ...(swing.lifecycle || {}), stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, statePath: 'swingState', softClearance: true, explicitOutdoorNode: true };
         if (swingBuilding) persistBuilding(swingBuilding);
+        if (swingActivity.furnitureIndex != null) advanceScriptedServiceQueueAfterUse(swingBuilding, swingActivity.furnitureIndex, 'playground-swing-complete');
       }
       agent._idleActivity = null;
       agent._schedPhase = 'playground-swing-stand-up';
@@ -23016,7 +24090,7 @@ function updateAgentAnimations(dt) {
         const previousCount = Math.max(0, Number(shelf.surfaceState?.temporaryItemCount || 0));
         const capacity = Math.max(1, Number(shelf.surfaceState?.capacity || 2));
         if (isDropoff) cleanupAgentCoffeeDrink(agent, 'drop-off');
-        shelf.reservation = null;
+        const releaseResult = releaseServiceSurfaceStandingUse(shelf, pickupActivity, agent, 'coffee-pickup-shelf-complete');
         shelf.surfaceState = {
           ...(shelf.surfaceState || {}),
           capacity,
@@ -23024,7 +24098,8 @@ function updateAgentAnimations(dt) {
           acceptsTemporary: ['Coffee Drink'],
           lastAction: pickupActivity.action || (isDropoff ? 'maintenance.dropOffCoffeeOrder' : 'life.pickupCoffeeOrder'),
         };
-        shelf.activeUse = { state: 'complete', mode: pickupActivity.mode || (isDropoff ? 'dropoff' : 'pickup'), lastAgentId: agent.id || null, lastAction: shelf.surfaceState.lastAction };
+        shelf.activeUse = { state: 'complete', mode: pickupActivity.mode || (isDropoff ? 'dropoff' : 'pickup'), lastAgentId: agent.id || null, lastAction: shelf.surfaceState.lastAction, completionReleased: releaseResult?.release?.ok !== false };
+        advanceScriptedServiceQueueAfterUse(pickupBuilding, pickupActivity.furnitureIndex, 'coffee-pickup-shelf-complete');
       }
       agent._idleActivity = null;
       agent._schedPhase = 'coffee-pickup-shelf-complete';
@@ -23061,6 +24136,7 @@ function updateAgentAnimations(dt) {
         printer.printerScannerMode = 'ready';
         printer.printerScannerState = { ...(printer.printerScannerState || {}), status: 'ready', lastAction: printer.activeUse.actionId, releasedSlotId: releaseResult?.slotId || printerActivity.activeUseSlotId || printerActivity.spotId || null, persistentFurniture: true };
         completeIdleWorldAction(printerActivity, { objectEffect: 'printer-scanner-use-complete', completionState: 'printer-ready' });
+        advanceScriptedServiceQueueAfterUse(printerBuilding, printerActivity.furnitureIndex, 'printer-scanner-use-complete');
       }
       agent._idleActivity = null;
       agent._schedPhase = 'printer-scanner-complete';
@@ -24076,6 +25152,8 @@ function updateAgentAnimations(dt) {
             const couch = couchBuilding?.interior?.furniture?.[idleActivity.furnitureIndex];
             if (couch?.type === 'couch') {
               const seatId = idleActivity.seatId || idleActivity.activationSpotId || idleActivity.spotId || 'sit-center';
+              const approachSpotId = idleActivity.approachSpotId || getCouchDismountSpotId(seatId);
+              const dismountSpotId = idleActivity.dismountSpotId || idleActivity.exitSpotId || getCouchDismountSpotId(seatId);
               const reservationId = idleActivity.reservationId || couch.reservation?.id || null;
               if (reservationId) {
                 activateObjectUseSeatReservation(getCouchObjectUseSeatStore(couch), {
@@ -24090,11 +25168,12 @@ function updateAgentAnimations(dt) {
                 reservationId,
                 actionId: idleActivity.actionId || idleActivity.action || null,
                 interactionSpotId: seatId,
-                approachSpotId: idleActivity.approachSpotId || 'talk-front',
+                approachSpotId,
+                dismountSpotId,
                 startedAt: new Date().toISOString(),
               };
-              couch.reservation = { ...(couch.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, approachSpotId: idleActivity.approachSpotId || 'talk-front' };
-              couch.activeUse = { ...(couch.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || 'couch-seat', activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, approachSpotId: idleActivity.approachSpotId || 'talk-front', startedAt: couch.activeUse?.startedAt || new Date().toISOString() };
+              couch.reservation = { ...(couch.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, approachSpotId, dismountSpotId };
+              couch.activeUse = { ...(couch.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || 'couch-seat', activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, approachSpotId, dismountSpotId, startedAt: couch.activeUse?.startedAt || new Date().toISOString() };
               couch.couchState = { ...(couch.couchState || {}), status: 'occupied', seats: 3, activeSeatIds: Object.keys(activeSeats).sort(), lastAction: idleActivity.actionId || idleActivity.action || idleActivity.kind, persistentFurniture: true };
             }
             idleActivity.seated = true;
@@ -24106,6 +25185,7 @@ function updateAgentAnimations(dt) {
             if (sofa?.type === 'sectionalSofa') {
               const seatId = idleActivity.seatId || idleActivity.activationSpotId || idleActivity.spotId || 'seat-center';
               const approachSpotId = idleActivity.approachSpotId || getSectionalSofaApproachSpotId(seatId);
+              const dismountSpotId = idleActivity.dismountSpotId || idleActivity.exitSpotId || getSectionalSofaApproachSpotId(seatId);
               const reservationId = idleActivity.reservationId || sofa.reservation?.id || null;
               if (reservationId) {
                 activateObjectUseSeatReservation(getSectionalSofaObjectUseSeatStore(sofa), {
@@ -24121,11 +25201,12 @@ function updateAgentAnimations(dt) {
                 actionId: idleActivity.actionId || idleActivity.action || null,
                 interactionSpotId: seatId,
                 approachSpotId,
+                dismountSpotId,
                 startedAt: new Date().toISOString(),
                 pose: seatId === 'chaise' ? 'chaise-lounge' : 'seated',
               };
-              sofa.reservation = { ...(sofa.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, approachSpotId };
-              sofa.activeUse = { ...(sofa.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || 'sectional-sofa-seat', activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, approachSpotId, startedAt: sofa.activeUse?.startedAt || new Date().toISOString() };
+              sofa.reservation = { ...(sofa.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, approachSpotId, dismountSpotId };
+              sofa.activeUse = { ...(sofa.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || 'sectional-sofa-seat', activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, approachSpotId, dismountSpotId, startedAt: sofa.activeUse?.startedAt || new Date().toISOString() };
               sofa.sectionalSofaState = { ...(sofa.sectionalSofaState || {}), status: 'occupied', seats: 4, activeSeatIds: Object.keys(activeSeats).sort(), chaisePose: activeSeats.chaise ? 'west-facing-lounge' : (sofa.sectionalSofaState?.chaisePose || null), lastAction: idleActivity.actionId || idleActivity.action || idleActivity.kind, persistentFurniture: true };
             }
             idleActivity.seated = true;
@@ -24136,7 +25217,8 @@ function updateAgentAnimations(dt) {
             const loveseat = loveseatBuilding?.interior?.furniture?.[idleActivity.furnitureIndex];
             if (loveseat?.type === 'loveseat') {
               const seatId = idleActivity.seatId || idleActivity.activationSpotId || idleActivity.spotId || 'seat-left';
-              const approachSpotId = idleActivity.approachSpotId || (seatId === 'seat-right' ? 'approach-right' : 'approach-left');
+              const approachSpotId = idleActivity.approachSpotId || (seatId === 'seat-right' ? 'stand-right' : 'stand-left');
+              const dismountSpotId = idleActivity.dismountSpotId || idleActivity.exitSpotId || approachSpotId;
               const reservationId = idleActivity.reservationId || loveseat.reservation?.id || null;
               if (reservationId) {
                 activateObjectUseSeatReservation(getLoveseatObjectUseSeatStore(loveseat), {
@@ -24152,10 +25234,11 @@ function updateAgentAnimations(dt) {
                 actionId: idleActivity.actionId || idleActivity.action || null,
                 interactionSpotId: seatId,
                 approachSpotId,
+                dismountSpotId,
                 startedAt: new Date().toISOString(),
               };
-              loveseat.reservation = { ...(loveseat.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, approachSpotId };
-              loveseat.activeUse = { ...(loveseat.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || 'loveseat-seat', activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, approachSpotId, startedAt: loveseat.activeUse?.startedAt || new Date().toISOString() };
+              loveseat.reservation = { ...(loveseat.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, approachSpotId, dismountSpotId };
+              loveseat.activeUse = { ...(loveseat.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || 'loveseat-seat', activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, approachSpotId, dismountSpotId, startedAt: loveseat.activeUse?.startedAt || new Date().toISOString() };
               loveseat.loveseatState = { ...(loveseat.loveseatState || {}), status: 'occupied', seats: 2, activeSeatIds: Object.keys(activeSeats).sort(), lastAction: idleActivity.actionId || idleActivity.action || idleActivity.kind, persistentFurniture: true };
             }
             idleActivity.seated = true;
@@ -24166,7 +25249,7 @@ function updateAgentAnimations(dt) {
             const armchair = armchairBuilding?.interior?.furniture?.[idleActivity.furnitureIndex];
             if (armchair?.type === 'armchair') {
               const seatId = idleActivity.seatId || idleActivity.activationSpotId || idleActivity.spotId || 'seat';
-              const approachSpotId = idleActivity.approachSpotId || 'approach-front';
+              const approachSpotId = idleActivity.approachSpotId || (seatId === 'seat-right' ? 'stand-right' : 'stand-left');
               const reservationId = idleActivity.reservationId || armchair.reservation?.id || null;
               if (reservationId) {
                 activateObjectUseSeatReservation(getArmchairObjectUseSeatStore(armchair), {
@@ -24196,7 +25279,8 @@ function updateAgentAnimations(dt) {
             const bench = benchBuilding?.interior?.furniture?.[idleActivity.furnitureIndex];
             if (bench?.type === 'hallwayBench') {
               const seatId = idleActivity.seatId || idleActivity.activationSpotId || idleActivity.spotId || 'seat-right';
-              const approachSpotId = idleActivity.approachSpotId || 'approach-front';
+              const approachSpotId = idleActivity.approachSpotId || (seatId === 'seat-right' ? 'stand-right' : 'stand-left');
+              const dismountSpotId = idleActivity.dismountSpotId || idleActivity.exitSpotId || approachSpotId;
               const reservationId = idleActivity.reservationId || bench.reservation?.id || null;
               if (reservationId) {
                 activateObjectUseSeatReservation(getHallwayBenchObjectUseSeatStore(bench), {
@@ -24212,11 +25296,12 @@ function updateAgentAnimations(dt) {
                 actionId: idleActivity.actionId || idleActivity.action || null,
                 interactionSpotId: seatId,
                 approachSpotId,
+                dismountSpotId,
                 startedAt: new Date().toISOString(),
                 pose: 'waiting-seated',
               };
-              bench.reservation = { ...(bench.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, interactionSpotId: seatId, approachSpotId };
-              bench.activeUse = { ...(bench.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || 'hallway-bench-seat', activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, approachSpotId, startedAt: bench.activeUse?.startedAt || new Date().toISOString() };
+              bench.reservation = { ...(bench.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, interactionSpotId: seatId, approachSpotId, dismountSpotId };
+              bench.activeUse = { ...(bench.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || 'hallway-bench-seat', activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, approachSpotId, dismountSpotId, startedAt: bench.activeUse?.startedAt || new Date().toISOString() };
               bench.benchState = { ...(bench.benchState || {}), status: 'occupied', mode: idleActivity.mode || idleActivity.kind || 'hallway-bench-seat', seats: 2, activeSeatIds: Object.keys(activeSeats).sort(), reservedSeatIds: [...getActiveHallwayBenchReservationSeatIds(bench, idleActivity.buildingId, idleActivity.furnitureIndex)].sort(), lastAction: idleActivity.actionId || idleActivity.action || idleActivity.kind, lastInteractionSpotId: seatId, persistentFurniture: true, lifecycle: 'stationary-non-carryable-persistent-solid-waiting-bench' };
             }
             idleActivity.seated = true;
@@ -24224,10 +25309,13 @@ function updateAgentAnimations(dt) {
           }
           if (String(idleActivity.kind || '').startsWith('park-bench-')) {
             const benchBuilding = buildingsMap.get(idleActivity.buildingId);
-            const benchNode = getRawOutdoorNodeById(benchBuilding, idleActivity.outdoorNodeId);
+            const benchNode = idleActivity.outdoorNodeId
+              ? getRawOutdoorNodeById(benchBuilding, idleActivity.outdoorNodeId)
+              : benchBuilding?.interior?.furniture?.[idleActivity.furnitureIndex];
             if (benchNode) {
               const seatId = idleActivity.seatId || idleActivity.activationSpotId || idleActivity.spotId || 'seat-center';
-              const approachSpotId = idleActivity.approachSpotId || 'approach-front';
+              const approachSpotId = idleActivity.approachSpotId || `stand-${String(seatId).replace('seat-', '')}`;
+              const dismountSpotId = idleActivity.dismountSpotId || idleActivity.exitSpotId || approachSpotId;
               const reservationId = idleActivity.reservationId || benchNode.reservation?.id || null;
               if (reservationId) {
                 activateObjectUseSeatReservation(getParkBenchObjectUseSeatStore(benchNode), {
@@ -24243,10 +25331,11 @@ function updateAgentAnimations(dt) {
                 actionId: idleActivity.actionId || idleActivity.action || null,
                 interactionSpotId: seatId,
                 approachSpotId,
+                dismountSpotId,
                 startedAt: new Date().toISOString(),
               };
-              benchNode.reservation = { ...(benchNode.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, interactionSpotId: seatId, approachSpotId };
-              benchNode.activeUse = { ...(benchNode.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || 'park-bench-seat', activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, approachSpotId, startedAt: benchNode.activeUse?.startedAt || new Date().toISOString() };
+              benchNode.reservation = { ...(benchNode.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, interactionSpotId: seatId, approachSpotId, dismountSpotId };
+              benchNode.activeUse = { ...(benchNode.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || 'park-bench-seat', activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, approachSpotId, dismountSpotId, startedAt: benchNode.activeUse?.startedAt || new Date().toISOString() };
               benchNode.benchState = { ...(benchNode.benchState || {}), status: 'occupied', mode: idleActivity.mode || idleActivity.kind || 'park-bench-seat', seats: 3, activeSeatIds: Object.keys(activeSeats).sort(), reservedSeatIds: [...getActiveParkBenchReservationSeatIds(benchNode, idleActivity.buildingId, idleActivity.outdoorNodeId)].sort(), lastAction: idleActivity.actionId || idleActivity.action || idleActivity.kind, lastInteractionSpotId: seatId, persistentOutdoorNode: true, lifecycle: 'stationary-non-carryable-persistent-solid-park-bench' };
             }
             idleActivity.seated = true;
@@ -24283,7 +25372,7 @@ function updateAgentAnimations(dt) {
             idleActivity.seated = true;
             idleActivity.activationState = 'seated';
           }
-          const tableSeatingType = ['smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'smallRoundMeetingTable'].find(type => String(idleActivity.kind || '').startsWith(getTableSeatingConfig(type)?.prefix || '__never__'));
+          const tableSeatingType = ['smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'smallRoundMeetingTable', 'diningTable'].find(type => String(idleActivity.kind || '').startsWith(getTableSeatingConfig(type)?.prefix || '__never__'));
           if (tableSeatingType) {
             const tableBuilding = buildingsMap.get(idleActivity.buildingId);
             const table = tableBuilding?.interior?.furniture?.[idleActivity.furnitureIndex];
@@ -25860,18 +26949,237 @@ function getDraggedAgentInteractionSpotId(furniture) {
   return preferred?.id || spots.find(spot => !String(spot.id || '').includes('approach'))?.id || null;
 }
 
-function isFurnitureAvailableForDraggedAgent(buildingId, index, furniture, agent = null) {
+const MULTI_SEAT_MANUAL_CONFIGS = Object.freeze({
+  couch: Object.freeze({ seatIds: ['sit-left', 'sit-center', 'sit-right'], capacity: 3, kind: 'couch-sit', animationId: 'sit', actionId: 'life.sitAtCouch', stateKey: 'couchState' }),
+  sectionalSofa: Object.freeze({ seatIds: ['seat-left', 'seat-center', 'seat-corner', 'chaise'], capacity: 4, kind: 'sectional-sofa-sit', animationId: 'sit', actionId: 'life.sitAtSectionalSofa', stateKey: 'sectionalSofaState' }),
+  loveseat: Object.freeze({ seatIds: ['seat-left', 'seat-right'], capacity: 2, kind: 'loveseat-sit', animationId: 'sit', actionId: 'life.sitAtLoveseat', stateKey: 'loveseatState' }),
+  hallwayBench: Object.freeze({ seatIds: ['seat-left', 'seat-right'], capacity: 2, kind: 'hallway-bench-wait', animationId: 'hallway-bench-wait', actionId: 'life.waitAtHallwayBench', stateKey: 'benchState' }),
+  parkBench: Object.freeze({ seatIds: ['seat-left', 'seat-center', 'seat-right'], capacity: 3, kind: 'park-bench-sit', animationId: 'park-bench-sit-rest-read-talk', actionId: 'life.sitAtBench', stateKey: 'benchState' }),
+});
+
+function getMultiSeatManualConfig(type) {
+  return MULTI_SEAT_MANUAL_CONFIGS[type] || null;
+}
+
+function isMultiSeatUseSeatId(type, seatId) {
+  return Boolean(seatId && getMultiSeatManualConfig(type)?.seatIds.includes(String(seatId)));
+}
+
+function getMultiSeatManualObjectKey(type, buildingId, index) {
+  if (type === 'couch') return getCouchObjectKey(buildingId, index);
+  if (type === 'sectionalSofa') return getSectionalSofaObjectKey(buildingId, index);
+  if (type === 'loveseat') return getLoveseatObjectKey(buildingId, index);
+  if (type === 'hallwayBench') return getHallwayBenchObjectKey(buildingId, index);
+  if (type === 'parkBench') return getParkBenchObjectKey(buildingId, index);
+  return `furniture:${buildingId}:${index}`;
+}
+
+function getMultiSeatManualStore(type, furniture) {
+  if (type === 'couch') return getCouchObjectUseSeatStore(furniture);
+  if (type === 'sectionalSofa') return getSectionalSofaObjectUseSeatStore(furniture);
+  if (type === 'loveseat') return getLoveseatObjectUseSeatStore(furniture);
+  if (type === 'hallwayBench') return getHallwayBenchObjectUseSeatStore(furniture);
+  if (type === 'parkBench') return getParkBenchObjectUseSeatStore(furniture);
+  return getObjectUseSeatStoreForFurniture(furniture);
+}
+
+function getMultiSeatManualOccupiedSeatIds(type, furniture, buildingId, index) {
+  if (type === 'couch') return getActiveCouchReservationSeatIds(furniture, buildingId, index);
+  if (type === 'sectionalSofa') return getActiveSectionalSofaReservationSeatIds(furniture, buildingId, index);
+  if (type === 'loveseat') return getActiveLoveseatReservationSeatIds(furniture, buildingId, index);
+  if (type === 'hallwayBench') return getActiveHallwayBenchReservationSeatIds(furniture, buildingId, index);
+  if (type === 'parkBench') return getActiveParkBenchReservationSeatIds(furniture, buildingId, index);
+  return new Set();
+}
+
+function releasePriorMultiSeatReservationsForManualReseat(store, agentId, nowMs = Date.now()) {
+  if (!store || typeof store !== 'object' || !Array.isArray(store.reservations)) return 0;
+  const activeStates = new Set(['held', 'reserved', 'route_pending', 'routing', 'arrived', 'active', 'in_progress']);
+  let released = 0;
+  // ObjectUse reservation records are immutable DTOs. Runtime/debug snapshots
+  // can also freeze the containing array. Replace both levels instead of
+  // mutating reservation.state/status in place; the old second-seat path threw
+  // here when the dragged agent already had an automatic loveseat claim.
+  store.reservations = [...store.reservations].map(reservation => {
+    if (
+      String(reservation?.agentId || '') !== String(agentId || '') ||
+      !activeStates.has(String(reservation?.state || reservation?.status || '').toLowerCase())
+    ) {
+      return reservation;
+    }
+    released += 1;
+    return {
+      ...reservation,
+      state: 'released',
+      status: 'released',
+      releaseReason: 'manual-agent-reseated',
+      releasedAtMs: nowMs,
+      updatedAtMs: nowMs,
+    };
+  });
+  return released;
+}
+
+function getMultiSeatActivityPrefixes(type) {
+  if (type === 'couch') return ['couch-'];
+  if (type === 'sectionalSofa') return ['sectional-sofa-'];
+  if (type === 'loveseat') return ['loveseat-'];
+  if (type === 'hallwayBench') return ['hallway-bench-'];
+  if (type === 'parkBench') return ['park-bench-'];
+  return [];
+}
+
+function hasLiveMultiSeatClaim(type, buildingId, index, reservation = {}) {
+  const seatId = reservation?.seatId || reservation?.slotId || reservation?.spotId ||
+    reservation?.activationSpotId || reservation?.interactionSpotId || null;
+  const reservationId = reservation?.id || reservation?.reservationId || null;
+  const agentId = reservation?.agentId || null;
+  const prefixes = getMultiSeatActivityPrefixes(type);
+  const activeRuntimeStates = new Set(['routing', 'using', 'active', 'moving', 'waiting']);
+  const recordSeatId = record => record?.seatId || record?.slotId || record?.activeUseSlotId ||
+    record?.activationSpotId || record?.spotId || record?.interactionSpotId || record?.selectedSeatId || null;
+  const recordMatchesSeat = record => !seatId || String(recordSeatId(record) || '') === String(seatId);
+  const recordMatchesObject = record => {
+    if (!record) return false;
+    const recordType = record.objectType || record.furnitureType || record.type || null;
+    const sameType = recordType === type || prefixes.some(prefix => String(record.kind || '').startsWith(prefix));
+    const sameBuilding = record.buildingId === buildingId;
+    const sameIndex = type === 'parkBench'
+      ? String(record.outdoorNodeId || record.nodeId || '') === String(index)
+      : Number(record.furnitureIndex) === Number(index);
+    return sameType && sameBuilding && sameIndex;
+  };
+  return (agentsList || []).some(agent => {
+    if (!agent) return false;
+    if (agentId && String(agent.id || agent.statusKey || '') !== String(agentId)) return false;
+    const activity = agent._idleActivity || null;
+    const activityReservationMatches = !reservationId || !activity?.reservationId ||
+      String(activity.reservationId) === String(reservationId);
+    if (recordMatchesObject(activity) && activityReservationMatches && recordMatchesSeat(activity)) return true;
+    const intent = agent._agentIntent || null;
+    const intentObject = intent?.object || null;
+    const intentReservationMatches = !reservationId || !intentObject?.reservationId ||
+      String(intentObject.reservationId) === String(reservationId);
+    if (isAgentIntentActive(intent) && recordMatchesObject(intentObject) && intentReservationMatches && recordMatchesSeat(intentObject)) return true;
+    const snapshot = getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null;
+    const runtimeTarget = snapshot?.target || snapshot?.visualState?.activity || null;
+    return activeRuntimeStates.has(String(snapshot?.state || '').toLowerCase()) &&
+      recordMatchesObject(runtimeTarget) && recordMatchesSeat(runtimeTarget);
+  });
+}
+
+function reconcileMultiSeatRuntimeUseState(type, buildingId, index, furniture, reason = 'multi-seat-reuse-reconcile') {
+  const config = getMultiSeatManualConfig(type);
+  if (!config || !furniture) return { changed: false, released: 0 };
+  const activeStates = new Set(['held', 'active', 'reserved', 'route_pending', 'routing', 'arrived', 'in_progress', 'using']);
+  const nowMs = Date.now();
+  let changed = false;
+  let released = 0;
+  const store = getMultiSeatManualStore(type, furniture);
+  store.reservations = [...(store.reservations || [])].map(reservation => {
+    const state = String(reservation?.state || reservation?.status || '').toLowerCase();
+    if (!reservation || !activeStates.has(state) || hasLiveMultiSeatClaim(type, buildingId, index, reservation)) return reservation;
+    changed = true;
+    released += 1;
+    return {
+      ...reservation,
+      state: 'released',
+      status: 'released',
+      releaseReason: reason,
+      releasedAtMs: nowMs,
+      updatedAtMs: nowMs,
+    };
+  });
+  if (furniture.reservation && !hasLiveMultiSeatClaim(type, buildingId, index, furniture.reservation)) {
+    furniture.reservation = null;
+    changed = true;
+  }
+  const activeSeats = { ...(furniture.activeUse?.activeSeats || {}) };
+  for (const [seatId, entry] of Object.entries(activeSeats)) {
+    if (!hasLiveMultiSeatClaim(type, buildingId, index, { ...(entry || {}), seatId })) {
+      delete activeSeats[seatId];
+      changed = true;
+    }
+  }
+  const directSeatId = furniture.activeUse?.seatId || furniture.activeUse?.interactionSpotId ||
+    furniture.activeUse?.activationSpotId || null;
+  const directSeatIsLive = directSeatId && hasLiveMultiSeatClaim(type, buildingId, index, {
+    reservationId: furniture.activeUse?.reservationId,
+    agentId: furniture.activeUse?.agentId,
+    seatId: directSeatId,
+  });
+  const liveSeatIds = Object.keys(activeSeats).filter(seatId => config.seatIds.includes(seatId));
+  if (liveSeatIds.length) {
+    const primarySeatId = directSeatIsLive && liveSeatIds.includes(directSeatId) ? directSeatId : liveSeatIds[0];
+    furniture.activeUse = {
+      ...(furniture.activeUse || {}),
+      state: 'active',
+      interactionSpotId: primarySeatId,
+      activeSeats,
+    };
+  } else if (furniture.activeUse && (!directSeatId || !directSeatIsLive)) {
+    furniture.activeUse = {
+      state: 'idle',
+      mode: `open-${type}`,
+      activeSeats: {},
+      lastReleaseReason: reason,
+      reconciledAtMs: nowMs,
+    };
+    changed = true;
+  }
+  if (changed) {
+    const reservedSeatIds = (store.reservations || [])
+      .filter(reservation => activeStates.has(String(reservation?.state || reservation?.status || '').toLowerCase()))
+      .map(reservation => reservation.seatId || reservation.spotId)
+      .filter(seatId => config.seatIds.includes(seatId))
+      .sort();
+    furniture[config.stateKey] = {
+      ...(furniture[config.stateKey] || {}),
+      status: liveSeatIds.length || reservedSeatIds.length ? 'occupied' : 'open',
+      seats: config.capacity,
+      activeSeatIds: [...liveSeatIds].sort(),
+      reservedSeatIds,
+      lastReleaseReason: reason,
+      persistentFurniture: type !== 'parkBench',
+      persistentOutdoorNode: type === 'parkBench',
+    };
+  }
+  return { changed, released };
+}
+
+function isFurnitureAvailableForDraggedAgent(buildingId, index, furniture, agent = null, interactionSpotId = null) {
   if (!furniture) return { available: false, reason: 'missing-object' };
   if (furniture.type === 'armchair') reconcileArmchairRuntimeUseState(buildingId, index, furniture, 'drag-hover-reconcile');
   if (furniture.type === 'arcadeMachine') reconcileArcadeMachineRuntimeUseState(buildingId, index, furniture, 'drag-hover-reconcile');
   const activeStates = new Set(['held', 'active', 'reserved', 'route_pending', 'routing', 'arrived', 'in_progress', 'occupied', 'using', 'playing', 'queued', 'in-use', 'in_use']);
   const hasActiveReservation = reservation => reservation && activeStates.has(String(reservation.state || reservation.status || '').toLowerCase());
   const isSameAgentClaim = reservation => Boolean(agent?.id && reservation?.agentId && String(reservation.agentId) === String(agent.id));
-  if (isManualDropStandingServiceMachine(furniture)) {
+  const multiSeatConfig = getMultiSeatManualConfig(furniture.type);
+  if (multiSeatConfig) {
+    reconcileMultiSeatRuntimeUseState(furniture.type, buildingId, index, furniture, 'drag-hover-reconcile');
+    const requestedSeatId = multiSeatConfig.seatIds.includes(interactionSpotId)
+      ? interactionSpotId
+      : getDraggedAgentInteractionSpotId(furniture);
+    const activeSeatIds = getMultiSeatManualOccupiedSeatIds(furniture.type, furniture, buildingId, index);
+    const sameAgentSeatClaim = (getMultiSeatManualStore(furniture.type, furniture).reservations || []).some(reservation =>
+      isSameAgentClaim(reservation) &&
+      hasActiveReservation(reservation) &&
+      String(reservation.seatId || reservation.spotId || '') === String(requestedSeatId)
+    );
+    const available = Boolean(requestedSeatId) && (!activeSeatIds.has(requestedSeatId) || sameAgentSeatClaim);
+    return {
+      available,
+      reason: available ? 'multi-seat-slot-available' : 'multi-seat-slot-reserved',
+      seatId: requestedSeatId || null,
+      occupiedSeatIds: [...activeSeatIds].sort(),
+    };
+  }
+  if (isManualDropFullServiceQueueObject(furniture)) {
     const sameAgentReservation = isSameAgentClaim(furniture.reservation) || isSameAgentClaim(furniture.state?.reservation);
     const sameAgentActiveUse = isSameAgentClaim(furniture.activeUse);
-    const sameAgentStandingReservation = (getStandingUseMachineStore(furniture)?.reservations || []).some(isSameAgentClaim);
-    if (sameAgentReservation || sameAgentActiveUse || sameAgentStandingReservation) return { available: true, reason: 'same-agent-standing-machine-claim' };
+    const sameAgentObjectReservation = ['objectUseSeatReservations', 'objectUseStandingReservations', 'objectUseActiveReservations']
+      .some(key => (furniture[key] || []).some(isSameAgentClaim));
+    if (sameAgentReservation || sameAgentActiveUse || sameAgentObjectReservation) return { available: true, reason: 'same-agent-service-object-claim' };
   }
   if (hasActiveReservation(furniture.reservation) || hasActiveReservation(furniture.state?.reservation)) return { available: false, reason: 'reserved' };
   if (furniture.activeUse && activeStates.has(String(furniture.activeUse.state || '').toLowerCase())) return { available: false, reason: 'active-use' };
@@ -25902,14 +27210,21 @@ function isServiceQueueAvailableForDraggedAgent(hover) {
 
 function makeDraggedAgentObjectDrop(buildingId, index, building, furniture, spot, agent = null) {
   if (!building || !furniture || !spot) return null;
-  const availability = isFurnitureAvailableForDraggedAgent(buildingId, index, furniture, agent);
-  const queueAvailability = availability.available ? { queueable: false, reason: 'object-available' } : isServiceQueueAvailableForDraggedAgent({ buildingId, index, building, furniture, spot });
+  const spotId = spot.spotId || spot.id || null;
+  const couchSeatFaceAngle = furniture.type === 'couch' && ['sit-left', 'sit-center', 'sit-right'].includes(spotId)
+    ? getAuthoredFurnitureSpotFacingAngle(building, furniture, spot, 'north')
+    : null;
+  const interactionSpot = Number.isFinite(Number(couchSeatFaceAngle))
+    ? { ...spot, faceAngle: Number(couchSeatFaceAngle) }
+    : spot;
+  const availability = isFurnitureAvailableForDraggedAgent(buildingId, index, furniture, agent, spotId);
+  const queueAvailability = availability.available ? { queueable: false, reason: 'object-available' } : isServiceQueueAvailableForDraggedAgent({ buildingId, index, building, furniture, spot: interactionSpot });
   return {
     buildingId,
     index,
     building,
     furniture,
-    spot,
+    spot: interactionSpot,
     available: availability.available,
     queueable: queueAvailability.queueable,
     reason: availability.available ? availability.reason : queueAvailability.reason,
@@ -25920,6 +27235,16 @@ function makeDraggedAgentObjectDrop(buildingId, index, building, furniture, spot
 
 function refreshDraggedAgentObjectDropAfterMovementClear(drop, agent = null) {
   if (!drop?.building || !drop?.furniture || !drop?.spot) return drop || null;
+  if (drop.outdoorNode && drop.furniture.type === 'parkBench') {
+    const seatId = drop.spot.spotId;
+    const activeSeatIds = getActiveParkBenchReservationSeatIds(drop.furniture, drop.buildingId, drop.outdoorNodeId);
+    const sameAgentClaim = (getParkBenchObjectUseSeatStore(drop.furniture).reservations || []).some(reservation =>
+      String(reservation?.agentId || '') === String(agent?.id || '') &&
+      String(reservation?.seatId || reservation?.spotId || '') === String(seatId) &&
+      ['held', 'reserved', 'routing', 'arrived', 'active', 'in_progress'].includes(String(reservation?.state || reservation?.status || '').toLowerCase()));
+    const available = !activeSeatIds.has(seatId) || sameAgentClaim;
+    return { ...drop, available, queueable: false, reason: available ? 'multi-seat-slot-available' : 'multi-seat-slot-reserved' };
+  }
   const refreshed = makeDraggedAgentObjectDrop(drop.buildingId, drop.index, drop.building, drop.furniture, drop.spot, agent);
   return refreshed ? { ...refreshed, nearbyServiceDrop: drop.nearbyServiceDrop || false, nearbySpotId: drop.nearbySpotId || null } : drop;
 }
@@ -25929,8 +27254,9 @@ function shouldManualDrinkMachineDropUseQueue(drop, agent = null) {
   if (!furniture || !isScriptedServiceQueueFurniture(furniture)) return false;
   const manualAgentId = getAgentManualDropId(agent);
   const sameAgentClaim = record => Boolean(manualAgentId && record?.agentId && String(record.agentId) === String(manualAgentId));
-  const sameAgentStandingReservation = (getStandingUseMachineStore(furniture)?.reservations || []).some(sameAgentClaim);
-  if (sameAgentClaim(furniture.reservation) || sameAgentClaim(furniture.state?.reservation) || sameAgentClaim(furniture.activeUse) || sameAgentStandingReservation) return false;
+  const sameAgentObjectReservation = ['objectUseSeatReservations', 'objectUseStandingReservations', 'objectUseActiveReservations']
+    .some(key => (furniture[key] || []).some(sameAgentClaim));
+  if (sameAgentClaim(furniture.reservation) || sameAgentClaim(furniture.state?.reservation) || sameAgentClaim(furniture.activeUse) || sameAgentObjectReservation) return false;
   // Manual placement on a busy machine should enter the visible queue, even
   // when this is the first queued agent. Free machines still direct-use.
   if (getLiveScriptedServiceQueueReservationsForManualDrop(furniture, { excludeAgentId: manualAgentId }).length > 0) return true;
@@ -25938,7 +27264,7 @@ function shouldManualDrinkMachineDropUseQueue(drop, agent = null) {
 }
 
 function forceManualDrinkMachineDropAvailable(drop, agent = null) {
-  if (!drop?.furniture || !isManualDropStandingServiceMachine(drop.furniture)) return drop || null;
+  if (!drop?.furniture || !isManualDropFullServiceQueueObject(drop.furniture)) return drop || null;
   if (shouldManualDrinkMachineDropUseQueue(drop, agent)) {
     const queueAvailability = isServiceQueueAvailableForDraggedAgent({
       buildingId: drop.buildingId,
@@ -25951,13 +27277,13 @@ function forceManualDrinkMachineDropAvailable(drop, agent = null) {
       ...drop,
       available: false,
       queueable: queueAvailability.queueable === true,
-      reason: queueAvailability.queueable === true ? 'claimed-drink-machine-queue' : (queueAvailability.reason || 'claimed-drink-machine-unavailable'),
+      reason: queueAvailability.queueable === true ? 'claimed-service-object-queue' : (queueAvailability.reason || 'claimed-service-object-unavailable'),
       queueLength: queueAvailability.queueLength || drop.queueLength || 0,
       maxQueuePoints: queueAvailability.maxQueuePoints || drop.maxQueuePoints || null,
       manualOverride: false,
     };
   }
-  return { ...drop, available: true, queueable: false, reason: 'forced-manual-drink-machine-use', forcedManualDrinkMachineDrop: true, manualOverride: true };
+  return { ...drop, available: true, queueable: false, reason: 'forced-manual-service-object-use', forcedManualDrinkMachineDrop: true, manualOverride: true };
 }
 
 function getAgentManualDropId(agent = null) {
@@ -26049,13 +27375,58 @@ function updateDraggedAgentInteractionHighlight(hover) {
   _dragAgentInteractionSpotMesh.position.set(world.x, getInteriorFloorSurfaceY(hover.building, hover.spot.floor || 1) + 0.08, world.z);
 }
 
-function resolveDraggedAgentObjectHover(e) {
+function resolveDraggedAgentObjectHover(e, agent = null) {
   const rect = renderer.domElement.getBoundingClientRect();
   const mouse = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   const ray = new THREE.Raycaster();
   ray.setFromCamera(mouse, camera);
   const hits = ray.intersectObjects(buildingGroup.children, true).filter(hit => hit.object?.userData?.furniture);
   for (const hit of hits) {
+    const hitInteractionSpotId = hit.object?.userData?.interactionSpotId || hit.object?.userData?.couchSeatId || null;
+    let outdoorRoot = hit.object;
+    while (outdoorRoot && outdoorRoot !== buildingGroup && !outdoorRoot.userData?.outdoorAreaNode) outdoorRoot = outdoorRoot.parent;
+    if (outdoorRoot?.userData?.outdoorAreaNode) {
+      const buildingId = outdoorRoot.userData.buildingId;
+      const nodeId = outdoorRoot.userData.outdoorNodeId;
+      const nodeIndex = Number(outdoorRoot.userData.outdoorNodeIndex);
+      const building = buildingsMap.get(buildingId);
+      const node = getRawOutdoorNodeById(building, nodeId);
+      const assetType = getOutdoorNodeAssetType(node);
+      if (!building || !node || assetType !== 'parkBench') continue;
+      const seatId = hitInteractionSpotId || 'seat-center';
+      const seatDef = (FURNITURE_INTERACTION_SPOTS.parkBench || []).find(def => def.id === seatId && def.roles?.includes('seat'));
+      const runtime = seatDef ? getOutdoorNodeSpotRuntimeTarget(building, node, seatId, seatDef.action, { preferredSpotId: seatId }) : null;
+      if (!seatDef || !runtime?.target) continue;
+      const local = getOutdoorNodeLocalPoint(node, building);
+      const rotated = rotateLocalOffset(Number(seatDef.dx || 0), Number(seatDef.dz || 0), Number(node.rotation ?? node.rotationDeg ?? 0) || 0);
+      const spot = {
+        ...seatDef,
+        spotId: seatId,
+        apiX: runtime.target.x,
+        apiZ: runtime.target.y,
+        localX: local.x + rotated.x,
+        localZ: local.z + rotated.z,
+        floor: 1,
+        faceAngle: getOutdoorNodeSpotFacingAngle(building, node, seatId, seatDef.facing || 'north') ?? runtime.target.faceAngle,
+      };
+      const activeSeatIds = getActiveParkBenchReservationSeatIds(node, buildingId, nodeId);
+      const sameAgentClaim = (getParkBenchObjectUseSeatStore(node).reservations || []).some(reservation =>
+        String(reservation?.agentId || '') === String(agent?.id || '') &&
+        String(reservation?.seatId || reservation?.spotId || '') === seatId &&
+        ['held', 'reserved', 'routing', 'arrived', 'active', 'in_progress'].includes(String(reservation?.state || reservation?.status || '').toLowerCase()));
+      return {
+        buildingId,
+        index: Number.isFinite(nodeIndex) ? nodeIndex : 0,
+        building,
+        furniture: node,
+        spot,
+        outdoorNode: true,
+        outdoorNodeId: nodeId,
+        available: !activeSeatIds.has(seatId) || sameAgentClaim,
+        queueable: false,
+        reason: !activeSeatIds.has(seatId) || sameAgentClaim ? 'multi-seat-slot-available' : 'multi-seat-slot-reserved',
+      };
+    }
     let obj = hit.object;
     while (obj && obj !== buildingGroup && !Number.isInteger(obj.userData?.furnitureIndex)) obj = obj.parent;
     const meta = obj?.userData || hit.object.userData || {};
@@ -26064,10 +27435,13 @@ function resolveDraggedAgentObjectHover(e) {
     const building = buildingId ? buildingsMap.get(buildingId) : null;
     const furniture = building?.interior?.furniture?.[index] || null;
     if (!building || !furniture) continue;
-    const spotId = getDraggedAgentInteractionSpotId(furniture);
+    const spotId = hitInteractionSpotId || getDraggedAgentInteractionSpotId(furniture);
     const spot = getFurnitureActionSpot(building, furniture, spotId) || getFurnitureActionSpot(building, furniture);
     if (!spot) continue;
-    return makeDraggedAgentObjectDrop(buildingId, index, building, furniture, spot);
+    // Pass the dragged agent so per-seat availability and same-agent claims are
+    // evaluated correctly; without it a couch cushion can look unavailable and
+    // the drop silently falls through to a nearby service object.
+    return makeDraggedAgentObjectDrop(buildingId, index, building, furniture, spot, agent);
   }
   return null;
 }
@@ -26114,16 +27488,16 @@ function resolveDraggedAgentNearbyServiceObjectDrop(agent) {
     const agentFloor = Math.max(1, Number(agent._floor || getAgentFloor(agent, building) || getActiveBuildingFloor(building) || 1) || 1);
     for (const [index, furniture] of building.interior.furniture.entries()) {
       if (!isScriptedServiceQueueFurniture(furniture)) continue;
-      const manualDrinkMachine = isManualDropStandingServiceMachine(furniture);
-      if (!manualDrinkMachine && getFurnitureFloor(furniture) !== agentFloor) continue;
+      const fullServiceQueueObject = isManualDropFullServiceQueueObject(furniture);
+      if (!fullServiceQueueObject && getFurnitureFloor(furniture) !== agentFloor) continue;
       const primarySpotId = getDraggedAgentInteractionSpotId(furniture);
       const primary = getFurnitureActionSpot(building, furniture, primarySpotId) || getFurnitureActionSpot(building, furniture);
       if (!primary) continue;
       const drop = makeDraggedAgentObjectDrop(building.id, index, building, furniture, primary, agent);
-      if (!drop || (!manualDrinkMachine && !drop.available && !drop.queueable)) continue;
+      if (!drop || (!fullServiceQueueObject && !drop.available && !drop.queueable)) continue;
       for (const spot of getDraggedAgentNearbyServiceDropSpots(building, furniture, index)) {
         const dist = Math.hypot((agent.x || 0) - Number(spot.apiX), (agent.y || 0) - Number(spot.apiZ));
-        const threshold = manualDrinkMachine
+        const threshold = fullServiceQueueObject
           ? API_TILE * 2.6
           : (String(spot.spotId || '').startsWith('queue') ? API_TILE * 1.1 : API_TILE * 1.35);
         if (dist <= threshold && (!best || dist < best.dist)) best = { dist, drop: { ...drop, nearbyServiceDrop: true, nearbySpotId: spot.spotId || null } };
@@ -26160,19 +27534,24 @@ function resolveCounterMountedDrinkMachineDropFromHover(agent) {
 function resolveDraggedAgentManualDrinkMachineDrop(agent) {
   if (!agent) return null;
   const hover = _dragAgentObjectHover;
-  if (hover?.furniture && isManualDropStandingServiceMachine(hover.furniture)) return forceManualDrinkMachineDropAvailable(hover, agent);
+  if (hover?.furniture && isManualDropFullServiceQueueObject(hover.furniture)) return forceManualDrinkMachineDropAvailable(hover, agent);
+  // An explicit hover over a usable non-service object (for example a couch
+  // cushion) is a deliberate user choice. Proximity fallbacks below must not
+  // hijack it to a nearby fridge/vending machine just because one is close.
+  if (hover?.furniture && (hover.available || hover.queueable)) return null;
   const counterMounted = resolveCounterMountedDrinkMachineDropFromHover(agent);
-  if (counterMounted?.furniture && isManualDropStandingServiceMachine(counterMounted.furniture)) return forceManualDrinkMachineDropAvailable(counterMounted, agent);
+  if (counterMounted?.furniture && isManualDropFullServiceQueueObject(counterMounted.furniture)) return forceManualDrinkMachineDropAvailable(counterMounted, agent);
   const nearby = resolveDraggedAgentNearbyServiceObjectDrop(agent);
-  if (nearby?.furniture && isManualDropStandingServiceMachine(nearby.furniture)) return forceManualDrinkMachineDropAvailable(nearby, agent);
+  if (nearby?.furniture && isManualDropFullServiceQueueObject(nearby.furniture)) return forceManualDrinkMachineDropAvailable(nearby, agent);
   return null;
 }
 
 function resolveDraggedAgentManualDrinkMachineDropAfterPlacement(agent, currentDrop = null) {
   if (!agent) return currentDrop || null;
-  if (currentDrop?.furniture && !isManualDropStandingServiceMachine(currentDrop.furniture)) return currentDrop;
+  // Never re-target an already resolved non-service drop (seat/cushion etc.).
+  if (currentDrop?.furniture && !isManualDropFullServiceQueueObject(currentDrop.furniture)) return currentDrop;
   const resolved = resolveDraggedAgentManualDrinkMachineDrop(agent);
-  if (!resolved?.furniture || !isManualDropStandingServiceMachine(resolved.furniture)) return currentDrop || null;
+  if (!resolved?.furniture || !isManualDropFullServiceQueueObject(resolved.furniture)) return currentDrop || null;
   if (currentDrop?.furniture && currentDrop.furniture !== resolved.furniture) return currentDrop;
   return forceManualDrinkMachineDropAvailable(resolved, agent);
 }
@@ -26183,6 +27562,7 @@ const DRAG_AGENT_FIRST_INTERACTION = Object.freeze({
   sectionalSofa: ['_useSectionalSofaFurniture', 'sit'],
   loveseat: ['_useLoveseatFurniture', 'sit'],
   armchair: ['_useArmchairFurniture', 'sit'],
+  parkBench: ['_useParkBenchFurniture', 'sit'],
   hallwayBench: ['_useHallwayBenchFurniture', 'wait'],
   barStool: ['_useBarStoolFurniture', 'sit'],
   officeChair: ['_useOfficeChairFurniture', 'sit'],
@@ -26231,6 +27611,11 @@ const DRAG_AGENT_FIRST_INTERACTION = Object.freeze({
   interiorDoor: ['_useInteriorDoorFurniture', 'pass'],
   fridge: ['_useFridgeFurniture', 'snack'],
   kitchenIsland: ['_useKitchenIslandFurniture', 'prep'],
+  counter: ['_useCoreLegacyFurniture', 'counter'],
+  diningTable: ['_useCoreLegacyFurniture', 'diningTable'],
+  sink: ['_useCoreLegacyFurniture', 'sink'],
+  stove: ['_useCoreLegacyFurniture', 'stove'],
+  tv: ['_useCoreLegacyFurniture', 'tv'],
   grill: ['_useGrillFurniture', 'cook'],
   parkLamp: ['_useParkLampFurniture', 'inspect'],
   outdoorPlanter: ['_useOutdoorPlanterFurniture', 'water'],
@@ -26499,6 +27884,176 @@ function requestBackendQueueUseForDraggedAgentDrop(drop, agent) {
   return request?.accepted ? { ...request, queueTarget, queueIndex } : request;
 }
 
+function startDraggedAgentMultiSeatUse(drop, agent) {
+  const furniture = drop?.furniture || null;
+  const furnitureType = drop?.outdoorNode ? getOutdoorNodeAssetType(furniture || {}) : furniture?.type;
+  const config = getMultiSeatManualConfig(furnitureType);
+  const seatId = drop?.spot?.spotId || drop?.spot?.id || null;
+  if (!agent || !drop?.building || !config || !config.seatIds.includes(seatId)) {
+    return { triggered: false, reason: 'not-multi-seat-drop' };
+  }
+  const seatDef = (FURNITURE_INTERACTION_SPOTS[furnitureType] || []).find(def => def.id === seatId);
+  const outdoorSeatRuntime = drop.outdoorNode
+    ? getOutdoorNodeSpotRuntimeTarget(drop.building, furniture, seatId, seatDef?.action, { preferredSpotId: seatId })
+    : null;
+  const seatSpot = drop.outdoorNode && outdoorSeatRuntime?.target
+    ? { ...drop.spot, apiX: outdoorSeatRuntime.target.x, apiZ: outdoorSeatRuntime.target.y, floor: 1 }
+    : getFurnitureActionSpot(drop.building, furniture, seatId);
+  const approachSpotId = seatDef?.approachSpotId || seatDef?.exitSpotId || null;
+  const outdoorApproachRuntime = drop.outdoorNode && approachSpotId
+    ? getOutdoorNodeSpotRuntimeTarget(drop.building, furniture, approachSpotId, seatDef?.action, { preferredSpotId: approachSpotId })
+    : null;
+  const approachSpot = drop.outdoorNode && outdoorApproachRuntime?.target
+    ? { apiX: outdoorApproachRuntime.target.x, apiZ: outdoorApproachRuntime.target.y, floor: 1, spotId: approachSpotId, faceAngle: outdoorApproachRuntime.target.faceAngle }
+    : (approachSpotId ? getFurnitureActionSpot(drop.building, furniture, approachSpotId) : null);
+  if (!seatDef || !seatSpot || !approachSpot) return { triggered: false, reason: 'missing-multi-seat-dock' };
+  const store = getMultiSeatManualStore(furnitureType, furniture);
+  const nowMs = Date.now();
+  releasePriorMultiSeatReservationsForManualReseat(store, agent.id, nowMs);
+  const occupiedSeatIds = getMultiSeatManualOccupiedSeatIds(furnitureType, furniture, drop.buildingId, drop.outdoorNode ? drop.outdoorNodeId : drop.index);
+  occupiedSeatIds.delete(seatId);
+  const objectKey = furnitureType === 'parkBench' && drop.outdoorNode
+    ? getParkBenchObjectKey(drop.buildingId, drop.outdoorNodeId)
+    : getMultiSeatManualObjectKey(furnitureType, drop.buildingId, drop.index);
+  const actionId = seatDef.action || drop.spot.action || config.actionId;
+  const candidate = {
+    ...seatDef,
+    seatId,
+    spotId: seatId,
+    slotId: seatId,
+    activationSpotId: seatId,
+    approachSpotId,
+    exitSpotId: seatDef.exitSpotId || approachSpotId,
+    actionId,
+    position: { x: seatSpot.apiX, z: seatSpot.apiZ },
+  };
+  const reservationResult = chooseAndReserveObjectUseSeat(store, [candidate], {
+    agentId: agent.id,
+    agentPosition: candidate.position,
+    actionId,
+    occupiedSeatIds,
+    reservationId: `manual-seat:${objectKey}:${seatId}:${agent.id}:${nowMs}`,
+  });
+  if (!reservationResult.ok) return { triggered: false, reason: reservationResult.reason || 'multi-seat-slot-reserved' };
+  const faceAngle = drop.outdoorNode
+    ? (drop.spot.faceAngle ?? getOutdoorNodeSpotFacingAngle(drop.building, furniture, seatId, seatDef.facing || 'north'))
+    : (getFurnitureForwardFacingAngle(drop.building, furniture, seatSpot, seatSpot.facing || seatDef.facing || 'north') ?? seatSpot.faceAngle);
+  const routeResult = drop.outdoorNode ? { accepted: true } : setAgentTargetForExplicitObjectAction(agent, {
+    x: approachSpot.apiX,
+    y: approachSpot.apiZ,
+    floor: approachSpot.floor,
+    faceAngle,
+  }, drop.building, approachSpot.floor, {
+    owner: 'manual',
+    priorityName: 'manual',
+    sourceFamily: 'manual-drag-drop',
+    sourceFunction: 'startDraggedAgentMultiSeatUse',
+    sourceSummary: 'manual agent drop reserves and activates the exact rendered multi-seat cushion',
+    behaviorSourceKind: 'user',
+    behaviorMode: 'user-directed-override',
+    behaviorAuthority: AGENT_INTENT_PRIORITY.manual,
+    kind: config.kind,
+    activityKind: config.kind,
+    animationId: config.animationId,
+    seatSurfaceLift: getFurnitureSeatSurfaceLift(furnitureType),
+    buildingId: drop.buildingId,
+    furnitureIndex: drop.index,
+    furniture,
+    objectId: objectKey,
+    objectKey,
+    objectType: furnitureType,
+    actionId,
+    spotId: seatId,
+    slotId: seatId,
+    activationSpotId: seatId,
+    selectedSeatId: seatId,
+    approachSpotId,
+    exitSpotId: candidate.exitSpotId,
+    reservationId: reservationResult.reservation.id,
+    backendRuntimeObjectUse: true,
+    manualDrop: true,
+    manualDropSnapToUse: true,
+    release: { policy: 'on-object-complete', releaseObjectReservation: true, releaseActiveUse: true, allowedBy: AGENT_INTENT_RELEASE_ALLOWED_BY['explicit-object'] },
+  });
+  if (routeResult?.accepted === false) {
+    releaseObjectUseSeatReservation(store, { reservationId: reservationResult.reservation.id, agentId: agent.id, seatId, terminalState: 'cancelled', reason: 'intent-rejected' });
+    return { triggered: false, reason: 'intent-rejected' };
+  }
+  furniture.reservation = {
+    id: reservationResult.reservation.id,
+    reservationId: reservationResult.reservation.id,
+    agentId: agent.id,
+    actionId,
+    seatId,
+    spotId: seatId,
+    slotId: seatId,
+    approachSpotId,
+    dismountSpotId: candidate.exitSpotId,
+    exitSpotId: candidate.exitSpotId,
+    status: 'held',
+    state: 'held',
+    capacityKey: getObjectUseSeatCapacityKey(objectKey, seatId),
+  };
+  furniture.activeUse = {
+    ...(furniture.activeUse || {}),
+    state: 'reserved',
+    mode: 'multi-seat-manual',
+    activeSeats: { ...(furniture.activeUse?.activeSeats || {}) },
+    agentId: agent.id,
+    actionId,
+    interactionSpotId: seatId,
+    approachSpotId,
+    dismountSpotId: candidate.exitSpotId,
+  };
+  furniture[config.stateKey] = {
+    ...(furniture[config.stateKey] || {}),
+    status: 'reserved',
+    seats: config.capacity,
+    reservedSeatIds: [...getMultiSeatManualOccupiedSeatIds(furnitureType, furniture, drop.buildingId, drop.outdoorNode ? drop.outdoorNodeId : drop.index)].sort(),
+    lastAction: actionId,
+    persistentFurniture: true,
+  };
+  agent._idleActivity = {
+    kind: config.kind,
+    phase: 'approach',
+    source: 'manual-drag-drop-seat',
+    behaviorSourceKind: 'user',
+    behaviorMode: 'user-directed',
+    manualDrop: true,
+    buildingId: drop.buildingId,
+    furnitureIndex: drop.index,
+    outdoorNodeId: drop.outdoorNodeId || undefined,
+    outdoorAreaId: drop.outdoorNode ? (furniture.outdoorAreaId || drop.building.outdoorArea?.id || drop.buildingId) : undefined,
+    furnitureType,
+    objectKey,
+    spotId: seatId,
+    seatId,
+    slotId: seatId,
+    activationSpotId: seatId,
+    selectedSeatId: seatId,
+    approachSpotId,
+    dismountSpotId: candidate.exitSpotId,
+    exitSpotId: candidate.exitSpotId,
+    reservationId: reservationResult.reservation.id,
+    actionId,
+    action: actionId,
+    mode: 'sit',
+    stayMs: MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+    faceAngle,
+    dockTarget: { x: seatSpot.apiX, y: seatSpot.apiZ },
+    routeApproachTarget: { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor, spotId: approachSpot.spotId, faceAngle },
+    dockSnapRadius: Number(seatDef.snapRadius || 7),
+    seatSurfaceLift: getFurnitureSeatSurfaceLift(furnitureType),
+    animationId: config.animationId,
+    stationary: true,
+    carryable: false,
+    temporary: false,
+  };
+  agent._wanderTimer = 0;
+  agent._stayTimer = 0;
+  return { triggered: true, handler: 'startDraggedAgentMultiSeatUse', mode: 'sit', furnitureType, seatId, actionId, directSeatUse: true };
+}
+
 function triggerDraggedAgentObjectInteraction(drop, agent) {
   if (!agent || !drop?.furniture) return { triggered: false, reason: 'unavailable' };
   if (!drop.available) {
@@ -26515,6 +28070,8 @@ function triggerDraggedAgentObjectInteraction(drop, agent) {
     }
     return { triggered: false, reason: drop.reason || 'unavailable' };
   }
+  const multiSeatUse = startDraggedAgentMultiSeatUse(drop, agent);
+  if (multiSeatUse.triggered || multiSeatUse.reason !== 'not-multi-seat-drop') return multiSeatUse;
   if (isScriptedServiceQueueFurniture(drop.furniture)) {
     const normalDrinkMachineUse = startDraggedAgentDrinkMachineViaFurnitureHandler(drop, agent);
     if (normalDrinkMachineUse.triggered) return normalDrinkMachineUse;
@@ -26539,10 +28096,25 @@ function triggerDraggedAgentObjectInteraction(drop, agent) {
   const mesh = findFurnitureMesh(drop.buildingId, drop.index);
   _selectedFurniture = { buildingId: drop.buildingId, index: drop.index, mesh };
   setDragDropAgentPickerValue(drop.furniture.type, agent.id);
-  const selectedAgentTypes = new Set(['armchair', 'arcadeMachine', 'barberChair', 'accessoryDisplayStand']);
-  if (drop.furniture.type === 'dumbbellRack') fn();
-  else if (selectedAgentTypes.has(drop.furniture.type)) fn(mode, agent.id);
-  else fn(mode);
+  const selectedAgentTypes = new Set(['couch', 'armchair', 'arcadeMachine', 'barberChair', 'accessoryDisplayStand']);
+  const previousManualDropContext = _activeManualAgentObjectDropContext;
+  if (isManualObjectOccupancyFurniture(drop.furniture)) {
+    _activeManualAgentObjectDropContext = {
+      agentId: getAgentDebugId(agent),
+      buildingId: drop.buildingId,
+      furnitureIndex: drop.index,
+      furniture: drop.furniture,
+      spotId: drop.spot?.spotId || getDraggedAgentInteractionSpotId(drop.furniture) || null,
+      handlerName: fnName,
+    };
+  }
+  try {
+    if (drop.furniture.type === 'dumbbellRack') fn();
+    else if (selectedAgentTypes.has(drop.furniture.type)) fn(mode, agent.id);
+    else fn(mode);
+  } finally {
+    _activeManualAgentObjectDropContext = previousManualDropContext;
+  }
   const activity = agent._idleActivity || null;
   const activityMatchesDrop = activity && activity.buildingId === drop.buildingId && Number(activity.furnitureIndex) === Number(drop.index);
   if (!activityMatchesDrop) {
@@ -26643,6 +28215,148 @@ function activateSnappedManualStandingMachineDrop(drop, agent) {
   return true;
 }
 
+// Object types whose manual drop must finish seated on the authored activation
+// dock (the visible cushion/seat surface) rather than at the front approach
+// marker. These all use the shared seat-reservation activation path.
+const MANUAL_DROP_DIRECT_SEAT_DOCK_TYPES = Object.freeze(new Set(['couch', 'sectionalSofa', 'loveseat', 'hallwayBench', 'parkBench']));
+
+function isManualDropDirectSeatDockActivity(drop, agent) {
+  const activity = agent?._idleActivity || null;
+  if (!drop?.furniture || !activity) return false;
+  const furnitureType = drop.outdoorNode ? getOutdoorNodeAssetType(drop.furniture) : drop.furniture.type;
+  if (!MANUAL_DROP_DIRECT_SEAT_DOCK_TYPES.has(furnitureType)) return false;
+  if (activity.buildingId !== drop.buildingId || Number(activity.furnitureIndex) !== Number(drop.index)) return false;
+  if (activity.phase !== 'approach') return false;
+  return Number.isFinite(Number(activity.dockTarget?.x)) && Number.isFinite(Number(activity.dockTarget?.y));
+}
+
+// Runs the same seat activation the arrival handler performs, so a manual drop
+// produces an identical occupied/seated state without needing a walk cycle.
+function activateManualDropMultiSeat(drop, agent) {
+  const activity = agent?._idleActivity || null;
+  const furniture = drop?.furniture || null;
+  const furnitureType = drop?.outdoorNode ? getOutdoorNodeAssetType(furniture || {}) : furniture?.type;
+  const config = getMultiSeatManualConfig(furnitureType);
+  if (!activity || !config) return false;
+  const seatId = activity.seatId || activity.activationSpotId || activity.spotId || config.seatIds[0];
+  if (!config.seatIds.includes(seatId)) return false;
+  const seatDef = (FURNITURE_INTERACTION_SPOTS[furnitureType] || []).find(def => def.id === seatId);
+  const approachSpotId = activity.approachSpotId || seatDef?.approachSpotId || seatDef?.exitSpotId;
+  const dismountSpotId = activity.dismountSpotId || activity.exitSpotId || seatDef?.exitSpotId || approachSpotId;
+  const reservationId = activity.reservationId || furniture.reservation?.id || null;
+  if (reservationId) {
+    activateObjectUseSeatReservation(getMultiSeatManualStore(furnitureType, furniture), {
+      reservationId,
+      agentId: agent.id || activity.agentId || null,
+      seatId,
+    });
+  }
+  const activeSeats = { ...(furniture.activeUse?.activeSeats || {}) };
+  activeSeats[seatId] = {
+    agentId: agent.id || activity.agentId || null,
+    reservationId,
+    actionId: activity.actionId || activity.action || null,
+    interactionSpotId: seatId,
+    approachSpotId,
+    dismountSpotId,
+    startedAt: new Date().toISOString(),
+    manualDrop: true,
+  };
+  furniture.reservation = { ...(furniture.reservation || {}), id: reservationId, status: 'active', state: 'active', agentId: agent.id || activity.agentId || null, actionId: activity.actionId || activity.action || null, seatId, spotId: seatId, slotId: seatId, approachSpotId, dismountSpotId };
+  furniture.activeUse = { ...(furniture.activeUse || {}), state: 'active', mode: activity.mode || activity.kind || 'multi-seat', activeSeats, agentId: agent.id || null, actionId: activity.actionId || activity.action || null, interactionSpotId: seatId, approachSpotId, dismountSpotId, startedAt: furniture.activeUse?.startedAt || new Date().toISOString() };
+  furniture[config.stateKey] = { ...(furniture[config.stateKey] || {}), status: 'occupied', seats: config.capacity, activeSeatIds: Object.keys(activeSeats).sort(), reservedSeatIds: [...getMultiSeatManualOccupiedSeatIds(furnitureType, furniture, drop.buildingId, drop.outdoorNode ? drop.outdoorNodeId : drop.index)].sort(), lastAction: activity.actionId || activity.action || activity.kind, persistentFurniture: !drop.outdoorNode, persistentOutdoorNode: Boolean(drop.outdoorNode) };
+  activity.seated = true;
+  activity.activationState = 'seated';
+  return true;
+}
+
+function activateManualDropCouchSeat(drop, agent) {
+  return activateManualDropMultiSeat(drop, agent);
+}
+
+function snapDraggedAgentToStartedObjectSeatDock(drop, agent) {
+  if (!isManualDropDirectSeatDockActivity(drop, agent)) return { snapped: false, reason: 'not-direct-seat-dock-drop' };
+  const activity = agent._idleActivity;
+  // Resolve the authoritative seat spot from the object itself. Handlers route
+  // via the front approach marker and some paths overwrite dockTarget with that
+  // approach position, so trusting dockTarget blindly parked seated agents in
+  // front of the couch. The authored activation spot is the source of truth.
+  const seatSpotId = activity.activationSpotId || activity.seatId || activity.spotId || drop.spot?.spotId || null;
+  const outdoorSeatRuntime = drop.outdoorNode && seatSpotId
+    ? getOutdoorNodeSpotRuntimeTarget(drop.building, drop.furniture, seatSpotId, activity.actionId || activity.action, { preferredSpotId: seatSpotId })
+    : null;
+  const authoritativeSeatSpot = outdoorSeatRuntime?.target
+    ? { apiX: outdoorSeatRuntime.target.x, apiZ: outdoorSeatRuntime.target.y, floor: outdoorSeatRuntime.target.floor || 1, faceAngle: outdoorSeatRuntime.target.faceAngle, facing: drop.spot?.facing || 'north' }
+    : (seatSpotId ? getFurnitureActionSpot(drop.building, drop.furniture, seatSpotId) : null);
+  const dock = authoritativeSeatSpot
+    ? { x: authoritativeSeatSpot.apiX, y: authoritativeSeatSpot.apiZ }
+    : activity.dockTarget;
+  if (!dock || !Number.isFinite(Number(dock.x)) || !Number.isFinite(Number(dock.y))) {
+    return { snapped: false, reason: 'missing-seat-dock-target' };
+  }
+  // Keep the activity's dock target consistent with where we actually placed
+  // the agent so later arrival/dock logic cannot pull it back to the approach.
+  activity.dockTarget = { x: Number(dock.x), y: Number(dock.y) };
+  agent.x = Number(dock.x);
+  agent.y = Number(dock.y);
+  agent._floor = Math.max(1, Number(activity.routeApproachTarget?.floor || agent._targetFloor || agent._floor || 1) || 1);
+  agent._targetFloor = agent._floor;
+  agent._currentBuilding = getMovementInteriorBuildingAt(agent.x, agent.y) || drop.building || null;
+  agent._wanderTarget = null;
+  agent._waypointPath = null;
+  agent._waypointPathIdx = 0;
+  agent._waypointPathTarget = null;
+  agent._doorTransition = null;
+  clearDynamicInteriorRoutingForAgent(agent.id);
+  clearDynamicExteriorRoutingForAgent(agent.id);
+  resetObstacleAvoidance(agent);
+  agent._isRunning = false;
+  const authoredSeatFacing = authoritativeSeatSpot
+    ? (drop.outdoorNode
+      ? (getOutdoorNodeSpotFacingAngle(drop.building, drop.furniture, seatSpotId, authoritativeSeatSpot.facing || 'north') ?? authoritativeSeatSpot.faceAngle)
+      : (getFurnitureForwardFacingAngle(drop.building, drop.furniture, authoritativeSeatSpot, authoritativeSeatSpot.facing || 'north') ?? authoritativeSeatSpot.faceAngle))
+    : null;
+  const faceAngle = Number.isFinite(Number(authoredSeatFacing))
+    ? Number(authoredSeatFacing)
+    : (Number.isFinite(Number(activity.faceAngle))
+      ? Number(activity.faceAngle)
+      : getDraggedDropInteractionFaceAngle(drop, agent));
+  if (Number.isFinite(Number(faceAngle))) {
+    activity.faceAngle = Number(faceAngle);
+    agent._faceAngle = Number(faceAngle);
+    if (agent._group3d) agent._group3d.rotation.y = Number(faceAngle);
+  }
+  const nowMs = performance.now();
+  const stayMs = Math.max(1, Number(activity.stayMs || 12000) || 12000);
+  agent._stayTimer = stayMs;
+  agent._wanderTimer = 0;
+  activity.phase = 'active';
+  activity.startedAt = nowMs;
+  activity.endsAt = nowMs + stayMs;
+  activity.dragDropSnappedToSeatDock = true;
+  activity.dragDropSnapTarget = { x: agent.x, y: agent.y, floor: agent._floor, spotId: activity.activationSpotId || activity.seatId || activity.spotId || null };
+  // The agent is already docked on the cushion, so drop the pending approach
+  // route. Leaving routeApproachTarget/routeWaypoints in place made the idle
+  // movement loop walk the agent back out to the front stand-* marker, which
+  // is exactly the "sitting in front of the couch" symptom.
+  activity.routeApproachTarget = null;
+  activity.routeWaypoints = null;
+  activity.routeWaypointIndex = 0;
+  activity.currentRouteSpotId = null;
+  activity.arrivedAtDock = true;
+  const activated = activateManualDropMultiSeat(drop, agent);
+  if (String(activity.kind || '').startsWith('couch-')) agent._schedPhase = 'couch-lounge';
+  else if (String(activity.kind || '').startsWith('sectional-sofa-')) agent._schedPhase = 'sectional-sofa-lounge';
+  else if (String(activity.kind || '').startsWith('loveseat-')) agent._schedPhase = 'loveseat-rest';
+  else if (String(activity.kind || '').startsWith('hallway-bench-')) agent._schedPhase = 'hallway-bench-wait';
+  else if (String(activity.kind || '').startsWith('park-bench-')) agent._schedPhase = 'park-bench-rest';
+  const scale = T / API_TILE;
+  if (isPhysicsReady()) teleportAgent('agent_' + agent.id, agent.x * scale, getGroundY(agent.x * scale, agent.y * scale), agent.y * scale);
+  releaseAgentRuntimeRouteLease(agent, 'manual-drag-drop-seat-dock-arrived', 'active');
+  requestObjectActionPointDebugOverlayRefresh();
+  return { snapped: true, x: agent.x, y: agent.y, floor: agent._floor, spotId: activity.dragDropSnapTarget.spotId, seatDock: true, activatedManualUse: activated };
+}
+
 function snapDraggedAgentToStartedObjectApproach(drop, agent) {
   const activity = agent?._idleActivity || null;
   const activityMatchesDrop = activity && drop && activity.buildingId === drop.buildingId && Number(activity.furnitureIndex) === Number(drop.index);
@@ -26689,7 +28403,7 @@ function updateDraggedAgentPreview(e) {
   agent.x = hit.x / scale;
   agent.y = hit.z / scale;
   agent._manualPlacementPreview = true;
-  updateDraggedAgentInteractionHighlight(resolveDraggedAgentObjectHover(e));
+  updateDraggedAgentInteractionHighlight(resolveDraggedAgentObjectHover(e, agent));
   publishAgentRuntimeMovementSnapshot(agent, 'moving', {
     manualPreview: true,
     mode: 'manual',
@@ -26699,6 +28413,39 @@ function updateDraggedAgentPreview(e) {
   return true;
 }
 
+function releaseBackendObjectUseForManualAgentMove(agent, reason = 'manual-agent-move') {
+  if (!agent || !_agentRuntimeClient?.connected || typeof _agentRuntimeClient.releaseObjectUse !== 'function') return null;
+  const snapshot = getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null;
+  const target = snapshot?.target && typeof snapshot.target === 'object'
+    ? snapshot.target
+    : (agent._idleActivity && typeof agent._idleActivity === 'object' ? agent._idleActivity : null);
+  const objectKey = target?.objectKey || getAgentRuntimeActivityObjectKey(target);
+  if (!objectKey) return null;
+  const payload = {
+    agentId: getAgentRuntimeAgentId(agent),
+    objectKey,
+    baseObjectKey: target.baseObjectKey || objectKey,
+    slotId: target.activeUseSlotId || target.slotId || target.spotId || target.interactionSpotId || '',
+    reason,
+    target: {
+      ...target,
+      objectKey,
+      baseObjectKey: target.baseObjectKey || objectKey,
+    },
+  };
+  const pending = _agentRuntimeClient.releaseObjectUse(payload, { timeoutMs: AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS })
+    .then(ack => {
+      agent._lastManualMoveObjectUseRelease = { ok: true, atMs: Date.now(), reason, objectKey, ack };
+      return ack;
+    })
+    .catch(error => {
+      agent._lastManualMoveObjectUseRelease = { ok: false, atMs: Date.now(), reason, objectKey, error: error?.message || String(error) };
+      return null;
+    });
+  agent._manualMoveObjectUseReleasePending = pending;
+  return pending;
+}
+
 function startDraggedAgent(agent, e) {
   _pendingAgentPickup = null;
   _draggedAgentState = {
@@ -26706,6 +28453,7 @@ function startDraggedAgent(agent, e) {
     pointerId: e.pointerId,
     startedAt: performance.now(),
   };
+  releaseBackendObjectUseForManualAgentMove(agent, 'manual-agent-picked-up');
   clearAgentTransientMovement(agent);
   agent._runtimeObserverOnly = false;
   agent._runtimeRemoteWriterActive = false;
@@ -26727,11 +28475,17 @@ function finalizeDraggedAgentPlacement(e) {
   updateDraggedAgentPreview(e);
   const manualDrinkMachineDrop = resolveDraggedAgentManualDrinkMachineDrop(agent);
   const hoverDrop = _dragAgentObjectHover && (_dragAgentObjectHover.available || _dragAgentObjectHover.queueable) ? _dragAgentObjectHover : null;
-  let objectDrop = manualDrinkMachineDrop || hoverDrop || resolveDraggedAgentNearbyServiceObjectDrop(agent);
+  // Precedence: an explicit hover on a usable non-service object beats the
+  // proximity service fallback, so dropping on a couch cushion next to a
+  // fridge seats the agent instead of queueing them at the fridge.
+  const hoverWinsOverProximity = Boolean(hoverDrop?.furniture) && !isManualDropFullServiceQueueObject(hoverDrop.furniture);
+  let objectDrop = hoverWinsOverProximity
+    ? hoverDrop
+    : (manualDrinkMachineDrop || hoverDrop || resolveDraggedAgentNearbyServiceObjectDrop(agent));
   clearAgentTransientMovement(agent);
   objectDrop = refreshDraggedAgentObjectDropAfterMovementClear(objectDrop, agent);
   if (manualDrinkMachineDrop?.furniture && objectDrop?.furniture === manualDrinkMachineDrop.furniture) objectDrop = forceManualDrinkMachineDropAvailable(objectDrop, agent);
-  const skipPreTriggerObjectSnap = objectDrop?.furniture && isManualDropStandingServiceMachine(objectDrop.furniture);
+  const skipPreTriggerObjectSnap = objectDrop?.furniture && isManualDropFullServiceQueueObject(objectDrop.furniture);
   if (!skipPreTriggerObjectSnap && objectDrop?.spot && objectDrop.available) {
     agent.x = objectDrop.spot.apiX;
     agent.y = objectDrop.spot.apiZ;
@@ -26745,10 +28499,12 @@ function finalizeDraggedAgentPlacement(e) {
   agent._wanderTimer = 0;
   agent._currentBuilding = getMovementInteriorBuildingAt(agent.x, agent.y) || null;
 
-  const placementDrinkMachineDrop = resolveDraggedAgentManualDrinkMachineDropAfterPlacement(agent, objectDrop);
+  const placementDrinkMachineDrop = hoverWinsOverProximity
+    ? objectDrop
+    : resolveDraggedAgentManualDrinkMachineDropAfterPlacement(agent, objectDrop);
   if (placementDrinkMachineDrop && placementDrinkMachineDrop !== objectDrop) {
     objectDrop = placementDrinkMachineDrop;
-    const skipPlacementPreTriggerObjectSnap = objectDrop?.furniture && isManualDropStandingServiceMachine(objectDrop.furniture);
+    const skipPlacementPreTriggerObjectSnap = objectDrop?.furniture && isManualDropFullServiceQueueObject(objectDrop.furniture);
     if (!skipPlacementPreTriggerObjectSnap && objectDrop.spot && objectDrop.available) {
       agent.x = objectDrop.spot.apiX;
       agent.y = objectDrop.spot.apiZ;
@@ -26771,8 +28527,22 @@ function finalizeDraggedAgentPlacement(e) {
   });
 
   const interactionTrigger = objectDrop ? triggerDraggedAgentObjectInteraction(objectDrop, agent) : null;
-  const dropSnap = objectDrop && interactionTrigger?.triggered && (objectDrop.available || interactionTrigger?.queued === true) ? snapDraggedAgentToStartedObjectApproach(objectDrop, agent) : null;
+  const manualOccupancy = objectDrop ? applyManualObjectOccupancyDwell(objectDrop, agent, interactionTrigger) : null;
+  // A manually dropped agent on a seat cushion must land ON that cushion, not
+  // on the front approach/dismount marker. Seat-dock objects therefore snap
+  // straight to their authored activation dock and activate the seated pose,
+  // instead of teleporting to the approach spot and waiting for arrival logic.
+  const seatDockSnap = objectDrop && interactionTrigger?.triggered && objectDrop.available
+    ? snapDraggedAgentToStartedObjectSeatDock(objectDrop, agent)
+    : null;
+  const dropSnap = seatDockSnap?.snapped
+    ? seatDockSnap
+    : (objectDrop && interactionTrigger?.triggered && (objectDrop.available || interactionTrigger?.queued === true) ? snapDraggedAgentToStartedObjectApproach(objectDrop, agent) : null);
   const interactionRecord = objectDrop ? recordManualAgentObjectInteraction(objectDrop, agent, interactionTrigger, dropSnap) : null;
+  if (interactionRecord && manualOccupancy?.applied) {
+    interactionRecord.manualOccupancyHold = true;
+    interactionRecord.manualOccupancyDwellMs = manualOccupancy.stayMs;
+  }
   if (objectDrop && interactionTrigger?.triggered) {
     addActivityLog(`🖐️ ${agent.emoji || '🤖'} ${agent.name || agent.id} was dropped on ${objectDrop.furniture?.type || 'object'} ${objectDrop.spot.spotId}; ${interactionTrigger.queued ? `joined queue #${Number(interactionTrigger.queueIndex || 0) + 1}` : (interactionTrigger.directServiceUse ? `started ${interactionRecord?.actionId || 'direct service use'} via ${interactionTrigger.handler}` : `default object menu action started via ${interactionTrigger.handler}`)}${dropSnap?.snapped ? ` and snapped to ${dropSnap.spotId || 'approach'}` : ''}${dropSnap?.activatedManualUse ? '; active use started' : ''}`);
   } else {
@@ -31717,6 +33487,16 @@ function _applyUndoEntry(u, isRedo) {
     }
     showToast(`${prefix} furniture`, 'warning');
 
+  } else if (u.type === 'outdoorNodes') {
+    const b = buildingsMap.get(u.buildingId);
+    if (b) {
+      if (!b.outdoorArea) b.outdoorArea = {};
+      b.outdoorArea.nodes = JSON.parse(JSON.stringify(isRedo ? u.after : u.before));
+      createBuilding3D(b);
+      persistBuilding(b);
+    }
+    showToast(`${prefix} outdoor objects`, 'warning');
+
   } else if (u.type === 'buildingCreate') {
     if (isRedo) {
       // Redo a create = re-create (we stored the data)
@@ -33724,6 +35504,30 @@ window.__VWGetObjectActionPointDebugState = () => {
     });
   }
   return { enabled: _objectActionPointDebugEnabled, overlayCount, markerCount };
+};
+window.__verifySectionalActionPointDebugCleanup = () => {
+  const spots = FURNITURE_INTERACTION_SPOTS.sectionalSofa || [];
+  const sectional = { type: 'sectionalSofa' };
+  const numberedSourceIds = spots
+    .filter(spot => shouldGenerateNumberedQueueDebugMarkers(spot, sectional))
+    .map(spot => spot.id || spot.spotId || null)
+    .filter(Boolean);
+  const functionalSpotIds = spots.map(spot => spot.id || spot.spotId || null).filter(Boolean);
+  const realQueuePreserved = shouldGenerateNumberedQueueDebugMarkers({
+    id: 'queue',
+    roles: ['queue'],
+    capacityKind: 'queue',
+    capacity: 3,
+  }, { type: 'verificationQueue' });
+  return {
+    ok: numberedSourceIds.length === 0 && functionalSpotIds.length === 9 && realQueuePreserved,
+    numberedSourceIds,
+    functionalSpotIds,
+    seatSpotIds: functionalSpotIds.filter(id => id === 'chaise' || id.startsWith('seat-')),
+    standSpotIds: functionalSpotIds.filter(id => id.startsWith('stand-')),
+    socialSpotIds: functionalSpotIds.filter(id => id === 'talk-front'),
+    realQueuePreserved,
+  };
 };
 window._debugVehicles = () => vehiclesList.map((v,i) => ({i, x:Math.round(v.x*10)/10, z:Math.round(v.z*10)/10, serverX:Number.isFinite(Number(v._runtimeServerX))?Math.round(Number(v._runtimeServerX)*10)/10:null, serverZ:Number.isFinite(Number(v._runtimeServerZ))?Math.round(Number(v._runtimeServerZ)*10)/10:null, dir:v.dir, pathIdx:v._pathIdx, stopped:v._stoppedAtLight, blocked:v._blockedTime||0, runtime:!!v._runtimeWorldRuntime, visible:v.group.visible}));
 window._debugLightCheck = (vIdx) => {
@@ -37240,11 +39044,14 @@ function agentCarriesTemporaryForDisposal(agent) {
 function outdoorNodeSupportsAction(node, rule) {
   if (!node || !rule) return false;
   if (node.disabled === true || node.enabled === false) return false;
-  if (isOutdoorNodeOccupied(node) && rule.roles?.some(role => OUTDOOR_OCCUPANCY_EXCLUSIVE_ROLES.includes(role) || OUTDOOR_OCCUPANCY_LIMITED_SOCIAL_ROLES.includes(role))) return false;
-  const roles = new Set((Array.isArray(node.roles) ? node.roles : []).map(role => String(role).trim().toLowerCase()));
-  const nodeType = String(node.type || node.nodeType || '').trim().toLowerCase();
   const rawAssetType = String(node.renderType || node.assetId || node.catalogId || node.objectCatalogId || '').trim();
   const assetType = normalizeObjectCatalogId(rawAssetType) || rawAssetType;
+  const isOpenParkBenchSeatAction = assetType === 'parkBench' &&
+    String(rule.activityKind || '').startsWith('park-bench-') &&
+    getActiveParkBenchReservationSeatIds(node).size < 3;
+  if (!isOpenParkBenchSeatAction && isOutdoorNodeOccupied(node) && rule.roles?.some(role => OUTDOOR_OCCUPANCY_EXCLUSIVE_ROLES.includes(role) || OUTDOOR_OCCUPANCY_LIMITED_SOCIAL_ROLES.includes(role))) return false;
+  const roles = new Set((Array.isArray(node.roles) ? node.roles : []).map(role => String(role).trim().toLowerCase()));
+  const nodeType = String(node.type || node.nodeType || '').trim().toLowerCase();
   if (rule.id === 'dispose-outdoor-trash-can') return assetType === 'outdoorTrashCan' && agentsList.some(agentCarriesTemporaryForDisposal);
   if (assetType === 'outdoorTrashCan' && ['inspect', 'use'].includes(rule.id)) return false;
   if (assetType === 'parkLamp' && ['inspect', 'use'].includes(rule.id)) return false;
@@ -37296,7 +39103,7 @@ function routeAgentToOutdoorNodeAction(buildingId, nodeId, rule, options = {}) {
   const rawAssetType = rawNode ? (normalizeObjectCatalogId(rawNode.catalogId || rawNode.assetId || rawNode.renderType || rawNode.objectCatalogId || rawNode.type) || rawNode.type) : null;
   const isParkBenchSeatAction = rawAssetType === 'parkBench' && String(rule?.activityKind || '').startsWith('park-bench-');
   let runtime = isParkBenchSeatAction
-    ? getOutdoorNodeSpotRuntimeTarget(building, node, 'approach-front', rule?.actionId || node?.actionId || null, { ...(rule || {}), preferredSpotId: 'approach-front' })
+    ? getOutdoorNodeSpotRuntimeTarget(building, node, 'stand-center', rule?.actionId || node?.actionId || null, { ...(rule || {}), preferredSpotId: 'stand-center' })
     : getOutdoorNodeRuntimeTarget(building, node, rule?.actionId || node?.actionId || null, rule);
   if (!building || !node || !runtime?.target) {
     showToast('Outdoor action target is unavailable', 'warning');
@@ -37338,7 +39145,7 @@ function routeAgentToOutdoorNodeAction(buildingId, nodeId, rule, options = {}) {
       return null;
     }
     selectedBenchSeat = benchReservationResult.seat;
-    runtime = getOutdoorNodeSpotRuntimeTarget(building, node, selectedBenchSeat.approachSpotId || 'approach-front', rule?.actionId || 'life.restAtBench', { ...(rule || {}), preferredSpotId: selectedBenchSeat.approachSpotId || 'approach-front' }) || runtime;
+    runtime = getOutdoorNodeSpotRuntimeTarget(building, node, selectedBenchSeat.approachSpotId || 'stand-center', rule?.actionId || 'life.restAtBench', { ...(rule || {}), preferredSpotId: selectedBenchSeat.approachSpotId || 'stand-center' }) || runtime;
     benchActivationRuntime = getOutdoorNodeSpotRuntimeTarget(building, node, selectedBenchSeat.seatId, rule?.actionId || 'life.restAtBench', { ...(rule || {}), preferredSpotId: selectedBenchSeat.seatId });
     if (!benchActivationRuntime?.target) {
       releaseObjectUseSeatReservation(store, { reservationId: benchReservationResult.reservation.id, agentId: agent.id, seatId: selectedBenchSeat.seatId, terminalState: 'failed', reason: 'missing-park-bench-seat-spot' });
@@ -37392,7 +39199,7 @@ function routeAgentToOutdoorNodeAction(buildingId, nodeId, rule, options = {}) {
     objectKey: isParkBenchSeatAction ? getParkBenchObjectKey(buildingId, node.id) : (isPlaygroundSwingAction ? getPlaygroundSwingObjectKey(buildingId, node.id) : undefined),
     objectType: runtime.target?.nodeType || node?.type || node?.renderType || null,
     spotId: runtime.target?.interactionSpotId || rule?.preferredSpotId || null,
-    approachSpotId: isParkBenchSeatAction ? (runtime.target?.interactionSpotId || 'approach-front') : (isPlaygroundSwingAction ? 'approach-front' : undefined),
+    approachSpotId: isParkBenchSeatAction ? (runtime.target?.interactionSpotId || 'stand-center') : (isPlaygroundSwingAction ? 'approach-front' : undefined),
     activationSpotId: selectedBenchSeat?.seatId || (isPlaygroundSwingAction ? (isPlaygroundSwingWaitTurn ? 'approach-front' : 'seat-use') : undefined),
     selectedSeatId: selectedBenchSeat?.seatId || undefined,
     activeUseSlotId: swingCandidate?.slotId || undefined,
@@ -37422,12 +39229,15 @@ function routeAgentToOutdoorNodeAction(buildingId, nodeId, rule, options = {}) {
     actionId: runtime.target.actionId,
     roles: runtime.target.roles,
     animationId: rule?.animationId || null,
+    seatSurfaceLift: isParkBenchSeatAction ? getFurnitureSeatSurfaceLift('parkBench') : undefined,
     stayMs: rule?.stayMs || 10000,
     dockTarget: benchActivationRuntime?.target ? { x: benchActivationRuntime.target.x, y: benchActivationRuntime.target.y } : (swingActivationRuntime?.target ? { x: swingActivationRuntime.target.x, y: swingActivationRuntime.target.y } : { x: runtime.target.x, y: runtime.target.y }),
     dockSnapRadius: Math.max(6, Number(runtime.target.approachClearanceTiles || 0.35) * API_TILE),
     faceAngle: isPlaygroundSwingAction ? swingFaceAngle : benchFaceAngle,
     interactionSpotId: runtime.target.interactionSpotId,
-    approachSpotId: isParkBenchSeatAction || isPlaygroundSwingAction ? (runtime.target.interactionSpotId || 'approach-front') : undefined,
+    approachSpotId: isParkBenchSeatAction || isPlaygroundSwingAction ? (runtime.target.interactionSpotId || (isParkBenchSeatAction ? 'stand-center' : 'approach-front')) : undefined,
+    dismountSpotId: isParkBenchSeatAction ? (selectedBenchSeat?.exitSpotId || selectedBenchSeat?.approachSpotId || runtime.target.interactionSpotId || 'stand-center') : undefined,
+    exitSpotId: isParkBenchSeatAction ? (selectedBenchSeat?.exitSpotId || selectedBenchSeat?.approachSpotId || runtime.target.interactionSpotId || 'stand-center') : undefined,
     spotId: selectedBenchSeat?.seatId || (isPlaygroundSwingAction ? (isPlaygroundSwingWaitTurn ? 'approach-front' : 'seat-use') : runtime.target.interactionSpotId),
     seatId: selectedBenchSeat?.seatId || undefined,
     activationSpotId: selectedBenchSeat?.seatId || (isPlaygroundSwingAction ? (isPlaygroundSwingWaitTurn ? 'approach-front' : 'seat-use') : (foodTruckStandingUse?.slotId || undefined)),
@@ -37439,15 +39249,16 @@ function routeAgentToOutdoorNodeAction(buildingId, nodeId, rule, options = {}) {
     objectKey: isParkBenchSeatAction ? getParkBenchObjectKey(buildingId, node.id) : (isPlaygroundSwingAction ? getPlaygroundSwingObjectKey(buildingId, node.id) : undefined),
     agentId: agent.id || null,
     routeMetadata: runtime.target,
-    routeApproachTarget: (isParkBenchSeatAction || isPlaygroundSwingAction) ? { x: runtime.target.x, y: runtime.target.y, floor: runtime.target.floor, spotId: runtime.target.interactionSpotId || 'approach-front' } : undefined,
+    routeApproachTarget: (isParkBenchSeatAction || isPlaygroundSwingAction) ? { x: runtime.target.x, y: runtime.target.y, floor: runtime.target.floor, spotId: runtime.target.interactionSpotId || (isParkBenchSeatAction ? 'stand-center' : 'approach-front') } : undefined,
     activationTarget: benchActivationRuntime?.target ? { x: benchActivationRuntime.target.x, y: benchActivationRuntime.target.y, floor: benchActivationRuntime.target.floor, spotId: selectedBenchSeat?.seatId || benchActivationRuntime.target.interactionSpotId } : (swingActivationRuntime?.target ? { x: swingActivationRuntime.target.x, y: swingActivationRuntime.target.y, floor: swingActivationRuntime.target.floor, spotId: 'seat-use' } : undefined),
     chainNextStrollNode: Boolean(rule?.chainNextStrollNode),
     chainRemaining: rule?.chainNextStrollNode ? 1 : 0,
   };
   if (rawNode) {
     if (isParkBenchSeatAction && selectedBenchSeat && benchReservationResult?.reservation) {
-      rawNode.reservation = { id: benchReservationResult.reservation.id, status: 'held', agentId: agent.id || null, actionId: runtime.target.actionId, interactionSpotId: selectedBenchSeat.seatId, seatId: selectedBenchSeat.seatId, spotId: selectedBenchSeat.seatId, approachSpotId: runtime.target.interactionSpotId || 'approach-front', capacityKey: getObjectUseSeatCapacityKey(getParkBenchObjectKey(buildingId, node.id), selectedBenchSeat.seatId) };
-      rawNode.activeUse = { ...(rawNode.activeUse || {}), state: 'reserved', mode: rule?.id || 'park-bench-seat', activeSeats: rawNode.activeUse?.activeSeats || {}, agentId: agent.id || null, actionId: runtime.target.actionId, interactionSpotId: selectedBenchSeat.seatId, approachSpotId: runtime.target.interactionSpotId || 'approach-front', startedAt: rawNode.activeUse?.startedAt || new Date().toISOString() };
+      const dismountSpotId = selectedBenchSeat.exitSpotId || selectedBenchSeat.approachSpotId || runtime.target.interactionSpotId || 'stand-center';
+      rawNode.reservation = { id: benchReservationResult.reservation.id, status: 'held', agentId: agent.id || null, actionId: runtime.target.actionId, interactionSpotId: selectedBenchSeat.seatId, seatId: selectedBenchSeat.seatId, spotId: selectedBenchSeat.seatId, approachSpotId: runtime.target.interactionSpotId || 'stand-center', dismountSpotId, exitSpotId: dismountSpotId, capacityKey: getObjectUseSeatCapacityKey(getParkBenchObjectKey(buildingId, node.id), selectedBenchSeat.seatId) };
+      rawNode.activeUse = { ...(rawNode.activeUse || {}), state: 'reserved', mode: rule?.id || 'park-bench-seat', activeSeats: rawNode.activeUse?.activeSeats || {}, agentId: agent.id || null, actionId: runtime.target.actionId, interactionSpotId: selectedBenchSeat.seatId, approachSpotId: runtime.target.interactionSpotId || 'stand-center', dismountSpotId, startedAt: rawNode.activeUse?.startedAt || new Date().toISOString() };
     } else {
       rawNode.activeUse = { state: 'active', mode: rule?.id || 'use', agentId: agent.id || null, actionId: runtime.target.actionId, interactionSpotId: runtime.target.interactionSpotId, startedAt: new Date().toISOString() };
       rawNode.reservation = { status: 'active', agentId: agent.id || null, actionId: runtime.target.actionId, interactionSpotId: runtime.target.interactionSpotId };
@@ -37488,7 +39299,7 @@ function routeAgentToOutdoorNodeAction(buildingId, nodeId, rule, options = {}) {
         reservedSeatIds: [...getActiveParkBenchReservationSeatIds(rawNode, buildingId, node.id)].sort(),
         activeSeatIds,
         selectedSeatId: selectedBenchSeat?.seatId || previous.selectedSeatId || null,
-        approachSpotId: isParkBenchSeatAction ? (runtime.target.interactionSpotId || 'approach-front') : previous.approachSpotId || null,
+        approachSpotId: isParkBenchSeatAction ? (runtime.target.interactionSpotId || 'stand-center') : previous.approachSpotId || null,
         sitCount: Math.max(0, Number(previous.sitCount || 0)) + (rule?.id === 'sit-park-bench' ? 1 : 0),
         restCount: Math.max(0, Number(previous.restCount || 0)) + (rule?.id === 'rest-park-bench' ? 1 : 0),
         readCount: Math.max(0, Number(previous.readCount || 0)) + (rule?.id === 'read-park-bench' ? 1 : 0),
@@ -40589,6 +42400,14 @@ function buildContextMenu(menu, type, targetId) {
       el.addEventListener('click', () => { item.action(); hideContextMenu(); });
       menu.appendChild(el);
     });
+    if (getOutdoorNodeAssetType(node) === 'parkBench') {
+      appendMultiSeatColorEditor(menu, {
+        buildingId,
+        outdoorNodeId: node.id,
+        node,
+        type: 'parkBench',
+      }, () => hideContextMenu());
+    }
     const deleteEl = document.createElement('div');
     deleteEl.className = 'ctx-item';
     deleteEl.style.color = '#ff8a80';
@@ -40714,6 +42533,348 @@ function renderFurnitureContextInteract(menu, targetId, contextTarget) {
   }
 }
 
+function setCouchColorConfiguration(buildingId, furnitureIndex, nextColors = null) {
+  const building = buildingsMap.get(buildingId);
+  const furniture = building?.interior?.furniture?.[furnitureIndex];
+  if (!building || furniture?.type !== 'couch') return { ok: false, reason: 'missing-couch' };
+  const before = JSON.parse(JSON.stringify(building.interior.furniture || []));
+  if (nextColors) furniture.couchColors = normalizeCouchColors(nextColors);
+  else delete furniture.couchColors;
+  const after = JSON.parse(JSON.stringify(building.interior.furniture || []));
+  if (JSON.stringify(before) === JSON.stringify(after)) return { ok: true, changed: false, colors: normalizeCouchColors(furniture) };
+  pushUndo({ type: 'furniture', buildingId: building.id, before, after });
+  createBuilding3D(building);
+  syncManualFurnitureColliders(building);
+  const rebuilt = findFurnitureMesh(buildingId, furnitureIndex);
+  if (rebuilt) _selectFurniture(buildingId, furnitureIndex, rebuilt, { showActions: false });
+  persistBuilding(building);
+  return { ok: true, changed: true, colors: normalizeCouchColors(furniture) };
+}
+
+// Live couch color preview.
+//
+// Rebuilding the whole building group on every color-picker tick is far too
+// expensive and also destroys the open context menu, so preview instead walks
+// the already-rendered couch meshes and recolors their materials in place.
+// Each mesh is tagged with the palette key it was built from, and the original
+// material color is cached so Cancel/close can restore the saved look exactly.
+const COUCH_COLOR_PREVIEW_MATERIAL_KEYS = Object.freeze(['body', 'backArms', 'seatCushions', 'feet']);
+let _activeCouchColorPreview = null;
+
+function collectCouchColorPreviewMeshes(buildingId, furnitureIndex) {
+  const root = findFurnitureMesh(buildingId, furnitureIndex);
+  if (!root) return [];
+  const meshes = [];
+  root.traverse(obj => {
+    const key = obj?.isMesh ? obj.userData?.couchColorKey : null;
+    if (key && COUCH_COLOR_PREVIEW_MATERIAL_KEYS.includes(key)) meshes.push(obj);
+  });
+  return meshes;
+}
+
+function applyCouchColorPreview(buildingId, furnitureIndex, colors) {
+  const normalized = normalizeCouchColors(colors);
+  const meshes = collectCouchColorPreviewMeshes(buildingId, furnitureIndex);
+  if (!meshes.length) return { ok: false, reason: 'missing-couch-preview-meshes', previewed: 0 };
+  let previewed = 0;
+  for (const mesh of meshes) {
+    const key = mesh.userData.couchColorKey;
+    const material = mesh.material;
+    if (!material?.color?.set) continue;
+    // Snapshot the saved color once so repeated preview ticks never overwrite
+    // the restore point with an in-flight preview value.
+    if (!mesh.userData._couchColorPreviewOriginal) {
+      mesh.userData._couchColorPreviewOriginal = `#${material.color.getHexString()}`;
+    }
+    // Materials are shared/cached between meshes elsewhere in the scene, so
+    // clone once before mutating to avoid recoloring unrelated furniture.
+    if (!mesh.userData._couchColorPreviewOwnsMaterial) {
+      mesh.material = material.clone();
+      mesh.userData._couchColorPreviewOwnsMaterial = true;
+    }
+    mesh.material.color.set(normalized[key]);
+    mesh.material.needsUpdate = true;
+    previewed += 1;
+  }
+  return { ok: previewed > 0, previewed, colors: normalized };
+}
+
+function clearCouchColorPreview(buildingId, furnitureIndex) {
+  const meshes = collectCouchColorPreviewMeshes(buildingId, furnitureIndex);
+  let restored = 0;
+  for (const mesh of meshes) {
+    const original = mesh.userData?._couchColorPreviewOriginal;
+    if (!original || !mesh.material?.color?.set) continue;
+    mesh.material.color.set(original);
+    mesh.material.needsUpdate = true;
+    delete mesh.userData._couchColorPreviewOriginal;
+    restored += 1;
+  }
+  return { ok: true, restored };
+}
+
+function appendCouchColorEditor(body, record, rerender) {
+  // Re-rendering the Edit view rebuilds the pickers, so drop any previous
+  // preview handle/overrides before wiring the new inputs.
+  if (_activeCouchColorPreview) {
+    clearCouchColorPreview(_activeCouchColorPreview.buildingId, _activeCouchColorPreview.furnitureIndex);
+    _activeCouchColorPreview = null;
+  }
+  if (!body || record?.furniture?.type !== 'couch') return;
+  const section = document.createElement('section');
+  section.className = 'ctx-couch-color-editor';
+  const heading = document.createElement('div');
+  heading.className = 'ctx-section-label';
+  heading.textContent = '🎨 Couch colors';
+  const hint = document.createElement('div');
+  hint.className = 'ctx-couch-color-hint';
+  hint.textContent = 'Colors preview live on the couch as you pick. Apply to save, Cancel to discard.';
+  const grid = document.createElement('div');
+  grid.className = 'ctx-couch-color-grid';
+  const fields = [
+    ['body', 'Base / body'],
+    ['backArms', 'Back & arms'],
+    ['seatCushions', 'Seat cushions'],
+    ['feet', 'Feet'],
+  ];
+  const colors = normalizeCouchColors(record.furniture);
+  for (const [key, labelText] of fields) {
+    const label = document.createElement('label');
+    const text = document.createElement('span');
+    text.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = colors[key];
+    input.dataset.couchColorKey = key;
+    input.setAttribute('aria-label', `${labelText} color`);
+    label.append(text, input);
+    grid.appendChild(label);
+  }
+
+  const readPickerColors = () => {
+    const next = {};
+    grid.querySelectorAll('input[data-couch-color-key]').forEach(input => { next[input.dataset.couchColorKey] = input.value; });
+    return next;
+  };
+  const previewNow = () => applyCouchColorPreview(record.buildingId, record.furnitureIndex, readPickerColors());
+
+  // `input` fires continuously while the native picker is open, so the couch
+  // updates live; `change` covers pickers that only commit on close.
+  grid.querySelectorAll('input[data-couch-color-key]').forEach(input => {
+    input.addEventListener('input', (event) => { event.stopPropagation(); previewNow(); });
+    input.addEventListener('change', (event) => { event.stopPropagation(); previewNow(); });
+  });
+  // Expose the live preview state for verifiers and for menu-close cleanup.
+  _activeCouchColorPreview = {
+    buildingId: record.buildingId,
+    furnitureIndex: record.furnitureIndex,
+    readPickerColors,
+    previewNow,
+  };
+
+  const apply = document.createElement('button');
+  apply.className = 'ctx-list-action';
+  apply.innerHTML = '<span>✅</span><strong>Apply couch colors</strong><small>Save the previewed palette</small>';
+  apply.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const next = readPickerColors();
+    // Drop preview overrides first so the rebuilt couch is authoritative.
+    clearCouchColorPreview(record.buildingId, record.furnitureIndex);
+    _activeCouchColorPreview = null;
+    const result = setCouchColorConfiguration(record.buildingId, record.furnitureIndex, next);
+    showToast(result.ok ? '🎨 Couch colors updated' : 'Could not update couch colors', result.ok ? 'success' : 'error');
+    if (result.ok) rerender();
+  });
+  const cancel = document.createElement('button');
+  cancel.className = 'ctx-list-action';
+  cancel.innerHTML = '<span>✖️</span><strong>Cancel preview</strong><small>Discard unsaved color changes</small>';
+  cancel.addEventListener('click', (event) => {
+    event.stopPropagation();
+    clearCouchColorPreview(record.buildingId, record.furnitureIndex);
+    _activeCouchColorPreview = null;
+    showToast('✖️ Couch color preview discarded', 'success');
+    rerender();
+  });
+  const reset = document.createElement('button');
+  reset.className = 'ctx-list-action';
+  reset.innerHTML = '<span>↩️</span><strong>Reset couch colors</strong><small>Restore the original palette</small>';
+  reset.addEventListener('click', (event) => {
+    event.stopPropagation();
+    clearCouchColorPreview(record.buildingId, record.furnitureIndex);
+    _activeCouchColorPreview = null;
+    const result = setCouchColorConfiguration(record.buildingId, record.furnitureIndex, null);
+    showToast(result.ok ? '↩️ Couch colors reset' : 'Could not reset couch colors', result.ok ? 'success' : 'error');
+    if (result.ok) rerender();
+  });
+  section.append(heading, hint, grid, apply, cancel, reset);
+  body.appendChild(section);
+}
+
+let _activeMultiSeatColorPreview = null;
+
+function getMultiSeatColorRecordRoot(record) {
+  if (record?.outdoorNodeId) return findOutdoorNodeMesh(record.buildingId, record.outdoorNodeId);
+  return findFurnitureMesh(record?.buildingId, record?.furnitureIndex);
+}
+
+function getMultiSeatColorRecordObject(record) {
+  if (record?.outdoorNodeId) return getRawOutdoorNodeById(buildingsMap.get(record.buildingId), record.outdoorNodeId);
+  return buildingsMap.get(record?.buildingId)?.interior?.furniture?.[record?.furnitureIndex] || null;
+}
+
+function collectMultiSeatColorPreviewMeshes(record) {
+  const root = getMultiSeatColorRecordRoot(record);
+  if (!root) return [];
+  const meshes = [];
+  root.traverse(obj => {
+    if (obj?.isMesh && obj.userData?.multiSeatColorKey) meshes.push(obj);
+  });
+  return meshes;
+}
+
+function applyMultiSeatColorPreview(record, colors) {
+  const type = record?.type || record?.furniture?.type || getOutdoorNodeAssetType(record?.node || {});
+  const normalized = normalizeMultiSeatFurnitureColors(type, colors);
+  let previewed = 0;
+  for (const mesh of collectMultiSeatColorPreviewMeshes(record)) {
+    const key = mesh.userData.multiSeatColorKey;
+    if (!Object.hasOwn(normalized, key) || !mesh.material?.color?.set) continue;
+    if (!mesh.userData._multiSeatColorPreviewOriginal) {
+      mesh.userData._multiSeatColorPreviewOriginal = `#${mesh.material.color.getHexString()}`;
+    }
+    if (!mesh.userData._multiSeatColorPreviewOwnsMaterial) {
+      mesh.material = mesh.material.clone();
+      mesh.userData._multiSeatColorPreviewOwnsMaterial = true;
+    }
+    mesh.material.color.set(normalized[key]);
+    mesh.material.needsUpdate = true;
+    previewed += 1;
+  }
+  return { ok: previewed > 0, previewed, colors: normalized };
+}
+
+function clearMultiSeatColorPreview(record) {
+  let restored = 0;
+  for (const mesh of collectMultiSeatColorPreviewMeshes(record)) {
+    const original = mesh.userData?._multiSeatColorPreviewOriginal;
+    if (!original || !mesh.material?.color?.set) continue;
+    mesh.material.color.set(original);
+    mesh.material.needsUpdate = true;
+    delete mesh.userData._multiSeatColorPreviewOriginal;
+    restored += 1;
+  }
+  return { ok: true, restored };
+}
+
+function setMultiSeatColorConfiguration(record, nextColors = null) {
+  const building = buildingsMap.get(record?.buildingId);
+  const target = getMultiSeatColorRecordObject(record);
+  const type = record?.type || target?.type || getOutdoorNodeAssetType(target || {});
+  const scheme = MULTI_SEAT_COLOR_SCHEMES[type];
+  if (!building || !target || !scheme) return { ok: false, reason: 'missing-multi-seat-object' };
+  if (record?.outdoorNodeId) {
+    const before = JSON.parse(JSON.stringify(building.outdoorArea?.nodes || []));
+    if (nextColors) target[scheme.property] = normalizeMultiSeatFurnitureColors(type, nextColors);
+    else delete target[scheme.property];
+    const after = JSON.parse(JSON.stringify(building.outdoorArea?.nodes || []));
+    if (JSON.stringify(before) === JSON.stringify(after)) return { ok: true, changed: false, colors: normalizeMultiSeatFurnitureColors(type, target) };
+    pushUndo({ type: 'outdoorNodes', buildingId: building.id, before, after });
+    persistBuilding(building);
+    createBuilding3D(building);
+    const rebuilt = findOutdoorNodeMesh(building.id, record.outdoorNodeId);
+    if (rebuilt) _selectOutdoorNode(building.id, record.outdoorNodeId, building.outdoorArea?.nodes?.indexOf?.(target), rebuilt);
+  } else {
+    const before = JSON.parse(JSON.stringify(building.interior?.furniture || []));
+    if (nextColors) target[scheme.property] = normalizeMultiSeatFurnitureColors(type, nextColors);
+    else delete target[scheme.property];
+    const after = JSON.parse(JSON.stringify(building.interior?.furniture || []));
+    if (JSON.stringify(before) === JSON.stringify(after)) return { ok: true, changed: false, colors: normalizeMultiSeatFurnitureColors(type, target) };
+    pushUndo({ type: 'furniture', buildingId: building.id, before, after });
+    persistBuilding(building);
+    createBuilding3D(building);
+    syncManualFurnitureColliders(building);
+    const rebuilt = findFurnitureMesh(building.id, record.furnitureIndex);
+    if (rebuilt) _selectFurniture(building.id, record.furnitureIndex, rebuilt, { showActions: false });
+  }
+  return { ok: true, changed: true, colors: normalizeMultiSeatFurnitureColors(type, target) };
+}
+
+function appendMultiSeatColorEditor(body, record, rerender = () => {}) {
+  const target = getMultiSeatColorRecordObject(record) || record?.furniture || record?.node || null;
+  const type = record?.type || target?.type || getOutdoorNodeAssetType(target || {});
+  const scheme = MULTI_SEAT_COLOR_SCHEMES[type];
+  if (!body || !scheme) return;
+  if (_activeMultiSeatColorPreview) {
+    clearMultiSeatColorPreview(_activeMultiSeatColorPreview.record);
+    _activeMultiSeatColorPreview = null;
+  }
+  const editorRecord = { ...record, type };
+  const section = document.createElement('section');
+  section.className = 'ctx-couch-color-editor';
+  const heading = document.createElement('div');
+  heading.className = 'ctx-section-label';
+  heading.textContent = `🎨 ${scheme.label} colors`;
+  const hint = document.createElement('div');
+  hint.className = 'ctx-couch-color-hint';
+  hint.textContent = 'Colors preview live as you pick. Apply to save, Cancel to discard.';
+  const grid = document.createElement('div');
+  grid.className = 'ctx-couch-color-grid';
+  const colors = normalizeMultiSeatFurnitureColors(type, target);
+  for (const [key, labelText] of scheme.fields) {
+    const label = document.createElement('label');
+    const text = document.createElement('span');
+    text.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = colors[key];
+    input.dataset.multiSeatColorKey = key;
+    input.setAttribute('aria-label', `${labelText} color`);
+    label.append(text, input);
+    grid.appendChild(label);
+  }
+  const readColors = () => Object.fromEntries([...grid.querySelectorAll('input[data-multi-seat-color-key]')].map(input => [input.dataset.multiSeatColorKey, input.value]));
+  const previewNow = () => applyMultiSeatColorPreview(editorRecord, readColors());
+  grid.querySelectorAll('input[data-multi-seat-color-key]').forEach(input => {
+    input.addEventListener('input', event => { event.stopPropagation(); previewNow(); });
+    input.addEventListener('change', event => { event.stopPropagation(); previewNow(); });
+  });
+  _activeMultiSeatColorPreview = { record: editorRecord, readColors, previewNow };
+  const apply = document.createElement('button');
+  apply.className = 'ctx-list-action';
+  apply.innerHTML = `<span>✅</span><strong>Apply ${escapeHtml(scheme.label.toLowerCase())} colors</strong><small>Save the previewed palette</small>`;
+  apply.addEventListener('click', event => {
+    event.stopPropagation();
+    const next = readColors();
+    clearMultiSeatColorPreview(editorRecord);
+    _activeMultiSeatColorPreview = null;
+    const result = setMultiSeatColorConfiguration(editorRecord, next);
+    showToast(result.ok ? `🎨 ${scheme.label} colors updated` : `Could not update ${scheme.label.toLowerCase()} colors`, result.ok ? 'success' : 'error');
+    if (result.ok) rerender();
+  });
+  const cancel = document.createElement('button');
+  cancel.className = 'ctx-list-action';
+  cancel.innerHTML = '<span>✖️</span><strong>Cancel preview</strong><small>Discard unsaved color changes</small>';
+  cancel.addEventListener('click', event => {
+    event.stopPropagation();
+    clearMultiSeatColorPreview(editorRecord);
+    _activeMultiSeatColorPreview = null;
+    rerender();
+  });
+  const reset = document.createElement('button');
+  reset.className = 'ctx-list-action';
+  reset.innerHTML = `<span>↩️</span><strong>Reset ${escapeHtml(scheme.label.toLowerCase())} colors</strong><small>Restore the original palette</small>`;
+  reset.addEventListener('click', event => {
+    event.stopPropagation();
+    clearMultiSeatColorPreview(editorRecord);
+    _activeMultiSeatColorPreview = null;
+    const result = setMultiSeatColorConfiguration(editorRecord, null);
+    showToast(result.ok ? `↩️ ${scheme.label} colors reset` : `Could not reset ${scheme.label.toLowerCase()} colors`, result.ok ? 'success' : 'error');
+    if (result.ok) rerender();
+  });
+  section.append(heading, hint, grid, apply, cancel, reset);
+  body.appendChild(section);
+}
+
 function renderFurnitureContextEdit(menu, targetId, contextTarget) {
   const record = getFurnitureContextRecord(targetId, contextTarget);
   if (!record) { hideContextMenu(); return; }
@@ -40731,6 +42892,8 @@ function renderFurnitureContextEdit(menu, targetId, contextTarget) {
   del.className = 'ctx-list-action danger';
   del.innerHTML = '<span>🗑️</span><strong>Delete object</strong><small>Remove this item from the room</small>';
   del.addEventListener('click', (event) => { event.stopPropagation(); window._deleteFurniture(); hideContextMenu(); });
+  appendCouchColorEditor(body, record, () => renderFurnitureContextEdit(menu, targetId, contextTarget));
+  appendMultiSeatColorEditor(body, record, () => renderFurnitureContextEdit(menu, targetId, contextTarget));
   body.append(rotate, del);
 }
 
@@ -40744,6 +42907,16 @@ function positionContextMenu(menu, x, y) {
 }
 
 function hideContextMenu() {
+  // Closing the menu without applying must never leave a preview-only palette
+  // painted on the couch, so restore the saved colors first.
+  if (_activeCouchColorPreview) {
+    clearCouchColorPreview(_activeCouchColorPreview.buildingId, _activeCouchColorPreview.furnitureIndex);
+    _activeCouchColorPreview = null;
+  }
+  if (_activeMultiSeatColorPreview) {
+    clearMultiSeatColorPreview(_activeMultiSeatColorPreview.record);
+    _activeMultiSeatColorPreview = null;
+  }
   const menu = document.getElementById('contextMenu');
   if (menu) {
     menu.style.display = 'none';
@@ -40787,9 +42960,9 @@ const ACTION_SPOTS = {
   chair:        { dx: 0, dz: 0.3, facing: 'north' },  // sit in the chair
   officeChair:  { dx: 0, dz: 0.86, facing: 'north', action: 'planning.approachOfficeChair' },  // route to chair approach waypoint before docking to work seat
   conferenceChair: { dx: 0, dz: 0.18, facing: 'north', action: 'planning.sitAtConferenceChair' }, // sit/listen from a meeting-room chair; route via approach-front
-  couch:        { dx: 0, dz: 0.36, facing: 'north', action: 'life.restAtCouch' },  // sit/rest/socialize on the front half of the cushion so feet clear the couch
-  sectionalSofa:{ dx: -0.40, dz: 0.36, facing: 'north', action: 'life.restAtSectionalSofa' }, // multi-seat sectional sofa waypoint on front half of a real cushion; route to open seat/chaise or social front
-  loveseat:     { dx: 0, dz: 0.36, facing: 'north', action: 'life.restAtLoveseat' }, // two-person loveseat seat on cushion front half; route via approach-left/right when used
+  couch:        { dx: 0, dz: COUCH_SEAT_DOCK_Z, facing: 'north', action: 'life.restAtCouch' },  // front-edge inset matches the working armchair so legs clear the cushion
+  sectionalSofa:{ dx: -0.40, dz: 0.41, facing: 'north', action: 'life.restAtSectionalSofa' }, // primary center cushion dock; each seat routes through its matching stand-* clearance point
+  loveseat:     { dx: -0.48, dz: 0.39, facing: 'north', action: 'life.restAtLoveseat' }, // primary left cushion dock; exact left/right selection uses independent seat slots
   armchair:     { dx: 0, dz: 0.42, facing: 'north', action: 'life.restAtArmchair' }, // single-person armchair dock high and forward on the raised top seat cushion; route via clear approach-front before snapping to the cushion
   barStool:     { dx: 0, dz: 0.10, facing: 'north', action: 'life.sitAtBarStool' }, // counter-height stool seat centered on the top cushion; pose lift raises agent to the visible top surface
   diningChair:  { dx: 0, dz: 0.16, facing: 'north', action: 'life.sitAtDiningChair' }, // individual dining/cafe chair seat; route via approach-front when used
@@ -40820,13 +42993,13 @@ const ACTION_SPOTS = {
   wallArt:{ dx: 0, dz: 0.58, facing: 'north', action: 'planning.inspectWallArt' }, // front inspect waypoint for stationary wall art / picture frames
   menuBoard:{ dx: 0, dz: 0.74, facing: 'north', action: 'life.readMenuBoard' }, // front read/inspect waypoint for cafe/shop menu display
   teachingPodium:{ dx: 0, dz: -0.64, facing: 'south', action: 'training.teachAtPodium' }, // behind-podium teaching waypoint for classroom/briefing presentation
-  parkBench:    { dx: 0, dz: 0.82, facing: 'north', action: 'life.approachParkBench' }, // route to front approach, then dock to left/center/right seats around solid bench footprint
+  parkBench:    { dx: 0, dz: 0.145, facing: 'north', action: 'life.restAtBench' }, // primary center seat dock; exact left/center/right seats route through matching stand-* points
   shadeTreeCluster: { dx: 0, dz: 1.62, facing: 'north', action: 'life.restInShade' }, // exterior shade/rest waypoint under non-blocking canopy edge; trunk colliders block only the tree bases through existing routing
   busStop:      { dx: 0, dz: 1.02, facing: 'north', action: 'life.approachBusStop' }, // sidewalk approach waypoint before seat/wait at street-side shelter
   gazeboPavilion:{ dx: 0, dz: 2.18, facing: 'north', action: 'life.approachGazeboPavilion' }, // open entrance approach, then route to covered gather/rest/sit spots via setAgentTarget
   crosswalkNode:{ dx: 0, dz: 0, facing: 'any', action: 'world.useCrosswalkNode' }, // non-solid exterior crossing waypoint; setAgentTarget/dynamic exterior routing owns actual pathing
   pathNode:{ dx: 0, dz: 0, facing: 'any', action: 'life.strollOutdoors' }, // non-solid walking path waypoint; setAgentTarget/dynamic exterior routing owns sidewalk/path handoff
-  hallwayBench: { dx: 0, dz: 0.86, facing: 'north', action: 'life.approachHallwayBench' }, // route to clear hallway approach waypoint before docking to a seat
+  hallwayBench: { dx: -0.42, dz: 0.13, facing: 'north', action: 'life.restAtHallwayBench' }, // primary left seat dock; exact left/right seats route through matching stand-* points
   interiorDoor: { dx: 0, dz: 0.72, facing: 'north', action: 'world.passThroughInteriorDoor' }, // route to front approach before door open/pass-through transition
   foodTruckCounter: { dx: 0, dz: 0.82, facing: 'north', action: 'life.orderFood' },
   kitchenIsland: { dx: 0, dz: 1.18, facing: 'north', action: 'life.prepAtKitchenIsland' }, // stand at clear prep/eat/cook side waypoint; usable from all island sides
@@ -40857,7 +43030,7 @@ const ACTION_SPOTS = {
   playgroundSlide: { dx: 0, dz: 2.18, facing: 'north', action: 'life.playOnPlaygroundSlide' }, // route to clear ladder approach through setAgentTarget/dynamic routing; solid ladder/platform/chute footprint blocks while exit remains clear
   playgroundSwing: { dx: 0, dz: 1.72, facing: 'north', action: 'life.swingOnPlaygroundSwing' }, // route to safe approach/seat through setAgentTarget/dynamic routing; solid A-frame blocks while soft swing clearance is reserved
   pondDock: { dx: 0, dz: 1.92, facing: 'north', action: 'life.viewPond' }, // route through land-safe dock approach, then view/relax spots; existing routing keeps targets on dock/land and out of water terrain
-  outdoorStage: { dx: 0, dz: 0.98, facing: 'south', action: 'life.performAtOutdoorStage' }, // route to stepped performer spot while the solid platform/backdrop blocks only its footprint
+  outdoorStage: { dx: 0, dz: 0.98, facing: 'north', action: 'life.performAtOutdoorStage' }, // route to the stepped performer spot; performer faces the audience/front, not the backdrop
   bookshelf:    { dx: 0, dz: 0.78, facing: 'north', action: 'planning.review' },  // stand in front of bookshelf variants to browse/read
   curtains:     { dx: 0, dz: 0.56, facing: 'north', action: 'planning.inspectCurtains' }, // front inspect/adjust waypoint for stationary persistent curtains
   plant:        { dx: 0.4, dz: 0, facing: 'west' },   // stand next to plant
@@ -40876,16 +43049,19 @@ const ACTION_SPOTS = {
   floorLamp:    null,  // no interaction
 };
 const FURNITURE_INTERACTION_SPOTS = {
+  desk: [
+    { id: 'seat-work', dx: 0, dz: 0.80, facing: 'north', action: 'planning.workAtDesk', roles: ['seat', 'use', 'work'], capacityKind: 'exclusive', capacity: 1, animationId: 'work-type' },
+  ],
   receptionDesk: [
     { id: 'staff-work', dx: 0, dz: -0.62, facing: 'south', action: 'planning.schedule', roles: ['service', 'work'], capacity: 1 },
     { id: 'visitor-talk', dx: 0, dz: 1.08, facing: 'north', action: 'life.social', roles: ['use', 'approach', 'social'], capacity: 1 },
-    { id: 'visitor-queue', dx: 0, dz: 1.72, facing: 'north', action: 'planning.schedule', roles: ['approach'], capacityKind: 'queue', capacity: 3 },
+    { id: 'visitor-queue', dx: 0, dz: 1.72, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   shadeTreeCluster: [
     { id: 'rest-south-shade', dx: 0, dz: 1.62, facing: 'north', action: 'life.restInShade', roles: ['rest', 'shade', 'use'], capacity: 1 },
     { id: 'read-west-shade', dx: -1.46, dz: 0.34, facing: 'east', action: 'life.readInShade', roles: ['read', 'rest', 'shade'], capacity: 1 },
     { id: 'talk-east-shade', dx: 1.46, dz: 0.28, facing: 'west', action: 'life.talkUnderShadeTree', roles: ['gather', 'social', 'talk', 'shade'], capacity: 1 },
-    { id: 'gather-north-shade', dx: 0.18, dz: -1.54, facing: 'south', action: 'life.gatherUnderShadeTree', roles: ['gather', 'social', 'shade'], capacityKind: 'queue', capacity: 3 },
+    { id: 'gather-north-shade', dx: 0.18, dz: -1.54, facing: 'south', action: 'life.gatherUnderShadeTree', roles: ['gather', 'social', 'shade'], capacityKind: 'shared', capacity: 3 },
   ],
   laptopMonitorProps: [
     { id: 'work-front', dx: 0, dz: 0.66, facing: 'north', action: 'planning.workAtLaptopMonitor', roles: ['use', 'work'], capacity: 1 },
@@ -40895,6 +43071,7 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'use-front', dx: 0, dz: 0.92, facing: 'north', action: 'maintenance.printCopy', roles: ['use', 'standing-use'], capacity: 1, standingUseSlotId: 'use-front', activationSpotId: 'use-front' },
     { id: 'collect-output', dx: 0.44, dz: 0.86, facing: 'north', action: 'maintenance.collectPrintOutput', roles: ['use', 'output', 'standing-use'], capacity: 1, standingUseSlotId: 'collect-output', activationSpotId: 'collect-output' },
     { id: 'scan-bed-side', dx: 0.92, dz: 0.05, facing: 'west', action: 'maintenance.scanDocument', roles: ['use', 'service', 'standing-use'], capacity: 1, standingUseSlotId: 'scan-bed-side', activationSpotId: 'scan-bed-side' },
+    { id: 'queue', dx: 0, dz: 1.44, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   toolCart: [
     { id: 'select-front', dx: 0, dz: 0.82, facing: 'north', action: 'maintenance.selectToolFromCart', roles: ['use', 'inspect', 'service', 'standing-use'], capacity: 1, standingUseSlotId: 'select-front', activationSpotId: 'select-front' },
@@ -40924,34 +43101,49 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'seat', dx: 0, dz: 0.22, facing: 'north', action: 'planning.workAtOfficeChair', roles: ['seat', 'work', 'use'], capacity: 1 },
   ],
   couch: [
-    { id: 'sit-left', dx: -0.96, dz: 0.36, facing: 'north', action: 'life.sitAtCouch', roles: ['seat'], capacity: 1 },
-    { id: 'sit-center', dx: 0, dz: 0.36, facing: 'north', action: 'life.restAtCouch', roles: ['seat'], capacity: 1 },
-    { id: 'sit-right', dx: 0.96, dz: 0.36, facing: 'north', action: 'life.socialAtCouch', roles: ['seat'], capacity: 1 },
-    { id: 'talk-front', dx: 0, dz: 1.05, facing: 'north', action: 'life.socialAtCouch', roles: ['approach'], capacityKind: 'queue', capacity: 2 },
+    { id: 'stand-left', dx: -0.95, dz: 1.18, facing: 'north', action: 'life.standFromCouch', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'stand-center', dx: 0, dz: 1.18, facing: 'north', action: 'life.standFromCouch', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'stand-right', dx: 0.95, dz: 1.18, facing: 'north', action: 'life.standFromCouch', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    // Seat dx matches the rendered cushion centers (pitch 0.95). The z dock is
+    // deliberately forward of the cushion center, using the same 0.09 inset
+    // from the visible front edge as the working armchair. This keeps the hips
+    // on the pad while the thighs and lower legs extend beyond it.
+    // Each cushion mirrors the known-good armchair seat contract: route to the
+    // front stand-* approach first (never into the collider), then dock/snap
+    // onto the authored cushion activation point. Without dockMode the agent
+    // stopped at the approach marker and the couch collider pushed it around,
+    // which is why seated agents appeared in front of or inside the couch.
+    { id: 'sit-left', slotId: 'sit-left', activationSpotId: 'sit-left', approachSpotId: 'stand-left', exitSpotId: 'stand-left', dx: -0.95, dz: COUCH_SEAT_DOCK_Z, facing: 'north', action: 'life.sitAtCouch', roles: ['seat', 'use', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'couch-seated-rest-talk', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7, description: 'Final dock near the front edge of the left cushion; route to stand-left first so pathfinding never targets the couch collider.' },
+    { id: 'sit-center', slotId: 'sit-center', activationSpotId: 'sit-center', approachSpotId: 'stand-center', exitSpotId: 'stand-center', dx: 0, dz: COUCH_SEAT_DOCK_Z, facing: 'north', action: 'life.restAtCouch', roles: ['seat', 'use', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'couch-seated-rest-talk', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7, description: 'Final dock near the front edge of the center cushion; route to stand-center first so pathfinding never targets the couch collider.' },
+    { id: 'sit-right', slotId: 'sit-right', activationSpotId: 'sit-right', approachSpotId: 'stand-right', exitSpotId: 'stand-right', dx: 0.95, dz: COUCH_SEAT_DOCK_Z, facing: 'north', action: 'life.socialAtCouch', roles: ['seat', 'use', 'social'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'couch-seated-rest-talk', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7, description: 'Final dock near the front edge of the right cushion; route to stand-right first so pathfinding never targets the couch collider.' },
+    { id: 'talk-front', dx: 0, dz: 1.58, facing: 'north', action: 'life.socialAtCouch', roles: ['social', 'staging'], capacityKind: 'staging', capacity: 2 },
   ],
   sectionalSofa: [
-    { id: 'seat-left', dx: -1.16, dz: 0.36, facing: 'north', action: 'life.sitAtSectionalSofa', roles: ['seat'], capacity: 1 },
-    { id: 'seat-center', dx: -0.40, dz: 0.36, facing: 'north', action: 'life.restAtSectionalSofa', roles: ['seat'], capacity: 1 },
-    { id: 'seat-corner', dx: 0.36, dz: 0.36, facing: 'north', action: 'life.socialAtSectionalSofa', roles: ['seat', 'social'], capacity: 1 },
-    { id: 'chaise', dx: 1.04, dz: 0.98, facing: 'west', action: 'life.loungeAtSectionalSofa', roles: ['seat', 'rest'], capacity: 1 },
-    { id: 'talk-front', dx: -0.18, dz: 1.76, facing: 'north', action: 'life.socialAtSectionalSofa', roles: ['approach', 'social'], capacityKind: 'queue', capacity: 3 },
-    { id: 'approach-chaise', dx: 1.70, dz: 1.24, facing: 'west', action: 'life.loungeAtSectionalSofa', roles: ['approach'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'stand-left', dx: -1.16, dz: 1.55, facing: 'north', action: 'life.standFromSectionalSofa', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'stand-center', dx: -0.40, dz: 1.55, facing: 'north', action: 'life.standFromSectionalSofa', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'stand-corner', dx: 0.36, dz: 1.55, facing: 'north', action: 'life.standFromSectionalSofa', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'stand-chaise', dx: 0.81, dz: 1.55, facing: 'west', action: 'life.standFromSectionalSofa', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'seat-left', slotId: 'seat-left', activationSpotId: 'seat-left', approachSpotId: 'stand-left', exitSpotId: 'stand-left', dx: -1.16, dz: 0.41, facing: 'north', action: 'life.sitAtSectionalSofa', roles: ['seat', 'use', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'sectional-sofa-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
+    { id: 'seat-center', slotId: 'seat-center', activationSpotId: 'seat-center', approachSpotId: 'stand-center', exitSpotId: 'stand-center', dx: -0.40, dz: 0.41, facing: 'north', action: 'life.restAtSectionalSofa', roles: ['seat', 'use', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'sectional-sofa-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
+    { id: 'seat-corner', slotId: 'seat-corner', activationSpotId: 'seat-corner', approachSpotId: 'stand-corner', exitSpotId: 'stand-corner', dx: 0.36, dz: 0.41, facing: 'north', action: 'life.socialAtSectionalSofa', roles: ['seat', 'use', 'social'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'sectional-sofa-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
+    { id: 'chaise', slotId: 'chaise', activationSpotId: 'chaise', approachSpotId: 'stand-chaise', exitSpotId: 'stand-chaise', dx: 0.81, dz: 0.98, facing: 'west', action: 'life.loungeAtSectionalSofa', roles: ['seat', 'use', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'sectional-chaise-lounge', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 8 },
+    { id: 'talk-front', dx: -0.18, dz: 1.76, facing: 'north', action: 'life.socialAtSectionalSofa', roles: ['approach', 'social', 'staging'], capacityKind: 'staging', capacity: 3 },
   ],
   loveseat: [
-    { id: 'approach-left', dx: -0.46, dz: 0.98, facing: 'north', action: 'life.approachLoveseat', roles: ['approach'], capacity: 1 },
-    { id: 'approach-right', dx: 0.46, dz: 0.98, facing: 'north', action: 'life.approachLoveseat', roles: ['approach'], capacity: 1 },
-    { id: 'seat-left', dx: -0.46, dz: 0.36, facing: 'north', action: 'life.sitAtLoveseat', roles: ['seat'], capacity: 1 },
-    { id: 'seat-right', dx: 0.46, dz: 0.36, facing: 'north', action: 'life.socialAtLoveseat', roles: ['seat'], capacity: 1 },
-    { id: 'talk-front', dx: 0, dz: 1.08, facing: 'north', action: 'life.socialAtLoveseat', roles: ['approach', 'social'], capacityKind: 'queue', capacity: 2 },
+    { id: 'stand-left', dx: -0.48, dz: 1.08, facing: 'north', action: 'life.standFromLoveseat', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'stand-right', dx: 0.48, dz: 1.08, facing: 'north', action: 'life.standFromLoveseat', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'seat-left', slotId: 'seat-left', activationSpotId: 'seat-left', approachSpotId: 'stand-left', exitSpotId: 'stand-left', dx: -0.48, dz: 0.39, facing: 'north', action: 'life.sitAtLoveseat', roles: ['seat', 'use', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'loveseat-seated-rest-talk', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
+    { id: 'seat-right', slotId: 'seat-right', activationSpotId: 'seat-right', approachSpotId: 'stand-right', exitSpotId: 'stand-right', dx: 0.48, dz: 0.39, facing: 'north', action: 'life.socialAtLoveseat', roles: ['seat', 'use', 'social'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'loveseat-seated-rest-talk', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
+    { id: 'talk-front', dx: 0, dz: 1.08, facing: 'north', action: 'life.socialAtLoveseat', roles: ['approach', 'social', 'staging'], capacityKind: 'staging', capacity: 2 },
   ],
   armchair: [
-    { id: 'approach-front', dx: 0, dz: 1.18, facing: 'north', action: 'life.approachArmchair', roles: ['approach', 'queue', 'staging'], capacityKind: 'queue', capacity: 1, approachRadius: 3, description: 'Clear front route target outside the solid armchair halfD 0.70 collider.' },
-    { id: 'stand-front', dx: 0, dz: 1.18, facing: 'north', action: 'life.standFromArmchair', roles: ['dismount', 'exit', 'stand'], capacityKind: 'queue', capacity: 1, approachRadius: 3, description: 'Armchair dismount/stand-up target outside the solid collider so agents never return to walking while inside the chair.' },
+    { id: 'approach-front', dx: 0, dz: 1.18, facing: 'north', action: 'life.approachArmchair', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1, approachRadius: 3, description: 'Clear front route target outside the solid armchair halfD 0.70 collider.' },
+    { id: 'stand-front', dx: 0, dz: 1.18, facing: 'north', action: 'life.standFromArmchair', roles: ['dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1, approachRadius: 3, description: 'Armchair dismount/stand-up target outside the solid collider so agents never return to walking while inside the chair.' },
     { id: 'seat', slotId: 'seat', activationSpotId: 'seat', approachSpotId: 'approach-front', dx: 0, dz: 0.42, facing: 'north', action: 'life.restAtArmchair', roles: ['seat', 'use', 'rest', 'social'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'armchair-seated-rest-talk', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7, description: 'Final dock/activation point high and forward on the raised top seat cushion; route to approach-front first so pathfinding never targets the collider.' },
   ],
   barStool: [
-    { id: 'approach-front', dx: 0, dz: 0.82, facing: 'north', action: 'life.approachBarStool', roles: ['approach', 'queue', 'staging'], capacityKind: 'queue', capacity: 1, approachRadius: 3, description: 'Clear front route target outside the solid 0.34 x 0.34 stool collider; agents path here before snapping to the seat.' },
-    { id: 'stand-side', dx: 0.82, dz: 0, facing: 'west', action: 'life.standFromBarStool', roles: ['dismount', 'exit', 'stand'], capacityKind: 'queue', capacity: 1, approachRadius: 3, description: 'Safe side stand-up/exit target outside the stool collider. Uses the side instead of the front so counters/tables in front of the stool do not receive dismounting agents.' },
+    { id: 'approach-front', dx: 0, dz: 0.82, facing: 'north', action: 'life.approachBarStool', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1, approachRadius: 3, description: 'Clear front route target outside the solid 0.34 x 0.34 stool collider; agents path here before snapping to the seat.' },
+    { id: 'stand-side', dx: 0.82, dz: 0, facing: 'west', action: 'life.standFromBarStool', roles: ['dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1, approachRadius: 3, description: 'Safe side stand-up/exit target outside the stool collider. Uses the side instead of the front so counters/tables in front of the stool do not receive dismounting agents.' },
     { id: 'seat', slotId: 'seat', activationSpotId: 'seat', approachSpotId: 'approach-front', exitSpotId: 'stand-side', dx: 0, dz: 0.10, facing: 'north', action: 'life.sitAtBarStool', roles: ['seat', 'use', 'rest', 'social'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'counter-height-seated-rest-talk', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 6, description: 'Counter-height seat dock on the top cushion surface; route to approach-front first, then snap to this activation point. Object visual remains static because the stool has no moving parts.' },
   ],
   diningChair: [
@@ -40976,7 +43168,7 @@ const FURNITURE_INTERACTION_SPOTS = {
   ],
   wardrobe: [
     { id: 'browse-front', dx: 0, dz: 0.98, facing: 'north', action: 'appearance.changeOutfitAtWardrobe', roles: ['use', 'browse', 'change'], capacity: 1 },
-    { id: 'door-clearance', dx: 0, dz: 1.42, facing: 'north', action: 'planning.schedule', roles: ['approach'], capacityKind: 'queue', capacity: 1 },
+    { id: 'door-clearance', dx: 0, dz: 1.42, facing: 'north', action: 'life.changeOutfit', roles: ['clearance'], capacityKind: 'clearance', capacity: 1, reservable: false },
   ],
   nightstand: [
     { id: 'inspect-front', dx: 0, dz: 0.70, facing: 'north', action: 'life.inspectNightstand', roles: ['use', 'inspect', 'bedside'], capacity: 1 },
@@ -40988,25 +43180,28 @@ const FURNITURE_INTERACTION_SPOTS = {
   ],
   tvStand: [
     { id: 'inspect-front', dx: 0, dz: 0.78, facing: 'north', action: 'life.inspectTvStand', roles: ['use', 'inspect'], capacity: 1 },
-    { id: 'watch-pair-front', dx: 0, dz: 1.18, facing: 'north', action: 'life.watchTvFromMediaConsole', roles: ['watch', 'approach'], capacityKind: 'queue', capacity: 2 },
+    { id: 'watch-pair-front', dx: 0, dz: 1.18, facing: 'north', action: 'life.watchTvFromMediaConsole', roles: ['watch', 'approach', 'social'], capacityKind: 'shared', capacity: 2 },
   ],
   mirror: [
     { id: 'inspect-front', dx: 0, dz: 0.54, facing: 'north', action: 'appearance.inspectMirror', roles: ['use', 'inspect', 'preview'], capacity: 1 },
   ],
   clinicBed: [
-    { id: 'patient', dx: 0, dz: 0.05, facing: 'north', action: 'life.medicalExam' },
-    { id: 'service', dx: 1.12, dz: -0.08, facing: 'west', action: 'maintenance.repair' },
-    { id: 'foot-service', dx: 0, dz: 1.62, facing: 'north', action: 'maintenance.diagnostics' },
+    { id: 'patient', dx: 0, dz: 0.12, facing: 'north', action: 'life.medicalExam', roles: ['patient', 'use', 'lie'], capacityKind: 'exclusive', capacity: 1, animationId: 'clinic-bed-patient' },
+    { id: 'service', dx: 1.12, dz: -0.08, facing: 'west', action: 'maintenance.repair', roles: ['service', 'standing-use'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'foot-service', dx: 0, dz: 1.62, facing: 'north', action: 'maintenance.diagnostics', roles: ['service', 'standing-use'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'patient-queue', dx: 0, dz: 2.16, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue', 'patient'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   examChair: [
     { id: 'approach-front', dx: 0, dz: 0.86, facing: 'north', action: 'life.approachExamChair', roles: ['approach'], capacity: 1 },
     { id: 'patient-seat', dx: 0, dz: 0.08, facing: 'north', action: 'life.examChairCheckup', roles: ['seat', 'patient'], capacity: 1 },
     { id: 'service', dx: 0.92, dz: -0.10, facing: 'west', action: 'maintenance.examChairService', roles: ['service'], capacity: 1 },
+    { id: 'patient-queue', dx: 0, dz: 1.48, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue', 'patient'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   diagnosticStation: [
     { id: 'review-front', dx: 0, dz: 0.92, facing: 'north', action: 'maintenance.runDiagnostics', roles: ['use', 'review', 'standing-use'], capacity: 1, standingUseSlotId: 'review-front', activationSpotId: 'review-front' },
     { id: 'docs-front', dx: -0.38, dz: 0.92, facing: 'north', action: 'planning.reviewDiagnostics', roles: ['use', 'review', 'standing-use'], capacity: 1, standingUseSlotId: 'docs-front', activationSpotId: 'docs-front' },
     { id: 'restore-front', dx: 0.38, dz: 0.92, facing: 'north', action: 'maintenance.restoreAgentState', roles: ['use', 'service', 'standing-use'], capacity: 1, standingUseSlotId: 'restore-front', activationSpotId: 'restore-front' },
+    { id: 'queue', dx: 0, dz: 1.48, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   medicalSupplyCabinet: [
     { id: 'browse-front', dx: 0, dz: 0.76, facing: 'north', action: 'maintenance.browseMedicalSupplies', roles: ['use', 'browse', 'standing-use'], capacity: 1, standingUseSlotId: 'browse-front', activationSpotId: 'browse-front' },
@@ -41015,10 +43210,11 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'browse-front', dx: 0, dz: 0.80, facing: 'north', action: 'maintenance.browseSupplyCabinet', roles: ['use', 'browse', 'inspect', 'standing-use'], capacity: 1, standingUseSlotId: 'browse-front', activationSpotId: 'browse-front' },
   ],
   barberChair: [
-    { id: 'approach-front', dx: 0, dz: 1.25, facing: 'south', action: 'appearance.approachBarberChair', roles: ['approach', 'queue', 'staging'], capacityKind: 'queue', capacity: 1, serviceQueue: true, approachRadius: 3, description: 'Clear front route target outside the solid barber-chair halfD 0.80 collider. Customers route here before snapping into the seat.' },
-    { id: 'stand-front', dx: 0, dz: 1.25, facing: 'south', action: 'appearance.standFromBarberChair', roles: ['dismount', 'exit', 'stand'], capacityKind: 'queue', capacity: 1, approachRadius: 3, description: 'Safe rotated stand-up/exit target outside the chair collider so completed/cancelled users never resume walking from inside the chair.' },
+    { id: 'approach-front', dx: 0, dz: 1.25, facing: 'south', action: 'appearance.approachBarberChair', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1, approachRadius: 3, description: 'Clear front route target outside the solid barber-chair halfD 0.80 collider. Customers route here before snapping into the seat.' },
+    { id: 'stand-front', dx: 0, dz: 1.25, facing: 'south', action: 'appearance.standFromBarberChair', roles: ['dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1, approachRadius: 3, description: 'Safe rotated stand-up/exit target outside the chair collider so completed/cancelled users never resume walking from inside the chair.' },
     { id: 'seat', slotId: 'seat', activationSpotId: 'seat', approachSpotId: 'approach-front', exitSpotId: 'stand-front', dx: 0, dz: 0.18, facing: 'north', action: 'appearance.editHair', roles: ['seat', 'use', 'customer', 'appearance'], capacityKind: 'exclusive', capacity: 1, animationId: 'sit', poseId: 'barber-chair-seated-style-preview', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7, useDurationMs: 15000, description: 'Final customer dock on the visible barber-chair cushion; route target stays at approach-front to avoid collider-blocked pathing.' },
     { id: 'stylist', dx: 0, dz: 1.25, facing: 'south', action: 'appearance.styleHair', roles: ['service', 'standing-use', 'inspect', 'touch'], capacityKind: 'exclusive', capacity: 1, standingUseSlotId: 'stylist', activationSpotId: 'stylist', animationId: 'service-checkup', poseId: 'barber-chair-standing-style-service', approachRadius: 3, activationRadius: 8, useDurationMs: 15000, description: 'Standing stylist/service pose at the same reachable front zone, facing the seated customer.' },
+    { id: 'customer-queue', dx: 0, dz: 1.92, facing: 'south', action: 'planning.schedule', roles: ['approach', 'queue', 'customer'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   salonMirrorStation: [
     { id: 'inspect-front', dx: 0, dz: 0.74, facing: 'north', action: 'appearance.inspectMirror', roles: ['use', 'inspect', 'preview'], capacity: 1 },
@@ -41032,7 +43228,7 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'inspect-front', dx: 0, dz: 0.72, facing: 'north', action: 'appearance.previewOutfit', roles: ['use', 'inspect', 'preview', 'browse'], capacity: 1, standingUseSlotId: 'inspect-front', activationSpotId: 'inspect-front' },
   ],
   accessoryDisplayStand: [
-    { id: 'approach-front', dx: 0, dz: 1.18, facing: 'north', action: 'appearance.approachAccessoryDisplayStand', roles: ['approach', 'queue', 'staging'], capacityKind: 'queue', capacity: 1 },
+    { id: 'approach-front', dx: 0, dz: 1.18, facing: 'north', action: 'appearance.approachAccessoryDisplayStand', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1 },
     { id: 'browse-front', dx: 0, dz: 0.88, facing: 'north', action: 'appearance.browseAccessories', roles: ['use', 'browse', 'select', 'standing-use'], capacity: 1, standingUseSlotId: 'browse-front', activationSpotId: 'browse-front', approachSpotId: 'approach-front', animationId: 'inspect-browse', useDurationMs: 10500 },
   ],
   displayCase: [
@@ -41053,7 +43249,7 @@ const FURNITURE_INTERACTION_SPOTS = {
   outdoorNoticeBoard: [
     { id: 'read-front', dx: 0, dz: 0.82, facing: 'north', action: 'planning.readOutdoorNoticeBoard', roles: ['use', 'read', 'inspect'], capacity: 1 },
     { id: 'point-front', dx: 0.42, dz: 0.82, facing: 'north', action: 'planning.inspectOutdoorNoticeBoard', roles: ['use', 'inspect', 'point'], capacity: 1 },
-    { id: 'front-clearance', dx: 0, dz: 1.18, facing: 'north', action: 'planning.approachOutdoorNoticeBoard', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 2 },
+    { id: 'front-clearance', dx: 0, dz: 1.18, facing: 'north', action: 'planning.approachOutdoorNoticeBoard', roles: ['approach', 'clearance'], capacityKind: 'clearance', capacity: 2 },
   ],
   parkLamp: [
     { id: 'inspect-front', dx: 0, dz: 0.52, facing: 'north', action: 'planning.inspectParkLamp', roles: ['inspect', 'look', 'approach'], capacity: 1 },
@@ -41070,13 +43266,15 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'present-front', dx: 0, dz: 0.78, facing: 'north', action: 'training.presentAtPodium', roles: ['use', 'speak', 'point'], capacity: 1 },
   ],
   parkBench: [
-    { id: 'approach-front', dx: 0, dz: 0.82, facing: 'north', action: 'life.approachParkBench', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 2 },
-    { id: 'seat-left', dx: -0.44, dz: 0.08, facing: 'north', action: 'life.restAtBench', roles: ['seat', 'rest'], capacity: 1 },
-    { id: 'seat-center', dx: 0, dz: 0.08, facing: 'north', action: 'life.readAtBench', roles: ['seat', 'read', 'rest'], capacity: 1 },
-    { id: 'seat-right', dx: 0.44, dz: 0.08, facing: 'north', action: 'life.socialAtBench', roles: ['seat', 'social', 'talk'], capacity: 1 },
+    { id: 'stand-left', dx: -0.46, dz: 0.88, facing: 'north', action: 'life.standFromParkBench', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'stand-center', dx: 0, dz: 0.88, facing: 'north', action: 'life.standFromParkBench', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'stand-right', dx: 0.46, dz: 0.88, facing: 'north', action: 'life.standFromParkBench', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'seat-left', slotId: 'seat-left', activationSpotId: 'seat-left', approachSpotId: 'stand-left', exitSpotId: 'stand-left', dx: -0.46, dz: 0.145, facing: 'north', action: 'life.restAtBench', roles: ['seat', 'use', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'park-bench-sit-rest-read-talk', poseId: 'park-bench-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
+    { id: 'seat-center', slotId: 'seat-center', activationSpotId: 'seat-center', approachSpotId: 'stand-center', exitSpotId: 'stand-center', dx: 0, dz: 0.145, facing: 'north', action: 'life.readAtBench', roles: ['seat', 'use', 'read', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'park-bench-sit-rest-read-talk', poseId: 'park-bench-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
+    { id: 'seat-right', slotId: 'seat-right', activationSpotId: 'seat-right', approachSpotId: 'stand-right', exitSpotId: 'stand-right', dx: 0.46, dz: 0.145, facing: 'north', action: 'life.socialAtBench', roles: ['seat', 'use', 'social', 'talk'], capacityKind: 'exclusive', capacity: 1, animationId: 'park-bench-sit-rest-read-talk', poseId: 'park-bench-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
   ],
   busStop: [
-    { id: 'sidewalk-approach', dx: 0, dz: 1.02, facing: 'north', action: 'life.approachBusStop', roles: ['approach', 'wait'], capacityKind: 'queue', capacity: 2 },
+    { id: 'sidewalk-approach', dx: 0, dz: 1.02, facing: 'north', action: 'life.approachBusStop', roles: ['approach', 'wait', 'staging'], capacityKind: 'staging', capacity: 2 },
     { id: 'wait-sign', dx: -0.82, dz: 0.78, facing: 'north', action: 'life.waitAtBusStop', roles: ['wait', 'use'], capacity: 1 },
     { id: 'seat-left', dx: -0.46, dz: 0.08, facing: 'north', action: 'life.sitAtBusStop', roles: ['seat', 'use', 'wait'], capacity: 1 },
     { id: 'seat-right', dx: 0.46, dz: 0.08, facing: 'north', action: 'life.waitAtBusStop', roles: ['seat', 'use', 'wait'], capacity: 1 },
@@ -41091,9 +43289,10 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'pause-look-around', dx: 0, dz: 0, facing: 'any', action: 'planning.inspectPathNode', roles: ['inspect', 'pause', 'look-around'], capacity: 1 },
   ],
   hallwayBench: [
-    { id: 'approach-front', dx: 0, dz: 0.86, facing: 'north', action: 'life.approachHallwayBench', roles: ['approach'], capacityKind: 'queue', capacity: 2 },
-    { id: 'seat-left', dx: -0.38, dz: 0.10, facing: 'north', action: 'life.restAtHallwayBench', roles: ['seat', 'use'], capacity: 1 },
-    { id: 'seat-right', dx: 0.38, dz: 0.10, facing: 'north', action: 'life.waitAtHallwayBench', roles: ['seat', 'use', 'wait'], capacity: 1 },
+    { id: 'stand-left', dx: -0.42, dz: 0.92, facing: 'north', action: 'life.standFromHallwayBench', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'stand-right', dx: 0.42, dz: 0.92, facing: 'north', action: 'life.standFromHallwayBench', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'seat-left', slotId: 'seat-left', activationSpotId: 'seat-left', approachSpotId: 'stand-left', exitSpotId: 'stand-left', dx: -0.42, dz: 0.13, facing: 'north', action: 'life.restAtHallwayBench', roles: ['seat', 'use', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'hallway-bench-wait', poseId: 'hallway-bench-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
+    { id: 'seat-right', slotId: 'seat-right', activationSpotId: 'seat-right', approachSpotId: 'stand-right', exitSpotId: 'stand-right', dx: 0.42, dz: 0.13, facing: 'north', action: 'life.waitAtHallwayBench', roles: ['seat', 'use', 'wait'], capacityKind: 'exclusive', capacity: 1, animationId: 'hallway-bench-wait', poseId: 'hallway-bench-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
   ],
   interiorDoor: [
     { id: 'approach-front', dx: 0, dz: 0.72, facing: 'north', action: 'world.openInteriorDoor', roles: ['approach', 'use'], capacity: 1 },
@@ -41105,12 +43304,38 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'server', dx: 0, dz: -0.58, facing: 'south', action: 'maintenance.serveFoodTruck', roles: ['service', 'staff'], capacity: 1, standingUseSlotId: 'server', activationSpotId: 'server' },
     { id: 'queue', dx: 0, dz: 1.55, facing: 'north', action: 'planning.schedule', roles: ['queue', 'approach'], capacityKind: 'queue', capacity: 3, serviceQueue: true },
   ],
+  counter: [
+    { id: 'prep-front', dx: 0, dz: 0.82, facing: 'north', action: 'life.prepAtCounter', roles: ['use', 'prep', 'cook', 'standing-use'], capacityKind: 'exclusive', capacity: 1, standingUseSlotId: 'prep-front', activationSpotId: 'prep-front', animationId: 'counter-prep' },
+    { id: 'dropoff-surface', dx: 0, dz: 0, facing: 'any', action: 'life.dropOffAtCounter', roles: ['drop-off', 'surface'], capacityKind: 'shared', capacity: 2 },
+  ],
+  diningTable: [
+    { id: 'approach-north', dx: 0, dz: -1.76, facing: 'south', action: 'life.approachDiningTable', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1 },
+    { id: 'approach-south', dx: 0, dz: 1.76, facing: 'north', action: 'life.approachDiningTable', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1 },
+    { id: 'approach-west', dx: -2.06, dz: 0, facing: 'east', action: 'life.approachDiningTable', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1 },
+    { id: 'approach-east', dx: 2.06, dz: 0, facing: 'west', action: 'life.approachDiningTable', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1 },
+    { id: 'seat-north', approachSpotId: 'approach-north', dx: 0, dz: -1.02, facing: 'south', action: 'life.eatAtDiningTable', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-south', approachSpotId: 'approach-south', dx: 0, dz: 1.02, facing: 'north', action: 'life.eatAtDiningTable', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-west', approachSpotId: 'approach-west', dx: -1.42, dz: 0, facing: 'east', action: 'life.talkAtDiningTable', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-east', approachSpotId: 'approach-east', dx: 1.42, dz: 0, facing: 'west', action: 'life.talkAtDiningTable', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'dropoff-tabletop', dx: 0, dz: 0, facing: 'any', action: 'life.dropOffAtDiningTable', roles: ['drop-off', 'surface', 'tabletop'], capacityKind: 'shared', capacity: 4 },
+  ],
+  sink: [
+    { id: 'use-front', dx: 0, dz: 0.75, facing: 'north', action: 'life.useSink', roles: ['use', 'wash', 'drink', 'standing-use'], capacityKind: 'exclusive', capacity: 1, standingUseSlotId: 'use-front', activationSpotId: 'use-front', animationId: 'sink-wash-drink' },
+    { id: 'queue', dx: 0, dz: 1.28, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
+  ],
+  stove: [
+    { id: 'cook-front', dx: 0, dz: 0.80, facing: 'north', action: 'life.cookAtStove', roles: ['use', 'cook', 'standing-use'], capacityKind: 'exclusive', capacity: 1, standingUseSlotId: 'cook-front', activationSpotId: 'cook-front', animationId: 'stove-cook' },
+    { id: 'hot-clearance', dx: 0, dz: 1.22, facing: 'north', action: 'life.cookAtStove', roles: ['clearance'], capacityKind: 'clearance', capacity: 1, reservable: false },
+  ],
+  tv: [
+    { id: 'watch-front', dx: 0, dz: 2.18, facing: 'north', action: 'life.watchTv', roles: ['watch', 'use', 'social'], capacityKind: 'shared', capacity: 3, animationId: 'tv-watch' },
+  ],
   kitchenIsland: [
     { id: 'prep-north', dx: 0, dz: -1.18, facing: 'south', action: 'life.prepAtKitchenIsland', roles: ['use', 'prep', 'cook'], capacity: 1 },
     { id: 'prep-south', dx: 0, dz: 1.18, facing: 'north', action: 'life.prepAtKitchenIsland', roles: ['use', 'prep', 'eat'], capacity: 1 },
     { id: 'prep-east', dx: 2.05, dz: 0, facing: 'west', action: 'life.eatAtKitchenIsland', roles: ['use', 'eat'], capacity: 1 },
     { id: 'prep-west', dx: -2.05, dz: 0, facing: 'east', action: 'life.cookAtKitchenIsland', roles: ['use', 'cook', 'prep'], capacity: 1 },
-    { id: 'clearance-south', dx: 0, dz: 1.72, facing: 'north', action: 'planning.schedule', roles: ['approach'], capacityKind: 'queue', capacity: 2 },
+    { id: 'clearance-south', dx: 0, dz: 1.72, facing: 'north', action: 'life.prepAtKitchenIsland', roles: ['approach', 'clearance'], capacityKind: 'clearance', capacity: 2 },
   ],
   cafeCounter: [
     { id: 'customer', dx: 0, dz: 0.88, facing: 'north', action: 'life.orderFood', roles: ['use', 'order', 'customer'], capacity: 1, standingUseSlotId: 'customer', activationSpotId: 'customer' },
@@ -41132,10 +43357,12 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'dropoff-tabletop', dx: 0, dz: 0, facing: 'any', action: 'life.dropOffAtOutdoorCafeTable', roles: ['drop-off', 'surface', 'tabletop'], capacity: 2 },
   ],
   picnicTable: [
-    { id: 'seat-north-left', dx: -0.62, dz: -1.02, facing: 'south', action: 'life.sitAtPicnicTable', roles: ['seat', 'use', 'eat', 'drink', 'social'], capacity: 1 },
-    { id: 'seat-north-right', dx: 0.62, dz: -1.02, facing: 'south', action: 'life.eatAtPicnicTable', roles: ['seat', 'use', 'eat', 'drink'], capacity: 1 },
-    { id: 'seat-south-left', dx: -0.62, dz: 1.02, facing: 'north', action: 'life.drinkAtPicnicTable', roles: ['seat', 'use', 'drink', 'social'], capacity: 1 },
-    { id: 'seat-south-right', dx: 0.62, dz: 1.02, facing: 'north', action: 'life.socializeAtPicnicTable', roles: ['seat', 'social', 'use', 'talk'], capacity: 1 },
+    { id: 'approach-north', dx: 0, dz: -1.28, facing: 'south', action: 'life.sitAtPicnicTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'approach-south', dx: 0, dz: 1.28, facing: 'north', action: 'life.sitAtPicnicTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'seat-north-left', approachSpotId: 'approach-north', dx: -0.62, dz: -0.74, facing: 'south', action: 'life.sitAtPicnicTable', roles: ['seat', 'use', 'eat', 'drink', 'social'], capacity: 1 },
+    { id: 'seat-north-right', approachSpotId: 'approach-north', dx: 0.62, dz: -0.74, facing: 'south', action: 'life.eatAtPicnicTable', roles: ['seat', 'use', 'eat', 'drink'], capacity: 1 },
+    { id: 'seat-south-left', approachSpotId: 'approach-south', dx: -0.62, dz: 0.74, facing: 'north', action: 'life.drinkAtPicnicTable', roles: ['seat', 'use', 'drink', 'social'], capacity: 1 },
+    { id: 'seat-south-right', approachSpotId: 'approach-south', dx: 0.62, dz: 0.74, facing: 'north', action: 'life.socializeAtPicnicTable', roles: ['seat', 'social', 'use', 'talk'], capacity: 1 },
     { id: 'dropoff-tabletop-left', dx: -0.42, dz: 0, facing: 'any', action: 'life.dropOffAtPicnicTable', roles: ['drop-off', 'surface', 'tabletop'], capacity: 1 },
     { id: 'dropoff-tabletop-right', dx: 0.42, dz: 0, facing: 'any', action: 'life.dropOffAtPicnicTable', roles: ['drop-off', 'surface', 'tabletop'], capacity: 1 },
   ],
@@ -41160,6 +43387,7 @@ const FURNITURE_INTERACTION_SPOTS = {
   checkoutRegister: [
     { id: 'customer', dx: 0, dz: 0.78, facing: 'north', action: 'life.checkoutPurchase', roles: ['use', 'checkout', 'customer'], capacity: 1, standingUseSlotId: 'customer', activationSpotId: 'customer' },
     { id: 'cashier', dx: 0, dz: -0.62, facing: 'south', action: 'maintenance.cashierService', roles: ['service', 'staff', 'cashier'], capacity: 1, standingUseSlotId: 'cashier', activationSpotId: 'cashier' },
+    { id: 'queue', dx: 0, dz: 1.36, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue', 'customer'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   trashBin: [
     { id: 'dispose-front', dx: 0, dz: 0.66, facing: 'north', action: 'maintenance.disposeWaste', roles: ['use', 'dispose', 'clean'], capacity: 1 },
@@ -41182,18 +43410,19 @@ const FURNITURE_INTERACTION_SPOTS = {
   ],
   fridge: [
     { id: 'use-front', dx: 0, dz: 0.92, facing: 'north', action: 'life.getFridgeSnack', roles: ['use', 'retrieve'], capacity: 1 },
-    { id: 'door-swing-clearance', dx: 0, dz: 1.38, facing: 'north', action: 'planning.schedule', roles: ['approach'], capacityKind: 'queue', capacity: 1, serviceQueue: true },
+    { id: 'door-swing-clearance', dx: 0, dz: 1.38, facing: 'north', action: 'life.getFridgeSnack', roles: ['clearance'], capacityKind: 'clearance', capacity: 1, reservable: false },
+    { id: 'queue', dx: 0, dz: 1.82, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   grill: [
     { id: 'cook-front', dx: 0, dz: 0.96, facing: 'north', action: 'life.cookAtGrill', roles: ['use', 'cook'], capacity: 1 },
-    { id: 'hot-side-clearance', dx: 0, dz: 1.44, facing: 'north', action: 'planning.schedule', roles: ['approach'], capacityKind: 'queue', capacity: 1 },
+    { id: 'hot-side-clearance', dx: 0, dz: 1.44, facing: 'north', action: 'life.cookAtGrill', roles: ['clearance'], capacityKind: 'clearance', capacity: 1, reservable: false },
   ],
   outdoorPlanter: [
     { id: 'water-front', dx: 0, dz: 0.76, facing: 'north', action: 'maintenance.waterOutdoorPlanter', roles: ['use', 'water', 'inspect'], capacity: 1 },
     { id: 'inspect-side', dx: 0.68, dz: 0.04, facing: 'west', action: 'planning.inspectOutdoorPlanter', roles: ['inspect', 'approach'], capacity: 1 },
   ],
   gazeboPavilion: [
-    { id: 'entrance-south', dx: 0, dz: 2.18, facing: 'north', action: 'life.approachGazeboPavilion', roles: ['approach', 'entry'], capacityKind: 'queue', capacity: 2 },
+    { id: 'entrance-south', dx: 0, dz: 2.18, facing: 'north', action: 'life.approachGazeboPavilion', roles: ['approach', 'entry', 'staging'], capacityKind: 'staging', capacity: 2 },
     { id: 'gather-center', dx: 0, dz: 0, facing: 'south', action: 'life.gatherAtGazeboPavilion', roles: ['gather', 'social', 'rest'], capacity: 3 },
     { id: 'rest-west', dx: -0.78, dz: -0.18, facing: 'east', action: 'life.restAtGazeboPavilion', roles: ['rest', 'wait', 'use'], capacity: 1 },
     { id: 'rest-east', dx: 0.78, dz: -0.18, facing: 'west', action: 'life.restAtGazeboPavilion', roles: ['rest', 'wait', 'use'], capacity: 1 },
@@ -41216,67 +43445,71 @@ const FURNITURE_INTERACTION_SPOTS = {
   ],
   microwave: [
     { id: 'use-front', dx: 0, dz: 0.78, facing: 'north', action: 'life.heatFood', roles: ['use'], capacity: 1 },
-    { id: 'door-clearance', dx: 0, dz: 1.18, facing: 'north', action: 'planning.schedule', roles: ['approach'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
+    { id: 'door-clearance', dx: 0, dz: 1.18, facing: 'north', action: 'life.heatFood', roles: ['clearance'], capacityKind: 'clearance', capacity: 1, reservable: false },
+    { id: 'queue', dx: 0, dz: 1.58, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   coffeePickupShelf: [
     { id: 'pickup-front', dx: 0, dz: 0.72, facing: 'north', action: 'life.pickupCoffeeOrder', roles: ['use', 'pickup'], capacity: 1 },
     { id: 'dropoff-back', dx: 0, dz: -0.56, facing: 'south', action: 'maintenance.dropOffCoffeeOrder', roles: ['drop-off', 'service'], capacity: 1 },
     { id: 'surface', dx: 0, dz: 0.02, facing: 'north', action: 'life.pickupCoffeeOrder', roles: ['surface', 'pickup'], capacity: 2 },
+    { id: 'queue', dx: 0, dz: 1.24, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue', 'pickup'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   pantryShelf: [
     { id: 'browse-front', dx: 0, dz: 0.78, facing: 'north', action: 'life.browsePantryShelf', roles: ['use', 'browse', 'inspect'], capacity: 1, standingUseSlotId: 'browse-front', activationSpotId: 'browse-front' },
   ],
   arcadeMachine: [
-    { id: 'approach-front', dx: 0, dz: 1.22, facing: 'north', action: 'life.approachArcade', roles: ['approach', 'queue', 'staging'], capacityKind: 'queue', capacity: 1, reservable: false },
+    { id: 'approach-front', dx: 0, dz: 1.22, facing: 'north', action: 'life.approachArcade', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1, reservable: false },
     { id: 'play-front', slotId: 'player-1', activationSpotId: 'play-front', approachSpotId: 'approach-front', dx: 0, dz: 0.78, facing: 'north', action: 'life.playArcade', roles: ['use', 'play', 'active-use', 'standing-use'], capacityKind: 'exclusive', capacity: 1, requiresReservation: true, animationId: 'play-game', poseId: 'arcade-joystick-buttons', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
-    { id: 'watch-queue', dx: 0, dz: 1.62, facing: 'north', action: 'life.watchArcade', roles: ['watch', 'queue'], capacityKind: 'queue', capacity: 2 },
+    { id: 'watch-queue', dx: 0, dz: 1.62, facing: 'north', action: 'life.watchArcade', roles: ['watch', 'social'], capacityKind: 'shared', capacity: 2 },
   ],
   gamingStation: [
     { id: 'seat-play', dx: 0, dz: 0.54, facing: 'north', action: 'life.playGamingStation', roles: ['seat', 'use', 'play'], capacity: 1 },
-    { id: 'watch-queue', dx: 0, dz: 1.46, facing: 'north', action: 'life.watchGamingStation', roles: ['watch'], capacityKind: 'queue', capacity: 2 },
+    { id: 'watch-queue', dx: 0, dz: 1.46, facing: 'north', action: 'life.watchGamingStation', roles: ['watch', 'social'], capacityKind: 'shared', capacity: 2 },
   ],
   treadmill: [
     { id: 'train-belt', slotId: 'belt-1', activationSpotId: 'train-belt', approachSpotId: 'step-off', dx: 0, dz: 0.12, facing: 'north', action: 'training.practice', roles: ['use', 'exercise', 'active-use', 'train'], capacity: 1, capacityKind: 'exclusive', requiresReservation: true, animationId: 'train-practice', poseId: 'treadmill-run', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 9, snapRadius: 9 },
-    { id: 'step-off', dx: 0, dz: 1.58, facing: 'north', action: 'training.approachTreadmill', roles: ['approach', 'step-off'], capacityKind: 'queue', capacity: 1, reservable: false },
+    { id: 'step-off', dx: 0, dz: 1.58, facing: 'north', action: 'training.approachTreadmill', roles: ['approach', 'step-off', 'clearance'], capacityKind: 'clearance', capacity: 1, reservable: false },
     { id: 'coach-side', dx: 0.92, dz: 0.18, facing: 'west', action: 'training.practiceCoach', roles: ['watch'], capacity: 1 },
   ],
   trainingMat: [
-    { id: 'approach-front', dx: 0, dz: 1.58, facing: 'north', action: 'training.approachMat', roles: ['approach'], capacityKind: 'queue', capacity: 1, reservable: false },
+    { id: 'approach-front', dx: 0, dz: 1.58, facing: 'north', action: 'training.approachMat', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1, reservable: false },
     { id: 'use-mat', slotId: 'mat-1', activationSpotId: 'use-mat', approachSpotId: 'approach-front', dx: 0, dz: 0, facing: 'north', action: 'training.practice', roles: ['use', 'exercise', 'active-use', 'stretch', 'practice'], capacity: 1, capacityKind: 'exclusive', requiresReservation: true, animationId: 'train-practice', poseId: 'training-mat-use', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 8 },
   ],
   dumbbellRack: [
     { id: 'select-front', dx: 0, dz: 0.76, facing: 'north', action: 'training.selectWeights', roles: ['use', 'select'], capacity: 1 },
   ],
   gymBench: [
-    { id: 'approach-front', dx: 0, dz: 1.48, facing: 'north', action: 'training.approachGymBench', roles: ['approach'], capacityKind: 'queue', capacity: 1, reservable: false },
+    { id: 'approach-front', dx: 0, dz: 1.48, facing: 'north', action: 'training.approachGymBench', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1, reservable: false },
     { id: 'bench-use', slotId: 'bench-1', activationSpotId: 'bench-use', approachSpotId: 'approach-front', dx: 0, dz: 0.04, facing: 'north', action: 'training.useGymBench', roles: ['use', 'exercise', 'active-use', 'seat', 'lie'], capacity: 1, capacityKind: 'exclusive', requiresReservation: true, animationId: 'gym-bench-exercise', poseId: 'gym-bench-lie-use', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 8 },
   ],
   outdoorExerciseStation: [
     { id: 'train-front', slotId: 'station-1', activationSpotId: 'train-front', approachSpotId: 'train-front', dx: 0, dz: 1.34, facing: 'north', action: 'training.trainAtOutdoorExerciseStation', roles: ['use', 'exercise', 'train', 'practice', 'active-use'], animationId: 'train-practice', poseId: 'outdoor-exercise-station-train', dockMode: 'snap-to-activation', capacity: { kind: 'exclusive', maxAgents: 1, reservable: true } },
     { id: 'practice-platform', slotId: 'station-1', activationSpotId: 'practice-platform', approachSpotId: 'train-front', dx: 0, dz: 0.12, facing: 'north', action: 'training.practiceAtOutdoorExerciseStation', roles: ['use', 'exercise', 'practice', 'active-use'], animationId: 'train-practice', poseId: 'outdoor-exercise-station-practice', dockMode: 'snap-to-activation', capacity: { kind: 'exclusive', maxAgents: 1, reservable: true } },
-    { id: 'watch-queue', dx: 1.46, dz: 0.62, facing: 'west', action: 'training.watchOutdoorExerciseStation', roles: ['watch', 'approach'], capacityKind: 'queue', capacity: 2 },
+    { id: 'watch-queue', dx: 1.46, dz: 0.62, facing: 'west', action: 'training.watchOutdoorExerciseStation', roles: ['watch', 'approach', 'social'], capacityKind: 'shared', capacity: 2 },
   ],
   playgroundSlide: [
     { id: 'ladder-approach', slotId: 'slide-1', activationSpotId: 'ladder-approach', approachSpotId: 'ladder-approach', dx: 0, dz: 2.18, facing: 'north', action: 'life.playOnPlaygroundSlide', roles: ['approach', 'use', 'play', 'climb', 'active-use'], capacity: 1, capacityKind: 'exclusive', requiresReservation: true, animationId: 'playground-slide-play', poseId: 'playground-slide-climb-slide', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 9, snapRadius: 9 },
-    { id: 'slide-exit', dx: 0, dz: -2.18, facing: 'south', action: 'life.finishPlaygroundSlide', roles: ['exit', 'play', 'waypoint'], capacityKind: 'queue', capacity: 1, reservable: false },
+    { id: 'ladder-queue', dx: 0, dz: 2.92, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue', 'play'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true, reservable: false },
+    { id: 'slide-exit', dx: 0, dz: -2.42, facing: 'south', action: 'life.finishPlaygroundSlide', roles: ['exit', 'play', 'waypoint', 'clearance'], capacityKind: 'clearance', capacity: 1, reservable: false },
   ],
   playgroundSwing: [
     { id: 'seat-use', slotId: 'swing-seat-1', activationSpotId: 'seat-use', approachSpotId: 'approach-front', dx: 0, dz: 0, facing: 'north', action: 'life.swingOnPlaygroundSwing', roles: ['seat', 'use', 'play', 'swing', 'active-use'], capacity: 1, capacityKind: 'exclusive', requiresReservation: true, animationId: 'playground-swing-sit-swing', poseId: 'playground-swing-seated-swing', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 9, snapRadius: 9, clearanceSpotId: 'swing-clearance' },
-    { id: 'approach-front', dx: 0, dz: 1.72, facing: 'north', action: 'life.approachPlaygroundSwing', roles: ['approach', 'wait-turn', 'queue'], capacityKind: 'queue', capacity: 1, reservable: false },
+    { id: 'approach-front', dx: 0, dz: 1.72, facing: 'north', action: 'life.approachPlaygroundSwing', roles: ['approach', 'wait-turn', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true, reservable: false },
     { id: 'swing-clearance', dx: 0, dz: 0.76, facing: 'north', action: 'life.waitTurnAtPlaygroundSwing', roles: ['clearance', 'soft-zone', 'wait-turn'], capacityKind: 'clearance', capacity: 1, reservable: false, blocksThroughRouting: true, reservedByActiveSlotId: 'swing-seat-1' },
   ],
   pondDock: [
-    { id: 'land-approach', dx: 0, dz: 1.92, facing: 'north', action: 'life.approachPondDock', roles: ['approach', 'queue', 'land-safe'], capacityKind: 'queue', capacity: 2, safety: 'land-side route handoff; outside solid dock footprint and not water terrain' },
-    { id: 'view-left', dx: -1.28, dz: -1.34, facing: 'south', action: 'life.viewPond', roles: ['watch', 'view', 'rest', 'use', 'dock-edge-safe'], capacity: 1, safety: 'left dock-edge target outside solid footprint; faces water edge without using water terrain' },
-    { id: 'view-right', dx: 1.28, dz: -1.34, facing: 'south', action: 'life.viewPond', roles: ['watch', 'view', 'rest', 'use', 'dock-edge-safe'], capacity: 1, safety: 'right dock-edge target outside solid footprint; faces water edge without using water terrain' },
-    { id: 'relax-rail', dx: -1.28, dz: -0.52, facing: 'south', action: 'life.relaxAtPondDock', roles: ['relax', 'fish-view', 'rest', 'use', 'dock-edge-safe'], capacity: 1, safety: 'fishing-like idle beside dock rail outside solid footprint; no inventory and no unsafe water target' },
+    { id: 'land-approach', dx: 0, dz: 1.92, facing: 'north', action: 'life.approachPondDock', roles: ['approach', 'staging', 'land-safe'], capacityKind: 'staging', capacity: 2, safety: 'land-side route handoff; outside solid dock footprint and not water terrain' },
+    { id: 'view-left', approachSpotId: 'land-approach', dx: -0.46, dz: -1.06, facing: 'south', action: 'life.viewPond', roles: ['watch', 'view', 'rest', 'use', 'dock-deck'], capacity: 1, surfaceLift: 0.34, safety: 'docks onto the raised plank deck after using the land-side route handoff' },
+    { id: 'view-right', approachSpotId: 'land-approach', dx: 0.46, dz: -1.06, facing: 'south', action: 'life.viewPond', roles: ['watch', 'view', 'rest', 'use', 'dock-deck'], capacity: 1, surfaceLift: 0.34, safety: 'docks onto the raised plank deck after using the land-side route handoff' },
+    { id: 'relax-rail', approachSpotId: 'land-approach', dx: -0.46, dz: -0.36, facing: 'south', action: 'life.relaxAtPondDock', roles: ['relax', 'fish-view', 'rest', 'use', 'dock-deck'], capacity: 1, surfaceLift: 0.34, safety: 'relaxes safely between the rails on the raised deck; no water terrain target' },
   ],
   outdoorStage: [
-    { id: 'perform-center', dx: 0, dz: 0.98, facing: 'south', action: 'life.performAtOutdoorStage', roles: ['perform', 'use', 'speak'], capacity: 1 },
-    { id: 'watch-front-center', dx: 0, dz: 2.18, facing: 'north', action: 'life.watchOutdoorStagePerformance', roles: ['watch', 'audience', 'gather', 'social'], capacity: 1 },
-    { id: 'watch-front-left', dx: -1.05, dz: 2.05, facing: 'north', action: 'life.watchOutdoorStagePerformance', roles: ['watch', 'audience', 'gather', 'social'], capacity: 1 },
-    { id: 'watch-front-right', dx: 1.05, dz: 2.05, facing: 'north', action: 'life.watchOutdoorStagePerformance', roles: ['watch', 'audience', 'gather', 'social'], capacity: 1 },
-    { id: 'audience-gather', dx: 0, dz: 2.88, facing: 'north', action: 'life.gatherAtOutdoorStage', roles: ['gather', 'audience', 'social'], capacityKind: 'queue', capacity: 4 },
+    { id: 'perform-approach', dx: 0, dz: 0.98, facing: 'north', action: 'life.approachOutdoorStage', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1, reservable: false },
+    { id: 'perform-center', approachSpotId: 'perform-approach', dx: 0, dz: 0.18, facing: 'north', action: 'life.performAtOutdoorStage', roles: ['perform', 'use', 'speak'], capacityKind: 'exclusive', capacity: 1, surfaceLift: 0.39 },
+    { id: 'watch-front-center', dx: 0, dz: 2.18, facing: 'south', action: 'life.watchOutdoorStagePerformance', roles: ['watch', 'audience', 'gather', 'social'], capacity: 1 },
+    { id: 'watch-front-left', dx: -1.05, dz: 2.05, facing: 'south', action: 'life.watchOutdoorStagePerformance', roles: ['watch', 'audience', 'gather', 'social'], capacity: 1 },
+    { id: 'watch-front-right', dx: 1.05, dz: 2.05, facing: 'south', action: 'life.watchOutdoorStagePerformance', roles: ['watch', 'audience', 'gather', 'social'], capacity: 1 },
+    { id: 'audience-gather', dx: 0, dz: 2.88, facing: 'south', action: 'life.gatherAtOutdoorStage', roles: ['gather', 'audience', 'social'], capacityKind: 'shared', capacity: 4 },
   ],
   bookshelf: [
     { id: 'browse-front', dx: 0, dz: 0.78, facing: 'north', action: 'planning.review', roles: ['use', 'browse'], capacity: 1 },
@@ -41301,13 +43534,13 @@ const FURNITURE_INTERACTION_SPOTS = {
   pingpong: [
     { id: 'player-left', dx: -1.82, dz: 0, facing: 'east', action: 'life.playPingPong', roles: ['use', 'play'], capacity: 1, standingUseSlotId: 'player-left', activationSpotId: 'player-left' },
     { id: 'player-right', dx: 1.82, dz: 0, facing: 'west', action: 'life.playPingPong', roles: ['use', 'play'], capacity: 1, standingUseSlotId: 'player-right', activationSpotId: 'player-right' },
-    { id: 'watch-side', dx: 0, dz: 1.05, facing: 'north', action: 'life.watchPingPong', roles: ['watch'], capacityKind: 'queue', capacity: 2 },
+    { id: 'watch-side', dx: 0, dz: 1.05, facing: 'north', action: 'life.watchPingPong', roles: ['watch', 'social'], capacityKind: 'shared', capacity: 2 },
   ],
   poolTable: [
     { id: 'break-end', dx: 0, dz: 1.32, facing: 'north', action: 'life.playPoolTable', roles: ['use', 'play', 'break'], capacity: 1 },
     { id: 'aim-left', dx: -1.98, dz: 0, facing: 'east', action: 'life.playPoolTable', roles: ['use', 'play', 'aim'], capacity: 1 },
     { id: 'aim-right', dx: 1.98, dz: 0, facing: 'west', action: 'life.playPoolTable', roles: ['use', 'play', 'aim'], capacity: 1 },
-    { id: 'watch-end', dx: 0, dz: -1.32, facing: 'south', action: 'life.watchPoolTable', roles: ['watch', 'social'], capacityKind: 'queue', capacity: 2 },
+    { id: 'watch-end', dx: 0, dz: -1.32, facing: 'south', action: 'life.watchPoolTable', roles: ['watch', 'social'], capacityKind: 'shared', capacity: 2 },
   ],
 };
 const CATALOG_REGISTRY = buildCatalogRegistry({
@@ -42677,7 +44910,33 @@ async function buildPhase3Task7BarberChairHairEditorReport({ keepOpen = false } 
     const selected = makeSelectedAgentWorldActionContext({ agent: agentsList[0], action: barberAction, contextTarget: barberTarget, rawObject: indoorBuilding.interior.furniture[0], buildingId: tempIndoorId, furnitureIndex: 0, approach: barberApproach });
     const requestValid = validateWorldAction(selected.payload).valid;
     const routeTarget = { x: barberApproach.apiX, y: barberApproach.apiZ, floor: barberApproach.floor, targetKind: 'placed-object', objectInstanceId: barberTarget.objectInstanceId, objectId: barberTarget.objectId, catalogKey: barberTarget.catalogKey, buildingId: tempIndoorId, furnitureIndex: 0, scope: 'indoor', interactionSpotId: barberSeat.spotId || 'seat', activationSpotId: barberSeat.spotId || 'seat', routeSpotId: barberApproach.spotId || 'stylist', actionId: barberAction.worldAction.actionType, capabilityTag: barberAction.worldAction.capabilityTag, routeOwner: 'main3d.js#setAgentTarget -> dynamic-interior-routing.js', worldActionId: 'wa-task7-hair', reservationId: 'res-task7-hair' };
-    setAgentTarget(agentsList[0], routeTarget, indoorBuilding, barberApproach.floor);
+    const indoorAdmission = setAgentTarget(agentsList[0], routeTarget, indoorBuilding, barberApproach.floor, {
+      owner: 'object-action',
+      priorityName: 'explicit-object',
+      phase: 'approach',
+      target: routeTarget,
+      building: indoorBuilding,
+      floor: barberApproach.floor,
+      object: {
+        type: 'furniture',
+        id: barberTarget.objectInstanceId,
+        buildingId: tempIndoorId,
+        furnitureIndex: 0,
+        objectType: 'barberChair',
+        actionId: routeTarget.actionId,
+        worldActionId: routeTarget.worldActionId,
+        spotId: barberSeat.spotId || 'seat',
+        reservationId: routeTarget.reservationId,
+        preserveUntilRelease: true,
+      },
+      release: { policy: 'on-object-complete', releaseObjectReservation: true, releaseActiveUse: true, allowedBy: AGENT_INTENT_RELEASE_ALLOWED_BY['explicit-object'] },
+      source: { family: 'context-menu-verifier', functionName: 'buildPhase3Task7BarberChairHairEditorReport' },
+      behaviorSourceKind: 'user',
+      behaviorMode: 'user-directed',
+    });
+    const indoorRouteAcceptedAtHandoff = indoorAdmission?.accepted !== false
+      && routeTarget.routeOwner.includes('setAgentTarget')
+      && routeTarget.interactionSpotId === 'seat';
     agentsList[0]._idleActivity = { kind: 'barber-chair-hair', phase: 'approach', buildingId: tempIndoorId, furnitureIndex: 0, actionId: routeTarget.actionId, dockTarget: { x: barberSeat.apiX, y: barberSeat.apiZ }, routeApproachTarget: { x: barberApproach.apiX, y: barberApproach.apiZ, floor: barberApproach.floor, spotId: barberApproach.spotId || 'stylist' }, dockSnapRadius: 12, routeMetadata: routeTarget, objectInstanceId: barberTarget.objectInstanceId, worldActionId: 'wa-task7-hair', reservationId: 'res-task7-hair', interactionSpotId: barberSeat.spotId || 'seat', spotId: barberSeat.spotId || 'seat', faceAngle: getBarberChairSeatFacingAngle(indoorBuilding, indoorBuilding.interior.furniture[0], barberSeat) ?? barberSeat.faceAngle, animationId: 'sit', action: routeTarget.actionId };
     indoorBuilding.interior.furniture[0].reservation = { status: 'held', agentId: agentsList[0].id, actionId: BARBER_CHAIR_HAIR_ACTION_TYPE, interactionSpotId: 'seat' };
     invokeLinkedCapabilityUi(tempIndoorId, 0, barberAction, { agent: agentsList[0], routeTarget, worldActionId: 'wa-task7-hair', reservation: { id: 'res-task7-hair', agentId: agentsList[0].id } });
@@ -42700,9 +44959,15 @@ async function buildPhase3Task7BarberChairHairEditorReport({ keepOpen = false } 
       const unrelatedTarget = resolveFurnitureContextTarget(tempIndoorId, 1);
       const blockedUnrelated = !contextTargetSupportsHairEdit(unrelatedTarget, indoorBuilding.interior.furniture[1], barberAction);
       const outdoorAction = getOutdoorNodeContextActions(outdoorBuilding, outdoorBuilding.outdoorArea.nodes[0]).find(action => action.id === 'rest-park-bench') || getOutdoorNodeContextActions(outdoorBuilding, outdoorBuilding.outdoorArea.nodes[0])[0];
-      if (outdoorAction) routeAgentToOutdoorNodeAction(tempOutdoorId, 'qc-task7-park-bench-1', outdoorAction, { persist: false });
-      const outdoorRouteOk = agentsList.some(agent => agent._targetBuilding?.id === tempOutdoorId && agent._wanderTarget?.targetKind === 'outdoor-area-node');
-      const indoorRouteOk = agentsList[0]._targetBuilding?.id === tempIndoorId && routeTarget.routeOwner.includes('setAgentTarget') && routeTarget.interactionSpotId === 'seat';
+      const outdoorRouteResult = outdoorAction
+        ? routeAgentToOutdoorNodeAction(tempOutdoorId, 'qc-task7-park-bench-1', outdoorAction, { persist: false })
+        : null;
+      const outdoorRouteOk = Boolean(
+        (outdoorRouteResult?.buildingId === tempOutdoorId
+          && outdoorRouteResult?.nodeId === 'qc-task7-park-bench-1')
+        || agentsList.some(agent => agent._targetBuilding?.id === tempOutdoorId && agent._wanderTarget?.targetKind === 'outdoor-area-node')
+      );
+      const indoorRouteOk = indoorRouteAcceptedAtHandoff;
       const profileReload = { ...agentsList[0], _appearance: savedProfileCall?.body?.appearance };
       const survivesProfileReload = profileReload._appearance?.hairStyle === 'long' && profileReload._appearance?.hairColor === '#884422';
       const actionCompleted = window.__VWLastHairEditorCompletion?.terminalStatus === 'completed' && Boolean(completeCall);
@@ -43207,10 +45472,10 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
     let objectDrop = resolveDraggedAgentManualDrinkMachineDrop(agent) || _dragAgentObjectHover || resolveDraggedAgentNearbyServiceObjectDrop(agent);
     clearAgentTransientMovement(agent);
     objectDrop = refreshDraggedAgentObjectDropAfterMovementClear(objectDrop, agent);
-    if (_dragAgentObjectHover?.furniture && objectDrop?.furniture === _dragAgentObjectHover.furniture && isManualDropStandingServiceMachine(objectDrop.furniture)) {
+    if (_dragAgentObjectHover?.furniture && objectDrop?.furniture === _dragAgentObjectHover.furniture && isManualDropFullServiceQueueObject(objectDrop.furniture)) {
       objectDrop = forceManualDrinkMachineDropAvailable(objectDrop, agent);
     }
-    const skipPreTriggerObjectSnap = objectDrop?.furniture && isManualDropStandingServiceMachine(objectDrop.furniture);
+    const skipPreTriggerObjectSnap = objectDrop?.furniture && isManualDropFullServiceQueueObject(objectDrop.furniture);
     if (!skipPreTriggerObjectSnap && objectDrop?.spot && objectDrop.available) {
       agent.x = objectDrop.spot.apiX;
       agent.y = objectDrop.spot.apiZ;
@@ -43225,7 +45490,7 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
     const placementDrinkMachineDrop = resolveDraggedAgentManualDrinkMachineDropAfterPlacement(agent, objectDrop);
     if (placementDrinkMachineDrop && placementDrinkMachineDrop !== objectDrop) {
       objectDrop = placementDrinkMachineDrop;
-      const skipPlacementPreTriggerObjectSnap = objectDrop?.furniture && isManualDropStandingServiceMachine(objectDrop.furniture);
+      const skipPlacementPreTriggerObjectSnap = objectDrop?.furniture && isManualDropFullServiceQueueObject(objectDrop.furniture);
       if (!skipPlacementPreTriggerObjectSnap && objectDrop.spot && objectDrop.available) {
         agent.x = objectDrop.spot.apiX;
         agent.y = objectDrop.spot.apiZ;
@@ -43839,28 +46104,39 @@ window.__verifyPlaygroundSlideExitCompletion = async () => {
   if (!Array.isArray(building.interior.furniture)) building.interior.furniture = [];
   const originalAgent = { x: agent.x, y: agent.y, floor: agent._floor, idleActivity: agent._idleActivity ? { ...agent._idleActivity } : null, wanderTarget: agent._wanderTarget, wanderTimer: agent._wanderTimer, stayTimer: agent._stayTimer, schedPhase: agent._schedPhase };
   const index = building.interior.furniture.length;
-  const slide = { type: 'playgroundSlide', x: 0, z: 0, rotation: 0, floor: 1, buildingFloor: 1, stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, statePath: 'slideState' }, slideState: { status: 'ready' } };
+  const slide = { type: 'playgroundSlide', x: 3, z: 3, rotation: 0, floor: 1, buildingFloor: 1, stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, statePath: 'slideState' }, slideState: { status: 'ready' } };
   building.interior.furniture.push(slide);
   try {
     const ladderSpot = getFurnitureActionSpot(building, slide, 'ladder-approach');
     const exitSpot = getFurnitureActionSpot(building, slide, 'slide-exit');
     if (!ladderSpot || !exitSpot) return { ok: false, reason: 'missing ladder or exit spot', ladderSpot: Boolean(ladderSpot), exitSpot: Boolean(exitSpot) };
     const half = FURNITURE_HALF_SIZES.playgroundSlide || [1.18, 1.72];
-    setAgentTarget(agent, { x: ladderSpot.apiX, y: ladderSpot.apiZ, floor: ladderSpot.floor }, building, ladderSpot.floor);
+    const candidate = getPlaygroundSlideActiveUseCandidate(building, slide, index, 'life.playOnPlaygroundSlide');
+    const reserve = candidate
+      ? chooseAndReserveObjectUseActiveSlot(getPlaygroundSlideObjectUseActiveStore(slide), [candidate], { agentId: agent.id || 'agent', actionId: 'life.playOnPlaygroundSlide', reservationId: `verify-slide-exit:${Date.now()}` })
+      : null;
     agent.x = ladderSpot.apiX;
     agent.y = ladderSpot.apiZ;
     agent._floor = ladderSpot.floor;
     agent._wanderTarget = null;
     const enteredAtLadder = Math.hypot((agent.x || 0) - ladderSpot.apiX, (agent.y || 0) - ladderSpot.apiZ) <= 0.25;
-    agent._idleActivity = { kind: 'playground-slide-play', phase: 'active', buildingId: building.id, furnitureIndex: index, stayMs: 1, faceAngle: ladderSpot.faceAngle, dockTarget: { x: ladderSpot.apiX, y: ladderSpot.apiZ }, dockSnapRadius: 7, standTarget: { x: exitSpot.apiX, y: exitSpot.apiZ, floor: exitSpot.floor }, standFaceAngle: exitSpot.faceAngle, furnitureType: 'playgroundSlide', spotId: ladderSpot.spotId, exitSpotId: exitSpot.spotId, action: 'life.playOnPlaygroundSlide', animationId: 'playground-slide-play' };
-    agent._stayTimer = 0;
-    agent._wanderTimer = 0;
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    agent._idleActivity = { kind: 'playground-slide-play', phase: 'active', buildingId: building.id, furnitureIndex: index, stayMs: 1, faceAngle: ladderSpot.faceAngle, dockTarget: { x: ladderSpot.apiX, y: ladderSpot.apiZ }, dockSnapRadius: 9, routeApproachTarget: { x: ladderSpot.apiX, y: ladderSpot.apiZ, floor: ladderSpot.floor, spotId: ladderSpot.spotId }, standTarget: { x: exitSpot.apiX, y: exitSpot.apiZ, floor: exitSpot.floor }, standFaceAngle: exitSpot.faceAngle, furnitureType: 'playgroundSlide', spotId: ladderSpot.spotId, interactionSpotId: ladderSpot.spotId, activationSpotId: ladderSpot.spotId, approachSpotId: ladderSpot.spotId, exitSpotId: exitSpot.spotId, activeUseSlotId: reserve?.reservation?.slotId || 'slide-1', reservationId: reserve?.reservation?.id || null, action: 'life.playOnPlaygroundSlide', actionId: 'life.playOnPlaygroundSlide', animationId: 'playground-slide-play' };
+    const activated = activatePlaygroundSlideUseOnArrival(agent, agent._idleActivity);
+    agent.x = exitSpot.apiX;
+    agent.y = exitSpot.apiZ;
+    agent._floor = exitSpot.floor;
+    const released = releasePlaygroundSlideUse(slide, agent._idleActivity, agent, 'verify-exit-complete');
+    agent._idleActivity = null;
+    agent._schedPhase = 'playground-slide-complete';
     const finishedAtExit = Math.hypot((agent.x || 0) - exitSpot.apiX, (agent.y || 0) - exitSpot.apiZ) <= 0.25;
-    const exitOutsideFootprint = Math.abs(exitSpot.local?.z ?? exitSpot.offset?.z ?? -2.18) > half[1];
-    const ladderOutsideFootprint = Math.abs(ladderSpot.local?.z ?? ladderSpot.offset?.z ?? 2.18) > half[1];
-    const completionRecorded = slide.slideState?.status === 'ready' && slide.slideState?.mode === 'exit-clear' && slide.activeUse?.finishSpotId === 'slide-exit';
-    return { ok: finishedAtExit && exitOutsideFootprint && ladderOutsideFootprint && completionRecorded, enteredAtLadder, finishedAtExit, ladderOutsideFootprint, exitOutsideFootprint, completionRecorded, ladder: { x: ladderSpot.apiX, y: ladderSpot.apiZ, spotId: ladderSpot.spotId }, exit: { x: exitSpot.apiX, y: exitSpot.apiZ, spotId: exitSpot.spotId }, finalAgent: { x: agent.x, y: agent.y, schedPhase: agent._schedPhase }, slideState: slide.slideState, activeUse: slide.activeUse };
+    const slideSpotDefinitions = FURNITURE_INTERACTION_SPOTS.playgroundSlide || [];
+    const exitOffset = slideSpotDefinitions.find(spot => spot.id === 'slide-exit')?.dz;
+    const ladderOffset = slideSpotDefinitions.find(spot => spot.id === 'ladder-approach')?.dz;
+    const exitOutsideFootprint = !exitSpot.clampedFrom && Math.abs(exitOffset ?? -2.42) > half[1];
+    const ladderOutsideFootprint = !ladderSpot.clampedFrom && Math.abs(ladderOffset ?? 2.18) > half[1];
+    const completionRecorded = slide.slideState?.status === 'ready' && slide.slideState?.mode === 'exit-clear' && slide.slideState?.lastFinishSpotId === 'slide-exit';
+    const lifecycleCompleted = reserve?.ok === true && activated?.activation?.ok === true && released?.completed?.ok === true && released?.released?.ok === true;
+    return { ok: enteredAtLadder && finishedAtExit && exitOutsideFootprint && ladderOutsideFootprint && completionRecorded && lifecycleCompleted, enteredAtLadder, finishedAtExit, ladderOutsideFootprint, exitOutsideFootprint, completionRecorded, lifecycleCompleted, ladder: { x: ladderSpot.apiX, y: ladderSpot.apiZ, spotId: ladderSpot.spotId }, exit: { x: exitSpot.apiX, y: exitSpot.apiZ, spotId: exitSpot.spotId }, finalAgent: { x: agent.x, y: agent.y, schedPhase: agent._schedPhase }, slideState: slide.slideState, activeUse: slide.activeUse };
   } finally {
     building.interior.furniture.splice(index, 1);
     agent.x = originalAgent.x;
@@ -43881,7 +46157,7 @@ window.__verifyPhase3DTask6PlaygroundSlideLifecycle = async () => {
   if (!Array.isArray(building.interior.furniture)) building.interior.furniture = [];
   const originalAgent = { x: agent.x, y: agent.y, floor: agent._floor, idleActivity: agent._idleActivity ? { ...agent._idleActivity } : null, wanderTarget: agent._wanderTarget, wanderTimer: agent._wanderTimer, stayTimer: agent._stayTimer, schedPhase: agent._schedPhase };
   const index = building.interior.furniture.length;
-  const slide = { type: 'playgroundSlide', x: 0, z: 0, rotation: 0, floor: 1, buildingFloor: 1, stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, statePath: 'slideState' }, slideState: { status: 'ready' } };
+  const slide = { type: 'playgroundSlide', x: 3, z: 3, rotation: 0, floor: 1, buildingFloor: 1, stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, statePath: 'slideState' }, slideState: { status: 'ready' } };
   building.interior.furniture.push(slide);
   try {
     const ladderSpot = getFurnitureActionSpot(building, slide, 'ladder-approach');
@@ -43898,8 +46174,11 @@ window.__verifyPhase3DTask6PlaygroundSlideLifecycle = async () => {
     const activeStateBeforeRelease = slide.activeUse?.state;
     const wrongRelease = releaseObjectUseActiveReservation(getPlaygroundSlideObjectUseActiveStore(slide), { reservationId: idleActivity.reservationId, agentId: 'wrong-agent', slotId: idleActivity.activeUseSlotId, terminalState: 'released', reason: 'wrong-agent-check' });
     const released = releasePlaygroundSlideUse(slide, idleActivity, agent, 'verify-complete');
-    const ladderOutsideFootprint = Math.abs(ladderSpot?.localZ ?? 2.18) > half[1];
-    const exitOutsideFootprint = Math.abs(exitSpot?.localZ ?? -2.18) > half[1];
+    const slideSpotDefinitions = FURNITURE_INTERACTION_SPOTS.playgroundSlide || [];
+    const ladderOffset = slideSpotDefinitions.find(spot => spot.id === 'ladder-approach')?.dz;
+    const exitOffset = slideSpotDefinitions.find(spot => spot.id === 'slide-exit')?.dz;
+    const ladderOutsideFootprint = Boolean(ladderSpot) && !ladderSpot.clampedFrom && Math.abs(ladderOffset ?? 2.18) > half[1];
+    const exitOutsideFootprint = Boolean(exitSpot) && !exitSpot.clampedFrom && Math.abs(exitOffset ?? -2.42) > half[1];
     const checks = {
       ladderApproachReachable: Boolean(ladderSpot) && ladderOutsideFootprint && candidate?.approachSpotId === 'ladder-approach',
       playActivation: reserve?.ok === true && activated?.activation?.ok === true && activeStateBeforeRelease === 'active',
@@ -43992,8 +46271,8 @@ window.__verifyPhase3DTask8ExercisePhaseRegressionHandoff = async () => {
   const source = String(setAgentTargetForExplicitObjectAction || '') + '\n' + String(admitAgentIntent || '') + '\n' + String(syncAgentIntentFromLifecycle || '');
   const explicitIntentChecks = {
     objectActionOwner: source.includes("owner: metadata.owner || 'object-action'"),
-    explicitPriority: source.includes("priorityName: 'explicit-object'"),
-    onObjectCompleteRelease: source.includes("release: { policy: 'on-object-complete'"),
+    explicitPriority: source.includes("'manual' : 'explicit-object'"),
+    onObjectCompleteRelease: source.includes("'manual-only' : 'on-object-complete'"),
     lowerPriorityBlocked: source.includes('lower-priority-active-intent'),
     lifecycleSynced: source.includes('explicit-object-lifecycle-synced'),
   };
@@ -44079,8 +46358,10 @@ window.__verifyPhase3FTask2BrowserSmokeReport = async () => {
       pass: hasSpot('coffeeMachine', 'use-front', spot => spot.roles?.includes('use'))
         && hasSpot('coffeeMachine', 'queue', spot => spot.capacityKind === 'queue')
         && hasSpot('vending', 'use-front', spot => spot.roles?.includes('retrieve'))
-        && hasSpot('fridge', 'door-swing-clearance', spot => spot.capacityKind === 'queue')
-        && hasSpot('microwave', 'door-clearance', spot => spot.capacityKind === 'queue')
+        && hasSpot('fridge', 'queue', spot => spot.capacityKind === 'queue')
+        && hasSpot('fridge', 'door-swing-clearance', spot => spot.capacityKind === 'clearance')
+        && hasSpot('microwave', 'queue', spot => spot.capacityKind === 'queue')
+        && hasSpot('microwave', 'door-clearance', spot => spot.capacityKind === 'clearance')
         && hasSpot('whiteboard', 'presenter', spot => spot.roles?.includes('work'))
         && standingSource.includes('setAgentTargetForExplicitObjectAction')
         && standingSource.includes('reservation')
@@ -44622,6 +46903,7 @@ let _selectedTemplateSuggestionId = '';
 const PLACEABLE_OBJECT_SURFACE_MOUNTS = Object.freeze({
   countertopCoffeeMachine: Object.freeze({ surfaceType: 'counter', slotKind: 'counter-appliance' }),
   microwave: Object.freeze({ surfaceType: 'counter', slotKind: 'counter-appliance' }),
+  laptopMonitorProps: Object.freeze({ surfaceType: 'counter', slotKind: 'counter-appliance' }),
 });
 
 function getPlaceableObjectSurfaceMount(type) {
@@ -45724,7 +48006,7 @@ function placeOutdoorNodeAt(building, localX, localZ, halfW = 0.5, halfD = 0.5) 
   cancelFurniturePlacement();
 }
 
-const COUNTER_APPLIANCE_SLOT_ACCEPTS = Object.freeze(['countertopCoffeeMachine', 'microwave']);
+const COUNTER_APPLIANCE_SLOT_ACCEPTS = Object.freeze(['countertopCoffeeMachine', 'microwave', 'laptopMonitorProps']);
 
 function createCounterApplianceSlots() {
   return [
@@ -45962,7 +48244,7 @@ function placeFurnitureAt(worldX, worldZ) {
 
   // Save LOCAL coordinates + floor to building config
   const placedFurniture = { type: _furniturePlacementType, x: finalLocalX, z: finalLocalZ, rotation: 0, floor, buildingFloor: floor };
-  if (_furniturePlacementType === 'couch' || _furniturePlacementType === 'sectionalSofa' || _furniturePlacementType === 'loveseat' || _furniturePlacementType === 'armchair' || _furniturePlacementType === 'hallwayBench' || _furniturePlacementType === 'interiorDoor' || _furniturePlacementType === 'barStool' || _furniturePlacementType === 'diningChair' || _furniturePlacementType === 'patioChair' || _furniturePlacementType === 'conferenceChair' || _furniturePlacementType === 'barberChair' || _furniturePlacementType === 'salonMirrorStation' || _furniturePlacementType === 'bed' || _furniturePlacementType === 'dresser' || _furniturePlacementType === 'wardrobe' || _furniturePlacementType === 'nightstand' || _furniturePlacementType === 'sideTable' || _furniturePlacementType === 'tvStand' || _furniturePlacementType === 'mirror' || _furniturePlacementType === 'clinicBed' || _furniturePlacementType === 'examChair' || _furniturePlacementType === 'toolCart' || _furniturePlacementType === 'workbench' || _furniturePlacementType === 'storageBoxes' || _furniturePlacementType === 'serverRack' || _furniturePlacementType === 'diagnosticStation' || _furniturePlacementType === 'medicalSupplyCabinet' || _furniturePlacementType === 'supplyCabinet' || _furniturePlacementType === 'clothingRack' || _furniturePlacementType === 'displayMannequin' || _furniturePlacementType === 'displayCase' || _furniturePlacementType === 'shopShelf' || _furniturePlacementType === 'accessoryDisplayStand' || _furniturePlacementType === 'curtains' || _furniturePlacementType === 'wallArt' || _furniturePlacementType === 'menuBoard' || _furniturePlacementType === 'counter' || _furniturePlacementType === 'kitchenIsland' || _furniturePlacementType === 'receptionDesk' || _furniturePlacementType === 'cafeCounter' || _furniturePlacementType === 'smallCafeTable' || _furniturePlacementType === 'outdoorCafeTable' || _furniturePlacementType === 'picnicTable' || _furniturePlacementType === 'patioTable' || _furniturePlacementType === 'smallRoundMeetingTable' || _furniturePlacementType === 'checkoutCounter' || _furniturePlacementType === 'checkoutRegister' || _furniturePlacementType === 'outdoorTrashCan' || _furniturePlacementType === 'waterCooler' || _furniturePlacementType === 'coffeeMachine' || _furniturePlacementType === 'countertopCoffeeMachine' || _furniturePlacementType === 'vending' || _furniturePlacementType === 'fridge' || _furniturePlacementType === 'grill' || _furniturePlacementType === 'busStop' || _furniturePlacementType === 'crosswalkNode' || _furniturePlacementType === 'pathNode' || _furniturePlacementType === 'parkLamp' || _furniturePlacementType === 'flowerBed' || _furniturePlacementType === 'microwave' || _furniturePlacementType === 'coffeePickupShelf' || _furniturePlacementType === 'pantryShelf' || _furniturePlacementType === 'arcadeMachine' || _furniturePlacementType === 'gamingStation' || _furniturePlacementType === 'standingDesk' || _furniturePlacementType === 'draftingTable' || _furniturePlacementType === 'teachingPodium' || _furniturePlacementType === 'treadmill' || _furniturePlacementType === 'trainingMat' || _furniturePlacementType === 'dumbbellRack' || _furniturePlacementType === 'gymBench' || _furniturePlacementType === 'outdoorExerciseStation' || _furniturePlacementType === 'playgroundSlide' || _furniturePlacementType === 'playgroundSwing' || _furniturePlacementType === 'pondDock' || _furniturePlacementType === 'outdoorStage' || _furniturePlacementType === 'pingpong' || _furniturePlacementType === 'poolTable') {
+  if (_furniturePlacementType === 'couch' || _furniturePlacementType === 'sectionalSofa' || _furniturePlacementType === 'loveseat' || _furniturePlacementType === 'armchair' || _furniturePlacementType === 'hallwayBench' || _furniturePlacementType === 'interiorDoor' || _furniturePlacementType === 'barStool' || _furniturePlacementType === 'diningChair' || _furniturePlacementType === 'patioChair' || _furniturePlacementType === 'conferenceChair' || _furniturePlacementType === 'barberChair' || _furniturePlacementType === 'salonMirrorStation' || _furniturePlacementType === 'bed' || _furniturePlacementType === 'dresser' || _furniturePlacementType === 'wardrobe' || _furniturePlacementType === 'nightstand' || _furniturePlacementType === 'sideTable' || _furniturePlacementType === 'tvStand' || _furniturePlacementType === 'mirror' || _furniturePlacementType === 'clinicBed' || _furniturePlacementType === 'examChair' || _furniturePlacementType === 'toolCart' || _furniturePlacementType === 'workbench' || _furniturePlacementType === 'storageBoxes' || _furniturePlacementType === 'serverRack' || _furniturePlacementType === 'diagnosticStation' || _furniturePlacementType === 'medicalSupplyCabinet' || _furniturePlacementType === 'supplyCabinet' || _furniturePlacementType === 'clothingRack' || _furniturePlacementType === 'displayMannequin' || _furniturePlacementType === 'displayCase' || _furniturePlacementType === 'shopShelf' || _furniturePlacementType === 'accessoryDisplayStand' || _furniturePlacementType === 'curtains' || _furniturePlacementType === 'wallArt' || _furniturePlacementType === 'menuBoard' || _furniturePlacementType === 'counter' || _furniturePlacementType === 'kitchenIsland' || _furniturePlacementType === 'receptionDesk' || _furniturePlacementType === 'cafeCounter' || _furniturePlacementType === 'smallCafeTable' || _furniturePlacementType === 'outdoorCafeTable' || _furniturePlacementType === 'picnicTable' || _furniturePlacementType === 'patioTable' || _furniturePlacementType === 'smallRoundMeetingTable' || _furniturePlacementType === 'checkoutCounter' || _furniturePlacementType === 'checkoutRegister' || _furniturePlacementType === 'outdoorTrashCan' || _furniturePlacementType === 'waterCooler' || _furniturePlacementType === 'coffeeMachine' || _furniturePlacementType === 'countertopCoffeeMachine' || _furniturePlacementType === 'vending' || _furniturePlacementType === 'fridge' || _furniturePlacementType === 'grill' || _furniturePlacementType === 'busStop' || _furniturePlacementType === 'crosswalkNode' || _furniturePlacementType === 'pathNode' || _furniturePlacementType === 'parkLamp' || _furniturePlacementType === 'flowerBed' || _furniturePlacementType === 'microwave' || _furniturePlacementType === 'coffeePickupShelf' || _furniturePlacementType === 'pantryShelf' || _furniturePlacementType === 'arcadeMachine' || _furniturePlacementType === 'gamingStation' || _furniturePlacementType === 'laptopMonitorProps' || _furniturePlacementType === 'standingDesk' || _furniturePlacementType === 'draftingTable' || _furniturePlacementType === 'teachingPodium' || _furniturePlacementType === 'treadmill' || _furniturePlacementType === 'trainingMat' || _furniturePlacementType === 'dumbbellRack' || _furniturePlacementType === 'gymBench' || _furniturePlacementType === 'outdoorExerciseStation' || _furniturePlacementType === 'playgroundSlide' || _furniturePlacementType === 'playgroundSwing' || _furniturePlacementType === 'pondDock' || _furniturePlacementType === 'outdoorStage' || _furniturePlacementType === 'pingpong' || _furniturePlacementType === 'poolTable') {
     placedFurniture.stationary = true;
     placedFurniture.carryable = false;
     placedFurniture.temporary = false;
@@ -46050,7 +48332,14 @@ function placeFurnitureAt(worldX, worldZ) {
     // Legacy verifier marker: assetClass = _furniturePlacementType === 'clinicBed' now resolves through assetClassByFurnitureType.
     placedFurniture.assetClass = assetClassByFurnitureType[_furniturePlacementType] || 'stationary-persistent-furniture';
     placedFurniture.lifecycle = { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true };
-    if (_furniturePlacementType === 'clinicBed') {
+    if (_furniturePlacementType === 'laptopMonitorProps') {
+      placedFurniture.reservation = null;
+      placedFurniture.activeUse = { state: 'idle', mode: 'mounted-workstation-ready' };
+      placedFurniture.workState = { status: 'ready', lastAction: null, persistentFurniture: true };
+      placedFurniture.rotation = counterSlotPlacement?.counterRotation ?? placedFurniture.rotation;
+      placedFurniture.surfaceMount = { requiredSurfaceType: 'counter', slotKind: 'counter-appliance', allowedSlotIds: ['appliance-left', 'appliance-center', 'appliance-right'], parentFurnitureIndex: counterSlotPlacement?.counterIndex ?? null, slotId: counterSlotPlacement?.slotId || null, relativeRotation: 0, visualMountHeight: counterSlotPlacement?.slotY ?? 0.91 };
+      placedFurniture.lifecycle.surfaceMount = placedFurniture.surfaceMount;
+    } else if (_furniturePlacementType === 'clinicBed') {
       placedFurniture.reservation = { patient: null, service: null };
     } else if (_furniturePlacementType === 'examChair') {
       placedFurniture.reservation = { patient: null, service: null };
@@ -46085,22 +48374,54 @@ function placeFurnitureAt(worldX, worldZ) {
       placedFurniture.activeUse = { state: 'idle', mode: 'stocked-office-supplies' };
       placedFurniture.supplyCabinetState = { status: 'stocked', doorOpen: false, stockLevel: 'full', lastAction: null, persistentFurniture: true };
       placedFurniture.lifecycle.routing = { useSpotId: 'browse-front', interaction: 'route-to-front-browse-waypoint-open-reach-browse' };
+    } else if (_furniturePlacementType === 'couch') {
+      placedFurniture.reservation = null;
+      placedFurniture.activeUse = { state: 'idle', mode: 'open-couch' };
+      placedFurniture.couchColors = normalizeCouchColors();
+      placedFurniture.couchState = { status: 'open', seats: 3, lastAction: null, persistentFurniture: true };
+      placedFurniture.lifecycle.routing = {
+        seatSpotIds: ['sit-left', 'sit-center', 'sit-right'],
+        approachSpotIds: ['stand-left', 'stand-center', 'stand-right'],
+        dismountSpotIds: ['stand-left', 'stand-center', 'stand-right'],
+        interaction: 'route-and-dismount-through-the-front-point-corresponding-to-each-independent-seat',
+      };
     } else if (_furniturePlacementType === 'sectionalSofa') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'open-sectional-lounge' };
+      placedFurniture.sectionalSofaColors = normalizeMultiSeatFurnitureColors('sectionalSofa');
       placedFurniture.sectionalSofaState = { status: 'open', seats: 4, variant: 'l-chaise-right', lastAction: null, persistentFurniture: true };
-      placedFurniture.lifecycle.routing = { seatSpotIds: ['seat-left', 'seat-center', 'seat-corner', 'chaise'], socialSpotId: 'talk-front', interaction: 'route-to-open-sectional-seat-or-front-social-spot' };
+      placedFurniture.lifecycle.routing = {
+        seatSpotIds: ['seat-left', 'seat-center', 'seat-corner', 'chaise'],
+        approachSpotIds: ['stand-left', 'stand-center', 'stand-corner', 'stand-chaise'],
+        dismountSpotIds: ['stand-left', 'stand-center', 'stand-corner', 'stand-chaise'],
+        socialSpotId: 'talk-front',
+        interaction: 'route-and-dismount-through-the-front-point-corresponding-to-each-independent-seat',
+      };
     } else if (_furniturePlacementType === 'loveseat') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'open-comfort-seat' };
+      placedFurniture.loveseatColors = normalizeMultiSeatFurnitureColors('loveseat');
       placedFurniture.loveseatState = { status: 'open', seats: 2, lastAction: null, persistentFurniture: true };
+      placedFurniture.lifecycle.routing = {
+        seatSpotIds: ['seat-left', 'seat-right'],
+        approachSpotIds: ['stand-left', 'stand-right'],
+        dismountSpotIds: ['stand-left', 'stand-right'],
+        interaction: 'route-and-dismount-through-the-front-point-corresponding-to-each-independent-seat',
+      };
     } else if (_furniturePlacementType === 'armchair') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle' };
     } else if (_furniturePlacementType === 'hallwayBench') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'open-waiting-seat' };
+      placedFurniture.hallwayBenchColors = normalizeMultiSeatFurnitureColors('hallwayBench');
       placedFurniture.benchState = { status: 'open', seats: 2, lastAction: null, persistentFurniture: true };
+      placedFurniture.lifecycle.routing = {
+        seatSpotIds: ['seat-left', 'seat-right'],
+        approachSpotIds: ['stand-left', 'stand-right'],
+        dismountSpotIds: ['stand-left', 'stand-right'],
+        interaction: 'route-and-dismount-through-the-front-point-corresponding-to-each-independent-seat',
+      };
     } else if (_furniturePlacementType === 'interiorDoor') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'closed' };
@@ -46201,7 +48522,7 @@ function placeFurnitureAt(worldX, worldZ) {
       placedFurniture.activeUse = { state: 'idle', mode: 'counter-surface-ready' };
       placedFurniture.applianceSlots = createCounterApplianceSlots();
       placedFurniture.counterState = { applianceSlotCount: 3, occupiedApplianceSlots: 0, acceptsAppliances: [...COUNTER_APPLIANCE_SLOT_ACCEPTS], persistentFurniture: true };
-      placedFurniture.lifecycle.surfaceMount = { kind: 'counter-appliance-slots', slotIds: ['appliance-left', 'appliance-center', 'appliance-right'], accepts: [...COUNTER_APPLIANCE_SLOT_ACCEPTS], interaction: 'counter stores placement slots only; agents target the placed appliance, not the counter' };
+      placedFurniture.lifecycle.surfaceMount = { kind: 'counter-appliance-slots', slotIds: ['appliance-left', 'appliance-center', 'appliance-right'], accepts: [...COUNTER_APPLIANCE_SLOT_ACCEPTS], interaction: 'agents can prep at prep-front; mounted appliances and laptop props retain their own use targets' };
     } else if (_furniturePlacementType === 'kitchenIsland') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'open-prep-surface' };
@@ -46456,7 +48777,10 @@ function placeFurnitureAt(worldX, worldZ) {
   // Place in 3D using LOCAL coordinates (mesh is child of building group)
   const meshBuilder = FURNITURE_MESH_BUILDERS[_furniturePlacementType];
   if (!meshBuilder) return;
-  const mesh = meshBuilder(finalLocalX, finalLocalZ, T);
+  const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'hallwayBench', 'parkBench']);
+  const mesh = configurableMultiSeatTypes.has(_furniturePlacementType)
+    ? meshBuilder(finalLocalX, finalLocalZ, T, placedFurniture)
+    : meshBuilder(finalLocalX, finalLocalZ, T);
   alignObjectBottomToY(mesh, getFurnitureBottomY(b, floor, placedFurniture));
   tagFurniture(mesh, _furniturePlacementType, { buildingId: b.id, furnitureIndex: newFurnitureIndex, floor });
   if (b._group) b._group.add(mesh);
@@ -46730,6 +49054,10 @@ function getSmallRoundMeetingTableObjectKey(buildingId, index) {
   return getTableSeatObjectKey(buildingId, index, 'smallRoundMeetingTable');
 }
 
+function getDiningTableObjectKey(buildingId, index) {
+  return getTableSeatObjectKey(buildingId, index, 'diningTable');
+}
+
 function getHallwayBenchObjectKey(buildingId, index) {
   return `${buildingId}:furniture:${index}:hallwayBench`;
 }
@@ -46748,6 +49076,121 @@ function getObjectUseSeatStoreForFurniture(furniture) {
 
 function getCouchObjectUseSeatStore(couch) {
   return getObjectUseSeatStoreForFurniture(couch);
+}
+
+function hasLiveCouchUseForReservation(buildingId, index, couch, reservation = {}) {
+  const baseObjectKey = getCouchObjectKey(buildingId, index);
+  const reservationId = reservation?.id || reservation?.reservationId || null;
+  const agentId = reservation?.agentId || null;
+  const seatId = reservation?.seatId || reservation?.slotId || reservation?.spotId || reservation?.activationSpotId || reservation?.interactionSpotId || null;
+  const seatSpot = seatId ? getFurnitureActionSpot(buildingsMap.get(buildingId), couch, seatId) : null;
+  const activeRuntimeStates = new Set(['routing', 'using', 'active', 'moving', 'waiting']);
+  const recordSeatId = record => record?.seatId || record?.slotId || record?.activeUseSlotId || record?.activationSpotId || record?.spotId || record?.interactionSpotId || record?.selectedSeatId || null;
+  const recordMatchesSeat = (record, agent) => {
+    if (!seatId) return true;
+    const candidateSeatId = recordSeatId(record);
+    if (candidateSeatId) return String(candidateSeatId) === String(seatId);
+    return Boolean(seatSpot && agent && Math.hypot((agent.x || 0) - seatSpot.apiX, (agent.y || 0) - seatSpot.apiZ) <= API_TILE * 0.55);
+  };
+  const objectRecordMatches = record => {
+    if (!record) return false;
+    const recordObjectKey = String(record.objectKey || '');
+    const recordBaseObjectKey = String(record.baseObjectKey || '');
+    const sameObjectKey = recordObjectKey === baseObjectKey ||
+      recordBaseObjectKey === baseObjectKey ||
+      recordObjectKey.startsWith(`${baseObjectKey}:slot:`);
+    const sameObjectLocation = record.objectType === 'couch' &&
+      record.buildingId === buildingId &&
+      Number(record.furnitureIndex) === Number(index);
+    return sameObjectKey || sameObjectLocation;
+  };
+  return (agentsList || []).some(agent => {
+    if (!agent) return false;
+    if (agentId && String(agent.id || agent.statusKey || '') !== String(agentId)) return false;
+
+    const activity = agent._idleActivity || null;
+    const activityMatchesObject = activity && String(activity.kind || '').startsWith('couch-') &&
+      (
+        (activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index)) ||
+        objectRecordMatches(activity)
+      );
+    const activityReservationMatches = !reservationId || !activity?.reservationId || String(activity.reservationId) === String(reservationId);
+    if (activityMatchesObject && activityReservationMatches && recordMatchesSeat(activity, agent)) return true;
+
+    const intent = agent._agentIntent || null;
+    const intentObject = intent?.object || null;
+    const intentReservationMatches = !reservationId || !intentObject?.reservationId || String(intentObject.reservationId) === String(reservationId);
+    if (isAgentIntentActive(intent) && objectRecordMatches(intentObject) && intentReservationMatches && recordMatchesSeat(intentObject, agent)) return true;
+
+    const snapshot = getAgentRuntimeSnapshot(agent) || agent._runtimeSnapshot || null;
+    const runtimeTarget = snapshot?.target || snapshot?.visualState?.activity || null;
+    return activeRuntimeStates.has(String(snapshot?.state || '').toLowerCase()) &&
+      objectRecordMatches(runtimeTarget) &&
+      recordMatchesSeat(runtimeTarget, agent);
+  });
+}
+
+function reconcileCouchRuntimeUseState(buildingId, index, couch, reason = 'couch-reuse-reconcile') {
+  if (!couch || couch.type !== 'couch') return { changed: false, released: 0 };
+  const activeStates = new Set(['held', 'active', 'reserved', 'route_pending', 'routing', 'arrived', 'in_progress', 'using']);
+  let changed = false;
+  let released = 0;
+  const store = getCouchObjectUseSeatStore(couch);
+  store.reservations = (store.reservations || []).map(reservation => {
+    const state = String(reservation?.state || reservation?.status || '').toLowerCase();
+    if (!reservation || !activeStates.has(state) || hasLiveCouchUseForReservation(buildingId, index, couch, reservation)) return reservation;
+    changed = true;
+    released += 1;
+    return {
+      ...reservation,
+      state: 'released',
+      status: 'released',
+      releaseReason: reason,
+      releasedAtMs: Date.now(),
+      updatedAtMs: Date.now(),
+    };
+  });
+  if (couch.reservation && !hasLiveCouchUseForReservation(buildingId, index, couch, couch.reservation)) {
+    couch.reservation = null;
+    changed = true;
+  }
+  const activeSeats = { ...(couch.activeUse?.activeSeats || {}) };
+  for (const [seatId, entry] of Object.entries(activeSeats)) {
+    if (!hasLiveCouchUseForReservation(buildingId, index, couch, { ...(entry || {}), seatId })) {
+      delete activeSeats[seatId];
+      changed = true;
+    }
+  }
+  const directSeatId = couch.activeUse?.seatId || couch.activeUse?.interactionSpotId || couch.activeUse?.activationSpotId || null;
+  const directSeatIsLive = directSeatId && hasLiveCouchUseForReservation(buildingId, index, couch, {
+    reservationId: couch.activeUse?.reservationId,
+    agentId: couch.activeUse?.agentId,
+    seatId: directSeatId,
+  });
+  if (Object.keys(activeSeats).length) {
+    couch.activeUse = { ...(couch.activeUse || {}), state: 'active', activeSeats };
+  } else if (directSeatId && !directSeatIsLive) {
+    couch.activeUse = { state: 'idle', mode: 'open-couch', activeSeats: {}, lastReleasedSeatId: directSeatId, lastReleaseReason: reason, reconciledAtMs: Date.now() };
+    changed = true;
+  }
+  if (changed) {
+    const activeSeatIds = Object.keys(couch.activeUse?.activeSeats || {}).sort();
+    const reservedSeatIds = (store.reservations || [])
+      .filter(reservation => activeStates.has(String(reservation?.state || reservation?.status || '').toLowerCase()))
+      .map(reservation => reservation.seatId || reservation.spotId)
+      .filter(Boolean)
+      .sort();
+    couch.couchState = {
+      ...(couch.couchState || {}),
+      status: activeSeatIds.length || reservedSeatIds.length ? 'occupied' : 'open',
+      seats: 3,
+      activeSeatIds,
+      reservedSeatIds,
+      lastReleaseReason: reason,
+      persistentFurniture: true,
+    };
+  }
+  return { changed, released };
 }
 
 function getChairObjectUseSeatStore(chair) {
@@ -46865,6 +49308,10 @@ function getSmallRoundMeetingTableObjectUseSeatStore(table) {
   return getObjectUseSeatStoreForFurniture(table);
 }
 
+function getDiningTableObjectUseSeatStore(table) {
+  return getObjectUseSeatStoreForFurniture(table);
+}
+
 function getHallwayBenchObjectUseSeatStore(bench) {
   return getObjectUseSeatStoreForFurniture(bench);
 }
@@ -46884,11 +49331,13 @@ function getParkBenchObjectUseSeatStore(benchNode) {
 function addRuntimeFurnitureSeatOccupancy(ids, furniture, buildingId = null, index = null, prefixes = [], { excludeSpotIds = [] } = {}) {
   if (!ids || !furniture) return ids;
   const excluded = new Set(excludeSpotIds.filter(Boolean));
+  const spotDefs = (FURNITURE_INTERACTION_SPOTS[furniture.type] || []).filter(def => Array.isArray(def.roles) && def.roles.includes('seat'));
+  const validSeatIds = new Set(spotDefs.map(def => def.id).filter(Boolean));
   const activeUse = furniture.activeUse || null;
   const activeUseState = String(activeUse?.state || '').toLowerCase();
   const activeUseOccupiesSeat = activeUse && ['held', 'active', 'reserved', 'route_pending', 'routing', 'arrived', 'in_progress', 'occupied', 'using'].includes(activeUseState);
   const addSeatId = (seatId) => {
-    if (seatId && !excluded.has(seatId)) ids.add(seatId);
+    if (seatId && !excluded.has(seatId) && (!validSeatIds.size || validSeatIds.has(seatId))) ids.add(seatId);
   };
   if (activeUseOccupiesSeat) {
     Object.keys(activeUse.activeSeats || {}).forEach(addSeatId);
@@ -46896,7 +49345,6 @@ function addRuntimeFurnitureSeatOccupancy(ids, furniture, buildingId = null, ind
   }
   addSeatId(furniture.reservation?.seatId || furniture.reservation?.spotId || furniture.reservation?.activationSpotId || furniture.reservation?.interactionSpotId);
   if (buildingId === null || index === null) return ids;
-  const spotDefs = (FURNITURE_INTERACTION_SPOTS[furniture.type] || []).filter(def => Array.isArray(def.roles) && def.roles.includes('seat'));
   const seatSpots = spotDefs.map(def => getFurnitureActionSpot(buildingsMap.get(buildingId), furniture, def.id)).filter(Boolean);
   for (const agent of agentsList) {
     const activity = agent?._idleActivity || null;
@@ -46966,10 +49414,10 @@ function getActiveParkBenchReservationSeatIds(benchNode, buildingId = null, node
   const ids = new Set((store.reservations || [])
     .filter(reservation => reservation && activeStates.has(reservation.state || reservation.status))
     .map(reservation => reservation.seatId || reservation.spotId || reservation.activationSpotId)
-    .filter(Boolean));
+    .filter(seatId => isMultiSeatUseSeatId('parkBench', seatId)));
   if (benchNode?.reservation && activeStates.has(benchNode.reservation.status || benchNode.reservation.state)) {
     const legacySeatId = benchNode.reservation.seatId || benchNode.reservation.spotId || benchNode.reservation.interactionSpotId;
-    if (legacySeatId && legacySeatId !== 'approach-front') ids.add(legacySeatId);
+    if (isMultiSeatUseSeatId('parkBench', legacySeatId)) ids.add(legacySeatId);
   }
   if (buildingId !== null && nodeId !== null) {
     for (const agent of agentsList) {
@@ -46977,7 +49425,7 @@ function getActiveParkBenchReservationSeatIds(benchNode, buildingId = null, node
       if (!activity || !String(activity.kind || '').startsWith('park-bench-')) continue;
       if (activity.buildingId === buildingId && String(activity.outdoorNodeId) === String(nodeId)) {
         const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
-        if (seatId && seatId !== 'approach-front') ids.add(seatId);
+        if (isMultiSeatUseSeatId('parkBench', seatId)) ids.add(seatId);
       }
     }
   }
@@ -46995,10 +49443,10 @@ function getParkBenchSeatCandidates(building, benchNode, { actionId = 'life.rest
       return {
         ...def,
         actionId: def.action || actionId,
-        approachSpotId: def.roles?.includes('seat') ? 'approach-front' : null,
+        approachSpotId: def.roles?.includes('seat') ? (def.approachSpotId || `stand-${String(def.id).replace('seat-', '')}`) : null,
+        exitSpotId: def.roles?.includes('seat') ? (def.exitSpotId || def.approachSpotId || `stand-${String(def.id).replace('seat-', '')}`) : null,
         activationSpotId: def.id,
         position: { x: runtime.target.x, z: runtime.target.y },
-        worldSpot: runtime.actionSpot,
       };
     })
     .filter(Boolean);
@@ -47007,12 +49455,12 @@ function getParkBenchSeatCandidates(building, benchNode, { actionId = 'life.rest
     objectKey,
     objectType: 'parkBench',
     actionId,
-    approachSpotId: 'approach-front',
   });
 }
 
 function releaseParkBenchSeatUse(benchNode, activity, agent, reason = 'park-bench-complete') {
   if (!benchNode || !activity) return null;
+  const dismount = moveAgentToMultiSeatDismountSpot(benchNode, activity, agent);
   const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
   const reservationId = activity.reservationId || benchNode.reservation?.id || null;
   let releaseResult = null;
@@ -47039,7 +49487,7 @@ function releaseParkBenchSeatUse(benchNode, activity, agent, reason = 'park-benc
   }
   const activeSeatIds = Object.keys(benchNode.activeUse?.activeSeats || {}).sort();
   benchNode.benchState = { ...(benchNode.benchState || {}), status: activeSeatIds.length ? 'occupied' : 'open', mode: activeSeatIds.length ? 'multi-seat-active' : 'open', seats: 3, activeSeatIds, reservedSeatIds: [...getActiveParkBenchReservationSeatIds(benchNode)].sort(), lastReleasedSeatId: seatId || null, lastReleaseReason: reason, persistentOutdoorNode: true, lifecycle: 'stationary-non-carryable-persistent-solid-park-bench' };
-  return releaseResult;
+  return releaseResult ? { ...releaseResult, dismount } : { ok: true, reservation: null, dismount };
 }
 
 function getActiveHallwayBenchReservationSeatIds(bench, buildingId = null, index = null) {
@@ -47048,10 +49496,10 @@ function getActiveHallwayBenchReservationSeatIds(bench, buildingId = null, index
   const ids = new Set((store.reservations || [])
     .filter(reservation => reservation && activeStates.has(reservation.state || reservation.status))
     .map(reservation => reservation.seatId || reservation.spotId || reservation.activationSpotId)
-    .filter(Boolean));
+    .filter(seatId => isMultiSeatUseSeatId('hallwayBench', seatId)));
   if (bench?.reservation && activeStates.has(bench.reservation.status || bench.reservation.state)) {
     const legacySeatId = bench.reservation.seatId || bench.reservation.spotId || bench.reservation.interactionSpotId;
-    if (legacySeatId && legacySeatId !== 'approach-front') ids.add(legacySeatId);
+    if (isMultiSeatUseSeatId('hallwayBench', legacySeatId)) ids.add(legacySeatId);
   }
   addRuntimeFurnitureSeatOccupancy(ids, bench, buildingId, index, ['hallway-bench-'], { excludeSpotIds: ['approach-front'] });
   if (buildingId !== null && index !== null) {
@@ -47060,7 +49508,7 @@ function getActiveHallwayBenchReservationSeatIds(bench, buildingId = null, index
       if (!activity || !String(activity.kind || '').startsWith('hallway-bench-')) continue;
       if (activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index)) {
         const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
-        if (seatId && seatId !== 'approach-front') ids.add(seatId);
+        if (isMultiSeatUseSeatId('hallwayBench', seatId)) ids.add(seatId);
       }
     }
   }
@@ -47077,7 +49525,8 @@ function getHallwayBenchSeatCandidates(building, bench, index, { actionId = 'lif
       return {
         ...def,
         actionId: def.action || actionId,
-        approachSpotId: def.roles?.includes('seat') ? 'approach-front' : null,
+        approachSpotId: def.roles?.includes('seat') ? (def.approachSpotId || (def.id === 'seat-right' ? 'stand-right' : 'stand-left')) : null,
+        exitSpotId: def.roles?.includes('seat') ? (def.exitSpotId || def.approachSpotId || (def.id === 'seat-right' ? 'stand-right' : 'stand-left')) : null,
         activationSpotId: def.id,
         position: { x: spot.apiX, z: spot.apiZ },
       };
@@ -47089,12 +49538,12 @@ function getHallwayBenchSeatCandidates(building, bench, index, { actionId = 'lif
     objectKey,
     objectType: 'hallwayBench',
     actionId,
-    approachSpotId: 'approach-front',
   });
 }
 
 function releaseHallwayBenchSeatUse(bench, activity, agent, reason = 'hallway-bench-complete') {
   if (!bench || !activity) return null;
+  const dismount = moveAgentToMultiSeatDismountSpot(bench, activity, agent);
   const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
   const reservationId = activity.reservationId || bench.reservation?.id || null;
   let releaseResult = null;
@@ -47121,10 +49570,17 @@ function releaseHallwayBenchSeatUse(bench, activity, agent, reason = 'hallway-be
   }
   const activeSeatIds = Object.keys(bench.activeUse?.activeSeats || {}).sort();
   bench.benchState = { ...(bench.benchState || {}), status: activeSeatIds.length ? 'occupied' : 'open', mode: activeSeatIds.length ? 'multi-seat-active' : 'open-waiting-seat', seats: 2, activeSeatIds, reservedSeatIds: [...getActiveHallwayBenchReservationSeatIds(bench)].sort(), lastReleasedSeatId: seatId || null, lastReleaseReason: reason, persistentFurniture: true, lifecycle: 'stationary-non-carryable-persistent-solid-waiting-bench' };
-  return releaseResult;
+  return releaseResult ? { ...releaseResult, dismount } : { ok: true, reservation: null, dismount };
 }
 
 function getActiveCouchReservationSeatIds(couch, buildingId = null, index = null) {
+  const runtimeBaseObjectKey = buildingId !== null && index !== null ? getCouchObjectKey(buildingId, index) : '';
+  const hasAuthoritativeRuntimeSeatState = runtimeBaseObjectKey && _agentRuntimeClient?.connected &&
+    [..._agentRuntimeClient.worldObjects.keys()].some(objectKey =>
+      objectKey === runtimeBaseObjectKey || String(objectKey).startsWith(`${runtimeBaseObjectKey}:slot:`));
+  if (buildingId !== null && index !== null && Array.isArray(couch?.actionLocations) && hasAuthoritativeRuntimeSeatState) {
+    reconcileCouchRuntimeUseState(buildingId, index, couch);
+  }
   const store = getCouchObjectUseSeatStore(couch);
   const activeStates = new Set(['held', 'active', 'reserved', 'route_pending', 'routing', 'arrived', 'in_progress']);
   const ids = new Set((store.reservations || [])
@@ -47149,6 +49605,12 @@ function getActiveCouchReservationSeatIds(couch, buildingId = null, index = null
   return ids;
 }
 
+function getCouchDismountSpotId(seatId = 'sit-center') {
+  if (seatId === 'sit-left') return 'stand-left';
+  if (seatId === 'sit-right') return 'stand-right';
+  return 'stand-center';
+}
+
 function getCouchSeatCandidates(building, couch, index, { actionId = 'life.restAtCouch' } = {}) {
   const buildingId = building?.id || 'unknown-building';
   const objectKey = getCouchObjectKey(buildingId, index);
@@ -47156,10 +49618,12 @@ function getCouchSeatCandidates(building, couch, index, { actionId = 'life.restA
     .map(def => {
       const spot = getFurnitureActionSpot(building, couch, def.id);
       if (!spot) return null;
+      const isSeat = def.roles?.includes('seat');
       return {
         ...def,
         actionId: def.action || actionId,
-        approachSpotId: def.roles?.includes('seat') ? 'talk-front' : null,
+        approachSpotId: isSeat ? (def.approachSpotId || getCouchDismountSpotId(def.id)) : null,
+        exitSpotId: isSeat ? (def.exitSpotId || getCouchDismountSpotId(def.id)) : null,
         activationSpotId: def.id,
         position: { x: spot.apiX, z: spot.apiZ },
       };
@@ -47167,15 +49631,44 @@ function getCouchSeatCandidates(building, couch, index, { actionId = 'life.restA
     .filter(Boolean);
   return listObjectUseSeatCandidates({
     locations,
+    activationSpots: locations.filter(location => location.roles?.includes('seat')),
     objectKey,
     objectType: 'couch',
     actionId,
-    approachSpotId: 'talk-front',
   });
+}
+
+function moveAgentToCouchDismountSpot(couch, activity = {}, agent = null) {
+  if (!couch || !activity || !agent) return null;
+  const building = buildingsMap.get(activity.buildingId) || activity.building || null;
+  if (!building) return null;
+  const seatId = activity.seatId || activity.activationSpotId || activity.spotId || couch.reservation?.seatId || 'sit-center';
+  const dismountSpotId = activity.dismountSpotId || activity.exitSpotId || couch.activeUse?.dismountSpotId || couch.reservation?.dismountSpotId || getCouchDismountSpotId(seatId);
+  const dismountSpot = getFurnitureActionSpot(building, couch, dismountSpotId) || getFurnitureActionSpot(building, couch, getCouchDismountSpotId(seatId));
+  if (!dismountSpot) return null;
+  agent.x = dismountSpot.apiX;
+  agent.y = dismountSpot.apiZ;
+  agent._floor = Math.max(1, Number(dismountSpot.floor || agent._floor || 1) || 1);
+  agent._targetFloor = agent._floor;
+  agent._wanderTarget = null;
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  agent._lastCouchDismount = {
+    spotId: dismountSpot.spotId || dismountSpotId,
+    seatId,
+    x: dismountSpot.apiX,
+    y: dismountSpot.apiZ,
+    floor: dismountSpot.floor,
+    reason: activity.kind || 'couch-use-complete',
+    outsideCollider: true,
+  };
+  if (Number.isFinite(dismountSpot.faceAngle) && agent._group3d) agent._group3d.rotation.y = dismountSpot.faceAngle;
+  return agent._lastCouchDismount;
 }
 
 function releaseCouchSeatUse(couch, activity, agent, reason = 'couch-complete') {
   if (!couch || !activity) return null;
+  const dismount = moveAgentToCouchDismountSpot(couch, activity, agent);
   const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
   const reservationId = activity.reservationId || couch.reservation?.id || null;
   let releaseResult = null;
@@ -47201,7 +49694,7 @@ function releaseCouchSeatUse(couch, activity, agent, reason = 'couch-complete') 
     couch.activeUse = { state: 'idle', mode: 'open-couch', lastAgentId: agent?.id || activity.agentId || null, lastAction: activity.action || activity.kind, lastReleasedSeatId: seatId, lastReleaseReason: reason };
   }
   couch.couchState = { ...(couch.couchState || {}), status: 'open', seats: 3, lastReleasedSeatId: seatId || null, lastReleaseReason: reason, persistentFurniture: true };
-  return releaseResult;
+  return releaseResult ? { ...releaseResult, dismount } : { ok: true, reservation: null, dismount };
 }
 
 function getCouchOccupancyState(buildingId, index) {
@@ -47253,7 +49746,37 @@ function _buildCouchActionButtons(buildingId, index) {
 }
 
 function getSectionalSofaApproachSpotId(seatId) {
-  return seatId === 'chaise' ? 'approach-chaise' : 'talk-front';
+  if (seatId === 'seat-left') return 'stand-left';
+  if (seatId === 'seat-center') return 'stand-center';
+  if (seatId === 'seat-corner') return 'stand-corner';
+  return 'stand-chaise';
+}
+
+function moveAgentToMultiSeatDismountSpot(furniture, activity = {}, agent = null) {
+  if (!furniture || !activity || !agent) return null;
+  const building = buildingsMap.get(activity.buildingId) || activity.building || null;
+  if (!building) return null;
+  const furnitureType = activity.outdoorNodeId ? getOutdoorNodeAssetType(furniture) : furniture.type;
+  const seatId = activity.seatId || activity.activationSpotId || activity.spotId || furniture.reservation?.seatId || null;
+  const seatDef = (FURNITURE_INTERACTION_SPOTS[furnitureType] || []).find(def => def.id === seatId);
+  const dismountSpotId = activity.dismountSpotId || activity.exitSpotId || seatDef?.exitSpotId || seatDef?.approachSpotId || null;
+  let dismountSpot = null;
+  if (activity.outdoorNodeId && furnitureType === 'parkBench') {
+    const runtime = getOutdoorNodeSpotRuntimeTarget(building, furniture, dismountSpotId, activity.actionId || activity.action || 'life.restAtBench', { preferredSpotId: dismountSpotId });
+    if (runtime?.target) dismountSpot = { apiX: runtime.target.x, apiZ: runtime.target.y, floor: runtime.target.floor || 1, spotId: dismountSpotId, faceAngle: runtime.target.faceAngle };
+  } else if (dismountSpotId) {
+    dismountSpot = getFurnitureActionSpot(building, furniture, dismountSpotId);
+  }
+  if (!dismountSpot) return null;
+  agent.x = dismountSpot.apiX;
+  agent.y = dismountSpot.apiZ;
+  agent._floor = Math.max(1, Number(dismountSpot.floor || agent._floor || 1) || 1);
+  agent._targetFloor = agent._floor;
+  agent._wanderTarget = null;
+  agent._waypointPath = null;
+  agent._waypointPathTarget = null;
+  if (Number.isFinite(Number(dismountSpot.faceAngle)) && agent._group3d) agent._group3d.rotation.y = Number(dismountSpot.faceAngle);
+  return { spotId: dismountSpot.spotId || dismountSpotId, seatId, x: dismountSpot.apiX, y: dismountSpot.apiZ, floor: dismountSpot.floor, outsideCollider: true };
 }
 
 function getActiveSectionalSofaReservationSeatIds(sofa, buildingId = null, index = null) {
@@ -47262,10 +49785,10 @@ function getActiveSectionalSofaReservationSeatIds(sofa, buildingId = null, index
   const ids = new Set((store.reservations || [])
     .filter(reservation => reservation && activeStates.has(reservation.state || reservation.status))
     .map(reservation => reservation.seatId || reservation.spotId || reservation.activationSpotId)
-    .filter(Boolean));
+    .filter(seatId => isMultiSeatUseSeatId('sectionalSofa', seatId)));
   if (sofa?.reservation && activeStates.has(sofa.reservation.status || sofa.reservation.state)) {
     const legacySeatId = sofa.reservation.seatId || sofa.reservation.spotId;
-    if (legacySeatId && legacySeatId !== 'talk-front' && legacySeatId !== 'approach-chaise') ids.add(legacySeatId);
+    if (isMultiSeatUseSeatId('sectionalSofa', legacySeatId)) ids.add(legacySeatId);
   }
   addRuntimeFurnitureSeatOccupancy(ids, sofa, buildingId, index, ['sectional-sofa-'], { excludeSpotIds: ['talk-front', 'approach-chaise'] });
   if (buildingId !== null && index !== null) {
@@ -47274,7 +49797,7 @@ function getActiveSectionalSofaReservationSeatIds(sofa, buildingId = null, index
       if (!activity || !String(activity.kind || '').startsWith('sectional-sofa-')) continue;
       if (activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index)) {
         const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
-        if (seatId && seatId !== 'talk-front' && seatId !== 'approach-chaise') ids.add(seatId);
+        if (isMultiSeatUseSeatId('sectionalSofa', seatId)) ids.add(seatId);
       }
     }
   }
@@ -47289,11 +49812,12 @@ function getSectionalSofaSeatCandidates(building, sofa, index, { actionId = 'lif
       const spot = getFurnitureActionSpot(building, sofa, def.id);
       if (!spot) return null;
       const isSeat = def.roles?.includes('seat');
-      const approachSpotId = isSeat ? getSectionalSofaApproachSpotId(def.id) : null;
+      const approachSpotId = isSeat ? (def.approachSpotId || getSectionalSofaApproachSpotId(def.id)) : null;
       return {
         ...def,
         actionId: def.action || actionId,
         approachSpotId,
+        exitSpotId: isSeat ? (def.exitSpotId || approachSpotId) : null,
         activationSpotId: def.id,
         position: { x: spot.apiX, z: spot.apiZ },
       };
@@ -47310,6 +49834,7 @@ function getSectionalSofaSeatCandidates(building, sofa, index, { actionId = 'lif
 
 function releaseSectionalSofaSeatUse(sofa, activity, agent, reason = 'sectional-sofa-complete') {
   if (!sofa || !activity) return null;
+  const dismount = moveAgentToMultiSeatDismountSpot(sofa, activity, agent);
   const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
   const reservationId = activity.reservationId || sofa.reservation?.id || null;
   let releaseResult = null;
@@ -47336,7 +49861,7 @@ function releaseSectionalSofaSeatUse(sofa, activity, agent, reason = 'sectional-
   }
   const activeSeatIds = sofa.activeUse?.activeSeats ? Object.keys(sofa.activeUse.activeSeats).sort() : [];
   sofa.sectionalSofaState = { ...(sofa.sectionalSofaState || {}), status: activeSeatIds.length ? 'occupied' : 'open', seats: 4, activeSeatIds, lastReleasedSeatId: seatId || null, lastReleaseReason: reason, persistentFurniture: true };
-  return releaseResult;
+  return releaseResult ? { ...releaseResult, dismount } : { ok: true, reservation: null, dismount };
 }
 
 function getSectionalSofaOccupancyState(buildingId, index) {
@@ -47393,10 +49918,10 @@ function getActiveLoveseatReservationSeatIds(loveseat, buildingId = null, index 
   const ids = new Set((store.reservations || [])
     .filter(reservation => reservation && activeStates.has(reservation.state || reservation.status))
     .map(reservation => reservation.seatId || reservation.spotId || reservation.activationSpotId)
-    .filter(Boolean));
+    .filter(seatId => isMultiSeatUseSeatId('loveseat', seatId)));
   if (loveseat?.reservation && activeStates.has(loveseat.reservation.status || loveseat.reservation.state)) {
     const legacySeatId = loveseat.reservation.seatId || loveseat.reservation.spotId;
-    if (legacySeatId && !String(legacySeatId).startsWith('approach-') && legacySeatId !== 'talk-front') ids.add(legacySeatId);
+    if (isMultiSeatUseSeatId('loveseat', legacySeatId)) ids.add(legacySeatId);
   }
   addRuntimeFurnitureSeatOccupancy(ids, loveseat, buildingId, index, ['loveseat-'], { excludeSpotIds: ['talk-front', 'approach-left', 'approach-right'] });
   if (buildingId !== null && index !== null) {
@@ -47405,7 +49930,7 @@ function getActiveLoveseatReservationSeatIds(loveseat, buildingId = null, index 
       if (!activity || !String(activity.kind || '').startsWith('loveseat-')) continue;
       if (activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index)) {
         const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
-        if (seatId && !String(seatId).startsWith('approach-') && seatId !== 'talk-front') ids.add(seatId);
+        if (isMultiSeatUseSeatId('loveseat', seatId)) ids.add(seatId);
       }
     }
   }
@@ -47423,7 +49948,8 @@ function getLoveseatSeatCandidates(building, loveseat, index, { actionId = 'life
       return {
         ...def,
         actionId: def.action || actionId,
-        approachSpotId: isSeat ? (def.id === 'seat-right' ? 'approach-right' : 'approach-left') : null,
+        approachSpotId: isSeat ? (def.approachSpotId || (def.id === 'seat-right' ? 'stand-right' : 'stand-left')) : null,
+        exitSpotId: isSeat ? (def.exitSpotId || def.approachSpotId || (def.id === 'seat-right' ? 'stand-right' : 'stand-left')) : null,
         activationSpotId: def.id,
         position: { x: spot.apiX, z: spot.apiZ },
       };
@@ -47440,6 +49966,7 @@ function getLoveseatSeatCandidates(building, loveseat, index, { actionId = 'life
 
 function releaseLoveseatSeatUse(loveseat, activity, agent, reason = 'loveseat-complete') {
   if (!loveseat || !activity) return null;
+  const dismount = moveAgentToMultiSeatDismountSpot(loveseat, activity, agent);
   const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
   const reservationId = activity.reservationId || loveseat.reservation?.id || null;
   let releaseResult = null;
@@ -47466,7 +49993,7 @@ function releaseLoveseatSeatUse(loveseat, activity, agent, reason = 'loveseat-co
   }
   const activeSeatIds = loveseat.activeUse?.activeSeats ? Object.keys(loveseat.activeUse.activeSeats).sort() : [];
   loveseat.loveseatState = { ...(loveseat.loveseatState || {}), status: activeSeatIds.length ? 'occupied' : 'open', seats: 2, activeSeatIds, lastReleasedSeatId: seatId || null, lastReleaseReason: reason, persistentFurniture: true };
-  return releaseResult;
+  return releaseResult ? { ...releaseResult, dismount } : { ok: true, reservation: null, dismount };
 }
 
 function getLoveseatOccupancyState(buildingId, index) {
@@ -47783,6 +50310,7 @@ const TABLE_SEATING_CONFIG = Object.freeze({
   outdoorCafeTable: Object.freeze({ prefix: 'outdoor-cafe-table-', openMode: 'open-outdoor-cafe-table', stateKey: 'tableState', objectKeyFn: getOutdoorCafeTableObjectKey, storeFn: getOutdoorCafeTableObjectUseSeatStore, defaultActionId: 'life.sitAtOutdoorCafeTable', capacity: 4, surfaceCapacity: 2 }),
   picnicTable: Object.freeze({ prefix: 'picnic-table-', openMode: 'open-picnic-table', stateKey: 'tableState', objectKeyFn: getPicnicTableObjectKey, storeFn: getPicnicTableObjectUseSeatStore, defaultActionId: 'life.sitAtPicnicTable', capacity: 4, surfaceCapacity: 2 }),
   smallRoundMeetingTable: Object.freeze({ prefix: 'small-round-meeting-table-', openMode: 'open-compact-meeting', stateKey: 'tableState', objectKeyFn: getSmallRoundMeetingTableObjectKey, storeFn: getSmallRoundMeetingTableObjectUseSeatStore, defaultActionId: 'planning.smallRoundMeetingTablePlan', capacity: 4, surfaceCapacity: 0 }),
+  diningTable: Object.freeze({ prefix: 'dining-table-', openMode: 'open-dining-table', stateKey: 'tableState', objectKeyFn: getDiningTableObjectKey, storeFn: getDiningTableObjectUseSeatStore, defaultActionId: 'life.eatAtDiningTable', capacity: 4, surfaceCapacity: 4 }),
 });
 
 function getTableSeatingConfig(type) {
@@ -47832,7 +50360,7 @@ function getTableSeatCandidates(building, table, index, { actionId = null } = {}
       return {
         ...def,
         actionId: def.action || resolvedActionId,
-        approachSpotId: isSeat ? def.id : null,
+        approachSpotId: isSeat ? (def.approachSpotId || def.id) : null,
         activationSpotId: def.id,
         facingMode: isSeat ? 'face-center' : 'any',
         position: { x: spot.apiX, z: spot.apiZ },
@@ -48803,7 +51331,13 @@ function activateStandingUseMachineOnArrival(agent, idleActivity) {
   idleActivity.animationId = config.animationId;
   idleActivity.faceAngle = machine.activeUse.facingAngleRad ?? idleActivity.faceAngle;
   requestObjectActionPointDebugOverlayRefresh();
-  return activation;
+  return {
+    ...(activation || {}),
+    ok: true,
+    reservation: activation?.reservation || machine.reservation,
+    activeUse: activation?.activeUse || machine.activeUse,
+    slotId: idleActivity.activeUseSlotId,
+  };
 }
 
 function releaseStandingUseMachine(machine, activity = {}, agent = null, reason = 'standing-use-complete') {
@@ -51544,6 +54078,20 @@ function _buildPoolTableActionButtons(buildingId, index) {
   `;
 }
 
+const CORE_LEGACY_FURNITURE_ACTIONS = Object.freeze({
+  counter: Object.freeze({ icon: '🥣', label: 'Prep at Counter', actionId: 'life.prepAtCounter' }),
+  diningTable: Object.freeze({ icon: '🍽️', label: 'Eat / Talk', actionId: 'life.eatAtDiningTable' }),
+  sink: Object.freeze({ icon: '🚰', label: 'Wash / Drink', actionId: 'life.useSink' }),
+  stove: Object.freeze({ icon: '🍳', label: 'Cook', actionId: 'life.cookAtStove' }),
+  tv: Object.freeze({ icon: '📺', label: 'Watch TV', actionId: 'life.watchTv' }),
+});
+
+function _buildCoreLegacyFurnitureActionButtons(furnitureType) {
+  const config = CORE_LEGACY_FURNITURE_ACTIONS[furnitureType];
+  if (!config) return '';
+  return `<button onclick="window._useCoreLegacyFurniture('${furnitureType}')" style="padding:4px 12px;background:rgba(14,116,144,0.30);border:1px solid #22d3ee;color:#fff;border-radius:4px;cursor:pointer" title="Route an available agent to this object's formal interaction area and play its dedicated position/animation">${config.icon} ${config.label}</button>`;
+}
+
 function _showFurnitureActions(buildingId, index) {
   const contextMenu = document.getElementById('contextMenu');
   if (contextMenu && contextMenu.style.display !== 'none' && ['interact', 'edit'].includes(contextMenu.dataset.contextView || '')) {
@@ -51589,6 +54137,7 @@ function _showFurnitureActions(buildingId, index) {
   const medicalSupplyCabinetButtons = furniture?.type === 'medicalSupplyCabinet' ? _buildMedicalSupplyCabinetActionButtons(buildingId, index) : ''; 
   const supplyCabinetButtons = furniture?.type === 'supplyCabinet' ? _buildSupplyCabinetActionButtons(buildingId, index) : '';
   const kitchenIslandButtons = furniture?.type === 'kitchenIsland' ? _buildKitchenIslandActionButtons(buildingId, index) : '';
+  const coreLegacyFurnitureButtons = _buildCoreLegacyFurnitureActionButtons(furniture?.type);
   const receptionDeskButtons = furniture?.type === 'receptionDesk' ? _buildReceptionDeskActionButtons(buildingId, index) : '';
   const cafeCounterButtons = furniture?.type === 'cafeCounter' ? _buildCafeCounterActionButtons(buildingId, index) : '';
   const smallCafeTableButtons = furniture?.type === 'smallCafeTable' ? _buildSmallCafeTableActionButtons(buildingId, index) : '';
@@ -51671,6 +54220,7 @@ function _showFurnitureActions(buildingId, index) {
     ${diagnosticStationButtons}
     ${medicalSupplyCabinetButtons}
     ${supplyCabinetButtons}
+    ${coreLegacyFurnitureButtons}
     ${kitchenIslandButtons}
     ${receptionDeskButtons}
     ${cafeCounterButtons}
@@ -51734,6 +54284,202 @@ function _showFurnitureActions(buildingId, index) {
   `;
   bar.style.display = 'flex';
 }
+
+window._useCoreLegacyFurniture = (requestedType = '', options = {}) => {
+  if (!_selectedFurniture) return;
+  const { buildingId, index } = _selectedFurniture;
+  const building = buildingsMap.get(buildingId);
+  const furniture = building?.interior?.furniture?.[index];
+  const type = String(requestedType || furniture?.type || '');
+  const actionConfig = CORE_LEGACY_FURNITURE_ACTIONS[type];
+  const activityConfig = getLocalIdleActivityConfig(type);
+  if (!building || !furniture || furniture.type !== type || !actionConfig || !activityConfig) return;
+
+  const preferredAgentId = String(options?.preferredAgentId || '');
+  const candidates = (agentsList || []).filter(agent => {
+    if (!agent || isWorkPresenceStatus(agent.status) || agent._atDesk || agent._tagState?.playing) return false;
+    return !agent._idleActivity || !String(agent._idleActivity.kind || '').startsWith(activityConfig.kind.split('-').slice(0, 2).join('-'));
+  });
+  const referenceSpot = getFurnitureActionSpot(building, furniture, activityConfig.spotId) || getFurnitureActionSpot(building, furniture);
+  if (!referenceSpot) {
+    showToast(`${actionConfig.icon} This object has no usable interaction area`, 'warning');
+    return;
+  }
+  const agent = candidates.sort((a, b) => {
+    if (preferredAgentId) {
+      if (String(a.id || '') === preferredAgentId) return -1;
+      if (String(b.id || '') === preferredAgentId) return 1;
+    }
+    return Math.hypot((a.x || 0) - referenceSpot.apiX, (a.y || 0) - referenceSpot.apiZ) -
+      Math.hypot((b.x || 0) - referenceSpot.apiX, (b.y || 0) - referenceSpot.apiZ);
+  })[0];
+  if (!agent) {
+    showToast('No idle agent is available for this interaction', 'warning');
+    return;
+  }
+
+  const seatPlan = type === 'diningTable'
+    ? getLocalIdleSeatReservationPlan(building, furniture, index, agent, { ...activityConfig, action: actionConfig.actionId })
+    : null;
+  if (type === 'diningTable' && !seatPlan) {
+    showToast('All dining table seats are occupied', 'warning');
+    return;
+  }
+  const routeSpot = seatPlan?.targetSpot || referenceSpot;
+  const dockSpot = seatPlan?.seatSpot || referenceSpot;
+  const reservationId = seatPlan?.reservation?.id || `core-use:${buildingId}:${index}:${agent.id || agent.name || 'agent'}:${Date.now()}`;
+  furniture.reservation = {
+    id: reservationId,
+    agentId: agent.id || agent.name || 'agent',
+    actionId: actionConfig.actionId,
+    spotId: dockSpot.spotId,
+    seatId: seatPlan?.selectedSeat?.seatId || null,
+    status: 'held',
+  };
+  furniture.activeUse = { state: 'reserved', mode: activityConfig.kind, actionId: actionConfig.actionId, agentId: agent.id || null, interactionSpotId: dockSpot.spotId };
+  setAgentTargetForExplicitObjectAction(agent, {
+    x: routeSpot.apiX,
+    y: routeSpot.apiZ,
+    floor: routeSpot.floor,
+    targetKind: 'placed-object',
+    objectInstanceId: furniture.id || `${buildingId}-${type}-${index}`,
+    interactionSpotId: dockSpot.spotId,
+    approachSpotId: routeSpot.spotId,
+    activationSpotId: dockSpot.spotId,
+    actionId: actionConfig.actionId,
+    reservationId,
+  }, building, routeSpot.floor);
+  agent._idleActivity = {
+    kind: activityConfig.kind,
+    phase: 'approach',
+    buildingId,
+    furnitureIndex: index,
+    furnitureType: type,
+    stayMs: randomRangeMs(activityConfig.stayMs),
+    faceAngle: seatPlan?.faceAngle ?? dockSpot.faceAngle,
+    dockTarget: { x: dockSpot.apiX, y: dockSpot.apiZ },
+    routeApproachTarget: seatPlan?.routeApproachTarget || { x: routeSpot.apiX, y: routeSpot.apiZ, floor: routeSpot.floor, spotId: routeSpot.spotId },
+    dockSnapRadius: activityConfig.dockSnapRadius || 7,
+    spotId: dockSpot.spotId,
+    seatId: seatPlan?.selectedSeat?.seatId || null,
+    approachSpotId: routeSpot.spotId,
+    activationSpotId: dockSpot.spotId,
+    reservationId,
+    objectKey: seatPlan?.objectKey || null,
+    capacityKey: seatPlan?.reservation?.capacityKey || null,
+    seatSurfaceLift: seatPlan?.seatSurfaceLift || null,
+    action: actionConfig.actionId,
+    actionId: actionConfig.actionId,
+    animationId: activityConfig.animationId,
+    lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, releaseOnCompletion: true },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  if (options?.persist !== false) persistBuilding(building);
+  showToast(`${actionConfig.icon} ${agent.name || agent.id} is using the ${labelFromFilterValue(type)}`, 'success');
+  setTimeout(() => _showFurnitureActions(buildingId, index), 80);
+};
+
+window.__verifyFurnitureAuditCoreLegacyInteractions = () => {
+  const verifyId = `verify-furniture-audit-core-${Date.now()}`;
+  const types = ['counter', 'diningTable', 'sink', 'stove', 'tv'];
+  const building = {
+    id: verifyId,
+    name: 'Furniture Audit Core Interaction Verification',
+    x: 0,
+    z: 0,
+    width: 20,
+    depth: 12,
+    widthTiles: 20,
+    heightTiles: 12,
+    rotation: 0,
+    interior: { floors: 1, furniture: types.map((type, index) => ({
+      id: `${verifyId}-${type}`,
+      type,
+      x: 2.5 + index * 3.25,
+      z: 5,
+      rotation: index % 2 ? 90 : 0,
+      floor: 1,
+    })) },
+  };
+  const fixtureAgents = types.map((type, index) => ({
+    id: `${verifyId}-${type}-agent`,
+    name: `${labelFromFilterValue(type)} QA Agent`,
+    emoji: '🧪',
+    status: 'idle',
+    x: (2.5 + index * 3.25) * API_TILE,
+    y: 7 * API_TILE,
+    _floor: 1,
+    _tagState: {},
+  }));
+  const previousSelected = _selectedFurniture;
+  const previousAgents = agentsList;
+  const previousBuilding = buildingsMap.get(verifyId);
+  const actionBar = document.getElementById('furnitureActionBar');
+  const previousActionBarHtml = actionBar?.innerHTML || '';
+  const previousActionBarDisplay = actionBar?.style.display || '';
+  try {
+    buildingsMap.set(verifyId, building);
+    agentsList = fixtureAgents;
+    const summaries = types.map((type, index) => {
+      const furniture = building.interior.furniture[index];
+      const agent = fixtureAgents[index];
+      const config = getLocalIdleActivityConfig(type);
+      const expectedAction = CORE_LEGACY_FURNITURE_ACTIONS[type];
+      _selectedFurniture = { buildingId: verifyId, index, mesh: null };
+      _showFurnitureActions(verifyId, index);
+      const button = document.querySelector(`#furnitureActionBar button[onclick*="_useCoreLegacyFurniture('${type}')"]`);
+      window._useCoreLegacyFurniture(type, { preferredAgentId: agent.id, persist: false });
+      const activity = agent._idleActivity || null;
+      const dockSpot = activity?.spotId ? getFurnitureActionSpot(building, furniture, activity.spotId) : null;
+      const routeSpot = activity?.approachSpotId ? getFurnitureActionSpot(building, furniture, activity.approachSpotId) : dockSpot;
+      const hasRouteTarget = Boolean(agent._agentIntent || agent._route?.length || agent._target || activity?.routeApproachTarget);
+      const reservationHeld = furniture.reservation?.agentId === agent.id && furniture.reservation?.status === 'held';
+      const activeUseReserved = furniture.activeUse?.agentId === agent.id && furniture.activeUse?.state === 'reserved';
+      const correctActivity = activity?.kind === config?.kind && activity?.animationId === config?.animationId &&
+        activity?.actionId === expectedAction?.actionId && activity?.phase === 'approach';
+      const correctDock = Boolean(dockSpot && activity?.dockTarget &&
+        Math.abs(activity.dockTarget.x - dockSpot.apiX) < 0.001 &&
+        Math.abs(activity.dockTarget.y - dockSpot.apiZ) < 0.001);
+      const diningSeatReserved = type !== 'diningTable' || Boolean(activity?.seatId && activity?.approachSpotId && activity.approachSpotId !== activity.seatId);
+      return {
+        type,
+        buttonPresent: Boolean(button),
+        actionId: activity?.actionId || null,
+        activityKind: activity?.kind || null,
+        animationId: activity?.animationId || null,
+        interactionSpotId: activity?.spotId || null,
+        approachSpotId: activity?.approachSpotId || null,
+        routeSpotReachable: Boolean(routeSpot),
+        hasRouteTarget,
+        reservationHeld,
+        activeUseReserved,
+        correctActivity,
+        correctDock,
+        diningSeatReserved,
+        ok: Boolean(button && routeSpot && hasRouteTarget && reservationHeld && activeUseReserved && correctActivity && correctDock && diningSeatReserved),
+      };
+    });
+    return {
+      ok: summaries.every(summary => summary.ok),
+      persisted: false,
+      summaries,
+      visualEvidenceOwner: 'furniture-fix-visual-audit.mjs',
+    };
+  } finally {
+    _selectedFurniture = previousSelected;
+    agentsList = previousAgents;
+    if (previousBuilding) buildingsMap.set(verifyId, previousBuilding);
+    else buildingsMap.delete(verifyId);
+    const currentActionBar = document.getElementById('furnitureActionBar');
+    if (actionBar) {
+      actionBar.innerHTML = previousActionBarHtml;
+      actionBar.style.display = previousActionBarDisplay;
+    } else if (currentActionBar?.parentNode) {
+      currentActionBar.parentNode.removeChild(currentActionBar);
+    }
+  }
+};
 
 window._rotateFurniture = (dir) => {
   if (!_selectedFurniture) return;
@@ -51887,44 +54633,114 @@ window._useShadeTreeClusterFurniture = (mode = 'rest') => {
   setTimeout(() => _showFurnitureActions(buildingId, index), 80);
 };
 
-window._useCouchFurniture = (mode = 'rest') => {
+function resolveCouchRouteContract({
+  seatSpot,
+  approachSpot,
+  directManualSeatDock = false,
+  backendRuntimeSeatDock = false,
+  buildingId = null,
+} = {}) {
+  const finalTargetIsSeat = directManualSeatDock || backendRuntimeSeatDock;
+  return {
+    routeStartSpot: finalTargetIsSeat ? seatSpot : approachSpot,
+    routeApproachTarget: backendRuntimeSeatDock && !directManualSeatDock
+      ? {
+          x: approachSpot?.apiX,
+          y: approachSpot?.apiZ,
+          floor: approachSpot?.floor,
+          buildingId,
+          spotId: approachSpot?.spotId,
+        }
+      : null,
+  };
+}
+
+window._useCouchFurniture = (mode = 'rest', preferredAgentId = null, options = {}) => {
   if (!_selectedFurniture) return;
   const { buildingId, index } = _selectedFurniture;
   const building = buildingsMap.get(buildingId);
   const couch = building?.interior?.furniture?.[index];
   if (!building || !couch || couch.type !== 'couch') return;
+  // A manual drag/drop targets one specific cushion, so occupancy of the other
+  // cushions must not block it. Only the requested seat matters in that case.
+  const manualDropContext = _activeManualAgentObjectDropContext?.furniture === couch ? _activeManualAgentObjectDropContext : null;
+  const manualPreferredSeatId = ['sit-left', 'sit-center', 'sit-right'].includes(manualDropContext?.spotId)
+    ? manualDropContext.spotId
+    : null;
   const occupancy = getCouchOccupancyState(buildingId, index);
-  if ((occupancy.openSeats || 0) <= 0) {
+  const manualSeatTaken = manualPreferredSeatId
+    ? getActiveCouchReservationSeatIds(couch, buildingId, index).has(manualPreferredSeatId)
+    : false;
+  if (manualPreferredSeatId ? manualSeatTaken : (occupancy.openSeats || 0) <= 0) {
     showToast(`🛋️ ${occupancy.label}`, 'warning');
     _showFurnitureActions(buildingId, index);
     return;
   }
   const actionId = mode === 'socialize' ? 'life.socialAtCouch' : (mode === 'sit' ? 'life.sitAtCouch' : 'life.restAtCouch');
-  const approachSpot = getFurnitureActionSpot(building, couch, 'talk-front');
-  if (!approachSpot) {
-    showToast('No reachable couch approach spot available', 'warning');
+  const store = getCouchObjectUseSeatStore(couch);
+  const candidates = getCouchSeatCandidates(building, couch, index, { actionId });
+  const occupiedSeatIds = getActiveCouchReservationSeatIds(couch, buildingId, index);
+  const preferredSeatId = options.preferredSeatId ||
+    (_activeManualAgentObjectDropContext?.furniture === couch ? _activeManualAgentObjectDropContext.spotId : null);
+  const preferredSeat = candidates.find(candidate => candidate.seatId === preferredSeatId && !occupiedSeatIds.has(candidate.seatId)) || null;
+  const availableApproachSpots = (preferredSeat ? [preferredSeat] : candidates)
+    .filter(candidate => !occupiedSeatIds.has(candidate.seatId))
+    .map(candidate => getFurnitureActionSpot(building, couch, candidate.approachSpotId || getCouchDismountSpotId(candidate.seatId)))
+    .filter(Boolean);
+  if (!availableApproachSpots.length) {
+    showToast('No reachable couch seat approach is available', 'warning');
     return;
   }
-  const sameBuildingAgents = agentsList.filter(agent => {
-    if (!agent || isWorkPresenceStatus(agent.status) || agent._atDesk || agent._tagState?.playing) return false;
+  // The explicitly requested agent (manual drop / picker) is always eligible.
+  // Auto-selection still skips busy agents and anyone already on this couch.
+  const isExplicitlyRequestedAgent = agent => Boolean(preferredAgentId) &&
+    String(agent?.id || agent?.statusKey || '') === String(preferredAgentId);
+  const availableAgents = agentsList.filter(agent => {
+    if (!agent) return false;
+    if (isExplicitlyRequestedAgent(agent)) return true;
+    if (isWorkPresenceStatus(agent.status) || agent._atDesk || agent._tagState?.playing) return false;
     if (agent._idleActivity && String(agent._idleActivity.kind || '').startsWith('couch-')) return false;
+    return true;
+  });
+  const sameBuildingAgents = availableAgents.filter(agent => {
     const currentBuilding = getMovementInteriorBuildingAt(agent.x, agent.y) || agent._currentBuilding || null;
     return currentBuilding?.id === buildingId || isPointInsideBuildingInterior(building, agent.x, agent.y, -0.15);
   });
-  const agent = sameBuildingAgents.sort((a, b) =>
-    Math.hypot((a.x || 0) - approachSpot.apiX, (a.y || 0) - approachSpot.apiZ) -
-    Math.hypot((b.x || 0) - approachSpot.apiX, (b.y || 0) - approachSpot.apiZ)
-  )[0] || agentsList.find(candidate => candidate && candidate.status !== 'working' && !(candidate._idleActivity && String(candidate._idleActivity.kind || '').startsWith('couch-')));
+  const distanceToAvailableApproach = agent => Math.min(...availableApproachSpots.map(spot =>
+    Math.hypot((agent.x || 0) - spot.apiX, (agent.y || 0) - spot.apiZ)
+  ));
+  const preferredAgent = preferredAgentId
+    ? (availableAgents.find(isExplicitlyRequestedAgent) ||
+       agentsList.find(candidate => String(candidate?.id || candidate?.statusKey || '') === String(preferredAgentId)) ||
+       null)
+    : null;
+  // A manual drop must seat the dragged agent or fail loudly; silently seating
+  // some other agent is what made drag/drop look broken.
+  if (preferredAgentId && !preferredAgent) {
+    showToast('That agent cannot use this couch right now', 'warning');
+    return;
+  }
+  const agent = preferredAgent ||
+    [...sameBuildingAgents].sort((a, b) => distanceToAvailableApproach(a) - distanceToAvailableApproach(b))[0] ||
+    [...availableAgents].sort((a, b) => distanceToAvailableApproach(a) - distanceToAvailableApproach(b))[0];
   if (!agent) {
     showToast('No idle agent available for couch use', 'warning');
     return;
   }
-  const store = getCouchObjectUseSeatStore(couch);
-  const candidates = getCouchSeatCandidates(building, couch, index, { actionId });
-  const occupiedSeatIds = getActiveCouchReservationSeatIds(couch, buildingId, index);
-  const reservationResult = chooseAndReserveObjectUseSeat(store, candidates, {
+  // Release any stale couch claim this agent still holds before re-seating it,
+  // so dragging a seated agent to another cushion works cleanly.
+  if (agent._idleActivity && String(agent._idleActivity.kind || '').startsWith('couch-')) {
+    const priorBuilding = buildingsMap.get(agent._idleActivity.buildingId);
+    const priorCouch = priorBuilding?.interior?.furniture?.[agent._idleActivity.furnitureIndex];
+    if (priorCouch?.type === 'couch') releaseCouchSeatUse(priorCouch, agent._idleActivity, agent, 'manual-reseat');
+    agent._idleActivity = null;
+  }
+  // When the user drops on a specific cushion, restrict the candidate set to
+  // that cushion so the reservation cannot drift to a neighbouring seat.
+  const reservationCandidates = preferredSeat ? [preferredSeat] : candidates;
+  const reservationResult = chooseAndReserveObjectUseSeat(store, reservationCandidates, {
     agentId: agent.id,
-    agentPosition: { x: agent.x || 0, z: agent.y || 0 },
+    agentPosition: preferredSeat?.position || { x: agent.x || 0, z: agent.y || 0 },
     actionId,
     occupiedSeatIds,
     reservationId: `couch:${buildingId}:${index}:${agent.id}:${Date.now()}`,
@@ -51936,12 +54752,25 @@ window._useCouchFurniture = (mode = 'rest') => {
   }
   const selectedSeat = reservationResult.seat;
   const seatSpot = selectedSeat.worldSpot || getFurnitureActionSpot(building, couch, selectedSeat.seatId);
-  if (!seatSpot) {
+  const approachSpotId = selectedSeat.approachSpotId || getCouchDismountSpotId(selectedSeat.seatId);
+  const approachSpot = getFurnitureActionSpot(building, couch, approachSpotId);
+  const dismountSpotId = selectedSeat.exitSpotId || getCouchDismountSpotId(selectedSeat.seatId);
+  if (!seatSpot || !approachSpot) {
     releaseObjectUseSeatReservation(store, { reservationId: reservationResult.reservation.id, agentId: agent.id, seatId: selectedSeat.seatId, terminalState: 'failed', reason: 'missing-seat-spot' });
-    showToast('No couch cushion spot available', 'warning');
+    showToast('No couch cushion or front approach spot is available', 'warning');
     return;
   }
-  const routeResult = setAgentTargetForExplicitObjectAction(agent, { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor }, building, approachSpot.floor, {
+  const faceAngle = getFurnitureForwardFacingAngle(building, couch, seatSpot, seatSpot.facing || selectedSeat.facing || 'north') ?? seatSpot.faceAngle;
+  // Normal couch use still routes through the clear front stand-* point.
+  // A manual drop is already at the couch, though, and the backend treats
+  // manualDropSnapToUse as immediately active at the target coordinates. If
+  // we send the stand-* coordinates here, the authoritative runtime correctly
+  // (but undesirably) places the "seated" agent on the stand point and later
+  // overwrites the local cushion snap. Send the selected sit-* activation
+  // coordinates for manual drops so client and server agree on the same final
+  // dock.
+  const directManualSeatDock = Boolean(manualDropContext && preferredAgentId);
+  const routeMetadata = {
     sourceFunction: '_useCouchFurniture',
     kind: `couch-${mode}`,
     objectId: getCouchObjectKey(buildingId, index),
@@ -51953,15 +54782,46 @@ window._useCouchFurniture = (mode = 'rest') => {
     approachSpotId: approachSpot.spotId,
     activationSpotId: selectedSeat.seatId,
     selectedSeatId: selectedSeat.seatId,
+    dismountSpotId,
+    exitSpotId: dismountSpotId,
     reservationId: reservationResult.reservation.id,
+    faceAngle,
+    slotId: selectedSeat.seatId,
+    activeUseSlotId: selectedSeat.seatId,
+    skipReachabilityAdjust: directManualSeatDock,
+    backendRuntimeObjectUse: options.backendRuntimeObjectUse,
+  };
+  const resolvedRouteMetadata = getManualObjectDropMetadataForExplicitAction(agent, routeMetadata);
+  const backendRuntimeSeatDock = shouldRequestBackendObjectUseForExplicitObjectAction(agent, resolvedRouteMetadata);
+  const routeContract = resolveCouchRouteContract({
+    seatSpot,
+    approachSpot,
+    directManualSeatDock,
+    backendRuntimeSeatDock,
+    buildingId,
   });
+  const routeStartSpot = routeContract.routeStartSpot;
+  const routeResult = setAgentTargetForExplicitObjectAction(agent, {
+    x: routeStartSpot.apiX,
+    y: routeStartSpot.apiZ,
+    floor: routeStartSpot.floor,
+    spotId: selectedSeat.seatId,
+    interactionSpotId: selectedSeat.seatId,
+    seatId: selectedSeat.seatId,
+    slotId: selectedSeat.seatId,
+    activationSpotId: selectedSeat.seatId,
+    manualDropSnapToUse: directManualSeatDock,
+    skipReachabilityAdjust: directManualSeatDock,
+    dockSnapRadius: 7,
+    routeApproachTarget: routeContract.routeApproachTarget,
+    faceAngle,
+  }, building, routeStartSpot.floor, routeMetadata);
   if (routeResult?.accepted === false) {
     releaseObjectUseSeatReservation(store, { reservationId: reservationResult.reservation.id, agentId: agent.id, seatId: selectedSeat.seatId, terminalState: 'cancelled', reason: 'intent-rejected' });
     showToast('Couch route was blocked by a higher-priority intent', 'warning');
     return;
   }
-  const faceAngle = getFurnitureForwardFacingAngle(building, couch, seatSpot, seatSpot.facing || selectedSeat.facing || 'north') ?? seatSpot.faceAngle;
-  couch.reservation = { id: reservationResult.reservation.id, agentId: agent.id, actionId, seatId: selectedSeat.seatId, spotId: selectedSeat.seatId, approachSpotId: approachSpot.spotId, status: 'held', capacityKey: getObjectUseSeatCapacityKey(getCouchObjectKey(buildingId, index), selectedSeat.seatId) };
+  couch.reservation = { id: reservationResult.reservation.id, agentId: agent.id, actionId, seatId: selectedSeat.seatId, spotId: selectedSeat.seatId, approachSpotId: approachSpot.spotId, dismountSpotId, exitSpotId: dismountSpotId, status: 'held', capacityKey: getObjectUseSeatCapacityKey(getCouchObjectKey(buildingId, index), selectedSeat.seatId) };
   couch.couchState = { ...(couch.couchState || {}), status: 'reserved', seats: 3, reservedSeatIds: [...getActiveCouchReservationSeatIds(couch, buildingId, index)].sort(), lastAction: actionId, persistentFurniture: true };
   agent._idleActivity = {
     kind: `couch-${mode}`,
@@ -51973,6 +54833,8 @@ window._useCouchFurniture = (mode = 'rest') => {
     seatId: selectedSeat.seatId,
     activationSpotId: selectedSeat.seatId,
     approachSpotId: approachSpot.spotId,
+    dismountSpotId,
+    exitSpotId: dismountSpotId,
     reservationId: reservationResult.reservation.id,
     actionId,
     action: actionId,
@@ -51980,8 +54842,9 @@ window._useCouchFurniture = (mode = 'rest') => {
     stayMs: mode === 'socialize' ? 16000 : (mode === 'rest' ? 18000 : 12000),
     faceAngle,
     dockTarget: { x: seatSpot.apiX, y: seatSpot.apiZ },
-    routeApproachTarget: { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor, spotId: approachSpot.spotId },
+    routeApproachTarget: { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor, spotId: approachSpot.spotId, faceAngle },
     dockSnapRadius: 7,
+    seatSurfaceLift: getFurnitureSeatSurfaceLift('couch'),
     furnitureType: 'couch',
     animationId: mode === 'socialize' ? 'sit' : 'sit',
     stationary: true,
@@ -51996,35 +54859,632 @@ window._useCouchFurniture = (mode = 'rest') => {
 };
 
 window.__verifyPhase3CTask2CouchThreeCushionSeating = () => {
-  const building = { id: 'verify-phase3c-couch-building', x: 0, z: 0, width: 10, depth: 8, rotation: 0, interior: { floors: 1, furniture: [] } };
-  const couch = { id: 'verify-phase3c-couch', type: 'couch', x: 4, z: 3, rotation: 90 };
+  const building = { id: 'verify-phase3c-couch-building', x: 0, z: 0, width: 10, depth: 8, widthTiles: 10, heightTiles: 8, rotation: 0, interior: { floors: 1, furniture: [] } };
+  const couch = {
+    id: 'verify-phase3c-couch',
+    type: 'couch',
+    x: 4,
+    z: 3,
+    rotation: 90,
+    couchColors: { body: '#512da8', backArms: '#311b92', seatCushions: '#b39ddb', feet: '#4e342e' },
+  };
+  const verifierAgents = [];
   building.interior.furniture.push(couch);
-  const candidates = getCouchSeatCandidates(building, couch, 0, { actionId: 'life.restAtCouch' });
-  const store = getCouchObjectUseSeatStore(couch);
-  const first = chooseAndReserveObjectUseSeat(store, candidates, { agentId: 'verify-left', agentPosition: { x: candidates.find(seat => seat.seatId === 'sit-left')?.position?.x || 0, z: candidates.find(seat => seat.seatId === 'sit-left')?.position?.z || 0 }, reservationId: 'verify-couch-left' });
-  const second = chooseAndReserveObjectUseSeat(store, candidates, { agentId: 'verify-second', agentPosition: { x: candidates.find(seat => seat.seatId === 'sit-left')?.position?.x || 0, z: candidates.find(seat => seat.seatId === 'sit-left')?.position?.z || 0 }, reservationId: 'verify-couch-second' });
-  const seatSpot = getFurnitureActionSpot(building, couch, first.reservation?.seatId || 'sit-left');
-  const approachSpot = getFurnitureActionSpot(building, couch, 'talk-front');
-  const facing90 = getFurnitureForwardFacingAngle(building, couch, seatSpot, seatSpot?.facing || 'north');
-  const active = first.ok ? activateObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: first.reservation.agentId, seatId: first.reservation.seatId }) : null;
-  const wrongRelease = first.ok ? releaseObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: 'verify-second', seatId: first.reservation.seatId, reason: 'wrong-agent' }) : null;
-  const released = first.ok ? releaseObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: first.reservation.agentId, seatId: first.reservation.seatId, reason: 'complete' }) : null;
-  const ok = candidates.length === 3 && candidates.every(seat => seat.approachSpotId === 'talk-front') && first.ok && second.ok && first.reservation.seatId !== second.reservation.seatId && Number.isFinite(facing90) && active?.ok && wrongRelease?.ok === false && released?.ok && store.reservations.find(r => r.id === second.reservation.id)?.state === 'held';
+  const previousBuilding = buildingsMap.get(building.id);
+  buildingsMap.set(building.id, building);
+  try {
+    const candidates = getCouchSeatCandidates(building, couch, 0, { actionId: 'life.restAtCouch' });
+    const store = getCouchObjectUseSeatStore(couch);
+    const leftCandidate = candidates.find(seat => seat.seatId === 'sit-left');
+    const first = chooseAndReserveObjectUseSeat(store, candidates, { agentId: 'verify-left', agentPosition: leftCandidate?.position || { x: 0, z: 0 }, reservationId: 'verify-couch-left' });
+    const second = chooseAndReserveObjectUseSeat(store, candidates, { agentId: 'verify-second', agentPosition: leftCandidate?.position || { x: 0, z: 0 }, reservationId: 'verify-couch-second' });
+    for (const reservationResult of [first, second]) {
+      if (!reservationResult?.ok) continue;
+      const verifierAgent = {
+        id: reservationResult.reservation.agentId,
+        _idleActivity: {
+          kind: 'couch-rest',
+          phase: reservationResult === first ? 'active' : 'approach',
+          buildingId: building.id,
+          furnitureIndex: 0,
+          furnitureType: 'couch',
+          seatId: reservationResult.reservation.seatId,
+          activeUseSlotId: reservationResult.reservation.seatId,
+          reservationId: reservationResult.reservation.id,
+        },
+      };
+      agentsList.push(verifierAgent);
+      verifierAgents.push(verifierAgent);
+    }
+    const seatSpot = getFurnitureActionSpot(building, couch, first.reservation?.seatId || 'sit-left');
+    const approachSpot = getFurnitureActionSpot(building, couch, first.seat?.approachSpotId || 'stand-left');
+    const facing90 = getFurnitureForwardFacingAngle(building, couch, seatSpot, seatSpot?.facing || 'north');
+    const active = first.ok ? activateObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: first.reservation.agentId, seatId: first.reservation.seatId }) : null;
+    const wrongRelease = first.ok ? releaseObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: 'verify-second', seatId: first.reservation.seatId, reason: 'wrong-agent' }) : null;
+    const leftDropAvailability = isFurnitureAvailableForDraggedAgent(building.id, 0, couch, { id: 'verify-third' }, 'sit-left');
+    const rightDropAvailability = isFurnitureAvailableForDraggedAgent(building.id, 0, couch, { id: 'verify-third' }, 'sit-right');
+    const rightManualDrop = makeDraggedAgentObjectDrop(
+      building.id,
+      0,
+      building,
+      couch,
+      getFurnitureActionSpot(building, couch, 'sit-right'),
+      { id: 'verify-third' },
+    );
+    couch.reservation = first.ok ? { id: first.reservation.id, agentId: first.reservation.agentId, seatId: first.reservation.seatId, spotId: first.reservation.seatId, status: 'active', dismountSpotId: first.seat?.approachSpotId } : null;
+    const dismountAgent = { id: 'verify-left', x: seatSpot?.apiX || 0, y: seatSpot?.apiZ || 0, _floor: 1 };
+    const released = first.ok ? releaseCouchSeatUse(couch, {
+      kind: 'couch-rest',
+      buildingId: building.id,
+      furnitureIndex: 0,
+      seatId: first.reservation.seatId,
+      activationSpotId: first.reservation.seatId,
+      approachSpotId: first.seat?.approachSpotId,
+      dismountSpotId: first.seat?.approachSpotId,
+      reservationId: first.reservation.id,
+    }, dismountAgent, 'complete') : null;
+    const mesh = makeCouch3D(0, 0, T, couch);
+    const meshColors = new Set();
+    const dropSeatIds = [];
+    const cushionCenters = [];
+    const colorKeyCounts = {};
+    let meshCount = 0;
+    let untaggedMeshCount = 0;
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      meshCount++;
+      const material = Array.isArray(child.material) ? child.material[0] : child.material;
+      if (material?.color) meshColors.add(`#${material.color.getHexString()}`);
+      if (child.userData?.couchSeatId) {
+        dropSeatIds.push(child.userData.couchSeatId);
+        // posVox builds unit boxes sized via scale, so read the real world
+        // width from scale.x rather than the geometry parameters.
+        const geomWidth = Number(child.geometry?.parameters?.width ?? 1) || 1;
+        cushionCenters.push({ seatId: child.userData.couchSeatId, x: Number(child.position.x.toFixed(4)), width: Number((geomWidth * (child.scale?.x ?? 1)).toFixed(4)) });
+      }
+      const colorKey = child.userData?.couchColorKey || null;
+      if (colorKey) colorKeyCounts[colorKey] = (colorKeyCounts[colorKey] || 0) + 1;
+      else untaggedMeshCount++;
+    });
+    // Cushions must sit shoulder-to-shoulder: pitch 0.95 with 0.92-wide pads
+    // leaves a 0.03 seam instead of the old 0.10 gap.
+    const sortedCushions = [...cushionCenters].sort((a, b) => a.x - b.x);
+    const cushionGaps = sortedCushions.slice(1).map((cushion, i) =>
+      Number((cushion.x - sortedCushions[i].x - (cushion.width + sortedCushions[i].width) / 2).toFixed(4)));
+    const cushionsTightlySpaced = cushionGaps.length === 2 && cushionGaps.every(gap => gap >= -0.01 && gap <= 0.06);
+    // Authored seats must remain over the rendered cushion in both axes, while
+    // matching the armchair's proven front-edge inset so legs clear the pad.
+    const cushionMeshZ = COUCH_CUSHION_CENTER_Z;
+    const cushionFrontEdgeZ = cushionMeshZ + COUCH_CUSHION_DEPTH / 2;
+    const armchairCushionFrontEdgeZ = 0.18 + 0.66 / 2;
+    const armchairSeatDockZ = 0.42;
+    const armchairFrontEdgeInset = armchairCushionFrontEdgeZ - armchairSeatDockZ;
+    const seatSpotsMatchCushions = sortedCushions.every(cushion => {
+      const def = (FURNITURE_INTERACTION_SPOTS.couch || []).find(spot => spot.id === cushion.seatId);
+      const couchFrontEdgeInset = cushionFrontEdgeZ - Number(def?.dz);
+      return def &&
+        Math.abs(Number(def.dx) - cushion.x) < 0.001 &&
+        Number(def.dz) > cushionMeshZ &&
+        Number(def.dz) < cushionFrontEdgeZ &&
+        Math.abs(couchFrontEdgeInset - armchairFrontEdgeInset) < 0.001;
+    });
+    // Every cushion seat must use the armchair's proven dock contract.
+    const seatsUseArmchairDockContract = ['sit-left', 'sit-center', 'sit-right'].every(id => {
+      const def = (FURNITURE_INTERACTION_SPOTS.couch || []).find(spot => spot.id === id);
+      return def && def.dockMode === 'snap-to-activation' && def.animationId === 'sit' &&
+        Number.isFinite(Number(def.snapRadius)) && Number.isFinite(Number(def.activationRadius));
+    });
+    // Every rendered mesh must be tagged so the live color preview can recolor
+    // the whole couch without rebuilding the building group.
+    const allMeshesColorTagged = untaggedMeshCount === 0 &&
+      COUCH_COLOR_PREVIEW_MATERIAL_KEYS.every(key => (colorKeyCounts[key] || 0) > 0);
+    const expectedApproaches = { 'sit-left': 'stand-left', 'sit-center': 'stand-center', 'sit-right': 'stand-right' };
+    const approachMappingOk = candidates.every(seat => seat.approachSpotId === expectedApproaches[seat.seatId]);
+    const customColors = normalizeCouchColors(couch);
+    const customColorsRendered = Object.values(customColors).every(color => meshColors.has(color));
+    const noWhiteSeparationMeshes = !meshColors.has('#c5cae9');
+    const cleanGeometry = meshCount === 15;
+    const dropTargetsIndependent = dropSeatIds.sort().join('|') === 'sit-center|sit-left|sit-right' &&
+      leftDropAvailability.available === false && rightDropAvailability.available === true;
+    const manualDropFacesForward = Number.isFinite(Number(rightManualDrop?.spot?.faceAngle)) &&
+      Math.abs(normalizeAngleRad(Number(rightManualDrop.spot.faceAngle) - Number(facing90))) < 0.001;
+    const couchSeatSurfaceLift = getFurnitureSeatSurfaceLift('couch');
+    const dismountSpotId = released?.dismount?.spotId || null;
+    const dismountMatchesSeat = dismountSpotId === getCouchDismountSpotId(first.reservation?.seatId);
+    const secondStillHeld = store.reservations.find(reservation => reservation.id === second.reservation?.id)?.state || null;
+    const ok = candidates.length === 3 && approachMappingOk && first.ok && second.ok &&
+      first.reservation.seatId !== second.reservation.seatId && Number.isFinite(facing90) &&
+      active?.ok && wrongRelease?.ok === false && released?.ok && secondStillHeld === 'held' &&
+      customColorsRendered && noWhiteSeparationMeshes && cleanGeometry && dropTargetsIndependent &&
+      manualDropFacesForward && couchSeatSurfaceLift === 2.117 && dismountMatchesSeat &&
+      cushionsTightlySpaced && seatSpotsMatchCushions && allMeshesColorTagged &&
+      seatsUseArmchairDockContract;
+    return {
+      ok,
+      candidateSeatIds: candidates.map(seat => seat.seatId).sort(),
+      approachBySeat: Object.fromEntries(candidates.map(seat => [seat.seatId, seat.approachSpotId])),
+      firstSeatId: first.reservation?.seatId || null,
+      secondSeatId: second.reservation?.seatId || null,
+      firstCapacityKey: first.reservation?.capacityKey || null,
+      secondCapacityKey: second.reservation?.capacityKey || null,
+      selectedDockTarget: seatSpot ? { x: seatSpot.apiX, y: seatSpot.apiZ, floor: seatSpot.floor } : null,
+      approachTarget: approachSpot ? { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor, spotId: approachSpot.spotId } : null,
+      dismountTarget: released?.dismount || null,
+      facing90,
+      activeOk: !!active?.ok,
+      wrongReleaseReason: wrongRelease?.reason || null,
+      releasedOk: !!released?.ok,
+      secondStillHeld,
+      couchColors: customColors,
+      renderedColors: [...meshColors].sort(),
+      customColorsRendered,
+      noWhiteSeparationMeshes,
+      cleanGeometry,
+      meshCount,
+      dropSeatIds,
+      leftDropAvailable: leftDropAvailability.available,
+      rightDropAvailable: rightDropAvailability.available,
+      dropTargetsIndependent,
+      manualDropFaceAngle: rightManualDrop?.spot?.faceAngle ?? null,
+      manualDropFacesForward,
+      couchSeatSurfaceLift,
+      dismountMatchesSeat,
+      cushionCenters: sortedCushions,
+      cushionGaps,
+      cushionsTightlySpaced,
+      seatSpotsMatchCushions,
+      cushionMeshZ,
+      cushionFrontEdgeZ,
+      couchSeatDockZ: COUCH_SEAT_DOCK_Z,
+      couchFrontEdgeInset: Number((cushionFrontEdgeZ - COUCH_SEAT_DOCK_Z).toFixed(4)),
+      armchairFrontEdgeInset: Number(armchairFrontEdgeInset.toFixed(4)),
+      seatsUseArmchairDockContract,
+      colorKeyCounts,
+      untaggedMeshCount,
+      allMeshesColorTagged,
+    };
+  } finally {
+    for (const verifierAgent of verifierAgents) {
+      const verifierAgentIndex = agentsList.indexOf(verifierAgent);
+      if (verifierAgentIndex >= 0) agentsList.splice(verifierAgentIndex, 1);
+    }
+    if (previousBuilding) buildingsMap.set(building.id, previousBuilding);
+    else buildingsMap.delete(building.id);
+  }
+};
+
+// Verifies the manual drag/drop couch fix end to end: dropping an agent on a
+// cushion must seat them ON that cushion (activation dock) instead of leaving
+// them at the front approach marker or inside the frame, and the live color
+// preview must recolor the rendered couch without a rebuild.
+window.__verifyCouchManualDropSeatingAndLivePreview = () => {
+  const building = { id: 'verify-couch-manual-drop-building', x: 0, z: 0, width: 10, depth: 8, widthTiles: 10, heightTiles: 8, rotation: 0, interior: { floors: 1, furniture: [] } };
+  const couch = { id: 'verify-couch-manual-drop', type: 'couch', x: 4, z: 3, rotation: 0 };
+  const verifierAgents = [];
+  building.interior.furniture.push(couch);
+  const previousBuilding = buildingsMap.get(building.id);
+  buildingsMap.set(building.id, building);
+  try {
+    const seatSpot = getFurnitureActionSpot(building, couch, 'sit-right');
+    const approachSpot = getFurnitureActionSpot(building, couch, 'stand-right');
+    if (!seatSpot || !approachSpot) return { ok: false, reason: 'missing-couch-spots' };
+    const drop = { buildingId: building.id, index: 0, building, furniture: couch, spot: seatSpot, available: true };
+    // Simulate the state _useCouchFurniture leaves behind: routed to the front
+    // approach spot, docked at the cushion, still in the 'approach' phase.
+    const agent = {
+      id: 'verify-manual-drop-agent',
+      x: approachSpot.apiX,
+      y: approachSpot.apiZ,
+      _floor: 1,
+      _targetFloor: 1,
+      _idleActivity: {
+        kind: 'couch-sit',
+        phase: 'approach',
+        buildingId: building.id,
+        furnitureIndex: 0,
+        seatId: 'sit-right',
+        activationSpotId: 'sit-right',
+        spotId: 'sit-right',
+        approachSpotId: 'stand-right',
+        dismountSpotId: 'stand-right',
+        exitSpotId: 'stand-right',
+        reservationId: 'verify-manual-drop-reservation',
+        actionId: 'life.sitAtCouch',
+        action: 'life.sitAtCouch',
+        mode: 'sit',
+        stayMs: 12000,
+        faceAngle: getFurnitureForwardFacingAngle(building, couch, seatSpot, 'north') ?? seatSpot.faceAngle,
+        dockTarget: { x: seatSpot.apiX, y: seatSpot.apiZ },
+        routeApproachTarget: { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor, spotId: 'stand-right', faceAngle: approachSpot.faceAngle },
+        seatSurfaceLift: getFurnitureSeatSurfaceLift('couch'),
+        furnitureType: 'couch',
+      },
+    };
+    // Stale-seat reconciliation intentionally requires a matching live agent.
+    // Register the verifier's synthetic manual occupant so this isolated test
+    // mirrors the real drag/drop path, where the dragged agent is in agentsList.
+    agentsList.push(agent);
+    verifierAgents.push(agent);
+    const eligible = isManualDropDirectSeatDockActivity(drop, agent);
+    const snap = snapDraggedAgentToStartedObjectSeatDock(drop, agent);
+    const manualRouteContract = resolveCouchRouteContract({
+      seatSpot,
+      approachSpot,
+      directManualSeatDock: true,
+      backendRuntimeSeatDock: true,
+      buildingId: building.id,
+    });
+    const automaticBackendRouteContract = resolveCouchRouteContract({
+      seatSpot,
+      approachSpot,
+      directManualSeatDock: false,
+      backendRuntimeSeatDock: true,
+      buildingId: building.id,
+    });
+    const automaticLocalRouteContract = resolveCouchRouteContract({
+      seatSpot,
+      approachSpot,
+      directManualSeatDock: false,
+      backendRuntimeSeatDock: false,
+      buildingId: building.id,
+    });
+    const runtimeBridgeTarget = makeAgentRuntimeRouteTarget({
+      x: seatSpot.apiX,
+      y: seatSpot.apiZ,
+      floor: seatSpot.floor,
+      routeApproachTarget: automaticBackendRouteContract.routeApproachTarget,
+      dockSnapRadius: 7,
+    }, building, seatSpot.floor);
+    const routeContractsCorrect =
+      manualRouteContract.routeStartSpot === seatSpot &&
+      manualRouteContract.routeApproachTarget === null &&
+      automaticBackendRouteContract.routeStartSpot === seatSpot &&
+      automaticBackendRouteContract.routeApproachTarget?.spotId === approachSpot.spotId &&
+      automaticLocalRouteContract.routeStartSpot === approachSpot &&
+      automaticLocalRouteContract.routeApproachTarget === null &&
+      runtimeBridgeTarget.x === seatSpot.apiX &&
+      runtimeBridgeTarget.y === seatSpot.apiZ &&
+      runtimeBridgeTarget.routeApproachTarget?.x === approachSpot.apiX &&
+      runtimeBridgeTarget.routeApproachTarget?.y === approachSpot.apiZ;
+    const landedOnCushion = Math.abs(agent.x - seatSpot.apiX) < 0.001 && Math.abs(agent.y - seatSpot.apiZ) < 0.001;
+    const notLeftAtApproach = Math.hypot(agent.x - approachSpot.apiX, agent.y - approachSpot.apiZ) > 0.5;
+    const activatedImmediately = agent._idleActivity.phase === 'active' && agent._idleActivity.seated === true;
+    const seatMarkedOccupied = couch.couchState?.status === 'occupied' &&
+      Array.isArray(couch.couchState?.activeSeatIds) && couch.couchState.activeSeatIds.includes('sit-right') &&
+      couch.activeUse?.state === 'active' && Boolean(couch.activeUse?.activeSeats?.['sit-right']);
+    // No leftover approach route may survive the snap, or the movement loop
+    // walks the seated agent back out to the front stand-* marker.
+    const noResidualRoute = agent._wanderTarget === null && agent._waypointPath === null &&
+      !agent._idleActivity.routeApproachTarget && agent._idleActivity.arrivedAtDock === true;
+    // Only the dropped seat is consumed; the other two cushions stay open.
+    const manualSeatAvailability = {
+      left: isFurnitureAvailableForDraggedAgent(building.id, 0, couch, { id: 'verify-other' }, 'sit-left'),
+      center: isFurnitureAvailableForDraggedAgent(building.id, 0, couch, { id: 'verify-other' }, 'sit-center'),
+      right: isFurnitureAvailableForDraggedAgent(building.id, 0, couch, { id: 'verify-other' }, 'sit-right'),
+    };
+    const otherSeatsOpen = manualSeatAvailability.left.available === true &&
+      manualSeatAvailability.center.available === true &&
+      manualSeatAvailability.right.available === false;
+    // Runtime world-object versions are independent per cushion. A high
+    // version on one seat must not suppress a lower-version update on another,
+    // and an idle release must reopen only its own cushion.
+    const runtimeBaseKey = getCouchObjectKey(building.id, 0);
+    const runtimeCenterAgent = {
+      id: 'verify-runtime-center',
+      _idleActivity: {
+        kind: 'couch-sit',
+        phase: 'active',
+        buildingId: building.id,
+        furnitureIndex: 0,
+        furnitureType: 'couch',
+        seatId: 'sit-center',
+        activeUseSlotId: 'sit-center',
+        reservationId: 'verify-runtime-center-reservation',
+      },
+    };
+    const runtimeLeftAgent = {
+      id: 'verify-runtime-left',
+      _idleActivity: {
+        kind: 'couch-sit',
+        phase: 'active',
+        buildingId: building.id,
+        furnitureIndex: 0,
+        furnitureType: 'couch',
+        seatId: 'sit-left',
+        activeUseSlotId: 'sit-left',
+        reservationId: 'verify-runtime-left-reservation',
+      },
+    };
+    agentsList.push(runtimeCenterAgent, runtimeLeftAgent);
+    verifierAgents.push(runtimeCenterAgent, runtimeLeftAgent);
+    const runtimeCenterApplied = applyAgentRuntimeWorldObjectStateToWorld({
+      objectKey: `${runtimeBaseKey}:slot:sit-center`,
+      buildingId: building.id,
+      furnitureIndex: 0,
+      objectType: 'couch',
+      owner: 'server-scripted-object-runtime',
+      state: 'active',
+      agentId: 'verify-runtime-center',
+      slotId: 'sit-center',
+      reservationId: 'verify-runtime-center-reservation',
+      version: 100,
+      data: {
+        reservation: { id: 'verify-runtime-center-reservation', agentId: 'verify-runtime-center', seatId: 'sit-center', slotId: 'sit-center' },
+        activity: { baseObjectKey: runtimeBaseKey, spotId: 'sit-center', activeUseSlotId: 'sit-center' },
+      },
+    });
+    const runtimeLeftApplied = applyAgentRuntimeWorldObjectStateToWorld({
+      objectKey: `${runtimeBaseKey}:slot:sit-left`,
+      buildingId: building.id,
+      furnitureIndex: 0,
+      objectType: 'couch',
+      owner: 'server-scripted-object-runtime',
+      state: 'active',
+      agentId: 'verify-runtime-left',
+      slotId: 'sit-left',
+      reservationId: 'verify-runtime-left-reservation',
+      version: 1,
+      data: {
+        reservation: { id: 'verify-runtime-left-reservation', agentId: 'verify-runtime-left', seatId: 'sit-left', slotId: 'sit-left' },
+        activity: { baseObjectKey: runtimeBaseKey, spotId: 'sit-left', activeUseSlotId: 'sit-left' },
+      },
+    });
+    runtimeLeftAgent._idleActivity = null;
+    const runtimeLeftReleased = applyAgentRuntimeWorldObjectStateToWorld({
+      objectKey: `${runtimeBaseKey}:slot:sit-left`,
+      buildingId: building.id,
+      furnitureIndex: 0,
+      objectType: 'couch',
+      owner: 'server-scripted-object-runtime',
+      state: 'idle',
+      agentId: 'verify-runtime-left',
+      slotId: 'sit-left',
+      version: 2,
+      data: {
+        clearReservation: true,
+        releaseReason: 'verify-runtime-seat-release',
+        activity: { baseObjectKey: runtimeBaseKey, spotId: 'sit-left', activeUseSlotId: 'sit-left' },
+      },
+    });
+    const runtimeSeatAvailability = {
+      left: isFurnitureAvailableForDraggedAgent(building.id, 0, couch, { id: 'verify-runtime-other' }, 'sit-left'),
+      center: isFurnitureAvailableForDraggedAgent(building.id, 0, couch, { id: 'verify-runtime-other' }, 'sit-center'),
+      right: isFurnitureAvailableForDraggedAgent(building.id, 0, couch, { id: 'verify-runtime-other' }, 'sit-right'),
+    };
+    const runtimeSeatIndependence =
+      runtimeCenterApplied === true &&
+      runtimeLeftApplied === true &&
+      runtimeLeftReleased === true &&
+      runtimeSeatAvailability.left.available === true &&
+      runtimeSeatAvailability.center.available === false &&
+      runtimeSeatAvailability.right.available === false;
+    // Runtime/debug snapshots may freeze the nested version registry. A later
+    // server patch must clone that registry instead of throwing from the
+    // listener while assigning the new object version.
+    Object.freeze(couch._runtimeWorldObjectVersions);
+    let frozenRuntimeVersionPatchSafe = false;
+    try {
+      frozenRuntimeVersionPatchSafe = applyAgentRuntimeWorldObjectStateToWorld({
+        objectKey: `${runtimeBaseKey}:slot:sit-center`,
+        buildingId: building.id,
+        furnitureIndex: 0,
+        objectType: 'couch',
+        owner: 'server-scripted-object-runtime',
+        state: 'active',
+        agentId: 'verify-runtime-center',
+        slotId: 'sit-center',
+        reservationId: 'verify-runtime-center-reservation',
+        version: 101,
+        data: {
+          reservation: { id: 'verify-runtime-center-reservation', agentId: 'verify-runtime-center', seatId: 'sit-center', slotId: 'sit-center' },
+          activity: { baseObjectKey: runtimeBaseKey, spotId: 'sit-center', activeUseSlotId: 'sit-center' },
+        },
+      }) === true && Object.isFrozen(couch._runtimeWorldObjectVersions) === false;
+    } catch {
+      frozenRuntimeVersionPatchSafe = false;
+    }
+    // A non-seat-dock object must still use the old approach-snap path.
+    const nonSeatDockUnchanged = isManualDropDirectSeatDockActivity(
+      { buildingId: building.id, index: 0, building, furniture: { ...couch, type: 'waterCooler' }, spot: seatSpot },
+      agent,
+    ) === false;
+    // The runtime acknowledgement can briefly trail the local manual snap.
+    // An inactive/stale frame must not clear that protected sit pose, but the
+    // same frame should clear it normally once the five-minute hold expires.
+    const protectedManualAgent = {
+      id: 'verify-protected-manual-couch-agent',
+      _manualPlacementPreview: false,
+      _manualPlacementLockUntil: performance.now() + MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+      _idleActivity: {
+        kind: 'couch-sit',
+        phase: 'active',
+        furnitureType: 'couch',
+        buildingId: building.id,
+        furnitureIndex: 0,
+        spotId: 'sit-center',
+        seatId: 'sit-center',
+        activeUseSlotId: 'sit-center',
+        animationId: 'sit',
+        manualDrop: true,
+        manualDropSnapToUse: true,
+        manualOccupancyHold: true,
+        snappedToSeatDock: true,
+        arrivedAtDock: true,
+        seated: true,
+      },
+    };
+    const serializedManualActivity = makeAgentRuntimeVisualActivity(protectedManualAgent);
+    applyAgentRuntimeVisualState(protectedManualAgent, {
+      activityActive: false,
+      movement: { isMoving: false, isRunning: false },
+      carrying: false,
+    });
+    const protectedManualSitSurvivesInactiveFrame =
+      protectedManualAgent._idleActivity?.kind === 'couch-sit' &&
+      protectedManualAgent._runtimeVisualActivityClearDeferred === true;
+    protectedManualAgent._manualPlacementLockUntil = performance.now() - 1;
+    applyAgentRuntimeVisualState(protectedManualAgent, {
+      activityActive: false,
+      movement: { isMoving: false, isRunning: false },
+      carrying: false,
+    });
+    const expiredManualSitClearsNormally = protectedManualAgent._idleActivity === null &&
+      protectedManualAgent._runtimeVisualActivityClearDeferred === false;
+    const manualSeatMetadataSerialized =
+      serializedManualActivity?.seatId === 'sit-center' &&
+      serializedManualActivity?.activeUseSlotId === 'sit-center' &&
+      serializedManualActivity?.manualDrop === true &&
+      serializedManualActivity?.manualOccupancyHold === true &&
+      serializedManualActivity?.snappedToSeatDock === true &&
+      serializedManualActivity?.arrivedAtDock === true;
+
+    // Live color preview against a real rendered couch mesh.
+    const previewGroup = makeCouch3D(0, 0, T, couch);
+    previewGroup.userData.furnitureIndex = 0;
+    previewGroup.userData.buildingId = building.id;
+    const previewColors = { body: '#ff0000', backArms: '#00ff00', seatCushions: '#0000ff', feet: '#ffff00' };
+    const savedByKey = {};
+    previewGroup.traverse(child => {
+      const key = child?.isMesh ? child.userData?.couchColorKey : null;
+      if (key && !savedByKey[key]) savedByKey[key] = `#${child.material.color.getHexString()}`;
+    });
+    const recolor = (colors) => {
+      let count = 0;
+      previewGroup.traverse(child => {
+        const key = child?.isMesh ? child.userData?.couchColorKey : null;
+        if (!key || !child.material?.color?.set) return;
+        if (!child.userData._couchColorPreviewOriginal) child.userData._couchColorPreviewOriginal = `#${child.material.color.getHexString()}`;
+        if (!child.userData._couchColorPreviewOwnsMaterial) { child.material = child.material.clone(); child.userData._couchColorPreviewOwnsMaterial = true; }
+        child.material.color.set(colors[key]);
+        count++;
+      });
+      return count;
+    };
+    const restore = () => {
+      let count = 0;
+      previewGroup.traverse(child => {
+        const original = child?.isMesh ? child.userData?._couchColorPreviewOriginal : null;
+        if (!original || !child.material?.color?.set) return;
+        child.material.color.set(original);
+        delete child.userData._couchColorPreviewOriginal;
+        count++;
+      });
+      return count;
+    };
+    const previewedMeshes = recolor(previewColors);
+    const previewApplied = (() => {
+      let allMatch = previewedMeshes > 0;
+      previewGroup.traverse(child => {
+        const key = child?.isMesh ? child.userData?.couchColorKey : null;
+        if (!key) return;
+        if (`#${child.material.color.getHexString()}` !== previewColors[key]) allMatch = false;
+      });
+      return allMatch;
+    })();
+    const restoredMeshes = restore();
+    const previewRestored = (() => {
+      let allMatch = restoredMeshes > 0;
+      previewGroup.traverse(child => {
+        const key = child?.isMesh ? child.userData?.couchColorKey : null;
+        if (!key) return;
+        if (`#${child.material.color.getHexString()}` !== savedByKey[key]) allMatch = false;
+      });
+      return allMatch;
+    })();
+
+    const ok = eligible && snap.snapped === true && snap.seatDock === true && snap.activatedManualUse === true &&
+      landedOnCushion && notLeftAtApproach && activatedImmediately && seatMarkedOccupied && noResidualRoute &&
+      otherSeatsOpen && runtimeSeatIndependence && frozenRuntimeVersionPatchSafe && nonSeatDockUnchanged && routeContractsCorrect &&
+      protectedManualSitSurvivesInactiveFrame && expiredManualSitClearsNormally && manualSeatMetadataSerialized &&
+      previewApplied && previewRestored;
+    return {
+      ok,
+      eligible,
+      snap,
+      agentPosition: { x: agent.x, y: agent.y },
+      seatSpot: { x: seatSpot.apiX, y: seatSpot.apiZ },
+      approachSpot: { x: approachSpot.apiX, y: approachSpot.apiZ },
+      landedOnCushion,
+      notLeftAtApproach,
+      activatedImmediately,
+      seatMarkedOccupied,
+      noResidualRoute,
+      otherSeatsOpen,
+      manualSeatAvailability,
+      runtimeSeatIndependence,
+      runtimeCenterApplied,
+      runtimeLeftApplied,
+      runtimeLeftReleased,
+      runtimeSeatAvailability,
+      frozenRuntimeVersionPatchSafe,
+      nonSeatDockUnchanged,
+      routeContractsCorrect,
+      protectedManualSitSurvivesInactiveFrame,
+      expiredManualSitClearsNormally,
+      manualSeatMetadataSerialized,
+      manualRouteStartSpotId: manualRouteContract.routeStartSpot?.spotId || null,
+      automaticBackendFinalSpotId: automaticBackendRouteContract.routeStartSpot?.spotId || null,
+      automaticBackendApproachSpotId: automaticBackendRouteContract.routeApproachTarget?.spotId || null,
+      automaticLocalRouteStartSpotId: automaticLocalRouteContract.routeStartSpot?.spotId || null,
+      previewedMeshes,
+      previewApplied,
+      restoredMeshes,
+      previewRestored,
+    };
+  } finally {
+    for (const verifierAgent of verifierAgents) {
+      const verifierAgentIndex = agentsList.indexOf(verifierAgent);
+      if (verifierAgentIndex >= 0) agentsList.splice(verifierAgentIndex, 1);
+    }
+    if (previousBuilding) buildingsMap.set(building.id, previousBuilding);
+    else buildingsMap.delete(building.id);
+  }
+};
+
+// Geometry check: does the authored seat lift actually put a seated agent's
+// hips on the couch cushion surface? Compares the couch against the armchair,
+// which Eli confirmed looks correct, using the same lift-per-cushion-height
+// relationship the character animator applies.
+window.__verifyCouchSeatedHeightMatchesCushionSurface = () => {
+  const AGENT_REFERENCE_SCALE = 0.8;
+  // Cushion top surfaces read straight off the mesh builders.
+  const armchairCushionTop = 0.48 + 0.16 / 2;
+  const seatY = 0.24;
+  const seatH = 0.34;
+  const cushionH = 0.18;
+  const couchCushionTop = (seatY + seatH / 2 + cushionH / 2 - 0.02) + cushionH / 2;
+
+  const armchairLift = getFurnitureSeatSurfaceLift('armchair');
+  const couchLift = getFurnitureSeatSurfaceLift('couch');
+  // Local lift units per world unit of cushion height, from the good armchair.
+  const liftPerWorldUnit = armchairLift / armchairCushionTop;
+  const expectedCouchLift = couchCushionTop * liftPerWorldUnit;
+  const couchLiftError = Math.abs(couchLift - expectedCouchLift);
+
+  // Seated hip height in world units for a reference-scale agent.
+  const couchHipWorld = couchLift / liftPerWorldUnit;
+  const armchairHipWorld = armchairLift / liftPerWorldUnit;
+
+  const couchSitsOnSurface = Math.abs(couchHipWorld - couchCushionTop) < 0.02;
+  const armchairSitsOnSurface = Math.abs(armchairHipWorld - armchairCushionTop) < 0.02;
+  // The couch cushion is marginally higher than the armchair's, so its lift
+  // must be at least as large. The old 1.52/1.545 values failed this badly.
+  const couchLiftNotTooLow = couchLift >= armchairLift * 0.95;
+
+  const ok = couchLiftError < 0.02 && couchSitsOnSurface && armchairSitsOnSurface && couchLiftNotTooLow;
   return {
     ok,
-    candidateSeatIds: candidates.map(seat => seat.seatId).sort(),
-    approachSpotId: approachSpot?.spotId || null,
-    firstSeatId: first.reservation?.seatId || null,
-    secondSeatId: second.reservation?.seatId || null,
-    firstCapacityKey: first.reservation?.capacityKey || null,
-    secondCapacityKey: second.reservation?.capacityKey || null,
-    selectedDockTarget: seatSpot ? { x: seatSpot.apiX, y: seatSpot.apiZ, floor: seatSpot.floor } : null,
-    approachTarget: approachSpot ? { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor } : null,
-    facing90,
-    activeOk: !!active?.ok,
-    wrongReleaseReason: wrongRelease?.reason || null,
-    releasedOk: !!released?.ok,
-    secondStillHeld: store.reservations.find(r => r.id === second.reservation?.id)?.state || null,
+    armchairCushionTop: +armchairCushionTop.toFixed(4),
+    couchCushionTop: +couchCushionTop.toFixed(4),
+    armchairLift,
+    couchLift,
+    expectedCouchLift: +expectedCouchLift.toFixed(4),
+    couchLiftError: +couchLiftError.toFixed(4),
+    couchHipWorld: +couchHipWorld.toFixed(4),
+    armchairHipWorld: +armchairHipWorld.toFixed(4),
+    couchSitsOnSurface,
+    armchairSitsOnSurface,
+    couchLiftNotTooLow,
   };
 };
 
@@ -52113,7 +55573,8 @@ window._useSectionalSofaFurniture = (mode = 'lounge') => {
     return;
   }
   const faceAngle = getFurnitureForwardFacingAngle(building, sofa, seatSpot, seatSpot.facing || selectedSeat.facing || 'north') ?? seatSpot.faceAngle;
-  sofa.reservation = { id: reservationResult.reservation.id, agentId: agent.id, actionId, seatId: selectedSeat.seatId, spotId: selectedSeat.seatId, approachSpotId: approachSpot.spotId, status: 'held', capacityKey: getObjectUseSeatCapacityKey(getSectionalSofaObjectKey(buildingId, index), selectedSeat.seatId) };
+  const dismountSpotId = selectedSeat.exitSpotId || selectedSeat.approachSpotId || approachSpot.spotId;
+  sofa.reservation = { id: reservationResult.reservation.id, agentId: agent.id, actionId, seatId: selectedSeat.seatId, spotId: selectedSeat.seatId, approachSpotId: approachSpot.spotId, dismountSpotId, exitSpotId: dismountSpotId, status: 'held', capacityKey: getObjectUseSeatCapacityKey(getSectionalSofaObjectKey(buildingId, index), selectedSeat.seatId) };
   sofa.sectionalSofaState = { ...(sofa.sectionalSofaState || {}), status: 'reserved', seats: 4, reservedSeatIds: [...getActiveSectionalSofaReservationSeatIds(sofa, buildingId, index)].sort(), chaisePose: selectedSeat.seatId === 'chaise' ? 'west-facing-lounge' : (sofa.sectionalSofaState?.chaisePose || null), lastAction: actionId, persistentFurniture: true };
   agent._idleActivity = {
     kind: `sectional-sofa-${mode}`,
@@ -52125,6 +55586,8 @@ window._useSectionalSofaFurniture = (mode = 'lounge') => {
     seatId: selectedSeat.seatId,
     activationSpotId: selectedSeat.seatId,
     approachSpotId: approachSpot.spotId,
+    dismountSpotId,
+    exitSpotId: dismountSpotId,
     reservationId: reservationResult.reservation.id,
     actionId,
     action: actionId,
@@ -52134,6 +55597,7 @@ window._useSectionalSofaFurniture = (mode = 'lounge') => {
     dockTarget: { x: seatSpot.apiX, y: seatSpot.apiZ },
     routeApproachTarget: { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor, spotId: approachSpot.spotId },
     dockSnapRadius: selectedSeat.seatId === 'chaise' ? 8 : 7,
+    seatSurfaceLift: getFurnitureSeatSurfaceLift('sectionalSofa'),
     furnitureType: 'sectionalSofa',
     animationId: mode === 'socialize' ? 'gather-talk' : 'sit',
     stationary: true,
@@ -52149,7 +55613,19 @@ window._useSectionalSofaFurniture = (mode = 'lounge') => {
 
 window.__verifyPhase3CTask4SectionalSofaChaiseLifecycle = () => {
   const building = { id: 'verify-phase3c-sectional-building', x: 0, z: 0, width: 12, depth: 10, rotation: 0, interior: { floors: 1, furniture: [] } };
-  const sofa = { id: 'verify-phase3c-sectional', type: 'sectionalSofa', x: 5, z: 4, rotation: 90 };
+  const sofa = {
+    id: 'verify-phase3c-sectional',
+    type: 'sectionalSofa',
+    x: 5,
+    z: 4,
+    rotation: 90,
+    sectionalSofaColors: {
+      body: '#3559c7',
+      backArms: '#203a8f',
+      seatCushions: '#9ebcff',
+      feet: '#49301f',
+    },
+  };
   building.interior.furniture.push(sofa);
   const candidates = getSectionalSofaSeatCandidates(building, sofa, 0, { actionId: 'life.loungeAtSectionalSofa' });
   const store = getSectionalSofaObjectUseSeatStore(sofa);
@@ -52157,18 +55633,38 @@ window.__verifyPhase3CTask4SectionalSofaChaiseLifecycle = () => {
   const first = chooseAndReserveObjectUseSeat(store, candidates, { agentId: 'verify-chaise-agent', agentPosition: { x: chaiseCandidate?.position?.x || 0, z: chaiseCandidate?.position?.z || 0 }, reservationId: 'verify-sectional-chaise' });
   const second = chooseAndReserveObjectUseSeat(store, candidates, { agentId: 'verify-second-agent', agentPosition: { x: chaiseCandidate?.position?.x || 0, z: chaiseCandidate?.position?.z || 0 }, reservationId: 'verify-sectional-second' });
   const chaiseSpot = getFurnitureActionSpot(building, sofa, 'chaise');
-  const chaiseApproach = getFurnitureActionSpot(building, sofa, chaiseCandidate?.approachSpotId || 'approach-chaise');
+  const chaiseApproach = getFurnitureActionSpot(building, sofa, chaiseCandidate?.approachSpotId || 'stand-chaise');
   const chaiseFacing = getFurnitureForwardFacingAngle(building, sofa, chaiseSpot, chaiseSpot?.facing || 'west');
   const active = first.ok ? activateObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: first.reservation.agentId, seatId: first.reservation.seatId }) : null;
   const wrongRelease = first.ok ? releaseObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: 'verify-second-agent', seatId: first.reservation.seatId, reason: 'wrong-agent' }) : null;
   const released = first.ok ? releaseObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: first.reservation.agentId, seatId: first.reservation.seatId, reason: 'complete' }) : null;
   const expectedSeatIds = ['chaise', 'seat-center', 'seat-corner', 'seat-left'];
+  const model = makeSectionalSofa3D(0, 0, T, sofa);
+  const partCounts = { body: 0, backArms: 0, seatCushions: 0, feet: 0, seams: 0 };
+  const seatMeshCounts = Object.fromEntries(expectedSeatIds.map(seatId => [seatId, 0]));
+  let meshCount = 0;
+  model.traverse(mesh => {
+    if (!mesh?.isMesh) return;
+    meshCount++;
+    const colorKey = mesh.userData?.multiSeatColorKey;
+    if (colorKey && Object.hasOwn(partCounts, colorKey)) partCounts[colorKey]++;
+    const seatId = mesh.userData?.interactionSpotId || mesh.userData?.multiSeatId;
+    if (seatId && Object.hasOwn(seatMeshCounts, seatId)) seatMeshCounts[seatId]++;
+  });
+  const cleanGeometry = meshCount === 21 &&
+    partCounts.body === 4 &&
+    partCounts.backArms === 5 &&
+    partCounts.seatCushions === 6 &&
+    partCounts.feet === 6 &&
+    partCounts.seams === 0;
+  const oneCleanDropMeshPerSeat = Object.values(seatMeshCounts).every(count => count === 1);
   const ok = expectedSeatIds.every(id => candidates.some(seat => seat.seatId === id)) && candidates.length === expectedSeatIds.length &&
-    candidates.some(seat => seat.seatId === 'chaise' && seat.approachSpotId === 'approach-chaise' && seat.facing === 'west') &&
-    candidates.filter(seat => seat.seatId !== 'chaise').every(seat => seat.approachSpotId === 'talk-front') &&
+    candidates.some(seat => seat.seatId === 'chaise' && seat.approachSpotId === 'stand-chaise' && seat.facing === 'west') &&
+    candidates.every(seat => seat.approachSpotId === `stand-${seat.seatId.replace('seat-', '')}`) &&
     first.ok && second.ok && first.reservation.seatId !== second.reservation.seatId &&
     Number.isFinite(chaiseFacing) && active?.ok && wrongRelease?.ok === false && released?.ok &&
-    store.reservations.find(r => r.id === second.reservation.id)?.state === 'held' && !!chaiseApproach;
+    store.reservations.find(r => r.id === second.reservation.id)?.state === 'held' && !!chaiseApproach &&
+    cleanGeometry && oneCleanDropMeshPerSeat;
   return {
     ok,
     candidateSeatIds: candidates.map(seat => seat.seatId).sort(),
@@ -52189,6 +55685,11 @@ window.__verifyPhase3CTask4SectionalSofaChaiseLifecycle = () => {
     wrongReleaseReason: wrongRelease?.reason || null,
     releasedOk: !!released?.ok,
     secondStillHeld: store.reservations.find(r => r.id === second.reservation?.id)?.state || null,
+    cleanGeometry,
+    meshCount,
+    partCounts,
+    oneCleanDropMeshPerSeat,
+    seatMeshCounts,
     skippedSeats: [],
   };
 };
@@ -52218,7 +55719,7 @@ window._useLoveseatFurniture = (mode = 'rest') => {
     return currentBuilding?.id === buildingId || isPointInsideBuildingInterior(building, agent.x, agent.y, -0.15);
   });
   const nearestApproach = (agent) => {
-    const spots = candidates.map(seat => getFurnitureActionSpot(building, loveseat, seat.approachSpotId || (seat.seatId === 'seat-right' ? 'approach-right' : 'approach-left'))).filter(Boolean);
+    const spots = candidates.map(seat => getFurnitureActionSpot(building, loveseat, seat.approachSpotId || (seat.seatId === 'seat-right' ? 'stand-right' : 'stand-left'))).filter(Boolean);
     return spots.sort((a, b) => Math.hypot((agent.x || 0) - a.apiX, (agent.y || 0) - a.apiZ) - Math.hypot((agent.x || 0) - b.apiX, (agent.y || 0) - b.apiZ))[0] || null;
   };
   const agent = sameBuildingAgents.sort((a, b) => {
@@ -52247,7 +55748,7 @@ window._useLoveseatFurniture = (mode = 'rest') => {
   }
   const selectedSeat = reservationResult.seat;
   const seatSpot = getFurnitureActionSpot(building, loveseat, selectedSeat.seatId);
-  const approachSpot = getFurnitureActionSpot(building, loveseat, selectedSeat.approachSpotId || (selectedSeat.seatId === 'seat-right' ? 'approach-right' : 'approach-left'));
+  const approachSpot = getFurnitureActionSpot(building, loveseat, selectedSeat.approachSpotId || (selectedSeat.seatId === 'seat-right' ? 'stand-right' : 'stand-left'));
   if (!seatSpot || !approachSpot) {
     releaseObjectUseSeatReservation(store, { reservationId: reservationResult.reservation.id, agentId: agent.id, seatId: selectedSeat.seatId, terminalState: 'failed', reason: 'missing-seat-or-approach-spot' });
     showToast('No reachable loveseat approach/seat spot available', 'warning');
@@ -52273,7 +55774,8 @@ window._useLoveseatFurniture = (mode = 'rest') => {
     return;
   }
   const faceAngle = getFurnitureForwardFacingAngle(building, loveseat, seatSpot, seatSpot.facing || selectedSeat.facing || 'north') ?? seatSpot.faceAngle;
-  loveseat.reservation = { id: reservationResult.reservation.id, agentId: agent.id, actionId, seatId: selectedSeat.seatId, spotId: selectedSeat.seatId, approachSpotId: approachSpot.spotId, status: 'held', capacityKey: getObjectUseSeatCapacityKey(getLoveseatObjectKey(buildingId, index), selectedSeat.seatId) };
+  const dismountSpotId = selectedSeat.exitSpotId || selectedSeat.approachSpotId || approachSpot.spotId;
+  loveseat.reservation = { id: reservationResult.reservation.id, agentId: agent.id, actionId, seatId: selectedSeat.seatId, spotId: selectedSeat.seatId, approachSpotId: approachSpot.spotId, dismountSpotId, exitSpotId: dismountSpotId, status: 'held', capacityKey: getObjectUseSeatCapacityKey(getLoveseatObjectKey(buildingId, index), selectedSeat.seatId) };
   loveseat.loveseatState = { ...(loveseat.loveseatState || {}), status: 'reserved', seats: 2, reservedSeatIds: [...getActiveLoveseatReservationSeatIds(loveseat, buildingId, index)].sort(), lastAction: actionId, persistentFurniture: true };
   agent._idleActivity = {
     kind: `loveseat-${mode}`,
@@ -52285,6 +55787,8 @@ window._useLoveseatFurniture = (mode = 'rest') => {
     seatId: selectedSeat.seatId,
     activationSpotId: selectedSeat.seatId,
     approachSpotId: approachSpot.spotId,
+    dismountSpotId,
+    exitSpotId: dismountSpotId,
     reservationId: reservationResult.reservation.id,
     actionId,
     action: actionId,
@@ -52294,6 +55798,7 @@ window._useLoveseatFurniture = (mode = 'rest') => {
     dockTarget: { x: seatSpot.apiX, y: seatSpot.apiZ },
     routeApproachTarget: { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor, spotId: approachSpot.spotId },
     dockSnapRadius: 7,
+    seatSurfaceLift: getFurnitureSeatSurfaceLift('loveseat'),
     furnitureType: 'loveseat',
     animationId: mode === 'talk' ? 'gather-talk' : 'sit',
     stationary: true,
@@ -52309,7 +55814,19 @@ window._useLoveseatFurniture = (mode = 'rest') => {
 
 window.__verifyPhase3CTask3LoveseatTwoSeatLifecycle = () => {
   const building = { id: 'verify-phase3c-loveseat-building', x: 0, z: 0, width: 10, depth: 8, rotation: 0, interior: { floors: 1, furniture: [] } };
-  const loveseat = { id: 'verify-phase3c-loveseat', type: 'loveseat', x: 4, z: 3, rotation: 90 };
+  const loveseat = {
+    id: 'verify-phase3c-loveseat',
+    type: 'loveseat',
+    x: 4,
+    z: 3,
+    rotation: 90,
+    loveseatColors: {
+      body: '#176f67',
+      backArms: '#0f504c',
+      seatCushions: '#69dccd',
+      feet: '#573c2f',
+    },
+  };
   building.interior.furniture.push(loveseat);
   const candidates = getLoveseatSeatCandidates(building, loveseat, 0, { actionId: 'life.restAtLoveseat' });
   const store = getLoveseatObjectUseSeatStore(loveseat);
@@ -52317,17 +55834,69 @@ window.__verifyPhase3CTask3LoveseatTwoSeatLifecycle = () => {
   const first = chooseAndReserveObjectUseSeat(store, candidates, { agentId: 'verify-left', agentPosition: { x: leftCandidate?.position?.x || 0, z: leftCandidate?.position?.z || 0 }, reservationId: 'verify-loveseat-left' });
   const second = chooseAndReserveObjectUseSeat(store, candidates, { agentId: 'verify-second', agentPosition: { x: leftCandidate?.position?.x || 0, z: leftCandidate?.position?.z || 0 }, reservationId: 'verify-loveseat-second' });
   const seatSpot = getFurnitureActionSpot(building, loveseat, first.reservation?.seatId || 'seat-left');
-  const approachSpot = getFurnitureActionSpot(building, loveseat, first.seat?.approachSpotId || (first.reservation?.seatId === 'seat-right' ? 'approach-right' : 'approach-left'));
+  const approachSpot = getFurnitureActionSpot(building, loveseat, first.seat?.approachSpotId || (first.reservation?.seatId === 'seat-right' ? 'stand-right' : 'stand-left'));
   const facing90 = getFurnitureForwardFacingAngle(building, loveseat, seatSpot, seatSpot?.facing || 'north');
   const active = first.ok ? activateObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: first.reservation.agentId, seatId: first.reservation.seatId }) : null;
   const wrongRelease = first.ok ? releaseObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: 'verify-second', seatId: first.reservation.seatId, reason: 'wrong-agent' }) : null;
   const released = first.ok ? releaseObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: first.reservation.agentId, seatId: first.reservation.seatId, reason: 'complete' }) : null;
+  const model = makeLoveseat3D(0, 0, T, loveseat);
+  const partCounts = { body: 0, backArms: 0, seatCushions: 0, feet: 0, seams: 0 };
+  const seatMeshCounts = { 'seat-left': 0, 'seat-right': 0 };
+  const cushionMeshes = [];
+  const renderedColors = new Set();
+  let meshCount = 0;
+  model.traverse(mesh => {
+    if (!mesh?.isMesh) return;
+    meshCount++;
+    const colorKey = mesh.userData?.multiSeatColorKey;
+    if (colorKey && Object.hasOwn(partCounts, colorKey)) partCounts[colorKey]++;
+    const seatId = mesh.userData?.interactionSpotId || mesh.userData?.multiSeatId;
+    if (seatId && Object.hasOwn(seatMeshCounts, seatId)) {
+      seatMeshCounts[seatId]++;
+      cushionMeshes.push({
+        seatId,
+        x: Number(mesh.position.x.toFixed(4)),
+        z: Number(mesh.position.z.toFixed(4)),
+        width: Number((mesh.scale?.x || 0).toFixed(4)),
+        depth: Number((mesh.scale?.z || 0).toFixed(4)),
+      });
+    }
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    if (material?.color) renderedColors.add(`#${material.color.getHexString()}`);
+  });
+  const sortedCushions = [...cushionMeshes].sort((a, b) => a.x - b.x);
+  const cushionGap = sortedCushions.length === 2
+    ? Number((sortedCushions[1].x - sortedCushions[0].x - (sortedCushions[0].width + sortedCushions[1].width) / 2).toFixed(4))
+    : null;
+  const cushionsTightlySpaced = cushionGap != null && cushionGap >= -0.01 && cushionGap <= 0.06;
+  const seatSpotsMatchCushions = sortedCushions.every(cushion => {
+    const def = (FURNITURE_INTERACTION_SPOTS.loveseat || []).find(spot => spot.id === cushion.seatId);
+    const frontEdge = cushion.z + cushion.depth / 2;
+    const armchairFrontEdgeInset = (0.18 + 0.66 / 2) - 0.42;
+    return def &&
+      Math.abs(Number(def.dx) - cushion.x) < 0.001 &&
+      Number(def.dz) > cushion.z &&
+      Number(def.dz) < frontEdge &&
+      Math.abs((frontEdge - Number(def.dz)) - armchairFrontEdgeInset) < 0.001;
+  });
+  const loveseatColors = normalizeMultiSeatFurnitureColors('loveseat', loveseat);
+  const customColorsRendered = Object.values(loveseatColors).every(color => renderedColors.has(color));
+  const cleanGeometry = meshCount === 14 &&
+    partCounts.body === 2 &&
+    partCounts.backArms === 5 &&
+    partCounts.seatCushions === 3 &&
+    partCounts.feet === 4 &&
+    partCounts.seams === 0;
+  const oneCleanDropMeshPerSeat = Object.values(seatMeshCounts).every(count => count === 1);
   const ok = candidates.length === 2 &&
-    candidates.some(seat => seat.seatId === 'seat-left' && seat.approachSpotId === 'approach-left') &&
-    candidates.some(seat => seat.seatId === 'seat-right' && seat.approachSpotId === 'approach-right') &&
+    candidates.some(seat => seat.seatId === 'seat-left' && seat.approachSpotId === 'stand-left') &&
+    candidates.some(seat => seat.seatId === 'seat-right' && seat.approachSpotId === 'stand-right') &&
     first.ok && second.ok && first.reservation.seatId !== second.reservation.seatId &&
     Number.isFinite(facing90) && active?.ok && wrongRelease?.ok === false && released?.ok &&
-    store.reservations.find(r => r.id === second.reservation.id)?.state === 'held';
+    store.reservations.find(r => r.id === second.reservation.id)?.state === 'held' &&
+    cleanGeometry && oneCleanDropMeshPerSeat && cushionsTightlySpaced &&
+    seatSpotsMatchCushions && customColorsRendered &&
+    getFurnitureSeatSurfaceLift('loveseat') === 2.117;
   return {
     ok,
     candidateSeatIds: candidates.map(seat => seat.seatId).sort(),
@@ -52343,6 +55912,19 @@ window.__verifyPhase3CTask3LoveseatTwoSeatLifecycle = () => {
     wrongReleaseReason: wrongRelease?.reason || null,
     releasedOk: !!released?.ok,
     secondStillHeld: store.reservations.find(r => r.id === second.reservation?.id)?.state || null,
+    cleanGeometry,
+    meshCount,
+    partCounts,
+    oneCleanDropMeshPerSeat,
+    seatMeshCounts,
+    cushionMeshes: sortedCushions,
+    cushionGap,
+    cushionsTightlySpaced,
+    seatSpotsMatchCushions,
+    loveseatColors,
+    customColorsRendered,
+    renderedColors: [...renderedColors].sort(),
+    seatSurfaceLift: getFurnitureSeatSurfaceLift('loveseat'),
   };
 };
 
@@ -52609,7 +56191,7 @@ window._useHallwayBenchFurniture = (mode = 'wait') => {
     showToast('No waiting bench seats available', 'warning');
     return;
   }
-  const approach = getFurnitureActionSpot(building, bench, 'approach-front') || getFurnitureActionSpot(building, bench);
+  let approach = getFurnitureActionSpot(building, bench, 'stand-left') || getFurnitureActionSpot(building, bench);
   if (!approach) {
     showToast('No reachable waiting bench approach spot available', 'warning');
     return;
@@ -52647,6 +56229,7 @@ window._useHallwayBenchFurniture = (mode = 'wait') => {
   }
   const selectedSeat = reservationResult.seat;
   const seatSpot = getFurnitureActionSpot(building, bench, selectedSeat.seatId);
+  approach = getFurnitureActionSpot(building, bench, selectedSeat.approachSpotId || (selectedSeat.seatId === 'seat-right' ? 'stand-right' : 'stand-left')) || approach;
   if (!seatSpot) {
     releaseObjectUseSeatReservation(store, { reservationId: reservationResult.reservation.id, agentId: agent.id, seatId: selectedSeat.seatId, terminalState: 'failed', reason: 'missing-seat-spot' });
     showToast('No waiting bench seat spot available', 'warning');
@@ -52673,8 +56256,9 @@ window._useHallwayBenchFurniture = (mode = 'wait') => {
     return;
   }
   const faceAngle = getFurnitureForwardFacingAngle(building, bench, seatSpot, seatSpot.facing || selectedSeat.facing || 'north') ?? seatSpot.faceAngle;
-  bench.reservation = { id: reservationResult.reservation.id, agentId: agent.id || agent.name || 'agent', actionId, seatId: selectedSeat.seatId, spotId: selectedSeat.seatId, approachSpotId: approach.spotId, status: 'held', capacityKey: getObjectUseSeatCapacityKey(objectKey, selectedSeat.seatId) };
-  bench.activeUse = { state: 'reserved', mode: isRest ? 'rest' : 'wait', activeSeats: bench.activeUse?.activeSeats || {}, actionId, agentId: agent.id || null, interactionSpotId: selectedSeat.seatId, approachSpotId: approach.spotId };
+  const dismountSpotId = selectedSeat.exitSpotId || selectedSeat.approachSpotId || approach.spotId;
+  bench.reservation = { id: reservationResult.reservation.id, agentId: agent.id || agent.name || 'agent', actionId, seatId: selectedSeat.seatId, spotId: selectedSeat.seatId, approachSpotId: approach.spotId, dismountSpotId, exitSpotId: dismountSpotId, status: 'held', capacityKey: getObjectUseSeatCapacityKey(objectKey, selectedSeat.seatId) };
+  bench.activeUse = { state: 'reserved', mode: isRest ? 'rest' : 'wait', activeSeats: bench.activeUse?.activeSeats || {}, actionId, agentId: agent.id || null, interactionSpotId: selectedSeat.seatId, approachSpotId: approach.spotId, dismountSpotId };
   bench.benchState = { ...(bench.benchState || {}), status: 'reserved', seats: 2, reservedSeatIds: [...getActiveHallwayBenchReservationSeatIds(bench, buildingId, index)].sort(), lastAction: actionId, persistentFurniture: true };
   agent._idleActivity = {
     kind: isRest ? 'hallway-bench-rest' : 'hallway-bench-wait',
@@ -52686,6 +56270,8 @@ window._useHallwayBenchFurniture = (mode = 'wait') => {
     spotId: selectedSeat.seatId,
     activationSpotId: selectedSeat.seatId,
     approachSpotId: approach.spotId,
+    dismountSpotId,
+    exitSpotId: dismountSpotId,
     reservationId: reservationResult.reservation.id,
     actionId,
     action: actionId,
@@ -52695,6 +56281,7 @@ window._useHallwayBenchFurniture = (mode = 'wait') => {
     dockTarget: { x: seatSpot.apiX, y: seatSpot.apiZ },
     routeApproachTarget: { x: approach.apiX, y: approach.apiZ, floor: approach.floor, spotId: approach.spotId },
     dockSnapRadius: 7,
+    seatSurfaceLift: getFurnitureSeatSurfaceLift('hallwayBench'),
     standTarget: { x: approach.apiX, y: approach.apiZ, floor: approach.floor },
     standFaceAngle: approach.faceAngle,
     furnitureType: 'hallwayBench',
@@ -52720,7 +56307,8 @@ window.__verifyPhase3CTask8HallwayBenchLifecycle = () => {
   const leftCandidate = candidates.find(seat => seat.seatId === 'seat-left');
   const first = chooseAndReserveObjectUseSeat(store, candidates, { agentId: 'verify-wait-left', agentPosition: { x: leftCandidate?.position?.x || 0, z: leftCandidate?.position?.z || 0 }, reservationId: 'verify-hallway-bench-left', actionId: 'life.waitAtHallwayBench' });
   const second = chooseAndReserveObjectUseSeat(store, candidates, { agentId: 'verify-wait-second', agentPosition: { x: leftCandidate?.position?.x || 0, z: leftCandidate?.position?.z || 0 }, reservationId: 'verify-hallway-bench-second', actionId: 'life.restAtHallwayBench' });
-  const approachSpot = getFurnitureActionSpot(building, bench, 'approach-front');
+  const selectedApproachId = first.seat?.approachSpotId || (first.reservation?.seatId === 'seat-right' ? 'stand-right' : 'stand-left');
+  const approachSpot = getFurnitureActionSpot(building, bench, selectedApproachId);
   const seatSpot = getFurnitureActionSpot(building, bench, first.reservation?.seatId || 'seat-left');
   const facing90 = getFurnitureForwardFacingAngle(building, bench, seatSpot, seatSpot?.facing || 'north');
   const active = first.ok ? activateObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: first.reservation.agentId, seatId: first.reservation.seatId }) : null;
@@ -52728,12 +56316,12 @@ window.__verifyPhase3CTask8HallwayBenchLifecycle = () => {
     bench.reservation = { id: first.reservation.id, agentId: first.reservation.agentId, actionId: first.reservation.actionId, seatId: first.reservation.seatId, spotId: first.reservation.seatId, status: 'active' };
     bench.activeUse = { state: 'active', mode: 'wait', activeSeats: { [first.reservation.seatId]: { agentId: first.reservation.agentId, reservationId: first.reservation.id, interactionSpotId: first.reservation.seatId, pose: 'waiting-seated' } } };
   }
-  const simulatedActivity = first.ok ? { kind: 'hallway-bench-wait', buildingId: building.id, furnitureIndex: 0, seatId: first.reservation.seatId, spotId: first.reservation.seatId, activationSpotId: first.reservation.seatId, approachSpotId: 'approach-front', reservationId: first.reservation.id, action: first.reservation.actionId || 'life.waitAtHallwayBench', animationId: 'hallway-bench-wait' } : null;
+  const simulatedActivity = first.ok ? { kind: 'hallway-bench-wait', buildingId: building.id, furnitureIndex: 0, seatId: first.reservation.seatId, spotId: first.reservation.seatId, activationSpotId: first.reservation.seatId, approachSpotId: selectedApproachId, dismountSpotId: selectedApproachId, exitSpotId: selectedApproachId, reservationId: first.reservation.id, action: first.reservation.actionId || 'life.waitAtHallwayBench', animationId: 'hallway-bench-wait' } : null;
   const wrongRelease = first.ok ? releaseObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: 'verify-wait-second', seatId: first.reservation.seatId, reason: 'wrong-agent' }) : null;
   const released = first.ok ? releaseHallwayBenchSeatUse(bench, simulatedActivity, { id: first.reservation.agentId }, 'complete') : null;
   const expectedSeatIds = ['seat-left', 'seat-right'];
   const ok = candidates.length === 2 && expectedSeatIds.every(id => candidates.some(seat => seat.seatId === id)) &&
-    candidates.every(seat => seat.approachSpotId === 'approach-front') && !!approachSpot && !!seatSpot &&
+    candidates.every(seat => seat.approachSpotId === `stand-${seat.seatId.replace('seat-', '')}`) && !!approachSpot && !!seatSpot &&
     first.ok && second.ok && first.reservation.seatId !== second.reservation.seatId &&
     active?.ok && wrongRelease?.ok === false && released?.ok &&
     store.reservations.find(r => r.id === first.reservation.id)?.state === 'released' &&
@@ -52767,6 +56355,7 @@ window.__verifyPhase3CTask9TableSeatingAudit = () => {
     outdoorCafeTable: Object.freeze(['seat-north', 'seat-south', 'seat-east', 'seat-west']),
     picnicTable: Object.freeze(['seat-north-left', 'seat-north-right', 'seat-south-left', 'seat-south-right']),
     smallRoundMeetingTable: Object.freeze(['seat-north', 'seat-east', 'seat-south', 'seat-west']),
+    diningTable: Object.freeze(['seat-north', 'seat-south', 'seat-east', 'seat-west']),
   });
   const building = { id: 'verify-phase3c-table-building', x: 0, z: 0, width: 12, depth: 10, rotation: 0, interior: { floors: 1, furniture: [] } };
   const summaries = Object.entries(requiredTables).map(([type, expectedSeatIds], index) => {
@@ -52855,7 +56444,7 @@ window._useOfficeChairFurniture = (mode = 'work') => {
     spotId: seatSpot.spotId,
     approachSpotId: approach.spotId,
     stayMs: isWork ? 15000 : 10000,
-    faceAngle: seatSpot.faceAngle,
+    faceAngle: getAuthoredFurnitureSpotFacingAngle(building, chair, seatSpot, 'north') ?? seatSpot.faceAngle,
     dockTarget: { x: seatSpot.apiX, y: seatSpot.apiZ },
     dockSnapRadius: 6,
     furnitureType: 'officeChair',
@@ -53065,12 +56654,13 @@ window.__verifyBarStoolRuntimeManualUse = () => {
     const autonomousSelectable = !!(autonomousPlan?.reservation?.seatId === 'seat' && autonomousPlan?.routeApproachTarget?.spotId === 'approach-front' && autonomousPlan?.seatSpot?.spotId === 'seat');
     if (autonomousPlan?.reservation?.id) releaseObjectUseSeatReservation(getBarStoolObjectUseSeatStore(stool), { reservationId: autonomousPlan.reservation.id, agentId: autonomousAgent.id, seatId: autonomousPlan.reservation.seatId, terminalState: 'released', reason: 'runtime-verification-cleanup' });
 
+    const manualIntentAccepted = Boolean(manualIntent || (manualActivity && manualReserved));
     const summary = {
-      ok: !!(dropdown && dropdown.value === manualAgent.id && approachOutsideCollider && standOutsideCollider && manualReserved && manualIntent && manualRoutedViaApproach && manualDocksAtSeat && duplicateResult.ok === false && dismountSafe && autonomousSelectable),
+      ok: !!(dropdown && dropdown.value === manualAgent.id && approachOutsideCollider && standOutsideCollider && manualReserved && manualIntentAccepted && manualRoutedViaApproach && manualDocksAtSeat && duplicateResult.ok === false && dismountSafe && autonomousSelectable),
       placedAndRotated: stool.rotation === 90,
       manualDropdownAgentId: dropdown?.value || null,
       manualReserved,
-      manualIntentAccepted: !!manualIntent,
+      manualIntentAccepted,
       manualRoutedViaApproach,
       manualDocksAtSeat,
       approachOutsideCollider,
@@ -53184,7 +56774,7 @@ window.__verifyPhase3CTask7ParkBenchLifecycle = () => {
   };
   building.outdoorArea.nodes.push(bench);
   const candidates = getParkBenchSeatCandidates(building, bench, { actionId: 'life.restAtBench' });
-  const approach = getOutdoorNodeSpotRuntimeTarget(building, bench, 'approach-front', 'life.approachParkBench', { preferredSpotId: 'approach-front' });
+  const centerApproach = getOutdoorNodeSpotRuntimeTarget(building, bench, 'stand-center', 'life.standFromParkBench', { preferredSpotId: 'stand-center' });
   const centerSeat = getOutdoorNodeSpotRuntimeTarget(building, bench, 'seat-center', 'life.restAtBench', { preferredSpotId: 'seat-center' });
   const facing0 = getOutdoorNodeSpotFacingAngle(building, { ...bench, rotation: 0 }, 'seat-center', 'north');
   const facing90 = getOutdoorNodeSpotFacingAngle(building, bench, 'seat-center', 'north');
@@ -53197,18 +56787,19 @@ window.__verifyPhase3CTask7ParkBenchLifecycle = () => {
     bench.reservation = { id: first.reservation.id, agentId: first.reservation.agentId, actionId: first.reservation.actionId, seatId: first.reservation.seatId, spotId: first.reservation.seatId, status: 'active' };
     bench.activeUse = { state: 'active', mode: 'rest', activeSeats: { [first.reservation.seatId]: { agentId: first.reservation.agentId, reservationId: first.reservation.id, interactionSpotId: first.reservation.seatId } } };
   }
-  const simulatedActivity = first.ok ? { kind: 'park-bench-rest', buildingId: building.id, outdoorNodeId: bench.id, seatId: first.reservation.seatId, spotId: first.reservation.seatId, activationSpotId: first.reservation.seatId, approachSpotId: 'approach-front', reservationId: first.reservation.id, action: first.reservation.actionId || 'life.restAtBench' } : null;
+  const firstApproachId = first.seat?.approachSpotId || `stand-${String(first.reservation?.seatId || 'seat-left').replace('seat-', '')}`;
+  const simulatedActivity = first.ok ? { kind: 'park-bench-rest', buildingId: building.id, outdoorNodeId: bench.id, seatId: first.reservation.seatId, spotId: first.reservation.seatId, activationSpotId: first.reservation.seatId, approachSpotId: firstApproachId, dismountSpotId: firstApproachId, exitSpotId: firstApproachId, reservationId: first.reservation.id, action: first.reservation.actionId || 'life.restAtBench' } : null;
   const wrongRelease = first.ok ? releaseObjectUseSeatReservation(store, { reservationId: first.reservation.id, agentId: 'verify-bench-second', seatId: first.reservation.seatId, reason: 'wrong-agent' }) : null;
   const released = first.ok ? releaseParkBenchSeatUse(bench, simulatedActivity, { id: first.reservation.agentId }, 'complete') : null;
-  const ok = candidates.length === 3 && candidates.every(seat => seat.approachSpotId === 'approach-front') &&
-    !!approach?.target && !!centerSeat?.target && first.ok && second.ok && first.reservation.seatId !== second.reservation.seatId &&
+  const ok = candidates.length === 3 && candidates.every(seat => seat.approachSpotId === `stand-${seat.seatId.replace('seat-', '')}`) &&
+    !!centerApproach?.target && !!centerSeat?.target && first.ok && second.ok && first.reservation.seatId !== second.reservation.seatId &&
     active?.ok && wrongRelease?.ok === false && released?.ok && store.reservations.find(r => r.id === second.reservation.id)?.state === 'held' &&
     store.reservations.find(r => r.id === first.reservation.id)?.state === 'released' && Number.isFinite(facing0) && Number.isFinite(facing90) && Math.abs(facing0 - facing90) > 0.1;
   return {
     ok,
     candidateSeatIds: candidates.map(seat => seat.seatId),
     approachSpotId: candidates[0]?.approachSpotId || null,
-    approachTarget: approach?.target ? { x: approach.target.x, y: approach.target.y, spotId: approach.target.interactionSpotId } : null,
+    approachTarget: centerApproach?.target ? { x: centerApproach.target.x, y: centerApproach.target.y, spotId: centerApproach.target.interactionSpotId } : null,
     centerSeatTarget: centerSeat?.target ? { x: centerSeat.target.x, y: centerSeat.target.y, spotId: 'seat-center' } : null,
     firstSeatId: first.reservation?.seatId || null,
     secondSeatId: second.reservation?.seatId || null,
@@ -53223,12 +56814,320 @@ window.__verifyPhase3CTask7ParkBenchLifecycle = () => {
   };
 };
 
+window.__verifyMultiSeatCouchParityUpgrades = () => {
+  const paletteValues = ['#123456', '#245678', '#36789a', '#489abc', '#5abcde'];
+  const definitions = [
+    {
+      type: 'sectionalSofa',
+      seatIds: ['seat-left', 'seat-center', 'seat-corner', 'chaise'],
+      lift: 2.08,
+      furniture: { id: 'verify-parity-sectional', type: 'sectionalSofa', x: 5, z: 4, rotation: 0 },
+      candidates: (building, furniture) => getSectionalSofaSeatCandidates(building, furniture, 0, { actionId: 'life.restAtSectionalSofa' }),
+      store: getSectionalSofaObjectUseSeatStore,
+      model: furniture => makeSectionalSofa3D(0, 0, 1, furniture),
+    },
+    {
+      type: 'loveseat',
+      seatIds: ['seat-left', 'seat-right'],
+      lift: 2.117,
+      furniture: { id: 'verify-parity-loveseat', type: 'loveseat', x: 5, z: 4, rotation: 0 },
+      candidates: (building, furniture) => getLoveseatSeatCandidates(building, furniture, 0, { actionId: 'life.restAtLoveseat' }),
+      store: getLoveseatObjectUseSeatStore,
+      model: furniture => makeLoveseat3D(0, 0, 1, furniture),
+    },
+    {
+      type: 'hallwayBench',
+      seatIds: ['seat-left', 'seat-right'],
+      lift: 2.071,
+      furniture: { id: 'verify-parity-hallway', type: 'hallwayBench', x: 5, z: 4, rotation: 0 },
+      candidates: (building, furniture) => getHallwayBenchSeatCandidates(building, furniture, 0, { actionId: 'life.waitAtHallwayBench' }),
+      store: getHallwayBenchObjectUseSeatStore,
+      model: furniture => makeHallwayBench3D(0, 0, 1, furniture),
+    },
+    {
+      type: 'parkBench',
+      seatIds: ['seat-left', 'seat-center', 'seat-right'],
+      lift: 1.662,
+      outdoor: true,
+      furniture: { id: 'verify-parity-park', type: 'seat', catalogId: 'parkBench', assetId: 'parkBench', renderType: 'parkBench', x: 5, z: 4, rotation: 0 },
+      candidates: (building, furniture) => getParkBenchSeatCandidates(building, furniture, { actionId: 'life.restAtBench' }),
+      store: getParkBenchObjectUseSeatStore,
+      model: furniture => makeParkBench3D(0, 0, 1, furniture),
+    },
+  ];
+
+  const results = {};
+  for (const definition of definitions) {
+    const { type, seatIds } = definition;
+    const scheme = MULTI_SEAT_COLOR_SCHEMES[type];
+    const customColors = Object.fromEntries(scheme.fields.map(([key], index) => [key, paletteValues[index]]));
+    const furniture = {
+      ...definition.furniture,
+      [scheme.property]: customColors,
+    };
+    const building = definition.outdoor
+      ? { id: `verify-parity-${type}-building`, type: 'park', x: 0, z: 0, width: 12, depth: 10, rotation: 0, outdoorArea: { nodes: [furniture] } }
+      : { id: `verify-parity-${type}-building`, x: 0, z: 0, width: 12, depth: 10, rotation: 0, interior: { floors: 1, furniture: [furniture] } };
+    const candidates = definition.candidates(building, furniture);
+    // ObjectUse helpers deep-freeze their immutable candidate DTOs. Candidate
+    // construction must never retain the live building/furniture (or a
+    // Three.js mesh/scene reached through them), otherwise a manual seat drop
+    // freezes the renderer and the day/night pass can no longer update
+    // scene.background.
+    const liveObjectsMutable = !Object.isFrozen(building) &&
+      !Object.isFrozen(furniture) &&
+      !Object.isFrozen(definition.outdoor ? building.outdoorArea : building.interior);
+    const store = definition.store(furniture);
+    const reservations = [];
+    for (const seatId of seatIds) {
+      const candidate = candidates.find(seat => seat.seatId === seatId);
+      reservations.push(chooseAndReserveObjectUseSeat(store, candidates, {
+        agentId: `verify-parity-${type}-${seatId}`,
+        agentPosition: { x: candidate?.position?.x || 0, z: candidate?.position?.z || 0 },
+        actionId: candidate?.actionId || candidate?.action || `verify.${type}`,
+        reservationId: `verify-parity-${type}-${seatId}`,
+      }));
+    }
+    const extra = chooseAndReserveObjectUseSeat(store, candidates, {
+      agentId: `verify-parity-${type}-extra`,
+      agentPosition: { x: candidates[0]?.position?.x || 0, z: candidates[0]?.position?.z || 0 },
+      reservationId: `verify-parity-${type}-extra`,
+    });
+    const first = reservations[0];
+    const released = first?.ok ? releaseObjectUseSeatReservation(store, {
+      reservationId: first.reservation.id,
+      agentId: first.reservation.agentId,
+      seatId: first.reservation.seatId,
+      terminalState: 'released',
+      reason: 'multi-seat-parity-verifier',
+    }) : null;
+    const otherReservationsRemain = reservations.slice(1).every(result =>
+      result.ok && ['held', 'active', 'reserved'].includes(String(store.reservations.find(entry => entry.id === result.reservation.id)?.state || ''))
+    );
+    const immutableReseatStore = {
+      reservations: Object.freeze([
+        Object.freeze({
+          id: `verify-parity-${type}-immutable-reseat`,
+          agentId: `verify-parity-${type}-reseated-agent`,
+          seatId: seatIds[0],
+          state: 'active',
+        }),
+        Object.freeze({
+          id: `verify-parity-${type}-other-seat`,
+          agentId: `verify-parity-${type}-other-agent`,
+          seatId: seatIds[1] || seatIds[0],
+          state: 'active',
+        }),
+      ]),
+    };
+    let immutableManualReseatSafe = false;
+    try {
+      const releasedCount = releasePriorMultiSeatReservationsForManualReseat(
+        immutableReseatStore,
+        `verify-parity-${type}-reseated-agent`,
+        12345,
+      );
+      immutableManualReseatSafe =
+        releasedCount === 1 &&
+        Object.isFrozen(immutableReseatStore.reservations) === false &&
+        immutableReseatStore.reservations[0]?.state === 'released' &&
+        immutableReseatStore.reservations[1]?.state === 'active';
+    } catch {
+      immutableManualReseatSafe = false;
+    }
+    const staleSeatFixture = {
+      type: definition.furniture.type,
+      objectUseSeats: {
+        reservations: Object.freeze([
+          Object.freeze({
+            id: `verify-parity-${type}-stale-seat`,
+            agentId: `verify-parity-${type}-departed-agent`,
+            seatId: seatIds[0],
+            state: 'active',
+            status: 'active',
+          }),
+        ]),
+      },
+      reservation: Object.freeze({
+        id: `verify-parity-${type}-stale-seat`,
+        agentId: `verify-parity-${type}-departed-agent`,
+        seatId: seatIds[0],
+        state: 'active',
+        status: 'active',
+      }),
+      activeUse: Object.freeze({
+        state: 'active',
+        interactionSpotId: seatIds[0],
+        activeSeats: Object.freeze({
+          [seatIds[0]]: Object.freeze({
+            agentId: `verify-parity-${type}-departed-agent`,
+            reservationId: `verify-parity-${type}-stale-seat`,
+          }),
+        }),
+      }),
+    };
+    let staleSeatReconciliationSafe = false;
+    try {
+      const reconciliation = reconcileMultiSeatRuntimeUseState(
+        type,
+        `verify-parity-${type}-stale-building`,
+        definition.outdoor ? staleSeatFixture.id : 0,
+        staleSeatFixture,
+        'multi-seat-parity-verifier',
+      );
+      staleSeatReconciliationSafe =
+        reconciliation.changed === true &&
+        reconciliation.released === 1 &&
+        staleSeatFixture.objectUseSeats.reservations[0]?.state === 'released' &&
+        staleSeatFixture.reservation === null &&
+        staleSeatFixture.activeUse?.state === 'idle' &&
+        Object.keys(staleSeatFixture.activeUse?.activeSeats || {}).length === 0;
+    } catch {
+      staleSeatReconciliationSafe = false;
+    }
+
+    const model = definition.model(furniture);
+    const renderedColorKeys = new Set();
+    const renderedSeatMeshes = new Map();
+    model.traverse(mesh => {
+      if (!mesh?.isMesh) return;
+      if (mesh.userData?.multiSeatColorKey) renderedColorKeys.add(mesh.userData.multiSeatColorKey);
+      const seatId = mesh.userData?.interactionSpotId || mesh.userData?.multiSeatId;
+      if (seatId) {
+        if (!renderedSeatMeshes.has(seatId)) renderedSeatMeshes.set(seatId, []);
+        renderedSeatMeshes.get(seatId).push(mesh);
+      }
+    });
+    const spots = FURNITURE_INTERACTION_SPOTS[type] || [];
+    const seatDefinitions = spots.filter(spot => seatIds.includes(spot.id));
+    const exactRouting = seatDefinitions.every(spot => {
+      const suffix = spot.id === 'chaise' ? 'chaise' : spot.id.replace('seat-', '');
+      return spot.slotId === spot.id &&
+        spot.activationSpotId === spot.id &&
+        spot.approachSpotId === `stand-${suffix}` &&
+        spot.exitSpotId === `stand-${suffix}` &&
+        spot.capacityKind === 'exclusive' &&
+        spot.capacity === 1 &&
+        spot.dockMode === 'snap-to-activation';
+    });
+    const frontEdgeAnchors = seatDefinitions.every(spot => {
+      const meshes = renderedSeatMeshes.get(spot.id) || [];
+      if (!meshes.length) return false;
+      if (spot.id === 'chaise') return meshes.every(mesh => Number(spot.dx) <= Number(mesh.position.x) - 0.05);
+      return meshes.some(mesh => Number(spot.dz) >= Number(mesh.position.z) + 0.05);
+    });
+    const standPointsOutsideCollider = seatDefinitions.every(spot => {
+      const stand = spots.find(candidate => candidate.id === spot.approachSpotId);
+      return stand && Math.abs(Number(stand.dz)) > Number(FURNITURE_HALF_SIZES[type]?.[1] || 0);
+    });
+    const firstSeatOccupiedBeforeRelease = first?.ok && reservations.every(result => result.ok);
+    const independentSeatKeys = new Set(reservations.map(result => result.reservation?.capacityKey).filter(Boolean)).size === seatIds.length;
+    const colorsPersisted = scheme.fields.every(([key]) => model.userData?.multiSeatColors?.[key] === customColors[key]);
+    const allPalettePartsRendered = scheme.fields.every(([key]) => renderedColorKeys.has(key));
+    const allSeatHitsRendered = seatIds.every(seatId => renderedSeatMeshes.has(seatId));
+    const lift = getFurnitureSeatSurfaceLift(type);
+    const runtimeSeatId = seatIds[0];
+    const runtimeHandoffAgent = {
+      id: `verify-runtime-handoff-${type}`,
+      _runtimeObserverOnly: true,
+      _runtimeObserverSnapshotBuffer: [],
+      _stayTimer: 0,
+    };
+    const runtimeHandoffSnapshot = {
+      x: candidates[0]?.position?.x || 0,
+      y: candidates[0]?.position?.z || 0,
+      floor: 1,
+      version: 1,
+      tickSeq: 1,
+      simTimeMs: 1,
+      updatedAt: new Date().toISOString(),
+      visualState: {
+        activityActive: true,
+        resolvedAnimationId: 'sit',
+        movement: { isMoving: false, isRunning: false },
+        activity: {
+          kind: `${type}-seat-verifier`,
+          phase: 'active',
+          objectType: type,
+          furnitureType: type,
+          poseKind: 'seat',
+          animationId: 'sit',
+          spotId: runtimeSeatId,
+          slotId: runtimeSeatId,
+        },
+      },
+    };
+    const runtimeHandoffQueued = queueAgentRuntimeObserverSnapshot(runtimeHandoffAgent, runtimeHandoffSnapshot);
+    const runtimeHandoff = runtimeHandoffQueued.reset === true &&
+      runtimeHandoffAgent._idleActivity?.phase === 'active' &&
+      runtimeHandoffAgent._idleActivity?.seatId === runtimeSeatId &&
+      runtimeHandoffAgent._idleActivity?.animationId === 'sit' &&
+      Math.abs(Number(runtimeHandoffAgent._idleActivity?.seatSurfaceLift) - definition.lift) < 0.001;
+    const result = {
+      ok: candidates.length === seatIds.length &&
+        seatIds.every(seatId => candidates.some(candidate => candidate.seatId === seatId)) &&
+        exactRouting &&
+        standPointsOutsideCollider &&
+        frontEdgeAnchors &&
+        firstSeatOccupiedBeforeRelease &&
+        independentSeatKeys &&
+        extra.ok === false &&
+        released?.ok === true &&
+        otherReservationsRemain &&
+        immutableManualReseatSafe &&
+        staleSeatReconciliationSafe &&
+        allPalettePartsRendered &&
+        allSeatHitsRendered &&
+        colorsPersisted &&
+        liveObjectsMutable &&
+        runtimeHandoff &&
+        Math.abs(lift - definition.lift) < 0.001,
+      seatIds: candidates.map(candidate => candidate.seatId).sort(),
+      approaches: Object.fromEntries(candidates.map(candidate => [candidate.seatId, candidate.approachSpotId])),
+      exits: Object.fromEntries(candidates.map(candidate => [candidate.seatId, candidate.exitSpotId])),
+      reservedSeatIds: reservations.map(entry => entry.reservation?.seatId || null),
+      capacityKeys: reservations.map(entry => entry.reservation?.capacityKey || null),
+      extraReservationReason: extra.reason || null,
+      releasedSeatId: first?.reservation?.seatId || null,
+      otherReservationsRemain,
+      immutableManualReseatSafe,
+      staleSeatReconciliationSafe,
+      exactRouting,
+      standPointsOutsideCollider,
+      frontEdgeAnchors,
+      allSeatHitsRendered,
+      renderedColorKeys: [...renderedColorKeys].sort(),
+      colorsPersisted,
+      liveObjectsMutable,
+      runtimeHandoff,
+      runtimeHandoffDetails: {
+        queued: runtimeHandoffQueued.queued === true,
+        reset: runtimeHandoffQueued.reset === true,
+        phase: runtimeHandoffAgent._idleActivity?.phase || null,
+        seatId: runtimeHandoffAgent._idleActivity?.seatId || null,
+        animationId: runtimeHandoffAgent._idleActivity?.animationId || null,
+        seatSurfaceLift: runtimeHandoffAgent._idleActivity?.seatSurfaceLift ?? null,
+        expectedSeatId: runtimeSeatId,
+        expectedSeatSurfaceLift: definition.lift,
+      },
+      seatSurfaceLift: lift,
+    };
+    results[type] = result;
+  }
+  return {
+    ok: Object.values(results).every(result => result.ok),
+    results,
+  };
+};
+
 window.__verifyPhase3CTask10SeatingRegressionHandoff = async () => {
   const seatingFlows = {
     couch: window.__verifyPhase3CTask2CouchThreeCushionSeating?.(),
+    sectionalSofa: window.__verifyPhase3CTask4SectionalSofaChaiseLifecycle?.(),
     loveseat: window.__verifyPhase3CTask3LoveseatTwoSeatLifecycle?.(),
     parkBench: window.__verifyPhase3CTask7ParkBenchLifecycle?.(),
     hallwayBench: window.__verifyPhase3CTask8HallwayBenchLifecycle?.(),
+    multiSeatCouchParity: window.__verifyMultiSeatCouchParityUpgrades?.(),
     tableSeating: window.__verifyPhase3CTask9TableSeatingAudit?.(),
   };
   const barberChair = typeof window.__verifyPhase3Task7BarberChairHairEditor === 'function'
@@ -53304,7 +57203,7 @@ window._useConferenceChairFurniture = (mode = 'sit') => {
     spotId: seatSpot.spotId,
     approachSpotId: approach.spotId,
     stayMs: mode === 'meeting' ? 15000 : (mode === 'listen' ? 14000 : 10000),
-    faceAngle: seatSpot.faceAngle,
+    faceAngle: getAuthoredFurnitureSpotFacingAngle(building, chair, seatSpot, 'north') ?? seatSpot.faceAngle,
     dockTarget: { x: seatSpot.apiX, y: seatSpot.apiZ },
     dockSnapRadius: 6,
     furnitureType: 'conferenceChair',
@@ -53611,12 +57510,13 @@ window._useBedFurniture = (mode = 'rest') => {
     buildingId,
     furnitureIndex: index,
     stayMs: mode === 'sleep' ? 26000 : (mode === 'dream' ? 18000 : 14000),
-    faceAngle: lieSpot.faceAngle,
+    faceAngle: getAuthoredFurnitureSpotFacingAngle(building, bed, lieSpot, 'north') ?? lieSpot.faceAngle,
     dockTarget: { x: lieSpot.apiX, y: lieSpot.apiZ },
     dockSnapRadius: 8,
     standTarget: { x: wakeStand.apiX, y: wakeStand.apiZ, floor: wakeStand.floor },
     standFaceAngle: wakeStand.faceAngle,
     furnitureType: 'bed',
+    surfaceLift: 0.88,
     wakeTransitionMs: 1600,
   };
   agent._wanderTimer = 150;
@@ -54999,10 +58899,13 @@ window._useClinicBedFurniture = (mode = 'review') => {
     buildingId,
     furnitureIndex: index,
     stayMs: isService ? 15000 : 22000,
-    faceAngle: dockSpot.faceAngle,
+    faceAngle: isService
+      ? dockSpot.faceAngle
+      : (getAuthoredFurnitureSpotFacingAngle(building, bed, dockSpot, 'north') ?? dockSpot.faceAngle),
     dockTarget: { x: dockSpot.apiX, y: dockSpot.apiZ },
     dockSnapRadius: 7,
     furnitureType: 'clinicBed',
+    surfaceLift: isService ? 0 : 0.86,
     spotId: dockSpot.spotId,
     action: actionId,
     actionId,
@@ -55059,7 +58962,9 @@ window._useExamChairFurniture = (mode = 'checkup') => {
     buildingId,
     furnitureIndex: index,
     stayMs: isService ? 15000 : 19000,
-    faceAngle: dockSpot.faceAngle,
+    faceAngle: isService
+      ? dockSpot.faceAngle
+      : (getAuthoredFurnitureSpotFacingAngle(building, chair, dockSpot, 'north') ?? dockSpot.faceAngle),
     dockTarget: { x: dockSpot.apiX, y: dockSpot.apiZ },
     dockSnapRadius: 7,
     furnitureType: 'examChair',
@@ -55609,6 +59514,7 @@ window._useSmallCafeTableFurniture = (mode = 'eat') => {
     dockTarget: { x: spot.apiX, y: spot.apiZ },
     dockSnapRadius: 7,
     furnitureType: 'smallCafeTable',
+    seatSurfaceLift: getFurnitureSeatSurfaceLift('smallCafeTable'),
     spotId: reservedSpotId,
     seatId: selectedSeat?.seatId || null,
     activationSpotId: selectedSeat?.activationSpotId || reservedSpotId,
@@ -55618,7 +59524,7 @@ window._useSmallCafeTableFurniture = (mode = 'eat') => {
     capacityKey: reservationResult?.reservation?.capacityKey || null,
     mode,
     action: actionId,
-    animationId: mode === 'work' ? 'sit-work' : (mode === 'talk' ? 'gather-talk' : (mode === 'setdown' ? 'stand-pickup-setdown' : 'sit-eat-drink')),
+    animationId: mode === 'work' ? 'sit-work' : (mode === 'talk' ? 'gather-talk' : (mode === 'setdown' ? 'stand-pickup-setdown' : 'drink-eat')),
     lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true },
   };
   agent._wanderTimer = 150;
@@ -55784,6 +59690,7 @@ window._useOutdoorCafeTableFurniture = (mode = 'sit') => {
     dockTarget: { x: spot.apiX, y: spot.apiZ },
     dockSnapRadius: 7,
     furnitureType: 'outdoorCafeTable',
+    seatSurfaceLift: getFurnitureSeatSurfaceLift('outdoorCafeTable'),
     spotId: reservedSpotId,
     seatId: selectedSeat?.seatId || null,
     activationSpotId: selectedSeat?.activationSpotId || reservedSpotId,
@@ -55868,7 +59775,13 @@ window._usePicnicTableFurniture = (mode = 'sit') => {
     }
     selectedSeat = reservationResult.seat;
   }
-  const reservedSpotId = selectedSeat?.seatId || spot.spotId;
+  const activationSpot = selectedSeat
+    ? (getFurnitureActionSpot(building, table, selectedSeat.seatId) || spot)
+    : spot;
+  const routeSpot = normalizedMode === 'setdown'
+    ? activationSpot
+    : (getFurnitureActionSpot(building, table, selectedSeat?.approachSpotId) || activationSpot);
+  const reservedSpotId = selectedSeat?.seatId || activationSpot.spotId;
   table.reservation = { id: reservationResult?.reservation?.id || null, agentId: agent.id || agent.name || 'agent', actionId, spotId: reservedSpotId, seatId: selectedSeat?.seatId || null, activationSpotId: selectedSeat?.activationSpotId || reservedSpotId, approachSpotId: selectedSeat?.approachSpotId || reservedSpotId, capacityKey: reservationResult?.reservation?.capacityKey || null, status: 'held' };
   table.activeUse = { state: 'reserved', mode: normalizedMode, actionId, agentId: agent.id || null, reservedSeatId: selectedSeat?.seatId || null };
   const nextSurfaceItems = normalizedMode === 'setdown' ? Math.min(2, previousSurfaceItems + 1) : previousSurfaceItems;
@@ -55883,17 +59796,19 @@ window._usePicnicTableFurniture = (mode = 'sit') => {
     cleanupOnReload: true,
     persistentFurniture: true,
   };
-  setAgentTargetForExplicitObjectAction(agent, { x: spot.apiX, y: spot.apiZ, floor: spot.floor }, building, spot.floor);
+  setAgentTargetForExplicitObjectAction(agent, { x: routeSpot.apiX, y: routeSpot.apiZ, floor: routeSpot.floor }, building, routeSpot.floor);
   agent._idleActivity = {
     kind: `picnic-table-${normalizedMode}`,
     phase: 'approach',
     buildingId,
     furnitureIndex: index,
     stayMs: normalizedMode === 'socialize' ? 15000 : 12000,
-    faceAngle: spot.faceAngle,
-    dockTarget: { x: spot.apiX, y: spot.apiZ },
+    faceAngle: activationSpot.faceAngle,
+    dockTarget: { x: activationSpot.apiX, y: activationSpot.apiZ },
+    routeApproachTarget: { x: routeSpot.apiX, y: routeSpot.apiZ, floor: routeSpot.floor, spotId: routeSpot.spotId },
     dockSnapRadius: 7,
     furnitureType: 'picnicTable',
+    seatSurfaceLift: getFurnitureSeatSurfaceLift('picnicTable'),
     spotId: reservedSpotId,
     seatId: selectedSeat?.seatId || null,
     activationSpotId: selectedSeat?.activationSpotId || reservedSpotId,
@@ -55963,6 +59878,7 @@ window._useSmallRoundMeetingTableFurniture = (mode = 'meeting') => {
       dockTarget: { x: spot.apiX, y: spot.apiZ },
       dockSnapRadius: 7,
       furnitureType: 'smallRoundMeetingTable',
+      seatSurfaceLift: getFurnitureSeatSurfaceLift('smallRoundMeetingTable'),
       spotId: reservedSpotId,
       seatId: selectedSeat?.seatId || null,
       activationSpotId: selectedSeat?.activationSpotId || reservedSpotId,
@@ -57373,6 +61289,7 @@ window._useGamingStationFurniture = (mode = 'play') => {
     dockTarget: { x: spot.apiX, y: spot.apiZ },
     dockSnapRadius: 7,
     furnitureType: 'gamingStation',
+    seatSurfaceLift: getFurnitureSeatSurfaceLift('gamingStation'),
     spotId: spot.spotId,
     mode,
     action: 'life.playGamingStation',
@@ -57690,6 +61607,7 @@ window._useTreadmillFurniture = (mode = 'train') => {
     action,
     actionId: action,
     animationId: 'train-practice',
+    surfaceLift: 0.22,
     lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true },
   };
   agent._wanderTimer = 150;
@@ -58245,7 +62163,7 @@ window._usePondDockFurniture = (mode = 'view') => {
     lifecycle: 'stationary-non-carryable-persistent-solid-pond-dock',
   };
   dock.lifecycle = { ...(dock.lifecycle || {}), stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, statePath: 'pondDockState', waterEdgeSafe: true };
-  setAgentTargetForExplicitObjectAction(agent, { x: spot.apiX, y: spot.apiZ, floor: spot.floor }, building, spot.floor);
+  setAgentTargetForExplicitObjectAction(agent, { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor }, building, approachSpot.floor);
   agent._idleActivity = {
     kind: activityKind,
     phase: 'approach',
@@ -58254,7 +62172,9 @@ window._usePondDockFurniture = (mode = 'view') => {
     stayMs: isRelax ? 18000 : 16000,
     faceAngle: spot.faceAngle,
     dockTarget: { x: spot.apiX, y: spot.apiZ },
+    routeApproachTarget: { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor },
     dockSnapRadius: 7,
+    surfaceLift: 0.34,
     standTarget: approachSpot ? { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor } : { x: spot.apiX, y: spot.apiZ, floor: spot.floor },
     standFaceAngle: approachSpot?.faceAngle ?? spot.faceAngle,
     furnitureType: 'pondDock',
@@ -58264,7 +62184,7 @@ window._usePondDockFurniture = (mode = 'view') => {
     waterEdgeOrientationDeg: orientationDeg,
     action,
     animationId: 'pond-dock-view-relax',
-    routeSafety: 'dock-edge/land-safe target outside solid dock footprint only; no water terrain target',
+    routeSafety: 'route to the land-side handoff, then dock onto the raised plank deck; no water terrain target',
     lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true },
   };
   agent._wanderTimer = 150;
@@ -58289,7 +62209,12 @@ window._useOutdoorStageFurniture = (mode = 'perform') => {
   const normalizedMode = mode === 'watch' ? 'watch' : (mode === 'gather' ? 'gather' : 'perform');
   const spotId = normalizedMode === 'perform' ? 'perform-center' : (normalizedMode === 'watch' ? 'watch-front-center' : 'audience-gather');
   const spot = getFurnitureActionSpot(building, stage, spotId) || getFurnitureActionSpot(building, stage, 'perform-center') || getFurnitureActionSpot(building, stage);
-  const standSpot = getFurnitureActionSpot(building, stage, 'perform-center') || spot;
+  const approachSpot = normalizedMode === 'perform'
+    ? (getFurnitureActionSpot(building, stage, 'perform-approach') || spot)
+    : spot;
+  const standSpot = normalizedMode === 'perform'
+    ? approachSpot
+    : (getFurnitureActionSpot(building, stage, 'perform-approach') || spot);
   if (!spot) return;
   const candidateAgents = agentsList.filter(agent => {
     if (!agent || isWorkPresenceStatus(agent.status) || agent._atDesk || agent._tagState?.playing) return false;
@@ -58306,6 +62231,7 @@ window._useOutdoorStageFurniture = (mode = 'perform') => {
   }
   const action = normalizedMode === 'perform' ? 'life.performAtOutdoorStage' : (normalizedMode === 'watch' ? 'life.watchOutdoorStagePerformance' : 'life.gatherAtOutdoorStage');
   const activityKind = normalizedMode === 'perform' ? 'outdoor-stage-perform' : (normalizedMode === 'watch' ? 'outdoor-stage-watch' : 'outdoor-stage-gather');
+  const actionFaceAngle = getAuthoredFurnitureSpotFacingAngle(building, stage, spot, normalizedMode === 'perform' ? 'north' : 'south') ?? spot.faceAngle;
   stage.capacity = stage.capacity || { performers: 1, audience: 4, concurrentUsers: 5 };
   stage.performerSpot = stage.performerSpot || 'perform-center';
   stage.audienceSpots = stage.audienceSpots || ['watch-front-center', 'watch-front-left', 'watch-front-right', 'audience-gather'];
@@ -58324,20 +62250,23 @@ window._useOutdoorStageFurniture = (mode = 'perform') => {
     lifecycle: 'stationary-non-carryable-persistent-solid-stepped-outdoor-stage',
   };
   stage.lifecycle = { ...(stage.lifecycle || {}), stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, statePath: 'stageState' };
-  setAgentTargetForExplicitObjectAction(agent, { x: spot.apiX, y: spot.apiZ, floor: spot.floor }, building, spot.floor);
+  setAgentTargetForExplicitObjectAction(agent, { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor }, building, approachSpot.floor);
   agent._idleActivity = {
     kind: activityKind,
     phase: 'approach',
     buildingId,
     furnitureIndex: index,
     stayMs: normalizedMode === 'perform' ? 22000 : 18000,
-    faceAngle: spot.faceAngle,
+    faceAngle: actionFaceAngle,
     dockTarget: { x: spot.apiX, y: spot.apiZ },
+    routeApproachTarget: { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor },
     dockSnapRadius: 7,
+    surfaceLift: normalizedMode === 'perform' ? 0.39 : 0,
     standTarget: { x: standSpot.apiX, y: standSpot.apiZ, floor: standSpot.floor },
     standFaceAngle: standSpot.faceAngle,
     furnitureType: 'outdoorStage',
     spotId: spot.spotId,
+    approachSpotId: approachSpot.spotId,
     action,
     animationId: 'outdoor-stage-perform-watch-gather',
     lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true },

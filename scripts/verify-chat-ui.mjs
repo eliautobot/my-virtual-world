@@ -99,14 +99,23 @@ assert(styleCss.includes('.chat-panel .chat-markdown blockquote'), 'chat blockqu
 assert(indexHtml.includes('class="chat-scroll-latest"'), 'chat windows need a jump-to-latest control');
 assert(
   chatSource.includes("this.messages.addEventListener('scroll'") &&
-  chatSource.includes('this.followLatest = this.isNearMessagesBottom();'),
+  chatSource.includes("this.messages.addEventListener('wheel'") &&
+  chatSource.includes('this.hasManualScrollIntent()'),
   'manual message scrolling must suspend bottom-follow mode'
 );
 assert(
-  chatSource.includes('this.restoringLatest = true;') &&
-  chatSource.includes('if (this.scrollTrackingSuspended || this.restoringLatest) return;') &&
-  chatSource.includes('if (force) scrollToEnd();'),
-  'forced latest-message restoration must survive stale scroll events before the animation frame'
+  chatSource.includes('if (nearBottom || reachedManualBottom) {') &&
+  chatSource.includes('reachedManualBottom') &&
+  chatSource.includes('this.manualScrollBottomTarget') &&
+  chatSource.includes('this.clearManualScrollIntent();') &&
+  chatSource.includes('if (this.followLatest && !nearBottom) this.scrollBottom();'),
+  'reaching the bottom must restore following while non-user scroll events preserve follow intent'
+);
+assert(
+  chatSource.includes('if (force) scrollToEnd();') &&
+  !chatSource.includes("last.scrollIntoView({ block: 'end' })") &&
+  !chatSource.includes('this.restoreLatestTimer = setTimeout'),
+  'forced latest-message restoration must use the true pane bottom without a timer race'
 );
 assert(
   chatSource.includes('replaceHistoryMessages(renderMessages)') &&

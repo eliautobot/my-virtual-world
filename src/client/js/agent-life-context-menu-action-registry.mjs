@@ -136,8 +136,47 @@ function stableId(value, fallback = 'action') {
   return asString(value).replace(/[^a-zA-Z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || fallback;
 }
 
+const RUNTIME_CONTEXT_DEFINITION_ADAPTERS = Object.freeze({
+  desk: Object.freeze([{ id: 'work', label: 'Work at Desk', action: 'planning.workAtDesk', tag: 'planning.review' }]),
+  meetingTable: Object.freeze([{ id: 'join-meeting', label: 'Join Meeting', action: 'planning.meeting', tag: 'planning.meeting' }]),
+  chair: Object.freeze([{ id: 'sit', label: 'Sit', action: 'life.sitAtChair', tag: 'life.rest' }]),
+  diningTable: Object.freeze([{ id: 'eat-and-talk', label: 'Eat and Talk', action: 'life.eatAtDiningTable', tag: 'life.food' }]),
+  counter: Object.freeze([{ id: 'prepare-food', label: 'Prepare Food', action: 'life.prepAtCounter', tag: 'life.food' }]),
+  sink: Object.freeze([{ id: 'wash-or-drink', label: 'Wash / Drink', action: 'life.useSink', tag: 'life.hygiene' }]),
+  stove: Object.freeze([{ id: 'cook', label: 'Cook', action: 'life.cookAtStove', tag: 'life.food' }]),
+  tv: Object.freeze([{ id: 'watch', label: 'Watch TV', action: 'life.watchTv', tag: 'life.social' }]),
+  pingpong: Object.freeze([{ id: 'play', label: 'Play Ping-Pong', action: 'life.playPingPong', tag: 'training.practice' }]),
+  poolTable: Object.freeze([{ id: 'play', label: 'Play Pool', action: 'life.playPoolTable', tag: 'training.practice' }]),
+  interiorDoor: Object.freeze([{ id: 'open-pass', label: 'Open / Pass Through', action: 'world.passThroughInteriorDoor', tag: 'world.structure' }]),
+});
+
 function catalogDefinitionForEntry(entry) {
-  return getObjectCatalogExample(entry?.objectCatalogId) || getObjectCatalogExample(entry?.id) || null;
+  const catalogDefinition = getObjectCatalogExample(entry?.objectCatalogId) || getObjectCatalogExample(entry?.id) || null;
+  if (catalogDefinition) return catalogDefinition;
+  const actions = RUNTIME_CONTEXT_DEFINITION_ADAPTERS[entry?.id];
+  if (!actions) return null;
+  return freezeDeep({
+    id: entry.objectCatalogId || entry.id,
+    tags: actions.map(action => action.tag),
+    classifications: entry.classifications || ['functional'],
+    interactionSpots: entry.interactionSpots || [],
+    uiActions: actions.map(action => ({
+      id: action.id,
+      label: action.label,
+      primaryTag: action.tag,
+      permission: 'public',
+    })),
+    apiActions: actions.map(action => ({
+      id: action.action,
+      label: action.label,
+      primaryTag: action.tag,
+      permission: 'public',
+    })),
+    runtimeAdapters: {
+      source: 'RUNTIME_CONTEXT_DEFINITION_ADAPTERS',
+      furnitureType: entry.id,
+    },
+  });
 }
 
 function findApiAction(uiAction, apiActions = []) {

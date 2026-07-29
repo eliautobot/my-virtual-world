@@ -310,10 +310,10 @@ export function buildAssetRegistryQaReport({
   const missingUi = [];
   const manualUi = [];
   for (const entry of entries) {
+    const actions = resolvedContextMenu?.list?.({ catalogId: entry.id }) || [];
     if (definitionRequiresUi(entry)) {
-      const actions = resolvedContextMenu?.list?.({ catalogId: entry.id }) || [];
       if (actions.length === 0) missingUi.push(entry.id);
-    } else if (isFunctionalEntry(entry) && !getDefinitionForEntry(entry)) {
+    } else if (isFunctionalEntry(entry) && !getDefinitionForEntry(entry) && actions.length === 0) {
       manualUi.push(entry.id);
     }
   }

@@ -128,6 +128,7 @@ export const SERVER_SCRIPTED_IDLE_RETRY_DELAY_MS = Object.freeze([3000, 8000]);
 export const SERVER_SCRIPTED_IDLE_OBJECT_COOLDOWN_MS = 240000;
 export const SERVER_SCRIPTED_IDLE_CATEGORY_COOLDOWN_MS = 180000;
 export const SERVER_SCRIPTED_IDLE_FAILED_TARGET_THROTTLE_MS = 90000;
+export const SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS = 5 * 60 * 1000;
 export const LIVE_ACTION_API_TILE = 40;
 const SERVER_RUNTIME_ELEVATOR_SIZE_TILES = 2.8;
 const SERVER_RUNTIME_ELEVATOR_QUEUE_SPACING_TILES = 0.72;
@@ -3627,6 +3628,9 @@ function explicitRuntimeFaceAngle(...candidates) {
 function runtimeFurnitureActionFaceAngle(building, furniture, local, fromPoint = null, options = {}) {
   const explicit = explicitRuntimeFaceAngle(local?.faceAngle);
   if (explicit !== null) return explicit;
+  if (String(furniture?.type || '').trim().toLowerCase() === 'outdoorstage' && String(local?.spotId || '').toLowerCase() === 'perform-center') {
+    return runtimeFacingAngle(building, furniture, local?.x, local?.z, local?.facing || 'north');
+  }
   if (options?.deskFacesScreen && String(furniture?.type || '').toLowerCase() === 'desk') {
     return runtimeFacingAngle(building, furniture, local?.x, local?.z, 'south');
   }
@@ -4048,6 +4052,39 @@ const SERVER_SCRIPTED_SEAT_OBJECT_TYPES = new Set([
   'playgroundswing',
   'busstop',
 ]);
+const SERVER_MANUAL_OBJECT_OCCUPANCY_TYPES = new Set([
+  ...SERVER_SCRIPTED_SEAT_OBJECT_TYPES,
+  'treadmill',
+  'trainingmat',
+  'gymbench',
+  'outdoorexercisestation',
+]);
+
+export function isServerManualObjectOccupancyTarget(target = null, { manualDrop = false, source = '' } = {}) {
+  if (!target || target.isQueueUse === true) return false;
+  const sourceKind = String(source || target.runtimeSource || '').trim().toLowerCase();
+  const requestedManually = manualDrop === true ||
+    target.manualDrop === true ||
+    target.manualOccupancyHold === true ||
+    sourceKind.startsWith('manual-drag-drop');
+  if (!requestedManually) return false;
+  return SERVER_MANUAL_OBJECT_OCCUPANCY_TYPES.has(normalizeObjectTypeKey(
+    target.objectType || target.catalogKey || target.furnitureType || '',
+  ));
+}
+
+function withServerManualObjectOccupancyDwell(target = null, options = {}) {
+  if (!target || !isServerManualObjectOccupancyTarget(target, options)) return target;
+  return {
+    ...target,
+    manualDrop: true,
+    manualOccupancyHold: true,
+    stayMs: Math.max(
+      SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+      Math.floor(numberOr(target.stayMs, SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS)),
+    ),
+  };
+}
 const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   chair: Object.freeze({ kind: 'chair-sit', spotId: 'seat', animationId: 'sit', poseKind: 'seat', stayMs: [9000, 15000] }),
   officechair: Object.freeze({ kind: 'office-chair-sit', spotId: 'seat', animationId: 'sit', poseKind: 'seat', stayMs: [9000, 15000] }),
@@ -4057,13 +4094,13 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   sectionalsofa: Object.freeze({ kind: 'sectional-sofa-lounge', spotId: 'seat-center', animationId: 'sit', poseKind: 'seat', stayMs: [14000, 24000] }),
   loveseat: Object.freeze({ kind: 'loveseat-rest', spotId: 'seat-left', animationId: 'sit', poseKind: 'seat', stayMs: [11000, 19000] }),
   armchair: Object.freeze({ kind: 'armchair-rest', spotId: 'seat', animationId: 'sit', poseKind: 'seat', stayMs: [11000, 18000] }),
-  parkbench: Object.freeze({ kind: 'park-bench-rest', spotId: 'approach-front', animationId: 'park-bench-sit-rest-read-talk', poseKind: 'seat', stayMs: [11000, 19000] }),
-  hallwaybench: Object.freeze({ kind: 'hallway-bench-wait', spotId: 'approach-front', animationId: 'hallway-bench-wait', poseKind: 'seat', stayMs: [10000, 17000] }),
+  parkbench: Object.freeze({ kind: 'park-bench-rest', spotId: 'seat-center', animationId: 'park-bench-sit-rest-read-talk', poseKind: 'seat', stayMs: [11000, 19000] }),
+  hallwaybench: Object.freeze({ kind: 'hallway-bench-wait', spotId: 'seat-left', animationId: 'hallway-bench-wait', poseKind: 'seat', stayMs: [10000, 17000] }),
   barstool: Object.freeze({ kind: 'bar-stool-sit', spotId: 'seat', animationId: 'sit', poseKind: 'seat', stayMs: [9000, 15000] }),
   diningchair: Object.freeze({ kind: 'dining-chair-sit', spotId: 'seat', animationId: 'sit', poseKind: 'seat', stayMs: [9000, 15000] }),
   patiochair: Object.freeze({ kind: 'patio-chair-sit', spotId: 'seat', animationId: 'sit', poseKind: 'seat', stayMs: [10000, 17000] }),
-  bed: Object.freeze({ kind: 'bed-rest', spotId: 'lie-sleep', animationId: 'bed-rest', poseKind: 'seat', stayMs: [14000, 24000] }),
-  clinicbed: Object.freeze({ kind: 'bed-clinic-service', spotId: 'patient', animationId: 'bed-rest', poseKind: 'seat', stayMs: [10000, 17000] }),
+  bed: Object.freeze({ kind: 'bed-rest', spotId: 'lie-sleep', animationId: 'sleep-lie', poseKind: 'seat', stayMs: [14000, 24000] }),
+  clinicbed: Object.freeze({ kind: 'bed-clinic-patient', spotId: 'patient', animationId: 'sleep-lie', poseKind: 'seat', stayMs: [10000, 17000] }),
   examchair: Object.freeze({ kind: 'exam-chair-patient', spotId: 'patient-seat', animationId: 'sit', poseKind: 'seat', stayMs: [10000, 16000] }),
   pathnode: Object.freeze({ kind: 'path-node-stroll', spotId: 'stroll-waypoint', animationId: 'path-node-stroll', poseKind: 'stand-use', stayMs: [2500, 5500] }),
   shadetreecluster: Object.freeze({ kind: 'shade-tree-rest', spotId: 'rest-south-shade', animationId: 'shade-tree-relax-read-gather', poseKind: 'stand-use', stayMs: [12000, 22000] }),
@@ -4084,7 +4121,7 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   nightstand: Object.freeze({ kind: 'nightstand-inspect', spotId: 'inspect-front', animationId: 'inspect-browse', poseKind: 'stand-use', stayMs: [6500, 11000] }),
   sidetable: Object.freeze({ kind: 'side-table-inspect', spotId: 'inspect-front', animationId: 'inspect-browse', poseKind: 'stand-use', stayMs: [6000, 10000] }),
   tvstand: Object.freeze({ kind: 'tv-stand-inspect', spotId: 'inspect-front', animationId: 'tv-stand-remote-inspect', poseKind: 'stand-use', stayMs: [7000, 12000] }),
-  tv: Object.freeze({ kind: 'tv-watch', spotId: 'watch-front', animationId: 'stand-use', poseKind: 'stand-use', stayMs: [9000, 15000] }),
+  tv: Object.freeze({ kind: 'tv-watch-relax', spotId: 'watch-front', animationId: 'tv-watch', poseKind: 'stand-use', stayMs: [9000, 15000] }),
   mirror: Object.freeze({ kind: 'mirror-inspect', spotId: 'inspect-front', animationId: 'inspect-browse', poseKind: 'stand-use', stayMs: [8000, 13000] }),
   clothingrack: Object.freeze({ kind: 'clothing-rack-outfit', spotId: 'browse', animationId: 'stand-read-point', poseKind: 'stand-use', stayMs: [9000, 16000] }),
   displaymannequin: Object.freeze({ kind: 'display-mannequin-preview', spotId: 'inspect-front', animationId: 'inspect-browse', poseKind: 'stand-use', stayMs: [9000, 15000] }),
@@ -4094,7 +4131,7 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   receptiondesk: Object.freeze({ kind: 'reception-desk-visitor', spotId: 'visitor-talk', animationId: 'gather-talk', poseKind: 'stand-use', stayMs: [9000, 16000] }),
   cafecounter: Object.freeze({ kind: 'cafe-counter-order', spotId: 'customer', animationId: 'order-food-drink', poseKind: 'stand-use', stayMs: [9000, 15000] }),
   kitchenisland: Object.freeze({ kind: 'kitchen-island-prep', spotId: 'prep-south', animationId: 'kitchen-island-prep', poseKind: 'stand-use', stayMs: [9000, 16000] }),
-  counter: Object.freeze({ kind: 'counter-use', spotId: 'use-front', animationId: 'stand-use', poseKind: 'stand-use', stayMs: [7000, 12000] }),
+  counter: Object.freeze({ kind: 'counter-prep', spotId: 'prep-front', animationId: 'counter-prep', poseKind: 'stand-use', stayMs: [7000, 12000] }),
   smallcafetable: Object.freeze({ kind: 'small-cafe-table-eat', spotId: 'seat-south', animationId: 'sit-eat-drink', poseKind: 'seat', stayMs: [10000, 18000] }),
   outdoorcafetable: Object.freeze({ kind: 'outdoor-cafe-table-eat', spotId: 'seat-south', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', poseKind: 'seat', stayMs: [10000, 18000] }),
   picnictable: Object.freeze({ kind: 'picnic-table-eat', spotId: 'seat-south-left', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', poseKind: 'seat', stayMs: [11000, 19000] }),
@@ -4109,10 +4146,10 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   coffeemachine: Object.freeze({ kind: 'coffee-machine-get-drink', spotId: 'use-front', animationId: 'order-food-drink', poseKind: 'stand-use', stayMs: [8000, 13000] }),
   countertopcoffeemachine: Object.freeze({ kind: 'coffee-machine-get-drink', spotId: 'use-front', animationId: 'order-food-drink', poseKind: 'stand-use', stayMs: [8000, 13000] }),
   fridge: Object.freeze({ kind: 'fridge-get-snack', spotId: 'use-front', animationId: 'fridge-use', poseKind: 'stand-use', stayMs: [7000, 12000] }),
-  sink: Object.freeze({ kind: 'sink-wash', spotId: 'use-front', animationId: 'stand-use', poseKind: 'stand-use', stayMs: [6000, 10000] }),
-  stove: Object.freeze({ kind: 'stove-cook', spotId: 'cook-front', animationId: 'stand-use', poseKind: 'stand-use', stayMs: [9000, 15000] }),
+  sink: Object.freeze({ kind: 'sink-wash-drink', spotId: 'use-front', animationId: 'sink-wash-drink', poseKind: 'stand-use', stayMs: [6000, 10000] }),
+  stove: Object.freeze({ kind: 'stove-cook', spotId: 'cook-front', animationId: 'stove-cook', poseKind: 'stand-use', stayMs: [9000, 15000] }),
   grill: Object.freeze({ kind: 'grill-cook', spotId: 'cook-front', animationId: 'grill-cook', poseKind: 'stand-use', stayMs: [9000, 15000] }),
-  outdoorplanter: Object.freeze({ kind: 'outdoor-planter-water', spotId: 'water-front', animationId: 'inspect-browse', poseKind: 'stand-use', stayMs: [7000, 12000] }),
+  outdoorplanter: Object.freeze({ kind: 'outdoor-planter-water', spotId: 'water-front', animationId: 'outdoor-planter-water', poseKind: 'stand-use', stayMs: [7000, 12000] }),
   flowerbed: Object.freeze({ kind: 'flower-bed-inspect', spotId: 'inspect-front', animationId: 'inspect-browse', poseKind: 'stand-use', stayMs: [7000, 12000] }),
   vending: Object.freeze({ kind: 'vending-machine-buy', spotId: 'use-front', animationId: 'vending-machine-use', poseKind: 'stand-use', stayMs: [7000, 12000] }),
   vendingmachine: Object.freeze({ kind: 'vending-machine-buy', spotId: 'use-front', animationId: 'vending-machine-use', poseKind: 'stand-use', stayMs: [7000, 12000] }),
@@ -4132,11 +4169,11 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   medicalsupplycabinet: Object.freeze({ kind: 'medical-supply-cabinet-browse', spotId: 'browse-front', animationId: 'inspect-browse', poseKind: 'stand-use', stayMs: [8000, 14000] }),
   supplycabinet: Object.freeze({ kind: 'supply-cabinet-browse', spotId: 'browse-front', animationId: 'inspect-browse', poseKind: 'stand-use', stayMs: [8000, 14000] }),
   draftingtable: Object.freeze({ kind: 'drafting-table-create', spotId: 'work-front', animationId: 'drafting-plan', poseKind: 'stand-use', stayMs: [12000, 22000] }),
-  treadmill: Object.freeze({ kind: 'treadmill-train', spotId: 'step-off', activationSpotId: 'train-belt', animationId: 'train-practice', poseKind: 'stand-use', stayMs: [12000, 22000] }),
-  trainingmat: Object.freeze({ kind: 'training-mat-stretch', spotId: 'approach-front', animationId: 'train-practice', poseKind: 'stand-use', stayMs: [12000, 22000] }),
+  treadmill: Object.freeze({ kind: 'treadmill-train', spotId: 'train-belt', activationSpotId: 'train-belt', animationId: 'train-practice', poseKind: 'stand-use', stayMs: [12000, 22000] }),
+  trainingmat: Object.freeze({ kind: 'training-mat-stretch', spotId: 'use-mat', activationSpotId: 'use-mat', animationId: 'train-practice', poseKind: 'stand-use', stayMs: [12000, 22000] }),
   dumbbellrack: Object.freeze({ kind: 'dumbbell-rack-select', spotId: 'select-front', animationId: 'select-weights', poseKind: 'stand-use', stayMs: [8000, 14000] }),
-  gymbench: Object.freeze({ kind: 'gym-bench-exercise', spotId: 'approach-front', activationSpotId: 'bench-use', animationId: 'gym-bench-exercise', poseKind: 'stand-use', stayMs: [11000, 19000] }),
-  outdoorexercisestation: Object.freeze({ kind: 'outdoor-exercise-station-train', spotId: 'train-front', activationSpotId: 'practice-platform', animationId: 'outdoor-exercise-station-training', poseKind: 'stand-use', stayMs: [12000, 22000] }),
+  gymbench: Object.freeze({ kind: 'gym-bench-exercise', spotId: 'bench-use', activationSpotId: 'bench-use', animationId: 'gym-bench-exercise', poseKind: 'stand-use', stayMs: [11000, 19000] }),
+  outdoorexercisestation: Object.freeze({ kind: 'outdoor-exercise-station-train', spotId: 'practice-platform', activationSpotId: 'practice-platform', animationId: 'train-practice', poseKind: 'stand-use', stayMs: [12000, 22000] }),
   playgroundslide: Object.freeze({ kind: 'playground-slide-play', spotId: 'ladder-approach', animationId: 'playground-slide-play', poseKind: 'stand-use', stayMs: [9000, 15000] }),
   playgroundswing: Object.freeze({ kind: 'playground-swing-swing', spotId: 'seat-use', animationId: 'playground-swing-sit-swing', poseKind: 'seat', stayMs: [10000, 18000] }),
   ponddock: Object.freeze({ kind: 'pond-dock-view', spotId: 'view-left', animationId: 'pond-dock-view-relax', poseKind: 'stand-use', stayMs: [12000, 22000] }),
@@ -4677,6 +4714,41 @@ function isServerScriptedMultiSlotPlaySpot(objectType = '', spotId = '', actionI
 function isServerScriptedMultiSlotPlayTarget(target = null) {
   if (!target || target.isQueueUse) return false;
   return isServerScriptedMultiSlotPlaySpot(
+    target.objectType || target.catalogKey || target.sourceObjectType || '',
+    target.slotId || target.spotId || target.interactionSpotId || '',
+    target.actionId || '',
+  );
+}
+
+function isServerScriptedMultiSlotSeatObjectType(objectType = '') {
+  return ['couch', 'sectionalsofa', 'loveseat', 'hallwaybench', 'parkbench'].includes(normalizeObjectTypeKey(objectType));
+}
+
+function isServerScriptedMultiSlotSeatSpot(objectType = '', spotId = '') {
+  if (!isServerScriptedMultiSlotSeatObjectType(objectType)) return false;
+  const seatsByType = {
+    couch: ['sit-left', 'sit-center', 'sit-right'],
+    sectionalsofa: ['seat-left', 'seat-center', 'seat-corner', 'chaise'],
+    loveseat: ['seat-left', 'seat-right'],
+    hallwaybench: ['seat-left', 'seat-right'],
+    parkbench: ['seat-left', 'seat-center', 'seat-right'],
+  };
+  return (seatsByType[normalizeObjectTypeKey(objectType)] || []).includes(String(spotId || '').trim().toLowerCase());
+}
+
+function isServerScriptedSharedSlotObjectType(objectType = '') {
+  return isServerScriptedMultiSlotPlayObjectType(objectType) ||
+    isServerScriptedMultiSlotSeatObjectType(objectType);
+}
+
+function isServerScriptedSharedSlotSpot(objectType = '', spotId = '', actionId = '') {
+  return isServerScriptedMultiSlotPlaySpot(objectType, spotId, actionId) ||
+    isServerScriptedMultiSlotSeatSpot(objectType, spotId);
+}
+
+function isServerScriptedSharedSlotTarget(target = null) {
+  if (!target || target.isQueueUse) return false;
+  return isServerScriptedSharedSlotSpot(
     target.objectType || target.catalogKey || target.sourceObjectType || '',
     target.slotId || target.spotId || target.interactionSpotId || '',
     target.actionId || '',
@@ -5248,6 +5320,20 @@ function isScriptedObjectArmchairRouteOnlySpot(furniture = null, location = null
   );
 }
 
+function isScriptedObjectMultiSeatRouteOnlySpot(furniture = null, location = null) {
+  if (!isServerScriptedMultiSlotSeatObjectType(furniture?.type) || !location) return false;
+  const spotId = String(scriptedObjectSpotId(location) || '').toLowerCase();
+  // Approach/dismount locations remain authored so routing can use them,
+  // but they are never final automatic-use destinations. Persisted action
+  // metadata may include a broad "seat" role on these clearance markers, so
+  // spot identity is the authoritative distinction.
+  return !isServerScriptedMultiSlotSeatSpot(furniture?.type, spotId);
+}
+
+function isScriptedObjectCouchRouteOnlySpot(furniture = null, location = null) {
+  return isScriptedObjectMultiSeatRouteOnlySpot(furniture, location);
+}
+
 function findServerScriptedObjectFurniture(dataDir, target = null) {
   const buildingId = safeText(target?.buildingId, '');
   const furnitureIndex = Number(target?.furnitureIndex);
@@ -5290,6 +5376,7 @@ function isScriptedObjectSpotUsable(furniture = null, location = null) {
   const spotId = String(scriptedObjectSpotId(location) || '').toLowerCase();
   if (roles.includes('work') && actionId === 'work.desk') return false;
   if (isScriptedObjectArmchairRouteOnlySpot(furniture, location)) return false;
+  if (isScriptedObjectMultiSeatRouteOnlySpot(furniture, location)) return false;
   if (isScriptedObjectQueueSpot(location, furniture)) return true;
   const config = scriptedObjectActivityConfig(furniture);
   const preferredSpotIds = scriptedObjectPreferredSpotIds(furniture);
@@ -5319,6 +5406,13 @@ function localPointFromScriptedObjectSpot(furniture = null, location = null) {
     !isQueue &&
     (
       roles.includes('seat') ||
+      (
+        safeText(config?.activationSpotId, '') &&
+        safeText(config?.activationSpotId, '') === safeText(
+          location?.activationSpotId || activationTarget?.activationSpotId || activationTarget?.spotId || spotId,
+          '',
+        )
+      ) ||
       config?.poseKind === 'seat' ||
       spotId.includes('seat') ||
       String(location?.dockMode || '').toLowerCase() === 'snap-to-activation'
@@ -5333,6 +5427,7 @@ function localPointFromScriptedObjectSpot(furniture = null, location = null) {
       x,
       z,
       floor: floorOr(location?.floor ?? explicit?.floor ?? furniture?.floor, 1),
+      spotId,
       facing: authoredRuntimeFacing(location, explicit, fallback.facing),
       faceAngle,
       poseKind: isQueue ? 'wait' : (roles.includes('seat') ? 'seat' : (config?.poseKind || fallback.poseKind)),
@@ -5343,6 +5438,7 @@ function localPointFromScriptedObjectSpot(furniture = null, location = null) {
     x: numberOr(furniture?.x, 0) + rotated.x,
     z: numberOr(furniture?.z, 0) + rotated.z,
     floor: floorOr(furniture?.floor, 1),
+    spotId: spotId || safeText(config?.spotId, ''),
     facing: fallback.facing,
     faceAngle: null,
     poseKind: config?.poseKind || fallback.poseKind,
@@ -5410,7 +5506,7 @@ export function listScriptedObjectRuntimeTargets(dataDir) {
         return aSpot.localeCompare(bSpot);
       });
       const targetLocations = sortedLocations.length > 0 ? sortedLocations : [null];
-      if (sortedLocations.length > 0 && scriptedObjectActivityConfig(item) && !isServerScriptedMultiSlotPlayObjectType(item.type)) targetLocations.push(null);
+      if (sortedLocations.length > 0 && scriptedObjectActivityConfig(item) && !isServerScriptedSharedSlotObjectType(item.type)) targetLocations.push(null);
       const seen = new Set();
       for (const location of targetLocations) {
         const target = scriptedObjectTargetFromFurnitureSpot(building, item, index, location);
@@ -5457,7 +5553,7 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
   const isQueueUse = isScriptedObjectQueueSpot(location, furniture);
   const objectKey = isQueueUse
     ? normalizeWorldObjectKey(`${baseObjectKey}:queue:${spotId}`)
-    : (isServerScriptedMultiSlotPlaySpot(objectType, slotId || spotId, actionId) ? serverScriptedMultiSlotObjectKey(baseObjectKey, slotId || spotId) : baseObjectKey);
+    : (isServerScriptedSharedSlotSpot(objectType, slotId || spotId, actionId) ? serverScriptedMultiSlotObjectKey(baseObjectKey, slotId || spotId) : baseObjectKey);
   const objectInstanceId = safeText(furniture.objectInstanceId || furniture.instanceId || furniture.id || `${building.id}:furniture:${index}`, '');
   return {
     x: point.x,
@@ -6044,6 +6140,18 @@ function isServerScriptedSeatTargetClaimedByRuntimeAgent(state = null, target = 
     const otherTarget = parseRuntimeAgentTarget(plain);
     if (serverScriptedSeatTargetsMatch(target, otherTarget)) return true;
     if (!otherTarget || !isServerScriptedSeatLikeTarget(otherTarget)) continue;
+    const targetSpotKey = serverScriptedTargetSpotKey(target);
+    const otherSpotKey = serverScriptedTargetSpotKey(otherTarget);
+    const explicitIndependentSeats = isServerScriptedMultiSlotSeatObjectType(target.objectType) &&
+      isServerScriptedMultiSlotSeatObjectType(otherTarget.objectType) &&
+      serverScriptedTargetBaseKey(target) === serverScriptedTargetBaseKey(otherTarget) &&
+      targetSpotKey &&
+      otherSpotKey &&
+      targetSpotKey !== otherSpotKey;
+    // Adjacent cushions are intentionally closer than the generic physical
+    // occupancy radius. Their explicit slot identities are authoritative;
+    // proximity must not make a neighbouring seat look occupied.
+    if (explicitIndependentSeats) continue;
     if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) continue;
     const otherX = Number(plain.x);
     const otherY = Number(plain.y);
@@ -6054,13 +6162,47 @@ function isServerScriptedSeatTargetClaimedByRuntimeAgent(state = null, target = 
   return false;
 }
 
+function findPreemptibleAutomaticSeatApproach(state = null, target = null, agentId = '', nowMs = Date.now()) {
+  if (!isServerScriptedSeatLikeTarget(target) ||
+      !isServerManualObjectOccupancyTarget(target, {
+        manualDrop: target?.manualDrop === true,
+        source: target?.runtimeSource || '',
+      })) return null;
+  for (const [otherId, record] of runtimeAgentEntries(state)) {
+    const plain = snapshotToPlain(record);
+    const otherAgentId = safeText(otherId || plain.agentId, '');
+    if (!otherAgentId || String(otherAgentId) === String(agentId || '')) continue;
+    if (!runtimeAgentSnapshotIsCurrent(plain, nowMs)) continue;
+    const stateKey = String(plain.state || '').trim().toLowerCase();
+    if (!['route_pending', 'routing', 'moving'].includes(stateKey)) continue;
+    if (safeText(plain.owner, '') !== SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER) continue;
+    const otherTarget = parseRuntimeAgentTarget(plain);
+    if (!serverScriptedSeatTargetsMatch(target, otherTarget)) continue;
+    if (isServerManualObjectOccupancyTarget(otherTarget, {
+      manualDrop: otherTarget?.manualDrop === true,
+      source: otherTarget?.runtimeSource || '',
+    })) continue;
+    return { agentId: otherAgentId, current: plain, target: otherTarget };
+  }
+  return null;
+}
+
+export function isServerAutomaticSeatApproachPreemptibleForManualDrop(
+  state = null,
+  target = null,
+  agentId = '',
+  nowMs = Date.now(),
+) {
+  return Boolean(findPreemptibleAutomaticSeatApproach(state, target, agentId, nowMs));
+}
+
 export function isServerScriptedObjectTargetAvailable(state, target, agentId, nowMs = Date.now(), dataDir = '') {
   if (!target?.objectKey) return false;
   const object = state?.objects?.get?.(target.objectKey);
   if (isWorldObjectActiveForAnotherAgent(object, agentId, nowMs)) return false;
   const baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
   const baseObject = baseObjectKey !== target.objectKey ? state?.objects?.get?.(baseObjectKey) : object;
-  const allowSharedBase = isServerScriptedMultiSlotPlayTarget(target);
+  const allowSharedBase = isServerScriptedSharedSlotTarget(target);
   const baseActiveForAnother = !allowSharedBase && isWorldObjectActiveForAnotherAgent(baseObject, agentId, nowMs);
   const queueStore = serverScriptedServiceQueueStoreFromWorldObject(baseObject);
   const reservations = normalizeServerScriptedServiceQueueReservations(queueStore);
@@ -6333,6 +6475,18 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
     faceAngle,
     dockTarget,
   };
+  if (poseKind === 'seat') {
+    const seatId = safeText(target?.slotId || target?.spotId || target?.interactionSpotId, '');
+    if (seatId) {
+      activity.seatId = seatId;
+      activity.activationSpotId = safeText(target?.activationSpotId, '') || seatId;
+    }
+    const seatSurfaceLift = numberOr(target?.seatSurfaceLift, NaN);
+    if (Number.isFinite(seatSurfaceLift)) activity.seatSurfaceLift = seatSurfaceLift;
+  }
+  if (target?.manualDrop === true) activity.manualDrop = true;
+  if (target?.manualOccupancyHold === true) activity.manualOccupancyHold = true;
+  if (target?.manualDropSnapToUse === true) activity.manualDropSnapToUse = true;
   const slotId = safeText(target?.slotId || target?.spotId || target?.interactionSpotId, '');
   if (slotId) {
     activity.slotId = slotId;
@@ -6552,8 +6706,22 @@ function objectUseRequestTargetFromPoint(message = {}) {
   const furnitureIndex = target?.furnitureIndex ?? message?.furnitureIndex;
   if (!Number.isFinite(x) || !Number.isFinite(y) || !buildingId || furnitureIndex === undefined || furnitureIndex === null) return null;
   const objectType = safeText(target?.objectType || target?.catalogKey || message?.objectType, 'object') || 'object';
-  const objectKey = safeText(target?.objectKey || message?.objectKey, '') || runtimeFurnitureObjectKey(buildingId, furnitureIndex, objectType);
+  const requestedObjectKey = safeText(target?.objectKey || message?.objectKey, '') || runtimeFurnitureObjectKey(buildingId, furnitureIndex, objectType);
   const spotId = safeText(target?.spotId || target?.interactionSpotId || message?.spotId, 'default') || 'default';
+  const slotId = safeText(target?.slotId || target?.seatId || spotId, spotId) || spotId;
+  const actionId = safeText(target?.actionId || message?.actionId, `object.use.${objectType}`) || `object.use.${objectType}`;
+  const slotSuffix = `:slot:${slotId}`;
+  const inferredBaseObjectKey = requestedObjectKey.endsWith(slotSuffix)
+    ? requestedObjectKey.slice(0, -slotSuffix.length)
+    : requestedObjectKey;
+  const baseObjectKey = safeText(target?.baseObjectKey || message?.baseObjectKey, '') || inferredBaseObjectKey;
+  // Outdoor multi-seat assets (notably park benches) are not part of the
+  // interior-furniture target catalog, so they arrive through this point
+  // fallback. Preserve their authored base/node identity but give every seat
+  // its own world-object key just like indoor sofas and benches.
+  const objectKey = isServerScriptedSharedSlotSpot(objectType, slotId, actionId)
+    ? serverScriptedMultiSlotObjectKey(baseObjectKey, slotId)
+    : requestedObjectKey;
   const config = scriptedObjectActivityConfig(null, { objectType });
   const poseKind = safeText(target?.poseKind, '') || safeText(config?.poseKind, '') || '';
   const out = {
@@ -6564,19 +6732,22 @@ function objectUseRequestTargetFromPoint(message = {}) {
     roomId: safeText(target?.roomId || message?.roomId, ''),
     targetKind: 'scripted-object',
     objectKey,
-    baseObjectKey: safeText(target?.baseObjectKey || message?.baseObjectKey, '') || objectKey,
+    baseObjectKey,
     objectInstanceId: safeText(target?.objectInstanceId || target?.objectId || message?.objectInstanceId, ''),
     furnitureIndex: Math.max(-1, Math.floor(numberOr(furnitureIndex, -1))),
     objectType,
     behaviorCategory: scriptedIdleCategoryForObjectType(objectType),
-    actionId: safeText(target?.actionId || message?.actionId, `object.use.${objectType}`) || `object.use.${objectType}`,
+    actionId,
     interactionSpotId: spotId,
     spotId,
-    slotId: safeText(target?.slotId || target?.seatId || spotId, spotId) || spotId,
+    slotId,
     activeUseSlotId: safeText(target?.activeUseSlotId || target?.slotId || target?.seatId || spotId, spotId) || spotId,
     poseKind,
     animationId: safeText(target?.animationId || config?.animationId, '') || (poseKind === 'seat' ? 'sit' : 'stand-use'),
     activityKind: safeText(target?.activityKind || config?.kind, '') || 'server-scripted-object-use',
+    seatSurfaceLift: Number.isFinite(numberOr(target?.seatSurfaceLift, NaN))
+      ? numberOr(target?.seatSurfaceLift, NaN)
+      : undefined,
     stayMs: Math.max(1000, Math.floor(numberOr(target?.stayMs ?? message?.stayMs, scriptedObjectStayMs({ objectKey, objectType, spotId })))),
     consumeDurationMs: Math.max(1000, Math.floor(numberOr(target?.consumeDurationMs ?? message?.consumeDurationMs, SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS))),
     vendingItemId: safeText(target?.vendingItemId || message?.vendingItemId, ''),
@@ -6593,18 +6764,20 @@ function mergeScriptedObjectRequestRuntimeOverrides(match = null, message = {}) 
   if (!match) return match;
   const rawTarget = message?.target && typeof message.target === 'object' ? message.target : message;
   const overrides = {};
-  for (const key of ['activityKind', 'animationId', 'pingPongSide', 'activeUseSlotId']) {
+  for (const key of ['actionId', 'activityKind', 'animationId', 'pingPongSide', 'activeUseSlotId']) {
     const value = safeText(rawTarget?.[key] ?? message?.[key], '');
     if (value) overrides[key] = value;
   }
   const stayMs = numberOr(rawTarget?.stayMs ?? message?.stayMs, NaN);
   if (Number.isFinite(stayMs)) overrides.stayMs = Math.max(1000, Math.floor(stayMs));
+  const seatSurfaceLift = numberOr(rawTarget?.seatSurfaceLift ?? message?.seatSurfaceLift, NaN);
+  if (Number.isFinite(seatSurfaceLift)) overrides.seatSurfaceLift = seatSurfaceLift;
   const paddleColor = numberOr(rawTarget?.paddleColor ?? message?.paddleColor, NaN);
   if (Number.isFinite(paddleColor)) overrides.paddleColor = paddleColor;
   return Object.keys(overrides).length ? { ...match, ...overrides } : match;
 }
 
-function resolveScriptedObjectRuntimeTargetFromRequest(dataDir, message = {}) {
+export function resolveScriptedObjectRuntimeTargetFromRequest(dataDir, message = {}) {
   const rawTarget = message?.target && typeof message.target === 'object' ? message.target : message;
   const requestedObjectKey = safeText(rawTarget?.objectKey || message?.objectKey, '');
   const requestedBuildingId = safeText(rawTarget?.buildingId || message?.buildingId, '');
@@ -6619,7 +6792,11 @@ function resolveScriptedObjectRuntimeTargetFromRequest(dataDir, message = {}) {
     if (requestedBuildingId && target.buildingId !== requestedBuildingId) return false;
     if (requestedFurnitureIndex !== undefined && requestedFurnitureIndex !== null && Number(target.furnitureIndex) !== Number(requestedFurnitureIndex)) return false;
     if (requestedSpotId && requestedSpotId !== target.spotId && requestedSpotId !== target.interactionSpotId) return false;
-    if (requestedActionId && requestedActionId !== target.actionId) return false;
+    // An exact authored spot is already the authoritative slot identity. The
+    // same couch cushion can intentionally be used with sit/rest/socialize, so
+    // an action mismatch must not discard its per-seat object key and fall back
+    // to the shared couch base key.
+    if (requestedActionId && requestedActionId !== target.actionId && !requestedSpotId) return false;
     return requestedBuildingId && requestedFurnitureIndex !== undefined && requestedFurnitureIndex !== null;
   });
   return mergeScriptedObjectRequestRuntimeOverrides(match, message) || objectUseRequestTargetFromPoint(message);
@@ -6631,14 +6808,17 @@ function refreshScriptedObjectRuntimeTarget(dataDir, target = null) {
   if (isServerScriptedObjectDeskConsumeTarget(target)) return target;
   const refreshed = resolveScriptedObjectRuntimeTargetFromRequest(dataDir, { target });
   if (!refreshed?.objectKey || refreshed.objectKey !== target.objectKey) return target;
-  return {
+  return withServerManualObjectOccupancyDwell({
     ...target,
     ...refreshed,
     routeStartedAt: target.routeStartedAt || refreshed.routeStartedAt || '',
     runtimeStartedAt: target.runtimeStartedAt || refreshed.runtimeStartedAt || '',
     runtimeActiveAt: target.runtimeActiveAt || refreshed.runtimeActiveAt || '',
     runtimeSource: target.runtimeSource || refreshed.runtimeSource || 'idle',
-  };
+  }, {
+    manualDrop: target.manualDrop === true || target.manualOccupancyHold === true,
+    source: target.runtimeSource || refreshed.runtimeSource || 'idle',
+  });
 }
 
 function serverLiveActionShouldComplete(action, nowMs) {
@@ -8401,14 +8581,60 @@ export class AgentRuntimeRoom extends Room {
     this.withErrors(client, message, 'runtime:objectUseRequest', () => {
       this.expireStaleRouteLeases();
       const agentId = normalizeAgentId(message.agentId);
+      const source = safeText(message.source, 'request') || 'request';
+      const nowMs = Date.now();
+      const now = new Date(nowMs).toISOString();
+      const manualDrop = message.manualDrop === true || message.target?.manualDrop === true;
       let target = resolveScriptedObjectRuntimeTargetFromRequest(this.dataDir, message);
       if (!target?.objectKey) {
         throw apiError('invalid_object_use_target', 'object use request requires a resolvable target object');
       }
+      if (manualDrop) {
+        target = withServerManualObjectOccupancyDwell({
+          ...target,
+          runtimeSource: source,
+        }, { manualDrop: true, source });
+        // A user may drop onto a cushion while an automatic agent is still
+        // approaching it. Preempt that non-manual route before evaluating the
+        // slot object, otherwise the stale routing claim rejects the explicit
+        // manual placement before startServerScriptedObjectRoute can arbitrate.
+        const preemptibleAutomaticApproach = findPreemptibleAutomaticSeatApproach(this.state, target, agentId, nowMs);
+        if (preemptibleAutomaticApproach) {
+          this.releaseServerScriptedObjectRoute(
+            preemptibleAutomaticApproach.agentId,
+            preemptibleAutomaticApproach.current,
+            preemptibleAutomaticApproach.target,
+            nowMs,
+            now,
+            'manual-drop-preempted-automatic-seat-approach',
+          );
+        }
+      }
       let existingObject = this.state.objects.get(target.objectKey);
       let baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
       let existingBaseObject = baseObjectKey !== target.objectKey ? this.state.objects.get(baseObjectKey) : existingObject;
-      let allowSharedBase = isServerScriptedMultiSlotPlayTarget(target);
+      let allowSharedBase = isServerScriptedSharedSlotTarget(target);
+      // Slot records can outlive the route that created them for a short
+      // cooldown. If no current runtime agent actually claims this exact seat,
+      // retire the stale active record before evaluating a new manual request.
+      if (
+        manualDrop &&
+        allowSharedBase &&
+        isServerScriptedSeatLikeTarget(target) &&
+        isWorldObjectActiveForAnotherAgent(existingObject, agentId, nowMs) &&
+        !isServerScriptedSeatTargetClaimedByRuntimeAgent(this.state, target, agentId, nowMs)
+      ) {
+        const stale = worldObjectToPlain(existingObject);
+        this.releaseServerScriptedObjectWorldObject(
+          stale.agentId || '',
+          target,
+          nowMs,
+          now,
+          'stale-seat-slot-reconciled-for-manual-drop',
+        );
+        existingObject = this.state.objects.get(target.objectKey);
+        existingBaseObject = baseObjectKey !== target.objectKey ? this.state.objects.get(baseObjectKey) : existingObject;
+      }
       let blockingObject = isWorldObjectActiveForAnotherAgent(existingObject, agentId)
         ? existingObject
         : (!target.isQueueUse && !allowSharedBase && isWorldObjectActiveForAnotherAgent(existingBaseObject, agentId) ? existingBaseObject : null);
@@ -8420,7 +8646,7 @@ export class AgentRuntimeRoom extends Room {
           existingObject = this.state.objects.get(target.objectKey);
           baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
           existingBaseObject = baseObjectKey !== target.objectKey ? this.state.objects.get(baseObjectKey) : existingObject;
-          allowSharedBase = isServerScriptedMultiSlotPlayTarget(target);
+          allowSharedBase = isServerScriptedSharedSlotTarget(target);
           baseQueueLength = normalizeServerScriptedServiceQueueReservations(serverScriptedServiceQueueStoreFromWorldObject(existingBaseObject)).length;
           blockingObject = isWorldObjectActiveForAnotherAgent(existingObject, agentId) ? existingObject : null;
         }
@@ -8455,14 +8681,14 @@ export class AgentRuntimeRoom extends Room {
           leaseExpiresAt: '',
         }, 'server-scripted-object-seeded', { reason: 'object-use-request' });
       }
-      const source = safeText(message.source, 'request') || 'request';
       const manualDropSnapToUse = message.manualDropSnapToUse === true || message.target?.manualDropSnapToUse === true;
       const insertQueueAtFront = message.insertQueueAtFront === true || message.target?.insertQueueAtFront === true;
       const queuePriority = numberOr(message.queuePriority ?? message.target?.queuePriority, NaN);
-      const result = this.startServerScriptedObjectRoute(agentId, target, Date.now(), new Date().toISOString(), {
+      const result = this.startServerScriptedObjectRoute(agentId, target, nowMs, now, {
         source,
         force: true,
         active: manualDropSnapToUse,
+        manualDrop,
         insertQueueAtFront,
         queuePriority: Number.isFinite(queuePriority) ? queuePriority : undefined,
       });
@@ -9280,14 +9506,29 @@ export class AgentRuntimeRoom extends Room {
         runtimeSource: options.source || target.runtimeSource || 'idle',
       };
     }
+    target = withServerManualObjectOccupancyDwell(target, {
+      manualDrop: options.manualDrop === true,
+      source: options.source || target.runtimeSource || '',
+    });
     const existing = this.ensureServerRuntimeAgentSeed(agentId, target, 'scripted-object-runtime-start');
     const current = snapshotToPlain(existing);
     const objectKey = normalizeWorldObjectKey(target.objectKey || runtimeFurnitureObjectKey(target.buildingId, target.furnitureIndex, target.objectType || 'object'));
     target.objectKey = objectKey;
     target.baseObjectKey = safeText(target.baseObjectKey, '') || objectKey;
+    const preemptibleAutomaticApproach = findPreemptibleAutomaticSeatApproach(this.state, target, agentId, nowMs);
+    if (preemptibleAutomaticApproach) {
+      this.releaseServerScriptedObjectRoute(
+        preemptibleAutomaticApproach.agentId,
+        preemptibleAutomaticApproach.current,
+        preemptibleAutomaticApproach.target,
+        nowMs,
+        now,
+        'manual-drop-preempted-automatic-seat-approach',
+      );
+    }
     const existingObject = this.state.objects.get(objectKey);
     const existingBaseObject = target.baseObjectKey !== objectKey ? this.state.objects.get(target.baseObjectKey) : existingObject;
-    const allowSharedBase = isServerScriptedMultiSlotPlayTarget(target);
+    const allowSharedBase = isServerScriptedSharedSlotTarget(target);
     if (allowSharedBase && isWorldObjectActiveForAnotherAgent(existingObject, agentId, nowMs)) {
       throw apiError('object_state_conflict', 'scripted object slot is already active for another agent', { objectKey, agentId });
     }
@@ -11179,9 +11420,16 @@ export class AgentRuntimeRoom extends Room {
       const current = snapshotToPlain(existing);
       const ownedByScriptedObjectRuntime = current.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER || current.leaseOwner === SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER;
       if (!ownedByScriptedObjectRuntime) continue;
-      activeScriptedRoutes++;
-      if (activeScriptedRoutes > activeRouteLimit) {
-        const originalTarget = current.target && typeof current.target === 'object' ? current.target : null;
+      const originalTarget = current.target && typeof current.target === 'object' ? current.target : null;
+      // The active-route cap protects autonomous scheduling load. A physical
+      // occupancy explicitly chosen by the user is not an autonomous route and
+      // must not be the arbitrary route evicted when that cap is exceeded.
+      const protectedManualOccupancy = isServerManualObjectOccupancyTarget(originalTarget, {
+        manualDrop: originalTarget?.manualDrop === true || originalTarget?.manualOccupancyHold === true,
+        source: originalTarget?.runtimeSource || '',
+      });
+      if (!protectedManualOccupancy) activeScriptedRoutes++;
+      if (!protectedManualOccupancy && activeScriptedRoutes > activeRouteLimit) {
         let target = originalTarget;
         target = refreshScriptedObjectRuntimeTarget(this.dataDir, target);
         target = hydrateServerScriptedDeskConsumeTargetFromVisual(target, current.visualState);
@@ -11191,7 +11439,6 @@ export class AgentRuntimeRoom extends Room {
         changedObjects += releaseTarget?.objectKey ? 1 : 0;
         continue;
       }
-      const originalTarget = current.target && typeof current.target === 'object' ? current.target : null;
       let target = originalTarget;
       target = refreshScriptedObjectRuntimeTarget(this.dataDir, target);
       target = hydrateServerScriptedDeskConsumeTargetFromVisual(target, current.visualState);

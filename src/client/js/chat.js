@@ -57,6 +57,7 @@
   const CHAT_STACK_GAP = 12;
   const CHAT_BOTTOM_OFFSET = 36;
   const CHAT_BOTTOM_FOLLOW_THRESHOLD = 28;
+  const CHAT_MANUAL_SCROLL_INTENT_MS = 180;
   const CHAT_MIDDLE_SCROLL_DEAD_ZONE = 8;
   const CHAT_MIDDLE_SCROLL_MAX_SPEED = 26;
   const HERMES_APPROVAL_POLL_MS = 1500;
@@ -158,8 +159,9 @@
       this.scrollFrame = null;
       this.followLatest = true;
       this.scrollTrackingSuspended = false;
-      this.restoringLatest = false;
-      this.restoreLatestTimer = null;
+      this.manualScrollIntentUntil = 0;
+      this.manualScrollBottomTarget = 0;
+      this.scrollbarPointerDown = false;
       this.middleScrollActive = false;
       this.middleScrollPointerDown = false;
       this.middleScrollGestureMoved = false;
@@ -220,6 +222,22 @@
         }
       });
       this.messages.addEventListener('scroll', () => this.handleMessagesScroll(), { passive: true });
+      this.messages.addEventListener('wheel', () => this.noteManualScrollIntent(), { passive: true });
+      this.messages.addEventListener('touchmove', () => this.noteManualScrollIntent(), { passive: true });
+      this.messages.addEventListener('pointerdown', (e) => {
+        const rect = this.messages.getBoundingClientRect();
+        const scrollbarWidth = Math.max(0, this.messages.offsetWidth - this.messages.clientWidth);
+        this.scrollbarPointerDown = scrollbarWidth > 0 && e.clientX >= rect.right - scrollbarWidth - 2;
+        if (this.scrollbarPointerDown) this.noteManualScrollIntent();
+      }, { passive: true });
+      window.addEventListener('pointermove', () => {
+        if (this.scrollbarPointerDown) this.noteManualScrollIntent();
+      }, { passive: true });
+      const releaseScrollbarPointer = () => {
+        this.scrollbarPointerDown = false;
+      };
+      window.addEventListener('pointerup', releaseScrollbarPointer, { passive: true });
+      window.addEventListener('pointercancel', releaseScrollbarPointer, { passive: true });
       this.messages.addEventListener('mousedown', (e) => {
         if (e.button !== 1) return;
         e.preventDefault();
@@ -321,8 +339,8 @@
 
     resetConversation(systemText) {
       this.stopMiddleAutoScroll();
-      this.cancelLatestRestore();
       this.followLatest = true;
+      this.clearManualScrollIntent();
       this.messages.innerHTML = '';
       this.streamingMsg = null;
       this.currentRunId = null;
@@ -1964,10 +1982,35 @@
       return remaining <= CHAT_BOTTOM_FOLLOW_THRESHOLD;
     }
 
+    noteManualScrollIntent() {
+      this.manualScrollIntentUntil = performance.now() + CHAT_MANUAL_SCROLL_INTENT_MS;
+      this.manualScrollBottomTarget = Math.max(0, this.messages.scrollHeight - this.messages.clientHeight);
+    }
+
+    clearManualScrollIntent() {
+      this.manualScrollIntentUntil = 0;
+      this.manualScrollBottomTarget = 0;
+    }
+
+    hasManualScrollIntent() {
+      return performance.now() <= this.manualScrollIntentUntil;
+    }
+
     handleMessagesScroll() {
-      if (this.scrollTrackingSuspended || this.restoringLatest) return;
-      this.followLatest = this.isNearMessagesBottom();
+      if (this.scrollTrackingSuspended) return;
+      const nearBottom = this.isNearMessagesBottom();
+      const manualScrollIntent = this.hasManualScrollIntent();
+      const reachedManualBottom = manualScrollIntent && (
+        this.messages.scrollTop >= this.manualScrollBottomTarget - CHAT_BOTTOM_FOLLOW_THRESHOLD
+      );
+      if (nearBottom || reachedManualBottom) {
+        this.followLatest = true;
+        this.clearManualScrollIntent();
+      } else if (manualScrollIntent) {
+        this.followLatest = false;
+      }
       this.updateScrollLatestButton();
+      if (this.followLatest && !nearBottom) this.scrollBottom();
     }
 
     replaceHistoryMessages(renderMessages) {
@@ -2003,39 +2046,25 @@
 
     resumeLatest() {
       this.stopMiddleAutoScroll();
-      this.cancelLatestRestore();
-      this.restoringLatest = true;
       this.followLatest = true;
+      this.clearManualScrollIntent();
       this.updateScrollLatestButton();
       this.scrollBottom({ force: true });
-      this.restoreLatestTimer = setTimeout(() => {
-        this.messages.scrollTop = this.messages.scrollHeight;
-        this.restoringLatest = false;
-        this.restoreLatestTimer = null;
-        this.followLatest = this.isNearMessagesBottom();
-        this.updateScrollLatestButton();
-      }, 140);
-    }
-
-    cancelLatestRestore() {
-      if (this.restoreLatestTimer) clearTimeout(this.restoreLatestTimer);
-      this.restoreLatestTimer = null;
-      this.restoringLatest = false;
     }
 
     scrollBottom({ force = false } = {}) {
-      if (force) this.followLatest = true;
+      if (force) {
+        this.followLatest = true;
+        this.clearManualScrollIntent();
+      }
       if (this.scrollTrackingSuspended) return;
       if (!this.followLatest) {
         this.updateScrollLatestButton();
         return;
       }
       const scrollToEnd = () => {
-        if (!force && !this.followLatest) return;
-        if (force) this.followLatest = true;
+        if (this.scrollTrackingSuspended || !this.followLatest) return;
         this.messages.scrollTop = this.messages.scrollHeight;
-        const last = this.messages.lastElementChild;
-        if (last) last.scrollIntoView({ block: 'end' });
         this.updateScrollLatestButton();
       };
       if (force) scrollToEnd();
@@ -2049,7 +2078,6 @@
     }
 
     startMiddleAutoScroll(event) {
-      this.cancelLatestRestore();
       if (activeMiddleScrollWindow && activeMiddleScrollWindow !== this) {
         activeMiddleScrollWindow.stopMiddleAutoScroll();
       }
@@ -2077,7 +2105,13 @@
             CHAT_MIDDLE_SCROLL_MAX_SPEED,
             (Math.abs(distance) - CHAT_MIDDLE_SCROLL_DEAD_ZONE) / 5
           );
+          this.noteManualScrollIntent();
           this.messages.scrollTop += direction * magnitude;
+          if (this.isNearMessagesBottom()) {
+            this.followLatest = true;
+            this.clearManualScrollIntent();
+            this.updateScrollLatestButton();
+          }
         }
         this.middleScrollFrame = requestAnimationFrame(tick);
       };

@@ -18,14 +18,14 @@ export const ACTION_LOCATION_ROLES = Object.freeze(['approach', 'seat', 'use', '
 export const ACTION_LOCATION_FACINGS = Object.freeze(['north', 'east', 'south', 'west', 'auto', 'none']);
 export const ACTION_LOCATION_COORDINATE_SPACES = Object.freeze(['asset-local', 'building-local', 'floor-local', 'exterior-local', 'world']);
 export const ACTION_LOCATION_TRANSFORM_KINDS = Object.freeze(['rotation', 'floor', 'exterior']);
-export const ACTION_LOCATION_CAPACITY_KINDS = Object.freeze(['exclusive', 'shared', 'queue']);
+export const ACTION_LOCATION_CAPACITY_KINDS = Object.freeze(['exclusive', 'shared', 'queue', 'staging', 'clearance']);
 
 export const ACTION_LOCATION_REGISTRY_CONTRACT = Object.freeze([
   Object.freeze({ key: 'assetId', required: true, meaning: 'Canonical catalog/registry id after alias normalization; legacy furniture type remains an adapter input only.' }),
   Object.freeze({ key: 'locations', required: true, meaning: 'One or more action-location records with stable id, action id, roles, capacity, facing, offset, and transform metadata.' }),
   Object.freeze({ key: 'location.id', required: true, meaning: 'Stable per-asset spot id referenced by world actions, reservations, routing, and UI without embedding the full definition.' }),
   Object.freeze({ key: 'location.roles', required: true, meaning: 'Normalized semantic roles such as seat, use, service, patient, work, watch, approach, or drop-off.' }),
-  Object.freeze({ key: 'location.capacity', required: true, meaning: 'Occupancy semantics for the spot: exclusive/shared/queue plus maxAgents for reservation checks.' }),
+  Object.freeze({ key: 'location.capacity', required: true, meaning: 'Occupancy semantics for the spot: exclusive/shared/queue/staging/clearance plus maxAgents for reservation checks.' }),
   Object.freeze({ key: 'location.facing', required: true, meaning: 'Direction an agent should face at the spot after item/building rotation transforms are applied.' }),
   Object.freeze({ key: 'location.offset', required: true, meaning: 'Asset-local offset in tile units before item rotation and building/world transforms.' }),
   Object.freeze({ key: 'location.transforms', required: true, meaning: 'Declared rotation, floor, and exterior transform ownership so route code knows what must be applied at handoff.' }),
