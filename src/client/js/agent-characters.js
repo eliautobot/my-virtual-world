@@ -1740,6 +1740,75 @@ export function createAgentCharacter(agent) {
 // ═══════════════════════════════════════════════════════════════
 // UPDATE ANIMATION — called every frame
 // ═══════════════════════════════════════════════════════════════
+export function isAuthoritativeSinkAnimationState(agent, activity = agent?._idleActivity || null) {
+  if (!activity || !String(activity.kind || '').startsWith('sink-') || activity.phase !== 'active') return false;
+  if (agent?._runtimeObserverOnly !== true) return true;
+  const snapshot = agent?._runtimeRenderSnapshot || agent?._runtimeSnapshot || null;
+  if (!snapshot) return false;
+  const state = String(snapshot.state || '').trim().toLowerCase();
+  if (!['active', 'using', 'in_progress'].includes(state)) return false;
+  const leaseExpiresAtMs = Date.parse(snapshot.leaseExpiresAt || '');
+  if (Number.isFinite(leaseExpiresAtMs) && leaseExpiresAtMs <= Date.now()) return false;
+  const target = snapshot.target && typeof snapshot.target === 'object' ? snapshot.target : {};
+  const visualActivity = snapshot.visualState?.activity && typeof snapshot.visualState.activity === 'object'
+    ? snapshot.visualState.activity
+    : {};
+  if (target.isQueueUse === true || visualActivity.isQueueUse === true) return false;
+  const expectedObjectKey = String(
+    activity.baseObjectKey ||
+    activity.objectKey ||
+    (
+      activity.buildingId && activity.furnitureIndex != null
+        ? `${activity.buildingId}:furniture:${Number(activity.furnitureIndex)}:sink`
+        : ''
+    ),
+  ).trim();
+  const candidateKeys = [
+    target.baseObjectKey,
+    target.objectKey,
+    visualActivity.baseObjectKey,
+    visualActivity.objectKey,
+  ].map(value => String(value || '').trim()).filter(Boolean);
+  if (expectedObjectKey && candidateKeys.includes(expectedObjectKey)) return true;
+  return String(target.objectType || visualActivity.objectType || visualActivity.furnitureType || '').toLowerCase() === 'sink' &&
+    String(target.buildingId || visualActivity.buildingId || '') === String(activity.buildingId || '') &&
+    Number(target.furnitureIndex ?? visualActivity.furnitureIndex) === Number(activity.furnitureIndex);
+}
+
+export function getSinkWashPoseTargets(workPhase = 0) {
+  const phase = Number(workPhase) || 0;
+  const wash = Math.sin(phase * 4.2);
+  const rinseLift = Math.max(0, Math.sin(phase * 1.35)) * 0.08;
+  const armElevation = -2.62 - rinseLift;
+  const armRootY = 0.89;
+  const armRootZ = 0.04;
+  const bodyLean = 0.08 + rinseLift * 0.06;
+  const leftArmX = armElevation + wash * 0.035;
+  const rightArmX = armElevation - wash * 0.035;
+  const leftArmZ = 0.32 + wash * 0.08;
+  const rightArmZ = -0.32 + wash * 0.08;
+  const estimateHandY = (armX) => {
+    const armLocalY = armRootY - 0.46 * Math.cos(armX);
+    const armLocalZ = armRootZ - 0.46 * Math.sin(armX);
+    return (armLocalY * Math.cos(bodyLean) - armLocalZ * Math.sin(bodyLean)) * 0.8;
+  };
+  return Object.freeze({
+    wash,
+    rinseLift,
+    armElevation,
+    armRootY,
+    armRootZ,
+    bodyLean,
+    bodyRoll: wash * 0.010,
+    headPitch: 0.10,
+    leftArmX,
+    rightArmX,
+    leftArmZ,
+    rightArmZ,
+    estimatedHandY: Math.min(estimateHandY(leftArmX), estimateHandY(rightArmX)),
+  });
+}
+
 export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const g = agent._group3d;
   if (!g) return;
@@ -1769,7 +1838,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const isSmallCafeTableSetDown = isSmallCafeTableUse && bedActivityKind === 'small-cafe-table-setdown';
   const isCounterPrep = bedActivityKind.startsWith('counter-') && agent._idleActivity?.phase === 'active';
   const isDiningTableUse = bedActivityKind.startsWith('dining-table-') && agent._idleActivity?.phase === 'active';
-  const isSinkUse = bedActivityKind.startsWith('sink-') && agent._idleActivity?.phase === 'active';
+  const isSinkUse = isAuthoritativeSinkAnimationState(agent, agent._idleActivity);
   const isStoveUse = bedActivityKind.startsWith('stove-') && agent._idleActivity?.phase === 'active';
   const isTvWatch = bedActivityKind.startsWith('tv-watch-') && agent._idleActivity?.phase === 'active';
   const isOutdoorCafeTableUse = (bedActivityKind.startsWith('outdoor-cafe-table-') || bedActivityKind.startsWith('picnic-table-')) && agent._idleActivity?.phase === 'active';
@@ -1840,7 +1909,11 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const isOutdoorExerciseStationTraining = bedActivityKind.startsWith('outdoor-exercise-station-') && agent._idleActivity?.phase === 'active';
   const isTreadmillTraining = (bedActivityKind.startsWith('treadmill-') || isTrainingMatTraining || isOutdoorExerciseStationTraining) && agent._idleActivity?.phase === 'active';
   const isTreadmillPractice = isTreadmillTraining && (bedActivityKind === 'treadmill-practice' || bedActivityKind === 'training-mat-practice');
-  const isDumbbellRackUse = bedActivityKind.startsWith('dumbbell-rack-') && agent._idleActivity?.phase === 'active';
+  const isDumbbellRackUse = isDumbbellRackUseFrontActivity(agent._idleActivity);
+  const dumbbellWorkoutMode = String(agent._idleActivity?.workoutMode || agent._idleActivity?.mode || '').toLowerCase();
+  const isDumbbellArmCurls = isDumbbellRackUse && (dumbbellWorkoutMode === 'curls' || bedActivityKind.includes('curl'));
+  const isDumbbellShoulderPress = isDumbbellRackUse && (dumbbellWorkoutMode === 'shoulderpress' || bedActivityKind.includes('shoulder-press'));
+  const isDumbbellShoulderFlys = isDumbbellRackUse && !isDumbbellArmCurls && !isDumbbellShoulderPress;
   const isGymBenchExercise = bedActivityKind.startsWith('gym-bench-') && agent._idleActivity?.phase === 'active';
   const isGymBenchStandingUp = agent._schedPhase === 'gym-bench-stand-up';
   const isBookshelfBrowse = bedActivityKind.startsWith('bookshelf-') && agent._idleActivity?.phase === 'active';
@@ -2017,6 +2090,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   else if (isTeachingPodiumUse) requestedAnimationId = 'stand-teach-point';
   else if (isTvStandUse) requestedAnimationId = 'tv-stand-remote-inspect';
   else if (isTreadmillTraining) requestedAnimationId = 'train-practice';
+  else if (isDumbbellRackUse) requestedAnimationId = 'dumbbell-workout';
   else if (isGymBenchExercise) requestedAnimationId = 'gym-bench-exercise';
   else if (isGazeboPavilionUse) requestedAnimationId = 'gazebo-pavilion-social-rest';
   else if (isShadeTreeUse) requestedAnimationId = 'shade-tree-relax-read-gather';
@@ -2060,6 +2134,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   g.userData.animationEntry = resolvedAnimation.entry;
 
   syncRightHandCarryVisual(parts, agent);
+  syncDumbbellWorkoutVisual(parts, agent);
 
   // Reset head translation unless a pose intentionally pushes it with the body.
   parts.headGroup.position.y = _lerp(parts.headGroup.position.y, parts.headBaseY, 0.18);
@@ -2352,13 +2427,18 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
       parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.16, 0.14);
       parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.20 - reach * 0.08, 0.16);
     } else if (isSinkUse) {
-      const wash = Math.sin(cs.workPhase * 3.4);
-      parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, 0.19 + reach * 0.05, 0.18);
-      parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.11, 0.14);
-      parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -1.02 + wash * 0.10, 0.24);
-      parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -1.02 - wash * 0.10, 0.24);
-      parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.28 + wash * 0.08, 0.18);
-      parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.28 + wash * 0.08, 0.18);
+      const sinkPose = getSinkWashPoseTargets(cs.workPhase);
+      parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, sinkPose.bodyLean, 0.20);
+      parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, sinkPose.bodyRoll, 0.14);
+      parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, sinkPose.headPitch, 0.16);
+      parts.leftArm.position.y = _lerp(parts.leftArm.position.y, sinkPose.armRootY, 0.24);
+      parts.rightArm.position.y = _lerp(parts.rightArm.position.y, sinkPose.armRootY, 0.24);
+      parts.leftArm.position.z = _lerp(parts.leftArm.position.z, sinkPose.armRootZ, 0.24);
+      parts.rightArm.position.z = _lerp(parts.rightArm.position.z, sinkPose.armRootZ, 0.24);
+      parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, sinkPose.leftArmX, 0.30);
+      parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, sinkPose.rightArmX, 0.30);
+      parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, sinkPose.leftArmZ, 0.20);
+      parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, sinkPose.rightArmZ, 0.20);
     } else {
       const stoveMultiplier = isStoveUse ? 1 : 0.72;
       parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, 0.13 + reach * 0.07, 0.18);
@@ -2958,12 +3038,43 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
       : (isTrainingMatTraining ? 0 : (Number.isFinite(agent._idleActivity?.surfaceLift) ? agent._idleActivity.surfaceLift : 0.22));
     g.position.y = (g.userData._groundY || 0) + equipmentSurfaceLift + stride * (isOutdoorExerciseStationTraining ? 0.025 : (isTrainingMatTraining ? 0.012 : (isTreadmillPractice ? 0.055 : 0.075)));
 
-  } else if (isServerRackUse || isMedicalSupplyCabinetBrowse || isDresserBrowse || isWardrobeBrowse || isNightstandInspect || isSideTableInspect || isAccessoryDisplayStandBrowse || isDisplayCaseBrowse || isShopShelfBrowse || isPantryShelfBrowse || isDisplayMannequinPreview || isDumbbellRackUse || (isSalonMirrorStationUse && !isSalonMirrorStationService) || isClothingRackBrowse || isBookshelfBrowse || isCurtainsAdjust || isBulletinBoardRead || isOutdoorNoticeBoardRead || isWallArtInspect || isMenuBoardRead) {
+  } else if (isDumbbellRackUse) {
+    // Both hand props stay attached to the arm hierarchy for the full active
+    // workout. The selected variation drives a distinct repeating two-arm
+    // motion: front curl, overhead press, or lateral shoulder fly.
+    cs.workPhase = (cs.workPhase || 0) + dt * 2.25;
+    const rep = 0.5 - 0.5 * Math.cos(cs.workPhase * 2.2);
+    const exert = Math.sin(cs.workPhase * 2.2);
+    parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, isDumbbellArmCurls ? 0.10 + rep * 0.055 : 0.045, 0.20);
+    parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, exert * 0.018, 0.14);
+    parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.02 + rep * 0.025, 0.14);
+    parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, exert * 0.025, 0.12);
+    if (isDumbbellArmCurls) {
+      parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.10 - rep * 1.48, 0.30);
+      parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.10 - rep * 1.48, 0.30);
+      parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.12, 0.22);
+      parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.12, 0.22);
+    } else if (isDumbbellShoulderPress) {
+      parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.14, 0.24);
+      parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.14, 0.24);
+      parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, -1.02 - rep * 1.52, 0.30);
+      parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, 1.02 + rep * 1.52, 0.30);
+    } else if (isDumbbellShoulderFlys) {
+      parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.18, 0.24);
+      parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.18, 0.24);
+      parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, -0.10 - rep * 1.40, 0.30);
+      parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, 0.10 + rep * 1.40, 0.30);
+    }
+    parts.leftLeg.rotation.x = _lerp(parts.leftLeg.rotation.x, -rep * 0.045, 0.16);
+    parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, rep * 0.045, 0.16);
+    g.position.y = (g.userData._groundY || 0) + Math.abs(exert) * 0.012;
+
+  } else if (isServerRackUse || isMedicalSupplyCabinetBrowse || isDresserBrowse || isWardrobeBrowse || isNightstandInspect || isSideTableInspect || isAccessoryDisplayStandBrowse || isDisplayCaseBrowse || isShopShelfBrowse || isPantryShelfBrowse || isDisplayMannequinPreview || (isSalonMirrorStationUse && !isSalonMirrorStationService) || isClothingRackBrowse || isBookshelfBrowse || isCurtainsAdjust || isBulletinBoardRead || isOutdoorNoticeBoardRead || isWallArtInspect || isMenuBoardRead) {
     // ── SERVER RACK / MEDICAL SUPPLY CABINET / DRESSER / WARDROBE / NIGHTSTAND / DISPLAY CASE / SHOP SHELF / PANTRY SHELF / DISPLAY / MIRROR / RACK / SHELF / CURTAINS / BOARD / WALL ART / MENU BOARD BROWSE & READ ─
     // DRESSER OPEN DRAWER / BROWSE / CHANGE and WARDROBE / CLOSET OPEN DOOR / BROWSE / CHANGE compatibility marker for asset tests.
     // NIGHTSTAND stand/lean inspect and optional place/take small item gesture compatibility marker for asset tests.
     // SIDE TABLE stand/inspect and set-down surface gesture compatibility marker for asset tests.
-    // ACCESSORY DISPLAY STAND, DISPLAY CASE, SHOP SHELF browse/reach/select, PANTRY SHELF browse/reach/inspect, and DUMBBELL RACK browse/select reach/select compatibility marker for asset tests.
+    // ACCESSORY DISPLAY STAND, DISPLAY CASE, SHOP SHELF browse/reach/select and PANTRY SHELF browse/reach/inspect compatibility marker for asset tests.
     // CLOTHING RACK BROWSE / SELECT stand/reach/select compatibility marker for rack outfit/accessory browse tests.
     // DISPLAY MANNEQUIN preview/reach/select compatibility marker for mannequin inspect/preview pose tests.
     // MENU BOARD stand/read/point pose compatibility marker for cafe/shop menu display tests.
@@ -2978,19 +3089,18 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     const menuBoardPose = isMenuBoardRead ? 1 : 0;
     const curtainReach = isCurtainsOpenClose ? 1 : 0;
     const retailBrowseReach = (isClothingRackBrowse || isDisplayMannequinPreview) ? Math.max(0.42, reach) : reach;
-    const weightSelectReach = isDumbbellRackUse ? Math.max(0.35, retailBrowseReach) : retailBrowseReach;
-    const lean = 0.065 + weightSelectReach * 0.040 + pointPose * 0.018 + wallArtPose * 0.010 + curtainReach * 0.018;
-    const headPitch = 0.050 + weightSelectReach * 0.018 + pointPose * 0.018 + wallArtPose * 0.012 + curtainReach * 0.010;
+    const lean = 0.065 + retailBrowseReach * 0.040 + pointPose * 0.018 + wallArtPose * 0.010 + curtainReach * 0.018;
+    const headPitch = 0.050 + retailBrowseReach * 0.018 + pointPose * 0.018 + wallArtPose * 0.012 + curtainReach * 0.010;
     parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, lean, 0.16);
     parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, browse * 0.035, 0.12);
     parts.headGroup.position.y = _lerp(parts.headGroup.position.y, parts.headBaseY * Math.cos(lean), 0.14);
     parts.headGroup.position.z = _lerp(parts.headGroup.position.z, parts.headBaseZ + Math.sin(lean) * parts.headBaseY * 0.55, 0.14);
     parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, browse * ((isBulletinBoardRead || isOutdoorNoticeBoardRead || isWallArtInspect || isMenuBoardRead) ? 0.18 : 0.32), 0.14);
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, headPitch, 0.14);
-    parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, -0.55 - weightSelectReach * 0.45 - pointPose * 0.10, 0.22);
-    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.85 - weightSelectReach * 0.75 - pointPose * 0.35 - curtainReach * 0.22, 0.24);
-    parts.leftArm.rotation.z  = _lerp(parts.leftArm.rotation.z || 0, (isDumbbellRackUse ? 0.28 : (isClothingRackBrowse || isDisplayMannequinPreview ? 0.24 : 0.18)) + browse * 0.08, 0.16);
-    parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, (isDumbbellRackUse ? -0.44 : (isClothingRackBrowse || isDisplayMannequinPreview ? -0.40 : -0.34)) - browse * 0.08 - pointPose * 0.22 - curtainReach * 0.12 - menuBoardPose * 0.04, 0.16);
+    parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, -0.55 - retailBrowseReach * 0.45 - pointPose * 0.10, 0.22);
+    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.85 - retailBrowseReach * 0.75 - pointPose * 0.35 - curtainReach * 0.22, 0.24);
+    parts.leftArm.rotation.z  = _lerp(parts.leftArm.rotation.z || 0, (isClothingRackBrowse || isDisplayMannequinPreview ? 0.24 : 0.18) + browse * 0.08, 0.16);
+    parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, (isClothingRackBrowse || isDisplayMannequinPreview ? -0.40 : -0.34) - browse * 0.08 - pointPose * 0.22 - curtainReach * 0.12 - menuBoardPose * 0.04, 0.16);
     parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, 0.02, 0.16);
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.02, 0.16);
     g.position.y = (g.userData._groundY || 0) + Math.abs(browse) * 0.01;
@@ -3207,8 +3317,8 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   } else if (isGymBenchExercise) {
     // ── GYM BENCH SIT/LIE EXERCISE POSE ─────────────────────
     // Agent docks to the bench-use spot after routing through the approach
-    // waypoint, then alternates a flat bench press/rest pose without any
-    // separate barbell/weight asset.
+    // waypoint, then alternates a flat bench press/rest pose. Exercise mode
+    // carries one temporary dumbbell in each hand; rest mode keeps hands free.
     cs.workPhase = (cs.workPhase || 0) + dt * 2.4;
     const press = Math.max(0, Math.sin(cs.workPhase * 1.9));
     const brace = Math.sin(cs.workPhase * 0.9);
@@ -3223,10 +3333,13 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     parts.headGroup.position.z = _lerp(parts.headGroup.position.z, parts.headBaseZ + 0.32, 0.14);
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, isRest ? 0.05 : 0.16, 0.14);
     parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, brace * 0.08, 0.12);
-    parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, isRest ? -0.18 : -1.15 - press * 0.78, 0.28);
-    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, isRest ? -0.18 : -1.15 - press * 0.78, 0.28);
-    parts.leftArm.rotation.z  = _lerp(parts.leftArm.rotation.z || 0, isRest ? 0.22 : 0.46 + press * 0.16, 0.18);
-    parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, isRest ? -0.22 : -0.46 - press * 0.16, 0.18);
+    // Keep the dumbbells outside shoulder width and stop the press before the
+    // hands drift over the face. Left must rotate negative and right positive:
+    // the mirrored signs spread the hands instead of crossing them inward.
+    parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, isRest ? -0.18 : -0.82 - press * 0.60, 0.28);
+    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, isRest ? -0.18 : -0.82 - press * 0.60, 0.28);
+    parts.leftArm.rotation.z  = _lerp(parts.leftArm.rotation.z || 0, isRest ? 0.22 : -0.36 - press * 0.10, 0.18);
+    parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, isRest ? -0.22 : 0.36 + press * 0.10, 0.18);
     parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, -0.72 + press * 0.10, 0.20);
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.72 - press * 0.10, 0.20);
     parts.leftLeg.rotation.z  = _lerp(parts.leftLeg.rotation.z || 0, 0.10, 0.16);
@@ -3356,13 +3469,19 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
 
   // ── RESET: clean up rotations from idle actions ────────────
   // Always reset z-rotation on arms (scratch/stretch set these)
-  if (parts.leftArm.rotation.z) parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z, 0, 0.12);
-  if (parts.rightArm.rotation.z) parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z, 0, 0.12);
+  if (!isSinkUse && !isGymBenchExercise && parts.leftArm.rotation.z) parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z, 0, 0.12);
+  if (!isSinkUse && !isGymBenchExercise && parts.rightArm.rotation.z) parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z, 0, 0.12);
+  if (!isSinkUse && !isGymBenchExercise) {
+    parts.leftArm.position.y = _lerp(parts.leftArm.position.y, 0.80, 0.16);
+    parts.rightArm.position.y = _lerp(parts.rightArm.position.y, 0.80, 0.16);
+    parts.leftArm.position.z = _lerp(parts.leftArm.position.z, 0, 0.16);
+    parts.rightArm.position.z = _lerp(parts.rightArm.position.z, 0, 0.16);
+  }
   
   if (!isMoving) {
     parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, 0, 0.12);
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, 0, 0.12);
-    if (!isWorking && !isTalking && !isClinicService && !isExamChairService && !isCoffeeMachineUse && !isCoffeeDeskConsume && !isVendingMachineUse && !isMicrowaveUse && !isPingPongPlay && !isPoolTablePlay && !isMeetingTable && !isSmallRoundMeetingTable && !isPrinterScannerUse && !isToolCartUse && !isWorkbenchUse && !isStorageBoxesUse && !isLaptopMonitorWork && !isStandingDeskWork && !isDraftingTableWork && !isWhiteboardUse && !isTeachingPodiumUse && !isDisplayMannequinPreview && !isDresserBrowse && !isWardrobeBrowse && !isNightstandInspect && !isClothingRackBrowse && !isBulletinBoardRead && !isOutdoorNoticeBoardRead && !isMenuBoardRead) {
+    if (!isWorking && !isTalking && !isClinicService && !isExamChairService && !isCoffeeMachineUse && !isCoffeeDeskConsume && !isVendingMachineUse && !isMicrowaveUse && !isSinkUse && !isPingPongPlay && !isPoolTablePlay && !isMeetingTable && !isSmallRoundMeetingTable && !isPrinterScannerUse && !isToolCartUse && !isWorkbenchUse && !isStorageBoxesUse && !isLaptopMonitorWork && !isStandingDeskWork && !isDraftingTableWork && !isWhiteboardUse && !isTeachingPodiumUse && !isDumbbellRackUse && !isGymBenchExercise && !isDisplayMannequinPreview && !isDresserBrowse && !isWardrobeBrowse && !isNightstandInspect && !isClothingRackBrowse && !isBulletinBoardRead && !isOutdoorNoticeBoardRead && !isMenuBoardRead) {
       parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, 0, 0.10);
       parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, 0, 0.10);
     }
@@ -3388,6 +3507,106 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
 // ═══════════════════════════════════════════════════════════════
 function _lerp(a, b, t) {
   return a + (b - a) * t;
+}
+
+const DUMBBELL_HAND_PROP_VERSION = 'paired-dumbbell-hand-props/v1';
+
+function buildHandDumbbellAsset(name, colors = {}) {
+  const group = new THREE.Group();
+  const handleColor = parseColor(colors.handles || '#f59e0b');
+  const weightColor = parseColor(colors.weights || '#1f2937');
+  const handleLength = 0.34;
+  const headOffset = 0.205;
+  group.name = name;
+  group.userData.assetVersion = DUMBBELL_HAND_PROP_VERSION;
+  group.userData.colorKey = `${colors.weights || '#1f2937'}|${colors.handles || '#f59e0b'}`;
+  group.userData.handHeldDumbbell = true;
+  group.add(box(0, 0, 0, handleLength, 0.055, 0.055, handleColor));
+  for (const x of [-headOffset, headOffset]) {
+    group.add(box(x, 0, 0, 0.13, 0.17, 0.17, weightColor));
+    group.add(box(x + (x < 0 ? -0.055 : 0.055), 0, 0, 0.055, 0.14, 0.14, weightColor));
+  }
+  return group;
+}
+
+function isDumbbellRackUseFrontActivity(activity = null) {
+  if (!activity || typeof activity !== 'object') return false;
+  const kind = String(activity.kind || '').trim().toLowerCase();
+  const phase = String(activity.phase || '').trim().toLowerCase();
+  const spotIds = [
+    activity.spotId,
+    activity.slotId,
+    activity.activeUseSlotId,
+    activity.activationSpotId,
+  ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+  const isNumberedQueueWait = activity.isQueueUse === true ||
+    activity.isServiceQueueWait === true ||
+    kind === 'service-queue-wait' ||
+    spotIds.some(spotId => /^queue:\d+$/.test(spotId));
+  return !isNumberedQueueWait &&
+    phase === 'active' &&
+    kind.startsWith('dumbbell-rack-') &&
+    spotIds.includes('use-front');
+}
+
+function isGymBenchDumbbellUseActivity(activity = null) {
+  if (!activity || typeof activity !== 'object') return false;
+  const kind = String(activity.kind || '').trim().toLowerCase();
+  const phase = String(activity.phase || '').trim().toLowerCase();
+  const spotIds = [
+    activity.spotId,
+    activity.slotId,
+    activity.activeUseSlotId,
+    activity.activationSpotId,
+  ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+  const isNumberedQueueWait = activity.isQueueUse === true ||
+    activity.isServiceQueueWait === true ||
+    kind === 'service-queue-wait' ||
+    spotIds.some(spotId => /^queue:\d+$/.test(spotId));
+  return !isNumberedQueueWait &&
+    phase === 'active' &&
+    kind === 'gym-bench-exercise' &&
+    spotIds.includes('bench-use');
+}
+
+function syncDumbbellWorkoutVisual(parts, agent) {
+  const leftArm = parts?.leftArm;
+  const rightArm = parts?.rightArm;
+  if (!leftArm || !rightArm) return;
+  const activity = agent?._idleActivity || null;
+  const showPair = (isDumbbellRackUseFrontActivity(activity) || isGymBenchDumbbellUseActivity(activity)) &&
+    activity.pairedDumbbells !== false;
+  const colors = activity?.dumbbellColors || {};
+  const colorKey = `${colors.weights || '#1f2937'}|${colors.handles || '#f59e0b'}`;
+  let left = leftArm.getObjectByName('leftHandDumbbell');
+  let right = rightArm.getObjectByName('rightHandDumbbell');
+  if (!showPair) {
+    if (left) disposeCarryVisual(left);
+    if (right) disposeCarryVisual(right);
+    return;
+  }
+  if (left && (left.userData?.assetVersion !== DUMBBELL_HAND_PROP_VERSION || left.userData?.colorKey !== colorKey)) {
+    disposeCarryVisual(left);
+    left = null;
+  }
+  if (right && (right.userData?.assetVersion !== DUMBBELL_HAND_PROP_VERSION || right.userData?.colorKey !== colorKey)) {
+    disposeCarryVisual(right);
+    right = null;
+  }
+  if (!left) {
+    left = buildHandDumbbellAsset('leftHandDumbbell', colors);
+    left.userData.hand = 'left';
+    left.position.set(0, -0.46, 0.01);
+    leftArm.add(left);
+  }
+  if (!right) {
+    right = buildHandDumbbellAsset('rightHandDumbbell', colors);
+    right.userData.hand = 'right';
+    right.position.set(0, -0.46, 0.01);
+    rightArm.add(right);
+  }
+  left.visible = true;
+  right.visible = true;
 }
 
 function syncRightHandCarryVisual(parts, agent) {

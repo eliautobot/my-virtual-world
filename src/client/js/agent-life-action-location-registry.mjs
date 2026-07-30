@@ -9,8 +9,8 @@
 import {
   CATALOG_REGISTRY_BLUEPRINTS,
   buildCatalogRegistry,
-} from './agent-life-catalog-registry.mjs';
-import { normalizeObjectCatalogId } from './agent-life-object-catalog-schema.mjs';
+} from './agent-life-catalog-registry.mjs?v=20260729-sectional-dismount-r1';
+import { normalizeObjectCatalogId } from './agent-life-object-catalog-schema.mjs?v=20260729-sectional-dismount-r1';
 
 export const ACTION_LOCATION_REGISTRY_API_VERSION = 'agent-life-action-location-registry/v1';
 
@@ -84,7 +84,7 @@ const FALLBACK_ACTION_BY_ID = Object.freeze({
   arcadeMachine: 'life.playArcade',
   treadmill: 'training.practice',
   trainingMat: 'training.practice',
-  dumbbellRack: 'training.selectWeights',
+  dumbbellRack: 'training.dumbbellCurls',
   gymBench: 'training.useGymBench',
   outdoorExerciseStation: 'training.trainAtOutdoorExerciseStation',
   playgroundSlide: 'life.playOnPlaygroundSlide',
@@ -140,13 +140,27 @@ function rotateOffset(offset, rotationDeg = 0) {
 function rolesForSpot(assetId, spot = {}) {
   const raw = Array.isArray(spot.roles) ? spot.roles : [];
   const roles = new Set(raw.filter(role => ACTION_LOCATION_ROLES.includes(role)));
+  const explicitlyNonSeat = raw.some(role => (
+    role === 'approach' ||
+    role === 'stand' ||
+    role === 'exit' ||
+    role === 'dismount' ||
+    role === 'clearance' ||
+    role === 'staging'
+  )) && !raw.includes('seat');
   const id = String(spot.id || '').toLowerCase();
   const action = String(spot.action || '').toLowerCase();
   if (id.includes('approach')) roles.add('approach');
   if (id.includes('patient')) roles.add('patient');
   if (id.includes('service') || action.includes('repair') || action.includes('diagnostic')) roles.add('service');
   if (id.includes('drop') || action.includes('drop')) roles.add('drop-off');
-  if (id.includes('seat') || id.includes('lie') || action.includes('sit') || action.includes('sleep') || (['chair', 'officeChair', 'conferenceChair', 'couch', 'sectionalSofa'].includes(assetId) && !id.includes('approach'))) roles.add('seat');
+  if (!explicitlyNonSeat && (
+    id.includes('seat') ||
+    id.includes('lie') ||
+    action.includes('sit') ||
+    action.includes('sleep') ||
+    (['chair', 'officeChair', 'conferenceChair', 'couch', 'sectionalSofa'].includes(assetId) && !id.includes('approach'))
+  )) roles.add('seat');
   if (id.includes('wait') || action.includes('wait')) roles.add('wait');
   if (action.includes('watch')) roles.add('watch');
   if (id.includes('pass') || action.includes('passthrough') || action.includes('pass-through') || action.includes('passthroughinteriordoor') || action.includes('passthrough')) roles.add('pass-through');
@@ -191,6 +205,10 @@ function normalizeSpot(assetId, spot, index, source) {
     facingMode: spot.facingMode || null,
     useDurationMs: spot.useDurationMs || spot.durationMs || spot.completionDurationMs || null,
     approachSpotId: spot.approachSpotId || null,
+    exitSpotId: spot.exitSpotId || null,
+    dismountSpotId: spot.dismountSpotId || null,
+    standSpotId: spot.standSpotId || null,
+    slotId: spot.slotId || null,
     activationSpotId: spot.activationSpotId || spot.id || id,
     offset: Object.freeze({ x: finiteNumber(spot.dx ?? spot.x, 0), z: finiteNumber(spot.dz ?? spot.z, 0), units: spot.units || 'tile' }),
     ...queueMetadata,

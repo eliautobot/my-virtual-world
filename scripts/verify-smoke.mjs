@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { getObjectCatalogExample } from '../src/client/js/agent-life-object-catalog-schema.mjs';
+import { getActionLocationsForAsset } from '../src/client/js/agent-life-action-location-registry.mjs';
+import { listObjectUseSeatCandidates } from '../src/client/js/agent-life-object-use-seats.mjs';
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), 'utf8');
@@ -66,6 +69,30 @@ const requiredFiles = [
 for (const path of requiredFiles) {
   assert(exists(path), `missing required product file: ${path}`);
 }
+
+const sectionalSchema = getObjectCatalogExample('sectional-sofa-variants');
+const sectionalLocations = getActionLocationsForAsset('sectionalSofa');
+const sectionalDismounts = sectionalLocations.filter(location => location.roles?.includes('dismount'));
+const sectionalSeats = listObjectUseSeatCandidates({
+  locations: sectionalLocations,
+  objectKey: 'verify:sectional-sofa',
+  objectType: 'sectionalSofa',
+});
+assert.equal(
+  sectionalSchema?.interactionSpots?.filter(location => location.roles?.includes('dismount')).length,
+  4,
+  'Sectional Sofa schema must expose one outside dismount per seat',
+);
+assert.equal(sectionalDismounts.length, 4, 'Sectional Sofa registry must preserve all four dismount locations');
+assert.deepEqual(
+  sectionalSeats.map(seat => seat.seatId).sort(),
+  ['chaise', 'seat-center', 'seat-corner', 'seat-left'],
+  'Sectional Sofa approach, staging, and dismount locations must never be selected as seats',
+);
+assert(
+  sectionalSeats.every(seat => seat.dismountSpotId?.startsWith('dismount-')),
+  'every Sectional Sofa seat must resolve to its dedicated outside dismount',
+);
 
 const removedProductArtifacts = [
   '.tmp-data',
@@ -380,7 +407,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260729-sectional-loveseat-debug-cleanup-r1',
+  'js/main3d.js?v=20260729-product-gym-props-queue-rotated-seating-sectional-dismount-r2',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
   'js/chat.js?v=20260729-chat-scroll-follow-r6',
@@ -403,6 +430,31 @@ for (const token of [
   'buildings may snap next to roads, but cannot cover roadways or sidewalks',
 ]) {
   assert(`${main3dJs}\n${indexHtml}`.includes(token), `client starter map wiring missing token: ${token}`);
+}
+for (const token of [
+  "sink: Object.freeze({",
+  "actionId: 'life.useSink'",
+  "kind: 'sink-wash-drink'",
+  "stateKey: 'sinkState'",
+  'useDurationMs: 12000',
+  "sink: ['_useSinkFurniture', 'wash-drink']",
+  'releaseStandingUseMachine(sink, sinkActivity',
+  'hasStandingServiceMachineActivity',
+  'function updateSinkFeedback(mesh, furniture)',
+  'window.__verifySinkVisualInteractionUpgrade',
+  'window.__startLiveSinkInteractionForVerification',
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing completed sink upgrade token: ${token}`);
+}
+for (const token of [
+  "requestedAnimationId = 'sink-wash-drink'",
+  'export function isAuthoritativeSinkAnimationState(agent',
+  'export function getSinkWashPoseTargets(workPhase = 0)',
+  'const armElevation = -2.62 - rinseLift',
+  'const sinkPose = getSinkWashPoseTargets(cs.workPhase)',
+  '!isMicrowaveUse && !isSinkUse && !isPingPongPlay',
+]) {
+  assert(agentCharactersJs.includes(token), `agent-characters.js missing sink hand-wash animation token: ${token}`);
 }
 for (const token of [
   'setting-locationLabel',
@@ -495,7 +547,7 @@ for (const token of [
   assert(read('src/server/providers/codex.py').includes(token), `codex.py missing stream token: ${token}`);
 }
 for (const token of [
-  "agent-characters.js?v=20260729-sectional-loveseat-debug-cleanup-r1",
+  "agent-characters.js?v=20260729-gym-bench-sync-r1",
   "chat-bubble-layout.mjs?v=20260728-chat-bubble-consistency-r4",
   'getChatBubbleSideInsets',
   'getChatBubbleChromeMetrics',
@@ -1006,7 +1058,7 @@ for (const token of [
   'ambient-schedule-routing-suppressed',
   'status-change-movement-clear-skipped',
   '__VWGetLiveModeScriptedSuppressionState',
-  "agent-characters.js?v=20260729-sectional-loveseat-debug-cleanup-r1",
+  "agent-characters.js?v=20260729-gym-bench-sync-r1",
   'function getAgentPresenceDotColor(statusValue)',
   'statusDot.userData.presenceStatusIndicator = true',
   'parts.statusDot.material.color.setHex(getAgentPresenceDotColor(normalizedStatus))',

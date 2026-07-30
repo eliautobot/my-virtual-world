@@ -62,7 +62,7 @@ function hasSeatRole(location = {}, allowedRoles = SEAT_ROLES) {
 function isApproachOnly(location = {}) {
   const roles = normalizeRoles(location.roles || location.role);
   const id = stableString(location.id).toLowerCase();
-  return roles.includes('approach') && !roles.some(role => SEAT_ROLES.includes(role)) && !id.includes('seat') && !id.includes('sit');
+  return roles.includes('approach') && !roles.includes('seat') && !id.includes('seat') && !id.includes('sit');
 }
 
 function capacityFor(location = {}) {
@@ -109,6 +109,9 @@ export function listObjectUseSeatCandidates({
         seatId,
         activationSpotId: stableString(location.activationSpotId || location.id, seatId),
         approachSpotId: selectedApproachSpotId,
+        exitSpotId: stableString(location.exitSpotId, null),
+        dismountSpotId: stableString(location.dismountSpotId || location.exitSpotId, null),
+        standSpotId: stableString(location.standSpotId, null),
         approachSpot,
         objectKey: stableString(objectKey, null),
         objectType: stableString(objectType || location.assetId, null),

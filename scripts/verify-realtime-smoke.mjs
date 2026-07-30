@@ -26,6 +26,7 @@ import {
   makeLiveActionEmbodiedState,
   resolveScriptedObjectRuntimeTargetFromRequest,
   resolveObjectTargetPoint,
+  resolveServerFurnitureSpotApiPoint,
   RUNTIME_SCHEMA_PATCH_RATE_MS,
   RUNTIME_HEALTH_BROADCAST_INTERVAL_MS,
   RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION,
@@ -42,6 +43,7 @@ import {
   SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
   SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS,
   SERVER_WORLD_TOPOLOGY_OWNER,
+  serverRuntimeReleasePointForTarget,
 } from '../src/realtime/agent-runtime-room.mjs';
 
 const root = process.cwd();
@@ -174,7 +176,7 @@ function verifyManualObjectOccupancyPolicy() {
     5 * 60 * 1000,
     'manual object occupancy should remain stable for five minutes unless the user moves or releases the agent',
   );
-  for (const objectType of ['barberChair', 'bed', 'chair', 'treadmill', 'trainingMat', 'gymBench', 'outdoorExerciseStation']) {
+  for (const objectType of ['barberChair', 'bed', 'chair', 'treadmill', 'trainingMat', 'outdoorExerciseStation']) {
     assert.equal(
       isServerManualObjectOccupancyTarget({
         objectType,
@@ -185,7 +187,7 @@ function verifyManualObjectOccupancyPolicy() {
       `${objectType} should receive protected manual occupancy`,
     );
   }
-  for (const objectType of ['waterCooler', 'vending', 'countertopCoffeeMachine', 'sink']) {
+  for (const objectType of ['waterCooler', 'vending', 'countertopCoffeeMachine', 'sink', 'gymBench']) {
     assert.equal(
       isServerManualObjectOccupancyTarget({
         objectType,
@@ -373,6 +375,102 @@ function assertRadiansClose(actual, expected, message) {
   assert(radiansClose(actual, expected), `${message}: expected ${expected}, got ${actual}`);
 }
 
+function verifyRotatedPersistedSeatFacings() {
+  const dataDir = mkdtempSync(join(tmpdir(), 'vw-rotated-seats-'));
+  mkdirSync(join(dataDir, 'buildings'), { recursive: true });
+  const seatTypes = [
+    ['loveseat', 'seat-left'],
+    ['armchair', 'seat'],
+    ['sectionalSofa', 'seat-center'],
+    ['conferenceChair', 'seat'],
+    ['hallwayBench', 'seat-left'],
+    ['couch', 'sit-center'],
+  ];
+  const rotations = [
+    [0, 'north', 0],
+    [90, 'east', Math.PI / 2],
+    [180, 'south', Math.PI],
+    [270, 'west', -Math.PI / 2],
+  ];
+  const furniture = [];
+  const expectations = [];
+  for (const [type, spotId] of seatTypes) {
+    for (const [rotation, facing, expectedAngle] of rotations) {
+      const index = furniture.length;
+      const x = 6 + (index % 4) * 12;
+      const z = 6 + Math.floor(index / 4) * 8;
+      furniture.push({
+        type,
+        x,
+        z,
+        floor: 1,
+        rotation,
+        actionLocations: [{
+          id: spotId,
+          spotId,
+          slotId: spotId,
+          actionId: 'life.sit',
+          roles: ['seat', 'use'],
+          facing,
+          actionTarget: { x, z: z + 0.7, floor: 1, facing },
+          activationTarget: { x, z, floor: 1, facing },
+        }],
+      });
+      expectations.push({ index, type, spotId, rotation, expectedAngle });
+    }
+  }
+  const buildingDocument = {
+    id: 'rotated-seats',
+    name: 'Rotated seating regression',
+    type: 'office',
+    worldX: 0,
+    worldY: 0,
+    widthTiles: 48,
+    heightTiles: 56,
+    interior: { furniture },
+  };
+  writeFileSync(join(dataDir, 'buildings', 'rotated-seats.json'), `${JSON.stringify(buildingDocument, null, 2)}\n`);
+
+  const targets = listScriptedObjectRuntimeTargets(dataDir);
+  for (const expectation of expectations) {
+    const target = targets.find(candidate =>
+      candidate.buildingId === 'rotated-seats' &&
+      candidate.furnitureIndex === expectation.index &&
+      candidate.slotId === expectation.spotId
+    );
+    assert.ok(
+      target,
+      `${expectation.type} at ${expectation.rotation} degrees should expose its authored seat target`,
+    );
+    assertRadiansClose(
+      target.faceAngle,
+      expectation.expectedAngle,
+      `${expectation.type} at ${expectation.rotation} degrees must face with the placed object`,
+    );
+    if (expectation.type === 'sectionalSofa') {
+      const release = serverRuntimeReleasePointForTarget(dataDir, target, {
+        x: target.x,
+        y: target.y,
+        floor: target.floor,
+        buildingId: target.buildingId,
+      });
+      const center = resolveServerFurnitureSpotApiPoint(
+        buildingDocument,
+        furniture[expectation.index],
+        { dx: 0, dz: 0 },
+      );
+      assert.ok(release, `sectional sofa at ${expectation.rotation} degrees should have a safe dismount point`);
+      assert.equal(release.spotId, 'dismount-center');
+      const expectedDismountDistance = Math.hypot(0.40, 2.15) * 40;
+      const actualDismountDistance = Math.hypot(release.x - center.apiX, release.y - center.apiZ);
+      assert(
+        Math.abs(actualDismountDistance - expectedDismountDistance) < 0.01,
+        `sectional sofa at ${expectation.rotation} degrees must preserve its 2.15-tile front dismount clearance (${actualDismountDistance} vs ${expectedDismountDistance})`,
+      );
+    }
+  }
+}
+
 async function waitForWorldRuntime(room, predicate = () => true) {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
@@ -462,6 +560,7 @@ async function run() {
   verifyLifecycleJournalRecovery();
   verifyIncrementalSchemaPatchSize();
   verifyManualObjectOccupancyPolicy();
+  verifyRotatedPersistedSeatFacings();
   const dataDir = mkdtempSync(join(tmpdir(), 'vw-realtime-'));
   const port = await getOpenPort();
   let server = startServer({ port, dataDir });
