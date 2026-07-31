@@ -2614,9 +2614,10 @@ export const OBJECT_CATALOG_EXAMPLES = Object.freeze([
     footprint: Object.freeze({ shape: 'rect', units: 'tile', halfW: 0.62, halfD: 0.46, solid: true, source: 'runtime FURNITURE_HALF_SIZES.fridge; stationary non-carryable persistent food storage appliance' }),
     interactionSpots: Object.freeze([
       Object.freeze({ id: 'use-front', dx: 0, dz: 0.92, facing: 'north', action: 'life.getFridgeSnack', capacity: 1, role: 'user', requiresReservation: true }),
-      Object.freeze({ id: 'door-swing-clearance', dx: 0, dz: 1.38, facing: 'north', action: 'planning.schedule', capacity: 1, capacityKind: 'queue', role: 'approach', requiresReservation: false }),
+      Object.freeze({ id: 'door-swing-clearance', dx: 0, dz: 1.38, facing: 'north', action: 'life.getFridgeSnack', capacity: 1, capacityKind: 'clearance', role: 'clearance', requiresReservation: false }),
+      Object.freeze({ id: 'queue', dx: 0, dz: 1.82, facing: 'north', action: 'planning.schedule', capacity: 3, capacityKind: 'queue', role: 'queue', roles: Object.freeze(['approach', 'queue', 'wait-turn']), requiresReservation: true, serviceQueue: true, queueMaxPoints: 3, queueSpacingTiles: 0.8 }),
     ]),
-    capacity: Object.freeze({ concurrentUsers: 1, queue: 1, staff: 0, observers: 1 }),
+    capacity: Object.freeze({ concurrentUsers: 1, queue: 3, staff: 0, observers: 1 }),
     uiActions: Object.freeze([
       Object.freeze({ id: 'get-meal-snack', label: 'Get Meal / Snack', primaryTag: 'life.food', permission: 'public' }),
       Object.freeze({ id: 'check-fridge-stock', label: 'Check Stock', primaryTag: 'maintenance.restock', permission: 'public' }),
@@ -2632,8 +2633,8 @@ export const OBJECT_CATALOG_EXAMPLES = Object.freeze([
       Object.freeze({ id: 'reach-shelf', kind: 'active', label: 'Reach into food storage' }),
       Object.freeze({ id: 'close-door', kind: 'complete', label: 'Close fridge door with temporary food in hand' }),
     ]),
-    runtimeAdapters: Object.freeze({ furnitureType: 'fridge', actionSpotSource: 'FURNITURE_INTERACTION_SPOTS.fridge + ACTION_SPOTS.fridge', footprintSource: 'FURNITURE_HALF_SIZES.fridge', temporaryItem: 'existing temporaryFood Chilled Snack, right-hand carry, omit-on-save' }),
-    lifecycle: Object.freeze({ stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, spawnsTemporary: Object.freeze({ catalogId: 'temporaryFood', label: 'Chilled Snack', carryable: true, attachPoint: 'right-hand', temporary: true }) }),
+    runtimeAdapters: Object.freeze({ furnitureType: 'fridge', actionSpotSource: 'FURNITURE_INTERACTION_SPOTS.fridge + ACTION_SPOTS.fridge', footprintSource: 'FURNITURE_HALF_SIZES.fridge', temporaryItem: 'one of ten temporary fridge foods, right-hand carry, desk placement/consume, omit-on-save', queue: 'first-come-first-served service queue with three numbered points and manual placement support', colorProperty: 'fridgeColors with six persistent live-preview appliance-part colors' }),
+    lifecycle: Object.freeze({ stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, queuePolicy: 'first-come-first-served', colorProperty: 'fridgeColors', spawnsTemporary: Object.freeze({ catalogId: 'temporaryFood', label: 'Random Fridge Food', itemPool: Object.freeze(['Greek Yogurt Cup', 'Red Apple', 'Fresh Orange', 'Green Grape Bunch', 'Garden Salad Bowl', 'Sushi Box', 'Cheese Wedges', 'Berry Parfait', 'Carrot Snack Pack', 'Turkey Avocado Wrap']), carryable: true, attachPoint: 'right-hand', temporary: true, validDropOff: Object.freeze(['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter', 'cafeCounter']) }) }),
   }),
   Object.freeze({
     id: 'coffee-pickup-shelf',

@@ -10,7 +10,12 @@ import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260725-
 import {
   createAgentCharacter, updateAgentAnimation, getAgentAppearance, getSinkWashPoseTargets,
   isAuthoritativeSinkAnimationState, APPEARANCE_CATALOG,
-} from './agent-characters.js?v=20260729-gym-bench-sync-r1';
+} from './agent-characters.js?v=20260731-fridge-food-r1';
+import {
+  FRIDGE_FOOD_ITEMS,
+  FRIDGE_FOOD_ITEM_LABELS,
+  findFridgeFoodItem,
+} from './fridge-food-catalog.mjs?v=20260731-fridge-food-r1';
 import {
   listObjectUseActiveCandidates,
   chooseAndReserveObjectUseActiveSlot,
@@ -155,7 +160,7 @@ import {
   getPhase1ObjectTaxonomy,
   validateObjectCatalogDefinition,
   getObjectCatalogExample,
-} from './agent-life-object-catalog-schema.mjs?v=20260729-sectional-dismount-r1';
+} from './agent-life-object-catalog-schema.mjs?v=20260731-fridge-color-r2';
 import {
   CATALOG_REGISTRY_API_VERSION,
   CATALOG_REGISTRY_CONTRACT,
@@ -169,7 +174,7 @@ import {
   buildEditorFurnitureCatalog,
   resolveCatalogEntryForPlacedInstance,
   validateCatalogRegistry,
-} from './agent-life-catalog-registry.mjs?v=20260729-sectional-dismount-r1';
+} from './agent-life-catalog-registry.mjs?v=20260731-fridge-color-r2';
 import {
   OBJECT_INSTANCE_SCHEMA_VERSION,
   OBJECT_INSTANCE_SCHEMA_FIELDS,
@@ -231,7 +236,7 @@ import {
   getActionLocationsForAsset,
   resolvePlacedActionLocations,
   validateActionLocationRegistry,
-} from './agent-life-action-location-registry.mjs?v=20260729-sectional-dismount-r1';
+} from './agent-life-action-location-registry.mjs?v=20260731-fridge-color-r2';
 import {
   AGENT_ANIMATION_REGISTRY_API_VERSION,
   AGENT_ANIMATION_IDS,
@@ -325,10 +330,10 @@ import {
   activateObjectUseStandingReservation,
   completeObjectUseStandingReservation,
   releaseObjectUseStandingReservation,
-} from './agent-life-object-use-standing.mjs?v=20260430-phase3e-task1-standing-use-helper';
+} from './agent-life-object-use-standing.mjs?v=20260731-fridge-color-r2';
 import {
   resolveBehaviorDestination,
-} from './agent-life-behavior-destination-resolver.mjs?v=20260609-queue-capability-v2';
+} from './agent-life-behavior-destination-resolver.mjs?v=20260731-fridge-color-r2';
 import {
   selectScriptedBehaviorCategory,
   buildScriptedBehaviorWeightedTable,
@@ -2882,7 +2887,8 @@ function isAgentRuntimeDeskConsumeActivityKind(kind = '') {
   return normalized.startsWith('coffee-desk-') ||
     normalized.startsWith('water-desk-') ||
     normalized.startsWith('vending-desk-') ||
-    normalized.startsWith('microwave-desk-');
+    normalized.startsWith('microwave-desk-') ||
+    normalized.startsWith('fridge-desk-');
 }
 
 function getAgentRuntimeDeskConsumeSchedulePhase(kind = '', animationId = '') {
@@ -2892,6 +2898,7 @@ function getAgentRuntimeDeskConsumeSchedulePhase(kind = '', animationId = '') {
   if (normalized.startsWith('water-desk-')) return explicit || 'water-desk-sip';
   if (normalized.startsWith('vending-desk-')) return explicit || 'vending-desk-consume';
   if (normalized.startsWith('microwave-desk-')) return explicit || 'microwave-desk-consume';
+  if (normalized.startsWith('fridge-desk-')) return explicit || 'fridge-desk-consume';
   return explicit;
 }
 
@@ -7099,7 +7106,7 @@ function isManualDropStandingDrinkMachine(furniture = {}) {
 }
 
 function isManualDropStandingServiceMachine(furniture = {}) {
-  return isManualDropStandingDrinkMachine(furniture) || furniture?.type === 'sink' || furniture?.type === 'vending' || furniture?.type === 'dumbbellRack';
+  return isManualDropStandingDrinkMachine(furniture) || furniture?.type === 'sink' || furniture?.type === 'vending' || furniture?.type === 'fridge' || furniture?.type === 'dumbbellRack';
 }
 
 function isManualDropFullServiceQueueObject(furniture = {}) {
@@ -18339,38 +18346,42 @@ function makeInteriorDoor3D(x, z, s = T, item = {}) {
   return g;
 }
 
-function makeFridge3D(x, z, s = T) {
+function makeFridge3D(x, z, s = T, furniture = {}) {
   const g = new THREE.Group();
-  const shell = 0xe5eef8;
-  const side = 0xcbd5e1;
-  const trim = 0x475569;
-  const seal = 0x0f172a;
-  const handle = 0xf8fafc;
+  const colors = normalizeMultiSeatFurnitureColors('fridge', furniture);
+  const shell = parseColor(colors.shell);
+  const side = parseColor(colors.sides);
+  const trim = parseColor(colors.trim);
+  const seal = parseColor(colors.seals);
+  const handle = parseColor(colors.handles);
+  const dispenser = parseColor(colors.dispenser);
   const glow = 0x93c5fd;
+  g.userData.multiSeatColors = colors;
+  const addPart = (mesh, key) => g.add(tagMultiSeatColorPart(mesh, 'fridge', key));
 
   // One stationary persistent fridge asset only. Door seams, handles,
   // dispenser, magnets, vents, and interior glow are visual details on the
   // same appliance; the runtime may reuse existing temporaryFood in hand but
   // this task does not add or bundle a second placeable item.
-  g.add(posVox(0, 0.82 * s, 0, 1.18 * s, 1.64 * s, 0.86 * s, shell));
-  g.add(posVox(-0.62 * s, 0.82 * s, 0, 0.08 * s, 1.58 * s, 0.80 * s, side));
-  g.add(posVox(0.62 * s, 0.82 * s, 0, 0.08 * s, 1.58 * s, 0.80 * s, side));
-  g.add(posVox(0, 1.66 * s, 0, 1.22 * s, 0.08 * s, 0.90 * s, trim));
-  g.add(posVox(0, 0.04 * s, 0, 1.18 * s, 0.08 * s, 0.84 * s, trim));
-  g.add(posVox(0, 1.06 * s, 0.455 * s, 1.10 * s, 0.045 * s, 0.035 * s, seal)); // freezer/fridge seam
-  g.add(posVox(0, 0.82 * s, 0.472 * s, 0.035 * s, 1.44 * s, 0.03 * s, seal)); // double-door seam
-  g.add(posVox(-0.12 * s, 1.30 * s, 0.505 * s, 0.055 * s, 0.48 * s, 0.055 * s, handle));
-  g.add(posVox(0.12 * s, 0.62 * s, 0.505 * s, 0.055 * s, 0.64 * s, 0.055 * s, handle));
-  g.add(posVox(-0.38 * s, 0.78 * s, 0.502 * s, 0.22 * s, 0.34 * s, 0.045 * s, 0x1e293b)); // water/ice panel detail
+  addPart(posVox(0, 0.82 * s, 0, 1.18 * s, 1.64 * s, 0.86 * s, shell), 'shell');
+  addPart(posVox(-0.62 * s, 0.82 * s, 0, 0.08 * s, 1.58 * s, 0.80 * s, side), 'sides');
+  addPart(posVox(0.62 * s, 0.82 * s, 0, 0.08 * s, 1.58 * s, 0.80 * s, side), 'sides');
+  addPart(posVox(0, 1.66 * s, 0, 1.22 * s, 0.08 * s, 0.90 * s, trim), 'trim');
+  addPart(posVox(0, 0.04 * s, 0, 1.18 * s, 0.08 * s, 0.84 * s, trim), 'trim');
+  addPart(posVox(0, 1.06 * s, 0.455 * s, 1.10 * s, 0.045 * s, 0.035 * s, seal), 'seals'); // freezer/fridge seam
+  addPart(posVox(0, 0.82 * s, 0.472 * s, 0.035 * s, 1.44 * s, 0.03 * s, seal), 'seals'); // double-door seam
+  addPart(posVox(-0.12 * s, 1.30 * s, 0.505 * s, 0.055 * s, 0.48 * s, 0.055 * s, handle), 'handles');
+  addPart(posVox(0.12 * s, 0.62 * s, 0.505 * s, 0.055 * s, 0.64 * s, 0.055 * s, handle), 'handles');
+  addPart(posVox(-0.38 * s, 0.78 * s, 0.502 * s, 0.22 * s, 0.34 * s, 0.045 * s, dispenser), 'dispenser'); // water/ice panel detail
   g.add(posVox(-0.38 * s, 0.88 * s, 0.528 * s, 0.14 * s, 0.08 * s, 0.02 * s, glow));
   g.add(posVox(-0.40 * s, 0.66 * s, 0.528 * s, 0.12 * s, 0.035 * s, 0.02 * s, 0xe0f2fe));
   [[0.34, 1.32, 0xf97316], [0.42, 1.22, 0x22c55e], [0.30, 0.92, 0xfacc15]].forEach(([lx, ly, color]) => {
     g.add(posVox(lx * s, ly * s, 0.515 * s, 0.12 * s, 0.08 * s, 0.018 * s, color));
   });
-  [-0.38, -0.18, 0.18, 0.38].forEach((lx) => g.add(posVox(lx * s, 0.18 * s, -0.455 * s, 0.10 * s, 0.035 * s, 0.025 * s, 0x64748b))); // rear bottom vent marks
+  [-0.38, -0.18, 0.18, 0.38].forEach((lx) => addPart(posVox(lx * s, 0.18 * s, -0.455 * s, 0.10 * s, 0.035 * s, 0.025 * s, trim), 'trim')); // rear bottom vent marks
   [-0.46, 0.46].forEach((lx) => {
-    g.add(posVox(lx * s, 0.08 * s, -0.28 * s, 0.12 * s, 0.16 * s, 0.12 * s, seal));
-    g.add(posVox(lx * s, 0.08 * s, 0.30 * s, 0.12 * s, 0.16 * s, 0.12 * s, seal));
+    addPart(posVox(lx * s, 0.08 * s, -0.28 * s, 0.12 * s, 0.16 * s, 0.12 * s, seal), 'seals');
+    addPart(posVox(lx * s, 0.08 * s, 0.30 * s, 0.12 * s, 0.16 * s, 0.12 * s, seal), 'seals');
   });
   g.position.set(x, 0, z);
   return g;
@@ -19045,7 +19056,7 @@ function addBuildingFurniture(group, building, bw, bd) {
     if (isBuildingFloorFocusActive(building) && itemFloor !== activeFloor) continue;
     const meshBuilder = FURNITURE_MESH_BUILDERS[f.type];
     if (!meshBuilder) continue;
-    const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'conferenceChair', 'hallwayBench', 'parkBench', 'dumbbellRack', 'gymBench', 'sink']);
+    const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'conferenceChair', 'hallwayBench', 'parkBench', 'dumbbellRack', 'gymBench', 'sink', 'fridge']);
     const mesh = f.type === 'interiorDoor'
       ? makeInteriorDoor3D(f.x, f.z, s, f)
       : (configurableMultiSeatTypes.has(f.type) ? meshBuilder(f.x, f.z, s, f) : meshBuilder(f.x, f.z, s));
@@ -19840,6 +19851,12 @@ const MULTI_SEAT_COLOR_SCHEMES = Object.freeze({
     label: 'Sink',
     defaults: Object.freeze({ cabinet: '#d8e0e3', countertop: '#f7fbfc', basin: '#ffffff', hardware: '#78909c' }),
     fields: Object.freeze([['cabinet', 'Cabinet'], ['countertop', 'Countertop'], ['basin', 'Sink basin'], ['hardware', 'Faucet & hardware']]),
+  }),
+  fridge: Object.freeze({
+    property: 'fridgeColors',
+    label: 'Fridge',
+    defaults: Object.freeze({ shell: '#e5eef8', sides: '#cbd5e1', trim: '#475569', seals: '#0f172a', handles: '#f8fafc', dispenser: '#1e293b' }),
+    fields: Object.freeze([['shell', 'Door / body'], ['sides', 'Side panels'], ['trim', 'Top, base & vents'], ['seals', 'Door seams & feet'], ['handles', 'Door handles'], ['dispenser', 'Water / ice panel']]),
   }),
 });
 
@@ -23698,7 +23715,7 @@ function updateAgentAnimations(dt) {
     // ── REAL STATUS OVERRIDE: working agents go to their desk ──────
     // When an agent's live status is 'working', override schedule entirely:
     // walk to their assigned desk (or a fallback desk/work spot) and type there.
-    const hasDeskDrinkConsumeActivity = String(agent._idleActivity?.kind || '').startsWith('coffee-desk-') || String(agent._idleActivity?.kind || '').startsWith('water-desk-') || String(agent._idleActivity?.kind || '').startsWith('vending-desk-') || String(agent._idleActivity?.kind || '').startsWith('microwave-desk-');
+    const hasDeskDrinkConsumeActivity = String(agent._idleActivity?.kind || '').startsWith('coffee-desk-') || String(agent._idleActivity?.kind || '').startsWith('water-desk-') || String(agent._idleActivity?.kind || '').startsWith('vending-desk-') || String(agent._idleActivity?.kind || '').startsWith('microwave-desk-') || String(agent._idleActivity?.kind || '').startsWith('fridge-desk-');
     const hasProtectedDrinkActivity = hasStandingServiceMachineActivity || hasDeskDrinkConsumeActivity;
     const hasPostDrinkDeskRelease = isPostDrinkDeskReleaseActive(agent);
     const workTarget = !liveModeScriptedSuppressed && isWorkPresenceStatus(agent.status) && !meetingTarget && !manualPlacementLocked && !hasProtectedDrinkActivity && !hasPostDrinkDeskRelease ? getAgentWorkTarget(agent) : null;
@@ -23857,7 +23874,7 @@ function updateAgentAnimations(dt) {
             agent._idleActivity.dockTarget = { x: routedWorkTarget.apiX, y: routedWorkTarget.apiZ };
             agent._idleActivity.faceAngle = Number.isFinite(routedWorkTarget.faceAngle) ? routedWorkTarget.faceAngle : agent._idleActivity.faceAngle;
             agent._stayTimer = Math.max(Number(agent._idleActivity.stayMs || 16000), 12000);
-            agent._schedPhase = agent._idleActivity.animationId || (String(agent._idleActivity.kind || '').startsWith('water-desk-') ? 'water-desk-sip' : (String(agent._idleActivity.kind || '').startsWith('vending-desk-') ? 'vending-desk-consume' : (String(agent._idleActivity.kind || '').startsWith('microwave-desk-') ? 'microwave-desk-consume' : 'coffee-desk-sip')));
+            agent._schedPhase = agent._idleActivity.animationId || (String(agent._idleActivity.kind || '').startsWith('water-desk-') ? 'water-desk-sip' : (String(agent._idleActivity.kind || '').startsWith('vending-desk-') ? 'vending-desk-consume' : (String(agent._idleActivity.kind || '').startsWith('microwave-desk-') ? 'microwave-desk-consume' : (String(agent._idleActivity.kind || '').startsWith('fridge-desk-') ? 'fridge-desk-consume' : 'coffee-desk-sip'))));
           }
           if (agent._group3d && Number.isFinite(routedWorkTarget.faceAngle)) agent._group3d.rotation.y = routedWorkTarget.faceAngle;
         }
@@ -25009,6 +25026,15 @@ function updateAgentAnimations(dt) {
       agent._idleActivity = null;
       agent._schedPhase = 'done-consuming-microwave-food';
       agent._wanderTimer = 1600 + Math.random() * 2400;
+    } else if (String(agent._idleActivity?.kind || '').startsWith('fridge-desk-')) {
+      const deskActivity = agent._idleActivity;
+      const cleanupPlan = cleanupAgentChilledSnack(agent, 'consume');
+      releaseAgentIntent(agent, 'fridge-desk-consume-complete', { clearRoute: true, clearLifecycle: true, releaseBy: 'object-complete' });
+      releaseAgentFromDrinkDeskConsume(agent, 'fridge');
+      completeIdleWorldAction(deskActivity, { objectEffect: 'temporary-fridge-food-consumed-at-desk', completionState: 'done-consuming-fridge-food', sipCount: 3, temporaryCleanup: cleanupPlan ? { id: cleanupPlan.item?.id || null, label: cleanupPlan.item?.label || null, fridgeFoodId: cleanupPlan.item?.fridgeFoodId || null, satisfies: cleanupPlan.item?.satisfies || null, reason: cleanupPlan.reason || 'consume', terminalState: cleanupPlan.finalItem?.temporaryUse?.state || 'consumed', skipPersistence: cleanupPlan.effects?.skipPersistence === true } : null });
+      agent._idleActivity = null;
+      agent._schedPhase = 'done-consuming-fridge-food';
+      agent._wanderTimer = 1600 + Math.random() * 2400;
     } else if (String(agent._idleActivity?.kind || '').startsWith('vending-machine-')) {
       const vendingActivity = agent._idleActivity;
       const vendingBuilding = buildingsMap.get(vendingActivity?.buildingId);
@@ -25031,19 +25057,34 @@ function updateAgentAnimations(dt) {
       }
     } else if (String(agent._idleActivity?.kind || '').startsWith('fridge-')) {
       const fridgeActivity = agent._idleActivity;
-      const cleanupPlan = fridgeActivity.mode !== 'check-stock' ? cleanupAgentChilledSnack(agent, 'consume') : null;
+      const isCheckStock = fridgeActivity.mode === 'check-stock' || fridgeActivity.mode === 'checking-stock';
       const fridgeBuilding = buildingsMap.get(fridgeActivity?.buildingId);
       const fridge = fridgeBuilding?.interior?.furniture?.[fridgeActivity?.furnitureIndex];
       if (fridge?.type === 'fridge') {
         const previousCount = Number(fridge.fridgeState?.retrievedCount || 0);
         const release = releaseStandingUseMachine(fridge, fridgeActivity, agent, 'fridge-retrieve-complete');
-        fridge.fridgeState = { ...(fridge.fridgeState || {}), doorOpen: false, doorState: 'closed-after-use', retrieveState: fridgeActivity.mode === 'check-stock' ? 'stock-inspected' : 'retrieved', stockLevel: fridge.fridgeState?.stockLevel || 'stocked', lastAction: fridge.activeUse.lastAction, retrievedCount: previousCount + (fridgeActivity.mode === 'check-stock' ? 0 : 1), temporaryCleanup: cleanupPlan ? { id: cleanupPlan.item?.id || null, reason: cleanupPlan.reason || 'consume', terminalState: cleanupPlan.finalItem?.temporaryUse?.state || 'consumed', skipPersistence: cleanupPlan.effects?.skipPersistence === true } : null, releasedSlotId: release?.slotId || fridgeActivity.activeUseSlotId || 'use-front', activeSlotIds: [], reservedSlotIds: [], completionReleased: release?.release?.ok !== false, persistentFurniture: true };
+        const carriedItem = agent._carriedItem || agent._carrying || null;
+        fridge.fridgeState = { ...(fridge.fridgeState || {}), doorOpen: false, doorState: 'closed-after-use', retrieveState: isCheckStock ? 'stock-inspected' : 'retrieved', stockLevel: fridge.fridgeState?.stockLevel || 'stocked', lastAction: fridge.activeUse.lastAction, retrievedCount: previousCount + (isCheckStock ? 0 : 1), temporaryCleanup: null, carriedToDesk: !isCheckStock, lastRetrievedFoodId: isCheckStock ? (fridge.fridgeState?.lastRetrievedFoodId || null) : (carriedItem?.fridgeFoodId || fridgeActivity.fridgeFoodId || null), lastRetrievedFoodLabel: isCheckStock ? (fridge.fridgeState?.lastRetrievedFoodLabel || null) : (carriedItem?.label || fridgeActivity.temporaryItem?.label || null), releasedSlotId: release?.slotId || fridgeActivity.activeUseSlotId || 'use-front', activeSlotIds: [], reservedSlotIds: [], completionReleased: release?.release?.ok !== false, persistentFurniture: true };
         persistBuilding(fridgeBuilding);
         advanceScriptedServiceQueueAfterUse(fridgeBuilding, fridgeActivity.furnitureIndex, 'fridge-retrieve-complete');
       }
-      agent._idleActivity = null;
-      agent._schedPhase = 'fridge-complete';
-      agent._wanderTimer = 1500 + Math.random() * 2200;
+      if (isCheckStock) {
+        completeIdleWorldAction(fridgeActivity, { objectEffect: 'fridge-stock-inspected', completionState: 'fridge-stock-check-complete' });
+        agent._idleActivity = null;
+        agent._schedPhase = 'fridge-stock-check-complete';
+        agent._wanderTimer = 1500 + Math.random() * 2200;
+      } else {
+        completeIdleWorldAction(fridgeActivity, { objectEffect: 'temporary-fridge-food-picked-up', completionState: 'fridge-food-carried-to-desk', fridgeFoodId: agent._carriedItem?.fridgeFoodId || fridgeActivity.fridgeFoodId || null });
+        clearManualPlacementHoldForDrinkMachineDeskHandoff(agent, fridgeActivity);
+        spawnChilledSnackForAgent(agent, fridgeActivity);
+        const routedToDesk = startFridgeDeskConsumeActivity(agent, fridgeActivity);
+        if (!routedToDesk) {
+          cleanupAgentChilledSnack(agent, 'consume');
+          agent._idleActivity = null;
+          agent._schedPhase = 'done-consuming-fridge-food';
+          agent._wanderTimer = 1600 + Math.random() * 2400;
+        }
+      }
     } else if (String(agent._idleActivity?.kind || '').startsWith('kitchen-island-')) {
       const islandActivity = agent._idleActivity;
       const islandBuilding = buildingsMap.get(islandActivity?.buildingId);
@@ -26544,7 +26585,7 @@ function updateAgentAnimations(dt) {
           if (!idleActivity.isServiceQueueWait && String(idleActivity.kind || '').startsWith('vending-machine-')) {
             activateStandingUseMachineOnArrival(agent, idleActivity);
           }
-          if (!idleActivity.isServiceQueueWait && String(idleActivity.kind || '').startsWith('fridge-')) {
+          if (!idleActivity.isServiceQueueWait && String(idleActivity.kind || '').startsWith('fridge-') && !String(idleActivity.kind || '').startsWith('fridge-desk-')) {
             activateStandingUseMachineOnArrival(agent, idleActivity);
             if (idleActivity.mode !== 'check-stock') spawnChilledSnackForAgent(agent, idleActivity);
           }
@@ -26588,6 +26629,7 @@ function updateAgentAnimations(dt) {
           else if (idleKind.startsWith('water-desk-')) agent._schedPhase = 'water-desk-sip';
           else if (idleKind.startsWith('vending-desk-')) agent._schedPhase = idleActivity.animationId || 'vending-desk-consume';
           else if (idleKind.startsWith('microwave-desk-')) agent._schedPhase = idleActivity.animationId || 'microwave-desk-consume';
+          else if (idleKind.startsWith('fridge-desk-')) agent._schedPhase = idleActivity.animationId || 'fridge-desk-consume';
           else if (idleKind.startsWith('fridge-')) agent._schedPhase = 'fridge-use';
           else if (idleKind.startsWith('microwave-')) agent._schedPhase = 'microwave-heat';
           else if (idleKind.startsWith('outdoor-planter-')) agent._schedPhase = 'outdoor-planter-water';
@@ -28818,6 +28860,7 @@ function startDraggedAgentStandingMachineUse(drop, agent, options = {}) {
   const standingUse = reserveStandingUseMachineForAgent(machine, building, drop.index, agent, config, spot);
   const isWater = isWaterCoolerFurnitureType(machine.type);
   const isMicrowave = machine.type === 'microwave';
+  const isFridge = machine.type === 'fridge';
   const spawnsTemporary = config.spawnsTemporary !== false;
   const spawnedLabel = isDumbbellRack ? 'Paired Dumbbells' : (spawnsTemporary ? (isWater ? 'Water Cup' : (machine.type === 'vending' ? 'Temporary Snack / Drink' : (machine.type === 'fridge' ? 'Temporary Snack / Food' : (isMicrowave ? 'Microwave Food' : 'Coffee Drink')))) : null);
   const spawnedItem = !spawnsTemporary
@@ -28826,7 +28869,9 @@ function startDraggedAgentStandingMachineUse(drop, agent, options = {}) {
     ? { label: spawnedLabel, catalogId: 'pairedDumbbellHandProps', temporary: true, carryable: false, visualOnly: true, attachPoints: ['left-hand', 'right-hand'], count: 2, removeOnCompletion: true }
     : (isMicrowave
     ? { label: 'Microwave Food', catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', itemPool: MICROWAVE_FOOD_ITEM_POOL.map(item => item.label), foodItems: MICROWAVE_FOOD_ITEM_POOL.map(item => ({ id: item.id, label: item.label, visualKind: item.visualKind })), validDropOff: MICROWAVE_FOOD_VALID_DROP_OFFS }
-    : { label: spawnedLabel, catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', visualKind: isWater ? 'water' : (machine.type === 'countertopCoffeeMachine' ? 'coffee' : null), drinkKind: isWater ? 'water' : (machine.type === 'countertopCoffeeMachine' ? 'coffee' : null), validDropOff: ['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter'] }));
+    : (isFridge
+    ? { label: 'Random Fridge Food', catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', itemPool: [...FRIDGE_FOOD_ITEM_LABELS], foodItems: FRIDGE_FOOD_ITEMS.map(item => ({ id: item.id, label: item.label, visualKind: item.visualKind })), validDropOff: FRIDGE_FOOD_VALID_DROP_OFFS }
+    : { label: spawnedLabel, catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', visualKind: isWater ? 'water' : (machine.type === 'countertopCoffeeMachine' ? 'coffee' : null), drinkKind: isWater ? 'water' : (machine.type === 'countertopCoffeeMachine' ? 'coffee' : null), validDropOff: ['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter'] })));
   agent._manualPlacementPreview = false;
   agent._manualPlacementLockUntil = performance.now() + Math.max(AGENT_MANUAL_PLACE_HOLD_MS, config.useDurationMs);
   const routeTarget = makeStandingMachineRouteTarget(building, machine, drop.index, spot, config, {
@@ -46803,7 +46848,7 @@ window.__verifyManualDrinkMachinePlacementLifecycle = () => {
       triggerStartedDirectServiceUse: trigger?.triggered === true && trigger?.directServiceUse === true,
       triggerUsedNormalFurnitureHandler: trigger?.viaNormalFurnitureHandler === true,
       manualDropIntentHasManualPriority: backendRuntimeObjectUseRequested || (manualIntent?.owner === 'manual' && manualIntent?.priorityName === 'manual'),
-      manualDropIntentUsesDragDropSource: backendRuntimeObjectUseRequested || (manualIntent?.source?.family === 'manual-drag-drop' && manualIntent?.source?.functionName === 'startDraggedAgentDrinkMachineViaFurnitureHandler'),
+      manualDropIntentUsesDragDropSource: backendRuntimeObjectUseRequested || (manualIntent?.source?.family === 'manual-drag-drop' && manualIntent?.source?.functionName === 'startDraggedAgentServiceMachineViaFurnitureHandler'),
       manualDropIntentTargetsMachineAction: backendRuntimeObjectUseRequested || (manualIntent?.object?.actionId === config.actionId && manualIntent?.object?.spotId === config.slotId),
       manualDropIntentReleasesOnCompletion: backendRuntimeObjectUseRequested || manualIntent?.release?.policy === 'on-object-complete',
       recordedSpecificInteractionCommand: interactionRecord?.furnitureType === machine.type && interactionRecord?.actionId === config.actionId && interactionRecord?.targetMatchesObject === true,
@@ -49885,8 +49930,10 @@ function placeFurnitureAt(worldX, worldZ) {
     } else if (_furniturePlacementType === 'fridge') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'closed-stocked' };
+      placedFurniture.queuePolicy = 'first-come-first-served';
+      placedFurniture.fridgeColors = normalizeMultiSeatFurnitureColors('fridge');
       placedFurniture.fridgeState = { doorOpen: false, stockLevel: 'stocked', lastAction: null, retrievedCount: 0, persistentFurniture: true };
-      placedFurniture.lifecycle.spawnsTemporary = { catalogId: 'temporaryFood', label: 'Chilled Snack', carryable: true, attachPoint: 'right-hand', temporary: true, validDropOff: ['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter', 'cafeCounter'] };
+      placedFurniture.lifecycle.spawnsTemporary = { catalogId: 'temporaryFood', label: 'Random Fridge Food', itemPool: [...FRIDGE_FOOD_ITEM_LABELS], foodItems: FRIDGE_FOOD_ITEMS.map(item => ({ id: item.id, label: item.label, visualKind: item.visualKind })), carryable: true, attachPoint: 'right-hand', temporary: true, validDropOff: [...FRIDGE_FOOD_VALID_DROP_OFFS] };
     } else if (_furniturePlacementType === 'grill') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'ready-to-cook' };
@@ -50066,7 +50113,7 @@ function placeFurnitureAt(worldX, worldZ) {
   // Place in 3D using LOCAL coordinates (mesh is child of building group)
   const meshBuilder = FURNITURE_MESH_BUILDERS[_furniturePlacementType];
   if (!meshBuilder) return;
-  const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'conferenceChair', 'hallwayBench', 'parkBench', 'dumbbellRack', 'sink']);
+  const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'conferenceChair', 'hallwayBench', 'parkBench', 'dumbbellRack', 'sink', 'fridge']);
   const mesh = configurableMultiSeatTypes.has(_furniturePlacementType)
     ? meshBuilder(finalLocalX, finalLocalZ, T, placedFurniture)
     : meshBuilder(finalLocalX, finalLocalZ, T);
@@ -53668,21 +53715,52 @@ function startVendingDeskConsumeActivity(agent, vendingActivity = {}) {
   return true;
 }
 
+const FRIDGE_FOOD_VALID_DROP_OFFS = Object.freeze(['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter', 'cafeCounter']);
+
+function chooseFridgeFoodItem(agent = {}, activity = {}) {
+  const forced = findFridgeFoodItem(activity.fridgeFoodId || activity.foodItemId || activity.foodType || '');
+  if (forced) return forced;
+  const seed = `${agent?.id || agent?.name || 'agent'}:${activity.buildingId || ''}:${activity.furnitureIndex ?? ''}:${Date.now()}`;
+  return FRIDGE_FOOD_ITEMS[stableScheduleHash(seed) % FRIDGE_FOOD_ITEMS.length] || FRIDGE_FOOD_ITEMS[0];
+}
+
 function makeChilledSnackTemporaryItem(agent, activity = {}) {
   const nowIso = new Date().toISOString();
-  return makeTemporaryUseItem({
-    id: `fridge-chilled-snack-${agent?.id || 'agent'}-${Date.now()}`,
+  const foodItem = chooseFridgeFoodItem(agent, activity);
+  activity.fridgeFoodItem = foodItem;
+  const item = makeTemporaryUseItem({
+    id: `fridge-${foodItem.id}-${agent?.id || 'agent'}-${Date.now()}`,
     catalogId: 'temporaryFood',
-    label: 'Chilled Snack',
+    label: foodItem.label,
     kind: 'consumable',
+    visualKind: foodItem.visualKind,
+    fridgeFoodId: foodItem.id,
+    packageColor: foodItem.packageColor,
+    accentColor: foodItem.accentColor,
+    needEffects: foodItem.needEffects,
+    satisfies: ['hunger', 'food', 'chilled-food', 'fridge-food'],
     state: 'carried',
     consumable: true,
     attachPoint: 'right-hand',
+    validDropOff: FRIDGE_FOOD_VALID_DROP_OFFS,
     sourceFurnitureType: activity.sourceFurnitureType || activity.furnitureType || 'fridge',
     sourceBuildingId: activity.buildingId || null,
     sourceFurnitureIndex: activity.furnitureIndex ?? null,
     temporaryUse: { persistence: { mode: 'omit-on-save', omitOnSave: true, owner: 'fridge-runtime' } },
   }, { now: nowIso, timeouts: { carriedTtlMs: 90 * 1000, placedTtlMs: 30 * 1000 } });
+  return Object.freeze({
+    ...item,
+    visualKind: foodItem.visualKind,
+    fridgeFoodId: foodItem.id,
+    packageColor: foodItem.packageColor,
+    accentColor: foodItem.accentColor,
+    needEffects: foodItem.needEffects,
+    satisfies: ['hunger', 'food', 'chilled-food', 'fridge-food'],
+    validDropOff: FRIDGE_FOOD_VALID_DROP_OFFS,
+    sourceFurnitureType: activity.sourceFurnitureType || activity.furnitureType || 'fridge',
+    sourceBuildingId: activity.buildingId || null,
+    sourceFurnitureIndex: activity.furnitureIndex ?? null,
+  });
 }
 
 function spawnChilledSnackForAgent(agent, activity = {}) {
@@ -53695,13 +53773,81 @@ function spawnChilledSnackForAgent(agent, activity = {}) {
   agent.carryItemTimer = Math.max(agent.carryItemTimer || 0, 4000);
   activity.spawnedTemporaryItemId = item.id;
   activity.carryAttachPoint = 'right-hand';
-  activity.temporaryItem = { id: item.id, label: item.label, state: item.temporaryUse.state, expiresAt: item.temporaryUse.expiresAt };
+  activity.fridgeFoodId = item.fridgeFoodId;
+  activity.temporaryItem = { id: item.id, label: item.label, kind: item.kind, visualKind: item.visualKind, fridgeFoodId: item.fridgeFoodId, packageColor: item.packageColor, accentColor: item.accentColor, needEffects: item.needEffects || null, satisfies: item.satisfies || null, validDropOff: item.validDropOff || null, sourceFurnitureType: item.sourceFurnitureType || 'fridge', state: item.temporaryUse.state, expiresAt: item.temporaryUse.expiresAt };
   return item;
+}
+
+function startFridgeDeskConsumeActivity(agent, fridgeActivity = {}) {
+  if (!agent || (!agent._carriedItem && !agent._carrying && agent.carryItem !== 'snack')) return false;
+  clearManualPlacementHoldForDrinkMachineDeskHandoff(agent, fridgeActivity);
+  const carriedItem = agent._carriedItem || agent._carrying || null;
+  const workArrival = getAgentWorkArrivalTarget(agent);
+  const fallbackBuilding = fridgeActivity?.buildingId ? buildingsMap.get(fridgeActivity.buildingId) : null;
+  const fallbackSpot = fallbackBuilding ? getBuildingInteriorWorkArrivalTarget(fallbackBuilding) : null;
+  const target = workArrival?.target || fallbackSpot || null;
+  const targetBuilding = workArrival?.building || fallbackBuilding || null;
+  if (!target || !Number.isFinite(Number(target.x)) || !Number.isFinite(Number(target.y))) return false;
+  const release = releaseAgentIntent(agent, 'fridge-pickup-complete-route-to-desk', { clearRoute: true, clearLifecycle: false, releaseBy: 'object-complete' });
+  const route = setAgentTarget(agent, {
+    ...target,
+    targetKind: 'work-desk',
+    actionId: 'life.eatFridgeFoodAtDesk',
+  }, targetBuilding, target.floor || workArrival?.floor || 1, {
+    owner: 'object-action',
+    priorityName: 'explicit-object',
+    phase: 'approach',
+    object: {
+      type: 'furniture',
+      id: target.objectInstanceId || target.objectId || `fridge-desk-${agent.id || agent.name || 'agent'}`,
+      buildingId: target.buildingId || targetBuilding?.id || null,
+      furnitureIndex: target.furnitureIndex ?? null,
+      objectType: 'desk',
+      actionId: 'life.eatFridgeFoodAtDesk',
+      spotId: target.spotId || target.interactionSpotId || null,
+      preserveUntilRelease: true,
+    },
+    release: { policy: 'on-object-complete', releaseObjectReservation: false, releaseActiveUse: false },
+    source: { family: 'agent-life-fridge', functionName: 'startFridgeDeskConsumeActivity', taskRef: 'virtual-world-fridge-food-desk-consume' },
+    debug: { label: 'fridge:desk-consume', sourceSummary: 'fridge pickup routes to work desk while selected food stays in the right hand', lastDecisionReason: 'fridge-pickup-complete' },
+  });
+  agent._lastDrinkDeskRoute = { kind: 'fridge', accepted: route?.accepted !== false, reason: route?.reason || null, release, target: { x: target.x, y: target.y, floor: target.floor || workArrival?.floor || 1, buildingId: target.buildingId || targetBuilding?.id || null, furnitureIndex: target.furnitureIndex ?? null, spotId: target.spotId || target.interactionSpotId || null } };
+  if (route?.accepted === false) return false;
+  agent._idleActivity = {
+    kind: 'fridge-desk-consume',
+    phase: 'approach',
+    startedAt: performance.now(),
+    buildingId: target.buildingId || targetBuilding?.id || null,
+    furnitureIndex: target.furnitureIndex ?? null,
+    spotId: target.spotId || target.interactionSpotId || null,
+    stayMs: 16000,
+    faceAngle: workArrival?.workTarget?.faceAngle ?? target.faceAngle ?? agent._deskFacingAngle ?? null,
+    dockTarget: { x: Number(target.x), y: Number(target.y) },
+    dockSnapRadius: WORK_DESK_DOCK_SNAP_RADIUS,
+    furnitureType: 'desk',
+    action: 'life.eatFridgeFoodAtDesk',
+    actionId: 'life.eatFridgeFoodAtDesk',
+    animationId: 'fridge-desk-consume',
+    sipCountTarget: 3,
+    consumeDurationMs: 16000,
+    carryAttachPoint: 'right-hand',
+    temporaryItem: fridgeActivity.temporaryItem || { id: carriedItem?.id || null, label: carriedItem?.label || 'Fridge Food', kind: carriedItem?.kind || null, visualKind: carriedItem?.visualKind || null, fridgeFoodId: carriedItem?.fridgeFoodId || null, packageColor: carriedItem?.packageColor || null, accentColor: carriedItem?.accentColor || null, satisfies: carriedItem?.satisfies || null, validDropOff: carriedItem?.validDropOff || null, sourceFurnitureType: carriedItem?.sourceFurnitureType || 'fridge', state: 'carried' },
+    sourceFridge: {
+      buildingId: fridgeActivity.buildingId || null,
+      furnitureIndex: fridgeActivity.furnitureIndex ?? null,
+      actionId: fridgeActivity.actionId || fridgeActivity.action || null,
+    },
+    lifecycle: { stationary: false, carryable: false, temporary: true, consumesTemporary: true },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  agent._schedPhase = agent._idleActivity.animationId;
+  return true;
 }
 
 function cleanupAgentChilledSnack(agent, reason = 'consume') {
   if (!agent?._carriedItem && !agent?._carrying && agent?.carryItem !== 'snack') return null;
-  const item = agent._carriedItem || agent._carrying || { id: `fridge-chilled-snack-${agent.id || 'agent'}`, catalogId: 'temporaryFood', label: 'Chilled Snack', state: 'carried', consumable: true };
+  const item = agent._carriedItem || agent._carrying || { id: `fridge-food-${agent.id || 'agent'}`, catalogId: 'temporaryFood', label: 'Fridge Food', state: 'carried', consumable: true };
   const plan = makeTemporaryUseCleanupPlan(item, { reason, now: new Date().toISOString() });
   agent._lastFridgeCleanupPlan = plan;
   agent._carriedItem = null;
@@ -58664,6 +58810,64 @@ window.__verifyMultiSeatCouchParityUpgrades = () => {
   };
 };
 
+window.__verifyFridgeColorOptions = () => {
+  const scheme = MULTI_SEAT_COLOR_SCHEMES.fridge;
+  const customColors = {
+    shell: '#4f46e5',
+    sides: '#312e81',
+    trim: '#f59e0b',
+    seals: '#111827',
+    handles: '#f8fafc',
+    dispenser: '#0f766e',
+  };
+  const model = makeFridge3D(0, 0, 1, { type: 'fridge', fridgeColors: customColors });
+  const meshesByKey = new Map();
+  model.traverse(mesh => {
+    const key = mesh?.isMesh ? mesh.userData?.multiSeatColorKey : null;
+    if (!key) return;
+    if (!meshesByKey.has(key)) meshesByKey.set(key, []);
+    meshesByKey.get(key).push(mesh);
+  });
+  const renderedColorKeys = [...meshesByKey.keys()].sort();
+  const allPalettePartsRendered = scheme.fields.every(([key]) => meshesByKey.has(key));
+  const customColorsRendered = scheme.fields.every(([key]) =>
+    (meshesByKey.get(key) || []).every(mesh => `#${mesh.material.color.getHexString()}` === customColors[key])
+  );
+  const colorsPersistedOnModel = scheme.fields.every(([key]) =>
+    model.userData?.multiSeatColors?.[key] === customColors[key]
+  );
+  const defaults = normalizeMultiSeatFurnitureColors('fridge');
+  const defaultsComplete = scheme.fields.every(([key]) => defaults[key] === scheme.defaults[key]);
+  const editorHost = document.createElement('div');
+  appendMultiSeatColorEditor(editorHost, { furniture: { type: 'fridge', fridgeColors: customColors } });
+  const colorInputs = [...editorHost.querySelectorAll('input[type="color"][data-multi-seat-color-key]')];
+  const editorRendered = colorInputs.length === scheme.fields.length &&
+    scheme.fields.every(([key]) => colorInputs.some(input => input.dataset.multiSeatColorKey === key && input.value === customColors[key])) &&
+    /Apply fridge colors/.test(editorHost.textContent || '') &&
+    /Reset fridge colors/.test(editorHost.textContent || '');
+  if (_activeMultiSeatColorPreview) {
+    clearMultiSeatColorPreview(_activeMultiSeatColorPreview.record);
+    _activeMultiSeatColorPreview = null;
+  }
+  return {
+    ok: scheme.property === 'fridgeColors' &&
+      scheme.fields.length === 6 &&
+      allPalettePartsRendered &&
+      customColorsRendered &&
+      colorsPersistedOnModel &&
+      defaultsComplete &&
+      editorRendered,
+    colorProperty: scheme.property,
+    renderedColorKeys,
+    allPalettePartsRendered,
+    customColorsRendered,
+    colorsPersistedOnModel,
+    defaultsComplete,
+    editorRendered,
+    editorColorInputCount: colorInputs.length,
+  };
+};
+
 window.__verifyArmchairConferenceChairUpgrades = () => {
   const definitions = [
     {
@@ -62218,21 +62422,28 @@ window._useInteriorDoorFurniture = (mode = 'pass') => {
   setTimeout(() => _showFurnitureActions(buildingId, index), 80);
 };
 
-window._useFridgeFurniture = (mode = 'snack') => {
+window._useFridgeFurniture = (mode = 'snack', preferredAgentId = null, options = {}) => {
   if (!_selectedFurniture) return;
   const { buildingId, index } = _selectedFurniture;
   const building = buildingsMap.get(buildingId);
   const fridge = building?.interior?.furniture?.[index];
   if (!building || !fridge || fridge.type !== 'fridge') return;
-  const state = getFridgeState(buildingId, index);
-  if (state.active) {
-    showToast(`🧊 ${state.label}`, 'warning');
-    _showFurnitureActions(buildingId, index);
-    return;
-  }
-  const spot = getFurnitureActionSpot(building, fridge, 'use-front') || getFurnitureActionSpot(building, fridge);
+  const spot = getFurnitureActionSpotAtDebugPoint(building, fridge, 'use-front') || getFurnitureActionSpot(building, fridge, 'use-front') || getFurnitureActionSpot(building, fridge);
   if (!spot) return;
-  const agent = chooseAgentForStandingUseSpot(building, buildingId, spot, 'fridge-');
+  const preferredAgent = preferredAgentId != null ? agentsList.find(candidate => String(candidate?.id || candidate?.name || '') === String(preferredAgentId)) : null;
+  const isAlreadyUsingThisFridge = candidate => {
+    const activity = candidate?._idleActivity || null;
+    return Boolean(activity && activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index) && (
+      String(activity.kind || '').startsWith('fridge-') ||
+      String(activity.kind || '').startsWith('service-queue-')
+    ));
+  };
+  let agent = preferredAgent || chooseAgentForStandingUseSpot(building, buildingId, spot, 'fridge-');
+  if (!preferredAgent && isAlreadyUsingThisFridge(agent)) {
+    agent = agentsList
+      .filter(candidate => candidate && !isAlreadyUsingThisFridge(candidate) && !isWorkPresenceStatus(candidate.status) && !candidate._atDesk && !candidate._tagState?.playing)
+      .sort((a, b) => Math.hypot((a.x || 0) - spot.apiX, (a.y || 0) - spot.apiZ) - Math.hypot((b.x || 0) - spot.apiX, (b.y || 0) - spot.apiZ))[0] || null;
+  }
   if (!agent) {
     showToast('No idle agent available for fridge use', 'warning');
     return;
@@ -62240,9 +62451,43 @@ window._useFridgeFurniture = (mode = 'snack') => {
   const isCheckStock = mode === 'check-stock';
   const actionId = isCheckStock ? 'maintenance.checkFridgeStock' : 'life.getFridgeSnack';
   const config = { ...getStandingUseMachineConfig('fridge'), actionId, mode: isCheckStock ? 'checking-stock' : 'getting-snack', kind: isCheckStock ? 'fridge-check-stock' : 'fridge-get-snack', useDurationMs: isCheckStock ? 6500 : 8200 };
+  const state = getFridgeState(buildingId, index);
+  if (state.active || state.reservedAgentId || isScriptedServiceObjectUnavailableForQueue(fridge)) {
+    const queued = queueAgentForScriptedServiceObject(agent, building, index, 'manual-fridge-button-service-queue', {
+      allowClaimedServiceObject: true,
+      sourceKind: 'manual-drag-drop-service-queue',
+      ignoreRecentCooldown: true,
+      actionId,
+    });
+    if (queued?.queued) {
+      if (!isScriptedServiceObjectUnavailableForQueue(fridge)) {
+        promoteScriptedServiceQueueFrontIfReady(building, index, 'manual-fridge-button-queued-while-free');
+      } else {
+        syncScriptedServiceQueueLine(building, index, 'manual-fridge-button-queued');
+      }
+      showToast(`🧊 ${agent.name || agent.id} joined the fridge queue`, 'success');
+    } else {
+      showToast(`🧊 ${queued?.reason || state.label}`, 'warning');
+    }
+    _showFurnitureActions(buildingId, index);
+    return;
+  }
   const standingUse = reserveStandingUseMachineForAgent(fridge, building, index, agent, config, spot);
   fridge.fridgeState = { ...(fridge.fridgeState || {}), doorOpen: false, doorState: 'closed-before-open', retrieveState: isCheckStock ? 'inspect-pending' : 'retrieve-pending', stockLevel: fridge.fridgeState?.stockLevel || 'stocked', lastAction: actionId, retrievedCount: Number(fridge.fridgeState?.retrievedCount || 0), persistentFurniture: true };
-  setAgentTargetForExplicitObjectAction(agent, { x: spot.apiX, y: spot.apiZ, floor: spot.floor }, building, spot.floor);
+  const routeTarget = makeStandingMachineRouteTarget(building, fridge, index, spot, config, {
+    reservationId: standingUse.reservation?.id || fridge.reservation?.id || null,
+  });
+  const intentMetadata = options && typeof options === 'object' ? (options.intentMetadata || {}) : {};
+  setAgentTargetForExplicitObjectAction(agent, routeTarget, building, spot.floor, {
+    ...intentMetadata,
+    furnitureIndex: index,
+    furniture: fridge,
+    objectType: 'fridge',
+    actionId,
+    spotId: spot.spotId,
+    slotId: config.slotId,
+    reservationId: routeTarget.reservationId,
+  });
   agent._idleActivity = {
     kind: config.kind,
     phase: 'approach',
@@ -62264,7 +62509,7 @@ window._useFridgeFurniture = (mode = 'snack') => {
     actionId,
     animationId: config.animationId,
     lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, spawnsTemporary: !isCheckStock, standingUse: true, releaseOnCompletion: true },
-    spawnedItem: isCheckStock ? null : { label: 'Chilled Snack', catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', validDropOff: ['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter', 'cafeCounter'] },
+    spawnedItem: isCheckStock ? null : { label: 'Random Fridge Food', catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', itemPool: [...FRIDGE_FOOD_ITEM_LABELS], foodItems: FRIDGE_FOOD_ITEMS.map(item => ({ id: item.id, label: item.label, visualKind: item.visualKind })), validDropOff: FRIDGE_FOOD_VALID_DROP_OFFS },
   };
   agent._wanderTimer = 150;
   agent._stayTimer = 0;

@@ -16,6 +16,10 @@ import {
   isDynamicExteriorRouteSegmentClear,
   updateDynamicExteriorRouting,
 } from '../client/js/dynamic-exterior-routing.js';
+import {
+  FRIDGE_FOOD_ITEMS,
+  findFridgeFoodItem,
+} from '../client/js/fridge-food-catalog.mjs';
 
 export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
 export const RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION = 'agent-runtime-lifecycle-journal/v1';
@@ -4252,6 +4256,7 @@ const SERVER_SCRIPTED_MICROWAVE_FOOD_OPTIONS = Object.freeze([
   Object.freeze({ id: 'pizza-slice', label: 'Pizza Slice', visualKind: 'microwave-pizza-slice', packageColor: 0xffc107, accentColor: 0xb91c1c }),
   Object.freeze({ id: 'sandwich', label: 'Sandwich', visualKind: 'microwave-sandwich', packageColor: 0xd9a05b, accentColor: 0x65a30d }),
 ]);
+export const SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS = FRIDGE_FOOD_ITEMS;
 const SERVER_SCRIPTED_DROP_OFFS = Object.freeze(['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter', 'cafeCounter']);
 const SERVER_SCRIPTED_DRINK_DROP_OFFS = Object.freeze(['desk', 'diningTable', 'counter']);
 
@@ -4329,6 +4334,23 @@ function serverScriptedObjectDispenseSpec(target = null) {
       validDropOff: SERVER_SCRIPTED_DROP_OFFS,
     };
   }
+  if (objectType === 'fridge' || activityKind.startsWith('fridge-')) {
+    return {
+      kind: 'fridge',
+      idPrefix: 'fridge',
+      label: 'Fridge Food',
+      itemKind: 'consumable',
+      carryItem: 'snack',
+      persistenceOwner: 'fridge-runtime',
+      deskActivityKind: 'fridge-desk-consume',
+      deskAnimationId: 'fridge-desk-consume',
+      deskActionId: 'life.eatFridgeFoodAtDesk',
+      deskCompletionState: 'done-consuming-fridge-food',
+      pickupEffect: 'temporary-fridge-food-picked-up',
+      consumeEffect: 'temporary-fridge-food-consumed-at-desk',
+      validDropOff: SERVER_SCRIPTED_DROP_OFFS,
+    };
+  }
   return null;
 }
 
@@ -4346,6 +4368,13 @@ function pickServerScriptedMicrowaveFood(agentId, target = null) {
   if (forcedItem) return forcedItem;
   const index = stableTextHash(`${agentId || ''}:${target?.objectKey || ''}:${target?.spotId || ''}`) % SERVER_SCRIPTED_MICROWAVE_FOOD_OPTIONS.length;
   return SERVER_SCRIPTED_MICROWAVE_FOOD_OPTIONS[index] || SERVER_SCRIPTED_MICROWAVE_FOOD_OPTIONS[0];
+}
+
+function pickServerScriptedFridgeFood(agentId, target = null) {
+  const forcedItem = findFridgeFoodItem(target?.fridgeFoodId || target?.foodItemId || target?.foodType || '');
+  if (forcedItem) return forcedItem;
+  const index = stableTextHash(`${agentId || ''}:${target?.objectKey || ''}:${target?.spotId || ''}`) % SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS.length;
+  return SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[index] || SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[0];
 }
 
 function makeServerScriptedTemporaryItem(agentId, sourceTarget = null, spec = null, nowMs = Date.now()) {
@@ -4375,6 +4404,18 @@ function makeServerScriptedTemporaryItem(agentId, sourceTarget = null, spec = nu
       packageColor: foodItem.packageColor,
       accentColor: foodItem.accentColor,
       satisfies: ['food', 'heated-food', 'microwave-food'],
+    };
+  } else if (spec.kind === 'fridge') {
+    const foodItem = pickServerScriptedFridgeFood(agentId, sourceTarget);
+    itemPatch = {
+      idPart: foodItem.id,
+      label: foodItem.label,
+      visualKind: foodItem.visualKind,
+      fridgeFoodId: foodItem.id,
+      packageColor: foodItem.packageColor,
+      accentColor: foodItem.accentColor,
+      needEffects: foodItem.needEffects,
+      satisfies: ['hunger', 'food', 'chilled-food', 'fridge-food'],
     };
   }
   const idPart = safeText(itemPatch.idPart, spec.kind) || spec.kind;
@@ -4408,6 +4449,7 @@ function makeServerScriptedTemporaryItem(agentId, sourceTarget = null, spec = nu
   if (carryItem) item.carryItem = carryItem;
   if (itemPatch.vendingItemId) item.vendingItemId = itemPatch.vendingItemId;
   if (itemPatch.microwaveFoodId) item.microwaveFoodId = itemPatch.microwaveFoodId;
+  if (itemPatch.fridgeFoodId) item.fridgeFoodId = itemPatch.fridgeFoodId;
   const packageColor = numberOr(itemPatch.packageColor, NaN);
   const accentColor = numberOr(itemPatch.accentColor, NaN);
   if (Number.isFinite(packageColor) && Math.abs(packageColor) <= 10000000) item.packageColor = packageColor;
@@ -4420,7 +4462,7 @@ function makeServerScriptedTemporaryItem(agentId, sourceTarget = null, spec = nu
 function isServerScriptedObjectDeskConsumeTarget(target = null) {
   const phase = String(target?.runtimePhase || '').trim().toLowerCase();
   const kind = String(target?.activityKind || target?.kind || '').trim().toLowerCase();
-  return phase === 'desk-routing' || phase === 'desk-consuming' || kind === 'coffee-desk-consume' || kind === 'water-desk-consume' || kind === 'vending-desk-consume' || kind === 'microwave-desk-consume';
+  return phase === 'desk-routing' || phase === 'desk-consuming' || kind === 'coffee-desk-consume' || kind === 'water-desk-consume' || kind === 'vending-desk-consume' || kind === 'microwave-desk-consume' || kind === 'fridge-desk-consume';
 }
 
 function serverScriptedObjectRouteShouldRun(target = null, isMoving = false) {
@@ -6994,6 +7036,7 @@ function objectUseRequestTargetFromPoint(message = {}) {
     consumeDurationMs: Math.max(1000, Math.floor(numberOr(target?.consumeDurationMs ?? message?.consumeDurationMs, SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS))),
     vendingItemId: safeText(target?.vendingItemId || message?.vendingItemId, ''),
     microwaveFoodId: safeText(target?.microwaveFoodId || target?.foodItemId || message?.microwaveFoodId || message?.foodItemId, ''),
+    fridgeFoodId: safeText(target?.fridgeFoodId || target?.foodItemId || message?.fridgeFoodId || message?.foodItemId, ''),
     pingPongSide: safeText(target?.pingPongSide || message?.pingPongSide, ''),
     faceAngle: normalizeRuntimeAngleRadians(target?.faceAngle, 0),
     ...(dumbbellWorkout ? {
@@ -7022,7 +7065,7 @@ function mergeScriptedObjectRequestRuntimeOverrides(match = null, message = {}) 
   if (!match) return match;
   const rawTarget = message?.target && typeof message.target === 'object' ? message.target : message;
   const overrides = {};
-  for (const key of ['actionId', 'activityKind', 'animationId', 'pingPongSide', 'activeUseSlotId', 'workoutMode']) {
+  for (const key of ['actionId', 'activityKind', 'animationId', 'pingPongSide', 'activeUseSlotId', 'workoutMode', 'vendingItemId', 'microwaveFoodId', 'fridgeFoodId']) {
     const value = safeText(rawTarget?.[key] ?? message?.[key], '');
     if (value) overrides[key] = value;
   }
@@ -8944,6 +8987,9 @@ export class AgentRuntimeRoom extends Room {
             queuedUseWorkoutMode: requestedUseTarget.workoutMode,
             queuedUsePairedDumbbells: requestedUseTarget.pairedDumbbells,
             queuedUseDumbbellColors: requestedUseTarget.dumbbellColors,
+            queuedUseVendingItemId: requestedUseTarget.vendingItemId,
+            queuedUseMicrowaveFoodId: requestedUseTarget.microwaveFoodId,
+            queuedUseFridgeFoodId: requestedUseTarget.fridgeFoodId,
           };
           existingObject = this.state.objects.get(target.objectKey);
           baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
@@ -9617,6 +9663,9 @@ export class AgentRuntimeRoom extends Room {
         useWorkoutMode: safeText(rawTarget?.queuedUseWorkoutMode || rawTarget?.useWorkoutMode, ''),
         usePairedDumbbells: rawTarget?.queuedUsePairedDumbbells === true || rawTarget?.usePairedDumbbells === true,
         useDumbbellColors: serverScriptedDumbbellColors({ dumbbellColors: rawTarget?.queuedUseDumbbellColors || rawTarget?.useDumbbellColors }),
+        useVendingItemId: safeText(rawTarget?.queuedUseVendingItemId || rawTarget?.useVendingItemId || rawTarget?.vendingItemId, ''),
+        useMicrowaveFoodId: safeText(rawTarget?.queuedUseMicrowaveFoodId || rawTarget?.useMicrowaveFoodId || rawTarget?.microwaveFoodId, ''),
+        useFridgeFoodId: safeText(rawTarget?.queuedUseFridgeFoodId || rawTarget?.useFridgeFoodId || rawTarget?.fridgeFoodId, ''),
         slotId: `${queueSpotId}:${live.length}`,
         queueSpotId,
         activationSpotId: `${queueSpotId}:${live.length}`,
@@ -9757,6 +9806,9 @@ export class AgentRuntimeRoom extends Room {
         ...(front.useActionId ? { actionId: front.useActionId } : {}),
         ...(front.useActivityKind ? { activityKind: front.useActivityKind } : {}),
         ...(front.useAnimationId ? { animationId: front.useAnimationId } : {}),
+        ...(front.useVendingItemId ? { vendingItemId: front.useVendingItemId } : {}),
+        ...(front.useMicrowaveFoodId ? { microwaveFoodId: front.useMicrowaveFoodId } : {}),
+        ...(front.useFridgeFoodId ? { fridgeFoodId: front.useFridgeFoodId } : {}),
         ...(promotedWorkout ? {
           actionId: promotedWorkout.actionId,
           activityKind: promotedWorkout.kind,

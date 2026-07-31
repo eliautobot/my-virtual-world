@@ -5,9 +5,9 @@
  * This module is deliberately side-effect-free: it does not reserve objects,
  * route agents, mutate AgentIntent/ObjectUse state, or import dynamic routing.
  */
-import { resolvePlacedActionLocations } from './agent-life-action-location-registry.mjs';
+import { resolvePlacedActionLocations } from './agent-life-action-location-registry.mjs?v=20260731-fridge-color-r2';
 import { normalizeCapabilityTag } from './agent-life-capability-tags.mjs';
-import { normalizeObjectCatalogId } from './agent-life-object-catalog-schema.mjs';
+import { normalizeObjectCatalogId } from './agent-life-object-catalog-schema.mjs?v=20260731-fridge-color-r2';
 import { SCRIPTED_BEHAVIOR_CATEGORIES } from './agent-life-scripted-mode-decision-table.mjs';
 import {
   chooseNearestFreeObjectUseSeat,
@@ -16,7 +16,7 @@ import {
 import {
   chooseNearestFreeObjectUseStandingSlot,
   listObjectUseStandingCandidates,
-} from './agent-life-object-use-standing.mjs';
+} from './agent-life-object-use-standing.mjs?v=20260731-fridge-color-r2';
 import {
   chooseNearestFreeObjectUseActiveSlot,
   listObjectUseActiveCandidates,
@@ -32,7 +32,7 @@ export const BEHAVIOR_DESTINATION_FALLBACK_RULES = Object.freeze({
   failedTargetThrottleReason: 'recent-failed-target-throttle',
   defaultFailedTargetThrottleMs: 90000,
   defaultQueueSpacingTiles: 0.8,
-  queueLocationRoles: Object.freeze(['queue', 'wait', 'wait-turn', 'approach', 'clearance']),
+  queueLocationRoles: Object.freeze(['queue', 'wait', 'wait-turn', 'approach']),
   serviceQueueCategories: Object.freeze(['snack-drink']),
   serviceQueueObjectTypes: Object.freeze([]),
 });

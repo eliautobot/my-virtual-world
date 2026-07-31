@@ -41,6 +41,7 @@ import {
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_RUN_SPEED_UNITS_PER_SEC,
+  SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS,
   SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS,
   SERVER_WORLD_TOPOLOGY_OWNER,
   serverRuntimeReleasePointForTarget,
@@ -187,7 +188,7 @@ function verifyManualObjectOccupancyPolicy() {
       `${objectType} should receive protected manual occupancy`,
     );
   }
-  for (const objectType of ['waterCooler', 'vending', 'countertopCoffeeMachine', 'sink', 'gymBench']) {
+  for (const objectType of ['waterCooler', 'vending', 'countertopCoffeeMachine', 'fridge', 'sink', 'gymBench']) {
     assert.equal(
       isServerManualObjectOccupancyTarget({
         objectType,
@@ -560,6 +561,9 @@ async function run() {
   verifyLifecycleJournalRecovery();
   verifyIncrementalSchemaPatchSize();
   verifyManualObjectOccupancyPolicy();
+  assert.equal(SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS.length, 10, 'server runtime must expose ten fridge foods');
+  assert.equal(new Set(SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS.map(item => item.id)).size, 10, 'server fridge food ids must be unique');
+  assert.equal(new Set(SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS.map(item => item.label)).size, 10, 'server fridge food labels must be unique');
   verifyRotatedPersistedSeatFacings();
   const dataDir = mkdtempSync(join(tmpdir(), 'vw-realtime-'));
   const port = await getOpenPort();
@@ -1137,6 +1141,47 @@ async function run() {
               },
             ],
           },
+          {
+            type: 'fridge',
+            x: 13,
+            z: 15,
+            floor: 1,
+            room: 'breakroom',
+            queuePolicy: 'first-come-first-served',
+            actionLocations: [
+              {
+                id: 'use-front',
+                activationSpotId: 'use-front',
+                roles: ['use', 'retrieve', 'standing-use'],
+                actionId: 'life.getFridgeSnack',
+                actionTarget: { x: 13, z: 15.92, floor: 1, faceAngle: Math.PI },
+                facing: 'north',
+              },
+              {
+                id: 'door-swing-clearance',
+                roles: ['clearance'],
+                actionId: 'life.getFridgeSnack',
+                capacityKind: 'clearance',
+                actionTarget: { x: 13, z: 16.38, floor: 1, faceAngle: Math.PI },
+                reservable: false,
+              },
+              {
+                id: 'queue',
+                roles: ['queue', 'wait', 'approach'],
+                actionId: 'planning.schedule',
+                capacityKind: 'queue',
+                serviceQueue: true,
+                actionTarget: { x: 13, z: 16.82, floor: 1, faceAngle: Math.PI },
+                queueMaxPoints: 3,
+                queueSpacingTiles: 0.8,
+                queueLocations: [
+                  { id: 'queue:0', spotId: 'queue:0', actionTarget: { x: 13, z: 16.82, floor: 1, faceAngle: Math.PI }, queueIndex: 0 },
+                  { id: 'queue:1', spotId: 'queue:1', actionTarget: { x: 13, z: 17.62, floor: 1, faceAngle: Math.PI }, queueIndex: 1 },
+                  { id: 'queue:2', spotId: 'queue:2', actionTarget: { x: 13, z: 18.42, floor: 1, faceAngle: Math.PI }, queueIndex: 2 },
+                ],
+              },
+            ],
+          },
         ],
       },
       outdoorArea: {
@@ -1582,6 +1627,153 @@ async function run() {
       !agent.visualStateJson.includes('vendingItemId')
     );
     assert.equal(coraVendingDone.owner, 'agent-scripted-mode');
+
+    // Keep the explicit three-agent fridge run deterministic after autonomous
+    // scripted-idle coverage has completed.
+    writeFileSync(join(dataDir, 'presence-snapshot.json'), `${JSON.stringify({
+      adam: { state: 'idle', agentLiveModeEnabled: false, scriptedAmbientEnabled: false },
+      coder: { state: 'working' },
+      morgan: { state: 'meeting' },
+      _meetings: [{
+        id: 'smoke-meeting',
+        topic: 'Runtime parity',
+        participants: ['morgan'],
+      }],
+    }, null, 2)}\n`);
+    await delay(750);
+
+    const fridgeObjectKey = 'office:furniture:6:fridge';
+    const fridgeQueueAgents = [
+      ['fridge-manual-a', 480, 700, SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[0]],
+      ['fridge-manual-b', 500, 700, SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[4]],
+      ['fridge-manual-c', 520, 700, SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[9]],
+    ];
+    for (const [agentId, x, y] of fridgeQueueAgents) {
+      scriptedRoom.send('runtime:snapshot', {
+        requestId: `${agentId}-seed`,
+        agentId,
+        mode: 'scripted',
+        owner: 'agent-scripted-mode',
+        x,
+        y,
+        floor: 1,
+        state: 'idle',
+      });
+      await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === `${agentId}-seed`);
+    }
+    const requestManualFridgeUse = (agentId, x, food) => {
+      scriptedRoom.send('runtime:objectUseRequest', {
+        requestId: `${agentId}-fridge-use`,
+        agentId,
+        source: 'manual-drag-drop-fridge-service-queue',
+        manualDrop: true,
+        manualDropSnapToUse: true,
+        target: {
+          objectKey: fridgeObjectKey,
+          baseObjectKey: fridgeObjectKey,
+          buildingId: 'office',
+          furnitureIndex: 6,
+          objectType: 'fridge',
+          spotId: 'use-front',
+          actionId: 'life.getFridgeSnack',
+          activityKind: 'fridge-get-snack',
+          animationId: 'fridge-use',
+          fridgeFoodId: food.id,
+          stayMs: 1200,
+          consumeDurationMs: 1200,
+          manualDrop: true,
+          manualDropSnapToUse: true,
+        },
+        agentPosition: { x, y: 700, floor: 1 },
+      });
+    };
+    requestManualFridgeUse(fridgeQueueAgents[0][0], fridgeQueueAgents[0][1], fridgeQueueAgents[0][3]);
+    const fridgeManualA = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'fridge-manual-a-fridge-use');
+    assert.equal(fridgeManualA.snapshot.state, 'using');
+    assert.equal(fridgeManualA.snapshot.target?.spotId, 'use-front');
+    assert.equal(fridgeManualA.snapshot.target?.manualDrop, true);
+    assert.equal(fridgeManualA.snapshot.target?.manualDropSnapToUse, true);
+    assert.equal(fridgeManualA.snapshot.target?.fridgeFoodId, SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[0].id);
+    assert.equal(fridgeManualA.snapshot.x, 13 * 40);
+    assert.equal(fridgeManualA.snapshot.y, 15.92 * 40);
+
+    requestManualFridgeUse(fridgeQueueAgents[1][0], fridgeQueueAgents[1][1], fridgeQueueAgents[1][3]);
+    const fridgeManualBQueued = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'fridge-manual-b-fridge-use');
+    assert.equal(fridgeManualBQueued.snapshot.state, 'waiting');
+    assert.equal(fridgeManualBQueued.snapshot.target?.isQueueUse, true);
+    assert.equal(fridgeManualBQueued.snapshot.target?.queueIndex, 0);
+    assert.equal(fridgeManualBQueued.snapshot.target?.queuedUseFridgeFoodId, SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[4].id);
+    assert.equal(fridgeManualBQueued.snapshot.x, 13 * 40);
+    assert.equal(fridgeManualBQueued.snapshot.y, 16.82 * 40);
+    assert.equal(fridgeManualBQueued.snapshot.visualState?.activity?.animationId, 'bus-stop-wait');
+
+    requestManualFridgeUse(fridgeQueueAgents[2][0], fridgeQueueAgents[2][1], fridgeQueueAgents[2][3]);
+    const fridgeManualCQueued = await waitForRoomMessage(scriptedRoom, 'runtime:ack', (msg) => msg.requestId === 'fridge-manual-c-fridge-use');
+    assert.equal(fridgeManualCQueued.snapshot.state, 'waiting');
+    assert.equal(fridgeManualCQueued.snapshot.target?.isQueueUse, true);
+    assert.equal(fridgeManualCQueued.snapshot.target?.queueIndex, 1);
+    assert.equal(fridgeManualCQueued.snapshot.target?.queuedUseFridgeFoodId, SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[9].id);
+    assert.equal(fridgeManualCQueued.snapshot.x, 13 * 40);
+    assert.equal(fridgeManualCQueued.snapshot.y, 17.62 * 40);
+
+    const fridgeManualADesk = await waitForAgent(scriptedRoom, 'fridge-manual-a', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.visualStateJson.includes('fridge-desk-consume') &&
+      agent.visualStateJson.includes(`"fridgeFoodId":"${SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[0].id}"`) &&
+      agent.visualStateJson.includes('"carrying":true')
+    );
+    const fridgeManualADeskTarget = JSON.parse(fridgeManualADesk.targetJson || '{}');
+    const fridgeManualADeskVisual = JSON.parse(fridgeManualADesk.visualStateJson || '{}');
+    assert.equal(fridgeManualADeskTarget.sourceObjectKey, fridgeObjectKey);
+    assert.equal(fridgeManualADeskVisual.carriedItem?.label, SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[0].label);
+    assert(fridgeManualADeskTarget.objectKey.includes(':desk'), 'fridge food must route to a desk consume target');
+    const fridgeManualAActive = await waitForAgent(scriptedRoom, 'fridge-manual-a', (agent) =>
+      agent.visualStateJson.includes('fridge-desk-consume') &&
+      agent.visualStateJson.includes('"phase":"active"') &&
+      agent.visualStateJson.includes('"animationId":"fridge-desk-consume"') &&
+      agent.visualStateJson.includes('"atDesk":true')
+    );
+    const fridgeManualAActiveVisual = JSON.parse(fridgeManualAActive.visualStateJson || '{}');
+    assert.equal(fridgeManualAActiveVisual.activity?.temporaryItem?.fridgeFoodId, SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[0].id);
+
+    const fridgeManualBPromoted = await waitForAgent(scriptedRoom, 'fridge-manual-b', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.targetJson.includes(fridgeObjectKey) &&
+      agent.targetJson.includes('"isQueueUse":false') &&
+      agent.targetJson.includes(`"fridgeFoodId":"${SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[4].id}"`) &&
+      agent.visualStateJson.includes('fridge-get-snack')
+    );
+    assert(['routing', 'using'].includes(fridgeManualBPromoted.state));
+    const fridgeManualCShifted = await waitForAgent(scriptedRoom, 'fridge-manual-c', (agent) =>
+      agent.targetJson.includes('"isQueueUse":true') &&
+      agent.targetJson.includes('"queueIndex":0') &&
+      agent.targetJson.includes(`${fridgeObjectKey}:queue:queue:0`)
+    );
+    assert(['routing', 'waiting'].includes(fridgeManualCShifted.state));
+
+    const fridgeManualCPromoted = await waitForAgent(scriptedRoom, 'fridge-manual-c', (agent) =>
+      agent.owner === SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER &&
+      agent.targetJson.includes(fridgeObjectKey) &&
+      agent.targetJson.includes('"isQueueUse":false') &&
+      agent.targetJson.includes(`"fridgeFoodId":"${SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[9].id}"`) &&
+      agent.visualStateJson.includes('fridge-get-snack')
+    );
+    assert(['routing', 'using'].includes(fridgeManualCPromoted.state));
+
+    for (const [agentId] of fridgeQueueAgents) {
+      const consumed = await waitForAgent(scriptedRoom, agentId, (agent) =>
+        agent.state === 'idle' &&
+        agent.routeId === '' &&
+        agent.visualStateJson.includes('"carrying":false') &&
+        !agent.visualStateJson.includes('fridgeFoodId')
+      );
+      assert.equal(consumed.owner, 'agent-scripted-mode');
+    }
+    const fridgeIdle = await waitForObject(scriptedRoom, fridgeObjectKey, (object) => {
+      const reservations = object.data?._scriptedServiceQueueStore?.reservations || [];
+      return object.state === 'idle' && object.activeUseId === '' && reservations.length === 0;
+    });
+    assert(fridgeIdle.dataJson.includes('"clearReservation":true'));
 
     for (const [agentId, x, y] of [
       ['queue-a', 560, 320],

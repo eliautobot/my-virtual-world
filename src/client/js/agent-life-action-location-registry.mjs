@@ -9,12 +9,12 @@
 import {
   CATALOG_REGISTRY_BLUEPRINTS,
   buildCatalogRegistry,
-} from './agent-life-catalog-registry.mjs?v=20260729-sectional-dismount-r1';
-import { normalizeObjectCatalogId } from './agent-life-object-catalog-schema.mjs?v=20260729-sectional-dismount-r1';
+} from './agent-life-catalog-registry.mjs?v=20260731-fridge-color-r2';
+import { normalizeObjectCatalogId } from './agent-life-object-catalog-schema.mjs?v=20260731-fridge-color-r2';
 
 export const ACTION_LOCATION_REGISTRY_API_VERSION = 'agent-life-action-location-registry/v1';
 
-export const ACTION_LOCATION_ROLES = Object.freeze(['approach', 'seat', 'use', 'inspect', 'preview', 'drop-off', 'service', 'patient', 'customer', 'staff', 'standing-use', 'touch', 'stand', 'exit', 'dismount', 'queue', 'staging', 'work', 'watch', 'wait', 'pass-through', 'waypoint', 'stroll', 'pause', 'look-around', 'perform', 'audience', 'gather', 'social', 'speak']);
+export const ACTION_LOCATION_ROLES = Object.freeze(['approach', 'clearance', 'seat', 'use', 'inspect', 'preview', 'drop-off', 'service', 'patient', 'customer', 'staff', 'standing-use', 'touch', 'stand', 'exit', 'dismount', 'queue', 'staging', 'work', 'watch', 'wait', 'pass-through', 'waypoint', 'stroll', 'pause', 'look-around', 'perform', 'audience', 'gather', 'social', 'speak']);
 export const ACTION_LOCATION_FACINGS = Object.freeze(['north', 'east', 'south', 'west', 'auto', 'none']);
 export const ACTION_LOCATION_COORDINATE_SPACES = Object.freeze(['asset-local', 'building-local', 'floor-local', 'exterior-local', 'world']);
 export const ACTION_LOCATION_TRANSFORM_KINDS = Object.freeze(['rotation', 'floor', 'exterior']);
@@ -138,7 +138,7 @@ function rotateOffset(offset, rotationDeg = 0) {
 }
 
 function rolesForSpot(assetId, spot = {}) {
-  const raw = Array.isArray(spot.roles) ? spot.roles : [];
+  const raw = Array.isArray(spot.roles) ? spot.roles : [spot.role].filter(Boolean);
   const roles = new Set(raw.filter(role => ACTION_LOCATION_ROLES.includes(role)));
   const explicitlyNonSeat = raw.some(role => (
     role === 'approach' ||

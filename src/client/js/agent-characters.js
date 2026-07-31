@@ -11,6 +11,9 @@ import * as THREE from 'three';
 import {
   resolveAgentAnimationState,
 } from './agent-life-animation-registry.mjs?v=20260725-furniture-interactions-r2';
+import {
+  FRIDGE_FOOD_VISUAL_KINDS,
+} from './fridge-food-catalog.mjs?v=20260731-fridge-food-r1';
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -235,7 +238,7 @@ function buildCoffeeCupAsset(name = 'rightHandCoffeeDrink', options = {}) {
 
 function getCoffeeDeskSipState(agent) {
   const activityKind = String(agent?._idleActivity?.kind || '');
-  if (!(activityKind.startsWith('coffee-desk-') || activityKind.startsWith('water-desk-') || activityKind.startsWith('vending-desk-') || activityKind.startsWith('microwave-desk-')) || agent?._idleActivity?.phase !== 'active') {
+  if (!(activityKind.startsWith('coffee-desk-') || activityKind.startsWith('water-desk-') || activityKind.startsWith('vending-desk-') || activityKind.startsWith('microwave-desk-') || activityKind.startsWith('fridge-desk-')) || agent?._idleActivity?.phase !== 'active') {
     return { isDeskConsume: false, handActive: false, lift: 0, phase: 0, localSipPhase: 0 };
   }
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -328,6 +331,7 @@ function getVendingItemVisualMeta(carried = {}) {
   const variant = [
     carried?.vendingItemId,
     carried?.microwaveFoodId,
+    carried?.fridgeFoodId,
     carried?.visualKind,
     carried?.label,
     carried?.id,
@@ -340,7 +344,7 @@ function getVendingItemVisualMeta(carried = {}) {
   };
 }
 
-const VENDING_ITEM_ASSET_VERSION = 'vending-item-v3-microwave-food';
+const VENDING_ITEM_ASSET_VERSION = 'temporary-food-v4-fridge-ten-items';
 const MICROWAVE_FOOD_VISUAL_KINDS = Object.freeze(['microwave-popcorn', 'microwave-pizza-slice', 'microwave-sandwich']);
 
 function buildVendingItemAsset(name, carried = {}) {
@@ -353,7 +357,149 @@ function buildVendingItemAsset(name, carried = {}) {
   item.userData.accentColor = meta.accentColor;
   item.userData.assetVersion = VENDING_ITEM_ASSET_VERSION;
   item.userData.microwaveFoodVisualKinds = MICROWAVE_FOOD_VISUAL_KINDS;
-  if (meta.variant.includes('popcorn')) {
+  item.userData.fridgeFoodVisualKinds = FRIDGE_FOOD_VISUAL_KINDS;
+  if (meta.variant.includes('greek-yogurt')) {
+    const cup = cyl(0.12, 0.20, 0xf8fafc);
+    item.add(cup);
+    const lid = cyl(0.13, 0.025, meta.accentColor);
+    lid.position.y = 0.112;
+    item.add(lid);
+    const label = box(0, 0, 0.112, 0.18, 0.09, 0.02, meta.accentColor);
+    item.add(label);
+    item.userData.deskRotation = [0, 0, 0];
+    item.userData.handTilt = -0.16;
+  } else if (meta.variant.includes('berry-parfait')) {
+    const glass = cyl(0.115, 0.24, 0xf8fafc);
+    glass.material = getMat(0xf8fafc, { transparent: true, opacity: 0.48 });
+    item.add(glass);
+    const yogurt = cyl(0.095, 0.07, 0xfff7ed);
+    yogurt.position.y = -0.065;
+    item.add(yogurt);
+    const berries = cyl(0.096, 0.055, 0xdb2777);
+    berries.position.y = 0.005;
+    item.add(berries);
+    const granola = cyl(0.098, 0.045, 0xb45309);
+    granola.position.y = 0.058;
+    item.add(granola);
+    [[-0.045, 0.105, 0], [0.03, 0.112, 0.025], [0.05, 0.098, -0.03]].forEach(([x, y, z]) => {
+      const berry = sph(0.027, 0xbe185d);
+      berry.position.set(x, y, z);
+      item.add(berry);
+    });
+    item.userData.deskRotation = [0, 0, 0];
+    item.userData.handTilt = -0.16;
+  } else if (meta.variant.includes('red-apple')) {
+    const fruit = sph(0.145, meta.packageColor);
+    fruit.scale.y *= 0.92;
+    item.add(fruit);
+    const stem = box(0, 0.15, 0, 0.025, 0.10, 0.025, 0x78350f);
+    stem.rotation.z = -0.18;
+    item.add(stem);
+    const leaf = box(0.045, 0.17, 0, 0.09, 0.025, 0.05, meta.accentColor);
+    leaf.rotation.z = 0.35;
+    item.add(leaf);
+    item.userData.deskRotation = [0, 0.22, 0];
+    item.userData.handTilt = -0.10;
+  } else if (meta.variant.includes('fresh-orange')) {
+    const fruit = sph(0.145, meta.packageColor);
+    item.add(fruit);
+    const navel = sph(0.018, 0xc2410c);
+    navel.position.y = -0.14;
+    item.add(navel);
+    const leaf = box(0.04, 0.15, 0, 0.10, 0.025, 0.052, meta.accentColor);
+    leaf.rotation.z = 0.30;
+    item.add(leaf);
+    item.userData.deskRotation = [0, -0.18, 0];
+    item.userData.handTilt = -0.10;
+  } else if (meta.variant.includes('green-grape')) {
+    const grapes = [
+      [-0.055, 0.07, 0], [0, 0.08, 0.02], [0.055, 0.07, -0.01],
+      [-0.035, 0.015, 0.025], [0.03, 0.015, -0.02], [0, -0.045, 0],
+      [-0.02, -0.095, 0.01],
+    ];
+    grapes.forEach(([x, y, z], index) => {
+      const grape = sph(0.052, index % 2 ? 0x84cc16 : 0xa3e635);
+      grape.position.set(x, y, z);
+      item.add(grape);
+    });
+    const stem = box(0, 0.15, 0, 0.025, 0.12, 0.025, meta.accentColor);
+    stem.rotation.z = -0.22;
+    item.add(stem);
+    item.userData.deskRotation = [0.18, 0.30, 0];
+    item.userData.handTilt = -0.12;
+  } else if (meta.variant.includes('garden-salad')) {
+    const bowl = cyl(0.165, 0.09, 0xe2e8f0);
+    item.add(bowl);
+    const greens = cyl(0.145, 0.055, meta.packageColor);
+    greens.position.y = 0.06;
+    item.add(greens);
+    [[-0.07, 0.10, -0.02], [0.02, 0.11, 0.045], [0.075, 0.095, -0.045]].forEach(([x, y, z], index) => {
+      const topping = sph(0.035, index === 1 ? 0xfacc15 : meta.accentColor);
+      topping.position.set(x, y, z);
+      item.add(topping);
+    });
+    item.userData.deskRotation = [0, 0.20, 0];
+    item.userData.handTilt = -0.12;
+  } else if (meta.variant.includes('sushi-box')) {
+    const tray = box(0, -0.045, 0, 0.31, 0.045, 0.22, meta.packageColor);
+    item.add(tray);
+    const lid = box(0, 0.07, 0, 0.32, 0.02, 0.23, 0xe2e8f0);
+    lid.material = getMat(0xe2e8f0, { transparent: true, opacity: 0.35 });
+    item.add(lid);
+    [-0.09, 0, 0.09].forEach((x, index) => {
+      const rice = cyl(0.052, 0.07, 0xf8fafc);
+      rice.position.set(x, 0.005, 0);
+      item.add(rice);
+      const fish = box(x, 0.052, 0, 0.095, 0.025, 0.075, index === 1 ? 0xf59e0b : meta.accentColor);
+      item.add(fish);
+    });
+    item.userData.deskRotation = [0, -0.25, 0];
+    item.userData.handTilt = -0.12;
+  } else if (meta.variant.includes('cheese-wedges')) {
+    [-0.07, 0.07].forEach((x, index) => {
+      const wedge = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.07, 3), getMat(index ? 0xfbbf24 : meta.packageColor));
+      wedge.position.set(x, index ? 0.02 : 0, 0);
+      wedge.rotation.y = index ? -0.35 : 0.35;
+      wedge.castShadow = true;
+      wedge.receiveShadow = true;
+      item.add(wedge);
+    });
+    [[-0.095, 0.045, 0.02], [0.08, 0.065, -0.015]].forEach(([x, y, z]) => {
+      const hole = sph(0.018, 0xd97706);
+      hole.position.set(x, y, z);
+      item.add(hole);
+    });
+    item.userData.deskRotation = [0, 0.35, 0];
+    item.userData.handTilt = -0.12;
+  } else if (meta.variant.includes('carrot-snack')) {
+    const pack = box(0, 0, 0, 0.25, 0.07, 0.18, 0xe0f2fe);
+    pack.material = getMat(0xe0f2fe, { transparent: true, opacity: 0.42 });
+    item.add(pack);
+    [-0.075, -0.025, 0.025, 0.075].forEach((x, index) => {
+      const carrot = box(x, 0.008, index % 2 ? 0.025 : -0.025, 0.032, 0.045, 0.14, meta.packageColor);
+      carrot.rotation.y = index % 2 ? 0.12 : -0.12;
+      item.add(carrot);
+    });
+    const seal = box(0, 0.052, -0.075, 0.25, 0.025, 0.025, meta.accentColor);
+    item.add(seal);
+    item.userData.deskRotation = [0, -0.28, 0];
+    item.userData.handTilt = -0.12;
+  } else if (meta.variant.includes('turkey-avocado-wrap')) {
+    const tortilla = cyl(0.105, 0.30, meta.packageColor);
+    tortilla.rotation.z = Math.PI / 2;
+    item.add(tortilla);
+    const cut = cyl(0.087, 0.025, 0xf8fafc);
+    cut.position.x = 0.16;
+    cut.rotation.z = Math.PI / 2;
+    item.add(cut);
+    const avocado = sph(0.035, meta.accentColor);
+    avocado.position.set(0.176, 0.025, 0.015);
+    item.add(avocado);
+    const turkey = box(0.176, -0.025, -0.012, 0.025, 0.05, 0.07, 0xe7a08a);
+    item.add(turkey);
+    item.userData.deskRotation = [0, 0.38, Math.PI / 2];
+    item.userData.handTilt = -0.18;
+  } else if (meta.variant.includes('popcorn')) {
     // Microwave popcorn: striped red bowl with visible popped kernels.
     const bowl = cyl(0.145, 0.12, 0xe53935);
     bowl.position.y = -0.02;
@@ -463,6 +609,10 @@ function buildVendingItemAsset(name, carried = {}) {
     }
   });
   return item;
+}
+
+export function buildTemporaryFoodCarryAssetForVerification(carried = {}) {
+  return buildVendingItemAsset('temporaryFoodVerificationAsset', carried);
 }
 
 function placeRightHandVendingItemAsset(item, agent) {
@@ -1855,9 +2005,9 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const isTrashBinDispose = (bedActivityKind.startsWith('trash-bin-') || bedActivityKind.startsWith('outdoor-trash-can-')) && agent._idleActivity?.phase === 'active';
   const isCoffeeMachineUse = bedActivityKind.startsWith('coffee-machine-') && agent._idleActivity?.phase === 'active';
   const isWaterCoolerUse = bedActivityKind.startsWith('water-cooler-') && agent._idleActivity?.phase === 'active';
-  const isCoffeeDeskConsume = (bedActivityKind.startsWith('coffee-desk-') || bedActivityKind.startsWith('water-desk-') || bedActivityKind.startsWith('vending-desk-') || bedActivityKind.startsWith('microwave-desk-')) && agent._idleActivity?.phase === 'active';
+  const isCoffeeDeskConsume = (bedActivityKind.startsWith('coffee-desk-') || bedActivityKind.startsWith('water-desk-') || bedActivityKind.startsWith('vending-desk-') || bedActivityKind.startsWith('microwave-desk-') || bedActivityKind.startsWith('fridge-desk-')) && agent._idleActivity?.phase === 'active';
   const isVendingMachineUse = bedActivityKind.startsWith('vending-machine-') && agent._idleActivity?.phase === 'active';
-  const isFridgeUse = bedActivityKind.startsWith('fridge-') && agent._idleActivity?.phase === 'active';
+  const isFridgeUse = bedActivityKind.startsWith('fridge-') && !bedActivityKind.startsWith('fridge-desk-') && agent._idleActivity?.phase === 'active';
   const isKitchenIslandUse = bedActivityKind.startsWith('kitchen-island-') && agent._idleActivity?.phase === 'active';
   const isKitchenIslandEat = isKitchenIslandUse && bedActivityKind === 'kitchen-island-eat';
   const isGrillUse = bedActivityKind.startsWith('grill-') && agent._idleActivity?.phase === 'active';
@@ -3638,7 +3788,8 @@ function syncRightHandCarryVisual(parts, agent) {
     carryKey.includes('granola') ||
     carryKey.includes('chocolate') ||
     carryKey.includes('soft drink') ||
-    carryKey.includes('vending')
+    carryKey.includes('vending') ||
+    carryKey.includes('fridge')
   );
   const isPongRacket = isPingPongActivity || (carried && carryKey.includes('pingpong'));
   const deskSipState = getCoffeeDeskSipState(agent);

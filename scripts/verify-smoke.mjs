@@ -3,8 +3,21 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import {
+  FRIDGE_FOOD_ITEMS,
+  FRIDGE_FOOD_VISUAL_KINDS,
+} from '../src/client/js/fridge-food-catalog.mjs';
+import {
+  buildTemporaryFoodCarryAssetForVerification,
+} from '../src/client/js/agent-characters.js';
+import {
+  resolveBehaviorDestination,
+} from '../src/client/js/agent-life-behavior-destination-resolver.mjs';
 import { getObjectCatalogExample } from '../src/client/js/agent-life-object-catalog-schema.mjs';
-import { getActionLocationsForAsset } from '../src/client/js/agent-life-action-location-registry.mjs';
+import {
+  ACTION_LOCATION_ROLES,
+  getActionLocationsForAsset,
+} from '../src/client/js/agent-life-action-location-registry.mjs';
 import { listObjectUseSeatCandidates } from '../src/client/js/agent-life-object-use-seats.mjs';
 
 const root = process.cwd();
@@ -58,6 +71,7 @@ const requiredFiles = [
   'src/client/js/chat-bubble-layout.mjs',
   'src/client/js/openclaw-run-state.js',
   'src/client/js/starter-map.mjs',
+  'src/client/js/fridge-food-catalog.mjs',
   'src/server/server.py',
   'src/server/live_agent_goals.py',
   'src/server/live_agent_spatial.py',
@@ -93,6 +107,52 @@ assert(
   sectionalSeats.every(seat => seat.dismountSpotId?.startsWith('dismount-')),
   'every Sectional Sofa seat must resolve to its dedicated outside dismount',
 );
+
+assert.equal(FRIDGE_FOOD_ITEMS.length, 10, 'fridge must provide exactly ten food choices');
+assert.equal(new Set(FRIDGE_FOOD_ITEMS.map(item => item.id)).size, 10, 'fridge food ids must be unique');
+assert.equal(new Set(FRIDGE_FOOD_ITEMS.map(item => item.label)).size, 10, 'fridge food labels must be unique');
+assert.equal(new Set(FRIDGE_FOOD_VISUAL_KINDS).size, 10, 'fridge food visual kinds must be unique');
+const fridgeAssetSignatures = FRIDGE_FOOD_ITEMS.map((food) => {
+  const asset = buildTemporaryFoodCarryAssetForVerification({
+    ...food,
+    fridgeFoodId: food.id,
+  });
+  const meshes = [];
+  asset.traverse((child) => {
+    if (!child.isMesh) return;
+    meshes.push({
+      geometry: child.geometry?.type || '',
+      position: child.position.toArray().map(value => Number(value.toFixed(4))),
+      rotation: child.rotation.toArray().slice(0, 3).map(value => Number(value.toFixed(4))),
+      scale: child.scale.toArray().map(value => Number(value.toFixed(4))),
+      color: child.material?.color?.getHex?.() ?? null,
+    });
+  });
+  assert(meshes.length >= 2, `${food.label} must build a visible multi-part temporary food asset`);
+  assert(asset.userData.snackVariant.includes(food.id), `${food.label} asset must retain its fridge food id`);
+  assert(asset.userData.fridgeFoodVisualKinds.includes(food.visualKind), `${food.label} asset must advertise its visual kind`);
+  return JSON.stringify(meshes);
+});
+assert.equal(new Set(fridgeAssetSignatures).size, 10, 'all ten fridge foods must render as distinct assets');
+assert(ACTION_LOCATION_ROLES.includes('clearance'), 'door-swing clearance must remain a non-use action-location role');
+const fridgeCatalog = getObjectCatalogExample('fridge');
+const blockedFridgeQueueDestination = resolveBehaviorDestination({
+  category: 'snack-drink',
+  agent: { id: 'fridge-queue-smoke-agent', buildingId: 'fridge-queue-smoke', floor: 1, x: 0, z: 0 },
+  buildings: [{
+    id: 'fridge-queue-smoke',
+    worldX: 0,
+    worldZ: 0,
+    activeFloor: 1,
+    interior: { furniture: [{ type: 'fridge', catalogId: 'fridge', x: 6, z: 4, floor: 1 }] },
+  }],
+  occupiedSpots: [{ objectKey: 'fridge-queue-smoke:0', slotId: 'use-front', spotId: 'use-front' }],
+  queueing: { default: true },
+  interactionSpots: { fridge: fridgeCatalog.interactionSpots },
+});
+assert.equal(blockedFridgeQueueDestination.lifecycle, 'queue-wait', 'autonomous agents must queue at a claimed fridge');
+assert.equal(blockedFridgeQueueDestination.spot.queueSpotId, 'queue', 'fridge contenders must use the authored queue, never door-swing clearance');
+assert.equal(blockedFridgeQueueDestination.spot.queueIndex, 0, 'first fridge contender must take queue position zero');
 
 const removedProductArtifacts = [
   '.tmp-data',
@@ -407,7 +467,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260729-product-gym-props-queue-rotated-seating-sectional-dismount-r2',
+  'js/main3d.js?v=20260731-fridge-color-r3',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
   'js/chat.js?v=20260729-chat-scroll-follow-r6',
@@ -547,7 +607,7 @@ for (const token of [
   assert(read('src/server/providers/codex.py').includes(token), `codex.py missing stream token: ${token}`);
 }
 for (const token of [
-  "agent-characters.js?v=20260729-gym-bench-sync-r1",
+  "agent-characters.js?v=20260731-fridge-food-r1",
   "chat-bubble-layout.mjs?v=20260728-chat-bubble-consistency-r4",
   'getChatBubbleSideInsets',
   'getChatBubbleChromeMetrics',
@@ -662,6 +722,28 @@ for (const token of [
   'item.visible = isAgentDeskCarrySurfaceActive(agent) && !deskSipState.handActive',
 ]) {
   assert(agentCharactersJs.includes(token), `agent-characters.js missing desk-resting carry token: ${token}`);
+}
+for (const token of [
+  'function startFridgeDeskConsumeActivity',
+  "kind: 'fridge-desk-consume'",
+  "actionId: 'life.eatFridgeFoodAtDesk'",
+  "placedFurniture.queuePolicy = 'first-come-first-served'",
+  "placedFurniture.fridgeColors = normalizeMultiSeatFurnitureColors('fridge')",
+  'FRIDGE_FOOD_ITEMS',
+  'manual-drag-drop',
+  "property: 'fridgeColors'",
+  'function makeFridge3D(x, z, s = T, furniture = {})',
+  'window.__verifyFridgeColorOptions',
+  "configurableMultiSeatTypes.has(f.type) ? meshBuilder(f.x, f.z, s, f)",
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing fridge queue/desk-consume/color token: ${token}`);
+}
+for (const token of [
+  "startsWith('fridge-desk-')",
+  'FRIDGE_FOOD_VISUAL_KINDS',
+  'temporary-food-v4-fridge-ten-items',
+]) {
+  assert(agentCharactersJs.includes(token), `agent-characters.js missing fridge food carry token: ${token}`);
 }
 
 for (const token of [
@@ -1058,7 +1140,7 @@ for (const token of [
   'ambient-schedule-routing-suppressed',
   'status-change-movement-clear-skipped',
   '__VWGetLiveModeScriptedSuppressionState',
-  "agent-characters.js?v=20260729-gym-bench-sync-r1",
+  "agent-characters.js?v=20260731-fridge-food-r1",
   'function getAgentPresenceDotColor(statusValue)',
   'statusDot.userData.presenceStatusIndicator = true',
   'parts.statusDot.material.color.setHex(getAgentPresenceDotColor(normalizedStatus))',
