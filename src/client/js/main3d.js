@@ -10,12 +10,20 @@ import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260725-
 import {
   createAgentCharacter, updateAgentAnimation, getAgentAppearance, getSinkWashPoseTargets,
   isAuthoritativeSinkAnimationState, APPEARANCE_CATALOG,
-} from './agent-characters.js?v=20260731-fridge-food-r1';
+} from './agent-characters.js?v=20260731-stove-oven-r1';
 import {
   FRIDGE_FOOD_ITEMS,
   FRIDGE_FOOD_ITEM_LABELS,
   findFridgeFoodItem,
 } from './fridge-food-catalog.mjs?v=20260731-fridge-food-r1';
+import {
+  STOVE_OVEN_FOOD_ITEMS,
+  STOVE_OVEN_FOOD_ITEM_LABELS,
+  STOVE_OVEN_VALID_DROP_OFFS,
+  findStoveOvenFoodItem,
+  listStoveOvenFoodsForMethod,
+  normalizeStoveOvenCookingMethod,
+} from './stove-oven-food-catalog.mjs?v=20260731-stove-oven-r1';
 import {
   listObjectUseActiveCandidates,
   chooseAndReserveObjectUseActiveSlot,
@@ -981,7 +989,7 @@ const FURNITURE_VOXEL_MERGE = true;
 function mergeFurnitureItemVoxels(item) {
   if (!FURNITURE_VOXEL_MERGE || !item?.isObject3D) return item;
   // Items whose child meshes are recolored/animated at runtime keep originals.
-  if (item.userData?.arcadeFeedbackParts || item.userData?.sinkFeedbackParts) return item;
+  if (item.userData?.arcadeFeedbackParts || item.userData?.sinkFeedbackParts || item.userData?.stoveOvenFeedbackParts) return item;
   if (item.userData?.furnitureVoxelsMerged) return item;
   // The couch supports live per-material color preview and per-cushion drop
   // raycasting, so its parts must stay individually addressable meshes.
@@ -1854,7 +1862,12 @@ function requestBackendObjectUseForExplicitObjectAction(agent, target = null, bu
     activeUseSlotId: metadata.activeUseSlotId || metadata.slotId || target?.activeUseSlotId || target?.slotId || target?.seatId || objectMeta.spotId || '',
     activityKind: metadata.activityKind || target?.activityKind || '',
     animationId: metadata.animationId || target?.animationId || '',
-    workoutMode: metadata.workoutMode || target?.workoutMode || '',
+    vendingItemId: metadata.vendingItemId || enrichedTarget?.vendingItemId || target?.vendingItemId || "",
+    microwaveFoodId: metadata.microwaveFoodId || enrichedTarget?.microwaveFoodId || target?.microwaveFoodId || "",
+    fridgeFoodId: metadata.fridgeFoodId || enrichedTarget?.fridgeFoodId || target?.fridgeFoodId || "",
+    stoveOvenFoodId: metadata.stoveOvenFoodId || enrichedTarget?.stoveOvenFoodId || target?.stoveOvenFoodId || "",
+    cookingMethod: metadata.cookingMethod || enrichedTarget?.cookingMethod || target?.cookingMethod || "",
+    workoutMode: metadata.workoutMode || target?.workoutMode || "",
     pairedDumbbells: resolveBackendPairedDumbbellsFlag(metadata, target),
     dumbbellColors: metadata.dumbbellColors || target?.dumbbellColors || undefined,
     seatSurfaceLift: Number.isFinite(Number(metadata.seatSurfaceLift ?? target?.seatSurfaceLift))
@@ -1865,6 +1878,8 @@ function requestBackendObjectUseForExplicitObjectAction(agent, target = null, bu
   };
   const stayMs = Number(metadata.stayMs ?? target?.stayMs);
   if (Number.isFinite(stayMs)) objectTarget.stayMs = Math.max(1000, Math.floor(stayMs));
+  const consumeDurationMs = Number(metadata.consumeDurationMs ?? target?.consumeDurationMs);
+  if (Number.isFinite(consumeDurationMs)) objectTarget.consumeDurationMs = Math.max(1000, Math.floor(consumeDurationMs));
   const paddleColor = Number(metadata.paddleColor ?? target?.paddleColor);
   if (Number.isFinite(paddleColor)) objectTarget.paddleColor = paddleColor;
   const request = {
@@ -1895,6 +1910,7 @@ function requestBackendObjectUseForExplicitObjectAction(agent, target = null, bu
     buildingId: objectTarget.buildingId,
     furnitureIndex: objectTarget.furnitureIndex,
     actionId: objectTarget.actionId,
+    queueRequest: metadata.queueRequest === true,
     requestedAtMs: Date.now(),
     source: request.source,
     serviceQueueWaitRequest: metadata.serviceQueueWaitRequest === true,
@@ -1928,6 +1944,9 @@ function requestBackendObjectUseForExplicitObjectAction(agent, target = null, bu
         error: error?.message || String(error),
         code: error?.code || null,
       });
+      if (typeof metadata.onBackendObjectUseRejected === 'function') {
+        try { metadata.onBackendObjectUseRejected(error); } catch { /* rejection reporting must not disrupt runtime recovery */ }
+      }
       return null;
     });
   return {
@@ -1967,6 +1986,12 @@ function doesAgentRuntimeSnapshotMatchBackendObjectUsePending(snapshot = null, p
 function shouldHoldManualObjectUsePositionForPendingRuntimeAck(agent = null, snapshot = null) {
   const pending = agent?._runtimeBackendObjectUsePending || null;
   if (!pending) return false;
+  // A manual object drop is already rendered at its authored activation or
+  // queue spot before the asynchronous realtime acknowledgement returns.
+  // Ignore unrelated status/autonomy snapshots during that short handoff:
+  // applying one here visibly teleports the agent back to an older location.
+  // The matching server object-use snapshot is still accepted immediately and
+  // transfers authoritative ownership to the realtime runtime.
   return !doesAgentRuntimeSnapshotMatchBackendObjectUsePending(snapshot, pending);
 }
 
@@ -2148,6 +2173,9 @@ function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
     : {};
   runtimeStates[objectVersionKey] = objectState;
   furniture._runtimeWorldObjectStates = runtimeStates;
+  // Queue-slot objects resolve to the same furniture entry as their base
+  // service object. Keep their snapshots for queue/debug use, but never let a
+  // queue slot replace the base object's active/idle state or reservation.
   if (!isQueueSlotState) {
     furniture._runtimeWorldObjectState = objectState;
     furniture._runtimeWorldObjectVersion = Math.max(
@@ -2178,6 +2206,10 @@ function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
   const state = String(objectState.state || '').toLowerCase();
   if (!isQueueSlotState && state === 'idle' && data.clearReservation === true) {
     furniture.reservation = null;
+    // The realtime server deliberately sends activeUse: null when a finite
+    // object interaction ends. Honor that explicit null instead of retaining
+    // the previous active snapshot, otherwise effects such as sink water can
+    // remain active forever and the next user is incorrectly sent to queue.
     furniture.activeUse = data.activeUse && typeof data.activeUse === 'object'
       ? { ...data.activeUse, runtimeWorldObject: true }
       : null;
@@ -2888,7 +2920,8 @@ function isAgentRuntimeDeskConsumeActivityKind(kind = '') {
     normalized.startsWith('water-desk-') ||
     normalized.startsWith('vending-desk-') ||
     normalized.startsWith('microwave-desk-') ||
-    normalized.startsWith('fridge-desk-');
+    normalized.startsWith('fridge-desk-') ||
+    normalized.startsWith('stove-oven-desk-');
 }
 
 function getAgentRuntimeDeskConsumeSchedulePhase(kind = '', animationId = '') {
@@ -2899,6 +2932,7 @@ function getAgentRuntimeDeskConsumeSchedulePhase(kind = '', animationId = '') {
   if (normalized.startsWith('vending-desk-')) return explicit || 'vending-desk-consume';
   if (normalized.startsWith('microwave-desk-')) return explicit || 'microwave-desk-consume';
   if (normalized.startsWith('fridge-desk-')) return explicit || 'fridge-desk-consume';
+  if (normalized.startsWith('stove-oven-desk-')) return explicit || 'stove-oven-desk-consume';
   return explicit;
 }
 
@@ -3001,6 +3035,9 @@ function sanitizeAgentRuntimeNumberedServiceQueueWait(activity = null) {
       activationSpotId: queueSlotId,
     } : {}),
   };
+  // The selected workout remains in the queue reservation (`queuedUse*` /
+  // `use*`) for promotion. Numbered queue visuals must contain no use-only
+  // metadata that could reactivate the dumbbell workout while the line moves.
   delete waiting.workoutMode;
   delete waiting.workoutLabel;
   delete waiting.dumbbellColors;
@@ -3273,6 +3310,11 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
     (visualState.activity && typeof visualState.activity === 'object') ||
     snapshotIsActiveSink
   ) {
+    // The runtime state/target pair is the authoritative admission record.
+    // During direct admission and FCFS promotion it can arrive one render
+    // snapshot before the detailed visual activity. Hydrate the exact sink
+    // identity from the target so that pose and particles neither blink off
+    // nor fail to start during that edge.
     const incomingActivity = {
       ...(visualState.activity && typeof visualState.activity === 'object'
         ? visualState.activity
@@ -4151,9 +4193,11 @@ function makeAgentRuntimeRouteTarget(target = null, building = null, floor = nul
   ].forEach(key => {
     if (target?.[key] != null && String(target[key]).trim()) plain[key] = String(target[key]).trim();
   });
-  const stayMs = Number(target?.stayMs);
+  const rawStayMs = target?.stayMs;
+  const stayMs = rawStayMs == null || rawStayMs === '' ? NaN : Number(rawStayMs);
   if (Number.isFinite(stayMs)) plain.stayMs = Math.max(1000, Math.floor(stayMs));
-  const paddleColor = Number(target?.paddleColor);
+  const rawPaddleColor = target?.paddleColor;
+  const paddleColor = rawPaddleColor == null || rawPaddleColor === '' ? NaN : Number(rawPaddleColor);
   if (Number.isFinite(paddleColor)) plain.paddleColor = paddleColor;
   const routeApproach = target?.routeApproachTarget;
   if (
@@ -6675,7 +6719,7 @@ const LOCAL_IDLE_FURNITURE_ACTIVITY_CONFIG = Object.freeze({
   counter: Object.freeze({ kind: 'counter-prep', spotId: 'prep-front', animationId: 'counter-prep', dockSnapRadius: 6, stayMs: [9000, 15000] }),
   diningTable: Object.freeze({ kind: 'dining-table-eat', spotId: 'seat-south', animationId: 'dining-table-eat-talk', dockSnapRadius: 7, stayMs: [11000, 19000] }),
   sink: Object.freeze({ kind: 'sink-wash-drink', spotId: 'use-front', animationId: 'sink-wash-drink', dockSnapRadius: 6, stayMs: [8000, 14000] }),
-  stove: Object.freeze({ kind: 'stove-cook', spotId: 'cook-front', animationId: 'stove-cook', dockSnapRadius: 6, stayMs: [10000, 17000] }),
+  stove: Object.freeze({ kind: 'stovetop-cook-food', spotId: 'stovetop-front', animationId: 'stovetop-cook', dockSnapRadius: 6, stayMs: [12000, 17000] }),
   tv: Object.freeze({ kind: 'tv-watch-relax', spotId: 'watch-front', animationId: 'tv-watch', dockSnapRadius: 7, stayMs: [12000, 22000] }),
   kitchenIsland: Object.freeze({ kind: 'kitchen-island-prep', spotId: 'prep-south', animationId: 'kitchen-island-prep', dockSnapRadius: 6, stayMs: [9000, 16000] }),
   smallCafeTable: Object.freeze({ kind: 'small-cafe-table-eat', spotId: 'seat-south', animationId: 'drink-eat', dockSnapRadius: 6, stayMs: [10000, 18000] }),
@@ -7106,7 +7150,7 @@ function isManualDropStandingDrinkMachine(furniture = {}) {
 }
 
 function isManualDropStandingServiceMachine(furniture = {}) {
-  return isManualDropStandingDrinkMachine(furniture) || furniture?.type === 'sink' || furniture?.type === 'vending' || furniture?.type === 'fridge' || furniture?.type === 'dumbbellRack';
+  return isManualDropStandingDrinkMachine(furniture) || furniture?.type === 'sink' || furniture?.type === 'vending' || furniture?.type === 'fridge' || furniture?.type === 'stove' || furniture?.type === 'dumbbellRack';
 }
 
 function isManualDropFullServiceQueueObject(furniture = {}) {
@@ -10474,7 +10518,7 @@ function isObjectAttachedToScene(object) {
 }
 
 function registerInteractiveFurnitureFeedbackMesh(mesh) {
-  if (!mesh?.userData?.arcadeFeedbackParts && !mesh?.userData?.sinkFeedbackParts) return;
+  if (!mesh?.userData?.arcadeFeedbackParts && !mesh?.userData?.sinkFeedbackParts && !mesh?.userData?.stoveOvenFeedbackParts) return;
   _interactiveFurnitureFeedbackMeshes.add(mesh);
 }
 
@@ -10505,6 +10549,12 @@ function isSinkInteractionActive(mesh, furniture) {
     return String(activity?.buildingId || '') === String(buildingId || '') &&
       Number(activity?.furnitureIndex) === furnitureIndex;
   }) || null;
+  // The fresh agent snapshot is the animation authority. During a queue
+  // handoff, the base object's terminal/idle event from the previous user can
+  // arrive after the promoted user's active snapshot. Letting that stale
+  // object event veto the promoted agent suppresses water and bubbles for the
+  // entire second use. Completion still stops immediately because the agent's
+  // authoritative activity leaves sink-wash-drink.
   if (!matchingActiveAgent) return false;
   const baseObjectKey = buildingId && Number.isInteger(furnitureIndex)
     ? getAgentRuntimeFurnitureObjectKey(buildingId, furnitureIndex, 'sink')
@@ -10518,11 +10568,21 @@ function isSinkInteractionActive(mesh, furniture) {
       : null
   );
   const runtimeState = String(runtimeObjectState?.state || '').toLowerCase();
+  // Server-owned agents already passed the strict, fresh activity check in
+  // isAuthoritativeSinkAnimationState. During the first manual admission the
+  // observer-only flag can trail ownership by one hydration edge, while a
+  // lagging idle base-object record still describes the previous user. Trust
+  // the exact server-owned sink activity in both that edge and FCFS promotion.
   if (
     matchingActiveAgent._runtimeObserverOnly === true ||
     String(matchingActiveAgent._runtimeOwner || '') === 'server-scripted-object-runtime'
   ) return true;
+
+  // Browser-local actions still use the local world-object lifecycle as their
+  // stop signal.
   if (runtimeObjectState && !isAgentRuntimeWorldObjectStateFresh(runtimeObjectState)) return false;
+  // A fresh active object record for a different agent is a real ownership
+  // conflict.
   if (['active', 'using', 'in_progress'].includes(runtimeState)) {
     const runtimeAgentId = String(
       runtimeObjectState?.agentId ||
@@ -10574,6 +10634,7 @@ function updateSinkFeedback(mesh, furniture) {
 
   parts.idleResetComplete = false;
   const t = Math.max(0, nowMs - Number(parts.activeSinceMs || nowMs)) / 1000;
+
   (parts.droplets || []).forEach((droplet, index) => {
     droplet.visible = true;
     const phase = (t * 2.8 + index / Math.max(1, parts.droplets.length)) % 1;
@@ -10582,6 +10643,7 @@ function updateSinkFeedback(mesh, furniture) {
     droplet.position.z = (droplet.userData.sinkBaseZ || 0) + Math.cos((phase + index * 0.7) * Math.PI * 2) * 0.010 * parts.scale;
     droplet.material.opacity = 0.92 - phase * 0.30;
   });
+
   (parts.bubbles || []).forEach((bubble, index) => {
     bubble.visible = true;
     const phase = (t * 0.72 + index / Math.max(1, parts.bubbles.length)) % 1;
@@ -10595,10 +10657,94 @@ function updateSinkFeedback(mesh, furniture) {
   });
 }
 
+function updateStoveOvenFeedback(mesh, furniture, nowMsOverride = null) {
+  const parts = mesh?.userData?.stoveOvenFeedbackParts;
+  if (!parts) return;
+  const buildingId = mesh.userData.buildingId;
+  const furnitureIndex = Number(mesh.userData.furnitureIndex);
+  const activeAgent = agentsList.find(agent => {
+    const activity = agent?._idleActivity;
+    const kind = String(activity?.kind || '');
+    return activity?.phase === 'active' &&
+      (kind.startsWith('stovetop-') || kind.startsWith('oven-')) &&
+      String(activity.buildingId || '') === String(buildingId || '') &&
+      Number(activity.furnitureIndex) === furnitureIndex;
+  }) || null;
+  const active = Boolean(activeAgent);
+  const nowMs = nowMsOverride != null && Number.isFinite(Number(nowMsOverride))
+    ? Number(nowMsOverride)
+    : performance.now();
+  if (active && !parts.active) parts.activeSinceMs = nowMs;
+  parts.active = active;
+  const activity = activeAgent?._idleActivity || {};
+  const method = normalizeStoveOvenCookingMethod(activity.cookingMethod || activity.mode || activity.kind || furniture?.stoveOvenState?.cookingMethod);
+  const food = findStoveOvenFoodItem(activity.stoveOvenFoodId || activity.temporaryItem?.stoveOvenFoodId || furniture?.stoveOvenState?.selectedFoodId, method) || listStoveOvenFoodsForMethod(method)[0];
+  const durationMs = Math.max(1000, Number(activity.stayMs || (method === 'oven' ? 16000 : 14500)));
+  const progress = active ? Math.max(0, Math.min(1, (nowMs - Number(parts.activeSinceMs || nowMs)) / durationMs)) : 0;
+  parts.cookingMethod = active ? method : null;
+  parts.foodId = active ? food?.id || null : null;
+  parts.progress = progress;
+  const stage = progress < 0.34 ? 0 : (progress < 0.72 ? 1 : 2);
+
+  // The pan is a cooking prop, not a permanent part of the stove. Keep the
+  // whole assembly hidden unless an agent is actively cooking on the burner.
+  // This also prevents a one-frame flash when interior/LOD meshes are rebuilt.
+  parts.pan.visible = active && method === 'stovetop';
+  parts.panStages.forEach((item, index) => {
+    item.visible = active && method === 'stovetop' && index === stage;
+    if (item.visible && food) setMeshColor(item, [food.rawColor, food.cookingColor, food.cookedColor][index]);
+  });
+  if (parts.activeBurner) {
+    const burnerPulse = active && method === 'stovetop' ? (0.5 + Math.sin(nowMs * 0.018) * 0.5) : 0;
+    setMeshColor(parts.activeBurner, burnerPulse > 0.45 ? 0xff3d00 : 0x7f1d1d);
+  }
+  if (active && method === 'stovetop') {
+    const tossEnvelope = Math.sin(progress * Math.PI);
+    const tossPhase = Math.sin(nowMs * 0.011);
+    parts.pan.rotation.z = tossPhase * 0.035 * tossEnvelope;
+    parts.pan.position.y = parts.panBasePosition.y + Math.max(0, Math.sin(nowMs * 0.016)) * 0.018 * parts.scale;
+    // Translate the pan's parent assembly so its body, handle, and food all
+    // participate in the same visible fore/aft cooking motion.
+    parts.pan.position.z = parts.panBasePosition.z + tossPhase * 0.018 * parts.scale * tossEnvelope;
+  } else {
+    parts.pan.rotation.z = 0;
+    parts.pan.position.copy(parts.panBasePosition);
+  }
+  parts.steam.forEach((puff, index) => {
+    const show = active && method === 'stovetop' && progress > 0.16;
+    puff.visible = show;
+    if (!show) return;
+    const phase = (progress * 5.5 + index / parts.steam.length) % 1;
+    puff.position.set(
+      (-0.28 + Math.sin(index * 2.1 + phase * 4) * 0.09) * parts.scale,
+      (1.13 + phase * 0.45) * parts.scale,
+      (-0.18 + Math.cos(index * 1.7 + phase * 3) * 0.06) * parts.scale,
+    );
+    puff.material.opacity = Math.max(0, 0.55 * (1 - phase));
+  });
+
+  const ovenActive = active && method === 'oven';
+  let doorOpen = 0;
+  if (ovenActive) {
+    if (progress < 0.14) doorOpen = Math.sin((progress / 0.14) * Math.PI * 0.5);
+    else if (progress < 0.28) doorOpen = Math.cos(((progress - 0.14) / 0.14) * Math.PI * 0.5);
+    else if (progress > 0.84) doorOpen = Math.sin(((progress - 0.84) / 0.16) * Math.PI * 0.5);
+  }
+  parts.ovenDoorPivot.rotation.x = -doorOpen * Math.PI * 0.48;
+  const heatOn = ovenActive && progress >= 0.28 && progress <= 0.86;
+  parts.ovenLight.material.emissiveIntensity = heatOn ? 0.55 + Math.sin(nowMs * 0.01) * 0.18 : 0;
+  setMeshColor(parts.ovenLight, heatOn ? 0xff8a1f : 0x2d3748);
+  parts.ovenStages.forEach((item, index) => {
+    item.visible = ovenActive && progress > 0.08 && index === stage;
+    if (item.visible && food) setMeshColor(item, [food.rawColor, food.cookingColor, food.cookedColor][index]);
+  });
+  if (!ovenActive) parts.ovenDoorPivot.rotation.x = 0;
+}
+
 function updateInteractiveFurnitureFeedback(dt = 0) {
   if (!scene || !buildingsMap) return;
   for (const mesh of _interactiveFurnitureFeedbackMeshes) {
-    const feedback = mesh?.userData?.arcadeFeedbackParts || mesh?.userData?.sinkFeedbackParts;
+    const feedback = mesh?.userData?.arcadeFeedbackParts || mesh?.userData?.sinkFeedbackParts || mesh?.userData?.stoveOvenFeedbackParts;
     if (!feedback || !isObjectAttachedToScene(mesh)) {
       _interactiveFurnitureFeedbackMeshes.delete(mesh);
       continue;
@@ -10607,6 +10753,7 @@ function updateInteractiveFurnitureFeedback(dt = 0) {
     const furniture = building?.interior?.furniture?.[mesh.userData.furnitureIndex];
     if (mesh.userData.arcadeFeedbackParts) updateArcadeMachineFeedback(mesh, furniture, dt);
     if (mesh.userData.sinkFeedbackParts) updateSinkFeedback(mesh, furniture, dt);
+    if (mesh.userData.stoveOvenFeedbackParts) updateStoveOvenFeedback(mesh, furniture);
   }
 }
 
@@ -12400,6 +12547,12 @@ function setAgentTargetForExplicitObjectAction(agent, target, building = null, f
     activityKind: metadata.activityKind || target?.activityKind || null,
     animationId: metadata.animationId || target?.animationId || null,
     stayMs: metadata.stayMs || target?.stayMs || null,
+    consumeDurationMs: metadata.consumeDurationMs || target?.consumeDurationMs || null,
+    vendingItemId: metadata.vendingItemId || target?.vendingItemId || null,
+    microwaveFoodId: metadata.microwaveFoodId || target?.microwaveFoodId || null,
+    fridgeFoodId: metadata.fridgeFoodId || target?.fridgeFoodId || null,
+    stoveOvenFoodId: metadata.stoveOvenFoodId || target?.stoveOvenFoodId || null,
+    cookingMethod: metadata.cookingMethod || target?.cookingMethod || null,
     pingPongSide: metadata.pingPongSide || target?.pingPongSide || null,
     paddleColor: metadata.paddleColor ?? target?.paddleColor ?? null,
     preserveUntilRelease: true,
@@ -14511,6 +14664,64 @@ function verifyCommittedObjectApproachTargetLock() {
   });
 }
 
+function verifyPendingManualObjectUsePositionLock() {
+  const objectKey = 'verify-building:furniture:7:sink';
+  const pending = {
+    objectKey,
+    buildingId: 'verify-building',
+    furnitureIndex: 7,
+    actionId: 'life.useSink',
+    requestedAtMs: Date.now(),
+    source: 'startDraggedAgentStandingMachineUse',
+  };
+  const agent = {
+    id: 'verify-pending-sink-position-lock',
+    x: 400,
+    y: 638,
+    _floor: 1,
+    _targetFloor: 1,
+    _runtimeVersion: 10,
+    _runtimeUpdatedAt: new Date(Date.now() - 50).toISOString(),
+    _runtimeBackendObjectUsePending: pending,
+    _runtimeObserverOnly: true,
+  };
+  const unrelatedSnapshot = {
+    agentId: agent.id,
+    mode: 'scripted',
+    owner: 'agent-scripted-mode',
+    x: 999,
+    y: 777,
+    floor: 1,
+    state: 'routing',
+    version: 11,
+    updatedAt: new Date().toISOString(),
+    target: { objectKey: 'another-building:furniture:2:fridge', buildingId: 'another-building', furnitureIndex: 2 },
+  };
+  const matchingSinkSnapshot = {
+    ...unrelatedSnapshot,
+    owner: 'server-scripted-object-runtime',
+    x: 400,
+    y: 638,
+    target: { objectKey, buildingId: pending.buildingId, furnitureIndex: pending.furnitureIndex, objectType: 'sink', spotId: 'use-front' },
+  };
+  const unrelatedApplied = applyAgentRuntimeSnapshotToAgent(agent, unrelatedSnapshot, {
+    updateVisible: false,
+    source: 'verify-pending-manual-object-use-position-lock',
+  });
+  const heldAtUseFront = unrelatedApplied === false && agent.x === 400 && agent.y === 638 && agent._runtimeBackendObjectUsePending === pending;
+  const matchingAckAccepted = shouldHoldManualObjectUsePositionForPendingRuntimeAck(agent, matchingSinkSnapshot) === false;
+  agent._runtimeBackendObjectUsePending = null;
+  const normalSnapshotsResumeAfterHandoff = shouldHoldManualObjectUsePositionForPendingRuntimeAck(agent, unrelatedSnapshot) === false;
+  return Object.freeze({
+    ok: heldAtUseFront && matchingAckAccepted && normalSnapshotsResumeAfterHandoff,
+    heldAtUseFront,
+    matchingAckAccepted,
+    normalSnapshotsResumeAfterHandoff,
+    position: Object.freeze({ x: agent.x, y: agent.y }),
+    expectedSpotId: 'use-front',
+  });
+}
+
 function verifyManualServiceQueueDragDropFallback() {
   const originalAgentsLength = agentsList.length;
   const hadBrowserWriterOverride = Object.prototype.hasOwnProperty.call(window, '__VWAllowBrowserAgentRuntimeWriter');
@@ -15240,6 +15451,7 @@ if (typeof window !== 'undefined') {
     verifyPhase4Task12ScriptedPlaySocialProximity,
     verifyPhase4Task14DebugReadoutAndControls,
     verifyCommittedObjectApproachTargetLock,
+    verifyPendingManualObjectUsePositionLock,
     verifyElevatorAccessQueuePolicy,
     verifyAmbientProximityConversationPolicy,
     verifyManualServiceQueueDragDropFallback,
@@ -15276,6 +15488,7 @@ if (typeof window !== 'undefined') {
   window.__verifyPhase4Task12ScriptedPlaySocialProximity = verifyPhase4Task12ScriptedPlaySocialProximity;
   window.__verifyPhase4Task14DebugReadoutAndControls = verifyPhase4Task14DebugReadoutAndControls;
   window.__verifyCommittedObjectApproachTargetLock = verifyCommittedObjectApproachTargetLock;
+  window.__verifyPendingManualObjectUsePositionLock = verifyPendingManualObjectUsePositionLock;
   window.__verifyElevatorAccessQueuePolicy = verifyElevatorAccessQueuePolicy;
   window.__verifyAmbientProximityConversationPolicy = verifyAmbientProximityConversationPolicy;
   window.__verifyManualServiceQueueDragDropFallback = verifyManualServiceQueueDragDropFallback;
@@ -15787,6 +16000,7 @@ const SCRIPTED_SERVICE_QUEUE_USE_CONFIGS = Object.freeze({
   coffeeMachine: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
   countertopCoffeeMachine: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
   fridge: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
+  stove: Object.freeze({ lifecycle: 'standing', activationSpotId: 'stovetop-front' }),
   vending: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
   microwave: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
   dumbbellRack: Object.freeze({ lifecycle: 'standing', activationSpotId: 'use-front' }),
@@ -15796,10 +16010,13 @@ const SCRIPTED_SERVICE_QUEUE_USE_CONFIGS = Object.freeze({
   playgroundSwing: Object.freeze({ lifecycle: 'active', activationSpotId: 'seat-use', approachSpotId: 'approach-front', exitSpotId: 'approach-front' }),
 });
 
-function getScriptedServiceQueueUseConfig(furniture = {}) {
+function getScriptedServiceQueueUseConfig(furniture = {}, requestedUse = null) {
   const activity = getLocalIdleActivityConfig(furniture?.type) || {};
-  const machine = getStandingUseMachineConfig(furniture?.type) || {};
-  const configured = SCRIPTED_SERVICE_QUEUE_USE_CONFIGS[furniture?.type] || {};
+  const machine = getStandingUseMachineConfig(furniture?.type, requestedUse) || {};
+  const configuredBase = SCRIPTED_SERVICE_QUEUE_USE_CONFIGS[furniture?.type] || {};
+  const configured = furniture?.type === 'stove'
+    ? { ...configuredBase, activationSpotId: machine.slotId, kind: machine.kind, animationId: machine.animationId, mode: machine.mode, stayMs: machine.useDurationMs }
+    : configuredBase;
   const activationSpotId = configured.activationSpotId || machine.slotId || activity.activationSpotId || activity.spotId || 'use-front';
   const definition = (FURNITURE_INTERACTION_SPOTS[furniture?.type] || [])
     .find(spot => (spot.id || spot.spotId) === activationSpotId) || {};
@@ -15826,10 +16043,11 @@ function getScriptedServiceQueueUseConfig(furniture = {}) {
 function submitQueuedScriptedServiceObjectUse(agent, building, furnitureIndex, queueActivity = null) {
   const furniture = building?.interior?.furniture?.[furnitureIndex];
   if (!agent || !building || !furniture) return { accepted: false, reason: 'missing-service-use-target' };
-  const useConfig = getScriptedServiceQueueUseConfig(furniture);
-  const machineConfig = getStandingUseMachineConfig(furniture?.type);
+  const requestedAction = queueActivity?.actionId || queueActivity?.action || null;
+  const useConfig = getScriptedServiceQueueUseConfig(furniture, requestedAction || queueActivity);
+  const machineConfig = getStandingUseMachineConfig(furniture?.type, requestedAction || queueActivity);
   const slotId = useConfig.activationSpotId;
-  const actionId = queueActivity?.actionId || queueActivity?.action || useConfig.actionId || `life.use.${furniture.type}`;
+  const actionId = requestedAction || useConfig.actionId || `life.use.${furniture.type}`;
   const dumbbellWorkout = furniture.type === 'dumbbellRack'
     ? getDumbbellWorkoutMode(actionId, Number(furniture.rackState?.workoutCount || 0))
     : null;
@@ -15930,6 +16148,11 @@ function submitQueuedScriptedServiceObjectUse(agent, building, furnitureIndex, q
       ? { policy: 'on-object-complete', releaseObjectReservation: true, releaseActiveUse: true, allowedBy: AGENT_INTENT_RELEASE_ALLOWED_BY['explicit-object'] }
       : null,
   });
+  // Direct manual drops used to remain browser-owned while queued drops were
+  // server-owned. A later realtime status snapshot could therefore pull a
+  // hand-washing agent away from use-front. Request authoritative ownership
+  // before starting any browser route; if the sink became busy during the
+  // drop, the server atomically converts this into a queue reservation.
   let backendRuntimeRequest = null;
   if (directManualServiceUse) {
     const objectKey = getAgentRuntimeFurnitureObjectKey(building.id, furnitureIndex, furniture.type);
@@ -16035,6 +16258,12 @@ function submitQueuedScriptedServiceObjectUse(agent, building, furnitureIndex, q
   if (route?.accepted !== false && agent._idleActivity) {
     agent._idleActivity.kind = objectUse.activityKind || activity.kind || machineConfig?.kind || `${String(furniture.type || 'service').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}-use`;
     agent._idleActivity.mode = objectUse.mode || mode;
+    if (furniture.type === 'stove') {
+      agent._idleActivity.cookingMethod = normalizeStoveOvenCookingMethod(actionId || mode);
+      const selectedFood = findStoveOvenFoodItem(queueActivity?.stoveOvenFoodId || queueActivity?.foodItemId || '', agent._idleActivity.cookingMethod);
+      if (selectedFood) agent._idleActivity.stoveOvenFoodId = selectedFood.id;
+      agent._idleActivity.spawnedItem = { label: 'Random Cooked Food', catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', cookingMethod: agent._idleActivity.cookingMethod, itemPool: listStoveOvenFoodsForMethod(agent._idleActivity.cookingMethod).map(item => item.label), validDropOff: STOVE_OVEN_VALID_DROP_OFFS };
+    }
     agent._idleActivity.stayMs = objectUse.stayMs || machineConfig?.useDurationMs || 9000;
     agent._idleActivity.animationId = objectUse.animationId || animationId;
     agent._idleActivity.dockSnapRadius = objectUse.dockSnapRadius || 6;
@@ -19056,7 +19285,7 @@ function addBuildingFurniture(group, building, bw, bd) {
     if (isBuildingFloorFocusActive(building) && itemFloor !== activeFloor) continue;
     const meshBuilder = FURNITURE_MESH_BUILDERS[f.type];
     if (!meshBuilder) continue;
-    const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'conferenceChair', 'hallwayBench', 'parkBench', 'dumbbellRack', 'gymBench', 'sink', 'fridge']);
+    const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'conferenceChair', 'hallwayBench', 'parkBench', 'dumbbellRack', 'gymBench', 'sink', 'fridge', 'stove']);
     const mesh = f.type === 'interiorDoor'
       ? makeInteriorDoor3D(f.x, f.z, s, f)
       : (configurableMultiSeatTypes.has(f.type) ? meshBuilder(f.x, f.z, s, f) : meshBuilder(f.x, f.z, s));
@@ -21541,28 +21770,71 @@ window.__verifySinkHandWashPose = () => {
   };
 };
 
-function makeStoveOven3D(x, z, s) {
+function makeStoveOven3D(x, z, s, furniture = {}) {
   const g = new THREE.Group();
-  // Compact freestanding range: sized between a sink/counter and an agent, with clear front approach space.
   g.add(posVox(0, 0.42 * s, 0, 1.1 * s, 0.84 * s, 0.9 * s, 0x90a4ae));
   g.add(posVox(0, 0.86 * s, -0.42 * s, 1.05 * s, 0.38 * s, 0.08 * s, 0x455a64)); // back guard
   g.add(posVox(0, 0.89 * s, 0, 1.14 * s, 0.08 * s, 0.94 * s, 0x263238)); // black cooktop
   g.add(posVox(0, 0.94 * s, 0.02 * s, 1.0 * s, 0.035 * s, 0.78 * s, 0x37474f));
 
-  // Oven door, handle, and glowing window.
-  g.add(posVox(0, 0.38 * s, 0.46 * s, 0.82 * s, 0.42 * s, 0.035 * s, 0xb0bec5));
-  g.add(posVox(0, 0.43 * s, 0.485 * s, 0.54 * s, 0.18 * s, 0.025 * s, 0x263238));
-  g.add(posVox(0, 0.43 * s, 0.502 * s, 0.48 * s, 0.12 * s, 0.012 * s, 0xffb74d));
-  g.add(posVox(0, 0.62 * s, 0.505 * s, 0.72 * s, 0.055 * s, 0.035 * s, 0x78909c));
+  // A real hinged door group lets the oven sequence open, close, heat, and reopen.
+  const ovenCavity = posVox(0, 0.43 * s, 0.468 * s, 0.66 * s, 0.30 * s, 0.03 * s, 0x101827);
+  g.add(ovenCavity);
+  const ovenLight = posVox(0, 0.43 * s, 0.486 * s, 0.54 * s, 0.20 * s, 0.018 * s, 0x2d3748);
+  ovenLight.material = ovenLight.material.clone();
+  ovenLight.material.emissive = new THREE.Color(0xff7a18);
+  ovenLight.material.emissiveIntensity = 0;
+  g.add(ovenLight);
+  const ovenTray = posVox(0, 0.34 * s, 0.34 * s, 0.58 * s, 0.025 * s, 0.34 * s, 0x475569);
+  g.add(ovenTray);
+  const ovenFoodRaw = posVox(0, 0.375 * s, 0.34 * s, 0.40 * s, 0.04 * s, 0.22 * s, 0xfca5a5);
+  const ovenFoodCooking = posVox(0, 0.382 * s, 0.34 * s, 0.43 * s, 0.055 * s, 0.24 * s, 0xf97316);
+  const ovenFoodCooked = posVox(0, 0.39 * s, 0.34 * s, 0.45 * s, 0.07 * s, 0.25 * s, 0xb91c1c);
+  [ovenFoodRaw, ovenFoodCooking, ovenFoodCooked].forEach(mesh => { mesh.visible = false; g.add(mesh); });
+  const ovenDoorPivot = new THREE.Group();
+  ovenDoorPivot.position.set(0, 0.18 * s, 0.50 * s);
+  const doorPanel = posVox(0, 0.20 * s, 0, 0.82 * s, 0.42 * s, 0.035 * s, 0xb0bec5);
+  const doorWindow = posVox(0, 0.24 * s, 0.022 * s, 0.54 * s, 0.18 * s, 0.025 * s, 0x263238);
+  const doorHandle = posVox(0, 0.40 * s, 0.04 * s, 0.72 * s, 0.055 * s, 0.035 * s, 0x78909c);
+  ovenDoorPivot.add(doorPanel, doorWindow, doorHandle);
+  g.add(ovenDoorPivot);
 
-  // Four burners with an orange active burner and a tiny pot for instant readability.
   const burnerPositions = [[-0.28, -0.18], [0.28, -0.18], [-0.28, 0.22], [0.28, 0.22]];
+  let activeBurner = null;
   burnerPositions.forEach(([bx, bz], idx) => {
-    g.add(posVox(bx * s, 0.96 * s, bz * s, 0.22 * s, 0.03 * s, 0.22 * s, idx === 0 ? 0xff7043 : 0x78909c));
+    const burner = posVox(bx * s, 0.96 * s, bz * s, 0.22 * s, 0.03 * s, 0.22 * s, idx === 0 ? 0x7f1d1d : 0x78909c);
+    if (idx === 0) { burner.material = burner.material.clone(); activeBurner = burner; }
+    g.add(burner);
     g.add(posVox(bx * s, 0.985 * s, bz * s, 0.13 * s, 0.018 * s, 0.13 * s, 0x111820));
   });
-  g.add(posVox(-0.28 * s, 1.04 * s, -0.18 * s, 0.34 * s, 0.12 * s, 0.24 * s, 0x546e7a));
-  g.add(posVox(-0.28 * s, 1.12 * s, -0.18 * s, 0.22 * s, 0.035 * s, 0.16 * s, 0xffcc80));
+  const pan = new THREE.Group();
+  pan.position.set(-0.28 * s, 1.04 * s, -0.18 * s);
+  // Cooking props start hidden so an idle stove never flashes a pan while a
+  // freshly-built mesh waits for its first feedback update.
+  pan.visible = false;
+  // The appliance's interaction side is local +Z, so rotate the complete pan
+  // until its handle points toward the agent standing at stovetop-front.
+  pan.rotation.y = -Math.PI * 0.5;
+  // Scale the complete assembly so the bowl, handle, and food stay proportional.
+  const panAssemblyScale = 1.12;
+  pan.scale.setScalar(panAssemblyScale);
+  const panBody = cyl(0.18 * s, 0.08 * s, 0x334155);
+  pan.add(panBody);
+  const panHandle = posVox(0.25 * s, 0.02 * s, 0, 0.34 * s, 0.045 * s, 0.07 * s, 0x1e293b);
+  pan.add(panHandle);
+  const panRaw = posVox(0, 0.055 * s, 0, 0.24 * s, 0.025 * s, 0.14 * s, 0x84cc16);
+  const panCooking = posVox(0, 0.065 * s, 0, 0.26 * s, 0.04 * s, 0.15 * s, 0xf59e0b);
+  const panCooked = posVox(0, 0.075 * s, 0, 0.27 * s, 0.055 * s, 0.16 * s, 0x65a30d);
+  [panRaw, panCooking, panCooked].forEach(mesh => { mesh.visible = false; pan.add(mesh); });
+  g.add(pan);
+  const steam = Array.from({ length: 5 }, (_, index) => {
+    const puff = new THREE.Mesh(_sphereGeo, new THREE.MeshLambertMaterial({ color: 0xe2e8f0, transparent: true, opacity: 0.48, flatShading: true }));
+    puff.scale.setScalar((0.025 + index * 0.004) * s);
+    puff.visible = false;
+    puff.userData.steamIndex = index;
+    g.add(puff);
+    return puff;
+  });
 
   // Knob strip + display on the front edge.
   g.add(posVox(0, 0.78 * s, 0.49 * s, 0.92 * s, 0.12 * s, 0.035 * s, 0x546e7a));
@@ -21574,6 +21846,27 @@ function makeStoveOven3D(x, z, s) {
   // Feet.
   g.add(posVox(-0.4 * s, 0.04 * s, 0.34 * s, 0.12 * s, 0.08 * s, 0.12 * s, 0x455a64));
   g.add(posVox(0.4 * s, 0.04 * s, 0.34 * s, 0.12 * s, 0.08 * s, 0.12 * s, 0x455a64));
+  g.userData.stoveOvenFeedbackParts = {
+    scale: s,
+    pan,
+    panBody,
+    panHandle,
+    panAssemblyScale,
+    panBasePosition: pan.position.clone(),
+    activeBurner,
+    panStages: [panRaw, panCooking, panCooked],
+    steam,
+    ovenDoorPivot,
+    ovenLight,
+    ovenTray,
+    ovenStages: [ovenFoodRaw, ovenFoodCooking, ovenFoodCooked],
+    active: false,
+    activeSinceMs: 0,
+    cookingMethod: null,
+    foodId: null,
+    authoredFoodCount: STOVE_OVEN_FOOD_ITEMS.length,
+  };
+  g.userData.stoveOvenState = furniture?.stoveOvenState || null;
   g.position.set(x, 0, z);
   return g;
 }
@@ -23715,7 +24008,7 @@ function updateAgentAnimations(dt) {
     // ── REAL STATUS OVERRIDE: working agents go to their desk ──────
     // When an agent's live status is 'working', override schedule entirely:
     // walk to their assigned desk (or a fallback desk/work spot) and type there.
-    const hasDeskDrinkConsumeActivity = String(agent._idleActivity?.kind || '').startsWith('coffee-desk-') || String(agent._idleActivity?.kind || '').startsWith('water-desk-') || String(agent._idleActivity?.kind || '').startsWith('vending-desk-') || String(agent._idleActivity?.kind || '').startsWith('microwave-desk-') || String(agent._idleActivity?.kind || '').startsWith('fridge-desk-');
+    const hasDeskDrinkConsumeActivity = String(agent._idleActivity?.kind || '').startsWith('coffee-desk-') || String(agent._idleActivity?.kind || '').startsWith('water-desk-') || String(agent._idleActivity?.kind || '').startsWith('vending-desk-') || String(agent._idleActivity?.kind || '').startsWith('microwave-desk-') || String(agent._idleActivity?.kind || '').startsWith('fridge-desk-') || String(agent._idleActivity?.kind || '').startsWith('stove-oven-desk-');
     const hasProtectedDrinkActivity = hasStandingServiceMachineActivity || hasDeskDrinkConsumeActivity;
     const hasPostDrinkDeskRelease = isPostDrinkDeskReleaseActive(agent);
     const workTarget = !liveModeScriptedSuppressed && isWorkPresenceStatus(agent.status) && !meetingTarget && !manualPlacementLocked && !hasProtectedDrinkActivity && !hasPostDrinkDeskRelease ? getAgentWorkTarget(agent) : null;
@@ -23874,7 +24167,7 @@ function updateAgentAnimations(dt) {
             agent._idleActivity.dockTarget = { x: routedWorkTarget.apiX, y: routedWorkTarget.apiZ };
             agent._idleActivity.faceAngle = Number.isFinite(routedWorkTarget.faceAngle) ? routedWorkTarget.faceAngle : agent._idleActivity.faceAngle;
             agent._stayTimer = Math.max(Number(agent._idleActivity.stayMs || 16000), 12000);
-            agent._schedPhase = agent._idleActivity.animationId || (String(agent._idleActivity.kind || '').startsWith('water-desk-') ? 'water-desk-sip' : (String(agent._idleActivity.kind || '').startsWith('vending-desk-') ? 'vending-desk-consume' : (String(agent._idleActivity.kind || '').startsWith('microwave-desk-') ? 'microwave-desk-consume' : (String(agent._idleActivity.kind || '').startsWith('fridge-desk-') ? 'fridge-desk-consume' : 'coffee-desk-sip'))));
+            agent._schedPhase = agent._idleActivity.animationId || (String(agent._idleActivity.kind || '').startsWith('water-desk-') ? 'water-desk-sip' : (String(agent._idleActivity.kind || '').startsWith('vending-desk-') ? 'vending-desk-consume' : (String(agent._idleActivity.kind || '').startsWith('microwave-desk-') ? 'microwave-desk-consume' : (String(agent._idleActivity.kind || '').startsWith('fridge-desk-') ? 'fridge-desk-consume' : (String(agent._idleActivity.kind || '').startsWith('stove-oven-desk-') ? 'stove-oven-desk-consume' : 'coffee-desk-sip')))));
           }
           if (agent._group3d && Number.isFinite(routedWorkTarget.faceAngle)) agent._group3d.rotation.y = routedWorkTarget.faceAngle;
         }
@@ -25026,6 +25319,15 @@ function updateAgentAnimations(dt) {
       agent._idleActivity = null;
       agent._schedPhase = 'done-consuming-microwave-food';
       agent._wanderTimer = 1600 + Math.random() * 2400;
+    } else if (String(agent._idleActivity?.kind || '').startsWith('stove-oven-desk-')) {
+      const deskActivity = agent._idleActivity;
+      const cleanupPlan = cleanupAgentStoveOvenFood(agent, 'consume');
+      releaseAgentIntent(agent, 'stove-oven-desk-consume-complete', { clearRoute: true, clearLifecycle: true, releaseBy: 'object-complete' });
+      releaseAgentFromDrinkDeskConsume(agent, 'stove-oven');
+      completeIdleWorldAction(deskActivity, { objectEffect: 'temporary-stove-oven-food-consumed-at-desk', completionState: 'done-consuming-stove-oven-food', sipCount: 3, temporaryCleanup: cleanupPlan ? { id: cleanupPlan.item?.id || null, label: cleanupPlan.item?.label || null, stoveOvenFoodId: cleanupPlan.item?.stoveOvenFoodId || null, cookingMethod: cleanupPlan.item?.cookingMethod || null, reason: cleanupPlan.reason || 'consume', terminalState: cleanupPlan.finalItem?.temporaryUse?.state || 'consumed', skipPersistence: cleanupPlan.effects?.skipPersistence === true } : null });
+      agent._idleActivity = null;
+      agent._schedPhase = 'done-consuming-stove-oven-food';
+      agent._wanderTimer = 1600 + Math.random() * 2400;
     } else if (String(agent._idleActivity?.kind || '').startsWith('fridge-desk-')) {
       const deskActivity = agent._idleActivity;
       const cleanupPlan = cleanupAgentChilledSnack(agent, 'consume');
@@ -25084,6 +25386,27 @@ function updateAgentAnimations(dt) {
           agent._schedPhase = 'done-consuming-fridge-food';
           agent._wanderTimer = 1600 + Math.random() * 2400;
         }
+      }
+    } else if (String(agent._idleActivity?.kind || '').startsWith('stovetop-') || String(agent._idleActivity?.kind || '').startsWith('oven-')) {
+      const cookingActivity = agent._idleActivity;
+      const cookingBuilding = buildingsMap.get(cookingActivity?.buildingId);
+      const stove = cookingBuilding?.interior?.furniture?.[cookingActivity?.furnitureIndex];
+      const method = normalizeStoveOvenCookingMethod(cookingActivity.cookingMethod || cookingActivity.mode || cookingActivity.kind);
+      const cookedItem = spawnStoveOvenFoodForAgent(agent, cookingActivity);
+      if (stove?.type === 'stove') {
+        const previousCount = Number(stove.stoveOvenState?.cookedCount || 0);
+        const release = releaseStandingUseMachine(stove, cookingActivity, agent, 'stove-oven-cooking-retrieve-complete');
+        stove.stoveOvenState = { ...(stove.stoveOvenState || {}), status: 'ready', cookingMethod: method, selectedFoodId: cookedItem?.stoveOvenFoodId || cookingActivity.stoveOvenFoodId || null, selectedFoodLabel: cookedItem?.label || cookingActivity.selectedFoodLabel || null, panState: 'idle-clean', ovenDoorState: 'closed-after-retrieve', ovenLightOn: false, cookedCount: previousCount + 1, carriedToDesk: true, releasedSlotId: release?.slotId || cookingActivity.activeUseSlotId || (method === 'oven' ? 'oven-front' : 'stovetop-front'), activeSlotIds: [], reservedSlotIds: [], completionReleased: release?.release?.ok !== false, lastAction: cookingActivity.actionId || cookingActivity.action || (method === 'oven' ? 'life.bakeInOven' : 'life.cookOnStovetop'), persistentFurniture: true };
+        persistBuilding(cookingBuilding);
+        advanceScriptedServiceQueueAfterUse(cookingBuilding, cookingActivity.furnitureIndex, 'stove-oven-cooking-retrieve-complete');
+      }
+      completeIdleWorldAction(cookingActivity, { objectEffect: 'temporary-stove-oven-food-picked-up', completionState: 'stove-oven-food-carried-to-desk', stoveOvenFoodId: cookedItem?.stoveOvenFoodId || cookingActivity.stoveOvenFoodId || null, cookingMethod: method });
+      const routedToDesk = startStoveOvenDeskConsumeActivity(agent, cookingActivity);
+      if (!routedToDesk) {
+        cleanupAgentStoveOvenFood(agent, 'consume');
+        agent._idleActivity = null;
+        agent._schedPhase = 'done-consuming-stove-oven-food';
+        agent._wanderTimer = 1600 + Math.random() * 2400;
       }
     } else if (String(agent._idleActivity?.kind || '').startsWith('kitchen-island-')) {
       const islandActivity = agent._idleActivity;
@@ -26593,7 +26916,10 @@ function updateAgentAnimations(dt) {
             activateStandingUseMachineOnArrival(agent, idleActivity);
             spawnHeatedSnackForAgent(agent, idleActivity);
           }
-          if (String(idleActivity.kind || '').startsWith('printer-scanner-') || String(idleActivity.kind || '').startsWith('tool-cart-') || String(idleActivity.kind || '').startsWith('workbench-') || String(idleActivity.kind || '').startsWith('server-rack-') || String(idleActivity.kind || '').startsWith('diagnostic-station-') || String(idleActivity.kind || '').startsWith('medical-supply-cabinet-') || String(idleActivity.kind || '').startsWith('supply-cabinet-')) {
+          if (!idleActivity.isServiceQueueWait && (String(idleActivity.kind || '').startsWith('stovetop-') || String(idleActivity.kind || '').startsWith('oven-'))) {
+            activateStandingUseMachineOnArrival(agent, idleActivity);
+          }
+          if (String(idleActivity.kind || '').startsWith('printer-scanner-') || String(idleActivity.kind || '').startsWith('tool-cart-') || String(idleActivity.kind || '').startsWith('workbench-') || String(idleActivity.kind || '').startsWith('server-rack-') || String(idleActivity.kind || '').startsWith('diagnostic-station-') || String(idleActivity.kind || '').startsWith('medical-supply-cabinet-') || String(idleActivity.kind || '').startsWith('supply-cabinet-') || (!isAgentRuntimeNumberedServiceQueueWait(idleActivity) && String(idleActivity.kind || '').startsWith('dumbbell-rack-'))) {
             activateStandingUseMachineOnArrival(agent, idleActivity);
           }
           if (String(idleActivity.kind || '').startsWith('cafe-counter-') || String(idleActivity.kind || '').startsWith('checkout-counter-') || String(idleActivity.kind || '').startsWith('checkout-register-') || String(idleActivity.kind || '').startsWith('kitchen-island-') || String(idleActivity.kind || '').startsWith('food-truck-counter-')) {
@@ -26630,8 +26956,11 @@ function updateAgentAnimations(dt) {
           else if (idleKind.startsWith('vending-desk-')) agent._schedPhase = idleActivity.animationId || 'vending-desk-consume';
           else if (idleKind.startsWith('microwave-desk-')) agent._schedPhase = idleActivity.animationId || 'microwave-desk-consume';
           else if (idleKind.startsWith('fridge-desk-')) agent._schedPhase = idleActivity.animationId || 'fridge-desk-consume';
+          else if (idleKind.startsWith('stove-oven-desk-')) agent._schedPhase = idleActivity.animationId || 'stove-oven-desk-consume';
           else if (idleKind.startsWith('fridge-')) agent._schedPhase = 'fridge-use';
           else if (idleKind.startsWith('microwave-')) agent._schedPhase = 'microwave-heat';
+          else if (idleKind.startsWith('stovetop-')) agent._schedPhase = 'stovetop-cook';
+          else if (idleKind.startsWith('oven-')) agent._schedPhase = 'oven-use';
           else if (idleKind.startsWith('outdoor-planter-')) agent._schedPhase = 'outdoor-planter-water';
           else if (idleKind.startsWith('flower-bed-')) agent._schedPhase = 'flower-bed-inspect';
           else if (idleKind.startsWith('fountain-')) agent._schedPhase = idleKind.includes('gather') ? 'fountain-gather' : 'fountain-watch';
@@ -28793,7 +29122,7 @@ const DRAG_AGENT_FIRST_INTERACTION = Object.freeze({
   counter: ['_useCoreLegacyFurniture', 'counter'],
   diningTable: ['_useCoreLegacyFurniture', 'diningTable'],
   sink: ['_useSinkFurniture', 'wash-drink'],
-  stove: ['_useCoreLegacyFurniture', 'stove'],
+  stove: ['_useStoveOvenFurniture', 'random'],
   tv: ['_useCoreLegacyFurniture', 'tv'],
   grill: ['_useGrillFurniture', 'cook'],
   parkLamp: ['_useParkLampFurniture', 'inspect'],
@@ -28844,7 +29173,10 @@ function setDragDropAgentPickerValue(furnitureType, agentId) {
 function startDraggedAgentStandingMachineUse(drop, agent, options = {}) {
   const machine = drop?.furniture || null;
   const building = drop?.building || null;
-  const baseConfig = getStandingUseMachineConfig(machine?.type);
+  const requestedStoveMethod = machine?.type === 'stove'
+    ? normalizeStoveOvenCookingMethod(options.cookingMethod || drop?.spot?.spotId || drop?.spot?.action)
+    : null;
+  const baseConfig = getStandingUseMachineConfig(machine?.type, requestedStoveMethod);
   if (!agent || !building || !machine || !baseConfig) return { triggered: false, reason: 'not-standing-machine' };
   const isDumbbellRack = machine.type === 'dumbbellRack';
   const dumbbellWorkout = isDumbbellRack
@@ -28861,17 +29193,20 @@ function startDraggedAgentStandingMachineUse(drop, agent, options = {}) {
   const isWater = isWaterCoolerFurnitureType(machine.type);
   const isMicrowave = machine.type === 'microwave';
   const isFridge = machine.type === 'fridge';
+  const isStove = machine.type === 'stove';
   const spawnsTemporary = config.spawnsTemporary !== false;
-  const spawnedLabel = isDumbbellRack ? 'Paired Dumbbells' : (spawnsTemporary ? (isWater ? 'Water Cup' : (machine.type === 'vending' ? 'Temporary Snack / Drink' : (machine.type === 'fridge' ? 'Temporary Snack / Food' : (isMicrowave ? 'Microwave Food' : 'Coffee Drink')))) : null);
+  const spawnedLabel = isDumbbellRack ? 'Paired Dumbbells' : (spawnsTemporary ? (isWater ? 'Water Cup' : (machine.type === 'vending' ? 'Temporary Snack / Drink' : (machine.type === 'fridge' ? 'Temporary Snack / Food' : (isMicrowave ? 'Microwave Food' : (isStove ? 'Cooked Stove / Oven Food' : 'Coffee Drink'))))) : null);
   const spawnedItem = !spawnsTemporary
     ? null
     : (isDumbbellRack
     ? { label: spawnedLabel, catalogId: 'pairedDumbbellHandProps', temporary: true, carryable: false, visualOnly: true, attachPoints: ['left-hand', 'right-hand'], count: 2, removeOnCompletion: true }
+    : (isStove
+    ? { label: 'Random Cooked Food', catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', cookingMethod: requestedStoveMethod, itemPool: listStoveOvenFoodsForMethod(requestedStoveMethod).map(item => item.label), foodItems: listStoveOvenFoodsForMethod(requestedStoveMethod).map(item => ({ id: item.id, label: item.label, visualKind: item.visualKind, method: item.method })), validDropOff: STOVE_OVEN_VALID_DROP_OFFS }
     : (isMicrowave
     ? { label: 'Microwave Food', catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', itemPool: MICROWAVE_FOOD_ITEM_POOL.map(item => item.label), foodItems: MICROWAVE_FOOD_ITEM_POOL.map(item => ({ id: item.id, label: item.label, visualKind: item.visualKind })), validDropOff: MICROWAVE_FOOD_VALID_DROP_OFFS }
     : (isFridge
     ? { label: 'Random Fridge Food', catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', itemPool: [...FRIDGE_FOOD_ITEM_LABELS], foodItems: FRIDGE_FOOD_ITEMS.map(item => ({ id: item.id, label: item.label, visualKind: item.visualKind })), validDropOff: FRIDGE_FOOD_VALID_DROP_OFFS }
-    : { label: spawnedLabel, catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', visualKind: isWater ? 'water' : (machine.type === 'countertopCoffeeMachine' ? 'coffee' : null), drinkKind: isWater ? 'water' : (machine.type === 'countertopCoffeeMachine' ? 'coffee' : null), validDropOff: ['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter'] })));
+    : { label: spawnedLabel, catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', visualKind: isWater ? 'water' : (machine.type === 'countertopCoffeeMachine' ? 'coffee' : null), drinkKind: isWater ? 'water' : (machine.type === 'countertopCoffeeMachine' ? 'coffee' : null), validDropOff: ['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter'] }))));
   agent._manualPlacementPreview = false;
   agent._manualPlacementLockUntil = performance.now() + Math.max(AGENT_MANUAL_PLACE_HOLD_MS, config.useDurationMs);
   const routeTarget = makeStandingMachineRouteTarget(building, machine, drop.index, spot, config, {
@@ -28921,6 +29256,7 @@ function startDraggedAgentStandingMachineUse(drop, agent, options = {}) {
     reservationId: standingUse.reservation?.id || machine.reservation?.id || null,
     capacityKey: standingUse.capacityKey,
     mode: config.mode,
+    ...(isStove ? { cookingMethod: requestedStoveMethod } : {}),
     action: config.actionId,
     actionId: config.actionId,
     animationId: config.animationId,
@@ -28957,7 +29293,7 @@ function startDraggedAgentStandingMachineUse(drop, agent, options = {}) {
     if (agent._group3d) agent._group3d.rotation.y = Number(spot.faceAngle);
   }
   requestObjectActionPointDebugOverlayRefresh();
-  return { triggered: true, handler: 'startDraggedAgentStandingMachineUse', mode: config.mode, workoutMode: dumbbellWorkout?.id || null, furnitureType: machine.type, directServiceUse: true, snapToUseSpot: true, actionId: config.actionId };
+  return { triggered: true, handler: 'startDraggedAgentStandingMachineUse', mode: config.mode, cookingMethod: isStove ? requestedStoveMethod : null, workoutMode: dumbbellWorkout?.id || null, furnitureType: machine.type, directServiceUse: true, snapToUseSpot: true, actionId: config.actionId };
 }
 
 function getManualServiceMachineDragDropIntentMetadata(drop, agent, config, spot) {
@@ -28995,11 +29331,13 @@ function startDraggedAgentServiceMachineViaFurnitureHandler(drop, agent, options
   const [fnName, mode] = DRAG_AGENT_FIRST_INTERACTION[drop.furniture.type] || [];
   const fn = fnName ? window[fnName] : null;
   if (typeof fn !== 'function') return { triggered: false, reason: 'missing-service-machine-handler', handler: fnName || null };
-  const config = getStandingUseMachineConfig(drop.furniture.type);
+  const stoveDropMethod = drop.furniture.type === 'stove' ? normalizeStoveOvenCookingMethod(drop.spot?.spotId || drop.spot?.action) : null;
+  const config = getStandingUseMachineConfig(drop.furniture.type, stoveDropMethod);
   const spot = config ? (getFurnitureActionSpot(drop.building, drop.furniture, config.slotId) || drop.spot || getFurnitureActionSpot(drop.building, drop.furniture)) : (drop.spot || null);
   const mesh = findFurnitureMesh(drop.buildingId, drop.index);
   _selectedFurniture = { buildingId: drop.buildingId, index: drop.index, mesh };
-  fn(mode, agent.id, {
+  const invokedMode = drop.furniture.type === 'stove' ? stoveDropMethod : mode;
+  fn(invokedMode, agent.id, {
     ...options,
     intentMetadata: getManualServiceMachineDragDropIntentMetadata(drop, agent, config, spot),
   });
@@ -29015,7 +29353,7 @@ function startDraggedAgentServiceMachineViaFurnitureHandler(drop, agent, options
   if (!activity.routeApproachTarget && drop.spot) {
     activity.routeApproachTarget = { x: drop.spot.apiX, y: drop.spot.apiZ, floor: drop.spot.floor, spotId: drop.spot.spotId, faceAngle: drop.spot.faceAngle };
   }
-  return { triggered: true, handler: fnName, mode, furnitureType: drop.furniture.type, directServiceUse: true, snapToUseSpot: true, actionId: activity.actionId || activity.action || config?.actionId || drop.spot?.action || null, viaNormalFurnitureHandler: true };
+  return { triggered: true, handler: fnName, mode: invokedMode, furnitureType: drop.furniture.type, directServiceUse: true, snapToUseSpot: true, actionId: activity.actionId || activity.action || config?.actionId || drop.spot?.action || null, viaNormalFurnitureHandler: true };
 }
 
 function requestBackendQueueUseForDraggedAgentDrop(drop, agent) {
@@ -29051,7 +29389,7 @@ function requestBackendQueueUseForDraggedAgentDrop(drop, agent) {
     agentId: getAgentDebugId(agent),
     queueSpotId,
     queueIndex,
-    actionId: getStandingUseMachineConfig(drop.furniture.type)?.actionId || queueDef.action || drop.spot?.action || 'planning.schedule',
+    actionId: getStandingUseMachineConfig(drop.furniture.type, drop.furniture.type === 'stove' ? drop.spot?.spotId : null)?.actionId || queueDef.action || drop.spot?.action || 'planning.schedule',
     sourceKind: 'manual-drag-drop-service-queue',
   }) || {
     x: drop.spot?.apiX,
@@ -29068,13 +29406,19 @@ function requestBackendQueueUseForDraggedAgentDrop(drop, agent) {
     slotId: `${queueSpotId}:${queueIndex}`,
     queueSpotId,
     queueIndex,
-    actionId: getStandingUseMachineConfig(drop.furniture.type)?.actionId || queueDef.action || drop.spot?.action || 'planning.schedule',
+    actionId: getStandingUseMachineConfig(drop.furniture.type, drop.furniture.type === 'stove' ? drop.spot?.spotId : null)?.actionId || queueDef.action || drop.spot?.action || 'planning.schedule',
     faceAngle: drop.spot?.faceAngle,
   };
-  // queue:0/1/2 are runtime-assigned line positions. Request the canonical
-  // use-front spot and let realtime atomically choose direct use or FIFO queue.
-  const useConfig = getScriptedServiceQueueUseConfig(drop.furniture);
-  const machineConfig = getStandingUseMachineConfig(drop.furniture.type);
+  // queue:0/1/2 are runtime-assigned line positions, not authored object
+  // targets. Sending one of those dynamic ids to realtime made the request
+  // fail with invalid_object_use_target because the server catalog only
+  // contains the canonical `queue` and `use-front` spots. Match the working
+  // coffee/microwave/vending/water-cooler path: request the canonical use spot
+  // and let the authoritative server atomically choose direct use or allocate
+  // the next FIFO queue slot from its current occupancy.
+  const requestedStoveMethod = drop.furniture.type === 'stove' ? normalizeStoveOvenCookingMethod(drop.spot?.spotId || drop.spot?.action) : null;
+  const machineConfig = getStandingUseMachineConfig(drop.furniture.type, requestedStoveMethod);
+  const useConfig = getScriptedServiceQueueUseConfig(drop.furniture, machineConfig?.actionId || requestedStoveMethod);
   const useSpotId = useConfig.activationSpotId || machineConfig?.slotId || 'use-front';
   const useSpot = getFurnitureActionSpot(drop.building, drop.furniture, useSpotId)
     || getFurnitureActionSpot(drop.building, drop.furniture)
@@ -29121,6 +29465,7 @@ function requestBackendQueueUseForDraggedAgentDrop(drop, agent) {
     manualDrop: true,
     manualDropSnapToUse: true,
     skipReachabilityAdjust: true,
+    ...(drop.furniture.type === 'stove' ? { cookingMethod: requestedStoveMethod } : {}),
   };
   const request = requestBackendObjectUseForExplicitObjectAction(agent, canonicalUseTarget, drop.building, canonicalUseTarget.floor, {
     owner: 'manual',
@@ -29375,10 +29720,11 @@ function triggerDraggedAgentObjectInteraction(drop, agent) {
       if (backendQueue?.accepted) {
         return { triggered: true, handler: 'runtime:objectUseRequest', mode: 'queue', furnitureType: drop.furniture.type, queued: true, queueIndex: backendQueue.queueIndex || 0, backendRuntime: true };
       }
-      if (String(backendQueue?.reason || '').startsWith('queue-full')) {
-        return { triggered: false, reason: backendQueue.reason, handler: 'runtime:objectUseRequest', mode: 'queue', furnitureType: drop.furniture.type };
+      if (String(backendQueue?.reason || "").startsWith("queue-full")) {
+        return { triggered: false, reason: backendQueue.reason, handler: "runtime:objectUseRequest", mode: "queue", furnitureType: drop.furniture.type };
       }
-      const queued = queueAgentForScriptedServiceObject(agent, drop.building, drop.index, 'manual-drag-drop-service-queue', { allowClaimedServiceObject: true, sourceKind: 'manual-drag-drop-service-queue', ignoreRecentCooldown: true });
+      const dropMachineConfig = getStandingUseMachineConfig(drop.furniture.type, drop.furniture.type === "stove" ? drop.spot?.spotId : null);
+      const queued = queueAgentForScriptedServiceObject(agent, drop.building, drop.index, "manual-drag-drop-service-queue", { allowClaimedServiceObject: true, sourceKind: "manual-drag-drop-service-queue", ignoreRecentCooldown: true, actionId: dropMachineConfig?.actionId || drop.spot?.action || null });
       if (queued?.queued) {
         return { triggered: true, handler: 'queueAgentForScriptedServiceObject', mode: 'queue', furnitureType: drop.furniture.type, queued: true, queueIndex: queued.reservation?.queueIndex || 0 };
       }
@@ -29398,7 +29744,7 @@ function triggerDraggedAgentObjectInteraction(drop, agent) {
       buildingId: drop.buildingId,
       furnitureIndex: drop.index,
       furnitureType: drop.furniture.type,
-      actionId: drop.spot?.action || null,
+      actionId: getScriptedServiceQueueUseConfig(drop.furniture).actionId || drop.spot?.action || null,
       source: 'manual-drag-drop-direct-service-use',
     });
     if (direct?.accepted !== false) {
@@ -29511,9 +29857,9 @@ function activateSnappedManualStandingMachineDrop(drop, agent) {
   if (activity.source !== 'manual-drag-drop-machine-use') return false;
   if (activity.buildingId !== drop.buildingId || Number(activity.furnitureIndex) !== Number(drop.index)) return false;
   const kind = String(activity.kind || '');
-  if (!kind.startsWith('water-cooler-') && !kind.startsWith('coffee-machine-')) return false;
+  const config = getStandingUseMachineConfig(activity.furnitureType || machine.type, activity);
+  if (!config || !isScriptedServiceQueueFurniture(machine) || activity.isServiceQueueWait === true) return false;
   if (activity.phase !== 'approach') return false;
-  const config = getStandingUseMachineConfig(activity.furnitureType || machine.type);
   const nowMs = performance.now();
   const stayMs = Math.max(1, Number(activity.stayMs || config?.useDurationMs || 9000) || 9000);
   agent._wanderTarget = null;
@@ -29527,7 +29873,13 @@ function activateSnappedManualStandingMachineDrop(drop, agent) {
   activateStandingUseMachineOnArrival(agent, activity);
   if (kind.startsWith('water-cooler-')) agent._schedPhase = 'water-cooler-dispense';
   else if (kind.startsWith('coffee-machine-')) agent._schedPhase = 'coffee-brew';
+  else if (kind.startsWith('vending-machine-')) agent._schedPhase = 'vending-machine-dispense';
+  else if (kind.startsWith('microwave-')) agent._schedPhase = 'microwave-heating';
+  else if (kind.startsWith('stovetop-')) agent._schedPhase = 'stovetop-cook';
+  else if (kind.startsWith('oven-')) agent._schedPhase = 'oven-use';
   else if (kind.startsWith('sink-')) agent._schedPhase = 'sink-wash-drink';
+  else if (kind.startsWith('dumbbell-rack-')) agent._schedPhase = 'dumbbell-rack-workout';
+  else agent._schedPhase = `${kind || machine.type || 'standing-machine'}-active`;
   requestObjectActionPointDebugOverlayRefresh();
   return true;
 }
@@ -29771,6 +30123,7 @@ function startDraggedAgent(agent, e) {
     startedAt: performance.now(),
   };
   releaseBackendObjectUseForManualAgentMove(agent, 'manual-agent-picked-up');
+  agent._runtimeBackendObjectUseAdoption = null;
   clearAgentTransientMovement(agent);
   agent._runtimeObserverOnly = false;
   agent._runtimeRemoteWriterActive = false;
@@ -31140,6 +31493,8 @@ function updateBuildingLOD() {
       if (obj.userData?.pingPongRuntimeVisual) {
         return;
       }
+      // The sink runtime owns these child meshes. LOD must never revive idle
+      // droplets/bubbles or suppress an active stream.
       if (obj.userData?.sinkEffect) {
         return;
       }
@@ -36687,6 +37042,8 @@ function applyBuildingViewMode(building, mode) {
     if (child.userData?.pingPongRuntimeVisual) {
       return;
     }
+    // Sink feedback visibility is edge-driven by updateSinkFeedback. Generic
+    // building view changes must not reveal idle effect meshes.
     if (child.userData?.sinkEffect) {
       return;
     }
@@ -44359,7 +44716,7 @@ const ACTION_SPOTS = {
   plant:        { dx: 0.4, dz: 0, facing: 'west' },   // stand next to plant
   diningTable:  { dx: 0, dz: 1.05, facing: 'north', action: 'eat_talk' }, // sit/eat/talk at the dining table
   sink:         { dx: 0, dz: 0.95, facing: 'north', action: 'wash_drink' }, // wash/drink at sink with cabinet/agent clearance
-  stove:        { dx: 0, dz: 0.8, facing: 'north', action: 'cook' }, // cook at stove / oven
+  stove:        { dx: -0.34, dz: 0.92, facing: 'north', action: 'life.cookOnStovetop' },
   grill:        { dx: 0, dz: 0.96, facing: 'north', action: 'life.cookAtGrill' }, // stand at front cook/use spot with hot-side clearance to flip/wait at the outdoor grill
   outdoorPlanter:{ dx: 0, dz: 0.76, facing: 'north', action: 'maintenance.waterOutdoorPlanter' }, // route to front watering/inspect waypoint for solid stationary outdoor planter
   flowerBed:{ dx: 0, dz: 0.76, facing: 'north', action: 'planning.inspectFlowerBed' }, // route to front edge inspect/smell/water waypoint outside low solid flower-bed footprint
@@ -44651,8 +45008,10 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'queue', dx: 0, dz: 1.55, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
   ],
   stove: [
-    { id: 'cook-front', dx: 0, dz: 0.80, facing: 'north', action: 'life.cookAtStove', roles: ['use', 'cook', 'standing-use'], capacityKind: 'exclusive', capacity: 1, standingUseSlotId: 'cook-front', activationSpotId: 'cook-front', animationId: 'stove-cook' },
-    { id: 'hot-clearance', dx: 0, dz: 1.22, facing: 'north', action: 'life.cookAtStove', roles: ['clearance'], capacityKind: 'clearance', capacity: 1, reservable: false },
+    { id: 'stovetop-front', dx: -0.34, dz: 0.92, facing: 'north', action: 'life.cookOnStovetop', roles: ['use', 'cook', 'stovetop', 'standing-use'], capacityKind: 'exclusive', capacity: 1, standingUseSlotId: 'stovetop-front', activationSpotId: 'stovetop-front', animationId: 'stovetop-cook' },
+    { id: 'oven-front', dx: 0.34, dz: 1.04, facing: 'north', action: 'life.bakeInOven', roles: ['use', 'cook', 'bake', 'oven', 'standing-use'], capacityKind: 'exclusive', capacity: 1, standingUseSlotId: 'oven-front', activationSpotId: 'oven-front', animationId: 'oven-use' },
+    { id: 'queue', dx: 0, dz: 1.72, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
+    { id: 'hot-clearance', dx: 0, dz: 1.36, facing: 'north', action: 'life.cookOnStovetop', roles: ['clearance'], capacityKind: 'clearance', capacity: 1, reservable: false },
   ],
   tv: [
     { id: 'watch-front', dx: 0, dz: 2.18, facing: 'north', action: 'life.watchTv', roles: ['watch', 'use', 'social'], capacityKind: 'shared', capacity: 3, animationId: 'tv-watch' },
@@ -52254,6 +52613,19 @@ const STANDING_USE_MACHINE_CONFIGS = Object.freeze({
     readyStatus: 'ready',
     useDurationMs: 8500,
   }),
+  stove: Object.freeze({
+    slotId: 'stovetop-front',
+    actionId: 'life.cookOnStovetop',
+    kind: 'stovetop-cook-food',
+    animationId: 'stovetop-cook',
+    mode: 'stovetop',
+    completeMode: 'ready',
+    stateKey: 'stoveOvenState',
+    reserveStatus: 'reserved',
+    activeStatus: 'cooking',
+    readyStatus: 'ready',
+    useDurationMs: 14500,
+  }),
   dumbbellRack: Object.freeze({
     slotId: 'use-front',
     actionId: 'training.dumbbellCurls',
@@ -52360,8 +52732,17 @@ const STANDING_USE_MACHINE_CONFIGS = Object.freeze({
   }),
 });
 
-function getStandingUseMachineConfig(furnitureType) {
-  return STANDING_USE_MACHINE_CONFIGS[furnitureType] || null;
+function getStandingUseMachineConfig(furnitureType, requestedMode = null) {
+  const base = STANDING_USE_MACHINE_CONFIGS[furnitureType] || null;
+  if (furnitureType !== 'stove' || !base) return base;
+  const method = normalizeStoveOvenCookingMethod(
+    requestedMode && typeof requestedMode === 'object'
+      ? (requestedMode.cookingMethod || requestedMode.mode || requestedMode.actionId || requestedMode.action || requestedMode.spotId || requestedMode.activationSpotId)
+      : requestedMode,
+  );
+  return method === 'oven'
+    ? { ...base, slotId: 'oven-front', actionId: 'life.bakeInOven', kind: 'oven-bake-food', animationId: 'oven-use', mode: 'oven', useDurationMs: 16000 }
+    : base;
 }
 
 function getStandingUseMachineObjectKey(buildingId, furnitureIndex, furnitureType) {
@@ -52498,6 +52879,8 @@ function queueAgentForScriptedServiceObject(agent, building, furnitureIndex, rea
     releaseAgentIntent(agent, 'service-queue-full', { releaseBy: 'route-failed', clearRoute: true, clearLifecycle: true, releaseSummary: queued?.reason || 'service queue full' });
     return { queued: false, reason: queued?.reason || 'queue-rejected' };
   }
+  if (options.stoveOvenFoodId && queued.reservation) queued.reservation.stoveOvenFoodId = options.stoveOvenFoodId;
+  if (options.cookingMethod && queued.reservation) queued.reservation.cookingMethod = normalizeStoveOvenCookingMethod(options.cookingMethod);
   releaseAgentIntent(agent, reason, { releaseBy: 'owner', clearRoute: true, clearLifecycle: false, releaseSummary: 'arrived service object was busy, entering queue' });
   retargetScriptedServiceQueueAgent(agent, building, furniture, furnitureIndex, queued.reservation, reason);
   syncScriptedServiceQueueLine(building, furnitureIndex, reason, { allowClaimedServiceObject: queueableClaim });
@@ -52505,8 +52888,20 @@ function queueAgentForScriptedServiceObject(agent, building, furnitureIndex, rea
 }
 
 function chooseAgentForStandingUseSpot(building, buildingId, spot, kindPrefix) {
+  const hasActiveLifecycle = (agent) => {
+    if (agent?._runtimeBackendObjectUsePending) return true;
+    const activity = agent?._idleActivity || null;
+    if (activity && !['complete', 'completed', 'cancelled', 'canceled', 'failed', 'released'].includes(String(activity.phase || '').toLowerCase())) return true;
+    const snapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || agent?._runtimeRenderSnapshot || null;
+    if (!snapshot || !isAgentRuntimeSnapshotFresh(snapshot)) return false;
+    const snapshotState = String(snapshot.state || '').trim().toLowerCase();
+    const activityActive = snapshot.visualState?.activityActive === true || snapshot.visualState?.activity?.phase === 'active';
+    const leasedRouteActive = Boolean(snapshot.routeId) && isAgentRuntimeSnapshotLeaseActive(snapshot);
+    return activityActive || leasedRouteActive || ['routing', 'moving', 'using', 'active', 'waiting', 'queued'].includes(snapshotState);
+  };
   const sameBuildingAgents = agentsList.filter(agent => {
     if (!agent || isWorkPresenceStatus(agent.status) || agent._atDesk || agent._tagState?.playing) return false;
+    if (hasActiveLifecycle(agent)) return false;
     if (agent._idleActivity && String(agent._idleActivity.kind || '').startsWith(kindPrefix)) return false;
     const currentBuilding = getMovementInteriorBuildingAt(agent.x, agent.y) || agent._currentBuilding || null;
     return currentBuilding?.id === buildingId || isPointInsideBuildingInterior(building, agent.x, agent.y, -0.15);
@@ -52514,7 +52909,7 @@ function chooseAgentForStandingUseSpot(building, buildingId, spot, kindPrefix) {
   return sameBuildingAgents.sort((a, b) =>
     Math.hypot((a.x || 0) - spot.apiX, (a.y || 0) - spot.apiZ) -
     Math.hypot((b.x || 0) - spot.apiX, (b.y || 0) - spot.apiZ)
-  )[0] || agentsList.find(candidate => candidate && candidate.status !== 'working');
+  )[0] || agentsList.find(candidate => candidate && !isWorkPresenceStatus(candidate.status) && !hasActiveLifecycle(candidate)) || null;
 }
 
 function reserveStandingUseMachineForAgent(machine, building, furnitureIndex, agent, config, spot) {
@@ -52569,7 +52964,7 @@ function reserveStandingUseMachineForAgent(machine, building, furnitureIndex, ag
 }
 
 function activateStandingUseMachineOnArrival(agent, idleActivity) {
-  const config = getStandingUseMachineConfig(idleActivity?.furnitureType);
+  const config = getStandingUseMachineConfig(idleActivity?.furnitureType, idleActivity);
   const building = buildingsMap.get(idleActivity?.buildingId);
   const machine = building?.interior?.furniture?.[idleActivity?.furnitureIndex];
   if (!agent || !building || !machine || !config || machine.type !== idleActivity.furnitureType || idleActivity.standingUseActivated) return null;
@@ -52694,6 +53089,10 @@ function activateStandingUseMachineOnArrival(agent, idleActivity) {
     machine.fridgeState = { ...(machine.fridgeState || {}), doorOpen: true, doorState: 'open', retrieveState: idleActivity.mode === 'check-stock' ? 'inspecting-stock' : 'retrieving', stockLevel: machine.fridgeState?.stockLevel || 'stocked', animationState: 'open-reach-close' };
   } else if (machine.type === 'microwave') {
     machine.applianceState = { ...(machine.applianceState || {}), doorOpen: true, doorState: 'open-place-close', heatState: 'heating', retrieveState: 'waiting-to-retrieve', animationState: 'open-place-press-wait-remove' };
+  } else if (machine.type === 'stove') {
+    const method = normalizeStoveOvenCookingMethod(idleActivity.cookingMethod || idleActivity.mode || idleActivity.kind);
+    machine.stoveOvenState = { ...(machine.stoveOvenState || {}), status: 'cooking', cookingMethod: method, selectedFoodId: idleActivity.stoveOvenFoodId || null, panState: method === 'stovetop' ? 'sizzle-progress' : 'idle', ovenDoorState: method === 'oven' ? 'open-close-heat-reopen' : 'closed', ovenLightOn: method === 'oven', animationState: method === 'oven' ? 'open-close-heat-reopen-retrieve' : 'pan-sizzle-toss-finish', persistentFurniture: true };
+    idleActivity.cookingMethod = method;
   } else if (machine.type === 'dumbbellRack') {
     const workout = getDumbbellWorkoutMode(idleActivity.workoutMode || idleActivity.actionId || idleActivity.action, Number(machine.rackState?.workoutCount || 0));
     idleActivity.kind = workout.kind;
@@ -52734,7 +53133,7 @@ function activateStandingUseMachineOnArrival(agent, idleActivity) {
 }
 
 function releaseStandingUseMachine(machine, activity = {}, agent = null, reason = 'standing-use-complete') {
-  const config = getStandingUseMachineConfig(machine?.type || activity?.furnitureType);
+  const config = getStandingUseMachineConfig(machine?.type || activity?.furnitureType, activity);
   if (!machine || !config) return null;
   const store = getStandingUseMachineStore(machine);
   const reservationId = activity.reservationId || machine.reservation?.id || null;
@@ -53850,6 +54249,111 @@ function cleanupAgentChilledSnack(agent, reason = 'consume') {
   const item = agent._carriedItem || agent._carrying || { id: `fridge-food-${agent.id || 'agent'}`, catalogId: 'temporaryFood', label: 'Fridge Food', state: 'carried', consumable: true };
   const plan = makeTemporaryUseCleanupPlan(item, { reason, now: new Date().toISOString() });
   agent._lastFridgeCleanupPlan = plan;
+  agent._carriedItem = null;
+  agent._carrying = null;
+  agent._carryItem = null;
+  if (agent.carryItem === 'snack') agent.carryItem = null;
+  agent.carryItemTimer = 0;
+  return plan;
+}
+
+function chooseStoveOvenFoodItem(agent = {}, activity = {}) {
+  const method = normalizeStoveOvenCookingMethod(activity.cookingMethod || activity.mode || activity.kind);
+  const forced = findStoveOvenFoodItem(activity.stoveOvenFoodId || activity.foodItemId || activity.foodType || '', method);
+  if (forced) return forced;
+  const pool = listStoveOvenFoodsForMethod(method);
+  const seed = `${agent?.id || agent?.name || 'agent'}:${activity.buildingId || ''}:${activity.furnitureIndex ?? ''}:${method}:${Date.now()}`;
+  return pool[stableScheduleHash(seed) % pool.length] || pool[0];
+}
+
+function makeStoveOvenFoodTemporaryItem(agent, activity = {}) {
+  const nowIso = new Date().toISOString();
+  const foodItem = chooseStoveOvenFoodItem(agent, activity);
+  const method = foodItem.method;
+  activity.cookingMethod = method;
+  activity.stoveOvenFoodId = foodItem.id;
+  const item = makeTemporaryUseItem({
+    id: `stove-oven-${foodItem.id}-${agent?.id || 'agent'}-${Date.now()}`,
+    catalogId: 'temporaryFood',
+    label: foodItem.label,
+    kind: 'consumable',
+    visualKind: foodItem.visualKind,
+    stoveOvenFoodId: foodItem.id,
+    cookingMethod: method,
+    packageColor: foodItem.packageColor,
+    accentColor: foodItem.accentColor,
+    needEffects: foodItem.needEffects,
+    satisfies: ['hunger', 'food', 'cooked-food', `${method}-food`],
+    state: 'carried',
+    consumable: true,
+    attachPoint: 'right-hand',
+    validDropOff: STOVE_OVEN_VALID_DROP_OFFS,
+    sourceFurnitureType: 'stove',
+    sourceBuildingId: activity.buildingId || null,
+    sourceFurnitureIndex: activity.furnitureIndex ?? null,
+    temporaryUse: { persistence: { mode: 'omit-on-save', omitOnSave: true, owner: 'stove-oven-runtime' } },
+  }, { now: nowIso, timeouts: { carriedTtlMs: 90 * 1000, placedTtlMs: 30 * 1000 } });
+  return Object.freeze({ ...item, stoveOvenFoodId: foodItem.id, cookingMethod: method, visualKind: foodItem.visualKind, packageColor: foodItem.packageColor, accentColor: foodItem.accentColor, needEffects: foodItem.needEffects, validDropOff: STOVE_OVEN_VALID_DROP_OFFS });
+}
+
+function spawnStoveOvenFoodForAgent(agent, activity = {}) {
+  if (!agent) return null;
+  if (agent._carriedItem?.sourceFurnitureType === 'stove') return agent._carriedItem;
+  const item = makeStoveOvenFoodTemporaryItem(agent, activity);
+  agent._carriedItem = item;
+  agent._carrying = item;
+  agent._carryItem = item;
+  agent.carryItem = 'snack';
+  agent.carryItemTimer = Math.max(agent.carryItemTimer || 0, 4000);
+  activity.spawnedTemporaryItemId = item.id;
+  activity.carryAttachPoint = 'right-hand';
+  activity.stoveOvenFoodId = item.stoveOvenFoodId;
+  activity.cookingMethod = item.cookingMethod;
+  activity.temporaryItem = { id: item.id, label: item.label, kind: item.kind, visualKind: item.visualKind, stoveOvenFoodId: item.stoveOvenFoodId, cookingMethod: item.cookingMethod, packageColor: item.packageColor, accentColor: item.accentColor, needEffects: item.needEffects || null, satisfies: item.satisfies || null, validDropOff: item.validDropOff, sourceFurnitureType: 'stove', state: item.temporaryUse.state, expiresAt: item.temporaryUse.expiresAt };
+  return item;
+}
+
+function startStoveOvenDeskConsumeActivity(agent, cookingActivity = {}) {
+  if (!agent || (!agent._carriedItem && !agent._carrying && agent.carryItem !== 'snack')) return false;
+  clearManualPlacementHoldForDrinkMachineDeskHandoff(agent, cookingActivity);
+  const carriedItem = agent._carriedItem || agent._carrying || null;
+  const workArrival = getAgentWorkArrivalTarget(agent);
+  const fallbackBuilding = cookingActivity?.buildingId ? buildingsMap.get(cookingActivity.buildingId) : null;
+  const target = workArrival?.target || (fallbackBuilding ? getBuildingInteriorWorkArrivalTarget(fallbackBuilding) : null);
+  const targetBuilding = workArrival?.building || fallbackBuilding || null;
+  if (!target || !Number.isFinite(Number(target.x)) || !Number.isFinite(Number(target.y))) return false;
+  releaseAgentIntent(agent, 'stove-oven-pickup-complete-route-to-desk', { clearRoute: true, clearLifecycle: false, releaseBy: 'object-complete' });
+  const route = setAgentTarget(agent, { ...target, targetKind: 'work-desk', actionId: 'life.eatStoveOvenFoodAtDesk' }, targetBuilding, target.floor || workArrival?.floor || 1, {
+    owner: 'object-action',
+    priorityName: 'explicit-object',
+    phase: 'approach',
+    object: { type: 'furniture', id: target.objectInstanceId || target.objectId || `stove-oven-desk-${agent.id || agent.name || 'agent'}`, buildingId: target.buildingId || targetBuilding?.id || null, furnitureIndex: target.furnitureIndex ?? null, objectType: 'desk', actionId: 'life.eatStoveOvenFoodAtDesk', spotId: target.spotId || target.interactionSpotId || null, preserveUntilRelease: true },
+    release: { policy: 'on-object-complete', releaseObjectReservation: false, releaseActiveUse: false },
+    source: { family: 'agent-life-stove-oven', functionName: 'startStoveOvenDeskConsumeActivity', taskRef: 'virtual-world-stove-oven-food-desk-consume' },
+    debug: { label: 'stove-oven:desk-consume', sourceSummary: 'cooked food remains attached to the right hand until desk consumption' },
+  });
+  if (route?.accepted === false) return false;
+  agent._idleActivity = {
+    kind: 'stove-oven-desk-consume', phase: 'approach', startedAt: performance.now(),
+    buildingId: target.buildingId || targetBuilding?.id || null, furnitureIndex: target.furnitureIndex ?? null, spotId: target.spotId || target.interactionSpotId || null,
+    stayMs: 16000, faceAngle: workArrival?.workTarget?.faceAngle ?? target.faceAngle ?? agent._deskFacingAngle ?? null,
+    dockTarget: { x: Number(target.x), y: Number(target.y) }, dockSnapRadius: WORK_DESK_DOCK_SNAP_RADIUS,
+    furnitureType: 'desk', action: 'life.eatStoveOvenFoodAtDesk', actionId: 'life.eatStoveOvenFoodAtDesk', animationId: 'stove-oven-desk-consume',
+    consumeDurationMs: 16000, carryAttachPoint: 'right-hand', cookingMethod: cookingActivity.cookingMethod || carriedItem?.cookingMethod || null,
+    temporaryItem: cookingActivity.temporaryItem || { id: carriedItem?.id || null, label: carriedItem?.label || 'Cooked Food', visualKind: carriedItem?.visualKind || null, stoveOvenFoodId: carriedItem?.stoveOvenFoodId || null, cookingMethod: carriedItem?.cookingMethod || null, sourceFurnitureType: 'stove', state: 'carried' },
+    lifecycle: { stationary: false, carryable: false, temporary: true, consumesTemporary: true },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  agent._schedPhase = 'stove-oven-desk-consume';
+  return true;
+}
+
+function cleanupAgentStoveOvenFood(agent, reason = 'consume') {
+  if (!agent?._carriedItem && !agent?._carrying && agent?.carryItem !== 'snack') return null;
+  const item = agent._carriedItem || agent._carrying || { id: `stove-oven-food-${agent.id || 'agent'}`, catalogId: 'temporaryFood', label: 'Cooked Food', state: 'carried', consumable: true };
+  const plan = makeTemporaryUseCleanupPlan(item, { reason, now: new Date().toISOString() });
+  agent._lastStoveOvenCleanupPlan = plan;
   agent._carriedItem = null;
   agent._carrying = null;
   agent._carryItem = null;
@@ -55580,6 +56084,34 @@ function _buildPoolTableActionButtons(buildingId, index) {
   `;
 }
 
+function getStoveOvenState(buildingId, index) {
+  const stove = buildingsMap.get(buildingId)?.interior?.furniture?.[index];
+  if (stove?.type !== 'stove') return { active: null, queueLength: 0, label: 'Unavailable' };
+  const active = agentsList.find(agent => {
+    const activity = agent?._idleActivity;
+    return activity && activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index) &&
+      (String(activity.kind || '').startsWith('stovetop-') || String(activity.kind || '').startsWith('oven-'));
+  }) || null;
+  const queueLength = normalizeScriptedServiceQueueReservations(stove._scriptedServiceQueueStore || { reservations: [] }).length;
+  const method = normalizeStoveOvenCookingMethod(active?._idleActivity?.cookingMethod || active?._idleActivity?.kind || stove.stoveOvenState?.cookingMethod);
+  return {
+    active,
+    queueLength,
+    method,
+    label: active ? `${active.name || active.id} • ${method === 'oven' ? 'oven' : 'stovetop'}${queueLength ? ` • ${queueLength} queued` : ''}` : (queueLength ? `${queueLength} queued` : 'Ready • 10 recipes'),
+  };
+}
+
+function _buildStoveOvenActionButtons(buildingId, index) {
+  const state = getStoveOvenState(buildingId, index);
+  return `
+    <span style="padding:4px 10px;border:1px solid rgba(249,115,22,0.55);border-radius:4px;color:${state.active ? '#fde68a' : '#bbf7d0'};background:rgba(124,45,18,0.24)" title="Shared FCFS queue, five stovetop foods, and five oven foods">🔥 ${state.label}</span>
+    <button onclick="window._useStoveOvenFurniture('random')" style="padding:4px 12px;background:rgba(234,88,12,0.30);border:1px solid #fb923c;color:#fff;border-radius:4px;cursor:pointer" title="Randomly choose the stovetop or oven and one of its five recipes">🎲 Cook Random</button>
+    <button onclick="window._useStoveOvenFurniture('stovetop')" style="padding:4px 12px;background:rgba(180,83,9,0.30);border:1px solid #f59e0b;color:#fff;border-radius:4px;cursor:pointer" title="Cook one of five foods in the animated pan">🍳 Stove Top</button>
+    <button onclick="window._useStoveOvenFurniture('oven')" style="padding:4px 12px;background:rgba(185,28,28,0.30);border:1px solid #f87171;color:#fff;border-radius:4px;cursor:pointer" title="Open, load, close, heat, reopen, and retrieve one of five oven foods">♨️ Oven</button>
+  `;
+}
+
 const CORE_LEGACY_FURNITURE_ACTIONS = Object.freeze({
   counter: Object.freeze({ icon: '🥣', label: 'Prep at Counter', actionId: 'life.prepAtCounter' }),
   diningTable: Object.freeze({ icon: '🍽️', label: 'Eat / Talk', actionId: 'life.eatAtDiningTable' }),
@@ -55591,6 +56123,7 @@ const CORE_LEGACY_FURNITURE_ACTIONS = Object.freeze({
 function _buildCoreLegacyFurnitureActionButtons(furnitureType) {
   const config = CORE_LEGACY_FURNITURE_ACTIONS[furnitureType];
   if (!config) return '';
+  if (furnitureType === 'stove') return '';
   if (furnitureType === 'sink') {
     return `<button onclick="window._useSinkFurniture('wash-drink')" style="padding:4px 12px;background:rgba(14,116,144,0.30);border:1px solid #22d3ee;color:#fff;border-radius:4px;cursor:pointer" title="Route an available agent to wash at the sink, or join the same FIFO service queue used by other service machines">${config.icon} ${config.label}</button>`;
   }
@@ -55643,6 +56176,7 @@ function _showFurnitureActions(buildingId, index) {
   const supplyCabinetButtons = furniture?.type === 'supplyCabinet' ? _buildSupplyCabinetActionButtons(buildingId, index) : '';
   const kitchenIslandButtons = furniture?.type === 'kitchenIsland' ? _buildKitchenIslandActionButtons(buildingId, index) : '';
   const coreLegacyFurnitureButtons = _buildCoreLegacyFurnitureActionButtons(furniture?.type);
+  const stoveOvenButtons = furniture?.type === 'stove' ? _buildStoveOvenActionButtons(buildingId, index) : '';
   const receptionDeskButtons = furniture?.type === 'receptionDesk' ? _buildReceptionDeskActionButtons(buildingId, index) : '';
   const cafeCounterButtons = furniture?.type === 'cafeCounter' ? _buildCafeCounterActionButtons(buildingId, index) : '';
   const smallCafeTableButtons = furniture?.type === 'smallCafeTable' ? _buildSmallCafeTableActionButtons(buildingId, index) : '';
@@ -55726,6 +56260,7 @@ function _showFurnitureActions(buildingId, index) {
     ${medicalSupplyCabinetButtons}
     ${supplyCabinetButtons}
     ${coreLegacyFurnitureButtons}
+    ${stoveOvenButtons}
     ${kitchenIslandButtons}
     ${receptionDeskButtons}
     ${cafeCounterButtons}
@@ -58866,6 +59401,218 @@ window.__verifyFridgeColorOptions = () => {
     editorRendered,
     editorColorInputCount: colorInputs.length,
   };
+};
+
+window.__verifyStoveOvenFeature = () => {
+  const model = makeStoveOven3D(0, 0, 1, { type: 'stove' });
+  // Exercise the same optimization path used by live tagged furniture. Stove
+  // animation parts must survive it as one attached, movable assembly.
+  mergeFurnitureItemVoxels(model);
+  const parts = model.userData?.stoveOvenFeedbackParts || null;
+  const spots = FURNITURE_INTERACTION_SPOTS.stove || [];
+  const useSpots = spots.filter(spot => spot.roles?.includes('use'));
+  const queueSpot = spots.find(spot => spot.roles?.includes('queue')) || null;
+  const stovetopConfig = getStandingUseMachineConfig('stove', 'stovetop');
+  const ovenConfig = getStandingUseMachineConfig('stove', 'oven');
+  const distinctStageColors = stages => new Set((stages || []).map(stage => stage.material?.color?.getHex?.())).size;
+  model.userData.buildingId = '__stove-oven-verifier__';
+  model.userData.furnitureIndex = -731;
+  model.updateMatrixWorld(true);
+  const panCenter = parts?.pan?.getWorldPosition(new THREE.Vector3()) || new THREE.Vector3();
+  const panHandleCenter = parts?.panHandle?.getWorldPosition(new THREE.Vector3()) || new THREE.Vector3();
+  const panHandleDirection = panHandleCenter.sub(panCenter);
+  const panRound = Boolean(parts?.panBody) && Math.abs(parts.panBody.scale.x - parts.panBody.scale.z) < 0.0001;
+  const panHandleFacesAgent = panHandleDirection.z > 0 && panHandleDirection.z > Math.abs(panHandleDirection.x) * 2;
+  const panAssemblyScale = Number(parts?.panAssemblyScale || 0);
+  const panSlightlyLarger = panAssemblyScale >= 1.1 && panAssemblyScale <= 1.15 &&
+    Math.abs(Number(parts?.pan?.scale?.x || 0) - panAssemblyScale) < 0.0001;
+  const panAssemblyAttached = parts?.panBody?.parent === parts?.pan && parts?.panHandle?.parent === parts?.pan;
+  const idlePanBodyCenter = parts?.panBody?.getWorldPosition(new THREE.Vector3()) || new THREE.Vector3();
+  const idlePanHandleCenter = parts?.panHandle?.getWorldPosition(new THREE.Vector3()) || new THREE.Vector3();
+  const sampleAnimation = (method, progress, foodId) => {
+    const stayMs = method === 'oven' ? 16000 : 14500;
+    const sampleNowMs = 1200;
+    const verifierAgent = {
+      id: `stove-oven-verifier-${method}-${progress}`,
+      _idleActivity: {
+        kind: method === 'oven' ? 'oven-bake-food' : 'stovetop-cook-food',
+        phase: 'active',
+        buildingId: '__stove-oven-verifier__',
+        furnitureIndex: -731,
+        cookingMethod: method,
+        stoveOvenFoodId: foodId,
+        stayMs,
+      },
+    };
+    parts.active = true;
+    parts.activeSinceMs = sampleNowMs - stayMs * progress;
+    agentsList.push(verifierAgent);
+    try {
+      updateStoveOvenFeedback(model, { type: 'stove' }, sampleNowMs);
+      model.updateMatrixWorld(true);
+      const animatedPanBodyCenter = parts.panBody.getWorldPosition(new THREE.Vector3());
+      const animatedPanHandleCenter = parts.panHandle.getWorldPosition(new THREE.Vector3());
+      return {
+        progress: Number(parts.progress.toFixed(3)),
+        panStage: parts.panStages.findIndex(stage => stage.visible),
+        ovenStage: parts.ovenStages.findIndex(stage => stage.visible),
+        steamVisible: parts.steam.filter(puff => puff.visible).length,
+        panTilt: Number(parts.pan.rotation.z.toFixed(4)),
+        panBodyTravel: Number(animatedPanBodyCenter.distanceTo(idlePanBodyCenter).toFixed(4)),
+        panHandleTravel: Number(animatedPanHandleCenter.distanceTo(idlePanHandleCenter).toFixed(4)),
+        ovenDoorRotation: Number(parts.ovenDoorPivot.rotation.x.toFixed(4)),
+        ovenLightIntensity: Number(parts.ovenLight.material.emissiveIntensity.toFixed(4)),
+      };
+    } finally {
+      agentsList.pop();
+    }
+  };
+  const animationSamples = {
+    stovetop: [0.1, 0.5, 0.9].map(progress => sampleAnimation('stovetop', progress, 'tomato-pasta')),
+    oven: [0.1, 0.5, 0.9].map(progress => sampleAnimation('oven', progress, 'vegetable-pizza')),
+  };
+  updateStoveOvenFeedback(model, { type: 'stove' }, 1800);
+  const idleCookingEffectsHidden = parts.pan.visible === false &&
+    parts.panStages.every(stageMesh => stageMesh.visible === false) &&
+    parts.ovenStages.every(stageMesh => stageMesh.visible === false) &&
+    parts.steam.every(puff => puff.visible === false);
+  const animationProgressionOk =
+    animationSamples.stovetop.map(sample => sample.panStage).join(',') === '0,1,2' &&
+    animationSamples.stovetop[1].steamVisible === 5 &&
+    animationSamples.oven.map(sample => sample.ovenStage).join(',') === '0,1,2' &&
+    animationSamples.oven[0].ovenDoorRotation < -0.1 &&
+    animationSamples.oven[1].ovenLightIntensity > 0.2 &&
+    animationSamples.oven[2].ovenDoorRotation < -0.1;
+  const panAssemblyMovesTogether = panAssemblyAttached &&
+    animationSamples.stovetop[1].panBodyTravel > 0.005 &&
+    animationSamples.stovetop[1].panHandleTravel > 0.005;
+  return {
+    ok: STOVE_OVEN_FOOD_ITEMS.length === 10 &&
+      listStoveOvenFoodsForMethod('stovetop').length === 5 &&
+      listStoveOvenFoodsForMethod('oven').length === 5 &&
+      useSpots.length === 2 &&
+      useSpots.some(spot => spot.id === 'stovetop-front') &&
+      useSpots.some(spot => spot.id === 'oven-front') &&
+      queueSpot?.queueMaxPoints === 3 &&
+      queueSpot?.queueSpacingTiles === 0.8 &&
+      stovetopConfig?.animationId === 'stovetop-cook' &&
+      ovenConfig?.animationId === 'oven-use' &&
+      parts?.panStages?.length === 3 &&
+      parts?.ovenStages?.length === 3 &&
+      parts?.steam?.length === 5 &&
+      distinctStageColors(parts?.panStages) === 3 &&
+      distinctStageColors(parts?.ovenStages) === 3 &&
+      panRound &&
+      panHandleFacesAgent &&
+      panSlightlyLarger &&
+      panAssemblyMovesTogether &&
+      idleCookingEffectsHidden &&
+      Boolean(parts?.pan && parts?.ovenDoorPivot && parts?.ovenLight) &&
+      animationProgressionOk,
+    foodCount: STOVE_OVEN_FOOD_ITEMS.length,
+    stovetopFoods: listStoveOvenFoodsForMethod('stovetop').map(item => item.id),
+    ovenFoods: listStoveOvenFoodsForMethod('oven').map(item => item.id),
+    useSpots: useSpots.map(spot => ({ id: spot.id, action: spot.action, animationId: spot.animationId })),
+    queue: queueSpot ? { id: queueSpot.id, capacity: queueSpot.queueMaxPoints, spacing: queueSpot.queueSpacingTiles } : null,
+    model: {
+      panPresent: Boolean(parts?.pan),
+      panRound,
+      panHandleFacesAgent,
+      panAssemblyScale,
+      panSlightlyLarger,
+      panAssemblyAttached,
+      panAssemblyMovesTogether,
+      idleCookingEffectsHidden,
+      panHandleDirection: {
+        x: Number(panHandleDirection.x.toFixed(3)),
+        z: Number(panHandleDirection.z.toFixed(3)),
+      },
+      panStageCount: parts?.panStages?.length || 0,
+      steamCount: parts?.steam?.length || 0,
+      ovenDoorPresent: Boolean(parts?.ovenDoorPivot),
+      ovenLightPresent: Boolean(parts?.ovenLight),
+      ovenStageCount: parts?.ovenStages?.length || 0,
+      authoredFoodCount: parts?.authoredFoodCount || 0,
+    },
+    animations: { stovetop: stovetopConfig?.animationId || null, oven: ovenConfig?.animationId || null, desk: 'stove-oven-desk-consume' },
+    animationProgressionOk,
+    animationSamples,
+  };
+};
+
+window.__startLiveStoveOvenInteractionForVerification = (method = 'stovetop', preferredAgentId = null, stoveOvenFoodId = '') => {
+  let target = null;
+  for (const [buildingId, building] of buildingsMap.entries()) {
+    const index = building?.interior?.furniture?.findIndex(item => item?.type === 'stove') ?? -1;
+    if (index >= 0) {
+      target = { buildingId, building, index, stove: building.interior.furniture[index] };
+      break;
+    }
+  }
+  if (!target) return { ok: false, reason: 'stove-not-found' };
+  const normalizedMethod = normalizeStoveOvenCookingMethod(method);
+  _selectedFurniture = { buildingId: target.buildingId, index: target.index, mesh: findFurnitureMesh(target.buildingId, target.index) };
+  const result = window._useStoveOvenFurniture(normalizedMethod, preferredAgentId, {
+    stoveOvenFoodId,
+    intentMetadata: { sourceFamily: 'manual-object-action', sourceFunction: '__startLiveStoveOvenInteractionForVerification' },
+  });
+  return {
+    ok: Boolean(result?.triggered || result?.queued),
+    mode: result?.queued ? 'queued' : (result?.triggered ? 'using' : 'rejected'),
+    cookingMethod: normalizedMethod,
+    buildingId: target.buildingId,
+    index: target.index,
+    agentId: result?.agentId || result?.reservation?.agentId || null,
+    foodId: result?.foodId || result?.reservation?.stoveOvenFoodId || stoveOvenFoodId || null,
+    backendRuntime: result?.backendRuntime === true,
+    reason: result?.reason || null,
+  };
+};
+
+window.__getLiveStoveOvenDebug = () => {
+  const entries = [];
+  for (const [buildingId, building] of buildingsMap.entries()) {
+    (building?.interior?.furniture || []).forEach((furniture, index) => {
+      if (furniture?.type !== 'stove') return;
+      const mesh = findFurnitureMesh(buildingId, index);
+      const parts = mesh?.userData?.stoveOvenFeedbackParts || null;
+      const state = getStoveOvenState(buildingId, index);
+      entries.push({
+        buildingId,
+        index,
+        label: state.label,
+        queueCount: state.queueCount,
+        activeAgentId: state.active ? getAgentRuntimeAgentId(state.active) : null,
+        cookingMethod: parts?.cookingMethod || furniture.stoveOvenState?.cookingMethod || null,
+        foodId: parts?.foodId || furniture.stoveOvenState?.selectedFoodId || null,
+        progress: Number((parts?.progress || 0).toFixed(3)),
+        panVisible: parts?.pan?.visible === true,
+        panAssemblyAttached: parts?.panBody?.parent === parts?.pan && parts?.panHandle?.parent === parts?.pan,
+        visiblePanStage: parts?.panStages?.findIndex(stage => stage.visible) ?? -1,
+        visibleOvenStage: parts?.ovenStages?.findIndex(stage => stage.visible) ?? -1,
+        ovenDoorRotation: Number((parts?.ovenDoorPivot?.rotation?.x || 0).toFixed(3)),
+        ovenLightIntensity: Number((parts?.ovenLight?.material?.emissiveIntensity || 0).toFixed(3)),
+        steamVisible: parts?.steam?.filter(puff => puff.visible).length || 0,
+      });
+    });
+  }
+  const stoveAgents = agentsList
+    .filter((agent) => {
+      const kind = String(agent?._idleActivity?.kind || '');
+      return kind.startsWith('stovetop-') || kind.startsWith('oven-') || kind === 'stove-oven-desk-consume';
+    })
+    .map(agent => ({
+      agentId: getAgentRuntimeAgentId(agent),
+      kind: agent._idleActivity?.kind || null,
+      phase: agent._idleActivity?.phase || null,
+      cookingMethod: agent._idleActivity?.cookingMethod || agent._carriedItem?.cookingMethod || null,
+      foodId: agent._idleActivity?.stoveOvenFoodId || agent._idleActivity?.temporaryItem?.stoveOvenFoodId || agent._carriedItem?.stoveOvenFoodId || null,
+      carrying: Boolean(agent._carriedItem || agent._carrying),
+      carriedLabel: agent._carriedItem?.label || agent._carrying?.label || null,
+      runtimeOwner: agent._runtimeOwner || null,
+      runtimeState: agent._runtimeState || null,
+    }));
+  return { ok: entries.length > 0, entries, stoveAgents };
 };
 
 window.__verifyArmchairConferenceChairUpgrades = () => {
@@ -62243,7 +62990,7 @@ window._useCoffeeMachineFurniture = (mode = 'coffee', preferredAgentId = null, o
   setTimeout(() => _showFurnitureActions(buildingId, index), 80);
 };
 
-window._useVendingMachineFurniture = (mode = 'buy') => {
+window._useVendingMachineFurniture = (mode = 'buy', preferredAgentId = null, options = {}) => {
   if (!_selectedFurniture) return;
   const { buildingId, index } = _selectedFurniture;
   const building = buildingsMap.get(buildingId);
@@ -62260,8 +63007,9 @@ window._useVendingMachineFurniture = (mode = 'buy') => {
       String(activity.kind || '').startsWith('service-queue-')
     ));
   };
-  let agent = chooseAgentForStandingUseSpot(building, buildingId, spot, 'vending-machine-');
-  if (isAlreadyUsingThisVendingMachine(agent)) {
+  const preferredAgent = preferredAgentId != null ? agentsList.find(candidate => String(candidate?.id || candidate?.name || '') === String(preferredAgentId)) : null;
+  let agent = preferredAgent || chooseAgentForStandingUseSpot(building, buildingId, spot, 'vending-machine-');
+  if (!preferredAgent && isAlreadyUsingThisVendingMachine(agent)) {
     agent = agentsList
       .filter(candidate => candidate && !isAlreadyUsingThisVendingMachine(candidate) && !isWorkPresenceStatus(candidate.status) && !candidate._atDesk && !candidate._tagState?.playing)
       .sort((a, b) => Math.hypot((a.x || 0) - spot.apiX, (a.y || 0) - spot.apiZ) - Math.hypot((b.x || 0) - spot.apiX, (b.y || 0) - spot.apiZ))[0] || null;
@@ -62297,7 +63045,9 @@ window._useVendingMachineFurniture = (mode = 'buy') => {
   const routeTarget = makeStandingMachineRouteTarget(building, machine, index, spot, config, {
     reservationId: standingUse.reservation?.id || machine.reservation?.id || null,
   });
+  const intentMetadata = options && typeof options === 'object' ? (options.intentMetadata || {}) : {};
   setAgentTargetForExplicitObjectAction(agent, routeTarget, building, spot.floor, {
+    ...intentMetadata,
     furnitureIndex: index,
     furniture: machine,
     objectType: 'vending',
@@ -62420,6 +63170,203 @@ window._useInteriorDoorFurniture = (mode = 'pass') => {
   syncManualFurnitureColliders(building);
   showToast(`🚪 ${agent.name || agent.id} is passing through the interior door`, 'success');
   setTimeout(() => _showFurnitureActions(buildingId, index), 80);
+};
+
+function requestBackendStoveOvenQueueUse(agent, building, stove, index, spot, config, foodItem, intentMetadata = {}) {
+  if (!agent || !building || !stove || !spot || !config || !foodItem) return null;
+  const objectKey = getAgentRuntimeFurnitureObjectKey(building.id, index, 'stove');
+  const objectId = stove.id || stove.instanceId || `${building.id}:${index}`;
+  const target = makeStandingMachineRouteTarget(building, stove, index, spot, config, {
+    objectKey,
+    baseObjectKey: objectKey,
+    objectId,
+    objectInstanceId: objectId,
+    cookingMethod: foodItem.method,
+    stoveOvenFoodId: foodItem.id,
+    stayMs: config.useDurationMs,
+  });
+  return requestBackendObjectUseForExplicitObjectAction(agent, target, building, spot.floor, {
+    ...intentMetadata,
+    owner: 'manual',
+    priorityName: 'manual',
+    phase: 'approach',
+    buildingId: building.id,
+    furnitureIndex: index,
+    furniture: stove,
+    objectType: 'stove',
+    objectKey,
+    baseObjectKey: objectKey,
+    actionId: config.actionId,
+    activityKind: config.kind,
+    animationId: config.animationId,
+    cookingMethod: foodItem.method,
+    stoveOvenFoodId: foodItem.id,
+    stayMs: config.useDurationMs,
+    spotId: spot.spotId,
+    slotId: config.slotId,
+    activeUseSlotId: config.slotId,
+    backendRuntimeObjectUse: true,
+    sourceFamily: intentMetadata.sourceFamily || 'manual-object-action',
+    sourceFunction: intentMetadata.sourceFunction || 'requestBackendStoveOvenQueueUse',
+    behaviorSourceKind: 'user',
+    behaviorMode: 'user-directed',
+    behaviorAuthority: AGENT_INTENT_PRIORITY.manual,
+    queueRequest: true,
+    onBackendObjectUseRejected: error => showToast(`🔥 Stove / oven queue rejected for ${agent.name || agent.id}: ${error?.message || 'queue unavailable'}`, 'warning'),
+  }, {
+    buildingId: building.id,
+    furnitureIndex: index,
+    objectKey,
+    objectId,
+    objectType: 'stove',
+    actionId: config.actionId,
+    spotId: config.slotId,
+  }, target);
+}
+
+window._useStoveOvenFurniture = (mode = 'random', preferredAgentId = null, options = {}) => {
+  if (!_selectedFurniture) return null;
+  const { buildingId, index } = _selectedFurniture;
+  const building = buildingsMap.get(buildingId);
+  const stove = building?.interior?.furniture?.[index];
+  if (!building || stove?.type !== 'stove') return null;
+  const method = mode === 'random'
+    ? (stableScheduleHash(`${preferredAgentId || ''}:${buildingId}:${index}:${Date.now()}`) % 2 ? 'oven' : 'stovetop')
+    : normalizeStoveOvenCookingMethod(mode);
+  const config = getStandingUseMachineConfig('stove', method);
+  const spot = getFurnitureActionSpotAtDebugPoint(building, stove, config.slotId)
+    || getFurnitureActionSpot(building, stove, config.slotId)
+    || getFurnitureActionSpot(building, stove);
+  if (!spot) return null;
+  const preferredAgent = preferredAgentId != null
+    ? agentsList.find(candidate => String(candidate?.id || candidate?.name || '') === String(preferredAgentId))
+    : null;
+  const alreadyUsing = candidate => {
+    const activity = candidate?._idleActivity;
+    return Boolean(activity && activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index) && (
+      String(activity.kind || '').startsWith('stovetop-') || String(activity.kind || '').startsWith('oven-') || String(activity.kind || '').startsWith('service-queue-')
+    ));
+  };
+  let agent = preferredAgent || chooseAgentForStandingUseSpot(building, buildingId, spot, method === 'oven' ? 'oven-' : 'stovetop-');
+  if (!preferredAgent && alreadyUsing(agent)) {
+    agent = agentsList.filter(candidate => candidate && !alreadyUsing(candidate) && !isWorkPresenceStatus(candidate.status) && !candidate._atDesk && !candidate._tagState?.playing)
+      .sort((a, b) => Math.hypot((a.x || 0) - spot.apiX, (a.y || 0) - spot.apiZ) - Math.hypot((b.x || 0) - spot.apiX, (b.y || 0) - spot.apiZ))[0] || null;
+  }
+  if (!agent) {
+    showToast('No idle agent available for stove / oven use', 'warning');
+    return null;
+  }
+  const forcedFood = findStoveOvenFoodItem(options?.stoveOvenFoodId || options?.foodItemId || '', method);
+  const foodPool = listStoveOvenFoodsForMethod(method);
+  const foodItem = forcedFood || foodPool[stableScheduleHash(`${agent.id || agent.name}:${buildingId}:${index}:${method}:${Date.now()}`) % foodPool.length] || foodPool[0];
+  const runtimeObjectKey = getAgentRuntimeFurnitureObjectKey(buildingId, index, 'stove');
+  const runtimeObjectState = getAgentRuntimeWorldObjectState(runtimeObjectKey);
+  const runtimeQueueLength = getLiveScriptedServiceQueueReservationsForManualDrop(stove, { buildingId, furnitureIndex: index }).length;
+  const pendingBackendQueueCount = agentsList.filter(candidate => {
+    const pending = candidate?._runtimeBackendObjectUsePending || null;
+    return pending?.queueRequest === true && pending.objectKey === runtimeObjectKey && Date.now() - Number(pending.requestedAtMs || 0) < AGENT_RUNTIME_ROUTE_REQUEST_TIMEOUT_MS + 1500;
+  }).length;
+  const maxQueuePoints = getScriptedServiceQueueMaxPoints(stove, 'queue');
+  const busy = isScriptedServiceObjectUnavailableForQueue(stove)
+    || isAgentRuntimeWorldObjectStateBlocking(runtimeObjectState, agent)
+    || runtimeQueueLength > 0;
+  if (busy) {
+    if (runtimeQueueLength + pendingBackendQueueCount >= maxQueuePoints) {
+      showToast('🔥 Stove / oven queue is full', 'warning');
+      return { queued: false, backendRuntime: true, reason: 'queue-full' };
+    }
+    const backendQueue = requestBackendStoveOvenQueueUse(agent, building, stove, index, spot, config, foodItem, options?.intentMetadata || {});
+    if (backendQueue?.accepted) {
+      showToast(`🔥 ${agent.name || agent.id} requested the stove / oven queue for ${foodItem.label}`, 'success');
+      _showFurnitureActions(buildingId, index);
+      return {
+        queued: true,
+        reservation: { agentId: getAgentRuntimeAgentId(agent), stoveOvenFoodId: foodItem.id, cookingMethod: method },
+        backendRuntime: true,
+        reason: backendQueue.reason || 'backend-runtime-object-use-requested',
+      };
+    }
+    const queued = queueAgentForScriptedServiceObject(agent, building, index, 'manual-stove-oven-button-service-queue', {
+      allowClaimedServiceObject: true,
+      sourceKind: options?.intentMetadata?.sourceFamily === 'manual-drag-drop' ? 'manual-drag-drop-service-queue' : 'manual-object-action-service-queue',
+      ignoreRecentCooldown: true,
+      actionId: config.actionId,
+      stoveOvenFoodId: foodItem.id,
+      cookingMethod: method,
+    });
+    if (queued?.queued) {
+      syncScriptedServiceQueueLine(building, index, 'manual-stove-oven-button-queued', { allowClaimedServiceObject: true });
+      showToast(`🔥 ${agent.name || agent.id} joined the stove / oven queue for ${foodItem.label}`, 'success');
+    } else showToast(`🔥 ${queued?.reason || 'Stove / oven queue unavailable'}`, 'warning');
+    _showFurnitureActions(buildingId, index);
+    return queued;
+  }
+  const standingUse = reserveStandingUseMachineForAgent(stove, building, index, agent, config, spot);
+  stove.stoveOvenState = { ...(stove.stoveOvenState || {}), status: 'reserved', cookingMethod: method, selectedFoodId: foodItem.id, selectedFoodLabel: foodItem.label, panState: method === 'stovetop' ? 'ready-to-cook' : 'idle', ovenDoorState: method === 'oven' ? 'closed-before-open' : 'closed', ovenLightOn: false, cookedCount: Number(stove.stoveOvenState?.cookedCount || 0), lastAction: config.actionId, persistentFurniture: true };
+  const routeTarget = makeStandingMachineRouteTarget(building, stove, index, spot, config, {
+    reservationId: standingUse.reservation?.id || stove.reservation?.id || null,
+    cookingMethod: method,
+    stoveOvenFoodId: foodItem.id,
+    stayMs: config.useDurationMs,
+  });
+  const intentMetadata = options?.intentMetadata || {};
+  const routeAdmission = setAgentTargetForExplicitObjectAction(agent, routeTarget, building, spot.floor, {
+    ...intentMetadata,
+    furnitureIndex: index,
+    furniture: stove,
+    objectType: 'stove',
+    actionId: config.actionId,
+    activityKind: config.kind,
+    animationId: config.animationId,
+    cookingMethod: method,
+    stoveOvenFoodId: foodItem.id,
+    stayMs: config.useDurationMs,
+    spotId: spot.spotId,
+    slotId: config.slotId,
+    reservationId: routeTarget.reservationId,
+  });
+  agent._idleActivity = {
+    kind: config.kind,
+    phase: 'approach',
+    buildingId,
+    furnitureIndex: index,
+    stayMs: config.useDurationMs,
+    faceAngle: spot.faceAngle,
+    dockTarget: { x: spot.apiX, y: spot.apiZ },
+    routeApproachTarget: { x: spot.apiX, y: spot.apiZ, floor: spot.floor, spotId: spot.spotId, faceAngle: spot.faceAngle },
+    dockSnapRadius: 7,
+    furnitureType: 'stove',
+    spotId: spot.spotId,
+    activationSpotId: config.slotId,
+    approachSpotId: config.slotId,
+    activeUseSlotId: standingUse.slotId,
+    reservationId: standingUse.reservation?.id || stove.reservation?.id || null,
+    capacityKey: standingUse.capacityKey,
+    mode: method,
+    cookingMethod: method,
+    stoveOvenFoodId: foodItem.id,
+    selectedFoodLabel: foodItem.label,
+    action: config.actionId,
+    actionId: config.actionId,
+    animationId: config.animationId,
+    source: options?.intentMetadata?.sourceFamily === 'manual-drag-drop' ? 'manual-drag-drop-machine-use' : 'manual-object-action',
+    behaviorSourceKind: options?.intentMetadata?.sourceFamily === 'manual-drag-drop' ? 'user' : 'agent-scripted-mode',
+    lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true, spawnsTemporary: true, standingUse: true, releaseOnCompletion: true },
+    spawnedItem: { label: foodItem.label, catalogId: 'temporaryFood', temporary: true, carryable: true, attachPoint: 'right-hand', cookingMethod: method, stoveOvenFoodId: foodItem.id, itemPool: foodPool.map(item => item.label), foodItems: foodPool.map(item => ({ id: item.id, label: item.label, visualKind: item.visualKind, method: item.method })), validDropOff: STOVE_OVEN_VALID_DROP_OFFS },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  persistBuilding(building);
+  showToast(`${method === 'oven' ? '♨️' : '🍳'} ${agent.name || agent.id} is making ${foodItem.label}`, 'success');
+  setTimeout(() => _showFurnitureActions(buildingId, index), 80);
+  return {
+    triggered: routeAdmission?.accepted !== false,
+    method,
+    foodId: foodItem.id,
+    agentId: agent.id || null,
+    backendRuntime: routeAdmission?.backendRuntime === true,
+    reason: routeAdmission?.reason || null,
+  };
 };
 
 window._useFridgeFurniture = (mode = 'snack', preferredAgentId = null, options = {}) => {

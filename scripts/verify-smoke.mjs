@@ -8,6 +8,12 @@ import {
   FRIDGE_FOOD_VISUAL_KINDS,
 } from '../src/client/js/fridge-food-catalog.mjs';
 import {
+  OVEN_FOOD_ITEMS,
+  STOVETOP_FOOD_ITEMS,
+  STOVE_OVEN_FOOD_ITEMS,
+  STOVE_OVEN_FOOD_VISUAL_KINDS,
+} from '../src/client/js/stove-oven-food-catalog.mjs';
+import {
   buildTemporaryFoodCarryAssetForVerification,
 } from '../src/client/js/agent-characters.js';
 import {
@@ -72,6 +78,7 @@ const requiredFiles = [
   'src/client/js/openclaw-run-state.js',
   'src/client/js/starter-map.mjs',
   'src/client/js/fridge-food-catalog.mjs',
+  'src/client/js/stove-oven-food-catalog.mjs',
   'src/server/server.py',
   'src/server/live_agent_goals.py',
   'src/server/live_agent_spatial.py',
@@ -134,6 +141,35 @@ const fridgeAssetSignatures = FRIDGE_FOOD_ITEMS.map((food) => {
   return JSON.stringify(meshes);
 });
 assert.equal(new Set(fridgeAssetSignatures).size, 10, 'all ten fridge foods must render as distinct assets');
+assert.equal(STOVETOP_FOOD_ITEMS.length, 5, 'stovetop must provide exactly five food choices');
+assert.equal(OVEN_FOOD_ITEMS.length, 5, 'oven must provide exactly five food choices');
+assert.equal(STOVE_OVEN_FOOD_ITEMS.length, 10, 'stove/oven must provide ten food choices total');
+assert.equal(new Set(STOVE_OVEN_FOOD_ITEMS.map(item => item.id)).size, 10, 'stove/oven food ids must be unique');
+assert.equal(new Set(STOVE_OVEN_FOOD_ITEMS.map(item => item.label)).size, 10, 'stove/oven food labels must be unique');
+assert.equal(new Set(STOVE_OVEN_FOOD_VISUAL_KINDS).size, 10, 'stove/oven visual kinds must be unique');
+const stoveOvenAssetSignatures = STOVE_OVEN_FOOD_ITEMS.map((food) => {
+  const asset = buildTemporaryFoodCarryAssetForVerification({
+    ...food,
+    stoveOvenFoodId: food.id,
+    cookingMethod: food.method,
+  });
+  const meshes = [];
+  asset.traverse((child) => {
+    if (!child.isMesh) return;
+    meshes.push({
+      geometry: child.geometry?.type || '',
+      position: child.position.toArray().map(value => Number(value.toFixed(4))),
+      rotation: child.rotation.toArray().slice(0, 3).map(value => Number(value.toFixed(4))),
+      scale: child.scale.toArray().map(value => Number(value.toFixed(4))),
+      color: child.material?.color?.getHex?.() ?? null,
+    });
+  });
+  assert(meshes.length >= 2, `${food.label} must build a visible multi-part cooked food asset`);
+  assert(asset.userData.snackVariant.includes(food.id), `${food.label} asset must retain its stove/oven food id`);
+  assert(asset.userData.stoveOvenFoodVisualKinds.includes(food.visualKind), `${food.label} asset must advertise its visual kind`);
+  return JSON.stringify(meshes);
+});
+assert.equal(new Set(stoveOvenAssetSignatures).size, 10, 'all ten stove/oven foods must render as distinct cooked assets');
 assert(ACTION_LOCATION_ROLES.includes('clearance'), 'door-swing clearance must remain a non-use action-location role');
 const fridgeCatalog = getObjectCatalogExample('fridge');
 const blockedFridgeQueueDestination = resolveBehaviorDestination({
@@ -467,7 +503,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260731-fridge-color-r3',
+  'js/main3d.js?v=20260803-stove-oven-product-r1',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
   'js/chat.js?v=20260729-chat-scroll-follow-r6',
@@ -607,7 +643,7 @@ for (const token of [
   assert(read('src/server/providers/codex.py').includes(token), `codex.py missing stream token: ${token}`);
 }
 for (const token of [
-  "agent-characters.js?v=20260731-fridge-food-r1",
+  "agent-characters.js?v=20260731-stove-oven-r1",
   "chat-bubble-layout.mjs?v=20260728-chat-bubble-consistency-r4",
   'getChatBubbleSideInsets',
   'getChatBubbleChromeMetrics',
@@ -744,6 +780,56 @@ for (const token of [
   'temporary-food-v4-fridge-ten-items',
 ]) {
   assert(agentCharactersJs.includes(token), `agent-characters.js missing fridge food carry token: ${token}`);
+}
+for (const token of [
+  "{ id: 'stovetop-front'",
+  "{ id: 'oven-front'",
+  "action: 'life.cookOnStovetop'",
+  "action: 'life.bakeInOven'",
+  "animationId: 'stovetop-cook'",
+  "animationId: 'oven-use'",
+  'function makeStoveOven3D',
+  'stoveOvenFeedbackParts',
+  'pan.rotation.y = -Math.PI * 0.5',
+  'idleCookingEffectsHidden',
+  'panStages: [panRaw, panCooking, panCooked]',
+  'ovenStages: [ovenFoodRaw, ovenFoodCooking, ovenFoodCooked]',
+  'function updateStoveOvenFeedback',
+  'startStoveOvenDeskConsumeActivity',
+  "kind: 'stove-oven-desk-consume'",
+  'window._useStoveOvenFurniture',
+  'window.__verifyStoveOvenFeature',
+  'function requestBackendStoveOvenQueueUse',
+  'queueRequest: true',
+  "reason: 'queue-full'",
+  'stayMs: config.useDurationMs',
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing stove/oven interaction token: ${token}`);
+}
+for (const token of [
+  'temporary-food-v5-stove-oven-ten-items',
+  'stovetop-veggie-stir-fry',
+  'stovetop-pancake-stack',
+  'stovetop-tomato-pasta',
+  'stovetop-grilled-cheese',
+  'stovetop-breakfast-skillet',
+  'oven-baked-lasagna',
+  'oven-roast-chicken',
+  'oven-chocolate-chip-cookies',
+  'oven-vegetable-pizza',
+  'oven-baked-salmon',
+]) {
+  assert(agentCharactersJs.includes(token), `agent-characters.js missing distinct stove/oven cooked asset token: ${token}`);
+}
+for (const token of [
+  'SERVER_SCRIPTED_STOVE_OVEN_FOOD_OPTIONS',
+  "deskActivityKind: 'stove-oven-desk-consume'",
+  'queuedUseStoveOvenFoodId',
+  'queuedUseCookingMethod',
+  'useStoveOvenFoodId',
+  'useCookingMethod',
+]) {
+  assert(agentRuntimeRoomJs.includes(token), `agent-runtime-room.mjs missing authoritative stove/oven token: ${token}`);
 }
 
 for (const token of [
@@ -1140,7 +1226,7 @@ for (const token of [
   'ambient-schedule-routing-suppressed',
   'status-change-movement-clear-skipped',
   '__VWGetLiveModeScriptedSuppressionState',
-  "agent-characters.js?v=20260731-fridge-food-r1",
+  "agent-characters.js?v=20260731-stove-oven-r1",
   'function getAgentPresenceDotColor(statusValue)',
   'statusDot.userData.presenceStatusIndicator = true',
   'parts.statusDot.material.color.setHex(getAgentPresenceDotColor(normalizedStatus))',

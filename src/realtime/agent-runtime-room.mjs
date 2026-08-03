@@ -20,6 +20,12 @@ import {
   FRIDGE_FOOD_ITEMS,
   findFridgeFoodItem,
 } from '../client/js/fridge-food-catalog.mjs';
+import {
+  STOVE_OVEN_FOOD_ITEMS,
+  findStoveOvenFoodItem,
+  listStoveOvenFoodsForMethod,
+  normalizeStoveOvenCookingMethod,
+} from '../client/js/stove-oven-food-catalog.mjs';
 
 export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
 export const RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION = 'agent-runtime-lifecycle-journal/v1';
@@ -4208,7 +4214,7 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   countertopcoffeemachine: Object.freeze({ kind: 'coffee-machine-get-drink', spotId: 'use-front', animationId: 'order-food-drink', poseKind: 'stand-use', stayMs: [8000, 13000] }),
   fridge: Object.freeze({ kind: 'fridge-get-snack', spotId: 'use-front', animationId: 'fridge-use', poseKind: 'stand-use', stayMs: [7000, 12000] }),
   sink: Object.freeze({ kind: 'sink-wash-drink', spotId: 'use-front', animationId: 'sink-wash-drink', poseKind: 'stand-use', stayMs: [6000, 10000] }),
-  stove: Object.freeze({ kind: 'stove-cook', spotId: 'cook-front', animationId: 'stove-cook', poseKind: 'stand-use', stayMs: [9000, 15000] }),
+  stove: Object.freeze({ kind: 'stovetop-cook-food', spotId: 'stovetop-front', animationId: 'stovetop-cook', poseKind: 'stand-use', stayMs: [12000, 17000] }),
   grill: Object.freeze({ kind: 'grill-cook', spotId: 'cook-front', animationId: 'grill-cook', poseKind: 'stand-use', stayMs: [9000, 15000] }),
   outdoorplanter: Object.freeze({ kind: 'outdoor-planter-water', spotId: 'water-front', animationId: 'outdoor-planter-water', poseKind: 'stand-use', stayMs: [7000, 12000] }),
   flowerbed: Object.freeze({ kind: 'flower-bed-inspect', spotId: 'inspect-front', animationId: 'inspect-browse', poseKind: 'stand-use', stayMs: [7000, 12000] }),
@@ -4257,6 +4263,7 @@ const SERVER_SCRIPTED_MICROWAVE_FOOD_OPTIONS = Object.freeze([
   Object.freeze({ id: 'sandwich', label: 'Sandwich', visualKind: 'microwave-sandwich', packageColor: 0xd9a05b, accentColor: 0x65a30d }),
 ]);
 export const SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS = FRIDGE_FOOD_ITEMS;
+export const SERVER_SCRIPTED_STOVE_OVEN_FOOD_OPTIONS = STOVE_OVEN_FOOD_ITEMS;
 const SERVER_SCRIPTED_DROP_OFFS = Object.freeze(['desk', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'patioTable', 'counter', 'cafeCounter']);
 const SERVER_SCRIPTED_DRINK_DROP_OFFS = Object.freeze(['desk', 'diningTable', 'counter']);
 
@@ -4351,6 +4358,23 @@ function serverScriptedObjectDispenseSpec(target = null) {
       validDropOff: SERVER_SCRIPTED_DROP_OFFS,
     };
   }
+  if (objectType === 'stove' || activityKind.startsWith('stovetop-') || activityKind.startsWith('oven-')) {
+    return {
+      kind: 'stove-oven',
+      idPrefix: 'stove-oven',
+      label: 'Cooked Stove / Oven Food',
+      itemKind: 'consumable',
+      carryItem: 'snack',
+      persistenceOwner: 'stove-oven-runtime',
+      deskActivityKind: 'stove-oven-desk-consume',
+      deskAnimationId: 'stove-oven-desk-consume',
+      deskActionId: 'life.eatStoveOvenFoodAtDesk',
+      deskCompletionState: 'done-consuming-stove-oven-food',
+      pickupEffect: 'temporary-stove-oven-food-picked-up',
+      consumeEffect: 'temporary-stove-oven-food-consumed-at-desk',
+      validDropOff: SERVER_SCRIPTED_DROP_OFFS,
+    };
+  }
   return null;
 }
 
@@ -4375,6 +4399,15 @@ function pickServerScriptedFridgeFood(agentId, target = null) {
   if (forcedItem) return forcedItem;
   const index = stableTextHash(`${agentId || ''}:${target?.objectKey || ''}:${target?.spotId || ''}`) % SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS.length;
   return SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[index] || SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[0];
+}
+
+function pickServerScriptedStoveOvenFood(agentId, target = null) {
+  const method = normalizeStoveOvenCookingMethod(target?.cookingMethod || target?.activityKind || target?.actionId || target?.spotId);
+  const forcedItem = findStoveOvenFoodItem(target?.stoveOvenFoodId || target?.foodItemId || target?.foodType || '', method);
+  if (forcedItem) return forcedItem;
+  const pool = listStoveOvenFoodsForMethod(method);
+  const index = stableTextHash(`${agentId || ''}:${target?.objectKey || ''}:${target?.spotId || ''}:${method}`) % pool.length;
+  return pool[index] || pool[0];
 }
 
 function makeServerScriptedTemporaryItem(agentId, sourceTarget = null, spec = null, nowMs = Date.now()) {
@@ -4417,6 +4450,19 @@ function makeServerScriptedTemporaryItem(agentId, sourceTarget = null, spec = nu
       needEffects: foodItem.needEffects,
       satisfies: ['hunger', 'food', 'chilled-food', 'fridge-food'],
     };
+  } else if (spec.kind === 'stove-oven') {
+    const foodItem = pickServerScriptedStoveOvenFood(agentId, sourceTarget);
+    itemPatch = {
+      idPart: foodItem.id,
+      label: foodItem.label,
+      visualKind: foodItem.visualKind,
+      stoveOvenFoodId: foodItem.id,
+      cookingMethod: foodItem.method,
+      packageColor: foodItem.packageColor,
+      accentColor: foodItem.accentColor,
+      needEffects: foodItem.needEffects,
+      satisfies: ['hunger', 'food', 'cooked-food', `${foodItem.method}-food`],
+    };
   }
   const idPart = safeText(itemPatch.idPart, spec.kind) || spec.kind;
   const sourceFurnitureType = safeText(sourceTarget?.objectType || sourceTarget?.sourceFurnitureType, spec.kind) || spec.kind;
@@ -4450,6 +4496,8 @@ function makeServerScriptedTemporaryItem(agentId, sourceTarget = null, spec = nu
   if (itemPatch.vendingItemId) item.vendingItemId = itemPatch.vendingItemId;
   if (itemPatch.microwaveFoodId) item.microwaveFoodId = itemPatch.microwaveFoodId;
   if (itemPatch.fridgeFoodId) item.fridgeFoodId = itemPatch.fridgeFoodId;
+  if (itemPatch.stoveOvenFoodId) item.stoveOvenFoodId = itemPatch.stoveOvenFoodId;
+  if (itemPatch.cookingMethod) item.cookingMethod = itemPatch.cookingMethod;
   const packageColor = numberOr(itemPatch.packageColor, NaN);
   const accentColor = numberOr(itemPatch.accentColor, NaN);
   if (Number.isFinite(packageColor) && Math.abs(packageColor) <= 10000000) item.packageColor = packageColor;
@@ -4462,7 +4510,7 @@ function makeServerScriptedTemporaryItem(agentId, sourceTarget = null, spec = nu
 function isServerScriptedObjectDeskConsumeTarget(target = null) {
   const phase = String(target?.runtimePhase || '').trim().toLowerCase();
   const kind = String(target?.activityKind || target?.kind || '').trim().toLowerCase();
-  return phase === 'desk-routing' || phase === 'desk-consuming' || kind === 'coffee-desk-consume' || kind === 'water-desk-consume' || kind === 'vending-desk-consume' || kind === 'microwave-desk-consume' || kind === 'fridge-desk-consume';
+  return phase === 'desk-routing' || phase === 'desk-consuming' || kind === 'coffee-desk-consume' || kind === 'water-desk-consume' || kind === 'vending-desk-consume' || kind === 'microwave-desk-consume' || kind === 'fridge-desk-consume' || kind === 'stove-oven-desk-consume';
 }
 
 function serverScriptedObjectRouteShouldRun(target = null, isMoving = false) {
@@ -4675,7 +4723,7 @@ const SERVER_SCRIPTED_IDLE_CATEGORY_WEIGHTS = Object.freeze({
 });
 const SERVER_SCRIPTED_IDLE_CATEGORY_OBJECT_TYPES = Object.freeze({
   rest: Object.freeze(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'hallwayBench', 'smallCafeTable', 'patioTable', 'smallRoundMeetingTable', 'chair', 'officeChair']),
-  'snack-drink': Object.freeze(['waterCooler', 'countertopCoffeeMachine', 'vending', 'fridge', 'microwave', 'cafeCounter', 'counter', 'kitchenIsland', 'pantryShelf', 'displayCase']),
+  'snack-drink': Object.freeze(['waterCooler', 'countertopCoffeeMachine', 'vending', 'fridge', 'microwave', 'stove', 'cafeCounter', 'counter', 'kitchenIsland', 'pantryShelf', 'displayCase']),
   'browse-read': Object.freeze(['bookshelf', 'bulletinBoard', 'menuBoard', 'whiteboard', 'wallArt', 'shopShelf', 'supplyCabinet', 'medicalSupplyCabinet', 'pantryShelf', 'displayCase', 'displayMannequin', 'tvStand', 'mirror', 'storageBoxes', 'serverRack', 'toolCart', 'workbench']),
   play: Object.freeze(['poolTable', 'arcadeMachine', 'gamingStation', 'treadmill', 'trainingMat', 'gymBench', 'dumbbellRack']),
 });
@@ -5395,6 +5443,39 @@ function serverScriptedServiceQueueDefinitionsForFurniture(furniture = {}) {
     }
     return configured;
   }
+  // Saved stoves predate the two-surface interaction contract. Give them the
+  // same exact numbered FCFS line as newly placed stoves, rather than deriving
+  // approximate points from whichever surface (oven or pan) sorts first.
+  if (normalizeObjectTypeKey(furniture.type) === 'stove') {
+    return [{
+      id: 'queue',
+      spotId: 'queue',
+      dx: 0,
+      dz: 1.72,
+      facing: 'north',
+      actionId: 'planning.schedule',
+      action: 'planning.schedule',
+      roles: ['approach', 'queue', 'wait-turn'],
+      capacityKind: 'queue',
+      capacity: 3,
+      queueMaxPoints: 3,
+      queueSpacingTiles: 0.8,
+      serviceQueue: true,
+      queueLocations: [0, 1, 2].map(queueIndex => ({
+        id: `queue:${queueIndex}`,
+        spotId: `queue:${queueIndex}`,
+        slotId: `queue:${queueIndex}`,
+        dx: 0,
+        dz: 1.72 + queueIndex * 0.8,
+        facing: 'north',
+        actionId: 'planning.schedule',
+        roles: ['queue', 'wait-turn'],
+        capacityKind: 'queue',
+        serviceQueue: true,
+        queueIndex,
+      })),
+    }];
+  }
   // Existing saved gym benches predate the queue schema. Give those records
   // the same authoritative three-point FIFO line without rewriting world data.
   if (normalizeObjectTypeKey(furniture.type) === 'gymbench') {
@@ -5571,7 +5652,12 @@ function localPointFromScriptedObjectSpot(furniture = null, location = null) {
       poseKind: isQueue ? 'wait' : (roles.includes('seat') ? 'seat' : (config?.poseKind || fallback.poseKind)),
     };
   }
-  const rotated = rotateRuntimeLocalOffset(fallback.dx, fallback.dz, furniture?.rotation || 0);
+  const authoredDx = numberOr(location?.dx ?? location?.offsetX, NaN);
+  const authoredDz = numberOr(location?.dz ?? location?.offsetZ, NaN);
+  const offset = Number.isFinite(authoredDx) || Number.isFinite(authoredDz)
+    ? { dx: numberOr(authoredDx, 0), dz: numberOr(authoredDz, 0) }
+    : fallback;
+  const rotated = rotateRuntimeLocalOffset(offset.dx, offset.dz, furniture?.rotation || 0);
   return {
     x: numberOr(furniture?.x, 0) + rotated.x,
     z: numberOr(furniture?.z, 0) + rotated.z,
@@ -5627,7 +5713,24 @@ export function listScriptedObjectRuntimeTargets(dataDir) {
       const item = furniture[index];
       if (!item || item.deleted || item.removed || item.enabled === false) continue;
       if (isPingPongObjectType(item.type)) continue;
-      const locations = Array.isArray(item.actionLocations) && item.actionLocations.length > 0 ? item.actionLocations : [];
+      const authoredLocationsRaw = Array.isArray(item.actionLocations) && item.actionLocations.length > 0 ? item.actionLocations : [];
+      // Old saved stoves only expose one generic `cook-front` location. Replace
+      // that legacy station with the two explicit appliance surfaces while
+      // preserving any newly-authored stovetop/oven/queue locations.
+      const authoredLocations = normalizeObjectTypeKey(item.type) === 'stove'
+        ? authoredLocationsRaw.filter((location) => {
+            const spotId = String(scriptedObjectSpotId(location) || '').trim().toLowerCase();
+            return spotId !== 'cook-front' && spotId !== 'hot-clearance';
+          })
+        : authoredLocationsRaw;
+      const stoveLocations = normalizeObjectTypeKey(item.type) === 'stove'
+        ? [
+            { id: 'stovetop-front', dx: -0.34, dz: 0.92, facing: 'north', action: 'life.cookOnStovetop', roles: ['use', 'cook', 'stovetop', 'standing-use'], cookingMethod: 'stovetop', animationId: 'stovetop-cook' },
+            { id: 'oven-front', dx: 0.34, dz: 1.04, facing: 'north', action: 'life.bakeInOven', roles: ['use', 'cook', 'bake', 'oven', 'standing-use'], cookingMethod: 'oven', animationId: 'oven-use' },
+            { id: 'queue', dx: 0, dz: 1.72, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
+          ].filter(location => !authoredLocations.some(existing => scriptedObjectSpotId(existing) === location.id))
+        : [];
+      const locations = [...authoredLocations, ...stoveLocations];
       const syntheticQueueLocations = serverScriptedServiceQueueDefinitionsForFurniture(item)
         .filter(location => !locations.some(existing => scriptedObjectSpotId(existing) === scriptedObjectSpotId(location)))
         .filter(location => !locations.some(existing => isScriptedObjectQueueSpot(existing, item) && serverScriptedQueueSpotId(existing) === serverScriptedQueueSpotId(location)));
@@ -5644,12 +5747,20 @@ export function listScriptedObjectRuntimeTargets(dataDir) {
         return aSpot.localeCompare(bSpot);
       });
       const targetLocations = sortedLocations.length > 0 ? sortedLocations : [null];
-      if (sortedLocations.length > 0 && scriptedObjectActivityConfig(item) && !isServerScriptedSharedSlotObjectType(item.type)) targetLocations.push(null);
+      if (
+        sortedLocations.length > 0 &&
+        scriptedObjectActivityConfig(item) &&
+        !isServerScriptedSharedSlotObjectType(item.type) &&
+        normalizeObjectTypeKey(item.type) !== 'stove'
+      ) targetLocations.push(null);
       const seen = new Set();
       for (const location of targetLocations) {
         const target = scriptedObjectTargetFromFurnitureSpot(building, item, index, location);
-        if (!target || seen.has(target.objectKey)) continue;
-        seen.add(target.objectKey);
+        const seenKey = target && normalizeObjectTypeKey(item.type) === 'stove' && !target.isQueueUse
+          ? `${target.objectKey}:${target.spotId}`
+          : target?.objectKey;
+        if (!target || seen.has(seenKey)) continue;
+        seen.add(seenKey);
         targets.push(target);
       }
     }
@@ -5697,6 +5808,12 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
     !isQueueUse &&
     !String(actionId || '').toLowerCase().includes('rest');
   const gymBenchColors = gymBenchExercise ? serverScriptedDumbbellColors(furniture) : null;
+  const stoveOvenMethod = normalizeObjectTypeKey(objectType) === 'stove' && !isQueueUse
+    ? normalizeStoveOvenCookingMethod(location?.cookingMethod || actionId || spotId)
+    : null;
+  const stoveOvenFood = stoveOvenMethod
+    ? pickServerScriptedStoveOvenFood(`${building.id || ''}:${index}`, { objectKey: baseObjectKey, spotId, actionId, cookingMethod: stoveOvenMethod, stoveOvenFoodId: location?.stoveOvenFoodId })
+    : null;
   const objectKey = isQueueUse
     ? normalizeWorldObjectKey(`${baseObjectKey}:queue:${spotId}`)
     : (isServerScriptedSharedSlotSpot(objectType, slotId || spotId, actionId) ? serverScriptedMultiSlotObjectKey(baseObjectKey, slotId || spotId) : baseObjectKey);
@@ -5720,9 +5837,9 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
     slotId,
     poseKind: local.poseKind,
     isQueueUse,
-    animationId: isQueueUse ? 'bus-stop-wait' : (dumbbellWorkout ? 'dumbbell-workout' : (safeText(config?.animationId, '') || (local.poseKind === 'seat' ? 'sit' : 'stand-use'))),
-    activityKind: isQueueUse ? 'service-queue-wait' : (dumbbellWorkout?.kind || safeText(config?.kind, '') || 'server-scripted-object-use'),
-    stayMs: scriptedObjectStayMs({ objectKey: baseObjectKey, objectType, spotId }),
+    animationId: isQueueUse ? 'bus-stop-wait' : (stoveOvenMethod ? (stoveOvenMethod === 'oven' ? 'oven-use' : 'stovetop-cook') : (dumbbellWorkout ? 'dumbbell-workout' : (safeText(config?.animationId, '') || (local.poseKind === 'seat' ? 'sit' : 'stand-use')))),
+    activityKind: isQueueUse ? 'service-queue-wait' : (stoveOvenMethod ? (stoveOvenMethod === 'oven' ? 'oven-bake-food' : 'stovetop-cook-food') : (dumbbellWorkout?.kind || safeText(config?.kind, '') || 'server-scripted-object-use')),
+    stayMs: stoveOvenMethod === 'oven' ? 16000 : (stoveOvenMethod === 'stovetop' ? 14500 : scriptedObjectStayMs({ objectKey: baseObjectKey, objectType, spotId })),
     faceAngle: runtimeFurnitureActionFaceAngle(building, furniture, local, point),
     ...(dumbbellWorkout ? {
       actionId: dumbbellWorkout.actionId,
@@ -5737,6 +5854,7 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
       pairedDumbbells: true,
       ...(gymBenchColors ? { dumbbellColors: gymBenchColors } : {}),
     } : {}),
+    ...(stoveOvenFood ? { cookingMethod: stoveOvenMethod, stoveOvenFoodId: stoveOvenFood.id } : {}),
     ...(exitSpotId ? { exitSpotId } : {}),
     ...(dismountSpotId ? { dismountSpotId } : {}),
     ...(standSpotId ? { standSpotId } : {}),
@@ -6729,6 +6847,8 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
     activity.activeUseSlotId = slotId;
   }
   if (Number.isFinite(Number(target?.stayMs))) activity.stayMs = Math.max(1000, Math.floor(Number(target.stayMs)));
+  if (target?.cookingMethod) activity.cookingMethod = normalizeStoveOvenCookingMethod(target.cookingMethod);
+  if (target?.stoveOvenFoodId) activity.stoveOvenFoodId = safeText(target.stoveOvenFoodId, '');
   if (target?.isQueueUse === true) {
     activity.kind = 'service-queue-wait';
     activity.poseKind = 'wait';
@@ -7037,6 +7157,8 @@ function objectUseRequestTargetFromPoint(message = {}) {
     vendingItemId: safeText(target?.vendingItemId || message?.vendingItemId, ''),
     microwaveFoodId: safeText(target?.microwaveFoodId || target?.foodItemId || message?.microwaveFoodId || message?.foodItemId, ''),
     fridgeFoodId: safeText(target?.fridgeFoodId || target?.foodItemId || message?.fridgeFoodId || message?.foodItemId, ''),
+    stoveOvenFoodId: safeText(target?.stoveOvenFoodId || target?.foodItemId || message?.stoveOvenFoodId || message?.foodItemId, ''),
+    cookingMethod: normalizeObjectTypeKey(objectType) === 'stove' ? normalizeStoveOvenCookingMethod(target?.cookingMethod || message?.cookingMethod || target?.activityKind || actionId || spotId) : '',
     pingPongSide: safeText(target?.pingPongSide || message?.pingPongSide, ''),
     faceAngle: normalizeRuntimeAngleRadians(target?.faceAngle, 0),
     ...(dumbbellWorkout ? {
@@ -7056,6 +7178,15 @@ function objectUseRequestTargetFromPoint(message = {}) {
       dumbbellColors: null,
     } : {})),
   };
+  if (normalizeObjectTypeKey(objectType) === 'stove') {
+    out.activityKind = out.cookingMethod === 'oven' ? 'oven-bake-food' : 'stovetop-cook-food';
+    out.animationId = out.cookingMethod === 'oven' ? 'oven-use' : 'stovetop-cook';
+    const explicitStayMs = numberOr(target?.stayMs ?? message?.stayMs, NaN);
+    out.stayMs = Number.isFinite(explicitStayMs)
+      ? Math.max(1000, Math.floor(explicitStayMs))
+      : (out.cookingMethod === 'oven' ? 16000 : 14500);
+    if (!out.stoveOvenFoodId) out.stoveOvenFoodId = pickServerScriptedStoveOvenFood(message?.agentId || '', out)?.id || '';
+  }
   const paddleColor = numberOr(target?.paddleColor ?? message?.paddleColor, NaN);
   if (Number.isFinite(paddleColor)) out.paddleColor = paddleColor;
   return out;
@@ -7065,7 +7196,7 @@ function mergeScriptedObjectRequestRuntimeOverrides(match = null, message = {}) 
   if (!match) return match;
   const rawTarget = message?.target && typeof message.target === 'object' ? message.target : message;
   const overrides = {};
-  for (const key of ['actionId', 'activityKind', 'animationId', 'pingPongSide', 'activeUseSlotId', 'workoutMode', 'vendingItemId', 'microwaveFoodId', 'fridgeFoodId']) {
+  for (const key of ['actionId', 'activityKind', 'animationId', 'pingPongSide', 'activeUseSlotId', 'workoutMode', 'vendingItemId', 'microwaveFoodId', 'fridgeFoodId', 'stoveOvenFoodId', 'cookingMethod']) {
     const value = safeText(rawTarget?.[key] ?? message?.[key], '');
     if (value) overrides[key] = value;
   }
@@ -8882,6 +9013,11 @@ export class AgentRuntimeRoom extends Room {
         const sameOwner = nextOwner && existingPlain.owner && nextOwner === existingPlain.owner;
         const sameAgent = nextAgentId && existingPlain.agentId && nextAgentId === existingPlain.agentId;
         const serverOwned = SERVER_WORLD_OBJECT_RUNTIME_OWNERS.has(existingPlain.owner || '');
+        // Once a scripted object has entered the authoritative server runtime,
+        // browser-side world-object mirrors must never take ownership back,
+        // even while the server record is briefly idle/cooling down. Allowing
+        // that handoff erased service queue stores and made every later manual
+        // drop reuse queue:0.
         if (serverOwned && !sameOwner) {
           throw apiError('object_state_conflict', 'server-owned world object cannot be overwritten by a browser runtime', {
             objectKey,
@@ -8990,6 +9126,10 @@ export class AgentRuntimeRoom extends Room {
             queuedUseVendingItemId: requestedUseTarget.vendingItemId,
             queuedUseMicrowaveFoodId: requestedUseTarget.microwaveFoodId,
             queuedUseFridgeFoodId: requestedUseTarget.fridgeFoodId,
+            queuedUseStoveOvenFoodId: requestedUseTarget.stoveOvenFoodId,
+            queuedUseCookingMethod: requestedUseTarget.cookingMethod,
+            queuedUseStayMs: requestedUseTarget.stayMs,
+            queuedUseConsumeDurationMs: requestedUseTarget.consumeDurationMs,
           };
           existingObject = this.state.objects.get(target.objectKey);
           baseObjectKey = safeText(target.baseObjectKey, '') || target.objectKey;
@@ -9651,6 +9791,8 @@ export class AgentRuntimeRoom extends Room {
       const queuePriority = insertAtFront
         ? Math.min(-1, numberOr(options.queuePriority ?? rawTarget?.queuePriority, -1))
         : Number((options.queuePriority ?? rawTarget?.queuePriority) || 0);
+      const requestedUseStayMs = numberOr(rawTarget?.queuedUseStayMs ?? rawTarget?.useStayMs ?? rawTarget?.stayMs, NaN);
+      const requestedUseConsumeDurationMs = numberOr(rawTarget?.queuedUseConsumeDurationMs ?? rawTarget?.useConsumeDurationMs ?? rawTarget?.consumeDurationMs, NaN);
       reservation = {
         id: safeText(options.reservationId || `queue:scripted:${agentId}:${queueSpotId}:${queuedAtMs}`, '') || `queue:scripted:${agentId}`,
         state: 'queued',
@@ -9666,6 +9808,10 @@ export class AgentRuntimeRoom extends Room {
         useVendingItemId: safeText(rawTarget?.queuedUseVendingItemId || rawTarget?.useVendingItemId || rawTarget?.vendingItemId, ''),
         useMicrowaveFoodId: safeText(rawTarget?.queuedUseMicrowaveFoodId || rawTarget?.useMicrowaveFoodId || rawTarget?.microwaveFoodId, ''),
         useFridgeFoodId: safeText(rawTarget?.queuedUseFridgeFoodId || rawTarget?.useFridgeFoodId || rawTarget?.fridgeFoodId, ''),
+        useStoveOvenFoodId: safeText(rawTarget?.queuedUseStoveOvenFoodId || rawTarget?.useStoveOvenFoodId || rawTarget?.stoveOvenFoodId, ''),
+        useCookingMethod: safeText(rawTarget?.queuedUseCookingMethod || rawTarget?.useCookingMethod || rawTarget?.cookingMethod, ''),
+        ...(Number.isFinite(requestedUseStayMs) ? { useStayMs: Math.max(1000, Math.floor(requestedUseStayMs)) } : {}),
+        ...(Number.isFinite(requestedUseConsumeDurationMs) ? { useConsumeDurationMs: Math.max(1000, Math.floor(requestedUseConsumeDurationMs)) } : {}),
         slotId: `${queueSpotId}:${live.length}`,
         queueSpotId,
         activationSpotId: `${queueSpotId}:${live.length}`,
@@ -9790,7 +9936,16 @@ export class AgentRuntimeRoom extends Room {
     }
     const current = snapshotToPlain(agent);
     const currentTarget = current.target && typeof current.target === 'object' ? current.target : { ...(typeof baseObjectKeyOrTarget === 'object' ? baseObjectKeyOrTarget : {}), baseObjectKey, objectKey: baseObjectKey };
-    const primaryTarget = serverScriptedObjectPrimaryTargetForQueue(this.dataDir, currentTarget);
+    let primaryTarget = serverScriptedObjectPrimaryTargetForQueue(this.dataDir, currentTarget);
+    if (primaryTarget && normalizeObjectTypeKey(primaryTarget.objectType) === 'stove' && front.useCookingMethod) {
+      const requestedMethod = normalizeStoveOvenCookingMethod(front.useCookingMethod);
+      primaryTarget = listScriptedObjectRuntimeTargets(this.dataDir).find(target =>
+        !target.isQueueUse &&
+        normalizeObjectTypeKey(target.objectType) === 'stove' &&
+        (safeText(target.baseObjectKey, '') || target.objectKey) === baseObjectKey &&
+        normalizeStoveOvenCookingMethod(target.cookingMethod || target.activityKind || target.actionId || target.spotId) === requestedMethod
+      ) || primaryTarget;
+    }
     if (!primaryTarget) return { promoted: false, changedSnapshots: 0, changedObjects: 0, reason: 'missing-service-use-target' };
     const source = safeText(front.sourceKind || currentTarget.runtimeSource || 'agent-scripted-mode', 'agent-scripted-mode') || 'agent-scripted-mode';
     let routeResult = null;
@@ -9809,6 +9964,10 @@ export class AgentRuntimeRoom extends Room {
         ...(front.useVendingItemId ? { vendingItemId: front.useVendingItemId } : {}),
         ...(front.useMicrowaveFoodId ? { microwaveFoodId: front.useMicrowaveFoodId } : {}),
         ...(front.useFridgeFoodId ? { fridgeFoodId: front.useFridgeFoodId } : {}),
+        ...(front.useStoveOvenFoodId ? { stoveOvenFoodId: front.useStoveOvenFoodId } : {}),
+        ...(front.useCookingMethod ? { cookingMethod: front.useCookingMethod } : {}),
+        ...(Number.isFinite(numberOr(front.useStayMs, NaN)) ? { stayMs: Math.max(1000, Math.floor(numberOr(front.useStayMs, 1000))) } : {}),
+        ...(Number.isFinite(numberOr(front.useConsumeDurationMs, NaN)) ? { consumeDurationMs: Math.max(1000, Math.floor(numberOr(front.useConsumeDurationMs, SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS))) } : {}),
         ...(promotedWorkout ? {
           actionId: promotedWorkout.actionId,
           activityKind: promotedWorkout.kind,
@@ -11618,6 +11777,9 @@ export class AgentRuntimeRoom extends Room {
     if (target?.isQueueUse) {
       this.releaseServerScriptedServiceQueueReservation(agentId, target, nowMs, now, reason);
     } else if (serverScriptedQueueRuntimeTargetForBase(this.dataDir, target)) {
+      // All terminal paths, including a manual move/release, must advance the
+      // service line. Natural dwell completion already calls this helper too;
+      // the second call is safely rejected while the promoted agent owns base.
       queuePromotion = this.promoteServerScriptedServiceQueueFrontIfReady(target, nowMs, now, reason);
     }
     const authoritativeObject = queuePromotion?.promoted
@@ -11843,6 +12005,10 @@ export class AgentRuntimeRoom extends Room {
         manualDrop: originalTarget?.manualDrop === true || originalTarget?.manualOccupancyHold === true,
         source: originalTarget?.runtimeSource || '',
       });
+      // A user-directed service line is just as authoritative as a manually
+      // occupied seat. In particular, never let the autonomous-route capacity
+      // limiter evict queue:0/1/2 waiters after a drag/drop; they must stay
+      // server-owned until promotion, explicit movement, or normal release.
       const protectedManualRoute = protectedManualOccupancy ||
         originalTarget?.manualDrop === true ||
         String(originalTarget?.runtimeSource || '').startsWith('manual-drag-drop');

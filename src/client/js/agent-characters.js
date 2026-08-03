@@ -14,6 +14,9 @@ import {
 import {
   FRIDGE_FOOD_VISUAL_KINDS,
 } from './fridge-food-catalog.mjs?v=20260731-fridge-food-r1';
+import {
+  STOVE_OVEN_FOOD_VISUAL_KINDS,
+} from './stove-oven-food-catalog.mjs?v=20260731-stove-oven-r1';
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -238,7 +241,7 @@ function buildCoffeeCupAsset(name = 'rightHandCoffeeDrink', options = {}) {
 
 function getCoffeeDeskSipState(agent) {
   const activityKind = String(agent?._idleActivity?.kind || '');
-  if (!(activityKind.startsWith('coffee-desk-') || activityKind.startsWith('water-desk-') || activityKind.startsWith('vending-desk-') || activityKind.startsWith('microwave-desk-') || activityKind.startsWith('fridge-desk-')) || agent?._idleActivity?.phase !== 'active') {
+  if (!(activityKind.startsWith('coffee-desk-') || activityKind.startsWith('water-desk-') || activityKind.startsWith('vending-desk-') || activityKind.startsWith('microwave-desk-') || activityKind.startsWith('fridge-desk-') || activityKind.startsWith('stove-oven-desk-')) || agent?._idleActivity?.phase !== 'active') {
     return { isDeskConsume: false, handActive: false, lift: 0, phase: 0, localSipPhase: 0 };
   }
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -332,6 +335,7 @@ function getVendingItemVisualMeta(carried = {}) {
     carried?.vendingItemId,
     carried?.microwaveFoodId,
     carried?.fridgeFoodId,
+    carried?.stoveOvenFoodId,
     carried?.visualKind,
     carried?.label,
     carried?.id,
@@ -345,6 +349,7 @@ function getVendingItemVisualMeta(carried = {}) {
 }
 
 const VENDING_ITEM_ASSET_VERSION = 'temporary-food-v4-fridge-ten-items';
+const STOVE_OVEN_FOOD_ASSET_VERSION = 'temporary-food-v5-stove-oven-ten-items';
 const MICROWAVE_FOOD_VISUAL_KINDS = Object.freeze(['microwave-popcorn', 'microwave-pizza-slice', 'microwave-sandwich']);
 
 function buildVendingItemAsset(name, carried = {}) {
@@ -358,6 +363,8 @@ function buildVendingItemAsset(name, carried = {}) {
   item.userData.assetVersion = VENDING_ITEM_ASSET_VERSION;
   item.userData.microwaveFoodVisualKinds = MICROWAVE_FOOD_VISUAL_KINDS;
   item.userData.fridgeFoodVisualKinds = FRIDGE_FOOD_VISUAL_KINDS;
+  item.userData.stoveOvenFoodVisualKinds = STOVE_OVEN_FOOD_VISUAL_KINDS;
+  item.userData.stoveOvenFoodAssetVersion = STOVE_OVEN_FOOD_ASSET_VERSION;
   if (meta.variant.includes('greek-yogurt')) {
     const cup = cyl(0.12, 0.20, 0xf8fafc);
     item.add(cup);
@@ -499,6 +506,51 @@ function buildVendingItemAsset(name, carried = {}) {
     item.add(turkey);
     item.userData.deskRotation = [0, 0.38, Math.PI / 2];
     item.userData.handTilt = -0.18;
+  } else if (meta.variant.includes('stovetop-veggie-stir-fry')) {
+    const bowl = cyl(0.17, 0.075, 0x1f2937); item.add(bowl);
+    [[-0.07, 0.065, -0.03, 0x22c55e], [0, 0.075, 0.025, 0xef4444], [0.07, 0.06, -0.01, 0xfacc15], [-0.025, 0.09, -0.055, 0xfb923c]].forEach(([x, y, z, color]) => { const piece = box(x, y, z, 0.065, 0.045, 0.055, color); piece.rotation.y = x * 3; item.add(piece); });
+    item.userData.deskRotation = [0, 0.22, 0]; item.userData.handTilt = -0.12;
+  } else if (meta.variant.includes('stovetop-pancake-stack')) {
+    [-0.045, 0, 0.045].forEach((y, index) => { const cake = cyl(0.15 - index * 0.006, 0.045, index === 2 ? 0xd97706 : 0xf59e0b); cake.position.y = y; item.add(cake); });
+    const butter = box(0, 0.095, 0, 0.07, 0.025, 0.07, 0xfef3c7); item.add(butter);
+    item.userData.deskRotation = [0, -0.18, 0]; item.userData.handTilt = -0.10;
+  } else if (meta.variant.includes('stovetop-tomato-pasta')) {
+    const bowl = cyl(0.17, 0.075, 0xf8fafc); item.add(bowl);
+    [-0.08, -0.04, 0, 0.04, 0.08].forEach((x, index) => { const noodle = box(x, 0.07 + (index % 2) * 0.018, 0, 0.025, 0.035, 0.22, index % 2 ? 0xfacc15 : 0xdc2626); noodle.rotation.y = index * 0.28; item.add(noodle); });
+    item.userData.deskRotation = [0, 0.28, 0]; item.userData.handTilt = -0.12;
+  } else if (meta.variant.includes('stovetop-grilled-cheese')) {
+    const plate = cyl(0.18, 0.018, 0xe2e8f0); plate.position.y = -0.06; item.add(plate);
+    [-0.06, 0.06].forEach((x, index) => { const half = box(x, 0, 0, 0.14, 0.09, 0.17, index ? 0xb45309 : 0xd97706); half.rotation.y = index ? -0.18 : 0.18; item.add(half); });
+    item.add(box(0, 0.008, 0.09, 0.22, 0.025, 0.04, 0xfde047));
+    item.userData.deskRotation = [0, -0.24, 0]; item.userData.handTilt = -0.13;
+  } else if (meta.variant.includes('stovetop-breakfast-skillet')) {
+    const skillet = cyl(0.17, 0.055, 0x334155); item.add(skillet); item.add(box(0.24, -0.005, 0, 0.28, 0.045, 0.06, 0x1e293b));
+    const egg = cyl(0.105, 0.025, 0xfffbeb); egg.position.y = 0.045; item.add(egg); const yolk = sph(0.045, 0xfacc15); yolk.position.y = 0.07; item.add(yolk);
+    [[-0.11, 0.05, 0.03], [0.10, 0.05, -0.04]].forEach(([x, y, z]) => item.add(box(x, y, z, 0.07, 0.04, 0.06, 0x92400e)));
+    item.userData.deskRotation = [0, 0.18, 0]; item.userData.handTilt = -0.12;
+  } else if (meta.variant.includes('oven-baked-lasagna')) {
+    const tray = box(0, -0.04, 0, 0.31, 0.045, 0.22, 0x64748b); item.add(tray);
+    item.add(box(0, 0.005, 0, 0.27, 0.06, 0.18, 0xb91c1c)); item.add(box(0, 0.05, 0, 0.25, 0.035, 0.16, 0xfde68a));
+    [-0.08, 0, 0.08].forEach(x => item.add(box(x, 0.075, 0, 0.025, 0.012, 0.12, 0x92400e)));
+    item.userData.deskRotation = [0, 0.20, 0]; item.userData.handTilt = -0.12;
+  } else if (meta.variant.includes('oven-roast-chicken')) {
+    const plate = cyl(0.19, 0.02, 0xe5e7eb); plate.position.y = -0.07; item.add(plate);
+    const body = sph(0.14, 0x92400e); body.scale.set(1.25, 0.75, 0.85); item.add(body);
+    [-0.15, 0.15].forEach((x, index) => { const leg = cyl(0.04, 0.16, 0xd97706); leg.rotation.z = Math.PI / 2; leg.position.set(x, -0.02, index ? 0.04 : -0.04); item.add(leg); });
+    item.userData.deskRotation = [0, -0.32, 0]; item.userData.handTilt = -0.15;
+  } else if (meta.variant.includes('oven-chocolate-chip-cookies')) {
+    const plate = cyl(0.19, 0.018, 0xf8fafc); plate.position.y = -0.05; item.add(plate);
+    [[-0.09, 0, -0.035], [0.02, 0.025, 0.035], [0.095, 0, -0.02]].forEach(([x, y, z], index) => { const cookie = cyl(0.085, 0.035, index === 1 ? 0xd97706 : 0xb45309); cookie.position.set(x, y, z); item.add(cookie); [[-0.025, 0], [0.025, 0.025]].forEach(([dx, dz]) => item.add(box(x + dx, y + 0.024, z + dz, 0.018, 0.012, 0.018, 0x3f2414))); });
+    item.userData.deskRotation = [0, 0.25, 0]; item.userData.handTilt = -0.10;
+  } else if (meta.variant.includes('oven-vegetable-pizza')) {
+    const base = cyl(0.17, 0.04, 0xd97706); item.add(base); const cheese = cyl(0.155, 0.025, 0xfacc15); cheese.position.y = 0.032; item.add(cheese);
+    [[-0.07, 0.055, 0, 0xef4444], [0.05, 0.055, 0.055, 0x22c55e], [0.065, 0.055, -0.06, 0xa855f7], [-0.02, 0.055, -0.075, 0x22c55e]].forEach(([x, y, z, color]) => { const topping = cyl(0.025, 0.015, color); topping.position.set(x, y, z); item.add(topping); });
+    item.userData.deskRotation = [0, -0.20, 0]; item.userData.handTilt = -0.12;
+  } else if (meta.variant.includes('oven-baked-salmon')) {
+    const plate = cyl(0.19, 0.018, 0xe2e8f0); plate.position.y = -0.055; item.add(plate);
+    const fillet = box(0, 0.015, 0, 0.28, 0.075, 0.14, 0xe11d48); fillet.rotation.y = -0.12; item.add(fillet);
+    [-0.08, 0, 0.08].forEach(x => item.add(box(x, 0.06, 0, 0.015, 0.012, 0.12, 0xfda4af))); item.add(box(0, 0.065, 0.08, 0.20, 0.018, 0.025, 0x4ade80));
+    item.userData.deskRotation = [0, 0.34, 0]; item.userData.handTilt = -0.13;
   } else if (meta.variant.includes('popcorn')) {
     // Microwave popcorn: striped red bowl with visible popped kernels.
     const bowl = cyl(0.145, 0.12, 0xe53935);
@@ -1989,7 +2041,9 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const isCounterPrep = bedActivityKind.startsWith('counter-') && agent._idleActivity?.phase === 'active';
   const isDiningTableUse = bedActivityKind.startsWith('dining-table-') && agent._idleActivity?.phase === 'active';
   const isSinkUse = isAuthoritativeSinkAnimationState(agent, agent._idleActivity);
-  const isStoveUse = bedActivityKind.startsWith('stove-') && agent._idleActivity?.phase === 'active';
+  const isStovetopUse = bedActivityKind.startsWith('stovetop-') && agent._idleActivity?.phase === 'active';
+  const isOvenUse = bedActivityKind.startsWith('oven-') && agent._idleActivity?.phase === 'active';
+  const isStoveUse = isStovetopUse || isOvenUse || (bedActivityKind.startsWith('stove-') && !bedActivityKind.startsWith('stove-oven-desk-') && agent._idleActivity?.phase === 'active');
   const isTvWatch = bedActivityKind.startsWith('tv-watch-') && agent._idleActivity?.phase === 'active';
   const isOutdoorCafeTableUse = (bedActivityKind.startsWith('outdoor-cafe-table-') || bedActivityKind.startsWith('picnic-table-')) && agent._idleActivity?.phase === 'active';
   const isOutdoorCafeTableSocial = isOutdoorCafeTableUse && (bedActivityKind === 'outdoor-cafe-table-socialize' || bedActivityKind === 'picnic-table-socialize');
@@ -2005,7 +2059,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const isTrashBinDispose = (bedActivityKind.startsWith('trash-bin-') || bedActivityKind.startsWith('outdoor-trash-can-')) && agent._idleActivity?.phase === 'active';
   const isCoffeeMachineUse = bedActivityKind.startsWith('coffee-machine-') && agent._idleActivity?.phase === 'active';
   const isWaterCoolerUse = bedActivityKind.startsWith('water-cooler-') && agent._idleActivity?.phase === 'active';
-  const isCoffeeDeskConsume = (bedActivityKind.startsWith('coffee-desk-') || bedActivityKind.startsWith('water-desk-') || bedActivityKind.startsWith('vending-desk-') || bedActivityKind.startsWith('microwave-desk-') || bedActivityKind.startsWith('fridge-desk-')) && agent._idleActivity?.phase === 'active';
+  const isCoffeeDeskConsume = (bedActivityKind.startsWith('coffee-desk-') || bedActivityKind.startsWith('water-desk-') || bedActivityKind.startsWith('vending-desk-') || bedActivityKind.startsWith('microwave-desk-') || bedActivityKind.startsWith('fridge-desk-') || bedActivityKind.startsWith('stove-oven-desk-')) && agent._idleActivity?.phase === 'active';
   const isVendingMachineUse = bedActivityKind.startsWith('vending-machine-') && agent._idleActivity?.phase === 'active';
   const isFridgeUse = bedActivityKind.startsWith('fridge-') && !bedActivityKind.startsWith('fridge-desk-') && agent._idleActivity?.phase === 'active';
   const isKitchenIslandUse = bedActivityKind.startsWith('kitchen-island-') && agent._idleActivity?.phase === 'active';
@@ -2222,7 +2276,8 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   else if (isCounterPrep) requestedAnimationId = 'counter-prep';
   else if (isDiningTableUse) requestedAnimationId = 'dining-table-eat-talk';
   else if (isSinkUse) requestedAnimationId = 'sink-wash-drink';
-  else if (isStoveUse) requestedAnimationId = 'stove-cook';
+  else if (isOvenUse) requestedAnimationId = 'oven-use';
+  else if (isStovetopUse || isStoveUse) requestedAnimationId = 'stovetop-cook';
   else if (isTvWatch) requestedAnimationId = 'tv-watch';
   else if (isPingPongPlay) requestedAnimationId = 'play-pingpong';
   else if (isPoolTablePlay) requestedAnimationId = isPoolTableWatch ? 'gather-talk' : 'pool-table-play';
@@ -2538,6 +2593,43 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, 0.02, 0.16);
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.02, 0.16);
     g.position.y = (g.userData._groundY || 0) + Math.abs(reach) * 0.006;
+
+  } else if (isOvenUse) {
+    // Reach down to the lower door, load the tray, wait through heating, then
+    // crouch and retrieve the cooked food during the final reopen.
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const startedAt = Number(agent._idleActivity?.activeStartedAt || agent._idleActivity?.startedAt || nowMs);
+    const progress = Math.max(0, Math.min(1, (nowMs - startedAt) / Math.max(1000, Number(agent._idleActivity?.stayMs || 16000))));
+    const openReach = progress < 0.28 ? Math.sin((progress / 0.28) * Math.PI) : (progress > 0.82 ? Math.sin(((progress - 0.82) / 0.18) * Math.PI) : 0);
+    const retrieve = progress > 0.82 ? Math.sin(((progress - 0.82) / 0.18) * Math.PI) : 0;
+    const wait = progress >= 0.28 && progress <= 0.82 ? Math.sin(progress * Math.PI * 8) * 0.02 : 0;
+    parts.bodyGroup.position.y = _lerp(parts.bodyGroup.position.y, -openReach * 0.22, 0.20);
+    parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, 0.12 + openReach * 0.30, 0.22);
+    parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, wait, 0.14);
+    parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.08 + openReach * 0.14, 0.18);
+    parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.30 - openReach * 0.58, 0.22);
+    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.52 - openReach * 1.02 - retrieve * 0.18, 0.30);
+    parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.18 + openReach * 0.10, 0.18);
+    parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.24 - openReach * 0.16, 0.20);
+    parts.leftLeg.rotation.x = _lerp(parts.leftLeg.rotation.x, openReach * -0.16, 0.18);
+    parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, openReach * -0.12, 0.18);
+    g.position.y = (g.userData._groundY || 0) + Math.abs(wait) * 0.3;
+
+  } else if (isStovetopUse) {
+    // Alternating stir and pan-toss pose, synchronized with the cooktop motion.
+    cs.workPhase = (cs.workPhase || 0) + dt * 3.1;
+    const stir = Math.sin(cs.workPhase * 2.2);
+    const toss = Math.max(0, Math.sin(cs.workPhase * 1.05));
+    parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, 0.15 + toss * 0.07, 0.20);
+    parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, stir * 0.025, 0.14);
+    parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.09 + toss * 0.035, 0.16);
+    parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.58 - toss * 0.35, 0.24);
+    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -1.02 - stir * 0.26, 0.30);
+    parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.28 + toss * 0.08, 0.18);
+    parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.34 + stir * 0.12, 0.20);
+    parts.leftLeg.rotation.x = _lerp(parts.leftLeg.rotation.x, 0.02, 0.16);
+    parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.02, 0.16);
+    g.position.y = (g.userData._groundY || 0) + toss * 0.008;
 
   } else if (isKitchenIslandUse) {
     // ── KITCHEN ISLAND PREP / COOK / EAT ─────────────────────
@@ -3631,7 +3723,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   if (!isMoving) {
     parts.leftLeg.rotation.x  = _lerp(parts.leftLeg.rotation.x, 0, 0.12);
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, 0, 0.12);
-    if (!isWorking && !isTalking && !isClinicService && !isExamChairService && !isCoffeeMachineUse && !isCoffeeDeskConsume && !isVendingMachineUse && !isMicrowaveUse && !isSinkUse && !isPingPongPlay && !isPoolTablePlay && !isMeetingTable && !isSmallRoundMeetingTable && !isPrinterScannerUse && !isToolCartUse && !isWorkbenchUse && !isStorageBoxesUse && !isLaptopMonitorWork && !isStandingDeskWork && !isDraftingTableWork && !isWhiteboardUse && !isTeachingPodiumUse && !isDumbbellRackUse && !isGymBenchExercise && !isDisplayMannequinPreview && !isDresserBrowse && !isWardrobeBrowse && !isNightstandInspect && !isClothingRackBrowse && !isBulletinBoardRead && !isOutdoorNoticeBoardRead && !isMenuBoardRead) {
+    if (!isWorking && !isTalking && !isClinicService && !isExamChairService && !isCoffeeMachineUse && !isCoffeeDeskConsume && !isVendingMachineUse && !isMicrowaveUse && !isSinkUse && !isPingPongPlay && !isStoveUse && !isPoolTablePlay && !isMeetingTable && !isSmallRoundMeetingTable && !isPrinterScannerUse && !isToolCartUse && !isWorkbenchUse && !isStorageBoxesUse && !isLaptopMonitorWork && !isStandingDeskWork && !isDraftingTableWork && !isWhiteboardUse && !isTeachingPodiumUse && !isDumbbellRackUse && !isGymBenchExercise && !isDisplayMannequinPreview && !isDresserBrowse && !isWardrobeBrowse && !isNightstandInspect && !isClothingRackBrowse && !isBulletinBoardRead && !isOutdoorNoticeBoardRead && !isMenuBoardRead) {
       parts.leftArm.rotation.x  = _lerp(parts.leftArm.rotation.x, 0, 0.10);
       parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, 0, 0.10);
     }
@@ -3789,7 +3881,11 @@ function syncRightHandCarryVisual(parts, agent) {
     carryKey.includes('chocolate') ||
     carryKey.includes('soft drink') ||
     carryKey.includes('vending') ||
-    carryKey.includes('fridge')
+    carryKey.includes('fridge') ||
+    carryKey.includes('stovetop') ||
+    carryKey.includes('oven-') ||
+    carryKey.includes('stove-oven') ||
+    carryKey.includes('cooked-food')
   );
   const isPongRacket = isPingPongActivity || (carried && carryKey.includes('pingpong'));
   const deskSipState = getCoffeeDeskSipState(agent);

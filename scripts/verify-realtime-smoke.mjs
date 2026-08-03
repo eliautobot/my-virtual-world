@@ -1679,7 +1679,7 @@ async function run() {
           activityKind: 'fridge-get-snack',
           animationId: 'fridge-use',
           fridgeFoodId: food.id,
-          stayMs: 1200,
+          stayMs: 5000,
           consumeDurationMs: 1200,
           manualDrop: true,
           manualDropSnapToUse: true,
