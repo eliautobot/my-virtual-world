@@ -322,7 +322,7 @@ function inferNodeTypeFromAsset(node = {}) {
   if (['crosswalknode', 'crosswalk-node', 'crossingnode', 'crossing-node', 'crosswalk', 'crossing'].includes(asset)) return 'crossing';
   if (['pathnode', 'path-node', 'walkingpathnode', 'walking-path-node', 'strollnode', 'stroll-node', 'walking-path'].includes(asset)) return 'stroll';
   if (['parkbench', 'park-bench', 'patiochair', 'patio-chair', 'chair', 'bench', 'hallwaybench', 'hallway-bench'].includes(asset)) return 'seat';
-  if (['patiotable', 'patio-table', 'smallcafetable', 'small-cafe-table', 'diningtable', 'dining-table', 'grill'].includes(asset)) return 'eat';
+  if (['patiotable', 'patio-table', 'smallcafetable', 'small-cafe-table', 'outdoorcafetable', 'outdoor-cafe-table', 'picnictable', 'picnic-table', 'diningtable', 'dining-table', 'grill'].includes(asset)) return 'eat';
   if (['foodtruckcounter', 'food-truck-counter', 'cafecounter', 'cafe-counter', 'counter', 'checkoutcounter', 'checkout-counter'].includes(asset)) return 'order';
   if (['outdoortrashcan', 'outdoor-trash-can', 'parktrashcan', 'park-trash-can', 'sidewalktrashcan', 'sidewalk-trash-can'].includes(asset)) return 'drop-off';
   if (['outdoorplanter', 'outdoor-planter', 'plant', 'fountain', 'shadetreecluster', 'shade-tree-cluster', 'shadetree', 'shade-tree', 'treecluster', 'tree-cluster'].includes(asset)) return 'watch';

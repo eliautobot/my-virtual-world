@@ -9,8 +9,19 @@ import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260725-
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
   createAgentCharacter, updateAgentAnimation, getAgentAppearance, getSinkWashPoseTargets,
-  isAuthoritativeSinkAnimationState, APPEARANCE_CATALOG,
-} from './agent-characters.js?v=20260731-stove-oven-r1';
+  isAuthoritativeSinkAnimationState, APPEARANCE_CATALOG, resolveConsumableSurfaceAssetPlacement,
+  removePingPongRacketVisual,
+} from './agent-characters.js?v=20260804-pingpong-live-r23';
+import {
+  clearPingPongEquipmentState,
+  hasPingPongEquipmentState,
+  isIncomingPingPongRuntimeVisual,
+  reconcilePingPongEquipmentTransition,
+} from './ping-pong-equipment-state.mjs?v=20260804-pingpong-paddle-cleanup-r1';
+import {
+  CONSUMABLE_SURFACE_SPECS,
+  getConsumableSurfaceSpec,
+} from './consumable-surface-specs.mjs?v=20260804-consumable-surface-r1';
 import {
   FRIDGE_FOOD_ITEMS,
   FRIDGE_FOOD_ITEM_LABELS,
@@ -168,7 +179,7 @@ import {
   getPhase1ObjectTaxonomy,
   validateObjectCatalogDefinition,
   getObjectCatalogExample,
-} from './agent-life-object-catalog-schema.mjs?v=20260731-fridge-color-r2';
+} from './agent-life-object-catalog-schema.mjs?v=20260804-park-bench-width-r1';
 import {
   CATALOG_REGISTRY_API_VERSION,
   CATALOG_REGISTRY_CONTRACT,
@@ -182,7 +193,7 @@ import {
   buildEditorFurnitureCatalog,
   resolveCatalogEntryForPlacedInstance,
   validateCatalogRegistry,
-} from './agent-life-catalog-registry.mjs?v=20260731-fridge-color-r2';
+} from './agent-life-catalog-registry.mjs?v=20260804-park-bench-width-r1';
 import {
   OBJECT_INSTANCE_SCHEMA_VERSION,
   OBJECT_INSTANCE_SCHEMA_FIELDS,
@@ -280,7 +291,7 @@ import {
   MVP_VERTICAL_SLICE_RULES,
   buildMvpVerticalSlice,
   validateMvpVerticalSlice,
-} from './agent-life-mvp-vertical-slice.mjs?v=20260428-phase0_5-task14';
+} from './agent-life-mvp-vertical-slice.mjs?v=20260804-park-bench-width-r1';
 import {
   CARRY_DROPOFF_FOUNDATION_VERSION,
   CARRY_ATTACH_POINTS,
@@ -472,7 +483,7 @@ import {
   resolveExteriorRoutingEnvelope,
   normalizeExteriorInteractionNodes,
   resolveExteriorInteractionNodeTarget,
-} from './agent-life-exterior-area-taxonomy.mjs?v=20260429-walking-path-node';
+} from './agent-life-exterior-area-taxonomy.mjs?v=20260804-park-table-node-inference-r2';
 import {
   EXTERIOR_ACCEPTANCE_TEMPLATE_VERSION,
   EXTERIOR_ACCEPTANCE_STATUS,
@@ -902,6 +913,7 @@ const BUILDING_THEMES = {
 const _boxGeo = new THREE.BoxGeometry(1,1,1);
 const _sphereGeo = new THREE.SphereGeometry(0.5, 8, 6);
 const _cylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
+const _roundFurnitureCylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 24);
 const _coneGeo = new THREE.ConeGeometry(0.5, 1, 8);
 const _matCache = {};
 const _sharedVertexColorMatCache = new Map();
@@ -1178,6 +1190,13 @@ function sphere(r, color) {
 function cyl(r, h, color) {
   const m = new THREE.Mesh(_cylGeo, getMat(color));
   m.scale.set(r*2, h, r*2);
+  m.castShadow = true;
+  return m;
+}
+
+function roundFurnitureCyl(r, h, color) {
+  const m = new THREE.Mesh(_roundFurnitureCylGeo, getMat(color));
+  m.scale.set(r * 2, h, r * 2);
   m.castShadow = true;
   return m;
 }
@@ -1737,6 +1756,8 @@ function getAgentRuntimeFurnitureObjectKey(buildingId, furnitureIndex, furniture
   if (type === 'outdoorCafeTable') return getOutdoorCafeTableObjectKey(bid, index);
   if (type === 'picnicTable') return getPicnicTableObjectKey(bid, index);
   if (type === 'smallRoundMeetingTable') return getSmallRoundMeetingTableObjectKey(bid, index);
+  if (type === 'meetingTable') return getMeetingTableObjectKey(bid, index);
+  if (type === 'diningTable') return getDiningTableObjectKey(bid, index);
   if (type === 'hallwayBench') return getHallwayBenchObjectKey(bid, index);
   if (type === 'treadmill') return getTreadmillObjectKey(bid, index);
   if (type === 'trainingMat') return getTrainingMatObjectKey(bid, index);
@@ -1860,6 +1881,11 @@ function requestBackendObjectUseForExplicitObjectAction(agent, target = null, bu
     interactionSpotId: enrichedTarget?.interactionSpotId || target?.interactionSpotId || objectMeta.spotId || '',
     slotId: metadata.slotId || target?.slotId || target?.seatId || objectMeta.spotId || '',
     activeUseSlotId: metadata.activeUseSlotId || metadata.slotId || target?.activeUseSlotId || target?.slotId || target?.seatId || objectMeta.spotId || '',
+    activationSpotId: metadata.activationSpotId || target?.activationSpotId || target?.seatId || objectMeta.spotId || '',
+    approachSpotId: metadata.approachSpotId || target?.approachSpotId || target?.routeApproachTarget?.spotId || '',
+    exitSpotId: metadata.exitSpotId || target?.exitSpotId || '',
+    dismountSpotId: metadata.dismountSpotId || target?.dismountSpotId || metadata.exitSpotId || target?.exitSpotId || '',
+    standSpotId: metadata.standSpotId || target?.standSpotId || '',
     activityKind: metadata.activityKind || target?.activityKind || '',
     animationId: metadata.animationId || target?.animationId || '',
     vendingItemId: metadata.vendingItemId || enrichedTarget?.vendingItemId || target?.vendingItemId || "",
@@ -2162,15 +2188,27 @@ function applyAgentRuntimeWorldObjectStateToWorld(objectState = null) {
   const runtimeVersions = furniture._runtimeWorldObjectVersions && typeof furniture._runtimeWorldObjectVersions === 'object'
     ? { ...furniture._runtimeWorldObjectVersions }
     : {};
-  if (Number(runtimeVersions[objectVersionKey] || 0) > Number(objectState.version || 0)) {
-    return false;
-  }
-  const data = objectState.data || {};
-  runtimeVersions[objectVersionKey] = Number(objectState.version || 0);
-  furniture._runtimeWorldObjectVersions = runtimeVersions;
   const runtimeStates = furniture._runtimeWorldObjectStates && typeof furniture._runtimeWorldObjectStates === 'object'
     ? { ...furniture._runtimeWorldObjectStates }
     : {};
+  const previousState = runtimeStates[objectVersionKey] ||
+    (furniture._runtimeWorldObjectState?.objectKey === objectVersionKey ? furniture._runtimeWorldObjectState : null);
+  const previousVersion = Number(runtimeVersions[objectVersionKey] || 0);
+  const incomingVersion = Number(objectState.version || 0);
+  const previousUpdatedAtMs = Date.parse(previousState?.updatedAt || furniture._runtimeWorldObjectUpdatedAt || '');
+  const incomingUpdatedAtMs = Date.parse(objectState.updatedAt || '');
+  // Runtime object versions restart when the realtime container/session does.
+  // Building persistence can retain an old high counter, so a newer timestamp
+  // is the authoritative epoch boundary and must be allowed to replace it.
+  const newerRuntimeEpoch = previousVersion > incomingVersion &&
+    Number.isFinite(incomingUpdatedAtMs) &&
+    (!Number.isFinite(previousUpdatedAtMs) || incomingUpdatedAtMs > previousUpdatedAtMs);
+  if (previousVersion > incomingVersion && !newerRuntimeEpoch) {
+    return false;
+  }
+  const data = objectState.data || {};
+  runtimeVersions[objectVersionKey] = incomingVersion;
+  furniture._runtimeWorldObjectVersions = runtimeVersions;
   runtimeStates[objectVersionKey] = objectState;
   furniture._runtimeWorldObjectStates = runtimeStates;
   // Queue-slot objects resolve to the same furniture entry as their base
@@ -2718,9 +2756,14 @@ function makeAgentRuntimeVisualActivity(agent) {
     'dismountSpotId',
     'exitSpotId',
     'mode',
+    'poseKind',
     'animationId',
     'targetAgentId',
     'outdoorNodeType',
+    'outdoorNodeId',
+    'consumeDestinationKind',
+    'consumePresentation',
+    'consumeSurfaceSpotId',
     'barberRole',
     'mirrorRole',
     'pingPongSide',
@@ -2734,6 +2777,9 @@ function makeAgentRuntimeVisualActivity(agent) {
     'stayMs',
     'dockSnapRadius',
     'seatSurfaceLift',
+    'consumeSurfaceHeight',
+    'consumeSurfaceForwardOffset',
+    'consumeSurfaceSideOffset',
     'faceAngle',
     'durationMs',
     'paddleColor',
@@ -2748,6 +2794,8 @@ function makeAgentRuntimeVisualActivity(agent) {
     'snappedToSeatDock',
     'arrivedAtDock',
     'seated',
+    'meetingStanding',
+    'consumeReservation',
   ].forEach(key => {
     if (activity[key] === true) out[key] = true;
   });
@@ -2987,6 +3035,60 @@ function isAgentRuntimePingPongActivity(activity = null, visualState = null) {
   return text.includes('pingpong') || text.includes('playpingpong');
 }
 
+function finishPingPongEquipmentCleanup(agent, stateResult = null, reason = 'pingpong-exit', { clearRuntimePosition = true } = {}) {
+  if (!agent) return { ...(stateResult || {}), removedVisuals: 0 };
+  const removedVisuals = removeVisiblePingPongPaddle(agent);
+  if (clearRuntimePosition) {
+    clearAgentRuntimeMember(agent, PING_PONG_RUNTIME_POSITION_OWNER);
+    agent._runtimePingPongPositionOverride = false;
+  }
+  if (stateResult?.cleared || removedVisuals > 0) {
+    agent._lastPingPongEquipmentCleanup = {
+      reason,
+      atMs: Date.now(),
+      clearedActivity: stateResult?.clearedActivity === true,
+      clearedCarry: stateResult?.clearedCarry === true,
+      removedVisuals,
+    };
+  }
+  return { ...(stateResult || {}), removedVisuals };
+}
+
+function clearPingPongEquipment(agent, { clearActivity = true, clearRuntimePosition = clearActivity, reason = 'pingpong-exit' } = {}) {
+  const stateResult = clearPingPongEquipmentState(agent, { clearActivity });
+  return finishPingPongEquipmentCleanup(agent, stateResult, reason, { clearRuntimePosition });
+}
+
+function reconcileAgentRuntimePingPongEquipmentTransition(agent, visualState = null, snapshotTarget = null) {
+  const transition = reconcilePingPongEquipmentTransition(agent, visualState, snapshotTarget);
+  if (!transition.exitedPingPong) return transition;
+  return finishPingPongEquipmentCleanup(agent, transition, 'runtime-visual-transition', { clearRuntimePosition: true });
+}
+
+let _pingPongAuthoritativeCleanupTimer = 0;
+function reconcileAuthoritativePingPongEquipment(dt = 0) {
+  _pingPongAuthoritativeCleanupTimer -= Math.max(0, Number(dt) || 0);
+  if (_pingPongAuthoritativeCleanupTimer > 0) return 0;
+  _pingPongAuthoritativeCleanupTimer = 0.75;
+  let cleaned = 0;
+  for (const agent of agentsList) {
+    const snapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
+    const visualState = snapshot?.visualState && typeof snapshot.visualState === 'object'
+      ? snapshot.visualState
+      : null;
+    if (!visualState) continue;
+    const snapshotTarget = snapshot?.target && typeof snapshot.target === 'object' ? snapshot.target : null;
+    if (isIncomingPingPongRuntimeVisual(visualState, snapshotTarget)) continue;
+    const hadEquipmentState = hasPingPongEquipmentState(agent);
+    const transition = reconcileAgentRuntimePingPongEquipmentTransition(agent, visualState, snapshotTarget);
+    // A legacy client can leave only the Three.js mesh behind after all carry
+    // aliases have already cleared. Remove that orphan as well.
+    const removedOrphanVisuals = removeVisiblePingPongPaddle(agent);
+    if (transition.exitedPingPong || removedOrphanVisuals > 0 || hadEquipmentState) cleaned++;
+  }
+  return cleaned;
+}
+
 function pingPongPaddleColorForSide(side = '') {
   return side === 'right' ? 0x2196f3 : 0xf44336;
 }
@@ -3141,7 +3243,8 @@ function syncAgentRuntimePingPongVisualMetadata(agent, visualState = null) {
   if (!agent) return false;
   const activity = agent._idleActivity || null;
   const carried = visualState?.carriedItem && typeof visualState.carriedItem === 'object' ? visualState.carriedItem : agent._carriedItem;
-  const isPingPong = isAgentRuntimePingPongActivity(activity, visualState) ||
+  const activityIsPingPong = isAgentRuntimePingPongActivity(activity, visualState);
+  const isPingPong = activityIsPingPong ||
     String(carried?.kind || carried?.label || '').toLowerCase().includes('pingpong');
   if (!isPingPong) {
     if (visualState?.activityActive === false || visualState?.carrying === false) {
@@ -3155,7 +3258,7 @@ function syncAgentRuntimePingPongVisualMetadata(agent, visualState = null) {
   const color = agentRuntimeVisualNumber(activity?.paddleColor ?? carried?.color ?? visualState?.paddleColor, pingPongPaddleColorForSide(side));
   agent._pingPongSide = side;
   agent._pingPongPaddleColor = color;
-  if (activity) {
+  if (activity && activityIsPingPong) {
     activity.pingPongSide = side;
     activity.paddleColor = color;
     if (!String(activity.kind || '').startsWith('pingpong-')) activity.kind = `pingpong-${side}`;
@@ -3171,7 +3274,9 @@ function syncAgentRuntimeVisualDeskState(agent, visualState = null, snapshotTarg
   const active = phase === 'active';
   const isWorkDesk = kind === 'live-status-work-desk';
   const isDeskConsume = isAgentRuntimeDeskConsumeActivityKind(kind);
-  const deskActivityActive = active && (isWorkDesk || isDeskConsume);
+  const consumeDestinationKind = String(activity?.consumeDestinationKind || '').trim().toLowerCase();
+  const isPhysicalDeskConsume = isDeskConsume && !['table-seat', 'standalone-seat'].includes(consumeDestinationKind);
+  const deskActivityActive = active && (isWorkDesk || isPhysicalDeskConsume);
   if (!deskActivityActive) {
     if (isWorkDesk || isDeskConsume || visualState?.activityActive === false) {
       agent._atDesk = false;
@@ -3207,7 +3312,9 @@ function syncAgentRuntimeVisualActivityPose(agent, visualState = null) {
   const phase = String(activity.phase || '').trim().toLowerCase();
   if (!['active', 'using', 'waiting'].includes(phase)) return false;
   const kind = String(activity.kind || visualState?.activityKind || '').trim().toLowerCase();
-  if (!kind || kind === 'live-status-work-desk' || isAgentRuntimeDeskConsumeActivityKind(kind)) return false;
+  const consumeDestinationKind = String(activity.consumeDestinationKind || '').trim().toLowerCase();
+  const physicalDeskConsume = isAgentRuntimeDeskConsumeActivityKind(kind) && !['table-seat', 'standalone-seat'].includes(consumeDestinationKind);
+  if (!kind || kind === 'live-status-work-desk' || physicalDeskConsume) return false;
   const animationId = agentRuntimeVisualText(activity.animationId || visualState?.resolvedAnimationId, 120);
   if (animationId) agent._schedPhase = animationId;
   const faceAngle = agentRuntimeVisualNumber(activity.faceAngle ?? visualState?.deskFacingAngle, null);
@@ -3220,6 +3327,135 @@ function syncAgentRuntimeVisualActivityPose(agent, visualState = null) {
     agent._stayTimer = Math.max(Number(agent._stayTimer || 0), stayMs);
   }
   return true;
+}
+
+function resolveActiveTableSeatAttachment(agent = null) {
+  if (!agent) return null;
+  const activity = agent._idleActivity && typeof agent._idleActivity === 'object'
+    ? agent._idleActivity
+    : null;
+  const snapshot = agent._runtimeRenderSnapshot || agent._runtimeSnapshot || null;
+  const snapshotTarget = snapshot?.target && typeof snapshot.target === 'object'
+    ? snapshot.target
+    : null;
+  const source = activity || snapshotTarget;
+  if (!source) return null;
+
+  const rawType = String(
+    source.furnitureType ||
+    source.objectType ||
+    snapshotTarget?.furnitureType ||
+    snapshotTarget?.objectType ||
+    '',
+  ).trim();
+  const tableType = Object.keys(TABLE_SEATING_CONFIG).find(type => type.toLowerCase() === rawType.toLowerCase()) || '';
+  if (!tableType) return null;
+
+  const activityPhase = String(activity?.phase || '').trim().toLowerCase();
+  const snapshotState = String(snapshot?.state || '').trim().toLowerCase();
+  const isSeated = activity?.seated === true || activity?.activationState === 'seated';
+  const isStandingMeeting = tableType === 'meetingTable' && (
+    activity?.meetingStanding === true ||
+    String(activity?.poseKind || source?.poseKind || '').toLowerCase() === 'stand'
+  );
+  const activeStates = new Set(['active', 'using', 'in_progress']);
+  if (!isSeated && !isStandingMeeting && !activeStates.has(activityPhase) && !activeStates.has(snapshotState)) return null;
+
+  const buildingId = String(source.buildingId || snapshotTarget?.buildingId || '').trim();
+  const furnitureIndex = Number(source.furnitureIndex ?? snapshotTarget?.furnitureIndex);
+  const outdoorNodeId = String(source.outdoorNodeId || snapshotTarget?.outdoorNodeId || '').trim();
+  if (!buildingId || (!outdoorNodeId && (!Number.isInteger(furnitureIndex) || furnitureIndex < 0))) return null;
+  const building = buildingsMap.get(buildingId) || null;
+  const furniture = outdoorNodeId
+    ? getRawOutdoorNodeById(building, outdoorNodeId)
+    : building?.interior?.furniture?.[furnitureIndex] || null;
+  const resolvedFurnitureType = outdoorNodeId ? getOutdoorNodeAssetType(furniture || {}) : furniture?.type;
+  if (!building || !furniture || String(resolvedFurnitureType || '').toLowerCase() !== tableType.toLowerCase()) return null;
+
+  const objectKey = String(source.objectKey || snapshotTarget?.objectKey || '');
+  const objectKeySeatId = objectKey.match(/:slot:([^:]+)$/)?.[1] || '';
+  const seatId = String(
+    source.seatId ||
+    source.selectedSeatId ||
+    source.activationSpotId ||
+    source.activeUseSlotId ||
+    source.slotId ||
+    source.spotId ||
+    objectKeySeatId ||
+    '',
+  ).trim();
+  const seatDefinition = (FURNITURE_INTERACTION_SPOTS[tableType] || [])
+    .find(definition => definition.id === seatId && (
+      definition.roles?.includes('seat') ||
+      (tableType === 'meetingTable' && definition.roles?.includes('meeting') && definition.roles?.includes('stand'))
+    ));
+  if (!seatDefinition) return null;
+
+  const seatSpot = getTableObjectActionSpot(building, furniture, seatId, {
+    outdoorNodeId,
+    actionId: source.actionId || source.action || snapshotTarget?.actionId || null,
+  });
+  if (!seatSpot) return null;
+  const faceAngle = outdoorNodeId
+    ? (seatSpot.faceAngle ?? getOutdoorNodeSpotFacingAngle(building, furniture, seatId, seatDefinition.facing || 'north'))
+    : (getFurnitureSpotFacingCenterAngle(building, furniture, seatSpot) ?? seatSpot.faceAngle);
+  if (!Number.isFinite(Number(faceAngle))) return null;
+  return {
+    building,
+    buildingId,
+    furniture,
+    furnitureIndex,
+    outdoorNodeId: outdoorNodeId || null,
+    tableType,
+    seatId,
+    positionKind: seatDefinition.roles?.includes('seat') ? 'seat' : 'stand',
+    seatSpot,
+    faceAngle: Number(faceAngle),
+  };
+}
+
+function syncAgentToCurrentTableSeatTransform(agent = null) {
+  const attachment = resolveActiveTableSeatAttachment(agent);
+  if (!attachment) return null;
+  const { building, seatSpot, faceAngle, seatId, positionKind } = attachment;
+  const activity = agent._idleActivity || null;
+  agent.x = Number(seatSpot.apiX);
+  agent.y = Number(seatSpot.apiZ);
+  agent._floor = Math.max(1, Number(seatSpot.floor || agent._floor || 1) || 1);
+  agent._targetFloor = agent._floor;
+  agent._currentBuilding = building;
+  agent._faceAngle = faceAngle;
+  if (activity) {
+    activity.dockTarget = { x: agent.x, y: agent.y };
+    activity.faceAngle = faceAngle;
+    if (positionKind === 'seat') activity.seatId = activity.seatId || seatId;
+    else activity.meetingStanding = true;
+    activity.activationSpotId = activity.activationSpotId || seatId;
+    activity.selectedSeatId = activity.selectedSeatId || seatId;
+    if (activity.dragDropSnapTarget) {
+      activity.dragDropSnapTarget = {
+        ...activity.dragDropSnapTarget,
+        x: agent.x,
+        y: agent.y,
+        floor: agent._floor,
+        spotId: seatId,
+      };
+    }
+  }
+  if (agent._group3d) agent._group3d.rotation.y = faceAngle;
+  agent._activeTableSeatAttachment = {
+    buildingId: attachment.buildingId,
+    furnitureIndex: attachment.furnitureIndex,
+    outdoorNodeId: attachment.outdoorNodeId,
+    tableType: attachment.tableType,
+    seatId,
+    positionKind,
+    x: agent.x,
+    y: agent.y,
+    floor: agent._floor,
+    faceAngle,
+  };
+  return attachment;
 }
 
 function isAgentProtectedManualObjectOccupancyActivity(agent = null) {
@@ -3251,6 +3487,11 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
     ['active', 'using', 'in_progress'].includes(snapshotState) &&
     snapshotObjectType === 'sink' &&
     snapshotTarget?.isQueueUse !== true;
+  // A Colyseus patch can replace ping-pong directly with another activity,
+  // without exposing the intermediate idle release. Clear the old temporary
+  // racket before hydrating the replacement so stale carry metadata cannot
+  // rewrite that new activity back to pingpong-left/right.
+  reconcileAgentRuntimePingPongEquipmentTransition(agent, visualState, snapshotTarget);
   agent._runtimeVisualState = visualState;
   const status = agentRuntimeVisualText(visualState.status, 80);
   if (status) agent.status = status;
@@ -3364,8 +3605,9 @@ function applyAgentRuntimeVisualState(agent, visualState = null, snapshot = null
   return true;
 }
 
-function placeRuntimeHydratedAgentMesh(agent, { force = false } = {}) {
+function placeRuntimeHydratedAgentMesh(agent, { force = false, tableSeatAttachment = null } = {}) {
   if (!agent?._group3d) return;
+  const currentTableSeatAttachment = tableSeatAttachment || syncAgentToCurrentTableSeatTransform(agent);
   const scale = T / API_TILE;
   const worldX = (agent.x || 0) * scale;
   const worldZ = (agent.y || 0) * scale;
@@ -3375,7 +3617,9 @@ function placeRuntimeHydratedAgentMesh(agent, { force = false } = {}) {
     ? getRenderedFloorY(floorBuilding, agent._floor || 1)
     : 0;
   const groundY = getGroundY(worldX, worldZ) + floorY;
-  const heading = Number.isFinite(Number(placementSnapshot?.heading))
+  const heading = Number.isFinite(Number(currentTableSeatAttachment?.faceAngle))
+    ? Number(currentTableSeatAttachment.faceAngle)
+    : Number.isFinite(Number(placementSnapshot?.heading))
     ? Number(placementSnapshot.heading)
     : null;
   const last = agent._runtimeLastMeshPlacement || null;
@@ -3626,11 +3870,14 @@ function updateAgentRuntimeObserverMotion(agent, dt = 0) {
     heading: renderedHeading ?? visualSample.snapshot?.heading ?? agent._runtimeSnapshot?.heading ?? 0,
   };
   applyAgentRuntimeObserverRenderVisual(agent, visualSample);
-  placeRuntimeHydratedAgentMesh(agent);
+  const tableSeatAttachment = syncAgentToCurrentTableSeatTransform(agent);
+  placeRuntimeHydratedAgentMesh(agent, { tableSeatAttachment });
 
   const movedDistance = Math.hypot(agent.x - previousX, agent.y - previousY);
   const visualMovement = agent._runtimeVisualMovement || null;
-  const moving = visualMovement?.isMoving === true || movedDistance > AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE * Math.max(1, dt * 60);
+  const moving = tableSeatAttachment
+    ? false
+    : (visualMovement?.isMoving === true || movedDistance > AGENT_RUNTIME_OBSERVER_MIN_MOVE_DISTANCE * Math.max(1, dt * 60));
   if (moving && agent._group3d && renderedHeading == null) {
     agent._group3d.rotation.y = Math.atan2(agent.x - previousX, agent.y - previousY);
     agent._runtimeLastMeshPlacement = {
@@ -4181,6 +4428,11 @@ function makeAgentRuntimeRouteTarget(target = null, building = null, floor = nul
     'interactionSpotId',
     'slotId',
     'activeUseSlotId',
+    'activationSpotId',
+    'approachSpotId',
+    'exitSpotId',
+    'dismountSpotId',
+    'standSpotId',
     'reservationId',
     'activeUseId',
     'activityKind',
@@ -5038,6 +5290,23 @@ function getFurnitureForwardFacingAngle(building, furniture, spot = null, facing
   const from = getBuildingWorldPoint(building, baseLocalX, baseLocalZ);
   const to = getBuildingWorldPoint(building, baseLocalX + rotatedFacing.x, baseLocalZ + rotatedFacing.z);
   return Math.atan2((to.x - from.x) * API_TILE, (to.z - from.z) * API_TILE);
+}
+
+function getFurnitureSpotFacingCenterAngle(building, furniture, spot = null) {
+  if (!building || !furniture || !spot) return null;
+  const center = getBuildingWorldPoint(building, Number(furniture.x) || 0, Number(furniture.z) || 0);
+  let fromX = Number(spot.apiX);
+  let fromZ = Number(spot.apiZ);
+  if (!Number.isFinite(fromX) || !Number.isFinite(fromZ)) {
+    const localX = Number.isFinite(Number(spot.localX)) ? Number(spot.localX) : Number(furniture.x) || 0;
+    const localZ = Number.isFinite(Number(spot.localZ)) ? Number(spot.localZ) : Number(furniture.z) || 0;
+    const from = getBuildingWorldPoint(building, localX, localZ);
+    fromX = from.x * API_TILE;
+    fromZ = from.z * API_TILE;
+  }
+  const dx = center.x * API_TILE - fromX;
+  const dz = center.z * API_TILE - fromZ;
+  return Math.hypot(dx, dz) > 0.0001 ? Math.atan2(dx, dz) : null;
 }
 
 function getAuthoredFurnitureSpotFacingAngle(building, furniture, spot = null, fallbackFacing = 'north') {
@@ -6464,8 +6733,29 @@ function isPostDrinkDeskReleaseActive(agent) {
   return true;
 }
 
+function releaseConsumableDestinationReservation(agent, activity = null, reason = 'consume-complete') {
+  if (!activity?.consumeReservation && !activity?.reservationId) return null;
+  const building = activity?.buildingId ? buildingsMap.get(activity.buildingId) : null;
+  const outdoorNodeId = String(activity?.outdoorNodeId || '').trim();
+  const furniture = outdoorNodeId
+    ? getRawOutdoorNodeById(building, outdoorNodeId)
+    : building?.interior?.furniture?.[activity?.furnitureIndex];
+  const type = outdoorNodeId ? getOutdoorNodeAssetType(furniture || {}) : furniture?.type;
+  if (!furniture || !type) return null;
+  if (type === 'parkBench') return releaseParkBenchSeatUse(furniture, activity, agent, reason);
+  if (CONSUMABLE_DESTINATION_TABLE_TYPES?.has(type)) return releaseTableSeatUse(furniture, activity, agent, reason);
+  if (type === 'couch') return releaseCouchSeatUse(furniture, activity, agent, reason);
+  if (type === 'sectionalSofa') return releaseSectionalSofaSeatUse(furniture, activity, agent, reason);
+  if (type === 'loveseat') return releaseLoveseatSeatUse(furniture, activity, agent, reason);
+  if (type === 'armchair') return releaseArmchairSeatUse(furniture, activity, agent, reason);
+  if (type === 'hallwayBench') return releaseHallwayBenchSeatUse(furniture, activity, agent, reason);
+  if (getSingleSeatChairConfig(type)) return releaseSingleSeatChairSeatUse(furniture, activity, agent, reason);
+  return null;
+}
+
 function releaseAgentFromDrinkDeskConsume(agent, drinkKind = 'drink') {
   if (!agent) return false;
+  releaseConsumableDestinationReservation(agent, agent._idleActivity, `${drinkKind}-consume-complete`);
   agent._postDrinkDeskReleaseUntil = getMonotonicNowMs() + POST_DRINK_DESK_RELEASE_MS;
   agent._postDrinkDeskReleaseKind = drinkKind;
   agent._atDesk = false;
@@ -6860,6 +7150,7 @@ function getFurnitureSeatSurfaceLift(furnitureType) {
   // short/tall agents.
   if (furnitureType === 'armchair') return 2.08;
   if (furnitureType === 'conferenceChair') return 2.108;
+  if (furnitureType === 'meetingTable') return 2.25;
   // Calibrated against the known-good armchair: its cushion top is at world Y
   // 0.56 and uses lift 2.08, i.e. ~3.714 local lift units per world unit of
   // cushion height. The couch cushion top is world Y 0.57 (seat frame 0.24 with
@@ -9472,6 +9763,14 @@ const AGENT_PICKUP_MOVE_TOLERANCE = 10;
 const AGENT_DRAG_LIFT = 0.62;
 const AGENT_MANUAL_PLACE_HOLD_MS = 15000;
 const MANUAL_OBJECT_OCCUPANCY_DWELL_MS = 5 * 60 * 1000;
+const MANUAL_TABLE_SEAT_DWELL_MS = 20 * 1000;
+const MANUAL_TABLE_SEAT_TYPES = new Set([
+  'diningTable',
+  'smallCafeTable',
+  'outdoorCafeTable',
+  'picnicTable',
+  'smallRoundMeetingTable',
+]);
 const MANUAL_OBJECT_OCCUPANCY_TYPES = new Set([
   'chair',
   'officeChair',
@@ -9512,9 +9811,16 @@ function isManualObjectOccupancyFurniture(furniture = null) {
   return MANUAL_OBJECT_OCCUPANCY_TYPES.has(String(furniture?.type || ''));
 }
 
+function getManualObjectOccupancyDwellMs(furniture = null) {
+  return MANUAL_TABLE_SEAT_TYPES.has(String(furniture?.type || ''))
+    ? MANUAL_TABLE_SEAT_DWELL_MS
+    : MANUAL_OBJECT_OCCUPANCY_DWELL_MS;
+}
+
 function getManualObjectDropMetadataForExplicitAction(agent, metadata = {}) {
   const context = _activeManualAgentObjectDropContext;
   if (!context || context.agentId !== getAgentDebugId(agent) || !isManualObjectOccupancyFurniture(context.furniture)) return metadata;
+  const manualOccupancyDwellMs = getManualObjectOccupancyDwellMs(context.furniture);
   return {
     ...metadata,
     owner: 'manual',
@@ -9524,7 +9830,7 @@ function getManualObjectDropMetadataForExplicitAction(agent, metadata = {}) {
     furniture: context.furniture,
     objectType: context.furniture.type,
     spotId: context.spotId,
-    stayMs: MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+    stayMs: manualOccupancyDwellMs,
     manualDrop: true,
     manualDropSnapToUse: true,
     backendRuntimeObjectUse: true,
@@ -9546,15 +9852,16 @@ function applyManualObjectOccupancyDwell(drop, agent, trigger = null) {
     activity.buildingId === drop.buildingId &&
     Number(activity.furnitureIndex) === Number(drop.index);
   if (!matches) return { applied: false, reason: 'activity-does-not-match-drop' };
-  activity.stayMs = Math.max(MANUAL_OBJECT_OCCUPANCY_DWELL_MS, Number(activity.stayMs || 0));
+  const manualOccupancyDwellMs = getManualObjectOccupancyDwellMs(drop.furniture);
+  activity.stayMs = manualOccupancyDwellMs;
   activity.manualDrop = true;
   activity.manualOccupancyHold = true;
-  activity.manualOccupancyDwellMs = MANUAL_OBJECT_OCCUPANCY_DWELL_MS;
+  activity.manualOccupancyDwellMs = manualOccupancyDwellMs;
   activity.behaviorSourceKind = 'user';
   activity.behaviorMode = 'user-directed';
   if (!String(activity.source || '').startsWith('manual-drag-drop')) activity.source = 'manual-drag-drop-object-occupancy';
-  agent._manualPlacementLockUntil = performance.now() + MANUAL_OBJECT_OCCUPANCY_DWELL_MS;
-  if (activity.phase === 'active') agent._stayTimer = Math.max(Number(agent._stayTimer || 0), MANUAL_OBJECT_OCCUPANCY_DWELL_MS);
+  agent._manualPlacementLockUntil = performance.now() + manualOccupancyDwellMs;
+  if (activity.phase === 'active') agent._stayTimer = Math.max(Number(agent._stayTimer || 0), manualOccupancyDwellMs);
   return { applied: true, stayMs: activity.stayMs, furnitureType: drop.furniture.type };
 }
 
@@ -10416,6 +10723,7 @@ function animate() {
     updateChunks();
     // Mini-game runtimes can own agent positions. Advance them before the
     // normal agent render/physics sync so there is only one frame authority.
+    reconcileAuthoritativePingPongEquipment(dt);
     updatePingPongGames(dt);
     updateAgentAnimations(dt);
     updateTrafficLights(dt);
@@ -17409,6 +17717,7 @@ function makeSideTable3D(x, z, s = T) {
   const top = 0x9a5a27;
   const brass = 0xf59e0b;
   const surfaceInlay = 0xd6b07a;
+  g.userData.tabletopCleanup = Object.freeze({ type: 'sideTable', staticItemCount: 0 });
 
   // One stationary, non-carryable Living Room Side Table asset. The tabletop
   // rim, shelf line, handle, and surface inlay are integrated visual/state
@@ -17794,22 +18103,12 @@ function makeDraftingTable3D(x, z, s = T) {
   const frame = 0x7c2d12;
   const darkWood = 0x3f1f12;
   const tableTop = 0xa16207;
-  const planPaper = 0xe0f2fe;
-  const gridBlue = 0x2563eb;
   const metal = 0x94a3b8;
+  g.userData.tabletopCleanup = Object.freeze({ type: 'draftingTable', staticItemCount: 0 });
 
-  // One stationary, non-carryable planning table. Blueprints/tools here are
-  // visual detail only; carryable papers require their own future asset task.
+  // One stationary, non-carryable planning table with a clear work surface.
   g.add(posVox(0, 0.72 * s, 0, 2.35 * s, 0.12 * s, 1.52 * s, tableTop));
   g.add(posVox(0, 0.79 * s, -0.12 * s, 2.20 * s, 0.035 * s, 1.28 * s, 0xd97706)); // angled drafting surface
-  g.add(posVox(0, 0.83 * s, 0.02 * s, 1.62 * s, 0.025 * s, 0.92 * s, planPaper));
-  g.add(posVox(0, 0.855 * s, 0.02 * s, 1.50 * s, 0.012 * s, 0.035 * s, gridBlue));
-  g.add(posVox(-0.45 * s, 0.858 * s, 0.02 * s, 0.035 * s, 0.012 * s, 0.82 * s, gridBlue));
-  g.add(posVox(0.28 * s, 0.861 * s, 0.16 * s, 0.52 * s, 0.014 * s, 0.03 * s, 0x0f172a));
-  g.add(posVox(0.52 * s, 0.862 * s, -0.18 * s, 0.36 * s, 0.014 * s, 0.03 * s, 0xef4444));
-  g.add(posVox(-0.88 * s, 0.87 * s, 0.50 * s, 0.36 * s, 0.035 * s, 0.07 * s, 0xfacc15)); // scale ruler
-  g.add(posVox(0.92 * s, 0.88 * s, 0.52 * s, 0.06 * s, 0.04 * s, 0.32 * s, metal)); // pen tray
-  g.add(posVox(0.96 * s, 0.91 * s, 0.52 * s, 0.035 * s, 0.035 * s, 0.24 * s, 0x111827)); // pencil
   g.add(posVox(0, 0.54 * s, 0.70 * s, 2.28 * s, 0.12 * s, 0.16 * s, darkWood)); // front apron
   g.add(posVox(0, 0.50 * s, -0.72 * s, 2.18 * s, 0.10 * s, 0.12 * s, darkWood));
   [[-1.02, -0.58], [1.02, -0.58], [-1.02, 0.58], [1.02, 0.58]].forEach(([lx, lz]) => {
@@ -18057,26 +18356,35 @@ function makeParkBench3D(x, z, s = T, furniture = {}) {
   const wood = parseColor(colors.wood);
   const woodLight = parseColor(colors.seatTop);
   const woodDark = parseColor(colors.back);
+  const backTop = parseColor(colors.backTop);
   const metal = parseColor(colors.metal);
   g.userData.multiSeatColors = colors;
+  g.userData.parkBenchGeometry = Object.freeze({
+    halfWidth: 1.12,
+    seatXOffsets: Object.freeze([-0.70, 0, 0.70]),
+    seatCenterSpacing: 0.70,
+    backSupportZ: -0.19,
+  });
   const addPart = (mesh, key, seatId = null) => g.add(tagMultiSeatColorPart(mesh, 'parkBench', key, seatId));
 
   // One stationary persistent Park Bench asset only. Seat planks, back rail,
   // legs, and center seams are visual detail on the single solid footprint;
   // they do not spawn extra benches, tables, signs, plants, or temporary props.
-  addPart(posVox(0, 0.34 * s, 0.06 * s, 1.46 * s, 0.09 * s, 0.38 * s, wood), 'wood');
-  [[-0.46, 'seat-left'], [0, 'seat-center'], [0.46, 'seat-right']].forEach(([sx, seatId]) => {
-    addPart(posVox(sx * s, 0.43 * s, 0.08 * s, 0.43 * s, 0.035 * s, 0.31 * s, woodLight), 'seatTop', seatId);
+  addPart(posVox(0, 0.34 * s, 0.06 * s, 2.18 * s, 0.09 * s, 0.38 * s, wood), 'wood');
+  [[-0.70, 'seat-left'], [0, 'seat-center'], [0.70, 'seat-right']].forEach(([sx, seatId]) => {
+    addPart(posVox(sx * s, 0.43 * s, 0.08 * s, 0.60 * s, 0.035 * s, 0.31 * s, woodLight), 'seatTop', seatId);
   });
-  addPart(posVox(0, 0.64 * s, -0.19 * s, 1.50 * s, 0.34 * s, 0.08 * s, woodDark), 'back');
-  addPart(posVox(0, 0.78 * s, -0.15 * s, 1.42 * s, 0.06 * s, 0.06 * s, woodLight), 'seatTop');
-  [-0.52, 0, 0.52].forEach((lx) => {
-    addPart(posVox(lx * s, 0.46 * s, 0.25 * s, 0.035 * s, 0.11 * s, 0.05 * s, metal), 'metal');
+  addPart(posVox(0, 0.64 * s, -0.19 * s, 2.22 * s, 0.34 * s, 0.08 * s, woodDark), 'back');
+  addPart(posVox(0, 0.78 * s, -0.15 * s, 2.14 * s, 0.06 * s, 0.06 * s, backTop), 'backTop');
+  [-0.82, 0, 0.82].forEach((lx) => {
+    const backSupport = posVox(lx * s, 0.46 * s, -0.19 * s, 0.035 * s, 0.11 * s, 0.05 * s, metal);
+    backSupport.userData.parkBenchBackSupport = true;
+    addPart(backSupport, 'metal');
     addPart(posVox(lx * s, 0.18 * s, 0.18 * s, 0.07 * s, 0.30 * s, 0.07 * s, metal), 'metal');
     addPart(posVox(lx * s, 0.18 * s, -0.14 * s, 0.07 * s, 0.30 * s, 0.07 * s, metal), 'metal');
   });
-  addPart(posVox(0, 0.21 * s, 0.18 * s, 1.38 * s, 0.045 * s, 0.05 * s, metal), 'metal');
-  addPart(posVox(0, 0.21 * s, -0.14 * s, 1.38 * s, 0.045 * s, 0.05 * s, metal), 'metal');
+  addPart(posVox(0, 0.21 * s, 0.18 * s, 2.08 * s, 0.045 * s, 0.05 * s, metal), 'metal');
+  addPart(posVox(0, 0.21 * s, -0.14 * s, 2.08 * s, 0.045 * s, 0.05 * s, metal), 'metal');
   g.position.set(x, 0, z);
   return g;
 }
@@ -19285,7 +19593,7 @@ function addBuildingFurniture(group, building, bw, bd) {
     if (isBuildingFloorFocusActive(building) && itemFloor !== activeFloor) continue;
     const meshBuilder = FURNITURE_MESH_BUILDERS[f.type];
     if (!meshBuilder) continue;
-    const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'conferenceChair', 'hallwayBench', 'parkBench', 'dumbbellRack', 'gymBench', 'sink', 'fridge', 'stove']);
+    const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'conferenceChair', 'meetingTable', 'hallwayBench', 'parkBench', 'dumbbellRack', 'gymBench', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'smallRoundMeetingTable', 'sink', 'fridge', 'stove']);
     const mesh = f.type === 'interiorDoor'
       ? makeInteriorDoor3D(f.x, f.z, s, f)
       : (configurableMultiSeatTypes.has(f.type) ? meshBuilder(f.x, f.z, s, f) : meshBuilder(f.x, f.z, s));
@@ -19457,9 +19765,41 @@ function selectOutdoorNodeInteractionSpot(type, node, actionId = null, rule = nu
   return spots.find(spot => spot.roles?.some(role => desiredRoles.has(String(role).toLowerCase()))) || spots[0];
 }
 
+function getOutdoorNodeRuntimeTaxonomyInput(node = {}) {
+  // The taxonomy resolver deep-freezes its immutable result. Never pass the
+  // live outdoor node because nested runtime state (especially seat stores)
+  // would be frozen through the resolver's shallow node copy.
+  return {
+    id: node.id,
+    instanceId: node.instanceId,
+    nodeType: node.nodeType,
+    interactionType: node.interactionType,
+    actionType: node.actionType,
+    type: node.type,
+    catalogId: node.catalogId,
+    objectCatalogId: node.objectCatalogId,
+    assetId: node.assetId,
+    renderType: node.renderType,
+    buildingId: node.buildingId,
+    outdoorAreaId: node.outdoorAreaId,
+    outdoorAreaType: node.outdoorAreaType,
+    x: node.x,
+    localX: node.localX,
+    z: node.z,
+    localZ: node.localZ,
+    worldX: node.worldX,
+    worldZ: node.worldZ,
+    facing: node.facing,
+    roles: Array.isArray(node.roles) ? [...node.roles] : [],
+    actionId: node.actionId,
+    approachClearanceTiles: node.approachClearanceTiles,
+  };
+}
+
 function getOutdoorNodeRuntimeTarget(building, node, actionId = null, rule = null) {
   if (!building || !node) return null;
-  const resolved = resolveExteriorInteractionNodeTarget(node, { building, outdoorArea: building.outdoorArea || null, apiTile: API_TILE });
+  const taxonomyInput = getOutdoorNodeRuntimeTaxonomyInput(node);
+  const resolved = resolveExteriorInteractionNodeTarget(taxonomyInput, { building, outdoorArea: building.outdoorArea || null, apiTile: API_TILE });
   if (!resolved.valid || !resolved.target) return null;
   const type = getOutdoorNodeAssetType(node);
   const local = getOutdoorNodeLocalPoint(node, building);
@@ -19874,32 +20214,50 @@ function makeChair3D(x, z, s) {
   return g;
 }
 
-function makeOfficeChair3D(x, z, s) {
+function makeOfficeChair3D(x, z, s, options = {}) {
   const g = new THREE.Group();
+  const colorType = String(options.colorType || '').trim();
+  const seatId = String(options.seatId || '').trim() || null;
+  const palette = options.colors && typeof options.colors === 'object' ? options.colors : {};
+  const color = (key, fallback) => palette[key] ? parseColor(palette[key]) : fallback;
+  const addPart = (mesh, key) => {
+    g.add(colorType ? tagMultiSeatColorPart(mesh, colorType, key, seatId) : mesh);
+    return mesh;
+  };
+  const frame = color('chairFrame', 0x263238);
+  const base = color('chairBase', 0x111820);
+  const metal = color('chairMetal', 0x455a64);
+  const upholstery = color('chairUpholstery', 0x37474f);
+  const accent = color('chairAccent', 0x4fc3f7);
   // Compact task-chair footprint, scaled to pair with desks without blocking walkways.
   // Cross base and casters only — no extra flat quadrant rails.
-  g.add(posVox(0, 0.08 * s, 0, 0.72 * s, 0.05 * s, 0.08 * s, 0x263238));
-  g.add(posVox(0, 0.08 * s, 0, 0.08 * s, 0.05 * s, 0.72 * s, 0x263238));
+  addPart(posVox(0, 0.08 * s, 0, 0.72 * s, 0.05 * s, 0.08 * s, frame), 'chairFrame');
+  addPart(posVox(0, 0.08 * s, 0, 0.08 * s, 0.05 * s, 0.72 * s, frame), 'chairFrame');
   for (const [cx, cz] of [[0.38,0],[-0.38,0],[0,0.38],[0,-0.38]]) {
-    g.add(posVox(cx * s, 0.045 * s, cz * s, 0.08 * s, 0.05 * s, 0.08 * s, 0x111820));
+    addPart(posVox(cx * s, 0.045 * s, cz * s, 0.08 * s, 0.05 * s, 0.08 * s, base), 'chairBase');
   }
   // Gas lift.
-  g.add(posVox(0, 0.28 * s, 0, 0.12 * s, 0.38 * s, 0.12 * s, 0x455a64));
-  g.add(posVox(0, 0.48 * s, 0, 0.18 * s, 0.08 * s, 0.18 * s, 0x90a4ae));
+  addPart(posVox(0, 0.28 * s, 0, 0.12 * s, 0.38 * s, 0.12 * s, metal), 'chairMetal');
+  addPart(posVox(0, 0.48 * s, 0, 0.18 * s, 0.08 * s, 0.18 * s, color('chairMetal', 0x90a4ae)), 'chairMetal');
   // Cushioned seat with beveled/highlighted top.
-  g.add(posVox(0, 0.55 * s, 0.04 * s, 0.76 * s, 0.16 * s, 0.72 * s, 0x263238));
-  g.add(posVox(0, 0.66 * s, 0.02 * s, 0.68 * s, 0.09 * s, 0.62 * s, 0x37474f));
-  g.add(posVox(0, 0.72 * s, -0.18 * s, 0.54 * s, 0.03 * s, 0.12 * s, 0x4fc3f7));
+  addPart(posVox(0, 0.55 * s, 0.04 * s, 0.76 * s, 0.16 * s, 0.72 * s, frame), 'chairFrame');
+  addPart(posVox(0, 0.66 * s, 0.02 * s, 0.68 * s, 0.09 * s, 0.62 * s, upholstery), 'chairUpholstery');
+  addPart(posVox(0, 0.72 * s, -0.18 * s, 0.54 * s, 0.03 * s, 0.12 * s, accent), 'chairAccent');
   // Arm rests.
-  g.add(posVox(-0.48 * s, 0.78 * s, 0.02 * s, 0.08 * s, 0.42 * s, 0.12 * s, 0x263238));
-  g.add(posVox(0.48 * s, 0.78 * s, 0.02 * s, 0.08 * s, 0.42 * s, 0.12 * s, 0x263238));
-  g.add(posVox(-0.48 * s, 1.0 * s, 0.0, 0.1 * s, 0.08 * s, 0.56 * s, 0x455a64));
-  g.add(posVox(0.48 * s, 1.0 * s, 0.0, 0.1 * s, 0.08 * s, 0.56 * s, 0x455a64));
+  addPart(posVox(-0.48 * s, 0.78 * s, 0.02 * s, 0.08 * s, 0.42 * s, 0.12 * s, frame), 'chairFrame');
+  addPart(posVox(0.48 * s, 0.78 * s, 0.02 * s, 0.08 * s, 0.42 * s, 0.12 * s, frame), 'chairFrame');
+  addPart(posVox(-0.48 * s, 1.0 * s, 0.0, 0.1 * s, 0.08 * s, 0.56 * s, metal), 'chairMetal');
+  addPart(posVox(0.48 * s, 1.0 * s, 0.0, 0.1 * s, 0.08 * s, 0.56 * s, metal), 'chairMetal');
   // Tall padded back, slightly behind seat, with head highlight stripe.
-  g.add(posVox(0, 1.0 * s, -0.34 * s, 0.78 * s, 0.9 * s, 0.12 * s, 0x263238));
-  g.add(posVox(0, 1.07 * s, -0.39 * s, 0.66 * s, 0.76 * s, 0.08 * s, 0x455a64));
-  g.add(posVox(0, 1.37 * s, -0.44 * s, 0.5 * s, 0.08 * s, 0.04 * s, 0x607d8b));
-  g.add(posVox(0, 0.77 * s, -0.43 * s, 0.44 * s, 0.03 * s, 0.04 * s, 0x4fc3f7));
+  addPart(posVox(0, 1.0 * s, -0.34 * s, 0.78 * s, 0.9 * s, 0.12 * s, frame), 'chairFrame');
+  addPart(posVox(0, 1.07 * s, -0.39 * s, 0.66 * s, 0.76 * s, 0.08 * s, upholstery), 'chairUpholstery');
+  addPart(posVox(0, 1.37 * s, -0.44 * s, 0.5 * s, 0.08 * s, 0.04 * s, metal), 'chairMetal');
+  addPart(posVox(0, 0.77 * s, -0.43 * s, 0.44 * s, 0.03 * s, 0.04 * s, accent), 'chairAccent');
+  if (seatId) {
+    g.userData.interactionSpotId = seatId;
+    g.userData.multiSeatId = seatId;
+    g.userData.dragAgentDropTarget = true;
+  }
   g.position.set(x, 0, z);
   return g;
 }
@@ -19940,51 +20298,68 @@ function makeConferenceChair3D(x, z, s, furniture = {}) {
   return g;
 }
 
-function makeMeetingTable(x, z, s) {
+function makeMeetingTable(x, z, s, furniture = {}) {
   const g = new THREE.Group();
-  const top = 0x8d6e63;
-  const edge = 0x5d4037;
-  const leg = 0x4e342e;
-  const paper = 0xf8fafc;
-  const paperBlue = 0x90caf9;
-  const speaker = 0x263238;
+  const colors = normalizeMultiSeatFurnitureColors('meetingTable', furniture);
+  const top = parseColor(colors.tabletop);
+  const edge = parseColor(colors.edgeApron);
+  const leg = parseColor(colors.legsBase);
+  const paper = parseColor(colors.paperwork);
+  const paperBlue = parseColor(colors.paperworkAccent);
+  const speaker = parseColor(colors.speaker);
+  const addPart = (mesh, key) => g.add(tagMultiSeatColorPart(mesh, 'meetingTable', key));
+  g.userData.multiSeatColors = colors;
+  g.userData.tabletopCleanup = Object.freeze({
+    type: 'meetingTable',
+    staticItemCount: 5,
+    staticItemKinds: Object.freeze(['paperwork-packet', 'conference-speaker']),
+  });
 
   // Conference table surface with apron/legs so it reads as grounded, not floating.
-  g.add(posVox(0, 0.72 * s, 0, 4.15 * s, 0.14 * s, 2.05 * s, top));
-  g.add(posVox(0, 0.62 * s, -0.98 * s, 4.05 * s, 0.16 * s, 0.12 * s, edge));
-  g.add(posVox(0, 0.62 * s, 0.98 * s, 4.05 * s, 0.16 * s, 0.12 * s, edge));
-  g.add(posVox(-2.02 * s, 0.62 * s, 0, 0.12 * s, 0.16 * s, 1.88 * s, edge));
-  g.add(posVox(2.02 * s, 0.62 * s, 0, 0.12 * s, 0.16 * s, 1.88 * s, edge));
+  addPart(posVox(0, 0.72 * s, 0, 4.15 * s, 0.14 * s, 2.05 * s, top), 'tabletop');
+  addPart(posVox(0, 0.62 * s, -0.98 * s, 4.05 * s, 0.16 * s, 0.12 * s, edge), 'edgeApron');
+  addPart(posVox(0, 0.62 * s, 0.98 * s, 4.05 * s, 0.16 * s, 0.12 * s, edge), 'edgeApron');
+  addPart(posVox(-2.02 * s, 0.62 * s, 0, 0.12 * s, 0.16 * s, 1.88 * s, edge), 'edgeApron');
+  addPart(posVox(2.02 * s, 0.62 * s, 0, 0.12 * s, 0.16 * s, 1.88 * s, edge), 'edgeApron');
   for (const [lx, lz] of [[-1.7, -0.72], [1.7, -0.72], [-1.7, 0.72], [1.7, 0.72]]) {
-    g.add(posVox(lx * s, 0.34 * s, lz * s, 0.16 * s, 0.68 * s, 0.16 * s, leg));
-    g.add(posVox(lx * s, 0.04 * s, lz * s, 0.32 * s, 0.08 * s, 0.32 * s, 0x3e2723));
+    addPart(posVox(lx * s, 0.34 * s, lz * s, 0.16 * s, 0.68 * s, 0.16 * s, leg), 'legsBase');
+    addPart(posVox(lx * s, 0.04 * s, lz * s, 0.32 * s, 0.08 * s, 0.32 * s, leg), 'legsBase');
   }
 
-  // Paperwork packets and a center conference speaker for table detail.
+  // The large Meeting Table is the only table that intentionally keeps static
+  // tabletop items: four paperwork packets and one center conference speaker.
   for (const [px, pz, rot] of [[-1.25, -0.42, -0.12], [-0.38, 0.36, 0.08], [0.62, -0.34, 0.16], [1.34, 0.38, -0.08]]) {
-    const sheet = posVox(px * s, 0.81 * s, pz * s, 0.46 * s, 0.018 * s, 0.32 * s, paper);
-    sheet.rotation.y = rot;
-    g.add(sheet);
-    const line = posVox(px * s, 0.825 * s, (pz + 0.06) * s, 0.34 * s, 0.012 * s, 0.025 * s, paperBlue);
-    line.rotation.y = rot;
-    g.add(line);
+    const packet = new THREE.Group();
+    packet.userData.tabletopStaticItem = 'paperwork-packet';
+    packet.add(tagMultiSeatColorPart(posVox(0, 0, 0, 0.46 * s, 0.018 * s, 0.32 * s, paper), 'meetingTable', 'paperwork'));
+    packet.add(tagMultiSeatColorPart(posVox(0, 0.015 * s, 0.06 * s, 0.34 * s, 0.012 * s, 0.025 * s, paperBlue), 'meetingTable', 'paperworkAccent'));
+    packet.position.set(px * s, 0.81 * s, pz * s);
+    packet.rotation.y = rot;
+    g.add(packet);
   }
-  g.add(posVox(0, 0.84 * s, 0, 0.56 * s, 0.08 * s, 0.56 * s, speaker));
-  g.add(posVox(0, 0.90 * s, 0, 0.36 * s, 0.035 * s, 0.36 * s, 0x455a64));
-  g.add(posVox(-0.11 * s, 0.925 * s, 0, 0.055 * s, 0.018 * s, 0.055 * s, 0x4caf50));
-  g.add(posVox(0.11 * s, 0.925 * s, 0, 0.055 * s, 0.018 * s, 0.055 * s, 0xf44336));
+  const speakerUnit = new THREE.Group();
+  speakerUnit.userData.tabletopStaticItem = 'conference-speaker';
+  speakerUnit.add(tagMultiSeatColorPart(posVox(0, 0, 0, 0.56 * s, 0.08 * s, 0.56 * s, speaker), 'meetingTable', 'speaker'));
+  speakerUnit.add(tagMultiSeatColorPart(posVox(0, 0.06 * s, 0, 0.36 * s, 0.035 * s, 0.36 * s, speaker), 'meetingTable', 'speaker'));
+  speakerUnit.add(posVox(-0.11 * s, 0.085 * s, 0, 0.055 * s, 0.018 * s, 0.055 * s, 0x4caf50));
+  speakerUnit.add(posVox(0.11 * s, 0.085 * s, 0, 0.055 * s, 0.018 * s, 0.055 * s, 0xf44336));
+  speakerUnit.position.y = 0.84 * s;
+  g.add(speakerUnit);
 
   // Replace plain chairs with the richer officeChair asset. Default chair faces +Z;
   // the south row is rotated to face back toward the table center.
-  for (const cx of [-1.65, -0.82, 0, 0.82, 1.65]) {
-    const north = makeOfficeChair3D(cx * s, -1.45 * s, s);
+  [-1.65, -0.82, 0, 0.82, 1.65].forEach((cx, index) => {
+    const northSeatId = `seat-n${index + 1}`;
+    const southSeatId = `seat-s${index + 1}`;
+    const chairOptions = { colorType: 'meetingTable', colors };
+    const north = makeOfficeChair3D(cx * s, -1.45 * s, s, { ...chairOptions, seatId: northSeatId });
     north.scale.setScalar(0.86);
     g.add(north);
-    const south = makeOfficeChair3D(cx * s, 1.45 * s, s);
+    const south = makeOfficeChair3D(cx * s, 1.45 * s, s, { ...chairOptions, seatId: southSeatId });
     south.scale.setScalar(0.86);
     south.rotation.y = Math.PI;
     g.add(south);
-  }
+  });
 
   g.position.set(x, 0, z);
   return g;
@@ -20051,6 +20426,36 @@ const MULTI_SEAT_COLOR_SCHEMES = Object.freeze({
     defaults: Object.freeze({ frame: '#334155', legs: '#0f172a', fabric: '#1d4ed8', fabricLight: '#60a5fa', fabricDark: '#1e3a8a', feet: '#94a3b8' }),
     fields: Object.freeze([['fabric', 'Seat / back fabric'], ['fabricLight', 'Cushion highlights'], ['fabricDark', 'Back / arm pads'], ['frame', 'Arm supports'], ['legs', 'Legs'], ['feet', 'Feet / braces']]),
   }),
+  meetingTable: Object.freeze({
+    property: 'meetingTableColors',
+    label: 'Meeting table',
+    defaults: Object.freeze({
+      tabletop: '#8d6e63',
+      edgeApron: '#5d4037',
+      legsBase: '#4e342e',
+      chairFrame: '#263238',
+      chairBase: '#111820',
+      chairMetal: '#455a64',
+      chairUpholstery: '#37474f',
+      chairAccent: '#4fc3f7',
+      paperwork: '#f8fafc',
+      paperworkAccent: '#90caf9',
+      speaker: '#263238',
+    }),
+    fields: Object.freeze([
+      ['tabletop', 'Tabletop'],
+      ['edgeApron', 'Table edge / apron'],
+      ['legsBase', 'Table legs / feet'],
+      ['chairUpholstery', 'Chair upholstery'],
+      ['chairFrame', 'Chair frames'],
+      ['chairMetal', 'Chair metal'],
+      ['chairBase', 'Chair casters'],
+      ['chairAccent', 'Chair accents'],
+      ['paperwork', 'Meeting paperwork'],
+      ['paperworkAccent', 'Paperwork accents'],
+      ['speaker', 'Conference speaker'],
+    ]),
+  }),
   dumbbellRack: Object.freeze({
     property: 'dumbbellRackColors',
     label: 'Dumbbell rack',
@@ -20072,8 +20477,32 @@ const MULTI_SEAT_COLOR_SCHEMES = Object.freeze({
   parkBench: Object.freeze({
     property: 'parkBenchColors',
     label: 'Park bench',
-    defaults: Object.freeze({ wood: '#8d6e63', seatTop: '#a98262', back: '#5d4037', metal: '#374151' }),
-    fields: Object.freeze([['wood', 'Wood base'], ['seatTop', 'Seat / top rail'], ['back', 'Back rail'], ['metal', 'Metal frame']]),
+    defaults: Object.freeze({ wood: '#8d6e63', seatTop: '#a98262', back: '#5d4037', backTop: '#7b5a4a', metal: '#374151' }),
+    fields: Object.freeze([['wood', 'Seat base'], ['seatTop', 'Seat tops'], ['back', 'Backrest'], ['backTop', 'Backrest top rail'], ['metal', 'Side / back frame']]),
+  }),
+  diningTable: Object.freeze({
+    property: 'diningTableColors',
+    label: 'Dining table',
+    defaults: Object.freeze({ tabletop: '#a66a3d', woodFrame: '#4e342e', woodAccent: '#6d4c41', chairSeat: '#8d6e63' }),
+    fields: Object.freeze([['tabletop', 'Tabletop'], ['woodFrame', 'Table legs & chair frame'], ['woodAccent', 'Chair accents'], ['chairSeat', 'Chair cushions']]),
+  }),
+  smallCafeTable: Object.freeze({
+    property: 'smallCafeTableColors',
+    label: 'Small cafe table',
+    defaults: Object.freeze({ tabletop: '#8b5e3c', tabletopAccent: '#c08457', baseFrame: '#4b5563', chairSeat: '#0f766e', chairBack: '#14b8a6' }),
+    fields: Object.freeze([['tabletop', 'Tabletop'], ['tabletopAccent', 'Tabletop accent'], ['baseFrame', 'Base & chair frame'], ['chairSeat', 'Chair seats'], ['chairBack', 'Chair backs']]),
+  }),
+  outdoorCafeTable: Object.freeze({
+    property: 'outdoorCafeTableColors',
+    label: 'Outdoor cafe table',
+    defaults: Object.freeze({ tabletop: '#9a6a3a', tabletopAccent: '#d6a15f', baseFrame: '#475569', chairSeat: '#0f766e', chairBack: '#14b8a6', umbrellaCanvas: '#fbbf24', umbrellaTrim: '#f97316' }),
+    fields: Object.freeze([['tabletop', 'Tabletop'], ['tabletopAccent', 'Tabletop accent'], ['baseFrame', 'Base, pole & chair frame'], ['chairSeat', 'Chair seats'], ['chairBack', 'Chair backs'], ['umbrellaCanvas', 'Umbrella canvas'], ['umbrellaTrim', 'Umbrella trim']]),
+  }),
+  smallRoundMeetingTable: Object.freeze({
+    property: 'smallRoundMeetingTableColors',
+    label: 'Small round meeting table',
+    defaults: Object.freeze({ tabletop: '#6b3f24', tabletopAccent: '#a16207', baseFrame: '#1f2937', pedestal: '#64748b', chairSeat: '#4338ca', chairBack: '#312e81' }),
+    fields: Object.freeze([['tabletop', 'Round tabletop'], ['tabletopAccent', 'Tabletop accent'], ['baseFrame', 'Table base & chair stems'], ['pedestal', 'Table pedestal & round chair bases'], ['chairSeat', 'Chair seats'], ['chairBack', 'Chair backs']]),
   }),
   sink: Object.freeze({
     property: 'sinkColors',
@@ -21257,46 +21686,46 @@ function makeKitchenIsland3D(x, z, s) {
   return g;
 }
 
-function makeSmallCafeTable3D(x, z, s) {
+function makeSmallCafeTable3D(x, z, s, furniture = {}) {
   const g = new THREE.Group();
-  const metal = 0x4b5563;
-  const metalDark = 0x1f2937;
-  const wood = 0x8b5e3c;
-  const woodLight = 0xc08457;
-  const linen = 0xfff7ed;
-  const cup = 0xf8fafc;
-  const coffee = 0x6f4e37;
-  const laptop = 0x111827;
+  const colors = normalizeMultiSeatFurnitureColors('smallCafeTable', furniture);
+  const metal = parseColor(colors.baseFrame);
+  const metalDark = new THREE.Color(metal).multiplyScalar(0.66).getHex();
+  const wood = parseColor(colors.tabletop);
+  const woodLight = parseColor(colors.tabletopAccent);
+  const chairSeat = parseColor(colors.chairSeat);
+  const chairBack = parseColor(colors.chairBack);
+  g.userData.multiSeatColors = colors;
+  g.userData.tabletopCleanup = Object.freeze({ type: 'smallCafeTable', staticItemCount: 0 });
+  const addPart = (mesh, key, seatId = null) => {
+    g.add(tagMultiSeatColorPart(mesh, 'smallCafeTable', key, seatId));
+    return mesh;
+  };
 
-  // One small stationary cafe table asset only. Cups, plates, a laptop mark,
-  // and tabletop accents are integrated visual details, not bundled objects.
-  g.add(posVox(0, 0.28 * s, 0, 0.18 * s, 0.56 * s, 0.18 * s, metalDark)); // pedestal
-  g.add(posVox(0, 0.10 * s, 0, 0.78 * s, 0.10 * s, 0.78 * s, metal)); // weighted base
-  g.add(posVox(0, 0.62 * s, 0, 1.28 * s, 0.12 * s, 1.28 * s, wood)); // square-readable round tabletop proxy
-  g.add(posVox(0, 0.70 * s, 0, 1.16 * s, 0.06 * s, 1.16 * s, woodLight));
-  g.add(posVox(0, 0.735 * s, 0, 0.88 * s, 0.018 * s, 0.88 * s, 0xf3d6b2)); // light center inset
-  g.add(posVox(0, 0.755 * s, 0, 0.18 * s, 0.02 * s, 0.92 * s, linen)); // narrow table runner
-
-  // Four subtle place/work spots on the same tabletop.
-  [[0, -0.34, 0], [0, 0.34, 1], [-0.34, 0, 2], [0.34, 0, 3]].forEach(([px, pz, idx]) => {
-    g.add(posVox(px * s, 0.775 * s, pz * s, 0.24 * s, 0.018 * s, 0.20 * s, idx === 3 ? 0xdbeafe : linen));
-    g.add(posVox((px + (idx < 2 ? 0.17 : 0)) * s, 0.83 * s, (pz + (idx >= 2 ? 0.15 : 0)) * s, 0.12 * s, 0.12 * s, 0.12 * s, cup));
-    g.add(posVox((px + (idx < 2 ? 0.17 : 0)) * s, 0.90 * s, (pz + (idx >= 2 ? 0.15 : 0)) * s, 0.08 * s, 0.018 * s, 0.08 * s, coffee));
-  });
-  g.add(posVox(0.28 * s, 0.81 * s, -0.22 * s, 0.32 * s, 0.035 * s, 0.22 * s, laptop)); // closed laptop work cue
-  g.add(posVox(0.28 * s, 0.93 * s, -0.33 * s, 0.32 * s, 0.24 * s, 0.035 * s, 0x334155));
-  g.add(posVox(0.28 * s, 0.94 * s, -0.354 * s, 0.22 * s, 0.14 * s, 0.014 * s, 0x60a5fa));
-  g.add(posVox(-0.12 * s, 0.82 * s, 0.10 * s, 0.22 * s, 0.04 * s, 0.18 * s, 0xfef3c7)); // small plate/snack cue
-  g.add(posVox(-0.12 * s, 0.86 * s, 0.10 * s, 0.12 * s, 0.035 * s, 0.10 * s, 0xf97316));
+  // One small stationary cafe table asset with a clear tabletop.
+  addPart(posVox(0, 0.28 * s, 0, 0.18 * s, 0.56 * s, 0.18 * s, metalDark), 'baseFrame'); // pedestal
+  addPart(posVox(0, 0.10 * s, 0, 0.78 * s, 0.10 * s, 0.78 * s, metal), 'baseFrame'); // weighted base
+  addPart(posVox(0, 0.62 * s, 0, 1.28 * s, 0.12 * s, 1.28 * s, wood), 'tabletop');
+  addPart(posVox(0, 0.70 * s, 0, 1.16 * s, 0.06 * s, 1.16 * s, woodLight), 'tabletopAccent');
+  const servingSurface = posVox(0, 0.735 * s, 0, 0.88 * s, 0.018 * s, 0.88 * s, 0xf3d6b2); // light center inset
+  servingSurface.userData.consumableTabletopSurface = 'smallCafeTable';
+  servingSurface.userData.consumableTabletopTopY = CONSUMABLE_SURFACE_SPECS.smallCafeTable.surfaceHeight * s;
+  g.userData.consumableSurfaceSpec = CONSUMABLE_SURFACE_SPECS.smallCafeTable;
+  g.add(servingSurface);
 
   // Four integrated chairs match the four reservable seat positions. They are
   // visual children of this one table asset and do not create extra colliders.
-  [[0, -1.02, 0], [0, 1.02, Math.PI], [1.02, 0, Math.PI / 2], [-1.02, 0, -Math.PI / 2]].forEach(([cx, cz, rot]) => {
+  [
+    ['seat-north', 0, -0.98, 0],
+    ['seat-south', 0, 0.98, Math.PI],
+    ['seat-east', 0.98, 0, -Math.PI / 2],
+    ['seat-west', -0.98, 0, Math.PI / 2],
+  ].forEach(([seatId, cx, cz, rot]) => {
     const chair = new THREE.Group();
-    chair.add(posVox(0, 0.35 * s, 0, 0.46 * s, 0.10 * s, 0.44 * s, 0x0f766e));
-    chair.add(posVox(0, 0.66 * s, -0.20 * s, 0.50 * s, 0.46 * s, 0.08 * s, 0x14b8a6));
+    chair.add(tagMultiSeatColorPart(posVox(0, 0.35 * s, 0, 0.46 * s, 0.10 * s, 0.44 * s, chairSeat), 'smallCafeTable', 'chairSeat', seatId));
+    chair.add(tagMultiSeatColorPart(posVox(0, 0.66 * s, -0.20 * s, 0.50 * s, 0.46 * s, 0.08 * s, chairBack), 'smallCafeTable', 'chairBack'));
     for (const [lx, lz] of [[-0.16, -0.12], [0.16, -0.12], [-0.16, 0.12], [0.16, 0.12]]) {
-      chair.add(posVox(lx * s, 0.17 * s, lz * s, 0.06 * s, 0.34 * s, 0.06 * s, metalDark));
+      chair.add(tagMultiSeatColorPart(posVox(lx * s, 0.17 * s, lz * s, 0.06 * s, 0.34 * s, 0.06 * s, metalDark), 'smallCafeTable', 'baseFrame'));
     }
     chair.rotation.y = rot;
     chair.position.set(cx * s, 0, cz * s);
@@ -21313,20 +21742,14 @@ function makePatioTable3D(x, z, s) {
   const frameDark = 0x111827;
   const slat = 0x9a6a3a;
   const slatLight = 0xd09a55;
-  const runner = 0xfef3c7;
-  const cup = 0xf8fafc;
-  const plate = 0xfef9c3;
+  g.userData.tabletopCleanup = Object.freeze({ type: 'patioTable', staticItemCount: 0 });
 
-  // One stationary persistent outdoor table only. Integrated cups/plates and
-  // tabletop grooves are visual details, not bundled chairs, umbrella, grill,
-  // planter, or separate food/drink assets.
+  // One stationary persistent outdoor table with a clear slatted tabletop.
   g.add(posVox(0, 0.62 * s, 0, 1.68 * s, 0.14 * s, 1.42 * s, slat));
   g.add(posVox(0, 0.715 * s, 0, 1.54 * s, 0.045 * s, 1.28 * s, slatLight));
   [-0.55, -0.18, 0.18, 0.55].forEach((lx) => {
     g.add(posVox(lx * s, 0.755 * s, 0, 0.035 * s, 0.018 * s, 1.20 * s, frameDark));
   });
-  g.add(posVox(0, 0.778 * s, 0, 0.20 * s, 0.018 * s, 1.08 * s, runner));
-  g.add(posVox(0, 0.79 * s, 0, 1.26 * s, 0.016 * s, 0.045 * s, 0xfbbf24));
 
   // Metal rim, cross-braces, and four legs keep the scale readable versus chairs/desks.
   g.add(posVox(0, 0.66 * s, -0.74 * s, 1.76 * s, 0.08 * s, 0.08 * s, frame));
@@ -21340,105 +21763,132 @@ function makePatioTable3D(x, z, s) {
   g.add(posVox(0, 0.34 * s, 0.52 * s, 1.32 * s, 0.07 * s, 0.07 * s, frame));
   g.add(posVox(0, 0.34 * s, -0.52 * s, 1.32 * s, 0.07 * s, 0.07 * s, frame));
 
-  [[-0.44, -0.34], [0.44, -0.34], [-0.44, 0.34], [0.44, 0.34]].forEach(([px, pz], idx) => {
-    g.add(posVox(px * s, 0.81 * s, pz * s, 0.24 * s, 0.018 * s, 0.20 * s, idx % 2 ? plate : 0xe0f2fe));
-    g.add(posVox((px + 0.13) * s, 0.865 * s, (pz - 0.02) * s, 0.10 * s, 0.12 * s, 0.10 * s, cup));
-    g.add(posVox((px + 0.13) * s, 0.93 * s, (pz - 0.02) * s, 0.065 * s, 0.018 * s, 0.065 * s, 0x6f4e37));
-  });
-
   g.position.set(x, 0, z);
   return g;
 }
 
-function makeOutdoorCafeTable3D(x, z, s) {
+function makeOutdoorCafeTable3D(x, z, s, furniture = {}) {
   const g = new THREE.Group();
-  const metal = 0x475569;
-  const metalDark = 0x1f2937;
-  const wood = 0x9a6a3a;
-  const woodLight = 0xd6a15f;
-  const canvas = 0xfbbf24;
-  const canvasTrim = 0xf97316;
-  const chairSeat = 0x0f766e;
-  const chairBack = 0x14b8a6;
-  const cup = 0xf8fafc;
-  const plate = 0xfef3c7;
+  const colors = normalizeMultiSeatFurnitureColors('outdoorCafeTable', furniture);
+  const metal = parseColor(colors.baseFrame);
+  const metalDark = new THREE.Color(metal).multiplyScalar(0.46).getHex();
+  const wood = parseColor(colors.tabletop);
+  const woodLight = parseColor(colors.tabletopAccent);
+  const canvas = parseColor(colors.umbrellaCanvas);
+  const canvasTrim = parseColor(colors.umbrellaTrim);
+  const chairSeat = parseColor(colors.chairSeat);
+  const chairBack = parseColor(colors.chairBack);
+  g.userData.multiSeatColors = colors;
+  g.userData.tabletopCleanup = Object.freeze({ type: 'outdoorCafeTable', staticItemCount: 0 });
+  const addPart = (mesh, key, seatId = null) => {
+    g.add(tagMultiSeatColorPart(mesh, 'outdoorCafeTable', key, seatId));
+    return mesh;
+  };
 
-  // Exactly one stationary Outdoor Cafe Table asset. The four chairs, umbrella,
-  // cups, plates, and tabletop marks are integrated visual detail only; they do
-  // not create separate outdoor assets or colliders. The solid footprint is the
-  // compact table/pedestal center, leaving the four seat waypoints reachable.
-  g.add(posVox(0, 0.03 * s, 0, 1.52 * s, 0.06 * s, 1.52 * s, 0x2f1b12));
-  g.add(posVox(0, 0.12 * s, 0, 0.74 * s, 0.10 * s, 0.74 * s, metalDark));
-  g.add(posVox(0, 0.36 * s, 0, 0.18 * s, 0.62 * s, 0.18 * s, metal));
-  g.add(posVox(0, 0.67 * s, 0, 1.34 * s, 0.14 * s, 1.34 * s, wood));
-  g.add(posVox(0, 0.765 * s, 0, 1.18 * s, 0.045 * s, 1.18 * s, woodLight));
+  // Exactly one stationary Outdoor Cafe Table asset. Its four chairs and
+  // umbrella remain integrated while the tabletop itself stays clear.
+  addPart(posVox(0, 0.12 * s, 0, 0.74 * s, 0.10 * s, 0.74 * s, metalDark), 'baseFrame');
+  addPart(posVox(0, 0.36 * s, 0, 0.18 * s, 0.62 * s, 0.18 * s, metal), 'baseFrame');
+  addPart(posVox(0, 0.67 * s, 0, 1.34 * s, 0.14 * s, 1.34 * s, wood), 'tabletop');
+  const servingSurface = addPart(posVox(0, 0.765 * s, 0, 1.18 * s, 0.045 * s, 1.18 * s, woodLight), 'tabletopAccent');
+  servingSurface.userData.consumableTabletopSurface = 'outdoorCafeTable';
+  servingSurface.userData.consumableTabletopTopY = CONSUMABLE_SURFACE_SPECS.outdoorCafeTable.surfaceHeight * s;
+  g.userData.consumableSurfaceSpec = CONSUMABLE_SURFACE_SPECS.outdoorCafeTable;
 
   // Umbrella is visual detail attached to this table record, with a thin center
   // pole inside the solid footprint so it doesn't block any extra seats/routes.
-  g.add(posVox(0, 1.22 * s, 0, 0.08 * s, 1.04 * s, 0.08 * s, metalDark));
-  g.add(posVox(0, 1.82 * s, 0, 2.08 * s, 0.10 * s, 2.08 * s, canvas));
-  g.add(posVox(0, 1.88 * s, 0, 1.38 * s, 0.12 * s, 1.38 * s, canvas));
-  g.add(posVox(0, 1.94 * s, 0, 0.38 * s, 0.16 * s, 0.38 * s, canvasTrim));
-  g.add(posVox(0, 1.805 * s, 1.08 * s, 2.02 * s, 0.055 * s, 0.08 * s, canvasTrim));
-  g.add(posVox(0, 1.805 * s, -1.08 * s, 2.02 * s, 0.055 * s, 0.08 * s, canvasTrim));
-  g.add(posVox(1.08 * s, 1.805 * s, 0, 0.08 * s, 0.055 * s, 2.02 * s, canvasTrim));
-  g.add(posVox(-1.08 * s, 1.805 * s, 0, 0.08 * s, 0.055 * s, 2.02 * s, canvasTrim));
+  const umbrellaOriginalCanopyY = 1.82;
+  const umbrellaLiftRatio = 0.30;
+  const umbrellaLift = umbrellaOriginalCanopyY * umbrellaLiftRatio;
+  const umbrellaPoleBottomY = 0.70;
+  const umbrellaPoleHeight = 1.04 + umbrellaLift;
+  const umbrellaPoleCenterY = umbrellaPoleBottomY + umbrellaPoleHeight / 2;
+  g.userData.outdoorCafeUmbrella = Object.freeze({
+    originalCanopyY: umbrellaOriginalCanopyY,
+    canopyY: umbrellaOriginalCanopyY + umbrellaLift,
+    lift: umbrellaLift,
+    liftRatio: umbrellaLiftRatio,
+    poleBottomY: umbrellaPoleBottomY,
+    poleHeight: umbrellaPoleHeight,
+  });
+  addPart(posVox(0, umbrellaPoleCenterY * s, 0, 0.08 * s, umbrellaPoleHeight * s, 0.08 * s, metalDark), 'baseFrame');
+  addPart(posVox(0, (1.82 + umbrellaLift) * s, 0, 2.08 * s, 0.10 * s, 2.08 * s, canvas), 'umbrellaCanvas');
+  addPart(posVox(0, (1.88 + umbrellaLift) * s, 0, 1.38 * s, 0.12 * s, 1.38 * s, canvas), 'umbrellaCanvas');
+  addPart(posVox(0, (1.94 + umbrellaLift) * s, 0, 0.38 * s, 0.16 * s, 0.38 * s, canvasTrim), 'umbrellaTrim');
+  addPart(posVox(0, (1.805 + umbrellaLift) * s, 1.08 * s, 2.02 * s, 0.055 * s, 0.08 * s, canvasTrim), 'umbrellaTrim');
+  addPart(posVox(0, (1.805 + umbrellaLift) * s, -1.08 * s, 2.02 * s, 0.055 * s, 0.08 * s, canvasTrim), 'umbrellaTrim');
+  addPart(posVox(1.08 * s, (1.805 + umbrellaLift) * s, 0, 0.08 * s, 0.055 * s, 2.02 * s, canvasTrim), 'umbrellaTrim');
+  addPart(posVox(-1.08 * s, (1.805 + umbrellaLift) * s, 0, 0.08 * s, 0.055 * s, 2.02 * s, canvasTrim), 'umbrellaTrim');
 
   // Integrated chair silhouettes sit outside the solid table footprint but are
   // deliberately non-collider visual detail so the seat action spots stay usable.
   const chairSpecs = [
-    [0, -1.18, 0], [0, 1.18, Math.PI], [1.18, 0, Math.PI / 2], [-1.18, 0, -Math.PI / 2],
+    ['seat-north', 0, -1.18, 0],
+    ['seat-south', 0, 1.18, Math.PI],
+    ['seat-east', 1.18, 0, -Math.PI / 2],
+    ['seat-west', -1.18, 0, Math.PI / 2],
   ];
-  chairSpecs.forEach(([cx, cz, rot]) => {
+  chairSpecs.forEach(([seatId, cx, cz, rot]) => {
     const chair = new THREE.Group();
-    chair.add(posVox(0, 0.36 * s, 0, 0.44 * s, 0.10 * s, 0.44 * s, chairSeat));
-    chair.add(posVox(0, 0.64 * s, -0.20 * s, 0.48 * s, 0.42 * s, 0.08 * s, chairBack));
-    chair.add(posVox(-0.16 * s, 0.18 * s, 0.12 * s, 0.06 * s, 0.36 * s, 0.06 * s, metalDark));
-    chair.add(posVox(0.16 * s, 0.18 * s, 0.12 * s, 0.06 * s, 0.36 * s, 0.06 * s, metalDark));
+    chair.userData.outdoorCafeChairSeatId = seatId;
+    chair.userData.interactionSpotId = seatId;
+    chair.userData.dragAgentDropTarget = true;
+    chair.add(tagMultiSeatColorPart(posVox(0, 0.36 * s, 0, 0.44 * s, 0.10 * s, 0.44 * s, chairSeat), 'outdoorCafeTable', 'chairSeat', seatId));
+    chair.add(tagMultiSeatColorPart(posVox(0, 0.64 * s, -0.20 * s, 0.48 * s, 0.42 * s, 0.08 * s, chairBack), 'outdoorCafeTable', 'chairBack'));
+    for (const [lx, lz] of [[-0.16, -0.12], [0.16, -0.12], [-0.16, 0.12], [0.16, 0.12]]) {
+      const leg = tagMultiSeatColorPart(posVox(lx * s, 0.18 * s, lz * s, 0.06 * s, 0.36 * s, 0.06 * s, metalDark), 'outdoorCafeTable', 'baseFrame');
+      leg.userData.outdoorCafeChairLeg = seatId;
+      chair.add(leg);
+    }
     chair.rotation.y = rot;
     chair.position.set(cx * s, 0, cz * s);
     g.add(chair);
   });
 
-  [[0, -0.38, 0], [0.38, 0, 1], [0, 0.38, 2], [-0.38, 0, 3]].forEach(([px, pz, idx]) => {
-    g.add(posVox(px * s, 0.81 * s, pz * s, 0.24 * s, 0.018 * s, 0.20 * s, idx % 2 ? 0xdbeafe : plate));
-    g.add(posVox((px + 0.13) * s, 0.87 * s, (pz - 0.02) * s, 0.10 * s, 0.12 * s, 0.10 * s, cup));
-    g.add(posVox((px + 0.13) * s, 0.935 * s, (pz - 0.02) * s, 0.065 * s, 0.018 * s, 0.065 * s, idx % 2 ? 0x60a5fa : 0x6f4e37));
-  });
-
   g.position.set(x, 0, z);
   return g;
 }
 
-function makePicnicTable3D(x, z, s) {
+function makePicnicTable3D(x, z, s, furniture = {}) {
   const g = new THREE.Group();
   const woodDark = 0x4b2e1f;
   const wood = 0x8b5a2b;
   const woodLight = 0xc08445;
   const metal = 0x334155;
-  const plate = 0xfef3c7;
-  const cup = 0xf8fafc;
-  const drink = 0x60a5fa;
+  g.userData.tabletopCleanup = Object.freeze({ type: 'picnicTable', staticItemCount: 0 });
 
-  // Exactly one stationary Picnic Table asset. The two benches, plates, cups,
-  // crumbs, tabletop slats, legs, and braces are integrated visual detail only;
-  // they do not create separate outdoor assets or separate persistence records.
+  // Exactly one stationary Picnic Table asset. The two benches, tabletop
+  // slats, legs, and braces remain integrated while the tabletop stays clear.
   // The combined table/bench footprint is solid and routed around, while seat
   // and tabletop action spots sit just outside/on the footprint via setAgentTarget.
 
   // Long tabletop with readable slats.
   g.add(posVox(0, 0.72 * s, 0, 2.34 * s, 0.14 * s, 0.72 * s, wood));
   [-0.78, 0, 0.78].forEach((lx) => {
-    g.add(posVox(lx * s, 0.815 * s, 0, 0.66 * s, 0.045 * s, 0.62 * s, woodLight));
+    const servingSlat = posVox(lx * s, 0.815 * s, 0, 0.66 * s, 0.045 * s, 0.62 * s, woodLight);
+    servingSlat.userData.consumableTabletopSurface = 'picnicTable';
+    servingSlat.userData.consumableTabletopTopY = CONSUMABLE_SURFACE_SPECS.picnicTable.surfaceHeight * s;
+    g.add(servingSlat);
   });
+  g.userData.consumableSurfaceSpec = CONSUMABLE_SURFACE_SPECS.picnicTable;
   [-0.39, 0.39].forEach((lx) => {
     g.add(posVox(lx * s, 0.845 * s, 0, 0.035 * s, 0.018 * s, 0.64 * s, woodDark));
   });
 
-  // Built-in benches: visual detail on this one asset, not separate bench assets.
+  // Built-in benches: each bench has two independently targetable sitting
+  // positions. The small center seam makes the four places visually readable,
+  // while all pieces remain part of this one persistent Picnic Table asset.
   [-0.74, 0.74].forEach((bz) => {
-    g.add(posVox(0, 0.46 * s, bz * s, 2.48 * s, 0.12 * s, 0.28 * s, wood));
-    g.add(posVox(0, 0.535 * s, bz * s, 2.28 * s, 0.04 * s, 0.20 * s, woodLight));
+    const side = bz < 0 ? 'north' : 'south';
+    [[-0.62, 'left'], [0.62, 'right']].forEach(([bx, horizontal]) => {
+      const seatId = `seat-${side}-${horizontal}`;
+      const benchSeat = tagMultiSeatColorPart(posVox(bx * s, 0.46 * s, bz * s, 1.20 * s, 0.12 * s, 0.28 * s, wood), 'picnicTable', 'benchSeat', seatId);
+      benchSeat.userData.picnicBenchSeatId = seatId;
+      g.add(benchSeat);
+      const benchTop = tagMultiSeatColorPart(posVox(bx * s, 0.535 * s, bz * s, 1.10 * s, 0.04 * s, 0.20 * s, woodLight), 'picnicTable', 'benchSeatTop', seatId);
+      benchTop.userData.picnicBenchSeatId = seatId;
+      g.add(benchTop);
+    });
     [-0.82, 0.82].forEach((lx) => {
       g.add(posVox(lx * s, 0.24 * s, bz * s, 0.12 * s, 0.42 * s, 0.12 * s, woodDark));
     });
@@ -21456,66 +21906,57 @@ function makePicnicTable3D(x, z, s) {
   g.add(posVox(0, 0.58 * s, -0.42 * s, 1.88 * s, 0.06 * s, 0.06 * s, woodDark));
   g.add(posVox(0, 0.58 * s, 0.42 * s, 1.88 * s, 0.06 * s, 0.06 * s, woodDark));
 
-  // Tabletop temporary-use cues are stateful detail on tableState, not objects.
-  [[-0.72, -0.18, 0], [0.72, -0.18, 1], [-0.72, 0.18, 2], [0.72, 0.18, 3]].forEach(([px, pz, idx]) => {
-    g.add(posVox(px * s, 0.875 * s, pz * s, 0.26 * s, 0.018 * s, 0.20 * s, plate));
-    g.add(posVox((px + 0.15) * s, 0.932 * s, (pz + 0.02) * s, 0.10 * s, 0.12 * s, 0.10 * s, cup));
-    g.add(posVox((px + 0.15) * s, 0.997 * s, (pz + 0.02) * s, 0.065 * s, 0.018 * s, 0.065 * s, idx % 2 ? drink : 0x6f4e37));
-  });
-  g.add(posVox(0, 0.872 * s, 0, 0.54 * s, 0.016 * s, 0.08 * s, 0xf59e0b));
-  g.add(posVox(-0.18 * s, 0.895 * s, 0.06 * s, 0.08 * s, 0.024 * s, 0.05 * s, 0xf97316));
-  g.add(posVox(0.18 * s, 0.895 * s, -0.06 * s, 0.08 * s, 0.024 * s, 0.05 * s, 0xf97316));
-
   g.position.set(x, 0, z);
   return g;
 }
 
-function makeSmallRoundMeetingTable3D(x, z, s) {
+function makeSmallRoundMeetingTable3D(x, z, s, furniture = {}) {
   const g = new THREE.Group();
-  const metalDark = 0x1f2937;
-  const metal = 0x64748b;
-  const walnut = 0x6b3f24;
-  const walnutLight = 0xa16207;
-  const paper = 0xf8fafc;
-  const sticky = 0xfacc15;
-  const accent = 0x7c3aed;
+  const colors = normalizeMultiSeatFurnitureColors('smallRoundMeetingTable', furniture);
+  const metalDark = parseColor(colors.baseFrame);
+  const metal = parseColor(colors.pedestal);
+  const walnut = parseColor(colors.tabletop);
+  const walnutLight = parseColor(colors.tabletopAccent);
+  const chairSeat = parseColor(colors.chairSeat);
+  const chairBack = parseColor(colors.chairBack);
+  g.userData.multiSeatColors = colors;
+  g.userData.tabletopCleanup = Object.freeze({ type: 'smallRoundMeetingTable', staticItemCount: 0 });
+  const addPart = (mesh, key) => {
+    g.add(tagMultiSeatColorPart(mesh, 'smallRoundMeetingTable', key));
+    return mesh;
+  };
+  const addRoundPart = (radius, height, y, color, key) => {
+    const mesh = roundFurnitureCyl(radius * s, height * s, color);
+    mesh.position.y = y * s;
+    return addPart(mesh, key);
+  };
 
-  // One compact, stationary office meeting asset. Papers, markers, and the
-  // center speaker puck are integrated tabletop details, not separate objects.
-  g.add(posVox(0, 0.12 * s, 0, 0.92 * s, 0.10 * s, 0.92 * s, metalDark));
-  g.add(posVox(0, 0.34 * s, 0, 0.20 * s, 0.58 * s, 0.20 * s, metal));
-  g.add(posVox(0, 0.63 * s, 0, 1.62 * s, 0.14 * s, 1.62 * s, walnut));
-  g.add(posVox(0, 0.72 * s, 0, 1.46 * s, 0.06 * s, 1.46 * s, walnutLight));
-  g.add(posVox(0, 0.755 * s, 0, 1.08 * s, 0.022 * s, 1.08 * s, 0xd6a15f));
-  g.add(posVox(0, 0.80 * s, 0, 0.26 * s, 0.07 * s, 0.26 * s, metalDark));
-  g.add(posVox(0, 0.855 * s, 0, 0.16 * s, 0.018 * s, 0.16 * s, accent));
-
-  const packets = [
-    [0, -0.46, 0], [0.46, 0, Math.PI / 2], [0, 0.46, Math.PI], [-0.46, 0, -Math.PI / 2],
-  ];
-  packets.forEach(([px, pz, rot], idx) => {
-    const p = new THREE.Group();
-    p.add(posVox(0, 0, 0, 0.34 * s, 0.018 * s, 0.24 * s, paper));
-    p.add(posVox(-0.07 * s, 0.018 * s, -0.04 * s, 0.14 * s, 0.012 * s, 0.025 * s, 0x94a3b8));
-    p.add(posVox(0.09 * s, 0.018 * s, 0.05 * s, 0.10 * s, 0.012 * s, 0.025 * s, idx % 2 ? sticky : 0x60a5fa));
-    p.rotation.y = rot;
-    p.position.set(px * s, 0.795 * s, pz * s);
-    g.add(p);
-  });
-  for (const [mx, mz, rot] of [[-0.24, -0.24, 0.7], [0.26, 0.22, -0.35]]) {
-    const marker = posVox(mx * s, 0.835 * s, mz * s, 0.05 * s, 0.04 * s, 0.28 * s, 0x2563eb);
-    marker.rotation.y = rot;
-    g.add(marker);
-  }
+  // One compact, stationary office meeting asset with a clear round tabletop.
+  addRoundPart(0.46, 0.10, 0.12, metalDark, 'baseFrame');
+  addRoundPart(0.10, 0.58, 0.34, metal, 'pedestal');
+  addRoundPart(0.81, 0.14, 0.63, walnut, 'tabletop');
+  addRoundPart(0.73, 0.06, 0.72, walnutLight, 'tabletopAccent');
+  const servingSurface = addRoundPart(0.54, 0.022, 0.755, walnutLight, 'tabletopAccent');
+  servingSurface.userData.consumableTabletopSurface = 'smallRoundMeetingTable';
+  servingSurface.userData.consumableTabletopTopY = CONSUMABLE_SURFACE_SPECS.smallRoundMeetingTable.surfaceHeight * s;
+  g.userData.consumableSurfaceSpec = CONSUMABLE_SURFACE_SPECS.smallRoundMeetingTable;
 
   // Visible conference chairs correspond one-for-one with the four reservable
   // table seats so seated agents never appear to hover in empty space.
-  [[0, -1.18, 0], [0, 1.18, Math.PI], [1.18, 0, Math.PI / 2], [-1.18, 0, -Math.PI / 2]].forEach(([cx, cz, rot]) => {
+  [
+    ['seat-north', 0, -1.15, 0],
+    ['seat-south', 0, 1.15, Math.PI],
+    ['seat-east', 1.15, 0, -Math.PI / 2],
+    ['seat-west', -1.15, 0, Math.PI / 2],
+  ].forEach(([seatId, cx, cz, rot]) => {
     const chair = new THREE.Group();
-    chair.add(posVox(0, 0.36 * s, 0, 0.48 * s, 0.10 * s, 0.46 * s, 0x4338ca));
-    chair.add(posVox(0, 0.72 * s, -0.21 * s, 0.52 * s, 0.58 * s, 0.09 * s, 0x312e81));
-    chair.add(posVox(0, 0.18 * s, 0, 0.08 * s, 0.36 * s, 0.08 * s, metalDark));
-    chair.add(posVox(0, 0.05 * s, 0, 0.50 * s, 0.06 * s, 0.08 * s, metal));
+    chair.add(tagMultiSeatColorPart(posVox(0, 0.36 * s, 0, 0.48 * s, 0.10 * s, 0.46 * s, chairSeat), 'smallRoundMeetingTable', 'chairSeat', seatId));
+    chair.add(tagMultiSeatColorPart(posVox(0, 0.72 * s, -0.21 * s, 0.52 * s, 0.58 * s, 0.09 * s, chairBack), 'smallRoundMeetingTable', 'chairBack'));
+    chair.add(tagMultiSeatColorPart(posVox(0, 0.18 * s, 0, 0.08 * s, 0.36 * s, 0.08 * s, metalDark), 'smallRoundMeetingTable', 'baseFrame'));
+    const roundBase = roundFurnitureCyl(0.25 * s, 0.06 * s, metal);
+    roundBase.position.y = 0.05 * s;
+    roundBase.userData.roundMeetingChairBase = seatId;
+    chair.add(tagMultiSeatColorPart(roundBase, 'smallRoundMeetingTable', 'pedestal'));
     chair.rotation.y = rot;
     chair.position.set(cx * s, 0, cz * s);
     g.add(chair);
@@ -21525,70 +21966,59 @@ function makeSmallRoundMeetingTable3D(x, z, s) {
   return g;
 }
 
-function makeDiningTable3D(x, z, s) {
+function makeDiningTable3D(x, z, s, furniture = {}) {
   const g = new THREE.Group();
 
   // Four-chair dining set scaled between a desk and couch: clear, readable, and compact enough for rooms.
-  const woodDark = 0x4e342e;
-  const woodMid = 0x6d4c41;
-  const woodTop = 0xa66a3d;
-  const cushion = 0x8d6e63;
-  const linen = 0xfff8e1;
-
-  // Table shadow / base footprint.
-  g.add(posVox(0.06 * s, 0.025 * s, 0.07 * s, 2.28 * s, 0.035 * s, 1.45 * s, 0x2b1b14));
+  const colors = normalizeMultiSeatFurnitureColors('diningTable', furniture);
+  const woodDark = parseColor(colors.woodFrame);
+  const woodMid = parseColor(colors.woodAccent);
+  const woodTop = parseColor(colors.tabletop);
+  const cushion = parseColor(colors.chairSeat);
+  g.userData.multiSeatColors = colors;
+  g.userData.tabletopCleanup = Object.freeze({
+    type: 'diningTable',
+    staticItemCount: 0,
+    tabletopLayerCount: 1,
+    tableAccentLayerCount: 0,
+    tableFrameLayerCount: 0,
+  });
+  const addPart = (mesh, key, seatId = null) => {
+    g.add(tagMultiSeatColorPart(mesh, 'diningTable', key, seatId));
+    return mesh;
+  };
 
   // Chairs: top, bottom, left, right. Each has a back, cushion, legs, and highlights.
-  const chair = (cx, cz, rot = 0) => {
+  const chair = (seatId, cx, cz, rot = 0) => {
     const c = new THREE.Group();
-    c.add(posVox(0, 0.28 * s, 0, 0.58 * s, 0.10 * s, 0.48 * s, woodMid));
-    c.add(posVox(0, 0.36 * s, 0.03 * s, 0.46 * s, 0.08 * s, 0.36 * s, cushion));
-    c.add(posVox(0, 0.68 * s, -0.25 * s, 0.60 * s, 0.68 * s, 0.10 * s, woodDark));
-    c.add(posVox(0, 0.72 * s, -0.30 * s, 0.46 * s, 0.38 * s, 0.04 * s, 0x8a5a35));
+    c.add(tagMultiSeatColorPart(posVox(0, 0.28 * s, 0, 0.58 * s, 0.10 * s, 0.48 * s, woodMid), 'diningTable', 'woodAccent'));
+    c.add(tagMultiSeatColorPart(posVox(0, 0.36 * s, 0.03 * s, 0.46 * s, 0.08 * s, 0.36 * s, cushion), 'diningTable', 'chairSeat', seatId));
+    c.add(tagMultiSeatColorPart(posVox(0, 0.68 * s, -0.25 * s, 0.60 * s, 0.68 * s, 0.10 * s, woodDark), 'diningTable', 'woodFrame'));
+    c.add(tagMultiSeatColorPart(posVox(0, 0.72 * s, -0.30 * s, 0.46 * s, 0.38 * s, 0.04 * s, woodMid), 'diningTable', 'woodAccent'));
     for (const [lx, lz] of [[-0.22, -0.16], [0.22, -0.16], [-0.22, 0.16], [0.22, 0.16]]) {
-      c.add(posVox(lx * s, 0.14 * s, lz * s, 0.07 * s, 0.28 * s, 0.07 * s, woodDark));
+      c.add(tagMultiSeatColorPart(posVox(lx * s, 0.14 * s, lz * s, 0.07 * s, 0.28 * s, 0.07 * s, woodDark), 'diningTable', 'woodFrame'));
     }
     c.rotation.y = rot;
     c.position.set(cx * s, 0, cz * s);
     g.add(c);
   };
-  chair(0, -1.02, 0);
-  chair(0, 1.02, Math.PI);
-  chair(-1.42, 0, -Math.PI / 2);
-  chair(1.42, 0, Math.PI / 2);
+  chair('seat-north', 0, -1.02, 0);
+  chair('seat-south', 0, 1.02, Math.PI);
+  chair('seat-west', -1.42, 0, Math.PI / 2);
+  chair('seat-east', 1.42, 0, -Math.PI / 2);
 
   // Table legs.
   for (const [lx, lz] of [[-0.72, -0.42], [0.72, -0.42], [-0.72, 0.42], [0.72, 0.42]]) {
-    g.add(posVox(lx * s, 0.28 * s, lz * s, 0.10 * s, 0.56 * s, 0.10 * s, woodDark));
+    addPart(posVox(lx * s, 0.40 * s, lz * s, 0.10 * s, 0.80 * s, 0.10 * s, woodDark), 'woodFrame');
   }
 
-  // Main tabletop: beveled layered pixel-art slab.
-  g.add(posVox(0, 0.66 * s, 0, 2.2 * s, 0.16 * s, 1.35 * s, woodDark));
-  g.add(posVox(0, 0.76 * s, 0, 2.05 * s, 0.08 * s, 1.20 * s, woodMid));
-  g.add(posVox(0, 0.82 * s, 0, 1.90 * s, 0.045 * s, 1.05 * s, woodTop));
-  g.add(posVox(0, 0.855 * s, -0.33 * s, 1.72 * s, 0.018 * s, 0.08 * s, 0xc98852));
-  g.add(posVox(0, 0.858 * s, 0.02 * s, 1.72 * s, 0.014 * s, 0.035 * s, 0x6a3d22));
-  g.add(posVox(0, 0.858 * s, 0.37 * s, 1.72 * s, 0.014 * s, 0.035 * s, 0x6a3d22));
-  g.add(posVox(0, 0.865 * s, 0, 0.035 * s, 0.018 * s, 1.02 * s, 0x7a4528));
-
-  // Runner / centerpiece.
-  g.add(posVox(0, 0.89 * s, 0, 0.28 * s, 0.025 * s, 0.96 * s, 0xf5efe4));
-  g.add(posVox(0, 0.95 * s, 0, 0.38 * s, 0.08 * s, 0.22 * s, 0xefebe9));
-  g.add(posVox(-0.08 * s, 1.02 * s, 0, 0.06 * s, 0.18 * s, 0.06 * s, 0x66bb6a));
-  g.add(posVox(0.08 * s, 1.02 * s, 0, 0.06 * s, 0.18 * s, 0.06 * s, 0x66bb6a));
-  g.add(posVox(-0.14 * s, 1.13 * s, 0, 0.11 * s, 0.08 * s, 0.11 * s, 0xff7043));
-  g.add(posVox(0.14 * s, 1.13 * s, 0, 0.11 * s, 0.08 * s, 0.11 * s, 0xffd54f));
-
-  // Place settings: placemats, plates, food accents, cups, and cutlery.
-  const placeSettings = [[0, -0.38], [0, 0.38], [-0.56, 0], [0.56, 0]];
-  placeSettings.forEach(([px, pz], idx) => {
-    g.add(posVox(px * s, 0.895 * s, pz * s, 0.44 * s, 0.018 * s, 0.28 * s, linen));
-    g.add(posVox(px * s, 0.925 * s, pz * s, 0.24 * s, 0.028 * s, 0.24 * s, 0xf5f5f5));
-    g.add(posVox(px * s, 0.95 * s, pz * s, 0.12 * s, 0.03 * s, 0.12 * s, idx % 2 ? 0xffcc80 : 0xd7ccc8));
-    g.add(posVox((px + 0.17) * s, 0.95 * s, (pz - 0.12) * s, 0.10 * s, 0.12 * s, 0.10 * s, 0x90caf9));
-    g.add(posVox((px - 0.21) * s, 0.93 * s, pz * s, 0.025 * s, 0.025 * s, 0.24 * s, 0xb0bec5));
-    g.add(posVox((px + 0.21) * s, 0.93 * s, pz * s, 0.025 * s, 0.025 * s, 0.24 * s, 0xb0bec5));
-  });
+  // One substantial, clean tabletop only: no lower frame slab, accent slab,
+  // runner, or props. Its top remains at the authored 0.84 world height.
+  const tabletop = addPart(posVox(0, 0.78 * s, 0, 1.90 * s, 0.12 * s, 1.05 * s, woodTop), 'tabletop');
+  tabletop.userData.diningTableSurfaceLayer = 'tabletop';
+  tabletop.userData.consumableTabletopSurface = 'diningTable';
+  tabletop.userData.consumableTabletopTopY = CONSUMABLE_SURFACE_SPECS.diningTable.surfaceHeight * s;
+  g.userData.consumableSurfaceSpec = CONSUMABLE_SURFACE_SPECS.diningTable;
 
   g.position.set(x, 0, z);
   return g;
@@ -23875,6 +24305,11 @@ function updateAgentAnimations(dt) {
 
   agentsList.forEach(agent => {
     if (!agent._group3d) return;
+    // Occupied table seats are attachments to their furniture, not static
+    // world coordinates. Re-resolve the authored chair transform every frame
+    // so an already seated agent follows the same chair when the table or its
+    // building is moved/rotated, including after runtime hydration on refresh.
+    syncAgentToCurrentTableSeatTransform(agent);
     agent._tick++;
     if (agent._decisionSlot == null) {
       agent._decisionSlot = (_agentDecisionSlotCursor++) % AGENT_DECISION_STAGGER_FRAMES;
@@ -23951,7 +24386,7 @@ function updateAgentAnimations(dt) {
     // ── REAL STATUS OVERRIDE: meeting agents go sit at the conference table ──────
     const meetingTarget = !liveModeScriptedSuppressed && normalizeLiveAgentStatus(agent.status) === 'meeting' && !manualPlacementLocked && !hasStandingServiceMachineActivity ? getLiveMeetingTargetForAgent(agent) : null;
     if (meetingTarget?.building) {
-      const existing = agent._idleActivity?.kind === 'meeting-table' ? agent._idleActivity : null;
+      const existing = String(agent._idleActivity?.kind || '').startsWith('meeting-table') ? agent._idleActivity : null;
       if (!existing || existing.spotId !== meetingTarget.spotId || existing.buildingId !== meetingTarget.entry.buildingId || Number(existing.furnitureIndex) !== Number(meetingTarget.entry.index)) {
         const meetingRoute = setAgentTargetForLiveStatus(agent, { x: meetingTarget.apiX, y: meetingTarget.apiZ, floor: meetingTarget.floor }, meetingTarget.building, meetingTarget.floor, {
           statusKind: 'meeting',
@@ -23964,7 +24399,7 @@ function updateAgentAnimations(dt) {
         });
         if (meetingRoute?.accepted === false) return;
         agent._idleActivity = {
-          kind: 'meeting-table',
+          kind: meetingTarget.meetingStanding ? 'meeting-table-stand' : 'meeting-table',
           phase: 'approach',
           meetingId: meetingTarget.meetingId,
           meetingTopic: meetingTarget.topic,
@@ -23972,18 +24407,25 @@ function updateAgentAnimations(dt) {
           furnitureIndex: meetingTarget.entry.index,
           furnitureType: 'meetingTable',
           spotId: meetingTarget.spotId,
+          slotId: meetingTarget.slotId || meetingTarget.spotId,
+          activationSpotId: meetingTarget.spotId,
+          seatId: meetingTarget.meetingStanding ? undefined : meetingTarget.spotId,
+          poseKind: meetingTarget.poseKind || (meetingTarget.meetingStanding ? 'stand' : 'seat'),
+          meetingStanding: meetingTarget.meetingStanding === true,
+          reservationId: meetingTarget.reservationId || null,
           action: 'planning.meeting',
           actionId: 'planning.meeting',
           stayMs: 30000,
           faceAngle: meetingTarget.faceAngle,
           dockTarget: { x: meetingTarget.apiX, y: meetingTarget.apiZ },
           dockSnapRadius: 8,
-          animationId: 'meeting-sit-talk',
+          animationId: meetingTarget.animationId || (meetingTarget.meetingStanding ? 'gather-talk' : 'meeting-sit-talk'),
+          seatSurfaceLift: meetingTarget.meetingStanding ? undefined : getFurnitureSeatSurfaceLift('meetingTable'),
           lifecycle: { stationary: true, carryable: false, temporary: false },
         };
         stampAgentRuntimeMember(agent, LIVE_STATUS_RUNTIME_POSITION_OWNER, {
           activity: agent._idleActivity,
-          objectKey: getAgentRuntimeFurnitureObjectKey(meetingTarget.entry.buildingId, meetingTarget.entry.index, 'meetingTable'),
+          objectKey: `${getAgentRuntimeFurnitureObjectKey(meetingTarget.entry.buildingId, meetingTarget.entry.index, 'meetingTable')}:slot:${meetingTarget.spotId}`,
           objectType: 'meetingTable',
           buildingId: meetingTarget.entry.buildingId,
           furnitureIndex: meetingTarget.entry.index,
@@ -24000,9 +24442,15 @@ function updateAgentAnimations(dt) {
         agent._stayTimer = 0;
       }
     } else if (agent._meetingId === 'live-meeting' && normalizeLiveAgentStatus(agent.status) !== 'meeting') {
+      const activity = agent._idleActivity || null;
+      const table = buildingsMap.get(activity?.buildingId)?.interior?.furniture?.[activity?.furnitureIndex];
+      const slotId = activity?.seatId || activity?.slotId || activity?.activationSpotId || activity?.spotId;
+      if (table?.type === 'meetingTable' && activity?.reservationId && slotId) {
+        releaseObjectUseSeatReservation(getMeetingTableObjectUseSeatStore(table), { reservationId: activity.reservationId, agentId: agent.id, seatId: slotId, reason: 'live-meeting-status-ended' });
+      }
       agent._meetingId = null;
       agent._meetingTopic = null;
-      if (agent._idleActivity?.kind === 'meeting-table') agent._idleActivity = null;
+      if (String(agent._idleActivity?.kind || '').startsWith('meeting-table')) agent._idleActivity = null;
     }
 
     // ── REAL STATUS OVERRIDE: working agents go to their desk ──────
@@ -24959,6 +25407,10 @@ function updateAgentAnimations(dt) {
         agent._stayTimer = 30000;
         agent._wanderTimer = 3000;
       } else {
+        const tableActivity = agent._idleActivity;
+        const tableBuilding = buildingsMap.get(tableActivity?.buildingId);
+        const table = tableBuilding?.interior?.furniture?.[tableActivity?.furnitureIndex];
+        if (table?.type === 'meetingTable') releaseTableSeatUse(table, tableActivity, agent, 'stay-complete');
         agent._meetingId = null;
         agent._meetingTopic = null;
         agent._idleActivity = null;
@@ -24982,30 +25434,30 @@ function updateAgentAnimations(dt) {
       agent._wanderTimer = 1600 + Math.random() * 2400;
     } else if (String(agent._idleActivity?.kind || '').startsWith('outdoor-cafe-table-')) {
       const tableActivity = agent._idleActivity;
-      const tableBuilding = buildingsMap.get(tableActivity?.buildingId);
-      const table = tableBuilding?.interior?.furniture?.[tableActivity?.furnitureIndex];
-      if (table?.type === 'outdoorCafeTable') {
+      const { building: tableBuilding, table, tableType, outdoorNodeId } = resolveTableObjectForActivity(tableActivity);
+      if (tableType === 'outdoorCafeTable') {
         const isSetDown = String(tableActivity.kind || '').includes('setdown');
         const previousCount = Math.max(0, Number(table.tableState?.surfaceItems ?? table.tableState?.temporaryItemSurfaceCount ?? 0));
         releaseTableSeatUse(table, tableActivity, agent, 'stay-complete');
         const nextCount = isSetDown ? Math.min(2, previousCount + 1) : previousCount;
         table.activeUse = { ...(table.activeUse || {}), state: 'complete', mode: tableActivity.mode || 'sit', lastAgentId: agent.id || null, lastAction: tableActivity.action || 'life.sitAtOutdoorCafeTable', completedAt: new Date().toISOString() };
-        table.tableState = { ...(table.tableState || {}), seats: 4, surfaceItems: nextCount, temporaryItemSurfaceCount: nextCount, lastAction: table.activeUse.lastAction, reservedSeatIds: [...getActiveTableSeatReservationSeatIds(table, tableActivity?.buildingId, tableActivity?.furnitureIndex, 'outdoorCafeTable')].sort(), persistentFurniture: true };
+        table.tableState = { ...(table.tableState || {}), seats: 4, surfaceItems: nextCount, temporaryItemSurfaceCount: nextCount, lastAction: table.activeUse.lastAction, reservedSeatIds: [...getActiveTableSeatReservationSeatIds(table, tableActivity?.buildingId, outdoorNodeId || tableActivity?.furnitureIndex, 'outdoorCafeTable')].sort(), persistentFurniture: !outdoorNodeId, persistentOutdoorNode: Boolean(outdoorNodeId) };
+        if (outdoorNodeId) persistBuilding(tableBuilding);
       }
       agent._idleActivity = null;
       agent._schedPhase = 'outdoor-cafe-table-complete';
       agent._wanderTimer = 1600 + Math.random() * 2400;
     } else if (String(agent._idleActivity?.kind || '').startsWith('picnic-table-')) {
       const tableActivity = agent._idleActivity;
-      const tableBuilding = buildingsMap.get(tableActivity?.buildingId);
-      const table = tableBuilding?.interior?.furniture?.[tableActivity?.furnitureIndex];
-      if (table?.type === 'picnicTable') {
+      const { building: tableBuilding, table, tableType, outdoorNodeId } = resolveTableObjectForActivity(tableActivity);
+      if (tableType === 'picnicTable') {
         const isSetDown = String(tableActivity.kind || '').includes('setdown');
         const previousCount = Math.max(0, Number(table.tableState?.surfaceItems ?? table.tableState?.temporaryItemSurfaceCount ?? 0));
         releaseTableSeatUse(table, tableActivity, agent, 'stay-complete');
         const nextCount = isSetDown ? Math.min(2, previousCount + 1) : previousCount;
         table.activeUse = { ...(table.activeUse || {}), state: 'complete', mode: tableActivity.mode || 'sit', lastAgentId: agent.id || null, lastAction: tableActivity.action || 'life.sitAtPicnicTable', completedAt: new Date().toISOString() };
-        table.tableState = { ...(table.tableState || {}), seats: 4, surfaceItems: nextCount, temporaryItemSurfaceCount: nextCount, lastAction: table.activeUse.lastAction, reservedSeatIds: [...getActiveTableSeatReservationSeatIds(table, tableActivity?.buildingId, tableActivity?.furnitureIndex, 'picnicTable')].sort(), persistentFurniture: true };
+        table.tableState = { ...(table.tableState || {}), seats: 4, surfaceItems: nextCount, temporaryItemSurfaceCount: nextCount, lastAction: table.activeUse.lastAction, reservedSeatIds: [...getActiveTableSeatReservationSeatIds(table, tableActivity?.buildingId, outdoorNodeId || tableActivity?.furnitureIndex, 'picnicTable')].sort(), persistentFurniture: !outdoorNodeId, persistentOutdoorNode: Boolean(outdoorNodeId) };
+        if (outdoorNodeId) persistBuilding(tableBuilding);
       }
       agent._idleActivity = null;
       agent._schedPhase = 'picnic-table-complete';
@@ -26604,6 +27056,9 @@ function updateAgentAnimations(dt) {
               }
             }
           }
+          if (idleActivity.consumeReservation === true) {
+            activateConsumableDestinationOnArrival(agent, idleActivity);
+          }
           if (String(idleActivity.kind || '').startsWith('couch-')) {
             const couchBuilding = buildingsMap.get(idleActivity.buildingId);
             const couch = couchBuilding?.interior?.furniture?.[idleActivity.furnitureIndex];
@@ -26829,7 +27284,7 @@ function updateAgentAnimations(dt) {
             idleActivity.seated = true;
             idleActivity.activationState = 'seated';
           }
-          const tableSeatingType = ['smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'smallRoundMeetingTable', 'diningTable'].find(type => String(idleActivity.kind || '').startsWith(getTableSeatingConfig(type)?.prefix || '__never__'));
+          const tableSeatingType = Object.keys(TABLE_SEATING_CONFIG).find(type => String(idleActivity.kind || '').startsWith(getTableSeatingConfig(type)?.prefix || '__never__'));
           if (tableSeatingType) {
             const tableBuilding = buildingsMap.get(idleActivity.buildingId);
             const table = tableBuilding?.interior?.furniture?.[idleActivity.furnitureIndex];
@@ -26858,10 +27313,29 @@ function updateAgentAnimations(dt) {
               }
               table.reservation = { ...(table.reservation || {}), id: reservationId, status: 'active', agentId: agent.id || idleActivity.agentId || null, actionId: idleActivity.actionId || idleActivity.action || null, seatId, spotId: seatId, activationSpotId: idleActivity.activationSpotId || seatId, approachSpotId: idleActivity.approachSpotId || seatId, capacityKey: idleActivity.capacityKey || table.reservation?.capacityKey || null };
               table.activeUse = { ...(table.activeUse || {}), state: 'active', mode: idleActivity.mode || idleActivity.kind || config.openMode, activeSeats, agentId: agent.id || null, actionId: idleActivity.actionId || idleActivity.action || null, interactionSpotId: seatId, startedAt: table.activeUse?.startedAt || new Date().toISOString() };
-              table[config.stateKey] = { ...(table[config.stateKey] || {}), status: 'occupied', seats: config.capacity, activeSeatIds: Object.keys(activeSeats).sort(), reservedSeatIds: [...getActiveTableSeatReservationSeatIds(table, idleActivity.buildingId, idleActivity.furnitureIndex, table.type)].sort(), lastAction: idleActivity.actionId || idleActivity.action || idleActivity.kind, lastInteractionSpotId: seatId, persistentFurniture: true };
+              const activePositionIds = Object.keys(activeSeats).sort();
+              const reservedPositionIds = [...getActiveTableSeatReservationSeatIds(table, idleActivity.buildingId, idleActivity.furnitureIndex, table.type)].sort();
+              table[config.stateKey] = {
+                ...(table[config.stateKey] || {}),
+                status: 'occupied',
+                seats: config.capacity,
+                standingSpots: config.standingCapacity || table[config.stateKey]?.standingSpots,
+                activeSeatIds: activePositionIds.filter(id => !String(id).startsWith('stand-')),
+                reservedSeatIds: reservedPositionIds.filter(id => !String(id).startsWith('stand-')),
+                activeStandingSpotIds: activePositionIds.filter(id => String(id).startsWith('stand-')),
+                reservedStandingSpotIds: reservedPositionIds.filter(id => String(id).startsWith('stand-')),
+                lastAction: idleActivity.actionId || idleActivity.action || idleActivity.kind,
+                lastInteractionSpotId: seatId,
+                persistentFurniture: true,
+              };
             }
-            idleActivity.seated = !String(idleActivity.spotId || '').startsWith('dropoff-');
-            idleActivity.activationState = idleActivity.seated ? 'seated' : 'using-surface';
+            const standingMeeting = tableSeatingType === 'meetingTable' && (
+              idleActivity.meetingStanding === true ||
+              String(idleActivity.poseKind || '').toLowerCase() === 'stand' ||
+              String(idleActivity.spotId || '').startsWith('stand-')
+            );
+            idleActivity.seated = !standingMeeting && !String(idleActivity.spotId || '').startsWith('dropoff-');
+            idleActivity.activationState = standingMeeting ? 'standing-meeting' : (idleActivity.seated ? 'seated' : 'using-surface');
           }
           if (String(idleActivity.kind || '').startsWith('barber-chair-')) {
             const barberBuilding = buildingsMap.get(idleActivity.buildingId);
@@ -28423,6 +28897,12 @@ const MULTI_SEAT_MANUAL_CONFIGS = Object.freeze({
   loveseat: Object.freeze({ seatIds: ['seat-left', 'seat-right'], capacity: 2, kind: 'loveseat-sit', animationId: 'sit', actionId: 'life.sitAtLoveseat', stateKey: 'loveseatState' }),
   hallwayBench: Object.freeze({ seatIds: ['seat-left', 'seat-right'], capacity: 2, kind: 'hallway-bench-wait', animationId: 'hallway-bench-wait', actionId: 'life.waitAtHallwayBench', stateKey: 'benchState' }),
   parkBench: Object.freeze({ seatIds: ['seat-left', 'seat-center', 'seat-right'], capacity: 3, kind: 'park-bench-sit', animationId: 'park-bench-sit-rest-read-talk', actionId: 'life.sitAtBench', stateKey: 'benchState' }),
+  diningTable: Object.freeze({ seatIds: ['seat-north', 'seat-south', 'seat-east', 'seat-west'], capacity: 4, kind: 'dining-table-eat', animationId: 'dining-table-eat-talk', actionId: 'life.eatAtDiningTable', stateKey: 'tableState' }),
+  smallCafeTable: Object.freeze({ seatIds: ['seat-north', 'seat-south', 'seat-east', 'seat-west'], capacity: 4, kind: 'small-cafe-table-eat', animationId: 'drink-eat', actionId: 'life.eatDrinkAtSmallCafeTable', stateKey: 'tableState' }),
+  outdoorCafeTable: Object.freeze({ seatIds: ['seat-north', 'seat-south', 'seat-east', 'seat-west'], capacity: 4, kind: 'outdoor-cafe-table-sit', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', actionId: 'life.sitAtOutdoorCafeTable', stateKey: 'tableState' }),
+  picnicTable: Object.freeze({ seatIds: ['seat-north-left', 'seat-north-right', 'seat-south-left', 'seat-south-right'], capacity: 4, kind: 'picnic-table-sit', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', actionId: 'life.sitAtPicnicTable', stateKey: 'tableState' }),
+  smallRoundMeetingTable: Object.freeze({ seatIds: ['seat-north', 'seat-south', 'seat-east', 'seat-west'], capacity: 4, kind: 'small-round-meeting-table-plan', animationId: 'meeting-sit-talk', actionId: 'planning.smallRoundMeetingTablePlan', stateKey: 'tableState' }),
+  meetingTable: Object.freeze({ seatIds: ['seat-n1', 'seat-n2', 'seat-n3', 'seat-n4', 'seat-n5', 'seat-s1', 'seat-s2', 'seat-s3', 'seat-s4', 'seat-s5'], capacity: 10, kind: 'meeting-table', animationId: 'meeting-sit-talk', actionId: 'planning.meeting', stateKey: 'tableState' }),
 });
 
 function getMultiSeatManualConfig(type) {
@@ -28434,6 +28914,8 @@ function isMultiSeatUseSeatId(type, seatId) {
 }
 
 function getMultiSeatManualObjectKey(type, buildingId, index) {
+  const tableConfig = getTableSeatingConfig(type);
+  if (tableConfig) return tableConfig.objectKeyFn(buildingId, index);
   if (type === 'couch') return getCouchObjectKey(buildingId, index);
   if (type === 'sectionalSofa') return getSectionalSofaObjectKey(buildingId, index);
   if (type === 'loveseat') return getLoveseatObjectKey(buildingId, index);
@@ -28443,6 +28925,8 @@ function getMultiSeatManualObjectKey(type, buildingId, index) {
 }
 
 function getMultiSeatManualStore(type, furniture) {
+  const tableConfig = getTableSeatingConfig(type);
+  if (tableConfig) return tableConfig.storeFn(furniture);
   if (type === 'couch') return getCouchObjectUseSeatStore(furniture);
   if (type === 'sectionalSofa') return getSectionalSofaObjectUseSeatStore(furniture);
   if (type === 'loveseat') return getLoveseatObjectUseSeatStore(furniture);
@@ -28452,6 +28936,7 @@ function getMultiSeatManualStore(type, furniture) {
 }
 
 function getMultiSeatManualOccupiedSeatIds(type, furniture, buildingId, index) {
+  if (getTableSeatingConfig(type)) return getActiveTableSeatReservationSeatIds(furniture, buildingId, index, type);
   if (type === 'couch') return getActiveCouchReservationSeatIds(furniture, buildingId, index);
   if (type === 'sectionalSofa') return getActiveSectionalSofaReservationSeatIds(furniture, buildingId, index);
   if (type === 'loveseat') return getActiveLoveseatReservationSeatIds(furniture, buildingId, index);
@@ -28489,6 +28974,8 @@ function releasePriorMultiSeatReservationsForManualReseat(store, agentId, nowMs 
 }
 
 function getMultiSeatActivityPrefixes(type) {
+  const tableConfig = getTableSeatingConfig(type);
+  if (tableConfig) return [tableConfig.prefix];
   if (type === 'couch') return ['couch-'];
   if (type === 'sectionalSofa') return ['sectional-sofa-'];
   if (type === 'loveseat') return ['loveseat-'];
@@ -28512,8 +28999,9 @@ function hasLiveMultiSeatClaim(type, buildingId, index, reservation = {}) {
     const recordType = record.objectType || record.furnitureType || record.type || null;
     const sameType = recordType === type || prefixes.some(prefix => String(record.kind || '').startsWith(prefix));
     const sameBuilding = record.buildingId === buildingId;
-    const sameIndex = type === 'parkBench'
-      ? String(record.outdoorNodeId || record.nodeId || '') === String(index)
+    const recordOutdoorNodeId = record.outdoorNodeId || record.nodeId || '';
+    const sameIndex = recordOutdoorNodeId
+      ? String(recordOutdoorNodeId) === String(index)
       : Number(record.furnitureIndex) === Number(index);
     return sameType && sameBuilding && sameIndex;
   };
@@ -28737,10 +29225,11 @@ function makeDraggedAgentObjectDrop(buildingId, index, building, furniture, spot
 
 function refreshDraggedAgentObjectDropAfterMovementClear(drop, agent = null) {
   if (!drop?.building || !drop?.furniture || !drop?.spot) return drop || null;
-  if (drop.outdoorNode && drop.furniture.type === 'parkBench') {
+  const outdoorAssetType = drop.outdoorNode ? getOutdoorNodeAssetType(drop.furniture) : '';
+  if (drop.outdoorNode && getMultiSeatManualConfig(outdoorAssetType)) {
     const seatId = drop.spot.spotId;
-    const activeSeatIds = getActiveParkBenchReservationSeatIds(drop.furniture, drop.buildingId, drop.outdoorNodeId);
-    const sameAgentClaim = (getParkBenchObjectUseSeatStore(drop.furniture).reservations || []).some(reservation =>
+    const activeSeatIds = getMultiSeatManualOccupiedSeatIds(outdoorAssetType, drop.furniture, drop.buildingId, drop.outdoorNodeId);
+    const sameAgentClaim = (getMultiSeatManualStore(outdoorAssetType, drop.furniture).reservations || []).some(reservation =>
       String(reservation?.agentId || '') === String(agent?.id || '') &&
       String(reservation?.seatId || reservation?.spotId || '') === String(seatId) &&
       ['held', 'reserved', 'routing', 'arrived', 'active', 'in_progress'].includes(String(reservation?.state || reservation?.status || '').toLowerCase()));
@@ -28883,14 +29372,26 @@ function updateDraggedAgentInteractionHighlight(hover) {
   _dragAgentInteractionSpotMesh.position.set(world.x, getInteriorFloorSurfaceY(hover.building, hover.spot.floor || 1) + 0.08, world.z);
 }
 
-function resolveDraggedAgentObjectHover(e, agent = null) {
-  const rect = renderer.domElement.getBoundingClientRect();
-  const mouse = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
-  const ray = new THREE.Raycaster();
-  ray.setFromCamera(mouse, camera);
-  const hits = ray.intersectObjects(buildingGroup.children, true).filter(hit => hit.object?.userData?.furniture);
+function getDraggedAgentHitInteractionSpotId(hitObject) {
+  let object = hitObject;
+  while (object && object !== buildingGroup) {
+    const seatId = object.userData?.interactionSpotId ||
+      object.userData?.couchSeatId ||
+      object.userData?.outdoorCafeChairSeatId ||
+      object.userData?.picnicBenchSeatId ||
+      null;
+    if (seatId) return seatId;
+    object = object.parent;
+  }
+  return null;
+}
+
+function resolveDraggedAgentObjectHits(hits, agent = null) {
   for (const hit of hits) {
-    const hitInteractionSpotId = hit.object?.userData?.interactionSpotId || hit.object?.userData?.couchSeatId || null;
+    // Outdoor furniture is built from nested chair/bench groups. Resolve the
+    // authored seat through that hierarchy so a park drop works on the full
+    // visible chair or bench, not only on its small top cushion mesh.
+    const hitInteractionSpotId = getDraggedAgentHitInteractionSpotId(hit.object);
     let outdoorRoot = hit.object;
     while (outdoorRoot && outdoorRoot !== buildingGroup && !outdoorRoot.userData?.outdoorAreaNode) outdoorRoot = outdoorRoot.parent;
     if (outdoorRoot?.userData?.outdoorAreaNode) {
@@ -28900,9 +29401,10 @@ function resolveDraggedAgentObjectHover(e, agent = null) {
       const building = buildingsMap.get(buildingId);
       const node = getRawOutdoorNodeById(building, nodeId);
       const assetType = getOutdoorNodeAssetType(node);
-      if (!building || !node || assetType !== 'parkBench') continue;
-      const seatId = hitInteractionSpotId || 'seat-center';
-      const seatDef = (FURNITURE_INTERACTION_SPOTS.parkBench || []).find(def => def.id === seatId && def.roles?.includes('seat'));
+      const multiSeatConfig = getMultiSeatManualConfig(assetType);
+      if (!building || !node || !multiSeatConfig) continue;
+      const seatId = hitInteractionSpotId || (assetType === 'parkBench' ? 'seat-center' : null);
+      const seatDef = (FURNITURE_INTERACTION_SPOTS[assetType] || []).find(def => def.id === seatId && def.roles?.includes('seat'));
       const runtime = seatDef ? getOutdoorNodeSpotRuntimeTarget(building, node, seatId, seatDef.action, { preferredSpotId: seatId }) : null;
       if (!seatDef || !runtime?.target) continue;
       const local = getOutdoorNodeLocalPoint(node, building);
@@ -28915,10 +29417,12 @@ function resolveDraggedAgentObjectHover(e, agent = null) {
         localX: local.x + rotated.x,
         localZ: local.z + rotated.z,
         floor: 1,
-        faceAngle: getOutdoorNodeSpotFacingAngle(building, node, seatId, seatDef.facing || 'north') ?? runtime.target.faceAngle,
+        faceAngle: getTableSeatingConfig(assetType)
+          ? runtime.target.faceAngle
+          : (getOutdoorNodeSpotFacingAngle(building, node, seatId, seatDef.facing || 'north') ?? runtime.target.faceAngle),
       };
-      const activeSeatIds = getActiveParkBenchReservationSeatIds(node, buildingId, nodeId);
-      const sameAgentClaim = (getParkBenchObjectUseSeatStore(node).reservations || []).some(reservation =>
+      const activeSeatIds = getMultiSeatManualOccupiedSeatIds(assetType, node, buildingId, nodeId);
+      const sameAgentClaim = (getMultiSeatManualStore(assetType, node).reservations || []).some(reservation =>
         String(reservation?.agentId || '') === String(agent?.id || '') &&
         String(reservation?.seatId || reservation?.spotId || '') === seatId &&
         ['held', 'reserved', 'routing', 'arrived', 'active', 'in_progress'].includes(String(reservation?.state || reservation?.status || '').toLowerCase()));
@@ -28952,6 +29456,15 @@ function resolveDraggedAgentObjectHover(e, agent = null) {
     return makeDraggedAgentObjectDrop(buildingId, index, building, furniture, spot, agent);
   }
   return null;
+}
+
+function resolveDraggedAgentObjectHover(e, agent = null) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const mouse = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(mouse, camera);
+  const hits = ray.intersectObjects(buildingGroup.children, true).filter(hit => hit.object?.userData?.furniture);
+  return resolveDraggedAgentObjectHits(hits, agent);
 }
 
 function getDraggedAgentNearbyServiceDropSpots(building, furniture, index) {
@@ -29570,12 +30083,15 @@ function startDraggedAgentMultiSeatUse(drop, agent) {
   releasePriorMultiSeatReservationsForManualReseat(store, agent.id, nowMs);
   const occupiedSeatIds = getMultiSeatManualOccupiedSeatIds(furnitureType, furniture, drop.buildingId, drop.outdoorNode ? drop.outdoorNodeId : drop.index);
   occupiedSeatIds.delete(seatId);
-  const objectKey = furnitureType === 'parkBench' && drop.outdoorNode
-    ? getParkBenchObjectKey(drop.buildingId, drop.outdoorNodeId)
+  const baseObjectKey = drop.outdoorNode
+    ? getOutdoorMultiSeatObjectKey(drop.buildingId, drop.outdoorNodeId, furnitureType)
     : getMultiSeatManualObjectKey(furnitureType, drop.buildingId, drop.index);
+  const objectKey = `${baseObjectKey}:slot:${seatId}`;
   const actionId = seatDef.action || drop.spot.action || config.actionId;
   const candidate = {
     ...seatDef,
+    objectKey: baseObjectKey,
+    capacityKey: getObjectUseSeatCapacityKey(baseObjectKey, seatId),
     seatId,
     spotId: seatId,
     slotId: seatId,
@@ -29593,14 +30109,34 @@ function startDraggedAgentMultiSeatUse(drop, agent) {
     reservationId: `manual-seat:${objectKey}:${seatId}:${agent.id}:${nowMs}`,
   });
   if (!reservationResult.ok) return { triggered: false, reason: reservationResult.reason || 'multi-seat-slot-reserved' };
-  const faceAngle = drop.outdoorNode
+  const faceAngle = !drop.outdoorNode && getTableSeatingConfig(furnitureType)
+    ? (getFurnitureSpotFacingCenterAngle(drop.building, furniture, seatSpot) ?? seatSpot.faceAngle)
+    : drop.outdoorNode
     ? (drop.spot.faceAngle ?? getOutdoorNodeSpotFacingAngle(drop.building, furniture, seatId, seatDef.facing || 'north'))
     : (getFurnitureForwardFacingAngle(drop.building, furniture, seatSpot, seatSpot.facing || seatDef.facing || 'north') ?? seatSpot.faceAngle);
+  // Manual placement is already on the selected chair. Send the activation
+  // dock as the authoritative realtime target, while retaining the separate
+  // approach marker only as routing metadata. Sending the approach point as
+  // x/y made the server render the seated pose at the staging marker whenever
+  // a saved table target was stale or did not yet expose this exact seat.
   const routeResult = drop.outdoorNode ? { accepted: true } : setAgentTargetForExplicitObjectAction(agent, {
-    x: approachSpot.apiX,
-    y: approachSpot.apiZ,
-    floor: approachSpot.floor,
+    x: seatSpot.apiX,
+    y: seatSpot.apiZ,
+    floor: seatSpot.floor,
     faceAngle,
+    objectKey,
+    baseObjectKey,
+    spotId: seatId,
+    interactionSpotId: seatId,
+    slotId: seatId,
+    activationSpotId: seatId,
+    routeApproachTarget: {
+      x: approachSpot.apiX,
+      y: approachSpot.apiZ,
+      floor: approachSpot.floor,
+      spotId: approachSpot.spotId || approachSpotId,
+      faceAngle,
+    },
   }, drop.building, approachSpot.floor, {
     owner: 'manual',
     priorityName: 'manual',
@@ -29617,8 +30153,9 @@ function startDraggedAgentMultiSeatUse(drop, agent) {
     buildingId: drop.buildingId,
     furnitureIndex: drop.index,
     furniture,
-    objectId: objectKey,
+    objectId: baseObjectKey,
     objectKey,
+    baseObjectKey,
     objectType: furnitureType,
     actionId,
     spotId: seatId,
@@ -29650,7 +30187,7 @@ function startDraggedAgentMultiSeatUse(drop, agent) {
     exitSpotId: candidate.exitSpotId,
     status: 'held',
     state: 'held',
-    capacityKey: getObjectUseSeatCapacityKey(objectKey, seatId),
+    capacityKey: getObjectUseSeatCapacityKey(baseObjectKey, seatId),
   };
   furniture.activeUse = {
     ...(furniture.activeUse || {}),
@@ -29669,7 +30206,8 @@ function startDraggedAgentMultiSeatUse(drop, agent) {
     seats: config.capacity,
     reservedSeatIds: [...getMultiSeatManualOccupiedSeatIds(furnitureType, furniture, drop.buildingId, drop.outdoorNode ? drop.outdoorNodeId : drop.index)].sort(),
     lastAction: actionId,
-    persistentFurniture: true,
+    persistentFurniture: !drop.outdoorNode,
+    persistentOutdoorNode: Boolean(drop.outdoorNode),
   };
   agent._idleActivity = {
     kind: config.kind,
@@ -29684,6 +30222,7 @@ function startDraggedAgentMultiSeatUse(drop, agent) {
     outdoorAreaId: drop.outdoorNode ? (furniture.outdoorAreaId || drop.building.outdoorArea?.id || drop.buildingId) : undefined,
     furnitureType,
     objectKey,
+    baseObjectKey,
     spotId: seatId,
     seatId,
     slotId: seatId,
@@ -29696,7 +30235,7 @@ function startDraggedAgentMultiSeatUse(drop, agent) {
     actionId,
     action: actionId,
     mode: 'sit',
-    stayMs: MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+    stayMs: getManualObjectOccupancyDwellMs(furniture),
     faceAngle,
     dockTarget: { x: seatSpot.apiX, y: seatSpot.apiZ },
     routeApproachTarget: { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor, spotId: approachSpot.spotId, faceAngle },
@@ -29887,7 +30426,7 @@ function activateSnappedManualStandingMachineDrop(drop, agent) {
 // Object types whose manual drop must finish seated on the authored activation
 // dock (the visible cushion/seat surface) rather than at the front approach
 // marker. These all use the shared seat-reservation activation path.
-const MANUAL_DROP_DIRECT_SEAT_DOCK_TYPES = Object.freeze(new Set(['couch', 'sectionalSofa', 'loveseat', 'hallwayBench', 'parkBench']));
+const MANUAL_DROP_DIRECT_SEAT_DOCK_TYPES = Object.freeze(new Set(['couch', 'sectionalSofa', 'loveseat', 'hallwayBench', 'parkBench', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'smallRoundMeetingTable', 'meetingTable']));
 
 function isManualDropDirectSeatDockActivity(drop, agent) {
   const activity = agent?._idleActivity || null;
@@ -29946,6 +30485,9 @@ function activateManualDropCouchSeat(drop, agent) {
 function snapDraggedAgentToStartedObjectSeatDock(drop, agent) {
   if (!isManualDropDirectSeatDockActivity(drop, agent)) return { snapped: false, reason: 'not-direct-seat-dock-drop' };
   const activity = agent._idleActivity;
+  const furnitureType = drop.outdoorNode
+    ? getOutdoorNodeAssetType(drop.furniture || {})
+    : drop.furniture?.type;
   // Resolve the authoritative seat spot from the object itself. Handlers route
   // via the front approach marker and some paths overwrite dockTarget with that
   // approach position, so trusting dockTarget blindly parked seated agents in
@@ -29982,8 +30524,12 @@ function snapDraggedAgentToStartedObjectSeatDock(drop, agent) {
   agent._isRunning = false;
   const authoredSeatFacing = authoritativeSeatSpot
     ? (drop.outdoorNode
-      ? (getOutdoorNodeSpotFacingAngle(drop.building, drop.furniture, seatSpotId, authoritativeSeatSpot.facing || 'north') ?? authoritativeSeatSpot.faceAngle)
-      : (getFurnitureForwardFacingAngle(drop.building, drop.furniture, authoritativeSeatSpot, authoritativeSeatSpot.facing || 'north') ?? authoritativeSeatSpot.faceAngle))
+      ? (getTableSeatingConfig(furnitureType)
+        ? authoritativeSeatSpot.faceAngle
+        : (getOutdoorNodeSpotFacingAngle(drop.building, drop.furniture, seatSpotId, authoritativeSeatSpot.facing || 'north') ?? authoritativeSeatSpot.faceAngle))
+      : (getTableSeatingConfig(drop.furniture?.type)
+        ? (getFurnitureSpotFacingCenterAngle(drop.building, drop.furniture, authoritativeSeatSpot) ?? authoritativeSeatSpot.faceAngle)
+        : (getFurnitureForwardFacingAngle(drop.building, drop.furniture, authoritativeSeatSpot, authoritativeSeatSpot.facing || 'north') ?? authoritativeSeatSpot.faceAngle)))
     : null;
   const faceAngle = Number.isFinite(Number(authoredSeatFacing))
     ? Number(authoredSeatFacing)
@@ -30019,6 +30565,11 @@ function snapDraggedAgentToStartedObjectSeatDock(drop, agent) {
   else if (String(activity.kind || '').startsWith('loveseat-')) agent._schedPhase = 'loveseat-rest';
   else if (String(activity.kind || '').startsWith('hallway-bench-')) agent._schedPhase = 'hallway-bench-wait';
   else if (String(activity.kind || '').startsWith('park-bench-')) agent._schedPhase = 'park-bench-rest';
+  else if (String(activity.kind || '').startsWith('dining-table-')) agent._schedPhase = 'dining-table-eat';
+  else if (String(activity.kind || '').startsWith('small-cafe-table-')) agent._schedPhase = 'small-cafe-table-eat';
+  else if (String(activity.kind || '').startsWith('outdoor-cafe-table-')) agent._schedPhase = 'outdoor-cafe-table-sit';
+  else if (String(activity.kind || '').startsWith('picnic-table-')) agent._schedPhase = 'picnic-table-sit';
+  else if (String(activity.kind || '').startsWith('small-round-meeting-table-')) agent._schedPhase = 'small-round-meeting-table-plan';
   const scale = T / API_TILE;
   if (isPhysicsReady()) teleportAgent('agent_' + agent.id, agent.x * scale, getGroundY(agent.x * scale, agent.y * scale), agent.y * scale);
   releaseAgentRuntimeRouteLease(agent, 'manual-drag-drop-seat-dock-arrived', 'active');
@@ -36573,7 +37124,7 @@ const FURNITURE_HALF_SIZES = {
   wallArt:  [0.72, 0.08],
   menuBoard: [0.74, 0.14],
   teachingPodium: [0.62, 0.46],
-  parkBench: [0.75, 0.35],
+  parkBench: [1.12, 0.35],
   shadeTreeCluster: [0.42, 0.42], // trunk-only solid footprint; canopy/shade radius is soft metadata and does not block route targets
   busStop: [1.38, 0.58],
   gazeboPavilion: [1.75, 1.75], // segmented solid post/rail colliders; open floor/interior action spots remain reachable
@@ -39771,8 +40322,96 @@ function getMeetingTableEntries() {
 
 function getMeetingTableSeatSpots(entry) {
   if (!entry?.building || !entry?.table) return [];
-  const spotDefs = FURNITURE_INTERACTION_SPOTS.meetingTable || [];
+  const spotDefs = (FURNITURE_INTERACTION_SPOTS.meetingTable || []).filter(def => def.roles?.includes('seat'));
   return spotDefs.map(def => getFurnitureActionSpot(entry.building, entry.table, def.id)).filter(Boolean);
+}
+
+function getMeetingTablePositionDefinitions() {
+  return (FURNITURE_INTERACTION_SPOTS.meetingTable || []).filter(definition =>
+    definition?.roles?.includes('seat') ||
+    (definition?.roles?.includes('meeting') && definition?.roles?.includes('stand'))
+  );
+}
+
+function getMeetingTablePositionCandidates(entry) {
+  if (!entry?.building || !entry?.table) return [];
+  const objectKey = getMeetingTableObjectKey(entry.buildingId, entry.index);
+  const locations = getMeetingTablePositionDefinitions().map(definition => {
+    const spot = getFurnitureActionSpot(entry.building, entry.table, definition.id);
+    if (!spot) return null;
+    return {
+      ...definition,
+      actionId: definition.action || 'planning.meeting',
+      activationSpotId: definition.activationSpotId || definition.id,
+      position: { x: spot.apiX, z: spot.apiZ },
+    };
+  }).filter(Boolean);
+  return listObjectUseSeatCandidates({
+    locations,
+    activationSpots: locations,
+    objectKey,
+    objectType: 'meetingTable',
+    actionId: 'planning.meeting',
+    seatRoles: ['seat', 'meeting', 'stand', 'standing'],
+  });
+}
+
+function getMeetingTableBlockedPositionIds(entry, ignoreAgentIds = []) {
+  const ignored = new Set((ignoreAgentIds || []).map(String));
+  const blocked = new Set();
+  const activeStates = new Set(['held', 'active', 'reserved', 'route_pending', 'routing', 'arrived', 'in_progress']);
+  const store = getMeetingTableObjectUseSeatStore(entry?.table);
+  for (const reservation of store?.reservations || []) {
+    if (!reservation || !activeStates.has(String(reservation.state || reservation.status || '').toLowerCase())) continue;
+    if (ignored.has(String(reservation.agentId || ''))) continue;
+    const slotId = reservation.seatId || reservation.slotId || reservation.spotId || reservation.activationSpotId;
+    if (slotId) blocked.add(slotId);
+  }
+  for (const agent of agentsList || []) {
+    if (!agent || ignored.has(String(agent.id || ''))) continue;
+    const activity = agent._idleActivity || null;
+    if (!activity || activity.buildingId !== entry?.buildingId || Number(activity.furnitureIndex) !== Number(entry?.index)) continue;
+    if (!String(activity.kind || '').startsWith('meeting-table')) continue;
+    const slotId = activity.seatId || activity.slotId || activity.activationSpotId || activity.spotId;
+    if (slotId) blocked.add(slotId);
+  }
+  const baseObjectKey = getMeetingTableObjectKey(entry?.buildingId, entry?.index);
+  for (const definition of getMeetingTablePositionDefinitions()) {
+    const positionId = definition?.id || definition?.spotId;
+    if (!positionId) continue;
+    const objectState = getAgentRuntimeWorldObjectState(`${baseObjectKey}:slot:${positionId}`);
+    if (!objectState || !isAgentRuntimeWorldObjectStateFresh(objectState)) continue;
+    const state = String(objectState.state || '').toLowerCase();
+    const objectAgentId = String(objectState.agentId || '');
+    if (
+      ['reserved', 'routing', 'active', 'using', 'occupied', 'queued', 'cooldown'].includes(state) &&
+      (!objectAgentId || !ignored.has(objectAgentId))
+    ) blocked.add(positionId);
+  }
+  return blocked;
+}
+
+function reserveMeetingTablePosition(entry, agent, candidate, meetingId) {
+  if (!entry?.table || !agent || !candidate?.seatId) return null;
+  const store = getMeetingTableObjectUseSeatStore(entry.table);
+  const agentId = String(agent.id || agent.name || 'agent');
+  const activeStates = new Set(['held', 'active', 'reserved', 'route_pending', 'routing', 'arrived', 'in_progress']);
+  const existing = (store.reservations || []).find(reservation =>
+    String(reservation?.agentId || '') === agentId &&
+    reservation?.seatId === candidate.seatId &&
+    activeStates.has(String(reservation.state || reservation.status || '').toLowerCase())
+  );
+  if (existing) return existing;
+  releasePriorMultiSeatReservationsForManualReseat(store, agentId);
+  const blocked = getMeetingTableBlockedPositionIds(entry, [agentId]);
+  const reserved = chooseAndReserveObjectUseSeat(store, [candidate], {
+    agentId,
+    agentPosition: candidate.position,
+    actionId: 'planning.meeting',
+    occupiedSeatIds: blocked,
+    reservationId: `meeting:${meetingId}:${entry.buildingId}:${entry.index}:${candidate.seatId}:${agentId}`,
+  });
+  return reserved.ok ? reserved.reservation : null;
 }
 
 function getBestMeetingTableEntry(participants = []) {
@@ -39789,34 +40428,157 @@ function getBestMeetingTableEntry(participants = []) {
 }
 
 function assignMeetingParticipantsToTable(participants, entry, meetingId, topic = 'Discussion') {
-  const seats = getMeetingTableSeatSpots(entry);
-  if (!seats.length) return [];
-  return participants.map((agent, i) => {
-    const spot = seats[i % seats.length];
-    setAgentTarget(agent, { x: spot.apiX, y: spot.apiZ, floor: spot.floor }, entry.building, spot.floor);
+  const candidates = getMeetingTablePositionCandidates(entry);
+  const seatCandidates = candidates.filter(candidate => String(candidate.seatId || '').startsWith('seat-'));
+  const standingCandidates = candidates.filter(candidate => String(candidate.seatId || '').startsWith('stand-'));
+  if (!seatCandidates.length) return [];
+  const assignments = [];
+  const store = getMeetingTableObjectUseSeatStore(entry.table);
+  for (const agent of participants.slice(0, seatCandidates.length + standingCandidates.length)) {
+    const agentId = String(agent.id || agent.name || 'agent');
+    releasePriorMultiSeatReservationsForManualReseat(store, agentId);
+    const blocked = getMeetingTableBlockedPositionIds(entry, [agentId]);
+    const availableSeats = seatCandidates.filter(candidate => !blocked.has(candidate.seatId));
+    const availableStanding = standingCandidates.filter(candidate => !blocked.has(candidate.seatId));
+    const pool = availableSeats.length ? availableSeats : availableStanding;
+    const reserved = chooseAndReserveObjectUseSeat(store, pool, {
+      agentId,
+      agentPosition: { x: agent.x || 0, z: agent.y || 0 },
+      actionId: 'planning.meeting',
+      occupiedSeatIds: blocked,
+      reservationId: `meeting:${meetingId}:${entry.buildingId}:${entry.index}:${agentId}`,
+    });
+    if (!reserved.ok) continue;
+    const candidate = reserved.seat;
+    const spot = getFurnitureActionSpot(entry.building, entry.table, candidate.seatId);
+    if (!spot) {
+      releaseObjectUseSeatReservation(store, { reservationId: reserved.reservation.id, agentId, seatId: candidate.seatId, terminalState: 'failed', reason: 'missing-meeting-position' });
+      continue;
+    }
+    const standing = candidate.seatId.startsWith('stand-');
+    const definition = getMeetingTablePositionDefinitions().find(position => position.id === candidate.seatId) || candidate;
+    const approachSpotId = standing ? null : (definition.approachSpotId || definition.exitSpotId || null);
+    const approachSpot = approachSpotId ? getFurnitureActionSpot(entry.building, entry.table, approachSpotId) : null;
+    const baseObjectKey = getMeetingTableObjectKey(entry.buildingId, entry.index);
+    const objectKey = `${baseObjectKey}:slot:${candidate.seatId}`;
+    const faceAngle = getFurnitureSpotFacingCenterAngle(entry.building, entry.table, spot) ?? spot.faceAngle;
+    const routeApproachTarget = approachSpot ? {
+      x: approachSpot.apiX,
+      y: approachSpot.apiZ,
+      floor: approachSpot.floor,
+      spotId: approachSpot.spotId || approachSpotId,
+      faceAngle,
+    } : null;
+    const routeResult = setAgentTargetForExplicitObjectAction(agent, {
+      x: spot.apiX,
+      y: spot.apiZ,
+      floor: spot.floor,
+      faceAngle,
+      targetKind: 'meeting-table',
+      objectKey,
+      baseObjectKey,
+      objectType: 'meetingTable',
+      actionId: 'planning.meeting',
+      spotId: candidate.seatId,
+      interactionSpotId: candidate.seatId,
+      slotId: candidate.seatId,
+      activeUseSlotId: candidate.seatId,
+      activationSpotId: candidate.seatId,
+      poseKind: standing ? 'stand' : 'seat',
+      meetingStanding: standing,
+      activityKind: standing ? 'meeting-table-stand' : 'meeting-table',
+      animationId: standing ? 'gather-talk' : 'meeting-sit-talk',
+      stayMs: 30000,
+      ...(routeApproachTarget ? { routeApproachTarget } : {}),
+    }, entry.building, spot.floor, {
+      owner: 'meeting',
+      priorityName: 'explicit-object',
+      phase: 'approach',
+      sourceFamily: 'meeting-table-call',
+      sourceFunction: 'assignMeetingParticipantsToTable',
+      sourceSummary: 'called meeting reserves and routes each participant to one exact Meeting Table seat or overflow standing point',
+      behaviorSourceKind: 'meeting',
+      behaviorMode: 'meeting-directed',
+      behaviorAuthority: AGENT_INTENT_PRIORITY['explicit-object'],
+      activityKind: standing ? 'meeting-table-stand' : 'meeting-table',
+      animationId: standing ? 'gather-talk' : 'meeting-sit-talk',
+      stayMs: 30000,
+      seatSurfaceLift: standing ? undefined : getFurnitureSeatSurfaceLift('meetingTable'),
+      buildingId: entry.buildingId,
+      furnitureIndex: entry.index,
+      furniture: entry.table,
+      objectId: baseObjectKey,
+      objectKey,
+      baseObjectKey,
+      objectType: 'meetingTable',
+      actionId: 'planning.meeting',
+      spotId: candidate.seatId,
+      slotId: candidate.seatId,
+      activeUseSlotId: candidate.seatId,
+      activationSpotId: candidate.seatId,
+      approachSpotId,
+      exitSpotId: standing ? null : (definition.exitSpotId || approachSpotId),
+      reservationId: reserved.reservation.id,
+      backendRuntimeObjectUse: true,
+      manualDropSnapToUse: true,
+      release: { policy: 'on-object-complete', releaseObjectReservation: true, releaseActiveUse: true, allowedBy: AGENT_INTENT_RELEASE_ALLOWED_BY['explicit-object'] },
+      onBackendObjectUseRejected: (error) => {
+        agent._lastMeetingRouteFailure = {
+          meetingId,
+          spotId: candidate.seatId,
+          code: error?.code || null,
+          message: error?.message || String(error || 'meeting runtime route rejected'),
+          atMs: Date.now(),
+        };
+        releaseObjectUseSeatReservation(store, {
+          reservationId: reserved.reservation.id,
+          agentId,
+          seatId: candidate.seatId,
+          terminalState: 'failed',
+          reason: 'meeting-runtime-route-rejected',
+        });
+      },
+    });
+    if (routeResult?.accepted === false) {
+      releaseObjectUseSeatReservation(store, { reservationId: reserved.reservation.id, agentId, seatId: candidate.seatId, terminalState: 'failed', reason: 'meeting-route-rejected' });
+      continue;
+    }
     agent._meetingId = meetingId;
     agent._meetingTopic = topic;
     agent._idleActivity = {
-      kind: 'meeting-table',
+      kind: standing ? 'meeting-table-stand' : 'meeting-table',
       phase: 'approach',
       meetingId,
       meetingTopic: topic,
       buildingId: entry.buildingId,
       furnitureIndex: entry.index,
       furnitureType: 'meetingTable',
-      spotId: spot.spotId,
+      objectKey,
+      spotId: candidate.seatId,
+      slotId: candidate.seatId,
+      activationSpotId: candidate.seatId,
+      seatId: standing ? undefined : candidate.seatId,
+      poseKind: standing ? 'stand' : 'seat',
+      meetingStanding: standing,
+      reservationId: reserved.reservation.id,
       action: 'planning.meeting',
+      actionId: 'planning.meeting',
       stayMs: 30000,
-      faceAngle: spot.faceAngle,
+      faceAngle,
       dockTarget: { x: spot.apiX, y: spot.apiZ },
+      ...(routeApproachTarget ? { routeApproachTarget } : {}),
       dockSnapRadius: 8,
-      animationId: 'meeting-sit-talk',
+      animationId: standing ? 'gather-talk' : 'meeting-sit-talk',
+      seatSurfaceLift: standing ? undefined : getFurnitureSeatSurfaceLift('meetingTable'),
       lifecycle: { stationary: true, carryable: false, temporary: false },
     };
     agent._wanderTimer = 120;
     agent._stayTimer = 0;
-    return { agent: agent.id, spot: spot.spotId, buildingId: entry.buildingId, furnitureIndex: entry.index };
-  });
+    assignments.push({ agent: agent.id, spot: candidate.seatId, poseKind: standing ? 'stand' : 'seat', reservationId: reserved.reservation.id, buildingId: entry.buildingId, furnitureIndex: entry.index });
+  }
+  entry.table.activeUse = { ...(entry.table.activeUse || {}), state: assignments.length ? 'reserved' : 'idle', mode: 'meeting', meetingId, reservedPositionIds: assignments.map(assignment => assignment.spot) };
+  entry.table.tableState = { ...(entry.table.tableState || {}), status: assignments.length ? 'reserved' : 'open', seats: 10, standingSpots: 6, reservedSeatIds: assignments.filter(assignment => assignment.poseKind === 'seat').map(assignment => assignment.spot), reservedStandingSpotIds: assignments.filter(assignment => assignment.poseKind === 'stand').map(assignment => assignment.spot), meetingMode: assignments.length ? 'active' : 'open', persistentFurniture: true };
+  return assignments;
 }
 
 function getLiveMeetingParticipants() {
@@ -39830,36 +40592,57 @@ function getLiveMeetingTargetForAgent(agent) {
   if (!agent || participants.length < 2) return null;
   const entry = getBestMeetingTableEntry(participants);
   if (!entry) return null;
-  const seats = getMeetingTableSeatSpots(entry);
-  if (!seats.length) return null;
+  const blocked = getMeetingTableBlockedPositionIds(entry, participants.map(participant => participant.id));
+  const positions = getMeetingTablePositionCandidates(entry).filter(candidate => !blocked.has(candidate.seatId));
+  if (!positions.length) return null;
   const idx = Math.max(0, participants.findIndex(candidate => candidate.id === agent.id));
-  const spot = seats[idx % seats.length];
-  return { ...spot, entry, meetingId: 'live-meeting', topic: agent.task || 'Meeting' };
+  const candidate = positions[idx] || null;
+  if (!candidate) return null;
+  const spot = getFurnitureActionSpot(entry.building, entry.table, candidate.seatId);
+  if (!spot) return null;
+  const reservation = reserveMeetingTablePosition(entry, agent, candidate, 'live-meeting');
+  if (!reservation) return null;
+  const standing = candidate.seatId.startsWith('stand-');
+  return {
+    ...spot,
+    spotId: candidate.seatId,
+    slotId: candidate.seatId,
+    poseKind: standing ? 'stand' : 'seat',
+    meetingStanding: standing,
+    animationId: standing ? 'gather-talk' : 'meeting-sit-talk',
+    reservationId: reservation.id,
+    faceAngle: getFurnitureSpotFacingCenterAngle(entry.building, entry.table, spot) ?? spot.faceAngle,
+    entry,
+    meetingId: 'live-meeting',
+    topic: agent.task || 'Meeting',
+  };
 }
 
 function createMeetingForParticipants(participants, topic, forcedTableEntry = null) {
   if (!Array.isArray(participants) || participants.length < 2) return null;
 
+  const meetingTable = forcedTableEntry || getBestMeetingTableEntry(participants);
+  const activeParticipants = meetingTable ? participants.slice(0, 16) : participants;
+
   const meeting = {
     id: 'meet-' + Date.now().toString(36),
     topic: topic || 'Discussion',
-    participants: participants.map(p => p.id),
+    participants: activeParticipants.map(p => p.id),
     startTime: Date.now(),
   };
   activeMeetings.push(meeting);
 
-  const meetingTable = forcedTableEntry || getBestMeetingTableEntry(participants);
   if (meetingTable) {
     meeting.table = { buildingId: meetingTable.buildingId, furnitureIndex: meetingTable.index };
-    meeting.slotAssignments = assignMeetingParticipantsToTable(participants, meetingTable, meeting.id, meeting.topic);
+    meeting.slotAssignments = assignMeetingParticipantsToTable(activeParticipants, meetingTable, meeting.id, meeting.topic);
   } else {
     // No meeting table — cluster agents near the first participant.
-    participants.forEach((agent, i) => {
+    activeParticipants.forEach((agent, i) => {
       // Gather around first participant
-      const angle = (i / participants.length) * Math.PI * 2;
+      const angle = (i / activeParticipants.length) * Math.PI * 2;
       agent._wanderTarget = {
-        x: participants[0].x + Math.cos(angle) * 60,
-        y: participants[0].y + Math.sin(angle) * 60,
+        x: activeParticipants[0].x + Math.cos(angle) * 60,
+        y: activeParticipants[0].y + Math.sin(angle) * 60,
       };
       agent._meetingId = meeting.id;
       agent._meetingTopic = meeting.topic;
@@ -39868,8 +40651,8 @@ function createMeetingForParticipants(participants, topic, forcedTableEntry = nu
     });
   }
 
-  showToast(`📊 Meeting: ${meeting.topic} (${participants.map(p => p.name).join(', ')})`, 'success');
-  addActivityLog(`📊 Meeting: ${participants.map(p => (p.emoji || '🤖') + ' ' + p.name).join(' + ')}`);
+  showToast(`📊 Meeting: ${meeting.topic} (${activeParticipants.map(p => p.name).join(', ')})`, 'success');
+  addActivityLog(`📊 Meeting: ${activeParticipants.map(p => (p.emoji || '🤖') + ' ' + p.name).join(' + ')}`);
   updateMeetingPanel();
   return meeting;
 }
@@ -39895,7 +40678,7 @@ function startMeetingAtTable(buildingId, furnitureIndex, topic = 'Table Briefing
       const db = Math.hypot((b.x || 0) - center.deskApiX, (b.y || 0) - center.deskApiZ);
       return da - db;
     })
-    .slice(0, Math.min(6, Math.max(2, agentsList.length)));
+    .slice(0, Math.min(16, Math.max(2, agentsList.length)));
   if (participants.length < 2) {
     showToast('Need at least 2 available agents for a table meeting', 'warning');
     return null;
@@ -39905,11 +40688,13 @@ function startMeetingAtTable(buildingId, furnitureIndex, topic = 'Table Briefing
 
 function describeMeetingTableState(buildingId, furnitureIndex) {
   const activeAtTable = activeMeetings.filter(meeting => meeting.table?.buildingId === buildingId && meeting.table?.furnitureIndex === furnitureIndex);
-  const seats = FURNITURE_INTERACTION_SPOTS.meetingTable || [];
+  const positions = getMeetingTablePositionDefinitions();
+  const seats = positions.filter(position => position.roles?.includes('seat'));
+  const standing = positions.filter(position => position.roles?.includes('stand'));
   const label = activeAtTable.length
-    ? `${activeAtTable.length} active meeting(s), ${seats.length} routed seat spots`
-    : `Ready · ${seats.length} routed seat spots · stationary persistent furniture`;
-  window.__VWLastMeetingTableState = { buildingId, furnitureIndex, seats: seats.map(spot => spot.id), activeMeetings: activeAtTable.map(meeting => meeting.id), classification: 'stationary-persistent' };
+    ? `${activeAtTable.length} active meeting(s), ${seats.length} seats + ${standing.length} standing spots`
+    : `Ready · ${seats.length} seats + ${standing.length} standing spots · stationary persistent furniture`;
+  window.__VWLastMeetingTableState = { buildingId, furnitureIndex, seats: seats.map(spot => spot.id), standingSpots: standing.map(spot => spot.id), activeMeetings: activeAtTable.map(meeting => meeting.id), classification: 'stationary-persistent' };
   showToast(`🤝 Meeting Room Table: ${label}`, activeAtTable.length ? 'success' : 'info');
   return window.__VWLastMeetingTableState;
 }
@@ -39919,19 +40704,32 @@ function endMeeting(meetingId) {
   if (idx >= 0) {
     const meeting = activeMeetings[idx];
     activeMeetings.splice(idx, 1);
+    const building = buildingsMap.get(meeting.table?.buildingId);
+    const table = building?.interior?.furniture?.[meeting.table?.furnitureIndex];
+    const store = table?.type === 'meetingTable' ? getMeetingTableObjectUseSeatStore(table) : null;
     // Release participants
     meeting.participants.forEach(pid => {
       const agent = agentsList.find(a => a.id === pid);
       if (agent) {
         if (agent._meetingId === meetingId) {
+          const activity = agent._idleActivity || null;
+          const slotId = activity?.seatId || activity?.slotId || activity?.activationSpotId || activity?.spotId;
+          releaseBackendObjectUseForManualAgentMove(agent, 'meeting-ended');
+          if (store && activity?.reservationId && slotId) {
+            releaseObjectUseSeatReservation(store, { reservationId: activity.reservationId, agentId: agent.id, seatId: slotId, reason: 'meeting-ended' });
+          }
           agent._meetingId = null;
           agent._meetingTopic = null;
-          if (agent._idleActivity?.kind === 'meeting-table') agent._idleActivity = null;
+          if (String(agent._idleActivity?.kind || '').startsWith('meeting-table')) agent._idleActivity = null;
         }
         agent._stayTimer = 0;
         agent._wanderTimer = 0;
       }
     });
+    if (table?.type === 'meetingTable') {
+      table.activeUse = { state: 'idle', mode: 'open-meeting', lastMeetingId: meetingId };
+      table.tableState = { ...(table.tableState || {}), status: 'open', seats: 10, standingSpots: 6, activeSeatIds: [], reservedSeatIds: [], activeStandingSpotIds: [], reservedStandingSpotIds: [], meetingMode: 'open', lastMeetingId: meetingId, persistentFurniture: true };
+    }
     showToast(`✅ Meeting ended: ${meeting.topic}`);
     updateMeetingPanel();
   }
@@ -44051,7 +44849,10 @@ function buildContextMenu(menu, type, targetId) {
   } else if (type === 'outdoor-node') {
     const { buildingId, nodeId } = parseOutdoorNodeTargetId(targetId);
     const building = buildingsMap.get(buildingId);
-    const node = getOutdoorNodeById(building, nodeId);
+    // Context actions and color edits must operate on the mutable persisted
+    // outdoor node. The normalized exterior taxonomy record is deeply frozen
+    // and is only suitable for read-only routing/metadata inspection.
+    const node = getRawOutdoorNodeById(building, nodeId);
     const mesh = findOutdoorNodeMesh(buildingId, node?.id || nodeId);
     if (!contextTarget || !building || !node) { hideContextMenu(); return; }
     const title = document.createElement('div');
@@ -44080,12 +44881,13 @@ function buildContextMenu(menu, type, targetId) {
       el.addEventListener('click', () => { item.action(); hideContextMenu(); });
       menu.appendChild(el);
     });
-    if (getOutdoorNodeAssetType(node) === 'parkBench') {
+    const outdoorColorType = getOutdoorNodeAssetType(node);
+    if (['parkBench', 'outdoorCafeTable'].includes(outdoorColorType)) {
       appendMultiSeatColorEditor(menu, {
         buildingId,
         outdoorNodeId: node.id,
         node,
-        type: 'parkBench',
+        type: outdoorColorType,
       }, () => hideContextMenu());
     }
     const deleteEl = document.createElement('div');
@@ -44162,7 +44964,7 @@ function getInlineFurnitureActionHtml(buildingId, furnitureIndex, furniture) {
     examChair: _buildExamChairActionButtons, toolCart: _buildToolCartActionButtons, workbench: _buildWorkbenchActionButtons, storageBoxes: _buildStorageBoxesActionButtons,
     serverRack: _buildServerRackActionButtons, diagnosticStation: _buildDiagnosticStationActionButtons, medicalSupplyCabinet: _buildMedicalSupplyCabinetActionButtons,
     supplyCabinet: _buildSupplyCabinetActionButtons, kitchenIsland: _buildKitchenIslandActionButtons, receptionDesk: _buildReceptionDeskActionButtons,
-    cafeCounter: _buildCafeCounterActionButtons, smallCafeTable: _buildSmallCafeTableActionButtons, outdoorCafeTable: _buildOutdoorCafeTableActionButtons,
+    cafeCounter: _buildCafeCounterActionButtons, meetingTable: _buildMeetingTableActionButtons, smallCafeTable: _buildSmallCafeTableActionButtons, outdoorCafeTable: _buildOutdoorCafeTableActionButtons,
     picnicTable: _buildPicnicTableActionButtons, patioTable: _buildPatioTableActionButtons, smallRoundMeetingTable: _buildSmallRoundMeetingTableActionButtons,
     checkoutCounter: _buildCheckoutCounterActionButtons, checkoutRegister: _buildCheckoutRegisterActionButtons, waterCooler: _buildWaterCoolerActionButtons, coffeeMachine: _buildWaterCoolerActionButtons, countertopCoffeeMachine: _buildCoffeeMachineActionButtons,
     vending: _buildVendingMachineActionButtons, fridge: _buildFridgeActionButtons, grill: _buildGrillActionButtons, parkLamp: _buildParkLampActionButtons,
@@ -44950,12 +45752,12 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'present-front', dx: 0, dz: 0.78, facing: 'north', action: 'training.presentAtPodium', roles: ['use', 'speak', 'point'], capacity: 1 },
   ],
   parkBench: [
-    { id: 'stand-left', dx: -0.46, dz: 0.88, facing: 'north', action: 'life.standFromParkBench', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'stand-left', dx: -0.70, dz: 0.88, facing: 'north', action: 'life.standFromParkBench', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
     { id: 'stand-center', dx: 0, dz: 0.88, facing: 'north', action: 'life.standFromParkBench', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
-    { id: 'stand-right', dx: 0.46, dz: 0.88, facing: 'north', action: 'life.standFromParkBench', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
-    { id: 'seat-left', slotId: 'seat-left', activationSpotId: 'seat-left', approachSpotId: 'stand-left', exitSpotId: 'stand-left', dx: -0.46, dz: 0.145, facing: 'north', action: 'life.restAtBench', roles: ['seat', 'use', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'park-bench-sit-rest-read-talk', poseId: 'park-bench-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
+    { id: 'stand-right', dx: 0.70, dz: 0.88, facing: 'north', action: 'life.standFromParkBench', roles: ['approach', 'dismount', 'exit', 'stand', 'clearance'], capacityKind: 'clearance', capacity: 1 },
+    { id: 'seat-left', slotId: 'seat-left', activationSpotId: 'seat-left', approachSpotId: 'stand-left', exitSpotId: 'stand-left', dx: -0.70, dz: 0.145, facing: 'north', action: 'life.restAtBench', roles: ['seat', 'use', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'park-bench-sit-rest-read-talk', poseId: 'park-bench-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
     { id: 'seat-center', slotId: 'seat-center', activationSpotId: 'seat-center', approachSpotId: 'stand-center', exitSpotId: 'stand-center', dx: 0, dz: 0.145, facing: 'north', action: 'life.readAtBench', roles: ['seat', 'use', 'read', 'rest'], capacityKind: 'exclusive', capacity: 1, animationId: 'park-bench-sit-rest-read-talk', poseId: 'park-bench-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
-    { id: 'seat-right', slotId: 'seat-right', activationSpotId: 'seat-right', approachSpotId: 'stand-right', exitSpotId: 'stand-right', dx: 0.46, dz: 0.145, facing: 'north', action: 'life.socialAtBench', roles: ['seat', 'use', 'social', 'talk'], capacityKind: 'exclusive', capacity: 1, animationId: 'park-bench-sit-rest-read-talk', poseId: 'park-bench-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
+    { id: 'seat-right', slotId: 'seat-right', activationSpotId: 'seat-right', approachSpotId: 'stand-right', exitSpotId: 'stand-right', dx: 0.70, dz: 0.145, facing: 'north', action: 'life.socialAtBench', roles: ['seat', 'use', 'social', 'talk'], capacityKind: 'exclusive', capacity: 1, animationId: 'park-bench-sit-rest-read-talk', poseId: 'park-bench-seated', dockMode: 'snap-to-activation', approachRadius: 3, activationRadius: 8, snapRadius: 7 },
   ],
   busStop: [
     { id: 'sidewalk-approach', dx: 0, dz: 1.02, facing: 'north', action: 'life.approachBusStop', roles: ['approach', 'wait', 'staging'], capacityKind: 'staging', capacity: 2 },
@@ -44997,10 +45799,10 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'approach-south', dx: 0, dz: 1.76, facing: 'north', action: 'life.approachDiningTable', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1 },
     { id: 'approach-west', dx: -2.06, dz: 0, facing: 'east', action: 'life.approachDiningTable', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1 },
     { id: 'approach-east', dx: 2.06, dz: 0, facing: 'west', action: 'life.approachDiningTable', roles: ['approach', 'staging'], capacityKind: 'staging', capacity: 1 },
-    { id: 'seat-north', approachSpotId: 'approach-north', dx: 0, dz: -1.02, facing: 'south', action: 'life.eatAtDiningTable', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
-    { id: 'seat-south', approachSpotId: 'approach-south', dx: 0, dz: 1.02, facing: 'north', action: 'life.eatAtDiningTable', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
-    { id: 'seat-west', approachSpotId: 'approach-west', dx: -1.42, dz: 0, facing: 'east', action: 'life.talkAtDiningTable', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
-    { id: 'seat-east', approachSpotId: 'approach-east', dx: 1.42, dz: 0, facing: 'west', action: 'life.talkAtDiningTable', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-north', slotId: 'seat-north', activationSpotId: 'seat-north', approachSpotId: 'approach-north', exitSpotId: 'approach-north', dx: 0, dz: -1.02, facing: 'south', action: 'life.eatAtDiningTable', animationId: 'dining-table-eat-talk', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-south', slotId: 'seat-south', activationSpotId: 'seat-south', approachSpotId: 'approach-south', exitSpotId: 'approach-south', dx: 0, dz: 1.02, facing: 'north', action: 'life.eatAtDiningTable', animationId: 'dining-table-eat-talk', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-west', slotId: 'seat-west', activationSpotId: 'seat-west', approachSpotId: 'approach-west', exitSpotId: 'approach-west', dx: -1.42, dz: 0, facing: 'east', action: 'life.talkAtDiningTable', animationId: 'dining-table-eat-talk', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-east', slotId: 'seat-east', activationSpotId: 'seat-east', approachSpotId: 'approach-east', exitSpotId: 'approach-east', dx: 1.42, dz: 0, facing: 'west', action: 'life.talkAtDiningTable', animationId: 'dining-table-eat-talk', roles: ['seat', 'use', 'eat', 'social'], capacityKind: 'exclusive', capacity: 1 },
     { id: 'dropoff-tabletop', dx: 0, dz: 0, facing: 'any', action: 'life.dropOffAtDiningTable', roles: ['drop-off', 'surface', 'tabletop'], capacityKind: 'shared', capacity: 4 },
   ],
   sink: [
@@ -45029,26 +45831,34 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'queue', dx: 0, dz: 1.55, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, serviceQueue: true },
   ],
   smallCafeTable: [
-    { id: 'seat-north', dx: 0, dz: -0.98, facing: 'south', action: 'life.eatDrinkAtSmallCafeTable', roles: ['seat', 'use'], capacity: 1 },
-    { id: 'seat-south', dx: 0, dz: 0.98, facing: 'north', action: 'life.eatDrinkAtSmallCafeTable', roles: ['seat', 'use'], capacity: 1 },
-    { id: 'seat-east', dx: 0.98, dz: 0, facing: 'west', action: 'life.workAtSmallCafeTable', roles: ['seat', 'work', 'use'], capacity: 1 },
-    { id: 'seat-west', dx: -0.98, dz: 0, facing: 'east', action: 'life.talkAtSmallCafeTable', roles: ['seat', 'social', 'use'], capacity: 1 },
+    { id: 'approach-north', dx: 0, dz: -1.58, facing: 'south', action: 'life.approachSmallCafeTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'approach-south', dx: 0, dz: 1.58, facing: 'north', action: 'life.approachSmallCafeTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'approach-east', dx: 1.58, dz: 0, facing: 'west', action: 'life.approachSmallCafeTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'approach-west', dx: -1.58, dz: 0, facing: 'east', action: 'life.approachSmallCafeTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'seat-north', slotId: 'seat-north', activationSpotId: 'seat-north', approachSpotId: 'approach-north', exitSpotId: 'approach-north', dx: 0, dz: -0.98, facing: 'south', action: 'life.eatDrinkAtSmallCafeTable', animationId: 'drink-eat', roles: ['seat', 'use'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-south', slotId: 'seat-south', activationSpotId: 'seat-south', approachSpotId: 'approach-south', exitSpotId: 'approach-south', dx: 0, dz: 0.98, facing: 'north', action: 'life.eatDrinkAtSmallCafeTable', animationId: 'drink-eat', roles: ['seat', 'use'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-east', slotId: 'seat-east', activationSpotId: 'seat-east', approachSpotId: 'approach-east', exitSpotId: 'approach-east', dx: 0.98, dz: 0, facing: 'west', action: 'life.workAtSmallCafeTable', animationId: 'drink-eat', roles: ['seat', 'work', 'use'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-west', slotId: 'seat-west', activationSpotId: 'seat-west', approachSpotId: 'approach-west', exitSpotId: 'approach-west', dx: -0.98, dz: 0, facing: 'east', action: 'life.talkAtSmallCafeTable', animationId: 'drink-eat', roles: ['seat', 'social', 'use'], capacityKind: 'exclusive', capacity: 1 },
     { id: 'dropoff-surface', dx: 0, dz: 0, facing: 'any', action: 'life.dropOffAtSmallCafeTable', roles: ['drop-off', 'surface'], capacity: 2 },
   ],
   outdoorCafeTable: [
-    { id: 'seat-north', dx: 0, dz: -1.18, facing: 'south', action: 'life.sitAtOutdoorCafeTable', roles: ['seat', 'use', 'eat', 'drink', 'social'], capacity: 1 },
-    { id: 'seat-south', dx: 0, dz: 1.18, facing: 'north', action: 'life.eatAtOutdoorCafeTable', roles: ['seat', 'use', 'eat', 'drink'], capacity: 1 },
-    { id: 'seat-east', dx: 1.18, dz: 0, facing: 'west', action: 'life.drinkAtOutdoorCafeTable', roles: ['seat', 'use', 'drink', 'social'], capacity: 1 },
-    { id: 'seat-west', dx: -1.18, dz: 0, facing: 'east', action: 'life.socializeAtOutdoorCafeTable', roles: ['seat', 'social', 'use', 'talk'], capacity: 1 },
+    { id: 'approach-north', dx: 0, dz: -1.72, facing: 'south', action: 'life.approachOutdoorCafeTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'approach-south', dx: 0, dz: 1.72, facing: 'north', action: 'life.approachOutdoorCafeTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'approach-east', dx: 1.72, dz: 0, facing: 'west', action: 'life.approachOutdoorCafeTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'approach-west', dx: -1.72, dz: 0, facing: 'east', action: 'life.approachOutdoorCafeTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'seat-north', slotId: 'seat-north', activationSpotId: 'seat-north', approachSpotId: 'approach-north', exitSpotId: 'approach-north', dx: 0, dz: -1.18, facing: 'south', action: 'life.sitAtOutdoorCafeTable', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', roles: ['seat', 'use', 'eat', 'drink', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-south', slotId: 'seat-south', activationSpotId: 'seat-south', approachSpotId: 'approach-south', exitSpotId: 'approach-south', dx: 0, dz: 1.18, facing: 'north', action: 'life.eatAtOutdoorCafeTable', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', roles: ['seat', 'use', 'eat', 'drink'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-east', slotId: 'seat-east', activationSpotId: 'seat-east', approachSpotId: 'approach-east', exitSpotId: 'approach-east', dx: 1.18, dz: 0, facing: 'west', action: 'life.drinkAtOutdoorCafeTable', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', roles: ['seat', 'use', 'drink', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-west', slotId: 'seat-west', activationSpotId: 'seat-west', approachSpotId: 'approach-west', exitSpotId: 'approach-west', dx: -1.18, dz: 0, facing: 'east', action: 'life.socializeAtOutdoorCafeTable', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', roles: ['seat', 'social', 'use', 'talk'], capacityKind: 'exclusive', capacity: 1 },
     { id: 'dropoff-tabletop', dx: 0, dz: 0, facing: 'any', action: 'life.dropOffAtOutdoorCafeTable', roles: ['drop-off', 'surface', 'tabletop'], capacity: 2 },
   ],
   picnicTable: [
     { id: 'approach-north', dx: 0, dz: -1.28, facing: 'south', action: 'life.sitAtPicnicTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
     { id: 'approach-south', dx: 0, dz: 1.28, facing: 'north', action: 'life.sitAtPicnicTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
-    { id: 'seat-north-left', approachSpotId: 'approach-north', dx: -0.62, dz: -0.74, facing: 'south', action: 'life.sitAtPicnicTable', roles: ['seat', 'use', 'eat', 'drink', 'social'], capacity: 1 },
-    { id: 'seat-north-right', approachSpotId: 'approach-north', dx: 0.62, dz: -0.74, facing: 'south', action: 'life.eatAtPicnicTable', roles: ['seat', 'use', 'eat', 'drink'], capacity: 1 },
-    { id: 'seat-south-left', approachSpotId: 'approach-south', dx: -0.62, dz: 0.74, facing: 'north', action: 'life.drinkAtPicnicTable', roles: ['seat', 'use', 'drink', 'social'], capacity: 1 },
-    { id: 'seat-south-right', approachSpotId: 'approach-south', dx: 0.62, dz: 0.74, facing: 'north', action: 'life.socializeAtPicnicTable', roles: ['seat', 'social', 'use', 'talk'], capacity: 1 },
+    { id: 'seat-north-left', slotId: 'seat-north-left', activationSpotId: 'seat-north-left', approachSpotId: 'approach-north', exitSpotId: 'approach-north', dx: -0.62, dz: -0.74, facing: 'south', action: 'life.sitAtPicnicTable', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', roles: ['seat', 'use', 'eat', 'drink', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-north-right', slotId: 'seat-north-right', activationSpotId: 'seat-north-right', approachSpotId: 'approach-north', exitSpotId: 'approach-north', dx: 0.62, dz: -0.74, facing: 'south', action: 'life.eatAtPicnicTable', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', roles: ['seat', 'use', 'eat', 'drink'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-south-left', slotId: 'seat-south-left', activationSpotId: 'seat-south-left', approachSpotId: 'approach-south', exitSpotId: 'approach-south', dx: -0.62, dz: 0.74, facing: 'north', action: 'life.drinkAtPicnicTable', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', roles: ['seat', 'use', 'drink', 'social'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-south-right', slotId: 'seat-south-right', activationSpotId: 'seat-south-right', approachSpotId: 'approach-south', exitSpotId: 'approach-south', dx: 0.62, dz: 0.74, facing: 'north', action: 'life.socializeAtPicnicTable', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', roles: ['seat', 'social', 'use', 'talk'], capacityKind: 'exclusive', capacity: 1 },
     { id: 'dropoff-tabletop-left', dx: -0.42, dz: 0, facing: 'any', action: 'life.dropOffAtPicnicTable', roles: ['drop-off', 'surface', 'tabletop'], capacity: 1 },
     { id: 'dropoff-tabletop-right', dx: 0.42, dz: 0, facing: 'any', action: 'life.dropOffAtPicnicTable', roles: ['drop-off', 'surface', 'tabletop'], capacity: 1 },
   ],
@@ -45060,10 +45870,14 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'dropoff-surface', dx: 0, dz: 0, facing: 'any', action: 'life.dropOffAtPatioTable', roles: ['drop-off', 'surface'], capacity: 2 },
   ],
   smallRoundMeetingTable: [
-    { id: 'seat-north', dx: 0, dz: -1.15, facing: 'south', action: 'planning.smallRoundMeetingTablePlan', roles: ['seat', 'use'], capacity: 1 },
-    { id: 'seat-east', dx: 1.15, dz: 0, facing: 'west', action: 'planning.smallRoundMeetingTableTalk', roles: ['seat', 'use'], capacity: 1 },
-    { id: 'seat-south', dx: 0, dz: 1.15, facing: 'north', action: 'planning.smallRoundMeetingTablePlan', roles: ['seat', 'use'], capacity: 1 },
-    { id: 'seat-west', dx: -1.15, dz: 0, facing: 'east', action: 'planning.smallRoundMeetingTableTalk', roles: ['seat', 'use'], capacity: 1 },
+    { id: 'approach-north', dx: 0, dz: -1.75, facing: 'south', action: 'planning.approachSmallRoundMeetingTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'approach-south', dx: 0, dz: 1.75, facing: 'north', action: 'planning.approachSmallRoundMeetingTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'approach-east', dx: 1.75, dz: 0, facing: 'west', action: 'planning.approachSmallRoundMeetingTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'approach-west', dx: -1.75, dz: 0, facing: 'east', action: 'planning.approachSmallRoundMeetingTable', roles: ['approach', 'staging'], capacityKind: 'staging', reservable: false },
+    { id: 'seat-north', slotId: 'seat-north', activationSpotId: 'seat-north', approachSpotId: 'approach-north', exitSpotId: 'approach-north', dx: 0, dz: -1.15, facing: 'south', action: 'planning.smallRoundMeetingTablePlan', animationId: 'meeting-sit-talk', roles: ['seat', 'use'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-east', slotId: 'seat-east', activationSpotId: 'seat-east', approachSpotId: 'approach-east', exitSpotId: 'approach-east', dx: 1.15, dz: 0, facing: 'west', action: 'planning.smallRoundMeetingTableTalk', animationId: 'meeting-sit-talk', roles: ['seat', 'use'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-south', slotId: 'seat-south', activationSpotId: 'seat-south', approachSpotId: 'approach-south', exitSpotId: 'approach-south', dx: 0, dz: 1.15, facing: 'north', action: 'planning.smallRoundMeetingTablePlan', animationId: 'meeting-sit-talk', roles: ['seat', 'use'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'seat-west', slotId: 'seat-west', activationSpotId: 'seat-west', approachSpotId: 'approach-west', exitSpotId: 'approach-west', dx: -1.15, dz: 0, facing: 'east', action: 'planning.smallRoundMeetingTableTalk', animationId: 'meeting-sit-talk', roles: ['seat', 'use'], capacityKind: 'exclusive', capacity: 1 },
   ],
   checkoutCounter: [
     { id: 'customer', dx: 0, dz: 0.94, facing: 'north', action: 'life.checkoutPurchase', roles: ['use', 'checkout', 'customer'], capacity: 1, standingUseSlotId: 'customer', activationSpotId: 'customer' },
@@ -45208,16 +46022,32 @@ const FURNITURE_INTERACTION_SPOTS = {
     { id: 'adjust-front', dx: 0.36, dz: 0.56, facing: 'north', action: 'life.adjustCurtains', roles: ['use', 'inspect'], capacity: 1 },
   ],
   meetingTable: [
-    { id: 'seat-n1', dx: -1.65, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: ['seat', 'meeting'], capacity: 1 },
-    { id: 'seat-n2', dx: -0.82, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: ['seat', 'meeting'], capacity: 1 },
-    { id: 'seat-n3', dx: 0, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: ['seat', 'meeting'], capacity: 1 },
-    { id: 'seat-n4', dx: 0.82, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: ['seat', 'meeting'], capacity: 1 },
-    { id: 'seat-n5', dx: 1.65, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: ['seat', 'meeting'], capacity: 1 },
-    { id: 'seat-s1', dx: -1.65, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: ['seat', 'meeting'], capacity: 1 },
-    { id: 'seat-s2', dx: -0.82, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: ['seat', 'meeting'], capacity: 1 },
-    { id: 'seat-s3', dx: 0, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: ['seat', 'meeting'], capacity: 1 },
-    { id: 'seat-s4', dx: 0.82, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: ['seat', 'meeting'], capacity: 1 },
-    { id: 'seat-s5', dx: 1.65, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: ['seat', 'meeting'], capacity: 1 },
+    { id: 'seat-n1', slotId: 'seat-n1', activationSpotId: 'seat-n1', dx: -1.65, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: ['seat', 'meeting'], capacityKind: 'exclusive', capacity: 1, approachSpotId: 'approach-n1', exitSpotId: 'approach-n1' },
+    { id: 'seat-n2', slotId: 'seat-n2', activationSpotId: 'seat-n2', dx: -0.82, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: ['seat', 'meeting'], capacityKind: 'exclusive', capacity: 1, approachSpotId: 'approach-n2', exitSpotId: 'approach-n2' },
+    { id: 'seat-n3', slotId: 'seat-n3', activationSpotId: 'seat-n3', dx: 0, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: ['seat', 'meeting'], capacityKind: 'exclusive', capacity: 1, approachSpotId: 'approach-n3', exitSpotId: 'approach-n3' },
+    { id: 'seat-n4', slotId: 'seat-n4', activationSpotId: 'seat-n4', dx: 0.82, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: ['seat', 'meeting'], capacityKind: 'exclusive', capacity: 1, approachSpotId: 'approach-n4', exitSpotId: 'approach-n4' },
+    { id: 'seat-n5', slotId: 'seat-n5', activationSpotId: 'seat-n5', dx: 1.65, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: ['seat', 'meeting'], capacityKind: 'exclusive', capacity: 1, approachSpotId: 'approach-n5', exitSpotId: 'approach-n5' },
+    { id: 'seat-s1', slotId: 'seat-s1', activationSpotId: 'seat-s1', dx: -1.65, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: ['seat', 'meeting'], capacityKind: 'exclusive', capacity: 1, approachSpotId: 'approach-s1', exitSpotId: 'approach-s1' },
+    { id: 'seat-s2', slotId: 'seat-s2', activationSpotId: 'seat-s2', dx: -0.82, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: ['seat', 'meeting'], capacityKind: 'exclusive', capacity: 1, approachSpotId: 'approach-s2', exitSpotId: 'approach-s2' },
+    { id: 'seat-s3', slotId: 'seat-s3', activationSpotId: 'seat-s3', dx: 0, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: ['seat', 'meeting'], capacityKind: 'exclusive', capacity: 1, approachSpotId: 'approach-s3', exitSpotId: 'approach-s3' },
+    { id: 'seat-s4', slotId: 'seat-s4', activationSpotId: 'seat-s4', dx: 0.82, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: ['seat', 'meeting'], capacityKind: 'exclusive', capacity: 1, approachSpotId: 'approach-s4', exitSpotId: 'approach-s4' },
+    { id: 'seat-s5', slotId: 'seat-s5', activationSpotId: 'seat-s5', dx: 1.65, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: ['seat', 'meeting'], capacityKind: 'exclusive', capacity: 1, approachSpotId: 'approach-s5', exitSpotId: 'approach-s5' },
+    { id: 'approach-n1', dx: -1.65, dz: -2.18, facing: 'south', action: 'planning.meeting', roles: ['approach', 'dismount', 'exit'] },
+    { id: 'approach-n2', dx: -0.82, dz: -2.18, facing: 'south', action: 'planning.meeting', roles: ['approach', 'dismount', 'exit'] },
+    { id: 'approach-n3', dx: 0, dz: -2.18, facing: 'south', action: 'planning.meeting', roles: ['approach', 'dismount', 'exit'] },
+    { id: 'approach-n4', dx: 0.82, dz: -2.18, facing: 'south', action: 'planning.meeting', roles: ['approach', 'dismount', 'exit'] },
+    { id: 'approach-n5', dx: 1.65, dz: -2.18, facing: 'south', action: 'planning.meeting', roles: ['approach', 'dismount', 'exit'] },
+    { id: 'approach-s1', dx: -1.65, dz: 2.18, facing: 'north', action: 'planning.meeting', roles: ['approach', 'dismount', 'exit'] },
+    { id: 'approach-s2', dx: -0.82, dz: 2.18, facing: 'north', action: 'planning.meeting', roles: ['approach', 'dismount', 'exit'] },
+    { id: 'approach-s3', dx: 0, dz: 2.18, facing: 'north', action: 'planning.meeting', roles: ['approach', 'dismount', 'exit'] },
+    { id: 'approach-s4', dx: 0.82, dz: 2.18, facing: 'north', action: 'planning.meeting', roles: ['approach', 'dismount', 'exit'] },
+    { id: 'approach-s5', dx: 1.65, dz: 2.18, facing: 'north', action: 'planning.meeting', roles: ['approach', 'dismount', 'exit'] },
+    { id: 'stand-west-1', slotId: 'stand-west-1', activationSpotId: 'stand-west-1', dx: -2.70, dz: -0.62, facing: 'east', action: 'planning.meeting', roles: ['meeting', 'stand', 'standing'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'stand-west-2', slotId: 'stand-west-2', activationSpotId: 'stand-west-2', dx: -2.70, dz: 0, facing: 'east', action: 'planning.meeting', roles: ['meeting', 'stand', 'standing'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'stand-west-3', slotId: 'stand-west-3', activationSpotId: 'stand-west-3', dx: -2.70, dz: 0.62, facing: 'east', action: 'planning.meeting', roles: ['meeting', 'stand', 'standing'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'stand-east-1', slotId: 'stand-east-1', activationSpotId: 'stand-east-1', dx: 2.70, dz: -0.62, facing: 'west', action: 'planning.meeting', roles: ['meeting', 'stand', 'standing'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'stand-east-2', slotId: 'stand-east-2', activationSpotId: 'stand-east-2', dx: 2.70, dz: 0, facing: 'west', action: 'planning.meeting', roles: ['meeting', 'stand', 'standing'], capacityKind: 'exclusive', capacity: 1 },
+    { id: 'stand-east-3', slotId: 'stand-east-3', activationSpotId: 'stand-east-3', dx: 2.70, dz: 0.62, facing: 'west', action: 'planning.meeting', roles: ['meeting', 'stand', 'standing'], capacityKind: 'exclusive', capacity: 1 },
   ],
   pingpong: [
     { id: 'player-left', dx: -1.82, dz: 0, facing: 'east', action: 'life.playPingPong', roles: ['use', 'play'], capacity: 1, standingUseSlotId: 'player-left', activationSpotId: 'player-left' },
@@ -49648,6 +50478,81 @@ function getOutdoorPlacedNodeDefaults(type) {
   return defaultsByType[normalized] || { nodeType: 'browse', roles: ['inspect', 'use'] };
 }
 
+function initializeOutdoorPlacedTableNode(node, type) {
+  if (!node || !getTableSeatingConfig(type)) return node;
+  node.reservation = null;
+  node.activeUse = { state: 'idle', mode: type === 'picnicTable' ? 'open-picnic-table' : 'open-outdoor-cafe-table', activeSeats: {} };
+  node.objectUseSeats = { reservations: [] };
+  node.capacity = { concurrentUsers: 4, seated: 4, surfaceItems: 2 };
+  node.tableState = {
+    seats: 4,
+    activeSeatIds: [],
+    reservedSeatIds: [],
+    surfaceItems: 0,
+    temporaryItemSurfaceCount: 0,
+    acceptsTemporary: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich', 'Vending Snack / Drink', 'Chilled Snack', 'Food Truck Order'],
+    lastAction: null,
+    persistentOutdoorNode: true,
+    cleanupOnReload: true,
+  };
+  if (type === 'outdoorCafeTable') node.outdoorCafeTableColors = normalizeMultiSeatFurnitureColors('outdoorCafeTable');
+  const seatSpotIds = type === 'picnicTable'
+    ? ['seat-north-left', 'seat-north-right', 'seat-south-left', 'seat-south-right']
+    : ['seat-north', 'seat-south', 'seat-east', 'seat-west'];
+  const approachSpotIds = type === 'picnicTable'
+    ? ['approach-north', 'approach-south']
+    : ['approach-north', 'approach-south', 'approach-east', 'approach-west'];
+  node.lifecycle = {
+    ...(node.lifecycle || {}),
+    stationary: true,
+    carryable: false,
+    temporary: false,
+    persistsUntilDeleted: true,
+    surfaceStatePath: 'tableState.surfaceItems',
+    acceptsTemporary: true,
+    routing: {
+      seatSpotIds,
+      approachSpotIds,
+      dropOffSpotIds: type === 'picnicTable' ? ['dropoff-tabletop-left', 'dropoff-tabletop-right'] : ['dropoff-tabletop'],
+      interaction: 'four independent seated positions with transformed approach, dock, facing, and dismount targets',
+    },
+  };
+  return node;
+}
+
+function initializeOutdoorPlacedParkBenchNode(node, type) {
+  if (!node || type !== 'parkBench') return node;
+  node.reservation = null;
+  node.activeUse = { state: 'idle', mode: 'open-park-bench', activeSeats: {} };
+  node.objectUseSeats = { reservations: [] };
+  node.capacity = { concurrentUsers: 3, seated: 3 };
+  node.benchState = {
+    status: 'open',
+    mode: 'open-park-bench',
+    seats: 3,
+    activeSeatIds: [],
+    reservedSeatIds: [],
+    lastAction: null,
+    persistentOutdoorNode: true,
+    lifecycle: 'stationary-non-carryable-persistent-solid-park-bench',
+  };
+  node.parkBenchColors = normalizeMultiSeatFurnitureColors('parkBench');
+  node.lifecycle = {
+    ...(node.lifecycle || {}),
+    stationary: true,
+    carryable: false,
+    temporary: false,
+    persistsUntilDeleted: true,
+    colorProperty: 'parkBenchColors',
+    routing: {
+      seatSpotIds: ['seat-left', 'seat-center', 'seat-right'],
+      approachSpotIds: ['stand-left', 'stand-center', 'stand-right'],
+      interaction: 'three independently spaced seats with matching transformed approach, dock, facing, and dismount targets',
+    },
+  };
+  return node;
+}
+
 function placeOutdoorNodeAt(building, localX, localZ, halfW = 0.5, halfD = 0.5) {
   if (!isOutsideSpaceBuilding(building) || !_furniturePlacementType) return;
   const type = normalizeObjectCatalogId(_furniturePlacementType) || _furniturePlacementType;
@@ -49683,6 +50588,8 @@ function placeOutdoorNodeAt(building, localX, localZ, halfW = 0.5, halfD = 0.5) 
     persistsUntilDeleted: true,
     lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true },
   };
+  initializeOutdoorPlacedTableNode(node, type);
+  initializeOutdoorPlacedParkBenchNode(node, type);
   building.outdoorArea.nodes.push(node);
   const nodeIndex = building.outdoorArea.nodes.length - 1;
   ensurePlacedObjectActionTargets(building, node, { collection: 'outdoor-node', index: nodeIndex, assetType: type });
@@ -49932,7 +50839,7 @@ function placeFurnitureAt(worldX, worldZ) {
 
   // Save LOCAL coordinates + floor to building config
   const placedFurniture = { type: _furniturePlacementType, x: finalLocalX, z: finalLocalZ, rotation: 0, floor, buildingFloor: floor };
-  if (_furniturePlacementType === 'couch' || _furniturePlacementType === 'sectionalSofa' || _furniturePlacementType === 'loveseat' || _furniturePlacementType === 'armchair' || _furniturePlacementType === 'hallwayBench' || _furniturePlacementType === 'interiorDoor' || _furniturePlacementType === 'barStool' || _furniturePlacementType === 'diningChair' || _furniturePlacementType === 'patioChair' || _furniturePlacementType === 'conferenceChair' || _furniturePlacementType === 'barberChair' || _furniturePlacementType === 'salonMirrorStation' || _furniturePlacementType === 'bed' || _furniturePlacementType === 'dresser' || _furniturePlacementType === 'wardrobe' || _furniturePlacementType === 'nightstand' || _furniturePlacementType === 'sideTable' || _furniturePlacementType === 'tvStand' || _furniturePlacementType === 'mirror' || _furniturePlacementType === 'clinicBed' || _furniturePlacementType === 'examChair' || _furniturePlacementType === 'toolCart' || _furniturePlacementType === 'workbench' || _furniturePlacementType === 'storageBoxes' || _furniturePlacementType === 'serverRack' || _furniturePlacementType === 'diagnosticStation' || _furniturePlacementType === 'medicalSupplyCabinet' || _furniturePlacementType === 'supplyCabinet' || _furniturePlacementType === 'clothingRack' || _furniturePlacementType === 'displayMannequin' || _furniturePlacementType === 'displayCase' || _furniturePlacementType === 'shopShelf' || _furniturePlacementType === 'accessoryDisplayStand' || _furniturePlacementType === 'curtains' || _furniturePlacementType === 'wallArt' || _furniturePlacementType === 'menuBoard' || _furniturePlacementType === 'counter' || _furniturePlacementType === 'kitchenIsland' || _furniturePlacementType === 'receptionDesk' || _furniturePlacementType === 'cafeCounter' || _furniturePlacementType === 'smallCafeTable' || _furniturePlacementType === 'outdoorCafeTable' || _furniturePlacementType === 'picnicTable' || _furniturePlacementType === 'patioTable' || _furniturePlacementType === 'smallRoundMeetingTable' || _furniturePlacementType === 'checkoutCounter' || _furniturePlacementType === 'checkoutRegister' || _furniturePlacementType === 'outdoorTrashCan' || _furniturePlacementType === 'waterCooler' || _furniturePlacementType === 'coffeeMachine' || _furniturePlacementType === 'countertopCoffeeMachine' || _furniturePlacementType === 'vending' || _furniturePlacementType === 'fridge' || _furniturePlacementType === 'grill' || _furniturePlacementType === 'busStop' || _furniturePlacementType === 'crosswalkNode' || _furniturePlacementType === 'pathNode' || _furniturePlacementType === 'parkLamp' || _furniturePlacementType === 'flowerBed' || _furniturePlacementType === 'microwave' || _furniturePlacementType === 'coffeePickupShelf' || _furniturePlacementType === 'pantryShelf' || _furniturePlacementType === 'arcadeMachine' || _furniturePlacementType === 'gamingStation' || _furniturePlacementType === 'laptopMonitorProps' || _furniturePlacementType === 'standingDesk' || _furniturePlacementType === 'draftingTable' || _furniturePlacementType === 'teachingPodium' || _furniturePlacementType === 'treadmill' || _furniturePlacementType === 'trainingMat' || _furniturePlacementType === 'dumbbellRack' || _furniturePlacementType === 'gymBench' || _furniturePlacementType === 'outdoorExerciseStation' || _furniturePlacementType === 'playgroundSlide' || _furniturePlacementType === 'playgroundSwing' || _furniturePlacementType === 'pondDock' || _furniturePlacementType === 'outdoorStage' || _furniturePlacementType === 'pingpong' || _furniturePlacementType === 'poolTable') {
+  if (_furniturePlacementType === 'couch' || _furniturePlacementType === 'sectionalSofa' || _furniturePlacementType === 'loveseat' || _furniturePlacementType === 'armchair' || _furniturePlacementType === 'hallwayBench' || _furniturePlacementType === 'interiorDoor' || _furniturePlacementType === 'barStool' || _furniturePlacementType === 'diningChair' || _furniturePlacementType === 'patioChair' || _furniturePlacementType === 'conferenceChair' || _furniturePlacementType === 'barberChair' || _furniturePlacementType === 'salonMirrorStation' || _furniturePlacementType === 'bed' || _furniturePlacementType === 'dresser' || _furniturePlacementType === 'wardrobe' || _furniturePlacementType === 'nightstand' || _furniturePlacementType === 'sideTable' || _furniturePlacementType === 'tvStand' || _furniturePlacementType === 'mirror' || _furniturePlacementType === 'clinicBed' || _furniturePlacementType === 'examChair' || _furniturePlacementType === 'toolCart' || _furniturePlacementType === 'workbench' || _furniturePlacementType === 'storageBoxes' || _furniturePlacementType === 'serverRack' || _furniturePlacementType === 'diagnosticStation' || _furniturePlacementType === 'medicalSupplyCabinet' || _furniturePlacementType === 'supplyCabinet' || _furniturePlacementType === 'clothingRack' || _furniturePlacementType === 'displayMannequin' || _furniturePlacementType === 'displayCase' || _furniturePlacementType === 'shopShelf' || _furniturePlacementType === 'accessoryDisplayStand' || _furniturePlacementType === 'curtains' || _furniturePlacementType === 'wallArt' || _furniturePlacementType === 'menuBoard' || _furniturePlacementType === 'counter' || _furniturePlacementType === 'kitchenIsland' || _furniturePlacementType === 'receptionDesk' || _furniturePlacementType === 'cafeCounter' || _furniturePlacementType === 'meetingTable' || _furniturePlacementType === 'diningTable' || _furniturePlacementType === 'smallCafeTable' || _furniturePlacementType === 'outdoorCafeTable' || _furniturePlacementType === 'picnicTable' || _furniturePlacementType === 'patioTable' || _furniturePlacementType === 'smallRoundMeetingTable' || _furniturePlacementType === 'checkoutCounter' || _furniturePlacementType === 'checkoutRegister' || _furniturePlacementType === 'outdoorTrashCan' || _furniturePlacementType === 'waterCooler' || _furniturePlacementType === 'coffeeMachine' || _furniturePlacementType === 'countertopCoffeeMachine' || _furniturePlacementType === 'vending' || _furniturePlacementType === 'fridge' || _furniturePlacementType === 'grill' || _furniturePlacementType === 'busStop' || _furniturePlacementType === 'crosswalkNode' || _furniturePlacementType === 'pathNode' || _furniturePlacementType === 'parkLamp' || _furniturePlacementType === 'flowerBed' || _furniturePlacementType === 'microwave' || _furniturePlacementType === 'coffeePickupShelf' || _furniturePlacementType === 'pantryShelf' || _furniturePlacementType === 'arcadeMachine' || _furniturePlacementType === 'gamingStation' || _furniturePlacementType === 'laptopMonitorProps' || _furniturePlacementType === 'standingDesk' || _furniturePlacementType === 'draftingTable' || _furniturePlacementType === 'teachingPodium' || _furniturePlacementType === 'treadmill' || _furniturePlacementType === 'trainingMat' || _furniturePlacementType === 'dumbbellRack' || _furniturePlacementType === 'gymBench' || _furniturePlacementType === 'outdoorExerciseStation' || _furniturePlacementType === 'playgroundSlide' || _furniturePlacementType === 'playgroundSwing' || _furniturePlacementType === 'pondDock' || _furniturePlacementType === 'outdoorStage' || _furniturePlacementType === 'pingpong' || _furniturePlacementType === 'poolTable') {
     placedFurniture.stationary = true;
     placedFurniture.carryable = false;
     placedFurniture.temporary = false;
@@ -49960,6 +50867,8 @@ function placeFurnitureAt(worldX, worldZ) {
       counter: 'stationary-persistent-kitchen-counter-with-appliance-slots',
       kitchenIsland: 'stationary-persistent-kitchen-island',
       cafeCounter: 'stationary-persistent-cafe-service-counter',
+      meetingTable: 'stationary-persistent-sixteen-position-meeting-table',
+      diningTable: 'stationary-persistent-four-seat-dining-table',
       smallCafeTable: 'stationary-persistent-small-cafe-table',
       outdoorCafeTable: 'stationary-non-carryable-persistent-solid-outdoor-cafe-table',
       picnicTable: 'stationary-non-carryable-persistent-solid-picnic-table',
@@ -50228,23 +51137,43 @@ function placeFurnitureAt(worldX, worldZ) {
       placedFurniture.reservation = null;
       placedFurniture.serviceState = { customer: null, worker: null, mode: 'open' };
       placedFurniture.activeUse = { state: 'idle', mode: 'open-counter' };
+    } else if (_furniturePlacementType === 'meetingTable') {
+      const seatSpotIds = ['seat-n1', 'seat-n2', 'seat-n3', 'seat-n4', 'seat-n5', 'seat-s1', 'seat-s2', 'seat-s3', 'seat-s4', 'seat-s5'];
+      const approachSpotIds = ['approach-n1', 'approach-n2', 'approach-n3', 'approach-n4', 'approach-n5', 'approach-s1', 'approach-s2', 'approach-s3', 'approach-s4', 'approach-s5'];
+      const standingSpotIds = ['stand-west-1', 'stand-west-2', 'stand-west-3', 'stand-east-1', 'stand-east-2', 'stand-east-3'];
+      placedFurniture.reservation = null;
+      placedFurniture.activeUse = { state: 'idle', mode: 'open-meeting', activeSeats: {} };
+      placedFurniture.meetingTableColors = normalizeMultiSeatFurnitureColors('meetingTable');
+      placedFurniture.capacity = { seated: 10, standing: 6, total: 16 };
+      placedFurniture.tableState = { status: 'open', seats: 10, standingSpots: 6, activeSeatIds: [], reservedSeatIds: [], activeStandingSpotIds: [], reservedStandingSpotIds: [], meetingMode: 'open', lastAction: null, persistentFurniture: true };
+      placedFurniture.actionLocations = (FURNITURE_INTERACTION_SPOTS.meetingTable || []).map(location => ({ ...location, roles: [...(location.roles || [])] }));
+      placedFurniture.lifecycle.routing = { seatSpotIds, approachSpotIds, standingSpotIds, interaction: 'reserve-one-exclusive-seat-per-attendee-then-use-six-exclusive-standing-overflow-points-at-the-table-ends' };
+    } else if (_furniturePlacementType === 'diningTable') {
+      placedFurniture.reservation = null;
+      placedFurniture.activeUse = { state: 'idle', mode: 'open-dining-table' };
+      placedFurniture.diningTableColors = normalizeMultiSeatFurnitureColors('diningTable');
+      placedFurniture.tableState = { seats: 4, activeSeatIds: [], reservedSeatIds: [], surfaceItems: 0, lastAction: null, persistentFurniture: true };
+      placedFurniture.lifecycle.routing = { seatSpotIds: ['seat-north', 'seat-south', 'seat-east', 'seat-west'], approachSpotIds: ['approach-north', 'approach-south', 'approach-east', 'approach-west'], interaction: 'route-and-dismount-through-the-approach-point-corresponding-to-each-independent-seat' };
     } else if (_furniturePlacementType === 'smallCafeTable') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'open-table' };
-      placedFurniture.tableState = { seats: 4, surfaceItems: 0, acceptsTemporary: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich'], lastAction: null };
+      placedFurniture.smallCafeTableColors = normalizeMultiSeatFurnitureColors('smallCafeTable');
+      placedFurniture.tableState = { seats: 4, activeSeatIds: [], reservedSeatIds: [], surfaceItems: 0, acceptsTemporary: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich'], lastAction: null };
       placedFurniture.lifecycle.acceptsTemporary = { catalogId: 'temporaryFood', labels: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich'], carryable: true, attachPoint: 'right-hand', temporary: true };
+      placedFurniture.lifecycle.routing = { seatSpotIds: ['seat-north', 'seat-south', 'seat-east', 'seat-west'], approachSpotIds: ['approach-north', 'approach-south', 'approach-east', 'approach-west'], interaction: 'route-and-dismount-through-the-approach-point-corresponding-to-each-independent-seat' };
     } else if (_furniturePlacementType === 'outdoorCafeTable') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'open-outdoor-cafe-table' };
-      placedFurniture.tableState = { seats: 4, surfaceItems: 0, temporaryItemSurfaceCount: 0, acceptsTemporary: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich', 'Vending Snack / Drink', 'Chilled Snack', 'Food Truck Order'], lastAction: null, persistentFurniture: true, cleanupOnReload: true };
+      placedFurniture.outdoorCafeTableColors = normalizeMultiSeatFurnitureColors('outdoorCafeTable');
+      placedFurniture.tableState = { seats: 4, activeSeatIds: [], reservedSeatIds: [], surfaceItems: 0, temporaryItemSurfaceCount: 0, acceptsTemporary: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich', 'Vending Snack / Drink', 'Chilled Snack', 'Food Truck Order'], lastAction: null, persistentFurniture: true, cleanupOnReload: true };
       placedFurniture.lifecycle.acceptsTemporary = { catalogId: 'temporaryFood', labels: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich', 'Vending Snack / Drink', 'Chilled Snack', 'Food Truck Order'], carryable: true, attachPoint: 'right-hand', temporary: true, surfaceStatePath: 'tableState.surfaceItems' };
-      placedFurniture.lifecycle.routing = { seatSpotIds: ['seat-north', 'seat-south', 'seat-east', 'seat-west'], dropOffSpotId: 'dropoff-tabletop', interaction: 'route-to-exterior-seat-or-tabletop-through-setAgentTarget-dynamic-exterior-routing' };
+      placedFurniture.lifecycle.routing = { seatSpotIds: ['seat-north', 'seat-south', 'seat-east', 'seat-west'], approachSpotIds: ['approach-north', 'approach-south', 'approach-east', 'approach-west'], dropOffSpotId: 'dropoff-tabletop', interaction: 'route-and-dismount-through-the-approach-point-corresponding-to-each-independent-exterior-seat' };
     } else if (_furniturePlacementType === 'picnicTable') {
       placedFurniture.reservation = null;
-      placedFurniture.activeUse = { state: 'idle', mode: 'open-picnic-table' };
-      placedFurniture.tableState = { seats: 4, surfaceItems: 0, temporaryItemSurfaceCount: 0, acceptsTemporary: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich', 'Vending Snack / Drink', 'Chilled Snack', 'Food Truck Order'], lastAction: null, persistentFurniture: true, cleanupOnReload: true };
+      placedFurniture.activeUse = { state: 'idle', mode: 'open-picnic-table', activeSeats: {} };
+      placedFurniture.tableState = { seats: 4, activeSeatIds: [], reservedSeatIds: [], surfaceItems: 0, temporaryItemSurfaceCount: 0, acceptsTemporary: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich', 'Vending Snack / Drink', 'Chilled Snack', 'Food Truck Order'], lastAction: null, persistentFurniture: true, cleanupOnReload: true };
       placedFurniture.lifecycle.acceptsTemporary = { catalogId: 'temporaryFood', labels: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich', 'Vending Snack / Drink', 'Chilled Snack', 'Food Truck Order'], carryable: true, attachPoint: 'right-hand', temporary: true, surfaceStatePath: 'tableState.surfaceItems' };
-      placedFurniture.lifecycle.routing = { seatSpotIds: ['seat-north-left', 'seat-north-right', 'seat-south-left', 'seat-south-right'], dropOffSpotIds: ['dropoff-tabletop-left', 'dropoff-tabletop-right'], interaction: 'route-to-exterior-bench-seat-or-tabletop-through-setAgentTarget-dynamic-exterior-routing' };
+      placedFurniture.lifecycle.routing = { seatSpotIds: ['seat-north-left', 'seat-north-right', 'seat-south-left', 'seat-south-right'], approachSpotIds: ['approach-north', 'approach-south'], dropOffSpotIds: ['dropoff-tabletop-left', 'dropoff-tabletop-right'], interaction: 'route-and-dismount through each bench side while preserving four independent seated positions' };
     } else if (_furniturePlacementType === 'patioTable') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'open-outdoor-table' };
@@ -50254,7 +51183,9 @@ function placeFurnitureAt(worldX, worldZ) {
     } else if (_furniturePlacementType === 'smallRoundMeetingTable') {
       placedFurniture.reservation = null;
       placedFurniture.activeUse = { state: 'idle', mode: 'open-compact-meeting' };
-      placedFurniture.tableState = { seats: 4, meetingMode: 'open', lastAction: null, persistentFurniture: true };
+      placedFurniture.smallRoundMeetingTableColors = normalizeMultiSeatFurnitureColors('smallRoundMeetingTable');
+      placedFurniture.tableState = { seats: 4, activeSeatIds: [], reservedSeatIds: [], meetingMode: 'open', lastAction: null, persistentFurniture: true };
+      placedFurniture.lifecycle.routing = { seatSpotIds: ['seat-north', 'seat-south', 'seat-east', 'seat-west'], approachSpotIds: ['approach-north', 'approach-south', 'approach-east', 'approach-west'], interaction: 'route-and-dismount-through-the-approach-point-corresponding-to-each-independent-seat' };
     } else if (_furniturePlacementType === 'checkoutCounter') {
       placedFurniture.reservation = null;
       placedFurniture.serviceState = { customer: null, cashier: null, mode: 'open' };
@@ -50472,7 +51403,7 @@ function placeFurnitureAt(worldX, worldZ) {
   // Place in 3D using LOCAL coordinates (mesh is child of building group)
   const meshBuilder = FURNITURE_MESH_BUILDERS[_furniturePlacementType];
   if (!meshBuilder) return;
-  const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'conferenceChair', 'hallwayBench', 'parkBench', 'dumbbellRack', 'sink', 'fridge']);
+  const configurableMultiSeatTypes = new Set(['couch', 'sectionalSofa', 'loveseat', 'armchair', 'conferenceChair', 'meetingTable', 'hallwayBench', 'parkBench', 'dumbbellRack', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'smallRoundMeetingTable', 'sink', 'fridge']);
   const mesh = configurableMultiSeatTypes.has(_furniturePlacementType)
     ? meshBuilder(finalLocalX, finalLocalZ, T, placedFurniture)
     : meshBuilder(finalLocalX, finalLocalZ, T);
@@ -50749,6 +51680,10 @@ function getSmallRoundMeetingTableObjectKey(buildingId, index) {
   return getTableSeatObjectKey(buildingId, index, 'smallRoundMeetingTable');
 }
 
+function getMeetingTableObjectKey(buildingId, index) {
+  return getTableSeatObjectKey(buildingId, index, 'meetingTable');
+}
+
 function getDiningTableObjectKey(buildingId, index) {
   return getTableSeatObjectKey(buildingId, index, 'diningTable');
 }
@@ -50759,6 +51694,10 @@ function getHallwayBenchObjectKey(buildingId, index) {
 
 function getParkBenchObjectKey(buildingId, nodeId) {
   return `${buildingId}:outdoor-node:${nodeId}:parkBench`;
+}
+
+function getOutdoorMultiSeatObjectKey(buildingId, nodeId, objectType) {
+  return `${buildingId}:outdoor-node:${nodeId}:${objectType}`;
 }
 
 function getObjectUseSeatStoreForFurniture(furniture) {
@@ -51003,6 +51942,10 @@ function getSmallRoundMeetingTableObjectUseSeatStore(table) {
   return getObjectUseSeatStoreForFurniture(table);
 }
 
+function getMeetingTableObjectUseSeatStore(table) {
+  return getObjectUseSeatStoreForFurniture(table);
+}
+
 function getDiningTableObjectUseSeatStore(table) {
   return getObjectUseSeatStoreForFurniture(table);
 }
@@ -51013,6 +51956,13 @@ function getHallwayBenchObjectUseSeatStore(bench) {
 
 function getObjectUseSeatStoreForOutdoorNode(node) {
   if (!node || typeof node !== 'object') return { reservations: [] };
+  if (!Object.isExtensible(node) || Object.isFrozen(node)) {
+    return {
+      reservations: Array.isArray(node.objectUseSeats?.reservations)
+        ? [...node.objectUseSeats.reservations]
+        : [],
+    };
+  }
   if (!node.objectUseSeats || typeof node.objectUseSeats !== 'object' || Object.isFrozen(node.objectUseSeats)) node.objectUseSeats = { reservations: Array.isArray(node.objectUseSeats?.reservations) ? [...node.objectUseSeats.reservations] : [] };
   if (!Array.isArray(node.objectUseSeats.reservations)) node.objectUseSeats.reservations = [];
   else if (!Object.isExtensible(node.objectUseSeats.reservations) || Object.isFrozen(node.objectUseSeats.reservations)) node.objectUseSeats.reservations = [...node.objectUseSeats.reservations];
@@ -51040,10 +51990,18 @@ function addRuntimeFurnitureSeatOccupancy(ids, furniture, buildingId = null, ind
   }
   addSeatId(furniture.reservation?.seatId || furniture.reservation?.spotId || furniture.reservation?.activationSpotId || furniture.reservation?.interactionSpotId);
   if (buildingId === null || index === null) return ids;
-  const seatSpots = spotDefs.map(def => getFurnitureActionSpot(buildingsMap.get(buildingId), furniture, def.id)).filter(Boolean);
+  const building = buildingsMap.get(buildingId);
+  const outdoorNodeId = building?.outdoorArea?.nodes?.includes?.(furniture) ? String(furniture.id || index || '') : '';
+  const seatSpots = spotDefs.map(def => getTableObjectActionSpot(building, furniture, def.id, {
+    outdoorNodeId,
+    actionId: def.action || null,
+  })).filter(Boolean);
   for (const agent of agentsList) {
     const activity = agent?._idleActivity || null;
-    const matchingActivity = activity && prefixes.some(prefix => String(activity.kind || '').startsWith(prefix)) && activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index);
+    const matchingObjectIndex = activity?.outdoorNodeId
+      ? String(activity.outdoorNodeId) === String(index)
+      : Number(activity?.furnitureIndex) === Number(index);
+    const matchingActivity = activity && prefixes.some(prefix => String(activity.kind || '').startsWith(prefix)) && activity.buildingId === buildingId && matchingObjectIndex;
     if (matchingActivity) addSeatId(activity.seatId || activity.activationSpotId || activity.spotId || activity.interactionSpotId);
     if (matchingActivity && !(activity.seatId || activity.activationSpotId || activity.spotId) && activity.dockTarget && seatSpots.length) {
       const nearest = seatSpots.find(spot => Math.hypot((activity.dockTarget.x || 0) - spot.apiX, (activity.dockTarget.y || 0) - spot.apiZ) <= Math.max(API_TILE * 0.55, 8));
@@ -51101,6 +52059,50 @@ function getOutdoorNodeSpotFacingAngle(building, node, spotId, facing = 'north')
   const from = getBuildingWorldPoint(building, local.x + rotatedSpot.x, local.z + rotatedSpot.z);
   const to = getBuildingWorldPoint(building, local.x + rotatedSpot.x + rotatedFacing.x, local.z + rotatedSpot.z + rotatedFacing.z);
   return Math.atan2((to.x - from.x) * API_TILE, (to.z - from.z) * API_TILE);
+}
+
+function getTableObjectActionSpot(building, table, spotId, { outdoorNodeId = null, actionId = null } = {}) {
+  if (!building || !table || !spotId) return null;
+  if (!outdoorNodeId) return getFurnitureActionSpot(building, table, spotId);
+  const tableType = getOutdoorNodeAssetType(table);
+  const definition = (FURNITURE_INTERACTION_SPOTS[tableType] || []).find(item => item.id === spotId) || null;
+  if (!definition) return null;
+  const runtime = getOutdoorNodeSpotRuntimeTarget(
+    building,
+    table,
+    spotId,
+    actionId || definition.action || null,
+    { preferredSpotId: spotId },
+  );
+  if (!runtime?.target) return null;
+  const local = getOutdoorNodeLocalPoint(table, building);
+  const rotationDeg = Number(table.rotation ?? table.rotationDeg ?? 0) || 0;
+  const offset = rotateLocalOffset(Number(definition.dx || 0), Number(definition.dz || 0), rotationDeg);
+  return {
+    ...definition,
+    building,
+    furniture: table,
+    outdoorNodeId,
+    spotId,
+    floor: runtime.target.floor || 1,
+    localX: local.x + offset.x,
+    localZ: local.z + offset.z,
+    apiX: runtime.target.x,
+    apiZ: runtime.target.y,
+    faceAngle: runtime.target.faceAngle ?? getOutdoorNodeSpotFacingAngle(building, table, spotId, definition.facing || 'north'),
+  };
+}
+
+function resolveTableObjectForActivity(activity = null) {
+  const buildingId = String(activity?.buildingId || '').trim();
+  const building = buildingId ? buildingsMap.get(buildingId) || null : null;
+  if (!building || !activity) return { building, table: null, tableType: '', outdoorNodeId: null };
+  const outdoorNodeId = String(activity.outdoorNodeId || '').trim();
+  const table = outdoorNodeId
+    ? getRawOutdoorNodeById(building, outdoorNodeId)
+    : building.interior?.furniture?.[activity.furnitureIndex] || null;
+  const tableType = outdoorNodeId ? getOutdoorNodeAssetType(table || {}) : String(table?.type || '');
+  return { building, table, tableType, outdoorNodeId: outdoorNodeId || null };
 }
 
 function getActiveParkBenchReservationSeatIds(benchNode, buildingId = null, nodeId = null) {
@@ -51201,7 +52203,10 @@ function getActiveHallwayBenchReservationSeatIds(bench, buildingId = null, index
     for (const agent of agentsList) {
       const activity = agent?._idleActivity || null;
       if (!activity || !String(activity.kind || '').startsWith('hallway-bench-')) continue;
-      if (activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index)) {
+      const matchingObjectIndex = activity.outdoorNodeId
+        ? String(activity.outdoorNodeId) === String(index)
+        : Number(activity.furnitureIndex) === Number(index);
+      if (activity.buildingId === buildingId && matchingObjectIndex) {
         const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
         if (isMultiSeatUseSeatId('hallwayBench', seatId)) ids.add(seatId);
       }
@@ -51887,7 +52892,10 @@ function getActiveSingleSeatChairReservationSeatIds(chair, buildingId = null, in
     for (const agent of agentsList) {
       const activity = agent?._idleActivity || null;
       if (!activity || !String(activity.kind || '').startsWith(config.prefix)) continue;
-      if (activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index)) {
+      const matchingObjectIndex = activity.outdoorNodeId
+        ? String(activity.outdoorNodeId) === String(index)
+        : Number(activity.furnitureIndex) === Number(index);
+      if (activity.buildingId === buildingId && matchingObjectIndex) {
         const activitySeatId = activity.seatId || activity.activationSpotId || activity.spotId;
         if (activitySeatId) ids.add(activitySeatId);
       }
@@ -52009,6 +53017,7 @@ function releaseBarStoolSeatUse(stool, activity, agent, reason = 'bar-stool-comp
 }
 
 const TABLE_SEATING_CONFIG = Object.freeze({
+  meetingTable: Object.freeze({ prefix: 'meeting-table', openMode: 'open-meeting', stateKey: 'tableState', objectKeyFn: getMeetingTableObjectKey, storeFn: getMeetingTableObjectUseSeatStore, defaultActionId: 'planning.meeting', capacity: 10, standingCapacity: 6, surfaceCapacity: 0 }),
   smallCafeTable: Object.freeze({ prefix: 'small-cafe-table-', openMode: 'open-table', stateKey: 'tableState', objectKeyFn: getSmallCafeTableObjectKey, storeFn: getSmallCafeTableObjectUseSeatStore, defaultActionId: 'life.eatDrinkAtSmallCafeTable', capacity: 4, surfaceCapacity: 2 }),
   outdoorCafeTable: Object.freeze({ prefix: 'outdoor-cafe-table-', openMode: 'open-outdoor-cafe-table', stateKey: 'tableState', objectKeyFn: getOutdoorCafeTableObjectKey, storeFn: getOutdoorCafeTableObjectUseSeatStore, defaultActionId: 'life.sitAtOutdoorCafeTable', capacity: 4, surfaceCapacity: 2 }),
   picnicTable: Object.freeze({ prefix: 'picnic-table-', openMode: 'open-picnic-table', stateKey: 'tableState', objectKeyFn: getPicnicTableObjectKey, storeFn: getPicnicTableObjectUseSeatStore, defaultActionId: 'life.sitAtPicnicTable', capacity: 4, surfaceCapacity: 2 }),
@@ -52041,7 +53050,10 @@ function getActiveTableSeatReservationSeatIds(table, buildingId = null, index = 
     for (const agent of agentsList) {
       const activity = agent?._idleActivity || null;
       if (!activity || !String(activity.kind || '').startsWith(config.prefix)) continue;
-      if (activity.buildingId === buildingId && Number(activity.furnitureIndex) === Number(index)) {
+      const matchingObjectIndex = activity.outdoorNodeId
+        ? String(activity.outdoorNodeId) === String(index)
+        : Number(activity.furnitureIndex) === Number(index);
+      if (activity.buildingId === buildingId && matchingObjectIndex) {
         const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
         if (seatId && !String(seatId).startsWith('dropoff-')) ids.add(seatId);
       }
@@ -52080,10 +53092,53 @@ function getTableSeatCandidates(building, table, index, { actionId = null } = {}
 }
 
 function releaseTableSeatUse(table, activity, agent, reason = 'table-seat-complete') {
-  const config = getTableSeatingConfig(table?.type);
+  const outdoorNodeId = String(activity?.outdoorNodeId || '').trim();
+  const tableType = outdoorNodeId ? getOutdoorNodeAssetType(table || {}) : table?.type;
+  const config = getTableSeatingConfig(tableType);
   if (!table || !activity || !config) return null;
   const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
   const reservationId = activity.reservationId || table.reservation?.id || null;
+  const building = activity.buildingId ? buildingsMap.get(activity.buildingId) : null;
+  const seatDefinition = (FURNITURE_INTERACTION_SPOTS[tableType] || [])
+    .find(definition => definition.id === seatId && definition.roles?.includes('seat')) || null;
+  const dismountSpotId = activity.dismountSpotId || activity.exitSpotId ||
+    table.activeUse?.dismountSpotId || table.activeUse?.exitSpotId ||
+    table.reservation?.dismountSpotId || table.reservation?.exitSpotId ||
+    seatDefinition?.exitSpotId || seatDefinition?.approachSpotId || null;
+  let dismount = null;
+  if (agent && building && dismountSpotId) {
+    const dismountSpot = getTableObjectActionSpot(building, table, dismountSpotId, {
+      outdoorNodeId,
+      actionId: activity.actionId || activity.action || config.defaultActionId,
+    });
+    if (dismountSpot) {
+      agent.x = Number(dismountSpot.apiX);
+      agent.y = Number(dismountSpot.apiZ);
+      agent._floor = Math.max(1, Number(dismountSpot.floor || agent._floor || 1) || 1);
+      agent._targetFloor = agent._floor;
+      agent._currentBuilding = building;
+      agent._manualPlacementLockUntil = 0;
+      agent._activeTableSeatAttachment = null;
+      agent._faceAngle = Number.isFinite(Number(dismountSpot.faceAngle))
+        ? Number(dismountSpot.faceAngle)
+        : agent._faceAngle;
+      if (agent._group3d && Number.isFinite(Number(agent._faceAngle))) {
+        agent._group3d.rotation.y = Number(agent._faceAngle);
+      }
+      if (agent._group3d && isPhysicsReady()) {
+        const scale = T / API_TILE;
+        teleportAgent('agent_' + agent.id, agent.x * scale, getGroundY(agent.x * scale, agent.y * scale), agent.y * scale);
+      }
+      dismount = {
+        spotId: dismountSpot.spotId || dismountSpotId,
+        seatId,
+        x: agent.x,
+        y: agent.y,
+        floor: agent._floor,
+        outsideSeat: true,
+      };
+    }
+  }
   let releaseResult = null;
   if (reservationId && seatId && !String(seatId).startsWith('dropoff-')) {
     releaseResult = releaseObjectUseSeatReservation(config.storeFn(table), {
@@ -52104,8 +53159,22 @@ function releaseTableSeatUse(table, activity, agent, reason = 'table-seat-comple
   table.activeUse = Object.keys(activeSeats).length
     ? { ...table.activeUse, activeSeats, state: 'active', lastReleasedSeatId: seatId || null, lastReleaseReason: reason }
     : { state: 'idle', mode: config.openMode, lastAgentId: agent?.id || activity.agentId || null, lastAction: activity.action || activity.actionId || activity.kind, lastReleasedSeatId: seatId || null, lastReleaseReason: reason };
-  table[config.stateKey] = { ...(table[config.stateKey] || {}), seats: config.capacity, reservedSeatIds: [...getActiveTableSeatReservationSeatIds(table)].sort(), activeSeatIds: Object.keys(activeSeats).sort(), lastReleasedSeatId: seatId || null, lastReleaseReason: reason, persistentFurniture: true };
-  return releaseResult;
+  const reservedPositionIds = [...getActiveTableSeatReservationSeatIds(table)].sort();
+  const activePositionIds = Object.keys(activeSeats).sort();
+  table[config.stateKey] = {
+    ...(table[config.stateKey] || {}),
+    seats: config.capacity,
+    standingSpots: config.standingCapacity || table[config.stateKey]?.standingSpots,
+    reservedSeatIds: reservedPositionIds.filter(id => !String(id).startsWith('stand-')),
+    activeSeatIds: activePositionIds.filter(id => !String(id).startsWith('stand-')),
+    reservedStandingSpotIds: reservedPositionIds.filter(id => String(id).startsWith('stand-')),
+    activeStandingSpotIds: activePositionIds.filter(id => String(id).startsWith('stand-')),
+    lastReleasedSeatId: seatId || null,
+    lastReleaseReason: reason,
+    persistentFurniture: !outdoorNodeId,
+    persistentOutdoorNode: Boolean(outdoorNodeId),
+  };
+  return releaseResult ? { ...releaseResult, dismount } : dismount;
 }
 
 function getArmchairOccupancyState(buildingId, index) {
@@ -53784,7 +54853,302 @@ function clearManualPlacementHoldForDrinkMachineDeskHandoff(agent, activity = nu
   return true;
 }
 
+const CONSUMABLE_DESTINATION_RADIUS_TILES = 14;
+const CONSUMABLE_DESTINATION_FURNITURE_TYPES = new Set([
+  'chair', 'couch', 'sectionalSofa', 'loveseat', 'armchair', 'hallwayBench',
+  'barStool', 'diningChair', 'patioChair',
+  'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'smallRoundMeetingTable',
+]);
+const CONSUMABLE_DESTINATION_OUTDOOR_TYPES = new Set(['parkBench', 'outdoorCafeTable', 'picnicTable']);
+const CONSUMABLE_DESTINATION_TABLE_TYPES = new Set(['diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'smallRoundMeetingTable']);
+const CONSUMABLE_USE_SPECS = Object.freeze({
+  coffee: Object.freeze({ kind: 'coffee-desk-consume', actionId: 'life.drinkCoffeeAtDesk', animationId: 'coffee-desk-sip', schedulePhase: 'coffee-carry-to-consume', sourceFamily: 'agent-life-coffee' }),
+  water: Object.freeze({ kind: 'water-desk-consume', actionId: 'life.drinkWaterAtDesk', animationId: 'water-desk-sip', schedulePhase: 'water-carry-to-consume', sourceFamily: 'agent-life-water-cooler' }),
+  vending: Object.freeze({ kind: 'vending-desk-consume', actionId: 'life.consumeVendingItemAtDesk', animationId: 'vending-desk-consume', schedulePhase: 'vending-carry-to-consume', sourceFamily: 'agent-life-vending' }),
+  fridge: Object.freeze({ kind: 'fridge-desk-consume', actionId: 'life.eatFridgeFoodAtDesk', animationId: 'fridge-desk-consume', schedulePhase: 'fridge-carry-to-consume', sourceFamily: 'agent-life-fridge' }),
+  'stove-oven': Object.freeze({ kind: 'stove-oven-desk-consume', actionId: 'life.eatStoveOvenFoodAtDesk', animationId: 'stove-oven-desk-consume', schedulePhase: 'stove-oven-carry-to-consume', sourceFamily: 'agent-life-stove-oven' }),
+  microwave: Object.freeze({ kind: 'microwave-desk-consume', actionId: 'life.eatMicrowaveFoodAtDesk', animationId: 'microwave-desk-consume', schedulePhase: 'microwave-carry-to-consume', sourceFamily: 'agent-life-microwave' }),
+});
+
+function getOutdoorConsumableSeatReservationPlan(building, node, agent, sourceActivity = null) {
+  if (!building || !node || !agent) return null;
+  const type = getOutdoorNodeAssetType(node);
+  if (!CONSUMABLE_DESTINATION_OUTDOOR_TYPES.has(type)) return null;
+  const nodeId = String(node.id || node.objectInstanceId || '').trim();
+  if (!nodeId) return null;
+  const actionId = sourceActivity?.actionId || sourceActivity?.action || 'life.consumeAtSeat';
+  let store = null;
+  let candidates = [];
+  let occupiedSeatIds = new Set();
+  if (type === 'parkBench') {
+    store = getParkBenchObjectUseSeatStore(node);
+    candidates = getParkBenchSeatCandidates(building, node, { actionId });
+    occupiedSeatIds = getActiveParkBenchReservationSeatIds(node, building.id, nodeId);
+  } else {
+    const config = getTableSeatingConfig(type);
+    if (!config) return null;
+    store = config.storeFn(node);
+    occupiedSeatIds = getActiveTableSeatReservationSeatIds(node, building.id, nodeId, type);
+    const locations = (FURNITURE_INTERACTION_SPOTS[type] || []).map(definition => {
+      if (!definition.roles?.includes('seat')) return null;
+      const spot = getTableObjectActionSpot(building, node, definition.id, { outdoorNodeId: nodeId, actionId });
+      return spot ? {
+        ...definition,
+        actionId: definition.action || actionId,
+        activationSpotId: definition.id,
+        approachSpotId: definition.approachSpotId || definition.id,
+        facingMode: 'face-center',
+        position: { x: spot.apiX, z: spot.apiZ },
+      } : null;
+    }).filter(Boolean);
+    candidates = listObjectUseSeatCandidates({
+      locations,
+      activationSpots: locations,
+      objectKey: getOutdoorMultiSeatObjectKey(building.id || 'unknown-building', nodeId, type),
+      objectType: type,
+      actionId,
+    });
+  }
+  if (!store || !candidates.length) return null;
+  const objectKey = getOutdoorMultiSeatObjectKey(building.id || 'unknown-building', nodeId, type);
+  const reserved = chooseAndReserveObjectUseSeat(store, candidates, {
+    agentId: agent.id || agent.name || 'agent',
+    agentPosition: { x: agent.x || 0, z: agent.y || 0 },
+    actionId,
+    occupiedSeatIds,
+    reservationId: `consume-seat:${objectKey}:${agent.id || agent.name || 'agent'}:${Date.now()}`,
+  });
+  if (!reserved.ok) return null;
+  const seatId = reserved.seat.seatId || reserved.seat.activationSpotId;
+  const seatSpot = getTableObjectActionSpot(building, node, seatId, { outdoorNodeId: nodeId, actionId });
+  const approachSpotId = reserved.seat.approachSpotId || seatId;
+  const approachSpot = getTableObjectActionSpot(building, node, approachSpotId, { outdoorNodeId: nodeId, actionId });
+  if (!seatSpot) {
+    releaseObjectUseSeatReservation(store, { reservationId: reserved.reservation.id, agentId: agent.id || agent.name || 'agent', seatId, terminalState: 'failed', reason: 'missing-outdoor-consume-seat' });
+    return null;
+  }
+  return {
+    targetSpot: approachSpot || seatSpot,
+    seatSpot,
+    approachSpot,
+    selectedSeat: reserved.seat,
+    reservation: reserved.reservation,
+    objectKey,
+    actionId,
+    faceAngle: seatSpot.faceAngle,
+    seatSurfaceLift: getFurnitureSeatSurfaceLift(type),
+    routeApproachTarget: approachSpot ? { x: approachSpot.apiX, y: approachSpot.apiZ, floor: approachSpot.floor, spotId: approachSpot.spotId } : null,
+    outdoorNodeId: nodeId,
+    furnitureType: type,
+    furniture: node,
+  };
+}
+
+function estimateConsumableFurnitureDistance(building, furniture, agent, outdoorNodeId = null) {
+  const type = outdoorNodeId ? getOutdoorNodeAssetType(furniture) : furniture?.type;
+  let best = Infinity;
+  for (const definition of FURNITURE_INTERACTION_SPOTS[type] || []) {
+    if (!definition.roles?.includes('seat')) continue;
+    const spot = outdoorNodeId
+      ? getTableObjectActionSpot(building, furniture, definition.id, { outdoorNodeId, actionId: definition.action })
+      : getFurnitureActionSpot(building, furniture, definition.id);
+    if (spot) best = Math.min(best, Math.hypot((agent.x || 0) - spot.apiX, (agent.y || 0) - spot.apiZ));
+  }
+  return best;
+}
+
+function chooseConsumableDestination(agent, sourceActivity = {}) {
+  const sourceBuilding = sourceActivity?.buildingId ? buildingsMap.get(sourceActivity.buildingId) : null;
+  const currentBuilding = getMovementInteriorBuildingAt(agent.x, agent.y) || agent._currentBuilding || sourceBuilding || null;
+  const building = sourceBuilding || currentBuilding;
+  const floor = building ? getAgentFloor(agent, building) : Math.max(1, Number(sourceActivity.floor || agent._floor || 1) || 1);
+  const radius = CONSUMABLE_DESTINATION_RADIUS_TILES * API_TILE;
+  const choices = [];
+  if (building) {
+    (building.interior?.furniture || []).forEach((furniture, furnitureIndex) => {
+      if (!furniture || furniture.deleted || furniture.removed || furniture.enabled === false || !CONSUMABLE_DESTINATION_FURNITURE_TYPES.has(furniture.type)) return;
+      if (getFurnitureFloor(furniture) !== floor) return;
+      const distance = estimateConsumableFurnitureDistance(building, furniture, agent);
+      if (distance <= radius) choices.push({ kind: 'interior-seat', building, furniture, furnitureIndex, distance, furnitureType: furniture.type });
+    });
+    (building.outdoorArea?.nodes || []).forEach(node => {
+      const furnitureType = getOutdoorNodeAssetType(node);
+      if (!node || node.deleted || node.removed || node.enabled === false || !CONSUMABLE_DESTINATION_OUTDOOR_TYPES.has(furnitureType)) return;
+      const nodeFloor = Math.max(1, Number(node.floor || 1) || 1);
+      if (nodeFloor !== floor) return;
+      const outdoorNodeId = String(node.id || node.objectInstanceId || '').trim();
+      if (!outdoorNodeId) return;
+      const distance = estimateConsumableFurnitureDistance(building, node, agent, outdoorNodeId);
+      if (distance <= radius) choices.push({ kind: 'outdoor-seat', building, furniture: node, outdoorNodeId, distance, furnitureType });
+    });
+  }
+  const workArrival = getAgentWorkArrivalTarget(agent);
+  const fallbackSpot = sourceBuilding ? getBuildingInteriorWorkArrivalTarget(sourceBuilding) : null;
+  const deskTarget = workArrival?.target || fallbackSpot || null;
+  const deskBuilding = workArrival?.building || sourceBuilding || null;
+  if (deskTarget && Number.isFinite(Number(deskTarget.x)) && Number.isFinite(Number(deskTarget.y))) {
+    const deskFloor = Math.max(1, Number(deskTarget.floor || workArrival?.floor || 1) || 1);
+    const verticalPenalty = deskFloor === floor && (!building || deskBuilding?.id === building.id) ? 0 : 10 * API_TILE;
+    choices.push({ kind: 'desk', building: deskBuilding, target: deskTarget, distance: Math.hypot((agent.x || 0) - deskTarget.x, (agent.y || 0) - deskTarget.y) + verticalPenalty, furnitureType: 'desk' });
+  }
+  choices.forEach(choice => { choice.score = choice.distance + Math.random() * (6 * API_TILE); });
+  choices.sort((a, b) => a.score - b.score);
+  for (const choice of choices) {
+    if (choice.kind === 'desk') return { ...choice, destinationKind: 'desk', consumePresentation: 'surface' };
+    const seatPlan = choice.kind === 'outdoor-seat'
+      ? getOutdoorConsumableSeatReservationPlan(choice.building, choice.furniture, agent, sourceActivity)
+      : getLocalIdleSeatReservationPlan(choice.building, choice.furniture, choice.furnitureIndex, agent, sourceActivity);
+    if (!seatPlan) continue;
+    const isTable = CONSUMABLE_DESTINATION_TABLE_TYPES.has(choice.furnitureType);
+    return { ...choice, seatPlan, target: seatPlan.targetSpot, destinationKind: isTable ? 'table-seat' : 'standalone-seat', consumePresentation: isTable ? 'surface' : 'handheld' };
+  }
+  return null;
+}
+
+function startConsumableUseActivity(agent, sourceActivity = {}, consumableKind = '') {
+  const spec = CONSUMABLE_USE_SPECS[consumableKind];
+  if (!agent || !spec || (!agent._carriedItem && !agent._carrying && !agent.carryItem)) return false;
+  clearManualPlacementHoldForDrinkMachineDeskHandoff(agent, sourceActivity);
+  const destination = chooseConsumableDestination(agent, sourceActivity);
+  if (!destination?.target || !Number.isFinite(Number(destination.target.x ?? destination.target.apiX)) || !Number.isFinite(Number(destination.target.y ?? destination.target.apiZ))) return false;
+  const plan = destination.seatPlan || null;
+  const target = destination.target;
+  const targetX = Number(target.x ?? target.apiX);
+  const targetY = Number(target.y ?? target.apiZ);
+  const dock = plan?.seatSpot || target;
+  const dockX = Number(dock.x ?? dock.apiX);
+  const dockY = Number(dock.y ?? dock.apiZ);
+  const targetFloor = Math.max(1, Number(target.floor || destination.target?.floor || 1) || 1);
+  const targetBuilding = destination.building || null;
+  const furnitureIndex = destination.kind === 'desk' ? (target.furnitureIndex ?? null) : (destination.furnitureIndex ?? -1);
+  const seatId = plan?.selectedSeat?.seatId || plan?.selectedSeat?.activationSpotId || null;
+  const release = releaseAgentIntent(agent, `${consumableKind}-pickup-complete-route-to-consume`, { clearRoute: true, clearLifecycle: false, releaseBy: 'object-complete' });
+  const route = setAgentTarget(agent, {
+    x: targetX,
+    y: targetY,
+    floor: targetFloor,
+    targetKind: destination.kind === 'desk' ? 'work-desk' : 'consume-seat',
+    objectKey: plan?.objectKey || null,
+    outdoorNodeId: plan?.outdoorNodeId || null,
+    actionId: spec.actionId,
+  }, targetBuilding, targetFloor, {
+    owner: 'object-action',
+    priorityName: 'explicit-object',
+    phase: 'approach',
+    object: {
+      type: 'furniture',
+      id: plan?.objectKey || target.objectInstanceId || target.objectId || `${consumableKind}-consume-${agent.id || agent.name || 'agent'}`,
+      buildingId: targetBuilding?.id || sourceActivity.buildingId || null,
+      furnitureIndex,
+      outdoorNodeId: plan?.outdoorNodeId || null,
+      objectType: destination.furnitureType,
+      actionId: spec.actionId,
+      spotId: seatId || target.spotId || target.interactionSpotId || null,
+      reservationId: plan?.reservation?.id || null,
+      preserveUntilRelease: true,
+    },
+    release: { policy: 'on-object-complete', releaseObjectReservation: Boolean(plan), releaseActiveUse: Boolean(plan) },
+    source: { family: spec.sourceFamily, functionName: 'startConsumableUseActivity', taskRef: 'virtual-world-consumable-destination' },
+    debug: { label: `${consumableKind}:consume-destination`, sourceSummary: `consume at ${destination.destinationKind}`, lastDecisionReason: 'consumable-pickup-complete' },
+  });
+  if (route?.accepted === false) {
+    if (plan?.reservation) releaseConsumableDestinationReservation(agent, { ...plan, buildingId: targetBuilding?.id, furnitureIndex, furnitureType: destination.furnitureType, outdoorNodeId: plan.outdoorNodeId, seatId, reservationId: plan.reservation.id }, 'consume-route-rejected');
+    return false;
+  }
+  const faceAngle = plan?.faceAngle ?? target.faceAngle ?? agent._deskFacingAngle ?? null;
+  const consumeSurfaceSpec = destination.consumePresentation === 'surface'
+    ? getConsumableSurfaceSpec(destination.furnitureType)
+    : null;
+  agent._lastDrinkDeskRoute = { kind: consumableKind, accepted: true, reason: route?.reason || null, release, destinationKind: destination.destinationKind, target: { x: targetX, y: targetY, floor: targetFloor, buildingId: targetBuilding?.id || null, furnitureIndex, outdoorNodeId: plan?.outdoorNodeId || null, spotId: seatId || target.spotId || null } };
+  agent._idleActivity = {
+    kind: spec.kind,
+    phase: 'approach',
+    startedAt: performance.now(),
+    buildingId: targetBuilding?.id || sourceActivity.buildingId || null,
+    furnitureIndex,
+    outdoorNodeId: plan?.outdoorNodeId || null,
+    objectKey: plan?.objectKey || null,
+    furnitureType: destination.furnitureType,
+    spotId: seatId || target.spotId || target.interactionSpotId || null,
+    seatId,
+    slotId: seatId,
+    activationSpotId: seatId,
+    approachSpotId: plan?.approachSpot?.spotId || target.spotId || null,
+    exitSpotId: plan?.selectedSeat?.exitSpotId || plan?.selectedSeat?.approachSpotId || null,
+    reservationId: plan?.reservation?.id || null,
+    consumeReservation: Boolean(plan),
+    consumeDestinationKind: destination.destinationKind,
+    consumePresentation: destination.consumePresentation,
+    consumeSurfaceSpotId: destination.consumePresentation === 'surface' ? (destination.destinationKind === 'desk' ? 'desk-surface' : `serving:${seatId || 'seat'}`) : null,
+    consumeSurfaceHeight: consumeSurfaceSpec?.surfaceHeight ?? null,
+    consumeSurfaceForwardOffset: consumeSurfaceSpec?.forwardOffset ?? null,
+    consumeSurfaceSideOffset: consumeSurfaceSpec?.sideOffset ?? null,
+    stayMs: 16000,
+    faceAngle,
+    dockTarget: { x: dockX, y: dockY },
+    routeApproachTarget: plan?.routeApproachTarget || null,
+    dockSnapRadius: destination.kind === 'desk' ? WORK_DESK_DOCK_SNAP_RADIUS : 7,
+    seatSurfaceLift: plan?.seatSurfaceLift || getFurnitureSeatSurfaceLift(destination.furnitureType),
+    action: spec.actionId,
+    actionId: spec.actionId,
+    animationId: spec.animationId,
+    sipCountTarget: 3,
+    sipDurationMs: 16000,
+    carryAttachPoint: 'right-hand',
+    temporaryItem: sourceActivity.temporaryItem || agent._carriedItem || agent._carrying || null,
+    sourceObject: { buildingId: sourceActivity.buildingId || null, furnitureIndex: sourceActivity.furnitureIndex ?? null, actionId: sourceActivity.actionId || sourceActivity.action || null },
+    lifecycle: { stationary: false, carryable: false, temporary: true, consumesTemporary: true },
+  };
+  agent._wanderTimer = 150;
+  agent._stayTimer = 0;
+  agent._schedPhase = spec.schedulePhase;
+  return true;
+}
+
+function activateConsumableDestinationOnArrival(agent, activity = null) {
+  if (!agent || !activity?.consumeReservation || !activity?.reservationId) return false;
+  const building = activity.buildingId ? buildingsMap.get(activity.buildingId) : null;
+  const outdoorNodeId = String(activity.outdoorNodeId || '').trim();
+  const furniture = outdoorNodeId
+    ? getRawOutdoorNodeById(building, outdoorNodeId)
+    : building?.interior?.furniture?.[activity.furnitureIndex];
+  const type = outdoorNodeId ? getOutdoorNodeAssetType(furniture || {}) : furniture?.type;
+  if (!furniture || !type) return false;
+  const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
+  let store = null;
+  if (type === 'parkBench') store = getParkBenchObjectUseSeatStore(furniture);
+  else if (getTableSeatingConfig(type)) store = getTableSeatingConfig(type).storeFn(furniture);
+  else if (type === 'couch') store = getCouchObjectUseSeatStore(furniture);
+  else if (type === 'sectionalSofa') store = getSectionalSofaObjectUseSeatStore(furniture);
+  else if (type === 'loveseat') store = getLoveseatObjectUseSeatStore(furniture);
+  else if (type === 'armchair') store = getArmchairObjectUseSeatStore(furniture);
+  else if (type === 'hallwayBench') store = getHallwayBenchObjectUseSeatStore(furniture);
+  else if (getSingleSeatChairConfig(type)) store = getSingleSeatChairConfig(type).storeFn(furniture);
+  if (!store || !seatId) return false;
+  activateObjectUseSeatReservation(store, { reservationId: activity.reservationId, agentId: agent.id || activity.agentId || null, seatId });
+  const activeSeats = { ...(furniture.activeUse?.activeSeats || {}) };
+  activeSeats[seatId] = {
+    agentId: agent.id || activity.agentId || null,
+    reservationId: activity.reservationId,
+    actionId: activity.actionId || activity.action || null,
+    interactionSpotId: seatId,
+    approachSpotId: activity.approachSpotId || seatId,
+    dismountSpotId: activity.exitSpotId || activity.dismountSpotId || null,
+    startedAt: new Date().toISOString(),
+    consumeDestination: true,
+  };
+  furniture.reservation = { ...(furniture.reservation || {}), id: activity.reservationId, status: 'active', agentId: agent.id || null, actionId: activity.actionId || activity.action || null, seatId, spotId: seatId };
+  furniture.activeUse = { ...(furniture.activeUse || {}), state: 'active', mode: 'consume-destination', activeSeats, agentId: agent.id || null, actionId: activity.actionId || activity.action || null, interactionSpotId: seatId, startedAt: furniture.activeUse?.startedAt || new Date().toISOString() };
+  activity.seated = true;
+  activity.activationState = 'seated';
+  activity.activeUseActivated = true;
+  if (building) persistBuilding(building);
+  return true;
+}
+
 function startCoffeeDeskConsumeActivity(agent, coffeeActivity = {}) {
+  return startConsumableUseActivity(agent, coffeeActivity, 'coffee');
+  /* legacy implementation retained below for compatibility reference */
   if (!agent || !agent._carriedItem && !agent._carrying && agent.carryItem !== 'coffee') return false;
   clearManualPlacementHoldForDrinkMachineDeskHandoff(agent, coffeeActivity);
   const workArrival = getAgentWorkArrivalTarget(agent);
@@ -53853,6 +55217,8 @@ function startCoffeeDeskConsumeActivity(agent, coffeeActivity = {}) {
 }
 
 function startWaterDeskConsumeActivity(agent, waterActivity = {}) {
+  return startConsumableUseActivity(agent, waterActivity, 'water');
+  /* legacy implementation retained below for compatibility reference */
   if (!agent || !agent._carriedItem && !agent._carrying && agent.carryItem !== 'water') return false;
   clearManualPlacementHoldForDrinkMachineDeskHandoff(agent, waterActivity);
   const workArrival = getAgentWorkArrivalTarget(agent);
@@ -54047,6 +55413,8 @@ function cleanupAgentVendingSnack(agent, reason = 'consume') {
 }
 
 function startVendingDeskConsumeActivity(agent, vendingActivity = {}) {
+  return startConsumableUseActivity(agent, vendingActivity, 'vending');
+  /* legacy implementation retained below for compatibility reference */
   if (!agent || !agent._carriedItem && !agent._carrying && agent.carryItem !== 'snack') return false;
   const carriedItem = agent._carriedItem || agent._carrying || null;
   const workArrival = getAgentWorkArrivalTarget(agent);
@@ -54178,6 +55546,8 @@ function spawnChilledSnackForAgent(agent, activity = {}) {
 }
 
 function startFridgeDeskConsumeActivity(agent, fridgeActivity = {}) {
+  return startConsumableUseActivity(agent, fridgeActivity, 'fridge');
+  /* legacy implementation retained below for compatibility reference */
   if (!agent || (!agent._carriedItem && !agent._carrying && agent.carryItem !== 'snack')) return false;
   clearManualPlacementHoldForDrinkMachineDeskHandoff(agent, fridgeActivity);
   const carriedItem = agent._carriedItem || agent._carrying || null;
@@ -54314,6 +55684,8 @@ function spawnStoveOvenFoodForAgent(agent, activity = {}) {
 }
 
 function startStoveOvenDeskConsumeActivity(agent, cookingActivity = {}) {
+  return startConsumableUseActivity(agent, cookingActivity, 'stove-oven');
+  /* legacy implementation retained below for compatibility reference */
   if (!agent || (!agent._carriedItem && !agent._carrying && agent.carryItem !== 'snack')) return false;
   clearManualPlacementHoldForDrinkMachineDeskHandoff(agent, cookingActivity);
   const carriedItem = agent._carriedItem || agent._carrying || null;
@@ -54431,6 +55803,8 @@ function spawnHeatedSnackForAgent(agent, activity = {}) {
 }
 
 function startMicrowaveDeskConsumeActivity(agent, microwaveActivity = {}) {
+  return startConsumableUseActivity(agent, microwaveActivity, 'microwave');
+  /* legacy implementation retained below for compatibility reference */
   if (!agent || !agent._carriedItem && !agent._carrying && agent.carryItem !== 'snack') return false;
   clearManualPlacementHoldForDrinkMachineDeskHandoff(agent, microwaveActivity);
   const carriedItem = agent._carriedItem || agent._carrying || null;
@@ -54548,20 +55922,55 @@ function cleanupAgentFoodTruckOrder(agent, reason = 'use-complete') {
   return plan;
 }
 
-function getSmallCafeTableState(buildingId, index) {
+function getFourSeatTableOccupancyState(buildingId, index, type) {
   const building = buildingsMap.get(buildingId);
   const table = building?.interior?.furniture?.[index];
-  if (!building || !table || table.type !== 'smallCafeTable') return { occupants: [], mode: 'unavailable', label: 'Unavailable' };
-  const occupants = agentsList.filter(agent => agent?._idleActivity?.buildingId === buildingId && Number(agent._idleActivity?.furnitureIndex) === Number(index) && String(agent._idleActivity?.kind || '').startsWith('small-cafe-table-'));
+  const config = getTableSeatingConfig(type);
+  if (!building || !table || table.type !== type || !config) return { building, table, occupants: [], occupiedSeatIds: [], reservedSeatIds: [], usedSeatIds: [], capacity: 4, openSeats: 0 };
+  const occupants = agentsList.filter(agent => agent?._idleActivity?.buildingId === buildingId && Number(agent._idleActivity?.furnitureIndex) === Number(index) && String(agent._idleActivity?.kind || '').startsWith(config.prefix));
+  const occupiedSeatIds = new Set(Object.keys(table.activeUse?.activeSeats || {}));
+  for (const agent of occupants) {
+    const activity = agent?._idleActivity || {};
+    const seatId = activity.seatId || activity.activationSpotId || activity.spotId;
+    if (seatId && !String(seatId).startsWith('dropoff-')) occupiedSeatIds.add(seatId);
+  }
+  const reservedSeatIds = getActiveTableSeatReservationSeatIds(table, buildingId, index, type);
+  const usedSeatIds = new Set([...occupiedSeatIds, ...reservedSeatIds]);
+  return {
+    building,
+    table,
+    occupants,
+    occupiedSeatIds: [...occupiedSeatIds].sort(),
+    reservedSeatIds: [...reservedSeatIds].sort(),
+    usedSeatIds: [...usedSeatIds].sort(),
+    capacity: config.capacity,
+    openSeats: Math.max(0, config.capacity - usedSeatIds.size),
+  };
+}
+
+function getDiningTableState(buildingId, index) {
+  const occupancy = getFourSeatTableOccupancyState(buildingId, index, 'diningTable');
+  if (!occupancy.table) return { ...occupancy, mode: 'unavailable', label: 'Unavailable' };
+  const mode = occupancy.table.activeUse?.mode || 'open-dining-table';
+  const occupantNames = occupancy.occupants.map(agent => agent.name || agent.id).join(', ');
+  const label = occupancy.occupants.length
+    ? `${occupancy.usedSeatIds.length}/4 seats used: ${occupantNames}`
+    : (occupancy.reservedSeatIds.length ? `${occupancy.reservedSeatIds.length}/4 reserved: ${occupancy.reservedSeatIds.join(', ')}` : '4/4 seats open');
+  return { ...occupancy, mode, label, reservedAgentId: occupancy.table.reservation?.agentId || null };
+}
+
+function getSmallCafeTableState(buildingId, index) {
+  const occupancy = getFourSeatTableOccupancyState(buildingId, index, 'smallCafeTable');
+  const { table, occupants, reservedSeatIds, capacity, openSeats } = occupancy;
+  if (!table) return { ...occupancy, mode: 'unavailable', label: 'Unavailable' };
   const surfaceItems = Math.max(0, Number(table.tableState?.surfaceItems || 0));
-  const reservedSeatIds = [...getActiveTableSeatReservationSeatIds(table, buildingId, index, 'smallCafeTable')].sort();
   const reserved = reservedSeatIds.length ? `Reserved seats: ${reservedSeatIds.join(', ')}` : (table.reservation?.agentId ? `Reserved by ${table.reservation.agentId}` : null);
   const mode = table.activeUse?.mode || 'open-table';
   const occupantNames = occupants.map(agent => agent.name || agent.id).join(', ');
   const label = occupants.length
-    ? `${occupants.length}/4 seated: ${occupantNames}`
-    : (reserved || `Open • ${surfaceItems}/2 items on table`);
-  return { occupants, mode, label, surfaceItems, reservedAgentId: table.reservation?.agentId || null, reservedSeatIds, capacity: 4, openSeats: Math.max(0, 4 - occupants.length - reservedSeatIds.length) };
+    ? `${occupancy.usedSeatIds.length}/4 seats used: ${occupantNames}`
+    : (reserved || `${openSeats}/4 seats open • ${surfaceItems}/2 items on table`);
+  return { ...occupancy, occupants, mode, label, surfaceItems, reservedAgentId: table.reservation?.agentId || null, reservedSeatIds, capacity, openSeats };
 }
 
 function getPatioTableState(buildingId, index) {
@@ -54580,16 +55989,14 @@ function getPatioTableState(buildingId, index) {
 }
 
 function getSmallRoundMeetingTableState(buildingId, index) {
-  const building = buildingsMap.get(buildingId);
-  const table = building?.interior?.furniture?.[index];
-  if (!building || !table || table.type !== 'smallRoundMeetingTable') return { occupants: [], mode: 'unavailable', label: 'Unavailable' };
-  const occupants = agentsList.filter(agent => agent?._idleActivity?.buildingId === buildingId && Number(agent._idleActivity?.furnitureIndex) === Number(index) && String(agent._idleActivity?.kind || '').startsWith('small-round-meeting-table-'));
-  const reservedSeatIds = [...getActiveTableSeatReservationSeatIds(table, buildingId, index, 'smallRoundMeetingTable')].sort();
+  const occupancy = getFourSeatTableOccupancyState(buildingId, index, 'smallRoundMeetingTable');
+  const { table, occupants, reservedSeatIds, capacity, openSeats } = occupancy;
+  if (!table) return { ...occupancy, mode: 'unavailable', label: 'Unavailable' };
   const reserved = reservedSeatIds.length ? `Reserved seats: ${reservedSeatIds.join(', ')}` : (table.reservation?.agentId ? `Reserved by ${table.reservation.agentId}` : null);
   const mode = table.activeUse?.mode || 'open-compact-meeting';
   const occupantNames = occupants.map(agent => agent.name || agent.id).join(', ');
-  const label = occupants.length ? `${occupants.length}/4 planning: ${occupantNames}` : (reserved || 'Open compact meeting table • stationary persistent furniture');
-  return { occupants, mode, label, reservedAgentId: table.reservation?.agentId || null, reservedSeatIds, capacity: 4, openSeats: Math.max(0, 4 - occupants.length - reservedSeatIds.length) };
+  const label = occupants.length ? `${occupancy.usedSeatIds.length}/4 seats used: ${occupantNames}` : (reserved || `${openSeats}/4 seats open • stationary persistent furniture`);
+  return { ...occupancy, occupants, mode, label, reservedAgentId: table.reservation?.agentId || null, reservedSeatIds, capacity, openSeats };
 }
 
 function _buildSmallRoundMeetingTableActionButtons(buildingId, index) {
@@ -54600,6 +56007,17 @@ function _buildSmallRoundMeetingTableActionButtons(buildingId, index) {
     <button onclick="window._useSmallRoundMeetingTableFurniture('meeting')" style="padding:4px 12px;background:rgba(124,58,237,0.32);border:1px solid #a78bfa;color:#fff;border-radius:4px;cursor:pointer" title="Route 2-4 idle agents to round-table seat waypoints for a sit/talk/plan loop">🤝 Start Compact Meeting</button>
     <button onclick="window._useSmallRoundMeetingTableFurniture('plan')" style="padding:4px 12px;background:rgba(37,99,235,0.28);border:1px solid #60a5fa;color:#fff;border-radius:4px;cursor:pointer" title="Route one idle agent to a planning seat waypoint">📝 Plan / Review</button>
     <button onclick="window._useSmallRoundMeetingTableFurniture('talk')" style="padding:4px 12px;background:rgba(16,185,129,0.24);border:1px solid #34d399;color:#fff;border-radius:4px;cursor:pointer" title="Route one idle agent to a social sync seat waypoint">💬 Talk / Sync</button>
+  `;
+}
+
+function _buildMeetingTableActionButtons(buildingId, index) {
+  const activeCount = activeMeetings.filter(meeting => meeting.table?.buildingId === buildingId && Number(meeting.table?.furnitureIndex) === Number(index)).length;
+  const label = activeCount
+    ? `${activeCount} active meeting(s) · 10 seats + 6 standing`
+    : '10 seats + 6 standing positions open';
+  return `
+    <span style="padding:4px 10px;border:1px solid rgba(59,130,246,0.58);border-radius:4px;color:${activeCount ? '#ffca28' : '#bfdbfe'};background:rgba(30,58,138,0.24)" title="Each seat and overflow position is independently reserved">🤝 ${label}</span>
+    <button onclick="window.startMeetingAtTable('${escapeHtml(buildingId)}', ${Number(index)})" style="padding:4px 12px;background:rgba(37,99,235,0.30);border:1px solid #60a5fa;color:#fff;border-radius:4px;cursor:pointer" title="Seat up to ten participants, then place up to six overflow participants at the table-end standing points">📊 Start Meeting</button>
   `;
 }
 
@@ -58583,6 +60001,8 @@ window.__verifyPhase3CTask9TableSeatingAudit = () => {
     diningTable: Object.freeze(['seat-north', 'seat-south', 'seat-east', 'seat-west']),
   });
   const building = { id: 'verify-phase3c-table-building', x: 0, z: 0, width: 12, depth: 10, rotation: 0, interior: { floors: 1, furniture: [] } };
+  const previousVerificationBuilding = buildingsMap.get(building.id);
+  buildingsMap.set(building.id, building);
   const summaries = Object.entries(requiredTables).map(([type, expectedSeatIds], index) => {
     const table = { id: `verify-${type}`, type, x: 3 + index * 2, z: 4, rotation: index * 90 };
     building.interior.furniture[index] = table;
@@ -58595,6 +60015,7 @@ window.__verifyPhase3CTask9TableSeatingAudit = () => {
       table.reservation = { id: first.reservation.id, agentId: first.reservation.agentId, actionId: first.reservation.actionId, seatId: first.reservation.seatId, spotId: first.reservation.seatId, status: 'active' };
       table.activeUse = { state: 'active', activeSeats: { [first.reservation.seatId]: { agentId: first.reservation.agentId, reservationId: first.reservation.id } } };
     }
+    const occupancyBeforeRelease = getFourSeatTableOccupancyState(building.id, index, type);
     const released = first.ok ? releaseTableSeatUse(table, { kind: `${getTableSeatingConfig(type).prefix}verify`, seatId: first.reservation.seatId, spotId: first.reservation.seatId, reservationId: first.reservation.id, action: first.reservation.actionId }, { id: first.reservation.agentId }, 'verify-complete') : null;
     return {
       type,
@@ -58608,19 +60029,772 @@ window.__verifyPhase3CTask9TableSeatingAudit = () => {
       secondSeatId: second.reservation?.seatId || null,
       distinctSeatsReserved: first.ok && second.ok && first.reservation.seatId !== second.reservation.seatId,
       activeOk: !!active?.ok,
+      occupancyUsedSeatIds: occupancyBeforeRelease.usedSeatIds,
+      occupancyOpenSeats: occupancyBeforeRelease.openSeats,
+      deduplicatesActiveReservation: occupancyBeforeRelease.usedSeatIds.length === 2 && occupancyBeforeRelease.openSeats === 2,
       releasedOk: !!released?.ok,
       firstFinalState: store.reservations.find(r => r.id === first.reservation?.id)?.state || null,
       secondFinalState: store.reservations.find(r => r.id === second.reservation?.id)?.state || null,
       reservedSeatIdsAfterRelease: [...getActiveTableSeatReservationSeatIds(table, building.id, index, type)].sort(),
     };
   });
-  const ok = summaries.every(summary => summary.capacity === 4 && summary.allSeatsListed && summary.faceCenter && summary.perSeatCapacityKeys && summary.distinctSeatsReserved && summary.activeOk && summary.releasedOk && summary.firstFinalState === 'released' && summary.secondFinalState === 'held');
+  if (previousVerificationBuilding) buildingsMap.set(building.id, previousVerificationBuilding);
+  else buildingsMap.delete(building.id);
+  const ok = summaries.every(summary => summary.capacity === 4 && summary.allSeatsListed && summary.faceCenter && summary.perSeatCapacityKeys && summary.distinctSeatsReserved && summary.activeOk && summary.deduplicatesActiveReservation && summary.releasedOk && summary.firstFinalState === 'released' && summary.secondFinalState === 'held');
   return {
     ok,
     summaries,
     multiSeatRequirements: ['per-seat capacityKey', 'selected seatId before route admission', 'activate only selected seat', 'release matching agent + reservationId + seatId'],
     noStandingUseChanges: true,
   };
+};
+
+window.__verifyParkTableSeating = () => {
+  const fixtures = Object.freeze({
+    outdoorCafeTable: Object.freeze({
+      seatIds: Object.freeze(['seat-north', 'seat-south', 'seat-east', 'seat-west']),
+      testSeatId: 'seat-east',
+      builder: makeOutdoorCafeTable3D,
+    }),
+    picnicTable: Object.freeze({
+      seatIds: Object.freeze(['seat-north-left', 'seat-north-right', 'seat-south-left', 'seat-south-right']),
+      testSeatId: 'seat-north-left',
+      builder: makePicnicTable3D,
+    }),
+  });
+  const summaries = Object.entries(fixtures).map(([type, fixture], fixtureIndex) => {
+    const building = {
+      id: `verify-park-${type}`,
+      type: 'park',
+      worldX: 4 + fixtureIndex * 2,
+      worldY: 6 + fixtureIndex * 2,
+      widthTiles: 24,
+      heightTiles: 20,
+      _rotation: 0,
+      outdoorAreaType: 'park',
+      interior: { floors: 1, furniture: [] },
+      outdoorArea: { id: `verify-outdoor-area-${type}`, outdoorAreaType: 'park', nodes: [] },
+    };
+    const node = {
+      id: `verify-outdoor-node-${type}`,
+      objectInstanceId: `verify-outdoor-node-${type}`,
+      type,
+      renderType: type,
+      catalogId: type,
+      x: 8,
+      z: 9,
+      rotation: 0,
+      floor: 1,
+      nodeType: 'eat',
+      roles: ['seat', 'eat', 'drink', 'social'],
+      lifecycle: { stationary: true, carryable: false, temporary: false, persistsUntilDeleted: true },
+    };
+    initializeOutdoorPlacedTableNode(node, type);
+    building.outdoorArea.nodes.push(node);
+    ensurePlacedObjectActionTargets(building, node, { collection: 'outdoor-node', index: 0, assetType: type });
+    const previousBuilding = buildingsMap.get(building.id);
+    const model = fixture.builder(0, 0, 1, node);
+    const taggedSeatIds = new Set();
+    model.traverse(object => {
+      const seatId = String(object?.userData?.interactionSpotId || '').trim();
+      if (seatId) taggedSeatIds.add(seatId);
+    });
+    const visibleSeatTargetSummaries = fixture.seatIds.map(seatId => {
+      const targetParts = [];
+      model.traverse(object => {
+        if (object?.isMesh && getDraggedAgentHitInteractionSpotId(object) === seatId) targetParts.push(object);
+      });
+      return {
+        seatId,
+        targetPartCount: targetParts.length,
+        colorKeys: [...new Set(targetParts.map(object => object.userData?.multiSeatColorKey).filter(Boolean))],
+      };
+    });
+    const fullVisibleSeatTargets = visibleSeatTargetSummaries.every(summary =>
+      summary.targetPartCount >= (type === 'outdoorCafeTable' ? 6 : 2));
+    let manualDropStarted = false;
+    let manualSeatDockSnapped = false;
+    let selectedSeatActivated = false;
+    let followsMoveAndRotation = false;
+    let transformedDismount = false;
+    let before = null;
+    let after = null;
+    let releaseDismount = null;
+    const seatDefinition = (FURNITURE_INTERACTION_SPOTS[type] || []).find(definition => definition.id === fixture.testSeatId);
+    const runtimeSpotSummaries = fixture.seatIds.map(seatId => {
+      const definition = (FURNITURE_INTERACTION_SPOTS[type] || []).find(item => item.id === seatId);
+      const runtime = getOutdoorNodeSpotRuntimeTarget(building, node, seatId, definition?.action, { preferredSpotId: seatId });
+      return {
+        seatId,
+        resolved: Boolean(runtime?.target),
+        target: runtime?.target ? { x: runtime.target.x, y: runtime.target.y, faceAngle: runtime.target.faceAngle } : null,
+      };
+    });
+    const initialSeatSpots = fixture.seatIds.map(seatId => getTableObjectActionSpot(building, node, seatId, {
+      outdoorNodeId: node.id,
+      actionId: getTableSeatingConfig(type)?.defaultActionId,
+    })).filter(Boolean);
+    const allSeatsFaceTable = initialSeatSpots.length === 4 && initialSeatSpots.every(spot => {
+      const local = getOutdoorNodeLocalPoint(node, building);
+      const center = getBuildingWorldPoint(building, local.x, local.z);
+      const dx = center.x * API_TILE - Number(spot.apiX);
+      const dz = center.z * API_TILE - Number(spot.apiZ);
+      const length = Math.hypot(dx, dz) || 1;
+      const dot = Math.sin(Number(spot.faceAngle)) * (dx / length) + Math.cos(Number(spot.faceAngle)) * (dz / length);
+      return Number.isFinite(dot) && dot > 0.999;
+    });
+    const initialSeat = initialSeatSpots.find(spot => spot.spotId === fixture.testSeatId) || null;
+    const testAgent = {
+      id: `verify-park-${type}-agent`,
+      x: Number(initialSeat?.apiX || 0),
+      y: Number(initialSeat?.apiZ || 0),
+      _floor: 1,
+      _runtimeObserverOnly: true,
+      _idleActivity: null,
+      _group3d: null,
+    };
+    try {
+      buildingsMap.set(building.id, building);
+      const drop = {
+        buildingId: building.id,
+        index: 0,
+        building,
+        furniture: node,
+        spot: initialSeat,
+        outdoorNode: true,
+        outdoorNodeId: node.id,
+        available: true,
+        queueable: false,
+      };
+      const started = startDraggedAgentMultiSeatUse(drop, testAgent);
+      manualDropStarted = started?.triggered === true && started?.seatId === fixture.testSeatId &&
+        testAgent._idleActivity?.outdoorNodeId === node.id &&
+        String(testAgent._idleActivity?.baseObjectKey || '').includes(':outdoor-node:') &&
+        Number(testAgent._idleActivity?.stayMs) === MANUAL_TABLE_SEAT_DWELL_MS;
+      if (manualDropStarted) {
+        const dockSnap = snapDraggedAgentToStartedObjectSeatDock(drop, testAgent);
+        manualSeatDockSnapped = dockSnap?.snapped === true && dockSnap?.activatedManualUse === true &&
+          testAgent._idleActivity?.phase === 'active' && testAgent._idleActivity?.seated === true;
+        selectedSeatActivated = node.activeUse?.state === 'active' &&
+          Boolean(node.activeUse?.activeSeats?.[fixture.testSeatId]) &&
+          node.tableState?.activeSeatIds?.includes(fixture.testSeatId);
+        const initialAttachment = syncAgentToCurrentTableSeatTransform(testAgent);
+        before = initialAttachment ? { x: testAgent.x, y: testAgent.y, faceAngle: testAgent._faceAngle } : null;
+        node.x += 2.25;
+        node.z -= 1.5;
+        node.rotation = 270;
+        building._rotation = 180;
+        const movedAttachment = syncAgentToCurrentTableSeatTransform(testAgent);
+        const transformedSeat = getTableObjectActionSpot(building, node, fixture.testSeatId, {
+          outdoorNodeId: node.id,
+          actionId: testAgent._idleActivity.actionId,
+        });
+        after = movedAttachment ? { x: testAgent.x, y: testAgent.y, faceAngle: testAgent._faceAngle } : null;
+        followsMoveAndRotation = Boolean(
+          before && after && transformedSeat &&
+          Math.hypot(before.x - after.x, before.y - after.y) > 0.1 &&
+          Math.abs(after.x - transformedSeat.apiX) < 0.001 &&
+          Math.abs(after.y - transformedSeat.apiZ) < 0.001 &&
+          Math.abs(normalizeAngleRad(after.faceAngle - transformedSeat.faceAngle)) < 0.001
+        );
+        const expectedExit = getTableObjectActionSpot(building, node, seatDefinition?.exitSpotId, {
+          outdoorNodeId: node.id,
+          actionId: testAgent._idleActivity.actionId,
+        });
+        const released = releaseTableSeatUse(node, testAgent._idleActivity, testAgent, 'verify-park-table-release');
+        releaseDismount = released?.dismount || (released?.outsideSeat ? released : null);
+        transformedDismount = Boolean(
+          releaseDismount && expectedExit &&
+          releaseDismount.spotId === seatDefinition?.exitSpotId &&
+          Math.abs(testAgent.x - expectedExit.apiX) < 0.001 &&
+          Math.abs(testAgent.y - expectedExit.apiZ) < 0.001 &&
+          node.tableState?.persistentOutdoorNode === true
+        );
+      }
+    } finally {
+      if (previousBuilding) buildingsMap.set(building.id, previousBuilding);
+      else buildingsMap.delete(building.id);
+    }
+    const directDockEnabled = MANUAL_DROP_DIRECT_SEAT_DOCK_TYPES.has(type);
+    const manualConfig = getMultiSeatManualConfig(type);
+    const picnicBenchLayout = type !== 'picnicTable' || (
+      fixture.seatIds.filter(seatId => seatId.startsWith('seat-north-')).length === 2 &&
+      fixture.seatIds.filter(seatId => seatId.startsWith('seat-south-')).length === 2
+    );
+    return {
+      type,
+      expectedSeatIds: [...fixture.seatIds],
+      taggedSeatIds: [...taggedSeatIds].sort(),
+      visibleSeatTargetSummaries,
+      fullVisibleSeatTargets,
+      runtimeSpotSummaries,
+      fourTaggedSeatTargets: taggedSeatIds.size === 4 && fixture.seatIds.every(seatId => taggedSeatIds.has(seatId)),
+      fourRuntimeSeatTargets: initialSeatSpots.length === 4,
+      allSeatsFaceTable,
+      picnicBenchLayout,
+      placementStateInitialized: node.capacity?.seated === 4 && node.tableState?.seats === 4 && node.lifecycle?.routing?.seatSpotIds?.length === 4,
+      manualConfigEnabled: manualConfig?.capacity === 4 && fixture.seatIds.every(seatId => manualConfig.seatIds.includes(seatId)),
+      directDockEnabled,
+      manualDropStarted,
+      manualSeatDockSnapped,
+      selectedSeatActivated,
+      followsMoveAndRotation,
+      transformedDismount,
+      attachmentBefore: before,
+      attachmentAfter: after,
+      releaseDismount,
+    };
+  });
+  return {
+    ok: summaries.every(summary => summary.fourTaggedSeatTargets && summary.fullVisibleSeatTargets && summary.fourRuntimeSeatTargets && summary.allSeatsFaceTable && summary.picnicBenchLayout && summary.placementStateInitialized && summary.manualConfigEnabled && summary.directDockEnabled && summary.manualDropStarted && summary.manualSeatDockSnapped && summary.selectedSeatActivated && summary.followsMoveAndRotation && summary.transformedDismount),
+    summaries,
+  };
+};
+
+window.__verifySavedParkTableRaycasts = () => {
+  const requiredSeatIdsByType = Object.freeze({
+    outdoorCafeTable: Object.freeze(['seat-north', 'seat-south', 'seat-east', 'seat-west']),
+    picnicTable: Object.freeze(['seat-north-left', 'seat-north-right', 'seat-south-left', 'seat-south-right']),
+  });
+  const renderedNodes = [];
+  buildingGroup.updateMatrixWorld(true);
+  buildingGroup.traverse(object => {
+    const type = object?.userData?.furnitureType;
+    if (object?.name?.startsWith('outdoor-node-') && requiredSeatIdsByType[type]) renderedNodes.push(object);
+  });
+  const nodeSummaries = renderedNodes.map(root => {
+    const type = root.userData.furnitureType;
+    const buildingId = root.userData.buildingId;
+    const nodeId = root.userData.outdoorNodeId;
+    const seatSummaries = requiredSeatIdsByType[type].map(seatId => {
+      const targetParts = [];
+      root.traverse(object => {
+        if (object?.isMesh && getDraggedAgentHitInteractionSpotId(object) === seatId) targetParts.push(object);
+      });
+      const probes = targetParts.map(part => {
+        const bounds = new THREE.Box3().setFromObject(part);
+        const center = bounds.getCenter(new THREE.Vector3());
+        const ray = new THREE.Raycaster(
+          new THREE.Vector3(center.x, Math.max(center.y + 30, bounds.max.y + 30), center.z),
+          new THREE.Vector3(0, -1, 0),
+          0,
+          100,
+        );
+        // Sprite raycasts expect a camera even though this verifier casts a
+        // direct world-space ray; use the live camera just as pointer rays do.
+        ray.camera = camera;
+        const hits = ray.intersectObjects(buildingGroup.children, true).filter(hit => hit.object?.userData?.furniture);
+        const drop = resolveDraggedAgentObjectHits(hits, null);
+        return {
+          colorKey: part.userData?.multiSeatColorKey || null,
+          resolvedType: drop?.furniture?.type || null,
+          resolvedSeatId: drop?.spot?.spotId || null,
+          matched: drop?.outdoorNode === true && drop?.buildingId === buildingId && drop?.outdoorNodeId === nodeId && drop?.spot?.spotId === seatId,
+        };
+      });
+      return {
+        seatId,
+        targetPartCount: targetParts.length,
+        probes,
+        allTargetPartsRaycast: probes.length >= (type === 'outdoorCafeTable' ? 6 : 2) && probes.every(probe => probe.matched),
+      };
+    });
+    return {
+      type,
+      buildingId,
+      nodeId,
+      seatSummaries,
+      ok: seatSummaries.every(summary => summary.allTargetPartsRaycast),
+    };
+  });
+  const tableTypesFound = [...new Set(nodeSummaries.map(summary => summary.type))].sort();
+  const allRequiredTypesPresent = Object.keys(requiredSeatIdsByType).every(type => tableTypesFound.includes(type));
+  return {
+    ok: allRequiredTypesPresent && nodeSummaries.length >= 2 && nodeSummaries.every(summary => summary.ok),
+    allRequiredTypesPresent,
+    tableTypesFound,
+    renderedNodeCount: nodeSummaries.length,
+    nodeSummaries,
+  };
+};
+
+window.__verifyDiningCafeMeetingTableFixes = () => {
+  const requiredSeatIds = ['seat-east', 'seat-north', 'seat-south', 'seat-west'];
+  const builders = {
+    diningTable: makeDiningTable3D,
+    smallCafeTable: makeSmallCafeTable3D,
+    outdoorCafeTable: makeOutdoorCafeTable3D,
+    smallRoundMeetingTable: makeSmallRoundMeetingTable3D,
+  };
+  const summaries = Object.entries(builders).map(([type, builder]) => {
+    const model = builder(0, 0, 1, {});
+    model.updateMatrixWorld(true);
+    const seatMeshes = [];
+    const colorKeys = new Set();
+    const roundTopMeshes = [];
+    const roundChairBases = [];
+    const diningGroundFootprints = [];
+    const outdoorGroundFootprints = [];
+    const cafeLaptopParts = [];
+    const outdoorCafeChairLegs = [];
+    model.traverse(object => {
+      if (!object?.isMesh) return;
+      if (object.userData?.interactionSpotId) seatMeshes.push(object);
+      if (object.userData?.multiSeatColorKey) colorKeys.add(object.userData.multiSeatColorKey);
+      if (type === 'smallRoundMeetingTable' && object.userData?.multiSeatColorKey === 'tabletop') roundTopMeshes.push(object);
+      if (type === 'smallRoundMeetingTable' && object.userData?.roundMeetingChairBase) roundChairBases.push(object);
+      if (type === 'diningTable' && object.position.y < 0.06 && object.scale.x > 2 && object.scale.z > 1) diningGroundFootprints.push(object);
+      if (type === 'outdoorCafeTable' && object.position.y < 0.06 && object.scale.x > 1 && object.scale.z > 1) outdoorGroundFootprints.push(object);
+      if (type === 'smallCafeTable' && Math.abs(object.position.x - 0.28) < 0.01 && object.position.y > 0.79 && object.position.z < -0.18 && object.scale.x > 0.2) cafeLaptopParts.push(object);
+      if (type === 'outdoorCafeTable' && object.userData?.outdoorCafeChairLeg) outdoorCafeChairLegs.push(object);
+    });
+    const seatIds = seatMeshes.map(mesh => mesh.userData.interactionSpotId).sort();
+    const facesCenter = seatMeshes.every(mesh => {
+      const chair = mesh.parent;
+      const forward = new THREE.Vector3(0, 0, 1).transformDirection(chair.matrixWorld).normalize();
+      const chairPosition = new THREE.Vector3();
+      chair.getWorldPosition(chairPosition);
+      const towardCenter = new THREE.Vector3(-chairPosition.x, 0, -chairPosition.z).normalize();
+      return forward.dot(towardCenter) > 0.99;
+    });
+    const interactionDefs = FURNITURE_INTERACTION_SPOTS[type] || [];
+    const seatDefs = interactionDefs.filter(def => def.roles?.includes('seat'));
+    const rotationFacingScenarios = [];
+    for (const buildingRotation of [0, 90, 180, 270]) {
+      for (const furnitureRotation of [0, 90, 180, 270]) {
+        const building = {
+          id: `verify-facing-${type}-${buildingRotation}-${furnitureRotation}`,
+          worldX: 3,
+          worldY: 5,
+          widthTiles: 20,
+          heightTiles: 20,
+          _rotation: buildingRotation,
+          interior: { floors: 1, furniture: [] },
+        };
+        const furniture = { id: `verify-facing-${type}`, type, x: 10, z: 10, rotation: furnitureRotation };
+        building.interior.furniture.push(furniture);
+        const seats = seatDefs.map(def => {
+          const spot = getFurnitureActionSpot(building, furniture, def.id);
+          const angle = getFurnitureSpotFacingCenterAngle(building, furniture, spot);
+          const center = getBuildingWorldPoint(building, furniture.x, furniture.z);
+          const dx = center.x * API_TILE - Number(spot?.apiX || 0);
+          const dz = center.z * API_TILE - Number(spot?.apiZ || 0);
+          const length = Math.hypot(dx, dz) || 1;
+          const dot = Number.isFinite(angle) ? Math.sin(angle) * (dx / length) + Math.cos(angle) * (dz / length) : -1;
+          return { seatId: def.id, angle, dot, facesCenter: dot > 0.999 };
+        });
+        rotationFacingScenarios.push({ buildingRotation, furnitureRotation, seats, ok: seats.length === 4 && seats.every(seat => seat.facesCenter) });
+      }
+    }
+    const attachmentBuilding = {
+      id: `verify-attached-seat-${type}`,
+      worldX: 4,
+      worldY: 6,
+      widthTiles: 20,
+      heightTiles: 20,
+      _rotation: 0,
+      interior: { floors: 1, furniture: [] },
+    };
+    const attachmentFurniture = { id: `verify-attached-seat-${type}-table`, type, x: 8, z: 9, rotation: 0, floor: 1 };
+    attachmentBuilding.interior.furniture.push(attachmentFurniture);
+    const previousAttachmentBuilding = buildingsMap.get(attachmentBuilding.id);
+    let occupiedAgentFollowsChairTransform = false;
+    let manualReleaseUsesTransformedExit = false;
+    let attachmentBefore = null;
+    let attachmentAfter = null;
+    let releaseDismount = null;
+    try {
+      buildingsMap.set(attachmentBuilding.id, attachmentBuilding);
+      const initialSeat = getFurnitureActionSpot(attachmentBuilding, attachmentFurniture, 'seat-east');
+      const attachedAgent = {
+        id: `verify-attached-seat-${type}-agent`,
+        x: initialSeat.apiX,
+        y: initialSeat.apiZ,
+        _floor: 1,
+        _runtimeObserverOnly: true,
+        _idleActivity: {
+          kind: `${getTableSeatingConfig(type).prefix}verify-attached`,
+          phase: 'active',
+          poseKind: 'seat',
+          furnitureType: type,
+          objectType: type,
+          buildingId: attachmentBuilding.id,
+          furnitureIndex: 0,
+          objectKey: `${getTableSeatingConfig(type).objectKeyFn(attachmentBuilding.id, 0)}:slot:seat-east`,
+          spotId: 'seat-east',
+          slotId: 'seat-east',
+          seatId: 'seat-east',
+          activationSpotId: 'seat-east',
+          dockTarget: { x: initialSeat.apiX, y: initialSeat.apiZ },
+          faceAngle: getFurnitureSpotFacingCenterAngle(attachmentBuilding, attachmentFurniture, initialSeat),
+          seated: true,
+        },
+        _runtimeRenderSnapshot: {
+          state: 'active',
+          x: initialSeat.apiX,
+          y: initialSeat.apiZ,
+          heading: -2.4,
+          target: {
+            buildingId: attachmentBuilding.id,
+            furnitureIndex: 0,
+            objectType: type,
+            spotId: 'seat-east',
+            slotId: 'seat-east',
+          },
+        },
+      };
+      const before = syncAgentToCurrentTableSeatTransform(attachedAgent);
+      attachmentBefore = before ? { x: attachedAgent.x, y: attachedAgent.y, faceAngle: attachedAgent._faceAngle } : null;
+      attachmentFurniture.x += 2.25;
+      attachmentFurniture.z -= 1.5;
+      attachmentFurniture.rotation = 270;
+      attachmentBuilding._rotation = 180;
+      const after = syncAgentToCurrentTableSeatTransform(attachedAgent);
+      const transformedSeat = getFurnitureActionSpot(attachmentBuilding, attachmentFurniture, 'seat-east');
+      const transformedFacing = getFurnitureSpotFacingCenterAngle(attachmentBuilding, attachmentFurniture, transformedSeat);
+      attachmentAfter = after ? { x: attachedAgent.x, y: attachedAgent.y, faceAngle: attachedAgent._faceAngle } : null;
+      occupiedAgentFollowsChairTransform = Boolean(
+        before && after &&
+        Math.hypot(attachmentBefore.x - attachmentAfter.x, attachmentBefore.y - attachmentAfter.y) > 0.1 &&
+        Math.abs(attachedAgent.x - transformedSeat.apiX) < 0.001 &&
+        Math.abs(attachedAgent.y - transformedSeat.apiZ) < 0.001 &&
+        Math.abs(normalizeAngleRad(attachedAgent._faceAngle - transformedFacing)) < 0.001 &&
+        Math.abs(attachedAgent._idleActivity.dockTarget.x - transformedSeat.apiX) < 0.001 &&
+        Math.abs(attachedAgent._idleActivity.dockTarget.y - transformedSeat.apiZ) < 0.001
+      );
+      const seatDefinition = seatDefs.find(definition => definition.id === 'seat-east');
+      const expectedExit = getFurnitureActionSpot(attachmentBuilding, attachmentFurniture, seatDefinition?.exitSpotId);
+      attachedAgent._idleActivity.dismountSpotId = seatDefinition?.exitSpotId;
+      attachedAgent._idleActivity.exitSpotId = seatDefinition?.exitSpotId;
+      const releaseResult = releaseTableSeatUse(attachmentFurniture, attachedAgent._idleActivity, attachedAgent, 'verify-dismount');
+      releaseDismount = releaseResult?.dismount || (releaseResult?.outsideSeat ? releaseResult : null);
+      manualReleaseUsesTransformedExit = Boolean(
+        releaseDismount && expectedExit &&
+        releaseDismount.spotId === seatDefinition?.exitSpotId &&
+        Math.abs(attachedAgent.x - expectedExit.apiX) < 0.001 &&
+        Math.abs(attachedAgent.y - expectedExit.apiZ) < 0.001 &&
+        Math.hypot(attachedAgent.x - transformedSeat.apiX, attachedAgent.y - transformedSeat.apiZ) > API_TILE * 0.4 &&
+        attachedAgent._manualPlacementLockUntil === 0 &&
+        attachedAgent._activeTableSeatAttachment === null
+      );
+    } finally {
+      if (previousAttachmentBuilding) buildingsMap.set(attachmentBuilding.id, previousAttachmentBuilding);
+      else buildingsMap.delete(attachmentBuilding.id);
+    }
+    const manualConfig = getMultiSeatManualConfig(type);
+    const scheme = MULTI_SEAT_COLOR_SCHEMES[type];
+    const editorHost = document.createElement('div');
+    appendMultiSeatColorEditor(editorHost, { furniture: { type } });
+    const editorInputs = [...editorHost.querySelectorAll('input[type="color"][data-multi-seat-color-key]')];
+    const colorEditorRendered = editorInputs.length === scheme?.fields?.length &&
+      scheme.fields.every(([key]) => editorInputs.some(input => input.dataset.multiSeatColorKey === key)) &&
+      editorHost.textContent?.includes(`Apply ${scheme.label.toLowerCase()} colors`) &&
+      editorHost.textContent?.includes(`Reset ${scheme.label.toLowerCase()} colors`);
+    if (_activeMultiSeatColorPreview) {
+      clearMultiSeatColorPreview(_activeMultiSeatColorPreview.record);
+      _activeMultiSeatColorPreview = null;
+    }
+    const summary = {
+      type,
+      seatIds,
+      fourTaggedSeats: seatIds.length === 4 && requiredSeatIds.every(id => seatIds.includes(id)),
+      eastWestFaceCenter: facesCenter,
+      allChairsFaceCenter: facesCenter,
+      rotationAwareSeatFacing: rotationFacingScenarios.every(scenario => scenario.ok),
+      rotationFacingScenarios,
+      occupiedAgentFollowsChairTransform,
+      manualReleaseUsesTransformedExit,
+      attachmentBefore,
+      attachmentAfter,
+      releaseDismount,
+      fourReservableSeats: getTableSeatingConfig(type)?.capacity === 4 && seatDefs.length === 4 && seatDefs.every(def => def.capacity === 1 && def.capacityKind === 'exclusive'),
+      seatApproachAndExit: seatDefs.every(def => Boolean(def.approachSpotId && def.exitSpotId)),
+      manualFourSeatConfig: manualConfig?.capacity === 4 && requiredSeatIds.every(id => manualConfig.seatIds.includes(id)) && MANUAL_DROP_DIRECT_SEAT_DOCK_TYPES.has(type),
+      finiteManualTableVisit: getManualObjectOccupancyDwellMs({ type }) === MANUAL_TABLE_SEAT_DWELL_MS,
+      colorFields: scheme?.fields?.map(([key]) => key) || [],
+      taggedColorKeys: [...colorKeys].sort(),
+      allColorFieldsRendered: scheme?.fields?.every(([key]) => colorKeys.has(key)) === true,
+      colorEditorRendered: Boolean(colorEditorRendered),
+      colorEditorInputCount: editorInputs.length,
+      roundTabletop: type !== 'smallRoundMeetingTable' || (roundTopMeshes.length > 0 && roundTopMeshes.every(mesh => mesh.geometry === _roundFurnitureCylGeo && mesh.geometry.parameters?.radialSegments === 24)),
+      roundChairBases: type !== 'smallRoundMeetingTable' || (roundChairBases.length === 4 && roundChairBases.every(mesh => mesh.geometry === _roundFurnitureCylGeo && mesh.userData.multiSeatColorKey === 'pedestal')),
+      roundChairBaseEditorLabel: type !== 'smallRoundMeetingTable' || editorHost.textContent?.includes('Table pedestal & round chair bases'),
+      diningShadowRemoved: type !== 'diningTable' || diningGroundFootprints.length === 0,
+      outdoorShadowRemoved: type !== 'outdoorCafeTable' || outdoorGroundFootprints.length === 0,
+      outdoorUmbrellaRaisedThirtyPercent: type !== 'outdoorCafeTable' || (
+        Math.abs(model.userData.outdoorCafeUmbrella?.liftRatio - 0.30) < 0.0001 &&
+        Math.abs(model.userData.outdoorCafeUmbrella?.canopyY - model.userData.outdoorCafeUmbrella?.originalCanopyY * 1.30) < 0.0001 &&
+        Math.abs(model.userData.outdoorCafeUmbrella?.poleHeight - (1.04 + model.userData.outdoorCafeUmbrella?.lift)) < 0.0001
+      ),
+      outdoorChairFourLegs: type !== 'outdoorCafeTable' || (
+        outdoorCafeChairLegs.length === 16 &&
+        requiredSeatIds.every(seatId => outdoorCafeChairLegs.filter(leg => leg.userData.outdoorCafeChairLeg === seatId).length === 4)
+      ),
+      cafeLaptopRemoved: type !== 'smallCafeTable' || cafeLaptopParts.length === 0,
+    };
+    model.traverse(object => {
+      if (Array.isArray(object.material)) object.material.forEach(material => material?.dispose?.());
+      else object.material?.dispose?.();
+    });
+    return summary;
+  });
+  return {
+    ok: summaries.every(summary => summary.fourTaggedSeats && summary.allChairsFaceCenter && summary.rotationAwareSeatFacing && summary.occupiedAgentFollowsChairTransform && summary.manualReleaseUsesTransformedExit && summary.fourReservableSeats && summary.seatApproachAndExit && summary.manualFourSeatConfig && summary.finiteManualTableVisit && summary.allColorFieldsRendered && summary.colorEditorRendered && summary.roundTabletop && summary.roundChairBases && summary.roundChairBaseEditorLabel && summary.diningShadowRemoved && summary.outdoorShadowRemoved && summary.outdoorUmbrellaRaisedThirtyPercent && summary.outdoorChairFourLegs && summary.cafeLaptopRemoved),
+    summaries,
+  };
+};
+
+window.__verifyMeetingTableSeatStandingAndColorParity = () => {
+  const seatIds = ['seat-n1', 'seat-n2', 'seat-n3', 'seat-n4', 'seat-n5', 'seat-s1', 'seat-s2', 'seat-s3', 'seat-s4', 'seat-s5'];
+  const standingIds = ['stand-west-1', 'stand-west-2', 'stand-west-3', 'stand-east-1', 'stand-east-2', 'stand-east-3'];
+  const definitions = FURNITURE_INTERACTION_SPOTS.meetingTable || [];
+  const seatDefinitions = definitions.filter(definition => definition.roles?.includes('seat'));
+  const standingDefinitions = definitions.filter(definition => definition.roles?.includes('stand'));
+  const model = makeMeetingTable(0, 0, 1, {});
+  model.updateMatrixWorld(true);
+  const taggedSeatIds = new Set();
+  const taggedColorKeys = new Set();
+  const staticItems = [];
+  model.traverse(object => {
+    if (object?.userData?.interactionSpotId) taggedSeatIds.add(object.userData.interactionSpotId);
+    if (object?.userData?.multiSeatColorKey) taggedColorKeys.add(object.userData.multiSeatColorKey);
+    if (object?.userData?.tabletopStaticItem) staticItems.push(object.userData.tabletopStaticItem);
+  });
+  const scheme = MULTI_SEAT_COLOR_SCHEMES.meetingTable;
+  const editorHost = document.createElement('div');
+  appendMultiSeatColorEditor(editorHost, { furniture: { type: 'meetingTable' } });
+  const editorKeys = [...editorHost.querySelectorAll('input[data-multi-seat-color-key]')].map(input => input.dataset.multiSeatColorKey);
+  if (_activeMultiSeatColorPreview) {
+    clearMultiSeatColorPreview(_activeMultiSeatColorPreview.record);
+    _activeMultiSeatColorPreview = null;
+  }
+
+  const building = {
+    id: 'verify-large-meeting-table-building',
+    worldX: 4,
+    worldY: 6,
+    widthTiles: 24,
+    heightTiles: 20,
+    _rotation: 0,
+    interior: { floors: 2, furniture: [] },
+  };
+  const table = { id: 'verify-large-meeting-table', type: 'meetingTable', x: 10, z: 9, rotation: 0, floor: 2 };
+  building.interior.furniture.push(table);
+  const entry = { buildingId: building.id, building, table, index: 0 };
+  const previousBuilding = buildingsMap.get(building.id);
+  let seatAttachmentFollowsTransform = false;
+  let standingAttachmentFollowsTransform = false;
+  let everyPositionFacesCenter = false;
+  let reservationSummary = null;
+  try {
+    buildingsMap.set(building.id, building);
+    const candidates = getMeetingTablePositionCandidates(entry);
+    const store = getMeetingTableObjectUseSeatStore(table);
+    const reservations = candidates.map((candidate, index) => chooseAndReserveObjectUseSeat(store, [candidate], {
+      agentId: `verify-meeting-agent-${index + 1}`,
+      agentPosition: candidate.position,
+      actionId: 'planning.meeting',
+      reservationId: `verify-meeting-reservation-${index + 1}`,
+    }));
+    const overflow = chooseAndReserveObjectUseSeat(store, candidates, {
+      agentId: 'verify-meeting-agent-17',
+      agentPosition: { x: 0, z: 0 },
+      actionId: 'planning.meeting',
+      reservationId: 'verify-meeting-reservation-17',
+    });
+    reservationSummary = {
+      reservedCount: reservations.filter(result => result.ok).length,
+      uniquePositionCount: new Set(reservations.filter(result => result.ok).map(result => result.reservation.seatId)).size,
+      firstTenSeated: reservations.slice(0, 10).every(result => result.ok && result.reservation.seatId.startsWith('seat-')),
+      lastSixStanding: reservations.slice(10, 16).every(result => result.ok && result.reservation.seatId.startsWith('stand-')),
+      seventeenthRejected: overflow.ok === false && overflow.reason === 'no_free_seat',
+    };
+
+    const seatSpot = getFurnitureActionSpot(building, table, 'seat-n1');
+    const standingSpot = getFurnitureActionSpot(building, table, 'stand-east-2');
+    const seatedAgent = { id: 'verify-attached-meeting-seat', x: seatSpot.apiX, y: seatSpot.apiZ, _floor: 2, _idleActivity: { kind: 'meeting-table', phase: 'active', furnitureType: 'meetingTable', buildingId: building.id, furnitureIndex: 0, spotId: 'seat-n1', seatId: 'seat-n1', slotId: 'seat-n1', poseKind: 'seat', seated: true } };
+    const standingAgent = { id: 'verify-attached-meeting-stand', x: standingSpot.apiX, y: standingSpot.apiZ, _floor: 2, _idleActivity: { kind: 'meeting-table-stand', phase: 'active', furnitureType: 'meetingTable', buildingId: building.id, furnitureIndex: 0, spotId: 'stand-east-2', slotId: 'stand-east-2', poseKind: 'stand', meetingStanding: true } };
+    const seatBefore = syncAgentToCurrentTableSeatTransform(seatedAgent);
+    const standBefore = syncAgentToCurrentTableSeatTransform(standingAgent);
+    const beforeSeat = { x: seatedAgent.x, y: seatedAgent.y };
+    const beforeStand = { x: standingAgent.x, y: standingAgent.y };
+    table.x += 2.25;
+    table.z -= 1.5;
+    table.rotation = 90;
+    building._rotation = 270;
+    const seatAfter = syncAgentToCurrentTableSeatTransform(seatedAgent);
+    const standAfter = syncAgentToCurrentTableSeatTransform(standingAgent);
+    const transformedSeat = getFurnitureActionSpot(building, table, 'seat-n1');
+    const transformedStand = getFurnitureActionSpot(building, table, 'stand-east-2');
+    seatAttachmentFollowsTransform = Boolean(seatBefore && seatAfter && Math.hypot(beforeSeat.x - seatedAgent.x, beforeSeat.y - seatedAgent.y) > 0.1 && Math.abs(seatedAgent.x - transformedSeat.apiX) < 0.001 && Math.abs(seatedAgent.y - transformedSeat.apiZ) < 0.001 && Math.abs(normalizeAngleRad(seatedAgent._faceAngle - getFurnitureSpotFacingCenterAngle(building, table, transformedSeat))) < 0.001);
+    standingAttachmentFollowsTransform = Boolean(standBefore && standAfter && Math.hypot(beforeStand.x - standingAgent.x, beforeStand.y - standingAgent.y) > 0.1 && Math.abs(standingAgent.x - transformedStand.apiX) < 0.001 && Math.abs(standingAgent.y - transformedStand.apiZ) < 0.001 && Math.abs(normalizeAngleRad(standingAgent._faceAngle - getFurnitureSpotFacingCenterAngle(building, table, transformedStand))) < 0.001);
+    const center = getBuildingWorldPoint(building, table.x, table.z);
+    everyPositionFacesCenter = [...seatIds, ...standingIds].every(id => {
+      const spot = getFurnitureActionSpot(building, table, id);
+      const angle = getFurnitureSpotFacingCenterAngle(building, table, spot);
+      const dx = center.x * API_TILE - spot.apiX;
+      const dz = center.z * API_TILE - spot.apiZ;
+      const length = Math.hypot(dx, dz) || 1;
+      return Math.sin(angle) * (dx / length) + Math.cos(angle) * (dz / length) > 0.999;
+    });
+  } finally {
+    if (previousBuilding) buildingsMap.set(building.id, previousBuilding);
+    else buildingsMap.delete(building.id);
+  }
+  const summary = {
+    tenIndividualChairTargets: taggedSeatIds.size === 10 && seatIds.every(id => taggedSeatIds.has(id)),
+    tenExclusiveSeatDefinitions: seatDefinitions.length === 10 && seatDefinitions.every(definition => definition.capacityKind === 'exclusive' && definition.capacity === 1 && definition.approachSpotId && definition.exitSpotId),
+    sixExclusiveStandingDefinitions: standingDefinitions.length === 6 && standingDefinitions.every(definition => definition.capacityKind === 'exclusive' && definition.capacity === 1),
+    manualSeatSelectionEnabled: getMultiSeatManualConfig('meetingTable')?.capacity === 10 && MANUAL_DROP_DIRECT_SEAT_DOCK_TYPES.has('meetingTable'),
+    sharedReservationConfig: getTableSeatingConfig('meetingTable')?.capacity === 10 && getTableSeatingConfig('meetingTable')?.standingCapacity === 6,
+    everyPositionFacesCenter,
+    seatAttachmentFollowsTransform,
+    standingAttachmentFollowsTransform,
+    colorFieldsTagged: scheme.fields.every(([key]) => taggedColorKeys.has(key)),
+    colorEditorRendered: scheme.fields.every(([key]) => editorKeys.includes(key)),
+    staticMeetingItemsPreserved: staticItems.filter(kind => kind === 'paperwork-packet').length === 4 && staticItems.filter(kind => kind === 'conference-speaker').length === 1,
+    calibratedSeatLift: getFurnitureSeatSurfaceLift('meetingTable') === 2.25,
+    reservationSummary,
+  };
+  return { ok: Object.entries(summary).every(([key, value]) => key === 'reservationSummary' ? Object.values(value || {}).every(Boolean) : value === true), ...summary, seatIds, standingIds, taggedSeatIds: [...taggedSeatIds].sort(), taggedColorKeys: [...taggedColorKeys].sort(), editorKeys };
+};
+
+window.__verifyTabletopStaticItemsPolicy = () => {
+  const builders = Object.freeze({
+    sideTable: makeSideTable3D,
+    draftingTable: makeDraftingTable3D,
+    meetingTable: makeMeetingTable,
+    diningTable: makeDiningTable3D,
+    smallCafeTable: makeSmallCafeTable3D,
+    patioTable: makePatioTable3D,
+    outdoorCafeTable: makeOutdoorCafeTable3D,
+    picnicTable: makePicnicTable3D,
+    smallRoundMeetingTable: makeSmallRoundMeetingTable3D,
+    poolTable: makePoolTable3D,
+    pingpong: makePingPongTable,
+  });
+  const summaries = Object.entries(builders).map(([type, builder]) => {
+    const model = builder(0, 0, 1, {});
+    const cleanup = model.userData?.tabletopCleanup || null;
+    let diningSurfaceLayerCount = 0;
+    let meshCount = 0;
+    const tabletopStaticItems = [];
+    model.traverse(object => {
+      if (object?.userData?.tabletopStaticItem) tabletopStaticItems.push(object.userData.tabletopStaticItem);
+      if (object?.isMesh) {
+        meshCount += 1;
+        if (object.userData?.diningTableSurfaceLayer === 'tabletop') diningSurfaceLayerCount += 1;
+      }
+    });
+    const expectedStaticItemCount = type === 'meetingTable' ? 5 : 0;
+    const staticItemsMatchPolicy = cleanup?.type === type &&
+      cleanup?.staticItemCount === expectedStaticItemCount &&
+      tabletopStaticItems.length === expectedStaticItemCount &&
+      (type !== 'meetingTable' || (
+        tabletopStaticItems.filter(item => item === 'paperwork-packet').length === 4 &&
+        tabletopStaticItems.filter(item => item === 'conference-speaker').length === 1
+      ));
+    const diningSingleLayer = type !== 'diningTable' || (
+      cleanup?.tabletopLayerCount === 1 &&
+      cleanup?.tableAccentLayerCount === 0 &&
+      cleanup?.tableFrameLayerCount === 0 &&
+      diningSurfaceLayerCount === 1
+    );
+    model.traverse(object => {
+      if (Array.isArray(object.material)) object.material.forEach(material => material?.dispose?.());
+      else object.material?.dispose?.();
+    });
+    return { type, staticItemsMatchPolicy, tabletopStaticItems, diningSingleLayer, diningSurfaceLayerCount, meshCount };
+  });
+  return {
+    ok: summaries.length === Object.keys(builders).length && summaries.every(summary => summary.staticItemsMatchPolicy && summary.diningSingleLayer),
+    summaries,
+  };
+};
+window.__verifyCleanTabletops = window.__verifyTabletopStaticItemsPolicy;
+
+window.__verifyConsumableTabletopSurfacePlacement = () => {
+  const builders = Object.freeze({
+    diningTable: makeDiningTable3D,
+    smallCafeTable: makeSmallCafeTable3D,
+    outdoorCafeTable: makeOutdoorCafeTable3D,
+    picnicTable: makePicnicTable3D,
+    smallRoundMeetingTable: makeSmallRoundMeetingTable3D,
+  });
+  const summaries = Object.entries(builders).map(([type, builder]) => {
+    const model = builder(0, 0, 1, {});
+    model.updateMatrixWorld(true);
+    const spec = getConsumableSurfaceSpec(type);
+    const surfaceBounds = [];
+    model.traverse(object => {
+      if (object?.isMesh && object.userData?.consumableTabletopSurface === type) {
+        surfaceBounds.push(new THREE.Box3().setFromObject(object));
+      }
+    });
+    const seatDefinitions = (FURNITURE_INTERACTION_SPOTS[type] || []).filter(definition => definition.roles?.includes('seat'));
+    const seatPlacements = seatDefinitions.map(definition => {
+      const facingVectors = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] };
+      const authoredFacing = facingVectors[String(definition.facing || '').toLowerCase()] || null;
+      const length = Math.hypot(Number(definition.dx) || 0, Number(definition.dz) || 0) || 1;
+      const inwardX = authoredFacing?.[0] ?? (-(Number(definition.dx) || 0) / length);
+      const inwardZ = authoredFacing?.[1] ?? (-(Number(definition.dz) || 0) / length);
+      const sideX = inwardZ;
+      const sideZ = -inwardX;
+      const x = (Number(definition.dx) || 0) + inwardX * spec.forwardOffset + sideX * spec.sideOffset;
+      const z = (Number(definition.dz) || 0) + inwardZ * spec.forwardOffset + sideZ * spec.sideOffset;
+      const supportingSurface = surfaceBounds.find(bounds =>
+        x >= bounds.min.x - 0.001 && x <= bounds.max.x + 0.001 &&
+        z >= bounds.min.z - 0.001 && z <= bounds.max.z + 0.001 &&
+        Math.abs(bounds.max.y - spec.surfaceHeight) < 0.0001
+      );
+      return { seatId: definition.id, x, z, supportedAtExactTop: Boolean(supportingSurface) };
+    });
+    const scaledAgentPlacements = [0.68, 0.8, 0.88].map(scale => {
+      const root = new THREE.Group();
+      root.scale.setScalar(scale);
+      root.position.y = 2.6 + 0.023;
+      root.userData._groundY = 2.6;
+      const agent = {
+        _group3d: root,
+        _idleActivity: {
+          furnitureType: type,
+          consumeDestinationKind: 'table-seat',
+          consumePresentation: 'surface',
+          consumeSurfaceHeight: spec.surfaceHeight,
+          consumeSurfaceForwardOffset: spec.forwardOffset,
+          consumeSurfaceSideOffset: spec.sideOffset,
+        },
+      };
+      const asset = { userData: { consumeSurfaceBottomY: -0.1425 } };
+      const placement = resolveConsumableSurfaceAssetPlacement(agent, asset);
+      const worldBottomY = root.position.y + (placement.y + asset.userData.consumeSurfaceBottomY) * scale;
+      return {
+        scale,
+        worldBottomY,
+        expectedWorldBottomY: root.userData._groundY + spec.surfaceHeight + 0.004,
+        exactHeight: Math.abs(worldBottomY - (root.userData._groundY + spec.surfaceHeight + 0.004)) < 0.0001,
+        exactForwardOffset: Math.abs(placement.z * scale - spec.forwardOffset) < 0.0001,
+        exactSideOffset: Math.abs(placement.x * scale - spec.sideOffset) < 0.0001,
+      };
+    });
+    const taggedTopsExact = surfaceBounds.length > 0 && surfaceBounds.every(bounds => Math.abs(bounds.max.y - spec.surfaceHeight) < 0.0001);
+    const diningTabletopIsSubstantial = type !== 'diningTable' || surfaceBounds.some(bounds => Math.abs((bounds.max.y - bounds.min.y) - 0.12) < 0.0001);
+    model.traverse(object => {
+      if (Array.isArray(object.material)) object.material.forEach(material => material?.dispose?.());
+      else object.material?.dispose?.();
+    });
+    return {
+      type,
+      surfaceHeight: spec.surfaceHeight,
+      taggedSurfaceCount: surfaceBounds.length,
+      taggedTopsExact,
+      diningTabletopIsSubstantial,
+      seatPlacements,
+      scaledAgentPlacements,
+      ok: taggedTopsExact && diningTabletopIsSubstantial && seatPlacements.length === 4 && seatPlacements.every(seat => seat.supportedAtExactTop) && scaledAgentPlacements.every(entry => entry.exactHeight && entry.exactForwardOffset && entry.exactSideOffset),
+    };
+  });
+  return { ok: summaries.length === 5 && summaries.every(summary => summary.ok), summaries };
 };
 
 window._useBarStoolFurniture = (mode = 'sit') => useSingleSeatChairFurniture('barStool', mode);
@@ -59036,6 +61210,142 @@ window.__verifyPhase3CTask7ParkBenchLifecycle = () => {
     firstFinalState: store.reservations.find(r => r.id === first.reservation?.id)?.state || null,
     secondFinalState: store.reservations.find(r => r.id === second.reservation?.id)?.state || null,
     benchState: bench.benchState || null,
+  };
+};
+
+window.__verifyParkBenchWidthPostsAndColors = () => {
+  const scheme = MULTI_SEAT_COLOR_SCHEMES.parkBench;
+  const customColors = {
+    wood: '#6b4423',
+    seatTop: '#d19a66',
+    back: '#315f3b',
+    backTop: '#75a478',
+    metal: '#253141',
+  };
+  const model = makeParkBench3D(0, 0, 1, { type: 'parkBench', parkBenchColors: customColors });
+  const meshesByColorKey = new Map();
+  const seatMeshes = new Map();
+  const backSupports = [];
+  model.traverse(mesh => {
+    if (!mesh?.isMesh) return;
+    const colorKey = mesh.userData?.multiSeatColorKey;
+    if (colorKey) {
+      if (!meshesByColorKey.has(colorKey)) meshesByColorKey.set(colorKey, []);
+      meshesByColorKey.get(colorKey).push(mesh);
+    }
+    if (mesh.userData?.interactionSpotId) seatMeshes.set(mesh.userData.interactionSpotId, mesh);
+    if (mesh.userData?.parkBenchBackSupport) backSupports.push(mesh);
+  });
+
+  const seatIds = ['seat-left', 'seat-center', 'seat-right'];
+  const seatCenters = seatIds.map(id => Number(seatMeshes.get(id)?.position.x));
+  const seatGaps = seatCenters.slice(1).map((center, index) => Number((center - seatCenters[index]).toFixed(3)));
+  const interactionSeatCenters = seatIds.map(id => Number(
+    FURNITURE_INTERACTION_SPOTS.parkBench.find(spot => spot.id === id)?.dx,
+  ));
+  const backrest = (meshesByColorKey.get('back') || [])[0] || null;
+  const postsAtBackrest = backSupports.length === 3 && !!backrest && backSupports.every(post =>
+    Math.abs(Number(post.position.z) - Number(backrest.position.z)) < 0.001 && Number(post.position.z) < 0,
+  );
+  const customColorsRendered = scheme.fields.every(([key]) =>
+    (meshesByColorKey.get(key) || []).length > 0 &&
+    (meshesByColorKey.get(key) || []).every(mesh => `#${mesh.material.color.getHexString()}` === customColors[key]),
+  );
+
+  const editorHost = document.createElement('div');
+  appendMultiSeatColorEditor(editorHost, { furniture: { type: 'parkBench', parkBenchColors: customColors } });
+  const colorInputs = [...editorHost.querySelectorAll('input[type="color"][data-multi-seat-color-key]')];
+  const editorRendered = colorInputs.length === scheme.fields.length &&
+    scheme.fields.every(([key]) => colorInputs.some(input => input.dataset.multiSeatColorKey === key && input.value === customColors[key])) &&
+    /Apply park bench colors/.test(editorHost.textContent || '') &&
+    /Reset park bench colors/.test(editorHost.textContent || '');
+  if (_activeMultiSeatColorPreview) {
+    clearMultiSeatColorPreview(_activeMultiSeatColorPreview.record);
+    _activeMultiSeatColorPreview = null;
+  }
+
+  const placedNode = {
+    type: 'parkBench',
+    renderType: 'parkBench',
+    catalogId: 'parkBench',
+    assetId: 'parkBench',
+    lifecycle: { stationary: true },
+  };
+  initializeOutdoorPlacedParkBenchNode(placedNode, 'parkBench');
+  const placementInitialized = placedNode.capacity?.seated === 3 &&
+    placedNode.benchState?.seats === 3 &&
+    placedNode.lifecycle?.colorProperty === 'parkBenchColors' &&
+    placedNode.lifecycle?.routing?.seatSpotIds?.join('|') === seatIds.join('|') &&
+    scheme.fields.every(([key]) => placedNode.parkBenchColors?.[key] === scheme.defaults[key]);
+
+  const readOnlySnapshot = Object.freeze({
+    type: 'parkBench',
+    objectUseSeats: Object.freeze({
+      reservations: Object.freeze([
+        Object.freeze({ seatId: 'seat-left', state: 'held' }),
+      ]),
+    }),
+  });
+  let readOnlySnapshotSafe = false;
+  try {
+    const occupied = getActiveParkBenchReservationSeatIds(readOnlySnapshot);
+    readOnlySnapshotSafe = occupied.size === 1 && occupied.has('seat-left');
+  } catch {
+    readOnlySnapshotSafe = false;
+  }
+
+  const rotatedBuilding = {
+    id: 'verify-park-bench-width-building',
+    type: 'outdoor',
+    widthTiles: 10,
+    heightTiles: 8,
+    x: 0,
+    y: 0,
+    rotation: 0,
+    outdoorArea: { id: 'verify-park-bench-width-area', nodes: [] },
+  };
+  const rotatedBench = { id: 'verify-park-bench-width-node', type: 'parkBench', x: 4, z: 4, rotation: 90 };
+  rotatedBuilding.outdoorArea.nodes.push(rotatedBench);
+  const rotatedCandidates = getParkBenchSeatCandidates(rotatedBuilding, rotatedBench);
+  const rotatedCenters = seatIds.map(id => rotatedCandidates.find(candidate => candidate.seatId === id)?.position || null);
+  const rotatedGaps = rotatedCenters.slice(1).map((center, index) => center && rotatedCenters[index]
+    ? Number((Math.hypot(center.x - rotatedCenters[index].x, center.z - rotatedCenters[index].z) / API_TILE).toFixed(3))
+    : null);
+  const facing0 = getOutdoorNodeSpotFacingAngle(rotatedBuilding, { ...rotatedBench, rotation: 0 }, 'seat-center', 'north');
+  const facing90 = getOutdoorNodeSpotFacingAngle(rotatedBuilding, rotatedBench, 'seat-center', 'north');
+  const rotationPreservesSpacingAndFacing = rotatedGaps.every(gap => Math.abs(gap - 0.70) < 0.001) &&
+    Number.isFinite(facing0) && Number.isFinite(facing90) && Math.abs(facing0 - facing90) > 0.1;
+
+  const widthAndSpacingMatch = model.userData?.parkBenchGeometry?.halfWidth === 1.12 &&
+    FURNITURE_HALF_SIZES.parkBench?.[0] === 1.12 &&
+    seatGaps.every(gap => gap === 0.70) &&
+    interactionSeatCenters.every((center, index) => Math.abs(center - seatCenters[index]) < 0.001);
+  return {
+    ok: scheme.property === 'parkBenchColors' &&
+      scheme.fields.length === 5 &&
+      widthAndSpacingMatch &&
+      postsAtBackrest &&
+      customColorsRendered &&
+      editorRendered &&
+      placementInitialized &&
+      readOnlySnapshotSafe &&
+      rotationPreservesSpacingAndFacing,
+    halfWidth: model.userData?.parkBenchGeometry?.halfWidth || null,
+    seatCenters,
+    seatGaps,
+    interactionSeatCenters,
+    rotatedGaps,
+    postsAtBackrest,
+    backSupportPositions: backSupports.map(post => [Number(post.position.x.toFixed(3)), Number(post.position.z.toFixed(3))]),
+    renderedColorKeys: [...meshesByColorKey.keys()].sort(),
+    customColorsRendered,
+    editorRendered,
+    editorColorInputCount: colorInputs.length,
+    placementInitialized,
+    readOnlySnapshotSafe,
+    rotationPreservesSpacingAndFacing,
+    facing0,
+    facing90,
   };
 };
 
@@ -59733,10 +62043,12 @@ window.__verifyPhase3CTask10SeatingRegressionHandoff = async () => {
     sectionalSofa: window.__verifyPhase3CTask4SectionalSofaChaiseLifecycle?.(),
     loveseat: window.__verifyPhase3CTask3LoveseatTwoSeatLifecycle?.(),
     parkBench: window.__verifyPhase3CTask7ParkBenchLifecycle?.(),
+    parkBenchUpgrade: window.__verifyParkBenchWidthPostsAndColors?.(),
     hallwayBench: window.__verifyPhase3CTask8HallwayBenchLifecycle?.(),
     multiSeatCouchParity: window.__verifyMultiSeatCouchParityUpgrades?.(),
     chairUpgrades: window.__verifyArmchairConferenceChairUpgrades?.(),
     tableSeating: window.__verifyPhase3CTask9TableSeatingAudit?.(),
+    parkTableSeating: window.__verifyParkTableSeating?.(),
   };
   const barberChair = typeof window.__verifyPhase3Task7BarberChairHairEditor === 'function'
     ? await window.__verifyPhase3Task7BarberChairHairEditor({ keepOpen: false })
@@ -62100,7 +64412,7 @@ window._useSmallCafeTableFurniture = (mode = 'eat') => {
   if (mode !== 'setdown') {
     const store = getSmallCafeTableObjectUseSeatStore(table);
     const candidates = getTableSeatCandidates(building, table, index, { actionId }).filter(candidate => !preferredSeatId || candidate.seatId === preferredSeatId || !occupiedSpotIds.has(candidate.seatId));
-    reservationResult = chooseAndReserveObjectUseSeat(store, candidates, { agentId: agent.id || agent.name || 'agent', agentPosition: { x: agent.x || 0, z: agent.y || 0 }, occupiedSeatIds: occupiedSpotIds, actionId });
+    reservationResult = chooseAndReserveObjectUseSeat(store, candidates.filter(candidate => candidate.seatId === preferredSeatId), { agentId: agent.id || agent.name || 'agent', agentPosition: { x: agent.x || 0, z: agent.y || 0 }, occupiedSeatIds: occupiedSpotIds, actionId });
     if (!reservationResult.ok) {
       showToast('No free small cafe table seat available', 'warning');
       _showFurnitureActions(buildingId, index);
@@ -62109,18 +64421,19 @@ window._useSmallCafeTableFurniture = (mode = 'eat') => {
     selectedSeat = reservationResult.seat;
   }
   const reservedSpotId = selectedSeat?.seatId || spot.spotId;
+  const activationSpot = selectedSeat ? (getFurnitureActionSpot(building, table, reservedSpotId) || spot) : spot;
   table.reservation = { id: reservationResult?.reservation?.id || null, agentId: agent.id || agent.name || 'agent', actionId, spotId: reservedSpotId, seatId: selectedSeat?.seatId || null, activationSpotId: selectedSeat?.activationSpotId || reservedSpotId, approachSpotId: selectedSeat?.approachSpotId || reservedSpotId, capacityKey: reservationResult?.reservation?.capacityKey || null, status: 'held' };
   table.activeUse = { state: 'reserved', mode, actionId, agentId: agent.id || null, reservedSeatId: selectedSeat?.seatId || null };
   table.tableState = { ...(table.tableState || {}), seats: 4, acceptsTemporary: ['Coffee Drink', 'Heated Snack', 'Microwave Food', 'Popcorn', 'Pizza Slice', 'Sandwich'], lastAction: actionId };
-  setAgentTargetForExplicitObjectAction(agent, { x: spot.apiX, y: spot.apiZ, floor: spot.floor }, building, spot.floor);
+  setAgentTargetForExplicitObjectAction(agent, { x: activationSpot.apiX, y: activationSpot.apiZ, floor: activationSpot.floor }, building, activationSpot.floor);
   agent._idleActivity = {
     kind: `small-cafe-table-${mode}`,
     phase: 'approach',
     buildingId,
     furnitureIndex: index,
     stayMs: mode === 'work' ? 16000 : (mode === 'talk' ? 14000 : 11000),
-    faceAngle: spot.faceAngle,
-    dockTarget: { x: spot.apiX, y: spot.apiZ },
+    faceAngle: selectedSeat ? (getFurnitureSpotFacingCenterAngle(building, table, activationSpot) ?? activationSpot.faceAngle) : activationSpot.faceAngle,
+    dockTarget: { x: activationSpot.apiX, y: activationSpot.apiZ },
     dockSnapRadius: 7,
     furnitureType: 'smallCafeTable',
     seatSurfaceLift: getFurnitureSeatSurfaceLift('smallCafeTable'),
@@ -62272,9 +64585,18 @@ window._useOutdoorCafeTableFurniture = (mode = 'sit') => {
     }
     selectedSeat = reservationResult.seat;
   }
-  const reservedSpotId = selectedSeat?.seatId || spot.spotId;
-  table.reservation = { id: reservationResult?.reservation?.id || null, agentId: agent.id || agent.name || 'agent', actionId, spotId: reservedSpotId, seatId: selectedSeat?.seatId || null, activationSpotId: selectedSeat?.activationSpotId || reservedSpotId, approachSpotId: selectedSeat?.approachSpotId || reservedSpotId, capacityKey: reservationResult?.reservation?.capacityKey || null, status: 'held' };
-  table.activeUse = { state: 'reserved', mode: normalizedMode, actionId, agentId: agent.id || null, reservedSeatId: selectedSeat?.seatId || null };
+  const activationSpot = selectedSeat
+    ? (getFurnitureActionSpot(building, table, selectedSeat.seatId) || spot)
+    : spot;
+  const routeSpot = normalizedMode === 'setdown'
+    ? activationSpot
+    : (getFurnitureActionSpot(building, table, selectedSeat?.approachSpotId) || activationSpot);
+  const reservedSpotId = selectedSeat?.seatId || activationSpot.spotId;
+  const exitSpotId = selectedSeat?.exitSpotId || selectedSeat?.approachSpotId || routeSpot.spotId;
+  const baseObjectKey = getOutdoorCafeTableObjectKey(buildingId, index);
+  const objectKey = selectedSeat ? `${baseObjectKey}:slot:${reservedSpotId}` : baseObjectKey;
+  table.reservation = { id: reservationResult?.reservation?.id || null, agentId: agent.id || agent.name || 'agent', actionId, objectKey, baseObjectKey, spotId: reservedSpotId, slotId: reservedSpotId, seatId: selectedSeat?.seatId || null, activationSpotId: selectedSeat?.activationSpotId || reservedSpotId, approachSpotId: selectedSeat?.approachSpotId || routeSpot.spotId, dismountSpotId: exitSpotId, exitSpotId, capacityKey: reservationResult?.reservation?.capacityKey || null, status: 'held' };
+  table.activeUse = { state: 'reserved', mode: normalizedMode, actionId, agentId: agent.id || null, reservedSeatId: selectedSeat?.seatId || null, interactionSpotId: reservedSpotId, approachSpotId: routeSpot.spotId, dismountSpotId: exitSpotId, exitSpotId };
   const previousSurfaceItems = Math.max(0, Number(table.tableState?.surfaceItems ?? table.tableState?.temporaryItemSurfaceCount ?? 0));
   const nextSurfaceItems = normalizedMode === 'setdown' ? Math.min(2, previousSurfaceItems + 1) : previousSurfaceItems;
   table.tableState = {
@@ -62288,24 +64610,47 @@ window._useOutdoorCafeTableFurniture = (mode = 'sit') => {
     cleanupOnReload: true,
     persistentFurniture: true,
   };
-  setAgentTargetForExplicitObjectAction(agent, { x: spot.apiX, y: spot.apiZ, floor: spot.floor }, building, spot.floor);
+  const faceAngle = selectedSeat
+    ? (getFurnitureSpotFacingCenterAngle(building, table, activationSpot) ?? activationSpot.faceAngle)
+    : activationSpot.faceAngle;
+  setAgentTargetForExplicitObjectAction(agent, {
+    x: activationSpot.apiX,
+    y: activationSpot.apiZ,
+    floor: activationSpot.floor,
+    faceAngle,
+    objectKey,
+    baseObjectKey,
+    spotId: reservedSpotId,
+    interactionSpotId: reservedSpotId,
+    slotId: reservedSpotId,
+    activationSpotId: selectedSeat?.activationSpotId || reservedSpotId,
+    approachSpotId: routeSpot.spotId,
+    exitSpotId,
+    dismountSpotId: exitSpotId,
+    routeApproachTarget: { x: routeSpot.apiX, y: routeSpot.apiZ, floor: routeSpot.floor, spotId: routeSpot.spotId, faceAngle },
+  }, building, routeSpot.floor);
   agent._idleActivity = {
     kind: `outdoor-cafe-table-${normalizedMode}`,
     phase: 'approach',
     buildingId,
     furnitureIndex: index,
     stayMs: normalizedMode === 'socialize' ? 14000 : 11000,
-    faceAngle: spot.faceAngle,
-    dockTarget: { x: spot.apiX, y: spot.apiZ },
+    faceAngle,
+    dockTarget: { x: activationSpot.apiX, y: activationSpot.apiZ },
+    routeApproachTarget: { x: routeSpot.apiX, y: routeSpot.apiZ, floor: routeSpot.floor, spotId: routeSpot.spotId, faceAngle },
     dockSnapRadius: 7,
     furnitureType: 'outdoorCafeTable',
     seatSurfaceLift: getFurnitureSeatSurfaceLift('outdoorCafeTable'),
     spotId: reservedSpotId,
     seatId: selectedSeat?.seatId || null,
+    slotId: reservedSpotId,
     activationSpotId: selectedSeat?.activationSpotId || reservedSpotId,
-    approachSpotId: selectedSeat?.approachSpotId || reservedSpotId,
+    approachSpotId: selectedSeat?.approachSpotId || routeSpot.spotId,
+    dismountSpotId: exitSpotId,
+    exitSpotId,
     reservationId: reservationResult?.reservation?.id || null,
-    objectKey: reservationResult?.reservation?.objectKey || null,
+    objectKey,
+    baseObjectKey,
     capacityKey: reservationResult?.reservation?.capacityKey || null,
     mode: normalizedMode,
     action: actionId,
@@ -62470,7 +64815,7 @@ window._useSmallRoundMeetingTableFurniture = (mode = 'meeting') => {
     const spot = getFurnitureActionSpot(building, table, spotId) || getFurnitureActionSpot(building, table);
     if (!spot) continue;
     const actionId = mode === 'talk' ? 'planning.smallRoundMeetingTableTalk' : 'planning.smallRoundMeetingTablePlan';
-    const candidates = getTableSeatCandidates(building, table, index, { actionId }).filter(candidate => candidate.seatId === spotId || !occupiedSpotIds.has(candidate.seatId));
+    const candidates = getTableSeatCandidates(building, table, index, { actionId }).filter(candidate => candidate.seatId === spotId);
     const reservationResult = chooseAndReserveObjectUseSeat(store, candidates, { agentId: agent.id || agent.name || 'agent', agentPosition: { x: agent.x || 0, z: agent.y || 0 }, occupiedSeatIds: occupiedSpotIds, actionId });
     if (!reservationResult.ok) continue;
     const selectedSeat = reservationResult.seat;
@@ -62483,7 +64828,7 @@ window._useSmallRoundMeetingTableFurniture = (mode = 'meeting') => {
       buildingId,
       furnitureIndex: index,
       stayMs: mode === 'meeting' ? 18000 : 13000,
-      faceAngle: spot.faceAngle,
+      faceAngle: getFurnitureSpotFacingCenterAngle(building, table, spot) ?? spot.faceAngle,
       dockTarget: { x: spot.apiX, y: spot.apiZ },
       dockSnapRadius: 7,
       furnitureType: 'smallRoundMeetingTable',
@@ -65580,27 +67925,15 @@ function setPingPongRacket(agent, color, activity) {
 }
 
 function clearPingPongRacket(agent) {
-  if (!agent) return;
-  const carried = agent._carriedItem || agent._carrying || null;
-  const isRacket = String(carried?.kind || carried?.label || agent.carryItem || '').toLowerCase().includes('pingpong');
-  if (!isRacket) return;
-  agent._carriedItem = null;
-  agent._carrying = null;
-  agent._carryItem = null;
-  if (agent.carryItem === 'pingpong-racket') agent.carryItem = null;
-  agent.carryItemTimer = 0;
-  agent._pingPongPaddleColor = null;
-  agent._pingPongSide = null;
-  removeVisiblePingPongPaddle(agent);
+  return clearPingPongEquipment(agent, {
+    clearActivity: false,
+    clearRuntimePosition: false,
+    reason: 'racket-release',
+  });
 }
 
 function removeVisiblePingPongPaddle(agent) {
-  const group = agent?._group3d;
-  if (!group) return;
-  const existing = group.getObjectByName?.('visiblePingPongPaddle');
-  if (!existing) return;
-  group.remove(existing);
-  existing.traverse?.(child => { child.geometry?.dispose?.(); });
+  return removePingPongRacketVisual(agent);
 }
 
 function ensureVisiblePingPongPaddle(agent, color = 0xf44336, side = 'left') {
@@ -66614,7 +68947,9 @@ function updatePingPongGameMeshes() {
       continue;
     }
     const building = buildingsMap.get(root.userData.buildingId);
-    const table = building?.interior?.furniture?.[root.userData.furnitureIndex];
+    const table = root.userData.outdoorNodeId
+      ? getRawOutdoorNodeById(building, root.userData.outdoorNodeId)
+      : building?.interior?.furniture?.[root.userData.furnitureIndex];
     updatePingPongMeshVisual(root, table?.pingPongGame || null, building, table);
   }
 }
@@ -66947,6 +69282,217 @@ function updatePingPongGames(dt = 0) {
 }
 
 if (typeof window !== 'undefined') {
+  window.__getLivePingPongState = () => {
+    const tables = [];
+    for (const root of _pingPongVisualRoots) {
+      if (!root?.parent || !isObjectAttachedToScene(root)) continue;
+      const building = buildingsMap.get(root.userData.buildingId) || null;
+      const table = root.userData.outdoorNodeId
+        ? getRawOutdoorNodeById(building, root.userData.outdoorNodeId)
+        : building?.interior?.furniture?.[root.userData.furnitureIndex] || null;
+      const objectKey = table?._runtimeWorldObjectState?.objectKey ||
+        (root.userData.furnitureIndex != null
+          ? getAgentRuntimeFurnitureObjectKey(root.userData.buildingId, root.userData.furnitureIndex, 'pingpong')
+          : '');
+      const runtimeState = objectKey ? _agentRuntimeClient?.worldObjects?.get?.(objectKey) || null : null;
+      const ball = root.userData?.pingPongVisualParts?.ball || root.getObjectByName?.('pingpongBall') || null;
+      const game = table?.pingPongGame || null;
+      tables.push({
+        buildingId: root.userData.buildingId || null,
+        furnitureIndex: root.userData.furnitureIndex ?? null,
+        outdoorNodeId: root.userData.outdoorNodeId || null,
+        objectKey,
+        appliedVersion: Number(table?._runtimeWorldObjectVersions?.[objectKey] || 0),
+        runtimeVersion: Number(runtimeState?.version || 0),
+        game: game ? { phase: game.phase, ballX: Number(game.ballX || 0), ballZ: Number(game.ballZ || 0), p1Score: Number(game.p1Score || 0), p2Score: Number(game.p2Score || 0), p1Id: game.p1Id || null, p2Id: game.p2Id || null } : null,
+        renderedBall: ball ? { visible: ball.visible === true, x: Number(ball.position.x || 0), z: Number(ball.position.z || 0) } : null,
+      });
+    }
+    const agents = agentsList.map(agent => {
+      const snapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
+      return {
+        id: agent.id,
+        name: agent.name || agent.id,
+        localActivity: agent._idleActivity?.kind || null,
+        authoritativeActivity: snapshot?.visualState?.activity?.kind || snapshot?.visualState?.activityKind || null,
+        paddleVisible: Boolean(
+          agent?._group3d?.getObjectByName?.('rightHandPingPongRacket') ||
+          agent?._group3d?.getObjectByName?.('visiblePingPongPaddle')
+        ),
+        paddleAssetVersion: agent?._group3d?.getObjectByName?.('rightHandPingPongRacket')?.userData?.assetVersion || null,
+      };
+    });
+    return { tables, agents };
+  };
+
+  window.__verifyPingPongRuntimeEpochReset = () => {
+    const buildingId = 'verify-pingpong-runtime-epoch-reset';
+    const table = { type: 'pingpong', x: 4, z: 4, buildingFloor: 1 };
+    const building = { id: buildingId, type: 'lounge', interior: { furniture: [table] } };
+    const previous = buildingsMap.get(buildingId) || null;
+    const hadPrevious = buildingsMap.has(buildingId);
+    const objectKey = getAgentRuntimeFurnitureObjectKey(buildingId, 0, 'pingpong');
+    try {
+      buildingsMap.set(buildingId, building);
+      const oldEpochApplied = applyAgentRuntimeWorldObjectStateToWorld({
+        objectKey, buildingId, furnitureIndex: 0, objectType: 'pingpong', owner: 'server-pingpong-runtime',
+        state: 'active', version: 900000, updatedAt: '2026-07-29T12:00:00.000Z',
+        data: { pingPongGame: { phase: 'playing', ballX: -0.7, ballZ: 0, p1Score: 0, p2Score: 0 } },
+      });
+      const newEpochApplied = applyAgentRuntimeWorldObjectStateToWorld({
+        objectKey, buildingId, furnitureIndex: 0, objectType: 'pingpong', owner: 'server-pingpong-runtime',
+        state: 'active', version: 4, updatedAt: '2026-08-04T12:00:00.000Z',
+        data: { pingPongGame: { phase: 'playing', ballX: 0.42, ballZ: -0.18, p1Score: 1, p2Score: 2 } },
+      });
+      const staleReplayRejected = applyAgentRuntimeWorldObjectStateToWorld({
+        objectKey, buildingId, furnitureIndex: 0, objectType: 'pingpong', owner: 'server-pingpong-runtime',
+        state: 'active', version: 3, updatedAt: '2026-08-04T11:59:59.000Z',
+        data: { pingPongGame: { phase: 'playing', ballX: -0.99, ballZ: -0.99, p1Score: 5, p2Score: 5 } },
+      }) === false;
+      return {
+        ok: oldEpochApplied === true && newEpochApplied === true && staleReplayRejected &&
+          table._runtimeWorldObjectVersions?.[objectKey] === 4 &&
+          table.pingPongGame?.ballX === 0.42 && table.pingPongGame?.p2Score === 2,
+        oldEpochApplied,
+        newEpochApplied,
+        staleReplayRejected,
+        appliedVersion: table._runtimeWorldObjectVersions?.[objectKey] || 0,
+        game: table.pingPongGame || null,
+      };
+    } finally {
+      if (hadPrevious) buildingsMap.set(buildingId, previous);
+      else buildingsMap.delete(buildingId);
+    }
+  };
+
+  window.__verifyPingPongEquipmentCleanup = () => {
+    const makeRacketItem = () => ({
+      id: 'verify-pingpong-racket',
+      kind: 'pingpong-racket',
+      label: 'Ping Pong Racket',
+      sourceFurnitureType: 'pingpong',
+    });
+    const makeAgent = (id) => {
+      const root = new THREE.Group();
+      const arm = new THREE.Group();
+      root.add(arm);
+      for (const name of ['rightHandPingPongRacket', 'visiblePingPongPaddle']) {
+        const visual = new THREE.Group();
+        visual.name = name;
+        visual.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial()));
+        arm.add(visual);
+      }
+      const racket = makeRacketItem();
+      return {
+        id,
+        status: 'idle',
+        x: 0,
+        y: 0,
+        _floor: 1,
+        _targetFloor: 1,
+        _group3d: root,
+        _idleActivity: { kind: 'pingpong-left', phase: 'active', objectType: 'pingpong', pingPongSide: 'left' },
+        _runtimeVisualState: {
+          activityActive: true,
+          activityKind: 'pingpong-left',
+          activity: { kind: 'pingpong-left', phase: 'active', objectType: 'pingpong' },
+          carrying: true,
+          carriedItem: racket,
+        },
+        _carriedItem: racket,
+        _carrying: racket,
+        _carryItem: racket,
+        carryItem: 'pingpong-racket',
+        carryItemTimer: 24000,
+        _pingPongSide: 'left',
+        _pingPongPaddleColor: 0xf44336,
+        _pingPongTrackZ: 0.2,
+        _pingPongBallZ: 0.15,
+        _pingPongSwingPulse: 12,
+      };
+    };
+    const hasPaddleVisual = (agent) => Boolean(
+      agent?._group3d?.getObjectByName?.('rightHandPingPongRacket') ||
+      agent?._group3d?.getObjectByName?.('visiblePingPongPaddle')
+    );
+    const hasRacketCarry = (agent) => [agent?._carriedItem, agent?._carrying, agent?._carryItem, agent?.carryItem]
+      .some(value => String(value?.kind || value?.label || value || '').toLowerCase().includes('pingpong'));
+
+    const interrupted = makeAgent('verify-pingpong-interrupted');
+    applyAgentRuntimeVisualState(interrupted, {
+      schemaVersion: 'agent-runtime-visual/v1',
+      status: 'meeting',
+      state: 'meeting',
+      resolvedAnimationId: 'meeting-sit-talk',
+      movement: { isMoving: false, isRunning: false },
+      activityActive: true,
+      activityKind: 'meeting-table-sit',
+      activity: { kind: 'meeting-table-sit', phase: 'active', objectType: 'meetingTable', animationId: 'meeting-sit-talk' },
+      carrying: false,
+    }, { state: 'meeting', target: { objectType: 'meetingTable', spotId: 'seat-n1' } });
+    const interruptionClean = interrupted._idleActivity?.kind === 'meeting-table-sit' &&
+      !hasRacketCarry(interrupted) && !hasPaddleVisual(interrupted) &&
+      interrupted._pingPongSide === null && interrupted._pingPongPaddleColor === null;
+
+    const replacement = makeAgent('verify-pingpong-replacement-carry');
+    const coffee = { kind: 'coffee-drink', label: 'Coffee Drink' };
+    applyAgentRuntimeVisualState(replacement, {
+      schemaVersion: 'agent-runtime-visual/v1',
+      status: 'idle',
+      state: 'moving',
+      resolvedAnimationId: 'walk',
+      movement: { isMoving: true, isRunning: false },
+      activityActive: true,
+      activityKind: 'coffee-desk-consume',
+      activity: { kind: 'coffee-desk-consume', phase: 'approach', objectType: 'desk' },
+      carrying: true,
+      carriedItem: coffee,
+    }, { state: 'routing', target: { objectType: 'desk' } });
+    const replacementCarryPreserved = replacement._idleActivity?.kind === 'coffee-desk-consume' &&
+      replacement._carriedItem?.kind === 'coffee-drink' &&
+      replacement._carrying?.kind === 'coffee-drink' &&
+      !hasPaddleVisual(replacement);
+
+    const completed = makeAgent('verify-pingpong-complete');
+    applyAgentRuntimeVisualState(completed, {
+      schemaVersion: 'agent-runtime-visual/v1',
+      status: 'idle',
+      state: 'idle',
+      resolvedAnimationId: 'idle',
+      movement: { isMoving: false, isRunning: false },
+      activityActive: false,
+      carrying: false,
+    }, { state: 'idle', target: null });
+    const completionClean = completed._idleActivity === null &&
+      !hasRacketCarry(completed) && !hasPaddleVisual(completed);
+
+    const orphaned = makeAgent('verify-pingpong-orphan');
+    const firstOrphanCleanup = clearPingPongEquipment(orphaned, { reason: 'orphan-player-released' });
+    const secondOrphanCleanup = clearPingPongEquipment(orphaned, { reason: 'orphan-player-released-repeat' });
+    const orphanCleanupIdempotent = firstOrphanCleanup.cleared === true &&
+      secondOrphanCleanup.cleared === false && !hasRacketCarry(orphaned) && !hasPaddleVisual(orphaned);
+
+    const mixedCarry = makeAgent('verify-pingpong-mixed-carry');
+    mixedCarry._carriedItem = coffee;
+    const mixedCleanup = clearPingPongEquipment(mixedCarry, { clearActivity: true, reason: 'preserve-replacement-item' });
+    const selectiveCarryCleanup = mixedCleanup.cleared === true &&
+      mixedCarry._carriedItem === coffee && mixedCarry._carrying === null && mixedCarry._carryItem === null &&
+      mixedCarry.carryItem === null && !hasPaddleVisual(mixedCarry);
+
+    return {
+      ok: interruptionClean && replacementCarryPreserved && completionClean && orphanCleanupIdempotent && selectiveCarryCleanup,
+      interruptionClean,
+      replacementCarryPreserved,
+      completionClean,
+      orphanCleanupIdempotent,
+      selectiveCarryCleanup,
+      interruptedActivity: interrupted._idleActivity?.kind || null,
+      replacementActivity: replacement._idleActivity?.kind || null,
+      replacementCarry: replacement._carriedItem?.kind || null,
+      cleanupReason: interrupted._lastPingPongEquipmentCleanup?.reason || null,
+    };
+  };
+
   window.__verifyPingPongRuntimeAdoption = () => {
     const tempBuildingId = 'verify-pingpong-runtime-adoption-building';
     const tempBuilding = {
@@ -67061,6 +69607,7 @@ if (typeof window !== 'undefined') {
 // Pool Table — one stationary recreation/social asset with integrated rail, pockets, balls, and play surface details.
 function makePoolTable3D(x, z, s = T) {
   const g = new THREE.Group();
+  g.userData.tabletopCleanup = Object.freeze({ type: 'poolTable', staticItemCount: 0 });
   // Regulation-ish proportions scaled between ping-pong and meeting tables: large enough for edge play spots, small enough for lounges.
   g.add(posVox(0, 0.42 * s, 0, 3.30 * s, 0.18 * s, 1.84 * s, 0x3f2414));
   g.add(posVox(0, 0.56 * s, 0, 2.86 * s, 0.09 * s, 1.40 * s, 0x0f7a3a));
@@ -67072,15 +69619,6 @@ function makePoolTable3D(x, z, s = T) {
   // Pocket cups are dark insets embedded in the single table asset.
   for (const [px, pz] of [[-1.44, -0.72], [0, -0.76], [1.44, -0.72], [-1.44, 0.72], [0, 0.76], [1.44, 0.72]]) {
     g.add(posVox(px * s, 0.76 * s, pz * s, 0.18 * s, 0.035 * s, 0.18 * s, 0x101010));
-  }
-  // Ball rack / cue ball dots are detail on the playing surface, not separate carryable assets.
-  const ballColors = [0xffffff, 0xffd54f, 0x1976d2, 0xd32f2f, 0x6a1b9a, 0xff8f00, 0x2e7d32, 0x111111, 0xc2185b];
-  const ballPositions = [[-0.82, 0], [0.58, 0], [0.72, -0.09], [0.72, 0.09], [0.86, -0.18], [0.86, 0], [0.86, 0.18], [1.00, -0.09], [1.00, 0.09]];
-  for (let i = 0; i < ballPositions.length; i++) {
-    const [bx, bz] = ballPositions[i];
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.055 * s, 10, 8), getMat(ballColors[i]));
-    ball.position.set(bx * s, 0.78 * s, bz * s);
-    g.add(ball);
   }
   // Subtle aiming diamonds and side chalk marks read at game scale without bundling another item.
   for (const sx of [-1.05, -0.35, 0.35, 1.05]) {
@@ -67098,6 +69636,7 @@ function makePoolTable3D(x, z, s = T) {
 // Ping-pong table (new furniture type)
 function makePingPongTable(x, z, s) {
   const g = new THREE.Group();
+  g.userData.tabletopCleanup = Object.freeze({ type: 'pingpong', staticItemCount: 0, runtimeItemCount: 1 });
   g.add(posVox(0, 0.5 * s, 0, 2.5 * s, 0.05 * s, 1.2 * s, 0x1b5e20));
   g.add(posVox(0, 0.535 * s, 0, 2.35 * s, 0.015 * s, 1.05 * s, 0x2e7d32));
   // White border and center service line.

@@ -11,7 +11,7 @@
  */
 import {
   buildCatalogRegistry,
-} from './agent-life-catalog-registry.mjs';
+} from './agent-life-catalog-registry.mjs?v=20260804-park-bench-width-r1';
 import {
   buildActionLocationRegistry,
 } from './agent-life-action-location-registry.mjs';
@@ -24,7 +24,7 @@ import {
 import {
   getObjectCatalogExample,
   normalizeObjectCatalogId,
-} from './agent-life-object-catalog-schema.mjs';
+} from './agent-life-object-catalog-schema.mjs?v=20260804-park-bench-width-r1';
 
 export const MVP_VERTICAL_SLICE_VERSION = 'agent-life-mvp-vertical-slice/v1';
 
@@ -99,9 +99,9 @@ export const MVP_VERTICAL_SLICE_INTERACTION_SPOTS = Object.freeze({
   ]),
   parkBench: Object.freeze([
     Object.freeze({ id: 'approach-front', dx: 0, dz: 0.82, facing: 'north', action: 'life.approachParkBench', roles: Object.freeze(['approach', 'queue']), capacityKind: 'queue', capacity: 2 }),
-    Object.freeze({ id: 'seat-left', dx: -0.44, dz: 0.08, facing: 'north', action: 'life.restAtBench', roles: Object.freeze(['seat', 'rest']), capacity: 1 }),
-    Object.freeze({ id: 'seat-center', dx: 0, dz: 0.08, facing: 'north', action: 'life.readAtBench', roles: Object.freeze(['seat', 'read', 'rest']), capacity: 1 }),
-    Object.freeze({ id: 'seat-right', dx: 0.44, dz: 0.08, facing: 'north', action: 'life.socialAtBench', roles: Object.freeze(['seat', 'social', 'talk']), capacity: 1 }),
+    Object.freeze({ id: 'seat-left', dx: -0.70, dz: 0.145, facing: 'north', action: 'life.restAtBench', roles: Object.freeze(['seat', 'rest']), capacity: 1 }),
+    Object.freeze({ id: 'seat-center', dx: 0, dz: 0.145, facing: 'north', action: 'life.readAtBench', roles: Object.freeze(['seat', 'read', 'rest']), capacity: 1 }),
+    Object.freeze({ id: 'seat-right', dx: 0.70, dz: 0.145, facing: 'north', action: 'life.socialAtBench', roles: Object.freeze(['seat', 'social', 'talk']), capacity: 1 }),
   ]),
   foodTruckCounter: Object.freeze([
     Object.freeze({ id: 'customer', dx: 0, dz: 0.82, facing: 'north', action: 'life.orderFood', roles: Object.freeze(['use']), capacity: 1 }),

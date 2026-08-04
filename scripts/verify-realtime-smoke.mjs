@@ -13,11 +13,16 @@ import {
   resolveRuntimeUrlForPage,
 } from '../src/client/js/agent-runtime-client.mjs';
 import {
+  CONSUMABLE_SURFACE_SPECS,
+} from '../src/client/js/consumable-surface-specs.mjs';
+import {
   AGENT_RUNTIME_ROOM_NAME,
   AgentRuntimeSnapshot,
   AgentRuntimeState,
   applySnapshotPlainToSchema,
   appendRuntimeLifecycleJournal,
+  buildScriptedObjectRuntimePlan,
+  buildServerScriptedConsumeSpatialIndex,
   DEFAULT_WORLD_RUNTIME_TICK_MS,
   LIVE_ACTION_RUNTIME_POLL_MS,
   LIVE_STATUS_RUNTIME_POLL_MS,
@@ -36,7 +41,10 @@ import {
   isServerAutomaticSeatApproachPreemptibleForManualDrop,
   isServerScriptedObjectTargetAvailable,
   listScriptedObjectRuntimeTargets,
+  listServerScriptedConsumeSeatTargets,
+  makeServerScriptedConsumeTarget,
   SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+  SERVER_MANUAL_TABLE_SEAT_DWELL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_POLL_MS,
   SERVER_SCRIPTED_OBJECT_RUNTIME_LEASE_OWNER,
   SERVER_SCRIPTED_OBJECT_RUNTIME_OWNER,
@@ -45,6 +53,7 @@ import {
   SERVER_SCRIPTED_IDLE_INITIAL_DELAY_MS,
   SERVER_WORLD_TOPOLOGY_OWNER,
   serverRuntimeReleasePointForTarget,
+  withServerManualObjectOccupancyDwell,
 } from '../src/realtime/agent-runtime-room.mjs';
 
 const root = process.cwd();
@@ -177,7 +186,7 @@ function verifyManualObjectOccupancyPolicy() {
     5 * 60 * 1000,
     'manual object occupancy should remain stable for five minutes unless the user moves or releases the agent',
   );
-  for (const objectType of ['barberChair', 'bed', 'chair', 'treadmill', 'trainingMat', 'outdoorExerciseStation']) {
+  for (const objectType of ['barberChair', 'bed', 'chair', 'diningTable', 'smallCafeTable', 'outdoorCafeTable', 'smallRoundMeetingTable', 'treadmill', 'trainingMat', 'outdoorExerciseStation']) {
     assert.equal(
       isServerManualObjectOccupancyTarget({
         objectType,
@@ -208,6 +217,173 @@ function verifyManualObjectOccupancyPolicy() {
     false,
     'waiting in a barber queue must not be mistaken for active chair occupancy',
   );
+  assert.equal(
+    SERVER_MANUAL_TABLE_SEAT_DWELL_MS,
+    20 * 1000,
+    'manually placed table agents should complete a normal finite visit',
+  );
+  const normalizedTableSeat = withServerManualObjectOccupancyDwell({
+    objectType: 'outdoorCafeTable',
+    manualDrop: true,
+    stayMs: SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+  }, { manualDrop: true });
+  assert.equal(
+    normalizedTableSeat.stayMs,
+    SERVER_MANUAL_TABLE_SEAT_DWELL_MS,
+    'outdoor cafe table seats must not inherit the generic five-minute manual furniture hold',
+  );
+  const normalizedChair = withServerManualObjectOccupancyDwell({
+    objectType: 'chair',
+    manualDrop: true,
+    stayMs: 1000,
+  }, { manualDrop: true });
+  assert.equal(
+    normalizedChair.stayMs,
+    SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+    'non-table manual seating should retain the protected five-minute hold',
+  );
+}
+
+function verifyAuthoredTableDismountPoint() {
+  const dataDir = mkdtempSync(join(tmpdir(), 'vw-table-dismount-'));
+  mkdirSync(join(dataDir, 'buildings'), { recursive: true });
+  writeFileSync(join(dataDir, 'buildings', 'rotated-table-building.json'), `${JSON.stringify({
+    id: 'rotated-table-building',
+    x: 12,
+    z: 8,
+    rotation: 90,
+    widthTiles: 20,
+    heightTiles: 16,
+    interior: {
+      furniture: [{
+        type: 'outdoorCafeTable',
+        x: 7,
+        z: 6,
+        rotation: 270,
+        floor: 1,
+        actionLocations: [{
+          id: 'approach-east',
+          interactionSpotId: 'approach-east',
+          activationSpotId: 'approach-east',
+          roles: ['approach', 'staging', 'dismount', 'exit'],
+          coordinateSpace: 'building-local',
+          buildingLocal: { x: 9.06, z: 6 },
+          actionTarget: { spotId: 'approach-east', x: 9.06, z: 6, floor: 1, facing: 'east' },
+          activationTarget: { spotId: 'approach-east', x: 9.06, z: 6, floor: 1, facing: 'east' },
+          facing: 'east',
+          floor: 1,
+        }],
+      }],
+    },
+  }, null, 2)}\n`);
+  const seat = { x: 300, y: 220, floor: 1, buildingId: 'rotated-table-building' };
+  const release = serverRuntimeReleasePointForTarget(dataDir, {
+    ...seat,
+    objectType: 'outdoorCafeTable',
+    furnitureIndex: 0,
+    poseKind: 'seat',
+    spotId: 'seat-east',
+    slotId: 'seat-east',
+    approachSpotId: 'approach-east',
+    exitSpotId: 'approach-east',
+    dismountSpotId: 'approach-east',
+  }, seat);
+  assert.equal(release?.spotId, 'approach-east', 'the explicit table exit must win even when it is also the route approach marker');
+  assert(Math.hypot(release.x - seat.x, release.y - seat.y) > 1, 'the table exit must be spatially separate from the seat');
+}
+
+function verifyUnifiedConsumableDestinationPolicy() {
+  const dataDir = mkdtempSync(join(tmpdir(), 'vw-consume-destination-'));
+  mkdirSync(join(dataDir, 'buildings'), { recursive: true });
+  writeFileSync(join(dataDir, 'buildings', 'consume-building.json'), `${JSON.stringify({
+    id: 'consume-building',
+    worldX: 0,
+    worldY: 0,
+    widthTiles: 30,
+    heightTiles: 22,
+    interior: {
+      floors: 2,
+      furniture: [
+        { type: 'waterCooler', x: 2, z: 2, floor: 1, actionLocations: [{ id: 'use-front', dx: 0, dz: 0.72, floor: 1, facing: 'north', action: 'life.getWater', roles: ['use'] }] },
+        { type: 'diningTable', x: 4, z: 2, floor: 1, actionLocations: [{ id: 'seat-west', slotId: 'seat-west', activationSpotId: 'seat-west', approachSpotId: 'approach-west', exitSpotId: 'approach-west', dx: -1.42, dz: 0, floor: 1, facing: 'east', action: 'life.eatAtDiningTable', roles: ['seat', 'use'] }] },
+        { type: 'chair', x: 4, z: 3, floor: 2, actionLocations: [{ id: 'seat', dx: 0, dz: 0.16, floor: 2, facing: 'north', action: 'life.sitAtChair', roles: ['seat'] }] },
+        { type: 'desk', x: 22, z: 16, floor: 2, actionLocations: [{ id: 'seat-work', dx: 0, dz: 0.8, floor: 2, facing: 'north', action: 'planning.workAtDesk', roles: ['seat', 'use', 'work'] }] },
+      ],
+    },
+    outdoorArea: {
+      nodes: [{ id: 'park-seat', type: 'parkBench', x: 5, z: 4, floor: 1, rotation: 90 }],
+    },
+  }, null, 2)}\n`);
+  const allSeats = listServerScriptedConsumeSeatTargets(dataDir);
+  assert(allSeats.some(target => target.objectType === 'diningTable' && target.floor === 1), 'consume index should include interior table seats');
+  assert(allSeats.some(target => target.objectType === 'parkBench' && target.outdoorNodeId === 'park-seat'), 'consume index should include outdoor Park Bench seats');
+  assert(allSeats.some(target => target.objectType === 'chair' && target.floor === 2), 'consume index should retain other-floor seats for queries on that floor');
+  const sourceTarget = {
+    objectKey: 'consume-building:furniture:0:waterCooler',
+    baseObjectKey: 'consume-building:furniture:0:waterCooler',
+    buildingId: 'consume-building',
+    furnitureIndex: 0,
+    objectType: 'waterCooler',
+    activityKind: 'water-cooler-get-water',
+    actionId: 'life.getWater',
+    x: 2 * 40,
+    y: 2.72 * 40,
+    floor: 1,
+  };
+  const runtimeState = {
+    agents: new Map([['consume-agent', { agentId: 'consume-agent', x: sourceTarget.x, y: sourceTarget.y, floor: 1, buildingId: 'consume-building', state: 'using' }]]),
+    objects: new Map(),
+  };
+  const tableSeat = allSeats.find(target => target.objectType === 'diningTable');
+  const tablePlan = { consumeSeatSpatialIndex: buildServerScriptedConsumeSpatialIndex([tableSeat]) };
+  const tableTarget = makeServerScriptedConsumeTarget(dataDir, 'consume-agent', sourceTarget, 100000, runtimeState, tablePlan);
+  assert.equal(tableTarget.consumeDestinationKind, 'table-seat', 'an available nearby table seat should be a consume option');
+  assert.equal(tableTarget.consumePresentation, 'surface', 'table consume should place the item on a serving surface');
+  assert.equal(tableTarget.objectKey, tableSeat.objectKey, 'table consume must preserve the exact seat slot key for contention');
+  assert.equal(tableTarget.consumeSurfaceSpotId, 'serving:seat-west', 'table serving spots should be tied to the exact selected seat');
+  assert.equal(tableTarget.consumeSurfaceHeight, CONSUMABLE_SURFACE_SPECS.diningTable.surfaceHeight, 'Dining Table consume must use the exact tabletop top');
+  assert.equal(tableTarget.consumeSurfaceForwardOffset, CONSUMABLE_SURFACE_SPECS.diningTable.forwardOffset, 'Dining Table consume must use its authored serving reach');
+  assert.equal(tableTarget.consumeSurfaceSideOffset, CONSUMABLE_SURFACE_SPECS.diningTable.sideOffset, 'Dining Table consume must retain its seat-relative serving offset');
+  for (const type of ['diningTable', 'smallCafeTable', 'outdoorCafeTable', 'picnicTable', 'smallRoundMeetingTable']) {
+    const candidate = {
+      ...tableSeat,
+      objectType: type,
+      objectKey: `${tableSeat.objectKey}:${type}`,
+      baseObjectKey: `${tableSeat.baseObjectKey || tableSeat.objectKey}:${type}`,
+    };
+    const target = makeServerScriptedConsumeTarget(dataDir, 'consume-agent', sourceTarget, 100000, runtimeState, {
+      consumeSeatSpatialIndex: buildServerScriptedConsumeSpatialIndex([candidate]),
+    });
+    assert.equal(target.consumeSurfaceHeight, CONSUMABLE_SURFACE_SPECS[type].surfaceHeight, `${type} must use the exact authored tabletop height`);
+    assert.equal(target.consumeSurfaceForwardOffset, CONSUMABLE_SURFACE_SPECS[type].forwardOffset, `${type} must use an authored serving reach`);
+    assert.equal(target.consumeSurfaceSideOffset, CONSUMABLE_SURFACE_SPECS[type].sideOffset, `${type} must use an authored seat-relative side offset`);
+  }
+  const occupiedTableState = {
+    agents: new Map([
+      ['consume-agent', runtimeState.agents.get('consume-agent')],
+      ['other-agent', { agentId: 'other-agent', x: tableSeat.x, y: tableSeat.y, floor: 1, buildingId: 'consume-building', state: 'using', owner: 'server-scripted-object-runtime', leaseExpiresAt: new Date(200000).toISOString(), targetJson: JSON.stringify(tableSeat) }],
+    ]),
+    objects: new Map(),
+  };
+  const occupiedTableTarget = makeServerScriptedConsumeTarget(dataDir, 'consume-agent', sourceTarget, 100000, occupiedTableState, tablePlan);
+  assert.notEqual(occupiedTableTarget.objectKey, tableSeat.objectKey, 'an occupied exact table seat must not be selected by another agent');
+  const standaloneSeat = allSeats.find(target => target.objectType === 'parkBench');
+  const standalonePlan = { consumeSeatSpatialIndex: buildServerScriptedConsumeSpatialIndex([standaloneSeat]) };
+  const standaloneTarget = makeServerScriptedConsumeTarget(dataDir, 'consume-agent', sourceTarget, 100000, runtimeState, standalonePlan);
+  assert.equal(standaloneTarget.consumeDestinationKind, 'standalone-seat', 'an outdoor standalone seat should be a consume option');
+  assert.equal(standaloneTarget.consumePresentation, 'handheld', 'standalone-seat consume must keep the item in hand');
+  assert.equal(standaloneTarget.floor, 1, 'nearby consume seats must remain on the agent floor');
+  const floorTwoChair = allSeats.find(target => target.objectType === 'chair');
+  const wrongFloorPlan = { consumeSeatSpatialIndex: buildServerScriptedConsumeSpatialIndex([floorTwoChair]) };
+  const wrongFloorTarget = makeServerScriptedConsumeTarget(dataDir, 'consume-agent', sourceTarget, 100000, runtimeState, wrongFloorPlan);
+  assert.equal(wrongFloorTarget.consumeDestinationKind, 'desk', 'an overlapping X/Z seat on another building floor must not count as nearby');
+  const floorOnePlan = buildScriptedObjectRuntimePlan(dataDir);
+  assert(floorOnePlan.consumeSeatSpatialIndex instanceof Map, 'the runtime plan should cache consume seats in a spatial index');
+  const emptySeatPlan = { consumeSeatSpatialIndex: buildServerScriptedConsumeSpatialIndex([]) };
+  const deskTarget = makeServerScriptedConsumeTarget(dataDir, 'consume-agent', sourceTarget, 100000, runtimeState, emptySeatPlan);
+  assert.equal(deskTarget.consumeDestinationKind, 'desk', 'the assigned desk should remain the fallback when no nearby seat is available');
+  assert.equal(deskTarget.consumePresentation, 'surface', 'desk consume should retain surface placement');
+  assert.equal(deskTarget.consumeSurfaceHeight, CONSUMABLE_SURFACE_SPECS.desk.surfaceHeight, 'desk fallback must carry its exact desktop top height');
 }
 
 async function getOpenPort() {
@@ -561,6 +737,8 @@ async function run() {
   verifyLifecycleJournalRecovery();
   verifyIncrementalSchemaPatchSize();
   verifyManualObjectOccupancyPolicy();
+  verifyAuthoredTableDismountPoint();
+  verifyUnifiedConsumableDestinationPolicy();
   assert.equal(SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS.length, 10, 'server runtime must expose ten fridge foods');
   assert.equal(new Set(SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS.map(item => item.id)).size, 10, 'server fridge food ids must be unique');
   assert.equal(new Set(SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS.map(item => item.label)).size, 10, 'server fridge food labels must be unique');
@@ -1182,6 +1360,56 @@ async function run() {
               },
             ],
           },
+          {
+            type: 'diningTable',
+            x: 6,
+            z: 18,
+            rotation: 90,
+            floor: 1,
+            room: 'dining',
+            actionLocations: [
+              {
+                id: 'seat-north',
+                slotId: 'seat-north',
+                activationSpotId: 'seat-north',
+                approachSpotId: 'approach-north',
+                roles: ['seat', 'use', 'eat', 'social'],
+                actionId: 'life.eatAtDiningTable',
+                actionTarget: { spotId: 'approach-north', x: 4.24, z: 18, floor: 1 },
+                activationTarget: { spotId: 'seat-north', x: 4.98, z: 18, floor: 1 },
+              },
+              {
+                id: 'seat-south',
+                slotId: 'seat-south',
+                activationSpotId: 'seat-south',
+                approachSpotId: 'approach-south',
+                roles: ['seat', 'use', 'eat', 'social'],
+                actionId: 'life.eatAtDiningTable',
+                actionTarget: { spotId: 'approach-south', x: 7.76, z: 18, floor: 1 },
+                activationTarget: { spotId: 'seat-south', x: 7.02, z: 18, floor: 1 },
+              },
+              {
+                id: 'seat-east',
+                slotId: 'seat-east',
+                activationSpotId: 'seat-east',
+                approachSpotId: 'approach-east',
+                roles: ['seat', 'use', 'eat', 'social'],
+                actionId: 'life.talkAtDiningTable',
+                actionTarget: { spotId: 'approach-east', x: 6, z: 15.94, floor: 1 },
+                activationTarget: { spotId: 'seat-east', x: 6, z: 16.58, floor: 1 },
+              },
+              {
+                id: 'seat-west',
+                slotId: 'seat-west',
+                activationSpotId: 'seat-west',
+                approachSpotId: 'approach-west',
+                roles: ['seat', 'use', 'eat', 'social'],
+                actionId: 'life.talkAtDiningTable',
+                actionTarget: { spotId: 'approach-west', x: 6, z: 20.06, floor: 1 },
+                activationTarget: { spotId: 'seat-west', x: 6, z: 19.42, floor: 1 },
+              },
+            ],
+          },
         ],
       },
       outdoorArea: {
@@ -1226,6 +1454,54 @@ async function run() {
     assert(couchTargets.every(target => target.objectKey.endsWith(`:slot:${target.slotId}`)));
     assert(couchTargets.every(target => Math.abs(target.y - 12.44 * 40) < 0.01), 'automatic couch targets must end on the forward cushion docks, never the stand markers');
     assert(couchTargets.every(target => Math.abs(target.routeApproachTarget.y - 13.18 * 40) < 0.01), 'automatic couch routes must preserve the separate front stand approach');
+
+    const diningTargets = listScriptedObjectRuntimeTargets(dataDir)
+      .filter(target => target.buildingId === 'office' && target.furnitureIndex === 7 && target.objectType === 'diningTable')
+      .sort((a, b) => a.slotId.localeCompare(b.slotId));
+    assert.deepEqual(
+      diningTargets.map(target => target.slotId),
+      ['seat-east', 'seat-north', 'seat-south', 'seat-west'],
+      'server runtime should expose all four dining chairs as independent seat slots',
+    );
+    assert.equal(new Set(diningTargets.map(target => target.objectKey)).size, 4, 'every dining chair must have its own world-object key');
+    assert(diningTargets.every(target => target.objectKey.endsWith(`:slot:${target.slotId}`)));
+    assert(diningTargets.every(target => target.poseKind === 'seat'), 'every dining chair target must use a seated pose');
+    assert(diningTargets.every(target => {
+      const expected = Math.atan2(6 * 40 - target.x, 18 * 40 - target.y);
+      return Math.abs(Math.atan2(Math.sin(target.faceAngle - expected), Math.cos(target.faceAngle - expected))) < 0.0001;
+    }), 'every rotated dining chair must face the current table center');
+    assert(diningTargets.every(target => target.routeApproachTarget && Math.hypot(target.x - target.routeApproachTarget.x, target.y - target.routeApproachTarget.y) > 20), 'seat and approach targets must remain separate');
+    const movedDiningEast = diningTargets.find(target => target.slotId === 'seat-east');
+    const movedManualDiningTarget = resolveScriptedObjectRuntimeTargetFromRequest(dataDir, {
+      manualDropSnapToUse: true,
+      target: {
+        ...movedDiningEast,
+        x: movedDiningEast.x + 40,
+        y: movedDiningEast.y + 80,
+        faceAngle: -Math.PI / 3,
+        routeApproachTarget: { ...movedDiningEast.routeApproachTarget, x: movedDiningEast.routeApproachTarget.x + 40, y: movedDiningEast.routeApproachTarget.y + 80 },
+      },
+    });
+    assert.equal(movedManualDiningTarget.objectKey, movedDiningEast.objectKey, 'manual moved-table placement must retain the selected chair slot');
+    assert.equal(movedManualDiningTarget.x, movedDiningEast.x + 40, 'manual moved-table placement must use the current seat x, not the saved approach x');
+    assert.equal(movedManualDiningTarget.y, movedDiningEast.y + 80, 'manual moved-table placement must use the current seat y, not the saved approach y');
+    assertRadiansClose(movedManualDiningTarget.faceAngle, -Math.PI / 3, 'manual moved/rotated table placement must preserve the current table-facing angle');
+
+    const largeMeetingTargets = listScriptedObjectRuntimeTargets(dataDir)
+      .filter(target => target.buildingId === 'office' && target.furnitureIndex === 2 && target.objectType === 'meetingTable');
+    const largeMeetingSeatTargets = largeMeetingTargets.filter(target => target.slotId.startsWith('seat-'));
+    const largeMeetingStandingTargets = largeMeetingTargets.filter(target => target.slotId.startsWith('stand-'));
+    assert.equal(largeMeetingTargets.length, 16, 'old saved Meeting Tables must expose ten seats plus six overflow standing points');
+    assert.equal(largeMeetingSeatTargets.length, 10, 'Meeting Table should expose ten independent seated slots');
+    assert.equal(largeMeetingStandingTargets.length, 6, 'Meeting Table should expose six independent overflow standing slots');
+    assert.equal(new Set(largeMeetingTargets.map(target => target.objectKey)).size, 16, 'every Meeting Table position must have a unique authoritative world-object key');
+    assert(largeMeetingSeatTargets.every(target => target.poseKind === 'seat' && target.animationId === 'meeting-sit-talk'));
+    assert(largeMeetingStandingTargets.every(target => target.poseKind === 'stand' && target.meetingStanding === true && target.animationId === 'gather-talk' && target.activityKind === 'meeting-table-stand'));
+    assert(largeMeetingTargets.every(target => {
+      const expected = Math.atan2(11 * 40 - target.x, 5 * 40 - target.y);
+      return Math.abs(Math.atan2(Math.sin(target.faceAngle - expected), Math.cos(target.faceAngle - expected))) < 0.0001;
+    }), 'every seated and standing Meeting Table target must face the current table center');
+
     const couchLeftTarget = couchTargets.find(target => target.slotId === 'sit-left');
     const couchCenterTarget = couchTargets.find(target => target.slotId === 'sit-center');
     const couchRightTarget = couchTargets.find(target => target.slotId === 'sit-right');
@@ -1455,9 +1731,9 @@ async function run() {
     const meetingAgent = await waitForAgent(scriptedRoom, 'morgan', (agent) => agent.owner === LIVE_STATUS_RUNTIME_OWNER);
     assert(['routing', 'meeting'].includes(meetingAgent.state));
     assert(meetingAgent.visualStateJson.includes('live-status-meeting-table'));
-    assert(Math.abs(Number(meetingAgent.heading || 0)) <= Math.PI, 'meeting runtime heading should be radians');
+    assert(Math.abs(Number(meetingAgent.heading || 0)) <= Math.PI + 0.00001, 'meeting runtime heading should be radians');
     const meetingTarget = JSON.parse(meetingAgent.targetJson || '{}');
-    assertRadiansClose(meetingTarget.faceAngle, -Math.PI / 2, 'authored meeting faceAngle should be preserved');
+    assertRadiansClose(meetingTarget.faceAngle, Math.PI, 'Meeting Table occupants should face the current table center');
     const meetingObject = await waitForObject(scriptedRoom, 'office:furniture:2:meetingTable', (object) => object.owner === LIVE_STATUS_RUNTIME_OWNER);
     assert.equal(meetingObject.agentId, 'morgan');
     assert(['routing', 'active'].includes(meetingObject.state));
@@ -1726,12 +2002,21 @@ async function run() {
     const fridgeManualADeskVisual = JSON.parse(fridgeManualADesk.visualStateJson || '{}');
     assert.equal(fridgeManualADeskTarget.sourceObjectKey, fridgeObjectKey);
     assert.equal(fridgeManualADeskVisual.carriedItem?.label, SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[0].label);
-    assert(fridgeManualADeskTarget.objectKey.includes(':desk'), 'fridge food must route to a desk consume target');
+    assert(
+      ['desk', 'table-seat', 'standalone-seat'].includes(fridgeManualADeskTarget.consumeDestinationKind),
+      'fridge food must route through the unified desk/table/seat consume chooser',
+    );
+    assert(
+      fridgeManualADeskTarget.consumeDestinationKind === 'standalone-seat'
+        ? fridgeManualADeskTarget.consumePresentation === 'handheld'
+        : fridgeManualADeskTarget.consumePresentation === 'surface',
+      'fridge consume presentation must match its selected destination',
+    );
     const fridgeManualAActive = await waitForAgent(scriptedRoom, 'fridge-manual-a', (agent) =>
       agent.visualStateJson.includes('fridge-desk-consume') &&
       agent.visualStateJson.includes('"phase":"active"') &&
       agent.visualStateJson.includes('"animationId":"fridge-desk-consume"') &&
-      agent.visualStateJson.includes('"atDesk":true')
+      agent.visualStateJson.includes('"consumeDestinationKind"')
     );
     const fridgeManualAActiveVisual = JSON.parse(fridgeManualAActive.visualStateJson || '{}');
     assert.equal(fridgeManualAActiveVisual.activity?.temporaryItem?.fridgeFoodId, SERVER_SCRIPTED_FRIDGE_FOOD_OPTIONS[0].id);

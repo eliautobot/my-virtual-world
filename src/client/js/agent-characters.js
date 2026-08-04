@@ -17,6 +17,9 @@ import {
 import {
   STOVE_OVEN_FOOD_VISUAL_KINDS,
 } from './stove-oven-food-catalog.mjs?v=20260731-stove-oven-r1';
+import {
+  getConsumableSurfaceSpec,
+} from './consumable-surface-specs.mjs?v=20260804-consumable-surface-r1';
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -24,6 +27,7 @@ import {
 const T = 1;
 const API_TILE = 40;
 const COFFEE_CUP_ASSET_VERSION = 'drink-cup-handheld-v10-fuller-water';
+const PING_PONG_PADDLE_ASSET_VERSION = 'real-ping-pong-paddle-v2';
 
 // ═══════════════════════════════════════════════════════════════
 // SHARED GEOMETRY CACHE
@@ -54,6 +58,58 @@ function box(x, y, z, w, h, d, color) {
   const m = vox(w, h, d, color);
   m.position.set(x, y, z);
   return m;
+}
+
+/**
+ * Build a recognizable table-tennis paddle: a thin oval rubber blade with a
+ * visible wooden edge and a tapered wooden grip.  Runtime and smoke tests use
+ * this same builder so the verified asset cannot drift from the hand-held one.
+ */
+export function buildPingPongPaddleAssetForVerification(color = 0xf44336) {
+  const paddleColor = Number(color) || 0xf44336;
+  const paddle = new THREE.Group();
+  paddle.name = 'rightHandPingPongRacket';
+  paddle.userData.paddleColor = paddleColor;
+  paddle.userData.assetVersion = PING_PONG_PADDLE_ASSET_VERSION;
+
+  const makeBladeLayer = (name, radius, thickness, layerColor, z) => {
+    const layer = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius, thickness, 24),
+      getMat(layerColor),
+    );
+    layer.name = name;
+    layer.userData.pingPongPaddlePart = name;
+    // Cylinder thickness starts on Y. Rotate it so the two round faces point
+    // forward/back, then stretch the circle into the familiar paddle oval.
+    layer.rotation.x = Math.PI / 2;
+    layer.scale.set(0.9, 1, 1.08);
+    layer.position.set(0, -0.44, z);
+    layer.castShadow = true;
+    return layer;
+  };
+
+  paddle.add(makeBladeLayer('paddleBladeEdge', 0.27, 0.09, 0xb8874d, 0.12));
+  paddle.add(makeBladeLayer('paddleRubberFront', 0.247, 0.014, paddleColor, 0.169));
+  paddle.add(makeBladeLayer('paddleRubberBack', 0.247, 0.014, 0x242424, 0.071));
+
+  const handleCore = box(0, -0.115, 0.12, 0.125, 0.40, 0.085, 0x9a6334);
+  handleCore.name = 'paddleHandleCore';
+  handleCore.userData.pingPongPaddlePart = 'handle';
+  handleCore.rotation.z = -0.015;
+  paddle.add(handleCore);
+  const handleFace = box(0, -0.115, 0.169, 0.095, 0.34, 0.018, 0xc89152);
+  handleFace.name = 'paddleHandleFace';
+  handleFace.userData.pingPongPaddlePart = 'handle-face';
+  paddle.add(handleFace);
+  const handleCap = new THREE.Mesh(new THREE.CylinderGeometry(0.0625, 0.0625, 0.085, 12), getMat(0x7a4827));
+  handleCap.name = 'paddleHandleCap';
+  handleCap.userData.pingPongPaddlePart = 'handle-cap';
+  handleCap.rotation.x = Math.PI / 2;
+  handleCap.position.set(0, 0.085, 0.12);
+  handleCap.castShadow = true;
+  paddle.add(handleCap);
+
+  return paddle;
 }
 
 // Phase 2 render optimization: merge static voxel boxes inside each animated
@@ -167,6 +223,59 @@ function disposeCarryVisual(group) {
   group?.parent?.remove?.(group);
 }
 
+export function removePingPongRacketVisual(agent = null) {
+  const root = agent?._group3d || null;
+  if (!root?.getObjectByName) return 0;
+  let removed = 0;
+  for (const name of ['rightHandPingPongRacket', 'visiblePingPongPaddle']) {
+    let existing = root.getObjectByName(name);
+    while (existing) {
+      const parent = existing.parent || null;
+      disposeCarryVisual(existing);
+      removed++;
+      if (!parent) break;
+      existing = root.getObjectByName(name);
+    }
+  }
+  return removed;
+}
+
+function cacheConsumableAssetSurfaceBottom(object, rotation = [0, 0, 0]) {
+  if (!object?.isObject3D) return object;
+  const previousRotation = object.rotation.clone();
+  object.rotation.set(Number(rotation[0]) || 0, Number(rotation[1]) || 0, Number(rotation[2]) || 0);
+  object.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(object);
+  object.userData.consumeSurfaceBottomY = Number.isFinite(bounds.min.y) ? bounds.min.y : 0;
+  object.rotation.copy(previousRotation);
+  object.updateMatrixWorld(true);
+  return object;
+}
+
+export function resolveConsumableSurfaceAssetPlacement(agent, asset = null) {
+  const root = agent?._group3d || null;
+  const activity = agent?._idleActivity || {};
+  const fallbackSpec = getConsumableSurfaceSpec(activity.furnitureType || activity.objectType || (activity.consumeDestinationKind === 'desk' ? 'desk' : ''));
+  const surfaceHeight = Number(activity.consumeSurfaceHeight ?? fallbackSpec?.surfaceHeight);
+  if (!root || !Number.isFinite(surfaceHeight)) return null;
+  const scaleX = Math.abs(Number(root.scale?.x)) || 0.8;
+  const scaleY = Math.abs(Number(root.scale?.y)) || 0.8;
+  const scaleZ = Math.abs(Number(root.scale?.z)) || 0.8;
+  const groundY = Number.isFinite(Number(root.userData?._groundY)) ? Number(root.userData._groundY) : Number(root.position?.y || 0);
+  const rootY = Number(root.position?.y || groundY);
+  const bottomY = Number.isFinite(Number(asset?.userData?.consumeSurfaceBottomY)) ? Number(asset.userData.consumeSurfaceBottomY) : 0;
+  const forwardOffset = Number(activity.consumeSurfaceForwardOffset ?? fallbackSpec?.forwardOffset);
+  const sideOffset = Number(activity.consumeSurfaceSideOffset ?? fallbackSpec?.sideOffset);
+  const clearance = 0.004;
+  return {
+    x: (Number.isFinite(sideOffset) ? sideOffset : 0.19) / scaleX,
+    y: ((groundY + surfaceHeight) - rootY + clearance) / scaleY - bottomY,
+    z: (Number.isFinite(forwardOffset) ? forwardOffset : 0.74) / scaleZ,
+    surfaceHeight,
+    worldBottomY: groundY + surfaceHeight + clearance,
+  };
+}
+
 function buildCoffeeCupAsset(name = 'rightHandCoffeeDrink', options = {}) {
   const drinkKind = options.drinkKind === 'water' ? 'water' : 'coffee';
   const isWater = drinkKind === 'water';
@@ -210,7 +319,7 @@ function buildCoffeeCupAsset(name = 'rightHandCoffeeDrink', options = {}) {
         child.receiveShadow = true;
       }
     });
-    return cup;
+    return cacheConsumableAssetSurfaceBottom(cup);
   }
 
   // Simple readable voxel mug authored around the handle. The group origin is
@@ -236,14 +345,16 @@ function buildCoffeeCupAsset(name = 'rightHandCoffeeDrink', options = {}) {
       child.receiveShadow = true;
     }
   });
-  return cup;
+  return cacheConsumableAssetSurfaceBottom(cup);
 }
 
 function getCoffeeDeskSipState(agent) {
   const activityKind = String(agent?._idleActivity?.kind || '');
   if (!(activityKind.startsWith('coffee-desk-') || activityKind.startsWith('water-desk-') || activityKind.startsWith('vending-desk-') || activityKind.startsWith('microwave-desk-') || activityKind.startsWith('fridge-desk-') || activityKind.startsWith('stove-oven-desk-')) || agent?._idleActivity?.phase !== 'active') {
-    return { isDeskConsume: false, handActive: false, lift: 0, phase: 0, localSipPhase: 0 };
+    return { isDeskConsume: false, usesSurface: false, handActive: false, lift: 0, phase: 0, localSipPhase: 0 };
   }
+  const consumePresentation = String(agent?._idleActivity?.consumePresentation || 'surface').trim().toLowerCase();
+  const usesSurface = consumePresentation !== 'handheld';
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const startedAt = Number(agent?._idleActivity?.activeStartedAt || agent?._idleActivity?.startedAt || now);
   const elapsedMs = Math.max(0, now - startedAt);
@@ -254,20 +365,21 @@ function getCoffeeDeskSipState(agent) {
   const handWindowStart = 0.30;
   const handWindowEnd = 0.82;
   const handProgress = (localSipPhase - handWindowStart) / Math.max(0.001, handWindowEnd - handWindowStart);
-  const handActive = handProgress > 0 && handProgress < 1;
-  const lift = handActive ? Math.sin(Math.max(0, Math.min(1, handProgress)) * Math.PI) : 0;
-  const reachToTable = localSipPhase > tableReachStart && localSipPhase < handWindowStart
+  const sipWindowActive = handProgress > 0 && handProgress < 1;
+  const handActive = usesSurface ? sipWindowActive : true;
+  const lift = sipWindowActive ? Math.sin(Math.max(0, Math.min(1, handProgress)) * Math.PI) : 0;
+  const reachToTable = usesSurface && localSipPhase > tableReachStart && localSipPhase < handWindowStart
     ? Math.sin(((localSipPhase - tableReachStart) / (handWindowStart - tableReachStart)) * Math.PI)
     : 0;
-  const setDownToTable = localSipPhase > 0.68 && localSipPhase < handWindowEnd
+  const setDownToTable = usesSurface && localSipPhase > 0.68 && localSipPhase < handWindowEnd
     ? Math.sin(((localSipPhase - 0.68) / (handWindowEnd - 0.68)) * Math.PI)
     : 0;
-  return { isDeskConsume: true, handActive, lift, reachToTable, setDownToTable, phase, localSipPhase };
+  return { isDeskConsume: true, usesSurface, handActive, lift, reachToTable, setDownToTable, phase, localSipPhase };
 }
 
 function isAgentDeskCarrySurfaceActive(agent) {
   const deskSipState = getCoffeeDeskSipState(agent);
-  if (deskSipState.isDeskConsume) return true;
+  if (deskSipState.isDeskConsume) return deskSipState.usesSurface;
   const workSpot = agent?._activeWorkSpot || null;
   const atRealWorkSpot = !!(
     workSpot &&
@@ -301,9 +413,11 @@ function placeRightHandCoffeeCupAsset(cup, agent) {
 
 function placeDeskCoffeeCupAsset(cup, agent) {
   const deskSipState = getCoffeeDeskSipState(agent);
-  cup.position.set(0.24, 1.03, 0.92);
   cup.rotation.set(0, 0, 0);
   cup.scale.setScalar(1);
+  const placement = resolveConsumableSurfaceAssetPlacement(agent, cup);
+  if (placement) cup.position.set(placement.x, placement.y, placement.z);
+  else cup.position.set(0.24, 1.03, 0.92);
   cup.visible = isAgentDeskCarrySurfaceActive(agent) && !deskSipState.handActive;
 }
 
@@ -660,7 +774,7 @@ function buildVendingItemAsset(name, carried = {}) {
       child.receiveShadow = true;
     }
   });
-  return item;
+  return cacheConsumableAssetSurfaceBottom(item, item.userData.deskRotation || [0, 0, 0]);
 }
 
 export function buildTemporaryFoodCarryAssetForVerification(carried = {}) {
@@ -680,9 +794,11 @@ function placeRightHandVendingItemAsset(item, agent) {
 function placeDeskVendingItemAsset(item, agent) {
   const deskSipState = getCoffeeDeskSipState(agent);
   const deskRot = item.userData?.deskRotation || [0, 0, 0];
-  item.position.set(0.24, 1.05, 0.92);
   item.rotation.set(deskRot[0], deskRot[1], deskRot[2]);
   item.scale.setScalar(1);
+  const placement = resolveConsumableSurfaceAssetPlacement(agent, item);
+  if (placement) item.position.set(placement.x, placement.y, placement.z);
+  else item.position.set(0.24, 1.05, 0.92);
   item.visible = isAgentDeskCarrySurfaceActive(agent) && !deskSipState.handActive;
 }
 
@@ -2092,6 +2208,12 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const isPoolTablePlay = bedActivityKind.startsWith('pool-table-') && agent._idleActivity?.phase === 'active';
   const isPoolTableWatch = isPoolTablePlay && bedActivityKind === 'pool-table-watch';
   const isMeetingTable = bedActivityKind.startsWith('meeting-table') && agent._idleActivity?.phase === 'active';
+  const isMeetingTableStanding = isMeetingTable && (
+    agent._idleActivity?.meetingStanding === true ||
+    String(agent._idleActivity?.poseKind || '').toLowerCase() === 'stand' ||
+    String(agent._idleActivity?.spotId || '').startsWith('stand-')
+  );
+  const isMeetingTableSeated = isMeetingTable && !isMeetingTableStanding;
   const isSmallRoundMeetingTable = bedActivityKind.startsWith('small-round-meeting-table-') && agent._idleActivity?.phase === 'active';
   const isPrinterScannerUse = bedActivityKind.startsWith('printer-scanner-') && agent._idleActivity?.phase === 'active';
   const isToolCartUse = bedActivityKind.startsWith('tool-cart-') && agent._idleActivity?.phase === 'active';
@@ -2282,7 +2404,8 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   else if (isPingPongPlay) requestedAnimationId = 'play-pingpong';
   else if (isPoolTablePlay) requestedAnimationId = isPoolTableWatch ? 'gather-talk' : 'pool-table-play';
   else if (isOfficeChairWork) requestedAnimationId = 'office-chair-work';
-  else if (isMeetingTable || isSmallRoundMeetingTable || isConferenceChairMeeting) requestedAnimationId = 'meeting-sit-talk';
+  else if (isMeetingTableStanding) requestedAnimationId = 'gather-talk';
+  else if (isMeetingTableSeated || isSmallRoundMeetingTable || isConferenceChairMeeting) requestedAnimationId = 'meeting-sit-talk';
   else if (isDiagnosticStationUse) requestedAnimationId = 'diagnostic-station-use';
   else if (isToolCartUse) requestedAnimationId = 'tool-cart-select';
   else if (isWorkbenchUse) requestedAnimationId = 'workbench-tool-use';
@@ -2329,7 +2452,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     isSleeping,
     isBedResting,
     isClinicService: isClinicService || isExamChairService,
-    isCouchLounging: isPlainChairSitting || isCouchLounging || isLoveseatLounging || isArmchairLounging || isParkBenchSeated || (isPlaygroundSwingUse && !isPlaygroundSwingWaiting) || isHallwayBenchWaiting || isBusStopWaiting || isBarStoolSitting || isDiningChairSitting || isPatioChairSitting || isConferenceChairSitting || isBarberChairSitting || isExamChairPatient || isMeetingTable || isSmallRoundMeetingTable || (isSmallCafeTableUse && !isSmallCafeTableSetDown) || (isOutdoorCafeTableUse && !isOutdoorCafeTableSetDown),
+    isCouchLounging: isPlainChairSitting || isCouchLounging || isLoveseatLounging || isArmchairLounging || isParkBenchSeated || (isPlaygroundSwingUse && !isPlaygroundSwingWaiting) || isHallwayBenchWaiting || isBusStopWaiting || isBarStoolSitting || isDiningChairSitting || isPatioChairSitting || isConferenceChairSitting || isBarberChairSitting || isExamChairPatient || isMeetingTableSeated || isSmallRoundMeetingTable || (isSmallCafeTableUse && !isSmallCafeTableSetDown) || (isOutdoorCafeTableUse && !isOutdoorCafeTableSetDown),
     isCouchSocializing: isCouchSocializing || isLoveseatSocializing || isArmchairSocializing || isParkBenchSocializing || isBarStoolChatting || isDiningChairTalking || isPatioChairTalking || isConferenceChairMeeting || isMeetingTable || isSmallRoundMeetingTable || isSmallCafeTableSocial || isOutdoorCafeTableSocial || isPatioTableSocial,
     isCarrying: !!(agent._carrying || agent._carriedItem || agent.carryItem),
     animationId: requestedAnimationId,
@@ -2436,7 +2559,10 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     const tableReach = Math.max(deskSipState.reachToTable || 0, deskSipState.setDownToTable || 0, deskSipState.handActive ? 0.35 : 0);
     const sip = deskSipState.lift;
     const setDownReach = deskSipState.setDownToTable || 0;
-    applySeatedBasePose({ lift: 1.12, lean: 0.10 + sip * 0.035 + setDownReach * 0.02, headForward: 0.12, bob: Math.abs(sip) * 0.006 });
+    const consumeSeatLift = Number.isFinite(Number(agent._idleActivity?.seatSurfaceLift))
+      ? Number(agent._idleActivity.seatSurfaceLift)
+      : 1.12;
+    applySeatedBasePose({ lift: consumeSeatLift, lean: 0.10 + sip * 0.035 + setDownReach * 0.02, headForward: 0.12, bob: Math.abs(sip) * 0.006 });
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.05 + sip * 0.07, 0.18);
     parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.26, 0.18);
     parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.18, 0.16);
@@ -2980,14 +3106,31 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
     parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, -0.02, 0.16);
     g.position.y = (g.userData._groundY || 0) + Math.abs(brew) * 0.01;
 
-  } else if (isMeetingTable || isSmallRoundMeetingTable) {
+  } else if (isMeetingTableStanding) {
+    // ── MEETING TABLE STANDING OVERFLOW DISCUSSION ───────────
+    cs.workPhase = (cs.workPhase || 0) + dt * 1.9;
+    const talk = Math.sin(cs.workPhase * 2.8);
+    const listen = Math.max(0, Math.sin(cs.workPhase * 0.9));
+    parts.bodyGroup.rotation.x = _lerp(parts.bodyGroup.rotation.x, 0.04 + listen * 0.025, 0.15);
+    parts.bodyGroup.rotation.z = _lerp(parts.bodyGroup.rotation.z, talk * 0.018, 0.14);
+    parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.04 + listen * 0.04, 0.12);
+    parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, talk * 0.18, 0.14);
+    parts.leftArm.rotation.x = _lerp(parts.leftArm.rotation.x, -0.24 - Math.max(0, talk) * 0.22, 0.22);
+    parts.rightArm.rotation.x = _lerp(parts.rightArm.rotation.x, -0.20 + Math.min(0, talk) * 0.18, 0.22);
+    parts.leftArm.rotation.z = _lerp(parts.leftArm.rotation.z || 0, 0.24 + talk * 0.10, 0.16);
+    parts.rightArm.rotation.z = _lerp(parts.rightArm.rotation.z || 0, -0.24 + talk * 0.08, 0.16);
+    parts.leftLeg.rotation.x = _lerp(parts.leftLeg.rotation.x, 0, 0.16);
+    parts.rightLeg.rotation.x = _lerp(parts.rightLeg.rotation.x, 0, 0.16);
+    g.position.y = (g.userData._groundY || 0) + Math.abs(talk) * 0.008;
+
+  } else if (isMeetingTableSeated || isSmallRoundMeetingTable) {
     // ── MEETING TABLE SEATED DISCUSSION ─────────────────────
     cs.workPhase = (cs.workPhase || 0) + dt * 1.9;
     const talk = Math.sin(cs.workPhase * 2.8);
     const listen = Math.max(0, Math.sin(cs.workPhase * 0.9));
     const meetingSeatLift = Number.isFinite(agent._idleActivity?.seatSurfaceLift)
       ? agent._idleActivity.seatSurfaceLift
-      : (isSmallRoundMeetingTable ? 1.48 : 0.76);
+      : (isSmallRoundMeetingTable ? 1.48 : 2.25);
     applySeatedBasePose({ lift: meetingSeatLift, lean: 0.20 + listen * 0.04, headForward: 0.12, talk, bob: 0.02 });
     parts.headGroup.rotation.x = _lerp(parts.headGroup.rotation.x, 0.05 + listen * 0.04, 0.12);
     parts.headGroup.rotation.y = _lerp(parts.headGroup.rotation.y, talk * 0.18, 0.14);
@@ -3914,23 +4057,17 @@ function syncRightHandCarryVisual(parts, agent) {
   }
   if (isPongRacket) {
     const color = Number(carried?.color || agent?._pingPongPaddleColor) || (agent?._pingPongSide === 'right' ? 0x2196f3 : 0xf44336);
-    if (racket && (racket.parent !== rightArm || racket.userData?.paddleColor !== color)) {
+    if (racket && (
+      racket.parent !== rightArm ||
+      racket.userData?.paddleColor !== color ||
+      racket.userData?.assetVersion !== PING_PONG_PADDLE_ASSET_VERSION
+    )) {
       racket.parent?.remove(racket);
       racket.traverse?.(child => { child.geometry?.dispose?.(); });
       racket = null;
     }
     if (!racket) {
-      racket = new THREE.Group();
-      racket.name = 'rightHandPingPongRacket';
-      racket.userData.paddleColor = color;
-      // True hand-held paddle: the handle begins at the right hand center and
-      // the large colored blade extends forward/down from that handle. This is
-      // parented to the arm (not floating in world space), so it moves with the
-      // hand while agents walk to the table and while they swing.
-      racket.add(box(0, -0.08, 0.03, 0.08, 0.34, 0.08, 0x5d4037));
-      racket.add(box(0, -0.36, 0.14, 0.62, 0.48, 0.12, 0x2b1b12));
-      racket.add(box(0, -0.36, 0.205, 0.54, 0.40, 0.13, color));
-      racket.add(box(0, -0.36, 0.285, 0.34, 0.24, 0.04, 0xfff7ed));
+      racket = buildPingPongPaddleAssetForVerification(color);
       racket.position.set(0.00, -0.46, 0.03);
       racket.rotation.x = -0.34;
       racket.rotation.y = agent?._pingPongSide === 'right' ? -0.45 : 0.45;

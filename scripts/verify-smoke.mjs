@@ -13,9 +13,21 @@ import {
   STOVE_OVEN_FOOD_ITEMS,
   STOVE_OVEN_FOOD_VISUAL_KINDS,
 } from '../src/client/js/stove-oven-food-catalog.mjs';
+import * as THREE from 'three';
 import {
+  buildPingPongPaddleAssetForVerification,
   buildTemporaryFoodCarryAssetForVerification,
+  removePingPongRacketVisual,
+  resolveConsumableSurfaceAssetPlacement,
 } from '../src/client/js/agent-characters.js';
+import {
+  clearPingPongEquipmentState,
+  isIncomingPingPongRuntimeVisual,
+  reconcilePingPongEquipmentTransition,
+} from '../src/client/js/ping-pong-equipment-state.mjs';
+import {
+  CONSUMABLE_SURFACE_SPECS,
+} from '../src/client/js/consumable-surface-specs.mjs';
 import {
   resolveBehaviorDestination,
 } from '../src/client/js/agent-life-behavior-destination-resolver.mjs';
@@ -25,6 +37,7 @@ import {
   getActionLocationsForAsset,
 } from '../src/client/js/agent-life-action-location-registry.mjs';
 import { listObjectUseSeatCandidates } from '../src/client/js/agent-life-object-use-seats.mjs';
+import { normalizeExteriorInteractionNode } from '../src/client/js/agent-life-exterior-area-taxonomy.mjs';
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), 'utf8');
@@ -55,6 +68,91 @@ const collectProductTextFiles = (path) => {
   }
   return isProductTextFile(path) ? [path] : [];
 };
+
+function verifyPingPongEquipmentCleanupState() {
+  const racket = { kind: 'pingpong-racket', label: 'Ping Pong Racket' };
+  const makeAgent = () => ({
+    _idleActivity: { kind: 'pingpong-left', objectType: 'pingpong' },
+    _runtimeVisualState: { activityActive: true, activityKind: 'pingpong-left', carrying: true, carriedItem: racket },
+    _carriedItem: racket,
+    _carrying: racket,
+    _carryItem: racket,
+    carryItem: 'pingpong-racket',
+    carryItemTimer: 24000,
+    _pingPongSide: 'left',
+    _pingPongPaddleColor: 0xf44336,
+  });
+  const replacementVisual = {
+    activityActive: true,
+    activityKind: 'meeting-table-sit',
+    activity: { kind: 'meeting-table-sit', objectType: 'meetingTable' },
+    carrying: false,
+  };
+  const interrupted = makeAgent();
+  const transition = reconcilePingPongEquipmentTransition(interrupted, replacementVisual, { objectType: 'meetingTable' });
+  assert.equal(transition.exitedPingPong, true, 'a direct meeting handoff must be recognized as a ping-pong exit');
+  assert.equal(interrupted._idleActivity, null, 'ping-pong activity must clear before the replacement activity is hydrated');
+  assert.equal(interrupted._carriedItem, null, 'stale ping-pong carriedItem must clear on interruption');
+  assert.equal(interrupted._carrying, null, 'stale ping-pong carrying alias must clear on interruption');
+  assert.equal(interrupted._carryItem, null, 'stale ping-pong carryItem alias must clear on interruption');
+  assert.equal(interrupted.carryItem, null, 'stale public ping-pong carry label must clear on interruption');
+  assert.equal(interrupted._pingPongSide, null, 'ping-pong side metadata must clear on interruption');
+  assert.equal(interrupted._pingPongPaddleColor, null, 'ping-pong color metadata must clear on interruption');
+  assert.equal(isIncomingPingPongRuntimeVisual(replacementVisual, { objectType: 'meetingTable' }), false);
+
+  const completion = makeAgent();
+  const completionResult = reconcilePingPongEquipmentTransition(completion, { activityActive: false, carrying: false }, null);
+  assert.equal(completionResult.exitedPingPong, true, 'an inactive terminal visual must clean ping-pong equipment');
+  assert.equal(clearPingPongEquipmentState(completion).cleared, false, 'ping-pong cleanup must be idempotent');
+
+  const mixed = makeAgent();
+  const coffee = { kind: 'coffee-drink', label: 'Coffee Drink' };
+  mixed._carriedItem = coffee;
+  clearPingPongEquipmentState(mixed);
+  assert.equal(mixed._carriedItem, coffee, 'cleanup must preserve a legitimate replacement carried item');
+  assert.equal(mixed._carrying, null, 'cleanup must still remove a stale racket from another carry alias');
+
+  const rootGroup = new THREE.Group();
+  const arm = new THREE.Group();
+  rootGroup.add(arm);
+  for (const name of ['rightHandPingPongRacket', 'visiblePingPongPaddle']) {
+    const paddle = new THREE.Group();
+    paddle.name = name;
+    paddle.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial()));
+    arm.add(paddle);
+  }
+  assert.equal(removePingPongRacketVisual({ _group3d: rootGroup }), 2, 'cleanup must dispose current and legacy paddle meshes');
+  assert.equal(rootGroup.getObjectByName('rightHandPingPongRacket'), undefined);
+  assert.equal(rootGroup.getObjectByName('visiblePingPongPaddle'), undefined);
+}
+
+verifyPingPongEquipmentCleanupState();
+
+function verifyPingPongPaddleAsset() {
+  const red = buildPingPongPaddleAssetForVerification(0xf44336);
+  const blue = buildPingPongPaddleAssetForVerification(0x2196f3);
+  for (const [label, paddle, expectedColor] of [['red', red, 0xf44336], ['blue', blue, 0x2196f3]]) {
+    const edge = paddle.getObjectByName('paddleBladeEdge');
+    const rubber = paddle.getObjectByName('paddleRubberFront');
+    const back = paddle.getObjectByName('paddleRubberBack');
+    const handle = paddle.getObjectByName('paddleHandleCore');
+    assert(edge?.geometry?.type === 'CylinderGeometry', `${label} paddle must have a round wooden blade edge`);
+    assert(rubber?.geometry?.type === 'CylinderGeometry', `${label} paddle must have a round rubber face`);
+    assert(back?.geometry?.type === 'CylinderGeometry', `${label} paddle must have a real opposing rubber face`);
+    assert(handle, `${label} paddle must have a wooden handle`);
+    assert.equal(rubber.material.color.getHex(), expectedColor, `${label} paddle face must preserve its team color`);
+    assert.equal(back.material.color.getHex(), 0x242424, `${label} paddle back must use dark table-tennis rubber`);
+    assert.match(paddle.userData.assetVersion, /^real-ping-pong-paddle-v\d+$/, `${label} paddle must expose its real-asset version`);
+    paddle.updateMatrixWorld(true);
+    const bladeBounds = new THREE.Box3().setFromObject(edge);
+    const bladeSize = new THREE.Vector3();
+    bladeBounds.getSize(bladeSize);
+    assert(bladeSize.y > bladeSize.x, `${label} paddle blade must be a taller oval, not a box`);
+    assert(bladeSize.z < bladeSize.x * 0.3, `${label} paddle blade must be thin like a real paddle`);
+  }
+}
+
+verifyPingPongPaddleAsset();
 
 const requiredFiles = [
   'README.md',
@@ -115,6 +213,26 @@ assert(
   'every Sectional Sofa seat must resolve to its dedicated outside dismount',
 );
 
+const parkBenchSchema = getObjectCatalogExample('park-bench');
+const parkBenchLocations = getActionLocationsForAsset('parkBench');
+const parkBenchSeatLocations = parkBenchLocations.filter(location => location.roles?.includes('seat'));
+assert.equal(parkBenchSchema?.footprint?.halfW, 1.12, 'Park Bench schema must retain the widened solid footprint');
+assert.equal(parkBenchSchema?.lifecycle?.colorProperty, 'parkBenchColors', 'Park Bench schema must retain persistent color settings');
+assert.deepEqual(
+  parkBenchSchema?.interactionSpots?.filter(location => location.roles?.includes('seat')).map(location => location.dx),
+  [-0.70, 0, 0.70],
+  'Park Bench schema must retain the widened left/center/right seat spacing',
+);
+assert.deepEqual(
+  parkBenchSeatLocations.map(location => location.offset.x),
+  [-0.70, 0, 0.70],
+  'Park Bench action-location registry must match the rendered seat spacing',
+);
+assert(
+  parkBenchSeatLocations.every(location => location.approachSpotId === `stand-${location.id.replace('seat-', '')}`),
+  'every Park Bench seat must retain its matching spaced approach/dismount route',
+);
+
 assert.equal(FRIDGE_FOOD_ITEMS.length, 10, 'fridge must provide exactly ten food choices');
 assert.equal(new Set(FRIDGE_FOOD_ITEMS.map(item => item.id)).size, 10, 'fridge food ids must be unique');
 assert.equal(new Set(FRIDGE_FOOD_ITEMS.map(item => item.label)).size, 10, 'fridge food labels must be unique');
@@ -138,6 +256,7 @@ const fridgeAssetSignatures = FRIDGE_FOOD_ITEMS.map((food) => {
   assert(meshes.length >= 2, `${food.label} must build a visible multi-part temporary food asset`);
   assert(asset.userData.snackVariant.includes(food.id), `${food.label} asset must retain its fridge food id`);
   assert(asset.userData.fridgeFoodVisualKinds.includes(food.visualKind), `${food.label} asset must advertise its visual kind`);
+  assert(Number.isFinite(asset.userData.consumeSurfaceBottomY), `${food.label} must cache its exact lowest point for tabletop placement`);
   return JSON.stringify(meshes);
 });
 assert.equal(new Set(fridgeAssetSignatures).size, 10, 'all ten fridge foods must render as distinct assets');
@@ -167,9 +286,29 @@ const stoveOvenAssetSignatures = STOVE_OVEN_FOOD_ITEMS.map((food) => {
   assert(meshes.length >= 2, `${food.label} must build a visible multi-part cooked food asset`);
   assert(asset.userData.snackVariant.includes(food.id), `${food.label} asset must retain its stove/oven food id`);
   assert(asset.userData.stoveOvenFoodVisualKinds.includes(food.visualKind), `${food.label} asset must advertise its visual kind`);
+  assert(Number.isFinite(asset.userData.consumeSurfaceBottomY), `${food.label} must cache its exact lowest point for tabletop placement`);
   return JSON.stringify(meshes);
 });
 assert.equal(new Set(stoveOvenAssetSignatures).size, 10, 'all ten stove/oven foods must render as distinct cooked assets');
+for (const [type, spec] of Object.entries(CONSUMABLE_SURFACE_SPECS)) {
+  for (const scale of [0.68, 0.8, 0.88]) {
+    const root = { scale: { x: scale, y: scale, z: scale }, position: { y: 3.125 }, userData: { _groundY: 3.1 } };
+    const bottomY = -0.1425;
+    const placement = resolveConsumableSurfaceAssetPlacement({
+      _group3d: root,
+      _idleActivity: {
+        furnitureType: type,
+        consumeSurfaceHeight: spec.surfaceHeight,
+        consumeSurfaceForwardOffset: spec.forwardOffset,
+        consumeSurfaceSideOffset: spec.sideOffset,
+      },
+    }, { userData: { consumeSurfaceBottomY: bottomY } });
+    const worldBottomY = root.position.y + (placement.y + bottomY) * scale;
+    assert(Math.abs(worldBottomY - (root.userData._groundY + spec.surfaceHeight + 0.004)) < 0.0001, `${type} item bottom must land on its exact surface for agent scale ${scale}`);
+    assert(Math.abs(placement.z * scale - spec.forwardOffset) < 0.0001, `${type} serving reach must be agent-scale independent`);
+    assert(Math.abs(placement.x * scale - spec.sideOffset) < 0.0001, `${type} serving side offset must be agent-scale independent`);
+  }
+}
 assert(ACTION_LOCATION_ROLES.includes('clearance'), 'door-swing clearance must remain a non-use action-location role');
 const fridgeCatalog = getObjectCatalogExample('fridge');
 const blockedFridgeQueueDestination = resolveBehaviorDestination({
@@ -503,7 +642,29 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260803-stove-oven-product-r1',
+  'js/main3d.js?v=20260804-pingpong-live-r23',
+  'agent-life-exterior-area-taxonomy.mjs?v=20260804-park-table-node-inference-r2',
+  'syncAgentToCurrentTableSeatTransform(agent)',
+  'occupiedAgentFollowsChairTransform',
+  'manualReleaseUsesTransformedExit',
+  'window.__verifyParkTableSeating',
+  'window.__verifySavedParkTableRaycasts',
+  'function resolveDraggedAgentObjectHits(hits, agent = null)',
+  'function getDraggedAgentHitInteractionSpotId(hitObject)',
+  'object.userData?.outdoorCafeChairSeatId',
+  'object.userData?.picnicBenchSeatId',
+  'function initializeOutdoorPlacedTableNode(node, type)',
+  'function initializeOutdoorPlacedParkBenchNode(node, type)',
+  'The normalized exterior taxonomy record is deeply frozen',
+  'window.__verifyParkBenchWidthPostsAndColors',
+  'parkBenchBackSupport',
+  "backTop: '#7b5a4a'",
+  'function getOutdoorMultiSeatObjectKey(buildingId, nodeId, objectType)',
+  'function getOutdoorNodeRuntimeTaxonomyInput(node = {})',
+  "picnicTable: Object.freeze({ seatIds: ['seat-north-left', 'seat-north-right', 'seat-south-left', 'seat-south-right']",
+  'MANUAL_TABLE_SEAT_DWELL_MS = 20 * 1000',
+  'outdoorCafeUmbrella',
+  'outdoorCafeChairLeg',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
   'js/chat.js?v=20260729-chat-scroll-follow-r6',
@@ -526,6 +687,111 @@ for (const token of [
   'buildings may snap next to roads, but cannot cover roadways or sidewalks',
 ]) {
   assert(`${main3dJs}\n${indexHtml}`.includes(token), `client starter map wiring missing token: ${token}`);
+}
+for (const token of [
+  "diningTable: 'stationary-persistent-four-seat-dining-table'",
+  "placedFurniture.diningTableColors = normalizeMultiSeatFurnitureColors('diningTable')",
+  "placedFurniture.smallCafeTableColors = normalizeMultiSeatFurnitureColors('smallCafeTable')",
+  "placedFurniture.outdoorCafeTableColors = normalizeMultiSeatFurnitureColors('outdoorCafeTable')",
+  "placedFurniture.smallRoundMeetingTableColors = normalizeMultiSeatFurnitureColors('smallRoundMeetingTable')",
+  "approachSpotIds: ['approach-north', 'approach-south', 'approach-east', 'approach-west']",
+  'function getFourSeatTableOccupancyState(buildingId, index, type)',
+  'function getDiningTableState(buildingId, index)',
+  'const usedSeatIds = new Set([...occupiedSeatIds, ...reservedSeatIds])',
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing 8593 table-parity token: ${token}`);
+}
+for (const token of [
+  'window.__verifyMeetingTableSeatStandingAndColorParity',
+  "property: 'meetingTableColors'",
+  "placedFurniture.meetingTableColors = normalizeMultiSeatFurnitureColors('meetingTable')",
+  "meetingTable: Object.freeze({ seatIds: ['seat-n1', 'seat-n2', 'seat-n3', 'seat-n4', 'seat-n5', 'seat-s1', 'seat-s2', 'seat-s3', 'seat-s4', 'seat-s5']",
+  "meetingTable: Object.freeze({ prefix: 'meeting-table'",
+  "standingSpotIds = ['stand-west-1', 'stand-west-2', 'stand-west-3', 'stand-east-1', 'stand-east-2', 'stand-east-3']",
+  "const isMeetingTableStanding = isMeetingTable",
+  "getFurnitureSeatSurfaceLift('meetingTable') === 2.25",
+  "sourceFamily: 'meeting-table-call'",
+  "sourceFunction: 'assignMeetingParticipantsToTable'",
+  'backendRuntimeObjectUse: true',
+  'getAgentRuntimeWorldObjectState(`${baseObjectKey}:slot:${positionId}`)',
+]) {
+  assert(`${main3dJs}\n${agentCharactersJs}`.includes(token), `meeting table parity missing token: ${token}`);
+}
+for (const token of [
+  'MEETING_TABLE_DEFAULT_LOCATIONS',
+  "meetingtable: ['seat-n1', 'seat-n2', 'seat-n3', 'seat-n4', 'seat-n5', 'seat-s1', 'seat-s2', 'seat-s3', 'seat-s4', 'seat-s5', 'stand-west-1', 'stand-west-2', 'stand-west-3', 'stand-east-1', 'stand-east-2', 'stand-east-3']",
+  "activityKind: objectType === 'conferenceChair' ? 'conference-chair-sit' : (standing ? 'meeting-table-stand' : 'meeting-table')",
+  "MEETING_TABLE_DEFAULT_LOCATIONS.filter(location => !authoredLocations.some(existing => scriptedObjectSpotId(existing) === location.id))",
+  "meetingStanding ? 'meeting-table-stand'",
+  "source === 'assignMeetingParticipantsToTable'",
+  "'meeting-call-preempted-pingpong'",
+  "protectedMeetingCall = String(originalTarget?.runtimeSource || '') === 'assignMeetingParticipantsToTable'",
+]) {
+  assert(agentRuntimeRoomJs.includes(token), `realtime Meeting Table parity missing token: ${token}`);
+}
+for (const token of [
+  'window.__verifyCleanTabletops',
+  'window.__verifyTabletopStaticItemsPolicy',
+  'window.__verifyConsumableTabletopSurfacePlacement',
+  "tabletop.userData.consumableTabletopSurface = 'diningTable'",
+  'consumeSurfaceHeight: consumeSurfaceSpec?.surfaceHeight ?? null',
+  "g.userData.tabletopCleanup = Object.freeze({ type: 'sideTable', staticItemCount: 0 })",
+  "g.userData.tabletopCleanup = Object.freeze({ type: 'draftingTable', staticItemCount: 0 })",
+  "staticItemCount: 5",
+  "staticItemKinds: Object.freeze(['paperwork-packet', 'conference-speaker'])",
+  "packet.userData.tabletopStaticItem = 'paperwork-packet'",
+  "speakerUnit.userData.tabletopStaticItem = 'conference-speaker'",
+  "g.userData.tabletopCleanup = Object.freeze({ type: 'smallCafeTable', staticItemCount: 0 })",
+  "g.userData.tabletopCleanup = Object.freeze({ type: 'patioTable', staticItemCount: 0 })",
+  "g.userData.tabletopCleanup = Object.freeze({ type: 'outdoorCafeTable', staticItemCount: 0 })",
+  "g.userData.tabletopCleanup = Object.freeze({ type: 'picnicTable', staticItemCount: 0 })",
+  "g.userData.tabletopCleanup = Object.freeze({ type: 'smallRoundMeetingTable', staticItemCount: 0 })",
+  "g.userData.tabletopCleanup = Object.freeze({ type: 'poolTable', staticItemCount: 0 })",
+  "g.userData.tabletopCleanup = Object.freeze({ type: 'pingpong', staticItemCount: 0, runtimeItemCount: 1 })",
+  'tabletopLayerCount: 1',
+  'tableAccentLayerCount: 0',
+  'tableFrameLayerCount: 0',
+  "tabletop.userData.diningTableSurfaceLayer = 'tabletop'",
+  "['woodFrame', 'Table legs & chair frame']",
+  "['woodAccent', 'Chair accents']",
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing clean-tabletop regression token: ${token}`);
+}
+assert.equal(
+  [...main3dJs.matchAll(/staticItemCount: 0/g)].length,
+  10,
+  'the ten non-Meeting tabletop builders must explicitly report zero built-in static items',
+);
+for (const removedToken of [
+  'Four subtle place/work spots on the same tabletop',
+  'Tabletop temporary-use cues are stateful detail',
+  'Place settings: placemats, plates, food accents, cups, and cutlery',
+  'center speaker puck',
+  'Integrated cups/plates',
+  'Blueprints/tools here',
+  'const runner = parseColor(colors.runner)',
+  'Ball rack / cue ball dots are detail on the playing surface',
+]) {
+  assert(!main3dJs.includes(removedToken), `removed static tabletop detail returned: ${removedToken}`);
+}
+assert.equal(
+  [...main3dJs.matchAll(/placedFurniture\.tableState = \{ seats: 4, activeSeatIds: \[\], reservedSeatIds: \[\]/g)].length,
+  5,
+  'Dining, Small Cafe, Outdoor Cafe, Picnic, and Small Round Meeting placement must initialize independent four-seat state',
+);
+for (const assetType of ['outdoorCafeTable', 'picnicTable']) {
+  const normalizedOutdoorTable = normalizeExteriorInteractionNode({
+    id: `legacy-${assetType}`,
+    type: assetType,
+    renderType: assetType,
+    catalogId: assetType,
+    x: 4,
+    z: 5,
+    roles: ['seat', 'eat', 'drink', 'social'],
+  });
+  assert.equal(normalizedOutdoorTable.valid, true, `${assetType} legacy outdoor nodes must remain valid without explicit nodeType metadata`);
+  assert.equal(normalizedOutdoorTable.node?.nodeType, 'eat', `${assetType} legacy outdoor nodes must infer the eat node type`);
+  assert.equal(normalizedOutdoorTable.node?.renderType, assetType, `${assetType} legacy outdoor nodes must retain their rendered asset type`);
 }
 for (const token of [
   "sink: Object.freeze({",
@@ -643,7 +909,7 @@ for (const token of [
   assert(read('src/server/providers/codex.py').includes(token), `codex.py missing stream token: ${token}`);
 }
 for (const token of [
-  "agent-characters.js?v=20260731-stove-oven-r1",
+  "agent-characters.js?v=20260804-pingpong-live-r23",
   "chat-bubble-layout.mjs?v=20260728-chat-bubble-consistency-r4",
   'getChatBubbleSideInsets',
   'getChatBubbleChromeMetrics',
@@ -859,6 +1125,13 @@ for (const token of [
   'PING_PONG_ORPHAN_READY_TIMEOUT_SECONDS = 60',
   'playersTrackingBall',
   'window.__verifyPingPongRuntimeAdoption',
+  'window.__verifyPingPongEquipmentCleanup',
+  'window.__verifyPingPongRuntimeEpochReset',
+  'window.__getLivePingPongState',
+  'reconcileAuthoritativePingPongEquipment(dt)',
+  'const newerRuntimeEpoch = previousVersion > incomingVersion',
+  'reconcileAgentRuntimePingPongEquipmentTransition(agent, visualState, snapshotTarget)',
+  "removePingPongRacketVisual(agent)",
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing ping-pong runtime ownership token: ${token}`);
 }
@@ -1226,7 +1499,7 @@ for (const token of [
   'ambient-schedule-routing-suppressed',
   'status-change-movement-clear-skipped',
   '__VWGetLiveModeScriptedSuppressionState',
-  "agent-characters.js?v=20260731-stove-oven-r1",
+  "agent-characters.js?v=20260804-pingpong-live-r23",
   'function getAgentPresenceDotColor(statusValue)',
   'statusDot.userData.presenceStatusIndicator = true',
   'parts.statusDot.material.color.setHex(getAgentPresenceDotColor(normalizedStatus))',

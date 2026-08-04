@@ -26,6 +26,9 @@ import {
   listStoveOvenFoodsForMethod,
   normalizeStoveOvenCookingMethod,
 } from '../client/js/stove-oven-food-catalog.mjs';
+import {
+  getConsumableSurfaceSpec,
+} from '../client/js/consumable-surface-specs.mjs';
 
 export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
 export const RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION = 'agent-runtime-lifecycle-journal/v1';
@@ -104,6 +107,8 @@ export const SERVER_RUNTIME_ROUTE_STALE_AFTER_MS = 45000;
 export const SERVER_RUNTIME_ROUTE_PROGRESS_EPSILON = 1;
 export const SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS = 16000;
 export const SERVER_SCRIPTED_OBJECT_TEMPORARY_ITEM_CARRIED_TTL_MS = 90000;
+export const SERVER_SCRIPTED_CONSUME_NEARBY_RADIUS_TILES = 14;
+export const SERVER_SCRIPTED_CONSUME_SPATIAL_BUCKET_TILES = 8;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ACTIVE_ROUTES = 8;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_ROUTE_STEPS_PER_TICK = 12;
 export const SERVER_SCRIPTED_OBJECT_RUNTIME_MAX_STARTS_PER_TICK = 3;
@@ -139,6 +144,7 @@ export const SERVER_SCRIPTED_IDLE_OBJECT_COOLDOWN_MS = 240000;
 export const SERVER_SCRIPTED_IDLE_CATEGORY_COOLDOWN_MS = 180000;
 export const SERVER_SCRIPTED_IDLE_FAILED_TARGET_THROTTLE_MS = 90000;
 export const SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS = 5 * 60 * 1000;
+export const SERVER_MANUAL_TABLE_SEAT_DWELL_MS = 20 * 1000;
 export const LIVE_ACTION_API_TILE = 40;
 const SERVER_RUNTIME_ELEVATOR_SIZE_TILES = 2.8;
 const SERVER_RUNTIME_ELEVATOR_QUEUE_SPACING_TILES = 0.72;
@@ -3491,6 +3497,16 @@ const LIVE_STATUS_WORK_STATES = new Set(['working', 'finishing', 'busy', 'runnin
 const LIVE_STATUS_WORK_OBJECT_TYPES = new Set(['desk', 'standingDesk', 'receptionDesk', 'laptopMonitorProps']);
 const LIVE_STATUS_MEETING_STATES = new Set(['meeting']);
 const LIVE_STATUS_MEETING_OBJECT_TYPES = new Set(['meetingTable', 'smallRoundMeetingTable', 'conferenceChair']);
+const MEETING_TABLE_DEFAULT_LOCATIONS = Object.freeze([
+  ...[-1.65, -0.82, 0, 0.82, 1.65].map((dx, index) => Object.freeze({ id: `seat-n${index + 1}`, slotId: `seat-n${index + 1}`, activationSpotId: `seat-n${index + 1}`, dx, dz: -1.45, facing: 'south', action: 'planning.meeting', roles: Object.freeze(['seat', 'meeting']), capacityKind: 'exclusive', capacity: 1 })),
+  ...[-1.65, -0.82, 0, 0.82, 1.65].map((dx, index) => Object.freeze({ id: `seat-s${index + 1}`, slotId: `seat-s${index + 1}`, activationSpotId: `seat-s${index + 1}`, dx, dz: 1.45, facing: 'north', action: 'planning.meeting', roles: Object.freeze(['seat', 'meeting']), capacityKind: 'exclusive', capacity: 1 })),
+  Object.freeze({ id: 'stand-west-1', slotId: 'stand-west-1', activationSpotId: 'stand-west-1', dx: -2.70, dz: -0.62, facing: 'east', action: 'planning.meeting', roles: Object.freeze(['meeting', 'stand', 'standing']), capacityKind: 'exclusive', capacity: 1 }),
+  Object.freeze({ id: 'stand-west-2', slotId: 'stand-west-2', activationSpotId: 'stand-west-2', dx: -2.70, dz: 0, facing: 'east', action: 'planning.meeting', roles: Object.freeze(['meeting', 'stand', 'standing']), capacityKind: 'exclusive', capacity: 1 }),
+  Object.freeze({ id: 'stand-west-3', slotId: 'stand-west-3', activationSpotId: 'stand-west-3', dx: -2.70, dz: 0.62, facing: 'east', action: 'planning.meeting', roles: Object.freeze(['meeting', 'stand', 'standing']), capacityKind: 'exclusive', capacity: 1 }),
+  Object.freeze({ id: 'stand-east-1', slotId: 'stand-east-1', activationSpotId: 'stand-east-1', dx: 2.70, dz: -0.62, facing: 'west', action: 'planning.meeting', roles: Object.freeze(['meeting', 'stand', 'standing']), capacityKind: 'exclusive', capacity: 1 }),
+  Object.freeze({ id: 'stand-east-2', slotId: 'stand-east-2', activationSpotId: 'stand-east-2', dx: 2.70, dz: 0, facing: 'west', action: 'planning.meeting', roles: Object.freeze(['meeting', 'stand', 'standing']), capacityKind: 'exclusive', capacity: 1 }),
+  Object.freeze({ id: 'stand-east-3', slotId: 'stand-east-3', activationSpotId: 'stand-east-3', dx: 2.70, dz: 0.62, facing: 'west', action: 'planning.meeting', roles: Object.freeze(['meeting', 'stand', 'standing']), capacityKind: 'exclusive', capacity: 1 }),
+]);
 const LIVE_STATUS_WORK_SPOT_DEFAULTS = {
   desk: { dx: 0, dz: 0.8, facing: 'north', spotId: 'default' },
   standingDesk: { dx: 0, dz: 0.92, facing: 'north', spotId: 'work-front' },
@@ -3662,6 +3678,13 @@ const ROTATION_AWARE_PERSISTED_SEAT_OBJECT_TYPES = new Set([
 ]);
 
 function runtimeFurnitureActionFaceAngle(building, furniture, local, fromPoint = null, options = {}) {
+  if (
+    normalizeObjectTypeKey(furniture?.type) === 'meetingtable' &&
+    (local?.poseKind === 'seat' || local?.poseKind === 'stand' || String(local?.spotId || '').startsWith('stand-'))
+  ) {
+    return runtimeFurnitureCenterFaceAngle(building, furniture, local?.x, local?.z, fromPoint)
+      ?? runtimeFacingAngle(building, furniture, local?.x, local?.z, local?.facing);
+  }
   const explicit = explicitRuntimeFaceAngle(local?.faceAngle);
   if (explicit !== null) return explicit;
   if (String(furniture?.type || '').trim().toLowerCase() === 'outdoorstage' && String(local?.spotId || '').toLowerCase() === 'perform-center') {
@@ -3671,6 +3694,9 @@ function runtimeFurnitureActionFaceAngle(building, furniture, local, fromPoint =
     return runtimeFacingAngle(building, furniture, local?.x, local?.z, 'south');
   }
   if (String(local?.poseKind || '').toLowerCase() === 'seat') {
+    if (['diningtable', 'smallcafetable', 'outdoorcafetable', 'picnictable', 'smallroundmeetingtable', 'meetingtable'].includes(normalizeObjectTypeKey(furniture?.type))) {
+      return runtimeFurnitureCenterFaceAngle(building, furniture, local?.x, local?.z, fromPoint);
+    }
     if (
       local?.facingAlreadyPlaced === true &&
       ROTATION_AWARE_PERSISTED_SEAT_OBJECT_TYPES.has(normalizeObjectTypeKey(furniture?.type))
@@ -3785,6 +3811,7 @@ function meetingTargetFromFurnitureSpot(building, furniture, index, location = n
   const objectType = safeText(furniture.type, 'meetingTable') || 'meetingTable';
   const objectInstanceId = safeText(furniture.objectInstanceId || furniture.instanceId || furniture.id || `${building.id}:furniture:${index}`, '');
   const spotId = scriptedObjectSpotId(location);
+  const standing = roles.includes('stand') || roles.includes('standing') || String(spotId || '').startsWith('stand-');
   return {
     x: point.x,
     y: point.y,
@@ -3800,9 +3827,10 @@ function meetingTargetFromFurnitureSpot(building, furniture, index, location = n
     interactionSpotId: spotId,
     spotId,
     slotId: safeText(location?.slotId || location?.seatId || spotId, spotId) || spotId,
-    poseKind: 'seat',
-    animationId: 'meeting-sit-talk',
-    activityKind: objectType === 'conferenceChair' ? 'conference-chair-sit' : 'meeting-table',
+    poseKind: standing ? 'stand' : 'seat',
+    meetingStanding: standing,
+    animationId: standing ? 'gather-talk' : 'meeting-sit-talk',
+    activityKind: objectType === 'conferenceChair' ? 'conference-chair-sit' : (standing ? 'meeting-table-stand' : 'meeting-table'),
     faceAngle: runtimeFurnitureActionFaceAngle(building, furniture, local, point),
   };
 }
@@ -3840,7 +3868,16 @@ function listLiveStatusMeetingTargets(dataDir) {
       const item = furniture[index];
       if (!item || item.deleted || item.removed || item.enabled === false) continue;
       if (!LIVE_STATUS_MEETING_OBJECT_TYPES.has(String(item.type || ''))) continue;
-      const locations = Array.isArray(item.actionLocations) && item.actionLocations.length > 0 ? item.actionLocations : [null];
+      let locations = Array.isArray(item.actionLocations) && item.actionLocations.length > 0 ? item.actionLocations : [null];
+      const authoredLocationIds = new Map(locations.filter(Boolean).map((location, locationIndex) => [scriptedObjectSpotId(location), locationIndex]));
+      if (String(item.type || '') === 'meetingTable') {
+        const authored = locations.filter(Boolean);
+        const authoredIds = new Set(authored.map(location => scriptedObjectSpotId(location)));
+        locations = [
+          ...authored,
+          ...MEETING_TABLE_DEFAULT_LOCATIONS.filter(fallback => !authoredIds.has(fallback.id)),
+        ];
+      }
       for (const location of locations) {
         const target = meetingTargetFromFurnitureSpot(building, item, index, location);
         if (!target) continue;
@@ -3852,11 +3889,20 @@ function listLiveStatusMeetingTargets(dataDir) {
           furnitureIndex: index,
           objectType: target.objectType,
           assignedTo: item.assignedTo ?? item.assignedAgentId ?? null,
+          authoredOrder: authoredLocationIds.has(target.spotId) ? authoredLocationIds.get(target.spotId) : null,
         });
       }
     }
   }
-  return targets.sort((a, b) => `${a.buildingId}:${a.furnitureIndex}:${a.target.spotId}`.localeCompare(`${b.buildingId}:${b.furnitureIndex}:${b.target.spotId}`));
+  return targets.sort((a, b) => {
+    const objectOrder = `${a.buildingId}:${a.furnitureIndex}`.localeCompare(`${b.buildingId}:${b.furnitureIndex}`);
+    if (objectOrder) return objectOrder;
+    const aAuthored = Number.isInteger(a.authoredOrder);
+    const bAuthored = Number.isInteger(b.authoredOrder);
+    if (aAuthored !== bAuthored) return aAuthored ? -1 : 1;
+    if (aAuthored && bAuthored && a.authoredOrder !== b.authoredOrder) return a.authoredOrder - b.authoredOrder;
+    return String(a.target.spotId || '').localeCompare(String(b.target.spotId || ''));
+  });
 }
 
 function agentAssignmentFor(meta, agentId) {
@@ -3907,7 +3953,7 @@ export function pickLiveStatusWorkTarget(agentId, { meta, targets, workingAgentI
   return picked?.target || null;
 }
 
-function pickLiveStatusMeetingTarget(agentId, { presence, targets, meetingAgentIds }) {
+function pickLiveStatusMeetingTarget(agentId, { presence, targets, meetingAgentIds, claimedMeetingTargetKeys = null }) {
   if (!agentId || !Array.isArray(targets) || targets.length === 0) return null;
   const meeting = meetingForPresenceAgent(presence, agentId);
   const participants = meetingParticipants(meeting);
@@ -3920,11 +3966,23 @@ function pickLiveStatusMeetingTarget(agentId, { presence, targets, meetingAgentI
       return true;
     });
     if (filtered.length > 0) candidates = filtered;
+  } else {
+    const meetingTableTargets = candidates.filter(entry => normalizeObjectTypeKey(entry.objectType) === 'meetingtable');
+    if (meetingTableTargets.length > 0) {
+      const anchor = meetingTableTargets[0];
+      candidates = meetingTableTargets.filter(entry => entry.buildingId === anchor.buildingId && Number(entry.furnitureIndex) === Number(anchor.furnitureIndex));
+    }
   }
   const participantIndex = participants.indexOf(agentId);
   const fallbackIndex = Array.isArray(meetingAgentIds) ? meetingAgentIds.indexOf(agentId) : -1;
   const index = participantIndex >= 0 ? participantIndex : (fallbackIndex >= 0 ? fallbackIndex : stableTextHash(agentId));
-  const picked = candidates[index % candidates.length]?.target || null;
+  const targetKey = entry => `${entry?.buildingId || ''}:${entry?.furnitureIndex ?? ''}:${entry?.target?.slotId || entry?.target?.spotId || ''}`;
+  let pickedEntry = index >= 0 && index < candidates.length ? candidates[index] || null : null;
+  if (pickedEntry && claimedMeetingTargetKeys?.has(targetKey(pickedEntry))) {
+    pickedEntry = candidates.find(entry => !claimedMeetingTargetKeys.has(targetKey(entry))) || null;
+  }
+  if (pickedEntry && claimedMeetingTargetKeys) claimedMeetingTargetKeys.add(targetKey(pickedEntry));
+  const picked = pickedEntry?.target || null;
   return picked ? {
     ...picked,
     meetingId: safeText(meeting?.id || meeting?.meetingId || 'live-meeting', 'live-meeting') || 'live-meeting',
@@ -3960,8 +4018,9 @@ export function buildLiveStatusRuntimePlan(dataDir) {
     .filter(Boolean)
     .sort();
   const targetsByAgent = {};
+  const claimedMeetingTargetKeys = new Set();
   for (const agentId of meetingAgentIds) {
-    const target = pickLiveStatusMeetingTarget(agentId, { presence, targets: meetingTargets, meetingAgentIds });
+    const target = pickLiveStatusMeetingTarget(agentId, { presence, targets: meetingTargets, meetingAgentIds, claimedMeetingTargetKeys });
     if (target) targetsByAgent[agentId] = target;
   }
   const claimedTargetIndexes = new Set();
@@ -4089,6 +4148,7 @@ const SERVER_SCRIPTED_SEAT_OBJECT_TYPES = new Set([
   'outdoorcafetable',
   'picnictable',
   'smallroundmeetingtable',
+  'diningtable',
   'meetingtable',
   'gamingstation',
   'playgroundswing',
@@ -4099,6 +4159,13 @@ const SERVER_MANUAL_OBJECT_OCCUPANCY_TYPES = new Set([
   'treadmill',
   'trainingmat',
   'outdoorexercisestation',
+]);
+const SERVER_MANUAL_TABLE_SEAT_TYPES = new Set([
+  'diningtable',
+  'smallcafetable',
+  'outdoorcafetable',
+  'picnictable',
+  'smallroundmeetingtable',
 ]);
 
 export function isServerManualObjectOccupancyTarget(target = null, { manualDrop = false, source = '' } = {}) {
@@ -4114,16 +4181,20 @@ export function isServerManualObjectOccupancyTarget(target = null, { manualDrop 
   ));
 }
 
-function withServerManualObjectOccupancyDwell(target = null, options = {}) {
+export function withServerManualObjectOccupancyDwell(target = null, options = {}) {
   if (!target || !isServerManualObjectOccupancyTarget(target, options)) return target;
+  const objectType = normalizeObjectTypeKey(target.objectType || target.catalogKey || target.furnitureType || '');
+  const tableSeatDwell = SERVER_MANUAL_TABLE_SEAT_TYPES.has(objectType);
   return {
     ...target,
     manualDrop: true,
     manualOccupancyHold: true,
-    stayMs: Math.max(
-      SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
-      Math.floor(numberOr(target.stayMs, SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS)),
-    ),
+    stayMs: tableSeatDwell
+      ? SERVER_MANUAL_TABLE_SEAT_DWELL_MS
+      : Math.max(
+        SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS,
+        Math.floor(numberOr(target.stayMs, SERVER_MANUAL_OBJECT_OCCUPANCY_DWELL_MS)),
+      ),
   };
 }
 const SERVER_SCRIPTED_DUMBBELL_WORKOUTS = Object.freeze([
@@ -4204,7 +4275,8 @@ const SERVER_SCRIPTED_OBJECT_ACTIVITY_CONFIG = Object.freeze({
   picnictable: Object.freeze({ kind: 'picnic-table-eat', spotId: 'seat-south-left', animationId: 'outdoor-cafe-table-sit-eat-drink-talk', poseKind: 'seat', stayMs: [11000, 19000] }),
   patiotable: Object.freeze({ kind: 'patio-table-eat-talk', spotId: 'use-south', animationId: 'stand-use', poseKind: 'stand-use', stayMs: [10000, 18000] }),
   smallroundmeetingtable: Object.freeze({ kind: 'small-round-meeting-table-plan', spotId: 'seat-south', animationId: 'meeting-sit-talk', poseKind: 'seat', stayMs: [12000, 20000] }),
-  meetingtable: Object.freeze({ kind: 'meeting-table', spotId: 'seat-s3', animationId: 'meeting-sit-talk', poseKind: 'seat', stayMs: [12000, 20000] }),
+  diningtable: Object.freeze({ kind: 'dining-table-eat', spotId: 'seat-south', animationId: 'dining-table-eat-talk', poseKind: 'seat', stayMs: [11000, 19000] }),
+  meetingtable: Object.freeze({ kind: 'meeting-table', spotId: 'seat-s3', animationId: 'meeting-sit-talk', poseKind: 'seat', stayMs: [30000, 30000] }),
   checkoutcounter: Object.freeze({ kind: 'checkout-counter-customer', spotId: 'customer', animationId: 'checkout-counter', poseKind: 'stand-use', stayMs: [8000, 14000] }),
   checkoutregister: Object.freeze({ kind: 'checkout-register-customer', spotId: 'customer', animationId: 'checkout-service', poseKind: 'stand-use', stayMs: [7000, 12000] }),
   trashbin: Object.freeze({ kind: 'trash-bin-dispose', spotId: 'dispose-front', animationId: 'dispose', poseKind: 'stand-use', stayMs: [6000, 10000] }),
@@ -4596,6 +4668,7 @@ export function makeServerScriptedDeskConsumeTarget(dataDir, agentId, sourceTarg
   const objectKey = normalizeWorldObjectKey(`${baseObjectKey}:consume:${safeText(agentId, 'agent') || 'agent'}`);
   const temporaryItem = makeServerScriptedTemporaryItem(agentId, sourceTarget, spec, nowMs);
   const consumeDurationMs = Math.max(1000, Math.floor(numberOr(sourceTarget?.consumeDurationMs ?? sourceTarget?.deskConsumeMs, SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS)));
+  const consumeSurfaceSpec = getConsumableSurfaceSpec('desk');
   return {
     ...deskTarget,
     targetKind: 'work-desk',
@@ -4621,64 +4694,118 @@ export function makeServerScriptedDeskConsumeTarget(dataDir, agentId, sourceTarg
     sourceActionId: safeText(sourceTarget?.actionId, ''),
     sourceActivityKind: safeText(sourceTarget?.activityKind, ''),
     runtimePhase: 'desk-routing',
-    runtimeSource: safeText(sourceTarget?.runtimeSource, 'idle') || 'idle',
+    runtimeSource: 'consumable-destination',
     runtimeStartedAt: new Date(nowMs).toISOString(),
     runtimeActiveAt: '',
     pickupEffect: spec.pickupEffect,
     consumeEffect: spec.consumeEffect,
     completionState: spec.deskCompletionState,
+    consumeDestinationKind: 'desk',
+    consumePresentation: 'surface',
+    consumeSurfaceSpotId: 'desk-surface',
+    consumeSurfaceHeight: consumeSurfaceSpec.surfaceHeight,
+    consumeSurfaceForwardOffset: consumeSurfaceSpec.forwardOffset,
+    consumeSurfaceSideOffset: consumeSurfaceSpec.sideOffset,
     lifecycle: { stationary: false, carryable: false, temporary: true, consumesTemporary: true },
   };
 }
 
-const SERVER_SCRIPTED_FREE_CONSUME_SEAT_TYPES = new Set([
+const SERVER_SCRIPTED_CONSUME_STANDALONE_SEAT_TYPES = new Set([
   'chair',
+  'officechair',
+  'diningchair',
+  'patiochair',
+  'barstool',
   'couch',
   'sectionalsofa',
   'loveseat',
   'armchair',
+  'hallwaybench',
   'parkbench',
 ]);
 
-// Live Agent Mode: agents are free to consume dispensed items (coffee, water,
-// snacks, microwaved food) at any available seat they like — a couch, armchair,
-// park bench, or chair — instead of being scripted back to a work desk. Queue
-// order at the dispenser is still enforced upstream; only the consume location
-// becomes a free choice. Scripted (non-live) agents keep the desk routine.
-export function makeServerScriptedFreeConsumeTarget(dataDir, agentId, sourceTarget = null, nowMs = Date.now(), runtimeState = null) {
-  const spec = serverScriptedObjectDispenseSpec(sourceTarget);
-  if (!spec) return null;
-  const meta = readWorldMetaDocument(dataDir);
-  if (!isAgentLiveModeEnabledForServer(meta, agentId)) return null;
-  let seats = [];
-  try {
-    seats = listScriptedObjectRuntimeTargets(dataDir).filter(target =>
-      String(target?.poseKind || '').toLowerCase() === 'seat' &&
-      !target?.isQueueUse &&
-      SERVER_SCRIPTED_FREE_CONSUME_SEAT_TYPES.has(String(target?.objectType || '').trim().toLowerCase()) &&
-      isServerScriptedObjectTargetAvailable(runtimeState, target, agentId, nowMs, dataDir));
-  } catch {
-    seats = [];
+const SERVER_SCRIPTED_CONSUME_TABLE_SEAT_TYPES = new Set([
+  'diningtable',
+  'smallcafetable',
+  'outdoorcafetable',
+  'picnictable',
+  'smallroundmeetingtable',
+]);
+
+const SERVER_SCRIPTED_CONSUME_SEAT_TYPES = new Set([
+  ...SERVER_SCRIPTED_CONSUME_STANDALONE_SEAT_TYPES,
+  ...SERVER_SCRIPTED_CONSUME_TABLE_SEAT_TYPES,
+]);
+
+const SERVER_SCRIPTED_CONSUME_SEAT_SURFACE_LIFTS = Object.freeze({
+  armchair: 2.08,
+  couch: 2.117,
+  sectionalsofa: 2.08,
+  loveseat: 2.117,
+  hallwaybench: 2.071,
+  parkbench: 1.662,
+  patiochair: 1.52,
+  barstool: 4.2,
+  diningtable: 1.48,
+  smallcafetable: 1.48,
+  outdoorcafetable: 1.48,
+  smallroundmeetingtable: 1.48,
+  picnictable: 1.6,
+});
+
+function serverScriptedConsumeSpatialKey(buildingId = '', floor = 1, x = 0, y = 0) {
+  const bucketSize = SERVER_SCRIPTED_CONSUME_SPATIAL_BUCKET_TILES * LIVE_ACTION_API_TILE;
+  return `${safeText(buildingId, '')}|${floorOr(floor, 1)}|${Math.floor(numberOr(x, 0) / bucketSize)}|${Math.floor(numberOr(y, 0) / bucketSize)}`;
+}
+
+export function buildServerScriptedConsumeSpatialIndex(targets = []) {
+  const index = new Map();
+  for (const target of Array.isArray(targets) ? targets : []) {
+    const key = serverScriptedConsumeSpatialKey(target?.buildingId, target?.floor, target?.x, target?.y);
+    const bucket = index.get(key) || [];
+    bucket.push(target);
+    index.set(key, bucket);
   }
-  if (!seats.length) return null;
-  const current = runtimeState?.agents?.get?.(agentId);
-  const cx = numberOr(current?.x, numberOr(sourceTarget?.x, 0));
-  const cy = numberOr(current?.y, numberOr(sourceTarget?.y, 0));
-  const ranked = seats
-    .map(seat => ({ seat, dist: Math.hypot(numberOr(seat.x, 0) - cx, numberOr(seat.y, 0) - cy) }))
-    .sort((a, b) => a.dist - b.dist);
-  const pool = ranked.slice(0, Math.min(5, ranked.length));
-  const pick = pool[stableTextHash(`${agentId}:free-consume:${Math.floor(nowMs / 8192)}`) % pool.length]?.seat;
-  if (!pick || !Number.isFinite(Number(pick.x)) || !Number.isFinite(Number(pick.y))) return null;
+  return index;
+}
+
+function nearbyServerScriptedConsumeSeatTargets(plan = null, current = null, buildingId = '', floor = 1) {
+  const spatialIndex = plan?.consumeSeatSpatialIndex;
+  if (!(spatialIndex instanceof Map)) return [];
+  const bucketSize = SERVER_SCRIPTED_CONSUME_SPATIAL_BUCKET_TILES * LIVE_ACTION_API_TILE;
+  const radius = SERVER_SCRIPTED_CONSUME_NEARBY_RADIUS_TILES * LIVE_ACTION_API_TILE;
+  const cx = numberOr(current?.x, 0);
+  const cy = numberOr(current?.y, 0);
+  const bx = Math.floor(cx / bucketSize);
+  const by = Math.floor(cy / bucketSize);
+  const bucketRadius = Math.ceil(radius / bucketSize);
+  const matches = [];
+  for (let dx = -bucketRadius; dx <= bucketRadius; dx += 1) {
+    for (let dy = -bucketRadius; dy <= bucketRadius; dy += 1) {
+      const bucket = spatialIndex.get(`${safeText(buildingId, '')}|${floorOr(floor, 1)}|${bx + dx}|${by + dy}`) || [];
+      for (const target of bucket) {
+        const distance = Math.hypot(numberOr(target?.x, 0) - cx, numberOr(target?.y, 0) - cy);
+        if (distance <= radius) matches.push({ target, distance });
+      }
+    }
+  }
+  return matches;
+}
+
+function makeServerScriptedConsumeDestinationTarget(agentId, sourceTarget, pickedTarget, nowMs, destinationKind) {
+  const spec = serverScriptedObjectDispenseSpec(sourceTarget);
+  if (!spec || !pickedTarget) return null;
   const temporaryItem = makeServerScriptedTemporaryItem(agentId, sourceTarget, spec, nowMs);
   const consumeDurationMs = Math.max(1000, Math.floor(numberOr(sourceTarget?.consumeDurationMs ?? sourceTarget?.deskConsumeMs, SERVER_SCRIPTED_OBJECT_DESK_CONSUME_MS)));
-  const baseObjectKey = safeText(pick.baseObjectKey, '') || pick.objectKey;
+  const objectTypeKey = normalizeObjectTypeKey(pickedTarget.objectType);
+  const isTableSeat = destinationKind === 'table-seat';
+  const isDesk = destinationKind === 'desk';
+  const seatSurfaceLift = numberOr(pickedTarget?.seatSurfaceLift, SERVER_SCRIPTED_CONSUME_SEAT_SURFACE_LIFTS[objectTypeKey]);
+  const consumeSurfaceSpec = (isTableSeat || isDesk) ? getConsumableSurfaceSpec(pickedTarget.objectType || (isDesk ? 'desk' : '')) : null;
   return {
-    ...pick,
-    targetKind: 'free-consume-seat',
-    objectKey: normalizeWorldObjectKey(`${baseObjectKey}:consume:${safeText(agentId, 'agent') || 'agent'}`),
-    baseObjectKey,
-    behaviorCategory: 'live-free-consume',
+    ...pickedTarget,
+    targetKind: isDesk ? 'work-desk' : 'consume-seat',
+    behaviorCategory: 'consume-destination',
     actionId: spec.deskActionId,
     activityKind: spec.deskActivityKind,
     animationId: spec.deskAnimationId,
@@ -4703,9 +4830,68 @@ export function makeServerScriptedFreeConsumeTarget(dataDir, agentId, sourceTarg
     pickupEffect: spec.pickupEffect,
     consumeEffect: spec.consumeEffect,
     completionState: spec.deskCompletionState,
-    freeConsumeSeat: true,
+    consumeDestinationKind: destinationKind,
+    consumePresentation: isTableSeat || isDesk ? 'surface' : 'handheld',
+    consumeSurfaceSpotId: isTableSeat ? `serving:${safeText(pickedTarget?.slotId || pickedTarget?.spotId, 'seat')}` : (isDesk ? 'desk-surface' : ''),
+    ...(consumeSurfaceSpec ? {
+      consumeSurfaceHeight: consumeSurfaceSpec.surfaceHeight,
+      consumeSurfaceForwardOffset: consumeSurfaceSpec.forwardOffset,
+      consumeSurfaceSideOffset: consumeSurfaceSpec.sideOffset,
+    } : {}),
+    consumeReservation: !isDesk,
+    freeConsumeSeat: !isDesk,
+    manualDrop: false,
+    manualOccupancyHold: false,
+    manualDropSnapToUse: false,
+    ...(Number.isFinite(seatSurfaceLift) ? { seatSurfaceLift } : {}),
     lifecycle: { stationary: false, carryable: false, temporary: true, consumesTemporary: true },
   };
+}
+
+export function makeServerScriptedConsumeTarget(dataDir, agentId, sourceTarget = null, nowMs = Date.now(), runtimeState = null, runtimePlan = null) {
+  const spec = serverScriptedObjectDispenseSpec(sourceTarget);
+  if (!spec) return null;
+  const runtimeAgent = runtimeState?.agents?.get?.(agentId);
+  const current = runtimeAgent ? snapshotToPlain(runtimeAgent) : (sourceTarget || {});
+  const buildingId = safeText(current?.buildingId || sourceTarget?.buildingId, '');
+  const floor = floorOr(current?.floor ?? sourceTarget?.floor, 1);
+  const plan = runtimePlan || buildScriptedObjectRuntimePlan(dataDir);
+  const seatCandidates = nearbyServerScriptedConsumeSeatTargets(plan, current, buildingId, floor)
+    .filter(({ target }) => isServerScriptedObjectTargetAvailable(runtimeState, target, agentId, nowMs, dataDir))
+    .map(({ target, distance }) => ({
+      target,
+      distance,
+      destinationKind: SERVER_SCRIPTED_CONSUME_TABLE_SEAT_TYPES.has(normalizeObjectTypeKey(target.objectType)) ? 'table-seat' : 'standalone-seat',
+    }));
+  const desk = makeServerScriptedDeskConsumeTarget(dataDir, agentId, sourceTarget, nowMs, runtimeState);
+  const deskDistance = desk
+    ? Math.hypot(numberOr(desk.x, 0) - numberOr(current.x, 0), numberOr(desk.y, 0) - numberOr(current.y, 0)) +
+      (floorOr(desk.floor, 1) === floor ? 0 : 10 * LIVE_ACTION_API_TILE)
+    : Infinity;
+  const candidates = [
+    ...seatCandidates,
+    ...(desk ? [{ target: desk, distance: deskDistance, destinationKind: 'desk' }] : []),
+  ];
+  if (!candidates.length) return null;
+  const ranked = candidates
+    .map((candidate, index) => ({
+      ...candidate,
+      score: candidate.distance + ((stableTextHash(`${agentId}:consume-choice:${candidate.target.objectKey}:${Math.floor(nowMs / 8192)}`) % 241) / 240) * (6 * LIVE_ACTION_API_TILE) + index * 0.001,
+    }))
+    .sort((a, b) => a.score - b.score);
+  const pick = ranked[0];
+  if (!pick?.target) return null;
+  if (pick.destinationKind === 'desk') return makeServerScriptedConsumeDestinationTarget(agentId, sourceTarget, pick.target, nowMs, 'desk');
+  return makeServerScriptedConsumeDestinationTarget(agentId, sourceTarget, pick.target, nowMs, pick.destinationKind);
+}
+
+// Live Agent Mode: agents are free to consume dispensed items (coffee, water,
+// snacks, microwaved food) at any available seat they like — a couch, armchair,
+// park bench, or chair — instead of being scripted back to a work desk. Queue
+// order at the dispenser is still enforced upstream; only the consume location
+// becomes a free choice. Scripted (non-live) agents keep the desk routine.
+export function makeServerScriptedFreeConsumeTarget(dataDir, agentId, sourceTarget = null, nowMs = Date.now(), runtimeState = null) {
+  return makeServerScriptedConsumeTarget(dataDir, agentId, sourceTarget, nowMs, runtimeState);
 }
 
 const SCRIPTED_OBJECT_SKIP_ACTIONS = new Set(['sit_work', 'work.desk']);
@@ -4868,7 +5054,19 @@ function isServerScriptedMultiSlotPlayTarget(target = null) {
 }
 
 function isServerScriptedMultiSlotSeatObjectType(objectType = '') {
-  return ['couch', 'sectionalsofa', 'loveseat', 'hallwaybench', 'parkbench'].includes(normalizeObjectTypeKey(objectType));
+  return [
+    'couch',
+    'sectionalsofa',
+    'loveseat',
+    'hallwaybench',
+    'parkbench',
+    'diningtable',
+    'smallcafetable',
+    'outdoorcafetable',
+    'picnictable',
+    'smallroundmeetingtable',
+    'meetingtable',
+  ].includes(normalizeObjectTypeKey(objectType));
 }
 
 function isServerScriptedMultiSlotSeatSpot(objectType = '', spotId = '') {
@@ -4879,6 +5077,12 @@ function isServerScriptedMultiSlotSeatSpot(objectType = '', spotId = '') {
     loveseat: ['seat-left', 'seat-right'],
     hallwaybench: ['seat-left', 'seat-right'],
     parkbench: ['seat-left', 'seat-center', 'seat-right'],
+    diningtable: ['seat-north', 'seat-south', 'seat-east', 'seat-west'],
+    smallcafetable: ['seat-north', 'seat-south', 'seat-east', 'seat-west'],
+    outdoorcafetable: ['seat-north', 'seat-south', 'seat-east', 'seat-west'],
+    picnictable: ['seat-north-left', 'seat-north-right', 'seat-south-left', 'seat-south-right'],
+    smallroundmeetingtable: ['seat-north', 'seat-south', 'seat-east', 'seat-west'],
+    meetingtable: ['seat-n1', 'seat-n2', 'seat-n3', 'seat-n4', 'seat-n5', 'seat-s1', 'seat-s2', 'seat-s3', 'seat-s4', 'seat-s5', 'stand-west-1', 'stand-west-2', 'stand-west-3', 'stand-east-1', 'stand-east-2', 'stand-east-3'],
   };
   return (seatsByType[normalizeObjectTypeKey(objectType)] || []).includes(String(spotId || '').trim().toLowerCase());
 }
@@ -5616,6 +5820,8 @@ function localPointFromScriptedObjectSpot(furniture = null, location = null) {
   const config = scriptedObjectActivityConfig(furniture);
   const isQueue = isScriptedObjectQueueSpot(location, furniture);
   const spotId = String(scriptedObjectSpotId(location) || '').toLowerCase();
+  const meetingStanding = normalizeObjectTypeKey(furniture?.type) === 'meetingtable' &&
+    (roles.includes('stand') || roles.includes('standing') || spotId.startsWith('stand-'));
   const activationTarget = location?.activationTarget && typeof location.activationTarget === 'object' ? location.activationTarget : null;
   const useActivationTarget = Boolean(
     activationTarget &&
@@ -5649,7 +5855,7 @@ function localPointFromScriptedObjectSpot(furniture = null, location = null) {
       facing: authoredRuntimeFacing(location, explicit, fallback.facing),
       faceAngle,
       facingAlreadyPlaced,
-      poseKind: isQueue ? 'wait' : (roles.includes('seat') ? 'seat' : (config?.poseKind || fallback.poseKind)),
+      poseKind: isQueue ? 'wait' : (meetingStanding ? 'stand' : (roles.includes('seat') ? 'seat' : (config?.poseKind || fallback.poseKind))),
     };
   }
   const authoredDx = numberOr(location?.dx ?? location?.offsetX, NaN);
@@ -5663,9 +5869,9 @@ function localPointFromScriptedObjectSpot(furniture = null, location = null) {
     z: numberOr(furniture?.z, 0) + rotated.z,
     floor: floorOr(furniture?.floor, 1),
     spotId: spotId || safeText(config?.spotId, ''),
-    facing: fallback.facing,
+    facing: authoredRuntimeFacing(location, null, fallback.facing),
     faceAngle: null,
-    poseKind: config?.poseKind || fallback.poseKind,
+    poseKind: meetingStanding ? 'stand' : (roles.includes('seat') ? 'seat' : (config?.poseKind || fallback.poseKind)),
   };
 }
 
@@ -5730,7 +5936,10 @@ export function listScriptedObjectRuntimeTargets(dataDir) {
             { id: 'queue', dx: 0, dz: 1.72, facing: 'north', action: 'planning.schedule', roles: ['approach', 'queue'], capacityKind: 'queue', capacity: 3, queueMaxPoints: 3, queueSpacingTiles: 0.8, serviceQueue: true },
           ].filter(location => !authoredLocations.some(existing => scriptedObjectSpotId(existing) === location.id))
         : [];
-      const locations = [...authoredLocations, ...stoveLocations];
+      const meetingTableLocations = normalizeObjectTypeKey(item.type) === 'meetingtable'
+        ? MEETING_TABLE_DEFAULT_LOCATIONS.filter(location => !authoredLocations.some(existing => scriptedObjectSpotId(existing) === location.id))
+        : [];
+      const locations = [...authoredLocations, ...stoveLocations, ...meetingTableLocations];
       const syntheticQueueLocations = serverScriptedServiceQueueDefinitionsForFurniture(item)
         .filter(location => !locations.some(existing => scriptedObjectSpotId(existing) === scriptedObjectSpotId(location)))
         .filter(location => !locations.some(existing => isScriptedObjectQueueSpot(existing, item) && serverScriptedQueueSpotId(existing) === serverScriptedQueueSpotId(location)));
@@ -5768,7 +5977,80 @@ export function listScriptedObjectRuntimeTargets(dataDir) {
   return targets.sort((a, b) => `${a.buildingId}:${a.furnitureIndex}:${a.spotId}`.localeCompare(`${b.buildingId}:${b.furnitureIndex}:${b.spotId}`));
 }
 
-function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null, index = -1, location = null) {
+function serverScriptedOutdoorConsumeSeatDefinitions(objectType = '', node = null) {
+  const authored = Array.isArray(node?.actionLocations)
+    ? node.actionLocations.filter(location => scriptedObjectRoles(location).includes('seat'))
+    : [];
+  if (authored.length) return authored;
+  const shared = (id, dx, dz, facing, approachSpotId) => ({
+    id,
+    slotId: id,
+    activationSpotId: id,
+    approachSpotId,
+    exitSpotId: approachSpotId,
+    dx,
+    dz,
+    facing,
+    action: 'life.consumeAtSeat',
+    roles: ['seat', 'use'],
+    capacityKind: 'exclusive',
+    capacity: 1,
+    dockMode: 'snap-to-activation',
+    snapRadius: 7,
+  });
+  switch (normalizeObjectTypeKey(objectType)) {
+    case 'parkbench':
+      return [
+        shared('seat-left', -0.7, 0.145, 'north', 'stand-left'),
+        shared('seat-center', 0, 0.145, 'north', 'stand-center'),
+        shared('seat-right', 0.7, 0.145, 'north', 'stand-right'),
+      ];
+    case 'outdoorcafetable':
+      return [
+        shared('seat-north', 0, -1.18, 'south', 'approach-north'),
+        shared('seat-south', 0, 1.18, 'north', 'approach-south'),
+        shared('seat-east', 1.18, 0, 'west', 'approach-east'),
+        shared('seat-west', -1.18, 0, 'east', 'approach-west'),
+      ];
+    case 'picnictable':
+      return [
+        shared('seat-north-left', -0.62, -0.74, 'south', 'approach-north'),
+        shared('seat-north-right', 0.62, -0.74, 'south', 'approach-north'),
+        shared('seat-south-left', -0.62, 0.74, 'north', 'approach-south'),
+        shared('seat-south-right', 0.62, 0.74, 'north', 'approach-south'),
+      ];
+    default:
+      return [];
+  }
+}
+
+export function listServerScriptedConsumeSeatTargets(dataDir, scriptedTargets = null) {
+  const interiorTargets = (Array.isArray(scriptedTargets) ? scriptedTargets : listScriptedObjectRuntimeTargets(dataDir))
+    .filter(target =>
+      String(target?.poseKind || '').toLowerCase() === 'seat' &&
+      !target?.isQueueUse &&
+      SERVER_SCRIPTED_CONSUME_SEAT_TYPES.has(normalizeObjectTypeKey(target?.objectType)));
+  const outdoorTargets = [];
+  for (const building of listBuildingDocuments(dataDir)) {
+    const nodes = Array.isArray(building?.outdoorArea?.nodes) ? building.outdoorArea.nodes : [];
+    for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
+      const node = nodes[nodeIndex];
+      if (!node || node.deleted || node.removed || node.enabled === false) continue;
+      const objectType = safeText(node.type || node.assetType || node.catalogId || node.renderType, '');
+      if (!SERVER_SCRIPTED_CONSUME_SEAT_TYPES.has(normalizeObjectTypeKey(objectType))) continue;
+      const outdoorNodeId = safeText(node.id || node.objectInstanceId || `node-${nodeIndex}`, `node-${nodeIndex}`);
+      const normalizedNode = { ...node, type: objectType, floor: floorOr(node.floor, 1) };
+      for (const location of serverScriptedOutdoorConsumeSeatDefinitions(objectType, normalizedNode)) {
+        const target = scriptedObjectTargetFromFurnitureSpot(building, normalizedNode, -1, location, { outdoorNodeId, outdoorNodeIndex: nodeIndex });
+        if (target && String(target.poseKind || '').toLowerCase() === 'seat') outdoorTargets.push(target);
+      }
+    }
+  }
+  return [...interiorTargets, ...outdoorTargets]
+    .sort((a, b) => `${a.buildingId}:${a.floor}:${a.objectKey}`.localeCompare(`${b.buildingId}:${b.floor}:${b.objectKey}`));
+}
+
+function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null, index = -1, location = null, context = null) {
   if (!building || !furniture || !isScriptedObjectSpotUsable(furniture, location)) return null;
   const config = scriptedObjectActivityConfig(furniture);
   const local = localPointFromScriptedObjectSpot(furniture, location);
@@ -5792,7 +6074,11 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
   if (!point) return null;
   const objectType = safeText(furniture.type, 'object') || 'object';
   const behaviorCategory = scriptedIdleCategoryForObjectType(objectType);
-  const baseObjectKey = normalizeWorldObjectKey(runtimeFurnitureObjectKey(building.id || 'building', index, objectType));
+  const outdoorNodeId = safeText(context?.outdoorNodeId, '');
+  const outdoorNodeIndex = Number.isFinite(Number(context?.outdoorNodeIndex)) ? Number(context.outdoorNodeIndex) : -1;
+  const baseObjectKey = outdoorNodeId
+    ? normalizeWorldObjectKey(`${building.id || 'building'}:outdoor-node:${outdoorNodeId}:${objectType}`)
+    : normalizeWorldObjectKey(runtimeFurnitureObjectKey(building.id || 'building', index, objectType));
   const spotId = scriptedObjectSpotId(location);
   const actionId = scriptedObjectActionId(furniture, location);
   const dumbbellWorkout = normalizeObjectTypeKey(objectType) === 'dumbbellrack'
@@ -5817,7 +6103,8 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
   const objectKey = isQueueUse
     ? normalizeWorldObjectKey(`${baseObjectKey}:queue:${spotId}`)
     : (isServerScriptedSharedSlotSpot(objectType, slotId || spotId, actionId) ? serverScriptedMultiSlotObjectKey(baseObjectKey, slotId || spotId) : baseObjectKey);
-  const objectInstanceId = safeText(furniture.objectInstanceId || furniture.instanceId || furniture.id || `${building.id}:furniture:${index}`, '');
+  const objectInstanceId = safeText(furniture.objectInstanceId || furniture.instanceId || furniture.id || (outdoorNodeId ? `${building.id}:outdoor-node:${outdoorNodeId}` : `${building.id}:furniture:${index}`), '');
+  const meetingStanding = normalizeObjectTypeKey(objectType) === 'meetingtable' && local.poseKind === 'stand';
   return {
     x: point.x,
     y: point.y,
@@ -5828,7 +6115,8 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
     objectKey,
     baseObjectKey,
     objectInstanceId,
-    furnitureIndex: index,
+    furnitureIndex: outdoorNodeId ? -1 : index,
+    ...(outdoorNodeId ? { outdoorNodeId, outdoorNodeIndex } : {}),
     objectType,
     behaviorCategory,
     actionId,
@@ -5836,9 +6124,10 @@ function scriptedObjectTargetFromFurnitureSpot(building = null, furniture = null
     spotId,
     slotId,
     poseKind: local.poseKind,
+    ...(meetingStanding ? { meetingStanding: true } : {}),
     isQueueUse,
-    animationId: isQueueUse ? 'bus-stop-wait' : (stoveOvenMethod ? (stoveOvenMethod === 'oven' ? 'oven-use' : 'stovetop-cook') : (dumbbellWorkout ? 'dumbbell-workout' : (safeText(config?.animationId, '') || (local.poseKind === 'seat' ? 'sit' : 'stand-use')))),
-    activityKind: isQueueUse ? 'service-queue-wait' : (stoveOvenMethod ? (stoveOvenMethod === 'oven' ? 'oven-bake-food' : 'stovetop-cook-food') : (dumbbellWorkout?.kind || safeText(config?.kind, '') || 'server-scripted-object-use')),
+    animationId: isQueueUse ? 'bus-stop-wait' : (meetingStanding ? 'gather-talk' : (stoveOvenMethod ? (stoveOvenMethod === 'oven' ? 'oven-use' : 'stovetop-cook') : (dumbbellWorkout ? 'dumbbell-workout' : (safeText(config?.animationId, '') || (local.poseKind === 'seat' ? 'sit' : 'stand-use'))))),
+    activityKind: isQueueUse ? 'service-queue-wait' : (meetingStanding ? 'meeting-table-stand' : (stoveOvenMethod ? (stoveOvenMethod === 'oven' ? 'oven-bake-food' : 'stovetop-cook-food') : (dumbbellWorkout?.kind || safeText(config?.kind, '') || 'server-scripted-object-use'))),
     stayMs: stoveOvenMethod === 'oven' ? 16000 : (stoveOvenMethod === 'stovetop' ? 14500 : scriptedObjectStayMs({ objectKey: baseObjectKey, objectType, spotId })),
     faceAngle: runtimeFurnitureActionFaceAngle(building, furniture, local, point),
     ...(dumbbellWorkout ? {
@@ -5914,18 +6203,25 @@ function serverRuntimeReleaseSpotIds(target = null) {
     safeText(target?.approachSpotId, '').toLowerCase(),
     safeText(target?.routeApproachTarget?.spotId, '').toLowerCase(),
   ].filter(Boolean));
-  return Array.from(new Set([
+  const explicitReleaseSpotIds = [
     target?.dismountSpotId,
+    target?.exitSpotId,
+    target?.standSpotId,
+  ].map(item => safeText(item, '')).filter(Boolean);
+  const fallbackReleaseSpotIds = [
     'dismount',
     'dismount-side',
     'dismount-left',
     'dismount-right',
-    target?.exitSpotId,
-    target?.standSpotId,
     'stand-side',
     'exit-side',
     'wake-stand',
-  ].map(item => safeText(item, '')).filter(Boolean))).filter(spotId => !blockedFrontSpots.has(spotId.toLowerCase()));
+  ].map(item => safeText(item, '')).filter(Boolean)
+    .filter(spotId => !blockedFrontSpots.has(spotId.toLowerCase()));
+  // A seat may intentionally use its approach marker as its authored exit.
+  // Keep that explicit release ID even though generic front-approach fallbacks
+  // remain blocked for seats that did not define a dismount/exit location.
+  return Array.from(new Set([...explicitReleaseSpotIds, ...fallbackReleaseSpotIds]));
 }
 
 const SERVER_SECTIONAL_SOFA_DISMOUNT_OFFSETS = Object.freeze({
@@ -6170,6 +6466,12 @@ export function serverRuntimeReleasePointForTarget(dataDir, target = null, curre
   ) {
     return sectionalDismount;
   }
+  // Multi-seat tables and benches already route through a collision-safe
+  // approach point. Reuse that exact authored point for dismounts even when a
+  // legacy saved seat omitted a separate exitSpotId; synthesizing sideways
+  // from the seat can otherwise send the agent through the table collider.
+  const routeApproach = serverRuntimeReleasePointFromRouteTarget(target?.routeApproachTarget, target, current);
+  if (routeApproach && !serverRuntimeReleasePointCrowdConflict(options?.agentId, routeApproach, crowdAgents, target)) return routeApproach;
   const authored = serverRuntimeAuthoredReleasePoint(dataDir, target, current);
   if (authored && !serverRuntimeReleasePointCrowdConflict(options?.agentId, authored, crowdAgents, target)) return authored;
   const synthetic = serverRuntimeSyntheticDismountPoint(dataDir, target, current, occupancyOptions);
@@ -6784,7 +7086,9 @@ export function buildScriptedObjectRuntimePlan(dataDir) {
     .map(([agentId]) => safeText(agentId, ''))
     .filter(Boolean)
     .sort();
-  return { presence, meta, targets, idleAgentIds };
+  const consumeSeatTargets = listServerScriptedConsumeSeatTargets(dataDir, targets);
+  const consumeSeatSpatialIndex = buildServerScriptedConsumeSpatialIndex(consumeSeatTargets);
+  return { presence, meta, targets, idleAgentIds, consumeSeatTargets, consumeSeatSpatialIndex };
 }
 
 function makeServerScriptedObjectVisualState(isMoving, target = null, status = 'idle') {
@@ -6829,6 +7133,16 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
     faceAngle,
     dockTarget,
   };
+  if (target?.outdoorNodeId) activity.outdoorNodeId = safeText(target.outdoorNodeId, '');
+  if (Number.isFinite(Number(target?.outdoorNodeIndex))) activity.outdoorNodeIndex = Number(target.outdoorNodeIndex);
+  if (target?.consumeDestinationKind) activity.consumeDestinationKind = safeText(target.consumeDestinationKind, '');
+  if (target?.consumePresentation) activity.consumePresentation = safeText(target.consumePresentation, '');
+  if (target?.consumeSurfaceSpotId) activity.consumeSurfaceSpotId = safeText(target.consumeSurfaceSpotId, '');
+  for (const key of ['consumeSurfaceHeight', 'consumeSurfaceForwardOffset', 'consumeSurfaceSideOffset']) {
+    const value = numberOr(target?.[key], NaN);
+    if (Number.isFinite(value)) activity[key] = value;
+  }
+  if (target?.consumeReservation === true) activity.consumeReservation = true;
   if (poseKind === 'seat') {
     const seatId = safeText(target?.slotId || target?.spotId || target?.interactionSpotId, '');
     if (seatId) {
@@ -6918,7 +7232,7 @@ function makeServerScriptedObjectVisualState(isMoving, target = null, status = '
     movement: { isMoving, isRunning },
     activityActive: Boolean(target),
     activityKind,
-    atDesk: Boolean(target && !isMoving && isDeskConsume),
+    atDesk: Boolean(target && !isMoving && isDeskConsume && target?.consumeDestinationKind !== 'table-seat' && target?.consumeDestinationKind !== 'standalone-seat'),
     deskFacingAngle: faceAngle,
     activity,
     carrying: Boolean(carriedItem),
@@ -7033,6 +7347,15 @@ function makeServerScriptedObjectData(agentId, target, state, now, expiresAt, so
       pickupEffect: safeText(target?.pickupEffect, ''),
       consumeEffect: safeText(target?.consumeEffect, ''),
       completionState: safeText(target?.completionState, ''),
+      consumeDestinationKind: safeText(target?.consumeDestinationKind, ''),
+      consumePresentation: safeText(target?.consumePresentation, ''),
+      consumeSurfaceSpotId: safeText(target?.consumeSurfaceSpotId, ''),
+      consumeSurfaceHeight: Number.isFinite(numberOr(target?.consumeSurfaceHeight, NaN)) ? numberOr(target.consumeSurfaceHeight, NaN) : null,
+      consumeSurfaceForwardOffset: Number.isFinite(numberOr(target?.consumeSurfaceForwardOffset, NaN)) ? numberOr(target.consumeSurfaceForwardOffset, NaN) : null,
+      consumeSurfaceSideOffset: Number.isFinite(numberOr(target?.consumeSurfaceSideOffset, NaN)) ? numberOr(target.consumeSurfaceSideOffset, NaN) : null,
+      consumeReservation: target?.consumeReservation === true,
+      outdoorNodeId: safeText(target?.outdoorNodeId, ''),
+      outdoorNodeIndex: Number.isFinite(Number(target?.outdoorNodeIndex)) ? Number(target.outdoorNodeIndex) : null,
       lifecycle: target?.lifecycle && typeof target.lifecycle === 'object' ? target.lifecycle : null,
       ...(normalizeObjectTypeKey(target?.objectType) === 'dumbbellrack' && target?.isQueueUse !== true ? {
         workoutMode: serverScriptedDumbbellWorkout(target?.workoutMode || target?.activityKind || target?.actionId).id,
@@ -7150,6 +7473,15 @@ function objectUseRequestTargetFromPoint(message = {}) {
     seatSurfaceLift: Number.isFinite(numberOr(target?.seatSurfaceLift, NaN))
       ? numberOr(target?.seatSurfaceLift, NaN)
       : undefined,
+    consumeSurfaceHeight: Number.isFinite(numberOr(target?.consumeSurfaceHeight, NaN))
+      ? numberOr(target?.consumeSurfaceHeight, NaN)
+      : undefined,
+    consumeSurfaceForwardOffset: Number.isFinite(numberOr(target?.consumeSurfaceForwardOffset, NaN))
+      ? numberOr(target?.consumeSurfaceForwardOffset, NaN)
+      : undefined,
+    consumeSurfaceSideOffset: Number.isFinite(numberOr(target?.consumeSurfaceSideOffset, NaN))
+      ? numberOr(target?.consumeSurfaceSideOffset, NaN)
+      : undefined,
     stayMs: gymBenchExercise || gymBenchRest
       ? boundedGymBenchStayMs(target?.stayMs ?? message?.stayMs, scriptedObjectStayMs({ objectKey, objectType, spotId }))
       : Math.max(1000, Math.floor(numberOr(target?.stayMs ?? message?.stayMs, scriptedObjectStayMs({ objectKey, objectType, spotId })))),
@@ -7196,7 +7528,23 @@ function mergeScriptedObjectRequestRuntimeOverrides(match = null, message = {}) 
   if (!match) return match;
   const rawTarget = message?.target && typeof message.target === 'object' ? message.target : message;
   const overrides = {};
-  for (const key of ['actionId', 'activityKind', 'animationId', 'pingPongSide', 'activeUseSlotId', 'workoutMode', 'vendingItemId', 'microwaveFoodId', 'fridgeFoodId', 'stoveOvenFoodId', 'cookingMethod']) {
+  const manualDropSnapToUse = message?.manualDropSnapToUse === true || rawTarget?.manualDropSnapToUse === true;
+  if (manualDropSnapToUse) {
+    const x = numberOr(rawTarget?.x, NaN);
+    const y = numberOr(rawTarget?.y ?? rawTarget?.z, NaN);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      overrides.x = x;
+      overrides.y = y;
+      overrides.floor = floorOr(rawTarget?.floor ?? match.floor, match.floor || 1);
+    }
+    const faceAngle = numberOr(rawTarget?.faceAngle, NaN);
+    if (Number.isFinite(faceAngle)) overrides.faceAngle = normalizeRuntimeAngleRadians(faceAngle, match.faceAngle || 0);
+    if (rawTarget?.routeApproachTarget && typeof rawTarget.routeApproachTarget === 'object') {
+      overrides.routeApproachTarget = { ...rawTarget.routeApproachTarget };
+      overrides.approachSpotId = safeText(rawTarget.routeApproachTarget.spotId || rawTarget.approachSpotId, match.approachSpotId || '');
+    }
+  }
+  for (const key of ['actionId', 'activityKind', 'animationId', 'poseKind', 'pingPongSide', 'activeUseSlotId', 'activationSpotId', 'approachSpotId', 'exitSpotId', 'dismountSpotId', 'standSpotId', 'workoutMode', 'vendingItemId', 'microwaveFoodId', 'fridgeFoodId', 'stoveOvenFoodId', 'cookingMethod']) {
     const value = safeText(rawTarget?.[key] ?? message?.[key], '');
     if (value) overrides[key] = value;
   }
@@ -7204,6 +7552,11 @@ function mergeScriptedObjectRequestRuntimeOverrides(match = null, message = {}) 
   if (Number.isFinite(stayMs)) overrides.stayMs = Math.max(1000, Math.floor(stayMs));
   const seatSurfaceLift = numberOr(rawTarget?.seatSurfaceLift ?? message?.seatSurfaceLift, NaN);
   if (Number.isFinite(seatSurfaceLift)) overrides.seatSurfaceLift = seatSurfaceLift;
+  if (rawTarget?.meetingStanding === true || message?.meetingStanding === true) overrides.meetingStanding = true;
+  for (const key of ['consumeSurfaceHeight', 'consumeSurfaceForwardOffset', 'consumeSurfaceSideOffset']) {
+    const value = numberOr(rawTarget?.[key] ?? message?.[key], NaN);
+    if (Number.isFinite(value)) overrides[key] = value;
+  }
   const paddleColor = numberOr(rawTarget?.paddleColor ?? message?.paddleColor, NaN);
   if (Number.isFinite(paddleColor)) overrides.paddleColor = paddleColor;
   if (normalizeObjectTypeKey(match.objectType) === 'dumbbellrack') {
@@ -8573,6 +8926,23 @@ function normalizeTarget(target) {
       normalized[key] = safeText(value, '');
     }
   }
+  // Preserve the small authored route/dock point records needed for exact
+  // seat approaches and safe dismounts. The generic primitive-only sanitizer
+  // used to drop routeApproachTarget after the first snapshot write, so a
+  // seated consume route could later synthesize an exit through the table.
+  for (const key of ['routeApproachTarget', 'dockFinalTarget']) {
+    const point = target[key];
+    if (!point || typeof point !== 'object' || Array.isArray(point)) continue;
+    const x = numberOr(point.x, NaN);
+    const y = numberOr(point.y ?? point.z, NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    normalized[key] = {
+      x: coordinateOr(x, 0, `${key}.x`),
+      y: coordinateOr(y, 0, `${key}.y`),
+      floor: floorOr(point.floor ?? target.floor, 1),
+      ...(point.spotId ? { spotId: safeText(point.spotId, '') } : {}),
+    };
+  }
   return normalized;
 }
 
@@ -9054,9 +9424,22 @@ export class AgentRuntimeRoom extends Room {
       this.expireStaleRouteLeases();
       const agentId = normalizeAgentId(message.agentId);
       const source = safeText(message.source, 'request') || 'request';
+      const meetingCall = source === 'assignMeetingParticipantsToTable' || message.meetingCall === true || message.target?.meetingCall === true;
       const nowMs = Date.now();
       const now = new Date(nowMs).toISOString();
       const manualDrop = message.manualDrop === true || message.target?.manualDrop === true;
+      if (manualDrop || meetingCall) {
+        const pingPongMatch = Array.from(this.serverPingPongMatches.values()).find(match => match?.p1Id === agentId || match?.p2Id === agentId) || null;
+        if (pingPongMatch) {
+          this.releaseServerPingPongMatch(
+            pingPongMatch,
+            this.serverPingPongTableTargetForObjectKey(pingPongMatch.objectKey, nowMs),
+            nowMs,
+            now,
+            meetingCall ? 'meeting-call-preempted-pingpong' : 'manual-object-use-preempted-pingpong',
+          );
+        }
+      }
       let target = resolveScriptedObjectRuntimeTargetFromRequest(this.dataDir, message);
       if (!target?.objectKey) {
         throw apiError('invalid_object_use_target', 'object use request requires a resolvable target object');
@@ -9090,7 +9473,7 @@ export class AgentRuntimeRoom extends Room {
       // cooldown. If no current runtime agent actually claims this exact seat,
       // retire the stale active record before evaluating a new manual request.
       if (
-        manualDrop &&
+        (manualDrop || meetingCall) &&
         allowSharedBase &&
         isServerScriptedSeatLikeTarget(target) &&
         isWorldObjectActiveForAnotherAgent(existingObject, agentId, nowMs) &&
@@ -9102,7 +9485,7 @@ export class AgentRuntimeRoom extends Room {
           target,
           nowMs,
           now,
-          'stale-seat-slot-reconciled-for-manual-drop',
+          meetingCall ? 'stale-seat-slot-reconciled-for-meeting-call' : 'stale-seat-slot-reconciled-for-manual-drop',
         );
         existingObject = this.state.objects.get(target.objectKey);
         existingBaseObject = baseObjectKey !== target.objectKey ? this.state.objects.get(baseObjectKey) : existingObject;
@@ -12009,9 +12392,11 @@ export class AgentRuntimeRoom extends Room {
       // occupied seat. In particular, never let the autonomous-route capacity
       // limiter evict queue:0/1/2 waiters after a drag/drop; they must stay
       // server-owned until promotion, explicit movement, or normal release.
+      const protectedMeetingCall = String(originalTarget?.runtimeSource || '') === 'assignMeetingParticipantsToTable';
       const protectedManualRoute = protectedManualOccupancy ||
         originalTarget?.manualDrop === true ||
-        String(originalTarget?.runtimeSource || '').startsWith('manual-drag-drop');
+        String(originalTarget?.runtimeSource || '').startsWith('manual-drag-drop') ||
+        protectedMeetingCall;
       if (!protectedManualRoute) activeScriptedRoutes++;
       if (!protectedManualRoute && activeScriptedRoutes > activeRouteLimit) {
         let target = originalTarget;
@@ -12166,12 +12551,18 @@ export class AgentRuntimeRoom extends Room {
           changedObjects++;
           continue;
         }
-        const deskTarget = makeServerScriptedFreeConsumeTarget(this.dataDir, agentId, activeTarget, nowMs, this.state)
-          || makeServerScriptedDeskConsumeTarget(this.dataDir, agentId, activeTarget, nowMs, this.state);
+        const deskTarget = makeServerScriptedConsumeTarget(
+          this.dataDir,
+          agentId,
+          activeTarget,
+          nowMs,
+          this.state,
+          this.loadScriptedObjectRuntimePlan(nowMs),
+        );
         if (deskTarget) {
           const releaseResult = this.releaseServerScriptedObjectWorldObject(agentId, activeTarget, nowMs, now, deskTarget.pickupEffect || 'temporary-item-picked-up');
           const promoted = this.promoteServerScriptedServiceQueueFrontIfReady(activeTarget, nowMs, now, deskTarget.pickupEffect || 'temporary-item-picked-up');
-          const routeResult = this.startServerScriptedObjectRoute(agentId, deskTarget, nowMs, now, { source, force: true });
+          const routeResult = this.startServerScriptedObjectRoute(agentId, deskTarget, nowMs, now, { source: 'consumable-destination', force: true });
           changedSnapshots += routeResult?.agent ? 1 : 0;
           changedObjects += releaseResult?.object ? 1 : 0;
           changedSnapshots += promoted.changedSnapshots || 0;
