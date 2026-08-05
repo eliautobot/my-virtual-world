@@ -28427,6 +28427,30 @@ def _format_time_et(ts):
         return ""
 
 
+def _timestamp_epoch_ms(ts):
+    """Normalize ISO/epoch timestamps for chronological chat-bubble sorting."""
+    try:
+        if isinstance(ts, (int, float)):
+            value = float(ts)
+            return int(value if value > 1e12 else value * 1000)
+        if isinstance(ts, str):
+            value = ts.strip()
+            if not value:
+                return 0
+            try:
+                numeric = float(value)
+                return int(numeric if numeric > 1e12 else numeric * 1000)
+            except ValueError:
+                pass
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return int(parsed.timestamp() * 1000)
+    except (OverflowError, TypeError, ValueError):
+        pass
+    return 0
+
+
 def _agent_chat_apply_session_meta(messages, session_meta):
     if not isinstance(messages, list) or not isinstance(session_meta, dict):
         return messages
@@ -28443,7 +28467,7 @@ def get_agent_chat():
     global _chat_cache, _chat_cache_time
     gateway_connected = _gateway_presence_connected()
     now = time.time()
-    if now - _chat_cache_time < 8:  # bound expensive session scans while keeping bubbles near-realtime
+    if now - _chat_cache_time < 2:  # bound session scans while keeping the active bubble stream responsive
         return _chat_cache
 
     result = {}
@@ -28548,6 +28572,7 @@ def get_agent_chat():
 
                     content = msg.get("content", "")
                     ts = entry.get("timestamp", "")
+                    epoch_ms = _timestamp_epoch_ms(ts or msg.get("timestamp"))
                     time_str = _format_time_et(ts)
                     from_name = agent.get("name", agent_id)
                     session_title = "Live Agent Mode" if str(best_key).endswith(":vw-live-mode-planner") else ("Main chat" if str(best_key).endswith(":main") or not best_key else str(best_key).split(":")[-1])
@@ -28557,6 +28582,7 @@ def get_agent_chat():
                         "sessionTitle": session_title,
                         "sessionKind": "live-mode" if str(best_key).endswith(":vw-live-mode-planner") else ("main" if str(best_key).endswith(":main") else "other"),
                         "liveMode": str(best_key).endswith(":vw-live-mode-planner"),
+                        "activeSession": True,
                     }
 
                     if isinstance(content, str):
@@ -28565,7 +28591,9 @@ def get_agent_chat():
                                 "role": role,
                                 "text": content[:500],
                                 "time": time_str,
+                                "epochMs": epoch_ms,
                                 "from": from_name,
+                                "source": "openclaw-session",
                                 **session_meta,
                             })
                     elif isinstance(content, list):
@@ -28578,16 +28606,22 @@ def get_agent_chat():
                                         "role": role,
                                         "text": text[:500],
                                         "time": time_str,
+                                        "epochMs": epoch_ms,
                                         "from": from_name,
+                                        "source": "openclaw-session",
                                         **session_meta,
                                     })
-                            elif item_type == "tool_use":
-                                activity = _format_tool_activity(item)
+                            elif item_type in ("tool_use", "toolCall"):
+                                tool_item = dict(item)
+                                tool_item["input"] = item.get("input") or item.get("arguments") or {}
+                                activity = _format_tool_activity(tool_item)
                                 messages.append({
                                     "role": role,
                                     "text": activity,
                                     "time": time_str,
+                                    "epochMs": epoch_ms,
                                     "from": from_name,
+                                    "source": "openclaw-session",
                                     **session_meta,
                                 })
 
@@ -28730,10 +28764,9 @@ def get_agent_chat():
                 continue
             seen.add(key)
             cleaned.append(msg)
-        try:
-            cleaned.sort(key=lambda m: int(m.get("epochMs") or m.get("ts") or 0))
-        except Exception:
-            pass
+        cleaned.sort(key=lambda m: _timestamp_epoch_ms(
+            m.get("epochMs") or m.get("ts") or m.get("timestamp") or m.get("createdAt") or m.get("updatedAt")
+        ))
         result[agent_key] = cleaned[-500:]
 
     status = load_agent_status()

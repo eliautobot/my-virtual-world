@@ -210,8 +210,31 @@ def main():
         fake_hermes = FakeHermesProvider()
         fake_codex = FakeCodexProvider()
         server._gateway_rpc_call = fake_gateway
+        server._gateway_presence_connected = lambda: True
         server._hermes_provider = lambda: fake_hermes
         server._codex_provider = lambda: fake_codex
+
+        coder_sessions_dir = data_dir.parent / "openclaw" / "agents" / "coder" / "sessions"
+        coder_sessions_dir.mkdir(parents=True, exist_ok=True)
+        coder_session_file = coder_sessions_dir / "coder-main-session.jsonl"
+        coder_session_file.write_text("\n".join([
+            json.dumps({"type": "message", "timestamp": "2026-07-07T13:09:00Z", "message": {"role": "user", "content": "fix the active bubble"}}),
+            json.dumps({"type": "message", "timestamp": "2026-07-07T13:10:00Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "working on the active bubble"}]}}),
+            json.dumps({"type": "message", "timestamp": "2026-07-07T13:10:01Z", "message": {"role": "assistant", "content": [{"type": "toolCall", "name": "read", "arguments": {"path": "/tmp/chat.js"}}]}}),
+        ]) + "\n", encoding="utf-8")
+        (coder_sessions_dir / "sessions.json").write_text(json.dumps({
+            "agent:coder:main": {
+                "updatedAt": 1783429801000,
+                "sessionId": "coder-main-session",
+                "sessionFile": str(coder_session_file),
+            }
+        }), encoding="utf-8")
+        server._append_comm_event({
+            "ts": 1783430400000,
+            "from": {"id": "coder", "name": "Coder"},
+            "to": {"id": "resident-a", "name": "Resident A"},
+            "text": "newer field report that must not hide the active main session",
+        })
 
         server._save_hermes_state("default", {"messages": [], "sessionId": "hermes-session-1"})
         server._save_codex_state("main", {"messages": [], "sessionId": "codex-thread-1"})
@@ -265,6 +288,23 @@ def main():
         resident_chat = chat.get("resident-a") or []
         check("agent chat synthesizes live-mode bubble row", bool(resident_chat and resident_chat[-1].get("sessionTitle") == "Live Agent Mode"))
         check("live-mode bubble row carries active durable session metadata", bool(resident_chat and resident_chat[-1].get("activeSession") and resident_chat[-1].get("liveMode") and resident_chat[-1].get("sessionKey") == "vw-live-mode:resident-a" and resident_chat[-1].get("activationId")))
+        coder_chat = chat.get("coder") or []
+        coder_active_chat = [row for row in coder_chat if row.get("activeSession") is True]
+        check(
+            "OpenClaw active-session messages retain sortable epoch timestamps",
+            bool(coder_active_chat and all(int(row.get("epochMs") or 0) > 0 for row in coder_active_chat)),
+            json.dumps(coder_chat[-6:], default=str),
+        )
+        check(
+            "OpenClaw active session survives newer local field-report history",
+            bool(any(row.get("text") == "working on the active bubble" for row in coder_active_chat)),
+            json.dumps(coder_chat[-6:], default=str),
+        )
+        check(
+            "current OpenClaw toolCall activity is parsed into the active stream",
+            bool(any(row.get("text") == "📄 chat.js" for row in coder_active_chat)),
+            json.dumps(coder_active_chat[-4:], default=str),
+        )
 
         resident_session_file = resident_sessions_dir / "resident-main-session.jsonl"
         resident_session_file.write_text(json.dumps({

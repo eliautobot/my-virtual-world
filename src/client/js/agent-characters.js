@@ -28,6 +28,67 @@ const T = 1;
 const API_TILE = 40;
 const COFFEE_CUP_ASSET_VERSION = 'drink-cup-handheld-v10-fuller-water';
 const PING_PONG_PADDLE_ASSET_VERSION = 'real-ping-pong-paddle-v2';
+const PING_PONG_PADDLE_RED = 0xf44336;
+const PING_PONG_PADDLE_BLUE = 0x2196f3;
+
+function normalizePingPongPaddleSide(value) {
+  const key = String(value || '').trim().toLowerCase();
+  if (!key) return '';
+  if (key === 'right' || key.endsWith('-right') || key.endsWith(':right') || key.includes('p2')) return 'right';
+  if (key === 'left' || key.endsWith('-left') || key.endsWith(':left') || key.includes('p1')) return 'left';
+  return '';
+}
+
+/**
+ * Resolve the paddle side/color from authoritative ping-pong activity before
+ * consulting flattened metadata or carried-item aliases. Observer
+ * interpolation can briefly omit _pingPongSide or retain a prior carry object
+ * while a right/blue route is active; neither gap may rebuild the paddle red.
+ */
+export function resolvePingPongPaddleVisualState(agent = null, carriedItem = null) {
+  const activity = agent?._idleActivity || null;
+  const runtimeVisual = agent?._runtimeVisualState || null;
+  const runtimeActivity = runtimeVisual?.activity || null;
+  const carried = carriedItem || agent?._carriedItem || agent?._carrying || agent?._carryItem || null;
+  const sideCandidates = [
+    activity?.pingPongSide,
+    activity?.side,
+    activity?.slotId,
+    activity?.kind,
+    runtimeActivity?.pingPongSide,
+    runtimeActivity?.side,
+    runtimeActivity?.slotId,
+    runtimeActivity?.kind,
+    runtimeVisual?.pingPongSide,
+    runtimeVisual?.pingPong?.side,
+    runtimeVisual?.activityKind,
+    agent?._pingPongSide,
+    carried?.pingPongSide,
+    carried?.side,
+    carried?.slotId,
+  ];
+  const side = sideCandidates.map(normalizePingPongPaddleSide).find(Boolean) || '';
+  if (side) {
+    return {
+      side,
+      color: side === 'right' ? PING_PONG_PADDLE_BLUE : PING_PONG_PADDLE_RED,
+    };
+  }
+  const colorCandidates = [
+    activity?.paddleColor,
+    runtimeActivity?.paddleColor,
+    runtimeVisual?.paddleColor,
+    agent?._pingPongPaddleColor,
+    carried?.color,
+  ];
+  const color = colorCandidates
+    .map(value => Number(value))
+    .find(value => Number.isFinite(value) && value > 0) || PING_PONG_PADDLE_RED;
+  return {
+    side: color === PING_PONG_PADDLE_BLUE ? 'right' : 'left',
+    color,
+  };
+}
 
 // ═══════════════════════════════════════════════════════════════
 // SHARED GEOMETRY CACHE
@@ -4056,7 +4117,8 @@ function syncRightHandCarryVisual(parts, agent) {
     racket = null;
   }
   if (isPongRacket) {
-    const color = Number(carried?.color || agent?._pingPongPaddleColor) || (agent?._pingPongSide === 'right' ? 0x2196f3 : 0xf44336);
+    const paddleVisual = resolvePingPongPaddleVisualState(agent, carried);
+    const color = paddleVisual.color;
     if (racket && (
       racket.parent !== rightArm ||
       racket.userData?.paddleColor !== color ||
@@ -4070,8 +4132,8 @@ function syncRightHandCarryVisual(parts, agent) {
       racket = buildPingPongPaddleAssetForVerification(color);
       racket.position.set(0.00, -0.46, 0.03);
       racket.rotation.x = -0.34;
-      racket.rotation.y = agent?._pingPongSide === 'right' ? -0.45 : 0.45;
-      racket.rotation.z = agent?._pingPongSide === 'right' ? 0.18 : -0.18;
+      racket.rotation.y = paddleVisual.side === 'right' ? -0.45 : 0.45;
+      racket.rotation.z = paddleVisual.side === 'right' ? 0.18 : -0.18;
       rightArm.add(racket);
     }
     racket.visible = true;

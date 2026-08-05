@@ -3563,6 +3563,12 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
         border-radius: 18px !important;
     }
 
+    html.chat-keyboard-open .chat-panel.open:not(.floating):not(.snap-left):not(.snap-right) {
+        bottom: calc(var(--chat-keyboard-inset, 0px) + 6px) !important;
+        height: calc(var(--chat-visual-viewport-height, 100dvh) - 12px) !important;
+        max-height: calc(var(--chat-visual-viewport-height, 100dvh) - 12px) !important;
+    }
+
     .chat-panel > .chat-exterior-tabs,
     .chat-exterior-tabs,
     .chat-exterior-tabs.visible {

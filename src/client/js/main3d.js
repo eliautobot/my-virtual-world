@@ -11,7 +11,7 @@ import {
   createAgentCharacter, updateAgentAnimation, getAgentAppearance, getSinkWashPoseTargets,
   isAuthoritativeSinkAnimationState, APPEARANCE_CATALOG, resolveConsumableSurfaceAssetPlacement,
   removePingPongRacketVisual,
-} from './agent-characters.js?v=20260804-pingpong-live-r23';
+} from './agent-characters.js?v=20260804-pingpong-blue-approach-r24';
 import {
   clearPingPongEquipmentState,
   hasPingPongEquipmentState,
@@ -3181,7 +3181,7 @@ function makeAgentRuntimeHydratedVisualActivity(agent, incomingActivity = null, 
   if (pingPongSide) {
     activity.kind = `pingpong-${pingPongSide}`;
     activity.pingPongSide = pingPongSide;
-    activity.paddleColor = agentRuntimeVisualNumber(activity.paddleColor ?? visualState?.carriedItem?.color, pingPongPaddleColorForSide(pingPongSide));
+    activity.paddleColor = pingPongPaddleColorForSide(pingPongSide);
     activity.animationId = agentRuntimeVisualText(activity.animationId || 'play-pingpong', 120) || 'play-pingpong';
     activity.furnitureType = agentRuntimeVisualText(activity.furnitureType || activity.objectType || 'pingpong', 120) || 'pingpong';
   }
@@ -3255,7 +3255,7 @@ function syncAgentRuntimePingPongVisualMetadata(agent, visualState = null) {
     return false;
   }
   const side = inferAgentRuntimePingPongSide(activity, visualState) || agent._pingPongSide || 'left';
-  const color = agentRuntimeVisualNumber(activity?.paddleColor ?? carried?.color ?? visualState?.paddleColor, pingPongPaddleColorForSide(side));
+  const color = pingPongPaddleColorForSide(side);
   agent._pingPongSide = side;
   agent._pingPongPaddleColor = color;
   if (activity && activityIsPingPong) {
@@ -69310,16 +69310,21 @@ if (typeof window !== 'undefined') {
     }
     const agents = agentsList.map(agent => {
       const snapshot = getAgentRuntimeSnapshot(agent) || agent?._runtimeSnapshot || null;
+      const paddle = agent?._group3d?.getObjectByName?.('rightHandPingPongRacket') ||
+        agent?._group3d?.getObjectByName?.('visiblePingPongPaddle') || null;
+      const paddleFace = paddle?.getObjectByName?.('paddleRubberFront') || null;
       return {
         id: agent.id,
         name: agent.name || agent.id,
         localActivity: agent._idleActivity?.kind || null,
         authoritativeActivity: snapshot?.visualState?.activity?.kind || snapshot?.visualState?.activityKind || null,
-        paddleVisible: Boolean(
-          agent?._group3d?.getObjectByName?.('rightHandPingPongRacket') ||
-          agent?._group3d?.getObjectByName?.('visiblePingPongPaddle')
-        ),
-        paddleAssetVersion: agent?._group3d?.getObjectByName?.('rightHandPingPongRacket')?.userData?.assetVersion || null,
+        pingPongSide: agent._pingPongSide || null,
+        pingPongPaddleColor: Number(agent._pingPongPaddleColor || 0) || null,
+        activityPaddleColor: Number(agent._idleActivity?.paddleColor || 0) || null,
+        carriedPaddleColor: Number(agent._carriedItem?.color || 0) || null,
+        paddleVisible: Boolean(paddle),
+        renderedPaddleColor: Number(paddle?.userData?.paddleColor || paddleFace?.material?.color?.getHex?.() || 0) || null,
+        paddleAssetVersion: paddle?.userData?.assetVersion || null,
       };
     });
     return { tables, agents };
@@ -71959,7 +71964,7 @@ function initChatBubbles() {
     finally { chatPollInFlight = false; }
   };
   pollAgentChat();
-  setInterval(pollAgentChat, 5000);
+  setInterval(pollAgentChat, 2000);
   // Also update positions every frame in animate loop
 }
 
@@ -72095,6 +72100,18 @@ function getChatBubbleSessionMeta(messages) {
   return null;
 }
 
+function getActiveChatBubbleMessages(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return [];
+  const explicitlyActive = messages.filter(message => message?.activeSession === true);
+  if (explicitlyActive.length) return explicitlyActive;
+  const sessionMeta = getChatBubbleSessionMeta(messages);
+  if (!sessionMeta?.sessionId) return messages;
+  const sameSession = messages.filter(message => (
+    String(message?.sessionId || message?.sessionKey || '').trim() === sessionMeta.sessionId
+  ));
+  return sameSession.length ? sameSession : messages;
+}
+
 function applyChatBubbleSessionMeta(state, sessionMeta) {
   const sessionEl = state?.el?.querySelector('.session-name');
   if (!sessionEl) return;
@@ -72110,8 +72127,8 @@ function updateChatBubbles() {
   const scale = T / API_TILE;
 
   for (const agent of agentsList) {
-    const messages = _chatData[agent.id];
-    if (!messages || messages.length === 0) continue;
+    const messages = getActiveChatBubbleMessages(_chatData[agent.id]);
+    if (messages.length === 0) continue;
 
     // Ensure bubble exists
     if (!_chatBubbles.has(agent.id)) {

@@ -5333,6 +5333,7 @@ function serverPingPongGameForClient(match = null) {
 
 function makeServerPingPongTarget(tableTarget, side, agentId, partnerAgentId, match, point = null, now = new Date().toISOString()) {
   const sideKey = side === 'right' ? 'right' : 'left';
+  const paddleColor = serverScriptedPingPongPaddleColor(sideKey);
   const targetPoint = point || serverPingPongPointFromTable(tableTarget, sideKey, 0);
   if (!targetPoint) return null;
   return {
@@ -5361,6 +5362,8 @@ function makeServerPingPongTarget(tableTarget, side, agentId, partnerAgentId, ma
     faceAngle: normalizeRuntimeAngleRadians(targetPoint.faceAngle, 0),
     matchId: match.matchId,
     side: sideKey,
+    pingPongSide: sideKey,
+    paddleColor,
     agentId,
     partnerAgentId,
     runtimeSource: match.source || 'idle',
@@ -5371,6 +5374,7 @@ function makeServerPingPongTarget(tableTarget, side, agentId, partnerAgentId, ma
 
 function makeServerPingPongVisualState(isMoving, target, match = null, nowMs = Date.now()) {
   const side = target?.side === 'right' ? 'right' : 'left';
+  const paddleColor = numberOr(target?.paddleColor, serverScriptedPingPongPaddleColor(side));
   const playerKey = side === 'right' ? 'p2' : 'p1';
   const trackZ = playerKey === 'p1' ? numberOr(match?.p1TrackZ, 0) : numberOr(match?.p2TrackZ, 0);
   const phase = String(match?.phase || '');
@@ -5385,6 +5389,8 @@ function makeServerPingPongVisualState(isMoving, target, match = null, nowMs = D
     movement: { isMoving, isRunning: false, suppressLocomotion: playing || resultHold },
     activityActive: Boolean(target) && !resultHold,
     activityKind: target?.activityKind || `pingpong-${side}`,
+    pingPongSide: side,
+    paddleColor,
     activity: {
       kind: target?.activityKind || `pingpong-${side}`,
       phase: isMoving ? 'routing' : (playing ? 'active' : (resultHold ? 'complete' : 'ready')),
@@ -5402,12 +5408,16 @@ function makeServerPingPongVisualState(isMoving, target, match = null, nowMs = D
       faceAngle: numberOr(target?.faceAngle, 0),
       matchId: match?.matchId || target?.matchId || '',
       partnerAgentId: target?.partnerAgentId || '',
+      pingPongSide: side,
+      paddleColor,
       runtimeOwner: SERVER_PINGPONG_RUNTIME_OWNER,
     },
     carrying: playing,
     carriedItem: playing ? {
       kind: 'pingpong-racket',
       label: 'Ping Pong Racket',
+      color: paddleColor,
+      sourceFurnitureType: 'pingpong',
       temporary: true,
       runtimeVisualOnly: true,
     } : null,
@@ -8919,7 +8929,17 @@ function normalizeTarget(target) {
   for (const [key, value] of Object.entries(target)) {
     if (value === null || value === undefined) continue;
     if (typeof value === 'number') {
-      normalized[key] = coordinateOr(value, 0, key);
+      const metadataNumber = /(?:ms|index|count|priority|capacity|color|version|floor|ttl|seq|level)$/i.test(key) ||
+        key.toLowerCase().includes('duration') ||
+        key.toLowerCase().includes('timestamp');
+      if (metadataNumber) {
+        if (!Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER) {
+          throw apiError('invalid_coordinate', `${key} must be a finite number`);
+        }
+        normalized[key] = value;
+      } else {
+        normalized[key] = coordinateOr(value, 0, key);
+      }
     } else if (typeof value === 'boolean') {
       normalized[key] = value;
     } else if (typeof value === 'string') {

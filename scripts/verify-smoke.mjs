@@ -19,6 +19,7 @@ import {
   buildTemporaryFoodCarryAssetForVerification,
   removePingPongRacketVisual,
   resolveConsumableSurfaceAssetPlacement,
+  resolvePingPongPaddleVisualState,
 } from '../src/client/js/agent-characters.js';
 import {
   clearPingPongEquipmentState,
@@ -153,6 +154,44 @@ function verifyPingPongPaddleAsset() {
 }
 
 verifyPingPongPaddleAsset();
+
+function verifyPingPongPaddleVisualState() {
+  const blueMetadataGap = resolvePingPongPaddleVisualState({
+    _idleActivity: { kind: 'pingpong-right', phase: 'routing', paddleColor: 0x2196f3 },
+    _pingPongSide: null,
+    _pingPongPaddleColor: null,
+  });
+  assert.deepEqual(
+    blueMetadataGap,
+    { side: 'right', color: 0x2196f3 },
+    'blue/right activity kind must survive a transient flattened-metadata gap',
+  );
+
+  const staleRedCarry = { kind: 'pingpong-racket', color: 0xf44336, pingPongSide: 'left' };
+  const blueApproach = resolvePingPongPaddleVisualState({
+    _idleActivity: { kind: 'pingpong-right', phase: 'routing', paddleColor: 0x2196f3 },
+    _pingPongSide: null,
+    _pingPongPaddleColor: null,
+  }, staleRedCarry);
+  assert.deepEqual(
+    blueApproach,
+    { side: 'right', color: 0x2196f3 },
+    'blue/right approach must ignore a stale red carried-item alias',
+  );
+
+  const staleBlueCarry = { kind: 'pingpong-racket', color: 0x2196f3, pingPongSide: 'right' };
+  const redApproach = resolvePingPongPaddleVisualState({
+    _idleActivity: { kind: 'pingpong-left', pingPongSide: 'left', phase: 'routing', paddleColor: 0xf44336 },
+    _pingPongSide: 'left',
+  }, staleBlueCarry);
+  assert.deepEqual(
+    redApproach,
+    { side: 'left', color: 0xf44336 },
+    'red/left approach must ignore a stale blue carried-item alias',
+  );
+}
+
+verifyPingPongPaddleVisualState();
 
 const requiredFiles = [
   'README.md',
@@ -642,7 +681,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260804-pingpong-live-r23',
+  'js/main3d.js?v=20260804-pingpong-blue-approach-r25',
   'agent-life-exterior-area-taxonomy.mjs?v=20260804-park-table-node-inference-r2',
   'syncAgentToCurrentTableSeatTransform(agent)',
   'occupiedAgentFollowsChairTransform',
@@ -667,9 +706,9 @@ for (const token of [
   'outdoorCafeChairLeg',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
-  'js/chat.js?v=20260729-chat-scroll-follow-r6',
+  'js/chat.js?v=20260804-chat-scroll-keyboard-r9',
   'css/style.css?v=20260728-multi-seat-couch-parity-r10',
-  'css/ui-redesign.css?v=20260728-chat-window-scroll-r4',
+  'css/ui-redesign.css?v=20260804-chat-mobile-keyboard-r5',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-codexOptions',
@@ -909,12 +948,14 @@ for (const token of [
   assert(read('src/server/providers/codex.py').includes(token), `codex.py missing stream token: ${token}`);
 }
 for (const token of [
-  "agent-characters.js?v=20260804-pingpong-live-r23",
+  "agent-characters.js?v=20260804-pingpong-blue-approach-r24",
   "chat-bubble-layout.mjs?v=20260728-chat-bubble-consistency-r4",
   'getChatBubbleSideInsets',
   'getChatBubbleChromeMetrics',
   'clampChatBubbleX',
   'getCurrentChatBubbleDisplayScale',
+  'getActiveChatBubbleMessages',
+  'message?.activeSession === true',
   'getRigidWorldChatBubbleLayout',
   'displayScale.effectiveScale',
   'displayScale.typographyScale',
@@ -1159,6 +1200,10 @@ for (const token of [
   "'pingpong_server_runtime_required'",
   'sweepLegacyServerScriptedPingPongObjects(nowMs, now)',
   "'legacy-scripted-pingpong-cleared'",
+  'pingPongSide: sideKey',
+  'const paddleColor = numberOr(target?.paddleColor, serverScriptedPingPongPaddleColor(side));',
+  'color: paddleColor',
+  "key.toLowerCase().includes('duration')",
 ]) {
   assert(agentRuntimeRoomJs.includes(token), `agent-runtime-room.mjs missing ping-pong pairing token: ${token}`);
 }
@@ -1499,7 +1544,7 @@ for (const token of [
   'ambient-schedule-routing-suppressed',
   'status-change-movement-clear-skipped',
   '__VWGetLiveModeScriptedSuppressionState',
-  "agent-characters.js?v=20260804-pingpong-live-r23",
+  "agent-characters.js?v=20260804-pingpong-blue-approach-r24",
   'function getAgentPresenceDotColor(statusValue)',
   'statusDot.userData.presenceStatusIndicator = true',
   'parts.statusDot.material.color.setHex(getAgentPresenceDotColor(normalizedStatus))',

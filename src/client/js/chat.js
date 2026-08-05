@@ -57,6 +57,7 @@
   const CHAT_STACK_GAP = 12;
   const CHAT_BOTTOM_OFFSET = 36;
   const CHAT_BOTTOM_FOLLOW_THRESHOLD = 28;
+  const CHAT_BOTTOM_REATTACH_THRESHOLD = 2;
   const CHAT_MANUAL_SCROLL_INTENT_MS = 180;
   const CHAT_MIDDLE_SCROLL_DEAD_ZONE = 8;
   const CHAT_MIDDLE_SCROLL_MAX_SPEED = 26;
@@ -73,6 +74,63 @@
     3: document.getElementById('chat-secondary-3')
   };
   let secondaryChatPanels = {};
+  let chatVisualViewportBaselineHeight = Math.max(
+    window.innerHeight || 0,
+    document.documentElement?.clientHeight || 0
+  );
+
+  function syncChatVisualViewport() {
+    const visualViewport = window.visualViewport;
+    const viewportHeight = Math.max(1, Number(visualViewport?.height || window.innerHeight || 1));
+    const viewportTop = Math.max(0, Number(visualViewport?.offsetTop || 0));
+    const layoutHeight = Math.max(
+      viewportHeight + viewportTop,
+      Number(window.innerHeight || 0),
+      Number(document.documentElement?.clientHeight || 0)
+    );
+    const activeElement = document.activeElement;
+    const chatInputFocused = Boolean(activeElement?.matches?.('.chat-panel .chat-input'));
+    if (!chatInputFocused) chatVisualViewportBaselineHeight = layoutHeight;
+    else chatVisualViewportBaselineHeight = Math.max(chatVisualViewportBaselineHeight, layoutHeight);
+    const keyboardInset = chatInputFocused
+      ? Math.max(0, layoutHeight - viewportTop - viewportHeight)
+      : 0;
+    const keyboardOpen = chatInputFocused && (
+      keyboardInset >= 80 || viewportHeight <= chatVisualViewportBaselineHeight * 0.78
+    );
+    const root = document.documentElement;
+    root.style.setProperty('--chat-visual-viewport-height', `${Math.round(viewportHeight)}px`);
+    root.style.setProperty('--chat-visual-viewport-offset-top', `${Math.round(viewportTop)}px`);
+    root.style.setProperty('--chat-keyboard-inset', `${Math.round(keyboardInset)}px`);
+    root.classList.toggle('chat-keyboard-open', keyboardOpen);
+    return {
+      viewportHeight,
+      viewportTop,
+      layoutHeight,
+      baselineHeight: chatVisualViewportBaselineHeight,
+      keyboardInset,
+      keyboardOpen
+    };
+  }
+
+  function scheduleChatVisualViewportSync() {
+    syncChatVisualViewport();
+    requestAnimationFrame(syncChatVisualViewport);
+    setTimeout(syncChatVisualViewport, 80);
+    setTimeout(syncChatVisualViewport, 280);
+  }
+
+  syncChatVisualViewport();
+  window.visualViewport?.addEventListener('resize', syncChatVisualViewport, { passive: true });
+  window.visualViewport?.addEventListener('scroll', syncChatVisualViewport, { passive: true });
+  window.addEventListener('resize', syncChatVisualViewport, { passive: true });
+  document.addEventListener('focusin', event => {
+    if (event.target?.matches?.('.chat-panel .chat-input')) scheduleChatVisualViewportSync();
+  });
+  document.addEventListener('focusout', event => {
+    if (event.target?.matches?.('.chat-panel .chat-input')) setTimeout(syncChatVisualViewport, 80);
+  });
+  window.__getChatVisualViewportState = syncChatVisualViewport;
 
   function readSavedChatSelections() {
     try {
@@ -157,10 +215,15 @@
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
       this.scrollFrame = null;
+      this.scrollSettleFrame = null;
+      this.scrollSettleTimer = null;
       this.followLatest = true;
       this.scrollTrackingSuspended = false;
       this.manualScrollIntentUntil = 0;
       this.manualScrollBottomTarget = 0;
+      this.manualScrollDirection = 0;
+      this.lastMessagesScrollTop = 0;
+      this.lastTouchScrollY = null;
       this.scrollbarPointerDown = false;
       this.middleScrollActive = false;
       this.middleScrollPointerDown = false;
@@ -222,8 +285,22 @@
         }
       });
       this.messages.addEventListener('scroll', () => this.handleMessagesScroll(), { passive: true });
-      this.messages.addEventListener('wheel', () => this.noteManualScrollIntent(), { passive: true });
-      this.messages.addEventListener('touchmove', () => this.noteManualScrollIntent(), { passive: true });
+      this.messages.addEventListener('wheel', (event) => {
+        this.noteManualScrollIntent(Math.sign(event.deltaY));
+      }, { passive: true });
+      this.messages.addEventListener('touchstart', (event) => {
+        this.lastTouchScrollY = event.touches?.[0]?.clientY ?? null;
+      }, { passive: true });
+      this.messages.addEventListener('touchmove', (event) => {
+        const nextY = event.touches?.[0]?.clientY ?? this.lastTouchScrollY;
+        const direction = this.lastTouchScrollY == null || nextY == null
+          ? 0
+          : Math.sign(this.lastTouchScrollY - nextY);
+        this.lastTouchScrollY = nextY;
+        this.noteManualScrollIntent(direction);
+      }, { passive: true });
+      this.messages.addEventListener('touchend', () => { this.lastTouchScrollY = null; }, { passive: true });
+      this.messages.addEventListener('touchcancel', () => { this.lastTouchScrollY = null; }, { passive: true });
       this.messages.addEventListener('pointerdown', (e) => {
         const rect = this.messages.getBoundingClientRect();
         const scrollbarWidth = Math.max(0, this.messages.offsetWidth - this.messages.clientWidth);
@@ -1982,14 +2059,21 @@
       return remaining <= CHAT_BOTTOM_FOLLOW_THRESHOLD;
     }
 
-    noteManualScrollIntent() {
+    noteManualScrollIntent(direction = 0) {
       this.manualScrollIntentUntil = performance.now() + CHAT_MANUAL_SCROLL_INTENT_MS;
       this.manualScrollBottomTarget = Math.max(0, this.messages.scrollHeight - this.messages.clientHeight);
+      this.manualScrollDirection = Number(direction) || 0;
+      if (this.manualScrollDirection < 0) {
+        this.followLatest = false;
+        this.cancelPendingScrollBottom();
+        this.updateScrollLatestButton();
+      }
     }
 
     clearManualScrollIntent() {
       this.manualScrollIntentUntil = 0;
       this.manualScrollBottomTarget = 0;
+      this.manualScrollDirection = 0;
     }
 
     hasManualScrollIntent() {
@@ -2000,14 +2084,18 @@
       if (this.scrollTrackingSuspended) return;
       const nearBottom = this.isNearMessagesBottom();
       const manualScrollIntent = this.hasManualScrollIntent();
+      const currentScrollTop = this.messages.scrollTop;
+      const movedUp = currentScrollTop < this.lastMessagesScrollTop - 0.5;
+      this.lastMessagesScrollTop = currentScrollTop;
       const reachedManualBottom = manualScrollIntent && (
-        this.messages.scrollTop >= this.manualScrollBottomTarget - CHAT_BOTTOM_FOLLOW_THRESHOLD
+        this.messages.scrollTop >= this.manualScrollBottomTarget - CHAT_BOTTOM_REATTACH_THRESHOLD
       );
-      if (nearBottom || reachedManualBottom) {
+      if (manualScrollIntent && (this.manualScrollDirection < 0 || movedUp)) {
+        this.followLatest = false;
+        this.cancelPendingScrollBottom();
+      } else if (reachedManualBottom || (!manualScrollIntent && nearBottom)) {
         this.followLatest = true;
         this.clearManualScrollIntent();
-      } else if (manualScrollIntent) {
-        this.followLatest = false;
       }
       this.updateScrollLatestButton();
       if (this.followLatest && !nearBottom) this.scrollBottom();
@@ -2026,12 +2114,14 @@
         if (scrollState.followLatest) {
           this.followLatest = true;
           this.messages.scrollTop = this.messages.scrollHeight;
+          this.lastMessagesScrollTop = this.messages.scrollTop;
           this.scrollTrackingSuspended = false;
           this.scrollBottom({ force: true });
         } else {
           const maxScrollTop = Math.max(0, this.messages.scrollHeight - this.messages.clientHeight);
           this.messages.scrollTop = Math.min(scrollState.scrollTop, maxScrollTop);
-          this.followLatest = !maxScrollTop || this.isNearMessagesBottom();
+          this.lastMessagesScrollTop = this.messages.scrollTop;
+          this.followLatest = !maxScrollTop;
           this.scrollTrackingSuspended = false;
           this.updateScrollLatestButton();
         }
@@ -2046,14 +2136,25 @@
 
     resumeLatest() {
       this.stopMiddleAutoScroll();
+      this.cancelPendingScrollBottom();
       this.followLatest = true;
       this.clearManualScrollIntent();
       this.updateScrollLatestButton();
       this.scrollBottom({ force: true });
     }
 
+    cancelPendingScrollBottom() {
+      if (this.scrollFrame) cancelAnimationFrame(this.scrollFrame);
+      if (this.scrollSettleFrame) cancelAnimationFrame(this.scrollSettleFrame);
+      if (this.scrollSettleTimer) clearTimeout(this.scrollSettleTimer);
+      this.scrollFrame = null;
+      this.scrollSettleFrame = null;
+      this.scrollSettleTimer = null;
+    }
+
     scrollBottom({ force = false } = {}) {
       if (force) {
+        this.cancelPendingScrollBottom();
         this.followLatest = true;
         this.clearManualScrollIntent();
       }
@@ -2065,6 +2166,7 @@
       const scrollToEnd = () => {
         if (this.scrollTrackingSuspended || !this.followLatest) return;
         this.messages.scrollTop = this.messages.scrollHeight;
+        this.lastMessagesScrollTop = this.messages.scrollTop;
         this.updateScrollLatestButton();
       };
       if (force) scrollToEnd();
@@ -2072,8 +2174,14 @@
       this.scrollFrame = requestAnimationFrame(() => {
         this.scrollFrame = null;
         scrollToEnd();
-        requestAnimationFrame(scrollToEnd);
-        setTimeout(scrollToEnd, 80);
+        this.scrollSettleFrame = requestAnimationFrame(() => {
+          this.scrollSettleFrame = null;
+          scrollToEnd();
+        });
+        this.scrollSettleTimer = setTimeout(() => {
+          this.scrollSettleTimer = null;
+          scrollToEnd();
+        }, 80);
       });
     }
 
@@ -2105,9 +2213,10 @@
             CHAT_MIDDLE_SCROLL_MAX_SPEED,
             (Math.abs(distance) - CHAT_MIDDLE_SCROLL_DEAD_ZONE) / 5
           );
-          this.noteManualScrollIntent();
+          this.noteManualScrollIntent(direction);
           this.messages.scrollTop += direction * magnitude;
-          if (this.isNearMessagesBottom()) {
+          const remaining = this.messages.scrollHeight - this.messages.clientHeight - this.messages.scrollTop;
+          if (direction > 0 && remaining <= CHAT_BOTTOM_REATTACH_THRESHOLD) {
             this.followLatest = true;
             this.clearManualScrollIntent();
             this.updateScrollLatestButton();

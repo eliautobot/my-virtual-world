@@ -104,12 +104,14 @@ assert(
   'manual message scrolling must suspend bottom-follow mode'
 );
 assert(
-  chatSource.includes('if (nearBottom || reachedManualBottom) {') &&
+  chatSource.includes('this.manualScrollDirection < 0 || movedUp') &&
   chatSource.includes('reachedManualBottom') &&
+  chatSource.includes('CHAT_BOTTOM_REATTACH_THRESHOLD') &&
   chatSource.includes('this.manualScrollBottomTarget') &&
+  chatSource.includes('this.cancelPendingScrollBottom();') &&
   chatSource.includes('this.clearManualScrollIntent();') &&
   chatSource.includes('if (this.followLatest && !nearBottom) this.scrollBottom();'),
-  'reaching the bottom must restore following while non-user scroll events preserve follow intent'
+  'one upward gesture must detach bottom-follow while reaching the true bottom restores it'
 );
 assert(
   chatSource.includes('if (force) scrollToEnd();') &&
@@ -119,8 +121,24 @@ assert(
 );
 assert(
   chatSource.includes('replaceHistoryMessages(renderMessages)') &&
-  chatSource.includes('scrollTrackingSuspended'),
+  chatSource.includes('scrollTrackingSuspended') &&
+  chatSource.includes('this.followLatest = !maxScrollTop;'),
   'history refreshes must preserve paused scroll positions without re-enabling bottom-follow'
+);
+for (const token of [
+  'window.visualViewport?.addEventListener(\'resize\'',
+  '--chat-visual-viewport-height',
+  '--chat-keyboard-inset',
+  "root.classList.toggle('chat-keyboard-open', keyboardOpen)",
+  "document.addEventListener('focusin'"
+]) {
+  assert(chatSource.includes(token), `mobile keyboard viewport synchronization missing ${token}`);
+}
+assert(
+  redesignCss.includes('html.chat-keyboard-open .chat-panel.open') &&
+  redesignCss.includes('bottom: calc(var(--chat-keyboard-inset, 0px) + 6px) !important;') &&
+  redesignCss.includes('height: calc(var(--chat-visual-viewport-height, 100dvh) - 12px) !important;'),
+  'mobile chat must remain entirely inside the visual viewport above the software keyboard'
 );
 assert(
   chatSource.includes("this.messages.addEventListener('mousedown'") &&
@@ -159,4 +177,4 @@ assert(
   'the composer background must follow the panel bottom corners without rectangular bleed'
 );
 
-console.log('PASS: chat Markdown, bottom-follow, middle-click/drag scrolling, curved resize, and multi-window regressions verified.');
+console.log('PASS: chat Markdown, one-gesture bottom detach, mobile keyboard viewport, middle scrolling, resize, and multi-window regressions verified.');
