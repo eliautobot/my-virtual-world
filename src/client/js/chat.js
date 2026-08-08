@@ -211,9 +211,12 @@
       this.hermesLiveEventSeq = 0;
       this.hermesEventSource = null;
       this.codexEventSource = null;
+      this.providerEventSource = null;
       this.hermesCompletedToolKeys = new Set();
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
+      this.codexApprovalPollTimer = null;
+      this.codexApprovalLastId = '';
       this.scrollFrame = null;
       this.scrollSettleFrame = null;
       this.scrollSettleTimer = null;
@@ -634,6 +637,7 @@
           this.hasExplicitAgentSelection = true;
           this.saveSelection();
         }
+        this.syncCapabilityControls();
         return;
       }
       this.selectedAgentKey = newAgentKey;
@@ -642,15 +646,19 @@
       this.saveSelection();
       this.closeHermesEventSource();
       this.closeCodexEventSource();
+      this.closeProviderEventSource();
       this.currentRunId = null;
       this.streamingMsg = null;
       this.openClawRunTracker.reset();
       this.clearRunNotice();
       this.syncAgentSelect();
+      this.syncCapabilityControls();
       this.resetConversation(`${systemPrefix} ${opt.textContent.trim()}`);
       if (this.sessionsPanelOpen) this.refreshSessionsList({ showLoading: true });
       if (this.isHermesSelected()) this.startHermesApprovalPolling();
       else this.stopHermesApprovalPolling();
+      if (this.supportsProviderApprovals()) this.startCodexApprovalPolling();
+      else this.stopCodexApprovalPolling();
       if (this.isLiveModeSessionSelected()) this.startLiveSessionPolling();
       else this.stopLiveSessionPolling();
       if (connected) {
@@ -682,6 +690,7 @@
             opt.dataset.agentId = a.agentId;
             opt.dataset.providerKind = a.providerKind || 'openclaw';
             opt.dataset.providerAgentId = a.providerAgentId || a.agentId;
+            opt.dataset.capabilities = JSON.stringify(a.capabilities || {});
             opt.dataset.model = a.model || '';
             opt.dataset.provider = a.provider || '';
             group.appendChild(opt);
@@ -689,6 +698,7 @@
           this.agentSelect.appendChild(group);
         }
         this.syncAgentSelect();
+        this.syncCapabilityControls();
         if (this.sessionsPanelOpen) this.refreshSessionsList({ showLoading: true });
         if (connected && (this.isPrimary || this.root.classList.contains('open'))) {
           this.fetchSessionInfo();
@@ -731,6 +741,29 @@
       return opt?.dataset?.providerKind || 'openclaw';
     }
 
+    getSelectedCapabilities() {
+      const opt = this.agentSelect?.selectedOptions?.[0];
+      try { return JSON.parse(opt?.dataset?.capabilities || '{}') || {}; }
+      catch (_) { return {}; }
+    }
+
+    syncCapabilityControls() {
+      const capabilities = this.getSelectedCapabilities();
+      if (!Object.keys(capabilities).length) return;
+      const toggle = (element, supported) => {
+        if (!element) return;
+        element.hidden = !supported;
+        element.disabled = !supported;
+        element.setAttribute('aria-hidden', supported ? 'false' : 'true');
+      };
+      toggle(this.sessionsToggleBtn, Boolean(capabilities.sessions));
+      toggle(this.sessionsNewBtn, Boolean(capabilities.sessionCreate));
+      toggle(this.newSessionBtn, Boolean(capabilities.sessionCreate));
+      toggle(this.attachBtn, Boolean(capabilities.attachments));
+      toggle(this.stopBtn, Boolean(capabilities.interrupt));
+      if (!capabilities.sessions && this.sessionsPanelOpen) this.toggleSessionsPanel(false);
+    }
+
     isHermesSelected() {
       const selectedAgentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
       return (
@@ -742,6 +775,17 @@
 
     isCodexSelected() {
       return this.getSelectedProviderKind() === 'codex' || String(this.sessionKey || '').startsWith('codex:');
+    }
+
+    isGenericProviderSelected() {
+      const kind = this.getSelectedProviderKind();
+      return Boolean(kind && !['openclaw', 'hermes', 'codex'].includes(kind));
+    }
+
+    supportsProviderApprovals() {
+      return this.getSelectedProviderKind() !== 'openclaw'
+        && !this.isHermesSelected()
+        && Boolean(this.getSelectedCapabilities().approvals);
     }
 
     isProviderAgentSelected() {
@@ -790,6 +834,44 @@
       const data = await res.json();
       if (!data.ok || !data.pending) return;
       this.appendHermesPendingApproval(data.pending, data.pending_count || 1);
+    }
+
+    startCodexApprovalPolling() {
+      if (!this.supportsProviderApprovals() || this.codexApprovalPollTimer) return;
+      this.pollCodexApproval().catch(() => {});
+      this.codexApprovalPollTimer = setInterval(() => this.pollCodexApproval().catch(() => {}), HERMES_APPROVAL_POLL_MS);
+    }
+
+    stopCodexApprovalPolling() {
+      if (this.codexApprovalPollTimer) clearInterval(this.codexApprovalPollTimer);
+      this.codexApprovalPollTimer = null;
+      this.codexApprovalLastId = '';
+    }
+
+    async pollCodexApproval() {
+      if (!this.supportsProviderApprovals() || !this.isVisibleForPolling()) return;
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const res = await fetch('/api/providers/approvals?agentId=' + encodeURIComponent(agentId));
+      const data = await res.json();
+      if (!data.ok || !data.pending) return;
+      this.appendCodexPendingApproval(data.pending, data.pending_count || 1);
+    }
+
+    appendCodexPendingApproval(approval, pendingCount = 1) {
+      if (!approval) return;
+      const approvalId = approval.approval_id || approval.id || '';
+      if (approvalId && [...this.messages.querySelectorAll('[data-approval-id]')].some(el => el.dataset.approvalId === approvalId)) return;
+      const enriched = {
+        ...approval,
+        id: approvalId || approval.id,
+        approval_id: approvalId || approval.approval_id,
+        pending_count: pendingCount,
+        providerKind: approval.providerKind || this.getSelectedProviderKind(),
+        provider: approval.provider || this.getSelectedProviderKind()
+      };
+      this.codexApprovalLastId = enriched.id || '';
+      this.appendMessage('assistant', '', Date.now(), [], { label:this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex', kind:'agent', approval:enriched }, []);
+      this.scrollBottom();
     }
 
     appendHermesPendingApproval(approval, pendingCount = 1) {
@@ -924,6 +1006,7 @@
           return;
         }
         if (this.isCodexSelected()) {
+          this.startCodexApprovalPolling();
           const res = await fetch('/api/codex/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
           if (data.ok && Array.isArray(data.messages)) {
@@ -948,15 +1031,16 @@
           }
           return;
         }
-        if (this.isProviderAgentSelected()) {
-          const res = await fetch('/api/agent-chat');
+        if (this.isGenericProviderSelected()) {
+          if (this.supportsProviderApprovals()) this.startCodexApprovalPolling();
+          const res = await fetch('/api/providers/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
-          const msgs = data[this.selectedAgentKey] || [];
+          const msgs = Array.isArray(data.messages) ? data.messages : [];
           this.replaceHistoryMessages(() => {
             for (const msg of msgs) {
               const tools = normalizeHermesTools(msg.tools || []);
               const meta = msg.role === 'user'
-                ? { label: msg.from || 'Agent', kind: msg.fromType === 'human' ? 'human' : 'agent' }
+                ? { label: msg.from || 'You', kind:'human' }
                 : {
                     label: msg.from || this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Agent',
                     kind: 'agent',
@@ -1320,6 +1404,7 @@
       this.scrollBottom();
 
       let attachments;
+      let providerAttachments = [];
       if (hasAttachments) {
         const UPLOAD_URL = window.location.origin + '/upload';
         const imageAtts = [];
@@ -1384,6 +1469,7 @@
           const pathNote = docPaths.map(p => '(attached file: ' + p + ')').join('\n');
           text = text ? text + '\n' + pathNote : pathNote;
         }
+        providerAttachments = docPaths.map(path => ({ path }));
         attachments = imageAtts.length ? imageAtts : undefined;
       }
 
@@ -1523,44 +1609,30 @@
         return;
       }
 
-      if (this.isProviderAgentSelected()) {
+      if (this.isGenericProviderSelected()) {
         const providerLabel = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Agent';
+        this.updateTypingIndicator(`${providerLabel} is running…`);
         try {
-          const resp = await fetch('/api/agent-platform-communications/send', {
+          const resp = await fetch('/api/providers/runs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              fromType: 'human',
-              fromDisplayName: 'User',
-              sourceApp: 'virtual-world',
-              sourceSurface: 'chat-window',
-              sourceLabel: 'Virtual World Chat',
-              fromAgentId: 'main',
-              toAgentId: this.getSelectedAgentId() || this.selectedAgentKey,
+              agentId: this.getSelectedAgentId() || this.selectedAgentKey,
               message: text || '(attached files)',
-              conversationId: `vw-chat-main-${this.getSelectedAgentId() || this.selectedAgentKey}`,
-              timeoutSec: 180
+              sessionId: String(this.sessionKey || '').split(':').slice(2).join(':'),
+              timeoutSec: 900,
+              attachments: providerAttachments,
             })
           });
           const data = await resp.json();
-          this.removeTypingIndicator();
           if (!resp.ok || data.ok === false) throw new Error(data.error || data.reply || resp.statusText);
-          this.appendMessage(
-            'assistant',
-            data.reply || '',
-            Date.now(),
-            [],
-            {
-              label: providerLabel,
-              kind: 'agent',
-              thinking: data.thinking || '',
-              reasoningTokens: data.reasoningTokens || 0,
-              approval: data.approval || null
-            },
-            normalizeHermesTools(data.tools || [])
-          );
+          this.currentRunId = data.runId || null;
+          await this.streamProviderSdkRun(data.runId, providerLabel);
+          await this.loadHistory();
+          await this.fetchSessionInfo();
           this.scrollBottom();
         } catch (e) {
+          this.closeProviderEventSource();
           this.removeTypingIndicator();
           this.showRunNotice('Response not completed', e.message);
         } finally {
@@ -1614,6 +1686,18 @@
           const data = await resp.json().catch(() => ({}));
           if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
           this.appendSystem('Stop sent');
+          return;
+        }
+        if (this.isGenericProviderSelected()) {
+          const resp = await fetch('/api/providers/interrupt', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({ agentId:this.getSelectedAgentId() || this.selectedAgentKey, runId:this.currentRunId || '' }),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
+          this.closeProviderEventSource();
+          this.appendSystem('🛑 Stop sent');
           return;
         }
         if (this.isCodexSelected()) {
@@ -2051,6 +2135,13 @@
       if (this.codexEventSource) {
         try { this.codexEventSource.close(); } catch (_) {}
         this.codexEventSource = null;
+      }
+    }
+
+    closeProviderEventSource() {
+      if (this.providerEventSource) {
+        try { this.providerEventSource.close(); } catch (_) {}
+        this.providerEventSource = null;
       }
     }
 
@@ -2522,6 +2613,7 @@
       }
 
       if (eventName === 'approval.request') {
+        if (data.approval) this.appendCodexPendingApproval(data.approval, data.pending_count || 1);
         this.updateTypingIndicator('Codex requested input...');
         return;
       }
@@ -2570,6 +2662,59 @@
         this.currentRunId = null;
         this.fetchSessionInfo();
       }
+    }
+
+    streamProviderSdkRun(runId, providerLabel = 'Provider') {
+      if (!runId) return Promise.reject(new Error('Provider SDK run did not return a run id'));
+      this.closeProviderEventSource();
+      this.currentRunId = runId;
+      const source = new EventSource('/api/providers/runs/' + encodeURIComponent(runId) + '/events');
+      this.providerEventSource = source;
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (ok, value) => {
+          if (settled) return;
+          settled = true;
+          if (this.providerEventSource === source) this.providerEventSource = null;
+          source.close();
+          this.removeTypingIndicator();
+          this.currentRunId = null;
+          if (ok) resolve(value);
+          else reject(value instanceof Error ? value : new Error(String(value || 'Provider SDK stream failed')));
+        };
+        const handle = (eventName, event) => {
+          let data = {};
+          try { data = JSON.parse(event.data || '{}'); } catch (_) {}
+          if (eventName === 'run.started') {
+            this.updateTypingIndicator(`${providerLabel} is running…`);
+            return;
+          }
+          if (eventName === 'turn.progress') {
+            if (data.reply) {
+              if (!this.streamingMsg || this.streamingMsg.id !== runId) {
+                this.streamingMsg = { id:runId, role:'assistant', content:'' };
+                this.appendStreamingMessage();
+              }
+              this.streamingMsg.content = data.reply;
+              this.updateStreamingMessage(data.reply);
+            }
+            const activity = data.thinking || data.commentary || (Array.isArray(data.tools) && data.tools[0]?.name ? `Using ${data.tools[0].name}…` : `${providerLabel} is working…`);
+            this.updateTypingIndicator(activity);
+            this.scrollBottom();
+            return;
+          }
+          if (eventName === 'run.completed' || eventName === 'run.failed') {
+            const finalText = data.reply || this.streamingMsg?.content || '';
+            if (this.streamingMsg) {
+              this.finalizeStreamingMessage(finalText);
+              this.streamingMsg = null;
+            }
+            finish(eventName === 'run.completed', eventName === 'run.completed' ? data : new Error(data.error || `${providerLabel} run failed`));
+          }
+        };
+        ['run.started', 'turn.progress', 'run.completed', 'run.failed'].forEach(name => source.addEventListener(name, event => handle(name, event)));
+        source.onerror = () => { if (!settled) finish(false, new Error(`${providerLabel} stream disconnected`)); };
+      });
     }
 
     stopHermesLivePolling() {
@@ -2753,6 +2898,41 @@
           if (status) status.textContent = 'error';
         }
         this.showRunNotice('Approval failed', e.message, this.currentRunId);
+      }
+    }
+
+    async respondProviderApproval(approval, choice, card) {
+      if (!approval || !this.supportsProviderApprovals()) return;
+      const buttons = card ? [...card.querySelectorAll('button')] : [];
+      buttons.forEach(button => { button.disabled = true; });
+      card?.classList.add('responding');
+      try {
+        const response = await fetch('/api/providers/approvals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+            approval,
+            approvalId: approval.approval_id || approval.id,
+            choice
+          })
+        });
+        const data = await response.json();
+        if (!response.ok || data.ok === false) throw new Error(data.error || response.statusText);
+        const approved = ['approve', 'approved', 'accept', 'allow', 'approve_once', 'allow_once'].includes(String(choice).toLowerCase());
+        if (card) {
+          card.classList.remove('pending', 'responding');
+          card.classList.add(approved ? 'approved' : 'denied');
+          const status = card.querySelector('.chat-approval-status');
+          if (status) status.textContent = approved ? 'approved' : 'denied';
+        }
+        await this.pollCodexApproval().catch(() => {});
+      } catch (error) {
+        buttons.forEach(button => { button.disabled = false; });
+        card?.classList.remove('responding');
+        const status = card?.querySelector('.chat-approval-status');
+        if (status) status.textContent = 'error';
+        this.showRunNotice('Approval failed', error.message, this.currentRunId);
       }
     }
 
@@ -3662,7 +3842,10 @@
     icon.textContent = visualStatus === 'denied' ? 'x' : visualStatus === 'approved' ? 'OK' : '!';
     const title = document.createElement('span');
     title.className = 'chat-approval-title';
-    title.textContent = approval.title || 'Hermes approval required';
+    const providerKind = String(approval.providerKind || approval.provider || '').toLowerCase();
+    const isHermesApproval = providerKind.includes('hermes') || windowInstance?.isHermesSelected();
+    const providerLabel = windowInstance?.agentSelect?.selectedOptions?.[0]?.textContent?.trim() || 'Provider';
+    title.textContent = approval.title || `${providerLabel} approval required`;
     const state = document.createElement('span');
     state.className = 'chat-approval-status';
     const pendingCount = Number(approval.pending_count || approval.pendingCount || 0);
@@ -3671,11 +3854,11 @@
 
     const desc = document.createElement('div');
     desc.className = 'chat-approval-desc';
-    desc.textContent = approval.description || 'Hermes needs user approval before it can continue.';
+    desc.textContent = approval.description || `${providerLabel} needs user approval before it can continue.`;
 
     const cmd = document.createElement('pre');
     cmd.className = 'chat-approval-command';
-    cmd.textContent = approval.command || 'Approval-gated Hermes command';
+    cmd.textContent = approval.command || 'Approval-gated provider action';
 
     card.append(header, desc, cmd);
     if (status === 'pending') {
@@ -3686,13 +3869,19 @@
       allow.className = 'chat-approval-btn primary';
       allow.textContent = 'Allow once';
       allow.title = 'Retry this Hermes turn with approval bypass for this invocation only';
-      allow.addEventListener('click', () => windowInstance?.respondHermesApproval(approval, 'approve_once', card));
+      allow.addEventListener('click', () => {
+        if (isHermesApproval) windowInstance?.respondHermesApproval(approval, 'approve_once', card);
+        else windowInstance?.respondProviderApproval(approval, 'approve', card);
+      });
       const deny = document.createElement('button');
       deny.type = 'button';
       deny.className = 'chat-approval-btn';
       deny.textContent = 'Deny';
       deny.title = 'Do not retry this blocked Hermes command';
-      deny.addEventListener('click', () => windowInstance?.respondHermesApproval(approval, 'deny', card));
+      deny.addEventListener('click', () => {
+        if (isHermesApproval) windowInstance?.respondHermesApproval(approval, 'deny', card);
+        else windowInstance?.respondProviderApproval(approval, 'cancel', card);
+      });
       actions.append(allow, deny);
       card.appendChild(actions);
     }

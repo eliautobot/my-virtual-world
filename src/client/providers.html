@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07151f">
+  <title>Universal Providers · My Virtual World</title>
+  <link rel="icon" href="favicon.png">
+  <link rel="stylesheet" href="css/provider-settings.css?v=20260808-2">
+</head>
+<body class="provider-settings-page">
+  <header class="ps-header">
+    <a class="ps-back" href="/">← World</a>
+    <div class="ps-heading-copy">
+      <h1>Universal Providers</h1>
+      <p>Connect agent runtimes through My Virtual World’s Provider SDK compatibility layer.</p>
+    </div>
+    <div class="ps-header-actions">
+      <button id="ps-discover" class="ps-button secondary" type="button">Discover agents</button>
+      <button id="ps-refresh" class="ps-button secondary" type="button">Refresh</button>
+    </div>
+  </header>
+  <main class="ps-shell">
+    <nav id="ps-provider-list" class="ps-provider-list" aria-label="Universal providers"></nav>
+    <section class="ps-content">
+      <div id="ps-loading" class="ps-empty">Loading Provider SDK manifests…</div>
+      <div id="ps-provider" hidden>
+        <div class="ps-provider-heading">
+          <div>
+            <div class="ps-title-row"><span id="ps-icon"></span><h2 id="ps-name"></h2><span id="ps-health" class="ps-health"></span></div>
+            <p id="ps-description"></p>
+          </div>
+          <div class="ps-actions">
+            <button id="ps-test" class="ps-button secondary" type="button">Test connection</button>
+            <button id="ps-save" class="ps-button primary" type="button">Save settings</button>
+          </div>
+        </div>
+        <div id="ps-capabilities" class="ps-capabilities"></div>
+        <div id="ps-status" class="ps-status" role="status" aria-live="polite"></div>
+        <form id="ps-form" novalidate></form>
+      </div>
+    </section>
+  </main>
+  <script src="js/provider-settings.js?v=20260808-1"></script>
+</body>
+</html>

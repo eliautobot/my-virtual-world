@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin
 
+from .file_safety import backup_files
+
 
 @dataclass
 class HermesProvider:
@@ -377,6 +379,7 @@ class HermesProvider:
 
         profile_home = os.path.join(self.home_path, "profiles", safe_profile)
         os.makedirs(profile_home, exist_ok=True)
+        os.makedirs(os.path.join(profile_home, "skills"), exist_ok=True)
         self._write_profile_bootstrap(profile_home, name=name, role=role, emoji=emoji, profile=safe_profile, prompt=prompt or "")
         self._chown_like_home(profile_home)
 
@@ -415,6 +418,34 @@ class HermesProvider:
             "exitCode": result.returncode,
         }
 
+    def update_profile(self, profile: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Synchronize the non-secret files that represent a Hermes identity."""
+        safe_profile = self._safe_profile_name(profile)
+        profile_home = self.home_path if safe_profile == "default" else os.path.join(self.home_path or "", "profiles", safe_profile)
+        if not os.path.isdir(profile_home):
+            return {"ok": False, "error": f"Hermes profile '{safe_profile}' was not found"}
+        identity_path = os.path.join(profile_home, "IDENTITY.md")
+        agents_path = os.path.join(profile_home, "AGENTS.md")
+        current = self._read_identity(profile_home)
+        name = str(patch.get("name") if "name" in patch else current.get("name") or self._display_name(safe_profile)).strip()
+        role = str(patch.get("role") if "role" in patch else current.get("role") or "Hermes Agent").strip()
+        emoji = str(patch.get("emoji") if "emoji" in patch else current.get("emoji") or "⚕️").strip()
+        backup_id, backups = backup_files(profile_home, [identity_path, agents_path])
+        with open(identity_path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "# IDENTITY.md\n\n"
+                f"- **Name:** {name}\n"
+                f"- **Creature:** {role} - Hermes profile\n"
+                "- **Vibe:** Helpful, direct, ready to work\n"
+                f"- **Emoji:** {emoji}\n"
+            )
+        changed = ["IDENTITY.md"]
+        if "instructions" in patch:
+            with open(agents_path, "w", encoding="utf-8") as handle:
+                handle.write(str(patch.get("instructions") or ""))
+            changed.append("AGENTS.md")
+        return {"ok": True, "profile": safe_profile, "changed": changed, "backupId": backup_id, "backups": backups}
+
     def delete_session(self, profile: str, session_id: str) -> dict[str, Any]:
         """Delete a Hermes session through the public sessions CLI."""
         if not session_id:
@@ -440,6 +471,19 @@ class HermesProvider:
     def _list_profiles(self) -> list[dict[str, str]]:
         profiles: list[dict[str, str]] = []
         try:
+            # Hermes renders a fixed-width table. A long profile name can run
+            # directly into the Model column with only one separating space,
+            # so splitting the whole row on repeated whitespace corrupts the
+            # native identity (for example, "profile model" becomes the
+            # profile). Match known public profile directory names first and
+            # parse only the remaining columns.
+            profiles_root = os.path.join(self.home_path or "", "profiles")
+            known_profiles = {"default"}
+            if os.path.isdir(profiles_root):
+                known_profiles.update(
+                    entry for entry in os.listdir(profiles_root)
+                    if entry and os.path.isdir(os.path.join(profiles_root, entry))
+                )
             result = subprocess.run([self.binary or "hermes", "profile", "list"], capture_output=True, text=True, timeout=15, env=self._subprocess_env())
             if result.returncode != 0:
                 return profiles
@@ -448,7 +492,19 @@ class HermesProvider:
                 if not clean or clean.startswith("Profile") or clean.startswith("─"):
                     continue
                 clean = clean.replace("◆", " ").strip()
-                parts = re.split(r"\s{2,}", clean)
+                profile = next(
+                    (
+                        candidate for candidate in sorted(known_profiles, key=len, reverse=True)
+                        if clean == candidate or clean.startswith(candidate + " ")
+                    ),
+                    "",
+                )
+                if profile:
+                    remainder = clean[len(profile):].strip()
+                    columns = re.split(r"\s{2,}", remainder) if remainder else []
+                    parts = [profile, *columns]
+                else:
+                    parts = re.split(r"\s{2,}", clean)
                 if not parts:
                     continue
                 profile = parts[0].strip()
@@ -459,6 +515,9 @@ class HermesProvider:
                     "model": parts[1].strip() if len(parts) > 1 else "",
                     "gateway": parts[2].strip() if len(parts) > 2 else "",
                 })
+            listed = {item.get("profile") for item in profiles}
+            for profile in sorted(known_profiles - listed):
+                profiles.append({"profile": profile, "model": "", "gateway": ""})
         except Exception:
             pass
         return profiles

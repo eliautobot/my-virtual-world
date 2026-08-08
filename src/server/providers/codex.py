@@ -8,6 +8,7 @@ explicitly disable the native path.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import queue
 import re
@@ -19,6 +20,8 @@ import tomllib
 import glob
 from dataclasses import dataclass
 from typing import Any, Callable
+
+from .file_safety import backup_files
 
 
 ProgressCallback = Callable[[dict[str, Any]], None]
@@ -224,6 +227,7 @@ class CodexProvider:
             return {"ok": False, "error": f"Native Codex agent '{safe_profile}' already exists in {native_agent_path}"}
 
         os.makedirs(os.path.join(agent_dir, ".codex", "agents"), exist_ok=True)
+        os.makedirs(os.path.join(agent_dir, ".agents", "skills"), exist_ok=True)
         model_value = (model or self.model or "").strip()
         instructions = (prompt or role or "Codex Agent").strip()
         meta = {
@@ -281,6 +285,8 @@ class CodexProvider:
                 self._remove_external_agent(safe_profile)
                 return {"ok": True, "deleted": True, "profile": safe_profile, "agentId": f"codex-{safe_profile}"}
             return {"ok": True, "deleted": False, "profile": safe_profile, "agentId": f"codex-{safe_profile}"}
+        if meta.get("providerKind") != self.provider_kind or self._safe_profile_name(meta.get("profile")) != safe_profile:
+            return {"ok": False, "error": "Refusing to delete an unowned Codex workspace"}
         shutil.rmtree(agent_dir)
         self._remove_external_agent(safe_profile)
         native_path = str(meta.get("nativeAgentPath") or "")
@@ -290,6 +296,45 @@ class CodexProvider:
             except OSError:
                 pass
         return {"ok": True, "deleted": True, "profile": safe_profile, "agentId": f"codex-{safe_profile}"}
+
+    def update_profile(self, profile: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Synchronize every managed Codex identity/instruction surface."""
+        safe_profile = self._safe_profile_name(profile)
+        agent_dir = self._runtime_workspace(safe_profile)
+        meta_path = os.path.join(agent_dir, "world-agent.json")
+        meta = self._load_meta(agent_dir)
+        if not meta or self._safe_profile_name(meta.get("profile")) != safe_profile:
+            return {"ok": False, "error": f"Managed Codex agent '{safe_profile}' was not found"}
+        for key in ("name", "role", "emoji", "model"):
+            if key in patch:
+                meta[key] = str(patch.get(key) or "")
+        if "instructions" in patch:
+            meta["prompt"] = str(patch.get("instructions") or "")
+        name = str(meta.get("name") or self._display_name(safe_profile))
+        role = str(meta.get("role") or "Codex Agent")
+        emoji = str(meta.get("emoji") or "🤖")
+        model = str(meta.get("model") or self.model or "")
+        instructions = str(meta.get("prompt") or role)
+        native_path = str(meta.get("nativeAgentPath") or "")
+        project_path = os.path.join(agent_dir, ".codex", "agents", f"{safe_profile}.toml")
+        config_path = os.path.join(agent_dir, ".codex", "config.toml")
+        paths = [
+            meta_path,
+            os.path.join(agent_dir, "IDENTITY.md"),
+            os.path.join(agent_dir, "AGENTS.md"),
+            project_path,
+            config_path,
+            native_path,
+        ]
+        backup_id, backups = backup_files(agent_dir, paths)
+        self._write_json(meta_path, meta)
+        self._write_text(os.path.join(agent_dir, "IDENTITY.md"), self._identity_md(name, role, emoji))
+        self._write_text(os.path.join(agent_dir, "AGENTS.md"), self._agents_md(name, role, instructions))
+        self._write_text(project_path, self._agent_toml(safe_profile, role, instructions, model))
+        self._write_text(config_path, self._config_toml(model))
+        if native_path and self._is_native_agent_path(native_path):
+            self._write_text(native_path, self._agent_toml(safe_profile, role, instructions, model))
+        return {"ok": True, "profile": safe_profile, "changed": [os.path.basename(path) for path in paths if path], "backupId": backup_id, "backups": backups}
 
     def send_chat_message(
         self,
@@ -354,6 +399,9 @@ class CodexProvider:
             event = state.event_from_message(msg)
             if event:
                 buffered_events.append(event)
+
+        client.profile = safe_profile
+        client.approval_callback = state.set_approval
 
         try:
             client.initialize()
@@ -494,6 +542,22 @@ class CodexProvider:
             return {"ok": False, "error": "No active Codex turn is running for this agent."}
         return client.interrupt()
 
+    def pending_approval(self, profile: str) -> dict[str, Any]:
+        safe_profile = self._safe_profile_name(profile)
+        with _ACTIVE_RUNS_LOCK:
+            client = _ACTIVE_RUNS.get(safe_profile)
+        if not client:
+            return {"ok": True, "pending": None, "pending_count": 0}
+        return client.pending_approval()
+
+    def respond_approval(self, profile: str, approval_id: str, choice: str = "cancel") -> dict[str, Any]:
+        safe_profile = self._safe_profile_name(profile)
+        with _ACTIVE_RUNS_LOCK:
+            client = _ACTIVE_RUNS.get(safe_profile)
+        if not client:
+            return {"ok": False, "error": "No active Codex turn is running for this agent."}
+        return client.respond_approval(approval_id, choice)
+
     def _send_app_server_message(
         self,
         profile: str,
@@ -532,6 +596,13 @@ class CodexProvider:
             if force or now - last_progress >= 0.25:
                 on_progress(state.snapshot())
                 last_progress = now
+
+        def emit_approval(approval: dict[str, Any]) -> None:
+            state.set_approval(approval)
+            emit_progress(force=True)
+
+        client.profile = safe_profile
+        client.approval_callback = emit_approval
 
         try:
             client.initialize()
@@ -1191,8 +1262,12 @@ class CodexAppServerClient:
         self.timeout_sec = int(timeout_sec)
         self.thread_id = ""
         self.turn_id = ""
+        self.profile = ""
+        self.approval_callback: Callable[[dict[str, Any]], None] | None = None
         self._next_id = 1
         self._send_lock = threading.Lock()
+        self._approval_lock = threading.Condition()
+        self._pending_approvals: dict[str, dict[str, Any]] = {}
         self._queue: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self._stderr: list[str] = []
         self._closed = False
@@ -1264,6 +1339,48 @@ class CodexAppServerClient:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "threadId": self.thread_id, "turnId": self.turn_id}
 
+    def pending_approval(self) -> dict[str, Any]:
+        with self._approval_lock:
+            pending = [
+                entry.get("approval")
+                for entry in self._pending_approvals.values()
+                if isinstance(entry.get("approval"), dict) and entry["approval"].get("status") == "pending"
+            ]
+        return {"ok": True, "pending": pending[0] if pending else None, "pending_count": len(pending)}
+
+    def respond_approval(self, approval_id: str, choice: str = "cancel") -> dict[str, Any]:
+        approval_id = str(approval_id or "").strip()
+        normalized_choice = self._normalize_approval_choice(choice)
+        if not approval_id:
+            return {"ok": False, "error": "approval_id is required"}
+        with self._approval_lock:
+            entry = self._pending_approvals.get(approval_id)
+            if not entry:
+                for candidate in self._pending_approvals.values():
+                    approval = candidate.get("approval") if isinstance(candidate.get("approval"), dict) else {}
+                    if approval_id in {
+                        str(approval.get("requestId") or ""),
+                        str(approval.get("itemId") or ""),
+                        str(approval.get("callbackId") or ""),
+                    }:
+                        entry = candidate
+                        break
+            if not entry:
+                return {"ok": False, "error": "Codex approval request is no longer pending"}
+            response = self._approval_response(entry.get("method") or "", entry.get("params") or {}, normalized_choice)
+            resolved = {
+                **entry.get("approval", {}),
+                "status": "approved" if normalized_choice == "approve" else "cancelled",
+                "resolvedAt": int(time.time() * 1000),
+                "choice": normalized_choice,
+            }
+            entry["response"] = response
+            entry["choice"] = normalized_choice
+            entry["approval"] = resolved
+            self._approval_lock.notify_all()
+        self._emit_approval(resolved)
+        return {"ok": True, "approval": resolved, "choice": normalized_choice, "response": response}
+
     def poll(self) -> int | None:
         return self.proc.poll()
 
@@ -1274,6 +1391,8 @@ class CodexAppServerClient:
         if self._closed:
             return
         self._closed = True
+        with self._approval_lock:
+            self._approval_lock.notify_all()
         try:
             if self.proc.poll() is None:
                 self.proc.terminate()
@@ -1281,8 +1400,15 @@ class CodexAppServerClient:
                     self.proc.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     self.proc.kill()
+                    self.proc.wait(timeout=3)
         except Exception:
             pass
+        for stream in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
+            try:
+                if stream is not None and not stream.closed:
+                    stream.close()
+            except Exception:
+                pass
 
     def _handle_or_forward(self, msg: dict[str, Any], event_handler: Callable[[dict[str, Any]], None] | None = None) -> None:
         if self.handle_server_request(msg):
@@ -1292,7 +1418,18 @@ class CodexAppServerClient:
 
     def handle_server_request(self, msg: dict[str, Any]) -> bool:
         if "id" in msg and msg.get("method"):
-            self._answer_server_request(msg)
+            method = str(msg.get("method") or "")
+            if self._is_approval_request(method):
+                # A stream reader must be free to publish the approval event while
+                # the native JSON-RPC request waits for the browser response.
+                threading.Thread(
+                    target=self._answer_server_request,
+                    args=(msg,),
+                    daemon=True,
+                    name=f"codex-approval-{msg.get('id')}",
+                ).start()
+            else:
+                self._answer_server_request(msg)
             return True
         return False
 
@@ -1301,14 +1438,176 @@ class CodexAppServerClient:
         method = str(msg.get("method") or "")
         if request_id is None:
             return
-        if method in {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"}:
-            self._send({"id": request_id, "result": {"decision": "cancel"}})
-        elif method == "item/permissions/requestApproval":
-            self._send({"id": request_id, "result": {"permissions": {"fileSystem": None, "network": None}, "scope": "turn"}})
+        if self._is_approval_request(method):
+            approval = self._approval_from_request(msg)
+            result = self._wait_for_approval_response(approval, method, msg.get("params") or {})
+            self._send({"id": request_id, "result": result})
         elif method in {"item/tool/requestUserInput", "mcpServer/elicitation/request"}:
             self._send({"id": request_id, "result": {"answers": {}}})
         else:
             self._send({"id": request_id, "error": {"code": -32601, "message": f"Unsupported Codex server request: {method}"}})
+
+    @staticmethod
+    def _is_approval_request(method: str) -> bool:
+        return method in {
+            "item/commandExecution/requestApproval",
+            "item/fileChange/requestApproval",
+            "item/permissions/requestApproval",
+            "execCommandApproval",
+            "applyPatchApproval",
+        }
+
+    def _wait_for_approval_response(self, approval: dict[str, Any], method: str, params: dict[str, Any]) -> dict[str, Any]:
+        approval_id = str(approval.get("approval_id") or approval.get("id") or "")
+        if not approval_id:
+            return self._approval_response(method, params, "cancel")
+        entry = {"approval": approval, "method": method, "params": params, "response": None, "choice": ""}
+        with self._approval_lock:
+            self._pending_approvals[approval_id] = entry
+        self._emit_approval(approval)
+
+        deadline = time.time() + max(5, int(self.timeout_sec or 900))
+        response = None
+        choice = "cancel"
+        while time.time() < deadline and not self._closed:
+            with self._approval_lock:
+                current = self._pending_approvals.get(approval_id)
+                if current and current.get("response") is not None:
+                    response = current.get("response")
+                    choice = str(current.get("choice") or choice)
+                    self._pending_approvals.pop(approval_id, None)
+                    break
+                self._approval_lock.wait(timeout=max(0.05, min(0.5, deadline - time.time())))
+            if self.poll() is not None:
+                break
+
+        if response is None:
+            response = self._approval_response(method, params, "cancel")
+            with self._approval_lock:
+                self._pending_approvals.pop(approval_id, None)
+            self._emit_approval({
+                **approval,
+                "status": "cancelled",
+                "resolvedAt": int(time.time() * 1000),
+                "choice": "cancel",
+                "timedOut": True,
+            })
+        else:
+            self._emit_approval({
+                **approval,
+                "status": "approved" if choice == "approve" else "cancelled",
+                "resolvedAt": int(time.time() * 1000),
+                "choice": choice,
+            })
+        return response if isinstance(response, dict) else self._approval_response(method, params, "cancel")
+
+    def _emit_approval(self, approval: dict[str, Any]) -> None:
+        if self.approval_callback and isinstance(approval, dict):
+            try:
+                self.approval_callback(dict(approval))
+            except Exception:
+                pass
+
+    def approval_from_request(self, msg: dict[str, Any]) -> dict[str, Any]:
+        return self._approval_from_request(msg)
+
+    def _approval_from_request(self, msg: dict[str, Any]) -> dict[str, Any]:
+        method = str(msg.get("method") or "")
+        params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        request_id = msg.get("id")
+        thread_id = str(params.get("threadId") or params.get("conversationId") or self.thread_id or "")
+        turn_id = str(params.get("turnId") or self.turn_id or "")
+        item_id = str(params.get("itemId") or params.get("callId") or "")
+        callback_id = str(params.get("approvalId") or "")
+        seed = json.dumps({
+            "profile": self.profile,
+            "method": method,
+            "requestId": request_id,
+            "threadId": thread_id,
+            "turnId": turn_id,
+            "itemId": item_id,
+            "callbackId": callback_id,
+        }, sort_keys=True)
+        approval_id = "codex-approval-" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
+        reason = str(params.get("reason") or "").strip()
+        kind = "command"
+        title = "Codex approval required"
+        description = reason or "Codex needs approval before it can continue."
+        if method in {"item/commandExecution/requestApproval", "execCommandApproval"}:
+            title = "Codex command approval required"
+            description = reason or "Codex wants to run a command that needs approval."
+        elif method in {"item/fileChange/requestApproval", "applyPatchApproval"}:
+            kind = "file_change"
+            title = "Codex file-change approval required"
+            description = reason or "Codex wants to apply file changes that need approval."
+        elif method == "item/permissions/requestApproval":
+            kind = "permissions"
+            title = "Codex permissions approval required"
+            description = reason or "Codex is requesting additional permissions for this turn."
+        return {
+            "id": approval_id,
+            "approval_id": approval_id,
+            "provider": "codex-app-server",
+            "kind": kind,
+            "title": title,
+            "description": description,
+            "command": self._approval_command_preview(method, params),
+            "agentId": f"codex-{self.profile}" if self.profile else "codex-default",
+            "profile": self.profile,
+            "threadId": thread_id,
+            "session_id": thread_id,
+            "turnId": turn_id,
+            "runId": turn_id,
+            "itemId": item_id,
+            "callbackId": callback_id,
+            "requestId": str(request_id),
+            "method": method,
+            "status": "pending",
+            "choices": ["approve", "cancel"],
+            "createdAt": int(time.time() * 1000),
+        }
+
+    @staticmethod
+    def _approval_command_preview(method: str, params: dict[str, Any]) -> str:
+        if method in {"item/commandExecution/requestApproval", "execCommandApproval"}:
+            command = params.get("command")
+            if isinstance(command, list):
+                return " ".join(str(item) for item in command)
+            if command:
+                return str(command)
+            actions = params.get("commandActions") or params.get("parsedCmd") or []
+            if isinstance(actions, list) and actions:
+                return "\n".join(json.dumps(item, ensure_ascii=False)[:1000] for item in actions[:5])
+            return "Codex command"
+        if method in {"item/fileChange/requestApproval", "applyPatchApproval"}:
+            if isinstance(params.get("fileChanges"), dict):
+                return "\n".join(str(path) for path in list(params["fileChanges"])[:40]) or "File changes"
+            grant_root = params.get("grantRoot")
+            return f"Grant write access under: {grant_root}" if grant_root else "File changes"
+        if method == "item/permissions/requestApproval":
+            return json.dumps(params.get("permissions") or {}, indent=2, ensure_ascii=False)[:4000]
+        return "Codex approval request"
+
+    @staticmethod
+    def _normalize_approval_choice(choice: str) -> str:
+        if str(choice or "").strip().lower() in {"approve", "approved", "accept", "allow", "allow_once", "approve_once", "yes"}:
+            return "approve"
+        return "cancel"
+
+    @classmethod
+    def _approval_response(cls, method: str, params: dict[str, Any], choice: str) -> dict[str, Any]:
+        approved = cls._normalize_approval_choice(choice) == "approve"
+        if method in {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"}:
+            return {"decision": "accept" if approved else "cancel"}
+        if method == "item/permissions/requestApproval":
+            if approved:
+                requested = params.get("permissions") if isinstance(params.get("permissions"), dict) else {}
+                granted = {key: requested.get(key) for key in ("fileSystem", "network") if requested.get(key) is not None}
+                return {"permissions": granted, "scope": "turn"}
+            return {"permissions": {"fileSystem": None, "network": None}, "scope": "turn"}
+        if method in {"execCommandApproval", "applyPatchApproval"}:
+            return {"decision": "approved" if approved else "abort"}
+        return {"decision": "cancel"}
 
     def _send(self, payload: dict[str, Any]) -> None:
         if not self.proc.stdin:
@@ -1367,6 +1666,7 @@ class CodexAppRunState:
         self._errors: list[str] = []
         self._tools: dict[str, dict[str, Any]] = {}
         self._tool_order: list[str] = []
+        self._approval: dict[str, Any] | None = None
 
     def handle_message(self, msg: dict[str, Any]) -> None:
         method = str(msg.get("method") or "")
@@ -1435,6 +1735,7 @@ class CodexAppRunState:
             "thinking": self.thinking(),
             "status": self.status,
             "error": self.error_text(),
+            "approval": self.approval(),
         }
         if method == "turn/started":
             return {"event": "run.started", **base}
@@ -1509,6 +1810,12 @@ class CodexAppRunState:
 
     def tools(self) -> list[dict[str, Any]]:
         return [self._tools[k] for k in self._tool_order if k in self._tools][-60:]
+
+    def approval(self) -> dict[str, Any] | None:
+        return dict(self._approval) if isinstance(self._approval, dict) else None
+
+    def set_approval(self, approval: dict[str, Any] | None) -> None:
+        self._approval = dict(approval) if isinstance(approval, dict) else None
 
     def error_text(self) -> str:
         return "\n".join(dict.fromkeys([e for e in self._errors if e]))[:2000]
@@ -1683,11 +1990,14 @@ class CodexAppStreamRun:
                 _ACTIVE_RUNS.pop(self.profile, None)
         self.client.close()
 
-    @staticmethod
-    def _event_from_server_request(msg: dict[str, Any]) -> dict[str, Any] | None:
+    def _event_from_server_request(self, msg: dict[str, Any]) -> dict[str, Any] | None:
         method = str(msg.get("method") or "")
         params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
         item = params.get("item") if isinstance(params.get("item"), dict) else {}
+        if self.client._is_approval_request(method):
+            approval = self.client.approval_from_request(msg)
+            self.state.set_approval(approval)
+            return {"event": "approval.request", **self.state.snapshot(), "approval": approval}
         if method in {"item/tool/requestUserInput", "mcpServer/elicitation/request"}:
             return {
                 "event": "approval.request",

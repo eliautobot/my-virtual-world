@@ -22,8 +22,16 @@ services:
       - ${VW_HERMES_HOST_UV:-~/.local/share/uv}:${VW_HERMES_CONTAINER_UV:-/home/vw/.local/share/uv}:ro
       # Optional native Codex integration. Override VW_CODEX_* if your Codex install lives elsewhere.
       - ~/.codex:/home/vw/.codex
-      # Optional native Claude Code setup fields. Claude Code provider runtime is not enabled yet.
+      # Optional native Claude Code integration.
       - ${VW_CLAUDE_CODE_HOST_HOME:-~/.claude}:${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}
+      - ${VW_CLAUDE_CODE_HOST_BIN:-~/.local/bin/claude}:${VW_CLAUDE_CODE_BIN:-/home/vw/.local/bin/claude}:ro
+      # Optional native OpenCode integration. Its data directory owns native sessions/auth.
+      - ${VW_OPENCODE_HOST_HOME:-~/.config/opencode}:${VW_OPENCODE_HOME:-/home/vw/.config/opencode}
+      - ${VW_OPENCODE_HOST_DATA:-~/.local/share/opencode}:${VW_OPENCODE_DATA:-/home/vw/.local/share/opencode}
+      - ${VW_OPENCODE_HOST_BIN:-~/.local/bin/opencode}:${VW_OPENCODE_BIN:-/home/vw/.local/bin/opencode}:ro
+      # Optional native Antigravity integration.
+      - ${VW_ANTIGRAVITY_HOST_HOME:-~/.gemini}:${VW_ANTIGRAVITY_HOME:-/home/vw/.gemini}
+      - ${VW_ANTIGRAVITY_HOST_BIN:-~/.local/bin/agy}:${VW_ANTIGRAVITY_BIN:-/home/vw/.local/bin/agy}:ro
     environment:
       - VW_PORT=${VW_PORT:-8590}
       - VW_HOST_PORT=${VW_HOST_PORT:-8590}
@@ -84,9 +92,9 @@ services:
       - VW_CODEX_INCLUDE_NATIVE_AGENTS=${VW_CODEX_INCLUDE_NATIVE_AGENTS:-true}
       - VW_CODEX_REGISTER_NATIVE_AGENTS=${VW_CODEX_REGISTER_NATIVE_AGENTS:-true}
       - CLAUDE_CONFIG_DIR=${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}
-      - VW_CLAUDE_CODE_ENABLED=${VW_CLAUDE_CODE_ENABLED:-false}
+      - VW_CLAUDE_CODE_ENABLED=${VW_CLAUDE_CODE_ENABLED:-true}
       - VW_CLAUDE_CODE_HOME=${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}
-      - VW_CLAUDE_CODE_BIN=${VW_CLAUDE_CODE_BIN:-claude}
+      - VW_CLAUDE_CODE_BIN=${VW_CLAUDE_CODE_BIN:-/home/vw/.local/bin/claude}
       - VW_CLAUDE_CODE_WORKSPACE_ROOT=${VW_CLAUDE_CODE_WORKSPACE_ROOT:-/data/claude-code-agents}
       - VW_CLAUDE_CODE_MAIN_WORKSPACE=${VW_CLAUDE_CODE_MAIN_WORKSPACE:-/data/claude-code-main}
       - VW_CLAUDE_CODE_TIMEOUT_SEC=${VW_CLAUDE_CODE_TIMEOUT_SEC:-900}
@@ -95,6 +103,26 @@ services:
       - VW_CLAUDE_CODE_INCLUDE_MAIN=${VW_CLAUDE_CODE_INCLUDE_MAIN:-true}
       - VW_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS=${VW_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS:-true}
       - VW_CLAUDE_CODE_REGISTER_NATIVE_AGENTS=${VW_CLAUDE_CODE_REGISTER_NATIVE_AGENTS:-true}
+      - VW_PROVIDER_USER_HOME=${VW_PROVIDER_USER_HOME:-/home/vw}
+      - XDG_DATA_HOME=${VW_PROVIDER_XDG_DATA_HOME:-/home/vw/.local/share}
+      - VW_OPENCODE_ENABLED=${VW_OPENCODE_ENABLED:-true}
+      - VW_OPENCODE_HOME=${VW_OPENCODE_HOME:-/home/vw/.config/opencode}
+      - VW_OPENCODE_BIN=${VW_OPENCODE_BIN:-/home/vw/.local/bin/opencode}
+      - VW_OPENCODE_WORKSPACE_ROOT=${VW_OPENCODE_WORKSPACE_ROOT:-/data/opencode-agents}
+      - VW_OPENCODE_MAIN_WORKSPACE=${VW_OPENCODE_MAIN_WORKSPACE:-/data/opencode-main}
+      - VW_OPENCODE_TIMEOUT_SEC=${VW_OPENCODE_TIMEOUT_SEC:-900}
+      - VW_OPENCODE_MODEL=${VW_OPENCODE_MODEL:-}
+      - VW_OPENCODE_INCLUDE_MAIN=${VW_OPENCODE_INCLUDE_MAIN:-true}
+      - VW_OPENCODE_INCLUDE_AGENTS=${VW_OPENCODE_INCLUDE_AGENTS:-true}
+      - VW_OPENCODE_REGISTER_AGENTS=${VW_OPENCODE_REGISTER_AGENTS:-true}
+      - VW_ANTIGRAVITY_ENABLED=${VW_ANTIGRAVITY_ENABLED:-true}
+      - VW_ANTIGRAVITY_HOME=${VW_ANTIGRAVITY_HOME:-/home/vw/.gemini}
+      - VW_ANTIGRAVITY_BIN=${VW_ANTIGRAVITY_BIN:-/home/vw/.local/bin/agy}
+      - VW_ANTIGRAVITY_WORKSPACE_ROOT=${VW_ANTIGRAVITY_WORKSPACE_ROOT:-/data/antigravity-agents}
+      - VW_ANTIGRAVITY_TIMEOUT_SEC=${VW_ANTIGRAVITY_TIMEOUT_SEC:-600}
+      - VW_ANTIGRAVITY_PRINT_TIMEOUT=${VW_ANTIGRAVITY_PRINT_TIMEOUT:-5m}
+      - VW_ANTIGRAVITY_MODEL=${VW_ANTIGRAVITY_MODEL:-}
+      - VW_ANTIGRAVITY_SANDBOX=${VW_ANTIGRAVITY_SANDBOX:-}
       - VW_LICENSE_STORE_ID=${VW_LICENSE_STORE_ID:-321733}
       - VW_LICENSE_PRODUCT_IDS=${VW_LICENSE_PRODUCT_IDS:-1140366}
       # Optional external provider relay for future non-Hermes providers.

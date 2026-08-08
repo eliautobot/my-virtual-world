@@ -44,12 +44,12 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_CODEX_MODEL` | empty | Optional default model override passed into Codex runs. |
 | `VW_CODEX_SANDBOX` | `workspace-write` | Codex sandbox mode used for native runs. |
 | `VW_CODEX_APPROVAL_POLICY` | `never` | Codex approval policy used for native runs. |
-| `VW_CLAUDE_CODE_ENABLED` | `false` | Saves Claude Code setup fields. Live Claude Code agents are not implemented in My Virtual World yet. |
+| `VW_CLAUDE_CODE_ENABLED` | `false` | Enables Claude Code discovery and native runs when the local CLI is installed and authenticated. |
 | `VW_CLAUDE_CODE_HOME` | `/home/vw/.claude` | Claude Code config directory inside Docker. |
 | `VW_CLAUDE_CODE_BIN` | `claude` | Claude Code CLI path or command name. |
-| `VW_CLAUDE_CODE_WORKSPACE_ROOT` | `/data/claude-code-agents` | Future workspace root for standard Claude Code-backed agents. |
-| `VW_CLAUDE_CODE_MAIN_WORKSPACE` | `/data/claude-code-main` | Future workspace for the main Claude Code agent. |
-| `VW_CLAUDE_CODE_PERMISSION_MODE` | `acceptEdits` | Claude Code permission mode setting saved by the Models & Providers window. |
+| `VW_CLAUDE_CODE_WORKSPACE_ROOT` | `/data/claude-code-agents` | Managed workspace root for Claude Code-backed agents. |
+| `VW_CLAUDE_CODE_MAIN_WORKSPACE` | `/data/claude-code-main` | Optional main Claude Code workspace. |
+| `VW_CLAUDE_CODE_PERMISSION_MODE` | `acceptEdits` | Claude Code permission mode exposed by Universal Providers. |
 | `VW_REALTIME_ENABLED` | `true` in Docker Compose, otherwise `false` unless a realtime URL is configured | Enable the Colyseus sidecar config for Live Agent Mode runtime state. |
 | `VW_REALTIME_BROWSER_URL` | empty | Browser-reachable websocket URL for this install's realtime sidecar, such as `ws://127.0.0.1:8591`, `ws://my-world-pc:8591`, or `wss://world.example.com/realtime`. |
 | `VW_REALTIME_URL` | empty | Backwards-compatible alias for `VW_REALTIME_BROWSER_URL`. |
@@ -101,6 +101,8 @@ Do not commit runtime data to source control. The `.gitignore` excludes local da
 World metadata is written atomically as compact JSON. Saving identical content is a no-op, and the last-known-good backup is refreshed on a configurable interval instead of being recopied for every high-frequency runtime update. Live Agent histories use both record-count retention and byte budgets so a small number of unusually large planner frames or diagnostics cannot grow storage without bound.
 
 ## Agent Connections
+
+The **Universal Providers** page reads its connection/model/runtime/authentication fields from Contract 1.1 manifests. Configure values in the UI or environment for each installation; do not add personal account names, provider connection ids, models, or credentials to source files.
 
 Use these defaults when running with Docker:
 

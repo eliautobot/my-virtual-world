@@ -7,11 +7,13 @@ import asyncio
 import base64
 import copy
 import contextlib
+import difflib
 import gzip
 import hashlib
 import hmac
 import http.server
 import importlib.util
+import inspect
 import json
 import math
 import os
@@ -31,6 +33,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 try:
     import fcntl
@@ -65,6 +69,14 @@ try:
 except Exception as e:
     CodexProvider = None
     print(f"⚠️  Virtual World Codex provider unavailable: {e}")
+
+try:
+    from providers.builtin import build_provider_registry
+    from providers.registry import CONTRACT_VERSION as PROVIDER_CONTRACT_VERSION
+except Exception as e:
+    build_provider_registry = None
+    PROVIDER_CONTRACT_VERSION = "1.1"
+    print(f"⚠️  Virtual World Provider SDK unavailable: {e}")
 
 try:
     from websockets.asyncio.client import connect as ws_connect
@@ -214,7 +226,7 @@ def _default_vw_config():
             "registerNativeAgents": True,
         },
         "claudeCode": {
-            "enabled": False,
+            "enabled": True,
             "homePath": "",
             "binary": "",
             "workspaceRoot": "",
@@ -225,6 +237,28 @@ def _default_vw_config():
             "includeMain": True,
             "includeNativeAgents": True,
             "registerNativeAgents": True,
+        },
+        "openCode": {
+            "enabled": True,
+            "homePath": "",
+            "binary": "",
+            "workspaceRoot": "",
+            "mainWorkspace": "",
+            "timeoutSec": 900,
+            "model": "",
+            "includeMain": True,
+            "includeAgents": True,
+            "registerAgents": True,
+        },
+        "antigravity": {
+            "enabled": True,
+            "homePath": "",
+            "binary": "",
+            "workspaceRoot": "",
+            "timeoutSec": 600,
+            "printTimeout": "5m",
+            "model": "",
+            "sandbox": "",
         },
         "features": {"agentBrowser": False, "sms": False, "weather": True, "agentLiveMode": False, "debugTools": True},
         "realtime": {"enabled": False, "url": "", "room": "agent_runtime"},
@@ -241,6 +275,8 @@ def _load_vw_config():
     cfg.setdefault("hermes", {})
     cfg.setdefault("codex", {})
     cfg.setdefault("claudeCode", {})
+    cfg.setdefault("openCode", {})
+    cfg.setdefault("antigravity", {})
     cfg.setdefault("browser", {})
     cfg.setdefault("sms", {})
     cfg.setdefault("features", {})
@@ -279,7 +315,7 @@ def _load_vw_config():
     cfg["codex"]["includeMain"] = _env_bool("VW_CODEX_INCLUDE_MAIN", cfg["codex"].get("includeMain", True))
     cfg["codex"]["includeNativeAgents"] = _env_bool("VW_CODEX_INCLUDE_NATIVE_AGENTS", cfg["codex"].get("includeNativeAgents", True))
     cfg["codex"]["registerNativeAgents"] = _env_bool("VW_CODEX_REGISTER_NATIVE_AGENTS", cfg["codex"].get("registerNativeAgents", True))
-    cfg["claudeCode"]["enabled"] = _env_bool("VW_CLAUDE_CODE_ENABLED", cfg["claudeCode"].get("enabled", False))
+    cfg["claudeCode"]["enabled"] = _env_bool("VW_CLAUDE_CODE_ENABLED", cfg["claudeCode"].get("enabled", True))
     cfg["claudeCode"]["homePath"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_HOME", _env_or("CLAUDE_CONFIG_DIR", cfg["claudeCode"].get("homePath") or "~/.claude")))
     cfg["claudeCode"]["binary"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_BIN", cfg["claudeCode"].get("binary") or "claude"))
     cfg["claudeCode"]["workspaceRoot"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_WORKSPACE_ROOT", cfg["claudeCode"].get("workspaceRoot") or os.path.join(DATA_DIR, "claude-code-agents")))
@@ -290,6 +326,24 @@ def _load_vw_config():
     cfg["claudeCode"]["includeMain"] = _env_bool("VW_CLAUDE_CODE_INCLUDE_MAIN", cfg["claudeCode"].get("includeMain", True))
     cfg["claudeCode"]["includeNativeAgents"] = _env_bool("VW_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", cfg["claudeCode"].get("includeNativeAgents", True))
     cfg["claudeCode"]["registerNativeAgents"] = _env_bool("VW_CLAUDE_CODE_REGISTER_NATIVE_AGENTS", cfg["claudeCode"].get("registerNativeAgents", True))
+    cfg["openCode"]["enabled"] = _env_bool("VW_OPENCODE_ENABLED", cfg["openCode"].get("enabled", True))
+    cfg["openCode"]["homePath"] = os.path.expanduser(_env_or("VW_OPENCODE_HOME", cfg["openCode"].get("homePath") or "~/.config/opencode"))
+    cfg["openCode"]["binary"] = os.path.expanduser(_env_or("VW_OPENCODE_BIN", cfg["openCode"].get("binary") or "opencode"))
+    cfg["openCode"]["workspaceRoot"] = os.path.expanduser(_env_or("VW_OPENCODE_WORKSPACE_ROOT", cfg["openCode"].get("workspaceRoot") or os.path.join(DATA_DIR, "opencode-agents")))
+    cfg["openCode"]["mainWorkspace"] = os.path.expanduser(_env_or("VW_OPENCODE_MAIN_WORKSPACE", cfg["openCode"].get("mainWorkspace") or os.path.join(DATA_DIR, "opencode-main")))
+    cfg["openCode"]["timeoutSec"] = int(_env_or("VW_OPENCODE_TIMEOUT_SEC", cfg["openCode"].get("timeoutSec", 900)))
+    cfg["openCode"]["model"] = _env_or("VW_OPENCODE_MODEL", cfg["openCode"].get("model") or "")
+    cfg["openCode"]["includeMain"] = _env_bool("VW_OPENCODE_INCLUDE_MAIN", cfg["openCode"].get("includeMain", True))
+    cfg["openCode"]["includeAgents"] = _env_bool("VW_OPENCODE_INCLUDE_AGENTS", cfg["openCode"].get("includeAgents", True))
+    cfg["openCode"]["registerAgents"] = _env_bool("VW_OPENCODE_REGISTER_AGENTS", cfg["openCode"].get("registerAgents", True))
+    cfg["antigravity"]["enabled"] = _env_bool("VW_ANTIGRAVITY_ENABLED", cfg["antigravity"].get("enabled", True))
+    cfg["antigravity"]["homePath"] = os.path.expanduser(_env_or("VW_ANTIGRAVITY_HOME", cfg["antigravity"].get("homePath") or "~/.gemini"))
+    cfg["antigravity"]["binary"] = os.path.expanduser(_env_or("VW_ANTIGRAVITY_BIN", cfg["antigravity"].get("binary") or "agy"))
+    cfg["antigravity"]["workspaceRoot"] = os.path.expanduser(_env_or("VW_ANTIGRAVITY_WORKSPACE_ROOT", cfg["antigravity"].get("workspaceRoot") or os.path.join(DATA_DIR, "antigravity-agents")))
+    cfg["antigravity"]["timeoutSec"] = int(_env_or("VW_ANTIGRAVITY_TIMEOUT_SEC", cfg["antigravity"].get("timeoutSec", 600)))
+    cfg["antigravity"]["printTimeout"] = _env_or("VW_ANTIGRAVITY_PRINT_TIMEOUT", cfg["antigravity"].get("printTimeout") or "5m")
+    cfg["antigravity"]["model"] = _env_or("VW_ANTIGRAVITY_MODEL", cfg["antigravity"].get("model") or "")
+    cfg["antigravity"]["sandbox"] = _env_or("VW_ANTIGRAVITY_SANDBOX", cfg["antigravity"].get("sandbox") or "")
     cfg["browser"]["cdpUrl"] = _env_or("VW_BROWSER_CDP_URL", cfg["browser"].get("cdpUrl") or "")
     cfg["browser"]["viewerUrl"] = _env_or("VW_BROWSER_VIEWER_URL", cfg["browser"].get("viewerUrl") or "")
     realtime_url = _env_or(
@@ -487,6 +541,8 @@ def _safe_vw_config():
     hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
     codex_cfg = VW_CONFIG.get("codex", {}) or {}
     claude_code_cfg = VW_CONFIG.get("claudeCode", {}) or {}
+    opencode_cfg = VW_CONFIG.get("openCode", {}) or {}
+    antigravity_cfg = VW_CONFIG.get("antigravity", {}) or {}
     openclaw_cfg = VW_CONFIG.get("openclaw", {}) or {}
     realtime_cfg = VW_CONFIG.get("realtime", {}) or {}
     return {
@@ -540,6 +596,28 @@ def _safe_vw_config():
             "includeMain": claude_code_cfg.get("includeMain", True),
             "includeNativeAgents": claude_code_cfg.get("includeNativeAgents", True),
             "registerNativeAgents": claude_code_cfg.get("registerNativeAgents", True),
+        },
+        "openCode": {
+            "enabled": opencode_cfg.get("enabled", False),
+            "homePath": _display_user_home_path(opencode_cfg.get("homePath")),
+            "binary": _display_user_home_path(opencode_cfg.get("binary")),
+            "workspaceRoot": _display_user_home_path(opencode_cfg.get("workspaceRoot")),
+            "mainWorkspace": _display_user_home_path(opencode_cfg.get("mainWorkspace")),
+            "timeoutSec": opencode_cfg.get("timeoutSec", 900),
+            "model": opencode_cfg.get("model"),
+            "includeMain": opencode_cfg.get("includeMain", True),
+            "includeAgents": opencode_cfg.get("includeAgents", True),
+            "registerAgents": opencode_cfg.get("registerAgents", True),
+        },
+        "antigravity": {
+            "enabled": antigravity_cfg.get("enabled", False),
+            "homePath": _display_user_home_path(antigravity_cfg.get("homePath")),
+            "binary": _display_user_home_path(antigravity_cfg.get("binary")),
+            "workspaceRoot": _display_user_home_path(antigravity_cfg.get("workspaceRoot")),
+            "timeoutSec": antigravity_cfg.get("timeoutSec", 600),
+            "printTimeout": antigravity_cfg.get("printTimeout", "5m"),
+            "model": antigravity_cfg.get("model"),
+            "sandbox": antigravity_cfg.get("sandbox"),
         },
         "browser": {
             "cdpUrl": (VW_CONFIG.get("browser") or {}).get("cdpUrl"),
@@ -652,6 +730,12 @@ def _save_vw_config_update(body):
                 meta.update(meta_patch)
                 save_world_meta(meta)
     result = {"ok": True, "config": _safe_vw_config()}
+    reset_registry = globals().get("_reset_provider_registry")
+    if callable(reset_registry):
+        reset_registry()
+    refresh_roster = globals().get("_refresh_provider_discovery")
+    if callable(refresh_roster):
+        refresh_roster(force=True)
     if isinstance(live_mode_runtime, dict):
         result["liveAgentModeRuntime"] = {key: value for key, value in live_mode_runtime.items() if key != "state"}
     return result, 200
@@ -23354,53 +23438,266 @@ def _refresh_agent_roster_after_create():
 
 
 def _handle_agent_platforms():
-    hermes_status = _hermes_provider().test() if _hermes_provider() else {"ok": False, "error": "Hermes provider module unavailable", "agents": []}
-    codex_provider = _codex_provider()
-    codex_status = codex_provider.test() if codex_provider else {"ok": False, "error": "Codex provider module unavailable", "agents": []}
-    codex_cfg = VW_CONFIG.get("codex", {}) or {}
-    codex_home = codex_status.get("homePath") or codex_cfg.get("homePath") or ""
+    platforms = []
+    for item in _get_provider_registry().manifests(include_health=True):
+        capabilities = item.get("capabilities") or {}
+        health = _public_provider_health(item.pop("health", {}) or {})
+        installed = bool(health.get("installed") or health.get("binary") or health.get("homePath"))
+        auth_ready = health.get("authOk") is True if "authOk" in health else True
+        connected = bool(health.get("ok")) and auth_ready
+        available = bool(item.get("enabled", True)) and (connected or installed)
+        error = str(health.get("error") or "")
+        if not error and not available:
+            error = "Provider is disabled or unavailable"
+        platforms.append({
+            **item,
+            "label": item.get("name") or item.get("id"),
+            "available": available,
+            "connected": connected,
+            "create": bool(capabilities.get("agentCreate")) and available,
+            "delete": bool(capabilities.get("agentDelete")) and available,
+            "error": error,
+            "health": health,
+        })
     return {
         "ok": True,
-        "platforms": [
-            {
-                "id": "openclaw",
-                "label": "OpenClaw",
-                "description": "Native OpenClaw workspace agent",
-                "providerType": "runtime",
-                "available": True,
-                "create": True,
-            },
-            {
-                "id": "hermes",
-                "label": "Hermes",
-                "description": "Hermes profile-backed agent",
-                "providerType": "runtime",
-                "available": bool(hermes_status.get("ok")),
-                "create": bool(hermes_status.get("ok")),
-                "error": "" if hermes_status.get("ok") else hermes_status.get("error", "Hermes is not available"),
-            },
-            {
-                "id": "codex",
-                "label": "Codex",
-                "description": "Native Codex app-server workspace agent",
-                "providerType": "harness",
-                "available": bool(codex_status.get("ok")),
-                "create": bool(codex_status.get("ok")),
-                "error": "" if codex_status.get("ok") else codex_status.get("error", "Codex is not available"),
-                "codex": {
-                    "homePath": codex_home,
-                    "nativeAgentsDir": os.path.join(codex_home, "agents") if codex_home else "",
-                    "workspaceRoot": codex_status.get("workspaceRoot") or codex_cfg.get("workspaceRoot") or "",
-                    "mainWorkspace": codex_status.get("mainWorkspace") or codex_cfg.get("mainWorkspace") or "",
-                    "defaultCreationMode": "standard",
-                    "registerNativeAgents": bool(codex_cfg.get("registerNativeAgents", True)),
-                },
-            },
-        ],
+        "contractVersion": PROVIDER_CONTRACT_VERSION,
+        "platforms": platforms,
+        "conformance": _get_provider_registry().conformance(),
     }
 
 
-def _handle_agent_create(body):
+_PROVIDER_SECRET_KEYS = {
+    "apikey", "api_key", "token", "gatewaytoken", "secret", "password",
+    "credential", "credentials", "auth", "authorization",
+}
+
+
+def _redact_provider_secrets(value):
+    if isinstance(value, list):
+        return [_redact_provider_secrets(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    secret_names = {re.sub(r"[^a-z0-9]+", "", item.lower()) for item in _PROVIDER_SECRET_KEYS}
+    result = {}
+    for key, item in value.items():
+        normalized = re.sub(r"[^a-z0-9]+", "", str(key).lower())
+        if normalized in secret_names or normalized.endswith("token") or normalized.endswith("apikey") or normalized.endswith("password"):
+            result[f"{key}Configured"] = bool(item)
+        else:
+            result[key] = _redact_provider_secrets(item)
+    return result
+
+
+def _public_provider_health(value):
+    """Return only universal readiness fields, never provider/account internals."""
+    health = value if isinstance(value, dict) else {}
+    allowed = {
+        "ok", "installed", "enabled", "ready", "authOk", "version",
+        "connectionState", "error", "message", "authGuidance", "code",
+    }
+    result = {key: _redact_provider_secrets(health.get(key)) for key in allowed if key in health}
+    result.setdefault("ok", bool(health.get("ok")))
+    if "installed" not in result:
+        result["installed"] = bool(health.get("binary") or health.get("homePath") or health.get("ok"))
+    if health.get("authOk") is False and not result.get("authGuidance"):
+        result["authGuidance"] = "Sign in with the provider's native authentication flow, then test the connection again."
+    return result
+
+
+def _provider_settings_manifest(provider_id):
+    manifest = _get_provider_registry().manifest(provider_id)
+    if manifest is None:
+        return None
+    schema = manifest.settings_schema if isinstance(manifest.settings_schema, dict) else {}
+    config_key = str(schema.get("configKey") or manifest.metadata.get("configKey") or manifest.id)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", config_key):
+        return None
+    return manifest, schema, config_key
+
+
+def _provider_settings_field_map(schema):
+    fields = {}
+    for section in schema.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        for field in section.get("fields") or []:
+            if isinstance(field, dict) and field.get("key") and field.get("type") != "link":
+                fields[str(field["key"])] = field
+    return fields
+
+
+def _sanitize_provider_setting_value(field, value):
+    field_type = str(field.get("type") or "text")
+    if field_type == "secret":
+        return {"value": "", "configured": bool(value)}
+    if field_type == "connection-list":
+        rows = []
+        for row in value if isinstance(value, list) else []:
+            if not isinstance(row, dict):
+                continue
+            safe = {}
+            for child in field.get("itemFields") or []:
+                if not isinstance(child, dict) or not child.get("key"):
+                    continue
+                key = str(child["key"])
+                if child.get("type") == "secret":
+                    safe[key] = ""
+                    safe[f"{key}Configured"] = bool(row.get(key))
+                else:
+                    safe[key] = _redact_provider_secrets(row.get(key))
+            rows.append(safe)
+        return rows
+    return _redact_provider_secrets(value)
+
+
+def _provider_settings_payload(provider_id=""):
+    rows = []
+    for item in _get_provider_registry().manifests(include_health=True):
+        if provider_id and item.get("id") != provider_id:
+            continue
+        schema = item.get("settingsSchema") if isinstance(item.get("settingsSchema"), dict) else {}
+        config_key = str(schema.get("configKey") or (item.get("metadata") or {}).get("configKey") or item.get("id") or "")
+        config = VW_CONFIG.get(config_key) if isinstance(VW_CONFIG.get(config_key), dict) else {}
+        values = {}
+        for key, field in _provider_settings_field_map(schema).items():
+            values[key] = _sanitize_provider_setting_value(field, config.get(key, field.get("default")))
+        rows.append({
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "icon": item.get("icon"),
+            "description": item.get("description"),
+            "capabilities": item.get("capabilities") or {},
+            "settingsSchema": schema,
+            "resourceSchema": item.get("resourceSchema") or [],
+            "skillSchema": item.get("skillSchema") or [],
+            "values": values,
+            "health": _public_provider_health(item.get("health") or {}),
+        })
+    return {"ok": True, "contractVersion": PROVIDER_CONTRACT_VERSION, "providers": rows}
+
+
+def _validate_provider_setting(field, value, existing=None, path="setting"):
+    field_type = str(field.get("type") or "text")
+    required = bool(field.get("required"))
+    if field_type == "boolean":
+        if not isinstance(value, bool):
+            raise ValueError(f"{path} must be true or false")
+        return value
+    if field_type == "number":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{path} must be a number")
+        if field.get("min") is not None and value < field["min"]:
+            raise ValueError(f"{path} must be at least {field['min']}")
+        if field.get("max") is not None and value > field["max"]:
+            raise ValueError(f"{path} must be at most {field['max']}")
+        return int(value) if float(value).is_integer() else float(value)
+    if field_type == "connection-list":
+        if not isinstance(value, list):
+            raise ValueError(f"{path} must be a list")
+        if len(value) < int(field.get("minItems") or 0) or len(value) > int(field.get("maxItems") or 100):
+            raise ValueError(f"{path} has an invalid number of connections")
+        existing_rows = existing if isinstance(existing, list) else []
+        existing_by_id = {str(row.get("id") or ""): row for row in existing_rows if isinstance(row, dict)}
+        clean_rows = []
+        seen = set()
+        for index, row in enumerate(value):
+            if not isinstance(row, dict):
+                raise ValueError(f"{path}[{index}] must be an object")
+            row_id = str(row.get("id") or "")
+            if row_id and row_id in seen:
+                raise ValueError(f"{path} contains duplicate connection id '{row_id}'")
+            if row_id:
+                seen.add(row_id)
+            old_row = existing_by_id.get(row_id) or {}
+            clean = {}
+            for child in field.get("itemFields") or []:
+                if not isinstance(child, dict) or not child.get("key"):
+                    continue
+                key = str(child["key"])
+                clean[key] = _validate_provider_setting(child, row.get(key, child.get("default")), old_row.get(key), f"{path}[{index}].{key}")
+            clean_rows.append(clean)
+        return clean_rows
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        raise ValueError(f"{path} must be text")
+    value = value.strip()
+    if field_type == "secret" and not value:
+        return str(existing or "")
+    if required and not value:
+        raise ValueError(f"{path} is required")
+    if len(value) > (16384 if field_type == "secret" else 4096):
+        raise ValueError(f"{path} is too long")
+    if field_type == "slug" and value and not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+        raise ValueError(f"{path} may contain only letters, numbers, dot, underscore, and dash")
+    if field_type == "url" and value:
+        parsed = urllib.parse.urlparse(value)
+        if parsed.scheme not in {"http", "https", "ws", "wss"} or not parsed.netloc:
+            raise ValueError(f"{path} must be an http(s) or ws(s) URL")
+    if field_type == "select":
+        allowed = {str(option.get("value")) for option in field.get("options") or [] if isinstance(option, dict)}
+        if value and value not in allowed:
+            raise ValueError(f"{path} has an unsupported value")
+    return value
+
+
+def _validated_provider_settings(provider_id, incoming):
+    resolved = _provider_settings_manifest(provider_id)
+    if not resolved:
+        raise KeyError(provider_id)
+    manifest, schema, config_key = resolved
+    fields = _provider_settings_field_map(schema)
+    unknown = sorted(set(incoming) - set(fields))
+    if unknown:
+        raise ValueError(f"Unsupported settings: {', '.join(unknown)}")
+    existing = VW_CONFIG.get(config_key) if isinstance(VW_CONFIG.get(config_key), dict) else {}
+    clean = dict(existing)
+    for key, value in incoming.items():
+        clean[key] = _validate_provider_setting(fields[key], value, existing.get(key), key)
+    return manifest, config_key, clean
+
+
+def _save_provider_settings(body):
+    provider_id = str((body or {}).get("providerId") or "").strip().lower()
+    incoming = body.get("values") if isinstance((body or {}).get("values"), dict) else {}
+    try:
+        _manifest, config_key, clean = _validated_provider_settings(provider_id, incoming)
+        result, status = _save_vw_config_update({config_key: clean})
+        if status >= 400:
+            return {**result, "_status": status}
+        _reset_provider_registry()
+        _refresh_provider_discovery(force=True)
+        _refresh_agent_roster_after_create()
+        payload = _provider_settings_payload(provider_id)
+        return {"ok": True, "provider": (payload.get("providers") or [{}])[0]}
+    except KeyError:
+        return {"ok": False, "error": f"Unknown provider settings schema: {provider_id}", "_status": 404}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "_status": 400}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "_status": 500}
+
+
+def _test_provider_settings(body):
+    provider_id = str((body or {}).get("providerId") or "").strip().lower()
+    incoming = body.get("values") if isinstance((body or {}).get("values"), dict) else {}
+    try:
+        _manifest, config_key, clean = _validated_provider_settings(provider_id, incoming)
+        test_config = copy.deepcopy(VW_CONFIG)
+        test_config[config_key] = clean
+        context = _provider_registry_context()
+        context["config"] = test_config
+        registry = build_provider_registry(context)
+        result = registry.invoke(provider_id, "test")
+        return _redact_provider_secrets(result if isinstance(result, dict) else {"ok": False, "error": "Invalid provider health response"})
+    except KeyError:
+        return {"ok": False, "error": f"Unknown provider settings schema: {provider_id}", "_status": 404}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "_status": 400}
+
+
+def _legacy_agent_create(body):
     if not isinstance(body, dict):
         return {"error": "payload must be an object", "_status": 400}
     name = (body.get("name") or "").strip()
@@ -23524,6 +23821,264 @@ def _handle_codex_agent_create(body, name):
         "nativeAgentPath": result.get("nativeAgentPath"),
         "message": result.get("message", f"Codex agent '{name}' created successfully"),
     }
+
+
+def _handle_agent_create(body):
+    """Create a real native agent through the selected provider manifest."""
+    if not isinstance(body, dict):
+        return {"error": "payload must be an object", "_status": 400}
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return {"error": "Agent name is required", "_status": 400}
+    requested = str(
+        body.get("agentPlatform")
+        or body.get("platform")
+        or body.get("providerKind")
+        or body.get("providerId")
+        or "openclaw"
+    ).strip().lower()
+    aliases = {
+        "openclaw-agent": "openclaw",
+        "hermes-agent": "hermes",
+        "codex-cli": "codex",
+        "codex-agent": "codex",
+        "claude": "claude-code",
+        "claude-cli": "claude-code",
+        "claude-code-agent": "claude-code",
+        "opencode-cli": "opencode",
+        "opencode-agent": "opencode",
+        "agy": "antigravity",
+        "antigravity-cli": "antigravity",
+    }
+    provider_id = aliases.get(requested, requested)
+    manifest = _get_provider_registry().manifest(provider_id)
+    if not manifest:
+        return {"error": f"Unknown agent provider '{provider_id}'", "_status": 400}
+    if not manifest.enabled or not manifest.capabilities.get("agentCreate"):
+        return {"error": f"{manifest.name} does not support creating agents", "_status": 405}
+    provider = _get_provider_registry().get(provider_id)
+    create_method = getattr(provider, "create_agent", None)
+    fields = manifest.creation_schema.get("fields") if isinstance(manifest.creation_schema, dict) else []
+    raw_values = {
+        "name": name,
+        "role": body.get("role") or f"{manifest.name} Agent",
+        "emoji": body.get("emoji") or manifest.icon,
+        "instructions": body.get("instructions") or body.get("prompt") or body.get("systemPrompt") or body.get("role") or "",
+    }
+    for field in fields or []:
+        if not isinstance(field, dict) or not field.get("id"):
+            continue
+        field_id = str(field["id"])
+        if field_id not in raw_values:
+            raw_values[field_id] = body.get(field_id, field.get("default"))
+        condition = field.get("showWhen") if isinstance(field.get("showWhen"), dict) else {}
+        condition_key = str(condition.get("field") or (next(iter(condition), "") if condition else ""))
+        condition_value = condition.get("value") if "value" in condition else condition.get(condition_key)
+        active = not condition_key or str(raw_values.get(condition_key, "")) == str(condition_value if condition_value is not None else "")
+        value = raw_values.get(field_id)
+        if field.get("required") and active and (value is None or str(value).strip() == ""):
+            return {"error": f"{field.get('label') or field_id} is required", "providerKind": provider_id, "_status": 400}
+        if not active:
+            raw_values.pop(field_id, None)
+            continue
+        field_type = str(field.get("type") or "text")
+        if field_type == "number" and value not in (None, ""):
+            try:
+                raw_values[field_id] = float(value)
+            except (TypeError, ValueError):
+                return {"error": f"{field.get('label') or field_id} must be a number", "providerKind": provider_id, "_status": 400}
+        if field_type == "slug" and value and not re.fullmatch(r"[A-Za-z0-9_.-]+", str(value)):
+            return {"error": f"{field.get('label') or field_id} contains unsupported characters", "providerKind": provider_id, "_status": 400}
+        if field_type == "select" and value not in (None, ""):
+            allowed = {str(option.get("value")) for option in field.get("options") or [] if isinstance(option, dict)}
+            if str(value) not in allowed:
+                return {"error": f"{field.get('label') or field_id} has an unsupported value", "providerKind": provider_id, "_status": 400}
+
+    aliases = {
+        "id": "profile",
+        "instructions": "prompt",
+        "creationMode": "creation_mode",
+        "customDirectory": "custom_directory",
+    }
+    payload = {}
+    for key, value in raw_values.items():
+        target = aliases.get(key) or re.sub(r"(?<!^)(?=[A-Z])", "_", key).lower()
+        if value is not None:
+            payload[target] = value
+    try:
+        signature = inspect.signature(create_method)
+        accepts_extra = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
+        if not accepts_extra:
+            payload = {key: value for key, value in payload.items() if key in signature.parameters}
+    except (TypeError, ValueError):
+        pass
+    result = _get_provider_registry().invoke(provider_id, "create_agent", **payload)
+    if not isinstance(result, dict):
+        return {"error": f"{manifest.name} returned an invalid create response", "_status": 502}
+    if not result.get("ok"):
+        error = str(result.get("error") or f"{manifest.name} agent creation failed")
+        status = 405 if result.get("code") == "not_supported" else (409 if "already exists" in error.lower() else 500)
+        return {"error": error, "providerKind": provider_id, "_status": status}
+    _refresh_provider_discovery(force=True)
+    _refresh_agent_roster_after_create()
+    agent_id = result.get("agentId") or result.get("profile") or result.get("providerAgentId")
+    if agent_id:
+        _ensure_resident_profile_for_agent(agent_id)
+    return {
+        **result,
+        "ok": True,
+        "providerKind": provider_id,
+        "providerType": manifest.provider_type,
+        "providerAgentId": result.get("profile") or result.get("providerAgentId") or agent_id,
+        "providerConnectionId": result.get("providerConnectionId") or "default",
+        "capabilities": dict(manifest.capabilities),
+        "name": result.get("name") or name,
+    }
+
+
+def _handle_agent_delete(body):
+    """Delete an available native agent, or forget an offline cached agent."""
+    agent_id = str((body or {}).get("id") or (body or {}).get("agentId") or "").strip()
+    if not agent_id:
+        return {"ok": False, "error": "Agent ID is required", "_status": 400}
+    agent = _agent_record_for(agent_id)
+    if not agent:
+        return {"ok": False, "error": f"Unknown agent '{agent_id}'", "_status": 404}
+    provider_kind = str(agent.get("providerKind") or "openclaw")
+    connection_id = str(agent.get("providerConnectionId") or "default")
+    profile = str(agent.get("providerAgentId") or agent.get("profile") or agent_id)
+    if profile == "main" or (provider_kind == "openclaw" and agent_id == "main"):
+        return {"ok": False, "error": "Cannot delete a provider's main agent", "_status": 403}
+    if not agent.get("available", True):
+        _forget_provider_agent(provider_kind, connection_id, profile)
+        _refresh_provider_discovery(force=True)
+        _refresh_agent_roster_after_create()
+        return {"ok": True, "agentId": agent_id, "providerKind": provider_kind, "forgotten": True, "nativeFilesDeleted": False}
+    manifest = _get_provider_registry().manifest(provider_kind)
+    if not manifest or not manifest.capabilities.get("agentDelete"):
+        return {"ok": False, "error": f"{(manifest.name if manifest else provider_kind)} does not support agent deletion", "_status": 405}
+    result = _get_provider_registry().invoke(provider_kind, "delete_agent", profile)
+    if not isinstance(result, dict) or not result.get("ok"):
+        return {"ok": False, "error": (result or {}).get("error") if isinstance(result, dict) else "Invalid provider response", "_status": 502}
+    _forget_provider_agent(provider_kind, connection_id, profile)
+    cleanup = _cleanup_deleted_provider_agent_state(agent, requested_agent_id=agent_id)
+    for filename in (
+        f"{provider_kind}-chat-{re.sub(r'[^A-Za-z0-9_.-]+', '-', profile)}.json",
+        f"provider-chat-{provider_kind}-{re.sub(r'[^A-Za-z0-9_.-]+', '-', profile)}.json",
+        f"provider-active-session-{provider_kind}-{re.sub(r'[^A-Za-z0-9_.-]+', '-', profile)}.json",
+    ):
+        try:
+            os.remove(os.path.join(STATUS_DIR, filename))
+        except FileNotFoundError:
+            pass
+    _refresh_provider_discovery(force=True)
+    _refresh_agent_roster_after_create()
+    return {
+        **result,
+        "ok": True,
+        "agentId": agent_id,
+        "providerKind": provider_kind,
+        "forgotten": False,
+        "cleanup": cleanup,
+    }
+
+
+def _deleted_provider_agent_aliases(agent, requested_agent_id=""):
+    """Return the exact world-state keys that can belong to one provider agent."""
+    agent = agent if isinstance(agent, dict) else {}
+    aliases = {
+        str(value or "").strip()
+        for value in (requested_agent_id, agent.get("id"), agent.get("statusKey"))
+        if str(value or "").strip()
+    }
+    provider_kind = str(agent.get("providerKind") or "openclaw").strip().lower()
+    profile = str(agent.get("providerAgentId") or agent.get("profile") or "").strip()
+    if provider_kind and profile:
+        aliases.add(f"{provider_kind}:{profile}")
+        aliases.add(f"{provider_kind}-{profile}")
+    return aliases
+
+
+def _cleanup_deleted_provider_agent_state(agent, requested_agent_id=""):
+    """Remove Virtual World state and revision artifacts for a natively deleted agent.
+
+    Offline `forget` deliberately does not call this function because forgetting a
+    cached provider record is non-destructive. Native deletion, however, must not
+    leave an orphan resident profile, live-mode row, relationship, or editable-file
+    backup behind.
+    """
+    aliases = _deleted_provider_agent_aliases(agent, requested_agent_id)
+    result = {
+        "residentProfilesRemoved": [],
+        "liveModeRowsRemoved": [],
+        "relationshipsRemoved": [],
+        "backupRootsRemoved": [],
+        "errors": [],
+    }
+    if not aliases:
+        return result
+
+    try:
+        with _WORLD_META_LOCK:
+            meta = load_world_meta()
+            changed = False
+
+            profiles = meta.get("agentProfiles") if isinstance(meta.get("agentProfiles"), dict) else {}
+            for alias in sorted(aliases):
+                if alias in profiles:
+                    profiles.pop(alias, None)
+                    result["residentProfilesRemoved"].append(alias)
+                    changed = True
+            if changed:
+                meta["agentProfiles"] = profiles
+
+            life = meta.get("agentLife") if isinstance(meta.get("agentLife"), dict) else {}
+            loop = life.get("liveModeLoop") if isinstance(life.get("liveModeLoop"), dict) else {}
+            loop_agents = loop.get("agents") if isinstance(loop.get("agents"), dict) else {}
+            for alias in sorted(aliases):
+                if alias in loop_agents:
+                    loop_agents.pop(alias, None)
+                    result["liveModeRowsRemoved"].append(alias)
+                    changed = True
+            if result["liveModeRowsRemoved"]:
+                loop["agents"] = loop_agents
+                life["liveModeLoop"] = loop
+                meta["agentLife"] = life
+
+            relationships = meta.get("agentRelationships") if isinstance(meta.get("agentRelationships"), dict) else {}
+            for key, relationship in list(relationships.items()):
+                members = set(str(key or "").split("::"))
+                if isinstance(relationship, dict):
+                    members.update({
+                        str(relationship.get("agentId") or "").strip(),
+                        str(relationship.get("otherAgentId") or "").strip(),
+                    })
+                if aliases.intersection(members):
+                    relationships.pop(key, None)
+                    result["relationshipsRemoved"].append(str(key))
+                    changed = True
+            if result["relationshipsRemoved"]:
+                meta["agentRelationships"] = relationships
+
+            if changed:
+                save_world_meta(meta)
+    except Exception as exc:
+        result["errors"].append(f"world-state cleanup failed: {exc}")
+
+    backup_parent = os.path.abspath(os.path.join(STATUS_DIR, "provider-resource-backups"))
+    for alias in sorted(aliases):
+        backup_root = os.path.abspath(_provider_resource_backup_root(alias))
+        if backup_root == backup_parent or not backup_root.startswith(backup_parent + os.sep):
+            result["errors"].append(f"refused unsafe backup cleanup path for {alias}")
+            continue
+        try:
+            if os.path.isdir(backup_root):
+                shutil.rmtree(backup_root)
+                result["backupRootsRemoved"].append(os.path.basename(backup_root))
+        except OSError as exc:
+            result["errors"].append(f"backup cleanup failed for {alias}: {exc}")
+
+    return result
 
 
 def _gateway_presence_connected():
@@ -23795,25 +24350,202 @@ def _apply_identities_to_roster(roster):
     return [_apply_identity_to_agent(agent) for agent in roster]
 
 
+# ─── UNIVERSAL PROVIDER SDK (Contract 1.1) ──────────────────────
+_PROVIDER_REGISTRY = None
+_PROVIDER_DISCOVERY_LOCK = threading.RLock()
+_PROVIDER_DISCOVERY_CACHE_FILE = os.path.join(STATUS_DIR, "provider-discovery-cache.json")
+_provider_discovered_roster = []
+_provider_discovered_at = 0.0
+_PROVIDER_DISCOVERY_REFRESH_SEC = 30
+_PROVIDER_DISCOVERY_FIELDS = {
+    "id", "statusKey", "providerAgentId", "profile", "name", "emoji", "role",
+    "model", "provider", "gateway", "workspace", "home", "lastActiveAt",
+    "providerKind", "providerId", "providerType", "providerManifestVersion",
+    "providerConnectionId", "capabilities", "nativeCapabilities", "connectionModes",
+    "source", "cliAvailable", "apiAvailable", "createdAt", "lastSeenAt", "offlineSince",
+    "available", "connectionState", "capabilityOverrides", "nativeAgentPath",
+}
+
+
+def _openclaw_gateway_home_path():
+    explicit = str(os.environ.get("VW_OPENCLAW_GATEWAY_PATH") or "").strip()
+    if explicit:
+        return os.path.abspath(os.path.expanduser(explicit))
+    config_path = os.path.join(WORKSPACE_BASE, "openclaw.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            configured = (json.load(handle).get("agents") or {}).get("list") or []
+    except (OSError, ValueError, TypeError):
+        configured = []
+    ordered = sorted(
+        (row for row in configured if isinstance(row, dict)),
+        key=lambda row: 0 if str(row.get("id") or "") == "main" else 1,
+    )
+    for item in ordered:
+        workspace = str(item.get("workspace") or "").strip()
+        if not os.path.isabs(workspace):
+            continue
+        basename = os.path.basename(os.path.normpath(workspace))
+        if basename == "workspace" or basename.startswith("workspace-"):
+            return os.path.dirname(os.path.normpath(workspace))
+    return WORKSPACE_BASE
+
+
+def _provider_openclaw_create(body):
+    payload = dict(body or {})
+    payload["agentPlatform"] = "openclaw"
+    return _legacy_agent_create(payload)
+
+
+def _provider_openclaw_delete(profile):
+    result = _gateway_rpc_call("agents.delete", {"agentId": profile, "deleteFiles": True}, timeout=30)
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error", "OpenClaw agent delete failed")}
+    return {"ok": True, "deleted": True, "profile": profile, "agentId": profile}
+
+
+def _provider_openclaw_send(profile, message, **_kwargs):
+    return {
+        "ok": False,
+        "code": "native_transport_required",
+        "error": "OpenClaw chat uses the existing browser-to-Gateway stream.",
+        "profile": profile,
+        "reply": "",
+    }
+
+
+def _provider_registry_context():
+    return {
+        "config": VW_CONFIG,
+        "workspaceBase": WORKSPACE_BASE,
+        "gatewayWorkspaceBase": _openclaw_gateway_home_path(),
+        "statusDir": STATUS_DIR,
+        "gatewayTest": lambda: _gateway_rpc_call("health", {}, timeout=8),
+        "openclawCreate": _provider_openclaw_create,
+        "openclawDelete": _provider_openclaw_delete,
+        "openclawInterrupt": lambda profile: {"ok": False, "error": f"No server-owned OpenClaw run for {profile}"},
+        "openclawSend": _provider_openclaw_send,
+        "hermesDiscover": _discover_hermes_agents,
+        "hermesSend": lambda agent, message, **kwargs: _handle_hermes_chat({
+            "agentId": (agent or {}).get("id") or (agent or {}).get("statusKey") or (agent or {}).get("profile"),
+            "message": message,
+            "timeoutSec": int(kwargs.get("timeout_sec") or kwargs.get("timeoutSec") or HERMES_TIMEOUT_SEC),
+            "sessionId": kwargs.get("session_id") or kwargs.get("sessionId") or "",
+            "_onProgress": kwargs.get("on_progress") or kwargs.get("onProgress"),
+        }),
+        "hermesInterrupt": lambda profile: _handle_hermes_interrupt({"agentId": profile}),
+        "hermesApprovalPending": lambda profile: _get_hermes_approval_pending(profile),
+        "hermesApprovalRespond": lambda profile, approval_id, choice, **kwargs: _handle_hermes_approval_respond({
+            "agentId": profile,
+            "approvalId": approval_id,
+            "choice": choice,
+            **kwargs,
+        }),
+        "sessionList": lambda profile, limit=40: handle_chat_sessions_list(profile, limit=limit)[0],
+    }
+
+
+def _get_provider_registry():
+    global _PROVIDER_REGISTRY
+    if _PROVIDER_REGISTRY is None:
+        if not callable(build_provider_registry):
+            raise RuntimeError("Provider SDK failed to load")
+        _PROVIDER_REGISTRY = build_provider_registry(_provider_registry_context())
+    return _PROVIDER_REGISTRY
+
+
+def _reset_provider_registry():
+    global _PROVIDER_REGISTRY
+    _PROVIDER_REGISTRY = None
+    return _get_provider_registry()
+
+
+def _provider_discovery_key(agent):
+    return (
+        str((agent or {}).get("providerKind") or (agent or {}).get("providerId") or "openclaw"),
+        str((agent or {}).get("providerConnectionId") or "default"),
+        str((agent or {}).get("providerAgentId") or (agent or {}).get("profile") or (agent or {}).get("id") or ""),
+    )
+
+
+def _load_provider_discovery_cache():
+    try:
+        with open(_PROVIDER_DISCOVERY_CACHE_FILE, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        rows = payload.get("agents") if isinstance(payload, dict) else []
+        return [row for row in rows if isinstance(row, dict)]
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_provider_discovery_cache(rows):
+    safe_rows = []
+    for row in rows:
+        item = {key: row.get(key) for key in _PROVIDER_DISCOVERY_FIELDS if key in row}
+        item["available"] = bool(row.get("available", True))
+        item["connectionState"] = str(row.get("connectionState") or ("connected" if item["available"] else "offline"))
+        safe_rows.append(item)
+    payload = {
+        "version": 1,
+        "contractVersion": PROVIDER_CONTRACT_VERSION,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "agents": safe_rows,
+    }
+    os.makedirs(os.path.dirname(_PROVIDER_DISCOVERY_CACHE_FILE), exist_ok=True)
+    _atomic_write_text(_PROVIDER_DISCOVERY_CACHE_FILE, json.dumps(payload, indent=2) + "\n")
+    try:
+        os.chmod(_PROVIDER_DISCOVERY_CACHE_FILE, 0o600)
+    except OSError:
+        pass
+
+
+def _discover_provider_roster():
+    now = datetime.now(timezone.utc).isoformat()
+    merged = []
+    live_keys = set()
+    for row in _get_provider_registry().discover_agents():
+        item = dict(row)
+        item["available"] = True
+        item["connectionState"] = "connected"
+        item["lastSeenAt"] = now
+        item.pop("offlineSince", None)
+        merged.append(item)
+        live_keys.add(_provider_discovery_key(item))
+    for cached in _load_provider_discovery_cache():
+        if _provider_discovery_key(cached) in live_keys:
+            continue
+        item = dict(cached)
+        item["available"] = False
+        item["connectionState"] = "offline"
+        item.setdefault("offlineSince", now)
+        merged.append(item)
+    _save_provider_discovery_cache(merged)
+    return merged
+
+
+def _refresh_provider_discovery(force=False):
+    global _provider_discovered_roster, _provider_discovered_at
+    if not force and _provider_discovered_roster and time.time() - _provider_discovered_at <= _PROVIDER_DISCOVERY_REFRESH_SEC:
+        return False
+    with _PROVIDER_DISCOVERY_LOCK:
+        if not force and _provider_discovered_roster and time.time() - _provider_discovered_at <= _PROVIDER_DISCOVERY_REFRESH_SEC:
+            return False
+        _provider_discovered_roster = _discover_provider_roster()
+        _provider_discovered_at = time.time()
+    return True
+
+
+def _forget_provider_agent(provider_kind, provider_connection_id, provider_agent_id):
+    target = (str(provider_kind or "openclaw"), str(provider_connection_id or "default"), str(provider_agent_id or ""))
+    with _PROVIDER_DISCOVERY_LOCK:
+        rows = [row for row in _load_provider_discovery_cache() if _provider_discovery_key(row) != target]
+        _save_provider_discovery_cache(rows)
+
+
 def discover_agents():
-    """Discover agents from OpenClaw using Virtual World's own local scanner."""
-    agents_dir = os.path.join(WORKSPACE_BASE, "agents")
-    model_cfg = _load_openclaw_model_config()
-    agents = []
-    if os.path.isdir(agents_dir):
-        for name in sorted(os.listdir(agents_dir)):
-            agent_dir = os.path.join(agents_dir, name, "agent")
-            if not os.path.isdir(agent_dir):
-                continue
-            agent_info = {"id": name, "statusKey": name, "name": name.capitalize(), "emoji": "🤖", "providerKind": "openclaw", "providerType": "runtime", "providerAgentId": name}
-            cfg_agent = _openclaw_config_agent_for(name, agent_info, model_cfg)
-            if isinstance(cfg_agent, dict):
-                agent_info["model"] = str(cfg_agent.get("model") or "")
-                agent_info["provider"] = str(cfg_agent.get("provider") or "")
-            agents.append(_apply_identity_to_agent(agent_info))
-    agents.extend(_discover_hermes_agents())
-    agents.extend(_discover_codex_agents())
-    return agents
+    """Return the normalized, restart-stable Contract 1.1 provider roster."""
+    _refresh_provider_discovery()
+    return [dict(row) for row in _provider_discovered_roster]
 
 
 def _agent_profile_key(agent):
@@ -23866,6 +24598,280 @@ def _agent_record_for(agent_id):
         if wanted in aliases:
             return dict(agent)
     return None
+
+
+_PROVIDER_RESOURCE_TEXT_EXTS = {".md", ".txt", ".json", ".yaml", ".yml", ".toml"}
+_PROVIDER_RESOURCE_FILE_LIMIT = 1024 * 1024
+
+
+def _provider_workspace_root(agent):
+    raw = (agent or {}).get("workspace") or (agent or {}).get("home")
+    if not raw and str((agent or {}).get("providerKind") or "openclaw") == "openclaw":
+        raw = _openclaw_workspace_root_for_agent((agent or {}).get("id") or "", agent)
+    return os.path.abspath(os.path.expanduser(str(raw))) if raw else ""
+
+
+def _safe_provider_relpath(raw_path):
+    raw = str(raw_path or "").replace("\\", "/").strip()
+    if not raw or raw.startswith("/") or re.match(r"^[A-Za-z]:/", raw) or "\x00" in raw:
+        return ""
+    parts = [part for part in raw.split("/") if part not in ("", ".")]
+    if not parts or any(part == ".." for part in parts):
+        return ""
+    return "/".join(parts)
+
+
+def _provider_resource_glob_matches(relpath, pattern):
+    rel = str(relpath or "").replace("\\", "/").strip("/")
+    raw = str(pattern or "").replace("\\", "/").strip("/")
+    if not rel or not raw:
+        return False
+    chunks = []
+    index = 0
+    while index < len(raw):
+        char = raw[index]
+        if char == "*":
+            if index + 1 < len(raw) and raw[index + 1] == "*":
+                index += 2
+                if index < len(raw) and raw[index] == "/":
+                    chunks.append("(?:.*/)?")
+                    index += 1
+                else:
+                    chunks.append(".*")
+                continue
+            chunks.append("[^/]*")
+        elif char == "?":
+            chunks.append("[^/]")
+        else:
+            chunks.append(re.escape(char))
+        index += 1
+    return re.fullmatch("".join(chunks), rel) is not None
+
+
+def _provider_resource_descriptor(agent, relpath, include_hidden=False):
+    rel = _safe_provider_relpath(relpath)
+    if not rel:
+        return None
+    manifest = _get_provider_registry().manifest((agent or {}).get("providerKind") or "openclaw")
+    for raw in manifest.resource_schema if manifest else []:
+        if not isinstance(raw, dict) or not any(_provider_resource_glob_matches(rel, pattern) for pattern in raw.get("paths") or []):
+            continue
+        item = dict(raw)
+        item.setdefault("id", "resource")
+        item.setdefault("label", "Native resource")
+        item.setdefault("runtimeActive", False)
+        item.setdefault("readable", True)
+        item.setdefault("writable", False)
+        item.setdefault("deletable", False)
+        item.setdefault("creatable", bool(item.get("writable")))
+        item["path"] = rel
+        if not include_hidden and not item.get("readable"):
+            return None
+        return item
+    return None
+
+
+def _resolve_provider_resource(agent, raw_path, *, allow_new=False, operation="read"):
+    root = _provider_workspace_root(agent)
+    if not root:
+        return "", "", "Workspace files are not available for this provider", None
+    rel = _safe_provider_relpath(raw_path)
+    if not rel:
+        return "", "", "A relative file path is required", None
+    resource = _provider_resource_descriptor(agent, rel, include_hidden=True)
+    if resource is None:
+        return "", rel, "This path is not exposed by the provider resource contract", None
+    if not resource.get("readable"):
+        return "", rel, f"This sensitive native file is hidden; manage it through {resource.get('managedBy') or 'provider settings'}", resource
+    if operation in {"write", "create", "delete"} and not resource.get("writable"):
+        return "", rel, f"This native resource is read-only; manage it through {resource.get('managedBy') or 'the native provider'}", resource
+    if operation == "create" and not resource.get("creatable"):
+        return "", rel, "This provider does not allow creating files in that resource group", resource
+    if operation == "delete" and not resource.get("deletable"):
+        return "", rel, "This provider does not allow deleting that native resource", resource
+    if os.path.splitext(rel)[1].lower() not in _PROVIDER_RESOURCE_TEXT_EXTS:
+        return "", rel, "Only declared text resources can be opened", resource
+    full = os.path.abspath(os.path.join(root, rel))
+    if full != root and not full.startswith(root + os.sep):
+        return "", rel, "File must stay inside the agent workspace", resource
+    real_root = os.path.realpath(root)
+    real_target = os.path.realpath(full if os.path.exists(full) else os.path.dirname(full))
+    if real_target != real_root and not real_target.startswith(real_root + os.sep):
+        return "", rel, "Symbolic-link paths outside the agent workspace are not allowed", resource
+    if not allow_new and not os.path.isfile(full):
+        return "", rel, "File not found", resource
+    return full, rel, "", resource
+
+
+def _provider_resource_backup_root(agent_id):
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(agent_id or "agent")).strip("-.") or "agent"
+    return os.path.join(STATUS_DIR, "provider-resource-backups", safe)
+
+
+def _read_provider_resource(agent, relpath):
+    full, rel, error, descriptor = _resolve_provider_resource(agent, relpath)
+    if error:
+        return {"ok": False, "error": error, "_status": 400}
+    size = os.path.getsize(full)
+    if size > _PROVIDER_RESOURCE_FILE_LIMIT:
+        return {"ok": False, "error": "File is too large for editing", "_status": 413}
+    content = Path(full).read_text(encoding="utf-8", errors="replace")
+    return {"ok": True, "file": {
+        "name": os.path.basename(rel), "path": rel, "content": content, "size": size,
+        "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "modified": datetime.fromtimestamp(os.path.getmtime(full), timezone.utc).isoformat(),
+        "resourceId": descriptor.get("id"), "resourceLabel": descriptor.get("label"),
+        "runtimeActive": bool(descriptor.get("runtimeActive")), "writable": bool(descriptor.get("writable")),
+        "deletable": bool(descriptor.get("deletable")), "generated": bool(descriptor.get("generated")),
+        "managedBy": str(descriptor.get("managedBy") or ""),
+    }}
+
+
+def _preview_provider_resource(agent, relpath, content, create=False):
+    root = _provider_workspace_root(agent)
+    rel = _safe_provider_relpath(relpath)
+    exists = bool(root and rel and os.path.isfile(os.path.join(root, rel)))
+    operation = "create" if create and not exists else "write"
+    full, rel, error, _descriptor = _resolve_provider_resource(agent, relpath, allow_new=create, operation=operation)
+    if error:
+        return {"ok": False, "error": error, "_status": 400}
+    old = Path(full).read_text(encoding="utf-8", errors="replace") if os.path.isfile(full) else ""
+    new = str(content or "")
+    return {
+        "ok": True,
+        "path": rel,
+        "sha256": hashlib.sha256(old.encode("utf-8")).hexdigest() if os.path.isfile(full) else "",
+        "changed": old != new,
+        "diff": "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True), fromfile=f"{rel} (current)", tofile=f"{rel} (proposed)"))[:100000],
+    }
+
+
+def _save_provider_resource(agent, relpath, content, *, create=False, expected_sha=""):
+    root = _provider_workspace_root(agent)
+    rel = _safe_provider_relpath(relpath)
+    exists = bool(root and rel and os.path.isfile(os.path.join(root, rel)))
+    operation = "create" if create and not exists else "write"
+    full, rel, error, _descriptor = _resolve_provider_resource(agent, relpath, allow_new=create, operation=operation)
+    if error:
+        return {"ok": False, "error": error, "_status": 400}
+    text = str(content or "")
+    if len(text.encode("utf-8")) > _PROVIDER_RESOURCE_FILE_LIMIT:
+        return {"ok": False, "error": "File content is too large", "_status": 413}
+    old = Path(full).read_text(encoding="utf-8", errors="replace") if os.path.isfile(full) else ""
+    old_sha = hashlib.sha256(old.encode("utf-8")).hexdigest() if os.path.isfile(full) else ""
+    if expected_sha and str(expected_sha) != old_sha:
+        return {"ok": False, "code": "sha_conflict", "error": "This file changed after it was opened. Reload it before saving.", "currentSha256": old_sha, "_status": 409}
+    backup_id = ""
+    if os.path.isfile(full):
+        backup_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        backup_path = os.path.join(_provider_resource_backup_root((agent or {}).get("statusKey") or (agent or {}).get("id")), backup_id, rel)
+        os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+        shutil.copy2(full, backup_path)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    _atomic_write_text(full, text)
+    return {"ok": True, "saved": rel, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "previousSha256": old_sha, "backupId": backup_id}
+
+
+def _delete_provider_resource(agent, relpath):
+    full, rel, error, _descriptor = _resolve_provider_resource(agent, relpath, operation="delete")
+    if error:
+        return {"ok": False, "error": error, "_status": 400}
+    backup_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    backup_path = os.path.join(_provider_resource_backup_root((agent or {}).get("statusKey") or (agent or {}).get("id")), backup_id, rel)
+    os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+    shutil.copy2(full, backup_path)
+    os.remove(full)
+    return {"ok": True, "deleted": rel, "backupId": backup_id}
+
+
+def _provider_resource_revisions(agent, relpath):
+    rel = _safe_provider_relpath(relpath)
+    if not rel:
+        return {"ok": False, "error": "A relative file path is required", "_status": 400}
+    _full, _rel, error, _descriptor = _resolve_provider_resource(agent, rel, allow_new=True)
+    if error:
+        return {"ok": False, "error": error, "_status": 400}
+    root = _provider_resource_backup_root((agent or {}).get("statusKey") or (agent or {}).get("id"))
+    revisions = []
+    if os.path.isdir(root):
+        for backup_id in sorted(os.listdir(root), reverse=True):
+            path = os.path.join(root, backup_id, rel)
+            if not os.path.isfile(path):
+                continue
+            raw = Path(path).read_bytes()
+            revisions.append({"backupId": backup_id, "path": rel, "size": len(raw), "sha256": hashlib.sha256(raw).hexdigest(), "modified": datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).isoformat()})
+    return {"ok": True, "path": rel, "revisions": revisions[:50]}
+
+
+def _restore_provider_resource(agent, relpath, backup_id, expected_sha=""):
+    rel = _safe_provider_relpath(relpath)
+    safe_backup = re.sub(r"[^A-Za-z0-9_.-]+", "", str(backup_id or ""))
+    backup = os.path.join(_provider_resource_backup_root((agent or {}).get("statusKey") or (agent or {}).get("id")), safe_backup, rel)
+    if not rel or not safe_backup or not os.path.isfile(backup):
+        return {"ok": False, "error": "Backup revision not found", "_status": 404}
+    return _save_provider_resource(agent, rel, Path(backup).read_text(encoding="utf-8", errors="replace"), create=True, expected_sha=expected_sha)
+
+
+def _list_provider_resources(agent):
+    root = _provider_workspace_root(agent)
+    if not root or not os.path.isdir(root):
+        return []
+    rows = []
+    for current, dirs, names in os.walk(root):
+        dirs[:] = [name for name in dirs if name not in {".git", "node_modules", "__pycache__", ".venv", "venv"}]
+        depth = len(Path(current).relative_to(root).parts)
+        if depth > 4:
+            dirs[:] = []
+        for name in names:
+            full = os.path.join(current, name)
+            rel = os.path.relpath(full, root).replace(os.sep, "/")
+            descriptor = _provider_resource_descriptor(agent, rel)
+            if not descriptor:
+                continue
+            real_root = os.path.realpath(root)
+            real_file = os.path.realpath(full)
+            if real_file != real_root and not real_file.startswith(real_root + os.sep):
+                continue
+            try:
+                rows.append({
+                    "name": name, "path": rel, "size": os.path.getsize(full),
+                    "modified": datetime.fromtimestamp(os.path.getmtime(full), timezone.utc).isoformat(),
+                    "resourceId": descriptor.get("id"), "resourceLabel": descriptor.get("label"),
+                    "runtimeActive": bool(descriptor.get("runtimeActive")), "writable": bool(descriptor.get("writable")),
+                    "deletable": bool(descriptor.get("deletable")), "generated": bool(descriptor.get("generated")),
+                    "managedBy": str(descriptor.get("managedBy") or ""),
+                })
+            except OSError:
+                continue
+    rows.sort(key=lambda row: row["path"])
+    return rows[:200]
+
+
+def _handle_provider_resource(body):
+    agent = _agent_record_for((body or {}).get("agentId") or (body or {}).get("agent"))
+    if not agent:
+        return {"ok": False, "error": "Agent not found", "_status": 404}
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    action = str((body or {}).get("action") or "list")
+    if action in {"list", "read", "revisions"} and not capabilities.get("resourcesRead"):
+        return {"ok": False, "error": "This provider does not expose readable resources", "_status": 405}
+    if action in {"preview", "save", "create", "delete", "restore"} and not capabilities.get("resourcesWrite"):
+        return {"ok": False, "error": "This provider does not allow resource writes", "_status": 405}
+    if action == "list":
+        return {"ok": True, "agentId": agent.get("id"), "providerKind": agent.get("providerKind"), "files": _list_provider_resources(agent)}
+    if action == "read":
+        return _read_provider_resource(agent, body.get("path"))
+    if action == "preview":
+        return _preview_provider_resource(agent, body.get("path"), body.get("content"), create=bool(body.get("create")))
+    if action in {"save", "create"}:
+        return _save_provider_resource(agent, body.get("path"), body.get("content"), create=action == "create", expected_sha=body.get("expectedSha256") or body.get("expectedRevision") or "")
+    if action == "delete":
+        return _delete_provider_resource(agent, body.get("path"))
+    if action == "revisions":
+        return _provider_resource_revisions(agent, body.get("path"))
+    if action == "restore":
+        return _restore_provider_resource(agent, body.get("path"), body.get("backupId"), expected_sha=body.get("expectedSha256") or "")
+    return {"ok": False, "error": f"Unknown resource action: {action}", "_status": 400}
 
 
 def _safe_agent_file_name(name):
@@ -25677,12 +26683,13 @@ def _get_codex_native_setup_state():
 
 def _get_claude_code_native_setup_state():
     cfg = VW_CONFIG.get("claudeCode", {}) or {}
-    home_path = cfg.get("homePath") or os.path.expanduser("~/.claude")
+    health = _get_provider_registry().invoke("claude-code", "test")
+    health = health if isinstance(health, dict) else {"ok": False, "error": "Invalid Claude Code health response"}
     return {
-        "ok": False,
+        **_redact_provider_secrets(health),
         "enabled": bool(cfg.get("enabled", False)),
         "binary": cfg.get("binary") or "",
-        "homePath": home_path,
+        "homePath": cfg.get("homePath") or os.path.expanduser("~/.claude"),
         "workspaceRoot": cfg.get("workspaceRoot") or "",
         "mainWorkspace": cfg.get("mainWorkspace") or "",
         "model": cfg.get("model") or "",
@@ -25690,8 +26697,6 @@ def _get_claude_code_native_setup_state():
         "includeMain": bool(cfg.get("includeMain", True)),
         "includeNativeAgents": bool(cfg.get("includeNativeAgents", True)),
         "registerNativeAgents": bool(cfg.get("registerNativeAgents", True)),
-        "nativeAgentsDir": os.path.join(home_path, "agents") if home_path else "",
-        "unsupportedReason": "Claude Code provider support is not implemented in My Virtual World yet.",
         "nativeCommands": {
             "login": "claude auth login",
             "status": "claude auth status --json",
@@ -25702,27 +26707,14 @@ def _get_claude_code_native_setup_state():
 
 
 def _handle_claude_code_test(body=None):
-    cfg = dict(VW_CONFIG.get("claudeCode", {}) or {})
-    if isinstance(body, dict):
-        cfg.update({k: v for k, v in body.items() if v is not None})
-    binary = os.path.expanduser(str(cfg.get("binary") or "claude"))
-    resolved_binary = binary if os.path.isabs(binary) and os.path.isfile(binary) else (shutil.which(binary) or "")
-    home_path = os.path.expanduser(str(cfg.get("homePath") or "~/.claude"))
-    workspace_root = os.path.expanduser(str(cfg.get("workspaceRoot") or os.path.join(DATA_DIR, "claude-code-agents")))
-    return {
-        "ok": False,
-        "error": "Claude Code provider support is not implemented in My Virtual World yet.",
-        "enabled": bool(cfg.get("enabled", False)),
-        "binary": binary,
-        "binaryDetected": bool(resolved_binary),
-        "resolvedBinary": resolved_binary,
-        "homePath": home_path,
-        "homeDetected": os.path.isdir(home_path),
-        "workspaceRoot": workspace_root,
-        "workspaceDetected": os.path.isdir(workspace_root),
-        "agents": [],
-        "unsupportedReason": "Settings can be saved now; live Claude Code agents still need the provider runtime ported from My Virtual Office.",
-    }
+    values = body if isinstance(body, dict) else {}
+    if values:
+        return _test_provider_settings({"providerId": "claude-code", "values": values})
+    result = _get_provider_registry().invoke("claude-code", "test")
+    return _redact_provider_secrets(
+        result if isinstance(result, dict)
+        else {"ok": False, "error": "Invalid Claude Code health response"}
+    )
 
 
 # ─── UNIFIED CHAT SESSIONS (per-framework session management) ───────────────
@@ -25737,6 +26729,117 @@ def _handle_claude_code_test(body=None):
 # This layer normalizes them into one sessions surface for the chat window.
 
 CHAT_SESSION_SCHEMA_VERSION = "vw-chat-sessions/v1"
+_PROVIDER_SESSION_SYNC_LOCK = threading.RLock()
+_PROVIDER_SESSION_SYNC_AT = {}
+
+
+def _generic_provider_state_slug(value):
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "default")).strip("-.") or "default"
+
+
+def _generic_provider_session_path(provider_kind, profile):
+    return os.path.join(STATUS_DIR, f"provider-active-session-{_generic_provider_state_slug(provider_kind)}-{_generic_provider_state_slug(profile)}.json")
+
+
+def _load_generic_provider_session(provider_kind, profile):
+    try:
+        with open(_generic_provider_session_path(provider_kind, profile), "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return payload if isinstance(payload, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_generic_provider_session(provider_kind, profile, session_id, **extra):
+    payload = {
+        "providerKind": provider_kind,
+        "profile": profile,
+        "sessionId": str(session_id or ""),
+        "selectedAt": time.time(),
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        **extra,
+    }
+    _atomic_write_text(_generic_provider_session_path(provider_kind, profile), json.dumps(payload, indent=2) + "\n")
+    return payload
+
+
+def _provider_config_key(provider_kind):
+    manifest = _get_provider_registry().manifest(provider_kind)
+    schema = manifest.settings_schema if manifest and isinstance(manifest.settings_schema, dict) else {}
+    return str(schema.get("configKey") or (manifest.metadata.get("configKey") if manifest else "") or provider_kind)
+
+
+def _provider_updated_epoch(value):
+    if value in (None, ""):
+        return 0.0
+    try:
+        numeric = float(value)
+        return numeric / 1000.0 if numeric > 10_000_000_000 else numeric
+    except (TypeError, ValueError):
+        pass
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _sync_provider_active_session(agent, force=False):
+    """Follow a provider's newest native session through the manifest contract."""
+    if not isinstance(agent, dict):
+        return {}
+    provider_kind = str(agent.get("providerKind") or "openclaw")
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    if provider_kind in {"openclaw", "hermes", "codex", "claude-code"} or not capabilities.get("sessions"):
+        return {}
+    profile = str(agent.get("providerAgentId") or agent.get("profile") or agent.get("id") or "main")
+    config = VW_CONFIG.get(_provider_config_key(provider_kind))
+    config = config if isinstance(config, dict) else {}
+    state = _load_generic_provider_session(provider_kind, profile)
+    if config.get("followActiveSession", True) is False or _provider_run_for_agent(provider_kind, profile):
+        return state
+    try:
+        interval = max(1, min(60, int(config.get("sessionSyncIntervalSec") or 3)))
+    except (TypeError, ValueError):
+        interval = 3
+    cache_key = f"{provider_kind}:{profile}"
+    now = time.time()
+    with _PROVIDER_SESSION_SYNC_LOCK:
+        if not force and now - float(_PROVIDER_SESSION_SYNC_AT.get(cache_key) or 0) < interval:
+            return state
+        _PROVIDER_SESSION_SYNC_AT[cache_key] = now
+    payload, status = handle_chat_sessions_list(agent.get("id") or agent.get("statusKey") or profile, limit=40)
+    sessions = payload.get("sessions") if status == 200 and isinstance(payload.get("sessions"), list) else []
+    if not sessions:
+        return state
+    newest = sessions[0]
+    newest_id = str(newest.get("id") or "")
+    current_id = str(state.get("sessionId") or "")
+    newest_epoch = _provider_updated_epoch(newest.get("updatedAt"))
+    should_import = bool(newest_id) and (
+        not current_id
+        or (newest_id != current_id and (newest_epoch <= 0 or newest_epoch > float(state.get("selectedAt") or 0)))
+        or (newest_id == current_id and newest_epoch > float(state.get("nativeUpdatedEpoch") or 0))
+    )
+    if not should_import:
+        return state
+    result, switch_status = handle_chat_session_switch(
+        agent.get("id") or agent.get("statusKey") or profile,
+        newest_id,
+        {"source": "provider-active-session-sync"},
+    )
+    if switch_status == 200 and result.get("ok"):
+        messages = result.get("messages") if isinstance(result.get("messages"), list) else []
+        if messages:
+            _save_provider_history(provider_kind, profile, messages)
+        return _save_generic_provider_session(
+            provider_kind,
+            profile,
+            newest_id,
+            source="native-follow",
+            nativeUpdatedEpoch=newest_epoch,
+            title=newest.get("title") or "",
+        )
+    return state
 
 
 def _chat_sessions_agent(agent_id):
@@ -26029,6 +27132,36 @@ def _chat_sessions_list_claude_code(agent_ref, limit=40):
     }
 
 
+def _chat_sessions_list_registered_provider(agent_ref, limit=40):
+    agent = _agent_record_for(agent_ref["agentId"]) or {}
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    if not capabilities.get("sessions"):
+        return {"ok": False, "error": f"{agent_ref['providerKind']} does not declare sessions", "sessions": []}
+    outcome = _get_provider_registry().invoke(agent_ref["providerKind"], "list_sessions", agent_ref["profile"], limit=limit)
+    if not isinstance(outcome, dict) or not outcome.get("ok"):
+        return {"ok": False, "error": (outcome or {}).get("error") if isinstance(outcome, dict) else "Invalid provider response", "sessions": []}
+    active_state = _load_generic_provider_session(agent_ref["providerKind"], agent_ref["profile"])
+    active_id = str(active_state.get("sessionId") or "")
+    sessions = []
+    for row in outcome.get("sessions") or []:
+        if not isinstance(row, dict):
+            continue
+        session_id = str(row.get("id") or row.get("sessionId") or "")
+        if not session_id:
+            continue
+        sessions.append({
+            "id": session_id,
+            "sessionKey": f"{agent_ref['providerKind']}:{agent_ref['profile']}:{session_id}",
+            "title": row.get("title") or row.get("name") or session_id,
+            "preview": row.get("preview") or row.get("summary") or "",
+            "updatedAt": row.get("updatedAt") or row.get("updated") or row.get("lastActive"),
+            "kind": "chat",
+            "active": bool(active_id and session_id == active_id),
+            "deletable": bool(capabilities.get("sessionDelete")),
+        })
+    return {"ok": True, "sessions": sessions[:max(1, int(limit))]}
+
+
 def handle_chat_sessions_list(agent_id, limit=40):
     agent_ref = _chat_sessions_agent(agent_id)
     if not agent_ref:
@@ -26043,7 +27176,7 @@ def handle_chat_sessions_list(agent_id, limit=40):
     elif kind in ("claude-code", "claudecode", "claude"):
         outcome = _chat_sessions_list_claude_code(agent_ref, limit=limit)
     else:
-        outcome = {"ok": False, "error": f"{kind} session management is not supported yet", "sessions": []}
+        outcome = _chat_sessions_list_registered_provider(agent_ref, limit=limit)
     status = 200 if outcome.get("ok") else 502
     return {
         "schemaVersion": CHAT_SESSION_SCHEMA_VERSION,
@@ -26078,7 +27211,16 @@ def handle_chat_session_create(agent_id, body=None):
         if not res.get("ok"):
             return {"ok": False, "error": str(res.get("error") or "sessions.reset failed")}, 502
         return {"ok": True, "providerKind": kind, "sessionKey": session_key}, 200
-    return {"ok": False, "error": f"{kind} session management is not supported yet"}, 400
+    agent = _agent_record_for(agent_ref["agentId"]) or {}
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    if not capabilities.get("sessionCreate"):
+        return {"ok": False, "error": f"{kind} does not declare session creation"}, 405
+    provider = _get_provider_registry().get(kind)
+    if callable(getattr(provider, "create_session", None)):
+        outcome = _get_provider_registry().invoke(kind, "create_session", profile)
+        return outcome, 200 if isinstance(outcome, dict) and outcome.get("ok") else 502
+    _save_generic_provider_session(kind, profile, "")
+    return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "A new native session starts with the next message."}, 200
 
 
 def handle_chat_session_delete(agent_id, session_id, body=None):
@@ -26125,7 +27267,16 @@ def handle_chat_session_delete(agent_id, session_id, body=None):
         if not res.get("ok"):
             return {"ok": False, "error": str(res.get("error") or "sessions.delete failed")}, 502
         return {"ok": True, "deleted": True, "sessionKey": session_key}, 200
-    return {"ok": False, "error": f"{kind} session management is not supported yet"}, 400
+    agent = _agent_record_for(agent_ref["agentId"]) or {}
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    if not capabilities.get("sessionDelete"):
+        return {"ok": False, "error": f"{kind} does not declare session deletion"}, 405
+    outcome = _get_provider_registry().invoke(kind, "delete_session", profile, session_id)
+    if isinstance(outcome, dict) and outcome.get("ok"):
+        if _load_generic_provider_session(kind, profile).get("sessionId") == session_id:
+            _save_generic_provider_session(kind, profile, "")
+        return outcome, 200
+    return outcome if isinstance(outcome, dict) else {"ok": False, "error": "Invalid provider response"}, 502
 
 
 def _live_agent_session_meta(agent_id, session=None):
@@ -26587,7 +27738,17 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
         # OpenClaw sessions are addressed directly by key; the client simply
         # switches its sessionKey and reloads history over the gateway.
         return {"ok": True, "providerKind": kind, "sessionKey": session_key}, 200
-    return {"ok": False, "error": f"{kind} session management is not supported yet"}, 400
+    agent = _agent_record_for(agent_ref["agentId"]) or {}
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    if not capabilities.get("sessionSwitch"):
+        return {"ok": False, "error": f"{kind} does not declare session switching"}, 405
+    provider = _get_provider_registry().get(kind)
+    operation = "export_session" if callable(getattr(provider, "export_session", None)) else "read_session"
+    outcome = _get_provider_registry().invoke(kind, operation, profile, session_id)
+    if not isinstance(outcome, dict) or not outcome.get("ok"):
+        return outcome if isinstance(outcome, dict) else {"ok": False, "error": "Invalid provider response"}, 502
+    _save_generic_provider_session(kind, profile, session_id, source="session-switch")
+    return {**outcome, "ok": True, "providerKind": kind, "sessionId": session_id}, 200
 
 
 def _hermes_session_to_chat_messages(session, agent_ref):
@@ -26760,29 +27921,52 @@ def save_agent_model_settings(agent_id, payload):
 
 
 def _parse_skill_frontmatter(content):
+    """Parse the required AgentSkills YAML frontmatter subset."""
     name = ""
     description = ""
     text = str(content or "")
     if text.startswith("---"):
         parts = text.split("---", 2)
         if len(parts) >= 3:
-            for line in parts[1].strip().splitlines():
-                key, sep, value = line.partition(":")
-                if not sep:
-                    continue
-                key = key.strip().lower()
-                value = value.strip().strip("'\"")
-                if key == "name":
-                    name = value
-                elif key == "description":
-                    description = value
-    if not description:
-        for line in text.splitlines():
-            clean = line.strip().lstrip("#").strip()
-            if clean and not clean.startswith("---") and not clean.startswith("name:"):
-                description = clean[:180]
-                break
+            lines = parts[1].strip("\n").splitlines()
+            index = 0
+            while index < len(lines):
+                line = lines[index].strip()
+                if line.startswith("name:"):
+                    name = line[5:].strip().strip("'\"")
+                elif line.startswith("description:"):
+                    description = line[12:].strip().strip("'\"")
+                    if description in {"|", ">", "|-", ">-", "|+", ">+"}:
+                        block = []
+                        index += 1
+                        while index < len(lines):
+                            next_raw = lines[index]
+                            if next_raw and not next_raw[0].isspace():
+                                index -= 1
+                                break
+                            value = next_raw.strip()
+                            if value:
+                                block.append(value)
+                            index += 1
+                        description = " ".join(block)
+                index += 1
     return name, description
+
+
+def _validate_provider_skill_content(content, expected_folder=""):
+    text = str(content or "")
+    if len(text.encode("utf-8")) > AGENT_SKILL_FILE_MAX_BYTES:
+        return "Skill content is too large"
+    name, description = _parse_skill_frontmatter(text)
+    if not name:
+        return "SKILL.md requires YAML frontmatter with a name"
+    if not description:
+        return "SKILL.md requires a non-empty frontmatter description"
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", name):
+        return "Skill frontmatter name must use letters, numbers, dots, underscores, or hyphens"
+    if expected_folder and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", expected_folder):
+        return "Skill folder name must use letters, numbers, underscores, or hyphens"
+    return ""
 
 
 def _skill_slug(name):
@@ -26801,7 +27985,10 @@ def _agent_skills_root_for_agent(agent_id):
     if not resolved_agent_id:
         return None, "", _api_error("agent_not_found", "Unknown agent id for skills.", details={"agentId": agent_id}), 404
     provider_kind = str((agent or {}).get("providerKind") or "openclaw").lower()
-    if provider_kind != "openclaw":
+    capabilities = (agent or {}).get("capabilities") if isinstance((agent or {}).get("capabilities"), dict) else {}
+    manifest = _get_provider_registry().manifest(provider_kind)
+    roots = manifest.skill_schema if manifest else []
+    if not capabilities.get("skills") or not roots:
         return None, resolved_agent_id, {
             "ok": True,
             "schemaVersion": AGENT_SKILL_SCHEMA_VERSION,
@@ -26810,16 +27997,29 @@ def _agent_skills_root_for_agent(agent_id):
             "skillsAvailable": False,
             "editable": False,
             "skills": [],
-            "unsupportedReason": f"{provider_kind} skills are not implemented in My Virtual World yet.",
+            "unsupportedReason": f"{provider_kind} does not expose AgentSkills through its provider contract.",
         }, 200
-    workspace_root = _openclaw_workspace_root_for_agent(resolved_agent_id, agent)
+    workspace_root = _provider_workspace_root(agent)
     if not workspace_root:
-        return None, resolved_agent_id, _api_error("workspace_not_found", "OpenClaw workspace root was not found for this agent.", details={"agentId": resolved_agent_id}), 404
-    return os.path.join(workspace_root, "skills"), resolved_agent_id, None, 200
+        return None, resolved_agent_id, _api_error("workspace_not_found", "Provider workspace root was not found for this agent.", details={"agentId": resolved_agent_id}), 404
+    raw_root = roots[0] if isinstance(roots[0], dict) else {}
+    relative = _safe_provider_relpath(raw_root.get("path"))
+    if not relative or raw_root.get("format") != "agentskills":
+        return None, resolved_agent_id, _api_error("invalid_skill_schema", "Provider skill root is invalid.", details={"providerKind": provider_kind}), 500
+    root = os.path.abspath(os.path.join(workspace_root, relative))
+    real_workspace = os.path.realpath(workspace_root)
+    real_parent = os.path.realpath(root if os.path.exists(root) else os.path.dirname(root))
+    if real_parent != real_workspace and not real_parent.startswith(real_workspace + os.sep):
+        return None, resolved_agent_id, _api_error("skill_root_escape", "Provider skill root escapes the agent workspace."), 400
+    if not raw_root.get("writable") or not capabilities.get("resourcesWrite"):
+        return root, resolved_agent_id, {"ok": True, "schemaVersion": AGENT_SKILL_SCHEMA_VERSION, "agentId": resolved_agent_id, "providerKind": provider_kind, "skillsAvailable": True, "editable": False, "skills": [], "unsupportedReason": "Provider skill root is read-only."}, 200
+    return root, resolved_agent_id, None, 200
 
 
 def _skill_file_for(root, skill_name):
     raw_name = str(skill_name or "").strip().strip("/\\")
+    if not raw_name or raw_name != os.path.basename(raw_name) or ".." in raw_name:
+        return None, ""
     slug = _skill_slug(skill_name)
     if not root or not slug:
         return None, ""
@@ -26854,7 +28054,16 @@ def _read_skill_file(skill_file, fallback_name):
         content = ""
         size = 0
     parsed_name, description = _parse_skill_frontmatter(content)
-    return {"name": fallback_name, "title": parsed_name or fallback_name, "description": description, "content": content, "path": skill_file, "editable": True, "size": size}
+    return {
+        "name": fallback_name,
+        "title": parsed_name or fallback_name,
+        "description": description,
+        "content": content,
+        "path": skill_file,
+        "editable": True,
+        "size": size,
+        "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+    }
 
 
 def handle_agent_skills_list(agent_id):
@@ -26863,15 +28072,26 @@ def handle_agent_skills_list(agent_id):
         return True, error, status
     skills = []
     if os.path.isdir(root):
+        real_root = os.path.realpath(root)
         for entry in sorted(os.listdir(root)):
+            if entry.startswith("."):
+                continue
             skill_file = os.path.join(root, entry, "SKILL.md")
+            real_file = os.path.realpath(skill_file)
+            if not (real_file == real_root or real_file.startswith(real_root + os.sep)):
+                continue
             if os.path.isfile(skill_file):
-                skills.append(_read_skill_file(skill_file, entry))
+                item = _read_skill_file(skill_file, entry)
+                validation_error = _validate_provider_skill_content(item.get("content") or "", entry)
+                item["valid"] = not validation_error
+                item["validationError"] = validation_error
+                skills.append(item)
+    agent = _agent_record_for(resolved_agent_id) or {}
     return True, {
         "ok": True,
         "schemaVersion": AGENT_SKILL_SCHEMA_VERSION,
         "agentId": resolved_agent_id,
-        "providerKind": "openclaw",
+        "providerKind": agent.get("providerKind") or "openclaw",
         "skillsAvailable": True,
         "editable": True,
         "skillsRoot": root,
@@ -26892,14 +28112,37 @@ def handle_agent_skill_save(agent_id, payload):
         return False, _api_error("invalid_skill", "Skill name is required and may only contain letters, numbers, dashes, and underscores."), 400
     content = str(payload.get("content") or "")
     if not content.strip():
-        content = f"---\nname: {slug}\ndescription: \n---\n\n# {slug}\n\nInstructions here.\n"
-    if len(content.encode("utf-8")) > AGENT_SKILL_FILE_MAX_BYTES:
-        return False, _api_error("file_too_large", "Skill file is larger than the editor limit.", details={"maxBytes": AGENT_SKILL_FILE_MAX_BYTES}), 413
+        content = f"---\nname: {slug}\ndescription: Agent workflow skill.\n---\n\n# {slug}\n\nInstructions here.\n"
+    validation_error = _validate_provider_skill_content(content, slug)
+    if validation_error:
+        return False, _api_error("invalid_skill", validation_error, details={"skill": slug}), 400
     try:
+        backup_id = ""
+        if os.path.isfile(skill_file):
+            current = Path(skill_file).read_text(encoding="utf-8", errors="replace")
+            current_sha = hashlib.sha256(current.encode("utf-8")).hexdigest()
+            expected_sha = str(payload.get("expectedSha256") or payload.get("expectedRevision") or "")
+            if expected_sha and expected_sha != current_sha:
+                return False, _api_error(
+                    "sha_conflict",
+                    "This skill changed after it was opened. Reload it before saving.",
+                    details={"skill": slug, "currentSha256": current_sha},
+                ), 409
+            backup_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+            backup_file = os.path.join(_provider_resource_backup_root(resolved_agent_id), "skills", backup_id, slug, "SKILL.md")
+            os.makedirs(os.path.dirname(backup_file), exist_ok=True)
+            shutil.copy2(skill_file, backup_file)
         _atomic_write_text(skill_file, content)
     except OSError as exc:
         return False, _api_error("write_failed", "Could not save skill.", details={"error": str(exc)}), 500
-    return True, {"ok": True, "agentId": resolved_agent_id, "skill": slug, "path": skill_file}, 200
+    return True, {
+        "ok": True,
+        "agentId": resolved_agent_id,
+        "skill": slug,
+        "path": skill_file,
+        "backupId": backup_id,
+        "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+    }, 200
 
 
 def handle_agent_skill_delete(agent_id, skill_name):
@@ -26912,10 +28155,65 @@ def handle_agent_skill_delete(agent_id, skill_name):
     if not skill_file or not os.path.isfile(skill_file):
         return False, _api_error("not_found", "Skill not found.", details={"skill": skill_name}), 404
     try:
+        backup_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        backup_folder = os.path.join(_provider_resource_backup_root(resolved_agent_id), "skills", backup_id, slug)
+        os.makedirs(os.path.dirname(backup_folder), exist_ok=True)
+        shutil.copytree(os.path.dirname(skill_file), backup_folder)
         shutil.rmtree(os.path.dirname(skill_file))
     except OSError as exc:
         return False, _api_error("delete_failed", "Could not delete skill.", details={"error": str(exc)}), 500
-    return True, {"ok": True, "agentId": resolved_agent_id, "deleted": slug}, 200
+    return True, {"ok": True, "agentId": resolved_agent_id, "deleted": slug, "backupId": backup_id}, 200
+
+
+def handle_agent_skill_revisions(agent_id, skill_name):
+    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
+    if error:
+        return False, error, status
+    _skill_file, slug = _skill_file_for(root, skill_name)
+    if not slug:
+        return False, _api_error("invalid_skill", "A valid skill name is required."), 400
+    backup_root = os.path.join(_provider_resource_backup_root(resolved_agent_id), "skills")
+    revisions = []
+    if os.path.isdir(backup_root):
+        for backup_id in sorted(os.listdir(backup_root), reverse=True):
+            path = os.path.join(backup_root, backup_id, slug, "SKILL.md")
+            if not os.path.isfile(path):
+                continue
+            raw = Path(path).read_bytes()
+            revisions.append({
+                "backupId": backup_id,
+                "skill": slug,
+                "size": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "modified": datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).isoformat(),
+            })
+    return True, {"ok": True, "agentId": resolved_agent_id, "skill": slug, "revisions": revisions[:50]}, 200
+
+
+def handle_agent_skill_restore(agent_id, payload):
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "skill restore payload must be an object."), 400
+    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
+    if error:
+        return False, error, status
+    skill_file, slug = _skill_file_for(root, payload.get("name") or payload.get("skill"))
+    backup_id = re.sub(r"[^A-Za-z0-9_.-]+", "", str(payload.get("backupId") or ""))
+    if not skill_file or not slug or not backup_id:
+        return False, _api_error("invalid_restore", "A valid skill name and backupId are required."), 400
+    backup_file = os.path.join(_provider_resource_backup_root(resolved_agent_id), "skills", backup_id, slug, "SKILL.md")
+    if not os.path.isfile(backup_file):
+        return False, _api_error("not_found", "Skill backup revision was not found.", details={"skill": slug, "backupId": backup_id}), 404
+    current = Path(skill_file).read_text(encoding="utf-8", errors="replace") if os.path.isfile(skill_file) else ""
+    current_sha = hashlib.sha256(current.encode("utf-8")).hexdigest() if os.path.isfile(skill_file) else ""
+    expected_sha = str(payload.get("expectedSha256") or "")
+    if expected_sha and expected_sha != current_sha:
+        return False, _api_error(
+            "sha_conflict",
+            "This skill changed after it was opened. Reload it before restoring.",
+            details={"currentSha256": current_sha},
+        ), 409
+    content = Path(backup_file).read_text(encoding="utf-8", errors="replace")
+    return handle_agent_skill_save(agent_id, {"name": slug, "content": content})
 
 
 def handle_skills_library_list():
@@ -28713,6 +30011,42 @@ def get_agent_chat():
             if claude_messages:
                 result.setdefault(agent.get("id"), []).extend(claude_messages[-500:])
 
+    # Contract 1.1 transports persist the same normalized history shape for
+    # every non-OpenClaw provider. Merge it into the yellow in-world bubble so
+    # compatible extension providers work without another provider-specific
+    # branch in this function.
+    for agent in roster:
+        provider_kind = str(agent.get("providerKind") or "openclaw")
+        if provider_kind == "openclaw" or agent.get("id") in active_live_agent_ids:
+            continue
+        profile = str(agent.get("profile") or agent.get("providerAgentId") or agent.get("id") or "main")
+        active = _sync_provider_active_session(agent) or _load_generic_provider_session(provider_kind, profile)
+        active_session_id = str(active.get("sessionId") or "")
+        generic_messages = []
+        for msg in _load_provider_history(provider_kind, profile):
+            if not isinstance(msg, dict):
+                continue
+            msg_session_id = str(msg.get("sessionId") or active_session_id)
+            generic_messages.append({
+                "role": msg.get("role") or "assistant",
+                "text": str(msg.get("text") or msg.get("reply") or msg.get("content") or ""),
+                "time": msg.get("time") or "",
+                "ts": msg.get("ts") or msg.get("epochMs") or msg.get("timestamp") or 0,
+                "epochMs": msg.get("epochMs") or msg.get("ts") or 0,
+                "from": msg.get("from") or (agent.get("name") if msg.get("role") != "user" else "You"),
+                "source": provider_kind,
+                "sessionId": msg_session_id,
+                "sessionTitle": f"{provider_kind} {str(msg_session_id)[-8:]}" if msg_session_id else f"{provider_kind} session",
+                "sessionKind": "chat",
+                "activeSession": bool(active_session_id and msg_session_id == active_session_id),
+                "tools": msg.get("tools") if isinstance(msg.get("tools"), list) else [],
+                "thinking": msg.get("thinking") or "",
+                "commentary": msg.get("commentary") or "",
+                "approval": msg.get("approval") if isinstance(msg.get("approval"), dict) else None,
+            })
+        if generic_messages:
+            result.setdefault(agent.get("id"), []).extend(generic_messages[-500:])
+
     # Merge Virtual World's own local A2A log so world-originated
     # communication remains visible from world UI surfaces.
     local_events = _load_comm_history(limit=1000)
@@ -28852,6 +30186,292 @@ def get_roster(meta=None):
         _merged_roster_cache_key = cache_key
         _merged_roster_cache = [dict(item) for item in merged]
         return [dict(item) for item in merged]
+
+
+# ─── PROVIDER SDK RUN/HISTORY TRANSPORT ─────────────────────────
+_PROVIDER_RUNS = {}
+_PROVIDER_RUNS_LOCK = threading.RLock()
+
+
+def _provider_history_path(provider_kind, profile):
+    return os.path.join(STATUS_DIR, f"provider-chat-{_generic_provider_state_slug(provider_kind)}-{_generic_provider_state_slug(profile)}.json")
+
+
+def _load_provider_history(provider_kind, profile):
+    try:
+        with open(_provider_history_path(provider_kind, profile), "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        rows = payload.get("messages") if isinstance(payload, dict) else payload
+        return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_provider_history(provider_kind, profile, messages):
+    payload = {"version": 1, "providerKind": provider_kind, "profile": profile, "messages": list(messages or [])[-500:]}
+    _atomic_write_text(_provider_history_path(provider_kind, profile), json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n")
+
+
+def _provider_run_emit(meta, event_name, payload=None):
+    condition = meta["condition"]
+    with condition:
+        event = {"id": meta["nextEventId"], "event": event_name, "data": dict(payload or {})}
+        meta["nextEventId"] += 1
+        meta["events"].append(event)
+        condition.notify_all()
+    return event
+
+
+def _provider_progress_payload(state, meta):
+    state = state if isinstance(state, dict) else {}
+    return {
+        "runId": meta.get("runId"),
+        "agentId": meta.get("agentId"),
+        "providerKind": meta.get("providerKind"),
+        "profile": meta.get("profile"),
+        "sessionId": state.get("sessionId") or state.get("session_id") or meta.get("sessionId") or "",
+        "status": state.get("status") or "running",
+        "reply": str(state.get("reply") or state.get("text") or ""),
+        "thinking": str(state.get("thinking") or state.get("activity") or ""),
+        "commentary": str(state.get("commentary") or ""),
+        "tools": state.get("tools") if isinstance(state.get("tools"), list) else [],
+        "approval": state.get("approval") if isinstance(state.get("approval"), dict) else None,
+        "tokenUsage": state.get("tokenUsage") if isinstance(state.get("tokenUsage"), dict) else None,
+        "error": str(state.get("error") or ""),
+    }
+
+
+def _provider_run_for_agent(provider_kind, profile):
+    with _PROVIDER_RUNS_LOCK:
+        for run in _PROVIDER_RUNS.values():
+            if run.get("providerKind") == provider_kind and run.get("profile") == profile and not run.get("done"):
+                return run
+    return None
+
+
+def _provider_attachment_files(raw_attachments):
+    attachments = raw_attachments if isinstance(raw_attachments, list) else []
+    resolved = []
+    allowed_roots = [os.path.realpath(UPLOADS_DIR), os.path.realpath(os.path.join(STATUS_DIR, "uploads"))]
+    host_root = os.path.realpath(UPLOADS_HOST_DIR) if UPLOADS_HOST_DIR else ""
+    for item in attachments:
+        if not isinstance(item, dict) or not item.get("path"):
+            continue
+        raw = os.path.expanduser(str(item.get("path") or "").strip())
+        candidates = []
+        if os.path.isabs(raw):
+            candidates.append(raw)
+            raw_real = os.path.realpath(raw)
+            if host_root and (raw_real == host_root or raw_real.startswith(host_root + os.sep)):
+                candidates.append(os.path.join(UPLOADS_DIR, os.path.relpath(raw_real, host_root)))
+        else:
+            safe_rel = _safe_provider_relpath(raw)
+            if safe_rel:
+                candidates.extend([os.path.join(UPLOADS_DIR, safe_rel), os.path.join(STATUS_DIR, "uploads", safe_rel)])
+        selected = ""
+        for candidate in candidates:
+            real = os.path.realpath(candidate)
+            if not any(real == root or real.startswith(root + os.sep) for root in allowed_roots):
+                continue
+            if os.path.isfile(real):
+                selected = real
+                break
+        if not selected:
+            return [], f"Attachment path is outside the managed upload roots: {os.path.basename(raw) or 'attachment'}"
+        resolved.append(selected)
+    return list(dict.fromkeys(resolved)), ""
+
+
+def _handle_provider_run_start(body):
+    agent = _agent_record_for((body or {}).get("agentId") or (body or {}).get("agent"))
+    if not agent:
+        return {"ok": False, "error": "Unknown agent", "_status": 404}
+    provider_kind = str(agent.get("providerKind") or "openclaw")
+    profile = str(agent.get("providerAgentId") or agent.get("profile") or agent.get("id"))
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    if provider_kind == "openclaw":
+        return {"ok": False, "code": "native_transport_required", "error": "OpenClaw uses the existing Gateway stream", "_status": 400}
+    if not capabilities.get("chat"):
+        return {"ok": False, "error": f"{provider_kind} does not support chat", "_status": 405}
+    message = str((body or {}).get("message") or "").strip()
+    if not message:
+        return {"ok": False, "error": "message is required", "_status": 400}
+    try:
+        timeout_sec = max(1, min(7200, int((body or {}).get("timeoutSec") or 900)))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "timeoutSec must be a number of seconds", "_status": 400}
+    attachments = (body or {}).get("attachments") or []
+    if attachments and not capabilities.get("attachments"):
+        return {"ok": False, "error": f"{provider_kind} does not declare attachment support", "_status": 405}
+    attachment_files, attachment_error = _provider_attachment_files(attachments)
+    if attachment_error:
+        return {"ok": False, "error": attachment_error, "_status": 400}
+    if _provider_run_for_agent(provider_kind, profile):
+        return {"ok": False, "error": "This agent already has an active provider run", "_status": 409}
+    health = _get_provider_registry().invoke(provider_kind, "test")
+    if isinstance(health, dict) and health.get("installed") and health.get("authOk") is False:
+        return {
+            "ok": False,
+            "code": "native_login_required",
+            "error": str(health.get("error") or f"{provider_kind} is installed but not authenticated. Sign in with its native CLI."),
+            "_status": 409,
+        }
+    active = _load_generic_provider_session(provider_kind, profile)
+    session_id = str((body or {}).get("sessionId") or active.get("sessionId") or "")
+    run_id = f"provider-{_generic_provider_state_slug(provider_kind)}-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+    meta = {
+        "runId": run_id, "agentId": agent.get("id"), "agentName": agent.get("name") or profile,
+        "providerKind": provider_kind, "profile": profile, "sessionId": session_id,
+        "condition": threading.Condition(), "events": [], "nextEventId": 1,
+        "startedAt": int(time.time() * 1000), "done": False, "result": None,
+    }
+    with _PROVIDER_RUNS_LOCK:
+        _PROVIDER_RUNS[run_id] = meta
+    now_ms = int(time.time() * 1000)
+    history = _load_provider_history(provider_kind, profile)
+    history.append({"role": "user", "text": message, "epochMs": now_ms, "ts": now_ms, "sessionId": session_id, "runId": run_id, "source": provider_kind})
+    _save_provider_history(provider_kind, profile, history)
+    _provider_run_emit(meta, "run.started", _provider_progress_payload({"thinking": f"Starting {agent.get('name') or provider_kind}."}, meta))
+
+    def worker():
+        def on_progress(state):
+            payload = _provider_progress_payload(state, meta)
+            if payload.get("sessionId"):
+                meta["sessionId"] = payload["sessionId"]
+            _provider_run_emit(meta, "turn.progress", payload)
+        kwargs = {"session_id": session_id, "timeout_sec": timeout_sec, "on_progress": on_progress}
+        if attachment_files:
+            kwargs["files"] = attachment_files
+        result = _get_provider_registry().invoke(provider_kind, "send_chat_message", profile, message, agent=agent, **kwargs)
+        if not isinstance(result, dict):
+            result = {"ok": False, "error": "Provider returned an invalid chat response"}
+        payload = _provider_progress_payload(result, meta)
+        payload["status"] = "completed" if result.get("ok") else "failed"
+        if payload.get("sessionId"):
+            _save_generic_provider_session(provider_kind, profile, payload["sessionId"], source="provider-run")
+        end_ms = int(time.time() * 1000)
+        history = _load_provider_history(provider_kind, profile)
+        history.append({
+            "role": "assistant", "text": payload.get("reply") or "", "thinking": payload.get("thinking") or "",
+            "commentary": payload.get("commentary") or "", "tools": payload.get("tools") or [], "approval": payload.get("approval"),
+            "error": payload.get("error") or None, "epochMs": end_ms, "ts": end_ms,
+            "sessionId": payload.get("sessionId") or "", "runId": run_id, "source": provider_kind,
+        })
+        _save_provider_history(provider_kind, profile, history)
+        _provider_run_emit(meta, "run.completed" if result.get("ok") else "run.failed", payload)
+        with meta["condition"]:
+            meta["done"] = True
+            meta["result"] = result
+            meta["condition"].notify_all()
+
+    threading.Thread(target=worker, daemon=True, name=f"provider-sdk-{run_id}").start()
+    return {"ok": True, "runId": run_id, "sessionId": session_id, "providerKind": provider_kind, "profile": profile}
+
+
+def _handle_provider_run_events(handler, run_id):
+    with _PROVIDER_RUNS_LOCK:
+        meta = _PROVIDER_RUNS.get(str(run_id or ""))
+    if not meta:
+        handler.send_response(404)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.end_headers()
+        handler.wfile.write(b'event: run.failed\ndata: {"error":"Provider run not found"}\n\n')
+        return
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    handler.close_connection = True
+    cursor = 0
+    try:
+        while True:
+            with meta["condition"]:
+                if cursor >= len(meta["events"]) and not meta.get("done"):
+                    meta["condition"].wait(timeout=0.5)
+                events = list(meta["events"][cursor:])
+                cursor += len(events)
+                done = bool(meta.get("done"))
+            for item in events:
+                encoded = json.dumps(item["data"], ensure_ascii=False, default=str)
+                handler.wfile.write(f"id: {item['id']}\nevent: {item['event']}\ndata: {encoded}\n\n".encode("utf-8"))
+                handler.wfile.flush()
+            if done and cursor >= len(meta["events"]):
+                break
+    except (BrokenPipeError, ConnectionError, OSError):
+        pass
+
+
+def _handle_provider_interrupt(body):
+    agent = _agent_record_for((body or {}).get("agentId") or (body or {}).get("agent"))
+    if not agent:
+        return {"ok": False, "error": "Unknown agent", "_status": 404}
+    provider_kind = str(agent.get("providerKind") or "openclaw")
+    profile = str(agent.get("providerAgentId") or agent.get("profile") or agent.get("id"))
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    if not capabilities.get("interrupt"):
+        return {"ok": False, "error": f"{provider_kind} does not declare interrupt", "_status": 405}
+    result = _get_provider_registry().invoke(provider_kind, "interrupt", profile)
+    if not isinstance(result, dict):
+        result = {"ok": False, "error": "Invalid provider interrupt response"}
+    result["_status"] = 200 if result.get("ok") else 409
+    return result
+
+
+def _handle_provider_approval_pending(agent_id):
+    agent = _agent_record_for(agent_id)
+    if not agent:
+        return {"ok": False, "error": "Unknown agent", "_status": 404}
+    provider_kind = str(agent.get("providerKind") or "openclaw")
+    profile = str(agent.get("providerAgentId") or agent.get("profile") or agent.get("id"))
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    if not capabilities.get("approvals"):
+        return {
+            "ok": False,
+            "code": "not_supported",
+            "error": f"{provider_kind} does not declare native approval events",
+            "_status": 405,
+        }
+    result = _get_provider_registry().invoke(provider_kind, "pending_approval", profile)
+    if not isinstance(result, dict):
+        result = {"ok": False, "error": "Invalid provider approval response"}
+    pending = result.get("pending") if isinstance(result.get("pending"), dict) else None
+    if pending:
+        pending["agentId"] = pending.get("agentId") or agent.get("id") or agent_id
+        pending["profile"] = pending.get("profile") or profile
+    result.setdefault("providerKind", provider_kind)
+    result.setdefault("profile", profile)
+    result["_status"] = 200 if result.get("ok") else 409
+    return result
+
+
+def _handle_provider_approval_respond(body):
+    body = body if isinstance(body, dict) else {}
+    approval = body.get("approval") if isinstance(body.get("approval"), dict) else {}
+    agent = _agent_record_for(body.get("agentId") or body.get("agent") or approval.get("agentId"))
+    if not agent:
+        return {"ok": False, "error": "Unknown agent", "_status": 404}
+    provider_kind = str(agent.get("providerKind") or "openclaw")
+    profile = str(agent.get("providerAgentId") or agent.get("profile") or agent.get("id"))
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    if not capabilities.get("approvals"):
+        return {
+            "ok": False,
+            "code": "not_supported",
+            "error": f"{provider_kind} does not declare native approval events",
+            "_status": 405,
+        }
+    approval_id = str(body.get("approvalId") or body.get("approval_id") or approval.get("approval_id") or approval.get("id") or "").strip()
+    if not approval_id:
+        return {"ok": False, "error": "approvalId is required", "_status": 400}
+    choice = str(body.get("choice") or body.get("action") or "cancel").strip().lower()
+    result = _get_provider_registry().invoke(provider_kind, "respond_approval", profile, approval_id, choice)
+    if not isinstance(result, dict):
+        result = {"ok": False, "error": "Invalid provider approval response"}
+    result.setdefault("providerKind", provider_kind)
+    result.setdefault("profile", profile)
+    result["_status"] = 200 if result.get("ok") else 409
+    return result
 
 # ─── HTTP HANDLER ─────────────────────────────────────────────────
 CLIENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "client")
@@ -29266,6 +30886,70 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/agent-platforms":
             return self._send_json(_handle_agent_platforms())
 
+        if path == "/api/providers":
+            manifests = []
+            for manifest in _get_provider_registry().manifests(include_health=True):
+                item = _redact_provider_secrets(manifest)
+                item["health"] = _public_provider_health(manifest.get("health") or {})
+                manifests.append(item)
+            return self._send_json({
+                "ok": True,
+                "contractVersion": PROVIDER_CONTRACT_VERSION,
+                "providers": manifests,
+                "conformance": _get_provider_registry().conformance(),
+            })
+
+        if path == "/api/providers/conformance":
+            return self._send_json(_get_provider_registry().conformance())
+
+        if path == "/api/providers/settings":
+            qs = urllib.parse.parse_qs(parsed.query)
+            provider_id = (qs.get("providerId") or qs.get("provider") or [""])[0]
+            return self._send_json(_provider_settings_payload(provider_id))
+
+        if path == "/api/providers/discovery":
+            qs = urllib.parse.parse_qs(parsed.query)
+            if str((qs.get("refresh") or [""])[0]).lower() in {"1", "true", "yes"}:
+                _refresh_provider_discovery(force=True)
+            return self._send_json({"ok": True, "contractVersion": PROVIDER_CONTRACT_VERSION, "agents": discover_agents()})
+
+        if path == "/api/providers/resources":
+            qs = urllib.parse.parse_qs(parsed.query)
+            result = _handle_provider_resource({"action": "list", "agentId": (qs.get("agentId") or qs.get("agent") or [""])[0]})
+            return self._send_json(result, int(result.pop("_status", 200)))
+
+        if path == "/api/providers/skills":
+            qs = urllib.parse.parse_qs(parsed.query)
+            ok, result, status = handle_agent_skills_list((qs.get("agentId") or qs.get("agent") or [""])[0])
+            return self._send_json(result, status)
+
+        if path == "/api/providers/history":
+            qs = urllib.parse.parse_qs(parsed.query)
+            agent = _agent_record_for((qs.get("agentId") or qs.get("agent") or [""])[0])
+            if not agent:
+                return self._send_json({"ok": False, "error": "Unknown agent"}, 404)
+            kind = str(agent.get("providerKind") or "openclaw")
+            profile = str(agent.get("providerAgentId") or agent.get("profile") or agent.get("id"))
+            return self._send_json({"ok": True, "providerKind": kind, "profile": profile, "messages": _load_provider_history(kind, profile)})
+
+        if path == "/api/providers/sessions":
+            qs = urllib.parse.parse_qs(parsed.query)
+            try:
+                limit = max(1, min(200, int((qs.get("limit") or [40])[0])))
+            except (TypeError, ValueError):
+                limit = 40
+            payload, status = handle_chat_sessions_list((qs.get("agentId") or qs.get("agent") or [""])[0], limit=limit)
+            return self._send_json(payload, status)
+
+        if path == "/api/providers/approvals":
+            qs = urllib.parse.parse_qs(parsed.query)
+            result = _handle_provider_approval_pending((qs.get("agentId") or qs.get("agent") or [""])[0])
+            return self._send_json(result, int(result.pop("_status", 200 if result.get("ok") else 409)))
+
+        if path.startswith("/api/providers/runs/") and path.endswith("/events"):
+            run_id = urllib.parse.unquote(path[len("/api/providers/runs/"):-len("/events")].strip("/"))
+            return _handle_provider_run_events(self, run_id)
+
         if path == "/api/agent-models":
             qs = urllib.parse.parse_qs(parsed.query)
             agent_id = (qs.get("agent") or qs.get("agentId") or [""])[0]
@@ -29537,12 +31221,10 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             total_agents = len(roster)
             for a in _limited(roster, get_agent_limit()):
                 provider_kind = a.get("providerKind", "openclaw")
-                if provider_kind == "hermes":
-                    session_key = f"hermes:{a.get('profile') or a.get('providerAgentId') or a['id']}"
-                elif provider_kind == "codex":
-                    session_key = f"codex:{a.get('profile') or a.get('providerAgentId') or a['id']}"
-                else:
+                if provider_kind == "openclaw":
                     session_key = f"agent:{a['id']}:main"
+                else:
+                    session_key = f"{provider_kind}:{a.get('profile') or a.get('providerAgentId') or a['id']}"
                 oc = oc_overrides.get(a["id"], {})
                 branch_id = oc.get("branch", "")
                 branch_name = oc_branches.get(branch_id, "") if branch_id else ""
@@ -29555,6 +31237,8 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                     "providerKind": provider_kind,
                     "providerType": a.get("providerType", "runtime"),
                     "providerAgentId": a.get("providerAgentId", a["id"]),
+                    "providerConnectionId": a.get("providerConnectionId", "default"),
+                    "capabilities": a.get("capabilities") if isinstance(a.get("capabilities"), dict) else {},
                     "model": a.get("model", ""),
                     "provider": a.get("provider", ""),
                     # Identity.md is the source of truth for the visible agent persona.
@@ -29591,6 +31275,17 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 })
 
             requested_agent = _agent_record_for(agent_key) if agent_key else None
+            requested_kind = str((requested_agent or {}).get("providerKind") or provider_kind or "openclaw").lower()
+            if requested_agent and requested_kind != "openclaw":
+                model = str(requested_agent.get("model") or "")
+                return self._send_json({
+                    "model": model or "Native runtime default",
+                    "provider": requested_agent.get("provider") or requested_kind,
+                    "providerKind": requested_kind,
+                    "contextWindow": 0,
+                    "capabilities": requested_agent.get("capabilities") if isinstance(requested_agent.get("capabilities"), dict) else {},
+                })
+
             cfg_agent = _openclaw_config_agent_for(agent_key, requested_agent, model_cfg) if agent_key else None
             defaults = model_cfg.get("agents", {}).get("defaults", {}).get("model", {}) if isinstance(model_cfg, dict) else {}
             provider = str(defaults.get("provider") or "")
@@ -29684,6 +31379,94 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             result = _handle_agent_create(self._read_body() or {})
             status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 500) or 500)
             return self._send_json(result, status)
+
+        if path == "/api/agent/delete":
+            result = _handle_agent_delete(self._read_body() or {})
+            status = int(result.pop("_status", 200) or 200) if result.get("ok") else int(result.pop("_status", 500) or 500)
+            return self._send_json(result, status)
+
+        if path == "/api/providers/settings":
+            result = _save_provider_settings(self._read_body() or {})
+            return self._send_json(result, int(result.pop("_status", 200 if result.get("ok") else 400)))
+
+        if path == "/api/providers/test":
+            result = _test_provider_settings(self._read_body() or {})
+            return self._send_json(result, int(result.pop("_status", 200 if result.get("ok") else 400)))
+
+        if path == "/api/providers/refresh":
+            _refresh_provider_discovery(force=True)
+            _refresh_agent_roster_after_create()
+            return self._send_json({"ok": True, "agents": discover_agents()})
+
+        if path == "/api/providers/resources":
+            result = _handle_provider_resource(self._read_body() or {})
+            return self._send_json(result, int(result.pop("_status", 200 if result.get("ok") else 400)))
+
+        if path == "/api/providers/skills":
+            body = self._read_body() or {}
+            action = str(body.get("action") or "list")
+            agent_id = body.get("agentId") or body.get("agent")
+            if action == "list":
+                _ok, result, status = handle_agent_skills_list(agent_id)
+            elif action in {"save", "install", "update"}:
+                _ok, result, status = handle_agent_skill_save(agent_id, body)
+            elif action == "delete":
+                _ok, result, status = handle_agent_skill_delete(agent_id, body.get("name") or body.get("skill"))
+            elif action == "revisions":
+                _ok, result, status = handle_agent_skill_revisions(agent_id, body.get("name") or body.get("skill"))
+            elif action == "restore":
+                _ok, result, status = handle_agent_skill_restore(agent_id, body)
+            else:
+                result, status = {"ok": False, "error": f"Unknown skill action: {action}"}, 400
+            return self._send_json(result, status)
+
+        if path == "/api/providers/runs":
+            result = _handle_provider_run_start(self._read_body() or {})
+            return self._send_json(result, int(result.pop("_status", 200 if result.get("ok") else 502)))
+
+        if path == "/api/providers/interrupt":
+            result = _handle_provider_interrupt(self._read_body() or {})
+            return self._send_json(result, int(result.pop("_status", 200 if result.get("ok") else 409)))
+
+        if path == "/api/providers/approvals":
+            result = _handle_provider_approval_respond(self._read_body() or {})
+            return self._send_json(result, int(result.pop("_status", 200 if result.get("ok") else 409)))
+
+        if path == "/api/providers/sessions":
+            body = self._read_body() or {}
+            action = str(body.get("action") or "list")
+            agent_id = body.get("agentId") or body.get("agent")
+            if action == "list":
+                result, status = handle_chat_sessions_list(agent_id, limit=int(body.get("limit") or 40))
+            elif action == "create":
+                result, status = handle_chat_session_create(agent_id, body)
+            elif action == "delete":
+                result, status = handle_chat_session_delete(agent_id, str(body.get("sessionId") or body.get("sessionKey") or ""), body)
+            elif action == "switch":
+                result, status = handle_chat_session_switch(agent_id, str(body.get("sessionId") or body.get("sessionKey") or ""), body)
+            else:
+                result, status = {"ok": False, "error": f"Unknown session action: {action}"}, 400
+            return self._send_json(result, status)
+
+        if path == "/api/providers/profile":
+            body = self._read_body() or {}
+            agent = _agent_record_for(body.get("agentId") or body.get("agent"))
+            if not agent:
+                return self._send_json({"ok": False, "error": "Unknown agent"}, 404)
+            kind = str(agent.get("providerKind") or "openclaw")
+            profile = str(agent.get("providerAgentId") or agent.get("profile") or agent.get("id"))
+            result = _get_provider_registry().invoke(kind, "update_profile", profile, body.get("patch") if isinstance(body.get("patch"), dict) else body)
+            return self._send_json(result, 200 if isinstance(result, dict) and result.get("ok") else 502)
+
+        if path == "/api/providers/history/clear":
+            body = self._read_body() or {}
+            agent = _agent_record_for(body.get("agentId") or body.get("agent"))
+            if not agent:
+                return self._send_json({"ok": False, "error": "Unknown agent"}, 404)
+            kind = str(agent.get("providerKind") or "openclaw")
+            profile = str(agent.get("providerAgentId") or agent.get("profile") or agent.get("id"))
+            _save_provider_history(kind, profile, [])
+            return self._send_json({"ok": True, "providerKind": kind, "profile": profile})
 
         if path == "/api/hermes/runs":
             result = _handle_hermes_run_start(self._read_body())
@@ -30237,6 +32020,27 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                     "lastReviewedAt": str(docs.get("lastReviewedAt") or "")[:80],
                     "reviewedVia": str(docs.get("reviewedVia") or "")[:80],
                 }
+            agent_record = _agent_record_for(resolved_agent_id) or {}
+            native_patch = {
+                key: data.get(key)
+                for key in ("name", "emoji", "role", "model", "instructions")
+                if key in data
+            }
+            capabilities = agent_record.get("capabilities") if isinstance(agent_record.get("capabilities"), dict) else {}
+            native_result = None
+            if native_patch and capabilities.get("profileEdit"):
+                native_result = _get_provider_registry().invoke(
+                    agent_record.get("providerKind") or "openclaw",
+                    "update_profile",
+                    agent_record.get("providerAgentId") or agent_record.get("profile") or resolved_agent_id,
+                    native_patch,
+                )
+                if not isinstance(native_result, dict) or not native_result.get("ok"):
+                    return self._send_json({
+                        "ok": False,
+                        "error": (native_result or {}).get("error") if isinstance(native_result, dict) else "Native profile update failed",
+                        "code": "native_profile_update_failed",
+                    }, 502)
             # Save only editable framework-profile fields against a fresh
             # document. Never let a stale Settings form overwrite Resident
             # memory, Live authority, or an action/checkpoint subtree.
@@ -30254,7 +32058,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 fresh_meta["agentProfiles"] = fresh_profiles
                 save_world_meta(fresh_meta)
                 profile = latest_profile
-            identity_path = _find_agent_identity_file(resolved_agent_id)
+            identity_path = _find_agent_identity_file(resolved_agent_id) if (agent_record.get("providerKind") or "openclaw") == "openclaw" else None
             wrote_identity = False
             if profile.get("name"):
                 wrote_identity = _update_identity_field(identity_path, "Name", profile["name"]) or wrote_identity
@@ -30268,6 +32072,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 "agentId": resolved_agent_id,
                 "identityPath": identity_path,
                 "wroteIdentity": wrote_identity,
+                "native": native_result,
             })
 
         if path == "/api/decorations":

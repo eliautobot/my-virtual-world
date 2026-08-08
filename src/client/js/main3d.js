@@ -34588,12 +34588,6 @@ setInterval(() => {
   if (expandedBuildingOccupants.size > 0) updateBuildingList();
 }, 2500);
 
-const NEW_AGENT_PLATFORM_DEFAULTS = {
-  openclaw: { name: 'New OpenClaw Agent', role: 'AI assistant', emoji: '🤖', prompt: '' },
-  hermes: { name: 'New Hermes Agent', role: 'Hermes Agent', emoji: '⚕️', prompt: '' },
-  codex: { name: 'New Codex Agent', role: 'Codex Agent', emoji: '🤖', prompt: 'You are a helpful Codex agent inside My Virtual World.' },
-};
-
 let _newAgentPlatformsCache = null;
 let _newAgentDialog = null;
 
@@ -34606,8 +34600,17 @@ async function fetchNewAgentPlatforms() {
   return platforms;
 }
 
-function getNewAgentPlatformDefaults(platformId) {
-  return NEW_AGENT_PLATFORM_DEFAULTS[platformId] || NEW_AGENT_PLATFORM_DEFAULTS.openclaw;
+function getNewAgentPlatformDefaults(platform) {
+  const item = typeof platform === 'string'
+    ? (_newAgentPlatformsCache || []).find(candidate => candidate?.id === platform) || { id: platform, label: platform }
+    : (platform || {});
+  const label = item.label || item.name || item.id || 'Provider';
+  return {
+    name: `New ${label} Agent`,
+    role: `${label} Agent`,
+    emoji: item.icon || '🤖',
+    prompt: `You are a ${label}-backed agent inside My Virtual World. Follow your assigned role and the native runtime's safety rules.`,
+  };
 }
 
 function closeNewAgentDialog() {
@@ -34628,26 +34631,80 @@ function updateNewAgentDialogPlatform(modal) {
   const emojiInput = modal.querySelector('#newAgent-emoji');
   const promptInput = modal.querySelector('#newAgent-prompt');
   const note = modal.querySelector('#newAgent-platformNote');
-  const codexOptions = modal.querySelector('#newAgent-codexOptions');
-  const customDir = modal.querySelector('#newAgent-codexCustomDirectory');
   const selected = platformSelect?.selectedOptions?.[0] || null;
   const platformId = selected?.value || 'openclaw';
-  const defaults = getNewAgentPlatformDefaults(platformId);
+  const platform = (_newAgentPlatformsCache || []).find(item => item?.id === platformId) || { id: platformId };
+  const defaults = getNewAgentPlatformDefaults(platform);
   if (nameInput && (!nameInput.value || nameInput.dataset.autofilled === 'true')) {
     nameInput.value = defaults.name;
     nameInput.dataset.autofilled = 'true';
   }
-  if (roleInput) roleInput.value = defaults.role;
-  if (emojiInput) emojiInput.value = defaults.emoji;
-  if (promptInput && platformId === 'codex' && !promptInput.value.trim()) promptInput.value = defaults.prompt;
-  if (codexOptions) codexOptions.style.display = platformId === 'codex' ? 'grid' : 'none';
-  if (customDir && platformId !== 'codex') customDir.value = '';
+  if (roleInput && (!roleInput.value || roleInput.dataset.autofilled === 'true')) {
+    roleInput.value = defaults.role;
+    roleInput.dataset.autofilled = 'true';
+  }
+  if (emojiInput && (!emojiInput.value || emojiInput.dataset.autofilled === 'true')) {
+    emojiInput.value = defaults.emoji;
+    emojiInput.dataset.autofilled = 'true';
+  }
+  if (promptInput && (!promptInput.value || promptInput.dataset.autofilled === 'true')) {
+    promptInput.value = defaults.prompt;
+    promptInput.dataset.autofilled = 'true';
+  }
   if (note) {
-    note.textContent = selected?.dataset.description || '';
+    const resourceNames = (platform.resourceSchema || []).filter(item => item?.readable !== false).map(item => item.label || item.id);
+    const skillNames = (platform.skillSchema || []).map(item => item.label || item.path || item.id);
+    note.textContent = [
+      selected?.dataset.description || platform.description || '',
+      resourceNames.length ? `Agent Desk files: ${resourceNames.join(', ')}.` : 'No Agent Desk files declared.',
+      skillNames.length ? `Skills: ${skillNames.join(', ')}.` : 'No AgentSkills root declared.',
+    ].filter(Boolean).join(' ');
     const error = selected?.dataset.error || '';
     note.classList.toggle('warning', Boolean(error));
     if (error) note.textContent = error;
   }
+  renderNewAgentProviderFields(modal, platform);
+}
+
+function renderNewAgentProviderFields(modal, platform) {
+  const holder = modal.querySelector('#newAgent-providerFields');
+  if (!holder) return;
+  const fields = (platform?.creationSchema?.fields || []).filter(field => field && !['name', 'role', 'emoji', 'instructions'].includes(field.id));
+  holder.innerHTML = fields.map(field => {
+    const id = String(field.id || '');
+    const condition = field.showWhen || {};
+    const conditionField = condition.field || Object.keys(condition)[0] || '';
+    const conditionValue = condition.value ?? condition[conditionField] ?? '';
+    let control = '';
+    if (field.type === 'select') {
+      control = `<select data-provider-field="${escapeAttr(id)}" ${field.required ? 'data-provider-required="true"' : ''}>${(field.options || []).map(option => `<option value="${escapeAttr(option.value)}" ${String(option.value) === String(field.default ?? '') ? 'selected' : ''}>${escapeHtml(option.label || option.value)}</option>`).join('')}</select>`;
+    } else if (field.type === 'textarea') {
+      control = `<textarea rows="3" data-provider-field="${escapeAttr(id)}" ${field.required ? 'data-provider-required="true"' : ''}>${escapeTextareaValue(field.default || '')}</textarea>`;
+    } else {
+      const inputType = field.type === 'number' ? 'number' : 'text';
+      control = `<input type="${inputType}" data-provider-field="${escapeAttr(id)}" value="${escapeAttr(field.default ?? '')}" ${field.required ? 'data-provider-required="true"' : ''} autocomplete="off">`;
+    }
+    return `<label class="form-group agent-create-provider-field" data-show-field="${escapeAttr(conditionField)}" data-show-value="${escapeAttr(conditionValue)}"><span>${escapeHtml(field.label || id)}</span>${control}${field.help ? `<small>${escapeHtml(field.help)}</small>` : ''}</label>`;
+  }).join('');
+  const refreshConditions = () => {
+    const values = {};
+    holder.querySelectorAll('[data-provider-field]').forEach(control => { values[control.dataset.providerField] = control.value; });
+    holder.querySelectorAll('.agent-create-provider-field').forEach(label => {
+      const conditionField = label.dataset.showField || '';
+      const hidden = Boolean(conditionField) && String(values[conditionField] ?? '') !== String(label.dataset.showValue ?? '');
+      label.hidden = hidden;
+      const control = label.querySelector('[data-provider-field]');
+      if (control) {
+        control.disabled = hidden;
+        control.required = !hidden && control.dataset.providerRequired === 'true';
+      }
+    });
+  };
+  holder.querySelectorAll('[data-provider-field]').forEach(control => {
+    control.addEventListener('change', refreshConditions);
+    control.addEventListener('input', refreshConditions);
+  });
+  refreshConditions();
 }
 
 function setNewAgentDialogError(modal, message) {
@@ -34682,6 +34739,8 @@ function buildWorldAgentFromCreateResult(result) {
     providerKind,
     providerType: result.providerType || (providerKind === 'codex' ? 'harness' : 'runtime'),
     providerAgentId: result.providerAgentId || profile || id,
+    providerConnectionId: result.providerConnectionId || 'default',
+    capabilities: result.capabilities || {},
     profile,
     workspace: result.workspace || '',
     status: 'idle',
@@ -34730,14 +34789,21 @@ async function submitNewAgentDialog(modal) {
   const role = (modal.querySelector('#newAgent-role')?.value || '').trim();
   const emoji = (modal.querySelector('#newAgent-emoji')?.value || '').trim();
   const prompt = (modal.querySelector('#newAgent-prompt')?.value || '').trim();
-  const codexCreationMode = modal.querySelector('input[name="newAgent-codexMode"]:checked')?.value || 'standard';
-  const codexCustomDirectory = (modal.querySelector('#newAgent-codexCustomDirectory')?.value || '').trim();
   if (!name) {
     setNewAgentDialogError(modal, 'Agent name is required.');
     return;
   }
-  if (platform === 'codex' && codexCreationMode === 'custom' && !codexCustomDirectory) {
-    setNewAgentDialogError(modal, 'Choose a custom parent directory for this Codex agent.');
+  const providerValues = {};
+  let missingField = null;
+  modal.querySelectorAll('[data-provider-field]').forEach(control => {
+    if (control.disabled) return;
+    const value = control.type === 'number' && control.value !== '' ? Number(control.value) : control.value.trim();
+    providerValues[control.dataset.providerField] = value;
+    if (control.required && value === '' && !missingField) missingField = control;
+  });
+  if (missingField) {
+    setNewAgentDialogError(modal, 'Complete all required provider fields.');
+    missingField.focus();
     return;
   }
   const createBtn = modal.querySelector('#newAgent-create');
@@ -34747,11 +34813,7 @@ async function submitNewAgentDialog(modal) {
     createBtn.textContent = 'Creating...';
   }
   try {
-    const payload = { platform, name, role, emoji, prompt };
-    if (platform === 'codex') {
-      payload.codexCreationMode = codexCreationMode;
-      payload.codexCustomDirectory = codexCustomDirectory;
-    }
+    const payload = { platform, name, role, emoji, prompt, instructions: prompt, ...providerValues };
     const res = await fetch('/api/agent/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -34800,12 +34862,6 @@ async function showCreateAgentDialog() {
             </select>
           </label>
           <div id="newAgent-platformNote" class="agent-create-platform-note"></div>
-          <div id="newAgent-codexOptions" class="agent-create-codex-options" style="display:none">
-            <div class="agent-create-option-title">Codex Location</div>
-            <label><input type="radio" name="newAgent-codexMode" value="standard" checked> Standard Codex agents directory</label>
-            <label><input type="radio" name="newAgent-codexMode" value="custom"> Custom parent directory</label>
-            <input id="newAgent-codexCustomDirectory" placeholder="/path/to/parent-directory" autocomplete="off">
-          </div>
           <label class="form-group">
             <span>Name</span>
             <input id="newAgent-name" maxlength="60" autocomplete="off">
@@ -34822,6 +34878,7 @@ async function showCreateAgentDialog() {
             <span>Standing Prompt</span>
             <textarea id="newAgent-prompt" rows="4" maxlength="3000"></textarea>
           </label>
+          <div id="newAgent-providerFields" class="agent-create-provider-fields"></div>
           <div id="newAgent-error" class="agent-create-error" style="display:none"></div>
         </div>
         <div class="agent-create-actions">
@@ -34834,20 +34891,15 @@ async function showCreateAgentDialog() {
     _newAgentDialog = modal;
     const nameInput = modal.querySelector('#newAgent-name');
     nameInput?.addEventListener('input', () => { nameInput.dataset.autofilled = 'false'; });
+    modal.querySelector('#newAgent-role')?.addEventListener('input', event => { event.target.dataset.autofilled = 'false'; });
+    modal.querySelector('#newAgent-emoji')?.addEventListener('input', event => { event.target.dataset.autofilled = 'false'; });
+    modal.querySelector('#newAgent-prompt')?.addEventListener('input', event => { event.target.dataset.autofilled = 'false'; });
     modal.querySelector('#newAgent-platform')?.addEventListener('change', () => updateNewAgentDialogPlatform(modal));
     modal.querySelectorAll('[data-new-agent-close]').forEach(btn => btn.addEventListener('click', closeNewAgentDialog));
     modal.addEventListener('click', event => {
       if (event.target === modal) closeNewAgentDialog();
     });
     modal.querySelector('#newAgent-create')?.addEventListener('click', () => submitNewAgentDialog(modal));
-    modal.querySelectorAll('input[name="newAgent-codexMode"]').forEach(input => {
-      input.addEventListener('change', () => {
-        const custom = modal.querySelector('#newAgent-codexCustomDirectory');
-        if (custom) custom.disabled = modal.querySelector('input[name="newAgent-codexMode"]:checked')?.value !== 'custom';
-      });
-    });
-    const custom = modal.querySelector('#newAgent-codexCustomDirectory');
-    if (custom) custom.disabled = true;
     document.addEventListener('keydown', handleNewAgentDialogKeydown);
     updateNewAgentDialogPlatform(modal);
     setTimeout(() => modal.querySelector('#newAgent-name')?.focus(), 0);
@@ -37947,16 +37999,68 @@ async function loadAgentWorkspaceSection(agent) {
   if (!container || !agent) return;
   const key = String(agent.id || agentProfileKey(agent) || '');
   try {
-    const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/workspace`);
-    const data = await readJsonResponse(response, 'Could not load workspace.');
+    const providerKind = String(agent.providerKind || 'openclaw');
+    const [response, settingsResponse] = await Promise.all([
+      fetch(`/api/providers/resources?agentId=${encodeURIComponent(key)}`),
+      fetch(`/api/providers/settings?providerId=${encodeURIComponent(providerKind)}`),
+    ]);
+    const resources = await readJsonResponse(response, 'Could not load Agent Desk files.');
+    const settings = await settingsResponse.json().catch(() => ({}));
+    const provider = (settings.providers || [])[0] || {};
+    const data = {
+      ...resources,
+      workspaceAvailable: true,
+      editable: Boolean(agent.capabilities?.resourcesWrite),
+      workspaceRoot: agent.workspace || '',
+      resourceSchema: provider.resourceSchema || [],
+      skillSchema: provider.skillSchema || [],
+    };
     const previous = _agentWorkspaceEditorState.get(key) || {};
-    _agentWorkspaceEditorState.set(key, {
+    const state = {
       data,
-      selectedName: previous.selectedName || data.files?.find(file => file.exists)?.name || data.files?.[0]?.name || '',
-    });
-    if (selectedAgentId === agent.id) renderAgentWorkspaceEditor(agent);
+      selectedName: previous.selectedName || data.files?.[0]?.path || '',
+      file: null,
+      revisions: [],
+      diff: '',
+      error: '',
+      loading: false,
+    };
+    _agentWorkspaceEditorState.set(key, state);
+    if (state.selectedName) await loadAgentWorkspaceFile(agent, state.selectedName);
+    else if (selectedAgentId === agent.id) renderAgentWorkspaceEditor(agent);
   } catch (error) {
-    container.innerHTML = `<div class="settings-status-card locked"><strong>Workspace unavailable</strong><span>${escapeHtml(error?.message || 'Could not load workspace.')}</span></div>`;
+    container.innerHTML = `<div class="settings-status-card locked"><strong>Agent Desk files unavailable</strong><span>${escapeHtml(error?.message || 'Could not load provider resources.')}</span></div>`;
+  }
+}
+
+async function providerResourceRequest(agent, payload) {
+  const response = await fetch('/api/providers/resources', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agentId: agent.id || agentProfileKey(agent), ...payload }),
+  });
+  return readJsonResponse(response, 'Provider resource request failed.');
+}
+
+async function loadAgentWorkspaceFile(agent, path) {
+  const key = String(agent.id || agentProfileKey(agent) || '');
+  const state = _agentWorkspaceEditorState.get(key);
+  if (!state) return;
+  state.selectedName = path;
+  state.loading = true;
+  state.error = '';
+  renderAgentWorkspaceEditor(agent);
+  try {
+    const data = await providerResourceRequest(agent, { action:'read', path });
+    state.file = data.file || null;
+    state.revisions = [];
+    state.diff = '';
+  } catch (error) {
+    state.file = null;
+    state.error = error?.message || 'Could not open file.';
+  } finally {
+    state.loading = false;
+    if (selectedAgentId === agent.id) renderAgentWorkspaceEditor(agent);
   }
 }
 
@@ -37971,33 +38075,49 @@ function renderAgentWorkspaceEditor(agent) {
     return;
   }
   const data = state.data;
-  if (!data.workspaceAvailable) {
-    container.innerHTML = `<div class="settings-status-card locked"><strong>${escapeHtml(data.providerKind || 'agent')}</strong><span>${escapeHtml(data.unsupportedReason || 'Workspace editing is not available.')}</span></div>`;
-    return;
-  }
   const files = Array.isArray(data.files) ? data.files : [];
-  const selectedName = files.some(file => file.name === state.selectedName) ? state.selectedName : (files[0]?.name || '');
+  const selectedName = files.some(file => file.path === state.selectedName) ? state.selectedName : (files[0]?.path || state.selectedName || '');
   state.selectedName = selectedName;
-  const file = files.find(item => item.name === selectedName) || {};
-  const locked = isLicenseFeatureLocked('advancedEditor') || !data.editable || !file.editable;
+  const descriptor = files.find(item => item.path === selectedName) || {};
+  const file = state.file?.path === selectedName ? state.file : null;
+  const locked = isLicenseFeatureLocked('advancedEditor') || !data.editable || descriptor.writable === false || file?.writable === false;
   const rootLabel = compactWorkspacePath(data.workspaceRoot);
+  const canCreate = !isLicenseFeatureLocked('advancedEditor') && data.editable && (data.resourceSchema || []).some(item => item?.writable && item?.creatable !== false);
+  const fileStatus = file?.runtimeActive ? 'Runtime active' : 'World-managed or reference file';
   container.innerHTML = `
-    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+    <div class="agent-workspace-toolbar">
       <select id="agentWorkspace-file" style="flex:1;min-width:0">
-        ${files.map(item => `<option value="${escapeAttr(item.name)}" ${item.name === selectedName ? 'selected' : ''}>${escapeHtml(item.name)}${item.exists ? '' : ' (new)'}</option>`).join('')}
+        ${files.length ? files.map(item => `<option value="${escapeAttr(item.path)}" ${item.path === selectedName ? 'selected' : ''}>${escapeHtml(item.path)}${item.runtimeActive ? ' · runtime' : ''}${item.writable ? '' : ' · read only'}</option>`).join('') : '<option value="">No declared files found</option>'}
       </select>
       <button id="agentWorkspace-refresh" class="btn-secondary" type="button" style="padding:8px 10px">Refresh</button>
     </div>
-    ${rootLabel ? `<div style="font-size:9px;color:var(--text-secondary);margin-bottom:6px">${escapeHtml(rootLabel)}</div>` : ''}
-    ${file.error ? `<div class="settings-inline-status error">${escapeHtml(file.error)}</div>` : ''}
-    <textarea id="agentWorkspace-content" rows="9" ${locked ? 'disabled' : ''} style="width:100%;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;line-height:1.4">${escapeTextareaValue(file.content || '')}</textarea>
-    <button id="agentWorkspace-save" class="btn-primary" type="button" ${locked ? 'disabled' : ''} style="width:100%;margin-top:8px">Save Workspace File</button>
+    ${rootLabel ? `<div class="agent-workspace-path">${escapeHtml(rootLabel)}</div>` : ''}
+    <div class="agent-workspace-contract">${escapeHtml(agent.providerKind || 'openclaw')} manifest · ${files.length} allowed file${files.length === 1 ? '' : 's'} found${file ? ` · ${escapeHtml(fileStatus)}` : ''}</div>
+    ${state.error ? `<div class="settings-inline-status error">${escapeHtml(state.error)}</div>` : ''}
+    ${state.loading ? '<div class="settings-inline-status">Opening native file…</div>' : ''}
+    <textarea id="agentWorkspace-content" rows="11" ${locked || !file ? 'disabled' : ''} spellcheck="false">${escapeTextareaValue(file?.content || '')}</textarea>
+    <div class="agent-workspace-actions">
+      <button id="agentWorkspace-preview" class="btn-secondary" type="button" ${locked || !file ? 'disabled' : ''}>Preview diff</button>
+      <button id="agentWorkspace-save" class="btn-primary" type="button" ${locked || !file ? 'disabled' : ''}>Save file</button>
+      <button id="agentWorkspace-revisions" class="btn-secondary" type="button" ${!file ? 'disabled' : ''}>Revisions</button>
+      <button id="agentWorkspace-delete" class="btn-secondary" type="button" ${locked || !file?.deletable ? 'disabled' : ''}>Delete</button>
+    </div>
+    ${state.diff ? `<pre class="agent-workspace-diff">${escapeHtml(state.diff)}</pre>` : ''}
+    <div id="agentWorkspace-revisionList" class="agent-workspace-revisions">${(state.revisions || []).map(revision => `<button type="button" class="btn-secondary" data-provider-revision="${escapeAttr(revision.backupId)}">Restore ${escapeHtml(revision.modified || revision.backupId)}</button>`).join('')}</div>
+    ${canCreate ? `<div class="agent-workspace-create"><input id="agentWorkspace-newPath" placeholder="Declared path, for example docs/note.md"><button id="agentWorkspace-create" class="btn-secondary" type="button">Create declared file</button></div>` : ''}
   `;
   container.querySelector('#agentWorkspace-file')?.addEventListener('change', event => {
     state.selectedName = event.target.value;
-    renderAgentWorkspaceEditor(agent);
+    if (state.selectedName) loadAgentWorkspaceFile(agent, state.selectedName);
   });
   container.querySelector('#agentWorkspace-refresh')?.addEventListener('click', () => renderAgentWorkspaceSection(agent, { reload: true }));
+  container.querySelector('#agentWorkspace-preview')?.addEventListener('click', async () => {
+    try {
+      const result = await providerResourceRequest(agent, { action:'preview', path:selectedName, content:container.querySelector('#agentWorkspace-content')?.value || '' });
+      state.diff = result.diff || (result.changed ? 'File changed.' : 'No changes.');
+      renderAgentWorkspaceEditor(agent);
+    } catch (error) { showToast(error?.message || 'Could not preview file', 'error'); }
+  });
   container.querySelector('#agentWorkspace-save')?.addEventListener('click', async () => {
     if (isLicenseFeatureLocked('advancedEditor')) {
       showLicenseLockedToast('Agent editing');
@@ -38008,24 +38128,48 @@ function renderAgentWorkspaceEditor(agent) {
     if (!textarea || !selectedName) return;
     if (button) { button.disabled = true; button.textContent = 'Saving...'; }
     try {
-      const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/workspace`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files: { [selectedName]: textarea.value } }),
-      });
-      await readJsonResponse(response, 'Could not save workspace file.');
-      const current = files.find(item => item.name === selectedName);
-      if (current) {
-        current.content = textarea.value;
-        current.exists = true;
-        current.size = new Blob([textarea.value]).size;
-      }
+      const result = await providerResourceRequest(agent, { action:'save', path:selectedName, content:textarea.value, expectedSha256:file?.sha256 || '' });
+      state.file = { ...file, content:textarea.value, sha256:result.sha256, size:new Blob([textarea.value]).size };
+      state.diff = '';
       showToast(`Saved ${selectedName}`, 'success');
     } catch (error) {
       showToast(error?.message || 'Could not save workspace file', 'error');
     } finally {
-      if (button) { button.disabled = isLicenseFeatureLocked('advancedEditor'); button.textContent = 'Save Workspace File'; }
+      if (button) { button.disabled = locked; button.textContent = 'Save file'; }
     }
+  });
+  container.querySelector('#agentWorkspace-revisions')?.addEventListener('click', async () => {
+    try {
+      const result = await providerResourceRequest(agent, { action:'revisions', path:selectedName });
+      state.revisions = result.revisions || [];
+      renderAgentWorkspaceEditor(agent);
+    } catch (error) { showToast(error?.message || 'Could not load revisions', 'error'); }
+  });
+  container.querySelectorAll('[data-provider-revision]').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm(`Restore ${selectedName} from this backup revision?`)) return;
+    try {
+      await providerResourceRequest(agent, { action:'restore', path:selectedName, backupId:button.dataset.providerRevision, expectedSha256:state.file?.sha256 || '' });
+      showToast(`Restored ${selectedName}`, 'success');
+      await loadAgentWorkspaceFile(agent, selectedName);
+    } catch (error) { showToast(error?.message || 'Could not restore revision', 'error'); }
+  }));
+  container.querySelector('#agentWorkspace-delete')?.addEventListener('click', async () => {
+    if (!confirm(`Delete ${selectedName}? A recoverable backup revision will be created.`)) return;
+    try {
+      await providerResourceRequest(agent, { action:'delete', path:selectedName });
+      showToast(`Deleted ${selectedName}`, 'success');
+      renderAgentWorkspaceSection(agent, { reload:true });
+    } catch (error) { showToast(error?.message || 'Could not delete file', 'error'); }
+  });
+  container.querySelector('#agentWorkspace-create')?.addEventListener('click', async () => {
+    const path = (container.querySelector('#agentWorkspace-newPath')?.value || '').trim();
+    if (!path) return showToast('Enter a manifest-allowed relative path', 'warning');
+    try {
+      await providerResourceRequest(agent, { action:'create', path, content:'' });
+      showToast(`Created ${path}`, 'success');
+      state.selectedName = path;
+      renderAgentWorkspaceSection(agent, { reload:true });
+    } catch (error) { showToast(error?.message || 'Could not create file', 'error'); }
   });
 }
 
@@ -38195,6 +38339,8 @@ async function loadAgentSkillsSection(agent) {
     const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/skills`);
     const data = await readJsonResponse(response, 'Could not load agent skills.');
     _agentSkillsState.skills = Array.isArray(data.skills) ? data.skills : [];
+    _agentSkillsState.data = data;
+    _agentSkillsState.revisions = [];
     _agentSkillsState.loaded = true;
     _agentSkillsState.error = data.unsupportedReason || '';
     if (!_agentSkillsState.selectedName && _agentSkillsState.skills[0]) _agentSkillsState.selectedName = _agentSkillsState.skills[0].name;
@@ -38211,7 +38357,12 @@ function renderAgentSkillsEditor(agent) {
   if (!container || !agent || !_agentSkillsState) return;
   const skills = _agentSkillsState.skills || [];
   const selected = skills.find(skill => skill.name === _agentSkillsState.selectedName) || skills[0] || null;
-  const locked = isLicenseFeatureLocked('advancedEditor');
+  const skillData = _agentSkillsState.data || {};
+  const locked = isLicenseFeatureLocked('advancedEditor') || skillData.editable === false;
+  if (skillData.skillsAvailable === false) {
+    container.innerHTML = `<div class="settings-status-card locked"><strong>${escapeHtml(agent.providerKind || 'Provider')} skills unsupported</strong><span>${escapeHtml(skillData.unsupportedReason || 'This provider does not expose AgentSkills.')}</span></div>`;
+    return;
+  }
   container.innerHTML = `
     <div class="agent-skills-layout">
       <div class="agent-skills-list">
@@ -38224,7 +38375,7 @@ function renderAgentSkillsEditor(agent) {
           ${skills.length ? skills.map(skill => `
             <button type="button" class="agent-skill-row ${skill.name === selected?.name ? 'active' : ''}" data-agent-skill-name="${escapeAttr(skill.name)}">
               <span>${escapeHtml(skill.name)}</span>
-              <small>${escapeHtml((skill.description || '').slice(0, 80))}</small>
+              <small>${escapeHtml(skill.validationError || (skill.description || '').slice(0, 80))}</small>
             </button>
           `).join('') : '<div class="settings-inline-status">No skills configured for this agent.</div>'}
         </div>
@@ -38241,8 +38392,10 @@ function renderAgentSkillsEditor(agent) {
         <div class="agent-skill-actions">
           <button id="agentSkill-save" class="btn-primary" type="button" ${locked ? 'disabled' : ''}>Save Skill</button>
           <button id="agentSkill-saveLibrary" class="btn-secondary" type="button" ${locked || !selected ? 'disabled' : ''}>Save To Library</button>
+          <button id="agentSkill-revisions" class="btn-secondary" type="button" ${!selected ? 'disabled' : ''}>Revisions</button>
           <button id="agentSkill-delete" class="btn-secondary" type="button" ${locked || !selected ? 'disabled' : ''}>Delete</button>
         </div>
+        <div class="agent-workspace-revisions">${(_agentSkillsState.revisions || []).map(revision => `<button type="button" class="btn-secondary" data-agent-skill-revision="${escapeAttr(revision.backupId)}">Restore ${escapeHtml(revision.modified || revision.backupId)}</button>`).join('')}</div>
       </div>
     </div>
   `;
@@ -38259,7 +38412,9 @@ function renderAgentSkillsEditor(agent) {
   });
   container.querySelector('#agentSkill-save')?.addEventListener('click', () => saveAgentSkillFromBuilder(agent));
   container.querySelector('#agentSkill-saveLibrary')?.addEventListener('click', () => saveAgentSkillToLibrary(agent, selected?.name || ''));
+  container.querySelector('#agentSkill-revisions')?.addEventListener('click', () => loadAgentSkillRevisions(agent, selected?.name || ''));
   container.querySelector('#agentSkill-delete')?.addEventListener('click', () => deleteAgentSkillFromBuilder(agent, selected?.name || ''));
+  container.querySelectorAll('[data-agent-skill-revision]').forEach(button => button.addEventListener('click', () => restoreAgentSkillRevision(agent, selected, button.dataset.agentSkillRevision || '')));
 }
 
 async function saveAgentSkillFromBuilder(agent) {
@@ -38271,7 +38426,7 @@ async function saveAgentSkillFromBuilder(agent) {
     const response = await fetch(`/api/agent/${agentEditorApiKey(agent)}/skills`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, content }),
+      body: JSON.stringify({ name, content, expectedSha256:(_agentSkillsState.skills || []).find(skill => skill.name === name)?.sha256 || '' }),
     });
     await readJsonResponse(response, 'Could not save skill.');
     _agentSkillsState.selectedName = name;
@@ -38280,6 +38435,32 @@ async function saveAgentSkillFromBuilder(agent) {
   } catch (error) {
     showToast(error?.message || 'Could not save skill', 'error');
   }
+}
+
+async function loadAgentSkillRevisions(agent, skillName) {
+  if (!skillName) return;
+  try {
+    const response = await fetch('/api/providers/skills', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ action:'revisions', agentId:agent.id || agentProfileKey(agent), name:skillName }),
+    });
+    const data = await readJsonResponse(response, 'Could not load skill revisions.');
+    _agentSkillsState.revisions = data.revisions || [];
+    renderAgentSkillsEditor(agent);
+  } catch (error) { showToast(error?.message || 'Could not load skill revisions', 'error'); }
+}
+
+async function restoreAgentSkillRevision(agent, skill, backupId) {
+  if (!skill || !backupId || !confirm(`Restore ${skill.name} from this backup revision?`)) return;
+  try {
+    const response = await fetch('/api/providers/skills', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ action:'restore', agentId:agent.id || agentProfileKey(agent), name:skill.name, backupId, expectedSha256:skill.sha256 || '' }),
+    });
+    await readJsonResponse(response, 'Could not restore skill revision.');
+    showToast(`Restored ${skill.name}`, 'success');
+    renderAgentSkillsSection(agent, { reload:true });
+  } catch (error) { showToast(error?.message || 'Could not restore skill revision', 'error'); }
 }
 
 async function saveAgentSkillToLibrary(agent, skillName) {
@@ -38361,7 +38542,7 @@ function closeAgentSkillsLibrary() {
 
 window.closeAgentSkillsLibrary = closeAgentSkillsLibrary;
 
-const MODELS_PROVIDERS_PAGE_VERSION = '20260706-models-providers-r4';
+const MODELS_PROVIDERS_PAGE_VERSION = '20260808-provider-sdk-r1';
 
 function bindModelsProvidersChrome() {
   const modal = document.getElementById('modelsProvidersModal');
@@ -38377,8 +38558,9 @@ function openModelsProvidersWindow() {
   const frame = document.getElementById('modelsProvidersFrame');
   if (!modal || !frame) return;
   bindModelsProvidersChrome();
-  const agentId = document.getElementById('agentList')?.value || selectedAgentId || 'main';
-  const frameSrc = `models.html?agent=${encodeURIComponent(agentId)}&v=${MODELS_PROVIDERS_PAGE_VERSION}`;
+  const agent = agentsList.find(candidate => candidate?.id === (document.getElementById('agentList')?.value || selectedAgentId || ''));
+  const providerId = agent?.providerKind || '';
+  const frameSrc = `providers.html?provider=${encodeURIComponent(providerId)}&v=${MODELS_PROVIDERS_PAGE_VERSION}`;
   if (frame.getAttribute('src') !== frameSrc) frame.setAttribute('src', frameSrc);
   modal.style.display = 'flex';
   modal.setAttribute('aria-hidden', 'false');

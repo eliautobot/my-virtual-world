@@ -509,6 +509,9 @@ const licensePy = read('src/server/license.py');
 const serverPy = read('src/server/server.py');
 const indexHtml = read('src/client/index.html');
 const modelsHtml = read('src/client/models.html');
+const providersHtml = read('src/client/providers.html');
+const providerSettingsJs = read('src/client/js/provider-settings.js');
+const providerSettingsCss = read('src/client/css/provider-settings.css');
 const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
 const main3dJs = read('src/client/js/main3d.js');
@@ -599,7 +602,7 @@ for (const token of [
   assert(main3dJs.includes(token), `main3d.js missing edit lock token: ${token}`);
 }
 for (const token of [
-  'Models & Providers',
+  'Universal Providers',
   'modelsProviders-open',
   'modelsProvidersModal',
   'modelsProvidersFrame',
@@ -610,7 +613,7 @@ for (const token of [
   'MODELS_PROVIDERS_PAGE_VERSION',
   'openModelsProvidersWindow',
   'closeModelsProvidersWindow',
-  'models.html?agent=',
+  'providers.html?provider=',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing models/providers editor token: ${token}`);
 }
@@ -619,6 +622,47 @@ for (const token of [
   'models-providers-frame',
 ]) {
   assert(uiCss.includes(token), `ui-redesign.css missing models/providers editor token: ${token}`);
+}
+for (const token of [
+  'Universal Providers',
+  'Provider SDK compatibility layer',
+  'ps-discover',
+  'ps-provider-list',
+]) {
+  assert(providersHtml.includes(token), `providers.html missing universal provider UI token: ${token}`);
+}
+for (const token of [
+  '/api/providers/settings',
+  '/api/providers/test',
+  '/api/providers/refresh',
+  'settingsSchema',
+  'resourceSchema',
+  'skillSchema',
+  'Configured — leave blank to preserve',
+]) {
+  assert(providerSettingsJs.includes(token), `provider-settings.js missing manifest-driven token: ${token}`);
+}
+for (const token of ['overflow-x:hidden', '@media(max-width:760px)', '.ps-connection-list']) {
+  assert(providerSettingsCss.includes(token), `provider-settings.css missing responsive token: ${token}`);
+}
+for (const token of [
+  '/api/providers/resources',
+  "action:'preview'",
+  "action:'revisions'",
+  "action:'restore'",
+  'expectedSha256',
+  'data-provider-field',
+]) {
+  assert(main3dJs.includes(token), `main3d.js missing Provider SDK Agent Desk token: ${token}`);
+}
+for (const token of [
+  '/api/providers/runs',
+  '/api/providers/history',
+  '/api/providers/interrupt',
+  'streamProviderSdkRun',
+  'syncCapabilityControls',
+]) {
+  assert(chatJs.includes(token), `chat.js missing generic Provider SDK transport token: ${token}`);
 }
 for (const token of [
   'Models & Providers - My Virtual World',
@@ -711,7 +755,9 @@ for (const token of [
   'css/ui-redesign.css?v=20260804-chat-mobile-keyboard-r5',
   'btn-newAgent',
   'Agent Platform',
-  'newAgent-codexOptions',
+  'newAgent-providerFields',
+  'renderNewAgentProviderFields',
+  'creationSchema',
   '/api/agent/create',
   'vw:agents-changed',
   'starter-map.mjs?v=20260613-road-terrain-r1',

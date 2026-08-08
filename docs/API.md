@@ -135,6 +135,30 @@ The starter Office appliance repair is narrow. It only restores mount metadata w
 
 Status records are used for visual presence only. They do not grant tool access.
 
+## Universal Provider SDK
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/providers` | Read public manifests, capabilities, schemas, and redacted health for installed providers. |
+| GET | `/api/providers/settings` | Read manifest-driven settings and redacted configured values. |
+| POST | `/api/providers/settings` | Validate and save one provider's settings; blank secret fields preserve existing values. |
+| POST | `/api/providers/test` | Test unsaved provider settings without persisting them. |
+| POST | `/api/providers/refresh` | Force provider and agent discovery refresh. |
+| GET | `/api/providers/discovery` | Read the normalized provider roster. |
+| POST | `/api/agent/create` | Create an agent using its provider manifest creation schema. |
+| POST | `/api/agent/delete` | Safely delete a provider agent when the provider declares deletion. |
+| POST | `/api/providers/profile` | Update a provider agent profile when supported. |
+| GET/POST | `/api/providers/resources` | List, read, preview, write, delete, inspect revisions, or restore manifest-declared files. |
+| GET/POST | `/api/providers/skills` | List, validate, save, delete, inspect revisions, or restore AgentSkills files. |
+| POST | `/api/providers/runs` | Start a generic native provider run. |
+| GET | `/api/providers/runs/<run-id>/events` | Stream normalized run events with SSE. |
+| GET | `/api/providers/history` | Read normalized provider chat history. |
+| POST | `/api/providers/interrupt` | Interrupt a native run when declared. |
+| GET/POST | `/api/providers/sessions` | List, create, switch, or delete native sessions according to capabilities. |
+| GET/POST | `/api/providers/approvals` | Read and answer native approval requests when declared. |
+
+Provider identity is the tuple `providerKind + providerConnectionId + providerAgentId`. Public health responses intentionally omit accounts, channels, discovered agents, binaries, credentials, and private runtime details. Provider resource and skill endpoints reject undeclared, absolute, traversal, sensitive, and escaping-symlink paths.
+
 ## Assignments, Decorations, and Profiles
 
 | Method | Path | Purpose |
@@ -156,7 +180,7 @@ Status records are used for visual presence only. They do not grant tool access.
 
 Profile writes may update local agent identity files when configured. Do not write private user data into profile documentation.
 
-Workspace editing currently supports OpenClaw markdown files under the resolved agent workspace, limited to built-in agent files such as `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, and `HEARTBEAT.md`. Non-OpenClaw providers return an unsupported-provider payload until their adapters are implemented.
+The legacy workspace endpoint remains available for compatibility. The Agent Desk uses `/api/providers/resources` for all providers and renders only each manifest's declared files, roots, write policy, and validation rules.
 
 Resident profiles live in `world-meta.json` under `agentProfiles[agentId].residentProfile`. They are Virtual World-specific roleplay/autonomy profiles with identity, life purpose, goals, needs, short-term memory, long-term memory, and Live Mode behavior settings.
 

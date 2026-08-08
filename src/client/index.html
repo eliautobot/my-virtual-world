@@ -147,7 +147,7 @@
                         <button id="agentSelectPicker-open" class="agent-select-picker-trigger" type="button">Choose an agent…</button>
                     </label>
                     <button id="agentPanel-open" class="sidebar-action-btn" type="button" disabled>Edit Selected Agent</button>
-                    <button id="modelsProviders-open" class="sidebar-action-btn" type="button" onclick="window.openModelsProvidersWindow?.()">Models & Providers</button>
+                    <button id="modelsProviders-open" class="sidebar-action-btn" type="button" onclick="window.openModelsProvidersWindow?.()">Universal Providers</button>
                     <button id="agentSkillsLibrary-open" class="sidebar-action-btn" type="button">Skill Library</button>
                 </div>
 
@@ -374,15 +374,15 @@
         <div class="agent-builder-window models-providers-window" role="dialog" aria-modal="true" aria-labelledby="modelsProviders-title">
             <div class="agent-builder-header">
                 <div class="agent-builder-title-lockup">
-                    <div class="agent-builder-icon">⚙️</div>
+                    <div class="agent-builder-icon">🧩</div>
                     <div>
-                        <h2 id="modelsProviders-title">Models & Providers</h2>
-                        <div class="agent-builder-subtitle">OpenClaw, Hermes, Codex CLI, and native provider setup</div>
+                        <h2 id="modelsProviders-title">Universal Providers</h2>
+                        <div class="agent-builder-subtitle">Connect and manage any compatible agent runtime through the Provider SDK</div>
                     </div>
                 </div>
                 <button class="modal-close" onclick="window.closeModelsProvidersWindow?.()">✕</button>
             </div>
-            <iframe id="modelsProvidersFrame" class="models-providers-frame" title="Models & Providers"></iframe>
+            <iframe id="modelsProvidersFrame" class="models-providers-frame" title="Universal Providers"></iframe>
         </div>
     </div>
 

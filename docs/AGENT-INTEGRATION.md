@@ -1,7 +1,7 @@
 # Agent Integration
 
 Status: product reference  
-Scope: OpenClaw, Hermes, and agent-to-agent communication
+Scope: Universal Provider SDK, native agent runtimes, and agent-to-agent communication
 
 ## Purpose
 
@@ -11,13 +11,41 @@ My Virtual World is a visual control surface for local agent systems. It can sho
 
 The app can discover and represent agents from multiple providers.
 
-Current provider paths:
+Contract 1.1 ships with six built-in provider manifests:
 
-- OpenClaw through local workspace/config and gateway status.
-- Hermes through the local Hermes provider adapter.
-- Future providers through an optional provider relay.
+- OpenClaw
+- Hermes
+- Codex
+- Claude Code
+- OpenCode
+- Antigravity
+
+Additional providers can register a `vw_provider_*.py` adapter. Browser forms and controls are rendered from the provider's manifest schemas and capabilities; account names, connection ids, models, and credentials are installation data rather than application constants.
 
 The world does not replace provider runtimes. Providers remain responsible for their own tools, sessions, permissions, and execution.
+
+## Universal Provider SDK
+
+The user-facing settings page is `providers.html`, opened through **Universal Providers** in My Virtual World. The primary normalized APIs are:
+
+```text
+GET /api/providers
+GET|POST /api/providers/settings
+POST /api/providers/test
+POST /api/providers/refresh
+GET /api/providers/discovery
+POST /api/providers/runs
+GET /api/providers/runs/<run-id>/events
+GET /api/providers/history
+POST /api/providers/interrupt
+GET|POST /api/providers/sessions
+GET|POST /api/providers/approvals
+GET|POST /api/providers/resources
+GET|POST /api/providers/skills
+POST /api/providers/profile
+```
+
+Resource and skill paths are restricted to manifest-declared roots. Writes use optimistic SHA checks and create recoverable revisions. Secret settings are redacted on reads and a blank secret value preserves the configured value.
 
 ## Agent Roster
 

@@ -73,7 +73,7 @@ The bridge routes through server-side provider abstractions:
 
 - OpenClaw targets use local OpenClaw/gateway paths when configured.
 - Hermes targets use the Hermes provider adapter.
-- Future providers can be added behind the same communication shape.
+- Contract 1.1 providers route through their registered `send_chat_message` capability behind the same communication shape.
 
 ## Related Docs
 

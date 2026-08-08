@@ -7,7 +7,7 @@ Scope: My Virtual World repository and runtime
 
 My Virtual World is a self-hosted 3D world for local agent systems. The browser renders the world, the Python server stores world state as JSON, and optional OpenClaw/Hermes integrations provide live agent presence, chat, and activity.
 
-The app is designed for local machines, LANs, and private VPNs. It is not a public hosted service.
+The app is designed for local machines, LANs, and private VPNs. It is not a public hosted service. A Contract 1.1 provider registry normalizes discovery, health, settings, lifecycle, resources, skills, chat, sessions, interrupts, and approvals without baking installation accounts into the product.
 
 ## Runtime Pieces
 
@@ -15,6 +15,7 @@ The app is designed for local machines, LANs, and private VPNs. It is not a publ
 | --- | --- | --- |
 | Client UI | `src/client/` | Three.js world, setup page, settings, chat, movement, and interactions. |
 | Server | `src/server/server.py` | Static file serving, JSON APIs, license state, OpenClaw/Hermes adapters, persistence. |
+| Provider registry | `src/server/providers/` | Six built-in manifests plus optional `vw_provider_*.py` extensions and file-safety helpers. |
 | Realtime sidecar | `src/realtime/server.mjs` | Optional Colyseus runtime for live agent snapshots, route leases, and heartbeat broadcast. |
 | Hermes provider | `src/server/providers/hermes.py` | Optional Hermes profile discovery and chat relay. |
 | Persistent data | `VW_DATA_DIR`, usually Docker volume `vw-data` | World metadata, chunks, buildings, license receipt, config, communication logs. |
@@ -27,7 +28,7 @@ The app is designed for local machines, LANs, and private VPNs. It is not a publ
 2. `main3d.js` initializes Three.js, loads settings, and fetches saved world data.
 3. The client reads and writes JSON through `/api/*` endpoints.
 4. The server persists data under `VW_DATA_DIR`.
-5. Optional OpenClaw/Hermes data is merged into the visible agent roster and chat surfaces.
+5. Provider registry data is merged into the visible agent roster, Agent Desk, chat window, and in-world bubbles according to manifest capabilities.
 
 ## World Flow
 

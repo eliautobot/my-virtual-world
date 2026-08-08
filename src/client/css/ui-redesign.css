@@ -2718,6 +2718,66 @@ body.agent-builder-open #canvasWrapper { pointer-events: none; }
     border: 0;
     background: #0d0d1a;
 }
+
+.agent-create-provider-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 2px;
+}
+.agent-create-provider-field small {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+.agent-create-provider-field:has(textarea),
+.agent-create-provider-field[hidden] + .agent-create-provider-field:has(textarea) {
+    grid-column: 1 / -1;
+}
+.agent-workspace-toolbar,
+.agent-workspace-actions,
+.agent-workspace-create,
+.agent-workspace-revisions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin: 7px 0;
+}
+.agent-workspace-path,
+.agent-workspace-contract {
+    color: var(--text-secondary);
+    font-size: 10px;
+    overflow-wrap: anywhere;
+    margin: 4px 0;
+}
+#agentWorkspace-content {
+    width: 100%;
+    resize: vertical;
+    font: 11px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.agent-workspace-diff {
+    max-height: 240px;
+    overflow: auto;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: rgba(0,0,0,.3);
+    color: #dcecff;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.agent-workspace-create input {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+@media (max-width: 760px) {
+    .agent-create-provider-fields { grid-template-columns: 1fr; }
+    .agent-create-provider-field:has(textarea) { grid-column: auto; }
+    .agent-workspace-actions > button,
+    .agent-workspace-create > button { min-height: 42px; }
+}
 .skills-library-body {
     flex: 1 1 auto;
     overflow: hidden;
