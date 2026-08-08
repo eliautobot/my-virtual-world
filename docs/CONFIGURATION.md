@@ -102,7 +102,7 @@ World metadata is written atomically as compact JSON. Saving identical content i
 
 ## Agent Connections
 
-The **Universal Providers** page reads its connection/model/runtime/authentication fields from Contract 1.1 manifests. Configure values in the UI or environment for each installation; do not add personal account names, provider connection ids, models, or credentials to source files.
+The **Settings → Connections → Provider SDK** tab reads its connection/model/runtime/authentication fields from Contract 1.1 manifests. It is an optional alternative to the built-in native connection tab. Configure values in the UI or environment for each installation; do not add personal account names, provider connection ids, models, or credentials to source files.
 
 Use these defaults when running with Docker:
 

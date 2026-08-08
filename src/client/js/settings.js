@@ -7,6 +7,7 @@
   let liveModeFeatureBusy = false;
   let liveModeWarningResolver = null;
   let liveModeWarningPreviouslyFocused = null;
+  let activeConnectionMethod = 'native';
   const liveModeAgentBusy = new Set();
 
   const $ = (id) => document.getElementById(id);
@@ -79,10 +80,54 @@
   function switchTab(name) {
     document.querySelectorAll('.settings-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.settingsTab === name));
     document.querySelectorAll('.settings-pane').forEach(pane => pane.classList.toggle('visible', pane.dataset.settingsPane === name));
+    syncProviderSdkSettingsMode(name);
     if (name === 'live-mode' && !isTrialLicense(vwConfig?.license || {})) {
       refreshLiveModeAgents().catch(err => setStatus('liveModeAgentStatus', err.message || 'Could not load agents.', 'warn'));
     }
   }
+
+  function ensureProviderSdkFrame(preferredProvider = '') {
+    const frame = $('settingsProviderSdkFrame');
+    if (!frame) return;
+    const providerId = String(preferredProvider || '').trim();
+    if (frame.dataset.loaded === 'true' && (!providerId || frame.dataset.providerId === providerId)) return;
+    const source = new URL(frame.dataset.src || 'providers.html?embedded=settings', window.location.href);
+    if (providerId) source.searchParams.set('provider', providerId);
+    frame.src = `${source.pathname}${source.search}`;
+    frame.dataset.loaded = 'true';
+    frame.dataset.providerId = providerId;
+  }
+
+  function syncProviderSdkSettingsMode(settingsTab = document.querySelector('.settings-tab.active')?.dataset.settingsTab || '') {
+    const providerSdkActive = settingsTab === 'connections' && activeConnectionMethod === 'provider-sdk';
+    $('settingsModal')?.classList.toggle('provider-sdk-active', providerSdkActive);
+    if (providerSdkActive) ensureProviderSdkFrame();
+  }
+
+  function switchConnectionMethod(name, preferredProvider = '') {
+    activeConnectionMethod = name === 'provider-sdk' ? 'provider-sdk' : 'native';
+    document.querySelectorAll('[data-settings-connection-tab]').forEach(button => {
+      const selected = button.dataset.settingsConnectionTab === activeConnectionMethod;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-settings-connection-pane]').forEach(pane => {
+      pane.classList.toggle('visible', pane.dataset.settingsConnectionPane === activeConnectionMethod);
+    });
+    syncProviderSdkSettingsMode();
+    if (activeConnectionMethod === 'provider-sdk') ensureProviderSdkFrame(preferredProvider);
+  }
+
+  function openProviderSdkSettings(preferredProvider = '') {
+    const modal = $('settingsModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    switchTab('connections');
+    switchConnectionMethod('provider-sdk', preferredProvider);
+    document.querySelector('[data-settings-connection-tab="provider-sdk"]')?.focus();
+  }
+
+  window.openProviderSdkSettings = openProviderSdkSettings;
 
   function updateLicenseUi(config) {
     const lic = config?.license || {};
@@ -1093,6 +1138,9 @@
 
   function bind() {
     document.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.settingsTab)));
+    document.querySelectorAll('[data-settings-connection-tab]').forEach(button => {
+      button.addEventListener('click', () => switchConnectionMethod(button.dataset.settingsConnectionTab));
+    });
     document.querySelectorAll('input[name="setting-chatBubbleGrouping"]').forEach(radio => {
       radio.addEventListener('change', updateChatBubbleGroupingUi);
     });
@@ -1142,6 +1190,7 @@
     originalSaveSettings = window.saveSettings;
     window.saveSettings = () => saveAllSettings().catch(err => alert(err.message));
     bind();
+    switchConnectionMethod(activeConnectionMethod);
     refreshConfig().catch(() => {});
   });
 })();

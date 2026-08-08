@@ -1,5 +1,8 @@
 (() => {
   'use strict';
+  if (new URLSearchParams(location.search).get('embedded') === 'settings') {
+    document.body.classList.add('provider-settings-embedded');
+  }
   const state = { providers: [], selectedId: '', connectionLists: new Map() };
   const $ = id => document.getElementById(id);
 

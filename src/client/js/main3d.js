@@ -35055,12 +35055,6 @@ function updateAgentList() {
     skillsLibraryBtn.addEventListener('click', () => openAgentSkillsLibrary());
   }
 
-  const modelsProvidersBtn = document.getElementById('modelsProviders-open');
-  if (modelsProvidersBtn && !modelsProvidersBtn.dataset.boundModelsProvidersOpen) {
-    modelsProvidersBtn.dataset.boundModelsProvidersOpen = 'true';
-    modelsProvidersBtn.addEventListener('click', () => openModelsProvidersWindow());
-  }
-
   const newAgentBtn = document.getElementById('btn-newAgent');
   if (newAgentBtn && !newAgentBtn.dataset.boundNewAgent) {
     newAgentBtn.dataset.boundNewAgent = 'true';
@@ -35101,7 +35095,7 @@ function isEditorOverlayOpen(id) {
 }
 
 function updateAgentEditorBodyLock() {
-  const anyOpen = ['agentPanel', 'skillsLibraryModal', 'modelsProvidersModal'].some(isEditorOverlayOpen);
+  const anyOpen = ['agentPanel', 'skillsLibraryModal'].some(isEditorOverlayOpen);
   document.body.classList.toggle('agent-builder-open', anyOpen);
 }
 
@@ -38542,38 +38536,14 @@ function closeAgentSkillsLibrary() {
 
 window.closeAgentSkillsLibrary = closeAgentSkillsLibrary;
 
-const MODELS_PROVIDERS_PAGE_VERSION = '20260808-provider-sdk-r1';
-
-function bindModelsProvidersChrome() {
-  const modal = document.getElementById('modelsProvidersModal');
-  if (!modal || modal.dataset.boundModelsProvidersChrome) return;
-  modal.dataset.boundModelsProvidersChrome = 'true';
-  modal.addEventListener('click', event => {
-    if (event.target === modal) closeModelsProvidersWindow();
-  });
-}
-
 function openModelsProvidersWindow() {
-  const modal = document.getElementById('modelsProvidersModal');
-  const frame = document.getElementById('modelsProvidersFrame');
-  if (!modal || !frame) return;
-  bindModelsProvidersChrome();
   const agent = agentsList.find(candidate => candidate?.id === (document.getElementById('agentList')?.value || selectedAgentId || ''));
   const providerId = agent?.providerKind || '';
-  const frameSrc = `providers.html?provider=${encodeURIComponent(providerId)}&v=${MODELS_PROVIDERS_PAGE_VERSION}`;
-  if (frame.getAttribute('src') !== frameSrc) frame.setAttribute('src', frameSrc);
-  modal.style.display = 'flex';
-  modal.setAttribute('aria-hidden', 'false');
-  document.body.classList.add('agent-builder-open');
+  window.openProviderSdkSettings?.(providerId);
 }
 
 function closeModelsProvidersWindow() {
-  const modal = document.getElementById('modelsProvidersModal');
-  if (modal) {
-    modal.style.display = 'none';
-    modal.setAttribute('aria-hidden', 'true');
-  }
-  updateAgentEditorBodyLock();
+  window.closeSettingsModal?.();
 }
 
 window.openModelsProvidersWindow = openModelsProvidersWindow;

@@ -602,30 +602,41 @@ for (const token of [
   assert(main3dJs.includes(token), `main3d.js missing edit lock token: ${token}`);
 }
 for (const token of [
-  'Universal Providers',
-  'modelsProviders-open',
-  'modelsProvidersModal',
-  'modelsProvidersFrame',
+  'data-settings-tab="connections"',
+  'data-settings-connection-tab="native"',
+  'data-settings-connection-tab="provider-sdk"',
+  'settingsProviderSdkFrame',
+  'providers.html?embedded=settings',
 ]) {
-  assert(indexHtml.includes(token), `index.html missing models/providers editor token: ${token}`);
+  assert(indexHtml.includes(token), `index.html missing Settings > Connections Provider SDK token: ${token}`);
 }
+assert(!indexHtml.includes('modelsProviders-open'), 'Provider SDK must not be exposed as an Edit Agents action');
+assert(!indexHtml.includes('modelsProvidersModal'), 'Provider SDK must use Settings > Connections instead of a separate modal');
 for (const token of [
-  'MODELS_PROVIDERS_PAGE_VERSION',
   'openModelsProvidersWindow',
   'closeModelsProvidersWindow',
-  'providers.html?provider=',
+  'openProviderSdkSettings',
 ]) {
-  assert(main3dJs.includes(token), `main3d.js missing models/providers editor token: ${token}`);
+  assert(main3dJs.includes(token), `main3d.js missing Provider SDK Settings compatibility token: ${token}`);
 }
 for (const token of [
-  'models-providers-window',
-  'models-providers-frame',
+  'settings-connection-tabbar',
+  'settings-provider-sdk-frame',
+  'provider-sdk-active',
 ]) {
-  assert(uiCss.includes(token), `ui-redesign.css missing models/providers editor token: ${token}`);
+  assert(uiCss.includes(token), `ui-redesign.css missing Settings > Connections Provider SDK token: ${token}`);
 }
 for (const token of [
-  'Universal Providers',
-  'Provider SDK compatibility layer',
+  'switchConnectionMethod',
+  'ensureProviderSdkFrame',
+  'openProviderSdkSettings',
+  'provider-sdk-active',
+]) {
+  assert(settingsJs.includes(token), `settings.js missing Provider SDK connection-tab token: ${token}`);
+}
+for (const token of [
+  'Provider SDK Connections',
+  'universal Provider SDK compatibility layer',
   'ps-discover',
   'ps-provider-list',
 ]) {
@@ -642,7 +653,7 @@ for (const token of [
 ]) {
   assert(providerSettingsJs.includes(token), `provider-settings.js missing manifest-driven token: ${token}`);
 }
-for (const token of ['overflow-x:hidden', '@media(max-width:760px)', '.ps-connection-list']) {
+for (const token of ['overflow-x:hidden', '@media(max-width:760px)', '.ps-connection-list', '.provider-settings-embedded']) {
   assert(providerSettingsCss.includes(token), `provider-settings.css missing responsive token: ${token}`);
 }
 for (const token of [
@@ -725,7 +736,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260804-pingpong-blue-approach-r25',
+  'js/main3d.js?v=20260808-provider-sdk-connections-r1',
   'agent-life-exterior-area-taxonomy.mjs?v=20260804-park-table-node-inference-r2',
   'syncAgentToCurrentTableSeatTransform(agent)',
   'occupiedAgentFollowsChairTransform',
@@ -752,7 +763,7 @@ for (const token of [
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
   'js/chat.js?v=20260804-chat-scroll-keyboard-r9',
   'css/style.css?v=20260728-multi-seat-couch-parity-r10',
-  'css/ui-redesign.css?v=20260804-chat-mobile-keyboard-r5',
+  'css/ui-redesign.css?v=20260808-provider-sdk-connections-r1',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-providerFields',
@@ -1743,7 +1754,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260728-chat-bubble-grouping-r1',
+  'js/settings.js?v=20260808-provider-sdk-connections-r1',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);

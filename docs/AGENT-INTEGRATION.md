@@ -26,7 +26,7 @@ The world does not replace provider runtimes. Providers remain responsible for t
 
 ## Universal Provider SDK
 
-The user-facing settings page is `providers.html`, opened through **Universal Providers** in My Virtual World. The primary normalized APIs are:
+The user-facing connection surface is **Settings → Connections → Provider SDK**. It embeds `providers.html` as an optional connection method alongside the built-in native connections; `providers.html` remains available as a direct deep link. The primary normalized APIs are:
 
 ```text
 GET /api/providers

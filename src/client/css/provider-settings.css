@@ -14,6 +14,11 @@ button,input,select,textarea { font:inherit; }
 .ps-back { flex:0 0 auto; color:var(--ps-accent); text-decoration:none; font-weight:750; }
 .ps-header-actions,.ps-actions { display:flex; gap:8px; margin-left:auto; flex-wrap:wrap; }
 .ps-shell { display:grid; grid-template-columns:250px minmax(0,1fr); min-height:calc(100vh - 78px); }
+.provider-settings-embedded .ps-back { display:none; }
+.provider-settings-embedded .ps-header { position:static; padding:12px 14px; }
+.provider-settings-embedded .ps-header h1 { font-size:18px; }
+.provider-settings-embedded .ps-header p { font-size:12px; }
+.provider-settings-embedded .ps-shell { min-height:calc(100vh - 67px); }
 .ps-provider-list { min-width:0; padding:14px; border-right:1px solid var(--ps-border); background:rgba(13,33,48,.84); }
 .ps-provider-tab { width:100%; display:flex; align-items:center; gap:10px; padding:11px 12px; margin-bottom:7px; border:1px solid transparent; border-radius:11px; background:transparent; color:var(--ps-text); text-align:left; cursor:pointer; }
 .ps-provider-tab:hover { background:var(--ps-card); }
