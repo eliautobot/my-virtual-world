@@ -859,6 +859,7 @@
     const browser = config.browser || {};
     const sms = config.sms || {};
     const debug = config.debug || {};
+    const chat = config.chat || {};
     const location = world.location || {};
     const chatBubbles = world.chatBubbles || {};
     if ($('setting-worldName')) $('setting-worldName').value = world.name || 'My Virtual World';
@@ -880,6 +881,11 @@
         : 5;
     }
     updateChatBubbleGroupingUi();
+    setSelectedRadio(
+      'setting-toolCallDisplay',
+      chat.toolCallsExpanded === false ? 'collapsed' : 'expanded',
+      'expanded'
+    );
     if ($('setting-showGrid')) $('setting-showGrid').checked = world.showGrid !== false;
     if ($('setting-showMinimap')) $('setting-showMinimap').checked = world.showMinimap !== false;
     if ($('setting-showCoords')) $('setting-showCoords').checked = world.showCoords !== false;
@@ -978,6 +984,9 @@
       debug: {
         movementDebugOverlays: checked('setting-movementDebugOverlays'),
         objectActionPointDebug: checked('setting-objectActionPointDebug'),
+      },
+      chat: {
+        toolCallsExpanded: selectedRadio('setting-toolCallDisplay', 'expanded') === 'expanded',
       },
     };
     const gatewayToken = value('setting-gatewayToken');

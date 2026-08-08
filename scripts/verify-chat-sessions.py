@@ -221,6 +221,8 @@ def main():
             json.dumps({"type": "message", "timestamp": "2026-07-07T13:09:00Z", "message": {"role": "user", "content": "fix the active bubble"}}),
             json.dumps({"type": "message", "timestamp": "2026-07-07T13:10:00Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "working on the active bubble"}]}}),
             json.dumps({"type": "message", "timestamp": "2026-07-07T13:10:01Z", "message": {"role": "assistant", "content": [{"type": "toolCall", "name": "read", "arguments": {"path": "/tmp/chat.js"}}]}}),
+            json.dumps({"type": "message", "timestamp": "2026-08-08T15:54:19.660Z", "message": {"role": "assistant", "content": [{"type": "toolCall", "id": "tool-1", "name": "read", "arguments": {"path": "/tmp/example"}}]}}),
+            json.dumps({"type": "message", "timestamp": "2026-08-08T15:55:01.433Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Final answer"}]}}),
         ]) + "\n", encoding="utf-8")
         (coder_sessions_dir / "sessions.json").write_text(json.dumps({
             "agent:coder:main": {
@@ -229,6 +231,48 @@ def main():
                 "sessionFile": str(coder_session_file),
             }
         }), encoding="utf-8")
+
+        # OpenClaw's gateway transcript can omit safe public Codex commentary.
+        # Seed a long trajectory/rollout pair to verify run->thread recovery,
+        # while ensuring private reasoning and final_answer records stay out.
+        commentary_run_id = "world-commentary-run"
+        commentary_thread_id = "019fd7c8-15ec-7852-a0a4-a0188edb277d"
+        commentary_trajectory = [
+            json.dumps({"type": "context.compiled", "ts": "2026-08-08T15:54:02.149Z", "runId": commentary_run_id, "data": {"threadId": commentary_thread_id}}),
+        ]
+        commentary_trajectory.extend(
+            json.dumps({"type": "diagnostic", "ts": f"2026-08-08T{15 + (54 + index) // 60:02d}:{(54 + index) % 60:02d}:00.000Z", "runId": commentary_run_id, "data": {"sequence": index}})
+            for index in range(100)
+        )
+        commentary_trajectory.extend([
+            json.dumps({"type": "tool.call", "ts": "2026-08-08T15:54:19.660Z", "runId": commentary_run_id, "data": {"toolCallId": "tool-1", "name": "read", "arguments": {"path": "/tmp/example"}}}),
+            json.dumps({"type": "tool.result", "ts": "2026-08-08T15:54:20.699Z", "runId": commentary_run_id, "data": {"toolCallId": "tool-1", "name": "read", "result": "ok"}}),
+        ])
+        (coder_sessions_dir / "coder-main-session.trajectory.jsonl").write_text("\n".join(commentary_trajectory) + "\n", encoding="utf-8")
+        rollout_dir = data_dir.parent / "openclaw" / "agents" / "coder" / "agent" / "codex-home" / "sessions" / "2026" / "08" / "08"
+        rollout_dir.mkdir(parents=True, exist_ok=True)
+        commentary_rollout = [
+            json.dumps({"timestamp": "2026-08-08T15:54:10.855Z", "type": "response_item", "payload": {"type": "reasoning", "summary": [], "encrypted_content": "private"}}),
+            json.dumps({"timestamp": "2026-08-08T15:54:11.863Z", "type": "response_item", "payload": {"id": "commentary-1", "type": "message", "role": "assistant", "phase": "commentary", "content": [{"type": "output_text", "text": "I will inspect the exact change set."}]}}),
+        ]
+        commentary_rollout.extend(
+            json.dumps({"timestamp": f"2026-08-08T{15 + (54 + index) // 60:02d}:{(54 + index) % 60:02d}:00.500Z", "type": "response_item", "payload": {"type": "reasoning", "summary": [], "encrypted_content": f"private-{index}"}})
+            for index in range(100)
+        )
+        commentary_rollout.append(
+            json.dumps({"timestamp": "2026-08-08T15:55:01.433Z", "type": "response_item", "payload": {"id": "final-1", "type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Final answer"}]}}),
+        )
+        (rollout_dir / f"rollout-2026-08-08T11-54-02-{commentary_thread_id}.jsonl").write_text("\n".join(commentary_rollout) + "\n", encoding="utf-8")
+
+        recovered = server._session_trajectory_messages("agent:coder:main", max_tools=80)
+        recovered_commentary = [msg for msg in recovered if msg.get("source") == "codex-commentary"]
+        check("OpenClaw activity recovers public Codex commentary", len(recovered_commentary) == 1 and recovered_commentary[0].get("text") == "I will inspect the exact change set.")
+        check("Long trajectories retain Codex thread mapping", len(recovered_commentary) == 1)
+        check("Long Codex rollouts retain early commentary", len(recovered_commentary) == 1)
+        check("Codex commentary keeps its OpenClaw run id", recovered_commentary[0].get("runId") == commentary_run_id if recovered_commentary else False)
+        check("Codex recovery excludes reasoning and final-answer records", all("private" not in str(msg) and msg.get("text") != "Final answer" for msg in recovered))
+        commentary_only = server._session_trajectory_messages("agent:coder:main", run_id=commentary_run_id, commentary_only=True)
+        check("Commentary-only recovery excludes tools", bool(commentary_only) and all(not msg.get("tools") for msg in commentary_only))
         server._append_comm_event({
             "ts": 1783430400000,
             "from": {"id": "coder", "name": "Coder"},
@@ -304,6 +348,16 @@ def main():
             "current OpenClaw toolCall activity is parsed into the active stream",
             bool(any(row.get("text") == "📄 chat.js" for row in coder_active_chat)),
             json.dumps(coder_active_chat[-4:], default=str),
+        )
+        yellow_order = [
+            row.get("text")
+            for row in coder_active_chat
+            if row.get("text") in {"I will inspect the exact change set.", "📄 example", "Final answer"}
+        ]
+        check(
+            "yellow bubble recovers public commentary before tool and final",
+            yellow_order == ["I will inspect the exact change set.", "📄 example", "Final answer"],
+            json.dumps(coder_active_chat[-8:], default=str),
         )
 
         resident_session_file = resident_sessions_dir / "resident-main-session.jsonl"

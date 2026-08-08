@@ -81,6 +81,9 @@
     "movementDebugOverlays": false,
     "objectActionPointDebug": false
   },
+  "chat": {
+    "toolCallsExpanded": true
+  },
   "license": {
     "acceptedTrial": false
   }

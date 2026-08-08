@@ -736,7 +736,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260808-provider-sdk-connections-r1',
+  'js/main3d.js?v=20260808-chat-order-r2',
   'agent-life-exterior-area-taxonomy.mjs?v=20260804-park-table-node-inference-r2',
   'syncAgentToCurrentTableSeatTransform(agent)',
   'occupiedAgentFollowsChairTransform',
@@ -761,8 +761,9 @@ for (const token of [
   'outdoorCafeChairLeg',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
-  'js/chat.js?v=20260804-chat-scroll-keyboard-r9',
-  'css/style.css?v=20260728-multi-seat-couch-parity-r10',
+  'js/chat-events.js?v=20260808-chat-order-r1',
+  'js/chat.js?v=20260808-tool-call-display-r1',
+  'css/style.css?v=20260808-chat-order-r1',
   'css/ui-redesign.css?v=20260808-provider-sdk-connections-r1',
   'btn-newAgent',
   'Agent Platform',
@@ -1113,6 +1114,35 @@ for (const token of [
   '"groupingMinimum": grouping_minimum',
 ]) {
   assert(serverPy.includes(token), `server.py missing normalized chat bubble setting: ${token}`);
+}
+for (const token of [
+  'setting-toolCallDisplay-expanded',
+  'setting-toolCallDisplay-collapsed',
+  'Expanded by default',
+  'Collapsed by default',
+]) {
+  assert(indexHtml.includes(token), `General settings missing tool call display option: ${token}`);
+}
+for (const token of [
+  "setSelectedRadio(\n      'setting-toolCallDisplay'",
+  "selectedRadio('setting-toolCallDisplay', 'expanded') === 'expanded'",
+]) {
+  assert(settingsJs.includes(token), `settings.js missing persisted tool call display option: ${token}`);
+}
+for (const token of [
+  'def _normalize_chat_settings',
+  '"toolCallsExpanded": expanded if isinstance(expanded, bool) else True',
+  'body["chat"] = _normalize_chat_settings(body["chat"])',
+]) {
+  assert(serverPy.includes(token), `server.py missing normalized tool call display setting: ${token}`);
+}
+for (const token of [
+  'toolCallsExpandedByDefault',
+  'details.open = toolCallsExpandedByDefault',
+  'applyChatUiSettings(event.detail?.config',
+  'Promise.all([gatewayInfoReady, chatUiSettingsReady])',
+]) {
+  assert(chatJs.includes(token), `chat.js missing tool call display behavior: ${token}`);
 }
 for (const token of [
   'function isAgentDeskCarrySurfaceActive(agent)',
@@ -1754,7 +1784,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260808-provider-sdk-connections-r1',
+  'js/settings.js?v=20260808-tool-call-display-r1',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);

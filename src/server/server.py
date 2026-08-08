@@ -156,6 +156,14 @@ def _normalize_chat_bubble_settings(value):
     }
 
 
+def _normalize_chat_settings(value):
+    value = value if isinstance(value, dict) else {}
+    expanded = value.get("toolCallsExpanded")
+    return {
+        "toolCallsExpanded": expanded if isinstance(expanded, bool) else True,
+    }
+
+
 def _resolve_vw_config_path():
     if os.environ.get("VW_CONFIG"):
         return os.environ["VW_CONFIG"]
@@ -265,6 +273,7 @@ def _default_vw_config():
         "browser": {"cdpUrl": "", "viewerUrl": ""},
         "sms": {"ownerAgentId": "", "twilioAccountSid": "", "twilioAuthToken": "", "fromNumber": "", "publicMediaBaseUrl": ""},
         "debug": {"movementDebugOverlays": False, "objectActionPointDebug": False},
+        "chat": {"toolCallsExpanded": True},
         "license": {"acceptedTrial": False},
     }
 
@@ -283,9 +292,11 @@ def _load_vw_config():
     cfg.setdefault("realtime", {})
     cfg.setdefault("world", {})
     cfg.setdefault("debug", {})
+    cfg.setdefault("chat", {})
     if not isinstance(cfg["world"].get("location"), dict):
         cfg["world"]["location"] = {"label": "", "timeZone": "", "latitude": None, "longitude": None}
     cfg["world"]["chatBubbles"] = _normalize_chat_bubble_settings(cfg["world"].get("chatBubbles"))
+    cfg["chat"] = _normalize_chat_settings(cfg.get("chat"))
     cfg["openclaw"]["homePath"] = os.path.expanduser(_env_or("VW_OPENCLAW_PATH", cfg["openclaw"].get("homePath") or "~/.openclaw"))
     cfg["openclaw"]["hostHomePath"] = os.path.expanduser(_env_or("VW_OPENCLAW_HOST_PATH", cfg["openclaw"].get("hostHomePath") or cfg["openclaw"]["homePath"]))
     cfg["openclaw"]["gatewayUrl"] = _env_or("VW_GATEWAY_URL", cfg["openclaw"].get("gatewayUrl") or "")
@@ -637,6 +648,7 @@ def _safe_vw_config():
             "hasCredentials": bool(sms_cfg.get("twilioAccountSid") and sms_cfg.get("twilioAuthToken") and sms_cfg.get("fromNumber")),
         },
         "debug": VW_CONFIG.get("debug", {}),
+        "chat": _normalize_chat_settings(VW_CONFIG.get("chat")),
         "license": lic,
     }
 
@@ -683,6 +695,8 @@ def _save_vw_config_update(body):
     _preserve_secret_updates(existing, body)
     if isinstance(body.get("world"), dict) and "chatBubbles" in body["world"]:
         body["world"]["chatBubbles"] = _normalize_chat_bubble_settings(body["world"]["chatBubbles"])
+    if "chat" in body:
+        body["chat"] = _normalize_chat_settings(body["chat"])
     if isinstance(body.get("features"), dict):
         for feature in ("agentBrowser", "sms", "agentLiveMode"):
             if _demo_feature_locked(feature):
@@ -29749,6 +29763,352 @@ def _timestamp_epoch_ms(ts):
     return 0
 
 
+def _agent_id_from_session_key(session_key):
+    """Parse OpenClaw session keys like agent:<agentId>:<bucket>."""
+    match = re.match(r"^agent:([^:]+):", str(session_key or ""))
+    return match.group(1) if match else ""
+
+
+def _read_tail_text(path, initial_bytes=64 * 1024, max_bytes=2 * 1024 * 1024, min_lines=20):
+    """Read a complete-line tail from a large JSONL file."""
+    if not path or not os.path.exists(path):
+        return ""
+    try:
+        with open(path, "rb") as stream:
+            stream.seek(0, 2)
+            size = stream.tell()
+            tail_size = min(initial_bytes, size)
+            while True:
+                start = max(0, size - tail_size)
+                stream.seek(start)
+                data = stream.read().decode("utf-8", errors="replace")
+                if start > 0:
+                    newline = data.find("\n")
+                    if newline >= 0:
+                        data = data[newline + 1:]
+                complete = [line for line in data.split("\n") if line.strip()]
+                if start == 0 or len(complete) >= min_lines or tail_size >= min(max_bytes, size):
+                    return data
+                tail_size = min(tail_size * 4, max_bytes, size)
+    except OSError:
+        return ""
+
+
+def _openclaw_session_paths(agent_id, session_key=None):
+    """Resolve an OpenClaw transcript and matching trajectory file."""
+    if not agent_id:
+        return None, None, {}
+    sessions_dir = os.path.join(WORKSPACE_BASE, "agents", _safe_openclaw_agent_id(agent_id), "sessions")
+    sessions_json_path = os.path.join(sessions_dir, "sessions.json")
+    session_info = {}
+    selected_key = str(session_key or "")
+    try:
+        with open(sessions_json_path, "r", encoding="utf-8") as handle:
+            sessions = json.load(handle)
+        if isinstance(sessions, dict) and selected_key and isinstance(sessions.get(selected_key), dict):
+            session_info = sessions.get(selected_key) or {}
+        if isinstance(sessions, dict) and not session_info:
+            best_timestamp = -1
+            for key, value in sessions.items():
+                if not isinstance(value, dict):
+                    continue
+                timestamp = value.get("updatedAt", 0)
+                if timestamp > best_timestamp:
+                    best_timestamp = timestamp
+                    selected_key = key
+                    session_info = value
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        session_info = {}
+    if session_info and selected_key:
+        session_info = dict(session_info)
+        session_info.setdefault("key", selected_key)
+        session_info.setdefault("sessionKey", selected_key)
+    session_id = str(session_info.get("sessionId") or "")
+    transcript = os.path.join(sessions_dir, f"{session_id}.jsonl") if session_id else None
+    trajectory = os.path.join(sessions_dir, f"{session_id}.trajectory.jsonl") if session_id else None
+    if transcript and not os.path.exists(transcript):
+        transcript = None
+    if trajectory and not os.path.exists(trajectory):
+        trajectory = None
+    return transcript, trajectory, session_info
+
+
+def _safe_tool_arguments(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            return {"value": value}
+    return {}
+
+
+def _limit_tool_payload(value, limit=2400):
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        try:
+            value = json.dumps(value, ensure_ascii=False)
+        except Exception:
+            value = str(value)
+    value = str(value)
+    if len(value) > limit:
+        return value[:limit] + f"\n\n... [truncated - {len(value)} chars total] ..."
+    return value
+
+
+_TRAJECTORY_THREAD_CACHE = {}
+_TRAJECTORY_THREAD_CACHE_LOCK = threading.Lock()
+_CODEX_COMMENTARY_CACHE = {}
+_CODEX_COMMENTARY_CACHE_LOCK = threading.Lock()
+
+
+def _trajectory_thread_map(trajectory_file):
+    """Incrementally retain run-to-Codex-thread metadata for long sessions."""
+    if not trajectory_file or not os.path.isfile(trajectory_file):
+        return {}
+    try:
+        size = os.path.getsize(trajectory_file)
+    except OSError:
+        return {}
+    with _TRAJECTORY_THREAD_CACHE_LOCK:
+        cached = _TRAJECTORY_THREAD_CACHE.get(trajectory_file) or {"offset": 0, "threads": {}}
+        if size < int(cached.get("offset") or 0):
+            cached = {"offset": 0, "threads": {}}
+        offset = int(cached.get("offset") or 0)
+        threads = dict(cached.get("threads") or {})
+        try:
+            with open(trajectory_file, "rb") as stream:
+                stream.seek(offset)
+                for raw_line in stream:
+                    if b'"threadId"' not in raw_line and b'"thread_id"' not in raw_line:
+                        continue
+                    try:
+                        event = json.loads(raw_line.decode("utf-8", errors="replace"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
+                    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+                    run_id = str(event.get("runId") or data.get("runId") or "")
+                    thread_id = str(data.get("threadId") or data.get("thread_id") or "")
+                    if run_id and thread_id:
+                        threads[run_id] = thread_id
+                next_offset = stream.tell()
+        except OSError:
+            return threads
+        _TRAJECTORY_THREAD_CACHE[trajectory_file] = {"offset": next_offset, "threads": threads}
+        return dict(threads)
+
+
+def _codex_rollout_commentary_items(rollout_file, thread_id):
+    """Incrementally retain public phase=commentary items from a Codex rollout."""
+    if not rollout_file or not os.path.isfile(rollout_file):
+        return []
+    try:
+        size = os.path.getsize(rollout_file)
+    except OSError:
+        return []
+    with _CODEX_COMMENTARY_CACHE_LOCK:
+        cached = _CODEX_COMMENTARY_CACHE.get(rollout_file) or {"offset": 0, "messages": [], "ids": set()}
+        if size < int(cached.get("offset") or 0):
+            cached = {"offset": 0, "messages": [], "ids": set()}
+        offset = int(cached.get("offset") or 0)
+        messages = list(cached.get("messages") or [])
+        seen = set(cached.get("ids") or set())
+        try:
+            with open(rollout_file, "rb") as stream:
+                stream.seek(offset)
+                for index, raw_line in enumerate(stream):
+                    if b'"commentary"' not in raw_line:
+                        continue
+                    try:
+                        record = json.loads(raw_line.decode("utf-8", errors="replace"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
+                    if record.get("type") != "response_item":
+                        continue
+                    payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+                    if payload.get("type") != "message" or payload.get("role") != "assistant" or payload.get("phase") != "commentary":
+                        continue
+                    parts = []
+                    content = payload.get("content")
+                    if isinstance(content, str):
+                        parts.append(content)
+                    elif isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict) and isinstance(item.get("text"), str) and item.get("text").strip():
+                                parts.append(item.get("text"))
+                    text = "\n".join(parts).strip()
+                    if not text:
+                        continue
+                    timestamp = record.get("timestamp") or record.get("ts") or ""
+                    item_id = str(payload.get("id") or f"{thread_id}:{timestamp}:{offset}:{index}")
+                    commentary_id = f"codex-commentary:{item_id}"
+                    if commentary_id in seen:
+                        continue
+                    seen.add(commentary_id)
+                    messages.append({
+                        "id": commentary_id,
+                        "role": "assistant",
+                        "text": text,
+                        "ts": timestamp,
+                        "epochMs": _timestamp_epoch_ms(timestamp),
+                        "source": "codex-commentary",
+                    })
+                next_offset = stream.tell()
+        except OSError:
+            return messages
+        messages.sort(key=lambda message: message.get("epochMs") or 0)
+        _CODEX_COMMENTARY_CACHE[rollout_file] = {"offset": next_offset, "messages": messages, "ids": seen}
+        return [dict(message) for message in messages]
+
+
+def _codex_rollout_commentary_messages(agent_id, run_threads, run_id="", max_messages=80):
+    """Recover only public Codex commentary omitted from OpenClaw history."""
+    if not agent_id or not isinstance(run_threads, dict):
+        return []
+    selected_runs = {
+        str(key): str(value)
+        for key, value in run_threads.items()
+        if key and value and (not run_id or str(key) == str(run_id))
+    }
+    if not selected_runs:
+        return []
+    sessions_dir = os.path.join(
+        WORKSPACE_BASE,
+        "agents",
+        _safe_openclaw_agent_id(agent_id),
+        "agent",
+        "codex-home",
+        "sessions",
+    )
+    if not os.path.isdir(sessions_dir):
+        return []
+    messages = []
+    seen = set()
+    for openclaw_run_id, thread_id in selected_runs.items():
+        safe_thread_id = re.sub(r"[^a-zA-Z0-9_.-]+", "", thread_id)[:160]
+        if not safe_thread_id:
+            continue
+        candidates = glob.glob(os.path.join(sessions_dir, "**", f"*-{safe_thread_id}.jsonl"), recursive=True)
+        if not candidates:
+            continue
+        rollout_file = max(candidates, key=os.path.getmtime)
+        for recovered in _codex_rollout_commentary_items(rollout_file, safe_thread_id):
+            commentary_id = str(recovered.get("id") or "")
+            if not commentary_id or commentary_id in seen:
+                continue
+            seen.add(commentary_id)
+            messages.append({**recovered, "runId": openclaw_run_id})
+    messages.sort(key=lambda message: message.get("epochMs") or 0)
+    return messages[-max_messages:]
+
+
+def _trajectory_activity_messages(trajectory_file, max_tools=60, agent_id="", run_id="", commentary_only=False):
+    """Recover tool activity and public Codex commentary for one session."""
+    tail_data = _read_tail_text(trajectory_file, initial_bytes=256 * 1024, max_bytes=4 * 1024 * 1024, min_lines=80)
+    if not tail_data:
+        return []
+    tools = {}
+    order = []
+    run_threads = _trajectory_thread_map(trajectory_file)
+    for line in tail_data.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        event_type = event.get("type") or ""
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        event_run_id = str(event.get("runId") or data.get("runId") or "")
+        thread_id = str(data.get("threadId") or data.get("thread_id") or "")
+        if event_run_id and thread_id:
+            run_threads[event_run_id] = thread_id
+        if event_type not in ("tool.call", "tool.result"):
+            continue
+        if run_id and event_run_id != str(run_id):
+            continue
+        tool_id = str(data.get("toolCallId") or data.get("tool_call_id") or data.get("itemId") or event.get("id") or "")
+        if not tool_id:
+            tool_id = f"{event.get('seq', len(order))}:{event_type}"
+        if tool_id not in tools:
+            tools[tool_id] = {
+                "id": tool_id,
+                "runId": event_run_id,
+                "status": "running",
+                "name": data.get("name") or data.get("toolName") or "tool",
+                "arguments": {},
+                "result": "",
+                "error": "",
+                "ts": event.get("ts") or "",
+                "epochMs": _timestamp_epoch_ms(event.get("ts")),
+                "source": "trajectory",
+            }
+            order.append(tool_id)
+        tool = tools[tool_id]
+        if event.get("ts"):
+            tool["ts"] = event.get("ts")
+            tool["epochMs"] = _timestamp_epoch_ms(event.get("ts"))
+        if event_type == "tool.call":
+            tool["status"] = "running"
+            tool["name"] = data.get("name") or data.get("toolName") or tool.get("name") or "tool"
+            tool["arguments"] = _safe_tool_arguments(data.get("arguments") or data.get("args") or {})
+        else:
+            is_error = bool(data.get("isError") or data.get("error"))
+            tool["status"] = "error" if is_error else "done"
+            tool["name"] = data.get("name") or data.get("toolName") or tool.get("name") or "tool"
+            result = data.get("output")
+            if result is None:
+                result = data.get("result")
+            if result is None:
+                result = data.get("error")
+            if is_error:
+                tool["error"] = _limit_tool_payload(result)
+            else:
+                tool["result"] = _limit_tool_payload(result)
+    messages = []
+    if not commentary_only:
+        for tool_id in order[-max_tools:]:
+            tool = tools.get(tool_id)
+            if tool:
+                messages.append({
+                    "role": "assistant",
+                    "text": "",
+                    "ts": tool.get("ts") or "",
+                    "epochMs": tool.get("epochMs") or 0,
+                    "runId": tool.get("runId") or "",
+                    "tools": [tool],
+                    "source": "trajectory",
+                })
+    if agent_id:
+        messages.extend(_codex_rollout_commentary_messages(
+            agent_id,
+            run_threads,
+            run_id=run_id,
+            max_messages=max_tools,
+        ))
+    messages.sort(key=lambda message: message.get("epochMs") or 0)
+    return messages
+
+
+def _session_trajectory_messages(session_key, max_tools=80, run_id="", commentary_only=False):
+    agent_id = _agent_id_from_session_key(session_key)
+    if not agent_id:
+        return []
+    _, trajectory_file, _ = _openclaw_session_paths(agent_id, session_key=session_key)
+    return _trajectory_activity_messages(
+        trajectory_file,
+        max_tools=max_tools,
+        agent_id=agent_id,
+        run_id=run_id,
+        commentary_only=commentary_only,
+    )
+
+
 def _agent_chat_apply_session_meta(messages, session_meta):
     if not isinstance(messages, list) or not isinstance(session_meta, dict):
         return messages
@@ -29922,6 +30282,47 @@ def get_agent_chat():
                                     "source": "openclaw-session",
                                     **session_meta,
                                 })
+
+            # OpenClaw's durable transcript can omit public Codex commentary
+            # even though the full chat recovers it from the matching rollout.
+            # Reconcile the same safe commentary into the in-world bubble so a
+            # refresh preserves commentary -> tool -> final chronology there,
+            # too. Private reasoning and rollout final_answer records remain
+            # excluded by _session_trajectory_messages(commentary_only=True).
+            recovered_session_title = "Live Agent Mode" if str(best_key).endswith(":vw-live-mode-planner") else ("Main chat" if str(best_key).endswith(":main") or not best_key else str(best_key).split(":")[-1])
+            recovered_session_meta = {
+                "sessionId": sess_id,
+                "sessionKey": best_key,
+                "sessionTitle": recovered_session_title,
+                "sessionKind": "live-mode" if str(best_key).endswith(":vw-live-mode-planner") else ("main" if str(best_key).endswith(":main") else "other"),
+                "liveMode": str(best_key).endswith(":vw-live-mode-planner"),
+                "activeSession": True,
+            }
+            visible_commentary_ids = {
+                str(message.get("id") or "")
+                for message in messages
+                if isinstance(message, dict) and message.get("id")
+            }
+            for recovered in _session_trajectory_messages(str(best_key), max_tools=80, commentary_only=True):
+                commentary_id = str(recovered.get("id") or "")
+                text = str(recovered.get("text") or "").strip()
+                if not text or (commentary_id and commentary_id in visible_commentary_ids):
+                    continue
+                if commentary_id:
+                    visible_commentary_ids.add(commentary_id)
+                recovered_ts = recovered.get("ts") or ""
+                messages.append({
+                    "id": commentary_id,
+                    "runId": recovered.get("runId") or "",
+                    "role": "assistant",
+                    "text": text[:500],
+                    "time": _format_time_et(recovered_ts),
+                    "epochMs": recovered.get("epochMs") or _timestamp_epoch_ms(recovered_ts),
+                    "from": agent.get("name", agent_id),
+                    "source": "codex-commentary",
+                    **recovered_session_meta,
+                })
+            messages.sort(key=lambda message: int(message.get("epochMs") or 0))
 
             # Keep last 500 messages
             result[agent_id] = messages[-500:]
@@ -30931,6 +31332,25 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
             kind = str(agent.get("providerKind") or "openclaw")
             profile = str(agent.get("providerAgentId") or agent.get("profile") or agent.get("id"))
             return self._send_json({"ok": True, "providerKind": kind, "profile": profile, "messages": _load_provider_history(kind, profile)})
+
+        if path == "/api/session-activity":
+            qs = urllib.parse.parse_qs(parsed.query)
+            session_key = (qs.get("sessionKey") or [""])[0]
+            try:
+                limit = max(1, min(120, int((qs.get("limit") or ["80"])[0])))
+            except (TypeError, ValueError):
+                limit = 80
+            run_id = (qs.get("runId") or [""])[0]
+            commentary_only = (qs.get("commentaryOnly") or [""])[0].lower() in {"1", "true", "yes"}
+            return self._send_json({
+                "ok": True,
+                "messages": _session_trajectory_messages(
+                    session_key,
+                    max_tools=limit,
+                    run_id=run_id,
+                    commentary_only=commentary_only,
+                ),
+            })
 
         if path == "/api/providers/sessions":
             qs = urllib.parse.parse_qs(parsed.query)

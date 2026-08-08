@@ -3221,7 +3221,51 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
     min-height: 31px;
 }
 .chat-tool-summary::-webkit-details-marker { display: none; }
-.chat-tool-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-tool-call.status-changed { animation: hermes-card-in 700ms cubic-bezier(.2,.7,.2,1) both; }
+.chat-tool-running-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: 0 0 7px;
+    background: rgba(255,255,255,0.22);
+}
+.chat-tool-call.running .chat-tool-running-dot {
+    background: #ffd54f;
+    animation: hermes-running-dot 1.15s ease-in-out infinite;
+}
+.chat-tool-call.done .chat-tool-running-dot { background: #81c784; }
+.chat-tool-call.error .chat-tool-running-dot { background: #ef9a9a; }
+.chat-tool-icon { width: 16px; text-align: center; opacity: 0.78; flex-shrink: 0; }
+.chat-tool-name {
+    flex: 0 0 auto;
+    max-width: 38%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255,255,255,0.78);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 700;
+}
+.chat-tool-preview {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255,255,255,0.48);
+    font-size: 11px;
+}
+.chat-tool-toggle {
+    font-size: 10px;
+    color: rgba(255,255,255,0.42);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transform-origin: center;
+    transition: transform .18s ease, color .18s ease;
+}
+.chat-tool-call[open] .chat-tool-toggle { transform: rotate(90deg); color: rgba(255,224,130,0.9); }
 .chat-tool-state {
     font-size: 9px;
     text-transform: uppercase;
@@ -3230,6 +3274,7 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
     padding: 2px 5px;
     border-radius: 999px;
     background: rgba(255,255,255,0.08);
+    flex-shrink: 0;
 }
 .chat-tool-call.running .chat-tool-state { color: #ffd54f; }
 .chat-tool-call.done .chat-tool-state { color: #81c784; }

@@ -24,6 +24,7 @@
   let gatewayAuthFailed = false;
   let gatewayAuthFailureMessage = '';
   let lastGatewayToken = null;
+  let toolCallsExpandedByDefault = true;
   const runOwners = new Map();
   const LOCAL_GATEWAY_HOSTS = new Set(['127.0.0.1', 'localhost', '0.0.0.0', 'host.docker.internal']);
 
@@ -48,7 +49,32 @@
     }
   }
 
+  function applyChatUiSettings(config, { applyExisting = false } = {}) {
+    const nextExpanded = config?.chat?.toolCallsExpanded !== false;
+    const changed = nextExpanded !== toolCallsExpandedByDefault;
+    toolCallsExpandedByDefault = nextExpanded;
+    if (applyExisting && changed) {
+      document.querySelectorAll('.chat-tool-call').forEach((card) => {
+        card.open = toolCallsExpandedByDefault;
+      });
+    }
+  }
+
+  async function loadChatUiSettings() {
+    try {
+      const response = await fetch('/vw-config', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const config = await response.json();
+      applyChatUiSettings(config);
+      return config;
+    } catch (err) {
+      console.warn('[chat] Failed to load chat display settings:', err);
+      return null;
+    }
+  }
+
   const gatewayInfoReady = loadGatewayInfo();
+  const chatUiSettingsReady = loadChatUiSettings();
 
   const MAX_INPUT_LINES = 15;
   const TOOL_RENDER_INTERVAL_MS = 80;
@@ -62,6 +88,22 @@
   const CHAT_MIDDLE_SCROLL_DEAD_ZONE = 8;
   const CHAT_MIDDLE_SCROLL_MAX_SPEED = 26;
   const HERMES_APPROVAL_POLL_MS = 1500;
+  const NATIVE_PROVIDER_UI = Object.freeze({
+    hermes: {
+      label: 'Hermes',
+      path: 'hermes',
+      sourceProperty: 'hermesEventSource',
+      completedKeysProperty: 'hermesCompletedToolKeys',
+      approval: 'hermes'
+    },
+    codex: {
+      label: 'Codex',
+      path: 'codex',
+      sourceProperty: 'codexEventSource',
+      completedKeysProperty: 'codexCompletedToolKeys',
+      approval: 'codex'
+    }
+  });
   const CHAT_SELECTION_STORAGE_KEY = 'vw-chat-selection-v1';
   const DEFAULT_CHAT_AGENT_KEY = 'main';
   const DEFAULT_CHAT_SESSION_KEY = 'agent:main:main';
@@ -201,6 +243,9 @@
       this.sessionKey = options.sessionKey || savedSelection?.sessionKey || DEFAULT_CHAT_SESSION_KEY;
       this.hasExplicitAgentSelection = !!savedSelection || !!options.selectedAgentKey || !!options.sessionKey;
       this.currentRunId = null;
+      this.turnEvents = new ChatEvents.TurnEventReducer();
+      this.openClawEventQueue = Promise.resolve();
+      this.seenOpenClawCommentary = new Set();
       this.streamingMsg = null;
       this.openClawRunTracker = new OpenClawRunTracker();
       this.liveToolCards = new Map();
@@ -213,6 +258,10 @@
       this.codexEventSource = null;
       this.providerEventSource = null;
       this.hermesCompletedToolKeys = new Set();
+      this.codexCompletedToolKeys = new Set();
+      this.liveThinkingEl = null;
+      this.liveThinkingPre = null;
+      this.liveThinkingRunId = '';
       this.hermesApprovalPollTimer = null;
       this.hermesApprovalLastId = '';
       this.codexApprovalPollTimer = null;
@@ -424,6 +473,9 @@
       this.messages.innerHTML = '';
       this.streamingMsg = null;
       this.currentRunId = null;
+      this.turnEvents.reset();
+      this.openClawEventQueue = Promise.resolve();
+      this.seenOpenClawCommentary.clear();
       this.openClawRunTracker.reset();
       this.clearRunNotice();
       this.liveAttentionByRunId.clear();
@@ -434,6 +486,9 @@
       if (this.toolFlushTimer) { clearTimeout(this.toolFlushTimer); this.toolFlushTimer = null; }
       this.pendingToolEvents.clear();
       this.liveToolCards.clear();
+      this.liveThinkingEl = null;
+      this.liveThinkingPre = null;
+      this.liveThinkingRunId = '';
       this.sessionModel = '—';
       this.contextWindow = 0;
       this.contextUsed = 0;
@@ -973,6 +1028,183 @@
       this.updateModelBar();
     }
 
+    renderHistoryItems(items) {
+      this.replaceHistoryMessages(() => {
+        this.liveThinkingEl = null;
+        this.liveThinkingPre = null;
+        this.liveThinkingRunId = '';
+        for (const item of ChatEvents.mergeHistoryItems(items)) {
+          const role = normalizeChatRole(item.role);
+          this.appendMessage(
+            role,
+            item.text || '',
+            item.epochMs || item.ts || item.timestamp || Date.now(),
+            normalizeChatMedia(item.media || item.attachments || []),
+            item.meta || normalizeSenderMeta({}, role, this),
+            item.tools || []
+          );
+        }
+      });
+    }
+
+    providerHistoryItems(messages, progressMarker = '') {
+      const output = [];
+      for (const msg of (messages || [])) {
+        const role = normalizeChatRole(msg.role);
+        const ts = msg.epochMs || msg.ts || msg.timestamp || Date.now();
+        if (role === 'assistant') {
+          const meta = resolveMessageSender(msg, this);
+          const isProgress = progressMarker && msg.ephemeral === progressMarker;
+          // Provider history is already in transcript order. Preserve each
+          // message boundary and only order blocks inside that message. Some
+          // native runtimes reuse one timestamp for an entire turn.
+          if (msg.thinking) {
+            output.push({
+              role: 'assistant',
+              text: '',
+              thinking: msg.thinking,
+              ts,
+              meta: { ...meta, thinking: msg.thinking, reasoningTokens: msg.reasoningTokens || 0 }
+            });
+          }
+          if (msg.commentary) {
+            output.push({ role: 'assistant', text: msg.commentary, ts, meta });
+          }
+          normalizeHermesTools(msg.tools || [], !isProgress).forEach((tool) => {
+            output.push({ role: 'assistant', text: '', tools: [tool], ts, meta });
+          });
+          if (msg.text || msg.approval) {
+            output.push({
+              role: 'assistant',
+              text: msg.text || '',
+              ts,
+              meta: { ...meta, approval: msg.approval || null },
+              media: msg.attachments || []
+            });
+          }
+          continue;
+        }
+        if (msg.text || msg.attachments?.length) {
+          output.push({
+            role,
+            text: msg.text || '',
+            ts,
+            media: msg.attachments || [],
+            meta: resolveMessageSender(msg, this),
+            tools: []
+          });
+        }
+      }
+      return output;
+    }
+
+    openClawHistoryItems(messages) {
+      const items = [];
+      for (const msg of (messages || [])) {
+        const rawRole = msg?.role || msg?.message?.role || '';
+        const role = normalizeChatRole(rawRole);
+        let text = extractText(msg) || (typeof msg.content === 'string' ? msg.content : '');
+        const media = extractMedia(msg, text);
+        let tools = extractToolItems(msg);
+        if (isToolResultRole(rawRole)) {
+          if (!tools.length && text) {
+            tools = [{
+              id: msg?.toolCallId || msg?.message?.toolCallId || '',
+              name: msg?.name || msg?.message?.name || 'tool result',
+              status: msg?.error || msg?.message?.error ? 'error' : 'done',
+              result: text,
+              error: msg?.error || msg?.message?.error || ''
+            }];
+          }
+          text = '';
+        }
+        if (!text && !media.length && !tools.length) continue;
+        items.push({
+          role,
+          text,
+          media,
+          tools,
+          ts: msg.timestamp || msg.ts || msg.message?.timestamp || null,
+          meta: role === 'assistant' ? normalizeSenderMeta({}, 'assistant', this) : resolveMessageSender(msg, this)
+        });
+      }
+      return items;
+    }
+
+    async fetchRecoveredActivityItems() {
+      if (!this.isVisibleForPolling()) return [];
+      try {
+        const url = '/api/session-activity?sessionKey=' + encodeURIComponent(this.sessionKey) + '&limit=80';
+        const res = await fetch(url);
+        if (!res.ok) return [];
+        const data = await res.json();
+        if (!this.isVisibleForPolling() || !data.ok || !Array.isArray(data.messages)) return [];
+        return data.messages.map(msg => {
+          if (msg.source === 'codex-commentary' && msg.id) this.seenOpenClawCommentary.add(String(msg.id));
+          return {
+            id: msg.id || '',
+            runId: msg.runId || '',
+            source: msg.source || '',
+            role: normalizeChatRole(msg.role || 'assistant'),
+            text: msg.text || '',
+            tools: normalizeHistoricalTools(msg.tools || []),
+            ts: msg.epochMs || msg.ts || Date.now(),
+            meta: normalizeSenderMeta({}, 'assistant', this),
+            media: msg.media || []
+          };
+        });
+      } catch (error) {
+        console.warn('[chat] recovered activity load failed:', error);
+        return [];
+      }
+    }
+
+    async syncOpenClawCommentary(runId) {
+      if (!runId || !this.isVisibleForPolling() || this.isProviderAgentSelected()) return;
+      try {
+        const params = new URLSearchParams({
+          sessionKey: this.sessionKey,
+          runId: String(runId),
+          commentaryOnly: '1',
+          limit: '80'
+        });
+        const res = await fetch('/api/session-activity?' + params.toString());
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.ok || !Array.isArray(data.messages)) return;
+        for (const msg of data.messages) {
+          if (msg.source !== 'codex-commentary' || !String(msg.text || '').trim()) continue;
+          const key = String(msg.id || [msg.runId || runId, msg.epochMs || msg.ts || '', msg.text].join(':'));
+          if (this.seenOpenClawCommentary.has(key)) continue;
+          this.seenOpenClawCommentary.add(key);
+          this.applyTurnEvent({ kind: 'commentary', runId: msg.runId || runId, text: msg.text });
+        }
+      } catch (error) {
+        console.warn('[chat] safe commentary recovery failed:', error);
+      }
+    }
+
+    queueOpenClawEvent(eventName, payload) {
+      this.openClawEventQueue = this.openClawEventQueue
+        .catch(() => {})
+        .then(async () => {
+          const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
+          const stream = payload?.stream || data.stream || '';
+          const runId = payload?.runId || data.runId || this.currentRunId || '';
+          const isToolEvent = eventName === 'agent' && (
+            stream === 'tool' ||
+            (stream === 'item' && data.kind === 'command') ||
+            ['tool_start', 'tool_end', 'tool_result'].includes(payload?.type)
+          );
+          const isFinalChat = eventName === 'chat' && ['final', 'done'].includes(payload?.state);
+          if ((isToolEvent || isFinalChat) && runId) await this.syncOpenClawCommentary(runId);
+          if (eventName === 'chat') return this.handleChatEvent(payload);
+          if (eventName === 'agent') return this.handleAgentEvent(payload);
+          if (eventName === 'session.message') return this.handleSessionMessageEvent(payload);
+        });
+      return this.openClawEventQueue;
+    }
+
     async loadHistory() {
       try {
         if (this.isLiveModeSessionSelected()) {
@@ -985,21 +1217,7 @@
           const res = await fetch('/api/hermes/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
           if (data.ok && Array.isArray(data.messages)) {
-            this.replaceHistoryMessages(() => {
-              for (const msg of data.messages) {
-                if (msg.text || msg.thinking || msg.approval || (Array.isArray(msg.tools) && msg.tools.length)) {
-                  const meta = msg.role === 'assistant'
-                    ? {
-                        ...resolveMessageSender(msg, this),
-                        thinking: msg.thinking || '',
-                        reasoningTokens: msg.reasoningTokens || 0,
-                        approval: msg.approval || null
-                      }
-                    : { label: 'You', kind: 'human' };
-                  this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, normalizeHermesTools(msg.tools || []));
-                }
-              }
-            });
+            this.renderHistoryItems(this.providerHistoryItems(data.messages, 'hermes-progress'));
             this.scrollBottom();
           }
           await this.pollHermesApproval().catch(() => {});
@@ -1010,23 +1228,7 @@
           const res = await fetch('/api/codex/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
           if (data.ok && Array.isArray(data.messages)) {
-            this.replaceHistoryMessages(() => {
-              for (const msg of data.messages) {
-                const tools = normalizeHermesTools(msg.tools || []);
-                const meta = msg.role === 'user'
-                  ? { label: msg.from || 'You', kind: msg.fromType === 'human' ? 'human' : 'agent' }
-                  : {
-                      label: msg.from || this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Codex',
-                      kind: 'agent',
-                      thinking: msg.thinking || '',
-                      reasoningTokens: msg.reasoningTokens || 0,
-                      approval: msg.approval || null
-                    };
-                if (msg.text || tools.length || msg.thinking || msg.reasoningTokens || msg.approval) {
-                  this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, tools);
-                }
-              }
-            });
+            this.renderHistoryItems(this.providerHistoryItems(data.messages, 'codex-progress'));
             this.scrollBottom();
           }
           return;
@@ -1036,37 +1238,14 @@
           const res = await fetch('/api/providers/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
           const msgs = Array.isArray(data.messages) ? data.messages : [];
-          this.replaceHistoryMessages(() => {
-            for (const msg of msgs) {
-              const tools = normalizeHermesTools(msg.tools || []);
-              const meta = msg.role === 'user'
-                ? { label: msg.from || 'You', kind:'human' }
-                : {
-                    label: msg.from || this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Agent',
-                    kind: 'agent',
-                    thinking: msg.thinking || '',
-                    reasoningTokens: msg.reasoningTokens || 0,
-                    approval: msg.approval || null
-                  };
-              if (msg.text || tools.length || msg.thinking || msg.reasoningTokens || msg.approval) {
-                this.appendMessage(msg.role || 'assistant', msg.text || '', msg.ts || msg.epochMs || Date.now(), [], meta, tools);
-              }
-            }
-          });
+          this.renderHistoryItems(this.providerHistoryItems(msgs, 'provider-progress'));
           this.scrollBottom();
           return;
         }
         const res = await rpc('chat.history', { sessionKey: this.sessionKey, limit: 500 });
         if (res.ok && res.payload?.messages) {
-          this.replaceHistoryMessages(() => {
-            for (const msg of res.payload.messages) {
-              const t = extractText(msg) || (typeof msg.content === 'string' ? msg.content : '');
-              const ts = msg.timestamp || msg.ts || msg.message?.timestamp || null;
-              const media = extractMedia(msg, t);
-              const tools = extractToolItems(msg);
-              if (t || media.length || tools.length) this.appendMessage(msg.role, t, ts, media, resolveMessageSender(msg, this), tools);
-            }
-          });
+          const recovered = await this.fetchRecoveredActivityItems();
+          this.renderHistoryItems([...this.openClawHistoryItems(res.payload.messages), ...recovered]);
           this.scrollBottom();
         }
       } catch (e) {
@@ -1555,7 +1734,9 @@
             this.settleLiveAgentUserAttention(liveAttentionAgentId);
             return;
           }
-          this.showRunNotice('Response not completed', e.message, this.currentRunId);
+          if (!e.turnReducerHandled) {
+            this.applyTurnEvent({ kind: 'run.failed', runId: this.currentRunId || hermesProgress?.runId || '', error: e.message });
+          }
         } finally {
           this.clearLiveAttentionForRun(this.currentRunId);
           this.settleLiveAgentUserAttention(liveAttentionAgentId);
@@ -1600,8 +1781,9 @@
           this.scrollBottom();
         } catch (e) {
           this.closeCodexEventSource();
-          this.removeTypingIndicator();
-          this.showRunNotice('Response not completed', e.message, this.currentRunId);
+          if (!e.turnReducerHandled) {
+            this.applyTurnEvent({ kind: 'run.failed', runId: this.currentRunId || `codex-failed-${codexSendStartedAt}`, error: e.message });
+          }
         } finally {
           this.clearLiveAttentionForRun(this.currentRunId);
           this.settleLiveAgentUserAttention(liveAttentionAgentId);
@@ -1633,8 +1815,9 @@
           this.scrollBottom();
         } catch (e) {
           this.closeProviderEventSource();
-          this.removeTypingIndicator();
-          this.showRunNotice('Response not completed', e.message);
+          if (!e.turnReducerHandled) {
+            this.applyTurnEvent({ kind: 'run.failed', runId: this.currentRunId || `provider-failed-${Date.now()}`, error: e.message });
+          }
         } finally {
           this.settleLiveAgentUserAttention(liveAttentionAgentId);
         }
@@ -1685,6 +1868,7 @@
           });
           const data = await resp.json().catch(() => ({}));
           if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
+          this.applyTurnEvent({ kind: 'run.cancelled', runId: this.currentRunId || '' });
           this.appendSystem('Stop sent');
           return;
         }
@@ -1697,6 +1881,7 @@
           const data = await resp.json().catch(() => ({}));
           if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
           this.closeProviderEventSource();
+          this.applyTurnEvent({ kind: 'run.cancelled', runId: this.currentRunId || '' });
           this.appendSystem('🛑 Stop sent');
           return;
         }
@@ -1708,19 +1893,15 @@
           });
           const data = await resp.json().catch(() => ({}));
           if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText);
+          this.applyTurnEvent({ kind: 'run.cancelled', runId: this.currentRunId || '' });
           this.appendSystem('Stop sent');
           return;
-        }
-        if (this.streamingMsg) {
-          this.finalizeStreamingMessage(this.streamingMsg.content || '');
-          this.streamingMsg = null;
         }
         const params = { sessionKey: this.sessionKey };
         if (this.currentRunId) params.runId = this.currentRunId;
         const res = await rpc('chat.abort', params);
         if (res?.ok === false) throw new Error(res.error?.message || 'abort failed');
-        this.clearActivityFeed();
-        this.currentRunId = null;
+        this.applyTurnEvent({ kind: 'run.cancelled', runId: this.currentRunId || '' });
         this.appendSystem('🛑 Stop sent');
       } catch (e) {
         this.appendSystem('Failed to stop: ' + e.message);
@@ -1784,88 +1965,204 @@
       return false;
     }
 
+    applyTurnEvent(event) {
+      const actions = this.turnEvents.ingest(event);
+      actions.forEach(action => this.applyTurnAction(action));
+      return actions;
+    }
+
+    applyDistinctThinking(runId, value) {
+      const thinking = String(value || '').trim();
+      const visibleText = this.turnEvents.get(runId)?.fullText?.trim() || '';
+      // Native runtimes sometimes repeat the already visible final answer in
+      // a reasoning field. It is not a second Thinking item.
+      if (!thinking || thinking === visibleText) return false;
+      this.applyTurnEvent({ kind: 'thinking', runId, text: thinking });
+      return true;
+    }
+
+    applyTurnAction(action) {
+      if (!action) return;
+      const runId = action.runId || this.currentRunId || '';
+      if (runId) this.currentRunId = runId;
+
+      if (action.kind === 'run.start') {
+        if (action.label) this.updateTypingIndicator(action.label);
+        return;
+      }
+
+      if (action.kind === 'text.open' || action.kind === 'text.update') {
+        if (!this.streamingMsg || this.streamingMsg.id !== runId || !this.messages.querySelector('.streaming-msg')) {
+          this.streamingMsg = { id: runId, role: 'assistant', content: '' };
+          this.appendStreamingMessage(runId);
+        }
+        this.streamingMsg.content = action.text || '';
+        this.updateStreamingMessage(this.streamingMsg.content);
+        return;
+      }
+
+      if (action.kind === 'text.finalize') {
+        const text = action.text || this.streamingMsg?.content || '';
+        this.renderStreamingMessageText(text);
+        if (this.streamingMsg) this.finalizeStreamingMessage(text, undefined, runId);
+        this.streamingMsg = null;
+        return;
+      }
+
+      if (action.kind === 'text.amend') {
+        this.amendFinalizedMessage(runId, action.text || '');
+        return;
+      }
+
+      if (action.kind === 'text.discard') {
+        this.discardStreamingMessage();
+        this.streamingMsg = null;
+        return;
+      }
+
+      if (action.kind === 'thinking') {
+        this.updateLiveThinking(runId, action.text || '');
+        return;
+      }
+
+      if (action.kind === 'tool.start' || action.kind === 'tool.update' || action.kind === 'tool.result') {
+        const tool = action.tool || {};
+        const payload = {
+          runId,
+          data: {
+            toolCallId: tool.id || tool.key || '',
+            phase: action.kind === 'tool.start' ? 'start' : (action.kind === 'tool.update' ? 'update' : 'result'),
+            name: tool.name || 'tool',
+            args: tool.arguments || {},
+            result: tool.result || '',
+            isError: tool.status === 'error' || !!tool.error,
+            error: tool.error || ''
+          }
+        };
+        if (action.kind === 'tool.start') this.appendToolCall(payload);
+        else if (action.kind === 'tool.update') this.updateToolCall(payload);
+        else this.finishToolCall(payload);
+        return;
+      }
+
+      if (action.kind === 'approval') {
+        if (action.provider === 'codex') this.appendCodexPendingApproval(action.approval, action.approval?.pending_count || 1);
+        else if (action.provider === 'hermes') this.appendHermesPendingApproval(action.approval, action.approval?.pending_count || 1);
+        else {
+          const approvalId = action.approval?.id || action.approval?.approval_id || '';
+          const selector = approvalId ? `[data-approval-id="${CSS.escape(approvalId)}"]` : '';
+          if (!selector || !this.messages.querySelector(selector)) {
+            this.appendMessage('assistant', '', Date.now(), [], {
+              label: this.agentSelect?.selectedOptions?.[0]?.textContent.trim() || action.provider || 'Provider',
+              kind: 'agent',
+              approval: action.approval
+            }, []);
+          }
+        }
+        return;
+      }
+
+      if (action.kind === 'run.terminal') this.finishRunUi(runId, action.status, action.error || '');
+    }
+
+    finishRunUi(runId, status = 'completed', errorText = '') {
+      if (this.streamingMsg) {
+        const text = this.streamingMsg.content || '';
+        if (text.trim()) this.finalizeStreamingMessage(text, undefined, runId);
+        else this.discardStreamingMessage();
+      }
+      this.streamingMsg = null;
+      this.cancelStreamingRender();
+      this.clearActivityFeed();
+      this.removeTypingIndicator();
+      this.settleLiveThinking(runId);
+      this.finalizeRunToolCards(runId, status, errorText);
+      if (status === 'failed') {
+        this.showRunNotice(classifyFailureStatus(errorText), errorText || 'The run failed before returning a reply.', runId);
+      }
+      if (runId) runOwners.delete(runId);
+      this.clearLiveAttentionForRun(runId);
+      if (!runId || this.currentRunId === runId) this.currentRunId = null;
+      this.scrollBottom();
+    }
+
+    settleLiveThinking(runId) {
+      if (!this.liveThinkingEl) return;
+      if (runId && this.liveThinkingEl.dataset.runId && this.liveThinkingEl.dataset.runId !== runId) return;
+      this.liveThinkingEl.classList.remove('chat-thinking-live');
+      this.liveThinkingEl.classList.add('chat-thinking-settled');
+      const card = this.liveThinkingEl.querySelector('.chat-thinking-card');
+      if (card) card.open = false;
+      this.liveThinkingEl = null;
+      this.liveThinkingPre = null;
+      this.liveThinkingRunId = '';
+    }
+
     handleChatEvent(payload) {
       if (!this.ownsPayload(payload)) return;
+      this.markLiveEvent();
       const disposition = classifyChatEvent(payload);
-      const eventRunId = getOpenClawRunId(payload, this.currentRunId);
-      if (eventRunId && this.openClawRunTracker.isSucceeded(eventRunId)) return;
+      const runId = getOpenClawRunId(payload, this.currentRunId) || 'openclaw-run';
       if (disposition === 'terminal-error') {
-        // A terminal event without an active/identified run cannot safely be
-        // attributed to this conversation and must not become a global error.
-        if (!eventRunId) return;
-        this.finishOpenClawRunError(payload);
+        if (!getOpenClawRunId(payload, this.currentRunId)) return;
+        const pending = this.openClawRunTracker.consumePending(runId);
+        const message = extractRunError(payload, '') || extractRunError(pending, '') || 'The run failed before returning a reply.';
+        if (this.openClawRunTracker.markFailed(runId)) this.applyTurnEvent({ kind: 'run.failed', runId, error: message });
         return;
       }
       const text = extractText(payload);
       if (disposition === 'streaming') {
-        if (!this.streamingMsg || this.streamingMsg.id !== payload.runId) {
-          this.streamingMsg = { id: payload.runId, role: 'assistant', content: '' };
-          this.appendStreamingMessage();
-        }
-        if (text) {
-          this.streamingMsg.content = text;
-          this.updateStreamingMessage(this.streamingMsg.content);
-        }
-        this.scrollBottom();
+        if (text) this.applyTurnEvent({ kind: 'text.replace', runId, text });
       } else if (disposition === 'success') {
-        const runId = eventRunId;
-        const finalText = text || (this.streamingMsg ? this.streamingMsg.content : '');
+        const finalText = text || this.streamingMsg?.content || '';
         this.openClawRunTracker.markSucceeded(runId);
         this.clearRunNotice(runId);
-        this.removeTypingIndicator();
-        this.flushToolEvents(true);
-        this.clearActivityFeed();
-        if (this.streamingMsg) {
-          this.finalizeStreamingMessage(finalText);
-          this.streamingMsg = null;
-        } else if (finalText) {
-          this.appendMessage('assistant', finalText);
-        }
+        if (finalText) this.applyTurnEvent({ kind: 'text.replace', runId, text: finalText });
+        this.applyTurnEvent({ kind: 'run.complete', runId });
         this.fetchContextUsage();
-        if (runId) this.finalizeRunToolCards(runId);
-        if (runId) runOwners.delete(runId);
-        this.clearLiveAttentionForRun(runId);
-        this.currentRunId = null;
-        this.scrollBottom();
       }
     }
 
     handleAgentEvent(payload) {
       if (!this.ownsPayload(payload)) return;
-      const eventRunId = getOpenClawRunId(payload, this.currentRunId);
-      if (eventRunId && this.openClawRunTracker.isSucceeded(eventRunId)) return;
-
       const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
       const phase = data.phase || payload?.phase || '';
       const disposition = classifyAgentEvent(payload);
+      const runId = getOpenClawRunId(payload, this.currentRunId) || 'openclaw-run';
 
-      // Current OpenClaw emits tool activity as agent events:
-      // { stream:"tool", data:{ phase:"start|update|result", name, toolCallId, args, result } }
       if (disposition === 'tool') {
         this.markLiveEvent();
         const tool = normalizeToolEvent(payload, phase === 'result' ? 'done' : 'running');
         const label = formatToolLabel(tool.name, coerceToolArgs(tool.arguments));
         this.updateTypingIndicator((phase === 'result' || phase === 'end' || payload?.type === 'tool_end' || payload?.type === 'tool_result') ? 'Processing...' : label);
-        this.queueToolEvent(payload);
+        const isTerminal = phase === 'result' || phase === 'end' || payload?.type === 'tool_end' || payload?.type === 'tool_result';
+        const isUpdate = phase === 'update';
+        this.applyTurnEvent({ kind: isTerminal ? 'tool.result' : (isUpdate ? 'tool.update' : 'tool.start'), runId, tool });
         return;
       }
 
-      if (disposition === 'terminal-error') {
-        this.finishOpenClawRunError(payload);
-        return;
-      }
-
-      // Generic agent/lifecycle errors can describe a failed tool inside a run
-      // that later completes successfully. Keep them only as fallback details
-      // until an authoritative chat terminal event resolves the run.
       if (disposition === 'pending-error') {
         this.openClawRunTracker.notePending(payload, this.currentRunId);
         return;
       }
 
       if (disposition === 'thinking') {
+        const thinking = data.thinking || data.text || payload?.thinking || payload?.text || '';
+        if (thinking) this.applyDistinctThinking(runId, thinking);
+        else this.applyTurnEvent({ kind: 'run.start', runId, label: 'Thinking...' });
         this.updateTypingIndicator('Thinking...');
       }
+    }
+
+    handleSessionMessageEvent(payload) {
+      if (!this.ownsPayload(payload)) return;
+      const msg = payload?.message && typeof payload.message === 'object' ? payload.message : payload;
+      const role = msg?.role || payload?.role || '';
+      if (role === 'assistant') {
+        this.markLiveEvent();
+        return this.loadHistory();
+      }
+      if (role === 'user') this.markLiveEvent();
     }
 
     finishOpenClawRunError(payload) {
@@ -1949,6 +2246,9 @@
         displayContent = envelope.text;
         meta = { ...meta, label: envelope.label, toLabel: envelope.toLabel || meta.toLabel, kind: 'agent' };
       }
+      if (role === 'assistant' && meta.thinking && String(meta.thinking).trim() === String(displayContent || '').trim()) {
+        meta = { ...meta, thinking: '', reasoningTokens: 0 };
+      }
       meta = normalizeSenderMeta(meta, role, this);
       if (meta.kind) div.dataset.senderKind = meta.kind;
       if (role === 'tool' && displayContent.length > 3000) {
@@ -1997,12 +2297,13 @@
       this.messages.appendChild(div);
     }
 
-    appendStreamingMessage() {
+    appendStreamingMessage(runId = '') {
       this.removeTypingIndicator();
       const existing = this.messages.querySelector('.streaming-msg');
       if (existing) existing.classList.remove('streaming-msg');
       const div = document.createElement('div');
       div.className = 'chat-msg assistant streaming-msg';
+      div.dataset.runId = runId || this.currentRunId || '';
       const bubble = document.createElement('div');
       bubble.className = 'chat-bubble streaming';
       const text = document.createElement('div');
@@ -2059,7 +2360,7 @@
       this.scrollBottom();
     }
 
-    finalizeStreamingMessage(content, mediaItems) {
+    finalizeStreamingMessage(content, mediaItems, runId = '') {
       this.cancelStreamingRender();
       const div = this.messages.querySelector('.streaming-msg');
       if (!div) return this.appendMessage('assistant', content, Date.now(), mediaItems);
@@ -2094,6 +2395,29 @@
       time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       bubble.appendChild(time);
       div.classList.remove('streaming-msg');
+      div.classList.add('chat-stream-segment');
+      div.dataset.runId = runId || div.dataset.runId || this.currentRunId || '';
+      return div;
+    }
+
+    amendFinalizedMessage(runId, content) {
+      const segments = [...this.messages.querySelectorAll('.chat-stream-segment')];
+      const div = segments.reverse().find(item => !runId || item.dataset.runId === String(runId));
+      if (!div) return this.finalizeStreamingMessage(content, undefined, runId);
+      const bubble = div.querySelector('.chat-bubble');
+      if (!bubble) return;
+      let textDiv = bubble.querySelector('.chat-markdown');
+      if (!textDiv) {
+        textDiv = document.createElement('div');
+        textDiv.className = 'chat-markdown';
+        const time = bubble.querySelector('.chat-time');
+        bubble.insertBefore(textDiv, time || null);
+      }
+      textDiv.innerHTML = formatContent(content || '');
+      div.classList.remove('chat-stream-segment-settling');
+      void div.offsetWidth;
+      div.classList.add('chat-stream-segment-settling');
+      this.scrollBottom();
     }
 
     appendSystem(text) {
@@ -2124,19 +2448,19 @@
 
     clearActivityFeed() { this.messages.querySelectorAll('.chat-activity').forEach(el => el.remove()); }
 
-    closeHermesEventSource() {
-      if (this.hermesEventSource) {
-        try { this.hermesEventSource.close(); } catch (_) {}
-        this.hermesEventSource = null;
+    closeNativeEventSource(provider) {
+      const cfg = NATIVE_PROVIDER_UI[provider];
+      if (!cfg) return;
+      const source = this[cfg.sourceProperty];
+      if (source) {
+        try { source.close(); } catch (_) {}
+        this[cfg.sourceProperty] = null;
       }
     }
 
-    closeCodexEventSource() {
-      if (this.codexEventSource) {
-        try { this.codexEventSource.close(); } catch (_) {}
-        this.codexEventSource = null;
-      }
-    }
+    closeHermesEventSource() { this.closeNativeEventSource('hermes'); }
+
+    closeCodexEventSource() { this.closeNativeEventSource('codex'); }
 
     closeProviderEventSource() {
       if (this.providerEventSource) {
@@ -2356,20 +2680,12 @@
           if (!hasRenderableHermesReply) throw new Error(data.error || data.reply || resp.statusText);
         }
         this.finishHermesProgress(hermesProgress, true);
-        this.appendMessage(
-          'assistant',
-          data.reply || '',
-          Date.now(),
-          [],
-          {
-            label: this.agentSelect.selectedOptions[0]?.textContent.trim() || 'Hermes',
-            kind: 'agent',
-            thinking: data.thinking || '',
-            reasoningTokens: data.reasoningTokens || 0,
-            approval: data.approval || null
-          },
-          hermesTools
-        );
+        const runId = this.currentRunId || hermesProgress?.runId || `hermes-blocking-${Date.now()}`;
+        if (data.thinking) this.applyDistinctThinking(runId, data.thinking);
+        hermesTools.forEach(tool => this.applyTurnEvent({ kind: 'tool.result', runId, tool: { ...tool, runId } }));
+        if (data.approval) this.applyTurnEvent({ kind: 'approval', runId, approval: data.approval, provider: 'hermes' });
+        if (data.reply) this.applyTurnEvent({ kind: 'text.replace', runId, text: data.reply });
+        this.applyTurnEvent({ kind: 'run.complete', runId });
         await this.pollHermesApproval().catch(() => {});
       } catch (e) {
         this.stopHermesLivePolling();
@@ -2390,23 +2706,142 @@
       if (!resp.ok || data.ok === false) {
         if (!hasRenderableReply) throw new Error(data.error || data.reply || resp.statusText);
       }
-      this.appendMessage(
-        'assistant',
-        data.reply || '',
-        Date.now(),
-        [],
-        {
-          label: codexLabel,
-          kind: 'agent',
-          thinking: data.thinking || '',
-          reasoningTokens: data.reasoningTokens || 0,
-          approval: data.approval || null
-        },
-        codexTools
-      );
+      const runId = this.currentRunId || `codex-blocking-${Date.now()}`;
+      if (data.thinking) this.applyDistinctThinking(runId, data.thinking);
+      codexTools.forEach(tool => this.applyTurnEvent({ kind: 'tool.result', runId, tool: { ...tool, runId } }));
+      if (data.approval) this.applyTurnEvent({ kind: 'approval', runId, approval: data.approval, provider: 'codex' });
+      if (data.reply) this.applyTurnEvent({ kind: 'text.replace', runId, text: data.reply });
+      this.applyTurnEvent({ kind: 'run.complete', runId });
+    }
+
+    streamNativeRunEvents(provider, runId) {
+      const cfg = NATIVE_PROVIDER_UI[provider];
+      if (!cfg || !runId) return Promise.reject(new Error(`${cfg?.label || provider} run did not return a run id`));
+      this.closeNativeEventSource(provider);
+      this[cfg.completedKeysProperty] = new Set();
+      this.currentRunId = runId;
+      this.markLiveEvent();
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey || '';
+      const url = '/api/' + cfg.path + '/runs/' + encodeURIComponent(runId) + '/events?agentId=' + encodeURIComponent(agentId);
+      const terminalEvents = new Set(['run.completed', 'run.failed', 'run.cancelled', 'run.canceled']);
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const source = new EventSource(url);
+        this[cfg.sourceProperty] = source;
+        const cleanup = () => {
+          if (this[cfg.sourceProperty] === source) this[cfg.sourceProperty] = null;
+          source.close();
+        };
+        const finish = (ok, value) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (ok) resolve(value);
+          else reject(value instanceof Error ? value : new Error(String(value || cfg.label + ' stream failed')));
+        };
+        const handle = (eventName, event) => {
+          let data = {};
+          try { data = JSON.parse(event.data || '{}'); } catch (_) {}
+          this.handleNativeRunEvent(provider, eventName, data);
+          if (terminalEvents.has(eventName)) {
+            if (eventName === 'run.completed') finish(true, data);
+            else {
+              const error = new Error(data.error || eventName);
+              error.turnReducerHandled = true;
+              finish(false, error);
+            }
+          }
+        };
+        [
+          'run.started',
+          'session.metrics',
+          'message.delta',
+          'reasoning.available',
+          'tool.started',
+          'tool.updated',
+          'tool.completed',
+          'tool.failed',
+          'approval.request',
+          'run.completed',
+          'run.failed',
+          'run.cancelled',
+          'run.canceled'
+        ].forEach(name => source.addEventListener(name, event => handle(name, event)));
+        source.onmessage = event => handle('message', event);
+        source.onerror = () => {
+          if (!settled) {
+            const error = cfg.label + ' native stream disconnected';
+            this.applyTurnEvent({ kind: 'run.failed', runId, error });
+            const failure = new Error(error);
+            failure.turnReducerHandled = true;
+            finish(false, failure);
+          }
+        };
+      });
+    }
+
+    handleNativeRunEvent(provider, eventName, data) {
+      const cfg = NATIVE_PROVIDER_UI[provider];
+      if (!cfg) return;
+      this.markLiveEvent();
+      this.applyContextUsage(data || {});
+      const runId = data?.runId || this.currentRunId || '';
+      if (runId) this.currentRunId = runId;
+
+      if (eventName === 'run.started') {
+        this.applyTurnEvent({ kind: 'run.start', runId, label: cfg.label + ' is running...' });
+        if (provider !== 'hermes') this.fetchSessionInfo().catch(() => {});
+        return;
+      }
+      if (eventName === 'session.metrics') return;
+      if (eventName === 'message.delta') {
+        if (data.reply) this.applyTurnEvent({ kind: 'text.replace', runId, text: data.reply });
+        else if (data.delta) this.applyTurnEvent({ kind: 'text.delta', runId, text: data.delta });
+        return;
+      }
+      if (eventName === 'reasoning.available') {
+        const thinking = data.thinking || data.text || '';
+        if (this.applyDistinctThinking(runId, thinking)) this.updateTypingIndicator(cfg.label + ' is reasoning...');
+        return;
+      }
+      if (eventName === 'approval.request') {
+        if (data.approval) {
+          const approval = { ...data.approval, pending_count: data.pending_count || data.approval.pending_count || 1 };
+          this.applyTurnEvent({ kind: 'approval', runId, approval, provider: cfg.approval || provider });
+        }
+        this.updateTypingIndicator(cfg.label + ' is waiting for approval...');
+        return;
+      }
+      if (['tool.started', 'tool.updated', 'tool.completed', 'tool.failed'].includes(eventName)) {
+        const card = data.toolCard || {};
+        const isTerminal = eventName === 'tool.completed' || eventName === 'tool.failed';
+        const tool = {
+          id: card.id || data.toolCallId || data.id || '',
+          runId,
+          status: eventName === 'tool.failed' || card.status === 'error' || data.error ? 'error' : (isTerminal ? 'done' : 'running'),
+          name: card.name || data.tool || data.name || cfg.label + ' tool',
+          arguments: card.arguments || (card.args_preview ? { command: card.args_preview } : (data.preview || {})),
+          result: card.result || data.result || data.output || '',
+          error: data.error || card.error || ''
+        };
+        const kind = isTerminal ? 'tool.result' : (eventName === 'tool.updated' ? 'tool.update' : 'tool.start');
+        this.updateTypingIndicator(isTerminal ? 'Processing...' : formatToolLabel(tool.name, coerceToolArgs(tool.arguments)));
+        this.applyTurnEvent({ kind, runId, tool });
+        return;
+      }
+      if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+        const finalText = data.reply || data.output || '';
+        if (finalText) this.applyTurnEvent({ kind: 'text.replace', runId, text: finalText });
+        const kind = eventName === 'run.completed' ? 'run.complete' : (eventName === 'run.failed' ? 'run.failed' : 'run.cancelled');
+        this.applyTurnEvent({ kind, runId, error: data.error || '' });
+        if (provider !== 'hermes') this.fetchSessionInfo().catch(() => {});
+      }
     }
 
     streamHermesRunEvents(runId, hermesProgress) {
+      return this.streamNativeRunEvents('hermes', runId).finally(() => this.finishHermesProgress(hermesProgress, true));
+      /* Legacy body retained below only until all downstream extensions move
+         to the provider-neutral adapter; execution returns above. */
       if (!runId) return Promise.reject(new Error('Hermes run did not return a run id'));
       this.closeHermesEventSource();
       this.hermesCompletedToolKeys = new Set();
@@ -2460,6 +2895,8 @@
     }
 
     handleHermesNativeEvent(eventName, data) {
+      return this.handleNativeRunEvent('hermes', eventName, data);
+      /* Legacy body retained for downstream compatibility; execution returns above. */
       this.markLiveEvent();
       const runId = data?.runId || this.currentRunId || '';
       if (runId) this.currentRunId = runId;
@@ -2536,6 +2973,8 @@
     }
 
     streamCodexRunEvents(runId) {
+      return this.streamNativeRunEvents('codex', runId);
+      /* Legacy body retained for downstream compatibility; execution returns above. */
       if (!runId) return Promise.reject(new Error('Codex run did not return a run id'));
       this.closeCodexEventSource();
       this.currentRunId = runId;
@@ -2587,6 +3026,8 @@
     }
 
     handleCodexNativeEvent(eventName, data) {
+      return this.handleNativeRunEvent('codex', eventName, data);
+      /* Legacy body retained for downstream compatibility; execution returns above. */
       this.markLiveEvent();
       const runId = data?.runId || this.currentRunId || '';
       if (runId) this.currentRunId = runId;
@@ -2677,44 +3118,97 @@
           settled = true;
           if (this.providerEventSource === source) this.providerEventSource = null;
           source.close();
-          this.removeTypingIndicator();
-          this.currentRunId = null;
           if (ok) resolve(value);
           else reject(value instanceof Error ? value : new Error(String(value || 'Provider SDK stream failed')));
         };
         const handle = (eventName, event) => {
           let data = {};
           try { data = JSON.parse(event.data || '{}'); } catch (_) {}
-          if (eventName === 'run.started') {
-            this.updateTypingIndicator(`${providerLabel} is running…`);
-            return;
-          }
-          if (eventName === 'turn.progress') {
-            if (data.reply) {
-              if (!this.streamingMsg || this.streamingMsg.id !== runId) {
-                this.streamingMsg = { id:runId, role:'assistant', content:'' };
-                this.appendStreamingMessage();
-              }
-              this.streamingMsg.content = data.reply;
-              this.updateStreamingMessage(data.reply);
+          this.handleProviderSdkEvent(eventName, { ...data, runId: data.runId || runId, providerLabel });
+          if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+            if (eventName === 'run.completed') finish(true, data);
+            else {
+              const error = new Error(data.error || eventName);
+              error.turnReducerHandled = true;
+              finish(false, error);
             }
-            const activity = data.thinking || data.commentary || (Array.isArray(data.tools) && data.tools[0]?.name ? `Using ${data.tools[0].name}…` : `${providerLabel} is working…`);
-            this.updateTypingIndicator(activity);
-            this.scrollBottom();
-            return;
-          }
-          if (eventName === 'run.completed' || eventName === 'run.failed') {
-            const finalText = data.reply || this.streamingMsg?.content || '';
-            if (this.streamingMsg) {
-              this.finalizeStreamingMessage(finalText);
-              this.streamingMsg = null;
-            }
-            finish(eventName === 'run.completed', eventName === 'run.completed' ? data : new Error(data.error || `${providerLabel} run failed`));
           }
         };
-        ['run.started', 'turn.progress', 'run.completed', 'run.failed'].forEach(name => source.addEventListener(name, event => handle(name, event)));
+        ['run.started', 'turn.progress', 'run.completed', 'run.failed', 'run.cancelled', 'run.canceled']
+          .forEach(name => source.addEventListener(name, event => handle(name, event)));
         source.onerror = () => { if (!settled) finish(false, new Error(`${providerLabel} stream disconnected`)); };
       });
+    }
+
+    handleProviderSdkEvent(eventName, data) {
+      this.markLiveEvent();
+      this.applyContextUsage(data || {});
+      const runId = data?.runId || this.currentRunId || '';
+      if (runId) this.currentRunId = runId;
+      const providerKind = this.getSelectedProviderKind();
+      const providerLabel = data?.providerLabel || this.agentSelect?.selectedOptions?.[0]?.textContent.trim() || providerKind || 'Provider';
+
+      if (eventName === 'run.started') {
+        this.applyTurnEvent({ kind: 'run.start', runId, label: providerLabel + ' is starting…' });
+      }
+
+      const thinking = String(data?.thinking || '').trim();
+      if (thinking && this.turnEvents.get(runId)?.thinkingText !== thinking) {
+        this.applyDistinctThinking(runId, thinking);
+        this.updateTypingIndicator(providerLabel + ' is working…');
+      }
+
+      const commentary = String(data?.commentary || '').trim();
+      if (commentary) {
+        const commentaryKey = `sdk:${runId}:${commentary}`;
+        if (!this.seenOpenClawCommentary.has(commentaryKey)) {
+          this.seenOpenClawCommentary.add(commentaryKey);
+          this.applyTurnEvent({ kind: 'commentary', runId, text: commentary });
+        }
+      }
+
+      for (const card of (Array.isArray(data?.tools) ? data.tools : [])) {
+        if (!card || typeof card !== 'object') continue;
+        const status = String(card.status || '').toLowerCase();
+        const terminal = ['done', 'completed', 'complete', 'success', 'succeeded', 'error', 'failed', 'cancelled', 'canceled'].includes(status);
+        const tool = {
+          runId,
+          id: card.id || card.toolCallId || card.callId || '',
+          name: card.name || card.tool || 'Provider tool',
+          status: ['error', 'failed'].includes(status) || card.error ? 'error' : (terminal ? 'done' : 'running'),
+          arguments: card.arguments || card.args || {},
+          result: card.result || card.output || '',
+          error: card.error || ''
+        };
+        const key = ChatEvents.toolIdentity(tool);
+        const existing = key ? this.turnEvents.get(runId)?.tools?.get(key) : null;
+        const kind = terminal ? 'tool.result' : (existing ? 'tool.update' : 'tool.start');
+        const label = formatToolLabel(tool.name, coerceToolArgs(tool.arguments));
+        this.updateTypingIndicator(terminal ? 'Processing...' : label);
+        this.applyTurnEvent({ kind, runId, tool });
+      }
+
+      const reply = String(data?.reply || '');
+      if (reply) this.applyTurnEvent({ kind: 'text.replace', runId, text: reply });
+
+      if (data?.approval) {
+        this.applyTurnEvent({
+          kind: 'approval',
+          runId,
+          approval: { ...data.approval, pending_count: data.pending_count || data.approval.pending_count || 1 },
+          provider: providerKind
+        });
+        this.updateTypingIndicator(providerLabel + ' is waiting for approval…');
+      }
+
+      if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName)) {
+        const kind = eventName === 'run.completed'
+          ? 'run.complete'
+          : (eventName === 'run.failed' ? 'run.failed' : 'run.cancelled');
+        this.applyTurnEvent({ kind, runId, error: data?.error || '' });
+        this.fetchSessionInfo().catch(() => {});
+        this.refreshSessionsList().catch(() => {});
+      }
     }
 
     stopHermesLivePolling() {
@@ -2989,10 +3483,14 @@
       this.scrollBottom();
     }
 
-    finalizeRunToolCards(runId) {
+    finalizeRunToolCards(runId, runStatus = 'completed', errorText = '') {
       for (const [key, wrap] of [...this.liveToolCards.entries()]) {
         if (!runId || wrap.dataset.runId === runId) {
-          updateToolCallCard(wrap.querySelector('.chat-tool-call'), { status: 'done', result: 'Completed' });
+          const failed = runStatus === 'failed';
+          const result = runStatus === 'cancelled' ? 'Cancelled' : 'Completed';
+          updateToolCallCard(wrap.querySelector('.chat-tool-call'), failed
+            ? { status: 'error', error: errorText || 'Run failed' }
+            : { status: 'done', result });
           this.liveToolCards.delete(key);
         }
       }
@@ -3014,6 +3512,32 @@
         notice.innerHTML = '<div class="chat-bubble system-bubble">Earlier live tool activity was collapsed to keep the chat responsive.</div>';
         this.messages.prepend(notice);
       }
+    }
+
+    updateLiveThinking(runId, text) {
+      const cleaned = String(text || '').trim();
+      if (!cleaned) return;
+      const key = runId || this.currentRunId || 'provider-run';
+      if (!this.liveThinkingEl || this.liveThinkingRunId !== key || !this.liveThinkingEl.isConnected) {
+        const wrap = document.createElement('div');
+        wrap.className = 'chat-msg assistant chat-thinking-live';
+        wrap.dataset.runId = key;
+        const bubble = document.createElement('div');
+        bubble.className = 'chat-bubble';
+        const card = renderThinkingCard(cleaned);
+        card.open = true;
+        bubble.appendChild(card);
+        wrap.appendChild(bubble);
+        const indicator = this.messages.querySelector('.typing-indicator');
+        if (indicator) this.messages.insertBefore(wrap, indicator);
+        else this.messages.appendChild(wrap);
+        this.liveThinkingEl = wrap;
+        this.liveThinkingPre = card.querySelector('.chat-thinking-body pre');
+        this.liveThinkingRunId = key;
+      } else if (this.liveThinkingPre) {
+        this.liveThinkingPre.textContent = cleaned;
+      }
+      this.scrollBottom();
     }
 
     appendActivity(text) {
@@ -3219,6 +3743,19 @@
     return window.innerWidth <= 900;
   }
 
+  function enforceSingleWindowMobileLayout() {
+    if (!shouldUseSingleWindowMobileLayout()) return;
+    // A desktop layout can be resized while several secondary windows are
+    // open. Mobile intentionally exposes one full-width chat surface, so do
+    // not leave desktop panels squeezed into unusable 1-2px strips.
+    Object.keys(secondaryChatPanels).forEach((slotNum) => {
+      if (secondaryChatPanels[slotNum]?.classList.contains('open')) {
+        setSecondaryPanelOpen(slotNum, false);
+      }
+    });
+    setActiveSecondarySlot(null);
+  }
+
   function setSecondaryPanelOpen(slotNum, shouldOpen) {
     const slotKey = String(slotNum);
     const panel = secondaryChatPanels[slotKey];
@@ -3325,6 +3862,7 @@
   async function connectGateway() {
     if (ws) return;
     chatWindows.forEach(w => w.setConnectionStatus('Connecting...', 'connecting'));
+    await chatUiSettingsReady;
     await loadGatewayInfo();
     if (ws) return;
     if (!GATEWAY_URL && !_chatWsPort) {
@@ -3416,8 +3954,9 @@
 
   function handleEvent(msg) {
     const { event, payload } = msg;
-    if (event === 'chat') chatWindows.forEach(w => w.handleChatEvent(payload));
-    if (event === 'agent') chatWindows.forEach(w => w.handleAgentEvent(payload));
+    if (event === 'chat' || event === 'agent' || event === 'session.message') {
+      chatWindows.forEach(w => w.queueOpenClawEvent(event, payload));
+    }
   }
 
   function agentLabelFromId(agentId) {
@@ -3471,6 +4010,17 @@
     return out;
   }
 
+  function isToolResultRole(role) {
+    return ['tool', 'toolresult', 'tool_result', 'tool-result'].includes(String(role || '').toLowerCase());
+  }
+
+  function normalizeChatRole(role) {
+    const normalized = String(role || '').toLowerCase();
+    if (normalized === 'assistant' || isToolResultRole(normalized)) return 'assistant';
+    if (normalized === 'system') return 'system';
+    return 'user';
+  }
+
   function resolveMessageSender(msg, win) {
     const message = msg?.message || msg || {};
     const role = message.role || msg?.role || '';
@@ -3478,7 +4028,7 @@
     const prov = message.provenance || msg?.provenance || {};
     const targetLabel = getWindowAgentLabel(win);
 
-    if (role === 'assistant') return { label: targetLabel, kind: 'agent' };
+    if (role === 'assistant' || isToolResultRole(role)) return { label: targetLabel, kind: 'agent' };
 
     if (role === 'user' && prov?.kind === 'inter_session') {
       const sourceAgentId = parseAgentIdFromSessionKey(prov.sourceSessionKey || '');
@@ -3700,24 +4250,68 @@
         if (last && (!b.toolCallId || b.toolCallId === last.id)) {
           last.result = result;
           last.status = isError ? 'error' : 'done';
+          if (isError) last.error = typeof result === 'string' ? result : JSON.stringify(result);
         } else {
-          tools.push({ status: isError ? 'error' : 'done', name: b.name || 'tool result', result, id: b.toolCallId || b.id || '' });
+          tools.push({
+            status: isError ? 'error' : 'done',
+            name: b.name || 'tool result',
+            result: isError ? '' : result,
+            error: isError ? result : '',
+            id: b.toolCallId || b.id || ''
+          });
         }
       }
     }
     return tools;
   }
 
-  function normalizeHermesTools(items) {
+  function normalizeToolStatus(value, error = '', result = '') {
+    if (error) return 'error';
+    const status = String(value || '').toLowerCase();
+    if (['error', 'failed', 'failure', 'cancelled', 'canceled'].includes(status)) return 'error';
+    if (['done', 'completed', 'complete', 'success', 'succeeded', 'result', 'end'].includes(status)) return 'done';
+    if (!status && result) return 'done';
+    return 'running';
+  }
+
+  function normalizeHistoricalTools(items) {
     if (!Array.isArray(items)) return [];
-    return items.filter(Boolean).map((item) => ({
-      id: item.id || item.toolCallId || item.callId || '',
-      status: item.status || (item.error ? 'error' : 'done'),
-      name: item.name || item.toolName || item.tool_name || 'tool',
-      arguments: coerceToolArgs(item.arguments || item.args || item.input || {}),
-      result: item.result ?? item.output ?? item.content ?? '',
-      error: item.error || ''
-    }));
+    return items.filter(Boolean).map((item) => {
+      const rawStatus = String(item.status || (item.error ? 'error' : item.result ? 'done' : 'running')).toLowerCase();
+      const status = normalizeToolStatus(rawStatus, item.error, item.result ?? item.output);
+      return {
+        id: item.id || item.toolCallId || item.callId || '',
+        runId: item.runId || '',
+        status,
+        name: item.name || item.toolName || item.tool_name || 'tool',
+        arguments: coerceToolArgs(item.arguments || item.args || item.input || {}),
+        result: item.result ?? item.output ?? item.content ?? (['cancelled', 'canceled'].includes(rawStatus) ? 'Cancelled' : ''),
+        error: item.error || ''
+      };
+    });
+  }
+
+  function normalizeHermesTools(items, coerceCompleted = false) {
+    if (!Array.isArray(items)) return [];
+    return items.filter(Boolean).map((item) => {
+      const rawStatus = String(item.status || (item.error ? 'error' : 'done')).toLowerCase();
+      let status = normalizeToolStatus(rawStatus, item.error, item.result ?? item.output ?? item.content);
+      let result = item.result ?? item.output ?? item.content ?? '';
+      if (!result && ['cancelled', 'canceled'].includes(rawStatus)) result = 'Cancelled';
+      if (coerceCompleted && status === 'running') {
+        status = 'done';
+        if (!result || result === 'Running') result = 'Completed';
+      }
+      return {
+        id: item.id || item.toolCallId || item.callId || '',
+        runId: item.runId || '',
+        status,
+        name: item.name || item.toolName || item.tool_name || 'tool',
+        arguments: coerceToolArgs(item.arguments || item.args || item.input || (item.args_preview ? { command: item.args_preview } : {})),
+        result,
+        error: item.error || ''
+      };
+    });
   }
 
   function normalizeToolEvent(payload, fallbackStatus = 'running') {
@@ -3746,21 +4340,29 @@
   function renderToolCallCard(tool, opts = {}) {
     const details = document.createElement('details');
     details.className = `chat-tool-call ${tool.status || 'running'}`;
-    if (opts.live || tool.status === 'running') details.open = true;
+    details.open = toolCallsExpandedByDefault;
     details.dataset.toolName = tool.name || 'tool';
 
     const summary = document.createElement('summary');
     summary.className = 'chat-tool-summary';
+    const dot = document.createElement('span');
+    dot.className = 'chat-tool-running-dot';
     const icon = document.createElement('span');
     icon.className = 'chat-tool-icon';
-    icon.textContent = tool.status === 'error' ? '⚠️' : tool.status === 'done' ? '✅' : '🔧';
-    const title = document.createElement('span');
-    title.className = 'chat-tool-title';
-    title.textContent = formatToolLabel(tool.name, coerceToolArgs(tool.arguments));
+    icon.textContent = toolIcon(tool);
+    const name = document.createElement('span');
+    name.className = 'chat-tool-name';
+    name.textContent = formatToolName(tool.name);
+    const preview = document.createElement('span');
+    preview.className = 'chat-tool-preview';
+    preview.textContent = formatToolPreview(tool);
+    const toggle = document.createElement('span');
+    toggle.className = 'chat-tool-toggle';
+    toggle.textContent = '▶';
     const state = document.createElement('span');
     state.className = 'chat-tool-state';
     state.textContent = tool.status === 'error' ? 'error' : tool.status === 'done' ? 'done' : 'running';
-    summary.append(icon, title, state);
+    summary.append(dot, icon, name, preview, toggle, state);
     details.appendChild(summary);
 
     const body = document.createElement('div');
@@ -3773,14 +4375,24 @@
 
   function updateToolCallCard(card, tool) {
     if (!card) return;
+    const previousStatus = card.classList.contains('running') ? 'running' : card.classList.contains('error') ? 'error' : card.classList.contains('done') ? 'done' : '';
     card.classList.remove('running', 'done', 'error');
     card.classList.add(tool.status || 'done');
+    if (previousStatus && previousStatus !== (tool.status || 'done')) {
+      card.classList.add('status-changed');
+      setTimeout(() => card.classList.remove('status-changed'), 850);
+      if ((tool.status === 'done' || tool.status === 'error') && card.open) {
+        setTimeout(() => { if (card.classList.contains('done') || card.classList.contains('error')) card.open = false; }, 900);
+      }
+    }
     const icon = card.querySelector('.chat-tool-icon');
-    if (icon) icon.textContent = tool.status === 'error' ? '⚠️' : tool.status === 'done' ? '✅' : '🔧';
+    if (icon) icon.textContent = toolIcon(tool);
     const state = card.querySelector('.chat-tool-state');
     if (state) state.textContent = tool.status === 'error' ? 'error' : tool.status === 'done' ? 'done' : 'running';
-    const title = card.querySelector('.chat-tool-title');
-    if (title) title.textContent = formatToolLabel(tool.name, coerceToolArgs(tool.arguments));
+    const name = card.querySelector('.chat-tool-name');
+    if (name) name.textContent = formatToolName(tool.name);
+    const preview = card.querySelector('.chat-tool-preview');
+    if (preview) preview.textContent = formatToolPreview(tool);
     const body = card.querySelector('.chat-tool-body');
     if (body) {
       body.innerHTML = '';
@@ -4141,6 +4753,7 @@
       case 'sessions_spawn': return '🤖 spawn: ' + truncate(args.agentId || '', 30) + (args.task ? ' — ' + truncate(args.task, 40) : '');
       case 'sessions_history': return '📜 history: ' + truncate(args.sessionKey || '', 40);
       case 'sessions_list': return '📋 sessions_list';
+      case 'todo': return '✅ tasks: ' + truncate(args.todos ? `${args.todos.length} updates` : args.content || args.id || '', 50);
       case 'memory_search': return '🧠 memory: ' + truncate(args.query || '', 50);
       case 'memory_get': return '🧠 memory_get: ' + truncate(args.path || '', 40);
       case 'web_search': return '🔍 search: ' + truncate(args.query || '', 50);
@@ -4151,6 +4764,64 @@
       case 'image': return '🖼️ image analysis';
       default: return '🔧 ' + (name || 'tool');
     }
+  }
+
+  function formatToolName(name) {
+    const raw = String(name || 'tool');
+    if (raw === 'Command') return 'command';
+    if (raw === 'Hermes task breakdown') return 'task plan';
+    return raw.replace(/^functions\./, '');
+  }
+
+  function toolIcon(tool) {
+    const name = String(tool?.name || '').toLowerCase();
+    if (tool?.status === 'error' || tool?.error) return '⚠️';
+    if (name.includes('task') || name === 'todo') return tool?.status === 'done' ? '✓' : '◌';
+    if (name.includes('read') || name.includes('fetch')) return '📄';
+    if (name.includes('write') || name.includes('edit')) return '✎';
+    if (name.includes('search')) return '⌕';
+    if (name.includes('browser')) return '◈';
+    if (tool?.status === 'done') return '✓';
+    return '⚡';
+  }
+
+  function formatToolPreview(tool) {
+    const args = coerceToolArgs(tool?.arguments || {});
+    const result = String(tool?.error || tool?.result || '').replace(/\s+/g, ' ').trim();
+    const pick = (...keys) => {
+      for (const key of keys) if (args[key]) return String(args[key]);
+      return '';
+    };
+    let preview = '';
+    switch (tool?.name) {
+      case 'exec':
+      case 'bash':
+      case 'Command':
+        preview = pick('command', 'description', 'value');
+        break;
+      case 'read':
+      case 'write':
+      case 'edit':
+        preview = pick('path', 'file_path', 'filePath');
+        break;
+      case 'sessions_send':
+        preview = pick('sessionKey', 'label', 'message');
+        break;
+      case 'sessions_spawn':
+        preview = [pick('agentId'), pick('task')].filter(Boolean).join(' · ');
+        break;
+      case 'todo':
+        preview = args.todos ? `${args.todos.length} task updates` : pick('content', 'id');
+        break;
+      case 'Hermes task breakdown':
+        preview = args.now || (Array.isArray(args.done) ? `${args.done.length} steps complete` : 'receive · run · export · render');
+        break;
+      default:
+        preview = pick('query', 'url', 'action', 'input', 'value');
+    }
+    if (!preview && result) preview = result;
+    if (!preview) preview = tool?.status === 'running' ? 'running...' : 'completed';
+    return preview.length > 90 ? preview.slice(0, 87) + '...' : preview;
   }
 
   updateChatStackLayout();
@@ -4174,7 +4845,7 @@
   syncSecondaryChatControls();
   // Virtual World shows the chat dock in the HUD even before the panel is expanded.
   // Connect immediately so users don't see a stale "Offline" state while the UI is visible.
-  gatewayInfoReady.then(() => connectGateway()).catch(() => {});
+  Promise.all([gatewayInfoReady, chatUiSettingsReady]).then(() => connectGateway()).catch(() => {});
 
   function applyQueryAgentAssignments() {
     const params = new URLSearchParams(window.location.search);
@@ -4298,7 +4969,8 @@
     setPrimaryPanelOpen(!primaryWindow.root.classList.contains('open'));
   });
 
-  window.addEventListener('vw:settings-saved', () => {
+  window.addEventListener('vw:settings-saved', (event) => {
+    applyChatUiSettings(event.detail?.config || window.__VWConfig || {}, { applyExisting: true });
     refreshGatewayConnectionFromSettings().catch(() => {});
   });
 
@@ -4310,6 +4982,7 @@
       setSecondaryPanelOpen('1', true);
       setSecondaryPanelOpen('2', true);
       setSecondaryPanelOpen('3', true);
+      enforceSingleWindowMobileLayout();
       agentListsReady.then(applyQueryAgentAssignments).catch(() => {});
     }, 50);
   } else if (chatUrlParams.get('chatAgents')) {
@@ -4418,7 +5091,12 @@
   }
   if (_sidebarEdge) _sidebarEdge.addEventListener('click', _scheduleDockRefresh);
   if (_vwSidebarToggle) _vwSidebarToggle.addEventListener('click', _scheduleDockRefresh);
-  window.addEventListener('resize', () => { updateChatStackLayout(); _chatUpdateSnapPosition(); _positionExteriorTabs(); });
+  window.addEventListener('resize', () => {
+    enforceSingleWindowMobileLayout();
+    updateChatStackLayout();
+    _chatUpdateSnapPosition();
+    _positionExteriorTabs();
+  });
   const chatHeader = chatPanel.querySelector('.chat-header');
   chatHeader.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.isPrimary === false) return;

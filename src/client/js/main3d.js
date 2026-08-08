@@ -116,6 +116,7 @@ import {
   normalizeChatBubbleDisplaySettings,
   shouldGroupChatBubbles,
 } from './chat-bubble-layout.mjs?v=20260728-chat-bubble-consistency-r4';
+import { orderedSnapshotBubbleParts } from './chat-bubble-events.mjs?v=20260808-chat-order-r2';
 import {
   CAPABILITY_TAG_GROUPS,
   CAPABILITY_TAG_DEFINITIONS,
@@ -72434,28 +72435,30 @@ function formatAgentChatToolLine(tool) {
 }
 
 function getAgentChatActivityLines(msg) {
-  const lines = [];
-  if (!msg || typeof msg !== 'object') return lines;
-  const tools = Array.isArray(msg.tools) ? msg.tools : [];
-  if (tools.length) {
-    const shown = tools.slice(-3);
-    for (const tool of shown) {
-      lines.push(formatAgentChatToolLine(tool));
-    }
-    if (tools.length > shown.length) lines.push('+' + (tools.length - shown.length) + ' more tool calls');
-  }
-  if (msg.thinking || msg.reasoningTokens) {
-    let reason = msg.thinking ? String(msg.thinking).replace(/\s+/g, ' ').trim() : ('reasoning tokens: ' + msg.reasoningTokens);
+  return orderedSnapshotBubbleParts(msg)
+    .filter(part => part.kind !== 'text')
+    .map(formatAgentChatSnapshotPart)
+    .filter(Boolean);
+}
+
+function formatAgentChatSnapshotPart(part) {
+  if (!part || typeof part !== 'object') return '';
+  if (part.kind === 'commentary' || part.kind === 'text') return String(part.text || '');
+  if (part.kind === 'tool') return formatAgentChatToolLine(part.tool);
+  if (part.kind === 'tool-overflow') return '+' + Number(part.count || 0) + ' more tool calls';
+  if (part.kind === 'thinking') {
+    let reason = part.text ? String(part.text).replace(/\s+/g, ' ').trim() : ('reasoning tokens: ' + part.reasoningTokens);
     if (reason.length > 90) reason = reason.substring(0, 87) + '...';
-    lines.push('[thinking] ' + reason);
+    return '[thinking] ' + reason;
   }
-  if (msg.approval) {
-    const approvalStatus = msg.approval.status || 'pending';
-    let approvalCommand = msg.approval.command || msg.approval.title || 'Hermes command';
+  if (part.kind === 'approval') {
+    const approval = part.approval || {};
+    const approvalStatus = approval.status || 'pending';
+    let approvalCommand = approval.command || approval.title || 'Hermes command';
     if (approvalCommand.length > 82) approvalCommand = approvalCommand.substring(0, 79) + '...';
-    lines.push('[approval ' + approvalStatus + '] ' + approvalCommand);
+    return '[approval ' + approvalStatus + '] ' + approvalCommand;
   }
-  return lines;
+  return '';
 }
 
 function getAgentChatActivitySignature(msg) {
@@ -72467,8 +72470,10 @@ function getAgentChatActivitySignature(msg) {
 }
 
 function getChatBubbleMessageDisplayText(message) {
-  const activityLines = getAgentChatActivityLines(message);
-  return String(message?.text ?? '') + (activityLines.length ? ((message?.text ? '\n' : '') + activityLines.join('\n')) : '');
+  return orderedSnapshotBubbleParts(message)
+    .map(formatAgentChatSnapshotPart)
+    .filter(Boolean)
+    .join('\n');
 }
 
 function finishChatBubbleTypewriter(state) {

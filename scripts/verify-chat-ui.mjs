@@ -80,7 +80,7 @@ assert(indexHtml.includes('class="chat-run-notice"'), 'genuine run failures need
 assert(styleCss.includes('.chat-run-notice[hidden]'), 'the run notice must be independently hideable');
 assert(chatSource.includes('this.showRunNotice(failureStatus, message, runId);'), 'terminal run errors must use the non-chat notice');
 assert(
-  chatSource.includes('if (!eventRunId) return;'),
+  chatSource.includes('if (!getOpenClawRunId(payload, this.currentRunId)) return;'),
   'unattributed late errors must not become global run failures'
 );
 assert(
@@ -97,6 +97,21 @@ assert(!redesignCss.includes('[style*="width:'), 'resized chat layout must not u
 assert(styleCss.includes('.chat-panel .chat-markdown table'), 'chat tables must have scoped styling');
 assert(styleCss.includes('.chat-panel .chat-markdown blockquote'), 'chat blockquotes must have scoped styling');
 assert(indexHtml.includes('class="chat-scroll-latest"'), 'chat windows need a jump-to-latest control');
+for (const token of [
+  'setting-toolCallDisplay-expanded',
+  'setting-toolCallDisplay-collapsed',
+  'Expanded by default',
+  'Collapsed by default',
+]) {
+  assert(indexHtml.includes(token), `General settings missing tool call display option: ${token}`);
+}
+for (const token of [
+  'toolCallsExpandedByDefault',
+  'details.open = toolCallsExpandedByDefault',
+  'applyChatUiSettings(event.detail?.config',
+]) {
+  assert(chatSource.includes(token), `chat tool display preference missing ${token}`);
+}
 assert(
   chatSource.includes("this.messages.addEventListener('scroll'") &&
   chatSource.includes("this.messages.addEventListener('wheel'") &&
