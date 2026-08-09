@@ -71,6 +71,7 @@ foreach ($name in $DisabledFiles) {
 }
 
 Set-DotEnvValue "VW_OPENCLAW_HOST_PATH" (Convert-ToComposePath $OpenClawHome)
+Set-DotEnvValue "VW_GATEWAY_ENDPOINT_MODE" "auto"
 Set-DotEnvValue "VW_GATEWAY_URL" "ws://host.docker.internal:18789"
 Set-DotEnvValue "VW_OPENCLAW_BROWSER_TRANSPORT" "proxy"
 Set-DotEnvValue "VW_REALTIME_BROWSER_URL" $RealtimeBrowserUrl
@@ -113,12 +114,19 @@ if ($HermesApiUrl) {
         throw "HermesApiUrl must start with http:// or https://"
     }
     Set-DotEnvValue "VW_HERMES_ENABLED" "true"
+    Set-DotEnvValue "VW_HERMES_LOCAL_PROFILES_ENABLED" "false"
     Set-DotEnvValue "VW_HERMES_API_URL" $HermesApiUrl
+    if ($HermesApiUrl -match '^https?://host\.docker\.internal(?::|/|$)' -or $HermesApiUrl -match '^https?://(?:127\.0\.0\.1|localhost)(?::|/|$)') {
+        Set-DotEnvValue "VW_HERMES_API_ENDPOINT_MODE" "auto"
+    } else {
+        Set-DotEnvValue "VW_HERMES_API_ENDPOINT_MODE" "custom"
+    }
     Set-DotEnvValue "VW_HERMES_PREFER_API" "true"
     Set-DotEnvValue "VW_HERMES_AUTO_START_PROFILE_APIS" "false"
     Set-DotEnvValue "VW_HERMES_AUTO_START_DEFAULT_API" "false"
 } else {
     Set-DotEnvValue "VW_HERMES_ENABLED" "false"
+    Set-DotEnvValue "VW_HERMES_LOCAL_PROFILES_ENABLED" "false"
 }
 
 Push-Location $RepoRoot

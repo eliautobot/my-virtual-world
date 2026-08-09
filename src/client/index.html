@@ -675,12 +675,15 @@
                             <span>Connect directly to the built-in OpenClaw and Hermes integrations.</span>
                         </div>
                         <div class="form-group"><label>OpenClaw Home Directory</label><input type="text" id="setting-openclawPath" placeholder="~/.openclaw"><div class="field-example">Example: local install <code>~/.openclaw</code>; Docker install <code>/openclaw</code>.</div></div>
-                        <div class="form-group"><label>Gateway URL</label><input type="text" id="setting-gatewayUrl" placeholder="ws://127.0.0.1:18789"><div class="field-example">Example: local install <code>ws://127.0.0.1:18789</code>; Docker install <code>ws://host.docker.internal:18789</code>.</div></div>
+                        <div class="form-group"><label>OpenClaw Gateway location</label><select id="setting-openclawEndpointMode"><option value="auto">Auto-detect</option><option value="host">Docker host</option><option value="container">Container local</option><option value="custom">Custom URL only</option></select><div class="field-example">Auto-detect checks one endpoint at a time and selects a single authenticated Gateway before sending work.</div></div>
+                        <div class="form-group"><label>Preferred or custom Gateway URL</label><input type="text" id="setting-gatewayUrl" placeholder="ws://host.docker.internal:18789"><div class="field-example"><code>host.docker.internal</code> reaches the Docker host; <code>127.0.0.1</code> reaches this server/container.</div></div>
                         <div class="form-group"><label>Gateway Token</label><input type="password" id="setting-gatewayToken" placeholder="Configured value is preserved when blank"><div class="field-example">Example: leave blank unless your OpenClaw gateway requires a token.</div></div>
                         <label class="settings-check"><input type="checkbox" id="setting-hermesEnabled" checked> Enable Hermes</label>
+                        <label class="settings-check"><input type="checkbox" id="setting-hermesLocalProfiles" checked> Discover Hermes CLI profiles inside the server/container</label>
                         <div class="form-group"><label>Hermes Home</label><input type="text" id="setting-hermesHome" placeholder="~/.hermes"><div class="field-example">Example: local install <code>~/.hermes</code>; Docker install <code>/home/vw/.hermes</code>.</div></div>
                         <div class="form-group"><label>Hermes CLI</label><input type="text" id="setting-hermesBin" placeholder="~/.local/bin/hermes"><div class="field-example">Example: local install <code>~/.local/bin/hermes</code>; Docker install <code>/home/vw/.local/bin/hermes</code>.</div></div>
-                        <div class="form-group"><label>Hermes API URL</label><input type="text" id="setting-hermesApiUrl" placeholder="http://127.0.0.1:8642"><div class="field-example">Example: leave blank for CLI mode, or use <code>http://127.0.0.1:8642</code> if your Hermes API is running locally.</div></div>
+                        <div class="form-group"><label>Hermes API location</label><select id="setting-hermesApiEndpointMode"><option value="auto">Auto-detect</option><option value="host">Docker host</option><option value="container">Container local</option><option value="custom">Custom URL only</option></select><div class="field-example">Authentication or protocol errors stop resolution; only unreachable endpoints fall back.</div></div>
+                        <div class="form-group"><label>Preferred or custom Hermes API URL</label><input type="text" id="setting-hermesApiUrl" placeholder="http://host.docker.internal:8642"><div class="field-example">Auto-detect can try the Docker host and container-local Hermes API without submitting a task twice.</div></div>
                         <div class="form-group"><label>Hermes API Key</label><input type="password" id="setting-hermesApiKey" placeholder="Configured value is preserved when blank"><div class="field-example">Example: leave blank unless your Hermes API requires a key.</div></div>
                         <label class="settings-check"><input type="checkbox" id="setting-hermesPreferApi" checked> Prefer Hermes native API streaming</label>
                         <label class="settings-check"><input type="checkbox" id="setting-hermesAutoStartProfileApis" checked> Auto-start local Hermes profile APIs</label>
@@ -1068,6 +1071,6 @@
     <script src="js/chat-markdown.js?v=20260727-chat-markdown-r1"></script>
     <script src="js/chat-events.js?v=20260809-commentary-runs-r1"></script>
     <script src="js/chat.js?v=20260809-commentary-runs-r1"></script>
-    <script src="js/settings.js?v=20260809-settings-window-r2"></script>
+    <script src="js/settings.js?v=20260809-provider-endpoints-r1"></script>
 </body>
 </html>

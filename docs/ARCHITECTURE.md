@@ -41,6 +41,27 @@ Windows drive-letter and UNC paths with Windows rules, then maps their OpenClaw
 relative suffixes into the `/openclaw` mount. POSIX paths keep their Linux
 semantics. Unmappable Windows paths are never passed through POSIX `abspath`.
 
+### Provider Transport and Endpoint Resolution
+
+Provider manifests declare their runtime boundary through the additive Contract
+1.1 `connectionSchema`. A `network` transport declares its mode key, URL key,
+allowed schemes, authenticated probe, and topology defaults. A `process`
+transport declares the executable setting that must run in the server's own
+runtime. Third-party manifests without `connectionSchema` remain compatible.
+
+`providers/endpoint_resolution.py` is the shared network resolver used by native
+OpenClaw/Hermes paths and the Universal Provider SDK. Auto mode tries declared
+configured, Docker-host, and container-local candidates and returns one selected
+endpoint. Candidate URLs come from manifests rather than provider-name branches.
+Authentication and protocol failures are terminal. Unreachable candidates can
+fall through. A run pins its selected endpoint for events and control operations,
+and ambiguous submission failures are never retried through another transport.
+
+This models topology rather than operating-system labels: `127.0.0.1` is the
+server/container, `host.docker.internal` is the Docker host, and Custom is an
+exclusive sidecar/remote endpoint. Process-only providers do not expose network
+modes unless an adapter supplies a real network bridge.
+
 ## World Flow
 
 The client owns most rendering and interactive behavior:

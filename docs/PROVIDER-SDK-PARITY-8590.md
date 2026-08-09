@@ -1,6 +1,6 @@
 # Universal Provider SDK parity checklist (8590)
 
-Reference: My Virtual Office v0.7.1/current on port 8090. Base architecture: My Virtual World v1.0.44. Current release target: My Virtual World v1.0.51 on port 8590.
+Reference: My Virtual Office v0.7.1/current on port 8090. Base architecture: My Virtual World v1.0.44. Current release target: My Virtual World v1.0.52 on port 8590.
 
 The target is behavioral parity adapted to My Virtual World's Three.js world, Agent Character Builder, full chat window, yellow in-world bubble, licensing, and persistent `/data` architecture. My Virtual Office branding, office-only layout, account values, and provider credentials are not copied.
 
@@ -13,11 +13,15 @@ The target is behavioral parity adapted to My Virtual World's Three.js world, Ag
 - [x] Discovery cache retains offline agents without deleting native files.
 - [x] Manual discovery refresh and clear online/offline health state.
 - [x] Public health payload omits account, channel, agent-list, credential, and private runtime internals.
+- [x] Additive manifest `connectionSchema` declares network and process runtime boundaries without breaking legacy extensions.
+- [x] Shared endpoint resolver selects one authenticated network endpoint across configured, Docker-host, container-local, and Custom modes.
+- [x] Authentication/protocol failures stop fallback, and ambiguous run submissions are never retried through another endpoint or CLI.
 
 ## Provider settings UI
 
 - [x] A dedicated **Settings → Connections → Provider SDK** tab, with native connections retained as the default connection method and `providers.html` retained as a direct deep link.
 - [x] Provider tabs and health/auth guidance for all six manifests.
+- [x] Runtime transport cards accurately distinguish network-capable OpenClaw/Hermes from process-only Codex, Claude Code, OpenCode, and Antigravity.
 - [x] Manifest-rendered connection, model, runtime, discovery, session, permission, and authentication fields.
 - [x] Connection-list add/remove editing.
 - [x] Client and server validation for boolean, number, URL, slug, select, required, and connection-list fields.

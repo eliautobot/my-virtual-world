@@ -20,6 +20,13 @@ SameSite cookie. Keep `VW_OPENCLAW_BROWSER_TRANSPORT=proxy`; do not expose port
 trusted-network admin surface, so place an authenticated reverse proxy in front
 of it before any public exposure.
 
+Provider endpoint Auto mode performs server-side authenticated health probes.
+API keys and resolved endpoint URLs are not returned in public health payloads.
+An authentication, authorization, incompatible-protocol, or rejected health
+response is terminal: Virtual World does not try another target to bypass it.
+Custom mode is exclusive. Keep Docker-host and custom provider services on a
+trusted network, authenticate them, and do not expose their ports publicly.
+
 ## Remote Access With Tailscale
 
 Tailscale is the recommended way to use My Virtual World remotely because it keeps access inside your private Tailnet.

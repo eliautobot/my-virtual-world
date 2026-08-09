@@ -1,4 +1,5 @@
 import hashlib
+import asyncio
 import json
 import os
 import sys
@@ -9,6 +10,11 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
+from websockets.asyncio.server import serve
+
+
+_SERVER_DATA_DIR = tempfile.TemporaryDirectory(prefix="vw-provider-sdk-tests-")
+os.environ.setdefault("VW_DATA_DIR", _SERVER_DATA_DIR.name)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -115,14 +121,206 @@ class ProviderSdkBackendTests(unittest.TestCase):
         self.assertTrue(registry.conformance()["ok"])
         for provider_id, manifest in manifests.items():
             self.assertEqual("1.1", manifest["contractVersion"], provider_id)
+            self.assertTrue(manifest["connectionSchema"].get("transports"), provider_id)
             self.assertTrue(manifest["settingsSchema"], provider_id)
             self.assertTrue(manifest["creationSchema"].get("fields"), provider_id)
             self.assertTrue(manifest["resourceSchema"], provider_id)
             self.assertTrue(manifest["skillSchema"], provider_id)
             paths = [path for item in manifest["resourceSchema"] for path in item.get("paths", [])]
             self.assertFalse({"*", "**", "**/*"}.intersection(paths), provider_id)
+        self.assertEqual(["network"], [item["kind"] for item in manifests["openclaw"]["connectionSchema"]["transports"]])
+        self.assertEqual({"network", "process"}, {item["kind"] for item in manifests["hermes"]["connectionSchema"]["transports"]})
+        for provider_id in {"codex", "claude-code", "opencode", "antigravity"}:
+            self.assertEqual(["process"], [item["kind"] for item in manifests[provider_id]["connectionSchema"]["transports"]])
         self.assertTrue(manifests["codex"]["capabilities"]["approvals"])
         self.assertFalse(manifests["opencode"]["capabilities"]["approvals"])
+
+    def test_endpoint_mode_upgrade_preserves_remote_urls_and_enables_local_auto(self):
+        self.assertEqual("custom", server._endpoint_mode("", "https://runtime.example.test"))
+        self.assertEqual("auto", server._endpoint_mode("", "http://127.0.0.1:8642"))
+        self.assertEqual("auto", server._endpoint_mode("", "http://host.docker.internal:8642"))
+        self.assertEqual("host", server._endpoint_mode("host", "https://runtime.example.test"))
+
+    def test_custom_endpoint_mode_requires_a_url_in_native_and_sdk_settings(self):
+        with self.assertRaises(ValueError):
+            server._validate_native_endpoint_settings({"hermes": {"apiEndpointMode": "custom", "apiUrl": ""}})
+        result = server._test_provider_settings({
+            "providerId": "hermes",
+            "values": {"apiEndpointMode": "custom", "apiUrl": ""},
+        })
+        self.assertFalse(result["ok"])
+        self.assertIn("required", result["error"])
+
+    def test_provider_settings_payload_exposes_transport_contract_without_secrets(self):
+        payload = server._provider_settings_payload("hermes")
+        provider = payload["providers"][0]
+        self.assertEqual("hermes", provider["id"])
+        self.assertEqual({"network", "process"}, {item["kind"] for item in provider["connectionSchema"]["transports"]})
+        self.assertNotIn("apiKey", json.dumps(provider.get("health") or {}))
+
+    def test_openclaw_authenticated_websocket_probe_uses_real_protocol(self):
+        async def scenario():
+            received = []
+
+            async def handler(websocket):
+                await websocket.send(json.dumps({"type": "challenge"}))
+                connect = json.loads(await websocket.recv())
+                received.append(connect)
+                token = ((connect.get("params") or {}).get("auth") or {}).get("token")
+                if token != "gateway-test-token":
+                    await websocket.send(json.dumps({"id": connect.get("id"), "ok": False, "error": {"message": "Unauthorized"}}))
+                    return
+                await websocket.send(json.dumps({"id": connect.get("id"), "ok": True, "payload": {}}))
+                request = json.loads(await websocket.recv())
+                received.append(request)
+                await websocket.send(json.dumps({"id": request.get("id"), "ok": True, "payload": {"status": "healthy", "version": "test"}}))
+
+            async with serve(handler, "127.0.0.1", 0) as gateway:
+                port = gateway.sockets[0].getsockname()[1]
+                result = await server._gateway_rpc_call_at_async(
+                    f"ws://127.0.0.1:{port}",
+                    "gateway-test-token",
+                    "health",
+                    timeout=3,
+                )
+            return result, received
+
+        result, received = asyncio.run(scenario())
+        self.assertTrue(result["ok"])
+        self.assertEqual("health", received[1]["method"])
+        self.assertEqual("gateway-test-token", received[0]["params"]["auth"]["token"])
+
+    def test_openclaw_resolution_falls_back_only_after_unreachable_probe(self):
+        calls = []
+
+        def probe(url, _token):
+            calls.append(url)
+            if "127.0.0.1" in url:
+                return {"ok": False, "failureKind": "unreachable", "code": "endpoint_unreachable", "error": "offline"}
+            return {"ok": True}
+
+        original_resolver = server.PROVIDER_ENDPOINT_RESOLVER
+        server.PROVIDER_ENDPOINT_RESOLVER = server.EndpointResolver(cache_ttl_sec=0)
+        try:
+            with mock.patch.object(server, "_read_gateway_config", return_value=("ws://127.0.0.1:18789", "token")), \
+                 mock.patch.object(server, "_gateway_probe_result", side_effect=probe), \
+                 mock.patch.dict(server.VW_CONFIG["openclaw"], {"endpointMode": "auto"}, clear=False):
+                resolution, _token = server._resolve_openclaw_gateway_endpoint(force_probe=True)
+        finally:
+            server.PROVIDER_ENDPOINT_RESOLVER = original_resolver
+        self.assertTrue(resolution["ok"])
+        self.assertEqual("host", resolution["endpoint"]["location"])
+        self.assertEqual(["ws://127.0.0.1:18789", "ws://host.docker.internal:18789"], calls)
+
+    def test_provider_sdk_openclaw_test_uses_unsaved_endpoint_values(self):
+        calls = []
+        original_resolver = server.PROVIDER_ENDPOINT_RESOLVER
+        server.PROVIDER_ENDPOINT_RESOLVER = server.EndpointResolver(cache_ttl_sec=0)
+        try:
+            with mock.patch.object(server, "_gateway_probe_result", side_effect=lambda url, _token: calls.append(url) or {"ok": True}), \
+                 mock.patch.dict(server.VW_CONFIG["openclaw"], {"gatewayToken": "test-token"}, clear=False):
+                result = server._test_provider_settings({
+                    "providerId": "openclaw",
+                    "values": {
+                        "endpointMode": "host",
+                        "gatewayUrl": "ws://127.0.0.1:18789",
+                    },
+                })
+        finally:
+            server.PROVIDER_ENDPOINT_RESOLVER = original_resolver
+        self.assertTrue(result["ok"])
+        self.assertEqual("host", result["endpointLocation"])
+        self.assertEqual(["ws://host.docker.internal:18789"], calls)
+
+    def test_provider_sdk_hermes_test_never_reuses_global_discovery_after_unsaved_failure(self):
+        native = mock.Mock()
+        native.test.return_value = {"ok": False, "error": "Linux CLI unavailable"}
+        discover = mock.Mock(return_value=[{
+            "id": "hermes-default",
+            "profile": "default",
+            "apiAvailable": True,
+        }])
+        manifest = ProviderManifest(id="hermes", name="Hermes", capabilities={"health": True})
+        office = HermesOfficeProvider(native, {
+            "config": {"hermes": {"apiKey": "unsaved-wrong-key"}},
+            "hermesConnectionTest": lambda _config: {
+                "ok": False,
+                "code": "endpoint_authentication_failed",
+                "error": "Endpoint authentication failed",
+                "terminal": True,
+            },
+            "hermesDiscover": discover,
+        }, manifest)
+
+        result = office.test()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual("endpoint_authentication_failed", result["code"])
+        discover.assert_not_called()
+
+    def test_provider_sdk_hermes_api_run_pins_one_endpoint_and_streams(self):
+        progress = []
+
+        class Client:
+            base_url = "http://host.docker.internal:8642"
+
+            @staticmethod
+            def start_run(message, **kwargs):
+                self.assertEqual("hello", message)
+                self.assertEqual("session-one", kwargs["session_id"])
+                return {"run_id": "run-one"}
+
+            @staticmethod
+            def stream_run_events(run_id, timeout_sec=None):
+                self.assertEqual("run-one", run_id)
+                self.assertGreater(timeout_sec, 0)
+                yield {"event": "message.delta", "delta": "Hello"}
+                yield {"event": "message.delta", "delta": " world"}
+                yield {"event": "run.completed"}
+
+        agent = {
+            "id": "hermes-default",
+            "statusKey": "hermes-default",
+            "profile": "default",
+            "providerAgentId": "default",
+            "apiAvailable": True,
+            "cliAvailable": False,
+            "connectionModes": ["api"],
+        }
+        with mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()), \
+             mock.patch.object(server, "_get_hermes_session_id", return_value="session-one"), \
+             mock.patch.object(server, "_set_hermes_session_id"), \
+             mock.patch.object(server, "_remember_hermes_active_run") as remember, \
+             mock.patch.object(server, "_clear_hermes_active_run") as clear:
+            result = server._provider_hermes_send(agent, "hello", timeout_sec=10, on_progress=progress.append)
+        self.assertTrue(result["ok"])
+        self.assertEqual("Hello world", result["reply"])
+        self.assertEqual("host", result["endpointLocation"])
+        self.assertEqual("http://host.docker.internal:8642", remember.call_args.args[0]["apiEndpointUrl"])
+        clear.assert_called_once_with("run-one")
+        self.assertGreaterEqual(len(progress), 3)
+
+    def test_provider_sdk_hermes_never_falls_back_after_ambiguous_submission(self):
+        class Client:
+            base_url = "http://host.docker.internal:8642"
+
+            @staticmethod
+            def start_run(*_args, **_kwargs):
+                raise ConnectionResetError("response lost")
+
+        agent = {
+            "id": "hermes-default",
+            "profile": "default",
+            "apiAvailable": True,
+            "cliAvailable": True,
+            "connectionModes": ["api", "cli"],
+        }
+        with mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()), \
+             mock.patch.object(server, "_handle_hermes_chat") as cli_fallback:
+            result = server._provider_hermes_send(agent, "do this")
+        self.assertFalse(result["ok"])
+        self.assertEqual("run_submission_ambiguous", result["code"])
+        cli_fallback.assert_not_called()
 
     def test_stable_identity_dedup_includes_connection(self):
         class Provider:

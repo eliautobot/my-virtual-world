@@ -1058,11 +1058,14 @@
     if ($('setting-enableDayNightCycle')) $('setting-enableDayNightCycle').checked = world.dayNightCycleEnabled !== false;
     if ($('setting-enableWeather')) $('setting-enableWeather').checked = world.weatherEnabled !== false;
     if ($('setting-openclawPath')) $('setting-openclawPath').value = openclaw.homePath || '';
+    if ($('setting-openclawEndpointMode')) $('setting-openclawEndpointMode').value = openclaw.endpointMode || 'auto';
     if ($('setting-gatewayUrl')) $('setting-gatewayUrl').value = openclaw.gatewayUrl || '';
     if ($('setting-gatewayToken')) $('setting-gatewayToken').placeholder = openclaw.gatewayTokenConfigured ? 'Configured - leave blank to keep' : 'Gateway token';
     if ($('setting-hermesEnabled')) $('setting-hermesEnabled').checked = hermes.enabled !== false;
+    if ($('setting-hermesLocalProfiles')) $('setting-hermesLocalProfiles').checked = hermes.localProfilesEnabled !== false;
     if ($('setting-hermesHome')) $('setting-hermesHome').value = hermes.homePath || '';
     if ($('setting-hermesBin')) $('setting-hermesBin').value = hermes.binary || '';
+    if ($('setting-hermesApiEndpointMode')) $('setting-hermesApiEndpointMode').value = hermes.apiEndpointMode || 'auto';
     if ($('setting-hermesApiUrl')) $('setting-hermesApiUrl').value = hermes.apiUrl || '';
     if ($('setting-hermesApiKey')) $('setting-hermesApiKey').placeholder = hermes.apiKeyConfigured ? 'Configured - leave blank to keep' : 'Hermes API key';
     if ($('setting-hermesPreferApi')) $('setting-hermesPreferApi').checked = hermes.preferApi !== false;
@@ -1118,12 +1121,15 @@
       },
       openclaw: {
         homePath: value('setting-openclawPath'),
+        endpointMode: value('setting-openclawEndpointMode') || 'auto',
         gatewayUrl: value('setting-gatewayUrl'),
       },
       hermes: {
         enabled: checked('setting-hermesEnabled'),
+        localProfilesEnabled: checked('setting-hermesLocalProfiles'),
         homePath: value('setting-hermesHome'),
         binary: value('setting-hermesBin'),
+        apiEndpointMode: value('setting-hermesApiEndpointMode') || 'auto',
         apiUrl: value('setting-hermesApiUrl'),
         preferApi: checked('setting-hermesPreferApi'),
         autoStartProfileApis: checked('setting-hermesAutoStartProfileApis'),
@@ -1354,8 +1360,16 @@
     $('btn-testHermes')?.addEventListener('click', async () => {
       setStatus('hermesTestStatus', 'Testing...');
       try {
-        const result = await fetchJson('/api/hermes/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ homePath: value('setting-hermesHome'), binary: value('setting-hermesBin') }) });
-        setStatus('hermesTestStatus', result.ok ? `Hermes connected (${(result.agents || []).length} profiles).` : (result.error || 'Hermes unavailable.'), result.ok ? 'success' : 'warn');
+        const result = await fetchJson('/api/hermes/test', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({
+          enabled: checked('setting-hermesEnabled'),
+          localProfilesEnabled: checked('setting-hermesLocalProfiles'),
+          homePath: value('setting-hermesHome'),
+          binary: value('setting-hermesBin'),
+          apiEndpointMode: value('setting-hermesApiEndpointMode') || 'auto',
+          apiUrl: value('setting-hermesApiUrl'),
+          apiKey: value('setting-hermesApiKey'),
+        }) });
+        setStatus('hermesTestStatus', result.ok ? (result.message || `Hermes connected (${(result.agents || []).length} profiles).`) : (result.error || result.apiError || 'Hermes unavailable.'), result.ok ? 'success' : 'warn');
       } catch (err) {
         setStatus('hermesTestStatus', err.message, 'warn');
       }

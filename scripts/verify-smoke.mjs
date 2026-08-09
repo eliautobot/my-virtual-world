@@ -435,6 +435,9 @@ assert(dockerCompose.includes('${VW_HOST_PORT:-8590}:${VW_PORT:-8590}'), 'docker
 assert(envExample.includes('VW_HOST_PORT=8590'), '.env.example should document the Docker host port');
 assert(dockerCompose.includes('${VW_OPENCLAW_HOST_PATH:-~/.openclaw}:/openclaw'), 'docker-compose.yml should mount the configured Windows or Linux OpenClaw home');
 assert(dockerCompose.includes('VW_OPENCLAW_BROWSER_TRANSPORT=${VW_OPENCLAW_BROWSER_TRANSPORT:-proxy}'), 'docker-compose.yml should default OpenClaw browser chat to the server proxy');
+assert(dockerCompose.includes('VW_GATEWAY_ENDPOINT_MODE=${VW_GATEWAY_ENDPOINT_MODE:-auto}'), 'docker-compose.yml should enable manifest endpoint resolution for OpenClaw');
+assert(dockerCompose.includes('VW_HERMES_API_ENDPOINT_MODE=${VW_HERMES_API_ENDPOINT_MODE:-auto}'), 'docker-compose.yml should enable manifest endpoint resolution for Hermes');
+assert(dockerCompose.includes('VW_PROVIDER_ENDPOINT_CACHE_TTL_SEC=${VW_PROVIDER_ENDPOINT_CACHE_TTL_SEC:-30}'), 'docker-compose.yml should configure endpoint ordering cache');
 assert(dockerCompose.includes('${VW_CODEX_HOST_HOME:-~/.codex}:${VW_CODEX_HOME:-/home/vw/.codex}'), 'docker-compose.yml should support an explicit cross-platform Codex home mount');
 assert(envExample.includes('VW_OPENCLAW_BROWSER_TRANSPORT=proxy'), '.env.example should keep Gateway credentials server-side by default');
 assert(envExample.includes('VW_CLAUDE_CODE_BIN=/home/vw/.local/bin/claude'), '.env.example should use an absolute Linux Claude bind target');
@@ -445,7 +448,7 @@ for (const [, key, fallback] of configurableBindTargets) {
   const renderedTarget = envExampleValues.get(key) || fallback;
   assert(renderedTarget.startsWith('/'), `.env.example makes Docker bind target ${key} relative: ${renderedTarget}`);
 }
-for (const token of ['OpenClawHome', 'VW_OPENCLAW_HOST_PATH', 'host.docker.internal:18789', 'VW_OPENCLAW_BROWSER_TRANSPORT', '.docker-disabled', 'docker compose config --quiet', 'docker compose config --format json', "Target -notmatch '^/'"]) {
+for (const token of ['OpenClawHome', 'VW_OPENCLAW_HOST_PATH', 'host.docker.internal:18789', 'VW_OPENCLAW_BROWSER_TRANSPORT', 'VW_GATEWAY_ENDPOINT_MODE', 'VW_HERMES_API_ENDPOINT_MODE', 'VW_HERMES_LOCAL_PROFILES_ENABLED', '.docker-disabled', 'docker compose config --quiet', 'docker compose config --format json', "Target -notmatch '^/'"]) {
   assert(windowsDockerSetup.includes(token), `Windows Docker setup missing token: ${token}`);
 }
 for (const [key, value] of Object.entries({
@@ -496,8 +499,10 @@ for (const token of ['.env', 'node_modules/', '.tmp-data/', 'backups/', 'memory/
 }
 
 const packageJson = JSON.parse(read('package.json'));
-assert.equal(packageJson.scripts.test, 'npm run verify:smoke', 'package test script should run the public smoke suite');
+assert(packageJson.scripts.test.includes('npm run verify:smoke'), 'package test script should run the public smoke suite');
+assert(packageJson.scripts.test.includes('npm run verify:providers'), 'package test script should run the provider endpoint suite');
 assert.equal(packageJson.scripts['verify:smoke'], 'node scripts/verify-smoke.mjs', 'verify:smoke should use the public verifier');
+assert.equal(packageJson.scripts['verify:providers'], 'python3 -B tests/test_provider_sdk_backend.py && python3 -B tests/test_provider_endpoint_resolution.py', 'provider verifier should run contract and endpoint tests');
 assert.equal(packageJson.scripts['verify:chat-ui'], 'node scripts/verify-chat-ui.mjs', 'chat UI verifier should be available');
 for (const scriptName of Object.keys(packageJson.scripts)) {
   assert(!scriptName.includes('phase'), `public package script should not expose internal phase verifier: ${scriptName}`);
@@ -538,6 +543,7 @@ const pyTargets = [
   'src/server/license.py',
   'src/server/providers/__init__.py',
   'src/server/providers/codex.py',
+  'src/server/providers/endpoint_resolution.py',
   'src/server/providers/hermes.py',
 ];
 
@@ -748,12 +754,34 @@ for (const token of [
   'settingsSchema',
   'resourceSchema',
   'skillSchema',
+  'connectionSchema',
+  'Runtime transports',
+  'host.docker.internal cannot execute a Windows CLI',
   'Configured — leave blank to preserve',
 ]) {
   assert(providerSettingsJs.includes(token), `provider-settings.js missing manifest-driven token: ${token}`);
 }
 for (const token of ['overflow-x:hidden', '@media(max-width:760px)', '.ps-connection-list', '.provider-settings-embedded', 'grid-template-columns:minmax(0,.9fr)']) {
   assert(providerSettingsCss.includes(token), `provider-settings.css missing responsive token: ${token}`);
+}
+for (const token of [
+  'OPENCLAW_GATEWAY_TRANSPORT',
+  'HERMES_API_TRANSPORT',
+  'EndpointResolver',
+  'run_submission_ambiguous',
+  'connectionSchema',
+  'endpointLocation',
+]) {
+  assert(serverPy.includes(token), `server.py missing shared provider endpoint resolution token: ${token}`);
+}
+const providerRegistryPy = read('src/server/providers/registry.py');
+const providerBuiltinsPy = read('src/server/providers/builtin.py');
+const endpointResolutionPy = read('src/server/providers/endpoint_resolution.py');
+for (const token of ['connection_schema', 'connectionSchema', 'defaultEndpoints', 'executableKey']) {
+  assert(`${providerRegistryPy}\n${providerBuiltinsPy}`.includes(token), `provider manifests missing transport contract token: ${token}`);
+}
+for (const token of ['ENDPOINT_MODES', 'build_endpoint_candidates', 'terminal', 'authentication', 'host.docker.internal', '127.0.0.1']) {
+  assert(endpointResolutionPy.includes(token), `endpoint resolver missing safety token: ${token}`);
 }
 for (const token of ['providerLinkHref', "target.searchParams.set('returnTo', 'provider-sdk')", "target.searchParams.set('provider'"]) {
   assert(providerSettingsJs.includes(token), `provider-settings.js missing nested native-model return token: ${token}`);
@@ -1893,7 +1921,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260809-settings-window-r2',
+  'js/settings.js?v=20260809-provider-endpoints-r1',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);

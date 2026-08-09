@@ -135,6 +135,42 @@
 
   function integrationTag(text, kind = '') { return element('span', { className:'ps-integration-tag' + (kind ? ' ' + kind : '') }, text); }
 
+  function renderTransportSection(provider) {
+    const transports = provider.connectionSchema?.transports || [];
+    const card = element('section', { className:'ps-section ps-transport-section' });
+    card.append(element('h3', {}, 'Runtime transports'));
+    card.append(element('p', { className:'ps-section-description' }, 'The provider manifest declares where each runtime actually executes. Endpoint fallback applies only to real HTTP or WebSocket services.'));
+    const list = element('div', { className:'ps-integration-list' });
+    transports.forEach(transport => {
+      const row = element('div', { className:'ps-integration-row ps-transport-row' });
+      const tags = element('div', { className:'ps-integration-tags' });
+      tags.append(integrationTag(transport.kind === 'network' ? 'network endpoint' : 'native process', transport.kind === 'network' ? 'ok' : ''));
+      if (transport.kind === 'network') {
+        const mode = provider.values?.[transport.modeKey] || 'auto';
+        tags.append(integrationTag(mode === 'auto' ? 'auto-detect' : mode));
+        if (provider.health?.endpointLocation) tags.append(integrationTag(`active: ${provider.health.endpointLocation}`, 'ok'));
+        row.append(
+          element('div', { className:'ps-integration-title' }, transport.label || transport.id || 'Network connection'),
+          tags,
+          element('div', { className:'ps-integration-paths' }, (transport.defaultEndpoints || []).map(item => item.label || item.location).join(' → '))
+        );
+        row.append(element('div', { className:'ps-help' }, 'Resolution performs authenticated health/capability checks and pins exactly one endpoint before a run. It never broadcasts a task to every candidate.'));
+      } else {
+        tags.append(integrationTag('server runtime'));
+        row.append(
+          element('div', { className:'ps-integration-title' }, transport.label || transport.id || 'Native CLI'),
+          tags,
+          element('div', { className:'ps-integration-paths' }, transport.executableKey || 'binary')
+        );
+        row.append(element('div', { className:'ps-help' }, 'This executable must run inside the Virtual World server/container. host.docker.internal cannot execute a Windows CLI; that framework needs a real host API bridge.'));
+      }
+      list.append(row);
+    });
+    if (!transports.length) list.append(element('div', { className:'ps-empty' }, 'This legacy extension does not declare a transport schema. Its existing adapter remains available without automatic endpoint resolution.'));
+    card.append(list);
+    return card;
+  }
+
   function renderIntegrationSection(provider) {
     const resources = provider.resourceSchema || [];
     const skillRoots = provider.skillSchema || [];
@@ -193,7 +229,7 @@
     const caps = Object.entries(provider.capabilities || {}).filter(([, enabled]) => enabled).map(([name]) => element('span', { className:'ps-capability' }, name));
     $('ps-capabilities').replaceChildren(...caps);
     setStatus(healthMessage(provider), provider.health?.ok ? 'ok' : 'error');
-    const cards = sections(provider).map(section => {
+    const cards = [renderTransportSection(provider), ...sections(provider).map(section => {
       const card = element('section', { className:'ps-section' });
       card.append(element('h3', {}, section.label || section.id));
       if (section.description) card.append(element('p', { className:'ps-section-description' }, section.description));
@@ -213,7 +249,7 @@
         row.append(labelBox, control); card.append(row);
       });
       return card;
-    });
+    })];
     cards.push(renderIntegrationSection(provider));
     $('ps-form').replaceChildren(...cards);
   }

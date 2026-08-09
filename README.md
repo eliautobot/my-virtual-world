@@ -135,6 +135,7 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_DATA_DIR` | `/data` | Persistent world data directory in Docker |
 | `VW_OPENCLAW_PATH` | `/openclaw` | Mounted OpenClaw home path |
 | `VW_OPENCLAW_HOST_PATH` | `~/.openclaw` | Host OpenClaw home path used when Gateway creates agent workspaces |
+| `VW_GATEWAY_ENDPOINT_MODE` | `auto` | Resolve one authenticated Gateway endpoint from the configured URL, Docker host, or container-local candidates |
 | `VW_GATEWAY_URL` | `ws://host.docker.internal:18789` | OpenClaw gateway WebSocket URL |
 | `VW_OPENCLAW_BROWSER_TRANSPORT` | `proxy` | Keep Gateway access server-side and carry browser chat through port 8590 |
 | `VW_REALTIME_ENABLED` | `true` | Enable the Colyseus realtime runtime config used by Agent Live Mode |
@@ -143,9 +144,12 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_HERMES_ENABLED` | `true` | Enable local Hermes profile support |
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker |
 | `VW_HERMES_BIN` | `/home/vw/.hermes/hermes-agent/hermes` | Hermes CLI path inside Docker |
-| `VW_HERMES_API_URL` | `http://127.0.0.1:8642` | Hermes native API server URL |
+| `VW_HERMES_LOCAL_PROFILES_ENABLED` | `true` | Allow Linux Hermes CLI/profile discovery inside the app server or container |
+| `VW_HERMES_API_ENDPOINT_MODE` | `auto` | Resolve one authenticated Hermes API endpoint from the configured URL, Docker host, or container-local candidates |
+| `VW_HERMES_API_URL` | `http://127.0.0.1:8642` | Preferred Hermes API URL; Auto can also resolve the Docker-host equivalent |
 | `VW_HERMES_API_KEY` | empty | Server-side bearer token for Hermes API |
 | `VW_HERMES_PREFER_API` | `true` | Prefer native Hermes run/SSE streaming |
+| `VW_PROVIDER_ENDPOINT_CACHE_TTL_SEC` | `30` | Reorder recently healthy network candidates while still rechecking health before each selection |
 | `VW_CODEX_ENABLED` | `true` | Enable local Codex workspace agent support |
 | `VW_CODEX_HOME` | `/home/vw/.codex` | Codex home path inside Docker |
 | `VW_CODEX_BIN` | `/home/vw/.codex/packages/standalone/current/bin/codex` | Codex CLI path inside Docker |
@@ -167,9 +171,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\configure-docker-windows.ps1
 This maps `%USERPROFILE%\.openclaw` to `/openclaw`, enables the secure
 same-origin OpenClaw chat proxy, disables invalid Linux CLI mounts, and validates
 the fully rendered Compose bind targets before startup. A Windows-hosted Hermes
-API can be enabled with
-`-HermesApiUrl http://host.docker.internal:8642`; a Windows Hermes executable
-cannot run inside the Linux app container. See
+API can be enabled with `-HermesApiUrl http://host.docker.internal:8642`; Auto
+endpoint resolution can then select it without broadcasting work to multiple
+targets. A Windows Hermes executable cannot run inside the Linux app container. See
 [docs/INSTALLATION.md](docs/INSTALLATION.md) for remote-browser and Hermes
 examples.
 
@@ -187,11 +191,13 @@ When running with Docker, use these values in `Settings > Connections`:
 | --- | --- |
 | OpenClaw Home | `/openclaw` |
 | OpenClaw Host Home | `~/.openclaw` |
+| Gateway endpoint | `Auto` |
 | Gateway URL | `ws://host.docker.internal:18789` |
 | Gateway Token | Leave blank unless your gateway requires one |
 | Hermes Home | `/home/vw/.hermes` |
 | Hermes CLI | `/home/vw/.hermes/hermes-agent/hermes` |
-| Hermes API URL | `http://127.0.0.1:8642` for the default local API, or your own API URL |
+| Hermes API endpoint | `Auto` |
+| Hermes API URL | `http://127.0.0.1:8642` as the preferred local URL, or your own API URL |
 | Hermes API Key | Required only when your Hermes API requires one or Virtual World should auto-start local profile APIs |
 | Codex Home | `/home/vw/.codex` |
 | Codex CLI | `/home/vw/.codex/packages/standalone/current/bin/codex` |
@@ -205,6 +211,19 @@ These values match the Docker mounts in `docker-compose.yml`:
 - Hermes home is mounted at `/home/vw/.hermes`.
 - The Hermes CLI is discovered from the mounted Hermes home, usually `/home/vw/.hermes/hermes-agent/hermes`.
 - Codex home is mounted at `/home/vw/.codex`; override `VW_CODEX_BIN` if your Codex binary is installed somewhere else.
+
+`Auto` is topology-aware rather than OS-aware. Network-capable transports probe
+the configured URL, the Docker host (`host.docker.internal`), and the container
+loopback (`127.0.0.1`) using the provider's authenticated health protocol, then
+select exactly one endpoint before a run is submitted. Authentication or
+protocol errors are terminal and are not bypassed by trying a different target.
+
+This capability applies to the OpenClaw Gateway and Hermes API transports. The
+Codex, Claude Code, OpenCode, and Antigravity built-ins are process transports:
+their executable must run inside the server/container. A Windows-native CLI
+cannot be made executable in a Linux container by changing a hostname; that
+framework needs a real HTTP/WebSocket bridge before it can use network endpoint
+resolution.
 
 ### Local Development Path Defaults
 

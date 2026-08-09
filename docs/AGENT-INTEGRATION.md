@@ -22,6 +22,13 @@ Contract 1.1 ships with six built-in provider manifests:
 
 Additional providers can register a `vw_provider_*.py` adapter. Browser forms and controls are rendered from the provider's manifest schemas and capabilities; account names, connection ids, models, and credentials are installation data rather than application constants.
 
+Manifests may also declare a Contract 1.1 `connectionSchema`. Network transports
+receive generic Auto, Docker-host, container-local, and Custom endpoint controls.
+Process transports display the executable boundary truthfully. The six built-ins
+currently declare OpenClaw and Hermes network transports, Hermes CLI as an
+additional process transport, and Codex, Claude Code, OpenCode, and Antigravity
+as process-only transports.
+
 The world does not replace provider runtimes. Providers remain responsible for their own tools, sessions, permissions, and execution.
 
 ## Universal Provider SDK
@@ -46,6 +53,13 @@ POST /api/providers/profile
 ```
 
 Resource and skill paths are restricted to manifest-declared roots. Writes use optimistic SHA checks and create recoverable revisions. Secret settings are redacted on reads and a blank secret value preserves the configured value.
+
+Network Auto mode performs an authenticated read-only probe and selects exactly
+one endpoint before execution. Only unreachable candidates can fall through;
+authentication, authorization, and incompatible-protocol results stop selection.
+The selected endpoint is pinned for streaming and control requests. If run
+submission is ambiguous, the SDK reports the error without retrying through a
+different endpoint or CLI, preventing duplicate agent work.
 
 ## Agent Roster
 

@@ -72,7 +72,8 @@ except Exception as e:
     print(f"⚠️  Virtual World Codex provider unavailable: {e}")
 
 try:
-    from providers.builtin import build_provider_registry
+    from providers.builtin import HERMES_API_TRANSPORT, OPENCLAW_GATEWAY_TRANSPORT, build_provider_registry
+    from providers.endpoint_resolution import EndpointResolver, endpoint_location, normalize_endpoint_url
     from providers.path_mapping import (
         infer_openclaw_host_home,
         is_windows_absolute,
@@ -83,6 +84,11 @@ try:
     from providers.registry import CONTRACT_VERSION as PROVIDER_CONTRACT_VERSION
 except Exception as e:
     build_provider_registry = None
+    EndpointResolver = None
+    endpoint_location = lambda _url: "custom"
+    normalize_endpoint_url = lambda url, _schemes: str(url or "")
+    OPENCLAW_GATEWAY_TRANSPORT = {}
+    HERMES_API_TRANSPORT = {}
     infer_openclaw_host_home = None
     is_windows_absolute = lambda _path: False
     join_host_path = os.path.join
@@ -113,6 +119,16 @@ def _env_bool(key, fallback=False):
     if val is None or val == "":
         return bool(fallback)
     return str(val).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _endpoint_mode(value, url=""):
+    """Normalize endpoint mode while preserving older remote URL behavior."""
+    mode = str(value or "").strip().lower()
+    if mode in {"auto", "container", "host", "custom"}:
+        return mode
+    # Existing explicit remote URLs must remain exclusive after upgrade. Local
+    # and Docker-host URLs gain the new paired fallback through Auto mode.
+    return "custom" if str(url or "").strip() and endpoint_location(url) == "custom" else "auto"
 
 
 def _env_int(key, fallback, *, minimum=None, maximum=None):
@@ -229,12 +245,14 @@ def _default_vw_config():
             },
             "location": {"label": "", "timeZone": "", "latitude": None, "longitude": None},
         },
-        "openclaw": {"homePath": "", "hostHomePath": "", "gatewayUrl": "", "gatewayToken": ""},
+        "openclaw": {"homePath": "", "hostHomePath": "", "endpointMode": "auto", "gatewayUrl": "", "gatewayToken": ""},
         "hermes": {
             "enabled": True,
+            "localProfilesEnabled": True,
             "homePath": "",
             "binary": "",
             "timeoutSec": 600,
+            "apiEndpointMode": "auto",
             "apiUrl": "",
             "apiKey": "",
             "preferApi": True,
@@ -337,12 +355,21 @@ def _load_vw_config():
         configured_host_home = inferred_host_home
     cfg["openclaw"]["hostHomePath"] = normalize_host_path(configured_host_home)
     cfg["openclaw"]["gatewayUrl"] = _env_or("VW_GATEWAY_URL", cfg["openclaw"].get("gatewayUrl") or "")
+    cfg["openclaw"]["endpointMode"] = _endpoint_mode(
+        _env_or("VW_GATEWAY_ENDPOINT_MODE", cfg["openclaw"].get("endpointMode") or ""),
+        cfg["openclaw"]["gatewayUrl"],
+    )
     cfg["openclaw"]["gatewayToken"] = _env_or("VW_GATEWAY_TOKEN", _env_or("OPENCLAW_GATEWAY_TOKEN", cfg["openclaw"].get("gatewayToken") or ""))
     cfg["hermes"]["enabled"] = str(_env_or("VW_HERMES_ENABLED", cfg["hermes"].get("enabled", True))).lower() not in ("0", "false", "no", "off")
+    cfg["hermes"]["localProfilesEnabled"] = _env_bool("VW_HERMES_LOCAL_PROFILES_ENABLED", cfg["hermes"].get("localProfilesEnabled", True))
     cfg["hermes"]["homePath"] = os.path.expanduser(_env_or("VW_HERMES_HOME", cfg["hermes"].get("homePath") or os.path.expanduser("~/.hermes")))
     cfg["hermes"]["binary"] = os.path.expanduser(_env_or("VW_HERMES_BIN", cfg["hermes"].get("binary") or os.path.expanduser("~/.local/bin/hermes")))
     cfg["hermes"]["timeoutSec"] = int(_env_or("VW_HERMES_TIMEOUT_SEC", cfg["hermes"].get("timeoutSec", 600)))
     cfg["hermes"]["apiUrl"] = _env_or("VW_HERMES_API_URL", cfg["hermes"].get("apiUrl") or "")
+    cfg["hermes"]["apiEndpointMode"] = _endpoint_mode(
+        _env_or("VW_HERMES_API_ENDPOINT_MODE", cfg["hermes"].get("apiEndpointMode") or ""),
+        cfg["hermes"]["apiUrl"],
+    )
     cfg["hermes"]["apiKey"] = _env_or("VW_HERMES_API_KEY", cfg["hermes"].get("apiKey") or "")
     cfg["hermes"]["preferApi"] = _env_bool("VW_HERMES_PREFER_API", cfg["hermes"].get("preferApi", True))
     cfg["hermes"]["autoStartProfileApis"] = _env_bool("VW_HERMES_AUTO_START_PROFILE_APIS", cfg["hermes"].get("autoStartProfileApis", True))
@@ -350,6 +377,11 @@ def _load_vw_config():
     cfg["hermes"]["apiProfilePortBase"] = _env_or("VW_HERMES_API_PROFILE_PORT_BASE", cfg["hermes"].get("apiProfilePortBase") or "")
     if not isinstance(cfg["hermes"].get("apiProfiles"), dict):
         cfg["hermes"]["apiProfiles"] = {}
+    if not isinstance(cfg["hermes"].get("connections"), list):
+        cfg["hermes"]["connections"] = []
+    for connection in cfg["hermes"]["connections"]:
+        if isinstance(connection, dict):
+            connection["endpointMode"] = _endpoint_mode(connection.get("endpointMode"), connection.get("apiUrl"))
     cfg["codex"]["enabled"] = _env_bool("VW_CODEX_ENABLED", cfg["codex"].get("enabled", True))
     cfg["codex"]["homePath"] = os.path.expanduser(_env_or("VW_CODEX_HOME", _env_or("CODEX_HOME", cfg["codex"].get("homePath") or "~/.codex")))
     cfg["codex"]["binary"] = os.path.expanduser(_env_or("VW_CODEX_BIN", cfg["codex"].get("binary") or "codex"))
@@ -602,15 +634,18 @@ def _safe_vw_config():
         "openclaw": {
             "homePath": _display_user_home_path(openclaw_cfg.get("homePath")),
             "hostHomePath": _display_user_home_path(openclaw_cfg.get("hostHomePath")),
+            "endpointMode": openclaw_cfg.get("endpointMode") or "auto",
             "gatewayUrl": openclaw_cfg.get("gatewayUrl"),
             "gatewayTokenConfigured": bool(openclaw_cfg.get("gatewayToken")),
             "detected": os.path.isdir(openclaw_cfg.get("homePath") or ""),
         },
         "hermes": {
             "enabled": hermes_cfg.get("enabled", True),
+            "localProfilesEnabled": hermes_cfg.get("localProfilesEnabled", True),
             "homePath": _display_user_home_path(hermes_cfg.get("homePath")),
             "binary": _display_user_home_path(hermes_cfg.get("binary")),
             "timeoutSec": hermes_cfg.get("timeoutSec", 600),
+            "apiEndpointMode": hermes_cfg.get("apiEndpointMode") or "auto",
             "apiUrl": hermes_cfg.get("apiUrl"),
             "apiKeyConfigured": bool(hermes_cfg.get("apiKey")),
             "preferApi": hermes_cfg.get("preferApi", True),
@@ -722,6 +757,25 @@ def _preserve_secret_updates(existing, body):
                 incoming.pop(key, None)
 
 
+def _validate_native_endpoint_settings(body):
+    declarations = [
+        ("openclaw", "endpointMode", "gatewayUrl", OPENCLAW_GATEWAY_TRANSPORT),
+        ("hermes", "apiEndpointMode", "apiUrl", HERMES_API_TRANSPORT),
+    ]
+    for section_key, mode_key, url_key, transport in declarations:
+        section = body.get(section_key)
+        if not isinstance(section, dict):
+            continue
+        mode = str(section.get(mode_key) or "auto").strip().lower()
+        if mode not in {"auto", "container", "host", "custom"}:
+            raise ValueError(f"{section_key}.{mode_key} has an unsupported value")
+        url = str(section.get(url_key) or "").strip()
+        if mode == "custom" and not url:
+            raise ValueError(f"{section_key}.{url_key} is required in custom mode")
+        if url:
+            normalize_endpoint_url(url, transport.get("schemes") or [])
+
+
 def _save_vw_config_update(body):
     global VW_CONFIG, WORKSPACE_BASE, HOST_WORKSPACE_BASE, HERMES_ENABLED, HERMES_HOME, HERMES_BIN, HERMES_TIMEOUT_SEC
     global CODEX_ENABLED, CODEX_HOME, CODEX_BIN, CODEX_WORKSPACE_ROOT, CODEX_MAIN_WORKSPACE, CODEX_TIMEOUT_SEC
@@ -729,6 +783,10 @@ def _save_vw_config_update(body):
     global CODEX_INCLUDE_NATIVE_AGENTS, CODEX_REGISTER_NATIVE_AGENTS, UPLOADS_DIR, UPLOADS_HOST_DIR
     if not isinstance(body, dict):
         return {"ok": False, "error": "settings payload must be an object"}, 400
+    try:
+        _validate_native_endpoint_settings(body)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, 400
     old_gateway_config = _gateway_config_key()
     existing = _deep_merge(_default_vw_config(), _load_config_file(_resolve_vw_config_path()))
     _preserve_secret_updates(existing, body)
@@ -745,6 +803,8 @@ def _save_vw_config_update(body):
         merged["_setupComplete"] = True
     _write_vw_config(merged)
     VW_CONFIG = _load_vw_config()
+    if PROVIDER_ENDPOINT_RESOLVER is not None:
+        PROVIDER_ENDPOINT_RESOLVER.invalidate()
     WORKSPACE_BASE = VW_CONFIG["openclaw"]["homePath"]
     HOST_WORKSPACE_BASE = VW_CONFIG["openclaw"].get("hostHomePath") or WORKSPACE_BASE
     HERMES_ENABLED = VW_CONFIG["hermes"]["enabled"]
@@ -1013,6 +1073,9 @@ _presence_snapshot_path = os.path.join(DATA_DIR, "presence-snapshot.json")
 _presence_snapshot_thread = None
 _presence_enabled = False
 _presence_gateway_config = None
+PROVIDER_ENDPOINT_RESOLVER = EndpointResolver(
+    cache_ttl_sec=_env_int("VW_PROVIDER_ENDPOINT_CACHE_TTL_SEC", 30, minimum=0, maximum=300)
+) if EndpointResolver else None
 _live_agent_loop_thread = None
 _live_agent_loop_stop = threading.Event()
 _live_agent_loop_wake = threading.Event()
@@ -21011,7 +21074,9 @@ def _codex_provider():
 def _discover_hermes_agents():
     if not HERMES_ENABLED:
         return []
-    provider = _hermes_provider()
+    hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+    local_profiles_enabled = hermes_cfg.get("localProfilesEnabled", True) is not False
+    provider = _hermes_provider() if local_profiles_enabled else None
     rows = []
     try:
         rows = provider.discover_agents() if provider else []
@@ -21019,55 +21084,43 @@ def _discover_hermes_agents():
         print(f"⚠️  Virtual World Hermes discovery failed: {e}")
     rows = rows if isinstance(rows, list) else []
 
-    # A Windows Hermes executable cannot run in this Linux container. Support
-    # the valid cross-platform topology instead: Hermes runs on the host and
-    # Virtual World reaches its authenticated HTTP API through
-    # host.docker.internal. API-only connections are real agents only while
-    # their health and streaming capabilities are reachable.
-    hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+    # API-only connections are real agents only while one declared endpoint
+    # passes authenticated health and capability probes.
     candidates = []
     configured_connections = hermes_cfg.get("connections") if isinstance(hermes_cfg.get("connections"), list) else []
     for item in configured_connections:
-        if not isinstance(item, dict) or item.get("enabled") is False or not str(item.get("apiUrl") or "").strip():
+        if not isinstance(item, dict) or item.get("enabled") is False:
             continue
         candidates.append({
             "id": str(item.get("id") or "default").strip() or "default",
             "name": str(item.get("name") or "Hermes").strip() or "Hermes",
             "emoji": str(item.get("emoji") or "⚕️").strip() or "⚕️",
             "role": str(item.get("role") or "Hermes Agent").strip() or "Hermes Agent",
-            "url": str(item.get("apiUrl") or "").strip(),
-            "key": str(item.get("apiKey") or ""),
         })
-    if str(hermes_cfg.get("apiUrl") or "").strip() and not any(item["id"] == "default" for item in candidates):
+    if hermes_cfg.get("preferApi", True) is not False and not any(item["id"] == "default" for item in candidates):
         candidates.append({
             "id": "default",
             "name": "Hermes",
             "emoji": "⚕️",
             "role": "Hermes Agent",
-            "url": str(hermes_cfg.get("apiUrl") or "").strip(),
-            "key": str(hermes_cfg.get("apiKey") or ""),
         })
 
     existing = {str(item.get("profile") or item.get("providerAgentId") or "default"): item for item in rows}
     for candidate in candidates:
         if HermesApiClient is None:
             break
-        try:
-            client = HermesApiClient(base_url=candidate["url"], api_key=candidate["key"], timeout_sec=5)
-            health = client.health()
-            if health.get("status") not in {"ok", "healthy"} and health.get("ok") is not True:
-                continue
-            capabilities = client.capabilities()
-            features = capabilities.get("features") if isinstance(capabilities.get("features"), dict) else {}
-            if not (features.get("run_submission") and features.get("run_events_sse")):
-                continue
-        except Exception:
+        resolution, _api_cfg = _resolve_hermes_api_endpoint(candidate["id"])
+        if not resolution.get("ok"):
             continue
+        resolved_endpoint = resolution.get("endpoint") or {}
+        capabilities = resolution.get("probe") or {}
         profile = candidate["id"]
         if profile in existing:
             row = existing[profile]
             row["apiAvailable"] = True
             row["connectionModes"] = sorted(set(row.get("connectionModes") or []) | {"cli", "api"})
+            row["gateway"] = resolved_endpoint.get("url") or row.get("gateway") or ""
+            row["endpointLocation"] = resolved_endpoint.get("location") or ""
             if not row.get("model"):
                 row["model"] = capabilities.get("model") or capabilities.get("model_name") or ""
             continue
@@ -21085,7 +21138,8 @@ def _discover_hermes_agents():
             "role": candidate["role"],
             "model": capabilities.get("model") or capabilities.get("model_name") or "",
             "provider": capabilities.get("provider") or "Hermes API",
-            "gateway": candidate["url"],
+            "gateway": resolved_endpoint.get("url") or "",
+            "endpointLocation": resolved_endpoint.get("location") or "",
             "workspace": "",
             "home": "",
             "lastActiveAt": 0,
@@ -22108,8 +22162,8 @@ def _is_local_http_url(url):
         return False
 
 
-def _hermes_profile_api_port(profile):
-    hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+def _hermes_profile_api_port(profile, hermes_cfg=None):
+    hermes_cfg = hermes_cfg if isinstance(hermes_cfg, dict) else (VW_CONFIG.get("hermes", {}) or {})
     base = hermes_cfg.get("apiProfilePortBase") or os.environ.get("VW_HERMES_API_PROFILE_PORT_BASE")
     try:
         base = int(base)
@@ -22119,9 +22173,9 @@ def _hermes_profile_api_port(profile):
     return base + (int(digest[:6], 16) % 1000)
 
 
-def _hermes_profile_api_config(profile):
+def _hermes_profile_api_config(profile, hermes_cfg=None):
     profile = profile or "default"
-    hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+    hermes_cfg = hermes_cfg if isinstance(hermes_cfg, dict) else (VW_CONFIG.get("hermes", {}) or {})
     connections = hermes_cfg.get("connections") if isinstance(hermes_cfg.get("connections"), list) else []
     connection_cfg = next((
         item for item in connections
@@ -22132,37 +22186,100 @@ def _hermes_profile_api_config(profile):
     profile_cfgs = hermes_cfg.get("apiProfiles") if isinstance(hermes_cfg.get("apiProfiles"), dict) else {}
     profile_cfg = profile_cfgs.get(profile) if isinstance(profile_cfgs.get(profile), dict) else {}
     api_key = profile_cfg.get("apiKey") or connection_cfg.get("apiKey") or hermes_cfg.get("apiKey") or ""
-    auto_start_all = hermes_cfg.get("autoStartProfileApis", True) is not False
+    auto_start_all = bool(
+        hermes_cfg.get("localProfilesEnabled", True) is not False
+        and hermes_cfg.get("autoStartProfileApis", True) is not False
+    )
     connection_url = str(connection_cfg.get("apiUrl") or "").strip()
     if profile == "default":
         url = profile_cfg.get("apiUrl") or connection_url or hermes_cfg.get("apiUrl") or "http://127.0.0.1:8642"
+        mode = _endpoint_mode(
+            profile_cfg.get("endpointMode") or connection_cfg.get("endpointMode") or hermes_cfg.get("apiEndpointMode"),
+            url,
+        )
         auto_start = profile_cfg.get("autoStart", hermes_cfg.get("autoStartDefaultApi", auto_start_all)) is not False
         return {
             "url": url,
             "key": api_key,
+            "mode": mode,
             "autoStart": bool(not connection_url and api_key and auto_start and _is_local_http_url(url)),
             "port": _parse_url_port(url, 8642),
         }
-    port = _hermes_profile_api_port(profile)
+    port = _hermes_profile_api_port(profile, hermes_cfg)
     url = profile_cfg.get("apiUrl") or connection_url or f"http://127.0.0.1:{port}"
+    mode = _endpoint_mode(
+        profile_cfg.get("endpointMode") or connection_cfg.get("endpointMode"),
+        url,
+    )
     auto_start = profile_cfg.get("autoStart", auto_start_all) is not False
     return {
         "url": url,
         "key": api_key,
+        "mode": mode,
         "autoStart": bool(not connection_url and api_key and auto_start and _is_local_http_url(url)),
         "port": _parse_url_port(url, port),
     }
 
 
-def _hermes_api_client_for_profile(profile):
+def _hermes_api_probe(url, api_key):
+    client = HermesApiClient(base_url=url, api_key=api_key, timeout_sec=5)
+    health = client.health()
+    if health.get("status") not in {"ok", "healthy"} and health.get("ok") is not True:
+        return {
+            "ok": False,
+            "failureKind": "incompatible",
+            "code": "invalid_health_response",
+            "error": "Endpoint did not return a Hermes health response",
+        }
+    capabilities = client.capabilities()
+    features = capabilities.get("features") if isinstance(capabilities.get("features"), dict) else {}
+    if not (features.get("run_submission") and features.get("run_events_sse")):
+        return {
+            "ok": False,
+            "failureKind": "incompatible",
+            "code": "missing_hermes_run_capabilities",
+            "error": "Endpoint is reachable but does not expose Hermes run submission and SSE events",
+        }
+    return {
+        "ok": True,
+        "model": capabilities.get("model") or capabilities.get("model_name") or "",
+        "provider": capabilities.get("provider") or "Hermes API",
+        "features": features,
+    }
+
+
+def _resolve_hermes_api_endpoint(profile, *, force_probe=False, hermes_cfg=None, allow_auto_start=True):
+    profile = profile or "default"
+    source_cfg = hermes_cfg if isinstance(hermes_cfg, dict) else (VW_CONFIG.get("hermes", {}) or {})
+    cfg = _hermes_profile_api_config(profile, source_cfg)
+    if allow_auto_start and cfg.get("autoStart"):
+        _ensure_hermes_profile_api(profile, cfg)
+    fingerprint = hashlib.sha256(str(cfg.get("key") or "").encode("utf-8")).hexdigest()[:16]
+    resolution = _resolve_network_endpoint(
+        cache_key=f"hermes:{profile}:{cfg.get('mode')}:{cfg.get('url')}:{fingerprint}",
+        transport=_network_transport_with_port(HERMES_API_TRANSPORT, cfg.get("port")),
+        configured_url=cfg.get("url") or "",
+        mode=cfg.get("mode") or "auto",
+        probe=lambda url: _hermes_api_probe(url, cfg.get("key") or ""),
+        force_probe=force_probe,
+    )
+    return resolution, cfg
+
+
+def _hermes_api_client_for_profile(profile, *, endpoint_url="", hermes_cfg=None):
     if HermesApiClient is None:
         raise RuntimeError("Hermes API client module unavailable")
     profile = profile or "default"
-    cfg = _hermes_profile_api_config(profile)
-    if cfg.get("autoStart"):
-        _ensure_hermes_profile_api(profile, cfg)
+    cfg = _hermes_profile_api_config(profile, hermes_cfg)
+    if endpoint_url:
+        resolved_url = endpoint_url
+    else:
+        resolution, cfg = _resolve_hermes_api_endpoint(profile, hermes_cfg=hermes_cfg)
+        if not resolution.get("ok"):
+            raise RuntimeError(resolution.get("error") or "No healthy Hermes API endpoint")
+        resolved_url = (resolution.get("endpoint") or {}).get("url")
     return HermesApiClient(
-        base_url=cfg.get("url"),
+        base_url=resolved_url,
         api_key=cfg.get("key"),
         timeout_sec=min(int((VW_CONFIG.get("hermes") or {}).get("timeoutSec") or 600), 60),
     )
@@ -22320,22 +22437,78 @@ def _build_hermes_delivery_message(agent, agent_key, message, body):
     }
 
 
+def _test_hermes_api_connections(hermes_cfg=None):
+    hermes_cfg = hermes_cfg if isinstance(hermes_cfg, dict) else (VW_CONFIG.get("hermes", {}) or {})
+    connection_ids = []
+    for item in hermes_cfg.get("connections") if isinstance(hermes_cfg.get("connections"), list) else []:
+        if isinstance(item, dict) and item.get("enabled") is not False:
+            connection_id = str(item.get("id") or "default").strip() or "default"
+            if connection_id not in connection_ids:
+                connection_ids.append(connection_id)
+    if hermes_cfg.get("preferApi", True) is not False and "default" not in connection_ids:
+        connection_ids.append("default")
+    results = []
+    for connection_id in connection_ids:
+        resolution, _cfg = _resolve_hermes_api_endpoint(
+            connection_id,
+            force_probe=True,
+            hermes_cfg=hermes_cfg,
+            allow_auto_start=False,
+        )
+        endpoint = resolution.get("endpoint") or {}
+        results.append({
+            "id": connection_id,
+            "ok": bool(resolution.get("ok")),
+            "mode": resolution.get("mode") or "auto",
+            "location": endpoint.get("location") or "",
+            "label": endpoint.get("label") or "",
+            "code": resolution.get("code") or "",
+            "error": resolution.get("error") or "",
+        })
+    healthy = [item for item in results if item.get("ok")]
+    if healthy:
+        labels = ", ".join(f"{item['id']} via {item['label'] or item['location']}" for item in healthy)
+        return {
+            "ok": True,
+            "transport": "api",
+            "message": f"Connected to {len(healthy)} Hermes API endpoint(s): {labels}",
+            "endpointMode": healthy[0].get("mode") or "auto",
+            "endpointLocation": healthy[0].get("location") or "",
+            "connections": results,
+        }
+    first = results[0] if results else {}
+    return {
+        "ok": False,
+        "transport": "api",
+        "code": first.get("code") or "no_healthy_endpoint",
+        "error": first.get("error") or "No Hermes API connections are configured or reachable",
+        "connections": results,
+    }
+
+
 def _handle_hermes_test(body=None):
     body = body if isinstance(body, dict) else {}
+    test_cfg = copy.deepcopy(VW_CONFIG.get("hermes", {}) or {})
+    for key in ("enabled", "localProfilesEnabled", "homePath", "binary", "timeoutSec", "apiEndpointMode", "apiUrl"):
+        if key in body:
+            test_cfg[key] = body.get(key)
+    if body.get("apiKey"):
+        test_cfg["apiKey"] = body.get("apiKey")
     provider = HermesProvider(
-        home_path=os.path.expanduser(body.get("homePath") or HERMES_HOME),
-        binary=os.path.expanduser(body.get("binary") or HERMES_BIN),
-        enabled=True,
-        timeout_sec=int(body.get("timeoutSec") or HERMES_TIMEOUT_SEC),
+        home_path=os.path.expanduser(test_cfg.get("homePath") or HERMES_HOME),
+        binary=os.path.expanduser(test_cfg.get("binary") or HERMES_BIN),
+        enabled=bool(test_cfg.get("enabled", True) and test_cfg.get("localProfilesEnabled", True)),
+        timeout_sec=int(test_cfg.get("timeoutSec") or HERMES_TIMEOUT_SEC),
     ) if HermesProvider else None
     if not provider:
         return {"ok": False, "error": "Hermes provider module unavailable", "agents": []}
     result = provider.test()
+    api_result = _test_hermes_api_connections(test_cfg)
     profile_apis = {}
     for agent in result.get("agents") or []:
         profile = agent.get("profile") or agent.get("providerAgentId") or "default"
         try:
-            api = _hermes_api_client_for_profile(profile)
+            api = _hermes_api_client_for_profile(profile, hermes_cfg=test_cfg)
             caps = api.capabilities()
             features = caps.get("features") if isinstance(caps.get("features"), dict) else {}
             profile_apis[profile] = {
@@ -22350,9 +22523,19 @@ def _handle_hermes_test(body=None):
                 },
             }
         except Exception as exc:
-            cfg = _hermes_profile_api_config(profile)
+            cfg = _hermes_profile_api_config(profile, test_cfg)
             profile_apis[profile] = {"ok": False, "url": cfg.get("url"), "error": str(exc)[:500]}
     result["profileApis"] = profile_apis
+    if api_result.get("ok"):
+        result["ok"] = True
+        result["transport"] = "cli+api" if result.get("agents") else "api"
+        result["message"] = api_result.get("message") or "Hermes API connection passed"
+        result["endpointMode"] = api_result.get("endpointMode") or "auto"
+        result["endpointLocation"] = api_result.get("endpointLocation") or ""
+    elif not result.get("ok"):
+        result["apiError"] = api_result.get("error") or ""
+        if test_cfg.get("localProfilesEnabled", True) is False:
+            result["error"] = api_result.get("error") or result.get("error")
     return result
 
 
@@ -22404,10 +22587,22 @@ def _handle_hermes_run_start(body):
     try:
         started = client.start_run(delivery["deliveryMessage"], session_id=session_id, session_key=session_key)
     except Exception as exc:
-        return {"ok": False, "fallback": True, "error": str(exc), "_status": 502}
+        return {
+            "ok": False,
+            "fallback": False,
+            "code": "run_submission_ambiguous",
+            "error": f"Hermes run submission may have been accepted; automatic fallback was stopped: {exc}",
+            "_status": 502,
+        }
     run_id = started.get("run_id") or started.get("runId") or started.get("id")
     if not run_id:
-        return {"ok": False, "fallback": True, "error": started.get("error") or "Hermes API did not return a run_id", "_status": 502}
+        return {
+            "ok": False,
+            "fallback": False,
+            "code": "run_submission_ambiguous",
+            "error": started.get("error") or "Hermes API did not return a run_id; automatic fallback was stopped",
+            "_status": 502,
+        }
 
     _set_hermes_session_id(profile, session_id)
     _remember_hermes_active_run({
@@ -22421,12 +22616,14 @@ def _handle_hermes_run_start(body):
         "deliveryMessage": delivery["deliveryMessage"],
         "timeoutSec": timeout,
         "startedAt": now_ms,
+        "apiEndpointUrl": client.base_url,
     })
     _set_hermes_presence(agent.get("statusKey") or agent.get("id"), "working", "Hermes native run")
     _publish_hermes_api_progress(profile, agent.get("id") or agent_key, run_id, tools=[], reasoning_parts=[], reply="")
     return {
         "ok": True,
         "providerPath": "api",
+        "endpointLocation": endpoint_location(client.base_url),
         "runId": run_id,
         "sessionId": session_id,
         "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
@@ -22447,7 +22644,7 @@ def _handle_hermes_run_events(handler, run_id):
     original_message = meta.get("message") or ""
     timeout = int(meta.get("timeoutSec") or (VW_CONFIG.get("hermes") or {}).get("timeoutSec") or HERMES_TIMEOUT_SEC)
     try:
-        client = _hermes_api_client_for_profile(profile)
+        client = _hermes_api_client_for_profile(profile, endpoint_url=meta.get("apiEndpointUrl") or "")
     except Exception as exc:
         return handler._send_json({"ok": False, "error": str(exc)}, 502)
 
@@ -22618,7 +22815,7 @@ def _handle_hermes_interrupt(body):
     run_id = meta.get("runId") or run_id
     profile = meta.get("profile") or profile or "default"
     try:
-        client = _hermes_api_client_for_profile(profile)
+        client = _hermes_api_client_for_profile(profile, endpoint_url=meta.get("apiEndpointUrl") or "")
         result = client.stop_run(run_id)
         _set_hermes_presence(meta.get("statusKey") or agent.get("statusKey") or agent_key, "working", "Hermes stopping")
         return {"ok": True, "providerPath": "api", "runId": run_id, "result": result, "message": "Hermes stop requested."}
@@ -22803,6 +23000,154 @@ def _handle_hermes_chat(body):
         "error": result.get("error"),
         "stderr": result.get("stderr", ""),
         "exitCode": result.get("exitCode"),
+    }
+
+
+def _provider_hermes_send(agent, message, **kwargs):
+    """Provider SDK Hermes transport with one endpoint pinned per run."""
+    agent = agent if isinstance(agent, dict) else {}
+    profile = str(agent.get("profile") or agent.get("providerAgentId") or "default")
+    modes = set(agent.get("connectionModes") or [])
+    use_api = bool(agent.get("apiAvailable") or "api" in modes)
+    if not use_api:
+        return _handle_hermes_chat({
+            "agentId": agent.get("id") or agent.get("statusKey") or profile,
+            "message": message,
+            "timeoutSec": kwargs.get("timeout_sec") or kwargs.get("timeoutSec") or HERMES_TIMEOUT_SEC,
+            "sessionId": kwargs.get("session_id") or kwargs.get("sessionId") or "",
+        })
+
+    timeout = int(kwargs.get("timeout_sec") or kwargs.get("timeoutSec") or HERMES_TIMEOUT_SEC)
+    on_progress = kwargs.get("on_progress") or kwargs.get("onProgress")
+    try:
+        client = _hermes_api_client_for_profile(profile)
+    except Exception as exc:
+        if "cli" in modes and agent.get("cliAvailable", True):
+            return _handle_hermes_chat({
+                "agentId": agent.get("id") or agent.get("statusKey") or profile,
+                "message": message,
+                "timeoutSec": timeout,
+                "sessionId": kwargs.get("session_id") or kwargs.get("sessionId") or "",
+            })
+        return {"ok": False, "code": "no_healthy_endpoint", "error": str(exc), "reply": ""}
+
+    session_id = str(kwargs.get("session_id") or kwargs.get("sessionId") or _get_hermes_session_id(profile) or f"vw-hermes-{HermesProvider._safe_suffix(profile) if HermesProvider else profile}")
+    session_key = f"virtual-world:provider-sdk:hermes:{profile}"
+    try:
+        started = client.start_run(message, session_id=session_id, session_key=session_key)
+    except Exception as exc:
+        # The server may have accepted the POST before the connection failed.
+        # Never fall back to the CLI after this point or the task could run twice.
+        return {
+            "ok": False,
+            "code": "run_submission_ambiguous",
+            "error": f"Hermes run submission may have been accepted; automatic transport fallback was stopped: {exc}",
+            "reply": "",
+            "providerPath": "api",
+            "endpointLocation": endpoint_location(client.base_url),
+        }
+    run_id = str(started.get("run_id") or started.get("runId") or started.get("id") or "")
+    if not run_id:
+        return {
+            "ok": False,
+            "code": "run_submission_ambiguous",
+            "error": started.get("error") or "Hermes accepted the request without returning a run id; automatic fallback was stopped",
+            "reply": "",
+            "providerPath": "api",
+            "endpointLocation": endpoint_location(client.base_url),
+        }
+
+    agent_id = agent.get("id") or f"hermes-{profile}"
+    _remember_hermes_active_run({
+        "runId": run_id,
+        "sessionId": session_id,
+        "agentId": agent_id,
+        "agentKey": agent_id,
+        "statusKey": agent.get("statusKey") or agent_id,
+        "profile": profile,
+        "message": message,
+        "timeoutSec": timeout,
+        "startedAt": int(time.time() * 1000),
+        "apiEndpointUrl": client.base_url,
+    })
+    _set_hermes_session_id(profile, session_id)
+    reply = ""
+    reasoning = []
+    tools = []
+    active_tools = {}
+    approval = None
+    error_text = ""
+    terminal = ""
+
+    def progress(status="running"):
+        if callable(on_progress):
+            on_progress({
+                "status": status,
+                "runId": run_id,
+                "sessionId": session_id,
+                "reply": reply,
+                "thinking": "\n\n".join(reasoning),
+                "tools": tools,
+                "approval": approval,
+                "error": error_text,
+                "providerPath": "api",
+                "endpointLocation": endpoint_location(client.base_url),
+            })
+
+    progress()
+    try:
+        for event in client.stream_run_events(run_id, timeout_sec=timeout + 30):
+            event_name = str(event.get("event") or "").lower()
+            if event_name == "message.delta":
+                reply += str(event.get("delta") or "")
+            elif event_name == "reasoning.available" and event.get("text"):
+                reasoning.append(str(event.get("text")))
+            elif event_name == "tool.started":
+                card = _hermes_event_tool_card(event, "running", fallback_id=f"{run_id}:tool:{len(tools) + 1}")
+                active_tools[card["id"]] = card
+                tools.append(card)
+            elif event_name in {"tool.completed", "tool.failed"}:
+                fallback_id = str(event.get("toolCallId") or event.get("tool_call_id") or event.get("id") or "")
+                if not fallback_id:
+                    fallback_id = next((key for key, item in reversed(list(active_tools.items())) if item.get("name") == (event.get("tool") or event.get("name"))), f"{run_id}:tool:{len(tools) + 1}")
+                card = _hermes_event_tool_card(event, "done" if event_name == "tool.completed" else "error", fallback_id=fallback_id)
+                if card["id"] in active_tools:
+                    active_tools[card["id"]].update(card)
+                else:
+                    tools.append(card)
+            elif event_name == "approval.request":
+                approval = _remember_hermes_approval_pending(
+                    _hermes_api_approval_from_event(event, agent_id=agent_id, profile=profile, session_id=session_id, original_message=message),
+                    agent_id=agent_id,
+                    profile=profile,
+                    session_id=session_id,
+                )
+            elif event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
+                terminal = event_name
+                if event.get("output"):
+                    reply = str(event.get("output"))
+                error_text = str(event.get("error") or "")
+                progress("completed" if event_name == "run.completed" else "failed")
+                break
+            progress()
+    except Exception as exc:
+        error_text = str(exc)
+        terminal = "run.failed"
+    finally:
+        _clear_hermes_active_run(run_id)
+
+    ok = terminal == "run.completed"
+    return {
+        "ok": ok,
+        "reply": reply,
+        "error": error_text if not ok else "",
+        "runId": run_id,
+        "sessionId": session_id,
+        "thinking": "\n\n".join(reasoning),
+        "tools": tools,
+        "approval": approval,
+        "providerPath": "api",
+        "endpointLocation": endpoint_location(client.base_url),
     }
 
 
@@ -23165,7 +23510,8 @@ def _handle_hermes_approval_respond(body):
         run_id = str(approval.get("runId"))
         api_choice = "deny" if choice == "deny" else "once"
         try:
-            client = _hermes_api_client_for_profile(profile)
+            run_meta = _get_hermes_active_run(run_id) or {}
+            client = _hermes_api_client_for_profile(profile, endpoint_url=run_meta.get("apiEndpointUrl") or "")
             approved = client.respond_approval(run_id, api_choice)
             history = _load_hermes_history(profile)
             history.append(_approval_result_message({**approval, "agentId": agent.get("id") or agent_key, "message": message}, choice))
@@ -23428,10 +23774,100 @@ def _resolve_session_jsonl_path(session_path, session_id, sessions_dir):
     return candidates[-1] if candidates else None
 
 
-def _read_gateway_config():
-    config_path = os.path.join(WORKSPACE_BASE, "openclaw.json")
-    override_url = (VW_CONFIG.get("openclaw", {}).get("gatewayUrl") or os.environ.get("VW_GATEWAY_URL") or "").strip()
-    override_token = (VW_CONFIG.get("openclaw", {}).get("gatewayToken") or os.environ.get("VW_GATEWAY_TOKEN") or "").strip()
+def _resolve_network_endpoint(*, cache_key, transport, configured_url, mode, probe, force_probe=False):
+    """Resolve one manifest-declared endpoint before any state-changing call."""
+    if PROVIDER_ENDPOINT_RESOLVER is None:
+        return {"ok": False, "code": "endpoint_resolver_unavailable", "error": "Provider endpoint resolver is unavailable"}
+    transport = transport if isinstance(transport, dict) else {}
+    try:
+        return PROVIDER_ENDPOINT_RESOLVER.resolve(
+            cache_key=cache_key,
+            configured_url=configured_url,
+            mode=mode,
+            defaults=transport.get("defaultEndpoints") or [],
+            allowed_schemes=transport.get("schemes") or [],
+            probe=probe,
+            force_probe=force_probe,
+        )
+    except ValueError as exc:
+        return {"ok": False, "code": "invalid_endpoint_configuration", "error": str(exc), "attempts": []}
+
+
+def _network_transport_with_port(transport, port):
+    """Reuse a manifest transport at a profile-specific port."""
+    adjusted = copy.deepcopy(transport if isinstance(transport, dict) else {})
+    try:
+        resolved_port = int(port)
+    except (TypeError, ValueError):
+        return adjusted
+    rows = []
+    for item in adjusted.get("defaultEndpoints") or []:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        parsed = urllib.parse.urlparse(str(row.get("url") or ""))
+        host = parsed.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        row["url"] = urllib.parse.urlunparse(parsed._replace(netloc=f"{host}:{resolved_port}"))
+        rows.append(row)
+    adjusted["defaultEndpoints"] = rows
+    return adjusted
+
+
+def _gateway_probe_result(url, token):
+    result = _run_async_blocking(
+        _gateway_rpc_call_at_async(url, token, "health", {}, timeout=8),
+        timeout=12,
+    )
+    if result.get("ok"):
+        return {"ok": True, "version": result.get("version") or ""}
+    error = str(result.get("error") or "Gateway health check failed")
+    lowered = error.lower()
+    if any(term in lowered for term in ("unauthorized", "authentication", "invalid token", "token mismatch", "forbidden")):
+        return {"ok": False, "failureKind": "authentication", "code": "endpoint_authentication_failed", "error": error}
+    if any(term in lowered for term in ("protocol", "handshake", "unsupported version")):
+        return {"ok": False, "failureKind": "incompatible", "code": "endpoint_protocol_mismatch", "error": error}
+    return {"ok": False, "failureKind": "unreachable", "code": "endpoint_unreachable", "error": error}
+
+
+def _resolve_openclaw_gateway_endpoint(*, force_probe=False, openclaw_cfg=None):
+    openclaw_cfg = openclaw_cfg if isinstance(openclaw_cfg, dict) else (VW_CONFIG.get("openclaw", {}) or {})
+    configured_url, token = _read_gateway_config(openclaw_cfg)
+    mode = _endpoint_mode(openclaw_cfg.get("endpointMode"), configured_url)
+    if not token:
+        return {"ok": False, "code": "gateway_token_missing", "error": "Gateway token is not configured"}, token
+    fingerprint = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+    resolution = _resolve_network_endpoint(
+        cache_key=f"openclaw:gateway:{mode}:{configured_url}:{fingerprint}",
+        transport=OPENCLAW_GATEWAY_TRANSPORT,
+        configured_url=configured_url or "",
+        mode=mode,
+        probe=lambda url: _gateway_probe_result(url, token),
+        force_probe=force_probe,
+    )
+    return resolution, token
+
+
+def _test_openclaw_gateway_config(openclaw_cfg=None):
+    resolution, _token = _resolve_openclaw_gateway_endpoint(force_probe=True, openclaw_cfg=openclaw_cfg)
+    if not resolution.get("ok"):
+        return resolution
+    endpoint = resolution.get("endpoint") or {}
+    return {
+        "ok": True,
+        "transport": "gateway",
+        "endpointMode": resolution.get("mode") or "auto",
+        "endpointLocation": endpoint.get("location") or "",
+        "message": f"Connected to OpenClaw Gateway via {endpoint.get('label') or endpoint.get('location') or 'resolved endpoint'}",
+    }
+
+
+def _read_gateway_config(openclaw_cfg=None):
+    openclaw_cfg = openclaw_cfg if isinstance(openclaw_cfg, dict) else (VW_CONFIG.get("openclaw", {}) or {})
+    config_path = os.path.join(os.path.expanduser(openclaw_cfg.get("homePath") or WORKSPACE_BASE), "openclaw.json")
+    override_url = (openclaw_cfg.get("gatewayUrl") or os.environ.get("VW_GATEWAY_URL") or "").strip()
+    override_token = (openclaw_cfg.get("gatewayToken") or os.environ.get("VW_GATEWAY_TOKEN") or "").strip()
     try:
         with open(config_path, "r") as f:
             cfg = json.load(f)
@@ -23447,7 +23883,8 @@ def _read_gateway_config():
 
 def _gateway_config_key():
     gw_url, gw_token = _read_gateway_config()
-    return gw_url or "", gw_token or ""
+    mode = (VW_CONFIG.get("openclaw", {}) or {}).get("endpointMode") or "auto"
+    return mode, gw_url or "", gw_token or ""
 
 
 def _gateway_info_payload():
@@ -23532,11 +23969,10 @@ def _handle_openclaw_proxy_rpc(body):
 async def _stream_openclaw_gateway_events(send_payload):
     if ws_connect is None:
         raise RuntimeError("Gateway websocket client is unavailable")
-    gw_url, token = _read_gateway_config()
-    if not gw_url:
-        raise RuntimeError("Gateway URL is not configured")
-    if not token:
-        raise RuntimeError("Gateway token is not configured")
+    resolution, token = await asyncio.to_thread(_resolve_openclaw_gateway_endpoint)
+    if not resolution.get("ok"):
+        raise RuntimeError(resolution.get("error") or "OpenClaw Gateway endpoint is unavailable")
+    gw_url = (resolution.get("endpoint") or {}).get("url")
     origin = _gateway_control_origin()
     async with ws_connect(
         gw_url,
@@ -23645,10 +24081,9 @@ def _run_async_blocking(coro, timeout=30):
         return future.result(timeout=timeout)
 
 
-async def _gateway_rpc_call_async(method, params=None, timeout=20, preserve_envelope=False):
+async def _gateway_rpc_call_at_async(gw_url, token, method, params=None, timeout=20, preserve_envelope=False):
     if ws_connect is None:
         return {"ok": False, "error": "Gateway websocket client is unavailable"}
-    gw_url, token = _read_gateway_config()
     if not token:
         return {"ok": False, "error": "Gateway token is not configured"}
     if not gw_url:
@@ -23716,8 +24151,20 @@ async def _gateway_rpc_call_async(method, params=None, timeout=20, preserve_enve
 
 def _gateway_rpc_call(method, params=None, timeout=20, preserve_envelope=False):
     try:
-        return _run_async_blocking(
-            _gateway_rpc_call_async(
+        resolution, token = _resolve_openclaw_gateway_endpoint()
+        if not resolution.get("ok"):
+            return {
+                "ok": False,
+                "code": resolution.get("code") or "gateway_unavailable",
+                "error": resolution.get("error") or "OpenClaw Gateway endpoint is unavailable",
+                "endpointMode": resolution.get("mode") or (VW_CONFIG.get("openclaw", {}) or {}).get("endpointMode") or "auto",
+                "endpointAttempts": resolution.get("attempts") or [],
+            }
+        gw_url = (resolution.get("endpoint") or {}).get("url")
+        outcome = _run_async_blocking(
+            _gateway_rpc_call_at_async(
+                gw_url,
+                token,
                 method,
                 params=params,
                 timeout=timeout,
@@ -23725,6 +24172,11 @@ def _gateway_rpc_call(method, params=None, timeout=20, preserve_envelope=False):
             ),
             timeout=timeout + 10,
         )
+        if isinstance(outcome, dict):
+            outcome.setdefault("transport", "gateway")
+            outcome.setdefault("endpointMode", resolution.get("mode") or "auto")
+            outcome.setdefault("endpointLocation", (resolution.get("endpoint") or {}).get("location") or "")
+        return outcome
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -23874,6 +24326,7 @@ def _public_provider_health(value):
     allowed = {
         "ok", "installed", "enabled", "ready", "authOk", "version",
         "connectionState", "error", "message", "authGuidance", "code",
+        "transport", "endpointMode", "endpointLocation",
     }
     result = {key: _redact_provider_secrets(health.get(key)) for key in allowed if key in health}
     result.setdefault("ok", bool(health.get("ok")))
@@ -23947,6 +24400,7 @@ def _provider_settings_payload(provider_id=""):
             "icon": item.get("icon"),
             "description": item.get("description"),
             "capabilities": item.get("capabilities") or {},
+            "connectionSchema": item.get("connectionSchema") or {},
             "settingsSchema": schema,
             "resourceSchema": item.get("resourceSchema") or [],
             "skillSchema": item.get("skillSchema") or [],
@@ -24034,6 +24488,15 @@ def _validated_provider_settings(provider_id, incoming):
     clean = dict(existing)
     for key, value in incoming.items():
         clean[key] = _validate_provider_setting(fields[key], value, existing.get(key), key)
+    transports = manifest.connection_schema.get("transports") if isinstance(manifest.connection_schema, dict) else []
+    for transport in transports if isinstance(transports, list) else []:
+        if not isinstance(transport, dict) or transport.get("kind") != "network":
+            continue
+        mode_key = str(transport.get("modeKey") or "")
+        url_key = str(transport.get("urlKey") or "")
+        mode = str(clean.get(mode_key) or "auto")
+        if mode == "custom" and not str(clean.get(url_key) or "").strip():
+            raise ValueError(f"{url_key} is required when {mode_key} is custom")
     return manifest, config_key, clean
 
 
@@ -24806,19 +25269,14 @@ def _provider_registry_context():
         "workspaceBase": WORKSPACE_BASE,
         "gatewayWorkspaceBase": _openclaw_gateway_home_path(),
         "statusDir": STATUS_DIR,
-        "gatewayTest": lambda: _gateway_rpc_call("health", {}, timeout=8),
+        "gatewayTest": _test_openclaw_gateway_config,
         "openclawCreate": _provider_openclaw_create,
         "openclawDelete": _provider_openclaw_delete,
         "openclawInterrupt": lambda profile: {"ok": False, "error": f"No server-owned OpenClaw run for {profile}"},
         "openclawSend": _provider_openclaw_send,
         "hermesDiscover": _discover_hermes_agents,
-        "hermesSend": lambda agent, message, **kwargs: _handle_hermes_chat({
-            "agentId": (agent or {}).get("id") or (agent or {}).get("statusKey") or (agent or {}).get("profile"),
-            "message": message,
-            "timeoutSec": int(kwargs.get("timeout_sec") or kwargs.get("timeoutSec") or HERMES_TIMEOUT_SEC),
-            "sessionId": kwargs.get("session_id") or kwargs.get("sessionId") or "",
-            "_onProgress": kwargs.get("on_progress") or kwargs.get("onProgress"),
-        }),
+        "hermesConnectionTest": _test_hermes_api_connections,
+        "hermesSend": _provider_hermes_send,
         "hermesInterrupt": lambda profile: _handle_hermes_interrupt({"agentId": profile}),
         "hermesApprovalPending": lambda profile: _get_hermes_approval_pending(profile),
         "hermesApprovalRespond": lambda profile, approval_id, choice, **kwargs: _handle_hermes_approval_respond({

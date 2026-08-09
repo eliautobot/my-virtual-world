@@ -23,14 +23,17 @@
   "openclaw": {
     "homePath": "",
     "hostHomePath": "",
+    "endpointMode": "auto",
     "gatewayUrl": "",
     "gatewayToken": ""
   },
   "hermes": {
     "enabled": true,
+    "localProfilesEnabled": true,
     "homePath": "",
     "binary": "",
     "timeoutSec": 600,
+    "apiEndpointMode": "auto",
     "apiUrl": "",
     "apiKey": "",
     "preferApi": true,

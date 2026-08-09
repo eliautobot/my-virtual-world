@@ -68,6 +68,7 @@ button,input,select,textarea { font:inherit; }
 .ps-integration-tag.ok { color:var(--ps-green); }.ps-integration-tag.danger { color:var(--ps-red); }
 .ps-integration-paths { min-width:0; overflow-wrap:anywhere; color:var(--ps-muted); font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace; }
 .ps-integration-row .ps-help { min-width:0; grid-column:1/-1; overflow-wrap:anywhere; }
+.ps-transport-row { grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr) minmax(0,1.2fr); }
 @media(max-width:760px){
   .ps-header{align-items:flex-start;flex-wrap:wrap;padding:13px}.ps-heading-copy{width:calc(100% - 80px)}.ps-header-actions{width:100%;margin-left:0}.ps-shell{display:block}.ps-provider-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;overflow-x:visible;border-right:0;border-bottom:1px solid var(--ps-border);position:static;padding:10px}.ps-provider-tab{min-width:0;margin:0;padding:9px 10px}.ps-content{padding:13px}.ps-provider-heading{display:block}.ps-actions{margin:12px 0}.ps-field{grid-template-columns:1fr;gap:6px}.ps-connection-grid,.ps-integration-row{grid-template-columns:1fr}.ps-section{padding:14px}.ps-button{min-height:42px}
 }

@@ -313,6 +313,19 @@ History query parameters:
 
 Hermes API keys, if used, belong in local settings or `.env`, not in docs or commits.
 
+## Provider Connection Schema
+
+`GET /api/providers` and `GET /api/providers/settings` expose each manifest's
+optional `connectionSchema`. It describes network and process transports without
+embedding installation-specific values. Network declarations include the mode
+and URL setting keys, allowed schemes, and topology defaults. Process declarations
+identify the executable setting that must run in the server/container.
+
+For network transports, connection results may include `transport`,
+`endpointMode`, and `endpointLocation`. They do not expose API keys or resolved
+endpoint URLs. Auto resolution selects one authenticated endpoint before a run;
+it never sends the same work to multiple candidates. Custom mode is exclusive.
+
 ## Browser and SMS
 
 These features are locked until licensed and configured.

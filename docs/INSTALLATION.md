@@ -245,6 +245,12 @@ The agent appears connected only after the API health and streaming capability
 checks pass. Saved history remains visible but is labeled offline when the API
 or CLI is unavailable.
 
+In Settings, leave **Hermes API endpoint** on **Auto**. Auto authenticates and
+checks the configured URL, Docker-host, and container-local candidates, then
+selects one healthy endpoint. It never submits a run to multiple endpoints. The
+Windows helper disables local Linux profile discovery for this topology because
+a Windows launcher cannot execute inside the Linux app container.
+
 ## Optional Agent Browser Hosting
 
 The optional Agent Browser service exposes browser viewer and CDP ports. Only enable it on trusted networks.

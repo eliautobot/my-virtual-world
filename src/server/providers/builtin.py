@@ -137,6 +137,87 @@ def _field(key: str, label: str, field_type: str = "text", **extra: Any) -> dict
     return {"key": key, "label": label, "type": field_type, **extra}
 
 
+def _endpoint_mode_field(key: str = "endpointMode", label: str = "Endpoint location") -> dict[str, Any]:
+    return _field(
+        key,
+        label,
+        "select",
+        default="auto",
+        options=[
+            {"value": "auto", "label": "Auto-detect"},
+            {"value": "host", "label": "Docker host"},
+            {"value": "container", "label": "Container local"},
+            {"value": "custom", "label": "Custom URL only"},
+        ],
+        help="Auto-detect probes one endpoint at a time and selects a single authenticated connection before submitting work.",
+    )
+
+
+def _network_transport(
+    transport_id: str,
+    label: str,
+    *,
+    mode_key: str,
+    url_key: str,
+    schemes: list[str],
+    host_url: str,
+    container_url: str,
+) -> dict[str, Any]:
+    return {
+        "id": transport_id,
+        "label": label,
+        "kind": "network",
+        "modeKey": mode_key,
+        "urlKey": url_key,
+        "schemes": schemes,
+        "selection": "single-before-run",
+        "defaultEndpoints": [
+            {"url": host_url, "location": "host", "label": "Docker host"},
+            {"url": container_url, "location": "container", "label": "Container local"},
+        ],
+    }
+
+
+def _process_transport(label: str, *, executable_key: str = "binary", home_key: str = "homePath") -> dict[str, Any]:
+    return {
+        "id": "cli",
+        "label": label,
+        "kind": "process",
+        "executionBoundary": "server-runtime",
+        "executableKey": executable_key,
+        "homeKey": home_key,
+        "hostEndpointFallback": False,
+    }
+
+
+def _connection_schema(*transports: dict[str, Any]) -> dict[str, Any]:
+    return {"version": 1, "transports": [dict(item) for item in transports]}
+
+
+# These transport declarations are the single source of truth shared by the
+# manifest/UI contract and the native server routes. Provider-specific probes
+# remain in their adapters; candidate topology does not.
+OPENCLAW_GATEWAY_TRANSPORT = _network_transport(
+    "gateway",
+    "OpenClaw Gateway",
+    mode_key="endpointMode",
+    url_key="gatewayUrl",
+    schemes=["ws", "wss"],
+    host_url="ws://host.docker.internal:18789",
+    container_url="ws://127.0.0.1:18789",
+)
+
+HERMES_API_TRANSPORT = _network_transport(
+    "api",
+    "Hermes API",
+    mode_key="apiEndpointMode",
+    url_key="apiUrl",
+    schemes=["http", "https"],
+    host_url="http://host.docker.internal:8642",
+    container_url="http://127.0.0.1:8642",
+)
+
+
 def _session_settings() -> dict[str, Any]:
     return {
         "id": "sessions",
@@ -177,7 +258,13 @@ def _cli_settings_schema(
     upper_name = display_name or provider_id.replace("-", " ").title()
     connection_fields = [
         _field("enabled", "Enabled", "boolean", default=True),
-        _field("binary", "Executable", "path", placeholder=provider_id),
+        _field(
+            "binary",
+            "Executable",
+            "path",
+            placeholder=provider_id,
+            help="This native CLI must be executable by the Virtual World server runtime. A host URL cannot substitute for a CLI unless that framework provides a network bridge.",
+        ),
         _field("homePath", f"{upper_name} home/config directory", "path"),
         _field("workspaceRoot", "Managed agent workspace root", "path"),
     ]
@@ -271,6 +358,7 @@ class OpenClawOfficeProvider:
                 "models": True, "projects": True, "meetings": True, "agentToAgent": True,
                 "attachments": True, "tools": True,
             },
+            connection_schema=_connection_schema(OPENCLAW_GATEWAY_TRANSPORT),
             # OpenClaw's Gateway derives the native agent id from the name.
             # Do not present an editable id that the Gateway cannot honor.
             creation_schema=_creation_schema(model_field=True, include_native_id=False),
@@ -283,7 +371,8 @@ class OpenClawOfficeProvider:
                         "label": "Connection",
                         "fields": [
                             _field("homePath", "OpenClaw home", "path", required=True),
-                            _field("gatewayUrl", "Gateway WebSocket URL", "url", required=True, placeholder="ws://127.0.0.1:18789"),
+                            _endpoint_mode_field(),
+                            _field("gatewayUrl", "Preferred or custom Gateway WebSocket URL", "url", required=True, placeholder="ws://host.docker.internal:18789"),
                             _field("gatewayHttp", "Gateway HTTP URL", "url", placeholder="http://127.0.0.1:18789"),
                             _field("gatewayToken", "Gateway token", "secret", secret=True, placeholder="Keep existing token"),
                         ],
@@ -317,7 +406,13 @@ class OpenClawOfficeProvider:
     def test(self) -> dict[str, Any]:
         config = os.path.join(self.home_path, "openclaw.json")
         gateway_test = self.context.get("gatewayTest")
-        result = gateway_test() if callable(gateway_test) else {"ok": os.path.isfile(config)}
+        if callable(gateway_test):
+            try:
+                result = gateway_test((self.context.get("config") or {}).get("openclaw") or {})
+            except TypeError:
+                result = gateway_test()
+        else:
+            result = {"ok": os.path.isfile(config)}
         result = dict(result or {})
         result.setdefault("ok", os.path.isfile(config))
         result.update({"homePath": self.home_path, "configPath": config, "installed": os.path.isfile(config)})
@@ -619,10 +714,25 @@ class HermesOfficeProvider(NativeOfficeProvider):
         return rows
 
     def test(self) -> dict[str, Any]:
+        connection_test = self.context.get("hermesConnectionTest")
+        api_result = connection_test((self.context.get("config") or {}).get("hermes") or {}) if callable(connection_test) else {"ok": False}
         native_result = self.native.test()
         if native_result.get("ok"):
             native_result.setdefault("transport", "cli")
+            if api_result.get("ok"):
+                native_result["transport"] = "cli+api"
+                native_result["message"] = api_result.get("message") or "Hermes CLI and API are connected"
+                native_result["endpointMode"] = api_result.get("endpointMode") or "auto"
+                native_result["endpointLocation"] = api_result.get("endpointLocation") or ""
             return native_result
+        if api_result.get("ok"):
+            return api_result
+        # A connection test may contain unsaved endpoint/authentication values.
+        # Never replace its failure with agents discovered through the global
+        # saved configuration; that would report a wrong key or explicit
+        # container/custom mode as healthy via a different endpoint.
+        if callable(connection_test):
+            return api_result
         rows = self.discover_agents()
         api_agents = [row for row in rows if row.get("apiAvailable")]
         if api_agents:
@@ -632,6 +742,8 @@ class HermesOfficeProvider(NativeOfficeProvider):
                 "agents": api_agents,
                 "message": f"Connected to {len(api_agents)} Hermes API agent(s)",
             }
+        if api_result.get("error"):
+            return api_result
         return native_result
 
     def send_chat_message(self, profile: str, message: str, **kwargs: Any) -> dict[str, Any]:
@@ -679,6 +791,7 @@ def _manifest(
     provider_type: str = "harness",
     metadata: dict[str, Any] | None = None,
     settings_schema: dict[str, Any] | None = None,
+    connection_schema: dict[str, Any] | None = None,
 ) -> ProviderManifest:
     normalized_metadata = dict(metadata or {})
     normalized_metadata.setdefault("configKey", provider_id)
@@ -689,6 +802,7 @@ def _manifest(
         description=description,
         provider_type=provider_type,
         capabilities=capabilities,
+        connection_schema=connection_schema or _connection_schema(_process_transport(f"{name} CLI")),
         creation_schema=_creation_schema(model_field=True, directory_modes=directory_modes),
         settings_schema=settings_schema or {},
         resource_schema=resource_schema,
@@ -706,7 +820,7 @@ def build_provider_registry(context: dict[str, Any]) -> ProviderRegistry:
     hermes_native = HermesProvider(
         home_path=hermes_cfg.get("homePath") or os.environ.get("VW_HERMES_HOME"),
         binary=hermes_cfg.get("binary") or os.environ.get("VW_HERMES_BIN"),
-        enabled=hermes_cfg.get("enabled", True),
+        enabled=bool(hermes_cfg.get("enabled", True) and hermes_cfg.get("localProfilesEnabled", True)),
         timeout_sec=int(hermes_cfg.get("timeoutSec") or 600),
     )
     registry.register(HermesOfficeProvider(
@@ -718,10 +832,10 @@ def build_provider_registry(context: dict[str, Any]) -> ProviderRegistry:
             {
                 "discover": True, "health": True, "chat": True, "streaming": True,
                 "sessions": True, "sessionCreate": True, "sessionDelete": True, "sessionSwitch": True,
-                "interrupt": True, "approvals": True, "agentCreate": bool(hermes_cfg.get("enabled", True)),
-                "agentDelete": bool(hermes_cfg.get("enabled", True)), "profileEdit": bool(hermes_cfg.get("enabled", True)),
-                "resourcesRead": bool(hermes_cfg.get("enabled", True)), "resourcesWrite": bool(hermes_cfg.get("enabled", True)),
-                "skills": bool(hermes_cfg.get("enabled", True)), "models": True, "projects": True, "meetings": True,
+                "interrupt": True, "approvals": True, "agentCreate": bool(hermes_cfg.get("enabled", True) and hermes_cfg.get("localProfilesEnabled", True)),
+                "agentDelete": bool(hermes_cfg.get("enabled", True) and hermes_cfg.get("localProfilesEnabled", True)), "profileEdit": bool(hermes_cfg.get("enabled", True) and hermes_cfg.get("localProfilesEnabled", True)),
+                "resourcesRead": bool(hermes_cfg.get("enabled", True) and hermes_cfg.get("localProfilesEnabled", True)), "resourcesWrite": bool(hermes_cfg.get("enabled", True) and hermes_cfg.get("localProfilesEnabled", True)),
+                "skills": bool(hermes_cfg.get("enabled", True) and hermes_cfg.get("localProfilesEnabled", True)), "models": True, "projects": True, "meetings": True,
                 "agentToAgent": True, "attachments": True, "tools": True,
             },
             [
@@ -738,6 +852,10 @@ def build_provider_registry(context: dict[str, Any]) -> ProviderRegistry:
             skill_schema=_skill_root("skills", "Hermes profile skills"),
             directory_modes=False,
             provider_type="runtime",
+            connection_schema=_connection_schema(
+                HERMES_API_TRANSPORT,
+                _process_transport("Hermes CLI"),
+            ),
             settings_schema={
                 "version": 1,
                 "configKey": "hermes",
@@ -747,6 +865,9 @@ def build_provider_registry(context: dict[str, Any]) -> ProviderRegistry:
                         "label": "Connections",
                         "fields": [
                             _field("enabled", "Enabled", "boolean", default=True),
+                            _endpoint_mode_field("apiEndpointMode", "Default API endpoint location"),
+                            _field("apiUrl", "Preferred or custom default API URL", "url", placeholder="http://host.docker.internal:8642"),
+                            _field("apiKey", "Default API key", "secret", secret=True, placeholder="Keep existing key"),
                             _field(
                                 "connections",
                                 "Native Hermes gateways",
@@ -757,7 +878,8 @@ def build_provider_registry(context: dict[str, Any]) -> ProviderRegistry:
                                 itemFields=[
                                     _field("id", "Connection ID", "slug", required=True),
                                     _field("name", "Display name", "text", required=True),
-                                    _field("apiUrl", "API URL", "url", required=True, placeholder="http://127.0.0.1:8080"),
+                                    _endpoint_mode_field("endpointMode", "Endpoint location"),
+                                    _field("apiUrl", "Preferred or custom API URL", "url", required=True, placeholder="http://host.docker.internal:8642"),
                                     _field("apiKey", "API key", "secret", secret=True, placeholder="Keep existing key"),
                                     _field("emoji", "Emoji", "text", default="⚕️"),
                                     _field("role", "Role", "text", default="Hermes Agent"),

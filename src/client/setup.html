@@ -85,13 +85,19 @@
         <div class="step-title">CONNECTIONS</div>
         <label>OpenClaw Home</label><input id="openclawPath" placeholder="~/.openclaw">
         <div class="field-example">Example: local install <code>~/.openclaw</code>; Docker install <code>/openclaw</code>.</div>
-        <label>Gateway URL</label><input id="gatewayUrl" placeholder="ws://127.0.0.1:18789">
-        <div class="field-example">Example: local install <code>ws://127.0.0.1:18789</code>; Docker install <code>ws://host.docker.internal:18789</code>.</div>
+        <label>Gateway location</label><select id="openclawEndpointMode"><option value="auto">Auto-detect</option><option value="host">Docker host</option><option value="container">Container local</option><option value="custom">Custom URL only</option></select>
+        <label>Preferred or custom Gateway URL</label><input id="gatewayUrl" placeholder="ws://host.docker.internal:18789">
+        <div class="field-example">Auto-detect checks <code>host.docker.internal</code> and <code>127.0.0.1</code>, authenticates, and selects one Gateway.</div>
         <label class="check"><input type="checkbox" id="hermesEnabled" checked> Enable Hermes</label>
+        <label class="check"><input type="checkbox" id="hermesLocalProfiles" checked> Discover Hermes CLI profiles inside the server/container</label>
         <label>Hermes Home</label><input id="hermesHome">
         <div class="field-example">Example: local install <code>~/.hermes</code>; Docker install <code>/home/vw/.hermes</code>.</div>
         <label>Hermes CLI</label><input id="hermesBin">
         <div class="field-example">Example: local install <code>~/.local/bin/hermes</code>; Docker install <code>/home/vw/.local/bin/hermes</code>.</div>
+        <label>Hermes API location</label><select id="hermesApiEndpointMode"><option value="auto">Auto-detect</option><option value="host">Docker host</option><option value="container">Container local</option><option value="custom">Custom URL only</option></select>
+        <label>Preferred or custom Hermes API URL</label><input id="hermesApiUrl" placeholder="http://host.docker.internal:8642">
+        <label>Hermes API key</label><input id="hermesApiKey" type="password" placeholder="Configured value is preserved when blank">
+        <div class="field-example">For Hermes running on Windows while Virtual World runs in Docker, use Auto-detect or Docker host.</div>
         <button id="testHermes">Test Hermes</button><div id="hermesStatus" class="status"></div>
       </section>
       <section class="step" data-pane="3">
@@ -151,10 +157,15 @@
       $('dayNight').checked=world.dayNightCycleEnabled!==false;
       $('weather').checked=world.weatherEnabled!==false;
       $('openclawPath').value=cfg.openclaw?.homePath||'';
+      $('openclawEndpointMode').value=cfg.openclaw?.endpointMode||'auto';
       $('gatewayUrl').value=cfg.openclaw?.gatewayUrl||'';
       $('hermesEnabled').checked=cfg.hermes?.enabled!==false;
+      $('hermesLocalProfiles').checked=cfg.hermes?.localProfilesEnabled!==false;
       $('hermesHome').value=cfg.hermes?.homePath||'';
       $('hermesBin').value=cfg.hermes?.binary||'';
+      $('hermesApiEndpointMode').value=cfg.hermes?.apiEndpointMode||'auto';
+      $('hermesApiUrl').value=cfg.hermes?.apiUrl||'';
+      $('hermesApiKey').placeholder=cfg.hermes?.apiKeyConfigured?'Configured - leave blank to keep':'Hermes API key';
       $('browserEnabled').checked=!trial()&&!!cfg.features?.agentBrowser;
       $('browserCdp').value=cfg.browser?.cdpUrl||'';
       $('browserViewer').value=cfg.browser?.viewerUrl||'';
@@ -180,20 +191,21 @@
             longitude:num('longitude')
           }
         },
-        openclaw:{homePath:val('openclawPath'),gatewayUrl:val('gatewayUrl')},
-        hermes:{enabled:chk('hermesEnabled'),homePath:val('hermesHome'),binary:val('hermesBin')},
+        openclaw:{homePath:val('openclawPath'),endpointMode:val('openclawEndpointMode')||'auto',gatewayUrl:val('gatewayUrl')},
+        hermes:{enabled:chk('hermesEnabled'),localProfilesEnabled:chk('hermesLocalProfiles'),homePath:val('hermesHome'),binary:val('hermesBin'),apiEndpointMode:val('hermesApiEndpointMode')||'auto',apiUrl:val('hermesApiUrl')},
         features:{agentBrowser:!locked&&chk('browserEnabled'),sms:!locked&&chk('smsEnabled'),debugTools:chk('debugTools'),weather:chk('weather')},
         browser:{cdpUrl:val('browserCdp'),viewerUrl:val('browserViewer')},
         sms:{ownerAgentId:val('smsOwner'),twilioAccountSid:val('twilioSid'),fromNumber:val('twilioFrom')},
         debug:{movementDebugOverlays:chk('movementDebug'),objectActionPointDebug:chk('actionPointDebug')}
       };
+      if(val('hermesApiKey'))p.hermes.apiKey=val('hermesApiKey');
       if(!locked&&val('twilioToken'))p.sms.twilioAuthToken=val('twilioToken');
       return p;
     }
     async function save(){ $('saveStatus').textContent='Saving...'; await json('/setup/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())}); $('saveStatus').textContent='Saved. Launching...'; setTimeout(()=>location.href='/',700); }
     document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>show(Number(b.dataset.step))); $('next').onclick=()=>show(Math.min(6,step+1)); $('back').onclick=()=>show(Math.max(0,step-1)); $('trial').onclick=()=>show(1); $('finish').onclick=()=>save().catch(e=>$('saveStatus').textContent=e.message);
     $('activate').onclick=async()=>{ try{ const r=await json('/api/license/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:val('licenseKey')})}); $('licenseStatus').textContent=r.ok?`${r.tierName} activated.`:r.error; await load(); }catch(e){ $('licenseStatus').textContent=e.message; } };
-    $('testHermes').onclick=async()=>{ const r=await json('/api/hermes/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({homePath:val('hermesHome'),binary:val('hermesBin')})}); $('hermesStatus').textContent=r.ok?`Connected: ${(r.agents||[]).length} profiles.`:(r.error||'Unavailable'); };
+    $('testHermes').onclick=async()=>{ const r=await json('/api/hermes/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({homePath:val('hermesHome'),binary:val('hermesBin'),localProfilesEnabled:chk('hermesLocalProfiles'),apiEndpointMode:val('hermesApiEndpointMode')||'auto',apiUrl:val('hermesApiUrl'),apiKey:val('hermesApiKey')})}); $('hermesStatus').textContent=r.ok?(r.message||`Connected: ${(r.agents||[]).length} profiles.`):(r.error||'Unavailable'); };
     $('testBrowser').onclick=async()=>{ if(trial()){ $('browserStatus').textContent='Locked until activation.'; return; } await json('/setup/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())}); const r=await json('/browser-status'); $('browserStatus').textContent=r.locked?'Locked until activation.':r.cdpAvailable?'CDP connected.':'CDP not reachable.'; };
     $('testSms').onclick=async()=>{ if(trial()){ $('smsStatus').textContent='Locked until activation.'; return; } await json('/setup/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())}); const r=await json('/sms-status'); $('smsStatus').textContent=r.locked?'Locked until activation.':r.hasCredentials?'Credentials configured.':'Missing credentials.'; };
     load().catch(e=>$('licenseStatus').textContent=e.message);

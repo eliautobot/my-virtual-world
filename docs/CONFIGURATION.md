@@ -25,19 +25,23 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_DATA_DIR` | `/data` | Persistent data directory inside Docker. |
 | `VW_OPENCLAW_PATH` | `/openclaw` | Mounted OpenClaw home path. |
 | `VW_OPENCLAW_HOST_PATH` | host `~/.openclaw` | Actual host OpenClaw home. Use an absolute drive-letter path on Windows; the setup helper writes it automatically. |
+| `VW_GATEWAY_ENDPOINT_MODE` | `auto` | `auto`, `host`, `container`, or `custom` endpoint selection for the OpenClaw Gateway. |
 | `VW_GATEWAY_URL` | `ws://host.docker.internal:18789` | OpenClaw gateway WebSocket URL. |
 | `VW_GATEWAY_TOKEN` | empty | Optional gateway token. |
 | `VW_OPENCLAW_BROWSER_TRANSPORT` | `proxy` | `proxy` keeps the Gateway token server-side and carries browser chat over port 8590. `direct` is a legacy opt-in. |
 | `VW_HERMES_ENABLED` | `true` | Enables Hermes discovery and chat relay. |
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker. |
 | `VW_HERMES_BIN` | `/home/vw/.local/bin/hermes` | Hermes CLI path inside Docker. |
+| `VW_HERMES_LOCAL_PROFILES_ENABLED` | `true` | Allow discovery and execution of Linux Hermes profiles/CLI inside the app server or container. Disable this when Hermes exists only as a Windows host API. |
 | `VW_HERMES_TIMEOUT_SEC` | `600` | Hermes call timeout. |
-| `VW_HERMES_API_URL` | `http://127.0.0.1:8642` | Hermes native API server URL for the default profile or a user-managed API. |
+| `VW_HERMES_API_ENDPOINT_MODE` | `auto` | `auto`, `host`, `container`, or `custom` endpoint selection for the Hermes API. |
+| `VW_HERMES_API_URL` | `http://127.0.0.1:8642` | Preferred Hermes API URL for the default profile or a user-managed API. Auto can resolve the equivalent Docker-host target. |
 | `VW_HERMES_API_KEY` | empty | Bearer token sent server-side to Hermes. Required for auto-started local API servers. |
 | `VW_HERMES_PREFER_API` | `true` | Prefer Hermes native `POST /v1/runs` plus SSE events over CLI fallback. |
 | `VW_HERMES_AUTO_START_PROFILE_APIS` | `true` | Allow Virtual World to start profile-scoped local Hermes API servers. Only localhost URLs and configured API keys are eligible. |
 | `VW_HERMES_AUTO_START_DEFAULT_API` | `true` | Allow auto-start for the default Hermes profile. |
 | `VW_HERMES_API_PROFILE_PORT_BASE` | `8643` | Base port used to derive profile-specific local API ports. |
+| `VW_PROVIDER_ENDPOINT_CACHE_TTL_SEC` | `30` | Seconds to prioritize a recently healthy endpoint. Health and authentication are still rechecked before selection. Use `0` to disable ordering cache. |
 | `VW_CODEX_ENABLED` | `true` | Enables Codex CLI discovery and chat relay. |
 | `VW_CODEX_HOST_HOME` | host `~/.codex` | Host path mounted as `VW_CODEX_HOME`; set explicitly on Windows or disable native Codex. |
 | `VW_CODEX_HOME` | `/home/vw/.codex` | Codex home path inside Docker. |
@@ -130,6 +134,34 @@ Use these defaults when running directly on your machine without Docker:
 | Hermes CLI | `~/.local/bin/hermes` |
 
 If OpenClaw or Hermes do not appear connected, confirm the host tools are running first, then restart the container after changing `.env` or Docker volume mounts.
+
+### Network Endpoint Resolution
+
+The Provider SDK declares transport topology in each provider manifest. Network
+transports support four modes:
+
+- `Auto` checks the configured/preferred URL, Docker host, and container-local
+  candidates using the provider's authenticated, read-only health protocol.
+- `Docker host` uses `host.docker.internal` only.
+- `Container local` uses `127.0.0.1` only.
+- `Custom` uses the saved URL exclusively and never rewrites or bypasses it.
+
+Resolution selects one endpoint before submitting work; it does not broadcast a
+request to every candidate. Unreachable candidates may fall through in Auto.
+Authentication, authorization, incompatible protocol, or rejected health checks
+stop resolution so a bad credential or wrong service is not silently bypassed.
+Once a run submission may have reached a provider, Virtual World does not retry
+that run through another endpoint or a CLI because doing so could execute it
+twice. The selected endpoint is pinned for streaming, approvals, interruption,
+and completion.
+
+OpenClaw and Hermes declare network transports. Hermes also declares its local
+CLI process transport. Codex, Claude Code, OpenCode, and Antigravity currently
+declare process transports only; each executable must be Linux-runnable inside
+the server/container. `host.docker.internal` routes network traffic and cannot
+execute a Windows `.exe`, `.cmd`, or PowerShell launcher. Those frameworks can
+use this resolver when a provider extension supplies a genuine HTTP/WebSocket
+bridge and declares it in `connectionSchema`.
 
 For Docker Desktop on Windows, run
 `scripts/configure-docker-windows.ps1`. It supplies a real Windows bind source
