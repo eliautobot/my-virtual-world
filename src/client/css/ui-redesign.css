@@ -462,9 +462,89 @@ body.vw-demo-locked .feature-locked-control {
 .settings-modal-content {
     width: min(940px, 94vw) !important;
     max-height: min(820px, 90vh) !important;
+    position: relative;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    box-sizing: border-box;
+}
+.settings-window-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+.modal-window-control {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: 700 22px/1 ui-sans-serif, system-ui, sans-serif;
+    cursor: pointer;
+}
+.modal-window-control:hover,
+.modal-window-control:focus-visible {
+    background: rgba(255,255,255,.08);
+    color: var(--accent-gold);
+    outline: none;
+}
+.settings-modal-content.settings-window-user-sized {
+    position: fixed !important;
+    left: var(--settings-window-left) !important;
+    top: var(--settings-window-top) !important;
+    bottom: auto !important;
+    width: var(--settings-window-width) !important;
+    height: var(--settings-window-height) !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+}
+.settings-modal-content.settings-window-maximized {
+    position: fixed !important;
+    inset: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left)) !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    border-radius: 12px !important;
+}
+.settings-resize-handle {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    z-index: 8;
+    width: 22px;
+    height: 22px;
+    cursor: nwse-resize;
+    touch-action: none;
+}
+.settings-resize-handle::before,
+.settings-resize-handle::after {
+    content: '';
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    border-right: 2px solid rgba(255,214,0,.72);
+    border-bottom: 2px solid rgba(255,214,0,.72);
+    border-radius: 1px;
+}
+.settings-resize-handle::before {
+    width: 12px;
+    height: 12px;
+}
+.settings-resize-handle::after {
+    width: 6px;
+    height: 6px;
+}
+.settings-modal-content.settings-window-maximized .settings-resize-handle {
+    display: none;
 }
 .settings-tabbar {
     display: flex;

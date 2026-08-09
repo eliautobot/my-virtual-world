@@ -10,7 +10,7 @@
     <link rel="icon" href="favicon.png" type="image/png">
     <title>My Virtual World</title>
     <link rel="stylesheet" href="css/style.css?v=20260808-chat-order-r1">
-    <link rel="stylesheet" href="css/ui-redesign.css?v=20260809-settings-layout-r1">
+    <link rel="stylesheet" href="css/ui-redesign.css?v=20260809-settings-window-r2">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
@@ -497,7 +497,10 @@
         <div class="modal-content settings-modal-content">
             <div class="modal-header">
                 <h2>⚙️ Settings</h2>
-                <button class="modal-close" onclick="closeSettingsModal()">✕</button>
+                <div class="settings-window-controls">
+                    <button id="settingsMaximize" class="modal-window-control" type="button" aria-label="Maximize Settings" aria-pressed="false" title="Maximize Settings">□</button>
+                    <button class="modal-close" type="button" aria-label="Close Settings" title="Close Settings" onclick="closeSettingsModal()">✕</button>
+                </div>
             </div>
             <div class="settings-tabbar" role="tablist">
                 <button class="settings-tab active" data-settings-tab="license">License</button>
@@ -822,6 +825,7 @@
                 <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
                 <button class="btn-secondary" onclick="closeSettingsModal()">Cancel</button>
             </div>
+            <div id="settingsResizeHandle" class="settings-resize-handle" role="separator" aria-label="Resize Settings window" aria-orientation="horizontal" title="Drag to resize Settings"></div>
         </div>
     </div>
 
@@ -1064,6 +1068,6 @@
     <script src="js/chat-markdown.js?v=20260727-chat-markdown-r1"></script>
     <script src="js/chat-events.js?v=20260809-commentary-runs-r1"></script>
     <script src="js/chat.js?v=20260809-commentary-runs-r1"></script>
-    <script src="js/settings.js?v=20260808-tool-call-display-r1"></script>
+    <script src="js/settings.js?v=20260809-settings-window-r2"></script>
 </body>
 </html>

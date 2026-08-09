@@ -2188,6 +2188,46 @@ export function getSinkWashPoseTargets(workPhase = 0) {
   });
 }
 
+const DESK_POSE_ACTIVITY_KINDS = Object.freeze(new Set([
+  'live-status-work-desk',
+  'live-status-idle-desk',
+  'desk-return',
+]));
+
+/**
+ * Desk poses are allowed only while the agent is still physically docked to
+ * the desk. _activeWorkSpot intentionally survives some route hand-offs, so
+ * proximity to that remembered spot alone must never reseat an agent after a
+ * dismount or while another object interaction owns the pose.
+ */
+export function isAgentDeskSeatedForAnimation(agent, { dockRadius = 10 } = {}) {
+  if (!agent || agent._atDesk !== true) return false;
+  if (agent._wanderTarget || agent._isReturningToDesk) return false;
+
+  const activity = agent._idleActivity && typeof agent._idleActivity === 'object'
+    ? agent._idleActivity
+    : null;
+  const activityKind = String(activity?.kind || '').trim().toLowerCase();
+  const deskCompatibleActivity = !activityKind ||
+    DESK_POSE_ACTIVITY_KINDS.has(activityKind) ||
+    /^(coffee|water|vending|microwave|fridge|stove-oven)-desk-/.test(activityKind);
+  if (!deskCompatibleActivity) return false;
+
+  const schedulePhase = String(agent._schedPhase || '').trim().toLowerCase();
+  if (/(?:stand-up|stand-down|dismount|exit|complete)$/.test(schedulePhase)) return false;
+
+  const workSpot = agent._activeWorkSpot || null;
+  if (workSpot && workSpot.kind !== 'legacy-grid' &&
+      Number.isFinite(Number(workSpot.apiX)) && Number.isFinite(Number(workSpot.apiZ))) {
+    const distance = Math.hypot(
+      Number(agent.x || 0) - Number(workSpot.apiX),
+      Number(agent.y || 0) - Number(workSpot.apiZ),
+    );
+    return distance <= Math.max(1, Number(dockRadius) || 10);
+  }
+  return true;
+}
+
 export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const g = agent._group3d;
   if (!g) return;
@@ -2360,15 +2400,7 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
   const isDreaming = isBedResting && bedActivityKind === 'bed-dream';
   const isWaking = agent._schedPhase === 'wake-stand';
   const isSleeping = (agent._schedPhase === 'sleep') || isBedResting;
-  const workSpot = agent._activeWorkSpot || null;
-  const atRealWorkSpot = !!(
-    workSpot &&
-    workSpot.kind !== 'legacy-grid' &&
-    Number.isFinite(workSpot.apiX) &&
-    Number.isFinite(workSpot.apiZ) &&
-    Math.hypot((agent.x || 0) - workSpot.apiX, (agent.y || 0) - workSpot.apiZ) <= 24
-  );
-  const isDeskSeated = !!(agent._atDesk || atRealWorkSpot);
+  const isDeskSeated = isAgentDeskSeatedForAnimation(agent);
   const isWorking = isDeskSeated && status === 'working';
   const isDeskIdleSeated = isDeskSeated && !isWorking;
   const isTalking = isSocializing;

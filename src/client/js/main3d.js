@@ -11,7 +11,7 @@ import {
   createAgentCharacter, updateAgentAnimation, getAgentAppearance, getSinkWashPoseTargets,
   isAuthoritativeSinkAnimationState, APPEARANCE_CATALOG, resolveConsumableSurfaceAssetPlacement,
   removePingPongRacketVisual,
-} from './agent-characters.js?v=20260804-pingpong-blue-approach-r24';
+} from './agent-characters.js?v=20260809-desk-pose-r1';
 import {
   clearPingPongEquipmentState,
   hasPingPongEquipmentState,

@@ -8,7 +8,10 @@
   let liveModeWarningResolver = null;
   let liveModeWarningPreviouslyFocused = null;
   let activeConnectionMethod = 'native';
+  let settingsResizeState = null;
+  let settingsRestoreState = null;
   const liveModeAgentBusy = new Set();
+  const SETTINGS_WINDOW_BOUNDS_KEY = 'vw_settings_window_bounds_v1';
 
   const $ = (id) => document.getElementById(id);
   const setText = (id, text) => { const el = $(id); if (el) el.textContent = text; };
@@ -128,6 +131,169 @@
   }
 
   window.openProviderSdkSettings = openProviderSdkSettings;
+
+  function settingsWindowLimits() {
+    const margin = window.innerWidth <= 720 ? 4 : 12;
+    const maxWidth = Math.max(280, window.innerWidth - margin * 2);
+    const maxHeight = Math.max(320, window.innerHeight - margin * 2);
+    return {
+      margin,
+      minWidth: Math.min(560, maxWidth),
+      minHeight: Math.min(420, maxHeight),
+      maxWidth,
+      maxHeight,
+    };
+  }
+
+  function clampSettingsWindowBounds(bounds = {}) {
+    const limits = settingsWindowLimits();
+    const width = Math.min(limits.maxWidth, Math.max(limits.minWidth, Number(bounds.width) || 940));
+    const height = Math.min(limits.maxHeight, Math.max(limits.minHeight, Number(bounds.height) || 720));
+    const left = Math.min(
+      window.innerWidth - limits.margin - width,
+      Math.max(limits.margin, Number(bounds.left) || (window.innerWidth - width) / 2)
+    );
+    const top = Math.min(
+      window.innerHeight - limits.margin - height,
+      Math.max(limits.margin, Number(bounds.top) || (window.innerHeight - height) / 2)
+    );
+    return { left, top, width, height };
+  }
+
+  function readStoredSettingsWindowBounds() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(SETTINGS_WINDOW_BOUNDS_KEY) || 'null');
+      return parsed && typeof parsed === 'object' ? clampSettingsWindowBounds(parsed) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function applySettingsWindowBounds(bounds, { persist = false } = {}) {
+    const content = document.querySelector('#settingsModal .settings-modal-content');
+    if (!content || !bounds) return null;
+    const next = clampSettingsWindowBounds(bounds);
+    content.classList.add('settings-window-user-sized');
+    content.style.setProperty('--settings-window-left', `${Math.round(next.left)}px`);
+    content.style.setProperty('--settings-window-top', `${Math.round(next.top)}px`);
+    content.style.setProperty('--settings-window-width', `${Math.round(next.width)}px`);
+    content.style.setProperty('--settings-window-height', `${Math.round(next.height)}px`);
+    if (persist) {
+      try { localStorage.setItem(SETTINGS_WINDOW_BOUNDS_KEY, JSON.stringify(next)); } catch { /* optional */ }
+    }
+    return next;
+  }
+
+  function clearSettingsWindowBounds() {
+    const content = document.querySelector('#settingsModal .settings-modal-content');
+    if (!content) return;
+    content.classList.remove('settings-window-user-sized');
+    ['--settings-window-left', '--settings-window-top', '--settings-window-width', '--settings-window-height']
+      .forEach(name => content.style.removeProperty(name));
+  }
+
+  function updateSettingsMaximizeButton(maximized) {
+    const button = $('settingsMaximize');
+    if (!button) return;
+    button.textContent = maximized ? '❐' : '□';
+    button.setAttribute('aria-pressed', maximized ? 'true' : 'false');
+    button.setAttribute('aria-label', maximized ? 'Restore Settings window' : 'Maximize Settings');
+    button.title = maximized ? 'Restore Settings window' : 'Maximize Settings';
+  }
+
+  function toggleSettingsWindowMaximized(force) {
+    const content = document.querySelector('#settingsModal .settings-modal-content');
+    if (!content) return false;
+    const shouldMaximize = typeof force === 'boolean'
+      ? force
+      : !content.classList.contains('settings-window-maximized');
+    if (shouldMaximize) {
+      const rect = content.getBoundingClientRect();
+      settingsRestoreState = {
+        userSized: content.classList.contains('settings-window-user-sized'),
+        bounds: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      };
+      content.classList.add('settings-window-maximized');
+    } else {
+      content.classList.remove('settings-window-maximized');
+      if (settingsRestoreState?.userSized) applySettingsWindowBounds(settingsRestoreState.bounds);
+      else clearSettingsWindowBounds();
+      settingsRestoreState = null;
+    }
+    updateSettingsMaximizeButton(shouldMaximize);
+    return shouldMaximize;
+  }
+
+  function beginSettingsWindowResize(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const content = document.querySelector('#settingsModal .settings-modal-content');
+    if (!content || content.classList.contains('settings-window-maximized')) return;
+    const rect = content.getBoundingClientRect();
+    settingsResizeState = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      bounds: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+    };
+    applySettingsWindowBounds(settingsResizeState.bounds);
+    try { event.currentTarget?.setPointerCapture?.(event.pointerId); } catch { /* pointer may already be released */ }
+    event.preventDefault();
+  }
+
+  function resizeSettingsWindow(event) {
+    if (!settingsResizeState || (event.pointerId !== undefined && event.pointerId !== settingsResizeState.pointerId)) return;
+    applySettingsWindowBounds({
+      ...settingsResizeState.bounds,
+      width: settingsResizeState.bounds.width + event.clientX - settingsResizeState.startX,
+      height: settingsResizeState.bounds.height + event.clientY - settingsResizeState.startY,
+    });
+    event.preventDefault();
+  }
+
+  function endSettingsWindowResize(event) {
+    if (!settingsResizeState || (event?.pointerId !== undefined && event.pointerId !== settingsResizeState.pointerId)) return;
+    const handle = $('settingsResizeHandle');
+    try {
+      if (handle?.hasPointerCapture?.(settingsResizeState.pointerId)) {
+        handle.releasePointerCapture(settingsResizeState.pointerId);
+      }
+    } catch { /* pointer capture cleanup is best-effort */ }
+    const content = document.querySelector('#settingsModal .settings-modal-content');
+    const rect = content?.getBoundingClientRect();
+    if (rect) applySettingsWindowBounds({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { persist: true });
+    settingsResizeState = null;
+  }
+
+  function constrainSettingsWindowToViewport() {
+    const content = document.querySelector('#settingsModal .settings-modal-content');
+    if (!content || content.classList.contains('settings-window-maximized') || !content.classList.contains('settings-window-user-sized')) return;
+    const rect = content.getBoundingClientRect();
+    applySettingsWindowBounds({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+  }
+
+  function bindSettingsWindowControls() {
+    const modal = $('settingsModal');
+    const content = modal?.querySelector('.settings-modal-content');
+    const handle = $('settingsResizeHandle');
+    $('settingsMaximize')?.addEventListener('click', () => toggleSettingsWindowMaximized());
+    handle?.addEventListener('pointerdown', beginSettingsWindowResize);
+    window.addEventListener('pointermove', resizeSettingsWindow, { passive: false });
+    window.addEventListener('pointerup', endSettingsWindowResize);
+    window.addEventListener('pointercancel', endSettingsWindowResize);
+    window.addEventListener('resize', constrainSettingsWindowToViewport);
+    content?.querySelector('.modal-header')?.addEventListener('dblclick', event => {
+      if (event.target.closest('button')) return;
+      toggleSettingsWindowMaximized();
+    });
+    const stored = readStoredSettingsWindowBounds();
+    if (stored) applySettingsWindowBounds(stored);
+    updateSettingsMaximizeButton(content?.classList.contains('settings-window-maximized') === true);
+    if (modal) {
+      new MutationObserver(() => {
+        if (modal.style.display !== 'none') requestAnimationFrame(constrainSettingsWindowToViewport);
+      }).observe(modal, { attributes: true, attributeFilter: ['style'] });
+    }
+  }
 
   function updateLicenseUi(config) {
     const lic = config?.license || {};
@@ -1146,6 +1312,7 @@
   }
 
   function bind() {
+    bindSettingsWindowControls();
     document.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.settingsTab)));
     document.querySelectorAll('[data-settings-connection-tab]').forEach(button => {
       button.addEventListener('click', () => switchConnectionMethod(button.dataset.settingsConnectionTab));
