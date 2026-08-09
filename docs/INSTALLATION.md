@@ -57,7 +57,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\configure-docker-windows.ps1
 The Windows helper validates `%USERPROFILE%\.openclaw`, writes the real
 drive-letter path to `.env`, keeps OpenClaw Gateway port `18789` private, and
 disables Linux-only CLI mounts that cannot execute in a Linux container. It
-finishes by validating the Compose configuration without starting anything.
+finishes by inspecting the fully rendered Compose model and rejecting relative
+container bind targets before Docker attempts to create anything.
 
 If the browser will open the world from another device, pass a browser-reachable
 realtime URL:

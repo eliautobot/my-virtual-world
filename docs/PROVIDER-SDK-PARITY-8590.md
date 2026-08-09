@@ -1,6 +1,6 @@
 # Universal Provider SDK parity checklist (8590)
 
-Reference: My Virtual Office v0.7.1/current on port 8090. Base architecture: My Virtual World v1.0.44. Current release target: My Virtual World v1.0.48 on port 8590.
+Reference: My Virtual Office v0.7.1/current on port 8090. Base architecture: My Virtual World v1.0.44. Current release target: My Virtual World v1.0.49 on port 8590.
 
 The target is behavioral parity adapted to My Virtual World's Three.js world, Agent Character Builder, full chat window, yellow in-world bubble, licensing, and persistent `/data` architecture. My Virtual Office branding, office-only layout, account values, and provider credentials are not copied.
 

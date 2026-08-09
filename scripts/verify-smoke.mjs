@@ -419,6 +419,15 @@ assert(dockerfile.includes('VW_LICENSE_PRODUCT_IDS=1140366'), 'Dockerfile should
 const dockerCompose = read('docker-compose.yml');
 const envExample = read('.env.example');
 const windowsDockerSetup = read('scripts/configure-docker-windows.ps1');
+const envExampleValues = new Map(
+  envExample.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && line.includes('='))
+    .map((line) => {
+      const separator = line.indexOf('=');
+      return [line.slice(0, separator), line.slice(separator + 1)];
+    }),
+);
 assert(!/(^|[^A-Za-z0-9_])\/home\/(?!vw\b|kasm-user\b)[A-Za-z0-9._-]+/i.test(dockerCompose), 'docker-compose.yml must not contain host home paths');
 assert(!/\b100\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(dockerCompose), 'docker-compose.yml must not contain private tailnet addresses');
 assert(dockerCompose.includes('${VW_HOST_PORT:-8590}:${VW_PORT:-8590}'), 'docker-compose.yml should support a configurable Docker host port');
@@ -427,8 +436,35 @@ assert(dockerCompose.includes('${VW_OPENCLAW_HOST_PATH:-~/.openclaw}:/openclaw')
 assert(dockerCompose.includes('VW_OPENCLAW_BROWSER_TRANSPORT=${VW_OPENCLAW_BROWSER_TRANSPORT:-proxy}'), 'docker-compose.yml should default OpenClaw browser chat to the server proxy');
 assert(dockerCompose.includes('${VW_CODEX_HOST_HOME:-~/.codex}:${VW_CODEX_HOME:-/home/vw/.codex}'), 'docker-compose.yml should support an explicit cross-platform Codex home mount');
 assert(envExample.includes('VW_OPENCLAW_BROWSER_TRANSPORT=proxy'), '.env.example should keep Gateway credentials server-side by default');
-for (const token of ['OpenClawHome', 'VW_OPENCLAW_HOST_PATH', 'host.docker.internal:18789', 'VW_OPENCLAW_BROWSER_TRANSPORT', '.docker-disabled', 'docker compose config --quiet']) {
+assert(envExample.includes('VW_CLAUDE_CODE_BIN=/home/vw/.local/bin/claude'), '.env.example should use an absolute Linux Claude bind target');
+const appVolumesBlock = dockerCompose.split('    volumes:', 2)[1]?.split('    environment:', 1)[0] || '';
+const configurableBindTargets = [...appVolumesBlock.matchAll(/\$\{[A-Z0-9_]+:-[^}]+\}:\$\{([A-Z0-9_]+):-([^}]+)\}(?::ro)?/g)];
+assert(configurableBindTargets.length >= 8, 'docker-compose.yml should expose the expected configurable provider bind targets');
+for (const [, key, fallback] of configurableBindTargets) {
+  const renderedTarget = envExampleValues.get(key) || fallback;
+  assert(renderedTarget.startsWith('/'), `.env.example makes Docker bind target ${key} relative: ${renderedTarget}`);
+}
+for (const token of ['OpenClawHome', 'VW_OPENCLAW_HOST_PATH', 'host.docker.internal:18789', 'VW_OPENCLAW_BROWSER_TRANSPORT', '.docker-disabled', 'docker compose config --quiet', 'docker compose config --format json', "Target -notmatch '^/'"]) {
   assert(windowsDockerSetup.includes(token), `Windows Docker setup missing token: ${token}`);
+}
+for (const [key, value] of Object.entries({
+  VW_HERMES_HOME: '/home/vw/.hermes',
+  VW_HERMES_BIN: '/home/vw/.local/bin/hermes',
+  VW_HERMES_CONTAINER_UV: '/home/vw/.local/share/uv',
+  VW_CODEX_HOME: '/home/vw/.codex',
+  VW_CODEX_BIN: '/home/vw/.codex/packages/standalone/current/bin/codex',
+  VW_CLAUDE_CODE_HOME: '/home/vw/.claude',
+  VW_CLAUDE_CODE_BIN: '/home/vw/.local/bin/claude',
+  VW_OPENCODE_HOME: '/home/vw/.config/opencode',
+  VW_OPENCODE_DATA: '/home/vw/.local/share/opencode',
+  VW_OPENCODE_BIN: '/home/vw/.local/bin/opencode',
+  VW_ANTIGRAVITY_HOME: '/home/vw/.gemini',
+  VW_ANTIGRAVITY_BIN: '/home/vw/.local/bin/agy',
+})) {
+  assert(
+    windowsDockerSetup.includes(`Set-LinuxContainerPath "${key}" "${value}"`),
+    `Windows Docker setup should force absolute container path ${key}`,
+  );
 }
 assert(dockerCompose.includes('virtual-world-realtime:'), 'docker-compose.yml should start the realtime sidecar by default');
 assert(dockerCompose.includes('target: realtime'), 'docker-compose.yml realtime service should build the Docker realtime target');

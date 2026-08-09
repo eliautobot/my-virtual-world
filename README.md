@@ -166,7 +166,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\configure-docker-windows.ps1
 
 This maps `%USERPROFILE%\.openclaw` to `/openclaw`, enables the secure
 same-origin OpenClaw chat proxy, disables invalid Linux CLI mounts, and validates
-Compose. A Windows-hosted Hermes API can be enabled with
+the fully rendered Compose bind targets before startup. A Windows-hosted Hermes
+API can be enabled with
 `-HermesApiUrl http://host.docker.internal:8642`; a Windows Hermes executable
 cannot run inside the Linux app container. See
 [docs/INSTALLATION.md](docs/INSTALLATION.md) for remote-browser and Hermes
