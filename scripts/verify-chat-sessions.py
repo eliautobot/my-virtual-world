@@ -236,8 +236,10 @@ def main():
         # Seed a long trajectory/rollout pair to verify run->thread recovery,
         # while ensuring private reasoning and final_answer records stay out.
         commentary_run_id = "world-commentary-run"
+        commentary_run_id_2 = "world-commentary-run-2"
         commentary_thread_id = "019fd7c8-15ec-7852-a0a4-a0188edb277d"
         commentary_trajectory = [
+            json.dumps({"type": "session.started", "ts": "2026-08-08T15:54:02.000Z", "runId": commentary_run_id, "data": {"threadId": commentary_thread_id}}),
             json.dumps({"type": "context.compiled", "ts": "2026-08-08T15:54:02.149Z", "runId": commentary_run_id, "data": {"threadId": commentary_thread_id}}),
         ]
         commentary_trajectory.extend(
@@ -247,6 +249,10 @@ def main():
         commentary_trajectory.extend([
             json.dumps({"type": "tool.call", "ts": "2026-08-08T15:54:19.660Z", "runId": commentary_run_id, "data": {"toolCallId": "tool-1", "name": "read", "arguments": {"path": "/tmp/example"}}}),
             json.dumps({"type": "tool.result", "ts": "2026-08-08T15:54:20.699Z", "runId": commentary_run_id, "data": {"toolCallId": "tool-1", "name": "read", "result": "ok"}}),
+            json.dumps({"type": "session.ended", "ts": "2026-08-08T17:40:00.000Z", "runId": commentary_run_id, "data": {"threadId": commentary_thread_id, "status": "success"}}),
+            json.dumps({"type": "session.started", "ts": "2026-08-08T18:00:00.000Z", "runId": commentary_run_id_2, "data": {"threadId": commentary_thread_id}}),
+            json.dumps({"type": "context.compiled", "ts": "2026-08-08T18:00:00.100Z", "runId": commentary_run_id_2, "data": {"threadId": commentary_thread_id}}),
+            json.dumps({"type": "session.ended", "ts": "2026-08-08T18:01:00.000Z", "runId": commentary_run_id_2, "data": {"threadId": commentary_thread_id, "status": "success"}}),
         ])
         (coder_sessions_dir / "coder-main-session.trajectory.jsonl").write_text("\n".join(commentary_trajectory) + "\n", encoding="utf-8")
         rollout_dir = data_dir.parent / "openclaw" / "agents" / "coder" / "agent" / "codex-home" / "sessions" / "2026" / "08" / "08"
@@ -262,17 +268,27 @@ def main():
         commentary_rollout.append(
             json.dumps({"timestamp": "2026-08-08T15:55:01.433Z", "type": "response_item", "payload": {"id": "final-1", "type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Final answer"}]}}),
         )
+        commentary_rollout.extend([
+            json.dumps({"timestamp": "2026-08-08T17:50:00.000Z", "type": "response_item", "payload": {"id": "commentary-orphan", "type": "message", "role": "assistant", "phase": "commentary", "content": [{"type": "output_text", "text": "This gap message belongs to no run."}]}}),
+            json.dumps({"timestamp": "2026-08-08T18:00:10.000Z", "type": "response_item", "payload": {"id": "commentary-2", "type": "message", "role": "assistant", "phase": "commentary", "content": [{"type": "output_text", "text": "I will verify the second request."}]}}),
+        ])
         (rollout_dir / f"rollout-2026-08-08T11-54-02-{commentary_thread_id}.jsonl").write_text("\n".join(commentary_rollout) + "\n", encoding="utf-8")
 
         recovered = server._session_trajectory_messages("agent:coder:main", max_tools=80)
         recovered_commentary = [msg for msg in recovered if msg.get("source") == "codex-commentary"]
-        check("OpenClaw activity recovers public Codex commentary", len(recovered_commentary) == 1 and recovered_commentary[0].get("text") == "I will inspect the exact change set.")
-        check("Long trajectories retain Codex thread mapping", len(recovered_commentary) == 1)
-        check("Long Codex rollouts retain early commentary", len(recovered_commentary) == 1)
-        check("Codex commentary keeps its OpenClaw run id", recovered_commentary[0].get("runId") == commentary_run_id if recovered_commentary else False)
+        recovered_by_text = {msg.get("text"): msg for msg in recovered_commentary}
+        check("OpenClaw activity recovers public Codex commentary", len(recovered_commentary) == 2 and "I will inspect the exact change set." in recovered_by_text)
+        check("Long trajectories retain Codex thread mapping", len(recovered_commentary) == 2)
+        check("Long Codex rollouts retain early commentary", "I will inspect the exact change set." in recovered_by_text)
+        check("Codex commentary keeps its OpenClaw run id", recovered_by_text.get("I will inspect the exact change set.", {}).get("runId") == commentary_run_id)
+        check("One Codex thread is separated across OpenClaw runs", recovered_by_text.get("I will verify the second request.", {}).get("runId") == commentary_run_id_2)
+        check("Commentary outside every run window is rejected", "This gap message belongs to no run." not in recovered_by_text)
         check("Codex recovery excludes reasoning and final-answer records", all("private" not in str(msg) and msg.get("text") != "Final answer" for msg in recovered))
-        commentary_only = server._session_trajectory_messages("agent:coder:main", run_id=commentary_run_id, commentary_only=True)
-        check("Commentary-only recovery excludes tools", bool(commentary_only) and all(not msg.get("tools") for msg in commentary_only))
+        commentary_only = server._session_trajectory_messages("agent:coder:main", run_id=commentary_run_id_2, commentary_only=True)
+        check("Commentary-only recovery excludes tools", len(commentary_only) == 1 and all(not msg.get("tools") for msg in commentary_only))
+        check("Run-scoped recovery never replays older commentary", commentary_only[0].get("text") == "I will verify the second request." if commentary_only else False)
+        check("Recovered commentary exposes its verified run boundary", commentary_only[0].get("runStartedAt") == server._timestamp_epoch_ms("2026-08-08T18:00:00.000Z") if commentary_only else False)
+        check("Session activity enforces one overall limit", len(server._session_trajectory_messages("agent:coder:main", max_tools=1)) == 1)
         server._append_comm_event({
             "ts": 1783430400000,
             "from": {"id": "coder", "name": "Coder"},

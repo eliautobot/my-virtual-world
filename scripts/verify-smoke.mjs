@@ -654,6 +654,21 @@ for (const token of [
 ]) {
   assert(indexHtml.includes(token), `index.html missing Settings > Connections Provider SDK token: ${token}`);
 }
+const settingsBodyStart = indexHtml.indexOf('<div class="modal-body settings-tabbody">');
+const settingsActionsIndex = indexHtml.indexOf('id="settingsActions"');
+assert(settingsBodyStart >= 0 && settingsActionsIndex >= 0, 'Settings body and footer must exist');
+const settingsDivTags = /<\/?div\b[^>]*>/g;
+settingsDivTags.lastIndex = settingsBodyStart;
+let settingsBodyDepth = 0;
+let settingsBodyEnd = -1;
+for (let match = settingsDivTags.exec(indexHtml); match; match = settingsDivTags.exec(indexHtml)) {
+  settingsBodyDepth += match[0].startsWith('</') ? -1 : 1;
+  if (settingsBodyDepth === 0) {
+    settingsBodyEnd = match.index + match[0].length;
+    break;
+  }
+}
+assert(settingsBodyEnd > settingsBodyStart && settingsActionsIndex > settingsBodyEnd, 'Settings actions must be a fixed modal footer outside the scrolling settings body');
 assert(!indexHtml.includes('modelsProviders-open'), 'Provider SDK must not be exposed as an Edit Agents action');
 assert(!indexHtml.includes('modelsProvidersModal'), 'Provider SDK must use Settings > Connections instead of a separate modal');
 for (const token of [
@@ -697,8 +712,11 @@ for (const token of [
 ]) {
   assert(providerSettingsJs.includes(token), `provider-settings.js missing manifest-driven token: ${token}`);
 }
-for (const token of ['overflow-x:hidden', '@media(max-width:760px)', '.ps-connection-list', '.provider-settings-embedded']) {
+for (const token of ['overflow-x:hidden', '@media(max-width:760px)', '.ps-connection-list', '.provider-settings-embedded', 'grid-template-columns:minmax(0,.9fr)']) {
   assert(providerSettingsCss.includes(token), `provider-settings.css missing responsive token: ${token}`);
+}
+for (const token of ['providerLinkHref', "target.searchParams.set('returnTo', 'provider-sdk')", "target.searchParams.set('provider'"]) {
+  assert(providerSettingsJs.includes(token), `provider-settings.js missing nested native-model return token: ${token}`);
 }
 for (const token of [
   '/api/providers/resources',
@@ -741,6 +759,9 @@ for (const token of [
   '/api/native-models/hermes/profile-model',
 ]) {
   assert(modelsHtml.includes(token), `models.html missing models/providers token: ${token}`);
+}
+for (const token of ['providerSdkReturnUrl', "params.get('returnTo')", '/providers.html', '← Back to Provider SDK']) {
+  assert(modelsHtml.includes(token), `models.html missing Provider SDK return-navigation token: ${token}`);
 }
 assert(!modelsHtml.includes('confirm('), 'models.html should use the MVW confirmation dialog instead of browser confirm()');
 for (const token of [
@@ -805,10 +826,10 @@ for (const token of [
   'outdoorCafeChairLeg',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
-  'js/chat-events.js?v=20260808-chat-order-r1',
-  'js/chat.js?v=20260808-windows-linux-r1',
+  'js/chat-events.js?v=20260809-commentary-runs-r1',
+  'js/chat.js?v=20260809-commentary-runs-r1',
   'css/style.css?v=20260808-chat-order-r1',
-  'css/ui-redesign.css?v=20260808-provider-sdk-connections-r1',
+  'css/ui-redesign.css?v=20260809-settings-layout-r1',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-providerFields',

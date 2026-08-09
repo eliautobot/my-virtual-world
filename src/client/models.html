@@ -346,7 +346,7 @@
             <span class="models-page-kicker">Native Runtime</span>
             <h1>⚙️ Models & Providers</h1>
         </div>
-        <button class="back-btn" type="button" onclick="closeModelsPage()">Close</button>
+        <button id="modelsPageClose" class="back-btn" type="button" onclick="closeModelsPage()">Close</button>
     </header>
     <div class="tabs">
         <button class="tab active" type="button" onclick="showTab(event,'openclaw')">🧠 OpenClaw Models</button>
@@ -375,12 +375,32 @@
 let nativeData = null;
 let pendingScrollRestore = null;
 let activeConfirmResolve = null;
+function providerSdkReturnUrl() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('returnTo') !== 'provider-sdk') return '';
+    const target = new URL('/providers.html', window.location.origin);
+    target.searchParams.set('embedded', 'settings');
+    const providerId = (params.get('provider') || window.location.hash.slice(1)).trim();
+    if (providerId) target.searchParams.set('provider', providerId);
+    return `${target.pathname}${target.search}`;
+}
+
 function closeModelsPage() {
+    const returnUrl = providerSdkReturnUrl();
+    if (returnUrl && window.parent && window.parent !== window) {
+        window.location.href = returnUrl;
+        return;
+    }
     if (window.parent && window.parent !== window && typeof window.parent.closeModelsProvidersWindow === 'function') {
         window.parent.closeModelsProvidersWindow();
         return;
     }
     window.location.href = '/';
+}
+
+if (providerSdkReturnUrl()) {
+    const closeButton = document.getElementById('modelsPageClose');
+    if (closeButton) closeButton.textContent = '← Back to Provider SDK';
 }
 
 function esc(value) {

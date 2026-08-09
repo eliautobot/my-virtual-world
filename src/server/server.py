@@ -136,6 +136,12 @@ if OPENCLAW_BROWSER_TRANSPORT not in {"proxy", "direct"}:
 _OPENCLAW_PROXY_COOKIE_NAME = "vw_openclaw_proxy"
 _OPENCLAW_PROXY_SECRET = secrets.token_urlsafe(32)
 _OPENCLAW_PROXY_METHODS = {"sessions.describe", "chat.history", "chat.send", "chat.abort"}
+_OPENCLAW_GATEWAY_RPC_MAX_BYTES = _env_int(
+    "VW_OPENCLAW_GATEWAY_RPC_MAX_BYTES",
+    8 * 1024 * 1024,
+    minimum=1024 * 1024,
+    maximum=64 * 1024 * 1024,
+)
 DATA_DIR = _env_or("VW_DATA_DIR", "/data")
 CHUNKS_DIR = os.path.join(DATA_DIR, "chunks")
 BUILDINGS_DIR = os.path.join(DATA_DIR, "buildings")
@@ -23578,7 +23584,7 @@ async def _gateway_rpc_call_async(method, params=None, timeout=20, preserve_enve
     origin = _gateway_control_origin()
     async with ws_connect(
         gw_url,
-        max_size=1024 * 1024,
+        max_size=_OPENCLAW_GATEWAY_RPC_MAX_BYTES,
         additional_headers={"Origin": origin},
         close_timeout=3,
     ) as ws:
@@ -30160,8 +30166,8 @@ _CODEX_COMMENTARY_CACHE = {}
 _CODEX_COMMENTARY_CACHE_LOCK = threading.Lock()
 
 
-def _trajectory_thread_map(trajectory_file):
-    """Incrementally retain run-to-Codex-thread metadata for long sessions."""
+def _trajectory_run_metadata(trajectory_file):
+    """Incrementally retain run/thread boundaries for long OpenClaw sessions."""
     if not trajectory_file or not os.path.isfile(trajectory_file):
         return {}
     try:
@@ -30169,16 +30175,20 @@ def _trajectory_thread_map(trajectory_file):
     except OSError:
         return {}
     with _TRAJECTORY_THREAD_CACHE_LOCK:
-        cached = _TRAJECTORY_THREAD_CACHE.get(trajectory_file) or {"offset": 0, "threads": {}}
-        if size < int(cached.get("offset") or 0):
-            cached = {"offset": 0, "threads": {}}
+        cached = _TRAJECTORY_THREAD_CACHE.get(trajectory_file) or {"offset": 0, "runs": {}, "version": 2}
+        if size < int(cached.get("offset") or 0) or cached.get("version") != 2:
+            cached = {"offset": 0, "runs": {}, "version": 2}
         offset = int(cached.get("offset") or 0)
-        threads = dict(cached.get("threads") or {})
+        runs = {
+            str(key): dict(value)
+            for key, value in (cached.get("runs") or {}).items()
+            if key and isinstance(value, dict)
+        }
         try:
             with open(trajectory_file, "rb") as stream:
                 stream.seek(offset)
                 for raw_line in stream:
-                    if b'"threadId"' not in raw_line and b'"thread_id"' not in raw_line:
+                    if b'"runId"' not in raw_line and b'"run_id"' not in raw_line:
                         continue
                     try:
                         event = json.loads(raw_line.decode("utf-8", errors="replace"))
@@ -30187,13 +30197,81 @@ def _trajectory_thread_map(trajectory_file):
                     data = event.get("data") if isinstance(event.get("data"), dict) else {}
                     run_id = str(event.get("runId") or data.get("runId") or "")
                     thread_id = str(data.get("threadId") or data.get("thread_id") or "")
-                    if run_id and thread_id:
-                        threads[run_id] = thread_id
+                    if not run_id:
+                        continue
+                    run = runs.setdefault(run_id, {
+                        "runId": run_id,
+                        "threadId": "",
+                        "firstMs": 0,
+                        "lastMs": 0,
+                        "startedAt": 0,
+                        "endedAt": 0,
+                    })
+                    if thread_id:
+                        run["threadId"] = thread_id
+                    epoch_ms = _timestamp_epoch_ms(event.get("ts") or event.get("timestamp"))
+                    if epoch_ms:
+                        if not run.get("firstMs") or epoch_ms < int(run.get("firstMs") or 0):
+                            run["firstMs"] = epoch_ms
+                        if epoch_ms > int(run.get("lastMs") or 0):
+                            run["lastMs"] = epoch_ms
+                        event_type = str(event.get("type") or "")
+                        if event_type == "session.started":
+                            run["startedAt"] = epoch_ms
+                        elif event_type == "session.ended":
+                            run["endedAt"] = epoch_ms
                 next_offset = stream.tell()
         except OSError:
-            return threads
-        _TRAJECTORY_THREAD_CACHE[trajectory_file] = {"offset": next_offset, "threads": threads}
-        return dict(threads)
+            return runs
+        _TRAJECTORY_THREAD_CACHE[trajectory_file] = {"offset": next_offset, "runs": runs, "version": 2}
+        return {key: dict(value) for key, value in runs.items()}
+
+
+def _trajectory_thread_map(trajectory_file):
+    """Return the retained run-to-Codex-thread mapping."""
+    return {
+        run_id: str(metadata.get("threadId") or "")
+        for run_id, metadata in _trajectory_run_metadata(trajectory_file).items()
+        if metadata.get("threadId")
+    }
+
+
+def _trajectory_run_windows(run_metadata):
+    """Build non-overlapping timestamp windows used to scope rollout recovery."""
+    prepared = []
+    for run_id, raw in (run_metadata or {}).items():
+        if not run_id or not isinstance(raw, dict):
+            continue
+        start_ms = int(raw.get("startedAt") or raw.get("firstMs") or 0)
+        if not start_ms or not raw.get("threadId"):
+            continue
+        prepared.append({
+            **raw,
+            "runId": str(run_id),
+            "threadId": str(raw.get("threadId") or ""),
+            "startMs": start_ms,
+        })
+    prepared.sort(key=lambda run: (run.get("startMs") or 0, run.get("runId") or ""))
+    now_ms = int(time.time() * 1000) + 5000
+    windows = {}
+    for index, run in enumerate(prepared):
+        next_start = int(prepared[index + 1].get("startMs") or 0) if index + 1 < len(prepared) else 0
+        explicit_end = int(run.get("endedAt") or 0)
+        if explicit_end:
+            end_ms = explicit_end
+        elif next_start:
+            end_ms = max(run["startMs"], next_start - 1)
+        else:
+            end_ms = max(now_ms, int(run.get("lastMs") or 0), run["startMs"])
+        if next_start:
+            end_ms = min(end_ms, max(run["startMs"], next_start - 1))
+        windows[run["runId"]] = {
+            "runId": run["runId"],
+            "threadId": run["threadId"],
+            "startMs": run["startMs"],
+            "endMs": end_ms,
+        }
+    return windows
 
 
 def _codex_rollout_commentary_items(rollout_file, thread_id):
@@ -30259,14 +30337,15 @@ def _codex_rollout_commentary_items(rollout_file, thread_id):
         return [dict(message) for message in messages]
 
 
-def _codex_rollout_commentary_messages(agent_id, run_threads, run_id="", max_messages=80):
+def _codex_rollout_commentary_messages(agent_id, run_metadata, run_id="", max_messages=80):
     """Recover only public Codex commentary omitted from OpenClaw history."""
-    if not agent_id or not isinstance(run_threads, dict):
+    if not agent_id or not isinstance(run_metadata, dict):
         return []
+    all_windows = _trajectory_run_windows(run_metadata)
     selected_runs = {
-        str(key): str(value)
-        for key, value in run_threads.items()
-        if key and value and (not run_id or str(key) == str(run_id))
+        key: value
+        for key, value in all_windows.items()
+        if not run_id or key == str(run_id)
     }
     if not selected_runs:
         return []
@@ -30282,7 +30361,8 @@ def _codex_rollout_commentary_messages(agent_id, run_threads, run_id="", max_mes
         return []
     messages = []
     seen = set()
-    for openclaw_run_id, thread_id in selected_runs.items():
+    recovered_by_thread = {}
+    for thread_id in {window["threadId"] for window in selected_runs.values()}:
         safe_thread_id = re.sub(r"[^a-zA-Z0-9_.-]+", "", thread_id)[:160]
         if not safe_thread_id:
             continue
@@ -30290,12 +30370,32 @@ def _codex_rollout_commentary_messages(agent_id, run_threads, run_id="", max_mes
         if not candidates:
             continue
         rollout_file = max(candidates, key=os.path.getmtime)
-        for recovered in _codex_rollout_commentary_items(rollout_file, safe_thread_id):
+        recovered_by_thread[thread_id] = _codex_rollout_commentary_items(rollout_file, safe_thread_id)
+
+    for thread_id, recovered_items in recovered_by_thread.items():
+        thread_windows = [
+            window for window in selected_runs.values()
+            if window.get("threadId") == thread_id
+        ]
+        for recovered in recovered_items:
             commentary_id = str(recovered.get("id") or "")
             if not commentary_id or commentary_id in seen:
                 continue
+            epoch_ms = int(recovered.get("epochMs") or 0)
+            matching = [
+                window for window in thread_windows
+                if epoch_ms and window["startMs"] <= epoch_ms <= window["endMs"]
+            ]
+            if not matching:
+                continue
+            owner = max(matching, key=lambda window: window["startMs"])
             seen.add(commentary_id)
-            messages.append({**recovered, "runId": openclaw_run_id})
+            messages.append({
+                **recovered,
+                "runId": owner["runId"],
+                "runStartedAt": owner["startMs"],
+                "runEndedAt": owner["endMs"],
+            })
     messages.sort(key=lambda message: message.get("epochMs") or 0)
     return messages[-max_messages:]
 
@@ -30307,7 +30407,7 @@ def _trajectory_activity_messages(trajectory_file, max_tools=60, agent_id="", ru
         return []
     tools = {}
     order = []
-    run_threads = _trajectory_thread_map(trajectory_file)
+    run_metadata = _trajectory_run_metadata(trajectory_file)
     for line in tail_data.split("\n"):
         line = line.strip()
         if not line:
@@ -30321,7 +30421,8 @@ def _trajectory_activity_messages(trajectory_file, max_tools=60, agent_id="", ru
         event_run_id = str(event.get("runId") or data.get("runId") or "")
         thread_id = str(data.get("threadId") or data.get("thread_id") or "")
         if event_run_id and thread_id:
-            run_threads[event_run_id] = thread_id
+            run = run_metadata.setdefault(event_run_id, {"runId": event_run_id})
+            run["threadId"] = thread_id
         if event_type not in ("tool.call", "tool.result"):
             continue
         if run_id and event_run_id != str(run_id):
@@ -30381,12 +30482,12 @@ def _trajectory_activity_messages(trajectory_file, max_tools=60, agent_id="", ru
     if agent_id:
         messages.extend(_codex_rollout_commentary_messages(
             agent_id,
-            run_threads,
+            run_metadata,
             run_id=run_id,
             max_messages=max_tools,
         ))
     messages.sort(key=lambda message: message.get("epochMs") or 0)
-    return messages
+    return messages[-max_tools:]
 
 
 def _session_trajectory_messages(session_key, max_tools=80, run_id="", commentary_only=False):

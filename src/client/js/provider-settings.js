@@ -26,6 +26,21 @@
 
   function currentProvider() { return state.providers.find(provider => provider.id === state.selectedId); }
   function sections(provider) { return provider?.settingsSchema?.sections || []; }
+  function providerLinkHref(provider, field) {
+    const href = field?.href || '#';
+    if (!document.body.classList.contains('provider-settings-embedded')) return href;
+    try {
+      const target = new URL(href, window.location.href);
+      if (target.origin === window.location.origin && target.pathname.endsWith('/models.html')) {
+        target.searchParams.set('returnTo', 'provider-sdk');
+        target.searchParams.set('provider', provider?.id || '');
+        return `${target.pathname}${target.search}${target.hash}`;
+      }
+    } catch (_) {
+      // Keep manifest-provided links usable even when a third-party provider uses a custom scheme.
+    }
+    return href;
+  }
   function healthMessage(provider) {
     const health = provider?.health || {};
     if (health.ok) return health.message || 'Runtime health check passed.';
@@ -185,7 +200,7 @@
       (section.fields || []).forEach(field => {
         if (field.type === 'link') {
           const row = element('div', { className:'ps-field' });
-          row.append(element('div', { className:'ps-label' }, field.label || field.key), element('a', { className:'ps-link', href:field.href || '#'}, field.actionLabel || 'Open'));
+          row.append(element('div', { className:'ps-label' }, field.label || field.key), element('a', { className:'ps-link', href:providerLinkHref(provider, field)}, field.actionLabel || 'Open'));
           card.append(row); return;
         }
         const row = element('div', { className:'ps-field' });

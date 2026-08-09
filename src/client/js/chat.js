@@ -1192,10 +1192,20 @@
         if (!data.ok || !Array.isArray(data.messages)) return;
         for (const msg of data.messages) {
           if (msg.source !== 'codex-commentary' || !String(msg.text || '').trim()) continue;
-          const key = String(msg.id || [msg.runId || runId, msg.epochMs || msg.ts || '', msg.text].join(':'));
+          const expectedRunId = String(runId);
+          const messageRunId = String(msg.runId || '');
+          const epochMs = ChatEvents.timestampMs(msg.epochMs || msg.ts || '');
+          const runStartedAt = ChatEvents.timestampMs(msg.runStartedAt || '');
+          const runEndedAt = ChatEvents.timestampMs(msg.runEndedAt || '');
+          if (
+            !messageRunId || messageRunId !== expectedRunId ||
+            !epochMs || !runStartedAt || epochMs < runStartedAt ||
+            (runEndedAt && epochMs > runEndedAt)
+          ) continue;
+          const key = String(msg.id || [messageRunId, epochMs, msg.text].join(':'));
           if (this.seenOpenClawCommentary.has(key)) continue;
           this.seenOpenClawCommentary.add(key);
-          this.applyTurnEvent({ kind: 'commentary', runId: msg.runId || runId, text: msg.text });
+          this.applyTurnEvent({ kind: 'commentary', runId: messageRunId, text: msg.text, ts: epochMs });
         }
       } catch (error) {
         console.warn('[chat] safe commentary recovery failed:', error);
@@ -2026,7 +2036,7 @@
       if (action.kind === 'text.finalize') {
         const text = action.text || this.streamingMsg?.content || '';
         this.renderStreamingMessageText(text);
-        if (this.streamingMsg) this.finalizeStreamingMessage(text, undefined, runId);
+        if (this.streamingMsg) this.finalizeStreamingMessage(text, undefined, runId, action.ts || Date.now());
         this.streamingMsg = null;
         return;
       }
@@ -2382,10 +2392,10 @@
       this.scrollBottom();
     }
 
-    finalizeStreamingMessage(content, mediaItems, runId = '') {
+    finalizeStreamingMessage(content, mediaItems, runId = '', ts = Date.now()) {
       this.cancelStreamingRender();
       const div = this.messages.querySelector('.streaming-msg');
-      if (!div) return this.appendMessage('assistant', content, Date.now(), mediaItems);
+      if (!div) return this.appendMessage('assistant', content, ts || Date.now(), mediaItems);
       const bubble = div.querySelector('.chat-bubble');
       bubble.classList.remove('streaming');
       const textDiv = bubble.querySelector('.streaming-text');
@@ -2414,7 +2424,7 @@
       }
       const time = document.createElement('span');
       time.className = 'chat-time';
-      time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      time.textContent = new Date(ts || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       bubble.appendChild(time);
       div.classList.remove('streaming-msg');
       div.classList.add('chat-stream-segment');

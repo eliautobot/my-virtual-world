@@ -46,6 +46,12 @@ for (const provider of ['hermes', 'codex', 'claude-code']) {
 
 {
   const reducer = new TurnEventReducer();
+  const commentary = reducer.ingest({ kind: 'commentary', runId: 'timed', text: 'Recovered progress', ts: 1786227688601 });
+  check('Recovered commentary preserves its original timestamp', commentary.find(action => action.kind === 'text.finalize')?.ts === 1786227688601, JSON.stringify(commentary));
+}
+
+{
+  const reducer = new TurnEventReducer();
   reducer.ingest({ kind: 'text.replace', runId: 'snapshot', text: 'Before tool' });
   reducer.ingest({ kind: 'tool.start', runId: 'snapshot', tool: { id: 't1', name: 'search' } });
   const after = reducer.ingest({ kind: 'text.replace', runId: 'snapshot', text: 'After tool' });
@@ -183,6 +189,8 @@ for (const provider of ['hermes', 'codex', 'claude-code']) {
   check('OpenClaw chat events enter shared reducer', /handleChatEvent\(payload\)[\s\S]*applyTurnEvent/.test(chat));
   check('OpenClaw tool events enter shared reducer', /handleAgentEvent\(payload\)[\s\S]*tool\.result[\s\S]*applyTurnEvent/.test(chat));
   check('OpenClaw queue recovers safe commentary before boundaries', /queueOpenClawEvent\(eventName, payload\)[\s\S]*syncOpenClawCommentary/.test(chat));
+  check('Live commentary requires matching verified run boundaries', /messageRunId !== expectedRunId/.test(chat) && /epochMs < runStartedAt/.test(chat));
+  check('Live commentary renders with its recovered timestamp', /kind: 'commentary'[\s\S]*ts: epochMs/.test(chat) && /finalizeStreamingMessage\(text, undefined, runId, action\.ts/.test(chat));
   check('Duplicate reasoning is suppressed', /applyDistinctThinking\(runId, value\)[\s\S]*thinking === visibleText/.test(chat));
   check('History uses shared chronological reconciliation', /renderHistoryItems\(items\)[\s\S]*ChatEvents\.mergeHistoryItems/.test(chat));
   check('Mobile resize clears squeezed desktop secondary windows', /function enforceSingleWindowMobileLayout\(\)[\s\S]*setSecondaryPanelOpen\(slotNum, false\)/.test(chat) && /window\.addEventListener\('resize'[\s\S]*enforceSingleWindowMobileLayout\(\)/.test(chat));
@@ -191,9 +199,11 @@ for (const provider of ['hermes', 'codex', 'claude-code']) {
   check('Terminal cleanup is centralized', /finishRunUi\(runId, status/.test(chat));
   check('Chat event model loads before renderer', index.indexOf('chat-events.js') > -1 && index.indexOf('chat-events.js') < index.indexOf('chat.js'));
   check('Server recovers only public Codex commentary', /payload\.get\("phase"\) != "commentary"/.test(server) && /commentary_only=/.test(server));
+  check('Server scopes Codex commentary to trajectory run windows', /def _trajectory_run_windows/.test(server) && /window\["startMs"\] <= epoch_ms <= window\["endMs"\]/.test(server));
   check('Session activity endpoint supports commentaryOnly', /path == "\/api\/session-activity"/.test(server) && /commentaryOnly/.test(server));
   check('OpenClaw browser chat defaults to the same-origin proxy', /GATEWAY_TRANSPORT = 'proxy'/.test(chat) && /new EventSource\(GATEWAY_EVENTS_URL/.test(chat));
   check('OpenClaw proxy RPC uses same-origin credentials', /fetch\(GATEWAY_RPC_URL,[\s\S]*credentials: 'same-origin'/.test(chat));
+  check('OpenClaw proxy accepts bounded long-session history responses', /_OPENCLAW_GATEWAY_RPC_MAX_BYTES = _env_int\([\s\S]*8 \* 1024 \* 1024/.test(server) && /max_size=_OPENCLAW_GATEWAY_RPC_MAX_BYTES/.test(server));
   check('Gateway operator token remains server-side in proxy mode', /if OPENCLAW_BROWSER_TRANSPORT == "direct":[\s\S]*payload\["token"\]/.test(server));
   check('OpenClaw proxy exposes only chat RPC methods', /_OPENCLAW_PROXY_METHODS = \{"sessions\.describe", "chat\.history", "chat\.send", "chat\.abort"\}/.test(server));
   check('OpenClaw proxy requires its HttpOnly same-origin cookie', /HttpOnly; SameSite=Strict/.test(server) && /_openclaw_proxy_same_origin/.test(server));
