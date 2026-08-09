@@ -1,6 +1,9 @@
-export const STARTER_MAP_NAME = 'My Virtual World';
+import { normalizeStarterBuildingFurniture } from './furniture-placement-defaults.mjs?v=20260809-furniture-schema-r1';
 
-export const STARTER_MAP_BUILDINGS = Object.freeze([
+export const STARTER_MAP_NAME = 'My Virtual World';
+export const STARTER_MAP_VERSION = 'desktop-8590-2026-08-09-furniture-v2';
+
+const STARTER_MAP_SOURCE_BUILDINGS = [
   {
     id: 'bld_1781275602998',
     name: 'First Park',
@@ -235,7 +238,11 @@ export const STARTER_MAP_BUILDINGS = Object.freeze([
       ],
     },
   },
-]);
+];
+
+export const STARTER_MAP_BUILDINGS = Object.freeze(
+  STARTER_MAP_SOURCE_BUILDINGS.map(normalizeStarterBuildingFurniture),
+);
 
 export const STARTER_MAP_STREETS = Object.freeze([
   { x1: -7, z1: 20, x2: -7, z2: 159, type: null, rotation: 0, openEdges: null },

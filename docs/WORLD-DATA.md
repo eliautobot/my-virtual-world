@@ -105,6 +105,19 @@ In the current starter Office:
 
 The server has a narrow compatibility repair for this starter Office. It only updates metadata when the expected original objects are still present. It does not recreate appliances that a user deleted, and it does not replace a customized building.
 
+## Starter Furniture Compatibility
+
+Fresh starter furniture and newly placed furniture use the same placement-default initializer and schema version. The initializer adds durable catalog, lifecycle, persistence, and asset-class metadata without adding transient reservation or active-use state.
+
+The starter Office armchairs are furniture indices `13` and `14`. Their current interaction contract uses:
+
+- approach spot `approach-front`, `1.18` tiles from the chair
+- exclusive seat spot `seat`, `0.42` tiles from the chair
+- seated surface lift `2.08`
+- dismount spot `stand-front`
+
+The server includes a narrow compatibility repair for armchairs from the original starter snapshot. It upgrades an armchair only when the starter Office id, original index, type, and position still match. Existing colors and routing overrides are preserved. Moved, replaced, or deleted furniture is not restored or overwritten.
+
 ## Chunks and Terrain
 
 Chunks are terrain files addressed by integer coordinates:

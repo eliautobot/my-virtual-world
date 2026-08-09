@@ -6480,7 +6480,9 @@ export function serverRuntimeReleasePointForTarget(dataDir, target = null, curre
   // approach point. Reuse that exact authored point for dismounts even when a
   // legacy saved seat omitted a separate exitSpotId; synthesizing sideways
   // from the seat can otherwise send the agent through the table collider.
-  const routeApproach = serverRuntimeReleasePointFromRouteTarget(target?.routeApproachTarget, target, current);
+  const routeApproach = isServerScriptedMultiSlotSeatObjectType(target?.objectType || target?.catalogKey || target?.sourceObjectType)
+    ? serverRuntimeReleasePointFromRouteTarget(target?.routeApproachTarget, target, current)
+    : null;
   if (routeApproach && !serverRuntimeReleasePointCrowdConflict(options?.agentId, routeApproach, crowdAgents, target)) return routeApproach;
   const authored = serverRuntimeAuthoredReleasePoint(dataDir, target, current);
   if (authored && !serverRuntimeReleasePointCrowdConflict(options?.agentId, authored, crowdAgents, target)) return authored;

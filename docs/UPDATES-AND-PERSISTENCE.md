@@ -123,6 +123,8 @@ The server may include narrow compatibility repairs for known starter-world meta
 - do not recreate deleted user objects
 - do not replace the whole world
 
+The current starter Office repair normalizes the original counter appliances and armchairs to the placement schema used for newly placed furniture. It checks their exact starter indices, types, and positions first, and fills only missing metadata so user colors and routing overrides survive.
+
 ## Testing an Update
 
 Recommended local verification:

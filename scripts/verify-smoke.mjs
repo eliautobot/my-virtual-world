@@ -508,6 +508,7 @@ const jsSyntaxTargets = [
   'src/client/js/agent-characters.js',
   'src/client/js/settings.js',
   'src/client/js/starter-map.mjs',
+  'src/client/js/furniture-placement-defaults.mjs',
   'src/client/js/chat.js',
   'src/client/js/chat-markdown.js',
   'src/client/js/chat-bubble-layout.mjs',
@@ -549,6 +550,13 @@ for rel in ${JSON.stringify(pyTargets)}:
 print("python syntax ok")
 `], { cwd: root, encoding: 'utf8' });
 assert.equal(pyCheck.status, 0, `Python syntax check failed\n${pyCheck.stderr || pyCheck.stdout}`);
+
+const starterFurnitureParityCheck = spawnSync(process.execPath, ['tests/test_starter_furniture.mjs'], { cwd: root, encoding: 'utf8' });
+assert.equal(starterFurnitureParityCheck.status, 0, `Starter furniture parity check failed\n${starterFurnitureParityCheck.stderr || starterFurnitureParityCheck.stdout}`);
+const starterFurnitureMigrationCheck = spawnSync('python3', ['-B', 'tests/test_starter_furniture_migration.py'], { cwd: root, encoding: 'utf8' });
+assert.equal(starterFurnitureMigrationCheck.status, 0, `Starter furniture migration check failed\n${starterFurnitureMigrationCheck.stderr || starterFurnitureMigrationCheck.stdout}`);
+const serverRuntimeCollisionCheck = spawnSync(process.execPath, ['scripts/verify-server-runtime-collision-guards.mjs'], { cwd: root, encoding: 'utf8' });
+assert.equal(serverRuntimeCollisionCheck.status, 0, `Server runtime collision guard check failed\n${serverRuntimeCollisionCheck.stderr || serverRuntimeCollisionCheck.stdout}`);
 
 const licensePy = read('src/server/license.py');
 const serverPy = read('src/server/server.py');
@@ -832,8 +840,8 @@ assert(
 for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
-  'desktop-8590-2026-06-13',
-  'js/main3d.js?v=20260808-chat-order-r2',
+  'STARTER_MAP_VERSION',
+  'js/main3d.js?v=20260809-starter-furniture-r1',
   'agent-life-exterior-area-taxonomy.mjs?v=20260804-park-table-node-inference-r2',
   'syncAgentToCurrentTableSeatTransform(agent)',
   'occupiedAgentFollowsChairTransform',
@@ -869,7 +877,7 @@ for (const token of [
   'creationSchema',
   '/api/agent/create',
   'vw:agents-changed',
-  'starter-map.mjs?v=20260613-road-terrain-r1',
+  'starter-map.mjs?v=20260809-furniture-schema-r1',
   'Math.min(clock.getDelta(), 0.05)',
   'const VEHICLE_SPEED = 7.0',
   'const spacing = 8',
@@ -1510,6 +1518,10 @@ for (const token of [
   'stationary-persistent-kitchen-counter-with-appliance-slots',
   'stationary-persistent-quick-heating-appliance',
   'stationary-persistent-countertop-beverage-appliance',
+  'repair_starter_office_furniture_metadata',
+  'STARTER_OFFICE_ARMCHAIR_SPECS',
+  'FURNITURE_PLACEMENT_SCHEMA_VERSION = 2',
+  'stationary-persistent-single-comfort-seat',
 ]) {
   assert(serverPy.includes(token), `server.py missing starter appliance repair token: ${token}`);
 }
@@ -1895,6 +1907,8 @@ assert(main3dJs.includes('agentLiveModeGloballyOff'), 'agent editor must disable
 for (const token of [
   'STARTER_MAP_BUILDINGS',
   'STARTER_MAP_STREETS',
+  'STARTER_MAP_VERSION',
+  'desktop-8590-2026-08-09-furniture-v2',
   'First Park',
   'Office',
   'meetingTable',

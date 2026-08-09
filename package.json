@@ -36,6 +36,7 @@
     "verify:asset:dumbbell-rack": "node scripts/verify-dumbbell-rack-asset.mjs",
     "verify:asset:gym-bench": "node scripts/verify-gym-bench-asset.mjs",
     "verify:smoke": "node scripts/verify-smoke.mjs",
+    "verify:starter-furniture": "node tests/test_starter_furniture.mjs && python3 -B tests/test_starter_furniture_migration.py",
     "verify:realtime": "node scripts/verify-realtime-smoke.mjs"
   },
   "dependencies": {

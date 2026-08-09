@@ -20482,6 +20482,11 @@ STARTER_OFFICE_ID = "bld_1781275645157"
 STARTER_OFFICE_COUNTER_INDEX = 17
 STARTER_OFFICE_MICROWAVE_INDEX = 18
 STARTER_OFFICE_COFFEE_INDEX = 19
+STARTER_OFFICE_ARMCHAIR_SPECS = (
+    (13, 3.8829448848333996, 13.995426226952492),
+    (14, 7.201852092913043, 14.072239350276813),
+)
+FURNITURE_PLACEMENT_SCHEMA_VERSION = 2
 COUNTER_APPLIANCE_SLOT_ACCEPTS = ["countertopCoffeeMachine", "microwave"]
 
 
@@ -20657,6 +20662,69 @@ def repair_starter_office_appliance_metadata(building):
     return building
 
 
+def _matches_untouched_starter_armchair(item, expected_x, expected_z):
+    if not isinstance(item, dict) or item.get("type") != "armchair":
+        return False
+    try:
+        return abs(float(item.get("x")) - expected_x) <= 0.001 and abs(float(item.get("z")) - expected_z) <= 0.001
+    except (TypeError, ValueError):
+        return False
+
+
+def repair_starter_office_furniture_metadata(building):
+    """Upgrade only untouched bundled Office furniture; preserve user edits."""
+    building = repair_starter_office_appliance_metadata(building)
+    if not isinstance(building, dict) or building.get("id") != STARTER_OFFICE_ID:
+        return building
+    furniture = ((building.get("interior") or {}).get("furniture") or [])
+    if not isinstance(furniture, list):
+        return building
+
+    for index, expected_x, expected_z in STARTER_OFFICE_ARMCHAIR_SPECS:
+        if index >= len(furniture):
+            continue
+        armchair = furniture[index]
+        if not _matches_untouched_starter_armchair(armchair, expected_x, expected_z):
+            continue
+        _merge_missing(armchair, {
+            "catalogId": "armchair",
+            "stationary": True,
+            "carryable": False,
+            "temporary": False,
+            "persistsUntilDeleted": True,
+            "assetClass": "stationary-persistent-single-comfort-seat",
+            "furnitureSchemaVersion": FURNITURE_PLACEMENT_SCHEMA_VERSION,
+            "armchairColors": {
+                "body": "#7c3aed",
+                "backArms": "#4c1d95",
+                "seatCushions": "#a78bfa",
+                "feet": "#4e342e",
+            },
+            "lifecycle": {
+                "stationary": True,
+                "carryable": False,
+                "temporary": False,
+                "persistsUntilDeleted": True,
+                "routing": {
+                    "approachSpotId": "approach-front",
+                    "seatSpotId": "seat",
+                    "dismountSpotId": "stand-front",
+                    "approachOffsetTiles": 1.18,
+                    "seatOffsetTiles": 0.42,
+                    "seatSurfaceLift": 2.08,
+                    "interaction": "route-to-front-approach-then-dock-at-the-exclusive-seat-and-dismount-through-stand-front",
+                },
+            },
+        })
+        try:
+            current_schema_version = int(armchair.get("furnitureSchemaVersion") or 0)
+        except (TypeError, ValueError):
+            current_schema_version = 0
+        armchair["furnitureSchemaVersion"] = max(FURNITURE_PLACEMENT_SCHEMA_VERSION, current_schema_version)
+
+    return building
+
+
 def _live_agent_home_owner_id(building):
     if not isinstance(building, dict):
         return ""
@@ -20754,9 +20822,11 @@ def load_building(building_id):
     try:
         with open(path, "r") as f:
             data = strip_building_transient_object_assignments(json.load(f))
-            data = repair_starter_office_appliance_metadata(data)
+            before_repair = copy.deepcopy(data)
+            data = repair_starter_office_furniture_metadata(data)
+            metadata_changed = data != before_repair
             data, changed = ensure_live_agent_home_starter_interior(data)
-            if changed and isinstance(data, dict) and data.get("id"):
+            if (metadata_changed or changed) and isinstance(data, dict) and data.get("id"):
                 save_building(data["id"], data)
             return data
     except (FileNotFoundError, json.JSONDecodeError):
@@ -20765,7 +20835,7 @@ def load_building(building_id):
 def save_building(building_id, data):
     path = building_path(building_id)
     data = strip_building_transient_object_assignments(data)
-    data = repair_starter_office_appliance_metadata(data)
+    data = repair_starter_office_furniture_metadata(data)
     data, _ = ensure_live_agent_home_starter_interior(data)
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
@@ -20783,9 +20853,11 @@ def list_buildings():
         try:
             with open(fname, "r") as f:
                 b = strip_building_transient_object_assignments(json.load(f))
-                b = repair_starter_office_appliance_metadata(b)
+                before_repair = copy.deepcopy(b)
+                b = repair_starter_office_furniture_metadata(b)
+                metadata_changed = b != before_repair
                 b, changed = ensure_live_agent_home_starter_interior(b)
-                if changed and isinstance(b, dict) and b.get("id"):
+                if (metadata_changed or changed) and isinstance(b, dict) and b.get("id"):
                     save_building(b["id"], b)
                 buildings.append(b)
         except (json.JSONDecodeError, OSError):
