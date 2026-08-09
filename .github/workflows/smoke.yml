@@ -25,7 +25,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          python -m pip install --requirement requirements.txt
 
       - name: Run smoke suite
         run: npm test

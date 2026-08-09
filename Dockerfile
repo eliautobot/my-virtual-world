@@ -30,6 +30,7 @@ WORKDIR /app
 
 # Copy application files
 COPY package.json package-lock.json /app/
+COPY requirements.txt /app/
 COPY src/server/ /app/server/
 COPY src/client/ /app/client/
 COPY src/realtime/ /app/realtime/
@@ -37,7 +38,7 @@ COPY scripts/ /app/scripts/
 COPY --from=node-deps /deps/node_modules/ /app/node_modules/
 
 # Runtime deps for live OpenClaw presence mirroring
-RUN pip install --no-cache-dir websockets
+RUN pip install --no-cache-dir --requirement requirements.txt
 
 # Create data directories
 RUN mkdir -p /data/chunks /data/buildings

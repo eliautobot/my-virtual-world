@@ -201,6 +201,7 @@ const requiredFiles = [
   '.gitignore',
   '.dockerignore',
   'Dockerfile',
+  'requirements.txt',
   'docker-compose.yml',
   'docs/CONFIGURATION.md',
   'docs/INSTALLATION.md',
@@ -411,11 +412,16 @@ for (const path of productReferenceFiles) {
 }
 
 const dockerfile = read('Dockerfile');
+const pythonRequirements = read('requirements.txt');
+const githubSmokeWorkflow = read('.github/workflows/smoke.yml');
 assert(dockerfile.includes('npm ci --omit=dev'), 'Dockerfile must install Node dependencies from package-lock.json');
+assert(dockerfile.includes('pip install --no-cache-dir --requirement requirements.txt'), 'Dockerfile must install pinned Python dependencies');
 assert(!dockerfile.includes('COPY node_modules'), 'Dockerfile must not copy local node_modules');
 assert(dockerfile.includes('VW_PORT=8590'), 'Dockerfile should default to the 8590 product port');
 assert(dockerfile.includes('VW_LICENSE_STORE_ID=321733'), 'Dockerfile should default to the My Virtual World Lemon Squeezy store ID');
 assert(dockerfile.includes('VW_LICENSE_PRODUCT_IDS=1140366'), 'Dockerfile should default to the My Virtual World Lemon Squeezy product ID');
+assert(/^websockets==[^\s]+$/m.test(pythonRequirements), 'requirements.txt must pin the WebSocket runtime dependency');
+assert(githubSmokeWorkflow.includes('python -m pip install --requirement requirements.txt'), 'GitHub smoke workflow must install Python dependencies before provider tests');
 
 const dockerCompose = read('docker-compose.yml');
 const envExample = read('.env.example');
