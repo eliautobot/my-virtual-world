@@ -24,8 +24,10 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_PORT` | `8590` | HTTP server port inside the container. Most Docker installs should leave this at 8590. |
 | `VW_DATA_DIR` | `/data` | Persistent data directory inside Docker. |
 | `VW_OPENCLAW_PATH` | `/openclaw` | Mounted OpenClaw home path. |
+| `VW_OPENCLAW_HOST_PATH` | host `~/.openclaw` | Actual host OpenClaw home. Use an absolute drive-letter path on Windows; the setup helper writes it automatically. |
 | `VW_GATEWAY_URL` | `ws://host.docker.internal:18789` | OpenClaw gateway WebSocket URL. |
 | `VW_GATEWAY_TOKEN` | empty | Optional gateway token. |
+| `VW_OPENCLAW_BROWSER_TRANSPORT` | `proxy` | `proxy` keeps the Gateway token server-side and carries browser chat over port 8590. `direct` is a legacy opt-in. |
 | `VW_HERMES_ENABLED` | `true` | Enables Hermes discovery and chat relay. |
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker. |
 | `VW_HERMES_BIN` | `/home/vw/.local/bin/hermes` | Hermes CLI path inside Docker. |
@@ -37,6 +39,7 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_HERMES_AUTO_START_DEFAULT_API` | `true` | Allow auto-start for the default Hermes profile. |
 | `VW_HERMES_API_PROFILE_PORT_BASE` | `8643` | Base port used to derive profile-specific local API ports. |
 | `VW_CODEX_ENABLED` | `true` | Enables Codex CLI discovery and chat relay. |
+| `VW_CODEX_HOST_HOME` | host `~/.codex` | Host path mounted as `VW_CODEX_HOME`; set explicitly on Windows or disable native Codex. |
 | `VW_CODEX_HOME` | `/home/vw/.codex` | Codex home path inside Docker. |
 | `VW_CODEX_BIN` | `/home/vw/.codex/packages/standalone/current/bin/codex` | Codex CLI path inside Docker. |
 | `VW_CODEX_WORKSPACE_ROOT` | `/data/codex-agents` | Workspace root for standard Codex-backed agents. |
@@ -92,6 +95,10 @@ Use `VW_REALTIME_BROWSER_URL` for the websocket URL that browsers can reach. The
 
 The default Docker Compose setup starts the realtime sidecar as `virtual-world-realtime` and publishes `VW_REALTIME_HOST_PORT`, normally `8591`. Do not expose that port directly to the public internet; use a private network or an authenticated reverse proxy.
 
+On Windows, `ws://127.0.0.1:8591` works only for a browser running on that same
+PC. Use the Windows PC name, LAN address, Tailnet name, or Tailnet address in
+`VW_REALTIME_BROWSER_URL` for browsers on another trusted device.
+
 ## Data
 
 World data is stored under `VW_DATA_DIR`.
@@ -123,6 +130,14 @@ Use these defaults when running directly on your machine without Docker:
 | Hermes CLI | `~/.local/bin/hermes` |
 
 If OpenClaw or Hermes do not appear connected, confirm the host tools are running first, then restart the container after changing `.env` or Docker volume mounts.
+
+For Docker Desktop on Windows, run
+`scripts/configure-docker-windows.ps1`. It supplies a real Windows bind source
+for OpenClaw and typed placeholder files/directories for disabled native Linux
+CLIs. This prevents Docker from creating a directory where an executable was
+expected. Do not mount a Windows Hermes launcher into a Linux executable path;
+use a Windows-hosted Hermes API at `http://host.docker.internal:<port>` or run a
+Linux Hermes sidecar.
 
 ## Hermes Native Streaming
 

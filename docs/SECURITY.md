@@ -12,6 +12,14 @@ My Virtual World is a local control surface for agent systems. Treat it like an 
 - Keep secrets in `.env`, OpenClaw config, Hermes config, or your deployment secret store.
 - Do not commit `.env`, runtime data, screenshots, backups, or local agent state.
 
+OpenClaw browser chat uses a same-origin proxy on port `8590` by default. The
+Gateway URL and operator token remain server-side, RPC methods are restricted to
+the chat operations the UI needs, and the event stream requires an HttpOnly,
+SameSite cookie. Keep `VW_OPENCLAW_BROWSER_TRANSPORT=proxy`; do not expose port
+`18789` as a workaround for browser connectivity. The app itself remains a
+trusted-network admin surface, so place an authenticated reverse proxy in front
+of it before any public exposure.
+
 ## Remote Access With Tailscale
 
 Tailscale is the recommended way to use My Virtual World remotely because it keeps access inside your private Tailnet.

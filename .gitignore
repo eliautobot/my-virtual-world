@@ -22,6 +22,7 @@ __pycache__/
 # Local scratch and review artifacts
 .tmp-*
 tmp-*
+.docker-disabled/
 *.bak
 *.bak2
 *.bak3

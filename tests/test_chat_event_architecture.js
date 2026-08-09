@@ -192,6 +192,11 @@ for (const provider of ['hermes', 'codex', 'claude-code']) {
   check('Chat event model loads before renderer', index.indexOf('chat-events.js') > -1 && index.indexOf('chat-events.js') < index.indexOf('chat.js'));
   check('Server recovers only public Codex commentary', /payload\.get\("phase"\) != "commentary"/.test(server) && /commentary_only=/.test(server));
   check('Session activity endpoint supports commentaryOnly', /path == "\/api\/session-activity"/.test(server) && /commentaryOnly/.test(server));
+  check('OpenClaw browser chat defaults to the same-origin proxy', /GATEWAY_TRANSPORT = 'proxy'/.test(chat) && /new EventSource\(GATEWAY_EVENTS_URL/.test(chat));
+  check('OpenClaw proxy RPC uses same-origin credentials', /fetch\(GATEWAY_RPC_URL,[\s\S]*credentials: 'same-origin'/.test(chat));
+  check('Gateway operator token remains server-side in proxy mode', /if OPENCLAW_BROWSER_TRANSPORT == "direct":[\s\S]*payload\["token"\]/.test(server));
+  check('OpenClaw proxy exposes only chat RPC methods', /_OPENCLAW_PROXY_METHODS = \{"sessions\.describe", "chat\.history", "chat\.send", "chat\.abort"\}/.test(server));
+  check('OpenClaw proxy requires its HttpOnly same-origin cookie', /HttpOnly; SameSite=Strict/.test(server) && /_openclaw_proxy_same_origin/.test(server));
 }
 
 const failed = checks.filter(item => !item.ok);

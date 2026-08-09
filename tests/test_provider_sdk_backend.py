@@ -18,11 +18,17 @@ if str(SERVER_ROOT) not in sys.path:
 
 import server  # noqa: E402
 from providers.antigravity import AntigravityProvider  # noqa: E402
-from providers.builtin import OpenClawOfficeProvider  # noqa: E402
+from providers.builtin import HermesOfficeProvider, OpenClawOfficeProvider  # noqa: E402
 from providers.claude_code import ClaudeCodeProvider  # noqa: E402
 from providers.codex import CodexAppServerClient, CodexProvider  # noqa: E402
 from providers.hermes import HermesProvider  # noqa: E402
 from providers.opencode import OpenCodeProvider  # noqa: E402
+from providers.path_mapping import (  # noqa: E402
+    infer_openclaw_host_home,
+    join_host_path,
+    map_host_path_to_container,
+    normalize_host_path,
+)
 from providers.registry import ProviderManifest, ProviderRegistry  # noqa: E402
 
 
@@ -215,6 +221,173 @@ class ProviderSdkBackendTests(unittest.TestCase):
         row = next(item for item in profiles if item["profile"] == long_profile)
         self.assertEqual("gpt-5.6-sol", row["model"])
         self.assertNotIn("gpt-5.6-sol", row["profile"])
+
+    def test_windows_openclaw_paths_map_to_linux_mount(self):
+        container_root = self.root / "openclaw"
+        (container_root / "workspace").mkdir(parents=True)
+        (container_root / "workspace-andy").mkdir()
+        self.assertEqual(r"C:\Users\ExampleUser\.openclaw", normalize_host_path(r"C:\Users\ExampleUser\.openclaw\."))
+        self.assertEqual(r"C:\Users\ExampleUser\.openclaw\workspace\uploads", join_host_path(r"C:\Users\ExampleUser\.openclaw", "workspace", "uploads"))
+        self.assertEqual(
+            str(container_root / "workspace"),
+            map_host_path_to_container(
+                r"C:\Users\ExampleUser\.openclaw\workspace",
+                host_root=r"C:\Users\ExampleUser\.openclaw",
+                container_root=str(container_root),
+            ),
+        )
+        self.assertEqual(
+            str(container_root / "workspace-andy"),
+            map_host_path_to_container(
+                r"C:\.openclaw\workspace-andy",
+                host_root=r"C:\Users\ExampleUser\.openclaw",
+                container_root=str(container_root),
+            ),
+        )
+        self.assertEqual(
+            r"C:\Users\ExampleUser\.openclaw",
+            infer_openclaw_host_home([{"id": "main", "workspace": r"C:\Users\ExampleUser\.openclaw\workspace"}]),
+        )
+        self.assertNotIn("C:\\", map_host_path_to_container(
+            r"C:\Users\ExampleUser\.openclaw\workspace",
+            host_root=r"C:\Users\ExampleUser\.openclaw",
+            container_root=str(container_root),
+        ))
+
+    def test_openclaw_provider_reads_windows_workspace_identities_from_mount(self):
+        container_root = self.root / "mounted-openclaw"
+        main_workspace = container_root / "workspace"
+        andy_workspace = container_root / "workspace-andy"
+        main_workspace.mkdir(parents=True)
+        andy_workspace.mkdir()
+        (main_workspace / "IDENTITY.md").write_text("- **Name:** News\n- **Emoji:** 📰\n", encoding="utf-8")
+        (andy_workspace / "IDENTITY.md").write_text("- **Name:** Andy\n- **Emoji:** 🛠️\n", encoding="utf-8")
+        (container_root / "openclaw.json").write_text(json.dumps({
+            "agents": {"list": [
+                {"id": "main", "workspace": r"C:\Users\ExampleUser\.openclaw\workspace"},
+                {"id": "andy", "workspace": r"C:\.openclaw\workspace-andy"},
+            ]},
+        }), encoding="utf-8")
+        provider = OpenClawOfficeProvider({
+            "workspaceBase": str(container_root),
+            "gatewayWorkspaceBase": r"C:\Users\ExampleUser\.openclaw",
+        })
+        rows = {row["id"]: row for row in provider.discover_agents()}
+        self.assertEqual("News", rows["main"]["name"])
+        self.assertEqual("Andy", rows["andy"]["name"])
+        self.assertEqual(str(main_workspace), rows["main"]["workspace"])
+        self.assertEqual(str(andy_workspace), rows["andy"]["workspace"])
+
+    def test_hermes_rejects_invalid_windows_and_directory_binary_mounts(self):
+        home = self.root / "hermes-invalid-bin"
+        home.mkdir()
+        binary_directory = self.root / "hermes-directory"
+        binary_directory.mkdir()
+        directory_provider = HermesProvider(home_path=str(home), binary=str(binary_directory), enabled=True)
+        self.assertFalse(directory_provider.is_available())
+        self.assertIn("not a file", directory_provider.test()["error"])
+        self.assertEqual([], directory_provider.discover_agents())
+
+        windows_binary = self.root / "hermes.exe"
+        windows_binary.write_bytes(b"MZ\x00\x00")
+        windows_binary.chmod(0o755)
+        windows_provider = HermesProvider(home_path=str(home), binary=str(windows_binary), enabled=True)
+        self.assertFalse(windows_provider.is_available())
+        self.assertIn("Windows Hermes", windows_provider.test()["error"])
+
+    def test_gateway_info_proxy_hides_operator_credentials_and_rpc_is_whitelisted(self):
+        with mock.patch.object(server, "_read_gateway_config", return_value=("ws://host.docker.internal:18789", "operator-secret")), \
+             mock.patch.object(server, "OPENCLAW_BROWSER_TRANSPORT", "proxy"):
+            payload = server._gateway_info_payload()
+        self.assertEqual("proxy", payload["transport"])
+        self.assertEqual("", payload["gatewayUrl"])
+        self.assertNotIn("token", payload)
+        self.assertTrue(payload["tokenConfigured"])
+
+        with mock.patch.object(server, "_gateway_rpc_call", return_value={"ok": True, "payload": {"messages": []}}) as gateway_call:
+            result = server._handle_openclaw_proxy_rpc({"method": "chat.history", "params": {"sessionKey": "agent:main:main", "limit": 9000}})
+        self.assertTrue(result["ok"])
+        self.assertEqual(1000, gateway_call.call_args.args[1]["limit"])
+        self.assertTrue(gateway_call.call_args.kwargs["preserve_envelope"])
+        denied = server._handle_openclaw_proxy_rpc({"method": "agents.delete", "params": {"agentId": "main"}})
+        self.assertFalse(denied["ok"])
+        self.assertEqual(403, denied["_status"])
+        with mock.patch.object(server, "_gateway_rpc_call", return_value={
+            "ok": False,
+            "error": {"message": "Unknown session", "code": "not_found"},
+            "_gatewayResponse": True,
+        }):
+            gateway_error = server._handle_openclaw_proxy_rpc({"method": "sessions.describe", "params": {"key": "missing"}})
+        self.assertFalse(gateway_error["ok"])
+        self.assertNotIn("_status", gateway_error)
+        self.assertNotIn("_gatewayResponse", gateway_error)
+
+        with mock.patch.object(server, "_read_gateway_config", return_value=("ws://127.0.0.1:18789", "legacy-secret")), \
+             mock.patch.object(server, "OPENCLAW_BROWSER_TRANSPORT", "direct"):
+            direct = server._gateway_info_payload()
+        self.assertEqual("legacy-secret", direct["token"])
+        self.assertEqual("ws://127.0.0.1:18789", direct["gatewayUrl"])
+
+    def test_hermes_host_api_is_discovered_without_linux_cli(self):
+        class ApiClient:
+            def __init__(self, base_url=None, api_key=None, timeout_sec=None):
+                self.base_url = base_url
+
+            @staticmethod
+            def health():
+                return {"status": "healthy"}
+
+            @staticmethod
+            def capabilities():
+                return {"model": "hermes-model", "features": {"run_submission": True, "run_events_sse": True}}
+
+        provider = mock.Mock()
+        provider.discover_agents.return_value = []
+        config = {
+            **server.VW_CONFIG,
+            "hermes": {
+                **server.VW_CONFIG["hermes"],
+                "apiUrl": "http://host.docker.internal:8642",
+                "apiKey": "server-only-key",
+                "connections": [],
+            },
+        }
+        with mock.patch.object(server, "VW_CONFIG", config), \
+             mock.patch.object(server, "HERMES_ENABLED", True), \
+             mock.patch.object(server, "_hermes_provider", return_value=provider), \
+             mock.patch.object(server, "HermesApiClient", ApiClient):
+            rows = server._discover_hermes_agents()
+        self.assertEqual(1, len(rows))
+        self.assertEqual("hermes-default", rows[0]["id"])
+        self.assertTrue(rows[0]["apiAvailable"])
+        self.assertFalse(rows[0]["cliAvailable"])
+        self.assertEqual(["api"], rows[0]["connectionModes"])
+
+        connection_config = {
+            **config,
+            "hermes": {
+                **config["hermes"],
+                "connections": [{
+                    "id": "windows",
+                    "apiUrl": "http://host.docker.internal:8643",
+                    "apiKey": "connection-key",
+                    "enabled": True,
+                }],
+            },
+        }
+        with mock.patch.object(server, "VW_CONFIG", connection_config):
+            api_config = server._hermes_profile_api_config("windows")
+        self.assertEqual("http://host.docker.internal:8643", api_config["url"])
+        self.assertEqual("connection-key", api_config["key"])
+        self.assertFalse(api_config["autoStart"])
+
+        native = mock.Mock()
+        native.test.return_value = {"ok": False, "error": "Linux CLI unavailable", "agents": []}
+        manifest = ProviderManifest(id="hermes", name="Hermes", capabilities={"health": True})
+        office = HermesOfficeProvider(native, {"hermesDiscover": lambda: rows}, manifest)
+        health = office.test()
+        self.assertTrue(health["ok"])
+        self.assertEqual("api", health["transport"])
 
     def test_settings_save_dispatch_preserves_existing_secret(self):
         config = {

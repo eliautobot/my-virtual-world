@@ -40,10 +40,31 @@ git clone https://github.com/eliautobot/my-virtual-world.git
 cd my-virtual-world
 ```
 
-2. Create your local environment file:
+2. Configure the local environment.
+
+Linux and macOS:
 
 ```bash
 cp .env.example .env
+```
+
+Windows PowerShell with OpenClaw installed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\configure-docker-windows.ps1
+```
+
+The Windows helper validates `%USERPROFILE%\.openclaw`, writes the real
+drive-letter path to `.env`, keeps OpenClaw Gateway port `18789` private, and
+disables Linux-only CLI mounts that cannot execute in a Linux container. It
+finishes by validating the Compose configuration without starting anything.
+
+If the browser will open the world from another device, pass a browser-reachable
+realtime URL:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\configure-docker-windows.ps1 `
+  -RealtimeBrowserUrl ws://<windows-pc-name-or-tailnet-ip>:8591
 ```
 
 3. Optional: change the outside browser port.
@@ -133,8 +154,7 @@ When the app runs in Docker, it is inside a container. The container cannot auto
 
 | Host path | Container path | Purpose |
 | --- | --- | --- |
-| `~/.openclaw` | `/openclaw` | OpenClaw home and workspace files |
-| `~/.openclaw/workspace/uploads` | `/openclaw/workspace/uploads` | Shared uploaded files |
+| `~/.openclaw` on Linux, `%USERPROFILE%\.openclaw` on Windows | `/openclaw` | OpenClaw home, workspaces, and shared uploads |
 | `~/.hermes` | `/home/vw/.hermes` | Hermes profiles and config |
 | `~/.local/bin/hermes` | `/home/vw/.local/bin/hermes` | Hermes CLI |
 | `~/.local/share/uv` | `/home/vw/.local/share/uv` | Hermes/uv runtime support |
@@ -148,6 +168,17 @@ In `Settings > Connections`, use these default Docker values:
 | OpenClaw Home | `/openclaw` |
 | Gateway URL | `ws://host.docker.internal:18789` |
 | Gateway Token | Leave blank unless your gateway requires one |
+
+Interactive browser chat uses My Virtual World's same-origin server proxy by
+default. The container connects to `host.docker.internal:18789`; browsers use
+only port `8590` and never receive the Gateway operator token. Do not publish
+port `18789` to repair a remote-browser connection.
+
+OpenClaw can record Windows workspaces such as
+`C:\Users\name\.openclaw\workspace`. My Virtual World maps those host paths to
+the `/openclaw` container mount before reading Agent Desk resources, skills,
+uploads, or identity files. Linux paths continue to use their normal POSIX
+mapping.
 
 For local development without Docker, use:
 
@@ -191,6 +222,27 @@ If Hermes does not work:
 - Confirm `~/.hermes` exists.
 - Confirm the Hermes binary exists at `~/.local/bin/hermes`.
 - If you do not use Hermes, set `VW_HERMES_ENABLED=false` in `.env` or turn it off in Settings.
+
+#### Hermes on Windows
+
+Docker Desktop runs the app in a Linux container. A Windows `.exe`, `.cmd`, or
+PowerShell launcher cannot be used as `VW_HERMES_BIN` inside that container.
+Choose one of these supported topologies:
+
+- Run a Linux Hermes CLI/runtime in Docker and mount its Linux home and binary.
+- Run Hermes on Windows as an HTTP API and connect from the container through
+  `host.docker.internal`.
+
+For a Windows-hosted API on port `8642`, rerun the helper with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\configure-docker-windows.ps1 `
+  -HermesApiUrl http://host.docker.internal:8642
+```
+
+The agent appears connected only after the API health and streaming capability
+checks pass. Saved history remains visible but is labeled offline when the API
+or CLI is unavailable.
 
 ## Optional Agent Browser Hosting
 

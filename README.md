@@ -136,6 +136,7 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_OPENCLAW_PATH` | `/openclaw` | Mounted OpenClaw home path |
 | `VW_OPENCLAW_HOST_PATH` | `~/.openclaw` | Host OpenClaw home path used when Gateway creates agent workspaces |
 | `VW_GATEWAY_URL` | `ws://host.docker.internal:18789` | OpenClaw gateway WebSocket URL |
+| `VW_OPENCLAW_BROWSER_TRANSPORT` | `proxy` | Keep Gateway access server-side and carry browser chat through port 8590 |
 | `VW_REALTIME_ENABLED` | `true` | Enable the Colyseus realtime runtime config used by Agent Live Mode |
 | `VW_REALTIME_BROWSER_URL` | `ws://127.0.0.1:8591` | Browser-reachable realtime URL for this self-hosted install |
 | `VW_REALTIME_HOST_PORT` | `8591` | Outside Docker host port for the realtime sidecar |
@@ -153,6 +154,23 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_LICENSE_PRODUCT_IDS` | `1140366` | Lemon Squeezy product ID list accepted by My Virtual World |
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for more detail.
+
+### Windows Docker Setup
+
+Docker Desktop runs Linux containers, so Windows drive-letter workspace paths
+and Windows executables need explicit handling. From PowerShell, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\configure-docker-windows.ps1
+```
+
+This maps `%USERPROFILE%\.openclaw` to `/openclaw`, enables the secure
+same-origin OpenClaw chat proxy, disables invalid Linux CLI mounts, and validates
+Compose. A Windows-hosted Hermes API can be enabled with
+`-HermesApiUrl http://host.docker.internal:8642`; a Windows Hermes executable
+cannot run inside the Linux app container. See
+[docs/INSTALLATION.md](docs/INSTALLATION.md) for remote-browser and Hermes
+examples.
 
 ## Connecting OpenClaw, Hermes, and Codex
 
@@ -182,6 +200,7 @@ These values match the Docker mounts in `docker-compose.yml`:
 
 - OpenClaw home is mounted into the container at `/openclaw`.
 - The OpenClaw gateway is reached from inside Docker at `ws://host.docker.internal:18789`.
+- Browser chat stays on the My Virtual World origin and does not need direct access to port `18789`.
 - Hermes home is mounted at `/home/vw/.hermes`.
 - The Hermes CLI is discovered from the mounted Hermes home, usually `/home/vw/.hermes/hermes-agent/hermes`.
 - Codex home is mounted at `/home/vw/.codex`; override `VW_CODEX_BIN` if your Codex binary is installed somewhere else.

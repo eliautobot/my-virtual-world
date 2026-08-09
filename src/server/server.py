@@ -12,6 +12,7 @@ import gzip
 import hashlib
 import hmac
 import http.server
+from http.cookies import SimpleCookie
 import importlib.util
 import inspect
 import json
@@ -72,9 +73,21 @@ except Exception as e:
 
 try:
     from providers.builtin import build_provider_registry
+    from providers.path_mapping import (
+        infer_openclaw_host_home,
+        is_windows_absolute,
+        join_host_path,
+        map_host_path_to_container,
+        normalize_host_path,
+    )
     from providers.registry import CONTRACT_VERSION as PROVIDER_CONTRACT_VERSION
 except Exception as e:
     build_provider_registry = None
+    infer_openclaw_host_home = None
+    is_windows_absolute = lambda _path: False
+    join_host_path = os.path.join
+    map_host_path_to_container = None
+    normalize_host_path = lambda path: os.path.abspath(os.path.expanduser(str(path or "")))
     PROVIDER_CONTRACT_VERSION = "1.1"
     print(f"⚠️  Virtual World Provider SDK unavailable: {e}")
 
@@ -117,6 +130,12 @@ def _env_int(key, fallback, *, minimum=None, maximum=None):
 PORT = int(_env_or("VW_PORT", "8590"))
 PUBLIC_HOST_PORT = _env_or("VW_HOST_PORT", str(PORT))
 PUBLIC_ORIGIN = _env_or("VW_PUBLIC_ORIGIN", f"http://127.0.0.1:{PUBLIC_HOST_PORT}")
+OPENCLAW_BROWSER_TRANSPORT = str(_env_or("VW_OPENCLAW_BROWSER_TRANSPORT", "proxy")).strip().lower()
+if OPENCLAW_BROWSER_TRANSPORT not in {"proxy", "direct"}:
+    OPENCLAW_BROWSER_TRANSPORT = "proxy"
+_OPENCLAW_PROXY_COOKIE_NAME = "vw_openclaw_proxy"
+_OPENCLAW_PROXY_SECRET = secrets.token_urlsafe(32)
+_OPENCLAW_PROXY_METHODS = {"sessions.describe", "chat.history", "chat.send", "chat.abort"}
 DATA_DIR = _env_or("VW_DATA_DIR", "/data")
 CHUNKS_DIR = os.path.join(DATA_DIR, "chunks")
 BUILDINGS_DIR = os.path.join(DATA_DIR, "buildings")
@@ -298,7 +317,19 @@ def _load_vw_config():
     cfg["world"]["chatBubbles"] = _normalize_chat_bubble_settings(cfg["world"].get("chatBubbles"))
     cfg["chat"] = _normalize_chat_settings(cfg.get("chat"))
     cfg["openclaw"]["homePath"] = os.path.expanduser(_env_or("VW_OPENCLAW_PATH", cfg["openclaw"].get("homePath") or "~/.openclaw"))
-    cfg["openclaw"]["hostHomePath"] = os.path.expanduser(_env_or("VW_OPENCLAW_HOST_PATH", cfg["openclaw"].get("hostHomePath") or cfg["openclaw"]["homePath"]))
+    configured_host_home = _env_or("VW_OPENCLAW_HOST_PATH", cfg["openclaw"].get("hostHomePath") or cfg["openclaw"]["homePath"])
+    configured_agents = []
+    try:
+        with open(os.path.join(cfg["openclaw"]["homePath"], "openclaw.json"), "r", encoding="utf-8") as handle:
+            configured_agents = (json.load(handle).get("agents") or {}).get("list") or []
+    except (OSError, ValueError, TypeError):
+        configured_agents = []
+    inferred_host_home = infer_openclaw_host_home(configured_agents) if callable(infer_openclaw_host_home) else ""
+    # Docker Compose on Windows can expand an unset HOME to '/.openclaw'.
+    # Prefer the authoritative Gateway workspace root in that specific case.
+    if inferred_host_home and (str(configured_host_home).strip() in {"", "/.openclaw"}):
+        configured_host_home = inferred_host_home
+    cfg["openclaw"]["hostHomePath"] = normalize_host_path(configured_host_home)
     cfg["openclaw"]["gatewayUrl"] = _env_or("VW_GATEWAY_URL", cfg["openclaw"].get("gatewayUrl") or "")
     cfg["openclaw"]["gatewayToken"] = _env_or("VW_GATEWAY_TOKEN", _env_or("OPENCLAW_GATEWAY_TOKEN", cfg["openclaw"].get("gatewayToken") or ""))
     cfg["hermes"]["enabled"] = str(_env_or("VW_HERMES_ENABLED", cfg["hermes"].get("enabled", True))).lower() not in ("0", "false", "no", "off")
@@ -494,6 +525,8 @@ def _context_window_for_model(model, provider="", cfg=None):
 def _display_user_home_path(path):
     if not path or not isinstance(path, str):
         return path
+    if is_windows_absolute(path):
+        return normalize_host_path(path)
     home = os.path.expanduser("~").rstrip(os.sep)
     normalized = os.path.abspath(os.path.expanduser(path))
     if home and normalized == home:
@@ -535,7 +568,7 @@ CODEX_REGISTER_NATIVE_AGENTS = bool(VW_CONFIG["codex"].get("registerNativeAgents
 UPLOADS_DIR = _env_or("VW_UPLOADS_DIR", os.path.join(WORKSPACE_BASE, "workspace", "uploads"))
 UPLOADS_HOST_DIR = _env_or(
     "VW_UPLOADS_HOST_DIR",
-    os.path.join(HOST_WORKSPACE_BASE, "workspace", "uploads")
+    join_host_path(HOST_WORKSPACE_BASE, "workspace", "uploads")
 )
 
 # Ensure directories exist
@@ -726,7 +759,7 @@ def _save_vw_config_update(body):
     CODEX_INCLUDE_NATIVE_AGENTS = bool(VW_CONFIG["codex"].get("includeNativeAgents", True))
     CODEX_REGISTER_NATIVE_AGENTS = bool(VW_CONFIG["codex"].get("registerNativeAgents", True))
     UPLOADS_DIR = _env_or("VW_UPLOADS_DIR", os.path.join(WORKSPACE_BASE, "workspace", "uploads"))
-    UPLOADS_HOST_DIR = _env_or("VW_UPLOADS_HOST_DIR", os.path.join(HOST_WORKSPACE_BASE, "workspace", "uploads"))
+    UPLOADS_HOST_DIR = _env_or("VW_UPLOADS_HOST_DIR", join_host_path(HOST_WORKSPACE_BASE, "workspace", "uploads"))
     if _gateway_config_key() != old_gateway_config:
         restart_gateway_presence()
     live_mode_runtime = None
@@ -20898,14 +20931,94 @@ def _codex_provider():
 
 
 def _discover_hermes_agents():
-    provider = _hermes_provider()
-    if not provider:
+    if not HERMES_ENABLED:
         return []
+    provider = _hermes_provider()
+    rows = []
     try:
-        return provider.discover_agents()
+        rows = provider.discover_agents() if provider else []
     except Exception as e:
         print(f"⚠️  Virtual World Hermes discovery failed: {e}")
-        return []
+    rows = rows if isinstance(rows, list) else []
+
+    # A Windows Hermes executable cannot run in this Linux container. Support
+    # the valid cross-platform topology instead: Hermes runs on the host and
+    # Virtual World reaches its authenticated HTTP API through
+    # host.docker.internal. API-only connections are real agents only while
+    # their health and streaming capabilities are reachable.
+    hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+    candidates = []
+    configured_connections = hermes_cfg.get("connections") if isinstance(hermes_cfg.get("connections"), list) else []
+    for item in configured_connections:
+        if not isinstance(item, dict) or item.get("enabled") is False or not str(item.get("apiUrl") or "").strip():
+            continue
+        candidates.append({
+            "id": str(item.get("id") or "default").strip() or "default",
+            "name": str(item.get("name") or "Hermes").strip() or "Hermes",
+            "emoji": str(item.get("emoji") or "⚕️").strip() or "⚕️",
+            "role": str(item.get("role") or "Hermes Agent").strip() or "Hermes Agent",
+            "url": str(item.get("apiUrl") or "").strip(),
+            "key": str(item.get("apiKey") or ""),
+        })
+    if str(hermes_cfg.get("apiUrl") or "").strip() and not any(item["id"] == "default" for item in candidates):
+        candidates.append({
+            "id": "default",
+            "name": "Hermes",
+            "emoji": "⚕️",
+            "role": "Hermes Agent",
+            "url": str(hermes_cfg.get("apiUrl") or "").strip(),
+            "key": str(hermes_cfg.get("apiKey") or ""),
+        })
+
+    existing = {str(item.get("profile") or item.get("providerAgentId") or "default"): item for item in rows}
+    for candidate in candidates:
+        if HermesApiClient is None:
+            break
+        try:
+            client = HermesApiClient(base_url=candidate["url"], api_key=candidate["key"], timeout_sec=5)
+            health = client.health()
+            if health.get("status") not in {"ok", "healthy"} and health.get("ok") is not True:
+                continue
+            capabilities = client.capabilities()
+            features = capabilities.get("features") if isinstance(capabilities.get("features"), dict) else {}
+            if not (features.get("run_submission") and features.get("run_events_sse")):
+                continue
+        except Exception:
+            continue
+        profile = candidate["id"]
+        if profile in existing:
+            row = existing[profile]
+            row["apiAvailable"] = True
+            row["connectionModes"] = sorted(set(row.get("connectionModes") or []) | {"cli", "api"})
+            if not row.get("model"):
+                row["model"] = capabilities.get("model") or capabilities.get("model_name") or ""
+            continue
+        safe_profile = HermesProvider._safe_suffix(profile) if HermesProvider else re.sub(r"[^A-Za-z0-9_.-]+", "-", profile)
+        row = {
+            "id": f"hermes-{safe_profile}",
+            "statusKey": f"hermes-{safe_profile}",
+            "providerKind": "hermes",
+            "providerType": "runtime",
+            "providerAgentId": profile,
+            "providerConnectionId": profile,
+            "profile": profile,
+            "name": candidate["name"],
+            "emoji": candidate["emoji"],
+            "role": candidate["role"],
+            "model": capabilities.get("model") or capabilities.get("model_name") or "",
+            "provider": capabilities.get("provider") or "Hermes API",
+            "gateway": candidate["url"],
+            "workspace": "",
+            "home": "",
+            "lastActiveAt": 0,
+            "source": "hermes-api",
+            "cliAvailable": False,
+            "apiAvailable": True,
+            "connectionModes": ["api"],
+        }
+        rows.append(row)
+        existing[profile] = row
+    return rows
 
 
 def _discover_codex_agents():
@@ -21931,26 +22044,34 @@ def _hermes_profile_api_port(profile):
 def _hermes_profile_api_config(profile):
     profile = profile or "default"
     hermes_cfg = VW_CONFIG.get("hermes", {}) or {}
+    connections = hermes_cfg.get("connections") if isinstance(hermes_cfg.get("connections"), list) else []
+    connection_cfg = next((
+        item for item in connections
+        if isinstance(item, dict)
+        and item.get("enabled") is not False
+        and str(item.get("id") or "default") == str(profile)
+    ), {})
     profile_cfgs = hermes_cfg.get("apiProfiles") if isinstance(hermes_cfg.get("apiProfiles"), dict) else {}
     profile_cfg = profile_cfgs.get(profile) if isinstance(profile_cfgs.get(profile), dict) else {}
-    api_key = profile_cfg.get("apiKey") or hermes_cfg.get("apiKey") or ""
+    api_key = profile_cfg.get("apiKey") or connection_cfg.get("apiKey") or hermes_cfg.get("apiKey") or ""
     auto_start_all = hermes_cfg.get("autoStartProfileApis", True) is not False
+    connection_url = str(connection_cfg.get("apiUrl") or "").strip()
     if profile == "default":
-        url = profile_cfg.get("apiUrl") or hermes_cfg.get("apiUrl") or "http://127.0.0.1:8642"
+        url = profile_cfg.get("apiUrl") or connection_url or hermes_cfg.get("apiUrl") or "http://127.0.0.1:8642"
         auto_start = profile_cfg.get("autoStart", hermes_cfg.get("autoStartDefaultApi", auto_start_all)) is not False
         return {
             "url": url,
             "key": api_key,
-            "autoStart": bool(api_key and auto_start and _is_local_http_url(url)),
+            "autoStart": bool(not connection_url and api_key and auto_start and _is_local_http_url(url)),
             "port": _parse_url_port(url, 8642),
         }
     port = _hermes_profile_api_port(profile)
-    url = profile_cfg.get("apiUrl") or f"http://127.0.0.1:{port}"
+    url = profile_cfg.get("apiUrl") or connection_url or f"http://127.0.0.1:{port}"
     auto_start = profile_cfg.get("autoStart", auto_start_all) is not False
     return {
         "url": url,
         "key": api_key,
-        "autoStart": bool(api_key and auto_start and _is_local_http_url(url)),
+        "autoStart": bool(not connection_url and api_key and auto_start and _is_local_http_url(url)),
         "port": _parse_url_port(url, port),
     }
 
@@ -23261,13 +23382,166 @@ def _gateway_info_payload():
                 ws_port = int(parsed.port)
         except Exception:
             pass
-    return {
+    payload = {
         "wsPort": ws_port,
-        "gatewayUrl": gw_url or "",
-        "token": gw_token or "",
+        "gatewayUrl": (gw_url or "") if OPENCLAW_BROWSER_TRANSPORT == "direct" else "",
         "tokenConfigured": bool(gw_token),
         "openclawVersion": _get_openclaw_version(),
+        "transport": OPENCLAW_BROWSER_TRANSPORT,
+        "rpcUrl": "/api/openclaw/rpc" if OPENCLAW_BROWSER_TRANSPORT == "proxy" else "",
+        "eventsUrl": "/api/openclaw/events" if OPENCLAW_BROWSER_TRANSPORT == "proxy" else "",
     }
+    if OPENCLAW_BROWSER_TRANSPORT == "direct":
+        payload["token"] = gw_token or ""
+    return payload
+
+
+def _openclaw_proxy_cookie_value(handler):
+    try:
+        cookies = SimpleCookie()
+        cookies.load(handler.headers.get("Cookie", ""))
+        morsel = cookies.get(_OPENCLAW_PROXY_COOKIE_NAME)
+        return morsel.value if morsel else ""
+    except Exception:
+        return ""
+
+
+def _openclaw_proxy_same_origin(handler):
+    origin = str(handler.headers.get("Origin") or "").strip()
+    if not origin:
+        return True
+    try:
+        parsed = urllib.parse.urlparse(origin)
+        return parsed.scheme in {"http", "https"} and parsed.netloc.lower() == str(handler.headers.get("Host") or "").lower()
+    except Exception:
+        return False
+
+
+def _openclaw_proxy_authorized(handler):
+    supplied = _openclaw_proxy_cookie_value(handler)
+    return bool(
+        OPENCLAW_BROWSER_TRANSPORT == "proxy"
+        and supplied
+        and hmac.compare_digest(supplied, _OPENCLAW_PROXY_SECRET)
+        and _openclaw_proxy_same_origin(handler)
+    )
+
+
+def _handle_openclaw_proxy_rpc(body):
+    body = body if isinstance(body, dict) else {}
+    method = str(body.get("method") or "").strip()
+    params = body.get("params") if isinstance(body.get("params"), dict) else {}
+    if method not in _OPENCLAW_PROXY_METHODS:
+        return {"ok": False, "error": {"message": f"Gateway method '{method}' is not allowed by the chat proxy", "code": "method_not_allowed"}, "_status": 403}
+    if method == "chat.history":
+        params = dict(params)
+        try:
+            params["limit"] = max(1, min(int(params.get("limit") or 500), 1000))
+        except (TypeError, ValueError):
+            params["limit"] = 500
+    result = _gateway_rpc_call(method, params, timeout=35, preserve_envelope=True)
+    if result.get("ok"):
+        return result
+    if result.pop("_gatewayResponse", False):
+        return result
+    return {
+        "ok": False,
+        "error": {"message": str(result.get("error") or "Gateway request failed"), "code": str(result.get("code") or "gateway_error")},
+        "_status": 502,
+    }
+
+
+async def _stream_openclaw_gateway_events(send_payload):
+    if ws_connect is None:
+        raise RuntimeError("Gateway websocket client is unavailable")
+    gw_url, token = _read_gateway_config()
+    if not gw_url:
+        raise RuntimeError("Gateway URL is not configured")
+    if not token:
+        raise RuntimeError("Gateway token is not configured")
+    origin = _gateway_control_origin()
+    async with ws_connect(
+        gw_url,
+        max_size=1024 * 1024,
+        additional_headers={"Origin": origin},
+        close_timeout=3,
+    ) as websocket:
+        await asyncio.wait_for(websocket.recv(), timeout=5)
+        connect_id = f"vw-chat-proxy-connect-{uuid.uuid4()}"
+        await websocket.send(json.dumps({
+            "type": "req",
+            "id": connect_id,
+            "method": "connect",
+            "params": {
+                "minProtocol": 4,
+                "maxProtocol": 4,
+                "client": {"id": "openclaw-control-ui", "version": _get_openclaw_version(), "platform": "server", "mode": "webchat"},
+                "role": "operator",
+                "scopes": ["operator.read"],
+                "caps": ["tool-events"],
+                "commands": [],
+                "permissions": {},
+                "auth": {"token": token},
+                "locale": "en-US",
+                "userAgent": "virtual-world-chat-proxy/1.0",
+            },
+        }))
+        while True:
+            message = json.loads(await asyncio.wait_for(websocket.recv(), timeout=10))
+            if message.get("id") != connect_id:
+                continue
+            if not message.get("ok"):
+                raise RuntimeError((message.get("error") or {}).get("message") or "Gateway authentication failed")
+            break
+        if not send_payload({"type": "proxy.ready", "payload": {"transport": "server-proxy"}}):
+            return
+        while True:
+            try:
+                raw = await asyncio.wait_for(websocket.recv(), timeout=15)
+            except asyncio.TimeoutError:
+                if not send_payload(None):
+                    return
+                continue
+            try:
+                message = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if message.get("type") == "event" and message.get("event") in {"chat", "agent", "session.message"}:
+                if not send_payload(message):
+                    return
+
+
+def _handle_openclaw_proxy_events(handler):
+    if not _openclaw_proxy_authorized(handler):
+        return handler._send_json({"ok": False, "error": "OpenClaw chat proxy authorization failed"}, 403)
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache, no-store")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.end_headers()
+    connected = True
+
+    def send_payload(payload):
+        nonlocal connected
+        if not connected:
+            return False
+        try:
+            if payload is None:
+                handler.wfile.write(b": keepalive\n\n")
+            else:
+                encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                handler.wfile.write(f"data: {encoded}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+            return True
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            connected = False
+            return False
+
+    try:
+        asyncio.run(_stream_openclaw_gateway_events(send_payload))
+    except Exception as exc:
+        send_payload({"type": "proxy.error", "payload": {"message": str(exc)[:500]}})
 
 
 ##############################################################################
@@ -23293,7 +23567,7 @@ def _run_async_blocking(coro, timeout=30):
         return future.result(timeout=timeout)
 
 
-async def _gateway_rpc_call_async(method, params=None, timeout=20):
+async def _gateway_rpc_call_async(method, params=None, timeout=20, preserve_envelope=False):
     if ws_connect is None:
         return {"ok": False, "error": "Gateway websocket client is unavailable"}
     gw_url, token = _read_gateway_config()
@@ -23348,8 +23622,13 @@ async def _gateway_rpc_call_async(method, params=None, timeout=20):
             if msg.get("id") != req_id:
                 continue
             if not msg.get("ok"):
-                return {"ok": False, "error": (msg.get("error") or {}).get("message", f"{method} failed")}
+                error = msg.get("error") if isinstance(msg.get("error"), dict) else {"message": str(msg.get("error") or f"{method} failed")}
+                if preserve_envelope:
+                    return {"ok": False, "error": error, "_gatewayResponse": True}
+                return {"ok": False, "error": error.get("message", f"{method} failed")}
             payload = msg.get("payload")
+            if preserve_envelope:
+                return {"ok": True, "payload": payload}
             if isinstance(payload, dict):
                 payload.setdefault("ok", True)
                 return payload
@@ -23357,9 +23636,17 @@ async def _gateway_rpc_call_async(method, params=None, timeout=20):
     return {"ok": False, "error": f"{method} timed out"}
 
 
-def _gateway_rpc_call(method, params=None, timeout=20):
+def _gateway_rpc_call(method, params=None, timeout=20, preserve_envelope=False):
     try:
-        return _run_async_blocking(_gateway_rpc_call_async(method, params=params, timeout=timeout), timeout=timeout + 10)
+        return _run_async_blocking(
+            _gateway_rpc_call_async(
+                method,
+                params=params,
+                timeout=timeout,
+                preserve_envelope=preserve_envelope,
+            ),
+            timeout=timeout + 10,
+        )
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -23445,7 +23732,7 @@ def _refresh_agent_roster_after_create():
             _gateway_presence.init_agents([
                 a.get("statusKey") or a.get("id")
                 for a in _agent_roster
-                if a.get("statusKey") or a.get("id")
+                if a.get("available") is not False and (a.get("statusKey") or a.get("id"))
             ], prune=True)
     except Exception as exc:
         print(f"⚠️  Virtual World agent roster refresh failed: {exc}")
@@ -23731,7 +24018,7 @@ def _legacy_agent_create(body):
     role = body.get("role") or "AI assistant"
     prompt = body.get("prompt") or body.get("systemPrompt") or body.get("instructions") or ""
     model = body.get("model") or ""
-    workspace_dir = os.path.join(HOST_WORKSPACE_BASE, f"workspace-{agent_id}")
+    workspace_dir = join_host_path(HOST_WORKSPACE_BASE, f"workspace-{agent_id}")
     try:
         create_params = {"name": name, "workspace": workspace_dir, "emoji": emoji}
         selected_model = model or _default_openclaw_agent_model()
@@ -24149,7 +24436,11 @@ def initialize_live_presence():
     if _presence_enabled:
         return
 
-    agent_ids = [a.get("statusKey") or a.get("id") for a in get_roster() if a.get("statusKey") or a.get("id")]
+    agent_ids = [
+        a.get("statusKey") or a.get("id")
+        for a in get_roster()
+        if a.get("available") is not False and (a.get("statusKey") or a.get("id"))
+    ]
     _gateway_presence.init_agents(agent_ids, prune=True)
 
     try:
@@ -24384,7 +24675,9 @@ _PROVIDER_DISCOVERY_FIELDS = {
 def _openclaw_gateway_home_path():
     explicit = str(os.environ.get("VW_OPENCLAW_GATEWAY_PATH") or "").strip()
     if explicit:
-        return os.path.abspath(os.path.expanduser(explicit))
+        return normalize_host_path(explicit)
+    if HOST_WORKSPACE_BASE:
+        return normalize_host_path(HOST_WORKSPACE_BASE)
     config_path = os.path.join(WORKSPACE_BASE, "openclaw.json")
     try:
         with open(config_path, "r", encoding="utf-8") as handle:
@@ -24397,11 +24690,12 @@ def _openclaw_gateway_home_path():
     )
     for item in ordered:
         workspace = str(item.get("workspace") or "").strip()
-        if not os.path.isabs(workspace):
+        if not (os.path.isabs(workspace) or is_windows_absolute(workspace)):
             continue
-        basename = os.path.basename(os.path.normpath(workspace))
+        module = __import__("ntpath") if is_windows_absolute(workspace) else os.path
+        basename = module.basename(module.normpath(workspace))
         if basename == "workspace" or basename.startswith("workspace-"):
-            return os.path.dirname(os.path.normpath(workspace))
+            return module.dirname(module.normpath(workspace))
     return WORKSPACE_BASE
 
 
@@ -30568,7 +30862,9 @@ def get_roster(meta=None):
         if _gateway_presence:
             try:
                 _gateway_presence.init_agents([
-                    a.get("statusKey") or a.get("id") for a in _agent_roster if a.get("statusKey") or a.get("id")
+                    a.get("statusKey") or a.get("id")
+                    for a in _agent_roster
+                    if a.get("available") is not False and (a.get("statusKey") or a.get("id"))
                 ], prune=True)
             except Exception:
                 pass
@@ -30942,6 +31238,16 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_private_json(self, data, status=200):
+        body = json.dumps(data).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send_json_cached(self, data):
         body = json.dumps(data).encode("utf-8")
         etag = '"' + hashlib.sha256(body).hexdigest()[:24] + '"'
@@ -30958,6 +31264,21 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("ETag", etag)
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_gateway_info(self):
+        body = json.dumps(_gateway_info_payload()).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if OPENCLAW_BROWSER_TRANSPORT == "proxy":
+            self.send_header(
+                "Set-Cookie",
+                f"{_OPENCLAW_PROXY_COOKIE_NAME}={_OPENCLAW_PROXY_SECRET}; Path=/api/openclaw; HttpOnly; SameSite=Strict",
+            )
         self.end_headers()
         self.wfile.write(body)
 
@@ -31025,11 +31346,20 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         # Browser-visible chat history may contain host paths. Map them to the
         # container's configured, read-only/read-write public upload roots.
         candidates = []
-        if os.path.isabs(requested):
-            candidates.append(requested)
-            host_upload_root = os.path.join(HOST_WORKSPACE_BASE, "workspace", "uploads")
-            if requested.startswith(host_upload_root + os.sep):
-                candidates.append(os.path.join(UPLOADS_DIR, os.path.relpath(requested, host_upload_root)))
+        if os.path.isabs(requested) or is_windows_absolute(requested):
+            if is_windows_absolute(requested) and callable(map_host_path_to_container):
+                mapped = map_host_path_to_container(
+                    requested,
+                    host_root=HOST_WORKSPACE_BASE,
+                    container_root=WORKSPACE_BASE,
+                )
+                if mapped:
+                    candidates.append(mapped)
+            else:
+                candidates.append(requested)
+                host_upload_root = join_host_path(HOST_WORKSPACE_BASE, "workspace", "uploads")
+                if requested.startswith(host_upload_root + os.sep):
+                    candidates.append(os.path.join(UPLOADS_DIR, os.path.relpath(requested, host_upload_root)))
         else:
             candidates.append(os.path.join(UPLOADS_DIR, requested))
             candidates.append(os.path.join(STATUS_DIR, "uploads", requested))
@@ -31253,6 +31583,10 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 agent_status = status.get(status_key, {}) or status.get(agent.get("id"), {})
                 a["status"] = agent_status.get("state", agent_status.get("status", "offline"))
                 a["task"] = agent_status.get("task", "")
+                a["providerAvailable"] = agent.get("available") is not False
+                if not a["providerAvailable"]:
+                    a["status"] = "offline"
+                    a["task"] = "Provider unavailable — saved history only"
                 a["homeBuilding"] = assignments.get(status_key, assignments.get(agent["id"], {})).get("home")
                 a["workBuilding"] = assignments.get(status_key, assignments.get(agent["id"], {})).get("work")
                 profile = (meta.get("agentProfiles", {}) or {}).get(status_key) or (meta.get("agentProfiles", {}) or {}).get(agent.get("id")) or {}
@@ -31615,7 +31949,10 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         # ─── CHAT INTERFACE ENDPOINTS ─────────────────────────────
         if path == "/gateway-info":
-            return self._send_json(_gateway_info_payload())
+            return self._send_gateway_info()
+
+        if path == "/api/openclaw/events":
+            return _handle_openclaw_proxy_events(self)
 
         if path == "/agents-list":
             # Return agent roster formatted for chat agent selector
@@ -31658,6 +31995,9 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                     "providerType": a.get("providerType", "runtime"),
                     "providerAgentId": a.get("providerAgentId", a["id"]),
                     "providerConnectionId": a.get("providerConnectionId", "default"),
+                    "available": a.get("available") is not False,
+                    "connectionState": a.get("connectionState") or ("connected" if a.get("available") is not False else "offline"),
+                    "offlineSince": a.get("offlineSince"),
                     "capabilities": a.get("capabilities") if isinstance(a.get("capabilities"), dict) else {},
                     "model": a.get("model", ""),
                     "provider": a.get("provider", ""),
@@ -31755,6 +32095,16 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+
+        if path == "/api/openclaw/rpc":
+            if not _openclaw_proxy_authorized(self):
+                return self._send_private_json({"ok": False, "error": {"message": "OpenClaw chat proxy authorization failed", "code": "proxy_unauthorized"}}, 403)
+            try:
+                body = self._read_body() or {}
+            except (ValueError, TypeError):
+                return self._send_private_json({"ok": False, "error": {"message": "Request body must be valid JSON", "code": "invalid_json"}}, 400)
+            result = _handle_openclaw_proxy_rpc(body)
+            return self._send_private_json(result, int(result.pop("_status", 200 if result.get("ok") else 502)))
 
         if path in {"/setup/save", "/api/settings"}:
             result, status = _save_vw_config_update(self._read_body() or {})
@@ -32575,7 +32925,7 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 ts = int(time.time() * 1000)
                 safe_name = f"{ts}_{filename}"
                 dest = os.path.join(UPLOADS_DIR, safe_name)
-                host_path = os.path.join(UPLOADS_HOST_DIR, safe_name)
+                host_path = join_host_path(UPLOADS_HOST_DIR, safe_name)
                 try:
                     raw = base64.b64decode(data["content"])
                     with open(dest, "wb") as f:

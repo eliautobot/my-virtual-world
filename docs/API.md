@@ -130,7 +130,9 @@ The starter Office appliance repair is narrow. It only restores mount metadata w
 | GET | `/api/presence/<agent-id>` | One agent presence record. |
 | GET | `/api/presence/debug` | Presence debug information. |
 | GET | `/api/agent-chat` | Chat/activity payload for visible agent bubbles. |
-| GET | `/gateway-info` | OpenClaw gateway connection info for the browser. |
+| GET | `/gateway-info` | Safe OpenClaw browser transport metadata; in default proxy mode this sets the proxy cookie and omits the Gateway token/URL. |
+| GET | `/api/openclaw/events` | Same-origin OpenClaw chat event stream backed by the server-owned Gateway connection. |
+| POST | `/api/openclaw/rpc` | Same-origin, cookie-protected RPC proxy restricted to chat/session methods required by the UI. |
 | GET | `/session-info` | Current model/context metadata when available. |
 
 Status records are used for visual presence only. They do not grant tool access.

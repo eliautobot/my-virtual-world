@@ -14,7 +14,11 @@
   } = globalThis.VirtualWorldChatMarkdown;
   let GATEWAY_TOKEN = '';
   let GATEWAY_URL = '';
+  let GATEWAY_TRANSPORT = 'proxy';
+  let GATEWAY_RPC_URL = '/api/openclaw/rpc';
+  let GATEWAY_EVENTS_URL = '/api/openclaw/events';
   let ws = null;
+  let gatewayEvents = null;
   let reqId = 0;
   let connected = false;
   let pendingCallbacks = {};
@@ -34,6 +38,9 @@
       const d = await r.json();
       if (d.wsPort) _chatWsPort = d.wsPort;
       GATEWAY_URL = typeof d.gatewayUrl === 'string' ? d.gatewayUrl.trim() : '';
+      GATEWAY_TRANSPORT = d.transport === 'direct' ? 'direct' : 'proxy';
+      GATEWAY_RPC_URL = typeof d.rpcUrl === 'string' && d.rpcUrl ? d.rpcUrl : '/api/openclaw/rpc';
+      GATEWAY_EVENTS_URL = typeof d.eventsUrl === 'string' && d.eventsUrl ? d.eventsUrl : '/api/openclaw/events';
       const nextToken = typeof d.token === 'string' ? d.token : '';
       if (nextToken !== lastGatewayToken) {
         gatewayAuthFailed = false;
@@ -740,11 +747,13 @@
           for (const a of agents) {
             const opt = document.createElement('option');
             opt.value = a.key;
-            opt.textContent = `${a.emoji} ${a.name}`;
+            opt.textContent = `${a.emoji} ${a.name}${a.available === false ? ' (offline)' : ''}`;
             opt.dataset.sessionKey = a.sessionKey;
             opt.dataset.agentId = a.agentId;
             opt.dataset.providerKind = a.providerKind || 'openclaw';
             opt.dataset.providerAgentId = a.providerAgentId || a.agentId;
+            opt.dataset.available = a.available === false ? 'false' : 'true';
+            opt.dataset.connectionState = a.connectionState || (a.available === false ? 'offline' : 'connected');
             opt.dataset.capabilities = JSON.stringify(a.capabilities || {});
             opt.dataset.model = a.model || '';
             opt.dataset.provider = a.provider || '';
@@ -802,8 +811,17 @@
       catch (_) { return {}; }
     }
 
+    isSelectedAgentAvailable() {
+      const opt = this.agentSelect?.selectedOptions?.[0];
+      return opt?.dataset?.available !== 'false';
+    }
+
     syncCapabilityControls() {
       const capabilities = this.getSelectedCapabilities();
+      const available = this.isSelectedAgentAvailable();
+      if (this.input) this.input.disabled = !available;
+      if (this.sendBtn) this.sendBtn.disabled = !available;
+      syncWindowAvailabilityStatus(this);
       if (!Object.keys(capabilities).length) return;
       const toggle = (element, supported) => {
         if (!element) return;
@@ -812,10 +830,10 @@
         element.setAttribute('aria-hidden', supported ? 'false' : 'true');
       };
       toggle(this.sessionsToggleBtn, Boolean(capabilities.sessions));
-      toggle(this.sessionsNewBtn, Boolean(capabilities.sessionCreate));
-      toggle(this.newSessionBtn, Boolean(capabilities.sessionCreate));
-      toggle(this.attachBtn, Boolean(capabilities.attachments));
-      toggle(this.stopBtn, Boolean(capabilities.interrupt));
+      toggle(this.sessionsNewBtn, available && Boolean(capabilities.sessionCreate));
+      toggle(this.newSessionBtn, available && Boolean(capabilities.sessionCreate));
+      toggle(this.attachBtn, available && Boolean(capabilities.attachments));
+      toggle(this.stopBtn, available && Boolean(capabilities.interrupt));
       if (!capabilities.sessions && this.sessionsPanelOpen) this.toggleSessionsPanel(false);
     }
 
@@ -1566,6 +1584,10 @@
     }
 
     async sendMessage() {
+      if (!this.isSelectedAgentAvailable()) {
+        this.appendSystem('This provider is offline. Saved history remains available, but new messages are disabled.');
+        return;
+      }
       let text = this.input.value.trim();
       const hasAttachments = this.pendingAttachments.length > 0;
       if ((!text && !hasAttachments) || (!connected && !this.isProviderAgentSelected())) return;
@@ -3860,11 +3882,15 @@
   }
 
   async function connectGateway() {
-    if (ws) return;
+    if (ws || gatewayEvents) return;
     chatWindows.forEach(w => w.setConnectionStatus('Connecting...', 'connecting'));
     await chatUiSettingsReady;
     await loadGatewayInfo();
-    if (ws) return;
+    if (ws || gatewayEvents) return;
+    if (GATEWAY_TRANSPORT === 'proxy') {
+      connectGatewayProxy();
+      return;
+    }
     if (!GATEWAY_URL && !_chatWsPort) {
       chatWindows.forEach(w => w.setConnectionStatus('Gateway unavailable', 'disconnected'));
       return;
@@ -3905,6 +3931,69 @@
     };
   }
 
+  function syncWindowAvailabilityStatus(chatWindow) {
+    if (!connected || !chatWindow) return;
+    const available = chatWindow.isSelectedAgentAvailable();
+    chatWindow.setConnectionStatus(
+      available ? 'Connected ⚡' : 'Offline — saved history only',
+      available ? 'connected' : 'disconnected'
+    );
+  }
+
+  function markGatewayConnected() {
+    connected = true;
+    gatewayAuthFailed = false;
+    gatewayAuthFailureMessage = '';
+    chatWindows.forEach(w => {
+      syncWindowAvailabilityStatus(w);
+      if (w.isPrimary || w.root.classList.contains('open')) {
+        w.fetchSessionInfo();
+        w.loadHistory();
+      }
+    });
+    startModelBarRefresh();
+  }
+
+  function connectGatewayProxy() {
+    if (gatewayEvents) return;
+    let source;
+    try {
+      source = new EventSource(GATEWAY_EVENTS_URL, { withCredentials: true });
+    } catch (_) {
+      chatWindows.forEach(w => w.setConnectionStatus('Gateway proxy unavailable', 'disconnected'));
+      return;
+    }
+    gatewayEvents = source;
+    source.onmessage = (evt) => {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+      if (msg.type === 'proxy.ready') {
+        markGatewayConnected();
+        return;
+      }
+      if (msg.type === 'proxy.error') {
+        connected = false;
+        const message = msg.payload?.message || 'Gateway proxy unavailable';
+        chatWindows.forEach(w => w.setConnectionStatus(message, 'disconnected'));
+        source.close();
+        if (gatewayEvents === source) gatewayEvents = null;
+        if (primaryWindow.root.classList.contains('open')) setTimeout(connectGateway, 3000);
+        return;
+      }
+      if (msg.type === 'event') handleEvent(msg);
+    };
+    source.onerror = () => {
+      if (gatewayEvents !== source) return;
+      connected = false;
+      const terminal = source.readyState === EventSource.CLOSED;
+      chatWindows.forEach(w => w.setConnectionStatus(terminal ? 'Gateway proxy unavailable' : 'Reconnecting...', terminal ? 'disconnected' : 'connecting'));
+      if (terminal) {
+        gatewayEvents = null;
+        if (primaryWindow.root.classList.contains('open')) setTimeout(connectGateway, 3000);
+      }
+    };
+  }
+
   function sendConnect(socket = ws) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     const id = nextId();
@@ -3919,15 +4008,7 @@
     };
     pendingCallbacks[id] = (res) => {
       if (res.ok) {
-        connected = true;
-        chatWindows.forEach(w => {
-          w.setConnectionStatus('Connected ⚡', 'connected');
-          if (w.isPrimary || w.root.classList.contains('open')) {
-            w.fetchSessionInfo();
-            w.loadHistory();
-          }
-        });
-        startModelBarRefresh();
+        markGatewayConnected();
       } else {
         gatewayAuthFailed = true;
         gatewayAuthFailureMessage = `Auth failed: ${res.error?.message || 'unknown'}`;
@@ -3940,7 +4021,19 @@
     socket.send(JSON.stringify(msg));
   }
 
-  function rpc(method, params) {
+  async function rpc(method, params) {
+    if (GATEWAY_TRANSPORT === 'proxy') {
+      if (!connected) throw new Error('Not connected');
+      const response = await fetch(GATEWAY_RPC_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ method, params })
+      });
+      const result = await response.json().catch(() => ({ ok:false, error:{ message:`Gateway proxy HTTP ${response.status}` } }));
+      if (!response.ok && result.ok !== false) result.ok = false;
+      return result;
+    }
     return new Promise((resolve, reject) => {
       if (!ws || !connected) return reject(new Error('Not connected'));
       const id = nextId();
@@ -4930,7 +5023,7 @@
     } else {
       _stopExteriorTabsFollow();
     }
-    if (shouldOpen && !ws) connectGateway();
+    if (shouldOpen && !ws && !gatewayEvents) connectGateway();
     if (shouldOpen) {
       primaryWindow.input.focus();
       primaryWindow.scrollBottom();
@@ -4945,10 +5038,15 @@
     gatewayAuthFailureMessage = '';
     pendingCallbacks = {};
     const oldWs = ws;
+    const oldEvents = gatewayEvents;
     ws = null;
+    gatewayEvents = null;
     connected = false;
     if (oldWs) {
       try { oldWs.close(1000, 'settings updated'); } catch {}
+    }
+    if (oldEvents) {
+      try { oldEvents.close(); } catch {}
     }
     await loadGatewayInfo();
     connectGateway();

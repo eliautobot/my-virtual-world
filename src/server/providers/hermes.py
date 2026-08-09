@@ -43,8 +43,27 @@ class HermesProvider:
         )
         self.binary = self._resolve_binary(self.binary)
 
+    def _binary_problem(self) -> str:
+        if not self.binary:
+            return "Hermes CLI is not configured"
+        if not os.path.exists(self.binary):
+            return f"Hermes CLI not found at {self.binary}"
+        if not os.path.isfile(self.binary):
+            return f"Hermes CLI path is not a file: {self.binary}"
+        if not os.access(self.binary, os.X_OK):
+            return f"Hermes CLI is not executable inside the Linux container: {self.binary}"
+        if str(self.binary).lower().endswith((".exe", ".cmd", ".bat", ".ps1")):
+            return "A Windows Hermes launcher cannot run inside the Linux container; use the Hermes host API or a Linux sidecar"
+        try:
+            with open(self.binary, "rb") as handle:
+                if handle.read(2) == b"MZ":
+                    return "A Windows Hermes executable cannot run inside the Linux container; use the Hermes host API or a Linux sidecar"
+        except OSError as exc:
+            return f"Hermes CLI cannot be read: {exc}"
+        return ""
+
     def is_available(self) -> bool:
-        return bool(self.enabled and self.binary and os.path.exists(self.binary) and self.home_path and os.path.isdir(self.home_path))
+        return bool(self.enabled and not self._binary_problem() and self.home_path and os.path.isdir(self.home_path))
 
     def _subprocess_env(self) -> dict[str, str]:
         """Environment for Hermes CLI calls.
@@ -71,7 +90,9 @@ class HermesProvider:
         if not self.is_available():
             return []
 
-        profiles = self._list_profiles() or [{"profile": "default", "model": "", "gateway": ""}]
+        profiles = self._list_profiles()
+        if not profiles:
+            return []
         agents: list[dict[str, Any]] = []
         for item in profiles:
             profile = item.get("profile") or "default"
@@ -108,8 +129,11 @@ class HermesProvider:
 
     def test(self) -> dict[str, Any]:
         """Check whether Hermes is reachable and return discovered profiles."""
-        if not self.binary or not os.path.exists(self.binary):
-            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}", "agents": []}
+        if not self.enabled:
+            return {"ok": False, "error": "Hermes integration is disabled", "agents": []}
+        binary_problem = self._binary_problem()
+        if binary_problem:
+            return {"ok": False, "error": binary_problem, "agents": []}
         if not self.home_path or not os.path.isdir(self.home_path):
             return {"ok": False, "error": f"Hermes home not found at {self.home_path}", "agents": []}
         try:
@@ -122,8 +146,8 @@ class HermesProvider:
 
     def send_message(self, profile: str, message: str, timeout_sec: int | None = None) -> dict[str, Any]:
         """Send a one-shot message to Hermes and return stdout as the reply."""
-        if not self.binary or not os.path.exists(self.binary):
-            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}", "exitCode": None, "reply": ""}
+        if problem := self._binary_problem():
+            return {"ok": False, "error": problem, "exitCode": None, "reply": ""}
         if not message.strip():
             return {"ok": False, "error": "message is required", "exitCode": None, "reply": ""}
 
@@ -173,8 +197,8 @@ class HermesProvider:
         session continuity by storing the returned ``session_id`` and passing it
         back with ``--resume`` on later turns.
         """
-        if not self.binary or not os.path.exists(self.binary):
-            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}", "exitCode": None, "reply": "", "sessionId": session_id or ""}
+        if problem := self._binary_problem():
+            return {"ok": False, "error": problem, "exitCode": None, "reply": "", "sessionId": session_id or ""}
         if not message.strip():
             return {"ok": False, "error": "message is required", "exitCode": None, "reply": "", "sessionId": session_id or ""}
 
@@ -242,8 +266,8 @@ class HermesProvider:
         whitespace-free token, keeping parsing stable even when titles or
         previews contain runs of spaces.
         """
-        if not self.binary or not os.path.exists(self.binary):
-            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}", "sessions": []}
+        if problem := self._binary_problem():
+            return {"ok": False, "error": problem, "sessions": []}
         cmd = [self.binary]
         if profile and profile != "default":
             cmd.extend(["--profile", profile])
@@ -288,8 +312,8 @@ class HermesProvider:
 
     def export_session(self, profile: str, session_id: str, timeout_sec: int = 30) -> dict[str, Any]:
         """Export one Hermes session through the public CLI JSONL surface."""
-        if not self.binary or not os.path.exists(self.binary):
-            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}", "session": None}
+        if problem := self._binary_problem():
+            return {"ok": False, "error": problem, "session": None}
         if not session_id:
             return {"ok": False, "error": "session_id is required", "session": None}
 
@@ -328,8 +352,8 @@ class HermesProvider:
 
     def create_agent(self, name: str, role: str = "Hermes Agent", model: str | None = None, emoji: str = "⚕️", profile: str | None = None, prompt: str | None = None) -> dict[str, Any]:
         """Create a Hermes profile that Virtual World treats as an agent."""
-        if not self.binary or not os.path.exists(self.binary):
-            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}"}
+        if problem := self._binary_problem():
+            return {"ok": False, "error": problem}
         if not self.home_path or not os.path.isdir(self.home_path):
             return {"ok": False, "error": f"Hermes home not found at {self.home_path}"}
 
@@ -397,8 +421,8 @@ class HermesProvider:
         safe_profile = self._safe_profile_name(profile)
         if safe_profile == "default":
             return {"ok": False, "error": "Cannot delete the default Hermes profile"}
-        if not self.binary or not os.path.exists(self.binary):
-            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}"}
+        if problem := self._binary_problem():
+            return {"ok": False, "error": problem}
 
         result = subprocess.run(
             [self.binary, "profile", "delete", safe_profile, "--yes"],
@@ -450,8 +474,8 @@ class HermesProvider:
         """Delete a Hermes session through the public sessions CLI."""
         if not session_id:
             return {"ok": True, "deleted": False}
-        if not self.binary or not os.path.exists(self.binary):
-            return {"ok": False, "error": f"Hermes CLI not found at {self.binary}"}
+        if problem := self._binary_problem():
+            return {"ok": False, "error": problem}
         cmd = [self.binary]
         if profile and profile != "default":
             cmd.extend(["--profile", profile])
@@ -556,8 +580,10 @@ class HermesProvider:
 
     def _resolve_binary(self, value: str | None) -> str:
         home = os.path.expanduser(self.home_path or os.environ.get("VW_HERMES_HOME") or "~/.hermes")
+        if value:
+            expanded = os.path.expanduser(str(value))
+            return shutil.which(expanded) if os.path.basename(expanded) == expanded and shutil.which(expanded) else expanded
         candidates = [
-            value,
             os.environ.get("VW_HERMES_BIN"),
             shutil.which("hermes"),
             os.path.expanduser("~/.local/bin/hermes"),
@@ -573,7 +599,7 @@ class HermesProvider:
             resolved = shutil.which(expanded) if os.path.basename(expanded) == expanded else expanded
             if resolved and os.path.isfile(resolved) and os.access(resolved, os.X_OK):
                 return resolved
-        return os.path.expanduser(str(value or os.environ.get("VW_HERMES_BIN") or "hermes"))
+        return os.path.expanduser(str(os.environ.get("VW_HERMES_BIN") or "hermes"))
 
     @staticmethod
     def _safe_profile_name(value: str) -> str:

@@ -12,8 +12,7 @@ services:
     volumes:
       - vw-data:/data
       # Agent editing/model switching needs write access to openclaw.json and agent workspace docs.
-      - ~/.openclaw:/openclaw
-      - ~/.openclaw/workspace/uploads:/openclaw/workspace/uploads
+      - ${VW_OPENCLAW_HOST_PATH:-~/.openclaw}:/openclaw
       # Optional native Hermes integration.
       # If your Hermes launcher stores absolute paths, set VW_HERMES_HOME,
       # VW_HERMES_BIN, and VW_HERMES_CONTAINER_UV to matching container paths.
@@ -21,7 +20,7 @@ services:
       - ${VW_HERMES_HOST_BIN:-~/.local/bin/hermes}:${VW_HERMES_BIN:-/home/vw/.local/bin/hermes}:ro
       - ${VW_HERMES_HOST_UV:-~/.local/share/uv}:${VW_HERMES_CONTAINER_UV:-/home/vw/.local/share/uv}:ro
       # Optional native Codex integration. Override VW_CODEX_* if your Codex install lives elsewhere.
-      - ~/.codex:/home/vw/.codex
+      - ${VW_CODEX_HOST_HOME:-~/.codex}:${VW_CODEX_HOME:-/home/vw/.codex}
       # Optional native Claude Code integration.
       - ${VW_CLAUDE_CODE_HOST_HOME:-~/.claude}:${VW_CLAUDE_CODE_HOME:-/home/vw/.claude}
       - ${VW_CLAUDE_CODE_HOST_BIN:-~/.local/bin/claude}:${VW_CLAUDE_CODE_BIN:-/home/vw/.local/bin/claude}:ro
@@ -39,6 +38,7 @@ services:
       - VW_OPENCLAW_PATH=/openclaw
       - VW_OPENCLAW_HOST_PATH=${VW_OPENCLAW_HOST_PATH:-${HOME}/.openclaw}
       - VW_GATEWAY_URL=${VW_GATEWAY_URL:-ws://host.docker.internal:18789}
+      - VW_OPENCLAW_BROWSER_TRANSPORT=${VW_OPENCLAW_BROWSER_TRANSPORT:-proxy}
       - VW_REALTIME_ENABLED=${VW_REALTIME_ENABLED:-true}
       - VW_REALTIME_BROWSER_URL=${VW_REALTIME_BROWSER_URL:-ws://127.0.0.1:8591}
       - VW_REALTIME_URL=${VW_REALTIME_URL:-}

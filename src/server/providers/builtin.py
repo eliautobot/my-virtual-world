@@ -18,6 +18,7 @@ from .claude_code import ClaudeCodeProvider
 from .codex import CodexProvider
 from .file_safety import backup_files
 from .hermes import HermesProvider
+from .path_mapping import is_windows_absolute, map_host_path_to_container, normalize_host_path
 from .registry import ProviderManifest, ProviderRegistry
 
 try:
@@ -254,9 +255,8 @@ class OpenClawOfficeProvider:
     def __init__(self, context: dict[str, Any]) -> None:
         self.context = context
         self.home_path = os.path.abspath(os.path.expanduser(str(context.get("workspaceBase") or "~/.openclaw")))
-        self.gateway_home_path = os.path.abspath(os.path.expanduser(str(
-            context.get("gatewayWorkspaceBase") or self.home_path
-        )))
+        gateway_home = str(context.get("gatewayWorkspaceBase") or self.home_path)
+        self.gateway_home_path = normalize_host_path(gateway_home)
         self.manifest = ProviderManifest(
             id="openclaw",
             name="OpenClaw",
@@ -362,14 +362,16 @@ class OpenClawOfficeProvider:
 
     def _local_workspace(self, workspace: str) -> str:
         """Translate a Gateway/host workspace path into the mounted path."""
-        normalized = os.path.abspath(os.path.expanduser(workspace))
-        try:
-            relative = os.path.relpath(normalized, self.gateway_home_path)
-        except ValueError:
-            return normalized
-        if relative == os.pardir or relative.startswith(os.pardir + os.sep):
-            return normalized
-        return os.path.abspath(os.path.join(self.home_path, relative))
+        mapped = map_host_path_to_container(
+            workspace,
+            host_root=self.gateway_home_path,
+            container_root=self.home_path,
+        )
+        # Windows paths that are not under the configured/mounted OpenClaw
+        # root are intentionally unavailable inside the Linux container.
+        if is_windows_absolute(workspace) and not mapped:
+            return ""
+        return mapped
 
     def create_agent(self, **body: Any) -> dict[str, Any]:
         callback = self.context.get("openclawCreate")
@@ -443,6 +445,8 @@ class OpenClawOfficeProvider:
     @staticmethod
     def _identity(workspace: str) -> dict[str, str]:
         result = {"name": "", "emoji": "", "role": ""}
+        if not workspace:
+            return result
         try:
             text = Path(workspace, "IDENTITY.md").read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -613,6 +617,22 @@ class HermesOfficeProvider(NativeOfficeProvider):
                 "agentDelete": bool(item.get("workspace") or item.get("home")),
             }
         return rows
+
+    def test(self) -> dict[str, Any]:
+        native_result = self.native.test()
+        if native_result.get("ok"):
+            native_result.setdefault("transport", "cli")
+            return native_result
+        rows = self.discover_agents()
+        api_agents = [row for row in rows if row.get("apiAvailable")]
+        if api_agents:
+            return {
+                "ok": True,
+                "transport": "api",
+                "agents": api_agents,
+                "message": f"Connected to {len(api_agents)} Hermes API agent(s)",
+            }
+        return native_result
 
     def send_chat_message(self, profile: str, message: str, **kwargs: Any) -> dict[str, Any]:
         """Route API-connected Hermes agents through their native API transport.

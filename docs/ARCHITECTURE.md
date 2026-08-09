@@ -30,6 +30,17 @@ The app is designed for local machines, LANs, and private VPNs. It is not a publ
 4. The server persists data under `VW_DATA_DIR`.
 5. Provider registry data is merged into the visible agent roster, Agent Desk, chat window, and in-world bubbles according to manifest capabilities.
 
+OpenClaw interactive chat follows a split server-owned transport: the browser
+opens same-origin `/api/openclaw/events` and `/api/openclaw/rpc` connections,
+while the Python server owns the authenticated Gateway WebSocket. This lets
+remote LAN/Tailnet browsers work without direct access to port `18789` or the
+operator token. An explicit legacy `direct` mode remains available.
+
+Docker always uses Linux container paths. `providers/path_mapping.py` interprets
+Windows drive-letter and UNC paths with Windows rules, then maps their OpenClaw
+relative suffixes into the `/openclaw` mount. POSIX paths keep their Linux
+semantics. Unmappable Windows paths are never passed through POSIX `abspath`.
+
 ## World Flow
 
 The client owns most rendering and interactive behavior:

@@ -418,10 +418,18 @@ assert(dockerfile.includes('VW_LICENSE_PRODUCT_IDS=1140366'), 'Dockerfile should
 
 const dockerCompose = read('docker-compose.yml');
 const envExample = read('.env.example');
+const windowsDockerSetup = read('scripts/configure-docker-windows.ps1');
 assert(!/(^|[^A-Za-z0-9_])\/home\/(?!vw\b|kasm-user\b)[A-Za-z0-9._-]+/i.test(dockerCompose), 'docker-compose.yml must not contain host home paths');
 assert(!/\b100\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(dockerCompose), 'docker-compose.yml must not contain private tailnet addresses');
 assert(dockerCompose.includes('${VW_HOST_PORT:-8590}:${VW_PORT:-8590}'), 'docker-compose.yml should support a configurable Docker host port');
 assert(envExample.includes('VW_HOST_PORT=8590'), '.env.example should document the Docker host port');
+assert(dockerCompose.includes('${VW_OPENCLAW_HOST_PATH:-~/.openclaw}:/openclaw'), 'docker-compose.yml should mount the configured Windows or Linux OpenClaw home');
+assert(dockerCompose.includes('VW_OPENCLAW_BROWSER_TRANSPORT=${VW_OPENCLAW_BROWSER_TRANSPORT:-proxy}'), 'docker-compose.yml should default OpenClaw browser chat to the server proxy');
+assert(dockerCompose.includes('${VW_CODEX_HOST_HOME:-~/.codex}:${VW_CODEX_HOME:-/home/vw/.codex}'), 'docker-compose.yml should support an explicit cross-platform Codex home mount');
+assert(envExample.includes('VW_OPENCLAW_BROWSER_TRANSPORT=proxy'), '.env.example should keep Gateway credentials server-side by default');
+for (const token of ['OpenClawHome', 'VW_OPENCLAW_HOST_PATH', 'host.docker.internal:18789', 'VW_OPENCLAW_BROWSER_TRANSPORT', '.docker-disabled', 'docker compose config --quiet']) {
+  assert(windowsDockerSetup.includes(token), `Windows Docker setup missing token: ${token}`);
+}
 assert(dockerCompose.includes('virtual-world-realtime:'), 'docker-compose.yml should start the realtime sidecar by default');
 assert(dockerCompose.includes('target: realtime'), 'docker-compose.yml realtime service should build the Docker realtime target');
 assert(dockerCompose.includes('${VW_REALTIME_HOST_PORT:-8591}:${VW_REALTIME_PORT:-8591}'), 'docker-compose.yml should expose a configurable private realtime sidecar port');
@@ -762,7 +770,7 @@ for (const token of [
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260727-chat-markdown-r1',
   'js/chat-events.js?v=20260808-chat-order-r1',
-  'js/chat.js?v=20260808-tool-call-display-r1',
+  'js/chat.js?v=20260808-windows-linux-r1',
   'css/style.css?v=20260808-chat-order-r1',
   'css/ui-redesign.css?v=20260808-provider-sdk-connections-r1',
   'btn-newAgent',
