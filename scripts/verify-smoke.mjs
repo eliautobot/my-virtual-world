@@ -518,6 +518,8 @@ const jsSyntaxTargets = [
   'src/client/js/main3d.js',
   'src/client/js/agent-characters.js',
   'src/client/js/settings.js',
+  'src/client/js/browser-viewer-url.mjs',
+  'src/client/js/browser-window-controller.mjs',
   'src/client/js/starter-map.mjs',
   'src/client/js/furniture-placement-defaults.mjs',
   'src/client/js/chat.js',
@@ -565,6 +567,10 @@ assert.equal(pyCheck.status, 0, `Python syntax check failed\n${pyCheck.stderr ||
 
 const starterFurnitureParityCheck = spawnSync(process.execPath, ['tests/test_starter_furniture.mjs'], { cwd: root, encoding: 'utf8' });
 assert.equal(starterFurnitureParityCheck.status, 0, `Starter furniture parity check failed\n${starterFurnitureParityCheck.stderr || starterFurnitureParityCheck.stdout}`);
+const browserViewerUrlCheck = spawnSync(process.execPath, ['tests/test_browser_viewer_url.mjs'], { cwd: root, encoding: 'utf8' });
+assert.equal(browserViewerUrlCheck.status, 0, `Browser viewer URL check failed\n${browserViewerUrlCheck.stderr || browserViewerUrlCheck.stdout}`);
+const browserWindowControllerCheck = spawnSync(process.execPath, ['tests/test_browser_window_controller.mjs'], { cwd: root, encoding: 'utf8' });
+assert.equal(browserWindowControllerCheck.status, 0, `Browser window controller check failed\n${browserWindowControllerCheck.stderr || browserWindowControllerCheck.stdout}`);
 const starterFurnitureMigrationCheck = spawnSync('python3', ['-B', 'tests/test_starter_furniture_migration.py'], { cwd: root, encoding: 'utf8' });
 assert.equal(starterFurnitureMigrationCheck.status, 0, `Starter furniture migration check failed\n${starterFurnitureMigrationCheck.stderr || starterFurnitureMigrationCheck.stdout}`);
 const serverRuntimeCollisionCheck = spawnSync(process.execPath, ['scripts/verify-server-runtime-collision-guards.mjs'], { cwd: root, encoding: 'utf8' });
@@ -590,6 +596,39 @@ const dynamicInteriorRoutingJs = read('src/client/js/dynamic-interior-routing.js
 const dynamicExteriorRoutingJs = read('src/client/js/dynamic-exterior-routing.js');
 const styleCss = read('src/client/css/style.css');
 const uiCss = read('src/client/css/ui-redesign.css');
+
+for (const token of [
+  'data-resize="n"',
+  'data-resize="s"',
+  'data-resize="e"',
+  'data-resize="w"',
+  'data-resize="ne"',
+  'data-resize="nw"',
+  'data-resize="se"',
+  'data-resize="sw"',
+  'aria-label="Open Agent Browser"',
+  'aria-label="Open SMS"',
+]) {
+  assert(indexHtml.includes(token), `Agent Browser/mobile toolbar markup missing token: ${token}`);
+}
+for (const token of [
+  'createBrowserWindowController',
+  'browserPanelViewportBounds',
+  "window.matchMedia('(max-width: 640px)')",
+  '20260809-agent-browser-window-r2',
+]) {
+  assert(settingsJs.includes(token), `Agent Browser window behavior missing token: ${token}`);
+}
+for (const token of [
+  '.browser-resize-handle-top',
+  '.browser-resize-handle-bottom-right',
+  'body.browser-window-interacting',
+  '#topBar-right > .toolbar-btn',
+  '#licenseStatusChip { display: none !important; }',
+  '.sms-panel .modal-close',
+]) {
+  assert(uiCss.includes(token), `Agent Browser/SMS responsive CSS missing token: ${token}`);
+}
 
 const deskSpot = { kind: 'desk', apiX: 100, apiZ: 200 };
 assert.equal(isAgentDeskSeatedForAnimation({ _atDesk: true, x: 100, y: 200, _activeWorkSpot: deskSpot }), true, 'docked desk agent should use the seated desk pose');
@@ -903,7 +942,7 @@ for (const token of [
   'js/chat-events.js?v=20260809-commentary-runs-r1',
   'js/chat.js?v=20260809-commentary-runs-r1',
   'css/style.css?v=20260808-chat-order-r1',
-  'css/ui-redesign.css?v=20260809-settings-window-r2',
+  'css/ui-redesign.css?v=20260809-agent-browser-mobile-r2',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-providerFields',
@@ -1927,7 +1966,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260809-provider-endpoints-r1',
+  'js/settings.js?v=20260809-agent-browser-window-r2',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);

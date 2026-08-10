@@ -10,7 +10,7 @@
     <link rel="icon" href="favicon.png" type="image/png">
     <title>My Virtual World</title>
     <link rel="stylesheet" href="css/style.css?v=20260808-chat-order-r1">
-    <link rel="stylesheet" href="css/ui-redesign.css?v=20260809-settings-window-r2">
+    <link rel="stylesheet" href="css/ui-redesign.css?v=20260809-agent-browser-mobile-r2">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
@@ -49,9 +49,9 @@
             <span id="coordDisplay" style="display:none">0, 0</span>
             <span id="fpsDisplay">-- fps</span>
             <span id="licenseStatusChip" class="license-status-chip">Trial</span>
-            <button id="btn-browserPanel" class="toolbar-btn" title="Agent Browser">🌐</button>
-            <button id="btn-smsPanel" class="toolbar-btn" title="SMS">📱</button>
-            <button id="btn-settings" class="toolbar-btn" title="Settings">⚙️</button>
+            <button id="btn-browserPanel" class="toolbar-btn" type="button" title="Agent Browser" aria-label="Open Agent Browser">🌐</button>
+            <button id="btn-smsPanel" class="toolbar-btn" type="button" title="SMS" aria-label="Open SMS">📱</button>
+            <button id="btn-settings" class="toolbar-btn" type="button" title="Settings" aria-label="Open Settings">⚙️</button>
         </div>
     </div>
     <div id="trialWatermark" class="demo-license-banner" hidden>
@@ -849,14 +849,28 @@
         </div>
     </div>
 
-    <div id="browserPanel" class="integration-panel" style="display:none">
-        <div class="integration-panel-header"><span>🌐 Agent Browser</span><button class="modal-close" id="browserPanelClose">✕</button></div>
+    <div id="browserPanel" class="integration-panel browser-integration-panel" style="display:none" role="dialog" aria-modal="false" aria-labelledby="browserPanelTitle">
+        <div class="browser-resize-handle browser-resize-handle-top" data-resize="n" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-bottom" data-resize="s" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-left" data-resize="w" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-right" data-resize="e" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-top-left" data-resize="nw" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-top-right" data-resize="ne" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-bottom-left" data-resize="sw" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-bottom-right" data-resize="se" aria-hidden="true"></div>
+        <div class="integration-panel-header browser-integration-panel-header">
+            <span id="browserPanelTitle">🌐 Agent Browser</span>
+            <div class="browser-integration-panel-controls">
+                <button class="browser-integration-panel-control" id="browserPanelMaximize" type="button" title="Maximize Agent Browser" aria-label="Maximize Agent Browser" aria-pressed="false">□</button>
+                <button class="modal-close" id="browserPanelClose" type="button" title="Close Agent Browser" aria-label="Close Agent Browser">✕</button>
+            </div>
+        </div>
         <div id="browserPanelStatus" class="integration-panel-status">Loading...</div>
-        <iframe id="browserPanelFrame" title="Agent Browser Viewer"></iframe>
+        <iframe id="browserPanelFrame" title="Agent Browser Viewer" allow="autoplay; clipboard-read; clipboard-write; pointer-lock; keyboard-map"></iframe>
     </div>
 
-    <div id="smsPanel" class="integration-panel sms-panel" style="display:none">
-        <div class="integration-panel-header"><span>📱 SMS</span><button class="modal-close" id="smsPanelClose">✕</button></div>
+    <div id="smsPanel" class="integration-panel sms-panel" style="display:none" role="dialog" aria-modal="false" aria-labelledby="smsPanelTitle">
+        <div class="integration-panel-header"><span id="smsPanelTitle">📱 SMS</span><button class="modal-close" id="smsPanelClose" type="button" title="Close SMS" aria-label="Close SMS">✕</button></div>
         <div id="smsPanelStatus" class="integration-panel-status">Loading...</div>
         <div id="smsThreadList" class="sms-thread-list"></div>
         <div class="sms-compose">
@@ -1071,6 +1085,6 @@
     <script src="js/chat-markdown.js?v=20260727-chat-markdown-r1"></script>
     <script src="js/chat-events.js?v=20260809-commentary-runs-r1"></script>
     <script src="js/chat.js?v=20260809-commentary-runs-r1"></script>
-    <script src="js/settings.js?v=20260809-provider-endpoints-r1"></script>
+    <script src="js/settings.js?v=20260809-agent-browser-window-r2"></script>
 </body>
 </html>

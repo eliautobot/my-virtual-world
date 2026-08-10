@@ -1272,11 +1272,126 @@ body.vw-demo-locked .feature-locked-control {
     color: var(--text-secondary);
     border-bottom: 1px solid rgba(255,255,255,.08);
 }
+.browser-integration-panel {
+    width: min(960px, calc(100vw - 36px));
+    height: min(640px, calc(100vh - var(--topbar-height) - var(--demo-banner-height) - 42px));
+    min-width: min(480px, calc(100vw - 36px));
+    min-height: min(360px, calc(100vh - var(--topbar-height) - var(--demo-banner-height) - 42px));
+}
+.browser-integration-panel.is-maximized {
+    inset: calc(var(--topbar-height) + var(--demo-banner-height)) 0 0 0;
+    width: 100vw;
+    height: calc(100vh - var(--topbar-height) - var(--demo-banner-height));
+    max-width: none;
+    max-height: none;
+    min-width: 0;
+    min-height: 0;
+    border-radius: 0;
+}
+.browser-integration-panel.is-maximized .browser-resize-handle { display: none; }
+.browser-integration-panel-header {
+    position: relative;
+    z-index: 2;
+    flex: 0 0 auto;
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+}
+.browser-integration-panel.is-window-interacting .browser-integration-panel-header {
+    cursor: grabbing;
+}
+body.browser-window-interacting {
+    user-select: none !important;
+}
+.browser-resize-handle {
+    position: absolute;
+    z-index: 4;
+    touch-action: none;
+}
+.browser-resize-handle-top,
+.browser-resize-handle-bottom {
+    left: 14px;
+    right: 14px;
+    height: 10px;
+    cursor: ns-resize;
+}
+.browser-resize-handle-top { top: 0; }
+.browser-resize-handle-bottom { bottom: 0; }
+.browser-resize-handle-left,
+.browser-resize-handle-right {
+    top: 14px;
+    bottom: 14px;
+    width: 10px;
+    cursor: ew-resize;
+}
+.browser-resize-handle-left { left: 0; }
+.browser-resize-handle-right { right: 0; }
+.browser-resize-handle-top-left,
+.browser-resize-handle-top-right,
+.browser-resize-handle-bottom-left,
+.browser-resize-handle-bottom-right {
+    width: 18px;
+    height: 18px;
+}
+.browser-resize-handle-top-left { top: 0; left: 0; cursor: nwse-resize; }
+.browser-resize-handle-top-right { top: 0; right: 0; cursor: nesw-resize; }
+.browser-resize-handle-bottom-left { bottom: 0; left: 0; cursor: nesw-resize; }
+.browser-resize-handle-bottom-right { right: 0; bottom: 0; cursor: nwse-resize; }
+.browser-integration-panel-controls {
+    position: relative;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.browser-integration-panel-control {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid rgba(255,255,255,.20);
+    border-radius: 7px;
+    background: rgba(255,255,255,.06);
+    color: var(--text-primary);
+    font: 15px/1 sans-serif;
+    cursor: pointer;
+}
+.browser-integration-panel-control:hover,
+.browser-integration-panel-control:focus-visible {
+    border-color: var(--vw-border-strong);
+    background: rgba(255,214,0,.12);
+    outline: none;
+}
 #browserPanelFrame {
     flex: 1;
     width: 100%;
+    min-height: 0;
     border: 0;
-    background: #05070f;
+    background: #000;
+}
+@media (max-width: 640px) {
+    .browser-integration-panel {
+        top: calc(var(--topbar-height) + var(--demo-banner-height) + 6px) !important;
+        right: 6px !important;
+        bottom: auto !important;
+        left: 6px !important;
+        width: auto !important;
+        height: min(
+            calc(56.25vw + 80px),
+            calc(100dvh - var(--topbar-height) - var(--demo-banner-height) - 12px - env(safe-area-inset-bottom))
+        ) !important;
+        max-width: none;
+        max-height: none;
+        min-width: 0;
+        min-height: 0;
+        border-radius: 14px;
+    }
+    .browser-resize-handle { display: none; }
+    .browser-integration-panel-header { min-height: 48px; cursor: default; touch-action: auto; }
+    #browserPanelMaximize { display: none; }
+    .integration-panel-status { padding: 7px 10px; font-size: 12px; }
 }
 .sms-panel {
     width: min(420px, 92vw);
@@ -1310,6 +1425,40 @@ body.vw-demo-locked .feature-locked-control {
     background: rgba(0,0,0,.24);
     color: var(--text-primary);
     padding: 9px 10px;
+}
+@media (max-width: 640px) {
+    .sms-panel {
+        top: calc(var(--topbar-height) + var(--demo-banner-height) + 6px) !important;
+        right: 6px !important;
+        bottom: calc(6px + env(safe-area-inset-bottom)) !important;
+        left: 6px !important;
+        width: auto !important;
+        height: auto !important;
+        max-width: none;
+        max-height: none;
+        min-width: 0;
+        min-height: 0;
+        border-radius: 14px;
+    }
+    .sms-panel .integration-panel-header {
+        flex: 0 0 auto;
+        min-height: 48px;
+        padding: 8px 10px;
+    }
+    .sms-panel .modal-close {
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+    }
+    .sms-thread-list { min-height: 0; padding: 8px; }
+    .sms-thread-row { min-height: 44px; margin-bottom: 6px; }
+    .sms-compose { flex: 0 0 auto; gap: 7px; padding: 9px; }
+    .sms-compose input,
+    .sms-compose textarea {
+        min-height: 44px;
+        font-size: 16px;
+    }
+    #smsSend { min-height: 44px; }
 }
 .edit-mode-group.open .edit-mode-panel.visible { display: block !important; }
 .sidebar-list { gap: 8px !important; max-height: none !important; }
@@ -4022,17 +4171,22 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
     }
     #topBar-center::-webkit-scrollbar { display: none !important; }
     #topBar-right {
-        flex: 0 0 40px !important;
-        width: 40px !important;
-        min-width: 40px !important;
+        flex: 0 0 124px !important;
+        width: 124px !important;
+        min-width: 124px !important;
+        height: 40px !important;
+        max-height: 40px !important;
         padding: 2px 4px !important;
+        gap: 4px !important;
+        overflow: visible !important;
         background: transparent !important;
         border-color: transparent !important;
         box-shadow: none !important;
     }
     #worldSearchWrapper,
     #coordDisplay,
-    #fpsDisplay { display: none !important; }
+    #fpsDisplay,
+    #licenseStatusChip { display: none !important; }
     #topBar .toolbar-btn,
     #topBar-center .view-mode-btn,
     #btn-settings {
@@ -4048,6 +4202,12 @@ body:has(#sidebar:not(.sidebar-collapsed)) #zoomControls {
         align-items: center !important;
         justify-content: center !important;
         flex: 0 0 auto !important;
+    }
+    #topBar-right > .toolbar-btn {
+        width: 36px !important;
+        min-width: 36px !important;
+        height: 36px !important;
+        min-height: 36px !important;
     }
     #canvasWrapper { top: var(--topbar-height) !important; }
     .edit-mode-toggle {

@@ -10,6 +10,9 @@
   let activeConnectionMethod = 'native';
   let settingsResizeState = null;
   let settingsRestoreState = null;
+  let browserViewerUrlModulePromise = null;
+  let browserWindowControllerModulePromise = null;
+  let browserWindowController = null;
   const liveModeAgentBusy = new Set();
   const SETTINGS_WINDOW_BOUNDS_KEY = 'vw_settings_window_bounds_v1';
 
@@ -1227,11 +1230,63 @@
     setStatus('browserTestStatus', status.locked ? 'Locked until activation.' : status.cdpAvailable ? 'CDP connected.' : 'CDP not reachable yet.', status.cdpAvailable ? 'success' : 'warn');
   }
 
+  function loadBrowserViewerUrlBuilder() {
+    if (!browserViewerUrlModulePromise) {
+      browserViewerUrlModulePromise = import('./browser-viewer-url.mjs?v=20260809-agent-browser-window-r2');
+    }
+    return browserViewerUrlModulePromise;
+  }
+
+  async function responsiveBrowserViewerUrl(viewerUrl) {
+    const { buildBrowserViewerUrl } = await loadBrowserViewerUrlBuilder();
+    return buildBrowserViewerUrl(viewerUrl, window.location.href);
+  }
+
+  function browserPanelViewportBounds() {
+    const styles = getComputedStyle(document.documentElement);
+    const topBarHeight = Number.parseFloat(styles.getPropertyValue('--topbar-height')) || 0;
+    const demoBannerHeight = Number.parseFloat(styles.getPropertyValue('--demo-banner-height')) || 0;
+    return {
+      left: 0,
+      top: topBarHeight + demoBannerHeight,
+      right: window.innerWidth,
+      bottom: window.innerHeight,
+    };
+  }
+
+  function loadBrowserWindowController() {
+    if (!browserWindowControllerModulePromise) {
+      browserWindowControllerModulePromise = import('./browser-window-controller.mjs?v=20260809-agent-browser-window-r2');
+    }
+    return browserWindowControllerModulePromise;
+  }
+
+  async function ensureBrowserWindowController() {
+    if (browserWindowController) return browserWindowController;
+    const panel = $('browserPanel');
+    const dragHandle = panel?.querySelector('.browser-integration-panel-header');
+    if (!panel || !dragHandle) return null;
+    const { createBrowserWindowController } = await loadBrowserWindowController();
+    browserWindowController = createBrowserWindowController({
+      panel,
+      dragHandle,
+      frame: $('browserPanelFrame'),
+      maximizeButton: $('browserPanelMaximize'),
+      resizeHandles: panel.querySelectorAll('[data-resize]'),
+      getBounds: browserPanelViewportBounds,
+      minimumSize: { width: 480, height: 360 },
+      isCompactLayout: () => window.matchMedia('(max-width: 640px)').matches,
+    });
+    return browserWindowController;
+  }
+
   async function openBrowserPanel() {
     const panel = $('browserPanel');
     const frame = $('browserPanelFrame');
     const statusEl = $('browserPanelStatus');
+    const controller = await ensureBrowserWindowController();
     panel.style.display = 'flex';
+    requestAnimationFrame(() => controller?.constrain());
     const status = await fetchJson('/browser-status');
     if (!status.enabled) {
       statusEl.textContent = status.locked ? 'Agent Browser is locked until activation.' : 'Agent Browser is disabled or not configured.';
@@ -1239,7 +1294,8 @@
       return;
     }
     statusEl.textContent = status.cdpAvailable ? 'CDP connected.' : 'Viewer opened; CDP not reachable.';
-    frame.src = status.viewerUrl || 'about:blank';
+    frame.src = await responsiveBrowserViewerUrl(status.viewerUrl);
+    requestAnimationFrame(() => controller?.constrain());
   }
 
   async function checkSms() {
@@ -1351,7 +1407,11 @@
     $('btn-testBrowser')?.addEventListener('click', () => testBrowser().catch(err => setStatus('browserTestStatus', err.message, 'warn')));
     $('btn-openBrowserPanel')?.addEventListener('click', () => openBrowserPanel().catch(err => setText('browserPanelStatus', err.message)));
     $('btn-browserPanel')?.addEventListener('click', () => openBrowserPanel().catch(err => setText('browserPanelStatus', err.message)));
-    $('browserPanelClose')?.addEventListener('click', () => { $('browserPanel').style.display = 'none'; });
+    $('browserPanelClose')?.addEventListener('click', () => {
+      $('browserPanel').style.display = 'none';
+      browserWindowController?.setMaximized(false);
+    });
+    ensureBrowserWindowController().catch(err => console.error('Failed to initialize Agent Browser window controls:', err));
     $('btn-testSms')?.addEventListener('click', () => checkSms().catch(err => setStatus('smsTestStatus', err.message, 'warn')));
     $('btn-openSmsPanel')?.addEventListener('click', () => openSmsPanel().catch(err => setText('smsPanelStatus', err.message)));
     $('btn-smsPanel')?.addEventListener('click', () => openSmsPanel().catch(err => setText('smsPanelStatus', err.message)));
