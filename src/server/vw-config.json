@@ -31,6 +31,8 @@
     "enabled": true,
     "localProfilesEnabled": true,
     "homePath": "",
+    "resourceRoot": "",
+    "resourceAccess": "read-write",
     "binary": "",
     "timeoutSec": 600,
     "apiEndpointMode": "auto",

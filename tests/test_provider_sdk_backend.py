@@ -134,6 +134,16 @@ class ProviderSdkBackendTests(unittest.TestCase):
             self.assertEqual(["process"], [item["kind"] for item in manifests[provider_id]["connectionSchema"]["transports"]])
         self.assertTrue(manifests["codex"]["capabilities"]["approvals"])
         self.assertFalse(manifests["opencode"]["capabilities"]["approvals"])
+        hermes_fields = server._provider_settings_field_map(
+            server._get_provider_registry().manifest("hermes").settings_schema
+        )
+        self.assertIn("resourceRoot", hermes_fields)
+        self.assertIn("resourceAccess", hermes_fields)
+        connection_fields = {
+            item.get("key") for item in hermes_fields["connections"].get("itemFields") or []
+        }
+        self.assertIn("resourcePath", connection_fields)
+        self.assertIn("resourceAccess", connection_fields)
 
     def test_endpoint_mode_upgrade_preserves_remote_urls_and_enables_local_auto(self):
         self.assertEqual("custom", server._endpoint_mode("", "https://runtime.example.test"))
@@ -386,6 +396,179 @@ class ProviderSdkBackendTests(unittest.TestCase):
         self.assertTrue(discovered["capabilityOverrides"]["skills"])
         self.assertFalse(discovered["capabilityOverrides"]["resourcesRead"])
         self.assertFalse(discovered["capabilityOverrides"]["resourcesWrite"])
+
+    def test_hermes_api_runtime_and_mounted_resources_work_without_local_cli(self):
+        profile = self.root / "mounted-hermes"
+        (profile / "workspace").mkdir(parents=True)
+        (profile / "skills" / "review").mkdir(parents=True)
+        (profile / "SOUL.md").write_text("# Mounted soul\n", encoding="utf-8")
+        (profile / "IDENTITY.md").write_text("- **Name:** Mounted Hermes\n- **Emoji:** ⚕️\n", encoding="utf-8")
+        (profile / ".env").write_text("TOKEN=NEVER_EXPOSE\n", encoding="utf-8")
+        (profile / "workspace" / "note.md").write_text("before\n", encoding="utf-8")
+        (profile / "skills" / "review" / "SKILL.md").write_text(
+            "---\nname: review\ndescription: Review mounted work.\n---\n\n# Review\n",
+            encoding="utf-8",
+        )
+        mounted = HermesProvider.inspect_mounted_profile("default", data_root=str(profile), access="read-write")
+        self.assertTrue(mounted["readable"])
+        self.assertTrue(mounted["writable"])
+
+        native = HermesProvider(home_path=str(profile), binary=str(self.root / "missing-hermes"), enabled=False)
+        row = {
+            "id": "hermes-default",
+            "profile": "default",
+            "providerAgentId": "default",
+            "apiAvailable": True,
+            "cliAvailable": False,
+            "workspace": str(profile),
+            "home": str(profile),
+            "resourcesReadable": True,
+            "resourcesWritable": True,
+            "resourceAccess": "read-write",
+            "connectionModes": ["api"],
+            "capabilityOverrides": {
+                "sessions": True,
+                "skills": True,
+                "resourcesRead": False,
+                "resourcesWrite": False,
+                "agentCreate": False,
+                "agentDelete": False,
+            },
+        }
+        manifest = server._get_provider_registry().manifest("hermes")
+        office = HermesOfficeProvider(native, {"hermesDiscover": lambda: [dict(row)]}, manifest)
+        registry = ProviderRegistry()
+        registry.register(office)
+        agent = registry.discover_agents()[0]
+        self.assertTrue(agent["capabilities"]["sessions"])
+        self.assertTrue(agent["capabilities"]["resourcesRead"])
+        self.assertTrue(agent["capabilities"]["resourcesWrite"])
+        self.assertTrue(agent["capabilities"]["skills"])
+        self.assertTrue(agent["capabilities"]["profileEdit"])
+        self.assertFalse(agent["capabilities"]["agentCreate"])
+        self.assertFalse(agent["capabilities"]["agentDelete"])
+
+        with mock.patch.object(server, "_get_provider_registry", return_value=registry), \
+             mock.patch.object(server, "_agent_record_for", return_value=agent), \
+             mock.patch.object(server, "STATUS_DIR", str(self.status)):
+            listed = server._handle_provider_resource({"agentId": agent["id"], "action": "list"})
+            self.assertTrue(listed["ok"])
+            self.assertIn("SOUL.md", {item["path"] for item in listed["files"]})
+            self.assertNotIn(".env", {item["path"] for item in listed["files"]})
+            opened = server._handle_provider_resource({"agentId": agent["id"], "action": "read", "path": "workspace/note.md"})
+            self.assertEqual("before\n", opened["file"]["content"])
+            saved = server._handle_provider_resource({
+                "agentId": agent["id"],
+                "action": "save",
+                "path": "workspace/note.md",
+                "content": "after\n",
+                "expectedSha256": opened["file"]["sha256"],
+            })
+            self.assertTrue(saved["ok"])
+            ok, skills, status = server.handle_agent_skills_list(agent["id"])
+            self.assertTrue(ok)
+            self.assertEqual(200, status)
+            self.assertEqual(["review"], [item["name"] for item in skills["skills"]])
+
+        updated = office.update_profile("default", {"name": "Updated Hermes", "emoji": "🧪"})
+        self.assertTrue(updated["ok"])
+        self.assertIn("Updated Hermes", (profile / "IDENTITY.md").read_text(encoding="utf-8"))
+
+        read_only_row = {**row, "resourcesWritable": False, "resourceAccess": "read-only"}
+        read_only_office = HermesOfficeProvider(native, {"hermesDiscover": lambda: [dict(read_only_row)]}, manifest)
+        read_only_registry = ProviderRegistry()
+        read_only_registry.register(read_only_office)
+        read_only_agent = read_only_registry.discover_agents()[0]
+        with mock.patch.object(server, "_get_provider_registry", return_value=read_only_registry), \
+             mock.patch.object(server, "_agent_record_for", return_value=read_only_agent):
+            ok, skills, status = server.handle_agent_skills_list(read_only_agent["id"])
+            self.assertTrue(ok)
+            self.assertEqual(200, status)
+            self.assertFalse(skills["editable"])
+            self.assertEqual(["review"], [item["name"] for item in skills["skills"]])
+            ok, rejected, status = server.handle_agent_skill_save(
+                read_only_agent["id"],
+                {"name": "review", "content": (profile / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8")},
+            )
+            self.assertFalse(ok)
+            self.assertEqual(400, status)
+            self.assertEqual("unsupported_provider", rejected["error"]["code"])
+
+    def test_mounted_hermes_skills_support_official_category_layout(self):
+        profile = self.root / "official-hermes-layout"
+        skill_file = profile / "skills" / "software-development" / "review" / "SKILL.md"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "---\nname: review\ndescription: Review mounted work.\n---\n\n# Review\n",
+            encoding="utf-8",
+        )
+        agent = {
+            "id": "hermes-default",
+            "statusKey": "hermes-default",
+            "providerKind": "hermes",
+            "providerAgentId": "default",
+            "profile": "default",
+            "workspace": str(profile),
+            "home": str(profile),
+            "apiAvailable": True,
+            "capabilities": {"skills": True, "resourcesRead": True, "resourcesWrite": True},
+        }
+        with mock.patch.object(server, "_agent_record_for", return_value=agent), \
+             mock.patch.object(server, "STATUS_DIR", str(self.status)):
+            ok, listed, status = server.handle_agent_skills_list(agent["id"])
+            self.assertTrue(ok)
+            self.assertEqual(200, status)
+            self.assertEqual(["software-development/review"], [item["name"] for item in listed["skills"]])
+            self.assertEqual("software-development", listed["skills"][0]["category"])
+            self.assertIn("# Review", listed["skills"][0]["content"])
+            ok, saved, status = server.handle_agent_skill_save(agent["id"], {
+                "name": "software-development/review",
+                "content": "---\nname: review\ndescription: Updated mounted skill.\n---\n\n# Updated\n",
+                "expectedSha256": listed["skills"][0]["sha256"],
+            })
+            self.assertTrue(ok)
+            self.assertEqual(200, status)
+            self.assertTrue(saved["ok"])
+        self.assertIn("# Updated", skill_file.read_text(encoding="utf-8"))
+        escaped, escaped_name = server._skill_file_for(str(profile / "skills"), "../outside")
+        self.assertIsNone(escaped)
+        self.assertEqual("", escaped_name)
+
+    def test_hermes_mounted_profile_policy_and_path_safety(self):
+        data_root = self.root / "hermes-data"
+        named = data_root / "profiles" / "coder"
+        named.mkdir(parents=True)
+        default_mount = HermesProvider.inspect_mounted_profile("default", data_root=str(data_root))
+        named_mount = HermesProvider.inspect_mounted_profile("coder", data_root=str(data_root))
+        self.assertEqual(str(data_root), default_mount["path"])
+        self.assertEqual(str(named), named_mount["path"])
+        self.assertTrue(named_mount["writable"])
+
+        read_only = HermesProvider.inspect_mounted_profile("coder", data_root=str(data_root), access="read-only")
+        self.assertTrue(read_only["readable"])
+        self.assertFalse(read_only["writable"])
+        self.assertEqual("read-only", read_only["access"])
+        disabled = HermesProvider.inspect_mounted_profile("coder", data_root=str(data_root), access="disabled")
+        self.assertFalse(disabled["available"])
+        escaped = HermesProvider.inspect_mounted_profile("..", data_root=str(data_root))
+        self.assertFalse(escaped["available"])
+        windows = HermesProvider.inspect_mounted_profile("default", data_root=r"C:\\Users\\Example\\.hermes")
+        self.assertFalse(windows["available"])
+        explicit = HermesProvider.inspect_mounted_profile("connection-id", profile_path=str(named))
+        self.assertEqual(str(named), explicit["path"])
+        outside = self.root / "outside-hermes-profile"
+        outside.mkdir()
+        os.symlink(outside, data_root / "profiles" / "escape")
+        symlink_escape = HermesProvider.inspect_mounted_profile("escape", data_root=str(data_root))
+        self.assertFalse(symlink_escape["available"])
+
+        statvfs = mock.Mock(f_flag=getattr(os, "ST_RDONLY", 1))
+        with mock.patch("providers.hermes.os.statvfs", return_value=statvfs):
+            filesystem_read_only = HermesProvider.inspect_mounted_profile("coder", data_root=str(data_root), access="read-write")
+        self.assertTrue(filesystem_read_only["readable"])
+        self.assertFalse(filesystem_read_only["writable"])
+        self.assertEqual("read-only", filesystem_read_only["access"])
+        self.assertEqual("read-write", filesystem_read_only["requestedAccess"])
 
     def test_hermes_api_only_sessions_and_skills_use_rest_surface(self):
         calls = []
@@ -684,6 +867,9 @@ class ProviderSdkBackendTests(unittest.TestCase):
             **server.VW_CONFIG,
             "hermes": {
                 **server.VW_CONFIG["hermes"],
+                "localProfilesEnabled": False,
+                "resourceRoot": str(self.root / "unmounted-hermes"),
+                "resourceAccess": "disabled",
                 "apiUrl": "http://host.docker.internal:8642",
                 "apiKey": "server-only-key",
                 "connections": [],
@@ -699,6 +885,7 @@ class ProviderSdkBackendTests(unittest.TestCase):
         self.assertTrue(rows[0]["apiAvailable"])
         self.assertFalse(rows[0]["cliAvailable"])
         self.assertEqual(["api"], rows[0]["connectionModes"])
+        self.assertEqual("", rows[0]["workspace"])
 
         connection_config = {
             **config,
@@ -725,6 +912,46 @@ class ProviderSdkBackendTests(unittest.TestCase):
         health = office.test()
         self.assertTrue(health["ok"])
         self.assertEqual("api", health["transport"])
+
+    def test_hermes_api_discovery_maps_default_named_and_explicit_profile_mounts(self):
+        data_root = self.root / "hermes-api-data"
+        explicit = self.root / "external-profile"
+        (data_root / "profiles" / "coder").mkdir(parents=True)
+        explicit.mkdir()
+        config = {
+            **server.VW_CONFIG,
+            "hermes": {
+                **server.VW_CONFIG["hermes"],
+                "enabled": True,
+                "localProfilesEnabled": False,
+                "resourceRoot": str(data_root),
+                "resourceAccess": "read-write",
+                "preferApi": True,
+                "connections": [
+                    {"id": "coder", "name": "Coder", "apiUrl": "http://hermes:8643", "apiKey": "key", "enabled": True, "resourceAccess": "inherit"},
+                    {"id": "alias", "name": "Alias", "apiUrl": "http://hermes:8644", "apiKey": "key", "enabled": True, "resourcePath": str(explicit), "resourceAccess": "read-only"},
+                ],
+            },
+        }
+        resolution = {
+            "ok": True,
+            "endpoint": {"url": "http://hermes:8642", "location": "custom"},
+            "probe": {
+                "model": "hermes-model",
+                "features": {"run_submission": True, "run_events_sse": True, "skills_api": True},
+                "endpoints": {"skills": {"path": "/v1/skills"}},
+            },
+        }
+        with mock.patch.object(server, "VW_CONFIG", config), \
+             mock.patch.object(server, "HERMES_ENABLED", True), \
+             mock.patch.object(server, "_resolve_hermes_api_endpoint", return_value=(resolution, {})):
+            rows = {row["profile"]: row for row in server._discover_hermes_agents()}
+        self.assertEqual(str(data_root), rows["default"]["workspace"])
+        self.assertEqual(str(data_root / "profiles" / "coder"), rows["coder"]["workspace"])
+        self.assertTrue(rows["coder"]["resourcesWritable"])
+        self.assertEqual(str(explicit), rows["alias"]["workspace"])
+        self.assertTrue(rows["alias"]["resourcesReadable"])
+        self.assertFalse(rows["alias"]["resourcesWritable"])
 
     def test_settings_save_dispatch_preserves_existing_secret_without_rewriting_it(self):
         config = {

@@ -324,9 +324,12 @@ Hermes' documented authenticated discovery surfaces:
 | `GET /api/native-models` | `GET /v1/models` |
 
 Every remote feature is gated by `/v1/capabilities`. API-only connections do
-not inherit local filesystem write capabilities. Native profile/workspace files
-remain unavailable unless Hermes advertises a future resource endpoint or a
-Linux profile is mounted into the container.
+not inherit filesystem permissions. When a Hermes profile data directory is
+explicitly mounted and mapped to that connection, the existing unified
+`/api/providers/resources` and `/api/providers/skills` endpoints expose only the
+Hermes manifest's allowlisted text files. Filesystem read/write capability is
+negotiated independently from API and CLI capability, honors configured and
+actual read-only mounts, and never derives a local path from an API URL.
 
 Hermes API keys, if used, belong in local settings or `.env`, not in docs or commits.
 

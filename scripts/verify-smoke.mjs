@@ -443,6 +443,15 @@ assert(dockerCompose.includes('${VW_OPENCLAW_HOST_PATH:-~/.openclaw}:/openclaw')
 assert(dockerCompose.includes('VW_OPENCLAW_BROWSER_TRANSPORT=${VW_OPENCLAW_BROWSER_TRANSPORT:-proxy}'), 'docker-compose.yml should default OpenClaw browser chat to the server proxy');
 assert(dockerCompose.includes('VW_GATEWAY_ENDPOINT_MODE=${VW_GATEWAY_ENDPOINT_MODE:-auto}'), 'docker-compose.yml should enable manifest endpoint resolution for OpenClaw');
 assert(dockerCompose.includes('VW_HERMES_API_ENDPOINT_MODE=${VW_HERMES_API_ENDPOINT_MODE:-auto}'), 'docker-compose.yml should enable manifest endpoint resolution for Hermes');
+assert(dockerCompose.includes('VW_HERMES_RESOURCE_ROOT=${VW_HERMES_RESOURCE_ROOT:-${VW_HERMES_HOME:-/home/vw/.hermes}}'), 'docker-compose.yml should default the mounted Hermes resource root to the effective Hermes home');
+assert(dockerCompose.includes('VW_HERMES_RESOURCE_ACCESS=${VW_HERMES_RESOURCE_ACCESS:-read-write}'), 'docker-compose.yml should declare mounted Hermes resource policy');
+assert(envExample.includes('VW_HERMES_RESOURCE_ROOT=/home/vw/.hermes'), '.env.example should document the mounted Hermes resource root');
+assert(envExample.includes('VW_HERMES_RESOURCE_ACCESS=read-write'), '.env.example should document mounted Hermes resource policy');
+const hermesSidecarBlock = dockerCompose.split('\n  hermes:\n')[1]?.split('\n  # Optional: Agent Browser', 1)[0] || '';
+assert(hermesSidecarBlock.includes('profiles: ["hermes"]'), 'Hermes sidecar must remain opt-in');
+assert(hermesSidecarBlock.includes('nousresearch/hermes-agent:v2026.8.3'), 'Hermes sidecar should default to a pinned image release');
+assert(hermesSidecarBlock.includes('expose:'), 'Hermes sidecar should expose its API only to the Compose network');
+assert(!hermesSidecarBlock.includes('\n    ports:'), 'Hermes sidecar must not publish its API port to the host by default');
 assert(dockerCompose.includes('VW_PROVIDER_ENDPOINT_CACHE_TTL_SEC=${VW_PROVIDER_ENDPOINT_CACHE_TTL_SEC:-30}'), 'docker-compose.yml should configure endpoint ordering cache');
 assert(dockerCompose.includes('${VW_CODEX_HOST_HOME:-~/.codex}:${VW_CODEX_HOME:-/home/vw/.codex}'), 'docker-compose.yml should support an explicit cross-platform Codex home mount');
 assert(envExample.includes('VW_OPENCLAW_BROWSER_TRANSPORT=proxy'), '.env.example should keep Gateway credentials server-side by default');
@@ -459,6 +468,7 @@ for (const token of ['OpenClawHome', 'VW_OPENCLAW_HOST_PATH', 'host.docker.inter
 }
 for (const [key, value] of Object.entries({
   VW_HERMES_HOME: '/home/vw/.hermes',
+  VW_HERMES_RESOURCE_ROOT: '/home/vw/.hermes',
   VW_HERMES_BIN: '/home/vw/.local/bin/hermes',
   VW_HERMES_CONTAINER_UV: '/home/vw/.local/share/uv',
   VW_CODEX_HOME: '/home/vw/.codex',

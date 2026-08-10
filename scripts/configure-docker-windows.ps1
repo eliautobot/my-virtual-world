@@ -80,6 +80,7 @@ Set-DotEnvValue "VW_REALTIME_BROWSER_URL" $RealtimeBrowserUrl
 # Write every container-side path explicitly so stale or host-native .env values
 # cannot turn a bind destination into a relative path such as "claude".
 Set-LinuxContainerPath "VW_HERMES_HOME" "/home/vw/.hermes"
+Set-LinuxContainerPath "VW_HERMES_RESOURCE_ROOT" "/home/vw/.hermes"
 Set-LinuxContainerPath "VW_HERMES_BIN" "/home/vw/.local/bin/hermes"
 Set-LinuxContainerPath "VW_HERMES_CONTAINER_UV" "/home/vw/.local/share/uv"
 Set-LinuxContainerPath "VW_CODEX_HOME" "/home/vw/.codex"
@@ -115,6 +116,7 @@ if ($HermesApiUrl) {
     }
     Set-DotEnvValue "VW_HERMES_ENABLED" "true"
     Set-DotEnvValue "VW_HERMES_LOCAL_PROFILES_ENABLED" "false"
+    Set-DotEnvValue "VW_HERMES_RESOURCE_ACCESS" "disabled"
     Set-DotEnvValue "VW_HERMES_API_URL" $HermesApiUrl
     if ($HermesApiUrl -match '^https?://host\.docker\.internal(?::|/|$)' -or $HermesApiUrl -match '^https?://(?:127\.0\.0\.1|localhost)(?::|/|$)') {
         Set-DotEnvValue "VW_HERMES_API_ENDPOINT_MODE" "auto"
@@ -127,6 +129,7 @@ if ($HermesApiUrl) {
 } else {
     Set-DotEnvValue "VW_HERMES_ENABLED" "false"
     Set-DotEnvValue "VW_HERMES_LOCAL_PROFILES_ENABLED" "false"
+    Set-DotEnvValue "VW_HERMES_RESOURCE_ACCESS" "disabled"
 }
 
 Push-Location $RepoRoot

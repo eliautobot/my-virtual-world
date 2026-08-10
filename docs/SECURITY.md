@@ -27,6 +27,12 @@ response is terminal: Virtual World does not try another target to bypass it.
 Custom mode is exclusive. Keep Docker-host and custom provider services on a
 trusted network, authenticate them, and do not expose their ports publicly.
 
+When Hermes runs as a sidecar, keep port `8642` on the private Compose network
+and use a strong `API_SERVER_KEY`. Share only the Hermes data directory required
+for profile resources. My Virtual World confines access to manifest-allowlisted
+text paths, blocks traversal and escaping symlinks, hides credential files, and
+can enforce read-only access even when the underlying mount is writable.
+
 ## Remote Access With Tailscale
 
 Tailscale is the recommended way to use My Virtual World remotely because it keeps access inside your private Tailnet.

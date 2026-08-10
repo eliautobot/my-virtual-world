@@ -153,6 +153,33 @@ def _endpoint_mode_field(key: str = "endpointMode", label: str = "Endpoint locat
     )
 
 
+def _resource_access_field(
+    key: str = "resourceAccess",
+    label: str = "Mounted profile access",
+    *,
+    inherit: bool = False,
+) -> dict[str, Any]:
+    options = []
+    if inherit:
+        options.append({"value": "inherit", "label": "Use data-root setting"})
+    options.extend([
+        {"value": "read-write", "label": "Read and write"},
+        {"value": "read-only", "label": "Read only"},
+        {"value": "disabled", "label": "Disabled"},
+    ])
+    return _field(
+        key,
+        label,
+        "select",
+        default="inherit" if inherit else "read-write",
+        options=options,
+        help=(
+            "Controls My Virtual World's allowlisted access to a Hermes profile directory mounted into this server/container. "
+            "Runtime chat and sessions continue to use the authenticated Hermes API."
+        ),
+    )
+
+
 def _network_transport(
     transport_id: str,
     label: str,
@@ -704,28 +731,45 @@ class HermesOfficeProvider(NativeOfficeProvider):
         rows = callback() if callable(callback) else self.native.discover_agents()
         rows = rows if isinstance(rows, list) else []
         for item in rows:
-            local_workspace = bool(item.get("workspace") or item.get("home"))
+            mounted_workspace = bool(item.get("workspace") or item.get("home"))
+            resources_readable = bool(item.get("resourcesReadable", mounted_workspace))
+            resources_writable = bool(item.get("resourcesWritable", resources_readable))
+            cli_available = bool(item.get("cliAvailable"))
+            if mounted_workspace and "cliAvailable" not in item:
+                cli_available = bool(self.native.is_available())
             overrides = dict(item.get("capabilityOverrides") or {})
-            # A mounted Linux profile retains the full local resource surface.
-            # API-only rows arrive with capability-negotiated remote flags and
-            # must not regain CLI/filesystem writes from the global manifest.
-            if local_workspace:
-                overrides.update({
-                    "profileEdit": True,
-                    "resourcesRead": True,
-                    "resourcesWrite": True,
-                    "skills": True,
-                    "agentDelete": True,
-                })
+            # API and mounted resources are independent transports. A readable
+            # profile adds allowlisted files/skills; a writable profile adds
+            # edits. Agent lifecycle still requires an actual local CLI.
+            if resources_readable:
+                overrides["resourcesRead"] = True
+                overrides["resourcesWrite"] = resources_writable
+                overrides["profileEdit"] = resources_writable
+                overrides["skills"] = True
             else:
                 overrides.setdefault("profileEdit", False)
                 overrides.setdefault("resourcesRead", False)
                 overrides.setdefault("resourcesWrite", False)
                 overrides.setdefault("skills", False)
-                overrides.setdefault("agentDelete", False)
-                overrides.setdefault("agentCreate", False)
+            overrides["agentDelete"] = cli_available
+            overrides["agentCreate"] = cli_available
             item["capabilityOverrides"] = overrides
         return rows
+
+    def update_profile(self, profile: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Update a mounted profile without requiring a duplicate local CLI."""
+        agent = next(
+            (
+                row for row in self.discover_agents()
+                if str(row.get("providerAgentId") or row.get("profile") or "") == str(profile)
+            ),
+            None,
+        )
+        workspace = str((agent or {}).get("workspace") or (agent or {}).get("home") or "")
+        overrides = (agent or {}).get("capabilityOverrides") if isinstance((agent or {}).get("capabilityOverrides"), dict) else {}
+        if workspace and overrides.get("profileEdit"):
+            return self.native.update_profile_at_home(workspace, profile, patch)
+        return {"ok": False, "error": "This Hermes connection does not expose a writable mounted profile."}
 
     def test(self) -> dict[str, Any]:
         connection_test = self.context.get("hermesConnectionTest")
@@ -902,13 +946,27 @@ def build_provider_registry(context: dict[str, Any]) -> ProviderRegistry:
                                     _endpoint_mode_field("endpointMode", "Endpoint location"),
                                     _field("apiUrl", "Preferred or custom API URL", "url", required=True, placeholder="http://host.docker.internal:8642"),
                                     _field("apiKey", "API key", "secret", secret=True, placeholder="Keep existing key"),
+                                    _field(
+                                        "resourcePath",
+                                        "Mounted profile directory",
+                                        "path",
+                                        help="Optional exact profile directory visible inside My Virtual World. Leave blank to map this connection id below the configured Hermes data root.",
+                                    ),
+                                    _resource_access_field(inherit=True),
                                     _field("emoji", "Emoji", "text", default="⚕️"),
                                     _field("role", "Role", "text", default="Hermes Agent"),
                                     _field("enabled", "Enabled", "boolean", default=True),
                                 ],
                             ),
-                            _field("localProfilesEnabled", "Discover local Hermes profiles", "boolean", default=True),
-                            _field("homePath", "Local Hermes home", "path"),
+                            _field(
+                                "resourceRoot",
+                                "Mounted Hermes data root",
+                                "path",
+                                help="Hermes data directory visible inside My Virtual World. The default profile lives here and named profiles live below profiles/<id>.",
+                            ),
+                            _resource_access_field(),
+                            _field("localProfilesEnabled", "Discover and run local Hermes CLI profiles", "boolean", default=True),
+                            _field("homePath", "Local Hermes CLI home", "path"),
                             _field("binary", "Local Hermes executable", "path"),
                             _field("timeoutSec", "Turn timeout", "number", default=600, min=30, max=7200, step=30, suffix="seconds"),
                         ],

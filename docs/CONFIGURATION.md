@@ -31,6 +31,8 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_OPENCLAW_BROWSER_TRANSPORT` | `proxy` | `proxy` keeps the Gateway token server-side and carries browser chat over port 8590. `direct` is a legacy opt-in. |
 | `VW_HERMES_ENABLED` | `true` | Enables Hermes discovery and chat relay. |
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker. |
+| `VW_HERMES_RESOURCE_ROOT` | `VW_HERMES_HOME` | Hermes data root visible inside My Virtual World. Default profile files live here; named profiles map below `profiles/<id>`. |
+| `VW_HERMES_RESOURCE_ACCESS` | `read-write` | Mounted resource policy: `read-write`, `read-only`, or `disabled`. Actual read-only filesystems remain read-only. |
 | `VW_HERMES_BIN` | `/home/vw/.local/bin/hermes` | Hermes CLI path inside Docker. |
 | `VW_HERMES_LOCAL_PROFILES_ENABLED` | `true` | Allow discovery and execution of Linux Hermes profiles/CLI inside the app server or container. Disable this when Hermes exists only as a Windows host API. |
 | `VW_HERMES_TIMEOUT_SEC` | `600` | Hermes call timeout. |
@@ -41,6 +43,7 @@ For a beginner-friendly walkthrough, see [INSTALLATION.md](INSTALLATION.md).
 | `VW_HERMES_AUTO_START_PROFILE_APIS` | `true` | Allow Virtual World to start profile-scoped local Hermes API servers. Only localhost URLs and configured API keys are eligible. |
 | `VW_HERMES_AUTO_START_DEFAULT_API` | `true` | Allow auto-start for the default Hermes profile. |
 | `VW_HERMES_API_PROFILE_PORT_BASE` | `8643` | Base port used to derive profile-specific local API ports. |
+| `VW_HERMES_IMAGE` | `nousresearch/hermes-agent:v2026.8.3` | Pinned image used only by the optional `hermes` Compose profile. |
 | `VW_PROVIDER_ENDPOINT_CACHE_TTL_SEC` | `30` | Seconds to prioritize a recently healthy endpoint. Health and authentication are still rechecked before selection. Use `0` to disable ordering cache. |
 | `VW_CODEX_ENABLED` | `true` | Enables Codex CLI discovery and chat relay. |
 | `VW_CODEX_HOST_HOME` | host `~/.codex` | Host path mounted as `VW_CODEX_HOME`; set explicitly on Windows or disable native Codex. |
@@ -122,6 +125,8 @@ Use these defaults when running with Docker:
 | OpenClaw Home | `/openclaw` |
 | Gateway URL | `ws://host.docker.internal:18789` |
 | Hermes Home | `/home/vw/.hermes` |
+| Mounted Hermes data root | `/home/vw/.hermes` |
+| Mounted profile access | `Read and write` |
 | Hermes CLI | `/home/vw/.local/bin/hermes` |
 
 Use these defaults when running directly on your machine without Docker:
@@ -170,6 +175,32 @@ CLIs. This prevents Docker from creating a directory where an executable was
 expected. Do not mount a Windows Hermes launcher into a Linux executable path;
 use a Windows-hosted Hermes API at `http://host.docker.internal:<port>` or run a
 Linux Hermes sidecar.
+
+### Hermes API + mounted resources
+
+Hermes runtime and profile files are independent connections. The authenticated
+API supplies live runtime operations. `VW_HERMES_RESOURCE_ROOT` supplies only
+allowlisted profile files that are already mounted into the My Virtual World
+server/container. Disabling `VW_HERMES_LOCAL_PROFILES_ENABLED` disables local
+CLI discovery and execution; it does not disable a valid mounted resource root.
+
+The default API connection maps directly to `VW_HERMES_RESOURCE_ROOT`. A named
+connection such as `coder` maps to
+`VW_HERMES_RESOURCE_ROOT/profiles/coder`. Provider SDK settings can supply an
+exact **Mounted profile directory** for a connection whose stable connection id
+does not match the native profile folder. Paths must be absolute Linux paths
+visible inside My Virtual World. API URLs are never converted into file paths.
+
+Use the optional pinned sidecar with:
+
+```bash
+docker compose --profile hermes up --build -d
+```
+
+Before starting it, set a strong `VW_HERMES_API_KEY`, use custom API URL
+`http://hermes:8642`, disable local CLI discovery/auto-start, and keep the
+shared Hermes host data path in `VW_HERMES_HOST_HOME`. The sidecar port is not
+published to the host by the product Compose file.
 
 ## Hermes Native Streaming
 

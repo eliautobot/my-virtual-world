@@ -15,7 +15,8 @@ services:
       - ${VW_OPENCLAW_HOST_PATH:-~/.openclaw}:/openclaw
       # Optional native Hermes integration.
       # If your Hermes launcher stores absolute paths, set VW_HERMES_HOME,
-      # VW_HERMES_BIN, and VW_HERMES_CONTAINER_UV to matching container paths.
+      # VW_HERMES_RESOURCE_ROOT, VW_HERMES_BIN, and VW_HERMES_CONTAINER_UV to matching container paths.
+      # The same data bind can be shared with the optional `hermes` profile below.
       - ${VW_HERMES_HOST_HOME:-~/.hermes}:${VW_HERMES_HOME:-/home/vw/.hermes}
       - ${VW_HERMES_HOST_BIN:-~/.local/bin/hermes}:${VW_HERMES_BIN:-/home/vw/.local/bin/hermes}:ro
       - ${VW_HERMES_HOST_UV:-~/.local/share/uv}:${VW_HERMES_CONTAINER_UV:-/home/vw/.local/share/uv}:ro
@@ -71,6 +72,8 @@ services:
       - VW_HERMES_ENABLED=${VW_HERMES_ENABLED:-true}
       - VW_HERMES_LOCAL_PROFILES_ENABLED=${VW_HERMES_LOCAL_PROFILES_ENABLED:-true}
       - VW_HERMES_HOME=${VW_HERMES_HOME:-/home/vw/.hermes}
+      - VW_HERMES_RESOURCE_ROOT=${VW_HERMES_RESOURCE_ROOT:-${VW_HERMES_HOME:-/home/vw/.hermes}}
+      - VW_HERMES_RESOURCE_ACCESS=${VW_HERMES_RESOURCE_ACCESS:-read-write}
       - VW_HERMES_BIN=${VW_HERMES_BIN:-/home/vw/.local/bin/hermes}
       - VW_HERMES_TIMEOUT_SEC=${VW_HERMES_TIMEOUT_SEC:-600}
       - VW_HERMES_API_ENDPOINT_MODE=${VW_HERMES_API_ENDPOINT_MODE:-auto}
@@ -153,6 +156,28 @@ services:
       - VW_REALTIME_ROOM=${VW_REALTIME_ROOM:-agent_runtime}
       - VW_REALTIME_MAX_PAYLOAD_BYTES=${VW_REALTIME_MAX_PAYLOAD_BYTES:-1048576}
       - VW_REALTIME_CHECKPOINT_INTERVAL_MS=${VW_REALTIME_CHECKPOINT_INTERVAL_MS:-5000}
+    restart: unless-stopped
+
+  # Optional official Hermes sidecar. It stays disabled unless the `hermes`
+  # Compose profile is selected. The API is exposed only to this private
+  # Compose network; both services see the same persistent Hermes data bind.
+  # Before enabling, set a strong VW_HERMES_API_KEY (minimum 8 characters),
+  # VW_HERMES_API_ENDPOINT_MODE=custom, and VW_HERMES_API_URL=http://hermes:8642.
+  hermes:
+    profiles: ["hermes"]
+    image: ${VW_HERMES_IMAGE:-nousresearch/hermes-agent:v2026.8.3}
+    container_name: my-virtual-world-hermes
+    volumes:
+      - ${VW_HERMES_HOST_HOME:-~/.hermes}:/opt/data
+    environment:
+      - HERMES_UID=${VW_HERMES_UID:-10000}
+      - HERMES_GID=${VW_HERMES_GID:-10000}
+      - API_SERVER_ENABLED=true
+      - API_SERVER_HOST=0.0.0.0
+      - API_SERVER_KEY=${VW_HERMES_API_KEY:-}
+    expose:
+      - "8642"
+    command: ["gateway", "run"]
     restart: unless-stopped
 
   # Optional: Agent Browser (uncomment to enable only on trusted networks)

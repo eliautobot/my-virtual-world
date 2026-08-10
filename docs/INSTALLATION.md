@@ -205,10 +205,12 @@ In `Settings > Connections`, keep Hermes enabled and use these default Docker va
 
 | Field | Docker value |
 | --- | --- |
-| Hermes Home | `/home/vw/.hermes` |
-| Hermes CLI | `/home/vw/.local/bin/hermes` |
-| Hermes API URL | Leave blank for CLI mode |
-| Hermes API Key | Leave blank unless your Hermes API requires one |
+| Mounted Hermes data root | `/home/vw/.hermes` |
+| Mounted profile access | `Read and write` or `Read only` |
+| Hermes CLI home | `/home/vw/.hermes` |
+| Hermes CLI | `/home/vw/.local/bin/hermes` (optional for API-connected agents) |
+| Hermes API URL | `http://hermes:8642` for the optional Compose sidecar |
+| Hermes API Key | The same strong value as Hermes `API_SERVER_KEY` |
 
 For local development without Docker, use:
 
@@ -224,12 +226,57 @@ If Hermes does not work:
 - Confirm the Hermes binary exists at `~/.local/bin/hermes`.
 - If you do not use Hermes, set `VW_HERMES_ENABLED=false` in `.env` or turn it off in Settings.
 
+#### Recommended dedicated Hermes container
+
+The product Compose file includes an optional, pinned official Hermes sidecar.
+It is disabled by default. Both containers use the same Hermes data bind, but
+only the authenticated API carries runtime work:
+
+```text
+My Virtual World ── private HTTP API ──> Hermes
+        │                                  │
+        └──── shared Hermes data bind ─────┘
+```
+
+Set these values in `.env` before enabling it:
+
+```dotenv
+VW_HERMES_LOCAL_PROFILES_ENABLED=false
+VW_HERMES_AUTO_START_PROFILE_APIS=false
+VW_HERMES_AUTO_START_DEFAULT_API=false
+VW_HERMES_API_ENDPOINT_MODE=custom
+VW_HERMES_API_URL=http://hermes:8642
+VW_HERMES_API_KEY=<strong-random-api-key>
+VW_HERMES_RESOURCE_ROOT=/home/vw/.hermes
+VW_HERMES_RESOURCE_ACCESS=read-write
+```
+
+On Linux, set `VW_HERMES_UID` and `VW_HERMES_GID` to the numeric owner that
+should own the host data directory (usually the output of `id -u` and `id -g`).
+Docker Desktop for Windows can keep the image defaults. My Virtual World
+preserves this ownership when it creates or replaces shared profile files.
+
+Then start the profile:
+
+```bash
+docker compose --profile hermes up --build -d
+```
+
+Port `8642` is exposed to the private Compose network only. No second Hermes
+CLI is installed in My Virtual World. The API supplies discovery, models,
+sessions, runs, streaming, approvals, and cancellation; the shared data mount
+supplies allowlisted `SOUL.md`, `IDENTITY.md`, workspace documents, and skill
+contents. Use `read-only` when the Agent Desk should not edit profile files.
+Never run another Hermes gateway against the same data directory at the same
+time.
+
 #### Hermes on Windows
 
 Docker Desktop runs the app in a Linux container. A Windows `.exe`, `.cmd`, or
 PowerShell launcher cannot be used as `VW_HERMES_BIN` inside that container.
 Choose one of these supported topologies:
 
+- Run Hermes in the optional dedicated Linux container above (recommended).
 - Run a Linux Hermes CLI/runtime in Docker and mount its Linux home and binary.
 - Run Hermes on Windows as an HTTP API and connect from the container through
   `host.docker.internal`.
@@ -257,17 +304,22 @@ into the Linux container:
 - runs, streaming events, approvals, and cancellation through `/v1/runs`.
 
 Hermes currently advertises `admin_config_rw: false` and does not publish a
-profile-resource endpoint. Therefore native `SOUL.md`, workspace-document, and
-skill-content editing still requires a real Linux Hermes profile mounted into
-the Virtual World container. My Virtual World reports that limitation in the
-Agent editor instead of presenting broken file controls or trying to execute a
-Windows path inside Linux.
+profile-resource endpoint. My Virtual World therefore keeps the API and
+filesystem boundaries separate. If the same Hermes data is mounted into My
+Virtual World, `SOUL.md`, workspace documents, and skill contents become
+available without installing another CLI. If no profile directory is mapped,
+the Agent editor reports the missing resource transport instead of presenting
+broken controls or trying to execute a Windows path inside Linux.
 
 For multiple Hermes profiles, add one enabled Hermes connection per profile.
 With Hermes multiplex profile routing, use a URL such as
 `http://host.docker.internal:8642/p/coder` and that profile's own
 `API_SERVER_KEY`. Hermes intentionally binds authentication to the routed
 profile; the default profile key must not be used for named profile prefixes.
+By default, connection id `coder` maps to
+`<Mounted Hermes data root>/profiles/coder`. If a connection id differs from
+its on-disk profile name, set that connection's **Mounted profile directory**
+to the exact absolute path visible inside My Virtual World.
 
 In Settings, leave **Hermes API endpoint** on **Auto**. Auto authenticates and
 checks the configured URL, Docker-host, and container-local candidates, then

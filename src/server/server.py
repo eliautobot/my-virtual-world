@@ -132,6 +132,11 @@ def _endpoint_mode(value, url=""):
     return "custom" if str(url or "").strip() and endpoint_location(url) == "custom" else "auto"
 
 
+def _hermes_resource_access(value, fallback="read-write"):
+    mode = str(value or fallback or "read-write").strip().lower()
+    return mode if mode in {"disabled", "read-only", "read-write"} else str(fallback or "read-write")
+
+
 def _env_int(key, fallback, *, minimum=None, maximum=None):
     try:
         value = int(os.environ.get(key, fallback))
@@ -306,6 +311,8 @@ def _default_vw_config():
             "enabled": True,
             "localProfilesEnabled": True,
             "homePath": "",
+            "resourceRoot": "",
+            "resourceAccess": "read-write",
             "binary": "",
             "timeoutSec": 600,
             "apiEndpointMode": "auto",
@@ -441,6 +448,12 @@ def _load_vw_config():
     cfg["hermes"]["homePath"] = os.path.expanduser(str(_config_or_env(
         cfg, overrides, "hermes", "homePath", ("VW_HERMES_HOME",), "~/.hermes"
     ) or "~/.hermes"))
+    cfg["hermes"]["resourceRoot"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "hermes", "resourceRoot", ("VW_HERMES_RESOURCE_ROOT",), cfg["hermes"]["homePath"]
+    ) or cfg["hermes"]["homePath"]))
+    cfg["hermes"]["resourceAccess"] = _hermes_resource_access(_config_or_env(
+        cfg, overrides, "hermes", "resourceAccess", ("VW_HERMES_RESOURCE_ACCESS",), "read-write"
+    ))
     cfg["hermes"]["binary"] = os.path.expanduser(str(_config_or_env(
         cfg, overrides, "hermes", "binary", ("VW_HERMES_BIN",), "~/.local/bin/hermes"
     ) or "~/.local/bin/hermes"))
@@ -474,6 +487,9 @@ def _load_vw_config():
     for connection in cfg["hermes"]["connections"]:
         if isinstance(connection, dict):
             connection["endpointMode"] = _endpoint_mode(connection.get("endpointMode"), connection.get("apiUrl"))
+            connection["resourceAccess"] = str(connection.get("resourceAccess") or "inherit").strip().lower()
+            if connection["resourceAccess"] not in {"inherit", "disabled", "read-only", "read-write"}:
+                connection["resourceAccess"] = "inherit"
     cfg["codex"]["enabled"] = _config_or_env_bool(cfg, overrides, "codex", "enabled", ("VW_CODEX_ENABLED",), True)
     cfg["codex"]["homePath"] = os.path.expanduser(str(_config_or_env(
         cfg, overrides, "codex", "homePath", ("VW_CODEX_HOME", "CODEX_HOME"), "~/.codex"
@@ -774,6 +790,8 @@ def _safe_vw_config():
             "enabled": hermes_cfg.get("enabled", True),
             "localProfilesEnabled": hermes_cfg.get("localProfilesEnabled", True),
             "homePath": _display_user_home_path(hermes_cfg.get("homePath")),
+            "resourceRoot": _display_user_home_path(hermes_cfg.get("resourceRoot")),
+            "resourceAccess": hermes_cfg.get("resourceAccess") or "read-write",
             "binary": _display_user_home_path(hermes_cfg.get("binary")),
             "timeoutSec": hermes_cfg.get("timeoutSec", 600),
             "apiEndpointMode": hermes_cfg.get("apiEndpointMode") or "auto",
@@ -21575,6 +21593,58 @@ def _hermes_api_capability_overrides(features, endpoints):
     }
 
 
+def _hermes_mounted_profile(profile, connection=None, hermes_cfg=None, *, discovered_path=""):
+    """Resolve an API/CLI agent to an explicitly configured mounted profile.
+
+    Runtime transport and resource transport are deliberately independent:
+    Hermes' authenticated API owns runs/sessions, while this mapping only
+    exposes manifest-allowlisted files from a directory already visible inside
+    the My Virtual World server/container.
+    """
+    if HermesProvider is None:
+        return {
+            "available": False,
+            "readable": False,
+            "writable": False,
+            "path": "",
+            "access": "disabled",
+            "source": "unavailable",
+            "reason": "Hermes provider support is unavailable.",
+        }
+    cfg = hermes_cfg if isinstance(hermes_cfg, dict) else (VW_CONFIG.get("hermes", {}) or {})
+    item = connection if isinstance(connection, dict) else {}
+    connection_access = str(item.get("resourceAccess") or "inherit").strip().lower()
+    access = (cfg.get("resourceAccess") or "read-write") if connection_access == "inherit" else connection_access
+    access = _hermes_resource_access(access)
+    explicit_path = str(item.get("resourcePath") or discovered_path or "").strip()
+    return HermesProvider.inspect_mounted_profile(
+        str(profile or "default"),
+        data_root=cfg.get("resourceRoot") or cfg.get("homePath") or "",
+        profile_path=explicit_path,
+        access=access,
+    )
+
+
+def _apply_hermes_mounted_profile(row, mounted):
+    item = row
+    mount = mounted if isinstance(mounted, dict) else {}
+    item["resourcesReadable"] = bool(mount.get("readable"))
+    item["resourcesWritable"] = bool(mount.get("writable"))
+    item["resourceAccess"] = str(mount.get("access") or "disabled")
+    item["resourceAccessRequested"] = str(mount.get("requestedAccess") or item["resourceAccess"])
+    item["resourceMountSource"] = str(mount.get("source") or "")
+    item["resourceMountReason"] = str(mount.get("reason") or "")[:500]
+    if mount.get("readable") and mount.get("path"):
+        item["workspace"] = str(mount["path"])
+        item["home"] = str(mount["path"])
+        item["workspaceTransport"] = "mounted-hermes-profile"
+    else:
+        item["workspace"] = ""
+        item["home"] = ""
+        item["workspaceTransport"] = "hermes-api" if item.get("apiAvailable") else "hermes-cli"
+    return item
+
+
 def _codex_provider():
     if CodexProvider is None:
         return None
@@ -21607,6 +21677,17 @@ def _discover_hermes_agents():
     except Exception as e:
         print(f"⚠️  Virtual World Hermes discovery failed: {e}")
     rows = rows if isinstance(rows, list) else []
+    for row in rows:
+        profile = str(row.get("profile") or row.get("providerAgentId") or "default")
+        mounted = _hermes_mounted_profile(
+            profile,
+            hermes_cfg=hermes_cfg,
+            discovered_path=str(row.get("workspace") or row.get("home") or ""),
+        )
+        _apply_hermes_mounted_profile(row, mounted)
+        row["cliAvailable"] = True
+        row.setdefault("apiAvailable", False)
+        row["connectionModes"] = sorted(set(row.get("connectionModes") or []) | {"cli"})
 
     # API-only connections are real agents only while one declared endpoint
     # passes authenticated health and capability probes.
@@ -21620,6 +21701,8 @@ def _discover_hermes_agents():
             "name": str(item.get("name") or "Hermes").strip() or "Hermes",
             "emoji": str(item.get("emoji") or "⚕️").strip() or "⚕️",
             "role": str(item.get("role") or "Hermes Agent").strip() or "Hermes Agent",
+            "resourcePath": str(item.get("resourcePath") or "").strip(),
+            "resourceAccess": str(item.get("resourceAccess") or "inherit").strip() or "inherit",
         })
     if hermes_cfg.get("preferApi", True) is not False and not any(item["id"] == "default" for item in candidates):
         candidates.append({
@@ -21627,6 +21710,8 @@ def _discover_hermes_agents():
             "name": "Hermes",
             "emoji": "⚕️",
             "role": "Hermes Agent",
+            "resourcePath": "",
+            "resourceAccess": "inherit",
         })
 
     existing = {str(item.get("profile") or item.get("providerAgentId") or "default"): item for item in rows}
@@ -21641,6 +21726,7 @@ def _discover_hermes_agents():
         api_features = capabilities.get("features") if isinstance(capabilities.get("features"), dict) else {}
         api_endpoints = capabilities.get("endpoints") if isinstance(capabilities.get("endpoints"), dict) else {}
         profile = candidate["id"]
+        mounted = _hermes_mounted_profile(profile, candidate, hermes_cfg)
         if profile in existing:
             row = existing[profile]
             row["cliAvailable"] = True
@@ -21652,6 +21738,8 @@ def _discover_hermes_agents():
                 row["model"] = capabilities.get("model") or capabilities.get("model_name") or ""
             row["apiFeatures"] = api_features
             row["apiEndpoints"] = api_endpoints
+            if mounted.get("readable") and (candidate.get("resourcePath") or not row.get("resourcesReadable")):
+                _apply_hermes_mounted_profile(row, mounted)
             continue
         safe_profile = HermesProvider._safe_suffix(profile) if HermesProvider else re.sub(r"[^A-Za-z0-9_.-]+", "-", profile)
         row = {
@@ -21669,18 +21757,19 @@ def _discover_hermes_agents():
             "provider": capabilities.get("provider") or "Hermes API",
             "gateway": resolved_endpoint.get("url") or "",
             "endpointLocation": resolved_endpoint.get("location") or "",
-            "workspace": "",
-            "home": "",
+            "workspace": str(mounted.get("path") or "") if mounted.get("readable") else "",
+            "home": str(mounted.get("path") or "") if mounted.get("readable") else "",
             "lastActiveAt": 0,
             "source": "hermes-api",
             "cliAvailable": False,
             "apiAvailable": True,
             "connectionModes": ["api"],
-            "workspaceTransport": "hermes-api",
+            "workspaceTransport": "mounted-hermes-profile" if mounted.get("readable") else "hermes-api",
             "apiFeatures": api_features,
             "apiEndpoints": api_endpoints,
             "capabilityOverrides": _hermes_api_capability_overrides(api_features, api_endpoints),
         }
+        _apply_hermes_mounted_profile(row, mounted)
         rows.append(row)
         existing[profile] = row
     return rows
@@ -25776,6 +25865,8 @@ _PROVIDER_DISCOVERY_FIELDS = {
     "source", "cliAvailable", "apiAvailable", "createdAt", "lastSeenAt", "offlineSince",
     "available", "connectionState", "capabilityOverrides", "nativeAgentPath",
     "apiFeatures", "apiEndpoints", "workspaceTransport",
+    "resourceAccess", "resourceAccessRequested", "resourcesReadable", "resourcesWritable",
+    "resourceMountSource", "resourceMountReason",
 }
 
 
@@ -26156,6 +26247,58 @@ def _preview_provider_resource(agent, relpath, content, create=False):
     }
 
 
+def _prepare_shared_provider_file(root, full_path):
+    """Create parent directories with the mounted provider owner's identity.
+
+    My Virtual World commonly runs as root while an official provider sidecar
+    runs as an unprivileged uid. New files must remain writable by that native
+    runtime instead of becoming root-owned artifacts on the shared volume.
+    """
+    root = os.path.abspath(str(root or ""))
+    parent = os.path.abspath(os.path.dirname(full_path))
+    try:
+        if os.path.commonpath([root, parent]) != root:
+            raise OSError("Provider file parent escapes the mounted profile")
+    except ValueError as exc:
+        raise OSError("Provider file parent is incompatible with the mounted profile") from exc
+    missing = []
+    cursor = parent
+    while cursor != root and not os.path.exists(cursor):
+        missing.append(cursor)
+        cursor = os.path.dirname(cursor)
+    reference = cursor if os.path.isdir(cursor) else root
+    reference_stat = os.stat(reference)
+    directory_mode = reference_stat.st_mode & 0o777
+    for directory in reversed(missing):
+        os.mkdir(directory, directory_mode)
+        try:
+            os.chown(directory, reference_stat.st_uid, reference_stat.st_gid)
+        except OSError:
+            pass
+    return reference_stat
+
+
+def _align_new_provider_file(full_path, reference_stat):
+    if reference_stat is None or not os.path.isfile(full_path):
+        return
+    try:
+        os.chown(full_path, reference_stat.st_uid, reference_stat.st_gid)
+    except OSError:
+        pass
+    directory_mode = reference_stat.st_mode & 0o777
+    file_mode = 0o600
+    if directory_mode & 0o040:
+        file_mode |= 0o040
+    if directory_mode & 0o020:
+        file_mode |= 0o020
+    if directory_mode & 0o004:
+        file_mode |= 0o004
+    try:
+        os.chmod(full_path, file_mode)
+    except OSError:
+        pass
+
+
 def _save_provider_resource(agent, relpath, content, *, create=False, expected_sha=""):
     root = _provider_workspace_root(agent)
     rel = _safe_provider_relpath(relpath)
@@ -26177,8 +26320,11 @@ def _save_provider_resource(agent, relpath, content, *, create=False, expected_s
         backup_path = os.path.join(_provider_resource_backup_root((agent or {}).get("statusKey") or (agent or {}).get("id")), backup_id, rel)
         os.makedirs(os.path.dirname(backup_path), exist_ok=True)
         shutil.copy2(full, backup_path)
-    os.makedirs(os.path.dirname(full), exist_ok=True)
+    existed = os.path.isfile(full)
+    reference_stat = _prepare_shared_provider_file(root, full)
     _atomic_write_text(full, text)
+    if not existed:
+        _align_new_provider_file(full, reference_stat)
     return {"ok": True, "saved": rel, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "previousSha256": old_sha, "backupId": backup_id}
 
 
@@ -26278,9 +26424,13 @@ def _handle_provider_resource(body):
             "editable": False,
             "files": [],
             "unsupportedReason": (
-                "This Hermes API version does not advertise a profile-resource endpoint. "
-                "Sessions, models, skills, runs, approvals, and stop work over the network; "
-                "native SOUL/workspace file access requires a mounted Linux profile."
+                str(agent.get("resourceMountReason") or "").strip()
+                or (
+                    "This Hermes API version does not advertise a profile-resource endpoint. "
+                    "Sessions, models, skills, runs, approvals, and stop work over the network; "
+                    "native SOUL/workspace file access requires a mounted Hermes profile data directory "
+                    "visible inside My Virtual World."
+                )
             ),
         }
     if action in {"list", "read", "revisions"} and not capabilities.get("resourcesRead"):
@@ -29617,7 +29767,7 @@ def _hermes_api_skills_for_agent(agent, resolved_agent_id):
     }, 200
 
 
-def _agent_skills_root_for_agent(agent_id):
+def _agent_skills_root_for_agent(agent_id, *, require_write=False):
     agent = _agent_record_for(agent_id)
     resolved_agent_id = (agent or {}).get("statusKey") or (agent or {}).get("id") or _resolve_agent_id(agent_id)
     if not resolved_agent_id:
@@ -29649,36 +29799,60 @@ def _agent_skills_root_for_agent(agent_id):
     real_parent = os.path.realpath(root if os.path.exists(root) else os.path.dirname(root))
     if real_parent != real_workspace and not real_parent.startswith(real_workspace + os.sep):
         return None, resolved_agent_id, _api_error("skill_root_escape", "Provider skill root escapes the agent workspace."), 400
-    if not raw_root.get("writable") or not capabilities.get("resourcesWrite"):
+    if require_write and (not raw_root.get("writable") or not capabilities.get("resourcesWrite")):
         return root, resolved_agent_id, {"ok": True, "schemaVersion": AGENT_SKILL_SCHEMA_VERSION, "agentId": resolved_agent_id, "providerKind": provider_kind, "skillsAvailable": True, "editable": False, "skills": [], "unsupportedReason": "Provider skill root is read-only."}, 200
     return root, resolved_agent_id, None, 200
 
 
 def _skill_file_for(root, skill_name):
-    raw_name = str(skill_name or "").strip().strip("/\\")
-    if not raw_name or raw_name != os.path.basename(raw_name) or ".." in raw_name:
+    raw_name = str(skill_name or "").strip().replace("\\", "/").strip("/")
+    relative = _safe_provider_relpath(raw_name)
+    parts = relative.split("/") if relative else []
+    if (
+        not parts
+        or len(parts) > 6
+        or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", part) for part in parts)
+    ):
         return None, ""
-    slug = _skill_slug(skill_name)
-    if not root or not slug:
+    if not root:
         return None, ""
     root_real = os.path.realpath(root)
-    dirname = slug
-    if os.path.isdir(root_real):
+    relative_name = "/".join(parts)
+    candidate = os.path.join(root_real, *parts, "SKILL.md")
+    if not os.path.isfile(candidate) and len(parts) == 1 and os.path.isdir(root_real):
+        # Backwards compatibility for callers that know only a skill's leaf
+        # name. Official Hermes images group bundled skills by category, so a
+        # unique recursive leaf match is safe and keeps old flat clients useful.
+        slug = _skill_slug(parts[0])
+        matches = []
         try:
-            for entry in os.listdir(root_real):
-                skill_file = os.path.join(root_real, entry, "SKILL.md")
-                if os.path.isfile(skill_file) and (entry == raw_name or _skill_slug(entry) == slug):
-                    dirname = entry
-                    break
+            for current, dirs, names in os.walk(root_real):
+                dirs[:] = [entry for entry in dirs if not entry.startswith(".")]
+                depth = len(Path(current).relative_to(root_real).parts)
+                if depth >= 6:
+                    dirs[:] = []
+                if "SKILL.md" not in names or current == root_real:
+                    continue
+                leaf = os.path.basename(current)
+                if leaf == parts[0] or _skill_slug(leaf) == slug:
+                    matches.append(current)
         except OSError:
-            pass
-    skill_dir = os.path.realpath(os.path.join(root_real, dirname))
+            matches = []
+        if len(matches) == 1:
+            skill_dir = matches[0]
+            candidate = os.path.join(skill_dir, "SKILL.md")
+            relative_name = Path(skill_dir).relative_to(root_real).as_posix()
+    skill_dir = os.path.realpath(os.path.dirname(candidate))
+    real_candidate = os.path.realpath(candidate)
     try:
-        if os.path.commonpath([root_real, skill_dir]) != root_real:
+        if (
+            os.path.commonpath([root_real, skill_dir]) != root_real
+            or os.path.commonpath([root_real, real_candidate]) != root_real
+        ):
             return None, ""
     except ValueError:
         return None, ""
-    return os.path.join(skill_dir, "SKILL.md"), dirname
+    return candidate, relative_name
 
 
 def _read_skill_file(skill_file, fallback_name):
@@ -29721,27 +29895,41 @@ def handle_agent_skills_list(agent_id):
     skills = []
     if os.path.isdir(root):
         real_root = os.path.realpath(root)
-        for entry in sorted(os.listdir(root)):
-            if entry.startswith("."):
+        for current, dirs, names in os.walk(root):
+            dirs[:] = [entry for entry in dirs if not entry.startswith(".")]
+            depth = len(Path(current).relative_to(root).parts)
+            if depth >= 6:
+                dirs[:] = []
+            if current == root or "SKILL.md" not in names:
                 continue
-            skill_file = os.path.join(root, entry, "SKILL.md")
+            skill_file = os.path.join(current, "SKILL.md")
             real_file = os.path.realpath(skill_file)
             if not (real_file == real_root or real_file.startswith(real_root + os.sep)):
                 continue
             if os.path.isfile(skill_file):
-                item = _read_skill_file(skill_file, entry)
-                validation_error = _validate_provider_skill_content(item.get("content") or "", entry)
+                relative_name = Path(current).relative_to(root).as_posix()
+                item = _read_skill_file(skill_file, relative_name)
+                if "/" in relative_name:
+                    item["category"] = relative_name.split("/", 1)[0]
+                validation_error = _validate_provider_skill_content(
+                    item.get("content") or "",
+                    os.path.basename(relative_name),
+                )
                 item["valid"] = not validation_error
                 item["validationError"] = validation_error
                 skills.append(item)
+                if len(skills) >= 500:
+                    break
+        skills.sort(key=lambda item: str(item.get("name") or "").lower())
     agent = _agent_record_for(resolved_agent_id) or {}
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
     return True, {
         "ok": True,
         "schemaVersion": AGENT_SKILL_SCHEMA_VERSION,
         "agentId": resolved_agent_id,
         "providerKind": agent.get("providerKind") or "openclaw",
         "skillsAvailable": True,
-        "editable": True,
+        "editable": bool(capabilities.get("resourcesWrite")),
         "skillsRoot": root,
         "skills": skills,
     }, 200
@@ -29750,7 +29938,7 @@ def handle_agent_skills_list(agent_id):
 def handle_agent_skill_save(agent_id, payload):
     if not isinstance(payload, dict):
         return False, _api_error("invalid_payload", "skill payload must be an object."), 400
-    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
+    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id, require_write=True)
     if error and not error.get("ok"):
         return False, error, status
     if error:
@@ -29761,7 +29949,7 @@ def handle_agent_skill_save(agent_id, payload):
     content = str(payload.get("content") or "")
     if not content.strip():
         content = f"---\nname: {slug}\ndescription: Agent workflow skill.\n---\n\n# {slug}\n\nInstructions here.\n"
-    validation_error = _validate_provider_skill_content(content, slug)
+    validation_error = _validate_provider_skill_content(content, os.path.basename(slug))
     if validation_error:
         return False, _api_error("invalid_skill", validation_error, details={"skill": slug}), 400
     try:
@@ -29780,7 +29968,11 @@ def handle_agent_skill_save(agent_id, payload):
             backup_file = os.path.join(_provider_resource_backup_root(resolved_agent_id), "skills", backup_id, slug, "SKILL.md")
             os.makedirs(os.path.dirname(backup_file), exist_ok=True)
             shutil.copy2(skill_file, backup_file)
+        existed = os.path.isfile(skill_file)
+        reference_stat = _prepare_shared_provider_file(os.path.dirname(root), skill_file)
         _atomic_write_text(skill_file, content)
+        if not existed:
+            _align_new_provider_file(skill_file, reference_stat)
     except OSError as exc:
         return False, _api_error("write_failed", "Could not save skill.", details={"error": str(exc)}), 500
     return True, {
@@ -29794,7 +29986,7 @@ def handle_agent_skill_save(agent_id, payload):
 
 
 def handle_agent_skill_delete(agent_id, skill_name):
-    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
+    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id, require_write=True)
     if error and not error.get("ok"):
         return False, error, status
     if error:
@@ -29841,7 +30033,7 @@ def handle_agent_skill_revisions(agent_id, skill_name):
 def handle_agent_skill_restore(agent_id, payload):
     if not isinstance(payload, dict):
         return False, _api_error("invalid_payload", "skill restore payload must be an object."), 400
-    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
+    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id, require_write=True)
     if error:
         return False, error, status
     skill_file, slug = _skill_file_for(root, payload.get("name") or payload.get("skill"))
@@ -29922,7 +30114,7 @@ def handle_skills_library_apply(payload):
     lib_file, slug = _skill_file_for(_skills_library_dir(), skill_name)
     if not lib_file or not os.path.isfile(lib_file):
         return False, _api_error("not_found", "Skill not found in library.", details={"skill": skill_name}), 404
-    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
+    root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id, require_write=True)
     if error and not error.get("ok"):
         return False, error, status
     if error:
@@ -29931,8 +30123,9 @@ def handle_skills_library_apply(payload):
     if os.path.isfile(dest_file) and not overwrite:
         return True, {"ok": False, "exists": True, "warning": f"Agent already has skill '{slug}'.", "skill": slug, "agentId": resolved_agent_id}, 200
     try:
-        os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+        reference_stat = _prepare_shared_provider_file(os.path.dirname(root), dest_file)
         shutil.copy2(lib_file, dest_file)
+        _align_new_provider_file(dest_file, reference_stat)
     except OSError as exc:
         return False, _api_error("write_failed", "Could not apply skill.", details={"error": str(exc)}), 500
     return True, {"ok": True, "skill": slug, "agentId": resolved_agent_id, "path": dest_file, "overwritten": overwrite}, 200
@@ -29954,7 +30147,10 @@ def handle_skills_library_save_from_agent(payload):
             break
     if not source:
         return False, _api_error("not_found", "Skill not found on agent.", details={"skill": skill_name, "agentId": agent_id}), 404
-    skill_file, slug = _skill_file_for(_skills_library_dir(), skill_name)
+    # The library is intentionally flat even when a provider groups mounted
+    # skills by category (for example Hermes' skills/<category>/<skill>).
+    library_name = os.path.basename(skill_name.replace("\\", "/"))
+    skill_file, slug = _skill_file_for(_skills_library_dir(), library_name)
     content = source.get("content") or ""
     if os.path.isfile(skill_file):
         try:

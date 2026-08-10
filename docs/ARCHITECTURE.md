@@ -17,7 +17,7 @@ The app is designed for local machines, LANs, and private VPNs. It is not a publ
 | Server | `src/server/server.py` | Static file serving, JSON APIs, license state, OpenClaw/Hermes adapters, persistence. |
 | Provider registry | `src/server/providers/` | Six built-in manifests plus optional `vw_provider_*.py` extensions and file-safety helpers. |
 | Realtime sidecar | `src/realtime/server.mjs` | Optional Colyseus runtime for live agent snapshots, route leases, and heartbeat broadcast. |
-| Hermes provider | `src/server/providers/hermes.py` | Optional Linux CLI integration plus capability-negotiated HTTP API discovery, sessions, skills metadata, models, runs, approvals, and cancellation across Windows/Docker boundaries. |
+| Hermes provider | `src/server/providers/hermes.py` | Capability-negotiated HTTP API runtime plus independently negotiated mounted-profile resources and optional Linux CLI lifecycle support. |
 | Persistent data | `VW_DATA_DIR`, usually Docker volume `vw-data` | World metadata, chunks, buildings, license receipt, config, communication logs. |
 | Docker deployment | `Dockerfile`, `docker-compose.yml` | Production-style local deployment. |
 | Verification | `scripts/verify-smoke.mjs` | Public smoke suite, syntax checks, package checks, and secret scan. |
@@ -61,6 +61,14 @@ This models topology rather than operating-system labels: `127.0.0.1` is the
 server/container, `host.docker.internal` is the Docker host, and Custom is an
 exclusive sidecar/remote endpoint. Process-only providers do not expose network
 modes unless an adapter supplies a real network bridge.
+
+Hermes intentionally uses two independent transports when it runs in a
+dedicated container. The authenticated HTTP API owns discovery, sessions,
+models, runs, approvals, and cancellation. A separately configured filesystem
+mount owns only manifest-allowlisted profile resources such as `SOUL.md`,
+workspace documents, and `SKILL.md` files. The resource mapping is never
+derived from the API URL, honors read-only mounts, and does not require a
+second Hermes CLI inside the My Virtual World container.
 
 ## World Flow
 

@@ -143,6 +143,8 @@ Most deployments only need the defaults in `.env.example`.
 | `VW_REALTIME_HOST_PORT` | `8591` | Outside Docker host port for the realtime sidecar |
 | `VW_HERMES_ENABLED` | `true` | Enable local Hermes profile support |
 | `VW_HERMES_HOME` | `/home/vw/.hermes` | Hermes home path inside Docker |
+| `VW_HERMES_RESOURCE_ROOT` | `VW_HERMES_HOME` | Hermes data root mounted into My Virtual World for allowlisted profile files |
+| `VW_HERMES_RESOURCE_ACCESS` | `read-write` | `read-write`, `read-only`, or `disabled` mounted-profile access |
 | `VW_HERMES_BIN` | `/home/vw/.hermes/hermes-agent/hermes` | Hermes CLI path inside Docker |
 | `VW_HERMES_LOCAL_PROFILES_ENABLED` | `true` | Allow Linux Hermes CLI/profile discovery inside the app server or container |
 | `VW_HERMES_API_ENDPOINT_MODE` | `auto` | Resolve one authenticated Hermes API endpoint from the configured URL, Docker host, or container-local candidates |
@@ -195,6 +197,8 @@ When running with Docker, use these values in `Settings > Connections`:
 | Gateway URL | `ws://host.docker.internal:18789` |
 | Gateway Token | Leave blank unless your gateway requires one |
 | Hermes Home | `/home/vw/.hermes` |
+| Mounted Hermes data root | `/home/vw/.hermes` |
+| Mounted profile access | `Read and write` (or `Read only` for a read-only mount) |
 | Hermes CLI | `/home/vw/.hermes/hermes-agent/hermes` |
 | Hermes API endpoint | `Auto` |
 | Hermes API URL | `http://127.0.0.1:8642` as the preferred local URL, or your own API URL |
@@ -209,7 +213,8 @@ These values match the Docker mounts in `docker-compose.yml`:
 - The OpenClaw gateway is reached from inside Docker at `ws://host.docker.internal:18789`.
 - Browser chat stays on the My Virtual World origin and does not need direct access to port `18789`.
 - Hermes home is mounted at `/home/vw/.hermes`.
-- The Hermes CLI is discovered from the mounted Hermes home, usually `/home/vw/.hermes/hermes-agent/hermes`.
+- Hermes API runtime and mounted profile resources are independent. Separate Hermes and Virtual World containers communicate over their private Docker network while sharing this data bind.
+- The Hermes CLI is optional for API-connected agents. It is only required for local CLI discovery, API auto-start, and profile create/delete operations.
 - Codex home is mounted at `/home/vw/.codex`; override `VW_CODEX_BIN` if your Codex binary is installed somewhere else.
 
 `Auto` is topology-aware rather than OS-aware. Network-capable transports probe

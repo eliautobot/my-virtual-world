@@ -54,6 +54,13 @@ POST /api/providers/profile
 
 Resource and skill paths are restricted to manifest-declared roots. Writes use optimistic SHA checks and create recoverable revisions. Secret settings are redacted on reads and a blank secret value preserves the configured value.
 
+For Hermes, runtime and resources can come from different declared transports:
+the API handles live work, while an optional profile directory mounted into the
+My Virtual World server provides allowlisted files and full skill contents.
+Read/write, read-only, and disabled resource modes are negotiated per default
+data root or named connection. A mounted resource directory never grants CLI
+profile creation/deletion by itself.
+
 Network Auto mode performs an authenticated read-only probe and selects exactly
 one endpoint before execution. Only unreachable candidates can fall through;
 authentication, authorization, and incompatible-protocol results stop selection.

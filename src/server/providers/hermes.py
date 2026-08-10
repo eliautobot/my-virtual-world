@@ -66,6 +66,119 @@ class HermesProvider:
     def is_available(self) -> bool:
         return bool(self.enabled and not self._binary_problem() and self.home_path and os.path.isdir(self.home_path))
 
+    @classmethod
+    def inspect_mounted_profile(
+        cls,
+        profile: str,
+        *,
+        data_root: str | None = None,
+        profile_path: str | None = None,
+        access: str = "read-write",
+    ) -> dict[str, Any]:
+        """Inspect a Hermes profile directory independently of CLI availability.
+
+        The official Hermes container keeps the default profile at its data
+        root and named profiles below ``profiles/<name>``.  My Virtual World
+        can mount that same data into its own container while continuing to use
+        Hermes' authenticated API for runtime operations.  An explicit
+        ``profile_path`` supports gateways whose connection id does not match
+        their on-disk profile name.
+
+        This method never creates, probes by writing, or reads profile files.
+        It only validates the configured path and filesystem capabilities.
+        """
+        requested_access = str(access or "read-write").strip().lower()
+        if requested_access not in {"disabled", "read-only", "read-write"}:
+            requested_access = "read-write"
+        result: dict[str, Any] = {
+            "available": False,
+            "readable": False,
+            "writable": False,
+            "path": "",
+            "access": requested_access,
+            "requestedAccess": requested_access,
+            "source": "explicit-profile" if str(profile_path or "").strip() else "data-root",
+            "reason": "",
+        }
+        if requested_access == "disabled":
+            result["reason"] = "Mounted Hermes profile resources are disabled for this connection."
+            return result
+
+        raw_profile = str(profile or "default").strip() or "default"
+        raw_path = str(profile_path or "").strip()
+        raw_root = str(data_root or "").strip()
+        configured = raw_path or raw_root
+        if not configured:
+            result["reason"] = "No Hermes profile data directory is configured."
+            return result
+        if re.match(r"^[A-Za-z]:[\\/]", configured) or configured.startswith("\\\\"):
+            result["reason"] = "The Hermes profile path must be visible inside the Linux server or container."
+            return result
+
+        configured = os.path.expanduser(configured)
+        if not os.path.isabs(configured):
+            result["reason"] = "The Hermes profile path must be an absolute server/container path."
+            return result
+
+        if raw_path:
+            candidate = os.path.abspath(configured)
+        else:
+            root = os.path.abspath(configured)
+            if raw_profile == "default":
+                candidate = root
+            else:
+                if (
+                    raw_profile in {".", ".."}
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", raw_profile)
+                    or cls._safe_suffix(raw_profile) != raw_profile
+                ):
+                    result["reason"] = "The Hermes profile id cannot be mapped safely below the data root."
+                    return result
+                candidate = os.path.abspath(os.path.join(root, "profiles", raw_profile))
+                try:
+                    if os.path.commonpath([root, candidate]) != root:
+                        result["reason"] = "The Hermes profile path escapes the configured data root."
+                        return result
+                    if os.path.exists(candidate) and os.path.commonpath([
+                        os.path.realpath(root),
+                        os.path.realpath(candidate),
+                    ]) != os.path.realpath(root):
+                        result["reason"] = "The Hermes profile directory resolves outside the configured data root."
+                        return result
+                except ValueError:
+                    result["reason"] = "The Hermes profile path is incompatible with the configured data root."
+                    return result
+
+        result["path"] = candidate
+        if not os.path.isdir(candidate):
+            result["reason"] = "The mounted Hermes profile directory was not found inside My Virtual World."
+            return result
+        if not os.access(candidate, os.R_OK | os.X_OK):
+            result["reason"] = "The mounted Hermes profile directory is not readable by My Virtual World."
+            return result
+
+        result["available"] = True
+        result["readable"] = True
+        volume_read_only = False
+        try:
+            volume_read_only = bool(os.statvfs(candidate).f_flag & getattr(os, "ST_RDONLY", 1))
+        except OSError:
+            volume_read_only = True
+        result["writable"] = bool(
+            requested_access == "read-write"
+            and not volume_read_only
+            and os.access(candidate, os.W_OK | os.X_OK)
+        )
+        if result["readable"] and not result["writable"]:
+            result["access"] = "read-only"
+        if requested_access == "read-only":
+            result["reason"] = "The mounted Hermes profile is configured for read-only access."
+        elif volume_read_only:
+            result["reason"] = "The mounted Hermes profile filesystem is read-only."
+        elif not result["writable"]:
+            result["reason"] = "The mounted Hermes profile is readable but not writable by My Virtual World."
+        return result
+
     def _subprocess_env(self) -> dict[str, str]:
         """Environment for Hermes CLI calls.
 
@@ -443,10 +556,9 @@ class HermesProvider:
             "exitCode": result.returncode,
         }
 
-    def update_profile(self, profile: str, patch: dict[str, Any]) -> dict[str, Any]:
-        """Synchronize the non-secret files that represent a Hermes identity."""
+    def update_profile_at_home(self, profile_home: str, profile: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Synchronize non-secret Hermes identity files at a verified profile root."""
         safe_profile = self._safe_profile_name(profile)
-        profile_home = self.home_path if safe_profile == "default" else os.path.join(self.home_path or "", "profiles", safe_profile)
         if not os.path.isdir(profile_home):
             return {"ok": False, "error": f"Hermes profile '{safe_profile}' was not found"}
         identity_path = os.path.join(profile_home, "IDENTITY.md")
@@ -469,7 +581,20 @@ class HermesProvider:
             with open(agents_path, "w", encoding="utf-8") as handle:
                 handle.write(str(patch.get("instructions") or ""))
             changed.append("AGENTS.md")
+        try:
+            directory_stat = os.stat(profile_home)
+            for path in (identity_path, agents_path):
+                if os.path.exists(path):
+                    os.chown(path, directory_stat.st_uid, directory_stat.st_gid)
+        except OSError:
+            pass
         return {"ok": True, "profile": safe_profile, "changed": changed, "backupId": backup_id, "backups": backups}
+
+    def update_profile(self, profile: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Synchronize the non-secret files that represent a Hermes identity."""
+        safe_profile = self._safe_profile_name(profile)
+        profile_home = self.home_path if safe_profile == "default" else os.path.join(self.home_path or "", "profiles", safe_profile)
+        return self.update_profile_at_home(profile_home or "", safe_profile, patch)
 
     def delete_session(self, profile: str, session_id: str) -> dict[str, Any]:
         """Delete a Hermes session through the public sessions CLI."""

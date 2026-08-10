@@ -1,6 +1,6 @@
 # Universal Provider SDK parity checklist (8590)
 
-Reference: My Virtual Office v0.7.1/current on port 8090. Base architecture: My Virtual World v1.0.44. Current release target: My Virtual World v1.0.56 on port 8590.
+Reference: My Virtual Office v0.7.1/current on port 8090. Base architecture: My Virtual World v1.0.44. Current release target: My Virtual World v1.0.57 on port 8590.
 
 The target is behavioral parity adapted to My Virtual World's Three.js world, Agent Character Builder, full chat window, yellow in-world bubble, licensing, and persistent `/data` architecture. My Virtual Office branding, office-only layout, account values, and provider credentials are not copied.
 
@@ -52,6 +52,9 @@ The target is behavioral parity adapted to My Virtual World's Three.js world, Ag
 - [x] AgentSkills roots come from `skillSchema` and validate required AgentSkills frontmatter.
 - [x] Skill create/edit/delete, SHA conflict handling, backups, revisions, and restore.
 - [x] Clear unsupported/read-only messaging from capabilities.
+- [x] Hermes API runtime can use an independently mounted default, named, or explicitly mapped profile without installing a second Hermes CLI.
+- [x] Read-only Docker mounts are detected from the effective filesystem and keep skill source readable while rejecting all writes.
+- [x] Shared Hermes files retain the mounted profile owner when My Virtual World creates or replaces content.
 - [x] Live file/skill acceptance for every disposable provider agent (recorded in final acceptance report).
 
 ## Sessions, chat, bubble, tools, and approvals
