@@ -17,7 +17,7 @@ The app is designed for local machines, LANs, and private VPNs. It is not a publ
 | Server | `src/server/server.py` | Static file serving, JSON APIs, license state, OpenClaw/Hermes adapters, persistence. |
 | Provider registry | `src/server/providers/` | Six built-in manifests plus optional `vw_provider_*.py` extensions and file-safety helpers. |
 | Realtime sidecar | `src/realtime/server.mjs` | Optional Colyseus runtime for live agent snapshots, route leases, and heartbeat broadcast. |
-| Hermes provider | `src/server/providers/hermes.py` | Optional Hermes profile discovery and chat relay. |
+| Hermes provider | `src/server/providers/hermes.py` | Optional Linux CLI integration plus capability-negotiated HTTP API discovery, sessions, skills metadata, models, runs, approvals, and cancellation across Windows/Docker boundaries. |
 | Persistent data | `VW_DATA_DIR`, usually Docker volume `vw-data` | World metadata, chunks, buildings, license receipt, config, communication logs. |
 | Docker deployment | `Dockerfile`, `docker-compose.yml` | Production-style local deployment. |
 | Verification | `scripts/verify-smoke.mjs` | Public smoke suite, syntax checks, package checks, and secret scan. |

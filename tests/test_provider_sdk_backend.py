@@ -352,6 +352,115 @@ class ProviderSdkBackendTests(unittest.TestCase):
         self.assertEqual("run_submission_ambiguous", result["code"])
         cli_fallback.assert_not_called()
 
+    def test_hermes_api_capabilities_are_negotiated_without_filesystem_writes(self):
+        features = {"session_resources": True, "skills_api": True, "model_options": True}
+        endpoints = {
+            "sessions": {"path": "/api/sessions"},
+            "session_create": {"path": "/api/sessions"},
+            "session_delete": {"path": "/api/sessions/{session_id}"},
+            "session_messages": {"path": "/api/sessions/{session_id}/messages"},
+            "skills": {"path": "/v1/skills"},
+            "models": {"path": "/v1/models"},
+        }
+        caps = server._hermes_api_capability_overrides(features, endpoints)
+        self.assertTrue(caps["sessions"])
+        self.assertTrue(caps["sessionCreate"])
+        self.assertTrue(caps["sessionDelete"])
+        self.assertTrue(caps["sessionSwitch"])
+        self.assertTrue(caps["skills"])
+        self.assertTrue(caps["models"])
+        for name in ("profileEdit", "resourcesRead", "resourcesWrite", "agentCreate", "agentDelete"):
+            self.assertFalse(caps[name], name)
+
+    def test_hermes_office_provider_preserves_api_only_capability_overrides(self):
+        native = mock.Mock()
+        manifest = ProviderManifest(id="hermes", name="Hermes", capabilities={"discover": True, "resourcesRead": True, "resourcesWrite": True, "skills": True})
+        row = {
+            "id": "hermes-remote", "profile": "remote", "apiAvailable": True,
+            "workspace": "", "home": "",
+            "capabilityOverrides": {"sessions": True, "skills": True, "resourcesRead": False, "resourcesWrite": False},
+        }
+        office = HermesOfficeProvider(native, {"hermesDiscover": lambda: [row]}, manifest)
+        discovered = office.discover_agents()[0]
+        self.assertTrue(discovered["capabilityOverrides"]["sessions"])
+        self.assertTrue(discovered["capabilityOverrides"]["skills"])
+        self.assertFalse(discovered["capabilityOverrides"]["resourcesRead"])
+        self.assertFalse(discovered["capabilityOverrides"]["resourcesWrite"])
+
+    def test_hermes_api_only_sessions_and_skills_use_rest_surface(self):
+        calls = []
+
+        class Client:
+            @staticmethod
+            def list_sessions(limit=40):
+                calls.append(("list", limit))
+                return {"data": [{"id": "remote-one", "title": "Remote", "preview": "hello", "last_active": 123, "message_count": 2}]}
+
+            @staticmethod
+            def create_session(**kwargs):
+                calls.append(("create", kwargs))
+                return {"session": {"id": "remote-two", "title": kwargs.get("title") or ""}}
+
+            @staticmethod
+            def session_messages(session_id, **kwargs):
+                calls.append(("messages", session_id, kwargs))
+                return {"data": [
+                    {"id": "m1", "session_id": session_id, "role": "user", "content": "Question", "timestamp": 1},
+                    {"id": "m2", "session_id": session_id, "role": "assistant", "content": [{"type": "text", "text": "Answer"}], "timestamp": 2},
+                ]}
+
+            @staticmethod
+            def delete_session(session_id):
+                calls.append(("delete", session_id))
+                return {"deleted": True, "id": session_id}
+
+            @staticmethod
+            def skills():
+                calls.append(("skills",))
+                return {"data": [{"name": "research", "description": "Research sources", "category": "work"}]}
+
+        agent = {
+            "id": "hermes-remote", "statusKey": "hermes-remote", "providerKind": "hermes",
+            "providerConnectionId": "remote", "providerAgentId": "remote", "profile": "remote",
+            "apiAvailable": True, "cliAvailable": False, "workspace": "", "home": "",
+            "capabilities": {
+                "sessions": True, "sessionCreate": True, "sessionDelete": True,
+                "sessionSwitch": True, "skills": True, "resourcesRead": False,
+                "resourcesWrite": False,
+            },
+        }
+        agent_ref = {"agentId": "hermes-remote", "providerKind": "hermes", "profile": "remote", "name": "Remote Hermes"}
+        with mock.patch.object(server, "_chat_sessions_agent", return_value=agent_ref), \
+             mock.patch.object(server, "_agent_record_for", return_value=agent), \
+             mock.patch.object(server, "_hermes_api_client_for_agent", return_value=Client()), \
+             mock.patch.object(server, "_live_agent_virtual_session_row", return_value=None), \
+             mock.patch.object(server, "_get_hermes_session_id", return_value="remote-one"), \
+             mock.patch.object(server, "_save_hermes_state"):
+            listed, status = server.handle_chat_sessions_list("hermes-remote")
+            self.assertEqual(200, status)
+            self.assertEqual("api", listed["providerPath"])
+            self.assertEqual("remote-one", listed["sessions"][0]["id"])
+
+            created, status = server.handle_chat_session_create("hermes-remote", {"title": "New remote chat"})
+            self.assertEqual(200, status)
+            self.assertEqual("remote-two", created["sessionId"])
+
+            switched, status = server.handle_chat_session_switch("hermes-remote", "remote-one")
+            self.assertEqual(200, status)
+            self.assertEqual(["Question", "Answer"], [item["text"] for item in switched["messages"]])
+
+            deleted, status = server.handle_chat_session_delete("hermes-remote", "remote-one")
+            self.assertEqual(200, status)
+            self.assertTrue(deleted["deleted"])
+
+            ok, skills, status = server.handle_agent_skills_list("hermes-remote")
+            self.assertTrue(ok)
+            self.assertEqual(200, status)
+            self.assertFalse(skills["editable"])
+            self.assertEqual("research", skills["skills"][0]["name"])
+
+        self.assertEqual(["list", "create", "messages", "delete", "skills"], [call[0] for call in calls])
+
     def test_stable_identity_dedup_includes_connection(self):
         class Provider:
             manifest = ProviderManifest(

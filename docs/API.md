@@ -311,6 +311,23 @@ History query parameters:
 | GET | `/api/hermes/test` | Test Hermes connection. |
 | POST | `/api/hermes/test` | Test Hermes connection with supplied config. |
 
+For an API-connected Hermes agent, the unified provider endpoints also proxy
+Hermes' documented authenticated discovery surfaces:
+
+| Virtual World endpoint | Hermes API source |
+| --- | --- |
+| `GET /api/chat-sessions?agent=<id>` | `GET /api/sessions` |
+| `POST /api/chat-sessions/create` | `POST /api/sessions` |
+| `POST /api/chat-sessions/switch` | `GET /api/sessions/{id}/messages` |
+| `POST /api/chat-sessions/delete` | `DELETE /api/sessions/{id}` |
+| `GET /api/agent/{id}/skills` | `GET /v1/skills` (read-only metadata) |
+| `GET /api/native-models` | `GET /v1/models` |
+
+Every remote feature is gated by `/v1/capabilities`. API-only connections do
+not inherit local filesystem write capabilities. Native profile/workspace files
+remain unavailable unless Hermes advertises a future resource endpoint or a
+Linux profile is mounted into the container.
+
 Hermes API keys, if used, belong in local settings or `.env`, not in docs or commits.
 
 ## Provider Connection Schema

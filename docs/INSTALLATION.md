@@ -245,6 +245,30 @@ The agent appears connected only after the API health and streaming capability
 checks pass. Saved history remains visible but is labeled offline when the API
 or CLI is unavailable.
 
+When **Use Hermes API discovery and runtime features** is enabled, My Virtual
+World negotiates the endpoint's advertised `/v1/capabilities` contract instead
+of assuming that every Hermes release has the same routes. Supported current
+Hermes releases provide these cross-OS features without mounting Windows files
+into the Linux container:
+
+- profile/model identity through `/v1/models` and `/v1/capabilities`;
+- session list, create, history, switch, and delete through `/api/sessions`;
+- enabled skill names/descriptions through `/v1/skills` (read-only);
+- runs, streaming events, approvals, and cancellation through `/v1/runs`.
+
+Hermes currently advertises `admin_config_rw: false` and does not publish a
+profile-resource endpoint. Therefore native `SOUL.md`, workspace-document, and
+skill-content editing still requires a real Linux Hermes profile mounted into
+the Virtual World container. My Virtual World reports that limitation in the
+Agent editor instead of presenting broken file controls or trying to execute a
+Windows path inside Linux.
+
+For multiple Hermes profiles, add one enabled Hermes connection per profile.
+With Hermes multiplex profile routing, use a URL such as
+`http://host.docker.internal:8642/p/coder` and that profile's own
+`API_SERVER_KEY`. Hermes intentionally binds authentication to the routed
+profile; the default profile key must not be used for named profile prefixes.
+
 In Settings, leave **Hermes API endpoint** on **Auto**. Auto authenticates and
 checks the configured URL, Docker-host, and container-local candidates, then
 selects one healthy endpoint. It never submits a run to multiple endpoints. The

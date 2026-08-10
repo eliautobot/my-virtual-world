@@ -762,8 +762,28 @@ function renderHermes() {
     const root = document.getElementById('hermes-models');
     const hermes = nativeData.hermes || {};
     const profiles = hermes.profiles || [];
-    const profileOpts = profiles.map(p => `<option value="${esc(p.id)}">${esc(p.id)}</option>`).join('');
+    const editableProfiles = profiles.filter(profile => profile.editable !== false && !profile.apiOnly);
+    const profileOpts = editableProfiles.map(p => `<option value="${esc(p.id)}">${esc(p.id)}</option>`).join('');
     const providers = hermes.providers || [];
+    if (profiles.length && !editableProfiles.length) {
+        root.innerHTML = `<div class="grid">
+            <div class="card wide">
+                <div class="provider-header">
+                    <div><div class="provider-name">Hermes API Models</div><div class="muted">${(hermes.models||[]).length} model aliases · ${profiles.length} API connections</div></div>
+                    <button class="btn btn-blue" onclick="refreshNativeSoon(0)">Refresh</button>
+                </div>
+                <p class="muted">Discovered through Hermes' authenticated API. Model and credential changes remain read-only because this Hermes API does not advertise admin configuration writes.</p>
+            </div>
+            ${profiles.map(profile => `<div class="card">
+                <div class="provider-header"><div><div class="provider-name">${esc(profile.id)}</div><div class="muted">Hermes API connection</div></div><div class="provider-current">${esc(profile.model || 'framework default')}</div></div>
+                <div class="row"><label>Provider</label><input value="${esc(profile.provider || 'Hermes API')}" disabled></div>
+                <div class="row"><label>Model</label><input value="${esc(profile.model || 'Framework default')}" disabled></div>
+                <p class="muted">Configure the profile and credentials on the Hermes host.</p>
+            </div>`).join('')}
+            ${(hermes.models || []).length ? `<div class="card wide"><div class="provider-name">Advertised model aliases</div><div class="model-list">${hermes.models.map(model => `<div class="model-item"><span>${esc(model.name || model.id)}</span><span>${esc(model.connectionId || model.provider || '')}</span></div>`).join('')}</div></div>` : ''}
+        </div>`;
+        return;
+    }
     let html = `<div class="grid">
         <div class="card wide">
             <div class="provider-header">

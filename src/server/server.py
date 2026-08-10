@@ -21521,6 +21521,60 @@ def _hermes_provider():
     return HermesProvider(home_path=HERMES_HOME, binary=HERMES_BIN, enabled=HERMES_ENABLED, timeout_sec=HERMES_TIMEOUT_SEC)
 
 
+def _hermes_api_surface_enabled(features, endpoints, *, feature_names=(), endpoint_names=()):
+    features = features if isinstance(features, dict) else {}
+    endpoints = endpoints if isinstance(endpoints, dict) else {}
+    return any(bool(features.get(name)) for name in feature_names) or any(
+        isinstance(endpoints.get(name), dict) and bool(endpoints[name].get("path"))
+        for name in endpoint_names
+    )
+
+
+def _hermes_api_capability_overrides(features, endpoints):
+    """Translate Hermes' advertised API surface into Contract 1.1 flags.
+
+    API-only connections must never inherit filesystem/CLI write capabilities
+    from the provider-level manifest.  Each remote feature is enabled only when
+    the authenticated Hermes endpoint advertises the matching stable surface.
+    """
+    sessions = _hermes_api_surface_enabled(
+        features,
+        endpoints,
+        feature_names=("session_resources",),
+        endpoint_names=("sessions",),
+    )
+    session_messages = _hermes_api_surface_enabled(
+        features,
+        endpoints,
+        endpoint_names=("session_messages",),
+    )
+    skills = _hermes_api_surface_enabled(
+        features,
+        endpoints,
+        feature_names=("skills_api",),
+        endpoint_names=("skills",),
+    )
+    models = _hermes_api_surface_enabled(
+        features,
+        endpoints,
+        feature_names=("model_options",),
+        endpoint_names=("models", "model_options"),
+    )
+    return {
+        "sessions": sessions,
+        "sessionCreate": sessions and _hermes_api_surface_enabled(features, endpoints, endpoint_names=("session_create",)),
+        "sessionDelete": sessions and _hermes_api_surface_enabled(features, endpoints, endpoint_names=("session_delete",)),
+        "sessionSwitch": sessions and session_messages,
+        "skills": skills,
+        "models": models,
+        "profileEdit": False,
+        "resourcesRead": False,
+        "resourcesWrite": False,
+        "agentCreate": False,
+        "agentDelete": False,
+    }
+
+
 def _codex_provider():
     if CodexProvider is None:
         return None
@@ -21584,15 +21638,20 @@ def _discover_hermes_agents():
             continue
         resolved_endpoint = resolution.get("endpoint") or {}
         capabilities = resolution.get("probe") or {}
+        api_features = capabilities.get("features") if isinstance(capabilities.get("features"), dict) else {}
+        api_endpoints = capabilities.get("endpoints") if isinstance(capabilities.get("endpoints"), dict) else {}
         profile = candidate["id"]
         if profile in existing:
             row = existing[profile]
+            row["cliAvailable"] = True
             row["apiAvailable"] = True
             row["connectionModes"] = sorted(set(row.get("connectionModes") or []) | {"cli", "api"})
             row["gateway"] = resolved_endpoint.get("url") or row.get("gateway") or ""
             row["endpointLocation"] = resolved_endpoint.get("location") or ""
             if not row.get("model"):
                 row["model"] = capabilities.get("model") or capabilities.get("model_name") or ""
+            row["apiFeatures"] = api_features
+            row["apiEndpoints"] = api_endpoints
             continue
         safe_profile = HermesProvider._safe_suffix(profile) if HermesProvider else re.sub(r"[^A-Za-z0-9_.-]+", "-", profile)
         row = {
@@ -21617,6 +21676,10 @@ def _discover_hermes_agents():
             "cliAvailable": False,
             "apiAvailable": True,
             "connectionModes": ["api"],
+            "workspaceTransport": "hermes-api",
+            "apiFeatures": api_features,
+            "apiEndpoints": api_endpoints,
+            "capabilityOverrides": _hermes_api_capability_overrides(api_features, api_endpoints),
         }
         rows.append(row)
         existing[profile] = row
@@ -22715,6 +22778,7 @@ def _hermes_api_probe(url, api_key):
         "model": capabilities.get("model") or capabilities.get("model_name") or "",
         "provider": capabilities.get("provider") or "Hermes API",
         "features": features,
+        "endpoints": capabilities.get("endpoints") if isinstance(capabilities.get("endpoints"), dict) else {},
     }
 
 
@@ -22753,6 +22817,26 @@ def _hermes_api_client_for_profile(profile, *, endpoint_url="", hermes_cfg=None)
         api_key=cfg.get("key"),
         timeout_sec=min(int((VW_CONFIG.get("hermes") or {}).get("timeoutSec") or 600), 60),
     )
+
+
+def _hermes_api_client_for_agent(agent):
+    """Resolve the authenticated API connection that owns a roster row."""
+    if not isinstance(agent, dict) or not agent.get("apiAvailable"):
+        raise RuntimeError("Hermes API is not available for this agent")
+    connection_id = str(
+        agent.get("providerConnectionId")
+        or agent.get("profile")
+        or agent.get("providerAgentId")
+        or "default"
+    ).strip() or "default"
+    return _hermes_api_client_for_profile(connection_id)
+
+
+def _hermes_api_agent_capability(agent, name):
+    if not isinstance(agent, dict) or not agent.get("apiAvailable"):
+        return False
+    capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
+    return bool(capabilities.get(name))
 
 
 def _ensure_hermes_profile_api(profile, api_cfg):
@@ -22926,6 +23010,9 @@ def _test_hermes_api_connections(hermes_cfg=None):
             allow_auto_start=False,
         )
         endpoint = resolution.get("endpoint") or {}
+        probe = resolution.get("probe") if isinstance(resolution.get("probe"), dict) else {}
+        features = probe.get("features") if isinstance(probe.get("features"), dict) else {}
+        endpoints = probe.get("endpoints") if isinstance(probe.get("endpoints"), dict) else {}
         results.append({
             "id": connection_id,
             "ok": bool(resolution.get("ok")),
@@ -22934,6 +23021,7 @@ def _test_hermes_api_connections(hermes_cfg=None):
             "label": endpoint.get("label") or "",
             "code": resolution.get("code") or "",
             "error": resolution.get("error") or "",
+            "discovery": _hermes_api_capability_overrides(features, endpoints) if resolution.get("ok") else {},
         })
     healthy = [item for item in results if item.get("ok")]
     if healthy:
@@ -25687,6 +25775,7 @@ _PROVIDER_DISCOVERY_FIELDS = {
     "providerConnectionId", "capabilities", "nativeCapabilities", "connectionModes",
     "source", "cliAvailable", "apiAvailable", "createdAt", "lastSeenAt", "offlineSince",
     "available", "connectionState", "capabilityOverrides", "nativeAgentPath",
+    "apiFeatures", "apiEndpoints", "workspaceTransport",
 }
 
 
@@ -26174,6 +26263,26 @@ def _handle_provider_resource(body):
         return {"ok": False, "error": "Agent not found", "_status": 404}
     capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
     action = str((body or {}).get("action") or "list")
+    if (
+        action == "list"
+        and str(agent.get("providerKind") or "").lower() == "hermes"
+        and agent.get("apiAvailable")
+        and not _provider_workspace_root(agent)
+    ):
+        return {
+            "ok": True,
+            "agentId": agent.get("id"),
+            "providerKind": "hermes",
+            "providerPath": "api",
+            "workspaceAvailable": False,
+            "editable": False,
+            "files": [],
+            "unsupportedReason": (
+                "This Hermes API version does not advertise a profile-resource endpoint. "
+                "Sessions, models, skills, runs, approvals, and stop work over the network; "
+                "native SOUL/workspace file access requires a mounted Linux profile."
+            ),
+        }
     if action in {"list", "read", "revisions"} and not capabilities.get("resourcesRead"):
         return {"ok": False, "error": "This provider does not expose readable resources", "_status": 405}
     if action in {"preview", "save", "create", "delete", "restore"} and not capabilities.get("resourcesWrite"):
@@ -27693,7 +27802,7 @@ def _get_hermes_native_models():
             mid = f"{provider}/{name}"
             if not any(m.get("id") == mid for m in models):
                 models.append({"id": mid, "provider": provider, "name": name, "source": "hermes", "available": True})
-    return {
+    result = {
         "ok": bool(profiles),
         "profiles": result_profiles,
         "models": models,
@@ -27709,6 +27818,53 @@ def _get_hermes_native_models():
             "assign": "hermes config set model.provider <provider>; hermes config set model.default <model>",
         },
     }
+    # API-only Hermes installations cannot expose config.yaml to the Linux
+    # container, but the documented models endpoint still provides safe,
+    # deterministic profile/model discovery across Windows and the network.
+    known_profiles = {str(item.get("id") or "") for item in result_profiles}
+    known_models = {str(item.get("id") or "") for item in models}
+    api_connections = []
+    for agent in _discover_hermes_agents():
+        if not isinstance(agent, dict) or not agent.get("apiAvailable"):
+            continue
+        connection_id = str(agent.get("providerConnectionId") or agent.get("profile") or "default")
+        api_connections.append(connection_id)
+        if connection_id not in known_profiles:
+            result_profiles.append({
+                "id": connection_id,
+                "configPath": "Hermes API connection",
+                "provider": str(agent.get("provider") or "Hermes API"),
+                "model": str(agent.get("model") or ""),
+                "baseUrl": "",
+                "auth": [],
+                "authOk": True,
+                "apiOnly": True,
+                "editable": False,
+            })
+            known_profiles.add(connection_id)
+        try:
+            payload = _hermes_api_client_for_agent(agent).models()
+            for row in payload.get("data") if isinstance(payload.get("data"), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                model_id = str(row.get("id") or "").strip()
+                if not model_id or model_id in known_models:
+                    continue
+                models.append({
+                    "id": model_id,
+                    "provider": "hermes-api",
+                    "name": model_id,
+                    "source": "hermes-api",
+                    "available": True,
+                    "connectionId": connection_id,
+                })
+                known_models.add(model_id)
+        except Exception:
+            continue
+    result["ok"] = bool(result_profiles)
+    result["apiConnections"] = sorted(set(api_connections))
+    result["apiDiscovery"] = bool(api_connections)
+    return result
 
 
 def _set_hermes_profile_model(profile_id, provider, model, base_url=""):
@@ -28271,31 +28427,52 @@ def _chat_sessions_list_openclaw(agent_ref, limit=40):
 
 
 def _chat_sessions_list_hermes(agent_ref, limit=40):
-    provider = _hermes_provider()
-    if not provider:
-        return {"ok": False, "error": "Hermes provider unavailable", "sessions": []}
     profile = agent_ref["profile"] or "default"
-    outcome = provider.list_sessions(profile, limit=limit)
-    if not outcome.get("ok"):
-        return {"ok": False, "error": outcome.get("error"), "sessions": []}
+    agent = _agent_record_for(agent_ref.get("agentId")) or {}
+    outcome = None
+    provider_path = "cli"
+    if _hermes_api_agent_capability(agent, "sessions"):
+        try:
+            payload = _hermes_api_client_for_agent(agent).list_sessions(limit=limit)
+            rows = payload.get("data") if isinstance(payload.get("data"), list) else []
+            outcome = {"ok": True, "sessions": rows}
+            provider_path = "api"
+        except Exception as exc:
+            if not agent.get("cliAvailable"):
+                return {"ok": False, "error": f"Hermes Sessions API failed: {exc}", "sessions": [], "providerPath": "api"}
+    if outcome is None:
+        provider = _hermes_provider()
+        if not provider:
+            return {"ok": False, "error": "Hermes provider unavailable", "sessions": []}
+        outcome = provider.list_sessions(profile, limit=limit)
+        if not outcome.get("ok"):
+            return {"ok": False, "error": outcome.get("error"), "sessions": []}
     active_id = _get_hermes_session_id(profile)
     sessions = []
     for row in outcome.get("sessions") or []:
+        if not isinstance(row, dict):
+            continue
+        session_id = str(row.get("id") or row.get("session_id") or "").strip()
+        if not session_id:
+            continue
         sessions.append({
-            "id": row.get("id"),
-            "sessionKey": f"hermes:{profile}:{row.get('id')}",
-            "title": row.get("title") or row.get("id"),
+            "id": session_id,
+            "sessionKey": f"hermes:{profile}:{session_id}",
+            "title": row.get("title") or session_id,
             "preview": row.get("preview") or "",
-            "updatedAt": row.get("lastActive") or None,
+            "updatedAt": row.get("last_active") or row.get("lastActive") or row.get("updatedAt") or None,
             "kind": "chat",
             "liveMode": False,
-            "active": bool(active_id and row.get("id") == active_id),
-            "deletable": True,
+            "active": bool(active_id and session_id == active_id),
+            "deletable": bool((agent.get("capabilities") or {}).get("sessionDelete", True)),
+            "providerPath": provider_path,
+            "messageCount": row.get("message_count"),
+            "model": row.get("model") or "",
         })
     live_session = _live_agent_virtual_session_row(agent_ref)
     if live_session:
         sessions.insert(0, live_session)
-    return {"ok": True, "sessions": sessions[: max(1, int(limit))]}
+    return {"ok": True, "sessions": sessions[: max(1, int(limit))], "providerPath": provider_path}
 
 
 def _chat_sessions_list_codex(agent_ref, limit=40):
@@ -28516,10 +28693,34 @@ def handle_chat_session_create(agent_id, body=None):
     kind = agent_ref["providerKind"]
     profile = agent_ref["profile"]
     if kind == "hermes":
+        agent = _agent_record_for(agent_ref["agentId"]) or {}
+        if _hermes_api_agent_capability(agent, "sessionCreate"):
+            try:
+                created = _hermes_api_client_for_agent(agent).create_session(
+                    title=str((body or {}).get("title") or "").strip() or None,
+                    model=str((body or {}).get("model") or "").strip() or None,
+                    source="api_server",
+                )
+                session = created.get("session") if isinstance(created.get("session"), dict) else {}
+                session_id = str(session.get("id") or created.get("id") or "").strip()
+                if not session_id:
+                    raise RuntimeError("Hermes created a session without returning its id")
+                _save_hermes_state(profile, {"messages": [], "sessionId": session_id})
+                return {
+                    "ok": True,
+                    "providerKind": kind,
+                    "profile": profile,
+                    "sessionId": session_id,
+                    "session": session,
+                    "providerPath": "api",
+                }, 200
+            except Exception as exc:
+                if not agent.get("cliAvailable"):
+                    return {"ok": False, "error": f"Hermes Sessions API create failed: {exc}", "providerPath": "api"}, 502
         # Hermes creates the new session lazily on the next message; clearing
         # the tracked session id + local mirror is the official reset path.
         _save_hermes_state(profile, {"messages": [], "sessionId": ""})
-        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "New Hermes session starts with the next message."}, 200
+        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "providerPath": "cli", "note": "New Hermes session starts with the next message."}, 200
     if kind == "codex":
         _save_codex_state(profile, {"messages": [], "sessionId": ""})
         return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "New Codex thread starts with the next message."}, 200
@@ -28553,13 +28754,24 @@ def handle_chat_session_delete(agent_id, session_id, body=None):
     kind = agent_ref["providerKind"]
     profile = agent_ref["profile"]
     if kind == "hermes":
+        agent = _agent_record_for(agent_ref["agentId"]) or {}
+        if _hermes_api_agent_capability(agent, "sessionDelete"):
+            try:
+                deleted = _hermes_api_client_for_agent(agent).delete_session(session_id)
+                ok = bool(deleted.get("deleted", True))
+                if ok and _get_hermes_session_id(profile) == session_id:
+                    _save_hermes_state(profile, {"messages": [], "sessionId": ""})
+                return {**deleted, "ok": ok, "sessionId": session_id, "providerPath": "api"}, 200 if ok else 502
+            except Exception as exc:
+                if not agent.get("cliAvailable"):
+                    return {"ok": False, "error": f"Hermes Sessions API delete failed: {exc}", "providerPath": "api"}, 502
         provider = _hermes_provider()
         if not provider:
             return {"ok": False, "error": "Hermes provider unavailable"}, 502
         outcome = provider.delete_session(profile, session_id)
         if outcome.get("ok") and _get_hermes_session_id(profile) == session_id:
             _save_hermes_state(profile, {"messages": [], "sessionId": ""})
-        return outcome, 200 if outcome.get("ok") else 502
+        return {**outcome, "providerPath": "cli"}, 200 if outcome.get("ok") else 502
     if kind == "codex":
         provider = _codex_provider()
         if not provider:
@@ -29024,6 +29236,27 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
             "virtual": True,
         }, 200
     if kind == "hermes":
+        agent = _agent_record_for(agent_ref["agentId"]) or {}
+        if _hermes_api_agent_capability(agent, "sessionSwitch"):
+            try:
+                payload = _hermes_api_client_for_agent(agent).session_messages(
+                    session_id,
+                    limit=max(1, min(int((body or {}).get("limit") or 500), 500)),
+                    order="oldest",
+                )
+                raw_messages = payload.get("data") if isinstance(payload.get("data"), list) else []
+                messages = _hermes_session_to_chat_messages({"messages": raw_messages}, agent_ref)
+                _save_hermes_state(profile, {"messages": messages, "sessionId": session_id})
+                return {
+                    "ok": True,
+                    "providerKind": kind,
+                    "sessionId": session_id,
+                    "messages": messages,
+                    "providerPath": "api",
+                }, 200
+            except Exception as exc:
+                if not agent.get("cliAvailable"):
+                    return {"ok": False, "error": f"Hermes Sessions API history failed: {exc}", "providerPath": "api"}, 502
         provider = _hermes_provider()
         if not provider:
             return {"ok": False, "error": "Hermes provider unavailable"}, 502
@@ -29033,7 +29266,7 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
         session = exported.get("session") or {}
         messages = _hermes_session_to_chat_messages(session, agent_ref)
         _save_hermes_state(profile, {"messages": messages, "sessionId": session_id})
-        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages}, 200
+        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages, "providerPath": "cli"}, 200
     if kind == "codex":
         provider = _codex_provider()
         if not provider:
@@ -29073,26 +29306,63 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
 
 
 def _hermes_session_to_chat_messages(session, agent_ref):
-    """Convert a `hermes sessions export` record into VW chat-history messages."""
+    """Convert either CLI export or Sessions API messages into VW chat rows."""
+    def content_text(content):
+        if isinstance(content, str):
+            return content
+        if isinstance(content, dict):
+            return str(content.get("text") or content.get("content") or content.get("output_text") or "")
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    value = item.get("text") or item.get("content") or item.get("output_text")
+                    if value:
+                        parts.append(str(value))
+            return "\n".join(parts)
+        return ""
+
     messages = []
     for msg in session.get("messages") or []:
         if not isinstance(msg, dict):
             continue
         role = str(msg.get("role") or "")
-        content = msg.get("content")
-        text = content if isinstance(content, str) else json.dumps(content)[:2000] if content else ""
+        text = content_text(msg.get("content"))
         if role == "tool":
             continue
         tools = []
-        for call in msg.get("tool_calls") or []:
+        raw_tool_calls = msg.get("tool_calls") or []
+        if isinstance(raw_tool_calls, str):
+            try:
+                raw_tool_calls = json.loads(raw_tool_calls)
+            except json.JSONDecodeError:
+                raw_tool_calls = []
+        for call in raw_tool_calls if isinstance(raw_tool_calls, list) else []:
             if isinstance(call, dict):
                 fn = call.get("function") if isinstance(call.get("function"), dict) else {}
-                tools.append({"name": str(fn.get("name") or call.get("name") or "tool"), "status": "completed", "args": str(fn.get("arguments") or "")[:400]})
+                tools.append({
+                    "id": str(call.get("id") or call.get("tool_call_id") or ""),
+                    "name": str(fn.get("name") or call.get("tool_name") or call.get("name") or "tool"),
+                    "status": "completed",
+                    "args": str(fn.get("arguments") or call.get("arguments") or "")[:400],
+                })
         if role not in ("user", "assistant"):
             continue
         if not text and not tools:
             continue
-        entry = {"role": role, "text": text or "", "ts": None, "from": agent_ref["name"] if role == "assistant" else "You", "fromType": "agent" if role == "assistant" else "human"}
+        entry = {
+            "role": role,
+            "text": text or "",
+            "ts": msg.get("timestamp") or msg.get("created_at") or None,
+            "from": agent_ref["name"] if role == "assistant" else "You",
+            "fromType": "agent" if role == "assistant" else "human",
+            "source": "hermes-session-api" if msg.get("session_id") else "hermes-session-export",
+        }
+        reasoning = content_text(msg.get("reasoning_content") or msg.get("reasoning"))
+        if reasoning:
+            entry["thinking"] = reasoning[:8000]
         if tools:
             entry["tools"] = tools
         messages.append(entry)
@@ -29300,6 +29570,53 @@ def _skills_library_dir():
     return root
 
 
+def _hermes_api_skills_for_agent(agent, resolved_agent_id):
+    """Return the documented Hermes API skill catalog as read-only metadata."""
+    try:
+        payload = _hermes_api_client_for_agent(agent).skills()
+    except Exception as exc:
+        return False, _api_error(
+            "hermes_skills_api_failed",
+            "Could not read the Hermes API skill catalog.",
+            details={"error": str(exc)[:500]},
+        ), 502
+    rows = payload.get("data") if isinstance(payload.get("data"), list) else []
+    skills = []
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        skills.append({
+            "name": name[:128],
+            "title": name[:128],
+            "description": str(row.get("description") or "")[:1000],
+            "category": str(row.get("category") or "")[:120],
+            "content": "",
+            "path": "",
+            "editable": False,
+            "valid": True,
+            "validationError": "",
+            "source": "hermes-api",
+        })
+    skills.sort(key=lambda item: (item.get("category") or "", item["name"].lower()))
+    return True, {
+        "ok": True,
+        "schemaVersion": AGENT_SKILL_SCHEMA_VERSION,
+        "agentId": resolved_agent_id,
+        "providerKind": "hermes",
+        "providerPath": "api",
+        "skillsAvailable": True,
+        "editable": False,
+        "skillsRoot": "",
+        "skills": skills,
+        "unsupportedReason": "Hermes API exposes skill names and descriptions read-only; editing requires a mounted Linux profile until Hermes advertises a resource-write endpoint.",
+    }, 200
+
+
 def _agent_skills_root_for_agent(agent_id):
     agent = _agent_record_for(agent_id)
     resolved_agent_id = (agent or {}).get("statusKey") or (agent or {}).get("id") or _resolve_agent_id(agent_id)
@@ -29388,6 +29705,16 @@ def _read_skill_file(skill_file, fallback_name):
 
 
 def handle_agent_skills_list(agent_id):
+    agent = _agent_record_for(agent_id)
+    resolved_agent_id = (agent or {}).get("statusKey") or (agent or {}).get("id") or _resolve_agent_id(agent_id)
+    if (
+        agent
+        and str(agent.get("providerKind") or "").lower() == "hermes"
+        and agent.get("apiAvailable")
+        and not _provider_workspace_root(agent)
+        and _hermes_api_agent_capability(agent, "skills")
+    ):
+        return _hermes_api_skills_for_agent(agent, resolved_agent_id)
     root, resolved_agent_id, error, status = _agent_skills_root_for_agent(agent_id)
     if error:
         return True, error, status

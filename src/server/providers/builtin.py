@@ -704,13 +704,27 @@ class HermesOfficeProvider(NativeOfficeProvider):
         rows = callback() if callable(callback) else self.native.discover_agents()
         rows = rows if isinstance(rows, list) else []
         for item in rows:
-            item["capabilityOverrides"] = {
-                "profileEdit": bool(item.get("workspace") or item.get("home")),
-                "resourcesRead": bool(item.get("workspace") or item.get("home")),
-                "resourcesWrite": bool(item.get("workspace") or item.get("home")),
-                "skills": bool(item.get("workspace") or item.get("home")),
-                "agentDelete": bool(item.get("workspace") or item.get("home")),
-            }
+            local_workspace = bool(item.get("workspace") or item.get("home"))
+            overrides = dict(item.get("capabilityOverrides") or {})
+            # A mounted Linux profile retains the full local resource surface.
+            # API-only rows arrive with capability-negotiated remote flags and
+            # must not regain CLI/filesystem writes from the global manifest.
+            if local_workspace:
+                overrides.update({
+                    "profileEdit": True,
+                    "resourcesRead": True,
+                    "resourcesWrite": True,
+                    "skills": True,
+                    "agentDelete": True,
+                })
+            else:
+                overrides.setdefault("profileEdit", False)
+                overrides.setdefault("resourcesRead", False)
+                overrides.setdefault("resourcesWrite", False)
+                overrides.setdefault("skills", False)
+                overrides.setdefault("agentDelete", False)
+                overrides.setdefault("agentCreate", False)
+            item["capabilityOverrides"] = overrides
         return rows
 
     def test(self) -> dict[str, Any]:
@@ -868,6 +882,13 @@ def build_provider_registry(context: dict[str, Any]) -> ProviderRegistry:
                             _endpoint_mode_field("apiEndpointMode", "Default API endpoint location"),
                             _field("apiUrl", "Preferred or custom default API URL", "url", placeholder="http://host.docker.internal:8642"),
                             _field("apiKey", "Default API key", "secret", secret=True, placeholder="Keep existing key"),
+                            _field(
+                                "preferApi",
+                                "Use API discovery and runtime features",
+                                "boolean",
+                                default=True,
+                                help="Discovers profile/model identity, sessions, skills, runs, approvals, and cancellation through the authenticated Hermes API before using a local Linux CLI.",
+                            ),
                             _field(
                                 "connections",
                                 "Native Hermes gateways",

@@ -24,7 +24,7 @@ export const PROVIDER_CONNECTION_GUIDES = Object.freeze({
     expectedDefault: 'Docker host API · http://host.docker.internal:8642 · matching API_SERVER_KEY',
     linux: 'For a host API, run hermes gateway run on the Linux Docker host, enable its API server on port 8642, choose Docker host or Auto-detect, and use http://host.docker.internal:8642. Local profile discovery and API auto-start require a real Linux Hermes executable and home mounted inside the container.',
     windows: 'Run hermes gateway run as a long-running Windows process/service with its API server on port 8642. Choose Docker host, use http://host.docker.internal:8642, enter the same API_SERVER_KEY, and turn off local profile discovery plus both local API auto-start settings.',
-    requirements: 'GET /health must report healthy. GET /v1/capabilities must advertise run_submission and run_events_sse. The API key must match API_SERVER_KEY. A mounted CLI path must be an executable file, never a directory.',
+    requirements: 'GET /health must report healthy and GET /v1/capabilities must advertise each feature before Virtual World enables it. Runs require run_submission and run_events_sse; remote sessions require session_resources plus the sessions/create/delete/messages endpoints; skills require skills_api; model aliases require /v1/models. The API key must match API_SERVER_KEY. Native SOUL/workspace file editing still requires a mounted Linux profile because the current Hermes API does not expose profile resources. A mounted CLI path must be an executable file, never a directory.',
     defaults: {
       enabled: 'Enabled', localProfilesEnabled: 'Enabled for Linux CLI installs; disabled for Windows-host API setups',
       homePath: '/home/vw/.hermes', binary: '/home/vw/.local/bin/hermes', timeoutSec: '600 seconds',
@@ -89,7 +89,7 @@ const FIELD_PURPOSES = Object.freeze({
   apiKey: 'The secret sent to Hermes and expected to match API_SERVER_KEY.',
   connections: 'Additional named Hermes API endpoints. Each connection should have a unique, stable ID.',
   localProfilesEnabled: 'Allows discovery of Hermes CLI profiles that actually exist inside the Linux server/container.',
-  preferApi: 'Uses Hermes API streaming when available before falling back to a valid local CLI path.',
+  preferApi: 'Uses the authenticated Hermes API for profile/model discovery, sessions, skills, streaming runs, approvals, and cancellation before falling back to a valid local Linux CLI.',
   autoStartProfileApis: 'Allows the server to launch profile-specific Hermes API processes through a valid Linux CLI.',
   autoStartDefaultApi: 'Allows the server to launch the default Hermes API through a valid Linux CLI.',
   apiProfilePortBase: 'The first port reserved for locally started profile-specific Hermes APIs.',

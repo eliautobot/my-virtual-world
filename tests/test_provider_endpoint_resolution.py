@@ -8,6 +8,7 @@ import io
 import http.server
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -186,6 +187,19 @@ class _HermesHandler(http.server.BaseHTTPRequestHandler):
     expected_token = "test-key"
     paths = []
     submissions = []
+    sessions = {
+        "session-one": {
+            "id": "session-one", "title": "First session", "preview": "Hello",
+            "last_active": 1786340000, "message_count": 2, "model": "test-model",
+        },
+    }
+    messages = {
+        "session-one": [
+            {"id": "m1", "session_id": "session-one", "role": "user", "content": "Hello", "timestamp": 1786339999},
+            {"id": "m2", "session_id": "session-one", "role": "assistant", "content": "Hi", "timestamp": 1786340000},
+        ],
+    }
+    state_lock = threading.Lock()
 
     def do_GET(self):  # noqa: N802
         type(self).paths.append(self.path)
@@ -196,7 +210,34 @@ class _HermesHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/health":
             payload = {"status": "healthy"}
         elif self.path == "/v1/capabilities":
-            payload = {"model": "test-model", "features": {"run_submission": True, "run_events_sse": True}}
+            payload = {
+                "model": "test-model",
+                "features": {
+                    "run_submission": True, "run_events_sse": True,
+                    "session_resources": True, "skills_api": True,
+                },
+                "endpoints": {
+                    "models": {"method": "GET", "path": "/v1/models"},
+                    "skills": {"method": "GET", "path": "/v1/skills"},
+                    "sessions": {"method": "GET", "path": "/api/sessions"},
+                    "session_create": {"method": "POST", "path": "/api/sessions"},
+                    "session_delete": {"method": "DELETE", "path": "/api/sessions/{session_id}"},
+                    "session_messages": {"method": "GET", "path": "/api/sessions/{session_id}/messages"},
+                },
+            }
+        elif self.path == "/v1/models":
+            payload = {"object": "list", "data": [{"id": "test-model", "object": "model"}]}
+        elif self.path == "/v1/skills":
+            payload = {"object": "list", "data": [{"name": "research", "description": "Research sources", "category": "work"}]}
+        elif self.path.startswith("/api/sessions?"):
+            with self.state_lock:
+                rows = list(self.sessions.values())
+            payload = {"object": "list", "data": rows, "has_more": False}
+        elif self.path.startswith("/api/sessions/") and self.path.endswith("/messages?limit=500&offset=0&order=oldest"):
+            session_id = self.path.split("/", 4)[3]
+            with self.state_lock:
+                rows = list(self.messages.get(session_id, []))
+            payload = {"object": "list", "session_id": session_id, "data": rows}
         elif self.path == "/v1/runs/run-integration/events":
             body = (
                 'event: message.delta\ndata: {"event":"message.delta","delta":"Hello"}\n\n'
@@ -225,6 +266,21 @@ class _HermesHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(401)
             self.end_headers()
             return
+        if self.path == "/api/sessions":
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            session_id = payload.get("session_id") or "session-created"
+            session = {"id": session_id, "title": payload.get("title") or "", "last_active": 1786340001}
+            with self.state_lock:
+                self.sessions[session_id] = session
+                self.messages.setdefault(session_id, [])
+            body = json.dumps({"object": "hermes.session", "session": session}).encode("utf-8")
+            self.send_response(201)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path != "/v1/runs":
             self.send_response(404)
             self.end_headers()
@@ -233,6 +289,27 @@ class _HermesHandler(http.server.BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(length).decode("utf-8"))
         type(self).submissions.append(payload)
         body = json.dumps({"run_id": "run-integration"}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_DELETE(self):  # noqa: N802
+        type(self).paths.append(self.path)
+        if self.headers.get("Authorization") != f"Bearer {self.expected_token}":
+            self.send_response(401)
+            self.end_headers()
+            return
+        if not self.path.startswith("/api/sessions/"):
+            self.send_response(404)
+            self.end_headers()
+            return
+        session_id = self.path.rsplit("/", 1)[-1]
+        with self.state_lock:
+            deleted = self.sessions.pop(session_id, None) is not None
+            self.messages.pop(session_id, None)
+        body = json.dumps({"object": "hermes.session.deleted", "id": session_id, "deleted": deleted}).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -260,6 +337,18 @@ class HermesEndpointIntegrationTests(unittest.TestCase):
     def setUp(self):
         _HermesHandler.paths = []
         _HermesHandler.submissions = []
+        _HermesHandler.sessions = {
+            "session-one": {
+                "id": "session-one", "title": "First session", "preview": "Hello",
+                "last_active": 1786340000, "message_count": 2, "model": "test-model",
+            },
+        }
+        _HermesHandler.messages = {
+            "session-one": [
+                {"id": "m1", "session_id": "session-one", "role": "user", "content": "Hello", "timestamp": 1786339999},
+                {"id": "m2", "session_id": "session-one", "role": "assistant", "content": "Hi", "timestamp": 1786340000},
+            ],
+        }
 
     def _probe(self, key):
         def probe(url):
@@ -307,6 +396,37 @@ class HermesEndpointIntegrationTests(unittest.TestCase):
         events = list(client.stream_run_events(started["run_id"], timeout_sec=2))
         self.assertEqual([{"input": "Say hello", "session_id": "session-one"}], _HermesHandler.submissions)
         self.assertEqual(["message.delta", "run.completed"], [item["event"] for item in events])
+
+    def test_authenticated_discovery_sessions_models_and_skills(self):
+        client = HermesApiClient(base_url=self.url, api_key="test-key", timeout_sec=2)
+        self.assertEqual("test-model", client.models()["data"][0]["id"])
+        self.assertEqual("research", client.skills()["data"][0]["name"])
+        self.assertEqual("session-one", client.list_sessions(limit=40)["data"][0]["id"])
+        self.assertEqual(["Hello", "Hi"], [row["content"] for row in client.session_messages("session-one")["data"]])
+
+        created = client.create_session(session_id="session-two", title="Second session")
+        self.assertEqual("session-two", created["session"]["id"])
+        self.assertTrue(client.delete_session("session-two")["deleted"])
+
+    def test_multiplex_profile_prefix_is_preserved_for_every_api_route(self):
+        client = HermesApiClient(base_url="https://hermes.example.test/p/coder", api_key="test-key")
+        self.assertEqual("https://hermes.example.test/p/coder/v1/capabilities", client._url("/v1/capabilities"))
+        self.assertEqual("https://hermes.example.test/p/coder/api/sessions/session-one", client._url("/api/sessions/session-one"))
+
+    def test_read_only_api_discovery_handles_parallel_stress(self):
+        def read_snapshot(_index):
+            client = HermesApiClient(base_url=self.url, api_key="test-key", timeout_sec=3)
+            return (
+                client.capabilities()["model"],
+                client.models()["data"][0]["id"],
+                client.skills()["data"][0]["name"],
+                client.list_sessions(limit=5)["data"][0]["id"],
+            )
+
+        with ThreadPoolExecutor(max_workers=20) as pool:
+            results = list(pool.map(read_snapshot, range(100)))
+        self.assertEqual(100, len(results))
+        self.assertEqual({("test-model", "test-model", "research", "session-one")}, set(results))
 
 
 if __name__ == "__main__":

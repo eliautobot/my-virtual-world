@@ -38006,8 +38006,8 @@ async function loadAgentWorkspaceSection(agent) {
     const provider = (settings.providers || [])[0] || {};
     const data = {
       ...resources,
-      workspaceAvailable: true,
-      editable: Boolean(agent.capabilities?.resourcesWrite),
+      workspaceAvailable: resources.workspaceAvailable !== false,
+      editable: resources.editable !== false && Boolean(agent.capabilities?.resourcesWrite),
       workspaceRoot: agent.workspace || '',
       resourceSchema: provider.resourceSchema || [],
       skillSchema: provider.skillSchema || [],
@@ -38072,6 +38072,10 @@ function renderAgentWorkspaceEditor(agent) {
     return;
   }
   const data = state.data;
+  if (data.workspaceAvailable === false) {
+    container.innerHTML = `<div class="settings-status-card locked"><strong>Hermes API file access unavailable</strong><span>${escapeHtml(data.unsupportedReason || 'This Hermes endpoint does not expose native profile files.')}</span></div>`;
+    return;
+  }
   const files = Array.isArray(data.files) ? data.files : [];
   const selectedName = files.some(file => file.path === state.selectedName) ? state.selectedName : (files[0]?.path || state.selectedName || '');
   state.selectedName = selectedName;

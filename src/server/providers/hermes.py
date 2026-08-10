@@ -1,9 +1,10 @@
 """Hermes provider adapter for My Virtual World.
 
 This module is intentionally isolated from the OpenClaw discovery/runtime paths.
-It talks to Hermes through public CLI surfaces only, so the product can add
-Hermes support without hardcoding one user's setup or reading private Hermes
-internals such as .env, auth.json, memories, raw logs, or state.db contents.
+It talks to Hermes through documented CLI and authenticated HTTP API surfaces,
+so the product can work across Linux/Windows without hardcoding one user's setup
+or reading private Hermes internals such as .env, auth.json, memories, raw logs,
+or state.db contents.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import glob
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urlencode, urljoin
 
 from .file_safety import backup_files
 
@@ -709,7 +710,13 @@ You are **{name}** {emoji} - {role}.
 
 @dataclass
 class HermesApiClient:
-    """Small client for Hermes Agent's native API Server run/event surface."""
+    """Client for Hermes Agent's documented, authenticated API Server.
+
+    The API client intentionally stays independent from Hermes' host
+    filesystem.  That makes profile metadata, sessions, model aliases, skills,
+    runs, approvals, and cancellation available when Hermes runs on Windows (or
+    another machine) while My Virtual World runs in a Linux container.
+    """
 
     base_url: str | None = None
     api_key: str | None = None
@@ -752,11 +759,84 @@ class HermesApiClient:
                 return parsed
             return {"data": parsed, "_status": getattr(resp, "status", 200)}
 
+    @staticmethod
+    def _session_path(session_id: str, suffix: str = "") -> str:
+        value = str(session_id or "").strip()
+        if not value:
+            raise ValueError("session_id is required")
+        return f"/api/sessions/{quote(value, safe='')}{suffix}"
+
     def capabilities(self) -> dict[str, Any]:
         return self._json_request("GET", "/v1/capabilities")
 
     def health(self) -> dict[str, Any]:
         return self._json_request("GET", "/health", timeout_sec=min(self.timeout_sec, 5))
+
+    def models(self) -> dict[str, Any]:
+        """List the API profile's OpenAI-compatible model aliases."""
+        return self._json_request("GET", "/v1/models")
+
+    def model_options(self, *, refresh: bool = False) -> dict[str, Any]:
+        """Return Hermes' richer provider/model inventory when advertised."""
+        return self._json_request("GET", "/api/model/options" + ("?refresh=1" if refresh else ""))
+
+    def skills(self) -> dict[str, Any]:
+        """List enabled skills through Hermes' read-only skills API."""
+        return self._json_request("GET", "/v1/skills")
+
+    def toolsets(self) -> dict[str, Any]:
+        return self._json_request("GET", "/v1/toolsets")
+
+    def list_sessions(self, *, limit: int = 40, offset: int = 0, include_children: bool = False) -> dict[str, Any]:
+        query = urlencode({
+            "limit": max(1, min(int(limit), 200)),
+            "offset": max(0, int(offset)),
+            "include_children": "true" if include_children else "false",
+        })
+        return self._json_request("GET", f"/api/sessions?{query}")
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        return self._json_request("GET", self._session_path(session_id))
+
+    def session_messages(
+        self,
+        session_id: str,
+        *,
+        limit: int = 500,
+        offset: int = 0,
+        order: str = "oldest",
+    ) -> dict[str, Any]:
+        normalized_order = "latest" if str(order).lower() == "latest" else "oldest"
+        query = urlencode({
+            "limit": max(1, min(int(limit), 500)),
+            "offset": max(0, int(offset)),
+            "order": normalized_order,
+        })
+        return self._json_request("GET", self._session_path(session_id, f"/messages?{query}"))
+
+    def create_session(
+        self,
+        *,
+        session_id: str | None = None,
+        title: str | None = None,
+        model: str | None = None,
+        source: str = "api_server",
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"source": str(source or "api_server")[:80]}
+        if session_id:
+            body["session_id"] = str(session_id)
+        if title is not None:
+            body["title"] = str(title)[:200]
+        if model:
+            body["model"] = str(model)[:300]
+        return self._json_request("POST", "/api/sessions", body)
+
+    def update_session(self, session_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        allowed = {key: patch.get(key) for key in ("title", "end_reason", "pinned", "archived") if key in patch}
+        return self._json_request("PATCH", self._session_path(session_id), allowed)
+
+    def delete_session(self, session_id: str) -> dict[str, Any]:
+        return self._json_request("DELETE", self._session_path(session_id))
 
     def is_available(self) -> bool:
         try:
