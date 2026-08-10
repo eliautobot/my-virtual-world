@@ -115,7 +115,7 @@ GET /api/hermes/history
 GET /api/hermes/live
 ```
 
-The `/api/hermes/runs*` endpoints are the primary native Hermes API path and proxy Hermes' public run/SSE endpoints while keeping API keys server-side. `/api/hermes/chat` and `/api/hermes/live` remain compatibility fallback paths for installs without the native API server.
+The `/api/hermes/runs*` endpoints are the primary native Hermes API path and proxy Hermes' public run/SSE endpoints while keeping API keys server-side. Each continued run carries the selected native session id and a bounded, canonical history loaded from Hermes' authenticated Sessions API. That preserves multi-turn context even though Hermes' run endpoint does not hydrate history from `session_id` alone. Tool-protocol rows are not replayed, and My Virtual World stops before submitting a continued run if its selected history cannot be loaded. `/api/hermes/chat` and `/api/hermes/live` remain compatibility fallback paths for installs without the native API server.
 
 ## AgentPlatform-to-AgentPlatform Communication
 

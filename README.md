@@ -214,7 +214,7 @@ These values match the Docker mounts in `docker-compose.yml`:
 - Browser chat stays on the My Virtual World origin and does not need direct access to port `18789`.
 - Hermes home is mounted at `/home/vw/.hermes`.
 - Hermes API runtime and mounted profile resources are independent. Separate Hermes and Virtual World containers communicate over their private Docker network while sharing this data bind.
-- The Hermes CLI is optional for API-connected agents. It is only required for local CLI discovery, API auto-start, and profile create/delete operations.
+- The Hermes CLI is optional inside My Virtual World for API-connected agents. The dedicated Hermes sidecar includes its own full CLI and runtime; operators can run that CLI inside the Hermes container for whole-profile lifecycle operations without installing Hermes in the My Virtual World container.
 - Codex home is mounted at `/home/vw/.codex`; override `VW_CODEX_BIN` if your Codex binary is installed somewhere else.
 
 `Auto` is topology-aware rather than OS-aware. Network-capable transports probe

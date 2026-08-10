@@ -1726,6 +1726,7 @@
         const hermesBody = {
           agentId: this.getSelectedAgentId() || this.selectedAgentKey,
           message: text || '(attached files)',
+          sessionId: String(this.sessionKey || '').split(':').slice(2).join(':'),
           timeoutSec: 180,
           fromType: 'human',
           fromDisplayName: 'User',

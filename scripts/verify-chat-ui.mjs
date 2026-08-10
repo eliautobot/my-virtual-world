@@ -87,6 +87,10 @@ assert(
   !chatSource.includes("this.appendSystem(failureStatus + ': ' + message)"),
   'terminal run errors must not create synthetic chat bubbles'
 );
+assert(
+  chatSource.includes("sessionId: String(this.sessionKey || '').split(':').slice(2).join(':')"),
+  'Hermes and Provider SDK sends must preserve the selected native session id'
+);
 assert(!chatSource.includes('this.setStatus('), 'run and tool activity must not mutate the connection status');
 assert(
   !chatSource.includes('this.setConnectionStatus('),

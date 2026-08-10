@@ -311,6 +311,13 @@ History query parameters:
 | GET | `/api/hermes/test` | Test Hermes connection. |
 | POST | `/api/hermes/test` | Test Hermes connection with supplied config. |
 
+`POST /api/hermes/runs` accepts the selected native Hermes `sessionId`. For an
+existing API session, My Virtual World reads the prior user/assistant messages
+from Hermes before calling `/v1/runs` and supplies them as bounded
+`conversation_history`. A Sessions API failure returns
+`session_history_unavailable` without starting a contextless run. New sessions
+can still begin with an empty history.
+
 For an API-connected Hermes agent, the unified provider endpoints also proxy
 Hermes' documented authenticated discovery surfaces:
 

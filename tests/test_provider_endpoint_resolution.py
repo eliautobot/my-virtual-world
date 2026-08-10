@@ -392,9 +392,17 @@ class HermesEndpointIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(resolution["ok"])
         client = HermesApiClient(base_url=resolution["endpoint"]["url"], api_key="test-key", timeout_sec=2)
-        started = client.start_run("Say hello", session_id="session-one")
+        history = [
+            {"role": "user", "content": "Remember cobalt."},
+            {"role": "assistant", "content": "I will remember cobalt."},
+        ]
+        started = client.start_run("Say hello", session_id="session-one", conversation_history=history)
         events = list(client.stream_run_events(started["run_id"], timeout_sec=2))
-        self.assertEqual([{"input": "Say hello", "session_id": "session-one"}], _HermesHandler.submissions)
+        self.assertEqual([{
+            "input": "Say hello",
+            "session_id": "session-one",
+            "conversation_history": history,
+        }], _HermesHandler.submissions)
         self.assertEqual(["message.delta", "run.completed"], [item["event"] for item in events])
 
     def test_authenticated_discovery_sessions_models_and_skills(self):

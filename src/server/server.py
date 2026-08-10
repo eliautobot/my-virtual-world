@@ -1585,6 +1585,9 @@ HERMES_APPROVAL_PENDING = {}
 HERMES_LIVE_LOCK = threading.Lock()
 HERMES_LIVE_EVENTS = {}
 HERMES_LIVE_MAX_EVENTS = 250
+HERMES_CONTEXT_MAX_MESSAGES = _env_int("VW_HERMES_CONTEXT_MAX_MESSAGES", 120, minimum=1, maximum=500)
+HERMES_CONTEXT_MAX_CHARS = _env_int("VW_HERMES_CONTEXT_MAX_CHARS", 120_000, minimum=4_000, maximum=1_000_000)
+HERMES_CONTEXT_MAX_MESSAGE_CHARS = _env_int("VW_HERMES_CONTEXT_MAX_MESSAGE_CHARS", 32_000, minimum=1_000, maximum=200_000)
 HERMES_APPROVAL_BRIDGE_DIR = os.path.join(DATA_DIR, "hermes-approval-bridge")
 HERMES_ACTIVE_RUNS_LOCK = threading.Lock()
 HERMES_ACTIVE_RUNS = {}
@@ -23080,6 +23083,90 @@ def _build_hermes_delivery_message(agent, agent_key, message, body):
     }
 
 
+def _hermes_history_content_text(content):
+    """Normalize Hermes Sessions API content into plain chat text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        value = content.get("text") or content.get("content") or content.get("output_text")
+        return _hermes_history_content_text(value)
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            value = _hermes_history_content_text(item)
+            if value:
+                parts.append(value)
+        return "\n".join(parts)
+    return ""
+
+
+def _clip_hermes_history_text(text, limit):
+    text = str(text or "")
+    limit = max(1, int(limit))
+    if len(text) <= limit:
+        return text
+    marker = "\n[Earlier message truncated by My Virtual World]\n"
+    if limit <= len(marker) + 2:
+        return text[:limit]
+    available = limit - len(marker)
+    head = max(1, int(available * 0.6))
+    return text[:head] + marker + text[-(available - head):]
+
+
+def _normalize_hermes_conversation_history(rows):
+    """Build a bounded, canonical prompt history from Hermes session rows.
+
+    Hermes stores tool protocol rows alongside conversational messages. The
+    run API needs only user/assistant text; replaying raw tool rows can create
+    invalid tool-call sequences. The newest coherent turns are retained within
+    explicit message and character budgets to prevent unbounded prompts.
+    """
+    normalized = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        role = str(row.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        text = _hermes_history_content_text(row.get("content")).strip()
+        if not text:
+            continue
+        normalized.append({
+            "role": role,
+            "content": _clip_hermes_history_text(text, HERMES_CONTEXT_MAX_MESSAGE_CHARS),
+        })
+
+    selected = []
+    remaining_chars = HERMES_CONTEXT_MAX_CHARS
+    for item in reversed(normalized[-HERMES_CONTEXT_MAX_MESSAGES:]):
+        if remaining_chars <= 0:
+            break
+        content = item["content"]
+        if len(content) > remaining_chars:
+            content = _clip_hermes_history_text(content, remaining_chars)
+        if not content:
+            break
+        selected.append({"role": item["role"], "content": content})
+        remaining_chars -= len(content)
+    selected.reverse()
+    return selected
+
+
+def _hermes_api_conversation_history(client, session_id):
+    """Read the selected Hermes session before submitting its next run."""
+    payload = client.session_messages(session_id, limit=500, order="oldest")
+    if not isinstance(payload, dict):
+        raise RuntimeError("Hermes Sessions API returned an invalid history response")
+    rows = payload.get("data")
+    if rows is None:
+        rows = payload.get("messages")
+    if rows is None:
+        rows = []
+    if not isinstance(rows, list):
+        raise RuntimeError("Hermes Sessions API returned invalid message data")
+    return _normalize_hermes_conversation_history(rows)
+
+
 def _test_hermes_api_connections(hermes_cfg=None):
     hermes_cfg = hermes_cfg if isinstance(hermes_cfg, dict) else (VW_CONFIG.get("hermes", {}) or {})
     connection_ids = []
@@ -23209,6 +23296,28 @@ def _handle_hermes_run_start(body):
     if not client.is_available():
         return {"ok": False, "fallback": True, "error": "Hermes API Server is not available", "_status": 409}
 
+    requested_session_id = str(body.get("sessionId") or body.get("session_id") or "").strip()
+    tracked_session_id = _get_hermes_session_id(profile)
+    existing_session_id = requested_session_id or tracked_session_id
+    safe_profile = HermesProvider._safe_suffix(profile) if HermesProvider else re.sub(r"[^A-Za-z0-9_.-]+", "-", profile)
+    session_id = existing_session_id or f"vw-hermes-{safe_profile}"
+    conversation_history = None
+    if (
+        existing_session_id
+        and _hermes_api_agent_capability(agent, "sessionSwitch")
+        and callable(getattr(client, "session_messages", None))
+    ):
+        try:
+            conversation_history = _hermes_api_conversation_history(client, session_id)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "fallback": False,
+                "code": "session_history_unavailable",
+                "error": f"Hermes session history could not be loaded; the run was not started: {exc}",
+                "_status": 502,
+            }
+
     delivery = _build_hermes_delivery_message(agent, agent_key, message, body)
     now_ms = int(time.time() * 1000)
     history = _load_hermes_history(profile)
@@ -23228,11 +23337,14 @@ def _handle_hermes_run_start(body):
     })
     _save_hermes_history(profile, history)
 
-    safe_profile = HermesProvider._safe_suffix(profile) if HermesProvider else re.sub(r"[^A-Za-z0-9_.-]+", "-", profile)
-    session_id = _get_hermes_session_id(profile) or f"vw-hermes-{safe_profile}"
     session_key = f"virtual-world:hermes:{profile}"
     try:
-        started = client.start_run(delivery["deliveryMessage"], session_id=session_id, session_key=session_key)
+        started = client.start_run(
+            delivery["deliveryMessage"],
+            session_id=session_id,
+            session_key=session_key,
+            conversation_history=conversation_history,
+        )
     except Exception as exc:
         return {
             "ok": False,
@@ -23678,10 +23790,35 @@ def _provider_hermes_send(agent, message, **kwargs):
             })
         return {"ok": False, "code": "no_healthy_endpoint", "error": str(exc), "reply": ""}
 
-    session_id = str(kwargs.get("session_id") or kwargs.get("sessionId") or _get_hermes_session_id(profile) or f"vw-hermes-{HermesProvider._safe_suffix(profile) if HermesProvider else profile}")
+    requested_session_id = str(kwargs.get("session_id") or kwargs.get("sessionId") or "").strip()
+    tracked_session_id = _get_hermes_session_id(profile)
+    existing_session_id = requested_session_id or tracked_session_id
+    session_id = existing_session_id or f"vw-hermes-{HermesProvider._safe_suffix(profile) if HermesProvider else profile}"
+    conversation_history = None
+    if (
+        existing_session_id
+        and _hermes_api_agent_capability(agent, "sessionSwitch")
+        and callable(getattr(client, "session_messages", None))
+    ):
+        try:
+            conversation_history = _hermes_api_conversation_history(client, session_id)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "code": "session_history_unavailable",
+                "error": f"Hermes session history could not be loaded; the run was not started: {exc}",
+                "reply": "",
+                "providerPath": "api",
+                "endpointLocation": endpoint_location(client.base_url),
+            }
     session_key = f"virtual-world:provider-sdk:hermes:{profile}"
     try:
-        started = client.start_run(message, session_id=session_id, session_key=session_key)
+        started = client.start_run(
+            message,
+            session_id=session_id,
+            session_key=session_key,
+            conversation_history=conversation_history,
+        )
     except Exception as exc:
         # The server may have accepted the POST before the connection failed.
         # Never fall back to the CLI after this point or the task could run twice.
@@ -29457,29 +29594,12 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
 
 def _hermes_session_to_chat_messages(session, agent_ref):
     """Convert either CLI export or Sessions API messages into VW chat rows."""
-    def content_text(content):
-        if isinstance(content, str):
-            return content
-        if isinstance(content, dict):
-            return str(content.get("text") or content.get("content") or content.get("output_text") or "")
-        if isinstance(content, list):
-            parts = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict):
-                    value = item.get("text") or item.get("content") or item.get("output_text")
-                    if value:
-                        parts.append(str(value))
-            return "\n".join(parts)
-        return ""
-
     messages = []
     for msg in session.get("messages") or []:
         if not isinstance(msg, dict):
             continue
         role = str(msg.get("role") or "")
-        text = content_text(msg.get("content"))
+        text = _hermes_history_content_text(msg.get("content"))
         if role == "tool":
             continue
         tools = []
@@ -29510,7 +29630,7 @@ def _hermes_session_to_chat_messages(session, agent_ref):
             "fromType": "agent" if role == "assistant" else "human",
             "source": "hermes-session-api" if msg.get("session_id") else "hermes-session-export",
         }
-        reasoning = content_text(msg.get("reasoning_content") or msg.get("reasoning"))
+        reasoning = _hermes_history_content_text(msg.get("reasoning_content") or msg.get("reasoning"))
         if reasoning:
             entry["thinking"] = reasoning[:8000]
         if tools:

@@ -305,9 +305,23 @@ class ProviderSdkBackendTests(unittest.TestCase):
             base_url = "http://host.docker.internal:8642"
 
             @staticmethod
+            def session_messages(session_id, **kwargs):
+                self.assertEqual("session-one", session_id)
+                self.assertEqual({"limit": 500, "order": "oldest"}, kwargs)
+                return {"data": [
+                    {"role": "user", "content": "Remember cobalt."},
+                    {"role": "assistant", "content": [{"type": "text", "text": "I will remember cobalt."}]},
+                    {"role": "tool", "content": "internal tool result"},
+                ]}
+
+            @staticmethod
             def start_run(message, **kwargs):
                 self.assertEqual("hello", message)
                 self.assertEqual("session-one", kwargs["session_id"])
+                self.assertEqual([
+                    {"role": "user", "content": "Remember cobalt."},
+                    {"role": "assistant", "content": "I will remember cobalt."},
+                ], kwargs["conversation_history"])
                 return {"run_id": "run-one"}
 
             @staticmethod
@@ -326,6 +340,7 @@ class ProviderSdkBackendTests(unittest.TestCase):
             "apiAvailable": True,
             "cliAvailable": False,
             "connectionModes": ["api"],
+            "capabilities": {"sessionSwitch": True},
         }
         with mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()), \
              mock.patch.object(server, "_get_hermes_session_id", return_value="session-one"), \
@@ -339,6 +354,136 @@ class ProviderSdkBackendTests(unittest.TestCase):
         self.assertEqual("http://host.docker.internal:8642", remember.call_args.args[0]["apiEndpointUrl"])
         clear.assert_called_once_with("run-one")
         self.assertGreaterEqual(len(progress), 3)
+
+    def test_hermes_history_normalization_is_bounded_and_ignores_tool_protocol(self):
+        rows = [
+            {"role": "system", "content": "do not replay"},
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": [{"type": "text", "text": "second"}]},
+            {"role": "assistant", "content": ""},
+            {"role": "tool", "content": "secret tool output"},
+            {"role": "user", "content": {"text": "third"}},
+        ]
+        with mock.patch.object(server, "HERMES_CONTEXT_MAX_MESSAGES", 2), \
+             mock.patch.object(server, "HERMES_CONTEXT_MAX_CHARS", 100), \
+             mock.patch.object(server, "HERMES_CONTEXT_MAX_MESSAGE_CHARS", 100):
+            history = server._normalize_hermes_conversation_history(rows)
+        self.assertEqual([
+            {"role": "assistant", "content": "second"},
+            {"role": "user", "content": "third"},
+        ], history)
+
+    def test_native_hermes_run_hydrates_the_explicit_selected_session(self):
+        submitted = {}
+
+        class Client:
+            base_url = "http://hermes:8642"
+
+            @staticmethod
+            def is_available():
+                return True
+
+            @staticmethod
+            def session_messages(session_id, **kwargs):
+                self.assertEqual("selected-session", session_id)
+                return {"data": [
+                    {"role": "user", "content": "The codeword is cobalt."},
+                    {"role": "assistant", "content": "Understood."},
+                ]}
+
+            @staticmethod
+            def start_run(message, **kwargs):
+                submitted.update({"message": message, **kwargs})
+                return {"run_id": "run-selected"}
+
+        agent = {
+            "id": "hermes-default",
+            "statusKey": "hermes-default",
+            "profile": "default",
+            "providerAgentId": "default",
+            "apiAvailable": True,
+            "capabilities": {"sessionSwitch": True},
+        }
+        with mock.patch.object(server, "_get_hermes_agent", return_value=agent), \
+             mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()), \
+             mock.patch.object(server, "_get_hermes_session_id", return_value="tracked-session"), \
+             mock.patch.object(server, "_set_hermes_session_id") as set_session, \
+             mock.patch.object(server, "_load_hermes_history", return_value=[]), \
+             mock.patch.object(server, "_save_hermes_history"), \
+             mock.patch.object(server, "_remember_hermes_active_run"), \
+             mock.patch.object(server, "_set_hermes_presence"), \
+             mock.patch.object(server, "_publish_hermes_api_progress"):
+            result = server._handle_hermes_run_start({
+                "agentId": "hermes-default",
+                "sessionId": "selected-session",
+                "message": "What is the codeword?",
+            })
+        self.assertTrue(result["ok"])
+        self.assertEqual("selected-session", result["sessionId"])
+        self.assertEqual("selected-session", submitted["session_id"])
+        self.assertEqual([
+            {"role": "user", "content": "The codeword is cobalt."},
+            {"role": "assistant", "content": "Understood."},
+        ], submitted["conversation_history"])
+        set_session.assert_called_once_with("default", "selected-session")
+
+    def test_native_hermes_run_does_not_submit_without_selected_session_history(self):
+        class Client:
+            base_url = "http://hermes:8642"
+
+            @staticmethod
+            def is_available():
+                return True
+
+            @staticmethod
+            def session_messages(*_args, **_kwargs):
+                raise TimeoutError("history timeout")
+
+            start_run = mock.Mock()
+
+        agent = {
+            "id": "hermes-default", "profile": "default", "providerAgentId": "default",
+            "apiAvailable": True, "capabilities": {"sessionSwitch": True},
+        }
+        with mock.patch.object(server, "_get_hermes_agent", return_value=agent), \
+             mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()), \
+             mock.patch.object(server, "_get_hermes_session_id", return_value="selected-session"), \
+             mock.patch.object(server, "_save_hermes_history") as save_history:
+            result = server._handle_hermes_run_start({"agentId": "hermes-default", "message": "continue"})
+        self.assertFalse(result["ok"])
+        self.assertEqual("session_history_unavailable", result["code"])
+        self.assertEqual(502, result["_status"])
+        Client.start_run.assert_not_called()
+        save_history.assert_not_called()
+
+    def test_native_hermes_first_turn_starts_without_a_history_lookup(self):
+        class Client:
+            base_url = "http://hermes:8642"
+            session_messages = mock.Mock()
+            start_run = mock.Mock(return_value={"run_id": "run-new"})
+
+            @staticmethod
+            def is_available():
+                return True
+
+        agent = {
+            "id": "hermes-default", "statusKey": "hermes-default", "profile": "default",
+            "providerAgentId": "default", "apiAvailable": True,
+            "capabilities": {"sessionSwitch": True},
+        }
+        with mock.patch.object(server, "_get_hermes_agent", return_value=agent), \
+             mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()), \
+             mock.patch.object(server, "_get_hermes_session_id", return_value=""), \
+             mock.patch.object(server, "_set_hermes_session_id"), \
+             mock.patch.object(server, "_load_hermes_history", return_value=[]), \
+             mock.patch.object(server, "_save_hermes_history"), \
+             mock.patch.object(server, "_remember_hermes_active_run"), \
+             mock.patch.object(server, "_set_hermes_presence"), \
+             mock.patch.object(server, "_publish_hermes_api_progress"):
+            result = server._handle_hermes_run_start({"agentId": "hermes-default", "message": "first turn"})
+        self.assertTrue(result["ok"])
+        Client.session_messages.assert_not_called()
+        self.assertIsNone(Client.start_run.call_args.kwargs["conversation_history"])
 
     def test_provider_sdk_hermes_never_falls_back_after_ambiguous_submission(self):
         class Client:
