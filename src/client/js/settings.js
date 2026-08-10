@@ -1174,17 +1174,40 @@
   }
 
   async function saveAllSettings() {
-    if (originalSaveSettings) {
-      try { originalSaveSettings(); } catch {}
+    const button = $('settingsSaveButton');
+    const status = $('settingsSaveStatus');
+    if (button?.disabled) return;
+    if (button) button.disabled = true;
+    if (status) {
+      status.textContent = 'Saving and applying settings…';
+      status.className = 'settings-save-status';
     }
-    const result = await fetchJson('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildSettingsPayload()),
-    });
-    populateForm(result.config);
-    window.dispatchEvent(new CustomEvent('vw:settings-saved', { detail: { config: result.config } }));
-    window.closeSettingsModal?.();
+    try {
+      const result = await fetchJson('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildSettingsPayload()),
+      });
+      populateForm(result.config);
+      window.dispatchEvent(new CustomEvent('vw:settings-saved', { detail: { config: result.config } }));
+      if (status) {
+        status.textContent = 'Saved and applied.';
+        status.className = 'settings-save-status success';
+      }
+      if (originalSaveSettings) {
+        try { originalSaveSettings(); } catch { window.closeSettingsModal?.(); }
+      } else {
+        window.closeSettingsModal?.();
+      }
+    } catch (error) {
+      if (status) {
+        status.textContent = error.message || 'Settings could not be saved.';
+        status.className = 'settings-save-status error';
+      }
+      throw error;
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   async function resetLiveModeAgent(agent) {
@@ -1439,6 +1462,16 @@
   document.addEventListener('DOMContentLoaded', () => {
     originalSaveSettings = window.saveSettings;
     window.saveSettings = () => saveAllSettings().catch(err => alert(err.message));
+    $('settingsSaveButton')?.addEventListener('click', window.saveSettings);
+    window.addEventListener('vw:provider-settings-saved', () => {
+      refreshConfig().then(() => {
+        const status = $('settingsSaveStatus');
+        if (status) {
+          status.textContent = 'Provider settings saved and synced.';
+          status.className = 'settings-save-status success';
+        }
+      }).catch(() => {});
+    });
     bind();
     switchConnectionMethod(activeConnectionMethod);
     refreshConfig().catch(() => {});

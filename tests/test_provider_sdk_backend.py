@@ -141,6 +141,36 @@ class ProviderSdkBackendTests(unittest.TestCase):
         self.assertEqual("auto", server._endpoint_mode("", "http://host.docker.internal:8642"))
         self.assertEqual("host", server._endpoint_mode("host", "https://runtime.example.test"))
 
+    def test_explicit_saved_settings_override_compose_bootstrap_defaults(self):
+        config_path = self.root / "vw-config.json"
+        config_path.write_text(json.dumps({
+            "hermes": {"timeoutSec": 601, "apiUrl": "http://host.docker.internal:8642"},
+            "_settingsOverrides": ["hermes.timeoutSec", "hermes.apiUrl"],
+        }), encoding="utf-8")
+        with mock.patch.object(server, "_resolve_vw_config_path", return_value=str(config_path)), \
+             mock.patch.dict(os.environ, {
+                 "VW_HERMES_TIMEOUT_SEC": "600",
+                 "VW_HERMES_API_URL": "http://127.0.0.1:8642",
+             }, clear=False):
+            loaded = server._load_vw_config()
+        self.assertEqual(601, loaded["hermes"]["timeoutSec"])
+        self.assertEqual("http://host.docker.internal:8642", loaded["hermes"]["apiUrl"])
+
+    def test_unedited_settings_continue_to_use_deployment_environment(self):
+        config_path = self.root / "vw-config.json"
+        config_path.write_text(json.dumps({"hermes": {"timeoutSec": 601}}), encoding="utf-8")
+        with mock.patch.object(server, "_resolve_vw_config_path", return_value=str(config_path)), \
+             mock.patch.dict(os.environ, {"VW_HERMES_TIMEOUT_SEC": "600"}, clear=False):
+            loaded = server._load_vw_config()
+        self.assertEqual(600, loaded["hermes"]["timeoutSec"])
+
+    def test_settings_override_path_collection_ignores_internal_keys(self):
+        paths = server._collect_settings_override_paths({
+            "hermes": {"enabled": False, "connections": []},
+            "_settingsOverrides": ["malicious.path"],
+        })
+        self.assertEqual({"hermes.enabled", "hermes.connections"}, paths)
+
     def test_custom_endpoint_mode_requires_a_url_in_native_and_sdk_settings(self):
         with self.assertRaises(ValueError):
             server._validate_native_endpoint_settings({"hermes": {"apiEndpointMode": "custom", "apiUrl": ""}})
@@ -587,7 +617,7 @@ class ProviderSdkBackendTests(unittest.TestCase):
         self.assertTrue(health["ok"])
         self.assertEqual("api", health["transport"])
 
-    def test_settings_save_dispatch_preserves_existing_secret(self):
+    def test_settings_save_dispatch_preserves_existing_secret_without_rewriting_it(self):
         config = {
             **server.VW_CONFIG,
             "openclaw": {**server.VW_CONFIG["openclaw"], "gatewayToken": "keep-me"},
@@ -603,7 +633,15 @@ class ProviderSdkBackendTests(unittest.TestCase):
              mock.patch.object(server, "_refresh_agent_roster_after_create"):
             result = server._save_provider_settings({"providerId": "openclaw", "values": {"gatewayToken": ""}})
         self.assertTrue(result["ok"])
-        self.assertEqual("keep-me", captured["openclaw"]["gatewayToken"])
+        self.assertNotIn("gatewayToken", captured["openclaw"])
+
+    def test_blank_native_secret_preserves_environment_backed_value(self):
+        existing = {"openclaw": {"gatewayToken": ""}}
+        incoming = {"openclaw": {"gatewayToken": ""}}
+        config = {**server.VW_CONFIG, "openclaw": {**server.VW_CONFIG["openclaw"], "gatewayToken": "environment-secret"}}
+        with mock.patch.object(server, "VW_CONFIG", config):
+            server._preserve_secret_updates(existing, incoming)
+        self.assertNotIn("gatewayToken", incoming["openclaw"])
 
     def test_discovery_cache_retains_offline_and_forget_is_non_destructive(self):
         cache = self.status / "provider-discovery-cache.json"

@@ -796,6 +796,8 @@ for (const token of [
   '/api/providers/settings',
   '/api/providers/test',
   '/api/providers/refresh',
+  'createConnectionHelpButton',
+  'vw:provider-settings-saved',
   'settingsSchema',
   'resourceSchema',
   'skillSchema',
@@ -805,6 +807,23 @@ for (const token of [
   'Configured — leave blank to preserve',
 ]) {
   assert(providerSettingsJs.includes(token), `provider-settings.js missing manifest-driven token: ${token}`);
+}
+for (const token of [
+  'settingsSaveButton',
+  'Saving and applying settings',
+  'Saved and applied.',
+  "fetchJson('/api/settings'",
+  'vw:provider-settings-saved',
+]) {
+  assert(settingsJs.includes(token), `settings.js missing reliable save/apply token: ${token}`);
+}
+for (const token of [
+  '_settingsOverrides',
+  '_collect_settings_override_paths',
+  '_config_or_env',
+  '_preserve_secret_updates',
+]) {
+  assert(serverPy.includes(token), `server.py missing persisted settings precedence token: ${token}`);
 }
 for (const token of ['overflow-x:hidden', '@media(max-width:760px)', '.ps-connection-list', '.provider-settings-embedded', 'grid-template-columns:minmax(0,.9fr)']) {
   assert(providerSettingsCss.includes(token), `provider-settings.css missing responsive token: ${token}`);
@@ -942,7 +961,11 @@ for (const token of [
   'js/chat-events.js?v=20260809-commentary-runs-r1',
   'js/chat.js?v=20260809-commentary-runs-r1',
   'css/style.css?v=20260808-chat-order-r1',
-  'css/ui-redesign.css?v=20260809-agent-browser-mobile-r2',
+  'css/ui-redesign.css?v=20260809-connection-guides-r1',
+  'css/connection-help.css?v=20260809-connection-guides-r1',
+  'js/connection-help.mjs?v=20260809-connection-guides-r1',
+  'data-connection-help-provider="hermes"',
+  'settingsSaveStatus',
   'btn-newAgent',
   'Agent Platform',
   'newAgent-providerFields',
@@ -1780,10 +1803,10 @@ for (const token of [
 }
 for (const token of [
   'VW_REALTIME_BROWSER_URL',
-  '_env_or("VW_REALTIME_URL", cfg["realtime"].get("url") or "")',
+  'cfg, overrides, "realtime", "url", ("VW_REALTIME_BROWSER_URL", "VW_REALTIME_URL"), ""',
   'realtime_url_from_env',
   'realtime_enabled_default = True if realtime_url and realtime_url_from_env',
-  'cfg["realtime"]["enabled"] = _env_bool("VW_REALTIME_ENABLED", realtime_enabled_default)',
+  'cfg["realtime"]["enabled"] = _config_or_env_bool(',
 ]) {
   assert(serverPy.includes(token), `server.py missing realtime browser URL token: ${token}`);
 }
@@ -1966,7 +1989,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260809-agent-browser-window-r2',
+  'js/settings.js?v=20260809-connection-guides-r1',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);

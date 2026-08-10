@@ -872,6 +872,15 @@ body.vw-demo-locked .feature-locked-control {
     background: rgba(10,15,29,.98);
     box-shadow: 0 -10px 28px rgba(0,0,0,.18);
 }
+.settings-save-status {
+    min-width: 0;
+    margin-right: auto;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.4;
+}
+.settings-save-status.success { color: #a5d6a7; }
+.settings-save-status.error { color: #ff9aa2; }
 .settings-actions .btn-primary,
 .settings-actions .btn-secondary {
     flex: 0 1 180px;

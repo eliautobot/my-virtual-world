@@ -223,6 +223,61 @@ def _load_config_file(path):
         return {}
 
 
+def _settings_override_paths(saved):
+    """Return persisted fields that were explicitly saved through the UI/API."""
+    paths = saved.get("_settingsOverrides") if isinstance(saved, dict) else []
+    if not isinstance(paths, list):
+        return set()
+    return {
+        str(path).strip()
+        for path in paths
+        if isinstance(path, str) and str(path).strip() and not str(path).startswith("_")
+    }
+
+
+def _collect_settings_override_paths(value, prefix=""):
+    """Collect leaf config paths from a validated settings update."""
+    if not isinstance(value, dict):
+        return {prefix} if prefix else set()
+    paths = set()
+    for key, child in value.items():
+        if str(key).startswith("_"):
+            continue
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(child, dict):
+            paths.update(_collect_settings_override_paths(child, path))
+        else:
+            paths.add(path)
+    return paths
+
+
+def _config_or_env(cfg, overrides, section, key, env_keys, fallback=None):
+    """Use an explicit saved value before deployment bootstrap environment values."""
+    configured = (cfg.get(section) or {}).get(key, fallback)
+    if f"{section}.{key}" in overrides:
+        return configured
+    for env_key in env_keys:
+        value = os.environ.get(env_key)
+        if value is not None and value != "":
+            return value
+    return configured
+
+
+def _config_or_env_bool(cfg, overrides, section, key, env_keys, fallback=False):
+    value = _config_or_env(cfg, overrides, section, key, env_keys, fallback)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def _config_or_env_int(cfg, overrides, section, key, env_keys, fallback):
+    value = _config_or_env(cfg, overrides, section, key, env_keys, fallback)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(fallback)
+
+
 def _default_vw_config():
     app_cfg = os.path.join(os.path.dirname(__file__), "vw-config.json")
     default = _load_config_file(app_cfg)
@@ -322,7 +377,10 @@ def _default_vw_config():
 
 
 def _load_vw_config():
-    cfg = _deep_merge(_default_vw_config(), _load_config_file(_resolve_vw_config_path()))
+    saved = _load_config_file(_resolve_vw_config_path())
+    overrides = _settings_override_paths(saved)
+    cfg = _deep_merge(_default_vw_config(), saved)
+    cfg["_settingsOverrides"] = sorted(overrides)
     cfg.setdefault("openclaw", {})
     cfg.setdefault("hermes", {})
     cfg.setdefault("codex", {})
@@ -340,8 +398,12 @@ def _load_vw_config():
         cfg["world"]["location"] = {"label": "", "timeZone": "", "latitude": None, "longitude": None}
     cfg["world"]["chatBubbles"] = _normalize_chat_bubble_settings(cfg["world"].get("chatBubbles"))
     cfg["chat"] = _normalize_chat_settings(cfg.get("chat"))
-    cfg["openclaw"]["homePath"] = os.path.expanduser(_env_or("VW_OPENCLAW_PATH", cfg["openclaw"].get("homePath") or "~/.openclaw"))
-    configured_host_home = _env_or("VW_OPENCLAW_HOST_PATH", cfg["openclaw"].get("hostHomePath") or cfg["openclaw"]["homePath"])
+    cfg["openclaw"]["homePath"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "openclaw", "homePath", ("VW_OPENCLAW_PATH",), "~/.openclaw"
+    ) or "~/.openclaw"))
+    configured_host_home = _config_or_env(
+        cfg, overrides, "openclaw", "hostHomePath", ("VW_OPENCLAW_HOST_PATH",), cfg["openclaw"]["homePath"]
+    ) or cfg["openclaw"]["homePath"]
     configured_agents = []
     try:
         with open(os.path.join(cfg["openclaw"]["homePath"], "openclaw.json"), "r", encoding="utf-8") as handle:
@@ -354,27 +416,49 @@ def _load_vw_config():
     if inferred_host_home and (str(configured_host_home).strip() in {"", "/.openclaw"}):
         configured_host_home = inferred_host_home
     cfg["openclaw"]["hostHomePath"] = normalize_host_path(configured_host_home)
-    cfg["openclaw"]["gatewayUrl"] = _env_or("VW_GATEWAY_URL", cfg["openclaw"].get("gatewayUrl") or "")
+    cfg["openclaw"]["gatewayUrl"] = _config_or_env(
+        cfg, overrides, "openclaw", "gatewayUrl", ("VW_GATEWAY_URL",), ""
+    ) or ""
     cfg["openclaw"]["endpointMode"] = _endpoint_mode(
-        _env_or("VW_GATEWAY_ENDPOINT_MODE", cfg["openclaw"].get("endpointMode") or ""),
+        _config_or_env(cfg, overrides, "openclaw", "endpointMode", ("VW_GATEWAY_ENDPOINT_MODE",), ""),
         cfg["openclaw"]["gatewayUrl"],
     )
-    cfg["openclaw"]["gatewayToken"] = _env_or("VW_GATEWAY_TOKEN", _env_or("OPENCLAW_GATEWAY_TOKEN", cfg["openclaw"].get("gatewayToken") or ""))
-    cfg["hermes"]["enabled"] = str(_env_or("VW_HERMES_ENABLED", cfg["hermes"].get("enabled", True))).lower() not in ("0", "false", "no", "off")
-    cfg["hermes"]["localProfilesEnabled"] = _env_bool("VW_HERMES_LOCAL_PROFILES_ENABLED", cfg["hermes"].get("localProfilesEnabled", True))
-    cfg["hermes"]["homePath"] = os.path.expanduser(_env_or("VW_HERMES_HOME", cfg["hermes"].get("homePath") or os.path.expanduser("~/.hermes")))
-    cfg["hermes"]["binary"] = os.path.expanduser(_env_or("VW_HERMES_BIN", cfg["hermes"].get("binary") or os.path.expanduser("~/.local/bin/hermes")))
-    cfg["hermes"]["timeoutSec"] = int(_env_or("VW_HERMES_TIMEOUT_SEC", cfg["hermes"].get("timeoutSec", 600)))
-    cfg["hermes"]["apiUrl"] = _env_or("VW_HERMES_API_URL", cfg["hermes"].get("apiUrl") or "")
+    cfg["openclaw"]["gatewayToken"] = _config_or_env(
+        cfg, overrides, "openclaw", "gatewayToken", ("VW_GATEWAY_TOKEN", "OPENCLAW_GATEWAY_TOKEN"), ""
+    ) or ""
+    cfg["hermes"]["enabled"] = _config_or_env_bool(cfg, overrides, "hermes", "enabled", ("VW_HERMES_ENABLED",), True)
+    cfg["hermes"]["localProfilesEnabled"] = _config_or_env_bool(
+        cfg, overrides, "hermes", "localProfilesEnabled", ("VW_HERMES_LOCAL_PROFILES_ENABLED",), True
+    )
+    cfg["hermes"]["homePath"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "hermes", "homePath", ("VW_HERMES_HOME",), "~/.hermes"
+    ) or "~/.hermes"))
+    cfg["hermes"]["binary"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "hermes", "binary", ("VW_HERMES_BIN",), "~/.local/bin/hermes"
+    ) or "~/.local/bin/hermes"))
+    cfg["hermes"]["timeoutSec"] = _config_or_env_int(
+        cfg, overrides, "hermes", "timeoutSec", ("VW_HERMES_TIMEOUT_SEC",), 600
+    )
+    cfg["hermes"]["apiUrl"] = _config_or_env(
+        cfg, overrides, "hermes", "apiUrl", ("VW_HERMES_API_URL",), ""
+    ) or ""
     cfg["hermes"]["apiEndpointMode"] = _endpoint_mode(
-        _env_or("VW_HERMES_API_ENDPOINT_MODE", cfg["hermes"].get("apiEndpointMode") or ""),
+        _config_or_env(cfg, overrides, "hermes", "apiEndpointMode", ("VW_HERMES_API_ENDPOINT_MODE",), ""),
         cfg["hermes"]["apiUrl"],
     )
-    cfg["hermes"]["apiKey"] = _env_or("VW_HERMES_API_KEY", cfg["hermes"].get("apiKey") or "")
-    cfg["hermes"]["preferApi"] = _env_bool("VW_HERMES_PREFER_API", cfg["hermes"].get("preferApi", True))
-    cfg["hermes"]["autoStartProfileApis"] = _env_bool("VW_HERMES_AUTO_START_PROFILE_APIS", cfg["hermes"].get("autoStartProfileApis", True))
-    cfg["hermes"]["autoStartDefaultApi"] = _env_bool("VW_HERMES_AUTO_START_DEFAULT_API", cfg["hermes"].get("autoStartDefaultApi", cfg["hermes"].get("autoStartProfileApis", True)))
-    cfg["hermes"]["apiProfilePortBase"] = _env_or("VW_HERMES_API_PROFILE_PORT_BASE", cfg["hermes"].get("apiProfilePortBase") or "")
+    cfg["hermes"]["apiKey"] = _config_or_env(
+        cfg, overrides, "hermes", "apiKey", ("VW_HERMES_API_KEY",), ""
+    ) or ""
+    cfg["hermes"]["preferApi"] = _config_or_env_bool(cfg, overrides, "hermes", "preferApi", ("VW_HERMES_PREFER_API",), True)
+    cfg["hermes"]["autoStartProfileApis"] = _config_or_env_bool(
+        cfg, overrides, "hermes", "autoStartProfileApis", ("VW_HERMES_AUTO_START_PROFILE_APIS",), True
+    )
+    cfg["hermes"]["autoStartDefaultApi"] = _config_or_env_bool(
+        cfg, overrides, "hermes", "autoStartDefaultApi", ("VW_HERMES_AUTO_START_DEFAULT_API",), cfg["hermes"].get("autoStartProfileApis", True)
+    )
+    cfg["hermes"]["apiProfilePortBase"] = _config_or_env(
+        cfg, overrides, "hermes", "apiProfilePortBase", ("VW_HERMES_API_PROFILE_PORT_BASE",), ""
+    ) or ""
     if not isinstance(cfg["hermes"].get("apiProfiles"), dict):
         cfg["hermes"]["apiProfiles"] = {}
     if not isinstance(cfg["hermes"].get("connections"), list):
@@ -382,63 +466,96 @@ def _load_vw_config():
     for connection in cfg["hermes"]["connections"]:
         if isinstance(connection, dict):
             connection["endpointMode"] = _endpoint_mode(connection.get("endpointMode"), connection.get("apiUrl"))
-    cfg["codex"]["enabled"] = _env_bool("VW_CODEX_ENABLED", cfg["codex"].get("enabled", True))
-    cfg["codex"]["homePath"] = os.path.expanduser(_env_or("VW_CODEX_HOME", _env_or("CODEX_HOME", cfg["codex"].get("homePath") or "~/.codex")))
-    cfg["codex"]["binary"] = os.path.expanduser(_env_or("VW_CODEX_BIN", cfg["codex"].get("binary") or "codex"))
-    cfg["codex"]["workspaceRoot"] = os.path.expanduser(_env_or("VW_CODEX_WORKSPACE_ROOT", cfg["codex"].get("workspaceRoot") or os.path.join(DATA_DIR, "codex-agents")))
-    cfg["codex"]["mainWorkspace"] = os.path.expanduser(_env_or("VW_CODEX_MAIN_WORKSPACE", cfg["codex"].get("mainWorkspace") or os.path.join(DATA_DIR, "codex-main")))
-    cfg["codex"]["timeoutSec"] = int(_env_or("VW_CODEX_TIMEOUT_SEC", cfg["codex"].get("timeoutSec", 900)))
-    cfg["codex"]["model"] = _env_or("VW_CODEX_MODEL", cfg["codex"].get("model") or "")
-    cfg["codex"]["sandbox"] = _env_or("VW_CODEX_SANDBOX", cfg["codex"].get("sandbox") or "workspace-write")
-    cfg["codex"]["approvalPolicy"] = _env_or("VW_CODEX_APPROVAL_POLICY", cfg["codex"].get("approvalPolicy") or "never")
-    cfg["codex"]["preferAppServer"] = _env_bool("VW_CODEX_PREFER_APP_SERVER", cfg["codex"].get("preferAppServer", True))
-    cfg["codex"]["includeMain"] = _env_bool("VW_CODEX_INCLUDE_MAIN", cfg["codex"].get("includeMain", True))
-    cfg["codex"]["includeNativeAgents"] = _env_bool("VW_CODEX_INCLUDE_NATIVE_AGENTS", cfg["codex"].get("includeNativeAgents", True))
-    cfg["codex"]["registerNativeAgents"] = _env_bool("VW_CODEX_REGISTER_NATIVE_AGENTS", cfg["codex"].get("registerNativeAgents", True))
-    cfg["claudeCode"]["enabled"] = _env_bool("VW_CLAUDE_CODE_ENABLED", cfg["claudeCode"].get("enabled", True))
-    cfg["claudeCode"]["homePath"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_HOME", _env_or("CLAUDE_CONFIG_DIR", cfg["claudeCode"].get("homePath") or "~/.claude")))
-    cfg["claudeCode"]["binary"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_BIN", cfg["claudeCode"].get("binary") or "claude"))
-    cfg["claudeCode"]["workspaceRoot"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_WORKSPACE_ROOT", cfg["claudeCode"].get("workspaceRoot") or os.path.join(DATA_DIR, "claude-code-agents")))
-    cfg["claudeCode"]["mainWorkspace"] = os.path.expanduser(_env_or("VW_CLAUDE_CODE_MAIN_WORKSPACE", cfg["claudeCode"].get("mainWorkspace") or os.path.join(DATA_DIR, "claude-code-main")))
-    cfg["claudeCode"]["timeoutSec"] = int(_env_or("VW_CLAUDE_CODE_TIMEOUT_SEC", cfg["claudeCode"].get("timeoutSec", 900)))
-    cfg["claudeCode"]["model"] = _env_or("VW_CLAUDE_CODE_MODEL", cfg["claudeCode"].get("model") or "")
-    cfg["claudeCode"]["permissionMode"] = _env_or("VW_CLAUDE_CODE_PERMISSION_MODE", cfg["claudeCode"].get("permissionMode") or "acceptEdits")
-    cfg["claudeCode"]["includeMain"] = _env_bool("VW_CLAUDE_CODE_INCLUDE_MAIN", cfg["claudeCode"].get("includeMain", True))
-    cfg["claudeCode"]["includeNativeAgents"] = _env_bool("VW_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", cfg["claudeCode"].get("includeNativeAgents", True))
-    cfg["claudeCode"]["registerNativeAgents"] = _env_bool("VW_CLAUDE_CODE_REGISTER_NATIVE_AGENTS", cfg["claudeCode"].get("registerNativeAgents", True))
-    cfg["openCode"]["enabled"] = _env_bool("VW_OPENCODE_ENABLED", cfg["openCode"].get("enabled", True))
-    cfg["openCode"]["homePath"] = os.path.expanduser(_env_or("VW_OPENCODE_HOME", cfg["openCode"].get("homePath") or "~/.config/opencode"))
-    cfg["openCode"]["binary"] = os.path.expanduser(_env_or("VW_OPENCODE_BIN", cfg["openCode"].get("binary") or "opencode"))
-    cfg["openCode"]["workspaceRoot"] = os.path.expanduser(_env_or("VW_OPENCODE_WORKSPACE_ROOT", cfg["openCode"].get("workspaceRoot") or os.path.join(DATA_DIR, "opencode-agents")))
-    cfg["openCode"]["mainWorkspace"] = os.path.expanduser(_env_or("VW_OPENCODE_MAIN_WORKSPACE", cfg["openCode"].get("mainWorkspace") or os.path.join(DATA_DIR, "opencode-main")))
-    cfg["openCode"]["timeoutSec"] = int(_env_or("VW_OPENCODE_TIMEOUT_SEC", cfg["openCode"].get("timeoutSec", 900)))
-    cfg["openCode"]["model"] = _env_or("VW_OPENCODE_MODEL", cfg["openCode"].get("model") or "")
-    cfg["openCode"]["includeMain"] = _env_bool("VW_OPENCODE_INCLUDE_MAIN", cfg["openCode"].get("includeMain", True))
-    cfg["openCode"]["includeAgents"] = _env_bool("VW_OPENCODE_INCLUDE_AGENTS", cfg["openCode"].get("includeAgents", True))
-    cfg["openCode"]["registerAgents"] = _env_bool("VW_OPENCODE_REGISTER_AGENTS", cfg["openCode"].get("registerAgents", True))
-    cfg["antigravity"]["enabled"] = _env_bool("VW_ANTIGRAVITY_ENABLED", cfg["antigravity"].get("enabled", True))
-    cfg["antigravity"]["homePath"] = os.path.expanduser(_env_or("VW_ANTIGRAVITY_HOME", cfg["antigravity"].get("homePath") or "~/.gemini"))
-    cfg["antigravity"]["binary"] = os.path.expanduser(_env_or("VW_ANTIGRAVITY_BIN", cfg["antigravity"].get("binary") or "agy"))
-    cfg["antigravity"]["workspaceRoot"] = os.path.expanduser(_env_or("VW_ANTIGRAVITY_WORKSPACE_ROOT", cfg["antigravity"].get("workspaceRoot") or os.path.join(DATA_DIR, "antigravity-agents")))
-    cfg["antigravity"]["timeoutSec"] = int(_env_or("VW_ANTIGRAVITY_TIMEOUT_SEC", cfg["antigravity"].get("timeoutSec", 600)))
-    cfg["antigravity"]["printTimeout"] = _env_or("VW_ANTIGRAVITY_PRINT_TIMEOUT", cfg["antigravity"].get("printTimeout") or "5m")
-    cfg["antigravity"]["model"] = _env_or("VW_ANTIGRAVITY_MODEL", cfg["antigravity"].get("model") or "")
-    cfg["antigravity"]["sandbox"] = _env_or("VW_ANTIGRAVITY_SANDBOX", cfg["antigravity"].get("sandbox") or "")
-    cfg["browser"]["cdpUrl"] = _env_or("VW_BROWSER_CDP_URL", cfg["browser"].get("cdpUrl") or "")
-    cfg["browser"]["viewerUrl"] = _env_or("VW_BROWSER_VIEWER_URL", cfg["browser"].get("viewerUrl") or "")
-    realtime_url = _env_or(
-        "VW_REALTIME_BROWSER_URL",
-        _env_or("VW_REALTIME_URL", cfg["realtime"].get("url") or ""),
+    cfg["codex"]["enabled"] = _config_or_env_bool(cfg, overrides, "codex", "enabled", ("VW_CODEX_ENABLED",), True)
+    cfg["codex"]["homePath"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "codex", "homePath", ("VW_CODEX_HOME", "CODEX_HOME"), "~/.codex"
+    ) or "~/.codex"))
+    cfg["codex"]["binary"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "codex", "binary", ("VW_CODEX_BIN",), "codex"
+    ) or "codex"))
+    cfg["codex"]["workspaceRoot"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "codex", "workspaceRoot", ("VW_CODEX_WORKSPACE_ROOT",), os.path.join(DATA_DIR, "codex-agents")
+    ) or os.path.join(DATA_DIR, "codex-agents")))
+    cfg["codex"]["mainWorkspace"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "codex", "mainWorkspace", ("VW_CODEX_MAIN_WORKSPACE",), os.path.join(DATA_DIR, "codex-main")
+    ) or os.path.join(DATA_DIR, "codex-main")))
+    cfg["codex"]["timeoutSec"] = _config_or_env_int(cfg, overrides, "codex", "timeoutSec", ("VW_CODEX_TIMEOUT_SEC",), 900)
+    cfg["codex"]["model"] = _config_or_env(cfg, overrides, "codex", "model", ("VW_CODEX_MODEL",), "") or ""
+    cfg["codex"]["sandbox"] = _config_or_env(cfg, overrides, "codex", "sandbox", ("VW_CODEX_SANDBOX",), "workspace-write") or "workspace-write"
+    cfg["codex"]["approvalPolicy"] = _config_or_env(cfg, overrides, "codex", "approvalPolicy", ("VW_CODEX_APPROVAL_POLICY",), "never") or "never"
+    cfg["codex"]["preferAppServer"] = _config_or_env_bool(cfg, overrides, "codex", "preferAppServer", ("VW_CODEX_PREFER_APP_SERVER",), True)
+    cfg["codex"]["includeMain"] = _config_or_env_bool(cfg, overrides, "codex", "includeMain", ("VW_CODEX_INCLUDE_MAIN",), True)
+    cfg["codex"]["includeNativeAgents"] = _config_or_env_bool(cfg, overrides, "codex", "includeNativeAgents", ("VW_CODEX_INCLUDE_NATIVE_AGENTS",), True)
+    cfg["codex"]["registerNativeAgents"] = _config_or_env_bool(cfg, overrides, "codex", "registerNativeAgents", ("VW_CODEX_REGISTER_NATIVE_AGENTS",), True)
+    cfg["claudeCode"]["enabled"] = _config_or_env_bool(cfg, overrides, "claudeCode", "enabled", ("VW_CLAUDE_CODE_ENABLED",), True)
+    cfg["claudeCode"]["homePath"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "claudeCode", "homePath", ("VW_CLAUDE_CODE_HOME", "CLAUDE_CONFIG_DIR"), "~/.claude"
+    ) or "~/.claude"))
+    cfg["claudeCode"]["binary"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "claudeCode", "binary", ("VW_CLAUDE_CODE_BIN",), "claude"
+    ) or "claude"))
+    cfg["claudeCode"]["workspaceRoot"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "claudeCode", "workspaceRoot", ("VW_CLAUDE_CODE_WORKSPACE_ROOT",), os.path.join(DATA_DIR, "claude-code-agents")
+    ) or os.path.join(DATA_DIR, "claude-code-agents")))
+    cfg["claudeCode"]["mainWorkspace"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "claudeCode", "mainWorkspace", ("VW_CLAUDE_CODE_MAIN_WORKSPACE",), os.path.join(DATA_DIR, "claude-code-main")
+    ) or os.path.join(DATA_DIR, "claude-code-main")))
+    cfg["claudeCode"]["timeoutSec"] = _config_or_env_int(cfg, overrides, "claudeCode", "timeoutSec", ("VW_CLAUDE_CODE_TIMEOUT_SEC",), 900)
+    cfg["claudeCode"]["model"] = _config_or_env(cfg, overrides, "claudeCode", "model", ("VW_CLAUDE_CODE_MODEL",), "") or ""
+    cfg["claudeCode"]["permissionMode"] = _config_or_env(cfg, overrides, "claudeCode", "permissionMode", ("VW_CLAUDE_CODE_PERMISSION_MODE",), "acceptEdits") or "acceptEdits"
+    cfg["claudeCode"]["includeMain"] = _config_or_env_bool(cfg, overrides, "claudeCode", "includeMain", ("VW_CLAUDE_CODE_INCLUDE_MAIN",), True)
+    cfg["claudeCode"]["includeNativeAgents"] = _config_or_env_bool(cfg, overrides, "claudeCode", "includeNativeAgents", ("VW_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS",), True)
+    cfg["claudeCode"]["registerNativeAgents"] = _config_or_env_bool(cfg, overrides, "claudeCode", "registerNativeAgents", ("VW_CLAUDE_CODE_REGISTER_NATIVE_AGENTS",), True)
+    cfg["openCode"]["enabled"] = _config_or_env_bool(cfg, overrides, "openCode", "enabled", ("VW_OPENCODE_ENABLED",), True)
+    cfg["openCode"]["homePath"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "openCode", "homePath", ("VW_OPENCODE_HOME",), "~/.config/opencode"
+    ) or "~/.config/opencode"))
+    cfg["openCode"]["binary"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "openCode", "binary", ("VW_OPENCODE_BIN",), "opencode"
+    ) or "opencode"))
+    cfg["openCode"]["workspaceRoot"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "openCode", "workspaceRoot", ("VW_OPENCODE_WORKSPACE_ROOT",), os.path.join(DATA_DIR, "opencode-agents")
+    ) or os.path.join(DATA_DIR, "opencode-agents")))
+    cfg["openCode"]["mainWorkspace"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "openCode", "mainWorkspace", ("VW_OPENCODE_MAIN_WORKSPACE",), os.path.join(DATA_DIR, "opencode-main")
+    ) or os.path.join(DATA_DIR, "opencode-main")))
+    cfg["openCode"]["timeoutSec"] = _config_or_env_int(cfg, overrides, "openCode", "timeoutSec", ("VW_OPENCODE_TIMEOUT_SEC",), 900)
+    cfg["openCode"]["model"] = _config_or_env(cfg, overrides, "openCode", "model", ("VW_OPENCODE_MODEL",), "") or ""
+    cfg["openCode"]["includeMain"] = _config_or_env_bool(cfg, overrides, "openCode", "includeMain", ("VW_OPENCODE_INCLUDE_MAIN",), True)
+    cfg["openCode"]["includeAgents"] = _config_or_env_bool(cfg, overrides, "openCode", "includeAgents", ("VW_OPENCODE_INCLUDE_AGENTS",), True)
+    cfg["openCode"]["registerAgents"] = _config_or_env_bool(cfg, overrides, "openCode", "registerAgents", ("VW_OPENCODE_REGISTER_AGENTS",), True)
+    cfg["antigravity"]["enabled"] = _config_or_env_bool(cfg, overrides, "antigravity", "enabled", ("VW_ANTIGRAVITY_ENABLED",), True)
+    cfg["antigravity"]["homePath"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "antigravity", "homePath", ("VW_ANTIGRAVITY_HOME",), "~/.gemini"
+    ) or "~/.gemini"))
+    cfg["antigravity"]["binary"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "antigravity", "binary", ("VW_ANTIGRAVITY_BIN",), "agy"
+    ) or "agy"))
+    cfg["antigravity"]["workspaceRoot"] = os.path.expanduser(str(_config_or_env(
+        cfg, overrides, "antigravity", "workspaceRoot", ("VW_ANTIGRAVITY_WORKSPACE_ROOT",), os.path.join(DATA_DIR, "antigravity-agents")
+    ) or os.path.join(DATA_DIR, "antigravity-agents")))
+    cfg["antigravity"]["timeoutSec"] = _config_or_env_int(cfg, overrides, "antigravity", "timeoutSec", ("VW_ANTIGRAVITY_TIMEOUT_SEC",), 600)
+    cfg["antigravity"]["printTimeout"] = _config_or_env(cfg, overrides, "antigravity", "printTimeout", ("VW_ANTIGRAVITY_PRINT_TIMEOUT",), "5m") or "5m"
+    cfg["antigravity"]["model"] = _config_or_env(cfg, overrides, "antigravity", "model", ("VW_ANTIGRAVITY_MODEL",), "") or ""
+    cfg["antigravity"]["sandbox"] = _config_or_env(cfg, overrides, "antigravity", "sandbox", ("VW_ANTIGRAVITY_SANDBOX",), "") or ""
+    cfg["browser"]["cdpUrl"] = _config_or_env(cfg, overrides, "browser", "cdpUrl", ("VW_BROWSER_CDP_URL",), "") or ""
+    cfg["browser"]["viewerUrl"] = _config_or_env(cfg, overrides, "browser", "viewerUrl", ("VW_BROWSER_VIEWER_URL",), "") or ""
+    realtime_url = _config_or_env(
+        cfg, overrides, "realtime", "url", ("VW_REALTIME_BROWSER_URL", "VW_REALTIME_URL"), ""
+    ) or ""
+    realtime_url_from_env = "realtime.url" not in overrides and bool(
+        os.environ.get("VW_REALTIME_BROWSER_URL") or os.environ.get("VW_REALTIME_URL")
     )
-    realtime_url_from_env = bool(os.environ.get("VW_REALTIME_BROWSER_URL") or os.environ.get("VW_REALTIME_URL"))
     realtime_enabled_default = True if realtime_url and realtime_url_from_env else cfg["realtime"].get("enabled", False)
-    cfg["realtime"]["enabled"] = _env_bool("VW_REALTIME_ENABLED", realtime_enabled_default)
+    cfg["realtime"]["enabled"] = _config_or_env_bool(
+        cfg, overrides, "realtime", "enabled", ("VW_REALTIME_ENABLED",), realtime_enabled_default
+    )
     cfg["realtime"]["url"] = realtime_url
-    cfg["realtime"]["room"] = _env_or("VW_REALTIME_ROOM", cfg["realtime"].get("room") or "agent_runtime")
-    cfg["sms"]["ownerAgentId"] = _env_or("VW_SMS_OWNER_AGENT_ID", cfg["sms"].get("ownerAgentId") or "")
-    cfg["sms"]["twilioAccountSid"] = _env_or("VW_TWILIO_ACCOUNT_SID", cfg["sms"].get("twilioAccountSid") or "")
-    cfg["sms"]["twilioAuthToken"] = _env_or("VW_TWILIO_AUTH_TOKEN", cfg["sms"].get("twilioAuthToken") or "")
-    cfg["sms"]["fromNumber"] = _env_or("VW_TWILIO_FROM_NUMBER", cfg["sms"].get("fromNumber") or "")
+    cfg["realtime"]["room"] = _config_or_env(cfg, overrides, "realtime", "room", ("VW_REALTIME_ROOM",), "agent_runtime") or "agent_runtime"
+    cfg["sms"]["ownerAgentId"] = _config_or_env(cfg, overrides, "sms", "ownerAgentId", ("VW_SMS_OWNER_AGENT_ID",), "") or ""
+    cfg["sms"]["twilioAccountSid"] = _config_or_env(cfg, overrides, "sms", "twilioAccountSid", ("VW_TWILIO_ACCOUNT_SID",), "") or ""
+    cfg["sms"]["twilioAuthToken"] = _config_or_env(cfg, overrides, "sms", "twilioAuthToken", ("VW_TWILIO_AUTH_TOKEN",), "") or ""
+    cfg["sms"]["fromNumber"] = _config_or_env(cfg, overrides, "sms", "fromNumber", ("VW_TWILIO_FROM_NUMBER",), "") or ""
     return cfg
 
 
@@ -750,10 +867,11 @@ def _preserve_secret_updates(existing, body):
     }.items():
         incoming = body.get(section)
         current = existing.get(section)
+        effective = VW_CONFIG.get(section) if isinstance(VW_CONFIG.get(section), dict) else {}
         if not isinstance(incoming, dict) or not isinstance(current, dict):
             continue
         for key in keys:
-            if key in incoming and not incoming.get(key) and current.get(key):
+            if key in incoming and not incoming.get(key) and (current.get(key) or effective.get(key)):
                 incoming.pop(key, None)
 
 
@@ -788,7 +906,9 @@ def _save_vw_config_update(body):
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}, 400
     old_gateway_config = _gateway_config_key()
-    existing = _deep_merge(_default_vw_config(), _load_config_file(_resolve_vw_config_path()))
+    saved = _load_config_file(_resolve_vw_config_path())
+    existing = _deep_merge(_default_vw_config(), saved)
+    override_paths = _settings_override_paths(saved)
     _preserve_secret_updates(existing, body)
     if isinstance(body.get("world"), dict) and "chatBubbles" in body["world"]:
         body["world"]["chatBubbles"] = _normalize_chat_bubble_settings(body["world"]["chatBubbles"])
@@ -799,6 +919,8 @@ def _save_vw_config_update(body):
             if _demo_feature_locked(feature):
                 body["features"][feature] = False
     merged = _deep_merge(existing, body)
+    override_paths.update(_collect_settings_override_paths(body))
+    merged["_settingsOverrides"] = sorted(override_paths)
     if body.get("_setupComplete") is not False:
         merged["_setupComplete"] = True
     _write_vw_config(merged)
@@ -24504,8 +24626,15 @@ def _save_provider_settings(body):
     provider_id = str((body or {}).get("providerId") or "").strip().lower()
     incoming = body.get("values") if isinstance((body or {}).get("values"), dict) else {}
     try:
-        _manifest, config_key, clean = _validated_provider_settings(provider_id, incoming)
-        result, status = _save_vw_config_update({config_key: clean})
+        manifest, config_key, clean = _validated_provider_settings(provider_id, incoming)
+        fields = _provider_settings_field_map(manifest.settings_schema)
+        patch = {}
+        for key in incoming:
+            field = fields.get(key) or {}
+            if field.get("type") == "secret" and not incoming.get(key):
+                continue
+            patch[key] = clean[key]
+        result, status = _save_vw_config_update({config_key: patch})
         if status >= 400:
             return {**result, "_status": status}
         _reset_provider_registry()

@@ -1,3 +1,5 @@
+import { createConnectionHelpButton } from './connection-help.mjs?v=20260809-connection-guides-r1';
+
 (() => {
   'use strict';
   if (new URLSearchParams(location.search).get('embedded') === 'settings') {
@@ -107,7 +109,9 @@
         const grid = element('div', { className:'ps-connection-grid' });
         (field.itemFields || []).forEach(child => {
           const label = element('label');
-          label.append(element('span', {}, child.label || child.key));
+          const childLabel = element('span', { className:'ps-child-label-with-info' });
+          childLabel.append(element('span', {}, child.label || child.key), createConnectionHelpButton(provider.id, child));
+          label.append(childLabel);
           const current = child.type === 'secret'
             ? { value:'', configured:!!row[`${child.key}Configured`] }
             : (row[child.key] ?? child.default ?? (child.type === 'boolean' ? false : ''));
@@ -222,6 +226,7 @@
     state.connectionLists.clear();
     $('ps-icon').textContent = provider.icon || '🤖';
     $('ps-name').textContent = provider.name || provider.id;
+    $('ps-provider-help').replaceChildren(createConnectionHelpButton(provider.id, { label:`${provider.name || provider.id} setup` }));
     $('ps-description').textContent = provider.description || '';
     const health = $('ps-health');
     health.textContent = provider.health?.ok ? 'Connected' : (provider.health?.authOk === false ? 'Login required' : 'Needs attention');
@@ -236,12 +241,16 @@
       (section.fields || []).forEach(field => {
         if (field.type === 'link') {
           const row = element('div', { className:'ps-field' });
-          row.append(element('div', { className:'ps-label' }, field.label || field.key), element('a', { className:'ps-link', href:providerLinkHref(provider, field)}, field.actionLabel || 'Open'));
+          const label = element('div', { className:'ps-label ps-label-with-info' });
+          label.append(element('span', {}, field.label || field.key), createConnectionHelpButton(provider.id, field));
+          row.append(label, element('a', { className:'ps-link', href:providerLinkHref(provider, field)}, field.actionLabel || 'Open'));
           card.append(row); return;
         }
         const row = element('div', { className:'ps-field' });
         const labelBox = element('div');
-        labelBox.append(element('div', { className:'ps-label' }, field.label || field.key));
+        const label = element('div', { className:'ps-label ps-label-with-info' });
+        label.append(element('span', {}, field.label || field.key), createConnectionHelpButton(provider.id, field));
+        labelBox.append(label);
         if (field.help) labelBox.append(element('div', { className:'ps-help' }, field.help));
         const control = element('div', { className:'ps-control' });
         const value = scalarValue(provider, field);
@@ -304,6 +313,7 @@
       await requestJson('/api/providers/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ providerId:provider.id, values:collectValues() }) });
       await load(provider.id);
       setStatus('Settings saved. Secrets left blank were preserved and agent discovery was refreshed.', 'ok');
+      window.parent?.dispatchEvent?.(new CustomEvent('vw:provider-settings-saved', { detail:{ providerId:provider.id } }));
     } catch (error) { setStatus(error.message, 'error'); }
     finally { $('ps-save').disabled = false; }
   }
