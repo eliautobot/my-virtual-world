@@ -339,7 +339,14 @@ These features are locked until licensed and configured.
 | GET | `/sms-threads` | SMS thread list. |
 | GET | `/sms-thread?phone=<number>` | Messages for a phone number. |
 | GET | `/sms-contacts` | SMS contacts derived from threads. |
-| POST | `/sms-send` | Send SMS through configured provider. |
+| POST | `/sms-sync` | Synchronize recent inbound and outbound history from Twilio. Accepts optional `{"force": true}`. |
+| POST | `/sms-thread-mode` | Set one thread to `agent` or `user` control. |
+| POST | `/sms-owner` | Assign or clear the roster agent that owns Agent-controlled SMS threads. |
+| POST | `/sms-send` | Send SMS through Twilio. User sends require User control; Agent sends require Agent control and the assigned agent ID. |
+
+Thread modes and contacts are runtime data in `/data`; Twilio credentials remain
+configuration secrets. The Inbox can synchronize Twilio history without requiring
+credentials to be exposed to the browser.
 
 Never commit Twilio credentials or customer phone data.
 

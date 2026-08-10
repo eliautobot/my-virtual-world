@@ -344,6 +344,7 @@
       'setting-twilioToken',
       'setting-twilioFrom',
       'setting-smsPublicMediaUrl',
+      'setting-smsSyncHistory',
       'btn-testSms',
       'btn-openSmsPanel',
       'smsTo',
@@ -1086,6 +1087,7 @@
     if ($('setting-twilioFrom')) $('setting-twilioFrom').value = sms.fromNumber || '';
     if ($('setting-twilioToken')) $('setting-twilioToken').placeholder = sms.authTokenConfigured ? 'Configured - leave blank to keep' : 'Twilio auth token';
     if ($('setting-smsPublicMediaUrl')) $('setting-smsPublicMediaUrl').value = sms.publicMediaBaseUrl || '';
+    if ($('setting-smsSyncHistory')) $('setting-smsSyncHistory').checked = sms.syncHistory !== false;
     if ($('setting-movementDebugOverlays')) $('setting-movementDebugOverlays').checked = debug.movementDebugOverlays === true;
     if ($('setting-objectActionPointDebug')) $('setting-objectActionPointDebug').checked = debug.objectActionPointDebug === true;
     updateLicenseUi(config);
@@ -1155,6 +1157,7 @@
         twilioAccountSid: value('setting-twilioSid'),
         fromNumber: value('setting-twilioFrom'),
         publicMediaBaseUrl: value('setting-smsPublicMediaUrl'),
+        syncHistory: checked('setting-smsSyncHistory'),
       },
       debug: {
         movementDebugOverlays: checked('setting-movementDebugOverlays'),
@@ -1436,10 +1439,6 @@
     });
     ensureBrowserWindowController().catch(err => console.error('Failed to initialize Agent Browser window controls:', err));
     $('btn-testSms')?.addEventListener('click', () => checkSms().catch(err => setStatus('smsTestStatus', err.message, 'warn')));
-    $('btn-openSmsPanel')?.addEventListener('click', () => openSmsPanel().catch(err => setText('smsPanelStatus', err.message)));
-    $('btn-smsPanel')?.addEventListener('click', () => openSmsPanel().catch(err => setText('smsPanelStatus', err.message)));
-    $('smsPanelClose')?.addEventListener('click', () => { $('smsPanel').style.display = 'none'; });
-    $('smsSend')?.addEventListener('click', () => sendSms().catch(err => { $('smsPanelStatus').textContent = err.message; }));
     $('btn-testHermes')?.addEventListener('click', async () => {
       setStatus('hermesTestStatus', 'Testing...');
       try {

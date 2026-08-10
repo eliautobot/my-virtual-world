@@ -114,7 +114,7 @@ The setup wizard walks through:
 - OpenClaw connection paths.
 - Hermes connection paths.
 - Optional Agent Browser settings.
-- Optional SMS/Twilio settings.
+- Optional SMS/Twilio settings, synchronized Inbox, per-thread Agent/User control, and SMS agent assignment.
 
 You can change the same options later from `Settings` inside the app.
 

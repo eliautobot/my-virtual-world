@@ -116,6 +116,8 @@ export function createBrowserWindowController({
   getBounds,
   minimumSize = { width: 480, height: 360 },
   isCompactLayout = () => false,
+  windowLabel = 'Agent Browser',
+  bodyInteractionClass = 'browser-window-interacting',
 }) {
   if (!panel || !dragHandle || typeof getBounds !== 'function') {
     throw new TypeError('Browser window controller requires a panel, drag handle, and bounds provider.');
@@ -141,8 +143,8 @@ export function createBrowserWindowController({
   function syncMaximizeButton(maximized) {
     if (!maximizeButton) return;
     maximizeButton.setAttribute('aria-pressed', String(maximized));
-    maximizeButton.setAttribute('aria-label', maximized ? 'Restore Agent Browser window' : 'Maximize Agent Browser');
-    maximizeButton.title = maximized ? 'Restore Agent Browser window' : 'Maximize Agent Browser';
+    maximizeButton.setAttribute('aria-label', maximized ? `Restore ${windowLabel} window` : `Maximize ${windowLabel}`);
+    maximizeButton.title = maximized ? `Restore ${windowLabel} window` : `Maximize ${windowLabel}`;
     maximizeButton.textContent = maximized ? '❐' : '□';
   }
 
@@ -192,7 +194,7 @@ export function createBrowserWindowController({
     interaction = null;
     pendingPoint = null;
     panel.classList.remove('is-window-interacting');
-    document.body.classList.remove('browser-window-interacting');
+    document.body.classList.remove(bodyInteractionClass);
     document.body.style.cursor = bodyCursor;
     if (frame) frame.style.pointerEvents = framePointerEvents;
   }
@@ -237,7 +239,7 @@ export function createBrowserWindowController({
     bodyCursor = document.body.style.cursor;
     if (frame) frame.style.pointerEvents = 'none';
     document.body.style.cursor = getComputedStyle(event.currentTarget).cursor;
-    document.body.classList.add('browser-window-interacting');
+    document.body.classList.add(bodyInteractionClass);
     panel.classList.add('is-window-interacting');
   }
 

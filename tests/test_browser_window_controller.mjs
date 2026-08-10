@@ -39,6 +39,24 @@ assert.deepEqual(
   'north-west resizing should stop at the top and left viewport bounds',
 );
 
+const allEdgeExpectations = {
+  n: { left: 300, top: 230, width: 600, height: 370 },
+  s: { left: 300, top: 200, width: 600, height: 430 },
+  e: { left: 300, top: 200, width: 640, height: 400 },
+  w: { left: 340, top: 200, width: 560, height: 400 },
+  ne: { left: 300, top: 230, width: 640, height: 370 },
+  nw: { left: 340, top: 230, width: 560, height: 370 },
+  se: { left: 300, top: 200, width: 640, height: 430 },
+  sw: { left: 340, top: 200, width: 560, height: 430 },
+};
+for (const [direction, expected] of Object.entries(allEdgeExpectations)) {
+  assert.deepEqual(
+    resizeFloatingRect({ left: 300, top: 200, width: 600, height: 400 }, direction, 40, 30, bounds, minimumSize),
+    expected,
+    `${direction} handle should resize from its declared edge or corner`,
+  );
+}
+
 assert.deepEqual(
   constrainFloatingRect(
     { left: -50, top: -50, width: 900, height: 900 },

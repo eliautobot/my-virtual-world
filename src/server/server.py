@@ -8,6 +8,7 @@ import base64
 import copy
 import contextlib
 import difflib
+import email.utils
 import gzip
 import hashlib
 import hmac
@@ -369,7 +370,14 @@ def _default_vw_config():
         "features": {"agentBrowser": False, "sms": False, "weather": True, "agentLiveMode": False, "debugTools": True},
         "realtime": {"enabled": False, "url": "", "room": "agent_runtime"},
         "browser": {"cdpUrl": "", "viewerUrl": ""},
-        "sms": {"ownerAgentId": "", "twilioAccountSid": "", "twilioAuthToken": "", "fromNumber": "", "publicMediaBaseUrl": ""},
+        "sms": {
+            "ownerAgentId": "",
+            "twilioAccountSid": "",
+            "twilioAuthToken": "",
+            "fromNumber": "",
+            "publicMediaBaseUrl": "",
+            "syncHistory": True,
+        },
         "debug": {"movementDebugOverlays": False, "objectActionPointDebug": False},
         "chat": {"toolCallsExpanded": True},
         "license": {"acceptedTrial": False},
@@ -556,6 +564,12 @@ def _load_vw_config():
     cfg["sms"]["twilioAccountSid"] = _config_or_env(cfg, overrides, "sms", "twilioAccountSid", ("VW_TWILIO_ACCOUNT_SID",), "") or ""
     cfg["sms"]["twilioAuthToken"] = _config_or_env(cfg, overrides, "sms", "twilioAuthToken", ("VW_TWILIO_AUTH_TOKEN",), "") or ""
     cfg["sms"]["fromNumber"] = _config_or_env(cfg, overrides, "sms", "fromNumber", ("VW_TWILIO_FROM_NUMBER",), "") or ""
+    cfg["sms"]["publicMediaBaseUrl"] = _config_or_env(
+        cfg, overrides, "sms", "publicMediaBaseUrl", ("VW_SMS_PUBLIC_MEDIA_BASE_URL",), ""
+    ) or ""
+    cfg["sms"]["syncHistory"] = _config_or_env_bool(
+        cfg, overrides, "sms", "syncHistory", ("VW_SMS_SYNC_HISTORY",), True
+    )
     return cfg
 
 
@@ -835,6 +849,7 @@ def _safe_vw_config():
             "twilioAccountSid": sms_cfg.get("twilioAccountSid"),
             "fromNumber": sms_cfg.get("fromNumber"),
             "publicMediaBaseUrl": sms_cfg.get("publicMediaBaseUrl"),
+            "syncHistory": sms_cfg.get("syncHistory", True),
             "authTokenConfigured": bool(sms_cfg.get("twilioAuthToken")),
             "hasCredentials": bool(sms_cfg.get("twilioAccountSid") and sms_cfg.get("twilioAuthToken") and sms_cfg.get("fromNumber")),
         },
@@ -1050,53 +1065,377 @@ def _sms_log_path():
     return os.path.join(DATA_DIR, "sms-log.json")
 
 
-def _load_sms_log():
+def _sms_contacts_path():
+    return os.path.join(DATA_DIR, "sms-contacts.json")
+
+
+def _sms_thread_modes_path():
+    return os.path.join(DATA_DIR, "sms-thread-modes.json")
+
+
+_SMS_DATA_LOCK = threading.RLock()
+_SMS_SYNC_LOCK = threading.Lock()
+_SMS_SYNC_CACHE = {"at": 0.0, "result": None}
+
+
+def _atomic_write_json(path, value):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temp_path = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        json.dump(value, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp_path, path)
+
+
+def _normalize_sms_phone(phone):
+    value = re.sub(r"[\s().-]+", "", str(phone or "").strip())
+    if value.startswith("00"):
+        value = "+" + value[2:]
+    if value.startswith("+") and value[1:].isdigit():
+        return value
+    if value.isdigit():
+        if len(value) == 10:
+            return "+1" + value
+        if len(value) == 11 and value.startswith("1"):
+            return "+" + value
+    return value
+
+
+def _sms_timestamp_ms(value):
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value or "").strip()
+    if not text:
+        return 0
     try:
-        with open(_sms_log_path(), "r") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+        return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _sms_timestamp_iso(value=None):
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value) / 1000, tz=timezone.utc).isoformat()
+    text = str(value or "").strip()
+    if text:
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).isoformat()
+        except (TypeError, ValueError, OverflowError):
+            try:
+                parsed = email.utils.parsedate_to_datetime(text)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc).isoformat()
+            except (TypeError, ValueError, OverflowError):
+                pass
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _sms_message_phone(message):
+    explicit = _normalize_sms_phone(message.get("phone"))
+    if explicit:
+        return explicit
+    configured_from = _normalize_sms_phone((VW_CONFIG.get("sms") or {}).get("fromNumber"))
+    from_number = _normalize_sms_phone(message.get("from"))
+    to_number = _normalize_sms_phone(message.get("to"))
+    if configured_from and from_number == configured_from:
+        return to_number
+    if configured_from and to_number == configured_from:
+        return from_number
+    return to_number if str(message.get("direction") or "").lower() == "outbound" else from_number
+
+
+def _normalize_sms_message(message):
+    if not isinstance(message, dict):
+        return None
+    normalized = dict(message)
+    direction = str(normalized.get("direction") or normalized.get("type") or "").lower()
+    if direction == "intervention":
+        direction = "outbound"
+    if direction not in {"inbound", "outbound"}:
+        configured_from = _normalize_sms_phone((VW_CONFIG.get("sms") or {}).get("fromNumber"))
+        direction = "outbound" if _normalize_sms_phone(normalized.get("from")) == configured_from else "inbound"
+    normalized["direction"] = direction
+    normalized["type"] = normalized.get("type") if normalized.get("type") in {"inbound", "outbound", "intervention"} else direction
+    normalized["from"] = _normalize_sms_phone(normalized.get("from"))
+    normalized["to"] = _normalize_sms_phone(normalized.get("to"))
+    normalized["phone"] = _sms_message_phone(normalized)
+    normalized["body"] = str(normalized.get("body") or "")
+    normalized["timestamp"] = _sms_timestamp_iso(normalized.get("timestamp") or normalized.get("dateSent") or normalized.get("ts"))
+    normalized["ts"] = _sms_timestamp_ms(normalized["timestamp"])
+    normalized["id"] = str(normalized.get("id") or normalized.get("sid") or f"local-{normalized['ts']}-{uuid.uuid4().hex[:8]}")
+    normalized["sid"] = str(normalized.get("sid") or normalized["id"])
+    return normalized
+
+
+def _load_sms_log():
+    with _SMS_DATA_LOCK:
+        try:
+            with open(_sms_log_path(), "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            data = []
+    rows = [_normalize_sms_message(item) for item in data] if isinstance(data, list) else []
+    rows = [item for item in rows if item and item.get("phone")]
+    rows.sort(key=lambda item: item.get("ts") or 0)
+    return rows
 
 
 def _save_sms_log(entries):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(_sms_log_path(), "w") as f:
-        json.dump(entries[-1000:], f, indent=2)
-        f.write("\n")
+    normalized = [_normalize_sms_message(item) for item in entries]
+    normalized = [item for item in normalized if item and item.get("phone")]
+    normalized.sort(key=lambda item: item.get("ts") or 0)
+    with _SMS_DATA_LOCK:
+        _atomic_write_json(_sms_log_path(), normalized[-2000:])
+
+
+def _load_sms_json_map(path):
+    with _SMS_DATA_LOCK:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
+
+
+def _load_sms_contacts():
+    contacts = {}
+    for phone, value in _load_sms_json_map(_sms_contacts_path()).items():
+        normalized = _normalize_sms_phone(phone)
+        if not normalized:
+            continue
+        info = value if isinstance(value, dict) else {"name": str(value or "")}
+        contacts[normalized] = {"name": str(info.get("name") or "Unknown")[:120]}
+    for item in _load_sms_log():
+        phone = item.get("phone")
+        if phone and phone not in contacts:
+            contacts[phone] = {"name": str(item.get("name") or "Unknown")[:120]}
+    return contacts
+
+
+def _save_sms_contacts(contacts):
+    cleaned = {}
+    for phone, info in (contacts or {}).items():
+        normalized = _normalize_sms_phone(phone)
+        if normalized:
+            cleaned[normalized] = {"name": str((info or {}).get("name") or "Unknown")[:120]}
+    with _SMS_DATA_LOCK:
+        _atomic_write_json(_sms_contacts_path(), cleaned)
+
+
+def _load_sms_thread_modes():
+    modes = {}
+    for phone, mode in _load_sms_json_map(_sms_thread_modes_path()).items():
+        normalized = _normalize_sms_phone(phone)
+        if normalized and mode in {"agent", "user"}:
+            modes[normalized] = mode
+    return modes
+
+
+def _sms_thread_mode(phone):
+    return _load_sms_thread_modes().get(_normalize_sms_phone(phone), "agent")
+
+
+def _set_sms_thread_mode(phone, mode):
+    normalized = _normalize_sms_phone(phone)
+    if not normalized:
+        return {"ok": False, "error": "A valid phone number is required."}, 400
+    if mode not in {"agent", "user"}:
+        return {"ok": False, "error": "SMS control must be 'agent' or 'user'."}, 400
+    modes = _load_sms_thread_modes()
+    modes[normalized] = mode
+    with _SMS_DATA_LOCK:
+        _atomic_write_json(_sms_thread_modes_path(), modes)
+    return {"ok": True, "phone": normalized, "activeMode": mode}, 200
+
+
+def _sms_owner_agent_info():
+    owner_id = str((VW_CONFIG.get("sms") or {}).get("ownerAgentId") or "").strip()
+    if not owner_id:
+        return None
+    owner = next((row for row in get_roster() if row.get("id") == owner_id or row.get("statusKey") == owner_id), None)
+    if owner:
+        return {
+            "id": owner.get("id") or owner_id,
+            "statusKey": owner.get("statusKey") or owner_id,
+            "name": owner.get("name") or owner_id,
+            "emoji": owner.get("emoji") or "🤖",
+            "status": owner.get("status") or "offline",
+        }
+    return {"id": owner_id, "statusKey": owner_id, "name": owner_id, "emoji": "🤖", "status": "offline"}
 
 
 def _sms_status_payload():
     sms_cfg = VW_CONFIG.get("sms", {}) or {}
     enabled_by_config = bool((VW_CONFIG.get("features") or {}).get("sms"))
     licensed = check_feature("sms")
-    roster = get_roster()
     owner_id = sms_cfg.get("ownerAgentId") or ""
-    owner = next((a for a in roster if a.get("id") == owner_id or a.get("statusKey") == owner_id), None)
     return {
+        "ok": True,
         "enabled": enabled_by_config and licensed,
         "configured": enabled_by_config,
         "locked": not licensed,
         "licensed": licensed,
         "ownerAgentId": owner_id,
-        "ownerAgent": owner,
+        "ownerAgent": _sms_owner_agent_info(),
         "hasCredentials": bool(sms_cfg.get("twilioAccountSid") and sms_cfg.get("twilioAuthToken") and sms_cfg.get("fromNumber")),
+        "syncHistory": bool(sms_cfg.get("syncHistory", True)),
+        "defaultControl": "agent",
     }
 
 
 def _sms_threads():
+    contacts = _load_sms_contacts()
     threads = {}
     for msg in _load_sms_log():
-        phone = msg.get("to") or msg.get("from") or ""
+        phone = msg.get("phone") or ""
         if not phone:
             continue
-        thread = threads.setdefault(phone, {"phone": phone, "count": 0, "lastMessage": None, "updatedAt": 0})
+        thread = threads.setdefault(phone, {
+            "phone": phone,
+            "name": (contacts.get(phone) or {}).get("name") or "Unknown",
+            "displayName": (contacts.get(phone) or {}).get("name") or phone,
+            "messageCount": 0,
+            "count": 0,
+            "lastMessage": "",
+            "lastTimestamp": "",
+            "lastType": "",
+            "updatedAt": 0,
+        })
+        thread["messageCount"] += 1
         thread["count"] += 1
         ts = msg.get("ts") or 0
         if ts >= thread["updatedAt"]:
             thread["updatedAt"] = ts
-            thread["lastMessage"] = msg
-    return sorted(threads.values(), key=lambda item: item.get("updatedAt", 0), reverse=True)
+            thread["lastMessage"] = msg.get("body") or ("Media message" if msg.get("numMedia") else "")
+            thread["lastTimestamp"] = msg.get("timestamp") or ""
+            thread["lastType"] = msg.get("type") or msg.get("direction") or ""
+    for phone, info in contacts.items():
+        threads.setdefault(phone, {
+            "phone": phone, "name": info.get("name") or "Unknown", "displayName": info.get("name") or phone,
+            "messageCount": 0, "count": 0, "lastMessage": "", "lastTimestamp": "", "lastType": "", "updatedAt": 0,
+        })
+    for thread in threads.values():
+        thread["activeMode"] = _sms_thread_mode(thread["phone"])
+    return sorted(threads.values(), key=lambda item: (-(item.get("updatedAt") or 0), item.get("displayName") or item["phone"]))
+
+
+def _sms_thread(phone, limit=250):
+    normalized = _normalize_sms_phone(phone)
+    messages = [item for item in _load_sms_log() if item.get("phone") == normalized]
+    messages = messages[-max(1, min(int(limit or 250), 500)):]
+    contacts = _load_sms_contacts()
+    name = (contacts.get(normalized) or {}).get("name") or "Unknown"
+    return {
+        "ok": True,
+        "thread": {
+            "phone": normalized,
+            "name": name,
+            "displayName": name if name != "Unknown" else normalized,
+            "messageCount": len(messages),
+            "activeMode": _sms_thread_mode(normalized),
+        },
+        "messages": messages,
+        "ownerAgent": _sms_owner_agent_info(),
+    }
+
+
+def _twilio_request_json(url, data=None):
+    sms_cfg = VW_CONFIG.get("sms", {}) or {}
+    account_sid = sms_cfg.get("twilioAccountSid") or ""
+    auth_token = sms_cfg.get("twilioAuthToken") or ""
+    auth = base64.b64encode(f"{account_sid}:{auth_token}".encode("utf-8")).decode("ascii")
+    request = urllib.request.Request(url, data=data, headers={
+        "Authorization": f"Basic {auth}",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+    })
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _sync_sms_history(force=False):
+    global _SMS_SYNC_CACHE
+    status = _sms_status_payload()
+    if not status["enabled"] or not status["hasCredentials"]:
+        return {"ok": False, "error": "SMS must be enabled and configured before history can sync."}, 400
+    if not (VW_CONFIG.get("sms") or {}).get("syncHistory", True):
+        return {"ok": True, "skipped": True, "reason": "history_sync_disabled"}, 200
+    now = time.time()
+    cached = _SMS_SYNC_CACHE.get("result")
+    if not force and cached and now - float(_SMS_SYNC_CACHE.get("at") or 0) < 12:
+        return dict(cached, cached=True), 200
+    with _SMS_SYNC_LOCK:
+        now = time.time()
+        cached = _SMS_SYNC_CACHE.get("result")
+        if not force and cached and now - float(_SMS_SYNC_CACHE.get("at") or 0) < 12:
+            return dict(cached, cached=True), 200
+        sms_cfg = VW_CONFIG.get("sms", {}) or {}
+        account_sid = sms_cfg.get("twilioAccountSid")
+        from_number = _normalize_sms_phone(sms_cfg.get("fromNumber"))
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json?PageSize=250"
+        try:
+            payload = _twilio_request_json(url)
+            remote_messages = payload.get("messages") or []
+            entries = _load_sms_log()
+            existing = {str(item.get("sid") or item.get("id")): item for item in entries}
+            imported = 0
+            for raw in remote_messages:
+                from_value = _normalize_sms_phone(raw.get("from"))
+                to_value = _normalize_sms_phone(raw.get("to"))
+                if from_value == from_number:
+                    direction, phone = "outbound", to_value
+                elif to_value == from_number:
+                    direction, phone = "inbound", from_value
+                else:
+                    continue
+                sid = str(raw.get("sid") or "")
+                if not sid or not phone:
+                    continue
+                prior = existing.get(sid) or {}
+                timestamp = _sms_timestamp_iso(raw.get("date_sent") or raw.get("date_created"))
+                message = _normalize_sms_message({
+                    **prior,
+                    "id": sid,
+                    "sid": sid,
+                    "direction": direction,
+                    "type": prior.get("type") if prior.get("type") == "intervention" else direction,
+                    "phone": phone,
+                    "from": from_value,
+                    "to": to_value,
+                    "body": raw.get("body") or "",
+                    "status": raw.get("status") or prior.get("status") or "",
+                    "timestamp": timestamp,
+                    "numMedia": int(raw.get("num_media") or 0),
+                    "ownerAgentId": prior.get("ownerAgentId") or sms_cfg.get("ownerAgentId") or "",
+                })
+                if sid not in existing:
+                    imported += 1
+                existing[sid] = message
+            _save_sms_log(list(existing.values()))
+            contacts = _load_sms_contacts()
+            for item in existing.values():
+                phone = item.get("phone")
+                if phone and phone not in contacts:
+                    contacts[phone] = {"name": "Unknown"}
+            _save_sms_contacts(contacts)
+            result = {"ok": True, "imported": imported, "messageCount": len(existing), "syncedAt": _sms_timestamp_iso()}
+            _SMS_SYNC_CACHE = {"at": time.time(), "result": result}
+            return result, 200
+        except urllib.error.HTTPError as exc:
+            try:
+                detail = json.loads(exc.read().decode("utf-8", errors="replace")).get("message")
+            except Exception:
+                detail = None
+            return {"ok": False, "error": detail or f"Twilio history sync failed ({exc.code})."}, 502
+        except Exception as exc:
+            return {"ok": False, "error": f"Twilio history sync failed: {str(exc)[:300]}"}, 502
 
 
 def _send_sms(body):
@@ -1106,36 +1445,45 @@ def _send_sms(body):
     if not status["enabled"] or not status["hasCredentials"]:
         return {"ok": False, "error": "SMS is not configured. Enable SMS and set Twilio credentials in Settings or /setup."}, 400
     sms_cfg = VW_CONFIG.get("sms", {}) or {}
-    to_number = (body.get("to") or "").strip()
+    to_number = _normalize_sms_phone(body.get("to"))
     text = (body.get("body") or body.get("message") or "").strip()
     if not to_number or not text:
         return {"ok": False, "error": "SMS requires both to and body."}, 400
+    sender = "agent" if body.get("sender") == "agent" else "user"
+    mode = _sms_thread_mode(to_number)
+    if sender != mode:
+        return {"ok": False, "error": f"This thread is under {mode.title()} control. Switch control before sending."}, 409
+    if sender == "agent":
+        owner_id = str(sms_cfg.get("ownerAgentId") or "")
+        if not owner_id or str(body.get("agentId") or "") != owner_id:
+            return {"ok": False, "error": "Only the assigned SMS agent can send while Agent control is active."}, 403
     account_sid = sms_cfg.get("twilioAccountSid")
-    auth_token = sms_cfg.get("twilioAuthToken")
     from_number = sms_cfg.get("fromNumber")
     url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
     payload = urllib.parse.urlencode({"To": to_number, "From": from_number, "Body": text}).encode("utf-8")
-    auth = base64.b64encode(f"{account_sid}:{auth_token}".encode("utf-8")).decode("ascii")
-    req = urllib.request.Request(url, data=payload, headers={
-        "Authorization": f"Basic {auth}",
-        "Content-Type": "application/x-www-form-urlencoded",
-    })
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        entry = {
+        result = _twilio_request_json(url, payload)
+        entry = _normalize_sms_message({
             "id": result.get("sid") or f"local-{int(time.time() * 1000)}",
+            "sid": result.get("sid"),
             "direction": "outbound",
+            "type": "outbound" if sender == "agent" else "intervention",
+            "phone": to_number,
             "to": to_number,
             "from": from_number,
             "body": text,
             "status": result.get("status", "sent"),
-            "ts": int(time.time() * 1000),
+            "timestamp": _sms_timestamp_iso(),
             "ownerAgentId": sms_cfg.get("ownerAgentId"),
-        }
+            "sender": sender,
+        })
         entries = _load_sms_log()
         entries.append(entry)
         _save_sms_log(entries)
+        contacts = _load_sms_contacts()
+        if to_number not in contacts:
+            contacts[to_number] = {"name": str(body.get("name") or "Unknown")[:120]}
+            _save_sms_contacts(contacts)
         return {"ok": True, "message": entry, "twilio": {"sid": result.get("sid"), "status": result.get("status")}}, 200
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")
@@ -32220,20 +32568,26 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/sms-threads":
             if not check_feature("sms"):
                 return self._send_json(_locked_response("sms"), 403)
-            return self._send_json({"threads": _sms_threads()})
+            return self._send_json({"ok": True, "threads": _sms_threads(), "ownerAgent": _sms_owner_agent_info()})
 
         if path == "/sms-thread":
             if not check_feature("sms"):
                 return self._send_json(_locked_response("sms"), 403)
             qs = urllib.parse.parse_qs(parsed.query)
             phone = (qs.get("phone") or [""])[0]
-            messages = [m for m in _load_sms_log() if m.get("to") == phone or m.get("from") == phone]
-            return self._send_json({"phone": phone, "messages": messages[-250:]})
+            try:
+                limit = int((qs.get("limit") or [250])[0])
+            except (TypeError, ValueError):
+                limit = 250
+            return self._send_json(_sms_thread(phone, limit=limit))
 
         if path == "/sms-contacts":
             if not check_feature("sms"):
                 return self._send_json(_locked_response("sms"), 403)
-            return self._send_json({"contacts": [{"phone": item["phone"], "name": item["phone"]} for item in _sms_threads()]})
+            contacts = _load_sms_contacts()
+            rows = [{"phone": phone, "name": (info or {}).get("name") or "Unknown"} for phone, info in contacts.items()]
+            rows.sort(key=lambda item: ((item.get("name") or "").lower(), item.get("phone") or ""))
+            return self._send_json({"ok": True, "contacts": rows})
 
         if path == "/api/meta":
             qs = urllib.parse.parse_qs(parsed.query)
@@ -32887,6 +33241,33 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/sms-send":
             result, status = _send_sms(self._read_body() or {})
+            return self._send_json(result, status)
+
+        if path == "/sms-thread-mode":
+            if not check_feature("sms"):
+                return self._send_json(_locked_response("sms"), 403)
+            body = self._read_body() or {}
+            result, status = _set_sms_thread_mode(body.get("phone"), body.get("activeMode") or body.get("active") or body.get("mode"))
+            return self._send_json(result, status)
+
+        if path == "/sms-sync":
+            if not check_feature("sms"):
+                return self._send_json(_locked_response("sms"), 403)
+            body = self._read_body() or {}
+            result, status = _sync_sms_history(force=bool(body.get("force")))
+            return self._send_json(result, status)
+
+        if path == "/sms-owner":
+            if not check_feature("sms"):
+                return self._send_json(_locked_response("sms"), 403)
+            body = self._read_body() or {}
+            owner_id = str(body.get("ownerAgentId") or "").strip()
+            roster = get_roster()
+            if owner_id and not any(row.get("id") == owner_id or row.get("statusKey") == owner_id for row in roster):
+                return self._send_json({"ok": False, "error": "The selected SMS owner is not in the current agent roster."}, 400)
+            result, status = _save_vw_config_update({"sms": {"ownerAgentId": owner_id}})
+            if result.get("ok"):
+                result["ownerAgent"] = _sms_owner_agent_info()
             return self._send_json(result, status)
 
         if path == "/api/meta":

@@ -39401,12 +39401,22 @@ function openAgentPanel(agentId, _opts = {}) {
     if (agent._homeBuilding?.id || agent.homeBuilding) homeSelect.value = agent._homeBuilding?.id || agent.homeBuilding;
   }
 
+  const smsAssignment = document.getElementById('agentPanel-assignSms');
+  const smsOwnerId = String(window.__VWConfig?.sms?.ownerAgentId || '');
+  const smsAgentAliases = new Set([agent.id, agent.statusKey, agent.providerAgentId].filter(Boolean).map(String));
+  if (smsAssignment) {
+    smsAssignment.checked = smsAgentAliases.has(smsOwnerId);
+    smsAssignment.disabled = isLicenseFeatureLocked('sms');
+    if (smsAssignment.disabled) smsAssignment.title = 'Activation required for SMS assignment.';
+  }
+
   // Save assignment button
   const assignBtn = document.getElementById('agentPanel-assign');
   if (assignBtn) {
     const nextBtn = assignBtn.cloneNode(true);
     assignBtn.parentNode.replaceChild(nextBtn, assignBtn);
     nextBtn.addEventListener('click', async () => {
+      try {
       const work = document.getElementById('agentPanel-work')?.value || null;
       const home = document.getElementById('agentPanel-home')?.value || null;
       const assignedDesk = getAgentAssignedDesk(agent);
@@ -39416,13 +39426,33 @@ function openAgentPanel(agentId, _opts = {}) {
       }
       applyAgentAssignment(agent, work, home);
       await persistAgentAssignments();
-      showToast(`Assigned ${agent.name}`, 'success');
+      const wantsSms = Boolean(document.getElementById('agentPanel-assignSms')?.checked);
+      const ownsSms = smsAgentAliases.has(String(window.__VWConfig?.sms?.ownerAgentId || ''));
+      if (wantsSms !== ownsSms) {
+        const ownerAgentId = wantsSms ? String(agent.statusKey || agent.id || '') : '';
+        const response = await fetch('/sms-owner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ownerAgentId }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.ok === false) {
+          throw new Error(result.error?.message || result.error || `SMS assignment failed (${response.status})`);
+        }
+        if (result.config) window.__VWConfig = result.config;
+        window.dispatchEvent(new CustomEvent('vw:sms-owner-changed', { detail: { ownerAgentId, ownerAgent: result.ownerAgent || null } }));
+      }
+      showToast(`Assigned ${agent.name}${wantsSms ? ' to SMS' : ''}`, 'success');
       openAgentPanel(agent.id);
+      } catch (error) {
+        showToast(error?.message || `Could not save assignment for ${agent.name}`, 'error');
+        openAgentPanel(agent.id);
+      }
     });
   }
 
   if (isLicenseFeatureLocked('advancedEditor')) {
-    for (const id of ['agentPanel-name', 'agentPanel-emoji', 'agentPanel-saveName', 'agentPanel-work', 'agentPanel-home', 'agentPanel-assign', 'agentBuilder-saveAppearance']) {
+    for (const id of ['agentPanel-name', 'agentPanel-emoji', 'agentPanel-saveName', 'agentPanel-work', 'agentPanel-home', 'agentPanel-assignSms', 'agentPanel-assign', 'agentBuilder-saveAppearance']) {
       const el = document.getElementById(id);
       if (!el) continue;
       el.disabled = true;

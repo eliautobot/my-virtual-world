@@ -507,6 +507,7 @@ for (const token of ['.env', 'node_modules/', '.tmp-data/', 'backups/', 'memory/
 const packageJson = JSON.parse(read('package.json'));
 assert(packageJson.scripts.test.includes('npm run verify:smoke'), 'package test script should run the public smoke suite');
 assert(packageJson.scripts.test.includes('npm run verify:providers'), 'package test script should run the provider endpoint suite');
+assert(packageJson.scripts.test.includes('npm run verify:sms'), 'package test script should run the SMS backend and window suite');
 assert.equal(packageJson.scripts['verify:smoke'], 'node scripts/verify-smoke.mjs', 'verify:smoke should use the public verifier');
 assert.equal(packageJson.scripts['verify:providers'], 'python3 -B tests/test_provider_sdk_backend.py && python3 -B tests/test_provider_endpoint_resolution.py', 'provider verifier should run contract and endpoint tests');
 assert.equal(packageJson.scripts['verify:chat-ui'], 'node scripts/verify-chat-ui.mjs', 'chat UI verifier should be available');
@@ -520,6 +521,7 @@ const jsSyntaxTargets = [
   'src/client/js/settings.js',
   'src/client/js/browser-viewer-url.mjs',
   'src/client/js/browser-window-controller.mjs',
+  'src/client/js/sms-panel.mjs',
   'src/client/js/starter-map.mjs',
   'src/client/js/furniture-placement-defaults.mjs',
   'src/client/js/chat.js',
@@ -585,6 +587,7 @@ const providerSettingsJs = read('src/client/js/provider-settings.js');
 const providerSettingsCss = read('src/client/css/provider-settings.css');
 const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
+const smsPanelJs = read('src/client/js/sms-panel.mjs');
 const main3dJs = read('src/client/js/main3d.js');
 const agentRuntimeClientJs = read('src/client/js/agent-runtime-client.mjs');
 const agentRuntimeRoomJs = read('src/realtime/agent-runtime-room.mjs');
@@ -628,6 +631,36 @@ for (const token of [
   '.sms-panel .modal-close',
 ]) {
   assert(uiCss.includes(token), `Agent Browser/SMS responsive CSS missing token: ${token}`);
+}
+for (const token of [
+  'id="smsInboxCollapse"',
+  'id="smsInboxExpand"',
+  'id="smsControlToggle"',
+  'id="smsMessages"',
+  'id="smsPanelMaximize"',
+  'id="agentPanel-assignSms"',
+  'js/sms-panel.mjs',
+]) {
+  assert(indexHtml.includes(token), `SMS inbox UI missing token: ${token}`);
+}
+for (const token of [
+  "fetchJson('/sms-sync'",
+  "fetchJson('/sms-thread-mode'",
+  "sender: 'user'",
+  'createBrowserWindowController',
+  'sms-inbox-collapsed',
+  'sms-mobile-thread',
+]) {
+  assert(smsPanelJs.includes(token), `SMS inbox behavior missing token: ${token}`);
+}
+for (const token of [
+  'if path == "/sms-thread-mode"',
+  'if path == "/sms-sync"',
+  'if path == "/sms-owner"',
+  'def _sync_sms_history',
+  'Only the assigned SMS agent can send',
+]) {
+  assert(serverPy.includes(token), `SMS backend contract missing token: ${token}`);
 }
 
 const deskSpot = { kind: 'desk', apiX: 100, apiZ: 200 };

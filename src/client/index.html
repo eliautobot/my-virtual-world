@@ -269,6 +269,10 @@
                                     <label>Home Building</label>
                                     <select id="agentPanel-home"><option value="">None</option></select>
                                 </div>
+                                <label class="agent-sms-assignment" title="Make this agent the default owner when an SMS conversation is under Agent control">
+                                    <input id="agentPanel-assignSms" type="checkbox">
+                                    <span><strong>Assign SMS</strong><small>Own the SMS inbox and Agent-controlled conversations</small></span>
+                                </label>
                                 <div class="agent-builder-inline-actions">
                                     <button class="btn-primary" id="agentPanel-assign">Save Assignment</button>
                                     <button class="btn-secondary" id="agentPanel-goto">Go To</button>
@@ -797,6 +801,7 @@
                     <div class="form-group"><label>Twilio Auth Token</label><input type="password" id="setting-twilioToken" placeholder="Configured value is preserved when blank"></div>
                     <div class="form-group"><label>Twilio From Number</label><input type="text" id="setting-twilioFrom" placeholder="+1..."></div>
                     <div class="form-group"><label>Public Media Base URL</label><input type="text" id="setting-smsPublicMediaUrl" placeholder="https://..."></div>
+                    <label class="settings-check"><input type="checkbox" id="setting-smsSyncHistory" checked> Sync inbox history from Twilio</label>
                     <div class="form-row">
                         <button class="btn-secondary" id="btn-testSms">Check SMS</button>
                         <button class="btn-secondary" id="btn-openSmsPanel">Open SMS Panel</button>
@@ -872,13 +877,57 @@
     </div>
 
     <div id="smsPanel" class="integration-panel sms-panel" style="display:none" role="dialog" aria-modal="false" aria-labelledby="smsPanelTitle">
-        <div class="integration-panel-header"><span id="smsPanelTitle">📱 SMS</span><button class="modal-close" id="smsPanelClose" type="button" title="Close SMS" aria-label="Close SMS">✕</button></div>
-        <div id="smsPanelStatus" class="integration-panel-status">Loading...</div>
-        <div id="smsThreadList" class="sms-thread-list"></div>
-        <div class="sms-compose">
-            <input id="smsTo" type="text" placeholder="+1 phone number">
-            <textarea id="smsBody" rows="3" placeholder="Message"></textarea>
-            <button id="smsSend" class="btn-primary">Send</button>
+        <div class="browser-resize-handle browser-resize-handle-top" data-resize="n" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-bottom" data-resize="s" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-left" data-resize="w" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-right" data-resize="e" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-top-left" data-resize="nw" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-top-right" data-resize="ne" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-bottom-left" data-resize="sw" aria-hidden="true"></div>
+        <div class="browser-resize-handle browser-resize-handle-bottom-right" data-resize="se" aria-hidden="true"></div>
+        <div class="integration-panel-header sms-panel-header">
+            <div class="sms-panel-title"><span id="smsPanelTitle">📱 SMS Inbox</span><span id="smsThreadCount" class="sms-count-badge">0</span></div>
+            <div class="sms-panel-controls">
+                <button class="browser-integration-panel-control" id="smsRefresh" type="button" title="Refresh SMS inbox" aria-label="Refresh SMS inbox">↻</button>
+                <button class="browser-integration-panel-control" id="smsPanelMaximize" type="button" title="Maximize SMS window" aria-label="Maximize SMS window" aria-pressed="false">□</button>
+                <button class="modal-close" id="smsPanelClose" type="button" title="Close SMS" aria-label="Close SMS">✕</button>
+            </div>
+        </div>
+        <div id="smsPanelStatus" class="integration-panel-status sms-panel-status" role="status" aria-live="polite">Loading…</div>
+        <div class="sms-owner-strip"><span id="smsOwnerBadge">🤖 SMS agent not assigned</span></div>
+        <div class="sms-workspace">
+            <aside id="smsInbox" class="sms-inbox" aria-label="SMS inbox">
+                <div class="sms-inbox-toolbar">
+                    <select id="smsContactSelect" aria-label="Select SMS contact"><option value="">Select contact…</option></select>
+                    <button id="smsNewThread" class="sms-icon-button" type="button" title="Start a new thread" aria-label="Start a new SMS thread">＋</button>
+                    <button id="smsInboxCollapse" class="sms-icon-button" type="button" title="Collapse inbox" aria-label="Collapse SMS inbox">◀</button>
+                </div>
+                <div id="smsNewThreadRow" class="sms-new-thread" hidden>
+                    <input id="smsTo" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 phone number" aria-label="SMS phone number">
+                    <button id="smsOpenThread" class="btn-secondary" type="button">Open</button>
+                </div>
+                <div id="smsThreadList" class="sms-thread-list" aria-label="SMS conversations"></div>
+            </aside>
+            <main class="sms-conversation">
+                <div class="sms-conversation-header">
+                    <button id="smsInboxExpand" class="sms-icon-button" type="button" title="Expand inbox" aria-label="Expand SMS inbox">☰</button>
+                    <div class="sms-conversation-heading">
+                        <strong id="smsThreadTitle">SMS Inbox</strong>
+                        <span id="smsThreadSubtitle">Select a conversation to read messages.</span>
+                    </div>
+                    <label class="sms-control-switch" title="Choose whether the assigned agent or you control this conversation">
+                        <span id="smsControlLabel">Agent</span>
+                        <input id="smsControlToggle" type="checkbox" aria-label="Switch between Agent and User control" disabled>
+                        <span class="sms-control-slider" aria-hidden="true"></span>
+                    </label>
+                </div>
+                <div id="smsEmptyState" class="sms-empty-state">Select a conversation from the Inbox, or start a new one.</div>
+                <div id="smsMessages" class="sms-messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+                <div class="sms-compose">
+                    <textarea id="smsBody" rows="2" maxlength="1600" placeholder="Select a conversation first…" disabled></textarea>
+                    <button id="smsSend" class="btn-primary" type="button" disabled>Send</button>
+                </div>
+            </main>
         </div>
     </div>
 
@@ -1089,5 +1138,6 @@
     <script src="js/chat.js?v=20260809-commentary-runs-r1"></script>
     <script type="module" src="js/connection-help.mjs?v=20260809-connection-guides-r1"></script>
     <script src="js/settings.js?v=20260809-connection-guides-r1"></script>
+    <script type="module" src="js/sms-panel.mjs?v=20260810-sms-inbox-r1"></script>
 </body>
 </html>
