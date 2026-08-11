@@ -19,6 +19,7 @@ import inspect
 import json
 import math
 import os
+import queue
 import signal
 import shutil
 import sqlite3
@@ -103,6 +104,16 @@ try:
 except Exception as e:
     ws_connect = None
     print(f"⚠️  Virtual World Gateway RPC client unavailable: {e}")
+
+try:
+    from openclaw_gateway_client import (
+        GatewayClientError,
+        OpenClawGatewayClient,
+    )
+except Exception as e:
+    GatewayClientError = RuntimeError
+    OpenClawGatewayClient = None
+    print(f"⚠️  Virtual World reusable Gateway client unavailable: {e}")
 
 try:
     import yaml
@@ -983,6 +994,7 @@ def _save_vw_config_update(body):
     UPLOADS_HOST_DIR = _env_or("VW_UPLOADS_HOST_DIR", join_host_path(HOST_WORKSPACE_BASE, "workspace", "uploads"))
     if _gateway_config_key() != old_gateway_config:
         restart_gateway_presence()
+        _refresh_openclaw_gateway_client_config()
     live_mode_runtime = None
     if isinstance(body.get("features"), dict) and "agentLiveMode" in body["features"]:
         if _agent_live_mode_runtime_enabled():
@@ -1557,6 +1569,8 @@ def _load_external_module(module_label, file_path):
 
 
 _gateway_presence = _load_external_module("vw_gateway_presence_local", os.path.join(os.path.dirname(__file__), "gateway_presence.py"))
+_openclaw_gateway_client = None
+_openclaw_gateway_client_lock = threading.RLock()
 _presence_snapshot_path = os.path.join(DATA_DIR, "presence-snapshot.json")
 _presence_snapshot_thread = None
 _presence_enabled = False
@@ -24671,6 +24685,57 @@ def _gateway_config_key():
     return mode, gw_url or "", gw_token or ""
 
 
+def _openclaw_gateway_connection_settings(_config_key=None):
+    """Resolve credentials once per reusable connection, not once per RPC."""
+    resolution, token = _resolve_openclaw_gateway_endpoint()
+    if not resolution.get("ok"):
+        error = resolution.get("error") or "OpenClaw Gateway endpoint is unavailable"
+        raise RuntimeError(error)
+    endpoint = resolution.get("endpoint") or {}
+    return {
+        "url": endpoint.get("url") or "",
+        "token": token,
+        "origin": _gateway_control_origin(),
+        "clientVersion": _get_openclaw_version(),
+        "transport": "gateway",
+        "endpointMode": resolution.get("mode") or "auto",
+        "endpointLocation": endpoint.get("location") or "",
+        "endpointLabel": endpoint.get("label") or "",
+    }
+
+
+def _get_openclaw_gateway_client():
+    global _openclaw_gateway_client
+    if OpenClawGatewayClient is None or ws_connect is None:
+        raise RuntimeError("Reusable OpenClaw Gateway client is unavailable")
+    with _openclaw_gateway_client_lock:
+        if _openclaw_gateway_client is None:
+            _openclaw_gateway_client = OpenClawGatewayClient(
+                _openclaw_gateway_connection_settings,
+                ws_connect,
+                max_size=_OPENCLAW_GATEWAY_RPC_MAX_BYTES,
+                logger=print,
+            )
+        return _openclaw_gateway_client
+
+
+def _refresh_openclaw_gateway_client_config():
+    """Move an existing proxy connection to newly saved Gateway settings."""
+    with _openclaw_gateway_client_lock:
+        client = _openclaw_gateway_client
+    if client is not None:
+        client.start(_gateway_config_key())
+
+
+def _shutdown_openclaw_gateway_client():
+    global _openclaw_gateway_client
+    with _openclaw_gateway_client_lock:
+        client = _openclaw_gateway_client
+        _openclaw_gateway_client = None
+    if client is not None:
+        client.close()
+
+
 def _gateway_info_payload():
     gw_url, gw_token = _read_gateway_config()
     ws_port = 18789
@@ -24750,65 +24815,6 @@ def _handle_openclaw_proxy_rpc(body):
     }
 
 
-async def _stream_openclaw_gateway_events(send_payload):
-    if ws_connect is None:
-        raise RuntimeError("Gateway websocket client is unavailable")
-    resolution, token = await asyncio.to_thread(_resolve_openclaw_gateway_endpoint)
-    if not resolution.get("ok"):
-        raise RuntimeError(resolution.get("error") or "OpenClaw Gateway endpoint is unavailable")
-    gw_url = (resolution.get("endpoint") or {}).get("url")
-    origin = _gateway_control_origin()
-    async with ws_connect(
-        gw_url,
-        max_size=1024 * 1024,
-        additional_headers={"Origin": origin},
-        close_timeout=3,
-    ) as websocket:
-        await asyncio.wait_for(websocket.recv(), timeout=5)
-        connect_id = f"vw-chat-proxy-connect-{uuid.uuid4()}"
-        await websocket.send(json.dumps({
-            "type": "req",
-            "id": connect_id,
-            "method": "connect",
-            "params": {
-                "minProtocol": 4,
-                "maxProtocol": 4,
-                "client": {"id": "openclaw-control-ui", "version": _get_openclaw_version(), "platform": "server", "mode": "webchat"},
-                "role": "operator",
-                "scopes": ["operator.read"],
-                "caps": ["tool-events"],
-                "commands": [],
-                "permissions": {},
-                "auth": {"token": token},
-                "locale": "en-US",
-                "userAgent": "virtual-world-chat-proxy/1.0",
-            },
-        }))
-        while True:
-            message = json.loads(await asyncio.wait_for(websocket.recv(), timeout=10))
-            if message.get("id") != connect_id:
-                continue
-            if not message.get("ok"):
-                raise RuntimeError((message.get("error") or {}).get("message") or "Gateway authentication failed")
-            break
-        if not send_payload({"type": "proxy.ready", "payload": {"transport": "server-proxy"}}):
-            return
-        while True:
-            try:
-                raw = await asyncio.wait_for(websocket.recv(), timeout=15)
-            except asyncio.TimeoutError:
-                if not send_payload(None):
-                    return
-                continue
-            try:
-                message = json.loads(raw)
-            except (TypeError, ValueError):
-                continue
-            if message.get("type") == "event" and message.get("event") in {"chat", "agent", "session.message"}:
-                if not send_payload(message):
-                    return
-
-
 def _handle_openclaw_proxy_events(handler):
     if not _openclaw_proxy_authorized(handler):
         return handler._send_json({"ok": False, "error": "OpenClaw chat proxy authorization failed"}, 403)
@@ -24836,10 +24842,25 @@ def _handle_openclaw_proxy_events(handler):
             connected = False
             return False
 
+    subscription = None
     try:
-        asyncio.run(_stream_openclaw_gateway_events(send_payload))
+        subscription = _get_openclaw_gateway_client().subscribe(config_key=_gateway_config_key())
+        while connected:
+            try:
+                payload = subscription.get(timeout=15)
+            except queue.Empty:
+                if not send_payload(None):
+                    return
+                continue
+            if not send_payload(payload):
+                return
+            if payload.get("type") == "proxy.error":
+                return
     except Exception as exc:
         send_payload({"type": "proxy.error", "payload": {"message": str(exc)[:500]}})
+    finally:
+        if subscription is not None:
+            subscription.close()
 
 
 ##############################################################################
@@ -24935,32 +24956,38 @@ async def _gateway_rpc_call_at_async(gw_url, token, method, params=None, timeout
 
 def _gateway_rpc_call(method, params=None, timeout=20, preserve_envelope=False):
     try:
-        resolution, token = _resolve_openclaw_gateway_endpoint()
-        if not resolution.get("ok"):
-            return {
-                "ok": False,
-                "code": resolution.get("code") or "gateway_unavailable",
-                "error": resolution.get("error") or "OpenClaw Gateway endpoint is unavailable",
-                "endpointMode": resolution.get("mode") or (VW_CONFIG.get("openclaw", {}) or {}).get("endpointMode") or "auto",
-                "endpointAttempts": resolution.get("attempts") or [],
-            }
-        gw_url = (resolution.get("endpoint") or {}).get("url")
-        outcome = _run_async_blocking(
-            _gateway_rpc_call_at_async(
-                gw_url,
-                token,
-                method,
-                params=params,
-                timeout=timeout,
-                preserve_envelope=preserve_envelope,
-            ),
-            timeout=timeout + 10,
+        client = _get_openclaw_gateway_client()
+        response = client.request(
+            method,
+            params or {},
+            timeout=timeout,
+            config_key=_gateway_config_key(),
         )
-        if isinstance(outcome, dict):
-            outcome.setdefault("transport", "gateway")
-            outcome.setdefault("endpointMode", resolution.get("mode") or "auto")
-            outcome.setdefault("endpointLocation", (resolution.get("endpoint") or {}).get("location") or "")
-        return outcome
+        status = client.status()
+        metadata = {
+            "transport": status.get("transport") or "gateway",
+            "endpointMode": status.get("endpointMode") or "auto",
+            "endpointLocation": status.get("endpointLocation") or "",
+        }
+        if not response.get("ok"):
+            error = response.get("error") if isinstance(response.get("error"), dict) else {
+                "message": str(response.get("error") or f"{method} failed")
+            }
+            if preserve_envelope:
+                return {"ok": False, "error": error, "_gatewayResponse": True, **metadata}
+            return {"ok": False, "error": error.get("message", f"{method} failed"), **metadata}
+        payload = response.get("payload")
+        if preserve_envelope:
+            return {"ok": True, "payload": payload, **metadata}
+        if isinstance(payload, dict):
+            outcome = dict(payload)
+            outcome.setdefault("ok", True)
+            for key, value in metadata.items():
+                outcome.setdefault(key, value)
+            return outcome
+        return {"ok": True, "payload": payload, **metadata}
+    except GatewayClientError as exc:
+        return {"ok": False, "code": "gateway_unavailable", "error": str(exc)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -34870,6 +34897,8 @@ def main():
             httpd.serve_forever()
         except KeyboardInterrupt:
             print("\n🛑 Server stopped.")
+        finally:
+            _shutdown_openclaw_gateway_client()
 
 if __name__ == "__main__":
     main()

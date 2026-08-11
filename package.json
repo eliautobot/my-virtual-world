@@ -1,6 +1,6 @@
 {
   "name": "my-virtual-world",
-  "version": "1.0.58",
+  "version": "1.0.59",
   "description": "A self-hosted 3D AI virtual world for agent harnesses like OpenClaw and Hermes.",
   "homepage": "https://myvirtualworld.ai/",
   "repository": {
@@ -27,8 +27,9 @@
     "dev": "VW_PORT=${VW_PORT:-8590} VW_DATA_DIR=${VW_DATA_DIR:-.local-data} python3 src/server/server.py",
     "dev:realtime": "node scripts/dev-with-realtime.mjs",
     "realtime": "node src/realtime/server.mjs",
-    "test": "npm run verify:smoke && npm run verify:connection-help && npm run verify:sms && npm run verify:providers",
+    "test": "npm run verify:smoke && npm run verify:connection-help && npm run verify:sms && npm run verify:providers && npm run verify:openclaw-gateway",
     "verify:chat-events": "node tests/test_chat_event_architecture.js",
+    "verify:openclaw-gateway": "python3 -B tests/test_openclaw_gateway_client.py",
     "verify:chat-ui": "node scripts/verify-chat-ui.mjs",
     "verify:connection-help": "node tests/test_connection_help.mjs",
     "verify:sms": "node tests/test_browser_window_controller.mjs && python3 -B tests/test_sms_backend.py",

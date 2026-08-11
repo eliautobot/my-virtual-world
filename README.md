@@ -222,6 +222,10 @@ the configured URL, the Docker host (`host.docker.internal`), and the container
 loopback (`127.0.0.1`) using the provider's authenticated health protocol, then
 select exactly one endpoint before a run is submitted. Authentication or
 protocol errors are terminal and are not bypassed by trying a different target.
+After OpenClaw selects an endpoint, the server keeps one authenticated Gateway
+connection for chat RPCs and events, multiplexes concurrent requests by id, and
+resolves again only after a configuration change or reconnect. Agent presence
+continues to use its independent read-only Gateway observer.
 
 This capability applies to the OpenClaw Gateway and Hermes API transports. The
 Codex, Claude Code, OpenCode, and Antigravity built-ins are process transports:

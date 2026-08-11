@@ -101,7 +101,17 @@ OpenClaw chat uses the local gateway information from:
 ```text
 GET /gateway-info
 GET /session-info
+POST /api/openclaw/rpc
+GET /api/openclaw/events
 ```
+
+In the default server-proxy transport, the browser never receives the Gateway
+token. One process-level authenticated Gateway connection multiplexes allowed
+chat RPCs by request id and fans chat, agent, and session events out to browser
+subscribers. It reconnects after Gateway or connection-setting changes, but it
+does not automatically replay a request whose delivery became uncertain. The
+separate read-only presence observer remains responsible for working, finishing,
+idle, and offline state.
 
 Hermes chat uses:
 
