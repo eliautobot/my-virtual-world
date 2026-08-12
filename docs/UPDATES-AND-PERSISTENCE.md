@@ -30,6 +30,7 @@ The Docker volume preserves:
 - license receipt
 - local app settings
 - runtime communication history
+- normalized per-provider chat-session mirrors
 - Live Agent durable goal/task/step ledgers
 
 ## What Changes
@@ -50,6 +51,12 @@ Existing user data remains unless a migration or narrow repair intentionally upd
 Live Agent storage separates cognitive memory from operational telemetry. Resident Profile memories are consolidated into durable semantic experiences before short-term records age out. Terminal move paths, event diagnostics, and planner scaffolding are compacted independently, so storage control does not depend on erasing identity, relationships, lessons, or important failures.
 
 Live Agent durable goals are orchestration state stored in `world-meta.json`. Normal rebuilds and restarts preserve goal/task/step dependencies, retries, and verified outcomes. The selected-agent Live Mode reset is the explicit operation that clears one resident's ledger.
+
+Provider chat-session mirrors are stored atomically under
+`chat-session-mirrors/` in `VW_STATUS_DIR` (normally the persistent `vw-data`
+volume). Starting a new chat preserves the current provider session and its
+mirror. Switching merges native history with the mirror. Explicit session
+deletion removes both the provider-owned session and its corresponding mirror.
 
 ## Live Agent Storage Migration
 

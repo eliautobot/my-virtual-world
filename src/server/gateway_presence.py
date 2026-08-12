@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Gateway Presence — derives agent working/idle state from OpenClaw gateway events.
+"""Provider-neutral lifecycle presence coordinator.
 
-Replaces the old office.py manual status updates with automatic detection.
-Connects to the gateway WebSocket, monitors session activity, and maintains
-in-memory presence state that server.py can read.
+All agent runtimes report the same small lifecycle vocabulary here. OpenClaw's
+Gateway observer is one event source; Hermes, Codex, the Universal Provider SDK,
+and extension providers call the public ``lifecycle_*`` functions directly.
 
 Architecture:
-  Gateway WS events + rare bootstrap snapshots → in-memory state dict → server.py reads it
+  provider lifecycle events → shared in-memory coordinator → server.py APIs
 
-Does NOT modify the gateway. Read-only observer.
+The OpenClaw connection remains a read-only observer and never modifies the
+Gateway.
 """
 
 import asyncio
@@ -27,7 +28,8 @@ except ImportError:
 # ─── In-Memory Presence State ────────────────────────────────────
 
 _state = {}        # agent_id → {state, task, updated, source}
-_state_lock = threading.Lock()
+_state_lock = threading.RLock()
+_lifecycle_lock = threading.RLock()
 _meetings = []     # Meetings still managed manually via office.py
 _meetings_lock = threading.Lock()
 
@@ -47,6 +49,7 @@ FINISHING_GRACE_SEC = 12
 # commands may not emit events for many minutes, so do not treat silence as idle.
 ACTIVE_RUN_STALE_SEC = 6 * 60 * 60
 ACTIVE_TOOL_STALE_SEC = 6 * 60 * 60
+ACTIVE_APPROVAL_STALE_SEC = 6 * 60 * 60
 
 # Track last known updatedAt per session key for change detection during rare snapshots
 _last_updated_at = {}  # session_key → updatedAt timestamp (ms)
@@ -59,7 +62,12 @@ _active_runs_by_agent = {}  # agent_id → set(runId); while non-empty the agent
 _active_run_last_seen = {}  # runId → timestamp (seconds)
 _active_tools_by_agent = {}  # agent_id → set(toolCallId); while non-empty the agent is working
 _active_tool_last_seen = {}  # toolCallId → timestamp (seconds)
+_tool_runs = {}        # toolCallId → runId
+_active_approvals_by_agent = {}  # agent_id → set(approvalId)
+_active_approval_last_seen = {}  # approvalId → timestamp (seconds)
+_approval_runs = {}    # approvalId → runId
 _finish_idle_at = {}   # agent_id → timestamp (seconds)
+_provider_health = {}  # agent_id → normalized provider connectivity record
 
 # Manual override tracking
 _manual_overrides = {}  # agent_id → {state, task, updated, expires}
@@ -80,8 +88,8 @@ _debug = {
 
 def get_state():
     """Return current presence state dict. Called by server.py for /status endpoint."""
-    with _state_lock:
-        result = dict(_state)
+    with _lifecycle_lock, _state_lock:
+        result = {agent_id: _decorate_agent_snapshot(agent_id, value) for agent_id, value in _state.items()}
     with _meetings_lock:
         result["_meetings"] = list(_meetings)
     return result
@@ -89,30 +97,219 @@ def get_state():
 
 def get_agent_state(agent_id):
     """Return state for a single agent."""
-    with _state_lock:
-        return dict(_state.get(agent_id, {"state": "idle", "task": "", "updated": 0}))
+    with _lifecycle_lock, _state_lock:
+        value = _state.get(agent_id, {"state": "idle", "task": "", "updated": 0})
+        return _decorate_agent_snapshot(agent_id, value)
+
+
+def get_provider_health(agent_id=None):
+    """Return the provider-health plane without conflating it with task presence."""
+    with _lifecycle_lock:
+        if agent_id is not None:
+            return dict(_provider_health.get(str(agent_id), {}))
+        return {key: dict(value) for key, value in _provider_health.items()}
+
+
+def _decorate_agent_snapshot(agent_id, value):
+    snapshot = dict(value or {})
+    snapshot["activeRunCount"] = len(_active_runs_by_agent.get(agent_id, ()))
+    snapshot["activeToolCount"] = len(_active_tools_by_agent.get(agent_id, ()))
+    snapshot["waitingApprovalCount"] = len(_active_approvals_by_agent.get(agent_id, ()))
+    health = _provider_health.get(agent_id)
+    if isinstance(health, dict):
+        snapshot["providerHealth"] = dict(health)
+    return snapshot
 
 
 def set_manual_override(agent_id, state, task=""):
     """Set a manual override (from office.py or POST /api/presence).
     Takes priority over gateway-derived state for MANUAL_OVERRIDE_TTL seconds."""
-    now = int(time.time())
-    _manual_overrides[agent_id] = {
-        "state": state,
-        "task": task,
-        "updated": now,
-        "expires": now + MANUAL_OVERRIDE_TTL
-    }
-    # Immediately apply to state
-    with _state_lock:
-        if agent_id not in _state:
-            _state[agent_id] = {}
-        _state[agent_id].update({
+    with _lifecycle_lock:
+        now = int(time.time())
+        _manual_overrides[agent_id] = {
             "state": state,
             "task": task,
             "updated": now,
-            "source": "manual"
-        })
+            "expires": now + MANUAL_OVERRIDE_TTL
+        }
+        # Immediately apply to state. Active provider lifecycle state will still
+        # supersede manual idle/offline values, while explicit meeting/break
+        # states remain operator-owned.
+        with _state_lock:
+            if agent_id not in _state:
+                _state[agent_id] = {}
+            _state[agent_id].update({
+                "state": state,
+                "task": task,
+                "updated": now,
+                "source": "manual"
+            })
+
+
+def _note_provider_health(agent_id, connected, provider_kind="", connection_state="", error=""):
+    if not agent_id:
+        return
+    now = int(time.time())
+    previous = _provider_health.get(agent_id, {})
+    _provider_health[agent_id] = {
+        "connected": bool(connected),
+        "connectionState": str(connection_state or ("connected" if connected else "offline")),
+        "providerKind": str(provider_kind or previous.get("providerKind") or ""),
+        "error": str(error or ""),
+        "updated": now,
+    }
+
+
+def lifecycle_provider_connected(agent_id, provider_kind="", connection_state="connected"):
+    """Record provider health without manufacturing task activity."""
+    agent_id = str(agent_id or "").strip()
+    if not agent_id:
+        return
+    with _lifecycle_lock:
+        _ensure_agent(agent_id, "provider-health")
+        _note_provider_health(agent_id, True, provider_kind, connection_state)
+        with _state_lock:
+            current = str(_state.get(agent_id, {}).get("state") or "")
+        if current == "offline" and not _agent_has_active_activity(agent_id):
+            _set_idle(agent_id, "provider-connected")
+
+
+def lifecycle_provider_disconnected(agent_id, provider_kind="", connection_state="offline", error=""):
+    """Make offline authoritative only when provider health reports a loss."""
+    agent_id = str(agent_id or "").strip()
+    if not agent_id:
+        return
+    with _lifecycle_lock:
+        now = int(time.time())
+        _ensure_agent(agent_id, "provider-health")
+        _note_provider_health(agent_id, False, provider_kind, connection_state, error)
+        _finish_idle_at.pop(agent_id, None)
+        with _state_lock:
+            _state[agent_id].update({
+                "state": "offline",
+                "task": "",
+                "updated": now,
+                "source": "provider-health",
+            })
+
+
+def lifecycle_run_started(agent_id, run_id, provider_kind="", task="Working"):
+    agent_id = str(agent_id or "").strip()
+    run_id = str(run_id or "").strip()
+    if not agent_id or not run_id:
+        return
+    with _lifecycle_lock:
+        _note_provider_health(agent_id, True, provider_kind)
+        _set_working(agent_id, task or "Working", f"{provider_kind or 'provider'}-lifecycle", run_id)
+
+
+def lifecycle_output_streaming(agent_id, run_id, provider_kind="", task="Responding"):
+    lifecycle_run_started(agent_id, run_id, provider_kind, task or "Responding")
+
+
+def lifecycle_tool_started(agent_id, run_id, tool_id, tool_name="", provider_kind="", task=""):
+    agent_id = str(agent_id or "").strip()
+    run_id = str(run_id or "").strip()
+    tool_id = str(tool_id or "").strip()
+    if not agent_id or not tool_id:
+        return
+    with _lifecycle_lock:
+        _note_provider_health(agent_id, True, provider_kind)
+        if run_id:
+            _mark_run_active(agent_id, run_id)
+            _tool_runs[tool_id] = run_id
+        _mark_tool_active(agent_id, tool_id)
+        label = task or (f"Using {tool_name}" if tool_name else "Using tool")
+        _set_working(agent_id, label, f"{provider_kind or 'provider'}-tool", None)
+
+
+def lifecycle_tool_updated(agent_id, run_id, tool_id, tool_name="", provider_kind="", task=""):
+    lifecycle_tool_started(agent_id, run_id, tool_id, tool_name, provider_kind, task)
+
+
+def lifecycle_tool_finished(agent_id, run_id, tool_id, provider_kind="", outcome="completed"):
+    agent_id = str(agent_id or "").strip()
+    tool_id = str(tool_id or "").strip()
+    if not agent_id or not tool_id:
+        return
+    with _lifecycle_lock:
+        _mark_tool_inactive(agent_id, tool_id)
+        _tool_runs.pop(tool_id, None)
+        if _agent_has_active_activity(agent_id):
+            _set_working(agent_id, _last_event_task.get(agent_id) or "Working", f"{provider_kind or 'provider'}-tool", None)
+        else:
+            _set_finishing(agent_id, f"{provider_kind or 'provider'}-tool")
+
+
+def lifecycle_approval_requested(agent_id, run_id, approval_id, provider_kind="", task="Waiting for approval"):
+    agent_id = str(agent_id or "").strip()
+    run_id = str(run_id or "").strip()
+    approval_id = str(approval_id or "").strip()
+    if not agent_id or not approval_id:
+        return
+    with _lifecycle_lock:
+        _note_provider_health(agent_id, True, provider_kind)
+        if run_id:
+            _mark_run_active(agent_id, run_id)
+            _approval_runs[approval_id] = run_id
+        _active_approvals_by_agent.setdefault(agent_id, set()).add(approval_id)
+        _active_approval_last_seen[approval_id] = time.time()
+        _set_working(agent_id, task or "Waiting for approval", f"{provider_kind or 'provider'}-approval", None)
+
+
+def lifecycle_approval_resolved(agent_id, run_id, approval_id, provider_kind="", outcome="resolved"):
+    agent_id = str(agent_id or "").strip()
+    approval_id = str(approval_id or "").strip()
+    if not agent_id or not approval_id:
+        return
+    with _lifecycle_lock:
+        approvals = _active_approvals_by_agent.get(agent_id)
+        if approvals:
+            approvals.discard(approval_id)
+            if not approvals:
+                _active_approvals_by_agent.pop(agent_id, None)
+        _active_approval_last_seen.pop(approval_id, None)
+        _approval_runs.pop(approval_id, None)
+        if _agent_has_active_activity(agent_id):
+            _set_working(agent_id, "Resuming work", f"{provider_kind or 'provider'}-approval", None)
+        else:
+            _set_finishing(agent_id, f"{provider_kind or 'provider'}-approval")
+
+
+def _clear_run_children(agent_id, run_id):
+    for tool_id, owner_run_id in list(_tool_runs.items()):
+        if owner_run_id == run_id:
+            _mark_tool_inactive(agent_id, tool_id)
+            _tool_runs.pop(tool_id, None)
+    for approval_id, owner_run_id in list(_approval_runs.items()):
+        if owner_run_id == run_id:
+            approvals = _active_approvals_by_agent.get(agent_id)
+            if approvals:
+                approvals.discard(approval_id)
+                if not approvals:
+                    _active_approvals_by_agent.pop(agent_id, None)
+            _active_approval_last_seen.pop(approval_id, None)
+            _approval_runs.pop(approval_id, None)
+
+
+def lifecycle_run_finished(agent_id, run_id, provider_kind="", outcome="completed", error=""):
+    """End a run as finishing/idle; a run error never means provider offline."""
+    agent_id = str(agent_id or "").strip()
+    run_id = str(run_id or "").strip()
+    if not agent_id or not run_id:
+        return
+    with _lifecycle_lock:
+        _clear_run_children(agent_id, run_id)
+        _mark_run_inactive(agent_id, run_id)
+        _run_agents.pop(run_id, None)
+        _ensure_agent(agent_id)
+        with _state_lock:
+            _state[agent_id]["lastRunOutcome"] = str(outcome or "completed")
+            _state[agent_id]["lastRunError"] = str(error or "")
+            _state[agent_id]["lastRunId"] = run_id
+            if provider_kind:
+                _state[agent_id]["providerKind"] = str(provider_kind)
+        _set_finishing(agent_id, f"{provider_kind or 'provider'}-lifecycle", None)
 
 
 def set_meetings(meetings_list):
@@ -151,14 +348,16 @@ def end_all_meetings():
 
 
 def get_connection_status():
-    """Return gateway connection/debug status."""
-    with _state_lock:
+    """Return coordinator and optional OpenClaw observer status."""
+    with _lifecycle_lock, _state_lock:
         agents_cached = len([k for k in _state.keys() if not k.startswith("_")])
     return {
         "connected": _gw_connected,
+        "coordinatorActive": bool(_maintenance_thread and _maintenance_thread.is_alive()),
         "error": _gw_error,
         "origin": _gw_origin,
         "agentsCached": agents_cached,
+        "providerHealthCached": len(_provider_health),
         "debug": dict(_debug),
     }
 
@@ -171,39 +370,47 @@ def init_agents(agent_ids, prune=False):
     snapshots from retaining deleted agents indefinitely.
     """
     agent_ids = {str(agent_id) for agent_id in agent_ids if str(agent_id or "").strip()}
-    stale_agent_ids = set()
-    with _state_lock:
-        if prune:
-            stale_agent_ids = set(_state) - agent_ids
-            for agent_id in stale_agent_ids:
-                _state.pop(agent_id, None)
-        for aid in agent_ids:
-            if aid not in _state:
-                _state[aid] = {"state": "idle", "task": "", "updated": 0, "source": "init"}
+    with _lifecycle_lock:
+        stale_agent_ids = set()
+        with _state_lock:
+            if prune:
+                stale_agent_ids = set(_state) - agent_ids
+                for agent_id in stale_agent_ids:
+                    _state.pop(agent_id, None)
+            for aid in agent_ids:
+                if aid not in _state:
+                    _state[aid] = {"state": "idle", "task": "", "updated": 0, "source": "init"}
 
-    if not stale_agent_ids:
-        return
+        if not stale_agent_ids:
+            return
 
-    removed_run_ids = set()
-    removed_tool_ids = set()
-    for agent_id in stale_agent_ids:
-        removed_run_ids.update(_active_runs_by_agent.pop(agent_id, set()))
-        removed_tool_ids.update(_active_tools_by_agent.pop(agent_id, set()))
-        _last_event_at.pop(agent_id, None)
-        _last_event_task.pop(agent_id, None)
-        _finish_idle_at.pop(agent_id, None)
-        _manual_overrides.pop(agent_id, None)
-    for run_id, agent_id in list(_run_agents.items()):
-        if agent_id in stale_agent_ids:
-            removed_run_ids.add(run_id)
-            _run_agents.pop(run_id, None)
-    for run_id in removed_run_ids:
-        _active_run_last_seen.pop(run_id, None)
-    for tool_id in removed_tool_ids:
-        _active_tool_last_seen.pop(tool_id, None)
-    for session_key in list(_last_updated_at):
-        if _extract_agent_id(session_key) in stale_agent_ids:
-            _last_updated_at.pop(session_key, None)
+        removed_run_ids = set()
+        removed_tool_ids = set()
+        removed_approval_ids = set()
+        for agent_id in stale_agent_ids:
+            removed_run_ids.update(_active_runs_by_agent.pop(agent_id, set()))
+            removed_tool_ids.update(_active_tools_by_agent.pop(agent_id, set()))
+            removed_approval_ids.update(_active_approvals_by_agent.pop(agent_id, set()))
+            _last_event_at.pop(agent_id, None)
+            _last_event_task.pop(agent_id, None)
+            _finish_idle_at.pop(agent_id, None)
+            _manual_overrides.pop(agent_id, None)
+            _provider_health.pop(agent_id, None)
+        for run_id, agent_id in list(_run_agents.items()):
+            if agent_id in stale_agent_ids:
+                removed_run_ids.add(run_id)
+                _run_agents.pop(run_id, None)
+        for run_id in removed_run_ids:
+            _active_run_last_seen.pop(run_id, None)
+        for tool_id in removed_tool_ids:
+            _active_tool_last_seen.pop(tool_id, None)
+            _tool_runs.pop(tool_id, None)
+        for approval_id in removed_approval_ids:
+            _active_approval_last_seen.pop(approval_id, None)
+            _approval_runs.pop(approval_id, None)
+        for session_key in list(_last_updated_at):
+            if _extract_agent_id(session_key) in stale_agent_ids:
+                _last_updated_at.pop(session_key, None)
 
 
 # ─── Event Processing ────────────────────────────────────────────
@@ -262,6 +469,7 @@ def _mark_run_inactive(agent_id, run_id):
         runs.discard(run_id)
         if not runs:
             _active_runs_by_agent.pop(agent_id, None)
+    _run_agents.pop(run_id, None)
 
 
 def _mark_tool_active(agent_id, tool_id):
@@ -280,6 +488,7 @@ def _mark_tool_inactive(agent_id, tool_id):
         tools.discard(tool_id)
         if not tools:
             _active_tools_by_agent.pop(agent_id, None)
+    _tool_runs.pop(tool_id, None)
 
 
 def _agent_has_active_activity(agent_id):
@@ -292,6 +501,7 @@ def _agent_has_active_activity(agent_id):
             runs.difference_update(stale)
             for run_id in stale:
                 _active_run_last_seen.pop(run_id, None)
+                _run_agents.pop(run_id, None)
             if not runs:
                 _active_runs_by_agent.pop(agent_id, None)
         has_runs = bool(runs)
@@ -304,11 +514,28 @@ def _agent_has_active_activity(agent_id):
             tools.difference_update(stale)
             for tool_id in stale:
                 _active_tool_last_seen.pop(tool_id, None)
+                _tool_runs.pop(tool_id, None)
             if not tools:
                 _active_tools_by_agent.pop(agent_id, None)
         has_tools = bool(tools)
 
-    return has_runs or has_tools
+    approvals = _active_approvals_by_agent.get(agent_id)
+    has_approvals = False
+    if approvals:
+        stale = {
+            approval_id for approval_id in approvals
+            if now - _active_approval_last_seen.get(approval_id, 0) > ACTIVE_APPROVAL_STALE_SEC
+        }
+        if stale:
+            approvals.difference_update(stale)
+            for approval_id in stale:
+                _active_approval_last_seen.pop(approval_id, None)
+                _approval_runs.pop(approval_id, None)
+            if not approvals:
+                _active_approvals_by_agent.pop(agent_id, None)
+        has_approvals = bool(approvals)
+
+    return has_runs or has_tools or has_approvals
 
 
 def _agent_has_active_run(agent_id):
@@ -316,15 +543,19 @@ def _agent_has_active_run(agent_id):
 
 
 def _set_working(agent_id, task="Working", source="gateway-event", run_id=None):
-    if not agent_id or _is_manual_override_active(agent_id):
+    if not agent_id:
         return
     now = time.time()
     _ensure_agent(agent_id)
+    if run_id:
+        _mark_run_active(agent_id, run_id)
+    manual_active = _is_manual_override_active(agent_id)
+    manual_state = str((_manual_overrides.get(agent_id) or {}).get("state") or "")
+    if manual_active and manual_state in {"meeting", "break"}:
+        return
     _last_event_at[agent_id] = now
     _last_event_task[agent_id] = task or "Working"
     _finish_idle_at.pop(agent_id, None)
-    if run_id:
-        _mark_run_active(agent_id, run_id)
     with _state_lock:
         _state[agent_id].update({
             "state": "working",
@@ -336,12 +567,16 @@ def _set_working(agent_id, task="Working", source="gateway-event", run_id=None):
 
 
 def _set_finishing(agent_id, source="gateway-lifecycle", run_id=None):
-    if not agent_id or _is_manual_override_active(agent_id):
+    if not agent_id:
         return
     now = time.time()
     _ensure_agent(agent_id)
     if run_id:
         _mark_run_inactive(agent_id, run_id)
+    manual_active = _is_manual_override_active(agent_id)
+    manual_state = str((_manual_overrides.get(agent_id) or {}).get("state") or "")
+    if manual_active and manual_state in {"meeting", "break"}:
+        return
     if _agent_has_active_run(agent_id):
         _set_working(agent_id, _last_event_task.get(agent_id) or "Working", source, None)
         return
@@ -459,6 +694,11 @@ def _process_event(event_type, payload):
     """
     if not isinstance(payload, dict):
         return
+    with _lifecycle_lock:
+        _process_event_locked(event_type, payload)
+
+
+def _process_event_locked(event_type, payload):
     _note_event(event_type)
 
     session_key = payload.get("sessionKey") or payload.get("key") or ""
@@ -482,7 +722,8 @@ def _process_event(event_type, payload):
             if phase in ("start", "accepted", "running"):
                 _set_working(agent_id, "Working", "agent-lifecycle", run_id)
             elif phase in ("end", "done", "final", "complete", "completed", "error", "aborted", "cancelled", "canceled", "failed"):
-                _set_finishing(agent_id, "agent-lifecycle", run_id)
+                outcome = "completed" if phase in ("end", "done", "final", "complete", "completed") else phase
+                lifecycle_run_finished(agent_id, run_id, "openclaw", outcome=outcome)
             else:
                 _set_working(agent_id, "Working", "agent-lifecycle", run_id)
             return
@@ -550,58 +791,60 @@ def _process_event(event_type, payload):
         if state_val in ("delta", "streaming"):
             _set_working(agent_id, "Responding...", "chat", run_id)
         elif state_val in ("final", "done"):
-            _set_finishing(agent_id, "chat", run_id)
+            lifecycle_run_finished(agent_id, run_id, "openclaw", outcome="completed")
 
 
 def _process_sessions_list(sessions):
     """Process a rare sessions.list snapshot for startup/reconnect recovery only."""
-    now = time.time()
-    now_ms = now * 1000
-    _debug["lastSnapshotAt"] = int(now)
-    _debug["snapshots"] = _debug.get("snapshots", 0) + 1
+    with _lifecycle_lock:
+        now = time.time()
+        now_ms = now * 1000
+        _debug["lastSnapshotAt"] = int(now)
+        _debug["snapshots"] = _debug.get("snapshots", 0) + 1
 
-    for s in sessions:
-        if not isinstance(s, dict):
-            continue
-        key = s.get("key", "")
-        if not str(key).startswith("agent:"):
-            continue
-        agent_id = _extract_agent_id(key)
-        if not agent_id:
-            continue
-        _ensure_agent(agent_id, "snapshot")
-        updated_at = s.get("updatedAt", 0) or s.get("lastMessageAt", 0) or 0
-        _last_updated_at[key] = updated_at
-        session_status = str(s.get("status") or "").lower()
-        if session_status in ("done", "ended", "complete", "completed", "error", "aborted", "cancelled", "canceled", "failed"):
-            _set_idle(agent_id, "snapshot-session-ended")
-        elif updated_at and ((now_ms - updated_at) / 1000) < IDLE_TIMEOUT_SEC:
-            _set_working(agent_id, _last_event_task.get(agent_id) or "Recently active", "snapshot")
+        for s in sessions:
+            if not isinstance(s, dict):
+                continue
+            key = s.get("key", "")
+            if not str(key).startswith("agent:"):
+                continue
+            agent_id = _extract_agent_id(key)
+            if not agent_id:
+                continue
+            _ensure_agent(agent_id, "snapshot")
+            updated_at = s.get("updatedAt", 0) or s.get("lastMessageAt", 0) or 0
+            _last_updated_at[key] = updated_at
+            session_status = str(s.get("status") or "").lower()
+            if session_status in ("done", "ended", "complete", "completed", "error", "aborted", "cancelled", "canceled", "failed"):
+                _set_idle(agent_id, "snapshot-session-ended")
+            elif updated_at and ((now_ms - updated_at) / 1000) < IDLE_TIMEOUT_SEC:
+                _set_working(agent_id, _last_event_task.get(agent_id) or "Recently active", "snapshot")
 
 
 def _maintenance_tick():
     """Expire finishing/working states without calling OpenClaw."""
-    now = time.time()
-    _sync_meetings_from_file()
+    with _lifecycle_lock:
+        now = time.time()
+        _sync_meetings_from_file()
 
-    # Expire manual overrides.
-    for agent_id in list(_manual_overrides.keys()):
-        _is_manual_override_active(agent_id, now)
+        # Expire manual overrides.
+        for agent_id in list(_manual_overrides.keys()):
+            _is_manual_override_active(agent_id, now)
 
-    # finishing -> idle after grace.
-    for agent_id, idle_at in list(_finish_idle_at.items()):
-        if now >= idle_at:
-            _set_idle(agent_id, "finish-grace-expired")
+        # finishing -> idle after grace.
+        for agent_id, idle_at in list(_finish_idle_at.items()):
+            if now >= idle_at:
+                _set_idle(agent_id, "finish-grace-expired")
 
-    # Quiet long-running tool calls are protected by active run/tool ids. If no
-    # active run/tool remains, stale gateway-derived display states must age out
-    # so missed terminal chat/snapshot events do not leave agents stuck working.
-    for agent_id, last_at in list(_last_event_at.items()):
-        if now - last_at > IDLE_TIMEOUT_SEC:
-            with _state_lock:
-                current = _state.get(agent_id, {}).get("state")
-            if current in ("working", "finishing") and not _agent_has_active_activity(agent_id):
-                _set_idle(agent_id, "event-idle-timeout")
+        # Quiet long-running tool calls are protected by active run/tool ids. If no
+        # active run/tool remains, stale display states must age out so missed
+        # terminal events do not leave agents stuck working.
+        for agent_id, last_at in list(_last_event_at.items()):
+            if now - last_at > IDLE_TIMEOUT_SEC:
+                with _state_lock:
+                    current = _state.get(agent_id, {}).get("state")
+                if current in ("working", "finishing") and not _agent_has_active_activity(agent_id):
+                    _set_idle(agent_id, "event-idle-timeout")
 
 # ─── Meeting File Sync ────────────────────────────────────────────
 
@@ -719,7 +962,6 @@ async def _gateway_loop(gateway_url, gateway_token, origin, client_version="unkn
 
                 tasks = [
                     asyncio.create_task(_message_reader(ws)),
-                    asyncio.create_task(_maintenance_loop()),
                     asyncio.create_task(_ping_loop(ws)),
                 ]
                 done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -810,13 +1052,6 @@ async def _message_reader(ws):
         print(f"⚠️  Gateway presence: reader error: {e}")
 
 
-async def _maintenance_loop():
-    """Local state maintenance. No gateway polling here."""
-    while True:
-        _maintenance_tick()
-        await asyncio.sleep(2)
-
-
 async def _ping_loop(ws):
     """Keep connection alive."""
     try:
@@ -831,11 +1066,44 @@ async def _ping_loop(ws):
 
 _thread = None
 _loop = None
+_maintenance_thread = None
+_maintenance_stop = threading.Event()
+
+
+def start_maintenance():
+    """Start provider-neutral lifecycle maintenance without requiring OpenClaw."""
+    global _maintenance_thread
+    if _maintenance_thread and _maintenance_thread.is_alive():
+        return
+    _maintenance_stop.clear()
+
+    def run():
+        while not _maintenance_stop.wait(2):
+            try:
+                _maintenance_tick()
+            except Exception as exc:
+                print(f"⚠️  Presence coordinator maintenance error: {exc}")
+
+    _maintenance_thread = threading.Thread(target=run, daemon=True, name="presence-coordinator")
+    _maintenance_thread.start()
+
+
+def stop_maintenance():
+    """Stop maintenance. Intended for process shutdown and isolated tests."""
+    global _maintenance_thread
+    _maintenance_stop.set()
+    thread = _maintenance_thread
+    if thread and thread.is_alive() and thread is not threading.current_thread():
+        thread.join(timeout=2.5)
+    if not thread or not thread.is_alive():
+        _maintenance_thread = None
 
 
 def start(gateway_url, gateway_token, port=8590, client_version="unknown", origin=None):
     """Start the gateway presence listener in a background thread."""
     global _thread, _loop, _gw_origin
+
+    start_maintenance()
 
     if websockets is None:
         print("⚠️  Gateway presence: websockets not installed, skipping")
@@ -951,3 +1219,26 @@ def load_snapshot(filepath, allowed_agent_ids=None):
         pass
     except Exception as e:
         print(f"⚠️  Gateway presence: snapshot load error: {e}")
+
+
+def reset_state_for_tests():
+    """Clear coordinator memory for deterministic isolated regression tests."""
+    with _lifecycle_lock, _state_lock:
+        _state.clear()
+        _manual_overrides.clear()
+        _last_updated_at.clear()
+        _last_event_at.clear()
+        _last_event_task.clear()
+        _run_agents.clear()
+        _active_runs_by_agent.clear()
+        _active_run_last_seen.clear()
+        _active_tools_by_agent.clear()
+        _active_tool_last_seen.clear()
+        _tool_runs.clear()
+        _active_approvals_by_agent.clear()
+        _active_approval_last_seen.clear()
+        _approval_runs.clear()
+        _finish_idle_at.clear()
+        _provider_health.clear()
+    with _meetings_lock:
+        _meetings.clear()

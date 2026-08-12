@@ -98,9 +98,16 @@
     return html;
   }
 
+  function renderMarkdownInto(target, text) {
+    const html = renderMarkdown(text);
+    if (target && typeof target === 'object') target.innerHTML = html;
+    return html;
+  }
+
   global.VirtualWorldChatMarkdown = Object.freeze({
     escapeHtml,
     renderMarkdown,
+    renderMarkdownInto,
     sanitizeHtml
   });
 })(globalThis);

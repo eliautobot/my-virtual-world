@@ -1599,6 +1599,11 @@ HERMES_APPROVAL_PENDING = {}
 HERMES_LIVE_LOCK = threading.Lock()
 HERMES_LIVE_EVENTS = {}
 HERMES_LIVE_MAX_EVENTS = 250
+HERMES_STATE_LOCK = threading.RLock()
+CODEX_STATE_LOCK = threading.RLock()
+CLAUDE_CODE_STATE_LOCK = threading.RLock()
+PROVIDER_HISTORY_LOCK = threading.RLock()
+CHAT_SESSION_MIRROR_LOCK = threading.RLock()
 HERMES_CONTEXT_MAX_MESSAGES = _env_int("VW_HERMES_CONTEXT_MAX_MESSAGES", 120, minimum=1, maximum=500)
 HERMES_CONTEXT_MAX_CHARS = _env_int("VW_HERMES_CONTEXT_MAX_CHARS", 120_000, minimum=4_000, maximum=1_000_000)
 HERMES_CONTEXT_MAX_MESSAGE_CHARS = _env_int("VW_HERMES_CONTEXT_MAX_MESSAGE_CHARS", 32_000, minimum=1_000, maximum=200_000)
@@ -21843,14 +21848,134 @@ def _get_codex_agent(agent_id_or_key=None):
     return None
 
 
+CHAT_SESSION_MIRROR_SCHEMA_VERSION = "vw-chat-session-mirror/v1"
+
+
+def _chat_session_mirror_path(provider_kind, profile, session_id):
+    provider_slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(provider_kind or "provider")).strip("-.") or "provider"
+    profile_slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(profile or "main")).strip("-.") or "main"
+    digest = hashlib.sha256(str(session_id or "").encode("utf-8", errors="ignore")).hexdigest()
+    return os.path.join(STATUS_DIR, "chat-session-mirrors", provider_slug, profile_slug, f"{digest}.json")
+
+
+def _chat_session_messages_with_id(messages, session_id):
+    session_id = str(session_id or "")
+    output = []
+    for item in messages if isinstance(messages, list) else []:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        if session_id and not row.get("sessionId"):
+            row["sessionId"] = session_id
+        output.append(row)
+    return output[-500:]
+
+
+def _save_chat_session_mirror(provider_kind, profile, session_id, messages):
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        return []
+    normalized = _chat_session_messages_with_id(messages, session_id)
+    payload = {
+        "schemaVersion": CHAT_SESSION_MIRROR_SCHEMA_VERSION,
+        "providerKind": str(provider_kind or "provider"),
+        "profile": str(profile or "main"),
+        "sessionId": session_id,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "messages": normalized,
+    }
+    with CHAT_SESSION_MIRROR_LOCK:
+        _atomic_write_json(_chat_session_mirror_path(provider_kind, profile, session_id), payload)
+    return normalized
+
+
+def _load_chat_session_mirror(provider_kind, profile, session_id):
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        return []
+    try:
+        with CHAT_SESSION_MIRROR_LOCK:
+            with open(_chat_session_mirror_path(provider_kind, profile, session_id), "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        if not isinstance(payload, dict) or str(payload.get("sessionId") or "") != session_id:
+            return []
+        return _chat_session_messages_with_id(payload.get("messages"), session_id)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def _delete_chat_session_mirror(provider_kind, profile, session_id):
+    path = _chat_session_mirror_path(provider_kind, profile, session_id)
+    with CHAT_SESSION_MIRROR_LOCK:
+        try:
+            os.unlink(path)
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return False
+
+
+def _provider_visible_user_text(value):
+    """Remove Virtual World's delivery envelope from provider-owned transcripts."""
+    text = str(value or "").strip()
+    text = re.sub(r"^\s*\[A2A\s+[^\]]+\]\s*\n?", "", text, count=1)
+    match = re.match(
+        r"^Message from .+? via .+?\.\s*\n\n([\s\S]*?)\n\nReply directly to the user\. Do not assume a personal name unless the user provides one\.?\s*$",
+        text,
+    )
+    return (match.group(1) if match else text).strip()
+
+
+def _chat_session_message_fingerprint(message):
+    if not isinstance(message, dict):
+        return ""
+    role = str(message.get("role") or "")
+    text = str(message.get("text") or message.get("content") or "").strip()
+    if role == "user":
+        text = _provider_visible_user_text(text)
+    tools = message.get("tools") if isinstance(message.get("tools"), list) else []
+    canonical_tools = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        canonical_tools.append({
+            "id": str(tool.get("id") or tool.get("toolCallId") or tool.get("callId") or ""),
+            "name": str(tool.get("name") or tool.get("tool") or "tool"),
+            "status": str(tool.get("status") or tool.get("state") or ""),
+            "arguments": tool.get("arguments") or tool.get("args") or {},
+            "result": str(tool.get("result") or tool.get("output") or ""),
+            "error": str(tool.get("error") or ""),
+        })
+    try:
+        tool_key = json.dumps(canonical_tools, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:
+        tool_key = str(canonical_tools)
+    return hashlib.sha256(f"{role}\n{text}\n{tool_key}".encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _merge_chat_session_messages(mirrored, native, session_id):
+    """Preserve the rich VW transcript while importing previously unseen native rows."""
+    output = _chat_session_messages_with_id(mirrored, session_id)
+    seen = {_chat_session_message_fingerprint(item) for item in output}
+    for item in _chat_session_messages_with_id(native, session_id):
+        fingerprint = _chat_session_message_fingerprint(item)
+        if fingerprint and fingerprint in seen:
+            continue
+        if fingerprint:
+            seen.add(fingerprint)
+        output.append(item)
+    return output[-500:]
+
+
 def _hermes_history_path(profile="default"):
     safe_profile = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(profile or "default")).strip("-.") or "default"
     return os.path.join(DATA_DIR, f"hermes-chat-{safe_profile}.json")
 
 
-def _load_hermes_state(profile="default"):
+def _load_hermes_state_unlocked(profile="default"):
     try:
-        with open(_hermes_history_path(profile), "r") as f:
+        with open(_hermes_history_path(profile), "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             return data
@@ -21861,21 +21986,55 @@ def _load_hermes_state(profile="default"):
     return {"messages": [], "sessionId": ""}
 
 
+def _load_hermes_state(profile="default"):
+    with HERMES_STATE_LOCK:
+        return _load_hermes_state_unlocked(profile)
+
+
 def _load_hermes_history(profile="default"):
     messages = _load_hermes_state(profile).get("messages", [])
     return messages if isinstance(messages, list) else []
 
 
+def _save_hermes_state_unlocked(profile, state):
+    payload = dict(state) if isinstance(state, dict) else {"messages": [], "sessionId": ""}
+    messages = payload.get("messages")
+    payload["messages"] = messages[-500:] if isinstance(messages, list) else []
+    payload["sessionId"] = str(payload.get("sessionId") or "")
+    if payload["sessionId"]:
+        payload["messages"] = _save_chat_session_mirror("hermes", profile, payload["sessionId"], payload["messages"])
+    _atomic_write_json(_hermes_history_path(profile), payload)
+
+
 def _save_hermes_state(profile, state):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(_hermes_history_path(profile), "w") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    with HERMES_STATE_LOCK:
+        _save_hermes_state_unlocked(profile, state)
+
+
+def _update_hermes_state(profile, updater):
+    """Apply one serialized read-modify-write transaction to Hermes chat state."""
+    with HERMES_STATE_LOCK:
+        state = _load_hermes_state_unlocked(profile)
+        updated = updater(state)
+        if isinstance(updated, dict):
+            state = updated
+        _save_hermes_state_unlocked(profile, state)
+        return state
+
+
+def _update_hermes_history(profile, updater):
+    def update(state):
+        current = state.get("messages")
+        current = list(current) if isinstance(current, list) else []
+        updated = updater(current)
+        state["messages"] = updated if isinstance(updated, list) else current
+        return state
+
+    return _update_hermes_state(profile, update).get("messages", [])
 
 
 def _save_hermes_history(profile, messages):
-    state = _load_hermes_state(profile)
-    state["messages"] = messages[-500:]
-    _save_hermes_state(profile, state)
+    _update_hermes_history(profile, lambda _current: list(messages or []))
 
 
 def _get_hermes_session_id(profile="default"):
@@ -21883,9 +22042,58 @@ def _get_hermes_session_id(profile="default"):
 
 
 def _set_hermes_session_id(profile="default", session_id=""):
-    state = _load_hermes_state(profile)
-    state["sessionId"] = session_id or ""
-    _save_hermes_state(profile, state)
+    # Changing identity must never relabel another session's messages.
+    return _activate_hermes_session(profile, session_id or "")
+
+
+def _activate_hermes_session(profile, session_id, messages=None):
+    session_id = str(session_id or "")
+    with HERMES_STATE_LOCK:
+        state = _load_hermes_state_unlocked(profile)
+        if messages is None:
+            messages = _load_chat_session_mirror("hermes", profile, session_id)
+            if not messages and str(state.get("sessionId") or "") == session_id:
+                messages = state.get("messages") if isinstance(state.get("messages"), list) else []
+        state["sessionId"] = session_id
+        state["messages"] = _chat_session_messages_with_id(messages, session_id)
+        _save_hermes_state_unlocked(profile, state)
+        return state
+
+
+def _update_hermes_session_history(profile, session_id, updater):
+    session_id = str(session_id or "")
+    with HERMES_STATE_LOCK:
+        state = _load_hermes_state_unlocked(profile)
+        if str(state.get("sessionId") or "") == session_id:
+            current = state.get("messages") if isinstance(state.get("messages"), list) else []
+        else:
+            current = _load_chat_session_mirror("hermes", profile, session_id)
+        updated = updater(list(current))
+        updated = updated if isinstance(updated, list) else current
+        updated = _save_chat_session_mirror("hermes", profile, session_id, updated) if session_id else updated[-500:]
+        if str(state.get("sessionId") or "") == session_id:
+            state["messages"] = updated
+            _save_hermes_state_unlocked(profile, state)
+        return updated
+
+
+def _rekey_hermes_session_history(profile, source_session_id, target_session_id):
+    """Move a lazy-session transcript to its native id without stealing focus."""
+    source_session_id = str(source_session_id or "")
+    target_session_id = str(target_session_id or "")
+    if not source_session_id or not target_session_id or source_session_id == target_session_id:
+        return _load_chat_session_mirror("hermes", profile, target_session_id or source_session_id)
+    with HERMES_STATE_LOCK:
+        state = _load_hermes_state_unlocked(profile)
+        source_is_current = str(state.get("sessionId") or "") == source_session_id
+        messages = state.get("messages") if source_is_current else _load_chat_session_mirror("hermes", profile, source_session_id)
+        messages = _save_chat_session_mirror("hermes", profile, target_session_id, messages)
+        _delete_chat_session_mirror("hermes", profile, source_session_id)
+        if source_is_current:
+            state["sessionId"] = target_session_id
+            state["messages"] = messages
+            _save_hermes_state_unlocked(profile, state)
+        return messages
 
 
 def _codex_history_path(profile="main"):
@@ -21894,16 +22102,17 @@ def _codex_history_path(profile="main"):
 
 
 def _load_codex_state(profile="main"):
-    try:
-        with open(_codex_history_path(profile), "r") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data
-        if isinstance(data, list):
-            return {"messages": data, "sessionId": ""}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        pass
-    return {"messages": [], "sessionId": ""}
+    with CODEX_STATE_LOCK:
+        try:
+            with open(_codex_history_path(profile), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+            if isinstance(data, list):
+                return {"messages": data, "sessionId": ""}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            pass
+        return {"messages": [], "sessionId": ""}
 
 
 def _load_codex_history(profile="main"):
@@ -21912,9 +22121,13 @@ def _load_codex_history(profile="main"):
 
 
 def _save_codex_state(profile, state):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(_codex_history_path(profile), "w") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    with CODEX_STATE_LOCK:
+        payload = dict(state) if isinstance(state, dict) else {"messages": [], "sessionId": ""}
+        payload["sessionId"] = str(payload.get("sessionId") or "")
+        payload["messages"] = _chat_session_messages_with_id(payload.get("messages"), payload["sessionId"])
+        if payload["sessionId"]:
+            payload["messages"] = _save_chat_session_mirror("codex", profile, payload["sessionId"], payload["messages"])
+        _atomic_write_json(_codex_history_path(profile), payload)
 
 
 def _save_codex_history(profile, messages):
@@ -21929,9 +22142,58 @@ def _get_codex_session_id(profile="main"):
 
 
 def _set_codex_session_id(profile="main", session_id=""):
-    state = _load_codex_state(profile)
-    state["sessionId"] = session_id or ""
-    _save_codex_state(profile, state)
+    # Changing identity must never relabel another thread's messages.
+    return _activate_codex_session(profile, session_id or "")
+
+
+def _activate_codex_session(profile, session_id, messages=None):
+    session_id = str(session_id or "")
+    with CODEX_STATE_LOCK:
+        state = _load_codex_state(profile)
+        if messages is None:
+            messages = _load_chat_session_mirror("codex", profile, session_id)
+            if not messages and str(state.get("sessionId") or "") == session_id:
+                messages = state.get("messages") if isinstance(state.get("messages"), list) else []
+        state["sessionId"] = session_id
+        state["messages"] = _chat_session_messages_with_id(messages, session_id)
+        _save_codex_state(profile, state)
+        return state
+
+
+def _update_codex_session_history(profile, session_id, updater):
+    session_id = str(session_id or "")
+    with CODEX_STATE_LOCK:
+        state = _load_codex_state(profile)
+        if str(state.get("sessionId") or "") == session_id:
+            current = state.get("messages") if isinstance(state.get("messages"), list) else []
+        else:
+            current = _load_chat_session_mirror("codex", profile, session_id)
+        updated = updater(list(current))
+        updated = updated if isinstance(updated, list) else current
+        updated = _save_chat_session_mirror("codex", profile, session_id, updated) if session_id else updated[-500:]
+        if str(state.get("sessionId") or "") == session_id:
+            state["messages"] = updated
+            _save_codex_state(profile, state)
+        return updated
+
+
+def _rekey_codex_session_history(profile, source_session_id, target_session_id):
+    """Move a lazy-thread transcript to its native id without stealing focus."""
+    source_session_id = str(source_session_id or "")
+    target_session_id = str(target_session_id or "")
+    if not source_session_id or not target_session_id or source_session_id == target_session_id:
+        return _load_chat_session_mirror("codex", profile, target_session_id or source_session_id)
+    with CODEX_STATE_LOCK:
+        state = _load_codex_state(profile)
+        source_is_current = str(state.get("sessionId") or "") == source_session_id
+        messages = state.get("messages") if source_is_current else _load_chat_session_mirror("codex", profile, source_session_id)
+        messages = _save_chat_session_mirror("codex", profile, target_session_id, messages)
+        _delete_chat_session_mirror("codex", profile, source_session_id)
+        if source_is_current:
+            state["sessionId"] = target_session_id
+            state["messages"] = messages
+            _save_codex_state(profile, state)
+        return messages
 
 
 def _claude_code_history_path(profile="main"):
@@ -21940,16 +22202,17 @@ def _claude_code_history_path(profile="main"):
 
 
 def _load_claude_code_state(profile="main"):
-    try:
-        with open(_claude_code_history_path(profile), "r") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data
-        if isinstance(data, list):
-            return {"messages": data, "sessionId": ""}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        pass
-    return {"messages": [], "sessionId": ""}
+    with CLAUDE_CODE_STATE_LOCK:
+        try:
+            with open(_claude_code_history_path(profile), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+            if isinstance(data, list):
+                return {"messages": data, "sessionId": ""}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            pass
+        return {"messages": [], "sessionId": ""}
 
 
 def _load_claude_code_history(profile="main"):
@@ -21958,9 +22221,13 @@ def _load_claude_code_history(profile="main"):
 
 
 def _save_claude_code_state(profile, state):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(_claude_code_history_path(profile), "w") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+    with CLAUDE_CODE_STATE_LOCK:
+        payload = dict(state) if isinstance(state, dict) else {"messages": [], "sessionId": ""}
+        payload["sessionId"] = str(payload.get("sessionId") or "")
+        payload["messages"] = _chat_session_messages_with_id(payload.get("messages"), payload["sessionId"])
+        if payload["sessionId"]:
+            payload["messages"] = _save_chat_session_mirror("claude-code", profile, payload["sessionId"], payload["messages"])
+        _atomic_write_json(_claude_code_history_path(profile), payload)
 
 
 def _get_claude_code_session_id(profile="main"):
@@ -22301,14 +22568,14 @@ def _hermes_approval_bridge_dir(run_id):
     return os.path.join(HERMES_APPROVAL_BRIDGE_DIR, _safe_hermes_bridge_run_id(run_id))
 
 
-def _start_hermes_approval_bridge_watcher(run_id, bridge_dir, agent_id, profile, stop_event):
+def _start_hermes_approval_bridge_watcher(run_id, bridge_dir, agent_id, profile, session_id, stop_event):
     if not run_id or not bridge_dir:
         return None
 
     def _watch():
         events_path = os.path.join(bridge_dir, "events.jsonl")
         offset = 0
-        seen = set()
+        seen_status = {}
         while not stop_event.wait(0.25):
             try:
                 if not os.path.exists(events_path):
@@ -22326,10 +22593,10 @@ def _start_hermes_approval_bridge_watcher(run_id, bridge_dir, agent_id, profile,
                     except json.JSONDecodeError:
                         continue
                     approval_id = str(item.get("approval_id") or item.get("id") or "").strip()
-                    if not approval_id or approval_id in seen:
-                        continue
-                    seen.add(approval_id)
                     status = str(item.get("status") or "pending").lower()
+                    if not approval_id or seen_status.get(approval_id) == status:
+                        continue
+                    seen_status[approval_id] = status
                     approval = {
                         "id": approval_id,
                         "approval_id": approval_id,
@@ -22342,7 +22609,10 @@ def _start_hermes_approval_bridge_watcher(run_id, bridge_dir, agent_id, profile,
                         "message": "",
                         "agentId": agent_id or "hermes-default",
                         "profile": profile or "default",
-                        "session_id": item.get("session_id") or "",
+                        # New CLI sessions do not have their native ID until
+                        # the process returns. Keep approvals on the window's
+                        # local @new session and rekey that mirror at finalize.
+                        "session_id": session_id or item.get("session_id") or "",
                         "bridgeRunId": _safe_hermes_bridge_run_id(run_id),
                         "bridgeApprovalId": approval_id,
                         "queuedAt": item.get("createdAt") or int(time.time() * 1000),
@@ -22350,8 +22620,17 @@ def _start_hermes_approval_bridge_watcher(run_id, bridge_dir, agent_id, profile,
                     }
                     if status == "pending":
                         approval = _remember_hermes_approval_pending(approval, agent_id, profile, approval.get("session_id", ""))
+                        _upsert_hermes_approval_history(profile, approval.get("session_id", ""), approval)
                         _append_hermes_live_event(run_id, "approval", {"approval": approval, "pending_count": 1})
                     else:
+                        resolved = _resolve_hermes_approval_pending(
+                            agent_id,
+                            approval_id,
+                            approval.get("session_id", ""),
+                            status,
+                        )
+                        approval = {**(resolved or approval), "status": status}
+                        _upsert_hermes_approval_history(profile, approval.get("session_id", ""), approval)
                         _append_hermes_live_event(run_id, "approval", {"approval": approval, "pending_count": 0})
             except Exception as exc:
                 _append_hermes_live_event(run_id, "debug", {"message": f"Hermes approval bridge watch failed: {exc}"})
@@ -22381,6 +22660,9 @@ def _get_hermes_active_run(run_id):
 def _find_hermes_active_run(agent_key="", profile=""):
     with HERMES_ACTIVE_RUNS_LOCK:
         for meta in reversed(list(HERMES_ACTIVE_RUNS.values())):
+            runtime = meta.get("runtime") if isinstance(meta.get("runtime"), dict) else {}
+            if runtime.get("done"):
+                continue
             if agent_key and agent_key in {meta.get("agentId"), meta.get("agentKey")}:
                 return dict(meta)
             if profile and profile == meta.get("profile"):
@@ -22411,43 +22693,113 @@ def _clear_codex_active_run(run_id):
         CODEX_ACTIVE_RUNS.pop(str(run_id or ""), None)
 
 
-def _set_hermes_presence(agent_id, state, task=""):
-    if not _gateway_presence or not agent_id:
+def _native_run_runtime():
+    return {
+        "condition": threading.Condition(),
+        "events": [],
+        "nextEventId": 1,
+        "done": False,
+        "result": None,
+    }
+
+
+def _native_run_emit(meta, event_name, payload=None):
+    runtime = meta.get("runtime") if isinstance(meta.get("runtime"), dict) else None
+    if not runtime:
+        return None
+    condition = runtime["condition"]
+    with condition:
+        event = {"id": runtime["nextEventId"], "event": event_name, "data": dict(payload or {})}
+        runtime["nextEventId"] += 1
+        runtime["events"].append(event)
+        condition.notify_all()
+    return event
+
+
+def _native_run_finish(meta, result):
+    runtime = meta.get("runtime") if isinstance(meta.get("runtime"), dict) else None
+    if not runtime:
         return
+    with runtime["condition"]:
+        runtime["done"] = True
+        runtime["result"] = dict(result or {})
+        runtime["condition"].notify_all()
+
+
+def _native_run_tail(handler, meta, *, cleanup=None):
+    """Tail a server-owned native event buffer; client disconnect never stops work."""
+    runtime = meta.get("runtime") if isinstance(meta.get("runtime"), dict) else None
+    if not runtime:
+        return handler._send_json({"ok": False, "error": "Native run event buffer is unavailable"}, 410)
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    handler.close_connection = True
+    cursor = 0
     try:
-        _gateway_presence.set_manual_override(agent_id, state, task)
-    except Exception:
+        while True:
+            with runtime["condition"]:
+                if cursor >= len(runtime["events"]) and not runtime.get("done"):
+                    runtime["condition"].wait(timeout=0.5)
+                events = list(runtime["events"][cursor:])
+                cursor += len(events)
+                done = bool(runtime.get("done"))
+            for item in events:
+                encoded = json.dumps(item["data"], ensure_ascii=False, default=str)
+                handler.wfile.write(f"id: {item['id']}\nevent: {item['event']}\ndata: {encoded}\n\n".encode("utf-8"))
+                handler.wfile.flush()
+            if done and cursor >= len(runtime["events"]):
+                break
+    except (BrokenPipeError, ConnectionResetError, ConnectionError, OSError):
         pass
+    finally:
+        if callable(cleanup) and runtime.get("done"):
+            cleanup()
 
 
-def _publish_hermes_api_progress(profile, agent_id, run_id, tools=None, reasoning_parts=None, reply=""):
+def _schedule_native_run_cleanup(callback, delay_sec=300):
+    timer = threading.Timer(delay_sec, callback)
+    timer.daemon = True
+    timer.start()
+
+
+def _publish_hermes_api_progress(profile, agent_id, run_id, tools=None, reasoning_parts=None, reply="", session_id=""):
     """Publish in-flight native Hermes API events to the visible chat history."""
     if not run_id:
         return
     progress_id = f"hermes-api-progress-{run_id}"
-    history = _load_hermes_history(profile)
-    history = [
-        msg for msg in history
-        if not (isinstance(msg, dict) and msg.get("ephemeral") == "hermes-progress" and msg.get("progressId") == progress_id)
-    ]
     now_ms = int(time.time() * 1000)
-    history.append({
-        "role": "assistant",
-        "text": reply or "",
-        "ts": now_ms,
-        "epochMs": now_ms,
-        "agentId": agent_id,
-        "from": "Hermes",
-        "source": "hermes",
-        "ephemeral": "hermes-progress",
-        "progressId": progress_id,
-        "runId": run_id,
-        "sessionId": _get_hermes_session_id(profile) or "",
-        "tools": tools or [],
-        "thinking": "\n\n".join(reasoning_parts or [])[:12000],
-        "reasoningTokens": 0,
-    })
-    _save_hermes_history(profile, history)
+
+    session_id = str(session_id or _get_hermes_session_id(profile) or "")
+
+    def update(history):
+        history = [
+            msg for msg in history
+            if not (isinstance(msg, dict) and msg.get("ephemeral") == "hermes-progress" and msg.get("progressId") == progress_id)
+        ]
+        history.append({
+            "role": "assistant",
+            "text": reply or "",
+            "ts": now_ms,
+            "epochMs": now_ms,
+            "agentId": agent_id,
+            "from": "Hermes",
+            "source": "hermes",
+            "ephemeral": "hermes-progress",
+            "progressId": progress_id,
+            "runId": run_id,
+            "sessionId": session_id,
+            "tools": tools or [],
+            "thinking": "\n\n".join(reasoning_parts or [])[:12000],
+            "reasoningTokens": 0,
+        })
+        return history
+
+    _update_hermes_session_history(profile, session_id, update)
 
 
 def _format_hermes_attachment_context(attachments):
@@ -22560,8 +22912,13 @@ def _get_hermes_approval_pending(agent_key="hermes-default", session_id=""):
     agent = _get_hermes_agent(agent_key) or {}
     agent_id = agent.get("id") or agent_key or "hermes-default"
     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    # Approval queues are session-scoped. A poll from one Hermes chat window
+    # must never inspect or prune another window's queue. Older clients did not
+    # send sessionId, so fall back only to this profile's tracked session plus
+    # the legacy profile/agent queues.
+    effective_session_id = str(session_id or _get_hermes_session_id(profile) or "").strip()
     keys = [
-        _hermes_approval_key(agent_id, profile, session_id),
+        _hermes_approval_key(agent_id, profile, effective_session_id),
         _hermes_approval_key(agent_id, profile, ""),
         _hermes_approval_key(agent_id, "", ""),
     ]
@@ -22570,17 +22927,40 @@ def _get_hermes_approval_pending(agent_key="hermes-default", session_id=""):
             queue = [item for item in HERMES_APPROVAL_PENDING.get(key, []) if item.get("status", "pending") == "pending"]
             HERMES_APPROVAL_PENDING[key] = queue
             if queue:
-                return {"ok": True, "pending": queue[0], "pending_count": len(queue), "session_id": session_id or queue[0].get("session_id", "")}
-        for key, items in list(HERMES_APPROVAL_PENDING.items()):
-            queue = [
-                item for item in items
-                if item.get("status", "pending") == "pending"
-                and (item.get("agentId") == agent_id or item.get("profile") == profile)
-            ]
-            HERMES_APPROVAL_PENDING[key] = queue
-            if queue:
-                return {"ok": True, "pending": queue[0], "pending_count": len(queue), "session_id": session_id or queue[0].get("session_id", "")}
-    return {"ok": True, "pending": None, "pending_count": 0, "session_id": session_id or ""}
+                return {"ok": True, "pending": queue[0], "pending_count": len(queue), "session_id": effective_session_id or queue[0].get("session_id", "")}
+    return {"ok": True, "pending": None, "pending_count": 0, "session_id": effective_session_id}
+
+
+def _find_hermes_approval_pending(agent_key="hermes-default", approval_id="", session_id=""):
+    """Read one pending approval without consuming it."""
+    agent = _get_hermes_agent(agent_key) or {}
+    agent_id = agent.get("id") or agent_key or "hermes-default"
+    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    effective_session_id = str(session_id or _get_hermes_session_id(profile) or "").strip()
+    keys = [
+        _hermes_approval_key(agent_id, profile, effective_session_id),
+        _hermes_approval_key(agent_id, profile, ""),
+        _hermes_approval_key(agent_id, "", ""),
+    ]
+    with HERMES_APPROVAL_LOCK:
+        for key in dict.fromkeys(keys):
+            for item in HERMES_APPROVAL_PENDING.get(key, []):
+                item_id = str(item.get("approval_id") or item.get("id") or "")
+                if item.get("status", "pending") == "pending" and (not approval_id or item_id == approval_id):
+                    return dict(item)
+        # An approval ID is globally unique. Permit an exact-ID recovery when
+        # an older card omitted sessionId, but never do an unscoped queue scan.
+        if approval_id:
+            for items in HERMES_APPROVAL_PENDING.values():
+                for item in items:
+                    item_id = str(item.get("approval_id") or item.get("id") or "")
+                    if (
+                        item_id == approval_id
+                        and item.get("status", "pending") == "pending"
+                        and (item.get("agentId") == agent_id or item.get("profile") == profile)
+                    ):
+                        return dict(item)
+    return None
 
 
 def _is_hermes_approval_pending_active(approval):
@@ -22663,17 +23043,47 @@ def _resolve_hermes_approval_pending(agent_key="hermes-default", approval_id="",
                     del queue[idx]
                     HERMES_APPROVAL_PENDING[key] = queue
                     return resolved
-        for key, queue in list(HERMES_APPROVAL_PENDING.items()):
-            for idx, item in enumerate(queue):
-                if (
-                    (item.get("agentId") == agent_id or item.get("profile") == profile)
-                    and (not approval_id or item.get("id") == approval_id or item.get("approval_id") == approval_id)
-                ):
-                    resolved = {**item, "status": choice or "resolved", "resolvedAt": int(time.time() * 1000)}
-                    del queue[idx]
-                    HERMES_APPROVAL_PENDING[key] = queue
-                    return resolved
+        # Only an exact approval ID may escape the selected session scope.
+        # This supports legacy cards without sessionId without allowing one
+        # window to consume another window's first pending request.
+        if approval_id:
+            for key, queue in list(HERMES_APPROVAL_PENDING.items()):
+                for idx, item in enumerate(queue):
+                    if (
+                        (item.get("agentId") == agent_id or item.get("profile") == profile)
+                        and (item.get("id") == approval_id or item.get("approval_id") == approval_id)
+                    ):
+                        resolved = {**item, "status": choice or "resolved", "resolvedAt": int(time.time() * 1000)}
+                        del queue[idx]
+                        HERMES_APPROVAL_PENDING[key] = queue
+                        return resolved
     return None
+
+
+def _discard_hermes_run_approval_pending(agent_key="hermes-default", profile="", session_id="", run_id=""):
+    """Expire unresolved API approvals when their owning run terminates."""
+    agent = _get_hermes_agent(agent_key) or {}
+    agent_id = agent.get("id") or agent_key or "hermes-default"
+    profile = profile or agent.get("profile") or agent.get("providerAgentId") or "default"
+    run_id = str(run_id or "").strip()
+    if not run_id:
+        return []
+    expired = []
+    with HERMES_APPROVAL_LOCK:
+        for key, queue in list(HERMES_APPROVAL_PENDING.items()):
+            keep = []
+            for item in queue:
+                if (
+                    item.get("status", "pending") == "pending"
+                    and str(item.get("runId") or "") == run_id
+                    and (item.get("agentId") in {agent_id, agent_key} or item.get("profile") == profile)
+                    and (not session_id or not item.get("session_id") or item.get("session_id") == session_id)
+                ):
+                    expired.append({**item, "status": "expired", "resolvedAt": int(time.time() * 1000)})
+                else:
+                    keep.append(item)
+            HERMES_APPROVAL_PENDING[key] = keep
+    return expired
 
 
 def _discard_hermes_approval_bridge_pending(agent_key="hermes-default", profile="", session_id="", bridge_run_id=""):
@@ -22772,17 +23182,66 @@ def _hermes_terminal_command_from_tools(tools):
 
 
 def _approval_result_message(approval, choice):
-    label = "approved once and retried" if choice == "approve_once" else "denied"
+    normalized_choice = _normalize_hermes_approval_choice(choice)
+    label = (
+        "approved" if normalized_choice == "approve_once"
+        else "denied" if normalized_choice == "deny"
+        else (normalized_choice or "resolved")
+    )
+    now_ms = int(time.time() * 1000)
     return {
         "role": "assistant",
         "text": "",
-        "ts": int(time.time() * 1000),
+        "ts": now_ms,
+        "epochMs": now_ms,
         "agentId": approval.get("agentId") or "hermes-default",
-        "approval": {**approval, "status": label, "resolvedAt": int(time.time() * 1000)},
+        "from": "Hermes",
+        "source": "hermes",
+        "sessionId": approval.get("session_id") or approval.get("sessionId") or "",
+        "runId": approval.get("runId") or approval.get("bridgeRunId") or "",
+        "approval": {**approval, "status": label, "resolvedAt": approval.get("resolvedAt") or now_ms},
         "tools": [],
         "thinking": "",
         "reasoningTokens": 0,
     }
+
+
+def _upsert_hermes_approval_history(profile, session_id, approval):
+    """Persist an approval card in its exact session and update it in place."""
+    if not isinstance(approval, dict):
+        return []
+    approval = dict(approval)
+    approval_id = str(approval.get("approval_id") or approval.get("id") or "").strip()
+    session_id = str(session_id or approval.get("session_id") or approval.get("sessionId") or "").strip()
+    if not approval_id:
+        return []
+    approval["id"] = approval_id
+    approval["approval_id"] = approval_id
+    approval["session_id"] = session_id
+    message = _approval_result_message(approval, approval.get("status") or "pending")
+    if str(approval.get("status") or "pending").lower() == "pending":
+        message["approval"]["status"] = "pending"
+        message["approval"].pop("resolvedAt", None)
+
+    def update(history):
+        history = list(history or [])
+        for index, item in enumerate(history):
+            current = item.get("approval") if isinstance(item, dict) and isinstance(item.get("approval"), dict) else None
+            current_id = str((current or {}).get("approval_id") or (current or {}).get("id") or "")
+            if current_id != approval_id:
+                continue
+            merged_approval = {**current, **message["approval"]}
+            history[index] = {
+                **item,
+                "sessionId": session_id or item.get("sessionId") or "",
+                "runId": message.get("runId") or item.get("runId") or "",
+                "approval": merged_approval,
+            }
+            return history
+        history.append(message)
+        return history
+
+    return _update_hermes_session_history(profile, session_id, update)
 
 
 def _parse_url_port(url, default=8642):
@@ -23334,8 +23793,7 @@ def _handle_hermes_run_start(body):
 
     delivery = _build_hermes_delivery_message(agent, agent_key, message, body)
     now_ms = int(time.time() * 1000)
-    history = _load_hermes_history(profile)
-    history.append({
+    user_message = {
         "role": "user",
         "text": message,
         "ts": now_ms,
@@ -23348,8 +23806,10 @@ def _handle_hermes_run_start(body):
         "sourceSurface": delivery["sourceSurface"] if delivery["isHumanSource"] else "",
         "sourceLabel": delivery["sourceLabel"] if delivery["isHumanSource"] else "",
         "attachments": delivery["attachments"],
-    })
-    _save_hermes_history(profile, history)
+    }
+    user_message["sessionId"] = session_id
+    _activate_hermes_session(profile, session_id)
+    _update_hermes_session_history(profile, session_id, lambda history: history + [user_message])
 
     session_key = f"virtual-world:hermes:{profile}"
     try:
@@ -23377,8 +23837,7 @@ def _handle_hermes_run_start(body):
             "_status": 502,
         }
 
-    _set_hermes_session_id(profile, session_id)
-    _remember_hermes_active_run({
+    run_meta = {
         "runId": run_id,
         "sessionId": session_id,
         "agentId": agent.get("id") or agent_key,
@@ -23390,9 +23849,17 @@ def _handle_hermes_run_start(body):
         "timeoutSec": timeout,
         "startedAt": now_ms,
         "apiEndpointUrl": client.base_url,
-    })
-    _set_hermes_presence(agent.get("statusKey") or agent.get("id"), "working", "Hermes native run")
-    _publish_hermes_api_progress(profile, agent.get("id") or agent_key, run_id, tools=[], reasoning_parts=[], reply="")
+        "providerKind": "hermes",
+        "runtime": _native_run_runtime(),
+    }
+    _remember_hermes_active_run(run_meta)
+    _presence_lifecycle("lifecycle_run_started", run_meta["statusKey"], run_id, "hermes", "Hermes native run")
+    threading.Thread(
+        target=_monitor_hermes_native_run,
+        args=(run_id,),
+        daemon=True,
+        name=f"hermes-native-run-{run_id}",
+    ).start()
     return {
         "ok": True,
         "providerPath": "api",
@@ -23403,57 +23870,24 @@ def _handle_hermes_run_start(body):
     }
 
 
-def _handle_hermes_run_events(handler, run_id):
-    """Proxy Hermes' native run SSE stream to the browser and persist final history."""
+def _monitor_hermes_native_run(run_id):
+    """Own Hermes execution server-side so browser SSE attachment is optional."""
     meta = _get_hermes_active_run(run_id)
     if not meta:
-        return handler._send_json({"ok": False, "error": f"Hermes run '{run_id}' not found"}, 404)
-
+        return
     profile = meta.get("profile") or "default"
     agent = _get_hermes_agent(meta.get("agentId") or meta.get("agentKey") or f"hermes-{profile}") or {}
     agent_id = agent.get("id") or meta.get("agentId") or "hermes-default"
-    status_key = agent.get("statusKey") or meta.get("statusKey") or agent_id
     session_id = meta.get("sessionId") or _get_hermes_session_id(profile) or ""
     original_message = meta.get("message") or ""
     timeout = int(meta.get("timeoutSec") or (VW_CONFIG.get("hermes") or {}).get("timeoutSec") or HERMES_TIMEOUT_SEC)
-    try:
-        client = _hermes_api_client_for_profile(profile, endpoint_url=meta.get("apiEndpointUrl") or "")
-    except Exception as exc:
-        return handler._send_json({"ok": False, "error": str(exc)}, 502)
-
-    handler.send_response(200)
-    handler.send_header("Content-Type", "text/event-stream")
-    handler.send_header("Cache-Control", "no-cache")
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header("X-Accel-Buffering", "no")
-    handler.end_headers()
-
-    client_connected = True
-
-    def send_sse(event_name, payload):
-        nonlocal client_connected
-        if not client_connected:
-            return False
-        data = dict(payload or {})
-        data.setdefault("event", event_name)
-        data.setdefault("runId", run_id)
-        data.setdefault("sessionId", session_id)
-        try:
-            handler.wfile.write(f"event: {event_name}\ndata: {json.dumps(data)}\n\n".encode("utf-8"))
-            handler.wfile.flush()
-            return True
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            client_connected = False
-            return False
-
     reply = ""
     reasoning_parts = []
     tools = []
     started_tools = {}
     started_tool_keys = {}
-    tool_seq = 0
     approval = None
-    terminal_event = None
+    terminal_name = ""
     error_text = ""
     last_progress_publish = 0.0
 
@@ -23461,75 +23895,48 @@ def _handle_hermes_run_events(handler, run_id):
         nonlocal last_progress_publish
         now = time.time()
         if force or now - last_progress_publish >= 0.25:
-            _publish_hermes_api_progress(profile, agent_id, run_id, tools=tools, reasoning_parts=reasoning_parts, reply=reply)
+            _publish_hermes_api_progress(
+                profile,
+                agent_id,
+                run_id,
+                tools=tools,
+                reasoning_parts=reasoning_parts,
+                reply=reply,
+                session_id=session_id,
+            )
             last_progress_publish = now
 
-    def finalize_history(ok=False):
-        history = _remove_hermes_progress_messages(_load_hermes_history(profile))
-        final_ts = int(time.time() * 1000)
-        history.extend(_hermes_tool_activity_messages(
-            tools,
-            agent_id=agent_id,
-            run_id=run_id,
-            base_ts=final_ts,
-            coerce_complete=bool(ok) and not approval,
-        ))
-        history.append({
-            "role": "assistant",
-            "text": reply,
-            "ts": final_ts + len(tools),
-            "epochMs": final_ts + len(tools),
-            "agentId": agent_id,
-            "from": agent.get("name") or "Hermes",
-            "source": "hermes",
-            "exitCode": 0 if ok else 1,
-            "sessionId": session_id,
-            "runId": run_id,
-            "tools": [],
-            "thinking": "" if "\n\n".join(reasoning_parts).strip() == reply.strip() else "\n\n".join(reasoning_parts),
-            "reasoningTokens": 0,
-            "approval": approval,
-            "error": error_text or None,
-        })
-        _save_hermes_history(profile, history)
-        _clear_hermes_active_run(run_id)
-        _set_hermes_presence(status_key, "idle" if ok or approval else "offline", "")
-
-    send_sse("run.started", {"ok": True, "agentId": agent_id, "profile": profile})
+    _native_run_emit(meta, "run.started", {
+        "ok": True, "agentId": agent_id, "profile": profile,
+        "runId": run_id, "sessionId": session_id,
+    })
     publish_progress(force=True)
-
     try:
+        client = _hermes_api_client_for_profile(profile, endpoint_url=meta.get("apiEndpointUrl") or "")
         for event in client.stream_run_events(run_id, timeout_sec=timeout + 30):
-            _set_hermes_presence(status_key, "working", "Hermes native run")
             event_name = str(event.get("event") or "").lower() or "event"
-            payload = {**event, "agentId": agent_id, "profile": profile}
+            payload = {**event, "agentId": agent_id, "profile": profile, "runId": run_id, "sessionId": session_id}
             if event_name == "message.delta":
-                delta = str(event.get("delta") or "")
-                reply += delta
+                reply += str(event.get("delta") or "")
                 payload["reply"] = reply
-                publish_progress()
             elif event_name == "reasoning.available":
                 text = str(event.get("text") or "")
                 if text:
                     reasoning_parts.append(text)
                     payload["thinking"] = "\n\n".join(reasoning_parts)
-                    publish_progress(force=True)
             elif event_name == "tool.started":
-                tool_seq += 1
-                fallback_id = f"{run_id}:tool:{tool_seq}"
-                card = _hermes_event_tool_card(event, "running", fallback_id=fallback_id)
+                card = _hermes_event_tool_card(event, "running", fallback_id=f"{run_id}:tool:{len(tools) + 1}")
                 event_tool_key = f"{event.get('tool') or event.get('name') or 'tool'}:{event.get('preview') or event.get('label') or ''}"
                 started_tool_keys[event_tool_key] = card["id"]
                 started_tools[card["id"]] = card
                 tools.append(card)
                 payload["toolCard"] = card
-                publish_progress(force=True)
             elif event_name in {"tool.completed", "tool.failed"}:
                 event_tool_key = f"{event.get('tool') or event.get('name') or 'tool'}:{event.get('preview') or event.get('label') or ''}"
-                fallback_id = started_tool_keys.get(event_tool_key)
-                if not fallback_id:
-                    matching_id = next((tid for tid, item in reversed(list(started_tools.items())) if item.get("name") == (event.get("tool") or event.get("name"))), "")
-                    fallback_id = matching_id or f"{run_id}:tool:{len(started_tools) + 1}"
+                fallback_id = started_tool_keys.get(event_tool_key) or next(
+                    (tool_id for tool_id, item in reversed(list(started_tools.items())) if item.get("name") == (event.get("tool") or event.get("name"))),
+                    f"{run_id}:tool:{len(tools) + 1}",
+                )
                 card = _hermes_event_tool_card(event, "done" if event_name == "tool.completed" else "error", fallback_id=fallback_id)
                 if card["id"] in started_tools:
                     started_tools[card["id"]].update(card)
@@ -23537,43 +23944,104 @@ def _handle_hermes_run_events(handler, run_id):
                 else:
                     tools.append(card)
                 payload["toolCard"] = card
-                publish_progress(force=True)
             elif event_name == "approval.request":
                 approval = _remember_hermes_approval_pending(
-                    _hermes_api_approval_from_event(event, agent_id=agent_id, profile=profile, session_id=session_id, original_message=original_message),
+                    _hermes_api_approval_from_event(
+                        event,
+                        agent_id=agent_id,
+                        profile=profile,
+                        session_id=session_id,
+                        original_message=original_message,
+                    ),
                     agent_id=agent_id,
                     profile=profile,
                     session_id=session_id,
                 )
+                _upsert_hermes_approval_history(profile, session_id, approval)
                 payload["approval"] = approval
-                publish_progress(force=True)
             elif event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
-                terminal_event = event
+                terminal_name = event_name
                 if event.get("output"):
                     reply = str(event.get("output") or reply)
-                if event.get("error"):
-                    error_text = str(event.get("error") or "")
+                error_text = str(event.get("error") or "")
                 if event_name == "run.completed":
                     approval = None
                 payload.update({"reply": reply, "tools": tools, "approval": approval, "error": error_text or None})
-                publish_progress(force=True)
-                send_sse(event_name, payload)
-                break
-            send_sse(event_name, payload)
-    except Exception as exc:
-        error_text = str(exc)
-        terminal_event = {"event": "run.failed", "error": error_text}
-        send_sse("run.failed", {"ok": False, "error": error_text, "reply": reply, "tools": tools})
 
-    terminal_name = str((terminal_event or {}).get("event") or "").lower()
+            _provider_run_presence_sync(meta, {
+                "reply": reply,
+                "thinking": "\n\n".join(reasoning_parts),
+                "tools": tools,
+                "approval": approval,
+                "error": error_text,
+            })
+            publish_progress(force=event_name != "message.delta")
+            _native_run_emit(meta, event_name, payload)
+            if terminal_name:
+                break
+        if not terminal_name:
+            terminal_name = "run.failed"
+            error_text = error_text or "Hermes event stream ended without a terminal event"
+            _native_run_emit(meta, terminal_name, {"ok": False, "error": error_text, "reply": reply, "tools": tools})
+    except Exception as exc:
+        terminal_name = "run.failed"
+        error_text = str(exc)
+        _native_run_emit(meta, terminal_name, {"ok": False, "error": error_text, "reply": reply, "tools": tools})
+
     ok = terminal_name == "run.completed"
-    if approval:
-        ok = False
-        error_text = error_text or "Hermes is waiting for approval."
-    elif terminal_name in {"run.failed", "run.cancelled", "run.canceled"}:
-        ok = False
+    if not ok:
         error_text = error_text or terminal_name.replace("run.", "Hermes run ")
-    finalize_history(ok=ok)
+    for expired_approval in _discard_hermes_run_approval_pending(
+        agent_id,
+        profile,
+        session_id,
+        run_id,
+    ):
+        _upsert_hermes_approval_history(profile, session_id, expired_approval)
+        if approval and (approval.get("id") or approval.get("approval_id")) == (expired_approval.get("id") or expired_approval.get("approval_id")):
+            approval = expired_approval
+    final_ts = int(time.time() * 1000)
+    tool_messages = _hermes_tool_activity_messages(
+        tools,
+        agent_id=agent_id,
+        run_id=run_id,
+        base_ts=final_ts,
+        coerce_complete=ok,
+    )
+    final_message = {
+        "role": "assistant", "text": reply, "ts": final_ts + len(tools), "epochMs": final_ts + len(tools),
+        "agentId": agent_id, "from": agent.get("name") or "Hermes", "source": "hermes",
+        "exitCode": 0 if ok else 1, "sessionId": session_id, "runId": run_id, "tools": [],
+        "thinking": "" if "\n\n".join(reasoning_parts).strip() == reply.strip() else "\n\n".join(reasoning_parts),
+        "reasoningTokens": 0, "approval": approval, "error": error_text or None,
+    }
+
+    def finalize_history(history):
+        history = _remove_hermes_progress_messages(history)
+        history.extend(tool_messages)
+        history.append(final_message)
+        return history
+
+    _update_hermes_session_history(profile, session_id, finalize_history)
+    result = {
+        "ok": ok,
+        "status": terminal_name.replace("run.", ""),
+        "error": error_text,
+        "reply": reply,
+        "tools": tools,
+        "approval": approval,
+    }
+    _provider_run_presence_finish(meta, result)
+    _native_run_finish(meta, result)
+    _schedule_native_run_cleanup(lambda: _clear_hermes_active_run(run_id))
+
+
+def _handle_hermes_run_events(handler, run_id):
+    """Tail the server-owned Hermes run stream."""
+    meta = _get_hermes_active_run(run_id)
+    if not meta:
+        return handler._send_json({"ok": False, "error": f"Hermes run '{run_id}' not found"}, 404)
+    return _native_run_tail(handler, meta, cleanup=lambda: _clear_hermes_active_run(run_id))
 
 
 def _handle_hermes_interrupt(body):
@@ -23590,7 +24058,13 @@ def _handle_hermes_interrupt(body):
     try:
         client = _hermes_api_client_for_profile(profile, endpoint_url=meta.get("apiEndpointUrl") or "")
         result = client.stop_run(run_id)
-        _set_hermes_presence(meta.get("statusKey") or agent.get("statusKey") or agent_key, "working", "Hermes stopping")
+        _presence_lifecycle(
+            "lifecycle_output_streaming",
+            meta.get("statusKey") or agent.get("statusKey") or agent_key,
+            run_id,
+            "hermes",
+            "Hermes stopping",
+        )
         return {"ok": True, "providerPath": "api", "runId": run_id, "result": result, "message": "Hermes stop requested."}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "providerPath": "api", "runId": run_id, "_status": 500}
@@ -23619,6 +24093,11 @@ def _handle_hermes_chat(body):
     sender_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
     yolo_once = bool(body.get("yoloOnce") or body.get("approvalApprovedOnce"))
     live_run_id = str(body.get("liveRunId") or body.get("runId") or "").strip()
+    presence_run_id = live_run_id or f"hermes-cli-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+    status_key = agent.get("statusKey") or agent.get("id") or agent_key
+    requested_session_id = str(body.get("sessionId") or body.get("session_id") or "").strip()
+    session_id = requested_session_id or _get_hermes_session_id(profile)
+    local_session_id = session_id or f"@new:hermes-{uuid.uuid4().hex}"
     delivery_message = message
     if is_human_source:
         pretty_surface = source_label or ("Virtual World Chat" if source_app == "virtual-world" and source_surface in {"chat-window", "chat"} else f"{source_app.replace('-', ' ').title()} {source_surface.replace('-', ' ').title()}".strip())
@@ -23628,9 +24107,8 @@ def _handle_hermes_chat(body):
             f"{message}\n\n"
             "Reply directly to the user. Do not assume a personal name unless the user provides one."
         )
-    history = _load_hermes_history(profile)
     now_ms = int(time.time() * 1000)
-    history.append({
+    user_message = {
         "role": "user",
         "text": message,
         "ts": now_ms,
@@ -23641,10 +24119,10 @@ def _handle_hermes_chat(body):
         "sourceApp": source_app if is_human_source else "",
         "sourceSurface": source_surface if is_human_source else "",
         "sourceLabel": source_label if is_human_source else "",
-    })
-    _save_hermes_history(profile, history)
+        "sessionId": local_session_id,
+    }
     progress_id = f"hermes-progress-{now_ms}"
-    history.append({
+    progress_message = {
         "role": "assistant",
         "text": "",
         "ts": int(time.time() * 1000),
@@ -23654,17 +24132,14 @@ def _handle_hermes_chat(body):
         "ephemeral": "hermes-progress",
         "progressId": progress_id,
         "runId": live_run_id,
+        "sessionId": local_session_id,
         "tools": [],
         "thinking": "Waiting for native Hermes activity.",
         "reasoningTokens": 0,
-    })
-    _save_hermes_history(profile, history)
-    if _gateway_presence:
-        try:
-            _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Hermes CLI task")
-        except Exception:
-            pass
-    session_id = _get_hermes_session_id(profile)
+    }
+    _activate_hermes_session(profile, local_session_id)
+    _update_hermes_session_history(profile, local_session_id, lambda history: history + [user_message, progress_message])
+    _presence_lifecycle("lifecycle_run_started", status_key, presence_run_id, "hermes", "Hermes CLI task")
     _append_hermes_live_event(live_run_id, "activity", {
         "tools": [],
         "thinking": "Hermes CLI process started.",
@@ -23686,6 +24161,7 @@ def _handle_hermes_chat(body):
         approval_bridge_dir,
         agent.get("id") or agent_key,
         profile,
+        local_session_id,
         stop_live_poll,
     ) if approval_bridge_dir else None
     try:
@@ -23697,15 +24173,20 @@ def _handle_hermes_chat(body):
             yolo_once=yolo_once,
             approval_bridge_dir=approval_bridge_dir,
         )
+        if not isinstance(result, dict):
+            result = {"ok": False, "error": "Hermes returned an invalid response"}
+    except Exception as exc:
+        result = {"ok": False, "error": str(exc), "reply": ""}
     finally:
         stop_live_poll.set()
         if live_thread:
             live_thread.join(timeout=0.2)
         if approval_bridge_thread:
             approval_bridge_thread.join(timeout=0.2)
-    if result.get("sessionId"):
-        _set_hermes_session_id(profile, result.get("sessionId"))
     active_session_id = result.get("sessionId") or session_id
+    history_session_id = active_session_id or local_session_id
+    if active_session_id and active_session_id != local_session_id:
+        _rekey_hermes_session_history(profile, local_session_id, active_session_id)
     if live_run_id:
         for expired_approval in _discard_hermes_approval_bridge_pending(
             agent.get("id") or agent_key,
@@ -23713,6 +24194,7 @@ def _handle_hermes_chat(body):
             active_session_id,
             live_run_id,
         ):
+            _upsert_hermes_approval_history(profile, history_session_id, expired_approval)
             _append_hermes_live_event(live_run_id, "approval", {"approval": expired_approval, "pending_count": 0})
     activity = {"tools": [], "thinking": "", "reasoningTokens": 0}
     if active_session_id and hasattr(provider, "export_session"):
@@ -23728,25 +24210,28 @@ def _handle_hermes_chat(body):
             tool_command = _hermes_terminal_command_from_tools(visible_tools)
             if tool_command:
                 approval["command"] = tool_command
-        approval = _remember_hermes_approval_pending(approval, agent.get("id") or agent_key, profile, result.get("sessionId") or _get_hermes_session_id(profile))
+        approval = _remember_hermes_approval_pending(approval, agent.get("id") or agent_key, profile, active_session_id)
         _append_hermes_live_event(live_run_id, "approval", {"approval": approval})
     now_ms = int(time.time() * 1000)
-    history = _remove_hermes_progress_messages(_load_hermes_history(profile))
-    history.append({
+    final_message = {
         "role": "assistant",
         "text": reply,
         "ts": now_ms,
         "epochMs": now_ms,
         "from": agent.get("name") or "Hermes",
         "source": "hermes",
-        "sessionId": active_session_id,
+        "sessionId": history_session_id,
         "exitCode": result.get("exitCode"),
         "tools": visible_tools,
         "thinking": activity.get("thinking") or "",
         "reasoningTokens": activity.get("reasoningTokens") or 0,
         "approval": approval,
-    })
-    _save_hermes_history(profile, history)
+    }
+    _update_hermes_session_history(
+        profile,
+        history_session_id,
+        lambda history: _remove_hermes_progress_messages(history) + [final_message],
+    )
     _append_hermes_live_event(live_run_id, "final", {
         "reply": reply,
         "ok": bool(result.get("ok")),
@@ -23756,11 +24241,23 @@ def _handle_hermes_chat(body):
         "approval": approval,
         "error": result.get("error"),
     })
-    if _gateway_presence:
-        try:
-            _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "idle" if result.get("ok") else "offline", "")
-        except Exception:
-            pass
+    _presence_lifecycle(
+        "lifecycle_run_finished",
+        status_key,
+        presence_run_id,
+        "hermes",
+        "completed" if result.get("ok") else "failed",
+        str(result.get("error") or ""),
+    )
+    if approval:
+        _presence_lifecycle(
+            "lifecycle_approval_requested",
+            status_key,
+            "",
+            approval.get("approval_id") or approval.get("id") or f"{presence_run_id}:approval",
+            "hermes",
+            "Waiting for approval",
+        )
     return {
         "ok": bool(result.get("ok")),
         "reply": reply,
@@ -23992,10 +24489,15 @@ def _handle_codex_chat(body):
     timeout = int(body.get("timeoutSec") or CODEX_TIMEOUT_SEC)
     profile = agent.get("profile") or agent.get("providerAgentId") or "main"
     delivery = _build_codex_delivery_message(agent, agent_key, message, body)
+    presence_run_id = f"codex-cli-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+    status_key = agent.get("statusKey") or agent.get("id") or agent_key
+    requested_session_id = str(body.get("sessionId") or body.get("session_id") or "").strip()
+    session_id = requested_session_id or _get_codex_session_id(profile)
+    local_session_id = session_id or f"@new:codex-{uuid.uuid4().hex}"
+    _activate_codex_session(profile, local_session_id)
 
-    history = _load_codex_history(profile)
     now_ms = int(time.time() * 1000)
-    history.append({
+    user_message = {
         "role": "user",
         "text": message,
         "ts": now_ms,
@@ -24006,48 +24508,52 @@ def _handle_codex_chat(body):
         "sourceApp": delivery["sourceApp"] if delivery["isHumanSource"] else "",
         "sourceSurface": delivery["sourceSurface"] if delivery["isHumanSource"] else "",
         "sourceLabel": delivery["sourceLabel"] if delivery["isHumanSource"] else "",
-    })
-    _save_codex_history(profile, history)
+        "sessionId": local_session_id,
+    }
+    _update_codex_session_history(profile, local_session_id, lambda history: history + [user_message])
 
-    if _gateway_presence:
-        try:
-            _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Codex task")
-        except Exception:
-            pass
-    session_id = _get_codex_session_id(profile)
-    result = provider.send_chat_message(
-        profile,
-        delivery["deliveryMessage"],
-        session_id=session_id,
-        timeout_sec=timeout,
-    )
-    if result.get("sessionId"):
-        _set_codex_session_id(profile, result.get("sessionId"))
+    _presence_lifecycle("lifecycle_run_started", status_key, presence_run_id, "codex", "Codex task")
+    try:
+        result = provider.send_chat_message(
+            profile,
+            delivery["deliveryMessage"],
+            session_id=session_id,
+            timeout_sec=timeout,
+        )
+        if not isinstance(result, dict):
+            result = {"ok": False, "error": "Codex returned an invalid response"}
+    except Exception as exc:
+        result = {"ok": False, "error": str(exc), "reply": ""}
     active_session_id = result.get("sessionId") or session_id
+    history_session_id = active_session_id or local_session_id
+    if active_session_id and active_session_id != local_session_id:
+        _rekey_codex_session_history(profile, local_session_id, active_session_id)
     reply = result.get("reply") or result.get("error") or ""
     tools = result.get("tools") if isinstance(result.get("tools"), list) else []
     thinking = result.get("thinking") or ""
     now_ms = int(time.time() * 1000)
-    history = _load_codex_history(profile)
-    history.append({
+    final_message = {
         "role": "assistant",
         "text": reply,
         "ts": now_ms,
         "epochMs": now_ms,
         "from": agent.get("name") or "Codex",
         "source": "codex",
-        "sessionId": active_session_id,
+        "sessionId": history_session_id,
         "exitCode": result.get("exitCode"),
         "tools": tools,
         "thinking": thinking,
         "reasoningTokens": result.get("reasoningTokens") or 0,
-    })
-    _save_codex_history(profile, history)
-    if _gateway_presence:
-        try:
-            _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "idle" if result.get("ok") else "offline", "")
-        except Exception:
-            pass
+    }
+    _update_codex_session_history(profile, history_session_id, lambda history: history + [final_message])
+    _presence_lifecycle(
+        "lifecycle_run_finished",
+        status_key,
+        presence_run_id,
+        "codex",
+        "completed" if result.get("ok") else "failed",
+        str(result.get("error") or ""),
+    )
     return {
         "ok": bool(result.get("ok")),
         "reply": reply,
@@ -24081,9 +24587,12 @@ def _handle_codex_run_start(body):
     timeout = int(body.get("timeoutSec") or CODEX_TIMEOUT_SEC)
     profile = agent.get("profile") or agent.get("providerAgentId") or "main"
     delivery = _build_codex_delivery_message(agent, agent_key, message, body)
+    requested_session_id = str(body.get("sessionId") or body.get("session_id") or "").strip()
+    session_id = requested_session_id or _get_codex_session_id(profile)
+    local_session_id = session_id or f"@new:codex-{uuid.uuid4().hex}"
+    _activate_codex_session(profile, local_session_id)
     now_ms = int(time.time() * 1000)
-    history = _load_codex_history(profile)
-    history.append({
+    user_message = {
         "role": "user",
         "text": message,
         "ts": now_ms,
@@ -24094,16 +24603,10 @@ def _handle_codex_run_start(body):
         "sourceApp": delivery["sourceApp"] if delivery["isHumanSource"] else "",
         "sourceSurface": delivery["sourceSurface"] if delivery["isHumanSource"] else "",
         "sourceLabel": delivery["sourceLabel"] if delivery["isHumanSource"] else "",
-    })
-    _save_codex_history(profile, history)
+        "sessionId": local_session_id,
+    }
+    _update_codex_session_history(profile, local_session_id, lambda history: history + [user_message])
 
-    if _gateway_presence:
-        try:
-            _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Codex app-server run")
-        except Exception:
-            pass
-
-    session_id = _get_codex_session_id(profile)
     try:
         run = provider.start_chat_stream(
             profile,
@@ -24112,18 +24615,13 @@ def _handle_codex_run_start(body):
             timeout_sec=timeout,
         )
     except Exception as exc:
-        if _gateway_presence:
-            try:
-                _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "offline", "")
-            except Exception:
-                pass
         return {"ok": False, "error": str(exc), "_status": 502}
 
     active_session_id = run.thread_id or session_id
-    if active_session_id:
-        _set_codex_session_id(profile, active_session_id)
+    if active_session_id and active_session_id != local_session_id:
+        _rekey_codex_session_history(profile, local_session_id, active_session_id)
     run_id = run.turn_id or f"codex-run-{uuid.uuid4().hex[:16]}"
-    _remember_codex_active_run({
+    run_meta = {
         "runId": run_id,
         "sessionId": active_session_id,
         "agentId": agent.get("id") or agent_key,
@@ -24135,7 +24633,17 @@ def _handle_codex_run_start(body):
         "timeoutSec": timeout,
         "startedAt": now_ms,
         "run": run,
-    })
+        "providerKind": "codex",
+        "runtime": _native_run_runtime(),
+    }
+    _remember_codex_active_run(run_meta)
+    _presence_lifecycle("lifecycle_run_started", run_meta["statusKey"], run_id, "codex", "Codex app-server run")
+    threading.Thread(
+        target=_monitor_codex_native_run,
+        args=(run_id,),
+        daemon=True,
+        name=f"codex-native-run-{run_id}",
+    ).start()
     return {
         "ok": True,
         "providerPath": "app-server",
@@ -24145,129 +24653,105 @@ def _handle_codex_run_start(body):
     }
 
 
-def _handle_codex_run_events(handler, run_id):
-    """Proxy Codex app-server notifications to the browser and persist final history."""
+def _monitor_codex_native_run(run_id):
+    """Own Codex app-server event consumption independently of the browser."""
     meta = _get_codex_active_run(run_id)
     if not meta:
-        return handler._send_json({"ok": False, "error": f"Codex run '{run_id}' not found"}, 404)
-
+        return
     run = meta.get("run")
     if not run:
-        _clear_codex_active_run(run_id)
-        return handler._send_json({"ok": False, "error": f"Codex run '{run_id}' is missing its stream"}, 410)
-
+        result = {"ok": False, "status": "failed", "error": "Codex run is missing its stream"}
+        _native_run_emit(meta, "run.failed", result)
+        _provider_run_presence_finish(meta, result)
+        _native_run_finish(meta, result)
+        return
     profile = meta.get("profile") or "main"
     agent = _get_codex_agent(meta.get("agentId") or meta.get("agentKey") or f"codex-{profile}") or {}
     agent_id = agent.get("id") or meta.get("agentId") or "codex-main"
-    status_key = agent.get("statusKey") or meta.get("statusKey") or agent_id
     session_id = meta.get("sessionId") or run.thread_id or _get_codex_session_id(profile) or ""
-
-    handler.send_response(200)
-    handler.send_header("Content-Type", "text/event-stream")
-    handler.send_header("Cache-Control", "no-cache")
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header("X-Accel-Buffering", "no")
-    handler.end_headers()
-
-    client_connected = True
-
-    def send_sse(event_name, payload):
-        nonlocal client_connected
-        if not client_connected:
-            return False
-        data = dict(payload or {})
-        data.setdefault("event", event_name)
-        data.setdefault("runId", run_id)
-        data.setdefault("turnId", run_id)
-        data.setdefault("sessionId", session_id)
-        data.setdefault("agentId", agent_id)
-        data.setdefault("profile", profile)
-        try:
-            handler.wfile.write(f"event: {event_name}\ndata: {json.dumps(data)}\n\n".encode("utf-8"))
-            handler.wfile.flush()
-            return True
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            client_connected = False
-            return False
-
     terminal_event = None
     error_text = ""
-
-    def finalize_history(ok=False):
-        snapshot = run.snapshot()
-        active_session_id = snapshot.get("sessionId") or session_id
-        if active_session_id:
-            _set_codex_session_id(profile, active_session_id)
-        tools = snapshot.get("tools") if isinstance(snapshot.get("tools"), list) else []
-        thinking = snapshot.get("thinking") or ""
-        reply = snapshot.get("reply") or error_text or snapshot.get("error") or ""
-        final_ts = int(time.time() * 1000)
-        history = _load_codex_history(profile)
-        history.append({
-            "role": "assistant",
-            "text": reply,
-            "ts": final_ts,
-            "epochMs": final_ts,
-            "from": agent.get("name") or "Codex",
-            "source": "codex",
-            "sessionId": active_session_id,
-            "runId": run_id,
-            "exitCode": 0 if ok else 1,
-            "tools": tools,
-            "thinking": thinking,
-            "reasoningTokens": 0,
-            "error": error_text or snapshot.get("error") or None,
-        })
-        _save_codex_history(profile, history)
-        _clear_codex_active_run(run_id)
-        try:
-            run.close()
-        except Exception:
-            pass
-        if _gateway_presence:
-            try:
-                _gateway_presence.set_manual_override(status_key, "idle" if ok else "offline", "")
-            except Exception:
-                pass
-
-    sent_run_started = send_sse("run.started", {"ok": True, "reply": "", "tools": [], "thinking": ""})
-
+    _native_run_emit(meta, "run.started", {
+        "ok": True, "reply": "", "tools": [], "thinking": "",
+        "agentId": agent_id, "profile": profile, "sessionId": session_id,
+        "runId": run_id, "turnId": run_id,
+    })
     try:
         while True:
-            if _gateway_presence:
-                try:
-                    _gateway_presence.set_manual_override(status_key, "working", "Codex app-server run")
-                except Exception:
-                    pass
             event = run.next_event(timeout=0.5)
             if event is None:
                 if getattr(run.state, "completed", False):
-                    terminal_event = terminal_event or {"event": "run.failed", "error": run.snapshot().get("error") or "Codex stream ended without a terminal event"}
+                    terminal_event = terminal_event or {
+                        "event": "run.failed",
+                        "error": run.snapshot().get("error") or "Codex stream ended without a terminal event",
+                    }
+                    _native_run_emit(meta, "run.failed", terminal_event)
                     break
                 continue
             event_name = str(event.get("event") or "event")
-            payload = {**event, "agentId": agent_id, "profile": profile, "sessionId": session_id, "runId": run_id, "turnId": run_id}
-            if event_name == "run.started" and sent_run_started:
+            if event_name == "run.started":
                 continue
+            payload = {
+                **event,
+                "agentId": agent_id,
+                "profile": profile,
+                "sessionId": event.get("sessionId") or session_id,
+                "runId": run_id,
+                "turnId": run_id,
+            }
             if event.get("error"):
                 error_text = str(event.get("error") or "")
+            _provider_run_presence_sync(meta, payload)
+            _native_run_emit(meta, event_name, payload)
             if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
-                payload.update(_codex_context_payload(agent, profile=profile, session_id=payload.get("sessionId") or session_id))
-            if send_sse(event_name, payload) and event_name == "run.started":
-                sent_run_started = True
-            if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
-                terminal_event = event
+                terminal_event = payload
                 break
     except Exception as exc:
         error_text = str(exc)
-        terminal_event = {"event": "run.failed", "error": error_text}
-        send_sse("run.failed", {"ok": False, "error": error_text, **run.snapshot()})
+        terminal_event = {"event": "run.failed", "error": error_text, **run.snapshot()}
+        _native_run_emit(meta, "run.failed", terminal_event)
 
-    terminal_name = str((terminal_event or {}).get("event") or "").lower()
+    terminal_name = str((terminal_event or {}).get("event") or "run.failed").lower()
     ok = terminal_name == "run.completed"
-    if terminal_name in {"run.failed", "run.cancelled", "run.canceled"}:
+    if not ok:
         error_text = error_text or str((terminal_event or {}).get("error") or terminal_name.replace("run.", "Codex run "))
-    finalize_history(ok=ok)
+    snapshot = run.snapshot()
+    active_session_id = snapshot.get("sessionId") or session_id
+    tools = snapshot.get("tools") if isinstance(snapshot.get("tools"), list) else []
+    thinking = snapshot.get("thinking") or ""
+    reply = snapshot.get("reply") or error_text or snapshot.get("error") or ""
+    final_ts = int(time.time() * 1000)
+    final_message = {
+        "role": "assistant", "text": reply, "ts": final_ts, "epochMs": final_ts,
+        "from": agent.get("name") or "Codex", "source": "codex",
+        "sessionId": active_session_id, "runId": run_id, "exitCode": 0 if ok else 1,
+        "tools": tools, "thinking": thinking, "reasoningTokens": 0,
+        "error": error_text or snapshot.get("error") or None,
+    }
+    _update_codex_session_history(profile, active_session_id, lambda history: history + [final_message])
+    try:
+        run.close()
+    except Exception:
+        pass
+    result = {
+        "ok": ok,
+        "status": terminal_name.replace("run.", ""),
+        "error": error_text,
+        "reply": reply,
+        "tools": tools,
+        "thinking": thinking,
+    }
+    _provider_run_presence_finish(meta, result)
+    _native_run_finish(meta, result)
+    _schedule_native_run_cleanup(lambda: _clear_codex_active_run(run_id))
+
+
+def _handle_codex_run_events(handler, run_id):
+    """Tail the server-owned Codex app-server run stream."""
+    meta = _get_codex_active_run(run_id)
+    if not meta:
+        return handler._send_json({"ok": False, "error": f"Codex run '{run_id}' not found"}, 404)
+    return _native_run_tail(handler, meta, cleanup=lambda: _clear_codex_active_run(run_id))
 
 
 def _handle_codex_interrupt(body):
@@ -24279,11 +24763,23 @@ def _handle_codex_interrupt(body):
     if not provider:
         return {"ok": False, "error": "Codex provider module unavailable", "_status": 503}
     result = provider.interrupt(profile)
-    if result.get("ok") and _gateway_presence:
-        try:
-            _gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Codex stopping")
-        except Exception:
-            pass
+    if result.get("ok"):
+        meta = next(
+            (
+                item for item in list(CODEX_ACTIVE_RUNS.values())
+                if isinstance(item, dict) and item.get("profile") == profile
+                and not ((item.get("runtime") or {}).get("done"))
+            ),
+            None,
+        )
+        if meta:
+            _presence_lifecycle(
+                "lifecycle_output_streaming",
+                meta.get("statusKey") or agent.get("statusKey") or agent.get("id"),
+                meta.get("runId"),
+                "codex",
+                "Codex stopping",
+            )
     return result
 
 
@@ -24296,7 +24792,9 @@ def _handle_hermes_approval_respond(body):
     agent_key = body.get("agentId") or approval.get("agentId") or "hermes-default"
     approval_id = str(body.get("approval_id") or body.get("approvalId") or approval.get("approval_id") or approval.get("id") or "").strip()
     session_id = str(body.get("session_id") or body.get("sessionId") or approval.get("session_id") or approval.get("sessionId") or "").strip()
-    queued_approval = _resolve_hermes_approval_pending(agent_key, approval_id, session_id, choice)
+    # Read first and consume only after the provider acknowledges delivery. A
+    # transient API/file error must leave the card pending so the user can retry.
+    queued_approval = _find_hermes_approval_pending(agent_key, approval_id, session_id)
     if queued_approval:
         approval = {**queued_approval, **approval}
     message = str(body.get("message") or approval.get("message") or "").strip()
@@ -24304,6 +24802,7 @@ def _handle_hermes_approval_respond(body):
     if not agent:
         return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
     profile = agent.get("profile") or agent.get("providerAgentId") or "default"
+    status_key = agent.get("statusKey") or agent.get("id") or agent_key
     if approval.get("provider") == "hermes-api" and approval.get("runId"):
         run_id = str(approval.get("runId"))
         api_choice = "deny" if choice == "deny" else "once"
@@ -24311,13 +24810,27 @@ def _handle_hermes_approval_respond(body):
             run_meta = _get_hermes_active_run(run_id) or {}
             client = _hermes_api_client_for_profile(profile, endpoint_url=run_meta.get("apiEndpointUrl") or "")
             approved = client.respond_approval(run_id, api_choice)
-            history = _load_hermes_history(profile)
-            history.append(_approval_result_message({**approval, "agentId": agent.get("id") or agent_key, "message": message}, choice))
-            _save_hermes_history(profile, history)
+            resolved = _resolve_hermes_approval_pending(agent_key, approval_id, session_id, choice) or {
+                **approval,
+                "status": choice,
+                "resolvedAt": int(time.time() * 1000),
+            }
+            resolved = {
+                **resolved,
+                "agentId": agent.get("id") or agent_key,
+                "message": message,
+                "session_id": session_id or approval.get("session_id") or "",
+                "status": "approved" if choice == "approve_once" else "denied",
+            }
+            _upsert_hermes_approval_history(
+                profile,
+                resolved.get("session_id") or "",
+                resolved,
+            )
+            _presence_lifecycle("lifecycle_approval_resolved", status_key, run_id, approval_id, "hermes", choice)
             if choice == "deny":
-                _set_hermes_presence(agent.get("statusKey") or agent.get("id"), "idle", "")
                 return {"ok": True, "choice": "deny", "providerPath": "api", "runId": run_id, "result": approved, "message": "Hermes approval denied."}
-            _set_hermes_presence(agent.get("statusKey") or agent.get("id"), "working", "Hermes approval responded")
+            _presence_lifecycle("lifecycle_output_streaming", status_key, run_id, "hermes", "Hermes approval responded")
             return {
                 "ok": True,
                 "choice": "approve_once",
@@ -24330,9 +24843,6 @@ def _handle_hermes_approval_respond(body):
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc), "providerPath": "api", "runId": run_id, "_status": 500}
-    history = _load_hermes_history(profile)
-    history.append(_approval_result_message({**approval, "agentId": agent.get("id") or agent_key, "message": message}, choice))
-    _save_hermes_history(profile, history)
     bridge_run_id = str(approval.get("bridgeRunId") or "").strip()
     bridge_approval_id = str(approval.get("bridgeApprovalId") or approval.get("approval_id") or approval.get("id") or "").strip()
     if bridge_run_id and bridge_approval_id:
@@ -24342,25 +24852,47 @@ def _handle_hermes_approval_respond(body):
             os.makedirs(response_dir, exist_ok=True)
             hermes_choice = "once" if choice == "approve_once" else "deny"
             response_path = os.path.join(response_dir, f"{bridge_approval_id}.json")
-            with open(response_path, "w", encoding="utf-8") as f:
-                json.dump({
-                    "choice": hermes_choice,
-                    "resolvedAt": int(time.time() * 1000),
-                    "source": "virtual-world-chat",
-                }, f)
+            _atomic_write_json(response_path, {
+                "choice": hermes_choice,
+                "resolvedAt": int(time.time() * 1000),
+                "source": "virtual-world-chat",
+            })
+            resolved = _resolve_hermes_approval_pending(agent_key, approval_id, session_id, choice) or approval
+            resolved = {
+                **resolved,
+                "agentId": agent.get("id") or agent_key,
+                "message": message,
+                "session_id": session_id or approval.get("session_id") or "",
+                "status": "approved" if choice == "approve_once" else "denied",
+                "resolvedAt": int(time.time() * 1000),
+            }
+            _upsert_hermes_approval_history(profile, resolved.get("session_id") or "", resolved)
+            _presence_lifecycle("lifecycle_approval_resolved", status_key, bridge_run_id, approval_id or bridge_approval_id, "hermes", choice)
             return {
                 "ok": True,
                 "choice": choice,
                 "message": "Hermes approval response delivered to the running request.",
-                "approval": {**approval, "status": "approved" if choice == "approve_once" else "denied"},
+                "approval": resolved,
                 "deferredFinal": True,
             }
         except Exception as exc:
             return {"ok": False, "error": f"failed to resolve live Hermes approval: {exc}", "_status": 500}
     if choice == "deny":
+        resolved = _resolve_hermes_approval_pending(agent_key, approval_id, session_id, choice) or approval
+        resolved = {
+            **resolved,
+            "agentId": agent.get("id") or agent_key,
+            "message": message,
+            "session_id": session_id or approval.get("session_id") or "",
+            "status": "denied",
+            "resolvedAt": int(time.time() * 1000),
+        }
+        _upsert_hermes_approval_history(profile, resolved.get("session_id") or "", resolved)
+        _presence_lifecycle("lifecycle_approval_resolved", status_key, "", approval_id, "hermes", choice)
         return {"ok": True, "choice": "deny", "message": "Hermes approval denied."}
     if not message:
         return {"ok": False, "error": "original approval message is missing", "_status": 400}
+    _presence_lifecycle("lifecycle_approval_resolved", status_key, "", approval_id, "hermes", choice)
     result = _handle_hermes_chat({
         "agentId": agent_key,
         "message": message,
@@ -24372,6 +24904,17 @@ def _handle_hermes_approval_respond(body):
         "yoloOnce": True,
         "approvalRetry": True,
     })
+    if result.get("ok"):
+        resolved = _resolve_hermes_approval_pending(agent_key, approval_id, session_id, choice) or approval
+        resolved = {
+            **resolved,
+            "agentId": agent.get("id") or agent_key,
+            "message": message,
+            "session_id": session_id or approval.get("session_id") or result.get("sessionId") or "",
+            "status": "approved",
+            "resolvedAt": int(time.time() * 1000),
+        }
+        _upsert_hermes_approval_history(profile, resolved.get("session_id") or "", resolved)
     result["approvalChoice"] = "approve_once"
     return result
 
@@ -25073,7 +25616,7 @@ def _refresh_agent_roster_after_create():
             _gateway_presence.init_agents([
                 a.get("statusKey") or a.get("id")
                 for a in _agent_roster
-                if a.get("available") is not False and (a.get("statusKey") or a.get("id"))
+                if a.get("statusKey") or a.get("id")
             ], prune=True)
     except Exception as exc:
         print(f"⚠️  Virtual World agent roster refresh failed: {exc}")
@@ -25798,9 +26341,12 @@ def initialize_live_presence():
     agent_ids = [
         a.get("statusKey") or a.get("id")
         for a in get_roster()
-        if a.get("available") is not False and (a.get("statusKey") or a.get("id"))
+        if a.get("statusKey") or a.get("id")
     ]
     _gateway_presence.init_agents(agent_ids, prune=True)
+    if hasattr(_gateway_presence, "start_maintenance"):
+        _gateway_presence.start_maintenance()
+    _presence_enabled = True
 
     try:
         _gateway_presence.set_meetings_file(STATUS_FILE)
@@ -25816,15 +26362,14 @@ def initialize_live_presence():
     if gw_url and gw_token:
         try:
             _gateway_presence.start(gw_url, gw_token, port=PORT, client_version=_get_openclaw_version(), origin=_gateway_control_origin())
-            _presence_enabled = True
             _presence_gateway_config = (gw_url or "", gw_token or "")
         except Exception as e:
             print(f"⚠️  Virtual World presence: failed to start gateway listener: {e}")
     else:
         _presence_gateway_config = None
-        print("⚠️  Virtual World presence: missing gateway config/token, falling back to legacy status file")
+        print("ℹ️  Virtual World presence: shared coordinator active without an OpenClaw Gateway observer")
 
-    if _presence_enabled and _presence_snapshot_thread is None:
+    if _presence_snapshot_thread is None:
         def snapshot_loop():
             while True:
                 time.sleep(30)
@@ -25895,7 +26440,13 @@ def _normalize_presence_entry(entry):
     # Active lifecycle/tool sources can be silent during long commands. Generic
     # chat/snapshot display states must still age out if maintenance missed the
     # terminal event, otherwise disconnected apps can show stale working status.
-    has_active_work_source = source_lower.startswith(("agent-lifecycle", "agent-tool", "session-tool", "gateway"))
+    has_active_work_source = (
+        int(normalized.get("activeRunCount") or 0) > 0
+        or int(normalized.get("activeToolCount") or 0) > 0
+        or int(normalized.get("waitingApprovalCount") or 0) > 0
+        or source_lower.startswith(("agent-lifecycle", "agent-tool", "session-tool", "gateway"))
+        or source_lower.endswith(("-lifecycle", "-tool", "-approval"))
+    )
     stale_limit_sec = 180 if (
         "tool" in source_lower or "command" in source_lower or
         any(token in task_lower for token in ("reading", "processing", "thinking", "running command", "editing", "writing", "searching", "fetching"))
@@ -25934,15 +26485,15 @@ def _load_local_presence_state():
 
 
 def load_agent_status():
-    # Virtual World owns its presence state. It derives status directly from the
-    # local OpenClaw gateway listener and only falls back to local status files.
+    # Virtual World owns one provider-neutral lifecycle state. OpenClaw's
+    # Gateway observer is one source feeding this coordinator.
     return _load_local_presence_state()
 
 
 def load_presence_debug():
     if _presence_enabled and _gateway_presence and hasattr(_gateway_presence, "get_connection_status"):
         try:
-            return {**_gateway_presence.get_connection_status(), "source": "virtual-world", "statusEndpoint": "/api/status"}
+            return {**_gateway_presence.get_connection_status(), "source": "provider-lifecycle-coordinator", "statusEndpoint": "/api/status"}
         except Exception as e:
             return {"connected": False, "error": str(e), "agentsCached": 0, "debug": {}, "source": "virtual-world", "statusEndpoint": "/api/status"}
     local_state = _load_local_presence_state()
@@ -26168,12 +26719,33 @@ def _discover_provider_roster():
     now = datetime.now(timezone.utc).isoformat()
     merged = []
     live_keys = set()
-    for row in _get_provider_registry().discover_agents():
+    registry = _get_provider_registry()
+    manifest_health = {}
+    try:
+        manifest_health = {
+            str(item.get("id") or ""): item
+            for item in registry.manifests(include_health=True)
+            if isinstance(item, dict) and item.get("id")
+        }
+    except Exception:
+        manifest_health = {}
+    for row in registry.discover_agents():
         item = dict(row)
-        item["available"] = True
-        item["connectionState"] = "connected"
+        provider_kind = str(item.get("providerKind") or item.get("providerId") or "openclaw")
+        provider_manifest = manifest_health.get(provider_kind) or {}
+        capabilities = provider_manifest.get("capabilities") if isinstance(provider_manifest.get("capabilities"), dict) else {}
+        health = provider_manifest.get("health") if isinstance(provider_manifest.get("health"), dict) else {}
+        health_authoritative = bool(capabilities.get("health")) and bool(health)
+        provider_connected = (
+            bool(health.get("ok")) and health.get("authOk") is not False
+        ) if health_authoritative else True
+        item["available"] = bool(row.get("available", True)) and provider_connected
+        item["connectionState"] = "connected" if item["available"] else str(health.get("connectionState") or "offline")
         item["lastSeenAt"] = now
-        item.pop("offlineSince", None)
+        if item["available"]:
+            item.pop("offlineSince", None)
+        else:
+            item.setdefault("offlineSince", now)
         merged.append(item)
         live_keys.add(_provider_discovery_key(item))
     for cached in _load_provider_discovery_cache():
@@ -26197,7 +26769,42 @@ def _refresh_provider_discovery(force=False):
             return False
         _provider_discovered_roster = _discover_provider_roster()
         _provider_discovered_at = time.time()
+        _sync_provider_presence_health(_provider_discovered_roster, prune=True)
     return True
+
+
+def _sync_provider_presence_health(rows, prune=False):
+    """Feed discovery connectivity into the independent provider-health plane."""
+    if not _gateway_presence:
+        return
+    agents = [row for row in (rows or []) if isinstance(row, dict)]
+    agent_ids = [
+        str(row.get("statusKey") or row.get("id") or "").strip()
+        for row in agents
+        if str(row.get("statusKey") or row.get("id") or "").strip()
+    ]
+    try:
+        _gateway_presence.init_agents(agent_ids, prune=prune)
+    except Exception:
+        pass
+    for row in agents:
+        agent_id = str(row.get("statusKey") or row.get("id") or "").strip()
+        if not agent_id:
+            continue
+        provider_kind = str(row.get("providerKind") or row.get("providerId") or "openclaw")
+        connection_state = str(row.get("connectionState") or ("connected" if row.get("available") is not False else "offline"))
+        connected = row.get("available") is not False and connection_state.lower() not in {"offline", "disconnected", "unavailable", "error"}
+        method_name = "lifecycle_provider_connected" if connected else "lifecycle_provider_disconnected"
+        callback = getattr(_gateway_presence, method_name, None)
+        if not callable(callback):
+            continue
+        try:
+            if connected:
+                callback(agent_id, provider_kind, connection_state)
+            else:
+                callback(agent_id, provider_kind, connection_state, str(row.get("error") or ""))
+        except Exception:
+            pass
 
 
 def _forget_provider_agent(provider_kind, provider_connection_id, provider_agent_id):
@@ -28533,12 +29140,13 @@ def _generic_provider_session_path(provider_kind, profile):
 
 
 def _load_generic_provider_session(provider_kind, profile):
-    try:
-        with open(_generic_provider_session_path(provider_kind, profile), "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        return payload if isinstance(payload, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
+    with _PROVIDER_SESSION_SYNC_LOCK:
+        try:
+            with open(_generic_provider_session_path(provider_kind, profile), "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            return payload if isinstance(payload, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
 
 
 def _save_generic_provider_session(provider_kind, profile, session_id, **extra):
@@ -28550,8 +29158,24 @@ def _save_generic_provider_session(provider_kind, profile, session_id, **extra):
         "updatedAt": datetime.now(timezone.utc).isoformat(),
         **extra,
     }
-    _atomic_write_text(_generic_provider_session_path(provider_kind, profile), json.dumps(payload, indent=2) + "\n")
+    with _PROVIDER_SESSION_SYNC_LOCK:
+        _atomic_write_text(_generic_provider_session_path(provider_kind, profile), json.dumps(payload, indent=2) + "\n")
     return payload
+
+
+def _provider_session_key(provider_kind, profile, session_id=""):
+    values = [str(provider_kind or "provider"), str(profile or "main")]
+    if session_id:
+        values.append(str(session_id))
+    return ":".join(values)
+
+
+def _new_provider_session_key(provider_kind, profile):
+    return _provider_session_key(provider_kind, profile, f"@new:{uuid.uuid4().hex}")
+
+
+def _new_openclaw_chat_session_key(agent_id):
+    return f"agent:{agent_id}:vw-chat-{int(time.time() * 1000)}-{uuid.uuid4().hex[:10]}"
 
 
 def _provider_config_key(provider_kind):
@@ -28919,7 +29543,8 @@ def _chat_sessions_list_claude_code(agent_ref, limit=40):
     home_path = _claude_code_home_path()
     if not os.path.isdir(home_path):
         return {"ok": False, "error": f"Claude Code home not found at {home_path}", "sessions": []}
-    active_id = _get_claude_code_session_id(agent_ref["profile"] or "main")
+    profile = agent_ref["profile"] or "main"
+    active_id = str(_load_generic_provider_session("claude-code", profile).get("sessionId") or _get_claude_code_session_id(profile) or "")
     sessions = []
     for row in _claude_code_session_records(limit=limit):
         session_id = row.get("id")
@@ -28980,11 +29605,11 @@ def handle_chat_sessions_list(agent_id, limit=40):
         return {"ok": False, "error": f"Unknown agent: {agent_id}", "sessions": []}, 404
     kind = agent_ref["providerKind"]
     if kind == "hermes":
-        outcome = _chat_sessions_list_hermes(agent_ref)
+        outcome = _chat_sessions_list_hermes(agent_ref, limit=limit)
     elif kind == "codex":
-        outcome = _chat_sessions_list_codex(agent_ref)
+        outcome = _chat_sessions_list_codex(agent_ref, limit=limit)
     elif kind == "openclaw":
-        outcome = _chat_sessions_list_openclaw(agent_ref)
+        outcome = _chat_sessions_list_openclaw(agent_ref, limit=limit)
     elif kind in ("claude-code", "claudecode", "claude"):
         outcome = _chat_sessions_list_claude_code(agent_ref, limit=limit)
     else:
@@ -29008,6 +29633,9 @@ def handle_chat_session_create(agent_id, body=None):
     profile = agent_ref["profile"]
     if kind == "hermes":
         agent = _agent_record_for(agent_ref["agentId"]) or {}
+        current = _load_hermes_state(profile)
+        if current.get("sessionId"):
+            _save_chat_session_mirror("hermes", profile, current.get("sessionId"), current.get("messages") or [])
         if _hermes_api_agent_capability(agent, "sessionCreate"):
             try:
                 created = _hermes_api_client_for_agent(agent).create_session(
@@ -29025,6 +29653,7 @@ def handle_chat_session_create(agent_id, body=None):
                     "providerKind": kind,
                     "profile": profile,
                     "sessionId": session_id,
+                    "sessionKey": _provider_session_key(kind, profile, session_id),
                     "session": session,
                     "providerPath": "api",
                 }, 200
@@ -29034,29 +29663,90 @@ def handle_chat_session_create(agent_id, body=None):
         # Hermes creates the new session lazily on the next message; clearing
         # the tracked session id + local mirror is the official reset path.
         _save_hermes_state(profile, {"messages": [], "sessionId": ""})
-        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "providerPath": "cli", "note": "New Hermes session starts with the next message."}, 200
+        return {
+            "ok": True,
+            "providerKind": kind,
+            "profile": profile,
+            "sessionId": "",
+            "sessionKey": _new_provider_session_key(kind, profile),
+            "providerPath": "cli",
+            "note": "New Hermes session starts with the next message; the previous session remains saved.",
+        }, 200
     if kind == "codex":
+        current = _load_codex_state(profile)
+        if current.get("sessionId"):
+            _save_chat_session_mirror("codex", profile, current.get("sessionId"), current.get("messages") or [])
         _save_codex_state(profile, {"messages": [], "sessionId": ""})
-        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "New Codex thread starts with the next message."}, 200
+        return {
+            "ok": True,
+            "providerKind": kind,
+            "profile": profile,
+            "sessionId": "",
+            "sessionKey": _new_provider_session_key(kind, profile),
+            "note": "New Codex thread starts with the next message; the previous thread remains saved.",
+        }, 200
     if kind in ("claude-code", "claudecode", "claude"):
+        current = _load_claude_code_state(profile)
+        if current.get("sessionId"):
+            _save_chat_session_mirror("claude-code", profile, current.get("sessionId"), current.get("messages") or [])
+        generic = _load_generic_provider_session("claude-code", profile)
+        generic_id = str(generic.get("sessionId") or "")
+        if generic_id:
+            _save_chat_session_mirror("claude-code", profile, generic_id, _load_provider_history("claude-code", profile))
         _save_claude_code_state(profile, {"messages": [], "sessionId": ""})
-        return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "New Claude Code session starts with the next message. Native resume uses `claude --resume <session-id>`; forking uses `--fork-session`."}, 200
+        _save_generic_provider_session("claude-code", profile, "", source="new-session")
+        _save_provider_history("claude-code", profile, [])
+        return {
+            "ok": True,
+            "providerKind": kind,
+            "profile": profile,
+            "sessionId": "",
+            "sessionKey": _new_provider_session_key("claude-code", profile),
+            "note": "New Claude Code session starts with the next message; the previous session remains saved.",
+        }, 200
     if kind == "openclaw":
-        session_key = str((body or {}).get("sessionKey") or f"agent:{agent_ref['agentId']}:main")
-        res = _gateway_rpc_call("sessions.reset", {"key": session_key}, timeout=15)
-        if not res.get("ok"):
-            return {"ok": False, "error": str(res.get("error") or "sessions.reset failed")}, 502
-        return {"ok": True, "providerKind": kind, "sessionKey": session_key}, 200
+        session_key = _new_openclaw_chat_session_key(agent_ref["agentId"])
+        return {
+            "ok": True,
+            "providerKind": kind,
+            "sessionKey": session_key,
+            "note": "The new OpenClaw session starts with the next message; the previous session remains saved.",
+        }, 200
     agent = _agent_record_for(agent_ref["agentId"]) or {}
     capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
     if not capabilities.get("sessionCreate"):
         return {"ok": False, "error": f"{kind} does not declare session creation"}, 405
     provider = _get_provider_registry().get(kind)
+    active = _load_generic_provider_session(kind, profile)
+    active_id = str(active.get("sessionId") or "")
+    if active_id:
+        _save_chat_session_mirror(kind, profile, active_id, _load_provider_history(kind, profile))
     if callable(getattr(provider, "create_session", None)):
         outcome = _get_provider_registry().invoke(kind, "create_session", profile)
-        return outcome, 200 if isinstance(outcome, dict) and outcome.get("ok") else 502
+        if not isinstance(outcome, dict) or not outcome.get("ok"):
+            return outcome if isinstance(outcome, dict) else {"ok": False, "error": "Invalid provider response"}, 502
+        session = outcome.get("session") if isinstance(outcome.get("session"), dict) else {}
+        session_id = str(outcome.get("sessionId") or outcome.get("id") or session.get("id") or "")
+        _save_generic_provider_session(kind, profile, session_id, source="session-create")
+        _save_provider_history(kind, profile, [])
+        return {
+            **outcome,
+            "ok": True,
+            "providerKind": kind,
+            "profile": profile,
+            "sessionId": session_id,
+            "sessionKey": _provider_session_key(kind, profile, session_id) if session_id else _new_provider_session_key(kind, profile),
+        }, 200
     _save_generic_provider_session(kind, profile, "")
-    return {"ok": True, "providerKind": kind, "profile": profile, "sessionId": "", "note": "A new native session starts with the next message."}, 200
+    _save_provider_history(kind, profile, [])
+    return {
+        "ok": True,
+        "providerKind": kind,
+        "profile": profile,
+        "sessionId": "",
+        "sessionKey": _new_provider_session_key(kind, profile),
+        "note": "A new native session starts with the next message; the previous session remains saved.",
+    }, 200
 
 
 def handle_chat_session_delete(agent_id, session_id, body=None):
@@ -29075,6 +29765,8 @@ def handle_chat_session_delete(agent_id, session_id, body=None):
                 ok = bool(deleted.get("deleted", True))
                 if ok and _get_hermes_session_id(profile) == session_id:
                     _save_hermes_state(profile, {"messages": [], "sessionId": ""})
+                if ok:
+                    _delete_chat_session_mirror("hermes", profile, session_id)
                 return {**deleted, "ok": ok, "sessionId": session_id, "providerPath": "api"}, 200 if ok else 502
             except Exception as exc:
                 if not agent.get("cliAvailable"):
@@ -29085,6 +29777,8 @@ def handle_chat_session_delete(agent_id, session_id, body=None):
         outcome = provider.delete_session(profile, session_id)
         if outcome.get("ok") and _get_hermes_session_id(profile) == session_id:
             _save_hermes_state(profile, {"messages": [], "sessionId": ""})
+        if outcome.get("ok"):
+            _delete_chat_session_mirror("hermes", profile, session_id)
         return {**outcome, "providerPath": "cli"}, 200 if outcome.get("ok") else 502
     if kind == "codex":
         provider = _codex_provider()
@@ -29093,6 +29787,8 @@ def handle_chat_session_delete(agent_id, session_id, body=None):
         outcome = provider.delete_thread(profile, session_id)
         if outcome.get("ok") and _get_codex_session_id(profile) == session_id:
             _save_codex_state(profile, {"messages": [], "sessionId": ""})
+        if outcome.get("ok"):
+            _delete_chat_session_mirror("codex", profile, session_id)
         return outcome, 200 if outcome.get("ok") else 502
     if kind in ("claude-code", "claudecode", "claude"):
         path = _claude_code_find_session_file(session_id)
@@ -29105,11 +29801,15 @@ def handle_chat_session_delete(agent_id, session_id, body=None):
             return {"ok": False, "error": str(exc)}, 500
         if _get_claude_code_session_id(profile) == session_id:
             _save_claude_code_state(profile, {"messages": [], "sessionId": ""})
+        if str(_load_generic_provider_session("claude-code", profile).get("sessionId") or "") == session_id:
+            _save_generic_provider_session("claude-code", profile, "", source="session-delete")
+            _save_provider_history("claude-code", profile, [])
+        _delete_chat_session_mirror("claude-code", profile, session_id)
         return {"ok": True, "deleted": True, "sessionId": session_id, "deletedPath": deleted_path}, 200
     if kind == "openclaw":
         session_key = str(session_id)
         if session_key.endswith(":main"):
-            return {"ok": False, "error": "The main session cannot be deleted; use new session to reset it."}, 400
+            return {"ok": False, "error": "The main session cannot be deleted; start a new session instead."}, 400
         res = _gateway_rpc_call("sessions.delete", {"key": session_key, "deleteTranscript": True}, timeout=15)
         if not res.get("ok"):
             return {"ok": False, "error": str(res.get("error") or "sessions.delete failed")}, 502
@@ -29122,6 +29822,8 @@ def handle_chat_session_delete(agent_id, session_id, body=None):
     if isinstance(outcome, dict) and outcome.get("ok"):
         if _load_generic_provider_session(kind, profile).get("sessionId") == session_id:
             _save_generic_provider_session(kind, profile, "")
+            _save_provider_history(kind, profile, [])
+        _delete_chat_session_mirror(kind, profile, session_id)
         return outcome, 200
     return outcome if isinstance(outcome, dict) else {"ok": False, "error": "Invalid provider response"}, 502
 
@@ -29527,6 +30229,31 @@ def _live_agent_session_messages(agent_ref, limit=80, *, sync_actions=True):
     }]
 
 
+def _saved_chat_session_messages(provider_kind, profile, session_id):
+    mirrored = _load_chat_session_mirror(provider_kind, profile, session_id)
+    if mirrored:
+        return mirrored
+    if provider_kind == "hermes":
+        state = _load_hermes_state(profile)
+        if str(state.get("sessionId") or "") == str(session_id or ""):
+            return _chat_session_messages_with_id(state.get("messages"), session_id)
+    elif provider_kind == "codex":
+        state = _load_codex_state(profile)
+        if str(state.get("sessionId") or "") == str(session_id or ""):
+            return _chat_session_messages_with_id(state.get("messages"), session_id)
+    elif provider_kind == "claude-code":
+        state = _load_claude_code_state(profile)
+        if str(state.get("sessionId") or "") == str(session_id or ""):
+            return _chat_session_messages_with_id(state.get("messages"), session_id)
+    active = _load_generic_provider_session(provider_kind, profile)
+    return _provider_history_for_session(
+        provider_kind,
+        profile,
+        session_id,
+        active_session_id=str(active.get("sessionId") or ""),
+    )
+
+
 def handle_chat_session_switch(agent_id, session_id, body=None):
     """Make a stored session the agent's active chat session and return its
     history so the chat window can render it immediately."""
@@ -29559,12 +30286,18 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
                     order="oldest",
                 )
                 raw_messages = payload.get("data") if isinstance(payload.get("data"), list) else []
-                messages = _hermes_session_to_chat_messages({"messages": raw_messages}, agent_ref)
+                native_messages = _hermes_session_to_chat_messages({"messages": raw_messages}, agent_ref)
+                messages = _merge_chat_session_messages(
+                    _saved_chat_session_messages("hermes", profile, session_id),
+                    native_messages,
+                    session_id,
+                )
                 _save_hermes_state(profile, {"messages": messages, "sessionId": session_id})
                 return {
                     "ok": True,
                     "providerKind": kind,
                     "sessionId": session_id,
+                    "sessionKey": _provider_session_key(kind, profile, session_id),
                     "messages": messages,
                     "providerPath": "api",
                 }, 200
@@ -29578,9 +30311,21 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
         if not exported.get("ok"):
             return {"ok": False, "error": exported.get("error") or "Hermes session export failed"}, 502
         session = exported.get("session") or {}
-        messages = _hermes_session_to_chat_messages(session, agent_ref)
+        native_messages = _hermes_session_to_chat_messages(session, agent_ref)
+        messages = _merge_chat_session_messages(
+            _saved_chat_session_messages("hermes", profile, session_id),
+            native_messages,
+            session_id,
+        )
         _save_hermes_state(profile, {"messages": messages, "sessionId": session_id})
-        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages, "providerPath": "cli"}, 200
+        return {
+            "ok": True,
+            "providerKind": kind,
+            "sessionId": session_id,
+            "sessionKey": _provider_session_key(kind, profile, session_id),
+            "messages": messages,
+            "providerPath": "cli",
+        }, 200
     if kind == "codex":
         provider = _codex_provider()
         if not provider:
@@ -29588,24 +30333,49 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
         outcome = provider.read_thread(profile, session_id)
         if not outcome.get("ok"):
             return {"ok": False, "error": outcome.get("error") or "Codex thread read failed"}, 502
-        messages = _codex_thread_to_chat_messages(outcome.get("thread") or {}, agent_ref)
+        native_messages = _codex_thread_to_chat_messages(outcome.get("thread") or {}, agent_ref)
+        messages = _merge_chat_session_messages(
+            _saved_chat_session_messages("codex", profile, session_id),
+            native_messages,
+            session_id,
+        )
         state = _load_codex_state(profile)
         state["messages"] = messages[-500:]
         state["sessionId"] = session_id
         _save_codex_state(profile, state)
-        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages}, 200
+        return {
+            "ok": True,
+            "providerKind": kind,
+            "sessionId": session_id,
+            "sessionKey": _provider_session_key(kind, profile, session_id),
+            "messages": messages,
+        }, 200
     if kind in ("claude-code", "claudecode", "claude"):
         path = _claude_code_find_session_file(session_id)
         if not path:
             return {"ok": False, "error": "Claude Code session not found"}, 404
-        messages = _claude_code_jsonl_to_chat_messages(path, agent_ref)
+        native_messages = _claude_code_jsonl_to_chat_messages(path, agent_ref)
+        messages = _merge_chat_session_messages(
+            _saved_chat_session_messages("claude-code", profile, session_id),
+            native_messages,
+            session_id,
+        )
         _save_claude_code_state(profile, {"messages": messages[-500:], "sessionId": session_id})
-        return {"ok": True, "providerKind": kind, "sessionId": session_id, "messages": messages, "resumeCommand": f"claude --resume {session_id}"}, 200
+        _save_generic_provider_session("claude-code", profile, session_id, source="session-switch")
+        _save_provider_history("claude-code", profile, messages)
+        return {
+            "ok": True,
+            "providerKind": "claude-code",
+            "sessionId": session_id,
+            "sessionKey": _provider_session_key("claude-code", profile, session_id),
+            "messages": messages,
+            "resumeCommand": f"claude --resume {session_id}",
+        }, 200
     if kind == "openclaw":
         session_key = str(session_id)
         # OpenClaw sessions are addressed directly by key; the client simply
         # switches its sessionKey and reloads history over the gateway.
-        return {"ok": True, "providerKind": kind, "sessionKey": session_key}, 200
+        return {"ok": True, "providerKind": kind, "sessionKey": session_key, "messages": []}, 200
     agent = _agent_record_for(agent_ref["agentId"]) or {}
     capabilities = agent.get("capabilities") if isinstance(agent.get("capabilities"), dict) else {}
     if not capabilities.get("sessionSwitch"):
@@ -29615,8 +30385,22 @@ def handle_chat_session_switch(agent_id, session_id, body=None):
     outcome = _get_provider_registry().invoke(kind, operation, profile, session_id)
     if not isinstance(outcome, dict) or not outcome.get("ok"):
         return outcome if isinstance(outcome, dict) else {"ok": False, "error": "Invalid provider response"}, 502
+    native_messages = _registered_provider_session_to_chat_messages(outcome, agent_ref)
+    messages = _merge_chat_session_messages(
+        _saved_chat_session_messages(kind, profile, session_id),
+        native_messages,
+        session_id,
+    )
     _save_generic_provider_session(kind, profile, session_id, source="session-switch")
-    return {**outcome, "ok": True, "providerKind": kind, "sessionId": session_id}, 200
+    _save_provider_history(kind, profile, messages)
+    return {
+        **outcome,
+        "ok": True,
+        "providerKind": kind,
+        "sessionId": session_id,
+        "sessionKey": _provider_session_key(kind, profile, session_id),
+        "messages": messages,
+    }, 200
 
 
 def _hermes_session_to_chat_messages(session, agent_ref):
@@ -29627,6 +30411,8 @@ def _hermes_session_to_chat_messages(session, agent_ref):
             continue
         role = str(msg.get("role") or "")
         text = _hermes_history_content_text(msg.get("content"))
+        if role == "user":
+            text = _provider_visible_user_text(text)
         if role == "tool":
             continue
         tools = []
@@ -29656,6 +30442,7 @@ def _hermes_session_to_chat_messages(session, agent_ref):
             "from": agent_ref["name"] if role == "assistant" else "You",
             "fromType": "agent" if role == "assistant" else "human",
             "source": "hermes-session-api" if msg.get("session_id") else "hermes-session-export",
+            "sessionId": msg.get("session_id") or session.get("id") or "",
         }
         reasoning = _hermes_history_content_text(msg.get("reasoning_content") or msg.get("reasoning"))
         if reasoning:
@@ -29682,6 +30469,7 @@ def _codex_thread_to_chat_messages(thread, agent_ref):
                     text = " ".join(str(part.get("text") or "") for part in content if isinstance(part, dict))
                 else:
                     text = str(item.get("text") or content or "")
+                text = _provider_visible_user_text(text)
                 if text.strip():
                     messages.append({"role": "user", "text": text.strip()[:4000], "ts": None, "from": "You", "fromType": "human"})
             elif item_type in ("agentMessage", "agent_message", "assistantMessage"):
@@ -29722,6 +30510,62 @@ def _claude_code_jsonl_to_chat_messages(path, agent_ref):
                 })
     except OSError:
         pass
+    return messages[-500:]
+
+
+def _registered_provider_session_to_chat_messages(outcome, agent_ref):
+    """Normalize Contract 1.1 exports (including OpenCode) for the chat UI."""
+    outcome = outcome if isinstance(outcome, dict) else {}
+    session = outcome.get("session") if isinstance(outcome.get("session"), dict) else outcome
+    raw_messages = session.get("messages") if isinstance(session.get("messages"), list) else outcome.get("messages")
+    messages = []
+    for raw in raw_messages if isinstance(raw_messages, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
+        role = str(raw.get("role") or info.get("role") or "").lower()
+        if role not in {"user", "assistant"}:
+            continue
+        parts = raw.get("parts") if isinstance(raw.get("parts"), list) else []
+        text_parts = []
+        tools = []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            part_type = str(part.get("type") or "").lower()
+            if part_type in {"text", "message", "output_text", "input_text"} and part.get("text"):
+                text_parts.append(str(part.get("text") or ""))
+            elif part_type in {"tool", "tool_call", "toolcall"}:
+                state = part.get("state") if isinstance(part.get("state"), dict) else {}
+                tools.append({
+                    "id": str(part.get("id") or part.get("callID") or part.get("callId") or ""),
+                    "name": str(part.get("tool") or part.get("name") or "tool"),
+                    "status": str(state.get("status") or part.get("status") or "completed"),
+                    "arguments": state.get("input") or part.get("input") or part.get("arguments") or {},
+                    "result": state.get("output") or part.get("output") or part.get("result") or "",
+                    "error": state.get("error") or part.get("error") or "",
+                })
+        content = raw.get("content")
+        if not text_parts:
+            if isinstance(content, str):
+                text_parts.append(content)
+            elif isinstance(raw.get("text"), str):
+                text_parts.append(raw.get("text"))
+        text = "\n".join(part for part in text_parts if part).strip()
+        if role == "user":
+            text = _provider_visible_user_text(text)
+        if not text and not tools:
+            continue
+        time_info = info.get("time") if isinstance(info.get("time"), dict) else {}
+        messages.append({
+            "role": role,
+            "text": text,
+            "ts": raw.get("timestamp") or info.get("timestamp") or time_info.get("created") or time_info.get("completed"),
+            "from": agent_ref.get("name") if role == "assistant" else "You",
+            "fromType": "agent" if role == "assistant" else "human",
+            "source": str(agent_ref.get("providerKind") or "provider"),
+            "tools": tools,
+        })
     return messages[-500:]
 
 
@@ -32642,7 +33486,7 @@ def get_roster(meta=None):
                 _gateway_presence.init_agents([
                     a.get("statusKey") or a.get("id")
                     for a in _agent_roster
-                    if a.get("available") is not False and (a.get("statusKey") or a.get("id"))
+                    if a.get("statusKey") or a.get("id")
                 ], prune=True)
             except Exception:
                 pass
@@ -32668,23 +33512,113 @@ _PROVIDER_RUNS = {}
 _PROVIDER_RUNS_LOCK = threading.RLock()
 
 
+def _presence_lifecycle(method_name, *args, **kwargs):
+    """Call the shared lifecycle coordinator without making providers depend on it."""
+    if not _gateway_presence:
+        return False
+    callback = getattr(_gateway_presence, method_name, None)
+    if not callable(callback):
+        return False
+    try:
+        callback(*args, **kwargs)
+        return True
+    except Exception as exc:
+        print(f"⚠️  Presence lifecycle update failed ({method_name}): {exc}")
+        return False
+
+
+def _provider_run_presence_sync(meta, state):
+    """Translate normalized Provider SDK progress into shared lifecycle events."""
+    state = state if isinstance(state, dict) else {}
+    agent_id = str(meta.get("statusKey") or meta.get("agentId") or "")
+    run_id = str(meta.get("runId") or "")
+    provider_kind = str(meta.get("providerKind") or "provider")
+    if not agent_id or not run_id:
+        return
+
+    task = "Responding" if state.get("reply") else ("Thinking" if state.get("thinking") or state.get("commentary") else "Working")
+    _presence_lifecycle("lifecycle_output_streaming", agent_id, run_id, provider_kind, task)
+
+    tracked_tools = meta.setdefault("presenceTools", {})
+    for index, tool in enumerate(state.get("tools") or []):
+        if not isinstance(tool, dict):
+            continue
+        tool_id = str(tool.get("id") or tool.get("toolCallId") or tool.get("tool_call_id") or f"{run_id}:tool:{index + 1}")
+        tool_name = str(tool.get("name") or tool.get("tool") or "tool")
+        status = str(tool.get("status") or tool.get("state") or "running").lower()
+        terminal = status in {"completed", "complete", "done", "failed", "error", "cancelled", "canceled", "interrupted"}
+        previous_terminal = tracked_tools.get(tool_id) == "terminal"
+        if terminal:
+            if not previous_terminal:
+                _presence_lifecycle("lifecycle_tool_finished", agent_id, run_id, tool_id, provider_kind, status)
+            tracked_tools[tool_id] = "terminal"
+        else:
+            _presence_lifecycle("lifecycle_tool_updated", agent_id, run_id, tool_id, tool_name, provider_kind, f"Using {tool_name}")
+            tracked_tools[tool_id] = "active"
+
+    approval = state.get("approval") if isinstance(state.get("approval"), dict) else None
+    if approval:
+        approval_id = str(approval.get("approval_id") or approval.get("id") or f"{run_id}:approval")
+        approval_status = str(approval.get("status") or "pending").lower()
+        if approval_status in {"pending", "requested", "waiting"}:
+            _presence_lifecycle("lifecycle_approval_requested", agent_id, run_id, approval_id, provider_kind, "Waiting for approval")
+            meta.setdefault("presenceApprovals", set()).add(approval_id)
+        else:
+            _presence_lifecycle("lifecycle_approval_resolved", agent_id, run_id, approval_id, provider_kind, approval_status)
+            meta.setdefault("presenceApprovals", set()).discard(approval_id)
+
+
+def _provider_run_presence_finish(meta, result):
+    result = result if isinstance(result, dict) else {}
+    outcome = "completed" if result.get("ok") else str(result.get("status") or "failed")
+    _presence_lifecycle(
+        "lifecycle_run_finished",
+        str(meta.get("statusKey") or meta.get("agentId") or ""),
+        str(meta.get("runId") or ""),
+        str(meta.get("providerKind") or "provider"),
+        outcome,
+        str(result.get("error") or ""),
+    )
+
+
 def _provider_history_path(provider_kind, profile):
     return os.path.join(STATUS_DIR, f"provider-chat-{_generic_provider_state_slug(provider_kind)}-{_generic_provider_state_slug(profile)}.json")
 
 
 def _load_provider_history(provider_kind, profile):
-    try:
-        with open(_provider_history_path(provider_kind, profile), "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        rows = payload.get("messages") if isinstance(payload, dict) else payload
-        return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return []
+    with PROVIDER_HISTORY_LOCK:
+        try:
+            with open(_provider_history_path(provider_kind, profile), "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            rows = payload.get("messages") if isinstance(payload, dict) else payload
+            return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return []
 
 
 def _save_provider_history(provider_kind, profile, messages):
-    payload = {"version": 1, "providerKind": provider_kind, "profile": profile, "messages": list(messages or [])[-500:]}
-    _atomic_write_text(_provider_history_path(provider_kind, profile), json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n")
+    with PROVIDER_HISTORY_LOCK:
+        normalized = [dict(row) for row in list(messages or []) if isinstance(row, dict)][-500:]
+        payload = {"version": 1, "providerKind": provider_kind, "profile": profile, "messages": normalized}
+        _atomic_write_text(_provider_history_path(provider_kind, profile), json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n")
+        grouped = {}
+        for row in normalized:
+            session_id = str(row.get("sessionId") or "").strip()
+            if session_id:
+                grouped.setdefault(session_id, []).append(row)
+        for session_id, rows in grouped.items():
+            _save_chat_session_mirror(provider_kind, profile, session_id, rows)
+
+
+def _provider_history_for_session(provider_kind, profile, session_id, *, active_session_id=""):
+    session_id = str(session_id or "").strip()
+    mirrored = _load_chat_session_mirror(provider_kind, profile, session_id)
+    if mirrored:
+        return mirrored
+    current = _load_provider_history(provider_kind, profile)
+    if session_id and str(active_session_id or "") == session_id:
+        return _chat_session_messages_with_id(current, session_id)
+    return []
 
 
 def _provider_run_emit(meta, event_name, payload=None):
@@ -32794,8 +33728,10 @@ def _handle_provider_run_start(body):
     active = _load_generic_provider_session(provider_kind, profile)
     session_id = str((body or {}).get("sessionId") or active.get("sessionId") or "")
     run_id = f"provider-{_generic_provider_state_slug(provider_kind)}-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+    local_session_id = session_id or f"@new:{run_id}"
     meta = {
         "runId": run_id, "agentId": agent.get("id"), "agentName": agent.get("name") or profile,
+        "statusKey": agent.get("statusKey") or agent.get("id"),
         "providerKind": provider_kind, "profile": profile, "sessionId": session_id,
         "condition": threading.Condition(), "events": [], "nextEventId": 1,
         "startedAt": int(time.time() * 1000), "done": False, "result": None,
@@ -32803,41 +33739,73 @@ def _handle_provider_run_start(body):
     with _PROVIDER_RUNS_LOCK:
         _PROVIDER_RUNS[run_id] = meta
     now_ms = int(time.time() * 1000)
-    history = _load_provider_history(provider_kind, profile)
-    history.append({"role": "user", "text": message, "epochMs": now_ms, "ts": now_ms, "sessionId": session_id, "runId": run_id, "source": provider_kind})
+    history = _provider_history_for_session(
+        provider_kind,
+        profile,
+        local_session_id,
+        active_session_id=str(active.get("sessionId") or ""),
+    )
+    history.append({"role": "user", "text": message, "epochMs": now_ms, "ts": now_ms, "sessionId": local_session_id, "runId": run_id, "source": provider_kind})
+    _save_generic_provider_session(provider_kind, profile, local_session_id, source="provider-run-start", runId=run_id)
     _save_provider_history(provider_kind, profile, history)
+    meta["history"] = list(history)
     _provider_run_emit(meta, "run.started", _provider_progress_payload({"thinking": f"Starting {agent.get('name') or provider_kind}."}, meta))
+    _presence_lifecycle(
+        "lifecycle_run_started",
+        meta.get("statusKey") or meta.get("agentId"),
+        run_id,
+        provider_kind,
+        f"{agent.get('name') or provider_kind} run",
+    )
 
     def worker():
         def on_progress(state):
             payload = _provider_progress_payload(state, meta)
             if payload.get("sessionId"):
                 meta["sessionId"] = payload["sessionId"]
+            _provider_run_presence_sync(meta, payload)
             _provider_run_emit(meta, "turn.progress", payload)
-        kwargs = {"session_id": session_id, "timeout_sec": timeout_sec, "on_progress": on_progress}
-        if attachment_files:
-            kwargs["files"] = attachment_files
-        result = _get_provider_registry().invoke(provider_kind, "send_chat_message", profile, message, agent=agent, **kwargs)
-        if not isinstance(result, dict):
-            result = {"ok": False, "error": "Provider returned an invalid chat response"}
-        payload = _provider_progress_payload(result, meta)
-        payload["status"] = "completed" if result.get("ok") else "failed"
-        if payload.get("sessionId"):
-            _save_generic_provider_session(provider_kind, profile, payload["sessionId"], source="provider-run")
-        end_ms = int(time.time() * 1000)
-        history = _load_provider_history(provider_kind, profile)
-        history.append({
-            "role": "assistant", "text": payload.get("reply") or "", "thinking": payload.get("thinking") or "",
-            "commentary": payload.get("commentary") or "", "tools": payload.get("tools") or [], "approval": payload.get("approval"),
-            "error": payload.get("error") or None, "epochMs": end_ms, "ts": end_ms,
-            "sessionId": payload.get("sessionId") or "", "runId": run_id, "source": provider_kind,
-        })
-        _save_provider_history(provider_kind, profile, history)
-        _provider_run_emit(meta, "run.completed" if result.get("ok") else "run.failed", payload)
-        with meta["condition"]:
-            meta["done"] = True
-            meta["result"] = result
-            meta["condition"].notify_all()
+        result = None
+        try:
+            kwargs = {"session_id": session_id, "timeout_sec": timeout_sec, "on_progress": on_progress}
+            if attachment_files:
+                kwargs["files"] = attachment_files
+            result = _get_provider_registry().invoke(provider_kind, "send_chat_message", profile, message, agent=agent, **kwargs)
+            if not isinstance(result, dict):
+                result = {"ok": False, "error": "Provider returned an invalid chat response"}
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc), "status": "failed"}
+
+        try:
+            payload = _provider_progress_payload(result, meta)
+            payload["status"] = "completed" if result.get("ok") else "failed"
+            _provider_run_presence_sync(meta, payload)
+            end_ms = int(time.time() * 1000)
+            history = [dict(row) for row in (meta.get("history") or []) if isinstance(row, dict)]
+            resolved_session_id = str(payload.get("sessionId") or session_id or local_session_id)
+            for row in history:
+                if str(row.get("sessionId") or "") == local_session_id:
+                    row["sessionId"] = resolved_session_id
+            history.append({
+                "role": "assistant", "text": payload.get("reply") or "", "thinking": payload.get("thinking") or "",
+                "commentary": payload.get("commentary") or "", "tools": payload.get("tools") or [], "approval": payload.get("approval"),
+                "error": payload.get("error") or None, "epochMs": end_ms, "ts": end_ms,
+                "sessionId": resolved_session_id, "runId": run_id, "source": provider_kind,
+            })
+            _save_chat_session_mirror(provider_kind, profile, resolved_session_id, history)
+            if resolved_session_id != local_session_id:
+                _delete_chat_session_mirror(provider_kind, profile, local_session_id)
+            selected = _load_generic_provider_session(provider_kind, profile)
+            if str(selected.get("runId") or "") == run_id and str(selected.get("sessionId") or "") == local_session_id:
+                _save_generic_provider_session(provider_kind, profile, resolved_session_id, source="provider-run")
+                _save_provider_history(provider_kind, profile, history)
+            _provider_run_emit(meta, "run.completed" if result.get("ok") else "run.failed", payload)
+        finally:
+            _provider_run_presence_finish(meta, result)
+            with meta["condition"]:
+                meta["done"] = True
+                meta["result"] = result
+                meta["condition"].notify_all()
 
     threading.Thread(target=worker, daemon=True, name=f"provider-sdk-{run_id}").start()
     return {"ok": True, "runId": run_id, "sessionId": session_id, "providerKind": provider_kind, "profile": profile}
@@ -32889,6 +33857,16 @@ def _handle_provider_interrupt(body):
     result = _get_provider_registry().invoke(provider_kind, "interrupt", profile)
     if not isinstance(result, dict):
         result = {"ok": False, "error": "Invalid provider interrupt response"}
+    if result.get("ok"):
+        active_run = _provider_run_for_agent(provider_kind, profile)
+        if active_run:
+            _presence_lifecycle(
+                "lifecycle_output_streaming",
+                active_run.get("statusKey") or active_run.get("agentId"),
+                active_run.get("runId"),
+                provider_kind,
+                "Stopping",
+            )
     result["_status"] = 200 if result.get("ok") else 409
     return result
 
@@ -32914,6 +33892,15 @@ def _handle_provider_approval_pending(agent_id):
     if pending:
         pending["agentId"] = pending.get("agentId") or agent.get("id") or agent_id
         pending["profile"] = pending.get("profile") or profile
+        active_run = _provider_run_for_agent(provider_kind, profile)
+        _presence_lifecycle(
+            "lifecycle_approval_requested",
+            agent.get("statusKey") or agent.get("id") or agent_id,
+            (active_run or {}).get("runId") or "",
+            pending.get("approval_id") or pending.get("id") or f"{provider_kind}:{profile}:approval",
+            provider_kind,
+            "Waiting for approval",
+        )
     result.setdefault("providerKind", provider_kind)
     result.setdefault("profile", profile)
     result["_status"] = 200 if result.get("ok") else 409
@@ -32943,6 +33930,16 @@ def _handle_provider_approval_respond(body):
     result = _get_provider_registry().invoke(provider_kind, "respond_approval", profile, approval_id, choice)
     if not isinstance(result, dict):
         result = {"ok": False, "error": "Invalid provider approval response"}
+    if result.get("ok"):
+        active_run = _provider_run_for_agent(provider_kind, profile)
+        _presence_lifecycle(
+            "lifecycle_approval_resolved",
+            agent.get("statusKey") or agent.get("id"),
+            (active_run or {}).get("runId") or "",
+            approval_id,
+            provider_kind,
+            choice,
+        )
     result.setdefault("providerKind", provider_kind)
     result.setdefault("profile", profile)
     result["_status"] = 200 if result.get("ok") else 409
@@ -33365,6 +34362,30 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 a = dict(agent)
                 status_key = agent.get("statusKey") or agent.get("id")
                 agent_status = status.get(status_key, {}) or status.get(agent.get("id"), {})
+                presence_state = _normalize_presence_entry(agent_status) if agent_status else {
+                    "state": "offline", "task": "", "updated": 0, "source": "not-found",
+                }
+                coordinator_health = {}
+                if _gateway_presence and hasattr(_gateway_presence, "get_provider_health"):
+                    try:
+                        coordinator_health = _gateway_presence.get_provider_health(status_key) or {}
+                    except Exception:
+                        coordinator_health = {}
+                connection_state = str(agent.get("connectionState") or ("connected" if agent.get("available") is not False else "offline"))
+                provider_connected = agent.get("available") is not False and connection_state.lower() not in {
+                    "offline", "disconnected", "unavailable", "error",
+                }
+                provider_health = {
+                    **coordinator_health,
+                    "connected": provider_connected,
+                    "available": agent.get("available") is not False,
+                    "connectionState": connection_state,
+                    "providerKind": agent.get("providerKind") or "openclaw",
+                }
+                if agent.get("error"):
+                    provider_health["error"] = str(agent.get("error"))
+                a["presence"] = presence_state
+                a["providerHealth"] = provider_health
                 a["status"] = agent_status.get("state", agent_status.get("status", "offline"))
                 a["task"] = agent_status.get("task", "")
                 a["providerAvailable"] = agent.get("available") is not False
@@ -33394,6 +34415,19 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                     "lastOutcome": loop_agent.get("lastOutcome") if isinstance(loop_agent, dict) else None,
                     "stats": loop_agent.get("stats", {}) if isinstance(loop_agent, dict) else {},
                 }
+                live_controller = loop_agent.get("controller") if isinstance(loop_agent, dict) and isinstance(loop_agent.get("controller"), dict) else None
+                if not live_controller:
+                    live_session = _live_agent_session_current(status_key)
+                    checkpoint = live_session.get("checkpoint") if isinstance(live_session, dict) and isinstance(live_session.get("checkpoint"), dict) else {}
+                    controller_state = checkpoint.get("controllerState") or checkpoint.get("phase")
+                    if controller_state:
+                        live_controller = {
+                            "state": controller_state,
+                            "reason": checkpoint.get("currentStep") or controller_state,
+                            "activeActionId": checkpoint.get("currentActionId"),
+                            "updatedAt": live_session.get("updatedAt"),
+                        }
+                a["liveController"] = _copy_jsonable(live_controller) if isinstance(live_controller, dict) else None
                 a["liveWorld"] = _agent_live_world_claim_payload(status_key, meta=meta, registry=live_world_registry, refresh_current=False)
                 if isinstance(profile.get("appearance"), dict):
                     a["appearance"] = profile["appearance"]
@@ -33449,7 +34483,15 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 return self._send_json({"ok": False, "error": "Unknown agent"}, 404)
             kind = str(agent.get("providerKind") or "openclaw")
             profile = str(agent.get("providerAgentId") or agent.get("profile") or agent.get("id"))
-            return self._send_json({"ok": True, "providerKind": kind, "profile": profile, "messages": _load_provider_history(kind, profile)})
+            session_id = str((qs.get("sessionId") or qs.get("session_id") or [""])[0] or "")
+            active = _load_generic_provider_session(kind, profile)
+            messages = _provider_history_for_session(
+                kind,
+                profile,
+                session_id,
+                active_session_id=str(active.get("sessionId") or ""),
+            ) if session_id else _load_provider_history(kind, profile)
+            return self._send_json({"ok": True, "providerKind": kind, "profile": profile, "sessionId": session_id, "messages": messages})
 
         if path == "/api/session-activity":
             qs = urllib.parse.parse_qs(parsed.query)
@@ -33577,7 +34619,11 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
         if path.startswith("/api/presence/"):
             agent_id = urllib.parse.unquote(path.split("/")[-1])
             status = load_agent_status()
-            return self._send_json(status.get(agent_id, {"state": "offline", "task": "", "updated": 0, "source": "not-found"}))
+            agent = _agent_record_for(agent_id)
+            status_key = (agent or {}).get("statusKey") or agent_id
+            return self._send_json(status.get(status_key, status.get(agent_id, {
+                "state": "offline", "task": "", "updated": 0, "source": "not-found",
+            })))
 
         if path == "/api/agent-chat":
             return self._send_json_cached(get_agent_chat())

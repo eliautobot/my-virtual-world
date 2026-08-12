@@ -1140,6 +1140,8 @@ function normalizeAgentAnimationStatus(statusValue) {
 }
 
 function getAgentPresenceDotColor(statusValue) {
+  const rawStatus = String(statusValue || '').trim().toLowerCase();
+  if (rawStatus === 'finishing') return 0x84cc16;
   const normalized = normalizeAgentAnimationStatus(statusValue);
   if (normalized === 'working') return 0xef4444;
   if (normalized === 'idle' || normalized === 'available' || normalized === 'ready' || normalized === 'standby') return 0x22c55e;
@@ -3970,10 +3972,11 @@ export function updateAgentAnimation(agent, dt, isMoving, isSocializing) {
 
   // ── PRESENCE STATUS DOT ───────────────────────────────────
   if (parts.statusDot) {
+    const rawStatus = String(agent?.status || '').trim().toLowerCase();
     const normalizedStatus = normalizeAgentAnimationStatus(agent?.status);
-    const isActiveWork = normalizedStatus === 'working';
+    const isActiveWork = normalizedStatus === 'working' && rawStatus !== 'finishing';
     const pulse = isActiveWork ? 1 + Math.sin(Date.now() / 260) * 0.28 : 1;
-    parts.statusDot.material.color.setHex(getAgentPresenceDotColor(normalizedStatus));
+    parts.statusDot.material.color.setHex(getAgentPresenceDotColor(rawStatus));
     parts.statusDot.material.opacity = normalizedStatus === 'offline' || normalizedStatus === 'unknown' ? 0.68 : 0.96;
     parts.statusDot.scale.setScalar(pulse);
     parts.statusDot.visible = true;

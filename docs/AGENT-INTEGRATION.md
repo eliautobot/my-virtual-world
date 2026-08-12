@@ -94,6 +94,19 @@ GET /api/agent-chat
 
 Presence is visual state. It should not be treated as security authority.
 
+All providers feed one shared lifecycle coordinator. Existing adapters translate
+native signals into provider connected/disconnected, run start/progress/terminal,
+tool start/update/terminal, and approval requested/resolved events. The
+coordinator—not individual adapters—owns active ids, quiet long-running
+protection, finishing grace, stale-run cleanup, and final presence. A failed
+turn records `lastRunError` and finishes normally; it does not mean the provider
+is offline.
+
+OpenClaw supplies events through its read-only Gateway observer. Native Hermes
+and Codex runs use server-owned event monitors. Claude Code, OpenCode,
+Antigravity, and extension providers use the normalized Provider SDK run path.
+This keeps presence authoritative even when no browser attaches to an SSE stream.
+
 ## Chat
 
 OpenClaw chat uses the local gateway information from:
@@ -112,6 +125,29 @@ subscribers. It reconnects after Gateway or connection-setting changes, but it
 does not automatically replay a request whose delivery became uncertain. The
 separate read-only presence observer remains responsible for working, finishing,
 idle, and offline state.
+
+All chat providers use the same session-panel contract:
+
+```text
+GET /api/chat-sessions?agentId=<id>
+POST /api/chat-sessions/create
+POST /api/chat-sessions/switch
+POST /api/chat-sessions/delete
+```
+
+Each browser chat window owns its selected session key. Runs carry that explicit
+native session id, so switching another window does not redirect the first
+window's messages. **New Session** is non-destructive: OpenClaw receives a new
+conversation key, while providers that create lazily use a temporary `@new` key
+until the first run returns a native id. Existing session history remains
+selectable. **Delete** is the only session-panel action that removes a native
+conversation.
+
+My Virtual World also keeps an atomic, per-provider/profile/session mirror of
+the normalized rich transcript. When a session is reopened, its native export
+is merged into that mirror rather than replacing it. This retains app-visible
+progress, thinking, tools, and approvals that Hermes, Codex, Claude Code,
+OpenCode, or an extension provider may omit from its export.
 
 Hermes chat uses:
 

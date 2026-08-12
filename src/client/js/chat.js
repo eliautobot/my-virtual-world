@@ -10,7 +10,7 @@
   } = globalThis.VirtualWorldOpenClawRunState;
   const {
     escapeHtml: escHtml,
-    renderMarkdown: formatContent
+    renderMarkdownInto
   } = globalThis.VirtualWorldChatMarkdown;
   let GATEWAY_TOKEN = '';
   let GATEWAY_URL = '';
@@ -225,6 +225,21 @@
     const date = new Date(numeric > 1e12 ? numeric : numeric * 1000);
     if (Number.isNaN(date.getTime())) return '';
     return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function providerSessionIdFromKey(sessionKey, providerKind) {
+    const kind = String(providerKind || '').trim();
+    const value = String(sessionKey || '');
+    if (!kind || !value.startsWith(kind + ':')) return '';
+    const parts = value.split(':');
+    if (parts.length < 3) return '';
+    const sessionId = parts.slice(2).join(':');
+    return sessionId.startsWith('@new:') ? '' : sessionId;
+  }
+
+  function isPendingProviderSessionKey(sessionKey, providerKind) {
+    const kind = String(providerKind || '').trim();
+    return Boolean(kind && String(sessionKey || '').startsWith(kind + ':') && String(sessionKey || '').split(':').slice(2).join(':').startsWith('@new:'));
   }
 
   function titleCaseAgentKey(agentKey) {
@@ -805,6 +820,39 @@
       return opt?.dataset?.providerKind || 'openclaw';
     }
 
+    getSelectedProviderProfile() {
+      const opt = this.agentSelect?.selectedOptions?.[0];
+      return opt?.dataset?.providerAgentId || opt?.dataset?.agentId || 'main';
+    }
+
+    selectedProviderSessionId() {
+      return providerSessionIdFromKey(this.sessionKey, this.getSelectedProviderKind());
+    }
+
+    isPendingProviderSession() {
+      return isPendingProviderSessionKey(this.sessionKey, this.getSelectedProviderKind());
+    }
+
+    selectedProviderBaseSessionKey() {
+      const opt = this.agentSelect?.selectedOptions?.[0];
+      return opt?.dataset?.sessionKey || `${this.getSelectedProviderKind()}:${this.getSelectedProviderProfile()}`;
+    }
+
+    setSelectedSessionKey(sessionKey) {
+      const next = String(sessionKey || '').trim();
+      if (!next || next === this.sessionKey) return false;
+      this.sessionKey = next;
+      this.saveSelection();
+      return true;
+    }
+
+    adoptProviderSessionId(sessionId) {
+      const value = String(sessionId || '').trim();
+      const kind = this.getSelectedProviderKind();
+      if (!value || kind === 'openclaw') return false;
+      return this.setSelectedSessionKey(`${kind}:${this.getSelectedProviderProfile()}:${value}`);
+    }
+
     getSelectedCapabilities() {
       const opt = this.agentSelect?.selectedOptions?.[0];
       try { return JSON.parse(opt?.dataset?.capabilities || '{}') || {}; }
@@ -903,7 +951,10 @@
     async pollHermesApproval() {
       if (!this.isHermesSelected() || !this.isVisibleForPolling()) return;
       const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
-      const res = await fetch('/api/hermes/approval/pending?agentId=' + encodeURIComponent(agentId));
+      const params = new URLSearchParams({ agentId });
+      const sessionId = this.selectedProviderSessionId();
+      if (sessionId) params.set('sessionId', sessionId);
+      const res = await fetch('/api/hermes/approval/pending?' + params.toString());
       const data = await res.json();
       if (!data.ok || !data.pending) return;
       this.appendHermesPendingApproval(data.pending, data.pending_count || 1);
@@ -1233,6 +1284,32 @@
       return this.openClawEventQueue;
     }
 
+    renderProviderSessionMessages(messages) {
+      this.renderHistoryItems(this.providerHistoryItems(Array.isArray(messages) ? messages : []));
+      this.scrollBottom();
+    }
+
+    async loadExplicitProviderSessionHistory() {
+      if (!this.isProviderAgentSelected() || this.getSelectedProviderKind() === 'openclaw') return false;
+      if (this.isPendingProviderSession()) {
+        this.renderProviderSessionMessages([]);
+        return true;
+      }
+      const sessionId = this.selectedProviderSessionId();
+      if (!sessionId) return false;
+      const agentId = this.getSelectedAgentId() || this.selectedAgentKey;
+      const res = await fetch('/api/chat-sessions/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId, sessionId, source: 'chat-window-history-load' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+      this.setSelectedSessionKey(data.sessionKey || this.sessionKey);
+      this.renderProviderSessionMessages(data.messages);
+      return true;
+    }
+
     async loadHistory() {
       try {
         if (this.isLiveModeSessionSelected()) {
@@ -1240,6 +1317,7 @@
           await this.loadLiveModeSessionHistory();
           return;
         }
+        if (await this.loadExplicitProviderSessionHistory()) return;
         if (this.isHermesSelected()) {
           this.startHermesApprovalPolling();
           const res = await fetch('/api/hermes/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
@@ -1333,7 +1411,7 @@
     async newSession() {
       if (!connected && !this.isProviderAgentSelected()) { this.appendSystem('Not connected'); return; }
       const agentName = this.agentSelect.selectedOptions[0]?.textContent.trim() || 'this agent';
-      if (!confirm(`Start a new session for ${agentName}? This clears the conversation history.`)) return;
+      if (!confirm(`Start a new session for ${agentName}? The current session will stay saved.`)) return;
       try {
         await this.createSessionFromPanel({ skipConfirm: true });
       } catch (e) {
@@ -1400,6 +1478,9 @@
 
     activeSessionIdForPanel() {
       if (this.getSelectedProviderKind() === 'openclaw' && !this.isProviderAgentSelected()) return this.sessionKey;
+      if (this.isPendingProviderSession()) return '@pending';
+      const selected = this.selectedProviderSessionId();
+      if (selected) return selected;
       const active = this.currentSessions.find(s => s.active);
       return active ? active.id : '';
     }
@@ -1415,7 +1496,7 @@
       for (const session of this.currentSessions) {
         const item = document.createElement('div');
         item.className = 'chat-session-item';
-        if (session.id === selectedId || (session.active && data.providerKind !== 'openclaw')) item.classList.add('selected');
+        if (session.id === selectedId || (!selectedId && session.active && data.providerKind !== 'openclaw')) item.classList.add('selected');
         const title = document.createElement('div');
         title.className = 'cs-title';
         title.textContent = session.title || session.id;
@@ -1467,6 +1548,7 @@
             this.sessionKey = nextSessionKey;
             saveChatSelection(this.slotId, { selectedAgentKey: this.selectedAgentKey, sessionKey: this.sessionKey });
           }
+          if (!session.liveMode) this.stopLiveSessionPolling();
           if (shouldReload) {
             this.resetConversation('Switched to session: ' + (session.title || session.sessionKey));
             await this.loadHistory();
@@ -1482,8 +1564,10 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+        this.setSelectedSessionKey(data.sessionKey || session.sessionKey || `${this.getSelectedProviderKind()}:${this.getSelectedProviderProfile()}:${session.id}`);
         this.resetConversation('Switched to session: ' + (session.title || session.id));
-        await this.loadHistory();
+        if (Array.isArray(data.messages)) this.renderProviderSessionMessages(data.messages);
+        else await this.loadHistory();
         this.refreshSessionsList();
       } catch (e) {
         this.appendSystem('Session switch failed: ' + e.message);
@@ -1504,7 +1588,9 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
-        this.resetConversation('New session started');
+        if (data.sessionKey) this.setSelectedSessionKey(data.sessionKey);
+        this.stopLiveSessionPolling();
+        this.resetConversation('New session started — the previous session is still saved');
         await this.loadHistory();
         this.fetchSessionInfo();
         this.refreshSessionsList();
@@ -1524,7 +1610,12 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
-        if (session.sessionKey === this.sessionKey || session.active) {
+        const deletingCurrent = session.sessionKey === this.sessionKey
+          || session.id === this.selectedProviderSessionId()
+          || (this.getSelectedProviderKind() === 'openclaw' && session.id === this.sessionKey)
+          || (!this.selectedProviderSessionId() && !this.isPendingProviderSession() && session.active);
+        if (deletingCurrent) {
+          this.setSelectedSessionKey(this.selectedProviderBaseSessionKey());
           this.resetConversation('Session deleted');
           await this.loadHistory();
         }
@@ -1726,7 +1817,7 @@
         const hermesBody = {
           agentId: this.getSelectedAgentId() || this.selectedAgentKey,
           message: text || '(attached files)',
-          sessionId: String(this.sessionKey || '').split(':').slice(2).join(':'),
+          sessionId: this.selectedProviderSessionId(),
           timeoutSec: 180,
           fromType: 'human',
           fromDisplayName: 'User',
@@ -1749,7 +1840,9 @@
             }
             throw new Error(data.error || data.reply || resp.statusText);
           }
+          this.adoptProviderSessionId(data.sessionId);
           this.currentRunId = data.runId || null;
+          if (data.runId) runOwners.set(data.runId, { slotId: this.slotId, sessionKey: this.sessionKey });
           this.rememberLiveAttentionForRun(data.runId, liveAttentionAgentId);
           await this.streamHermesRunEvents(data.runId, hermesProgress);
           this.removeTypingIndicator();
@@ -1783,6 +1876,7 @@
         const codexBody = {
           agentId: this.getSelectedAgentId() || this.selectedAgentKey,
           message: text || '(attached files)',
+          sessionId: this.selectedProviderSessionId(),
           timeoutSec: 180,
           fromType: 'human',
           fromDisplayName: 'User',
@@ -1805,7 +1899,9 @@
             }
             throw new Error(data.error || data.reply || resp.statusText);
           }
+          this.adoptProviderSessionId(data.sessionId);
           this.currentRunId = data.runId || null;
+          if (data.runId) runOwners.set(data.runId, { slotId: this.slotId, sessionKey: this.sessionKey });
           this.rememberLiveAttentionForRun(data.runId, liveAttentionAgentId);
           await this.streamCodexRunEvents(data.runId);
           this.removeTypingIndicator();
@@ -1834,14 +1930,16 @@
             body: JSON.stringify({
               agentId: this.getSelectedAgentId() || this.selectedAgentKey,
               message: text || '(attached files)',
-              sessionId: String(this.sessionKey || '').split(':').slice(2).join(':'),
+              sessionId: this.selectedProviderSessionId(),
               timeoutSec: 900,
               attachments: providerAttachments,
             })
           });
           const data = await resp.json();
           if (!resp.ok || data.ok === false) throw new Error(data.error || data.reply || resp.statusText);
+          this.adoptProviderSessionId(data.sessionId);
           this.currentRunId = data.runId || null;
+          if (data.runId) runOwners.set(data.runId, { slotId: this.slotId, sessionKey: this.sessionKey });
           await this.streamProviderSdkRun(data.runId, providerLabel);
           await this.loadHistory();
           await this.fetchSessionInfo();
@@ -2271,6 +2369,7 @@
     appendMessage(role, content, ts, mediaItems, meta = {}, toolItems = []) {
       const div = document.createElement('div');
       div.className = `chat-msg ${role}`;
+      if (role === 'assistant') div.dataset.providerKind = this.getSelectedProviderKind() || 'openclaw';
       const bubble = document.createElement('div');
       bubble.className = 'chat-bubble';
       let displayContent = content || '';
@@ -2314,7 +2413,7 @@
         } else {
           const textDiv = document.createElement('div');
           textDiv.className = 'chat-markdown';
-          textDiv.innerHTML = formatContent(displayContent);
+          renderMarkdownInto(textDiv, displayContent);
           bubble.appendChild(textDiv);
         }
       }
@@ -2337,6 +2436,7 @@
       const div = document.createElement('div');
       div.className = 'chat-msg assistant streaming-msg';
       div.dataset.runId = runId || this.currentRunId || '';
+      div.dataset.providerKind = this.getSelectedProviderKind() || 'openclaw';
       const bubble = document.createElement('div');
       bubble.className = 'chat-bubble streaming';
       const text = document.createElement('div');
@@ -2388,7 +2488,7 @@
       }
       const nextContent = content || '';
       if (nextContent === this.streamingRenderedContent) return;
-      text.innerHTML = formatContent(nextContent);
+      renderMarkdownInto(text, nextContent);
       this.streamingRenderedContent = nextContent;
       this.scrollBottom();
     }
@@ -2403,7 +2503,7 @@
       const cursor = bubble.querySelector('.cursor');
       const finalContent = content || '';
       if (textDiv && finalContent !== this.streamingRenderedContent) {
-        textDiv.innerHTML = formatContent(finalContent);
+        renderMarkdownInto(textDiv, finalContent);
       }
       this.streamingRenderedContent = finalContent;
       cursor?.remove();
@@ -2420,7 +2520,7 @@
       } else if (!textDiv) {
         const finalText = document.createElement('div');
         finalText.className = 'chat-markdown';
-        finalText.innerHTML = formatContent(finalContent);
+        renderMarkdownInto(finalText, finalContent);
         bubble.appendChild(finalText);
       }
       const time = document.createElement('span');
@@ -2446,7 +2546,7 @@
         const time = bubble.querySelector('.chat-time');
         bubble.insertBefore(textDiv, time || null);
       }
-      textDiv.innerHTML = formatContent(content || '');
+      renderMarkdownInto(textDiv, content || '');
       div.classList.remove('chat-stream-segment-settling');
       void div.offsetWidth;
       div.classList.add('chat-stream-segment-settling');
@@ -2705,6 +2805,7 @@
           body: JSON.stringify(hermesBody)
         });
         const data = await resp.json();
+        this.adoptProviderSessionId(data.sessionId);
         this.stopHermesLivePolling();
         this.removeTypingIndicator();
         const hermesTools = normalizeHermesTools(data.tools || []);
@@ -2733,6 +2834,7 @@
         body: JSON.stringify(codexBody)
       });
       const data = await resp.json();
+      this.adoptProviderSessionId(data.sessionId);
       this.removeTypingIndicator();
       const codexTools = normalizeHermesTools(data.tools || []);
       const hasRenderableReply = !!(data.reply || data.thinking || data.reasoningTokens || codexTools.length);
@@ -2819,6 +2921,20 @@
       this.markLiveEvent();
       this.applyContextUsage(data || {});
       const runId = data?.runId || this.currentRunId || '';
+      const owner = runId ? runOwners.get(runId) : null;
+      const ownerMatchesWindow = !owner || owner.slotId === this.slotId;
+      const ownerMatchesSession = !owner || owner.sessionKey === this.sessionKey;
+      if (data?.sessionId && ownerMatchesWindow && ownerMatchesSession) {
+        this.adoptProviderSessionId(data.sessionId);
+        if (owner) owner.sessionKey = this.sessionKey;
+      }
+      if (!ownerMatchesWindow || !ownerMatchesSession) {
+        if (['run.completed', 'run.failed', 'run.cancelled', 'run.canceled'].includes(eventName) && runId) {
+          runOwners.delete(runId);
+          this.clearLiveAttentionForRun(runId);
+        }
+        return;
+      }
       if (runId) this.currentRunId = runId;
 
       if (eventName === 'run.started') {
@@ -3176,6 +3292,7 @@
     handleProviderSdkEvent(eventName, data) {
       this.markLiveEvent();
       this.applyContextUsage(data || {});
+      this.adoptProviderSessionId(data?.sessionId);
       const runId = data?.runId || this.currentRunId || '';
       if (runId) this.currentRunId = runId;
       const providerKind = this.getSelectedProviderKind();
@@ -3375,6 +3492,7 @@
             approval,
             choice,
             agentId: this.getSelectedAgentId() || this.selectedAgentKey,
+            sessionId: approval.session_id || approval.sessionId || this.selectedProviderSessionId(),
             fromDisplayName: 'User'
           })
         });

@@ -85,7 +85,14 @@
     }
 
     return prepared
-      .filter((item) => asText(item.text).trim() || item.media?.length || item.thinking || item.approval || item.tools.length)
+      .filter((item) => (
+        asText(item.text).trim()
+        || item.media?.length
+        || item.thinking
+        || item.approval
+        || item.meta?.approval
+        || item.tools.length
+      ))
       .map(({ _inputIndex, _timeMs, ...item }) => item);
   }
 

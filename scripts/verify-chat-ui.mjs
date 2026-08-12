@@ -6,6 +6,7 @@ import { marked } from 'marked';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const markdownSource = read('src/client/js/chat-markdown.js');
+const chatEventsSource = read('src/client/js/chat-events.js');
 const chatSource = read('src/client/js/chat.js');
 const indexHtml = read('src/client/index.html');
 const styleCss = read('src/client/css/style.css');
@@ -14,8 +15,22 @@ const redesignCss = read('src/client/css/ui-redesign.css');
 const sandbox = { marked };
 vm.createContext(sandbox);
 vm.runInContext(markdownSource, sandbox, { filename: 'chat-markdown.js' });
+vm.runInContext(chatEventsSource, sandbox, { filename: 'chat-events.js' });
 
-const { renderMarkdown } = sandbox.VirtualWorldChatMarkdown;
+const { renderMarkdown, renderMarkdownInto } = sandbox.VirtualWorldChatMarkdown;
+const { mergeHistoryItems } = sandbox.ChatEvents;
+const approvalOnlyHistory = mergeHistoryItems([{
+  role: 'assistant',
+  text: '',
+  tools: [],
+  meta: { approval: { id: 'approval-reload-fixture', status: 'pending' } }
+}]);
+assert.equal(approvalOnlyHistory.length, 1, 'approval-only history must survive reload merging');
+assert.equal(
+  approvalOnlyHistory[0].meta.approval.id,
+  'approval-reload-fixture',
+  'approval-only history must preserve its approval metadata'
+);
 const fixture = [
   '## Streaming Markdown',
   '',
@@ -39,6 +54,9 @@ const fixture = [
   '```'
 ].join('\n');
 const rendered = renderMarkdown(fixture);
+const renderedTarget = { innerHTML: '' };
+assert.equal(renderMarkdownInto(renderedTarget, fixture), rendered, 'shared Markdown DOM sink must return rendered HTML');
+assert.equal(renderedTarget.innerHTML, rendered, 'shared Markdown DOM sink must update the target');
 
 for (const token of [
   '<h2>Streaming Markdown</h2>',
@@ -60,17 +78,69 @@ assert(
 );
 
 assert(
-  chatSource.includes('text.innerHTML = formatContent(nextContent);'),
-  'streaming updates must use the Markdown renderer'
+  chatSource.includes('renderMarkdownInto(text, nextContent);'),
+  'streaming updates must use the shared Markdown DOM sink'
 );
 assert(
   !chatSource.includes("text.textContent = content || '';"),
   'streaming updates must not fall back to plain text'
 );
+assert(!chatSource.includes('innerHTML = formatContent('), 'chat surfaces must not bypass the shared Markdown DOM sink');
 assert(
   !chatSource.includes("bubble.innerHTML = '';"),
   'finalization must preserve the existing streamed Markdown container'
 );
+assert(
+  chatSource.includes("div.dataset.providerKind = this.getSelectedProviderKind() || 'openclaw';"),
+  'assistant messages must retain their provider kind for cross-provider verification'
+);
+assert(
+  chatSource.includes("if (sessionId) params.set('sessionId', sessionId);"),
+  'Hermes approval polling must be pinned to the selected chat session'
+);
+assert(
+  chatSource.includes('sessionId: approval.session_id || approval.sessionId || this.selectedProviderSessionId()'),
+  'Hermes approval responses must retain the originating session'
+);
+
+const providerKinds = ['openclaw', 'hermes', 'codex', 'claude-code', 'opencode', 'antigravity', 'extension-provider'];
+for (const providerKind of providerKinds) {
+  const reducer = new sandbox.ChatEvents.TurnEventReducer();
+  const runId = `${providerKind}-markdown-run`;
+  reducer.ingest({ kind: 'run.start', runId });
+  const streamingMarkdown = `## ${providerKind} Streaming\n\n**Formatted while streaming.**\n\n- first\n- second`;
+  const streamingActions = reducer.ingest({ kind: 'text.delta', runId, text: streamingMarkdown });
+  const streamingAction = streamingActions.find(action => action.kind === 'text.open');
+  assert(streamingAction, `${providerKind} must open a provider-neutral streaming text segment`);
+  const streamingTarget = { innerHTML: '' };
+  renderMarkdownInto(streamingTarget, streamingAction.text);
+  assert(streamingTarget.innerHTML.includes(`<h2>${providerKind} Streaming</h2>`), `${providerKind} streaming heading must render`);
+  assert(streamingTarget.innerHTML.includes('<strong>Formatted while streaming.</strong>'), `${providerKind} streaming emphasis must render`);
+  assert(streamingTarget.innerHTML.includes('<ul>'), `${providerKind} streaming list must render`);
+
+  const finalMarkdown = `${streamingMarkdown}\n\n\`inline\`\n\n\`\`\`js\nconst markdown = true;\n\`\`\``;
+  const updateActions = reducer.ingest({ kind: 'text.replace', runId, text: finalMarkdown });
+  const updateAction = updateActions.find(action => action.kind === 'text.update');
+  assert(updateAction, `${providerKind} must update the same streaming text segment`);
+  const finalTarget = { innerHTML: '' };
+  renderMarkdownInto(finalTarget, updateAction.text);
+  assert(finalTarget.innerHTML.includes('<code>inline</code>'), `${providerKind} inline code must render`);
+  assert(finalTarget.innerHTML.includes('<pre><code class="language-js">'), `${providerKind} fenced code must render`);
+
+  const terminalActions = reducer.ingest({ kind: 'run.complete', runId });
+  assert(terminalActions.some(action => action.kind === 'text.finalize'), `${providerKind} must finalize rendered Markdown`);
+}
+
+for (const token of [
+  "this.handleNativeRunEvent('hermes'",
+  "this.handleNativeRunEvent('codex'",
+  "this.applyTurnEvent({ kind: 'text.delta'",
+  "this.handleProviderSdkEvent(eventName",
+  "if (reply) this.applyTurnEvent({ kind: 'text.replace'",
+  "this.renderHistoryItems(this.providerHistoryItems"
+]) {
+  assert(chatSource.includes(token), `provider Markdown route missing ${token}`);
+}
 assert(indexHtml.includes('/node_modules/marked/lib/marked.umd.js'), 'Marked must be served locally');
 assert(!indexHtml.includes('cdn.jsdelivr.net/npm/marked'), 'chat Markdown must not depend on the CDN');
 assert(!indexHtml.includes('id="chat-move"'), 'the dedicated move button must be removed');
@@ -87,9 +157,18 @@ assert(
   !chatSource.includes("this.appendSystem(failureStatus + ': ' + message)"),
   'terminal run errors must not create synthetic chat bubbles'
 );
+for (const token of [
+  'sessionId: this.selectedProviderSessionId()',
+  'this.adoptProviderSessionId(data.sessionId);',
+  'if (Array.isArray(data.messages)) this.renderProviderSessionMessages(data.messages);',
+  'if (await this.loadExplicitProviderSessionHistory()) return;',
+  'New session started — the previous session is still saved',
+]) {
+  assert(chatSource.includes(token), `session-isolated provider chat flow missing ${token}`);
+}
 assert(
-  chatSource.includes("sessionId: String(this.sessionKey || '').split(':').slice(2).join(':')"),
-  'Hermes and Provider SDK sends must preserve the selected native session id'
+  !chatSource.includes("sessionId: String(this.sessionKey || '').split(':').slice(2).join(':')"),
+  'provider sends must never derive a native session id from an unrelated session-key shape'
 );
 assert(!chatSource.includes('this.setStatus('), 'run and tool activity must not mutate the connection status');
 assert(

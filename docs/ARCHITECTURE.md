@@ -16,6 +16,7 @@ The app is designed for local machines, LANs, and private VPNs. It is not a publ
 | Client UI | `src/client/` | Three.js world, setup page, settings, chat, movement, and interactions. |
 | Server | `src/server/server.py` | Static file serving, JSON APIs, license state, OpenClaw/Hermes adapters, persistence. |
 | Provider registry | `src/server/providers/` | Six built-in manifests plus optional `vw_provider_*.py` extensions and file-safety helpers. |
+| Lifecycle coordinator | `src/server/gateway_presence.py` | Provider-neutral run, tool, approval, health, finishing, idle, and stale-run state shared by every provider. |
 | Realtime sidecar | `src/realtime/server.mjs` | Optional Colyseus runtime for live agent snapshots, route leases, and heartbeat broadcast. |
 | Hermes provider | `src/server/providers/hermes.py` | Capability-negotiated HTTP API runtime plus independently negotiated mounted-profile resources and optional Linux CLI lifecycle support. |
 | Persistent data | `VW_DATA_DIR`, usually Docker volume `vw-data` | World metadata, chunks, buildings, license receipt, config, communication logs. |
@@ -29,6 +30,22 @@ The app is designed for local machines, LANs, and private VPNs. It is not a publ
 3. The client reads and writes JSON through `/api/*` endpoints.
 4. The server persists data under `VW_DATA_DIR`.
 5. Provider registry data is merged into the visible agent roster, Agent Desk, chat window, and in-world bubbles according to manifest capabilities.
+
+Every execution transport translates its native signals into the same lifecycle
+coordinator. The coordinator owns active run/tool/approval ids and the
+`working → finishing → idle` transition. Provider health and Live Agent
+controller state remain separate state planes. Native Hermes and Codex streams
+are consumed by server-owned monitors, so browser SSE attachment or disconnect
+does not control task presence.
+
+Chat-session state is addressed by `providerKind + profile + native session id`,
+not by one process-global active session alone. The browser persists that key per
+chat-window slot and sends it with every native run. Atomic per-session mirrors
+under `VW_STATUS_DIR/chat-session-mirrors/` preserve normalized rich history
+across switching, lazy session creation, restarts, and incomplete native
+exports. Session switching merges provider history into the mirror; only an
+explicit delete removes it. OpenClaw new-session creation allocates a distinct
+Gateway conversation key and never resets the prior key.
 
 OpenClaw interactive chat follows a split server-owned transport: the browser
 opens same-origin `/api/openclaw/events` and `/api/openclaw/rpc` connections,

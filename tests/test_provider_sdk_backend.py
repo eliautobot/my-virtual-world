@@ -373,6 +373,179 @@ class ProviderSdkBackendTests(unittest.TestCase):
             {"role": "user", "content": "third"},
         ], history)
 
+    def test_hermes_history_transactions_preserve_all_concurrent_progress_updates(self):
+        profile = "concurrent-history"
+        worker_count = 24
+        start = threading.Barrier(worker_count)
+        initial = {
+            "messages": [{"role": "user", "text": "keep this turn", "ts": 1}],
+            "sessionId": "session-concurrent",
+        }
+        with mock.patch.object(server, "DATA_DIR", str(self.root)):
+            server._save_hermes_state(profile, initial)
+
+            def publish(index):
+                start.wait(timeout=5)
+                server._publish_hermes_api_progress(
+                    profile,
+                    "hermes-concurrent",
+                    f"run-{index}",
+                    reply=f"reply-{index}",
+                )
+
+            with ThreadPoolExecutor(max_workers=worker_count) as pool:
+                futures = [pool.submit(publish, index) for index in range(worker_count)]
+                for future in futures:
+                    future.result(timeout=10)
+
+            state = server._load_hermes_state(profile)
+
+        self.assertEqual("session-concurrent", state["sessionId"])
+        self.assertEqual("keep this turn", state["messages"][0]["text"])
+        progress = [item for item in state["messages"] if item.get("ephemeral") == "hermes-progress"]
+        self.assertEqual(worker_count, len(progress))
+        self.assertEqual(
+            {f"hermes-api-progress-run-{index}" for index in range(worker_count)},
+            {item["progressId"] for item in progress},
+        )
+
+    def test_hermes_approval_polls_are_session_scoped_and_non_destructive(self):
+        agents = {
+            "hermes-default": {"id": "hermes-default", "profile": "default", "providerAgentId": "default"},
+            "hermes-cod": {"id": "hermes-cod", "profile": "cod", "providerAgentId": "cod"},
+        }
+        with server.HERMES_APPROVAL_LOCK:
+            server.HERMES_APPROVAL_PENDING.clear()
+        try:
+            with mock.patch.object(server, "_get_hermes_agent", side_effect=lambda key: agents.get(key)), \
+                 mock.patch.object(server, "_get_hermes_session_id", side_effect=lambda profile: f"session-{profile}"):
+                server._remember_hermes_approval_pending(
+                    {"id": "approval-default", "status": "pending"},
+                    "hermes-default", "default", "session-default",
+                )
+                server._remember_hermes_approval_pending(
+                    {"id": "approval-cod", "status": "pending"},
+                    "hermes-cod", "cod", "session-cod",
+                )
+
+                default_result = server._get_hermes_approval_pending("hermes-default", "session-default")
+                self.assertEqual("approval-default", default_result["pending"]["id"])
+                cod_result = server._get_hermes_approval_pending("hermes-cod", "session-cod")
+                self.assertEqual("approval-cod", cod_result["pending"]["id"])
+
+                wrong_session = server._get_hermes_approval_pending("hermes-cod", "session-other")
+                self.assertIsNone(wrong_session["pending"])
+                self.assertEqual(
+                    "approval-cod",
+                    server._get_hermes_approval_pending("hermes-cod", "session-cod")["pending"]["id"],
+                )
+        finally:
+            with server.HERMES_APPROVAL_LOCK:
+                server.HERMES_APPROVAL_PENDING.clear()
+
+    def test_hermes_failed_approval_delivery_keeps_request_pending(self):
+        agent = {"id": "hermes-default", "statusKey": "hermes-default", "profile": "default", "providerAgentId": "default"}
+        approval = {
+            "id": "approval-retry",
+            "provider": "hermes-api",
+            "runId": "run-retry",
+            "session_id": "session-retry",
+            "status": "pending",
+        }
+        with server.HERMES_APPROVAL_LOCK:
+            server.HERMES_APPROVAL_PENDING.clear()
+        server._remember_hermes_approval_pending(approval, "hermes-default", "default", "session-retry")
+
+        class Client:
+            @staticmethod
+            def respond_approval(_run_id, _choice):
+                raise ConnectionError("temporary approval transport failure")
+
+        try:
+            with mock.patch.object(server, "_get_hermes_agent", return_value=agent), \
+                 mock.patch.object(server, "_get_hermes_session_id", return_value="session-retry"), \
+                 mock.patch.object(server, "_get_hermes_active_run", return_value={"apiEndpointUrl": "http://hermes:8642"}), \
+                 mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()):
+                result = server._handle_hermes_approval_respond({
+                    "agentId": "hermes-default",
+                    "sessionId": "session-retry",
+                    "approvalId": "approval-retry",
+                    "choice": "approve_once",
+                    "approval": approval,
+                })
+                pending = server._get_hermes_approval_pending("hermes-default", "session-retry")
+            self.assertFalse(result["ok"])
+            self.assertIn("temporary approval transport failure", result["error"])
+            self.assertEqual("approval-retry", pending["pending"]["id"])
+        finally:
+            with server.HERMES_APPROVAL_LOCK:
+                server.HERMES_APPROVAL_PENDING.clear()
+
+    def test_hermes_successful_approval_delivery_resolves_exact_session(self):
+        agent = {"id": "hermes-default", "statusKey": "hermes-default", "profile": "default", "providerAgentId": "default"}
+        approval = {
+            "id": "approval-success",
+            "provider": "hermes-api",
+            "runId": "run-success",
+            "session_id": "session-success",
+            "status": "pending",
+        }
+        persisted = []
+        with server.HERMES_APPROVAL_LOCK:
+            server.HERMES_APPROVAL_PENDING.clear()
+        server._remember_hermes_approval_pending(approval, "hermes-default", "default", "session-success")
+
+        class Client:
+            @staticmethod
+            def respond_approval(run_id, choice):
+                self.assertEqual(("run-success", "once"), (run_id, choice))
+                return {"ok": True}
+
+        try:
+            with mock.patch.object(server, "_get_hermes_agent", return_value=agent), \
+                 mock.patch.object(server, "_get_hermes_session_id", return_value="session-success"), \
+                 mock.patch.object(server, "_get_hermes_active_run", return_value={"apiEndpointUrl": "http://hermes:8642"}), \
+                 mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()), \
+                 mock.patch.object(server, "_upsert_hermes_approval_history", side_effect=lambda profile, session_id, item: persisted.append((profile, session_id, item)) or []), \
+                 mock.patch.object(server, "_presence_lifecycle"):
+                result = server._handle_hermes_approval_respond({
+                    "agentId": "hermes-default",
+                    "sessionId": "session-success",
+                    "approvalId": "approval-success",
+                    "choice": "approve_once",
+                    "approval": approval,
+                })
+                pending = server._get_hermes_approval_pending("hermes-default", "session-success")
+            self.assertTrue(result["ok"])
+            self.assertIsNone(pending["pending"])
+            self.assertEqual(("default", "session-success"), persisted[0][:2])
+            self.assertEqual("approved", persisted[0][2]["status"])
+        finally:
+            with server.HERMES_APPROVAL_LOCK:
+                server.HERMES_APPROVAL_PENDING.clear()
+
+    def test_hermes_approval_history_is_upserted_in_its_exact_session(self):
+        profile = "approval-history"
+        with mock.patch.object(server, "DATA_DIR", str(self.root)):
+            server._save_hermes_state(profile, {"messages": [], "sessionId": "different-session"})
+            pending = {
+                "id": "approval-history-one",
+                "provider": "hermes-api",
+                "runId": "run-history-one",
+                "session_id": "target-session",
+                "status": "pending",
+            }
+            server._upsert_hermes_approval_history(profile, "target-session", pending)
+            server._upsert_hermes_approval_history(profile, "target-session", {**pending, "status": "approved"})
+            target = server._load_chat_session_mirror("hermes", profile, "target-session")
+            different = server._load_hermes_state(profile)
+
+        approval_rows = [item for item in target if item.get("approval")]
+        self.assertEqual(1, len(approval_rows))
+        self.assertEqual("approved", approval_rows[0]["approval"]["status"])
+        self.assertEqual("target-session", approval_rows[0]["sessionId"])
+        self.assertEqual([], different["messages"])
+
     def test_native_hermes_run_hydrates_the_explicit_selected_session(self):
         submitted = {}
 
@@ -407,11 +580,10 @@ class ProviderSdkBackendTests(unittest.TestCase):
         with mock.patch.object(server, "_get_hermes_agent", return_value=agent), \
              mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()), \
              mock.patch.object(server, "_get_hermes_session_id", return_value="tracked-session"), \
-             mock.patch.object(server, "_set_hermes_session_id") as set_session, \
-             mock.patch.object(server, "_load_hermes_history", return_value=[]), \
-             mock.patch.object(server, "_save_hermes_history"), \
+             mock.patch.object(server, "_activate_hermes_session") as activate_session, \
+             mock.patch.object(server, "_update_hermes_session_history"), \
              mock.patch.object(server, "_remember_hermes_active_run"), \
-             mock.patch.object(server, "_set_hermes_presence"), \
+             mock.patch.object(server, "_presence_lifecycle"), \
              mock.patch.object(server, "_publish_hermes_api_progress"):
             result = server._handle_hermes_run_start({
                 "agentId": "hermes-default",
@@ -425,7 +597,7 @@ class ProviderSdkBackendTests(unittest.TestCase):
             {"role": "user", "content": "The codeword is cobalt."},
             {"role": "assistant", "content": "Understood."},
         ], submitted["conversation_history"])
-        set_session.assert_called_once_with("default", "selected-session")
+        activate_session.assert_called_once_with("default", "selected-session")
 
     def test_native_hermes_run_does_not_submit_without_selected_session_history(self):
         class Client:
@@ -448,13 +620,13 @@ class ProviderSdkBackendTests(unittest.TestCase):
         with mock.patch.object(server, "_get_hermes_agent", return_value=agent), \
              mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()), \
              mock.patch.object(server, "_get_hermes_session_id", return_value="selected-session"), \
-             mock.patch.object(server, "_save_hermes_history") as save_history:
+             mock.patch.object(server, "_update_hermes_session_history") as update_history:
             result = server._handle_hermes_run_start({"agentId": "hermes-default", "message": "continue"})
         self.assertFalse(result["ok"])
         self.assertEqual("session_history_unavailable", result["code"])
         self.assertEqual(502, result["_status"])
         Client.start_run.assert_not_called()
-        save_history.assert_not_called()
+        update_history.assert_not_called()
 
     def test_native_hermes_first_turn_starts_without_a_history_lookup(self):
         class Client:
@@ -474,11 +646,10 @@ class ProviderSdkBackendTests(unittest.TestCase):
         with mock.patch.object(server, "_get_hermes_agent", return_value=agent), \
              mock.patch.object(server, "_hermes_api_client_for_profile", return_value=Client()), \
              mock.patch.object(server, "_get_hermes_session_id", return_value=""), \
-             mock.patch.object(server, "_set_hermes_session_id"), \
-             mock.patch.object(server, "_load_hermes_history", return_value=[]), \
-             mock.patch.object(server, "_save_hermes_history"), \
+             mock.patch.object(server, "_activate_hermes_session"), \
+             mock.patch.object(server, "_update_hermes_session_history"), \
              mock.patch.object(server, "_remember_hermes_active_run"), \
-             mock.patch.object(server, "_set_hermes_presence"), \
+             mock.patch.object(server, "_presence_lifecycle"), \
              mock.patch.object(server, "_publish_hermes_api_progress"):
             result = server._handle_hermes_run_start({"agentId": "hermes-default", "message": "first turn"})
         self.assertTrue(result["ok"])

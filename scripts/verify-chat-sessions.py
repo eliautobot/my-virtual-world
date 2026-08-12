@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -52,6 +53,7 @@ def load_server(tmpdir):
         {"id": "hermes-default", "statusKey": "hermes-default", "name": "Hermes", "providerKind": "hermes", "providerAgentId": "default", "profile": "default"},
         {"id": "codex-main", "statusKey": "codex-main", "name": "Codex", "providerKind": "codex", "providerAgentId": "main", "profile": "main"},
         {"id": "claude-main", "statusKey": "claude-main", "name": "Claude", "providerKind": "claude-code", "providerAgentId": "main", "profile": "main"},
+        {"id": "opencode-main", "statusKey": "opencode-main", "name": "OpenCode", "providerKind": "opencode", "providerAgentId": "main", "profile": "main", "capabilities": {"chat": True, "sessions": True, "sessionCreate": True, "sessionDelete": True, "sessionSwitch": True}},
     ]
     module._roster_time = time.time()
     return module, data_dir
@@ -120,6 +122,54 @@ class FakeCodexProvider:
     def delete_thread(self, profile, thread_id):
         self.deleted.append((profile, thread_id))
         return {"ok": True, "deleted": True}
+
+
+class FakeOpenCodeProvider:
+    def __init__(self):
+        self.deleted = []
+        self.block_chat = False
+        self.chat_started = threading.Event()
+        self.chat_release = threading.Event()
+
+    def list_sessions(self, profile, limit=40):
+        return {"ok": True, "sessions": [
+            {"id": "opencode-session-1", "title": "OpenCode Current", "updatedAt": "2026-07-07T15:00:00Z"},
+            {"id": "opencode-session-0", "title": "OpenCode Older", "updatedAt": "2026-07-06T15:00:00Z"},
+        ][:limit]}
+
+    def export_session(self, profile, session_id):
+        return {"ok": True, "session": {"info": {"id": session_id}, "messages": [
+            {"info": {"role": "user", "time": {"created": 1}}, "parts": [{"type": "text", "text": "hello opencode"}]},
+            {"info": {"role": "assistant", "time": {"created": 2}}, "parts": [
+                {"type": "text", "text": "hi from opencode"},
+                {"type": "tool", "id": "tool-1", "tool": "read", "state": {"status": "completed", "output": "ok"}},
+            ]},
+        ]}}
+
+    def delete_session(self, profile, session_id):
+        self.deleted.append((profile, session_id))
+        return {"ok": True, "deleted": True, "sessionId": session_id}
+
+    def send_chat_message(self, profile, message, **kwargs):
+        self.chat_started.set()
+        if self.block_chat:
+            self.chat_release.wait(timeout=5)
+        return {"ok": True, "reply": "opencode run finished", "sessionId": kwargs.get("session_id") or "opencode-session-1"}
+
+
+class FakeProviderRegistry:
+    def __init__(self, provider):
+        self.provider = provider
+
+    def get(self, provider_kind):
+        return self.provider if provider_kind == "opencode" else None
+
+    def invoke(self, provider_kind, operation, *args, **kwargs):
+        provider = self.get(provider_kind)
+        method = getattr(provider, operation, None) if provider else None
+        if not callable(method):
+            return {"ok": False, "error": f"unsupported fake operation: {provider_kind}.{operation}"}
+        return method(*args, **kwargs)
 
 
 def main():
@@ -315,8 +365,17 @@ def main():
         coder_payload, coder_status = server.handle_chat_sessions_list("coder")
         check("non-live OpenClaw agent does not get virtual Live Mode session", coder_status == 200 and not any(s.get("liveMode") for s in (coder_payload.get("sessions") or [])), json.dumps(coder_payload, default=str))
 
+        gateway_call_count = len(gateway_calls)
         created, status = server.handle_chat_session_create("resident-a", {"sessionKey": "agent:resident-a:main"})
-        check("OpenClaw create/reset uses gateway sessions.reset", status == 200 and created.get("ok") and gateway_calls[-1][0] == "sessions.reset")
+        check(
+            "OpenClaw new session preserves the current gateway session",
+            status == 200
+            and created.get("ok")
+            and str(created.get("sessionKey") or "").startswith("agent:resident-a:vw-chat-")
+            and created.get("sessionKey") != "agent:resident-a:main"
+            and len(gateway_calls) == gateway_call_count,
+            json.dumps(created, default=str),
+        )
         server._live_agent_session_append(
             "resident-a",
             kind="observation",
@@ -406,28 +465,105 @@ def main():
             json.dumps(resident_main_chat[-4:], default=str),
         )
 
+        hermes_rich = [
+            {"role": "user", "text": "hello", "sessionId": "hermes-session-1", "source": "virtual-world"},
+            {"role": "assistant", "text": "hi from hermes", "sessionId": "hermes-session-1", "source": "virtual-world"},
+            {"role": "assistant", "text": "local progress survives native export", "sessionId": "hermes-session-1", "source": "hermes-progress"},
+        ]
+        server._save_hermes_state("default", {"messages": hermes_rich, "sessionId": "hermes-session-1"})
         hermes_payload, hermes_status = server.handle_chat_sessions_list("hermes-default")
         check("Hermes sessions list uses provider", hermes_status == 200 and hermes_payload.get("sessions", [{}])[0].get("active") is True)
         switched, status = server.handle_chat_session_switch("hermes-default", "hermes-session-1")
-        check("Hermes switch exports messages", status == 200 and len(switched.get("messages") or []) == 2 and server._get_hermes_session_id("default") == "hermes-session-1")
+        check("Hermes switch merges native history without truncating the rich transcript", status == 200 and len(switched.get("messages") or []) == 3 and any(row.get("text") == "local progress survives native export" for row in switched.get("messages") or []) and server._get_hermes_session_id("default") == "hermes-session-1")
+        created, status = server.handle_chat_session_create("hermes-default")
+        check("Hermes new session archives rather than clears the prior transcript", status == 200 and "@new:" in str(created.get("sessionKey") or "") and len(server._load_chat_session_mirror("hermes", "default", "hermes-session-1")) == 3 and not server._load_hermes_history("default"))
+        switched, status = server.handle_chat_session_switch("hermes-default", "hermes-session-1")
+        check("Hermes archived session reopens with its complete transcript", status == 200 and len(switched.get("messages") or []) == 3)
         deleted, status = server.handle_chat_session_delete("hermes-default", "hermes-session-1")
         check("Hermes delete clears active session", status == 200 and deleted.get("deleted") and server._get_hermes_session_id("default") == "")
 
+        codex_rich = [
+            {"role": "user", "text": "build it", "sessionId": "codex-thread-1"},
+            {"role": "assistant", "text": "built it", "sessionId": "codex-thread-1"},
+            {"role": "assistant", "text": "codex commentary survives", "sessionId": "codex-thread-1", "source": "codex-progress"},
+        ]
+        server._save_codex_state("main", {"messages": codex_rich, "sessionId": "codex-thread-1"})
         codex_payload, codex_status = server.handle_chat_sessions_list("codex-main")
         codex_sessions = codex_payload.get("sessions") or []
         check("Codex list filters archived threads", codex_status == 200 and len(codex_sessions) == 1 and codex_sessions[0].get("id") == "codex-thread-1")
         switched, status = server.handle_chat_session_switch("codex-main", "codex-thread-1")
-        check("Codex switch reads thread messages", status == 200 and len(switched.get("messages") or []) == 2 and server._get_codex_session_id("main") == "codex-thread-1")
+        check("Codex switch merges thread history without truncating commentary", status == 200 and len(switched.get("messages") or []) == 3 and server._get_codex_session_id("main") == "codex-thread-1")
+        created, status = server.handle_chat_session_create("codex-main")
+        check("Codex new thread preserves the prior transcript", status == 200 and "@new:" in str(created.get("sessionKey") or "") and len(server._load_chat_session_mirror("codex", "main", "codex-thread-1")) == 3)
+        switched, status = server.handle_chat_session_switch("codex-main", "codex-thread-1")
+        check("Codex archived thread reopens with its complete transcript", status == 200 and len(switched.get("messages") or []) == 3)
         deleted, status = server.handle_chat_session_delete("codex-main", "codex-thread-1")
         check("Codex delete clears active thread", status == 200 and deleted.get("deleted") and server._get_codex_session_id("main") == "")
 
+        claude_rich = [
+            {"role": "user", "text": "hello claude", "sessionId": claude_session_id},
+            {"role": "assistant", "text": "hi from claude", "sessionId": claude_session_id},
+            {"role": "assistant", "text": "claude local activity survives", "sessionId": claude_session_id, "source": "provider-progress"},
+        ]
+        server._save_claude_code_state("main", {"messages": claude_rich, "sessionId": claude_session_id})
         claude_payload, claude_status = server.handle_chat_sessions_list("claude-main")
         claude_sessions = claude_payload.get("sessions") or []
         check("Claude Code lists native JSONL sessions", claude_status == 200 and claude_sessions and claude_sessions[0].get("id") == claude_session_id)
         switched, status = server.handle_chat_session_switch("claude-main", claude_session_id)
-        check("Claude Code switch reads JSONL messages", status == 200 and len(switched.get("messages") or []) == 2 and server._get_claude_code_session_id("main") == claude_session_id)
+        check("Claude Code switch synchronizes native and generic session state", status == 200 and len(switched.get("messages") or []) == 3 and server._get_claude_code_session_id("main") == claude_session_id and server._load_generic_provider_session("claude-code", "main").get("sessionId") == claude_session_id and len(server._load_provider_history("claude-code", "main")) == 3)
+        created, status = server.handle_chat_session_create("claude-main")
+        check("Claude Code new session preserves the prior transcript", status == 200 and "@new:" in str(created.get("sessionKey") or "") and len(server._load_chat_session_mirror("claude-code", "main", claude_session_id)) == 3 and not server._load_provider_history("claude-code", "main"))
+        switched, status = server.handle_chat_session_switch("claude-main", claude_session_id)
+        check("Claude Code archived session reopens with its complete transcript", status == 200 and len(switched.get("messages") or []) == 3)
         deleted, status = server.handle_chat_session_delete("claude-main", claude_session_id)
         check("Claude Code delete renames native session file and clears active id", status == 200 and deleted.get("deleted") and server._get_claude_code_session_id("main") == "" and not claude_file.exists())
+
+        fake_opencode = FakeOpenCodeProvider()
+        server._PROVIDER_REGISTRY = FakeProviderRegistry(fake_opencode)
+        opencode_rich = [
+            {"role": "user", "text": "hello opencode", "sessionId": "opencode-session-1"},
+            {"role": "assistant", "text": "hi from opencode", "sessionId": "opencode-session-1", "tools": [{"id": "tool-1", "name": "read", "status": "completed", "result": "ok"}]},
+            {"role": "assistant", "text": "opencode local activity survives", "sessionId": "opencode-session-1", "source": "provider-progress"},
+        ]
+        server._save_generic_provider_session("opencode", "main", "opencode-session-1", source="test")
+        server._save_provider_history("opencode", "main", opencode_rich)
+        opencode_payload, opencode_status = server.handle_chat_sessions_list("opencode-main")
+        check("registered provider sessions list uses its native contract", opencode_status == 200 and len(opencode_payload.get("sessions") or []) == 2)
+        switched, status = server.handle_chat_session_switch("opencode-main", "opencode-session-1")
+        check("OpenCode switch normalizes export and preserves rich local activity", status == 200 and len(switched.get("messages") or []) == 3 and any(row.get("text") == "opencode local activity survives" for row in switched.get("messages") or []))
+        created, status = server.handle_chat_session_create("opencode-main")
+        check("registered provider new session preserves prior history", status == 200 and "@new:" in str(created.get("sessionKey") or "") and len(server._load_chat_session_mirror("opencode", "main", "opencode-session-1")) == 3 and not server._load_provider_history("opencode", "main"))
+        switched, status = server.handle_chat_session_switch("opencode-main", "opencode-session-1")
+        check("registered provider archived session reopens completely", status == 200 and len(switched.get("messages") or []) == 3 and server._load_generic_provider_session("opencode", "main").get("sessionId") == "opencode-session-1")
+
+        fake_opencode.block_chat = True
+        started = server._handle_provider_run_start({
+            "agentId": "opencode-main",
+            "sessionId": "opencode-session-1",
+            "message": "finish in the original session",
+            "timeoutSec": 5,
+        })
+        check("registered provider run starts in the explicitly selected session", started.get("ok") and fake_opencode.chat_started.wait(timeout=2))
+        switched_other, status = server.handle_chat_session_switch("opencode-main", "opencode-session-0")
+        fake_opencode.chat_release.set()
+        run_meta = server._PROVIDER_RUNS.get(started.get("runId")) or {}
+        deadline = time.time() + 5
+        while not run_meta.get("done") and time.time() < deadline:
+            time.sleep(0.02)
+        active_after_run = server._load_generic_provider_session("opencode", "main")
+        current_after_run = server._load_provider_history("opencode", "main")
+        original_after_run = server._load_chat_session_mirror("opencode", "main", "opencode-session-1")
+        check(
+            "a finishing provider run cannot steal focus from a newer session switch",
+            status == 200
+            and run_meta.get("done")
+            and active_after_run.get("sessionId") == "opencode-session-0"
+            and all(row.get("sessionId") == "opencode-session-0" for row in current_after_run)
+            and any(row.get("text") == "opencode run finished" for row in original_after_run),
+            json.dumps({"active": active_after_run, "current": current_after_run, "original": original_after_run}, default=str),
+        )
+        deleted, status = server.handle_chat_session_delete("opencode-main", "opencode-session-1")
+        check("registered provider explicit delete removes only the selected session", status == 200 and deleted.get("deleted") and fake_opencode.deleted == [("main", "opencode-session-1")])
 
     failures = [name for name, ok, _detail in CHECKS if not ok]
     if failures:

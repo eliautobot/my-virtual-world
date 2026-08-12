@@ -136,6 +136,13 @@ The starter Office appliance repair is narrow. It only restores mount metadata w
 | GET | `/session-info` | Current model/context metadata when available. |
 
 Status records are used for visual presence only. They do not grant tool access.
+Each `/api/agents` row exposes three independent state planes:
+
+- `presence`: task activity such as `working`, `finishing`, or `idle`, including active lifecycle counts.
+- `providerHealth`: provider availability and connection state; only this plane can make an agent offline.
+- `liveController`: the independent Agent Live Mode controller state when one exists.
+
+The top-level `status` and `task` fields remain for client compatibility.
 
 ## Universal Provider SDK
 
@@ -160,6 +167,23 @@ Status records are used for visual presence only. They do not grant tool access.
 | GET/POST | `/api/providers/approvals` | Read and answer native approval requests when declared. |
 
 Provider identity is the tuple `providerKind + providerConnectionId + providerAgentId`. Public health responses intentionally omit accounts, channels, discovered agents, binaries, credentials, and private runtime details. Provider resource and skill endpoints reject undeclared, absolute, traversal, sensitive, and escaping-symlink paths.
+
+## Unified Chat Sessions
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/chat-sessions?agentId=<id>` | List the selected agent's native sessions. |
+| POST | `/api/chat-sessions/create` | Start a distinct session without deleting or resetting the current one. |
+| POST | `/api/chat-sessions/switch` | Select a native session and return its normalized message history. |
+| POST | `/api/chat-sessions/delete` | Explicitly delete one provider-owned session when supported. |
+
+Provider chat windows persist the returned `sessionKey` and include its native
+`sessionId` in subsequent run requests. This isolates multiple windows using the
+same agent but different sessions. A new lazy session uses a temporary `@new`
+key until the provider returns its native id. Switching merges the native export
+with the app's per-session rich mirror, preserving progress, reasoning, tool,
+and approval rows that the native export may omit. Only the delete endpoint is
+destructive; creating a session never calls a reset/delete operation.
 
 ## Assignments, Decorations, and Profiles
 

@@ -9572,12 +9572,13 @@ function presenceSnapshotImpliesActiveWork(snapshot = null, rosterMatch = null) 
 function applyWorkPresenceClientHold(agent, nextStatus, snapshot = null, rosterMatch = null, nowMs = performance.now()) {
   const normalizedNext = normalizeLiveAgentStatus(nextStatus) || 'offline';
   if (!agent) return normalizedNext;
-  const hasFreshWorkSignal = isWorkPresenceStatus(normalizedNext) || presenceSnapshotImpliesActiveWork(snapshot, rosterMatch);
+  const authoritativeWorkStatus = isWorkPresenceStatus(normalizedNext);
+  const hasFreshWorkSignal = authoritativeWorkStatus || presenceSnapshotImpliesActiveWork(snapshot, rosterMatch);
   const task = String(snapshot?.task ?? rosterMatch?.task ?? agent.task ?? '').trim();
 
   if (hasFreshWorkSignal) {
     agent._workPresenceHoldUntil = nowMs + WORK_PRESENCE_CLIENT_HOLD_MS;
-    return 'working';
+    return authoritativeWorkStatus ? normalizedNext : 'working';
   }
 
   const previous = normalizeLiveAgentStatus(agent.status);

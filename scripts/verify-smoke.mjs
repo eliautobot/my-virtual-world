@@ -516,10 +516,11 @@ for (const token of ['.env', 'node_modules/', '.tmp-data/', 'backups/', 'memory/
 
 const packageJson = JSON.parse(read('package.json'));
 assert(packageJson.scripts.test.includes('npm run verify:smoke'), 'package test script should run the public smoke suite');
+assert(packageJson.scripts.test.includes('npm run verify:chat-ui'), 'package test script should run provider-neutral chat Markdown verification');
 assert(packageJson.scripts.test.includes('npm run verify:providers'), 'package test script should run the provider endpoint suite');
 assert(packageJson.scripts.test.includes('npm run verify:sms'), 'package test script should run the SMS backend and window suite');
 assert.equal(packageJson.scripts['verify:smoke'], 'node scripts/verify-smoke.mjs', 'verify:smoke should use the public verifier');
-assert.equal(packageJson.scripts['verify:providers'], 'python3 -B tests/test_provider_sdk_backend.py && python3 -B tests/test_provider_endpoint_resolution.py', 'provider verifier should run contract and endpoint tests');
+assert.equal(packageJson.scripts['verify:providers'], 'python3 -B tests/test_provider_sdk_backend.py && python3 -B tests/test_provider_endpoint_resolution.py && python3 -B tests/test_presence_lifecycle.py', 'provider verifier should run contract, endpoint, and lifecycle tests');
 assert.equal(packageJson.scripts['verify:chat-ui'], 'node scripts/verify-chat-ui.mjs', 'chat UI verifier should be available');
 for (const scriptName of Object.keys(packageJson.scripts)) {
   assert(!scriptName.includes('phase'), `public package script should not expose internal phase verifier: ${scriptName}`);
@@ -1000,10 +1001,10 @@ for (const token of [
   'outdoorCafeUmbrella',
   'outdoorCafeChairLeg',
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
-  'js/chat-markdown.js?v=20260727-chat-markdown-r1',
-  'js/chat-events.js?v=20260809-commentary-runs-r1',
-  'js/chat.js?v=20260809-commentary-runs-r1',
-  'css/style.css?v=20260808-chat-order-r1',
+  'js/chat-markdown.js?v=20260811-provider-markdown-r1',
+  'js/chat-events.js?v=20260812-approval-history-r2',
+  'js/chat.js?v=20260811-provider-markdown-r1',
+  'css/style.css?v=20260811-provider-markdown-r1',
   'css/ui-redesign.css?v=20260809-connection-guides-r1',
   'css/connection-help.css?v=20260809-connection-guides-r1',
   'js/connection-help.mjs?v=20260809-connection-guides-r1',
@@ -1882,7 +1883,8 @@ for (const token of [
   "agent-characters.js?v=20260809-desk-pose-r1",
   'function getAgentPresenceDotColor(statusValue)',
   'statusDot.userData.presenceStatusIndicator = true',
-  'parts.statusDot.material.color.setHex(getAgentPresenceDotColor(normalizedStatus))',
+  'parts.statusDot.material.color.setHex(getAgentPresenceDotColor(rawStatus))',
+  "if (rawStatus === 'finishing') return 0x84cc16",
   'agentHasLiveModeWorldActionRoute',
   'stale_claim_released',
   'routeLiveModeLocalObjectWorldAction',
