@@ -13,6 +13,11 @@
       "groupingEnabled": true,
       "groupingMinimum": 5
     },
+    "previewBubbles": {
+      "displayMode": "consistent",
+      "size": "large",
+      "contentZoom": 100
+    },
     "location": {
       "label": "",
       "timeZone": "",

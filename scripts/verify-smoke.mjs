@@ -1667,7 +1667,7 @@ for (const token of [
 }
 for (const token of [
   "agent-characters.js?v=20260809-desk-pose-r1",
-  "chat-bubble-layout.mjs?v=20260728-chat-bubble-consistency-r4",
+  "chat-bubble-layout.mjs?v=20260814-preview-bubble-collision-r1",
   'getChatBubbleSideInsets',
   'getChatBubbleChromeMetrics',
   'clampChatBubbleX',
@@ -2449,7 +2449,7 @@ for (const token of [
   'refreshLiveModeLoopStatus',
   'pauseLiveModeLoop',
   'clearLiveModeClientActivity',
-  'js/settings.js?v=20260809-connection-guides-r1',
+  'js/settings.js?v=20260814-preview-bubble-live-settings-r2',
   '/live-mode',
 ]) {
   assert(`${indexHtml}\n${settingsJs}\n${uiCss}`.includes(token), `settings Live Mode control missing token: ${token}`);

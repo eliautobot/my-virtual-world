@@ -52,6 +52,10 @@
     const parsed = optionalNumber(id);
     return parsed === null ? fallback : Math.max(minimum, Math.floor(parsed));
   };
+  const integerBetween = (id, fallback, minimum, maximum) => {
+    const parsed = optionalNumber(id);
+    return parsed === null ? fallback : Math.max(minimum, Math.min(maximum, Math.round(parsed)));
+  };
   const DEMO_MESSAGE = 'DEMO: 3 agents max, some features are locked. Get a License Key to activate all features.';
 
   function isTrialLicense(lic) {
@@ -1032,6 +1036,7 @@
     const chat = config.chat || {};
     const location = world.location || {};
     const chatBubbles = world.chatBubbles || {};
+    const previewBubbles = world.previewBubbles || {};
     if ($('setting-worldName')) $('setting-worldName').value = world.name || 'My Virtual World';
     if ($('setting-locationLabel')) $('setting-locationLabel').value = location.label || '';
     if ($('setting-timeZone')) $('setting-timeZone').value = location.timeZone || '';
@@ -1051,6 +1056,15 @@
         : 5;
     }
     updateChatBubbleGroupingUi();
+    setSelectedRadio('setting-previewBubbleDisplayMode', previewBubbles.displayMode, 'consistent');
+    setSelectedRadio('setting-previewBubbleSize', previewBubbles.size, 'large');
+    if ($('setting-previewBubbleContentZoom')) {
+      const configuredZoom = Number(previewBubbles.contentZoom);
+      $('setting-previewBubbleContentZoom').value = Number.isFinite(configuredZoom)
+        ? Math.max(50, Math.min(200, Math.round(configuredZoom)))
+        : 100;
+    }
+    updatePreviewBubbleZoomUi();
     setSelectedRadio(
       'setting-toolCallDisplay',
       chat.toolCallsExpanded === false ? 'collapsed' : 'expanded',
@@ -1117,6 +1131,11 @@
           groupingEnabled: selectedRadio('setting-chatBubbleGrouping', 'enabled') === 'enabled',
           groupingMinimum: integerAtLeast('setting-chatBubbleGroupingMinimum', 5, 2),
         },
+        previewBubbles: {
+          displayMode: selectedRadio('setting-previewBubbleDisplayMode', 'consistent'),
+          size: selectedRadio('setting-previewBubbleSize', 'large'),
+          contentZoom: integerBetween('setting-previewBubbleContentZoom', 100, 50, 200),
+        },
         location: {
           label: value('setting-locationLabel'),
           timeZone: value('setting-timeZone'),
@@ -1176,6 +1195,24 @@
     return payload;
   }
 
+  function mergeSettingsConfig(baseConfig, settingsPatch) {
+    const merged = { ...(baseConfig || {}) };
+    for (const [section, value] of Object.entries(settingsPatch || {})) {
+      const previous = merged[section];
+      merged[section] = value && typeof value === 'object' && !Array.isArray(value)
+        ? { ...(previous && typeof previous === 'object' ? previous : {}), ...value }
+        : value;
+    }
+    return merged;
+  }
+
+  function applySettingsLive(config) {
+    if (!config || typeof config !== 'object') return;
+    vwConfig = config;
+    window.__VWConfig = config;
+    window.dispatchEvent(new CustomEvent('vw:settings-saved', { detail: { config } }));
+  }
+
   async function saveAllSettings() {
     const button = $('settingsSaveButton');
     const status = $('settingsSaveStatus');
@@ -1185,14 +1222,19 @@
       status.textContent = 'Saving and applying settings…';
       status.className = 'settings-save-status';
     }
+    const previouslySavedConfig = vwConfig;
+    const pendingPayload = buildSettingsPayload();
+    // Apply visual settings immediately on click. The server response below
+    // replaces this optimistic config with its normalized canonical value.
+    applySettingsLive(mergeSettingsConfig(vwConfig, pendingPayload));
     try {
       const result = await fetchJson('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildSettingsPayload()),
+        body: JSON.stringify(pendingPayload),
       });
       populateForm(result.config);
-      window.dispatchEvent(new CustomEvent('vw:settings-saved', { detail: { config: result.config } }));
+      applySettingsLive(result.config);
       if (status) {
         status.textContent = 'Saved and applied.';
         status.className = 'settings-save-status success';
@@ -1203,6 +1245,7 @@
         window.closeSettingsModal?.();
       }
     } catch (error) {
+      applySettingsLive(previouslySavedConfig);
       if (status) {
         status.textContent = error.message || 'Settings could not be saved.';
         status.className = 'settings-save-status error';
@@ -1399,6 +1442,15 @@
     minimumInput.disabled = selectedRadio('setting-chatBubbleGrouping', 'enabled') !== 'enabled';
   }
 
+  function updatePreviewBubbleZoomUi() {
+    const input = $('setting-previewBubbleContentZoom');
+    const output = $('setting-previewBubbleContentZoomValue');
+    if (!input || !output) return;
+    const zoom = Math.max(50, Math.min(200, Math.round(Number(input.value) || 100)));
+    output.value = `${zoom}%`;
+    output.textContent = `${zoom}%`;
+  }
+
   function bind() {
     bindSettingsWindowControls();
     document.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.settingsTab)));
@@ -1408,6 +1460,7 @@
     document.querySelectorAll('input[name="setting-chatBubbleGrouping"]').forEach(radio => {
       radio.addEventListener('change', updateChatBubbleGroupingUi);
     });
+    $('setting-previewBubbleContentZoom')?.addEventListener('input', updatePreviewBubbleZoomUi);
     $('setting-liveModeFeatureEnabled')?.addEventListener('change', () => handleGlobalLiveAgentModeToggleChange());
     $('liveAgentModeWarningApply')?.addEventListener('click', () => closeLiveAgentModeWarning(true));
     $('liveAgentModeWarningCancel')?.addEventListener('click', () => closeLiveAgentModeWarning(false));

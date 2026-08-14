@@ -7,6 +7,7 @@ import {
   getRigidWorldChatBubbleLayout,
   getChatBubbleSideInsets,
   normalizeChatBubbleDisplaySettings,
+  resolveChatBubbleObstacleCollisions,
   shouldGroupChatBubbles,
 } from '../src/client/js/chat-bubble-layout.mjs';
 
@@ -71,6 +72,24 @@ assert.equal(
   clampChatBubbleX(900, 320, openInsets.leftBound, openInsets.rightBound),
   785,
   'expanded bubbles must continue respecting the Info panel'
+);
+
+const obstacleRects = [{ x: 280, y: 100, w: 260, h: 200 }];
+const chatRects = [{ agentId: 'coder', x: 300, y: 130, w: 220, h: 160 }];
+resolveChatBubbleObstacleCollisions(chatRects, obstacleRects, {
+  left: 0,
+  right: 900,
+  top: 0,
+  bottom: 700,
+});
+assert.equal(chatRects[0].movedForObstacle, true, 'a chat bubble overlapping a Preview Bubble must be moved');
+assert.equal(
+  chatRects[0].x + chatRects[0].w <= obstacleRects[0].x - 8
+    || chatRects[0].x >= obstacleRects[0].x + obstacleRects[0].w + 8
+    || chatRects[0].y + chatRects[0].h <= obstacleRects[0].y - 8
+    || chatRects[0].y >= obstacleRects[0].y + obstacleRects[0].h + 8,
+  true,
+  'the moved chat bubble must clear the fixed Preview Bubble obstacle with a gap'
 );
 
 assert.deepEqual(

@@ -214,6 +214,21 @@ def _normalize_chat_bubble_settings(value):
     }
 
 
+def _normalize_preview_bubble_settings(value):
+    value = value if isinstance(value, dict) else {}
+    display_mode = value.get("displayMode")
+    size = value.get("size")
+    try:
+        content_zoom = int(value.get("contentZoom", 100))
+    except (TypeError, ValueError, OverflowError):
+        content_zoom = 100
+    return {
+        "displayMode": display_mode if display_mode in ("consistent", "world") else "consistent",
+        "size": size if size in ("large", "medium", "small") else "large",
+        "contentZoom": max(50, min(200, content_zoom)),
+    }
+
+
 def _normalize_chat_settings(value):
     value = value if isinstance(value, dict) else {}
     expanded = value.get("toolCallsExpanded")
@@ -314,6 +329,11 @@ def _default_vw_config():
                 "size": "large",
                 "groupingEnabled": True,
                 "groupingMinimum": 5,
+            },
+            "previewBubbles": {
+                "displayMode": "consistent",
+                "size": "large",
+                "contentZoom": 100,
             },
             "location": {"label": "", "timeZone": "", "latitude": None, "longitude": None},
         },
@@ -423,6 +443,7 @@ def _load_vw_config():
     if not isinstance(cfg["world"].get("location"), dict):
         cfg["world"]["location"] = {"label": "", "timeZone": "", "latitude": None, "longitude": None}
     cfg["world"]["chatBubbles"] = _normalize_chat_bubble_settings(cfg["world"].get("chatBubbles"))
+    cfg["world"]["previewBubbles"] = _normalize_preview_bubble_settings(cfg["world"].get("previewBubbles"))
     cfg["chat"] = _normalize_chat_settings(cfg.get("chat"))
     cfg["openclaw"]["homePath"] = os.path.expanduser(str(_config_or_env(
         cfg, overrides, "openclaw", "homePath", ("VW_OPENCLAW_PATH",), "~/.openclaw"
@@ -956,6 +977,8 @@ def _save_vw_config_update(body):
     _preserve_secret_updates(existing, body)
     if isinstance(body.get("world"), dict) and "chatBubbles" in body["world"]:
         body["world"]["chatBubbles"] = _normalize_chat_bubble_settings(body["world"]["chatBubbles"])
+    if isinstance(body.get("world"), dict) and "previewBubbles" in body["world"]:
+        body["world"]["previewBubbles"] = _normalize_preview_bubble_settings(body["world"]["previewBubbles"])
     if "chat" in body:
         body["chat"] = _normalize_chat_settings(body["chat"])
     if isinstance(body.get("features"), dict):
@@ -3057,6 +3080,12 @@ AGENT_WORKSPACE_ALLOWED_FILES = (
 )
 AGENT_WORKSPACE_FILE_MAX_BYTES = 160 * 1024
 AGENT_SKILL_FILE_MAX_BYTES = 256 * 1024
+AGENT_PREVIEW_SCHEMA_VERSION = "agent-work-preview/v1"
+AGENT_PREVIEW_TEXT_MAX_BYTES = 2 * 1024 * 1024
+AGENT_PREVIEW_DOCUMENT_MAX_BYTES = 24 * 1024 * 1024
+AGENT_PREVIEW_MEDIA_MAX_BYTES = 100 * 1024 * 1024
+AGENT_PREVIEW_RECORD_LIMIT = 100
+AGENT_PREVIEW_RECORD_MAX_AGE_SEC = 24 * 60 * 60
 AGENT_SKILL_SCHEMA_VERSION = "agent-skills/v1"
 SKILLS_LIBRARY_SCHEMA_VERSION = "skills-library/v1"
 RESIDENT_PROFILE_SCHEMA_VERSION = "virtual-world-resident-profile/v1"
@@ -26883,6 +26912,273 @@ def _provider_workspace_root(agent):
     return os.path.abspath(os.path.expanduser(str(raw))) if raw else ""
 
 
+_AGENT_PREVIEW_EXTENSION_KINDS = {
+    ".html": ("html", "text/html; charset=utf-8", "html"),
+    ".htm": ("html", "text/html; charset=utf-8", "html"),
+    ".md": ("markdown", "text/markdown; charset=utf-8", "markdown"),
+    ".markdown": ("markdown", "text/markdown; charset=utf-8", "markdown"),
+    ".txt": ("text", "text/plain; charset=utf-8", "text"),
+    ".log": ("text", "text/plain; charset=utf-8", "text"),
+    ".csv": ("text", "text/csv; charset=utf-8", "csv"),
+    ".json": ("code", "application/json; charset=utf-8", "json"),
+    ".jsonl": ("code", "application/x-ndjson; charset=utf-8", "json"),
+    ".yaml": ("code", "text/yaml; charset=utf-8", "yaml"),
+    ".yml": ("code", "text/yaml; charset=utf-8", "yaml"),
+    ".toml": ("code", "text/plain; charset=utf-8", "toml"),
+    ".xml": ("code", "application/xml; charset=utf-8", "xml"),
+    ".css": ("code", "text/css; charset=utf-8", "css"),
+    ".scss": ("code", "text/plain; charset=utf-8", "scss"),
+    ".js": ("code", "text/javascript; charset=utf-8", "javascript"),
+    ".mjs": ("code", "text/javascript; charset=utf-8", "javascript"),
+    ".cjs": ("code", "text/javascript; charset=utf-8", "javascript"),
+    ".jsx": ("code", "text/plain; charset=utf-8", "jsx"),
+    ".ts": ("code", "text/plain; charset=utf-8", "typescript"),
+    ".tsx": ("code", "text/plain; charset=utf-8", "tsx"),
+    ".py": ("code", "text/x-python; charset=utf-8", "python"),
+    ".go": ("code", "text/plain; charset=utf-8", "go"),
+    ".rs": ("code", "text/plain; charset=utf-8", "rust"),
+    ".java": ("code", "text/plain; charset=utf-8", "java"),
+    ".c": ("code", "text/plain; charset=utf-8", "c"),
+    ".h": ("code", "text/plain; charset=utf-8", "c"),
+    ".cpp": ("code", "text/plain; charset=utf-8", "cpp"),
+    ".hpp": ("code", "text/plain; charset=utf-8", "cpp"),
+    ".sh": ("code", "text/plain; charset=utf-8", "shell"),
+    ".bash": ("code", "text/plain; charset=utf-8", "shell"),
+    ".sql": ("code", "text/plain; charset=utf-8", "sql"),
+    ".svg": ("image", "image/svg+xml", "svg"),
+    ".png": ("image", "image/png", "image"),
+    ".jpg": ("image", "image/jpeg", "image"),
+    ".jpeg": ("image", "image/jpeg", "image"),
+    ".gif": ("image", "image/gif", "image"),
+    ".webp": ("image", "image/webp", "image"),
+    ".avif": ("image", "image/avif", "image"),
+    ".pdf": ("pdf", "application/pdf", "pdf"),
+    ".mp4": ("video", "video/mp4", "video"),
+    ".webm": ("video", "video/webm", "video"),
+    ".mov": ("video", "video/quicktime", "video"),
+    ".m4v": ("video", "video/x-m4v", "video"),
+    ".mp3": ("audio", "audio/mpeg", "audio"),
+    ".wav": ("audio", "audio/wav", "audio"),
+    ".ogg": ("audio", "audio/ogg", "audio"),
+    ".m4a": ("audio", "audio/mp4", "audio"),
+    ".flac": ("audio", "audio/flac", "audio"),
+}
+_AGENT_PREVIEW_SECRET_BASENAMES = {
+    ".env", "auth.json", "openclaw.json", "credentials.json", "secrets.json",
+    "id_" + "rsa", "id_" + "ed25519", "known_hosts", "authorized_keys", ".netrc",
+}
+_AGENT_PREVIEW_SECRET_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".jks", ".keystore")
+_agent_preview_records = []
+_agent_preview_serial = 0
+_agent_preview_lock = threading.RLock()
+
+
+def _agent_preview_error(code, message, status=400, **details):
+    payload = _api_error(code, message, details=details or None)
+    payload["_status"] = status
+    return payload
+
+
+def _agent_preview_sensitive_path(relative_path):
+    parts = [part for part in str(relative_path or "").replace("\\", "/").split("/") if part]
+    for part in parts:
+        lowered = part.lower()
+        if lowered.startswith("."):
+            return True
+        if lowered in _AGENT_PREVIEW_SECRET_BASENAMES:
+            return True
+        if lowered.startswith(("credentials.", "secrets.", "tokens.", "private-key.")):
+            return True
+        if lowered.endswith(_AGENT_PREVIEW_SECRET_SUFFIXES):
+            return True
+    return False
+
+
+def _map_agent_preview_absolute_path(raw_path):
+    requested = str(raw_path or "").strip()
+    candidates = [requested]
+    if callable(map_host_path_to_container):
+        host_roots = [HOST_WORKSPACE_BASE, _openclaw_gateway_home_path()]
+        for host_root in host_roots:
+            if not host_root:
+                continue
+            mapped = map_host_path_to_container(
+                requested,
+                host_root=host_root,
+                container_root=WORKSPACE_BASE,
+            )
+            if mapped and mapped not in candidates:
+                candidates.append(mapped)
+    return candidates
+
+
+def _resolve_agent_preview_file(agent_id, raw_path, workdir=""):
+    agent = _agent_record_for(agent_id)
+    if not agent:
+        return None, None, _agent_preview_error("agent_not_found", "Unknown agent id for preview.", 404, agentId=agent_id)
+    root = _provider_workspace_root(agent)
+    if not root or not os.path.isdir(root):
+        return None, None, _agent_preview_error("workspace_not_found", "Agent workspace is not available for preview.", 404, agentId=agent_id)
+
+    raw_path = str(raw_path or "").strip()
+    raw_workdir = str(workdir or "").strip()
+    if not raw_path or "\x00" in raw_path or "\x00" in raw_workdir:
+        return None, None, _agent_preview_error("invalid_path", "A file path is required.")
+
+    root_real = os.path.realpath(root)
+
+    def inside_root(candidate):
+        try:
+            absolute = os.path.abspath(candidate)
+            real = os.path.realpath(absolute)
+            return os.path.commonpath([root_real, real]) == root_real
+        except (OSError, ValueError):
+            return False
+
+    candidate_bases = [root]
+    if raw_workdir:
+        if os.path.isabs(raw_workdir) or is_windows_absolute(raw_workdir):
+            candidate_bases = _map_agent_preview_absolute_path(raw_workdir)
+        else:
+            candidate_bases = [os.path.join(root, raw_workdir)]
+
+    candidates = []
+    if os.path.isabs(raw_path) or is_windows_absolute(raw_path):
+        candidates.extend(_map_agent_preview_absolute_path(raw_path))
+    else:
+        candidates.extend(os.path.join(base, raw_path) for base in candidate_bases)
+        if raw_workdir:
+            candidates.append(os.path.join(root, raw_path))
+
+    outside_workspace = False
+    for candidate in candidates:
+        if not inside_root(candidate):
+            outside_workspace = True
+            continue
+        full = os.path.realpath(os.path.abspath(candidate))
+        try:
+            relative = os.path.relpath(full, root_real).replace(os.sep, "/")
+        except ValueError:
+            outside_workspace = True
+            continue
+        if relative == ".." or relative.startswith("../"):
+            outside_workspace = True
+            continue
+        if _agent_preview_sensitive_path(relative):
+            return None, None, _agent_preview_error("sensitive_path", "Hidden and secret files cannot be previewed.", 403)
+        if not os.path.isfile(full):
+            continue
+        extension = os.path.splitext(full)[1].lower()
+        kind_info = _AGENT_PREVIEW_EXTENSION_KINDS.get(extension)
+        if not kind_info:
+            return None, None, _agent_preview_error("unsupported_file", "This file type is not supported by Agent Preview.", 415, extension=extension)
+        kind, mime_type, language = kind_info
+        size = os.path.getsize(full)
+        maximum = AGENT_PREVIEW_MEDIA_MAX_BYTES if kind in {"video", "audio"} else (
+            AGENT_PREVIEW_DOCUMENT_MAX_BYTES if kind in {"image", "pdf"} else AGENT_PREVIEW_TEXT_MAX_BYTES
+        )
+        if size > maximum:
+            return None, None, _agent_preview_error("file_too_large", "File exceeds the preview size limit.", 413, size=size, maxBytes=maximum)
+        stat = os.stat(full)
+        descriptor = {
+            "schemaVersion": AGENT_PREVIEW_SCHEMA_VERSION,
+            "agentId": str((agent or {}).get("statusKey") or (agent or {}).get("id") or agent_id),
+            "name": os.path.basename(full),
+            "path": relative,
+            "kind": kind,
+            "mimeType": mime_type,
+            "language": language,
+            "size": size,
+            "maxBytes": maximum,
+            "modifiedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+            "version": hashlib.sha256(f"{stat.st_mtime_ns}:{size}".encode("utf-8")).hexdigest()[:20],
+        }
+        return full, descriptor, None
+
+    if outside_workspace:
+        return None, None, _agent_preview_error("workspace_escape", "Preview files must stay inside the agent workspace.", 403)
+    return None, None, _agent_preview_error("file_not_found", "Preview file was not found in the agent workspace.", 404)
+
+
+def get_agent_preview_descriptor(agent_id, raw_path, workdir=""):
+    _full, descriptor, error = _resolve_agent_preview_file(agent_id, raw_path, workdir)
+    if error:
+        return False, error, error.pop("_status", 400)
+    return True, {"ok": True, "schemaVersion": AGENT_PREVIEW_SCHEMA_VERSION, "preview": descriptor}, 200
+
+
+def publish_agent_preview(payload):
+    global _agent_preview_serial
+    if not isinstance(payload, dict):
+        return False, _api_error("invalid_payload", "Preview payload must be an object."), 400
+    agent_id = str(payload.get("agentId") or payload.get("agent") or "").strip()
+    kind = str(payload.get("kind") or payload.get("type") or ("file" if payload.get("path") else "")).strip().lower()
+    if not agent_id:
+        return False, _api_error("agent_required", "agentId is required."), 400
+    target = {
+        "agentId": agent_id,
+        "kind": kind,
+        "title": str(payload.get("title") or payload.get("label") or "").strip(),
+        "source": str(payload.get("source") or "world-api").strip(),
+    }
+    if kind == "file":
+        raw_path = str(payload.get("path") or payload.get("file") or "").strip()
+        workdir = str(payload.get("workdir") or payload.get("cwd") or "").strip()
+        _full, descriptor, error = _resolve_agent_preview_file(agent_id, raw_path, workdir)
+        if error:
+            status = error.pop("_status", 400)
+            return False, error, status
+        target.update({"path": raw_path, "workdir": workdir, "title": target["title"] or descriptor["name"]})
+    elif kind == "url":
+        raw_url = str(payload.get("url") or payload.get("target") or "").strip()
+        parsed = urllib.parse.urlparse(raw_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return False, _api_error("invalid_url", "Only HTTP and HTTPS preview URLs are allowed."), 400
+        target.update({"url": raw_url, "title": target["title"] or parsed.netloc})
+    elif kind == "browser":
+        target["title"] = target["title"] or "Live Agent Browser"
+    else:
+        return False, _api_error("invalid_kind", "Preview kind must be file, url, or browser."), 400
+
+    now = time.time()
+    with _agent_preview_lock:
+        _agent_preview_records[:] = [
+            item for item in _agent_preview_records
+            if now - float(item.get("createdEpoch") or 0) <= AGENT_PREVIEW_RECORD_MAX_AGE_SEC
+        ]
+        _agent_preview_serial += 1
+        record = {
+            "id": f"preview-{_agent_preview_serial}-{uuid.uuid4().hex[:8]}",
+            "serial": _agent_preview_serial,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "createdEpoch": now,
+            "target": target,
+        }
+        _agent_preview_records.append(record)
+        del _agent_preview_records[:-AGENT_PREVIEW_RECORD_LIMIT]
+    public_record = {key: value for key, value in record.items() if key != "createdEpoch"}
+    return True, {"ok": True, "schemaVersion": AGENT_PREVIEW_SCHEMA_VERSION, "preview": public_record}, 201
+
+
+def list_agent_previews(after=0):
+    try:
+        cursor = max(0, int(after or 0))
+    except (TypeError, ValueError, OverflowError):
+        cursor = 0
+    now = time.time()
+    with _agent_preview_lock:
+        _agent_preview_records[:] = [
+            item for item in _agent_preview_records
+            if now - float(item.get("createdEpoch") or 0) <= AGENT_PREVIEW_RECORD_MAX_AGE_SEC
+        ]
+        rows = [
+            {key: value for key, value in item.items() if key != "createdEpoch"}
+            for item in _agent_preview_records if int(item.get("serial") or 0) > cursor
+        ]
+        latest = _agent_preview_serial
+    return {"ok": True, "schemaVersion": AGENT_PREVIEW_SCHEMA_VERSION, "cursor": latest, "previews": rows}
+
+
 def _safe_provider_relpath(raw_path):
     raw = str(raw_path or "").replace("\\", "/").strip()
     if not raw or raw.startswith("/") or re.match(r"^[A-Za-z]:/", raw) or "\x00" in raw:
@@ -34164,6 +34460,68 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
                 continue
         self.send_error(404, "File not found")
 
+    def _serve_agent_preview_content(self, query):
+        params = urllib.parse.parse_qs(query)
+        agent_id = (params.get("agentId") or params.get("agent") or [""])[0]
+        raw_path = (params.get("path") or [""])[0]
+        workdir = (params.get("workdir") or params.get("cwd") or [""])[0]
+        full, descriptor, error = _resolve_agent_preview_file(agent_id, raw_path, workdir)
+        if error:
+            status = error.pop("_status", 400)
+            return self._send_private_json(error, status)
+
+        size = int(descriptor.get("size") or 0)
+        start = 0
+        end = max(0, size - 1)
+        status = 200
+        range_header = str(self.headers.get("Range") or "").strip()
+        if range_header and range_header.startswith("bytes=") and size > 0:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+            if not match:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            first, last = match.groups()
+            if first:
+                start = int(first)
+                end = int(last) if last else end
+            elif last:
+                suffix = min(size, int(last))
+                start = size - suffix
+            if start >= size or start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            end = min(end, size - 1)
+            status = 206
+
+        length = max(0, end - start + 1) if size else 0
+        self.send_response(status)
+        self.send_header("Content-Type", descriptor.get("mimeType") or "application/octet-stream")
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "sandbox; default-src 'none'; img-src data: blob: http: https:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:")
+        safe_name = str(descriptor.get("name") or "preview").replace('"', "")
+        self.send_header("Content-Disposition", f'inline; filename="{safe_name}"')
+        self.end_headers()
+        if not length:
+            return
+        with open(full, "rb") as handle:
+            handle.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = handle.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -34193,6 +34551,21 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/vw-config":
             return self._send_json(_safe_vw_config())
+
+        if path == "/api/previews":
+            qs = urllib.parse.parse_qs(parsed.query)
+            return self._send_private_json(list_agent_previews((qs.get("after") or [0])[0]))
+
+        if path == "/api/previews/descriptor":
+            qs = urllib.parse.parse_qs(parsed.query)
+            agent_id = (qs.get("agentId") or qs.get("agent") or [""])[0]
+            raw_path = (qs.get("path") or [""])[0]
+            workdir = (qs.get("workdir") or qs.get("cwd") or [""])[0]
+            ok, result, status = get_agent_preview_descriptor(agent_id, raw_path, workdir)
+            return self._send_private_json(result, status)
+
+        if path == "/api/previews/content":
+            return self._serve_agent_preview_content(parsed.query)
 
         if path == "/browser-status":
             cdp_url = (VW_CONFIG.get("browser") or {}).get("cdpUrl") or ""
@@ -34929,6 +35302,14 @@ class VWHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+
+        if path in {"/api/previews", "/api/previews/open"}:
+            try:
+                body = self._read_body() or {}
+            except (ValueError, TypeError, json.JSONDecodeError):
+                return self._send_private_json(_api_error("invalid_json", "Request body must be valid JSON."), 400)
+            ok, result, status = publish_agent_preview(body)
+            return self._send_private_json(result, status)
 
         if path == "/api/openclaw/rpc":
             if not _openclaw_proxy_authorized(self):

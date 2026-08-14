@@ -5,6 +5,7 @@
  */
 import * as THREE from 'three';
 import { createAgentRuntimeClient } from './agent-runtime-client.mjs?v=20260725-runtime-host-affinity-r1';
+import { createAgentPreviewHub } from './agent-preview-hub.mjs?v=20260814-agent-preview-r10';
 // Prior cache-bust marker retained for regression verifiers:
 // './agent-characters.js?v=20260527-work-status-tool-animation-cache-bust'
 import {
@@ -182,8 +183,9 @@ import {
   getRigidWorldChatBubbleLayout,
   getChatBubbleSideInsets,
   normalizeChatBubbleDisplaySettings,
+  resolveChatBubbleObstacleCollisions,
   shouldGroupChatBubbles,
-} from './chat-bubble-layout.mjs?v=20260728-chat-bubble-consistency-r4';
+} from './chat-bubble-layout.mjs?v=20260814-preview-bubble-collision-r1';
 import { orderedSnapshotBubbleParts } from './chat-bubble-events.mjs?v=20260808-chat-order-r2';
 import {
   CAPABILITY_TAG_GROUPS,
@@ -10244,6 +10246,7 @@ async function init() {
   console.log('[VW init] spawn ambient');
   initBirds();
   initChatBubbles();
+  initAgentPreviewHub();
 
   // Streets are user-drawn — no hardcoded initial segments
 
@@ -10978,6 +10981,7 @@ function animate() {
     renderer.render(scene, camera);
 
     // Chat bubble/floating controls positions (must be after render so projection is current)
+    _agentPreviewHub?.updatePositions();
     updateChatBubblePositions();
     updateFloorControlPosition();
 
@@ -21390,9 +21394,14 @@ function makeDesk(x, z, s) {
   // Larger monitor with screen glow, stand, keyboard, key rows, and mouse.
   const monW = 0.68 * s + pseudoRandom(x * 7 + z * 3) * 0.16 * s;
   const monH = 0.42 * s + pseudoRandom(x * 5 + z * 11) * 0.12 * s;
-  g.add(posVox(0, 1.04 * s, -0.28 * s, monW, monH, 0.045 * s, screenDark));
+  const monitorFrame = posVox(0, 1.04 * s, -0.28 * s, monW, monH, 0.045 * s, screenDark);
+  monitorFrame.userData.agentPreviewScreen = true;
+  g.add(monitorFrame);
   // Screen glow faces the chair/work spot on the +Z side of the monitor.
-  g.add(posVox(0, 1.045 * s, -0.252 * s, monW * 0.78, monH * 0.66, 0.016 * s, screenGlow));
+  const monitorScreen = posVox(0, 1.045 * s, -0.252 * s, monW * 0.78, monH * 0.66, 0.016 * s, screenGlow);
+  monitorScreen.userData.agentPreviewScreen = true;
+  monitorScreen.userData.agentPreviewScreenPrimary = true;
+  g.add(monitorScreen);
   g.add(posVox(0, 0.78 * s, -0.27 * s, 0.08 * s, 0.22 * s, 0.08 * s, 0x37474f));
   g.add(posVox(0, 0.70 * s, -0.20 * s, 0.34 * s, 0.035 * s, 0.20 * s, 0x455a64));
   g.add(posVox(0, 0.735 * s, 0.30 * s, 0.58 * s, 0.035 * s, 0.20 * s, 0x455a64));
@@ -32189,6 +32198,20 @@ function handleClick(e) {
     return;
   }
 
+  // An assigned desk monitor is the physical world control for that agent's
+  // compact Preview Bubble. The target list remains intact while hidden, so a
+  // second screen click restores the same bubble and selected compact tab.
+  const previewScreenHit = getAssignedDeskPreviewScreenHit(e);
+  if (previewScreenHit?.agent) {
+    const result = initAgentPreviewHub()?.toggleBubble(previewScreenHit.agent.id);
+    if (result?.reason === 'empty') {
+      showToast(`🖥️ ${previewScreenHit.agent.name || previewScreenHit.agent.id} has no open previews yet`, 'info');
+    } else if (result) {
+      showToast(`🖥️ ${previewScreenHit.agent.name || previewScreenHit.agent.id} preview ${result.visible ? 'opened' : 'closed'}`, 'success');
+    }
+    return;
+  }
+
   if (!placementMode && !decorationPlacementType && !_furniturePlacementType && editMode === 'world') {
     const decorHit = getPlacedDecorationHit(e);
     if (decorHit?.meta && selectPlacedDecoration(decorHit.meta)) return;
@@ -38254,6 +38277,7 @@ function onResize() {
   renderer.setSize(c.clientWidth, c.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   updateCamera();
+  _agentPreviewHub?.updatePositions();
   updateChatBubblePositions();
 }
 
@@ -38520,6 +38544,8 @@ window.saveSettings = () => {
   const objectActionPointDebugEnabled = document.getElementById('setting-objectActionPointDebug')?.checked === true;
   const chatBubbleDisplayMode = document.querySelector('input[name="setting-chatBubbleDisplayMode"]:checked')?.value;
   const chatBubbleSize = document.querySelector('input[name="setting-chatBubbleSize"]:checked')?.value;
+  const chatBubbleGroupingEnabled = document.querySelector('input[name="setting-chatBubbleGrouping"]:checked')?.value !== 'disabled';
+  const chatBubbleGroupingMinimum = Number(document.getElementById('setting-chatBubbleGroupingMinimum')?.value || 5);
 
   if (name) {
     setWorldTitleName(name);
@@ -38533,6 +38559,8 @@ window.saveSettings = () => {
   applyChatBubbleDisplaySettings({
     displayMode: chatBubbleDisplayMode,
     size: chatBubbleSize,
+    groupingEnabled: chatBubbleGroupingEnabled,
+    groupingMinimum: chatBubbleGroupingMinimum,
   });
 
   const metaPatch = { name, showMinimap, dayNightCycleEnabled, weatherEnabled };
@@ -74923,6 +74951,138 @@ window.__VWAmbientBirds = Object.freeze({
 // ═══════════════════════════════════════════════════════════════
 // CHAT BUBBLES — Agent conversation overlays (HTML div + 3D projection)
 // ═══════════════════════════════════════════════════════════════
+let _agentPreviewHub = null;
+const _previewAnchorBoxScratch = new THREE.Box3();
+const _previewAnchorPositionScratch = new THREE.Vector3();
+const _previewControlPositionScratch = new THREE.Vector3();
+
+function findAgentPreviewScreenMesh(furnitureMesh) {
+  if (!furnitureMesh) return null;
+  const cached = furnitureMesh.userData?.agentPreviewPrimaryScreen;
+  if (cached?.parent) return cached;
+  let primary = null;
+  let fallback = null;
+  furnitureMesh.traverse(object => {
+    if (!object?.isMesh || !object.userData?.agentPreviewScreen) return;
+    fallback ||= object;
+    if (object.userData.agentPreviewScreenPrimary) primary = object;
+  });
+  const screen = primary || fallback;
+  if (screen) furnitureMesh.userData.agentPreviewPrimaryScreen = screen;
+  return screen;
+}
+
+function getAssignedDeskPreviewScreenHit(event) {
+  if (!renderer || !camera || !buildingGroup || editMode || placementMode || decorationPlacementType || _furniturePlacementType) return null;
+  const raycaster = getPointerRaycast(event);
+  const hits = raycaster.intersectObjects(buildingGroup.children, true)
+    .filter(hit => hit.object?.visible !== false && hit.object?.userData?.furniture);
+  const hit = hits[0];
+  if (!hit?.object?.userData?.agentPreviewScreen) return null;
+  const buildingId = hit.object.userData.buildingId;
+  const furnitureIndex = Number(hit.object.userData.furnitureIndex);
+  const building = buildingsMap.get(buildingId);
+  const furniture = building?.interior?.furniture?.[furnitureIndex];
+  if (!building || furniture?.type !== 'desk' || !furniture.assignedTo) return null;
+  const agent = findAgentByAssignmentRef(furniture.assignedTo);
+  return agent ? { agent, building, furniture, furnitureIndex, hit } : null;
+}
+
+function getAssignedDeskPreviewScreenDiagnostics() {
+  if (!renderer || !camera) return [];
+  const viewport = getRendererViewportMetrics();
+  return getDeskFurnitureEntries().flatMap(entry => {
+    const agent = findAgentByAssignmentRef(entry.furniture.assignedTo);
+    const mesh = agent ? findFurnitureMesh(entry.building.id, entry.index) : null;
+    if (!agent || !mesh) return [];
+    let screenCount = 0;
+    mesh.traverse(object => {
+      if (!object?.isMesh || !object.userData?.agentPreviewScreen) return;
+      screenCount += 1;
+    });
+    const screen = findAgentPreviewScreenMesh(mesh);
+    if (!screen) return [{ agentId: agent.id, buildingId: entry.building.id, furnitureIndex: entry.index, screenCount: 0, visible: false }];
+    screen.updateWorldMatrix(true, false);
+    _previewAnchorBoxScratch.setFromObject(screen).getCenter(_previewAnchorPositionScratch);
+    _previewAnchorPositionScratch.project(camera);
+    const x = viewport.left + (_previewAnchorPositionScratch.x * 0.5 + 0.5) * viewport.width;
+    const y = viewport.top + (-_previewAnchorPositionScratch.y * 0.5 + 0.5) * viewport.height;
+    return [{
+      agentId: agent.id,
+      agentName: agent.name || agent.id,
+      buildingId: entry.building.id,
+      furnitureIndex: entry.index,
+      screenCount,
+      x: Math.round(x),
+      y: Math.round(y),
+      visible: _previewAnchorPositionScratch.z <= 1 && isChatBubbleAnchorVisible(x - viewport.left, y - viewport.top, viewport.width, viewport.height),
+    }];
+  });
+}
+
+function getAgentPreviewScreenAnchor(agentId) {
+  if (!renderer || !camera) return null;
+  const agent = agentsList.find(item => String(item.id) === String(agentId));
+  if (!agent) return null;
+
+  const workTarget = getAgentWorkTarget(agent);
+  const furnitureMesh = workTarget?.building && workTarget.furnitureIndex != null
+    ? findFurnitureMesh(workTarget.building.id, Number(workTarget.furnitureIndex))
+    : null;
+  let controlX = null;
+  let controlY = null;
+  if (furnitureMesh) {
+    furnitureMesh.updateWorldMatrix(true, true);
+    const screen = findAgentPreviewScreenMesh(furnitureMesh);
+    if (screen) {
+      _previewAnchorBoxScratch.setFromObject(screen).getCenter(_previewControlPositionScratch);
+      _previewControlPositionScratch.project(camera);
+      const viewport = getRendererViewportMetrics();
+      controlX = viewport.left + (_previewControlPositionScratch.x * 0.5 + 0.5) * viewport.width;
+      controlY = viewport.top + (-_previewControlPositionScratch.y * 0.5 + 0.5) * viewport.height;
+    }
+    _previewAnchorBoxScratch.setFromObject(furnitureMesh);
+    _previewAnchorBoxScratch.getCenter(_previewAnchorPositionScratch);
+    _previewAnchorPositionScratch.y = _previewAnchorBoxScratch.max.y + 0.42;
+  } else {
+    const scale = T / API_TILE;
+    _previewAnchorPositionScratch.copy(getAgentBubbleAnchorWorld(agent, scale));
+    _previewAnchorPositionScratch.y += 0.25;
+  }
+
+  _previewAnchorPositionScratch.project(camera);
+  const viewport = getRendererViewportMetrics();
+  const x = viewport.left + (_previewAnchorPositionScratch.x * 0.5 + 0.5) * viewport.width;
+  const y = viewport.top + (-_previewAnchorPositionScratch.y * 0.5 + 0.5) * viewport.height;
+  const visible = _previewAnchorPositionScratch.z <= 1
+    && isChatBubbleAnchorVisible(x - viewport.left, y - viewport.top, viewport.width, viewport.height);
+  return {
+    x,
+    y,
+    visible,
+    color: getAgentColor(agent),
+    agentName: agent.name || agent.id,
+    agentEmoji: agent.emoji || '🤖',
+    controlX,
+    controlY,
+    cameraDistance: camDist,
+  };
+}
+
+function initAgentPreviewHub() {
+  if (_agentPreviewHub) return _agentPreviewHub;
+  _agentPreviewHub = createAgentPreviewHub({ resolveAnchor: getAgentPreviewScreenAnchor });
+  return _agentPreviewHub;
+}
+
+window.__verifyAssignedDeskPreviewScreens = () => {
+  const screens = getAssignedDeskPreviewScreenDiagnostics();
+  return {
+    ok: screens.length > 0 && screens.every(screen => screen.screenCount >= 2),
+    screens,
+  };
+};
+
 const CHAT_BUBBLE_VISIBLE_MESSAGE_LIMIT = 18;
 const CHAT_BUBBLE_MINI_SIZE = 28;
 const CHAT_BUBBLE_TYPEWRITER_INTERVAL_MS = 50;
@@ -75622,6 +75782,14 @@ function chatBubbleRectsOverlap(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
+function getVisiblePreviewBubbleObstacleRects() {
+  return Array.from(document.querySelectorAll('#previewBubbleContainer .agent-preview-bubble'))
+    .filter(element => getComputedStyle(element).display !== 'none')
+    .map(element => element.getBoundingClientRect())
+    .filter(rect => rect.width > 0 && rect.height > 0)
+    .map(rect => ({ x: rect.left, y: rect.top, w: rect.width, h: rect.height }));
+}
+
 function countChatBubbleOverlaps(rects) {
   let overlaps = 0;
   for (let i = 0; i < rects.length; i++) {
@@ -75719,7 +75887,9 @@ function applyExpandedChatBubbleLayout(rect, layout) {
   const dx = endX - edge.x;
   const dy = endY - edge.y;
   const len = Math.hypot(dx, dy);
-  const maxConnectorLen = rect.packed ? Number.POSITIVE_INFINITY : getMaxChatBubbleConnectorLength(layout);
+  const maxConnectorLen = rect.packed || rect.movedForObstacle
+    ? Number.POSITIVE_INFINITY
+    : getMaxChatBubbleConnectorLength(layout);
 
   if (len < 2 || len > maxConnectorLen) {
     state.el.style.display = 'none';
@@ -75881,6 +76051,26 @@ function updateChatBubblePositions() {
   } else if (bubbleRects.length <= 1) {
     _packedChatBubbleKey = bubbleRects.length === 1 ? String(bubbleRects[0].agentId) : '';
     _packedChatBubbleOrder = bubbleRects.length === 1 ? [bubbleRects[0].agentId] : [];
+  }
+
+  const previewObstacles = getVisiblePreviewBubbleObstacleRects();
+  if (previewObstacles.length) {
+    resolveChatBubbleObstacleCollisions(bubbleRects, previewObstacles, {
+      left: leftBound,
+      right: rightBound,
+      top: topBound,
+      bottom: bottomBound,
+    });
+    resolveChatBubbleObstacleCollisions(miniRects, previewObstacles, {
+      left: leftBound,
+      right: rightBound,
+      top: topBound,
+      bottom: bottomBound,
+    }, 5);
+    for (const miniRect of miniRects) {
+      miniRect.state.miniEl.style.left = miniRect.x + 'px';
+      miniRect.state.miniEl.style.top = miniRect.y + 'px';
+    }
   }
 
   for (const rect of bubbleRects) applyExpandedChatBubbleLayout(rect, bubbleLayout);

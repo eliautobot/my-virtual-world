@@ -87,6 +87,20 @@ export function resizeFloatingRect(rect, direction, deltaX, deltaY, bounds, mini
   };
 }
 
+export function snapFloatingRect(side, bounds) {
+  if (!['left', 'right'].includes(side)) {
+    throw new TypeError(`Unsupported snap side: ${side}`);
+  }
+  const area = normalizeFloatingBounds(bounds);
+  const width = (area.right - area.left) / 2;
+  return {
+    left: side === 'left' ? area.left : area.right - width,
+    top: area.top,
+    width,
+    height: area.bottom - area.top,
+  };
+}
+
 function rectFromElement(element) {
   const rect = element.getBoundingClientRect();
   return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
@@ -127,6 +141,7 @@ export function createBrowserWindowController({
   let pendingPoint = null;
   let animationFrame = 0;
   let restoreRect = null;
+  let snapMode = null;
   let framePointerEvents = '';
   let bodyCursor = '';
   const listeners = [];
@@ -154,10 +169,16 @@ export function createBrowserWindowController({
       panel.classList.remove('is-maximized');
       syncMaximizeButton(false);
       restoreRect = null;
+      snapMode = null;
       clearInlineGeometry(panel);
       return rectFromElement(panel);
     }
     if (panel.classList.contains('is-maximized')) return rectFromElement(panel);
+    if (snapMode) {
+      const next = snapFloatingRect(snapMode, currentBounds());
+      applyRect(panel, next);
+      return next;
+    }
     const next = constrainFloatingRect(rectFromElement(panel), currentBounds(), minimumSize);
     applyRect(panel, next);
     return next;
@@ -172,7 +193,8 @@ export function createBrowserWindowController({
     }
 
     if (shouldMaximize) {
-      restoreRect = constrainFloatingRect(rectFromElement(panel), currentBounds(), minimumSize);
+      if (!restoreRect) restoreRect = constrainFloatingRect(rectFromElement(panel), currentBounds(), minimumSize);
+      snapMode = null;
       clearInlineGeometry(panel);
       panel.classList.add('is-maximized');
     } else {
@@ -183,6 +205,41 @@ export function createBrowserWindowController({
     }
     syncMaximizeButton(shouldMaximize);
     return shouldMaximize;
+  }
+
+  function snap(side) {
+    if (side == null) {
+      const wasSnapped = Boolean(snapMode);
+      snapMode = null;
+      if (wasSnapped && restoreRect) {
+        applyRect(panel, restoreRect);
+        restoreRect = null;
+        constrain();
+      }
+      return null;
+    }
+    if (!['left', 'right'].includes(side)) {
+      throw new TypeError(`Unsupported snap side: ${side}`);
+    }
+    if (isCompactLayout()) return null;
+    const wasMaximized = panel.classList.contains('is-maximized');
+    if (snapMode === side) {
+      snapMode = null;
+      panel.classList.remove('is-maximized');
+      if (restoreRect) applyRect(panel, restoreRect);
+      restoreRect = null;
+      constrain();
+      syncMaximizeButton(false);
+      return null;
+    }
+    if (!snapMode && !wasMaximized) {
+      restoreRect = constrainFloatingRect(rectFromElement(panel), currentBounds(), minimumSize);
+    }
+    panel.classList.remove('is-maximized');
+    syncMaximizeButton(false);
+    snapMode = side;
+    applyRect(panel, snapFloatingRect(side, currentBounds()));
+    return snapMode;
   }
 
   function endInteraction() {
@@ -221,6 +278,11 @@ export function createBrowserWindowController({
     if (type === 'move' && event.target.closest('button, a, input, select, textarea')) return;
     event.preventDefault();
     event.stopPropagation();
+
+    if (snapMode) {
+      snapMode = null;
+      restoreRect = null;
+    }
 
     const bounds = currentBounds();
     const startRect = constrainFloatingRect(rectFromElement(panel), bounds, minimumSize);
@@ -276,6 +338,8 @@ export function createBrowserWindowController({
   return {
     constrain,
     setMaximized,
+    snap,
+    getSnapMode: () => snapMode,
     destroy() {
       endInteraction();
       listeners.splice(0).forEach(remove => remove());

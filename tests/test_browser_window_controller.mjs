@@ -4,6 +4,7 @@ import {
   constrainFloatingRect,
   moveFloatingRect,
   resizeFloatingRect,
+  snapFloatingRect,
 } from '../src/client/js/browser-window-controller.mjs';
 
 const bounds = { left: 0, top: 56, right: 1200, bottom: 800 };
@@ -71,6 +72,24 @@ assert.throws(
   () => resizeFloatingRect({ left: 0, top: 0, width: 500, height: 500 }, 'invalid', 0, 0, bounds, minimumSize),
   /Unsupported resize direction/,
   'invalid resize handles should fail fast',
+);
+
+assert.deepEqual(
+  snapFloatingRect('left', bounds),
+  { left: 0, top: 56, width: 600, height: 744 },
+  'left snap should fill the left half of the usable viewport',
+);
+
+assert.deepEqual(
+  snapFloatingRect('right', bounds),
+  { left: 600, top: 56, width: 600, height: 744 },
+  'right snap should fill the right half of the usable viewport',
+);
+
+assert.throws(
+  () => snapFloatingRect('center', bounds),
+  /Unsupported snap side/,
+  'unsupported snap sides should fail fast',
 );
 
 console.log('browser window controller geometry tests passed');

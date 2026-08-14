@@ -1914,7 +1914,7 @@
           }
           this.adoptProviderSessionId(data.sessionId);
           this.currentRunId = data.runId || null;
-          if (data.runId) runOwners.set(data.runId, { slotId: this.slotId, sessionKey: this.sessionKey });
+          if (data.runId) this.registerRunOwner(data.runId);
           this.rememberLiveAttentionForRun(data.runId, liveAttentionAgentId);
           await this.streamHermesRunEvents(data.runId, hermesProgress);
           this.removeTypingIndicator();
@@ -1973,7 +1973,7 @@
           }
           this.adoptProviderSessionId(data.sessionId);
           this.currentRunId = data.runId || null;
-          if (data.runId) runOwners.set(data.runId, { slotId: this.slotId, sessionKey: this.sessionKey });
+          if (data.runId) this.registerRunOwner(data.runId);
           this.rememberLiveAttentionForRun(data.runId, liveAttentionAgentId);
           await this.streamCodexRunEvents(data.runId);
           this.removeTypingIndicator();
@@ -2011,7 +2011,7 @@
           if (!resp.ok || data.ok === false) throw new Error(data.error || data.reply || resp.statusText);
           this.adoptProviderSessionId(data.sessionId);
           this.currentRunId = data.runId || null;
-          if (data.runId) runOwners.set(data.runId, { slotId: this.slotId, sessionKey: this.sessionKey });
+          if (data.runId) this.registerRunOwner(data.runId);
           await this.streamProviderSdkRun(data.runId, providerLabel);
           await this.loadHistory();
           await this.fetchSessionInfo();
@@ -2032,7 +2032,7 @@
         if (!res?.ok) throw new Error(extractRunError(res));
         if (res.payload?.runId) {
           this.currentRunId = res.payload.runId;
-          runOwners.set(res.payload.runId, { slotId: this.slotId, sessionKey: sendSessionKey });
+          this.registerRunOwner(res.payload.runId, sendSessionKey);
           this.rememberLiveAttentionForRun(res.payload.runId, liveAttentionAgentId);
         } else {
           this.removeTypingIndicator();
@@ -2168,6 +2168,30 @@
       return false;
     }
 
+    registerRunOwner(runId, sessionKey = this.sessionKey) {
+      const key = String(runId || '').trim();
+      if (!key) return null;
+      const owner = {
+        slotId: this.slotId,
+        sessionKey: String(sessionKey || this.sessionKey || ''),
+        agentId: String(this.getSelectedAgentId() || this.selectedAgentKey || parseAgentIdFromSessionKey(sessionKey) || '').trim(),
+      };
+      runOwners.set(key, owner);
+      return owner;
+    }
+
+    previewOwnerForRun(runId) {
+      const key = String(runId || '').trim();
+      const owner = key ? runOwners.get(key) : null;
+      if (owner && owner.slotId !== this.slotId) return null;
+      const claimed = owner || this.registerRunOwner(key);
+      if (!claimed) return null;
+      if (!claimed.agentId) {
+        claimed.agentId = String(this.getSelectedAgentId() || this.selectedAgentKey || parseAgentIdFromSessionKey(claimed.sessionKey) || '').trim();
+      }
+      return claimed.agentId ? claimed : null;
+    }
+
     applyTurnEvent(event) {
       const actions = this.turnEvents.ingest(event);
       actions.forEach(action => this.applyTurnAction(action));
@@ -2230,11 +2254,25 @@
 
       if (action.kind === 'tool.start' || action.kind === 'tool.update' || action.kind === 'tool.result') {
         const tool = action.tool || {};
+        const previewPhase = action.kind === 'tool.start' ? 'start' : (action.kind === 'tool.update' ? 'update' : 'result');
+        const previewOwner = this.previewOwnerForRun(runId);
+        if (previewOwner) {
+          window.dispatchEvent(new CustomEvent('vw:agent-tool-preview', {
+            detail: {
+              agentId: previewOwner.agentId,
+              sessionKey: previewOwner.sessionKey,
+              slotId: previewOwner.slotId,
+              runId,
+              phase: previewPhase,
+              tool: { ...tool },
+            }
+          }));
+        }
         const payload = {
           runId,
           data: {
             toolCallId: tool.id || tool.key || '',
-            phase: action.kind === 'tool.start' ? 'start' : (action.kind === 'tool.update' ? 'update' : 'result'),
+            phase: previewPhase,
             name: tool.name || 'tool',
             args: tool.arguments || {},
             result: tool.result || '',

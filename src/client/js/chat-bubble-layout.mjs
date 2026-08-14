@@ -173,3 +173,62 @@ export function getRigidWorldChatBubbleLayout({
     transformScale: safeZoomScale,
   };
 }
+
+function overlayRectsOverlap(a, b, gap = 0) {
+  const safeGap = Math.max(0, finiteNumber(gap));
+  return a.x < b.x + b.w + safeGap
+    && a.x + a.w + safeGap > b.x
+    && a.y < b.y + b.h + safeGap
+    && a.y + a.h + safeGap > b.y;
+}
+
+export function resolveChatBubbleObstacleCollisions(
+  rects = [],
+  obstacles = [],
+  bounds = {},
+  gap = 8
+) {
+  if (!Array.isArray(rects) || !Array.isArray(obstacles) || !rects.length || !obstacles.length) return rects;
+  const left = finiteNumber(bounds.left);
+  const top = finiteNumber(bounds.top);
+  const right = Math.max(left, finiteNumber(bounds.right, left));
+  const bottom = Math.max(top, finiteNumber(bounds.bottom, top));
+  const safeGap = Math.max(0, finiteNumber(gap, 8));
+  const clampCandidate = (rect, x, y) => ({
+    x: Math.max(left, Math.min(Math.max(left, right - rect.w), x)),
+    y: Math.max(top, Math.min(Math.max(top, bottom - rect.h), y)),
+  });
+
+  for (let pass = 0; pass < Math.max(4, obstacles.length * 3); pass++) {
+    let moved = false;
+    for (let index = 0; index < rects.length; index++) {
+      const rect = rects[index];
+      const obstacle = obstacles.find(item => overlayRectsOverlap(rect, item, safeGap));
+      if (!obstacle) continue;
+      const candidates = [
+        clampCandidate(rect, rect.x, obstacle.y - rect.h - safeGap),
+        clampCandidate(rect, rect.x, obstacle.y + obstacle.h + safeGap),
+        clampCandidate(rect, obstacle.x - rect.w - safeGap, rect.y),
+        clampCandidate(rect, obstacle.x + obstacle.w + safeGap, rect.y),
+      ];
+      let best = null;
+      for (const candidate of candidates) {
+        const candidateRect = { ...rect, ...candidate };
+        const obstacleHits = obstacles.reduce((count, item) => count + Number(overlayRectsOverlap(candidateRect, item, safeGap)), 0);
+        const chatHits = rects.reduce((count, item, otherIndex) => (
+          count + Number(otherIndex !== index && overlayRectsOverlap(candidateRect, item, 4))
+        ), 0);
+        const distance = Math.hypot(candidate.x - rect.x, candidate.y - rect.y);
+        const score = obstacleHits * 1_000_000_000 + chatHits * 1_000_000 + distance;
+        if (!best || score < best.score) best = { ...candidate, score };
+      }
+      if (!best || (best.x === rect.x && best.y === rect.y)) continue;
+      rect.x = best.x;
+      rect.y = best.y;
+      rect.movedForObstacle = true;
+      moved = true;
+    }
+    if (!moved || rects.every(rect => obstacles.every(obstacle => !overlayRectsOverlap(rect, obstacle, safeGap)))) break;
+  }
+  return rects;
+}
