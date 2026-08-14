@@ -32628,7 +32628,11 @@ def _openclaw_session_paths(agent_id, session_key=None):
             sessions = json.load(handle)
         if isinstance(sessions, dict) and selected_key and isinstance(sessions.get(selected_key), dict):
             session_info = sessions.get(selected_key) or {}
-        if isinstance(sessions, dict) and not session_info:
+        # An explicit key is authoritative. A freshly-created OpenClaw chat key
+        # has no transcript row until its first message; falling back to the
+        # newest row here makes a reset immediately replay the previous session.
+        # Only auto-select the newest session when no key was requested.
+        if isinstance(sessions, dict) and not session_info and not selected_key:
             best_timestamp = -1
             for key, value in sessions.items():
                 if not isinstance(value, dict):

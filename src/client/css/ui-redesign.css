@@ -3508,6 +3508,15 @@ body.agent-builder-open #canvasWrapper { pointer-events: none; }
     border: 1px solid var(--vw-border-strong) !important;
     border-radius: 22px !important;
     overflow: hidden;
+    /* Blurring a live WebGL canvas forces a costly full-panel backdrop repaint
+       whenever chat opens or changes size. The panel gradient is already opaque
+       enough to preserve the glass look without that compositor pass. */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+.chat-panel.chat-resizing,
+.chat-panel.chat-resizing .chat-bubble {
+    box-shadow: none !important;
 }
 .chat-panel.open { transform: translateY(0) !important; }
 .chat-header {
@@ -3526,7 +3535,15 @@ body.agent-builder-open #canvasWrapper { pointer-events: none; }
     box-shadow: 0 8px 22px rgba(0,0,0,.18);
 }
 .chat-input-row { padding: 12px !important; gap: 8px !important; background: rgba(0,0,0,.26) !important; }
-.chat-input { min-height: 44px !important; padding: 11px 13px !important; border-radius: 15px !important; }
+.chat-input {
+    min-height: 44px !important;
+    padding: 11px 13px !important;
+    border-radius: 15px !important;
+    /* Animating textarea height makes rapid mobile backspace repeats trigger
+       continuous layout work after the key is released. Keep only paint-only
+       focus feedback animated; height updates should settle in one frame. */
+    transition: border-color .12s ease, background-color .12s ease !important;
+}
 .chat-send-btn,
 .chat-attach-btn,
 .chat-mic-btn { width: 44px !important; height: 44px !important; border-radius: 15px !important; }

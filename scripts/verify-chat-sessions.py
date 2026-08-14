@@ -339,6 +339,18 @@ def main():
         check("Run-scoped recovery never replays older commentary", commentary_only[0].get("text") == "I will verify the second request." if commentary_only else False)
         check("Recovered commentary exposes its verified run boundary", commentary_only[0].get("runStartedAt") == server._timestamp_epoch_ms("2026-08-08T18:00:00.000Z") if commentary_only else False)
         check("Session activity enforces one overall limit", len(server._session_trajectory_messages("agent:coder:main", max_tools=1)) == 1)
+        unknown_transcript, unknown_trajectory, unknown_info = server._openclaw_session_paths(
+            "coder", "agent:coder:vw-chat-new-session"
+        )
+        check(
+            "fresh OpenClaw session does not inherit the newest old trajectory",
+            unknown_transcript is None and unknown_trajectory is None and not unknown_info,
+            json.dumps(unknown_info, default=str),
+        )
+        check(
+            "fresh OpenClaw session activity starts empty",
+            server._session_trajectory_messages("agent:coder:vw-chat-new-session", max_tools=80) == [],
+        )
         server._append_comm_event({
             "ts": 1783430400000,
             "from": {"id": "coder", "name": "Coder"},

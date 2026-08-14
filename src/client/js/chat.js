@@ -87,6 +87,8 @@
   const TOOL_RENDER_INTERVAL_MS = 80;
   const STREAMING_TEXT_RENDER_INTERVAL_MS = 50;
   const MAX_LIVE_TOOL_CARDS = 24;
+  const MAX_RENDERED_HISTORY_ITEMS = 120;
+  const RECOVERED_ACTIVITY_LIMIT = 80;
   const CHAT_STACK_GAP = 12;
   const CHAT_BOTTOM_OFFSET = 36;
   const CHAT_BOTTOM_FOLLOW_THRESHOLD = 28;
@@ -94,6 +96,7 @@
   const CHAT_MANUAL_SCROLL_INTENT_MS = 180;
   const CHAT_MIDDLE_SCROLL_DEAD_ZONE = 8;
   const CHAT_MIDDLE_SCROLL_MAX_SPEED = 26;
+  const CHAT_INPUT_DELETE_RESIZE_DELAY_MS = 140;
   const HERMES_APPROVAL_POLL_MS = 1500;
   const NATIVE_PROVIDER_UI = Object.freeze({
     hermes: {
@@ -308,6 +311,7 @@
       this.middleScrollPointerY = 0;
       this.middleScrollFrame = null;
       this.inputResizeFrame = null;
+      this.inputResizeTimer = null;
       this.streamingRenderTimer = null;
       this.streamingPendingContent = '';
       this.streamingRenderedContent = '';
@@ -351,6 +355,7 @@
       this.liveSessionRefreshTimer = null;
       this.liveResponsePendingAt = 0;
       this.sessionsRefreshSeq = 0;
+      this.historyLoadSeq = 0;
       this.currentSessions = [];
 
       this.messages.addEventListener('click', (e) => {
@@ -445,9 +450,10 @@
           this.sendMessage();
         }
       });
-      this.input?.addEventListener('input', () => this.scheduleAutoResizeInput());
+      this.input?.addEventListener('input', (event) => this.handleInputResize(event));
       this.input?.addEventListener('change', () => this.scheduleAutoResizeInput());
       this.input?.addEventListener('compositionend', () => this.scheduleAutoResizeInput());
+      this.input?.addEventListener('blur', () => this.scheduleAutoResizeInput());
       this.input?.addEventListener('paste', (e) => this.handlePaste(e));
 
       this.attachBtn?.addEventListener('click', () => this.fileInput?.click());
@@ -489,6 +495,7 @@
     }
 
     resetConversation(systemText) {
+      this.historyLoadSeq += 1;
       this.stopMiddleAutoScroll();
       this.followLatest = true;
       this.clearManualScrollIntent();
@@ -616,8 +623,40 @@
       }
     }
 
-    scheduleAutoResizeInput() {
-      if (!this.input || this.inputResizeFrame) return;
+    handleInputResize(event) {
+      const inputType = String(event?.inputType || '');
+      this.scheduleAutoResizeInput({ defer: inputType.startsWith('delete') });
+    }
+
+    cancelPendingInputResize() {
+      if (this.inputResizeFrame) cancelAnimationFrame(this.inputResizeFrame);
+      if (this.inputResizeTimer) clearTimeout(this.inputResizeTimer);
+      this.inputResizeFrame = null;
+      this.inputResizeTimer = null;
+    }
+
+    scheduleAutoResizeInput({ defer = false } = {}) {
+      if (!this.input) return;
+      if (this.inputResizeTimer) {
+        clearTimeout(this.inputResizeTimer);
+        this.inputResizeTimer = null;
+      }
+      if (defer) {
+        if (this.inputResizeFrame) {
+          cancelAnimationFrame(this.inputResizeFrame);
+          this.inputResizeFrame = null;
+        }
+        // Mobile keyboards can emit backspace repeats faster than a forced
+        // textarea scrollHeight measurement can be laid out. Shrinking is
+        // cosmetic, so wait until the repeat pauses instead of queueing work
+        // that continues after the user's finger leaves the delete key.
+        this.inputResizeTimer = setTimeout(() => {
+          this.inputResizeTimer = null;
+          this.scheduleAutoResizeInput();
+        }, CHAT_INPUT_DELETE_RESIZE_DELAY_MS);
+        return;
+      }
+      if (this.inputResizeFrame) return;
       this.inputResizeFrame = requestAnimationFrame(() => {
         this.inputResizeFrame = null;
         this.autoResizeInput();
@@ -1098,11 +1137,23 @@
     }
 
     renderHistoryItems(items) {
+      const mergedItems = ChatEvents.mergeHistoryItems(items);
+      const visibleItems = mergedItems.slice(-MAX_RENDERED_HISTORY_ITEMS);
+      const omittedCount = mergedItems.length - visibleItems.length;
       this.replaceHistoryMessages(() => {
         this.liveThinkingEl = null;
         this.liveThinkingPre = null;
         this.liveThinkingRunId = '';
-        for (const item of ChatEvents.mergeHistoryItems(items)) {
+        if (omittedCount > 0) {
+          const notice = document.createElement('div');
+          notice.className = 'chat-msg system chat-history-window-notice';
+          const bubble = document.createElement('div');
+          bubble.className = 'chat-bubble system-bubble';
+          bubble.textContent = `Showing the latest ${visibleItems.length} history items. ${omittedCount} older items remain saved in this session.`;
+          notice.appendChild(bubble);
+          this.messages.appendChild(notice);
+        }
+        for (const item of visibleItems) {
           const role = normalizeChatRole(item.role);
           this.appendMessage(
             role,
@@ -1203,7 +1254,7 @@
     async fetchRecoveredActivityItems() {
       if (!this.isVisibleForPolling()) return [];
       try {
-        const url = '/api/session-activity?sessionKey=' + encodeURIComponent(this.sessionKey) + '&limit=80';
+        const url = '/api/session-activity?sessionKey=' + encodeURIComponent(this.sessionKey) + '&limit=' + RECOVERED_ACTIVITY_LIMIT;
         const res = await fetch(url);
         if (!res.ok) return [];
         const data = await res.json();
@@ -1230,6 +1281,9 @@
 
     async syncOpenClawCommentary(runId) {
       if (!runId || !this.isVisibleForPolling() || this.isProviderAgentSelected()) return;
+      const requestedSessionKey = this.sessionKey;
+      const owner = runOwners.get(String(runId));
+      if (owner && (owner.slotId !== this.slotId || owner.sessionKey !== requestedSessionKey)) return;
       try {
         const params = new URLSearchParams({
           sessionKey: this.sessionKey,
@@ -1240,7 +1294,7 @@
         const res = await fetch('/api/session-activity?' + params.toString());
         if (!res.ok) return;
         const data = await res.json();
-        if (!data.ok || !Array.isArray(data.messages)) return;
+        if (this.sessionKey !== requestedSessionKey || !data.ok || !Array.isArray(data.messages)) return;
         for (const msg of data.messages) {
           if (msg.source !== 'codex-commentary' || !String(msg.text || '').trim()) continue;
           const expectedRunId = String(runId);
@@ -1276,7 +1330,9 @@
             ['tool_start', 'tool_end', 'tool_result'].includes(payload?.type)
           );
           const isFinalChat = eventName === 'chat' && ['final', 'done'].includes(payload?.state);
-          if ((isToolEvent || isFinalChat) && runId) await this.syncOpenClawCommentary(runId);
+          if ((isToolEvent || isFinalChat) && runId && this.ownsPayload(payload)) {
+            await this.syncOpenClawCommentary(runId);
+          }
           if (eventName === 'chat') return this.handleChatEvent(payload);
           if (eventName === 'agent') return this.handleAgentEvent(payload);
           if (eventName === 'session.message') return this.handleSessionMessageEvent(payload);
@@ -1289,7 +1345,7 @@
       this.scrollBottom();
     }
 
-    async loadExplicitProviderSessionHistory() {
+    async loadExplicitProviderSessionHistory(isCurrent = () => true) {
       if (!this.isProviderAgentSelected() || this.getSelectedProviderKind() === 'openclaw') return false;
       if (this.isPendingProviderSession()) {
         this.renderProviderSessionMessages([]);
@@ -1305,23 +1361,33 @@
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+      if (!isCurrent()) return true;
       this.setSelectedSessionKey(data.sessionKey || this.sessionKey);
       this.renderProviderSessionMessages(data.messages);
       return true;
     }
 
     async loadHistory() {
+      const requestSeq = ++this.historyLoadSeq;
+      const requestSessionKey = this.sessionKey;
+      const requestAgentKey = this.selectedAgentKey;
+      const isCurrent = () => (
+        requestSeq === this.historyLoadSeq
+        && requestSessionKey === this.sessionKey
+        && requestAgentKey === this.selectedAgentKey
+      );
       try {
         if (this.isLiveModeSessionSelected()) {
           this.startLiveSessionPolling();
           await this.loadLiveModeSessionHistory();
           return;
         }
-        if (await this.loadExplicitProviderSessionHistory()) return;
+        if (await this.loadExplicitProviderSessionHistory(isCurrent)) return;
         if (this.isHermesSelected()) {
           this.startHermesApprovalPolling();
           const res = await fetch('/api/hermes/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
+          if (!isCurrent()) return;
           if (data.ok && Array.isArray(data.messages)) {
             this.renderHistoryItems(this.providerHistoryItems(data.messages, 'hermes-progress'));
             this.scrollBottom();
@@ -1333,6 +1399,7 @@
           this.startCodexApprovalPolling();
           const res = await fetch('/api/codex/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
+          if (!isCurrent()) return;
           if (data.ok && Array.isArray(data.messages)) {
             this.renderHistoryItems(this.providerHistoryItems(data.messages, 'codex-progress'));
             this.scrollBottom();
@@ -1343,14 +1410,17 @@
           if (this.supportsProviderApprovals()) this.startCodexApprovalPolling();
           const res = await fetch('/api/providers/history?agentId=' + encodeURIComponent(this.getSelectedAgentId() || this.selectedAgentKey));
           const data = await res.json();
+          if (!isCurrent()) return;
           const msgs = Array.isArray(data.messages) ? data.messages : [];
           this.renderHistoryItems(this.providerHistoryItems(msgs, 'provider-progress'));
           this.scrollBottom();
           return;
         }
         const res = await rpc('chat.history', { sessionKey: this.sessionKey, limit: 500 });
+        if (!isCurrent()) return;
         if (res.ok && res.payload?.messages) {
           const recovered = await this.fetchRecoveredActivityItems();
+          if (!isCurrent()) return;
           this.renderHistoryItems([...this.openClawHistoryItems(res.payload.messages), ...recovered]);
           this.scrollBottom();
         }
@@ -1590,8 +1660,9 @@
         if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
         if (data.sessionKey) this.setSelectedSessionKey(data.sessionKey);
         this.stopLiveSessionPolling();
-        this.resetConversation('New session started — the previous session is still saved');
+        this.resetConversation();
         await this.loadHistory();
+        this.appendSystem('New session started — the previous session is still saved');
         this.fetchSessionInfo();
         this.refreshSessionsList();
       } catch (e) {
@@ -1694,6 +1765,7 @@
       if ((!text && !hasAttachments) || (!connected && !this.isProviderAgentSelected())) return;
 
       this.clearRunNotice();
+      this.cancelPendingInputResize();
       this.input.value = '';
       this.input.style.setProperty('height', 'auto', 'important');
       this.input.style.overflowY = 'hidden';
@@ -5375,6 +5447,8 @@
 
   /** Generic resize state — one per panel, keyed by slotId */
   const _resizeStates = {};
+  let _chatResizeFrame = null;
+  let _pendingChatResizePoint = null;
 
   /** Detect which direction class a handle element has */
   function _getHandleDir(handleEl) {
@@ -5540,6 +5614,7 @@
       startRect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
     };
     panel.style.transition = 'none';
+    panel.classList.add('chat-resizing');
     handleEl.classList.add('dragging');
     document.body.style.userSelect = 'none';
     document.body.style.webkitUserSelect = 'none';
@@ -5554,16 +5629,14 @@
     document.body.style.cursor = cursorMap[dir] || 'default';
   }
 
-  function _chatResizeMove(e) {
+  function _applyChatResizePoint(point) {
     let activeSecondaryResize = false;
     for (const slotId in _resizeStates) {
       const rs = _resizeStates[slotId];
       if (!rs || !rs.active) continue;
       if (rs.panel.classList.contains('chat-panel-secondary')) activeSecondaryResize = true;
-      const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
-      const clientY = e.type.startsWith('touch') ? e.touches[0].clientY : e.clientY;
-      const dx = clientX - rs.startX;
-      const dy = clientY - rs.startY;
+      const dx = point.clientX - rs.startX;
+      const dy = point.clientY - rs.startY;
       _applyResizeDelta(rs.panel, rs, dx, dy);
     }
     // Do not re-tile while a secondary window is actively resizing. Re-tiling
@@ -5573,7 +5646,30 @@
     _positionExteriorTabs();
   }
 
+  function _chatResizeMove(e) {
+    if (!Object.values(_resizeStates).some(rs => rs?.active)) return;
+    const source = e.type.startsWith('touch') ? e.touches?.[0] : e;
+    if (!source) return;
+    if (e.cancelable) e.preventDefault();
+    _pendingChatResizePoint = { clientX: source.clientX, clientY: source.clientY };
+    if (_chatResizeFrame) return;
+    _chatResizeFrame = requestAnimationFrame(() => {
+      _chatResizeFrame = null;
+      const point = _pendingChatResizePoint;
+      _pendingChatResizePoint = null;
+      if (point) _applyChatResizePoint(point);
+    });
+  }
+
   function _chatResizeEnd() {
+    if (_chatResizeFrame) {
+      cancelAnimationFrame(_chatResizeFrame);
+      _chatResizeFrame = null;
+    }
+    if (_pendingChatResizePoint) {
+      _applyChatResizePoint(_pendingChatResizePoint);
+      _pendingChatResizePoint = null;
+    }
     let resizedPanels = [];
     for (const slotId in _resizeStates) {
       const rs = _resizeStates[slotId];
@@ -5581,6 +5677,7 @@
       rs.active = false;
       delete rs.panel.dataset.resizeActive;
       rs.handleEl.classList.remove('dragging');
+      rs.panel.classList.remove('chat-resizing');
       rs.panel.style.transition = '';
       resizedPanels.push(rs.panel);
       // Scroll chat to bottom after resize

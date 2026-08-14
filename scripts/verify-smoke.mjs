@@ -770,7 +770,18 @@ assert(!main3dJs.includes('makeNaturalFlowerCluster'), 'removed colorful circle 
 assert(!main3dJs.includes("bush:       { label:"), 'removed colorful bush must not remain in the decoration editor');
 assert(!naturalWorldJs.includes("id: 'bush'"), 'removed colorful bush must not remain in procedural natural detail mix');
 assert(!naturalWorldJs.includes("id: 'flower-cluster'"), 'removed colorful circle cluster must not remain in procedural natural detail mix');
-assert(indexHtml.includes('js/main3d.js?v=20260813-traffic-wheels-r5'), 'traffic-wheel renderer must be cache-busted in index.html');
+assert(indexHtml.includes('js/main3d.js?v=20260814-chat-mobile-input-r6'), 'mobile chat responsive rendering must be cache-busted in index.html');
+for (const token of [
+  'MOBILE_CHAT_INPUT_RENDER_MAX_WIDTH_PX = 760',
+  'MOBILE_CHAT_INPUT_IDLE_BUDGET_MS = 48',
+  "window.__VWWorldRenderModeForChatInput = active ? 'input-responsive' : 'full'",
+  'window.__VWWorldRenderStats.renderedFrames += 1',
+]) {
+  assert(main3dJs.includes(token), `mobile chat responsive rendering missing token: ${token}`);
+}
+assert(!main3dJs.includes('shouldPauseWorldRenderForMobileChatInput'), 'mobile chat input must not pause the world renderer');
+assert(!main3dJs.includes('MOBILE_CHAT_INPUT_MAX_PIXEL_RATIO'), 'mobile typing must not change WebGL resolution');
+assert(!main3dJs.includes('renderer?.setPixelRatio'), 'mobile typing must not reallocate the WebGL drawing buffer');
 
 for (const token of [
   "from './ambient-birds.mjs?v=20260813-ambient-birds-r5'",
@@ -1211,7 +1222,7 @@ for (const token of [
   'const shouldHoldOpen = hasNearbyAgent || hasActiveCrossing',
   'resetBuildingDoorAnimation(building?.id || null)',
   'window.__verifyAutomaticOfficeDoors',
-  'js/main3d.js?v=20260813-traffic-wheels-r5',
+  'js/main3d.js?v=20260814-chat-mobile-input-r6',
 ]) {
   assert(main3dJs.includes(token) || indexHtml.includes(token), `automatic office door integration missing token: ${token}`);
 }
@@ -1279,7 +1290,7 @@ for (const token of [
   'getWallSegmentsForOpenings',
   'buildingWindowGlass',
   'window.__verifyBuildingWindowUpgrade',
-  'js/main3d.js?v=20260813-traffic-wheels-r5',
+  'js/main3d.js?v=20260814-chat-mobile-input-r6',
 ]) {
   assert(main3dJs.includes(token) || indexHtml.includes(token), `dynamic building window integration missing token: ${token}`);
 }
@@ -1372,7 +1383,7 @@ for (const token of [
   "'rake-trim'",
   "'ridge-cap'",
   'window.__verifyResidentialRoofUpgrade',
-  'js/main3d.js?v=20260813-traffic-wheels-r5',
+  'js/main3d.js?v=20260814-chat-mobile-input-r6',
 ]) {
   assert(main3dJs.includes(token) || indexHtml.includes(token), `dynamic building roof integration missing token: ${token}`);
 }
@@ -1381,7 +1392,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'STARTER_MAP_VERSION',
-  'js/main3d.js?v=20260813-traffic-wheels-r5',
+  'js/main3d.js?v=20260814-chat-mobile-input-r6',
   'agent-life-exterior-area-taxonomy.mjs?v=20260804-park-table-node-inference-r2',
   'syncAgentToCurrentTableSeatTransform(agent)',
   'occupiedAgentFollowsChairTransform',
@@ -1407,9 +1418,9 @@ for (const token of [
   'js/openclaw-run-state.js?v=20260727-connection-status-r1',
   'js/chat-markdown.js?v=20260811-provider-markdown-r1',
   'js/chat-events.js?v=20260812-approval-history-r2',
-  'js/chat.js?v=20260811-provider-markdown-r1',
+  'js/chat.js?v=20260814-chat-mobile-input-r2',
   'css/style.css?v=20260811-provider-markdown-r1',
-  'css/ui-redesign.css?v=20260809-connection-guides-r1',
+  'css/ui-redesign.css?v=20260814-chat-mobile-input-r2',
   'css/connection-help.css?v=20260809-connection-guides-r1',
   'js/connection-help.mjs?v=20260809-connection-guides-r1',
   'data-connection-help-provider="hermes"',
@@ -1422,7 +1433,7 @@ for (const token of [
   '/api/agent/create',
   'vw:agents-changed',
   'starter-map.mjs?v=20260809-furniture-schema-r1',
-  'Math.min(clock.getDelta(), 0.05)',
+  'Math.min(_pendingWorldAnimationDelta, inputResponsive ? 0.1 : 0.05)',
   'const VEHICLE_SPEED = 7.0',
   'const spacing = 8',
   'Math.floor(totalRoadLen / 40)',

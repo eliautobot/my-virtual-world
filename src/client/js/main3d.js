@@ -10863,10 +10863,72 @@ let _miniMapUpdateTimer = MINIMAP_UPDATE_INTERVAL_SEC;
 
 let _animErrorCount = 0;
 let _lastReportedAnimErrorMessage = null;
+const MOBILE_CHAT_INPUT_RENDER_MAX_WIDTH_PX = 760;
+const MOBILE_CHAT_INPUT_ACTIVITY_HOLD_MS = 220;
+const MOBILE_CHAT_INPUT_IDLE_BUDGET_MS = 48;
+let _mobileChatInputBusyUntil = 0;
+let _mobileChatInputRenderMode = false;
+let _lastWorldRenderCompletedAt = 0;
+let _pendingWorldAnimationDelta = 0;
+
+function isChatComposerInput(target) {
+  return Boolean(target?.matches?.('.chat-panel .chat-input'));
+}
+
+function noteMobileChatInputActivity(event) {
+  if (window.innerWidth > MOBILE_CHAT_INPUT_RENDER_MAX_WIDTH_PX) return;
+  if (!isChatComposerInput(event.target)) return;
+  _mobileChatInputBusyUntil = performance.now() + MOBILE_CHAT_INPUT_ACTIVITY_HOLD_MS;
+}
+
+document.addEventListener('beforeinput', noteMobileChatInputActivity, true);
+document.addEventListener('input', noteMobileChatInputActivity, true);
+document.addEventListener('keydown', noteMobileChatInputActivity, true);
+
+function shouldUseMobileChatInputRenderMode(nowMs) {
+  if (window.innerWidth > MOBILE_CHAT_INPUT_RENDER_MAX_WIDTH_PX) return false;
+  if (!isChatComposerInput(document.activeElement)) return false;
+  return nowMs < _mobileChatInputBusyUntil;
+}
+
+function setMobileChatInputRenderMode(active, nowMs) {
+  if (_mobileChatInputRenderMode === active) return;
+  _mobileChatInputRenderMode = active;
+  window.__VWWorldRenderModeForChatInput = active ? 'input-responsive' : 'full';
+  if (active) _lastWorldRenderCompletedAt = nowMs;
+}
+
+window.__VWWorldRenderModeForChatInput = 'full';
+window.__VWWorldRenderStats = {
+  renderedFrames: 0,
+  inputResponsiveFrames: 0,
+  deferredFrames: 0,
+  lastRenderedAt: 0,
+};
+
 function animate() {
   requestAnimationFrame(animate);
   try {
-    const dt = Math.min(clock.getDelta(), 0.05);
+    const frameStartedAt = performance.now();
+    _pendingWorldAnimationDelta += clock.getDelta();
+    const inputResponsive = shouldUseMobileChatInputRenderMode(frameStartedAt);
+    setMobileChatInputRenderMode(inputResponsive, frameStartedAt);
+
+    // Expensive WebGL frames can monopolize a phone's main thread while its
+    // keyboard is repeating input. Keep the world moving at a reduced cost,
+    // but reserve a short gap after every rendered frame for queued keyboard
+    // work. Keep the canvas resolution constant: changing the WebGL pixel
+    // ratio here reallocates its drawing buffer and visibly flashes on phones.
+    // An idle focused composer immediately returns to full frame cadence.
+    if (
+      inputResponsive &&
+      frameStartedAt - _lastWorldRenderCompletedAt < MOBILE_CHAT_INPUT_IDLE_BUDGET_MS
+    ) {
+      window.__VWWorldRenderStats.deferredFrames += 1;
+      return;
+    }
+    const dt = Math.min(_pendingWorldAnimationDelta, inputResponsive ? 0.1 : 0.05);
+    _pendingWorldAnimationDelta = 0;
     waterTick += dt;
 
     updateDayNight();
@@ -10929,6 +10991,10 @@ function animate() {
       const el = document.getElementById('fpsDisplay');
       if (el) el.textContent = fpsDisplay + ' fps';
     }
+    _lastWorldRenderCompletedAt = performance.now();
+    window.__VWWorldRenderStats.renderedFrames += 1;
+    if (inputResponsive) window.__VWWorldRenderStats.inputResponsiveFrames += 1;
+    window.__VWWorldRenderStats.lastRenderedAt = _lastWorldRenderCompletedAt;
     _animErrorCount = 0; // reset on successful frame
   } catch (err) {
     _animErrorCount++;

@@ -161,7 +161,7 @@ for (const token of [
   'sessionId: this.selectedProviderSessionId()',
   'this.adoptProviderSessionId(data.sessionId);',
   'if (Array.isArray(data.messages)) this.renderProviderSessionMessages(data.messages);',
-  'if (await this.loadExplicitProviderSessionHistory()) return;',
+  'if (await this.loadExplicitProviderSessionHistory(isCurrent)) return;',
   'New session started — the previous session is still saved',
 ]) {
   assert(chatSource.includes(token), `session-isolated provider chat flow missing ${token}`);
@@ -253,6 +253,34 @@ assert(
   chatSource.includes("const panel = primaryPanel.cloneNode(true);") &&
   chatSource.includes("const w = new ChatWindow(panel, { slot: Number(slot) });"),
   'secondary chat panels must inherit the shared scroll controls and behavior'
+);
+for (const token of [
+  'MAX_RENDERED_HISTORY_ITEMS = 120',
+  'mergedItems.slice(-MAX_RENDERED_HISTORY_ITEMS)',
+  'older items remain saved in this session',
+  'this.sessionKey !== requestedSessionKey',
+  'this.ownsPayload(payload)',
+  '_chatResizeFrame = requestAnimationFrame',
+  "panel.classList.add('chat-resizing')"
+]) {
+  assert(chatSource.includes(token), `chat performance/session isolation missing ${token}`);
+}
+for (const token of [
+  'CHAT_INPUT_DELETE_RESIZE_DELAY_MS = 140',
+  "inputType.startsWith('delete')",
+  'this.inputResizeTimer = setTimeout',
+  'this.cancelPendingInputResize();'
+]) {
+  assert(chatSource.includes(token), `mobile composer deletion performance guard missing ${token}`);
+}
+assert(
+  redesignCss.includes('transition: border-color .12s ease, background-color .12s ease !important;'),
+  'chat composer height must not animate while mobile keyboards repeat backspace'
+);
+assert(
+  redesignCss.includes('backdrop-filter: none !important;') &&
+  redesignCss.includes('.chat-panel.chat-resizing .chat-bubble'),
+  'chat must avoid WebGL backdrop blur and resize-time bubble shadows'
 );
 for (const token of [
   'top: -7px !important;',
