@@ -29,6 +29,18 @@ import {
 import {
   getConsumableSurfaceSpec,
 } from '../client/js/consumable-surface-specs.mjs';
+import {
+  TRAFFIC_LANE_OFFSET,
+  TRAFFIC_TURN_RADIUS,
+  TRAFFIC_VEHICLE_SPECS,
+  advanceTrafficPath,
+  buildLaneAwareTrafficLoop,
+  distancePointToTrafficSegment,
+  getTrafficVehicleSeparation,
+  getTrafficVehicleSpec,
+  movementRotationY,
+  trafficVehicleFootprintsOverlap,
+} from '../client/js/traffic-vehicles.mjs';
 
 export const AGENT_RUNTIME_SCHEMA_VERSION = 'agent-runtime/v1';
 export const RUNTIME_LIFECYCLE_JOURNAL_SCHEMA_VERSION = 'agent-runtime-lifecycle-journal/v1';
@@ -628,7 +640,9 @@ const SERVER_STREET_INTERSECTION_ROAD_RADIUS = 4;
 const SERVER_STREET_INTERSECTION_SIDEWALK_RADIUS = 6;
 const SERVER_VEHICLE_COLORS = Object.freeze([0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0x8e24aa, 0xff6f00, 0x00897b, 0x5c6bc0]);
 const SERVER_VEHICLE_TYPES = Object.freeze(['car', 'car', 'car', 'sedan', 'sedan', 'truck', 'van', 'bus']);
-const SERVER_VEHICLE_SPEED_MULT = Object.freeze({ car: 1, sedan: 1.05, truck: 0.8, van: 0.85, bus: 0.65 });
+const SERVER_VEHICLE_SPEED_MULT = Object.freeze(Object.fromEntries(
+  Object.keys(TRAFFIC_VEHICLE_SPECS).map(type => [type, getTrafficVehicleSpec(type).speedMult]),
+));
 const _chunkTerrainCache = new Map();
 const _streetSegmentCache = new Map();
 
@@ -8538,7 +8552,7 @@ function normalizeTrafficVehicleState(raw = {}) {
 function normalizeVehiclePath(value = []) {
   if (!Array.isArray(value)) return [];
   const path = [];
-  for (const point of value.slice(0, 80)) {
+  for (const point of value.slice(0, 160)) {
     if (!point || typeof point !== 'object') continue;
     const x = numberOr(point.x, NaN);
     const z = numberOr(point.z, NaN);
@@ -8749,6 +8763,62 @@ function cleanServerVehiclePath(tilePath = [], startTile = null) {
     .map(point => ({ x: point.x, z: point.z }));
 }
 
+function serverTrafficTerminalRoutes(graph) {
+  const terminals = Array.from(graph?.nodes?.values?.() || [])
+    .filter(node => Array.isArray(node?.edges) && node.edges.length === 1)
+    .sort((a, b) => (a.x - b.x) || (a.z - b.z));
+  const routes = [];
+  for (let startIndex = 0; startIndex < terminals.length; startIndex += 1) {
+    for (let endIndex = startIndex + 1; endIndex < terminals.length; endIndex += 1) {
+      const start = terminals[startIndex];
+      const end = terminals[endIndex];
+      const path = cleanServerVehiclePath(pathfindServerRoadGraph(graph, start.x, start.z, end.x, end.z) || []);
+      if (path.length < 2) continue;
+      const length = path.slice(1).reduce((sum, point, index) => (
+        sum + Math.hypot(point.x - path[index].x, point.z - path[index].z)
+      ), 0);
+      routes.push({ path, length });
+    }
+  }
+  return routes;
+}
+
+function distanceToServerTrafficPath(point, path = []) {
+  let best = Infinity;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    best = Math.min(best, distancePointToTrafficSegment(point, path[index], path[index + 1]));
+  }
+  return best;
+}
+
+function projectServerTrafficSpawn(path = [], candidate = null) {
+  if (!candidate || path.length < 2) return null;
+  const desired = candidate.dir === 0
+    ? { x: 1, z: 0 }
+    : candidate.dir === 1
+      ? { x: -1, z: 0 }
+      : candidate.dir === 2
+        ? { x: 0, z: 1 }
+        : { x: 0, z: -1 };
+  let best = null;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const start = path[index];
+    const end = path[index + 1];
+    const dx = end.x - start.x;
+    const dz = end.z - start.z;
+    const lengthSq = dx * dx + dz * dz;
+    if (lengthSq <= 0.000001) continue;
+    const amount = Math.max(0, Math.min(1, ((candidate.x - start.x) * dx + (candidate.z - start.z) * dz) / lengthSq));
+    const x = start.x + dx * amount;
+    const z = start.z + dz * amount;
+    const distance = Math.hypot(candidate.x - x, candidate.z - z);
+    const headingDot = (dx * desired.x + dz * desired.z) / Math.sqrt(lengthSq);
+    const score = distance + (headingDot < 0.25 ? 20 : 0);
+    if (!best || score < best.score) best = { x, z, pathIdx: index + 1, score };
+  }
+  return best;
+}
+
 function buildServerWorldTopology(dataDir) {
   const streets = readStreetSegments(dataDir).map(normalizeStreetSegment).filter(Boolean);
   const trafficLights = streets
@@ -8763,7 +8833,7 @@ function buildServerWorldTopology(dataDir) {
     .sort((a, b) => a.key.localeCompare(b.key));
   const graph = buildServerRoadGraph(streets);
   const roadSegments = streets.filter(segment => !segment.type);
-  const spawnCandidates = [];
+  const spawnGroups = [];
   const spacing = 8;
   for (const segment of roadSegments) {
     const dx = segment.x2 - segment.x1;
@@ -8771,52 +8841,66 @@ function buildServerWorldTopology(dataDir) {
     const length = Math.hypot(dx, dz);
     const count = Math.max(2, Math.floor(length / spacing));
     const horizontal = Math.abs(dx) >= Math.abs(dz);
+    const group = [];
     for (let i = 0; i < count; i++) {
       const t = (i + 0.5) / count;
       const x = segment.x1 + dx * t;
       const z = segment.z1 + dz * t;
       let dir = horizontal ? (dx >= 0 ? 0 : 1) : (dz >= 0 ? 2 : 3);
       if (i % 2 === 1) dir = horizontal ? (dir === 0 ? 1 : 0) : (dir === 2 ? 3 : 2);
-      spawnCandidates.push({ x, z, dir });
+      group.push({ x, z, dir });
+    }
+    spawnGroups.push(group);
+  }
+  const spawnCandidates = [];
+  const maximumGroupSize = Math.max(0, ...spawnGroups.map(group => group.length));
+  for (let index = 0; index < maximumGroupSize; index++) {
+    for (const group of spawnGroups) {
+      if (group[index]) spawnCandidates.push(group[index]);
     }
   }
   const totalRoadLength = roadSegments.reduce((sum, segment) => sum + Math.hypot(segment.x2 - segment.x1, segment.z2 - segment.z1), 0);
-  const vehicleCount = Math.min(Math.max(0, Math.floor(totalRoadLength / 15)), SERVER_WORLD_MAX_TRAFFIC_VEHICLES, spawnCandidates.length);
+  const vehicleCount = Math.min(Math.max(0, Math.floor(totalRoadLength / 40)), 12, SERVER_WORLD_MAX_TRAFFIC_VEHICLES, spawnCandidates.length);
+  const terminalRoutes = serverTrafficTerminalRoutes(graph);
   const trafficVehicles = [];
   for (const candidate of spawnCandidates) {
     if (trafficVehicles.length >= vehicleCount) break;
-    const tooClose = trafficVehicles.some(vehicle => Math.hypot(vehicle.x - candidate.x, vehicle.z - candidate.z) < 8);
-    if (tooClose) continue;
-    const startNode = nearestServerRoadNode(graph, candidate.x, candidate.z, candidate.dir);
-    const destinations = Array.from(graph.nodes.values())
-      .filter(node => node !== startNode)
-      .sort((a, b) => {
-        const da = Math.abs(a.x - candidate.x) + Math.abs(a.z - candidate.z);
-        const db = Math.abs(b.x - candidate.x) + Math.abs(b.z - candidate.z);
-        return db - da;
-      });
-    const destination = destinations[trafficVehicles.length % Math.max(1, destinations.length)] || null;
-    const tilePath = startNode && destination
-      ? pathfindServerRoadGraph(graph, startNode.x, startNode.z, destination.x, destination.z)
+    const matchingRoutes = terminalRoutes
+      .map(route => ({ ...route, distance: distanceToServerTrafficPath(candidate, route.path) }))
+      .filter(route => route.distance <= 1.5)
+      .sort((a, b) => (a.distance - b.distance) || (b.length - a.length));
+    const routePool = matchingRoutes.length > 0 ? matchingRoutes : terminalRoutes;
+    const selectedRoute = routePool.length > 0
+      ? routePool[(trafficVehicles.length * 3) % routePool.length]
       : null;
-    const cleanPath = cleanServerVehiclePath(tilePath || [], { x: candidate.x, z: candidate.z });
+    const cleanPath = selectedRoute?.path || [];
     if (cleanPath.length < 2) continue;
     const type = SERVER_VEHICLE_TYPES[trafficVehicles.length % SERVER_VEHICLE_TYPES.length] || 'car';
-    const path = cleanPath.map(point => ({ x: point.x, z: point.z }));
-    const firstMove = path[1] || path[0];
-    const dir = directionFromDelta(firstMove.x - path[0].x, firstMove.z - path[0].z, candidate.dir);
+    const path = buildLaneAwareTrafficLoop(cleanPath, {
+      laneOffset: TRAFFIC_LANE_OFFSET,
+      turnRadius: TRAFFIC_TURN_RADIUS,
+      curveSamples: 4,
+      uTurnSamples: 7,
+    }).map(point => ({ x: point.x, z: point.z }));
+    if (path.length < 2) continue;
+    const spawn = projectServerTrafficSpawn(path, candidate);
+    if (!spawn) continue;
+    const tooClose = trafficVehicles.some(vehicle => Math.hypot(vehicle.x - spawn.x, vehicle.z - spawn.z) < 8);
+    if (tooClose) continue;
+    const firstMove = path[spawn.pathIdx] || path[0];
+    const dir = directionFromDelta(firstMove.x - spawn.x, firstMove.z - spawn.z, candidate.dir);
     trafficVehicles.push({
       vehicleId: `traffic-vehicle:${trafficVehicles.length}`,
       vehicleType: type,
       color: SERVER_VEHICLE_COLORS[trafficVehicles.length % SERVER_VEHICLE_COLORS.length],
-      x: path[0].x,
-      z: path[0].z,
+      x: spawn.x,
+      z: spawn.z,
       dir,
       rotationY: dirToRotationY(dir),
       speed: SERVER_WORLD_TRAFFIC_SPEED,
       speedMult: SERVER_VEHICLE_SPEED_MULT[type] || 1,
       path,
-      pathIdx: 1,
+      pathIdx: spawn.pathIdx,
       state: 'moving',
     });
   }
@@ -8833,6 +8917,7 @@ function buildServerWorldTopology(dataDir) {
     }
     topologyHash = `traffic:${streets.length}:${hash.toString(36)}`;
   }
+  if (topologyHash) topologyHash = `${topologyHash}:traffic-motion-r6`;
   return {
     owner: SERVER_WORLD_TOPOLOGY_OWNER,
     topologyHash,
@@ -12932,8 +13017,9 @@ export class AgentRuntimeRoom extends Room {
 
   tickTrafficVehicles(runtime, tickMs, updatedAt) {
     if (!runtime?.trafficVehicles?.size) return 0;
-    let changed = 0;
-    for (const [, vehicle] of runtime.trafficVehicles.entries()) {
+    const entries = Array.from(runtime.trafficVehicles.entries());
+    const plans = new Map();
+    for (const [vehicleId, vehicle] of entries) {
       let path = [];
       if (vehicle.pathJson) {
         try {
@@ -12943,40 +13029,150 @@ export class AgentRuntimeRoom extends Room {
         }
       }
       if (path.length < 2 || Number(vehicle.speed || 0) <= 0) {
-        vehicle.state = 'idle';
+        plans.set(vehicleId, { vehicle, path, idle: true });
         continue;
       }
       let pathIdx = clampInteger(vehicle.pathIdx, 1, 0, path.length - 1);
       if (pathIdx <= 0) pathIdx = 1;
       if (pathIdx >= path.length) pathIdx = path.length - 1;
-      const target = path[pathIdx];
-      const dx = target.x - Number(vehicle.x || 0);
-      const dz = target.z - Number(vehicle.z || 0);
-      const dist = Math.hypot(dx, dz);
       const move = Math.max(0, Number(vehicle.speed || 0) * Number(vehicle.speedMult || 1) * (tickMs / 1000));
-      let moved = false;
-      if (dist <= Math.max(0.001, move)) {
-        vehicle.x = target.x;
-        vehicle.z = target.z;
-        pathIdx += 1;
-        if (pathIdx >= path.length) {
-          path = path.slice().reverse();
-          vehicle.pathJson = JSON.stringify(path);
-          pathIdx = Math.min(1, path.length - 1);
-        }
-        moved = true;
-      } else {
-        vehicle.x = Number(vehicle.x || 0) + (dx / dist) * move;
-        vehicle.z = Number(vehicle.z || 0) + (dz / dist) * move;
-        moved = move > 0;
+      const next = advanceTrafficPath(path, {
+        x: Number(vehicle.x || 0),
+        z: Number(vehicle.z || 0),
+        pathIdx,
+      }, move);
+      plans.set(vehicleId, { vehicle, path, idle: false, next, move });
+    }
+
+    const intersectionRadius = SERVER_STREET_INTERSECTION_ROAD_RADIUS;
+    if (!(this.trafficIntersectionReservations instanceof Map)) this.trafficIntersectionReservations = new Map();
+    for (const [key, holderId] of Array.from(this.trafficIntersectionReservations.entries())) {
+      const holder = runtime.trafficVehicles.get(holderId);
+      const light = runtime.trafficLights.get(key);
+      if (!holder || !light || Math.hypot(Number(holder.x || 0) - Number(light.ix || 0), Number(holder.z || 0) - Number(light.iz || 0)) > intersectionRadius + 3) {
+        this.trafficIntersectionReservations.delete(key);
       }
-      const nextTarget = path[Math.max(0, Math.min(pathIdx, path.length - 1))] || target;
-      const nextDx = nextTarget.x - Number(vehicle.x || 0);
-      const nextDz = nextTarget.z - Number(vehicle.z || 0);
-      vehicle.pathIdx = pathIdx;
-      vehicle.dir = directionFromDelta(moved ? dx : nextDx, moved ? dz : nextDz, vehicle.dir);
-      vehicle.rotationY = dirToRotationY(vehicle.dir);
-      vehicle.state = moved ? 'moving' : 'idle';
+    }
+
+    const accepted = new Map();
+    let changed = 0;
+    for (const [vehicleId, vehicle] of entries) {
+      const plan = plans.get(vehicleId);
+      if (!plan || plan.idle) {
+        vehicle.state = 'idle';
+        continue;
+      }
+      const start = { x: Number(vehicle.x || 0), z: Number(vehicle.z || 0) };
+      const candidate = { x: plan.next.x, z: plan.next.z };
+      const nextDir = directionFromDelta(plan.next.dx, plan.next.dz, vehicle.dir);
+      let blocked = false;
+      let blockingReason = '';
+      const intersectionClaimKeys = [];
+
+      for (const [key, light] of runtime.trafficLights.entries()) {
+        const center = { x: Number(light.ix || 0), z: Number(light.iz || 0) };
+        const currentDistance = Math.hypot(start.x - center.x, start.z - center.z);
+        const nextDistance = Math.hypot(candidate.x - center.x, candidate.z - center.z);
+        const approaching = nextDistance < currentDistance && currentDistance > intersectionRadius;
+        const signal = nextDir === 0 || nextDir === 1 ? light.ew : light.ns;
+        if (approaching && nextDistance <= intersectionRadius + 3 && signal !== 'green') {
+          blocked = true;
+          blockingReason = 'traffic-light';
+          break;
+        }
+        if (Math.min(currentDistance, nextDistance) <= intersectionRadius + 1) {
+          const holderId = this.trafficIntersectionReservations.get(key);
+          if (holderId && holderId !== vehicleId) {
+            blocked = true;
+            blockingReason = 'intersection-reserved';
+            break;
+          }
+          if (!holderId) intersectionClaimKeys.push(key);
+        }
+      }
+
+      if (!blocked) {
+        for (const [otherId, other] of entries) {
+          if (otherId === vehicleId) continue;
+          const otherAccepted = accepted.get(otherId);
+          const otherPlan = plans.get(otherId);
+          const otherCurrent = { x: Number(other.x || 0), z: Number(other.z || 0) };
+          const otherCandidate = otherAccepted?.moved
+            ? { x: otherAccepted.x, z: otherAccepted.z }
+            : otherCurrent;
+          const separation = getTrafficVehicleSeparation(vehicle.vehicleType, other.vehicleType);
+          const currentDistance = Math.hypot(start.x - otherCurrent.x, start.z - otherCurrent.z);
+          const candidateDistance = Math.hypot(candidate.x - otherCandidate.x, candidate.z - otherCandidate.z);
+          const movingApart = currentDistance < separation && candidateDistance > currentDistance + 0.02;
+          const motionDistance = Math.hypot(plan.next.dx, plan.next.dz) || 1;
+          const otherMotionDistance = Math.hypot(otherPlan?.next?.dx || 0, otherPlan?.next?.dz || 0) || 1;
+          const parallelLanes = Math.abs(
+            (plan.next.dx / motionDistance) * ((otherPlan?.next?.dx || 0) / otherMotionDistance)
+              + (plan.next.dz / motionDistance) * ((otherPlan?.next?.dz || 0) / otherMotionDistance),
+          ) > 0.8;
+          const relativeX = otherCurrent.x - start.x;
+          const relativeZ = otherCurrent.z - start.z;
+          const lateralGap = Math.abs(relativeX * (-plan.next.dz / motionDistance) + relativeZ * (plan.next.dx / motionDistance));
+          if (parallelLanes && lateralGap >= 1.6) continue;
+          if (!parallelLanes) {
+            const currentFootprintsOverlap = trafficVehicleFootprintsOverlap({
+              x: start.x,
+              z: start.z,
+              rotationY: Number(vehicle.rotationY || 0),
+              vehicleType: vehicle.vehicleType,
+            }, {
+              x: otherCurrent.x,
+              z: otherCurrent.z,
+              rotationY: Number(other.rotationY || 0),
+              vehicleType: other.vehicleType,
+            });
+            const candidateFootprintsOverlap = trafficVehicleFootprintsOverlap({
+              x: candidate.x,
+              z: candidate.z,
+              rotationY: movementRotationY(plan.next.dx, plan.next.dz, vehicle.rotationY),
+              vehicleType: vehicle.vehicleType,
+            }, {
+              x: otherCandidate.x,
+              z: otherCandidate.z,
+              rotationY: movementRotationY(otherPlan?.next?.dx, otherPlan?.next?.dz, other.rotationY),
+              vehicleType: other.vehicleType,
+            });
+            if (candidateFootprintsOverlap && currentFootprintsOverlap && candidateDistance > currentDistance + 0.01) continue;
+            if (candidateFootprintsOverlap) {
+              blocked = true;
+              blockingReason = 'vehicle-spacing';
+              break;
+            }
+            continue;
+          }
+          const preservingMalformedInitialGap = currentDistance < separation
+            && lateralGap >= 1.6
+            && candidateDistance >= currentDistance - 0.02;
+          const sweptDistance = distancePointToTrafficSegment(otherCurrent, start, candidate);
+          if ((!movingApart && !preservingMalformedInitialGap && candidateDistance < separation)
+            || (!movingApart && !preservingMalformedInitialGap && sweptDistance < separation && candidateDistance <= currentDistance + 0.05)) {
+            blocked = true;
+            blockingReason = 'vehicle-spacing';
+            break;
+          }
+        }
+      }
+
+      const moved = !blocked && plan.next.moved > 0;
+      if (moved) {
+        vehicle.x = plan.next.x;
+        vehicle.z = plan.next.z;
+        vehicle.pathIdx = plan.next.pathIdx;
+        vehicle.dir = nextDir;
+        vehicle.rotationY = movementRotationY(plan.next.dx, plan.next.dz, vehicle.rotationY);
+        for (const key of intersectionClaimKeys) this.trafficIntersectionReservations.set(key, vehicleId);
+      }
+      accepted.set(vehicleId, {
+        x: Number(vehicle.x || 0),
+        z: Number(vehicle.z || 0),
+        moved,
+      });
+      vehicle.state = moved ? 'moving' : (blocked ? `stopped:${blockingReason}` : 'idle');
       vehicle.updatedAt = updatedAt;
       vehicle.version = Number(vehicle.version || 0) + 1;
       changed++;

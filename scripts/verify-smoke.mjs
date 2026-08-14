@@ -40,10 +40,122 @@ import {
 } from '../src/client/js/agent-life-action-location-registry.mjs';
 import { listObjectUseSeatCandidates } from '../src/client/js/agent-life-object-use-seats.mjs';
 import { normalizeExteriorInteractionNode } from '../src/client/js/agent-life-exterior-area-taxonomy.mjs';
+import {
+  getBuildingExteriorDoorType,
+  isAgentNearAutomaticDoor,
+} from '../src/client/js/building-doors.mjs';
+import {
+  WINDOW_FACES,
+  getBuildingWindowLayout,
+  getWallSegmentsForOpenings,
+  validateBuildingWindowLayout,
+} from '../src/client/js/building-windows.mjs';
+import {
+  getCommercialRoofLayout,
+  getResidentialRoofLayout,
+  validateCommercialRoofLayout,
+  validateResidentialRoofLayout,
+} from '../src/client/js/building-roofs.mjs';
+import {
+  CHUNK_DETAIL_MIX,
+  NATURAL_BASE_DENSITIES,
+  NATURAL_DENSITIES,
+  NATURAL_DENSITY_MULTIPLIER,
+  NATURAL_FLOWER_VARIANTS,
+  NATURAL_ROADWAY_CLEARANCE_RADII,
+  TREE_STYLE_DEFS,
+  TREE_STYLE_SCALE_MULTIPLIERS,
+  WORLD_HALF_SIZE,
+  WORLD_SIZE,
+  chunkIntersectsWorldBounds,
+  clampWorldCameraTarget,
+  circleIntersectsBounds,
+  doesNaturalAssetOverlapRoadway,
+  getCameraWorldLimit,
+  getNaturalDensitySummary,
+  getRoadwayComponentBounds,
+  isWorldPositionInBounds,
+  isWorldTileInBounds,
+  selectTreeStyle,
+  selectWeightedNaturalKind,
+} from '../src/client/js/natural-world.mjs';
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), 'utf8');
 const exists = (path) => existsSync(join(root, path));
+
+function verifyNaturalWorldContract() {
+  assert.equal(WORLD_HALF_SIZE, 1000, 'temporary world boundary must stay at ±1000');
+  assert.equal(WORLD_SIZE, 2000, 'ground plane must cover the complete bounded world');
+  assert.equal(NATURAL_DENSITY_MULTIPLIER, 1.3, 'natural density must increase by exactly 30%');
+  for (const [key, baseDensity] of Object.entries(NATURAL_BASE_DENSITIES)) {
+    assert(Math.abs(NATURAL_DENSITIES[key] - baseDensity * 1.3) < 1e-12, `${key} density must be exactly 30% above its prior placement-slot rate`);
+  }
+  const densitySummary = getNaturalDensitySummary();
+  assert.equal(densitySummary.increasePercent, 30, 'combined natural placement slots must increase by exactly 30%');
+
+  assert.deepEqual(
+    TREE_STYLE_DEFS.map(style => style.id),
+    ['pine', 'round', 'broadleaf', 'cypress', 'palm'],
+    'map and editor trees must expose five visually distinct tree families',
+  );
+  assert.equal(new Set([0.01, 0.21, 0.41, 0.61, 0.81].map(unit => selectTreeStyle(unit).id)).size, 5, 'tree selector must reach every family');
+  assert.equal(TREE_STYLE_SCALE_MULTIPLIERS.pine, 1.7, 'pine trees must be 70% larger');
+  assert.equal(TREE_STYLE_SCALE_MULTIPLIERS.cypress, 1.7, 'pointed cypress trees must be 70% larger');
+  assert.equal(TREE_STYLE_SCALE_MULTIPLIERS.round, 1, 'round-tree fullness must come from its crown geometry, not global scaling');
+  assert.equal(TREE_STYLE_SCALE_MULTIPLIERS.broadleaf, 1, 'broadleaf fullness must come from its crown geometry, not global scaling');
+  assert.equal(NATURAL_ROADWAY_CLEARANCE_RADII.tree, 2.3, 'roadway tree clearance must include the widest scaled pine canopy');
+  assert.deepEqual(
+    NATURAL_FLOWER_VARIANTS,
+    ['rounded', 'five-petal', 'six-petal', 'cup'],
+    'natural flowers must expose rounded and petaled silhouette variants',
+  );
+  assert.deepEqual(
+    new Set([0.01, 0.6, 0.9].map(unit => selectWeightedNaturalKind(unit, CHUNK_DETAIL_MIX))),
+    new Set(['none', 'grass-patch', 'large-rock']),
+    'the former bush and colorful flower-cluster slots must stay empty while remaining detail slots cover grass and larger rocks',
+  );
+
+  const straightRoad = { x1: 0, z1: 10, x2: 20, z2: 10 };
+  const intersection = { x1: 30, z1: 30, x2: 30, z2: 30, type: 'x-int' };
+  assert.deepEqual(
+    getRoadwayComponentBounds(straightRoad, 5.3),
+    { minX: 0, maxX: 21, minZ: 5.2, maxZ: 15.8 },
+    'straight roadway bounds must cover its complete rendered tile length and cross-section',
+  );
+  assert.equal(circleIntersectsBounds(10.5, 15.5, 0.5, getRoadwayComponentBounds(straightRoad, 5.3)), true, 'sidewalk-edge natural detail must intersect the roadway footprint');
+  assert.equal(
+    doesNaturalAssetOverlapRoadway(10.5, 18, NATURAL_ROADWAY_CLEARANCE_RADII.tree, [straightRoad], 5.3),
+    true,
+    'tree canopy clearance must reject trees whose foliage could overhang the outer sidewalk edge',
+  );
+  assert.equal(
+    doesNaturalAssetOverlapRoadway(10.5, 18.2, NATURAL_ROADWAY_CLEARANCE_RADII.tree, [straightRoad], 5.3),
+    false,
+    'trees beyond the canopy clearance must remain eligible',
+  );
+  assert.equal(
+    doesNaturalAssetOverlapRoadway(36.1, 30.5, NATURAL_ROADWAY_CLEARANCE_RADII.grassPatch, [intersection], 5.3),
+    true,
+    'intersection sidewalks must receive the same natural-object clearance as straight roads',
+  );
+
+  assert.equal(isWorldPositionInBounds(-1000, 1000), true, 'world corner must remain inside the temporary boundary');
+  assert.equal(isWorldPositionInBounds(1000.001, 0), false, 'positions past +1000 must be outside');
+  assert.equal(isWorldTileInBounds(999, 999, 1), true, 'last complete positive tile must render');
+  assert.equal(isWorldTileInBounds(1000, 0, 1), false, 'tiles starting beyond the positive edge must not render');
+  assert.equal(chunkIntersectsWorldBounds(31, 31, 32), true, 'partial positive edge chunk must load');
+  assert.equal(chunkIntersectsWorldBounds(32, 0, 32), false, 'chunk fully beyond +1000 must not load');
+  assert.equal(chunkIntersectsWorldBounds(-32, -32, 32), true, 'partial negative edge chunk must load');
+  assert.equal(chunkIntersectsWorldBounds(-33, 0, 32), false, 'chunk fully beyond -1000 must not load');
+
+  const cameraLimit = getCameraWorldLimit(40, 32);
+  const clamped = clampWorldCameraTarget(5000, -5000, 40, 32);
+  assert.equal(clamped.x, cameraLimit, 'camera target must clamp before the positive world edge');
+  assert.equal(clamped.z, -cameraLimit, 'camera target must clamp before the negative world edge');
+}
+
+verifyNaturalWorldContract();
 const textFileSuffixes = [
   '.css',
   '.dockerignore',
@@ -532,6 +644,11 @@ const jsSyntaxTargets = [
   'src/client/js/settings.js',
   'src/client/js/browser-viewer-url.mjs',
   'src/client/js/browser-window-controller.mjs',
+  'src/client/js/building-doors.mjs',
+  'src/client/js/building-windows.mjs',
+  'src/client/js/building-roofs.mjs',
+  'src/client/js/ambient-birds.mjs',
+  'src/client/js/traffic-vehicles.mjs',
   'src/client/js/sms-panel.mjs',
   'src/client/js/starter-map.mjs',
   'src/client/js/furniture-placement-defaults.mjs',
@@ -580,6 +697,10 @@ assert.equal(pyCheck.status, 0, `Python syntax check failed\n${pyCheck.stderr ||
 
 const starterFurnitureParityCheck = spawnSync(process.execPath, ['tests/test_starter_furniture.mjs'], { cwd: root, encoding: 'utf8' });
 assert.equal(starterFurnitureParityCheck.status, 0, `Starter furniture parity check failed\n${starterFurnitureParityCheck.stderr || starterFurnitureParityCheck.stdout}`);
+const ambientBirdCheck = spawnSync(process.execPath, ['tests/test_ambient_birds.mjs'], { cwd: root, encoding: 'utf8' });
+assert.equal(ambientBirdCheck.status, 0, `Ambient bird check failed\n${ambientBirdCheck.stderr || ambientBirdCheck.stdout}`);
+const trafficVehicleCheck = spawnSync(process.execPath, ['tests/test_traffic_vehicles.mjs'], { cwd: root, encoding: 'utf8' });
+assert.equal(trafficVehicleCheck.status, 0, `Traffic vehicle check failed\n${trafficVehicleCheck.stderr || trafficVehicleCheck.stdout}`);
 const browserViewerUrlCheck = spawnSync(process.execPath, ['tests/test_browser_viewer_url.mjs'], { cwd: root, encoding: 'utf8' });
 assert.equal(browserViewerUrlCheck.status, 0, `Browser viewer URL check failed\n${browserViewerUrlCheck.stderr || browserViewerUrlCheck.stdout}`);
 const browserWindowControllerCheck = spawnSync(process.execPath, ['tests/test_browser_window_controller.mjs'], { cwd: root, encoding: 'utf8' });
@@ -600,6 +721,9 @@ const setupHtml = read('src/client/setup.html');
 const settingsJs = read('src/client/js/settings.js');
 const smsPanelJs = read('src/client/js/sms-panel.mjs');
 const main3dJs = read('src/client/js/main3d.js');
+const ambientBirdJs = read('src/client/js/ambient-birds.mjs');
+const trafficVehicleJs = read('src/client/js/traffic-vehicles.mjs');
+const naturalWorldJs = read('src/client/js/natural-world.mjs');
 const agentRuntimeClientJs = read('src/client/js/agent-runtime-client.mjs');
 const agentRuntimeRoomJs = read('src/realtime/agent-runtime-room.mjs');
 const realtimeServerJs = read('src/realtime/server.mjs');
@@ -611,6 +735,97 @@ const dynamicExteriorRoutingJs = read('src/client/js/dynamic-exterior-routing.js
 const styleCss = read('src/client/css/style.css');
 const uiCss = read('src/client/css/ui-redesign.css');
 
+for (const token of [
+  "from './natural-world.mjs?v=20260813-roadway-clearance-r1'",
+  'makeNaturalGrassPatch',
+  'makeNaturalRockCluster',
+  'addTerrainRockMound',
+  'addTerrainFlowerBloom',
+  'TREE_STYLE_SCALE_MULTIPLIERS[style.id]',
+  "terrainDetailGeometry: 'raised-rock-mounds-and-petaled-blooms'",
+  "case 'tree':       return makeTree(x, z, rng)",
+  "grassPatch: { label: '🌾 Grass Patch'",
+  'removeChunkDecorationLayer',
+  'CHUNK_BUILDS_PER_FRAME',
+  '_pendingChunkLoads',
+  'refreshChunkTerrainFlags',
+  'NATURAL_ROADWAY_CLEARANCE_RADII',
+  'getRoadwayNaturalExclusionRects',
+  'naturalAssetOverlapsRoadway',
+  'refreshRoadwayNaturalClearance',
+  '_removePlacedDecorationsAtWorldTile',
+  'Natural objects cannot overlap a roadway, curb, gutter, or sidewalk',
+  'buildingFacadeBatch',
+  'windowOpeningCount',
+  'window.__verifyBuildingFacadeBatching',
+  'BUILDING_FURNITURE_LOD_DISTANCE',
+  'chunkIntersectsWorldBounds(nextCx, nextCz, CHUNK_W)',
+  'clampWorldCameraTarget(camTarget.x, camTarget.z, d, CHUNK_W)',
+  'window.__VWNaturalWorldDiagnostics',
+]) {
+  assert(main3dJs.includes(token), `natural-world renderer/editor integration missing token: ${token}`);
+}
+assert(!main3dJs.includes('makeNaturalBush'), 'removed colorful bush renderer must not remain in main3d.js');
+assert(!main3dJs.includes('makeNaturalFlowerCluster'), 'removed colorful circle cluster renderer must not remain in main3d.js');
+assert(!main3dJs.includes("bush:       { label:"), 'removed colorful bush must not remain in the decoration editor');
+assert(!naturalWorldJs.includes("id: 'bush'"), 'removed colorful bush must not remain in procedural natural detail mix');
+assert(!naturalWorldJs.includes("id: 'flower-cluster'"), 'removed colorful circle cluster must not remain in procedural natural detail mix');
+assert(indexHtml.includes('js/main3d.js?v=20260813-traffic-vehicles-r4'), 'traffic-vehicle renderer must be cache-busted in index.html');
+
+for (const token of [
+  "from './ambient-birds.mjs?v=20260813-ambient-birds-r5'",
+  'const BIRD_COUNT = IS_MOBILE_VIEWPORT ? 18 : 28',
+  'makeAmbientBirdWingGeometry',
+  'BIRD_SURFACE_KINDS.PARK_GRASS',
+  'BIRD_SURFACE_KINDS.TERRAIN_GRASS',
+  'BIRD_SURFACE_KINDS.COMMERCIAL_ROOF_LEDGE',
+  'BIRD_SURFACE_KINDS.RESIDENTIAL_ROOF_RIDGE',
+  'selectSpreadBirdHabitatZones',
+  'selectBalancedBirdHabitatZone',
+  'selectOpenBirdPerchRef',
+  'shouldScareGroundBird',
+  'scareAmbientBirdFlock',
+  'const BIRD_MODEL_SCALE = 0.5',
+  'startAmbientBirdExitFlight',
+  'BIRD_NATURAL_DRAW_DISTANCE',
+  'shouldRetireAmbientBirdExit',
+  'backwardWingViolationCount',
+  'descendingExitCount',
+  "'off-screen-arrival'",
+  'isAmbientBirdRoofVisible',
+  'tuckedWingViolationCount',
+  'duplicatePerchCount',
+  'window.__VWAmbientBirds',
+]) {
+  assert(
+    main3dJs.includes(token) || ambientBirdJs.includes(token),
+    `ambient-bird renderer integration missing token: ${token}`,
+  );
+}
+for (const token of [
+  "from './traffic-vehicles.mjs?v=20260813-traffic-vehicles-r2'",
+  'buildLaneAwareTrafficLoop',
+  'getVehicleRoadSurfaceY',
+  'getVehicleTrafficDiagnostics',
+  'trafficVehicleFootprintsOverlap',
+  'vehicleDetails',
+  'window.__VWTraffic',
+]) {
+  assert(
+    main3dJs.includes(token) || trafficVehicleJs.includes(token),
+    `traffic-vehicle renderer integration missing token: ${token}`,
+  );
+}
+for (const token of [
+  "from '../client/js/traffic-vehicles.mjs'",
+  'advanceTrafficPath',
+  'trafficIntersectionReservations',
+  'vehicle-spacing',
+  'intersection-reserved',
+  'traffic-motion-r6',
+]) {
+  assert(agentRuntimeRoomJs.includes(token), `authoritative traffic runtime missing token: ${token}`);
+}
 for (const token of [
   'data-resize="n"',
   'data-resize="s"',
@@ -973,11 +1188,195 @@ assert(
   'xray must not bypass the entered-building view while a building is selected/entered',
 );
 
+assert.equal(getBuildingExteriorDoorType('office'), 'sliding', 'office buildings must render automatic sliding glass doors');
+assert.equal(getBuildingExteriorDoorType('store'), 'sliding', 'stores must keep automatic sliding glass doors');
+assert.equal(getBuildingExteriorDoorType('home'), 'swivel', 'homes must keep wooden swing doors');
+assert.equal(
+  isAgentNearAutomaticDoor({ x: 100, y: 100 }, [{ x: 100, y: 100 }], { radiusApi: 60, doorwayReachApi: 22, apiTile: 40 }),
+  true,
+  'an agent at the threshold must trigger the automatic door',
+);
+assert.equal(
+  isAgentNearAutomaticDoor({ x: 200, y: 200 }, [{ x: 100, y: 100 }], { radiusApi: 60, doorwayReachApi: 22, apiTile: 40 }),
+  false,
+  'a distant agent must not keep the automatic door open',
+);
+for (const token of [
+  "getBuildingExteriorDoorType(btype)",
+  'const shouldHoldOpen = hasNearbyAgent || hasActiveCrossing',
+  'resetBuildingDoorAnimation(building?.id || null)',
+  'window.__verifyAutomaticOfficeDoors',
+  'js/main3d.js?v=20260813-traffic-vehicles-r4',
+]) {
+  assert(main3dJs.includes(token) || indexHtml.includes(token), `automatic office door integration missing token: ${token}`);
+}
+
+const windowFixtures = [
+  { type: 'office', width: 25, depth: 17, floorCount: 3 },
+  { type: 'store', width: 15, depth: 12, floorCount: 3 },
+  { type: 'home', width: 10, depth: 8, floorCount: 3 },
+];
+const windowLayouts = Object.fromEntries(windowFixtures.map((fixture) => {
+  const openings = getBuildingWindowLayout({ ...fixture, wallHeight: 3, doorOpeningWidth: 2.4 });
+  assert(validateBuildingWindowLayout(openings, { ...fixture, wallHeight: 3 }).ok, `${fixture.type} windows must stay in bounds without overlap`);
+  for (let floor = 1; floor <= fixture.floorCount; floor++) {
+    for (const face of WINDOW_FACES) {
+      assert(openings.some((opening) => opening.floor === floor && opening.face === face), `${fixture.type} floor ${floor} ${face} facade must have windows`);
+    }
+  }
+  return [fixture.type, openings];
+}));
+
+const officeBackWindows = windowLayouts.office.filter((opening) => opening.floor === 2 && opening.face === 'back');
+assert(officeBackWindows.every((opening) => opening.width >= 1.8), 'office windows must be materially larger than the former surface panes');
+for (let index = 1; index < officeBackWindows.length; index++) {
+  const gap = (officeBackWindows[index].center - officeBackWindows[index].width / 2)
+    - (officeBackWindows[index - 1].center + officeBackWindows[index - 1].width / 2);
+  assert(gap < 0.6, 'office windows must be grouped with close side-to-side spacing');
+}
+
+for (let floor = 1; floor <= 3; floor++) {
+  for (const face of WINDOW_FACES) {
+    const count = windowLayouts.store.filter((opening) => opening.floor === floor && opening.face === face).length;
+    assert.equal(count, face === 'front' && floor === 1 ? 2 : 1, 'store facades must use one continuous glass run, split only around the ground-floor door');
+  }
+}
+
+const houseBackWindows = windowLayouts.home.filter((opening) => opening.floor === 2 && opening.face === 'back');
+assert.equal(houseBackWindows.length, 2, 'house windows must be larger and spaced farther apart');
+assert(houseBackWindows.every((opening) => opening.kind === 'residential' && opening.mullions === 1 && opening.rails === 1), 'house windows must include residential sash/frame details');
+const houseBackGap = (houseBackWindows[1].center - houseBackWindows[1].width / 2)
+  - (houseBackWindows[0].center + houseBackWindows[0].width / 2);
+assert(houseBackGap > 1.5, 'house windows must retain residential spacing');
+
+const cutoutOpenings = [
+  ...windowLayouts.home.filter((opening) => opening.floor === 1 && opening.face === 'front'),
+  { id: 'door', center: 5, width: 2.4, bottom: 0, height: 2.94 },
+];
+const cutoutSegments = getWallSegmentsForOpenings({ length: 10, height: 3, openings: cutoutOpenings });
+for (const segment of cutoutSegments) {
+  for (const opening of cutoutOpenings) {
+    const horizontalOverlap = Math.min(segment.center + segment.width / 2, opening.center + opening.width / 2)
+      - Math.max(segment.center - segment.width / 2, opening.center - opening.width / 2);
+    const verticalOverlap = Math.min(segment.bottom + segment.height, opening.bottom + opening.height)
+      - Math.max(segment.bottom, opening.bottom);
+    assert(horizontalOverlap <= 1e-6 || verticalOverlap <= 1e-6, `wall segment must not cover cutout ${opening.id}`);
+  }
+}
+const wallArea = cutoutSegments.reduce((sum, segment) => sum + segment.width * segment.height, 0);
+const openingArea = cutoutOpenings.reduce((sum, opening) => sum + opening.width * opening.height, 0);
+assert(Math.abs(wallArea + openingArea - 30) < 1e-6, 'wall segments and non-overlapping openings must exactly cover the facade area');
+const widerOfficeLayout = getBuildingWindowLayout({ type: 'office', width: 31, depth: 20, floorCount: 3, wallHeight: 3, doorOpeningWidth: 2.4 });
+assert(widerOfficeLayout.length > windowLayouts.office.length, 'window and wall-cutout layout must respond dynamically to building resize');
+
+for (const token of [
+  'addBuildingFacadeShell(group, building',
+  'getWallSegmentsForOpenings',
+  'buildingWindowGlass',
+  'window.__verifyBuildingWindowUpgrade',
+  'js/main3d.js?v=20260813-traffic-vehicles-r4',
+]) {
+  assert(main3dJs.includes(token) || indexHtml.includes(token), `dynamic building window integration missing token: ${token}`);
+}
+
+const officeRoof = getCommercialRoofLayout({ type: 'office', width: 25, depth: 17, floorCount: 3, seed: 'office-roof-smoke' });
+const storeRoof = getCommercialRoofLayout({ type: 'store', width: 15, depth: 12, floorCount: 3, seed: 'store-roof-smoke' });
+const homeRoof = getCommercialRoofLayout({ type: 'home', width: 10, depth: 8, floorCount: 3, seed: 'home-roof-smoke' });
+for (const layout of [officeRoof, storeRoof]) {
+  assert(layout.supported && layout.edge.enabled, `${layout.type} must receive a commercial parapet roof edge`);
+  assert(validateCommercialRoofLayout(layout, layout).ok, `${layout.type} rooftop components must stay in bounds without overlap`);
+  assert(layout.components.some((component) => component.kind === 'ac-unit'), `${layout.type} roof must include an AC unit`);
+  assert(layout.components.some((component) => component.kind === 'roof-vent'), `${layout.type} roof must include a roof vent`);
+  assert(layout.componentCount <= layout.areaCapacity, `${layout.type} roof detail count must obey its area cap`);
+  assert(layout.componentCount <= layout.slotCapacity, `${layout.type} roof detail count must obey its collision-free slot cap`);
+  assert.equal(layout.acUnitCount, layout.floorCount, `${layout.type} must request and fit one AC unit per floor when space is available`);
+  assert.equal(layout.unplacedAcUnits, 0, `${layout.type} must report no missing AC units when its roof has enough space`);
+}
+assert.equal(homeRoof.supported, false, 'homes must retain their existing pitched roof instead of commercial equipment');
+
+const officeLowRise = getCommercialRoofLayout({ type: 'office', width: 19, depth: 9.2, floorCount: 1, seed: 'density-smoke' });
+const officeMidRise = getCommercialRoofLayout({ type: 'office', width: 19, depth: 9.2, floorCount: 6, seed: 'density-smoke' });
+const officeNearCapacity = getCommercialRoofLayout({ type: 'office', width: 19, depth: 9.2, floorCount: 9, seed: 'density-smoke' });
+const officeTall = getCommercialRoofLayout({ type: 'office', width: 19, depth: 9.2, floorCount: 15, seed: 'density-smoke' });
+const officeWide = getCommercialRoofLayout({ type: 'office', width: 19, depth: 12.4, floorCount: 15, seed: 'density-smoke' });
+assert.equal(officeLowRise.acUnitCount, 1, 'a one-floor office must request one AC unit');
+assert.equal(officeMidRise.acUnitCount, 6, 'AC unit count must grow directly with floor count while roof space remains');
+assert.equal(officeNearCapacity.acUnitCount, 9, 'AC unit count must continue growing up to the roof packing capacity');
+assert.equal(officeTall.acUnitCapacity, 10, 'the small fixture roof must expose ten collision-free equipment slots');
+assert.equal(officeTall.acUnitCount, 10, 'a 15-floor small-footprint office must stop at its ten-unit roof capacity');
+assert.equal(officeTall.unplacedAcUnits, 5, 'the layout must report floor-driven AC demand that could not fit');
+assert.equal(officeTall.componentCount, officeTall.maxCount, 'AC demand must fill a capacity-constrained roof before optional details');
+assert(validateCommercialRoofLayout(officeTall, officeTall).ok, 'a capacity-filled small roof must remain collision-free');
+assert.equal(officeWide.acUnitCapacity, 15, 'the resized fixture roof must expose fifteen collision-free equipment slots');
+assert.equal(officeWide.acUnitCount, 15, 'resizing the same 15-floor office must unlock all fifteen requested AC units');
+assert.equal(officeWide.unplacedAcUnits, 0, 'the resized roof must satisfy all floor-driven AC demand');
+assert(officeWide.componentCount > 12, 'roof-area capacity must replace the former fixed twelve-component ceiling');
+assert(validateCommercialRoofLayout(officeWide, officeWide).ok, 'the expanded roof layout must remain collision-free');
+assert.deepEqual(
+  getCommercialRoofLayout({ type: 'office', width: 25, depth: 17, floorCount: 3, seed: 'office-roof-smoke' }),
+  officeRoof,
+  'rooftop layout must remain deterministic for the same building and dimensions',
+);
+assert.notDeepEqual(
+  getCommercialRoofLayout({ type: 'office', width: 25, depth: 17, floorCount: 3, seed: 'different-office' }).components,
+  officeRoof.components,
+  'different buildings should receive visibly different deterministic rooftop layouts',
+);
+
+const homeRoofBase = getResidentialRoofLayout({
+  width: 10,
+  depth: 8,
+  wallThickness: 0.25,
+  wallHeight: 3,
+  seed: 'home-roof-smoke',
+});
+const homeRoofResized = getResidentialRoofLayout({
+  width: 18,
+  depth: 14,
+  wallThickness: 0.25,
+  wallHeight: 3,
+  seed: 'home-roof-smoke',
+});
+for (const layout of [homeRoofBase, homeRoofResized]) {
+  assert(layout.supported, 'home roofs must receive a finished residential roof layout');
+  assert(validateResidentialRoofLayout(layout).ok, 'residential shingles must follow the roof slopes and remain inside the finished roof edge');
+  assert(layout.roofWidth > layout.outerWidth, 'home roofs must overhang both side walls');
+  assert(layout.roofDepth > layout.outerDepth, 'home roofs must overhang the front and back gables');
+  assert(layout.courseCount >= 5 && layout.columnCount >= 5, 'home roofs must contain a visible procedural shingle grid');
+  assert(layout.shingleCount > 0, 'home roofs must contain shingles on both slopes');
+  assert(layout.shingles.some((shingle) => shingle.side === 'left'), 'home roof shingles must cover the left slope');
+  assert(layout.shingles.some((shingle) => shingle.side === 'right'), 'home roof shingles must cover the right slope');
+}
+assert(homeRoofResized.roofWidth > homeRoofBase.roofWidth, 'home roof width and overhang must follow footprint resizing');
+assert(homeRoofResized.roofDepth > homeRoofBase.roofDepth, 'home roof depth and overhang must follow footprint resizing');
+assert(homeRoofResized.shingleCount > homeRoofBase.shingleCount, 'a larger home roof must procedurally receive more shingles');
+assert.deepEqual(
+  getResidentialRoofLayout({ width: 10, depth: 8, wallThickness: 0.25, wallHeight: 3, seed: 'home-roof-smoke' }),
+  homeRoofBase,
+  'residential shingle placement must remain deterministic across rebuilds and movement',
+);
+
+for (const token of [
+  'makeCommercialRoof(building, type, width, depth',
+  'roofLayoutSummary',
+  "addRoofBox(roof, building, null, 'parapet-edge'",
+  'window.__verifyCommercialRoofUpgrade',
+  'makeResidentialRoof(building, width, depth',
+  "tagBuildingRoofPart(shingles, building, 'shingles')",
+  "'eave-fascia'",
+  "'rake-trim'",
+  "'ridge-cap'",
+  'window.__verifyResidentialRoofUpgrade',
+  'js/main3d.js?v=20260813-traffic-vehicles-r4',
+]) {
+  assert(main3dJs.includes(token) || indexHtml.includes(token), `dynamic building roof integration missing token: ${token}`);
+}
+
 for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'STARTER_MAP_VERSION',
-  'js/main3d.js?v=20260809-starter-furniture-r1',
+  'js/main3d.js?v=20260813-traffic-vehicles-r4',
   'agent-life-exterior-area-taxonomy.mjs?v=20260804-park-table-node-inference-r2',
   'syncAgentToCurrentTableSeatTransform(agent)',
   'occupiedAgentFollowsChairTransform',
@@ -1021,7 +1420,7 @@ for (const token of [
   'Math.min(clock.getDelta(), 0.05)',
   'const VEHICLE_SPEED = 7.0',
   'const spacing = 8',
-  'Math.floor(totalRoadLen / 15)',
+  'Math.floor(totalRoadLen / 40)',
   'Fresh GitHub installs start with only /api/streets',
   'reroute one in place instead of teleporting it to a different road',
   'Do not recycle it across the map while the user watches',
@@ -1268,7 +1667,7 @@ for (const token of [
   'dataset.typographyScale',
   "state.miniEl.style.top = miniY + 'px'",
   'CHAT_BUBBLE_MINI_SIZE = 28',
-  'if (dist > 100)',
+  'BUILDING_FURNITURE_LOD_DISTANCE = 45',
 ]) {
   assert(main3dJs.includes(token), `main3d.js missing chat bubble/desk carry token: ${token}`);
 }

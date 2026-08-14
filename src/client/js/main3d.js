@@ -103,6 +103,72 @@ import {
   clearDynamicExteriorRoutingDebug,
 } from './dynamic-exterior-routing.js?v=20260711-runtime-routing-hydrate';
 import {
+  getBuildingExteriorDoorType,
+  isAgentNearAutomaticDoor,
+} from './building-doors.mjs?v=20260813-office-sliding-doors-r1';
+import {
+  WINDOW_FACES,
+  getBuildingWindowLayout,
+  getFacadeWindowOpenings,
+  getWallSegmentsForOpenings,
+  validateBuildingWindowLayout,
+} from './building-windows.mjs?v=20260813-building-window-cutouts-r1';
+import {
+  getCommercialRoofLayout,
+  getResidentialRoofLayout,
+  validateCommercialRoofLayout,
+  validateResidentialRoofLayout,
+} from './building-roofs.mjs?v=20260813-residential-roof-r1';
+import {
+  CHUNK_DETAIL_MIX,
+  NATURAL_DENSITIES,
+  NATURAL_DENSITY_MULTIPLIER,
+  NATURAL_FLOWER_VARIANTS,
+  NATURAL_ROADWAY_CLEARANCE_RADII,
+  TERRAIN_DETAIL_MIX,
+  TREE_STYLE_DEFS,
+  TREE_STYLE_SCALE_MULTIPLIERS,
+  WORLD_HALF_SIZE,
+  WORLD_SIZE,
+  chunkIntersectsWorldBounds,
+  clampWorldCameraTarget,
+  circleIntersectsBounds,
+  doesNaturalAssetOverlapRoadway,
+  getCameraWorldLimit,
+  getNaturalDensitySummary,
+  getRoadwayComponentBounds,
+  isWorldPositionInBounds,
+  isWorldTileInBounds,
+  selectTreeStyle,
+  selectWeightedNaturalKind,
+} from './natural-world.mjs?v=20260813-roadway-clearance-r1';
+import {
+  BIRD_STATES,
+  BIRD_SURFACE_KINDS,
+  createParkBirdPerchRefs,
+  createRoofBirdPerchRefs,
+  getBirdGroundSurfaceAt,
+  getBirdPerchRefKey,
+  isBirdGroundSurfaceKind,
+  isBirdRoofSurfaceKind,
+  resolveBirdPerchRef,
+  selectSpreadBirdHabitatZones,
+  shouldScareGroundBird,
+} from './ambient-birds.mjs?v=20260813-ambient-birds-r5';
+import {
+  TRAFFIC_LANE_OFFSET,
+  TRAFFIC_TURN_RADIUS,
+  advanceTrafficPath,
+  analyzeTrafficPath,
+  buildLaneAwareTrafficLoop,
+  getTrafficVehicleRideHeight,
+  getTrafficVehicleSeparation,
+  getTrafficVehicleSpec,
+  movementRotationY,
+  trafficPathForwardDistance,
+  trafficVehicleFootprintsOverlap,
+} from './traffic-vehicles.mjs?v=20260813-traffic-vehicles-r2';
+import {
   STARTER_MAP_NAME,
   STARTER_MAP_VERSION,
   cloneStarterMapBuildings,
@@ -918,8 +984,10 @@ const _sphereGeo = new THREE.SphereGeometry(0.5, 8, 6);
 const _cylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
 const _roundFurnitureCylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 24);
 const _coneGeo = new THREE.ConeGeometry(0.5, 1, 8);
+const _rockGeo = new THREE.DodecahedronGeometry(0.5, 0);
 const _matCache = {};
 const _sharedVertexColorMatCache = new Map();
+const _naturalAssetTemplateCache = new Map();
 
 function getMat(color, opts) {
   const key = color + (opts ? JSON.stringify(opts) : '');
@@ -1050,7 +1118,7 @@ function mergeFurnitureItemVoxels(item) {
     let vertexCount = 0;
     for (const mesh of meshes) {
       mesh.updateMatrixWorld(true);
-      const geo = mesh.geometry.toNonIndexed();
+      const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
       geo.deleteAttribute('uv');
       relMatrix.copy(itemInv).multiply(mesh.matrixWorld);
       geo.applyMatrix4(relMatrix); // bake transform relative to furniture root
@@ -1137,7 +1205,7 @@ function mergeStaticGroupMeshes(rootGroup) {
     const colorArrays = [];
     let vertexCount = 0;
     for (const mesh of meshes) {
-      const geo = mesh.geometry.toNonIndexed();
+      const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
       if (geo.getAttribute('uv')) geo.deleteAttribute('uv');
       relMatrix.copy(rootInv).multiply(mesh.matrixWorld);
       geo.applyMatrix4(relMatrix); // bake transform relative to chunk group
@@ -2312,7 +2380,7 @@ function makeAgentRuntimeTrafficTopology() {
     });
   }
   trafficLights.sort((a, b) => a.key.localeCompare(b.key));
-  const trafficVehicles = vehiclesList
+    const trafficVehicles = vehiclesList
     .map((vehicle, index) => makeAgentRuntimeTrafficVehicleSeed(vehicle, index))
     .filter(Boolean);
   return {
@@ -2340,7 +2408,10 @@ function makeAgentRuntimeTrafficVehicleSeed(vehicle, index = 0) {
     rotationY: Number(vehicle.group?.rotation?.y || _dirToRotY(vehicle.dir || 0)),
     speed: VEHICLE_SPEED,
     speedMult: Number(vehicle._speedMult || 1),
-    path: vehicle._path.map(point => ({ x: Number(point.x || 0) * T, z: Number(point.z || 0) * T })),
+    path: vehicle._path.map(point => ({
+      x: Number(point.x || 0) * (vehicle._pathIncludesLaneOffset ? 1 : T),
+      z: Number(point.z || 0) * (vehicle._pathIncludesLaneOffset ? 1 : T),
+    })),
     pathIdx: Math.max(0, Math.floor(Number(vehicle._pathIdx || 0))),
     state: vehicle._stoppedAtLight ? 'stopped' : 'moving',
   };
@@ -2456,7 +2527,9 @@ function getVehicleLaneOffsetForDir(dir) {
 
 function placeRuntimeTrafficVehicle(vehicle, { dt = 0, force = false } = {}) {
   if (!vehicle?.group) return false;
-  const lane = getVehicleLaneOffsetForDir(vehicle.dir);
+  const lane = vehicle._runtimeWorldRuntime || vehicle._pathIncludesLaneOffset
+    ? { x: 0, z: 0 }
+    : getVehicleLaneOffsetForDir(vehicle.dir);
   if (force) {
     vehicle._laneOffX = lane.x;
     vehicle._laneOffZ = lane.z;
@@ -2476,13 +2549,16 @@ function placeRuntimeTrafficVehicle(vehicle, { dt = 0, force = false } = {}) {
       vehicle.group.rotation.y += diff * rotAlpha;
     }
   }
-  const vPosY = ST.BASE + ST.ROAD_THICK + 0.18;
   const renderX = Number(vehicle.x || 0) + Number(vehicle._laneOffX || 0);
   const renderZ = Number(vehicle.z || 0) + Number(vehicle._laneOffZ || 0);
+  const roadSurfaceY = getVehicleRoadSurfaceY(renderX, renderZ) ?? (ST.BASE + ST.ROAD_THICK);
+  const physicsY = roadSurfaceY + 0.18;
+  const visualY = roadSurfaceY + Number(vehicle._rideHeight || getTrafficVehicleRideHeight(vehicle.vehicleType));
   if (isPhysicsReady() && vehicle._physicsId) {
-    setVehiclePosition(vehicle._physicsId, renderX, vPosY, renderZ, vehicle.group.rotation.y);
+    setVehiclePosition(vehicle._physicsId, renderX, physicsY, renderZ, vehicle.group.rotation.y);
   }
-  vehicle.group.position.set(renderX, vPosY, renderZ);
+  vehicle.group.position.set(renderX, visualY, renderZ);
+  updateVehicleDetailVisibility(vehicle);
   vehicle.group.visible = true;
   return true;
 }
@@ -2497,6 +2573,7 @@ function applyAgentRuntimeTrafficVehicles() {
     if (!vehicle._runtimeVehicleId) vehicle._runtimeVehicleId = `traffic-vehicle:${index}`;
     return [vehicle._runtimeVehicleId, vehicle];
   }));
+  const runtimeTopologyHash = String(worldRuntime.topologyHash || '');
   let applied = 0;
   for (const runtimeVehicle of runtimeVehicles.values()) {
     let vehicle = byId.get(runtimeVehicle.vehicleId);
@@ -2509,18 +2586,38 @@ function applyAgentRuntimeTrafficVehicles() {
     }
     const startX = Number.isFinite(Number(vehicle.x)) ? Number(vehicle.x) : targetX;
     const startZ = Number.isFinite(Number(vehicle.z)) ? Number(vehicle.z) : targetZ;
+    const runtimePath = Array.isArray(runtimeVehicle.path)
+      ? runtimeVehicle.path.map(point => ({ x: Number(point.x || 0), z: Number(point.z || 0) }))
+      : vehicle._path;
+    const runtimePathIdx = Math.max(1, Math.floor(Number(runtimeVehicle.pathIdx || 1)));
+    const renderPathIdx = Math.max(1, Math.floor(Number(vehicle._renderPathIdx || vehicle._pathIdx || runtimePathIdx)));
     const distToTarget = Math.hypot(startX - targetX, startZ - targetZ);
-    const shouldSnap = !vehicle._runtimeWorldRuntime || distToTarget > AGENT_RUNTIME_TRAFFIC_VEHICLE_SNAP_DISTANCE;
+    const topologyChanged = Boolean(runtimeTopologyHash && vehicle._runtimeTopologyHash !== runtimeTopologyHash);
+    const forwardDistance = trafficPathForwardDistance(runtimePath, {
+      x: startX,
+      z: startZ,
+      pathIdx: renderPathIdx,
+    }, {
+      x: targetX,
+      z: targetZ,
+      pathIdx: runtimePathIdx,
+    });
+    const shouldSnap = !vehicle._runtimeWorldRuntime
+      || topologyChanged
+      || !Number.isFinite(forwardDistance)
+      || forwardDistance > AGENT_RUNTIME_TRAFFIC_VEHICLE_SNAP_DISTANCE
+      || distToTarget > AGENT_RUNTIME_TRAFFIC_VEHICLE_SNAP_DISTANCE;
     if (shouldSnap) {
       vehicle.x = targetX;
       vehicle.z = targetZ;
+      vehicle._renderPathIdx = runtimePathIdx;
       vehicle._runtimeVehicleInterpolation = null;
     } else {
       vehicle._runtimeVehicleInterpolation = {
         fromX: startX,
         fromZ: startZ,
-        toX: targetX,
-        toZ: targetZ,
+        fromPathIdx: renderPathIdx,
+        forwardDistance,
         startedAtMs: performance.now(),
         durationMs: AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS,
         tickSeq: worldRuntime.tickSeq || 0,
@@ -2529,10 +2626,12 @@ function applyAgentRuntimeTrafficVehicles() {
     }
     vehicle.dir = Math.max(0, Math.min(3, Math.floor(Number(runtimeVehicle.dir || 0))));
     vehicle._targetRotY = Number.isFinite(Number(runtimeVehicle.rotationY)) ? Number(runtimeVehicle.rotationY) : _dirToRotY(vehicle.dir);
-    vehicle._path = Array.isArray(runtimeVehicle.path) ? runtimeVehicle.path.map(point => ({ x: point.x / T, z: point.z / T })) : vehicle._path;
-    vehicle._pathIdx = Math.max(0, Math.floor(Number(runtimeVehicle.pathIdx || 0)));
+    vehicle._path = runtimePath;
+    vehicle._pathIncludesLaneOffset = true;
+    vehicle._pathIdx = runtimePathIdx;
     vehicle._stoppedAtLight = runtimeVehicle.state === 'stopped';
     vehicle._runtimeWorldRuntime = true;
+    vehicle._runtimeTopologyHash = runtimeTopologyHash;
     vehicle._runtimeVersion = runtimeVehicle.version || 0;
     vehicle._runtimeServerX = targetX;
     vehicle._runtimeServerZ = targetZ;
@@ -2562,8 +2661,15 @@ function updateRuntimeTrafficVehicles(dt = 0) {
     if (interpolation) {
       const duration = Math.max(1, Number(interpolation.durationMs || AGENT_RUNTIME_TRAFFIC_VEHICLE_INTERPOLATION_MS));
       const t = Math.min(1, Math.max(0, (now - Number(interpolation.startedAtMs || now)) / duration));
-      vehicle.x = Number(interpolation.fromX || 0) + (Number(interpolation.toX || 0) - Number(interpolation.fromX || 0)) * t;
-      vehicle.z = Number(interpolation.fromZ || 0) + (Number(interpolation.toZ || 0) - Number(interpolation.fromZ || 0)) * t;
+      const next = advanceTrafficPath(vehicle._path, {
+        x: Number(interpolation.fromX || 0),
+        z: Number(interpolation.fromZ || 0),
+        pathIdx: Number(interpolation.fromPathIdx || 1),
+      }, Number(interpolation.forwardDistance || 0) * t);
+      vehicle.x = next.x;
+      vehicle.z = next.z;
+      vehicle._renderPathIdx = next.pathIdx;
+      if (next.moved > 0) vehicle._targetRotY = movementRotationY(next.dx, next.dz, vehicle._targetRotY);
       if (t >= 1) vehicle._runtimeVehicleInterpolation = null;
     }
     placeRuntimeTrafficVehicle(vehicle, { dt });
@@ -2574,10 +2680,39 @@ function updateRuntimeTrafficVehicles(dt = 0) {
     }
     rendered++;
   }
+  let visualOverlapCorrections = 0;
+  for (let index = 0; index < vehiclesList.length; index++) {
+    const vehicle = vehiclesList[index];
+    if (!vehicle?._runtimeWorldRuntime || !vehicle.group?.visible) continue;
+    for (let otherIndex = index + 1; otherIndex < vehiclesList.length; otherIndex++) {
+      const other = vehiclesList[otherIndex];
+      if (!other?._runtimeWorldRuntime || !other.group?.visible) continue;
+      if (!trafficVehicleFootprintsOverlap({
+        x: vehicle.group.position.x,
+        z: vehicle.group.position.z,
+        rotationY: vehicle.group.rotation.y,
+        vehicleType: vehicle.vehicleType,
+      }, {
+        x: other.group.position.x,
+        z: other.group.position.z,
+        rotationY: other.group.rotation.y,
+        vehicleType: other.vehicleType,
+      })) continue;
+      for (const entry of [vehicle, other]) {
+        entry.x = Number(entry._runtimeServerX || 0);
+        entry.z = Number(entry._runtimeServerZ || 0);
+        entry._renderPathIdx = Math.max(1, Number(entry._pathIdx || 1));
+        entry._runtimeVehicleInterpolation = null;
+        placeRuntimeTrafficVehicle(entry, { force: true });
+      }
+      visualOverlapCorrections++;
+    }
+  }
   if (typeof window !== 'undefined' && window.__VWWorldRuntimeVehicles) {
     window.__VWWorldRuntimeVehicles = {
       ...window.__VWWorldRuntimeVehicles,
       rendered,
+      visualOverlapCorrections,
       renderUpdatedAt: new Date().toISOString(),
     };
   }
@@ -9750,7 +9885,7 @@ function getWorldTitleName() {
 }
 
 // Decoration placement
-let decorationPlacementType = null; // 'tree'|'bench'|'lamppost'|'fence'|'fountain'
+let decorationPlacementType = null;
 let decorationGhost = null;
 let _selectedPlacedDecoration = null; // { type, wx, wz, chunkKey }
 let _selectedDecorationHelper = null;
@@ -9870,11 +10005,13 @@ function applyManualObjectOccupancyDwell(drop, agent, trigger = null) {
 }
 
 const DECORATION_DEFS = {
-  tree:     { label: '🌲 Tree',     icon: '🌲' },
-  bench:    { label: '🪑 Bench',    icon: '🪑' },
-  lamppost: { label: '💡 Lamp',     icon: '💡' },
-  fence:    { label: '🚧 Fence',    icon: '🚧' },
-  fountain: { label: '⛲ Fountain', icon: '⛲' },
+  tree:       { label: '🌳 Tree',        shortLabel: 'Tree',     icon: '🌳', natural: true, solid: true },
+  grassPatch: { label: '🌾 Grass Patch', shortLabel: 'Grass',    icon: '🌾', natural: true, solid: false },
+  rock:       { label: '🪨 Large Rock',  shortLabel: 'Rock',     icon: '🪨', natural: true, solid: true },
+  bench:      { label: '🪑 Bench',       shortLabel: 'Bench',    icon: '🪑', solid: true },
+  lamppost:   { label: '💡 Lamp',        shortLabel: 'Lamp',     icon: '💡', solid: true },
+  fence:      { label: '🚧 Fence',       shortLabel: 'Fence',    icon: '🚧', solid: true },
+  fountain:   { label: '⛲ Fountain',     shortLabel: 'Fountain', icon: '⛲', solid: true },
 };
 
 // Camera (fixed isometric)
@@ -9947,7 +10084,7 @@ async function init() {
   scene.background = new THREE.Color(0x87ceeb); // sky blue
 
   // Large ground plane (green base so unloaded areas still look like grass)
-  const groundGeo = new THREE.PlaneGeometry(2000, 2000);
+  const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE);
   const groundMat = new THREE.MeshLambertMaterial({ color: 0x5a9e3a });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.rotation.x = -Math.PI / 2;
@@ -10189,6 +10326,9 @@ function getEffectiveCameraPlacementDistance(distance = camDist, options = {}) {
 
 function updateCamera() {
   const d = camDist;
+  const boundedTarget = clampWorldCameraTarget(camTarget.x, camTarget.z, d, CHUNK_W);
+  camTarget.x = boundedTarget.x;
+  camTarget.z = boundedTarget.z;
   const viewport = getCameraViewportMetrics(d);
   const frameBiasY = getEffectiveCameraFrameBiasY(d);
   const placementDistance = getEffectiveCameraPlacementDistance(d, { viewport, frameBiasY });
@@ -10315,8 +10455,10 @@ function zoomFitAll() {
 
 // Smoothly animate camera to a goal (lerp in animate loop)
 function flyCameraTo(targetPos, targetDist) {
-  _camGoalTarget.copy(targetPos);
-  _camGoalDist = targetDist;
+  const boundedDistance = Math.max(4.5, Math.min(120, Number(targetDist) || camDist));
+  const boundedTarget = clampWorldCameraTarget(targetPos?.x, targetPos?.z, boundedDistance, CHUNK_W);
+  _camGoalTarget.set(boundedTarget.x, Number(targetPos?.y) || 0, boundedTarget.z);
+  _camGoalDist = boundedDistance;
   _camIsFlying = true;
 }
 
@@ -11079,32 +11221,83 @@ function chunkKey(cx, cz) { return `${cx},${cz}`; }
 let _lastChunkCx = null;
 let _lastChunkCz = null;
 let _chunksDirty = true;
+const CHUNK_BUILDS_PER_FRAME = IS_MOBILE_VIEWPORT ? 1 : 2;
+let _pendingChunkLoads = [];
+let _pendingChunkLoadKeys = new Set();
 function markChunksDirty() { _chunksDirty = true; }
+
+function removeChunkDecorationLayer(layer) {
+  if (!layer) return;
+  for (const colliderId of layer.userData?.colliderIds || []) removeBody(colliderId);
+  decorGroup?.remove(layer);
+  layer.traverse?.((object) => {
+    if (object?.isMesh && object.userData?.mergedStaticMeshes) object.geometry?.dispose?.();
+  });
+}
 
 function updateChunks() {
   const cx = Math.floor(camTarget.x / CHUNK_W);
   const cz = Math.floor(camTarget.z / CHUNK_W);
-  if (!_chunksDirty && cx === _lastChunkCx && cz === _lastChunkCz) return;
-  _lastChunkCx = cx;
-  _lastChunkCz = cz;
-  _chunksDirty = false;
-  for (let dz = -LOAD_R; dz <= LOAD_R; dz++) {
-    for (let dx = -LOAD_R; dx <= LOAD_R; dx++) {
-      const key = chunkKey(cx + dx, cz + dz);
-      if (!loadedChunks.has(key)) createChunk(cx + dx, cz + dz);
+  const centerChanged = cx !== _lastChunkCx || cz !== _lastChunkCz;
+  if (_chunksDirty || centerChanged) {
+    _lastChunkCx = cx;
+    _lastChunkCz = cz;
+    _chunksDirty = false;
+
+    // Creating every newly exposed edge chunk in one animation frame caused
+    // visible pan hitches. Queue the nearest work first and amortize geometry
+    // creation over a few frames while the wider retention ring fills the gap.
+    const desired = [];
+    for (let dz = -LOAD_R; dz <= LOAD_R; dz++) {
+      for (let dx = -LOAD_R; dx <= LOAD_R; dx++) {
+        const nextCx = cx + dx;
+        const nextCz = cz + dz;
+        if (!chunkIntersectsWorldBounds(nextCx, nextCz, CHUNK_W)) continue;
+        const key = chunkKey(nextCx, nextCz);
+        if (!loadedChunks.has(key)) desired.push({ cx: nextCx, cz: nextCz, key, distance: dx * dx + dz * dz });
+      }
+    }
+    desired.sort((a, b) => a.distance - b.distance || a.cz - b.cz || a.cx - b.cx);
+    _pendingChunkLoads = desired;
+    _pendingChunkLoadKeys = new Set(desired.map(item => item.key));
+
+    for (const [key, c] of loadedChunks) {
+      if (!chunkIntersectsWorldBounds(c.cx, c.cz, CHUNK_W)
+        || Math.max(Math.abs(c.cx - cx), Math.abs(c.cz - cz)) > LOAD_R + 2) {
+        terrainGroup.remove(c.mesh);
+        removeChunkDecorationLayer(c.decors);
+        c.mesh.geometry?.dispose();
+        loadedChunks.delete(key);
+      }
     }
   }
-  for (const [key, c] of loadedChunks) {
-    if (Math.max(Math.abs(c.cx - cx), Math.abs(c.cz - cz)) > LOAD_R + 2) {
-      terrainGroup.remove(c.mesh);
-      if (c.decors) decorGroup.remove(c.decors);
-      c.mesh.geometry?.dispose();
-      loadedChunks.delete(key);
-    }
+
+  let built = 0;
+  while (_pendingChunkLoads.length && built < CHUNK_BUILDS_PER_FRAME) {
+    const next = _pendingChunkLoads.shift();
+    _pendingChunkLoadKeys.delete(next.key);
+    if (loadedChunks.has(next.key)) continue;
+    if (Math.max(Math.abs(next.cx - cx), Math.abs(next.cz - cz)) > LOAD_R) continue;
+    createChunk(next.cx, next.cz);
+    built++;
   }
 }
 
+function refreshChunkTerrainFlags(data) {
+  if (!data) return;
+  let hasWater = false;
+  let allWater = Array.isArray(data.terrain) && data.terrain.length > 0;
+  for (const type of data.terrain || []) {
+    if (type === TERRAIN.WATER) hasWater = true;
+    else allWater = false;
+  }
+  data.hasWater = hasWater;
+  data.allWater = hasWater && allWater;
+  data.terrainFlagsDirty = false;
+}
+
 function createChunk(cx, cz) {
+  if (!chunkIntersectsWorldBounds(cx, cz, CHUNK_W)) return;
   const key = chunkKey(cx, cz);
   if (loadedChunks.has(key)) return;
   const terrain = new Array(CHUNK * CHUNK).fill(TERRAIN.GRASS);
@@ -11112,10 +11305,12 @@ function createChunk(cx, cz) {
   terrainGroup.add(mesh);
   const decors = buildChunkDecorations(terrain, cx, cz);
   decorGroup.add(decors);
-  const data = { cx, cz, terrain, mesh, decors, dirty: false };
+  const data = { cx, cz, terrain, mesh, decors, dirty: false, hasWater: false, allWater: false, terrainFlagsDirty: false };
   loadedChunks.set(key, data);
 
   fetchChunk(cx, cz).then(async d => {
+    if (loadedChunks.get(key) !== data) return;
+    const priorTerrain = data.terrain.slice();
     if (d && d.terrain) {
       data.terrain = d.terrain;
     }
@@ -11126,7 +11321,11 @@ function createChunk(cx, cz) {
     // visible chunk just because road terrain was derived from /api/streets.
     await withWorldAutosaveSuppressed(async () => _repaintStreetTerrainForChunk(cx, cz));
     data.dirty = false;
-    rebuildChunk(data);
+    const terrainChanged = data.terrain !== priorTerrain
+      || data.terrain.length !== priorTerrain.length
+      || data.terrain.some((value, index) => value !== priorTerrain[index]);
+    if (terrainChanged) rebuildChunk(data);
+    else refreshChunkTerrainFlags(data);
   });
 }
 
@@ -11135,15 +11334,24 @@ function rebuildChunk(data) {
   data.mesh.geometry?.dispose();
   data.mesh = buildChunkMesh(data.terrain, data.cx, data.cz);
   terrainGroup.add(data.mesh);
-  if (data.decors) decorGroup.remove(data.decors);
+  removeChunkDecorationLayer(data.decors);
   data.decors = buildChunkDecorations(data.terrain, data.cx, data.cz);
   decorGroup.add(data.decors);
+  refreshChunkTerrainFlags(data);
 }
 
 function buildChunkMesh(terrain, cx, cz) {
   const positions = [], normals = [], colors = [];
   const col = new THREE.Color();
   const tH = 0.2;
+  const chunkMinX = cx * CHUNK_W;
+  const chunkMinZ = cz * CHUNK_W;
+  const roadwayNaturalExclusions = getRoadwayNaturalExclusionRects(
+    chunkMinX,
+    chunkMinZ,
+    chunkMinX + CHUNK_W,
+    chunkMinZ + CHUNK_W,
+  );
 
   for (let tz = 0; tz < CHUNK; tz++) {
     for (let tx = 0; tx < CHUNK; tx++) {
@@ -11154,6 +11362,9 @@ function buildChunkMesh(terrain, cx, cz) {
 
       const x = cx * CHUNK_W + tx * T;
       const z = cz * CHUNK_W + tz * T;
+
+      // Partial edge chunks stop exactly at the temporary 2,000 × 2,000 map.
+      if (!isWorldTileInBounds(x, z, T)) continue;
 
       // Skip terrain tiles under buildings (building floor replaces them)
       if (isInsideBuildingFootprint(x + 0.5, z + 0.5, 0)) continue;
@@ -11229,42 +11440,78 @@ function buildChunkMesh(terrain, cx, cz) {
           x + 0.55, tH + 0.01, z + T, x + 0.45, tH + 0.01, z + T, 0, 1, 0);
       }
 
-      // Terrain variety on grass: rocks (1%) and flowers (0.5%)
-      // Skip decorations inside building footprints
+      // Low-cost ground detail shares one deterministic placement slot. The
+      // slot rate is exactly 30% above the former rock/flower total, while the
+      // mix now includes grass tufts and pebble patches without multiplying
+      // the number of objects or draw calls.
       if (type === TERRAIN.GRASS && !isInsideBuildingFootprint(x, z, 0)) {
         const terrainRng = pseudoRandom(cx * 10007 + cz * 9001 + tx * 31 + tz * 97);
-        if (terrainRng < 0.01) {
-          // Small rock — dark gray tiny box (3 crossed quads)
-          const rx = x + 0.3 + terrainRng * 0.4;
-          const rz = z + 0.3 + pseudoRandom(terrainRng * 13) * 0.4;
-          const rs = 0.12 + terrainRng * 0.1;
-          col.setHex(0x666666);
-          // Top face of rock
-          addQuad(positions, normals, colors, col,
-            rx, tH + rs, rz, rx + rs, tH + rs, rz,
-            rx + rs, tH + rs, rz + rs, rx, tH + rs, rz + rs, 0, 1, 0);
-          // Front face
-          col.setHex(0x555555);
-          addQuad(positions, normals, colors, col,
-            rx, tH, rz + rs, rx + rs, tH, rz + rs,
-            rx + rs, tH + rs, rz + rs, rx, tH + rs, rz + rs, 0, 0, 1);
-        } else if (terrainRng < 0.015) {
-          // Flower — tiny colored dot (cross of 2 quads)
-          const flowerColors = [0xf44336, 0xffeb3b, 0x9c27b0, 0xffffff, 0xff69b4];
-          const fRng = pseudoRandom(terrainRng * 997);
-          col.setHex(flowerColors[Math.floor(fRng * flowerColors.length)]);
-          const fx = x + 0.2 + fRng * 0.6;
-          const fz = z + 0.2 + pseudoRandom(fRng * 7) * 0.6;
-          const fs = 0.1;
-          // Flat flower face (X quad)
-          addQuad(positions, normals, colors, col,
-            fx - fs, tH + 0.05, fz, fx + fs, tH + 0.05, fz,
-            fx + fs, tH + 0.05, fz + fs * 0.5, fx - fs, tH + 0.05, fz + fs * 0.5, 0, 1, 0);
-          // Green stem/center
-          col.setHex(0x4caf50);
-          addQuad(positions, normals, colors, col,
-            fx, tH + 0.01, fz - fs * 0.5, fx + fs * 0.3, tH + 0.01, fz - fs * 0.5,
-            fx + fs * 0.3, tH + 0.04, fz + fs, fx, tH + 0.04, fz + fs, 0, 1, 0);
+        if (terrainRng < NATURAL_DENSITIES.terrainDetail) {
+          const detailUnit = terrainRng / NATURAL_DENSITIES.terrainDetail;
+          const detailKind = selectWeightedNaturalKind(detailUnit, TERRAIN_DETAIL_MIX);
+          const detailRng = pseudoRandom(cx * 17011 + cz * 13007 + tx * 71 + tz * 149);
+          const rx = x + 0.2 + detailRng * 0.55;
+          const rz = z + 0.2 + pseudoRandom(detailRng * 313) * 0.55;
+          if (naturalAssetOverlapsRoadway(rx, rz, 'terrainDetail', roadwayNaturalExclusions)) continue;
+          if (detailKind === 'small-stone') {
+            // Raised, irregular rocks replace the former flat square slabs.
+            // They are still baked into the terrain buffer, preserving the
+            // one-mesh-per-chunk rendering path.
+            const rockCount = 2 + Math.floor(detailRng * 2);
+            for (let rockIndex = 0; rockIndex < rockCount; rockIndex++) {
+              const rockRng = pseudoRandom(detailRng * 1291 + rockIndex * 83);
+              const rockX = rx + (rockRng - 0.5) * 0.38;
+              const rockZ = rz + (pseudoRandom(rockRng * 719) - 0.5) * 0.38;
+              addTerrainRockMound(
+                positions, normals, colors, col,
+                rockX, tH + 0.008, rockZ,
+                0.055 + rockRng * 0.055,
+                0.075 + pseudoRandom(rockRng * 419) * 0.09,
+                rockRng,
+              );
+            }
+          } else if (detailKind === 'wildflowers') {
+            const flowerColors = [0xf44336, 0xffeb3b, 0x9c27b0, 0xffffff, 0xff69b4];
+            const bloomCount = 2 + Math.floor(detailRng * 3);
+            for (let bloomIndex = 0; bloomIndex < bloomCount; bloomIndex++) {
+              const bloomRng = pseudoRandom(detailRng * 1877 + bloomIndex * 101);
+              const bloomX = rx + (bloomRng - 0.5) * 0.52;
+              const bloomZ = rz + (pseudoRandom(bloomRng * 977) - 0.5) * 0.52;
+              addTerrainFlowerBloom(
+                positions, normals, colors, col,
+                bloomX,
+                tH + 0.09 + pseudoRandom(bloomRng * 503) * 0.09,
+                bloomZ,
+                0.032 + bloomRng * 0.018,
+                flowerColors[(bloomIndex + Math.floor(detailRng * flowerColors.length)) % flowerColors.length],
+                bloomIndex + Math.floor(detailRng * NATURAL_FLOWER_VARIANTS.length),
+              );
+            }
+          } else if (detailKind === 'grass-tuft') {
+            const bladeH = 0.10 + detailRng * 0.08;
+            for (let blade = 0; blade < 3; blade++) {
+              const offset = (blade - 1) * 0.055;
+              col.setHex(blade % 2 ? 0x3f7d35 : 0x5a9f42);
+              addQuad(positions, normals, colors, col,
+                rx + offset - 0.018, tH + 0.005, rz, rx + offset + 0.018, tH + 0.005, rz,
+                rx + offset + 0.006, tH + bladeH, rz, rx + offset - 0.006, tH + bladeH, rz, 0, 0, 1);
+            }
+          } else {
+            // Pebble patches use the same raised geometry as small stones, but
+            // at a tighter scale and a wider irregular scatter.
+            for (let pebble = 0; pebble < 4; pebble++) {
+              const pRng = pseudoRandom(detailRng * 997 + pebble * 37);
+              const px = rx + (pRng - 0.5) * 0.34;
+              const pz = rz + (pseudoRandom(pRng * 431) - 0.5) * 0.34;
+              addTerrainRockMound(
+                positions, normals, colors, col,
+                px, tH + 0.006, pz,
+                0.035 + pRng * 0.032,
+                0.04 + pseudoRandom(pRng * 283) * 0.05,
+                pRng + pebble * 0.17,
+              );
+            }
+          }
         }
       }
     }
@@ -11287,6 +11534,93 @@ function addQuad(pos, nor, col, color, x1,y1,z1, x2,y2,z2, x3,y3,z3, x4,y4,z4, n
   for (let i = 0; i < 6; i++) { nor.push(nx, ny, nz); col.push(color.r, color.g, color.b); }
 }
 
+function addTriangle(pos, nor, colors, color, ax, ay, az, bx, by, bz, cx, cy, cz) {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const abz = bz - az;
+  const acx = cx - ax;
+  const acy = cy - ay;
+  const acz = cz - az;
+  let nx = aby * acz - abz * acy;
+  let ny = abz * acx - abx * acz;
+  let nz = abx * acy - aby * acx;
+  const length = Math.hypot(nx, ny, nz) || 1;
+  nx /= length;
+  ny /= length;
+  nz /= length;
+  pos.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+  for (let i = 0; i < 3; i++) {
+    nor.push(nx, ny, nz);
+    colors.push(color.r, color.g, color.b);
+  }
+}
+
+function addTerrainRockMound(pos, nor, colors, color, x, baseY, z, radius, height, seed) {
+  const palette = [0x747b79, 0x858b87, 0x626967, 0x969a94];
+  const segments = 5;
+  const rotation = pseudoRandom(seed * 631 + 17) * Math.PI * 2;
+  const apexX = x + (pseudoRandom(seed * 883 + 29) - 0.5) * radius * 0.45;
+  const apexZ = z + (pseudoRandom(seed * 947 + 41) - 0.5) * radius * 0.45;
+  for (let segment = 0; segment < segments; segment++) {
+    const angleA = rotation + (segment / segments) * Math.PI * 2;
+    const angleB = rotation + ((segment + 1) / segments) * Math.PI * 2;
+    const radiusA = radius * (0.76 + pseudoRandom(seed * 1117 + segment * 47) * 0.32);
+    const radiusB = radius * (0.76 + pseudoRandom(seed * 1117 + (segment + 1) * 47) * 0.32);
+    color.setHex(palette[(segment + Math.floor(seed * 100)) % palette.length]);
+    addTriangle(
+      pos, nor, colors, color,
+      x + Math.cos(angleA) * radiusA, baseY, z + Math.sin(angleA) * radiusA,
+      apexX, baseY + height * (0.82 + pseudoRandom(seed * 1213 + segment * 31) * 0.18), apexZ,
+      x + Math.cos(angleB) * radiusB, baseY, z + Math.sin(angleB) * radiusB,
+    );
+  }
+}
+
+function addTerrainFlowerBloom(pos, nor, colors, color, x, bloomY, z, radius, bloomColor, variantIndex) {
+  const petalCount = variantIndex % 2 ? 5 : 6;
+  const rotation = (variantIndex % NATURAL_FLOWER_VARIANTS.length) * 0.47;
+  const stemBaseY = bloomY - 0.10;
+  color.setHex(variantIndex % 2 ? 0x377f3f : 0x4b9849);
+  addQuad(pos, nor, colors, color,
+    x - 0.009, stemBaseY, z, x + 0.009, stemBaseY, z,
+    x + 0.009, bloomY, z, x - 0.009, bloomY, z, 0, 0, 1);
+  addQuad(pos, nor, colors, color,
+    x, stemBaseY, z - 0.009, x, bloomY, z - 0.009,
+    x, bloomY, z + 0.009, x, stemBaseY, z + 0.009, 1, 0, 0);
+
+  color.setHex(bloomColor);
+  for (let petal = 0; petal < petalCount; petal++) {
+    const angle = rotation + (petal / petalCount) * Math.PI * 2;
+    const sideAngle = angle + Math.PI / 2;
+    const innerRadius = radius * 0.25;
+    const outerRadius = radius * (1.65 + (variantIndex % 3) * 0.14);
+    const halfWidth = radius * (0.52 + (variantIndex % 2) * 0.10);
+    const ix = x + Math.cos(angle) * innerRadius;
+    const iz = z + Math.sin(angle) * innerRadius;
+    const ox = x + Math.cos(angle) * outerRadius;
+    const oz = z + Math.sin(angle) * outerRadius;
+    const lx = x + Math.cos(angle) * radius + Math.cos(sideAngle) * halfWidth;
+    const lz = z + Math.sin(angle) * radius + Math.sin(sideAngle) * halfWidth;
+    const rx = x + Math.cos(angle) * radius - Math.cos(sideAngle) * halfWidth;
+    const rz = z + Math.sin(angle) * radius - Math.sin(sideAngle) * halfWidth;
+    addTriangle(pos, nor, colors, color, ix, bloomY, iz, lx, bloomY, lz, ox, bloomY, oz);
+    addTriangle(pos, nor, colors, color, ix, bloomY, iz, ox, bloomY, oz, rx, bloomY, rz);
+  }
+
+  color.setHex(variantIndex % 3 === 0 ? 0xfff59d : 0xffd54f);
+  const centerRadius = radius * 0.48;
+  for (let center = 0; center < 6; center++) {
+    const angleA = (center / 6) * Math.PI * 2;
+    const angleB = ((center + 1) / 6) * Math.PI * 2;
+    addTriangle(
+      pos, nor, colors, color,
+      x, bloomY + 0.002, z,
+      x + Math.cos(angleB) * centerRadius, bloomY + 0.002, z + Math.sin(angleB) * centerRadius,
+      x + Math.cos(angleA) * centerRadius, bloomY + 0.002, z + Math.sin(angleA) * centerRadius,
+    );
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // CHUNK DECORATIONS (trees, lampposts)
 // ═══════════════════════════════════════════════════════════════
@@ -11303,44 +11637,61 @@ function isInsideBuildingFootprint(wx, wz, padding) {
 function buildChunkDecorations(terrain, cx, cz) {
   const g = new THREE.Group();
   const seed = cx * 1000 + cz;
+  const colliderIds = [];
+  const naturalCounts = { trees: 0, grassPatches: 0, largeRocks: 0 };
+  const chunkMinX = cx * CHUNK_W;
+  const chunkMinZ = cz * CHUNK_W;
+  const roadwayNaturalExclusions = getRoadwayNaturalExclusionRects(
+    chunkMinX,
+    chunkMinZ,
+    chunkMinX + CHUNK_W,
+    chunkMinZ + CHUNK_W,
+  );
+  g.userData.colliderIds = colliderIds;
+  g.userData.naturalCounts = naturalCounts;
 
   for (let tz = 0; tz < CHUNK; tz++) {
     for (let tx = 0; tx < CHUNK; tx++) {
       const type = terrain[tz * CHUNK + tx];
       const wx = cx * CHUNK_W + tx * T;
       const wz = cz * CHUNK_W + tz * T;
+      if (!isWorldTileInBounds(wx, wz, T)) continue;
       const rng = pseudoRandom(seed + tx * 31 + tz * 97);
 
-      // Trees on grass — skip tiles inside building footprints (reduced density for performance with larger trees)
-      if (type === TERRAIN.GRASS && rng < 0.006) {
-        if (!isInsideBuildingFootprint(wx, wz, 2)) {
-          g.add(makeTree(wx + 0.5, wz + 0.5, rng));
+      // Tree density is exactly 30% above the previous 0.006 rate. The richer
+      // five-style asset is still merged into the chunk's static draw batch.
+      if (type === TERRAIN.GRASS && rng < NATURAL_DENSITIES.tree) {
+        const treeX = wx + 0.5;
+        const treeZ = wz + 0.5;
+        if (!isInsideBuildingFootprint(wx, wz, 2) && !naturalAssetOverlapsRoadway(treeX, treeZ, 'tree', roadwayNaturalExclusions)) {
+          g.add(makeTree(treeX, treeZ, rng));
+          naturalCounts.trees++;
           // Physics: add tree collider
           if (isPhysicsReady()) {
-            addDecorationCollider(`tree_${cx}_${cz}_${tx}_${tz}`, 'tree', wx + 0.5, wz + 0.5);
+            const colliderId = `tree_${cx}_${cz}_${tx}_${tz}`;
+            addDecorationCollider(colliderId, 'tree', treeX, treeZ);
+            colliderIds.push(colliderId);
           }
         }
       }
 
-      // Small flowers/rocks on grass (skip building interiors)
+      // One 30%-denser detail slot per eligible tile. Weighted variants add
+      // richer grass patches and stones without stacking
+      // multiple procedural objects on the same tile.
       if (type === TERRAIN.GRASS && !isInsideBuildingFootprint(wx, wz, 1)) {
-        const rng2 = pseudoRandom(seed + tx * 53 + tz * 139);
-        if (rng2 < 0.002) {
-          // Flower cluster
-          const flowerColors = [0xff5252, 0xffeb3b, 0xff80ab, 0xb388ff, 0x80cbc4];
-          const fc = flowerColors[Math.floor(rng2 * flowerColors.length * 333) % flowerColors.length];
-          const flower = new THREE.Mesh(_sphereGeo, getMat(fc));
-          flower.scale.set(0.08, 0.06, 0.08);
-          flower.position.set(wx + 0.5, 0.03, wz + 0.5);
-          g.add(flower);
-        }
-        if (rng2 > 0.995) {
-          // Small rock
-          const rock = new THREE.Mesh(_boxGeo, getMat(0x9e9e9e));
-          rock.scale.set(0.12 + rng * 0.1, 0.06, 0.1 + rng * 0.08);
-          rock.position.set(wx + 0.5, 0.03, wz + 0.5);
-          rock.rotation.y = rng * Math.PI;
-          g.add(rock);
+        const detailRoll = pseudoRandom(seed + tx * 53 + tz * 139);
+        if (detailRoll < NATURAL_DENSITIES.chunkDetail) {
+          const kind = selectWeightedNaturalKind(detailRoll / NATURAL_DENSITIES.chunkDetail, CHUNK_DETAIL_MIX);
+          const detailRng = pseudoRandom(seed * 17 + tx * 211 + tz * 307);
+          const dx = wx + 0.22 + pseudoRandom(detailRng * 701) * 0.56;
+          const dz = wz + 0.22 + pseudoRandom(detailRng * 907) * 0.56;
+          if (kind === 'grass-patch' && !naturalAssetOverlapsRoadway(dx, dz, 'grassPatch', roadwayNaturalExclusions)) {
+            g.add(makeNaturalGrassPatch(dx, dz, detailRng));
+            naturalCounts.grassPatches++;
+          } else if (kind === 'large-rock' && !naturalAssetOverlapsRoadway(dx, dz, 'rock', roadwayNaturalExclusions)) {
+            g.add(makeNaturalRockCluster(dx, dz, detailRng));
+            naturalCounts.largeRocks++;
+          }
         }
       }
 
@@ -11355,6 +11706,13 @@ function buildChunkDecorations(terrain, cx, cz) {
   const placedKey = chunkDecorationKey(cx, cz);
   const placed = placedDecorations.get(placedKey) || [];
   for (const pd of placed) {
+    if (!isWorldPositionInBounds(pd.wx + 0.5, pd.wz + 0.5)) continue;
+    if (DECORATION_DEFS[pd.type]?.natural && naturalAssetOverlapsRoadway(
+      pd.wx + 0.5,
+      pd.wz + 0.5,
+      pd.type,
+      roadwayNaturalExclusions,
+    )) continue;
     // Convert world position to local tile index to check terrain type
     const ptx = Math.floor((pd.wx - cx * CHUNK_W) / T);
     const ptz = Math.floor((pd.wz - cz * CHUNK_W) / T);
@@ -11369,9 +11727,12 @@ function buildChunkDecorations(terrain, cx, cz) {
       obj.userData.placedDecoration = { type: pd.type, wx: pd.wx, wz: pd.wz, chunkKey: placedKey };
     });
     g.add(placedDecorationMesh);
-      // Physics: add placed decoration collider
-      if (isPhysicsReady()) {
-        addDecorationCollider(`pdecor_${cx}_${cz}_${pd.wx}_${pd.wz}`, pd.type, pd.wx + 0.5, pd.wz + 0.5);
+      // Physics: only solid placeables receive bodies. Decorative grass stays
+      // visual so added variety does not expand the physics load.
+      if (isPhysicsReady() && DECORATION_DEFS[pd.type]?.solid !== false) {
+        const colliderId = `pdecor_${cx}_${cz}_${pd.wx}_${pd.wz}`;
+        addDecorationCollider(colliderId, pd.type, pd.wx + 0.5, pd.wz + 0.5);
+        colliderIds.push(colliderId);
       }
   }
 
@@ -11383,96 +11744,233 @@ function pseudoRandom(s) {
   return x - Math.floor(x);
 }
 
-function makeTree(x, z, rng) {
+const NATURAL_TREE_PALETTES = Object.freeze([
+  Object.freeze({ trunk: 0x6d4c41, trunkDark: 0x4e342e, leaf: 0x2f7d3c, leafMid: 0x43a047, leafLight: 0x66bb6a }),
+  Object.freeze({ trunk: 0x795548, trunkDark: 0x5d4037, leaf: 0x246b35, leafMid: 0x388e3c, leafLight: 0x7cb342 }),
+  Object.freeze({ trunk: 0x704214, trunkDark: 0x4b2d16, leaf: 0x1f6f4a, leafMid: 0x2e8b57, leafLight: 0x6fba62 }),
+]);
+
+function getCachedNaturalTemplate(key, create) {
+  if (!_naturalAssetTemplateCache.has(key)) {
+    const template = create();
+    template.userData.naturalAssetTemplate = key;
+    _naturalAssetTemplateCache.set(key, template);
+  }
+  return _naturalAssetTemplateCache.get(key);
+}
+
+function addNaturalRootFlares(group, trunkDark, radius = 0.22) {
+  for (let i = 0; i < 4; i++) {
+    const angle = (Math.PI * 2 * i) / 4;
+    const root = posVox(Math.cos(angle) * radius, 0.08, Math.sin(angle) * radius, 0.42, 0.09, 0.09, trunkDark);
+    root.rotation.y = -angle;
+    group.add(root);
+  }
+}
+
+function buildNaturalTreeTemplate(style, palette) {
   const g = new THREE.Group();
-  const h = 0.8 + rng * 0.6; // base height (scaled up at end)
-  // 5 tree variants for visual variety
-  const treeType = Math.floor(rng * 500) % 5;
+  const addTrunk = (radius, height, y = height / 2, color = palette.trunk) => {
+    const trunk = cyl(radius, height, color);
+    trunk.position.set(0, y, 0);
+    g.add(trunk);
+    return trunk;
+  };
 
-  // Leaf color variety
-  const leafColors = [0x4caf50, 0x43a047, 0x66bb6a, 0x2e7d32, 0x81c784];
-  const darkLeaf = [0x388e3c, 0x1b5e20, 0x558b2f, 0x33691e, 0x4caf50];
-  const trunkColors = [0x8d6e63, 0x795548, 0x6d4c41, 0xa1887f, 0x5d4037];
-  const lc = leafColors[treeType];
-  const dlc = darkLeaf[treeType];
-  const tc = trunkColors[treeType];
-
-  if (treeType === 0) {
-    // Pine tree — tall cone with 2-3 tiers
-    const trunk = cyl(0.05, h * 0.7, tc);
-    trunk.position.set(0, h * 0.35, 0);
-    g.add(trunk);
-    const c1 = cone(0.4, h * 0.5, lc);
-    c1.position.set(0, h * 0.6 + 0.25, 0);
-    g.add(c1);
-    const c2 = cone(0.3, h * 0.4, dlc);
-    c2.position.set(0, h * 0.85 + 0.25, 0);
-    g.add(c2);
-    if (h > 1.0) {
-      const c3 = cone(0.2, h * 0.3, lc);
-      c3.position.set(0, h * 1.05 + 0.25, 0);
-      g.add(c3);
-    }
-  } else if (treeType === 1) {
-    // Round deciduous tree — sphere canopy
-    const trunk = cyl(0.08, h * 0.5, tc);
-    trunk.position.set(0, h * 0.25, 0);
-    g.add(trunk);
-    const canopy = sphere(0.45 + rng * 0.15, lc);
-    canopy.position.set(0, h * 0.55 + 0.3, 0);
-    g.add(canopy);
-  } else if (treeType === 2) {
-    // Bushy tree — 3 overlapping spheres
-    const trunk = cyl(0.06, h * 0.45, tc);
-    trunk.position.set(0, h * 0.22, 0);
-    g.add(trunk);
-    const s1 = sphere(0.3, lc);
-    s1.position.set(-0.12, h * 0.5 + 0.2, 0.08);
-    g.add(s1);
-    const s2 = sphere(0.35, dlc);
-    s2.position.set(0.1, h * 0.55 + 0.25, -0.05);
-    g.add(s2);
-    const s3 = sphere(0.25, lc);
-    s3.position.set(0, h * 0.65 + 0.3, 0.1);
-    g.add(s3);
-  } else if (treeType === 3) {
-    // Cypress — tall and narrow
-    const trunk = cyl(0.04, h * 0.8, tc);
-    trunk.position.set(0, h * 0.4, 0);
-    g.add(trunk);
-    const canopy = cyl(0.15, h * 0.9, lc);
-    canopy.position.set(0, h * 0.5 + 0.2, 0);
-    g.add(canopy);
-    // Pointy top
-    const top = cone(0.12, h * 0.25, dlc);
-    top.position.set(0, h * 0.95 + 0.25, 0);
-    g.add(top);
-  } else {
-    // Palm tree — curved trunk + flat leaf clusters
-    const trunk = cyl(0.045, h * 0.7, 0xa1887f);
-    trunk.position.set(0, h * 0.35, 0);
-    trunk.rotation.z = 0.05;
-    g.add(trunk);
-    // Coconut cluster
-    const coconut = sphere(0.06, 0x8d6e63);
-    coconut.position.set(0, h * 0.7 + 0.1, 0);
-    g.add(coconut);
-    // Palm fronds (4 flat ellipses radiating out)
+  if (style.id === 'pine') {
+    addNaturalRootFlares(g, palette.trunkDark, 0.18);
+    addTrunk(0.16, 3.4);
+    const tiers = [
+      [1.72, 1.12, 1.08, palette.leaf],
+      [2.22, 0.96, 1.02, palette.leafMid],
+      [2.70, 0.78, 0.92, palette.leaf],
+      [3.12, 0.60, 0.80, palette.leafMid],
+      [3.48, 0.42, 0.66, palette.leafLight],
+      [3.78, 0.25, 0.48, palette.leafLight],
+    ];
+    tiers.forEach(([y, radius, height, color], index) => {
+      const bough = cone(radius, height, color);
+      bough.position.set(0, y, 0);
+      bough.rotation.y = index * 0.23;
+      g.add(bough);
+    });
+  } else if (style.id === 'round') {
+    addNaturalRootFlares(g, palette.trunkDark, 0.25);
+    addTrunk(0.22, 3.18);
+    [[-0.34, 2.52, 0.02, -0.48], [0.34, 2.67, -0.04, 0.48], [0.04, 2.80, -0.30, 0.10]].forEach(([bx, by, bz, tilt]) => {
+      const branch = cyl(0.085, 1.10, palette.trunk);
+      branch.position.set(bx * 0.52, by, bz * 0.52);
+      branch.rotation.z = tilt;
+      branch.rotation.x = bz;
+      g.add(branch);
+    });
+    const crowns = [
+      [-0.66, 3.50, 0.12, 0.92, palette.leaf],
+      [0.00, 3.68, -0.49, 0.98, palette.leafMid],
+      [0.70, 3.50, 0.08, 0.90, palette.leaf],
+      [-0.29, 4.08, 0.34, 0.87, palette.leafLight],
+      [0.39, 4.12, 0.30, 0.85, palette.leafMid],
+      [0.05, 4.56, -0.07, 0.76, palette.leafLight],
+    ];
+    crowns.forEach(([cx, cy, cz, radius, color]) => {
+      const crown = sphere(radius, color);
+      crown.position.set(cx, cy, cz);
+      crown.scale.y *= 0.98;
+      g.add(crown);
+    });
+  } else if (style.id === 'broadleaf') {
+    addNaturalRootFlares(g, palette.trunkDark, 0.27);
+    addTrunk(0.24, 3.34);
     for (let i = 0; i < 4; i++) {
-      const frond = new THREE.Mesh(_boxGeo, getMat(0x66bb6a));
-      frond.scale.set(0.5, 0.03, 0.15);
-      const angle = (i / 4) * Math.PI * 2;
-      frond.position.set(Math.cos(angle) * 0.3, h * 0.72 + 0.1, Math.sin(angle) * 0.3);
-      frond.rotation.y = angle;
-      frond.rotation.z = -0.4;
-      g.add(frond);
+      const angle = (i / 4) * Math.PI * 2 + 0.35;
+      const branch = cyl(0.09, 1.32, palette.trunk);
+      branch.position.set(Math.cos(angle) * 0.29, 2.82, Math.sin(angle) * 0.29);
+      branch.rotation.z = Math.cos(angle) * 0.58;
+      branch.rotation.x = -Math.sin(angle) * 0.58;
+      g.add(branch);
+    }
+    const crowns = [
+      [-0.82, 3.66, 0.00, 0.82, palette.leaf],
+      [0.82, 3.73, -0.02, 0.86, palette.leafMid],
+      [0.00, 3.63, -0.77, 0.80, palette.leaf],
+      [0.02, 3.66, 0.79, 0.82, palette.leafMid],
+      [-0.43, 4.20, 0.32, 0.81, palette.leafLight],
+      [0.43, 4.26, -0.23, 0.85, palette.leafMid],
+      [0.00, 4.68, 0.09, 0.76, palette.leafLight],
+    ];
+    crowns.forEach(([cx, cy, cz, radius, color], index) => {
+      const crown = sphere(radius, color);
+      crown.position.set(cx, cy, cz);
+      crown.scale.set(1.15, index < 4 ? 0.90 : 0.96, 1.02);
+      g.add(crown);
+    });
+  } else if (style.id === 'cypress') {
+    addNaturalRootFlares(g, palette.trunkDark, 0.15);
+    addTrunk(0.13, 4.0);
+    const tiers = [
+      [1.38, 0.48, 1.50, palette.leaf],
+      [2.18, 0.43, 1.70, palette.leafMid],
+      [3.00, 0.35, 1.54, palette.leaf],
+      [3.72, 0.27, 1.20, palette.leafLight],
+      [4.28, 0.18, 0.82, palette.leafLight],
+    ];
+    tiers.forEach(([y, radius, height, color]) => {
+      const foliage = cone(radius, height, color);
+      foliage.position.set(0, y, 0);
+      g.add(foliage);
+    });
+  } else {
+    // Segmented, gently leaning trunk plus eight multi-part fronds. These are
+    // still only shared low-poly boxes/cylinders and batch with map foliage.
+    const palmTrunk = [0.00, 0.05, 0.12, 0.20, 0.27];
+    palmTrunk.forEach((offset, index) => {
+      const segment = cyl(0.16 - index * 0.012, 0.92, index % 2 ? 0x9a6b3f : 0xa97b4f);
+      segment.position.set(offset, 0.46 + index * 0.82, 0);
+      segment.rotation.z = -0.07;
+      g.add(segment);
+      const band = cyl(0.17 - index * 0.012, 0.07, palette.trunkDark);
+      band.position.set(offset + 0.03, 0.84 + index * 0.82, 0);
+      band.rotation.z = -0.07;
+      g.add(band);
+    });
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      for (let segmentIndex = 0; segmentIndex < 3; segmentIndex++) {
+        const radial = 0.44 + segmentIndex * 0.42;
+        const frond = posVox(
+          0.30 + Math.cos(angle) * radial,
+          4.14 - segmentIndex * 0.11,
+          Math.sin(angle) * radial,
+          0.50 - segmentIndex * 0.055,
+          0.075,
+          0.22 - segmentIndex * 0.035,
+          segmentIndex === 2 ? palette.leafLight : (i % 2 ? palette.leafMid : palette.leaf),
+        );
+        frond.rotation.y = -angle;
+        frond.rotation.z = -0.08 * segmentIndex;
+        g.add(frond);
+      }
+    }
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2;
+      const coconut = sphere(0.12, 0x6d4c2f);
+      coconut.position.set(0.30 + Math.cos(angle) * 0.18, 3.94, Math.sin(angle) * 0.18);
+      g.add(coconut);
     }
   }
+  return g;
+}
 
-  // Scale up to be proportional to buildings (WALL_H=3.0, trees should be 2.5-5.0 tall)
-  const baseScale = 2.5 + rng * 1.5; // 2.5x-4.0x base scale
-  g.scale.setScalar(baseScale);
-  g.position.set(x, 0, z);
+function makeTree(x, z, rng) {
+  const seed = Number.isFinite(Number(rng)) ? Number(rng) : pseudoRandom(x * 31.7 + z * 97.3 + 42);
+  const style = selectTreeStyle(pseudoRandom(seed * 9137 + 17));
+  const paletteIndex = Math.floor(pseudoRandom(seed * 6271 + 29) * NATURAL_TREE_PALETTES.length) % NATURAL_TREE_PALETTES.length;
+  const templateKey = `tree:${style.id}:${paletteIndex}`;
+  const template = getCachedNaturalTemplate(templateKey, () => buildNaturalTreeTemplate(style, NATURAL_TREE_PALETTES[paletteIndex]));
+  const g = template.clone(true);
+  const baseSize = 0.86 + pseudoRandom(seed * 4219 + 53) * 0.30;
+  const size = baseSize * (TREE_STYLE_SCALE_MULTIPLIERS[style.id] || 1);
+  g.scale.setScalar(size);
+  g.rotation.y = pseudoRandom(seed * 3259 + 71) * Math.PI * 2;
+  g.position.set(x, 0.20, z);
+  g.userData.naturalAsset = 'tree';
+  g.userData.treeStyle = style.id;
+  g.userData.treeStyleLabel = style.label;
+  return g;
+}
+
+function buildNaturalGrassPatchTemplate(paletteIndex) {
+  const g = new THREE.Group();
+  const colors = paletteIndex % 2 ? [0x397a35, 0x579b42, 0x78ad4d] : [0x2f7131, 0x4f913b, 0x6aa344];
+  for (let i = 0; i < 9; i++) {
+    const angle = (i / 9) * Math.PI * 2;
+    const radius = 0.06 + (i % 3) * 0.075;
+    const bladeH = 0.30 + (i % 4) * 0.065;
+    const blade = posVox(Math.cos(angle) * radius, bladeH / 2, Math.sin(angle) * radius, 0.045, bladeH, 0.035, colors[i % colors.length]);
+    blade.rotation.z = Math.cos(angle) * 0.22;
+    blade.rotation.x = -Math.sin(angle) * 0.22;
+    g.add(blade);
+  }
+  return g;
+}
+
+function makeNaturalGrassPatch(x, z, rng = 0.5) {
+  const paletteIndex = Math.floor(pseudoRandom(rng * 3767 + 11) * 2);
+  const template = getCachedNaturalTemplate(`grass-patch:${paletteIndex}`, () => buildNaturalGrassPatchTemplate(paletteIndex));
+  const g = template.clone(true);
+  const size = 0.70 + pseudoRandom(rng * 2081 + 23) * 0.42;
+  g.scale.setScalar(size);
+  g.rotation.y = pseudoRandom(rng * 4591 + 29) * Math.PI * 2;
+  g.position.set(x, 0.20, z);
+  g.userData.naturalAsset = 'grassPatch';
+  return g;
+}
+
+function buildNaturalRockClusterTemplate(paletteIndex) {
+  const palettes = [[0x737b78, 0x59615e, 0x909793], [0x81786e, 0x625c54, 0x9d9488], [0x6d747b, 0x50575e, 0x8b9298]];
+  const colors = palettes[paletteIndex % palettes.length];
+  const g = new THREE.Group();
+  [[-0.18, 0.20, 0.04, 0.62, 0.42, 0.50], [0.26, 0.15, -0.08, 0.46, 0.30, 0.40], [0.08, 0.10, 0.28, 0.34, 0.21, 0.30]].forEach(([x, y, z, sx, sy, sz], index) => {
+    const rock = new THREE.Mesh(_rockGeo, getMat(colors[index % colors.length]));
+    rock.position.set(x, y, z);
+    rock.scale.set(sx, sy, sz);
+    rock.rotation.set(index * 0.12, index * 0.63, index * 0.08);
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+    g.add(rock);
+  });
+  return g;
+}
+
+function makeNaturalRockCluster(x, z, rng = 0.5) {
+  const paletteIndex = Math.floor(pseudoRandom(rng * 4937 + 31) * 3);
+  const template = getCachedNaturalTemplate(`rock-cluster:${paletteIndex}`, () => buildNaturalRockClusterTemplate(paletteIndex));
+  const g = template.clone(true);
+  const size = 0.78 + pseudoRandom(rng * 2689 + 37) * 0.52;
+  g.scale.setScalar(size);
+  g.rotation.y = pseudoRandom(rng * 5861 + 41) * Math.PI * 2;
+  g.position.set(x, 0.20, z);
+  g.userData.naturalAsset = 'rock';
   return g;
 }
 
@@ -11549,12 +12047,14 @@ function makeFountain(x, z) {
 function makeDecoration(type, x, z, rng) {
   rng = rng ?? pseudoRandom(x * 31.7 + z * 97.3 + 42);
   switch (type) {
-    case 'tree':     return makeTree(x, z, rng);
-    case 'bench':    return makeBench(x, z);
-    case 'lamppost': return makeLamppost(x, z);
-    case 'fence':    return makeFence(x, z);
-    case 'fountain': return makeFountain(x, z);
-    default:         return makeTree(x, z, rng);
+    case 'tree':       return makeTree(x, z, rng);
+    case 'grassPatch': return makeNaturalGrassPatch(x, z, rng);
+    case 'rock':       return makeNaturalRockCluster(x, z, rng);
+    case 'bench':      return makeBench(x, z);
+    case 'lamppost':   return makeLamppost(x, z);
+    case 'fence':      return makeFence(x, z);
+    case 'fountain':   return makeFountain(x, z);
+    default:           return makeTree(x, z, rng);
   }
 }
 
@@ -11575,12 +12075,13 @@ function makeDecorationGhost(type) {
 function chunkDecorationKey(cx, cz) { return `decor_${cx},${cz}`; }
 const placedDecorations = new Map(); // key → [{type,wx,wz}, ...]
 let _placedDecorationsSaveTimer = null;
+let _placedDecorationRoadwayCleanupPending = false;
 
 function normalizePlacedDecoration(decoration) {
   const type = decoration?.type;
   const wx = Number(decoration?.wx ?? decoration?.x);
   const wz = Number(decoration?.wz ?? decoration?.z);
-  if (!type || !Number.isFinite(wx) || !Number.isFinite(wz)) return null;
+  if (!DECORATION_DEFS[type] || !Number.isFinite(wx) || !Number.isFinite(wz)) return null;
   return { type, wx: Math.floor(wx), wz: Math.floor(wz) };
 }
 
@@ -11647,6 +12148,8 @@ function debounceSavePlacedDecorations() {
 }
 
 function addPlacedDecoration(type, wx, wz, { persist = true } = {}) {
+  if (!DECORATION_DEFS[type] || !isWorldTileInBounds(wx, wz, T)) return false;
+  if (DECORATION_DEFS[type].natural && naturalAssetOverlapsRoadway(wx + 0.5, wz + 0.5, type)) return false;
   const cx = Math.floor(wx / CHUNK_W);
   const cz = Math.floor(wz / CHUNK_W);
   const key = chunkDecorationKey(cx, cz);
@@ -11657,6 +12160,7 @@ function addPlacedDecoration(type, wx, wz, { persist = true } = {}) {
   const chunkData = loadedChunks.get(chunkKey(cx, cz));
   if (chunkData) rebuildChunkDecorations(chunkData);
   if (persist) debounceSavePlacedDecorations();
+  return true;
 }
 
 function updateDecorationSelectionPanel() {
@@ -11706,7 +12210,9 @@ function selectPlacedDecoration(meta) {
     _selectedDecorationHelper.renderOrder = 1000;
     scene.add(_selectedDecorationHelper);
   }
-  const radiusScale = decoration.type === 'fountain' ? 1.8 : (decoration.type === 'tree' ? 1.35 : 1);
+  const radiusScale = decoration.type === 'fountain'
+    ? 1.8
+    : (decoration.type === 'tree' ? 2.8 : (decoration.type === 'rock' ? 1.2 : 1));
   _selectedDecorationHelper.scale.setScalar(radiusScale);
   _selectedDecorationHelper.position.set(decoration.wx + 0.5, 0.06, decoration.wz + 0.5);
   updateDecorationSelectionPanel();
@@ -11757,9 +12263,75 @@ function deleteSelectedPlacedDecoration() {
 }
 
 function rebuildChunkDecorations(data) {
-  if (data.decors) decorGroup.remove(data.decors);
+  removeChunkDecorationLayer(data.decors);
   data.decors = buildChunkDecorations(data.terrain, data.cx, data.cz);
   decorGroup.add(data.decors);
+}
+
+function getNaturalWorldDiagnostics() {
+  const counts = { trees: 0, grassPatches: 0, largeRocks: 0 };
+  const treeStyles = Object.fromEntries(TREE_STYLE_DEFS.map(style => [style.id, 0]));
+  const assetSamples = { tree: [], grassPatch: [], rock: [] };
+  let colliderCount = 0;
+  let chunksOutsideBounds = 0;
+  let treesOutsideBounds = 0;
+  let naturalBatchMeshes = 0;
+  let mergedSourceMeshes = 0;
+  let placedDecorationMeshes = 0;
+  for (const chunk of loadedChunks.values()) {
+    if (!chunkIntersectsWorldBounds(chunk.cx, chunk.cz, CHUNK_W)) chunksOutsideBounds++;
+    const chunkCounts = chunk.decors?.userData?.naturalCounts || {};
+    for (const key of Object.keys(counts)) counts[key] += Number(chunkCounts[key] || 0);
+    colliderCount += chunk.decors?.userData?.colliderIds?.length || 0;
+    chunk.decors?.traverse?.(object => {
+      const naturalAsset = object?.userData?.naturalAsset;
+      if (naturalAsset && assetSamples[naturalAsset]?.length < 3) {
+        assetSamples[naturalAsset].push({
+          x: Number(object.position.x.toFixed(3)),
+          z: Number(object.position.z.toFixed(3)),
+        });
+      }
+      const style = object?.userData?.treeStyle;
+      if (style && Object.hasOwn(treeStyles, style)) {
+        treeStyles[style]++;
+        if (!isWorldPositionInBounds(object.position.x, object.position.z)) treesOutsideBounds++;
+      }
+      if (object?.isMesh && object.userData?.mergedStaticMeshes) {
+        naturalBatchMeshes++;
+        mergedSourceMeshes += Number(object.userData.mergedStaticMeshes || 0);
+      }
+      if (object?.isMesh && object.userData?.placedDecoration) placedDecorationMeshes++;
+    });
+  }
+  const cameraLimit = getCameraWorldLimit(camDist, CHUNK_W);
+  return Object.freeze({
+    worldHalfSize: WORLD_HALF_SIZE,
+    worldSize: WORLD_SIZE,
+    density: getNaturalDensitySummary(),
+    densities: { ...NATURAL_DENSITIES },
+    treeScaleMultipliers: { ...TREE_STYLE_SCALE_MULTIPLIERS },
+    flowerVariants: [...NATURAL_FLOWER_VARIANTS],
+    terrainDetailGeometry: 'raised-rock-mounds-and-petaled-blooms',
+    treeStyles,
+    counts,
+    assetSamples,
+    templateCacheSize: _naturalAssetTemplateCache.size,
+    loadedChunks: loadedChunks.size,
+    chunksOutsideBounds,
+    treesOutsideBounds,
+    colliderCount,
+    naturalBatchMeshes,
+    mergedSourceMeshes,
+    placedDecorationMeshes,
+    cameraTarget: { x: camTarget.x, z: camTarget.z },
+    cameraLimit,
+    cameraInsideBoundary: Math.abs(camTarget.x) <= cameraLimit + 1e-6 && Math.abs(camTarget.z) <= cameraLimit + 1e-6,
+    render: {
+      calls: renderer?.info?.render?.calls ?? null,
+      triangles: renderer?.info?.render?.triangles ?? null,
+      geometries: renderer?.info?.memory?.geometries ?? null,
+    },
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -11770,9 +12342,8 @@ function updateWaterAnimation() {
   // For chunks that also have non-water tiles we apply a smaller offset
   // so roads/grass beside water still look reasonable.
   for (const [key, c] of loadedChunks) {
-    const hasWater = c.terrain.includes(TERRAIN.WATER);
-    const allWater = hasWater && c.terrain.every(t => t === TERRAIN.WATER);
-    if (hasWater) {
+    if (c.terrainFlagsDirty) refreshChunkTerrainFlags(c);
+    if (c.hasWater) {
       // Offset based on chunk position for variety
       const phase = (c.cx * 2.3 + c.cz * 1.7);
       const bobY = Math.sin(waterTick * 1.5 + phase) * 0.04;
@@ -17008,6 +17579,407 @@ function updateElevatorAnimations(dt) {
   }
 }
 
+function unregisterBuildingWindowMeshes(root) {
+  if (!root) return;
+  const removed = new Set();
+  root.traverse?.((object) => {
+    if (object?.isMesh && object.userData?.buildingWindowGlass) removed.add(object);
+  });
+  if (removed.size) {
+    _dayNightWindowLights = _dayNightWindowLights.filter((mesh) => !removed.has(mesh));
+  }
+}
+
+function getFacadeLength(face, width, depth) {
+  return face === 'front' || face === 'back' ? width : depth;
+}
+
+function createFacadeBox(face, center, y, plane, span, height, thickness, color) {
+  if (face === 'front' || face === 'back') {
+    return posVox(center, y, plane, span, height, thickness, color);
+  }
+  return posVox(plane, y, center, thickness, height, span, color);
+}
+
+function tagBuildingWindowPart(mesh, building, opening, part) {
+  if (!mesh) return mesh;
+  mesh.name = 'window';
+  tagExteriorWallMesh(mesh, building, opening.floor);
+  mesh.userData = {
+    ...(mesh.userData || {}),
+    buildingWindow: true,
+    buildingWindowGlass: part === 'glass',
+    windowBaseOpacity: part === 'glass' ? Number(mesh.material?.opacity ?? opening.glassOpacity) : 1,
+    windowPart: part,
+    windowKind: opening.kind,
+    windowFace: opening.face,
+    windowOpeningId: opening.id,
+  };
+  return mesh;
+}
+
+function createBuildingWindowParts(opening, { width, depth, wallThickness, floorY }) {
+  const face = opening.face;
+  const plane = face === 'front'
+    ? depth + wallThickness / 2
+    : face === 'back'
+      ? -wallThickness / 2
+      : face === 'left'
+        ? -wallThickness / 2
+        : width + wallThickness / 2;
+  const centerY = floorY + opening.bottom + opening.height / 2;
+  const glass = createFacadeBox(face, opening.center, centerY, plane, opening.width, opening.height, 0.035, opening.glassColor);
+  glass.material = getMat(opening.glassColor, {
+    transparent: true,
+    opacity: opening.glassOpacity,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  glass.castShadow = false;
+  const frameParts = [];
+
+  const frame = opening.frameThickness;
+  const frameDepth = wallThickness + 0.07;
+  const topY = floorY + opening.bottom + opening.height;
+  const bottomY = floorY + opening.bottom;
+  const addFrame = (center, y, span, height, part = 'frame') => {
+    const mesh = createFacadeBox(face, center, y, plane, span, height, frameDepth, opening.frameColor);
+    mesh.userData.facadeWindowPart = part;
+    frameParts.push(mesh);
+    return mesh;
+  };
+
+  addFrame(opening.center - opening.width / 2, centerY, frame, opening.height + frame, 'frame-side');
+  addFrame(opening.center + opening.width / 2, centerY, frame, opening.height + frame, 'frame-side');
+  addFrame(opening.center, bottomY, opening.width + frame, frame, 'frame-bottom');
+  addFrame(opening.center, topY, opening.width + frame, frame, 'frame-top');
+
+  for (let index = 1; index <= opening.mullions; index++) {
+    const offset = opening.width * (index / (opening.mullions + 1) - 0.5);
+    addFrame(opening.center + offset, centerY, frame * 0.78, opening.height, 'mullion');
+  }
+  for (let index = 1; index <= opening.rails; index++) {
+    const railY = bottomY + opening.height * index / (opening.rails + 1);
+    addFrame(opening.center, railY, opening.width, frame * 0.78, 'rail');
+  }
+
+  if (opening.kind === 'residential') {
+    const sill = createFacadeBox(face, opening.center, bottomY - frame * 0.35, plane, opening.width + 0.24, frame * 0.8, wallThickness + 0.2, opening.frameColor);
+    sill.userData.facadeWindowPart = 'sill';
+    frameParts.push(sill);
+  }
+  return { glass, frameParts };
+}
+
+function addMergedFacadeBatch(group, meshes, decorate) {
+  if (!meshes.length) return [];
+  const batchRoot = new THREE.Group();
+  for (const mesh of meshes) {
+    // The generic static merger intentionally skips tagged meshes. These are
+    // temporary build parts, so clear their construction-only metadata and tag
+    // the one resulting face/floor batch after geometry has been combined.
+    mesh.name = '';
+    mesh.userData = {};
+    batchRoot.add(mesh);
+  }
+  mergeStaticGroupMeshes(batchRoot);
+  const outputs = [...batchRoot.children];
+  for (const output of outputs) {
+    batchRoot.remove(output);
+    output.userData = { ...(output.userData || {}), buildingFacadeBatch: true };
+    decorate(output);
+    group.add(output);
+  }
+  return outputs;
+}
+
+function addBuildingFacadeShell(group, building, {
+  type,
+  width,
+  depth,
+  wallThickness,
+  floorCount,
+  doorOpeningWidth,
+  doorHeight,
+  frontColor,
+  backColor,
+}) {
+  const summary = {
+    type,
+    floorCount,
+    openings: 0,
+    wallSegments: 0,
+    byFace: Object.fromEntries(WINDOW_FACES.map((face) => [face, 0])),
+    byFloor: {},
+  };
+
+  for (let floor = 1; floor <= floorCount; floor++) {
+    if (!shouldRenderBuildingFloor(building, floor)) continue;
+    const floorY = getRenderedFloorY(building, floor);
+    summary.byFloor[floor] = 0;
+    for (const face of WINDOW_FACES) {
+      const length = getFacadeLength(face, width, depth);
+      const windows = getFacadeWindowOpenings({
+        type,
+        face,
+        floor,
+        length,
+        wallHeight: WALL_H,
+        doorOpeningWidth,
+      });
+      const doorOpening = face === 'front' && floor === 1
+        ? [{ id: 'exterior-door', center: width / 2, width: doorOpeningWidth, bottom: 0, height: doorHeight }]
+        : [];
+      const segments = getWallSegmentsForOpenings({
+        length,
+        height: WALL_H,
+        openings: [...windows, ...doorOpening],
+      });
+      const faceColor = face === 'back' || face === 'left' ? backColor : frontColor;
+      const plane = face === 'front'
+        ? depth + wallThickness / 2
+        : face === 'back'
+          ? -wallThickness / 2
+          : face === 'left'
+          ? -wallThickness / 2
+          : width + wallThickness / 2;
+      const wallMeshes = [];
+      for (const segment of segments) {
+        const rawStart = segment.center - segment.width / 2;
+        const rawEnd = segment.center + segment.width / 2;
+        const extendedStart = rawStart <= 1e-6 ? rawStart - wallThickness : rawStart;
+        const extendedEnd = rawEnd >= length - 1e-6 ? rawEnd + wallThickness : rawEnd;
+        const wall = createFacadeBox(
+          face,
+          (extendedStart + extendedEnd) / 2,
+          floorY + segment.bottom + segment.height / 2,
+          plane,
+          extendedEnd - extendedStart,
+          segment.height,
+          wallThickness,
+          faceColor,
+        );
+        wallMeshes.push(wall);
+      }
+      addMergedFacadeBatch(group, wallMeshes, (wall) => {
+        wall.name = floor === 1 ? `wall-${face}` : `wall-${face}-f${floor}`;
+        wall.userData.facadeSourceParts = wallMeshes.length;
+        tagExteriorWallMesh(wall, building, floor);
+      });
+
+      const glassMeshes = [];
+      const frameMeshes = [];
+      for (const opening of windows) {
+        const parts = createBuildingWindowParts(opening, {
+          width,
+          depth,
+          wallThickness,
+          floorY,
+        });
+        glassMeshes.push(parts.glass);
+        frameMeshes.push(...parts.frameParts);
+      }
+      const batchOpening = windows[0] || {
+        id: `window-${face}-f${floor}`,
+        kind: type,
+        face,
+        floor,
+        glassOpacity: 0.3,
+      };
+      addMergedFacadeBatch(group, glassMeshes, (glass) => {
+        tagBuildingWindowPart(glass, building, batchOpening, 'glass');
+        glass.userData.windowOpeningCount = windows.length;
+        registerWindowMesh(glass);
+      });
+      addMergedFacadeBatch(group, frameMeshes, (frameMesh) => {
+        tagBuildingWindowPart(frameMesh, building, batchOpening, 'frame-batch');
+        frameMesh.userData.windowOpeningCount = windows.length;
+        frameMesh.userData.windowPartCount = frameMeshes.length;
+      });
+      summary.openings += windows.length;
+      summary.wallSegments += segments.length;
+      summary.byFace[face] += windows.length;
+      summary.byFloor[floor] += windows.length;
+    }
+  }
+  group.userData.windowLayoutSummary = Object.freeze(summary);
+  return summary;
+}
+
+function tagBuildingRoofPart(mesh, building, part, component = null) {
+  if (!mesh) return mesh;
+  mesh.name = 'roof';
+  mesh.userData = {
+    ...(mesh.userData || {}),
+    buildingId: building?.id || null,
+    buildingRoof: true,
+    roofPart: part,
+    roofComponent: Boolean(component),
+    roofComponentId: component?.id || null,
+    roofComponentType: component?.kind || null,
+    roofTransparent: part === 'skylight-glass',
+    roofBaseOpacity: part === 'skylight-glass' ? Number(mesh.material?.opacity ?? 0.52) : 1,
+  };
+  return mesh;
+}
+
+function addRoofBox(parent, building, component, part, x, y, z, width, height, depth, color, materialOptions = null) {
+  const mesh = posVox(x, y, z, width, height, depth, color);
+  if (materialOptions) mesh.material = getMat(color, materialOptions);
+  tagBuildingRoofPart(mesh, building, part, component);
+  parent.add(mesh);
+  return mesh;
+}
+
+function addRoofCylinder(parent, building, component, part, x, y, z, radius, height, color) {
+  const mesh = new THREE.Mesh(_cylGeo, getMat(color));
+  mesh.scale.set(radius * 2, height, radius * 2);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  tagBuildingRoofPart(mesh, building, part, component);
+  parent.add(mesh);
+  return mesh;
+}
+
+function addCommercialRoofComponent(roof, building, component) {
+  const item = new THREE.Group();
+  item.name = `roof-component-${component.kind}`;
+  item.position.set(component.x, 0, component.z);
+  item.rotation.y = component.rotation;
+  item.userData = {
+    buildingRoofComponent: true,
+    roofComponentId: component.id,
+    roofComponentType: component.kind,
+  };
+  const baseY = 0.17;
+  const metalColors = [0xb0b8bd, 0x98a4aa, 0xc4c9cc, 0x89979e];
+  const metal = metalColors[component.variant % metalColors.length];
+  const darkMetal = 0x4b565c;
+
+  if (component.kind === 'ac-unit') {
+    addRoofBox(item, building, component, 'equipment-pad', 0, baseY + 0.045, 0, component.width + 0.18, 0.09, component.depth + 0.18, 0x586268);
+    addRoofBox(item, building, component, 'ac-casing', 0, baseY + 0.12 + component.height / 2, 0, component.width, component.height, component.depth, metal);
+    addRoofBox(item, building, component, 'ac-top', 0, baseY + component.height + 0.15, 0, component.width + 0.05, 0.08, component.depth + 0.05, darkMetal);
+    addRoofCylinder(item, building, component, 'ac-fan', 0, baseY + component.height + 0.205, 0, 0.31, 0.045, 0x273238);
+    for (let index = -2; index <= 2; index++) {
+      addRoofBox(item, building, component, 'ac-grille', index * component.width * 0.12, baseY + 0.45, component.depth / 2 + 0.018, component.width * 0.075, 0.42, 0.035, darkMetal);
+    }
+  } else if (component.kind === 'roof-vent') {
+    addRoofBox(item, building, component, 'vent-base', 0, baseY + 0.045, 0, 0.82, 0.09, 0.82, darkMetal);
+    addRoofCylinder(item, building, component, 'vent-stack', 0, baseY + component.height * 0.48, 0, 0.22, component.height * 0.78, metal);
+    addRoofCylinder(item, building, component, 'vent-cap', 0, baseY + component.height * 0.92, 0, 0.34, 0.12, 0x5f6b70);
+  } else if (component.kind === 'exhaust-fan') {
+    addRoofBox(item, building, component, 'fan-base', 0, baseY + 0.06, 0, component.width, 0.12, component.depth, 0x515c61);
+    addRoofCylinder(item, building, component, 'fan-drum', 0, baseY + 0.34, 0, 0.34, 0.5, metal);
+    addRoofCylinder(item, building, component, 'fan-hood', 0, baseY + 0.66, 0, 0.46, 0.14, darkMetal);
+    addRoofBox(item, building, component, 'fan-motor', 0, baseY + 0.49, 0, 0.22, 0.24, 0.22, 0x263238);
+  } else if (component.kind === 'skylight') {
+    const frame = 0.12;
+    addRoofBox(item, building, component, 'skylight-frame', 0, baseY + 0.08, -component.depth / 2, component.width + frame, 0.16, frame, darkMetal);
+    addRoofBox(item, building, component, 'skylight-frame', 0, baseY + 0.08, component.depth / 2, component.width + frame, 0.16, frame, darkMetal);
+    addRoofBox(item, building, component, 'skylight-frame', -component.width / 2, baseY + 0.08, 0, frame, 0.16, component.depth, darkMetal);
+    addRoofBox(item, building, component, 'skylight-frame', component.width / 2, baseY + 0.08, 0, frame, 0.16, component.depth, darkMetal);
+    const glass = addRoofBox(item, building, component, 'skylight-glass', 0, baseY + 0.14, 0, component.width - frame, 0.055, component.depth - frame, 0x78cbe8, {
+      transparent: true,
+      opacity: 0.52,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    glass.castShadow = false;
+  } else {
+    addRoofBox(item, building, component, 'access-hatch-base', 0, baseY + 0.07, 0, component.width + 0.08, 0.14, component.depth + 0.08, darkMetal);
+    addRoofBox(item, building, component, 'access-hatch-lid', 0, baseY + 0.2, 0, component.width, 0.12, component.depth, metal);
+    addRoofBox(item, building, component, 'access-hatch-handle', 0, baseY + 0.32, 0.22, 0.36, 0.08, 0.08, 0x263238);
+  }
+  roof.add(item);
+  return item;
+}
+
+function makeCommercialRoof(building, type, width, depth, wallThickness, roofColor, floorCount) {
+  const roof = new THREE.Group();
+  roof.name = 'commercial-roof-system';
+  const layout = getCommercialRoofLayout({
+    type,
+    width,
+    depth,
+    floorCount,
+    seed: building?.id || building?.name || 'building',
+  });
+  const surface = addRoofBox(
+    roof,
+    building,
+    null,
+    'surface',
+    width / 2,
+    0.075,
+    depth / 2,
+    width + wallThickness * 2,
+    0.15,
+    depth + wallThickness * 2,
+    roofColor,
+  );
+  surface.receiveShadow = true;
+
+  if (layout.edge.enabled) {
+    const outerWidth = width + wallThickness * 2;
+    const outerDepth = depth + wallThickness * 2;
+    const edgeThickness = layout.edge.thickness;
+    const edgeY = 0.15 + layout.edge.height / 2;
+    const copingY = 0.15 + layout.edge.height + layout.edge.copingHeight / 2;
+    const edgeColor = new THREE.Color(roofColor).multiplyScalar(0.72).getHex();
+    const copingColor = new THREE.Color(roofColor).offsetHSL(0, -0.05, 0.12).getHex();
+    const edgeRuns = [
+      [width / 2, -wallThickness + edgeThickness / 2, outerWidth, edgeThickness],
+      [width / 2, depth + wallThickness - edgeThickness / 2, outerWidth, edgeThickness],
+    ];
+    for (const [x, z, span, thickness] of edgeRuns) {
+      addRoofBox(roof, building, null, 'parapet-edge', x, edgeY, z, span, layout.edge.height, thickness, edgeColor);
+      addRoofBox(roof, building, null, 'parapet-coping', x, copingY, z, span + 0.08, layout.edge.copingHeight, thickness + 0.08, copingColor);
+    }
+    const sideDepth = Math.max(0.1, outerDepth - edgeThickness * 2);
+    for (const x of [-wallThickness + edgeThickness / 2, width + wallThickness - edgeThickness / 2]) {
+      addRoofBox(roof, building, null, 'parapet-edge', x, edgeY, depth / 2, edgeThickness, layout.edge.height, sideDepth, edgeColor);
+      addRoofBox(roof, building, null, 'parapet-coping', x, copingY, depth / 2, edgeThickness + 0.08, layout.edge.copingHeight, sideDepth, copingColor);
+    }
+  }
+
+  for (const component of layout.components) addCommercialRoofComponent(roof, building, component);
+  const componentTypes = Object.freeze(Object.fromEntries(
+    [...new Set(layout.components.map((component) => component.kind))]
+      .map((kind) => [kind, layout.components.filter((component) => component.kind === kind).length]),
+  ));
+  roof.userData = {
+    ...(roof.userData || {}),
+    buildingRoof: true,
+    roofLayout: layout,
+    roofLayoutSummary: Object.freeze({
+      type,
+      floorCount,
+      edgeEnabled: layout.edge.enabled,
+      componentCount: layout.componentCount,
+      maxCount: layout.maxCount,
+      areaCapacity: layout.areaCapacity,
+      slotCapacity: layout.slotCapacity,
+      requestedAcUnits: layout.requestedAcUnits,
+      acUnitCapacity: layout.acUnitCapacity,
+      acUnitCount: layout.acUnitCount,
+      unplacedAcUnits: layout.unplacedAcUnits,
+      requestedAuxiliaryCount: layout.requestedAuxiliaryCount,
+      auxiliaryCount: layout.auxiliaryCount,
+      componentTypes,
+    }),
+  };
+  return roof;
+}
+
+function makeBuildingRoof(building, type, width, depth, wallThickness, roofColor, floorCount) {
+  if (type === 'home') {
+    return makeResidentialRoof(building, width, depth, wallThickness, roofColor);
+  }
+  return makeCommercialRoof(building, type, width, depth, wallThickness, roofColor, floorCount);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // BUILDINGS (Full 3D — Crossy Road style)
 // ═══════════════════════════════════════════════════════════════
@@ -17016,8 +17988,17 @@ function createBuilding3D(building) {
   invalidateDynamicInteriorRouting(building?.id || null);
   invalidateDynamicExteriorRouting();
   invalidateGroundIndex(); // PERF: building geometry/position/rotation changed
+  resetBuildingDoorAnimation(building?.id || null);
   const existing = building._group;
-  if (existing) buildingGroup.remove(existing);
+  if (existing) {
+    unregisterBuildingWindowMeshes(existing);
+    buildingGroup.remove(existing);
+    existing.traverse?.((object) => {
+      if (object?.isMesh && object.userData?.buildingFacadeBatch && object.userData?.mergedStaticMeshes) {
+        object.geometry?.dispose?.();
+      }
+    });
+  }
 
   const btype = building.type || 'office';
   const isPark = btype === 'park';
@@ -17073,9 +18054,6 @@ function createBuilding3D(building) {
     const wt = 0.25;
     const doorOpeningW = T * 2.4;
     const doorH = WALL_H - 0.06;
-    const doorLintelH = Math.max(0.08, WALL_H - doorH);
-    const frontLeftW = (bw - doorOpeningW) / 2;
-    const frontRightW = (bw - doorOpeningW) / 2;
     building.doorSpec = normalizeBuildingDoorSpec(building, building.doorSpec || building._doorSpec || {
       localCenterX: bw / 2,
       localThresholdZ: bd + wt / 2 + 0.01,
@@ -17089,78 +18067,25 @@ function createBuilding3D(building) {
     building._doorSpec = building.doorSpec;
 
     if (!floorFocusActive || activeFloor >= 1) {
-    // Front wall (south) — split around a tall door opening
-    if (frontLeftW > 0.2) {
-      const fwL = posVox(frontLeftW / 2, WALL_H / 2, bd + wt / 2, frontLeftW, WALL_H, wt, wallCol);
-      fwL.name = 'wall-front';
-      tagExteriorWallMesh(fwL, building, 1);
-      group.add(fwL);
-    }
-    if (frontRightW > 0.2) {
-      const fwR = posVox(bw - frontRightW / 2, WALL_H / 2, bd + wt / 2, frontRightW, WALL_H, wt, wallCol);
-      fwR.name = 'wall-front';
-      tagExteriorWallMesh(fwR, building, 1);
-      group.add(fwR);
-    }
-
-    // Thin lintel above the doorway so the door reaches almost all the way to the roof
-    const doorFrameTop = posVox(bw / 2, doorH + doorLintelH / 2, bd + wt / 2, doorOpeningW, doorLintelH, wt + 0.02, darkWall);
-    doorFrameTop.name = 'wall-front';
-    tagExteriorWallMesh(doorFrameTop, building, 1);
-    group.add(doorFrameTop);
-    // Back wall (north)
-    const bw2 = posVox(bw / 2, WALL_H / 2, -wt / 2, bw + wt * 2, WALL_H, wt, darkWall);
-    bw2.name = 'wall-back';
-    tagExteriorWallMesh(bw2, building, 1);
-    group.add(bw2);
-    // Left wall (west), extend slightly to meet front/back walls flush at the corners
-    const sideWallDepth = bd + wt * 2;
-    const lw = posVox(-wt / 2, WALL_H / 2, bd / 2, wt, WALL_H, sideWallDepth, darkWall);
-    lw.name = 'wall-left';
-    tagExteriorWallMesh(lw, building, 1);
-    group.add(lw);
-    // Right wall (east), extend slightly to meet front/back walls flush at the corners
-    const rw = posVox(bw + wt / 2, WALL_H / 2, bd / 2, wt, WALL_H, sideWallDepth, wallCol);
-    rw.name = 'wall-right';
-    tagExteriorWallMesh(rw, building, 1);
-    group.add(rw);
-
-    // Upper-floor exterior shells: same footprint, no exterior doors.
-    for (let fl = 2; fl <= floorCount; fl++) {
-      if (!shouldRenderBuildingFloor(building, fl)) continue;
-      const y = getRenderedFloorY(building, fl);
-      const upFront = posVox(bw / 2, y + WALL_H / 2, bd + wt / 2, bw + wt * 2, WALL_H, wt, wallCol);
-      const upBack = posVox(bw / 2, y + WALL_H / 2, -wt / 2, bw + wt * 2, WALL_H, wt, darkWall);
-      const upLeft = posVox(-wt / 2, y + WALL_H / 2, bd / 2, wt, WALL_H, sideWallDepth, darkWall);
-      const upRight = posVox(bw + wt / 2, y + WALL_H / 2, bd / 2, wt, WALL_H, sideWallDepth, wallCol);
-      upFront.name = `wall-front-f${fl}`; upBack.name = `wall-back-f${fl}`; upLeft.name = `wall-left-f${fl}`; upRight.name = `wall-right-f${fl}`;
-      tagExteriorWallMesh(upFront, building, fl);
-      tagExteriorWallMesh(upBack, building, fl);
-      tagExteriorWallMesh(upLeft, building, fl);
-      tagExteriorWallMesh(upRight, building, fl);
-      group.add(upFront, upBack, upLeft, upRight);
-    }
-
-    // Roof — style depends on building type
-    const roofMat = new THREE.MeshLambertMaterial({
-      color: roofCol, flatShading: true, transparent: true, opacity: 0.35
+    // Build real wall openings, rather than placing decorative panes on top of
+    // solid wall boxes. Every floor recalculates its facade from the current
+    // footprint, so resizing also rebuilds both glass and cutouts.
+    addBuildingFacadeShell(group, building, {
+      type: btype,
+      width: bw,
+      depth: bd,
+      wallThickness: wt,
+      floorCount,
+      doorOpeningWidth: doorOpeningW,
+      doorHeight: doorH,
+      frontColor: wallCol,
+      backColor: darkWall,
     });
 
-    let roof;
-    if (btype === 'home') {
-      // Pitched / gabled roof using a triangular prism BufferGeometry
-      roof = makePitchedRoof(bw, bd, wt, roofCol);
-      roof.name = 'roof';
-      group.add(roof);
-    } else {
-      // Office and default: flat box roof
-      roof = new THREE.Mesh(_boxGeo, roofMat);
-      roof.scale.set(bw + wt * 2, 0.15, bd + wt * 2);
-      roof.position.set(bw / 2, getRenderedFloorY(building, floorFocusActive ? activeFloor : floorCount) + WALL_H + 0.075, bd / 2);
-      roof.receiveShadow = true;
-      roof.name = 'roof';
-      group.add(roof);
-    }
+    // Homes keep their pitched roof. Offices and stores receive a complete
+    // commercial roof system with parapet edging and bounded equipment.
+    const roof = makeBuildingRoof(building, btype, bw, bd, wt, roofCol, floorCount);
+    group.add(roof);
     building._roof = roof;
     if (floorFocusActive && roof) roof.visible = false;
 
@@ -17180,9 +18105,8 @@ function createBuilding3D(building) {
       group.add(signLabel);
     }
 
-    // Door system — type based on building type
-    // Stores/offices get glass sliding doors, homes get swivel wooden doors
-    const doorType = (btype === 'store') ? 'sliding' : 'swivel';
+    // Door system — offices/stores use automatic glass sliders; homes keep wooden swing doors.
+    const doorType = getBuildingExteriorDoorType(btype);
     const dw = doorOpeningW / 2; // each panel = half the opening
     const dh = doorH;
     const doorZ = bd + wt / 2 + 0.01;
@@ -17259,52 +18183,19 @@ function createBuilding3D(building) {
       building._doorType = 'swivel';
     }
 
-    // Windows on front, keep them clearly away from the door opening
-    const winCount = Math.max(2, Math.floor(bw / (T * 2)));
-    const winSp = bw / (winCount + 1);
-    const frontWindowW = T * 0.5;
-    const frontWindowH = T * 0.4;
-    const doorClearHalf = doorOpeningW / 2 + frontWindowW * 0.75;
-    for (let i = 1; i <= winCount; i++) {
-      const wx = i * winSp;
-      if (Math.abs(wx - bw / 2) <= doorClearHalf) continue;
-      const wm = posVox(wx, WALL_H * 0.65, bd + wt + 0.02, frontWindowW, frontWindowH, 0.05, 0x81d4fa);
-      wm.name = 'window';
-      group.add(wm);
-      registerWindowMesh(wm);
-    }
-    // Windows on sides
-    const sideWinCount = Math.max(1, Math.floor(bd / (T * 3)));
-    for (let i = 1; i <= sideWinCount; i++) {
-      const wz = i * (bd / (sideWinCount + 1));
-      const wl = posVox(-wt - 0.02, WALL_H * 0.65, wz, 0.05, T * 0.4, T * 0.5, 0x81d4fa);
-      const wr = posVox(bw + wt + 0.02, WALL_H * 0.65, wz, 0.05, T * 0.4, T * 0.5, 0x81d4fa);
-      wl.name = 'window'; wr.name = 'window';
-      group.add(wl); group.add(wr);
-      registerWindowMesh(wl); registerWindowMesh(wr);
-    }
     }
 
 
     // Roof always belongs to the current top floor. In focused floor view it stays hidden
     // so the active floor remains editable/visible, including after the top floor changes.
     if (!building._roof || building._roof.parent !== group) {
-      const roofMat2 = new THREE.MeshLambertMaterial({ color: roofCol, flatShading: true, transparent: true, opacity: 0.35 });
-      if (btype === 'home') {
-        building._roof = makePitchedRoof(bw, bd, wt, roofCol);
-        building._roof.name = 'roof';
-      } else {
-        building._roof = new THREE.Mesh(_boxGeo, roofMat2);
-        building._roof.scale.set(bw + wt * 2, 0.15, bd + wt * 2);
-        building._roof.receiveShadow = true;
-        building._roof.name = 'roof';
-      }
+      building._roof = makeBuildingRoof(building, btype, bw, bd, wt, roofCol, floorCount);
       group.add(building._roof);
     }
     if (building._roof) {
       const roofFloor = floorCount;
       if (btype === 'home') building._roof.position.y = getRenderedFloorY(building, roofFloor);
-      else building._roof.position.set(bw / 2, getRenderedFloorY(building, roofFloor) + WALL_H + 0.075, bd / 2);
+      else building._roof.position.set(0, getRenderedFloorY(building, roofFloor) + WALL_H, 0);
       building._roof.visible = !floorFocusActive;
     }
 
@@ -17421,60 +18312,452 @@ function createBuilding3D(building) {
   }
 }
 
-// ─── PITCHED ROOF for homes (triangular prism) ───
-function makePitchedRoof(bw, bd, wt, roofCol) {
-  const W = bw + wt * 2;
-  const D = bd + wt * 2;
-  const H = 1.4; // ridge height
-  const y0 = WALL_H; // base of roof
-
-  // Build a triangular prism: 2 triangular end faces + 2 slanted quad faces + bottom (open)
-  // Vertices:
-  // Bottom rect: 4 corners at y0
-  // Ridge: 2 points at top center (y0 + H)
-  const hW = W / 2;
-  const hD = D / 2;
-
-  // 0: -hW, y0,  hD  (front-left bottom)
-  // 1:  hW, y0,  hD  (front-right bottom)
-  // 2:  hW, y0, -hD  (back-right bottom)
-  // 3: -hW, y0, -hD  (back-left bottom)
-  // 4:   0, y0+H, hD (front ridge)
-  // 5:   0, y0+H,-hD (back ridge)
-
-  const verts = new Float32Array([
-    -hW, y0,  hD,   // 0
-     hW, y0,  hD,   // 1
-     hW, y0, -hD,   // 2
-    -hW, y0, -hD,   // 3
-      0, y0+H, hD,  // 4
-      0, y0+H,-hD,  // 5
-  ]);
-
-  // Faces (CCW from outside):
-  // Left slope:  0,4,5, 0,5,3
-  // Right slope: 1,2,5, 1,5,4
-  // Front gable: 0,1,4
-  // Back gable:  3,5,2
-  const idx = new Uint16Array([
-    0,4,5, 0,5,3,   // left slope
-    1,5,2, 1,4,5,   // right slope (flip winding)
-    0,1,4,          // front gable
-    3,5,2,          // back gable
-  ]);
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-  geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  geo.computeVertexNormals();
-
-  const mat = new THREE.MeshLambertMaterial({
-    color: roofCol, flatShading: true, transparent: true, opacity: 0.45, side: THREE.DoubleSide
+function summarizeRenderedBuildingWindows(building) {
+  const panes = [];
+  const parts = [];
+  building?._group?.traverse?.((object) => {
+    if (!object?.isMesh || object.userData?.buildingWindow !== true) return;
+    parts.push(object);
+    if (object.userData.buildingWindowGlass === true) panes.push(object);
   });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(bw / 2, 0, bd / 2); // offset to building center
-  mesh.castShadow = true;
+  const faceFloorCounts = {};
+  for (const pane of panes) {
+    const face = pane.userData.windowFace;
+    const floor = Math.max(1, Number(pane.userData.floor || 1) || 1);
+    const key = `${face}:f${floor}`;
+    faceFloorCounts[key] = (faceFloorCounts[key] || 0) + Math.max(1, Number(pane.userData.windowOpeningCount || 1));
+  }
+  const visibleFloorCount = Object.keys(building?._group?.userData?.windowLayoutSummary?.byFloor || {}).length;
+  return Object.freeze({
+    id: building?.id || null,
+    type: building?.type || 'office',
+    floorCount: getBuildingFloorCount(building),
+    visibleFloorCount,
+    paneCount: panes.reduce((sum, pane) => sum + Math.max(1, Number(pane.userData.windowOpeningCount || 1)), 0),
+    framePartCount: parts
+      .filter(part => part.userData.buildingWindowGlass !== true)
+      .reduce((sum, part) => sum + Math.max(1, Number(part.userData.windowPartCount || 1)), 0),
+    hasTransparentGlass: panes.length > 0 && panes.every((pane) => pane.material?.transparent === true && pane.material?.opacity < 1 && pane.material?.depthWrite === false),
+    hasBackWindows: panes.some((pane) => pane.userData.windowFace === 'back'),
+    faceFloorCounts: Object.freeze(faceFloorCounts),
+    layout: building?._group?.userData?.windowLayoutSummary || null,
+  });
+}
+
+window.__verifyBuildingWindowUpgrade = () => {
+  const fixtures = [
+    { type: 'office', width: 25, depth: 17, floorCount: 3 },
+    { type: 'store', width: 15, depth: 12, floorCount: 3 },
+    { type: 'home', width: 10, depth: 8, floorCount: 3 },
+  ].map((fixture) => {
+    const openings = getBuildingWindowLayout({ ...fixture, wallHeight: WALL_H, doorOpeningWidth: T * 2.4 });
+    const validation = validateBuildingWindowLayout(openings, { ...fixture, wallHeight: WALL_H });
+    const faceFloorCounts = Object.fromEntries(WINDOW_FACES.flatMap((face) => (
+      Array.from({ length: fixture.floorCount }, (_, index) => {
+        const floor = index + 1;
+        return [`${face}:f${floor}`, openings.filter((opening) => opening.face === face && opening.floor === floor).length];
+      })
+    )));
+    return Object.freeze({ ...fixture, openingCount: openings.length, validation, faceFloorCounts });
+  });
+  const rendered = [...buildingsMap.values()]
+    .filter((building) => building?.type !== 'park' && building?._group)
+    .map(summarizeRenderedBuildingWindows);
+  const everyFixtureHasEveryFloorAndFace = fixtures.every((fixture) => (
+    fixture.validation.ok && Object.values(fixture.faceFloorCounts).every((count) => count > 0)
+  ));
+  return Object.freeze({
+    ok: everyFixtureHasEveryFloorAndFace && rendered.every((building) => building.hasTransparentGlass && building.hasBackWindows),
+    everyFixtureHasEveryFloorAndFace,
+    fixtures: Object.freeze(fixtures),
+    rendered: Object.freeze(rendered),
+  });
+};
+
+window.__verifyBuildingFacadeBatching = () => {
+  const building = {
+    id: '__facade-batch-verifier__',
+    type: 'office',
+    widthTiles: 25,
+    heightTiles: 17,
+    floorCount: 3,
+    floors: [{ level: 1 }, { level: 2 }, { level: 3 }],
+  };
+  const group = new THREE.Group();
+  const summary = addBuildingFacadeShell(group, building, {
+    type: building.type,
+    width: building.widthTiles * T,
+    depth: building.heightTiles * T,
+    wallThickness: 0.25,
+    floorCount: building.floorCount,
+    doorOpeningWidth: T * 2.4,
+    doorHeight: WALL_H - 0.06,
+    frontColor: 0x78909c,
+    backColor: 0x59666c,
+  });
+  const facadeMeshes = [];
+  group.traverse(object => {
+    if (object?.isMesh && object.userData?.buildingFacadeBatch) facadeMeshes.push(object);
+  });
+  const wallBatches = facadeMeshes.filter(mesh => mesh.userData?.exteriorWall === true && mesh.userData?.buildingWindow !== true);
+  const windowBatches = facadeMeshes.filter(mesh => mesh.userData?.buildingWindow === true);
+  const facesAndFloors = WINDOW_FACES.flatMap(face => (
+    Array.from({ length: building.floorCount }, (_, index) => ({ face, floor: index + 1 }))
+  ));
+  const everyFaceFloorBatched = facesAndFloors.every(({ face, floor }) => (
+    wallBatches.filter(mesh => mesh.userData.floor === floor && mesh.name.startsWith(`wall-${face}`)).length === 1
+    && windowBatches.filter(mesh => mesh.userData.floor === floor && mesh.userData.windowFace === face).length === 2
+  ));
+  const result = Object.freeze({
+    ok: everyFaceFloorBatched
+      && wallBatches.length === WINDOW_FACES.length * building.floorCount
+      && windowBatches.length === WINDOW_FACES.length * building.floorCount * 2,
+    floorCount: building.floorCount,
+    openings: summary.openings,
+    originalWallSegments: summary.wallSegments,
+    wallBatches: wallBatches.length,
+    windowBatches: windowBatches.length,
+    facadeDrawMeshes: facadeMeshes.length,
+    everyFaceFloorBatched,
+  });
+  unregisterBuildingWindowMeshes(group);
+  group.traverse(object => {
+    if (object?.isMesh && object.userData?.mergedStaticMeshes) object.geometry?.dispose?.();
+  });
+  return result;
+};
+
+function summarizeRenderedCommercialRoof(building) {
+  const roof = building?._roof;
+  const layout = roof?.userData?.roofLayout || null;
+  const componentIds = new Set();
+  const componentTypes = new Set();
+  const componentKindsById = new Map();
+  let roofPartCount = 0;
+  let parapetEdgePartCount = 0;
+  roof?.traverse?.((object) => {
+    if (!object?.isMesh || object.userData?.buildingRoof !== true) return;
+    roofPartCount++;
+    if (object.userData.roofPart === 'parapet-edge') parapetEdgePartCount++;
+    if (object.userData.roofComponentId) {
+      componentIds.add(object.userData.roofComponentId);
+      componentKindsById.set(object.userData.roofComponentId, object.userData.roofComponentType);
+    }
+    if (object.userData.roofComponentType) componentTypes.add(object.userData.roofComponentType);
+  });
+  const expectedTopY = getRenderedFloorY(building, getBuildingFloorCount(building)) + WALL_H;
+  return Object.freeze({
+    id: building?.id || null,
+    type: building?.type || null,
+    floorCount: getBuildingFloorCount(building),
+    roofPartCount,
+    parapetEdgePartCount,
+    componentCount: componentIds.size,
+    acUnitCount: [...componentKindsById.values()].filter((kind) => kind === 'ac-unit').length,
+    componentTypes: Object.freeze([...componentTypes]),
+    maxCount: layout?.maxCount ?? 0,
+    areaCapacity: layout?.areaCapacity ?? 0,
+    slotCapacity: layout?.slotCapacity ?? 0,
+    topY: roof?.position?.y ?? null,
+    expectedTopY,
+    atTopFloor: Number.isFinite(roof?.position?.y) && Math.abs(roof.position.y - expectedTopY) < 1e-6,
+    layout,
+  });
+}
+
+window.__verifyCommercialRoofUpgrade = () => {
+  const fixtureInputs = [
+    { type: 'office', width: 25, depth: 17, floorCount: 3, seed: 'office-fixture' },
+    { type: 'store', width: 15, depth: 12, floorCount: 3, seed: 'store-fixture' },
+    { type: 'home', width: 10, depth: 8, floorCount: 3, seed: 'home-fixture' },
+  ];
+  const fixtures = fixtureInputs.map((input) => {
+    const layout = getCommercialRoofLayout(input);
+    return Object.freeze({ input: Object.freeze(input), layout, validation: validateCommercialRoofLayout(layout, input) });
+  });
+  const officeBase = getCommercialRoofLayout({ type: 'office', width: 19, depth: 9.2, floorCount: 1, seed: 'density-fixture' });
+  const officeTall = getCommercialRoofLayout({ type: 'office', width: 19, depth: 9.2, floorCount: 15, seed: 'density-fixture' });
+  const officeWide = getCommercialRoofLayout({ type: 'office', width: 19, depth: 12.4, floorCount: 15, seed: 'density-fixture' });
+  const rendered = [...buildingsMap.values()]
+    .filter((building) => (building?.type === 'office' || building?.type === 'store') && building?._roof)
+    .map(summarizeRenderedCommercialRoof);
+  const renderedOk = rendered.every((roof) => (
+    roof.parapetEdgePartCount === 4
+    && roof.componentCount === roof.layout?.componentCount
+    && roof.componentCount <= roof.maxCount
+    && roof.componentCount <= roof.areaCapacity
+    && roof.componentCount <= roof.slotCapacity
+    && roof.acUnitCount === roof.layout?.acUnitCount
+    && roof.acUnitCount === Math.min(roof.floorCount, roof.layout?.acUnitCapacity ?? 0)
+    && roof.atTopFloor
+    && roof.componentTypes.includes('ac-unit')
+    && (roof.layout?.auxiliaryCount === 0 || roof.componentTypes.includes('roof-vent'))
+  ));
+  const supportedFixturesOk = fixtures
+    .filter((fixture) => fixture.input.type !== 'home')
+    .every((fixture) => fixture.layout.supported && fixture.layout.edge.enabled && fixture.validation.ok);
+  const homeUnchanged = fixtures.find((fixture) => fixture.input.type === 'home')?.layout.supported === false;
+  const densityIsBounded = officeBase.acUnitCount === 1
+    && officeTall.acUnitCapacity === 10
+    && officeTall.acUnitCount === 10
+    && officeTall.unplacedAcUnits === 5
+    && officeTall.componentCount === officeTall.maxCount
+    && officeWide.acUnitCapacity === 15
+    && officeWide.acUnitCount === 15
+    && officeWide.unplacedAcUnits === 0;
+  return Object.freeze({
+    ok: rendered.length > 0 && renderedOk && supportedFixturesOk && homeUnchanged && densityIsBounded,
+    renderedOk,
+    supportedFixturesOk,
+    homeUnchanged,
+    densityIsBounded,
+    fixtures: Object.freeze(fixtures),
+    density: Object.freeze({ officeBase, officeTall, officeWide }),
+    rendered: Object.freeze(rendered),
+  });
+};
+
+function summarizeRenderedResidentialRoof(building) {
+  const roof = building?._roof;
+  const layout = roof?.userData?.residentialRoofLayout || null;
+  const partCounts = {};
+  let shingleCount = 0;
+  roof?.traverse?.((object) => {
+    if (!object?.isMesh || object.userData?.buildingRoof !== true) return;
+    const part = object.userData.roofPart || 'unknown';
+    partCounts[part] = (partCounts[part] || 0) + 1;
+    if (object.userData?.residentialRoofShingles) shingleCount += Number(object.count || object.userData.shingleCount || 0);
+  });
+  const width = (building?.widthTiles || BUILDING_TYPES.home.w) * T;
+  const depth = (building?.heightTiles || BUILDING_TYPES.home.h) * T;
+  const floorCount = getBuildingFloorCount(building);
+  const expectedTopY = getRenderedFloorY(building, floorCount);
+  return Object.freeze({
+    id: building?.id || null,
+    floorCount,
+    width,
+    depth,
+    shingleCount,
+    partCounts: Object.freeze(partCounts),
+    hasOverhang: Boolean(layout && layout.roofWidth > layout.outerWidth && layout.roofDepth > layout.outerDepth),
+    centeredOnFootprint: Boolean(
+      roof
+      && Math.abs(roof.position.x - width / 2) < 1e-6
+      && Math.abs(roof.position.z - depth / 2) < 1e-6
+    ),
+    atTopFloor: Boolean(Number.isFinite(roof?.position?.y) && Math.abs(roof.position.y - expectedTopY) < 1e-6),
+    inheritsBuildingTransform: roof?.parent === building?._group,
+    validation: layout ? validateResidentialRoofLayout(layout) : Object.freeze({ ok: false, errors: Object.freeze(['missing-layout']) }),
+    layout,
+  });
+}
+
+window.__verifyResidentialRoofUpgrade = () => {
+  const base = getResidentialRoofLayout({ width: 10, depth: 8, wallThickness: 0.25, wallHeight: WALL_H, seed: 'home-roof-fixture' });
+  const resized = getResidentialRoofLayout({ width: 18, depth: 14, wallThickness: 0.25, wallHeight: WALL_H, seed: 'home-roof-fixture' });
+  const rendered = [...buildingsMap.values()]
+    .filter((building) => building?.type === 'home' && building?._roof)
+    .map(summarizeRenderedResidentialRoof);
+  const fixturesOk = validateResidentialRoofLayout(base).ok
+    && validateResidentialRoofLayout(resized).ok
+    && base.roofWidth > base.outerWidth
+    && base.roofDepth > base.outerDepth
+    && resized.roofWidth > base.roofWidth
+    && resized.roofDepth > base.roofDepth
+    && resized.shingleCount > base.shingleCount;
+  const renderedOk = rendered.every((item) => (
+    item.validation.ok
+    && item.hasOverhang
+    && item.centeredOnFootprint
+    && item.atTopFloor
+    && item.inheritsBuildingTransform
+    && item.shingleCount === item.layout?.shingleCount
+    && item.partCounts['slope-panel'] === 2
+    && item.partCounts['gable-infill'] === 1
+    && item.partCounts['eave-fascia'] === 2
+    && item.partCounts['rake-trim'] === 4
+    && item.partCounts['ridge-cap'] === 1
+  ));
+  return Object.freeze({
+    ok: rendered.length > 0 && fixturesOk && renderedOk,
+    fixturesOk,
+    renderedOk,
+    fixtures: Object.freeze({ base, resized }),
+    rendered: Object.freeze(rendered),
+  });
+};
+
+// ─── FINISHED PITCHED ROOF for homes ───
+function addResidentialRoofBox(parent, building, part, {
+  x,
+  y,
+  z,
+  width,
+  height,
+  depth,
+  rotationZ = 0,
+  color,
+}) {
+  const mesh = posVox(x, y, z, width, height, depth, color);
+  mesh.rotation.z = rotationZ;
+  tagBuildingRoofPart(mesh, building, part);
+  parent.add(mesh);
   return mesh;
+}
+
+function addResidentialGableInfill(roof, building, layout, roofColor) {
+  const halfWidth = layout.outerWidth / 2;
+  const halfDepth = layout.outerDepth / 2;
+  const y0 = layout.wallHeight;
+  const ridgeY = y0 + layout.ridgeHeight;
+  const vertices = new Float32Array([
+    -halfWidth, y0, halfDepth,
+    halfWidth, y0, halfDepth,
+    0, ridgeY, halfDepth,
+    -halfWidth, y0, -halfDepth,
+    0, ridgeY, -halfDepth,
+    halfWidth, y0, -halfDepth,
+  ]);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+  geometry.computeVertexNormals();
+  const color = new THREE.Color(roofColor).multiplyScalar(0.62).getHex();
+  const mesh = new THREE.Mesh(geometry, getMat(color, { side: THREE.DoubleSide }));
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  tagBuildingRoofPart(mesh, building, 'gable-infill');
+  roof.add(mesh);
+  return mesh;
+}
+
+function addResidentialShingles(roof, building, layout, roofColor) {
+  const material = getMat(0xffffff);
+  const shingles = new THREE.InstancedMesh(_boxGeo, material, layout.shingleCount);
+  shingles.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  shingles.castShadow = true;
+  shingles.receiveShadow = true;
+  const dummy = new THREE.Object3D();
+  const tones = [-0.075, -0.035, 0, 0.035, 0.065];
+  for (let index = 0; index < layout.shingles.length; index++) {
+    const shingle = layout.shingles[index];
+    const surfaceLift = layout.panelThickness / 2 + shingle.height / 2 + 0.012;
+    const normalX = shingle.side === 'left'
+      ? -Math.sin(layout.roofAngle)
+      : Math.sin(layout.roofAngle);
+    dummy.position.set(
+      shingle.x + normalX * surfaceLift,
+      shingle.y + Math.cos(layout.roofAngle) * surfaceLift,
+      shingle.z,
+    );
+    dummy.rotation.set(0, 0, shingle.rotationZ);
+    dummy.scale.set(shingle.width, shingle.height, shingle.depth);
+    dummy.updateMatrix();
+    shingles.setMatrixAt(index, dummy.matrix);
+    const color = new THREE.Color(roofColor).offsetHSL(0, 0, tones[shingle.variant % tones.length]);
+    shingles.setColorAt(index, color);
+  }
+  shingles.instanceMatrix.needsUpdate = true;
+  if (shingles.instanceColor) shingles.instanceColor.needsUpdate = true;
+  tagBuildingRoofPart(shingles, building, 'shingles');
+  shingles.userData.residentialRoofShingles = true;
+  shingles.userData.shingleCount = layout.shingleCount;
+  roof.add(shingles);
+  return shingles;
+}
+
+function makeResidentialRoof(building, width, depth, wallThickness, roofColor) {
+  const layout = getResidentialRoofLayout({
+    width,
+    depth,
+    wallThickness,
+    wallHeight: WALL_H,
+    ridgeHeight: 1.4,
+    seed: building?.id || building?.name || 'home',
+  });
+  const roof = new THREE.Group();
+  roof.name = 'residential-roof-system';
+  roof.position.set(width / 2, 0, depth / 2);
+  const panelColor = new THREE.Color(roofColor).multiplyScalar(0.82).getHex();
+  const trimColor = new THREE.Color(roofColor).multiplyScalar(0.56).getHex();
+  const trimHighlight = new THREE.Color(roofColor).offsetHSL(0, -0.04, 0.12).getHex();
+  const panelY = layout.wallHeight + layout.ridgeHeight / 2;
+
+  addResidentialGableInfill(roof, building, layout, roofColor);
+  for (const side of ['left', 'right']) {
+    const direction = side === 'left' ? -1 : 1;
+    addResidentialRoofBox(roof, building, 'slope-panel', {
+      x: direction * layout.roofWidth / 4,
+      y: panelY,
+      z: 0,
+      width: layout.slopeLength,
+      height: layout.panelThickness,
+      depth: layout.roofDepth,
+      rotationZ: side === 'left' ? layout.roofAngle : -layout.roofAngle,
+      color: panelColor,
+    });
+  }
+  addResidentialShingles(roof, building, layout, roofColor);
+
+  // A complete trim loop finishes the ridge, both eaves, and all four rake
+  // edges. These dimensions derive from the same layout as the roof panels,
+  // so they continue to fit after every building resize.
+  addResidentialRoofBox(roof, building, 'ridge-cap', {
+    x: 0,
+    y: layout.wallHeight + layout.ridgeHeight + 0.095,
+    z: 0,
+    width: 0.3,
+    height: 0.19,
+    depth: layout.roofDepth + 0.12,
+    color: trimHighlight,
+  });
+  for (const x of [-layout.roofWidth / 2, layout.roofWidth / 2]) {
+    addResidentialRoofBox(roof, building, 'eave-fascia', {
+      x,
+      y: layout.wallHeight - 0.015,
+      z: 0,
+      width: layout.edgeThickness,
+      height: 0.25,
+      depth: layout.roofDepth + 0.1,
+      color: trimColor,
+    });
+  }
+  for (const z of [-layout.roofDepth / 2, layout.roofDepth / 2]) {
+    for (const side of ['left', 'right']) {
+      addResidentialRoofBox(roof, building, 'rake-trim', {
+        x: (side === 'left' ? -1 : 1) * layout.roofWidth / 4,
+        y: panelY + 0.025,
+        z,
+        width: layout.slopeLength + 0.08,
+        height: 0.15,
+        depth: layout.edgeThickness,
+        rotationZ: side === 'left' ? layout.roofAngle : -layout.roofAngle,
+        color: trimHighlight,
+      });
+    }
+  }
+
+  roof.userData = {
+    ...(roof.userData || {}),
+    buildingRoof: true,
+    residentialRoof: true,
+    residentialRoofLayout: layout,
+    residentialRoofLayoutSummary: Object.freeze({
+      width,
+      depth,
+      roofWidth: layout.roofWidth,
+      roofDepth: layout.roofDepth,
+      eaveOverhang: layout.overhang.eave,
+      gableOverhang: layout.overhang.gable,
+      courseCount: layout.courseCount,
+      columnCount: layout.columnCount,
+      shingleCount: layout.shingleCount,
+      slopePanelCount: 2,
+      eaveEdgeCount: 2,
+      rakeEdgeCount: 4,
+      ridgeCapCount: 1,
+    }),
+  };
+  return roof;
 }
 
 function tagFurniture(item, type = null, meta = null) {
@@ -28439,7 +29722,7 @@ function setupInput() {
       if (hit) {
         decorationGhost.position.set(
           Math.floor(hit.x / T) * T + 0.5,
-          0,
+          DECORATION_DEFS[decorationPlacementType]?.natural ? 0.20 : 0,
           Math.floor(hit.z / T) * T + 0.5
         );
       }
@@ -30980,6 +32263,10 @@ function handleClick(e) {
   if (decorationPlacementType && editMode === 'world') {
     const wx = Math.floor(hit.x / T);
     const wz = Math.floor(hit.z / T);
+    if (!isWorldTileInBounds(wx, wz, T)) {
+      showToast('🚫 Decorations must stay inside the world boundary', 'error');
+      return;
+    }
     const tile = _getWorldTile(wx, wz);
     if (tile !== TERRAIN.GRASS && tile !== TERRAIN.DIRT) {
       showToast('🚫 Decorations can only be placed on grass or dirt terrain', 'error');
@@ -30989,8 +32276,17 @@ function handleClick(e) {
       showToast('🚫 Decorations cannot be placed inside a building footprint', 'error');
       return;
     }
-    addPlacedDecoration(decorationPlacementType, wx, wz);
-    showToast(`${DECORATION_DEFS[decorationPlacementType]?.icon || '🌿'} Placed!`, 'success');
+    if (DECORATION_DEFS[decorationPlacementType]?.natural && naturalAssetOverlapsRoadway(
+      wx + 0.5,
+      wz + 0.5,
+      decorationPlacementType,
+    )) {
+      showToast('🚫 Natural objects cannot overlap a roadway, curb, gutter, or sidewalk', 'error');
+      return;
+    }
+    if (addPlacedDecoration(decorationPlacementType, wx, wz)) {
+      showToast(`${DECORATION_DEFS[decorationPlacementType]?.icon || '🌿'} Placed!`, 'success');
+    }
     return;
   }
 
@@ -31049,6 +32345,7 @@ function paintTerrain(e) {
 
   chunk.terrain[idx] = selectedTerrain;
   chunk.dirty = true;
+  chunk.terrainFlagsDirty = true;
 
   // Remove any user-placed decorations on tiles painted as non-grass (road, sidewalk, water, etc.)
   if (selectedTerrain !== TERRAIN.GRASS && selectedTerrain !== TERRAIN.DIRT) {
@@ -31079,6 +32376,7 @@ function paintTerrain(e) {
         const ni = nlz * CHUNK + nlx;
         if (chunk.terrain[ni] === TERRAIN.GRASS || chunk.terrain[ni] === TERRAIN.DIRT) {
           chunk.terrain[ni] = TERRAIN.SIDEWALK;
+          chunk.terrainFlagsDirty = true;
         }
       } else {
         // Neighbour chunk
@@ -31092,6 +32390,7 @@ function paintTerrain(e) {
           if (nChunk.terrain[ni] === TERRAIN.GRASS || nChunk.terrain[ni] === TERRAIN.DIRT) {
             nChunk.terrain[ni] = TERRAIN.SIDEWALK;
             nChunk.dirty = true;
+            nChunk.terrainFlagsDirty = true;
             rebuildChunk(nChunk);
           }
         }
@@ -31447,6 +32746,11 @@ function getStreetMeshTileRect(street) {
 }
 
 function validateBuildingResizeFootprint(building, bounds) {
+  const rect = getBuildingResizeFootprintRect(building, bounds);
+  const worldLimitTiles = WORLD_HALF_SIZE / T;
+  if (rect.minX < -worldLimitTiles || rect.minZ < -worldLimitTiles || rect.maxX > worldLimitTiles || rect.maxZ > worldLimitTiles) {
+    return { ok: false, reason: 'world-boundary', message: 'Resize blocked: footprint would cross the world boundary.' };
+  }
   if (checkResizeBuildingOverlap(building, bounds).blocked) {
     return { ok: false, reason: 'building-overlap', message: 'Resize blocked: another building is in the way.' };
   }
@@ -32031,6 +33335,9 @@ function getExteriorFloorWallHit(e) {
 // ═══════════════════════════════════════════════════════════════
 // LOD — LEVEL OF DETAIL (run once per second)
 // ═══════════════════════════════════════════════════════════════
+const BUILDING_FURNITURE_LOD_DISTANCE = 45;
+const BUILDING_DOOR_LOD_DISTANCE = 24;
+
 function updateBuildingLOD() {
   for (const [, b] of buildingsMap) {
     if (!b._group) continue;
@@ -32042,6 +33349,7 @@ function updateBuildingLOD() {
     const dx = bCenterX - camTarget.x;
     const dz = bCenterZ - camTarget.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
+    const focused = selectedBuildingId === b.id || insideBuildingId === b.id;
 
     b._group.traverse(obj => {
       if (!obj.isMesh) return;
@@ -32061,14 +33369,9 @@ function updateBuildingLOD() {
       // Never touch structural elements (roof/walls/windows/interior walls) — view mode controls those
       if (isStructural) return;
 
-      if (dist > 100) {
-        if (isFurniture || isDoor) obj.visible = false;
-      } else if (dist > 20) {
-        if (isFurniture) obj.visible = true;
-        if (isDoor) obj.visible = false;
-      } else {
-        obj.visible = true;
-      }
+      if (isFurniture) obj.visible = focused || dist <= BUILDING_FURNITURE_LOD_DISTANCE;
+      else if (isDoor) obj.visible = focused || dist <= BUILDING_DOOR_LOD_DISTANCE;
+      else if (dist <= BUILDING_DOOR_LOD_DISTANCE) obj.visible = true;
     });
   }
   updateAgentDetailLOD();
@@ -32327,7 +33630,7 @@ function buildTerrainPalette() {
     btn.className = 'terrain-swatch decor-btn';
     btn.style.cssText = 'background:#2d3a2e;min-width:52px;font-size:13px';
     btn.title = def.label;
-    btn.innerHTML = `<span class="swatch-label">${def.icon} ${def.label.split(' ')[1]}</span>`;
+    btn.innerHTML = `<span class="swatch-label">${def.icon} ${def.shortLabel}</span>`;
     btn.dataset.decorType = type;
     btn.addEventListener('click', () => {
       if (decorationPlacementType === type) {
@@ -32405,6 +33708,7 @@ const ST = {
 // Total half-width: SIDEWALK + CURB + GUTTER + LANE + CENTER/2
 ST.HALF_W = ST.SIDEWALK_W + ST.CURB_W + ST.GUTTER_W + ST.LANE_W + ST.CENTER_W / 2; // ~5.3
 ST.FULL_W = ST.HALF_W * 2; // ~10.6 tiles total width
+const MAX_NATURAL_ROADWAY_CLEARANCE = Math.max(...Object.values(NATURAL_ROADWAY_CLEARANCE_RADII));
 const STREET_LINE_SNAP_RADIUS = 8;
 const STREET_LINE_AXIS_ALIGN_RADIUS = Math.ceil(ST.HALF_W) + 2;
 const STREET_HANDLE_Y = ST.BASE + ST.SIDEWALK_H + 0.32;
@@ -32413,6 +33717,90 @@ let _streetLampGroup = null;      // THREE.Group for street light poles
 let _streetLampDebounce = null;   // debounce timer for light pole rebuild
 let _streetLampPhysicsIds = [];   // physics collider IDs for street lamps (for cleanup)
 const LAMP_SPACING = 8;           // tiles between light poles (equal spacing)
+
+function getRoadwayNaturalExclusionRects(minX, minZ, maxX, maxZ, padding = MAX_NATURAL_ROADWAY_CLEARANCE) {
+  const pad = Math.max(0, Number(padding) || 0);
+  const query = {
+    minX: Number(minX) - pad,
+    minZ: Number(minZ) - pad,
+    maxX: Number(maxX) + pad,
+    maxZ: Number(maxZ) + pad,
+  };
+  const rects = [];
+  for (const segment of _streetSegments) {
+    const bounds = getRoadwayComponentBounds(segment, ST.HALF_W, T);
+    if (!bounds) continue;
+    if (bounds.maxX < query.minX || bounds.minX > query.maxX || bounds.maxZ < query.minZ || bounds.minZ > query.maxZ) continue;
+    rects.push(bounds);
+  }
+  return rects;
+}
+
+function naturalAssetOverlapsRoadway(x, z, assetType, roadwayRects = null) {
+  const radius = NATURAL_ROADWAY_CLEARANCE_RADII[assetType] ?? NATURAL_ROADWAY_CLEARANCE_RADII.terrainDetail;
+  if (roadwayRects) return roadwayRects.some(bounds => circleIntersectsBounds(x, z, radius, bounds));
+  return doesNaturalAssetOverlapRoadway(x, z, radius, _streetSegments, ST.HALF_W, T);
+}
+
+function removePlacedNaturalDecorationsOverlappingRoadways({ persist = true } = {}) {
+  if (_streetSegments.length === 0 || placedDecorations.size === 0) return 0;
+  let removed = 0;
+  for (const [key, list] of placedDecorations) {
+    const kept = [];
+    for (const decoration of list || []) {
+      const natural = DECORATION_DEFS[decoration.type]?.natural === true;
+      const overlaps = natural && naturalAssetOverlapsRoadway(
+        Number(decoration.wx) + 0.5,
+        Number(decoration.wz) + 0.5,
+        decoration.type,
+      );
+      if (!overlaps) {
+        kept.push(decoration);
+        continue;
+      }
+      const cx = Math.floor(Number(decoration.wx) / CHUNK_W);
+      const cz = Math.floor(Number(decoration.wz) / CHUNK_W);
+      removeBody(`pdecor_${cx}_${cz}_${decoration.wx}_${decoration.wz}`);
+      removed++;
+    }
+    if (kept.length) placedDecorations.set(key, kept);
+    else placedDecorations.delete(key);
+  }
+  if (removed > 0) _placedDecorationRoadwayCleanupPending = true;
+  if (_placedDecorationRoadwayCleanupPending && persist) {
+    debounceSavePlacedDecorations();
+    _placedDecorationRoadwayCleanupPending = false;
+  }
+  return removed;
+}
+
+function getRoadwayNaturalRefreshArea(x1, z1, x2 = x1, z2 = z1) {
+  const pad = ST.HALF_W + MAX_NATURAL_ROADWAY_CLEARANCE + T;
+  return {
+    minX: Math.min(Number(x1), Number(x2)) * T - pad,
+    minZ: Math.min(Number(z1), Number(z2)) * T - pad,
+    maxX: (Math.max(Number(x1), Number(x2)) + 1) * T + pad,
+    maxZ: (Math.max(Number(z1), Number(z2)) + 1) * T + pad,
+  };
+}
+
+function refreshRoadwayNaturalClearance({ persist = true, rebuild = true, area = null } = {}) {
+  const removedPlaced = removePlacedNaturalDecorationsOverlappingRoadways({ persist });
+  if (!rebuild || _streetSegments.length === 0) return { removedPlaced, rebuiltChunks: 0 };
+
+  let rebuiltChunks = 0;
+  for (const chunk of loadedChunks.values()) {
+    const minX = chunk.cx * CHUNK_W;
+    const minZ = chunk.cz * CHUNK_W;
+    const maxX = minX + CHUNK_W;
+    const maxZ = minZ + CHUNK_W;
+    if (area && (maxX < area.minX || minX > area.maxX || maxZ < area.minZ || minZ > area.maxZ)) continue;
+    if (getRoadwayNaturalExclusionRects(minX, minZ, maxX, maxZ).length === 0) continue;
+    rebuildChunk(chunk);
+    rebuiltChunks++;
+  }
+  return { removedPlaced, rebuiltChunks };
+}
 
 function initStreetGroup() {
   _streetGroup = new THREE.Group();
@@ -33816,6 +35204,7 @@ function _restoreStreets(snapshot) {
   }
   refreshAllStreetSegmentMeshes();
   refreshStreetEditHandles();
+  refreshRoadwayNaturalClearance();
 }
 
 function _removeSegment(seg) {
@@ -33918,6 +35307,7 @@ function placeIntersectionSmart(tx, tz, type, rotation) {
   const hit = isOnStreetSegment(tx, tz);
   if (hit && hit.position === 'middle') splitStreetAt(tx, tz);
   _rebuildIntersectionAt(tx, tz);
+  refreshRoadwayNaturalClearance({ area: getRoadwayNaturalRefreshArea(tx, tz) });
 }
 
 /**
@@ -34095,6 +35485,7 @@ function addStreetSegment(x1, z1, x2, z2) {
     for (const c of crossings) _rebuildNearChunks(c.crossX, c.crossZ, 5);
     _rebuildNearChunks(x1, z1, 5);
     _rebuildNearChunks(x2, z2, 5);
+    refreshRoadwayNaturalClearance({ area: getRoadwayNaturalRefreshArea(x1, z1, x2, z2) });
     return;
   }
   
@@ -34183,6 +35574,7 @@ function addStreetSegment(x1, z1, x2, z2) {
   if (newLen >= 2) {
     _addRawSegment(nx1, nz1, nx2, nz2);
   }
+  refreshRoadwayNaturalClearance({ area: getRoadwayNaturalRefreshArea(x1, z1, x2, z2) });
 }
 
 // Legacy wrapper
@@ -34234,6 +35626,7 @@ function _rebuildNearChunks(tx, tz, radius) {
 }
 
 function _getWorldTile(wx, wz) {
+  if (!isWorldTileInBounds(wx * T, wz * T, T)) return -1;
   const cx = Math.floor(wx / CHUNK);
   const cz = Math.floor(wz / CHUNK);
   const chunk = loadedChunks.get(chunkKey(cx, cz));
@@ -35315,10 +36708,9 @@ function hasNaturalItemsInArea(wx, wz, widthTiles, heightTiles) {
       // Check procedural tree (same RNG as buildChunkDecorations)
       const seed = cx * 1000 + cz;
       const rng = pseudoRandom(seed + ltx * 31 + ltz * 97);
-      if (rng < 0.006) return true; // tree here
-      // Check procedural rock
-      const rng2 = pseudoRandom(seed + ltx * 53 + ltz * 139);
-      if (rng2 > 0.995) return true; // rock here
+      if (rng < NATURAL_DENSITIES.tree) return true;
+      const detailRoll = pseudoRandom(seed + ltx * 53 + ltz * 139);
+      if (detailRoll < NATURAL_DENSITIES.chunkDetail) return true;
     }
   }
   // Check user-placed decorations
@@ -35329,7 +36721,7 @@ function hasNaturalItemsInArea(wx, wz, widthTiles, heightTiles) {
       const placed = placedDecorations.get(chunkDecorationKey(ccx, ccz)) || [];
       for (const pd of placed) {
         if (pd.wx >= wx && pd.wx < wx + widthTiles && pd.wz >= wz && pd.wz < wz + heightTiles) {
-          if (pd.type === 'tree' || pd.type === 'rock' || pd.type === 'flower' || pd.type === 'bush') return true;
+          if (DECORATION_DEFS[pd.type]?.natural || ['flower', 'grassPatch'].includes(pd.type)) return true;
         }
       }
     }
@@ -35352,7 +36744,7 @@ function _removeNaturalDecorationsInArea(wx, wz, widthTiles, heightTiles) {
       const kept = [];
       for (const pd of placed) {
         const inArea = pd.wx >= wx && pd.wx < wx + widthTiles && pd.wz >= wz && pd.wz < wz + heightTiles;
-        if (inArea && (pd.type === 'tree' || pd.type === 'rock' || pd.type === 'flower' || pd.type === 'bush')) {
+        if (inArea && (DECORATION_DEFS[pd.type]?.natural || ['flower', 'grassPatch'].includes(pd.type))) {
           // Remove physics collider using the standard naming convention
           removeBody(`pdecor_${ccx}_${ccz}_${pd.wx}_${pd.wz}`);
         } else {
@@ -35550,6 +36942,10 @@ function checkBuildingRoadwayOverlap(wx, wz, widthTiles, heightTiles) {
 }
 
 function getBuildingPlacementBlocker(wx, wz, widthTiles, heightTiles, excludeId) {
+  const worldLimitTiles = WORLD_HALF_SIZE / T;
+  if (wx < -worldLimitTiles || wz < -worldLimitTiles || wx + widthTiles > worldLimitTiles || wz + heightTiles > worldLimitTiles) {
+    return { blocked: true, reason: 'world-boundary', message: 'Cannot place here — footprint would cross the world boundary.' };
+  }
   if (checkBuildingCollision(wx, wz, widthTiles, heightTiles, excludeId)) {
     return { blocked: true, reason: 'building-overlap', message: 'Cannot place here — overlaps another building!' };
   }
@@ -35706,6 +37102,7 @@ function _applyUndoEntry(u, isRedo) {
     if (chunk) {
       chunk.terrain[u.idx] = isRedo ? u.newType : u.oldType;
       chunk.dirty = true;
+      chunk.terrainFlagsDirty = true;
       rebuildChunk(chunk);
     }
     showToast(`${prefix} terrain`, 'warning');
@@ -36164,6 +37561,10 @@ async function loadStreets() {
       if (s.x1 !== s.x2 || s.z1 !== s.z2) _rebuildNearChunks(s.x2, s.z2, 5);
     }
     refreshAllStreetSegmentMeshes();
+    // Startup migration: remove any saved natural object that intersects the
+    // rendered roadway footprint. Loaded chunks are rebuilt immediately after
+    // this function, so only persistence cleanup is needed here.
+    refreshRoadwayNaturalClearance({ rebuild: false });
     // Rebuild light poles and traffic lights after all streets loaded
     _rebuildStreetLightPoles();
     _rebuildTrafficLights();
@@ -36950,7 +38351,35 @@ function _paintRoadLine(x1, z1, x2, z2) {
   }
 }
 
+function _removePlacedDecorationsAtWorldTile(cx, cz, lx, lz) {
+  const key = chunkDecorationKey(cx, cz);
+  const list = placedDecorations.get(key);
+  if (!list?.length) return 0;
+  const kept = [];
+  let removed = 0;
+  for (const decoration of list) {
+    const decorationLx = Math.floor((decoration.wx - cx * CHUNK_W) / T);
+    const decorationLz = Math.floor((decoration.wz - cz * CHUNK_W) / T);
+    if (decorationLx !== lx || decorationLz !== lz) {
+      kept.push(decoration);
+      continue;
+    }
+    removeBody(`pdecor_${cx}_${cz}_${decoration.wx}_${decoration.wz}`);
+    removed++;
+  }
+  if (removed === 0) return 0;
+  if (kept.length) placedDecorations.set(key, kept);
+  else placedDecorations.delete(key);
+  _placedDecorationRoadwayCleanupPending = true;
+  if (shouldPersistWorldAutosave()) {
+    debounceSavePlacedDecorations();
+    _placedDecorationRoadwayCleanupPending = false;
+  }
+  return removed;
+}
+
 function _setWorldTile(wx, wz, tileType) {
+  if (!isWorldTileInBounds(wx * T, wz * T, T)) return;
   const cx = Math.floor(wx / CHUNK);
   const cz = Math.floor(wz / CHUNK);
   const chunk = loadedChunks.get(chunkKey(cx, cz));
@@ -36958,26 +38387,16 @@ function _setWorldTile(wx, wz, tileType) {
   const lx = ((wx % CHUNK) + CHUNK) % CHUNK;
   const lz = ((wz % CHUNK) + CHUNK) % CHUNK;
   chunk.terrain[lz * CHUNK + lx] = tileType;
+  chunk.terrainFlagsDirty = true;
   if (shouldPersistWorldAutosave()) chunk.dirty = true;
   // Remove user-placed decorations on non-grass tiles (e.g. roads painted over trees)
   if (tileType !== TERRAIN.GRASS && tileType !== TERRAIN.DIRT) {
-    const pdKey = chunkDecorationKey(cx, cz);
-    const pdList = placedDecorations.get(pdKey);
-    if (pdList) {
-      const filtered = pdList.filter(pd => {
-        const ptx = Math.floor((pd.wx - cx * CHUNK_W) / T);
-        const ptz = Math.floor((pd.wz - cz * CHUNK_W) / T);
-        return ptx !== lx || ptz !== lz;
-      });
-      if (filtered.length !== pdList.length) {
-        placedDecorations.set(pdKey, filtered);
-        if (shouldPersistWorldAutosave()) debounceSavePlacedDecorations();
-      }
-    }
+    _removePlacedDecorationsAtWorldTile(cx, cz, lx, lz);
   }
 }
 
 function _setWorldTileIfGrass(wx, wz, tileType) {
+  if (!isWorldTileInBounds(wx * T, wz * T, T)) return;
   const cx = Math.floor(wx / CHUNK);
   const cz = Math.floor(wz / CHUNK);
   const chunk = loadedChunks.get(chunkKey(cx, cz));
@@ -36987,7 +38406,11 @@ function _setWorldTileIfGrass(wx, wz, tileType) {
   const idx = lz * CHUNK + lx;
   if (chunk.terrain[idx] === TERRAIN.GRASS || chunk.terrain[idx] === TERRAIN.DIRT) {
     chunk.terrain[idx] = tileType;
+    chunk.terrainFlagsDirty = true;
     if (shouldPersistWorldAutosave()) chunk.dirty = true;
+    if (tileType !== TERRAIN.GRASS && tileType !== TERRAIN.DIRT) {
+      _removePlacedDecorationsAtWorldTile(cx, cz, lx, lz);
+    }
   }
 }
 
@@ -37649,12 +39072,13 @@ function applyBuildingViewMode(building, mode) {
       return;
     }
     const n = child.name || '';
-    const isExteriorStructure = n === 'roof' || n.startsWith('wall-') || n === 'window';
-    const isExteriorWall = n.startsWith('wall-');
+    const isRoofStructure = n === 'roof' || child.userData?.buildingRoof === true;
+    const isExteriorStructure = isRoofStructure || n.startsWith('wall-') || n === 'window';
+    const isExteriorWall = n.startsWith('wall-') || child.userData?.buildingWindow === true;
     const isInteriorWall = n === 'interior-wall';
 
     if (isBuildingFloorFocusActive(building)) {
-      if (n === 'roof') {
+      if (isRoofStructure) {
         child.visible = false;
         return;
       }
@@ -37668,27 +39092,41 @@ function applyBuildingViewMode(building, mode) {
       child.visible = true;
       if (isExteriorStructure) {
         if (child.material) {
-          child.material.transparent = false;
-          child.material.opacity = 1.0;
+          const isWindowGlass = child.userData?.buildingWindowGlass === true;
+          const isRoofGlass = child.userData?.roofTransparent === true;
+          child.material.transparent = isWindowGlass || isRoofGlass;
+          child.material.opacity = isWindowGlass
+            ? Number(child.userData?.windowBaseOpacity || 0.3)
+            : isRoofGlass
+              ? Number(child.userData?.roofBaseOpacity || 0.52)
+              : 1.0;
+          if (isWindowGlass || isRoofGlass) child.material.depthWrite = false;
           child.material.needsUpdate = true;
         }
       }
     } else if (mode === 'no-roof') {
-      if (n === 'roof') {
+      if (isRoofStructure) {
         child.visible = false;
       } else {
         child.visible = true;
         if (isExteriorStructure) {
           if (child.material) {
-            child.material.transparent = false;
-            child.material.opacity = 1.0;
+            const isWindowGlass = child.userData?.buildingWindowGlass === true;
+            const isRoofGlass = child.userData?.roofTransparent === true;
+            child.material.transparent = isWindowGlass || isRoofGlass;
+            child.material.opacity = isWindowGlass
+              ? Number(child.userData?.windowBaseOpacity || 0.3)
+              : isRoofGlass
+                ? Number(child.userData?.roofBaseOpacity || 0.52)
+                : 1.0;
+            if (isWindowGlass || isRoofGlass) child.material.depthWrite = false;
             child.material.needsUpdate = true;
           }
         }
       }
     } else if (mode === 'active-walls') {
       // Camera-relative: hide roof + walls facing camera, keep walls behind
-      if (n === 'roof') {
+      if (isRoofStructure) {
         child.visible = false;
       } else if (n.startsWith('wall-front')) {
         child.visible = !facing.front;
@@ -37827,6 +39265,7 @@ window.setCamDist = (d) => { camDist = Math.max(4.5, Math.min(120, d)); updateCa
 window.camTarget = camTarget; // live Vector3 reference
 window.flyCameraTo = flyCameraTo;
 window.zoomFitAll = zoomFitAll;
+window.__VWNaturalWorldDiagnostics = getNaturalWorldDiagnostics;
 
 // ═══════════════════════════════════════════════════════════════
 // AGENT DASHBOARD PANEL
@@ -41067,17 +42506,15 @@ const _doorAutoPresence = new Map(); // buildingId → proximity refresh state
 let _doorAutoScanTimer = 0;
 
 function isAgentNearDoor(building, agent, radius = API_TILE * 1.5) {
-  if (!building || !agent || !Number.isFinite(agent.x) || !Number.isFinite(agent.y)) return false;
-  const effectiveRadius = Math.max(radius, getBuildingDoorwayReachApi(building) + API_TILE * 0.4);
-  const radiusSq = effectiveRadius * effectiveRadius;
+  if (!building) return false;
   const points = [
     getBuildingDoorPosAPI(building),
     getBuildingDoorwayPosAPI(building),
   ].filter((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y));
-  return points.some((point) => {
-    const dx = (point.x || 0) - agent.x;
-    const dy = (point.y || 0) - agent.y;
-    return (dx * dx + dy * dy) <= radiusSq;
+  return isAgentNearAutomaticDoor(agent, points, {
+    radiusApi: radius,
+    doorwayReachApi: getBuildingDoorwayReachApi(building),
+    apiTile: API_TILE,
   });
 }
 
@@ -41093,9 +42530,14 @@ function updateAutoDoors(dt) {
   for (const building of buildingsMap.values()) {
     if (!building?.id || building.type === 'park' || !building._group) continue;
     const hasNearbyAgent = agentsList.some((agent) => isAgentNearDoor(building, agent));
+    const hasActiveCrossing = agentsList.some((agent) => (
+      agent?._doorTransition?.buildingId === building.id ||
+      agent?._enteringBuilding?.id === building.id
+    ));
+    const shouldHoldOpen = hasNearbyAgent || hasActiveCrossing;
     const state = _doorAutoPresence.get(building.id) || { active: false, lastRefreshMs: 0 };
 
-    if (hasNearbyAgent) {
+    if (shouldHoldOpen) {
       if (!state.active || (nowMs - state.lastRefreshMs) >= 700) {
         animateDoorOpen(building.id);
         state.lastRefreshMs = nowMs;
@@ -41107,6 +42549,17 @@ function updateAutoDoors(dt) {
 
     _doorAutoPresence.set(building.id, state);
   }
+}
+
+function resetBuildingDoorAnimation(buildingId) {
+  if (!buildingId) return;
+  const anim = _doorAnimations.get(buildingId);
+  if (anim) {
+    clearTimeout(anim._closeTimer);
+    clearTimeout(anim._forceCloseTimer);
+    _doorAnimations.delete(buildingId);
+  }
+  _doorAutoPresence.delete(buildingId);
 }
 
 function animateDoorOpen(buildingId) {
@@ -41254,13 +42707,35 @@ function clearAllDoorQueues() {
   _doorQueues.clear();
   _doorAutoPresence.clear();
   _doorAutoScanTimer = 0;
-  for (const anim of _doorAnimations.values()) {
-    clearTimeout(anim?._closeTimer);
-    clearTimeout(anim?._forceCloseTimer);
-    if (anim?.type === 'sliding') anim.targetOffset = 0;
-    else if (anim) anim.targetAngle = 0;
-  }
+  for (const buildingId of [..._doorAnimations.keys()]) resetBuildingDoorAnimation(buildingId);
 }
+
+window.__verifyAutomaticOfficeDoors = () => {
+  const offices = [...buildingsMap.values()].filter((building) => building?.type === 'office');
+  const rendered = offices.map((building) => ({
+    id: building.id,
+    doorType: building._doorType || null,
+    hasLeftGlassPanel: Boolean(building._group?.getObjectByName('doorSlideLeft')),
+    hasRightGlassPanel: Boolean(building._group?.getObjectByName('doorSlideRight')),
+  }));
+  const sample = offices[0] || null;
+  const points = sample ? [getBuildingDoorPosAPI(sample), getBuildingDoorwayPosAPI(sample)] : [];
+  const probe = points[0] ? { x: points[0].x, y: points[0].y } : null;
+  const proximityOpens = Boolean(sample && probe && isAgentNearDoor(sample, probe));
+  if (sample && proximityOpens) {
+    animateDoorOpen(sample.id);
+    updateDoorAnimations(0.25);
+  }
+  const animation = sample ? _doorAnimations.get(sample.id) : null;
+  return Object.freeze({
+    officeCount: offices.length,
+    allOfficesUseSlidingGlass: rendered.length > 0 && rendered.every((door) => door.doorType === 'sliding' && door.hasLeftGlassPanel && door.hasRightGlassPanel),
+    proximityOpens,
+    sampleAnimationType: animation?.type || null,
+    sampleOpenOffset: Number(animation?.currentOffset || 0),
+    rendered,
+  });
+};
 
 // ═══════════════════════════════════════════════════════════════
 // AGENT CLICK HANDLER
@@ -70451,11 +71926,36 @@ function _shouldStopAtLight(vx, vz, vdir, thisVehicle) {
  */
 const VEHICLE_FOLLOW_DIST = 4.5; // minimum distance to keep behind the car in front
 function _getQueueStopDistance(v) {
+  const myRenderX = Number(v.group?.position?.x ?? v.x);
+  const myRenderZ = Number(v.group?.position?.z ?? v.z);
+  let closestFootprintGap = Infinity;
+  for (const other of vehiclesList) {
+    if (other === v || !other.group.visible) continue;
+    const otherRenderX = Number(other.group?.position?.x ?? other.x);
+    const otherRenderZ = Number(other.group?.position?.z ?? other.z);
+    const dx = otherRenderX - myRenderX;
+    const dz = otherRenderZ - myRenderZ;
+    const forwardX = Math.cos(Number(v.group?.rotation?.y || 0));
+    const forwardZ = -Math.sin(Number(v.group?.rotation?.y || 0));
+    const ahead = dx * forwardX + dz * forwardZ;
+    if (ahead <= 0) continue;
+    const lateral = Math.abs(dx * (-forwardZ) + dz * forwardX);
+    const separation = getTrafficVehicleSeparation(v.vehicleType, other.vehicleType);
+    if (lateral <= separation * 0.72 && ahead < closestFootprintGap) closestFootprintGap = ahead;
+  }
+  if (closestFootprintGap < VEHICLE_FOLLOW_DIST + Number(v._collisionRadius || 1.3)) {
+    return {
+      shouldQueue: true,
+      distToStop: Math.max(0, closestFootprintGap - VEHICLE_FOLLOW_DIST),
+      distToCarAhead: closestFootprintGap,
+    };
+  }
+
   const laneOff = ST.LANE_W * 0.45;
   const myOffX = v.dir === 2 ? -laneOff : v.dir === 3 ? laneOff : 0;
   const myOffZ = v.dir === 0 ? laneOff : v.dir === 1 ? -laneOff : 0;
-  const myLaneX = v.x + (v._laneOffX || myOffX);
-  const myLaneZ = v.z + (v._laneOffZ || myOffZ);
+  const myLaneX = v.x + (v._pathIncludesLaneOffset ? 0 : (v._laneOffX || myOffX));
+  const myLaneZ = v.z + (v._pathIncludesLaneOffset ? 0 : (v._laneOffZ || myOffZ));
 
   // Direction unit vector
   const dirVectors = [[1,0],[-1,0],[0,1],[0,-1]]; // 0=+X, 1=-X, 2=+Z, 3=-Z
@@ -70469,8 +71969,8 @@ function _getQueueStopDistance(v) {
 
     const otherOffX = other.dir === 2 ? -laneOff : other.dir === 3 ? laneOff : 0;
     const otherOffZ = other.dir === 0 ? laneOff : other.dir === 1 ? -laneOff : 0;
-    const otherLaneX = other.x + (other._laneOffX || otherOffX);
-    const otherLaneZ = other.z + (other._laneOffZ || otherOffZ);
+    const otherLaneX = other.x + (other._pathIncludesLaneOffset ? 0 : (other._laneOffX || otherOffX));
+    const otherLaneZ = other.z + (other._pathIncludesLaneOffset ? 0 : (other._laneOffZ || otherOffZ));
 
     const dx = otherLaneX - myLaneX;
     const dz = otherLaneZ - myLaneZ;
@@ -70517,7 +72017,22 @@ const VEHICLE_SPEED = 7.0; // world units/sec (~4x walking speed)
 // Vehicle types for variety
 const VEHICLE_TYPES = ['car', 'car', 'car', 'sedan', 'sedan', 'truck', 'van', 'bus'];
 
-function _buildCarModel(g, color) {
+function _vehicleDetailBox(group, x, y, z, width, height, depth, color) {
+  const part = posVox(x, y, z, width, height, depth, color);
+  group.add(part);
+  return part;
+}
+
+function _addVehicleMirrors(details, x, y, z, color = 0x263238) {
+  _vehicleDetailBox(details, x, y, z, 0.12, 0.08, 0.08, color);
+  _vehicleDetailBox(details, x, y, -z, 0.12, 0.08, 0.08, color);
+}
+
+function _addVehiclePlate(details, x, y, color = 0xeceff1) {
+  _vehicleDetailBox(details, x, y, 0, 0.025, 0.075, 0.22, color);
+}
+
+function _buildCarModel(g, color, details) {
   // Standard car body
   g.add(posVox(0, 0, 0, 1.0, 0.35, 0.55, color));
   const roofCol = new THREE.Color(color).multiplyScalar(0.75).getHex();
@@ -70527,11 +72042,25 @@ function _buildCarModel(g, color) {
   g.add(posVox(0.52, -0.04, -0.2, 0.05, 0.1, 0.1, 0xfff9c4)); // headlight R
   g.add(posVox(-0.52, -0.04, 0.2, 0.05, 0.1, 0.1, 0xef5350)); // tail L
   g.add(posVox(-0.52, -0.04, -0.2, 0.05, 0.1, 0.1, 0xef5350)); // tail R
-  _addWheels(g, [[0.35, 0.3], [0.35, -0.3], [-0.35, 0.3], [-0.35, -0.3]], 0.13);
+  _vehicleDetailBox(details, -0.28, 0.28, 0, 0.08, 0.2, 0.4, 0x90caf9);
+  for (const side of [-1, 1]) {
+    _vehicleDetailBox(details, 0.12, 0.29, side * 0.245, 0.24, 0.18, 0.025, 0x81d4fa);
+    _vehicleDetailBox(details, -0.16, 0.29, side * 0.245, 0.22, 0.18, 0.025, 0x90caf9);
+    _vehicleDetailBox(details, 0, -0.08, side * 0.285, 0.76, 0.08, 0.035, roofCol);
+    _vehicleDetailBox(details, -0.02, 0.08, side * 0.282, 0.018, 0.22, 0.02, 0x37474f);
+    _vehicleDetailBox(details, -0.12, 0.13, side * 0.286, 0.12, 0.025, 0.02, 0xcfd8dc);
+  }
+  _vehicleDetailBox(details, 0.525, -0.03, 0, 0.035, 0.12, 0.24, 0x263238);
+  _vehicleDetailBox(details, 0.55, -0.14, 0, 0.06, 0.09, 0.5, 0x37474f);
+  _vehicleDetailBox(details, -0.55, -0.14, 0, 0.06, 0.09, 0.5, 0x37474f);
+  _addVehicleMirrors(details, 0.25, 0.27, 0.32, roofCol);
+  _addVehiclePlate(details, 0.57, -0.11);
+  _addVehiclePlate(details, -0.57, -0.11, 0xfff8e1);
+  _addWheels(g, [[0.35, 0.3], [0.35, -0.3], [-0.35, 0.3], [-0.35, -0.3]], 0.13, details);
   g.scale.setScalar(2.0);
 }
 
-function _buildSedanModel(g, color) {
+function _buildSedanModel(g, color, details) {
   // Longer sedan with sleeker roof
   g.add(posVox(0, 0, 0, 1.2, 0.32, 0.52, color));
   const roofCol = new THREE.Color(color).multiplyScalar(0.8).getHex();
@@ -70542,11 +72071,24 @@ function _buildSedanModel(g, color) {
   g.add(posVox(0.62, -0.04, -0.2, 0.05, 0.08, 0.08, 0xfff9c4));
   g.add(posVox(-0.62, -0.04, 0.2, 0.05, 0.08, 0.08, 0xef5350));
   g.add(posVox(-0.62, -0.04, -0.2, 0.05, 0.08, 0.08, 0xef5350));
-  _addWheels(g, [[0.42, 0.28], [0.42, -0.28], [-0.42, 0.28], [-0.42, -0.28]], 0.12);
+  for (const side of [-1, 1]) {
+    _vehicleDetailBox(details, 0.17, 0.28, side * 0.235, 0.26, 0.17, 0.025, 0x81d4fa);
+    _vehicleDetailBox(details, -0.17, 0.28, side * 0.235, 0.25, 0.17, 0.025, 0x90caf9);
+    _vehicleDetailBox(details, 0, -0.075, side * 0.272, 0.92, 0.07, 0.03, roofCol);
+    _vehicleDetailBox(details, 0, 0.1, side * 0.268, 0.018, 0.2, 0.02, 0x37474f);
+    _vehicleDetailBox(details, -0.19, 0.13, side * 0.27, 0.11, 0.022, 0.018, 0xcfd8dc);
+  }
+  _vehicleDetailBox(details, 0.625, -0.12, 0, 0.055, 0.08, 0.48, 0x37474f);
+  _vehicleDetailBox(details, -0.625, -0.12, 0, 0.055, 0.08, 0.48, 0x37474f);
+  _vehicleDetailBox(details, 0.62, -0.025, 0, 0.03, 0.1, 0.23, 0x263238);
+  _addVehicleMirrors(details, 0.29, 0.27, 0.31, roofCol);
+  _addVehiclePlate(details, 0.655, -0.1);
+  _addVehiclePlate(details, -0.655, -0.1, 0xfff8e1);
+  _addWheels(g, [[0.42, 0.28], [0.42, -0.28], [-0.42, 0.28], [-0.42, -0.28]], 0.12, details);
   g.scale.setScalar(2.0);
 }
 
-function _buildTruckModel(g, color) {
+function _buildTruckModel(g, color, details) {
   // Pickup truck with bed
   const darkColor = new THREE.Color(color).multiplyScalar(0.7).getHex();
   // Cab
@@ -70564,11 +72106,24 @@ function _buildTruckModel(g, color) {
   g.add(posVox(0.62, 0.02, -0.22, 0.05, 0.1, 0.1, 0xfff9c4));
   g.add(posVox(-0.68, 0.02, 0.22, 0.05, 0.1, 0.1, 0xef5350));
   g.add(posVox(-0.68, 0.02, -0.22, 0.05, 0.1, 0.1, 0xef5350));
-  _addWheels(g, [[0.4, 0.32], [0.4, -0.32], [-0.4, 0.32], [-0.4, -0.32]], 0.15);
+  _vehicleDetailBox(details, 0.57, 0.04, 0, 0.04, 0.18, 0.34, 0x263238);
+  _vehicleDetailBox(details, 0.64, -0.15, 0, 0.08, 0.1, 0.58, 0x455a64);
+  _vehicleDetailBox(details, -0.68, -0.12, 0, 0.07, 0.1, 0.58, 0x455a64);
+  _vehicleDetailBox(details, -0.35, 0.17, 0, 0.54, 0.035, 0.48, 0x263238);
+  _vehicleDetailBox(details, 0.08, 0.36, 0, 0.045, 0.22, 0.45, 0x90caf9);
+  for (const side of [-1, 1]) {
+    _vehicleDetailBox(details, 0.32, 0.37, side * 0.285, 0.32, 0.22, 0.025, 0x81d4fa);
+    _vehicleDetailBox(details, -0.35, -0.09, side * 0.315, 0.58, 0.07, 0.03, darkColor);
+    _vehicleDetailBox(details, 0.29, 0.13, side * 0.315, 0.12, 0.025, 0.02, 0xcfd8dc);
+  }
+  _addVehicleMirrors(details, 0.48, 0.35, 0.36, darkColor);
+  _addVehiclePlate(details, 0.69, -0.1);
+  _addVehiclePlate(details, -0.72, -0.09, 0xfff8e1);
+  _addWheels(g, [[0.4, 0.32], [0.4, -0.32], [-0.4, 0.32], [-0.4, -0.32]], 0.15, details);
   g.scale.setScalar(2.0);
 }
 
-function _buildVanModel(g, color) {
+function _buildVanModel(g, color, details) {
   // Delivery van (taller, boxy)
   g.add(posVox(0, 0.05, 0, 1.1, 0.4, 0.55, color));
   g.add(posVox(-0.1, 0.42, 0, 0.9, 0.35, 0.52, color)); // cargo area
@@ -70580,11 +72135,24 @@ function _buildVanModel(g, color) {
   g.add(posVox(0.57, 0.0, -0.22, 0.05, 0.1, 0.1, 0xfff9c4));
   g.add(posVox(-0.57, 0.0, 0.22, 0.05, 0.1, 0.1, 0xef5350));
   g.add(posVox(-0.57, 0.0, -0.22, 0.05, 0.1, 0.1, 0xef5350));
-  _addWheels(g, [[0.38, 0.3], [0.38, -0.3], [-0.38, 0.3], [-0.38, -0.3]], 0.14);
+  _vehicleDetailBox(details, 0.565, 0.03, 0, 0.04, 0.15, 0.3, 0x263238);
+  _vehicleDetailBox(details, 0.59, -0.15, 0, 0.07, 0.09, 0.52, 0x455a64);
+  _vehicleDetailBox(details, -0.59, -0.15, 0, 0.07, 0.09, 0.52, 0x455a64);
+  for (const side of [-1, 1]) {
+    _vehicleDetailBox(details, 0.35, 0.43, side * 0.27, 0.3, 0.25, 0.025, 0x81d4fa);
+    _vehicleDetailBox(details, -0.14, 0.28, side * 0.273, 0.018, 0.48, 0.02, 0x455a64);
+    _vehicleDetailBox(details, -0.23, 0.2, side * 0.275, 0.12, 0.025, 0.02, 0xcfd8dc);
+    _vehicleDetailBox(details, 0, -0.11, side * 0.29, 0.84, 0.07, 0.03, new THREE.Color(color).multiplyScalar(0.72).getHex());
+  }
+  _vehicleDetailBox(details, -0.585, 0.29, 0, 0.025, 0.32, 0.02, 0x455a64);
+  _addVehicleMirrors(details, 0.48, 0.4, 0.34, 0x263238);
+  _addVehiclePlate(details, 0.62, -0.1);
+  _addVehiclePlate(details, -0.62, -0.1, 0xfff8e1);
+  _addWheels(g, [[0.38, 0.3], [0.38, -0.3], [-0.38, 0.3], [-0.38, -0.3]], 0.14, details);
   g.scale.setScalar(2.0);
 }
 
-function _buildBusModel(g, color) {
+function _buildBusModel(g, color, details) {
   // City bus (long, tall, distinct)
   const busColor = 0x1565c0; // always blue/transit color
   const accent = 0xffd600;
@@ -70592,9 +72160,12 @@ function _buildBusModel(g, color) {
   g.add(posVox(0, 0.1, 0, 1.8, 0.45, 0.6, busColor));
   // Upper section
   g.add(posVox(0, 0.5, 0, 1.75, 0.35, 0.58, busColor));
-  // Windows (long strip on each side)
-  g.add(posVox(0, 0.52, 0.3, 1.5, 0.22, 0.02, 0x90caf9));
-  g.add(posVox(0, 0.52, -0.3, 1.5, 0.22, 0.02, 0x90caf9));
+  // Windows use distinct panes so the bus reads clearly at street level.
+  for (const side of [-1, 1]) {
+    for (let index = 0; index < 6; index++) {
+      _vehicleDetailBox(details, -0.55 + index * 0.22, 0.52, side * 0.3, 0.18, 0.22, 0.022, index === 5 ? 0x81d4fa : 0x90caf9);
+    }
+  }
   // Windshield
   g.add(posVox(0.88, 0.48, 0, 0.06, 0.28, 0.52, 0x81d4fa));
   // Rear window
@@ -70603,7 +72174,8 @@ function _buildBusModel(g, color) {
   g.add(posVox(0, 0.25, 0.31, 1.8, 0.06, 0.01, accent));
   g.add(posVox(0, 0.25, -0.31, 1.8, 0.06, 0.01, accent));
   // Door (front)
-  g.add(posVox(0.6, 0.15, 0.3, 0.25, 0.45, 0.02, 0x263238));
+  _vehicleDetailBox(details, 0.6, 0.15, 0.3, 0.25, 0.45, 0.025, 0x263238);
+  _vehicleDetailBox(details, 0.6, 0.15, -0.3, 0.25, 0.45, 0.025, 0x263238);
   // Headlights
   g.add(posVox(0.92, 0.05, 0.22, 0.05, 0.1, 0.1, 0xfff9c4));
   g.add(posVox(0.92, 0.05, -0.22, 0.05, 0.1, 0.1, 0xfff9c4));
@@ -70612,8 +72184,15 @@ function _buildBusModel(g, color) {
   // Route number on front
   const routeSprite = _makeRouteNumberSprite();
   routeSprite.position.set(0.9, 0.7, 0);
-  g.add(routeSprite);
-  _addWheels(g, [[0.6, 0.32], [0.6, -0.32], [-0.55, 0.32], [-0.55, -0.32]], 0.16);
+  details.add(routeSprite);
+  _vehicleDetailBox(details, 0, 0.78, 0, 0.5, 0.08, 0.35, 0xeceff1);
+  _vehicleDetailBox(details, 0.91, -0.12, 0, 0.07, 0.1, 0.56, 0x455a64);
+  _vehicleDetailBox(details, -0.91, -0.12, 0, 0.07, 0.1, 0.56, 0x455a64);
+  _vehicleDetailBox(details, 0.9, 0.18, 0, 0.035, 0.12, 0.3, 0x263238);
+  _addVehicleMirrors(details, 0.78, 0.56, 0.38, 0x263238);
+  _addVehiclePlate(details, 0.95, -0.08);
+  _addVehiclePlate(details, -0.95, -0.08, 0xfff8e1);
+  _addWheels(g, [[0.6, 0.32], [0.6, -0.32], [-0.55, 0.32], [-0.55, -0.32]], 0.16, details);
   g.scale.setScalar(2.0);
 }
 
@@ -70633,7 +72212,7 @@ function _makeRouteNumberSprite() {
   return sprite;
 }
 
-function _addWheels(g, positions, radius) {
+function _addWheels(g, positions, radius, details = null) {
   const wheelCol = 0x222222;
   for (const [wx, wz] of positions) {
     const wheel = new THREE.Mesh(_cylGeo, getMat(wheelCol));
@@ -70642,22 +72221,73 @@ function _addWheels(g, positions, radius) {
     wheel.position.set(wx, -0.18, wz);
     wheel.name = 'wheel';
     g.add(wheel);
+    const hub = new THREE.Mesh(_cylGeo, getMat(0xb0bec5));
+    hub.scale.set(radius * 0.48, 0.106, radius * 0.48);
+    hub.rotation.z = Math.PI / 2;
+    hub.position.set(wx, -0.18, wz);
+    hub.name = 'wheelHub';
+    hub.userData.vehicleDetail = true;
+    (details || g).add(hub);
   }
+}
+
+function getVehicleRoadSurfaceY(wx, wz) {
+  const halfRoad = ST.LANE_W + ST.CENTER_W / 2 + ST.GUTTER_W;
+  const intersectionHalf = ST.HALF_W;
+  const surfaceTolerance = 0.05;
+  for (const segment of _streetSegments) {
+    if (segment.type) {
+      const centerX = segment.x1 * T + 0.5;
+      const centerZ = segment.z1 * T + 0.5;
+      if (Math.abs(wx - centerX) <= intersectionHalf + surfaceTolerance && Math.abs(wz - centerZ) <= intersectionHalf + surfaceTolerance) {
+        return ST.BASE + ST.ROAD_THICK;
+      }
+      continue;
+    }
+    const x1 = Math.min(segment.x1, segment.x2) * T;
+    const x2 = Math.max(segment.x1, segment.x2) * T;
+    const z1 = Math.min(segment.z1, segment.z2) * T;
+    const z2 = Math.max(segment.z1, segment.z2) * T;
+    if (Math.hypot(wx - segment.x1 * T, wz - segment.z1 * T) <= halfRoad + surfaceTolerance
+      || Math.hypot(wx - segment.x2 * T, wz - segment.z2 * T) <= halfRoad + surfaceTolerance) {
+      return ST.BASE + ST.ROAD_THICK;
+    }
+    const horizontal = Math.abs(segment.x2 - segment.x1) >= Math.abs(segment.z2 - segment.z1);
+    if (horizontal
+      ? wx >= x1 - 0.5 - surfaceTolerance && wx <= x2 + 0.5 + surfaceTolerance && Math.abs(wz - z1) <= halfRoad + surfaceTolerance
+      : wz >= z1 - 0.5 - surfaceTolerance && wz <= z2 + 0.5 + surfaceTolerance && Math.abs(wx - x1) <= halfRoad + surfaceTolerance) {
+      return ST.BASE + ST.ROAD_THICK;
+    }
+  }
+  return null;
+}
+
+function updateVehicleDetailVisibility(vehicle) {
+  if (!vehicle?._details || !camera) return;
+  const detailDistance = Number(vehicle._detailDistance || 64);
+  const distanceSq = camera.position.distanceToSquared(vehicle.group.position);
+  vehicle._details.visible = distanceSq <= detailDistance * detailDistance;
 }
 
 function makeVehicle(color, startX, startZ, dir, vehicleType, options = {}) {
   const g = new THREE.Group();
   const type = vehicleType || 'car';
+  const details = new THREE.Group();
+  details.name = 'vehicleDetails';
+  g.add(details);
 
   // Build model based on type
   switch (type) {
-    case 'sedan':  _buildSedanModel(g, color); break;
-    case 'truck':  _buildTruckModel(g, color); break;
-    case 'van':    _buildVanModel(g, color); break;
-    case 'bus':    _buildBusModel(g, color); break;
-    default:       _buildCarModel(g, color); break;
+    case 'sedan':  _buildSedanModel(g, color, details); break;
+    case 'truck':  _buildTruckModel(g, color, details); break;
+    case 'van':    _buildVanModel(g, color, details); break;
+    case 'bus':    _buildBusModel(g, color, details); break;
+    default:       _buildCarModel(g, color, details); break;
   }
-  g.position.set(startX, ST.BASE + ST.ROAD_THICK + 0.18, startZ); // Sit on road surface
+  const detailSourcePartCount = details.children.length;
+  mergeFurnitureItemVoxels(details);
+  const rideHeight = getTrafficVehicleRideHeight(type);
+  g.position.set(startX, ST.BASE + ST.ROAD_THICK + rideHeight, startZ);
   // dir: 0=+X, 1=-X, 2=+Z, 3=-Z
   // Car model faces +X at rotation.y=0. Map cardinal dirs to rotation.y:
   //   0(+X)=0, 1(-X)=PI, 2(+Z)=-PI/2, 3(-Z)=PI/2
@@ -70673,7 +72303,7 @@ function makeVehicle(color, startX, startZ, dir, vehicleType, options = {}) {
   }
   
   // Speed varies by type: buses slower, trucks slightly slower
-  const typeSpeedMult = { car: 1.0, sedan: 1.05, truck: 0.8, van: 0.85, bus: 0.65 };
+  const typeSpec = getTrafficVehicleSpec(type);
 
   return {
     group: g,
@@ -70681,7 +72311,12 @@ function makeVehicle(color, startX, startZ, dir, vehicleType, options = {}) {
     dir, // 0=+X, 1=-X, 2=+Z, 3=-Z
     color,
     vehicleType: type,
-    _speedMult: typeSpeedMult[type] || 1.0,
+    _speedMult: typeSpec.speedMult,
+    _collisionRadius: typeSpec.collisionRadius,
+    _rideHeight: rideHeight,
+    _details: details,
+    _detailSourcePartCount: detailSourcePartCount,
+    _detailDistance: typeSpec.detailDistance,
     _tick: Math.random() * 1000,
     _physicsId: vehicleId,
     _path: null,     // array of {x,z} waypoints in tile coords
@@ -70765,7 +72400,7 @@ function initVehicles() {
     const dx = seg.x2 - seg.x1, dz = seg.z2 - seg.z1;
     totalRoadLen += Math.sqrt(dx * dx + dz * dz);
   }
-  const vehicleCount = Math.min(Math.max(2, Math.floor(totalRoadLen / 15)), 30, interleaved.length);
+  const vehicleCount = Math.min(Math.max(2, Math.floor(totalRoadLen / 40)), 12, interleaved.length);
   let spawned = 0;
   for (const sp of interleaved) {
     if (spawned >= vehicleCount) break;
@@ -70973,23 +72608,35 @@ function _assignVehiclePath(v, graph) {
   }
 
   if (cleanPath.length >= 2) {
-    v._path = cleanPath;
+    const laneLoop = buildLaneAwareTrafficLoop(cleanPath, {
+      laneOffset: TRAFFIC_LANE_OFFSET,
+      turnRadius: TRAFFIC_TURN_RADIUS,
+      curveSamples: 4,
+      uTurnSamples: 7,
+    });
+    if (laneLoop.length < 2) return;
+    v._path = laneLoop.map(point => ({ x: point.x * T, z: point.z * T }));
+    v._pathIncludesLaneOffset = true;
+    v.x = v._path[0].x;
+    v.z = v._path[0].z;
+    v._laneOffX = 0;
+    v._laneOffZ = 0;
     // Skip waypoint 0 if it's essentially the vehicle's current position
-    const vTx = v.x / T, vTz = v.z / T;
-    const p0Dist = Math.abs(cleanPath[0].x - vTx) + Math.abs(cleanPath[0].z - vTz);
+    const vTx = v.x, vTz = v.z;
+    const p0Dist = Math.abs(v._path[0].x - vTx) + Math.abs(v._path[0].z - vTz);
     v._pathIdx = (p0Dist < 1.0) ? 1 : 0;
     // Set initial direction from first movement segment
     const fromIdx = v._pathIdx > 0 ? v._pathIdx - 1 : 0;
-    const toIdx = Math.min(v._pathIdx, cleanPath.length - 1);
+    const toIdx = Math.min(v._pathIdx, v._path.length - 1);
     if (fromIdx !== toIdx) {
-      const ddx = cleanPath[toIdx].x - cleanPath[fromIdx].x;
-      const ddz = cleanPath[toIdx].z - cleanPath[fromIdx].z;
+      const ddx = v._path[toIdx].x - v._path[fromIdx].x;
+      const ddz = v._path[toIdx].z - v._path[fromIdx].z;
       if (Math.abs(ddx) > Math.abs(ddz)) {
         v.dir = ddx > 0 ? 0 : 1;
       } else {
         v.dir = ddz > 0 ? 2 : 3;
       }
-      v._targetRotY = _dirToRotY(v.dir);
+      v._targetRotY = movementRotationY(ddx, ddz, _dirToRotY(v.dir));
     }
   }
 }
@@ -71135,9 +72782,8 @@ function _movementToRotY(ddx, ddz) {
 
 function _updateVehicleDir(v, ddx, ddz) {
   // Update discrete dir for lane offset and traffic light checks.
-  // With axis-aligned paths, direction changes are clean — just pick dominant axis.
   const ax = Math.abs(ddx), az = Math.abs(ddz);
-  if (ax < 0.5 && az < 0.5) return; // ignore tiny movements
+  if (ax < 0.001 && az < 0.001) return;
   if (ax > az) {
     v.dir = ddx > 0 ? 0 : 1;
   } else if (az > ax) {
@@ -71152,16 +72798,8 @@ function _updateVehicleDir(v, ddx, ddz) {
  */
 function _updateVehicleRotation(v, ddx, ddz) {
   const mag = Math.sqrt(ddx * ddx + ddz * ddz);
-  if (mag < 0.5) return;
-  
-  // Snap to cardinal rotation based on dominant axis
-  let rotY;
-  if (Math.abs(ddx) > Math.abs(ddz)) {
-    rotY = ddx > 0 ? 0 : Math.PI;
-  } else {
-    rotY = ddz > 0 ? -Math.PI / 2 : Math.PI / 2;
-  }
-  v._targetRotY = rotY;
+  if (mag < 0.001) return;
+  v._targetRotY = movementRotationY(ddx, ddz, v._targetRotY);
 }
 
 // Track how long each vehicle has been stuck (not moving)
@@ -71181,6 +72819,68 @@ function _isInsideIntersection(vx, vz) {
   }
   return false;
 }
+
+function getVehicleTrafficDiagnostics() {
+  const visible = vehiclesList.filter(vehicle => vehicle?.group?.visible);
+  const overlaps = [];
+  let offRoadCount = 0;
+  let wheelRoadHeightViolationCount = 0;
+  let roundedPathCount = 0;
+  let pathReversalViolationCount = 0;
+  for (let index = 0; index < visible.length; index++) {
+    const vehicle = visible[index];
+    const roadSurfaceY = getVehicleRoadSurfaceY(vehicle.group.position.x, vehicle.group.position.z);
+    if (roadSurfaceY === null) offRoadCount++;
+    const expectedY = (roadSurfaceY ?? (ST.BASE + ST.ROAD_THICK))
+      + Number(vehicle._rideHeight || getTrafficVehicleRideHeight(vehicle.vehicleType));
+    if (Math.abs(vehicle.group.position.y - expectedY) > 0.035) wheelRoadHeightViolationCount++;
+    const analysis = analyzeTrafficPath(vehicle._path || []);
+    if (analysis.roundedSegmentCount > 0) roundedPathCount++;
+    if (analysis.reversalCount > 0) pathReversalViolationCount++;
+    for (let otherIndex = index + 1; otherIndex < visible.length; otherIndex++) {
+      const other = visible[otherIndex];
+      if (trafficVehicleFootprintsOverlap({
+        x: vehicle.group.position.x,
+        z: vehicle.group.position.z,
+        rotationY: vehicle.group.rotation.y,
+        vehicleType: vehicle.vehicleType,
+      }, {
+        x: other.group.position.x,
+        z: other.group.position.z,
+        rotationY: other.group.rotation.y,
+        vehicleType: other.vehicleType,
+      })) overlaps.push([vehicle._runtimeVehicleId || vehicle._physicsId, other._runtimeVehicleId || other._physicsId]);
+    }
+  }
+  return Object.freeze({
+    total: vehiclesList.length,
+    visible: visible.length,
+    roundedPathCount,
+    offRoadCount,
+    overlapCount: overlaps.length,
+    overlaps: Object.freeze(overlaps),
+    pathReversalViolationCount,
+    wheelRoadHeightViolationCount,
+    detailPartCount: visible.reduce((sum, vehicle) => sum + Number(vehicle._detailSourcePartCount || 0), 0),
+    detailDrawObjectCount: visible.reduce((sum, vehicle) => sum + Number(vehicle._details?.children?.length || 0), 0),
+    detailVisibleCount: visible.filter(vehicle => vehicle._details?.visible).length,
+    vehicles: Object.freeze(visible.map(vehicle => Object.freeze({
+      id: vehicle._runtimeVehicleId || vehicle._physicsId,
+      type: vehicle.vehicleType,
+      x: vehicle.group.position.x,
+      y: vehicle.group.position.y,
+      z: vehicle.group.position.z,
+      rotationY: vehicle.group.rotation.y,
+      roadSurfaceY: getVehicleRoadSurfaceY(vehicle.group.position.x, vehicle.group.position.z),
+      rideHeight: vehicle._rideHeight,
+      pathIdx: vehicle._pathIdx,
+      pathPointCount: vehicle._path?.length || 0,
+      state: vehicle._runtimeState || (vehicle._stoppedAtLight ? 'stopped' : 'moving'),
+    }))),
+  });
+}
+
+window.__VWTraffic = Object.freeze({ snapshot: getVehicleTrafficDiagnostics });
 
 /**
  * Detect and resolve intersection gridlocks without visible jumps.
@@ -71342,18 +73042,23 @@ function updateVehicles(dt) {
 
       // Update lane offset smoothing
       const laneOffset = ST.LANE_W * 0.45;
-      const tOffX = v.dir === 2 ? -laneOffset : v.dir === 3 ? laneOffset : 0;
-      const tOffZ = v.dir === 0 ? laneOffset : v.dir === 1 ? -laneOffset : 0;
+      const tOffX = v._pathIncludesLaneOffset ? 0 : (v.dir === 2 ? -laneOffset : v.dir === 3 ? laneOffset : 0);
+      const tOffZ = v._pathIncludesLaneOffset ? 0 : (v.dir === 0 ? laneOffset : v.dir === 1 ? -laneOffset : 0);
       const lAlpha = 1 - Math.exp(-6 * dt);
       v._laneOffX = (v._laneOffX || 0) + (tOffX - (v._laneOffX || 0)) * lAlpha;
       v._laneOffZ = (v._laneOffZ || 0) + (tOffZ - (v._laneOffZ || 0)) * lAlpha;
 
       // Update physics position even while stopped
-      const vPosYStopped = ST.BASE + ST.ROAD_THICK + 0.18;
+      const renderX = v.x + (v._laneOffX || 0);
+      const renderZ = v.z + (v._laneOffZ || 0);
+      const roadSurfaceY = getVehicleRoadSurfaceY(renderX, renderZ) ?? (ST.BASE + ST.ROAD_THICK);
+      const physicsY = roadSurfaceY + 0.18;
+      const visualY = roadSurfaceY + Number(v._rideHeight || getTrafficVehicleRideHeight(v.vehicleType));
       if (isPhysicsReady() && v._physicsId) {
-        setVehiclePosition(v._physicsId, v.x + (v._laneOffX || 0), vPosYStopped, v.z + (v._laneOffZ || 0), v.group.rotation.y);
+        setVehiclePosition(v._physicsId, renderX, physicsY, renderZ, v.group.rotation.y);
       }
-      v.group.position.set(v.x + (v._laneOffX || 0), vPosYStopped, v.z + (v._laneOffZ || 0));
+      v.group.position.set(renderX, visualY, renderZ);
+      updateVehicleDetailVisibility(v);
       return; // skip normal movement for this vehicle
     }
     v._stoppedAtLight = false;
@@ -71364,8 +73069,9 @@ function updateVehicles(dt) {
 
     // Current target waypoint (in tile coords)
     const wp = v._path[v._pathIdx];
-    const wpX = wp.x * T;
-    const wpZ = wp.z * T;
+    const waypointScale = v._pathIncludesLaneOffset ? 1 : T;
+    const wpX = wp.x * waypointScale;
+    const wpZ = wp.z * waypointScale;
 
     // Move toward waypoint
     const ddx = wpX - v.x;
@@ -71383,26 +73089,17 @@ function updateVehicles(dt) {
       // Update facing based on NEXT waypoint direction (before moving)
       if (v._pathIdx < v._path.length) {
         const nwp = v._path[v._pathIdx];
-        const ndx = nwp.x * T - v.x;
-        const ndz = nwp.z * T - v.z;
+        const ndx = nwp.x * waypointScale - v.x;
+        const ndz = nwp.z * waypointScale - v.z;
         if (Math.abs(ndx) > 0.5 || Math.abs(ndz) > 0.5) {
           _updateVehicleDir(v, ndx, ndz);
           _updateVehicleRotation(v, ndx, ndz);
         }
       }
     } else {
-      // Move toward current waypoint — axis-aligned movement
-      // For axis-aligned paths, clamp movement to the dominant axis
-      let moveX, moveZ;
-      if (Math.abs(ddx) > Math.abs(ddz)) {
-        // Horizontal movement — lock Z
-        moveX = Math.sign(ddx) * Math.min(speed, Math.abs(ddx));
-        moveZ = 0;
-      } else {
-        // Vertical movement — lock X
-        moveX = 0;
-        moveZ = Math.sign(ddz) * Math.min(speed, Math.abs(ddz));
-      }
+      // Move along the sampled lane curve instead of snapping orthogonally.
+      const moveX = (ddx / dist) * Math.min(speed, dist);
+      const moveZ = (ddz / dist) * Math.min(speed, dist);
 
       // Physics-based collision detection (skip if inside intersection — must clear it)
       let blocked = false;
@@ -71428,8 +73125,8 @@ function updateVehicles(dt) {
       }
 
       // Update direction and rotation from movement vector
-      _updateVehicleDir(v, ddx, ddz);
-      _updateVehicleRotation(v, ddx, ddz);
+      _updateVehicleDir(v, moveX, moveZ);
+      _updateVehicleRotation(v, moveX, moveZ);
     }
 
     // Smooth rotation toward target angle using exponential decay.
@@ -71462,24 +73159,28 @@ function updateVehicles(dt) {
     //   dir 2 (+Z): right lane is -X side → offset -X
     //   dir 3 (-Z): right lane is +X side → offset +X
     const laneOffset = ST.LANE_W * 0.45;
-    const targetOffX = v.dir === 2 ? -laneOffset : v.dir === 3 ? laneOffset : 0;
-    const targetOffZ = v.dir === 0 ? laneOffset : v.dir === 1 ? -laneOffset : 0;
+    const targetOffX = v._pathIncludesLaneOffset ? 0 : (v.dir === 2 ? -laneOffset : v.dir === 3 ? laneOffset : 0);
+    const targetOffZ = v._pathIncludesLaneOffset ? 0 : (v.dir === 0 ? laneOffset : v.dir === 1 ? -laneOffset : 0);
     // Smooth lane offset transition — k=6 for responsive lane centering
     const laneAlpha = 1 - Math.exp(-6 * dt);
     v._laneOffX = (v._laneOffX || 0) + (targetOffX - (v._laneOffX || 0)) * laneAlpha;
     v._laneOffZ = (v._laneOffZ || 0) + (targetOffZ - (v._laneOffZ || 0)) * laneAlpha;
 
-    const vPosY = ST.BASE + ST.ROAD_THICK + 0.18;
+    const renderX = v.x + v._laneOffX;
+    const renderZ = v.z + v._laneOffZ;
+    const roadSurfaceY = getVehicleRoadSurfaceY(renderX, renderZ) ?? (ST.BASE + ST.ROAD_THICK);
+    const physicsY = roadSurfaceY + 0.18;
+    const visualY = roadSurfaceY + Number(v._rideHeight || getTrafficVehicleRideHeight(v.vehicleType));
     if (isPhysicsReady() && v._physicsId) {
-      const resolved = setVehiclePosition(v._physicsId, v.x + v._laneOffX, vPosY, v.z + v._laneOffZ, v.group.rotation.y);
-      v.group.position.set(resolved.x, vPosY, resolved.z);
+      const resolved = setVehiclePosition(v._physicsId, renderX, physicsY, renderZ, v.group.rotation.y);
+      v.group.position.set(resolved.x, visualY, resolved.z);
     } else {
-      v.group.position.set(v.x + v._laneOffX, vPosY, v.z + v._laneOffZ);
+      v.group.position.set(renderX, visualY, renderZ);
     }
+    updateVehicleDetailVisibility(v);
 
-    // Only show car if it's on or near a road
-    v.group.visible = isRoadAt(v.x, v.z) || isRoadAt(v.x + T, v.z) || isRoadAt(v.x - T, v.z) ||
-                      isRoadAt(v.x, v.z + T) || isRoadAt(v.x, v.z - T);
+    // Use the rendered roadway footprint, including intersection curve slabs.
+    v.group.visible = getVehicleRoadSurfaceY(renderX, renderZ) !== null;
 
     // If a car leaves the road graph, hide it and let the next path assignment
     // happen in place. Do not recycle it across the map while the user watches.
@@ -71523,8 +73224,8 @@ function _vehicleCollisionCheck(v, moveX, moveZ) {
   const laneOff = ST.LANE_W * 0.45;
   const myOffX = v.dir === 2 ? -laneOff : v.dir === 3 ? laneOff : 0;
   const myOffZ = v.dir === 0 ? laneOff : v.dir === 1 ? -laneOff : 0;
-  const myLaneX = v.x + (v._laneOffX || myOffX);
-  const myLaneZ = v.z + (v._laneOffZ || myOffZ);
+  const myLaneX = v.x + (v._pathIncludesLaneOffset ? 0 : (v._laneOffX || myOffX));
+  const myLaneZ = v.z + (v._pathIncludesLaneOffset ? 0 : (v._laneOffZ || myOffZ));
 
   const lookAhead = VEHICLE_FOLLOW_DIST + 1.0; // world units to look ahead (matches queue distance)
   for (const other of vehiclesList) {
@@ -71532,8 +73233,8 @@ function _vehicleCollisionCheck(v, moveX, moveZ) {
     if (!other.group.visible) continue;
     const otherOffX = other.dir === 2 ? -laneOff : other.dir === 3 ? laneOff : 0;
     const otherOffZ = other.dir === 0 ? laneOff : other.dir === 1 ? -laneOff : 0;
-    const otherLaneX = other.x + (other._laneOffX || otherOffX);
-    const otherLaneZ = other.z + (other._laneOffZ || otherOffZ);
+    const otherLaneX = other.x + (other._pathIncludesLaneOffset ? 0 : (other._laneOffX || otherOffX));
+    const otherLaneZ = other.z + (other._pathIncludesLaneOffset ? 0 : (other._laneOffZ || otherOffZ));
 
     const dx = otherLaneX - myLaneX;
     const dz = otherLaneZ - myLaneZ;
@@ -72025,72 +73726,1112 @@ function autoConnectBuildingsWithRoads() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// AMBIENT LIFE — Birds flying overhead during daytime
+// AMBIENT LIFE — Surface-aware birds, flocks, perching, and flight
 // ═══════════════════════════════════════════════════════════════
 const _birds = [];
-const BIRD_COUNT = 8;
+const BIRD_COUNT = IS_MOBILE_VIEWPORT ? 18 : 28;
+const BIRD_FLOCK_SIZE = 4;
+const BIRD_AGENT_SCARE_RADIUS = 3.6;
+const BIRD_HABITAT_REFRESH_SECONDS = 5;
+const BIRD_MODEL_SCALE = 0.5;
+const BIRD_FLOCK_SPREAD = 0.82;
+const BIRD_SPAWN_PROBE_SECONDS = 0.35;
+const BIRD_VIEWPORT_MARGIN = 0.12;
+const BIRD_NATURAL_DRAW_DISTANCE = (LOAD_R + 1) * CHUNK_W;
+const BIRD_MODEL_PALETTES = Object.freeze([
+  Object.freeze({ body: 0x455a64, chest: 0x90a4ae, wing: 0x263238, beak: 0xffb300, leg: 0x8d6e63 }),
+  Object.freeze({ body: 0x5d4037, chest: 0xbcaaa4, wing: 0x3e2723, beak: 0xffa000, leg: 0x795548 }),
+  Object.freeze({ body: 0x37474f, chest: 0xcfd8dc, wing: 0x1c313a, beak: 0xffca28, leg: 0x8d6e63 }),
+  Object.freeze({ body: 0x6d4c41, chest: 0xd7ccc8, wing: 0x4e342e, beak: 0xffb300, leg: 0x795548 }),
+]);
 
-function initBirds() {
-  for (let i = 0; i < BIRD_COUNT; i++) {
-    const bird = new THREE.Group();
-    // Simple bird shape — two flat triangular wings
-    const wingMat = getMat(0x333333);
-    const wingL = new THREE.Mesh(_boxGeo, wingMat);
-    wingL.scale.set(0.3, 0.02, 0.15);
-    wingL.position.set(-0.15, 0, 0);
-    bird.add(wingL);
-    const wingR = new THREE.Mesh(_boxGeo, wingMat);
-    wingR.scale.set(0.3, 0.02, 0.15);
-    wingR.position.set(0.15, 0, 0);
-    bird.add(wingR);
-    // Body
-    bird.add(posVox(0, 0, 0, 0.1, 0.06, 0.2, 0x222222));
+let _birdHabitatZones = [];
+let _birdHabitatById = new Map();
+let _birdHabitatRefreshTimer = 0;
+let _birdScareProbeTimer = 0;
+let _birdSpawnProbeTimer = 0;
+let _birdFlightSequence = 0;
+let _birdFlockSequence = 0;
+const _birdProjectionPoint = new THREE.Vector3();
 
-    bird.position.set(
-      (Math.random() - 0.5) * 80,
-      8 + Math.random() * 6,
-      (Math.random() - 0.5) * 80,
-    );
-    bird.userData = {
-      speed: 1.5 + Math.random() * 2,
-      dir: Math.random() * Math.PI * 2,
-      wingPhase: Math.random() * Math.PI * 2,
-      circleRadius: 10 + Math.random() * 20,
-      circleCenter: new THREE.Vector3(
-        (Math.random() - 0.5) * 40,
-        0,
-        (Math.random() - 0.5) * 40,
-      ),
-    };
-    scene.add(bird);
-    _birds.push(bird);
-  }
+function makeAmbientBirdWingGeometry() {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    0.00,  0.00,  0.10,
+    0.20,  0.015, 0.03,
+    0.46,  0.00,  0.09,
+    0.62, -0.01,  0.24,
+    0.45,  0.00,  0.34,
+    0.23,  0.01,  0.27,
+    0.04,  0.00,  0.19,
+  ], 3));
+  geometry.setIndex([
+    0, 1, 6,
+    1, 2, 5,
+    1, 5, 6,
+    2, 3, 4,
+    2, 4, 5,
+  ]);
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
-function updateBirds(dt) {
-  // Only show birds during daytime
-  const showBirds = _gameHour >= 6 && _gameHour < 20;
-  _birds.forEach(bird => {
-    bird.visible = showBirds;
-    if (!showBirds) return;
-    const ud = bird.userData;
-    ud.dir += dt * 0.3;
-    // Circle pattern
-    const cx = ud.circleCenter.x + Math.cos(ud.dir) * ud.circleRadius;
-    const cz = ud.circleCenter.z + Math.sin(ud.dir) * ud.circleRadius;
-    bird.position.x = cx;
-    bird.position.z = cz;
-    bird.position.y = 8 + Math.sin(ud.dir * 2) * 1.5;
-    bird.rotation.y = ud.dir + Math.PI / 2;
-    // Wing flap
-    ud.wingPhase += dt * 8;
-    const flap = Math.sin(ud.wingPhase) * 0.3;
-    const wl = bird.children[0], wr = bird.children[1];
-    if (wl) wl.rotation.z = flap;
-    if (wr) wr.rotation.z = -flap;
+function makeAmbientBirdTailGeometry() {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    -0.12, 0.00, 0.00,
+     0.00, 0.015, 0.42,
+     0.04, 0.00, 0.04,
+     0.12, 0.00, 0.00,
+     0.00, 0.015, 0.42,
+    -0.04, 0.00, 0.04,
+  ], 3));
+  geometry.setIndex([0, 1, 2, 3, 4, 5]);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+const _ambientBirdWingGeo = makeAmbientBirdWingGeometry();
+const _ambientBirdTailGeo = makeAmbientBirdTailGeometry();
+
+function makeAmbientBirdModel(index) {
+  const palette = BIRD_MODEL_PALETTES[index % BIRD_MODEL_PALETTES.length];
+  const bird = new THREE.Group();
+  bird.name = `ambientBird_${index + 1}`;
+
+  const modelRoot = new THREE.Group();
+  modelRoot.name = 'birdModel';
+  modelRoot.scale.setScalar(BIRD_MODEL_SCALE);
+  bird.add(modelRoot);
+
+  const body = new THREE.Mesh(_sphereGeo, getMat(palette.body));
+  body.scale.set(0.21, 0.18, 0.36);
+  body.position.set(0, 0.28, 0.02);
+  body.castShadow = true;
+  modelRoot.add(body);
+
+  const chest = new THREE.Mesh(_sphereGeo, getMat(palette.chest));
+  chest.scale.set(0.145, 0.135, 0.23);
+  chest.position.set(0, 0.25, -0.17);
+  chest.castShadow = true;
+  modelRoot.add(chest);
+
+  const head = new THREE.Mesh(_sphereGeo, getMat(palette.body));
+  head.scale.set(0.16, 0.155, 0.17);
+  head.position.set(0, 0.41, -0.255);
+  head.castShadow = true;
+  modelRoot.add(head);
+
+  const beak = new THREE.Mesh(_coneGeo, getMat(palette.beak));
+  beak.scale.set(0.075, 0.17, 0.075);
+  beak.rotation.x = -Math.PI / 2;
+  beak.position.set(0, 0.39, -0.375);
+  modelRoot.add(beak);
+
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(_sphereGeo, getMat(0x101418));
+    eye.scale.setScalar(0.027);
+    eye.position.set(side * 0.06, 0.425, -0.325);
+    modelRoot.add(eye);
+  }
+
+  const wingMaterial = getMat(palette.wing, { side: THREE.DoubleSide });
+  const leftWing = new THREE.Group();
+  leftWing.name = 'leftWing';
+  leftWing.position.set(-0.06, 0.31, -0.05);
+  const leftFeathers = new THREE.Mesh(_ambientBirdWingGeo, wingMaterial);
+  leftFeathers.scale.x = -1;
+  leftFeathers.castShadow = true;
+  leftWing.add(leftFeathers);
+  modelRoot.add(leftWing);
+
+  const rightWing = new THREE.Group();
+  rightWing.name = 'rightWing';
+  rightWing.position.set(0.06, 0.31, -0.05);
+  const rightFeathers = new THREE.Mesh(_ambientBirdWingGeo, wingMaterial.clone());
+  rightFeathers.castShadow = true;
+  rightWing.add(rightFeathers);
+  modelRoot.add(rightWing);
+
+  const tail = new THREE.Mesh(_ambientBirdTailGeo, getMat(palette.wing, { side: THREE.DoubleSide }));
+  tail.position.set(0, 0.285, 0.13);
+  tail.castShadow = true;
+  modelRoot.add(tail);
+
+  const legs = new THREE.Group();
+  legs.name = 'legs';
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Mesh(_cylGeo, getMat(palette.leg));
+    leg.scale.set(0.018, 0.19, 0.018);
+    leg.position.set(side * 0.065, 0.11, 0.02);
+    legs.add(leg);
+    for (const toeX of [-0.025, 0, 0.025]) {
+      const toe = new THREE.Mesh(_boxGeo, getMat(palette.leg));
+      toe.scale.set(0.013, 0.012, 0.10);
+      toe.position.set(side * 0.065 + toeX, 0.012, -0.03);
+      toe.rotation.y = toeX * 7;
+      legs.add(toe);
+    }
+  }
+  modelRoot.add(legs);
+
+  bird.userData = {
+    index,
+    modelRoot,
+    body,
+    leftWing,
+    rightWing,
+    legs,
+    state: BIRD_STATES.HIDDEN,
+    surfaceKind: null,
+    surfaceKey: null,
+    habitatId: null,
+    flockId: null,
+    currentPerchRef: null,
+    targetPerchRef: null,
+    targetHabitatId: null,
+    targetFlockId: null,
+    flightMode: null,
+    flightTarget: new THREE.Vector3(),
+    spawnTimer: Math.random() * 2.5,
+    perchTimer: 4 + Math.random() * 12,
+    wingPhase: Math.random() * Math.PI * 2,
+    heading: Math.random() * Math.PI * 2,
+    walkElapsed: 0,
+    walkDuration: 0,
+    flightElapsed: 0,
+    flightDuration: 0,
+    flightLift: 5,
+    flightCurve: 0,
+    flightStart: new THREE.Vector3(),
+    lastPosition: new THREE.Vector3(),
+    reason: 'spawn',
+  };
+  return bird;
+}
+
+function getAmbientBirdTerrainSurfaceY(tileX, tileZ) {
+  const cx = Math.floor(tileX / CHUNK);
+  const cz = Math.floor(tileZ / CHUNK);
+  const localX = ((tileX % CHUNK) + CHUNK) % CHUNK;
+  const localZ = ((tileZ % CHUNK) + CHUNK) % CHUNK;
+  const grassRng = pseudoRandom(cx * 997 + cz * 701 + localX * 31 + localZ * 97);
+  return 0.2 + (grassRng - 0.5) * 0.04;
+}
+
+function getAmbientBirdGroundSurface(x, z) {
+  return getBirdGroundSurfaceAt({
+    x,
+    z,
+    buildings: Array.from(buildingsMap.values()),
+    terrainAt: _getWorldTile,
+    terrainSurfaceYAt: getAmbientBirdTerrainSurfaceY,
+    grassTerrain: TERRAIN.GRASS,
+    tileSize: T,
+    parkSurfaceY: PARK_GRASS_SURFACE_Y,
   });
 }
 
+function resolveAmbientBirdPerch(ref) {
+  if (!ref) return null;
+  if (ref.directGround || ref.kind === BIRD_SURFACE_KINDS.TERRAIN_GRASS) {
+    const surface = getAmbientBirdGroundSurface(ref.x, ref.z);
+    if (!surface || surface.kind !== ref.kind) return null;
+    return { ...surface, refId: ref.id || null };
+  }
+  return resolveBirdPerchRef(ref, {
+    buildingById: buildingsMap,
+    floorHeight: FLOOR_HEIGHT,
+    wallHeight: WALL_H,
+    tileSize: T,
+    parkSurfaceY: PARK_GRASS_SURFACE_Y,
+  });
+}
+
+function isAmbientBirdGroundPerchClear(surface) {
+  if (!surface || !isBirdGroundSurfaceKind(surface.kind)) return false;
+  if (!isPhysicsReady()) return true;
+  return !probeObstacleAt(surface.x, surface.z, 0.22, {
+    y: surface.y + 0.28,
+    height: 0.48,
+    maxCenters: 1,
+  }).hit;
+}
+
+function buildAmbientBirdHabitatZones() {
+  const zones = [];
+  for (const building of buildingsMap.values()) {
+    if (!building?.id) continue;
+    const bounds = getBuildingFootprintBounds(building);
+    if (String(building.type || '').toLowerCase() === 'park') {
+      const perches = createParkBirdPerchRefs(building, 16).filter(ref => {
+        const surface = resolveAmbientBirdPerch(ref);
+        return surface && isAmbientBirdGroundPerchClear(surface);
+      });
+      if (perches.length) {
+        zones.push({
+          id: `park:${building.id}`,
+          kind: BIRD_SURFACE_KINDS.PARK_GRASS,
+          centerX: bounds.centerX,
+          centerZ: bounds.centerZ,
+          priority: 5,
+          perches,
+        });
+      }
+      continue;
+    }
+    const perches = createRoofBirdPerchRefs(building).filter(ref => Boolean(resolveAmbientBirdPerch(ref)));
+    if (perches.length) {
+      zones.push({
+        id: `roof:${building.id}`,
+        kind: perches[0].kind,
+        centerX: bounds.centerX,
+        centerZ: bounds.centerZ,
+        priority: 3,
+        perches,
+      });
+    }
+  }
+
+  const grassSampleOffsets = Object.freeze([
+    Object.freeze([5.5, 6.5]),
+    Object.freeze([15.5, 5.5]),
+    Object.freeze([25.5, 8.5]),
+    Object.freeze([7.5, 20.5]),
+    Object.freeze([17.5, 25.5]),
+    Object.freeze([27.5, 21.5]),
+  ]);
+  for (const chunk of loadedChunks.values()) {
+    if (!Number.isFinite(chunk?.cx) || !Number.isFinite(chunk?.cz)) continue;
+    const perches = [];
+    for (let index = 0; index < grassSampleOffsets.length; index++) {
+      const offset = grassSampleOffsets[index];
+      const jitterX = (pseudoRandom(chunk.cx * 911 + chunk.cz * 353 + index * 43) - 0.5) * 3.2;
+      const jitterZ = (pseudoRandom(chunk.cx * 557 + chunk.cz * 743 + index * 71) - 0.5) * 3.2;
+      const x = chunk.cx * CHUNK_W + offset[0] + jitterX;
+      const z = chunk.cz * CHUNK_W + offset[1] + jitterZ;
+      const surface = getAmbientBirdGroundSurface(x, z);
+      if (!surface || surface.kind !== BIRD_SURFACE_KINDS.TERRAIN_GRASS || !isAmbientBirdGroundPerchClear(surface)) continue;
+      perches.push(Object.freeze({
+        id: `terrain:${chunk.cx}:${chunk.cz}:${index + 1}`,
+        kind: BIRD_SURFACE_KINDS.TERRAIN_GRASS,
+        directGround: true,
+        x,
+        z,
+      }));
+    }
+    if (perches.length >= 2) {
+      zones.push({
+        id: `grass:${chunk.cx}:${chunk.cz}`,
+        kind: BIRD_SURFACE_KINDS.TERRAIN_GRASS,
+        centerX: chunk.cx * CHUNK_W + CHUNK_W / 2,
+        centerZ: chunk.cz * CHUNK_W + CHUNK_W / 2,
+        priority: 1,
+        perches,
+      });
+    }
+  }
+  const maximumZones = IS_MOBILE_VIEWPORT ? 8 : 12;
+  const authoredZones = zones.filter(zone => zone.kind !== BIRD_SURFACE_KINDS.TERRAIN_GRASS);
+  const retainedAuthoredZones = authoredZones.length > maximumZones
+    ? [...selectSpreadBirdHabitatZones(authoredZones, maximumZones)]
+    : authoredZones;
+  const remainingSlots = Math.max(0, maximumZones - retainedAuthoredZones.length);
+  const terrainZones = zones.filter(zone => zone.kind === BIRD_SURFACE_KINDS.TERRAIN_GRASS);
+  return Object.freeze([
+    ...retainedAuthoredZones,
+    ...selectSpreadBirdHabitatZones(terrainZones, remainingSlots),
+  ]);
+}
+
+function getAmbientBirdHabitatOccupancy(excludeBird = null) {
+  const occupancy = new Map();
+  for (const candidate of _birds) {
+    if (candidate === excludeBird) continue;
+    const ud = candidate.userData;
+    const zoneId = ud.targetPerchRef ? ud.targetHabitatId : ud.habitatId;
+    if (!zoneId) continue;
+    occupancy.set(zoneId, (occupancy.get(zoneId) || 0) + 1);
+  }
+  return occupancy;
+}
+
+function isAmbientBirdPointOnScreen(x, y, z, margin = BIRD_VIEWPORT_MARGIN) {
+  if (!camera) return false;
+  camera.updateMatrixWorld();
+  _birdProjectionPoint.set(x, y, z).project(camera);
+  const inset = Math.max(-0.5, Math.min(0.48, Number(margin) || 0));
+  const edge = 1 - inset;
+  return _birdProjectionPoint.z >= -1
+    && _birdProjectionPoint.z <= 1
+    && Math.abs(_birdProjectionPoint.x) <= edge
+    && Math.abs(_birdProjectionPoint.y) <= edge;
+}
+
+function isAmbientBirdFullyOutsideViewport(x, y, z, margin = BIRD_VIEWPORT_MARGIN) {
+  if (!camera) return true;
+  camera.updateMatrixWorld();
+  _birdProjectionPoint.set(x, y, z).project(camera);
+  const edge = 1 + Math.max(0, Number(margin) || 0);
+  return Math.abs(_birdProjectionPoint.x) > edge
+    || Math.abs(_birdProjectionPoint.y) > edge;
+}
+
+function isAmbientBirdBeyondNaturalDrawDistance(x, z) {
+  return Math.hypot(Number(x) - camTarget.x, Number(z) - camTarget.z) >= BIRD_NATURAL_DRAW_DISTANCE;
+}
+
+function shouldRetireAmbientBirdExit(x, y, z) {
+  return isAmbientBirdFullyOutsideViewport(x, y, z)
+    && isAmbientBirdBeyondNaturalDrawDistance(x, z);
+}
+
+function isAmbientBirdRoofVisible(buildingId) {
+  const building = buildingsMap.get(buildingId);
+  const roof = building?._roof;
+  if (!building?._group?.visible || !roof || getEffectiveBuildingViewMode(building) !== 'solid') return false;
+  let visiblePart = false;
+  roof.traverse(object => {
+    if (visiblePart || (!object.isMesh && !object.isSprite)) return;
+    let cursor = object;
+    while (cursor) {
+      if (!cursor.visible) return;
+      if (cursor === roof) break;
+      cursor = cursor.parent;
+    }
+    if (cursor === roof && roof.visible) visiblePart = true;
+  });
+  return visiblePart;
+}
+
+function isAmbientBirdSurfaceVisible(surface, margin = BIRD_VIEWPORT_MARGIN) {
+  if (!surface) return false;
+  if (isBirdRoofSurfaceKind(surface.kind) && !isAmbientBirdRoofVisible(surface.buildingId)) return false;
+  return isAmbientBirdPointOnScreen(surface.x, surface.y + 0.18, surface.z, margin);
+}
+
+function getAmbientBirdVisiblePerches(zone) {
+  if (!zone?.perches?.length) return [];
+  return zone.perches.filter(ref => {
+    const surface = resolveAmbientBirdPerch(ref);
+    return surface
+      && isAmbientBirdSurfaceVisible(surface)
+      && (!isBirdGroundSurfaceKind(surface.kind) || isAmbientBirdGroundPerchClear(surface));
+  });
+}
+
+function getAmbientBirdVisibleZones() {
+  return _birdHabitatZones
+    .map(zone => ({ zone, visiblePerches: getAmbientBirdVisiblePerches(zone) }))
+    .filter(entry => entry.visiblePerches.length > 0);
+}
+
+function retireAmbientBird(bird, delay = 2 + Math.random() * 7, reason = 'off-screen') {
+  if (!bird) return false;
+  const ud = bird.userData;
+  ud.state = BIRD_STATES.HIDDEN;
+  ud.surfaceKind = null;
+  ud.surfaceKey = null;
+  ud.habitatId = null;
+  ud.flockId = null;
+  ud.currentPerchRef = null;
+  ud.targetPerchRef = null;
+  ud.targetHabitatId = null;
+  ud.targetFlockId = null;
+  ud.flightMode = null;
+  ud.spawnTimer = Math.max(0, Number(delay) || 0);
+  ud.reason = reason;
+  bird.visible = false;
+  bird.rotation.z = 0;
+  ud.modelRoot.position.y = 0;
+  ud.leftWing.rotation.set(0, 1.52, 0);
+  ud.rightWing.rotation.set(0, -1.52, 0);
+  ud.leftWing.scale.set(0.56, 1, 0.3);
+  ud.rightWing.scale.set(0.56, 1, 0.3);
+  return true;
+}
+
+function getAmbientBirdOffscreenPoint(reference, altitude = 3.4) {
+  if (!camera) return new THREE.Vector3(reference.x + 20, reference.y + altitude, reference.z + 20);
+  camera.updateMatrixWorld();
+  const elevated = new THREE.Vector3(reference.x, reference.y + altitude, reference.z);
+  const projected = elevated.clone().project(camera);
+  const edge = 1.18 + Math.random() * 0.18;
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const horizontalWorldUnits = (camera.right - camera.left) / 2;
+  const cameraRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+  return elevated.addScaledVector(cameraRight, (side * edge - projected.x) * horizontalWorldUnits);
+}
+
+function getAmbientBirdExitTarget(reference, altitude = 3.4) {
+  if (!camera) return new THREE.Vector3(
+    reference.x + BIRD_NATURAL_DRAW_DISTANCE,
+    Math.max(reference.y + altitude, altitude),
+    reference.z,
+  );
+  camera.updateMatrixWorld();
+  const projected = new THREE.Vector3(reference.x, reference.y, reference.z).project(camera);
+  const side = projected.x < -0.12 ? -1 : (projected.x > 0.12 ? 1 : (Math.random() < 0.5 ? -1 : 1));
+  const cameraRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+  cameraRight.y = 0;
+  cameraRight.normalize();
+  const target = new THREE.Vector3(
+    reference.x,
+    Math.max(reference.y + altitude, altitude),
+    reference.z,
+  );
+  const step = CHUNK_W;
+  do {
+    target.addScaledVector(cameraRight, side * step);
+  } while (!isAmbientBirdBeyondNaturalDrawDistance(target.x, target.z));
+  return target.addScaledVector(cameraRight, side * CHUNK_W * 0.5);
+}
+
+function getAmbientBirdDesiredPopulation(zone) {
+  if (zone?.kind === BIRD_SURFACE_KINDS.PARK_GRASS) return BIRD_FLOCK_SIZE;
+  if (zone?.kind === BIRD_SURFACE_KINDS.TERRAIN_GRASS) return 3;
+  return 2;
+}
+
+function isAmbientBirdLandingPointClear(surface, excludeBird = null, minimumDistance = 0.28) {
+  if (!surface) return false;
+  for (const candidate of _birds) {
+    if (candidate === excludeBird || candidate.userData.state === BIRD_STATES.HIDDEN) continue;
+    const ref = candidate.userData.targetPerchRef || candidate.userData.currentPerchRef;
+    const occupiedSurface = resolveAmbientBirdPerch(ref);
+    if (!occupiedSurface || occupiedSurface.surfaceKey !== surface.surfaceKey) continue;
+    if (Math.hypot(occupiedSurface.x - surface.x, occupiedSurface.z - surface.z) < minimumDistance) return false;
+  }
+  return true;
+}
+
+function createAmbientBirdClusterPerch(zone, anchorRef, flockId, memberIndex) {
+  const anchorSurface = resolveAmbientBirdPerch(anchorRef);
+  if (!anchorSurface) return null;
+  if (memberIndex === 0 && isAmbientBirdLandingPointClear(anchorSurface)) return anchorRef;
+
+  if (isBirdGroundSurfaceKind(anchorSurface.kind)) {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 0.3 + Math.random() * (BIRD_FLOCK_SPREAD - 0.3);
+      const x = anchorSurface.x + Math.cos(angle) * distance;
+      const z = anchorSurface.z + Math.sin(angle) * distance;
+      const surface = getAmbientBirdGroundSurface(x, z);
+      if (!surface
+        || surface.kind !== anchorSurface.kind
+        || surface.surfaceKey !== anchorSurface.surfaceKey
+        || !isAmbientBirdGroundPerchClear(surface)
+        || !isAmbientBirdLandingPointClear(surface)) continue;
+      return {
+        id: `${flockId}:ground:${memberIndex + 1}`,
+        kind: surface.kind,
+        directGround: true,
+        x: surface.x,
+        z: surface.z,
+      };
+    }
+    return null;
+  }
+
+  const building = buildingsMap.get(anchorRef.buildingId);
+  if (!building) return null;
+  const width = Math.max(T, Number(building.widthTiles || building.width || 1) * T);
+  const depth = Math.max(T, Number(building.heightTiles || building.depth || 1) * T);
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const signedOffset = (Math.random() < 0.5 ? -1 : 1) * (0.3 + Math.random() * (BIRD_FLOCK_SPREAD - 0.3));
+    const ref = {
+      ...anchorRef,
+      id: `${flockId}:roof:${memberIndex + 1}:${attempt + 1}`,
+    };
+    if (anchorRef.kind === BIRD_SURFACE_KINDS.RESIDENTIAL_ROOF_RIDGE) {
+      ref.v = THREE.MathUtils.clamp(Number(anchorRef.v || 0.5) + signedOffset / depth, 0.08, 0.92);
+    } else if (anchorRef.edge === 'north' || anchorRef.edge === 'south') {
+      ref.u = THREE.MathUtils.clamp(Number(anchorRef.u || 0.5) + signedOffset / width, 0.05, 0.95);
+    } else {
+      ref.v = THREE.MathUtils.clamp(Number(anchorRef.v || 0.5) + signedOffset / depth, 0.05, 0.95);
+    }
+    const surface = resolveAmbientBirdPerch(ref);
+    if (surface && isAmbientBirdSurfaceVisible(surface) && isAmbientBirdLandingPointClear(surface)) return ref;
+  }
+  return null;
+}
+
+function refreshAmbientBirdHabitats() {
+  _birdHabitatZones = buildAmbientBirdHabitatZones();
+  _birdHabitatById = new Map(_birdHabitatZones.map(zone => [zone.id, zone]));
+  if (!_birdHabitatZones.length) {
+    _birds.forEach(bird => retireAmbientBird(bird));
+    return;
+  }
+  _birds.forEach(bird => {
+    const ud = bird.userData;
+    if (ud.state === BIRD_STATES.HIDDEN || ud.flightMode === 'exit') return;
+    const currentValid = resolveAmbientBirdPerch(ud.currentPerchRef);
+    const targetValid = resolveAmbientBirdPerch(ud.targetPerchRef);
+    if (!currentValid && !targetValid) retireAmbientBird(bird, 1 + Math.random() * 3);
+  });
+}
+
+function startAmbientBirdFlight(bird, destination, reason = 'enter-screen', options = {}) {
+  if (!bird || !destination?.surface) return false;
+  const ud = bird.userData;
+  if (options.startPoint) bird.position.copy(options.startPoint);
+  const distance = Math.hypot(destination.surface.x - bird.position.x, destination.surface.z - bird.position.z);
+  ud.flightStart.copy(bird.position);
+  ud.lastPosition.copy(bird.position);
+  ud.flightTarget.set(destination.surface.x, destination.surface.y, destination.surface.z);
+  ud.flightMode = options.mode || 'enter';
+  ud.targetPerchRef = destination.perch;
+  ud.targetHabitatId = destination.zone.id;
+  ud.targetFlockId = destination.flockId || `${destination.zone.id}:flock:${++_birdFlockSequence}`;
+  ud.flockId = ud.targetFlockId;
+  ud.flightElapsed = 0;
+  ud.flightDuration = options.duration ?? Math.max(1.7, Math.min(7.5, distance / (3.2 + Math.random() * 1.8)));
+  ud.flightLift = options.lift ?? Math.max(2.2, Math.min(6.5, 2.6 + distance * 0.055 + Math.random() * 0.8));
+  ud.flightCurve = options.curve ?? (Math.random() - 0.5) * Math.min(4, distance * 0.16);
+  ud.state = ud.flightMode === 'enter' ? BIRD_STATES.FLYING : BIRD_STATES.TAKEOFF;
+  ud.reason = reason;
+  ud.surfaceKind = null;
+  ud.surfaceKey = null;
+  ud.flightSequence = ++_birdFlightSequence;
+  bird.visible = true;
+  return true;
+}
+
+function startAmbientBirdExitFlight(bird, reason = 'natural-exit', options = {}) {
+  if (!bird || bird.userData.state === BIRD_STATES.HIDDEN) return false;
+  const ud = bird.userData;
+  const target = options.target || getAmbientBirdExitTarget(bird.position, 2.8 + Math.random() * 1.5);
+  const distance = Math.hypot(target.x - bird.position.x, target.z - bird.position.z);
+  ud.flightStart.copy(bird.position);
+  ud.lastPosition.copy(bird.position);
+  ud.flightTarget.copy(target);
+  ud.flightMode = 'exit';
+  ud.currentPerchRef = null;
+  ud.targetPerchRef = null;
+  ud.targetHabitatId = null;
+  ud.targetFlockId = null;
+  ud.flightElapsed = 0;
+  ud.flightDuration = options.duration ?? Math.max(2.8, Math.min(9, distance / (14 + Math.random() * 4)));
+  ud.flightLift = options.lift ?? (1.4 + Math.random() * 1.2);
+  ud.flightCurve = options.curve ?? ((Math.random() - 0.5) * 1.4);
+  ud.state = BIRD_STATES.TAKEOFF;
+  ud.reason = reason;
+  ud.surfaceKind = null;
+  ud.surfaceKey = null;
+  ud.flightSequence = ++_birdFlightSequence;
+  bird.visible = true;
+  return true;
+}
+
+function spawnAmbientBirdFlock(preferredEntry = null) {
+  const readyBirds = _birds.filter(bird => (
+    bird.userData.state === BIRD_STATES.HIDDEN && bird.userData.spawnTimer <= 0
+  ));
+  if (!readyBirds.length) return 0;
+  const occupancy = getAmbientBirdHabitatOccupancy();
+  const candidates = getAmbientBirdVisibleZones().filter(({ zone }) => (
+    (occupancy.get(zone.id) || 0) < getAmbientBirdDesiredPopulation(zone)
+  ));
+  if (!candidates.length) return 0;
+  const entry = preferredEntry && candidates.includes(preferredEntry)
+    ? preferredEntry
+    : candidates[Math.floor(Math.random() * candidates.length)];
+  const currentPopulation = occupancy.get(entry.zone.id) || 0;
+  const flockSize = Math.min(
+    readyBirds.length,
+    getAmbientBirdDesiredPopulation(entry.zone) - currentPopulation,
+    isBirdRoofSurfaceKind(entry.zone.kind) ? 2 : BIRD_FLOCK_SIZE,
+  );
+  if (flockSize <= 0) return 0;
+
+  const flockId = `ambient-flock:${++_birdFlockSequence}`;
+  const shuffledPerches = [...entry.visiblePerches].sort(() => Math.random() - 0.5);
+  const anchorRef = shuffledPerches.find(ref => {
+    const surface = resolveAmbientBirdPerch(ref);
+    return surface && isAmbientBirdLandingPointClear(surface);
+  });
+  const anchorSurface = resolveAmbientBirdPerch(anchorRef);
+  if (!anchorRef || !anchorSurface) return 0;
+  const spawnOrigin = getAmbientBirdOffscreenPoint(anchorSurface, 3.2 + Math.random() * 1.6);
+  const duration = 2.5 + Math.random() * 1.6;
+  const lift = 1.8 + Math.random() * 1.1;
+  const curve = (Math.random() - 0.5) * 1.2;
+  let spawned = 0;
+  for (let index = 0; index < flockSize; index++) {
+    const bird = readyBirds[index];
+    const perch = createAmbientBirdClusterPerch(entry.zone, anchorRef, flockId, index);
+    const surface = resolveAmbientBirdPerch(perch);
+    if (!perch || !surface) continue;
+    const formationAngle = (index / Math.max(1, flockSize)) * Math.PI * 2;
+    const startPoint = spawnOrigin.clone().add(new THREE.Vector3(
+      Math.cos(formationAngle) * index * 0.12,
+      (index % 2) * 0.12,
+      Math.sin(formationAngle) * index * 0.12,
+    ));
+    if (startAmbientBirdFlight(bird, {
+      zone: entry.zone,
+      perch,
+      surface,
+      flockId,
+    }, 'off-screen-arrival', {
+      mode: 'enter',
+      startPoint,
+      duration: duration + index * 0.04,
+      lift,
+      curve: curve + (index - (flockSize - 1) / 2) * 0.08,
+    })) spawned++;
+  }
+  return spawned;
+}
+
+function beginAmbientBirdWalk(bird, surface) {
+  if (!bird || !surface || !isBirdGroundSurfaceKind(surface.kind)) return false;
+  const ud = bird.userData;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 0.28 + Math.random() * 0.75;
+    const target = getAmbientBirdGroundSurface(
+      surface.x + Math.cos(angle) * distance,
+      surface.z + Math.sin(angle) * distance,
+    );
+    if (!target || target.kind !== surface.kind || target.surfaceKey !== surface.surfaceKey || !isAmbientBirdGroundPerchClear(target)) continue;
+    ud.walkStart = { ...surface };
+    ud.walkTarget = { ...target };
+    ud.walkElapsed = 0;
+    ud.walkDuration = 1.1 + Math.random() * 1.5;
+    ud.state = BIRD_STATES.WALKING;
+    return true;
+  }
+  return false;
+}
+
+function startAmbientBirdFlockExit(bird, reason = 'natural-flight') {
+  const flockId = bird?.userData?.flockId;
+  if (!bird || !flockId) return startAmbientBirdExitFlight(bird, reason);
+  const members = _birds.filter(candidate => (
+    candidate.visible
+    && candidate.userData.flockId === flockId
+    && [BIRD_STATES.PERCHED, BIRD_STATES.WALKING].includes(candidate.userData.state)
+  ));
+  if (!members.length) return false;
+  const center = members.reduce((sum, member) => sum.add(member.position), new THREE.Vector3()).multiplyScalar(1 / members.length);
+  const target = getAmbientBirdExitTarget(center, 3.6 + Math.random() * 1.2);
+  const exitDistance = Math.hypot(target.x - center.x, target.z - center.z);
+  const duration = Math.max(3.2, Math.min(9, exitDistance / (14 + Math.random() * 4)));
+  const lift = 1.8 + Math.random() * 0.8;
+  const curve = (Math.random() - 0.5) * 0.8;
+  members.forEach((member, index) => {
+    const formationOffset = member.position.clone().sub(center).multiplyScalar(0.7);
+    formationOffset.y = (index % 2) * 0.12;
+    startAmbientBirdExitFlight(member, reason, {
+      target: target.clone().add(formationOffset),
+      duration: duration + index * 0.035,
+      lift,
+      curve: curve + (index - (members.length - 1) / 2) * 0.07,
+    });
+  });
+  return true;
+}
+
+function scareAmbientBirdFlock(bird) {
+  const ud = bird?.userData;
+  if (!ud?.flockId || !isBirdGroundSurfaceKind(ud.surfaceKind)) return false;
+  const members = _birds.filter(candidate => (
+    candidate.visible
+    && candidate.userData.flockId === ud.flockId
+    && isBirdGroundSurfaceKind(candidate.userData.surfaceKind)
+    && [BIRD_STATES.PERCHED, BIRD_STATES.WALKING].includes(candidate.userData.state)
+  ));
+  if (!members.length) return false;
+  return startAmbientBirdFlockExit(bird, 'agent-nearby');
+}
+
+function probeAmbientBirdAgentScares() {
+  for (const bird of _birds) {
+    const ud = bird.userData;
+    if (!bird.visible || !isBirdGroundSurfaceKind(ud.surfaceKind)) continue;
+    for (const agent of agentsList) {
+      const position = agent?._group3d?.position;
+      if (!position) continue;
+      if (shouldScareGroundBird({
+        birdX: bird.position.x,
+        birdY: bird.position.y,
+        birdZ: bird.position.z,
+        surfaceKind: ud.surfaceKind,
+        agentX: position.x,
+        agentY: position.y,
+        agentZ: position.z,
+        radius: BIRD_AGENT_SCARE_RADIUS,
+      })) {
+        scareAmbientBirdFlock(bird);
+        break;
+      }
+    }
+  }
+}
+
+function updateAmbientBirdModel(bird, dt) {
+  const ud = bird.userData;
+  const wingsExtended = [BIRD_STATES.TAKEOFF, BIRD_STATES.FLYING].includes(ud.state);
+  ud.wingPhase += dt * (wingsExtended ? 12 : 2.4);
+  const foldAmount = wingsExtended ? 0 : 1;
+  ud.leftWing.rotation.y = THREE.MathUtils.lerp(ud.leftWing.rotation.y, 1.52 * foldAmount, Math.min(1, dt * 10));
+  ud.rightWing.rotation.y = THREE.MathUtils.lerp(ud.rightWing.rotation.y, -1.52 * foldAmount, Math.min(1, dt * 10));
+  const foldedLength = wingsExtended ? 1 : 0.56;
+  const foldedWidth = wingsExtended ? 1 : 0.3;
+  ud.leftWing.scale.x = THREE.MathUtils.lerp(ud.leftWing.scale.x, foldedLength, Math.min(1, dt * 10));
+  ud.rightWing.scale.x = THREE.MathUtils.lerp(ud.rightWing.scale.x, foldedLength, Math.min(1, dt * 10));
+  ud.leftWing.scale.z = THREE.MathUtils.lerp(ud.leftWing.scale.z, foldedWidth, Math.min(1, dt * 10));
+  ud.rightWing.scale.z = THREE.MathUtils.lerp(ud.rightWing.scale.z, foldedWidth, Math.min(1, dt * 10));
+  const flap = wingsExtended ? Math.sin(ud.wingPhase) * 0.72 : 0;
+  ud.leftWing.rotation.z = THREE.MathUtils.lerp(ud.leftWing.rotation.z, -flap, Math.min(1, dt * 16));
+  ud.rightWing.rotation.z = THREE.MathUtils.lerp(ud.rightWing.rotation.z, flap, Math.min(1, dt * 16));
+  ud.legs.visible = !wingsExtended;
+  const walkBob = ud.state === BIRD_STATES.WALKING ? Math.abs(Math.sin(ud.walkElapsed * 11)) * 0.035 : 0;
+  const perchBob = ud.state === BIRD_STATES.PERCHED ? Math.sin(ud.wingPhase * 0.45) * 0.008 : 0;
+  ud.modelRoot.position.y = walkBob + perchBob;
+  ud.body.rotation.x = ud.state === BIRD_STATES.WALKING ? Math.sin(ud.walkElapsed * 3.4) * 0.12 : 0;
+}
+
+function initBirds() {
+  for (let i = 0; i < BIRD_COUNT; i++) {
+    const bird = makeAmbientBirdModel(i);
+    scene.add(bird);
+    _birds.push(bird);
+    retireAmbientBird(bird, Math.random() * 2.5, 'awaiting-visible-habitat');
+  }
+  refreshAmbientBirdHabitats();
+}
+
+function updateBirds(dt) {
+  const showBirds = _gameHour >= 6 && _gameHour < 20;
+  _birdHabitatRefreshTimer += dt;
+  if (_birdHabitatRefreshTimer >= BIRD_HABITAT_REFRESH_SECONDS) {
+    _birdHabitatRefreshTimer = 0;
+    refreshAmbientBirdHabitats();
+  }
+  _birdScareProbeTimer += dt;
+  if (showBirds && _birdScareProbeTimer >= 0.16) {
+    _birdScareProbeTimer = 0;
+    probeAmbientBirdAgentScares();
+  }
+
+  for (const bird of _birds) {
+    if (bird.userData.state === BIRD_STATES.HIDDEN) {
+      bird.visible = false;
+      if (showBirds) bird.userData.spawnTimer = Math.max(0, bird.userData.spawnTimer - dt);
+    }
+  }
+  _birdSpawnProbeTimer += dt;
+  if (showBirds && _birdSpawnProbeTimer >= BIRD_SPAWN_PROBE_SECONDS) {
+    _birdSpawnProbeTimer = 0;
+    spawnAmbientBirdFlock();
+  }
+
+  _birds.forEach(bird => {
+    const ud = bird.userData;
+    if (ud.state === BIRD_STATES.HIDDEN) return;
+    if (!showBirds) {
+      retireAmbientBird(bird, 2 + Math.random() * 4, 'nighttime');
+      return;
+    }
+    const hasPlacement = Boolean(ud.currentPerchRef || ud.targetPerchRef || ud.flightMode === 'exit');
+    bird.visible = showBirds && hasPlacement;
+    if (!bird.visible) return;
+
+    if (ud.state === BIRD_STATES.PERCHED) {
+      const surface = resolveAmbientBirdPerch(ud.currentPerchRef);
+      if (!surface) {
+        retireAmbientBird(bird, 1 + Math.random() * 3, 'surface-changed');
+      } else if (isBirdRoofSurfaceKind(surface.kind) && !isAmbientBirdRoofVisible(surface.buildingId)) {
+        retireAmbientBird(bird, 2 + Math.random() * 4, 'roof-hidden');
+      } else {
+        bird.position.set(surface.x, surface.y, surface.z);
+        ud.surfaceKind = surface.kind;
+        ud.surfaceKey = surface.surfaceKey;
+        ud.perchTimer -= dt;
+        if (ud.perchTimer <= 0) {
+          const walked = isBirdGroundSurfaceKind(surface.kind) && Math.random() < 0.62
+            ? beginAmbientBirdWalk(bird, surface)
+            : false;
+          if (!walked) {
+            startAmbientBirdFlockExit(bird, 'natural-flight');
+          }
+        }
+      }
+    } else if (ud.state === BIRD_STATES.WALKING) {
+      const start = ud.walkStart;
+      const target = ud.walkTarget;
+      if (!start || !target) {
+        ud.state = BIRD_STATES.PERCHED;
+      } else {
+        ud.walkElapsed += dt;
+        const progress = Math.min(1, ud.walkElapsed / Math.max(0.1, ud.walkDuration));
+        const eased = progress * progress * (3 - 2 * progress);
+        const x = THREE.MathUtils.lerp(start.x, target.x, eased);
+        const z = THREE.MathUtils.lerp(start.z, target.z, eased);
+        const liveSurface = getAmbientBirdGroundSurface(x, z);
+        if (!liveSurface || liveSurface.kind !== start.kind || liveSurface.surfaceKey !== start.surfaceKey) {
+          ud.state = BIRD_STATES.PERCHED;
+        } else {
+          bird.position.set(x, liveSurface.y, z);
+          const dx = target.x - start.x;
+          const dz = target.z - start.z;
+          if (Math.hypot(dx, dz) > 0.001) bird.rotation.y = Math.atan2(-dx, -dz);
+          ud.surfaceKind = liveSurface.kind;
+          ud.surfaceKey = liveSurface.surfaceKey;
+          if (progress >= 1) {
+            ud.currentPerchRef = {
+              id: `walk:${ud.index}:${Date.now()}`,
+              kind: liveSurface.kind,
+              directGround: true,
+              x: liveSurface.x,
+              z: liveSurface.z,
+            };
+            ud.state = BIRD_STATES.PERCHED;
+            ud.perchTimer = 2 + Math.random() * 7;
+          }
+        }
+      }
+    } else {
+      const exiting = ud.flightMode === 'exit';
+      const target = exiting
+        ? { x: ud.flightTarget.x, y: ud.flightTarget.y, z: ud.flightTarget.z, kind: null, surfaceKey: null }
+        : resolveAmbientBirdPerch(ud.targetPerchRef);
+      if (!target) {
+        retireAmbientBird(bird, 1 + Math.random() * 3, 'target-changed');
+      } else {
+        ud.flightElapsed += dt;
+        const progress = Math.min(1, ud.flightElapsed / Math.max(0.1, ud.flightDuration));
+        ud.state = exiting
+          ? (progress < 0.18 ? BIRD_STATES.TAKEOFF : BIRD_STATES.FLYING)
+          : (progress < 0.82 ? BIRD_STATES.FLYING : BIRD_STATES.LANDING);
+        if (!exiting
+          && ud.state === BIRD_STATES.LANDING
+          && isBirdRoofSurfaceKind(target.kind)
+          && !isAmbientBirdRoofVisible(target.buildingId)) {
+          retireAmbientBird(bird, 2 + Math.random() * 4, 'roof-hidden-during-landing');
+          return;
+        }
+        const eased = progress * progress * (3 - 2 * progress);
+        const dx = target.x - ud.flightStart.x;
+        const dz = target.z - ud.flightStart.z;
+        const distance = Math.hypot(dx, dz) || 1;
+        const sideX = -dz / distance;
+        const sideZ = dx / distance;
+        const curve = Math.sin(Math.PI * progress) * ud.flightCurve;
+        const x = THREE.MathUtils.lerp(ud.flightStart.x, target.x, eased) + sideX * curve;
+        const z = THREE.MathUtils.lerp(ud.flightStart.z, target.z, eased) + sideZ * curve;
+        const y = THREE.MathUtils.lerp(ud.flightStart.y, target.y, eased) + Math.sin(Math.PI * progress) * ud.flightLift;
+        bird.position.set(x, y, z);
+        const moveX = x - ud.lastPosition.x;
+        const moveZ = z - ud.lastPosition.z;
+        if (Math.hypot(moveX, moveZ) > 0.001) bird.rotation.y = Math.atan2(-moveX, -moveZ);
+        bird.rotation.z = THREE.MathUtils.lerp(bird.rotation.z, -curve * 0.015, Math.min(1, dt * 5));
+        ud.lastPosition.copy(bird.position);
+        if (exiting && progress >= 0.16 && shouldRetireAmbientBirdExit(x, y, z)) {
+          retireAmbientBird(bird, 2 + Math.random() * 7, 'completed-off-screen-exit');
+          return;
+        }
+        if (progress >= 1) {
+          if (exiting) {
+            if (shouldRetireAmbientBirdExit(x, y, z)) {
+              retireAmbientBird(bird, 2 + Math.random() * 7, 'completed-off-screen-exit');
+            } else {
+              startAmbientBirdExitFlight(bird, ud.reason || 'natural-flight');
+            }
+            return;
+          }
+          if (!isAmbientBirdSurfaceVisible(target, -0.08)) {
+            retireAmbientBird(bird, 1 + Math.random() * 4, 'landing-left-screen');
+            return;
+          }
+          const zone = _birdHabitatById.get(ud.targetHabitatId);
+          ud.currentPerchRef = ud.targetPerchRef;
+          ud.targetPerchRef = null;
+          ud.habitatId = ud.targetHabitatId;
+          ud.flockId = ud.targetFlockId;
+          ud.surfaceKind = target.kind;
+          ud.surfaceKey = target.surfaceKey;
+          ud.state = BIRD_STATES.PERCHED;
+          ud.flightMode = null;
+          ud.perchTimer = 4 + Math.random() * 16;
+          bird.position.set(target.x, target.y, target.z);
+          bird.rotation.z = 0;
+          if (!zone) refreshAmbientBirdHabitats();
+        }
+      }
+    }
+    updateAmbientBirdModel(bird, dt);
+  });
+}
+
+function getAmbientBirdDiagnostics() {
+  const visible = _birds.filter(bird => bird.visible);
+  const hidden = _birds.filter(bird => bird.userData.state === BIRD_STATES.HIDDEN);
+  const visibleHabitatEntries = getAmbientBirdVisibleZones();
+  const byState = {};
+  const bySurface = {};
+  const byHabitat = {};
+  const perchedByRef = new Map();
+  const flockMembers = new Map();
+  let tuckedWingViolationCount = 0;
+  let backwardWingViolationCount = 0;
+  let hiddenRoofBirdCount = 0;
+  let descendingExitCount = 0;
+  for (const bird of visible) {
+    const state = bird.userData.state || 'unknown';
+    const surface = bird.userData.surfaceKind || (state === BIRD_STATES.FLYING ? 'airborne' : 'transition');
+    const habitatId = bird.userData.targetPerchRef ? bird.userData.targetHabitatId : bird.userData.habitatId;
+    const flockId = bird.userData.targetFlockId || bird.userData.flockId;
+    byState[state] = (byState[state] || 0) + 1;
+    bySurface[surface] = (bySurface[surface] || 0) + 1;
+    if (habitatId) byHabitat[habitatId] = (byHabitat[habitatId] || 0) + 1;
+    if (flockId) {
+      if (!flockMembers.has(flockId)) flockMembers.set(flockId, []);
+      flockMembers.get(flockId).push(bird);
+    }
+    if ([BIRD_STATES.PERCHED, BIRD_STATES.WALKING, BIRD_STATES.LANDING].includes(state)) {
+      const tucked = Math.abs(bird.userData.leftWing.rotation.y) >= 1.25
+        && Math.abs(bird.userData.rightWing.rotation.y) >= 1.25
+        && bird.userData.leftWing.scale.z <= 0.46
+        && bird.userData.rightWing.scale.z <= 0.46;
+      if (!tucked) tuckedWingViolationCount++;
+      if (bird.userData.leftWing.rotation.y <= 1.25 || bird.userData.rightWing.rotation.y >= -1.25) {
+        backwardWingViolationCount++;
+      }
+    }
+    if (bird.userData.flightMode === 'exit' && bird.userData.flightTarget.y < bird.userData.flightStart.y) descendingExitCount++;
+    const activeRef = bird.userData.targetPerchRef || bird.userData.currentPerchRef;
+    const activeSurface = resolveAmbientBirdPerch(activeRef);
+    if (activeSurface
+      && isBirdRoofSurfaceKind(activeSurface.kind)
+      && !isAmbientBirdRoofVisible(activeSurface.buildingId)
+      && [BIRD_STATES.PERCHED, BIRD_STATES.WALKING, BIRD_STATES.LANDING].includes(state)) hiddenRoofBirdCount++;
+    if (state === BIRD_STATES.PERCHED) {
+      const perchKey = getBirdPerchRefKey(bird.userData.currentPerchRef);
+      if (perchKey) perchedByRef.set(perchKey, (perchedByRef.get(perchKey) || 0) + 1);
+    }
+  }
+  const duplicatePerchCount = [...perchedByRef.values()].reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+  const flockSpans = [...flockMembers.entries()].map(([flockId, members]) => {
+    let span = 0;
+    for (let first = 0; first < members.length; first++) {
+      for (let second = first + 1; second < members.length; second++) {
+        span = Math.max(span, Math.hypot(
+          members[first].position.x - members[second].position.x,
+          members[first].position.z - members[second].position.z,
+        ));
+      }
+    }
+    return Object.freeze({ flockId, count: members.length, span });
+  });
+  const xs = visible.map(bird => bird.position.x);
+  const zs = visible.map(bird => bird.position.z);
+  return Object.freeze({
+    total: _birds.length,
+    visible: visible.length,
+    hidden: hidden.length,
+    habitatCount: _birdHabitatZones.length,
+    visibleHabitatCount: visibleHabitatEntries.length,
+    visibleHabitats: Object.freeze(visibleHabitatEntries.map(entry => Object.freeze({
+      id: entry.zone.id,
+      kind: entry.zone.kind,
+      visiblePerchCount: entry.visiblePerches.length,
+    }))),
+    roofHabitats: Object.freeze(_birdHabitatZones
+      .filter(zone => isBirdRoofSurfaceKind(zone.kind))
+      .map(zone => {
+        const surface = resolveAmbientBirdPerch(zone.perches[0]);
+        return Object.freeze({
+          id: zone.id,
+          buildingId: surface?.buildingId || null,
+          roofVisible: Boolean(surface && isAmbientBirdRoofVisible(surface.buildingId)),
+          onScreen: Boolean(surface && isAmbientBirdPointOnScreen(surface.x, surface.y, surface.z, 0)),
+        });
+      })),
+    modelScale: BIRD_MODEL_SCALE,
+    naturalDrawDistance: BIRD_NATURAL_DRAW_DISTANCE,
+    flockSpreadLimit: BIRD_FLOCK_SPREAD * 2,
+    flockSpans: Object.freeze(flockSpans),
+    maximumFlockSpan: Math.max(0, ...flockSpans.map(entry => entry.span)),
+    tuckedWingViolationCount,
+    backwardWingViolationCount,
+    descendingExitCount,
+    hiddenRoofBirdCount,
+    byState: Object.freeze(byState),
+    bySurface: Object.freeze(bySurface),
+    byHabitat: Object.freeze(byHabitat),
+    duplicatePerchCount,
+    maxHabitatPopulation: Math.max(0, ...Object.values(byHabitat)),
+    spread: visible.length ? Object.freeze({
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      minZ: Math.min(...zs),
+      maxZ: Math.max(...zs),
+    }) : null,
+    birds: Object.freeze(visible.map(bird => Object.freeze({
+      id: bird.name,
+      state: bird.userData.state,
+      surfaceKind: bird.userData.surfaceKind,
+      surfaceKey: bird.userData.surfaceKey,
+      habitatId: bird.userData.targetPerchRef ? bird.userData.targetHabitatId : bird.userData.habitatId,
+      flockId: bird.userData.flockId,
+      targetFlockId: bird.userData.targetFlockId,
+      flightMode: bird.userData.flightMode,
+      perchRefKey: getBirdPerchRefKey(bird.userData.targetPerchRef || bird.userData.currentPerchRef),
+      x: bird.position.x,
+      y: bird.position.y,
+      z: bird.position.z,
+      onScreen: isAmbientBirdPointOnScreen(bird.position.x, bird.position.y, bird.position.z, 0),
+      fullyOutsideViewport: isAmbientBirdFullyOutsideViewport(bird.position.x, bird.position.y, bird.position.z),
+      beyondNaturalDrawDistance: isAmbientBirdBeyondNaturalDrawDistance(bird.position.x, bird.position.z),
+      leftWingFold: Math.abs(bird.userData.leftWing.rotation.y),
+      leftWingFoldY: bird.userData.leftWing.rotation.y,
+      rightWingFoldY: bird.userData.rightWing.rotation.y,
+      leftWingWidth: bird.userData.leftWing.scale.z,
+      flightStartY: bird.userData.flightStart.y,
+      flightTargetY: bird.userData.flightTarget.y,
+      reason: bird.userData.reason,
+    }))),
+  });
+}
+
+window.__VWAmbientBirds = Object.freeze({
+  states: BIRD_STATES,
+  surfaces: BIRD_SURFACE_KINDS,
+  snapshot: getAmbientBirdDiagnostics,
+  refresh: () => refreshAmbientBirdHabitats(),
+  resetAndSpawnFromOffScreen: () => {
+    _birds.forEach(bird => retireAmbientBird(bird, 0, 'debug-respawn'));
+    const spawned = spawnAmbientBirdFlock();
+    return Object.freeze({ spawned, snapshot: getAmbientBirdDiagnostics() });
+  },
+  fillVisibleHabitatsFromOffScreen: () => {
+    _birds.forEach(bird => {
+      if (bird.userData.state === BIRD_STATES.HIDDEN) bird.userData.spawnTimer = 0;
+    });
+    let spawned = 0;
+    for (let attempt = 0; attempt < _birds.length; attempt++) {
+      const count = spawnAmbientBirdFlock();
+      if (!count) break;
+      spawned += count;
+    }
+    return Object.freeze({ spawned, snapshot: getAmbientBirdDiagnostics() });
+  },
+  scareGroundFlocks: () => {
+    const frightened = new Set();
+    for (const bird of _birds) {
+      const flockId = bird.userData.flockId;
+      if (!flockId || frightened.has(flockId) || !isBirdGroundSurfaceKind(bird.userData.surfaceKind)) continue;
+      if (scareAmbientBirdFlock(bird)) frightened.add(flockId);
+    }
+    return frightened.size;
+  },
+});
+
+// ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
 // CHAT BUBBLES — Agent conversation overlays (HTML div + 3D projection)
 // ═══════════════════════════════════════════════════════════════
