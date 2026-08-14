@@ -2675,7 +2675,12 @@ function updateRuntimeTrafficVehicles(dt = 0) {
     placeRuntimeTrafficVehicle(vehicle, { dt });
     if (vehicle._runtimeState === 'moving') {
       vehicle.group.children.forEach(child => {
-        if (child.name === 'wheel') child.rotation.x += Number(vehicle._runtimeSpeed || VEHICLE_SPEED) * Math.max(0, dt) * 5;
+        if (child.name === 'wheel') {
+          child.rotateOnAxis(
+            VEHICLE_WHEEL_SPIN_AXIS,
+            Number(vehicle._runtimeSpeed || VEHICLE_SPEED) * Math.max(0, dt) * 5,
+          );
+        }
       });
     }
     rendered++;
@@ -72013,6 +72018,8 @@ function _debounceRebuildTrafficLights() {
 // ═══════════════════════════════════════════════════════════════
 const VEHICLE_COLORS = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0x8e24aa, 0xff6f00, 0x00897b, 0x5c6bc0];
 const VEHICLE_SPEED = 7.0; // world units/sec (~4x walking speed)
+const VEHICLE_WHEEL_SPIN_AXIS = new THREE.Vector3(0, 1, 0);
+const _vehicleWheelAxleScratch = new THREE.Vector3();
 
 // Vehicle types for variety
 const VEHICLE_TYPES = ['car', 'car', 'car', 'sedan', 'sedan', 'truck', 'van', 'bus'];
@@ -72217,16 +72224,20 @@ function _addWheels(g, positions, radius, details = null) {
   for (const [wx, wz] of positions) {
     const wheel = new THREE.Mesh(_cylGeo, getMat(wheelCol));
     wheel.scale.set(radius, 0.1, radius);
-    wheel.rotation.z = Math.PI / 2;
+    // Vehicle length is local X and width is local Z. Rotate the cylinder's
+    // native Y axle across the vehicle on Z so the tire rolls front-to-back.
+    wheel.rotation.x = Math.PI / 2;
     wheel.position.set(wx, -0.18, wz);
     wheel.name = 'wheel';
+    wheel.userData.vehicleWheelAxle = 'z';
     g.add(wheel);
     const hub = new THREE.Mesh(_cylGeo, getMat(0xb0bec5));
     hub.scale.set(radius * 0.48, 0.106, radius * 0.48);
-    hub.rotation.z = Math.PI / 2;
+    hub.rotation.x = Math.PI / 2;
     hub.position.set(wx, -0.18, wz);
     hub.name = 'wheelHub';
     hub.userData.vehicleDetail = true;
+    hub.userData.vehicleWheelAxle = 'z';
     (details || g).add(hub);
   }
 }
@@ -72824,6 +72835,8 @@ function getVehicleTrafficDiagnostics() {
   const visible = vehiclesList.filter(vehicle => vehicle?.group?.visible);
   const overlaps = [];
   let offRoadCount = 0;
+  let wheelCount = 0;
+  let wheelAxleOrientationViolationCount = 0;
   let wheelRoadHeightViolationCount = 0;
   let roundedPathCount = 0;
   let pathReversalViolationCount = 0;
@@ -72834,6 +72847,13 @@ function getVehicleTrafficDiagnostics() {
     const expectedY = (roadSurfaceY ?? (ST.BASE + ST.ROAD_THICK))
       + Number(vehicle._rideHeight || getTrafficVehicleRideHeight(vehicle.vehicleType));
     if (Math.abs(vehicle.group.position.y - expectedY) > 0.035) wheelRoadHeightViolationCount++;
+    for (const child of vehicle.group.children) {
+      if (child?.name !== 'wheel') continue;
+      wheelCount++;
+      _vehicleWheelAxleScratch.set(0, 1, 0).applyQuaternion(child.quaternion);
+      if (Math.abs(_vehicleWheelAxleScratch.z) < 0.999
+        || Math.abs(_vehicleWheelAxleScratch.x) > 0.001) wheelAxleOrientationViolationCount++;
+    }
     const analysis = analyzeTrafficPath(vehicle._path || []);
     if (analysis.roundedSegmentCount > 0) roundedPathCount++;
     if (analysis.reversalCount > 0) pathReversalViolationCount++;
@@ -72860,6 +72880,8 @@ function getVehicleTrafficDiagnostics() {
     overlapCount: overlaps.length,
     overlaps: Object.freeze(overlaps),
     pathReversalViolationCount,
+    wheelCount,
+    wheelAxleOrientationViolationCount,
     wheelRoadHeightViolationCount,
     detailPartCount: visible.reduce((sum, vehicle) => sum + Number(vehicle._detailSourcePartCount || 0), 0),
     detailDrawObjectCount: visible.reduce((sum, vehicle) => sum + Number(vehicle._details?.children?.length || 0), 0),

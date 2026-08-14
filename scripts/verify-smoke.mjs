@@ -770,7 +770,7 @@ assert(!main3dJs.includes('makeNaturalFlowerCluster'), 'removed colorful circle 
 assert(!main3dJs.includes("bush:       { label:"), 'removed colorful bush must not remain in the decoration editor');
 assert(!naturalWorldJs.includes("id: 'bush'"), 'removed colorful bush must not remain in procedural natural detail mix');
 assert(!naturalWorldJs.includes("id: 'flower-cluster'"), 'removed colorful circle cluster must not remain in procedural natural detail mix');
-assert(indexHtml.includes('js/main3d.js?v=20260813-traffic-vehicles-r4'), 'traffic-vehicle renderer must be cache-busted in index.html');
+assert(indexHtml.includes('js/main3d.js?v=20260813-traffic-wheels-r5'), 'traffic-wheel renderer must be cache-busted in index.html');
 
 for (const token of [
   "from './ambient-birds.mjs?v=20260813-ambient-birds-r5'",
@@ -809,6 +809,11 @@ for (const token of [
   'getVehicleTrafficDiagnostics',
   'trafficVehicleFootprintsOverlap',
   'vehicleDetails',
+  'wheel.rotation.x = Math.PI / 2',
+  'hub.rotation.x = Math.PI / 2',
+  'child.rotateOnAxis(',
+  'VEHICLE_WHEEL_SPIN_AXIS',
+  'wheelAxleOrientationViolationCount',
   'window.__VWTraffic',
 ]) {
   assert(
@@ -1206,7 +1211,7 @@ for (const token of [
   'const shouldHoldOpen = hasNearbyAgent || hasActiveCrossing',
   'resetBuildingDoorAnimation(building?.id || null)',
   'window.__verifyAutomaticOfficeDoors',
-  'js/main3d.js?v=20260813-traffic-vehicles-r4',
+  'js/main3d.js?v=20260813-traffic-wheels-r5',
 ]) {
   assert(main3dJs.includes(token) || indexHtml.includes(token), `automatic office door integration missing token: ${token}`);
 }
@@ -1274,7 +1279,7 @@ for (const token of [
   'getWallSegmentsForOpenings',
   'buildingWindowGlass',
   'window.__verifyBuildingWindowUpgrade',
-  'js/main3d.js?v=20260813-traffic-vehicles-r4',
+  'js/main3d.js?v=20260813-traffic-wheels-r5',
 ]) {
   assert(main3dJs.includes(token) || indexHtml.includes(token), `dynamic building window integration missing token: ${token}`);
 }
@@ -1367,7 +1372,7 @@ for (const token of [
   "'rake-trim'",
   "'ridge-cap'",
   'window.__verifyResidentialRoofUpgrade',
-  'js/main3d.js?v=20260813-traffic-vehicles-r4',
+  'js/main3d.js?v=20260813-traffic-wheels-r5',
 ]) {
   assert(main3dJs.includes(token) || indexHtml.includes(token), `dynamic building roof integration missing token: ${token}`);
 }
@@ -1376,7 +1381,7 @@ for (const token of [
   'cloneStarterMapBuildings',
   'cloneStarterMapStreets',
   'STARTER_MAP_VERSION',
-  'js/main3d.js?v=20260813-traffic-vehicles-r4',
+  'js/main3d.js?v=20260813-traffic-wheels-r5',
   'agent-life-exterior-area-taxonomy.mjs?v=20260804-park-table-node-inference-r2',
   'syncAgentToCurrentTableSeatTransform(agent)',
   'occupiedAgentFollowsChairTransform',
