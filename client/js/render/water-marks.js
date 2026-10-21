@@ -1,11 +1,11 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Marks on the water (the fishing game's polish, 2026-10-15 - the product owner: "the water splashing and water trails
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Marks on the water (the fishing game's polish, 2026-10-15 — the product owner: "the water splashing and water trails
 // need some serious work … the splashes are way too basic, and so is the trail"): what boats, fish and splashes do to
-// the surface, drawn from above into a map round the view every frame - white water (foam), the surface lifted and
+// the surface, drawn from above into a map round the view every frame — white water (foam), the surface lifted and
 // hollowed (waves: a wake's arms and the waves between them, rings spreading from a splash, the bow wave) and churned,
-// bubbly water (aerated: milky, paler - a propeller's track). The sea's and the lakes' own shaders read it
+// bubbly water (aerated: milky, paler — a propeller's track). The sea's and the lakes' own shaders read it
 // (MARKS_GLSL), so the marks ride their waves and are lit as water is, not strips laid over it.
-// The map: RGBA8 - r foam, g the surface raised, b lowered (HMAX m at full), a aerated; added up where marks overlap.
+// The map: RGBA8 — r foam, g the surface raised, b lowered (HMAX m at full), a aerated; added up where marks overlap.
 // Redrawn from scratch each frame from what is live (nothing kept from frame to frame), so it can follow the view.
 import * as THREE from 'three';
 import { bus } from '../core/state.js';
@@ -14,7 +14,7 @@ import { GU } from './scene.js';
 export const HMAX = 0.3;   // m of rise (or fall) a channel's full value stands for
 
 const blank = new THREE.DataTexture(new Uint8Array(4), 1, 1); blank.needsUpdate = true;
-/** The map and where it lies (x0, z0, size m, texels across - 0: nothing to draw), for the water's materials. */
+/** The map and where it lies (x0, z0, size m, texels across — 0: nothing to draw), for the water's materials. */
 const HN = 4;   // hulls the water keeps out of at once (the nearest)
 export const MARKS_U = {
   uMarks: { value: blank }, uMarksRect: { value: new THREE.Vector4(0, 0, 1, 0) }, uFoamTex: { value: blank },
@@ -29,8 +29,8 @@ float mkN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
 `;
 
 /**
- * For a water material's shaders: mkAt(p) - the marks at world p (x, z): foam cover, aeration, the surface's slope -
- * and mkFoam(p, cover, px) - white water as it looks: solid where it is thick, a lacy web where it thins, flecks as it
+ * For a water material's shaders: mkAt(p) — the marks at world p (x, z): foam cover, aeration, the surface's slope —
+ * and mkFoam(p, cover, px) — white water as it looks: solid where it is thick, a lacy web where it thins, flecks as it
  * goes; px: a pixel's size there (m), so it never sparkles from afar.
  */
 export const MARKS_GLSL = /* glsl */`
@@ -40,8 +40,8 @@ uniform mat4 uHullM[${HN}];
 uniform vec4 uHullS[${HN}], uHullT[${HN}];
 uniform int uHullN;
 // Whether p (the water's surface, in the world) is inside a boat's hull (2026-10-15, the product owner: "the water tends
-// to go through the hull" - a wave higher than the cockpit's sole showed in it): the water there is not drawn. The hull
-// as render/vessels.js lofts it - its beam along it, its sheer, its V down to the keel - in the boat's own frame
+// to go through the hull" — a wave higher than the cockpit's sole showed in it): the water there is not drawn. The hull
+// as render/vessels.js lofts it — its beam along it, its sheer, its V down to the keel — in the boat's own frame
 // (uHullM: the world into it); uHullS: L, B, free board at the transom, draft; uHullT: transom beam, rise to the bow, x, z.
 bool mkDry(vec3 p) {
   for (int i = 0; i < ${HN}; i++) {
@@ -72,7 +72,7 @@ void mkAt(vec2 p, out float foam, out float aer, out vec2 slope) {
   slope = vec2(mx.g - mx.b - h, mz.g - mz.b - h) * (${HMAX.toFixed(2)} / (uMarksRect.z * t)) * e;
   foam = m.r * e; aer = m.a * e;
 }
-// (the foam's pattern from a tiling texture, foamTexture(): three lookups - working its webs out per pixel cost the
+// (the foam's pattern from a tiling texture, foamTexture(): three lookups — working its webs out per pixel cost the
 // phone a third of its frame rate, 2026-10-15)
 float mkFoam(vec2 p, float c, float px, float tm) {
   if (c < 0.004) return 0.0;
@@ -270,7 +270,7 @@ const _v = new THREE.Vector3(), _c = new THREE.Color();
 
 // ------------------------------------------------------------------ the hulls in the water
 /**
- * The boats in the water, by key: the water keeps out of their hulls (mkDry) and laps at them - a line of foam where
+ * The boats in the water, by key: the water keeps out of their hulls (mkDry) and laps at them — a line of foam where
  * the hull meets it, rings spreading as it bobs (the marks, while a map is drawn). obj: an Object3D whose world matrix
  * is the boat's (read when the water is drawn), else m: its matrix now (copied); form: its hull (render/boat-models.js
  * HULL_FORM). Call every frame it is there; one not seen for half a second is gone.

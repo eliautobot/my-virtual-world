@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Accounts against a throwaway server: first start, what guests, members, admins and the owner may do, CSRF and Origin,
 // sign-in rate limits, devices and sessions, the live stream's session guard, task text, and re-authentication.
 // CHECKLIST I14.1, I14.2, I14.3, I14.8, I14.14, I14.15, I14.20; DECISIONS C64–C67.

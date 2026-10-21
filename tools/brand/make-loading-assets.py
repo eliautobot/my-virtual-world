@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 """The loading screen's logo layers, from the brand originals in tools/brand/src (Pillow + numpy).
 
   mvw-base.webp   the MVW mark with its orange/magenta light turned down (the letters as if unlit)
@@ -92,7 +92,7 @@ tight = whole.crop((wx.min() - 4, wy.min() - 4, wx.max() + 5, wy.max() + 5))
 tight.resize((round(tight.width * 84 / tight.height), 84), Image.LANCZOS).save(os.path.join(OUT, 'mvw-mark.webp'), 'WEBP', quality=92, method=6)
 print('mvw-mark.webp', os.path.getsize(os.path.join(OUT, 'mvw-mark.webp')))
 
-# ---- favicons (2026-10-06): the V of the mark, on its own - a browser draws the tab icon in a 16 px square, where the
+# ---- favicons (2026-10-06): the V of the mark, on its own — a browser draws the tab icon in a 16 px square, where the
 # whole 3.4:1 mark is ~5 px tall; one square letter fills it. Transparent; the home-screen icon (apple-touch, 180) on a white
 # square (phones put transparent ones on black). The V is cut at the thinnest columns between the letters, then only its
 # own shape is kept (flood fill from its middle), so no sliver of the M or the W comes along.

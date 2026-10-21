@@ -1,8 +1,8 @@
-/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
 /* The chat windows (client/js/ui/chat.js, chat-window.js; docs/features/CHAT.md §7, §12; chat-and-voice.md): up to four, each by
    default floating over the world, moved by its header and sized from any edge or corner; full screen with one button (a
    phone is always full screen, one window at a time); put away to a button above the 💬 one. The Sidebar (the agent's chats and the tools: Search, Projects, Library, Notifications) sits
-   beside the chat when the window is wide enough and slides over it when it isn't - at every size. Colours come from the
+   beside the chat when the window is wide enough and slides over it when it isn't — at every size. Colours come from the
    theme (theme.css), so the light and dark themes both hold and it is as see-through as Settings → Display →
    Transparency says, like every window; the accent is the platform's sky blue. */
 /* their layer: one level of the page over the world; inside it each window's place in the stack is its own (z-index from
@@ -11,7 +11,7 @@
 #ui > .chat-layer, .chat-layer { position: fixed; inset: 0; z-index: 7; pointer-events: none; }
 .chat-back.floating { position: fixed; inset: 0; pointer-events: none; background: none; }
 .chat-back.min { display: none; }
-/* several showing: the ones behind skip the panels' frosted blur (≥95 % opaque, it barely shows - yet it is worked out
+/* several showing: the ones behind skip the panels' frosted blur (≥95 % opaque, it barely shows — yet it is worked out
    again over the moving world every frame, per window); the one on top keeps it */
 .chat-layer.multi .chat-back:not(.front) .chatwin { backdrop-filter: none; -webkit-backdrop-filter: none; }
 /* several showing: the one on top (the keys go to it) has the accent on its edge */
@@ -21,7 +21,7 @@
   background: var(--cw-bg); animation: cw-in .22s cubic-bezier(.2, .9, .3, 1.1); container: cw / inline-size; }
 .chat-back.modal-back .chatwin { width: min(1180px, calc(100vw - 24px)); height: min(860px, calc(100dvh - var(--topbar-height, 56px) - 20px)); margin-top: var(--topbar-height, 56px); }
 .chat-back.floating .chatwin { position: fixed; pointer-events: auto; margin: 0; border-color: var(--line-3); box-shadow: 0 18px 50px var(--shadow-c4); }
-/* (a side panel or the selection widget coming or going moves it - as they slide) */
+/* (a side panel or the selection widget coming or going moves it — as they slide) */
 .chat-back.floating .chatwin:not(.dragging) { transition: right .2s ease, bottom .2s ease, width .2s ease, height .2s ease; }
 .chatwin.wide { grid-template-columns: 268px minmax(0, 1fr); }
 .chatwin.wide.side-hidden { grid-template-columns: 0 minmax(0, 1fr); }
@@ -125,8 +125,8 @@
 .chatwin.drawer .cw-main::after { content: ''; position: absolute; inset: 0; background: rgba(0, 0, 0, .35); z-index: 7; }
 
 /* ---- the open chat */
-/* (one column, never wider than the window: an implicit 'auto' column grew to the widest thing in a message - a table, a
-   line of code - and pushed the header's buttons, the send button and the text past the window's edge) */
+/* (one column, never wider than the window: an implicit 'auto' column grew to the widest thing in a message — a table, a
+   line of code — and pushed the header's buttons, the send button and the text past the window's edge) */
 .cw-main { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; }
 .cw-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
 .chatwin.wide:not(.side-hidden) .cw-burger { display: none; }
@@ -212,7 +212,7 @@
 .cw-think { margin: 0 0 8px; border-left: 2px solid var(--line-3); padding-left: 10px; }
 .cw-think summary { cursor: pointer; color: var(--dim); font-size: 13px; list-style: none; }
 .cw-think summary::before { content: '▸ '; } .cw-think[open] summary::before { content: '▾ '; }
-/* (thinking: a gentle fade - opacity is moved by the GPU without painting; the moving gradient it replaces was painted
+/* (thinking: a gentle fade — opacity is moved by the GPU without painting; the moving gradient it replaces was painted
    again every frame for as long as the agent reasoned: 117 paints a second for three of them, 2026-10-16) */
 .cw-think.live .cw-think-l { display: inline-block; animation: cw-pulse 1.6s ease-in-out infinite; }
 @keyframes cw-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
@@ -269,7 +269,7 @@
   box-shadow: 0 6px 24px var(--shadow-c5); transition: border-color .15s; }
 .cw-box:focus-within { border-color: color-mix(in srgb, var(--cw-acc) 55%, var(--line-3)); }
 .cw-in { display: block; width: 100%; border: 0; outline: 0; resize: none; background: transparent; color: var(--text); font: inherit; font-size: 15px; line-height: 1.5; padding: 6px 2px; max-height: 38vh; }
-/* (a small window: the tools wrap onto a second row, never cut off - the left ones stay left; the microphone, voice and
+/* (a small window: the tools wrap onto a second row, never cut off — the left ones stay left; the microphone, voice and
    send are one group, at the right edge, moving to the next row together) */
 .cw-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; row-gap: 4px; }
 .cw-tools-r { display: flex; align-items: center; gap: 4px; margin-left: auto; min-width: 0; max-width: 100%; }
@@ -304,7 +304,7 @@
 .cw-pi-l em { font-style: normal; font-size: 11px; color: var(--dim); margin-left: 4px; }
 .cw-pi-s { grid-column: 1; font-size: 11.5px; color: var(--dim); margin-top: 1px; }
 .cw-pi-ok { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--cw-acc); }
-/* the agent picker: a row per agent, its ⧉ beside it - in a window of its own */
+/* the agent picker: a row per agent, its ⧉ beside it — in a window of its own */
 .cw-pi-row { display: flex; align-items: stretch; gap: 2px; }
 .cw-pi-row .cw-pi { flex: 1; min-width: 0; }
 .cw-pi-new { flex: none; width: 34px; border: 0; border-radius: 9px; background: transparent; color: var(--dim); cursor: pointer; display: grid; place-items: center; }
@@ -410,7 +410,7 @@
 .cw-ic.on { color: var(--cw-acc); background: color-mix(in srgb, var(--cw-acc) 14%, transparent); }
 
 /* voice mode, in the chat (2026-10-08: no window of its own): its status beside the buttons, and a blue glow that
-   pulses with the sound - --lv, how loud now (0–1), set every frame by chat-voice.js - on the 🎧 button and the top edge of
+   pulses with the sound — --lv, how loud now (0–1), set every frame by chat-voice.js — on the 🎧 button and the top edge of
    the message box; reading aloud, on the answer's blue stop square. (Its name in the world glows too: app.css .voicing.) */
 .chatwin { --vm-blue: 56, 189, 248; }
 .cw-vm.vm-on { color: rgb(var(--vm-blue)); border-color: rgba(var(--vm-blue), .7); background: rgba(var(--vm-blue), .14);
@@ -435,7 +435,7 @@
 /* (the box's own buttons give way to the status in a small window) */
 .chatwin.voice-mode .cw-effort .cw-tool-lb { display: none; }
 @container cw (max-width: 520px) { .chatwin.voice-mode .cw-model { display: none; } .cw-vm-state { max-width: 190px; } }
-/* (a phone in voice mode: attaching and the thinking effort wait, Work · Life keeps its icons - the status needs the room) */
+/* (a phone in voice mode: attaching and the thinking effort wait, Work · Life keeps its icons — the status needs the room) */
 @container cw (max-width: 520px) {
   .chatwin.voice-mode :is(.cw-attach, .cw-effort) { display: none; }
   .chatwin.voice-mode .cw-cmode .cw-tool-lb { display: none; }
@@ -459,7 +459,7 @@
 .cw-modeline.work { --cm: #818cf8; } .cw-modeline.life { --cm: #f59e0b; }
 /* (a narrow window: the mode it is in by name, the other by its icon) */
 @container cw (max-width: 520px) { .cw-cmode .cw-tool:not(.on) .cw-tool-lb { display: none; } .cw-cmode .cw-tool { padding: 3px 7px; } }
-/* (the window as it opens, 460 px: one row - the effort by its 💡 alone, the model's name shorter; smaller still, the row wraps) */
+/* (the window as it opens, 460 px: one row — the effort by its 💡 alone, the model's name shorter; smaller still, the row wraps) */
 @container cw (max-width: 520px) { .cw-effort .cw-tool-lb { display: none; } .cw-tools .cw-model { max-width: 90px; } .cw-tools-r { gap: 2px; } }
 
 /* ---- talking with someone else's agent (ui/talk-bar.js, CHAT.md §14): a short bar, its answers in the agent's bubble */
@@ -487,7 +487,7 @@ body:has(> #ui > .tb) #phud .prompt { display: none; }   /* (the bar is the talk
 .tb-send { border: 0; background: var(--primary); color: var(--on-primary); font-weight: 700; }
 .tb-mic:disabled, .tb-send:disabled { opacity: .35; cursor: default; }
 .tb-note { font-size: 12.5px; color: var(--dim); } .tb-note:empty { display: none; } .tb-note.bad { color: var(--bad); }
-/* a phone: the stick and the buttons are at the foot, and the keyboard rises from there - the bar goes under the top bar */
+/* a phone: the stick and the buttons are at the foot, and the keyboard rises from there — the bar goes under the top bar */
 @media (pointer: coarse) { .tb { top: calc(64px + env(safe-area-inset-top)); bottom: auto; } .tb-count { display: none; } }
 @media (max-width: 420px) { .tb-left { gap: 6px; font-size: 12px; } }
 
@@ -538,7 +538,7 @@ body:has(> #ui > .tb) #phud .prompt { display: none; }   /* (the bar is the talk
 .cw-q-text { width: 100%; box-sizing: border-box; }
 .cw-q-acts { display: flex; gap: 6px; margin-top: 4px; }
 .cw-q-ans { font-size: 13.5px; font-weight: 600; }
-/* the task progress card (a provider's: OpenClaw's notes and checklist), at the top of the composer. Folded: one row - a
+/* the task progress card (a provider's: OpenClaw's notes and checklist), at the top of the composer. Folded: one row — a
    marker, the step under way, how far along; open: "Task progress", N of M and when, Dismiss, Refresh, and its body
    sliding up out of the message box */
 .cw-card { margin: -2px -2px 6px -6px; border-radius: 16px; border: 1px solid var(--line); background: color-mix(in srgb, var(--btn) 55%, transparent); }
@@ -560,7 +560,7 @@ body:has(> #ui > .tb) #phud .prompt { display: none; }   /* (the bar is the talk
 .cw-card-rf.busy .mvi { animation: cw-spin 1s linear infinite; }
 .cw-card-rf.busy { cursor: default; }
 .cw-card-rf.ok { color: var(--good); }
-.cw-card-chev .mvi { transform: rotate(180deg); transition: transform .2s; }   /* (folded: up - it opens upward) */
+.cw-card-chev .mvi { transform: rotate(180deg); transition: transform .2s; }   /* (folded: up — it opens upward) */
 .cw-card.open .cw-card-chev .mvi { transform: none; }
 .cw-card-st { padding: 0 12px 6px 30px; font-size: 12px; color: var(--dim); }
 .cw-card-st.failed { color: var(--bad); }
@@ -584,7 +584,7 @@ body:has(> #ui > .tb) #phud .prompt { display: none; }   /* (the bar is the talk
 .cw-pop-cmds .cw-pi-l { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .cw-msg.live.observed .cw-mbody { border-left: 2px solid color-mix(in srgb, #38bdf8 55%, transparent); padding-left: 10px; }
 .cw-via { font-size: 11.5px; color: var(--dim); margin-bottom: 4px; }
-/* an answer's media (Agent Providers: what the agent attached) - pictures, players, a card for one that couldn't come */
+/* an answer's media (Agent Providers: what the agent attached) — pictures, players, a card for one that couldn't come */
 .cw-media { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 2px; }
 .cw-mimg { display: block; max-width: min(100%, 420px); border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: color-mix(in srgb, var(--bg2) 70%, transparent); cursor: zoom-in; }
 .cw-mimg img { display: block; max-width: 100%; max-height: 340px; width: auto; height: auto; object-fit: contain; }
@@ -689,7 +689,7 @@ summary.cw-tk-sh { cursor: pointer; }
 .cw-tk-who { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 700; color: var(--dim); margin-bottom: 2px; }
 .cw-tk-who time { font-weight: 400; font-variant-numeric: tabular-nums; }
 .cw-tk-steps { font-size: 12px; color: var(--dim); margin-bottom: 3px; }
-/* the Browser tab: the provider's own browser - its tabs, back, forward, reload, the address, and the page live (wider
+/* the Browser tab: the provider's own browser — its tabs, back, forward, reload, the address, and the page live (wider
    while it shows) */
 .chatwin.dock-browsing { --cw-dock-w: 560px; }
 .cw-dock.browsing .cw-dock-body { display: flex; flex-direction: column; overflow: hidden; padding: 6px 8px 8px; }
@@ -741,12 +741,12 @@ summary.cw-tk-sh { cursor: pointer; }
 }
 
 /* ---------------------------------------------------------------- a provider's own view: Hermes, as Hermes Desktop lays a
-   turn out (providers/hermes-chat.js) - flat, not boxed: the person's turn a hairline box across the column, the answer
+   turn out (providers/hermes-chat.js) — flat, not boxed: the person's turn a hairline box across the column, the answer
    plain text, its thinking and its tool calls quiet grey rows that open on a click; red only for a call that failed */
 .chatwin.pv-hermes .cw-thread { gap: 14px; }
 .chatwin.pv-hermes .cw-msg.user { align-self: stretch; max-width: none; align-items: stretch; }
 .chatwin.pv-hermes .cw-msg.user .cw-bubble { border-radius: 8px; border: 1px solid var(--line-3); background: color-mix(in srgb, var(--text) 3%, transparent); padding: 9px 14px; }
-/* (its actions sit inside the box, at its right, on hover - as Desktop's - not on a row of their own under it) */
+/* (its actions sit inside the box, at its right, on hover — as Desktop's — not on a row of their own under it) */
 .chatwin.pv-hermes .cw-msg.user .cw-mact { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); margin: 0; min-height: 0; background: var(--cw-bg); border-radius: 6px; }
 .chatwin.pv-hermes .cw-msg.user .cw-bubble { padding-right: 64px; }
 .cw-msg.assistant.pv { display: block; }
@@ -761,7 +761,7 @@ summary.cw-tk-sh { cursor: pointer; }
 .hv-think[open] summary::after { transform: rotate(45deg) translate(-2px, -1px); }
 .hv-think.live summary { animation: cw-pulse 1.6s ease-in-out infinite; }
 .hv-think-t { white-space: pre-wrap; color: var(--muted-2); font-size: 13px; line-height: 1.5; margin: 3px 0 2px; max-height: 220px; overflow-y: auto; overscroll-behavior-y: auto; }
-/* a tool call: one line - its icon, what it did, how long - opening to what it ran and what came back */
+/* a tool call: one line — its icon, what it did, how long — opening to what it ran and what came back */
 .hv-tool > summary, .hv-run > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 13px; line-height: 1.5; min-width: 0; padding: 1px 0; }
 .hv-tool > summary::-webkit-details-marker, .hv-run > summary::-webkit-details-marker { display: none; }
 .hv-tool > summary:hover, .hv-run > summary:hover { color: var(--text); }
@@ -793,7 +793,7 @@ summary.cw-tk-sh { cursor: pointer; }
 .hv-status { color: var(--dim); font-size: 13px; }
 .hv-timer { display: inline-flex; align-items: center; gap: 5px; color: var(--muted-2); font-size: 12px; }
 .hv-timer .hv-ic { display: inline-flex; width: 13px; height: 13px; } .hv-timer .hv-ic svg { width: 13px; height: 13px; }
-/* the provider's queue above the composer (Hermes: messages waiting for the turn to end - Desktop's queue panel) */
+/* the provider's queue above the composer (Hermes: messages waiting for the turn to end — Desktop's queue panel) */
 .cw-vq { max-width: var(--cw-col); margin: 0 auto 6px; border: 1px solid var(--line-3); border-radius: 14px; background: var(--bg2); padding: 6px 6px 4px; display: flex; flex-direction: column; gap: 2px; max-height: 40vh; overflow-y: auto; overscroll-behavior-y: contain; }
 .hv-q-h { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); padding: 0 6px 2px; }
 .hv-q-h .hv-ic { display: inline-flex; width: 13px; height: 13px; } .hv-q-h .hv-ic svg { width: 13px; height: 13px; }
@@ -819,7 +819,7 @@ summary.cw-tk-sh { cursor: pointer; }
 .hv-btn-text { background: transparent !important; border-color: transparent !important; color: var(--dim); }
 .hv-btn-text:hover { color: var(--text); }
 .hv-kbd { opacity: .7; font-size: 11px; margin-left: 2px; }
-/* Hermes' questions: its widget - "0 of 2 answered", lettered choices, Other, Skip · Confirm and continue under it */
+/* Hermes' questions: its widget — "0 of 2 answered", lettered choices, Other, Skip · Confirm and continue under it */
 .hv-cl { display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
 .hv-cl-w { gap: 12px; }
 .hv-cl-prog { font-size: 12px; color: var(--dim); }
@@ -846,7 +846,7 @@ summary.cw-tk-sh { cursor: pointer; }
 .hv-dlg-f pre, .hv-dlg-code { margin: 0; padding: 7px 9px; border-radius: 8px; background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text); font: 12.5px/1.5 var(--mono, ui-monospace, monospace); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow: auto; }
 .hv-dlg-b { display: flex; justify-content: flex-end; gap: 6px; }
 .hv-chev { display: inline-flex; width: 12px; height: 12px; vertical-align: -1px; margin-left: 2px; } .hv-chev svg { width: 12px; height: 12px; }
-/* the status stack above the composer (Desktop's): sections - Tasks, Subagents, the queue - and a ridge that hides it */
+/* the status stack above the composer (Desktop's): sections — Tasks, Subagents, the queue — and a ridge that hides it */
 .cw-vq { position: relative; padding-top: 8px; }
 .hv-ridge { position: absolute; top: -1px; left: 50%; transform: translateX(-50%); width: 46px; height: 8px; border: 0; padding: 0; background: transparent; cursor: pointer; }
 .hv-ridge::before { content: ''; position: absolute; left: 8px; right: 8px; top: 3px; height: 3px; border-radius: 3px; background: var(--line-3); }
@@ -891,7 +891,7 @@ summary.cw-tk-sh { cursor: pointer; }
 .hv-dl-act { padding-left: 21px; font-size: 12px; color: var(--muted-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hv-dl-act.shimmer { background: linear-gradient(90deg, var(--muted-2) 30%, var(--text) 50%, var(--muted-2) 70%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: hv-shimmer 2.2s linear infinite; }
 @keyframes hv-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
-/* (Hermes' view: its status stack says what runs - the window's own running-tasks chip would only repeat it) */
+/* (Hermes' view: its status stack says what runs — the window's own running-tasks chip would only repeat it) */
 .chatwin.pv-hermes .cw-tchip { display: none !important; }
 /* Hermes' message actions: icons (Desktop's set); the person's sit inside the box, on hover */
 .chatwin.pv-hermes .cw-msg .cw-mact .cw-ic svg { width: 14px; height: 14px; }
@@ -899,7 +899,7 @@ summary.cw-tk-sh { cursor: pointer; }
 .chatwin.pv-hermes .cw-msg.assistant.pv .cw-mact { justify-content: flex-end; }
 .chatwin.pv-hermes .cw-msg.user.editing { align-self: stretch; width: auto; }
 .chatwin.pv-hermes .cw-msg.user.editing .hv-edit-in { width: 100%; min-height: 64px; border-radius: 8px; }
-/* Hermes' Sidebar rows, as Desktop's list: a dot - blue while it works, orange while it waits for the person - and the age */
+/* Hermes' Sidebar rows, as Desktop's list: a dot — blue while it works, orange while it waits for the person — and the age */
 .chatwin.pv-hermes .cw-item-w { width: 7px; height: 7px; border: 0; border-radius: 50%; background: #60a5fa; animation: hv-dotpulse 1.6s ease-in-out infinite; }
 .chatwin.pv-hermes .cw-item.waiting .cw-item-w { background: #fb923c; animation: none; }
 @keyframes hv-dotpulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
@@ -914,7 +914,7 @@ summary.cw-tk-sh { cursor: pointer; }
 .cw-pop.pv-pop .pv-ci-ic svg { width: 14px; height: 14px; }
 .cw-pop.pv-pop .pv-ci-l { flex: none; font-size: 13px; white-space: nowrap; }
 .cw-pop.pv-pop .pv-ci-s { flex: 1; min-width: 0; font-size: 12.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* what a command said: a quiet line across the middle - the command in mono, a dot, its words; several lines: left-aligned */
+/* what a command said: a quiet line across the middle — the command in mono, a dot, its words; several lines: left-aligned */
 .chatwin.pv-hermes .cw-msg.sys.hv-note { background: none; padding: 2px 8px; width: 60%; max-width: 44rem; font-size: 11.5px; line-height: 1.7; color: color-mix(in srgb, var(--dim) 75%, transparent); text-align: center; border-radius: 0; }
 .chatwin.pv-hermes .cw-msg.sys.hv-note.multi { text-align: left; }
 .chatwin.pv-hermes .hv-note-c { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: color-mix(in srgb, var(--dim) 85%, transparent); }
@@ -967,7 +967,7 @@ details.hv-tool.edit > .hv-tb { padding: 0; }
 /* Hermes' own lines in the conversation (a subagent's task completed, a goal …): quiet, on the left, as Desktop's */
 .chatwin.pv-hermes .cw-msg.sys:not(.bad):not(.hv-note):not(.cw-modeline) { align-self: stretch; text-align: left; background: none; padding: 2px 0; font-size: 12.5px; color: color-mix(in srgb, var(--dim) 80%, transparent); max-width: none; }
 .hv-act-l { flex: 1; }
-/* what Hermes' self-improvement review saved (memory, skills): a brain, its label, what it saved - left, as Desktop's */
+/* what Hermes' self-improvement review saved (memory, skills): a brain, its label, what it saved — left, as Desktop's */
 .chatwin.pv-hermes .cw-msg.sys.hv-note.review { align-self: stretch; width: auto; max-width: none; display: flex; align-items: flex-start; gap: 6px; text-align: left; font-size: 12.5px; padding: 2px 0; }
 .hv-note.review .hv-ic { display: inline-flex; width: 14px; flex: none; color: #c084fc; margin-top: 2px; } .hv-note.review .hv-ic svg { width: 14px; height: 14px; }
 .hv-rv-l { flex: none; font-weight: 600; background: linear-gradient(90deg, #fbbf24, #c084fc); -webkit-background-clip: text; background-clip: text; color: transparent; }

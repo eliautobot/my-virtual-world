@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Moving and resizing a standing building (op bld.place, WP4.6 handles): only someone with build rights on its lot, only
 // to a place inside a lot they may build on, never so small that its furniture would end up outside the walls; one
 // undo puts it back, a redo moves it again, and furniture against a side that moves goes with it.

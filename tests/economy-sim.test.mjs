@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The living economy fast-forwarded (tests/helpers/econ-model.mjs; docs/features/ECONOMY.md §3, §5): a generated city's
 // residents work, eat, shop and pay rent for six weeks of world days with the default policy. The books balance every
 // day and the signed chain holds; money reaches residents and comes back through rent and sales; nobody's wallet goes

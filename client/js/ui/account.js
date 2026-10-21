@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Accounts in the UI: the account chip in the top bar, the sign-in dialog, the forced password change after a
 // temporary password, the confirm-password prompt for sensitive actions, and Account settings (display name,
 // password, devices, sign out everywhere). It also marks what the visitor may do on <body> (cap-* classes), so tools
@@ -227,7 +227,7 @@ export async function downloadFile(url, name, retried = false) {
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
-/** Focuses a dialog's first field a moment after it opens - unless the person is already in one of its fields. A fast
+/** Focuses a dialog's first field a moment after it opens — unless the person is already in one of its fields. A fast
  *  typist on a slow first load could otherwise click into the password box, start typing, and have the delayed focus
  *  pull the rest into the username (found by the WP1.10 rehearsal: the name got the password, the password box
  *  stayed empty, and the browser's required check silently blocked the submit). */

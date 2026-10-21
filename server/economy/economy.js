@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The economy (docs/features/ECONOMY.md): Virtual Coin wallets for every player, agent, resident, business and the
 // city, on the ledger (./ledger.js). This module holds the switches, the sealed ledger key, the policy, wallets by
 // subject (created and endowed once), payments between players and agents, payment requests, administrators' grants,
@@ -370,7 +370,7 @@ export class Economy {
 
   /**
    * Buys from a business's menu: the buyer pays the price; the business keeps it less the stock it buys on the market
-   * (cost of goods, a sink) and the sales tax (to the treasury). ctx: { actor, at?: { b } } - players must be there
+   * (cost of goods, a sink) and the sales tax (to the treasury). ctx: { actor, at?: { b } } — players must be there
    * (the route checks where their player stands). items: [{ id, n }].
    */
   buy(ctx, { business, items, idem = null }) {

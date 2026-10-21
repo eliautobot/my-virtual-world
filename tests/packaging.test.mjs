@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The official packages (docs/INSTALL.md), checked without Docker or systemd: the image, compose.yaml, .dockerignore
 // and the example systemd unit. tools/install-check.mjs runs real clean installs of both.
 import assert from 'node:assert/strict';

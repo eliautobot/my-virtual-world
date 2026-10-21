@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Checks a configuration the way this release's server reads it (server/config.js), without starting anything: every
 // problem at once, and never the key itself. promote.sh runs the new release's own copy against the live unit before it
 // stops live, because a setting the new release rejects would stop it at start (PLAN WP1.6).

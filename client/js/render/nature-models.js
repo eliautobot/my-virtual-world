@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The island's natural scatter as models in the city's style (the design review 2026-10-03: "it's no longer a low-poly, retro
 // style ... this is a brand new style"): rounded, softly shaded crowns built like the city's street trees (render/
 // furniture.js treeRound), each in a close version (a crown of several leafy masses, branches, a flared trunk) and a far
-// one (the same silhouette from a few masses) - the terrain swaps between them by distance; layered firs; bushes of
+// one (the same silhouette from a few masses) — the terrain swaps between them by distance; layered firs; bushes of
 // several masses; boulders with layered stone; grass tufts and wild-flower clumps for the ground near the camera.
 // Geometry: position, normal, color (linear) and aTint (1 where the per-instance colour applies: leaves, petals).
 import * as THREE from 'three';
@@ -17,7 +17,7 @@ const leafShade = (dx, dy) => 0.55 + 0.45 * Math.max(0, dy * 0.5 + 0.5);
 /**
  * FB (aC: linear rgb + tint flag) → geometry with color and aTint. puff (0..1): the leaves' normals turned toward the
  * crown's own round shape (2026-10-03: "smooth ... cozy 3D"): the whole crown is lit as one soft, puffy mass with
- * its lobes still showing a little, instead of each little facet catching the light on its own - the way cozy games
+ * its lobes still showing a little, instead of each little facet catching the light on its own — the way cozy games
  * shade foliage. The crown: an ellipsoid round the leaves' bounding box.
  */
 function fromFB(f, puff = 0) {
@@ -88,7 +88,7 @@ function conifer(near) {
   for (let t = 0; t < tiers; t++) {
     const y0 = h * (0.16 + t * 0.78 / tiers), r0 = 2.3 * (1 - t / (tiers + 0.6)), seg = near ? 11 : 7;
     // (from the underside's middle out to the rim and up to the tip: the lathe lights and culls a profile that runs
-    // upward - listed tip-first, every tier was inside out, and from outside one saw into it and the trunk, 2026-10-04)
+    // upward — listed tip-first, every tier was inside out, and from outside one saw into it and the trunk, 2026-10-04)
     const prof = [[0, y0 - 0.25], [r0 * 0.82, y0 - 0.35], [r0, y0 - 0.15], [r0 * 0.35, y0 + h * 0.1], [0, y0 + h * (near ? 0.2 : 0.32)]];
     if (near) {
       // boughs: the rim pulled in and out around the tier
@@ -112,7 +112,7 @@ function bush() {
 }
 /**
  * A boulder with two smaller stones beside it (2026-10-03: "rocks ... more natural, not lego"): each stone a
- * sphere cut by a few planes - the flat, chipped faces of broken rock - its edges worn round, a little rough; greys
+ * sphere cut by a few planes — the flat, chipped faces of broken rock — its edges worn round, a little rough; greys
  * and browns that vary over it, darker in its hollows and underneath, lichen on its top, moss low down on one side.
  */
 function rock(stones = [[0, 0, 0.95, 0.66, 2, 7], [1.05, 0.5, 0.42, 0.75, 1, 5], [-0.8, 0.62, 0.32, 0.8, 1, 5]], seed = 9) {
@@ -255,8 +255,8 @@ function reeds() {
 /** Water-lily pads on still water, a few in flower (the instance's colour tints the pads' green and the flowers). */
 /**
  * A coral clump for the shallow sea floor (2026-10-03: "corals or underwater grass ... realistic, but not too
- * realistic"): a rounded rock seat with soft, chunky coral on it - branching fingers, a ridged brain coral, a fan, a few
- * tube sponges - in cheerful colours (the instance's colour tints them a little, so no two clumps match).
+ * realistic"): a rounded rock seat with soft, chunky coral on it — branching fingers, a ridged brain coral, a fan, a few
+ * tube sponges — in cheerful colours (the instance's colour tints them a little, so no two clumps match).
  */
 function coral() {
   const f = new FB(), r = rng(71), lin = h => '#' + h;
@@ -344,7 +344,7 @@ function coralTube() {
 }
 /**
  * A coconut palm (2026-10-04: "add palms so that the beach areas look the part"; reshaped: "the trunk looks like a
- * bunch of pieces of cylinders one on top of the other"). The trunk is one smooth tube swept up its leaning curve -
+ * bunch of pieces of cylinders one on top of the other"). The trunk is one smooth tube swept up its leaning curve —
  * a flared foot, tapering as it climbs, ringed with the faint bands of old leaf scars (painted, not stepped), a crown
  * shaft where the fronds spring. Each frond's midrib arches out and droops; many narrow leaflets hang from it either
  * side in a V, each a tapering strip, darker at its base. Coconuts under the crown. near: full; far: fewer, plainer.
@@ -467,7 +467,7 @@ function distantTree(kind) {
 }
 
 /**
- * The scatter's models: { kind: { near, far } } - `far` only where a simpler version exists. Kinds: tree, tree2, birch,
+ * The scatter's models: { kind: { near, far } } — `far` only where a simpler version exists. Kinds: tree, tree2, birch,
  * conifer, bush, rock, grass, flower.
  */
 export function natureModels() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Shared editing rules: the client uses them for live placement previews, the server re-checks every edit.
 import { CATALOG } from './catalog.js';
 import { WALL_T, MAX_FLOORS } from './constants.js';
@@ -68,7 +68,7 @@ export function levelConnected(b, f, level) {
 
 const FOLLOW = 1.2, FOLLOW_WALL = 0.3;   // m: furniture this close to a side moves with it; wall ends this close
 const r3e = v => Math.round(v * 1000) / 1000;
-/** How the inside of building B changes when it takes geometry g ({ x, z, w, d, rot }) - as in the Sims: whatever stands
+/** How the inside of building B changes when it takes geometry g ({ x, z, w, d, rot }) — as in the Sims: whatever stands
  *  against a side that moves (furniture within FOLLOW m, the elevator, the ends of inner walls touching it) moves with
  *  that side; everything else goes with the side that moved least (it stays where it stands in the world while one side
  *  is dragged, and comes along when the building is also moved). Moving or turning without a new size keeps the inside
@@ -155,9 +155,9 @@ export function interiorFits(B, g, levelAt, full = true) {
 }
 
 // ------------------------------------------------------------------ floor layouts on a resize (2026-10-04)
-/** How a floor layout came to be: 'auto' - generated and never changed by hand, so a resize generates it again for the
- *  new size (the building's seed: the same size gives the same floor back); 'empty' - cleared on purpose, it stays
- *  empty; 'custom' - changed by hand (and any layout nobody has shown to be generated). */
+/** How a floor layout came to be: 'auto' — generated and never changed by hand, so a resize generates it again for the
+ *  new size (the building's seed: the same size gives the same floor back); 'empty' — cleared on purpose, it stays
+ *  empty; 'custom' — changed by hand (and any layout nobody has shown to be generated). */
 export function levelMode(L) { return L?.auto ? 'auto' : L?.mode === 'empty' ? 'empty' : 'custom'; }
 /** "floor 2", "floors 2 & 3", "floors 2–9"; "the floor" (or "the park") in a building of one floor. */
 export function floorsName(B, floors) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The economy in the browser (docs/features/ECONOMY.md §10; server/economy/): the Virtual Coin balance in the top bar
 // (a figure floats up when money moves), the wallet (activity, send, ask to be paid, requests, your businesses, your
 // agents' wallets and limits, approvals), a venue's menu and buying there, a business's card and its owner's settings,
@@ -20,7 +20,7 @@ const E = {};
 export const coin = (size = 'sm') => `<img class="vc-ico ${size}" src="/img/vc-${size === 'lg' ? 128 : 64}.png" alt="" aria-hidden="true" draggable="false">`;
 /** Hundredths of a VC for people: 1250 → "12.50 VC", 1200 → "12 VC". */
 export function vc(n, unit = true) {
-  if (!Number.isFinite(n)) return '-';
+  if (!Number.isFinite(n)) return '—';
   const neg = n < 0, a = Math.abs(Math.trunc(n)), w = Math.floor(a / 100), c = a % 100;
   return `${neg ? '−' : ''}${w.toLocaleString('en-US')}${c ? `.${String(c).padStart(2, '0')}` : ''}${unit ? ' VC' : ''}`;
 }
@@ -137,7 +137,7 @@ function addTopbar() {
   if (!bar) return;
   const before = bar.querySelector('.helpb');
   // The city's economy opens from the wallet (its "City economy" button, for every member) and with K: no button of its own
-  E.chip = h(`<button type="button" class="btn ec-chip hidden" title="Your wallet" aria-label="Your wallet"><span class="ec-coin">${coin()}</span><b> - </b></button>`);
+  E.chip = h(`<button type="button" class="btn ec-chip hidden" title="Your wallet" aria-label="Your wallet"><span class="ec-coin">${coin()}</span><b>—</b></button>`);
   bar.insertBefore(E.chip, before);
   E.chip.onclick = () => openWallet();
 }
@@ -170,7 +170,7 @@ function floatUp(amount) {
 }
 function onNote(m) {
   const say = (t, k = '') => app.toast?.(t, k, 5200);
-  if (m.ev === 'paid') app.toast?.(`${m.from} paid you ${vc(m.amount)}${m.memo ? ` - “${m.memo}”` : ''}`, 'good', 5200, '/img/vc-64.png');
+  if (m.ev === 'paid') app.toast?.(`${m.from} paid you ${vc(m.amount)}${m.memo ? ` — “${m.memo}”` : ''}`, 'good', 5200, '/img/vc-64.png');
   else if (m.ev === 'request') say(`🧾 ${m.from} asks you to pay ${vc(m.amount)}${m.memo ? ` for “${m.memo}”` : ''}. Open your wallet to answer.`);
   else if (m.ev === 'approval') say(`🤖 ${m.agent} wants to spend ${vc(m.amount)} (${m.summary}). Open your wallet to approve.`);
   else if (m.ev === 'frozen') say(`🧊 Your wallet was frozen by an administrator${m.memo ? `: ${m.memo}` : ''}.`, 'bad');
@@ -215,7 +215,7 @@ async function openWallet(tab = 'activity') {
         <h4>On offer</h4><div class="lib-list">${mine.length ? mine.map(l => `<div class="lib-row"><div class="lib-main"><b>${l.kind === 'lot' ? `Lot ${esc(l.target)}` : l.kind === 'venue_rent' ? `${bizIcon(l.business?.kind)} ${esc(l.business?.name || 'A business')}` : `Flat ${esc(l.target)}`}</b><span class="dim">${l.kind.endsWith('_rent') ? `for rent, ${vc(l.price)} a month` : `for sale, ${vc(l.price)}`}</span></div><div class="lib-acts"><button type="button" class="btn small" data-w="unlistvc" data-id="${esc(l.id)}">Take it off</button></div></div>`).join('') : '<p class="hint">Nothing listed for Virtual Coin.</p>'}</div>`;
     } else if (tab === 'businesses') {
       body = me.businesses.length ? `<div class="lib-list">${me.businesses.map(b => `<div class="lib-row"><div class="lib-main"><b>${bizIcon(b.kind)} ${esc(b.name)}</b><span class="dim">${vc(b.wallet.balance)} in the till · today ${vc(b.today?.sales || 0)} from ${b.today?.customers || 0} customers · ★ ${(b.rating / 100).toFixed(1)}</span></div><div class="lib-acts"><button type="button" class="btn small primary" data-w="biz" data-id="${esc(b.id)}">Run it</button></div></div>`).join('')}</div>`
-        : `<p class="hint">You don't run a business yet. A café, restaurant, shop, gym or office building on a lot you hold is yours to run - or rent one: ${realty.listings.filter(l => l.kind === 'venue_rent').length ? `${realty.listings.filter(l => l.kind === 'venue_rent').length} for rent now (📊 City economy → Businesses, or a venue's 📒 card)` : 'a venue\'s 📒 card shows when its landlord lets it'}. Its takings come here.</p>`;
+        : `<p class="hint">You don't run a business yet. A café, restaurant, shop, gym or office building on a lot you hold is yours to run — or rent one: ${realty.listings.filter(l => l.kind === 'venue_rent').length ? `${realty.listings.filter(l => l.kind === 'venue_rent').length} for rent now (📊 City economy → Businesses, or a venue's 📒 card)` : 'a venue\'s 📒 card shows when its landlord lets it'}. Its takings come here.</p>`;
     } else {
       body = `${me.approvals.length ? `<h4>Waiting for your approval</h4><div class="lib-list">${me.approvals.map(p => `<div class="lib-row due"><div class="lib-main"><b>🤖 ${esc(p.agent.name)}: ${esc(p.action === 'buy' ? 'buy' : 'pay')} ${vc(p.amount)}</b><span class="dim">${p.action === 'pay' && p.payload.memo ? `“${esc(p.payload.memo)}” · ` : ''}asked ${when(p.created)}</span></div><div class="lib-acts"><button type="button" class="btn small primary" data-w="approve" data-id="${esc(p.id)}">Approve</button><button type="button" class="btn small" data-w="refuse" data-id="${esc(p.id)}">Decline</button></div></div>`).join('')}</div>` : ''}
         ${me.agents.length ? me.agents.map(agentBlock).join('') : '<p class="hint">Agents you own have their own wallets; they show here with the limits you set for them.</p>'}`;
@@ -331,7 +331,7 @@ const bizIcon = k => ({ cafe: '☕', restaurant: '🍽️', shop: '🛍️', gym
 async function buyAt(biz, items) {
   try {
     const r = await post('/api/economy/buy', { business: biz.id, items, idem: key() });
-    app.toast?.(`🧾 ${r.items.map(i => `${i.n > 1 ? `${i.n} × ` : ''}${i.label}`).join(', ')} - ${vc(r.total)}`, 'good', 3200);
+    app.toast?.(`🧾 ${r.items.map(i => `${i.n > 1 ? `${i.n} × ` : ''}${i.label}`).join(', ')} — ${vc(r.total)}`, 'good', 3200);
     refresh();
     return r;
   } catch (x) {

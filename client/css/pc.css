@@ -1,5 +1,5 @@
-/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
-/* The agents' PC (client/js/ui/pc-app.js): a desktop with a taskbar, and its apps - Files, Board, Calendar, Browser,
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* The agents' PC (client/js/ui/pc-app.js): a desktop with a taskbar, and its apps — Files, Board, Calendar, Browser,
    Teams, Activity, Terminal, Settings. The same screen shows in the Agent Studio, in its own window and on the agent's
    desk in the world; it follows the theme inside its windows, and has its own wallpaper. */
 .pc { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; color: var(--text); font-size: 13.5px; container: pc / inline-size;
@@ -190,7 +190,7 @@
 .pc-window { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; background: var(--scrim, rgba(0, 0, 0, .45)); }
 .pc-window > .pc { width: min(1180px, 96vw); height: min(760px, 92vh); box-shadow: 0 30px 90px -20px rgba(0, 0, 0, .9); }
 
-/* a narrow PC (a phone, or a narrow panel): one column, icons only in the taskbar - by the PC's own width */
+/* a narrow PC (a phone, or a narrow panel): one column, icons only in the taskbar — by the PC's own width */
 @container pc (max-width: 760px) {
   .pc-desk { flex-direction: column; align-items: stretch; }
   .pc-widgets { width: auto; margin-left: 0; }
@@ -213,8 +213,8 @@
 }
 @media (prefers-reduced-motion: reduce) { .pc-win, .pc-status.working .pc-dot, .pc-feed .pc-new { animation: none; } }
 
-/* the PC used on its screen in the world (client/js/ui/pc-onscreen.js): put exactly on the monitor or the laptop - or, on a
-   narrow screen, filling it - once the camera has glided there */
+/* the PC used on its screen in the world (client/js/ui/pc-onscreen.js): put exactly on the monitor or the laptop — or, on a
+   narrow screen, filling it — once the camera has glided there */
 .pc-onscreen { position: fixed; inset: 0; z-index: 35; pointer-events: none; opacity: 0; transition: opacity .25s ease-out; }
 .pc-onscreen.on { opacity: 1; }
 .pc-onscreen-pc { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: auto; }
@@ -237,7 +237,7 @@
 .pbw-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .pbw .cw-bw-view { flex: 1 1 auto; max-height: 100%; }
 
-/* an agent's own screen, live (client/js/ui/provider-screen.js: Hermes' Bot Desktop through noVNC) - in the Browser app
+/* an agent's own screen, live (client/js/ui/provider-screen.js: Hermes' Bot Desktop through noVNC) — in the Browser app
    and the chat side panel's Screen tab; a person in control: its frame in the accent colour */
 .psc { display: flex; flex-direction: column; gap: 6px; padding: 8px; min-height: 0; flex: 1; }
 .psc-bar { display: flex; align-items: center; gap: 6px; flex: none; min-height: 28px; font-size: 12.5px; color: var(--dim); flex-wrap: wrap; }
@@ -245,7 +245,7 @@
 .psc-sp { flex: 1; }
 .psc-bar [hidden] { display: none; }
 .psc-bar .cw-ic { width: auto; padding: 3px 8px; font-size: 12px; border-radius: 8px; }
-/* (the screen's own shape - 16:10 - as wide as there is room; shorter where the space is: the picture then fits inside) */
+/* (the screen's own shape — 16:10 — as wide as there is room; shorter where the space is: the picture then fits inside) */
 .psc-view { position: relative; flex: 0 1 auto; width: 100%; aspect-ratio: 16 / 10; min-height: 120px; border-radius: 10px; overflow: hidden; background: #111318; border: 1px solid var(--line); }
 .psc-view.mine { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 55%, transparent); }
 .psc-cv { position: absolute; inset: 0; }

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The inventory's routes (server/economy/inventory.js; docs/features/INVENTORY.md): a player's own inventory and their
 // agents', giving something to a player, an agent or a business, throwing something away, an administrator's grant; and
 // an agent's own (the agent API: what it holds, giving within its owner's limits).

@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Agent Studio's Customize tab (ui/agent-studio.js; 2026-10-07: "everything about the agent in the Agent Studio"):
 // its look, chosen on the stage itself. Every character as a portrait (client/assets/chars/portraits, made by
 // tools/chars/portraits.mjs); pointing at one tries it on the stage, a click picks it; poses to see it move; a surprise;
-// Save. Saving is the editor's person.set with only the look - allowed for the agent's owner and accounts that manage it
+// Save. Saving is the editor's person.set with only the look — allowed for the agent's owner and accounts that manage it
 // (server/lot-rights.js). Skin, hair and clothes come back with the new characters (as in the Customizer).
 import { S } from '../core/state.js';
 import { esc } from '../core/util.js';

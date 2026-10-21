@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An Agent Providers' agent's own computer in its owner's PC (docs/features/agent-pc.md §4.1), on a real server against
 // the stand-in OpenClaw gateway and Hermes backend (tests/helpers/fake-openclaw.mjs, fake-hermes.mjs): the PC says which
 // agents have one; OpenClaw's agent's workspace (read-only, through agents.workspace.list / .get, its own agent id) and its
@@ -129,7 +129,7 @@ test('OpenClaw: its documents, changed with the hash they were read at; one chan
   assert.equal(JSON.stringify(row).includes('kinder'), false, 'never what it carried');
 });
 
-test('Hermes: its managed files - list, read, as itself, upload, a folder, delete; a sensitive file refused', async () => {
+test('Hermes: its managed files — list, read, as itself, upload, a folder, delete; a sensitive file refused', async () => {
   hm.files.set('/tmp/notes.txt', { mime: 'text/plain', bytes: Buffer.from('hello hermes') });
   hm.files.set('/tmp/.env', { mime: 'text/plain', bytes: Buffer.from('KEY=secret') });
   const top = await get(owner, { agent: hmAgent, op: 'list' });

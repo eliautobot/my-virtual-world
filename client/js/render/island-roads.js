@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Roads drawn from the road kit (shared/road-kit.js; the design review 2026-10-03): every road type band by band - travel
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Roads drawn from the road kit (shared/road-kit.js; the design review 2026-10-03): every road type band by band — travel
 // lanes with their markings (double or dashed yellow centre, dashed white lane lines, solid edge lines), parking lanes
-// with stall marks, paved or gravel shoulders, gutters, curbs standing CURB_RISE proud and sidewalks of square tiles -
+// with stall marks, paved or gravel shoulders, gutters, curbs standing CURB_RISE proud and sidewalks of square tiles —
 // at the road's own graded profile (shared/island-roads.js), so the drawn road, the ground, the physics and the
 // simulation agree. Junctions follow their plans: a paved area inside curb returns sized for buses, the gutter, curb
 // and sidewalk wrapping every corner and blending from one road to the next, zebra crosswalks and stop bars. Dead ends
@@ -22,7 +22,7 @@ import { GU } from './scene.js';
 
 const STEP = 2.4384, LIFT = DRAW_LIFT, DROP = 0.45;
 /** How far the drawn road stands above the graded ground vehicles (and the physics) run on beyond the city: its lift
- *  plus the formation (shared/island-roads.js) - vehicles are drawn that much higher, wheels on the drawn surface. */
+ *  plus the formation (shared/island-roads.js) — vehicles are drawn that much higher, wheels on the drawn surface. */
 export const ROAD_TOP = LIFT + 0.04;
 // surface kinds (the shader's materials)
 export const K = { lane: 0, parking: 1, gravel: 2, gutter: 3, curb: 4, walk: 5, pad: 6, walkW: 7, white: 10, yellow: 11 };
@@ -63,8 +63,8 @@ export class IslandRoadsLayer {
   }
   inCity(x, z) { const c = this.city; return !!c && x > c.x0 && x < c.x1 && z > c.z0 && z < c.z1; }
   /** The island lamps' light at night (2026-10-14, the product owner: their pools faded under the sidewalk close up, and lit
-   *  less than the city's): the city's own way - a light map every lit surface reads (render/mats.js lampLight: road,
-   *  sidewalk, lots, walls) - GU.uLightMap2: one channel over the lamps' area, ≤ 4096 texels a side (1.5 m a texel
+   *  less than the city's): the city's own way — a light map every lit surface reads (render/mats.js lampLight: road,
+   *  sidewalk, lots, walls) — GU.uLightMap2: one channel over the lamps' area, ≤ 4096 texels a side (1.5 m a texel
    *  while it fits), each lamp the city's pool (render/city.js bakeLightMap: 11 m, 0.8 at its head). */
   bakeLamps(heads) {
     if (GU.uLightMap2.value) { GU.uLightMap2.value.dispose(); GU.uLightMap2.value = null; GU.uLightRect2.value.set(-1e7, -1e7, 1, 1); }
@@ -107,7 +107,7 @@ export class IslandRoadsLayer {
           const sl = s + (side < 0 ? 15 : 0); if (!free(sl)) continue;
           const q = at(sl, side * (sec.sidewalk.o1 - 0.45), CURB_RISE); if (this.inCity(q.x, q.z)) continue;
           lamps.push({ ...q, yaw: Math.atan2(-side * q.nx, -side * q.nz) });
-          // the tree halfway to this side's next lamp (2026-10-13: on one side it stood on the lamp itself - that side's
+          // the tree halfway to this side's next lamp (2026-10-13: on one side it stood on the lamp itself — that side's
           // stations were worked out as the lamp's own, so the two grew through each other)
           const st = sl + 15; if (!free(st)) continue;
           const t = at(st, side * (sec.sidewalk.o1 - 1.0), CURB_RISE); if (!this.inCity(t.x, t.z)) trees.push({ ...t, k: h(rid, Math.round(st)) });
@@ -160,7 +160,7 @@ export class IslandRoadsLayer {
       }
     }
     if (poles.length) {
-      // a wooden utility pole: a crossarm across the road (2026-10-04: "the cross poles missing up on top" - it ran
+      // a wooden utility pole: a crossarm across the road (2026-10-04: "the cross poles missing up on top" — it ran
       // along the road, end-on to the wires; now square across, the wires' ends on its insulators), two angled braces
       // under it, porcelain insulators on top, one on the pole's top for the middle wire, a transformer on the field side
       const f = new FB();

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Small pieces the PC's apps share (client/js/ui/pc-app.js and its apps): sizes and times as people read them, a menu.
 import { esc } from '../core/util.js';
 

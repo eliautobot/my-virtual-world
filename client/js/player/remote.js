@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Other players (PLAN WP1.10, DECISIONS C62, C118): the server streams the players in this page's area of interest
 // (binary frame type 2, shared/playerproto.js); each is drawn with Next's body and its own look, interpolated 120 ms
 // behind the stream so movement stays smooth at 10 (near) or 2 (farther) updates a second. A player whose person is
@@ -23,7 +23,7 @@ export class Remote {
     this.app = app; this.net = app.net; this.agents = app.agents;
     this.byPid = new Map(); this.info = new Map();   // pid → { name, app, you }
     this.drawn = [];         // the players drawn this frame, for the name tags
-    this.says = new Map();   // pid → { text, until } - chat bubbles
+    this.says = new Map();   // pid → { text, until } — chat bubbles
     this.me = null;          // this account's player as the server last put it: { pid, x, y, z, ctx, yaw, look, cam }
     this.freeSlots = []; this.nextSlot = 0;
     this.stats = { frames: 0, entries: 0, bytes: 0 };
@@ -139,7 +139,7 @@ export function init(app) {
   };
   bus.on('msg:you', onYou);
   if (app.net.playerYou) onYou(app.net.playerYou);
-  bus.on('msg:chat', m => { if (m.agent !== undefined || typeof m.text !== 'string') return; R.say(m.pid, m.text); bus.emit('player:chat', m); });   // (agent chat - a run's frames, a progress card - names its agent: not a player speaking)
+  bus.on('msg:chat', m => { if (m.agent !== undefined || typeof m.text !== 'string') return; R.say(m.pid, m.text); bus.emit('player:chat', m); });   // (agent chat — a run's frames, a progress card — names its agent: not a player speaking)
   bus.on('net', up => { if (!up) R.reset(); });
   bus.on('frame', dt => R.update(dt));
 }

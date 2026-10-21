@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Terrain section of the edit dock (WP4.7, wp4-world-spec.md §9): administrators reshape the land beyond the city
-// with a brush - raise, lower, flatten to the height where they click, dig a pond, clear woodland or plant it. A ring
+// with a brush — raise, lower, flatten to the height where they click, dig a pond, clear woodland or plant it. A ring
 // on the ground shows the brush (its soft edge inside), green where the change may go and red with the reason where it
 // may not (the same rules the server checks, shared/terrain-rules.js). A click sends the stroke (/api/edit
 // terrain.add); undo takes it back. Works while the section is open, in any mode but driving.

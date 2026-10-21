@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Main UI: the 56 px top bar (brand, explore, undo/redo, clock and speed, stats, search, help, settings, and the
 // account chip), the floor widget, the zoom controls, the floating Player button, the minimap, toasts, help, hover /
 // click picking and the follow camera. The editor panels and the lists live in the docks (ui/docks.js); this module
@@ -83,7 +83,7 @@ export function init(a) {
   bus.on('wmods', () => { if (E.mini?.isl?.img) paintIsland(E.mini.isl); });   // an airport placed, moved or closed: the island view again
   bus.on('world', () => { searchIdx = null; drawMiniStatic(); if (E.mini?.isl?.img) { if (E.mini.isl.terrain !== JSON.stringify(S.world.terrain)) { E.mini.isl = null; if (E.mini.view === 'island') setMiniView('island'); } else paintIsland(E.mini.isl); } if (S.selB >= 0) { if (bld(S.selB)) showBuilding(S.selB); else selectBuilding(-1); } onFocus(); });
   bus.on('msg:presence', presenceToast);
-  bus.on('net', (ok, why) => { E.net.classList.toggle('ok', ok); if (!ok && why !== 'signin') toast('Lost connection - reconnecting…', 'bad'); });
+  bus.on('net', (ok, why) => { E.net.classList.toggle('ok', ok); if (!ok && why !== 'signin') toast('Lost connection — reconnecting…', 'bad'); });
   bus.on('clock', updateSpeed);
   bus.on('say', m => { if (m.i === S.sel && E.ag) showSaid(m.text); });
   bus.on('frame', (dt, now) => { followTick(); hoverTick(now); floorTag(); });
@@ -104,7 +104,7 @@ export function init(a) {
 
 // ------------------------------------------------------------------ toasts
 /** A passing note: text (escaped), kind ('good', 'bad' or ''), how long, an optional icon (an image of the app's own),
- *  an agent's emoji, and an optional action: { label, run } - a button in the note that does it and closes the note. */
+ *  an agent's emoji, and an optional action: { label, run } — a button in the note that does it and closes the note. */
 export function toast(text, kind = '', ms = 3400, icon = '', avatar = '', action = null) {
   if (!E.toasts) return;
   const ico = icon && /^\/img\/[a-z0-9-]+\.png$/.test(icon) ? `<img class="toast-ico" src="${icon}" alt="" aria-hidden="true">` : '';
@@ -141,7 +141,7 @@ function parkAt(cx, cy) {
 }
 
 // ------------------------------------------------------------------ top bar
-/** A top bar wider than the screen (a phone: app.css) scrolls sideways under the finger - no scroll bar, nothing squeezed
+/** A top bar wider than the screen (a phone: app.css) scrolls sideways under the finger — no scroll bar, nothing squeezed
  *  or cut off; at an end with more beyond it, a fade with an arrow says so (a tap scrolls most of a screen that way); a
  *  mouse wheel scrolls it too. (2026-10-18, the product owner: "on mobile some buttons get cut off … make the top bar swipable") */
 function swipeBar(el) {
@@ -160,7 +160,7 @@ function swipeBar(el) {
   };
   el.addEventListener('scroll', update, { passive: true });
   addEventListener('resize', update);
-  // (its buttons come and go - the bell, the wallet, Agent Providers, the account - as the modules and the account say)
+  // (its buttons come and go — the bell, the wallet, Agent Providers, the account — as the modules and the account say)
   new MutationObserver(update).observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
   el.addEventListener('wheel', e => {
     if (el.scrollWidth <= el.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY) || getComputedStyle(el).overflowX === 'visible') return;
@@ -175,7 +175,7 @@ function buildTopbar(root) {
   <div class="brand"><img class="logo" src="/img/brand/mvw-mark.webp" alt="My Virtual World" draggable="false"></div>
   <button type="button" class="btn icon undo" disabled title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
   <button type="button" class="btn icon redo" disabled title="Redo (Ctrl+Y)" aria-label="Redo">↷</button>
-  <div id="clock" title="World time - a day lasts 90 real minutes at 1×"><span class="sun">☀️</span><span class="t">--:--</span><span class="d"></span></div>
+  <div id="clock" title="World time — a day lasts 90 real minutes at 1×"><span class="sun">☀️</span><span class="t">--:--</span><span class="d"></span></div>
   <div id="speed" data-cap="world.clock" title="Only admins change the world clock">
     <button type="button" class="btn pause" title="Pause (Space)" aria-label="Pause" aria-pressed="false">${PAUSE}</button>
     <button type="button" class="btn spd" title="Speed" aria-label="Speed"></button>
@@ -183,7 +183,7 @@ function buildTopbar(root) {
   <div class="spacer"></div>
   <button type="button" class="btn icon searchb" title="Search people & places (/)" aria-label="Search">🔍</button>
   <div id="search"><input class="input" placeholder="${innerWidth <= 760 ? 'Search people & places' : 'Search people & places   /'}" spellcheck="false" autocomplete="off"><div class="results panel scroll hidden"></div></div>
-  <button type="button" class="btn icon soundb" title="Sound on - tap to mute" aria-label="Mute all sound" aria-pressed="false">🔊</button>
+  <button type="button" class="btn icon soundb" title="Sound on — tap to mute" aria-label="Mute all sound" aria-pressed="false">🔊</button>
   <button type="button" class="btn icon helpb" title="Controls (H)" aria-label="Controls">❓</button>
   <button type="button" class="btn icon setb" title="Settings" aria-label="Settings">⚙️</button>
   <div id="net" title="Server connection"></div>
@@ -198,24 +198,24 @@ function buildTopbar(root) {
     const v = sk.value; sk.value = '';
     if (!v) return;
     if (!auth.can('world.clock')) return toast('Only admins can change the world clock', 'bad');
-    try { await post('/api/clock', { skip: +v }); toast(`Skipped ahead to ${formatClock(+v)} - everyone re-plans their day`); } catch (e) { toast(e.message, 'bad'); }
+    try { await post('/api/clock', { skip: +v }); toast(`Skipped ahead to ${formatClock(+v)} — everyone re-plans their day`); } catch (e) { toast(e.message, 'bad'); }
   };
   // sound on/off for this device (audio/mixer.js; the volumes are in Settings → Sound)
   const sb = el.querySelector('.soundb');
   const paintSound = () => {
     const on = soundOn();
     sb.innerHTML = icon(on ? 'speaker' : 'speaker-off');
-    sb.title = on ? 'Sound on - tap to mute' : 'Sound off - tap to turn it on';
+    sb.title = on ? 'Sound on — tap to mute' : 'Sound off — tap to turn it on';
     sb.setAttribute('aria-label', on ? 'Mute all sound' : 'Turn sound on');
     sb.setAttribute('aria-pressed', String(!on));
   };
-  sb.onclick = () => { const on = !soundOn(); setSoundOn(on); toast(on ? 'Sound on' : 'Sound off - Settings → Sound has the volumes', '', 2200); };
+  sb.onclick = () => { const on = !soundOn(); setSoundOn(on); toast(on ? 'Sound on' : 'Sound off — Settings → Sound has the volumes', '', 2200); };
   bus.on('sound', paintSound);
   paintSound();
   el.querySelector('.helpb').onclick = toggleHelp;
   el.querySelector('.setb').onclick = () => import('./settings.js').then(m => m.open(app, 'display'));
   // Settings' code (about twenty files: its tabs' and theirs), fetched while the page is idle once the world is up, so
-  // its first open doesn't wait for it - a chain of requests, one after another, on a phone's network (2026-10-08)
+  // its first open doesn't wait for it — a chain of requests, one after another, on a phone's network (2026-10-08)
   const warmSettings = () => import('./settings.js').catch(() => { /* fetched when it opens */ });
   bus.on('ready', () => { if (typeof requestIdleCallback === 'function') requestIdleCallback(warmSettings, { timeout: 8000 }); else setTimeout(warmSettings, 3000); });
   E.net = el.querySelector('#net');
@@ -237,7 +237,7 @@ function nextSpeed(r) {
 function cycleSpeed() {
   if (!auth.can('world.clock')) return toast('Only admins can change the world clock', 'bad');
   const r = app.net.clock ? app.net.clock.rate : 1, next = nextSpeed(r > 0 ? r : lastRate || 1);
-  if (r === 0) { lastRate = next; updateSpeed(); toast(`Resumes at ${next}× - press pause or Space to resume`); return; }
+  if (r === 0) { lastRate = next; updateSpeed(); toast(`Resumes at ${next}× — press pause or Space to resume`); return; }
   setRate(next);
 }
 function updateSpeed() {
@@ -246,7 +246,7 @@ function updateSpeed() {
   const shown = r > 0 ? r : lastRate || 1, next = nextSpeed(shown), paused = r === 0;
   if (E.spd._r !== shown) { E.spd._r = shown; E.spd.innerHTML = TRI + (shown > 1 ? `<b>${shown}×</b>` : ''); }
   E.spd.dataset.r = String(shown);
-  const t = `Speed ${shown}×${shown === 1 ? ' (a day lasts 90 minutes)' : ''}${paused ? ' when resumed' : ''} - click for ${next}×`;
+  const t = `Speed ${shown}×${shown === 1 ? ' (a day lasts 90 minutes)' : ''}${paused ? ' when resumed' : ''} — click for ${next}×`;
   if (E.spd.title !== t) { E.spd.title = t; E.spd.setAttribute('aria-label', t); }
   E.pause.classList.toggle('on', paused);
   E.pause.setAttribute('aria-pressed', String(paused));
@@ -327,7 +327,7 @@ function buildRoster(root) {
     select(+row.dataset.i, { fly: true, force: true });
   });
 }
-/** Which agents the team list shows (2026-10-09): this account's own - the ones it owns or may manage - or the public
+/** Which agents the team list shows (2026-10-09): this account's own — the ones it owns or may manage — or the public
  *  ones, anyone's agent that anyone may talk with (the server's `public`: its owner gives visitors its work or its life).
  *  Another account's private agent is never listed. A guest has no agents of its own: it sees the public ones. */
 const teamView = () => (auth.account && pref('teamView') !== 'public' ? 'mine' : 'public');
@@ -389,7 +389,7 @@ function toggleFav(B) {
 }
 function favBtn(B) {
   const own = ownedBy(B), on = own || isFav(B);
-  const label = own ? 'Yours - always a favourite' : on ? 'Remove from favourites' : 'Add to favourites';
+  const label = own ? 'Yours — always a favourite' : on ? 'Remove from favourites' : 'Add to favourites';
   return `<button type="button" class="fbtn${on ? ' on' : ''}${own ? ' owned' : ''}" data-fav="${esc(B.id)}" title="${label}" aria-label="${label}" aria-pressed="${on}">${own ? '🏠' : '★'}</button>`;
 }
 function tickRoster() {
@@ -403,7 +403,7 @@ function tickRoster() {
     const a = actOf(i);
     set(row.querySelector('.ac'), `${a.icon} ${a.label} · ${placeOf(i)}`);
     row.classList.toggle('sel', i === S.sel);
-    row.title = w ? `Working now${pr.task ? ': ' + pr.task : ''}` : `${p.n} - ${p.r || ''}`;
+    row.title = w ? `Working now${pr.task ? ': ' + pr.task : ''}` : `${p.n} — ${p.r || ''}`;
   }
   const view = teamView(), ext = bodylessAgents(S.agentList).filter(a => (view === 'mine' ? isMine(a) : !isMine(a)));
   for (const a of ext) {
@@ -426,8 +426,8 @@ function presenceToast(m) {
 }
 
 // ------------------------------------------------------------------ the selection widget
-// What is selected shows in a widget that comes down from under the top bar (2026-10-07, 2026-10-08): no header -
-// its kind is a badge beside the name - and a handle at its lower middle that folds it up under the top bar and down
+// What is selected shows in a widget that comes down from under the top bar (2026-10-07, 2026-10-08): no header —
+// its kind is a badge beside the name — and a handle at its lower middle that folds it up under the top bar and down
 // again. Beside the handle, Auto / Manual: Auto (the default) opens it when something is selected and folds it away
 // when nothing is; Manual leaves it as the person put it (selecting only changes what it shows). The account's display
 // preference `selectionWidget`: 'auto', or 'open' / 'closed' (manual, as left). css/selection.css.
@@ -493,7 +493,7 @@ function paintSelMode() {
   const auto = selAuto(), b = E.selMode;
   b.textContent = auto ? 'Auto' : 'Manual';
   b.setAttribute('aria-pressed', String(auto));
-  b.title = auto ? 'Auto: opens when you select something, folds away when you don\'t - click for Manual' : 'Manual: stays open or folded as you leave it - click for Auto';
+  b.title = auto ? 'Auto: opens when you select something, folds away when you don\'t — click for Manual' : 'Manual: stays open or folded as you leave it — click for Auto';
   b.setAttribute('aria-label', b.title);
 }
 /** Open or folded as the preference says now (Auto: open while something is selected). */
@@ -545,7 +545,7 @@ function selCard(key) {
     if (E.selOpen && key !== was) { E.inspBody.getAnimations?.().forEach(a => a.cancel()); E.inspBody.animate?.([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.2,.8,.2,1)' }); }
   }
 }
-/** Where the widget ends at the top - open, its card and the handle under it; folded, the handle under the top bar - for
+/** Where the widget ends at the top — open, its card and the handle under it; folded, the handle under the top bar — for
  *  the toasts and the floor control under it (--sel-b, E.selB) and the chat window (bus 'selcard'). From the layout,
  *  not the moving picture, so it is right at once. */
 function selRoom(force = false) {
@@ -562,7 +562,7 @@ function showAgent(i) {
   const p = S.people[i]; if (!p) return hideInsp();
   E.bd = null;
   setKind(p.v ? 'agent' : 'resident');
-  // one panel, two tabs (ui/sel-feeds.js fills them): Activity - what they are doing now, then what they did, newest first -
+  // one panel, two tabs (ui/sel-feeds.js fills them): Activity — what they are doing now, then what they did, newest first —
   // and Money; an agent this account manages is dressed in its Agent Studio, a resident by administrators in the Customizer
   const mine = !!p.v && !!studioAgentAt(S.agentList, i);
   E.inspBody.innerHTML = `
@@ -585,7 +585,7 @@ function showAgent(i) {
   const rec = (S.agentList || []).find(a => isExt(a) && a.i === i);
   if (rec) { const b = q('.agchat'); b.classList.remove('hidden'); b.onclick = () => bus.emit('openagent', rec.id); }
   q('.cust').onclick = () => (app.openCustomizer ? app.openCustomizer({ kind: 'person', i }) : toast('The customizer is still loading'));   // (an agent's goes to its Studio: ui/customizer.js)
-  // its PC, used on its screen (render/pc-screens.js knows this account's own agents - the PC is its owner's alone)
+  // its PC, used on its screen (render/pc-screens.js knows this account's own agents — the PC is its owner's alone)
   const pcA = app.pcScreens && [...app.pcScreens.mine.values()].find(a => a.i === i);
   if (pcA) { const b = q('.agpc'); b.classList.remove('hidden'); b.onclick = () => bus.emit('pc:use', pcA.id); }
   updateAgentLocal();
@@ -649,7 +649,7 @@ function flatsRow(B, b) {
   const L = S.world.levels[B.lv[S.focus.f]], n = L?.units?.length || 0;
   if (!n) return '';
   const tag = u => { const r = flatRecord(b, S.focus.f, u); return r ? (r.locked ? '🔒' : '') + (r.deal === 'sold' ? ' sold' : r.deal === 'rented' ? ' let' : r.deal === 'assigned' ? ' assigned' : '') : ''; };
-  return `<div class="hint">Flats on floor ${S.focus.f + 1} - tap one for who lives there, visitors and the deal</div><div class="flatrow">${Array.from({ length: n }, (_, u) => `<button class="btn" data-u="${u}" title="Flat ${u + 1}">${u + 1}<small>${esc(tag(u))}</small></button>`).join('')}</div>`;
+  return `<div class="hint">Flats on floor ${S.focus.f + 1} — tap one for who lives there, visitors and the deal</div><div class="flatrow">${Array.from({ length: n }, (_, u) => `<button class="btn" data-u="${u}" title="Flat ${u + 1}">${u + 1}<small>${esc(tag(u))}</small></button>`).join('')}</div>`;
 }
 function showBuilding(b) {
   const B = bld(b); if (!B) return hideInsp();
@@ -663,7 +663,7 @@ function showBuilding(b) {
     ${B.mixed && B.shopName ? `<div class="role">Street level: ${esc(B.shopName)}</div>` : ''}</div>${favBtn(B)}</div>
   <div class="act"><div class="ic">👥</div><div><div class="lb occ">Counting people…</div><div class="pl occ2"></div></div></div>
   <div class="row bld-btns">${park ? '<button class="btn primary look">🔍 Visit</button>' : '<button class="btn primary look">🔍 Look inside</button>'}${mayOn(B, 'furnish') ? '<button class="btn furn">🛋️ Furnish</button>' : ''}${mayOn(B, 'build') ? '<button class="btn edit">🏗️ Edit</button><button class="btn place" title="Handles on the building: move, resize, turn, floors">✥ Move</button>' : ''}</div>
-  <div class="sel-place">${flatsRow(B, b)}${park ? '' : `<div class="hint">Floors - click one to look inside${B.lv.some(lv => levelMode(S.world.levels[lv]) !== 'auto') ? ' · ✎ changed by hand · ○ empty' : ''}</div><div class="floors">${Array.from({ length: B.floors }, (_, f) => `<button class="btn" data-f="${f}" data-fm="${levelMode(S.world.levels[B.lv[f]])}">${f + 1}<small></small></button>`).join('')}</div>`}</div>
+  <div class="sel-place">${flatsRow(B, b)}${park ? '' : `<div class="hint">Floors — click one to look inside${B.lv.some(lv => levelMode(S.world.levels[lv]) !== 'auto') ? ' · ✎ changed by hand · ○ empty' : ''}</div><div class="floors">${Array.from({ length: B.floors }, (_, f) => `<button class="btn" data-f="${f}" data-fm="${levelMode(S.world.levels[B.lv[f]])}">${f + 1}<small></small></button>`).join('')}</div>`}</div>
   <div class="sel-slot"></div>`;
   E.inspBody.className = 'body scroll sel-place-card';
   selCard(`b${b}`);
@@ -705,7 +705,7 @@ function markFloors() {
   [...E.bd.floors.children].forEach(btn => { btn.classList.toggle('on', S.focus.b === E.bd.b && +btn.dataset.f === S.focus.f); btn.classList.toggle('pick', S.focus.b !== E.bd.b && S.selB === E.bd.b && +btn.dataset.f === S.selF); });
   floorInView();
 }
-/** The list shows three rows: the floor looked at or picked is scrolled into them (the page itself never moves) - again
+/** The list shows three rows: the floor looked at or picked is scrolled into them (the page itself never moves) — again
  *  whenever the list changes size (the business column coming in a moment later narrows it). */
 function floorInView() {
   const fl = E.bd?.floors, at = fl?.querySelector('.btn.on, .btn.pick');
@@ -756,11 +756,11 @@ function onFocus() {
   }
   const wl = WALL_LABEL[S.walls] || 'Cutaway';
   set(E.walls, wl);
-  E.walls.title = `Walls: ${wl} - click to change (V)`;
+  E.walls.title = `Walls: ${wl} — click to change (V)`;
   if (B) { measureFloorw(); placeFloorw(); }
   markFloors();
 }
-/** The control's size and the top bar's height, read when the control shows or the window resizes - never per frame,
+/** The control's size and the top bar's height, read when the control shows or the window resizes — never per frame,
  *  so placing it forces no layout. */
 function measureFloorw() {
   const el = E.floorw;
@@ -943,8 +943,8 @@ function buildHelp(root) {
 function toggleHelp() { E.help.classList.toggle('hidden'); }
 
 // ------------------------------------------------------------------ minimap
-// Two views: the city's streets and buildings, and on an island world (WP4.2) the whole island - terrain, water, roads
-// and the city - shown while the view (or the player) is out of the city.
+// Two views: the city's streets and buildings, and on an island world (WP4.2) the whole island — terrain, water, roads
+// and the city — shown while the view (or the player) is out of the city.
 function buildMinimap(root) {
   initIslandPicture(app);   // start building (or fetch the kept) island picture right away
   const g = viewGrid(S.world), pad = 6, W = 236, s = (W - 2 * pad) / (g.maxX - g.minX), H = Math.round((g.maxZ - g.minZ) * s + 2 * pad);
@@ -1057,7 +1057,7 @@ function setHover(i, b) {
   if (b >= 0 && i < 0) {
     const B = bld(b);
     if (B) {
-      const fl = hoverF !== null && B.floors > 1 ? `<div class="sub">Floor ${hoverF + 1} - ${S.selB === b && S.selF === hoverF ? 'click to go in' : 'click to pick it, double-click to go in'}</div>` : '';
+      const fl = hoverF !== null && B.floors > 1 ? `<div class="sub">Floor ${hoverF + 1} — ${S.selB === b && S.selF === hoverF ? 'click to go in' : 'click to pick it, double-click to go in'}</div>` : '';
       const html = `<b>${esc(B.name)}</b><div class="sub">${esc(TYPE_NAME[B.type] || B.type)}${B.floors > 1 ? ` · ${B.floors} floors` : ''}</div>${fl}`;
       if (E.tip._h !== html) { E.tip.innerHTML = html; E.tip._h = html; }
       E.tip.classList.remove('hidden');

@@ -1,24 +1,24 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Provider manifests (PLAN WP2.2; DECISIONS C11, A9, E20; CHECKLIST X12).
 // A manifest is what the server and the pages know about a kind of agent connection before any adapter exists: its
 // label, how it connects, which fields it needs (and which are secret), and what it can do. Settings → Connections is
 // drawn from these; the pages never hard-code a provider. Manifests contain no secrets and no personal data.
-// 'decisions': a decision service (Free Will, docs/features/FREE-WILL.md) - it picks from given options and is never an
+// 'decisions': a decision service (Free Will, docs/features/FREE-WILL.md) — it picks from given options and is never an
 // agent's chat brain (a connection without 'chat' cannot be linked to an agent).
-// (Agent Providers, docs/features/agent-providers.md §4: agents - the provider lists its own agents; tools - each step
-// as it runs; context - the context meter; questions - the agent asks the person; plan - the plan card; commands - slash
-// commands; observe - live activity in a session from the provider's other channels; settings - its own sub-menu;
-// rewrite - editing a message and writing an answer again; false where the provider keeps the history itself; media -
-// the images, video and audio an answer carries, shown in the chat window; queue - messages sent while the agent works:
-// the provider takes them in (into the running turn, or after it, as it is set up); tasks - the chat's background tasks
-// (subagents, jobs) in the side panel, for whoever manages the provider; browser - the agents' own browser there, live;
-// phone - a phone service: numbers that text and call, given to agents as their phones, docs/features/phone.md; files -
-// it takes any file a person attaches (video, audio …), not only images, PDF, documents and text); rewind - the provider
+// (Agent Providers, docs/features/agent-providers.md §4: agents — the provider lists its own agents; tools — each step
+// as it runs; context — the context meter; questions — the agent asks the person; plan — the plan card; commands — slash
+// commands; observe — live activity in a session from the provider's other channels; settings — its own sub-menu;
+// rewrite — editing a message and writing an answer again; false where the provider keeps the history itself; media —
+// the images, video and audio an answer carries, shown in the chat window; queue — messages sent while the agent works:
+// the provider takes them in (into the running turn, or after it, as it is set up); tasks — the chat's background tasks
+// (subagents, jobs) in the side panel, for whoever manages the provider; browser — the agents' own browser there, live;
+// phone — a phone service: numbers that text and call, given to agents as their phones, docs/features/phone.md; files —
+// it takes any file a person attaches (video, audio …), not only images, PDF, documents and text); rewind — the provider
 // rewinds its own record to before one of the person's messages and goes on from there (an edit, a checkpoint restored,
-// an answer written again: Hermes' truncating prompt.submit); branch - a chat copied up to an answer into a new one;
-// titles - its own sessions' titles are the record (they follow its renaming, and a rename here goes to it); archive -
-// a chat archived on the provider (kept there, out of its lists); native - its own calls for its chat view (Hermes: its slash
-// commands as its Desktop runs them, its / and @ suggestions, side questions and background tasks); search - a web search
+// an answer written again: Hermes' truncating prompt.submit); branch — a chat copied up to an answer into a new one;
+// titles — its own sessions' titles are the record (they follow its renaming, and a rename here goes to it); archive —
+// a chat archived on the provider (kept there, out of its lists); native — its own calls for its chat view (Hermes: its slash
+// commands as its Desktop runs them, its / and @ suggestions, side questions and background tasks); search — a web search
 // service for the agents' PC (docs/features/agent-pc.md §5)
 export const CAPABILITIES = Object.freeze(['chat', 'sessions', 'models', 'effort', 'attachments', 'approvals', 'stop', 'taskProgress', 'presence', 'decisions', 'speak', 'listen',
   'agents', 'tools', 'context', 'questions', 'plan', 'commands', 'observe', 'settings', 'rewrite', 'media', 'queue', 'tasks', 'browser', 'phone', 'files',
@@ -92,7 +92,7 @@ const f = (key, label, type, o = {}) => ({ key, label, type, ...o });
 export const VOICE_PROVIDERS = Object.freeze({
   openai: { label: 'OpenAI', speak: true, listen: true, speakModel: 'gpt-4o-mini-tts', listenModel: 'gpt-4o-mini-transcribe', voice: 'alloy', speakPrice: 15, listenPrice: 0.003,
     docs: 'https://platform.openai.com/docs/guides/text-to-speech' },
-  // (speaking: Kokoro, af_heart - the live bake-off of 2026-10-08, docs/features/CHAT.md §9.4: the fastest heard right at
+  // (speaking: Kokoro, af_heart — the live bake-off of 2026-10-08, docs/features/CHAT.md §9.4: the fastest heard right at
   // ≤ $15 per million characters, at $0.62; OpenAI's TTS isn't on OpenRouter's speech list any more)
   openrouter: { label: 'OpenRouter', speak: true, listen: true, speakModel: 'hexgrad/kokoro-82m', listenModel: 'openai/whisper-large-v3', voice: 'af_heart', speakPrice: 0.62, listenPrice: 0,
     docs: 'https://openrouter.ai/docs/guides/overview/multimodal/tts' },
@@ -121,17 +121,17 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     // here (agents: true). access: 'full' asks for OpenClaw's operator.admin scope too, so its settings can be changed from
     // its sub-menu; 'chat' leaves it out. deviceKey and deviceToken are the device pairing's, kept by the server.
     // pairs: it signs in as a device the gateway's owner approves (the pages speak of pairing and its devices).
-    // detect: where else Agent Providers' "Find" looks besides the address field's default - the machine this server runs
+    // detect: where else Agent Providers' "Find" looks besides the address field's default — the machine this server runs
     // on, seen from inside a Docker container (Docker's documented name for it).
     // menu: its sub-menu in Agent Providers (client/js/ui/providers/openclaw.js); menuWrite: which of the sub-menu's calls change
-    // something (the server records each; the adapter takes only listed calls - ./openclaw/menu.js)
+    // something (the server records each; the adapter takes only listed calls — ./openclaw/menu.js)
     id: 'openclaw', label: 'OpenClaw', transport: 'network', connectionKind: 'remote', live: true, hub: true, pairs: true, detect: ['ws://host.docker.internal:18789'],
     menu: 'openclaw', menuWrite: ['agents.create', 'agents.update', 'agents.delete', 'skills.update', 'plugins.setEnabled', 'cron.update', 'cron.run', 'cron.remove',
       'exec.approvals.set', 'exec.approval.resolve', 'exec.approval.grants.revoke', 'sessions.patch', 'sessions.delete', 'config.patch'],
     official: 'OpenClaw Gateway WebSocket protocol v4 (documented), through OpenClaw\'s published client @openclaw/gateway-client',
     docs: 'https://docs.openclaw.ai/gateway/protocol',
     fields: [
-      // (hint: a line under the field, in the provider's own terms - the pages show it and know nothing of OpenClaw)
+      // (hint: a line under the field, in the provider's own terms — the pages show it and know nothing of OpenClaw)
       f('url', 'Gateway address', 'url', { default: 'ws://127.0.0.1:18789', required: true,
         hint: 'OpenClaw\'s gateway listens on ws://127.0.0.1:18789 by default. From another machine use its address (wss:// through a secure proxy).' }),
       f('auth', 'Sign in with', 'select', { options: ['token', 'password'], default: 'token', labels: { token: 'Gateway token', password: 'Gateway password' } }),
@@ -149,7 +149,7 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     capabilities: { chat: true, sessions: true, models: true, effort: true, attachments: true, approvals: true, stop: true, presence: true,
       agents: true, tools: true, context: true, questions: true, plan: true, commands: true, observe: true, settings: true, rewrite: false, media: true, queue: true, tasks: true, browser: true, files: true,
       computer: true },
-    // computer: its agents' own computer, in their owner's PC (docs/features/agent-pc.md §4.1; ./openclaw/files.js) -
+    // computer: its agents' own computer, in their owner's PC (docs/features/agent-pc.md §4.1; ./openclaw/files.js) —
     // where its files are (each agent's workspace), the calls the adapter takes and which of them change something
     computer: { where: 'workspace', docs: true, ops: ['list', 'read', 'docs', 'doc', 'docSet'], writes: ['docSet'] },
   },
@@ -165,7 +165,7 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     docs: 'https://hermes-agent.nousresearch.com/docs/developer-guide/programmatic-integration',
     fields: [
       f('url', 'Hermes address', 'url', { default: 'http://127.0.0.1:9119', required: true,
-        hint: 'The address `hermes serve` (or `hermes dashboard`) listens on - http://127.0.0.1:9119 by default. From another machine use its address (https:// through a secure proxy).' }),
+        hint: 'The address `hermes serve` (or `hermes dashboard`) listens on — http://127.0.0.1:9119 by default. From another machine use its address (https:// through a secure proxy).' }),
       f('auth', 'Sign in with', 'select', { options: ['token', 'password'], default: 'token', labels: { token: 'Session token', password: 'Username and password' },
         hint: 'A Hermes bound to its own machine takes a session token; one listening beyond it asks for its username and password.' }),
       f('token', 'Session token', 'secret', { requiredIf: { auth: 'token' }, showIf: { auth: 'token' },
@@ -180,8 +180,8 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     capabilities: { chat: true, sessions: true, models: true, effort: true, attachments: true, approvals: true, stop: true, presence: true,
       agents: true, tools: true, context: true, questions: true, plan: true, commands: true, observe: true, settings: true, rewrite: false, media: true, queue: true, tasks: true, files: true,
       rewind: true, branch: true, titles: true, archive: true, native: true, computer: true, screen: true },
-    // (its own computer: the machine Hermes runs on, through Hermes' managed files - ./hermes/files.js; screen: its Bot
-    // Desktop, where its browser opens - watched live and taken over, ./hermes/screen.js)
+    // (its own computer: the machine Hermes runs on, through Hermes' managed files — ./hermes/files.js; screen: its Bot
+    // Desktop, where its browser opens — watched live and taken over, ./hermes/screen.js)
     computer: { where: 'machine', docs: false, ops: ['list', 'read', 'write', 'mkdir', 'remove'], writes: ['write', 'mkdir', 'remove'] },
   },
   {
@@ -235,8 +235,8 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     // Free Will (docs/features/FREE-WILL.md): OpenAI's Decisions API picks an agent's next action from the options the world
     // offers. Its own kind, not a chat provider: the adapter is server/providers/openai-decisions.js. The price is a setting so
     // the metered cost follows OpenAI's price list without a release. byok (2026-10-10): a member may add one with their
-    // own key - it only ranks the options the world offers (no tools, no money, no messages), a
-    // public vendor's API, nothing on the server's network - so Free Will runs on their key.
+    // own key — it only ranks the options the world offers (no tools, no money, no messages), a
+    // public vendor's API, nothing on the server's network — so Free Will runs on their key.
     id: 'openai-decisions', label: 'OpenAI Decisions', transport: 'network', connectionKind: 'remote', byok: true,
     official: 'OpenAI Decisions API, POST https://api.openai.com/v1/decisions (documented, public beta)',
     fields: [
@@ -267,7 +267,7 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     providers: VOICE_PROVIDERS,
   },
   {
-    // Agents' phones (docs/features/phone.md): a Twilio account whose numbers become agents' phones - texts, calls,
+    // Agents' phones (docs/features/phone.md): a Twilio account whose numbers become agents' phones — texts, calls,
     // voicemail, contacts. The adapter is server/providers/twilio.js; the server's phone (server/phone/) decides which
     // agent has which number and what reaches it. Not an agent's brain: it is never linked to an agent as its connection.
     // byok: a member may add their own account (a public vendor's API, nothing on the server's network). An API key
@@ -283,7 +283,7 @@ export const BUILTIN_MANIFESTS = Object.freeze([
   },
   {
     // The agents' PC's browser service (docs/features/agent-pc.md §5): any browser that speaks the Chrome DevTools Protocol
-    // - a cloud browser for AI agents, a Lightpanda, a Chrome on one's own machine. Its address carries its key, so the whole
+    // — a cloud browser for AI agents, a Lightpanda, a Chrome on one's own machine. Its address carries its key, so the whole
     // address is sealed. The server drives it itself (server/pc/browser.js), so no helper adapter: an in-process kind. An
     // account's own one must be on the public internet; an installation's (an administrator's) may name a local machine.
     id: 'browser', label: 'Browser service (Chrome DevTools Protocol)', transport: 'network', connectionKind: 'remote', byok: true,
@@ -291,7 +291,7 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     docs: 'https://chromedevtools.github.io/devtools-protocol/',
     fields: [
       f('endpoint', 'Browser address', 'secret', { required: true,
-        hint: 'The browser\'s DevTools address, with its key if it has one - wss://… from a cloud browser service (Browserless, Steel, Lightpanda Cloud, a Browserbase or Browser Use session\'s connect address), or http://127.0.0.1:9222 for a Chrome or Lightpanda started with --remote-debugging-port=9222.' }),
+        hint: 'The browser\'s DevTools address, with its key if it has one — wss://… from a cloud browser service (Browserless, Steel, Lightpanda Cloud, a Browserbase or Browser Use session\'s connect address), or http://127.0.0.1:9222 for a Chrome or Lightpanda started with --remote-debugging-port=9222.' }),
     ],
     capabilities: { browser: true },
   },
@@ -303,7 +303,7 @@ export const BUILTIN_MANIFESTS = Object.freeze([
     docs: 'https://api-dashboard.search.brave.com/app/documentation/web-search/get-started',
     fields: [
       f('provider', 'Search with', 'select', { options: ['brave', 'searxng'], default: 'brave', labels: { brave: 'Brave Search (a key)', searxng: 'SearXNG (your own server)' } }),
-      f('url', 'SearXNG address', 'url', { showIf: { provider: 'searxng' }, requiredIf: { provider: 'searxng' }, hint: 'Your SearXNG\'s address, e.g. https://search.example.com - with format json allowed in its settings.' }),
+      f('url', 'SearXNG address', 'url', { showIf: { provider: 'searxng' }, requiredIf: { provider: 'searxng' }, hint: 'Your SearXNG\'s address, e.g. https://search.example.com — with format json allowed in its settings.' }),
       f('key', 'Brave Search key', 'secret', { showIf: { provider: 'brave' }, requiredIf: { provider: 'brave' }, hint: 'From the Brave Search API dashboard (its free plan works).' }),
     ],
     capabilities: { search: true },

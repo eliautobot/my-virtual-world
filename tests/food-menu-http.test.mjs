@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Cafés' and restaurants' kinds and menus over HTTP (server/economy/businesses.js, shared/food.js): every one has a kind
 // of place and a menu of pack items; its owner (the city's: an administrator) changes the kind (its usual menu comes
 // with it), adds or removes any item, prices one in the same change; bad menus are refused; nobody else may change

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents at work on their PC, on a real server with a fake brain (docs/features/agent-pc.md §4): its owner's chat uses
 // the "pc" tool (the file is made, the chat shows the step), a task given to it runs a work session to Review with a note
 // and a notification, its owner turns working by itself off and back on, and the PC's command line as one's own agent
@@ -22,7 +22,7 @@ function content(j) {
     if (!/RESULTS:/.test(msg)) return JSON.stringify({ use: [{ tool: 'pc', run: 'whoami' }, { tool: 'pc', run: 'write ~/Documents/report.md', text: '# Report\nDone by the fake brain.' }] });
     return JSON.stringify({ done: 'Wrote the report in ~/Documents/report.md.', status: 'review' });
   }
-  if (/YOUR PC - your own computer/.test(sys)) {
+  if (/YOUR PC — your own computer/.test(sys)) {
     if (/RESULTS:/.test(msg)) return 'Saved it to ~/Documents/hello.md.';
     if (/save-hello/.test(msg)) return JSON.stringify({ use: [{ tool: 'pc', run: 'write ~/Documents/hello.md', text: 'Hello from the PC' }] });
     return 'Hi.';
@@ -70,7 +70,7 @@ test('its owner\'s chat uses its PC: the file is made, the step shows in the cha
   assert.equal(ev.find(e => e.type === 'run.end').text, 'Saved it to ~/Documents/hello.md.');
   assert.equal((await owner.get(`/api/pc/text?profile=${A}&path=${encodeURIComponent('~/Documents/hello.md')}`)).json.text, 'Hello from the PC');
   const first = seen.find(j => j.stream && /save-hello/.test(lastUser(j)));
-  assert.match(first.messages[0].content, /YOUR PC - your own computer for work/);
+  assert.match(first.messages[0].content, /YOUR PC — your own computer for work/);
   assert.match(first.messages[0].content, /PC COMMANDS/);
 });
 

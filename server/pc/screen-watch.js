@@ -1,5 +1,5 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// An Agent Providers' agent's work that started elsewhere - a conversation on another channel, a scheduled job - on its
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// An Agent Providers' agent's work that started elsewhere — a conversation on another channel, a scheduled job — on its
 // screens (docs/features/agent-pc.md §2.2). Its provider says which of its sessions have a turn running (agent.activity:
 // their keys); while its owner watches its PC (its window open, its screen live in the world: a lease the page renews,
 // LEASE_MS), those sessions are followed (chat.followKey: the provider's own session feed, the same as a watched chat's),

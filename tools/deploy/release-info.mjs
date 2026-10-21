@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Writes release.json (server/release.js) for a host that builds from the repository itself, such as a managed web
 // service, so the server reports its release instead of the development channel. The tag is v<package version>; the
 // commit comes from RELEASE_COMMIT, else the host's own variable (RENDER_GIT_COMMIT), else none.

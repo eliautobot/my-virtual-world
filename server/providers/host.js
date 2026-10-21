@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The provider host: one supervised helper process that runs every adapter (PLAN WP2.2; DECISIONS A9, C120).
 // - The world simulation never waits on a provider: while the helper is down, call() fails at once with host_down.
 // - The helper starts with a minimal environment, so the server's secrets never reach it; credentials travel per call.
@@ -38,7 +38,7 @@ export class ProviderHost {
     this.connected = new Map();                     // `${kind}:${connectionId}` → { kind, connectionId }
     this.restarts = 0; this.timer = null; this.stableTimer = null; this.readyWaiters = [];
     this.onPersist = null;          // ({ kind, connectionId, field, value }) => void: a credential an adapter's provider issued
-    this.readyListeners = new Set(); // () => void: the helper (re)started - live connections are opened again
+    this.readyListeners = new Set(); // () => void: the helper (re)started — live connections are opened again
     // events from the helper flow to the bus; the host keeps a note of what is in flight
     this.bus.on(e => {
       if (e.type === 'run.start') this.runs.set(e.runId, { kind: e.kind, connectionId: e.connectionId, agentKey: e.agentKey, sessionKey: e.sessionKey });

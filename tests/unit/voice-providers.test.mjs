@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The voice services (server/providers/voice.js, docs/features/CHAT.md §9): every provider's request and answer against a
-// fake of its documented API - speaking (the body, the headers, the audio back; a long text in pieces joined in order),
-// listening (multipart or JSON or raw audio, the language, the length the service reports), the voices list - and their
+// fake of its documented API — speaking (the body, the headers, the audio back; a long text in pieces joined in order),
+// listening (multipart or JSON or raw audio, the language, the length the service reports), the voices list — and their
 // refusals in our own words (a service's error text is never passed on), the custom server's and Qwen's address rules.
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -67,7 +67,7 @@ test('OpenAI: speech as MP3 with the voice, speed and instructions; transcriptio
   assert.ok(v.voices.some(x => x.id === 'marin') && v.voices.length === 13);
 });
 
-test('Groq: Orpheus speaks at most 200 characters a call and only WAV - a long text in pieces, joined in order; whisper with verbose_json', async () => {
+test('Groq: Orpheus speaks at most 200 characters a call and only WAV — a long text in pieces, joined in order; whisper with verbose_json', async () => {
   const lens = [];
   script = (req, res, raw, j) => {
     if (req.url.endsWith('/audio/speech')) { lens.push(j.input.length); return audioRes(res, wav(j.input.length / 100), 'audio/wav'); }
@@ -105,7 +105,7 @@ test('OpenRouter: speech as MP3; transcription as JSON with the audio in base64,
   assert.deepEqual(v.voices.map(x => x.id), ['af_heart', 'af_bella']); assert.equal(v.models[0].pricePerMChars, 0.62);
 });
 
-test('ElevenLabs: its own API - the voice in the path, MP3 at 44.1 kHz, speed in voice settings; Scribe; its voices', async () => {
+test('ElevenLabs: its own API — the voice in the path, MP3 at 44.1 kHz, speed in voice settings; Scribe; its voices', async () => {
   script = (req, res) => {
     if (req.url.startsWith('/el/v1/text-to-speech/')) return audioRes(res, mp3(10, true));
     if (req.url === '/el/v1/speech-to-text') return jsonRes(res, { language_code: 'eng', text: 'Testing one two', words: [{ text: 'Testing', start: 0, end: 0.5 }, { text: 'two', start: 1, end: 1.4 }] });
@@ -256,7 +256,7 @@ test('refusals in our words: key, credit, rate limit with its wait, a disabled A
   script = (req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html>not audio</html>'); };
   await assert.rejects(adapter.speak(P('openai', { text: 'x' })), e => e.code === 'provider_error');
   await assert.rejects(adapter.speak(P('openai', { text: '   ' })), e => e.code === 'bad_request');
-  await assert.rejects(adapter.transcribe(P('openai', { audio: Buffer.from('just some text, not a recording at all - certainly not audio of any kind').toString('base64') })), e => e.code === 'unsupported');
+  await assert.rejects(adapter.transcribe(P('openai', { audio: Buffer.from('just some text, not a recording at all — certainly not audio of any kind').toString('base64') })), e => e.code === 'unsupported');
   await assert.rejects(adapter.speak({ config: { provider: 'openai' }, secrets: {}, text: 'x' }), e => e.code === 'auth');
   // test(): the smallest real calls, and the fix for what went wrong
   script = (req, res) => (req.url.endsWith('/audio/speech') ? audioRes(res, mp3(5)) : jsonRes(res, { text: '' }));

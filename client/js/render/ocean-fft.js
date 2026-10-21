@@ -1,11 +1,11 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The ocean's waves (2026-10-03, with the reference video "Three.js Water Pro V3": "we gotta make it look that good
 // ... far LOD while keeping up performance"): real ocean waves worked out on the GPU every frame, the way films and games
 // do it (J. Tessendorf, "Simulating Ocean Water", 2001): a spectrum of waves for the wind (JONSWAP, from the North Sea
 // measurements of Hasselmann et al., 1973) plus a long swell from far away, turned into the sea's surface by an inverse
 // FFT. Three sizes at once ("cascades": swell, waves, ripples), each tiling the sea seamlessly with its own period, so
 // together they never visibly repeat. Each cascade gives three maps of the surface:
-//   displacement (x, y, z, foam): choppy - crests sharpen and troughs widen; foam where the surface folds over (a
+//   displacement (x, y, z, foam): choppy — crests sharpen and troughs widen; foam where the surface folds over (a
 //     whitecap), kept and fading where it formed, so it trails behind the crest that broke;
 //   slopes (dy/dx, dy/dz, dx/dx, dz/dz): the light, per pixel.
 // Mipmapped, so from afar the waves average out to a calm, slightly rougher sea instead of shimmering. All in WebGL2
@@ -44,7 +44,7 @@ function jonswap(w, wp, gamma = 3.3) {
  */
 export function seaState({ wind = 3, dir = 0, storm = 0, fetch = 30000, swellH = 0.75, swellLen = 140, swellDir = null } = {}) {
   // (2026-10-03: "a big improvement on the waves ... on the sea": a calm day still has a long swell rolling through
-  // and a lively wind sea on it - the waves read from the shore and from the air)
+  // and a lively wind sea on it — the waves read from the shore and from the air)
   const U = Math.max(2.5, wind + 9 * storm);
   return {
     windDir: dir,
@@ -158,7 +158,7 @@ export class OceanWaves {
   /**
    * @param {THREE.WebGLRenderer} renderer
    * @param {{ n?: number, sizes?: number[], seed?: number, lambda?: number }} opts n: samples across each cascade (a
-   *   power of two); sizes: each cascade's tile (m), coarsest first - waves shorter than ~6 of a finer tile's cells
+   *   power of two); sizes: each cascade's tile (m), coarsest first — waves shorter than ~6 of a finer tile's cells
    *   belong to the finer one, so none is counted twice.
    */
   constructor(renderer, { n = 128, sizes = [512, 64, 13], seed = 7, lambda = 1.1 } = {}) {

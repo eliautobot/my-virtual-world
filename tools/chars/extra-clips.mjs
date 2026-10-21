@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Clips added to every baked character, and where each character holds things (client/assets/chars/extra-clips.json).
 //
 // Swimming (2026-10-05: treading water, swimming on the surface, swimming under water): posed from the character's idle
@@ -9,23 +9,23 @@
 // also gives the palm's direction per phase (2026-10-06: the strokes pushed the water with the backs of the hands);
 // the forearm and the hand turn about their own length to face it, and the fingers lie flat along the hand: a paddle.
 //
-// Mended loops (2026-10-06: "a slight hitch" walking and running): the bake's walk and run don't close - the walk's
+// Mended loops (2026-10-06: "a slight hitch" walking and running): the bake's walk and run don't close — the walk's
 // first frames hold the hips ~5 cm forward, the run's two strides don't end where they began. Each is rebuilt from its own
 // frames (LOOPS): the cleanest whole stride in it, played as often as the clip held strides, the hips' leftover offset over
 // the stride taken out. They replace the bake's clips of the same name as the frames load.
 //
-// Holding (2026-10-07, agents working on a phone or a laptop, drinking a coffee, reading - the bake has no clip that holds
-// anything): the walk (mended), the idle and the seated idle with an arm or both brought up to hold something - a cup in
+// Holding (2026-10-07, agents working on a phone or a laptop, drinking a coffee, reading — the bake has no clip that holds
+// anything): the walk (mended), the idle and the seated idle with an arm or both brought up to hold something — a cup in
 // front, a phone looked at, a sip, an open book. Each hand is placed by reaching (two-bone: the elbow falls down and out)
 // for a point given from the character's own shoulders and head, so it fits every body, and turned so its palm faces the
 // way given; the fingers close round what it holds. Bones not posed go on as in the clip below (the walk's legs, the
 // idle's sway, the other arm).
 //
 // Doing things (2026-10-07): cooking, washing up, browsing a shelf, using a machine, a dumbbell curl, a ping-pong forehand
-// - short loops posed the same way on the idle's first stance (still: the legs stand), so a cook stirs and a shopper
+// — short loops posed the same way on the idle's first stance (still: the legs stand), so a cook stirs and a shopper
 // reaches for the shelf instead of looking round.
 //
-// Eating at a table (2026-10-07, "proper eating animations depending on the meal"): four seated clips - a burger or
+// Eating at a table (2026-10-07, "proper eating animations depending on the meal"): four seated clips — a burger or
 // a sandwich in both hands, a slice or a pastry in one, knife and fork (cutting, then the fork to the mouth), and one
 // hand with a spoon, a fork or chopsticks (two spoonfuls a cycle). Each reaches for the dish where render/food-table.js
 // puts it and for the mouth as the head bows, leaning in from the hips; what is held is placed in the hand by the grip
@@ -105,7 +105,7 @@ export const CLIPS = [
       return { pitch: 1.42, roll: 0.34 * Math.sin(TAU * u + PI / 2), dy: 0, d, hands: FLAT };
     },
   },
-  { // under water: a breaststroke - a sweep out and in, a frog kick, then a glide
+  { // under water: a breaststroke — a sweep out and in, a frog kick, then a glide
     name: 'swim_under', frames: 40, dur: 1.9, stride: 1.6,
     pose(u) {
       const d = { ...STRAIGHT, Neck: V(0, 1, -0.08), Head: V(0, 1, -0.38) };   // the head lifted to look ahead: aimed along the spine it folded down and showed the neck (2026-10-05)
@@ -239,9 +239,9 @@ export const HOLDS = [
     },
   },
   // ---- doing things with the hands (2026-10-07: cooking, washing up, browsing a shelf, a machine, the gym played the
-  // idle's look round or a stretch): short loops on the idle's first, still stance - each frame is downloaded
+  // idle's look round or a stretch): short loops on the idle's first, still stance — each frame is downloaded
   { // stirring a pot on the stove, the other hand on its handle
-    // - in the pan on the stove's front right burner (shared/eating.js STOVE_PAN: render/food-table.js puts it there), a
+    // — in the pan on the stove's front right burner (shared/eating.js STOVE_PAN: render/food-table.js puts it there), a
     // spoon in the right hand (render/char-props.js), the left on the pan's handle (2026-10-08: it stirred the air)
     name: 'act_cook', base: 'idle', still: 1, frames: 32, dur: 2.4,
     pose(u, L) {
@@ -532,7 +532,7 @@ function landmarks(R, X, desk) {
 /**
  * Where the wrist goes, and the hand's turn, for a hold that sends point s.p of the hand's grip to s.target with the hand
  * turned (s.along, s.palm): if the hand would bend more than s.bend (radians, WRIST_MAX by default) from the forearm the
- * arm reaches it with, it is turned toward the forearm (the palm with it) and the wrist placed again - a few rounds, as
+ * arm reaches it with, it is turned toward the forearm (the palm with it) and the wrist placed again — a few rounds, as
  * the forearm moves with the wrist.
  */
 function wristLimited(L, side, S, a, b, s) {
@@ -565,7 +565,7 @@ function holdFrame(R, F0, hold, u, desk) {
     const s = h[side];
     if (!s) continue;
     const a = len(sub(R.J[R.idx[side + 'ForeArm']], R.J[R.idx[side + 'Arm']])), b = len(sub(R.J[R.idx[side + 'Hand']], R.J[R.idx[side + 'ForeArm']]));
-    // a point of the hand's grip (p) sent to a target (eating): the hand turned no more than s.bend from its forearm -
+    // a point of the hand's grip (p) sent to a target (eating): the hand turned no more than s.bend from its forearm —
     // turned toward it until it is, the wrist placed again so the point still reaches (the arm follows)
     if (s.target) Object.assign(s, wristLimited(L, side, X0[R.idx[side + 'Arm']], a, b, s));
     // (an arm is placed by where its wrist goes, or by the directions of its two bones)
@@ -584,8 +584,8 @@ function holdFrame(R, F0, hold, u, desk) {
 }
 
 /**
- * Grip frames (bind space, 3×4: y along the fingers, z out of the palm, x = y × z - the right hand's index finger's side,
- * the left's little finger's - origin on the palm's surface GRIP_ALONG of the way from the wrist to the middle knuckle) for
+ * Grip frames (bind space, 3×4: y along the fingers, z out of the palm, x = y × z — the right hand's index finger's side,
+ * the left's little finger's — origin on the palm's surface GRIP_ALONG of the way from the wrist to the middle knuckle) for
  * each hand, and the desk point (deskOf).
  */
 function gripsOf(R) {
@@ -601,7 +601,7 @@ function gripsOf(R) {
   if (desk) out.desk = desk;
   return out;
 }
-/** Where a seated typist's fingertips rest, root space ([0, height, ahead]) - the top of the table before them. */
+/** Where a seated typist's fingertips rest, root space ([0, height, ahead]) — the top of the table before them. */
 function deskOf(R) {
   const c = R.clip('sit_work'), idx = R.idx;
   if (c) {
@@ -669,7 +669,7 @@ function bake(kind) {
   for (const hold of HOLDS) {
     const base = mendedFrames[hold.base] ? { frames: mendedFrames[hold.base] } : R.clip(hold.base);
     if (!base) throw new Error(`${kind}: no ${hold.base} to hold from`);
-    // (slow clips - the idle's sway, sitting - keep every other frame: the shader blends between frames, and each frame
+    // (slow clips — the idle's sway, sitting — keep every other frame: the shader blends between frames, and each frame
     // of every character is downloaded)
     const nb = base.frames ? base.frames.length : base.len, n = hold.still ? hold.frames : Math.floor(nb / hold.step);
     for (let fr = 0; fr < n; fr++) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Voice services (docs/features/CHAT.md §9): an account's or the installation's own speech service, called with its own API
 // key. Runs inside the provider helper process (./host-main.mjs) like the models adapter: its environment holds none of
 // the server's secrets and the key arrives with each call. Who uses which service, for whom, and what it may cost is the
@@ -17,7 +17,7 @@
 // /audio/speech and /audio/transcriptions (OpenRouter's transcription as JSON with the audio in base64); ElevenLabs,
 // Google Cloud (Text-to-Speech and Speech-to-Text v1, an API key), Deepgram, xAI and Qwen (Alibaba Model Studio) through
 // their own APIs. A custom server must be a public HTTPS address unless the connection is the installation's, and a Qwen
-// address must be Alibaba Cloud's - both checked when the connection is used, the custom one again on every connection.
+// address must be Alibaba Cloud's — both checked when the connection is used, the custom one again on every connection.
 // Errors carry a code the server acts on (auth, quota, rate_limited, bad_request, unsupported, timeout, network, blocked,
 // provider_error) and words of our own: a service's error text is never passed on.
 import http from 'node:http';
@@ -50,9 +50,9 @@ const PIECE = { openai: 4000, openrouter: 3000, groq: 190, elevenlabs: 5000, goo
 /** The speaking speed each service accepts (none: it has no speed). */
 const SPEED = { openai: [0.25, 4], openrouter: [0.5, 2], elevenlabs: [0.7, 1.2], google: [0.25, 4], deepgram: [0.7, 1.5], xai: [0.7, 1.5], custom: [0.25, 4] };
 const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse', 'marin', 'cedar'];
-/** How OpenAI's voices sound (OpenAI doesn't say; by ear, for picking a voice to suit a character - alloy is neither). */
+/** How OpenAI's voices sound (OpenAI doesn't say; by ear, for picking a voice to suit a character — alloy is neither). */
 const OPENAI_GENDER = { ash: 'male', ballad: 'male', coral: 'female', echo: 'male', fable: 'male', onyx: 'male', nova: 'female', sage: 'female', shimmer: 'female', verse: 'male', marin: 'female', cedar: 'male' };
-/** Kokoro's voices are named by language, gender and name - af_heart: American English, female, Heart (hexgrad/Kokoro-82M
+/** Kokoro's voices are named by language, gender and name — af_heart: American English, female, Heart (hexgrad/Kokoro-82M
  *  VOICES.md). Through OpenRouter or a self-hosted Kokoro server they come as bare names: their language and gender read
  *  from the name, and a label a person can read. */
 const KOKORO_LANG = { a: ['en-US', 'American English'], b: ['en-GB', 'British English'], e: ['es', 'Spanish'], f: ['fr', 'French'], h: ['hi', 'Hindi'], i: ['it', 'Italian'], j: ['ja', 'Japanese'], p: ['pt-BR', 'Brazilian Portuguese'], z: ['zh', 'Mandarin Chinese'] };
@@ -60,16 +60,16 @@ export function kokoroVoice(id) {
   const m = /^([abefhijpz])([fm])_([a-z]+)$/.exec(String(id || ''));
   if (!m) return null;
   const [lang, langName] = KOKORO_LANG[m[1]], gender = m[2] === 'f' ? 'female' : 'male';
-  // (its Santa voices are for the holidays: choosable, never picked for an agent on its own - novelty)
-  return { id: m[0], label: `${m[3][0].toUpperCase()}${m[3].slice(1)} - ${langName}, ${gender}`, lang, gender, ...(m[3] === 'santa' ? { novelty: true } : {}) };
+  // (its Santa voices are for the holidays: choosable, never picked for an agent on its own — novelty)
+  return { id: m[0], label: `${m[3][0].toUpperCase()}${m[3].slice(1)} — ${langName}, ${gender}`, lang, gender, ...(m[3] === 'santa' ? { novelty: true } : {}) };
 }
 const described = v => kokoroVoice(v.id) || v;
 const GROQ_VOICES = {
   'canopylabs/orpheus-v1-english': [['autumn', 'Autumn', 'female'], ['diana', 'Diana', 'female'], ['hannah', 'Hannah', 'female'], ['austin', 'Austin', 'male'], ['daniel', 'Daniel', 'male'], ['troy', 'Troy', 'male']],
   'canopylabs/orpheus-arabic-saudi': [['abdullah', 'Abdullah', 'male'], ['fahad', 'Fahad', 'male'], ['sultan', 'Sultan', 'male'], ['lulwa', 'Lulwa', 'female'], ['noura', 'Noura', 'female'], ['aisha', 'Aisha', 'female']],
 };
-const QWEN_VOICES = [['Cherry', 'Cherry - sunny, friendly young woman', 'female'], ['Ethan', 'Ethan - warm, energetic', 'male'], ['Jennifer', 'Jennifer - cinematic American English', 'female'],
-  ['Ryan', 'Ryan - rhythmic, dramatic', 'male'], ['Katerina', 'Katerina - mature, rich rhythm', 'female'], ['Elias', 'Elias - clear, storytelling', 'female'], ['Nofish', 'Nofish - a designer, playful', 'male']];
+const QWEN_VOICES = [['Cherry', 'Cherry — sunny, friendly young woman', 'female'], ['Ethan', 'Ethan — warm, energetic', 'male'], ['Jennifer', 'Jennifer — cinematic American English', 'female'],
+  ['Ryan', 'Ryan — rhythmic, dramatic', 'male'], ['Katerina', 'Katerina — mature, rich rhythm', 'female'], ['Elias', 'Elias — clear, storytelling', 'female'], ['Nofish', 'Nofish — a designer, playful', 'male']];
 const QWEN_LANG = { en: 'English', zh: 'Chinese', de: 'German', it: 'Italian', pt: 'Portuguese', es: 'Spanish', ja: 'Japanese', ko: 'Korean', fr: 'French', ru: 'Russian' };
 const GOOGLE_LANG = { en: 'en-US', es: 'es-ES', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', pt: 'pt-BR', ja: 'ja-JP', ko: 'ko-KR', zh: 'cmn-Hans-CN', ru: 'ru-RU', ar: 'ar-XA', hi: 'hi-IN', nl: 'nl-NL', pl: 'pl-PL', tr: 'tr-TR', sv: 'sv-SE' };
 /** OpenRouter's names for a recording's format. */
@@ -96,7 +96,7 @@ function target(p) {
     return { provider, def, key, base: u.href.replace(/\/+$/, ''), guard: !local };
   }
   if (provider === 'qwen' && c.baseUrl) {
-    // a region's or a workspace's own address - Alibaba Cloud's only (the key goes there)
+    // a region's or a workspace's own address — Alibaba Cloud's only (the key goes there)
     let u;
     try { u = new URL(String(c.baseUrl)); } catch { throw fail('bad_request', 'That is not a Model Studio address'); }
     if (u.protocol !== 'https:' || !/(^|\.)aliyuncs\.com$/i.test(u.hostname) || u.username || u.password) throw fail('blocked', 'A Qwen address must be an https address of Alibaba Cloud (…aliyuncs.com)');
@@ -170,16 +170,16 @@ function refusal(res, what) {
   const flat = JSON.stringify(j).slice(0, 4000).toLowerCase();
   if (/quota_exceeded|insufficient_quota|insufficient credits|insufficient_credits|credit balance|billing/.test(flat) || res.status === 402) return fail('quota', 'The voice service account has no credit left');
   if (/api_key_invalid|api key not valid|invalid_api_key|invalid api key|unauthorized/.test(flat) || res.status === 401) return fail('auth', 'The API key was refused');
-  if (res.status === 403 && /service_disabled|has not been used|is disabled/.test(flat)) return fail('bad_request', 'This API isn\'t switched on for the key\'s project - enable it in the provider\'s console');
+  if (res.status === 403 && /service_disabled|has not been used|is disabled/.test(flat)) return fail('bad_request', 'This API isn\'t switched on for the key\'s project — enable it in the provider\'s console');
   if (res.status === 403) return fail('auth', 'The API key may not use this service');
   if (res.status === 429 || res.status === 529) {
     const ra = Number(res.headers && res.headers['retry-after']);
     return fail('rate_limited', 'The voice service is limiting requests', { retryAfterMs: Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 300000) : 0 });
   }
-  if (res.status === 404) return fail('bad_request', `${what}: not found (HTTP 404) - check the model or the voice`);
+  if (res.status === 404) return fail('bad_request', `${what}: not found (HTTP 404) — check the model or the voice`);
   if (res.status === 413) return fail('bad_request', 'The recording is too large for this service');
   if (res.status === 415) return fail('unsupported', 'The service doesn\'t take this recording\'s format');
-  if (res.status === 400 || res.status === 422) return fail('bad_request', `${what} refused the request (HTTP ${res.status}) - check the model and the voice`);
+  if (res.status === 400 || res.status === 422) return fail('bad_request', `${what} refused the request (HTTP ${res.status}) — check the model and the voice`);
   return fail('provider_error', `${what} failed (HTTP ${res.status})`);
 }
 const ok = (res, what) => { if (res.status < 200 || res.status > 299) throw refusal(res, what); return res; };
@@ -255,7 +255,7 @@ async function speakOne(t, p, text, model, voice, speed, ms) {
         onLine: l => {
           if (!l.startsWith('data:')) return;
           let j; try { j = JSON.parse(l.slice(5).trim()); } catch { return; }
-          if (j.code && !err) err = fail(/Arrearage|quota|Insufficient/i.test(j.code) ? 'quota' : /InvalidApiKey|Unauthorized/i.test(j.code) ? 'auth' : /Throttl|RateQuota/i.test(j.code) ? 'rate_limited' : 'bad_request', 'Qwen refused the request - check the model and the voice');
+          if (j.code && !err) err = fail(/Arrearage|quota|Insufficient/i.test(j.code) ? 'quota' : /InvalidApiKey|Unauthorized/i.test(j.code) ? 'auth' : /Throttl|RateQuota/i.test(j.code) ? 'rate_limited' : 'bad_request', 'Qwen refused the request — check the model and the voice');
           const d = j.output && j.output.audio && j.output.audio.data;
           if (typeof d === 'string' && d) pcm.push(Buffer.from(d, 'base64'));
         } });

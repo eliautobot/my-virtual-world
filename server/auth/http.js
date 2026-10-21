@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // HTTP-level protection for accounts: cookies, client addresses behind trusted proxies, secure-request and Origin
 // checks, and CSRF tokens. (Sign-in limits live in accounts.js, in the database.)
 import crypto from 'node:crypto';

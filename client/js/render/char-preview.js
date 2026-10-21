@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // One character on a small stage of its own (its own renderer, running the same instanced character shader and rig as the
 // world): the Customizer's live preview and the Agent Studio's portrait. Drag to turn; it turns slowly by itself until
 // touched. The portrait also holds things (a phone, a book…, render/char-props.js) and shows a glowing ring around a part
@@ -39,7 +39,7 @@ export class CharPreview {
     this.canvas.addEventListener('pointercancel', up);
   }
   /** Puts the canvas in el and keeps the picture the size of el's box: when the box changes (the window, a strip filling
-   *  in below it), the picture is redrawn at the new size - never stretched to it (that squashed the Studio's character). */
+   *  in below it), the picture is redrawn at the new size — never stretched to it (that squashed the Studio's character). */
   mount(el) {
     el.prepend(this.canvas);
     this.ro?.disconnect();

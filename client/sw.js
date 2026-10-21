@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The service worker (docs/features/CHAT.md §8): it only shows notifications pushed while the page isn't open - an
-// agent asking for its owner's OK, a note, an answer that came - and opens (or brings forward) the page where it
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The service worker (docs/features/CHAT.md §8): it only shows notifications pushed while the page isn't open — an
+// agent asking for its owner's OK, a note, an answer that came — and opens (or brings forward) the page where it
 // belongs when one is tapped. It caches nothing and handles no requests: the page always comes from the server.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));

@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Shift while driving: boost (2026-10-05: "like a boosted speed for the car, extra acceleration to go faster and
-// burnout" - Shift used to brake; S still brakes). Moving, a boost pushes the car on harder and lets it run past its usual
+// burnout" — Shift used to brake; S still brakes). Moving, a boost pushes the car on harder and lets it run past its usual
 // top speed (BOOST.top × its handling's maxSpeed, within the server's pose check of 1.25 × + 4 m/s). Held with the
-// throttle from a standstill it first does a burnout - the reference dynamics' own (rear wheels spinning on held front
-// brakes, smoke-free tyre marks), BOOST.burn seconds - then launches.
+// throttle from a standstill it first does a burnout — the reference dynamics' own (rear wheels spinning on held front
+// brakes, smoke-free tyre marks), BOOST.burn seconds — then launches.
 // The reference module (shared/driving-classic, hash-pinned) is not touched: this runs around its beforeStep on the
 // server (server/world/vehicles.js) and in the browser's own simulation (shared/vehicle-local.js) alike, so both agree.
 import { VEHICLE_HANDLING } from './driving-classic/vehicle-dynamics.mjs';

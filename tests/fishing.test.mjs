@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fishing game's rules (docs/features/fishing.md): the fish (every species sound, sizes and weights, values), the
 // fight (a good angler lands what the gear is made for in a sensible time; the gear gates the giants; the server's
 // fastest-fight bound is never above what a good angler takes), the trip (grounds where the water suits them, the same
@@ -103,7 +103,7 @@ test('the fight: the line snaps on a jump not bowed to at full tension; slack th
   assert.ok(MAX_FIGHT_S >= 200);
 });
 
-// a coast: land west of x = 0, the bed falling east - flats, reefs, a drop-off at 1500 m, the blue beyond
+// a coast: land west of x = 0, the bed falling east — flats, reefs, a drop-off at 1500 m, the blue beyond
 const seaDepth = (x, z) => (x <= 0 ? 0 : x < 1500 ? 0.4 + x * 0.016 + (x > 400 ? 3 * Math.sin(z / 70) : 0) : x < 1700 ? 25 + (x - 1500) * 0.4 : 105 + (x - 1700) * 0.05);
 const lakeDepth = (x, z) => { const r = Math.hypot(x, z); return r < 220 ? 9 * (1 - (r / 220) ** 2) + 0.3 : 0; };
 const SEA_ENV = { water: 'sea', depthAt: seaDepth, dock: { x: 10, z: 0 }, reach: 4500 };
@@ -217,7 +217,7 @@ test('a trip through the play core: the server rolls the fish, refuses a landing
       assert.ok(r.caught && r.cooler.used <= r.cooler.size); landed++;
     }
     assert.ok(landed >= 3);
-    // a lure is used again and again - lost only to a snapped line
+    // a lure is used again and again — lost only to a snapped line
     let j = null;
     for (let k = 0; k < 20 && !j?.hook; k++) { now.t += 4000; j = play.act(account, st.run, 'hook', { ground: g.id, lure: 'jig', d0: 20 }); }
     if (j?.hook) {

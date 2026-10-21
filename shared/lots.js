@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Exact lot geometry and lot rules (WP4.13, wp4-world-spec.md §5). Lots are simple polygons with integer micrometre
 // vertices (units.js). Every predicate here is exact: integer inputs, BigInt arithmetic, rational intersection points,
 // so two lots either overlap or they don't, areas add up to the last µm², and merges/splits never drift.

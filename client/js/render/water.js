@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Water (WP4.18, wp4-world-spec.md §6.1): the ocean as a camera-centred radial mesh (fine near the camera, coarse to
-// the horizon) with Gerstner waves along the wind - a low swell on calm days, whitecaps and ~1.5 m waves in storms -
+// the horizon) with Gerstner waves along the wind — a low swell on calm days, whitecaps and ~1.5 m waves in storms —
 // faded flat with distance; and surf on the shore: a foam line washing up and down the beach at the waterline, with
 // darker wet sand below it, drawn in the terrain's own material. Waves are computed in world space, so the mesh can
 // follow the camera without the sea moving.
@@ -96,15 +96,15 @@ float swSurf(vec2 p, float d, float sharp, out float dhdd, out vec3 wh) {
 float swRun(vec2 p) { return fract(uTime * SW_F + swWob(p)); }
 // How high (m above the sea) the water reaches up the beach (2026-10-03: "come in and out further, more splashy";
 // then, marked on a screenshot, about a fifth of the 8 m that gave): fast up, slower back; each wave in tongues of its
-// own along the beach, farther for a bigger one - some 2–3 m up the sand. up: 0..1 of the way.
+// own along the beach, farther for a bigger one — some 2–3 m up the sand. up: 0..1 of the way.
 float swReachAt(vec2 p, float slope, float up) {
   float n = floor(uTime * SW_F + swWob(p)), tongue = 0.7 + 0.6 * swNoise(p * 0.07 + vec2(n * 1.7, n * 0.9));
   return min(0.5, slope * (0.3 + 2.6 * up * swSet(p, n) * tongue)) * max(uSurf, 0.6);
 }
 float swReachS(vec2 p, float slope) { float run = swRun(p); return swReachAt(p, slope, smoothstep(0.0, 0.2, run) * (1.0 - smoothstep(0.2, 0.95, run))); }
 float swReachTop(vec2 p, float slope) { return swReachAt(p, slope, 1.0); }
-// The swash's white water at a spot x m (across the beach) above the water's edge now - negative under the sheet of
-// water running up - with xTop m from the edge to where this wave reaches, its lace (0..1), a pixel's size ex and a
+// The swash's white water at a spot x m (across the beach) above the water's edge now — negative under the sheet of
+// water running up — with xTop m from the edge to where this wave reaches, its lace (0..1), a pixel's size ex and a
 // ragged offset jag: a bubbling line on the edge; the sheet churned white as it rushes up, lacy as it drains back; a
 // line of foam left where it reached, thinning as the sand dries.
 float swSwashFoam(float x, float xTop, float run, float lace, float ex, float jag) {
@@ -121,7 +121,7 @@ const WAVES = /* glsl */`
 uniform float uWaveH, uTime, uSurf;
 uniform vec4 uWind;
 uniform sampler2D uDepth, uDepthN, uDepthF;
-uniform vec4 uDepthRect, uDepthRectN, uDepthRectF;   // x0, z0, size, samples across (0: not ready) - water depth (m) around the camera, wide and close, and over the whole island
+uniform vec4 uDepthRect, uDepthRectN, uDepthRectF;   // x0, z0, size, samples across (0: not ready) — water depth (m) around the camera, wide and close, and over the whole island
 ${SWASH_GLSL}
 // Water depth (m) here, from the map around the camera (deep where the map doesn't reach).
 float depthAt(vec2 p) {
@@ -175,7 +175,7 @@ export class Ocean {
           fade *= shoal(wpos0.xz);
           vec3 wdisp = gerstner(wpos0.xz, wn, crest) * fade;
           // in the shallows the swell rises into breakers rolling in to the shore (swSurf), and at the shore the
-          // water itself runs up the beach and back with each one (swReach) - the beach draws the foam on its edge
+          // water itself runs up the beach and back with each one (swReach) — the beach draws the foam on its edge
           float bd = depthAt(wpos0.xz), nearK = 1.0 - smoothstep(700.0, 1500.0, distance(wpos0.xz, uNear));
           if (bd > 0.0 && bd < swOut()) { float sdh; vec3 swh; wdisp.y += swSurf(wpos0.xz, bd, 0.0, sdh, swh) * nearK; }
           if (bd > -1.5 && bd < 2.0) wdisp.y += swReach(wpos0.xz) * smoothstep(-1.5, -1.0, bd) * (1.0 - smoothstep(0.4, 2.0, bd)) * nearK;
@@ -189,7 +189,7 @@ export class Ocean {
       sh.fragmentShader = 'uniform float uWaveH, uTime, uSurf;\nuniform sampler2D uDepth, uDepthN, uDepthF;\nuniform vec4 uDepthRect, uDepthRectN, uDepthRectF;\nvarying float vCrest;\nvarying vec3 vOPos;\n' + SWASH_GLSL + MARKS_GLSL + `
 float oH(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float oN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(oH(i), oH(i + vec2(1.0, 0.0)), f.x), mix(oH(i + vec2(0.0, 1.0)), oH(i + vec2(1.0, 1.0)), f.x), f.y); }
-// Foam lace (2026-10-03: like the cozy references): a white web with round holes - the edges between jittered
+// Foam lace (2026-10-03: like the cozy references): a white web with round holes — the edges between jittered
 // cells, drifting; fades to its average where the holes would be smaller than a pixel or two.
 float oLace(vec2 p, float px) {
   vec2 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.0;
@@ -204,7 +204,7 @@ float oLace(vec2 p, float px) {
         vec2 oMap = swMap(vOPos.xz); float od = oMap.x, oReef = oMap.y;
         vec3 shallow = vec3(0.04, 0.62, 0.62), mid = vec3(0.01, 0.36, 0.5);
         diffuseColor.rgb = mix(mix(shallow, mid, smoothstep(0.4, 6.0, od)), diffuseColor.rgb, smoothstep(5.0, 16.0, od));
-        // clear in the shallows - the sand, the light on it and what lives there show through (2026-10-03) -
+        // clear in the shallows — the sand, the light on it and what lives there show through (2026-10-03) —
         // clouding with depth; more of a mirror where you look across it than down into it
         vec3 ovd = normalize(cameraPosition - vOPos);
         diffuseColor.a = mix(0.26, diffuseColor.a, smoothstep(0.3, 9.0, od));
@@ -252,7 +252,7 @@ float oLace(vec2 p, float px) {
     this.mesh.onBeforeRender = hullsUpdate;   // (the boats' hulls it keeps out of, placed this frame)
   }
   /**
-   * The full sea (render/ocean-fft.js waves): the surface displaced by the wave field and lit as water is - a mirror of
+   * The full sea (render/ocean-fft.js waves): the surface displaced by the wave field and lit as water is — a mirror of
    * the sky by the Fresnel law (little looking down into it, almost all across it), the sun's glitter, light glowing
    * through the crests (subsurface scattering), whitecaps where the waves break; under it the water's own colour
    * thickening with depth, so the shallows are clear and the open sea deep teal. Drawn premultiplied: the reflection is
@@ -272,9 +272,9 @@ float oLace(vec2 p, float px) {
           float bd = swDepth(wpos0.xz), nearK = 1.0 - smoothstep(700.0, 1500.0, vd);
           vec3 wdisp = ocDisp(wpos0.xz, max(1.0, vd * 0.05)) * smoothstep(0.3, 6.0, bd) * (1.0 - smoothstep(1500.0, 4000.0, vd));
           // in the shallows the swell rises into breakers and bores rolling in to the shore (swSurf), each crest thrown
-          // forward as it comes; at the shore the water itself runs up the beach and back with each one (swReach) - the
+          // forward as it comes; at the shore the water itself runs up the beach and back with each one (swReach) — the
           // beach draws the foam on its edge
-          // (on the mesh: rounded swells, and only where its vertices are close enough to draw them - crests fewer than
+          // (on the mesh: rounded swells, and only where its vertices are close enough to draw them — crests fewer than
           // ~5 vertices apart came out as zigzags, 2026-10-03; the light draws them per pixel everywhere)
           if (bd > 0.0 && bd < swOut() && nearK > 0.0) {
             float crestM = 2.0 * sqrt(max(bd, 0.02)) / (SW_K * max(length(swGrad(wpos0.xz, 2.0)), 1e-3));
@@ -400,13 +400,13 @@ float oLace(vec2 p, float px) {
         // premultiplied: the reflection in full, the water's own light by how much water there is, the bottom (drawn
         // before, tinted by the water over it: render/water.js underwater) through the rest
         // (over the shallows the sky's reflection is softened: the colour of the clear water and the sand beneath it is
-        // what shows there - at High, drawn through the bloom's linear buffer, full strength laid a milky film over them)
+        // what shows there — at High, drawn through the bloom's linear buffer, full strength laid a milky film over them)
         float oSoft = mix(${hi ? '0.45' : '0.85'}, 1.0, smoothstep(0.3, 6.0, od));
         float oNV = clamp(dot(normal, normalize(geometryViewDir)), 0.0, 1.0), oF = (0.02 + 0.98 * pow(1.0 - oNV, 5.0)) * oSoft;
         // tone-mapped and encoded here, before it is weighted (2026-10-03, the phone: drawn straight to the screen,
         // weighting first and encoding after brightened the red of the see-through part, and the surf's white water came
         // out lavender; through the bloom's buffer at High both are no-ops and nothing changes)
-        // (the reflection adds what it would on top of the brightness of the water's own weighted light - of its
+        // (the reflection adds what it would on top of the brightness of the water's own weighted light — of its
         // brightness only: on each colour apart, the reflection over thin turquoise came out pink)
         vec3 oUnder = totalDiffuse + totalEmissiveRadiance, oBase = vec3(dot(oUnder * oBody, vec3(0.2126, 0.7152, 0.0722))), oAll = oBase + totalSpecular * oSoft;
         #if defined( TONE_MAPPING )
@@ -480,7 +480,7 @@ function radialGrid(segments = 128, step0 = 2) {
 
 /**
  * A water surface that can be seen from under it (2026-10-06: diving, the sky and the whole island showed through
- * the sea): drawn from both sides - from above (the camera above the water) its top as before, from under the water
+ * the sea): drawn from both sides — from above (the camera above the water) its top as before, from under the water
  * (GU.uUnder, scene.js Stage.under) its underside: Snell's window overhead, the sky's light through a rippling surface,
  * and outside it the water's own colour mirrored back (total internal reflection), all into the water's fog. pos: the
  * material's world-position varying.
@@ -507,7 +507,7 @@ export function withUnderside(material, pos) {
     // tinted by the water, a faint web of light over it. Outside the window the water's own colour mirrored back.
     vec3 uwN = normalize(vec3(uwA * 0.07 + sin(uwQ.y * 0.35 + uUwT * 1.3) * 0.03, -1.0, uwB * 0.07 + cos(uwQ.x * 0.35 - uUwT * 1.1) * 0.03));
     vec3 uwT = refract(uwV, uwN, 1.333);
-    // (a line of sight bent past the edge of that image - toward the horizon behind - takes the rim's light: the water's
+    // (a line of sight bent past the edge of that image — toward the horizon behind — takes the rim's light: the water's
     // colour, brighter)
     vec3 uwRim = uUnderCol * 1.6, uwSky = uwRim;
     if (uAboveOn > 0.5 && dot(uwT, uwT) > 0.0) {
@@ -536,8 +536,8 @@ export function withUnderside(material, pos) {
 
 /**
  * Things under the sea seen through it (the reference's clear tropical water): sunlight going down and the view coming
- * back up through the water lose their red first, then green - sand a metre down turns turquoise, deeper teal, then the
- * water's own blue-green - and the water's own glow fills in what the bottom loses. Applied to the lit colour of a
+ * back up through the water lose their red first, then green — sand a metre down turns turquoise, deeper teal, then the
+ * water's own blue-green — and the water's own glow fills in what the bottom loses. Applied to the lit colour of a
  * material's pixels below the sea (the ground, the rocks and corals, the fish); the sea's surface then adds its
  * reflection over them (Ocean, premultiplied).
  */
@@ -593,7 +593,7 @@ float sfLace(vec2 p, float px) {
       if (vWPos.y > uSea - 1.5 && vWPos.y < uSea + 1.25) {
         float slope = swSlope(sp), top = swReachTop(sp, slope), above = vWPos.y - uSea;
         // the sand the waves reach: dark and glossy, drying up the beach; under the water it eases off before this block
-        // ends (1.5 m down) - the water's own colour takes over there (a hard stop drew a straight line)
+        // ends (1.5 m down) — the water's own colour takes over there (a hard stop drew a straight line)
         float wetSand = (1.0 - smoothstep(top * 0.6, top + slope * 2.0 + 0.02, above)) * (1.0 - smoothstep(0.5, 1.4, -above));
         diffuseColor.rgb *= 1.0 - 0.28 * wetSand;
         // the swash's foam, only where it can be (above where this wave reaches it is dry sand; far under the water

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A building connects to its street (shared/door-access.js; 2026-10-09: "lots should connect to roadways … this has to
 // work flawlessly"): the straight way residents walk from the door to the sidewalk (city) or the road (beyond it) may
 // not run through the building itself, another building beyond the city, or someone else's lot. And lots made beside a

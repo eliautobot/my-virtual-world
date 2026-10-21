@@ -1,12 +1,12 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Getting started (2026-10-09: "new users don't know how to use the interface and how to get things done … a guided UI
 // on where things are … a random hint on the load screen"): the in-world guide.
 // - The welcome tour: a few steps, each pointing at the real control (the Info panel, the data map, Edit world, chats,
 //   help), at a signed-in account's first visit. Once per ACCOUNT, not per browser: it starts only when the server says
 //   this account has not been through it (GET /api/guide), never on an unknown (no account, a refused or failed read),
-//   and Done or Skip is kept with the account (display.guide) - so it follows the account to every device and a second
+//   and Done or Skip is kept with the account (display.guide) — so it follows the account to every device and a second
 //   account on the same browser gets its own. ❓ → Replay the tour shows it again any time.
-// - Getting started: the first things to do - get land, build on it, make an agent, talk to it, set a home view - ticked
+// - Getting started: the first things to do — get land, build on it, make an agent, talk to it, set a home view — ticked
 //   off by what the account really holds (server/guide.js), each with how to do it and a Show me button that opens the
 //   right panel and points at the control. 🎯 n/5 in the top bar until they are done (or hidden).
 // - ❓ Help: Getting started, How do I… (searchable short answers, with Show me) and the Controls. The loading screen's
@@ -30,7 +30,7 @@ const shown = el => { if (!el) return null; const r = el.getBoundingClientRect()
 const SHOW = {
   datamap: () => { app.property?.show(true); return spot('#propbar', 'The data map: tap a lot marked For sale (or one of yours) to open its card'); },
   land: () => { app.property?.show(true); return spot('#propbar', 'Tap a lot marked For sale, then buy it from its card'); },
-  build: () => { app.docks?.show('l:buildings'); return spot('#dockL [data-sec="buildings"]', 'Pick a building here, then place it on your lot - or tap your lot on the data map and choose Build here'); },
+  build: () => { app.docks?.show('l:buildings'); return spot('#dockL [data-sec="buildings"]', 'Pick a building here, then place it on your lot — or tap your lot on the data map and choose Build here'); },
   furnish: () => { app.docks?.show('l:buildings'); return spot('#dockL [data-sec="buildings"] .dtab[data-tab="furnish"]', 'Furniture: look inside your building first (double-click it)'); },
   agent: () => { app.docks?.show('l:agents'); return spot('#dockL .newagent', 'Make your own AI agent here'); },
   talk: () => spot('#floatbtns .fb-chat .chat', 'Your chats with your agents'),
@@ -121,7 +121,7 @@ const HOWTO = [
 
 // ------------------------------------------------------------------ the welcome tour
 const STEPS = [
-  { title: '👋 Welcome to My Virtual World', text: () => 'A living city where you can own land, build, and run AI agents of your own. This quick tour shows where things are - about a minute.' },
+  { title: '👋 Welcome to My Virtual World', text: () => 'A living city where you can own land, build, and run AI agents of your own. This quick tour shows where things are — about a minute.' },
   { title: '🧭 Getting around', text: () => (touch() ? 'One finger pans, pinch zooms, two fingers twist and tilt. Tap a person or building to select it; double-tap a building to look inside.' : 'Drag to move the camera, right-drag to turn, the wheel zooms. Click a person or building to select it; double-click a building to look inside.') },
   { title: 'ℹ️ The Info panel', target: () => shown($('#dockR:not(.closed) .dock-body')) || shown($('#dockR .dock-toggle')), text: () => `Your agents (Team), your property, your home view and what is happening in the city.${touch() ? '' : ' Press <kbd>I</kbd> to open or close it.'}` },
   { title: '🗺️ The data map', target: () => shown($('#floatbtns .pmapbtn')), text: () => (auth.can('property.hold') && landMarket() ? 'Find land for sale: open the data map, tap a lot marked For sale and buy it from its card. Your own lots show here too.' : 'Every lot\'s status, owner, value and zoning, on the world itself.') },
@@ -194,7 +194,7 @@ async function refresh() {
   G = { id, guide: r.guide || { tour: null, list: null }, tasks: Array.isArray(r.tasks) ? r.tasks : [] };
   if (before) {
     const now = G.tasks.filter(t => t.done && !before.has(t.id));
-    for (const t of now) app.toast?.(`✅ ${TASKS[t.id]?.title || t.id} - ${G.tasks.filter(x => x.done).length} of ${G.tasks.length} done`, 'good');
+    for (const t of now) app.toast?.(`✅ ${TASKS[t.id]?.title || t.id} — ${G.tasks.filter(x => x.done).length} of ${G.tasks.length} done`, 'good');
     if (now.length && G.tasks.every(t => t.done)) setTimeout(() => app.toast?.('🎉 You have the basics. ❓ Help has more any time.', 'good'), 1600);
   }
   render();

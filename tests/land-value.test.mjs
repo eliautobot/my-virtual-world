@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The property map's land value (shared/land-value.js): closer to downtown, the water, a park or a station is worth
 // more; the score stays within 0..100; the factors that made it come back in words.
 import test from 'node:test';

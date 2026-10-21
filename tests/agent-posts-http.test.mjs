@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // AI agents on post around the clock on a real server (server/agent-posts/, 2026-10-08): its owner sees the spots
-// they may post it at (where they could furnish), posts it - it goes there, "On duty", its needs waiting, everyone told
-// it is on post - one agent to a spot and never on another's desk or a bed; only its owner or a manager, and only where
+// they may post it at (where they could furnish), posts it — it goes there, "On duty", its needs waiting, everyone told
+// it is on post — one agent to a spot and never on another's desk or a bed; only its owner or a manager, and only where
 // they could furnish; it goes back to its day when let go, and its post ends when its furniture is taken away.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
@@ -23,7 +23,7 @@ before(async () => {
 });
 after(async () => { await s?.stop(); });
 
-test('the spots: where its owner could furnish - desks, counters, kitchens; never a bed', async () => {
+test('the spots: where its owner could furnish — desks, counters, kitchens; never a bed', async () => {
   const r = await owner.get(`/api/agent-posts/spots?agent=${A.id}`);
   assert.equal(r.status, 200, r.text);
   assert.equal(r.json.post, null, 'not on post yet');
@@ -49,7 +49,7 @@ test('posted: it goes there "On duty", everyone sees it is on post, its needs wa
   assert.equal(on.post.b, desk.b, 'its card says where it is on post');
   const pub = await waitFor(async () => { const p = await person(iA); return p?.po === 1 ? p : null; }, 5000);
   assert.ok(pub, 'anyone sees it is on post (the public people list)');
-  // (the clock fast: off post, needs fall visibly in these seconds - B's do; A's on post don't)
+  // (the clock fast: off post, needs fall visibly in these seconds — B's do; A's on post don't)
   assert.equal((await owner.post('/api/clock', { rate: 30 })).status, 200);
   const a1 = (await info(iA)).needs, b1 = (await info(iB)).needs; await wait(3000); const a2 = (await info(iA)).needs, b2 = (await info(iB)).needs;
   assert.equal((await owner.post('/api/clock', { rate: 1 })).status, 200);
@@ -70,7 +70,7 @@ test('posted: it goes there "On duty", everyone sees it is on post, its needs wa
 test('only its owner or a manager, only where they could furnish', async () => {
   assert.equal((await ann.post('/api/agent-posts', { agent: A.id, b: desk.b, f: desk.f, item: desk.item, slot: desk.slot })).status, 404, 'not hers');
   assert.equal((await ann.get(`/api/agent-posts/spots?agent=${A.id}`)).status, 404);
-  // shared with Ann to manage: she may post it - but only where she could furnish (she holds nothing)
+  // shared with Ann to manage: she may post it — but only where she could furnish (she holds nothing)
   const sh = await owner.post('/api/agents/share', { id: C.id, kind: 'account', who: annId, level: 'manage' });
   assert.equal(sh.status, 200, sh.text);
   const r = await ann.post('/api/agent-posts', { agent: C.id, b: desk.b, f: desk.f, item: desk.item, slot: desk.slot });

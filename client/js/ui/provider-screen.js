@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// An agent's own screen, live: Hermes' Bot Desktop (docs/features/agent-pc.md §4.2) - the desktop on the machine Hermes
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// An agent's own screen, live: Hermes' Bot Desktop (docs/features/agent-pc.md §4.2) — the desktop on the machine Hermes
 // runs on where its browser opens and its computer use acts, for whoever manages the provider. Shown as Hermes Desktop's
 // Screen pane shows it: watched by default (nothing the person does reaches it), ✋ Take over to use it (a login, a
 // CAPTCHA) and ↩ Hand back; ▶ Start when it is off. The picture is the screen itself (noVNC, /vendor/novnc/, over
-// /api/providers/screen/ws - server/providers/screen-relay.js), not pictures of it. One piece, shown in the agent's PC
+// /api/providers/screen/ws — server/providers/screen-relay.js), not pictures of it. One piece, shown in the agent's PC
 // (its Browser app, ./pc-more.js) and the chat window's side panel (./chat-dock.js).
 import { getJSON, post } from '../core/net.js';
 import { esc } from '../core/util.js';
@@ -116,7 +116,7 @@ export function mountProviderScreen(el, agentId, { toast = null } = {}) {
     else if (S.conn === 'idle' && !S.seen) msg = 'Its screen';
     const live = !!st?.running && S.conn === 'live';
     if (live) {
-      state = st.mine ? '<b>You have control</b> - it waits until you hand it back' : st.holder === 'human' ? 'Watching - someone else has control' : 'Watching - the agent has control';
+      state = st.mine ? '<b>You have control</b> — it waits until you hand it back' : st.holder === 'human' ? 'Watching — someone else has control' : 'Watching — the agent has control';
       hint = st.mine ? '' : S.err && /took control/.test(S.err) ? esc(S.err) : 'Take over to use it yourself (a sign-in, a CAPTCHA); the agent waits meanwhile.';
     }
     $('.psc-st').innerHTML = state;

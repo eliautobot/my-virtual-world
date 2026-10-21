@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The island's picture from above (terrain, water, beaches, fields - no roads), shared by the minimap's island view
-// (ui/ui.js) and the world map (ui/worldmap.js). The terrain worker paints it - slowly: several seconds, more while it
-// is also building terrain tiles (2026-10-05: the minimap took too long to switch to the island) - so it is built
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The island's picture from above (terrain, water, beaches, fields — no roads), shared by the minimap's island view
+// (ui/ui.js) and the world map (ui/worldmap.js). The terrain worker paints it — slowly: several seconds, more while it
+// is also building terrain tiles (2026-10-05: the minimap took too long to switch to the island) — so it is built
 // once per land, as soon as the world is up, and kept in the browser (IndexedDB) under a key made from the land itself:
 // the next visit shows it at once, and a changed land (a terrain stroke, a coast) gets a new one.
 // A quick small picture comes first; the sharp one follows in thin strips, so the worker builds tiles in between.

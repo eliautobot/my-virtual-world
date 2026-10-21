@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The city's economy window (docs/features/ECONOMY.md §6, §7, §10), after SimCity's panels: an overview (the money
 // supply, the treasury, yesterday's activity, the price index, employment, demand bars for homes, shops and jobs, the
 // residents' wealth, the top businesses), the budget (income and expenses per line with history; for administrators the
@@ -54,7 +54,7 @@ export function open(app, want = 'overview') {
         ${tile('Yesterday\'s takings', vc(y.sales || 0), { delta: ch('sales'), spark: last('sales'), note: 'Sold by every business, and companies\' work sold abroad' })}
         ${tile('Wages yesterday', vc(y.wages || 0), { delta: ch('wages'), spark: last('wages') })}
         ${tile('Price index', o.priceIndex ? o.priceIndex.level.toFixed(1) : '100', { delta: o.priceIndex?.change ?? null, deltaGood: false, note: 'What a basket costs against the first day: 100' })}
-        ${tile('Looking for work', emp === null ? '-' : `${emp}%`, { note: `${y.unemployed || 0} residents without work, ${y.employed || 0} in work` })}
+        ${tile('Looking for work', emp === null ? '—' : `${emp}%`, { note: `${y.unemployed || 0} residents without work, ${y.employed || 0} in work` })}
       </div>
       <div class="ec-two">
         <div><div class="tier-head">📈 Demand</div>${demandBars([
@@ -99,7 +99,7 @@ export function open(app, want = 'overview') {
       <div class="lib-list">${B.upkeep.map(u => `<div class="lib-row ec-line"><div class="lib-main"><b>${esc(u.label)}</b></div><b>${vc(u.amount)}</b></div>`).join('')}</div>
       <div class="tier-head">🧾 Taxes</div>
       ${admin() ? `<div class="ec-form ec-taxes">
-          ${T.income.map((b, k) => slider(`inc${k}`, `Income tax ${'$'.repeat(k + 1)} - ${b.upTo ? `up to ${vc(b.upTo)} a day` : 'above'}`, b.bp)).join('')}
+          ${T.income.map((b, k) => slider(`inc${k}`, `Income tax ${'$'.repeat(k + 1)} — ${b.upTo ? `up to ${vc(b.upTo)} a day` : 'above'}`, b.bp)).join('')}
           ${slider('sales', 'Sales tax (on purchases)', T.sales)}${slider('exports', 'Business tax (companies\' sales abroad)', T.exports)}${slider('venueProfit', 'Profit tax (venues)', T.venueProfit)}
           <div class="lib-btns"><button type="button" class="btn primary" data-c="taxes">Save the tax rates</button></div></div>`
         : `<div class="lib-list">${T.income.map((b, k) => `<div class="lib-row ec-line"><div class="lib-main"><b>Income tax ${'$'.repeat(k + 1)}</b><span class="dim">${b.upTo ? `on a day's income up to ${vc(b.upTo)}` : 'above that'}</span></div><b>${b.bp / 100}%</b></div>`).join('')}
@@ -123,13 +123,13 @@ export function open(app, want = 'overview') {
     return `<p class="hint">${list.length} businesses: ${venues.length} venues and ${list.length - venues.length} companies. ${losing} venues lost money yesterday.</p>
       <div class="seg">${[['sales', 'Takings'], ['profit', 'Profit'], ['rating', 'Rating'], ['name', 'Name']].map(([k, t]) => `<button type="button" class="btn small${sort === k ? ' on' : ''}" data-sort="${k}">${t}</button>`).join('')}</div>
       <div class="ec-table" role="table"><div class="ec-tr ec-th" role="row"><span>Business</span><span>Owner</span><span>★</span><span>Takings</span><span>Profit</span></div>
-      ${rows.map(b => `<button type="button" class="ec-tr" role="row" data-biz="${esc(b.id)}"><span>${esc(b.name)} <small>${esc(b.kind)}</small></span><span>${esc(b.owner.name)}</span><span>${(b.rating / 100).toFixed(1)}</span><span>${b.yesterday ? v0(b.yesterday.sales) : '-'}</span><span class="${(b.yesterday?.profit || 0) < 0 ? 'bad' : ''}">${b.yesterday ? v0(b.yesterday.profit) : '-'}</span></button>`).join('')}</div>`;
+      ${rows.map(b => `<button type="button" class="ec-tr" role="row" data-biz="${esc(b.id)}"><span>${esc(b.name)} <small>${esc(b.kind)}</small></span><span>${esc(b.owner.name)}</span><span>${(b.rating / 100).toFixed(1)}</span><span>${b.yesterday ? v0(b.yesterday.sales) : '—'}</span><span class="${(b.yesterday?.profit || 0) < 0 ? 'bad' : ''}">${b.yesterday ? v0(b.yesterday.profit) : '—'}</span></button>`).join('')}</div>`;
   }
   // ------------------------------------------------------------------ jobs: the shift board and my work
   function jobs() {
     const J = data.jobs; if (!J) return '<p class="hint">Loading…</p>';
     const me = data.me, T = me?.trust;
-    const mine = me ? `<div class="ec-tiles">${tile('Your trust', T ? (T.events < 5 ? 'New' : `${T.stars.toFixed(1)} ★`) : '-', { note: T ? `${T.word}: paying ${T.dims.pay}, working ${T.dims.work} (of 1000)` : '' })}${(me.xp || []).slice(0, 4).map(x => tile(`${x.icon} ${x.label}`, `Level ${x.level}`, { note: `${x.xp} XP · ${x.units} served` })).join('')}</div>
+    const mine = me ? `<div class="ec-tiles">${tile('Your trust', T ? (T.events < 5 ? 'New' : `${T.stars.toFixed(1)} ★`) : '—', { note: T ? `${T.word}: paying ${T.dims.pay}, working ${T.dims.work} (of 1000)` : '' })}${(me.xp || []).slice(0, 4).map(x => tile(`${x.icon} ${x.label}`, `Level ${x.level}`, { note: `${x.xp} XP · ${x.units} served` })).join('')}</div>
       ${me.active ? `<p class="hint">You are working: ${esc(me.active.roleLabel)} at ${esc(me.active.business?.name || '')}.</p>` : ''}
       ${me.history?.length ? `<details><summary class="hint">Your last shifts</summary><div class="lib-list">${me.history.slice(0, 8).map(s => `<div class="lib-row ec-line"><div class="lib-main"><b>${esc(s.roleLabel)} at ${esc(s.business?.name || '')}</b><span class="dim">${s.served} ${esc(s.units)}${s.avgStars ? ` · ${s.avgStars} ★` : ''} · ${new Date(s.started).toLocaleString()}</span></div><b>${vc(s.pay)}</b></div>`).join('')}</div></details>` : ''}` : '';
     const rows = J.board.map(v => `<div class="lib-row ec-shift${v.open ? '' : ' closed'}"><div class="lib-main"><b>${esc(v.business.name)}</b><span class="dim">${esc(v.business.kind)} · ★ ${(v.business.rating / 100).toFixed(1)} · ${v.open ? 'open now' : 'closed now'}${v.waiting ? ` · <b>🧾 ${v.waiting} customer${v.waiting === 1 ? '' : 's'} waiting</b>` : ''}${v.residents.length ? ` · on staff: ${esc(v.residents.slice(0, 3).join(', '))}${v.residents.length > 3 ? '…' : ''}` : ''}</span></div>
@@ -151,13 +151,13 @@ export function open(app, want = 'overview') {
     const I = data.index; if (!I) return '<p class="hint">Loading…</p>';
     return `<div class="ec-tiles">${tile('Price index', I.level.toFixed(1), { delta: I.change, deltaGood: false })}${tile('The basket', vc(I.basket))}</div>
       ${lineChart([{ label: 'Price index', points: I.history }], { fmt: 'idx', zero: false, area: true })}
-      <div class="lib-list">${I.items.map(it => `<div class="lib-row ec-line"><div class="lib-main"><b>${esc(it.label)}</b><span class="dim">the median price charged</span></div><span>${sparkline(it.history.map(p => p[1]))}</span><b>${it.median ? vc(it.median) : '-'}</b></div>`).join('')}</div>
+      <div class="lib-list">${I.items.map(it => `<div class="lib-row ec-line"><div class="lib-main"><b>${esc(it.label)}</b><span class="dim">the median price charged</span></div><span>${sparkline(it.history.map(p => p[1]))}</span><b>${it.median ? vc(it.median) : '—'}</b></div>`).join('')}</div>
       <p class="hint">${esc(I.method)}. Virtual Coin is never exchanged for money.</p>`;
   }
   // ------------------------------------------------------------------ the treasury's ledger
   function ledger() {
     const L = data.ledger; if (!L) return '<p class="hint">Loading…</p>';
-    return `<p class="hint">Every coin in and out of the city's purse - public, as the city's books should be. Balance ${vc(L.wallet.balance)}.</p>
+    return `<p class="hint">Every coin in and out of the city's purse — public, as the city's books should be. Balance ${vc(L.wallet.balance)}.</p>
       <div class="lib-list ec-stmt">${L.statement.map(l => `<div class="lib-row ec-line"><div class="lib-main"><b>${esc(l.memo || l.kind)}</b><span class="dim">${l.with ? `${esc(l.with)} · ` : ''}${new Date(l.at).toLocaleString()}${l.note ? ` · ${esc(l.note)}` : ''}</span></div><b class="${l.amount > 0 ? 'good' : ''}">${l.amount > 0 ? '+' : ''}${vc(l.amount)}</b></div>`).join('') || '<p class="hint">Nothing yet.</p>'}</div>`;
   }
 

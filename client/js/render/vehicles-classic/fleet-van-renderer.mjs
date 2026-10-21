@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Original high-roof panel van: short bonnet, forward cab, sliding side door,
 // opaque load compartment, twin rear doors, bulkhead and a fitted cargo floor.
 import {createVehicleMeshTools,authorRoadWheel} from './vehicle-mesh-tools.mjs';

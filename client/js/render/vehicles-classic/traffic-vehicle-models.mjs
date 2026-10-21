@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 import { createFleetVehicleModelMetadata } from './fleet-vehicle-proportions.mjs';
 import { createSedanModelMetadata } from './sedan-proportions.mjs';
 

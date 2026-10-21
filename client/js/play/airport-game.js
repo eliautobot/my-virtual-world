@@ -1,11 +1,11 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The airport's ring game (docs/features/play-modules.md §Airport): while flying, G (or 🏁 on the instruments) opens the
-// ring courses for this aircraft - locked ones say what opens them, the others their stars, best time and what they pay.
+// ring courses for this aircraft — locked ones say what opens them, the others their stars, best time and what they pay.
 // Start one: the server lays its rings out over this airport (POST /api/play/start); they hang in the sky, the next one
 // gold with a beam of light, an arrow at the top of the screen pointing at it with the distance. The clock starts at the
 // first ring (the gate) and runs against the course's limit; through the last ring the flight path goes to the server
-// (POST /api/play/finish: it finds the passes itself and works the time out) and the result comes back - stars, the
-// time, a new best, the place on the leaderboard, experience, Virtual Coin, new badges, level-ups - with Retry, the next
+// (POST /api/play/finish: it finds the passes itself and works the time out) and the result comes back — stars, the
+// time, a new best, the place on the leaderboard, experience, Virtual Coin, new badges, level-ups — with Retry, the next
 // course and the leaderboard. A crash, getting out or running out of time ends the run (nothing is recorded).
 // Rings: one instanced torus mesh and one beam, only for the pilot flying the course (docs: §Performance).
 import * as THREE from 'three';
@@ -112,7 +112,7 @@ async function stop(why) {
   if (!run) return;
   const id = run.id; run = null;
   rings.count = 0; beam.visible = false; E.hud.classList.add('hidden');
-  if (why) app.toast(`🏁 ${why} - the run did not count`, 'warn', 3000);
+  if (why) app.toast(`🏁 ${why} — the run did not count`, 'warn', 3000);
   try { await post('/api/play/abandon', { run: id }); } catch { /* it lapses by itself */ }
 }
 function drawRings() {
@@ -209,7 +209,7 @@ function result(r, x) {
       ${x.place ? `<span>🏆 #${x.place} on the leaderboard</span>` : ''}
       <span>+${x.xp} XP${x.module.level > x.module.was ? ` · ✈️ Airport level ${x.module.level}!` : ''}</span>
       ${vc.paid ? `<span class="pf-vc">+${fmtVc(vc.paid)}</span>` : vc.why ? `<span class="dim">${esc(vc.why)}</span>` : ''}
-      ${x.player.level > x.player.was ? `<span>⭐ Level ${x.player.level}${x.player.rankUp ? ` - ${esc(x.player.rank.icon)} ${esc(x.player.rank.name)} rank!` : ''}</span>` : ''}
+      ${x.player.level > x.player.was ? `<span>⭐ Level ${x.player.level}${x.player.rankUp ? ` — ${esc(x.player.rank.icon)} ${esc(x.player.rank.name)} rank!` : ''}</span>` : ''}
     </div>
     ${vc.parts?.length ? `<p class="rr-parts dim">${vc.parts.map(p => `${esc(p.label)} ${fmtVc(p.amount)}`).join(' · ')}</p>` : ''}
     ${x.badges?.length ? `<div class="rr-badges">${x.badges.map(b => `<div class="pf-sb t-${b.tier}"><span>${b.icon}</span><b>${esc(b.label)}</b></div>`).join('')}</div>` : ''}

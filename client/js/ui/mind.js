@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Mind in the UI (docs/features/FREE-WILL.md §9).
 // - An agent's Mind (whether it plans and reflects, with which brain, its thoughts and what they cost, "Plan now" /
 //   "Reflect now") is the Agent Studio's Brain tab (ui/studio-mind.js); the words and the thought list it shows are here:
-//   every thought - what it planned, remembered, noted about people, how it changed, what it felt - with its cost.
-// - An agent's problems (rent it couldn't pay, money running out, no home, no job: server/mind/problems.js) - its owner is
+//   every thought — what it planned, remembered, noted about people, how it changed, what it felt — with its cost.
+// - An agent's problems (rent it couldn't pay, money running out, no home, no job: server/mind/problems.js) — its owner is
 //   told when one opens, when its Mind did something about it, and when it is solved; the Studio lists them.
 // - Settings → Free Will (freewill.admin): the Mind's switch, the world's brain for agents without their own, the limits,
 //   and today at a glance.
@@ -28,7 +28,7 @@ function onNote(m) {
 
 export const REASON = {
   mind_off: 'The Mind is switched off for the whole world by an administrator.',
-  switched_off: 'Off - it doesn\'t plan or reflect; its routine and Free Will go on.',
+  switched_off: 'Off — it doesn\'t plan or reflect; its routine and Free Will go on.',
   brain_off: 'Its brain (its connection) is switched off.',
   unavailable: 'Model providers are not available on this server.',
   not_allowed: 'Its owner may not use its brain connection.',
@@ -48,14 +48,14 @@ export const KIND = { plan: ['☀', 'Planned its day'], reflect: ['🌙', 'Refle
 const NOT_SAID = { blocked: 'the moderation service stopped it', local: 'it broke the world\'s rules for public lines', unchecked: 'it couldn\'t be checked' };
 const LOCAL_WHY = { link: 'a link', contact: 'contact details', character: 'out of character', format: 'garbled', long: 'too long', empty: 'empty' };
 /** What a line said in public came to: its words, or why nobody heard it. */
-const saidLine = d => (d.shown ? `“${esc(d.said || '')}”` : `Kept it to itself - ${NOT_SAID[d.moderation] || 'not said'}${d.categories?.length ? ` (${esc(d.categories.join(', '))})` : d.reason && LOCAL_WHY[d.reason] ? ` (${LOCAL_WHY[d.reason]})` : ''}`);
+const saidLine = d => (d.shown ? `“${esc(d.said || '')}”` : `Kept it to itself — ${NOT_SAID[d.moderation] || 'not said'}${d.categories?.length ? ` (${esc(d.categories.join(', '))})` : d.reason && LOCAL_WHY[d.reason] ? ` (${LOCAL_WHY[d.reason]})` : ''}`);
 export const PROBLEM = { rent: ['🏠', 'Rent'], money: ['🪙', 'Money'], home: ['🛏️', 'Home'], job: ['💼', 'Job'] };
 export const usd = micro => (micro >= 10000 ? `$${(micro / 1e6).toFixed(2)}` : `$${(micro / 1e6).toFixed(4)}`);
 export const ago = t => { const s = Math.max(0, (Date.now() - t) / 1000); return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
 
 /** One line about a thought, for the card. */
 export function gist(t) {
-  if (t.status !== 'ok') return `${(KIND[t.kind] || ['•'])[0]} ${t.status === 'skipped' ? 'Skipped' : 'Could not think'} - ${esc(ERR[t.error] || t.error || 'unknown')}`;
+  if (t.status !== 'ok') return `${(KIND[t.kind] || ['•'])[0]} ${t.status === 'skipped' ? 'Skipped' : 'Could not think'} — ${esc(ERR[t.error] || t.error || 'unknown')}`;
   const d = t.did || {};
   if (t.kind === 'speech') return `${KIND.speech[0]} ${saidLine(d)}`;
   const bits = [];
@@ -66,7 +66,7 @@ export function gist(t) {
   if (!bits.length && d.thought) bits.push(`“${esc(d.thought)}”`);
   return `${(KIND[t.kind] || ['•'])[0]} ${bits.join(' · ') || (KIND[t.kind] || [, t.kind])[1]}`;
 }
-// (a step its owner has no plain words for - a look, a slip - is shown as the agent saw it)
+// (a step its owner has no plain words for — a look, a slip — is shown as the agent saw it)
 const TOOL_WORD = { flats: 'Looked at flats', menu: 'Looked at a menu', rent_flat: 'Rent a flat', buy: 'Buy', pay: 'Pay', ask_owner: 'Ask you' };
 
 // ------------------------------------------------------------------ an agent's problems (the Studio)
@@ -123,19 +123,19 @@ export async function mindAdmin(d, body) {
       <p><span class="tag${on ? ' set' : ''}">${on ? 'On' : 'Off'}</span> <span class="tag">${O.inFlight} thinking now</span>${O.paused.length ? ` <span class="tag warn">${O.paused.length} brain paused</span>` : ''}</p>
       <div class="row wrap"><button type="button" class="btn small${on ? '' : ' primary'} mind-a-switch">${on ? 'Switch the Mind off for everyone' : 'Switch the Mind on'}</button></div>
       <label>The world's brain (nightly reflections of agents without their own) <span class="row"><select class="input mind-a-brain"><option value="">None</option>
-        ${O.brains.map(x => `<option value="${x.id}"${O.reflectConnection === x.id ? ' selected' : ''}${x.enabled && x.implemented ? '' : ' disabled'}>${esc(x.label)} (${esc(x.model || x.provider)})${x.status && x.status.ok === false ? ' - last test failed' : ''}</option>`).join('')}</select></span></label>
+        ${O.brains.map(x => `<option value="${x.id}"${O.reflectConnection === x.id ? ' selected' : ''}${x.enabled && x.implemented ? '' : ' disabled'}>${esc(x.label)} (${esc(x.model || x.provider)})${x.status && x.status.ok === false ? ' — last test failed' : ''}</option>`).join('')}</select></span></label>
       <p class="hint">${O.brains.length ? 'Add or test brains in Settings → Connections (a Model provider, installation-wide).' : 'No brain yet: add a Model provider in Settings → Connections (installation-wide), for example OpenRouter with deepseek/deepseek-v4.1-flash.'}</p>
       <label>Most thoughts a day, one agent <span class="row">${sel('mind-a-jobs', setting('mind.agentDailyJobs'))}</span></label>
       <label>Most a month, one agent <span class="row">${sel('mind-a-month', setting('mind.agentMonthlyUsd'), x => `$${x}`)}</span></label>
       <label>Most a day, all agents <span class="row">${sel('mind-a-day', setting('mind.dailyUsd'), x => `$${x}`)}</span></label>
       <label>Keep the record of thoughts <span class="row"><select class="input mind-a-keep">${(keep.choices || [7, 30, 90, 365]).map(x => `<option value="${x}"${x === keep.value ? ' selected' : ''}>${x} days</option>`).join('')}</select></span></label>
       <div class="tier-head">🗣️ Speaking in public</div>
-      <p class="hint">Agents with a brain of their own answer people who talk to them, and say something when they chat with someone, in their own words - in a speech bubble everyone near them sees. Every line is checked first: by the world's own rules (short, no links or contact details) and then by a moderation service. Without one, they only say the routine's lines.</p>
+      <p class="hint">Agents with a brain of their own answer people who talk to them, and say something when they chat with someone, in their own words — in a speech bubble everyone near them sees. Every line is checked first: by the world's own rules (short, no links or contact details) and then by a moderation service. Without one, they only say the routine's lines.</p>
       <p><span class="tag${sp.on ? ' set' : ''}">${sp.on ? 'On' : 'Off'}</span> ${sp.moderator ? `<span class="tag set">Checked by ${esc(sp.moderator.label)}</span>` : '<span class="tag warn">No moderation service: nothing is said</span>'} <span class="tag">${sp.shown} said · ${sp.blocked} stopped · ${sp.local + sp.unchecked} not said</span></p>
       <div class="row wrap"><button type="button" class="btn small mind-a-speech">${sp.on ? 'Switch public speech off' : 'Switch public speech on'}</button></div>
       <label>The moderation service <span class="row"><select class="input mind-a-mod"><option value="">None (agents say only the routine's lines)</option>
         ${O.brains.filter(x => x.provider === 'openai' || x.provider === 'custom').map(x => `<option value="${x.id}"${sp.moderationConnection === x.id ? ' selected' : ''}${x.enabled && x.implemented ? '' : ' disabled'}>${esc(x.label)} (${esc(x.provider === 'openai' ? 'OpenAI' : 'OpenAI-compatible')})</option>`).join('')}</select></span></label>
-      <p class="hint">An installation-wide Model provider with an OpenAI key (Settings → Connections) - OpenAI's moderation is free.</p>
+      <p class="hint">An installation-wide Model provider with an OpenAI key (Settings → Connections) — OpenAI's moderation is free.</p>
       <label>Most lines one agent says in a world day <span class="row">${sel('mind-a-lines', setting('mind.speechPerDay'))}</span></label>
       <div class="tier-head">Today (UTC)</div>
       <div class="kv"><span class="k">Plans</span><span>${n('plan', 'ok')}${n('plan', 'failed') ? ` · ${n('plan', 'failed')} failed` : ''}</span>
@@ -143,7 +143,7 @@ export async function mindAdmin(d, body) {
         <span class="k">Chats</span><span>${n('chat', 'ok')}${n('chat', 'failed') ? ` · ${n('chat', 'failed')} failed` : ''}</span>
         <span class="k">Problems</span><span>${n('problem', 'ok')} thought about${O.problems ? ` · ${O.problems.open} open now` : ''}</span>
         <span class="k">Cost</span><span>${usd(O.today.cost)} of ${usd(O.today.limitMicro)}</span>
-        <span class="k">Speed</span><span>${O.latency ? `${(O.latency.p50 / 1000).toFixed(1)} s typical, ${(O.latency.p95 / 1000).toFixed(1)} s slowest 5%` : '-'}</span></div>
+        <span class="k">Speed</span><span>${O.latency ? `${(O.latency.p50 / 1000).toFixed(1)} s typical, ${(O.latency.p95 / 1000).toFixed(1)} s slowest 5%` : '—'}</span></div>
       <div class="row"><button type="button" class="btn small mind-a-refresh">Refresh</button></div></div>`;
     const q = s => body.querySelector(s);
     q('.mind-a-switch').onclick = () => change({ 'mind.enabled': !on }, on ? 'The Mind is off' : 'The Mind is on');

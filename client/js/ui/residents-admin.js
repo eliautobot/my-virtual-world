@@ -1,5 +1,5 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Settings → Residents (WP4.12, PLAN WP4.12): administrators create, edit and remove residents - name and look (the
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Settings → Residents (WP4.12, PLAN WP4.12): administrators create, edit and remove residents — name and look (the
 // customizer), home (an apartment building, or any free home), work (an office or a venue, free time, or looking for
 // work), work hours and the daily routine (waking, lunch, bedtime). Every change goes through /api/edit: undoable,
 // in the activity log. Residents never hold title to land; they live and work in buildings (DECISIONS E25).
@@ -32,7 +32,7 @@ export function residentsTab(app) {
       if (force || document.activeElement !== q('.pop-pct')) { q('.pop-pct').value = st.pct; q('.pop-v').textContent = `${st.pct}%`; }
       const gap = st.target - st.residents;
       q('.pop-stat').textContent = `${num(st.beds)} beds in the city's homes · ${num(st.residents)} residents now, ${num(st.target)} at ${st.pct}%`
-        + (gap > 0 ? ` - ${num(gap)} more moving in over the next world day or two` : gap < 0 ? ` - ${num(-gap)} moving away over the next world day or two` : ' - settled')
+        + (gap > 0 ? ` — ${num(gap)} more moving in over the next world day or two` : gap < 0 ? ` — ${num(-gap)} moving away over the next world day or two` : ' — settled')
         + (st.homeless ? ` · ${num(st.homeless)} without a home (they move away after a world day if none frees up)` : '');
     };
     paintPop();

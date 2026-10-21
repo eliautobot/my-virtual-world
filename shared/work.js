@@ -1,11 +1,11 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Work modules (docs/features/WORK-MODULES.md; ECONOMY.md §8; spec 03 §2–4): the roles a player or an agent can work
-// at a venue, each a MODULE registered here - what one order of the job is (made deterministically from a seed), what
+// at a venue, each a MODULE registered here — what one order of the job is (made deterministically from a seed), what
 // the worker reports for it (raw inputs only) and how it is scored (a rubric: weights, star thresholds, tips). The
 // economy's core (server/economy/jobs.js) owns everything around a module: who may work where, the venue's tickets from
 // real customers, the pace a person can work at, pay, tax, experience, reputation and reviews, all committed together.
 // A new mini-game (a restaurant's kitchen, a cinema's box office, a gym's class) is a new module: registerModule() here
-// and, if it needs its own screen, a browser game registered with app.work.registerGame() - no change to the economy.
+// and, if it needs its own screen, a browser game registered with app.work.registerGame() — no change to the economy.
 //
 // Shared by the browser (which draws and plays the steps) and the server (which makes the orders and scores the
 // reports): the server never trusts a score from the browser and clamps raw inputs to what a person can do.
@@ -195,7 +195,7 @@ registerModule({ id: 'chef', version: 1, label: 'Chef', icon: '🧑‍🍳', uni
     const order = r.shuffle([0, 1, 2]);
     return { title: `${dish} with ${side}`, item: item || 'meal', expectMs: 16000, steps: [
       step(r, 'sequence', 'Prep the station', { items: prep, order, hint: 'Tap them in the order shown' }),
-      step(r, 'timing', 'Cook it', { period: [1100, 1700], lo: 0.55, hi: 0.8, band: 0.1, hint: 'Take it off the heat in the green - not raw, not burnt' }),
+      step(r, 'timing', 'Cook it', { period: [1100, 1700], lo: 0.55, hi: 0.8, band: 0.1, hint: 'Take it off the heat in the green — not raw, not burnt' }),
       step(r, 'choice', 'Plate it', { options: SIDES.slice(0, 4).includes(side) ? SIDES.slice(0, 4) : [side, ...SIDES.slice(0, 3)], correct: side, memo: `The ticket: ${dish} with ${side}`, hint: 'The side on the ticket' }),
     ] };
   } });

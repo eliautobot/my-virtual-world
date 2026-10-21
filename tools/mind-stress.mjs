@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Mind under load (docs/features/FREE-WILL.md §8): a city of `population` residents, `mind` of them AI agents with a
 // brain, run in real time like the server does (a 100 ms main loop, the Mind's own 1 s scheduler), with a brain that
 // answers after `latency` ms (± half) and fails `fail` of the time. The world is put at dawn so every agent's day starts
-// at once (the morning rush of plans), then at bedtime (the rush of reflections) - with the clock 4× its normal pace, so
+// at once (the morning rush of plans), then at bedtime (the rush of reflections) — with the clock 4× its normal pace, so
 // the rushes are 4× steeper than a real morning. Reports the main loop's cost with and
 // without the Mind, the scheduler's own cost, the event loop's delay, how many agents planned and reflected and how fast,
 // the most thoughts at once, memory and the database's growth.

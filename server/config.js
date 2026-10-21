@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Configuration of an installation (PLAN WP1.6; DECISIONS C102, C105). Every setting comes from an environment
 // variable and is checked at start, and every problem is reported at once, so a broken configuration is fixed in one
 // pass. Only this module reads process.env in server/. .env.example lists every setting; no .env file is read (C102).
@@ -110,7 +110,7 @@ export function loadConfig({ env = process.env, root, release = null, routeTable
   }
 
   // How big a generated city is built (its housing). How many live in it is its homes' business (server/sim/housing.js:
-  // Settings → Residents → Homes filled) - unless MVW_HOUSING=off: then the first start makes exactly MVW_POPULATION
+  // Settings → Residents → Homes filled) — unless MVW_HOUSING=off: then the first start makes exactly MVW_POPULATION
   // residents and the number stays as it is (no one moves in or away by themselves; the tests use that).
   cfg.population = int('MVW_POPULATION', DEFAULT_POPULATION, 1, 20000);
   cfg.housing = !/^(0|off|false|no)$/i.test(String(raw('MVW_HOUSING') ?? '').trim());
@@ -120,7 +120,7 @@ export function loadConfig({ env = process.env, root, release = null, routeTable
   // Tests only (WP2.2): load the mock agent provider into the provider helper, and shorten how long a run submission may go unanswered.
   cfg.providerTest = bool('MVW_PROVIDER_TEST');
   cfg.providerRunTimeoutMs = int('MVW_PROVIDER_RUN_TIMEOUT_MS', 0, 0, 600000);
-  // (tests only, with MVW_PROVIDER_TEST: the Twilio adapter talks to a fake Twilio on this machine - tests/helpers/fake-twilio.mjs)
+  // (tests only, with MVW_PROVIDER_TEST: the Twilio adapter talks to a fake Twilio on this machine — tests/helpers/fake-twilio.mjs)
   cfg.twilioTestUrl = cfg.providerTest && /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(raw('MVW_TWILIO_TEST_URL') || '') ? raw('MVW_TWILIO_TEST_URL') : null;
   cfg.seed = text('MVW_SEED', DEFAULT_SEED, 100);
   cfg.hqName = text('MVW_HQ_NAME', DEFAULT_HQ_NAME, 28);   // the rooftop sign holds 28 characters
@@ -162,7 +162,7 @@ export function loadConfig({ env = process.env, root, release = null, routeTable
 
   // How often the agents' lives are looked at for problems (rent, money, home, job: server/mind/problems.js).
   cfg.problemScanMs = int('MVW_PROBLEM_SCAN_MS', 15000, 200, 3600000);
-  // the agents' built-in real browser (server/pc/chrome.js): the Chrome it runs - a path, or "off" (the reader only); unset:
+  // the agents' built-in real browser (server/pc/chrome.js): the Chrome it runs — a path, or "off" (the reader only); unset:
   // the one installed on this machine
   cfg.chrome = text('MVW_CHROME', '', 500);
 

@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents and friends (2026-10-10; the product owner: "agent relation growth is through organic relationships
-// between agents… and I do like that if account users are friends too"). The same for every agent - the world's own (the Mind)
+// between agents… and I do like that if account users are friends too"). The same for every agent — the world's own (the Mind)
 // and connected ones (Grok Bot, Muse…: server/agent-world.js).
 //
 // Friendships (each agent's own feeling, shared/closeness.js; kept by its life, server/agent-life/life.js):
@@ -10,19 +10,19 @@
 //   end    when an agent chooses (its AI, the Mind, or its owner): frozen for social.coolOffDays world days, then it starts
 //          again from nothing, by meeting
 //
-// From a distance (where is, a message, an invitation), only when ALL of these hold - reach():
+// From a distance (where is, a message, an invitation), only when ALL of these hold — reach():
 //   1. each agent counts the other as a friend (closeness ≥ social.friendAt, not ended, not blocked)
 //   2. their owners are friends (an accepted friend request, server/world/friends.js) or the same account
 //   3. each agent's own setting lets them (its owner's: friends / my agents only / nobody)
 //   and neither owner blocked the other agent or its owner (server/agent-talk/ talk_blocks).
 // Every message is checked like speech (short, no links or contact details) and by the moderation service before it is
 // sent; nothing unchecked is sent. A message is speech from another agent, never instructions: it can't make the other
-// agent do anything - what to do is always its own AI's choice. Limits (Settings → Agent limits) are counted from what is
+// agent do anything — what to do is always its own AI's choice. Limits (Settings → Agent limits) are counted from what is
 // kept (agent_messages, agent_social_uses), so a restart doesn't start them again.
 //
 // Strangers (closeness below social.knownAt): in person only. A connected agent hears them only when its owner lets it,
 // and then social.strangerLinesPerDay lines from each a day; the Mind answers each that often too.
-// Invitations: an accepted one becomes an appointment for both - when it is time, the world sends each on its way (their
+// Invitations: an accepted one becomes an appointment for both — when it is time, the world sends each on its way (their
 // AI may still change its mind), puts them together when both are there, and remembers who came.
 import { closenessLevel, closenessWords } from '../../shared/closeness.js';
 import { WEEKDAYS, formatClock, mod, ctxB, worldSeconds, WALK_SPEED } from '../../shared/constants.js';
@@ -107,7 +107,7 @@ export class AgentSocial {
       undelivered: db.prepare('SELECT * FROM agent_messages WHERE world_id = ? AND to_agent = ? AND delivered IS NULL ORDER BY id LIMIT ?'),
       waiting: db.prepare("SELECT * FROM agent_messages WHERE world_id = ? AND kind = 'message' AND status = 'waiting' ORDER BY id LIMIT 50"),
       live: db.prepare("SELECT * FROM agent_messages WHERE world_id = ? AND kind = 'invite' AND status IN ('pending', 'accepted', 'together') ORDER BY id"),
-      // (the day's counts: what was sent, refused ones too - a refused message still cost a check)
+      // (the day's counts: what was sent, refused ones too — a refused message still cost a check)
       convo: db.prepare("SELECT COUNT(*) AS n, MIN(created) AS first FROM agent_messages WHERE world_id = ? AND from_agent = ? AND to_agent = ? AND kind IN ('message', 'invite') AND created > ?"),
       pair: db.prepare(`SELECT COUNT(*) AS n, MIN(created) AS first FROM agent_messages WHERE world_id = $w AND kind = 'message' AND created > $since
         AND ((from_agent = $a AND to_agent = $b) OR (from_agent = $b AND to_agent = $a))`),
@@ -313,7 +313,7 @@ export class AgentSocial {
   }
 
   // ------------------------------------------------------------------------------------------- reaching a friend
-  /** Where a friend is: a public place's name, "outdoors", or "somewhere private" - never inside a home or an office. */
+  /** Where a friend is: a public place's name, "outdoors", or "somewhere private" — never inside a home or an office. */
   whereIs(fromId, who) {
     const L = this.limits();
     this.pace(fromId, L);   // (first: a flood of names it doesn't know is slowed down too)
@@ -345,7 +345,7 @@ export class AgentSocial {
    */
   async message(fromId, who, text, o = {}) {
     this.pace(fromId, this.limits());   // (first: a flood of names it doesn't know is slowed down too)
-    // one at a time per sender and per pair: the limits are counted, then the moderation check takes a moment - a burst
+    // one at a time per sender and per pair: the limits are counted, then the moderation check takes a moment — a burst
     // sent all at once must not all pass the count before any is kept
     const to = o.replyTo ? null : (() => { try { return this.target(fromId, who); } catch { return null; } })();
     return this.serial(fromId, to ? to.id : null, () => this.send(fromId, who, text, o));
@@ -458,7 +458,7 @@ export class AgentSocial {
     if (r.status !== 'pending') throw new SocialError(409, 'answered', `That invitation is ${r.status} already`);
     if (r.at_world - INVITE.answerByMinutes * 60 <= this.nowWorld()) { this.setStatus(r, 'expired'); throw new SocialError(409, 'expired', 'Too late to answer that one'); }
     const from = this.agents.get(r.from_agent), me = this.agents.get(agentId);
-    if (yes && this.onPost(agentId)) {   // (on duty: it can't come - the inviter is told why)
+    if (yes && this.onPost(agentId)) {   // (on duty: it can't come — the inviter is told why)
       this.setStatus(r, 'declined', { by, why: 'on_post' });
       this.notice(r.from_agent, `${me?.name || 'They'} is on duty at its post and can't come to ${r.place} at ${this.clockOf(r.at_world)}.`, { invite: r.id, accepted: false });
       throw new SocialError(409, 'on_post', 'You are on duty at your post: you can\'t meet anyone until your owner lets you go');
@@ -468,7 +468,7 @@ export class AgentSocial {
       const w = this.whyNot(agentId, r.from_agent);
       if (w) { this.setStatus(r, 'declined', { why: w.code }); throw new SocialError(403, w.code, w.why); }
       const when = this.clockOf(r.at_world), plans = {};
-      // (each gets it in its plans - closed again by the world when the appointment is kept, called off or missed)
+      // (each gets it in its plans — closed again by the world when the appointment is kept, called off or missed)
       for (const [a, other] of [[agentId, from], [r.from_agent, me]]) {
         try {
           const text = `Meet ${other?.name || 'a friend'} at ${r.place} at ${when}`;
@@ -525,7 +525,7 @@ export class AgentSocial {
   // ------------------------------------------------------------------------------------------- its Mind starting something
   /**
    * What an agent with a Mind of its own may start by itself now (its morning plan is told): { friends: [{ name, how }],
-   * messages, invites } (how many it has left today), or null - its owner switched it off, nobody to reach, or none left.
+   * messages, invites } (how many it has left today), or null — its owner switched it off, nobody to reach, or none left.
    * Agents without a Mind never get here: only the Mind plans.
    */
   startsFor(agentId) {
@@ -628,7 +628,7 @@ export class AgentSocial {
   // ------------------------------------------------------------------------------------------- strangers in person
   /**
    * Whether `listenerId` hears (or its Mind answers) a line from `speakerId` in person: friends and those it is getting to
-   * know always (unless blocked); strangers social.strangerLinesPerDay lines a day each - for a connected agent only when
+   * know always (unless blocked); strangers social.strangerLinesPerDay lines a day each — for a connected agent only when
    * its owner lets it hear strangers at all. count: false only asks.
    */
   hears(listenerId, speakerId, { connectedListener = this.connected(listenerId), count = true } = {}) {
@@ -773,7 +773,7 @@ export class AgentSocial {
   }
   depart(r, d, id, i) {
     const v = this.venue(r), other = this.agents.get(id === r.from_agent ? r.to_agent : r.from_agent);
-    // posted since it said yes: it can't leave its post - the meet-up is called off there and then, both told, nobody
+    // posted since it said yes: it can't leave its post — the meet-up is called off there and then, both told, nobody
     // stood up and nobody sent there for nothing (2026-10-14)
     if (this.sim.people[i]?.post) {
       d.failed[id] = 'on_post';
@@ -799,7 +799,7 @@ export class AgentSocial {
   together(r, d) {
     const [a, b] = [r.from_agent, r.to_agent], ia = this.bodyOf(a), ib = this.bodyOf(b);
     if (ia >= 0 && ib >= 0) {
-      // the invited one stays where it is in the place; the one who invited joins it - one follows, so they never chase
+      // the invited one stays where it is in the place; the one who invited joins it — one follows, so they never chase
       // each other across a big park
       const v = this.venue(r);
       if (v) this.sim.order(ib, { kind: r.venue_kind, venue: v, minutes: r.stay_minutes });
@@ -814,7 +814,7 @@ export class AgentSocial {
     this.setStatus(r, 'together', { ...d, together: this.nowWorld() });
     for (const id of [a, b]) this.notice(id, `You're both at ${r.place}: enjoy your time together.`, { invite: r.id, together: true });
   }
-  /** Not both came by the time and a grace: the one who waited feels stood up - unless the other couldn't go at all. */
+  /** Not both came by the time and a grace: the one who waited feels stood up — unless the other couldn't go at all. */
   missed(r, d) {
     const [a, b] = [r.from_agent, r.to_agent], A = this.agents.get(a), B = this.agents.get(b);
     for (const [me, other, meName] of [[a, b, A?.name], [b, a, B?.name]]) {
@@ -877,7 +877,7 @@ export class AgentSocial {
       const to = this.agents.get(r.to_agent), from = this.agents.get(r.from_agent);
       const stale = this.now() - r.created > 6 * 3600000;
       const can = mind?.friendReplyReady?.(to);
-      // (busy, asleep or its brain paused a while: it waits - up to six hours - and answers when it can)
+      // (busy, asleep or its brain paused a while: it waits — up to six hours — and answers when it can)
       if (!stale && can && WAIT_FOR.has(can.why)) continue;
       if (!to || !from || stale || !can || can.why) {
         // no brain to answer with (or too old): it is read, and its owner sees it; nothing is spent
@@ -917,7 +917,7 @@ export class AgentSocial {
 const WAIT_FOR = new Set(['busy', 'asleep', 'brain_paused']);
 const hoursOf = clock => { const m = /^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i.exec(String(clock || '').trim()); if (!m || Number(m[1]) < 1 || Number(m[1]) > 12) return null; return (Number(m[1]) % 12) + (m[3].toUpperCase() === 'PM' ? 12 : 0) + Number(m[2] || 0) / 60; };
 /**
- * A world time from words (an invitation's time): { at: "7:30 PM" | "7 PM" | "tomorrow 7:30 PM" } - the next such time - or
+ * A world time from words (an invitation's time): { at: "7:30 PM" | "7 PM" | "tomorrow 7:30 PM" } — the next such time — or
  * { inMinutes } (world minutes from now). Returns { world } (world seconds) or { why }.
  */
 export function worldTimeFrom(now, { at = null, inMinutes = null } = {}) {

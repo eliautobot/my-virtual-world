@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The island around the city (WP4.2, WP4.16): terrain tiles in a distance-based quadtree (full 8 ft detail near the
 // camera, coarser with distance), built in a worker and swapped in only when a whole subtree is ready (no holes, no
 // overlaps), the endless ocean, the lakes, and natural scatter (trees, bushes, rocks) as instanced meshes on the
@@ -24,21 +24,21 @@ import { fadeable, FADE_S, FADE_GLSL, holeable, holeUniforms, HOLE_N } from './f
 // n0: cells per full-detail tile (50 = the canonical 8 ft grid), n: cells for coarser tiles, split: detail distance
 // in tile sizes, scatter: radius (m) and instance caps, shadowR: scatter within this radius casts shadows, lodR: trees
 // within it are drawn in full detail (render/nature-models.js), grassR / grassCap: grass tufts and wild flowers; ocean: the
-// sea's wave simulation (render/ocean-fft.js: samples across, cascade sizes) - none: the simpler Gerstner sea.
+// sea's wave simulation (render/ocean-fft.js: samples across, cascade sizes) — none: the simpler Gerstner sea.
 const Q = {
   low: { n0: 25, n: 16, split: 0.75, scatterR: 0, scatterCap: 0, shadowR: 0, minLevel: 1, maxTiles: 40, uploads: 1, uploadMs: 2, gm: 32, ocean: null },
   medium: { n0: 25, n: 40, split: 0.85, poolBudget: 300e3, scatterR: 280, scatterCap: 9000, shadowR: 0, lodR: 70, grassR: 45, grassCap: 7000, minLevel: 0, maxTiles: 60, uploads: 1, uploadMs: 3, gm: 48, ocean: { n: 64, sizes: [420, 90, 19] } },
   high: { n0: 50, n: 50, split: 1.25, poolBudget: 600e3, scatterR: 520, scatterCap: 40000, shadowR: 170, lodR: 170, grassR: 95, grassCap: 32000, minLevel: 0, maxTiles: 90, uploads: 2, uploadMs: 4, gm: 96, ocean: { n: 128, sizes: [503, 67, 11.3] } },
 };
 // Ground heights the browser keeps (shared/terrain.js GroundQuery: 400 ft chunks, ~10 KB each): enough for everything
-// asking each frame - residents, cars, animals, boats - over the view, so none is recomputed frame after frame.
+// asking each frame — residents, cars, animals, boats — over the view, so none is recomputed frame after frame.
 const GROUND_CHUNKS = 384;
 const ROOT_LEVEL = 7;
 // Streaming ahead (2026-10-04: driving, "the other area takes time to load and suddenly appears"): tiles are built
 // for where the camera will be LOOK_S seconds on (at most LOOK_MAX m), and finer ones out to MARGIN x the distance they
-// are switched in at, all round - ready before they are needed; behind what is wanted now in the queue (AHEAD_M).
+// are switched in at, all round — ready before they are needed; behind what is wanted now in the queue (AHEAD_M).
 const LOOK_S = 3, LOOK_MAX = 600, MARGIN = 1.35, AHEAD_M = 150;
-// The coarsest tiles that carry trees (thinned: terrain.worker.js treeLevel) - past them, no trees stand
+// The coarsest tiles that carry trees (thinned: terrain.worker.js treeLevel) — past them, no trees stand
 const FAR_TREE_LEVEL = 2;
 const PIN_LEVEL = 5;   // tiles this coarse (≈ 3.9 km) cover the island from the start and are always kept
 const tileDist = (m, c) => { const S = CHUNK_M * 2 ** m.level, dx = Math.max(m.x0 - c.x, 0, c.x - m.x0 - S), dz = Math.max(m.z0 - c.z, 0, c.z - m.z0 - S); return dx * dx + dz * dz; };   // 400 ft × 2^7 ≈ 15.6 km: a couple of roots cover the island and its shelf
@@ -113,7 +113,7 @@ export class Terrain {
     import('/shared/terrain.js').then(async T => {
       const island = new T.Island(this.params, { roads: world.roads || null, pads: this.pads });
       this.ground = new T.GroundQuery(island, { maxChunks: GROUND_CHUNKS });
-      bus.emit('ground');   // (what stands on the land beyond the city - decorations, a dock's rocks - on it from the start)
+      bus.emit('ground');   // (what stands on the land beyond the city — decorations, a dock's rocks — on it from the start)
       if (island.rivers?.length) { const { RiversLayer } = await import('./rivers.js'); this.rivers = new RiversLayer(island, this.waterNormal); this.group.add(this.rivers.group); }
       if (island.roads) {
         const { IslandRoadsLayer } = await import('./island-roads.js');
@@ -150,8 +150,8 @@ export class Terrain {
     const oldRoads = this.ground?.island.roads || null;
     const island = new T.Island(this.params, { roads: this.world.roads, pads });
     this.ground = new T.GroundQuery(island, { maxChunks: GROUND_CHUNKS });
-    // the new ground is in (it came after the edit's own events): what stands on it - a dock's rocks, the decorations
-    // (a new dock's benches) - is laid again on it (2026-10-15, the product owner: a marina placed showed neither until
+    // the new ground is in (it came after the edit's own events): what stands on it — a dock's rocks, the decorations
+    // (a new dock's benches) — is laid again on it (2026-10-15, the product owner: a marina placed showed neither until
     // a reload)
     bus.emit('ground');
     if (editChanges.some(e => e.kind === 'pond')) this.setLakes(island.lakes);
@@ -164,7 +164,7 @@ export class Terrain {
     for (const r of changed) { try { const b = alignmentGeometry(r).bbox; boxes.push({ x0: b.x0 - pad, z0: b.z0 - pad, x1: b.x1 + pad, z1: b.z1 + pad }); } catch { /* skipped */ } }
     // A road joined by another changes too, though its record didn't (2026-10-13: "after connecting it has terrain
     // issues"): the junction takes a shared height, so the old road is re-profiled through it and its junction pad is
-    // new - the ground there was graded to the old heights, and grass showed through the road. Every stretch whose
+    // new — the ground there was graded to the old heights, and grass showed through the road. Every stretch whose
     // profile moved and every junction pad that came, went or changed is rebuilt as well.
     if (changed.length) for (const b of roadShifts(oldRoads, island.roads)) boxes.push({ x0: b.x0 - pad, z0: b.z0 - pad, x1: b.x1 + pad, z1: b.z1 + pad });
     for (const p of padChanges) { const R = Math.hypot(p.hw, p.hd) + (p.blend || 8) + 4; boxes.push({ x0: p.x - R, z0: p.z - R, x1: p.x + R, z1: p.z + R }); }
@@ -214,7 +214,7 @@ export class Terrain {
   async cityCuts() { const { cityRoadSet } = await import('/shared/city-roads.js'); return cityRoadSet(this.world.grid, this.world.roads)?.islandCuts || null; }
   heightAt(x, z) { return this.ground ? this.ground.height(x, z) : this.params.plainY; }
   /** The ground's height at one point, worked out there (not from the cached 8 ft grid around it): for one-off queries
-   *  scattered over the island - street furniture, flight planning - where heightAt would build a whole 122 m chunk of
+   *  scattered over the island — street furniture, flight planning — where heightAt would build a whole 122 m chunk of
    *  2601 heights per query (7 s of the phone's start-up, 2026-10-04). Within centimetres of heightAt. */
   pointHeight(x, z) { return this.ground ? this.ground.island.height(x, z) : this.params.plainY; }
   /** The top of whatever is at (x, z): the ground, or the water over it (sea, lake or river). */
@@ -477,7 +477,7 @@ float iSnow = 0.0;
   }
   /**
    * Refill the scatter pools around camPos: kind by kind over the next frames (grass and flowers first, then the rest),
-   * at most ~POOL_BUDGET of instance data sent to the GPU a frame - a kind's near, far and distant pools together, so no
+   * at most ~POOL_BUDGET of instance data sent to the GPU a frame — a kind's near, far and distant pools together, so no
    * tree is shown twice or lost where they meet. All in one frame, the refill every 25 m of driving sent the pools'
    * whole buffers at once (~16 MB at High) and held a busy phone 100-200 ms (2026-10-04). now: everything at once.
    */
@@ -488,7 +488,7 @@ float iSnow = 0.0;
     this.poolDirty = new Set(this.poolOrder);
     if (now) { for (const k of this.poolOrder) this.fillKind(k); this.poolDirty.clear(); }
   }
-  /** Some of the kinds waiting to be refilled each frame (terrain update), within the upload budget - taken in turn,
+  /** Some of the kinds waiting to be refilled each frame (terrain update), within the upload budget — taken in turn,
    *  carrying on where the last frame stopped, so refills asked for every frame (tiles arriving) still reach every kind. */
   stepPools() {
     const D = this.poolDirty; if (!D?.size) return;
@@ -510,7 +510,7 @@ float iSnow = 0.0;
         // tiles wholly out of reach are skipped
         const tx = Math.max(t.x0 - camPos.x, 0, camPos.x - t.x0 - t.S), tz = Math.max(t.z0 - camPos.z, 0, camPos.z - t.z0 - t.S);
         if (tx * tx + tz * tz > lim) continue;
-        // born: when each fades in from - what also stood on the tile it replaced keeps that tile's time (no blink),
+        // born: when each fades in from — what also stood on the tile it replaced keeps that tile's time (no blink),
         // the rest (the trees a coarser tile left out, the grass) its own
         const p = sc.p, cc = sc.c, lvs = sc.v, n = cc.length / 3, own = Math.max(t.shownAt ?? 0, t.scBorn ?? 0), inh = t.kindBorn?.get(P.kind);
         const cov = t.covered, cellS = t.S / HOLE_N;   // (where finer tiles are shown over it, theirs stand instead)
@@ -558,7 +558,7 @@ float iSnow = 0.0;
   }
   /**
    * Stand-ins for the materials tiles get as they stream in (a tile's ground with its map, its crops), so their shaders
-   * are compiled behind the loading screen - not in the frame the first farm comes into view (a long frame on phones).
+   * are compiled behind the loading screen — not in the frame the first farm comes into view (a long frame on phones).
    * Add to the scene for the warm-up compile, then remove it and call its userData.dispose().
    */
   warmGroup() {
@@ -572,7 +572,7 @@ float iSnow = 0.0;
     for (const m of [csMesh, cssMesh]) { m.frustumCulled = false; m.position.y = -9999; g.add(m); }
     if (!this.pools) this.buildPools();   // (the scatter's pools: their materials compile with the rest)
     // After the warm-up the stand-ins leave the scene but their materials are kept: three.js frees a shader once no live
-    // material uses it, and tiles come and go - without these the phone would compile them again on the next far jump.
+    // material uses it, and tiles come and go — without these the phone would compile them again on the next far jump.
     g.userData.dispose = () => { g.traverse(o => { if (o.isMesh) o.geometry.dispose(); }); this.warmKept = g; };
     return g;
   }
@@ -620,7 +620,7 @@ float iSnow = 0.0;
     return tile;
   }
   /** Tiles the camera wants: split while closer than size × split factor; never below the quality's finest level. */
-  // (the camera's own cover - splitK 1 - keeps what it split a little longer: an area is split at S x split and joined
+  // (the camera's own cover — splitK 1 — keeps what it split a little longer: an area is split at S x split and joined
   // again only past 12 % more, so a camera hovering at the distance doesn't flip it back and forth)
   wanted(cam, splitK = 1, own = splitK === 1) {
     const out = [], c = this.cfg, b = this.bounds(), split = c.split * splitK, was = own ? this._split : null, now = own ? new Set() : null;
@@ -659,7 +659,7 @@ float iSnow = 0.0;
    * Per frame: choose tiles, request the missing ones (nearest first, a coarser stand-in first where nothing near is
    * built), turn finished builds into meshes within a time budget, and show what is ready.
    * Shown: every wanted tile that is built; where one isn't, its nearest built ancestor stands in (or the finer tiles
-   * shown before, when zooming out) - so each area sharpens as soon as its own tiles are in, nearest first, instead of
+   * shown before, when zooming out) — so each area sharpens as soon as its own tiles are in, nearest first, instead of
    * the whole view waiting for the last tile (2026-10-03). Changes cross-fade (render/fade.js).
    */
   update(camera) {
@@ -684,7 +684,7 @@ float iSnow = 0.0;
       else { t.fade.value.set(p, f.dir); if (t.dfade && !this.dfades.has(k)) t.dfade.value.set(p, f.dir); }
     }
     for (const [k, start] of this.dfades) { const t = this.tiles.get(k), p = Math.min(1, (now - start) / FADE_S); if (!t?.dfade) { this.dfades.delete(k); continue; } if (p >= 1) { t.dfade.value.set(1, 0); this.dfades.delete(k); } else t.dfade.value.set(p, 1); }
-    // what to show: every frame, each change fading on its own - an area finished a moment after another no longer waits
+    // what to show: every frame, each change fading on its own — an area finished a moment after another no longer waits
     // for the other's fade (they ran one at a time, so after a jump the near areas queued behind each other, 2026-10-04).
     // A tile turning round mid-fade carries on from the share of its pixels it shows (from).
     {
@@ -695,7 +695,7 @@ float iSnow = 0.0;
           const t = this.tiles.get(k), was = this.fades.get(k), from = was?.dir < 0 ? 1 - Math.min(1, (was.from || 0) + (now - was.start) / FADE_S) : 0;
           this.group.add(t.mesh); t.shownAt ??= now; t.fade.value.set(from, 1); this.dfades.delete(k); t.dfade?.value.set(from, 1); this.fades.set(k, { dir: 1, start: now, from });
           // what it shares with the tiles it replaces stays as it was: their trees are the same trees (one world grid,
-          // terrain.worker.js buildScatter) - faded in again they blinked out and back on each change (2026-10-04)
+          // terrain.worker.js buildScatter) — faded in again they blinked out and back on each change (2026-10-04)
           // (and from the coarser tile it is shown over, which stays for the rest of its area)
           const over = []; { let L = t.level, tx = t.tx, tz = t.tz; while (L < ROOT_LEVEL) { L++; tx = Math.floor(tx / 2); tz = Math.floor(tz / 2); const a = this.key(L, tx, tz); if (next.has(a) && this.shown.has(a)) { over.push(a); break; } } }
           for (const lk of [...leave, ...over]) {
@@ -703,7 +703,7 @@ float iSnow = 0.0;
             for (const [kind, L] of Object.entries(o.sc)) {
               if (!L?.c?.length) continue;
               const b = o.kindBorn?.get(kind)?.born ?? Math.max(o.shownAt ?? 0, o.scBorn ?? 0), e = (t.kindBorn ??= new Map()).get(kind);
-              // (lv: the replaced tile's level - its instances are those standing on that level: treeLevel >= lv)
+              // (lv: the replaced tile's level — its instances are those standing on that level: treeLevel >= lv)
               t.kindBorn.set(kind, { born: e ? Math.min(e.born, b) : b, lv: e ? Math.min(e.lv, o.level) : o.level });
             }
           }
@@ -765,11 +765,11 @@ float iSnow = 0.0;
     }
     this._mv = { x: cam.x, z: cam.z, t: now };
   }
-  /** Built and complete: its ground, and (up to level 2, where farmsteads, crops and scatter stand) what stands on it -
+  /** Built and complete: its ground, and (up to level 2, where farmsteads, crops and scatter stand) what stands on it —
    *  a tile shown before that arrived replaced its parent's trees with bare ground until it did (2026-10-04). */
   isReady(k) { const t = this.tiles.get(k); return !!t && (t.level > 2 || t.detail === 'done' || t.inPlace || t.mesh.visible === false); }
   /** Built but still waiting for what stands on it: shown anyway where what shows there now has nothing standing on it
-   *  either (no shown ancestor with trees - after a jump, the island's coarse cover) - waiting there only delayed the
+   *  either (no shown ancestor with trees — after a jump, the island's coarse cover) — waiting there only delayed the
    *  ground (2026-10-04: "closer things should load faster"); it fades in when it arrives. */
   showable(k) {
     if (this.isReady(k)) return true;
@@ -793,7 +793,7 @@ float iSnow = 0.0;
       push(w.level, w.tx, w.tz, w.dist);
     }
     // what stands on the tiles (built, up to level 2): farmsteads; crops and scatter (level 0); far trees (levels 1 to
-    // FAR_TREE_LEVEL) - asked for as soon as the ground is in, so the tile is complete when it is shown (isReady)
+    // FAR_TREE_LEVEL) — asked for as soon as the ground is in, so the tile is complete when it is shown (isReady)
     const sc = this.cfg.scatterCap > 0;
     const detailFor = list => { for (const w of list) {
       const t = this.tiles.get(w.key);
@@ -801,7 +801,7 @@ float iSnow = 0.0;
       jobs.push({ detail: true, t, key: w.key, dist: w.dist + 5, scatter: t.level === 0 && sc, distant: t.level >= 1 && t.level <= FAR_TREE_LEVEL && sc });
     } };
     detailFor(want);
-    // ahead: where the camera will be in LOOK_S s, and finer tiles out to MARGIN x their switch distance all round - only
+    // ahead: where the camera will be in LOOK_S s, and finer tiles out to MARGIN x their switch distance all round — only
     // while nothing that is wanted now waits for a worker (after a jump it doubled the work in front of the near tiles)
     if (cam && !jobs.length) {
       const ahead = new Map(), wk = new Set(want.map(w => w.key)), v = this.vel || { x: 0, z: 0 }, sp = Math.hypot(v.x, v.z);
@@ -873,7 +873,7 @@ float iSnow = 0.0;
       // zooming out: the finer tiles shown before still cover it
       for (const k of this.shown) { const t = this.tiles.get(k); if (t && t.level < w.level && Math.floor(t.tx / 2 ** (w.level - t.level)) === w.tx && Math.floor(t.tz / 2 ** (w.level - t.level)) === w.tz) D.add(k); }
     }
-    // (a finer tile shown under a coarser one: the coarser one leaves its pixels out - updateHoles)
+    // (a finer tile shown under a coarser one: the coarser one leaves its pixels out — updateHoles)
     return D;
   }
   /** Drop built tiles that haven't been shown for a while (bounded memory). */

@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Reputation and trust (docs/features/ECONOMY.md §8.3; jobs plan addendum 3): standing is earned, never bought or
-// transferred. Each subject (a player or an agent) has scores by dimension - pay (paying rent on time, honouring payment
-// requests, no debts) and work (the stars customers give) - from 0 to 1000, starting at 500 ("new"). Earning is slow,
+// transferred. Each subject (a player or an agent) has scores by dimension — pay (paying rent on time, honouring payment
+// requests, no debts) and work (the stars customers give) — from 0 to 1000, starting at 500 ("new"). Earning is slow,
 // losing quicker (trust, not a counter). Every change is an append-only event; one with a reference counts once.
 // Trust (0–5 stars) is their blend; it shows with every wallet, orders the shift board and lets owners ask for a minimum.
 const START = 500;

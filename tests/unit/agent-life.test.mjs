@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// An agent's life (docs/features/FREE-WILL.md §5): it only watches - a city with it attached plans exactly what one
-// without it plans - and turns what agents do into an activity log, memories and relationships; the owner's profile
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// An agent's life (docs/features/FREE-WILL.md §5): it only watches — a city with it attached plans exactly what one
+// without it plans — and turns what agents do into an activity log, memories and relationships; the owner's profile
 // and plans are checked and kept small; body traits change the resident's routine; Free Will is told who the agent is.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -69,7 +69,7 @@ test('the activity log: one line per activity (a shift with its breaks is one), 
   for (const k of ['sleep', 'work', 'meal']) assert.ok(kinds.has(k), `${k} is logged (${[...kinds]})`);
   for (const r of all) { assert.ok(r.label && r.world_time && r.minutes >= 0); assert.ok(!/undefined|null/.test(r.label), r.label); }
   // the stretches of a shift between coffee breaks are one line: a new work line only comes after something else
-  // (lunch, a chat, a meeting) - never right after another work line at the same place
+  // (lunch, a chat, a meeting) — never right after another work line at the same place
   const byAgent = new Map();
   for (const r of all) { if (!byAgent.has(r.agent_id)) byAgent.set(r.agent_id, []); byAgent.get(r.agent_id).push(r); }
   for (const rows of byAgent.values()) {

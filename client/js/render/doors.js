@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Doors on the floor being looked at (2026-10-05: "doors on buildings and apartments ... make them open and close"):
-// the floor's doors (shared/doors.js levelDoors) as wooden leaves that swing - one leaf, or two on a wide doorway - and
+// the floor's doors (shared/doors.js levelDoors) as wooden leaves that swing — one leaf, or two on a wide doorway — and
 // the glass doors of shops and offices that slide apart. A door opens when someone comes within reach of it (a
 // resident, or the player) and closes again behind them; a click or tap on a door holds it open (or lets it close).
 // Doors are as tall as the walls let them be in the cutaway. (Who may pass a locked flat door comes with the flats.)
@@ -82,7 +82,7 @@ export class Doors {
     const h = hits[0], lf = this.leaves.find(l => (l.glass ? this.glass : this.wood) === h.object && l.slot === h.instanceId);
     return lf ? this.doors[lf.i] : null;
   }
-  /** Holds a door open, or lets it close again - for everyone (op door.set; the server says no to a locked flat's door). */
+  /** Holds a door open, or lets it close again — for everyone (op door.set; the server says no to a locked flat's door). */
   toggle(d) {
     if (d.kind === 'flat' && !d.held && !mayEnter(this.B, this.focus.f, d.u, -1)) return false;   // locked, and not yours
     d.held = !d.held;

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Shared constants + tiny math helpers. Imported by the Node server AND the browser client.
 export const FLOOR_H = 3.4;          // storey height (m)
 export const SIGN_RIM = 0.045;      // m: a sign's board beyond its face, each side (shared/signs.js, geom.js itemRect)

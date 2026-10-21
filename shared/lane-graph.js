@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Traffic lanes on alignment roads (WP4.5, wp4-world-spec.md §3–4): every road type's lanes in both directions, along
 // each road's curves and graded height, cut back at junctions; short connector curves through each junction for the
 // moves a driver may make (straight, left from the inner lane, right from the outer lane; a turnaround at a dead end),

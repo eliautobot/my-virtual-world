@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Decorations on the land (WP4.7, shared/decor.js): the outdoor items people place outside buildings - trees, bushes,
-// flower beds, benches, picnic tables, fountains - one instanced mesh per kind (and its glass), standing on the ground
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Decorations on the land (WP4.7, shared/decor.js): the outdoor items people place outside buildings — trees, bushes,
+// flower beds, benches, picnic tables, fountains — one instanced mesh per kind (and its glass), standing on the ground
 // (the city's lots, or the terrain beyond the city). Rebuilt when the list or the ground changes.
 import * as THREE from 'three';
 import { furnitureGeometry } from './furniture.js';

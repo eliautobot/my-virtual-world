@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A fishing trip's grounds as they show on the water (docs/features/fishing.md §Finding fish; shared/fishing-trip.js
 // GROUNDS shows): bird flocks wheeling over the fish and diving into them (seen from far off), surface boils (the water
 // churning, bait fish breaking it), lily pads, weed beds, rocks breaking the surface off a point, and the water's own
-// colour - the sand of the flats, the dark of a reef, the line of a drop-off, the cobalt of the blue water. Hidden
+// colour — the sand of the flats, the dark of a reef, the line of a drop-off, the cobalt of the blue water. Hidden
 // grounds show nothing (the fish finder finds them). The legend's ground, while it's about, gets a golden ring. One mesh
 // for every patch of colour, one for every bird, one for the pads, one for the weed, one for the rocks.
 import * as THREE from 'three';
@@ -60,7 +60,7 @@ export class GroundMarks {
   set(plan, level) {
     this.plan = plan; this.level = level; this.on = !!plan;
     this.list = plan ? plan.grounds.map(g => ({ g, seed: hashOf(g.id + plan.seed), birds: [], dive: null })) : [];
-    // the things that stay put: pads, weed, rocks - laid out once
+    // the things that stay put: pads, weed, rocks — laid out once
     let np = 0, nw = 0, nr = 0;
     for (const G of this.list) {
       const g = G.g, R = rnd(G.seed), y = level(g.x, g.z);
@@ -86,7 +86,7 @@ export class GroundMarks {
   }
   /**
    * Once a frame: the patches and flocks where their grounds are now (they wander), the birds wheel and dive, a boil
-   * breaks (fx: render/fishing-fx.js - its ripples and drops, near the camera only), the legend's ring pulses.
+   * breaks (fx: render/fishing-fx.js — its ripples and drops, near the camera only), the legend's ring pulses.
    * minute: into the trip; legend: the plan's sighting (shown from..to).
    */
   update(dt, t, minute, cam, fx) {

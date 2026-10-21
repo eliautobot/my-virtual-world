@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Rolling back across an accounts-database schema change (DECISIONS C84): the schema number is lowered when every newer
 // migration only added things, an older release's writes still work, and migrating forward again is harmless.
 import assert from 'node:assert/strict';

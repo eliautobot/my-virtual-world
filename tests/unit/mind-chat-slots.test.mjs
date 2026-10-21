@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Owners' chats wait for a slot first come, first served (server/mind/mind.js chatSlot; docs/features/CHAT.md §2): a
 // slot that frees goes to the oldest waiting chat, never to a newcomer; Stop leaves the line; the count never drifts.
 // (A load test found the earlier 200 ms poll let newcomers take freed slots, so unlucky chats starved to "busy".)

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents that connect outbound with a key they hold (PLAN WP2.14; DECISIONS E22, E23, C122 to C130; CHECKLIST I8.14, I8.15;
 // design: docs/parity/agent-api-design.md).
 // - The agent makes an Ed25519 key pair on its own machine. We keep only the PUBLIC key and its fingerprint, so a leak of this
@@ -9,8 +9,8 @@
 //   used once (C130). The bearer token is random, stored hashed and valid 30 minutes (C122).
 // - Losing a key: the owner revokes and enrols again; the slot keeps its name, history and settings (C124).
 // - A new connection waits for its owner's OK (2026-10-11; the admin's connected.requireApproval, on by default): a key that
-//   joined with the code signs in only once its owner has approved it - told the key's fingerprint, the same the AI is
-//   told - so a code someone else saw is worth nothing; declining clears the key. Its owner hears of a sign-in from an
+//   joined with the code signs in only once its owner has approved it — told the key's fingerprint, the same the AI is
+//   told — so a code someone else saw is worth nothing; declining clears the key. Its owner hears of a sign-in from an
 //   address it has not used before (once a day at most).
 // - Nothing here can approve anything for the agent, or change its own visibility, audience or key (C129): those are owner
 //   routes with a browser session.
@@ -104,7 +104,7 @@ export class AgentApi {
     // what else the mailbox hands over besides messages: extra(slot) → { heard: [...] } or null, taken
     // once (server/agent-world.js: lines said near its body); wake(slot id) when there is something new
     this.extra = null;
-    // (the admin's limits, read at each use - Settings → Agent limits; AGENT_LIMITS are the defaults)
+    // (the admin's limits, read at each use — Settings → Agent limits; AGENT_LIMITS are the defaults)
     this.limit = k => AGENT_LIMITS[k];
     this.w = store.worldId;
     this.fails = new Map();   // key → [timestamps] of refused attempts (in memory: a restart clears it, the limits are short)
@@ -311,7 +311,7 @@ export class AgentApi {
   }
   /**
    * Connects the slot through an AI app (MCP, server/connector/): its owner signed in on the app's consent page and chose
-   * it, which is the owner's OK - no code, no key. Already connected: nothing changes. Its owner is told.
+   * it, which is the owner's OK — no code, no key. Already connected: nothing changes. Its owner is told.
    */
   connectViaMcp(account, id, { ip = null, app = '' } = {}) {
     const slot = this.ownSlot(account, id), now = this.now();
@@ -337,8 +337,8 @@ export class AgentApi {
   }
   /**
    * Deletes a third-party agent, connected or not (2026-10-13: its owner deleted the Bot in its own app and expected the agent
-   * to go too): an active one is disconnected first - its app's sign-ins end, anything it is doing ends, its body leaves
-   * the world -, then it goes like one that never connected: its record, its waiting messages and wake-up link go, and its
+   * to go too): an active one is disconnected first — its app's sign-ins end, anything it is doing ends, its body leaves
+   * the world —, then it goes like one that never connected: its record, its waiting messages and wake-up link go, and its
    * plan's place comes back. (Its app keeps its own connector until its owner removes it there.)
    */
   deleteSlot(account, id, { ip = null } = {}) {
@@ -475,7 +475,7 @@ export class AgentApi {
     const newAddress = !!s.last_ip_hash && !!ih && s.last_ip_hash !== ih;
     this.q.touchSlot.run(now, ih, s.id);
     if (newAddress) this.log('agent.session_new_address', { actor: { id: s.account_id, login: null }, slot: s, ip });   // C126: notice, no hard binding
-    // the addresses it signed in from (the last ten): a new one after the first, its owner hears of - once a day at most
+    // the addresses it signed in from (the last ten): a new one after the first, its owner hears of — once a day at most
     if (ih) {
       let known = []; try { known = JSON.parse(s.known_ips || '[]'); } catch { known = []; }
       if (!known.includes(ih)) {
@@ -580,8 +580,8 @@ export class AgentApi {
     return out;
   }
   /** Its inbox with the facts about it right now first (`you`): whoever reads the messages reads them too. A kit older
-   *  than today's (or none) doesn't print `you`: with something to answer it gets the facts as a notice - which every kit
-   *  prints - and, every few hours, a notice to update its kit. */
+   *  than today's (or none) doesn't print `you`: with something to answer it gets the facts as a notice — which every kit
+   *  prints — and, every few hours, a notice to update its kit. */
   withFacts(slot, out, kit = null) {
     let you = null; try { you = this.deps.factsFor ? this.deps.factsFor(slot) : null; } catch { you = null; }
     if (!you) return out;

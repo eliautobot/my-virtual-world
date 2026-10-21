@@ -1,11 +1,11 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Edit dock → World modules (docs/features/play-modules.md §Placing modules): administrators place the big play modules
-// that take up world space - an airport, the fishing docks (a marina, a lake dock: point at the shore and the ghost turns
+// that take up world space — an airport, the fishing docks (a marina, a lake dock: point at the shore and the ghost turns
 // its water side to the water). Pick one, move the ghost over open land beyond the city (green: it fits;
-// red: why not - the same rules the server checks), turn it with R (Shift+R the other way), click to place it: the
+// red: why not — the same rules the server checks), turn it with R (Shift+R the other way), click to place it: the
 // airport and a road from its car park to the nearest road (square out of its entrance, round to the road) go in
 // together, as one edit that can be undone. Placed modules are listed with Go to, Move (its old road goes, a new one
-// comes), Road (its access road laid again), Rename and Remove. (Interior modules - a kitchen, an arcade - are bought by
+// comes), Road (its access road laid again), Rename and Remove. (Interior modules — a kitchen, an arcade — are bought by
 // players for their own buildings from the Buildings section.)
 import * as THREE from 'three';
 import { S, bus } from '../core/state.js';
@@ -149,7 +149,7 @@ async function place() {
   try {
     const r = await post('/api/edit', { ops, atomic: true });
     stop(T.moving ? 'Moved.' : `${r?.results?.[0]?.name || 'It'} is open.`);
-  } catch (e) { say(`⚠️ ${e.message}${road ? ' (the access road and the module go in together - turn or move it)' : ''}`, true); }
+  } catch (e) { say(`⚠️ ${e.message}${road ? ' (the access road and the module go in together — turn or move it)' : ''}`, true); }
   finally { T.busy = false; }
 }
 function onClick(e) {

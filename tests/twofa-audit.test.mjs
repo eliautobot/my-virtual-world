@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Two-factor codes (RFC 6238 test vectors), recovery codes, secret encryption, and the append-only audit log.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

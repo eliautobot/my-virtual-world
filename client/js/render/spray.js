@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Water thrown into the air (the fishing game's polish, 2026-10-15 - the product owner: "the splashes are way too
-// basic"): drops - drawn as short streaks along their flight, as a camera sees fast water - and mist (soft, ragged
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Water thrown into the air (the fishing game's polish, 2026-10-15 — the product owner: "the splashes are way too
+// basic"): drops — drawn as short streaks along their flight, as a camera sees fast water — and mist (soft, ragged
 // puffs that drift, spread and thin), and a splash's crown (the thin sheet of water that rises round where something
 // hit, opens out, breaks into fingers at its rim and falls back). Lit by the day (grey-blue at night). One draw for every
 // drop and puff, one for every crown; the drops that fall back can leave rings on the water (render/water-marks.js).

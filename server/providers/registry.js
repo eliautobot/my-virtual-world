@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The provider registry (PLAN WP2.2, CHECKLIST X12). It knows every kind that is listed (the built-in manifests) and which
 // of them have a working adapter behind the helper process. It never calls an adapter: calls go through the host.
 import { BUILTIN_MANIFESTS, validateManifest } from './manifest.js';

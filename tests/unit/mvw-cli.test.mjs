@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The connected agent's command line (client/agent-api/mvw.mjs; 2026-10-11): the world's address it keeps. Enrolling
-// saves the address of the world joined - replacing one an earlier try saved - and a world that can't be reached is
+// saves the address of the world joined — replacing one an earlier try saved — and a world that can't be reached is
 // reported with the address tried, so a wrong or old one is easy to spot.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';

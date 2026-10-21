@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Automatic resolution: steps down only when it helps, steps back up after a smooth stretch, never flaps.
 import test from 'node:test';
 import assert from 'node:assert/strict';

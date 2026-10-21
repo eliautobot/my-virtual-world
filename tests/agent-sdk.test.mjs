@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The public contract of the Agent API (PLAN WP2.14; CHECKLIST I8.14): /skill.md, the OpenAPI description and the JavaScript client are
 // served to anybody, describe exactly the routes the server has, and the client works end to end against a real server: enrol, sign
 // in, answer a chat message, report progress, stop a run, and sign in again by itself when the token has ended.

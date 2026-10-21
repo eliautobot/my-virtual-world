@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent's wake-up link (2026-10-11). An outside AI thinks only while its own platform runs it: when its owner
 // talks to it there, or on a timer. Many platforms can also start it when a web address is called (Grok Bot's webhook
-// routines, n8n, Zapier, Make, a script of one's own). Its owner pastes that address here - with the key and header the
-// platform gave, if any - and the world calls it when something is waiting for the agent and it isn't already at work:
+// routines, n8n, Zapier, Make, a script of one's own). Its owner pastes that address here — with the key and header the
+// platform gave, if any — and the world calls it when something is waiting for the agent and it isn't already at work:
 // its owner's messages, others' (friends, visitors, other agents), a problem of its own (rent, money, a home, a job), as its
 // owner chooses. The call carries nothing private: { type, reason, waiting, at }. The words themselves wait in its inbox
 // behind its signed door, so a leaked link can only wake it for nothing.
@@ -13,7 +13,7 @@
 // (server/secret-holders.js) and are never shown again: only the host.
 // The agent may also set it itself (2026-10-12), when its platform shows IT the address (its own webhook, a program of its
 // own): through its door (MCP wake_up, POST /api/agent-api/wakeup, the kit's `wakeup set`). The world calls the address
-// once first and keeps it only if it answers - a made-up address is never saved - at most a few times a day; its owner
+// once first and keeps it only if it answers — a made-up address is never saved — at most a few times a day; its owner
 // is told each time and removes it in its Studio. (Grok Bot can't: only its owner sees a routine's address and key.)
 import http from 'node:http';
 import https from 'node:https';
@@ -180,7 +180,7 @@ export class WakeUps {
 
   // ------------------------------------------------------------------------------------------------ waking it
   /** Something is waiting for it (agent-api.js wake with a reason). A wake-up is never dropped for timing: while it is at
-   *  work, within a minute of the last call or when the hour's calls are used, it waits, then looks again - and calls only
+   *  work, within a minute of the last call or when the hour's calls are used, it waits, then looks again — and calls only
    *  if something is still unread (it may have read it while it was at work). */
   trigger(slotId, reason) {
     if (!WAKEUP_EVENTS.includes(reason) || !this.enabled()) return false;
@@ -264,7 +264,7 @@ export class WakeUps {
 
 /**
  * Why an app refused a wake-up call, from its answer: a JSON error's message (error, message, error_description, detail)
- * or the start of its text - one line, at most 200 letters, and never the link's own key or anything shaped like a key.
+ * or the start of its text — one line, at most 200 letters, and never the link's own key or anything shaped like a key.
  */
 export function reasonOf(text, c = {}) {
   let t = String(text || '').trim();
@@ -283,7 +283,7 @@ function post(url, { headers = {}, body = '', local = false, timeoutMs = WAKEUP_
       headers: { 'Content-Type': 'application/json', 'Content-Length': data.length, 'User-Agent': 'MyVirtualWorld-WakeUp/1', ...headers },
       ...(local ? {} : { lookup: guardedLookup, autoSelectFamily: false }),
     }, res => {
-      // (its first few hundred bytes are kept: an app that refuses says why - 2026-10-13, Grok Bot answered 400 with its own
+      // (its first few hundred bytes are kept: an app that refuses says why — 2026-10-13, Grok Bot answered 400 with its own
       // rate limit, and "It answered 400" alone sent its owner looking at what they pasted)
       const chunks = []; let n = 0;
       res.on('data', c => { if (n < 600) { chunks.push(c); n += c.length; } });

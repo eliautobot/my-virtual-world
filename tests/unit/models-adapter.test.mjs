@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The built-in brains' adapter (server/providers/models.js): what each provider is sent, how its answer and its failures
 // are read (our own messages, never the provider's text), and where a custom provider may not reach.
 import assert from 'node:assert/strict';
@@ -99,7 +99,7 @@ test('failures carry a code and our own words, never the provider\'s text', asyn
   assert.equal(t.ok, false); assert.equal(t.code, 'provider_error'); assert.ok(t.fix);
 });
 
-test('a custom provider: a public https address only - unless the installation says the local network is fine', async () => {
+test('a custom provider: a public https address only — unless the installation says the local network is fine', async () => {
   // (the private examples are reviewed exceptions of the neutrality scan; the public ones are documentation addresses)
   for (const a of ['127.0.0.1', '10.1.2.3', '100.64.5.6', '169.254.169.254', '172.20.0.1', '192.168.1.5', '0.0.0.0', '::1', 'fe80::1', 'fd00::1', '::ffff:10.1.2.3', '224.0.0.1']) assert.equal(privateAddress(a), true, a);
   for (const a of ['198.51.100.7', '203.0.113.5', '2001:4860::8888', '100.128.0.1']) assert.equal(privateAddress(a), false, a);

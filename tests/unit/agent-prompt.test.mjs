@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The text a person pastes into their agent (client/js/core/agent-prompt.js; Settings → Third-party agents; 2026-09-29: users must
 // be able to copy the instructions straight from the page, they have no other way to get skill.md). Pure text building: this world's
 // address in front, the contract inside, the one-time code only when there is one, and nothing invented.

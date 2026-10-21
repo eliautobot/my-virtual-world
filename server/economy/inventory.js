@@ -1,5 +1,5 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The inventory (docs/features/INVENTORY.md): what each player, agent or business holds, kept beside its wallet - the
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The inventory (docs/features/INVENTORY.md): what each player, agent or business holds, kept beside its wallet — the
 // same owner (the economy's subject: 'account:12', 'agent:7', 'business:b3'), the same rules for giving as for paying
 // (an agent within its owner's limits, a new account's daily cap), every change in one transaction with its log line
 // (inv_moves: what, how many, from whom to whom, worth what, why, an idempotency key: a repeat never moves it twice).
@@ -202,10 +202,10 @@ export class Inventory {
     if (!def.unique) {
       const s = this.q.stack.get(this.w, owner, def.id);
       if (s) { if (s.qty + qty > MAX_QTY) throw bad(`No room for that many ${def.name}.`, 'limit', 409); this.q.setQty.run(s.qty + qty, this.w, s.id); return [s.id]; }
-      if (this.q.count.get(this.w, owner).n >= MAX_STACKS) throw bad('That inventory is full - sell, give or throw something away first.', 'full', 409);
+      if (this.q.count.get(this.w, owner).n >= MAX_STACKS) throw bad('That inventory is full — sell, give or throw something away first.', 'full', 409);
       return [Number(this.q.ins.run(this.w, owner, def.id, qty, null, now).lastInsertRowid)];
     }
-    if (this.q.count.get(this.w, owner).n + qty > MAX_STACKS) throw bad('That inventory is full - sell, give or throw something away first.', 'full', 409);
+    if (this.q.count.get(this.w, owner).n + qty > MAX_STACKS) throw bad('That inventory is full — sell, give or throw something away first.', 'full', 409);
     for (let k = 0; k < qty; k++) ids.push(Number(this.q.ins.run(this.w, owner, def.id, 1, JSON.stringify(attrs || {}), now).lastInsertRowid));
     return ids;
   }

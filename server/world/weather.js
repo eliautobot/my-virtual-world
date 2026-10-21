@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The world's weather on the server (WP4.18, wp4-world-spec.md §6.1): the region's deterministic timeline
-// (shared/weather.js) from its seed and the world clock - the same function the browsers run every frame, so only the
+// (shared/weather.js) from its seed and the world clock — the same function the browsers run every frame, so only the
 // seed and an administrator's override travel (in hello, and as { t: 'weather' } when an override changes). An override
 // sets the weather for a number of world hours; it is kept in weather.json beside the world and audited.
 import { weatherAt, worldHours, WEATHER_KINDS } from '../../shared/weather.js';

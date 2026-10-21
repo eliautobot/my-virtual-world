@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Trading (docs/features/INVENTORY.md §Trading): two sides - players, agents, a player for their own agent - each put
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Trading (docs/features/INVENTORY.md §Trading): two sides — players, agents, a player for their own agent — each put
 // in things from their inventory and/or Virtual Coin; either may change their side (which takes back both sides'
-// acceptance: nobody accepts what they didn't see), and when both have accepted the trade settles in one transaction -
+// acceptance: nobody accepts what they didn't see), and when both have accepted the trade settles in one transaction —
 // every thing and the coin both ways, or nothing (a thing gone since, coin spent, a frozen wallet: it stays open and
 // says why). The same rules as giving and paying: a new account's daily cap (by what it gives: things and coin), an
 // agent within its owner's limits (above its line its owner approves its acceptance first). An open trade lapses after
@@ -35,7 +35,7 @@ export class Trades {
   }
   // ---------------------------------------------------------------- who acts for a side
   /**
-   * The side an actor trades as: themselves (a player), or one of their agents (as: its id - a player for their own
+   * The side an actor trades as: themselves (a player), or one of their agents (as: its id — a player for their own
    * agent), or an agent itself (actor.kind 'agent', its API). → the subject.
    */
   sideOf(actor, as = null) {
@@ -74,7 +74,7 @@ export class Trades {
     if (ownerKey(me) === ownerKey(them)) throw bad('That\'s you.');
     const k1 = ownerKey(me), k2 = ownerKey(them), was = this.q.pair.get(this.w, k1, k2, k2, k1);
     if (was) return this.view(was, k1);
-    for (const k of [k1, k2]) if (this.q.openOf.get(this.w, k, k).n >= MAX_OPEN) throw bad(k === k1 ? 'You have 10 trades open already - finish or decline some first.' : 'They have too many trades open right now.', 'limit', 429);
+    for (const k of [k1, k2]) if (this.q.openOf.get(this.w, k, k).n >= MAX_OPEN) throw bad(k === k1 ? 'You have 10 trades open already — finish or decline some first.' : 'They have too many trades open right now.', 'limit', 429);
     const id = `trd_${crypto.randomBytes(8).toString('hex')}`, t = this.e.now();
     this.q.add.run({ w: this.w, id, a: k1, b: k2, ao: JSON.stringify(emptyOffer()), bo: JSON.stringify(emptyOffer()), memo: String(memo || '').slice(0, 140), t, exp: t + LAPSE });
     this.tell(them, me, id, 'opened');

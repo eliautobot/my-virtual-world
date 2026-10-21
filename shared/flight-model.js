@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The flight model (docs/features/play-modules.md §Airport): how the airport's aircraft fly, in the pilot's own browser
 // (like a car, decision A20; the server checks the poses and the ring runs). Pure maths, no three.js: the browser steps
 // it every frame and the tests fly it. Metres, seconds, radians; world y up; the aircraft's own frame: nose +z, up +y,
@@ -90,7 +90,7 @@ function stepPlane(s, S, inp, env, dt) {
   // FLY-BY-WIRE (2026-10-14: "the plane moves way too much for the input"; how arcade and casual flight games and
   // FlightGear's keyboard FCS do it): the input is shaped (eased in, an expo curve: gentle near the middle, full at the
   // end), it asks for a RATE of pitch and roll, and the aircraft's rates follow that with damping (no snap, no overshoot);
-  // let go and it holds - the flight path is held (the trim keeps the lift for a level turn, so a bank doesn't sink it),
+  // let go and it holds — the flight path is held (the trim keeps the lift for a level turn, so a bank doesn't sink it),
   // a shallow bank levels itself, a steep one holds; bank and pitch have limits; the nose turns with the bank.
   const ang = anglesOf(q), auth = clamp(vf / S.rotate, 0, 1.15), flying = !s.onGround;
   const c = s.ctl || (s.ctl = { p: 0, r: 0, y: 0 }), w = s.w || (s.w = { p: 0, q: 0, r: 0 });
@@ -139,7 +139,7 @@ function contactPlane(s, S, inp, env, dt) {
   if (w != null && p.y - S.gearH < w + 0.2 && hG < w) return crash(s, 'You came down in the water');
   if (s.agl > 0.02) { s.onGround = false; return; }
   const a = anglesOf(s.q), vf = dot(v, qrot(s.q, 0, 0, 1));
-  // the ground rising ahead (m per m, along the way it moves): a hillside is not a runway - flown level into one at speed
+  // the ground rising ahead (m per m, along the way it moves): a hillside is not a runway — flown level into one at speed
   // it counted as a landing and the plane rolled up the mountain (2026-10-14)
   const sp0 = Math.hypot(v.x, v.z), rise = sp0 > 3 ? (env.ground(p.x + v.x / sp0 * 6, p.z + v.z / sp0 * 6) - hG) / 6 : 0;
   if (!s.onGround) {   // touching down
@@ -152,7 +152,7 @@ function contactPlane(s, S, inp, env, dt) {
   } else if (sp0 > 12 && rise > 0.3) return crash(s, 'You ran into the hillside');
   s.onGround = true;
   p.y = hG + S.gearH; if (v.y < 0) v.y = 0;
-  // rolling: brakes, friction; the wheels steer (A/D) - the faster, the gentler
+  // rolling: brakes, friction; the wheels steer (A/D) — the faster, the gentler
   const decel = (inp.brake ? 4.5 : 0) + 0.18 + (s.throttle < 0.05 ? 0.25 : 0);
   const sp = Math.hypot(v.x, v.z);
   if (sp > 0) { const k = Math.max(0, sp - decel * dt) / sp; v.x *= k; v.z *= k; }
@@ -175,10 +175,10 @@ function stepHeli(s, S, inp, env, dt) {
   s.throttle = s.rpm;
   // THE SWAY (2026-10-14, "it needs that helicopter swaying feel": as flight simulators and Battlefield's helicopters do
   // it). The fuselage hangs under the rotor like a pendulum: the disc's tilt (the cyclic: W/S, Z/C) follows the stick on
-  // an underdamped spring, so it swings a little past and rocks back - the nose dips as it sets off and comes up as it
+  // an underdamped spring, so it swings a little past and rocks back — the nose dips as it sets off and comes up as it
   // slows. Hands off, the pilot flares: the disc tilts against the way it is going, the nose comes up, it slows into a
   // hover and levels. The pedals (A/D) turn it; at speed it banks into the turn and carves (a coordinated turn: the bank
-  // the turn needs, the way it goes turning with the nose) - the faster, the wider; the tail fin turns the nose into the
+  // the turn needs, the way it goes turning with the nose) — the faster, the wider; the tail fin turns the nose into the
   // airflow; sideways it slides a little before the fuselage stops it.
   const expo = x => 0.35 * x + 0.65 * x * x * x, cyc = clamp(-(inp.pitch || 0), -1, 1), side = clamp(inp.strafe || 0, -1, 1);
   const v = s.v, sp = Math.hypot(v.x, v.z), air = lifting && !s.onGround;

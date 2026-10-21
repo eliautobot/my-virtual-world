@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.7 terrain, water and decorations on real requests (wp4-world-spec.md §9): administrators reshape the land
 // beyond the city (raise, lower, flatten, ponds, clearing and planting); a stroke that would touch the city, a road, a
 // building or someone's lot is refused with the reason; undo and redo; the ground every height query sees follows.

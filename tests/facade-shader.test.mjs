@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The real-browser UI gate additionally rasterizes the actual facade seed expressions (facadecheck.cjs).
 // These contracts prevent accidentally restoring smooth interpolation to metadata while retaining continuous UVs.
 import assert from 'node:assert/strict';

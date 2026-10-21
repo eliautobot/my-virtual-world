@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The options a Free Will agent chooses from (docs/features/FREE-WILL.md §2.3). They come from the same rules the routine
 // uses (Brain.leisureOptions: what is open, what the needs allow, invitations), so Free Will can never pick something
-// the world would not let a resident do. Kinds that happen at a venue are offered as real places - the nearest open ones
-// with a free spot, with their name, the travel time and the price of a visit - because "a café" made agents stay home
+// the world would not let a resident do. Kinds that happen at a venue are offered as real places — the nearest open ones
+// with a free spot, with their name, the travel time and the price of a visit — because "a café" made agents stay home
 // and spend nothing in the bake-off (FREE-WILL.md §11.1).
 import { ctxB, ctxF, ctxOf } from '../../shared/constants.js';
 import { isOpen } from '../sim/agents.js';
@@ -72,7 +72,7 @@ function possibleHere(brain, a, kind, at) {
  * The menu for one choice point: [{ id, kind, w, label, b?, f?, price?, minutes?, rating? }] (≤ MAX_OPTIONS), where w is the
  * routine's weight. at = { x, z, ctx, h, day, needs, atHome } describes the agent at the moment of the choice (predicted
  * when asked ahead). econ (or null when the economy is off) = { canSpend(a, kind), venueFactor(b, f), price(b, f, item),
- * rating(b, f) } - prices in hundredths of a VC, ratings 0..500.
+ * rating(b, f) } — prices in hundredths of a VC, ratings 0..500.
  */
 export function buildOptions(brain, a, at, econ) {
   const out = [];

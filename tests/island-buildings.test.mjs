@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.6 buildings beyond the city and WP4.5 walking there (wp4-world-spec.md §4–5, §9): buildings turned to face their
 // road, on level pads at the height of the ground along their front; residents reach them on footpaths along the
 // island's roads, joined to the city's streets where the roads leave it.

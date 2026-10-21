@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The economy's policy (docs/features/ECONOMY.md §3, §11): every wage, price, rent, tax, benefit, upkeep, endowment,
 // rate and limit is data an administrator can change (Settings → Economy), validated here. Amounts are hundredths of a
 // VC; rates are basis points (1/100 of a percent: 600 = 6%). Nothing here knows one installation.
@@ -21,7 +21,7 @@ const COMMODITIES = {
   materials: { label: 'Building materials', icon: '🧱', base: 500, vol: 350 },
 };
 /** What each kind of venue sells: price (hundredths of a VC) and the commodities one unit uses. */
-// (cafés and restaurants sell food and drink: each place's own menu from shared/food.js, at the city's usual prices - the
+// (cafés and restaurants sell food and drink: each place's own menu from shared/food.js, at the city's usual prices — the
 // items' own, times food.pricePct, or an administrator's price for one item in food.prices)
 const MENUS = {
   shop: [
@@ -74,7 +74,7 @@ export const POLICY_DEFAULTS = deepFreeze({
     tourism: { on: false, label: 'Tourism promotion', icon: '🧳', desc: 'Advertising the city abroad: more export demand.', cost: 60000, exportBoostBp: 500 },
   },
   loans: { cityRateBp: 150, cityMaxDebt: 50000000, termDays: 30 },
-  // automatic shifts (spec 02 §9): a wage, never the best way to play - a share of the wage, capped a day, only in a role
+  // automatic shifts (spec 02 §9): a wage, never the best way to play — a share of the wage, capped a day, only in a role
   // the worker has played at that venue before; no tips, experience or reviews
   // roles: which work modules each kind of venue uses ({ cinema: ['usher'] }); empty: each module's own venues
   jobs: { tipMax: 100, autoPayPct: 30, autoDailyCap: 12000, autoNeedsPlayed: 5, tipsOfWagesPct: 60, roles: {} },

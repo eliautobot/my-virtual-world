@@ -1,10 +1,10 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a step works on (docs/features/agent-pc.md §2.2): an Agent Providers' agent's step (OpenClaw's, Hermes') says what
-// it touches - a web address, a file, a picture, its calendar, its tasks - whatever tool it went through: a terminal
+// it touches — a web address, a file, a picture, its calendar, its tasks — whatever tool it went through: a terminal
 // command that drives a browser (agent-browser … --cdp) is browsing, `sed -n 1,80p notes.md` is reading a file. Each app
 // of the PC recognizes its own work (RECOGNIZERS: one entry per app, a new app adds its own) and the strongest claim
 // shows; a step no app claims is the terminal's (a build, an install, a script: then the terminal is the work). A claim
-// is the app, a line of what it does, and the window it has open - built from the step's own input, then filled in from
+// is the app, a line of what it does, and the window it has open — built from the step's own input, then filled in from
 // its result (the text of the file it read, what it found): the view kinds of ./views.js, `remote` (it is on the agent's
 // own computer, not on this PC). Nothing here reaches anything: it reads the step and nothing else.
 import { capView } from './views.js';
@@ -23,7 +23,7 @@ export function argsOf(input) {
   if (!s.startsWith('{')) return {};
   try { const o = JSON.parse(s); return o && typeof o === 'object' ? o : {}; } catch { /* cut short */ }
   const o = {};
-  // (a cut-short JSON: each "key": "string" that came whole, and the last one that didn't - what it was writing)
+  // (a cut-short JSON: each "key": "string" that came whole, and the last one that didn't — what it was writing)
   const re = /"([A-Za-z_]+)"\s*:\s*"((?:[^"\\]|\\.)*)("?)/g;
   for (let m; (m = re.exec(s));) { try { o[m[1]] = JSON.parse(`"${m[2].replace(/\\$/, '')}"`); } catch { o[m[1]] = m[2]; } }
   return o;
@@ -54,15 +54,15 @@ function partsOf(cmd) {
 export function stepOf(s) {
   const step = { name: String(s.name || ''), kind: String(s.kind || s.toolKind || 'other'), input: String(s.input || '') };
   step.n = step.name.toLowerCase().replace(/^mcp[_-]+/, '');
-  // (its provider's own words for it - "Run agent-browser", "Read MEMORY.md" - not just its tool's name tidied: "exec", "Read file")
+  // (its provider's own words for it — "Run agent-browser", "Read MEMORY.md" — not just its tool's name tidied: "exec", "Read file")
   const bare = x => String(x || '').toLowerCase().replace(/^mcp[_-]+/, '').replace(/[\s_-]+/g, '');
   step.title = s.title && bare(s.title) !== bare(s.name) ? one(s.title, 120) : '';
   step.args = argsOf(step.input);
   step.cmd = commandOf(step);
   step.parts = step.cmd ? partsOf(step.cmd) : [];
-  // (a step whose whole input is one word with no spaces - Hermes' short context, OpenClaw's lone path - names its file)
+  // (a step whose whole input is one word with no spaces — Hermes' short context, OpenClaw's lone path — names its file)
   step.path = argPath(step.args) || (!step.cmd && step.kind !== 'execute' && /^[^\s{}"]+$/.test(step.input.trim()) && !URL_RE.test(step.input) ? step.input.trim() : null);
-  // (named before its arguments come - "Read README.md": its title says the file)
+  // (named before its arguments come — "Read README.md": its title says the file)
   if (!step.path && !step.cmd && ['read', 'edit', 'delete', 'move'].includes(step.kind)) step.path = /([\w.~/-]+\.\w{1,8})\s*$/.exec(step.title)?.[1] || null;
   step.url = (typeof step.args.url === 'string' && step.args.url) || (Array.isArray(step.args.urls) && step.args.urls[0]) || URL_RE.exec(step.input)?.[0] || null;
   return step;
@@ -83,7 +83,7 @@ export function readText(text, from = 1) {
   const lines = String(text ?? '').replace(/\n+\[[^\]\n]{0,200}\]\s*$/, '').replace(/\n+$/, '').split('\n');
   const num = /^\s*(\d+)(?:\t|: |\||→)(.*)$/;
   const full = lines.filter(l => l.trim());
-  // (most of its lines numbered - or its one line, numbered where it was read from)
+  // (most of its lines numbered — or its one line, numbered where it was read from)
   const numbered = full.length > 1 ? full.filter(l => num.test(l)).length >= Math.ceil(full.length * 0.8) : full.length === 1 && Number(num.exec(full[0])?.[1]) === from;
   if (!numbered) return { text: lines.join('\n'), first: from };
   const m = num.exec(lines.find(l => num.test(l)));
@@ -143,12 +143,12 @@ const FILE_LIST = new Set(['ls', 'tree', 'exa', 'eza', 'dir']);
 const FILE_CHANGE = new Set(['tee', 'touch', 'mkdir', 'cp', 'mv', 'rm', 'rmdir', 'ln', 'chmod', 'trash', 'trash-put', 'patch']);
 const EDITORS = new Set(['vim', 'vi', 'nano', 'emacs', 'code', 'micro']);
 const BROWSERS = /^(agent-browser|playwright|playwright-cli|puppeteer|chromium|chromium-browser|google-chrome|chrome|firefox|lynx|w3m|links|xdg-open|browser-use|stagehand)$/;
-// (a browser program by its file's name: agent-browser's own build - ~/…/agent-browser/bin/agent-browser-linux-x64 -
+// (a browser program by its file's name: agent-browser's own build — ~/…/agent-browser/bin/agent-browser-linux-x64 —
 // counts as agent-browser; a script of one run by node, the same)
 const progOf = w => String(w || '').split('/').pop().replace(/\.(exe|js|mjs|cjs)$/i, '').replace(/-(linux|darwin|macos|mac|win(dows)?|win32)(-[\w]+)?$/i, '');
 const isBrowserProg = (ws, k = 0) => BROWSERS.test(progOf(ws[k])) || /(^|\/)node_modules\/(agent-browser|playwright|puppeteer)\//.test(ws[k] || '');
 const isLocal = u => /^https?:\/\/(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|\[::1\])/i.test(u);
-// (a command's file: its last word that looks like one - not an option, a line range, a sed or awk program, an address)
+// (a command's file: its last word that looks like one — not an option, a line range, a sed or awk program, an address)
 const pathArg = ws => ws.slice(1).filter(w => !/^-/.test(w) && !/^\d+(,\d+)?p?$/.test(w) && !/^[sy]([/|#,:]).*\1/.test(w) && !/^[{'"<>]|[{}]/.test(w) && /[./~]/.test(w) && !URL_RE.test(w)).pop() || null;
 /** A file a command writes with a here-document or a redirect (cat > f <<EOF … EOF, tee f <<EOF, echo … > f), with its words. */
 function writtenBy(cmd) {
@@ -166,7 +166,7 @@ function writtenBy(cmd) {
 
 /**
  * Each app's recognizer: claim(step) → { score, title, view } or null. finish(step, claim, result) fills its window in
- * from the step's result ({ text, ok }) - or leaves it as it was (returns null).
+ * from the step's result ({ text, ok }) — or leaves it as it was (returns null).
  */
 export const RECOGNIZERS = [
   // MVW's own PC, reached as a tool (the connector's `pc`): the PC shows that step itself (./shell.js)
@@ -200,7 +200,7 @@ export const RECOGNIZERS = [
     const p = s.path && IMAGE.test(s.path) ? s.path : (s.parts.map(pathArg).find(x => x && IMAGE.test(x)) || null);
     if (!p && !tool) return null;
     if (!p) return { score: 3, title: s.title, view: { kind: 'image', remote: true, name: one(s.args.prompt || s.title, 120), made: /generat|create|draw|edit/.test(s.n) } };
-    // (a picture a tool is given beats any other claim; one a command names, a browser it drives - its screenshot)
+    // (a picture a tool is given beats any other claim; one a command names, a browser it drives — its screenshot)
     return { score: s.path && IMAGE.test(s.path) ? 7 : 5, title: s.title || `Looking at ${nameOf(p)}`, view: { kind: 'image', remote: true, path: p.slice(0, 400), name: nameOf(p).slice(0, 200) } };
   } },
   { app: 'files', claim(s) {
@@ -234,7 +234,7 @@ export const RECOGNIZERS = [
     const v = c.view;
     if (v.kind === 'find') return { ...v, results: hitsOf(r.text) };
     if (v.kind === 'file' && v.mode === 'read') { const t = readText(r.text, v.first); return fileText(v, t.text, { first: t.first }); }
-    // (a change: a tool that gives back the changed part shows it - Hermes' diff)
+    // (a change: a tool that gives back the changed part shows it — Hermes' diff)
     if (v.kind === 'file' && !v.lines.length && /^[-+@]{1,3}[ @]/m.test(r.text)) return fileText(v, r.text, { diff: true });
     return null;
   } },
@@ -244,7 +244,7 @@ export const RECOGNIZERS = [
     return w ? { score: 5, title: `Writing ${nameOf(w.path)}`, view: fileText(fileOf(w.path, 'write'), w.text, { mark: true }) } : null;
   } },
   { app: 'files', claim(s) {
-    // reviewing changes: git diff / show / log -p, gh pr diff - the changes, as a diff
+    // reviewing changes: git diff / show / log -p, gh pr diff — the changes, as a diff
     const ws = s.parts.find(x => (x[0] === 'git' && /^(diff|show|log)$/.test(x[1] || '')) || (x[0] === 'gh' && x[1] === 'pr' && /^(diff|view)$/.test(x[2] || '')));
     if (!ws) return null;
     const p = ws.slice(2).filter(x => !/^-/.test(x) && /[./]/.test(x) && !/^[0-9a-f]{7,40}$|\.\./.test(x)).pop();
@@ -268,7 +268,7 @@ export const RECOGNIZERS = [
       }
       if (FILE_LIST.has(w)) { const p = ws.slice(1).filter(x => !/^-/.test(x)).pop() || '.'; return { score: 3, title: `Looking in ${p}`, view: { kind: 'folder', remote: true, path: p.slice(0, 400), total: 0, entries: [] } }; }
       if (FILE_CHANGE.has(w)) { const p = pathArg(ws); if (p) return { score: 3, title: `${w} ${nameOf(p)}`, view: fileOf(p, w === 'rm' || w === 'trash' || w === 'trash-put' ? 'delete' : 'open') }; }
-      // (anything else first - a build, a script - is the terminal's work, whatever it reads after)
+      // (anything else first — a build, a script — is the terminal's work, whatever it reads after)
       return null;
     }
     return null;
@@ -308,14 +308,14 @@ function boardOf(todos) {
   const col = st => (/progress|doing|active|working/i.test(st) ? 'doing' : /done|complete|finished|cancel/i.test(st) ? 'done' : /review/i.test(st) ? 'review' : 'todo');
   return { kind: 'board', remote: true, board: 'its list', cards: todos.slice(0, 40).map((t, k) => ({ id: String(t?.id ?? k), title: clipLine(one(t?.content ?? t?.title ?? t?.text ?? t?.step ?? '', 160)), col: col(String(t?.status ?? '')), who: null, due: null, working: /progress|doing|active/i.test(String(t?.status ?? '')) })) };
 }
-/** Its plan (a run's plan.update - OpenClaw's update_plan, Hermes' todo list) as a board. */
+/** Its plan (a run's plan.update — OpenClaw's update_plan, Hermes' todo list) as a board. */
 export function planBoard(steps, title = 'Its plan') {
   const v = boardOf((steps || []).map((x, k) => (typeof x === 'string' ? { id: k, content: x } : { id: x?.id ?? k, content: x?.step ?? x?.title ?? x?.content ?? x?.text, status: x?.status })));
   return { ...v, board: one(title, 80) || 'Its plan' };
 }
 
 /**
- * What a step works on: the strongest claim - { app, title, view, score } - null for one the PC shows itself (skip), and
+ * What a step works on: the strongest claim — { app, title, view, score } — null for one the PC shows itself (skip), and
  * the terminal's ({ app: 'terminal' }) when no app claims it.
  */
 export function recognize(raw) {

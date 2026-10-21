@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Lengths and positions of the editable world (roads, lots, terrain edits) are stored as integer micrometres (µm).
 // One foot is exactly 304,800 µm and one metre 1,000,000 µm. Exact on entry: metres to six decimals, feet to hundredths
 // (0.01 ft = 3,048 µm) and inches to eighths (1/8 in = 3,175 µm). Finer values (0.001 ft = 304.8 µm, 1/16 in =
-// 1,587.5 µm) are rounded to the nearest micrometre when entered - the declared storage quantum, an error of at most
+// 1,587.5 µm) are rounded to the nearest micrometre when entered — the declared storage quantum, an error of at most
 // 0.5 µm. Stored geometry is then exact: overlaps, containment and areas are computed on the stored integers with no
 // further rounding. People see and type feet (shown to 0.01 ft); the renderer and the simulation work in metres
 // (DECISIONS E25, wp4-world-spec.md §3.1).

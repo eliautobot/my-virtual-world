@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Automatic resolution: when frames run long (a GPU falling behind in a busy view) render fewer pixels, and raise them
 // again after a long smooth stretch. A lower step that does not help (a CPU-bound device) is undone and not retried for
 // 30 s; a raise that brings slow frames back is undone and retried only after twice as long. The first 10 s after
@@ -9,7 +9,7 @@ export class AutoResolution {
   }
   set(s) { this.scale = Math.round(s * 100) / 100; this.setScale(this.scale); }
   enable(on) { this.on = on; this.tried = this.raised = null; this.smooth = 0; if (!on) this.set(1); }
-  /** Frames drawn slower on purpose (core/framepace.js): not a sign of a slow GPU - start the next window afresh. */
+  /** Frames drawn slower on purpose (core/framepace.js): not a sign of a slow GPU — start the next window afresh. */
   rest(now) { this.last = now; this.t = now; this.sum = this.n = 0; }
   /** Call once per displayed frame with its timestamp (ms). */
   frame(now) {

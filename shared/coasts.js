@@ -1,11 +1,11 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Coast classes (WP4.15, wp4-world-spec.md §3.3, DECISIONS E25): the main island's coastline is cut into sectors round
 // its centre, each with a class stored in world.terrain.coasts (one letter per sector):
-//   s  public shore (beach, promenade, shore park) - the municipality's; no waterfront lots; never grows;
-//   g  growth coast (port, industrial shore, reserved headland) - new land, piers, bridges and causeways may start here;
-//   w  protected waterfront - lots may face the water, and a clear-water corridor (500 ft) in front of it stays open:
+//   s  public shore (beach, promenade, shore park) — the municipality's; no waterfront lots; never grows;
+//   g  growth coast (port, industrial shore, reserved headland) — new land, piers, bridges and causeways may start here;
+//   w  protected waterfront — lots may face the water, and a clear-water corridor (500 ft) in front of it stays open:
 //      no new land, bridge, pier or island may enter it;
-//   o  open-ocean frontage - protected waterfront whose view out to sea is protected too (a view cone).
+//   o  open-ocean frontage — protected waterfront whose view out to sea is protected too (a view cone).
 // The islands of the chain (shared/island-chain.js) have coasts of their own, ISLE_SECTORS round each island's centre,
 // stored on the island (coasts); by default the stretch facing the main island is a growth coast (where its bridge or
 // ferry lands) and the rest public shore. The same rules run in the browser's tools and on the server.
@@ -103,7 +103,7 @@ function protectedStretches(island) {
 
 /**
  * Why a disc of water (x, z, r) may not be built on (new land, a bridge pier, an island), or null: it enters the clear
- * water in front of protected waterfront, or an open-ocean view - of the main island or of an island of the chain.
+ * water in front of protected waterfront, or an open-ocean view — of the main island or of an island of the chain.
  */
 export function protectedWhy(island, x, z, r = 0) {
   for (const { a, b, c } of protectedStretches(island)) {
@@ -116,7 +116,7 @@ export function protectedWhy(island, x, z, r = 0) {
   }
   return null;
 }
-/** Whether growth (new land, piers, bridges) may leave the coast near (x, z): the stretch there is a growth coast - the
+/** Whether growth (new land, piers, bridges) may leave the coast near (x, z): the stretch there is a growth coast — the
  *  main island's, or that of the island of the chain whose shore it is. */
 export function growthAt(island, x, z) {
   const who = landOf(island, x, z, 0.3);

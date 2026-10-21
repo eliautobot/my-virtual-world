@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat window under load (docs/features/CHAT.md): `chats` owners' chats at once, each streamed by a brain that
 // starts after `latency` ms (± half) and then writes `pieces` pieces `gap` ms apart, on the real chat contract
 // (server/chat/chat.js), the real transcript store and database (schema 27, FTS) and the real Mind (assistantRun:

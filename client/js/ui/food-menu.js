@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Menus with pictures (shared/food.js; the pictures: assets/food/thumbs.webp, tools/food/thumbs.mjs): a café's or
-// restaurant's menu grouped by course for ordering, and its owner's menu editor - the kind of place (a burger joint, a
+// restaurant's menu grouped by course for ordering, and its owner's menu editor — the kind of place (a burger joint, a
 // seafood restaurant, a café …: each starts with its usual menu) and any item of the whole pack added or removed, with
 // prices. ui/economy.js opens these.
 import { h, esc } from '../core/util.js';

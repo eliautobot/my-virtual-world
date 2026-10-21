@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Agent Studio (2026-10-07: "the full agent suite … everything regarding that agent in one place, fun to use
 // and interactive"). One window per agent for its owner (or an account it is shared with to manage): the agent itself
-// on a stage - its own 3D character, turning, whose head, heart, hands and feet open its Brain, Personality, Money and
-// Free Will - beside every part of it as a tab of its own colour: Overview, Brain, Voice, Work, Visitors, Phone, Free Will,
+// on a stage — its own 3D character, turning, whose head, heart, hands and feet open its Brain, Personality, Money and
+// Free Will — beside every part of it as a tab of its own colour: Overview, Brain, Voice, Work, Visitors, Phone, Free Will,
 // Personality, Plans, Memories, People, Places, Money, Activity and Settings. The tabs live in studio-mind.js, studio-life.js,
 // studio-world.js, studio-work.js, studio-visitors.js, studio-phone.js and voice-settings.js; this file holds the window, the stage and the Overview. The server decides who may see and change
 // what (every part answers 404 to anyone else); this only asks and shows what it answers.
@@ -95,9 +95,9 @@ function studioEntry(body, i) {
   const rec = (S.agentList || []).find(a => a.i === i && (a.mine || a.level === 'manage'));
   if (!rec) return;
   const brain = rec.connection ? (rec.connection.kind === 'models' ? `🧠 ${rec.connection.label}` : `🔌 ${rec.connection.label}`) : isExt(rec) ? '🔌 Third-party agent' : '🧠 No brain yet';
-  // beside the name (the selection widget; under it where the card stacks): compact - what it holds is its tooltip
+  // beside the name (the selection widget; under it where the card stacks): compact — what it holds is its tooltip
   // (2026-10-08), its brain the line under its name
-  const row = h(`<div class="st-entry"><button type="button" class="st-entry-btn" title="${esc(`Brain, personality, home, money, plans - everything about ${rec.name}`)}"><span class="st-entry-ic">${icon('agent')}</span><span><b>Agent Studio</b><small>${esc(brain)}</small></span><span class="st-entry-go">›</span></button></div>`);
+  const row = h(`<div class="st-entry"><button type="button" class="st-entry-btn" title="${esc(`Brain, personality, home, money, plans — everything about ${rec.name}`)}"><span class="st-entry-ic">${icon('agent')}</span><span><b>Agent Studio</b><small>${esc(brain)}</small></span><span class="st-entry-go">›</span></button></div>`);
   const title = body.querySelector('.title');
   if (title) title.after(row); else body.appendChild(row);
   row.querySelector('.st-entry-btn').onclick = () => open(rec.id);
@@ -124,7 +124,7 @@ export function showFlat(rec, b, f, u) {
 }
 
 // ------------------------------------------------------------------------------------------------ the window
-/** Opens agent id's Studio at tab `want`. swap: another agent from the picker - the window stays, without its entrance. */
+/** Opens agent id's Studio at tab `want`. swap: another agent from the picker — the window stays, without its entrance. */
 export async function open(id, want = 'overview', { swap = false } = {}) {
   const rec0 = studioAgent(id);
   if (!rec0) { app?.toast?.('Only its owner, or someone it is shared with to manage it, can open its Studio.', 'bad'); return; }
@@ -170,7 +170,7 @@ export async function open(id, want = 'overview', { swap = false } = {}) {
     slot: () => (isExt(C.rec()) && auth.can('agents.connect') ? getJSON('/api/agent-slots').then(r => r.agents.find(a => `ext-${a.id}` === C.rec()?.key) || null) : Promise.resolve(null)),
     mems: () => getJSON(`/api/agent-life/memories?agent=${id}&term=long&limit=1`).then(r => (r.memories?.length ? r : getJSON(`/api/agent-life/memories?agent=${id}&term=short&limit=1`))),
   };
-  /** A part's data: the answer, or { error } (a part this account may not see answers 404 - shown as such, not thrown). */
+  /** A part's data: the answer, or { error } (a part this account may not see answers 404 — shown as such, not thrown). */
   C.get = (k, force = false) => {
     if (force) C.cache.delete(k);
     if (!C.cache.has(k)) C.cache.set(k, LOAD[k]().then(r => r ?? null, e => ({ error: e.message || 'Could not read it', status: e.status })));
@@ -380,12 +380,12 @@ function makeStage(C, root) {
 }
 
 // ------------------------------------------------------------------------------------------------ Voice
-/** Its voice (2026-10-08: a tab of its own, its pin at the throat - not under the Brain): which voice it speaks with
+/** Its voice (2026-10-08: a tab of its own, its pin at the throat — not under the Brain): which voice it speaks with
  *  in read aloud and voice mode, the service, its speed, a preview (seen at its throat on the stage while it plays). */
 async function voiceTab(C, body) {
   body.innerHTML = `<div class="sb"><div class="st-sec sv-voice"><div class="st-sec-h"><h4>🔊 Its voice</h4></div><p class="hint">Loading…</p></div>
     <div class="st-sec"><div class="st-sec-h"><h4>Where you hear it</h4></div>
-      <p class="hint">🔊 Read aloud under its answers and 🎧 voice mode in its chat. Each of your agents speaks with a voice of its own: one is picked for it to suit its character (none the same while there are enough) until you choose one above - Settings → Voice turns that off.</p></div></div>`;
+      <p class="hint">🔊 Read aloud under its answers and 🎧 voice mode in its chat. Each of your agents speaks with a voice of its own: one is picked for it to suit its character (none the same while there are enough) until you choose one above — Settings → Voice turns that off.</p></div></div>`;
   const sv = body.querySelector('.sv-voice');
   if (C.manage) await agentVoiceSection(C, sv);
   else sv.querySelector('.hint').textContent = 'Only its owner, or someone it is shared with to manage it, chooses its voice.';
@@ -456,7 +456,7 @@ async function overviewTab(C, body, live) {
   const thought = mind?.thoughts?.[0]?.did?.thought;
   body.innerHTML = `<div class="st-ov">
     <div class="st-ov-top">${info ? dayRing(info) : ''}<div class="st-ov-intro">
-      ${life?.profile.bio ? `<p class="st-bio">${esc(life.profile.bio)}</p>` : `<p class="hint">${C.manage || C.owner ? 'Tell its story in Personality - who it is, what it loves - and it lives by it.' : ''}</p>`}
+      ${life?.profile.bio ? `<p class="st-bio">${esc(life.profile.bio)}</p>` : `<p class="hint">${C.manage || C.owner ? 'Tell its story in Personality — who it is, what it loves — and it lives by it.' : ''}</p>`}
       ${life?.profile.purpose ? `<p class="st-purpose">🎯 ${esc(life.profile.purpose)}</p>` : ''}
       ${troubles.length ? `<button type="button" class="st-probs" data-go="brain" title="What its Mind did about it: the Brain tab">${problemsHtml(troubles.slice(0, 2), { solved: 0 })}</button>` : thought ? `<blockquote class="st-quote">“${esc(thought)}”</blockquote>` : ''}</div></div>
     <div class="st-grid">${cards.join('')}</div></div>`;

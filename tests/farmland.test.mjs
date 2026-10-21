@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Farmland (the design review 2026-10-03): fields laid out in a gently curving patchwork (shared/farms.js), farmed whole
 // (shared/biome.js), with their crops, hedges, fences and walls standing on the ground (client/js/render/countryside-
 // build.js) and the ground shader drawing the same fields (client/js/render/ground-detail.js mirrors farms.js).

@@ -1,19 +1,19 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Speech lines for agents (player talks, ambient chatter). Pure functions of agent state.
 const pick = (rng, arr) => arr[Math.floor(rng.next() * arr.length)];
 const GREET = ['Hey there!', 'Oh, hi!', 'Hello!', 'Hi! Nice to see you.', 'Hey, what\'s up?', 'Good to see you!', 'Well, hello!'];
 const BY_USE = {
-  work: ['Busy day - lots to get through.', 'Deep in work right now.', 'Almost done with this task.', 'Deadlines, deadlines…', 'Just wrapping up an email.'],
-  meeting: ['We\'re in a meeting - catch you later?', 'Planning next quarter. Riveting stuff.', 'This meeting could have been an email.'],
+  work: ['Busy day — lots to get through.', 'Deep in work right now.', 'Almost done with this task.', 'Deadlines, deadlines…', 'Just wrapping up an email.'],
+  meeting: ['We\'re in a meeting — catch you later?', 'Planning next quarter. Riveting stuff.', 'This meeting could have been an email.'],
   present: ['…and that\'s why the numbers are up!', 'Slide 14 of 30. Stay with me.'],
-  eat: ['This is delicious.', 'Lunch break - finally!', 'You have to try the food here.', 'I was starving.'],
+  eat: ['This is delicious.', 'Lunch break — finally!', 'You have to try the food here.', 'I was starving.'],
   coffee: ['Can\'t function without coffee.', 'Third cup today. Don\'t judge.', 'Best coffee in the building.'],
   water: ['Staying hydrated!', 'Just a quick water break.'],
   relax: ['Just taking it easy.', 'Nothing beats a comfy couch.', 'Recharging a bit.'],
   bench: ['Lovely day to sit outside.', 'I love people-watching here.', 'The fountain is so relaxing.'],
   browse: ['Just looking around.', 'So many choices…', 'I might buy this.'],
-  buy: ['Checking out - found some good stuff.'],
-  run: ['Can\'t stop - on a roll!', 'Two more kilometres!'],
+  buy: ['Checking out — found some good stuff.'],
+  run: ['Can\'t stop — on a roll!', 'Two more kilometres!'],
   jog: ['Morning jog! Gotta keep moving.', 'Just a lap around the block.'],
   lift: ['Leg day. Pray for me.', 'One more set!'],
   yoga: ['Breathe in… breathe out.', 'Finding my zen.'],
@@ -35,7 +35,7 @@ export function dialogLine(sim, a, rng, act, presence) {
   if (act?.use === 'sleep' || act?.use === 'nap') return 'Zzz…';
   const parts = [pick(rng, GREET)];
   if (p.vip && (sim.agentShown ? sim.agentShown(p.agentId) : (!sim.agentOk || sim.agentOk(p.agentId)))) {
-    parts.push(`I'm ${p.name}${p.emoji ? ' ' + p.emoji : ''} - ${p.role || 'AI agent'}.`);
+    parts.push(`I'm ${p.name}${p.emoji ? ' ' + p.emoji : ''} — ${p.role || 'AI agent'}.`);
     // Spoken lines are shown to everyone watching, so they never quote an agent's task (DECISIONS C67).
     if (presence && presence.working) parts.push('I\'m on a live task right now.');
     else parts.push(pick(rng, ['Between tasks right now.', 'Waiting for my next job.', 'All caught up for the moment.']));

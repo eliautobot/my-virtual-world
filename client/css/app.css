@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--page); color: var(--text); }
@@ -90,7 +90,7 @@ svg.mvi.t-dim { color: var(--dim); }
 .panel { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow);
   backdrop-filter: blur(14px) saturate(.6); -webkit-backdrop-filter: blur(14px) saturate(.6); }
 /* See-through (Settings → Display → Transparency; core/theme.js, theme.css): the world shows through the windows, panels
-   and buttons - not frosted - and their words keep a faint halo of the theme's own surface colour so they read over a busy
+   and buttons — not frosted — and their words keep a faint halo of the theme's own surface colour so they read over a busy
    world. High contrast never is. */
 :root.see-through .panel, :root.see-through .dock, :root.see-through #topbar { backdrop-filter: none; -webkit-backdrop-filter: none;
   text-shadow: 0 0 3px var(--panel-strong-0), 0 0 9px var(--panel-strong-0); }
@@ -128,7 +128,7 @@ svg.mvi.t-dim { color: var(--dim); }
 .input, select.input { width: 100%; background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; outline: none; }
 .input:focus { border-color: var(--hl-line); }
 /* Dropdowns in the theme (2026-10-06), every <select> in every panel: the closed box like the other fields, and the open
-   list too - fully, where the browser has stylable selects (Chromium's appearance: base-select), else at least its colours. */
+   list too — fully, where the browser has stylable selects (Chromium's appearance: base-select), else at least its colours. */
 select { font: inherit; color: var(--text); background-color: var(--field); border: 1px solid var(--line); border-radius: 8px; }
 select option { background-color: var(--panel-strong); color: var(--text); }
 @supports (appearance: base-select) {
@@ -242,7 +242,7 @@ kbd { background: var(--line); border: 1px solid var(--line); border-bottom-widt
 .lbl .tagname.vip { border-color: var(--gold-line); }
 .lbl .tagname .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 6px var(--good); }
 .lbl .tagname.sel { background: var(--sel-tag-bg); border-color: var(--strong); color: var(--page); }
-/* an agent talking in the chat - voice mode, or an answer read aloud (ui/chat-voice.js, render/labels.js): its name glows
+/* an agent talking in the chat — voice mode, or an answer read aloud (ui/chat-voice.js, render/labels.js): its name glows
    blue with how loud it is now (--lv, 0–1, on the label) */
 .lbl .tagname.voicing { border-color: rgba(56, 189, 248, .9); box-shadow: 0 0 0 1px rgba(56, 189, 248, calc(.35 + var(--lv, 0) * .5)),
   0 0 calc(6px + var(--lv, 0) * 22px) calc(var(--lv, 0) * 5px) rgba(56, 189, 248, calc(.4 + var(--lv, 0) * .55)); }
@@ -251,7 +251,7 @@ kbd { background: var(--line); border: 1px solid var(--line); border-bottom-widt
 .bubble::after { content: ''; position: absolute; left: 50%; bottom: -7px; margin-left: -7px; border: 7px solid transparent; border-bottom: 0; border-top-color: var(--strong); }
 .bubble b { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
 .bubble .bt { max-height: 152px; overflow: hidden; white-space: pre-line; overflow-wrap: anywhere; }
-/* (a long one - an agent's answer - scrolls inside, under the finger or the wheel; faded at the foot until its end) */
+/* (a long one — an agent's answer — scrolls inside, under the finger or the wheel; faded at the foot until its end) */
 .bubble.scroll { pointer-events: auto; }
 .bubble.scroll .bt { overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; scrollbar-width: thin; scrollbar-color: var(--muted) transparent; padding-right: 4px;
   -webkit-mask-image: linear-gradient(#000 calc(100% - 22px), transparent); mask-image: linear-gradient(#000 calc(100% - 22px), transparent); }
@@ -376,7 +376,7 @@ kbd { background: var(--line); border: 1px solid var(--line); border-bottom-widt
 .ccol { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; font-size: 10px; color: var(--dim); cursor: pointer; }
 #buildp .tedit, #buildp .tnew { max-height: 44vh; overflow-y: auto; }
 /* The building editor in sections (2026-10-06): a card for the building, then name and sign, size and place, look,
-   billboards and actions - section titles small and quiet, labels above their fields, choices in even grids. */
+   billboards and actions — section titles small and quiet, labels above their fields, choices in even grids. */
 #buildp .be-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 10px; }
 #buildp .be-tabs .btn { justify-content: center; }
 #buildp .be { display: grid; gap: 12px; }
@@ -472,7 +472,7 @@ body.driving #phud { max-width: calc(100vw - 30px); width: 580px; }
 #acctmenu .who { display: grid; gap: 2px; margin: 0 2px 4px; }
 #acctmenu .who span { color: var(--dim); font-size: 12px; }
 #acctmenu .btn { text-align: left; }
-/* (above every window - the PC's own at 40 too: a password asked for from anywhere is always reachable) */
+/* (above every window — the PC's own at 40 too: a password asked for from anywhere is always reachable) */
 .modal-back.auth-back { z-index: 50; }
 .modal.auth { display: block; width: min(410px, calc(100vw - 30px)); padding: 16px 18px; overflow-y: auto; }
 .modal.auth .why { margin: 0 0 12px; }
@@ -506,7 +506,7 @@ body:not(.cap-world-edit) [data-cap="world.edit"] { display: none !important; }
 body:not(.cap-agents-manage) [data-cap="agents.manage"] { display: none !important; }
 /* ➕ New agent: for anyone who may make a built-in agent or bring in a third-party one */
 body:not(.cap-agents-manage):not(.cap-agents-connect) [data-cap="agents.new"] { display: none !important; }
-/* (the clock's controls are the administrators': others see the time, not controls they can't use - step 8) */
+/* (the clock's controls are the administrators': others see the time, not controls they can't use — step 8) */
 body:not(.cap-world-clock) [data-cap="world.clock"] { display: none !important; }
 @media (max-width: 700px) { #acct .nm, #acct .rl { display: none; } }
 
@@ -677,7 +677,7 @@ body:not(.cap-world-clock) [data-cap="world.clock"] { display: none !important; 
 /* The floating controls sit 12 px from the side and the bottom alike (2026-10-06): they keep clear of an open dock only
    (--dock-rb), not of a closed dock's edge button up at the top. */
 /* The bottom-right buttons (2026-10-06), top to bottom: Chat in a panel of its own, then one panel with Play, the map,
-   the data map and Home - 12 px from the side (or an open dock) and from the bottom. */
+   the data map and Home — 12 px from the side (or an open dock) and from the bottom. */
 #floatbtns .btn { width: 36px; height: 34px; padding: 0; border-radius: 9px; font-size: 16px; display: inline-grid; place-items: center; }
 @media (pointer: coarse) { #floatbtns .btn { width: 42px; height: 40px; font-size: 18px; } }
 #floatbtns .fb-chat, #floatbtns .fb-main { display: flex; flex-direction: column; gap: 4px; padding: 6px; }
@@ -687,7 +687,7 @@ body.play #floatbtns .zfit { display: none; }   /* Home flies the camera: not wh
 #floatbtns .btn.on { border-color: var(--vw-border-strong); color: var(--vw-accent); }
 
 /* the Settings dialog: tabs at its side (C112); the Agent Studio's and the Map's size and place (2026-10-08: the big
-   windows one size - theme.css --win-w/--win-h), its forms kept to a readable width inside it */
+   windows one size — theme.css --win-w/--win-h), its forms kept to a readable width inside it */
 .modal.auth.settings { display: grid; grid-template-columns: 200px 1fr; width: var(--win-w); height: var(--win-h); max-height: none; padding: 0; overflow: hidden;
   margin-top: var(--topbar-height, 56px); border-radius: 18px; }
 .modal.auth.settings .st-body .atab { max-width: 900px; }
@@ -858,7 +858,7 @@ input[type=checkbox], input[type=radio], input[type=range] { accent-color: var(-
 @media (pointer: coarse) { body.play #toasts { top: 106px; } }
 
 /* ---------- the activity log and undo/redo (WP1.8, DECISIONS C116) ---------- */
-/* The activity log (ui/activity.js, 2026-10-06): filters, the days as headings, then a timeline - time, a dot coloured by
+/* The activity log (ui/activity.js, 2026-10-06): filters, the days as headings, then a timeline — time, a dot coloured by
    kind on a line joining the dots, and a card with what happened, who, when and its actions. */
 .alog { display: grid; gap: 10px; }
 .al-filters { display: flex; flex-wrap: nowrap; gap: 3px; overflow-x: auto; scrollbar-width: none; }

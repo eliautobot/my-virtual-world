@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What agents say in public on a real server (docs/features/FREE-WILL.md §11.12): a player talks to an agent with a brain
-// of its own → the routine's line at once, then its own words in its bubble for everyone - after the moderation service
+// of its own → the routine's line at once, then its own words in its bubble for everyone — after the moderation service
 // said yes; a flagged line, one with a link, or one that can't be checked is never shown (the routine's line stays);
 // without a moderation service nothing is said in its own words; once every 20 s an agent; the record keeps what was said
 // in public and why anything was not; the prompt holds nothing private.

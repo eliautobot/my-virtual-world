@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Signs (shared/signs.js, 2026-10-05): the Marketing tools' billboards and street signs (where they may stand,
 // standard or large, centred or overhang, their own content), the metro stations' panels, owners' rooftop billboards
 // (at most two, their own design, never ads), signs inside (resizable; private, or ads that earn their owner VC for
@@ -75,7 +75,7 @@ test('where the Marketing tools\' signs may stand: a street sign on the sidewalk
   assert.match(checkDecor(normalizeDecor({ t: 'street_sign', x: r.x0 + 2.2, z: r.z0 + 2.5, r: 0 }), env), /corner/);
   assert.match(checkDecor(normalizeDecor({ t: 'street_sign', x: r.x0 - 3, z: (r.z0 + r.z1) / 2, r: 0 }), env), /street/);
   assert.match(checkDecor(normalizeDecor({ t: 'billboard', x: r.x0 + 2.2, z: (r.z0 + r.z1) / 2, r: Math.PI / 2 }), env), /sidewalk/, 'a billboard stands on a lot');
-  // overhang: the pole on the lot, the board over the sidewalk - fine; over the street - no
+  // overhang: the pole on the lot, the board over the sidewalk — fine; over the street — no
   const mid = (L.z0 + L.z1) / 2;
   const over = normalizeDecor({ t: 'billboard_oh', x: L.x0 + 1.8, z: mid, r: Math.PI });   // the pole (+x end turned to −x… ) checked below either way
   const ok = [0, Math.PI].map(rr => checkDecor({ ...over, r: rr }, env));

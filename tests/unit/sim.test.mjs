@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A morning in a small city on a virtual clock: no errors, every resident keeps a finite plan, and a client decoding
 // the snapshot puts every resident exactly where the server does.
 import assert from 'node:assert/strict';

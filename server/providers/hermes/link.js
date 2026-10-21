@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // One live connection to a Hermes backend (docs/features/agent-providers.md §9), inside the provider helper process: the
 // `hermes serve` / `hermes dashboard` process its Desktop app connects to as a Remote gateway.
 // - Its gateway JSON-RPC over WebSocket (/api/ws): newline-delimited JSON-RPC 2.0 both ways, `gateway.ready` first; events
@@ -8,7 +8,7 @@
 //   frame counting) when gateway.ready offers one; reconnects with jittered backoff, as Hermes' own clients do.
 // - Its REST beside it (/api/…): with the same credential.
 // - Signing in (what Hermes accepts): the backend's session token (a backend bound to its own machine), or a username and
-//   password (a backend whose sign-in is engaged): Hermes' native-app flow (RFC 8252 - /auth/native/authorize with a PKCE
+//   password (a backend whose sign-in is engaged): Hermes' native-app flow (RFC 8252 — /auth/native/authorize with a PKCE
 //   challenge, the password form, /auth/native/token), its access and refresh tokens kept sealed by the server (persist),
 //   the password then forgotten; the access token renewed with /auth/native/refresh.
 // configure(config, secrets) is called with every call's credentials: the socket is rebuilt only when what it is built from
@@ -186,7 +186,7 @@ export class HermesLink {
     const j = res && res.ok ? await res.json().catch(() => null) : null;
     if (!j || !j.access_token) throw fail('signin_refused', 'Hermes did not issue a sign-in token');
     this.keepTokens(j);
-    // (signed in: the password is handed off - the server forgets it, and this link counts as built from the tokens)
+    // (signed in: the password is handed off — the server forgets it, and this link counts as built from the tokens)
     this.persist('password', null); this.password = '';
     this.key = sha(JSON.stringify([this.url, this.auth, `p:${this.username}::tokens`]));
     return this.tokens.access;
@@ -298,7 +298,7 @@ export class HermesLink {
   }
   /** Whether a live session's missed events can be fetched again (its numbers are from this Hermes process). */
   canReplay(sid) { return !!sid && this.seen.has(String(sid)); }
-  /** Live events of the session wait from now until replay() (or release()) - set before the session is attached again. */
+  /** Live events of the session wait from now until replay() (or release()) — set before the session is attached again. */
   holdFor(sid) { if (!this.hold.has(String(sid))) this.hold.set(String(sid), []); }
   release(sid) {
     const list = this.hold.get(String(sid)) || [];
@@ -307,8 +307,8 @@ export class HermesLink {
   }
   /**
    * The events of a live session this connection missed while its socket was down (Hermes' session.events.since:
-   * everything after the last one seen), delivered in order - then the live ones that waited, each once. Hermes
-   * restarted meanwhile (another replay epoch): its numbers start again, nothing can be fetched - { reset: true }.
+   * everything after the last one seen), delivered in order — then the live ones that waited, each once. Hermes
+   * restarted meanwhile (another replay epoch): its numbers start again, nothing can be fetched — { reset: true }.
    * Resolves { count, truncated, open } (open: Hermes' requests still waiting for an answer).
    */
   async replay(sid) {
@@ -330,7 +330,7 @@ export class HermesLink {
   forget(sid) { this.seen.delete(String(sid)); this.hold.delete(String(sid)); }
   async onGatewayReady(p) {
     const gen = this.gen;
-    // (Hermes restarted: its event numbers start again - none seen before can be fetched again)
+    // (Hermes restarted: its event numbers start again — none seen before can be fetched again)
     if (this.epoch && p.replay_epoch && p.replay_epoch !== this.epoch) this.seen.clear();
     this.epoch = p.replay_epoch || null;
     try {
@@ -384,7 +384,7 @@ export class HermesLink {
     this.pending.clear();
     if (was) { try { this.onDown?.(); } catch { /* the adapter's own */ } }
     if (this.status.state === 'error') return;
-    // (Hermes' own close codes: 4401 the credential, 4403 its request guard - the host, the peer or the origin)
+    // (Hermes' own close codes: 4401 the credential, 4403 its request guard — the host, the peer or the origin)
     if (code === 4401) {
       if (this.auth === 'password' && this.tokens) { this.tokens = { ...this.tokens, expiresAt: 1 }; this.later(); return; }
       this.setStatus({ state: 'error', code: 'auth_rejected', detail: 'Hermes refused the session token.', fix: 'Start Hermes with HERMES_DASHBOARD_SESSION_TOKEN and enter the same token here (Edit).' });
@@ -392,7 +392,7 @@ export class HermesLink {
     }
     if (code === 4403) {
       this.setStatus({ state: 'error', code: 'request_refused', detail: 'Hermes refused this connection (its request guard).',
-        fix: 'A Hermes backend bound to its own machine answers only callers on that machine. From elsewhere - another computer, a container - start it on an address they can reach, which engages its sign-in (username and password).' });
+        fix: 'A Hermes backend bound to its own machine answers only callers on that machine. From elsewhere — another computer, a container — start it on an address they can reach, which engages its sign-in (username and password).' });
       return;
     }
     this.setStatus({ state: 'offline', code: 'closed', detail: was ? 'The connection to Hermes was lost; reconnecting…' : 'Hermes is not answering; trying again…' });

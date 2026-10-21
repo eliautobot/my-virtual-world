@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The home view (PLAN WP1.9, DECISIONS C44, C117). The module itself is the classic release's home-location.mjs, copied unchanged
 // (X5: sha256 8a0815d54922e344…, docs/parity/IMPORTS.md): the frame is position, distance and angle, the distance stays
-// between 4.5 and 120, the values are rounded to four decimals, and the default is the documented one - no value is
+// between 4.5 and 120, the values are rounded to four decimals, and the default is the documented one — no value is
 // invented here. These tests are its own (the classic release's tests/test_home_reset.mjs, kept), plus the two checks that belong to
 // Next: the camera envelope that carries Next's tilt alongside the reused frame, and the dock panel that offers the two
 // actions.
@@ -23,8 +23,8 @@ test('the copied module is the pinned one: its body, without the provenance head
   assert.ok(text.startsWith('/*'), 'the file opens with its provenance header');
   const end = text.indexOf('*/') + 2;
   const body = Buffer.from(text.slice(end).replace(/^\n/, ''), 'utf8');
-  assert.equal(crypto.createHash('sha256').update(body).digest('hex'), '6dafc94a1e6666aa3b708bf95c30ea436252cbad3a3421be5aff5f7bc5d9d3a9',
-    'the body is the classic file at its pin, with only its dashes changed (2026-10-21; release 1\'s body hashed to 8a0815d5…)');
+  assert.equal(crypto.createHash('sha256').update(body).digest('hex'), '8a0815d54922e344dd6221a8d568e5b135cb79178a069e7f732fd1aa3abdb942',
+    'the body is the classic file at its pin, unchanged');
   assert.match(text.slice(0, end), /PolyForm Noncommercial License 1.0.0/, 'the header names the licence');
 });
 

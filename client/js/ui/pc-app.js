@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The agents' PC (docs/features/agent-pc.md) as a person uses it: a desktop for one agent at a time (its profile - the
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The agents' PC (docs/features/agent-pc.md) as a person uses it: a desktop for one agent at a time (its profile — the
 // person can switch to another agent of theirs unless the PC is an agent's own screen), a taskbar with the apps that are
 // open, what the agent is doing on it right now and the time, and the apps: Files, Board, Calendar, Browser, Teams,
-// Activity, Terminal, Settings - and, for an Agent Providers' agent, Its computer (its real one: ./pc-own.js). One
-// component, mounted wherever the PC shows - the Agent Studio, its own window, the agent's desk in the world. The server
+// Activity, Terminal, Settings — and, for an Agent Providers' agent, Its computer (its real one: ./pc-own.js). One
+// component, mounted wherever the PC shows — the Agent Studio, its own window, the agent's desk in the world. The server
 // decides everything (server/pc/); this asks, shows, and follows the 'pc' frames (only the PC's own account ever
 // receives them).
 import { bus } from '../core/state.js';
@@ -17,7 +17,7 @@ import { watchScreens } from './pc-watch.js';
 
 export const APPS = [
   { id: 'files', label: 'Files', icon: '📂', run: filesApp },
-  // (an Agent Providers' agent's own computer - OpenClaw's, Hermes' - for whoever manages its provider: ./pc-own.js)
+  // (an Agent Providers' agent's own computer — OpenClaw's, Hermes' — for whoever manages its provider: ./pc-own.js)
   { id: 'computer', label: 'Its computer', icon: '💻', run: computerApp, when: me => !!me?.own, labelOf: me => me.own.label },
   { id: 'board', label: 'Board', icon: '📋', run: boardApp },
   { id: 'calendar', label: 'Calendar', icon: '🗓', run: calendarApp },
@@ -47,7 +47,7 @@ export { size, when, popMenu };
 export function mountPc(el, { agent, lock = false, start = null, args = null, toast = () => {}, onClose = null } = {}) {
   const P = {
     agent: Number(agent), lock, toast, agents: [], teams: [], usage: null, limits: null, profile: null, screen: null, alive: true,
-    follow: true,   // (it shows what the agent does, as it does it - until the person takes over: setFollow)
+    follow: true,   // (it shows what the agent does, as it does it — until the person takes over: setFollow)
     place: `pc-${++mounts}`,   // (this PC, among the places watching agents' screens: ./pc-watch.js)
     open: (id, a) => open(id, a), close: () => closeApp(cur), refresh: () => load(),
     /** The query naming this PC's profile, with more fields: "profile=3&path=…". */
@@ -79,7 +79,7 @@ export function mountPc(el, { agent, lock = false, start = null, args = null, to
       if (!P.agents.some(a => a.id === P.agent) && P.agents.length && !lock) P.agent = P.agents[0].id;
       const me = P.me();
       P.screen = me?.screen || null;
-      // (an Agent Providers' agent's PC open: its work elsewhere - another channel, a schedule - is followed onto it meanwhile)
+      // (an Agent Providers' agent's PC open: its work elsewhere — another channel, a schedule — is followed onto it meanwhile)
       watchScreens(P.place, me?.own ? [P.agent] : []);
       loadProfile();
       // (opened while it works: straight to what it is doing)
@@ -134,7 +134,7 @@ export function mountPc(el, { agent, lock = false, start = null, args = null, to
     const fb = el.querySelector('.pc-follow');
     fb.classList.toggle('on', P.follow);
     fb.textContent = P.follow ? '👁 Following' : '▶ Follow';
-    fb.title = P.follow ? `Showing what ${P.me()?.name || 'it'} does as it does it - touch anything to take over` : `Show what ${P.me()?.name || 'it'} does again`;
+    fb.title = P.follow ? `Showing what ${P.me()?.name || 'it'} does as it does it — touch anything to take over` : `Show what ${P.me()?.name || 'it'} does again`;
     const s = el.querySelector('.pc-status');
     s.classList.toggle('working', !!P.profile?.working || !!(P.screen && Date.now() - P.screen.at < 90000));
     s.querySelector('span').textContent = nowText();
@@ -148,7 +148,7 @@ export function mountPc(el, { agent, lock = false, start = null, args = null, to
   /** The app and place for the window the agent has open (server/pc/views.js), opened here too. */
   function follow(v) {
     if (!v || !P.alive) return;
-    // (on its own computer - an Agent Providers' agent's file, picture, folder, search, list: Its computer, following it)
+    // (on its own computer — an Agent Providers' agent's file, picture, folder, search, list: Its computer, following it)
     if (v.remote && v.kind !== 'page' && v.kind !== 'web') return P.me()?.own ? open('computer', { live: v }) : undefined;
     switch (v.kind) {
       case 'file': case 'image': return open('files', { path: v.path, live: v });
@@ -179,7 +179,7 @@ export function mountPc(el, { agent, lock = false, start = null, args = null, to
       if (wins.size >= OPEN_MAX) closeApp([...wins.keys()].find(k => k !== cur));
       const node = document.createElement('div');
       node.className = 'pc-win';
-      node.innerHTML = `<div class="pc-tb"><span class="pc-ti" aria-hidden="true">${app.icon}</span><b>${esc(labelOf(app, P.me()))}</b><button class="pc-x" data-act="min" title="Back to the desktop"> - </button><button class="pc-x" data-act="close" title="Close">✕</button></div><div class="pc-body"></div>`;
+      node.innerHTML = `<div class="pc-tb"><span class="pc-ti" aria-hidden="true">${app.icon}</span><b>${esc(labelOf(app, P.me()))}</b><button class="pc-x" data-act="min" title="Back to the desktop">—</button><button class="pc-x" data-act="close" title="Close">✕</button></div><div class="pc-body"></div>`;
       desk.append(node);
       w = { app, el: node, inst: null };
       wins.set(id, w);
@@ -241,7 +241,7 @@ export function mountPc(el, { agent, lock = false, start = null, args = null, to
     for (const w of wins.values()) { try { w.inst?.onFrame?.(f); } catch { /* one app's trouble */ } }
   });
 
-  // (an app to open at once: once the PC is read - what the agent's own computer offers decides how some open)
+  // (an app to open at once: once the PC is read — what the agent's own computer offers decides how some open)
   load().then(() => { if (start && P.alive) open(start, args); });
   return {
     el, P,

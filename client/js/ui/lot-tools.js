@@ -1,18 +1,18 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Lots section of the edit dock (the product owner, 2026-10-09: "admins are the only ones that can create more lots. We
 // need a lots tab in the edit panel so the admin can create the lot, give it zoning and value for sale. Make it
 // intuitive and easy. Also lots should connect to roadways so that a building can be placed there that connects").
-// Administrators tap the ground beside a road beyond the city: the lots appear there, fronting that road - a row centred
-// on the tap, continuing a row of lots already beside it - with their size, how many (or all along the road, one side
+// Administrators tap the ground beside a road beyond the city: the lots appear there, fronting that road — a row centred
+// on the tap, continuing a row of lots already beside it — with their size, how many (or all along the road, one side
 // or both), zoning and sale: at the day's market value, at a price, or kept by the city. The preview is
 // shared/plat-road.js, the same function the server makes them with (/api/property/plat-road), so what shows is what is
 // made; then they go up for sale for Virtual Coin (the economy) or as city land for sale.
 // Lots only ever front a road, and a building on one connects to it (its door must face the road: shared/door-access.js).
 // Beside a grid's road (the grid layout tool) the tap fills the block (2026-10-14, the product owner: "fill this block"):
-// its lots made exactly as the grid tool made the rest - runs from the back of one sidewalk to the next, lots of equal
+// its lots made exactly as the grid tool made the rest — runs from the back of one sidewalk to the next, lots of equal
 // width, corner lots giving up the junction's rounded corner (shared/road-grid.js blockRuns, /api/property/plat-grid);
 // a road's own rows keep clear of the whole circle round each junction, which in a grid leaves no room for a lot.
-// Changing a lot afterwards - zoning, price, sale, hold, transfer - is its card on the lot map (ui/property.js).
+// Changing a lot afterwards — zoning, price, sale, hold, transfer — is its card on the lot map (ui/property.js).
 import * as THREE from 'three';
 import { S, bus } from '../core/state.js';
 import { h, esc, isTouch } from '../core/util.js';
@@ -183,7 +183,7 @@ function where() {
     : isTouch() ? 'Tap the ground beside a road.' : 'Click the ground beside a road.';
 }
 
-/** Where along the road: a row of n centred on the tap - or carrying on a row of lots already there - or all of it. */
+/** Where along the road: a row of n centred on the tap — or carrying on a row of lots already there — or all of it. */
 function range(A) {
   const L = A.G.length, w = T.w * FT;
   if (T.all) return { from: 0, to: L, count: null };

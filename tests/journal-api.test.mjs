@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The edit journal over HTTP and the live stream (PLAN WP1.8, DECISIONS C35, C116) with two admins, a member and a
 // guest: each account undoes only its own edits, a later change by someone else refuses the undo with the reason,
 // admins revert any edit from the activity log (asking for the password when that removes a building), members read

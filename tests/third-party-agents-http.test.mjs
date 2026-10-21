@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Third-party agents from ➕ New agent (2026-10-12): an agent made for an app (Grok Bot, OpenAI Dot, Meta Muse) keeps which
 // app it is for; the app's sign-in offers it first, and choosing it there connects it as that agent (MCP, no key); one
 // that never connected can be removed outright (it gives its plan's place back), one that was connected can't.
@@ -65,7 +65,7 @@ test('a third-party agent: made for its app, offered first at the app\'s sign-in
   } finally { await s.stop(); }
 });
 
-test('who may choose each app in New agent: Grok Bot everyone, Meta Muse admins only, OpenAI Dot no one - the admin\'s setting', { timeout: 180000 }, async () => {
+test('who may choose each app in New agent: Grok Bot everyone, Meta Muse admins only, OpenAI Dot no one — the admin\'s setting', { timeout: 180000 }, async () => {
   const s = await startServer({ data: tempDir('mvw-app-offer-'), population: 60, env: {} });
   try {
     const owner = await ownerSession(s);
@@ -82,7 +82,7 @@ test('who may choose each app in New agent: Grok Bot everyone, Meta Muse admins 
     const muse = await owner.post('/api/agent-slots', { name: 'Muse', app: 'meta-muse' });
     assert.equal(muse.status, 200, muse.text);
     assert.equal((await owner.post('/api/agent-slots', { name: 'Dot', app: 'openai-dot' })).json.code, 'app_not_offered');
-    // (an agent for no app in particular - Advanced connection - is not affected)
+    // (an agent for no app in particular — Advanced connection — is not affected)
     assert.equal((await ann.post('/api/agent-slots', { name: 'Own program' })).status, 200);
 
     // the settings, with their words for each choice; a member cannot change them

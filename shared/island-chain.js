@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The island chain (WP4.15, wp4-world-spec.md §3.4): new islands beyond the main one, each made once from a template
 // and a seed by the pinned generator and then kept (world.terrain.islands: [{ id, name, template, seed, center, radius }]).
 // Their land joins the main island's in the one height function (shared/terrain.js), so everything that walks, drives,

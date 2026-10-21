@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Agent Providers on a real server (docs/features/agent-providers.md): an OpenClaw gateway - a stand-in that runs the
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Agent Providers on a real server (docs/features/agent-providers.md): an OpenClaw gateway — a stand-in that runs the
 // protocol v4 handshake with OpenClaw's recorded frames and checks the device signature for real
-// (tests/helpers/fake-openclaw.mjs) - connected through the provider helper: silent pairing and the hand-off to the
+// (tests/helpers/fake-openclaw.mjs) — connected through the provider helper: silent pairing and the hand-off to the
 // device's own token, pairing that waits for approval and goes on by itself, a wrong token, chat-only access, the address
 // rules, a dropped connection, the provider's agents as agents here, removal (the device takes itself off the gateway),
 // and credentials that never come back.

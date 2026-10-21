@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Voice in the window, the parts that need no page (docs/features/CHAT.md §9.4), so the tests run them in node:
-// - Segmenter: an answer being written is cut into whole pieces - a sentence, a line of a list, a whole code block or
-//   table - each ready to speak as soon as it is complete, so voice mode starts talking within a second or two of the
+// - Segmenter: an answer being written is cut into whole pieces — a sentence, a line of a list, a whole code block or
+//   table — each ready to speak as soon as it is complete, so voice mode starts talking within a second or two of the
 //   first words instead of waiting for the end.
 // - takeUnits: what goes in one request to the voice service (the first piece alone, for speed; later ones together).
 // - Vad: when someone has started and stopped talking, from the microphone's loudness, following the room's own noise.
@@ -74,7 +74,7 @@ function prose(s, final, soft) {
     // no end yet and a long way in: cut at the last pause (a comma, a semicolon, a dash), else at a space
     const head = s.slice(0, soft * 2);
     let k = -1;
-    for (const m of head.matchAll(/[,;:\u2014\u2013](?=\s)/g)) if (m.index > 40) k = m.index + 1;
+    for (const m of head.matchAll(/[,;:—–](?=\s)/g)) if (m.index > 40) k = m.index + 1;
     if (k > 0) return k;
     if (s.length > soft * 2) { const sp = head.lastIndexOf(' '); if (sp > 40) return sp; }
   }
@@ -95,14 +95,14 @@ export function takeUnits(units, { first = false, max = 500 } = {}) {
  * When someone starts and stops talking, from the microphone's loudness (RMS, 0–1) read every few milliseconds. The
  * room's own noise is followed (at once when it gets quieter, slowly when louder, never while someone talks), and talking
  * starts louder than it by a margin. Once talking, a turn goes on while it stays near the person's own voice (`drop` of
- * its running level): a real room is not silent in the pause - the browser's automatic gain turns it up as soon as they
- * stop, the world's sounds and birdsong go on - so the pause is what falls well below their voice, not only below the
+ * its running level): a real room is not silent in the pause — the browser's automatic gain turns it up as soon as they
+ * stop, the world's sounds and birdsong go on — so the pause is what falls well below their voice, not only below the
  * room's noise as it was before they spoke. Talking again after a dip is told from a blip (a chirp, a click) by how much
  * of it there is: `back` gathers the loud time since the pause began and fades in the quiet, and the turn goes on once it
- * reaches `blipMs` - after a dip shorter than `gapMs` (between syllables) - or `resumeMs` after a real pause; until then
+ * reaches `blipMs` — after a dip shorter than `gapMs` (between syllables) — or `resumeMs` after a real pause; until then
  * the pause is held, neither ended nor started over. step() says 'speech' once talking has started, 'end' after
  * `silenceMs` of pause that followed at least `minSpeechMs` of talking, 'noise' when what was heard was too short to be
- * words (a cough, a knock) - each once, until reset().
+ * words (a cough, a knock) — each once, until reset().
  */
 export class Vad {
   constructor({ silenceMs = 1000, minSpeechMs = 300, startMs = 150, gapMs = 300, blipMs = 100, resumeMs = 250, min = 0.012, ratio = 3, drop = 0.3 } = {}) {

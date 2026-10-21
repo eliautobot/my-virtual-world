@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // AI apps connecting to the world (2026-10-10; the product owner: people should "directly connect their ai agent into the
-// world" - Grok first, then ChatGPT, Gemini, Meta's Muse, Claude…). Each of those AI apps is an MCP client; the world is
+// world" — Grok first, then ChatGPT, Gemini, Meta's Muse, Claude…). Each of those AI apps is an MCP client; the world is
 // the MCP server (./mcp.js) AND its OAuth 2.1 authorization server, following the MCP authorization specification
 // (revision 2026-07-28):
 // - discovery: protected resource metadata (RFC 9728) names this server as the authorization server; its metadata
@@ -9,8 +9,8 @@
 // - which app is asking: a client ID metadata document (the client_id is an https URL whose JSON names the app and its
 //   redirect URIs; fetched through the public-internet guard, never a private address, small and quick, cached an hour),
 //   or a registration (RFC 7591, kept for older apps; rate-limited per address).
-// - the person decides: an authorization request is checked (the app, the exact redirect URI - a loopback one with any
-//   port -, response type code, PKCE S256, the resource being this world's MCP endpoint, the scope) and parked for ten
+// - the person decides: an authorization request is checked (the app, the exact redirect URI — a loopback one with any
+//   port —, response type code, PKCE S256, the resource being this world's MCP endpoint, the scope) and parked for ten
 //   minutes; the consent page shows who asks and lets the person pick which of THEIR agents the app acts as, or say no.
 //   Saying yes makes a grant (account, agent, app) and a single-use code (one minute).
 // - tokens: the code with the PKCE verifier (and the app's secret if it registered one) gives a short access token (an
@@ -95,7 +95,7 @@ export class ConnectorAuth {
    * @param {(url: string) => Promise<object>} [o.fetchDocument]  client ID metadata documents (tests use a fake)
    */
   constructor(store, { accounts, agents, audit = null, log = () => {}, now = () => Date.now(), fetchDocument = fetchClientDocument, slots = null }) {
-    // slots: the person's connected agents (server/agent-api.js) - { notConnected(accountId), connect(account, slotId, { ip, app }) → agent id,
+    // slots: the person's connected agents (server/agent-api.js) — { notConnected(accountId), connect(account, slotId, { ip, app }) → agent id,
     // ownsLiving(account, agent) }: an app may live as one, connecting it through this consent
     Object.assign(this, { store, accounts, agents, audit, log, now, fetchDocument, slots });
     this.w = store.worldId;
@@ -137,7 +137,7 @@ export class ConnectorAuth {
   /** RFC 7591: an app registers itself (no person involved yet). → the registration response. */
   register(body, { ip = null } = {}) {
     const b = body && typeof body === 'object' ? body : {};
-    // (a refusal is logged with what the app asked for - no secrets are in a registration - so an app that can't register
+    // (a refusal is logged with what the app asked for — no secrets are in a registration — so an app that can't register
     // can be understood from the server's log)
     const no = (code, msg, status) => {
       const asked = JSON.stringify({ client_name: b.client_name, redirect_uris: b.redirect_uris, token_endpoint_auth_method: b.token_endpoint_auth_method, grant_types: b.grant_types, response_types: b.response_types });
@@ -262,7 +262,7 @@ export class ConnectorAuth {
     let host = '';
     try { host = new URL(r.redirect_uri).host || new URL(r.redirect_uri).protocol; } catch { host = ''; }
     let agents = P?.account ? this.agentsFor(P) : [];
-    // (its own address - <world>/mcp/a/<handle> - is for one agent: only it is offered, and only to its owner)
+    // (its own address — <world>/mcp/a/<handle> — is for one agent: only it is offered, and only to its owner)
     const only = this.addressedSlot(r.resource);
     if (only) agents = agents.filter(a => a.id === `slot:${only.id}` || (only.agentId !== null && a.id === only.agentId));
     return {
@@ -279,7 +279,7 @@ export class ConnectorAuth {
   }
   /** The agents a person may hand to an app: their own, and those shared with them to manage. */
   agentsFor(P) {
-    // (a connected agent of its own: the app lives as it - its body's own tools, server/connector/body-tools.js; one not
+    // (a connected agent of its own: the app lives as it — its body's own tools, server/connector/body-tools.js; one not
     // connected right now is offered too: choosing it connects it)
     // (the ones waiting for an app come first, newest first: the agent just made for this app in New agent is preselected)
     const waiting = (this.slots ? this.slots.notConnected(P.account.id) : [])
@@ -303,7 +303,7 @@ export class ConnectorAuth {
     }
     const app = this.q.client.get(this.w, r.client_id), now = this.now();
     if (!app) throw bad('invalid_client', 'This app is no longer known here', 410);
-    // one of its connected agents not connected right now: choosing it here is its owner's OK - it connects (no key)
+    // one of its connected agents not connected right now: choosing it here is its owner's OK — it connects (no key)
     let agentId = Number(agent);
     const slotPick = /^slot:(\d{1,9})$/.exec(String(agent ?? ''));
     // (an agent's own address is for it alone: checked before anything is connected)

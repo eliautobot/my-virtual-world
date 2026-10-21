@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's own screen (docs/features/agent-pc.md §4.2) on a real server, against the stand-in Hermes and its Bot
 // Desktop (tests/helpers/fake-hermes.mjs, as Hermes' tools/bot_desktop and display.* calls): its PC and chat say it has
-// one; its state; started; one picture of it; the live stream through /api/providers/screen/ws - watching never types,
+// one; its state; started; one picture of it; the live stream through /api/providers/screen/ws — watching never types,
 // taking over does, a person in control is never pictured; closing the viewer hands control back, a dropped link keeps
 // it; Hermes' word passes on (4001: the screen stopped); its browser put on it (Hermes' own two settings); a Hermes
 // without a Bot Desktop; who may not see it (another member, another site, no session); how many at once.
@@ -20,7 +20,7 @@ import adapter from '../server/providers/hermes/adapter.js';
 let s, owner, ann, hm, conn, agent;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(fn, ms = 8000) { const end = Date.now() + ms; let v; while (Date.now() < end) { v = await fn(); if (v) return v; await sleep(50); } return v; }
-/** The live stream, as a viewer opens it: { ws, got (buffers), closed (a promise of its close code) } - or { refused: status }. */
+/** The live stream, as a viewer opens it: { ws, got (buffers), closed (a promise of its close code) } — or { refused: status }. */
 function stream(c, ag = agent, { origin = s.url, cookie = c?.cookie } = {}) {
   return new Promise(resolve => {
     const ws = new WebSocket(`${s.url.replace(/^http/, 'ws')}/api/providers/screen/ws?agent=${ag}`, { headers: { ...(cookie ? { cookie } : {}), ...(origin ? { origin } : {}) }, perMessageDeflate: false });

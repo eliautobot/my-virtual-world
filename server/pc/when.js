@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Dates and times as agents write them (docs/features/agent-pc.md §4), read in the agent's work time zone: "2026-10-20
 // 14:00", "tomorrow 9am", "fri 5pm", "next monday", "oct 20 3:30pm", "in 2 hours", "+30m", "noon". Real time, never
 // the world's clock. Also lengths ("30m", "1h30", "2 days") and the way times are shown back ("Tue Oct 20, 14:00").

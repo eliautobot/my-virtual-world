@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's money as its Mind sees and uses it (docs/features/FREE-WILL.md §11.11). The Mind (server/mind/) never touches
-// the ledger itself: it reads through here and every payment, purchase or lease goes through runAgentAction - the same
-// path as a connected agent's API calls - so the owner's spending rules (scopes, the daily limit, "ask me above", pause)
+// the ledger itself: it reads through here and every payment, purchase or lease goes through runAgentAction — the same
+// path as a connected agent's API calls — so the owner's spending rules (scopes, the daily limit, "ask me above", pause)
 // decide, and above the threshold an approval waits for the owner, exactly as before.
 // Also what goes wrong with an agent's money, for the problems watcher (server/mind/problems.js): rent it owes, and a
 // flat it rents for VC whose rent is overdue (its days of grace counting down) or that is ending.
@@ -85,7 +85,7 @@ export function createMindMoney(econ, runAgentAction) {
     pay(agentId, to, amount, memo, idem) { return runAgentAction('pay', { to, amount, memo, idem }, agentId, false); },
     /** Gives something from its inventory (a stack ref or a thing's name), worth as much as a payment of its value. */
     give(agentId, to, item, qty, memo, idem) { return runAgentAction('give', { item, qty, to, memo, idem }, agentId, false); },
-    /** Asks its owner for money (a payment request the owner answers in their wallet) - allowed when it may pay at all. */
+    /** Asks its owner for money (a payment request the owner answers in their wallet) — allowed when it may pay at all. */
     askOwner(agentId, amount, memo) {
       const owner = econ.agentOwner(agentId);
       if (owner == null) throw new LedgerError('rights', 'This agent has no owner to ask.', 403);

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Renderer improvements that can be switched off one by one (2026-10-03: "make all the changes, in a way that's easy
 // to reverse in case I don't like it"), learnt from a reference renderer (Hollowmere): each on by default; Settings →
 // Display → Renderer lists them, kept per device. ?rf=-noise,-bake in the address turns some off for one visit (A/B).

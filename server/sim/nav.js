@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Street + indoor navigation for the simulation.
 // Street network: walking-band corners of every block, joined along block sides and by crosswalks
 // (orthogonal + diagonal scramble crossings) at every intersection. All-pairs shortest paths are precomputed.
@@ -190,7 +190,7 @@ export class Nav {
   }
   /**
    * A walk between two access records where one or both are beyond the city: along the footpaths, through the best
-   * link with the city's streets when one end is in the city. { cost (s), pts } - with no way through (a building cut
+   * link with the city's streets when one end is in the city. { cost (s), pts } — with no way through (a building cut
    * off from every road), a straight walk over the ground.
    */
   walkRoute(A, B, wantPts = false) {

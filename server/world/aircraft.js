@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The airport's aircraft on the server (docs/features/play-modules.md §Airport): one record per stand (shared/
 // world-modules.js aircraftStands). A player standing next to a free one boards it (fboard) and flies it in the browser
 // (shared/flight-model.js); the server takes its poses (fpose: ten a second, each checked against the aircraft's top
-// speed - a jump is refused and the pilot corrected), moves the pilot's player with it (so the area of interest, the
+// speed — a jump is refused and the pilot corrected), moves the pilot's player with it (so the area of interest, the
 // online list and proximity chat follow), and sends everyone near the aircraft that are off their stands (fleet: five a
 // second, nearby ones only; the ids of every aircraft away from its stand to all, so no parked copy is drawn twice).
 // Landed and stopped, the pilot gets out (fexit) beside it; an aircraft left away from its stand waits there a few
@@ -73,7 +73,7 @@ export class Fleet {
     if (![x, y, z].every(Number.isFinite) || !q || !q.every(Number.isFinite)) return;
     const now = this.now(), last = a.pose;
     // How long passed between this pose and the last: by the time they arrived, or by the flight's own clock (ts, the
-    // pilot's simulated seconds) when that says more - two poses arriving together after the pilot's phone or this
+    // pilot's simulated seconds) when that says more — two poses arriving together after the pilot's phone or this
     // server stalled were refused as too fast, and the jet stopped dead in the air (2026-10-14, as the car's poses
     // 2026-10-04). The flight's clock can't run ahead: all told, no more than really passed since its first pose, plus 2 s.
     let dt = (now - a.at) / 1000;
@@ -119,7 +119,7 @@ export class Fleet {
       this.release(a, this.exitPoint(a, pose), near ? 'Back on its stand' : 'You got out');
       if (near) this.home(a); else { a.mode = 'parked'; a.returnAt = this.now() + PARK_MS; }
     } else {
-      this.release(a, this.besideStand(a), 'You left the cockpit - the ground crew took the aircraft back to its stand');
+      this.release(a, this.besideStand(a), 'You left the cockpit — the ground crew took the aircraft back to its stand');
       this.home(a);
     }
     this.ver++;
@@ -128,7 +128,7 @@ export class Fleet {
     const p = ws.pid != null ? this.players.byId.get(ws.pid) : null, a = p ? this.byPilot.get(p.id) : null;
     if (!a) return;
     const side = this.besideStand(a);
-    this.release(a, side, `💥 ${String(m.why || 'Crashed').slice(0, 80)} - the ground crew takes it back to its stand`);
+    this.release(a, side, `💥 ${String(m.why || 'Crashed').slice(0, 80)} — the ground crew takes it back to its stand`);
     this.home(a);
     this.ver++;
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Mind's problems and money tools on their own (docs/features/FREE-WILL.md §11.11): what opens a problem and what
 // resolves it (twice in a row; money with a margin; rent says more than money; a retired body has no job to lose), what
 // the agent remembers and its owner is told; the tools a thought may use, their limits, references and refusals; what a
@@ -113,7 +113,7 @@ test('tools: by kind of thought and its owner\'s rules; references from the resu
   // a flat by a reference "flats" gave; before that, none
   assert.match(T.run([{ tool: 'rent_flat', flat: 'F1' }])[0].text, /use a flat from the list/);
   const [list] = T.run([{ tool: 'flats' }]);
-  assert.match(list.text, /^FLATS FOR RENT: \[F1\] «Flat 1 on floor 2 of Elm Court» - 600 VC a month \(20 VC a day\), let by «City»; \[F2\]/);
+  assert.match(list.text, /^FLATS FOR RENT: \[F1\] «Flat 1 on floor 2 of Elm Court» — 600 VC a month \(20 VC a day\), let by «City»; \[F2\]/);
   const r = T.run([{ tool: 'rent_flat', flat: 'f2' }, { tool: 'ask_owner', amount: 40, why: 'rent\u0000' }, { tool: 'ask_owner', amount: 10 }, { tool: 'flats' }]);
   assert.equal(r.length, MAX_PER_ROUND, 'at most three a round');
   assert.equal(r[0].text, 'done: I rent «Flat 3» from today (30 VC a day)');
@@ -127,7 +127,7 @@ test('tools: by kind of thought and its owner\'s rules; references from the resu
   T2.run([{ tool: 'flats' }]);
   const w2 = T2.run([{ tool: 'rent_flat', flat: 'F1' }])[0];
   assert.match(w2.text, /^waiting: my owner must agree first/);
-  assert.equal(T2.summary(), 'Wants to rent Flat 1 on floor 2 of Elm Court (20 VC a day) - waiting for your OK');
+  assert.equal(T2.summary(), 'Wants to rent Flat 1 on floor 2 of Elm Court (20 VC a day) — waiting for your OK');
   // the economy refuses (its daily limit): the reason, as the economy gives it
   const T3 = toolbox({ agent: { id: 1 }, kind: 'problem', ctx, money: fakeMoney({ refuse: 'That would pass your daily limit.' }), wallet: wallet(), people, idem: 'z' });
   T3.run([{ tool: 'flats' }]);
@@ -137,7 +137,7 @@ test('tools: by kind of thought and its owner\'s rules; references from the resu
   assert.deepEqual(T.run([{ tool: 'pay', to: 'my owner', amount: 1 }, { tool: 'shell', cmd: 'ls' }]).map(x => x.text), ['not done: that is not something I may do now', 'not done: that is not something I may do now']);
 });
 
-test('tools in a chat: a real place\'s menu, buying from it, paying people it knows, its owner, or a place - no one else', () => {
+test('tools in a chat: a real place\'s menu, buying from it, paying people it knows, its owner, or a place — no one else', () => {
   const m = fakeMoney();
   const T = toolbox({ agent: { id: 1 }, kind: 'chat', ctx, money: m, wallet: wallet(), people, idem: 'c' });
   assert.match(T.run([{ tool: 'menu', place: 'Nowhere' }])[0].text, /I don't know a place called «Nowhere»/);
@@ -147,7 +147,7 @@ test('tools in a chat: a real place\'s menu, buying from it, paying people it kn
   const T2 = toolbox({ agent: { id: 1 }, kind: 'chat', ctx, money: m, wallet: wallet(), people, idem: 'd' });
   const out = T2.run([{ tool: 'pay', to: 'Lea', amount: '2.5', memo: 'lunch' }, { tool: 'pay', to: 'Tom', amount: 1 }, { tool: 'pay', to: 'casey', amount: 0 }]);
   assert.equal(out[0].text, 'done: paid 2.50 VC to Lea');
-  assert.match(out[1].text, /^not done: I can pay my owner, a person I know or a place - not «Tom»/, 'a resident has no wallet to pay');
+  assert.match(out[1].text, /^not done: I can pay my owner, a person I know or a place — not «Tom»/, 'a resident has no wallet to pay');
   assert.equal(out[2].text, 'not done: the amount must be a number of VC');
   assert.deepEqual(m.calls.at(-1), ['pay', { kind: 'agent', id: 9 }, 250, 'lunch', 'd:1']);
   const T3 = toolbox({ agent: { id: 1 }, kind: 'chat', ctx, money: m, wallet: wallet(), people, idem: 'e' });
@@ -155,7 +155,7 @@ test('tools in a chat: a real place\'s menu, buying from it, paying people it kn
   assert.deepEqual(m.calls.slice(-2).map(c => c[1]), [{ kind: 'account', id: 7 }, { kind: 'business', id: 'biz_bean' }]);
 });
 
-test('a problem\'s answer: ≤2 plans, ≤1 short memory, a word to its owner - no plans dropped, nothing done', () => {
+test('a problem\'s answer: ≤2 plans, ≤1 short memory, a word to its owner — no plans dropped, nothing done', () => {
   const a = readActions('problem', { plans: [{ kind: 'must', text: 'Ask about cheaper flats' }, { text: 'Cook at home' }, { text: 'A third' }], memories: [{ term: 'long', text: 'Rent is hard', importance: 5 }, { text: 'Second' }],
     drop: [1], done: [1], tell_owner: 'Could you lend me 40 VC?', thought: 'Worried.' }, { plans: [{ id: 1, text: 'Old plan' }] });
   assert.deepEqual(a.plans, [{ kind: 'must', text: 'Ask about cheaper flats' }, { kind: 'want', text: 'Cook at home' }]);
@@ -168,7 +168,7 @@ test('the problem\'s prompt: what is wrong, its money and its owner\'s rules, th
   const c = { name: 'Adam', role: '', personality: [], bio: '', purpose: '', aspirations: [], likes: [], dislikes: [], now: { weekday: 'Monday', clock: '9:00 AM' }, where: 'at home',
     job: null, home: 'Elm Court', plans: [], memoriesLong: [], memoriesShort: [], people: [], places: [{ kind: 'cafe', name: 'Bean «There»', minutes: 3, price: 900 }], atHome: true,
     troubles: ['My rent is behind: I owe 44 VC'], wallet: { ...wallet(['rent', 'pay']), owed: VC(44), waiting: 1, askOpen: true } };
-  const t = problemText(c, ['TOOLS (to use some, answer {"use":[...]} with up to 3 of them; the results come back to me):', '- {"tool":"flats"} - x']);
+  const t = problemText(c, ['TOOLS (to use some, answer {"use":[...]} with up to 3 of them; the results come back to me):', '- {"tool":"flats"} — x']);
   assert.match(t, /WHAT IS WRONG: «My rent is behind: I owe 44 VC»\./);
   assert.match(t, /MY MONEY: 50 VC to spend; my rent is 20 VC a day; I owe 44 VC in rent\./);
   assert.match(t, /MY OWNER'S RULES: I may rent a home, pay people; up to 100 VC a day \(100 VC left today\); above 10 VC my owner agrees first\. 1 of my requests wait for their OK\. I asked my owner for money/);

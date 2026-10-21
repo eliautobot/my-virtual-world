@@ -1,10 +1,10 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fish of the fishing game as models (docs/features/fishing.md §Fish), built from each species' body (shared/fish-
-// species.js body: its shape's archetype, how deep it is for its length, its tail, its fins, its marks - a bill, a
-// hammer head, whiskers, a snout - and its colours and pattern): a lofted body, the tail and fins as flat blades, its
+// species.js body: its shape's archetype, how deep it is for its length, its tail, its fins, its marks — a bill, a
+// hammer head, whiskers, a snout — and its colours and pattern): a lofted body, the tail and fins as flat blades, its
 // own small painted skin (back to belly, the stripes, bars, spots or blotches, the eye). The squid and the ray are built
 // their own way; the junk and treasure that come up too. One length unit (1 m nose to tail, along +z, the head
-// forward; the caller scales it to the fish's length), made when first wanted and kept - only a few are ever drawn.
+// forward; the caller scales it to the fish's length), made when first wanted and kept — only a few are ever drawn.
 import * as THREE from 'three';
 import { speciesOf } from '/shared/fish-species.js';
 

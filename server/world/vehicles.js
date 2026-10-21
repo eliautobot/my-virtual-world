@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Driving: original classic Rapier handling, authenticated seats, safe exits and shared fleet poses. A driver's browser may
 // simulate its own car (decision A20); the server then validates and relays its poses and takes the car back if they stop.
 import fs from 'node:fs';

@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Settings → Agent limits (the product owner, 2026-10-10: "admin controls so that I have control to modify
 // these limits at any time"): every limit on agents talking, acting and spending in one place, laid out by direction
 // (2026-10-11: switches; people → agents; agents → agents; the world → an agent; an agent → the world; what thinking may
-// cost - ./agent-limit-groups.js), the finer ones under "Advanced". Each is an installation setting, saved as it changes
+// cost — ./agent-limit-groups.js), the finer ones under "Advanced". Each is an installation setting, saved as it changes
 // and read by the server at its next use. The server keeps every value within its range whatever is sent.
 import { settingsForm } from './admin.js';
 import { AGENT_LIMIT_SECTIONS } from './agent-limit-groups.js';

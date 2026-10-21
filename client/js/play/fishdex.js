@@ -1,5 +1,5 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The Fishdex (docs/features/fishing.md §Fish, step 7b): every species there is - its picture (drawn from the game's
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The Fishdex (docs/features/fishing.md §Fish, step 7b): every species there is — its picture (drawn from the game's
 // own fish model: render/fish-models.js, a dark shape until you've landed one), how many you've landed and your
 // biggest, the world record (the biggest anyone has landed, and who: server/play/angler.js), and where to find it (the
 // grounds it holds on, its hours, what it takes, the trips that go there). Filters: sea, lake, legends; landed or not
@@ -70,13 +70,13 @@ function card(s) {
     <div class="dim"><b style="color:${r.color}">${esc(r.label)}</b> · ${s.water === 'sea' ? '🌊 Sea' : '🛶 Lake'} · ${s.len[0]}–${s.len[1]} cm${s.legend ? ' · one of a kind' : ''}</div>
     <div class="fd-facts">
       <div><span>You</span>${m ? `<b>${m.n} landed</b> · biggest ${kgTxt(m.kg)} kg (${toLb(m.kg).toFixed(1)} lb), ${m.cm} cm` : '<span class="dim">Not landed yet</span>'}</div>
-      <div><span>World record</span>${rec ? `<b>${kgTxt(rec.kg)} kg</b> (${rec.cm} cm) - ${rec.mine ? '🥇 yours!' : esc(rec.name)}` : '<span class="dim">Nobody yet - be the first</span>'}</div>
+      <div><span>World record</span>${rec ? `<b>${kgTxt(rec.kg)} kg</b> (${rec.cm} cm) — ${rec.mine ? '🥇 yours!' : esc(rec.name)}` : '<span class="dim">Nobody yet — be the first</span>'}</div>
     </div>
     <h5>Where to find it</h5>
     <p>${W.grounds.map(g => `${g.icon} ${esc(g.label)}`).join(' · ')}${W.open ? `${W.grounds.length ? ' · ' : ''}open water` : ''}</p>
     <p>${W.when.length ? `Feeds best at ${W.when.length > 1 ? `${W.when.slice(0, -1).join(', ')} and ${W.when.at(-1)}` : W.when[0]}` : 'Feeds any time'} · ${s.depth[0]}–${s.depth[1]} m down</p>
     <p>Takes ${W.lures.map(l => `${l.icon} ${esc(l.name)}`).join(', ')}</p>
-    ${W.trips.length ? `<p class="dim">Trips: ${W.trips.map(t => esc(t.label)).join(', ')}${s.legend ? ' - at its own ground, in its hour' : ''}</p>` : ''}`;
+    ${W.trips.length ? `<p class="dim">Trips: ${W.trips.map(t => esc(t.label)).join(', ')}${s.legend ? ' — at its own ground, in its hour' : ''}</p>` : ''}`;
 }
 function onClick(e) {
   const t = e.target.closest('button'); if (!t) return;

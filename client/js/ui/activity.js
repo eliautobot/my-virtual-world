@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The activity log in the info dock, and the account's own undo and redo (PLAN WP1.8, DECISIONS C35, C116).
 // - Undo and redo: the top bar's ↶ ↷ (on a phone, the edit drawer's), Ctrl+Z, and Ctrl+Y or Ctrl+Shift+Z. Each account
 //   undoes only its own edits; the server refuses, with the reason, an undo whose target someone changed later. After
@@ -99,7 +99,7 @@ async function step(dir) {
 }
 
 // ------------------------------------------------------------------ the activity log
-// A timeline (2026-10-06: "too cramped and not intuitive - make it a true activity log"): filters by kind, the days as
+// A timeline (2026-10-06: "too cramped and not intuitive — make it a true activity log"): filters by kind, the days as
 // headings, and for each line its time, a dot coloured by kind on a line joining them, what happened, who, and its actions.
 const KIND = {
   edit: ['Change', 'edits'], revert: ['Revert', 'edits'], undo: ['Undo', 'edits'], redo: ['Redo', 'edits'],

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 """A small client for the My Virtual World Agent API v1 (see /skill.md).
 
 Needs Python 3.9+ and the `cryptography` package (pip install cryptography). The private key is made here, saved only in the

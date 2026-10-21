@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The island's ground (WP4.2, wp4-world-spec.md §3.2): one deterministic height function shared by the server
 // (players, vehicles, residents), the browser (terrain meshes, scatter) and workers. It is generated, not stored: a pinned
 // generator version, a seed and a few parameters give the same island everywhere. Only + − × ÷, floor, sqrt and
@@ -30,7 +30,7 @@ function padDist(P, x, z) {
   if (P.round) return Math.hypot(Math.max(0, a), Math.max(0, b));   // (rounded round its corners: a dock's dredged basin)
   return Math.max(a, b, 0);
 }
-/** A pad's level at (x, z): level, or (a sloped pad: a dock's launch ramp) rising P.k a metre along its own s (hw) -
+/** A pad's level at (x, z): level, or (a sloped pad: a dock's launch ramp) rising P.k a metre along its own s (hw) —
  *  outside it, the level at the nearest point of its edge. */
 function padY(P, x, z) {
   if (!P.k) return P.y;
@@ -55,7 +55,7 @@ export function lakeQ(k, x, z) {
  * smooth curves") and its water fitted to the ground (the product owner the same day: "the rivers sometimes are floating ... higher at
  * a point even if there's lower ground right next to it"; "the waterfalls are sometimes oddly shaped"): the traced
  * points (every ~24 m) eased twice ([1 2 3 2 1]) and a curve drawn through them (Catmull-Rom) every ~STEP m; then the
- * water's level worked out along that curve itself - never above the ground at its middle or on either bank out past
+ * water's level worked out along that curve itself — never above the ground at its middle or on either bank out past
  * its drawn edge (bank(x, z, nx, nz, w): the highest the water may lie there), and only ever falling. A waterfall is
  * where the ground drops: the water falls with it, where it falls. endY: the sea's or the lake's level at its mouth.
  * Returns { pts: [{ x, z, y, w, s }], falls }.
@@ -179,7 +179,7 @@ function seedOf(s) { let h = 2166136261; const str = String(s); for (let i = 0; 
  * Defaults put an ~8 km island north of the city, the city on its southern coastal plain with the sea beyond it.
  */
 /** Under the city the terrain is held this far below the natural plain, so the city's own ground (streets, blocks) is
- *  the surface there - for the renderer (client/js/render/terrain.worker.js) and the driving physics (terrain-physics.js). */
+ *  the surface there — for the renderer (client/js/render/terrain.worker.js) and the driving physics (terrain-physics.js). */
 export const CITY_FLOOR_DROP = 0.6;
 /** The height (m) the snow lies above, give or take 40 m (shared/biome.js); tarns above it are frozen. */
 export const SNOW_LINE = 470;
@@ -195,7 +195,7 @@ export function defaultIsland({ seed = 'island', city = { x0: -470, z0: -300, x1
 /** The world modules' gates among the pads: [{ x, z, y }] (where an access road meets a module, at its land's level). */
 const gatesOf = pads => (pads || []).filter(P => P.gate).map(P => P.gate);
 export class Island {
-  /** p: world.terrain. roads: world.roads (alignment records) - the ground is graded to them (cuttings, embankments). */
+  /** p: world.terrain. roads: world.roads (alignment records) — the ground is graded to them (cuttings, embankments). */
   /** bridgesAsGround: false for drawing the terrain (open water under bridges); true for walking, driving and placing. */
   constructor(p, { roads = null, pads = null, bridgesAsGround = true } = {}) {
     if (!p || p.generator !== TERRAIN_GENERATOR) throw new Error(`unknown terrain generator ${p && p.generator}`);
@@ -218,9 +218,9 @@ export class Island {
     this.edits = p.edits && p.edits.length ? new TerrainEdits(p.edits) : null;
     if (this.edits) this.lakes = [...this.lakes, ...this.edits.ponds()];
     this._drawn = !bridgesAsGround;   // the drawn terrain (render/terrain.worker.js), not the ground people stand on
-    // (the world modules' gates - where their access roads meet them - come with their pads: the roads are held level
+    // (the world modules' gates — where their access roads meet them — come with their pads: the roads are held level
     // with a module's land there)
-    // (cityStreets null: a world without a city, shared/city.js - no road is pinned to the city's level anywhere)
+    // (cityStreets null: a world without a city, shared/city.js — no road is pinned to the city's level anywhere)
     this._roadArgs = roads && roads.length ? [roads, (x, z) => this.dryGround(x, z), { cityRect: p.cityStreets === null ? null : p.cityStreets || p.city, cityY: 0, seaLevel: p.seaLevel, depthAt: (x, z) => this.waterDepth(x, z), skipBridges: !bridgesAsGround, drawn: !bridgesAsGround }] : null;
     this._gates = gatesOf(pads);
     this.roads = this._roadArgs ? new IslandRoads(this._roadArgs[0], this._roadArgs[1], { ...this._roadArgs[2], gates: this._gates }) : null;
@@ -290,7 +290,7 @@ export class Island {
       if (Math.abs(x - c.center.x) > c.reach || Math.abs(z - c.center.z) > c.reach) continue;
       const Li = chainLandness(c, x, z); if (Li > L) { L = Li; isle = c; }
     }
-    // The sea floor: a shallow shelf (about 8 % off a beach), then deeper water further out - continuous with the land.
+    // The sea floor: a shallow shelf (about 8 % off a beach), then deeper water further out — continuous with the land.
     if (L <= 0) return p.seaLevel - 0.4 + (L > -0.1 ? L * 8 : -0.8 + (L + 0.1) * 42) - (L < -0.5 ? (-0.5 - L) * 60 : 0);
     if (isle) return chainNatural(isle, x, z, L, p.seaLevel);
     const shore = sstep(0, 0.22, L);
@@ -318,12 +318,12 @@ export class Island {
     return h;
   }
   /** On a grid's land (shared/island-build.js gridPads): just under its lots' level everywhere off the roads, and just
-   *  under the sidewalks' tops beneath them - so a lot meets the back of the sidewalk flush, with no dip between. */
+   *  under the sidewalks' tops beneath them — so a lot meets the back of the sidewalk flush, with no dip between. */
   gridGround(x, z, h) {
     const P = this.underAt(x, z); if (!P) return null;
     // under the roads: their formation; for the ground people stand on, just under a sidewalk's top. Never in the drawn
     // terrain: its 2.4 m cells would slope from there up through the road beside a curb (2026-10-14: grey wedges poking
-    // through the asphalt round the corners) - the block's own surface meets the sidewalk instead (render/lot-ground.js)
+    // through the asphalt round the corners) — the block's own surface meets the sidewalk instead (render/lot-ground.js)
     const R = this.roads, j = R ? R.junctionAt(x, z) : null;
     if (j) return j === 'raised' && !this._drawn ? Math.max(h, P.lot - 0.06) : h;   // a junction's paving at the road's level
     const t = R ? R.top(x, z) : null;
@@ -356,7 +356,7 @@ export class Island {
   /**
    * A pad not drawn here (2026-10-15, the product owner: the marina's water "looks unnatural since it's a square area and
    * you can see the waves outlined"): a dock's dredged basin, and its launch ramp under the water, shape the ground the
-   * boats float over (and walking, driving) but not the drawn terrain - its sea floor, and the surf's depth map read from
+   * boats float over (and walking, driving) but not the drawn terrain — its sea floor, and the surf's depth map read from
    * it, stay as nature made them.
    */
   undrawn(P, x, z) { return this._drawn && (P.undrawn || (P.dryOnly && padY(P, x, z) < P.wy)); }
@@ -372,7 +372,7 @@ export class Island {
     if (L) for (const P of L) if (!P.under && !P.clear && !this.undrawn(P, x, z) && padDist(P, x, z) === 0) return padY(P, x, z) - 0.05;   // (a grid's land: its roads keep their corridors)
     return null;
   }
-  /** The ground a road may follow: never below a lake's or river's banks, and over water a bridge's deck - every road
+  /** The ground a road may follow: never below a lake's or river's banks, and over water a bridge's deck — every road
    *  crossing water is a bridge (2026-10-03): its deck stands clear of a lake or river, or high over the sea. */
   dryGround(x, z) {
     const b = this.baseHeight(x, z);
@@ -422,14 +422,14 @@ export class Island {
         }
         continue;
       }
-      // (a waterfall's plunge pool: its rock walls rise steeply from the water, the cliff behind the fall among them -
+      // (a waterfall's plunge pool: its rock walls rise steeply from the water, the cliff behind the fall among them —
       // over 4.5 m: sheerer, the ground's 2.4 m grid drew them as a sawtooth of thin spikes; render/rivers.js stands a
       // clean rock face in front)
       const qw = k.pool ? (1 + 4.5 / k.r) ** 2 : 1.44;
       if (q < qw) { const bowl = k.level - k.depth * (1 - q) * (1 - q > 0 ? 1 : 0) - 0.6; h = q < 1 ? Math.min(h, bowl) : lerp(Math.min(h, k.level - 0.6), h, sstep(1, qw, q)); }
     }
     // River channels: a rounded trough under the water, a shallow shelf RIVER_SHELF m wide either side of it just under
-    // the water's edge, banks sloping back to the land. (The shelf: a coarse ground mesh - a point every ~5 m - never
+    // the water's edge, banks sloping back to the land. (The shelf: a coarse ground mesh — a point every ~5 m — never
     // spans a narrow stream from bank to bank above its water; 2026-10-03, bands of ground across the rapids.)
     const r = this.riverAt(x, z);
     if (r) {
@@ -477,7 +477,7 @@ export class Island {
   }
   /**
    * Rivers: from springs high in the mountains down to the sea, a lake or another river (a tributary), along the
-   * island's drainage - a priority flood over a 40 m grid from the sea and the lakes inward, so every course reaches
+   * island's drainage — a priority flood over a 40 m grid from the sea and the lakes inward, so every course reaches
    * open water and none loops, crossing hollows over their lowest rims; the city's plain is avoided. The course is
    * smoothed and given a gentle meander; its water only ever falls, cutting gorges through rims. Cached per island.
    * Each: { id, pts: [{ x, z, y (water level), w (width), s }], falls: [index], drops (_stairs), mouth }.
@@ -668,7 +668,7 @@ export class Island {
   }
   /**
    * Tarns (2026-10-03: "the rivers should start from a lake ... on top of the mountain on some of its valleys, so
-   * that the rivers look natural"): each river rises from a small lake in a hollow high on its course - the first place
+   * that the rivers look natural"): each river rises from a small lake in a hollow high on its course — the first place
    * down from its spring where the mountain stands round it (little damming needed), as a cirque holds a tarn below a
    * peak; the river leaves it through a notch in its rim. Found once the courses are traced, which never move: only the
    * stretch above the tarn is dropped. Above the snowline they are frozen.
@@ -789,7 +789,7 @@ export class GroundQuery {
     const top = this.island.roads?.top(x, z);
     if (top !== null && top !== undefined) return top;
     // beside a bridge the grid's cells hold its deck too: the water there would seem to rise to it (swimmers were lifted
-    // onto decks, 2026-10-05) - the exact height instead
+    // onto decks, 2026-10-05) — the exact height instead
     const dk = this.island.roads?.deckAt(x, z, CELL_M * 1.5);
     if (dk !== null && dk !== undefined) return this.island.height(x, z);
     const gx = x / CELL_M, gz = z / CELL_M, ix = Math.floor(gx), iz = Math.floor(gz), fx = gx - ix, fz = gz - iz;
@@ -799,8 +799,8 @@ export class GroundQuery {
     return h00 + (h10 - h00) * fx + (h01 - h00) * fz + (h00 - h10 - h01 + h11) * fx * fz;
   }
   water(x, z) { return this.island.waterAt(x, z); }
-  /** For a body whose feet are at y more than 1.5 m under a bridge's deck: { h, water, deck } - the ground and the water
-   *  beneath the bridge (2026-10-05: swimming under a bridge lifted the swimmer onto its deck) - else null. */
+  /** For a body whose feet are at y more than 1.5 m under a bridge's deck: { h, water, deck } — the ground and the water
+   *  beneath the bridge (2026-10-05: swimming under a bridge lifted the swimmer onto its deck) — else null. */
   under(x, z, y) {
     const deck = this.island.roads?.deckAt(x, z);
     if (deck === null || deck === undefined || !(y < deck - 1.5)) return null;

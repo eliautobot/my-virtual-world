@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Headless simulation benchmark with a virtual clock: node tools/simbench.mjs [population] [worldHours]
 import { generateWorld } from '../server/world/generate.js';
 import { generatePopulation } from '../server/sim/population.js';

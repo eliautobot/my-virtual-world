@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The food and drink pack (shared/food.js) and its models (client/js/render/food-models.js): numbers that travel on the
 // wire never move, every item has a model and every drink a glass someone can hold, every kind of place's menu is made
 // of known items, what residents order comes from the menu they were given (same order for the same who and when), and

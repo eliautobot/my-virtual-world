@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.14 lots along roads beyond the city and WP4.6 building on them, on real requests (wp4-world-spec.md §5.0, §5.5,
 // §9): administrators plat standard lots beside a road and retire unused ones; members can't; a building on an island
 // lot faces its road on a level pad; newcomers arrive and the simulation keeps running without errors; undo and redo.
@@ -87,7 +87,7 @@ test('island lots: platting, building on one, residents, undo and redo, retiring
     assert.equal(denied.status, 403, 'members do not build on city land');
 
     // Its flats count among the city's homes; no one arrives at once (the residents follow the homes by themselves,
-    // server/sim/housing.js - off in tests, tests/unit/housing.test.mjs); the simulation runs on without errors.
+    // server/sim/housing.js — off in tests, tests/unit/housing.test.mjs); the simulation runs on without errors.
     const pop = (await owner.get('/api/population')).json;
     assert.ok(pop.beds > 0 && pop.target >= 0, `its homes counted: ${JSON.stringify(pop)}`);
     const before = (await owner.get('/api/people')).json.people.length;

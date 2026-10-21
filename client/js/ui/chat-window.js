@@ -1,21 +1,21 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A chat window (docs/features/CHAT.md §6–§7): the world's own, ChatGPT/Claude-like; up to four are open at once, each
 // made here (create) and kept by the manager, ui/chat.js. Each is a window on the chats this account has with the
-// agents it may use: a list of the agent's chats (pinned first, by day, searchable) and the open chat - its answer
+// agents it may use: a list of the agent's chats (pinned first, by day, searchable) and the open chat — its answer
 // written as it comes (the socket's pieces; the events route as a fallback), Markdown with code
 // blocks to copy, the reasoning a model shows, the steps it took, what it took (model, tokens, cost, time); Stop; edit a
 // message, write an answer again; attachments (any file: pick, drop, paste; images shrunk before they go); the chat's
-// own model and thinking effort; voice - dictation, read aloud and voice mode (chat-voice.js). Everything it shows comes
+// own model and thinking effort; voice — dictation, read aloud and voice mode (chat-voice.js). Everything it shows comes
 // from the server, which decides who may chat with what.
 // Opened by the manager for every way of talking to someone (the selection card's Talk, the right-click menu's Talk, the
 // Agent Studio's Chat, the floating 💬 button, the team list); who can't chat is told in one line.
-// Agent Providers (docs/features/agent-providers.md §4): an agent of a provider (OpenClaw) brings more - what a run is
+// Agent Providers (docs/features/agent-providers.md §4): an agent of a provider (OpenClaw) brings more — what a run is
 // doing before it writes, each step as a card (its title and kind, its command, its output as it comes, how it ended),
 // approvals with the provider's own choices (allow once, always, deny), the thinking levels its models have, and the
 // context meter; its history is the provider's (no editing or writing again: caps.rewrite false).
-// (2026-10-08, §12) A floating window - the first at the bottom right, the others beside it; sized from any edge or
-// corner (2026-10-18), moved by its header - or full screen (⛶; always on a phone), or put away ( - ) to its button by 💬; see-through as Settings → Display says; the Sidebar lists the
-// open agent's own chats and holds the tools (Search, Projects, Library, Notifications, and its PC - in the side panel); the header finds the agent in
+// (2026-10-08, §12) A floating window — the first at the bottom right, the others beside it; sized from any edge or
+// corner (2026-10-18), moved by its header — or full screen (⛶; always on a phone), or put away (—) to its button by 💬; see-through as Settings → Display says; the Sidebar lists the
+// open agent's own chats and holds the tools (Search, Projects, Library, Notifications, and its PC — in the side panel); the header finds the agent in
 // the world and opens its Agent Studio; a rail of ticks at the right edge goes back to any message the person sent.
 import { S, select } from '../core/state.js';
 import { getJSON, post } from '../core/net.js';
@@ -34,10 +34,10 @@ import * as hermesView from './providers/hermes-chat.js';
 
 let app;   // (the page: given by create)
 // (Agent Providers: the window is the same for every agent; a provider with a view of its own lays its turns out the way
-// its own app does - Hermes as Hermes Desktop. Others: the window's own drawing.)
+// its own app does — Hermes as Hermes Desktop. Others: the window's own drawing.)
 const VIEWS = { hermes: hermesView };
 const SUGGEST = ['What have you been up to today?', 'Help me plan my week', 'Summarise a document for me', 'Explain this like I\'m five'];
-// (its owner's chats are at Work or in Life - CHAT.md §13: what to ask it differs)
+// (its owner's chats are at Work or in Life — CHAT.md §13: what to ask it differs)
 const SUGGEST_MODE = { work: ['Help me plan my week', 'Draft an email for me', 'Summarise a document for me', 'Explain this like I\'m five'],
   life: ['What have you been up to today?', 'How is life in the city?', 'Help me plan my week', 'Explain this like I\'m five'] };
 // (an agent of an agent provider: a working assistant, not a resident)
@@ -68,24 +68,24 @@ export function room() {
   return {
     top: Math.max(css + GAP, selB),
     right: docksInset.r + (fbW ? 12 + fbW + GAP : 16),
-    // (the left side panel's edge button, beside it open or closed, near the top: its strip kept clear - ui/docks.js)
+    // (the left side panel's edge button, beside it open or closed, near the top: its strip kept clear — ui/docks.js)
     left: docksInset.l + (docksInset.l || docksInset.tl ? EDGE_BTN : 0) + GAP,
     bottom: 16,
   };
 }
-/** The person's Side by side: `n` windows across the room, left to right, each its full height - as wide as the room
+/** The person's Side by side: `n` windows across the room, left to right, each its full height — as wide as the room
  *  shares out, never under MIN_W (then they overlap evenly). Each { w, h, r, b }, the leftmost first. */
 export function tiles(n) {
   const R = room(), availW = Math.max(200, innerWidth - R.left - R.right), availH = Math.max(200, innerHeight - R.top - R.bottom);
   const w = Math.max(Math.min(MIN_W, availW), Math.floor((availW - GAP * (n - 1)) / n)), step = n > 1 ? Math.min(w + GAP, (availW - w) / (n - 1)) : 0;
   return Array.from({ length: n }, (_, k) => ({ w, h: availH, r: Math.max(0, Math.round(availW - w - k * step)), b: 0 }));
 }
-/** A side question or background task a chat started, answered (Hermes' /btw, /bg): kept with its chat once - shown in
+/** A side question or background task a chat started, answered (Hermes' /btw, /bg): kept with its chat once — shown in
  *  the window that has that chat open (ctx), if one does. */
 export function sideAnswer(m, ctx) { for (const v of new Set(Object.values(VIEWS))) v.onSide?.(m, ctx); }
 /** Where a new floating window goes (w × h, in a room availW × availH; `others`: the windows floating there, each
  *  { w, h, r, b } from the room's right and bottom edges, the top one last): along the bottom from the right, in the first
- *  gap none of them covers - at its size, else narrowed to the gap (not under MIN_W); with no gap, a step up and in from
+ *  gap none of them covers — at its size, else narrowed to the gap (not under MIN_W); with no gap, a step up and in from
  *  the top one, over them. Only where it opens: once open, nothing but the person moves it. */
 function spotFor(w, h, availW, availH, others) {
   w = Math.min(w, availW); h = Math.min(h, availH);
@@ -155,13 +155,13 @@ function metaLine(meta) {
 }
 /**
  * The answer being written: this chat's own run, or (observed) one the provider runs from another channel. Drawn once as a
- * frame of parts - its reasoning, its steps, its text, what waits for the person - then kept up to date part by
+ * frame of parts — its reasoning, its steps, its text, what waits for the person — then kept up to date part by
  * part (updateLive): only a part that changed is touched, the text only from its first changed paragraph, at most LIVE_MS
- * apart (2026-10-16: "my GPU is screaming while the chat works" - the whole answer was drawn again for every piece).
+ * apart (2026-10-16: "my GPU is screaming while the chat works" — the whole answer was drawn again for every piece).
  */
 const LIVE_MS = 80;        // ≈12 updates a second while it writes
 const RECENT_STEPS = 3;    // finished steps shown as cards; the ones before fold into one row
-/** Puts `html` into the live answer's part `name` - only when it differs from what is there. */
+/** Puts `html` into the live answer's part `name` — only when it differs from what is there. */
 function setPart(live, name, html) {
   const el = live.querySelector(`[data-part="${name}"]`);
   if (!el || el._h === html) return false;
@@ -172,7 +172,7 @@ function setPart(live, name, html) {
  * The task progress card, in the composer (OpenClaw's own: the agent's notes and checklist, sliding up from the message
  * box), kept up to date as the agent works, and when a refresh or another channel changes it. As OpenClaw shows it: open
  * on a wide screen until every step is done, opening again when a turn starts or ends; folded on a phone; folded by
- * itself when the person scrolls back through the conversation - unless they opened it again twice there. Their own
+ * itself when the person scrolls back through the conversation — unless they opened it again twice there. Their own
  * open or fold stands for that chat while the page is open. Folded, it is one row: the step under way and how far along.
  * Drawn again only when what it shows changed; opening and folding only moves it.
  */
@@ -223,9 +223,9 @@ const nap = (R, ms) => new Promise(resolve => { const t = setTimeout(resolve, ms
 /**
  * One chat window (the manager, ui/chat.js, keeps up to four): its own agent and chat, Sidebar, side panel, composer,
  * files, model and effort, voice, and the provider's own view of the turns (Hermes as Hermes Desktop; OpenClaw's cards).
- * mgr: the manager's hooks - front (to the top), changed (its button and the saved windows follow), closed, holder (the
+ * mgr: the manager's hooks — front (to the top), changed (its button and the saved windows follow), closed, holder (the
  * window already showing a chat), open (another window), rects (where the others float), claimVoice (one window speaks
- * or listens at a time), count. o: how it opens - { geo, mode, min, side, dock, draft } when it comes back with the page.
+ * or listens at a time), count. o: how it opens — { geo, mode, min, side, dock, draft } when it comes back with the page.
  */
 export function create(a, mgr, o = {}) {
   app = a;
@@ -244,7 +244,7 @@ export function create(a, mgr, o = {}) {
     get el() { return W.el; }, get agentId() { return W?.agentId ?? null; }, get agent() { return W ? agentRec(W.agentId) : null; }, get session() { return W?.session || null; },
     input: () => $w('.cw-in'), grow: () => grow(), paintSend: () => paintSend(), toast: (m, kind = '', ms = 3800, ic) => app.toast?.(m, kind, ms, ic),
     say: text => sendVoice(text), stop: () => stop(), run: () => W?.run || null, focus: () => { if (W && !touch()) $w('.cw-in').focus(); },
-    /** Its name over its head in the world glows with how loud it talks (0–1; null: no more) - render/labels.js. */
+    /** Its name over its head in the world glows with how loud it talks (0–1; null: no more) — render/labels.js. */
     labelGlow: lv => app.labels?.voice?.(lv === null || !W ? -1 : agentRec(W.agentId)?.i ?? -1, lv || 0),
     can: () => W?.can || null, wide: () => !!W?.wide,
     /** It begins to listen or speak: the other windows stop theirs (one microphone, one voice at a time). */
@@ -253,14 +253,14 @@ export function create(a, mgr, o = {}) {
     changed: () => mgr.changed(me),
   };
 
-  /** Shows agent `id` - its latest chat (latest: false - a new one), or `session` - or, with no agent named, the account's
+  /** Shows agent `id` — its latest chat (latest: false — a new one), or `session` — or, with no agent named, the account's
    *  most recent chat. quiet: coming back with the page (a chat it may no longer have closes the window without a word). */
   async function show(id = null, { session = null, latest = !session, onClose = null, project = null, quiet = false } = {}) {
     if (!W) build();
     if (onClose) W.onClose = onClose;
     const tok = ++W.token;
     if (id === null) {
-      // the most recent chat's agent (or the first it may chat with) - one no other window shows
+      // the most recent chat's agent (or the first it may chat with) — one no other window shows
       let recent = [];
       try { recent = (await getJSON('/api/chat/recent')).sessions || []; } catch { /* none */ }
       if (!W || tok !== W.token) return;
@@ -283,7 +283,7 @@ export function create(a, mgr, o = {}) {
 
   /** Shows agent `id`'s chat `sessionId` (null: a new chat, made when the first message is sent). */
   async function pick(id, sessionId, { latest = false, project = null, quiet = false } = {}) {
-    // (a chat another window shows: that window comes forward - one chat is never in two windows)
+    // (a chat another window shows: that window comes forward — one chat is never in two windows)
     const elsewhere = sessionId ? mgr.holder(id, sessionId, me) : null;
     if (elsewhere) { mgr.front(elsewhere, { reveal: true }); if (!W.agentId) close(); return; }
     const tok = ++W.token;
@@ -305,7 +305,7 @@ export function create(a, mgr, o = {}) {
     paintKind();
     head(); paintThread(); paintComposer(); W.dock?.sync();
     if (other) loadNotes();
-    // (asked together, not one after another: whether it may chat, its chats and - a chat named - that chat's messages;
+    // (asked together, not one after another: whether it may chat, its chats and — a chat named — that chat's messages;
     // each round trip waited for the one before, three in a row on a phone's network)
     const canP = getJSON(`/api/chat/can?agent=${id}`).catch(e => ({ ok: false, message: e.message }));
     const listP = loadList(tok);
@@ -317,7 +317,7 @@ export function create(a, mgr, o = {}) {
     paintKind();
     await listP;
     if (!W || tok !== W.token) return;
-    // (its latest chat - unless another window shows it: then a new one here, beside it)
+    // (its latest chat — unless another window shows it: then a new one here, beside it)
     if (latest && !sessionId) { const s0 = W.sessions[0]; sessionId = s0 && !mgr.holder(id, s0.id, me) ? s0.id : null; W.want = sessionId; }
     if (W.view === 'project') loadProject(W.projectId);
     if (!can.ok) { const rec = agentRec(id); if (!can.fix && !W.sessions.some(s => s.agentId === id)) { close(); return quiet ? undefined : app.toast?.(can.message, '', 4500, '💬'); } blocked(can, rec); head(); return; }
@@ -349,21 +349,21 @@ export function create(a, mgr, o = {}) {
       const j = await (started || historyOf(W.agentId, W.session.id));
       if (!W || tok !== W.token) return;
       W.messages = (j.messages || []).filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'system');
-      // (a provider's own messages carry no id of this installation's: each gets one for this page - below zero, never a
-      // transcript id - so its actions, copy and read aloud find it)
+      // (a provider's own messages carry no id of this installation's: each gets one for this page — below zero, never a
+      // transcript id — so its actions, copy and read aloud find it)
       let pid = 0;
       for (const m of W.messages) if (m.id === undefined || m.id === null) m.id = -(++pid);
-      // (a provider view's own lines among them - Hermes: what its commands said, kept for the page's life)
+      // (a provider view's own lines among them — Hermes: what its commands said, kept for the page's life)
       if (view()?.withNotes) W.messages = view().withNotes(W.session.id, W.messages);
       W.usage = j.usage || null; W.prov = j.session || null;   // (a provider's: the context meter, the session's own model and thinking)
       W.plan = j.plan && ((j.plan.steps && j.plan.steps.length) || j.plan.markdown) ? j.plan : null;   // (… and its progress card)
       W.planCan = j.planCan || {};
-      W.liveRun = j.live || null;   // (an answer of this person's still being written here: followed - attachRun)
+      W.liveRun = j.live || null;   // (an answer of this person's still being written here: followed — attachRun)
       if (W.liveRun && !W.run && !W.sending && !W.queued.some(q => q.id === W.liveRun)) attachRun(W.liveRun, { reload: false });
       if (!W.obs || W.obs.observed) watchSession();
       W.dock.sync();   // (another chat: its background tasks)
       post('/api/notifications/read', { agent: W.agentId, session: W.session.id }).catch(() => {});   // (what told of this chat is read)
-      view()?.loaded?.(cctx());   // (a provider view's own reading for the chat - Hermes: its commands)
+      view()?.loaded?.(cctx());   // (a provider view's own reading for the chat — Hermes: its commands)
       await apprStatus();
     } catch (e) { if (W && tok === W.token) W.messages = [{ role: 'system', text: e.message }]; }
   }
@@ -384,7 +384,7 @@ export function create(a, mgr, o = {}) {
     try { const m = await getJSON(`/api/providers/models?agent=${W.agentId}`); if (W && tok === W.token) { W.models = m; paintComposer(); } } catch { /* the picker stays on the default */ }
   }
 
-  /** keep: closed with the page's account (signed out), not by the person - it comes back with the account. */
+  /** keep: closed with the page's account (signed out), not by the person — it comes back with the account. */
   function close({ keep = false } = {}) {
     if (!W) return;
     const w = W; W = null;
@@ -454,8 +454,8 @@ export function create(a, mgr, o = {}) {
               <button type="button" class="cw-tool cw-effort" aria-haspopup="listbox" title="Thinking effort"><span aria-hidden="true">💡</span> <span class="cw-tool-lb">Default</span> ▾</button>
               <button type="button" class="cw-tool cw-ctx hidden" title="Context"><svg class="cw-ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8"/><circle class="cw-ring-v" cx="10" cy="10" r="8"/></svg><span class="cw-tool-lb">0%</span></button>
               <div class="cw-cmode hidden" role="radiogroup" aria-label="Work or Life">
-                <button type="button" class="cw-tool" data-cm="work" role="radio" aria-checked="false" title="Work: on the job for you - the real date and time, its job, what it knows and its notes; nothing of its city life"><span aria-hidden="true">💼</span><span class="cw-tool-lb">Work</span></button>
-                <button type="button" class="cw-tool" data-cm="life" role="radio" aria-checked="false" title="Life: the resident of the city - its own life, plans and memories, and its city tools"><span aria-hidden="true">🏠</span><span class="cw-tool-lb">Life</span></button></div>
+                <button type="button" class="cw-tool" data-cm="work" role="radio" aria-checked="false" title="Work: on the job for you — the real date and time, its job, what it knows and its notes; nothing of its city life"><span aria-hidden="true">💼</span><span class="cw-tool-lb">Work</span></button>
+                <button type="button" class="cw-tool" data-cm="life" role="radio" aria-checked="false" title="Life: the resident of the city — its own life, plans and memories, and its city tools"><span aria-hidden="true">🏠</span><span class="cw-tool-lb">Life</span></button></div>
               <div class="cw-tools-r">
                 <button type="button" class="cw-tool cw-vm-state hidden" aria-live="polite"></button>
                 <button type="button" class="cw-tool cw-mic" title="Dictate: say it, it is written here" aria-label="Dictate" aria-pressed="false">🎤</button>
@@ -471,7 +471,7 @@ export function create(a, mgr, o = {}) {
       <aside class="cw-dock" aria-label="Side panel" hidden></aside>
     </div></div>`));
     W = { el, token: 0, agentId: null, session: null, sessions: [], projects: [], messages: [], run: null, queued: [], done: new Set(), sending: 0, files: [], can: null, models: null, pending: { model: null, effort: null, mode: null },
-      usage: null, prov: null, steps: new Map(), stepSeen: new Map(), folds: new Map(), cards: new Map(), tabShots: new Map(), planCan: {}, plan: null, commands: null,   // (plan: the session's progress card; commands: the agent's / menu)   // (stepSeen: what a step showed as it ran - its title, exit code, time: the history keeps only its tool's name and output)   // (Agent Providers: the context meter, the provider's own session settings, the steps a person opened or closed)
+      usage: null, prov: null, steps: new Map(), stepSeen: new Map(), folds: new Map(), cards: new Map(), tabShots: new Map(), planCan: {}, plan: null, commands: null,   // (plan: the session's progress card; commands: the agent's / menu)   // (stepSeen: what a step showed as it ran — its title, exit code, time: the history keeps only its tool's name and output)   // (Agent Providers: the context meter, the provider's own session settings, the steps a person opened or closed)
       pop: null, view: 'chats', search: '', hits: null, stick: true, onClose: null, editing: null, apprs: new Map(), early: [], newIn: null, library: null,
       // (its place: as it was when it comes back with the page; a first window as the last one was; another beside them)
       choice: o.mode === 'max' || o.mode === 'float' ? o.mode : mgr.count() <= 1 && store.get(MODE_KEY, 'float') === 'max' ? 'max' : 'float', mode: null, geo: o.geo || null,
@@ -492,7 +492,7 @@ export function create(a, mgr, o = {}) {
     $('.cw-side-x').onclick = () => toggleSide(false);
     $('.cw-agent').onclick = e => agentMenu(e.currentTarget);
     $('.cw-find').onclick = findAgent;
-    // (its Agent Studio over the world: the window put away meanwhile - its chat as it was, by the 💬 button)
+    // (its Agent Studio over the world: the window put away meanwhile — its chat as it was, by the 💬 button)
     $('.cw-studio').onclick = () => { const id = W.agentId; setMin(true); app.studio?.open(id, 'overview'); };
     $('.cw-max').onclick = () => setMode(W.mode === 'max' ? 'float' : 'max');
     $('.cw-head').addEventListener('dblclick', e => { if (!e.target.closest('button') && !phone()) setMode(W.mode === 'max' ? 'float' : 'max'); });
@@ -532,19 +532,19 @@ export function create(a, mgr, o = {}) {
       if (W.pop?.classList.contains('cw-pop-cmds')) {
         const items = [...W.pop.querySelectorAll('[data-k]')];
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); W.cmdAt = (W.cmdAt + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length; items.forEach((b, k) => b.classList.toggle('hl', k === W.cmdAt)); items[W.cmdAt]?.scrollIntoView({ block: 'nearest' }); return; }
-        // (Enter on what is already written in full - a command typed out: that one, whichever is highlighted)
+        // (Enter on what is already written in full — a command typed out: that one, whichever is highlighted)
         const exact = e.key === 'Enter' ? items.find(b => b.dataset.ins !== undefined && b.dataset.ins.trim() === input.value.trim()) : null;
         if ((e.key === 'Enter' && !e.shiftKey && !e.isComposing) || e.key === 'Tab') { e.preventDefault(); (exact || items[W.cmdAt])?.click(); return; }
         if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePop(); return; }
       }
-      // (a provider's own Esc while it works - Hermes: stop the turn, as its Desktop)
+      // (a provider's own Esc while it works — Hermes: stop the turn, as its Desktop)
       if (e.key === 'Escape' && !W.voice.dictating && view()?.escape?.(cctx())) { e.preventDefault(); e.stopPropagation(); return; }
       if (W.voice.dictating) {
         // while dictating: Enter is done, Esc puts the text back as it was
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); W.voice.finishDictation(); return; }
         if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); W.voice.cancelDictation(); return; }
       }
-      // Enter sends - on a phone too: its keyboard shows a send key (enterkeyhint) and that key sends; Shift+Enter is a new
+      // Enter sends — on a phone too: its keyboard shows a send key (enterkeyhint) and that key sends; Shift+Enter is a new
       // line (2026-10-20: the phone's send key wrote a new line, and Enter was ignored while the agent was still answering)
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
@@ -582,7 +582,7 @@ export function create(a, mgr, o = {}) {
     $('.cw-navs').addEventListener('click', e => {
       const b = e.target.closest('.cw-nav');
       if (!b) return;
-      // (its PC: in the side panel beside the chat - a Sidebar over the chat steps aside for it)
+      // (its PC: in the side panel beside the chat — a Sidebar over the chat steps aside for it)
       if (b.dataset.pc) { if (W.dock.isOpen() && W.dock.tab() === 'pc') W.dock.toggle(false); else { W.dock.openPc(); if (!W.wide) toggleSide(false); } return; }
       setView(W.view === b.dataset.view ? 'chats' : b.dataset.view);
     });
@@ -602,7 +602,7 @@ export function create(a, mgr, o = {}) {
     // moving and resizing (floating): the header moves it, every edge and corner sizes it
     $('.cw-head').addEventListener('pointerdown', e => { if (W.mode === 'float' && e.button === 0 && !e.target.closest('button, input, select, textarea')) drag(e, 'move'); });
     for (const g of el.querySelectorAll('.cw-grip')) g.addEventListener('pointerdown', e => { if (W.mode === 'float' && e.button === 0) drag(e, g.dataset.grip); });
-    // the Sidebar sits beside the chat when there is room, over it (a drawer) when there isn't - at every size
+    // the Sidebar sits beside the chat when there is room, over it (a drawer) when there isn't — at every size
     W.ro = new ResizeObserver(() => { if (!W) return; const wide = $('.chatwin').getBoundingClientRect().width >= WIDE_PX; if (wide !== W.wide) { W.wide = wide; layout(); } else W.dock.layout(); });
     W.ro.observe($('.chatwin'));
     if (o.side) $('.chatwin').classList.add('side-hidden');
@@ -621,7 +621,7 @@ export function create(a, mgr, o = {}) {
     if (save) store.set(MODE_KEY, choice);
     const mode = phone() ? 'max' : choice;
     W.mode = mode;
-    // (put away: neither over the world nor floating - the world goes on drawing; ui/main.js covered)
+    // (put away: neither over the world nor floating — the world goes on drawing; ui/main.js covered)
     W.el.classList.toggle('min', W.min);
     W.el.classList.toggle('modal-back', mode === 'max' && !W.min);
     W.el.classList.toggle('floating', mode === 'float' && !W.min);
@@ -645,7 +645,7 @@ export function create(a, mgr, o = {}) {
     else { mgr.front(me); if (!touch()) $w('.cw-in').focus(); }
   }
   /** The floating window's place and size. What the person chose (W.geo: its size, and how far it sits from the room's
-   *  right and bottom edges - kept with the window) is shown as far as the room allows: a panel opening moves it aside
+   *  right and bottom edges — kept with the window) is shown as far as the room allows: a panel opening moves it aside
    *  first and sizes it down only when it must; when the panel closes it goes back. Nothing else ever moves it: no
    *  snapping, no rearranging when another window opens or closes. */
   function place() {
@@ -798,7 +798,7 @@ export function create(a, mgr, o = {}) {
     } catch (e) { if (W && W.projectId === id) { app.toast?.(e.message, 'bad'); W.projects = W.projects.filter(p => p.id !== id); W.view = 'projects'; } }
     if (W) paintSide();
   }
-  /** This agent's notifications - what it asked for (approvals), told its owner or answered while they were away - and
+  /** This agent's notifications — what it asked for (approvals), told its owner or answered while they were away — and
    *  how many are unread; the top bar's bell holds every agent's. */
   async function loadNotes() {
     if (!W || !W.agentId || !auth.account) return;
@@ -847,7 +847,7 @@ export function create(a, mgr, o = {}) {
     } else if (v === 'projects') {
       L.innerHTML = W.projects.length ? W.projects.map(p => `<button type="button" class="cw-item cw-proj-item" data-proj="${p.id}" role="listitem"><span class="cw-proj-ic" aria-hidden="true">📂</span>
         <span class="cw-item-t" data-noicon>${esc(p.name)}</span><span class="cw-item-n">${p.chats ? plural(p.chats, 'chat') : 'empty'}</span></button>`).join('')
-        : `<div class="cw-empty">A project keeps the chats about one thing together, with instructions ${esc(name)} follows in each of them - “we're planning the bakery; answer in Spanish”.<br><button type="button" class="btn small primary" data-a="proj-new">＋ New project</button></div>`;
+        : `<div class="cw-empty">A project keeps the chats about one thing together, with instructions ${esc(name)} follows in each of them — “we're planning the bakery; answer in Spanish”.<br><button type="button" class="btn small primary" data-a="proj-new">＋ New project</button></div>`;
     } else if (v === 'project') {
       const ta = L.querySelector('.cw-proj-in'), kept = ta && Number(ta.dataset.p) === proj.id && ta.value !== proj.instructions ? ta.value : null;
       L.innerHTML = `<div class="cw-proj"><label class="cw-proj-l" for="cw-proj-in-${me.id}">Instructions for every chat in this project</label>
@@ -885,12 +885,12 @@ export function create(a, mgr, o = {}) {
       const g = s.pinned ? 'Pinned' : dayGroup(s.updated);
       if (g !== group) { html += `<div class="cw-group">${esc(g)}</div>`; group = g; }
       const p = chip ? projOf(s.projectId) : null;
-      // (a chat the agent is working in now - an answer being written, or its provider running a turn there from anywhere)
+      // (a chat the agent is working in now — an answer being written, or its provider running a turn there from anywhere)
       const busy = s.working || (W.session && W.session.id === s.id && !!(W.run || W.obs));
-      // (waiting: for the person - an approval, a question; a provider view marks it apart, as its app does)
+      // (waiting: for the person — an approval, a question; a provider view marks it apart, as its app does)
       const waiting = s.working === 'waiting' || (W.session && W.session.id === s.id && W.run && cctx().blocking());
       const pv = view();
-      // (a chat another window shows: marked - opening it brings that window forward)
+      // (a chat another window shows: marked — opening it brings that window forward)
       const there = !(W.session && W.session.id === s.id) && !!mgr.holder(W.agentId, s.id, me);
       html += `<div class="cw-item${W.session && W.session.id === s.id ? ' on' : ''}${busy ? ' working' : ''}${waiting ? ' waiting' : ''}${there ? ' elsewhere' : ''}" role="listitem"><button type="button" class="cw-item-open" data-open="${s.id}">
         ${busy ? `<span class="cw-item-w" role="img" aria-label="${waiting ? 'Waiting for you' : 'Working'}" title="${waiting ? 'Waiting for you' : 'Working now'}"></span>` : ''}<span class="cw-item-t" data-noicon>${esc(s.label)}</span>${there ? `<span class="cw-item-win" title="Open in another window" aria-label="Open in another window">${icon('windows')}</span>` : ''}${p ? `<span class="cw-item-p" title="In the project ${esc(p.name)}" data-noicon>${esc(p.name)}</span>` : ''}${pv?.since ? `<span class="cw-item-ago">${esc(pv.since(s.updated))}</span>` : ''}</button>
@@ -1079,7 +1079,7 @@ export function create(a, mgr, o = {}) {
     } });
   }
   function chatMenu(anchor, s) {
-    // (a provider's own chat actions - Hermes: Branch, Copy ID, Archive, as its Desktop's chat menu - beside the window's)
+    // (a provider's own chat actions — Hermes: Branch, Copy ID, Archive, as its Desktop's chat menu — beside the window's)
     const caps = W.can?.caps || {}, provider = s.key && s.key !== '@new';
     const own = view() && provider ? [
       ...(caps.branch ? [{ label: 'Branch', sub: 'The whole chat, in a new one', run: () => branchChat(s) }] : []),
@@ -1136,7 +1136,7 @@ export function create(a, mgr, o = {}) {
       await refreshList(); head();
     } catch (e) { app.toast?.(e.message, 'bad'); }
   }
-  /** The chat as Markdown: who said what, when, and the files sent - downloaded to this device. */
+  /** The chat as Markdown: who said what, when, and the files sent — downloaded to this device. */
   async function exportChat(s) {
     let msgs = W.session?.id === s.id ? W.messages : null;
     if (!msgs) { try { msgs = (await getJSON(`/api/providers/history?agent=${s.agentId}&session=${s.id}`)).messages || []; } catch (e) { return app.toast?.(e.message, 'bad'); } }
@@ -1144,7 +1144,7 @@ export function create(a, mgr, o = {}) {
     const out = [`# ${s.label}`, '', `A chat with ${rec?.name || 'an agent'} · exported ${new Date().toLocaleString()}`, ''];
     for (const m of msgs) {
       if (m.role !== 'user' && m.role !== 'assistant') continue;
-      out.push(`## ${m.role === 'user' ? me : rec?.name || 'Agent'}${m.ts ? ` - ${when(m.ts)}` : ''}`, '');
+      out.push(`## ${m.role === 'user' ? me : rec?.name || 'Agent'}${m.ts ? ` — ${when(m.ts)}` : ''}`, '');
       if (m.text) out.push(m.text, '');
       for (const f of m.meta?.attachments || []) out.push(`- Attached: ${f.name}`);
       if (m.meta?.attachments?.length) out.push('');
@@ -1177,7 +1177,7 @@ export function create(a, mgr, o = {}) {
     else W.pending[k] = v;
     paintComposer();
   }
-  /** The / menu: while the message is a slash command being typed, the agent's commands that start so (a provider's -
+  /** The / menu: while the message is a slash command being typed, the agent's commands that start so (a provider's —
    *  OpenClaw's /help, /status, /skill…), each with what it does; picking one writes it. */
   async function cmdMenu() {
     const pv = view();
@@ -1198,7 +1198,7 @@ export function create(a, mgr, o = {}) {
     p.querySelector('[data-k]')?.classList.add('hl');
   }
   /** A provider view's own suggestions as the composer is typed into (Hermes: its / commands and @references, as its Desktop
-   *  suggests them), in groups; picking one writes it in place of what it completes - and suggests on from there when it
+   *  suggests them), in groups; picking one writes it in place of what it completes — and suggests on from there when it
    *  is only the start of one (@file: → the files). Enter on one that is already written in full sends it. */
   let pvSeq = 0;
   async function pvMenu(pv) {
@@ -1322,7 +1322,7 @@ export function create(a, mgr, o = {}) {
   /** A picture of an answer, large, over the chat: ← → through that answer's pictures, Esc (or a click outside) to close. */
   /**
    * The browser tabs an answer's steps left (the agent opened or went to a page), as OpenClaw's Control UI shows them: a card
-   * for each tab - the latest step's - with its title and address; Open shows it in the side panel's Browser tab, Copy URL,
+   * for each tab — the latest step's — with its title and address; Open shows it in the side panel's Browser tab, Copy URL,
    * Open in new tab. The chat's latest card shows the page itself (tabShot).
    */
   function tabCardsHtml(steps) {
@@ -1368,7 +1368,7 @@ export function create(a, mgr, o = {}) {
   function viewImage(a) {
     const all = [...a.closest('.cw-media').querySelectorAll('.cw-mimg')];
     let k = Math.max(0, all.indexOf(a));
-    // (as OpenClaw's viewer: the picture fitted, or zoomed - − and +, Ctrl+wheel, + − 0 keys; the % fits it again; download, copy)
+    // (as OpenClaw's viewer: the picture fitted, or zoomed — − and +, Ctrl+wheel, + − 0 keys; the % fits it again; download, copy)
     const v = h(`<div class="cw-viewer" role="dialog" aria-modal="true" aria-label="Image" tabindex="-1">
       <div class="cw-vstage"><img alt="" draggable="false"></div><div class="cw-vbar"><span class="cw-vname"></span>
       <button type="button" class="cw-ic" data-v="prev" aria-label="Previous image">‹</button><button type="button" class="cw-ic" data-v="next" aria-label="Next image">›</button>
@@ -1563,7 +1563,7 @@ export function create(a, mgr, o = {}) {
     if (!R && c.run && c.ended !== c.run) { c.ended = c.run; if (c.manual === undefined && !W.cardReading) c.auto = !narrow() || c.auto; }
     const rf = c.refresh, live = !!R;
     if (rf && rf.state === 'pending' && rf.accepted && Number.isInteger(p.revision) && p.revision > rf.baseline) { clearTimeout(rf.timer); rf.state = 'updated'; rf.fade = setTimeout(() => { if (c.refresh === rf) { c.refresh = null; paintCard(); } }, 5000); }
-    // (as OpenClaw counts: the step under way - else the next, else the last done - as "2 of 3"; when, as "Updated 5m ago")
+    // (as OpenClaw counts: the step under way — else the next, else the last done — as "2 of 3"; when, as "Updated 5m ago")
     const cur = steps.find(x => x.status === 'in_progress') || steps.find(x => x.status === 'pending') || steps.findLast(x => x.status === 'completed');
     const pos = Math.max(1, steps.indexOf(cur) + 1), at = Math.max(p.updatedAt || 0, p.at || 0), when = at ? `Updated ${updatedAgo(at)}` : '';
     const now = cardNow(p, steps, complete), marker = complete ? 'done' : steps.some(x => x.status === 'in_progress') ? (live ? 'now' : 'paused') : 'todo';
@@ -1606,7 +1606,7 @@ export function create(a, mgr, o = {}) {
       c.manual = open; if (open && W.cardReading) c.reopens += 1;
       paintCard();
     } else if (b.dataset.a === 'card-refresh' && sess && c.refresh?.state !== 'pending') {
-      // (a retry after no answer is the same request - the gateway answers it once; after a failure, a new one)
+      // (a retry after no answer is the same request — the gateway answers it once; after a failure, a new one)
       const was = c.refresh, key = was && was.state === 'timeout' ? was.key : requestKey();
       clearTimeout(was?.timer); clearTimeout(was?.fade);
       const rf = c.refresh = { state: 'pending', key, baseline: was && was.state === 'timeout' ? was.baseline : (W.plan?.revision || 0), accepted: false };
@@ -1631,7 +1631,7 @@ export function create(a, mgr, o = {}) {
     }
   }
   /** What the agent asks (a provider's questions): each with its options (one, or several), a free answer where it takes
-   *  one, a secret's field; Send answer and Skip - or, once answered, what was answered. */
+   *  one, a secret's field; Send answer and Skip — or, once answered, what was answered. */
   function questionHtml(q) {
     const pending = q.status === 'pending';
     const html = `<div class="cw-q-head"><span aria-hidden="true">❓</span> <b>${pending ? `${esc(agentRec(W.agentId)?.name || 'It')} asks you` : 'It asked you'}</b></div>
@@ -1658,9 +1658,9 @@ export function create(a, mgr, o = {}) {
   /** Whether this chat's messages can be edited and written again (a provider that keeps the history itself: no). */
   const rewrites = () => W?.can?.caps?.rewrite !== false;
   /** A run's steps as cards: what each is (its kind's icon, its title), how it stands, its input (the command), its output
-   *  - open while it runs, closed once it is done, unless the person opened or closed it. */
+   *  — open while it runs, closed once it is done, unless the person opened or closed it. */
   function stepsHtml(list, live) {
-    // (finished steps before the last few fold into one row - drawn only when opened: a long turn stays light)
+    // (finished steps before the last few fold into one row — drawn only when opened: a long turn stays light)
     const fold = !live && list.length > RECENT_STEPS + 1 ? list.length - RECENT_STEPS : 0;
     return `<div class="cw-tsteps">${fold ? foldHtml(list.slice(0, fold)) : ''}${list.slice(fold).map(t => stepHtml(t, live)).join('')}</div>`;
   }
@@ -1671,7 +1671,7 @@ export function create(a, mgr, o = {}) {
     const chosen = W.steps.get(String(t.id)), open = chosen !== undefined ? chosen : live && !t.done;
     const input = t.input && t.input !== (t.title || t.name) ? `<div class="cw-tin"><code data-noicon>${esc(String(t.input).slice(0, 2000))}</code></div>` : '';
     const out = t.output ? `<pre class="cw-tout" data-noicon>${esc(tailOf(t.output))}</pre>` : '';
-    // (a finished step is drawn the same from then on: data-sig lets a repaint keep it - and its open or closed state)
+    // (a finished step is drawn the same from then on: data-sig lets a repaint keep it — and its open or closed state)
     return `<details class="cw-tstep ${st}" data-tool="${esc(String(t.id))}"${t.done ? ` data-key="step:${esc(String(t.id))}" data-sig="${esc(sigOf(`${st}|${foot}|${t.output || ''}|${t.title}`))}"` : ''}${open ? ' open' : ''}><summary><span class="cw-tic" aria-hidden="true">${KIND_ICON[t.kind] || KIND_ICON.other}</span>
         <span class="cw-tt" data-noicon>${esc(t.title || TOOL_WORDS[t.name] || t.name)}</span><span class="cw-tst" aria-label="${st === 'run' ? 'Running' : st === 'ok' ? 'Done' : 'Failed'}">${st === 'run' ? '<i class="cw-spin"></i>' : st === 'ok' ? '✓' : '✗'}</span>${foot ? `<span class="cw-tfoot">${esc(foot)}</span>` : ''}</summary>
         ${input}${out}${t.cwd && t.done ? `<div class="cw-tcwd">in ${esc(t.cwd)}</div>` : ''}</details>`;
@@ -1694,11 +1694,11 @@ export function create(a, mgr, o = {}) {
     return list.filter(a => !/^econ:/.test(a.id) && a.options).map(provApprHtml).join('') + list.filter(a => /^econ:/.test(a.id)).map(a => {
       const st = W.apprs.get(a.id) || 'pending';
       return `<div class="cw-appr ${st}" data-appr-id="${esc(a.id)}"><span class="cw-appr-ic" aria-hidden="true">✋</span><div class="cw-appr-t"><b data-noicon>${esc(a.summary || 'It wants to spend money')}</b>
-        <span class="cw-appr-s">${st === 'pending' ? 'Waiting for your OK - your spending rules ask for it above your limit.' : { approved: 'Approved - done.', declined: 'Declined.', expired: 'Expired: it waited a day.', failed: 'Approved, but it failed.' }[st] || st}</span></div>
+        <span class="cw-appr-s">${st === 'pending' ? 'Waiting for your OK — your spending rules ask for it above your limit.' : { approved: 'Approved — done.', declined: 'Declined.', expired: 'Expired: it waited a day.', failed: 'Approved, but it failed.' }[st] || st}</span></div>
         ${st === 'pending' ? '<div class="cw-appr-b"><button type="button" class="btn small primary" data-a="appr-yes">Approve</button><button type="button" class="btn small" data-a="appr-no">Decline</button></div>' : ''}</div>`;
     }).join('');
   }
-  /** A step of a provider's run waiting for the person (Agent Providers): what it would do - the command and where - and
+  /** A step of a provider's run waiting for the person (Agent Providers): what it would do — the command and where — and
    *  the answers it takes, or how it was answered. */
   function provApprHtml(a) {
     const st = W.apprs.get(a.id) || 'pending';
@@ -1782,7 +1782,7 @@ export function create(a, mgr, o = {}) {
       case 'appr-yes': case 'appr-no': answerAppr(b.closest('.cw-appr').dataset.apprId, b.dataset.a === 'appr-yes', b); break;
       case 'appr-dec': answerProvAppr(b.closest('[data-appr-id]').dataset.apprId, b.dataset.dec, b); break;
       case 'q-opt': {
-        // (one answer: choosing it chooses it alone - and a card of one such question, with nothing to write, is sent at once)
+        // (one answer: choosing it chooses it alone — and a card of one such question, with nothing to write, is sent at once)
         const q = b.closest('.cw-q'), card = b.closest('.cw-qs'), on = b.getAttribute('aria-pressed') !== 'true';
         if (q.dataset.multi !== '1') q.querySelectorAll('.cw-q-o').forEach(x => x.setAttribute('aria-pressed', 'false'));
         b.setAttribute('aria-pressed', String(on));
@@ -1802,12 +1802,12 @@ export function create(a, mgr, o = {}) {
 
   // ------------------------------------------------------------------------------------------------ the composer
   function grow() { const i = $w('.cw-in'); i.style.height = 'auto'; i.style.height = `${Math.min(i.scrollHeight, Math.round(innerHeight * 0.38))}px`; }
-  /** The composer's prompt: while it works, a provider that takes messages then - Enter sends one now, Ctrl/Cmd+Enter after
+  /** The composer's prompt: while it works, a provider that takes messages then — Enter sends one now, Ctrl/Cmd+Enter after
    *  this answer. */
   function paintPlaceholder() {
     const look = view()?.sendLook?.(cctx());
     const p = look?.placeholder ? look.placeholder : W.run && W.can?.caps?.queue ? `Send now (Enter) or after this answer (${/Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl'}+Enter)…`
-      : W.run ? 'Write your next message - it is sent when this answer ends…' : (W.placeholder || 'Message…');
+      : W.run ? 'Write your next message — it is sent when this answer ends…' : (W.placeholder || 'Message…');
     const i = $w('.cw-in');
     if (i.placeholder !== p) i.placeholder = p;
   }
@@ -1817,7 +1817,7 @@ export function create(a, mgr, o = {}) {
     const ready = !!$w('.cw-in').value.trim() || W.files.some(f => f.id);
     const look = view()?.sendLook?.(cctx());
     if (look) {
-      // (the provider's own: Send with words - redirecting a running turn -, Stop without; Queue message beside while it works)
+      // (the provider's own: Send with words — redirecting a running turn —, Stop without; Queue message beside while it works)
       b.classList.toggle('stop', look.stop);
       b.textContent = look.stop ? '⏹' : '↑';
       b.title = look.title; b.setAttribute('aria-label', look.stop ? 'Stop' : 'Send');
@@ -1826,12 +1826,12 @@ export function create(a, mgr, o = {}) {
       return;
     }
     $w('.cw-queue').classList.add('hidden');
-    // (while it works: with words written, the button sends them - into this answer for a provider that takes them, else
+    // (while it works: with words written, the button sends them — into this answer for a provider that takes them, else
     // queued until it ends; with nothing written, it stops the answer)
     const stopping = busy && !ready;
     b.classList.toggle('stop', stopping);
     b.textContent = stopping ? '⏹' : '↑';
-    b.title = stopping ? 'Stop' : busy ? (W.can?.caps?.queue ? 'Send now (Enter) - or after this answer (Ctrl+Enter)' : 'Queue it: sent when this answer ends (Enter)') : 'Send (Enter)';
+    b.title = stopping ? 'Stop' : busy ? (W.can?.caps?.queue ? 'Send now (Enter) — or after this answer (Ctrl+Enter)' : 'Queue it: sent when this answer ends (Enter)') : 'Send (Enter)';
     b.setAttribute('aria-label', stopping ? 'Stop' : busy && !W.can?.caps?.queue ? 'Queue message' : 'Send');
     b.disabled = !stopping && (!ready || W.files.some(f => f.status === 'up') || !W.can?.ok);
   }
@@ -1874,7 +1874,7 @@ export function create(a, mgr, o = {}) {
     for (const file of list) {
       if (W.files.length >= MAX_FILES) { app.toast?.(`At most ${MAX_FILES} files in one message.`, 'bad'); break; }
       // (said before anything is uploaded: a video or recording to an agent that can't take one; a file larger than its
-      // provider takes - a picture is made smaller below, so only its own limit counts for it)
+      // provider takes — a picture is made smaller below, so only its own limit counts for it)
       const av = isAvFile(file), image = /^image\//.test(file.type || '');
       if (av && !W.can.caps?.files) { app.toast?.(`${name} can't take videos or recordings (${file.name}).`, 'bad', 5000); continue; }
       const cap = W.limits && !image ? W.limits.maxBytes : null;
@@ -1925,16 +1925,16 @@ export function create(a, mgr, o = {}) {
     return W.session;
   }
   /** Sends what is written. While the agent works, a provider that takes messages then (caps.queue: OpenClaw) gets it as it
-   *  is set up to - into the running turn by default; later: after this answer (Ctrl/Cmd+Enter), as OpenClaw's Control UI. */
+   *  is set up to — into the running turn by default; later: after this answer (Ctrl/Cmd+Enter), as OpenClaw's Control UI. */
   async function send({ later = false, redirect = false, item = null } = {}) {
     if (!W || !W.can?.ok || (W.run && !W.can.caps?.queue)) return false;
     const follow = !!W.run;
-    // (item: a message the provider's queue held - sent as it was, the composer left as it is)
+    // (item: a message the provider's queue held — sent as it was, the composer left as it is)
     const input = $w('.cw-in'), text = item ? item.text.trim() : input.value.trim(), files = item ? item.files : W.files.filter(f => f.status === 'ok' && f.id);
     if (!text && !files.length) return false;
     if (!item && W.files.some(f => f.status === 'up')) return false;
     const tok = W.token;
-    // (a redirect, as Hermes Desktop records it: the person's words at once, under what the turn wrote so far - the rest of
+    // (a redirect, as Hermes Desktop records it: the person's words at once, under what the turn wrote so far — the rest of
     // the turn comes below them, whatever the answer to the request races)
     let early = null;
     if (follow && redirect) {
@@ -1948,7 +1948,7 @@ export function create(a, mgr, o = {}) {
       if (follow && !item) input.value = '';   // (cleared at once: the next one can be written while this one goes)
       const r = await postRun({ agent: W.agentId, session: s.id, input: text, attachments: files.map(f => f.id), ...zoneArg(), ...(follow && redirect ? { queue: 'redirect' } : follow && later ? { queue: 'later' } : {}) });
       if (!W || tok !== W.token) return true;   // (it went; the window moved on meanwhile)
-      // (a chat just begun has its session on the provider now: followed from this first answer on - what the provider
+      // (a chat just begun has its session on the provider now: followed from this first answer on — what the provider
       // does there from elsewhere, the background tasks this answer starts)
       if (r.session && W.session?.id === r.session.id && W.session.key !== r.session.key) { W.session = r.session; watchSession(); W.dock.sync(); }
       if (!item) {
@@ -1957,7 +1957,7 @@ export function create(a, mgr, o = {}) {
         W.files = []; paintFiles();
       }
       let mine = r.message || { role: 'user', text, meta: files.length ? { attachments: files.map(f => ({ id: f.id, name: f.name, mime: f.mime })) } : null };
-      // (a provider command's message - a skill's words: shown as the command, as the provider's own app shows it)
+      // (a provider command's message — a skill's words: shown as the command, as the provider's own app shows it)
       if (item?.display) mine = { ...mine, text: item.display };
       if (early) {
         // (recorded already: the server's copy of it takes its place; its run, ended at once, is the turn's)
@@ -1985,7 +1985,7 @@ export function create(a, mgr, o = {}) {
     }
   }
   /** Enter, the phone keyboard's send key and the send button: one way in. A provider's own rules while it works (Hermes:
-   *  redirect, queue, stop); else - not working: send; working: a provider that takes messages then (OpenClaw) gets it now,
+   *  redirect, queue, stop); else — not working: send; working: a provider that takes messages then (OpenClaw) gets it now,
    *  Ctrl/Cmd+Enter after this answer; any other agent (the built-in ones) queues it, sent by itself when the answer ends
    *  (as OpenClaw's Control UI queues follow-ups). The button with nothing written stops the answer. */
   function submit({ ctrl = false, button = false } = {}) {
@@ -2016,7 +2016,7 @@ export function create(a, mgr, o = {}) {
     if (!W) return '';
     const q = W.outboxes?.get(outboxKey());
     if (!q || !q.items.length) return '';
-    return `<div class="hv-q-h"><span class="hv-ic" aria-hidden="true">${icon('layers')}</span><span>${q.items.length} Queued${q.parked ? ' - paused' : ' - sent when this answer ends'}</span>${q.parked && !W.run ? '<button type="button" class="btn small" data-oq="resume" title="Send the next one now">Resume</button>' : ''}</div>`
+    return `<div class="hv-q-h"><span class="hv-ic" aria-hidden="true">${icon('layers')}</span><span>${q.items.length} Queued${q.parked ? ' — paused' : ' — sent when this answer ends'}</span>${q.parked && !W.run ? '<button type="button" class="btn small" data-oq="resume" title="Send the next one now">Resume</button>' : ''}</div>`
       + q.items.map(x => `<div class="hv-q-row" data-q="${esc(x.id)}"><button type="button" class="cw-ic hv-q-x" data-oq="delete" title="Delete" aria-label="Delete">${icon('x')}</button>
         <div class="hv-q-t" data-noicon>${esc(x.text || 'Attachment only')}${x.files.length ? `<span class="hv-q-f">${x.files.map(f => `<span class="hv-ic" aria-hidden="true">${icon('doc')}</span>${esc(f.name)}`).join(' ')}</span>` : ''}</div>
         <span class="hv-q-acts"><button type="button" class="cw-ic" data-oq="edit" title="Edit (back into the message box)" aria-label="Edit">${icon('pencil')}</button></span></div>`).join('');
@@ -2057,7 +2057,7 @@ export function create(a, mgr, o = {}) {
     const key = () => (W.session ? W.session.id : 'new');
     return {
       busy: () => !!W?.run,
-      // (a turn waiting for the person - an approval, a question: Hermes can't take words into it, they queue)
+      // (a turn waiting for the person — an approval, a question: Hermes can't take words into it, they queue)
       blocking: () => !!W?.run && ((W.run.approvals || []).some(a => W.apprs.get(a.id) === 'pending') || (W.run.questions || []).some(q => q.status === 'pending')),
       /** What the turn waits on: its questions (ids) and how many other things (approvals, passwords, secrets). */
       waiting: () => {
@@ -2106,7 +2106,7 @@ export function create(a, mgr, o = {}) {
       /** A message being edited (its id, or null). */
       edit: id => { W.editing = id; paintThread(); setTimeout(() => { const t = W.el.querySelector('.cw-msg.user.editing textarea'); if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } }, 0); },
       /** The provider's record rewound to before the person's message `m` (its row there), and `text` sent from that point
-       *  - what follows it goes from the page at once. */
+       *  — what follows it goes from the page at once. */
       rewind: async (m, text, display = null) => {
         if (!W.session || W.run) return;
         const row = m.meta && m.meta.row;
@@ -2182,7 +2182,7 @@ export function create(a, mgr, o = {}) {
       root: () => W.el,
     };
   }
-  /** A provider view's dialog over the chat window (Hermes: a sudo password, a secret) - drawn when its key changes, gone
+  /** A provider view's dialog over the chat window (Hermes: a sudo password, a secret) — drawn when its key changes, gone
    *  with null; its controls answer through the view. */
   function overlay(html, key) {
     const win = W.el.querySelector('.chatwin');
@@ -2274,7 +2274,7 @@ export function create(a, mgr, o = {}) {
     const w = W;
     try { return await post('/api/providers/runs', body); } finally { w.sending -= 1; }
   }
-  /** Follows an answer of this chat that this page didn't start - begun before it was opened (a refresh), in another tab,
+  /** Follows an answer of this chat that this page didn't start — begun before it was opened (a refresh), in another tab,
    *  or the turn a message sent while it worked was taken into: what it did so far is in the history (read again), the
    *  live answer shows what comes next, and anything waiting for the person (an approval, a question) at once. */
   async function attachRun(id, { reload = true } = {}) {
@@ -2356,7 +2356,7 @@ export function create(a, mgr, o = {}) {
   async function stop() {
     if (!W?.run) return;
     const id = W.run.id;
-    W.run.stopAsked = true;   // (the person stopped it: what they queued waits - the end may come as 'stopped' or not)
+    W.run.stopAsked = true;   // (the person stopped it: what they queued waits — the end may come as 'stopped' or not)
     $w('.cw-send').disabled = true;
     try { await post('/api/providers/interrupt', { run: id }); } catch (e) { note(e.message); }
   }
@@ -2368,15 +2368,15 @@ export function create(a, mgr, o = {}) {
     }
     if (m.card) { if (W && W.session && m.session === W.session.id && m.agent === W.agentId) { W.plan = { ...(W.plan || {}), ...m.card }; paintCard(); } return; }
     if (m.task) { if (W && W.session && m.session === W.session.id && m.agent === W.agentId) { W.dock.onTask(m.task); noteTask(m.task); } return; }
-    // (a side question or background task a chat started, answered: the manager hands it on once - to the window that
+    // (a side question or background task a chat started, answered: the manager hands it on once — to the window that
     // shows that chat, if one does)
     if (m.side) return;
     if (m.observed) { onObserved(m); return; }
     const Q = W?.queued.find(q => q.id === m.run);
     if (Q) { Q.buf.push(m); if (Q.buf.length > 5000) Q.buf.shift(); if (m.event?.type === 'run.end') Q.ended = m.event; return; }
     const R = W?.run;
-    // (an answer of the open chat this page doesn't follow - begun before it was opened, in another tab, or the turn a
-    // message sent while it worked was taken into - is followed: now if nothing is shown, or instead of a run of ours that
+    // (an answer of the open chat this page doesn't follow — begun before it was opened, in another tab, or the turn a
+    // message sent while it worked was taken into — is followed: now if nothing is shown, or instead of a run of ours that
     // hasn't begun (it waits behind this one), or after the one under way)
     if (W && m.run && (!R || m.run !== R.id) && !W.sending && !W.done.has(m.run) && W.session && m.session === W.session.id && m.agent === W.agentId && (m.delta || (m.event && m.event.type !== 'run.end'))) {
       W.early.push({ m, at: Date.now() });
@@ -2421,7 +2421,7 @@ export function create(a, mgr, o = {}) {
       W.obs = { id: m.run, observed: true, text: '', thinking: '', tools: [], approvals: [], questions: [], t0: Date.now(), since: 0, session: W.session.id };
     }
     const R = W.obs;
-    // (one that goes quiet - its end missed - is let go after a while: the history shows what happened)
+    // (one that goes quiet — its end missed — is let go after a while: the history shows what happened)
     clearTimeout(R.quiet); R.quiet = setTimeout(() => { if (W && W.obs === R) { W.obs = null; loadHistory().then(() => paintThread()); } }, 300000);
     if (m.delta) {
       if (m.delta.replace && typeof m.delta.text === 'string') R.text = m.delta.text;
@@ -2444,7 +2444,7 @@ export function create(a, mgr, o = {}) {
     stopWatching();
     if (!W.session || !W.can?.caps?.observe || W.session.key === '@new') return;
     const w = { agent: W.agentId, session: W.session.id };
-    // (followed from now: the chat's subagents read once - one that began before the lease would else be missed)
+    // (followed from now: the chat's subagents read once — one that began before the lease would else be missed)
     const renew = () => post('/api/providers/watch', w).then(r => { if (W && r && r.ok) { const first = !W.watching; W.watching = w; if (first) loadSubs(); } }, () => {});
     renew();
     W.watchTimer = setInterval(renew, 60000);
@@ -2452,12 +2452,12 @@ export function create(a, mgr, o = {}) {
   function event(R, e, seq) {
     if (seq) R.since = Math.max(R.since, seq);
     if (e.type === 'native') {
-      // (in order, once: the socket and the events route may both bring one - its number says whether it was applied)
+      // (in order, once: the socket and the events route may both bring one — its number says whether it was applied)
       if (seq) { if (seq <= (R.nativeSeq || 0)) return; R.nativeSeq = seq; }
       const v = view(); if (v) { v.onNative(R, e.ev); paintRun(); }
-      // (the provider named the chat - or renamed it - as it goes: its name here at once, in the header and the Sidebar)
+      // (the provider named the chat — or renamed it — as it goes: its name here at once, in the header and the Sidebar)
       if (e.ev && e.ev.op === 'title' && W.session && R.session === W.session.id && !R.observed) { W.session = { ...W.session, label: e.ev.text.slice(0, 60) }; head(); const it = (W.sessions || []).find(x => x.id === W.session.id); if (it) { it.label = W.session.label; paintSide(); } }
-      // (a delegation sent its children off: the chat's subagents read again - their first events may have gone by)
+      // (a delegation sent its children off: the chat's subagents read again — their first events may have gone by)
       if (e.ev && e.ev.op === 'tool' && e.ev.ph === 'end' && e.ev.name === 'delegate_task') loadSubs();
       return;
     }
@@ -2500,7 +2500,7 @@ export function create(a, mgr, o = {}) {
     // the whole answer, with its id and what it took, from the history (and the chat's new name from the list)
     await loadHistory();
     if (!W || W.run !== R) return;
-    // (a turn stopped or cut off part-way that the provider hasn't kept - or not yet: what it showed stays as it was drawn,
+    // (a turn stopped or cut off part-way that the provider hasn't kept — or not yet: what it showed stays as it was drawn,
     // as Hermes Desktop keeps it; the history read next time has the provider's own)
     if (e.status !== 'ok') {
       const lastUser = W.messages.map(m => m.role).lastIndexOf('user'), answered = W.messages.slice(lastUser + 1).some(m => m.role === 'assistant');
@@ -2520,10 +2520,10 @@ export function create(a, mgr, o = {}) {
     // the whole answer as kept (its last words too) for voice mode
     const after = W.messages.slice(W.messages.map(m => m.role).lastIndexOf('user') + 1), ans = after.find(m => m.role === 'assistant');
     W.voice.onRun('end', R, { text: ans ? ans.text : R.text, error: e.status === 'error' ? (e.error || 'It could not answer.') : null });
-    // (its owner's own agent: the answer in its bubble too, on this page only - ui/talk-bar.js)
+    // (its owner's own agent: the answer in its bubble too, on this page only — ui/talk-bar.js)
     if (e.status === 'ok' && (ans?.text || R.text)) app.talk?.bubble(W.agentId, ans ? ans.text : R.text);
   }
-  /** The events route: what the socket missed (a page that was away, a socket down) - and the end, for sure. */
+  /** The events route: what the socket missed (a page that was away, a socket down) — and the end, for sure. */
   async function poll(R) {
     await nap(R, 1500);
     while (W && W.run === R && !R.ended) {

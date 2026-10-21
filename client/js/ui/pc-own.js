@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see
 // LICENSE).
-// The PC's "Its computer" app (client/js/ui/pc-app.js; docs/features/agent-pc.md §4.1), for an Agent Providers' agent -
-// OpenClaw, Hermes - that lives on a real computer of its own: that computer's files as its provider shows them (OpenClaw:
-// the agent's workspace, read-only, and its agent documents - AGENTS.md, SOUL.md… - to read and change; Hermes: Hermes'
+// The PC's "Its computer" app (client/js/ui/pc-app.js; docs/features/agent-pc.md §4.1), for an Agent Providers' agent —
+// OpenClaw, Hermes — that lives on a real computer of its own: that computer's files as its provider shows them (OpenClaw:
+// the agent's workspace, read-only, and its agent documents — AGENTS.md, SOUL.md… — to read and change; Hermes: Hermes'
 // managed files, to change too when the connection has Full access), and a file copied from there into its PC. Everything
 // goes through the server (/api/pc/own: its provider's own interfaces, for whoever manages that provider); a change asks
 // for the password when it wasn't entered lately.
@@ -220,7 +220,7 @@ export function computerApp(P, el, args = {}) {
       ${err()}<div class="pc-list">${rows}</div>`;
   }
   /**
-   * What it works on there now, following it (server/pc/recognize.js - a step's window, `remote`): the file it reads,
+   * What it works on there now, following it (server/pc/recognize.js — a step's window, `remote`): the file it reads,
    * writes or changes with its own line numbers (its changes as a diff), a picture, a folder, its search, what a calendar
    * or task command printed, its list. Only what the step showed: ↩ goes back to its files.
    */
@@ -250,7 +250,7 @@ export function computerApp(P, el, args = {}) {
   const err = () => (C.err ? `<div class="pc-err">${esc(C.err)}</div>` : '');
   function paintUps() {
     const box = el.querySelector('.pc-ups');
-    if (box) box.innerHTML = C.ups.map(u => `<div class="pc-up">${u.err ? `<span class="bad">${esc(u.name)}: ${esc(u.err)}</span>` : `${esc(u.name)} - ${u.pct} %`}</div>`).join('');
+    if (box) box.innerHTML = C.ups.map(u => `<div class="pc-up">${u.err ? `<span class="bad">${esc(u.name)}: ${esc(u.err)}</span>` : `${esc(u.name)} — ${u.pct} %`}</div>`).join('');
   }
   function paint() {
     if (!P.alive) return;
@@ -293,7 +293,7 @@ export function computerApp(P, el, args = {}) {
 
   if (C.live) paint(); else if (C.view === 'docs') docs(); else list(args.path ?? null);
   return {
-    // (following it: what it works on there now - never over a file or document the person is changing)
+    // (following it: what it works on there now — never over a file or document the person is changing)
     go(a) { if (a.live) { if (C.file?.dirty || C.doc?.dirty) return; C.live = a.live; return paint(); } C.live = null; if (a.view === 'docs') docs(); else list(a.path ?? C.path); },
     destroy() { ++C.seq; },
   };

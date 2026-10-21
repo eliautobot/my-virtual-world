@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Saved floor layouts over the API (server/layout-routes.js, op lvl.apply; 2026-10-04): save the floor being
 // furnished, list it, lay it onto another floor of the same kind (fitted to its size; misfits need fit 'keep'), refused on
 // another kind of floor, shared with a player by username (and private otherwise), renamed, deleted; undo puts the

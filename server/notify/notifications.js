@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What an account is told (docs/features/CHAT.md §8): an agent asking for its OK (an approval), a note from an agent,
 // an answer that came while it was away. Each is kept (notifications, schema 28) and shown at once on every page the
 // account has open (a 'notify' frame: the bell); when it has none open, it is pushed to the browsers and phones that
@@ -11,7 +11,7 @@ const KEEP = 200;                       // notifications kept per account (the o
 const KEEP_READ_MS = 30 * 86400000;     // read ones, this long
 const MAX_FAILS = 5;                    // a subscription that fails this often in a row is dropped
 const MAX_DEVICES = 10;                 // browsers and phones per account
-const KINDS = new Set(['approval', 'note', 'chat', 'problem', 'system', 'phone', 'pc']);   // (phone: an agent's phone - a text, a missed call, a draft: server/phone/; pc: work an agent did on its PC, server/pc/work.js)
+const KINDS = new Set(['approval', 'note', 'chat', 'problem', 'system', 'phone', 'pc']);   // (phone: an agent's phone — a text, a missed call, a draft: server/phone/; pc: work an agent did on its PC, server/pc/work.js)
 const VAPID = 'push.vapid';
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 
@@ -32,7 +32,7 @@ export class Notifications {
       add: db.prepare('INSERT INTO notifications (world_id, account_id, kind, title, body, link_json, created) VALUES (?, ?, ?, ?, ?, ?, ?)'),
       trim: db.prepare('DELETE FROM notifications WHERE world_id = ? AND account_id = ? AND id NOT IN (SELECT id FROM notifications WHERE world_id = ? AND account_id = ? ORDER BY id DESC LIMIT ?)'),
       list: db.prepare('SELECT * FROM notifications WHERE world_id = ? AND account_id = ? AND id < ? ORDER BY id DESC LIMIT ?'),
-      // (one agent's: what it asked, told or answered - the chat window's Notifications)
+      // (one agent's: what it asked, told or answered — the chat window's Notifications)
       listAgent: db.prepare("SELECT * FROM notifications WHERE world_id = ? AND account_id = ? AND json_extract(link_json, '$.agent') = ? AND id < ? ORDER BY id DESC LIMIT ?"),
       unreadAgent: db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE world_id = ? AND account_id = ? AND json_extract(link_json, '$.agent') = ? AND read_at IS NULL"),
       unread: db.prepare('SELECT COUNT(*) AS n FROM notifications WHERE world_id = ? AND account_id = ? AND read_at IS NULL'),

@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What the signed-in person may change, as the browser sees it (WP4.6/4.14, wp4-world-spec.md §5.0): on a world with
 // lots, holders (and the people they share rights with) build and furnish on their own lots, administrators on the
-// city's land; on a world without lots only administrators edit. The server checks every change again - this only
+// city's land; on a world without lots only administrators edit. The server checks every change again — this only
 // decides which tools, buttons and menu entries to offer, and explains in words when one isn't offered.
 import { auth } from './auth.js';
 
@@ -23,7 +23,7 @@ export function lotOf(B) { return B && B.lot && layer ? layer.byId.get(B.lot) ||
 /** Whether the lot is held by me. */
 export function isMine(L) { return !!(L && L.holder?.kind === 'account' && auth.account && String(L.holder.id) === String(auth.account.id)); }
 
-/** My rights on lot L: 'build', 'furnish', 'decorate', 'manage', 'merge' - every one when I hold it, the shared ones
+/** My rights on lot L: 'build', 'furnish', 'decorate', 'manage', 'merge' — every one when I hold it, the shared ones
  *  when its holder shared them with me, and as an administrator everything on the city's land. */
 export function rightsOn(L) {
   if (!L || !auth.account) return new Set();

@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // World management (WP4.10, PLAN WP4.10, wp4-world-spec.md §4.1, §9): Settings → Data for administrators.
-// - Download a backup of the world: everything built and lived in - buildings and their floors, roads, the land and its
-//   changes, the island chain, stations, decorations, residents - as one versioned JSON bundle. Lots are listed in it
+// - Download a backup of the world: everything built and lived in — buildings and their floors, roads, the land and its
+//   changes, the island chain, stations, decorations, residents — as one versioned JSON bundle. Lots are listed in it
 //   for reference only: a backup never carries property claims back (titles are never rewound, spec §5.8).
 // - Restore a backup of this world: the current world is backed up first; lots and titles stay exactly as they are.
 // - Reset the residents: everyone but the agents' residents starts afresh (new people, homes and jobs given again).

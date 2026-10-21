@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A fishing trip (docs/features/fishing.md §Trips): the kinds of trip (the module's courses), the fishing grounds each
-// trip generates round its dock from the run's seed - where the water's depth suits them: flats in the shallows, reefs
-// at 4–25 m, drop-offs where the bed falls away, wrecks and the blue water far out; pads, weed, holes on a lake - what
+// trip generates round its dock from the run's seed — where the water's depth suits them: flats in the shallows, reefs
+// at 4–25 m, drop-offs where the bed falls away, wrecks and the blue water far out; pads, weed, holes on a lake — what
 // lives on each (its population), the bounties, the legend's sighting; what bites (rollBite, on the server, with its own
 // secret dice: the browser never decides what it caught), how often (biteEvery, the browser's pacing), and a trip's
 // score. Shared by the server and the browser: the same seed and the same land give the same grounds on both.
@@ -13,11 +13,11 @@ import { LURE_BY_ID } from './fishing-gear.js';
 // water; difficulty; reach (m from the dock the grounds go out to; a lake: the whole lake); minutes until dusk;
 // grounds [min, max]; kinds it draws from; size (bias toward bigger fish); legend (chance of a legend sighting);
 // stars: the trip's value (VC) for 1★ 2★ 3★ (set from simulated trips: a flawless angler with the gear for it averages
-// between 2★ and 3★ - tools: tests/fishing.test.mjs).
+// between 2★ and 3★ — tools: tests/fishing.test.mjs).
 const SEA = 'sea', LAKE = 'lake';
 export const TRIPS = Object.freeze([
   { id: 'harbour-morning', label: 'Harbour Morning', water: SEA, difficulty: 1, reach: 700, minutes: 12, grounds: [6, 8], kinds: ['flats', 'shore', 'boil', 'reef'], size: 0, legend: 0, stars: [11, 22, 36], blurb: 'Calm water close to the dock. Shrimp under a float and you\'re fishing.' },
-  { id: 'reef-run', label: 'Reef Run', water: SEA, difficulty: 3, reach: 1200, minutes: 14, grounds: [7, 10], kinds: ['reef', 'flats', 'shore', 'boil', 'birds'], size: 0.15, legend: 0, stars: [24, 48, 80], blurb: 'The reefs and rocks: snapper, grouper, hogfish - and what hunts them.' },
+  { id: 'reef-run', label: 'Reef Run', water: SEA, difficulty: 3, reach: 1200, minutes: 14, grounds: [7, 10], kinds: ['reef', 'flats', 'shore', 'boil', 'birds'], size: 0.15, legend: 0, stars: [24, 48, 80], blurb: 'The reefs and rocks: snapper, grouper, hogfish — and what hunts them.' },
   { id: 'wreck-ledge', label: 'Wreck & Ledge', water: SEA, difficulty: 5, reach: 2000, minutes: 16, grounds: [8, 11], kinds: ['reef', 'drop', 'wreck', 'birds', 'boil'], size: 0.3, legend: 0.15, stars: [50, 100, 165], blurb: 'Deeper water and the old wrecks. Bigger fish, heavier gear.' },
   { id: 'offshore-edge', label: 'Offshore Edge', water: SEA, difficulty: 6, reach: 3000, minutes: 18, grounds: [8, 12], kinds: ['drop', 'birds', 'boil', 'wreck', 'blue'], size: 0.4, legend: 0.2, stars: [62, 125, 205], blurb: 'Follow the birds along the edge: mackerel, bonito, tuna, mahi.' },
   { id: 'blue-water', label: 'Blue Water', water: SEA, difficulty: 8, reach: 4500, minutes: 20, grounds: [9, 13], kinds: ['blue', 'birds', 'drop', 'wreck', 'deep'], size: 0.55, legend: 0.3, stars: [105, 210, 340], blurb: 'Far out where the water turns cobalt. Tuna, wahoo, sailfish, marlin.' },
@@ -233,7 +233,7 @@ export function rollBite(rng, ground, ctx) {
   const bias = 1 + (ctx.size || 0) * 1.4 + (ctx.luck || 0) * 1.5;
   let u = Math.pow(rng.next(), 1 / bias), f = fishOf(s, u);
   // one too heavy for the angler's rod (ctx.maxKg) is usually a smaller one (2026-10-15, polish: a beginner lost one
-  // fish in eight to "too heavy"); now and then the big one still comes - the one that got away, and a reason to upgrade
+  // fish in eight to "too heavy"); now and then the big one still comes — the one that got away, and a reason to upgrade
   if (ctx.maxKg && f.kg > ctx.maxKg && rng.chance(0.6)) {
     for (let k = 0; k < 24 && f.kg > ctx.maxKg * 0.6; k++) { u *= 0.85; f = fishOf(s, u); }
   }

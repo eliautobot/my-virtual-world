@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Lays a world's generated floors out again with the current generators (floor layouts step 4, 2026-10-04): every floor
 // still as it was generated (mode auto, without a roll of its own) gets what its building's seed gives now; floors changed
 // by hand, cleared or re-rolled stay exactly as they are. Residents keep a home or a job where the new floor still has

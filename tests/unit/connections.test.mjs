@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Connections (server/connections.js, PLAN WP2.2; DECISIONS C60, A8, A9; CHECKLIST I8.7, I8.13, X11): who may add and see what,
 // sealed credentials that never come back, shares, probes with scrubbed results, and the secret holder.
 import assert from 'node:assert/strict';

@@ -1,17 +1,17 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A stand-in Hermes backend for the tests (Agent Providers, docs/features/agent-providers.md §9): what `hermes serve`
 // answers, with the frames recorded from Hermes 0.21.5 (tests/fixtures/hermes/run-*.json).
 // - Its public /api/status; signing in as Hermes does: the session token (X-Hermes-Session-Token, ?token= on the socket)
-//   when bound to its own machine, or - mode 'password' - its native-app sign-in (/auth/native/authorize with PKCE, the
+//   when bound to its own machine, or — mode 'password' — its native-app sign-in (/auth/native/authorize with PKCE, the
 //   password form, /auth/native/token, /auth/native/refresh) and the access token as a Bearer credential / ?token=.
 // - Its gateway JSON-RPC on /api/ws: gateway.ready, client.capabilities, profiles.list, session.create / resume /
-//   interrupt / close, prompt.submit - it replays a recorded turn with this session's id ([[tool: a command run;
+//   interrupt / close, prompt.submit — it replays a recorded turn with this session's id ([[tool: a command run;
 //   rm -rf: the one that asks for approval, continued once answered; [[tool:clarify: the questions; [[think]]: the
 //   reasoning one; [[slow]] waits between frames so Stop can cut it; anything else: a plain answer), and takes a message
-//   sent while a turn runs as Hermes' busy_input_mode says (steer by default here; queued: true waits) - model.options,
+//   sent while a turn runs as Hermes' busy_input_mode says (steer by default here; queued: true waits) — model.options,
 //   commands.catalog, config.set, image.attach_bytes, file.attach, approval.respond, request.answer.
 // - Its REST: sessions (list, one, messages, patch, delete), config and its schema, skills and toolsets, cron jobs, files
-//   (its managed files: list, read, upload, mkdir, delete - and a download).
+//   (its managed files: list, read, upload, mkdir, delete — and a download).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -30,7 +30,7 @@ export async function startFakeHermes({ token = 'hermes-session-token', mode = '
     toolsets: [{ name: 'web', label: 'Web Search', description: 'web_search', enabled: true, available: true, configured: true, tools: ['web_search'] }],
     config: { model: 'stub-1', display: { busy_input_mode: busy }, gateway: { api_server: { key: 'super-secret-key' } } }, jobs: [{ job_id: 'j1', name: 'Morning brief', schedule: '0 8 * * *', enabled: true, state: 'scheduled', prompt_preview: 'Brief me' }],
     seq: 0, rqSeq: 0, accessTtl: 3600, stopped: false,
-    // its Bot Desktop (one for the test, whatever the profile): as Hermes' tools/bot_desktop + tui_gateway/methods_display -
+    // its Bot Desktop (one for the test, whatever the profile): as Hermes' tools/bot_desktop + tui_gateway/methods_display —
     // its lease (who may type), single-use 30 s tickets for /api/display/ws, the streams open on it and what they sent
     display: { installed: true, running: false, lease: { holder: 'agent', viewer_id: null, epoch: 0, reason: '' }, tickets: new Map(), streams: new Set(), input: [], closes: [], calls: [] },
   };
@@ -182,7 +182,7 @@ export async function startFakeHermes({ token = 'hermes-session-token', mode = '
       }
     });
   });
-  // (as Hermes: every session event numbered and kept in a ring, sent to the client attached - a client whose socket
+  // (as Hermes: every session event numbered and kept in a ring, sent to the client attached — a client whose socket
   // dropped fetches what it missed with session.events.since)
   const ev = (l, type, payload = {}) => {
     const params = { type, session_id: l.sid, payload, seq: ++f.seq };
@@ -301,7 +301,7 @@ export async function startFakeHermes({ token = 'hermes-session-token', mode = '
       }
       s.messages.push({ id: s.messages.length + 1, role: 'user', content: String(p.text || ''), timestamp: Date.now() / 1000, active: 1 });
       if (l.running) {
-        // (as Hermes: text-only messages queued behind one already waiting share its slot - one turn answers them all)
+        // (as Hermes: text-only messages queued behind one already waiting share its slot — one turn answers them all)
         if (p.queued || f.config.display.busy_input_mode === 'queue') { if (l.queue.length) l.queue[l.queue.length - 1] += `\n\n${String(p.text || '')}`; else l.queue.push(String(p.text || '')); return { status: 'queued' }; }
         l.steered = (l.steered || []).concat(String(p.text || ''));
         return { status: 'steered' };
@@ -332,7 +332,7 @@ export async function startFakeHermes({ token = 'hermes-session-token', mode = '
     if (method === 'session.redirect') {
       if (!l) throw err(4001, 'session not found');
       if (!l.running) return { status: 'rejected', text: p.text };
-      // (as Hermes: the turn goes on with the correction - here, noted in the answer like a steer)
+      // (as Hermes: the turn goes on with the correction — here, noted in the answer like a steer)
       f.redirects = (f.redirects || []).concat([String(p.text || '')]);
       l.steered = (l.steered || []).concat(String(p.text || ''));
       return { status: 'redirected', text: p.text };
@@ -380,7 +380,7 @@ export async function startFakeHermes({ token = 'hermes-session-token', mode = '
       }
       if (name === 'loop') { control(l).loop = { prompt: 'check the news', status: 'active', mode: 'interval', interval_seconds: 1800, current_delay: 1800, times: 3, until: '', max_ticks: 100, ticks_fired: 0, created_at: Date.now() / 1000, last_fired_at: 0, next_due_at: Date.now() / 1000 + 1800, awaiting_response: false, deferred_by_goal: !!control(l).goal }; changed(l); return { output: '↻ Loop set (every 30m): check the news' }; }
       if (name === 'title') return { output: `Title: ${f.sessions.get(l.key).title || '(none)'}` };
-      return { output: `Unknown command /${name} - nothing was sent.` };
+      return { output: `Unknown command /${name} — nothing was sent.` };
     }
     if (method === 'command.dispatch') {
       if (!l) throw err(4001, 'session not found');
@@ -388,7 +388,7 @@ export async function startFakeHermes({ token = 'hermes-session-token', mode = '
         message: `[IMPORTANT: The user has invoked the "airtable" skill, indicating they want you to follow its instructions. The full skill content is loaded below.]\n\nUse Airtable well.\n\nThe user has provided the following instruction alongside the skill invocation: ${p.arg}\n\n[Runtime note: none]` };
       throw err(4018, `not a quick/plugin/bundle/skill command: ${p.name}`);
     }
-    // (as Hermes: a session's goal, loop and heartbeat - read, changed by its actions, every change sent as an event)
+    // (as Hermes: a session's goal, loop and heartbeat — read, changed by its actions, every change sent as an event)
     if (method === 'session.control.read') { if (!l) throw err(4001, 'session not found'); return { control: control(l) }; }
     if (method === 'session.control') {
       if (!l) throw err(4001, 'session not found');

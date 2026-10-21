@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's work on a real server (docs/features/CHAT.md §13): its job brief, notes and knowledge files (its owner's
-// and its managers' only, checked and bounded); its owner's chats in Work mode - the real date and time, the brief, what
-// it knows and its notes, nothing of its city life, notes kept instead of plans and memories - and in Life mode as
+// and its managers' only, checked and bounded); its owner's chats in Work mode — the real date and time, the brief, what
+// it knows and its notes, nothing of its city life, notes kept instead of plans and memories — and in Life mode as
 // before; a chat's own mode, the line that marks a switch, and who has the modes at all.
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -151,7 +151,7 @@ test('a chat in Work mode: the real time where it works, its brief, what it know
   assert.match(r.system, /at «Acme Dental», an AI agent who works for/);
   assert.match(r.system, /in a tone that is professional/);
   assert.match(r.system, /NOW: \w+day, \w+ \d{1,2}, \d{4} at \d{1,2}:\d{2} [AP]M E[DS]T \(time zone America\/New_York\)/, 'the brief\'s time zone wins over the writer\'s');
-  assert.match(r.system, /YOUR JOB - «[^»]+»'s instructions[^\n]*\nAnswer the phone\.\nBook appointments\./);
+  assert.match(r.system, /YOUR JOB — «[^»]+»'s instructions[^\n]*\nAnswer the phone\.\nBook appointments\./);
   assert.match(r.system, /Open 9 to 5, Monday to Friday\./);
   assert.match(r.system, /--- FILE «prices\.md» ---\n# Prices\nCleaning: \$90/);
   assert.match(r.system, /Your PDF «menu\.pdf» can't be read by the brain you think with now/, 'a brain that reads no PDFs is told (models.js: only OpenAI, OpenRouter, Anthropic)');

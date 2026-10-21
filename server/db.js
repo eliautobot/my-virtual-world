@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The accounts database: <data>/next.db through node:sqlite (WAL, foreign keys, versioned migrations, online backup).
 // World geometry stays in the JSON files. Every row carries the world id (meta.world_id), so several worlds could share
 // one database later without a migration (DECISIONS C59).
@@ -155,7 +155,7 @@ const MIGRATIONS = [
       db.exec("UPDATE recovery_codes SET world_id = COALESCE((SELECT a.world_id FROM accounts a WHERE a.id = recovery_codes.account_id), '') WHERE world_id = ''");
     },
   },
-  // v6 (WP1.8): the edit journal - every world edit with its account and the states before and after, for per-account
+  // v6 (WP1.8): the edit journal — every world edit with its account and the states before and after, for per-account
   // undo and redo, admin reverts and the activity log (DECISIONS C35, C116); edit_keys lists the states each changed.
   {
     additive: true,
@@ -552,7 +552,7 @@ const MIGRATIONS = [
    );
    CREATE INDEX IF NOT EXISTS floor_layout_shares_to ON floor_layout_shares (world_id, account_id);`,
   },
-  // v15 (commerce, the online platform's Land Sales package - wp4-world-spec.md §5.8, 2026-10-05): buying, selling
+  // v15 (commerce, the online platform's Land Sales package — wp4-world-spec.md §5.8, 2026-10-05): buying, selling
   // and renting with real money through Stripe (server/commerce/). Real money only ever goes to the platform; a seller
   // or landlord receives store credit (a closed-loop balance, never cash). Amounts are integers in the currency's minor
   // unit (cents). The credit ledger and the record of Stripe events are append-only, like the title history.
@@ -685,7 +685,7 @@ const MIGRATIONS = [
    CREATE TRIGGER IF NOT EXISTS commerce_events_no_delete BEFORE DELETE ON commerce_events BEGIN SELECT RAISE(ABORT, 'the record of payment events is kept'); END;`,
   },
   // v16 (the shop, 2026-10-05 "finish the items not built yet"): rent paid from store credit (a lease is paid by card
-  // - a Stripe subscription - or from credit, month by month, with a card top-up when credit runs short: status 'due'),
+  // — a Stripe subscription — or from credit, month by month, with a card top-up when credit runs short: status 'due'),
   // one month's rent and advertising as kinds of order, and advertising campaigns (billboards and the promotional
   // aircraft) with their daily counts. The two tables whose checks change are rebuilt with every row kept.
   {
@@ -1114,7 +1114,7 @@ const MIGRATIONS = [
    );
    CREATE INDEX IF NOT EXISTS econ_loans_borrower ON econ_loans (world_id, borrower, status);`,
   },
-  // v19 (jobs, docs/features/ECONOMY.md §8): work sessions - a player or an agent working a role at a venue (a mini-game
+  // v19 (jobs, docs/features/ECONOMY.md §8): work sessions — a player or an agent working a role at a venue (a mini-game
   // for each order, or an agent's competent "auto" shift), paid from the venue at the end; experience per role;
   // reputation by dimension (paying reliably, working well) with its append-only events; customers' reviews.
   {
@@ -1223,7 +1223,7 @@ const MIGRATIONS = [
   },
   // v21 (Free Will, docs/features/FREE-WILL.md): an agent whose owner gave it Free Will lets a decision service choose
   // what it does with its free time. agent_free_will is the owner's switch for each agent (connection_id NULL: the
-  // installation's default decision service); agent_decisions is the "why" log - every choice point, what could be
+  // installation's default decision service); agent_decisions is the "why" log — every choice point, what could be
   // chosen, what was chosen and how sure the service was, or why the routine chose instead. cost_micro is millionths
   // of a US dollar. The log is pruned by age (server/free-will/free-will.js).
   {
@@ -1348,7 +1348,7 @@ const MIGRATIONS = [
      SELECT world_id, agent_id, json_object('spontaneity', spontaneity), updated, updated_by FROM agent_free_will;`,
   },
   // v23 (Free Will decides more than free time, docs/features/FREE-WILL.md §11.4): which kind of choice each line of the
-  // why-log was - free time, a task, a meal, the morning, the way to work, rest, after a task at night.
+  // why-log was — free time, a task, a meal, the morning, the way to work, rest, after a task at night.
   {
     additive: true,
     up: db => {
@@ -1357,8 +1357,8 @@ const MIGRATIONS = [
     },
   },
   // v24 (the Mind, docs/features/FREE-WILL.md §3–4): agent_mind is the owner's setting for each agent's thinking (cadence
-  // 'off' or 'daily') and the last world day it planned and reflected; mind_jobs is every thought - a morning plan, an
-  // evening reflection, a conversation - with what it did (summary_json: the plans, memories and notes it wrote, the
+  // 'off' or 'daily') and the last world day it planned and reflected; mind_jobs is every thought — a morning plan, an
+  // evening reflection, a conversation — with what it did (summary_json: the plans, memories and notes it wrote, the
   // agent's own data), who paid (account_id), the tokens and the cost in millionths of a US dollar, kept by age. No
   // prompt or answer text is stored.
   {
@@ -1396,7 +1396,7 @@ const MIGRATIONS = [
    CREATE INDEX IF NOT EXISTS mind_jobs_account ON mind_jobs (world_id, account_id, at);`,
   },
   // v25 (the Mind handles problems and money, docs/features/FREE-WILL.md §11.11): agent_problems is what goes wrong in an
-  // agent's life - rent it couldn't pay, money running out, no home, no job - opened and resolved by what the world shows
+  // agent's life — rent it couldn't pay, money running out, no home, no job — opened and resolved by what the world shows
   // (server/mind/problems.js), with the thoughts its Mind gave it and a short note of what it did (the agent's own data).
   // mind_jobs may now also record a 'problem' thought and a 'speech' (a line said out loud, moderated first): its CHECK is
   // widened by rebuilding the table (same columns, same rows; an older release reads and writes it as before), only when
@@ -1451,7 +1451,7 @@ const MIGRATIONS = [
     },
   },
   // v26 (plans and billing, docs/features/FREE-WILL.md §6, §11.13; the online platform): account_plans is each account's
-  // plan - its tier, the Stripe subscription that pays it, how far it is paid and whether it is ending; account_ai_usage
+  // plan — its tier, the Stripe subscription that pays it, how far it is paid and whether it is ending; account_ai_usage
   // is the month's meter per account (Free Will decisions and their cost on the platform's decision service, the
   // platform brain's cost for its agents' thoughts and for nightly reflections, and how much of its top-up packs that
   // month used); account_ai_packs the top-ups bought by card (they last until used). commerce_orders may now also hold a
@@ -1541,7 +1541,7 @@ const MIGRATIONS = [
     },
   },
   // v27 (the platform's chat window, docs/features/CHAT.md): chat_messages holds every chat's messages (they were one JSON
-  // file per session; server/chat/transcript.js imports those once) - each with an id, so a message can be edited and
+  // file per session; server/chat/transcript.js imports those once) — each with an id, so a message can be edited and
   // an answer written again, and its meta (model, effort, tokens, cost, attachments); chat_messages_fts searches them
   // (an external-content FTS5 index kept by triggers). chat_sessions gains the session's own model and thinking effort
   // (the window's pickers; NULL = the agent's) and pinned.
@@ -1580,8 +1580,8 @@ const MIGRATIONS = [
       if (!cols.includes('pinned')) db.exec('ALTER TABLE chat_sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
     },
   },
-  // v28 (notifications, docs/features/CHAT.md §8): notifications is what an account is told - an agent asking for its
-  // OK, a note from an agent, an answer that came while it was away - kept (200 an account, the read ones 30 days) and
+  // v28 (notifications, docs/features/CHAT.md §8): notifications is what an account is told — an agent asking for its
+  // OK, a note from an agent, an answer that came while it was away — kept (200 an account, the read ones 30 days) and
   // marked read; push_subscriptions are the browsers and phones that asked to be told when the page isn't open (Web
   // Push: the push service's address and the browser's keys), each with its failures (one gone is dropped).
   {
@@ -1615,7 +1615,7 @@ const MIGRATIONS = [
      CREATE INDEX IF NOT EXISTS push_subscriptions_account ON push_subscriptions (world_id, account_id);`);
     },
   },
-  // v29 (voice, docs/features/CHAT.md §9): the month's meter per account also counts the installation's voice - seconds
+  // v29 (voice, docs/features/CHAT.md §9): the month's meter per account also counts the installation's voice — seconds
   // heard and spoken through the platform's voice services (a plan's voice minutes) and their cost (millionths of a US$);
   // voice_prefs is an account's own voice choices (which service listens to it, which speaks to it, its language). An
   // agent's own voice is kept with the agent (agents.voice_json, there since v1).
@@ -1710,7 +1710,7 @@ const MIGRATIONS = [
   // v33 (talking with others' agents in the city, docs/features/CHAT.md §14): chat_sessions.kind 'talk' is one such
   // conversation (a player with someone else's agent: a few short messages, cleared after a few minutes; never in the
   // chat window's lists; its agent's owner may read it); talk_blocks are whom an owner keeps from talking with their
-  // agents - a player (account_id) or another agent (agent_id).
+  // agents — a player (account_id) or another agent (agent_id).
   {
     additive: true,
     up: db => {
@@ -1728,7 +1728,7 @@ const MIGRATIONS = [
      CREATE UNIQUE INDEX IF NOT EXISTS talk_blocks_one ON talk_blocks (world_id, owner_id, IFNULL(account_id, 0), IFNULL(agent_id, 0));`);
     },
   },
-  // v34 (the realty market, 2026-10-08, server/commerce/market.js): realty_values are each lot's market value for a day -
+  // v34 (the realty market, 2026-10-08, server/commerce/market.js): realty_values are each lot's market value for a day —
   // its land and the buildings on it, in the shop's minor units, with the scores they came from; realty_market the day's
   // market index (10000 = 1.00) and the sales it saw; commerce_floor_rights the floors a building may have without paying
   // (the most it was bought or built up to). commerce_orders take kind 'floors' (floors bought past the included ones) and
@@ -1810,8 +1810,8 @@ const MIGRATIONS = [
     },
   },
   // v35 (account emails, 2026-10-09): accounts.email_verified is when the address was confirmed (a link sent to it was
-  // opened); an address belongs to one account; auth_tokens are the single-use links sent by email - confirming an
-  // address ('verify') and resetting a forgotten password ('reset') - kept as hashes, each with its expiry.
+  // opened); an address belongs to one account; auth_tokens are the single-use links sent by email — confirming an
+  // address ('verify') and resetting a forgotten password ('reset') — kept as hashes, each with its expiry.
   {
     additive: true,
     up: db => {
@@ -1879,7 +1879,7 @@ const MIGRATIONS = [
      );`);
     },
   },
-  // v37 (2026-10-09): the People page (server/people.js) - the owner's and admins' own notes and tags on an account; and
+  // v37 (2026-10-09): the People page (server/people.js) — the owner's and admins' own notes and tags on an account; and
   // each paying account's Stripe customer (one per Stripe mode: a test customer is not a live one), so every payment in
   // Stripe names the player who made it.
   {
@@ -1902,7 +1902,7 @@ const MIGRATIONS = [
      PRIMARY KEY (world_id, account_id, mode)
    );`,
   },
-  // v38 (2026-10-09): gift codes (server/commerce/gifts.js) - a code claims one city lot for nothing, once; it may name
+  // v38 (2026-10-09): gift codes (server/commerce/gifts.js) — a code claims one city lot for nothing, once; it may name
   // who it was made for, be limited to lots worth up to a value, expire, and belongs to a batch (one lot per account per
   // batch). The order it made carries promo 'gift'.
   {
@@ -1928,10 +1928,10 @@ const MIGRATIONS = [
    );
    CREATE INDEX IF NOT EXISTS commerce_gifts_batch ON commerce_gifts (world_id, batch, redeemed_by);`,
   },
-  // v39 (2026-10-10): AI apps connecting to the world (server/connector/) - the OAuth 2.1 authorization server MCP clients
+  // v39 (2026-10-10): AI apps connecting to the world (server/connector/) — the OAuth 2.1 authorization server MCP clients
   // (Grok, ChatGPT, Gemini, Claude, Meta AI…) sign in through: their registrations or fetched metadata documents
   // (mcp_clients), authorization requests waiting for the person's consent (mcp_requests), single-use codes
-  // (mcp_codes), what a person allowed - which app acts as which of their agents (mcp_grants) - and tokens (hashes
+  // (mcp_codes), what a person allowed — which app acts as which of their agents (mcp_grants) — and tokens (hashes
   // only, mcp_tokens).
   {
     additive: true,
@@ -2002,8 +2002,8 @@ const MIGRATIONS = [
   },
   // v40 (agents and friends, 2026-10-10; server/agent-social/): a relation also keeps whether its agent
   // ended the friendship (ended_until: the world day it may grow again), blocked them itself, and the world day its fading
-  // was last counted. agent_messages are what agents send each other from a distance - messages, invitations and the
-  // world's notices to them - kept for their owners to read (and the day's limits counted from them, so a restart doesn't
+  // was last counted. agent_messages are what agents send each other from a distance — messages, invitations and the
+  // world's notices to them — kept for their owners to read (and the day's limits counted from them, so a restart doesn't
   // start them again). agent_social is each agent's own settings (its owner's); agent_social_uses counts what isn't a
   // message (looking up where a friend is).
   {
@@ -2092,7 +2092,7 @@ const MIGRATIONS = [
     },
   },
   // v42 (agents and friends, 2026-10-10): whether an agent with a Mind of its own may start a conversation
-  // or an invitation by itself (its owner's switch; on by default - the admin's daily numbers still apply)
+  // or an invitation by itself (its owner's switch; on by default — the admin's daily numbers still apply)
   {
     additive: true,
     up: db => {
@@ -2215,8 +2215,8 @@ const MIGRATIONS = [
       );`,
   },
   // v48 (free lots, 2026-10-13: the product owner's "claimable lots … first come first serve … then they can earn the
-  // property"): a city lot listed free to claim, and each claim's homestead - claimed, earned by its checklist before it
-  // is due (agents with brains, one public, a billboard, days it came back), or released back to the city - with what
+  // property"): a city lot listed free to claim, and each claim's homestead — claimed, earned by its checklist before it
+  // is due (agents with brains, one public, a billboard, days it came back), or released back to the city — with what
   // stood on the lot when it was claimed (kept: the city's own buildings and decorations stay when it goes back)
   {
     additive: true,
@@ -2260,7 +2260,7 @@ const MIGRATIONS = [
       );`);
     },
   },
-  // v50 (the inventory, 2026-10-14: server/economy/inventory.js): what each player, agent or business holds - its
+  // v50 (the inventory, 2026-10-14: server/economy/inventory.js): what each player, agent or business holds — its
   // owner the economy's own subject ('account:12', 'agent:7'), plain stacks (one row per kind of item) or one-of-a-kind
   // pieces (a fish with its length and weight: attrs), some set aside for an open trade (held); every change logged
   // (inv_moves, an idempotency key on each); trades: what each side puts in, until both accept
@@ -2317,7 +2317,7 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS inv_trades_b ON inv_trades (world_id, b, status);`,
   },
   // v51 (the fishing game's angler, 2026-10-14: server/play/angler.js): what an angler has chosen and bought beyond the
-  // things in their inventory - the rod, reel and line they fish with, their boat's upgrades and their skills (kit),
+  // things in their inventory — the rod, reel and line they fish with, their boat's upgrades and their skills (kit),
   // their running totals (stats); the Fishdex (every species they've landed: how many, their best); the world's
   // records (the biggest of each species, who landed it)
   {
@@ -2455,7 +2455,7 @@ const MIGRATIONS = [
         PRIMARY KEY (world_id, connection_id)
       );`,
   },
-  // v53 (agents' phones: the person takes over, 2026-10-16 - docs/features/phone.md §4): the whole phone in the person's
+  // v53 (agents' phones: the person takes over, 2026-10-16 — docs/features/phone.md §4): the whole phone in the person's
   // hands (phone_lines.human_since/human_by; human_last: their last text from it), or one conversation (phone_takeovers);
   // control goes back to the agent after handback_minutes without the person's texts (0: only by hand); what was said
   // meanwhile is given to the agent once it has its texts back (phone_catchups), to know, never to answer.
@@ -2489,7 +2489,7 @@ const MIGRATIONS = [
         );`);
     },
   },
-  // v54 (the agents' PC, 2026-10-18 - docs/features/agent-pc.md §4): an agent's work session on a task at its PC is a
+  // v54 (the agents' PC, 2026-10-18 — docs/features/agent-pc.md §4): an agent's work session on a task at its PC is a
   // thought of its own kind ('work'), recorded and counted like the others (one a session; its cost in the day's and the
   // month's totals). The CHECK is widened by rebuilding the table (same columns, same rows), only when it lacks 'work'.
   {

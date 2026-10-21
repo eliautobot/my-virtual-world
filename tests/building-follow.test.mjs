@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What happens inside a building when its sides move (shared/edit.js followLayout/followCore/interiorFits, op
 // bld.place): as in the Sims, furniture and the elevator standing against a side that moves go with it, everything else
 // stays where it stands in the world; turning keeps the inside as it is; a move that would push something into

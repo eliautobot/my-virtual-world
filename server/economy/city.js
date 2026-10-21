@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The city (docs/features/ECONOMY.md §6), SimCity's budget: the treasury's income and expenses per line, per day and
 // over time; the daily costs of running the city (roads by the kilometre, parks, metro stations, city buildings,
 // ordinances, bond repayments); the upkeep owners pay for their own buildings; bonds (loans to the treasury).

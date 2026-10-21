@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's work, in parts (docs/features/CHAT.md §13): the store's brief read back safely whatever is kept, notes
 // bounded, files kept and let go; the real time; the work prompt; its PDFs sent with the first message, within room.
 import assert from 'node:assert/strict';

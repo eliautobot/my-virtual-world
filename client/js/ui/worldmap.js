@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The world map and GPS (2026-10-05: "build it properly, something like how GTA works"; the M key opens it).
-// - The map: the whole island and the city in a full-screen view - terrain, water, rivers, every road and street (named),
-//   city blocks and buildings by kind, parks, metro stations, other players, you (an arrow), your home - pan by dragging,
+// - The map: the whole island and the city in a full-screen view — terrain, water, rivers, every road and street (named),
+//   city blocks and buildings by kind, parks, metro stations, other players, you (an arrow), your home — pan by dragging,
 //   zoom with the wheel, pinch or the buttons; a legend that shows and hides kinds of places; search for places, streets,
 //   roads and players. Clicking picks something (a card: what, where, how far); double-clicking (or the card) sets the
 //   waypoint. "Travel here" moves a player there (server: players.travel, dry open ground only, once every 10 s).
@@ -502,7 +502,7 @@ function css() {
 #wmap .wm-li:hover { background: rgba(255,255,255,.07); }
 #wmap .wm-li.off { opacity: .38; text-decoration: line-through; }
 #wmap .wm-li span { width: 22px; text-align: center; }
-/* the map's buttons (2026-10-06): like the main screen's corner - the waypoint in a panel of its own above one with zoom
+/* the map's buttons (2026-10-06): like the main screen's corner — the waypoint in a panel of its own above one with zoom
    and centre, the same button size and style, 12 px from the side and the bottom */
 #wmap .wm-ctl { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
 #wmap .wm-ctl .panel { display: flex; flex-direction: column; gap: 4px; padding: 6px; }

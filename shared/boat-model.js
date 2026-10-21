@@ -1,10 +1,10 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The fishing boats and how they handle (docs/features/fishing.md §Boats) - stepped in the skipper's browser like the
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The fishing boats and how they handle (docs/features/fishing.md §Boats) — stepped in the skipper's browser like the
 // aircraft (shared/flight-model.js), the server only checking the poses. Arcade-real: the way the boat games and the
 // buoyancy tutorials do it, with what a planing hull really does.
 //   · It floats on the water the screen shows: the surface under the hull (its height and its slope along and across
 //     the boat, from the ocean's own waves: render/sea-probe.js) is a target the boat's heave, pitch and roll spring to
-//     - each with its own period and damping (a boat rolls slowly and lightly damped, heaves quicker) - so it rides the
+//     — each with its own period and damping (a boat rolls slowly and lightly damped, heaves quicker) — so it rides the
 //     swell with weight, not glued to it; off a crest it flies (gravity takes over) and slams back.
 //   · An outboard pushes it (the throttle lever: forward, neutral, reverse; the engine spools), its thrust vectored by
 //     the wheel: it turns best under power, a little with way on (the lower unit), and in reverse the stern swings.
@@ -12,7 +12,7 @@
 //     the drag falls away. The keel holds it sideways (a little skid in a hard turn); it leans into its turns.
 //   · Slow, it drifts with the wind; at anchor it swings to it. Shallow water grounds it (a bump, it stops); the docks
 //     are solid. Nothing breaks and it can't capsize.
-// Frame: the bow along (sin heading, cos heading) - the aircraft's convention; starboard is (−cos, sin); y up.
+// Frame: the bow along (sin heading, cos heading) — the aircraft's convention; starboard is (−cos, sin); y up.
 
 export const BOATS = Object.freeze({
   coastal: Object.freeze({
@@ -57,8 +57,8 @@ export const G = 9.81;
 // (docs/features/fishing.md §The angler) Boat frame: x to port, z to the bow, y over the water. A boat's walkable deck
 // is its floors (the cockpit sole, the casting decks: [z from, z to, height]) inside the gunwales (beam: the half-width
 // one can stand at, along the boat) less what stands on them (blocks: [x0, x1, z0, z1], kept a body's width R from);
-// a step up between floors is at most STEP. You can't go over the side. spots: where to fish from - [x, y, z, facing
-// (0 toward the bow, π/2 to port), name] - one angler at each.
+// a step up between floors is at most STEP. You can't go over the side. spots: where to fish from — [x, y, z, facing
+// (0 toward the bow, π/2 to port), name] — one angler at each.
 export const DECK_R = 0.2, DECK_STEP = 0.32;
 function deckPlan(d) {
   return Object.freeze({ beam: d.beam, floors: d.floors, blocks: d.blocks, spots: d.spots.map(([x, y, z, yaw, name]) => Object.freeze({ x, y, z, yaw, name })) });
@@ -79,7 +79,7 @@ export function deckFloor(type, x, z) {
   return f[2];
 }
 /**
- * A step across the deck from at {x, y, z} by (dx, dz): where it ends up - sliding along a gunwale (in as the hull
+ * A step across the deck from at {x, y, z} by (dx, dz): where it ends up — sliding along a gunwale (in as the hull
  * narrows) or a fixture rather than stopping dead, up or down a step between floors (never a higher one); still at
  * `at` if there's no way.
  */
@@ -250,7 +250,7 @@ export const knots = ms => ms * 1.94384;
 
 /**
  * The water's plane under a boat from its probe points' heights (render/sea-probe.js, or any function): a least-squares
- * fit - the height at its middle, the slope rising to the bow and to starboard. heights[i] at S.probes[i] (x port+, z fwd).
+ * fit — the height at its middle, the slope rising to the bow and to starboard. heights[i] at S.probes[i] (x port+, z fwd).
  */
 export function fitPlane(S, heights) {
   let n = 0, sx = 0, sz = 0, sh = 0, sxx = 0, szz = 0, sxh = 0, szh = 0;

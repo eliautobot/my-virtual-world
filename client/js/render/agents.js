@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents: evaluates every server motion plan each frame (piecewise-linear segments in absolute sim time), decides who
 // is visible (outdoors, parks, the focused floor), animates them (gait phase locked to distance travelled, clip
 // cross-fades, yaw smoothing, error smoothing when a plan is replaced) and draws them through the instanced character
@@ -29,7 +29,7 @@ export class Agents {
     this.net = net; this.stage = stage;
     // Phones (2026-10-04, the phone slowed right down after loading): characters' colour maps at most 1024 square (a
     // person fills a few hundred pixels of a phone's screen at most), normal maps half that, two downloading at a time
-    // (each is a worker decoding and a GPU upload) - 2048 maps were a quarter of a gigabyte of the phone's memory per 10.
+    // (each is a worker decoding and a GPU upload) — 2048 maps were a quarter of a gigabyte of the phone's memory per 10.
     const phone = matchMedia('(pointer: coarse)').matches, mapSize = phone ? Math.min(1024, stage.q.charMap) : stage.q.charMap;
     this.chars = new Characters({ capacity: 4096, shadows: stage.q.shadows, renderer: stage.renderer, mapSize, normalSize: phone ? mapSize / 2 : mapSize, warmAll: false, concurrency: phone ? 2 : 4 });
     this.frame = 0; this.n = 0;
@@ -184,7 +184,7 @@ export class Agents {
       }
       this.lph[i] = ph;
       const w = Math.max(0, 1 - (now - this.fadeT[i]) / FADE);
-      // (someone between the camera and a screen the person is using - ui/pc-onscreen.js: the body isn't drawn meanwhile,
+      // (someone between the camera and a screen the person is using — ui/pc-onscreen.js: the body isn't drawn meanwhile,
       // what is on the table in front of it is)
       const ghost = this.hideFn ? this.hideFn(i, x, y, z) : false;
       chars.push(lod, x, y, z, yw, a, ph, w > 0 ? this.pclip[i] : a, this.pph[i], w, i, prop, (i === sel ? 2 : i === hov ? 1 : 0) | (indoor ? 4 : 0), item, ghost);

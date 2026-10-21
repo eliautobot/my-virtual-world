@@ -1,11 +1,11 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // GLSL shared by the characters (render/characters.js) and the things they hold (render/char-props.js): the
 // appearance texture's lookups, and the baked clips' skinning sampled with frame interpolation.
 import { TRIPO_CLIPS } from './charClips.js';
 
 const NCL = TRIPO_CLIPS.length, NCL2 = Math.ceil(NCL / 2);
 /**
- * A character's clips for SKIN_GLSL's uClip: (frame offset, length) for each, two clips to a vec4 - a vec4 a slot, where
+ * A character's clips for SKIN_GLSL's uClip: (frame offset, length) for each, two clips to a vec4 — a vec4 a slot, where
  * two float arrays took a slot an element each (2026-10-14: 71 clips in 36 slots, not 142; phones give a vertex shader
  * as few as 256).
  */

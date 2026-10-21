@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Checks the key for stored secrets before a release is promoted or the server restarted (DECISIONS C98): it is set up
 // as the server needs it (MVW_KEY_FILE or MVW_SECRET_KEY, exactly one, outside the data folder) and opens every stored
 // secret. A server that cannot open its secrets refuses to start, and so would the release a failed promotion rolls

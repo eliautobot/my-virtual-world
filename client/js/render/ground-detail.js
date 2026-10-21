@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The island ground's close detail (the design review 2026-10-03: "the terrain details are way lacking"), drawn to the pixel
 // in the terrain's own material, so it costs no geometry: farm fields with their crops in rows, tram lines, headlands and
 // furrows, hedges and dry-stone walls along their edges (shared/farms.js, mirrored exactly below); meadows of grass with
 // patches of wild flowers that colour the land from afar; woodland floor; mountain rock; snow; sand; river pebbles.
-// the owner's notes the same day ("more natural, not lego/bands"; "fluffy snow"): nothing is drawn as ruled lines - rock is
+// the owner's notes the same day ("more natural, not lego/bands"; "fluffy snow"): nothing is drawn as ruled lines — rock is
 // plates of stone with cracks between them, each plate tilted its own way and seen in the face's own plane; sand has soft
 // wind ripples in patches; crop rows are plants whose rows wander and thin; river banks are pebbles; snow lies in soft
 // pillows with a thick rounded lip where it ends, blue in its hollows and lit through. Fine patterns fade to their
@@ -67,7 +67,7 @@ ${FARM_GLSL}
 #ifdef GD_NTEX
 // Randomness looked up in a 256² texture (core/render-flags.js 'noise'; the reference renderer's way): one fetch where
 // the arithmetic hash took a dozen operations and value noise four of them. The hash reads exact texels (a fractional
-// offset in its argument - the seeds such as + 7.1 - jumps far across the texture, so seeds never line up); value noise
+// offset in its argument — the seeds such as + 7.1 — jumps far across the texture, so seeds never line up); value noise
 // lets the texture's own filtering blend the four corners, with the smoothstep fade put into the coordinate.
 uniform sampler2D uGNoise;
 float gH21(vec2 p) { vec2 q = floor(p) + floor(fract(p) * 10.0) * vec2(37.0, 91.0); return texelFetch(uGNoise, ivec2(mod(q, 256.0)), 0).y; }
@@ -88,7 +88,7 @@ float gStripe(float x, float period, float fill, float px) {
   float d = abs(fract(x / period) - 0.5) * period, hw = fill * period * 0.5, e = max(px, 1e-3);
   return mix(fill, 1.0 - smoothstep(hw - e, hw + e, d), smoothstep(period * 0.7, period * 0.22, px));
 }
-// Rows of plants seen from above: rows period apart whose width wanders along them (fill ± wob) - never ruled lines.
+// Rows of plants seen from above: rows period apart whose width wanders along them (fill ± wob) — never ruled lines.
 float gRows(float x, float along, float period, float fill, float wob, float px) {
   float ri = floor(x / period);
   float f = fill + (gNoise(vec2(along * 0.9, ri * 7.1)) - 0.5) * wob + (gNoise(vec2(along * 3.7, ri * 3.3 + 50.0)) - 0.5) * wob * 0.6;
@@ -126,7 +126,7 @@ vec3 gVor(vec2 p, out vec2 toC) {
   d1 = sqrt(d1);
   return vec3(d1, (sqrt(d2) - d1) * 0.5, id);
 }
-// Smooth gradient noise (quintic fade: no creases along its grid when used as relief - value noise's showed as streaks
+// Smooth gradient noise (quintic fade: no creases along its grid when used as relief — value noise's showed as streaks
 // and lines in the lighting), about 0..1.
 float gSoft(vec2 p) {
   vec2 i = floor(p), f = fract(p), u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
@@ -161,7 +161,7 @@ vec3 gRockPlane(vec2 q, float s, float px) {
   return vec3(0.5 + (id - 0.5) * 0.1 + (mott - 0.5) * 0.75 + (grain - 0.5) * 0.5 + (fg - 0.5) * 0.15, crack * 0.8, tilt * 0.2 * s + (grain - 0.5) * 0.06 + (fg - 0.5) * 0.01);
 }
 // Loose stones lying on grit (cell size c): round, each its own size and shade, some cells bare; returns (cover, dome,
-// id) - cover fades to its average once the stones are too small to see.
+// id) — cover fades to its average once the stones are too small to see.
 vec3 gStones(vec2 p, float c, float fill, float px) {
   vec2 toC; vec3 v = gVor(p / c, toC);
   float rr = 0.24 + 0.17 * fract(v.z * 7.13), e = max(px / c, 0.01);
@@ -171,7 +171,7 @@ vec3 gStones(vec2 p, float c, float fill, float px) {
 }
 #ifdef GD_BAKE
 // Baked layers (render/ground-bake.js, render flag 'bake'): sampled with the coordinates' own derivatives (worked out
-// once, outside any branch, so mip levels never jump at a branch's edge), twice - the second turned and shifted -
+// once, outside any branch, so mip levels never jump at a branch's edge), twice — the second turned and shifted —
 // blended by a slow noise so a tile's repeat never shows; k: the blend's half-width (narrow for stones and specks).
 uniform highp sampler2DArray uGBake;
 vec4 gBakeAt(float L, vec2 q, vec2 dx, vec2 dy, float T) { return textureGrad(uGBake, vec3(q / T, L), dx / T, dy / T); }
@@ -228,7 +228,7 @@ const DETAIL_MAIN = /* glsl */`
     col *= mix(1.0, 0.93 + 0.12 * v1 + 0.06 * v2, land);
     col = mix(col, col * vec3(1.08, 1.05, 0.8), smoothstep(0.62, 0.9, v3) * 0.3 * land * (1.0 - forest));
     // ---------- the mountains, per pixel: bare rock on the steep ground and high up, snow above the snowline on all but
-    // the steepest faces - from the height and the smooth normal, never from a coarse tile's corners
+    // the steepest faces — from the height and the smooth normal, never from a coarse tile's corners
     float mtn = clamp(1.0 - farm - sand - wet, 0.0, 1.0);
     float L = ${SNOW_LINE.toFixed(1)} + (gNoise(P * 0.004 + 5.0) - 0.5) * 80.0, edgeN = gNoise(P * 0.045) * 0.6 + gNoise(P * 0.19) * 0.4;
     float rockP = max(smoothstep(0.34, 0.5, slopeP + (v2 - 0.5) * 0.06), smoothstep(L - 90.0, L - 30.0, vGPos.y)) * mtn;
@@ -323,7 +323,7 @@ const DETAIL_MAIN = /* glsl */`
         if (aw.x > 0.03) rk += gRockBaked(0.0, vec2(vGPos.z, vGPos.y * 1.4), vec2(gDX.z, gDX.y * 1.4), vec2(gDY.z, gDY.y * 1.4), 32.0, 3.2) * aw.x;
         if (aw.z > 0.03) rk += gRockBaked(0.0, vec2(vGPos.x, vGPos.y * 1.4), vec2(gDX.x, gDX.y * 1.4), vec2(gDY.x, gDY.y * 1.4), 32.0, 3.2) * aw.z;
         #elif defined(GD_LITE)
-        // phones: the face's own plane only (its strongest axis) - one rock pattern a pixel, not up to three blended
+        // phones: the face's own plane only (its strongest axis) — one rock pattern a pixel, not up to three blended
         // (the ground's detail was a fifth to a quarter of a phone's frame on the hills, 2026-10-03: "very hot")
         vec3 an = abs(wn);
         rk = gRockPlane(an.y >= max(an.x, an.z) ? P : an.x > an.z ? vec2(vGPos.z, vGPos.y * 1.4) : vec2(vGPos.x, vGPos.y * 1.4), 3.2, px);
@@ -337,8 +337,8 @@ const DETAIL_MAIN = /* glsl */`
         // loose stones on the gentler slopes
         float scr = smoothstep(0.42, 0.3, slopeP) * near * (1.0 - snowP);
         #ifdef GD_LITE
-        scr *= smoothstep(0.3, 0.12, px);   // (phones: the loose stones only close by - farther off they are under a pixel)
-        #endif   // (under the snow: none - their relief showed through it as rings)
+        scr *= smoothstep(0.3, 0.12, px);   // (phones: the loose stones only close by — farther off they are under a pixel)
+        #endif   // (under the snow: none — their relief showed through it as rings)
         if (scr > 0.01) {
           #ifdef GD_BAKE
           vec3 st = gStonesBaked(P, gDX.xz, gDY.xz, 0.6, 0.55, px);
@@ -351,8 +351,8 @@ const DETAIL_MAIN = /* glsl */`
         rc = mix(rc, rc * vec3(0.96, 1.05, 0.84), smoothstep(0.7, 0.88, gNoise(P * 0.3 + 31.0)) * 0.35 * (1.0 - slopeP) * near);   // lichen
         gBumpL += rk.z * 0.6 * near * (1.0 - snowP);
       }
-      // cliffs (2026-10-03, on the phone: not layers - "grey dark wall ... angled carved rocks"): on the steep faces,
-      // dark grey stone in big angular blocks - two sets of joints, each block a facet of its own leaning its own way
+      // cliffs (2026-10-03, on the phone: not layers — "grey dark wall ... angled carved rocks"): on the steep faces,
+      // dark grey stone in big angular blocks — two sets of joints, each block a facet of its own leaning its own way
       // and a shade of its own, the cracks between them dark; wet streaks running down, moss in the damp. One plane, the
       // face's own (seen along its strongest axis), so it costs one rock pattern a pixel.
       float cliff = smoothstep(0.55, 0.85, slopeP) * (1.0 - snowP);
@@ -501,7 +501,7 @@ const DETAIL_MAIN = /* glsl */`
 `;
 
 const BUMP_MAIN = /* glsl */`
-  {   // (phones: the snow's swells only; no branch round it - derivatives need every pixel of the quad)
+  {   // (phones: the snow's swells only; no branch round it — derivatives need every pixel of the quad)
     // bump from the detail's height (derivatives across the pixel), as three's bump map does
     #ifdef GD_LITE
     float bH = gSnowH;

@@ -1,13 +1,13 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Who may do what, swept on real servers (step 8, 2026-10-08: "make sure all admin settings/controls are properly
 // applied to admin accounts and all member accounts have user controls … a user can't hack or make themselves admin, nor
 // have controls over the world or agents that they shouldn't"). The route table comes from the server itself (GET
 // /api/routes, administrators only), so a route added later is swept too.
 // - A member is refused every route of an administrator or the owner; a member can't raise their own role, run the
-//   world, or act on agents, connections or private records that aren't theirs or shared with them to manage - and what
+//   world, or act on agents, connections or private records that aren't theirs or shared with them to manage — and what
 //   is shared to use stays use.
 // - An administrator is refused the owner's own controls and can't raise
-//   anyone - themselves included - to their own role or above.
+//   anyone — themselves included — to their own role or above.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { startServer, ownerSession, userSession } from './helpers/server.mjs';
@@ -90,7 +90,7 @@ test('a member doesn\'t run the world: no clock, no commands, no edits off their
   assert.equal(after.buildings[city.idx].name, city.name, 'the building is as it was');
 });
 
-test('a member acts only on agents that are theirs or shared with them to manage - never on others, never beyond "use"', async () => {
+test('a member acts only on agents that are theirs or shared with them to manage — never on others, never beyond "use"', async () => {
   // the owner's agent, not shared: as if it didn't exist
   for (const [m, p, b] of [['post', '/api/agents/update', { id: X.id, name: 'Mine now' }], ['post', '/api/agents/remove', { id: X.id }], ['post', '/api/agents/share', { id: X.id, kind: 'account', who: bob.id, level: 'manage' }],
     ['post', '/api/mind/agent', { agent: X.id, cadence: 'daily' }], ['post', '/api/free-will/agent', { agent: X.id, enabled: true }], ['post', '/api/agent-work', { agent: X.id, publicMode: 'greet' }],
@@ -102,7 +102,7 @@ test('a member acts only on agents that are theirs or shared with them to manage
   // shared to use: she chats with it, she doesn't manage it
   assert.equal((await ann.post('/api/agents/update', { id: U.id, name: 'Renamed' })).status, 403);
   assert.equal((await ann.post('/api/agents/remove', { id: U.id })).status, 403);
-  // shared to manage: she changes what a manager may - never whose it is
+  // shared to manage: she changes what a manager may — never whose it is
   const up = await ann.post('/api/agents/update', { id: M.id, name: 'Managed', ownerId: ann.id });
   assert.equal(up.status, 200, up.text);
   const m = (await owner.get('/api/agents')).json.agents.find(a => a.id === M.id);

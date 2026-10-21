@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Hermes adapter (docs/features/agent-providers.md §9): runs in the provider helper process (../host-main.mjs) and
-// keeps one live connection per Hermes connection (./link.js) - to a `hermes serve` / `hermes dashboard` backend, as Hermes
+// keeps one live connection per Hermes connection (./link.js) — to a `hermes serve` / `hermes dashboard` backend, as Hermes
 // Desktop connects to a Remote gateway. Every call carries the connection's settings and credentials; the connection is
 // (re)built from them when they change. The calls are the same as every live provider's (../openclaw/adapter.js): the
 // universal chat window and Agent Providers know nothing of which provider answers them.
@@ -91,7 +91,7 @@ const adapter = {
   },
   async refresh(p) { return adapter.test(p); },
 
-  /** Hermes' agents - its profiles: { defaultId, agents: [{ id, name, emoji }] }, named as Hermes shows them. */
+  /** Hermes' agents — its profiles: { defaultId, agents: [{ id, name, emoji }] }, named as Hermes shows them. */
   async agents(p) {
     const l = await linkFor(p);
     const r = await l.request('profiles.list', {});
@@ -131,7 +131,7 @@ const adapter = {
   async limits() { return {}; },
 
   /** One of an answer's media ({ sessionKey, agentKey, ref: { source } }: the path the agent wrote in a MEDIA line),
-   *  fetched through Hermes' own file route with this connection's credential - Hermes' file policy decides what it serves. */
+   *  fetched through Hermes' own file route with this connection's credential — Hermes' file policy decides what it serves. */
   async media(p) {
     const l = await linkFor(p);
     const ref = (p && p.ref) || {};
@@ -168,7 +168,7 @@ const adapter = {
   },
 
   // ---------------------------------------------------------------- its screen (./screen.js: Hermes' Bot Desktop)
-  /** The agent's own screen: watching it, taking it over and starting it are its machine's - Full access only (as
+  /** The agent's own screen: watching it, taking it over and starting it are its machine's — Full access only (as
    *  OpenClaw's browser needs Full access). viewer: the person asking (their own viewer id on Hermes). */
   async screenState(p) {
     if ((p.config || {}).access === 'chat') return { available: false, reason: 'This connection is set up for chat only: the agent\'s screen needs Full access (Agent Providers → its settings).' };

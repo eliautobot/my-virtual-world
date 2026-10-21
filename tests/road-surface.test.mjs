@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Feet, wheels' tilt and tyre marks on the island's roads meet the drawn surface (2026-10-05: feet sank into the
 // 2-lane roads; people and traffic sank into bridge decks near their edges): GroundQuery.height on a road is the road's
-// drawn top - exactly, not off the 2.4 m height grid - with raised sidewalks a curb higher.
+// drawn top — exactly, not off the 2.4 m height grid — with raised sidewalks a curb higher.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateWorld } from '../server/world/generate.js';

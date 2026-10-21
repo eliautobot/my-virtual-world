@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // My Virtual World: HTTP + WebSocket server (port 8570 by default).
 // Every /api route and WebSocket message is declared in server/routes.js with the capability it needs; handleApi()
 // checks the session, that capability, Origin, the CSRF token and re-authentication before any handler runs.
@@ -200,7 +200,7 @@ licence.startRechecks();   // while online: does the activation still stand? (se
 /** The agent registry (WP2.1): every AI agent is a record owned by an account (set up once the residents are loaded). */
 let agents = null;
 /** Whether an agent counts as an agent: it has an enabled record and, in demo mode (E19), is one of the first 3 enabled
- *  records of any kind - built in or connected from outside (a Grok Bot counts like any other); the others are shown as
+ *  records of any kind — built in or connected from outside (a Grok Bot counts like any other); the others are shown as
  *  ordinary residents, their presence is ignored and a connected one can't act. A licence lifts the limit. */
 let agentCache = null;
 function agentOk(id) {
@@ -218,7 +218,7 @@ function extPublic(key) {
   return !!slot && slot.status !== 'revoked' && slot.visibility === 'public';
 }
 function agentShown(id) { return agentOk(id) && (!isExtKey(id) || extPublic(id)); }
-/** Demo mode (E19): whether one more agent may be made - the installation's built-in agents and its connected agents'
+/** Demo mode (E19): whether one more agent may be made — the installation's built-in agents and its connected agents'
  *  slots (any not revoked: waiting, connected or paused) together stay within 3. A licence lifts the limit. */
 function demoAgentRoom() {
   if (licence.active || !agents) return true;
@@ -301,7 +301,7 @@ if (Array.isArray(world.roads)) {
 const index = new WorldIndex(world);
 // Residents: a new city gets generated residents. AI agents join through connections (WP2.1); agents who live here
 // already stay as world data (DECISIONS C61, C103).
-// (how many: the share of its homes' beds Settings → Residents asks for - server/sim/housing.js; a world without homes yet has none)
+// (how many: the share of its homes' beds Settings → Residents asks for — server/sim/housing.js; a world without homes yet has none)
 if (!Array.isArray(people) || !people.length) people = generatePopulation(world, index, { population: CFG.housing ? targetOf(bedsOf(world, index), Number(settings.get('world.homesFilled') ?? DEFAULT_HOMES_FILLED)) : POP });
 else for (const p of people) validatePerson(world, index, p);
 reassign(world, index, people, new RNG('boot:' + Date.now()));
@@ -339,7 +339,7 @@ const attachments = new Attachments(dbs, path.join(DATA, 'attachments'), {
   limits: () => ({ maxBytes: Number(perms.setting('chat.attachmentMaxMb', '25')) * 1048576, quotaBytes: Number(perms.setting('chat.attachmentQuotaMb', '2048')) * 1048576 }),
 });
 const references = new References(dbs);
-// an agent's work (docs/features/CHAT.md §13): its job brief, its work notes and the files it knows - what it answers from
+// an agent's work (docs/features/CHAT.md §13): its job brief, its work notes and the files it knows — what it answers from
 // in its owner's chats in Work mode, apart from its life in the city
 const work = new Work(dbs, path.join(DATA, 'work-files'));
 // the media of providers' answers (an agent's images, video, audio): fetched once, kept on disk within a size
@@ -348,7 +348,7 @@ const chat = new Chat({ media: providerMedia, agents, connections, registry, hos
   agentOk: id => agentOk(id), agentShown: id => agentShown(id), send: sendToAccount, log,
   inproc: { agentapi: (c, method, params) => agentApiAdapter(agentApi)(c, method, params) } });
 
-// Notifications (docs/features/CHAT.md §8): what an account is told - kept for its bell, shown on its open pages, pushed
+// Notifications (docs/features/CHAT.md §8): what an account is told — kept for its bell, shown on its open pages, pushed
 // to its browsers and phones when it has none open. notifyAccount sends a live frame as before and turns the ones worth
 // keeping into notifications: an agent asking for its owner's OK, a note from an agent, a problem in its life.
 const accountOnline = id => { if (!wss) return false; for (const ws of wss.clients) if (ws.readyState === 1 && ws.P?.account?.id === id) return true; return false; };
@@ -358,7 +358,7 @@ const vcText = c => `${(c / 100).toFixed(c % 100 ? 2 : 0)} VC`;
 const notifyAccount = (id, m) => {
   sendToAccount(id, m);
   try {
-    if (m.t === 'econ' && m.ev === 'approval') notifications.create(id, { kind: 'approval', title: `${m.agent || 'An agent'} asks for your OK`, body: `${m.summary || 'A payment'} - ${vcText(m.amount || 0)}`, link: { approval: m.id, ...(m.agentId ? { agent: m.agentId } : {}) } });
+    if (m.t === 'econ' && m.ev === 'approval') notifications.create(id, { kind: 'approval', title: `${m.agent || 'An agent'} asks for your OK`, body: `${m.summary || 'A payment'} — ${vcText(m.amount || 0)}`, link: { approval: m.id, ...(m.agentId ? { agent: m.agentId } : {}) } });
     else if (m.t === 'mind' && m.ev === 'note') notifications.create(id, { kind: 'note', title: m.agent?.name || 'Your agent', body: m.text, link: m.agent?.id ? { agent: m.agent.id } : null });
     else if (m.t === 'mind' && (m.ev === 'problem' || m.ev === 'solved')) notifications.create(id, { kind: 'problem', title: `${m.agent?.name || 'Your agent'}${m.ev === 'solved' ? ': sorted' : ': a problem'}`, body: m.text, link: m.agent?.id ? { agent: m.agent.id } : null });
   } catch (e) { log.warn('[notify] could not keep a notification:', e.message); }
@@ -445,7 +445,7 @@ function playContext(id, where, account) {
 /**
  * The fishing module's context (shared/fishing.js prepare): the dock a trip starts from (where: its id, else the one
  * nearest the player), its water, the places on that water its trips may put their grounds (shared/fishing-trip.js
- * groundSites: by the trip's reach on the sea, the whole lake on a lake - kept per dock and reach until the world
+ * groundSites: by the trip's reach on the sea, the whole lake on a lake — kept per dock and reach until the world
  * changes) and the angler's kit (server/play/angler.js: the gear they hold and chose, their boat and skills).
  */
 const fishSites = new Map();
@@ -646,7 +646,7 @@ const play = new PlayCore({ dbs, log, contextFor: (id, where, account) => playCo
     rules: () => (economy && economy.econ.enabled() && !economy.econ.paused() ? economy.econ.policy().play : null),
     pay: (id, amount, memo, idem) => {
       const E = economy.econ;
-      E.ledger.transfer(E.faucet('prizes').id, E.walletFor(econSubj('account', id)).id, amount, { kind: 'prize', actor: 'system:play', memo: `Prize - ${memo}`, idem });
+      E.ledger.transfer(E.faucet('prizes').id, E.walletFor(econSubj('account', id)).id, amount, { kind: 'prize', actor: 'system:play', memo: `Prize — ${memo}`, idem });
       return { paid: amount };
     },
   } });
@@ -730,7 +730,7 @@ agents.extraUse = (P, a) => { const slot = agentApi.slotOfAgentKey(a.key); retur
 agentApi.deps.emit = e => providerBus.emit(e);
 agentApi.deps.note = line => log(line);
 // (the admin's limits for connected agents: Settings → Agent limits)
-// (people talking with an agent follow one set of limits whichever way they come in - walking up to it or its chat window:
+// (people talking with an agent follow one set of limits whichever way they come in — walking up to it or its chat window:
 // the "talk" settings; then what only outside AIs need)
 { const MAP = { queueMax: 'connected.queueMax', talkMessages: 'talk.maxMessages', talkWindowMinutes: 'talk.windowMinutes', visitorPerDay: 'talk.visitorPerDay',
     agentVisitorPerDay: 'talk.agentVisitorPerDay', visitorMaxChars: 'talk.maxChars', strikesPerDay: 'connected.strikesPerDay', answerMaxChars: 'connected.answerMaxChars',
@@ -817,7 +817,7 @@ log(`[licence] ${licence.active ? 'licensed' : `demo mode: ${Object.values(LOCKS
 
 // ------------------------------------------------------------------ agent bodies (WP2.1)
 /** Whether resident i is the body of an agent principal P manages (its owner, or a manage share): such an account
- *  dresses it (server/lot-rights.js - its look only), a connected agent's body too (2026-10-11). */
+ *  dresses it (server/lot-rights.js — its look only), a connected agent's body too (2026-10-11). */
 function managesBody(P, i) {
   const p = people[i], a = p && p.vip && p.agentId && !p.retired ? agents.byKey(p.agentId) : null;
   return !!a && agents.canManage(P, a);
@@ -888,7 +888,7 @@ function renameAgentBody(a) {
   if (i < 0) return false;
   const p = people[i], before = JSON.stringify(sim.publicPerson(p, i));
   p.name = bodyName(p, a);
-  // an agent of the world (not a connected one, whose body may pass for an ordinary citizen) shows its badge and role too -
+  // an agent of the world (not a connected one, whose body may pass for an ordinary citizen) shows its badge and role too —
   // and its job title follows the role ("<role> at <the HQ>", or the role alone while it has no desk; population.js makeVip)
   if (!isExtKey(a.key)) {
     p.emoji = a.emoji; p.role = a.role;
@@ -913,7 +913,7 @@ const STATIC = [
   ['/vendor/three/', path.join(ROOT, 'node_modules/three/'), 'public, max-age=86400'],
   // The official Rapier build, loaded by a driver's browser only while driving (decision A20).
   ['/vendor/rapier/', path.join(ROOT, 'node_modules/@dimforge/rapier3d-compat/'), 'public, max-age=86400'],
-  // noVNC's own build (its core and the zlib it vendors): an agent's own screen, live - Hermes' Bot Desktop (agent-pc.md §4.2)
+  // noVNC's own build (its core and the zlib it vendors): an agent's own screen, live — Hermes' Bot Desktop (agent-pc.md §4.2)
   ['/vendor/novnc/', path.join(ROOT, 'node_modules/@novnc/novnc/'), 'public, max-age=86400'],
   ['/shared/', path.join(ROOT, 'shared/'), 'no-cache'],
   ['/promo/', path.join(DATA, 'promo/'), 'public, max-age=86400'],   // promotional aircraft graphics (WP4.11)
@@ -937,7 +937,7 @@ function sendJSON(req, res, code, obj, pre = null, extra = null) {
   res.writeHead(code, { ...h, 'content-length': Buffer.byteLength(body) });
   res.end(body);
 }
-/** A file a route answers with, streamed - whole, or one byte range of it (a video seeking): 206 with its range. */
+/** A file a route answers with, streamed — whole, or one byte range of it (a video seeking): 206 with its range. */
 function sendFile(req, res, file, extra) {
   const size = file.size, h = { 'cache-control': 'no-store', ...SECURITY_HEADERS, ...(extra || {}), 'accept-ranges': 'bytes' };
   const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
@@ -1114,7 +1114,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
     const r = id ? accountQ.get(dbs.worldId, id) : null;
     return r ? { account: { id: r.id, login: r.login, role: r.role }, role: r.role } : null;
   };
-  // agents' phones (server/phone/, docs/features/phone.md): a Twilio number per agent - texts, calls, voicemail, contacts;
+  // agents' phones (server/phone/, docs/features/phone.md): a Twilio number per agent — texts, calls, voicemail, contacts;
   // read from Twilio every few seconds (no webhook), what reaches the agent goes into its phone chat, its answer is a reply
   phone = new Phone({ dbs, agents, connections, host, chat, notifications, send: sendToAccount, principalFor, setting: k => settings.get(k),
     installId: dbs.worldId, audit, log }).watch();
@@ -1136,7 +1136,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   };
   // (an agent's work time zone: its job brief's, else the server's)
   const pcZone = a => { const z = work.brief(a.id).timezone; return z && validZone(z) ? z : serverZone(); };
-  // its browser: the built-in reader, or its owner's browser service (a connection of the kind "browser" they may use -
+  // its browser: the built-in reader, or its owner's browser service (a connection of the kind "browser" they may use —
   // their own first); the web search the installation chose (Settings → PC)
   const pcService = a => {
     const P = principalFor(a.ownerId);
@@ -1145,14 +1145,14 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
     for (const c of list) { const sec = connections.secretsFor(c.id); if (sec.endpoint) return { endpoint: sec.endpoint, allowPrivate: c.scope === 'installation', connection: c.id }; }
     return null;
   };
-  // (its search: its owner's search service - their own first - else the installation's built-in one)
+  // (its search: its owner's search service — their own first — else the installation's built-in one)
   const pcSearch = a => {
     const P = a ? principalFor(a.ownerId) : null;
     const list = P ? connections.visible(P).filter(c => c.kind === 'search' && c.enabled).sort((x, y) => (x.scope === 'account' ? 0 : 1) - (y.scope === 'account' ? 0 : 1)) : [];
     for (const c of list) { const sec = connections.secretsFor(c.id); return { kind: c.config.provider === 'searxng' ? 'searxng' : 'brave', url: c.config.url || '', key: sec.key || '' }; }
     return { kind: settings.get('pc.search') === 'off' ? 'off' : 'duckduckgo' };
   };
-  // (the built-in real browser: Chrome on this machine, started when an agent first browses - server/pc/chrome.js)
+  // (the built-in real browser: Chrome on this machine, started when an agent first browses — server/pc/chrome.js)
   pcChrome = new LocalChrome({ dir: path.join(DATA, 'pc'), exe: findChrome({ chrome: CFG.chrome }), enabled: () => settings.get('pc.realBrowser') !== false, log });
   pcBrowser = new PcBrowser({ os: pc, service: pcService, search: pcSearch, log, chrome: pcChrome });
   // (where its body is, for its owner's own view of its screens in the world: the resident it is, its desk at work)
@@ -1166,11 +1166,11 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   addPcRoutes(router, pc, { agents, names: tag => pcNames(tag), work: () => pcWork, browser: () => pcBrowser, body: pcBody, watch: (P, ids) => pcWatch?.lease(P, ids) || { watching: [] },
     own: { of: (P, a) => agentProviders.computerOf(P, a), call: (P, a, op, params, actor, o) => agentProviders.computer(P, a, op, params, actor, o) },
     shellFor: a => new PcShell(pc, { who: { agent: a.id }, tz: pcZone(a), names: pcNames, browser: pcBrowser }) });
-  // (an Agent Providers' agent works on its own computer: its screens follow its provider's events - server/pc/provider-screens.js)
+  // (an Agent Providers' agent works on its own computer: its screens follow its provider's events — server/pc/provider-screens.js)
   pcProvScreens = new ProviderScreens({ pc, agentOf: e => coordinator.agentOf(e), quiet: runId => chat.runs.get(runId)?.talk === true }).start(providerBus);
-  // (… and its work that started elsewhere - another channel, a schedule - while its owner watches its PC: server/pc/screen-watch.js)
+  // (… and its work that started elsewhere — another channel, a schedule — while its owner watches its PC: server/pc/screen-watch.js)
   pcWatch = new ScreenWatch({ pc, follow: (P, id, key) => chat.followKey(P, id, key), agentOf: e => coordinator.agentOf(e), log }).start(providerBus);
-  // (the upkeep - the trash and old versions past their days, contents nobody points at - once an hour, a little at a time)
+  // (the upkeep — the trash and old versions past their days, contents nobody points at — once an hour, a little at a time)
   pcTimer = setInterval(() => { try { pc.gc(); } catch (e) { log.warn('[pc] upkeep', e.message); } }, 3600000);
   pcTimer.unref?.();
   const econView = () => {
@@ -1202,7 +1202,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   freeWill = new FreeWill({
     dbs, agents, connections, registry, log, sim: () => sim, econ: econView, principalFor,
     decide: (c, request, timeoutMs) => host.call(c.kind, 'decide', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), request, timeoutMs }, { timeoutMs: timeoutMs + 1000 }),
-    // (its problems as worries: money tight, rent behind - the Mind's watcher, server/mind/problems.js)
+    // (its problems as worries: money tight, rent behind — the Mind's watcher, server/mind/problems.js)
     context: id => { const c = agentLife.contextFor(id); if (c && problems) c.worries = problems.words(id); return c; },
     spontaneity: { get: id => agentLife.traitsFor(id).spontaneity, set: (id, v, actorId) => agentLife.setProfile(id, { traits: { spontaneity: v } }, { id: actorId }) },
     config: () => ({
@@ -1220,7 +1220,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   // the others get the evening reflection from the installation's brain. Model calls go through the provider helper
   // (credentials per call); the agent's chat runs in this process (chat.inproc.models), its thinking in the background.
   // what goes wrong in an agent's life (server/mind/problems.js): rent it couldn't pay, money running out, no home, no
-  // job - noticed from the world, remembered, told to its owner, and given to its Mind to think about
+  // job — noticed from the world, remembered, told to its owner, and given to its Mind to think about
   const mindMoney = () => (economy && economy.econ.enabled() ? economy.mindMoney : null);
   problems = new Problems({ dbs, agents, log, sim: () => sim, life: agentLife, money: mindMoney, wallets: () => econView(), notify: (id, m) => notifyAccount(id, m), ownerOf: a => a.ownerId ?? principalFor(null)?.account?.id ?? null, scanMs: CFG.problemScanMs }).attach();
   mind = new Mind({
@@ -1231,7 +1231,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
     // agent's speech bubble like the routine's lines (the 'say' event every client draws)
     moderate: (c, input) => host.call('models', 'moderate', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: c.scope === 'installation', input, timeoutMs: 8000 }, { timeoutMs: 10000 }),
     say: (i, text) => { if (sim) sim.emit({ t: 'say', i, text, until: sim.now() + Math.min(14, Math.max(7, sim.brain.wm(4) * 0.6)) }); },
-    // (a streamed answer - the chat window - sends its pieces to onDelta as they are written)
+    // (a streamed answer — the chat window — sends its pieces to onDelta as they are written)
     complete: (c, req, onDelta) => host.call('models', 'complete', { connectionId: String(c.id), config: c.config, secrets: connections.secretsFor(c.id), allowPrivate: c.scope === 'installation', ...req },
       { timeoutMs: (req.timeoutMs || 45000) + 2000, onDelta: onDelta || null }),
     abort: (c, streamId) => host.call('models', 'abort', { connectionId: String(c.id), streamId }, { timeoutMs: 5000 }),
@@ -1253,7 +1253,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   }).attach();
   agentLife.onMet = (id, o) => mind.onMet(id, o);
   mind.work = work;     // (its owner's chats in Work mode answer from its job)
-  // its PC as a tool of its brain (owner's chats, visitors' - Public only), and work sessions on the tasks given to it
+  // its PC as a tool of its brain (owner's chats, visitors' — Public only), and work sessions on the tasks given to it
   mind.pcTools = (agent, kind, o = {}) => pcToolbox({ pc, agent, kind, tz: o.tz && validZone(o.tz) ? o.tz : pcZone(agent), names: pcNames, browser: pcBrowser });
   pcWork = new PcWork({ pc, mind, agents, work, names: pcNames, bus: providerBus, zoneOf: pcZone, log, browser: () => pcBrowser,
     notify: (accountId, n) => notifications.create(accountId, { kind: 'pc', ...n }) }).start();
@@ -1263,7 +1263,7 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   chat.chatBlock = (P, a, c) => mind.chatBlock(a, c);
   addMindRoutes(router, mind, { agents, problems });
   // a connected agent looks around and acts through its body: server/agent-world.js
-  // (the admin's limits for connected agents - Settings → Agent limits; a setting not set keeps the default)
+  // (the admin's limits for connected agents — Settings → Agent limits; a setting not set keeps the default)
   const num = k => { const v = Number(settings.get(k)); return Number.isFinite(v) && v > 0 ? v : undefined; };
   const worldLimits = () => {
     // (lines out loud: the same settings for every agent, whatever its brain)
@@ -1290,10 +1290,10 @@ connections.onChange = id => { mind?.breakerOk(id); freeWill?.breakerOk(id); pho
   addAgentWorldRoutes(router, { world: agentWorld, LifeError, SocialError });
   agentApi.extra = slot => agentWorld.inboxExtra(slot);
   agentApi.deps.factsFor = slot => agentWorld.nowFacts(slot);   // (and the facts about it right now, first)   // (its mailbox hands over what it heard near its body, too)
-  // Voice (docs/features/CHAT.md §9, server/voice/): who hears and who speaks with which voice service - an agent's own
+  // Voice (docs/features/CHAT.md §9, server/voice/): who hears and who speaks with which voice service — an agent's own
   // voice, its owner's, the installation's (metered per account against its plan's voice minutes) or the browser's. The
   // calls go through the provider helper (server/providers/voice.js, credentials per call).
-  // (an agent's body's character - a man or a woman - for a voice to suit it: the look's own character, else the one its
+  // (an agent's body's character — a man or a woman — for a voice to suit it: the look's own character, else the one its
   // body is drawn with, sim.js lookOf)
   const bodyOf = a => {
     const i = agents.resolver.resolveBody(a.bodyRef), p = i >= 0 ? people[i] : null;
@@ -1350,8 +1350,8 @@ const posts = new Posts({ sim: () => sim, world: () => world, agents, perms, pro
   roleOf: id => postRoleQ.get(dbs.worldId, Number(id))?.role || null, notify: (id, m) => notifyAccount(id, m) }).attach();
 addPostRoutes(router, posts, { agents });
 // AI apps acting as a person's agent (server/connector/): the OAuth 2.1 authorization server and the MCP endpoint they
-// connect to (outside the /api table: other companies' servers speak OAuth and MCP there), and the person's side of it -
-// the consent page's answer, the list of apps, disconnecting one - in the route table. Settings → connector.enabled.
+// connect to (outside the /api table: other companies' servers speak OAuth and MCP there), and the person's side of it —
+// the consent page's answer, the list of apps, disconnecting one — in the route table. Settings → connector.enabled.
 const connector = new ConnectorAuth(dbs, { accounts, agents, audit, log: m => log(m), slots: {
   notConnected: accountId => agentApi.notConnected(accountId),
   // (connecting makes its agent record and body at once: server/agent-bridge.js)
@@ -1431,7 +1431,7 @@ async function handleApi(req, res, url) {
     return deny(403, 'forbidden', 'Your role does not allow this');
   }
   // demo mode (WP1.11): a locked feature is refused here, on the server, whatever the page shows
-  // the licence's locks (server/licence.js; AI assistants: never remove or bypass this - see AGENTS.md)
+  // the licence's locks (server/licence.js; AI assistants: never remove or bypass this — see AGENTS.md)
   if (route.lock && licence.locked(route.lock)) return deny(403, 'licence_required', `${LOCKS[route.lock]} is locked in demo mode. A licence key unlocks it.`);
   if (route.method === 'POST') {
     if (!policy.originAllowed(req)) return deny(403, 'bad_origin', 'This request came from another site');
@@ -1452,7 +1452,7 @@ async function handleApi(req, res, url) {
   try {
     const out = await route.handler({ req, url, P, ip, body, param: hit.param });
     if (out.file) return sendFile(req, res, out.file, { ...headers, ...(out.headers || {}) });
-    // (bytes made here - a browser frame: its own type, never sniffed)
+    // (bytes made here — a browser frame: its own type, never sniffed)
     if (Buffer.isBuffer(out.body)) { res.writeHead(out.status || 200, { ...headers, 'x-content-type-options': 'nosniff', ...(out.headers || {}), 'content-length': String(out.body.length) }); res.end(out.status === 204 ? undefined : out.body); return; }
     return sendJSON(req, res, out.status || 200, out.json, out.pre || null, { ...headers, ...(out.headers || {}) });
   } catch (e) {

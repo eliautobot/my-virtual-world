@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Test and check helper (WP4.15): a ferry line round an island's coast between two stretches with a road near the
-// shore, docks just off them where the water is deep enough - valid under shared/ferries.js. Used by tests/ferries and
+// shore, docks just off them where the water is deep enough — valid under shared/ferries.js. Used by tests/ferries and
 // the browser checks.
 import { makeGrid } from '../../shared/city.js';
 import { Island } from '../../shared/terrain.js';

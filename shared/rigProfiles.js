@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Showcase calibration profiles. Legacy top-level values remain Batch 1 aliases.
 export const RIG_BATCHES = ['batch1', 'batch2'];
 export const RIG_BODIES = ['male', 'female'];

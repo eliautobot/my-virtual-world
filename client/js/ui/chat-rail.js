@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The message rail (docs/features/CHAT.md §12; 2026-10-08: "the lines on the side that represent every message the
-// user sends, for going back to a previous one - the classic release has this working pretty well"): a short tick at the chat's right
+// user sends, for going back to a previous one — the classic release has this working pretty well"): a short tick at the chat's right
 // edge for each message the person sent (the newest 40), the one at the top of the view highlighted as it scrolls; hover
 // (or tap, on a touch screen) shows them as a list of previews; a click glides back to that message. Behaviour after
 // the classic release's chat-prompt-navigation (itself after Hermes Desktop's prompt rail); written for this window.

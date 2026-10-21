@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The installation-neutrality scan (tools/neutrality-scan.mjs; CHECKLIST X9): each rule, the private list, exceptions,
 // the command line, and the product itself. Every example is assembled at run time with j(...), so this file holds
 // none of them in one piece and the scan reads it like any other file of the product.

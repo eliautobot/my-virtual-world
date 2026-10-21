@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Flying the airport's aircraft (docs/features/play-modules.md §Airport). Walk up to a free aircraft in Play mode and press
 // E (the prompt says what it is); the server gives it to you (server/world/aircraft.js) and this page flies it with the
 // shared flight model (shared/flight-model.js), stepped at 120 Hz, the chase camera behind it, the instruments on screen;
@@ -7,10 +7,10 @@
 // instanced mesh per type, smoothed between the server's five updates a second), with their propellers or rotors turning.
 //
 //   Planes:      W/S pitch (S: nose up) · A/D roll (on the ground: steer) · Z/C rudder · R or Shift: more throttle,
-//                F: less · Space: brakes · E: get out (stopped) - the arrow keys work as W/S/A/D
+//                F: less · Space: brakes · E: get out (stopped) — the arrow keys work as W/S/A/D
 //   Helicopter:  W/S forward/back · A/D turn · Z/C sideways · R or Shift: up · F or Space: down · E: get out (landed)
 //
-// app.flight: { active, state(), type, module, onFrame(fn), instruments() } - the ring game (play/airport-game.js) uses it.
+// app.flight: { active, state(), type, module, onFrame(fn), instruments() } — the ring game (play/airport-game.js) uses it.
 import * as THREE from 'three';
 import { S, bus } from '../core/state.js';
 import { h, esc, isTouch } from '../core/util.js';
@@ -37,7 +37,7 @@ export function init(a) {
   window.addEventListener('keyup', e => F.keys.delete(e.code));
   window.addEventListener('blur', () => F.keys.clear());
   bus.on('msg:fstate', onState);
-  // a pose the server refused (too far for the time): back where it last agreed - still flying (stopped dead in the air it fell)
+  // a pose the server refused (too far for the time): back where it last agreed — still flying (stopped dead in the air it fell)
   bus.on('msg:fcorr', m => { if (F.active && m.pose) { F.s.p = { x: m.pose.x, y: m.pose.y, z: m.pose.z }; F.prev?.p.set(m.pose.x, m.pose.y, m.pose.z); } });
   bus.on('msg:pmoved', m => { if (m.flight === 'out' && F.active) end(m); });
   bus.on('msg:fleet', onFleet);
@@ -85,7 +85,7 @@ function board(c) {
   if (F.pending || F.active) return;
   F.pending = true;
   app.net.send({ t: 'fboard', id: c.id });
-  setTimeout(() => { if (F.pending) { F.pending = false; app.toast('No answer from the airport - try again', 'bad', 3000); } }, 5000);
+  setTimeout(() => { if (F.pending) { F.pending = false; app.toast('No answer from the airport — try again', 'bad', 3000); } }, 5000);
 }
 function onState(m) {
   F.pending = false;
@@ -112,7 +112,7 @@ function start(m) {
   app.airports?.hide(m.id, true);
   // the body, and its rotors as parts that turn (2026-10-14: the blades were part of the body and stood still under a
   // faint disc): each turns about its hub with the rotor's or the engine's speed, its blur thickening as it speeds up;
-  // the jet has no propeller - its exhausts glow with the power
+  // the jet has no propeller — its exhausts glow with the power
   const parts = flyingParts(m.type), mat = app.airports?.material;
   F.mesh = new THREE.Mesh(parts.body, mat); F.mesh.castShadow = true; F.mesh.frustumCulled = false;
   F.rotors = parts.rotors.map(r => {
@@ -162,7 +162,7 @@ function input() {
   return { throttle: thr, pitch: cl(-Math.sign(fwd) + T.y), roll: cl(Math.sign(side) + T.x + (j?.on ? j.x : 0)), yaw: ax('KeyC', 'KeyZ'), brake: k('Space') || T.brake };
 }
 /** The ground's height at one point (worked out there: heightAt would build a whole 122 m chunk each time the aircraft
- *  crosses into a new one - a hitch every few seconds on a phone, 2026-10-14). */
+ *  crosses into a new one — a hitch every few seconds on a phone, 2026-10-14). */
 function groundAt(x, z) { return app.terrain ? (app.terrain.pointHeight ? app.terrain.pointHeight(x, z) : app.terrain.heightAt(x, z)) : 0; }
 function solidsFor() {
   if (!solids || solidsVer !== S.version) { solids = new Solids(S.world); solidsVer = S.version; }
@@ -184,7 +184,7 @@ function frame(P, dt, t) {
   if (!s.crashed && !F.leaving) {
     const env = envAt(s), inp = app.custOpen || app.mapOpen ? {} : input();
     // by the frame's own time (requestAnimationFrame's, t), as the car since 2026-10-04: the time the code happens to run
-    // (performance.now) wanders within a busy phone's frame, and the drawn aircraft wobbled with it - at 125 m/s up to
+    // (performance.now) wanders within a busy phone's frame, and the drawn aircraft wobbled with it — at 125 m/s up to
     // 0.4 m a frame (2026-10-14). Real time even on a slow frame (the page's own dt stops at 0.1 s; a step costs microseconds).
     const real = F.lastT ? Math.max(0, t - F.lastT) : dt; F.lastT = t;
     F.acc = Math.min(F.acc + real, 1.0); F.real = Math.min(real, 1.0);
@@ -193,7 +193,7 @@ function frame(P, dt, t) {
       stepFlight(s, inp, env, DT); F.acc -= DT;
     }
   }
-  // drawn between the last two physics steps (a fixed 120 Hz model under a frame rate that wanders - a phone's - would
+  // drawn between the last two physics steps (a fixed 120 Hz model under a frame rate that wanders — a phone's — would
   // otherwise move in uneven jumps: the stutter, 2026-10-14)
   const al = s.crashed ? 1 : Math.min(1, F.acc / DT);
   const R = F.render;
@@ -215,7 +215,7 @@ function frame(P, dt, t) {
   P.x = R.p.x; P.y = R.p.y - Sx.gearH; P.z = R.p.z; P.ctx = -1;
   const a = anglesOf(R.q);
   P.yaw = P.tyaw = a.heading;
-  // the chase camera: behind, a little above, turning with the aircraft - all from the drawn aircraft (its heading from
+  // the chase camera: behind, a little above, turning with the aircraft — all from the drawn aircraft (its heading from
   // the model's last step moved in steps of one or two physics steps a frame: the camera's yaw shook in a turn)
   const cam = app.cam, f = qrot(R.q, 0, 0, 1);
   cam.follow = () => ({ x: R.p.x + f.x * 2, y: R.p.y + 1.2, z: R.p.z + f.z * 2 });

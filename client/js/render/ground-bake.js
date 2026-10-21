@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Baked ground materials (render flag 'bake', core/render-flags.js; the reference renderer bakes its procedural
-// materials once at start and only samples them after): the ground detail that cost the most per pixel -
+// materials once at start and only samples them after): the ground detail that cost the most per pixel —
 // render/ground-detail.js's rock plates (gRockPlane), loose stones and river pebbles (gStones), sand ripples and shells,
-// the meadow's fine grain and wild-flower specks (gDots) - drawn once into a stack of tiling textures (a texture array,
+// the meadow's fine grain and wild-flower specks (gDots) — drawn once into a stack of tiling textures (a texture array,
 // mipmapped, so far ground fades to its average by itself instead of shimmering). Each layer is the same pattern as the
 // per-pixel version, laid out to repeat seamlessly across its tile (its noise and cells wrap); the ground shader samples
 // it twice, placed differently, and blends the two by a slow noise so the repeat never shows.

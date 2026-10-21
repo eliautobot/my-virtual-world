@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A circuit breaker per connection (the Mind's brains, Free Will's decision services): a connection that keeps failing
 // is left alone for a while instead of being called again and again. Closed → open → half-open:
 // - Failures in a row (after) open it for a while (baseMs, doubling up to maxMs).
-// - A fault its owner fixes themselves - no credit left, a refused key (longCodes) - opens it at once, but only briefly:
+// - A fault its owner fixes themselves — no credit left, a refused key (longCodes) — opens it at once, but only briefly:
 //   a minute, doubling up to probeMaxMs (5 minutes). Waiting longer would keep a refilled account idle for nothing.
 // - When the time is up it is half-open: ONE call goes through as the trial (allow() marks it) and its result closes the
 //   breaker (ok) or opens it again (fail). Others wait for that answer, so a broken provider is never called in a burst.
@@ -39,7 +39,7 @@ export class Breakers {
     b.trialAt = 0; b.fails++; b.code = code;
     if (this.long.has(code)) {
       b.long = true; b.probe = Math.min(this.probeMaxMs, b.probe ? b.probe * 2 : this.probeMs); b.openUntil = t + b.probe; b.fails = 0;
-      this.log?.warn?.(`[breaker] ${this.name} ${id}: ${code} - paused ${Math.round(b.probe / 1000)} s, then one trial call (a person's own request may try at once)`);
+      this.log?.warn?.(`[breaker] ${this.name} ${id}: ${code} — paused ${Math.round(b.probe / 1000)} s, then one trial call (a person's own request may try at once)`);
     } else if (wasTrial || b.fails >= this.after) {
       b.long = false; b.openUntil = t + b.backoff; b.backoff = Math.min(this.maxMs, b.backoff * 2); b.fails = 0;
       this.log?.warn?.(`[breaker] ${this.name} ${id}: paused ${Math.round((b.openUntil - t) / 1000)} s after failures (${code})`);
@@ -63,8 +63,8 @@ export class Breakers {
 /** One line for a person whose agent's brain (or service) is held back: what is wrong and what fixes it. */
 export function pausedWords(name, st) {
   const who = name ? `${name}'s` : 'Its';
-  if (st?.code === 'quota') return `${who} AI provider account has no credit left. Add credit to it - it works again the moment the account has funds.`;
-  if (st?.code === 'auth') return `${who} AI provider refused its API key. Put a working key in its connection (Settings → Connections) - it works again at once.`;
+  if (st?.code === 'quota') return `${who} AI provider account has no credit left. Add credit to it — it works again the moment the account has funds.`;
+  if (st?.code === 'auth') return `${who} AI provider refused its API key. Put a working key in its connection (Settings → Connections) — it works again at once.`;
   if (st?.code === 'blocked') return `${who} AI provider is at an address this server may not reach. Check the connection's address.`;
   return `${who} brain isn't answering at the moment; try again in a minute.`;
 }

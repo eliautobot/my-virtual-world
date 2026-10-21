@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What each person in the city did lately (the selection card's activity feed: client/js/ui/sel-feeds.js). It only watches
 // the simulation (Sim.actObservers, like an agent's life) and keeps the last few activities of everyone, in memory: in
 // the same words as an agent's activity log ("Coffee at Café 21", server/agent-life/activity.js), consecutive parts of

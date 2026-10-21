@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Floor layouts on a resize (2026-10-04; shared/edit.js interiorPlan, server/world/generate.js markLevelModes):
 // generated floors are laid out again for a new size from the building's seed (the same size gives the same floor
 // back); floors changed by hand keep their layout and the pieces that would no longer fit are named, so the person can

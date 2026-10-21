@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Talking with others' agents in the city, over HTTP (docs/features/CHAT.md §14). Talking: any signed-in account that may
-// chat (chat.use) - the server decides who may talk with which agent and counts every message (talk.js). Its owner's
+// chat (chat.use) — the server decides who may talk with which agent and counts every message (talk.js). Its owner's
 // review and blocking: the agent's owner or someone it is shared with to manage (agents.profile; anyone else: 404).
 import { TalkError } from './talk.js';
 

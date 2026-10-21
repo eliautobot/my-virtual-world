@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The starting map (server/world/starter.js): a new installation opens with the city built for new installations - its
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The starting map (server/world/starter.js): a new installation opens with the city built for new installations — its
 // buildings, roads, stations and world modules as built, its lots laid out with the same ids and held by the city, its
-// homes filled to Homes filled (no residents travel with the map) - and tools/starter-map.mjs makes one from a running
+// homes filled to Homes filled (no residents travel with the map) — and tools/starter-map.mjs makes one from a running
 // installation's data folder, without residents, accounts or owners. MVW_STARTER_MAP=off generates a city instead.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

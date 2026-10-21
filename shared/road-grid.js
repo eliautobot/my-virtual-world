@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The grid layout tool's plan (client/js/ui/roads.js; the product owner 2026-10-13: "lay out the entire roadway system
 // in a grid … leaving space for lots"; 2026-10-14: the roadways "as flat as possible, so that the lots are also placed on
 // even level", and "an option to place lots along with the roadway"). The roads are flat at one level (their `level`;
@@ -55,11 +55,11 @@ export function gridLayout(o) {
 
 /**
  * One block of a grid that is already built, filled the way the grid tool fills its blocks (the product owner,
- * 2026-10-14: "fill this block" - lots taken away from one block put back like the rest). The block is the one beside
+ * 2026-10-14: "fill this block" — lots taken away from one block put back like the rest). The block is the one beside
  * road `roadId` on its `side` at station `s` (m); its lots are runs along the roads round it, exactly as gridLayout makes
  * them: rows along the pair of roads the grid's lots face, each run exactly from the back of one sidewalk to the next,
  * `count` lots of equal width, rows meeting in the middle, the rows between them along the other pair (square lots only).
- * roads: the world's road records (µm); lots: the lots there now ({ frontage: [{ road }] }) - the grid's lots face the
+ * roads: the world's road records (µm); lots: the lots there now ({ frontage: [{ road }] }) — the grid's lots face the
  * roads most of them face, else the road given; width, depth: the lots' (m). Returns { runs: [{ road (id), side, from,
  * to, count, even: true }], lx, lz, ring (the block, m), depth (as platted, as the grid tool: 3 cm short, rows meeting 2 cm
  * apart) }, or null when the road is

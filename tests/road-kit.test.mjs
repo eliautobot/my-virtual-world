@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The road kit (shared/road-kit.js): cross-sections band by band; junction corners whose curb returns let a bus keep
 // its lane (never the classic release's tight corners), curb lines that run smoothly from the straight onto the arc, bands that blend
 // between different roads, a clean paved area, crosswalks, stop bars, and signals on the city's timetable.

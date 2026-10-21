@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // City grid layout helpers shared by server (generation, navigation) and client (rendering, traffic).
 // Streets run along z at x = X[i] (i = 0..nx) and along x at z = Z[j] (j = 0..nz).
 // Block (i, j) sits between streets i/i+1 and j/j+1. Block side ids: 0 = +z edge, 1 = +x, 2 = -z, 3 = -x.
@@ -78,7 +78,7 @@ export function bandPoint(g, i, j, side, x, z) {
   const zz = Math.min(Math.max(z, r.z0 + w), r.z1 - w);
   return { x: xx, z: zz, t: Math.abs(zz - a.z) };
 }
-/** Street lamp positions (on the sidewalk, near the curb) - deterministic. */
+/** Street lamp positions (on the sidewalk, near the curb) — deterministic. */
 export function lampPositions(g) {
   const out = [];
   for (let j = 0; j < g.nz; j++) for (let i = 0; i < g.nx; i++) {

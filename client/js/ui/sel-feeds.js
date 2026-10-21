@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// A selected person's feeds (2026-10-07): one panel with tabs - Activity (what they are doing now, then what they
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// A selected person's feeds (2026-10-07): one panel with tabs — Activity (what they are doing now, then what they
 // did, newest first), for an agent this account manages its Thoughts (2026-10-08: what its Mind planned, reflected,
 // answered and said, newest first: GET /api/mind/thoughts) and Money (their savings and rent, then what they spent and
 // earned, newest first). The three newest
-// lines are clear, each older one fainter; scrolled down to read back, all of them clear - ten lines, and under the last,
+// lines are clear, each older one fainter; scrolled down to read back, all of them clear — ten lines, and under the last,
 // for an agent this account manages, "See full feed" opens its Agent Studio at Activity or Money; a live update never moves
 // a reader who scrolled down. ui.js draws the panel in the selection (the floating card or the Info panel); this fills it,
 // from GET /api/people/recent (server/recent.js) and GET /api/economy/person. An agent's day and money are its owner's,

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // New agent (2026-10-12, the product owner: "when a user clicks new agent there should be an option of selecting Built-in
 // Agent … [and] 3rd Party Agents: Grok Bot, OpenAI Dot, Meta Muse … the creation steps should go from there … all the way
 // until it ends up in the Agent Studio"). Every ➕ New agent button opens this one dialog: choose the kind of agent, then
@@ -22,7 +22,7 @@ import { AGENT_APP_STEPS, fillAgentApp, readWakePaste } from '../core/agent-app-
 const POLL_MS = 3000;
 const CHECKIN_MS = 150000;   // how long the wake-up step waits to see the agent check in after its first call
 // (each agent has its own MCP address, <world>/mcp/a/<handle>: an app sees one server per agent, so a Grok account's
-// bots - which share their connectors - never sign in as each other; the world's /mcp stays for any agent)
+// bots — which share their connectors — never sign in as each other; the world's /mcp stays for any agent)
 const mcpUrl = slot => `${location.origin}${slot?.mcpPath || '/mcp'}`;
 
 /** The logo of a third-party app, on its own coloured tile. */
@@ -271,7 +271,7 @@ export function openNewAgent(app, { slot = null, step = null } = {}) {
       const text = e.clipboardData?.getData('text') || '';
       if (take(text)) { e.preventDefault(); box.value = ''; err(''); }
     });
-    // (typed by hand: read when it is complete - Enter or leaving the box - not letter by letter)
+    // (typed by hand: read when it is complete — Enter or leaving the box — not letter by letter)
     box.addEventListener('input', e => { if (/^insertFrom/.test(e.inputType || '') && take(box.value)) box.value = ''; });
     box.addEventListener('change', () => { if (take(box.value)) box.value = ''; });
     box.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && box.value.trim()) { e.preventDefault(); if (take(box.value)) box.value = ''; } });
@@ -298,7 +298,7 @@ export function openNewAgent(app, { slot = null, step = null } = {}) {
           saving = false; show();
           return wait(st === 401 || st === 403 ? `${a.name} refused the key (${st}): copy the header again and paste it here.`
             : st === 404 ? `${a.name} doesn't know that address (404): copy POST to again and paste it here.`
-            // (an app that refused for its own reason - Grok Bot's rate limit, 2026-10-13 - says so: what was pasted is fine)
+            // (an app that refused for its own reason — Grok Bot's rate limit, 2026-10-13 — says so: what was pasted is fine)
             : r.said && /limit|too many|rate|quota|busy|overload|try again/i.test(r.said) ? `${a.name} refused for now: "${r.said}". That is on ${a.name}'s side, not what you pasted: the link is saved, and the world tries it again next time someone writes to ${s.name}. You can Skip for now.`
             : r.said ? `${a.name} answered ${st}: "${r.said}". Check what you pasted and try again.`
             : `It didn't work: ${r.error || r.status}. Check what you pasted and try again.`, 'bad');

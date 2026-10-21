@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The mock decision service (Free Will tests and load tests). A test manifest: the registry only takes it when tests
 // allow it, so it never appears in a real installation. Its settings script how it behaves:
 //   latencyMs  how long each answer takes          failRate  share of calls that fail (0..1), chosen deterministically

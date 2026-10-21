@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Chat sessions (PLAN WP2.2; DECISIONS C119): a session belongs to one account and one agent. Other accounts never see it, even
 // when they may use the same agent. New Session never destroys the old one; delete is the only destructive action.
 export const LAZY_KEY = '@new';
@@ -8,7 +8,7 @@ export class Sessions {
   constructor(dbs, { now = () => Date.now() } = {}) {
     this.db = dbs.db; this.w = dbs.worldId; this.now = now;
     this.q = {
-      // (a talk in the city - kind 'talk', server/agent-talk/ - is never in the chat window's lists)
+      // (a talk in the city — kind 'talk', server/agent-talk/ — is never in the chat window's lists)
       list: this.db.prepare('SELECT * FROM chat_sessions WHERE world_id = ? AND account_id = ? AND agent_id = ? AND deleted IS NULL AND kind IS NULL ORDER BY updated DESC, id DESC'),
       get: this.db.prepare('SELECT * FROM chat_sessions WHERE world_id = ? AND id = ? AND account_id = ? AND deleted IS NULL'),
       ins: this.db.prepare('INSERT INTO chat_sessions (world_id, agent_id, account_id, native_key, label, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)'),

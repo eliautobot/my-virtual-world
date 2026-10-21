@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 # Builds a release folder from a git tag: $MVW_LIVE_ROOT/releases/<tag>, with production dependencies and a
 # release.json (tag, commit, build time), made read-only. Building the same tag again is a no-op.
 # Usage: tools/deploy/build-release.sh <tag>

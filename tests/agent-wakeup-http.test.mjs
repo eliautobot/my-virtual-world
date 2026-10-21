@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent's wake-up link over HTTP on a real server (server/agent-wakeup.js, routes.js; 2026-10-11): its owner
 // pastes the address, key and header its platform gave; a message for it while it is away calls that address once, with
 // nothing but { type, reason, waiting, at } and the key in its header; "Try it now" calls it on demand; nobody else sets,

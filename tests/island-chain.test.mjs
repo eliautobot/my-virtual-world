@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.15 coasts, the island chain and bridges (wp4-world-spec.md §3.3–3.4): a new island never changes the main one;
 // slots keep clear of other islands and of protected waterfront and open-ocean views; administrators set coast classes
 // and raise or remove islands (undo/redo); a bridge leaves the main island only from a growth coast and stands on piers
@@ -34,7 +34,7 @@ test('a new island leaves the main island as it was; slots respect other islands
   // the next islands keep their distance
   const next = islandSlots({ ...T, islands: [I] }, 'harbour');
   assert.ok(!next.find(s => s.k === free[0].k).free, 'the same place is taken');
-  // a protected waterfront facing a slot closes it (its corridor) - and an open-ocean frontage keeps its view
+  // a protected waterfront facing a slot closes it (its corridor) — and an open-ocean frontage keeps its view
   const line = coastline(A), facing = sectorAt(T, free[1].center.x, free[1].center.z);
   let cls = coastClasses(T).split(''); cls[facing] = 'o'; cls = cls.join('');
   const C = new Island({ ...T, coasts: cls }), blocked = islandSlots({ ...T, coasts: cls }, 'harbour', { coastsWhy: (x, z, r) => protectedWhy(C, x, z, r) });

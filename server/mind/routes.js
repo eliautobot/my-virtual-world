@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Mind over HTTP (docs/features/FREE-WILL.md §9). Every route goes through the server's pipeline (session,
 // capability, Origin, CSRF, JSON).
-// - An agent's Mind - whether it plans and reflects each day, with which brain, what its thoughts did and cost, and
+// - An agent's Mind — whether it plans and reflects each day, with which brain, what its thoughts did and cost, and
 //   "think now": the agent's owner, or an account it is shared with to manage (agents.mind). Anyone else gets 404.
-// - An agent's problems (rent, money, home, job: server/mind/problems.js) - open and lately solved, with what its Mind
+// - An agent's problems (rent, money, home, job: server/mind/problems.js) — open and lately solved, with what its Mind
 //   did about them: the same people (agents.mind).
 // - The installation's overview (today's thoughts and cost, latency, paused brains, problems open): freewill.admin. The installation's
 //   switch, reflection brain and limits are settings (mind.*), changed through /api/settings.

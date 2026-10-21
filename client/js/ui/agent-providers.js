@@ -1,11 +1,11 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agent Providers (docs/features/agent-providers.md): the top bar's button and its window. The left column lists the
 // agent platforms this account may see (OpenClaw first), each with its live state; ➕ Add provider connects a new one;
 // the right side is the chosen provider's own page: its state, what to do when it waits for approval or something is
-// wrong, its agents (Chat opens the chat window with one) - and, for whoever manages it once it is connected, the
+// wrong, its agents (Chat opens the chat window with one) — and, for whoever manages it once it is connected, the
 // provider's own sub-menu: the module its manifest names (menu: client/js/ui/providers/<menu>.js), drawn in tabs, each of
 // its changes shown in a confirmation (what changes, from what to what) before it is sent.
-// Everything shown comes from the server: the kinds and their fields, hints and labels (GET /api/agent-providers - no
+// Everything shown comes from the server: the kinds and their fields, hints and labels (GET /api/agent-providers — no
 // provider is described here), each provider's state as it changes (the socket's 'provider' frames), and who may do what.
 import { bus } from '../core/state.js';
 import { auth } from '../core/auth.js';
@@ -52,7 +52,7 @@ function paintDot() {
   const cls = !states.length ? '' : states.includes('error') ? 'bad' : states.includes('pairing') ? 'wait' : states.every(s => s === 'connected') ? 'ok' : 'busy';
   const dot = btn.querySelector('.pv-dot');
   dot.className = `pv-dot ${cls}`;
-  btn.title = states.length ? `Agent Providers: ${D.providers.map(p => `${p.label} - ${STATE[stateOf(p)].word.toLowerCase()}`).join('; ')}` : 'Agent Providers: connect OpenClaw, Hermes and your other agent platforms';
+  btn.title = states.length ? `Agent Providers: ${D.providers.map(p => `${p.label} — ${STATE[stateOf(p)].word.toLowerCase()}`).join('; ')}` : 'Agent Providers: connect OpenClaw, Hermes and your other agent platforms';
 }
 
 async function load() {
@@ -134,7 +134,7 @@ async function loadMenu(name) {
 /** What a sub-menu's page may do: call its provider (through the server), ask the person's OK for a change, tell them
  *  how it went, open the chat with one of the provider's agents. */
 /** What a provider's sub-menu reaches it with. A read the provider answers "busy" (503: OpenClaw while it applies a plugin
- *  or settings change; its documented answer is to retry shortly) is asked again a few times; a change never is - it is
+ *  or settings change; its documented answer is to retry shortly) is asked again a few times; a change never is — it is
  *  the person's to send again (it may have been applied: the provider's base-hash guard and its reply say so). */
 const BUSY_RETRY_MS = [500, 1000, 2000, 4000];
 function ctxFor(p) {
@@ -260,7 +260,7 @@ function fieldHtml(f, edit) {
   if (f.type === 'secret') {
     const set = edit && edit.secrets && edit.secrets[f.key];
     // (a credential handed off once paired: not needed while the device is paired; typed again, it pairs again)
-    const ph = set ? 'Set - leave blank to keep it' : f.handoff && edit && edit.paired ? 'Not needed: it is paired. Type it only to pair again.' : '';
+    const ph = set ? 'Set — leave blank to keep it' : f.handoff && edit && edit.paired ? 'Not needed: it is paired. Type it only to pair again.' : '';
     return `<label class="ap-f"${show}>${esc(f.label)}<input class="input apf" id="${id}" data-key="${esc(f.key)}" data-secret="1" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="${esc(ph)}">${hint}</label>`;
   }
   if (f.type === 'select') {

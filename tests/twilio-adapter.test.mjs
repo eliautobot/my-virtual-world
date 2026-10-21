@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Twilio adapter (server/providers/twilio.js) against the fake Twilio: credentials checked before any call, Basic
 // auth with an API key standing in for the Auth Token, lists read page by page, Twilio's errors in our own words (its
 // number kept, its text never), the call handler deployed and found again, the phone's numbers written any way.

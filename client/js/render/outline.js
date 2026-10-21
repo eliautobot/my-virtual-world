@@ -1,13 +1,13 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The outline round what is picked or under the pointer (2026-10-19, the product owner: "an outline, similar to how inZOI does it" -
-// for agents, characters, buildings, every interactive thing - instead of the glow all over them). Whatever is outlined
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The outline round what is picked or under the pointer (2026-10-19, the product owner: "an outline, similar to how inZOI does it" —
+// for agents, characters, buildings, every interactive thing — instead of the glow all over them). Whatever is outlined
 // is drawn once more, alone, into a mask (the selected in red, the hovered in green: render/characters.js its people,
-// render/buildings.js a building, render/interiors.js a piece of furniture - each with a material of its own that writes
+// render/buildings.js a building, render/interiors.js a piece of furniture — each with a material of its own that writes
 // only where it is), and a line is drawn over the finished picture just outside the mask's edge: white, soft-edged, a
 // little wider for the selected. Its whole shape is outlined, also where something stands in front of it. Nothing is
 // drawn while nothing is outlined.
 //
-// A source: outline.add(fn), fn(draw) called each frame - draw(obj, selected, box) once for each thing to outline: an
+// A source: outline.add(fn), fn(draw) called each frame — draw(obj, selected, box) once for each thing to outline: an
 // object of its own, in no scene, its mask material on it and its matrixWorld set (it is drawn as it is, matrices not
 // updated); box (a THREE.Box3, world) round it, when known: the line is then drawn only round those parts of the screen
 // (a phone following an agent draws it every frame).

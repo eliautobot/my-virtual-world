@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The city's streets in the road model (WP4.1; wp4-world-spec.md §4.2, the compatibility layer). The city is still a
 // regular grid (world.grid, which rendering, traffic and walking read); here its avenues and streets are road records
-// like any road beyond the city - the same centrelines (exact, in µm), the 'avenue-4' road type (14 m curb to curb, the
-// city's street) and the names its addresses use - so a question about roads (what runs here, does this new road run on
+// like any road beyond the city — the same centrelines (exact, in µm), the 'avenue-4' road type (14 m curb to curb, the
+// city's street) and the names its addresses use — so a question about roads (what runs here, does this new road run on
 // top of another or crowd a junction) is asked of one network. gridFromRoads goes back to the grid exactly; when WP4.5
 // lets the road records lead, the grid becomes what they derive.
 import { RoadNetwork, alignmentsFromGrid, DEFAULT_ROAD_PROFILES } from './roads.js';
@@ -11,7 +11,7 @@ import { umToM } from './units.js';
 import { junctionPlans, CROSSWALK_W } from './road-kit.js';
 import { WALK_BAND, sigOffset } from './constants.js';
 
-/** m: a city corner's curb return - a bus in the outer lane turns on ~14 m (more through the parking lane), and the
+/** m: a city corner's curb return — a bus in the outer lane turns on ~14 m (more through the parking lane), and the
  *  walking band's corner (WALK_BAND in from both curbs), where walkers cross, stays on the sidewalk. */
 export const CITY_RETURN = 9.0;
 
@@ -64,9 +64,9 @@ export function joinsCity(g, rec) {
   return on(rec.pts[0]) || on(rec.pts.at(-1));
 }
 /**
- * A road beyond the city that stops short of an edge street's junction - an end on the line of an avenue (or street)
+ * A road beyond the city that stops short of an edge street's junction — an end on the line of an avenue (or street)
  * that meets the city's edge, outside it but within the edge street's half width of the junction's centre (an island's
- * Beach Road ended at the curb, 2026-10-06: "the junction didn't trigger") - carried on to that centre, so it joins
+ * Beach Road ended at the curb, 2026-10-06: "the junction didn't trigger") — carried on to that centre, so it joins
  * the city's junction like every road there (joinsCity). The same record when nothing stops short, else a new one.
  */
 export function joinCityEdge(grid, rec, profiles = DEFAULT_ROAD_PROFILES) {

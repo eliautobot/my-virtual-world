@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Pictures on signs (shared/signs.js; both editions): the designs of owners' rooftop billboards and signs inside, and
 // the Marketing tools' own content for billboards, street signs and aircraft (the house's turns). Uploaded by the
 // account that designs them, checked by their first bytes (PNG, JPEG, WebP, GIF up to 2 MB), kept in the data folder

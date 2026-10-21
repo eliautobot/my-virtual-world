@@ -1,19 +1,18 @@
-/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-   From My Virtual World (release 1): src/client/js/home-location.mjs, copied unchanged (WP1.9, G8 extras); since then only its punctuation changed
-   (dashes), so the pin below describes release 1's file.
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+   From My Virtual World (release 1): src/client/js/home-location.mjs, copied unchanged (WP1.9, G8 extras).
    Pin: the classic release's working tree as reviewed on 2026-09-26 · sha256 (this file's body, without this header)
    8a0815d54922e344dd6221a8d568e5b135cb79178a069e7f732fd1aa3abdb942
    Licence: part of My Virtual World, the PolyForm Noncommercial License 1.0.0 (see LICENSE at the repository's root); the brand is reserved. The header is the only
-   addition (IMPORTS.md allows a provenance header and stripped import paths). Next's own half of the home view -
-   the camera envelope that adds the tilt - lives beside it in client/js/core/home-frame.js. */
-/* Home location - the camera frame that "Reset View (Home)" returns to, and the
+   addition (IMPORTS.md allows a provenance header and stripped import paths). Next's own half of the home view —
+   the camera envelope that adds the tilt — lives beside it in client/js/core/home-frame.js. */
+/* Home location — the camera frame that "Reset View (Home)" returns to, and the
    account value behind "Set home to current view".
 
    Contract (wave 2, §4):
      - `#btn-zoomReset` returns the camera to the account's home frame:
        `flyCameraTo(homePosition, homeDistance)`.
-     - Home defaults to {x:0, y:0, z:0, distance:40, angle:π/4} - the engine's own
-       starting frame - and a user can define their own.
+     - Home defaults to {x:0, y:0, z:0, distance:40, angle:π/4} — the engine's own
+       starting frame — and a user can define their own.
      - Home persists with the account through the existing settings path. No
        value is hardcoded twice: this module is the single definition of the
        default and of the shape that is read and written.

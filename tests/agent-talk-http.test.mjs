@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Talking with someone else's agent in the city on a real server (docs/features/CHAT.md §14): its owner is sent to the
-// chat window, a resident-like agent (no brain that handles visitors) only greets, anyone else talks - a few short
+// chat window, a resident-like agent (no brain that handles visitors) only greets, anyone else talks — a few short
 // messages, cleared after a few minutes, every limit the admin's and enforced here; the answer goes to the talker alone
 // and never into their chat window's lists; the agent stops and turns to them; its owner reads every conversation and
 // blocks whom they choose.
@@ -129,7 +129,7 @@ test('its owner reads every conversation and blocks a player; the admin can swit
 });
 
 test('what its owner gives others: its job (never its work notes, nothing kept), its life, or only a greeting', async () => {
-  // its job: the brief and what it knows - not the notes it keeps from its owner's chats
+  // its job: the brief and what it knows — not the notes it keeps from its owner's chats
   const w = await owner.post('/api/agent-work', { agent: A.id, company: 'Sunrise Bakery', instructions: 'Answer questions about the bakery. Be cheerful.', knowledge: 'Open 7 to 18. Sourdough is $6.', publicMode: 'work' });
   assert.equal(w.status, 200, w.text);
   assert.equal(w.json.brief.publicMode, 'work');
@@ -160,7 +160,7 @@ test('what its owner gives others: its job (never its work notes, nothing kept),
   assert.equal((await owner.post('/api/agent-work', { agent: A.id, publicMode: 'life' })).status, 200);
 });
 
-test('a day\'s worth (the admin\'s): one person with one agent, and all visitors with one agent - a new conversation doesn\'t start the count again', async () => {
+test('a day\'s worth (the admin\'s): one person with one agent, and all visitors with one agent — a new conversation doesn\'t start the count again', async () => {
   const db = (await import('node:sqlite')).DatabaseSync;
   const age = () => { const raw = new db(`${s.data}/next.db`); raw.prepare("UPDATE chat_sessions SET created = created - 400000 WHERE kind = 'talk'").run(); raw.close(); };
   const cay = await userSession(s, owner, { login: 'cay', displayName: 'Cay', role: 'member' });

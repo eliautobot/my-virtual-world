@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The airport's sounds (docs/features/play-modules.md §Airport), synthesised with Web Audio like the ambience
-// (audio/ambience.js): no recordings to licence or download. While flying: the engine - a propeller plane's buzzing
-// piston and its prop beat, a small jet's roar and turbine whine, a helicopter's rotor "whop" and turbine - following the
+// (audio/ambience.js): no recordings to licence or download. While flying: the engine — a propeller plane's buzzing
+// piston and its prop beat, a small jet's roar and turbine whine, a helicopter's rotor "whop" and turbine — following the
 // throttle (or the rotor's speed); the wind growing with the airspeed; the stall horn; a thump on touchdown. The ring game:
 // a chime through each ring (brighter through the gate), a fanfare at the end by the stars, a low tone when time runs out;
 // a crash. Other players' aircraft near the camera are heard too, quieter with distance (the nearest one: one voice).

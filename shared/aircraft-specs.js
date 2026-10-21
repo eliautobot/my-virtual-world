@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The aircraft people can fly (the airport module, docs/features/play-modules.md): three classes, each with the numbers
 // its flight model uses (client/js/player/flight.js) and the server's limits for a run (shared/airport.js verify()).
 // Speeds in metres a second, lengths in metres. Scaled to the world: real light aircraft, a little quicker in the turn.

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Accounts and sessions (DECISIONS C56–C58, C71, A16–A18): sign-in with limits and lockout, sessions behind HttpOnly
 // cookies, the first owner's temporary password, password, username and display-name changes, devices, and the
 // user management that the WP1.4 screens build on. Tokens are stored as SHA-256 hashes; passwords as Argon2id.
@@ -210,8 +210,8 @@ export class Accounts {
     };
   }
   /**
-   * An account's principal when an AI app acts for it with the person's grant (server/connector/): no browser session -
-   * so nothing that needs a fresh password, and no CSRF token -, and null when the account can't act (disabled, or a
+   * An account's principal when an AI app acts for it with the person's grant (server/connector/): no browser session —
+   * so nothing that needs a fresh password, and no CSRF token —, and null when the account can't act (disabled, or a
    * temporary password still to replace).
    */
   connectorPrincipal(id) {
@@ -377,7 +377,7 @@ export class Accounts {
   async confirm(P, password, ip = null) {
     const acc = this.q.byId.get({ w: this.w, id: P.account.id }), now = this.now();
     if (!acc) throw new AuthError(401, 'signin_required', 'Sign in first');
-    // (an account without a password of its own - made by a sign-in provider in an older world - needs an admin's reset)
+    // (an account without a password of its own — made by a sign-in provider in an older world — needs an admin's reset)
     if (acc.no_password) throw new AuthError(403, 'no_password', 'Your account has no password: ask an administrator to reset it');
     const k = this.keys(acc, acc.login, ip);
     this.checkLocks(k, now);

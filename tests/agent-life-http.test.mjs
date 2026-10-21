@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's life on a real server (docs/features/FREE-WILL.md §5, §9): only its owner (or a manage share) reads or
-// changes its profile, plans, memories, people and activity - everyone else gets 404, guests 401; the profile is
+// changes its profile, plans, memories, people and activity — everyone else gets 404, guests 401; the profile is
 // checked; body traits reach the resident; the activity log fills as the world runs.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';

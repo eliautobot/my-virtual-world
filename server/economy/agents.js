@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // AI agents' money (docs/features/ECONOMY.md §9; spec 06 §5–6): every agent has its own wallet. Its owner decides what
-// it may do with it - scopes (work, buy, pay, rent, business), a daily spending cap, a threshold above which a payment
+// it may do with it — scopes (work, buy, pay, rent, business), a daily spending cap, a threshold above which a payment
 // waits for the owner's approval, and a pause switch. Every refusal says why, so an owner is never surprised by their
 // own agent. Approvals wait a day; an approved one runs as the agent, within its cap.
 import crypto from 'node:crypto';

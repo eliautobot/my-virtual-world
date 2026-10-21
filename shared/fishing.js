@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fishing module (docs/features/fishing.md): a trip from a dock is a run of one of its courses (shared/fishing-trip.js
 // TRIPS). The server lays the trip out from the run's seed over the water round the dock it starts at (prepare), keeps
 // the trip's catch itself (init → the run's state, never sent), and answers the browser's moves on the water through
 // the play core's in-run actions: hook (a fish took: the server rolls what it is with its own secret), land (the fight
-// was won - no sooner than that gear could have won it: shared/fishing-fight.js minFightSeconds), lose (the line broke,
+// was won — no sooner than that gear could have won it: shared/fishing-fight.js minFightSeconds), lose (the line broke,
 // the hook pulled), keep / release (the cooler). verify() sells the server's own list of the catch: the trip's score.
 // Shared by the server and the browser.
 import { registerPlay } from './play.js';
@@ -25,7 +25,7 @@ const minuteOf = ctx => ctx.serverMs / 60000;
 export const hourAt = (data, minute) => (((data.clock?.hour0 ?? 9) + minute * (data.clock?.perMin ?? 0)) % 24 + 24) % 24;
 
 /**
- * A trip's own day: from early morning (late afternoon for a dusk trip) to dusk (19:30) over the trip's minutes - the
+ * A trip's own day: from early morning (late afternoon for a dusk trip) to dusk (19:30) over the trip's minutes — the
  * fish feed by it (shared/fishing-trip.js activity), and the catch keeps fresh until it.
  */
 export const DUSK = 19.5;
@@ -48,15 +48,15 @@ export const coolerUsed = caught => caught.filter(c => c.kept).reduce((a, c) => 
 function act(name, body, ctx) {
   const { course, data, state } = ctx, plan = data.plan, L = kitFor(state.kit, plan.water), minute = minuteOf(ctx);
   if (name === 'hook') {
-    if (minute > course.minutes + AFTER_DUSK_MIN) return err('It\'s dark - the trip is over. Head back to the dock to sell your catch.', 409);
+    if (minute > course.minutes + AFTER_DUSK_MIN) return err('It\'s dark — the trip is over. Head back to the dock to sell your catch.', 409);
     if (ctx.serverMs - state.lastHook < HOOK_GAP_MS) return err('Too quick', 429);
     const lure = String(body.lure || ''), lu = LURE_BY_ID[lure];
     if (!lu || (lu.water !== 'both' && lu.water !== plan.water)) return err('Not a lure for this water');
     state.used ||= {};
-    if (left(state, lure) <= 0) return err(`You have no ${lu.name} left - the dock store sells more`, 409);
+    if (left(state, lure) <= 0) return err(`You have no ${lu.name} left — the dock store sells more`, 409);
     if (lu.kind === 'troll' && !(L.boat.holders > 0)) return err('Trolling needs rod holders on the boat');
     let ground = plan.grounds.find(g => g.id === body.ground) || null;
-    // the ground must be where the angler is (ctx.pos: the server's own idea of where they stand - the boat's helm or
+    // the ground must be where the angler is (ctx.pos: the server's own idea of where they stand — the boat's helm or
     // deck): within its circle, the line's length and some slack; else it's open water
     if (ground && ctx.pos) { const p = groundPos(ground, minute, plan.water); if (Math.hypot(p.x - ctx.pos.x, p.z - ctx.pos.z) > ground.r + Math.min(+body.d0 || 0, L.reach * 1.3) + 25) ground = null; }
     const fished = ground && (state.fished[ground.id] || 0) >= ground.fish;
@@ -75,7 +75,7 @@ function act(name, body, ctx) {
     state.hooked = null;
     const isFind = h.what.kind === 'find', sp = !isFind && speciesOf(h.what.species);
     const least = isFind ? Math.max(0, h.d0 - 3) / (L.speed * 2.55) * 0.8 : minFightSeconds(sp, h.what.kg, L, h.d0);
-    if (ctx.serverMs - h.at < least * 1000 - SLACK_MS) return err('That fish came in too fast - it got away', 422);
+    if (ctx.serverMs - h.at < least * 1000 - SLACK_MS) return err('That fish came in too fast — it got away', 422);
     if (h.ground) state.fished[h.ground] = (state.fished[h.ground] || 0) + 1;
     const c = isFind
       ? { n: h.n, find: h.what.id, kg: findOf(h.what.id)?.kg || 0, slots: 1, ground: h.ground, lure: h.lure, at: r2(minuteOf(ctx)) }
@@ -100,7 +100,7 @@ function act(name, body, ctx) {
     const c = state.caught.find(x => x.n === body.n);
     if (!c) return err('No such fish');
     if (name === 'release') { if (c.kept) state.released++; c.kept = false; c.released = true; }
-    else { if (!c.kept && (c.slots || 1) > (L.boat.cooler || 12) - coolerUsed(state.caught)) return err('No room in the cooler - release something first', 409); c.kept = true; c.released = false; }
+    else { if (!c.kept && (c.slots || 1) > (L.boat.cooler || 12) - coolerUsed(state.caught)) return err('No room in the cooler — release something first', 409); c.kept = true; c.released = false; }
     return { cooler: { used: coolerUsed(state.caught), size: L.boat.cooler } };
   }
   return err('Unknown action');
@@ -119,10 +119,10 @@ function verify(course, report, ctx) {
       fish: v.fish, finds: v.finds, released: state.released, value: v.value, bonus: v.bonus, sale: v.sale, fresh: r2(v.fresh), bounties: v.bounties,
       species: [...new Set(kept.map(i => i.species))], trophies: kept.filter(i => i.size === 'trophy').length, legends: kept.filter(i => speciesOf(i.species)?.legend).map(i => i.species),
       maxKg: best ? best.kg : 0, best: best ? { species: best.species, kg: best.kg, cm: best.cm } : null, cooler: coolerUsed(state.caught), coolerSize: L.boat.cooler,
-      // (compact - the run's record keeps 6000 characters: what, cm, kg, worth (VC, freshness and the trader's skill in), size)
+      // (compact — the run's record keeps 6000 characters: what, cm, kg, worth (VC, freshness and the trader's skill in), size)
       items: v.items.slice(0, 30).map(i => [i.species || i.find, i.cm || 0, i.kg, Math.round(i.vc * (1 + (L.trader || 0)) * 100) / 100, i.size || '']),
       bonusSale: r2(v.bonus * (1 + (L.trader || 0))),
-      // every species landed, kept or let go - [species, how many, the biggest's kg and cm] - for the Fishdex and the
+      // every species landed, kept or let go — [species, how many, the biggest's kg and cm] — for the Fishdex and the
       // world records (server/play/angler.js); and how many came in after dusk (Night owl)
       landed: landedOf(state.caught), night: state.caught.filter(c => c.species && c.at > course.minutes).length,
     },
@@ -186,7 +186,7 @@ export const FISHING = registerPlay({
     { id: 'fishdex_10', label: 'Fishdex 10', icon: '📖', desc: 'Land ten different species', tier: 'bronze', granted: true, when: () => false },
     { id: 'fishdex_25', label: 'Fishdex 25', icon: '📖', desc: 'Land 25 different species', tier: 'silver', granted: true, when: () => false },
     { id: 'fishdex_50', label: 'Fishdex 50', icon: '📚', desc: 'Land 50 different species', tier: 'gold', granted: true, when: () => false },
-    { id: 'fishdex_all', label: 'Complete Fishdex', icon: '🏅', desc: 'Land every species there is - the legends too', tier: 'platinum', granted: true, when: () => false },
+    { id: 'fishdex_all', label: 'Complete Fishdex', icon: '🏅', desc: 'Land every species there is — the legends too', tier: 'platinum', granted: true, when: () => false },
     { id: 'record_breaker', label: 'Record breaker', icon: '🥇', desc: 'Set a world record: the biggest of a species anyone has landed', tier: 'gold', granted: true, when: () => false },
     { id: 'gentle_hands', label: 'Gentle hands', icon: '🫶', desc: 'Let 25 fish go back', tier: 'silver', granted: true, when: () => false },
     { id: 'fish_record', label: 'Record catch', icon: '🏆', desc: 'Take first place on a fishing leaderboard with a three-star trip', tier: 'platinum', when: (s, run) => run?.place === 1 && run.stars >= 3 },

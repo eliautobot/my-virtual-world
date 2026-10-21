@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Solid boxes with tops (docs/features/play-modules.md): every building as a box from its base to its roof, and the world
 // modules' structures (an airport's terminal, tower and hangar). A helicopter lands on any of these roofs, aircraft hit
 // their walls, and the airport's ring courses stay clear of them. Built when the world changes (never per frame) into a

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.13 exact lot geometry and lot rules: areas, overlaps (incl. the tricky touching cases), side-to-side merges up
 // to 4 lots, unmerge, platting at the 100 × 100 ft standard, and partition checks (wp4-world-spec.md §5).
 import test from 'node:test';

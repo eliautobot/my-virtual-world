@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Puts a world's city on the island (WP4.2, DECISIONS E25 (3)): writes world.terrain - the pinned generator, its seed and
-// the city's flat rectangle - so the server and every browser generate the same ~8 km island around the city. Nothing
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Puts a world's city on the island (WP4.2, DECISIONS E25 (3)): writes world.terrain — the pinned generator, its seed and
+// the city's flat rectangle — so the server and every browser generate the same ~8 km island around the city. Nothing
 // else changes; the island is generated, never stored, so this is a small, reversible change (remove world.terrain).
 // Run while the server that uses the data folder is stopped.
 // Usage: node tools/wp4/add-island.mjs --data <data folder> --server-stopped [--seed <s>]

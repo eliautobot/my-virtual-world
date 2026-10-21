@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The agents' PC swept for access (docs/features/agent-pc.md §2): every /api/pc route the server answers (its own route
-// table, GET /api/routes - a route added later is swept too), called by everyone who is not the PC's account - the
-// installation's owner, an administrator, a member, a person the agent is shared with to manage or to use, a guest -
+// table, GET /api/routes — a route added later is swept too), called by everyone who is not the PC's account — the
+// installation's owner, an administrator, a member, a person the agent is shared with to manage or to use, a guest —
 // with the real ids of three PCs (the owner's, an administrator's, a member's: agent, team, team space, task cards,
 // event, trash item, files). Nothing of a PC may come back (its words are marked), nothing in it may change (each PC is
 // read whole before and after), and no request may break the server. The same requests made by the PC's own account do
@@ -31,7 +31,7 @@ async function seed(c, agent, tag) {
   const ev = ok(await c.post('/api/pc/events', { profile: agent, path: '~', title: `Event ${mark}`, start: T0, end: T0 + 1800000 }));
   return { c, agent, tag, mark, team: team.id, space: team.space, card: card.id, tcard: tcard.id, event: ev.id, trash: trash[0].id };
 }
-/** A PC read whole, as its own account sees it (what may change on its own - times of screens - left out). */
+/** A PC read whole, as its own account sees it (what may change on its own — times of screens — left out). */
 async function snapshot(v) {
   const g = async p => { const r = await v.c.get(p); return [r.status, r.json]; };
   const pa = `profile=${v.agent}`;
@@ -63,9 +63,9 @@ function bags(v, name = 'HACKED') {
     { ...base, path: '~', id: v.tcard, op: 'docs' },
   ];
 }
-// (in a query, to is the end of a calendar's range - in a body, where a file moves to)
+// (in a query, to is the end of a calendar's range — in a body, where a file moves to)
 const qs = b => new URLSearchParams(Object.entries(b).filter(([, x]) => x !== undefined).map(([k, x]) => [k, k === 'to' && typeof x === 'string' ? String(T0 + 86400000) : String(x)])).toString();
-/** One probe: a GET with the fields as its query; a POST with them as its JSON body - or, for an upload, as its query
+/** One probe: a GET with the fields as its query; a POST with them as its JSON body — or, for an upload, as its query
  *  with a body of bytes. */
 function probe(c, r, b) {
   if (r.method === 'GET') return c.get(`${r.path}?${qs({ ...b, from: T0 - 86400000 })}`);
@@ -90,7 +90,7 @@ before(async () => {
   V.own = await seed(owner, A, 'own');
   V.adm = await seed(adm, X, 'adm');
   V.ann = await seed(ann, N, 'ann');
-  // shares open an agent elsewhere - never its PC: the owner's to Ann to manage, Ann's to Bob to manage, the admin's to Bob to use
+  // shares open an agent elsewhere — never its PC: the owner's to Ann to manage, Ann's to Bob to manage, the admin's to Bob to use
   for (const [c, id, who, level] of [[owner, A, ann, 'manage'], [ann, N, bob, 'manage'], [adm, X, bob, 'use']]) {
     assert.equal((await c.post('/api/agents/share', { id, kind: 'account', who: String(who.me.account.id), level })).status, 200);
   }
@@ -136,10 +136,10 @@ test('nobody outside a PC\'s account reaches it: nothing comes back, nothing cha
 });
 
 test('the same probes work for the PC\'s own account (the refusals above are the rule\'s)', async () => {
-  // a route answers its own account with 2xx for at least one of the probes - each POST on a fresh copy of the PC, as
+  // a route answers its own account with 2xx for at least one of the probes — each POST on a fresh copy of the PC, as
   // the probes change it; these are the ones that can't: an agent made here has no computer of its own (§4.1), and a
   // work session needs a brain the test server has none of
-  // (and its real browser's controls and live picture: no browser is started here - tests/pc-chrome.test.mjs and the lab's
+  // (and its real browser's controls and live picture: no browser is started here — tests/pc-chrome.test.mjs and the lab's
   // pc-browser-check use a real one)
   const CANT = new Set(['/api/pc/own', '/api/pc/own/file', '/api/pc/own/upload', '/api/pc/work', '/api/pc/work/stop', 'POST /api/pc/browser', '/api/pc/browser/frame']);
   const failed = [];

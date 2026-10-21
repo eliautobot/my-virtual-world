@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Every place that keeps sealed values, registered with the SecretBox (server/secrets.js; DECISIONS C85, C97, C99), so
 // the start-up check, re-sealing after a rotation, forgetting unreadable values and staging copies reach all of them.
 // Tables that an older schema lacks are skipped: the deploy tools look at a database before it is migrated.

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agent brain: needs, daily schedules, work, meals, leisure, sleep, meetings and chats.
 // Every decision produces one motion plan (travel + activity) that starts where the previous plan ends.
 import { RNG, hashStr } from '../../shared/rng.js';
@@ -34,7 +34,7 @@ function wpick(rng, opts) {
 
 /**
  * The routines that come before free time, in order (Brain.choose). when() only looks (no random draws, no changes), so
- * Brain.reflexAt can ask it ahead of time with predicted needs; act() does it and says whether it worked - when it does
+ * Brain.reflexAt can ask it ahead of time with predicted needs; act() does it and says whether it worked — when it does
  * not, the next routine is tried, and after the last one comes free time (Brain.leisure).
  */
 /** What the lounge at work offers, with the routine's weights (Brain.loungeVisit, Brain.loungeHasRoom). */
@@ -324,7 +324,7 @@ export class Brain {
     if (!k) return false;
     const pid = a.p.id, t = P.t, dish = this.food ? homeDish(this.hour(t), tag => r01(pid, t, tag), k) : [];
     const item = dish.length ? FOOD_BY_ID[dish[0]].n : 0, o = { item, ...(item ? { order: dish.slice(0, 1) } : {}) };
-    // cooking is at a stove (the pan on its hob holds what they will eat); without one - or for a dish that isn't cooked -
+    // cooking is at a stove (the pan on its hob holds what they will eat); without one — or for a dish that isn't cooked —
     // something cold is made on the counter's board (2026-10-08: they cooked in a pan on the counter, without a stove)
     if (a.rng.chance(0.55)) {
       const made = k.stove && (!item || onStove(dish[0])) ? this.homeUse(a, P, ['cook'], [8, 18], { use: 'cook', anim: A.cook, ...o })
@@ -389,7 +389,7 @@ export class Brain {
       if (this.resumeValid(a, P, P.t, n) && this.resumeActivity(a, P, h, day)) return;
       a.resume = null;
     }
-    // its outside AI's order comes first - after a post, a task in hand and a body in trouble
+    // its outside AI's order comes first — after a post, a task in hand and a body in trouble
     if (this.orderNow(a, P) && !a.p.post && !(a.p.vip && this.sim.presence.isWorking(a.p.agentId)) && n.hunger >= 0.2 && n.energy >= 0.22) {
       if (this.doOrder(a, P, h, day)) return;
       // it can't any more (closed, full, no money, they went somewhere private): the routine goes on, and its AI is told
@@ -443,8 +443,8 @@ export class Brain {
     return true;
   }
   /**
-   * A message (or a job) starts or ends for an AI agent (index.mjs, its presence). At a screen already - its desk, its
-   * computer, a laptop - it answers right there and carries on: nothing changes. Otherwise it marks what it is doing to go
+   * A message (or a job) starts or ends for an AI agent (index.mjs, its presence). At a screen already — its desk, its
+   * computer, a laptop — it answers right there and carries on: nothing changes. Otherwise it marks what it is doing to go
    * back to, notes when it woke it, and turns to it (its phone, a laptop, its desk; up from bed at night); when the work
    * ends it goes back to what it was doing (choose → resumeActivity), or to bed.
    */
@@ -458,7 +458,7 @@ export class Brain {
     } else if (a.msgHere && !a.taskWay) a.msgHere = false;
     else { a.msgHere = false; this.interruptSoon(a); }
   }
-  /** Whether it is at a screen now - a desk, its computer at home, a laptop (typing): a message is answered right there. */
+  /** Whether it is at a screen now — a desk, its computer at home, a laptop (typing): a message is answered right there. */
   atScreen(a, now = this.sim.now()) {
     const x = a.act;
     if (!x || !a.plan || x.holdStart > now || x.holdEnd <= now) return false;
@@ -498,7 +498,7 @@ export class Brain {
     if (r.kind === 'wander') return r.b >= 0 && this.W.buildings[r.b] && !this.W.buildings[r.b].gone ? this.stroll(a, P, r.b, r.f) : this.wander(a, P);
     return false;
   }
-  /** Whether the agent has just finished a task (woken by a message at night, it may go back to bed - or not). */
+  /** Whether the agent has just finished a task (woken by a message at night, it may go back to bed — or not). */
   justFinishedTask(a, t) {
     return !!(a.taskWay && !(a.p.vip && this.sim.presence.isWorking(a.p.agentId))) || (a.taskEnded !== undefined && t - a.taskEnded < this.wm(30));
   }
@@ -595,7 +595,7 @@ export class Brain {
   // ------------------------------------------------------------------ tasks (an AI agent working on what its owner asked)
   /**
    * The ways an agent can work on a task from where it is: { way: 'desk' | 'home' | 'laptop' | 'phone', b, f, place,
-   * minutes } - its desk at work, the computer (or a table, with a laptop) at home, a laptop at a free table where it is
+   * minutes } — its desk at work, the computer (or a table, with a laptop) at home, a laptop at a free table where it is
    * or at a café nearby, or its phone right where it stands. Pure (no random draws): Free Will offers these.
    */
   taskWays(a, P) {
@@ -810,7 +810,7 @@ export class Brain {
     const prop = kind === 'cafe' ? PROP.coffee : 0;
     return !!this.useAt(a, P, v.b, v.f, 'eat', kind === 'cafe' ? [18, 35] : [28, 50], { kind: 'meal', use: 'eat', prop, ...this.orderAt(a, v.b, v.f, 'meal', P.t) });
   }
-  /** Free Will's meal: at home, at a named venue, or in the kitchen at work - with the routine's own bookkeeping. */
+  /** Free Will's meal: at home, at a named venue, or in the kitchen at work — with the routine's own bookkeeping. */
   mealDo(a, P, h, day, o, venue) {
     if (h >= 17) a.dinnerDay = day; else if (h >= 11 && h < 15) a.lunchDay = day;
     if (o.way === 'home') return this.homeMeal(a, P);
@@ -1194,7 +1194,7 @@ export class Brain {
 
   // ------------------------------------------------------------------ social
   /** Walk up to a nearby idle person and chat with them. */
-  /** Whether someone to chat with is around (ctx, x, z) right now - the same first checks as chat(), without moving
+  /** Whether someone to chat with is around (ctx, x, z) right now — the same first checks as chat(), without moving
    *  anyone (pure: Free Will offers a chat only then). */
   chatPartnerNear(a, ctx, x, z) {
     const set = this.joinable.get(this.regionKey(ctx, x, z));
@@ -1286,8 +1286,8 @@ export class Brain {
     return true;
   }
   // ------------------------------------------------------------------ orders from its own outside AI
-  // A connected agent's AI (server/agent-world.js) gives an order - a kind of activity, maybe at a named place, or to be
-  // with someone, for a while - and the body keeps doing it until then: it comes before Free Will and the routine
+  // A connected agent's AI (server/agent-world.js) gives an order — a kind of activity, maybe at a named place, or to be
+  // with someone, for a while — and the body keeps doing it until then: it comes before Free Will and the routine
   // (choose). Only a post, a task it is working on, or a body in trouble (starving, exhausted) comes first; an order that
   // can no longer be carried out ends, and the routine goes on.
   /** Floors anyone may walk into: the city's venues (cafés, restaurants, shops, gyms, parks, lounges). */
@@ -1325,7 +1325,7 @@ export class Brain {
   /** The order still running at P (null: none, or its time is up). */
   orderNow(a, P) { return this.liveOrder(a, P.t, true); }
   /** Its order at time t, or null; one whose time is up ends there (a meet that never reached them: it gave up), and its
-   *  AI is told on its next look - whether a choice point or a look notices first. (Not orderAt: that is what it orders
+   *  AI is told on its next look — whether a choice point or a look notices first. (Not orderAt: that is what it orders
    *  at a café.) */
   liveOrder(a, t, planning = false) {
     if (!a.order && a.p.order) this.restoreOrder(a);
@@ -1375,7 +1375,7 @@ export class Brain {
       case 'restaurant': { const v = o.venue || this.pickVenue(a, P, 'restaurant', { essential: true }); return !!(v && this.mealAt(a, P, 'restaurant', v)); }
       case 'meet': {
         // with someone: walk up to where they are now, then stay with them a little; they may have moved on by the next
-        // round, and it follows - unless they went somewhere private (the order ends: it doesn't follow people home)
+        // round, and it follows — unless they went somewhere private (the order ends: it doesn't follow people home)
         const t = this.sim.agents[o.who];
         if (!t?.plan || this.sim.people[o.who]?.retired) return false;
         const e = evalPlan(t.plan, P.t);
@@ -1415,12 +1415,12 @@ export class Brain {
     this.sim.commit(a, P);
     return ok ? { ok: true } : { ok: false, why: 'not_possible' };
   }
-  /** On plan P: walks over to (x, z) - outdoors, or on floor ctx of a building - and waits there a little, facing it.
+  /** On plan P: walks over to (x, z) — outdoors, or on floor ctx of a building — and waits there a little, facing it.
    *  False when there is no way there. */
   approachOn(a, P, x, z, ctx = CTX_OUT, label = '', target = null) {
     if (P.ctx === CTX_UNDER) P.ctx = CTX_OUT;
     // someone on the move (a walk, a jog): it hurries when they are far, and heads for where they will be when it gets
-    // there - their plan is known ahead - rather than where they were (at the same pace it would never catch them up)
+    // there — their plan is known ahead — rather than where they were (at the same pace it would never catch them up)
     let hurry = false;
     if (target?.plan && ctx === CTX_OUT) {
       const far = Math.hypot(x - P.x, z - P.z) > 25, speed = far ? JOG_SPEED : (a.p.speed || 1.35);
@@ -1448,7 +1448,7 @@ export class Brain {
     const hs = P.t;
     // a moment to look again (someone still: they're there; someone walking: the next round catches them up)
     P.hold(target ? this.wm(0.5) : this.wm(3), A.idle, U.greet, 0, Math.atan2(x - dest.x, z - dest.z));
-    // (its own kind: walking over to someone is not a conversation - its life's log keeps it out)
+    // (its own kind: walking over to someone is not a conversation — its life's log keeps it out)
     this.act(a, 'meet', 'greet', P, { ctx: dest.ctx, arrive: hs, holdStart: hs, holdEnd: P.t, ...(label ? { label } : {}), place: dest.ctx >= 0 ? this.placeName(ctxB(dest.ctx), ctxF(dest.ctx)) : this.nav.addressAt(dest.x, dest.z) });
     return P.t > t0;
   }
@@ -1498,9 +1498,9 @@ export class Brain {
     return P;
   }
   /**
-   * On its post (an AI agent's, around the clock - server/agent-posts/): to the piece of furniture its owner chose, and
+   * On its post (an AI agent's, around the clock — server/agent-posts/): to the piece of furniture its owner chose, and
    * there an hour at a time. Taken by someone else for now: it waits close by and tries again. Its furniture gone: false
-   * (its day goes on; the post itself is dropped when the world is checked - population.js validatePerson).
+   * (its day goes on; the post itself is dropped when the world is checked — population.js validatePerson).
    */
   postDuty(a, P) {
     const r = a.p.post;

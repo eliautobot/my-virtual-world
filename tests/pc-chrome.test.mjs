@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The built-in browser itself (server/pc/chrome.js), with the real Chrome of this machine (skipped without one): it
 // starts by itself, every page goes through its egress proxy (this machine's own pages refused, its loopback included),
 // each agent's context keeps its cookies to itself, and it stops cleanly.

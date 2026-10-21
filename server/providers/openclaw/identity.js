@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The device identity a connection presents to an OpenClaw gateway (docs/features/agent-providers.md §2), made the way
 // OpenClaw makes its own: an Ed25519 key pair; the device id is the SHA-256 of the raw 32-byte public key, in hex; the
 // public key travels as its raw bytes in base64url; a signature is Ed25519 over the UTF-8 payload, in base64url. The

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The replay cache of server/voice/voice.js (docs/features/CHAT.md §9.3): an audio kept again under the same key is
 // counted once (a double count once drifted the size past its limit until an empty cache was asked for its oldest
 // entry and threw), the oldest go first within the items and bytes allowed, and an audio too big to keep isn't.

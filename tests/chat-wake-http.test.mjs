@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An owner's message to an agent whose brain is the server's own (docs/features/CHAT.md §13.3), on a real server: at
-// 3 AM in the city its body is asleep; the message wakes it - the run makes it work (presence: the agent named by its own
-// key, though every agent on the brain shares the platform id "mind"), so its body gets up to work on it - and its
+// 3 AM in the city its body is asleep; the message wakes it — the run makes it work (presence: the agent named by its own
+// key, though every agent on the brain shares the platform id "mind"), so its body gets up to work on it — and its
 // answer knows it was woken, what it really did today, and that nothing else about its moment is to be made up; at Work
 // the same facts, and no office or desk.
 import assert from 'node:assert/strict';

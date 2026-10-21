@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // tools/deploy/dbcopy.mjs: a consistent, private copy of a running server's accounts database, taken while it writes.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';

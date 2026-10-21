@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.11 promotional aircraft (rebuilt for the design review 2026-10-03): Next's own flight plans keep every aircraft well
 // above every roof and hill near its path, never turn tighter than a wide banked arc, and keep each aircraft apart from
 // the rest of the fleet; the configuration a world already stores still loads; it is saved by administrators only;

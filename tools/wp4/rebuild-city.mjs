@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Rebuilds a world's city on 100 × 100 ft lots (WP4, DECISIONS E25 (9)): a new street-and-lot layout and new buildings,
 // with every lot created in the property store (municipal) and the lots under big buildings, parks and the
-// headquarters merged. People are carried over exactly - accounts, residents (ids, names, looks, traits, routines),
-// agents and their records - and move into the new buildings: homes, desks and shifts are given again by the
+// headquarters merged. People are carried over exactly — accounts, residents (ids, names, looks, traits, routines),
+// agents and their records — and move into the new buildings: homes, desks and shifts are given again by the
 // population rules (agents first at the headquarters). Parked cars are cleared (their spots are gone), earlier edits
 // stop being undoable (they describe buildings that no longer exist), players start from the spawn point if their
 // saved spot is now inside a building (the server does that on its own).

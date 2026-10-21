@@ -51,7 +51,7 @@
    "type": "thinking.delta",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "⏳ waiting on provider - retrying in 3s (attempt 1/3)"
+    "text": "⏳ waiting on provider — retrying in 3s (attempt 1/3)"
    }
   },
   {
@@ -85,7 +85,7 @@
    "type": "thinking.delta",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "⏳ waiting on provider - retrying in 5s (attempt 2/3)"
+    "text": "⏳ waiting on provider — retrying in 5s (attempt 2/3)"
    }
   },
   {
@@ -116,14 +116,14 @@
    "session_id": "a8db60c1",
    "payload": {
     "kind": "lifecycle",
-    "text": "⏳ Provider temporarily unavailable - retrying automatically in 17s (cycle 1/5); press Esc to stop"
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 17s (cycle 1/5); press Esc to stop"
    }
   },
   {
    "type": "thinking.delta",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "⏳ Provider temporarily unavailable - retrying automatically in 17s (cycle 1/5); press Esc to stop"
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 17s (cycle 1/5); press Esc to stop"
    }
   },
   {
@@ -161,7 +161,7 @@
    "type": "thinking.delta",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "⏳ waiting on provider - retrying in 2s (attempt 1/3)"
+    "text": "⏳ waiting on provider — retrying in 2s (attempt 1/3)"
    }
   },
   {
@@ -175,57 +175,7 @@
    "type": "thinking.delta",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "⏳ waiting on provider - retrying in 5s (attempt 2/3)"
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": ""
-   }
-  },
-  {
-   "type": "status.update",
-   "session_id": "a8db60c1",
-   "payload": {
-    "kind": "lifecycle",
-    "text": "⏳ Provider temporarily unavailable - retrying automatically in 33s (cycle 2/5); press Esc to stop"
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": "⏳ Provider temporarily unavailable - retrying automatically in 33s (cycle 2/5); press Esc to stop"
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": ""
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": "⏳ waiting on provider - retrying in 2s (attempt 1/3)"
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": ""
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": "⏳ waiting on provider - retrying in 5s (attempt 2/3)"
+    "text": "⏳ waiting on provider — retrying in 5s (attempt 2/3)"
    }
   },
   {
@@ -240,28 +190,14 @@
    "session_id": "a8db60c1",
    "payload": {
     "kind": "lifecycle",
-    "text": "⏳ Provider temporarily unavailable - retrying automatically in 71s (cycle 3/5); press Esc to stop"
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 33s (cycle 2/5); press Esc to stop"
    }
   },
   {
    "type": "thinking.delta",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "⏳ Provider temporarily unavailable - retrying automatically in 71s (cycle 3/5); press Esc to stop"
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": ""
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": "⏳ waiting on provider - retrying in 3s (attempt 1/3)"
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 33s (cycle 2/5); press Esc to stop"
    }
   },
   {
@@ -275,29 +211,7 @@
    "type": "thinking.delta",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "⏳ waiting on provider - retrying in 5s (attempt 2/3)"
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": ""
-   }
-  },
-  {
-   "type": "status.update",
-   "session_id": "a8db60c1",
-   "payload": {
-    "kind": "lifecycle",
-    "text": "⏳ Provider temporarily unavailable - retrying automatically in 71s (cycle 4/5); press Esc to stop"
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": "⏳ Provider temporarily unavailable - retrying automatically in 71s (cycle 4/5); press Esc to stop"
+    "text": "⏳ waiting on provider — retrying in 2s (attempt 1/3)"
    }
   },
   {
@@ -311,21 +225,7 @@
    "type": "thinking.delta",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "⏳ waiting on provider - retrying in 2s (attempt 1/3)"
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": ""
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": "⏳ waiting on provider - retrying in 5s (attempt 2/3)"
+    "text": "⏳ waiting on provider — retrying in 5s (attempt 2/3)"
    }
   },
   {
@@ -340,28 +240,14 @@
    "session_id": "a8db60c1",
    "payload": {
     "kind": "lifecycle",
-    "text": "⏳ Provider temporarily unavailable - retrying automatically in 70s (cycle 5/5); press Esc to stop"
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 71s (cycle 3/5); press Esc to stop"
    }
   },
   {
    "type": "thinking.delta",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "⏳ Provider temporarily unavailable - retrying automatically in 70s (cycle 5/5); press Esc to stop"
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": ""
-   }
-  },
-  {
-   "type": "thinking.delta",
-   "session_id": "a8db60c1",
-   "payload": {
-    "text": "⏳ waiting on provider - retrying in 3s (attempt 1/3)"
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 71s (cycle 3/5); press Esc to stop"
    }
   },
   {
@@ -375,7 +261,21 @@
    "type": "thinking.delta",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "⏳ waiting on provider - retrying in 4s (attempt 2/3)"
+    "text": "⏳ waiting on provider — retrying in 3s (attempt 1/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 5s (attempt 2/3)"
    }
   },
   {
@@ -390,7 +290,107 @@
    "session_id": "a8db60c1",
    "payload": {
     "kind": "lifecycle",
-    "text": "⏳ Automatic recovery gave up after 5 cycles - the provider is still unavailable."
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 71s (cycle 4/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 71s (cycle 4/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 2s (attempt 1/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 5s (attempt 2/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 70s (cycle 5/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ Provider temporarily unavailable — retrying automatically in 70s (cycle 5/5); press Esc to stop"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 3s (attempt 1/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": "⏳ waiting on provider — retrying in 4s (attempt 2/3)"
+   }
+  },
+  {
+   "type": "thinking.delta",
+   "session_id": "a8db60c1",
+   "payload": {
+    "text": ""
+   }
+  },
+  {
+   "type": "status.update",
+   "session_id": "a8db60c1",
+   "payload": {
+    "kind": "lifecycle",
+    "text": "⏳ Automatic recovery gave up after 5 cycles — the provider is still unavailable."
    }
   },
   {
@@ -494,14 +494,14 @@
    "session_id": "a8db60c1",
    "payload": {
     "kind": "lifecycle",
-    "text": "❌ API failed after 3 retries - HTTP 500: stub error 500"
+    "text": "❌ API failed after 3 retries — HTTP 500: stub error 500"
    }
   },
   {
    "type": "message.complete",
    "session_id": "a8db60c1",
    "payload": {
-    "text": "custom returned a server error on all 3 attempts - it looks temporarily unavailable. Wait a minute and send /retry, or switch models with /model. To avoid this in future, add a backup provider with `hermes fallback add`.\n\nProvider said: HTTP 500: stub error 500",
+    "text": "custom returned a server error on all 3 attempts — it looks temporarily unavailable. Wait a minute and send /retry, or switch models with /model. To avoid this in future, add a backup provider with `hermes fallback add`.\n\nProvider said: HTTP 500: stub error 500",
     "usage": {
      "model": "stub-1",
      "input": 0,

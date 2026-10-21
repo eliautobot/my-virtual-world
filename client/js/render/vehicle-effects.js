@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Bounded vehicle effects: lens-only night emission, instanced road-light pools,
 // and distance/radius wheel rotation. No app state or per-car dynamic lights.
 import * as THREE from 'three';

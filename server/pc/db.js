@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The agents' PC database (docs/features/agent-pc.md §6): <data>/pc/pc.db, apart from next.db so a busy PC never slows
 // the world's own writes and the world's backups stay small. node:sqlite, WAL, versioned migrations (append only, each
 // moves PRAGMA user_version one up). Every row belongs to one account; times are Unix milliseconds.

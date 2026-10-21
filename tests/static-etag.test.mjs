@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Static files carry content-hash ETags, so a file a new release leaves unchanged revalidates with 304 instead of
 // being downloaded again (release folders get new modification times).
 import test from 'node:test';

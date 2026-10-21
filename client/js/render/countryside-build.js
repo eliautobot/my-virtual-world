@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The countryside's standing detail for one full-detail terrain tile (runs in the terrain worker; the design review
 // 2026-10-03: "fields of flowers, farm land with hay-rolls, detailed farm land with wheat fields or corn"): the crops of
-// every farmed field (shared/farms.js) as solid shapes over the rows the ground shader draws - corn and sunflowers in
+// every farmed field (shared/farms.js) as solid shapes over the rows the ground shader draws — corn and sunflowers in
 // tall leafy rows, wheat and barley as a standing crop with its tram lines open, cabbages, lavender in mounds, tulips in
-// coloured bands, hay raked into windrows, round bales (some wrapped) and stacks of square ones on the stubble - and the
+// coloured bands, hay raked into windrows, round bales (some wrapped) and stacks of square ones on the stubble — and the
 // fields' boundaries: hedgerows with trees in them and gates, post-and-rail fences and dry-stone walls. One mesh per
 // tile (one draw call), built from cross-sections swept along rows and boundaries, following the ground vertex by vertex.
 // Nothing grows on roads and their verges, building yards, water or in the city. The renderer raises it out of the

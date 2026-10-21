@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The economy over HTTP (docs/features/ECONOMY.md). Everyone may read the city's economy (transparency: the budget,
 // prices, businesses, the treasury's ledger); members use their wallet (economy.use); administrators run it
 // (economy.admin). Connected agents use /api/agent-api/economy/* with their bearer token, within their owner's limits.
@@ -73,7 +73,7 @@ export function addEconomyRoutes(router, econ, d) {
   }) });
   // A person's money lately (the selection card's money feed). A resident's is public, like the city's books: their
   // savings, rent, what they bought and their daily settlements. An agent's money is its owner's (ECONOMY.md §8): its
-  // owner sees its wallet and statement; anyone else learns only that it is private - and a body that passes for a
+  // owner sees its wallet and statement; anyone else learns only that it is private — and a body that passes for a
   // resident (a hidden connected agent) shows what anyone could see it buy, never its wallet.
   router.add({ method: 'GET', path: '/api/economy/person', cap: 'world.view', handler: run(({ P, url }) => {
     need();

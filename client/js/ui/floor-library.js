@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Saved floor layouts in the browser (floor layouts, 2026-10-04; server/layout-routes.js): 💾 Save layout keeps the
 // floor being furnished in the account's library; 📂 Layouts lists the account's own layouts and the ones shared with it,
-// lays one out on this floor (fitted to its size with the same rules as a resize: shared/edit.js fitSaved - what doesn't
+// lays one out on this floor (fitted to its size with the same rules as a resize: shared/edit.js fitSaved — what doesn't
 // fit is named before anything changes), shares it with a player by username, renames or deletes it. Laying out is
 // one edit (op lvl.apply): one undo.
 import { getJSON, post } from '../core/net.js';
@@ -134,7 +134,7 @@ async function layOut(tg, l, scope) {
   try {
     const r = await post('/api/edit', { ops: [{ op: 'lvl.apply', b: tg.b, f: tg.f, layout: l.id, ...(n ? { fit: 'keep' } : {}), ...scope }], who: 'web' });
     if (r && r.ok === false) throw new Error(r.error || 'That did not work');
-    toast(`${cap(here)} laid out as “${l.name}”${n ? ` without ${n} piece${n > 1 ? 's' : ''}` : ''} - undo with ↶`, 'good', 3600);
+    toast(`${cap(here)} laid out as “${l.name}”${n ? ` without ${n} piece${n > 1 ? 's' : ''}` : ''} — undo with ↶`, 'good', 3600);
     return true;
   } catch (err) { if (!err.quiet) toast(err.message, 'bad', 3600); return false; }
 }

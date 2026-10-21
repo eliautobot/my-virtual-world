@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What an Agent Providers' agent (OpenClaw, Hermes) does, on its screens in the world (docs/features/agent-pc.md §2.2,
 // §4.1). It works on its own computer, not on this PC, so its screen follows its provider's own events instead of PC
-// commands: each step it takes shows what that step works on - the page it browses (a browser tool, or a terminal command
+// commands: each step it takes shows what that step works on — the page it browses (a browser tool, or a terminal command
 // that drives one), the file it reads or changes with the text it read or wrote, its search and what it found, a picture,
-// its calendar, its tasks (./recognize.js: each app recognizes its own work; a step no app claims is the terminal's) -
+// its calendar, its tasks (./recognize.js: each app recognizes its own work; a step no app claims is the terminal's) —
 // then what its run says it is doing, and what its provider says it is busy with elsewhere (another channel, a schedule).
 // The screen is the PC's ordinary one (os.screen: kept in memory, sent to its owner's account only); what only sets the
 // scene (a step of the terminal's, its run writing between steps) never covers the window it works in for long (os.js
@@ -81,7 +81,7 @@ export class ProviderScreens {
       if (e.input) t.input = e.input;
       if (e.raw) t.raw = e.raw;
     }
-    // (its arguments whole where its provider gives them - the words of a file it writes - else its one line)
+    // (its arguments whole where its provider gives them — the words of a file it writes — else its one line)
     if (e.type !== 'tool.end' || !t.claim) t.claim = recognize({ name: t.name, toolKind: t.kind, title: t.title, input: t.raw || t.input });
     const c = t.claim;
     if (!c) { if (e.type === 'tool.end') this.tools.delete(key); return; }   // (MVW's own PC, reached as a tool: it shows that itself)
@@ -102,7 +102,7 @@ export class ProviderScreens {
     this.put(t.agent, [c.app, c.title, line(t.input, 240), { ...(c.view ? { view: c.view } : {}), log }]);
   }
   /** [app, title, detail, { view, log, soft }] for a run's own events, or null when it changes nothing to see. What only
-   *  sets the scene - its run starting, its words between steps - is soft: it doesn't cover the window it works in. */
+   *  sets the scene — its run starting, its words between steps — is soft: it doesn't cover the window it works in. */
   screenOf(e) {
     switch (e.type) {
       case 'run.start': return ['chat', 'Working on a message', '', { view: { kind: 'chat', text: '' }, log: ['● working on a message'], soft: true }];
@@ -110,7 +110,7 @@ export class ProviderScreens {
       case 'run.progress': return e.text ? ['chat', line(e.text, 120), '', { view: { kind: 'chat', text: line(e.text, 300) }, soft: true }] : null;
       // (its plan, as it keeps it: a board of its steps)
       case 'plan.update': return Array.isArray(e.steps) && e.steps.length ? ['board', line(e.title, 120) || 'Its plan', '', { view: planBoard(e.steps, e.title), log: [`› ${line(e.title, 120) || 'its plan'}`] }] : null;
-      // (busy elsewhere: what it is busy with, over what its screen shows - its steps there show once they are followed,
+      // (busy elsewhere: what it is busy with, over what its screen shows — its steps there show once they are followed,
       // ./screen-watch.js)
       case 'agent.activity': return e.active ? ['other', line(e.task, 120) || 'Busy on its own computer', '', { soft: true }] : null;
       default: return null;
@@ -120,8 +120,8 @@ export class ProviderScreens {
     const now = this.now(), since = now - (this.last.get(agentId) || 0);
     const w = this.waiting.get(agentId);
     if (since >= GAP_MS && !w) { this.last.set(agentId, now); this.pc.screen(agentId, app, title, detail, o); return; }
-    // (one waiting its turn: the newest is shown - unless it only sets the scene and the one waiting is a window it works
-    // in - and every step still goes to its terminal)
+    // (one waiting its turn: the newest is shown — unless it only sets the scene and the one waiting is a window it works
+    // in — and every step still goes to its terminal)
     if (w) {
       const log = [...(w.screen[3]?.log || []), ...(o.log || [])];
       const keep = (o.soft || !o.view) && w.screen[3]?.view && !w.screen[3]?.soft;

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The local transcript (PLAN WP2.2; DECISIONS C14, C119; docs/features/CHAT.md §3): every chat message, kept in the
 // database (chat_messages, schema 27) per account, agent and session, so history survives reloads and provider restarts,
 // each message has an id (edit a message, write an answer again: everything from it on goes) and a meta (model, effort,

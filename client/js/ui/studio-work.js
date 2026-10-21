@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Agent Studio's Work tab (docs/features/CHAT.md §13): the agent on the job for its owner, apart from its life in the
-// city. Its job (its title - the agent's role -, who it works for, its instructions, its tone), what it knows (text and
+// city. Its job (its title — the agent's role —, who it works for, its instructions, its tone), what it knows (text and
 // files, all of it sent with every work message, so bounded and measured here), how it works (its time zone, whether it
 // keeps work notes, the mode a new chat starts in) and the notes it kept. Each chat switches Work · Life (ui/chat.js).
 // The job's fields are saved together (Save, like Personality); notes and files are added and removed at once.
@@ -32,25 +32,25 @@ export async function workTab(C, body, live) {
   const brainNote = !conn ? `<p class="wk-note">${name} has no brain yet. Give it one in <button type="button" class="linkish" data-go="brain">Brain</button>, then its job applies to your chats with it.</p>`
     : conn.kind !== 'models' ? `<p class="wk-note">${name} thinks on <b>${esc(conn.label)}</b>, which has its own instructions: what you write here is for agents whose brain is a model provider (Brain).</p>` : '';
   const zl = zones(), here = hereZone();
-  const zoneOpts = zl ? [`<option value="">Yours - whoever is chatting${here ? ` (now ${esc(here)})` : ''}</option>`,
+  const zoneOpts = zl ? [`<option value="">Yours — whoever is chatting${here ? ` (now ${esc(here)})` : ''}</option>`,
     ...(B.timezone && !zl.includes(B.timezone) ? [`<option value="${esc(B.timezone)}" selected>${esc(B.timezone)}</option>`] : []),
     ...zl.map(z => `<option value="${esc(z)}"${z === B.timezone ? ' selected' : ''}>${esc(z.replace(/_/g, ' '))}</option>`)].join('') : null;
   const files = D.files.map(f => `<li class="wk-file"><span class="wk-fi" aria-hidden="true">📄</span><a href="/api/agent-work/file?agent=${C.id}&id=${f.id}" target="_blank" rel="noopener">${esc(f.name)}</a>
     <small>${f.kind === 'pdf' ? `PDF · ${sizeOf(f.size)}` : `${num(f.chars)} characters`}</small><button type="button" class="wk-x" data-rm-file="${f.id}" title="Remove it" aria-label="Remove ${esc(f.name)}">×</button></li>`).join('');
   const notes = D.notes.map(n => `<li class="wk-n"><span>${esc(n.text)}</span><small>${n.source === 'owner' ? 'you wrote' : 'it kept'} · ${when(n.created)}</small><button type="button" class="wk-x" data-rm-note="${n.id}" title="Remove it" aria-label="Remove this note">×</button></li>`).join('');
   body.innerHTML = `<div class="wk">
-    <p class="hint wk-intro">In a chat set to <b>Work</b>, ${name} is on the job for you: this brief, what it knows, its notes and the real date and time - nothing of its life in the city. In <b>Life</b> it is the resident you know. Each chat has the switch. What others who talk with it get: <button type="button" class="linkish" data-go="visitors">Visitors</button>.</p>
+    <p class="hint wk-intro">In a chat set to <b>Work</b>, ${name} is on the job for you: this brief, what it knows, its notes and the real date and time — nothing of its life in the city. In <b>Life</b> it is the resident you know. Each chat has the switch. What others who talk with it get: <button type="button" class="linkish" data-go="visitors">Visitors</button>.</p>
     ${brainNote}
     <div class="st-sec"><div class="st-sec-h"><h4>💼 Its job</h4></div>
       <div class="wk-two"><label>Job title<input class="input wk-title" maxlength="60" placeholder="Receptionist" value="${esc(st.title)}"></label>
-        <label>Works for<input class="input wk-company" maxlength="80" placeholder="You - or your business's name" value="${esc(B.company)}"></label></div>
-      <label>Instructions <small class="dim">- what it does at work and how; it follows them in every work chat</small>
-        <textarea class="input wk-instr" rows="7" maxlength="8000" placeholder="Answer questions about our clinic and book appointments: ask for the name, a phone number and a time that suits. Never give medical advice - suggest calling us instead.">${esc(B.instructions)}</textarea>
+        <label>Works for<input class="input wk-company" maxlength="80" placeholder="You — or your business's name" value="${esc(B.company)}"></label></div>
+      <label>Instructions <small class="dim">— what it does at work and how; it follows them in every work chat</small>
+        <textarea class="input wk-instr" rows="7" maxlength="8000" placeholder="Answer questions about our clinic and book appointments: ask for the name, a phone number and a time that suits. Never give medical advice — suggest calling us instead.">${esc(B.instructions)}</textarea>
         <small class="wk-count" data-count="instr">${num(B.instructions.length)} / 8,000</small></label>
       <div class="wk-row"><span class="wk-lab">Tone</span><div class="seg wk-tones" role="radiogroup" aria-label="Tone">${TONES.map(([k, l, t]) => `<button type="button" class="btn small${B.tone === k ? ' on' : ''}" data-tone="${k}" role="radio" aria-checked="${B.tone === k}" title="${esc(t)}">${l}</button>`).join('')}</div></div>
     </div>
     <div class="st-sec"><div class="st-sec-h"><h4>📚 What it knows</h4></div>
-      <p class="hint">Facts it answers from - hours, prices, services, policies, who to ask. All of it goes with every work message.</p>
+      <p class="hint">Facts it answers from — hours, prices, services, policies, who to ask. All of it goes with every work message.</p>
       <textarea class="input wk-know" rows="5" placeholder="Open 9 to 5, Monday to Friday. A cleaning is $90. Parking is behind the building.">${esc(B.knowledge)}</textarea>
       <ul class="wk-files">${files}${st.adding ? `<li class="wk-file adding"><span class="wk-fi" aria-hidden="true">📄</span><span>${esc(st.adding)}</span><small>Reading it…</small></li>` : ''}</ul>
       <div class="wk-row"><button type="button" class="btn small" data-c="add-file"${st.adding || D.files.length >= D.budget.maxFiles ? ' disabled' : ''}>📄 Add a file</button>
@@ -58,8 +58,8 @@ export async function workTab(C, body, live) {
       <div class="wk-budget"></div>
     </div>
     <div class="st-sec"><div class="st-sec-h"><h4>⚙ At work</h4></div>
-      <label>Its time zone <small class="dim">- for the real date and time it works by</small>${zoneOpts ? `<select class="input wk-tz">${zoneOpts}</select>` : `<input class="input wk-tz" maxlength="64" placeholder="Yours - or one like America/New_York" value="${esc(B.timezone)}">`}</label>
-      <label class="wk-check"><input type="checkbox" class="wk-keep"${B.notes ? ' checked' : ''}> Keeps work notes <small class="dim">- what's worth remembering from work chats (below)</small></label>
+      <label>Its time zone <small class="dim">— for the real date and time it works by</small>${zoneOpts ? `<select class="input wk-tz">${zoneOpts}</select>` : `<input class="input wk-tz" maxlength="64" placeholder="Yours — or one like America/New_York" value="${esc(B.timezone)}">`}</label>
+      <label class="wk-check"><input type="checkbox" class="wk-keep"${B.notes ? ' checked' : ''}> Keeps work notes <small class="dim">— what's worth remembering from work chats (below)</small></label>
       <div class="wk-row"><span class="wk-lab">New chats start in</span><div class="seg wk-modes" role="radiogroup" aria-label="New chats start in">${[['work', 'Work'], ['life', 'Life']].map(([k, l]) => `<button type="button" class="btn small${B.defaultMode === k ? ' on' : ''}" data-mode="${k}" role="radio" aria-checked="${B.defaultMode === k}">${l}</button>`).join('')}</div></div>
     </div>
     <div class="st-sec"><div class="st-sec-h"><h4>🧾 Its work notes</h4><span class="st-pill">${D.notes.length}</span></div>
@@ -83,7 +83,7 @@ export async function workTab(C, body, live) {
     const chars = q('.wk-know').value.length + D.files.reduce((n, f) => n + (f.chars || 0), 0), max = D.budget.maxChars, over = chars > max;
     const pdf = D.budget.pdf;
     q('.wk-budget').innerHTML = `<div class="st-meter${over ? ' over' : ''}"><i style="width:${Math.min(100, Math.round(chars / max * 100))}%"></i></div>
-      <small class="${over ? 'bad' : 'dim'}">${num(chars)} of ${num(max)} characters${chars ? ` · about ${num(Math.ceil(chars / 4))} tokens with every work message` : ''}${pdf ? ` · PDFs ${mb(pdf)} of ${mb(D.budget.maxPdf)}` : ''}${over ? ' - too much: shorten it or remove a file' : ''}</small>`;
+      <small class="${over ? 'bad' : 'dim'}">${num(chars)} of ${num(max)} characters${chars ? ` · about ${num(Math.ceil(chars / 4))} tokens with every work message` : ''}${pdf ? ` · PDFs ${mb(pdf)} of ${mb(D.budget.maxPdf)}` : ''}${over ? ' — too much: shorten it or remove a file' : ''}</small>`;
   };
   budget();
   q('.wk-instr').oninput = () => { q('[data-count="instr"]').textContent = `${num(q('.wk-instr').value.length)} / 8,000`; dirty(); };

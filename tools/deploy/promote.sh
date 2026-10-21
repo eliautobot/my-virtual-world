@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 # Promotes a tagged release to live: build → test → stop → back up → switch → start → smoke test.
 # If the new release fails its checks, the data backup and the previous release are restored automatically.
 # Usage: tools/deploy/promote.sh <tag> [--skip-tests] [--redistribute-population]

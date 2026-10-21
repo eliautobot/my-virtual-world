@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Motion plans: the server builder and evaluator (server/sim/plan.js), the wire format and the client evaluator
 // (shared/proto.js). Every client must place every resident exactly where the server planned it.
 import assert from 'node:assert/strict';

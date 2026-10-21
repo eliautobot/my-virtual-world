@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The economy over HTTP (server/economy/; docs/features/ECONOMY.md): switched off until the owner turns it on (genesis:
 // every wallet with its starting money); players pay each other and ask to be paid, within limits, with the password
 // again for large amounts; nobody spends someone else's money; administrators grant, correct and freeze with a reason;

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Visitors chatting with someone else's connected agent (PLAN WP2.14; DECISIONS C119, C127, C128, C129; CHECKLIST I8.15): who may chat
 // follows the owner's audience setting, each visitor has a private session, visitors are limited and can be blocked and can report,
 // they never see the agent's tools or what it asks its owner, and only the owner answers approvals.
@@ -106,7 +106,7 @@ test('a visitor sees the answer but not the agent\'s tools or what it asks its o
   const end = await events(cy, r.json.runId); assert.equal(end.done, true); assert.equal(end.events.at(-1).event.text, 'Left the build folder alone');
 });
 
-test('a visitor is limited per conversation and per day - the same "talk" settings as walking up to an agent; the owner is not (C128)', async () => {
+test('a visitor is limited per conversation and per day — the same "talk" settings as walking up to an agent; the owner is not (C128)', async () => {
   assert.equal((await owner.post('/api/settings', { values: { 'talk.maxMessages': 6 } })).status, 200);
   const runs = [];
   for (let i = 0; i < 6; i++) { const r = await write(dee, `m${i}`, `S${i}`); assert.equal(r.status, 200, `${i}: ${r.text}`); runs.push(r.json.runId); }

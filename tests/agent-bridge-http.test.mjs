@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent in the agent list, over HTTP on a real server (PLAN WP2.14; DECISIONS E22, E23, C127; CHECKLIST I8.14, I8.15):
 // it appears as an agent with its own record once enrolled, follows its slot (name, revoke, enrol again), shows offline until it has a
 // session, is never counted by the demo limit, and stays hidden from everybody its owner has not let see it: guests, strangers and
@@ -124,7 +124,7 @@ test('the server-made connection cannot be added, changed or removed by hand, an
     const r = await ann.post(p, { id: mine[0].id, label: 'x' });
     assert.equal(r.status, 409, `${p}: ${r.text}`); assert.equal(r.json.code, 'managed_by_system');
   }
-  // (its owner manages it in its Agent Studio - its look, role, life - but its name and disconnecting it are its slot's, and
+  // (its owner manages it in its Agent Studio — its look, role, life — but its name and disconnecting it are its slot's, and
   // who may chat with it is the slot's audience: no "use" share; 2026-10-11)
   for (const [p, b, code] of [['/api/agents/update', { id: S.id, name: 'Hacked' }, 'connected_agent'], ['/api/agents/remove', { id: S.id }, 'connected_agent'], ['/api/agents/share', { id: S.id, kind: 'account', who: '3', level: 'use' }, 'connected_share']]) {
     const r = await ann.post(p, b);

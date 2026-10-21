@@ -1,5 +1,5 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Agent Providers (docs/features/agent-providers.md): the server's side of the live provider connections - OpenClaw
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Agent Providers (docs/features/agent-providers.md): the server's side of the live provider connections — OpenClaw
 // first. A kind whose manifest says live: true keeps a connection open in the provider helper (its adapter); this:
 // - opens every enabled one when the helper (re)starts, and again whenever the connection is changed; closes it when it
 //   is switched off or removed;
@@ -88,7 +88,7 @@ export class AgentProviders {
     this.connections.setSystemSecret(c.id, m.field, m.value);
   }
   /** The server is shutting down: what the helper still reports as it closes (every link going offline) is not
-   *  recorded - the database is closing, and the next start finds the true state. */
+   *  recorded — the database is closing, and the next start finds the true state. */
   stop() { this.stopped = true; }
   onStatus(e) {
     if (this.stopped) return;
@@ -161,7 +161,7 @@ export class AgentProviders {
   // ---------------------------------------------------------------- their bodies in the city
   /**
    * The city's body hooks ({ spawn, retire, revive, rename, state }: server/index.mjs, the same as a connected agent's): from
-   * now on every listed agent of a provider lives in the city - a home, a desk, a routine, like an agent made here - and
+   * now on every listed agent of a provider lives in the city — a home, a desk, a routine, like an agent made here — and
    * one the provider no longer lists retires. The agents already listed get theirs now.
    */
   useBodies(body) {
@@ -207,7 +207,7 @@ export class AgentProviders {
   }
   /**
    * One call of a provider's sub-menu (its settings, agents, skills, automations…): for whoever manages the connection
-   * only; the adapter takes only its listed calls; a change (manifest menuWrite) is recorded in the audit log - which call,
+   * only; the adapter takes only its listed calls; a change (manifest menuWrite) is recorded in the audit log — which call,
    * on which connection, never what it carried. The agents are listed again after a change to them.
    */
   async menu(P, id, method, params, actor = null) {
@@ -230,7 +230,7 @@ export class AgentProviders {
    * What of an agent's own computer its owner's PC may show this person: the computer its provider lives on (OpenClaw:
    * the agent's workspace and its documents; Hermes: Hermes' managed files), its provider's browser and its own screen
    * (Hermes' Bot Desktop). Null for an agent
-   * made here, one whose provider is off or can't, and anyone who doesn't manage its provider - the files and browser of
+   * made here, one whose provider is off or can't, and anyone who doesn't manage its provider — the files and browser of
    * an agent platform are its managers' (as its sub-menu is).
    */
   computerOf(P, a) {
@@ -240,13 +240,13 @@ export class AgentProviders {
     const chatOnly = this.params(c).config.access === 'chat';
     return { kind: c.kind, label: m.label, connection: c.id, where: m.computer.where, docs: !!m.computer.docs,
       write: !chatOnly && m.computer.writes.length > 0, browser: !!m.capabilities.browser,
-      // (its own screen - Hermes' Bot Desktop, where its browser opens: Full access, as it is its machine's)
+      // (its own screen — Hermes' Bot Desktop, where its browser opens: Full access, as it is its machine's)
       ...(m.capabilities.screen && !chatOnly ? { screen: true } : {}) };
   }
   /**
-   * One call on an agent's own computer: { op, params } - only its manifest's listed calls (computer.ops); change: true
+   * One call on an agent's own computer: { op, params } — only its manifest's listed calls (computer.ops); change: true
    * for one that changes something (computer.writes: only those then, and only on a connection with Full access; recorded
-   * in the audit log - which call, on which connection and agent, never a path or what it carried), false for a reading
+   * in the audit log — which call, on which connection and agent, never a path or what it carried), false for a reading
    * (never one of those). Errors come back as ProviderError, in the provider's words.
    */
   async computer(P, a, op, params = {}, actor = null, { change = false } = {}) {
@@ -274,7 +274,7 @@ export class AgentProviders {
   }
   /**
    * Removes a provider connection, telling the truth about its device: first the device takes itself off the provider
-   * (the adapter's forget, while the link is still signed in - covered by operator.admin for OpenClaw), then the
+   * (the adapter's forget, while the link is still signed in — covered by operator.admin for OpenClaw), then the
    * connection goes (its agents with it). `unpaired`: whether the provider confirmed it; if not, the person revokes it there.
    */
   async remove(P, id, actor = null) {

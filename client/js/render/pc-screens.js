@@ -1,13 +1,13 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Agents' PCs on their screens in the world (docs/features/agent-pc.md §2): for the signed-in person's OWN agents only,
-// each agent's PC screen itself on the screen it is at - its desk's monitor, the laptop it types on (a café, a park, at
+// each agent's PC screen itself on the screen it is at — its desk's monitor, the laptop it types on (a café, a park, at
 // home), its home desk: its desktop and the window it has open with what is in it now (the file it writes, typed in as
-// it writes it; a picture; a web page; its board, its week, its terminal - ./pc-draw.js), its desktop while it sits
-// idle, its lock screen while it is away - and, on the floor where a team works (its lead's desk), the team's board on
-// the wall screens. Nothing of a PC reaches another account (server/pc/): every other screen - someone else's desk, an
-// empty one, a stranger's laptop - shows a plain PC screen (its wallpaper and the time, ./pc-draw.js drawPlainScreen), so
+// it writes it; a picture; a web page; its board, its week, its terminal — ./pc-draw.js), its desktop while it sits
+// idle, its lock screen while it is away — and, on the floor where a team works (its lead's desk), the team's board on
+// the wall screens. Nothing of a PC reaches another account (server/pc/): every other screen — someone else's desk, an
+// empty one, a stranger's laptop — shows a plain PC screen (its wallpaper and the time, ./pc-draw.js drawPlainScreen), so
 // a room's screens look alike from any side. Mine in view are live (up to LIVE agents' screens, TVS boards), each keeping
-// its canvas while it stays in view, drawn only when what is on it changes (and while it types) - a few a frame, nearest
+// its canvas while it stays in view, drawn only when what is on it changes (and while it types) — a few a frame, nearest
 // first, the far ones at half size. Each step it takes stays up a moment (DWELL), so a burst of commands is seen one
 // after another. A click on one uses that PC right there (ui/pc-onscreen.js).
 import * as THREE from 'three';
@@ -38,7 +38,7 @@ const _sph = new THREE.Sphere(new THREE.Vector3(), IN_VIEW);
 const ray = new THREE.Raycaster();
 
 // the laptop a character types on, in the frame of its 'desk' point (render/char-props.js laptop(): hinged at the table's
-// far edge, the lid leaning back 0.26, its picture 0.304 × 0.202 facing the person) - drawn over by a quad facing +z
+// far edge, the lid leaning back 0.26, its picture 0.304 × 0.202 facing the person) — drawn over by a quad facing +z
 const TABLE = -0.004;
 const LAP_IN_DESK = new THREE.Matrix4().makeTranslation(0, TABLE, 0.075).multiply(new THREE.Matrix4().makeRotationX(0.26))
   .multiply(new THREE.Matrix4().makeTranslation(0, 0.113, -0.0012)).multiply(new THREE.Matrix4().makeRotationY(Math.PI)).multiply(new THREE.Matrix4().makeScale(0.304, 0.202, 1));
@@ -133,7 +133,7 @@ export class PcScreens {
       const sc = SCREENS[it.t];
       if (!sc) continue;
       const w = toWorld(B, it.x, it.z), M = new THREE.Matrix4().makeRotationY(bRot(B) + (it.r || 0)).setPosition(w.x, y, w.z);
-      // (each of its screens; plain: none is anyone's PC - a meeting table's laptops)
+      // (each of its screens; plain: none is anyone's PC — a meeting table's laptops)
       sc.quads.forEach((Q, k) => this.items.push({ t: it.t, id: it.id, kind: sc.kind, M: M.clone().multiply(Q), x: w.x, z: w.z, b, f, ...(k || sc.plain ? { plain: true } : {}) }));
     }
     return this.items;
@@ -163,20 +163,20 @@ export class PcScreens {
     return null;
   }
   /** The world matrix of the laptop on the table in front of resident i (char-props.js deskPoint: its model's desk point
-   *  for its height and build, on the top of the table there (Characters.deskRoot), turned by its heading - the same as
+   *  for its height and build, on the top of the table there (Characters.deskRoot), turned by its heading — the same as
    *  the characters place it). */
   laptopMatrix(i) {
     const ag = this.app.agents, ch = ag.chars, kind = ch.kindOf?.[i], desk = ch.props?.desks?.[kind];
     if (!desk || !ch.appData) return null;
     const base = (i >> 7) * 4096 + (i & 127) * 32;
-    // (bytes, read by the shader as 0 … 1: its height in slot 0's alpha, its build in slot 6's - shared/appearance.js packAppearance)
+    // (bytes, read by the shader as 0 … 1: its height in slot 0's alpha, its build in slot 6's — shared/appearance.js packAppearance)
     const H = 0.8 + ((ch.appData[base + 3] || 0) / 255) * 0.4, Bd = 0.8 + ((ch.appData[base + 27] || 0) / 255) * 0.45;
     const r = ch.deskRoot ? ch.deskRoot(kind, i, ag.rx[i], ag.ry[i], ag.rz[i], ag.yaw[i], _root) : [ag.rx[i], ag.ry[i], ag.rz[i]];
     _m.makeRotationY(ag.yaw[i]).setPosition(r[0], r[1], r[2]);
     _q.makeTranslation(...deskPoint(desk, H, Bd));
     return new THREE.Matrix4().multiplyMatrices(_m, _q).multiply(LAP_IN_DESK);
   }
-  /** Each team's office: the floor its lead works on (else its first member with a desk) - its wall screens show its board. */
+  /** Each team's office: the floor its lead works on (else its first member with a desk) — its wall screens show its board. */
   officeOf(t) {
     const ms = [...t.members].sort((x, y) => (x.role === 'lead' ? 0 : 1) - (y.role === 'lead' ? 0 : 1));
     for (const m of ms) { const a = this.mine.get(m.agent); if (a?.desk) return { b: a.desk.b, f: a.desk.f }; }
@@ -197,7 +197,7 @@ export class PcScreens {
     this.updatePlain(clock, t, cp, covered, coveredAt);
   }
   /** My agents' screens in view, nearest first: each keeps its canvas while it stays in view (nothing is drawn again for
-   *  moving the camera), drawn again when what it shows changes - a few a frame. */
+   *  moving the camera), drawn again when what it shows changes — a few a frame. */
   updateLive(fr, cp, clock, blink, t, covered, coveredAt) {
     const cand = [];
     for (const a of this.mine.values()) {
@@ -212,7 +212,7 @@ export class PcScreens {
     }
     cand.sort((x, y) => x.d - y.d);
     const keep = cand.slice(0, LIVE), want = new Set(keep.map(c => c.a.id));
-    // (an Agent Providers' agent's screen live here: its work elsewhere is followed onto it meanwhile - ui/pc-watch.js)
+    // (an Agent Providers' agent's screen live here: its work elsewhere is followed onto it meanwhile — ui/pc-watch.js)
     const prov = keep.filter(c => c.a.own).map(c => c.a.id).sort((x, y) => x - y).join(',');
     if (prov !== this.watching) { this.watching = prov; watchScreens('world', prov ? prov.split(',') : []); }
     for (const [id, k] of this.slots) if (!want.has(id)) { this.slots.delete(id); const L = this.pool[k]; L.mesh.visible = false; L.mesh.userData = {}; L.owner = null; L.sig = ''; }
@@ -229,12 +229,12 @@ export class PcScreens {
       L.mesh.matrix.copy(c.q.M); L.mesh.matrixWorldNeedsUpdate = true;
       L.mesh.userData = { agent: c.a.id, quad: c.q };
       const st = c.a.cur ?? c.a.screen ?? null, state = !c.q.live ? 'away' : st && t - st.at < ACTIVE_MS ? 'active' : 'idle';
-      // (drawn again when what it shows changes, the minute turns, a picture arrives - and every frame while it types)
-      // (a real browser on it - built-in or its provider's - is live: its picture is read again as it is drawn again)
+      // (drawn again when what it shows changes, the minute turns, a picture arrives — and every frame while it types)
+      // (a real browser on it — built-in or its provider's — is live: its picture is read again as it is drawn again)
       const moving = state === 'active' && (isTyping(st, c.a.since, t) || (st.view?.kind === 'chat' && !st.view.done) || st.view?.kind === 'terminal'
         || (st.view?.kind === 'page' && (st.view.live || st.view.provider)));
       const sig = `${c.a.id}|${st?.at || 0}|${c.a.since}|${state}|${clock}|${c.q.kind}|${half}|${this.assetV}|${moving ? `${blink}|${isTyping(st, c.a.since, t) ? Math.floor(t / 50) : Math.floor(t / 400)}` : ''}`;
-      // (one newly in view is drawn at once - never shown with what its canvas had before; the others take turns)
+      // (one newly in view is drawn at once — never shown with what its canvas had before; the others take turns)
       if (sig !== L.sig && (L.owner !== c.a.id || draws < DRAWS)) {
         L.sig = sig; draws++;
         drawPcScreen(L.ctx, { W: L.cv.width, H: L.cv.height, agent: c.a, st, state, clock, kind: c.q.kind, now: t, since: c.a.since, blink, image: url => this.image(url) });
@@ -264,7 +264,7 @@ export class PcScreens {
     for (; k < TVS; k++) this.pool[LIVE + k].mesh.visible = false;
   }
   /**
-   * Every other screen - the desks of the floor looked into that no live screen is on (someone else's, an empty one, one
+   * Every other screen — the desks of the floor looked into that no live screen is on (someone else's, an empty one, one
    * of mine beyond the live ones) and the laptops strangers type on near the camera: the plain screen, one picture for
    * each shape (drawn again when the minute turns), one draw for them all.
    */
@@ -311,15 +311,15 @@ export class PcScreens {
     if (busy) return;
     a.cur = a.queue.shift(); a.since = t;
   }
-  /** A picture for a screen: its address (its file, a browser service's screen), or provider-browser:<agent> - the
-   *  picture its provider's browser shows now, provider-screen:<agent> - its own screen's (Hermes' Bot Desktop), or
-   *  pc-browser:<agent> - its built-in real browser's (each read again every second while it is on a screen). null while
+  /** A picture for a screen: its address (its file, a browser service's screen), or provider-browser:<agent> — the
+   *  picture its provider's browser shows now, provider-screen:<agent> — its own screen's (Hermes' Bot Desktop), or
+   *  pc-browser:<agent> — its built-in real browser's (each read again every second while it is on a screen). null while
    *  it loads. */
   image(url) {
     const e = this.assets.get(url), t = Date.now();
     const stale = e && /^(provider-browser|provider-screen|pc-browser):/.test(url) && t - e.at > LIVE_FRAME_MS;
     if (e && (e.img || e.loading) && !stale) return e.img;
-    // (one that couldn't be had - a picture its provider won't show from where it is: not asked again for a while)
+    // (one that couldn't be had — a picture its provider won't show from where it is: not asked again for a while)
     if (e && !e.img && e.missed && t - e.at < MISSED_MS) return null;
     if (e?.loading) return e.img;
     const entry = e || { img: null, at: 0, loading: false };
@@ -330,11 +330,11 @@ export class PcScreens {
         let blob = null;
         const m = /^provider-browser:(\d+)$/.exec(url), pcb = /^pc-browser:(\d+)$/.exec(url), scr = /^provider-screen:(\d+)$/.exec(url);
         if (scr) {
-          // (its own screen now: one picture of it - none while it is off, or while a person has control)
+          // (its own screen now: one picture of it — none while it is off, or while a person has control)
           const r = await fetch(`/api/providers/screen/thumb?agent=${scr[1]}`, { credentials: 'same-origin', cache: 'no-store' });
           if (r.status === 200) blob = await r.blob();
         } else if (pcb) {
-          // (its built-in browser's newest picture - asking keeps its live picture running while it is on a screen)
+          // (its built-in browser's newest picture — asking keeps its live picture running while it is on a screen)
           const r = await fetch(`/api/pc/browser/frame?agent=${pcb[1]}&after=0&wait=0`, { credentials: 'same-origin', cache: 'no-store' });
           if (r.status === 200) blob = await r.blob();
         } else if (m) {

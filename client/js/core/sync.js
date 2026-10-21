@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // World sync: applies server patches (levels, buildings, people), presence + speech events, and reloads when the
 // world changed while this client was disconnected.
 import { S, bus, setFocus, selectBuilding } from './state.js';
@@ -21,7 +21,7 @@ export function init(a) {
   bus.on('msg:say', m => { S.says.set(m.i, { text: m.text, until: m.until }); bus.emit('say', m); });
   bus.on('hello', m => {
     if (S.version && m.version && m.version !== S.version) {
-      app.toast?.('The city changed while you were away - reloading…');
+      app.toast?.('The city changed while you were away — reloading…');
       setTimeout(() => location.reload(), 1500);
     }
   });

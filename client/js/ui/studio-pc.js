@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The Agent Studio's PC tab (docs/features/agent-pc.md): the agent's own PC (./pc-app.js) - its files, board, calendar,
-// browser, teams, activity, terminal and settings - with a button for the PC in its own big window.
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The Agent Studio's PC tab (docs/features/agent-pc.md): the agent's own PC (./pc-app.js) — its files, board, calendar,
+// browser, teams, activity, terminal and settings — with a button for the PC in its own big window.
 import { bus } from '../core/state.js';
 import { mountPc, openPcWindow } from './pc-app.js';
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The characters' portraits (the Agent Studio's Customize tab): every character's head and shoulders, 160×200, on a
 // transparent background, from client/dev/portrait.html in a headless browser → client/assets/chars/portraits/<id>.webp.
 // Run again after a character's model or textures change:  node tools/chars/portraits.mjs [ids…]

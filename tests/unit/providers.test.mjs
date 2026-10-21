@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The provider core (server/providers/*, PLAN WP2.2; DECISIONS A9, C120; CHECKLIST X12): manifests, the normalized event
 // bus, the registry, and the supervised helper process, exercised with the mock provider.
 import assert from 'node:assert/strict';

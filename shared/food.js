@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Food and drink (2026-10-07, "when an agent gets a dessert it's an actual dessert"): every item a café, a restaurant
-// or a home kitchen makes - its name, category, course, price, what it uses from the Global Market and, for drinks, the
-// glass it comes in - and the kinds of place that serve them (a burger joint serves burgers, a seafood restaurant seafood).
+// or a home kitchen makes — its name, category, course, price, what it uses from the Global Market and, for drinks, the
+// glass it comes in — and the kinds of place that serve them (a burger joint serves burgers, a seafood restaurant seafood).
 // Each place has a kind (its cuisine) whose usual menu it starts with; its owner may change the kind and add or remove
 // any item (server/economy/businesses.js). The 3D model of every item: client/js/render/food-models.js.
 //
@@ -299,7 +299,7 @@ const ITEMS = [
 ];
 
 /**
- * How a dish is eaten (2026-10-07, "proper eating animations depending on the meal" - the clip and what is in the
+ * How a dish is eaten (2026-10-07, "proper eating animations depending on the meal" — the clip and what is in the
  * hands: client/js/render/char-props.js): 'hands' held in both (a burger, a sandwich, a wrap), 'hand' in one (a slice,
  * fries, a pastry), 'knife' (knife and fork), 'fork', 'spoon', 'sticks' (chopsticks). Drinks are sipped (no way). The
  * category's way unless the dish has its own.
@@ -483,7 +483,7 @@ export function pickOrder(menu, occasion, hour, r) {
 }
 
 /**
- * How a visit's order is served, as courses over the time at the table: [{ f: share of the time, item, sip }] - the
+ * How a visit's order is served, as courses over the time at the table: [{ f: share of the time, item, sip }] — the
  * drink alone first (sipped), then the starter, the main, the dessert (each on the table, the drink beside it); a lone
  * drink is sipped throughout; two drinks one after the other. sip: the drink is in the hand.
  */
@@ -515,7 +515,7 @@ const HOME = {
 };
 /**
  * What a home's kitchen and seats allow (2026-10-08: "food type and seating type need to go hand in hand"): a dish
- * cooked on a stove only with a stove (ON_STOVE - a home without one makes something cold at the counter); without a
+ * cooked on a stove only with a stove (ON_STOVE — a home without one makes something cold at the counter); without a
  * table only a dish eaten in the hands (shared/food.js eat 'hands' | 'hand', on the sofa or standing). The meal's own
  * list first, then the cold and the hand-held ones.
  */
@@ -531,7 +531,7 @@ export const onStove = id => ON_STOVE.has(id);
 /** Is dish id eaten in the hands (no table needed)? */
 export const byHand = id => { const it = FOOD_BY_ID[id]; return !!it && (it.eat === 'hands' || it.eat === 'hand'); };
 /**
- * A home meal: [dish, drink?] ids. hour 0..24; r(tag) as in pickOrder; home: { stove, table } (false: the home has none -
+ * A home meal: [dish, drink?] ids. hour 0..24; r(tag) as in pickOrder; home: { stove, table } (false: the home has none —
  * by default it has both).
  */
 export function homeMeal(hour, r, home = {}) {

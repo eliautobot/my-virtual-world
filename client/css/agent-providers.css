@@ -1,5 +1,5 @@
-/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
-/* Agent Providers (client/js/ui/agent-providers.js): the top bar's button and its window - the providers on the left,
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* Agent Providers (client/js/ui/agent-providers.js): the top bar's button and its window — the providers on the left,
    the chosen one's page on the right. The window is the big windows' size (theme.css --win-w, --win-h), like the Agent
    Studio's. State colours: ok (connected), busy (connecting), wait (waiting for approval), bad (needs attention), off. */
 

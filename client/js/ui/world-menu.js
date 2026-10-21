@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Actions on things in the world, where they are (2026-10-04: "a sub menu (right click or press and hold) to show
 // like edit building or modify ... the simplest yet most effective UI so that both desktop and phone work"):
 // - press and hold (touch) or right-click (mouse) on a building, a lot, a person or the ground opens a menu right there
-//   with what can be done to it - only what this account may do, the rest explained in one line;
+//   with what can be done to it — only what this account may do, the rest explained in one line;
 // - a selected building also gets a small bar of its main actions just above it in the world (⋯ opens the full menu),
 //   so nobody has to know about press-and-hold or open a drawer on a phone.
 // A ring fills under the finger while holding, so the gesture explains itself; a hold that moves becomes a pan.
@@ -175,7 +175,7 @@ async function act(a, t) {
       try {
         const r = await post('/api/edit', { ops: [{ op: 'bld.del', b: t.b }], who: 'web' });
         if (r && r.ok === false) throw new Error(r.error);
-        app.toast(`${B.name} was demolished - undo with ↶`, '', 3200); selectBuilding(-1);
+        app.toast(`${B.name} was demolished — undo with ↶`, '', 3200); selectBuilding(-1);
       } catch (err) { if (!err.quiet) app.toast(err.message || String(err), 'bad', 4000); }
       break;
     }

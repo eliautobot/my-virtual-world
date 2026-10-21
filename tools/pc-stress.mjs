@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Stress run for the agents' PC (docs/features/agent-pc.md): thousands of agents, each with its home, files of every
-// kind, tasks and events, in many accounts with teams - then agents at work through the command line. Measures how long
+// kind, tasks and events, in many accounts with teams — then agents at work through the command line. Measures how long
 // each kind of command takes (median, 95th percentile), commands per second, memory, and the disk taken against the
 // bytes the files hold (contents stored once and compressed), and checks every space's count of bytes.
 //   node tools/pc-stress.mjs [agents=5000] [files=12] [perAccount=10]

@@ -1,15 +1,15 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat window's voice (docs/features/CHAT.md §9.4), on the server's voice (§9.3):
 // - 🎤 dictation in the composer: a recording heard by the voice service, or the browser's own recognition (its choice,
 //   none set up, the plan's minutes used); the words go where the cursor was.
 // - 🔊 read aloud under every answer: the answer's parts from the voice service in turn, each fetched while the one before
 //   plays; Stop. When the browser is to read it, the browser's own voice reads the text the server made pronounceable.
-// - 🎧 voice mode: a conversation right in the chat (2026-10-08: no window of its own) - listening, the end of talking
+// - 🎧 voice mode: a conversation right in the chat (2026-10-08: no window of its own) — listening, the end of talking
 //   found from a second of quiet (or a tap on its status), thinking, then the answer spoken sentence by sentence while it
 //   is still being written; what is said shows in the chat as messages. 🎧 again ends it; 🎤 mutes and unmutes; its status
 //   beside them says what it is doing (tap: done talking, interrupt, talk). It never stops mid-conversation: when the
 //   plan's minutes run out or a service fails, the browser's own voice and recognition carry on.
-// - Seen while it talks (2026-10-08): a blue glow that pulses with the sound - the voice mode button, the top edge of
+// - Seen while it talks (2026-10-08): a blue glow that pulses with the sound — the voice mode button, the top edge of
 //   the message box and the agent's name over its head in the world in voice mode; for read aloud, its name in the world
 //   and the blue stop square of the answer being read (not the voice mode button).
 // chat.js owns the window and hands over a host: who the agent is, the open chat, sending a message, Stop, the answer.
@@ -45,10 +45,10 @@ async function modesFor(agentId) {
 }
 
 /** Wires voice into the window. host: { el, agentId, agent, session, input, grow, paintSend, toast, say(text), stop(), run(),
- *  claimVoice() - it begins to listen or speak: the other chat windows stop theirs }. */
+ *  claimVoice() — it begins to listen or speak: the other chat windows stop theirs }. */
 export function attach(host) {
   const V = { D: null, RA: null, VM: null };
-  // (the window's element, kept: as the window closes, what stops - reading, a conversation - still finds its parts)
+  // (the window's element, kept: as the window closes, what stops — reading, a conversation — still finds its parts)
   const root = host.el;
   const box = root.querySelector('.cw-box');
   const strip = box.appendChild(h(`<div class="cw-rec hidden" role="group" aria-label="Dictation">
@@ -226,7 +226,7 @@ export function attach(host) {
   }
 
   // ---------------------------------------------------------------------------------------------- the blue glow
-  // While it talks - voice mode, or an answer read aloud - the glow follows how loud it is, every frame: in voice mode
+  // While it talks — voice mode, or an answer read aloud — the glow follows how loud it is, every frame: in voice mode
   // the 🎧 button, the top edge of the message box and its name in the world; reading aloud, its name in the world and
   // the answer's blue stop square. The page's own frames, only while one of them is on.
   function glowOn() { if (!V.raf) V.raf = requestAnimationFrame(glowFrame); }
@@ -259,7 +259,7 @@ export function attach(host) {
 
 // ------------------------------------------------------------------------------------------------ voice mode
 const STATE_WORDS = { starting: 'Starting…', listening: 'Listening', heard: 'Listening…', hearing: 'Got it…', thinking: 'Thinking', speaking: 'Speaking', paused: 'Tap to talk', muted: 'Muted' };
-// (listening needs nothing from the person: it answers when they pause - 2026-10-08: "a natural back and forth, not
+// (listening needs nothing from the person: it answers when they pause — 2026-10-08: "a natural back and forth, not
 // requiring a click to send"; a tap on the status still sends at once, said in its tooltip)
 const ORB_LABEL = { listening: '', heard: '', hearing: '', thinking: 'tap to stop', speaking: 'tap to interrupt', paused: '', muted: 'unmute to talk', starting: '' };
 
@@ -371,7 +371,7 @@ class Conversation {
     else if (!on && (this.state === 'muted' || this.state === 'paused')) this.listen();
   }
   /** Stops listening; between turns a computer keeps the microphone open (the next turn starts at once), a phone lets it
-   *  go (it plays sound quietly while one is open) - and muted or resting, every device lets it go (its light goes off). */
+   *  go (it plays sound quietly while one is open) — and muted or resting, every device lets it go (its light goes off). */
   stopEars(release = false) {
     clearInterval(this.loop); this.loop = null;
     this.mic?.cancel(); this.ear?.abort(); this.ear = null;
@@ -439,7 +439,7 @@ class Conversation {
       if ((e.code === 'use_browser' || e.fallback === 'browser') && can.recognize()) {
         // minutes used, or the service is down: the browser listens from now on
         this.m.listen = 'browser'; this.src();
-        this.note(`${e.message}. The browser listens now - say that again.`);
+        this.note(`${e.message}. The browser listens now — say that again.`);
         return this.listen();
       }
       this.note(e.message);

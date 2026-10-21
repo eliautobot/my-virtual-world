@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat window's Markdown (client/js/ui/chat-md.js; docs/features/CHAT.md §7): what an agent writes becomes safe
-// HTML - every character escaped first, only the renderer's own tags, links only to http(s) and mailto - and the usual
+// HTML — every character escaped first, only the renderer's own tags, links only to http(s) and mailto — and the usual
 // shapes render: headings, lists (nested, numbered from their start, task boxes), quotes, tables with alignment, fenced
 // code (also unfinished, while it streams), bold, italic, strike, inline code, bare addresses.
 import assert from 'node:assert/strict';

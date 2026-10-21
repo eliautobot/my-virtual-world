@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What an AI app can do as the person's agent (./mcp.js tools/list and tools/call). Every tool runs one or more of the
-// world's own routes through invoker() - the same capability checks, validation, ownership checks and limits as the
-// person's browser - as the person (the grant's account, with no browser session: nothing that needs a fresh password,
+// world's own routes through invoker() — the same capability checks, validation, ownership checks and limits as the
+// person's browser — as the person (the grant's account, with no browser session: nothing that needs a fresh password,
 // and no upload or payment routes), always on the agent the person chose for this app. Nothing here spends money, sells
 // or gives property away: those are done by the person on the website. What the world says (names, notes, visitors'
 // words) is marked as information from other people, never instructions.
@@ -141,7 +141,7 @@ export const TOOLS = [
   },
   {
     name: 'inventory', title: 'What I hold',
-    description: 'The things in the person\'s inventory, or their agent\'s: fish (each with its length and weight), bait and lures, tackle, food and drink, goods, treasures - how many and what each is worth (Virtual Coin; value in hundredths). Giving and trading are done by the person on the website.',
+    description: 'The things in the person\'s inventory, or their agent\'s: fish (each with its length and weight), bait and lures, tackle, food and drink, goods, treasures — how many and what each is worth (Virtual Coin; value in hundredths). Giving and trading are done by the person on the website.',
     inputSchema: obj({ who: { type: 'string', enum: ['me', 'agent'], description: 'Whose: the person\'s (default) or their agent\'s' } }), annotations: RO,
     async run(c, a) {
       const r = await c.call('GET', '/api/inventory', a.who === 'agent' && c.agent ? { query: { agent: c.agent.id } } : {});
@@ -150,11 +150,11 @@ export const TOOLS = [
       return { whose: a.who === 'agent' ? 'agent' : 'me', spaces: `${j.used}/${j.max}`, value: j.value, items: (j.stacks || []).slice(0, 100).map(x => { const d = itemOf(x.item); return { name: d?.name || x.item, category: d?.cat, qty: x.qty, value: itemValue(d, x.attrs), ...(x.attrs?.cm ? { cm: x.attrs.cm, kg: x.attrs.kg } : {}) }; }) };
     },
   },
-  // its phone (docs/features/phone.md): the agent's own number - its texts, contacts and calls; a text it sends follows
+  // its phone (docs/features/phone.md): the agent's own number — its texts, contacts and calls; a text it sends follows
   // the rule its owner set for texts it starts (a draft for their OK by default, and only ever sent to a contact)
   {
     name: 'my_phone', title: 'My phone',
-    description: 'Your agent\'s phone, if it has one: its number, what is new (unread texts, missed calls, drafts waiting for the person\'s OK) and its rules - which texts reach it, and whether a text it sends goes at once or waits for the person\'s OK.',
+    description: 'Your agent\'s phone, if it has one: its number, what is new (unread texts, missed calls, drafts waiting for the person\'s OK) and its rules — which texts reach it, and whether a text it sends goes at once or waits for the person\'s OK.',
     inputSchema: obj(), annotations: RO,
     async run(c) {
       const r = await c.call('GET', '/api/phone', { query: { agent: c.agent.id } });
@@ -195,10 +195,10 @@ export const TOOLS = [
     run: async c => ({ ...(await c.call('GET', '/api/phone/calls', { query: { agent: c.agent.id } })).json, note: UNTRUSTED }),
   },
   {
-    // its PC (docs/features/agent-pc.md): the same command line its built-in brain uses - its own home and its teams'
+    // its PC (docs/features/agent-pc.md): the same command line its built-in brain uses — its own home and its teams'
     // folders, task boards and calendars, never its owner's other agents; the folder it is in carries over for 15 minutes
     name: 'pc', title: 'My PC', textOut: true,
-    description: 'Your own computer in My Virtual World: files (~ is your home, /teams/<team> a team\'s shared folder), task boards and calendars. Give one or more commands in "run", one per line - ls, read <file>, write <file> (the text in "text"), append, edit <file> (with "find" and "replace"), mkdir, mv, cp, rm, find <words>, tasks, task add "<title>" --to <agent> --due <when> --on <board>, task <id> doing|review|done|note "…", cal, cal add "<title>" <when>, team, whoami, help. Start with: whoami',
+    description: 'Your own computer in My Virtual World: files (~ is your home, /teams/<team> a team\'s shared folder), task boards and calendars. Give one or more commands in "run", one per line — ls, read <file>, write <file> (the text in "text"), append, edit <file> (with "find" and "replace"), mkdir, mv, cp, rm, find <words>, tasks, task add "<title>" --to <agent> --due <when> --on <board>, task <id> doing|review|done|note "…", cal, cal add "<title>" <when>, team, whoami, help. Start with: whoami',
     inputSchema: obj({ run: text('One or more PC commands, one per line', 20000), text: text('The text for write or append', 1048576), find: text('For edit: the exact words now', 100000), replace: text('For edit: the new words', 100000) }, ['run']),
     annotations: WRITE,
     run: async (c, a) => c.call('POST', '/api/pc/shell', { body: { agent: c.agent.id, run: a.run, session: 'mcp', ...(a.text !== undefined ? { text: a.text } : {}), ...(a.find !== undefined ? { find: a.find } : {}), ...(a.replace !== undefined ? { replace: a.replace } : {}) } }),
@@ -229,7 +229,7 @@ export function toolSet(ctx) {
       const routed = out && typeof out.status === 'number' && 'json' in out;
       if (routed && out.status >= 400) return { content: [{ type: 'text', text: `${out.json?.error || 'Refused'} (${out.json?.code || out.status})` }], structuredContent: out.json || {}, isError: true };
       const data = routed ? out.json : out;
-      // (a tool that answers in words - its PC's command line - gives them as they are, not as JSON)
+      // (a tool that answers in words — its PC's command line — gives them as they are, not as JSON)
       if (t.textOut && data && typeof data.text === 'string') return { content: [{ type: 'text', text: data.text }], structuredContent: data };
       return { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data && typeof data === 'object' ? data : { value: data } };
     },

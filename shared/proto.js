@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Motion-plan wire format. The server sends each agent's plan once (piecewise-linear segments, absolute sim time);
 // every client evaluates positions locally each frame, so bandwidth scales with plan changes, not with frame rate.
 // Plan header 28 B: u32 idx | f64 base | f32 sx sy sz | u16 n | u16 dest ctx + 2
 // Segment   24 B: f32 dur | f32 x y z (end point) | i16 yaw*1e4 | u16 ctx+2 | u8 anim | u8 prop|flags<<4 | u8 use | u8 veh
-// veh (WP4.9/4.15): what carries a hidden traveller - 0 nothing drawn (a lift, the subway), VEH_CAR, VEH_BOAT. On a visible
+// veh (WP4.9/4.15): what carries a hidden traveller — 0 nothing drawn (a lift, the subway), VEH_CAR, VEH_BOAT. On a visible
 // segment the same byte is the food or drink item they have (shared/food.js number; 0 none): on their table, in their hand.
 import { normAngle } from './geom.js';
 

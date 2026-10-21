@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Taking over someone else's connected agent, over HTTP on a real server (server/agent-api.js, routes.js; 2026-10-11): a code
-// someone else saw (a screenshot, a shared chat, a log) is worth nothing without its owner's OK - the key it enrols waits, opens
+// someone else saw (a screenshot, a shared chat, a log) is worth nothing without its owner's OK — the key it enrols waits, opens
 // no session, puts nothing in the world, and its owner is told at once with the key to compare; the owner declines it and that key
 // is dead. Only the owner answers for the connection: not a stranger, not the installation's owner, not a person it is shared
 // with to manage. A disconnected key and a replayed login stay refused. The admin's switch turns the wait off for an

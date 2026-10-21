@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Twilio, for agents' phones (docs/features/phone.md): a person's or the installation's own Twilio account, called with its
 // own Account SID and Auth Token (or an API key and its secret). Runs inside the provider helper process (./host-main.mjs)
 // like the voice adapter: its environment holds none of the server's secrets and the credentials arrive with each call.
@@ -7,7 +7,7 @@
 // - api.twilio.com 2010-04-01: the account, its phone numbers (list, search, buy, change what a number does), Messages
 //   (send, list, one, its media), Calls (list, one, start with inline TwiML), Recordings and their Transcriptions.
 // - serverless.twilio.com v1 + serverless-upload.twilio.com: a small Twilio Function in the person's own account that
-//   answers their agents' numbers' calls (forward, voicemail) - Twilio fetches it at call time, so this server needs no
+//   answers their agents' numbers' calls (forward, voicemail) — Twilio fetches it at call time, so this server needs no
 //   public web address (server/phone/callfn.js holds its code).
 // Nothing is read from the server's network: every address is Twilio's own. Errors carry a code the server acts on
 // (auth, not_found, bad_request, rate_limited, quota, unsupported, timeout, network, provider_error) and words of our
@@ -127,7 +127,7 @@ export function makeTwilio({ fetchImpl = globalThis.fetch, hosts = HOSTS, timeou
   const one = o => { for (const [k, f] of Object.entries(o)) if (typeof f === 'function' && k !== 'setup' && k !== 'test') o[k] = p => f(p, p || {}); return o; };
   return one({
     manifest,
-    /** (the server's tests only: a fake Twilio on this machine - server/config.js twilioTestUrl) */
+    /** (the server's tests only: a fake Twilio on this machine — server/config.js twilioTestUrl) */
     setup(o = {}) { if (o.hosts) H = { ...H, ...o.hosts }; },
     /** The smallest real call: the account itself, and how many numbers it has. */
     async test(p) {

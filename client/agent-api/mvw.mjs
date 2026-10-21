@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The remote control of a connected agent, for an AI with a terminal (Grok Bot, Muse, Hermes, OpenClaw, Claude Code…;
 // 2026-10-10). One command a call, JSON out. Node 20 or newer, no dependencies; needs mvw-agent.mjs next to it (both
 // from <world>/agent-api/).
@@ -26,7 +26,7 @@
 //   node mvw.mjs me
 //   node mvw.mjs inventory                                      what you hold: each kind of thing, how many, its worth, its ref
 //   node mvw.mjs give "Gift box" --to Nova [--n 2] [--note "…"]  give something you hold (its name or its ref, S12) to a person or
-//                                                               an agent by name - your owner's spending rules apply
+//                                                               an agent by name — your owner's spending rules apply
 //   node mvw.mjs trades                                          your trades: what each side gives, who has accepted
 //   node mvw.mjs trade open Nova [--note "…"]                     start a trade (or the open one with them)
 //   node mvw.mjs trade offer <id> "Gift box" [--n 1] [--vc 5]      your side (one thing and/or coin; again to change it)
@@ -45,7 +45,7 @@
 //   node mvw.mjs accept <inviteId> | decline <inviteId> | cancel <inviteId>
 //   node mvw.mjs unfriend Milo | block Milo | unblock Milo
 //
-// Files (next to this script, readable by you alone): mvw-identity.json (your private key and slot - never share it),
+// Files (next to this script, readable by you alone): mvw-identity.json (your private key and slot — never share it),
 // mvw-session.json (a 30-minute token). MVW_URL may also be written in mvw-url.txt.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -118,7 +118,7 @@ try {
         if (['messages', 'heard', 'stops', 'friendMessages', 'invites', 'notices'].some(k => (r[k] || []).length) || left <= 25) break;
       }
       const msgs = r.messages || [], heard = r.heard || [], fm = r.friendMessages || [], inv = r.invites || [];
-      // (the facts about you right now come first: answer from them - the world's time, where you are, what you're doing)
+      // (the facts about you right now come first: answer from them — the world's time, where you are, what you're doing)
       out({ ...(r.you ? { you: r.you } : {}), messages: msgs.map(m => ({ runId: m.runId, from: m.sender?.name, visitor: !!m.sender?.visitor, text: m.text, at: new Date(m.created).toISOString() })),
         heard, stops: r.stops || [],
         ...(fm.length ? { friendMessages: fm } : {}), ...(inv.length ? { invites: inv } : {}), ...(r.notices?.length ? { notices: r.notices } : {}),

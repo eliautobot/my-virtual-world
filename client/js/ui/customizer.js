@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Character customizer: live 3D preview (render/char-preview.js: its own small renderer running the same instanced
 // character shader and rig), every appearance option and random looks. Edits residents (person.set), creates new ones (person.add) and
 // styles the player character (saved in this browser).

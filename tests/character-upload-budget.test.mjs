@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // With a renderer, each loaded model's maps and animation texture go to the GPU one per frame (from begin()) before
 // its meshes exist, so no single frame uploads a whole model. Without one, behaviour is unchanged.
 import test from 'node:test';

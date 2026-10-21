@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A connected agent's eyes, ears and hands (server/agent-world.js; 2026-10-10) on a generated city with a
 // virtual clock: look says where it is heading and when it arrives, names each place once, and shows its order; meet is an
 // order; a line said to someone near is heard by them (toYou) and wakes their mailbox, someone far is told how far; a
@@ -112,7 +112,7 @@ test('the open air is one space: the street and a park\'s grounds see and hear e
   assert.equal(R.w.sameSpace(R.sim, O0, P0), false);
 });
 
-test('its facts right now (2026-10-12): the time and part of the day, where, its day as "doing" - a message only a moment from it', async () => {
+test('its facts right now (2026-10-12): the time and part of the day, where, its day as "doing" — a message only a moment from it', async () => {
   const R = rig();
   R.run(20);
   const i = R.vip[0], a = R.sim.agents[i], key = R.people[i].agentId;
@@ -122,14 +122,14 @@ test('its facts right now (2026-10-12): the time and part of the day, where, its
   assert.match(f.rule, /"doing" is your day.*Never make up the time, the part of the day, where you are or what you are doing/s);
   const working = new Set([key]);
   R.sim.presence = { isWorking: k => working.has(k), info: () => null, ok: true };
-  // a message: its facts keep its day as what it is doing - the phone or desk it turned to is only a moment
+  // a message: its facts keep its day as what it is doing — the phone or desk it turned to is only a moment
   const was = a.act && { ...a.act };
   R.sim.brain.workChanged(a, true);
   R.run(2);
   const g = R.w.nowFacts(R.A);
   assert.doesNotMatch(g.doing, /phone|answer(ing)? (a |this )?message/i, `"doing" is its day, not the message (${g.doing})`);
   if (a.resume) {
-    assert.ok(g.doing.includes(a.resume.label.toLowerCase()), `${g.doing} - it was ${was?.label}`);
+    assert.ok(g.doing.includes(a.resume.label.toLowerCase()), `${g.doing} — it was ${was?.label}`);
     assert.match(g.moment, /^you paused it to answer this message; you go back to it until \d{1,2}:\d{2} (AM|PM)$/);
   } else if (R.sim.brain.atScreen(a)) assert.match(g.moment, /right where you are/);
   assert.equal(R.w.look(R.A, { brief: true }).me.doing, g.doing, 'look says the same');

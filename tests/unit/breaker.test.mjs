@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The circuit breaker of brains and decision services (server/providers/breaker.js; 2026-10-08: "when an account
 // runs out of API funds and then it gets filled, it should become available again as soon as it's filled"): failures
 // in a row pause a connection; no credit or a refused key pauses it only briefly (a minute, doubling to five), and a
@@ -9,7 +9,7 @@ import { Breakers, pausedWords } from '../../server/providers/breaker.js';
 
 const make = () => { let t = 1_000_000; const b = new Breakers({ after: 4, baseMs: 60000, maxMs: 1800000, longCodes: ['auth', 'quota', 'blocked'], now: () => t }); return { b, tick: ms => { t += ms; } }; };
 
-test('no credit: paused a minute for the world, but a person may try at once - and the moment it answers it is open for all', () => {
+test('no credit: paused a minute for the world, but a person may try at once — and the moment it answers it is open for all', () => {
   const { b } = make();
   b.fail(7, 'quota');
   assert.equal(b.open(7), true);
@@ -58,7 +58,7 @@ test('ordinary failures: four in a row pause it (doubling); half-open lets one t
 });
 
 test('what a person is told', () => {
-  assert.match(pausedWords('Adam', { code: 'quota' }), /^Adam's AI provider account has no credit left\. Add credit to it - it works again the moment/);
+  assert.match(pausedWords('Adam', { code: 'quota' }), /^Adam's AI provider account has no credit left\. Add credit to it — it works again the moment/);
   assert.match(pausedWords('Adam', { code: 'auth' }), /refused its API key/);
   assert.match(pausedWords('Adam', { code: 'timeout' }), /isn't answering at the moment; try again in a minute/);
 });

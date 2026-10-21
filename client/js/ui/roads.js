@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Roads section of the edit dock (WP4.4, wp4-world-spec.md §3, DECISIONS E25): administrators draw roads beyond the
-// city - straight legs joined by curves - of a chosen road type, snapping to existing roads, road ends and the city's
+// city — straight legs joined by curves — of a chosen road type, snapping to existing roads, road ends and the city's
 // street ends; they select a road to rename it, change its type, move its points or remove it. Every change goes
 // through /api/edit (road.set / road.del): the server checks it and says why in words, journals it (undo/redo) and
 // sends it to everyone. Roads are selected and changed only with Edit roads switched on (handles sized for fingers and kept
@@ -28,7 +28,7 @@ const R = { tool: null, edit: false, profile: 'country', pts: [], cursor: null, 
 // The grid layout tool (2026-10-13, the product owner: "lay out the entire roadway system in a grid … leaving space for lots"):
 // roads each way, the lots between them, the lot size, a turn; it follows the pointer until clicked in place.
 // Its roads are flat, all at one level, and the land across the whole grid is levelled to it (2026-10-14: "make sure the
-// terrain is adjusted so that the roadways are flat" - shared/island-build.js gridPads); it can make the lots too.
+// terrain is adjusted so that the roadways are flat" — shared/island-build.js gridPads); it can make the lots too.
 const GRID = { ns: 4, ew: 4, lotsX: 3, lotsZ: 2, lotFt: 100, rot: 0, name: 'Grid', lots: true, zoning: 'residential', at: null, pinned: null, why: null, plan: null };
 const GRID_ZONES = ['residential', 'mixed', 'commercial', 'industrial', 'civic', 'agricultural'];
 const PRESETS = { 'Small town': [3, 3, 3, 2], 'Town': [5, 4, 3, 2], 'City': [8, 7, 3, 2], 'Big city': [14, 12, 3, 2], 'Farmland': [4, 4, 6, 6] };
@@ -42,7 +42,7 @@ export function init(a) {
     <p class="hint">Roads beyond the city: straight legs with curves at the bends. Lengths and radii in feet; the server checks every road.</p>
     <div class="row types">${TYPES.map(t => `<button type="button" class="btn sm rtype" data-t="${t}" title="${esc(DEFAULT_ROAD_PROFILES[t].description || '')}">${esc(DEFAULT_ROAD_PROFILES[t].label || t)}</button>`).join(' ')}</div>
     <div class="row"><button type="button" class="btn draw">✏️ Draw a road</button> <button type="button" class="btn redit" title="Select roads to move their points, change or remove them">🛠 Edit roads</button> <button type="button" class="btn rgrid" title="Lay out a whole grid of roads with room for lots between them">🏘️ Grid layout</button> <button type="button" class="btn undo hidden">↶ Undo point</button> <button type="button" class="btn finish hidden">✔ Finish</button> <button type="button" class="btn cancel hidden">✕ Cancel</button></div>
-    <div class="row"><button type="button" class="btn sm rsnap" title="Keep every leg at 45° or 90° - to the map and to the leg before it (hold Shift to switch it for a moment)">📐 Snap 45°/90°</button></div>
+    <div class="row"><button type="button" class="btn sm rsnap" title="Keep every leg at 45° or 90° — to the map and to the leg before it (hold Shift to switch it for a moment)">📐 Snap 45°/90°</button></div>
     <div class="gridbox hidden">
       <p class="hint">A grid of roads with room for lots between them. Pick a size, then move it over the map and click to put it there; ✔ Build makes it (one undo).</p>
       <div class="row gpresets">${Object.keys(PRESETS).map(k => `<button type="button" class="btn sm gpre" data-p="${esc(k)}">${esc(k)}</button>`).join(' ')}</div>
@@ -131,7 +131,7 @@ function endCands(skipId) {
 const angleSnapOn = (shift = ptr.shift) => R.snapAng !== !!shift;
 /**
  * Snap a ground point: the city's street ends on its edge, road ends, a point on a road's centreline, else whole feet.
- * guide: { from, prev } - with the angle snap on, the leg from `from` keeps to a multiple of 45° (to the map, or to the
+ * guide: { from, prev } — with the angle snap on, the leg from `from` keeps to a multiple of 45° (to the map, or to the
  * leg prev → from), a whole number of feet long, and stops on a road or a road end it reaches along that line
  * (2026-10-13, the product owner: "a snap tool to activate snapping at 45 and 90 degrees").
  */
@@ -152,7 +152,7 @@ function snap(p, skipId = null, guide = null) {
   const f = v => Math.round(v / FT) * FT;
   return { x: f(p.x), z: f(p.z) };
 }
-/** The point along the nearest 45° line from `from` (to the map or to the leg prev → from) - on a road end or a road's
+/** The point along the nearest 45° line from `from` (to the map or to the leg prev → from) — on a road end or a road's
  *  centreline when the line meets one near the pointer, else at a whole number of feet. */
 function angleSnap(p, from, prev, skipId) {
   const dx = p.x - from.x, dz = p.z - from.z, L = Math.hypot(dx, dz);
@@ -412,7 +412,7 @@ function gridSummary(plan, why = null) {
   const blocks = (plan.ns - 1) * (plan.ew - 1);
   const flat = plan.level === null ? '' : ` · flat at ${formatFt(Math.round(plan.level * 1e6))}${plan.cut > 0.3 || plan.fill > 0.3 ? ` (land cut up to ${formatFt(Math.round(plan.cut * 1e6))}, filled up to ${formatFt(Math.round(plan.fill * 1e6))})` : ''}`;
   const made = GRID.lots ? ` · makes ${plan.lots - plan.inner} lots${plan.inner ? ` (${plan.inner} inside big blocks have no road and are left out)` : ''}` : ` · room for ${plan.lots} lots`;
-  E.gsum.textContent = `${plan.ns} × ${plan.ew} roads · ${blocks} block${blocks === 1 ? '' : 's'}${made} · ${formatFt(Math.round((plan.W + 2 * plan.oh) * 1e6))} × ${formatFt(Math.round((plan.D + 2 * plan.oh) * 1e6))} · ${DEFAULT_ROAD_PROFILES[R.profile].label || R.profile}${flat}${why ? ` - ⚠️ ${why}` : GRID.pinned ? ' - ready: ✔ Build' : ` - ${isTouch() ? 'tap' : 'click'} to put it here`}`;
+  E.gsum.textContent = `${plan.ns} × ${plan.ew} roads · ${blocks} block${blocks === 1 ? '' : 's'}${made} · ${formatFt(Math.round((plan.W + 2 * plan.oh) * 1e6))} × ${formatFt(Math.round((plan.D + 2 * plan.oh) * 1e6))} · ${DEFAULT_ROAD_PROFILES[R.profile].label || R.profile}${flat}${why ? ` — ⚠️ ${why}` : GRID.pinned ? ' — ready: ✔ Build' : ` — ${isTouch() ? 'tap' : 'click'} to put it here`}`;
   E.gsum.classList.toggle('bad', !!why);
 }
 async function buildGrid() {
@@ -457,7 +457,7 @@ function drawGhost(pts = null, base = {}) {
   for (const q of list) marker(q, col);
   const len = G.length;
   const c = R.tool === 'draw' ? R.cursor : R.drag ? R.drag.pts[R.drag.k] : null, ang = c && c.heading !== undefined ? ` · 📐 ${c.heading}°${c.turn !== null ? ` (turn ${c.turn}°)` : ''}${c.snapped === 'road' ? ' onto the road' : c.snapped === 'end' ? ' to the road end' : ''}` : '';
-  if (R.tool === 'draw') say(`${formatFt(Math.round(len * 1e6))} · ${list.length} points${ang}${probs.length ? ` - ${probs[0].message}` : ''}. Double-click or Enter to finish.${angleSnapOn() ? '' : ' Hold Shift (or 📐) to keep 45°/90° angles.'}`, !!probs.length);
+  if (R.tool === 'draw') say(`${formatFt(Math.round(len * 1e6))} · ${list.length} points${ang}${probs.length ? ` — ${probs[0].message}` : ''}. Double-click or Enter to finish.${angleSnapOn() ? '' : ' Hold Shift (or 📐) to keep 45°/90° angles.'}`, !!probs.length);
   else if (R.drag && ang) say(`Moving point ${R.drag.k + 1}${ang}.`);
 }
 function marker(q, col = 0x4ade80, r = 1.2, data = {}) {

@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Agents and friends, its owner's side (2026-10-10): the People tab's friends - its own settings, the
-// limits in force, how it stands with each agent it knows - the messages it sent and got (every one, refused ones too),
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Agents and friends, its owner's side (2026-10-10): the People tab's friends — its own settings, the
+// limits in force, how it stands with each agent it knows — the messages it sent and got (every one, refused ones too),
 // ending a friendship or blocking an agent for it, and reporting a message another agent sent it. The agent's owner or
 // someone it is shared with to manage (agents.profile); anyone else: 404. Connected agents use their own routes
 // (server/agent-world.js), the world's own agents live it (server/agent-social/social.js).
@@ -40,7 +40,7 @@ export function addSocialRoutes(router, social, d) {
     const a = managed(P, num(q(url, 'agent')));
     return { messages: social.thread(a.id, num(q(url, 'other')), { before: num(q(url, 'before')) || null, limit: num(q(url, 'limit')) || 60 }) };
   });
-  // its owner ends a friendship for it, or blocks (or lets again) another agent - for this agent only
+  // its owner ends a friendship for it, or blocks (or lets again) another agent — for this agent only
   R('POST', '/api/agent-social/end', ({ P, body }) => { const a = managed(P, num(body?.agent)); return social.unfriend(a.id, { id: other(num(body?.other)).id }, { by: 'owner' }); });
   R('POST', '/api/agent-social/block', ({ P, body }) => { const a = managed(P, num(body?.agent)); return social.block(a.id, { id: other(num(body?.other)).id }, body?.on !== false, { by: 'owner' }); });
   R('POST', '/api/agent-social/report', ({ P, body }) => { const a = managed(P, num(body?.agent)); return social.report(P.account, a.id, num(body?.message), body?.reason); });

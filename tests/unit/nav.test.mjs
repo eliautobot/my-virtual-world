@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Indoor reachability: every home and job of a generated city can be walked to from its floor's entrances without
 // crossing a wall, including slots whose approach point lies in a pocket (Nav.approach), and a path into a pocket
 // squeezes in over a short stretch instead of cutting straight through walls (Nav.detour).

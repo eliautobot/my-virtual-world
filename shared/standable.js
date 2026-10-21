@@ -1,5 +1,5 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Jumping onto things (2026-10-05: "colliders on objects so players can jump on things" - without a physics
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Jumping onto things (2026-10-05: "colliders on objects so players can jump on things" — without a physics
 // engine). Every catalog item already has a height; this adds where a body stands on it (a desk's top, not its
 // screen; a bench's seat, not its back). A body walks into anything whose top is above its feet + STEP, steps or lands
 // onto anything lower, and falls off edges. Shared by the browser (client/js/player/player.js) and the server
@@ -23,7 +23,7 @@ const TOP = {
 /** The height a body stands at on top of an item of type t (tall things: their full height, out of reach). */
 export function itemTop(t) { const d = CATALOG[t]; return d ? (TOP[t] ?? d.h ?? 3) : 3; }
 // Round things whose height changes across them, by distance from their centre: the park fountain (client/js/render/
-// furniture.js FOUNTAIN) - its column, the pool floor you wade on, the coping you stand on, the step.
+// furniture.js FOUNTAIN) — its column, the pool floor you wade on, the coping you stand on, the step.
 const RADIAL = {
   fountain: r => (r < 1.55 ? 2.6 : r < 2.62 ? 0.1 : r <= 3.1 ? 0.56 : 0.1),   // under the lower bowl: no room for a head
 };

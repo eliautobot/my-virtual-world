@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Each connected agent has its own MCP address (schema 46, 2026-10-13: a Grok account's bots share their connectors, and
-// an app reuses the sign-in it already has for an address - so a second Bot quietly acted as the first Bot's agent). An
+// an app reuses the sign-in it already has for an address — so a second Bot quietly acted as the first Bot's agent). An
 // app that signs in at <world>/mcp/a/<handle> can only be that agent: its sign-in offers only it, to its owner only, and its
 // tokens work only there; the world's /mcp stays for any agent. The facts name the agent. Deleting a connected agent
 // disconnects its app and frees its place.
@@ -72,7 +72,7 @@ test('each agent has its own MCP address: its sign-in is for it alone, its token
     const tok = await a2.finish(yes.json.redirect);
     assert.ok(tok.access_token, JSON.stringify(tok));
 
-    // its token works at its address - it is Luke, and the facts say so - and nowhere else
+    // its token works at its address — it is Luke, and the facts say so — and nowhere else
     const init = await rpc(LUKE, tok.access_token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'grok', version: '1' } });
     assert.equal(init.status, 200, JSON.stringify(init.json));
     assert.match(init.json.result.instructions, /^You are Luke, who lives in My Virtual World/);

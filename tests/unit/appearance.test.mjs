@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Character looks: random generation, sanitising (every look from a client goes through it), packing (shared/appearance.js).
 import assert from 'node:assert/strict';
 import test from 'node:test';

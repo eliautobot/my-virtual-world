@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The GPS in the world (ui/worldmap.js): a tall beam of light over the waypoint, seen from afar, with a ring pulsing on the
 // ground under it. (Arrows along the route on the ground were tried and dropped: not the owner's style, 2026-10-05.) Nothing is
 // drawn without a waypoint.

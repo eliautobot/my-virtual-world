@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The provider helper process (see host.js). It loads the adapters named in its first argument (a JSON list of module paths),
 // tells the server which manifests it serves, answers calls over IPC and forwards adapter events. It has no access to the
 // server's secrets: its environment is minimal, it reads none of it, and credentials arrive with each call.
@@ -12,14 +12,14 @@ async function load() {
   let list = [];
   try { list = JSON.parse(process.argv[2] || '[]'); } catch { list = []; }
   for (const entry of list) {
-    // (an entry is a module path, or { path, options } - options only ever from the server's tests: a fake service's address)
+    // (an entry is a module path, or { path, options } — options only ever from the server's tests: a fake service's address)
     const p = typeof entry === 'string' ? entry : entry && entry.path;
     try {
       const mod = await import(pathToFileURL(p).href);
       const a = mod.default || mod.adapter;
       if (!a || !a.manifest || !a.manifest.id) throw new Error('no adapter or manifest exported');
       // an adapter that keeps connections open (Agent Providers) reports events, and hands back a credential its provider
-      // issued (persist: a device token), outside any call; the server seals it - the helper writes nothing itself
+      // issued (persist: a device token), outside any call; the server seals it — the helper writes nothing itself
       if (entry && typeof entry === 'object' && entry.options) a.setup?.(entry.options);
       const kind = a.manifest.id;
       a.attach?.({ emit: ctx.emit, persist: (connectionId, field, value) => send({ t: 'persist', kind, connectionId: String(connectionId), field: String(field), value: value ?? null }) });

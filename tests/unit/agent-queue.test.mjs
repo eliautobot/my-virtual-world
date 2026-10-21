@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat mailbox of a connected agent (server/agent-api.js; PLAN WP2.14; DECISIONS C125, C129; CHECKLIST I8.14): messages wait up to
 // a day, are handed over once, can be taken back, expire with a message to the chat, and the agent can only report on its own runs.
 import assert from 'node:assert/strict';

@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The eye on password fields (the product owner, 2026-10-09: "add the little eye thing on the password to see/hide the
-// password as you are typing it"). Every password field the app shows - signing in, creating an account, changing or
-// resetting a password, the keys of stored secrets - gets a button at its right end that shows what was typed and hides
+// password as you are typing it"). Every password field the app shows — signing in, creating an account, changing or
+// resetting a password, the keys of stored secrets — gets a button at its right end that shows what was typed and hides
 // it again; the field keeps its focus and caret. One observer covers the fields that dialogs and panels add later.
 const ICON = {
   show: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',

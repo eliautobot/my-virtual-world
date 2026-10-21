@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 # Backs up the live data folder while the server runs. Every data file is written atomically (temporary file +
 # rename), so each copied file is complete. Promotions and restores take their own backups with the server stopped.
 # Usage: tools/deploy/backup.sh [<reason>]      prints the backup folder

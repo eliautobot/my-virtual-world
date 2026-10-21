@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat over one Hermes connection (docs/features/agent-providers.md §9), inside the provider helper.
 // - A chat's session is a Hermes stored session (its id is the session key here). Hermes runs a turn in a *live* session
 //   of its backend process: made with session.create (a new chat: tagged source 'myvirtualworld', for the agent's
@@ -6,7 +6,7 @@
 //   again after every reconnect. Events name the live id; this keeps which stored session each is.
 // - A run is one message: prompt.submit. Hermes answers it at once (streaming), after the turn in progress (queued:
 //   its turn comes with a later message.start), or takes it into that turn (steered, redirected: its own run ends empty,
-//   the running turn answers it) - as its busy_input_mode says, or queued when the person asked for "after this answer".
+//   the running turn answers it) — as its busy_input_mode says, or queued when the person asked for "after this answer".
 // - Hermes' requests to the client in a session with a run of ours (approvals, its clarify questions, masked prompts)
 //   become that run's approvals and questions; the person's answer is the response to that request (or, if the socket
 //   that brought it is gone, Hermes' approval.respond / request.answer).
@@ -22,7 +22,7 @@ const FOREIGN_QUIET_MS = 600000;     // another client's turn with nothing new t
 const ASKS = new Set(['approval', 'clarify', 'secret', 'sudo']);
 const TURN_EVENTS = new Set(['message.start', 'message.delta', 'message.interim', 'message.complete', 'reasoning.delta', 'reasoning.available', 'thinking.delta',
   'tool.start', 'tool.generating', 'tool.complete', 'status.update', 'todo.updated', 'moa.reference', 'error',
-  // (as its Desktop: the session named or renamed as it goes, and its usage - while a turn of ours is there)
+  // (as its Desktop: the session named or renamed as it goes, and its usage — while a turn of ours is there)
   'session.title', 'session.usage']);
 const fail = (code, message, extra = {}) => Object.assign(new Error(message), { code, ...extra });
 const IMAGE = /^image\/(png|jpe?g|gif|webp|bmp)$/i;
@@ -80,7 +80,7 @@ export class LinkChat {
     this.downTimer.unref?.();
   }
   /** The connection is closed for good (Reconnect, switched off, removed, the helper stopping): every answer still
-   *  being written here ends now, with why - never left waiting. */
+   *  being written here ends now, with why — never left waiting. */
   close(why) {
     clearTimeout(this.downTimer); this.downTimer = null;
     for (const [, r] of this.runs) if (!r.ended) r.tr.end('interrupted', { error: why });
@@ -90,7 +90,7 @@ export class LinkChat {
     const runs = (this.turns.get(key) || []).map(id => this.runs.get(id)).filter(Boolean);
     if (!runs.length) return;
     const profile = runs[0].profile;
-    // (as Hermes' own client: the session attached again - its live events wait -, then every event missed while the
+    // (as Hermes' own client: the session attached again — its live events wait —, then every event missed while the
     // socket was down fetched again and delivered in order, then the waiting ones: nothing lost, nothing twice)
     const oldSid = this.live.get(key)?.sid, canReplay = this.link.canReplay(oldSid);
     if (canReplay) this.link.holdFor(oldSid);
@@ -108,7 +108,7 @@ export class LinkChat {
     }
     // (the replay brought its end: nothing more to do)
     if (!runs.some(x => !x.ended)) return;
-    // ended while the connection was down: its answer is in the history - what Hermes stored after this message (its
+    // ended while the connection was down: its answer is in the history — what Hermes stored after this message (its
     // own row), never an earlier answer; none there: Hermes stopped before it answered (a restart)
     const head = runs.find(x => x.started) || runs[0];
     const raw = await this.link.rest('GET', `/api/sessions/${encodeURIComponent(this.renamed.get(key) || key)}/messages`, { query: { profile } }).catch(() => null);
@@ -134,7 +134,7 @@ export class LinkChat {
     // (a side question or a background task the chat started, answered: the session's, whatever turn runs)
     const side = sideOf(evt);
     if (side) { try { this.emit({ kind: this.kind, connectionId: this.link.connectionId, sessionKey: key, type: 'session.native', ev: side }); } catch { /* the bus refused it */ } return; }
-    // (its goal, loop or heartbeat changed - set, a turn counted, paused, done: the status stack follows)
+    // (its goal, loop or heartbeat changed — set, a turn counted, paused, done: the status stack follows)
     if (evt.type === 'session.control.update') { try { this.emit({ kind: this.kind, connectionId: this.link.connectionId, sessionKey: key, type: 'session.native', ev: { op: 'control', control: controlOf(p.control) } }); } catch { /* the bus refused it */ } return; }
     if (evt.type === 'todo.updated') this.todos.set(key, { steps: stepsOf(p.todos), revision: p.revision });
     if (!TURN_EVENTS.has(evt.type) && evt.type !== 'session.info') return;
@@ -142,7 +142,7 @@ export class LinkChat {
     if (r) { r.tr.feed(evt); return; }
     if (evt.type !== 'session.info') this.observe(key, evt);
   }
-  /** The run Hermes' turn in a session belongs to: the one answering, or - a turn beginning - the next one waiting. */
+  /** The run Hermes' turn in a session belongs to: the one answering, or — a turn beginning — the next one waiting. */
   current(key, starting) {
     const list = this.turns.get(key) || [];
     for (const id of list) {
@@ -175,7 +175,7 @@ export class LinkChat {
     o.tr.feed(evt);
   }
   /** A request from Hermes to this client. Returns undefined (answered later, by the person), or null (not answered
-   *  here: Hermes is told so at once) - only in a session where we have a run; in another one it is left to Hermes' other
+   *  here: Hermes is told so at once) — only in a session where we have a run; in another one it is left to Hermes' other
    *  clients. */
   onRequest(rq, { replay = false } = {}) {
     const p = rq.params || {};
@@ -196,8 +196,8 @@ export class LinkChat {
       r.questions.add(id);
       if (!r.shown.has(id)) {
         r.shown.add(id); r.tr.status('Waiting for your answer');
-        // (the Hermes view: what the request says beyond its questions - the command a sudo password is for, the
-        // variable a secret goes into - drawn as Hermes Desktop's dialogs draw them)
+        // (the Hermes view: what the request says beyond its questions — the command a sudo password is for, the
+        // variable a secret goes into — drawn as Hermes Desktop's dialogs draw them)
         this.out(r, { type: 'native', ev: { op: 'ask', id, kind: rq.method, ...(p.command ? { command: String(p.command) } : {}), ...(p.env_var ? { env: String(p.env_var) } : {}),
           ...(p.prompt ? { prompt: String(p.prompt) } : {}), ...(p.description ? { desc: String(p.description) } : {}) } });
         this.out(r, { type: 'question.requested', questionId: id, questions });
@@ -259,7 +259,7 @@ export class LinkChat {
     let text = String(p.input || '');
     try {
       text = await this.files(sid, profile, p.attachments || [], text);
-      // (Hermes Desktop's Enter while a turn runs: redirect it - the turn stops at a safe point and goes on with these
+      // (Hermes Desktop's Enter while a turn runs: redirect it — the turn stops at a safe point and goes on with these
       // words, recorded as the person's message after what it wrote so far. Hermes queues it for the next turn while the
       // turn is still being built; one it can't redirect goes as an ordinary message, queued for the next turn.)
       let sent = null;
@@ -267,16 +267,16 @@ export class LinkChat {
         sent = await l.request('session.redirect', { session_id: sid, profile, text }).catch(e => (e.rpcCode === 4010 ? { status: 'rejected' } : Promise.reject(e)));
         if (sent && sent.status === 'rejected') sent = null;
       }
-      // (an edit, a checkpoint restored, an answer written again - Hermes Desktop's rewind: Hermes drops that message of
+      // (an edit, a checkpoint restored, an answer written again — Hermes Desktop's rewind: Hermes drops that message of
       // the person's and everything after it from its record, then takes this one from there)
       const rewind = Number.isInteger(p.rewind) && p.rewind >= 0 && !busy ? { confirm_truncate: true, truncate_before_row_id: p.rewind } : {};
-      // (going back to the chat's first message replaces the whole of it: Hermes asks to be told so - the person asked)
+      // (going back to the chat's first message replaces the whole of it: Hermes asks to be told so — the person asked)
       if (!sent) sent = await l.request('prompt.submit', { session_id: sid, profile, text, ...(busy && p.queue ? { queued: true } : {}), ...rewind })
         .catch(e => (e.rpcCode === 4028 && rewind.confirm_truncate ? l.request('prompt.submit', { session_id: sid, profile, text, ...rewind, confirm_empty_truncate: true }) : Promise.reject(e)));
       const st = sent && sent.status;
       if (sent && Number.isFinite(sent.user_row_id)) r.userRow = sent.user_row_id;
       if (st === 'steered' || st === 'redirected') {
-        // (redirected: what the turn wrote so far is a section of its own - the person's words come after it, the rest
+        // (redirected: what the turn wrote so far is a section of its own — the person's words come after it, the rest
         // of the turn after them)
         const cur = st === 'redirected' ? list.map(id => this.runs.get(id)).find(x => x && x !== r && x.started && !x.ended) : null;
         if (cur) { if (cur.tr.text) { cur.tr.segments.push(cur.tr.text); cur.tr.text = ''; } cur.tr.seg = null; }
@@ -287,7 +287,7 @@ export class LinkChat {
         return { runId, sessionKey: key };
       }
       // (queued behind another message of ours still waiting: Hermes merges text-only messages into that one waiting
-      // turn - one answer for both - so this one is taken into it, as a steered one is; a message with pictures waits
+      // turn — one answer for both — so this one is taken into it, as a steered one is; a message with pictures waits
       // for a turn of its own)
       const pictures = (p.attachments || []).some(f => IMAGE.test(f.mime || ''));
       const waiting = st === 'queued' && !pictures && list.some(id => { const x = this.runs.get(id); return x && x !== r && !x.ended && !x.started && !x.pictures; });
@@ -321,8 +321,8 @@ export class LinkChat {
     const list = (this.turns.get(r.key) || []).filter(id => id !== r.id);
     if (list.length) this.turns.set(r.key, list); else this.turns.delete(r.key);
   }
-  /** The chat's model and thinking level as the session's own on Hermes - for that chat only (`--session`), as Hermes
-   *  Desktop sets a secondary chat's - never the profile's default. A chat that names none leaves the session's. */
+  /** The chat's model and thinking level as the session's own on Hermes — for that chat only (`--session`), as Hermes
+   *  Desktop sets a secondary chat's — never the profile's default. A chat that names none leaves the session's. */
   async prefsFor(key, sid, profile, model, effort) {
     const last = this.prefs.get(key) || {};
     if (model && model !== last.model) {
@@ -356,7 +356,7 @@ export class LinkChat {
     const live = this.live.get(r.key);
     if (!live) return { ok: false };
     await this.link.request('session.interrupt', { session_id: live.sid, profile: r.profile });
-    // (a message still waiting its turn: Hermes keeps it queued - it is ended here, and the interrupt answers the running one)
+    // (a message still waiting its turn: Hermes keeps it queued — it is ended here, and the interrupt answers the running one)
     if (!r.started) r.tr.end('stopped');
     return { ok: true };
   }
@@ -407,8 +407,8 @@ export class LinkChat {
     const s = row && (row.session || row);
     const running = (this.turns.get(sessionKey) || []).some(x => this.runs.get(x) && !this.runs.get(x).ended) || this.foreign.has(sessionKey);
     // (a turn stopped or redirected part-way: Hermes' store keeps its row hidden and empty; what it wrote is in Hermes'
-    // live transcript - session.history, which its Desktop reads - fetched only then)
-    // (also when the store ends on the person's message: a turn just stopped may not be stored yet - its live transcript
+    // live transcript — session.history, which its Desktop reads — fetched only then)
+    // (also when the store ends on the person's message: a turn just stopped may not be stored yet — its live transcript
     // has it; an answer there that the store doesn't have yet is taken, in its place by row)
     let visible = null, rows = h && Array.isArray(h.messages) ? h.messages : [];
     const shown = rows.filter(m => m && m.active !== 0 && m.display_kind !== 'hidden' && (m.role === 'user' || m.role === 'assistant'));
@@ -438,7 +438,7 @@ export class LinkChat {
   }
   /**
    * One of Hermes' own calls for the chat's view (native.js: its slash commands, its completions, its side questions), on
-   * the chat's session - a new chat's made on Hermes first, as its Desktop makes one for a command typed into a new chat.
+   * the chat's session — a new chat's made on Hermes first, as its Desktop makes one for a command typed into a new chat.
    * Resolves { result (rebuilt), sessionKey (the chat's on Hermes, when it has one) }.
    */
   async native({ agentKey, sessionKey, method, params, model = null, effort = null }) {
@@ -449,7 +449,7 @@ export class LinkChat {
     const profile = String(agentKey || '');
     if (!profile) throw fail('bad_request', 'Which agent?');
     let key = sessionKey && sessionKey !== LAZY ? String(sessionKey) : null, sid = null;
-    // (only a chat with its session on Hermes has this: none yet - nothing to ask)
+    // (only a chat with its session on Hermes has this: none yet — nothing to ask)
     if (c.session === 'have' && !key) return { result: nativeResult(c.method, {}) };
     if (c.session === 'need' && !key) {
       const want = model ? parseModelRef(model) : null;
@@ -471,8 +471,8 @@ export class LinkChat {
     const r = await this.link.request('model.options', { profile: String(agentKey || ''), ...(live && live.gen === this.link.gen ? { session_id: live.sid } : {}) }, { timeoutMs: 45000 });
     return modelsOf(r);
   }
-  /** The agent's stored sessions on Hermes, newest first - from every channel (its Desktop, Telegram…), not its scheduled
-   *  jobs' - for whoever manages the provider. */
+  /** The agent's stored sessions on Hermes, newest first — from every channel (its Desktop, Telegram…), not its scheduled
+   *  jobs' — for whoever manages the provider. */
   async sessions({ agentKey, limit = 100 }) {
     const r = await this.link.rest('GET', '/api/sessions', { query: { profile: String(agentKey || ''), limit: Math.min(200, limit) } });
     const rows = (r && Array.isArray(r.sessions) ? r.sessions : []).filter(s => s && s.id && s.source !== 'cron' && !s.parent_session_id && !s.hidden && !s.archived);
@@ -494,7 +494,7 @@ export class LinkChat {
     if (!sessionKey || sessionKey === LAZY) throw fail('bad_request', 'Nothing to branch yet');
     const profile = String(agentKey || '');
     const sid = await this.liveFor(sessionKey, profile);
-    // (a count: up to an answer; none: the whole chat - session.branch_whole, as its Desktop's chat menu)
+    // (a count: up to an answer; none: the whole chat — session.branch_whole, as its Desktop's chat menu)
     const r = await this.link.request(count ? 'session.branch' : 'session.branch_whole', { session_id: sid, profile, ...(count ? { count: Number(count) } : {}) }, { timeoutMs: 30000 });
     if (!r || !r.stored_session_id) throw fail('provider_error', 'Hermes did not make the branch');
     // (the branch's live session is Hermes' own until a message goes there: closed here, taken up again when needed)
@@ -520,7 +520,7 @@ export class LinkChat {
     return { ok: true };
   }
   /** A page has a session open: its live activity is followed for it (Hermes sends a resumed session's events to every
-   *  client attached to it) - a lease, renewed while it stays open. */
+   *  client attached to it) — a lease, renewed while it stays open. */
   async watch({ agentKey, agent, sessionKey, ms = 150000 }) {
     if (!sessionKey || sessionKey === LAZY) return { ok: false };
     const profile = String(agentKey || '');

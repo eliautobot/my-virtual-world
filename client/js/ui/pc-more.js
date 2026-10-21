@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The PC's other apps (client/js/ui/pc-app.js): Teams (the account's teams - who is in each and as what, its brief,
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The PC's other apps (client/js/ui/pc-app.js): Teams (the account's teams — who is in each and as what, its brief,
 // its folder; made, renamed, deleted and brought back), Browser (what the agent is reading: its browser service's screen
-// when it has one, the pages it opened - or, for an Agent Providers' agent, its provider's own browser, live), Activity (what it did on its PC, live), Terminal (the agent's own command line,
+// when it has one, the pages it opened — or, for an Agent Providers' agent, its provider's own browser, live), Activity (what it did on its PC, live), Terminal (the agent's own command line,
 // as it uses it), Settings (storage, whether it works on tasks by itself, its browser and search, the trash).
 import { esc } from '../core/util.js';
 import { getJSON } from '../core/net.js';
@@ -27,7 +27,7 @@ export function teamsApp(P, el) {
         <button class="pc-btn" data-folder="1">📂 Its folder</button><button class="pc-btn" data-board="1">📋 Its board</button></div>
       <form class="pc-form pc-tform" style="margin-top:12px"><div class="pc-row2"><label>Name<input name="name" value="${esc(t.name)}" maxlength="40"></label>
         <label>Colour<input name="color" type="color" value="${esc(t.color || COLORS[t.id % COLORS.length])}"></label></div>
-        <label>Brief - what the team is for and how it works (every member reads it)<textarea name="brief" rows="4" maxlength="4000">${esc(t.brief)}</textarea></label>
+        <label>Brief — what the team is for and how it works (every member reads it)<textarea name="brief" rows="4" maxlength="4000">${esc(t.brief)}</textarea></label>
         <div><button class="pc-btn primary">Save</button> <span class="dim">${size(t.used)} in its folder</span></div></form>
       <h4 style="margin:16px 0 6px">Members</h4>
       ${t.members.length ? t.members.map(m => `<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(P.agents.find(a => a.id === m.agent)?.emoji || '🤖')} ${esc(P.name(m.agent))}</span>
@@ -79,8 +79,8 @@ export function teamsApp(P, el) {
 
 // ------------------------------------------------------------------------------------------- Browser
 export function browserApp(P, el, args = {}) {
-  // (its real browser, live - an Agent Providers' agent's: its provider's own (OpenClaw's), or its own screen where its
-  // browser opens (Hermes' Bot Desktop, ./provider-screen.js); a built-in agent's: the installation's built-in Chrome -
+  // (its real browser, live — an Agent Providers' agent's: its provider's own (OpenClaw's), or its own screen where its
+  // browser opens (Hermes' Bot Desktop, ./provider-screen.js); a built-in agent's: the installation's built-in Chrome —
   // ./provider-browser.js; beside it the reader's pages. No real browser here: the reader)
   const me = P.me();
   if (me?.own?.browser) return twoBrowsers(P, el, args, { label: `${me.own.label}'s browser` });
@@ -146,7 +146,7 @@ function readerApp(P, el, args = {}) {
     el.innerHTML = `<div class="pc-main"><div class="pc-tools"><span class="pc-addr"><span aria-hidden="true">🌐</span><span>${esc(cur || 'Nothing open yet')}</span></span>
       ${cur ? `<a class="pc-btn" href="${esc(cur)}" target="_blank" rel="noopener noreferrer">↗ Open it yourself</a>` : ''}</div>
       ${W.err ? `<div class="pc-err">${esc(W.err)}</div>` : ''}
-      ${liveHtml()}${W.shot ? `<div class="pc-shot"><img alt="What its browser shows" src="${W.shot}"></div>` : W.live ? '' : `<div class="pc-note">${esc(P.me()?.name || 'It')} reads pages with the built-in reader: their words and links, no pictures. To have it use a full browser - sign in to sites, click and type - add a <b>Browser service</b> in Settings → Connections; its screen then shows here.</div>`}
+      ${liveHtml()}${W.shot ? `<div class="pc-shot"><img alt="What its browser shows" src="${W.shot}"></div>` : W.live ? '' : `<div class="pc-note">${esc(P.me()?.name || 'It')} reads pages with the built-in reader: their words and links, no pictures. To have it use a full browser — sign in to sites, click and type — add a <b>Browser service</b> in Settings → Connections; its screen then shows here.</div>`}
       <div class="pc-hist" style="${W.shot ? 'max-height:30%;' : ''}overflow:auto;flex:${W.shot ? 'none' : '1'}">${W.pages.length ? W.pages.map(p => `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer"><b>${esc(p.title)}</b><small>${esc(when(p.at))} · ${esc(p.url)}</small>${p.summary ? `<small>${esc(p.summary)}</small>` : ''}</a>`).join('') : '<div class="pc-empty">It hasn\'t opened any page yet.</div>'}</div></div>`;
     img = el.querySelector('.pc-shot img');
   }
@@ -183,7 +183,7 @@ export function activityApp(P, el) {
 export function terminalApp(P, el, args = {}) {
   const hist = [];
   let at = -1, cwd = '~';
-  el.innerHTML = `<div class="pc-term"><pre class="pc-agentlog" hidden></pre><pre>${esc(`${P.me()?.name || 'Agent'}'s PC - the command line it uses. Type help for the commands.\n`)}</pre>
+  el.innerHTML = `<div class="pc-term"><pre class="pc-agentlog" hidden></pre><pre>${esc(`${P.me()?.name || 'Agent'}'s PC — the command line it uses. Type help for the commands.\n`)}</pre>
     <form><span style="align-self:center">${'>'}</span><input autocomplete="off" spellcheck="false" placeholder="ls ~/Documents"><button class="pc-btn">Run</button></form></div>`;
   const out = el.querySelector('pre'), input = el.querySelector('input');
   const print = (html) => { out.insertAdjacentHTML('beforeend', html); out.scrollTop = out.scrollHeight; };
@@ -203,7 +203,7 @@ export function terminalApp(P, el, args = {}) {
     if (e.key === 'ArrowUp' && hist.length) { at = Math.min(hist.length - 1, at + 1); input.value = hist[at]; e.preventDefault(); }
     if (e.key === 'ArrowDown') { at = Math.max(-1, at - 1); input.value = at >= 0 ? hist[at] : ''; e.preventDefault(); }
   });
-  // (following the agent: its own terminal - the commands it ran and what they said - above this one)
+  // (following the agent: its own terminal — the commands it ran and what they said — above this one)
   const log = el.querySelector('.pc-agentlog');
   const showLog = lines => {
     log.hidden = !lines?.length;
@@ -228,7 +228,7 @@ export function settingsApp(P, el) {
     const label = s => (s.kind === 'agent' ? P.name(s.ref) : `${P.teams.find(t => t.id === s.ref)?.name || 'A team'} (team)`);
     el.innerHTML = `<div class="pc-pad">${err ? `<div class="pc-err">${esc(err)}</div>` : ''}
       <h3 style="margin-top:0">Storage</h3>${u ? `<div class="pc-meter ${pct >= 100 ? 'full' : pct >= 80 ? 'warn' : ''}"><i style="width:${pct}%"></i></div>
-        <p>${size(u.used)} used${u.limit ? ` of ${size(u.limit)} (${pct} %)` : ' (no limit)'} - ${u.agents} agent${u.agents === 1 ? '' : 's'} × ${size(u.perAgent)}${u.teams ? ` + ${u.teams} team${u.teams === 1 ? '' : 's'} × ${size(u.perTeam)}` : ''}, shared by them all. One file is at most ${size(u.fileMax)}. The trash and older versions don't count.</p>
+        <p>${size(u.used)} used${u.limit ? ` of ${size(u.limit)} (${pct} %)` : ' (no limit)'} — ${u.agents} agent${u.agents === 1 ? '' : 's'} × ${size(u.perAgent)}${u.teams ? ` + ${u.teams} team${u.teams === 1 ? '' : 's'} × ${size(u.perTeam)}` : ''}, shared by them all. One file is at most ${size(u.fileMax)}. The trash and older versions don't count.</p>
         ${spaces.length ? spaces.map(s => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--line)"><span>${esc(label(s))}</span><span class="dim">${size(s.used)}</span></div>`).join('') : ''}` : ''}
       <h3>${esc(me?.name || 'This agent')} at work</h3>
       ${prof ? `<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" class="pc-auto" ${prof.autoWork !== false ? 'checked' : ''} style="width:auto">
@@ -236,7 +236,7 @@ export function settingsApp(P, el) {
       <p class="dim">Off: tasks wait until you press ▶ Work on it. Each session counts toward its thinking limits (Settings → The Mind).</p>
       ${prof?.working ? `<p class="good">⚡ Working on task #${prof.working.card} now · step ${prof.working.steps + 1}</p>` : ''}${prof?.queued?.length ? `<p class="dim">Waiting: ${prof.queued.map(q => `#${q.card}`).join(', ')}</p>` : ''}
       <h3>Browser and search</h3>
-      <p>Pages are read with the built-in reader, unless you add a <b>Browser service</b> (any Chrome DevTools browser: a cloud browser for AI agents, a Lightpanda, your own Chrome) - then ${esc(me?.name || 'it')} can sign in, click and type. Web search uses your <b>Search service</b> (Brave or your own SearXNG) if you add one. Both: Settings → Connections.</p>
+      <p>Pages are read with the built-in reader, unless you add a <b>Browser service</b> (any Chrome DevTools browser: a cloud browser for AI agents, a Lightpanda, your own Chrome) — then ${esc(me?.name || 'it')} can sign in, click and type. Web search uses your <b>Search service</b> (Brave or your own SearXNG) if you add one. Both: Settings → Connections.</p>
       <h3>Who can see this PC</h3><p class="dim">Only your account. Other players see a glowing screen on its desk; people your agent is shared with, administrators and visitors can't open any of it. In a chat with a visitor, your agent can only read its Public folder.</p></div>`;
   }
   el.addEventListener('change', async e => {

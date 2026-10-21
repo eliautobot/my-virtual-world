@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat window's server side on a real server (docs/features/CHAT.md): its owner's chat streams as it is written
 // (pieces over the socket, the whole kept with what it took) and names a new chat; Stop ends the answer at once and
 // keeps what was written; an answer written again and a message edited; a chat's own model and effort (only the models
-// the installation offers on its brain, metered at their price); attachments - documents as text, images as images,
+// the installation offers on its brain, metered at their price); attachments — documents as text, images as images,
 // private to their account; search and the list of chats; a visitor still gets the short text-only resident.
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -131,7 +131,7 @@ test('Stop ends the answer at once: the provider is let go and what was written 
   assert.equal(h.at(-1).role, 'assistant'); assert.equal(h.at(-1).status, 'stopped'); assert.equal(h.at(-1).text, end.text);
 });
 
-test('a stream that breaks part-way: what was written is kept and said to be cut short - never shown as a whole answer', async () => {
+test('a stream that breaks part-way: what was written is kept and said to be cut short — never shown as a whole answer', async () => {
   const sess = await newChat(owner, 'Broken');
   const run = await send(owner, sess.id, 'this breaks');
   const r = await waitFor(async () => { const e = (await owner.get(`/api/providers/runs/events?run=${run}`)).json; return e.done ? e : null; });
@@ -200,10 +200,10 @@ test('attachments: a document read as text, an image as an image; private to the
   // the next message: the document's text again, the image not resent as an image only after newer ones
   await ended(owner, await send(owner, sess.id, 'And the totals?'));
   assert.match(JSON.stringify(seen.at(-1).body.messages), /Quarterly report/);
-  // a video: kept like any file, but a brain that reads text and pictures can't take it - said before sending
+  // a video: kept like any file, but a brain that reads text and pictures can't take it — said before sending
   const vid = await up(owner, 'clip.mp4', Buffer.from('000000206674797069736f6d', 'hex'));
   const r = await owner.post('/api/providers/runs', { agent: A, session: sess.id, input: 'Watch this', attachments: [vid.id] });
-  assert.equal(r.status, 415, r.text); assert.match(r.json.error, /can't take videos or recordings - clip\.mp4/);
+  assert.equal(r.status, 415, r.text); assert.match(r.json.error, /can't take videos or recordings — clip\.mp4/);
   const old = await up(owner, 'old.doc', Buffer.from('legacy'));
   const bad = await ended(owner, await send(owner, sess.id, '', { attachments: [old.id] }));
   assert.equal(bad.status, 'error'); assert.match(bad.error, /Save it as \.docx/);
@@ -258,7 +258,7 @@ test('whether someone can chat, said before anything is typed: why not in one li
   assert.equal((await can(owner, 999999)).reason, 'gone');
 });
 
-test('an account out of credit and then topped up: the very next message is answered - no waiting for a pause to end', async () => {
+test('an account out of credit and then topped up: the very next message is answered — no waiting for a pause to end', async () => {
   const sess = await newChat(owner, 'Credit');
   credit = false;
   const dry = await ended(owner, await send(owner, sess.id, 'hello?'));

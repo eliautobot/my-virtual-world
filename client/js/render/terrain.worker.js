@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Builds island terrain tiles off the main thread (WP4.2/WP4.16): heights from the shared deterministic generator,
 // normals, biome colours, skirts that hide seams between detail levels, and (for the most detailed tiles) the natural
-// scatter - trees, bushes and rocks - placed by fixed rules so every visitor sees the same forest. Results are
+// scatter — trees, bushes and rocks — placed by fixed rules so every visitor sees the same forest. Results are
 // transferred without copies.
 import { Island, CELL_M, CHUNK_M, CITY_FLOOR_DROP, lakeShore } from '/shared/terrain.js';
 import { biome } from '/shared/biome.js';
@@ -26,9 +26,9 @@ function toHalf(v) { H32[0] = v; const x = U32[0], s = (x >>> 16) & 0x8000, e = 
 const LIN = new Uint8Array(256);
 for (let i = 0; i < 256; i++) { const c = i / 255; LIN[i] = Math.round((c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4) * 255); }
 
-// Tiles are built in two steps (2026-10-03: crossing the map took seconds on the phone): first the ground - its
-// heights, normals and ground map - which is shown as soon as it arrives; then, asked for separately and nearest first,
-// what stands on it - trees, grass, crops, hedges, farmsteads - which fades in. The second step reuses the first's
+// Tiles are built in two steps (2026-10-03: crossing the map took seconds on the phone): first the ground — its
+// heights, normals and ground map — which is shown as soon as it arrives; then, asked for separately and nearest first,
+// what stands on it — trees, grass, crops, hedges, farmsteads — which fades in. The second step reuses the first's
 // heights (kept for the last few dozen tiles).
 const KEPT = new Map(), KEEP = 64;
 function keep(id, e) { KEPT.delete(id); KEPT.set(id, e); if (KEPT.size > KEEP) KEPT.delete(KEPT.keys().next().value); }
@@ -114,7 +114,7 @@ function buildTile({ id, level, tx, tz, n, epoch = 0, gm = 0 }) {
   ms.total = performance.now() - T0; ms.rest = 0;
   postMessage(out, transfer);
 }
-/** The second step: what stands on a tile - farmsteads (tiles up to level 2), crops, hedges and the scatter (level 0
+/** The second step: what stands on a tile — farmsteads (tiles up to level 2), crops, hedges and the scatter (level 0
  *  near the camera: scatter), or only far-off trees (level 1: distant). */
 function buildDetail({ id, level, tx, tz, n, scatter, distant = false, epoch = 0, gm = 0 }) {
   const T0 = performance.now();
@@ -157,7 +157,7 @@ function buildDetail({ id, level, tx, tz, n, scatter, distant = false, epoch = 0
 // The flower drifts' noise, as the ground shader draws it (render/ground-detail.js gH21/gNoise), so the flowers stand
 // where the ground shows them.
 const fr = v => v - Math.floor(v);
-let noiseTex = false;   // (render flag 'noise': the shader looks its randomness up in a texture - render/ground-noise.js)
+let noiseTex = false;   // (render flag 'noise': the shader looks its randomness up in a texture — render/ground-noise.js)
 function gH21(px, py) {
   if (noiseTex) return nH21(px, py);
   let x = fr(px * 0.1031), y = fr(py * 0.1031), z = fr(px * 0.1031); const q = x * (y + 33.33) + y * (z + 33.33) + z * (x + 33.33); x += q; y += q; z += q; return fr((x + y) * z); }
@@ -176,7 +176,7 @@ const TAU_W = Math.PI * 2;
 // across (slow noise), sand channels running through them (spur and groove), the reef's edge thinning out. 0..1.
 const REEF_KINDS = ['coralBranch', 'coralBrain', 'coralTable', 'coralFan', 'coralTube'];
 // per kind: its model's height at scale 1 (m), the scale range, the colours its colonies come in (linear multipliers)
-// (the colours strong: seen through metres of water they lose their reds - render/water.js underwater); w: its share
+// (the colours strong: seen through metres of water they lose their reds — render/water.js underwater); w: its share
 const REEF = [
   { kind: 'coralBranch', w: 0.3, h: 0.85, sc: [1.3, 2.4], tint: [[1.3, 1.1, 0.85], [0.85, 0.4, 3.2], [1.6, 0.7, 2.4], [0.65, 0.85, 4.2], [0.75, 1.0, 0.8]] },   // tan, violet, pink, lilac, olive
   { kind: 'coralBrain', w: 0.22, h: 0.62, sc: [1.0, 2.2], tint: [[0.55, 1.1, 1.0], [1.2, 0.75, 0.55], [1.3, 1.15, 0.55], [1.05, 0.62, 2.4], [0.85, 0.9, 0.75]] },   // green, rust, mustard, mauve, brown
@@ -185,7 +185,7 @@ const REEF = [
   { kind: 'coralTube', w: 0.18, h: 1.4, sc: [0.8, 1.5], tint: [[1.4, 1.2, 1.0], [1.6, 1.0, 0.8], [1.1, 1.0, 1.5]] },
 ];
 const reefPick = u => { let a = 0; for (let k = 0; k < REEF.length; k++) { a += REEF[k].w; if (u < a) return k; } return REEF.length - 1; };
-// (the section as a whole, its sand channels included: the sea is drawn clearer over it - the depth map's second channel)
+// (the section as a whole, its sand channels included: the sea is drawn clearer over it — the depth map's second channel)
 function reefZone(x, z, dep) {
   const patch = sstep(0.55, 0.66, gNoise(x * 0.0042 + 31, z * 0.0042 - 17) * 0.65 + gNoise(x * 0.011 - 5, z * 0.011 + 8) * 0.35);
   return patch <= 0 ? 0 : patch * sstep(2.4, 3.6, dep) * (1 - sstep(10, 12.5, dep));
@@ -199,7 +199,7 @@ function reefAt(x, z, dep) {
 // bushes, boulders); and, on a finer grid, grass tufts and wild flowers (their colours from the ground and the flower
 // drifts). Per instance: x, y, z (world), yaw, scale; and a colour (linear).
 // Each tree's coarsest tile level (1-3): every tree stands on the level-1 tiles (and the full-detail ones); one in 4 of
-// them on level 2, one in 16 on level 3 - the same trees, picked by a hash of their grid cell, so a forest seen from a
+// them on level 2, one in 16 on level 3 — the same trees, picked by a hash of their grid cell, so a forest seen from a
 // kilometre off thins out with distance instead of ending (2026-10-04: none past ~1 km), and none moves when its area
 // is refined; the client keeps those already standing and fades in only the rest (render/terrain.js fillKind).
 const treeLevel = h => (h < 1 / 16 ? 3 : h < 1 / 4 ? 2 : 1);
@@ -238,7 +238,7 @@ function buildScatter(x0, z0, S, H, B, d, extraTrees = null, T = null, distant =
     // the sand between them; the reef's fish and turtles live over the reefs (render/wildlife.js)
     const dep = P.seaLevel - h;
     if (dep > 0.7 && dep < 14 && !distant) {
-      if (dep > 7) habAt('sea', x, h, z, hashf(gx, gz, 1321));   // (open water from 7 m: the dolphins' places - over the outer reef too)
+      if (dep > 7) habAt('sea', x, h, z, hashf(gx, gz, 1321));   // (open water from 7 m: the dolphins' places — over the outer reef too)
       if (reefAt(x, z, dep) > 0.3) habAt('reef', x, h, z, hashf(gx, gz, 1319));
       else if (dep < 9 && r < 0.025) put('rock', lx, h - 0.25, lz, r * 6.283, 0.5 + jx * 1.2, stoneTint(jz));
       continue;
@@ -270,7 +270,7 @@ function buildScatter(x0, z0, S, H, B, d, extraTrees = null, T = null, distant =
   }
   // trees standing in the hedgerows
   if (extraTrees) for (let i = 0; i < extraTrees.length; i += 4) { const t = extraTrees[i + 3]; cell = (t * 7.13 + 0.17) % 1; put(t < 0.3 ? 'tree2' : 'tree', extraTrees[i] - x0, extraTrees[i + 1], extraTrees[i + 2] - z0, t * 6.283, 0.85 + t * 0.45, leafTint(t)); }
-  // the reefs (2026-10-04): sections of reef - big colonies packed close, a few kinds each in zones of their own,
+  // the reefs (2026-10-04): sections of reef — big colonies packed close, a few kinds each in zones of their own,
   // sand channels running through, nothing shallow enough to break the surface (each colony's top a metre or more under)
   if (!distant) {
     const rs = 2.3;
@@ -335,7 +335,7 @@ function buildScatter(x0, z0, S, H, B, d, extraTrees = null, T = null, distant =
   const pools = (island.lakes || []).filter(K => K.pool), inPool = (x, z) => pools.some(K => (x - K.x) ** 2 + (z - K.z) ** 2 < (K.r * 1.08) ** 2);
   const belowFall = (x, z) => pools.some(K => (x - K.x) ** 2 + (z - K.z) ** 2 < (K.r * 2.8) ** 2);   // (the churned water out of a pool: no reeds)
   // Where a fall's water runs and falls (2026-10-03: "the water falls over the rocks, not through them"): its
-  // channel over the last metres to the lip, the ledge, and the air it falls through down to where it lands - no stone
+  // channel over the last metres to the lip, the ledge, and the air it falls through down to where it lands — no stone
   // there. (Its landing: render/rivers.js throws it out at d.v from the ledge's edge d.ov.)
   const fallZones = [];
   for (const R of island.rivers || []) for (const d of R.drops || []) if (d.kind === 'fall') fallZones.push({ d, land: d.ov + d.v * Math.sqrt(2 * d.F / 9.81) + 2, half: d.w / 2 + 3 + d.F * 0.07 });
@@ -486,7 +486,7 @@ self.onmessage = e => {
     else if (m.op === 'detail') buildDetail(m);
     else if (m.op === 'depth') {
       // Water depth (m) around a point, n × n over size m, two half floats per sample: the depth (signed: the beach above
-      // the sea too, the surf runs up it) and how much of a reef section is there (0..1: the sea is clearer over it) -
+      // the sea too, the surf runs up it) and how much of a reef section is there (0..1: the sea is clearer over it) —
       // render/water.js.
       const { id, x0, z0, size, n } = m, px = new Uint16Array(n * n * 2), d = size / (n - 1), sea = P.seaLevel;
       for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {

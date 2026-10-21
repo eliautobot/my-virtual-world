@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // OpenClaw → the universal chat (server/providers/openclaw/translate.js), replaying frames recorded from a real OpenClaw
 // 2026.9.6 gateway (tests/fixtures/openclaw/run-*.json): a command run with its live output, an approval, reasoning; and
 // the history, model list and session rows the chat window draws from.
@@ -128,7 +128,7 @@ test('the plan: its steps as they stand, from the run\'s plan stream and the ses
   const ev = [], t = new RunTranslator({ emit: e => ev.push(e) });
   t.feed({ event: 'progress.card', payload: { sessionKey: 'k', revision: 2, updatedAt: 1792170000000, markdown: 'Reviewing the docs', steps: [{ step: 'A', status: 'completed' }] } });
   assert.deepEqual(ev[0], { type: 'plan.update', title: 'Plan', steps: [{ step: 'A', status: 'completed' }], markdown: 'Reviewing the docs', revision: 2, updatedAt: 1792170000000 });
-  // (taken off - dismissed, or the session reset: no card) - an empty one, so the chat drops it
+  // (taken off — dismissed, or the session reset: no card) — an empty one, so the chat drops it
   t.feed({ event: 'progress.card', payload: null });
   assert.deepEqual(ev[1], { type: 'plan.update', title: 'Plan', steps: [], markdown: '' });
 });
@@ -168,7 +168,7 @@ test('media: an agent\'s MEDIA lines leave the text (not in a code block), its k
 });
 
 // (recorded from OpenClaw 2026.9.6 with tools offered by search: the agent calls tool_call { id: 'browser' }, and OpenClaw
-// reports the browser call itself - parentToolCallId naming the tool_call - live and in the history)
+// reports the browser call itself — parentToolCallId naming the tool_call — live and in the history)
 test('a deferred-tool call shows as the tool it called (live and in the history), and a browser tab it left as such', () => {
   const ev = [], t = new RunTranslator({ emit: e => ev.push(e) });
   const tab = { targetId: '5B9D6553178000D01D47D940D225E760', profile: 'openclaw', target: 'host', url: 'https://example.com/', title: 'Example Domain' };

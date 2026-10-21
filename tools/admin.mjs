@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Account and key administration on the host for My Virtual World. It opens <data>/next.db directly, so it
 // works while the server runs (SQLite WAL); a running server notices sign-outs made here within a minute, and a new key
 // file within seconds. Nothing secret is ever printed: temporary passwords and keys go to files readable only by their
@@ -200,7 +200,7 @@ async function backup(data, out) {
       if (verdict !== 'ok') { console.error(`the copy of next.db failed its integrity check: ${verdict}`); return 1; }
       files.push({ name: 'next.db', body: fs.readFileSync(copy) });
     }
-    // the agents' PC (docs/features/agent-pc.md): its database through SQLite's online backup, then its file store -
+    // the agents' PC (docs/features/agent-pc.md): its database through SQLite's online backup, then its file store —
     // the database first, so every content it names was already there when its copy was made
     const pcDb = path.join(data, 'pc', 'pc.db');
     let pcFiles = 0;

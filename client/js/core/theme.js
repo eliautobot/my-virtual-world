@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Themes (PLAN WP1.9, DECISIONS C39, C117): three token sets in client/css/theme.css - Dark (the default), Light and
-// High contrast - applied by setting data-theme on <html>. The choice is a preference like the others: it follows the
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Themes (PLAN WP1.9, DECISIONS C39, C117): three token sets in client/css/theme.css — Dark (the default), Light and
+// High contrast — applied by setting data-theme on <html>. The choice is a preference like the others: it follows the
 // account to every device, and a guest's stays in this browser (prefs.js). index.html applies the browser's own copy
 // before the first paint so the page never flashes the wrong look; a signed-in account's choice replaces it a moment
 // later, when the account's preferences arrive. Only the interface is themed: the 3D world keeps its own colours.

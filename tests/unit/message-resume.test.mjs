@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A message doesn't wipe out what an agent was doing (server/sim/agents.js bookmark / resumeValid / resumeActivity;
 // 2026-10-12: "the bug itself is that it causes a redo of the decision, dismissing what it had already planned"). The
 // message still makes it turn to it (its phone, a laptop, its desk); once dealt with, it goes back to the same seat for
-// the rest of its time - no new decision, so Free Will isn't asked; its own AI's order (a request to do something else)
+// the rest of its time — no new decision, so Free Will isn't asked; its own AI's order (a request to do something else)
 // comes instead; what would have ended by then is let go; a talk in the city is the same.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -85,7 +85,7 @@ test('a message: it turns to it, and once it is dealt with goes back to the same
   assert.equal(c.sim.errorCount, 0, JSON.stringify(c.sim.errors));
 });
 
-test('with Free Will: nothing is decided again after the message - it just goes back', async () => {
+test('with Free Will: nothing is decided again after the message — it just goes back', async () => {
   const c = city(), h = withFreeWill(c);
   try {
     c.sim.start(); c.sim.skipTo(18.5);
@@ -145,7 +145,7 @@ test('a talk in the city is the same: afterwards it goes back to what it was doi
   assert.equal(c.sim.errorCount, 0, JSON.stringify(c.sim.errors));
 });
 
-test('at a screen (its desk, its computer, a laptop): it answers right there and carries on - no phone, no getting up', async () => {
+test('at a screen (its desk, its computer, a laptop): it answers right there and carries on — no phone, no getting up', async () => {
   const c = city();
   c.sim.start(); c.sim.skipTo(10.5);
   const a = await busyWithSomething(c, 30, null, true);

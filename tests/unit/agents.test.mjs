@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The agent registry (server/agents.js, PLAN WP2.1, I8.8, I8.12, E20): records, ownership, shares, the boot sync of
 // residents that are agents already, and the rule that the registry never reads inside the opaque references.
 import assert from 'node:assert/strict';

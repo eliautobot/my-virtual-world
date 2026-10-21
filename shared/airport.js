@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The airport module (docs/features/play-modules.md §Airport): ring courses flown against the clock from an airport.
 // Ten courses, each for one class of aircraft (shared/aircraft-specs.js), harder as they go: more rings, smaller rings,
 // farther, lower, twistier. A course is laid out in the airport's own frame (its runway heading), the same for every
-// airport, and lifted clear of the ground and the buildings under it - so a course is the same length everywhere and
+// airport, and lifted clear of the ground and the buildings under it — so a course is the same length everywhere and
 // its stars are fixed. The clock starts at the first ring (the gate) and stops at the last.
 //
 // The browser reports the flight path only ([t ms, x, y, z] samples); verify() finds the ring passes in it itself, checks
@@ -16,13 +16,13 @@ import { registerPlay } from './play.js';
 // back), hop (short low hops for a helicopter). dist: how far out (m); alt: height above the airport (m); r: ring radius.
 const SPECS = [
   { id: 'first-flight', label: 'First Flight', aircraft: 'prop', difficulty: 1, n: 6, r: 24, style: 'loop', dist: [450, 650], alt: [45, 60], blurb: 'Six big rings round the field. Take off, bank gently, keep it smooth.' },
-  { id: 'coast-cruise', label: 'Coastline Cruise', aircraft: 'prop', difficulty: 2, n: 8, r: 21, style: 'tour', dist: [500, 1000], alt: [40, 80], blurb: 'Out over the land and back - watch the heights change.' },
+  { id: 'coast-cruise', label: 'Coastline Cruise', aircraft: 'prop', difficulty: 2, n: 8, r: 21, style: 'tour', dist: [500, 1000], alt: [40, 80], blurb: 'Out over the land and back — watch the heights change.' },
   { id: 'hover-hop', label: 'Hover Hop', aircraft: 'heli', difficulty: 2, n: 8, r: 18, style: 'hop', dist: [120, 380], alt: [15, 40], blurb: 'Short low hops in a helicopter: slow down, line up, slide through.' },
-  { id: 'city-hop', label: 'City Hop', aircraft: 'heli', difficulty: 3, n: 10, r: 16, style: 'tour', dist: [300, 700], alt: [30, 70], blurb: 'Weave between the rooftops - the rings sit just over the buildings.' },
+  { id: 'city-hop', label: 'City Hop', aircraft: 'heli', difficulty: 3, n: 10, r: 16, style: 'tour', dist: [300, 700], alt: [30, 70], blurb: 'Weave between the rooftops — the rings sit just over the buildings.' },
   { id: 'jet-intro', label: 'Jet Familiarisation', aircraft: 'jet', difficulty: 4, n: 8, r: 26, style: 'loop', dist: [1200, 1600], alt: [120, 160], blurb: 'A long take-off run, then wide fast turns. Plan your turns early.' },
   { id: 'island-loop', label: 'Island Loop', aircraft: 'prop', difficulty: 5, n: 14, r: 17, style: 'tour', dist: [700, 1500], alt: [35, 110], blurb: 'Fourteen rings across the island. Pace yourself.' },
   { id: 'rooftop-rally', label: 'Rooftop Rally', aircraft: 'heli', difficulty: 6, n: 14, r: 13, style: 'slalom', dist: [500, 1200], alt: [18, 45], blurb: 'Tight, low and quick: a slalom for helicopter pilots.' },
-  { id: 'mountain-pass', label: 'Mountain Pass', aircraft: 'jet', difficulty: 7, n: 12, r: 20, style: 'tour', dist: [1600, 2600], alt: [90, 260], blurb: 'Climb and dive with the land - the rings follow the hills.' },
+  { id: 'mountain-pass', label: 'Mountain Pass', aircraft: 'jet', difficulty: 7, n: 12, r: 20, style: 'tour', dist: [1600, 2600], alt: [90, 260], blurb: 'Climb and dive with the land — the rings follow the hills.' },
   { id: 'speed-circuit', label: 'Speed Circuit', aircraft: 'jet', difficulty: 8, n: 16, r: 18, style: 'slalom', dist: [1800, 3400], alt: [80, 140], blurb: 'Flat out down the slalom and back. Every second counts.' },
   { id: 'ace-gauntlet', label: 'Ace Gauntlet', aircraft: 'prop', difficulty: 10, n: 20, r: 11, style: 'tour', dist: [350, 1100], alt: [22, 120], blurb: 'Twenty small rings, low and twisting. Only aces get three stars.' },
 ];

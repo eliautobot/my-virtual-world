@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Access rules without a server: the route table (DECISIONS C64, C65), capabilities, accounts and sessions on a fake
 // clock, request checks (client address, secure requests, Origin, CSRF), the password policy and destructive edits.
 import assert from 'node:assert/strict';

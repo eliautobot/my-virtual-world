@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.3 driving on the island: beyond the city the ground is the island's terrain (roads graded in), for the driver's own
 // browser simulation and for the server's; the server accepts poses anywhere on the island above the ground and out of
 // deep water; water slows a car, stops it at its wading depth and always lets it back out.

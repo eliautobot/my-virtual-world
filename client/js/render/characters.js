@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Character lab: GPU-instanced Tripo characters (male + female bodies, 65-bone Mixamo rig, 4-weight skinning).
 // Same public API as the original renderer (constructor, group, setAppearance, begin, push, end, stats, setShadows).
 // - Meshes/clips come from /assets/chars/<kind>.{json,bin} (built by mvw-next-character-module/tools/build_lab_chars.py).
@@ -137,7 +137,7 @@ function loadBase(kind) {
     // a clip this character lacks (its added frames missing or not yet made) plays as another, never as no frames at all
     TRIPO_CLIPS.forEach((n, k) => { if (len[k]) return; const f = T[TRIPO_FALLBACK[n]] ?? T.idle; off[k] = off[f]; len[k] = len[f] || len[T.idle]; });
     // the clips placed exactly against the body (charClips.js TRIPO_EXACT) play without the arm calibration: their length
-    // goes negative (char-glsl.js chRigK) - only when the character has them, not a stand-in
+    // goes negative (char-glsl.js chRigK) — only when the character has them, not a stand-in
     for (const n of TRIPO_EXACT) if (man.clips.some(c => c.name === n)) len[T[n]] = -Math.abs(len[T[n]]);
     // where it holds things (tools/chars/extra-clips.mjs grips): only with its added frames, which the hold clips are
     const grips = added ? ex.grips?.[kind] || null : null;
@@ -318,7 +318,7 @@ float charRough() {
 `;
 const RIM = /* glsl */`
 {
-  // (selected or hovered: outlined instead - render/outline.js)
+  // (selected or hovered: outlined instead — render/outline.js)
   totalEmissiveRadiance += diffuseColor.rgb * uIndoor * vLimb.w * 0.45;
 }
 `;
@@ -354,7 +354,7 @@ export class Characters {
     this.kinds = [];           // per kind: { data, lods: [{ L, g, mesh, ... }], mats }
     // instance staging per (kind, lod), filled by push() even before the meshes exist
     // (each sized for the people actually drawn with that character at that detail, and doubled when more are: sized for
-    // every possible person, 12032, the 129 meshes' buffers were ~74 MB of zeros sent to the GPU at the first frame -
+    // every possible person, 12032, the 129 meshes' buffers were ~74 MB of zeros sent to the GPU at the first frame —
     // 4.5 s of the phone's loading screen, 2026-10-04)
     const room0 = 256;   // (instances each character's mesh at each detail starts with room for)
     this.stage = KINDS.map(() => lods.map(() => ({ P: new Float32Array(room0 * 4), An: new Float32Array(room0 * 4), M: new Float32Array(room0 * 4), n: 0, cap: room0 })));
@@ -432,7 +432,7 @@ export class Characters {
     };
     const tx = !!d.colorMap;
     if (mask) {
-      // (render/outline.js: the body alone, in the mask's colour - its shape as its shadow has it)
+      // (render/outline.js: the body alone, in the mask's colour — its shape as its shadow has it)
       const m = new THREE.MeshBasicMaterial({ depthTest: false, depthWrite: false, fog: false });
       m.onBeforeCompile = sh => {
         Object.assign(sh.uniforms, U, { uMaskCol: MASK_COL });
@@ -481,8 +481,8 @@ export class Characters {
     })));
   }
   /**
-   * Stand-ins for the characters' shaders - the clothed body (colour map, and normal map when they load one) and its
-   * shadow's depth - to compile with the world's at load (render: main.js). The characters arrive after the loading
+   * Stand-ins for the characters' shaders — the clothed body (colour map, and normal map when they load one) and its
+   * shadow's depth — to compile with the world's at load (render: main.js). The characters arrive after the loading
    * screen, and compiling their shader then held a frame 130–400 ms on the phone (2026-10-04). Kept afterwards, so
    * three.js keeps the programs for the real characters.
    */
@@ -578,10 +578,10 @@ export class Characters {
   }
   /**
    * A point of a hand's grip frame (tools/chars/extra-clips.mjs: x the index finger's side, y along the fingers, z out of
-   * the palm, on the palm) where character `app` has it in MVW clip c at phase u - worked out on the CPU from the same
+   * the palm, on the palm) where character `app` has it in MVW clip c at phase u — worked out on the CPU from the same
    * baked frames the shader skins with (the fishing line hangs off the rod's tip, the catch lies in the hands). side:
    * 'R' or 'L'. → [x, y, z] in the body's own frame (before its height, build and turn: bodyToWorld), or null while its
-   * model loads. (For the clips that play without the arm calibration - charClips.js TRIPO_EXACT - this is exact.)
+   * model loads. (For the clips that play without the arm calibration — charClips.js TRIPO_EXACT — this is exact.)
    */
   gripPoint(app, c, u, side, p = [0, 0, 0], out = [0, 0, 0]) {
     const kd = this.kinds[app < this.kindOf.length ? this.kindOf[app] : 0], d = kd?.d, gr = d?.grips?.[side];
@@ -615,11 +615,11 @@ export class Characters {
       s.P[o] = x; s.P[o + 1] = y; s.P[o + 2] = z; s.P[o + 3] = yaw;
       s.An[o] = a; s.An[o + 1] = pA; s.An[o + 2] = b; s.An[o + 3] = pB;
       s.M[o] = w; s.M[o + 1] = app; s.M[o + 2] = prop; s.M[o + 3] = flags;
-      if (flags & 3) this.hl.push({ kind, j: k, at: o, sel: (flags & 3) === 2 });   // (selected or hovered: outlined - render/outline.js)
+      if (flags & 3) this.hl.push({ kind, j: k, at: o, sel: (flags & 3) === 2 });   // (selected or hovered: outlined — render/outline.js)
     }
-    const shape = prop || item || GEAR_CLIP[cA] ? shapeFor(cA, prop, item) : 0;   // (item: the drink they hold, the dish they eat - shared/food.js; a fishing rod)
+    const shape = prop || item || GEAR_CLIP[cA] ? shapeFor(cA, prop, item) : 0;   // (item: the drink they hold, the dish they eat — shared/food.js; a fishing rod)
     if (shape && this.lodIds[k] < 2 && this.kinds[kind]) {
-      // (set down on a table: on the top of the one in front of them - a picnic table, a bar stands higher than a café's)
+      // (set down on a table: on the top of the one in front of them — a picnic table, a bar stands higher than a café's)
       if (onTable(shape)) { const r = this.deskRoot(kind, app, x, y, z, yaw, _root); this.props.push(kind, r[0], r[1], r[2], yaw, a, pA, b, pB, w, app, shape, flags); }
       else this.props.push(kind, x, y, z, yaw, a, pA, b, pB, w, app, shape, flags);
     }

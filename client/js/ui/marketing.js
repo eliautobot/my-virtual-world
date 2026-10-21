@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Marketing (administrators; the edit panel's 📣 section; 2026-10-05): every asset that carries ads, in one place.
 // - Billboards (standard or large; the pole centred or at one end with the board overhanging) and street signs, put up
 //   with the decorating placer (ui/decor-tools.js) on public land or the city's lots; a selected one can be turned,
@@ -80,7 +80,7 @@ function renderAssets() {
   const list = (S.world?.decorations || []).filter(d => AD_ASSETS[d.t]);
   root.querySelector('.mk-n').textContent = `(${list.length})`;
   root.querySelector('.mk-assets').innerHTML = list.length ? list.map(d => `<div class="mk-row"><span>${d.t === 'street_sign' ? '🚏' : '🪧'} ${esc(name(d.t))}${d.hc?.title ? ` · <span class="dim">${esc(d.hc.title)}</span>` : ''}</span><span class="row"><button type="button" class="btn small" data-go="${esc(d.id)}" title="Show it">🎯</button><button type="button" class="btn small" data-pick="${esc(d.id)}" title="Select it">✎</button></span></div>`).join('')
-    : '<p class="hint">None yet: pick a size and how it stands, then “Place a billboard” - or a street sign for a sidewalk or a park.</p>';
+    : '<p class="hint">None yet: pick a size and how it stands, then “Place a billboard” — or a street sign for a sidewalk or a park.</p>';
 }
 
 // ------------------------------------------------------------------ metro panels

@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Property for Virtual Coin over HTTP (server/economy/realty.js; docs/features/ECONOMY.md §7, §12): the city sells land
 // for VC and players resell it (the title passes in the payment's transaction; the 10% world
-// fee is destroyed); a flat is let for VC - the first day at once, then by the day at the settlement - and edits can't
+// fee is destroyed); a flat is let for VC — the first day at once, then by the day at the settlement — and edits can't
 // destroy it while it is let; leases end by the tenant, or after the days of grace when the rent goes unpaid.
 import test from 'node:test';
 import assert from 'node:assert/strict';

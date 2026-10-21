@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The edit journal (PLAN WP1.8, DECISIONS C35, C116): every accepted world edit with its account and, for each piece of
-// the world it changed (the state keys of server/world/edit.js), the state before and after - kept in next.db.
+// the world it changed (the state keys of server/world/edit.js), the state before and after — kept in next.db.
 // - Each account undoes and redoes its own edits. Its history holds 100 steps (undo and redo together, as in any
 //   editor); a new edit drops the redo steps.
 // - An undo, redo or revert whose target someone changed later is refused, naming who did what; a refused undo stays
@@ -9,7 +9,7 @@
 // - Restores check placement again and never bring newcomers; adding a resident is logged but cannot be undone.
 // - Kept until the owner sets a limit (activity.retentionDays). A deleted account's entries keep its display name only.
 // The world lives in next.db too (WP4.1, server/world/world-db.js): an edit, an undo, a redo or a revert and its journal
-// rows commit in one transaction. (Should a write ever fail, undoing that edit is refused as changed - never applied twice.)
+// rows commit in one transaction. (Should a write ever fail, undoing that edit is refused as changed — never applied twice.)
 import { changedFloors } from './edit.js';
 
 export const UNDO_DEPTH = 100;

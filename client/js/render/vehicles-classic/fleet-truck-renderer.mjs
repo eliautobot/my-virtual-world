@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Original full-size regular-cab pickup. A separate double-wall open bed,
 // stamped floor and wheel tubs sit on a ladder frame behind a fitted cabin.
 import {createVehicleMeshTools,authorRoadWheel} from './vehicle-mesh-tools.mjs';

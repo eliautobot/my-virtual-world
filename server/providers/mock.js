@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The mock provider (PLAN WP2.2): a deterministic, scriptable adapter for tests. It is a test manifest, so the registry only
 // takes it when tests allow it; it never appears in a real installation. The run text is the script:
 //   "crash"  → the helper dies mid-run      "slow:300" → the run takes 300 ms      "fail" → the run ends with an error

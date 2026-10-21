@@ -1,4 +1,4 @@
-# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 # Shared helpers for tools/deploy/*.sh. Sourced by the scripts, never run directly.
 # Configuration: ${MVW_DEPLOY_ENV:-~/.config/mvw-next/deploy.env} (start from deploy.env.example next to this file).
 set -euo pipefail

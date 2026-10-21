@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The OpenClaw adapter (docs/features/agent-providers.md): runs in the provider helper process (../host-main.mjs) and
 // keeps one live connection per OpenClaw connection (./link.js). Every call carries the connection's settings and
 // credentials; the connection is (re)built from them when they change.
@@ -76,7 +76,7 @@ async function publicOrAllowed(url, allowPrivate) {
 }
 
 /** The gateway's own web address beside its WebSocket one: the same host and port, http(s), and its path as the base
- *  (a gateway served under a path - behind a proxy - is reached there for both). */
+ *  (a gateway served under a path — behind a proxy — is reached there for both). */
 export function httpBase(url) {
   const u = new URL(url);
   u.protocol = u.protocol === 'wss:' ? 'https:' : 'http:';
@@ -161,7 +161,7 @@ const adapter = {
     return { defaultId: r && r.defaultId ? String(r.defaultId) : null,
       agents: list.map((a, i) => {
         const id = ids[i] || {}, cfg = a.identity || {};
-        // (a name OpenClaw only made up - its generic default, "Assistant" - gives way to the one in its list, else its id:
+        // (a name OpenClaw only made up — its generic default, "Assistant" — gives way to the one in its list, else its id:
         // two agents with no name of their own stay told apart)
         const name = (id.name && id.nameSource !== 'default' && id.name) || cfg.name || a.name || a.id;
         return { id: a.id.slice(0, 120), name: String(name).slice(0, 60), emoji: String(id.emoji || cfg.emoji || '').slice(0, 32) };
@@ -199,7 +199,7 @@ const adapter = {
 
   /**
    * One of an answer's media, fetched the way OpenClaw's own UI fetches it ({ sessionKey, agentKey, ref }): a kept one
-   * (ref.artifactId) through artifacts.download - its bytes, or a short-lived link carrying its own ticket - and a path or
+   * (ref.artifactId) through artifacts.download — its bytes, or a short-lived link carrying its own ticket — and a path or
    * address an agent wrote (ref.source) through the gateway's assistant-media route, signed in with this device's token;
    * OpenClaw's own rules decide which files a session may show. Returns { mime, data } (base64), at most MEDIA_MAX.
    */
@@ -228,7 +228,7 @@ const adapter = {
   },
 
   // ---------------------------------------------------------------- the sub-menu (./menu.js)
-  /** One of the sub-menu's calls: { method, params } - only the listed ones; no secret's value comes back. */
+  /** One of the sub-menu's calls: { method, params } — only the listed ones; no secret's value comes back. */
   async menu(p) { return menuCall(await linkFor(p), String(p.method || ''), p.params || {}); },
   /** Its agent's own computer in the owner's PC (./files.js): { op, agentId, … }; a change needs Full access. */
   async files(p) {

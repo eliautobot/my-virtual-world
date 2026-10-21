@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 /* The loading screen (index.html #loading): starts its moving art (js/loading-art.js) on a worker when the browser can
    hand the canvas to one, so the art keeps moving while the page builds the world, else on the page; and gives main.js
    window.__mvwLoading:
@@ -13,9 +13,9 @@
   let cv = root.querySelector('.ld-canvas');
   const msgEl = document.getElementById('load-msg');
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  // Who draws the art, measured: on a phone the GPU is the bottleneck - a GPU-drawn canvas competed with the world for it
+  // Who draws the art, measured: on a phone the GPU is the bottleneck — a GPU-drawn canvas competed with the world for it
   // while it loads (start-up 1-3 s slower), drawn by the CPU start-up took as long as before. On a computer the CPU path is
-  // the bottleneck - at 3440×1440 it managed 26-36 frames a second where the GPU-drawn one holds 60, and start-up is the
+  // the bottleneck — at 3440×1440 it managed 26-36 frames a second where the GPU-drawn one holds 60, and start-up is the
   // same either way. So: the CPU on touch devices, the GPU elsewhere. ?ldsoft=1 / ?ldsoft=0 force one.
   const force = /[?&]ldsoft=([01])/.exec(location.search);
   const soft = force ? force[1] === '1' : matchMedia('(pointer: coarse)').matches;

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.9 residents' cars: a drive's lanes run on the roads (city streets and island roads), in the right-hand lane for
 // the way they go, without jumps; the plan marks the drive (the segment's vehicle byte, which the wire format carries);
 // the router tells who drives where and when, matching the hidden segment.

@@ -1,10 +1,10 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Settings → Connections (PLAN WP2.2, CHECKLIST I8.1, I8.7, I8.13; DECISIONS C60, A8, A9).
 // The list and the add form are drawn from what the server reports (GET /api/providers: every kind with its fields, whether its
 // adapter exists and whether this account may add one; GET
 // /api/connections: what this account may see). Nothing about a provider is hard-coded here. Credentials are
 // password fields; a saved one is shown only as "set" and a blank keeps it. The server decides what each account may do.
-// An agent platform with its own window (a kind marked hub: OpenClaw - Agent Providers, ui/agent-providers.js) is listed
+// An agent platform with its own window (a kind marked hub: OpenClaw — Agent Providers, ui/agent-providers.js) is listed
 // here too, but added and managed there: its row and the note above the list open it.
 import { auth } from '../core/auth.js';
 import { getJSON, post } from '../core/net.js';
@@ -15,7 +15,7 @@ const SCOPES = { account: 'Personal', installation: 'Shared' };
 
 function fieldHtml(f, value, edit) {
   const id = `cf-${f.key}`, lab = esc(f.label) + (f.required && !edit ? ' *' : '');
-  if (f.type === 'secret') return `<label>${lab}<input class="input cf" id="${id}" data-key="${esc(f.key)}" data-secret="1" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="${edit && value ? 'set - leave blank to keep' : ''}"></label>`;
+  if (f.type === 'secret') return `<label>${lab}<input class="input cf" id="${id}" data-key="${esc(f.key)}" data-secret="1" type="password" autocomplete="new-password" spellcheck="false" maxlength="4000" placeholder="${edit && value ? 'set — leave blank to keep' : ''}"></label>`;
   if (f.type === 'select') return `<label>${lab}<select class="input cf" id="${id}" data-key="${esc(f.key)}">${f.options.map(o => `<option value="${esc(o)}"${(value ?? f.default) === o ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
   if (f.type === 'boolean') return `<label class="check"><input class="cf" id="${id}" data-key="${esc(f.key)}" data-bool="1" type="checkbox"${(value ?? f.default) ? ' checked' : ''}> ${lab}</label>`;
   return `<label>${lab}<input class="input cf" id="${id}" data-key="${esc(f.key)}" type="${f.type === 'number' ? 'number' : 'text'}" maxlength="500" spellcheck="false" value="${esc(value ?? f.default ?? '')}"></label>`;
@@ -34,7 +34,7 @@ export async function connectionsTab(d, body) {
   err('');
   const manager = auth.can('connections.manage');
   const kindOf = id => kinds.find(k => k.id === id);
-  /** Kinds this account may add: the server says (addable); an older server's list falls back to the old rule - members only
+  /** Kinds this account may add: the server says (addable); an older server's list falls back to the old rule — members only
    *  the ones that call a remote service, and a server-made kind (connected agents) never by hand. Only working ones are offered. */
   const addable = () => kinds.filter(k => k.implemented && !k.system && !k.hub && ('addable' in k ? k.addable
     : (manager || !k.modes ? (manager || k.connectionKind === 'remote') : k.modes.some(m => m.connectionKind === 'remote'))));
@@ -128,7 +128,7 @@ export async function connectionsTab(d, body) {
     try {
       const r = await post(`/api/connections/${action}`, { id });
       if (action === 'discover') out.textContent = r.ok === false ? (r.error || 'Could not look') : (r.agents && r.agents.length ? `Found: ${r.agents.map(a => a.name || a.nativeId).join(', ')}` : 'No agents found');
-      else out.textContent = r.ok === false ? `${r.error || 'Not connected'}${r.fix ? ` - ${r.fix}` : ''}` : (r.detail || 'Connected');
+      else out.textContent = r.ok === false ? `${r.error || 'Not connected'}${r.fix ? ` — ${r.fix}` : ''}` : (r.detail || 'Connected');
       if (action !== 'discover') { await load(); const keep = out.textContent; render(); const o = body.querySelector(`.conn[data-id="${id}"] .c-out`); if (o) { o.textContent = keep; o.classList.remove('hidden'); } }
     } catch (e) { out.textContent = e.message; }
   };

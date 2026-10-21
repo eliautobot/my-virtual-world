@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Roads across the island (WP4.3/4.5, wp4-world-spec.md §3–4): the network generated once around the city (stored as
-// alignment records in world.roads, like any road an administrator draws later), and each road's vertical profile -
-// the terrain along it, smoothed and held within the road type's grade, starting level with the city's streets - that
+// alignment records in world.roads, like any road an administrator draws later), and each road's vertical profile —
+// the terrain along it, smoothed and held within the road type's grade, starting level with the city's streets — that
 // the terrain is graded to (cuttings and embankments), so the ground, the road surface, the physics and the
 // simulation agree.
 import { RoadNetwork, alignmentGeometry, pointAt, project, DEFAULT_ROAD_PROFILES } from './roads.js';
@@ -33,7 +33,7 @@ export function roadProfile(geom, ground, { maxGrade = 0.08, fixed = [], minY = 
   // Pinned stations keep their height; everything else is graded toward them (forward and backward passes).
   const pinned = new Uint8Array(n), gk = new Float64Array(n).fill(1);
   // A fixed entry is a station { s, y } or a level stretch { s0, s1, y } (s1 may run past a ring's start); ease: metres
-  // past it over which the grade comes on gently (a vertical curve: a module's gate, 2026-10-15 - the road bent sharply
+  // past it over which the grade comes on gently (a vertical curve: a module's gate, 2026-10-15 — the road bent sharply
   // from level to its full grade)
   for (const f of fixed) {
     const i0 = Math.round((f.s0 ?? f.s) / d), i1 = Math.round((f.s1 ?? f.s) / d);
@@ -161,7 +161,7 @@ export function generateIslandRoads(island, grid) {
       if (B.length - at < 80) {
         const q = pointAt(LG, X.arms.find(a => a.id === 'isl-loop').s, {});
         out.splice(out.indexOf(beach), 1); net.delete('isl-beach');
-        tryAdd([{ id: 'isl-beach', profile: 'country', name: 'Beach Road', pts: [P(g.X[mid], eS), P(q.x, q.z)] }], tLoop);   // (from the edge street's centre, like the first try: g.maxZ, its curb, never joined the city - 2026-10-06)
+        tryAdd([{ id: 'isl-beach', profile: 'country', name: 'Beach Road', pts: [P(g.X[mid], eS), P(q.x, q.z)] }], tLoop);   // (from the edge street's centre, like the first try: g.maxZ, its curb, never joined the city — 2026-10-06)
       }
     }
   }
@@ -207,7 +207,7 @@ export class IslandRoads {
   /** depthAt(x, z): water depth (m) under a point (for bridges, WP4.15); skipBridges: leave the ground under bridge spans
    *  as it is (the browser's terrain: water shows under a bridge), else the deck is the ground (walking, driving). */
   constructor(records, natural, { cityRect = null, cityY = 0, seaLevel = -2.4, profiles = DEFAULT_ROAD_PROFILES, depthAt = null, skipBridges = false, gates = [], drawn = false } = {}) {
-    // drawn: the drawn terrain's ground (render/terrain.worker.js) - held lower under a road's corridor (DRAWN_FORMATION:
+    // drawn: the drawn terrain's ground (render/terrain.worker.js) — held lower under a road's corridor (DRAWN_FORMATION:
     // within the road's sides, which reach DROP down) so its 2.4 m cells never poke up through the asphalt in a cutting
     // (2026-10-15, the product owner: grass through a marina's access road); walking and driving keep FORMATION
     this.formation = drawn ? DRAWN_FORMATION : FORMATION;
@@ -216,7 +216,7 @@ export class IslandRoads {
     this.profiles = profiles; this.prof = new Map(); this.half = new Map();
     const inCity = (x, z) => cityRect && x >= cityRect.x0 - 0.01 && x <= cityRect.x1 + 0.01 && z >= cityRect.z0 - 0.01 && z <= cityRect.z1 + 0.01;
     // Two passes. First every road on its own, level with the city's streets where it leaves the city. Then every
-    // junction takes one shared height - the mean of its roads' first-pass heights there - and the roads are profiled
+    // junction takes one shared height — the mean of its roads' first-pass heights there — and the roads are profiled
     // again through those heights, level across the junction's pad (so the pad is flat and meets every road).
     // Where a road leaves the city (2026-10-03: "the junction between the 4lane and the 2lane needs work"): it
     // starts in the city's edge junction, which the city draws at street level out to its mouth past the edge. The road
@@ -274,15 +274,15 @@ export class IslandRoads {
       const ys = j.arms.map(a => profileAt(first.get(a.id), a.s)), city = inCity(j.x, j.z), y = city ? cityY : flat.length ? flat.reduce((a, b) => a + b, 0) / flat.length : ys.reduce((a, b) => a + b, 0) / ys.length;
       const plan = this.plans.get(j.key), half = j.carriageHalf / UM_PER_M;
       const r = plan ? Math.max(...plan.arms.map(A => A.mouth + A.sec.outer)) + 2 : half + CURB_RETURN + 3;
-      // (a road through the junction is two arms with the same station: each side by its direction - 2026-10-13: both took
+      // (a road through the junction is two arms with the same station: each side by its direction — 2026-10-13: both took
       // the first side's mouth, so where the paving reached further on the other side the road dipped under it)
       const lv = a => { const dir = along(a, this.net.geometry(a.id)), A = plan?.arms.find(x => x.id === a.id && Math.abs(x.s - a.s) < 0.5 && x.along === dir); return A ? A.mouth + 3 : r; };
       const runs = j.arms.map(a => { const e = a.s + along(a, this.net.geometry(a.id)) * lv(a); return { id: a.id, s0: Math.min(a.s, e), s1: Math.max(a.s, e) }; });
       JS.push({ j, y, city, plan, r, lv, runs, g: JS.length, flat: flat.length > 0 });
     }
     // Junctions close together on one road share one height (2026-10-13): each holds its roads level out past its
-    // mouths, and where two such stretches overlap - or lie closer than the road's grade can climb between their
-    // heights - the later one used to win, so the road beside a junction stood off its paving (and ground over it).
+    // mouths, and where two such stretches overlap — or lie closer than the road's grade can climb between their
+    // heights — the later one used to win, so the road beside a junction stood off its paving (and ground over it).
     const grp = i => (JS[i].g === i ? i : (JS[i].g = grp(JS[i].g)));
     for (let pass = 0; pass < 4; pass++) {
       let merged = false;
@@ -360,15 +360,15 @@ export class IslandRoads {
     for (const id of cand) {
       const pr = project(this.net.geometry(id), x, z), half = this.half.get(id);
       if (!pr || pr.dist > half + BLEND) continue;
-      // over a bridge: the deck only (open water beside it - never a ramp out over the water, 2026-10-03); for
+      // over a bridge: the deck only (open water beside it — never a ramp out over the water, 2026-10-03); for
       // drawing and vehicle physics not even that (render/terrain.worker.js, shared/terrain-physics.js)
       if (this.onBridge(id, pr.s) && (skipDecks || pr.dist > half)) continue;
       const ry = profileAt(this.prof.get(id), pr.s), t = pr.dist <= half ? 0 : (pr.dist - half) / BLEND, w = t * t * (3 - 2 * t);
       const y = ry - this.formation + (h - ry + this.formation) * w;
       if (!best || pr.dist - half < best.d) best = { d: pr.dist - half, y, id, s: pr.s };
     }
-    // Within a road's own width its profile rules. A junction levels what it paves - its footprint: the paved area and
-    // the corners' gutters, curbs and sidewalks (shared/road-kit.js plan) - and the ground blends away from that edge.
+    // Within a road's own width its profile rules. A junction levels what it paves — its footprint: the paved area and
+    // the corners' gutters, curbs and sidewalks (shared/road-kit.js plan) — and the ground blends away from that edge.
     // (2026-10-13, the product owner: "the terrain doesn't clear … seems to happen a lot at intersections". A circle
     // round the junction was levelled instead: past the stretch its roads are held level it stood as a bank over a
     // sloped road; and where a wide road meets a narrow one, the paved corners lie outside the narrow road, so letting
@@ -379,16 +379,16 @@ export class IslandRoads {
       if (c > BLEND) continue;
       const d = P.foot ? footDist(P.foot, x, z) : c;
       if (d > BLEND || (best && d >= best.d)) continue;
-      // (a pad without a plan - where a road leaves the city - keeps to the stretch its road is held level on)
+      // (a pad without a plan — where a road leaves the city — keeps to the stretch its road is held level on)
       if (!P.foot && best && P.arms?.some(a => a.id === best.id) && !P.arms.some(a => a.id === best.id && this.alongLevel(a, best.s))) continue;
       const t = d <= 0 ? 0 : d / BLEND, w = t * t * (3 - 2 * t);
       best = { d, y: P.y - FORMATION + (h - P.y + FORMATION) * w };
     }
     return best ? best.y : h;
   }
-  /** The drawn surface at (x, z) where something stands on a road - lanes and shoulders at the road's drawn top
+  /** The drawn surface at (x, z) where something stands on a road — lanes and shoulders at the road's drawn top
    *  (DRAW_LIFT over its profile), curbs and sidewalks CURB_RISE above that, junction pads and turning circles, bridge
-   *  decks - or null off the roads. Exact (no height grid): feet, wheels' tilt and tyre marks meet what is drawn (the product owner
+   *  decks — or null off the roads. Exact (no height grid): feet, wheels' tilt and tyre marks meet what is drawn (the product owner
    *  2026-10-05: feet sank into the 2-lane roads; people and traffic sank into bridge decks near their edges). */
   top(x, z) {
     if (!this.net.size) return null;
@@ -499,8 +499,8 @@ function footDist(foot, x, z) {
   }
   return best;
 }
-/** The piers under the bridges, where render/island-roads.js draws them - at the road's 2.44 m stations, one each 30 m
- *  of a span over water deeper than 2 m (hw across the road, hd along it), and an abutment where a span meets a bank -
+/** The piers under the bridges, where render/island-roads.js draws them — at the road's 2.44 m stations, one each 30 m
+ *  of a span over water deeper than 2 m (hw across the road, hd along it), and an abutment where a span meets a bank —
  *  so swimmers meet them as walls (2026-10-05: swimming under a bridge). [{ x, z, nx, nz, hw, hd, top, bottom }];
  *  seabed(x, z): the ground under the water (Island.baseHeight); inCity(x, z): stations the city draws instead. */
 export function bridgePiers(roads, seabed, inCity = () => false) {

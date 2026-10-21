@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Promotional aircraft (WP4.11, PLAN WP4.11, DECISIONS C41): banner planes, blimps and hot-air balloons flying over
 // and round the city with an administrator's advertisement. The configuration (shared/promo.js normalises it, here
 // and in the browser) is kept with the world (world.promo), plus a schedule: the hours of the world's day they fly. Graphics are uploaded images kept in the data folder (served at /promo/), so the

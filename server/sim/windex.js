@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // World index: per-level slot tables (building-local coords), public venue lists, apartment unit contents.
 import { CATALOG, USE_ID } from '../../shared/catalog.js';
 import { itemToLocal } from '../../shared/geom.js';

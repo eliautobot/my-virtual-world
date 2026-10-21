@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Where a city on an island meets the island (WP4.2/4.3): a sidewalk-height apron around the city's road edge, open
-// where island roads leave the city so a road runs on at street level, and the one ground-height rule outdoors - the
+// where island roads leave the city so a road runs on at street level, and the one ground-height rule outdoors — the
 // city's streets and blocks, the apron, then the island's terrain. The renderer draws these rectangles, the driving
 // physics (shared/vehicle-world.js) builds them, and walking (server and browser) stands on them, so all agree.
 import { RoadNetwork, samplePolyline, DEFAULT_ROAD_PROFILES } from './roads.js';
@@ -45,7 +45,7 @@ const onEdge = (g, p) => Math.abs(p.z - g.minZ) < 1e-6 || Math.abs(p.z - g.maxZ)
  * The apron as rectangles ({ x0, z0, x1, z1 }, at sidewalk height): north and south strips across the corners, west and
  * east strips between them, each cut where a road crosses that side. `g` from makeGrid, `records` world.roads. inset:
  * metres left open next to the city's edge (drawing a widened city: its edge streets' own sidewalks lie there, at the
- * same height - two surfaces in one place would flicker); walking and driving use the whole apron.
+ * same height — two surfaces in one place would flicker); walking and driving use the whole apron.
  */
 export function apronRects(g, records, { width = APRON_M, profiles, inset = 0 } = {}) {
   if (g.empty) return [];   // no city, no apron

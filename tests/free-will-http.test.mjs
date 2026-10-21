@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Free Will on a real server (docs/features/FREE-WILL.md §2, §7, §9): an administrator sets up the installation's decision
 // service, an owner switches Free Will on for an agent, the agent's choices come through the provider helper (the mock
 // decision service) and land in its why-log; who may see and change what; credentials never leave the server; the

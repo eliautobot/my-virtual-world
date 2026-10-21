@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The Mind on a real server (docs/features/FREE-WILL.md §3–4, §7, §9): an agent whose brain is a model provider plans its
 // day, reflects on it and answers its chats; what an answer may do is checked (limits, locks, owner vs visitor); thoughts
 // are recorded with their cost and never their text; limits stop it; a failing brain is paused; the installation's
@@ -60,7 +60,7 @@ before(async () => {
   agents = (await owner.get('/api/agents')).json.agents;
   // nobody thinks on its own until a test says so
   for (const a of agents) assert.equal((await owner.post('/api/mind/agent', { agent: a.id, cadence: 'off' })).status, 200);
-  // (its owner's chats here are its city self, with its life and tools: Life - docs/features/CHAT.md §13; Work is agent-work-http's)
+  // (its owner's chats here are its city self, with its life and tools: Life — docs/features/CHAT.md §13; Work is agent-work-http's)
   for (const a of agents) assert.equal((await owner.post('/api/agent-work', { agent: a.id, defaultMode: 'life' })).status, 200);
 });
 after(async () => { await s?.stop(); fake?.close(); });
@@ -225,7 +225,7 @@ test('on its own: an agent plans once when its day starts and reflects once at b
   assert.equal((await owner.post('/api/settings', { values: { 'mind.reflectConnection': String(brain) } })).status, 200);
   for (const x of [a, noBrain]) await owner.post('/api/mind/agent', { agent: x.id, cadence: 'daily' });
   assert.deepEqual((await owner.get(`/api/mind/agent?agent=${noBrain.id}`)).json.status.does, ['reflect'], 'without a brain of its own it only reflects');
-  // (a new world day: today's thoughts - and a failed one's retry wait - belong to the day before)
+  // (a new world day: today's thoughts — and a failed one's retry wait — belong to the day before)
   await owner.post('/api/clock', { skip: 23 });
   await owner.post('/api/clock', { skip: 11 });
   let planned = [];
@@ -277,7 +277,7 @@ test('on post (2026-10-14): no morning plan and no evening reflection while post
     assert.ok((await count(control, 'reflect')) > cr0, 'the control reflected');
     await wait(3000);
     assert.equal(await count(a, 'reflect'), r0, 'no reflection on post');
-    // let go: back to its day - the next morning it plans again
+    // let go: back to its day — the next morning it plans again
     assert.equal((await owner.post('/api/agent-posts/leave', { agent: a.id })).status, 200);
     await owner.post('/api/clock', { skip: 11 });
     for (let k = 0; k < 60 && (await count(a, 'plan')) === p0; k++) await wait(500);

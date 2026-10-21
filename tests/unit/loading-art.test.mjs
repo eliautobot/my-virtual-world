@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The loading screen's art (client/js/loading-art.js): every figure, at any moment, samples into the same number of
 // particles at real places on its stage, and any figure can transform into any other (each particle has exactly one place
 // to go). The file is a classic script (a worker's and a page's), so it is run here in a bare context.

@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The Agent Studio's Visitors tab (docs/features/CHAT.md §14.3; 2026-10-08): what others - players, or anyone
-// choosing it on the map - get when they talk with it in the city: its job (Work: the job brief and what it knows,
-// never its work notes), itself as a resident (Life), or only a greeting. Then everyone who did - each conversation, to
-// read - and the players and agents blocked from talking with any of its owner's agents. A conversation's limits are the
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The Agent Studio's Visitors tab (docs/features/CHAT.md §14.3; 2026-10-08): what others — players, or anyone
+// choosing it on the map — get when they talk with it in the city: its job (Work: the job brief and what it knows,
+// never its work notes), itself as a resident (Life), or only a greeting. Then everyone who did — each conversation, to
+// read — and the players and agents blocked from talking with any of its owner's agents. A conversation's limits are the
 // city admin's (Settings); the server keeps to all of this (server/agent-talk/), this only asks and shows.
 import { S } from '../core/state.js';
 import { getJSON } from '../core/net.js';
@@ -23,7 +23,7 @@ export async function visitorsTab(C, body, live) {
   const st = C.st.visitors ||= { open: null, read: new Map() };
   const name = esc(r.name), conn = r.connection, L = data.limits, mode = data.publicMode, blocks = bl?.blocks || [];
   const b = work && !work.error ? work.brief : null, briefed = !!(b && (b.instructions || b.knowledge || b.company || work.files?.length));
-  // what it can be asked: by its brain - the Mind takes all three; a connected agent's platform answers for itself; one
+  // what it can be asked: by its brain — the Mind takes all three; a connected agent's platform answers for itself; one
   // with tools on real machines, or none, only greets
   const kinds = !conn ? null : conn.kind === 'models' ? ['work', 'life', 'greet'] : conn.kind === 'agentapi' ? ['life', 'greet'] : null;
   const OPTS = {
@@ -55,9 +55,9 @@ export async function visitorsTab(C, body, live) {
   const blockedAgents = new Set(blocks.filter(x => x.agent).map(x => x.agent.id));
   const others = (S.agentList || []).filter(a => !a.mine && a.id !== r.id && !blockedAgents.has(a.id)).sort((a, z) => a.name.localeCompare(z.name));
   body.innerHTML = `<div class="wk vt">
-    <p class="hint wk-intro">When someone else - a player, or anyone choosing ${name} on the map - talks with it, it answers in its speech bubble, to them alone. You choose what they get; you read every conversation, and block whom you choose.</p>
+    <p class="hint wk-intro">When someone else — a player, or anyone choosing ${name} on the map — talks with it, it answers in its speech bubble, to them alone. You choose what they get; you read every conversation, and block whom you choose.</p>
     <div class="st-sec"><div class="st-sec-h"><h4>🛎️ When others talk with ${name}</h4></div>${off}${choice}
-      ${L ? `<p class="hint vt-lim">Each conversation: up to ${plural(L.maxMessages, 'message')} of ${L.maxChars} characters, cleared ${mins(L.windowMs)} minutes after its first message - the city's limits, against misuse and runaway cost.</p>` : ''}</div>
+      ${L ? `<p class="hint vt-lim">Each conversation: up to ${plural(L.maxMessages, 'message')} of ${L.maxChars} characters, cleared ${mins(L.windowMs)} minutes after its first message — the city's limits, against misuse and runaway cost.</p>` : ''}</div>
     <div class="st-sec"><div class="st-sec-h"><h4>💬 Conversations with others</h4><span class="st-pill">${convs.length}</span><button type="button" class="btn small icon vt-ref" data-c="refresh" title="Look again" aria-label="Look again">↻</button></div>
       <p class="hint">Everyone who talked with ${name} in the last 30 days. Only you see them.</p>
       ${rows ? `<ul class="vt-list">${rows}</ul>` : '<p class="hint dim">Nobody yet.</p>'}</div>

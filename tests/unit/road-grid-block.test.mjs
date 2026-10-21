@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // "Fill this block" (shared/road-grid.js blockRuns; 2026-10-14, the product owner: lots taken away from one block of a
 // grid put back like the rest): from a built grid's roads, the block beside a road is filled with exactly the runs the
-// grid tool made for it - the rows along the roads its lots face (whichever the clicked road is), the rows between along
-// the others - at any turn of the grid; a road that isn't a grid's, or a side with no block, gives nothing.
+// grid tool made for it — the rows along the roads its lots face (whichever the clicked road is), the rows between along
+// the others — at any turn of the grid; a road that isn't a grid's, or a side with no block, gives nothing.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { gridLayout, blockRuns } from '../../shared/road-grid.js';

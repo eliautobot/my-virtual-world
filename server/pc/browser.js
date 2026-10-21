@@ -1,12 +1,12 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The PC's browser (docs/features/agent-pc.md §5), two kinds behind the same commands (open, more, links, back, save,
 // search, and click / type / press for a real browser):
 //   the built-in reader  this server fetches the page and keeps its readable words, its links numbered ("open 3"
 //                        follows the third). No scripts run. It only ever reaches the public internet: every address a
 //                        page or a redirect names is resolved and checked, and the connection goes to the address that
 //                        was checked (no second lookup to trick). Bounded in size, time and pages a day.
-//   a browser service    any browser that speaks the Chrome DevTools Protocol - a cloud browser rented for AI agents, a
-//                        Lightpanda, a Chrome on the owner's machine - set up as a connection of the kind "browser"
+//   a browser service    any browser that speaks the Chrome DevTools Protocol — a cloud browser rented for AI agents, a
+//                        Lightpanda, a Chrome on the owner's machine — set up as a connection of the kind "browser"
 //                        (its address with its key, sealed). The page runs as in any browser; the agent reads it the same
 //                        way, and can click, type and press keys on the numbered fields and buttons. Its owner's PC
 //                        window shows the screen (screenshots after each step, kept in memory only).
@@ -114,7 +114,7 @@ export function fetchPublic(raw, { maxBytes = PAGE_MAX, timeoutMs = FETCH_MS, me
 }
 
 // ------------------------------------------------------------------------------------------- readable text
-const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'', nbsp: ' ', mdash: '-', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', copy: '©', reg: '®', trade: '™', euro: '€', pound: '£', middot: '·', bull: '•', times: '×', laquo: '«', raquo: '»', deg: '°' };
+const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'', nbsp: ' ', mdash: '—', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', copy: '©', reg: '®', trade: '™', euro: '€', pound: '£', middot: '·', bull: '•', times: '×', laquo: '«', raquo: '»', deg: '°' };
 export const decode = s => String(s).replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
   if (e[0] === '#') { const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10); return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : ''; }
   return ENT[e.toLowerCase()] ?? m;
@@ -123,7 +123,7 @@ const BLOCK = new Set(['p', 'div', 'section', 'article', 'main', 'header', 'ul',
 const DROP = new Set(['script', 'style', 'noscript', 'template', 'svg', 'canvas', 'iframe', 'object', 'math', 'head', 'select', 'button']);   // (each has a closing tag)
 const SKIP = new Set(['nav', 'footer', 'aside']);
 /**
- * The words of an HTML page as an agent reads them: { title, text, links: [{ n, text, href }] } - headings as #,
+ * The words of an HTML page as an agent reads them: { title, text, links: [{ n, text, href }] } — headings as #,
  * list items as -, table rows as cells joined by |, each link's words then [n]. Its <main> or <article> when it has one
  * (the page's own content), else the body without its menus and footer.
  */
@@ -324,7 +324,7 @@ export class CdpPage {
     if (r.errorText) throw userErr('unreachable', `The page could not be opened (${r.errorText})`);
     await wait;
   }
-  /** The page as the agent reads it: { url, title, html, fields: [{ k, label }] } - fields and buttons numbered f1, f2… */
+  /** The page as the agent reads it: { url, title, html, fields: [{ k, label }] } — fields and buttons numbered f1, f2… */
   async read() {
     const r = await this.call('Runtime.evaluate', { returnByValue: true, expression: READ_PAGE }, true);
     const v = r.result?.value || {};
@@ -422,7 +422,7 @@ export class PcBrowser {
   }
   /**
    * The real browser an agent browses in: its owner's browser service when they have one, else this installation's
-   * built-in Chrome (./chrome.js) in a context of the agent's own; null - the built-in reader - when there is neither
+   * built-in Chrome (./chrome.js) in a context of the agent's own; null — the built-in reader — when there is neither
    * (or Chrome can't start: tried again after a minute).
    */
   async serviceFor(a) {
@@ -476,7 +476,7 @@ export class PcBrowser {
     p.part = at === 0 ? 1 : (p.part || 1) + 1;
     const k = p.part, parts = Math.max(k, k + Math.ceil((p.text.length - p.at) / PART));
     const fields = p.fields?.length && at === 0 ? `\nFIELDS AND BUTTONS: ${p.fields.map(f => `[f${f.k}] ${f.label}`).join(' · ')}` : '';
-    return `${at === 0 ? `${p.title || '(no title)'} - ${p.url}${p.live ? p.builtIn ? '' : ' (in your browser service)' : ''}\n` : `(part ${k} of ${parts})\n`}${FROM_WEB}\n${chunk || '(this page has no words to read)'}${fields}`
+    return `${at === 0 ? `${p.title || '(no title)'} — ${p.url}${p.live ? p.builtIn ? '' : ' (in your browser service)' : ''}\n` : `(part ${k} of ${parts})\n`}${FROM_WEB}\n${chunk || '(this page has no words to read)'}${fields}`
       + `${p.at < p.text.length ? `\n… more: "more" (part ${k} of ${parts})` : ''}${p.links.length ? ` · ${p.links.length} links: "links", then "open <n>"` : ''}${p.live && p.fields?.length ? ' · click f<n> / type f<n> "words" / press Enter' : ''}`;
   }
   async open(sh, target) {
@@ -493,14 +493,14 @@ export class PcBrowser {
     if (p) {
       webUrl(url);   // (a real browser still opens only http and https addresses)
       await p.navigate(url);
-      // (a file - a PDF, a picture - shows in its browser, and is kept for "save" as the reader keeps one)
+      // (a file — a PDF, a picture — shows in its browser, and is kept for "save" as the reader keeps one)
       const ct = String(await p.eval('document.contentType').catch(() => 'text/html') || 'text/html');
       if (!/html|xml|^text\/plain/.test(ct)) {
         const r = await this.fetchFn(url).catch(() => null);
         if (r && r.status < 400) {
           sh.download = { url: r.url, type: r.type || ct, buf: r.buf, truncated: r.truncated };
           sh.show = () => ({ kind: 'page', url: r.url, title: r.url.split('/').pop() || r.url, live: true, part: 1, total: 0, first: 1, lines: [] });
-          return `${r.url} is a file (${r.type || ct}, ${mbText(r.buf.length)}), open in your browser - keep it in your PC with: save ~/Downloads/<name>`;
+          return `${r.url} is a file (${r.type || ct}, ${mbText(r.buf.length)}), open in your browser — keep it in your PC with: save ~/Downloads/<name>`;
         }
       }
       return this.showLive(sh, p);
@@ -514,7 +514,7 @@ export class PcBrowser {
     if (/^text\/|json/.test(r.type)) return this.show(sh, { url: r.url, title: r.url.split('/').pop() || r.url, text: r.buf.toString('utf8').slice(0, TEXT_KEEP), links: [] });
     // a file (a PDF, a picture…): kept for "save", not read here
     sh.download = { url: r.url, type: r.type, buf: r.buf, truncated: r.truncated };
-    return `${r.url} is a file (${r.type || 'unknown type'}, ${mbText(r.buf.length)})${r.truncated ? ', too large to download whole' : ''} - not a page to read. Keep it in your PC with: save ~/Downloads/<name>`;
+    return `${r.url} is a file (${r.type || 'unknown type'}, ${mbText(r.buf.length)})${r.truncated ? ', too large to download whole' : ''} — not a page to read. Keep it in your PC with: save ~/Downloads/<name>`;
   }
   async showLive(sh, p) {
     const v = await p.read();
@@ -526,7 +526,7 @@ export class PcBrowser {
   }
   /**
    * Its real browser shared with its owner: when the page there is no longer the one it read (its owner went on, or
-   * clicked through), it is read again first - the agent works on what is open, never on a page that has gone. Returns
+   * clicked through), it is read again first — the agent works on what is open, never on a page that has gone. Returns
    * the new page's first part, or null when nothing changed.
    */
   async fresh(sh) {
@@ -552,7 +552,7 @@ export class PcBrowser {
     const l = sh.page.links, pg = sh.page;
     sh.show = () => (pg.kind === 'page' ? pageView(pg, pg.shown || '') : null);
     if (!l.length) return 'This page has no links.';
-    return `${l.length} links on ${sh.page.url || 'the search'} (open <n>):\n${l.slice(0, 150).map(x => `[${x.n}] ${x.text}${x.text !== x.href ? ` - ${x.href.slice(0, 120)}` : ''}`).join('\n')}${l.length > 150 ? '\n…' : ''}`;
+    return `${l.length} links on ${sh.page.url || 'the search'} (open <n>):\n${l.slice(0, 150).map(x => `[${x.n}] ${x.text}${x.text !== x.href ? ` — ${x.href.slice(0, 120)}` : ''}`).join('\n')}${l.length > 150 ? '\n…' : ''}`;
   }
   async back(sh) {
     const prev = (sh.pages || []).pop();
@@ -566,7 +566,7 @@ export class PcBrowser {
     const a = this.agentOf(sh);
     if (!a) return 'No history here.';
     const h = this.os.history({ agent: a.id }, { limit: 20 });
-    return h.length ? h.map(x => `${new Date(x.at).toISOString().slice(0, 16).replace('T', ' ')} ${x.title} - ${x.url}`).join('\n') : 'You have not opened any page yet.';
+    return h.length ? h.map(x => `${new Date(x.at).toISOString().slice(0, 16).replace('T', ' ')} ${x.title} — ${x.url}`).join('\n') : 'You have not opened any page yet.';
   }
   /** Keeps the page (its words, as Markdown with its address) or the file just opened in the PC. */
   async save(sh, path) {
@@ -575,11 +575,11 @@ export class PcBrowser {
       const d = sh.download; sh.download = null;
       const r = this.os.write(sh.who, path, d.buf, { cwd: sh.cwd, profile: sh.profile, mime: d.type || undefined, force: true });
       sh.show = () => fileView(sh, r.info.path);
-      return `saved ${d.url} as ${r.info.path} (${mbText(r.info.size)})${d.truncated ? ' - only its start: it was too large' : ''}`;
+      return `saved ${d.url} as ${r.info.path} (${mbText(r.info.size)})${d.truncated ? ' — only its start: it was too large' : ''}`;
     }
     if (!sh.page || sh.page.kind !== 'page') throw userErr('no_page', 'Open a page first');
     const p = sh.page;
-    const md = `# ${p.title || p.url}\n\nSource: ${p.url}\nSaved: ${new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ')} UTC\n\n${p.text}\n${p.links.length ? `\n## Links\n${p.links.slice(0, 200).map(l => `[${l.n}] ${l.text} - ${l.href}`).join('\n')}\n` : ''}`;
+    const md = `# ${p.title || p.url}\n\nSource: ${p.url}\nSaved: ${new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ')} UTC\n\n${p.text}\n${p.links.length ? `\n## Links\n${p.links.slice(0, 200).map(l => `[${l.n}] ${l.text} — ${l.href}`).join('\n')}\n` : ''}`;
     const r = this.os.write(sh.who, path, md, { cwd: sh.cwd, profile: sh.profile, force: true });
     sh.show = () => fileView(sh, r.info.path);
     return `saved the page as ${r.info.path} (${mbText(r.info.size)})`;
@@ -617,7 +617,7 @@ export class PcBrowser {
 
   // ------------------------------------------------------------------------------------------- watched and taken over
   // Its owner's view of its real browser (server/pc/routes.js /api/pc/browser*): its tab, the page live, and the owner's
-  // own clicks, scrolling, keys and typing on it - the agent's browser shared with its owner, as OpenClaw's side panel
+  // own clicks, scrolling, keys and typing on it — the agent's browser shared with its owner, as OpenClaw's side panel
   // shares its own. The routes check that the agent is the asker's.
   /** { available, running, kind, tabs: [{ id, title, url }], reason } */
   async liveState(a) {
@@ -699,7 +699,7 @@ export class PcBrowser {
     sh.page = { kind: 'search', url: `search: ${q}`, title: q, links: results.map((x, i) => ({ n: i + 1, text: x.title, href: x.href })), text: '', at: 0 };
     sh.show = () => webView(q, results);   // (its screen: the results)
     if (!results.length) return `nothing found for "${q}"`;
-    return `results for "${q}" (open <n> to read one) ${FROM_WEB}:\n${results.map((x, i) => `[${i + 1}] ${x.title} - ${x.href}${x.text ? `\n    ${x.text.slice(0, 200)}` : ''}`).join('\n')}`;
+    return `results for "${q}" (open <n> to read one) ${FROM_WEB}:\n${results.map((x, i) => `[${i + 1}] ${x.title} — ${x.href}${x.text ? `\n    ${x.text.slice(0, 200)}` : ''}`).join('\n')}`;
   }
 }
 const stripTags = s => decode(String(s ?? '').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();

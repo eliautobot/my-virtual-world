@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An Agent Providers' agent's screens follow its provider's events (server/pc/provider-screens.js): a step shows in the
 // app its kind belongs to, with what it works on; a run's later events (naming only the run) are its agent's; an agent made
 // here, a talk in the city and an unrelated event change nothing; updates come at most every 400 ms, the last one kept.

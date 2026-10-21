@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The airport's aircraft (docs/features/play-modules.md §Airport), in the promotional aircraft's style (render/promo-models.js):
 // the propeller plane is the banner plane itself (with its tail wheel on its leg); a small business jet (low swept
 // wing, T-tail, two engines on the rear fuselage, tricycle gear) and a light helicopter (cabin, tail boom, fin, tail
@@ -13,7 +13,7 @@ import { bannerPlane, loft, slab, wheel, airfoil, hullPoint, hullDecal, both, PR
 import { stillBlades, rotorBlades, blurDisc } from './rotors.js';
 
 /** How each stands: lift = the model's origin over the ground, pitch = nose up (radians: a taildragger sits on its
- *  tail wheel - mains at (y −1.37, z 0.75), tail wheel at (y −0.67, z −4.0)). */
+ *  tail wheel — mains at (y −1.37, z 0.75), tail wheel at (y −0.67, z −4.0)). */
 const tail = Math.atan2(1.37 - 0.67, 0.75 + 4.0);
 export const PARKED = Object.freeze({
   prop: { pitch: tail, lift: 1.37 * Math.cos(tail) - 0.75 * Math.sin(tail) },
@@ -44,7 +44,7 @@ export function jetPlane() {
   both(f, JET, glass, 3.25, 3.85, 0.18, 0.5, { nt: 3, na: 3 });
   for (const [a0, a1] of [[0.55, 1.5], [1.64, 2.59]]) hullDecal(f, JET, glass, 3.95, 4.75, a0, a1, { nt: 4, na: 5 });
   both(f, JET, '#d5d8dc', -0.4, 0.9, -0.05, 0.42, { nt: 1, na: 1, off: 0.008 });   // the door outline (a lighter panel)
-  // the low, swept wing - solid airfoils, a little dihedral - out to its winglets, which stand on its tips (there was a
+  // the low, swept wing — solid airfoils, a little dihedral — out to its winglets, which stand on its tips (there was a
   // gap at the tips' leading edges, 2026-10-14)
   f.col(white);
   for (const s of [1, -1]) {
@@ -148,10 +148,10 @@ export function helicopter(opts = {}) {
 export const MODELS = { prop: propPlane, jet: jetPlane, heli: helicopter };
 
 /**
- * A flying aircraft's parts (player/flight.js - yours and everyone else's): the body without its rotors, and each rotor
- * that turns - its blades (centred on the hub, on its axis), its motion-blur disc, where its hub is, which axis, how fast
+ * A flying aircraft's parts (player/flight.js — yours and everyone else's): the body without its rotors, and each rotor
+ * that turns — its blades (centred on the hub, on its axis), its motion-blur disc, where its hub is, which axis, how fast
  * it turns at full power (rad/s) and the tips' colour; the jet has none (no propeller: its engines' exhausts glow with
- * the power instead - where they are, how big). Made once a type.
+ * the power instead — where they are, how big). Made once a type.
  */
 const ROTORS = { prop: [{ ...PROP_ROTOR, rate: 56 }], jet: [], heli: [{ ...HELI_MAIN, rate: 28 }, { ...HELI_TAIL, rate: 56 }] };
 const BODIES = { prop: () => bannerPlane({ parked: true, noProp: true }), jet: jetPlane, heli: () => helicopter({ noRotors: true }) };

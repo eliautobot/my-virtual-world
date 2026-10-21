@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
+/* My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE). */
 /* The economy's screens (ui/economy.js, ui/econ-city.js, ui/econ-charts.js, ui/econ-admin.js). Chart colours are roles:
    --ec-1 … --ec-4 the categorical slots (validated for colour-blind separation and contrast on each theme's surface;
    the dark steps for the dark and high-contrast themes, the light steps for the light theme), --ec-seq1..3 an ordinal

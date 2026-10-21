@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Decorating outdoors (WP4.7, shared/decor.js): in the Outside spaces section lot holders place trees, bushes, flower
 // beds, benches, picnic tables and fountains on their own lots (administrators also on public land). A ghost follows
 // the pointer, green where it may go and red with the reason where it may not (the land's rules and the lots, as the
@@ -149,7 +149,7 @@ export function makeDecorTool(a, cfg) {
     // nothing picked: select one of its decorations under the pointer
     const p = a.terrain?.rayHit(cam.rayAt(e.clientX, e.clientY)) || cam.groundAt(e.clientX, e.clientY, 0.15);
     const d = p && nearest(p.x, p.z);
-    if (d) { select(d); say(`${name(d.t)} - turn, move or remove it.`); return true; }
+    if (d) { select(d); say(`${name(d.t)} — turn, move or remove it.`); return true; }
     if (D.sel) select(null);
     return false;
   }

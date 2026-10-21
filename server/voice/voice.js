@@ -1,12 +1,12 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Voice (docs/features/CHAT.md §9.2): who hears and who speaks with which voice service, for whom, at whose cost. The
 // calls themselves are the provider helper's (server/providers/voice.js); this decides and keeps count:
 // - Speaking (read aloud, voice mode) in an agent's voice: the agent's own choice (a voice service and a voice, set by
 //   whoever manages it), else its owner's default, else the installation's (Settings: voice.speakConnection), else the
 //   browser's own voice. Whichever service speaks for it, an agent has a voice of its own on it (2026-10-08: "every
 //   agent a unique voice, not just the default"): the one chosen for it in its Agent Studio, else one picked for it the
-//   first time it speaks there - of its character's gender and its owner's language, the least used by the other agents
-//   on that service - and kept (agents.voice_json voices/auto). An owner may turn that off (Settings → Voice: every
+//   first time it speaks there — of its character's gender and its owner's language, the least used by the other agents
+//   on that service — and kept (agents.voice_json voices/auto). An owner may turn that off (Settings → Voice: every
 //   agent its own voice) to have them all speak with the owner's voice. Listening (dictation, voice mode) for a person: their own choice, else the installation's
 //   (voice.listenConnection), else the browser's recognition. "browser" may also be chosen outright.
 // - A service is someone's own (an account connection: its owner pays the provider) or the installation's (an
@@ -41,7 +41,7 @@ const LANG = /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8}){0,2}$/;
 const cleanText = (s, n) => String(s ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, n);
 const dayOf = t => new Date(t).toISOString().slice(0, 10);
 
-/** Checks a voice choice { connection, voice, model, speed, instructions, browserVoice, language } - a partial patch. */
+/** Checks a voice choice { connection, voice, model, speed, instructions, browserVoice, language } — a partial patch. */
 function checkChoice(b, { listen = false } = {}) {
   const out = {};
   if (b.connection !== undefined) {
@@ -130,7 +130,7 @@ export class Voice {
     return this.prefs(me);
   }
   /** An agent's own voice (kept with the agent): { connection, voice, model, speed, instructions, browserVoice, voices,
-   *  auto } - voices: its voice on each service by its id (chosen in the Studio, or picked for it: auto, with the gender
+   *  auto } — voices: its voice on each service by its id (chosen in the Studio, or picked for it: auto, with the gender
    *  it was picked for). */
   agentVoice(a) {
     const v = a && a.voice && typeof a.voice === 'object' ? a.voice : {};
@@ -157,7 +157,7 @@ export class Voice {
     const cur = this.agentVoice(a), next = { ...cur, ...x };
     delete next.unique;
     if (body.for !== undefined && body.for !== null && body.for !== '') {
-      // its voice on one service - whichever speaks for it (its own, its owner's or the installation's); '' lets one be
+      // its voice on one service — whichever speaks for it (its own, its owner's or the installation's); '' lets one be
       // picked for it again
       const fid = Number(body.for), c = Number.isInteger(fid) && fid > 0 ? this.connections.get(fid) : null, owner = this.ownerPrincipal(a);
       if (!c || !owner || !this.canUse(owner, c, 'speak') || !this.canUse(P, c, 'speak')) throw new VoiceError(404, 'not_found', 'No such voice service');
@@ -183,7 +183,7 @@ export class Voice {
     return value.voices;
   }
   /** The voice an agent speaks with on this service when none was chosen for it: the one picked for it before (while its
-   *  character's gender is the same), else one picked now - one at a time per service, so two agents heard first
+   *  character's gender is the same), else one picked now — one at a time per service, so two agents heard first
    *  together don't get the same one. '' when the service can't list its voices (its usual voice, then). */
   async autoVoice(agent, c) {
     const kept = this.keptAuto(this.agentVoice(agent), c, this.genderOf(agent));
@@ -242,7 +242,7 @@ export class Voice {
     if (!this.registry.implemented('voice')) throw new VoiceError(503, 'unavailable', 'Voice services are not available right now');
     return def;
   }
-  /** Whether a principal may use a voice service for this: its own or shared with it - or the installation's service for
+  /** Whether a principal may use a voice service for this: its own or shared with it — or the installation's service for
    *  it (Settings: voice.listenConnection / voice.speakConnection), which is everyone's (metered on the platform). */
   canUse(P, c, what) {
     if (!c || c.kind !== 'voice' || !P || !P.account) return false;
@@ -379,7 +379,7 @@ export class Voice {
   // ------------------------------------------------------------------------------------------- speak
   /**
    * Speaks for P: { agent?, text? | session+message (one of the account's answers), part?, connection?+voice? (a
-   * preview), speed? }. Resolves { audio: Buffer, mime, seconds, source, part, parts, cached } - or throws a VoiceError
+   * preview), speed? }. Resolves { audio: Buffer, mime, seconds, source, part, parts, cached } — or throws a VoiceError
    * 409 use_browser { text, browserVoice, reason } when the browser's own voice is to read it.
    */
   async speak(P, b = {}) {
@@ -473,7 +473,7 @@ export class Voice {
     if (audio.length > MAX_AUDIO_BYTES) throw new VoiceError(413, 'too_large', 'A recording may be at most 25 MB');
     const kind = sniff(audio);
     if (!kind) throw new VoiceError(415, 'unsupported', 'That recording\'s format isn\'t one a voice service takes (WebM, Ogg, MP4, WAV, MP3 or FLAC)');
-    // how long it is: read from the file - never less than its size allows at the highest rate a recording of its kind
+    // how long it is: read from the file — never less than its size allows at the highest rate a recording of its kind
     // has (a header may say less than the file holds, to pay less); where its container doesn't say, the page's count
     // within what the size allows
     const read = audioSeconds(audio, kind.format);
@@ -526,7 +526,7 @@ export class Voice {
       ...(r.speed !== undefined ? { speed: r.speed } : {}), ...(r.language !== undefined ? { language: r.language } : {}), ...(r.browserVoice !== undefined ? { browserVoice: r.browserVoice } : {}), metered: !!r.metered };
   }
   /** What this account can use: who listens to it, who speaks for the agent (or its own default), its services, its
-   *  voice minutes and the limits - the window, the Studio and Settings draw from this. */
+   *  voice minutes and the limits — the window, the Studio and Settings draw from this. */
   async options(P, agentId = null) {
     const me = this.me(P);
     const agent = agentId !== null && agentId !== undefined && agentId !== '' ? this.agentFor(P, agentId) : null;

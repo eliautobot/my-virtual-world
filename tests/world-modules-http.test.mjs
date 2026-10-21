@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // World modules over HTTP on a real island (docs/features/play-modules.md §Placing modules): only administrators place
 // an airport; it needs open, dry, fairly flat land beyond the city, clear of roads, buildings and lots, and a road within
 // reach; its pad levels the ground; nothing else is built on it and no road crosses it; it and its access road go in
@@ -77,7 +77,7 @@ test('only administrators place an airport; it levels its land and keeps everyth
   // rename; undo the rename, then undo the airport
   assert.equal((await edit(owner, [{ op: 'wmod.set', id: m.id, name: 'Sky Harbour' }])).status, 200);
   { const w2 = await world(), T = w2.buildings[m.terminal]; assert.equal(w2.worldModules[0].name, 'Sky Harbour'); assert.deepEqual([T.name, T.sign], ['Sky Harbour', 'Sky Harbour'], 'the terminal takes the airport\'s name'); }
-  // one name: renaming the terminal (its name or its sign) renames the airport - canopy and entrance sign - in one undo
+  // one name: renaming the terminal (its name or its sign) renames the airport — canopy and entrance sign — in one undo
   assert.equal((await edit(owner, [{ op: 'bld.set', b: m.terminal, name: 'Gulf Coast Intl' }])).status, 200);
   { const w2 = await world(), T = w2.buildings[m.terminal]; assert.deepEqual([w2.worldModules[0].name, T.name, T.sign], ['Gulf Coast Intl', 'Gulf Coast Intl', 'Gulf Coast Intl']); }
   assert.equal((await edit(owner, [{ op: 'bld.set', b: m.terminal, sign: 'Bay Field' }])).status, 200);
@@ -122,10 +122,10 @@ test('an airport and its access road go in together, or neither does', async () 
     assert.ok(Math.abs(m.y - 0.035 - top) < 0.03, `${what}: the airport's paving ${(m.y - 0.035).toFixed(2)} meets its road's top ${top.toFixed(2)}`);
   };
   flush(w, 'placed');
-  // moved: its old access road goes, a new one comes - in one edit, the old one first (it would cross where it now stands)
+  // moved: its old access road goes, a new one comes — in one edit, the old one first (it would cross where it now stands)
   const cur = w.worldModules[0], olds = accessRoadsOf(w, cur), island = new Island(w.terrain, { roads: w.roads });
   const env = { heightAt: (x, z) => island.height(x, z), isWater: (x, z) => !!island.waterAt(x, z), roads: RoadNetwork.fromJSON(w.roads.filter(r => !olds.some(o => o.id === r.id))) };
-  // (somewhere close by the server takes: it is the judge - its ground has the airport's own pad, the client's check not)
+  // (somewhere close by the server takes: it is the judge — its ground has the airport's own pad, the client's check not)
   let moved = null; const why = [];
   for (const sp of spots.slice(1)) {   // another open place, far off
     const to = { ...cur, x: sp.x, z: sp.z, rot: sp.rot }, ds = Math.round(sp.x), df = Math.round(sp.z);
@@ -232,14 +232,14 @@ test('flying: walk up to a jet and board it, its poses are checked (a jump is re
   assert.ok(st2, 'aboard again');
   await sleep(700); o.send({ t: 'fpose', x: st2.pose.x, y: st2.pose.y + 30, z: st2.pose.z, q, v: 60, g: 0 }); await sleep(150);   // (30 m up in 0.7 s: within what a jet does)
   // poses arriving together (the pilot's phone or the server stalled) are judged by the flight's own clock (ts): 45 m in
-  // its half second, sent at once - accepted (by the time they arrived, 45 m in no time: refused, the jet stopped dead)
+  // its half second, sent at once — accepted (by the time they arrived, 45 m in no time: refused, the jet stopped dead)
   await sleep(1200); o.msgs.length = 0;
   let px = st2.pose.x, pz = st2.pose.z;
   o.send({ t: 'fpose', ts: 0.1, x: px, y: st2.pose.y + 20, z: pz, q, v: 90, g: 0 });
   for (const ts of [0.6, 1.1]) { px += Math.sin(h) * 45; pz += Math.cos(h) * 45; o.send({ t: 'fpose', ts, x: px, y: st2.pose.y + 20, z: pz, q, v: 90, g: 0 }); }
   await sleep(400);
   assert.ok(!o.msgs.some(m => m.t === 'fcorr'), 'poses arriving together, half a second apart on their own clock: accepted');
-  // its clock can't run ahead of the real one: a minute claimed a moment later, 5 km on - refused
+  // its clock can't run ahead of the real one: a minute claimed a moment later, 5 km on — refused
   o.send({ t: 'fpose', ts: 61.1, x: px + Math.sin(h) * 5000, y: st2.pose.y + 20, z: pz + Math.cos(h) * 5000, q, v: 90, g: 0 });
   assert.ok(await o.msg(m => m.t === 'fcorr'), 'a clock running ahead is not believed');
   o.send({ t: 'fleave' });

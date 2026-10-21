@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.6 lot rights on real requests (wp4-world-spec.md §5.0, §5.5, DECISIONS E25 (8)): administrators edit the city's
 // land and never someone's private lot; holders edit the buildings on their own lots and nobody else's; a new building
 // stands inside one lot they may build on, within its envelope; undo re-checks the rights; residents stay with

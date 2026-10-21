@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The built-in brains (docs/features/FREE-WILL.md §3, the Mind): a model provider the agent's owner (or the installation)
 // connects with its own API key. Runs inside the provider helper process (./host-main.mjs): its environment holds none of
 // the server's secrets and the key arrives with each call. The thinking itself (what to ask, what the answer may do) is
 // the server's (server/mind/); this adapter makes one model call at a time.
-// - complete: one chat completion - a system and a user message (or a short conversation) in, the model's text out, with the tokens it used and,
+// - complete: one chat completion — a system and a user message (or a short conversation) in, the model's text out, with the tokens it used and,
 //   where the provider says it (OpenRouter), what it cost. json: true asks for a JSON object.
 //   stream: true sends the answer as it is written (ctx.delta({ text }) and, where the model shows it, { thinking }) and
 //   resolves with the whole of it; streamId lets abort() cut it off (the chat's Stop: the provider stops writing, and
@@ -129,7 +129,7 @@ function refusal(res, what) {
     const ra = Number(res.headers && res.headers['retry-after']);
     return fail('rate_limited', 'The provider is limiting requests', { retryAfterMs: Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 300000) : 0 });
   }
-  if (res.status === 400 || res.status === 404 || res.status === 413 || res.status === 422) return fail('bad_request', `The provider refused the request (HTTP ${res.status}) - check the model name`);
+  if (res.status === 400 || res.status === 404 || res.status === 413 || res.status === 422) return fail('bad_request', `The provider refused the request (HTTP ${res.status}) — check the model name`);
   return fail('provider_error', `${what} failed (HTTP ${res.status})`);
 }
 const num = v => (Number.isFinite(v) ? v : null);
@@ -176,7 +176,7 @@ function build(p) {
   const messages = turns.map(t => ({ role: t.role, content: t.role === 'user' ? contentOf(t, provider) : t.text }));
   const hasPdf = turns.some(t => Array.isArray(t.parts) && t.parts.some(x => x && x.type === 'pdf'));
   if (provider === 'anthropic') {
-    // the Messages API; a JSON answer by starting it with "{" (its documented way to shape the output - not allowed while
+    // the Messages API; a JSON answer by starting it with "{" (its documented way to shape the output — not allowed while
     // the model thinks, when the instruction alone asks for it). The 5-series thinks adaptively at an effort level.
     const adaptive = /claude-(?:[a-z]+-)?(?:5|fable)/.test(model);
     const think = THINK_TOKENS[thinking], prefill = !!p.json && !think && !stream;
@@ -203,7 +203,7 @@ function build(p) {
 }
 
 /** p: { config: { provider, baseUrl, model, thinking }, secrets: { apiKey }, system, user, json, maxTokens, temperature, timeoutMs, allowPrivate }
- *  - or turns: [{ role: 'user'|'assistant', text, parts? }] instead of user, a conversation ending with a user message (a
+ *  — or turns: [{ role: 'user'|'assistant', text, parts? }] instead of user, a conversation ending with a user message (a
  *  thought that uses tools: its earlier answers and the results it was given; a chat: its history and attachments).
  *  model / thinking: this call's own. stream + streamId: see the header (ctx.delta receives the pieces). */
 async function complete(p, ctx = {}) {
@@ -329,7 +329,7 @@ function streamed(p, r, ctx, t0) {
 }
 
 /**
- * p: { config, secrets, input, timeoutMs } - the provider's moderation service checks a text: { flagged, categories }.
+ * p: { config, secrets, input, timeoutMs } — the provider's moderation service checks a text: { flagged, categories }.
  * OpenAI's (omni-moderation-latest; no charge) or an OpenAI-compatible server's that has one; other providers have none.
  */
 async function moderate(p) {

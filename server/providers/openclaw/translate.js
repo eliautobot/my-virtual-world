@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // OpenClaw → the universal chat (docs/features/agent-providers.md §4–§5). Pure functions, fed the gateway's frames as
 // OpenClaw 2026.9 sends them (tests/fixtures/openclaw/): a run's events become the provider bus's events, a session's
 // history becomes the chat window's messages, a session row and a model list become what its pickers and meter show.
@@ -16,12 +16,12 @@ export const PHASE_TEXT = Object.freeze({
 });
 export const phaseText = p => PHASE_TEXT[p] || String(p || '').replace(/[_-]+/g, ' ').replace(/^\w/, c => c.toUpperCase()).slice(0, 80);
 
-/** OpenClaw's tools that are the chat's own cards - the agent's questions (ask_user) and its plan (progress_card) - and
+/** OpenClaw's tools that are the chat's own cards — the agent's questions (ask_user) and its plan (progress_card) — and
  *  its deferred-tool call that may carry one (tool_call { id }): shown as those cards, never also as steps. */
 export const CARD_TOOLS = new Set(['ask_user', 'progress_card']);
 const cardTool = (name, args) => CARD_TOOLS.has(String(name)) || (String(name) === 'tool_call' && args && CARD_TOOLS.has(String(args.id || '').replace(/^.*:/, '')));
-/** OpenClaw's deferred-tool call (tools offered by search): it calls another tool, which OpenClaw reports itself - with
- *  `parentToolCallId` naming the call - live and in the history. That tool is the step; the wrapper shows only when
+/** OpenClaw's deferred-tool call (tools offered by search): it calls another tool, which OpenClaw reports itself — with
+ *  `parentToolCallId` naming the call — live and in the history. That tool is the step; the wrapper shows only when
  *  nothing came of it (a gateway that doesn't report it). */
 const WRAPPER = 'tool_call';
 /** The browser tab a browser tool's result leaves (its details: browserTab, or the tab it navigated): the chat shows a card
@@ -49,8 +49,8 @@ export function toolKind(name) {
 // ------------------------------------------------------------------ media (images, video, audio an answer carries)
 // OpenClaw's agents attach files with a line of their own, `MEDIA:<path or URL>` (its reply directives; the lines are
 // read by ../media-lines.js). Its history turns those it keeps into media blocks (image, video, audio: an artifact id,
-// the type, the size); a line it leaves in the text - an absolute path, a run through an outside CLI - is fetched by its
-// own UI from the path. Both become the universal chat's media: { kind, name, mime, w, h, size, ref } - ref { artifactId }
+// the type, the size); a line it leaves in the text — an absolute path, a run through an outside CLI — is fetched by its
+// own UI from the path. Both become the universal chat's media: { kind, name, mime, w, h, size, ref } — ref { artifactId }
 // or { source }.
 const MEDIA_KINDS = new Set(['image', 'video', 'audio', 'file']);
 /** The media blocks of a message's content (the ones OpenClaw keeps: each with its artifact id). */
@@ -63,7 +63,7 @@ export function mediaBlocks(content) {
       ref: { artifactId: p.artifactId.slice(0, 200) } };
   });
 }
-/** A message's media in the order it shows them - its MEDIA lines and its kept blocks - with its text without the lines. */
+/** A message's media in the order it shows them — its MEDIA lines and its kept blocks — with its text without the lines. */
 export function mediaOf(content) {
   if (!Array.isArray(content)) { const sm = splitMedia(typeof content === 'string' ? content : ''); return { text: sm.text, media: sm.media }; }
   let text = '', media = [];
@@ -130,7 +130,7 @@ export class RunTranslator {
     if (p.state === 'status') { this.status(p.phase); return; }
     if (p.state === 'delta') {
       const d = typeof p.deltaText === 'string' ? p.deltaText : '';
-      // (followed from the middle - a run on another channel a page started watching: the answer so far, whole)
+      // (followed from the middle — a run on another channel a page started watching: the answer so far, whole)
       const whole = !this.text && p.message ? textOf(p.message.content) : '';
       if (p.replace || (whole && whole !== d)) {
         // (the gateway rewrote what was written so far: the whole of it, from the start)
@@ -281,9 +281,9 @@ export class RunTranslator {
 }
 
 /**
- * A session's history (chat.history's messages) as the chat window's: the person's messages, and each answer - the
+ * A session's history (chat.history's messages) as the chat window's: the person's messages, and each answer — the
  * assistant's turn between two of the person's, its text, the reasoning it showed and every step it took (a tool call
- * with its result) - with what it took.
+ * with its result) — with what it took.
  */
 export function historyOf(messages) {
   const out = [];
@@ -346,7 +346,7 @@ export function historyOf(messages) {
 function stepOf(p) {
   return { id: String(p.id), name: String(p.name || 'tool'), title: String(p.name || 'tool').replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase()), kind: toolKind(p.name), input: inputOf(p.arguments) };
 }
-/** A tool's result into its step: its output, whether it went well, what it took - and the browser tab it left. */
+/** A tool's result into its step: its output, whether it went well, what it took — and the browser tab it left. */
 function resultInto(s, m) {
   const det = m.details || {};
   s.output = clip(textOf(m.content) || String(det.aggregated || ''), OUT_MAX); s.ok = !m.isError;

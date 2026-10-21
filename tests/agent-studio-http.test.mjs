@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What the Agent Studio needs from the server (client/js/ui/agent-studio.js): who an agent is linked to (its brain) for
 // those who manage it and nobody else; which model a brain thinks with for everyone who may use it, its other settings
 // for its managers only; a rename in the Studio reaching the agent's body in the city; and an agent's owner (or a manage
-// share) dressing its body - its look only, nobody else's, nothing more - and undoing that.
+// share) dressing its body — its look only, nobody else's, nothing more — and undoing that.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { startServer, ownerSession, userSession } from './helpers/server.mjs';
@@ -59,7 +59,7 @@ test('renaming an agent in the Studio renames its body in the city, with its bad
   assert.equal(again.name, 'Nova Studio'); assert.equal(again.role, 'Pathfinder'); assert.equal(again.emoji, '🚀');
 });
 
-test('an agent\'s owner dresses its body - its look only, its own agents only - and may undo it', async () => {
+test('an agent\'s owner dresses its body — its look only, its own agents only — and may undo it', async () => {
   const a = agents[2];
   const look = (await owner.get(`/api/agent/${a.i}`)).json.app;
   assert.ok(look, 'the body has a look');

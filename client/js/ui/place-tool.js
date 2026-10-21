@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Placing and changing buildings with handles in the world (WP4.6; 2026-10-04: "provide UI elements in the actual
 // canvas world, like handles for easy resizing ... so that both desktop and phone work and are intuitive"). One tool
 // for a new building and for one that stands already:
@@ -299,7 +299,7 @@ async function apply() {
     }
     else {
       const res = r?.results?.[0] || {}, n = res.removed || 0;
-      app.toast(`${bld(b)?.name || 'The building'} changed${n ? ` · ${n} piece${n > 1 ? 's' : ''} removed` : ''} - undo with ↶`, 'good', n ? 3600 : 2400);
+      app.toast(`${bld(b)?.name || 'The building'} changed${n ? ` · ${n} piece${n > 1 ? 's' : ''} removed` : ''} — undo with ↶`, 'good', n ? 3600 : 2400);
       selectBuilding(b);
     }
   } catch (err) {
@@ -335,7 +335,7 @@ function chooseFit(B, plan) {
   const el = document.body.appendChild(h(`<div class="modal-back fit-back"><div class="panel fitdlg" role="dialog" aria-modal="true" aria-labelledby="fit-t">
     <h3 id="fit-t">Resizing ${esc(B.name)}</h3>
     <p>${esc(cap(fl))} ${many ? 'were' : 'was'} changed by hand. ${n ? `${n} piece${n > 1 ? 's' : ''} ${n > 1 ? 'don’t' : 'doesn’t'} fit the new size:` : 'The new size would block the way through:'}</p>
-    <ul class="fit-list">${C.map(G => `<li><b>${esc(cap(floorsName(B, G.floors)))}</b>${G.remove.length ? `: ${esc(piecesWords(G.remove, 5))}` : ''}${G.keepOk ? '' : ` <span class="bad">- ${esc(G.keepWhy.toLowerCase())}</span>`}</li>`).join('')}</ul>
+    <ul class="fit-list">${C.map(G => `<li><b>${esc(cap(floorsName(B, G.floors)))}</b>${G.remove.length ? `: ${esc(piecesWords(G.remove, 5))}` : ''}${G.keepOk ? '' : ` <span class="bad">— ${esc(G.keepWhy.toLowerCase())}</span>`}</li>`).join('')}</ul>
     ${autoFl ? `<p class="hint">${esc(cap(autoFl))} ${auto.length > 1 || auto[0].floors.length > 1 ? 'weren’t' : 'wasn’t'} changed by hand: ${auto.length > 1 || auto[0].floors.length > 1 ? 'they' : 'it'}’ll be laid out again for the new size.</p>` : ''}
     <div class="fit-btns">
       <button type="button" class="btn primary" data-fit="keep"${allKeep ? '' : ' disabled'}>Keep my layout, remove ${n === 1 ? 'the conflicting piece' : `the ${n} conflicting pieces`}</button>
@@ -408,7 +408,7 @@ function show() {
   E.dims.textContent = ` · ${ft(s.w)} × ${ft(s.d)} ft${s.type === 'park' ? '' : ` · ${s.floors} floor${s.floors > 1 ? 's' : ''}`}`;
   const P = D.plan, warn = D.ok && !!P?.choose && changed(), words = D.ok && P && changed() ? planWords(B, P) : '';
   const t = !D.ok ? `⚠️ ${D.reason}` : D.kind === 'new' ? '✅ It fits here' : !changed() ? 'Drag a handle to change it'
-    : warn ? `⚠️ ${words} - lit red. Move ${P.remove === 1 ? 'it' : 'them'} first, or Apply and choose` : `✅ It fits here${words ? ` · ${words}` : ''}`;
+    : warn ? `⚠️ ${words} — lit red. Move ${P.remove === 1 ? 'it' : 'them'} first, or Apply and choose` : `✅ It fits here${words ? ` · ${words}` : ''}`;
   if (E.why.textContent !== t) E.why.textContent = t;
   E.why.classList.toggle('bad', !D.ok);
   E.why.classList.toggle('warn', warn);

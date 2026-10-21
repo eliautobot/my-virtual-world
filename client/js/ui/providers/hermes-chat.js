@@ -1,11 +1,11 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Hermes' chat view (docs/features/agent-providers.md §9 "Drawn as Hermes Desktop draws it"): the chat window keeps its
 // frame, its composer and its Sidebar; a Hermes agent's turns inside it are laid out the way Hermes' own Desktop lays them
-// out. A turn is Hermes' sections in Hermes' order - its thinking ("Thought for 2s", folded once the turn ends), its words,
+// out. A turn is Hermes' sections in Hermes' order — its thinking ("Thought for 2s", folded once the turn ends), its words,
 // and its tool calls as quiet one-line rows ("Ran ls -la /tmp", "Read notes.md"), a run of calls folded into one line that
 // says what they did ("Explored 3 files, ran 5 commands"), each row opening to what it ran and what came back; a file
 // edit is its own row with what it changed (+3 −1). Red only for a call that failed. Built live from Hermes' own stream
-// (server/providers/hermes/native.js) and, once kept, from Hermes' stored messages (their parts) - the same drawing for
+// (server/providers/hermes/native.js) and, once kept, from Hermes' stored messages (their parts) — the same drawing for
 // both. The wording, the grouping and its order follow Hermes Desktop's (MIT, Nous Research; THIRD-PARTY-NOTICES.md).
 import { esc } from '../../core/util.js';
 import { icon } from '../../core/icons.js';
@@ -58,7 +58,7 @@ const dur = ms => (!Number.isFinite(ms) ? '' : ms < 1000 ? `${Math.max(1, Math.r
 export function toolTitle(p) {
   const args = parse(p.args), done = !!p.done, verb = (a, b) => (done ? b : a);
   const name = p.name;
-  // (a file edit's row is its file's name, as Desktop's - what changed is in its diff and +/−)
+  // (a file edit's row is its file's name, as Desktop's — what changed is in its diff and +/−)
   if (FILE_EDIT.has(name)) { const path = first(args, ['path', 'file_path', 'target_file', 'filename']); if (path) return basename(path); }
   if (name === 'terminal' || name === 'execute_code') {
     const cmd = shell(first(args, ['command', 'code']) || p.ctx);
@@ -177,7 +177,7 @@ function outBody(p) {
   else if (p.out && p.out.trim()) bits.push(`<pre class="hv-out" data-noicon>${esc(p.out)}</pre>`);
   return bits.join('');
 }
-/** An edit's diff as Desktop shows it: the changed lines and their context, removed red, added green - no file headers,
+/** An edit's diff as Desktop shows it: the changed lines and their context, removed red, added green — no file headers,
  *  no hunk markers, no +/− signs. */
 function diffHtml(diff) {
   const lines = String(diff).split('\n').filter(l => !/^(---|\+\+\+|@@|diff |index |\\ No newline)/.test(l));
@@ -207,7 +207,7 @@ function clarifyHtml(p) {
   let res = []; try { const j = JSON.parse(p.out || '{}'); res = Array.isArray(j.responses) ? j.responses : []; } catch { /* plain text */ }
   const rows = (res.length ? res : qs).map((x, i) => {
     const q = x.question || qs[i]?.question || '', a = x.user_response ?? x.answer ?? '';
-    return q ? `<div class="hv-qa"><div class="hv-q" data-noicon>${esc(q)}</div><div class="hv-a" data-noicon>${esc(String(a || (x.status === 'skipped' ? 'Skipped' : '-')))}</div></div>` : '';
+    return q ? `<div class="hv-qa"><div class="hv-q" data-noicon>${esc(q)}</div><div class="hv-a" data-noicon>${esc(String(a || (x.status === 'skipped' ? 'Skipped' : '—')))}</div></div>` : '';
   }).join('');
   return rows ? `<div class="hv-widget hv-clarify">${rows}</div>` : '';
 }
@@ -226,7 +226,7 @@ export function blockList(parts, { live = false, sid = null } = {}) {
     return { k: b.k, text: String(b.p.text).replace(/^\s+/, '') };
   });
 }
-/** The files a turn edited - one each, in the order first touched, the +/− of all its edits summed (Desktop's changed
+/** The files a turn edited — one each, in the order first touched, the +/− of all its edits summed (Desktop's changed
  *  files: only edits that landed with a diff). */
 function changedFiles(parts) {
   const by = new Map();
@@ -247,7 +247,7 @@ function filesHtml(parts) {
   return `<div class="hv-widget hv-files"><div class="hv-files-h"><span>${files.length === 1 ? '1 file changed' : `${files.length} files changed`}</span><button type="button" class="hv-files-r" data-a="hv-review">Review</button></div>
     ${files.map(f => `<button type="button" class="hv-file" data-a="hv-file" data-tools="${esc(f.ids.join(' '))}" title="${esc(f.path)}"><span class="hv-ic" aria-hidden="true">${icon('doc')}</span><span class="hv-file-n" data-noicon>${esc(f.name)}</span><span class="hv-stat"><b class="add">+${f.a}</b> <b class="del">−${f.d}</b></span></button>`).join('')}</div>`;
 }
-/** A kept answer's turn, drawn whole (last: the chat's latest answer, settled - it closes with the files it changed). */
+/** A kept answer's turn, drawn whole (last: the chat's latest answer, settled — it closes with the files it changed). */
 export function answerHtml(m, { last = false, sid = null } = {}) {
   const parts = Array.isArray(m.meta?.parts) ? m.meta.parts : [{ t: 'text', text: m.text || '' }];
   return blockList(parts, { sid }).map(b => (b.text !== undefined ? `<div class="cw-md hv-text" data-noicon>${render(b.text).html}</div>` : b.html)).join('') + (last ? filesHtml(parts) : '');
@@ -287,7 +287,7 @@ export function updateFlow(box, R) {
 }
 /** The live turn's last line: Hermes' status (a retry and its countdown, compacting…) and how long it has been at it. */
 // The status row under the live turn, as Desktop's turn activity: a pulse, Hermes' status words when it has some (a retry
-// and its countdown, compacting…) and a clock - shown only when there is such a status or the turn has been quiet for 2 s
+// and its countdown, compacting…) and a clock — shown only when there is such a status or the turn has been quiet for 2 s
 // (the clock counting from then); never while Hermes waits for the person, nor while a call shows its own progress.
 const QUIET_MS = 2000;
 export function footHtml(R) {
@@ -307,7 +307,7 @@ export function tick(live, R, waiting = false) {
   el.hidden = !active;
   if (active) el.querySelector('.hv-act-t').textContent = dur(Math.max(0, now - (quiet ? hv.lastAct : (R.t0 || now)))).replace(/\.\d/, '').replace(/^\d+ms$/, '0s');
 }
-/** Esc while a turn runs stops it (and pauses the queue), as Desktop's - not while it waits for the person. */
+/** Esc while a turn runs stops it (and pauses the queue), as Desktop's — not while it waits for the person. */
 export function escape(ctx) {
   if (!ctx.busy() || ctx.blocking()) return false;
   stop(ctx);
@@ -316,9 +316,9 @@ export function escape(ctx) {
 
 // ------------------------------------------------------------------ the composer while Hermes works (Desktop's)
 // While a turn runs: Enter with words redirects the turn (Hermes' session.redirect: it stops at a safe point and goes on
-// with the correction, which shows under what was written so far); Ctrl/Cmd+Enter - and anything Hermes can't take into
-// the turn (files, a slash command, a turn waiting for an approval or an answer) - waits in the queue above the composer,
-// sent by itself when the turn ends; Enter on an empty composer stops it. Stop pauses the queue ("Queued - paused") until
+// with the correction, which shows under what was written so far); Ctrl/Cmd+Enter — and anything Hermes can't take into
+// the turn (files, a slash command, a turn waiting for an approval or an answer) — waits in the queue above the composer,
+// sent by itself when the turn ends; Enter on an empty composer stops it. Stop pauses the queue ("Queued — paused") until
 // Resume, Send now, or an edit. Each queued message: delete, edit (back into the composer), steer now (into the running
 // turn), send now (now if idle; else first in line, the running turn stopped to reach it).
 const MOD = () => (/Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl');
@@ -328,11 +328,11 @@ const steerable = (text, files) => !!text.trim() && !files.length && !text.trim(
 export function submit(ctx, { ctrl = false, button = false, queue = false } = {}) {
   const text = ctx.text(), files = ctx.files(), payload = !!text.trim() || files.length > 0;
   if (ctx.uploading()) return;
-  // (a command runs now, whatever the turn - as Desktop's; with files it is a message)
+  // (a command runs now, whatever the turn — as Desktop's; with files it is a message)
   if (!files.length && isSlash(text) && !queue && !ctrl) { ctx.take(); runSlash(ctx, text); return; }
   if (!ctx.busy()) { if (payload) ctx.send({}); return; }
   if (!payload) { if (!ctrl && !queue) stop(ctx); return; }
-  // (words while Hermes waits on its question: they are the answer "none of these" - the question is skipped and the
+  // (words while Hermes waits on its question: they are the answer "none of these" — the question is skipped and the
   // words go into the turn, as Desktop's; an approval, a password or a secret can't be answered by words: they queue)
   const asked = ctx.waiting();
   if (!ctrl && !queue && steerable(text, files) && asked.clarify.length && !asked.others) { skipThenRedirect(ctx, asked.clarify); return; }
@@ -402,16 +402,16 @@ export function queueAction(ctx, act, id, el) {
   if (!ctx.busy() && !q.parked && q.items.length) afterRun(ctx);
 }
 // ------------------------------------------------------------------ the status stack above the composer (Desktop's)
-// Hermes' todo list - "Tasks 2/5", open while a turn runs, each item done (a check), under way (a spinner) or to do (a
-// dashed ring); once the turn ends, "Previous tasks 2/5", folded -, its live subagents - "2 Subagents" (folded): each its
+// Hermes' todo list — "Tasks 2/5", open while a turn runs, each item done (a check), under way (a spinner) or to do (a
+// dashed ring); once the turn ends, "Previous tasks 2/5", folded —, its live subagents — "2 Subagents" (folded): each its
 // goal, what it does now and how long it has run, opening to a box to steer it ("Instructions for this subagent") and
-// Stop; Agents opens the side panel's Tasks -, then the queue. A ridge on its top edge hides or shows the whole stack.
+// Stop; Agents opens the side panel's Tasks —, then the queue. A ridge on its top edge hides or shows the whole stack.
 // Sections start folded except the todo list; a section the person opened or folded stays so for the chat.
 const LIVE = new Set(['running', 'queued']);
 const uiOf = q => (q.ui = q.ui || { open: {}, hidden: false, sub: null, drafts: {} });
 const defaultOpen = sec => sec === 'todo';   // (Desktop's: the todo list open; the goal, loop and heartbeat folded)
 const ago = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
-// (each chat's subagents as the page knows them - chat id → list: the strip and the turn's delegation cards both read them;
+// (each chat's subagents as the page knows them — chat id → list: the strip and the turn's delegation cards both read them;
 // two windows may each show a Hermes chat)
 const SUBS = new Map();
 const subsOf = sid => SUBS.get(sid) || [];
@@ -420,11 +420,11 @@ function section(ctx, sec, label, iconName, body, { indicator = '', acc = '', to
   return `<section class="hv-sec${open ? ' open' : ''}${acc ? ' acc' : ''}" data-sec="${sec}"><button type="button" class="hv-sec-h" data-qa="sec" data-sec="${sec}" aria-expanded="${open}"><span class="hv-sec-chev" aria-hidden="true">${icon('caret-right')}</span><span class="hv-ic${tone ? ` ${tone}` : ''}" aria-hidden="true">${icon(iconName)}</span><span class="hv-sec-l">${esc(label)}</span>${!open ? indicator : ''}</button>${acc}${open ? `<div class="hv-sec-b">${body}</div>` : ''}</section>`;
 }
 // ------------------------------------------------------------------ the session's goal, loop and heartbeat (Desktop's)
-// Hermes' session control - /goal (a standing goal it works on turn after turn until a judge says it is done), /loop (a
-// prompt run again on a cadence), /heartbeat (a prompt that comes back when the chat is idle) - first in the status
+// Hermes' session control — /goal (a standing goal it works on turn after turn until a judge says it is done), /loop (a
+// prompt run again on a cadence), /heartbeat (a prompt that comes back when the chat is idle) — first in the status
 // stack, as Desktop's: each a section saying how it stands ("Goal active · Turn 3/20", "Loop active · Run 1/3 · next
 // ~29m", "Heartbeat active · every 45m · next 00:44:59"), folded; open, what it is (the goal and its criteria, the loop's
-// prompt and cadence …); its ⋯ menu Desktop's actions (pause, resume, resume now, add a criterion, details, clear / stop -
+// prompt and cadence …); its ⋯ menu Desktop's actions (pause, resume, resume now, add a criterion, details, clear / stop —
 // asked first). Read when the chat opens (session.control.read), followed live (session.control.update), changed through
 // Hermes' own session.control. A resumed goal sends its continuation as the person's next message (queued while busy).
 const CONTROL = new Map();   // (chat id → Hermes' control snapshot)
@@ -436,7 +436,7 @@ const every = sec => (!Number.isFinite(sec) ? '' : sec % 3600 === 0 ? `every ${s
 const row = (iconName, html, cls = '') => `<div class="hv-ctl-row${cls ? ` ${cls}` : ''}">${iconName ? `<span class="hv-ic" aria-hidden="true">${icon(iconName)}</span>` : '<span class="hv-ic"></span>'}<span data-noicon>${html}</span></div>`;
 const menuBtn = (sec, label) => `<button type="button" class="hv-sec-acc" data-qa="ctl-menu" data-ctl="${sec}" title="${esc(label)}" aria-label="${esc(label)}" aria-haspopup="menu">⋯</button>`;
 export function setControl(sid, control) {
-  // (the latest word, whichever way it came - Hermes' updated_at goes back when an item is cleared: no ordering by it)
+  // (the latest word, whichever way it came — Hermes' updated_at goes back when an item is cleared: no ordering by it)
   if (sid === null || sid === undefined) return;
   CONTROL.set(sid, control || null);
 }
@@ -465,7 +465,7 @@ function loopHtml(ctx, l) {
 }
 function heartbeatHtml(ctx, h) {
   const due = (h.last_fired_at || h.created_at || 0) + (h.interval_seconds || 0), isDue = h.status === 'active' && ms(due) <= Date.now();
-  const next = h.status === 'active' ? ` · ${isDue ? 'due - waiting for idle' : `next <span data-until="${ms(due)}">${countdown(due)}</span>`}` : '';
+  const next = h.status === 'active' ? ` · ${isDue ? 'due — waiting for idle' : `next <span data-until="${ms(due)}">${countdown(due)}</span>`}` : '';
   const tone = h.status === 'paused' ? 'red' : isDue ? 'amber' : 'green';
   const body = [row('chat', esc(h.prompt), 'title'), row('', `Fired ${h.fire_count} time${h.fire_count === 1 ? '' : 's'}`)].join('');
   const label = `${h.status === 'paused' ? 'Heartbeat paused' : 'Heartbeat active'} · ${every(h.interval_seconds)}`;
@@ -491,7 +491,7 @@ async function controlAction(ctx, action, args = {}) {
   const d = r.dispatch || {};
   if (d.type === 'send' && d.message) {
     const item = { id: `q${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, text: d.message, files: [], ...(d.display ? { display: d.display } : {}) };
-    if (ctx.busy()) { qOf(ctx).items.push(item); ctx.toast('Goal resumed - continuation queued until the current turn finishes'); }
+    if (ctx.busy()) { qOf(ctx).items.push(item); ctx.toast('Goal resumed — continuation queued until the current turn finishes'); }
     else ctx.send({ item });
   }
   ctx.paint();
@@ -596,7 +596,7 @@ export function onTasks(ctx) {
 function queueRows(ctx, busy) {
   const q = qOf(ctx);
   if (!q.items.length) return '';
-  return `<div class="hv-q-h"><span class="hv-ic" aria-hidden="true">${icon('layers')}</span><span>${q.items.length} Queued${q.parked ? ' - paused' : ''}</span>${q.parked ? '<button type="button" class="btn small" data-qa="resume" title="Paused by Stop - resume sending the queued turns">Resume</button>' : ''}</div>`
+  return `<div class="hv-q-h"><span class="hv-ic" aria-hidden="true">${icon('layers')}</span><span>${q.items.length} Queued${q.parked ? ' — paused' : ''}</span>${q.parked ? '<button type="button" class="btn small" data-qa="resume" title="Paused by Stop — resume sending the queued turns">Resume</button>' : ''}</div>`
     + q.items.map(x => {
       const words = (x.display || x.text).trim() || (x.files.length ? 'Attachment-only turn' : 'Empty turn');
       const long = words.length > 140 || words.includes('\n');
@@ -610,7 +610,7 @@ function queueRows(ctx, busy) {
 }
 
 // ------------------------------------------------------------------ a delegation in the turn (Desktop's)
-// delegate_task as the fan-out it is: one row per child - its goal and the model running it, its time while it works,
+// delegate_task as the fan-out it is: one row per child — its goal and the model running it, its time while it works,
 // one ticking line of what it does; a check once done, a dot once sent to the background, red when it failed. Its live
 // state is the chat's subagents (the same the strip shows); its goal opens the side panel's Tasks.
 const DELEG = new Map();   // (tool call id → its part: a card drawn again when its children change)
@@ -646,14 +646,14 @@ export function sendLook(ctx) {
 }
 
 // ------------------------------------------------------------------ what waits for the person (Desktop's panels)
-// An approval: one card under the turn - "Command" (or "Command details" for a rule's label), what it would run, then
+// An approval: one card under the turn — "Command" (or "Command details" for a rule's label), what it would run, then
 // Reject · Always allow… ▾ (Allow this session, Always allow…, Reject) · Run; Always allow asks first, as Desktop's
 // dialog does (it goes into Hermes' permanent allowlist). Several waiting: one at a time, "1 / 2". Hermes' questions
-// (clarify): its widget - "0 of 2 answered", each question, its choices lettered A, B… (its preferred one marked
+// (clarify): its widget — "0 of 2 answered", each question, its choices lettered A, B… (its preferred one marked
 // "(Recommended)"), "Other (type your answer)", or a box for a question without choices; Skip and "Confirm and continue"
 // under it (Confirm once anything is answered; letters and 1–9 pick, inside the card). A sudo password or a secret:
-// Desktop's dialog over the window - "Administrator password" with the command it is for, or the variable a secret goes
-// into - Cancel or Send; the value goes to Hermes only, never shown back.
+// Desktop's dialog over the window — "Administrator password" with the command it is for, or the variable a secret goes
+// into — Cancel or Send; the value goes to Hermes only, never shown back.
 const RECOMMENDED = /\s*\(Recommended\)\s*$/i;
 const letter = i => String.fromCharCode(65 + i);
 const SYNTHETIC = /^<[^>]+> \(/;
@@ -744,7 +744,7 @@ export function click(ctx, b) {
 }
 function confirmAlways(ctx, card, b) {
   const cmd = card.querySelector('.hv-appr-cmd').textContent;
-  ctx.confirm({ title: 'Always allow this command?', body: `This adds the pattern to your permanent allowlist (~/.hermes/config.yaml). Hermes won’t ask again for commands like this - in this session or any future one.`,
+  ctx.confirm({ title: 'Always allow this command?', body: `This adds the pattern to your permanent allowlist (~/.hermes/config.yaml). Hermes won’t ask again for commands like this — in this session or any future one.`,
     code: cmd, yes: 'Always allow' }).then(ok => { if (ok) ctx.approve(card.dataset.apprId, 'allow-always', b); });
 }
 /** Typing in a clarify box counts as an answer (a single-choice question's choice is let go); keys inside a clarify
@@ -790,13 +790,13 @@ export function userHtml(m, { editing, busy }) {
     <div class="cw-edit-acts"><button type="button" class="btn small" data-a="hv-edit-cancel">Cancel</button><button type="button" class="btn small primary" data-a="hv-edit-send">Send</button></div></div>`;
   const can = !busy && Number.isInteger(m.meta?.row);
   return `<div class="cw-msg user" data-id="${m.id}">${files ? `<div class="cw-files">${files}</div>` : ''}${m.text ? `<div class="cw-bubble" data-noicon>${esc(m.text)}</div>` : ''}
-    <div class="cw-mact">${can ? `<button type="button" class="cw-ic" data-a="hv-edit" title="Edit message" aria-label="Edit message">${icon('pencil')}</button><button type="button" class="cw-ic" data-a="hv-restore" title="Restore checkpoint - rerun from this prompt" aria-label="Restore checkpoint">${icon('undo')}</button>` : ''}<button type="button" class="cw-ic" data-a="copy" title="Copy" aria-label="Copy">⧉</button></div></div>`;
+    <div class="cw-mact">${can ? `<button type="button" class="cw-ic" data-a="hv-edit" title="Edit message" aria-label="Edit message">${icon('pencil')}</button><button type="button" class="cw-ic" data-a="hv-restore" title="Restore checkpoint — rerun from this prompt" aria-label="Restore checkpoint">${icon('undo')}</button>` : ''}<button type="button" class="cw-ic" data-a="copy" title="Copy" aria-label="Copy">⧉</button></div></div>`;
 }
 export function actionsHtml(m, { last, busy, read, meta, caps }) {
   const branch = caps.branch && Number.isInteger(m.meta?.upto) && !busy;
   return `<div class="cw-mact">${branch ? `<button type="button" class="cw-ic" data-a="hv-branch" title="Branch in new chat" aria-label="Branch in new chat">${icon('arrow-ur')}</button>` : ''}<button type="button" class="cw-ic" data-a="copy" title="Copy" aria-label="Copy">⧉</button>${read}${last && caps.rewind && !busy ? `<button type="button" class="cw-ic" data-a="hv-refresh" title="Refresh" aria-label="Refresh">${icon('rotate')}</button>` : ''}${meta}</div>`;
 }
-/** Back to before message `m`, then `text` from there - a skill's command expanded again into the skill's words (the
+/** Back to before message `m`, then `text` from there — a skill's command expanded again into the skill's words (the
  *  message still shows the command). */
 async function rewindTo(ctx, m, text) {
   if (isSlash(text) && ctx.manages()) {
@@ -825,7 +825,7 @@ export function messageClick(ctx, b) {
   if (a === 'hv-refresh') { const all = ctx.messages(), k = all.indexOf(m), u = all.slice(0, k).reverse().find(x => x.role === 'user'); if (u) rewindTo(ctx, u, u.text); return true; }
   if (a === 'hv-branch') { ctx.branch(m.meta.upto); return true; }
   if (a === 'hv-review' || a === 'hv-file') {
-    // (Desktop's Review opens its diff pane: here, the turn's own edit cards - opened, the first brought into view)
+    // (Desktop's Review opens its diff pane: here, the turn's own edit cards — opened, the first brought into view)
     const box = b.closest('.cw-msg'), ids = a === 'hv-file' ? b.dataset.tools.split(' ') : null;
     const cards = [...box.querySelectorAll('details.hv-tool.edit, details.hv-tool[data-tool]')].filter(d => (ids ? ids.includes(d.dataset.tool) : d.classList.contains('edit')));
     for (const d of cards) { d.open = true; d.closest('details.hv-run')?.setAttribute('open', ''); }
@@ -843,10 +843,10 @@ export function since(ms) {
 }
 
 // ------------------------------------------------------------------ slash commands and @references (Desktop's)
-// A message beginning with / is a command, run as Hermes Desktop runs it - never sent to the model as words, and at once,
+// A message beginning with / is a command, run as Hermes Desktop runs it — never sent to the model as words, and at once,
 // even while a turn runs: a few by the window itself (/new, /branch, /model, /resume), the rest through the call Hermes
 // has for them (/status, /save, /compress, /title, /reasoning, /yolo, /stop, /help, /btw, /bg) or by Hermes itself
-// (slash.exec; a skill, a quick command or a plugin's through command.dispatch - whose message then goes as the person's,
+// (slash.exec; a skill, a quick command or a plugin's through command.dispatch — whose message then goes as the person's,
 // shown as the command). What a command says is a quiet line in the conversation ("/status · …"), kept for the page's
 // life as Desktop keeps it for its window's; a side question's (/btw) or a background task's (/bg) answer comes there
 // later. A command Hermes marks as not for its Desktop (the terminal's, messaging platforms'…) says so instead, and is not
@@ -856,13 +856,13 @@ export function since(ms) {
 const SLASH_RE = /^\/[^\s/]*(?:\s|$)/;
 export const isSlash = t => SLASH_RE.test(String(t || '').trim());
 const parseSlash = c => { const m = /^(\S+)([\s\S]*)$/.exec(String(c).replace(/^\/+/, '')); return m ? { name: m[1].toLowerCase(), arg: m[2].trim() } : { name: '', arg: '' }; };
-/** Desktop's own handling of its commands (desktop-slash-commands.ts), as far as this window has each: act - the window
- *  or a call of Hermes' does it; rpc - Hermes' own call for it; off - Desktop's alone, said so. */
+/** Desktop's own handling of its commands (desktop-slash-commands.ts), as far as this window has each: act — the window
+ *  or a call of Hermes' does it; rpc — Hermes' own call for it; off — Desktop's alone, said so. */
 const SPECS = [
   { name: '/new', desc: 'Start a new chat', aliases: ['/reset', '/clear'], act: 'new' },
   { name: '/stop', desc: 'Stop the active turn and background processes', act: 'stop' },
   { name: '/branch', desc: 'Branch the latest message into a new chat', aliases: ['/fork'], act: 'branch' },
-  { name: '/yolo', desc: 'Toggle YOLO - auto-approve dangerous commands', act: 'yolo' },
+  { name: '/yolo', desc: 'Toggle YOLO — auto-approve dangerous commands', act: 'yolo' },
   { name: '/reasoning', desc: 'Reasoning effort or display [<level> [--global]|show|hide|full|clamp]', act: 'reasoning' },
   { name: '/title', desc: 'Rename the current session', act: 'title' },
   { name: '/help', desc: 'Show slash commands', aliases: ['/commands'], act: 'help' },
@@ -880,9 +880,9 @@ const SPECS = [
 ];
 const SPEC = new Map(SPECS.map(x => [x.name, x])), ALIAS = new Map(SPECS.flatMap(x => (x.aliases || []).map(a => [a, x.name])));
 const OFF = {
-  desktop: c => `${c} is Hermes Desktop's own - it isn't available here.`,
-  profile: c => `${c}: each Hermes profile is its own agent here - choose it in the agent menu.`,
-  browser: c => `${c} manages a Chromium-family browser on the gateway host - only available when connected to a local gateway.`,
+  desktop: c => `${c} is Hermes Desktop's own — it isn't available here.`,
+  profile: c => `${c}: each Hermes profile is its own agent here — choose it in the agent menu.`,
+  browser: c => `${c} manages a Chromium-family browser on the gateway host — only available when connected to a local gateway.`,
   advanced: c => `${c} is not offered here. Use Hermes' terminal interface instead.`,
   'composer-voice': () => 'Voice lives in the composer here: use its microphone button.',
   messaging: c => `${c} is only used from messaging platforms.`,
@@ -891,7 +891,7 @@ const OFF = {
 };
 const CATALOGS = new Map();   // (chat or agent → { at, catalog }: Hermes' commands, read again after a minute)
 const SUGGEST = new Map();    // (a query → { at, items }: Hermes' suggestions, for a few seconds)
-// (a chat's catalog adds the skills of its folder; reading it takes Hermes a moment - the agent's, when known, is used
+// (a chat's catalog adds the skills of its folder; reading it takes Hermes a moment — the agent's, when known, is used
 // meanwhile, the chat's read in the background)
 const fetchCatalog = async (ctx, k) => { const catalog = await ctx.native('commands.catalog', {}); CATALOGS.set(k, { at: Date.now(), catalog }); CATALOGS.set(`a${ctx.agentId()}`, { at: Date.now(), catalog }); return catalog; };
 const pendingCat = new Map();
@@ -922,8 +922,8 @@ function suggested(c, cat, exactAlias) {
   const r = resolve(n, cat);
   return !r.off && !r.hidden;
 }
-// (Desktop's own words for the commands - its composer.commandDescs; "desktop chat" said "chat" here)
-const DESCS = {"/help": "Show slash commands", "/clear": "start a new session", "/resume": "Resume a saved session", "/details": "control transcript detail level", "/copy": "copy selection or last assistant message", "/quit": "exit hermes", "/start": "Acknowledge platform start pings without a reply", "/new": "Start a new chat", "/topic": "Enable or inspect Telegram DM topic sessions", "/save": "Save the current transcript to JSON", "/retry": "Retry the last message (resend to agent)", "/prompt": "Compose your next prompt in $EDITOR (markdown), then send it", "/undo": "Back up N user turns and re-prompt (default 1)", "/title": "Rename the current session", "/handoff": "Hand off this session to a messaging platform", "/branch": "Branch the latest message into a new chat", "/worktree": "Show, list, create, or prune isolated git worktrees", "/compress": "Compress this conversation context", "/rollback": "List or restore filesystem checkpoints (restores keep your hand-edits; --all overrides)", "/export": "Export a profile (config, skills, theme) to a shareable archive", "/import": "Import a shared profile archive as a new profile", "/stop": "Stop the active turn and background processes", "/pause": "Pause new work globally (emergency stop); '/pause off' resumes", "/bg": "Run a prompt in a separate background session", "/btw": "Ask a side question about this conversation without interrupting it", "/agents": "Show active agents and running tasks", "/journey": "Open the memory graph - skills + memories over time", "/queue": "Queue a prompt for the next turn, or list/edit/rm/move/clear queued prompts", "/steer": "Inject a message after the next tool call without interrupting", "/goal": "Set a standing goal Hermes works on across turns until achieved", "/heartbeat": "Set a recurring prompt that re-enters this session when idle", "/refine": "Review this conversation now and save lessons to memory/skills", "/review": "Spawn an independent subagent to review the work just discussed (PR, code, docs)", "/loop": "Re-run a prompt on a recurring interval in this session", "/plan": "Write a markdown implementation plan to .hermes/plans/ without executing anything", "/moa": "Run one prompt through the default Mixture of Agents preset, then restore your model", "/subgoal": "Add or manage extra criteria on the active goal", "/status": "Show current session status", "/egress": "Show Docker egress proxy status", "/context": "Show detailed context window view with usage gauge, category breakdown, compression stats, and throughput", "/whoami": "Show your slash command access (admin / user)", "/profile": "Switch the active Hermes profile", "/codex-runtime": "Toggle codex app-server runtime for OpenAI/Codex models", "/personality": "Set a predefined personality", "/battery": "Toggle a color-coded battery indicator in the status bar", "/timestamps": "Toggle [HH:MM] timestamps on messages and /history", "/diff": "Show git changes in the working directory", "/focus": "Toggle focus view - show only your prompt and the final response", "/yolo": "Toggle YOLO - auto-approve dangerous commands", "/approvals": "Show or set the persistent dangerous-command approval mode", "/reasoning": "Reasoning effort or display [<level> [--global]|show|hide|full|clamp]", "/skin": "Switch desktop theme or cycle to the next one", "/wake": "Control the desktop wake-word listener [on|off|status]", "/tools": "Manage tools: /tools [list|disable|enable] [name...]", "/memory": "Review pending memory writes / toggle the approval gate", "/bundles": "List skill bundles (aliases /<name> for multiple skills)", "/pet": "Toggle or adopt a petdex mascot (/pet, /pet list, /pet boba)", "/hatch": "Generate a new pet (opens the pet generator)", "/learn": "Learn a reusable skill from anything you describe (dirs, URLs, this chat, notes)", "/init": "Generate or update AGENTS.md project instructions from a repo scan", "/suggestions": "Review suggested automations (accept/dismiss)", "/blueprint": "Set up an automation from a blueprint template", "/browser": "Manage browser CDP connection [connect|disconnect|status] (local gateway only)", "/palette": "Open the fuzzy command palette (also Ctrl+P)", "/usage": "Show token usage and rate limits; `reset` redeems a banked Codex limit reset", "/subscription": "View your Nous plan and change it in the browser", "/topup": "Show your Nous balance and manage billing on the portal", "/platform": "Pause, resume, or list a failing gateway platform", "/version": "Show Hermes Agent version", "/debug": "Upload debug report (system info + logs) and get shareable links", "/model": "Switch the model for this session"};
+// (Desktop's own words for the commands — its composer.commandDescs; "desktop chat" said "chat" here)
+const DESCS = {"/help": "Show slash commands", "/clear": "start a new session", "/resume": "Resume a saved session", "/details": "control transcript detail level", "/copy": "copy selection or last assistant message", "/quit": "exit hermes", "/start": "Acknowledge platform start pings without a reply", "/new": "Start a new chat", "/topic": "Enable or inspect Telegram DM topic sessions", "/save": "Save the current transcript to JSON", "/retry": "Retry the last message (resend to agent)", "/prompt": "Compose your next prompt in $EDITOR (markdown), then send it", "/undo": "Back up N user turns and re-prompt (default 1)", "/title": "Rename the current session", "/handoff": "Hand off this session to a messaging platform", "/branch": "Branch the latest message into a new chat", "/worktree": "Show, list, create, or prune isolated git worktrees", "/compress": "Compress this conversation context", "/rollback": "List or restore filesystem checkpoints (restores keep your hand-edits; --all overrides)", "/export": "Export a profile (config, skills, theme) to a shareable archive", "/import": "Import a shared profile archive as a new profile", "/stop": "Stop the active turn and background processes", "/pause": "Pause new work globally (emergency stop); '/pause off' resumes", "/bg": "Run a prompt in a separate background session", "/btw": "Ask a side question about this conversation without interrupting it", "/agents": "Show active agents and running tasks", "/journey": "Open the memory graph — skills + memories over time", "/queue": "Queue a prompt for the next turn, or list/edit/rm/move/clear queued prompts", "/steer": "Inject a message after the next tool call without interrupting", "/goal": "Set a standing goal Hermes works on across turns until achieved", "/heartbeat": "Set a recurring prompt that re-enters this session when idle", "/refine": "Review this conversation now and save lessons to memory/skills", "/review": "Spawn an independent subagent to review the work just discussed (PR, code, docs)", "/loop": "Re-run a prompt on a recurring interval in this session", "/plan": "Write a markdown implementation plan to .hermes/plans/ without executing anything", "/moa": "Run one prompt through the default Mixture of Agents preset, then restore your model", "/subgoal": "Add or manage extra criteria on the active goal", "/status": "Show current session status", "/egress": "Show Docker egress proxy status", "/context": "Show detailed context window view with usage gauge, category breakdown, compression stats, and throughput", "/whoami": "Show your slash command access (admin / user)", "/profile": "Switch the active Hermes profile", "/codex-runtime": "Toggle codex app-server runtime for OpenAI/Codex models", "/personality": "Set a predefined personality", "/battery": "Toggle a color-coded battery indicator in the status bar", "/timestamps": "Toggle [HH:MM] timestamps on messages and /history", "/diff": "Show git changes in the working directory", "/focus": "Toggle focus view — show only your prompt and the final response", "/yolo": "Toggle YOLO — auto-approve dangerous commands", "/approvals": "Show or set the persistent dangerous-command approval mode", "/reasoning": "Reasoning effort or display [<level> [--global]|show|hide|full|clamp]", "/skin": "Switch desktop theme or cycle to the next one", "/wake": "Control the desktop wake-word listener [on|off|status]", "/tools": "Manage tools: /tools [list|disable|enable] [name...]", "/memory": "Review pending memory writes / toggle the approval gate", "/bundles": "List skill bundles (aliases /<name> for multiple skills)", "/pet": "Toggle or adopt a petdex mascot (/pet, /pet list, /pet boba)", "/hatch": "Generate a new pet (opens the pet generator)", "/learn": "Learn a reusable skill from anything you describe (dirs, URLs, this chat, notes)", "/init": "Generate or update AGENTS.md project instructions from a repo scan", "/suggestions": "Review suggested automations (accept/dismiss)", "/blueprint": "Set up an automation from a blueprint template", "/browser": "Manage browser CDP connection [connect|disconnect|status] (local gateway only)", "/palette": "Open the fuzzy command palette (also Ctrl+P)", "/usage": "Show token usage and rate limits; `reset` redeems a banked Codex limit reset", "/subscription": "View your Nous plan and change it in the browser", "/topup": "Show your Nous balance and manage billing on the portal", "/platform": "Pause, resume, or list a failing gateway platform", "/version": "Show Hermes Agent version", "/debug": "Upload debug report (system info + logs) and get shareable links", "/model": "Switch the model for this session"};
 const describe = (c, fallback, cat) => { const k = canonical(c, cat), s = SPEC.get(k), d = DESCS[k] || (s && s.desc); const usage = String(fallback || '').match(/\s+\(usage:\s+(.+)\)$/s)?.[0] || ''; return d ? `${d}${usage}` : fallback || ''; };
 
 // ---- what a command says: a quiet line in the conversation, kept for the page's life
@@ -934,7 +934,7 @@ function addNote(ctx, { cmd = '', text, kind = 'slash', id = null, before = null
   const list = NOTES.get(sid) || [];
   if (id && list.some(n => n.meta.note.id === id)) return;
   const msgs = ctx ? ctx.messages() : null;
-  // (after what is on the page - and after the answer being written, when one is; a side task's acknowledgement before
+  // (after what is on the page — and after the answer being written, when one is; a side task's acknowledgement before
   // its answer, should the answer have come first)
   const next = before ? list.find(n => n.meta.note.id === before) : null;
   const at = next ? next.meta.note.at : msgs ? msgs.filter(m => !m.meta?.note).length + (ctx.busy() ? 1 : 0) : null;
@@ -948,7 +948,7 @@ export function withNotes(sid, messages) {
   if (!list || !list.length) return messages;
   const plain = messages.filter(m => !m.meta?.note);
   for (const n of list) if (n.meta.note.at === null) n.meta.note.at = plain.length;   // (an answer that came while the chat was closed: here)
-  // (a kept partial that Hermes' record has after all - the same words where it was - is not shown twice)
+  // (a kept partial that Hermes' record has after all — the same words where it was — is not shown twice)
   const twice = n => { if (n.meta.note.kind !== 'partial') return false; const m = plain[n.meta.note.at], t = String(n.text || '').trim().slice(0, 80); return !!(m && m.role === 'assistant' && t && String(m.text || '').trim().startsWith(t)); };
   const sorted = [...list].filter(n => !twice(n)).sort((a, b) => a.meta.note.at - b.meta.note.at || a.meta.note.n - b.meta.note.n), out = [];
   let k = 0;
@@ -957,7 +957,7 @@ export function withNotes(sid, messages) {
   return out;
 }
 /** What a turn wrote before the person redirected it (cut off under their correction): Hermes keeps it out of its record,
- *  Desktop keeps showing it for the window's life - kept here for the page's, where it was. */
+ *  Desktop keeps showing it for the window's life — kept here for the page's, where it was. */
 export function kept(ctx, m) {
   const sid = ctx.sessionId();
   if (sid === null || sid === undefined) return;
@@ -1003,7 +1003,7 @@ function renderCatalog(cat) {
   const keep = pairs => (pairs || []).filter(([c]) => suggested(c, cat)).map(([c, d]) => [c, describe(c, d, cat)]);
   const sections = cat.categories && cat.categories.length ? cat.categories.map(s => ({ name: s.name, pairs: keep(s.pairs) })) : [{ name: 'Commands', pairs: keep(cat.pairs) }];
   const body = sections.filter(s => s.pairs.length).map(s => [`${s.name}:`, ...s.pairs.map(([c, d]) => `${c.padEnd(18)} ${d}`)].join('\n')).join('\n\n');
-  const tail = [cat.skill_count ? `${cat.skill_count} skill command${cat.skill_count === 1 ? '' : 's'} available - type / to browse them.` : '', cat.warning ? `warning: ${cat.warning}` : ''].filter(Boolean).join('\n');
+  const tail = [cat.skill_count ? `${cat.skill_count} skill command${cat.skill_count === 1 ? '' : 's'} available — type / to browse them.` : '', cat.warning ? `warning: ${cat.warning}` : ''].filter(Boolean).join('\n');
   return [body || 'No commands available.', tail].filter(Boolean).join('\n\n');
 }
 function reasoningParams(arg) {
@@ -1019,7 +1019,7 @@ export async function runSlash(ctx, text, { record = true } = {}) {
   if (!name) { await out('empty slash command'); return; }
   if (!ctx.manages()) { await out('Commands are run by whoever manages this agent\'s provider. Leave out the / to send it as a message.'); return; }
   const call = (method, params = {}) => ctx.native(method, params, { ensure: true, preview: command });
-  // (the window's own commands need nothing of Hermes' to be known; any other one, its catalog - how its Desktop takes it)
+  // (the window's own commands need nothing of Hermes' to be known; any other one, its catalog — how its Desktop takes it)
   let cat = lastCatalog(ctx);
   if (!cat && !SPEC.has(ALIAS.get(`/${name}`) || `/${name}`)) { try { cat = await catalogOf(ctx); } catch { cat = null; } }
   const r = resolve(`/${name}`, cat);
@@ -1047,10 +1047,10 @@ export async function runSlash(ctx, text, { record = true } = {}) {
       }
       case 'btw': case 'background': {
         const bg = r.act === 'background';
-        if (!arg) { await out(bg ? 'Usage: /background <prompt> - the task runs in a separate session and the result appears here when done.' : 'Usage: /btw <question> - answered from a snapshot of this conversation without interrupting it.'); return; }
+        if (!arg) { await out(bg ? 'Usage: /background <prompt> — the task runs in a separate session and the result appears here when done.' : 'Usage: /btw <question> — answered from a snapshot of this conversation without interrupting it.'); return; }
         const x = await call(bg ? 'prompt.background' : 'prompt.btw', { text: arg });
         await ctx.ensure();
-        addNote(ctx, { cmd: `/${name}`, text: bg ? `Background task ${x.task_id ? `${x.task_id} ` : ''}started - you can continue chatting; the result will appear here when done.` : `btw ${x.task_id ? `${x.task_id} ` : ''}- answering from a conversation snapshot`,
+        addNote(ctx, { cmd: `/${name}`, text: bg ? `Background task ${x.task_id ? `${x.task_id} ` : ''}started — you can continue chatting; the result will appear here when done.` : `btw ${x.task_id ? `${x.task_id} ` : ''}— answering from a conversation snapshot`,
           before: x.task_id ? `side:${x.task_id}` : null });
         return;
       }
@@ -1104,7 +1104,7 @@ function rereadControl(ctx, name) {
   if (!CONTROL_CMDS.has(name) || sid === null || !ctx.hasProviderSession()) return;
   ctx.native('session.control.read', {}).then(r => { setControl(sid, r.control); if (ctx.sessionId() === sid) ctx.paint(); }).catch(() => {});
 }
-/** Hermes runs it (slash.exec), or - a skill, a quick command, a plugin's - says what to do with it (command.dispatch). */
+/** Hermes runs it (slash.exec), or — a skill, a quick command, a plugin's — says what to do with it (command.dispatch). */
 async function runExec(ctx, args) {
   try { await runExec1(ctx, args); } finally { rereadControl(ctx, args.name); }
 }
@@ -1136,9 +1136,9 @@ async function dispatched(ctx, d, { name, arg, out }) {
   const message = String(d.message || '').trim();
   if (d.type === 'prefill') { if (message) ctx.put({ text: message, files: [] }); return; }
   if (!message) { await out(`/${name}: ${d.type === 'skill' ? 'skill payload missing message' : 'empty message'}`); return; }
-  // (the skill's words go to the model; the person's message shows the command - as Desktop's bubble does)
+  // (the skill's words go to the model; the person's message shows the command — as Desktop's bubble does)
   const item = { id: `q${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, text: message, files: [], ...(d.display ? { display: d.display } : {}) };
-  if (ctx.busy()) { qOf(ctx).items.push(item); ctx.paint(); await out('session busy - message queued to send when the current turn finishes'); return; }
+  if (ctx.busy()) { qOf(ctx).items.push(item); ctx.paint(); await out('session busy — message queued to send when the current turn finishes'); return; }
   ctx.send({ item });
 }
 
@@ -1154,8 +1154,8 @@ async function cached(key, fn) {
   if (SUGGEST.size > 300) SUGGEST.delete(SUGGEST.keys().next().value);
   return v;
 }
-/** What to suggest at the caret: { groups: [{ label, items: [{ label, sub, icon, insert, again }] }], from, to } - the
- *  composer's text from `from` to `to` is replaced by the item picked - or null. */
+/** What to suggest at the caret: { groups: [{ label, items: [{ label, sub, icon, insert, again }] }], from, to } — the
+ *  composer's text from `from` to `to` is replaced by the item picked — or null. */
 export async function completions(ctx, value, caret) {
   if (!ctx.manages()) return null;
   const before = value.slice(0, caret), at = /(?:^|\s)(@[^\s]*)$/.exec(before);
@@ -1173,7 +1173,7 @@ export function loaded(ctx) {
 }
 async function commands(ctx, text, caret) {
   const scope = ctx.sessionId() ?? `a${ctx.agentId()}`;
-  // (the catalog - read when the chat opened - and Hermes' completer, asked together)
+  // (the catalog — read when the chat opened — and Hermes' completer, asked together)
   const ask = text === '/' ? null : cached(`s|${scope}|${text.toLowerCase()}`, () => ctx.native('complete.slash', { text }));
   ask?.catch(() => {});
   const cat = await catalogOf(ctx).catch(() => null);

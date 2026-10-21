@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Prints a backup manifest for a data folder: every file's size and sha256, plus world and population counts.
 // Usage: node tools/deploy/manifest.mjs <data folder>
 import crypto from 'node:crypto';

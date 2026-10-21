@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The left edit dock and the right info dock (PLAN WP1.7; DECISIONS C112, C113). Collapsible panels hold the editing
 // tools and the information, so no editor or settings panel covers the middle of the world view (CHECKLIST I3.1–I3.4,
 // I3.12). A section appears only to accounts with the matching capability; a section whose tools arrive in a later
@@ -215,7 +215,7 @@ function layout() {
 }
 function mark() {
   // (a dot on the closed Info panel used to say "something selected is shown in it": the selection is the widget across
-  // the top now, ui.js - nothing to mark)
+  // the top now, ui.js — nothing to mark)
   E.right?.querySelector('.dock-toggle').classList.remove('mark');
 }
 function toggleDock(side) {
@@ -359,7 +359,7 @@ function listBody(b, filterPlaceholder, pick) {
   const fav = () => app.fav || { has: () => false, owned: () => false, toggle: () => {}, list: () => [] };
   const star = x => {
     const B = S.world.buildings[x.b], own = fav().owned(B), on = own || fav().has(B);
-    const label = own ? 'Yours - always a favourite' : on ? 'Remove from favourites' : 'Add to favourites';
+    const label = own ? 'Yours — always a favourite' : on ? 'Remove from favourites' : 'Add to favourites';
     return `<button type="button" class="fbtn${on ? ' on' : ''}${own ? ' owned' : ''}" data-fav="${x.b}" title="${label}" aria-label="${label}" aria-pressed="${on}">${own ? '🏠' : '★'}</button>`;
   };
   const rec = { render: () => {

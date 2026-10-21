@@ -1,5 +1,5 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The player's profile (docs/features/play-modules.md): the Agent Studio's idea for people - a page for a player. Its
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The player's profile (docs/features/play-modules.md): the Agent Studio's idea for people — a page for a player. Its
 // rank and level, the badges it has earned (three pinned to show off), its progress in every play module with its best
 // results and places, the leaderboards, and its last runs. The own profile edits the bio and the pinned badges and opens
 // the character's look. Opened from the account menu (My profile), the online list, friends and the leaderboards;
@@ -85,7 +85,7 @@ function badgesHtml(cat, p, earned) {
     if (!list.length) return '';
     return `<h4>${esc(title)}</h4><div class="pf-badges">${list.map(b => {
       const at = earned.get(b.id), pinned = p.showcase.includes(b.id);
-      return `<div class="pf-b t-${b.tier}${at ? ' got' : ''}${pinned ? ' pinned' : ''}${p.own && at ? ' pin' : ''}" data-badge="${b.id}" title="${esc(b.desc)}${at ? ` - earned ${when(at)}` : ''}">
+      return `<div class="pf-b t-${b.tier}${at ? ' got' : ''}${pinned ? ' pinned' : ''}${p.own && at ? ' pin' : ''}" data-badge="${b.id}" title="${esc(b.desc)}${at ? ` — earned ${when(at)}` : ''}">
         <span class="pf-bi">${at || !b.secret ? b.icon : '❔'}</span><b>${esc(b.label)}</b><small>${at ? `${pinned ? '📌 ' : ''}${when(at)}` : esc(b.desc)}</small></div>`;
     }).join('')}</div>`;
   }).join('');
@@ -122,7 +122,7 @@ async function boardHtml(cat, module, course) {
   const others = m.courses.map(x => `<option value="${x.id}"${x.id === c.id ? ' selected' : ''}>${esc(x.label)}</option>`).join('');
   return `<div class="pf-bh"><button class="btn small pf-back">← Profile</button><h3>${m.icon} ${esc(m.label)} leaderboard</h3><select class="pf-bsel">${others}</select></div>
     <p class="dim">${esc(c.blurb || '')} Stars: ★ ${esc(formatScore(m, c.stars[0]))} · ★★ ${esc(formatScore(m, c.stars[1]))} · ★★★ ${esc(formatScore(m, c.stars[2]))}</p>
-    ${b.rows.length ? `<table class="pf-courses board"><tbody>${b.rows.map(row).join('')}${b.you && !b.rows.some(r => r.id === b.you.id) ? `<tr class="gap"><td colspan="4">…</td></tr>${row(b.you)}` : ''}</tbody></table>` : '<p class="hint">Nobody has finished this course yet - be the first.</p>'}`;
+    ${b.rows.length ? `<table class="pf-courses board"><tbody>${b.rows.map(row).join('')}${b.you && !b.rows.some(r => r.id === b.you.id) ? `<tr class="gap"><td colspan="4">…</td></tr>${row(b.you)}` : ''}</tbody></table>` : '<p class="hint">Nobody has finished this course yet — be the first.</p>'}`;
 }
 async function topHtml() {
   const t = await getJSON('/api/play/top?limit=25');
@@ -145,7 +145,7 @@ async function onClick(e) {
   if (pin && M.p?.own) {
     const id = pin.dataset.badge, cur = M.p.showcase;
     const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
-    if (next.length > 3) { app.toast('Pin at most three badges - unpin one first', 'warn', 3000); return; }
+    if (next.length > 3) { app.toast('Pin at most three badges — unpin one first', 'warn', 3000); return; }
     await save({ showcase: next }, cur.includes(id) ? 'Badge unpinned' : 'Badge pinned to your profile');
   }
 }

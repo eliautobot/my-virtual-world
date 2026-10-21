@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // One name for an airport (server/world/edit.js ensureTerminals, at start; 2026-10-14): a terminal named before the rule
-// takes the airport's name - unless its sign was renamed by hand (neither the airport's name nor the one its terminal was
+// takes the airport's name — unless its sign was renamed by hand (neither the airport's name nor the one its terminal was
 // given), and then that name names the whole airport, its canopy and entrance sign too. Nothing else changes.
 import assert from 'node:assert/strict';
 import test from 'node:test';

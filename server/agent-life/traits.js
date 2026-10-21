@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's character traits (docs/features/FREE-WILL.md §5). Every trait is a value from 0 to 1.
 // - Body traits drive the routine as well as Free Will: they are the resident's own traits (person.tr, which the
 //   simulation reads), shown here on a 0..1 scale. Changing one changes how the resident lives.

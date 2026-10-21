@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Tripo character clips (character lab). The server and the rest of the client keep MVW's clip ids (shared/anims.js +
 // anim.js CLIP_NAMES); each id is mapped to one baked Tripo clip here. Durations/strides are refreshed from the asset
 // manifest once it loads (see characters.js), the defaults below match the current bake.
@@ -11,7 +11,7 @@ export const TRIPO_CLIPS = ['idle', 'walk', 'run', 'sit', 'lie', 'jump', 'dance_
   'hold_walk', 'hold_walk_phone', 'hold_idle', 'hold_phone', 'hold_drink', 'hold_sit_phone', 'hold_sit_drink', 'hold_sit_read',
   // doing things with the hands (tools/chars/extra-clips.mjs, on the idle's still stance)
   'act_cook', 'act_wash', 'act_browse', 'act_use', 'act_lift', 'act_pingpong',
-  // eating at a table (tools/chars/extra-clips.mjs; which one: render/char-props.js eatClip, by the dish - shared/eating.js)
+  // eating at a table (tools/chars/extra-clips.mjs; which one: render/char-props.js eatClip, by the dish — shared/eating.js)
   'eat_hands', 'eat_hand', 'eat_knife', 'eat_spoon',
   // with no table, and making something cold on a counter (2026-10-08)
   'eat_lap', 'eat_stand', 'eat_stand_hands', 'act_prep',
@@ -37,7 +37,7 @@ export const TRIPO_FALLBACK = {
   helm: 'idle', fish_idle: 'idle', fish_cast: 'idle', fish_reel: 'idle', fish_fight: 'idle', fish_net: 'idle', fish_show: 'idle',
 };
 /**
- * Clips that put the hands against the body's own marks - a cup or a fork at the lips, a burger held between both hands
+ * Clips that put the hands against the body's own marks — a cup or a fork at the lips, a burger held between both hands
  * (tools/chars/extra-clips.mjs measures them on each character): the arm calibration (assets/chars/rig.json, which moves
  * the arms out from the body for the bake's own clips) is left off while they play, or it would push the cup off the
  * lips and the hands off the burger (2026-10-07).

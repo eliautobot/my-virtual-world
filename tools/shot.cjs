@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Real-GPU screenshot of a page: node tools/shot.cjs <url> <out.png> [waitMs] [width] [height] [evalJS]
 // It only views the page, unless evalJS changes something.
 // Browser: tools/lib/browser.cjs (Chrome channel or MVW_TEST_BROWSER; sandbox on; no security-weakening flags).

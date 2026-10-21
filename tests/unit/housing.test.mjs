@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // How many live in the city follows its homes (server/sim/housing.js): the beds of its apartment buildings × Homes
-// filled; the city settles towards it by the world's clock - moving in (about 1/24 of the gap a world hour, only into free
+// filled; the city settles towards it by the world's clock — moving in (about 1/24 of the gap a world hour, only into free
 // beds), moving away (no home first, then no work, never an agent's resident), a resident without a home for a world day
 // leaves; a paused clock changes nothing.
 import assert from 'node:assert/strict';
@@ -51,7 +51,7 @@ test('fewer residents than the homes call for: they move in about 1/24 of the ga
   assert.equal(full.live().length, 10, 'no free bed, no newcomer');
 });
 
-test('more residents than that: those without a home leave first, then those without work - never an agent\'s resident', () => {
+test('more residents than that: those without a home leave first, then those without work — never an agent\'s resident', () => {
   const c = city({ apts: 2, beds: 50, n: 60, housed: 55, agents: 2 }), h = H(c, 20);   // target 20, 40 too many
   h.step(); c.advance(6 * 3600); h.step();
   const gone = c.sim.people.filter(p => p.retired);
@@ -76,7 +76,7 @@ test('a resident without a home for a whole world day moves away; a paused clock
   assert.deepEqual([s.beds, s.target, s.residents, s.homeless], [10, 10, 8, 0]);
 });
 
-test('a small gap closes at about one person a world hour - not one every step - and what is owed never piles up', () => {
+test('a small gap closes at about one person a world hour — not one every step — and what is owed never piles up', () => {
   const c = city({ apts: 1, beds: 100, n: 50 }), h = H(c, 45);   // target 45: 5 too many
   h.step();
   for (let k = 0; k < 16; k++) { c.advance(225); h.step(); }      // one world hour in steps of 225 world seconds

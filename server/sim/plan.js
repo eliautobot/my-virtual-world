@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Motion plan builder: turns routes (indoor A* paths, street polylines, crosswalks with signal waits, elevator rides,
 // subway rides, furniture use) into absolute-time piecewise-linear segments in WORLD coordinates.
 import { GROUND_Y, floorAt, CROSS_SPEED, ELEVATOR_BASE, ELEVATOR_PER_FLOOR, ctxOf, ctxB, ctxF, pedStart } from '../../shared/constants.js';

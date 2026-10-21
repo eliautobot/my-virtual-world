@@ -1,5 +1,5 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The starting map: the city a new installation opens with (server/world/starter-map.json.gz) - its land, roads, lots,
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The starting map: the city a new installation opens with (server/world/starter-map.json.gz) — its land, roads, lots,
 // buildings and their floors, metro stations, parks, the airport, the marina and the lake docks, built by hand in the
 // editor. It holds no residents (a new world's residents follow its homes: server/sim/housing.js), no accounts, no
 // agents and no money. MVW_STARTER_MAP=off generates a city instead (server/world/generate.js), as the tests do.

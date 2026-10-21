@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Read-only browser check of a Next address in real Chrome.
 // Reports: HTTP status, secure context, whether the microphone API exists, WebSocket traffic, console errors,
 // failed requests; optional screenshot. It only views the world and never sends edits.

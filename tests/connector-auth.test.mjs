@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // AI apps' authorization server (server/connector/auth.js): registrations (RFC 7591) and client ID metadata documents;
-// the authorization request's checks (the app, its exact redirect URI - loopback with any port -, code, PKCE S256, the
+// the authorization request's checks (the app, its exact redirect URI — loopback with any port —, code, PKCE S256, the
 // resource, the scope), the person's answer (deny; allow as one of THEIR agents), single-use codes with the PKCE verifier,
-// short access tokens bound to this resource, refresh tokens replaced at every use - a code or refresh token used twice
-// ends the grant -, confidential apps' secrets; a grant ends with its agent, its account, or the person disconnecting it.
+// short access tokens bound to this resource, refresh tokens replaced at every use — a code or refresh token used twice
+// ends the grant —, confidential apps' secrets; a grant ends with its agent, its account, or the person disconnecting it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';

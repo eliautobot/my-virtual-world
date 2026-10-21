@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // This browser simulates its own car while driving (decision A20); the server validates and relays. The official Rapier
 // build loads only on the first drive. Automatic uses this browser on every device (measured affordable on phone-class
 // CPUs, and instant controls matter most on mobile networks); server physics stays selectable.

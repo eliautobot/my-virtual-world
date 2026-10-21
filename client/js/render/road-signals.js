@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Traffic signals at the busier junctions beyond the city (shared/road-kit.js plans), in the city's style
 // (render/city.js): a pole on the corner where each road comes in, a mast arm reaching over its incoming lanes with a
 // US three-lamp head over each lane (red, yellow, green; 2026-10-06), and walk/don't-walk heads facing across the
@@ -76,7 +76,7 @@ export class RoadSignals {
         }
       }
     }
-    // corners with neither signals nor stop signs: a post with the two street names (built with the rest - 2026-10-14:
+    // corners with neither signals nor stop signs: a post with the two street names (built with the rest — 2026-10-14:
     // added after the build, the post was never drawn and its names floated)
     if (nameOf) for (const J of plans.filter(p => !p.signalized && !p.signs?.length)) {
       const C = J.corners?.find(c => c.X && c.O && c.R); if (!C) continue;

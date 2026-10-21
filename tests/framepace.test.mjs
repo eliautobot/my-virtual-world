@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Frame pacing (client/js/core/framepace.js; 2026-10-03: the phone ran very hot): phones draw at most 60 a second,
 // 30 once still and untouched for a few seconds; other devices every display frame unless a cap is chosen.
 import test from 'node:test';

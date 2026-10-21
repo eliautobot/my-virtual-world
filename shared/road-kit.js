@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The road kit (WP4 polish, the design review 2026-10-03): what every road and junction is made of, shared by the renderer,
 // the traffic and the walkers so they all agree.
 // - A road type's cross-section, band by band from the centre out: travel lanes (with their markings: a double or
@@ -11,7 +11,7 @@
 //   lanes coming in, and traffic control by the junction's layout (2026-10-04: "junctions are missing signals around
 //   the map ... signal poles should also be placed for all roadway types per their layout and requirements"):
 //   traffic signals on the city's timetable (shared/constants.js) wherever two or more roads meet, of any type (the
-//   country roads' poles stand beyond their shoulders); where a road only meets itself, stop signs - on the side
+//   country roads' poles stand beyond their shoulders); where a road only meets itself, stop signs — on the side
 //   branch where the road carries on through (two-way stop), on every approach where it doesn't (all-way stop).
 //   (lanesPerDir: kept for the record of the old rule, multi-lane or curbed only.)
 import { pointAt } from './roads.js';
@@ -78,7 +78,7 @@ export function junctionPlans(net, profiles, { skip = () => false, rules = () =>
 }
 /**
  * One junction's plan. rules (a city's own junctions): { R: curb-return radius, crosswalkAt (m from the centre),
- * scramble (diagonal crossings too), sigOffset, phaseOf(arm) (0 or 1) } - so the city's corners, crossings and lights
+ * scramble (diagonal crossings too), sigOffset, phaseOf(arm) (0 or 1) } — so the city's corners, crossings and lights
  * stay where its walkers and traffic already use them.
  */
 function planJunction(net, profiles, j, rules = {}) {
@@ -158,8 +158,8 @@ function planJunction(net, profiles, j, rules = {}) {
   // crosswalks across arms with sidewalks on both sides, stop bars on the lanes coming in, signals at busier junctions
   const crosswalks = [], stops = [], signals = [], signs = [];
   const lanesPerDir = Math.max(...arms.map(A => A.sec.lanes.length)), roads = new Set(arms.map(A => A.id));
-  const signalized = rules.signalized ?? (N >= 3 && roads.size >= 2);   // (any road type: country roads too - 2026-10-04)
-  // without signals: a stop sign on each approach that gives way - the through road is the busiest pair of arms facing
+  const signalized = rules.signalized ?? (N >= 3 && roads.size >= 2);   // (any road type: country roads too — 2026-10-04)
+  // without signals: a stop sign on each approach that gives way — the through road is the busiest pair of arms facing
   // each other (more lanes, then the faster road); with no such pair, every approach stops (all-way)
   let through = null;
   if (!signalized && N >= 3) {

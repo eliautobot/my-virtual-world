@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat over one OpenClaw connection (docs/features/agent-providers.md §4–§5), inside the provider helper: a run is a
 // chat.send into the agent's session (made with sessions.create when the chat is new), followed through the session's
-// own events - the connection asks only for the sessions it follows (the session-scoped-events capability:
+// own events — the connection asks only for the sessions it follows (the session-scoped-events capability:
 // sessions.messages.subscribe with approvals, counted per session, sent with only the documented fields so gateways
-// older and newer than the client take it: the client's own coordinator adds fields a 2026.9 gateway refuses) - and
+// older and newer than the client take it: the client's own coordinator adds fields a 2026.9 gateway refuses) — and
 // translated (./translate.js) into the provider bus's events. Following OpenClaw's guide for clients: after a reconnect every followed session is subscribed again and
 // a run that ended meanwhile is finished from the history; a run whose connection stays down is ended as interrupted.
 import fs from 'node:fs/promises';
@@ -81,7 +81,7 @@ export class LinkChat {
     this.downTimer.unref?.();
   }
   /** The connection is closed for good (Reconnect, switched off, removed, the helper stopping): every answer still being
-   *  written here ends now, with why - never left waiting. */
+   *  written here ends now, with why — never left waiting. */
   close(why) {
     clearTimeout(this.downTimer); this.downTimer = null;
     for (const [, r] of [...this.runs]) r.tr.feed({ event: 'chat', payload: { state: 'error', errorMessage: why } });
@@ -108,7 +108,7 @@ export class LinkChat {
       // (the session's progress card changed: read it, for the run going on there)
       const rid = this.bySession(p.sessionKey), r = rid && this.runs.get(rid);
       if (r) { this.link.request('progressCard.get', { sessionKey: p.sessionKey, agentId: r.agentId }).then(x => { if (this.runs.get(rid) === r) r.tr.feed({ event: 'progress.card', payload: x && x.card }); }, () => {}); return; }
-      // (no run of ours there - its other channels, a refresh, a job: the card itself, for whoever has the session open)
+      // (no run of ours there — its other channels, a refresh, a job: the card itself, for whoever has the session open)
       if (p.sessionKey) {
         this.link.request('progressCard.get', { sessionKey: p.sessionKey, ...(p.agentId ? { agentId: p.agentId } : {}) }).then(x => {
           const c = x && x.card;
@@ -141,7 +141,7 @@ export class LinkChat {
     r.tr.feed(evt);
   }
   /** A run in a session a page has open that isn't ours (the agent answering on another channel, a scheduled job):
-   *  followed and translated like ours, its events marked by its own run id - the server sends them to whoever watches. */
+   *  followed and translated like ours, its events marked by its own run id — the server sends them to whoever watches. */
   observe(evt) {
     const p = evt.payload, key = p.sessionKey, w = key && this.watched.get(key);
     if (!w || !p.runId) return;
@@ -149,7 +149,7 @@ export class LinkChat {
     const id = normalizeSessionProjectionRunId(p.runId) || String(p.runId);
     if (this.done.has(id) || this.alias.has(id)) return;
     const now = Date.now();
-    // (one that went quiet - its end missed - is let go: a run is never shown going on for ever)
+    // (one that went quiet — its end missed — is let go: a run is never shown going on for ever)
     for (const [fid, f] of this.foreign) if (now - f.at > FOREIGN_QUIET_MS) { this.foreign.delete(fid); f.tr.feed({ event: 'chat', payload: { state: 'error', errorMessage: 'Lost track of this run' } }); }
     let o = this.foreign.get(id);
     if (!o) {
@@ -215,7 +215,7 @@ export class LinkChat {
     await this.hold(key, agentId);
     const runId = String(p.runId);
     const base = { kind: this.kind, connectionId: l.connectionId, agentKey: String(p.agent || agentId), sessionKey: key, runId };
-    // (sent while the agent works in this session - a run of ours, or one from another channel: OpenClaw takes it as its
+    // (sent while the agent works in this session — a run of ours, or one from another channel: OpenClaw takes it as its
     // queue is set up; steered into that turn, its own run ends empty and its answer comes in that turn)
     const followup = [...this.runs.values()].some(x => x.key === key && !x.tr.ended) || [...this.foreign.values()].some(f => f.key === key);
     const r = { key, agentId, base, approvals: new Map(), questions: new Set(), tr: null, followup };
@@ -223,7 +223,7 @@ export class LinkChat {
     this.runs.set(runId, r);
     try {
       await this.prefsFor(key, agentId, p.model, p.effort);
-      // (how a message sent while the agent works is taken: the gateway's own setting - messages.queue, steer by default -
+      // (how a message sent while the agent works is taken: the gateway's own setting — messages.queue, steer by default —
       // as OpenClaw's Control UI sends it; queue 'later': after the running turn, whatever that setting)
       const sent = await l.request('chat.send', { sessionKey: key, agentId, message: String(p.input || ''), idempotencyKey: runId, ...(p.queue === 'later' ? { queueMode: 'followup' } : {}),
         ...(attachments.length ? { attachments } : {}) }, { timeoutMs: SEND_TIMEOUT_MS });
@@ -333,7 +333,7 @@ export class LinkChat {
     const r = await this.link.request('progressCard.refresh', { sessionKey, agentId: agentKey, idempotencyKey: key || crypto.randomUUID() });
     return { accepted: !!(r && r.status === 'accepted'), revision: r && Number.isInteger(r.revision) ? r.revision : null };
   }
-  /** Takes the progress card off the chat (OpenClaw's Dismiss): only the card as the person saw it - one the agent has
+  /** Takes the progress card off the chat (OpenClaw's Dismiss): only the card as the person saw it — one the agent has
    *  written since is kept, and said so. */
   async dismissCard({ agentKey, sessionKey, revision }) {
     if (!sessionKey || sessionKey === LAZY) throw fail('bad_request', 'This chat has no progress card yet');

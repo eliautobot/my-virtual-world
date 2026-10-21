@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Self-contained so Playwright can evaluate this exact function against the public client state.
 // Public person.x is a retained retired-body tombstone, not hidden-agent visibility. Active anonymous bodies still need plans.
 export function activePlanCoverage(state = globalThis.__mvw) {

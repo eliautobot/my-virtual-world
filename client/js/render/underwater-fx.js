@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Under water (2026-10-06: diving, it looked like air): specks drifting in the water round the camera, and the view
-// darkening toward its edges, lit from above - while the camera is under the surface (Stage.under). The water's colour
+// darkening toward its edges, lit from above — while the camera is under the surface (Stage.under). The water's colour
 // closing in, the sky going and the surface seen from below are render/scene.js's and render/water.js's.
 import * as THREE from 'three';
 import { GU } from './scene.js';

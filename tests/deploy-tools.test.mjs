@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Checks of the release tooling that need no running service: script syntax, missing configuration, backup
 // manifests. The full flow (promote, rollback, restore on a real systemd unit) is rehearsed on a throwaway install.
 import assert from 'node:assert/strict';

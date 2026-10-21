@@ -1,15 +1,15 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Interior walls in the Furniture panel (WP4.8, shared/walls.js; redesigned for the design review 2026-10-03: "interior
 // building work like walls needs proper design tools, like snapping, handles for modifications etc, think of The Sims",
 // and "more mobile friendly"). On the floor you are looking at:
-//   Select - tap a wall: handles at its ends and its middle. Drag an end and every wall meeting there follows (a corner
+//   Select — tap a wall: handles at its ends and its middle. Drag an end and every wall meeting there follows (a corner
 //            moves as one); drag the middle and the wall slides sideways, the walls joined to it stretching to follow.
 //            The selected wall's length and angle show beside it; make it glass or solid, split it, take it down.
-//   Wall / Glass - draw: press and drag (or click its start, then its end; it carries on from there until Esc).
-//   Room - drag out a rectangle: its walls go up at once (sides along the outer walls or a wall already there are left
+//   Wall / Glass — draw: press and drag (or click its start, then its end; it carries on from there until Esc).
+//   Room — drag out a rectangle: its walls go up at once (sides along the outer walls or a wall already there are left
 //            out; if the room would shut something off, a doorway goes in the side facing the way in).
-//   Doorway - choose its width, then click the wall where it goes.
-//   Remove - click a wall, or drag across several to take them all down together.
+//   Doorway — choose its width, then click the wall where it goes.
+//   Remove — click a wall, or drag across several to take them all down together.
 // Points snap to wall ends, onto walls (a T-joint), to the outer walls and the quarter-metre grid; drawn walls keep to
 // 15° steps (hold Shift for any angle). Lengths show as you go, in metres and feet. The ghost is green, or red with the
 // reason (the same rules the server checks: nothing shut off, nothing cut through). Every change is one step to undo.
@@ -330,8 +330,8 @@ function frame() {
       tags([tagFor(Fl, [a.x, a.z, c.x, a.z], bad), tagFor(Fl, [c.x, a.z, c.x, c.z], bad)]);
     } else if (plan.edit.add?.length === 1) tags([tagFor(Fl, plan.edit.add[0], bad)]);
     if (bad) say(`⚠️ ${T.why}`, true);
-    else if (T.tool === 'room') say(`${plan.edit.add.length} wall${plan.edit.add.length === 1 ? '' : 's'} - release to build${plan.edit.add.length < 4 ? ' (sides along walls already there are left out)' : ''}`);
-    else if (T.tool === 'wall' || T.tool === 'glass') say(`${lenText(plan.edit.add[0])} - ${T.drag ? 'release' : 'click'} to build it · Esc stops`);
+    else if (T.tool === 'room') say(`${plan.edit.add.length} wall${plan.edit.add.length === 1 ? '' : 's'} — release to build${plan.edit.add.length < 4 ? ' (sides along walls already there are left out)' : ''}`);
+    else if (T.tool === 'wall' || T.tool === 'glass') say(`${lenText(plan.edit.add[0])} — ${T.drag ? 'release' : 'click'} to build it · Esc stops`);
   } else if (T.why) say(`⚠️ ${T.why}`, true);
   // the start point and the selection
   if (T.start && (T.tool === 'wall' || T.tool === 'glass' || T.tool === 'room')) handle(Fl, T.start.x, T.start.z);

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The server's logger (DECISIONS C102): text lines "time level [area] message" on standard output. Every line passes
 // through the redaction helper (server/redact.js), so fields named like credentials and every secret value the server
 // has handled become [redacted]. Levels: info, warn, error.

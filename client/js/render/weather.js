@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The weather in the browser (WP4.18, wp4-world-spec.md §6.1): the region's timeline (shared/weather.js) from the seed
 // and override the server sends, run every frame on the world clock, so everyone sees the same sky. It sets the sky's
 // cloud cover, light, fog and lightning (render/scene.js), the shared wind (GU.uWind: trees, clouds, rain) and how wet

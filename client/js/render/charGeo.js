@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Procedural character geometry (rest pose, faces +z, left = +x, feet at y = 0).
 // One master geometry per LOD contains every style variant; the vertex shader collapses variants that do not match
 // the instance's appearance. Vertex attributes: position, normal, aInfo = (bone, part, variant code), aCol (fixed colour).

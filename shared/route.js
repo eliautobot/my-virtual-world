@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// GPS routes (2026-10-05: "a map that works like GTA's"): the shortest way along the world's roads and streets -
-// the city's avenues and streets and the roads beyond it, one network (city-roads.js worldRoads) - from any point to any
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// GPS routes (2026-10-05: "a map that works like GTA's"): the shortest way along the world's roads and streets —
+// the city's avenues and streets and the roads beyond it, one network (city-roads.js worldRoads) — from any point to any
 // point, with turn-by-turn steps. A point off the roads joins the nearest road in a straight line (walking across a
 // field or out of a lot). Pure: the browser routes the player (ui/worldmap.js); tests route without one.
 import { pointAt } from './roads.js';

@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A fast-forward model of the living economy for tests and tuning (docs/features/ECONOMY.md §3): a generated city, its
 // residents and the real economy (ledger, businesses, households, market, city) on a throwaway database, with each world
-// day's activity reported the way the simulation reports it (work hours, meals, coffees, shopping, gym) - drawn from
-// the same rules the residents follow (they go out only when they can afford it) - then settled. Runs a few thousand
+// day's activity reported the way the simulation reports it (work hours, meals, coffees, shopping, gym) — drawn from
+// the same rules the residents follow (they go out only when they can afford it) — then settled. Runs a few thousand
 // residents through months in seconds.
 //
 //   node tests/helpers/econ-model.mjs [days] [population]      prints a line per day

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A binary min-heap of (key, value) pairs for shortest-path searches (keys are costs; ties come out in any order).
 export class MinHeap {
   constructor() { this.k = []; this.v = []; }

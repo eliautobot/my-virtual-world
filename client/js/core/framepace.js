@@ -1,17 +1,17 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Frame pacing (2026-10-03: "my phone gets very hot when in the world ... uncomfortable to use"). On a phone the GPU
 // ran flat out every frame; most of that is spent when nothing on screen needs it. Settings → Display → Frame rate:
-//   auto  - phones and tablets: up to 60 frames a second while you touch, pan or follow someone, 30 once the camera
+//   auto  — phones and tablets: up to 60 frames a second while you touch, pan or follow someone, 30 once the camera
 //           has been still and untouched for a few seconds (the world's people, water and weather still move, only
 //           half as often); never faster than 60 on a 90/120 Hz screen. Other devices: as before (every display frame).
-//   60 / 30 - at most that many, always.  max - every display frame.
+//   60 / 30 — at most that many, always.  max — every display frame.
 // The choice stays with this device (like the graphics quality).
-// A window over the whole world - Settings, the Agent Studio, a dialog, the chat full screen (2026-10-08:
+// A window over the whole world — Settings, the Agent Studio, a dialog, the chat full screen (2026-10-08:
 // "the chat window, Settings, the Agent Studio take a bit longer to load"; on a phone a world frame takes ~50 ms, and
 // every step of opening a window waited behind them): while one is open the world behind it draws at most COVERED_FPS a
-// second, and none at all for its first OPENING_MS, while it is being built - whatever the mode.
+// second, and none at all for its first OPENING_MS, while it is being built — whatever the mode.
 const KEY = 'mvw.fps', IDLE_MS = 4000, COVERED_FPS = 20, OPENING_MS = 400;
-export const FPS_MODES = [['auto', 'Auto - smooth when moving, cooler when still'], ['60', '60 at most'], ['30', '30 at most (coolest)'], ['max', 'Unlimited']];
+export const FPS_MODES = [['auto', 'Auto — smooth when moving, cooler when still'], ['60', '60 at most'], ['30', '30 at most (coolest)'], ['max', 'Unlimited']];
 
 export class FramePace {
   constructor({ battery = false } = {}) {

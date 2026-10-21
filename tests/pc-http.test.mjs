@@ -1,5 +1,5 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The agents' PC on a real server (docs/features/agent-pc.md): its owner's alone - another account (an administrator, a
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The agents' PC on a real server (docs/features/agent-pc.md): its owner's alone — another account (an administrator, a
 // person the agent is shared with to manage, a guest) never reaches it, not by agent, team, space, task or event id;
 // files upload and download as they are, shown only when they can't run anything on the site; teams, boards and
 // calendars through the routes; live frames only to the owning account.
@@ -22,7 +22,7 @@ before(async () => {
 });
 after(async () => { await s?.stop(); });
 
-test('the PC is its owner\'s: their agents, nobody else\'s - not an admin\'s, not a manager\'s, not a guest\'s', async () => {
+test('the PC is its owner\'s: their agents, nobody else\'s — not an admin\'s, not a manager\'s, not a guest\'s', async () => {
   const o = (await owner.get('/api/pc')).json;
   assert.deepEqual(o.agents.map(a => a.id).sort(), [A, B].sort());
   assert.equal(o.usage.limit, 2 * 200 * 1048576);
@@ -39,7 +39,7 @@ test('the PC is its owner\'s: their agents, nobody else\'s - not an admin\'s, no
     assert.equal((await c.get('/api/pc/find?q=secret')).json.results.length, 0);
     assert.equal((await c.get(`/api/pc/activity?agent=${A}`)).status, 404);
   }
-  // a manage share opens the agent to Ann elsewhere - never its PC
+  // a manage share opens the agent to Ann elsewhere — never its PC
   assert.equal((await owner.post('/api/agents/share', { id: A, kind: 'account', who: String(ann.me.account.id), level: 'manage' })).status, 200);
   assert.equal((await ann.get(`/api/pc/text?profile=${A}&path=~/Documents/secret.md`)).status, 404);
   await owner.post('/api/agents/unshare', { id: A, kind: 'account', who: String(ann.me.account.id) });

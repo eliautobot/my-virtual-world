@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // One redaction helper for every settings endpoint and the logger (PLAN WP1.5; DECISIONS C89, C94): fields whose names
 // hold credentials, and every secret value this process has handled, never reach a settings response or a log line.
 

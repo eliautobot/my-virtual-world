@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Lays the island's roads (WP4.3/4.5): city exits, the Island Loop and roads to the lakes, generated once for the world's
 // island and stored as alignment records in world.roads (the same records an administrator's road tools edit). The
 // terrain is graded to them from then on. Run while the server that uses the data folder is stopped.

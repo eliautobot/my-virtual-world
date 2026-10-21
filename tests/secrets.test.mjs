@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The secret store and the settings tiers (PLAN WP1.5; CHECKLIST I14.16; DECISIONS C85–C100): credential names, the
 // redaction helper, sealing, where the key comes from, rotation while running, the settings service with declared test
 // entries (no real secret setting exists before the next phase, C93), recovery codes across rotations, and the host and

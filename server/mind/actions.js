@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What a thought may do (docs/features/FREE-WILL.md §3): the model's answer is one JSON object; this reads it, keeps only
 // what is allowed for that kind of thought and that agent, and carries it out through the agent's life
-// (server/agent-life/life.js) as the Mind - the same checks as the owner's own changes (plan and memory limits, traits
+// (server/agent-life/life.js) as the Mind — the same checks as the owner's own changes (plan and memory limits, traits
 // the owner locked stay as they are). Anything unknown, too long or out of range is left out, never guessed at; an answer
 // that is not a JSON object does nothing.
 //   plan:    plans for today (2–4), plans dropped, a thought
@@ -90,7 +90,7 @@ export function readActions(kind, o, ctx) {
   }
   out.thought = text(o.thought, 2, 200);
   if (kind === 'chat') out.reply = text(o.reply, 1, 1500);
-  // (its checks - length, links, moderation - are the friends' messages', server/agent-social/: a longer one is refused there)
+  // (its checks — length, links, moderation — are the friends' messages', server/agent-social/: a longer one is refused there)
   // its morning plan may start one message and one invitation with a friend it can reach (server/agent-social/ checks
   // and counts them); only names and places it was given count
   if (kind === 'plan' && ctx.reach) {

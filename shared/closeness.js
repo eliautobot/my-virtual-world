@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // How close one agent feels to someone it knows (2026-10-10): one scale for the server (its life's memories,
 // the Mind's words, the friends' rules) and the pages (the Studio's People tab). Closeness is the relation's affinity, -1 to 1:
 // it grows with time spent together, fades with time apart and drops with bad experiences (server/agent-social/).
@@ -14,7 +14,7 @@ export const LEVELS = Object.freeze([
 
 /**
  * The level of a closeness: { key, label }. ended: a friendship it ended and can't start again yet. friendAt / knownAt: the
- * admin's levels (Settings → Agent limits: a friend, a stranger below) - "Friend" is what counts as a friend in this world;
+ * admin's levels (Settings → Agent limits: a friend, a stranger below) — "Friend" is what counts as a friend in this world;
  * "Close friend" halfway from there to the top. The defaults are the scale above.
  */
 export function closenessLevel(affinity, { ended = false, friendAt = 0.5, knownAt = 0.25 } = {}) {

@@ -1,12 +1,12 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The countryside's standing detail as drawn (meshes from render/countryside-build.js, one per full-detail terrain
 // tile): a shared material that sways crops and hedges in the wind, raises them out of the ground as the camera comes
-// within reach (and lays them down beyond it, so tiles never pop), and gives each kind of surface its close texture -
+// within reach (and lays them down beyond it, so tiles never pop), and gives each kind of surface its close texture —
 // corn and sunflower leaves, wheat ears with the wind's waves running over them (the same waves the ground shader
 // draws further off), hedge foliage, dry-stone, straw, wood. Darker toward the ground, like the shade under a crop.
 // the owner's notes 2026-10-03 ("not lego/bands", "the hay-wheels' texture looks off"): foliage and crops take their texture
 // from noise in all three dimensions (no streaks running across the world), and everything built along a path or round
-// an axis - walls, bales, boards, shingles - from its own surface coordinates (aT): straw rolled round a bale with
+// an axis — walls, bales, boards, shingles — from its own surface coordinates (aT): straw rolled round a bale with
 // the spiral on its ends, plastic wrap wound in bands, square bales in flakes with their strings, stones laid in courses.
 import * as THREE from 'three';
 import { GU, wettable } from './scene.js';

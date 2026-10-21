@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // HTTP API and WebSocket of a throwaway server (free port, temporary data folder). Reads run as a guest; writes run
 // as the owner (signed in with the first-owner password, which the owner then replaces). Access rules: auth.test.mjs.
 import assert from 'node:assert/strict';

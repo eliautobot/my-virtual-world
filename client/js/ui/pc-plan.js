@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The PC's Board and Calendar (client/js/ui/pc-app.js). The board: the agent's own or one of its teams' - To do, Doing,
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The PC's Board and Calendar (client/js/ui/pc-app.js). The board: the agent's own or one of its teams' — To do, Doing,
 // Review, Done; a task added at the top of To do (given to someone, with a due date); dragged between columns (or moved
 // with its buttons, on a phone); opened beside the board to change it, read and add notes, give it to someone, and
-// "Work on it" - the agent then works on it by itself (server/pc/work.js), and the card shows how far it is. The calendar:
+// "Work on it" — the agent then works on it by itself (server/pc/work.js), and the card shows how far it is. The calendar:
 // the week (an agenda on a phone) across the agent's calendar and its teams', events added, moved and deleted.
 import { esc } from '../core/util.js';
 import { when } from './pc-ui.js';
@@ -106,7 +106,7 @@ export function boardApp(P, el, args = {}) {
   let soon = null;
   load();
   return {
-    // (a: a board, a task to open - or, following the agent, the task it just touched, marked)
+    // (a: a board, a task to open — or, following the agent, the task it just touched, marked)
     go(a) { if (a.board) B.at = a.board; if (a.card) B.open = a.card; B.mark = a.mark ?? null; load(); },
     onFrame(f) { if (f.kind === 'board' || f.kind === 'teams') { clearTimeout(soon); soon = setTimeout(load, 250); } },
     destroy() { clearTimeout(soon); },
@@ -150,7 +150,7 @@ export function calendarApp(P, el, args = {}) {
   function agendaHtml() {
     const days = Array.from({ length: 7 }, (_, i) => C.week + i * DAY);
     return `<div class="pc-agenda">${days.map(d => { const evs = C.events.filter(e => e.start < d + DAY && e.end > d);
-      return `<h5>${new Date(d).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</h5>${evs.length ? evs.map(e => `<div class="pc-ae" data-ev="${e.id}" style="--ev:${colorOf(e.calendar)}"><span>${e.allDay ? 'All day' : `${hm(e.start)}–${hm(e.end)}`}</span><span><b>${esc(e.title)}</b>${e.place ? ` · ${esc(e.place)}` : ''}</span></div>`).join('') : '<div class="dim" style="padding:2px 4px"> - </div>'}`; }).join('')}</div>`;
+      return `<h5>${new Date(d).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</h5>${evs.length ? evs.map(e => `<div class="pc-ae" data-ev="${e.id}" style="--ev:${colorOf(e.calendar)}"><span>${e.allDay ? 'All day' : `${hm(e.start)}–${hm(e.end)}`}</span><span><b>${esc(e.title)}</b>${e.place ? ` · ${esc(e.place)}` : ''}</span></div>`).join('') : '<div class="dim" style="padding:2px 4px">—</div>'}`; }).join('')}</div>`;
   }
   function formHtml() {
     const e = C.edit, cs = cals();

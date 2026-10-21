@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The built-in browser's way out (server/pc/egress-proxy.js): the public internet only. A tunnel (CONNECT: HTTPS,
-// secure WebSockets) or a plain request to this machine, the local network or a cloud's metadata address - by number or
-// by a name that resolves there - is refused; one to a public address goes to the very address checked.
+// secure WebSockets) or a plain request to this machine, the local network or a cloud's metadata address — by number or
+// by a name that resolves there — is refused; one to a public address goes to the very address checked.
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import net from 'node:net';

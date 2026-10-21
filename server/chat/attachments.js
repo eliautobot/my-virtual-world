@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Chat attachments (PLAN WP2.2; DECISIONS C121, X11): files an account sends to an agent. Stored once per account by content hash
 // (sha256) in <data>/attachments/<accountId>/<sha256>; the type comes from the file name's extension, never from what the
 // client claims, and only images, PDF, office documents, plain-text or code files, video and audio are accepted (video and

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 # My Virtual World: the official image. Install guide: docs/INSTALL.md.
 #   docker compose up -d    builds and starts it with compose.yaml (the app at http://localhost:8570 on this machine)
 # The server keeps the world and the accounts in the /data volume and the key for stored secrets in the /keys volume,

@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The interface's icons (client/js/core/icons.js): every emoji the interface writes - in client/, and the data shared/
-// and server/ send to it (what residents are doing, terrain tools, goods) - has a drawn icon, so nothing shows as an emoji
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The interface's icons (client/js/core/icons.js): every emoji the interface writes — in client/, and the data shared/
+// and server/ send to it (what residents are doing, terrain tools, goods) — has a drawn icon, so nothing shows as an emoji
 // in the middle of the theme's line icons; every icon's path is well formed. Adding an emoji? Draw its icon in icons.js,
 // map the emoji to it in EMOJI (or, for typography such as arrows in prose, list it in KEEP).
 import assert from 'node:assert/strict';

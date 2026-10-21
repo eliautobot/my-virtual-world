@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fish of the fishing game (docs/features/fishing.md §Fish): every species in the sea and the lakes, the legends
 // and the junk and treasure that come up on a hook. Each species says where it lives (its water, the kinds of ground it
 // holds on, how deep, when it feeds), what it takes (lure kinds: shared/fishing-gear.js LURES), how big it grows (length

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // One live connection to an OpenClaw gateway (docs/features/agent-providers.md §2), inside the provider helper process.
 // It is built on OpenClaw's published client (@openclaw/gateway-client): the challenge-signed handshake, protocol
 // negotiation, reconnects with backoff and pausing on what needs a person are the client's; this keeps the device
@@ -20,7 +20,7 @@ export const KIND = 'openclaw';
 export const SCOPES = Object.freeze(['operator.read', 'operator.write', 'operator.approvals', 'operator.questions']);
 export const ADMIN_SCOPE = 'operator.admin';
 /** The client capabilities this adapter implements (OpenClaw: "advertise only capabilities the client actually implements"). */
-// (session-scoped-events: the gateway sends a session's events only to the connections that follow it - ./chat.js
+// (session-scoped-events: the gateway sends a session's events only to the connections that follow it — ./chat.js
 // subscribes to the sessions it has runs in)
 export const CLIENT_CAPS = Object.freeze([GATEWAY_CLIENT_CAPS.TOOL_EVENTS, GATEWAY_CLIENT_CAPS.APPROVALS, GATEWAY_CLIENT_CAPS.EXEC_APPROVALS, GATEWAY_CLIENT_CAPS.PLUGIN_APPROVALS,
   GATEWAY_CLIENT_CAPS.SESSION_SCOPED_EVENTS]);
@@ -89,7 +89,7 @@ export class GatewayLink {
     const auth = config.auth === 'password' ? 'password' : 'token';
     const scopes = config.access === 'chat' ? [...SCOPES] : [...SCOPES, ADMIN_SCOPE];
     // how it signs in: the gateway's own token (or password) while it pairs; afterwards the device token the gateway issued
-    // it (the server then forgets the gateway's - OpenClaw's guide: use the token pairing minted)
+    // it (the server then forgets the gateway's — OpenClaw's guide: use the token pairing minted)
     let stored = null;
     if (secrets.deviceToken) { try { const t = JSON.parse(secrets.deviceToken); if (t && t.deviceId === identity.deviceId && t.token) stored = t; } catch { /* not ours: none */ } }
     const shared = (auth === 'token' ? secrets.token : secrets.password) || '';
@@ -119,7 +119,7 @@ export class GatewayLink {
         storeDeviceAuthToken: live(({ deviceId, role, token, scopes }) => {
           this.stored = { deviceId, role, token, scopes: Array.isArray(scopes) ? scopes : [] };
           this.persist('deviceToken', JSON.stringify(this.stored));
-          // paired: the gateway's own token is handed off - the server forgets it, and this link counts as built from the
+          // paired: the gateway's own token is handed off — the server forgets it, and this link counts as built from the
           // device token (the next call's credentials are those; nothing is rebuilt for it)
           if (this.shared) { this.persist(this.auth, null); this.shared = ''; this.key = this.keyOf(this.url, this.auth, 'device', this.scopes, this.deviceKey); }
         }),

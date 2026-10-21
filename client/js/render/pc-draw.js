@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // An agent's PC screen drawn for its screens in the world (docs/features/agent-pc.md §2.1; render/pc-screens.js): the
-// PC as its window shows it (client/js/ui/pc-app.js, css/pc.css) - its wallpaper and the theme's colours, the taskbar
-// with the agent, the app open and the time - and the window the agent has open with what is in it now (server/pc/
+// PC as its window shows it (client/js/ui/pc-app.js, css/pc.css) — its wallpaper and the theme's colours, the taskbar
+// with the agent, the app open and the time — and the window the agent has open with what is in it now (server/pc/
 // views.js): the file with the lines it is writing typed in, a picture, a folder, its search, a task board, its week, a
 // web page (or its browser's own picture), its terminal, a message it is writing. Its desktop while it sits idle, its
 // lock screen while it is away. Drawn on a small canvas only when something on it changes (see pc-screens.js).
@@ -14,7 +14,7 @@ const MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', SANS = 'syst
 
 // ------------------------------------------------------------------------------------------- the theme
 let theme = null, themeAt = 0, probe = null;
-/** A CSS colour as rgba() - however the theme writes it (a name, hex, color-mix(), oklch()…): painted on one pixel
+/** A CSS colour as rgba() — however the theme writes it (a name, hex, color-mix(), oklch()…): painted on one pixel
  *  and read back, so a canvas always gets a colour it takes; one it can't read: `fallback`. */
 function rgbaOf(css, fallback) {
   probe ||= document.createElement('canvas').getContext('2d', { willReadFrequently: true });
@@ -29,7 +29,7 @@ function rgbaOf(css, fallback) {
 export function themeColors() {
   const t = Date.now();
   if (theme && t - themeAt < 5000) return theme;
-  // (a theme's variables may be written with others - var(), color-mix(): an element resolves them, the canvas reads it)
+  // (a theme's variables may be written with others — var(), color-mix(): an element resolves them, the canvas reads it)
   let el = document.getElementById('pc-draw-probe');
   if (!el) { el = document.createElement('i'); el.id = 'pc-draw-probe'; el.hidden = true; document.body.append(el); }
   const v = (k, d) => { el.style.color = d; el.style.color = `var(${k}, ${d})`; return rgbaOf(getComputedStyle(el).color, rgbaOf(d, d)); };
@@ -40,7 +40,7 @@ export function themeColors() {
 }
 
 // ------------------------------------------------------------------------------------------- small pieces
-// (shapes as plain paths - no clipping and no blurred shadows anywhere: some phones' canvases draw nothing inside a clip,
+// (shapes as plain paths — no clipping and no blurred shadows anywhere: some phones' canvases draw nothing inside a clip,
 // 2026-10-19; a screen is laid out to stay inside its window instead)
 function rr(c, x, y, w, h, r) {
   r = Math.max(0, Math.min(r, w / 2, h / 2));
@@ -98,7 +98,7 @@ function alpha(color, a) { const m = /rgba\((\d+),(\d+),(\d+),([\d.]+)\)/.exec(c
 let warned = false;
 export function drawPcScreen(c, o) {
   const { W, H } = o, T = themeColors(), s = Math.min(W / 640, H / 360), bar = Math.round(28 * s);
-  // (from a clean state every time - nothing a drawing left set carries into the next; a drawing that fails still
+  // (from a clean state every time — nothing a drawing left set carries into the next; a drawing that fails still
   // leaves a whole screen: its taskbar, and a note where its window was)
   c.save();
   c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.shadowBlur = 0; c.shadowColor = 'rgba(0,0,0,0)';
@@ -120,7 +120,7 @@ export function drawPcScreen(c, o) {
 }
 /**
  * A screen that isn't one of this person's agents' (someone else's desk, an empty one, a stranger's laptop): a PC all the
- * same - its wallpaper and the time, as a locked screen shows them - so every screen in a room looks alike from any side.
+ * same — its wallpaper and the time, as a locked screen shows them — so every screen in a room looks alike from any side.
  * Nothing of anyone's PC is on it.
  */
 export function drawPlainScreen(c, { W, H, clock }) {
@@ -224,7 +224,7 @@ function win(c, o, W, H, s, T) {
   c.font = `${11.5 * s}px ${SANS}`; c.fillStyle = T.dim;
   c.fillText(fit(c, titleOf(v, o), w - lw - 70 * s), x + 22 * s + lw, y + tb / 2);
   c.fillStyle = 'rgba(255,255,255,.35)'; c.font = `${12 * s}px ${SANS}`; c.textAlign = 'right';
-  c.fillText('-   ✕', x + w - 10 * s, y + tb / 2);
+  c.fillText('—   ✕', x + w - 10 * s, y + tb / 2);
   c.textAlign = 'left'; c.textBaseline = 'alphabetic';
   // (what it shows stays inside: a little in from its sides, above its rounded bottom corners)
   const body = { x: x + 1, y: y + tb + 1, w: w - 2, h: h - tb - 1 - r * 0.8 };
@@ -255,7 +255,7 @@ const typed = o => Math.max(0, Math.min(1, (o.now - o.since) / TYPE_MS));
 
 function fileBody(c, o, v, b, s, T) {
   const pad = 10 * s;
-  if (v.binary) { c.font = `${13 * s}px ${SANS}`; c.fillStyle = T.dim; c.fillText(`${v.name} · ${sizeText(v.size)} - opens in its own program`, b.x + pad, b.y + 30 * s); return; }
+  if (v.binary) { c.font = `${13 * s}px ${SANS}`; c.fillStyle = T.dim; c.fillText(`${v.name} · ${sizeText(v.size)} — opens in its own program`, b.x + pad, b.y + 30 * s); return; }
   // its tool row: the mode, who changed it
   const badge = { write: 'Writing', append: 'Adding', edit: 'Editing', read: 'Reading', open: 'Open', review: 'Reviewing', delete: 'Deleting' }[v.mode] || 'Open';
   c.font = `600 ${10.5 * s}px ${SANS}`;
@@ -265,7 +265,7 @@ function fileBody(c, o, v, b, s, T) {
   c.fillStyle = bf; c.fill();
   c.fillStyle = ink(bf); c.textBaseline = 'middle'; c.fillText(badge, b.x + pad + 7 * s, b.y + 15.5 * s);
   c.font = `${10.5 * s}px ${SANS}`; c.fillStyle = T.dim;
-  // (a file on its own computer: what the step showed of it - no size or version here)
+  // (a file on its own computer: what the step showed of it — no size or version here)
   const info = v.remote ? `${v.lines.length ? `${v.diff ? 'its changes' : `${v.total} lines`} · ` : ''}on its own computer` : `${v.total} lines · ${sizeText(v.size)}${v.by ? ` · last by ${v.by}` : ''}${v.doc ? ' · a document\'s words' : ''}`;
   c.fillText(fit(c, info, b.w - bw - 3 * pad), b.x + pad * 2 + bw, b.y + 15.5 * s);
   c.textBaseline = 'alphabetic';
@@ -313,7 +313,7 @@ const DIFF_INK = { add: '#86efac', del: '#fca5a5', at: '#93c5fd', head: '#c4b5fd
 const diffKind = l => (/^(\+\+\+|---) /.test(l) || /^diff --git|^index [0-9a-f]/.test(l) ? 'head' : /^@@/.test(l) ? 'at' : /^\+/.test(l) ? 'add' : /^-/.test(l) ? 'del' : null);
 function imageBody(c, o, v, b, s, T) {
   // (a picture on its own computer: through its provider, when the person manages it and the picture is where it can
-  // be read - else what it is)
+  // be read — else what it is)
   const url = !v.remote ? `/api/pc/file?profile=${o.agent.id}&path=${encodeURIComponent(v.path)}&v=${v.version || 0}`
     : v.path && o.agent.own ? `/api/pc/own/file?agent=${o.agent.id}&path=${encodeURIComponent(v.path)}` : null;
   const img = url ? o.image(url) : null;
@@ -426,7 +426,7 @@ function browserChrome(c, b, s, T, url, title) {
   return { x: b.x, y: b.y + 46 * s, w: b.w, h: b.h - 46 * s };
 }
 function pageBody(c, o, v, b, s, T) {
-  // (a provider agent whose browser opens on its own screen - Hermes' Bot Desktop: that screen, its browser window and all)
+  // (a provider agent whose browser opens on its own screen — Hermes' Bot Desktop: that screen, its browser window and all)
   if (v.provider && o.agent.own?.screen) {
     const pic = o.image(`provider-screen:${o.agent.id}`);
     c.fillStyle = '#111318'; c.fillRect(b.x, b.y, b.w, b.h);
@@ -438,7 +438,7 @@ function pageBody(c, o, v, b, s, T) {
   }
   const area = browserChrome(c, b, s, T, v.url, v.title);
   // a browser with a picture of its own (a browser service's, the provider's): that picture
-  // (its real browser's live picture - the built-in one's or its provider's - else a browser service's last picture)
+  // (its real browser's live picture — the built-in one's or its provider's — else a browser service's last picture)
   const pic = v.provider ? (o.agent.own?.screen ? null : o.image(`provider-browser:${o.agent.id}`)) : v.live ? o.image(`pc-browser:${o.agent.id}`) || (v.shot ? o.image(`/api/pc/browser/shot?agent=${o.agent.id}&t=${v.shot}`) : null)
     : v.shot ? o.image(`/api/pc/browser/shot?agent=${o.agent.id}&t=${v.shot}`) : null;
   c.fillStyle = '#f7f7f8'; c.fillRect(area.x, area.y, area.w, area.h);

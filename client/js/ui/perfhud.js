@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Optional performance readout (Settings → General): frame rate, the slowest recent frame, slow frames, character
 // loading, the driving physics in use, ping and the longest wait for car data (sent late by the server, or arrived
 // late: held up on the way or by this device), so performance on a particular device can be seen and reported.
@@ -14,7 +14,7 @@ export function init(app) {
   const render = () => {
     const worst = dts.reduce((m, d) => Math.max(m, d[1]), 0), slow = dts.filter(d => d[1] > 33).length;
     const ch = app.agents?.chars, loaded = ch?.kinds?.filter(Boolean).length || 0, queued = ch?.uploads?.length || 0;
-    const d = app.driving, physics = !d?.id ? '-' : d.simState === 'on' ? 'this device' : d.simState === 'off' ? 'server' : 'starting…';
+    const d = app.driving, physics = !d?.id ? '—' : d.simState === 'on' ? 'this device' : d.simState === 'off' ? 'server' : 'starting…';
     const cg = d?.carGap?.(), cars = cg ? `\ncar data gap ${Math.round(cg.ms)} ms${cg.ms > 150 ? (cg.server ? ' (sent late)' : ' (arrived late)') : ''} · car buffer ${Math.round(d.otherDelay?.value || 0)} ms` : '';
     el.textContent = `${Math.round(app.fps || 0)} fps · slowest ${Math.round(worst)} ms · slow frames ${slow}/5 s\n`
       + `characters ${loaded}${queued ? ` (+${queued} uploading)` : ''} · driving ${physics} · ping ${Math.round((app.net?.rtt || 0) * 1000)} ms`

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Original cutaway ambulance: short sloped cab and a separate beveled patient
 // module, with real window openings, cabinets, cot, oxygen and fitted seats.
 import {createVehicleMeshTools,authorRoadWheel} from './vehicle-mesh-tools.mjs';

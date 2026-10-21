@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The boats' white water (docs/features/fishing.md §Boats; redone 2026-10-15 - the product owner: "the water trails need
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The boats' white water (docs/features/fishing.md §Boats; redone 2026-10-15 — the product owner: "the water trails need
 // some serious work … way too basic"). Drawn into the water itself (render/water-marks.js: it rides the waves and is lit
 // as water), each boat leaves:
-//   - its wash: the propellers' churned track - boiling white water at the stern, breaking up into lace and streaks,
+//   - its wash: the propellers' churned track — boiling white water at the stern, breaking up into lace and streaks,
 //     and under it a wide band of milky, bubbly water that lingers long after the foam has gone;
 //   - its wake's arms: two trains of waves opening behind it at the Kelvin angle (19.5°), feathered into short crests
 //     the light catches, white along their first crest at speed;
@@ -184,7 +184,7 @@ export class BoatFx {
       }
       for (let n = poisson((sp - 7) * 0.8 * dt); n > 0; n--) S.mist(x0, y + 0.4, z0, fx * b.u * 0.5, 0.5, fz * b.u * 0.5, 0.6 + Math.random() * 0.8, 1.2 + Math.random() * 0.6, 0.12);
     }
-    // slow or still, the bow dipping into a swell: a slap - a little white water and drops thrown up, rings from it
+    // slow or still, the bow dipping into a swell: a slap — a little white water and drops thrown up, rings from it
     if (sp < 4 && (b.vy || 0) < -0.35 && GU.uTime.value - (T.slap ?? -9) > 0.6) {
       T.slap = GU.uTime.value;
       const k = Math.min(1, (-b.vy - 0.35) / 0.6), bx = b.x + fx * b.L * 0.3, bz = b.z + fz * b.L * 0.3;

@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Where a player may stand, shared by the server (it validates every move, PLAN WP1.10, DECISIONS C62) and usable by
-// the browser. The browser's own collision (client/js/player/player.js) is stricter - it also stops at street
-// furniture, kiosks and park hedges and keeps the body clear of walls - so every position it produces passes here; this
+// the browser. The browser's own collision (client/js/player/player.js) is stricter — it also stops at street
+// furniture, kiosks and park hedges and keeps the body clear of walls — so every position it produces passes here; this
 // module only has to refuse what no honest client sends: standing inside a building's walls, walking through an
 // interior wall, off the floor plan, or changing floor or building without a door or an elevator.
 import { moduleBoxes, aircraftSolids } from './world-modules.js';
@@ -78,7 +78,7 @@ export class PlayerNav {
     return g;
   }
   /** Outside: on the island's dry land (or within the city's edge on a world without terrain) and not inside a
-   *  building's walls (a doorway is open). up: how high the feet are above the ground - a body that high may stand on
+   *  building's walls (a doorway is open). up: how high the feet are above the ground — a body that high may stand on
    *  decorations no taller than that (shared/standable.js). */
   outsideOk(x, z, up = 0) {
     const g = this.g;
@@ -87,7 +87,7 @@ export class PlayerNav {
       if (!this.ground) return false;
       const t = this.world.terrain, r = t.radius * 1.35;
       if (Math.abs(x - t.center.x) > r || Math.abs(z - t.center.z) > r) return false;
-      // water: swum in (2026-10-05) - anywhere within the island's reach
+      // water: swum in (2026-10-05) — anywhere within the island's reach
     }
     for (const b of this.mboxes) if (inItemRect(x, z, b.x, b.z, b.rot, [-b.hw, -b.hd, b.hw, b.hd], -0.12)) return false;
     for (const a of this.planes) if (Math.abs(x - a.x) < 9 && Math.abs(z - a.z) < 9 && inItemRect(x, z, a.x, a.z, a.rot, a.rect, -0.3)) return false;
@@ -109,11 +109,11 @@ export class PlayerNav {
     if (l.x < ib.x0 || l.x > ib.x1 || l.z < ib.z0 || l.z > ib.z1) return false;
     const g = this.gridFor(B, f);
     if (walkable(g, l.x, l.z)) return true;
-    // over furniture: no wall there, and nothing there more than a STEP above the feet (up: above the floor) - the
+    // over furniture: no wall there, and nothing there more than a STEP above the feet (up: above the floor) — the
     // browser's own rule (player.js inBlocked), with a little slack
     return furnitureOnly(g, l.x, l.z) && !tallUnder(g.items, l.x, l.z, ITEM_CLEAR, up + STAND_TOL);
   }
-  /** up: the feet's height above the ground or floor (0: standing on it) - higher, a body may stand on things. */
+  /** up: the feet's height above the ground or floor (0: standing on it) — higher, a body may stand on things. */
   ok(x, z, ctx, up = 0) {
     if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
     return ctx < 0 ? this.outsideOk(x, z, up) : this.insideOk(this.world.buildings[ctx >> 6], ctx & 63, x, z, up);

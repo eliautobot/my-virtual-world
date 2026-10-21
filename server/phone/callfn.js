@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The call handler of agents' phones (docs/features/phone.md §5): a Twilio Function this server deploys into the person's
 // own Twilio account (server/providers/twilio.js deploy). Twilio fetches it when one of their agents' numbers is called, so
 // this server needs no public web address. Everything it needs is in the number's call address (callUrl): what to do
-// (forward to a phone, then voicemail; or voicemail at once), the greeting and the agent's name - nothing secret. The
+// (forward to a phone, then voicemail; or voicemail at once), the greeting and the agent's name — nothing secret. The
 // recording and its transcript stay in the Twilio account, where the phone's sync reads them (server/phone/phone.js).
 import crypto from 'node:crypto';
 

@@ -1,14 +1,14 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // AI agents on post around the clock (2026-10-08: "assign agents to be permanent occupants of certain spots, like
 // the reception desk … restaurants … 24/7"): its owner (or someone it is shared with to manage) posts it at a piece of
-// furniture - the serving side of a reception desk, a counter or a checkout, a desk, a kitchen (population.js
-// POST_USES) - and it stays there day and night: no sleep, meals or free time, its needs waiting
+// furniture — the serving side of a reception desk, a counter or a checkout, a desk, a kitchen (population.js
+// POST_USES) — and it stays there day and night: no sleep, meals or free time, its needs waiting
 // (server/sim/agents.js postDuty), talking with whoever walks up as its Visitors choice says (server/agent-talk/).
 // - Only where its owner could furnish: a building on a lot they hold or were given furnishing rights on, a flat they
-//   own or rent, anywhere for a world administrator - the same rights as the furniture editor (lot-rights.js).
+//   own or rent, anywhere for a world administrator — the same rights as the furniture editor (lot-rights.js).
 // - One agent to a spot; never another resident's desk or counter (their job's); a business may post many agents.
 // - The post lives on the agent's resident (people, like its home and job): kept with the world, dropped by the world's
-//   own checks when its furniture goes (validatePerson), and dropped here - its owner told - when its owner no longer
+//   own checks when its furniture goes (validatePerson), and dropped here — its owner told — when its owner no longer
 //   holds the place (a lot sold, a flat left), checked every few minutes.
 import { CATALOG } from '../../shared/catalog.js';
 import { POST_USES } from '../sim/population.js';
@@ -88,7 +88,7 @@ export class Posts {
   }
   /**
    * The spots its owner may post agent a at, by building and floor: the buildings on lots they hold or may furnish, the
-   * flats they own or rent, and - when they may furnish there - the buildings where the agent works and lives.
+   * flats they own or rent, and — when they may furnish there — the buildings where the agent works and lives.
    * [{ b, name, floors: [{ f, name, items: [{ id, t, name, slots: [{ k, use, holder }] }] }] }]
    */
   spots(P, a) {

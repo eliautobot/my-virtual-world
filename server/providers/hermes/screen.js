@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// A Hermes agent's own screen - Hermes' Bot Desktop (docs/features/agent-pc.md §4.2): one desktop per Hermes profile on
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// A Hermes agent's own screen — Hermes' Bot Desktop (docs/features/agent-pc.md §4.2): one desktop per Hermes profile on
 // the machine Hermes runs on, where its browser opens (headed) and its computer_use acts; a person watches it live and
 // takes it over (a login, a CAPTCHA) and hands it back, as Hermes Desktop's Screen pane does. Hermes' own calls, on this
 // connection: display.status / start / stop, display.thumbnail (one picture of it), display.observe (a single-use 30 s
-// ticket for its /api/display/ws - raw RFB, which ../../providers/screen-relay.js carries to the person's viewer) and
+// ticket for its /api/display/ws — raw RFB, which ../../providers/screen-relay.js carries to the person's viewer) and
 // display.lease.acquire / release (take over, hand back: Hermes lets input through only from the viewer holding it).
 // A viewer id is minted by Hermes per connection: one per person and profile here, kept while this connection lasts, so a
 // person's reconnect keeps their control and two people never share it.
@@ -73,7 +73,7 @@ export class LinkScreen {
       return this.view(await this.rpc('display.status', { profile }), profile, viewer);
     }
     if (a === 'browser') {
-      // (Hermes' own two settings, for this profile: its browser headed - a window, on its screen - and the screen started
+      // (Hermes' own two settings, for this profile: its browser headed — a window, on its screen — and the screen started
       // the first time it browses)
       const on = p.on === true;
       await this.link.rest('PUT', '/api/config', { query: { profile }, body: { config: { browser: { headed: on }, bot_desktop: { auto_start: on } }, profile } });
@@ -88,7 +88,7 @@ export class LinkScreen {
     if (this.viewers.size > 200) this.viewers.delete(this.viewers.keys().next().value);
     return { ticket: r.ticket, path: typeof r.path === 'string' && /^\/[\w/.-]{1,200}$/.test(r.path) ? r.path : '/api/display/ws', viewerId: r.viewer_id, view: this.view(r, profile, viewer) };
   }
-  /** Where the person's viewer connects, once (a single-use 30 s ticket): { url, view } - url on this connection's own
+  /** Where the person's viewer connects, once (a single-use 30 s ticket): { url, view } — url on this connection's own
    *  Hermes address (the relay dials nothing else). */
   async ticket(p) {
     const profile = this.profileOf(p);
@@ -97,7 +97,7 @@ export class LinkScreen {
     if (!base) throw fail('not_connected', 'Hermes is not connected');
     return { url: `${base.replace(/\/api\/ws$/, '')}${o.path}?display_ticket=${encodeURIComponent(o.ticket)}`, view: o.view };
   }
-  /** One picture of the screen (a JPEG, base64), or { jpeg: null } - not running, or a person has control (Hermes then
+  /** One picture of the screen (a JPEG, base64), or { jpeg: null } — not running, or a person has control (Hermes then
    *  shows nobody what they type). */
   async thumb(p) {
     const profile = this.profileOf(p);

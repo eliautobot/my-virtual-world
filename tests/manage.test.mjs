@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Account management against a throwaway server (WP1.4): invites, open registration, deleting accounts, handing over
 // ownership, the audit log, security settings, two-factor sign-in, the own data export and account deletion.
 // CHECKLIST I14.4, I14.5, I14.6, I14.7; DECISIONS C73–C81.

@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Businesses (docs/features/ECONOMY.md §4): every venue floor (café, restaurant, shop, gym) and every office building
 // (a company) is a business with an owner, a wallet, a price list, wage rates, a rating and daily books. The registry
 // follows the world: a new venue opens a business, a floor that stops being one closes it, and the owner follows the
-// holder of the building's lot - or, while the venue is let (./realty.js), its tenant, who runs it. Owners set prices (within the policy's bounds) and wages (at least the minimum wage),
+// holder of the building's lot — or, while the venue is let (./realty.js), its tenant, who runs it. Owners set prices (within the policy's bounds) and wages (at least the minimum wage),
 // fund the business from their wallet and draw its profit.
 import crypto from 'node:crypto';
 import { LedgerError } from './ledger.js';
@@ -124,7 +124,7 @@ export class Businesses {
   }
   /**
    * A closing business, or one changing hands, pays what it holds: first what it owes (wages, oldest first), then the
-   * rest to its owner - in one transaction. Debts it can't pay stay open against its wallet.
+   * rest to its owner — in one transaction. Debts it can't pay stay open against its wallet.
    */
   _payOut(b, why) {
     const w = this.e.ledger.walletOf('business', b.id, 'business');
@@ -200,7 +200,7 @@ export class Businesses {
   /** Whether a business sets its own prices from demand and cost: the city's by policy, a player's when they choose. */
   autoPricing(b) { return b.owner_kind === 'municipality' ? this.e.policy().pricing.auto : !!b.settings?.auto; }
   /**
-   * After a day: each business that prices automatically moves its price level a step - up when it served more customers
+   * After a day: each business that prices automatically moves its price level a step — up when it served more customers
    * than others of its kind or its stock cost too much of its takings, down when it served fewer or its margin is wide.
    */
   autoPrice(day, books) {

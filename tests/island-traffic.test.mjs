@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // WP4.3/4.5 roads and traffic beyond the city: the generated island roads meet square (every exit a T junction on the
 // Island Loop, every lake road square off its road), a ring road's profile is continuous where it joins up, and traffic
 // runs on the lane graph: cars leave the city onto the island and come back, never overlap in a lane, never use two
@@ -124,7 +124,7 @@ test('traffic obeys the signals at a busy junction beyond the city', async () =>
   const T = new VehicleTraffic(w2, { seed: 'signals' });
   const signalled = T.roadLanes.filter(l => l.signal && l.signal.plan.arms.some(a => a.id.startsWith('av-')));
   assert.equal(signalled.length, 8, 'two lanes come in on each of the four arms');
-  // (2026-10-04: signals at every junction of two roads, whatever their type - the island's country roads' too)
+  // (2026-10-04: signals at every junction of two roads, whatever their type — the island's country roads' too)
   for (const P of T.roadLanes.filter(l => l.signal).map(l => l.signal.plan)) assert.ok(P.signals.length === P.arms.length, `${P.key}: a signal on every arm`);
   const countryJ = [...new Set(T.roadLanes.filter(l => l.signal && l.signal.plan.arms.every(a => a.sec.id === 'country')).map(l => l.signal.plan.key))];
   assert.ok(countryJ.length >= 1, 'country-road junctions are signalled');

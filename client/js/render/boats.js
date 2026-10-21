@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Boats on the water (WP4.18, wp4-world-spec.md §6.5 ambient life): sailing dinghies tacking round the lakes and motor
 // launches cruising off the growth coasts (the harbours) of the main island and the islands of the chain. Decoration
 // only, the same on every screen: each boat goes round its own loop on the shared clock. Loops are checked to stay on

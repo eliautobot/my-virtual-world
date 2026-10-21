@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // City camera: orbit around a ground target. Left-drag pans (grab the ground), right/middle-drag rotates + tilts,
 // wheel zooms toward the cursor, WASD/QE/arrows move. Touch: 1 finger pans, 2 fingers pinch/twist/tilt.
 // Play mode (look = true, player.js): on a computer the mouse turns the camera with no button held (pointer lock: Esc frees
-// the cursor, a click on the world takes it again); on a touch screen one finger anywhere on the world turns it - so one
+// the cursor, a click on the world takes it again); on a touch screen one finger anywhere on the world turns it — so one
 // thumb on the stick and one on the world walk and look at once; two fingers on the world still zoom.
 // First person (2026-10-06): in Play mode on foot, zooming on in past the nearest distance (the wheel, a pinch)
 // glides the camera into the player's eyes; zooming out glides it back out behind them.
@@ -250,7 +250,7 @@ export class CityCamera {
     // (33, 50, 33 ms on a busy phone) shook the car on screen by ~12 cm at 50 km/h (2026-10-04); this trails it by the
     // same amount whatever the frames. The same for the camera turning after it.
     // Something followed that moves by real time (an aircraft: player/flight.js sets followDt) gives the frame's real
-    // length: after a long frame the camera keeps its distance behind it - with the page's dt (at most 0.1 s) it fell
+    // length: after a long frame the camera keeps its distance behind it — with the page's dt (at most 0.1 s) it fell
     // behind by the rest and lurched after it (2026-10-14, a phone's 300 ms frame at 120 m/s).
     const fdt = this.follow && this.followDt > 0 ? Math.min(1, this.followDt) : dt; this.followDt = 0;
     const F = this.follow && this._fPrev && fdt > 1e-4 ? this._fPrev : null;

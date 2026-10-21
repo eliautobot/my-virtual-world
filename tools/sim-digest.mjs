@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // A fingerprint of the simulation: runs a generated city on a virtual clock and hashes every plan it sends, so a refactor
 // of the residents' brain can be proven not to change anyone's behaviour (same digest before and after).
 // Usage: node tools/sim-digest.mjs [population=1500] [worldHours=30] [seed=next-city] [--no-food]

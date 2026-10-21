@@ -1,10 +1,10 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The chat window with its owner (docs/features/CHAT.md §2): the pieces of an agent's answer as a capable assistant
-// that also lives in the city - server/mind/mind.js assistantRun() runs them.
+// that also lives in the city — server/mind/mind.js assistantRun() runs them.
 // - The answer is plain text (Markdown) and is streamed as it is written. A model that wants the city's tools first
 //   answers with nothing but {"use":[…]} (server/mind/tools.js): StreamSplit holds the first characters back until it can
 //   tell which of the two it is, so a tool request is never shown as an answer.
-// - What the agent keeps from the chat - plans its owner asked for, memories, the chat's title - comes after a marker
+// - What the agent keeps from the chat — plans its owner asked for, memories, the chat's title — comes after a marker
 //   line at the very end (ACTIONS_MARK + one JSON object); StreamSplit never shows it, even split across pieces.
 // - The conversation sent is bounded (CONTEXT_CHARS, newest first); attachments: images and PDFs go to the model as
 //   they are, for the newest message that has them (and the one before); documents and text files as text
@@ -53,7 +53,7 @@ export class StreamSplit {
   }
   emit(t) { if (t) { this.shown += t.length; this.onText(t); } }
   /** The end of the answer (full: the whole text, as the provider returned it): { tool } or { reply, actions }. cut: it
-   *  ended before its time (stopped, or the stream broke) - a start of the marker at its end is not part of the answer. */
+   *  ended before its time (stopped, or the stream broke) — a start of the marker at its end is not part of the answer. */
   end(full = this.all, { cut = false } = {}) {
     if (this.mode === 'start') this.decide(true);
     if (this.mode === 'text') { this.flush(!cut); if (cut) this.buf = ''; }
@@ -96,7 +96,7 @@ function docText(f) {
 
 /**
  * The turns of one call: the conversation (oldest first, ending with the newest message), each user turn with its
- * attachments - images and PDFs as parts, documents as text. history: [{ id, role, text, files: [{ id, name, mime,
+ * attachments — images and PDFs as parts, documents as text. history: [{ id, role, text, files: [{ id, name, mime,
  * size, path }] }] (the newest is the message being answered). Throws { code: 'unreadable', message } when the newest
  * message's own file cannot be read at all.
  */

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The agents' PC engine (docs/features/agent-pc.md): homes and teams, who reaches what (never another account, never
 // another agent's home, a viewer reads only, a visitor only Public), paths that can't leave their space, files with
 // versions, the trash, the storage pool, contents stored once, search, boards, calendars and the upkeep.
@@ -67,7 +67,7 @@ test('a home is made on first use with its four folders; ls, write, read, mkdir,
   } finally { done(); }
 });
 
-test('no other account, and no other agent\'s home, can be reached - not even named', () => {
+test('no other account, and no other agent\'s home, can be reached — not even named', () => {
   const { pc, done } = make();
   try {
     pc.write(A, '~/secret.md', 'mine');

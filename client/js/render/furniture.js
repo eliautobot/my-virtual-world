@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Furniture / object geometry library. Item-local frame: +z = front, y up, origin = item centre on the floor.
 // Dimensions match shared/catalog.js rects and seat slots (seat tops 0.46 m, bar stools 0.74 m, mattress 0.56 m).
 // Vertex attribute aC = (linear rgb, flags) where flags = tint(1) + emit*2 (emit 1 screen, 2 night lamp, 3 neon, 4 disco).
@@ -228,7 +228,7 @@ function noise3(a, b, c, k) { return Math.sin(a * 5.1 + k) * Math.sin(b * 4.3 + 
 // ------------------------------------------------------------------ item definitions
 const D = {};
 D.desk = f => {
-  // (2026-10-18: one large monitor, so its agent's PC is a screen its owner can read and use - render/pc-screens.js)
+  // (2026-10-18: one large monitor, so its agent's PC is a screen its owner can read and use — render/pc-screens.js)
   f.tint(); f.box(-0.7, 0.722, -0.37, 0.7, 0.755, 0.37);
   f.col('#2a2d33'); f.box(-0.7, 0.708, 0.35, 0.7, 0.722, 0.37);
   f.col(C.dark);
@@ -465,7 +465,7 @@ function tableLegs(f, x0, z0, x1, z1, h, col = C.dark, t = 0.025) { f.col(col); 
 D.dining_table = f => {
   f.tint(); f.box(-0.8, 0.72, -0.45, 0.8, 0.76, 0.45); tableLegs(f, -0.72, -0.38, 0.72, 0.38, 0.72, C.woodD, 0.03);
   for (const x of [-0.42, 0.42]) { chair(f, x, 0.78, P, '#3c4048', C.woodD); chair(f, x, -0.78, 0, '#3c4048', C.woodD); }
-  // (no plates or vase of its own: the dishes people eat are drawn on it - render/food-table.js; 2026-10-07)
+  // (no plates or vase of its own: the dishes people eat are drawn on it — render/food-table.js; 2026-10-07)
 };
 D.cafe_table = f => {
   f.tint(); f.cyl(0, 0, 0.36, 0.72, 0.76, 18); f.col(C.dark); f.cyl(0, 0, 0.035, 0.0, 0.72, 8); f.cyl(0, 0, 0.22, 0, 0.03, 14);
@@ -563,7 +563,7 @@ D.display = f => {
   f.tint(); f.box(-0.75, 0.7, -0.5, 0.75, 0.76, 0.5); tableLegs(f, -0.68, -0.43, 0.68, 0.43, 0.7, C.dark, 0.03);
   products(f, -0.7, 0.7, 0.76, -0.4, -0.05, 55, 0.12); products(f, -0.7, 0.7, 0.76, 0.05, 0.4, 56, 0.1);
 };
-// ---- a shoe store (2026-10-15): a low-poly sneaker - its outsole, a white midsole, the upper (colour), the toe, the
+// ---- a shoe store (2026-10-15): a low-poly sneaker — its outsole, a white midsole, the upper (colour), the toe, the
 // collar's opening, the tongue and laces, a stripe and a heel tab (accent). Item frame: its sole's middle at (x, y, z),
 // pointing along +z (yaw turns it), about 0.29 m long; s scales it. up: the upper's colour (null: the item's tint).
 function sneaker(f, x, y, z, yaw, up, accent, s = 1) {
@@ -740,10 +740,10 @@ D.flowers = f => {
   for (let k = 0; k < 16; k++) f.sph(-0.8 + r() * 1.6, 0.36, -0.35 + r() * 0.7, 0.12, 0.08, 0.12, 6, 4);
   for (let k = 0; k < 26; k++) { f.tint(); const x = -0.85 + r() * 1.7, z = -0.38 + r() * 0.76; f.sph(x, 0.44 + r() * 0.06, z, 0.045, 0.035, 0.045, 5, 3); }
 };
-// The park fountain (2026-10-05: "make sure it looks great"): a two-tier sandstone fountain - a low step, the
+// The park fountain (2026-10-05: "make sure it looks great"): a two-tier sandstone fountain — a low step, the
 // basin with a moulded coping you can stand on, a tiled pool with lamps in its floor (lit at night), an octagonal
-// pedestal, a baluster carrying the lower bowl, a slimmer one carrying the upper bowl, and a finial spout. The water -
-// the pool, the bowls, the curtains spilling over both lips, the crown jet and the rim jets - is animated separately
+// pedestal, a baluster carrying the lower bowl, a slimmer one carrying the upper bowl, and a finial spout. The water —
+// the pool, the bowls, the curtains spilling over both lips, the crown jet and the rim jets — is animated separately
 // (render/fountains.js, FOUNTAIN_WATER); the heights here are the ones it fits.
 export const FOUNTAIN = { r: 3.0, rim: 0.56, poolIn: 2.62, poolY: 0.36, floorY: 0.1, bowl1: { r: 1.42, y: 1.46, in: 1.3 }, bowl2: { r: 0.72, y: 2.16, in: 0.62 }, spout: 2.55, ped: 0.72 };
 D.fountain = f => {
@@ -962,7 +962,7 @@ export const SCREENS = Object.freeze({
   standing_desk: { kind: 'monitor', quads: [monQuad(-0.16, 0.29)] },
   desk_exec: { kind: 'laptop', quads: [lapQuad(0, 0.77, 0.0)] },
   desk_home: { kind: 'laptop', quads: [lapQuad(-0.05, 0.755, -0.05)] },
-  // (a meeting table's two laptops: nobody's PC - plain screens only, render/pc-screens.js)
+  // (a meeting table's two laptops: nobody's PC — plain screens only, render/pc-screens.js)
   meeting_table: { kind: 'laptop', plain: true, quads: [lapQuad(-0.9, 0.76, 0.3, P), lapQuad(0.9, 0.76, -0.3, 0)] },
   reception: { kind: 'monitor', quads: [quadAt(-0.3, 0, 0.02, P, 0, MON.y0 + MON.h / 2, MON.z + 0.0004, MON.w, MON.h)] },
   tv_wall: { kind: 'tv', quads: [quadAt(0, 0, -0.016, 0, 0, 1.5, 0.0005, 1.82, 0.92)] },

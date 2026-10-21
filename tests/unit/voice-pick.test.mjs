@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Every agent its own voice (server/voice/voice.js; 2026-10-08: "change the voice for every AI agent so each one has
 // a unique voice, not just the default"): on whichever service speaks for an agent, the voice chosen for it, else one
-// picked for it - of its character's gender, the least used by the other agents there - and kept; a character's gender
+// picked for it — of its character's gender, the least used by the other agents there — and kept; a character's gender
 // changed, a new one; Kokoro's bare voice names read as a language, a gender and a name.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -25,8 +25,8 @@ function world(people) {
 const C = { id: 6, updated: 1, config: { provider: 'openrouter' }, scope: 'installation', label: 'Platform voice' };
 
 test('Kokoro\'s names: language, gender, a readable label', () => {
-  assert.deepEqual(kokoroVoice('af_heart'), { id: 'af_heart', label: 'Heart - American English, female', lang: 'en-US', gender: 'female' });
-  assert.deepEqual(kokoroVoice('bm_george'), { id: 'bm_george', label: 'George - British English, male', lang: 'en-GB', gender: 'male' });
+  assert.deepEqual(kokoroVoice('af_heart'), { id: 'af_heart', label: 'Heart — American English, female', lang: 'en-US', gender: 'female' });
+  assert.deepEqual(kokoroVoice('bm_george'), { id: 'bm_george', label: 'George — British English, male', lang: 'en-GB', gender: 'male' });
   assert.equal(kokoroVoice('alloy'), null, 'not a Kokoro name: as the service said it');
 });
 
@@ -39,7 +39,7 @@ test('picked for each agent: its character\'s gender, in English, none the same 
   assert.equal(new Set(got).size, 5, 'all different');
   assert.ok(got.every(id => /^[ab]/.test(id)), 'English voices only (not French)');
   assert.equal(lists(), 1, 'the service asked for its voices once');
-  // kept: asked again, the same - and not picked again
+  // kept: asked again, the same — and not picked again
   assert.equal(await v.autoVoice(agents.get(1), C), got[0]);
   assert.deepEqual(agents.get(1).voice.auto, { 6: 'female' });
   // its character changed to a man: a man's voice now
@@ -60,7 +60,7 @@ test('more agents than voices: the least used first; two first heard at once sti
 test('a voice chosen for it wins; cleared, one is picked for it again', async () => {
   const { v, agents } = world([{ fem: true }]);
   const a = agents.get(1);
-  a.voice = { voices: { 6: 'am_adam' } };   // (chosen in its Studio: a man's voice for a woman - its owner's choice)
+  a.voice = { voices: { 6: 'am_adam' } };   // (chosen in its Studio: a man's voice for a woman — its owner's choice)
   assert.equal(v.chosenVoice(v.agentVoice(a), C), 'am_adam');
   assert.equal(await v.autoVoice(a, C), 'am_adam', 'the choice stands');
   a.voice = { voices: {} };

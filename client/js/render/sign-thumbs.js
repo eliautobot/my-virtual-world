@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Pictures of the signs' styles for the style picker (ui/sign-design.js): each sign model drawn once, three-quarter on,
 // in its colour, by a small renderer of its own (made for a batch and given back after it, so it holds no GPU context).
 import * as THREE from 'three';

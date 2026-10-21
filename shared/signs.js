@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Signs in the world (2026-10-05): what stands where and which faces it shows. Three families:
 // - Ad assets the administrators put up in the Marketing tools: billboards (standard or large, the pole centred or at
 //   one end with the board overhanging) and street signs (lit "mupi" panels for sidewalks and parks); with the metro
@@ -109,7 +109,7 @@ export function bulkheadAt(core, rx, rz, hw, hd, boards = []) {
 // ------------------------------------------------------------------ signs inside (owners' furniture)
 /**
  * The kinds (furniture types, shared/catalog.js) and the face each starts with (w × h, m; a standing sign's y: its
- * centre above the floor; a wall sign's pivot: its centre's height). The face - the panel the design is on - takes
+ * centre above the floor; a wall sign's pivot: its centre's height). The face — the panel the design is on — takes
  * any width and height within `size` (2026-10-05: "the actual sign canvas to any size/aspect ratio, not the
  * entire sign being scaled"): a standing sign's base and post keep their size and its board's bottom its height, the
  * board growing up and to both sides; a wall sign grows round its centre, held between the floor and the ceiling.

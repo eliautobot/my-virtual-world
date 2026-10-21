@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What people have in front of them (shared/food.js, the models: render/food-models.js): the dish someone ordered on
 // the table at their place, the drink beside it, a pan or a pot on the stove while someone cooks at home. One batched
 // mesh draws every item near the camera in one call (and one for glass); an item's geometry is added the first time it
@@ -65,7 +65,7 @@ export class FoodTable {
   }
   begin() { this.solid.begin(); this.glass.begin(); }
   /** Item n at a spot in someone's frame: (lx left, ly up, lz ahead) from (x, y, z), turned yaw. cook: the pan/pot;
-   *  eat: being eaten - 'hand' (a piece of it in the hands) or 'tools' (the cutlery in the hands, not by the plate). */
+   *  eat: being eaten — 'hand' (a piece of it in the hands) or 'tools' (the cutlery in the hands, not by the plate). */
   put(n, cook, x, y, z, yaw, lx, ly, lz, eat = '') {
     const g = foodGeometry(n, cook, eat === 'tools', eat === 'hand');
     if (!g.geo && !g.glass) return;

@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What an agent's PC screen shows (server/pc/views.js, docs/features/agent-pc.md §2.1): after each command, the window
-// it has open - the file it wrote with the lines it changed marked (written, appended, edited), the part it reads, the
+// it has open — the file it wrote with the lines it changed marked (written, appended, edited), the part it reads, the
 // folder with what it made marked, its search, the board with the task it touched, its week with the event, its
-// terminal with the commands and what they said - kept small, sent to its owner's account alone, never for a visitor.
+// terminal with the commands and what they said — kept small, sent to its owner's account alone, never for a visitor.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -50,7 +50,7 @@ test('a file: written (all of it marked), appended (the new lines), edited (the 
   } finally { done(); }
 });
 
-test('folders, search, board, calendar, terminal - each command leaves its window', async () => {
+test('folders, search, board, calendar, terminal — each command leaves its window', async () => {
   const { sh, view, later, done } = setup();
   try {
     const r = sh({ agent: 1 });
@@ -72,7 +72,7 @@ test('folders, search, board, calendar, terminal - each command leaves its windo
     await r.run('cal add "Team call" tomorrow 3pm --for 30m');
     v = view(1);
     assert.equal(v.kind, 'calendar'); assert.equal(v.events[0].title, 'Team call'); assert.equal(v.mark, v.events[0].id); assert.equal(v.tz, 'America/New_York');
-    // (a quick command right after: its week stays up - the command goes to its terminal; one a while later shows it)
+    // (a quick command right after: its week stays up — the command goes to its terminal; one a while later shows it)
     await r.run('whoami');
     assert.equal(view(1).kind, 'calendar', 'a command no app claims doesn\'t cover the window it works in');
     later(HOLD_MS + 1);
@@ -112,7 +112,7 @@ test('a picture opened (read, or open ~/…) is on its screen, and the agent is 
     assert.equal(view(1).kind, 'image'); assert.equal(view(1).path, '~/Downloads/chart.png');
     await r.run('write ~/Documents/plan.md', { text: '# Plan' });
     out = await r.run('open ~/Documents/plan.md');
-    assert.match(out.text, /^~\/Documents\/plan\.md - 1 line/);
+    assert.match(out.text, /^~\/Documents\/plan\.md — 1 line/);
     assert.equal(view(1).kind, 'file'); assert.equal(view(1).mode, 'read');
     out = await r.run('open ~/Downloads/chart.png');
     assert.equal(view(1).kind, 'image');

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Two-factor sign-in: TOTP (RFC 6238, HMAC-SHA-1, 30-second steps, 6 digits, as every authenticator app expects) and
 // recovery codes. Their secrets are sealed by the secret store (server/secrets.js, DECISIONS C85).
 import crypto from 'node:crypto';

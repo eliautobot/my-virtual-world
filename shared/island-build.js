@@ -1,8 +1,8 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Buildings beyond the city (WP4.6, wp4-world-spec.md §4–5): a building outside the city's grid stands on a level pad
 // at the height of the ground along its front (its base, B.base, metres above the city's ground level), so its door
 // meets the path to its road; the ground around is graded to that pad (shared/terrain.js pads) and the back is cut or
-// filled. The rules where it may go - the same in the browser's ghost and on the server: on dry
+// filled. The rules where it may go — the same in the browser's ghost and on the server: on dry
 // ground, not too steep, clear of roads and other buildings, with a road within reach of its door (lots and rights are
 // checked separately, server/lot-rights.js).
 import { makeGrid, addressOf } from './city.js';
@@ -41,8 +41,8 @@ export function padHeight(heightAt, spec) {
   let s = 0; for (const [x, z] of pts) s += heightAt(x, z);
   return Math.round(s / pts.length * 100) / 100;
 }
-/** A grid's blocks: the rectangles between its roads, from the back of one road's sidewalk to the next's - [u0, u1,
- *  v0, v1] in the grid's frame (u along (co, si)) - each closed on all four sides by roads running past it. */
+/** A grid's blocks: the rectangles between its roads, from the back of one road's sidewalk to the next's — [u0, u1,
+ *  v0, v1] in the grid's frame (u along (co, si)) — each closed on all four sides by roads running past it. */
 function gridBlocks(rs, co, si) {
   const along = [], across = [];
   for (const r of rs) {
@@ -127,7 +127,7 @@ export function buildingPads(world) {
 export const GRID_BLEND = 30;   // m over which a levelled grid's land eases back into the hills round it
 /**
  * The level land under each grid of roads (the grid layout tool, client/js/ui/roads.js; the product owner 2026-10-14:
- * "make sure the terrain is adjusted so that the roadways are flat" - and the lots between them on even level): one pad
+ * "make sure the terrain is adjusted so that the roadways are flat" — and the lots between them on even level): one pad
  * per grid, the rectangle round all its roads (straight, square to each other) out past their sidewalks, at the grid's
  * level. `under`: roads still shape their own corridors over it (shared/terrain.js); its edge eases out over GRID_BLEND.
  */

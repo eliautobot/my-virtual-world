@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Eating at a table (2026-10-07, "proper eating animations depending on the meal"): every dish has a way to be eaten
 // (shared/food.js eat) and something to eat it with (render/char-props.js BITE: the food held by hand, or the cutlery
 // with a forkful of the dish's colour); someone at a table with a dish plays its clip (eatClip) and holds its things
@@ -52,7 +52,7 @@ test('someone at a table with a dish plays its clip and holds its things; a drin
   assert.equal(Math.floor(shapeFor(CLIP.eat_hands, 0, n('cheeseburger'))), SHAPE['f-burger']);
   // not at a table, or busy: the clip is left alone
   for (const c of [CLIP.sit_type, CLIP.sit_talk, CLIP.sit_phone, CLIP.walk]) assert.equal(eatClip(c, n('cheeseburger')), c);
-  // no table (2026-10-08): on a sofa, or standing in the kitchen - in the hands
+  // no table (2026-10-08): on a sofa, or standing in the kitchen — in the hands
   assert.equal(eatClip(CLIP.sit_relax, n('cheeseburger')), CLIP.eat_hands);
   assert.equal(eatClip(CLIP.sit_relax, n('pizza_slice')), CLIP.eat_lap);
   assert.equal(eatClip(CLIP.idle, n('pbj')), CLIP.eat_stand_hands);

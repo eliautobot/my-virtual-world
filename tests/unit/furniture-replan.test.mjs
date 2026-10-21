@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// Moving furniture re-plans only the people it concerns (2026-10-07: "if I move a furniture agents reset - if they
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// Moving furniture re-plans only the people it concerns (2026-10-07: "if I move a furniture agents reset — if they
 // are sleeping they get up"). A piece that changed re-plans whoever uses it or holds a place at it, stands where it was or
-// now is, or is walking on that floor; everyone else on the floor carries on - a sleeper sleeps on. A wall still
+// now is, or is walking on that floor; everyone else on the floor carries on — a sleeper sleeps on. A wall still
 // re-plans the whole floor.
 import assert from 'node:assert/strict';
 import test from 'node:test';

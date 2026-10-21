@@ -1,6 +1,6 @@
 // Demo mode over HTTP (server/licence.js; the self-hosted release's licence, as release 1's): until a licence key is
-// active the world stays the one generated at the first start - building, interiors, signs, layouts, promotional
-// aircraft and restoring a world backup are refused on the server - and the installation has at most 3 agents in all,
+// active the world stays the one generated at the first start — building, interiors, signs, layouts, promotional
+// aircraft and restoring a world backup are refused on the server — and the installation has at most 3 agents in all,
 // built in or connected (a Grok Bot counts like any other; tests/agents-api.test.mjs). Watching, chat and the routes
 // that only read stay open.
 import assert from 'node:assert/strict';

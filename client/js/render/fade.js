@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Dithered cross-fades (2026-10-03: "a lot of popping in and out ... it should be a smooth transition"): a mesh
 // fading in draws a growing share of its pixels, picked by a fixed screen pattern, while the mesh it replaces draws
-// exactly the other pixels - so for the third of a second they overlap, every pixel comes from one of them: no blending,
+// exactly the other pixels — so for the third of a second they overlap, every pixel comes from one of them: no blending,
 // no doubled depth, nothing to sort. The same pattern fades scattered trees and grass in as they arrive.
 import * as THREE from 'three';
 
@@ -33,9 +33,9 @@ export function fadeable(material, uniform = { value: new THREE.Vector2(1, 0) })
 
 /**
  * Where finer tiles are shown over a coarser one (render/terrain.js: each finer tile shows as soon as it is ready, the
- * coarser one stands in only for the rest - 2026-10-04, after a jump the near tiles waited for the whole region), the
+ * coarser one stands in only for the rest — 2026-10-04, after a jump the near tiles waited for the whole region), the
  * coarser one leaves out the pixels the finer one draws: a grid of HOLE_N x HOLE_N cells over the tile, each RG = the
- * share of the cell's pixels the finer tile draws (0..1) and whether it is fading in (1) or out (0) - the same screen
+ * share of the cell's pixels the finer tile draws (0..1) and whether it is fading in (1) or out (0) — the same screen
  * pattern as the fades, so the two share every pixel exactly. hole: { tex: { value }, rect: { value: Vector4(x0, z0,
  * size, on) } }.
  */

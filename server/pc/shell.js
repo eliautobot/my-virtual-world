@@ -1,5 +1,5 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
-// The PC's command line (docs/features/agent-pc.md §4): how agents work their PC. Made for small models - the words
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// The PC's command line (docs/features/agent-pc.md §4): how agents work their PC. Made for small models — the words
 // every model knows (ls, read, write, mkdir, mv, cp, rm), a few for the apps (task, cal, team, and the browser's open,
 // search), forgiving input (quotes or none, a mistyped path answered with the nearest real one, times as people write
 // them), several commands in one go (one per line; a command's text after <<EOF … EOF), short answers in plain words,
@@ -111,7 +111,7 @@ export class PcShell {
     if (!list.length) return { text: 'error: no command given. Try: help', results: [] };
     if (list.length > 12) return { text: 'error: at most 12 commands at a time', results: [] };
     const results = [];
-    // (text beside the request goes to its command that takes text - the last such one - else to its last command)
+    // (text beside the request goes to its command that takes text — the last such one — else to its last command)
     const takes = list.map(x => TEXT_TAKERS.has((words(x.line)[0] || '').toLowerCase()) && x.text === undefined);
     const target = takes.lastIndexOf(true) >= 0 ? takes.lastIndexOf(true) : list.length - 1;
     for (let k = 0; k < list.length; k++) {
@@ -143,7 +143,7 @@ export class PcShell {
       throw e;
     }
   }
-  /** What its screen shows after a command (an agent's own commands only; seen only by its owner - os.screen()): the
+  /** What its screen shows after a command (an agent's own commands only; seen only by its owner — os.screen()): the
    *  window the command left open, else its terminal; the command and the start of what it said go to its terminal. */
   onScreen(c, line, out) {
     if (this.c.kind !== 'agent') return;
@@ -157,7 +157,7 @@ export class PcShell {
     if (visitor) return 'PC (only your Public folder, to read): ls ~/Public · read <file> · find <words>';
     const g = (k, list) => `${k}: ${list}`;
     return [
-      'PC COMMANDS - your own computer. ~ is your home folder, /teams/<team> a team\'s shared folder. Several commands may go in one request, one per line.',
+      'PC COMMANDS — your own computer. ~ is your home folder, /teams/<team> a team\'s shared folder. Several commands may go in one request, one per line.',
       g('files', 'ls [folder] · read <file> [from-line] · write <file> (+text) · append <file> (+text) · edit <file> (+find, +replace) · mkdir <folder> · mv <from> <to> · cp <from> <to> · rm <path> · find <words> · info <file> · trash · restore <id>'),
       g('tasks', 'tasks [board] · task <id> · task add "<title>" [--to <agent>] [--due <when>] [--on <board>] (+text = notes) · task <id> doing|review|done · task <id> note "<words>" · task <id> to <agent>'),
       g('calendar', 'cal [today|tomorrow|week|<date>] · cal add "<title>" <when> [--for 30m] [--on <board>] [--at <place>] · cal move <id> <when> · cal rm <id>'),
@@ -187,7 +187,7 @@ cmd(['ls', 'dir', 'list'], 'files', 'ls [folder]', 'list a folder (default: the 
   if (!r.entries.length) return `${r.path} is empty`;
   const lines = r.entries.map(e => e.dir ? `${e.name}/${e.title ? `  (${e.title}${e.role ? `, you are ${e.role}` : ''})` : ''}`
     : `${e.name}  ${mbText(e.size)}  ${sh.when(e.modified)}${e.by && e.by !== sh.c.tag ? `  by ${sh.by(e.by)}` : ''}`);
-  return `${r.path}${r.access === 'r' ? ' (read only)' : ''} - ${plural(r.total, 'item')}\n${lines.join('\n')}${r.more ? `\n… more: ls ${r.path} --from ${(Number(flags.from) || 0) + r.entries.length}` : ''}`;
+  return `${r.path}${r.access === 'r' ? ' (read only)' : ''} — ${plural(r.total, 'item')}\n${lines.join('\n')}${r.more ? `\n… more: ls ${r.path} --from ${(Number(flags.from) || 0) + r.entries.length}` : ''}`;
 }, { visitor: true });
 cmd('cd', 'files', 'cd <folder>', 'go into a folder (relative paths start there)', (sh, a) => {
   const p = a[0] || '~';
@@ -213,16 +213,16 @@ cmd('tree', 'files', 'tree [folder]', 'folders and files below, 3 levels', (sh, 
   sh.show = () => folderView(sh, start);
   return out.length ? out.join('\n') : `${start} is empty`;
 });
-cmd(['read', 'cat', 'view', 'show'], 'files', 'read <file> [from-line] [lines]', 'show a text file or a document\'s words (in pages) - or a picture, on your screen', (sh, a) => {
+cmd(['read', 'cat', 'view', 'show'], 'files', 'read <file> [from-line] [lines]', 'show a text file or a document\'s words (in pages) — or a picture, on your screen', (sh, a) => {
   const { args } = parseArgs(a);
   need(args[0], 'usage: read <file> [from-line]');
-  // (a picture is opened on its screen - the agent is told what it is; anything else not text says what it is)
+  // (a picture is opened on its screen — the agent is told what it is; anything else not text says what it is)
   const st = sh.os.stat(sh.who, args[0], sh.opt());
   if (st.dir) throw new PcError(400, 'is_folder', `${st.path} is a folder: ls ${st.path}`);
   if (/^image\/(png|jpeg|gif|webp|avif)$/.test(st.mime || '')) {
     const px = pictureSize(sh.os.readFile(sh.who, st.path, sh.opt()).buf);
     sh.show = () => fileView(sh, st.path);
-    return `${st.path} - a picture (${(st.mime || '').replace('image/', '').toUpperCase()}${px ? `, ${px.w}×${px.h}` : ''}, ${mbText(st.size)}), open on your screen. Its pixels can't be read as words here: say what it is for from its name and where it came from.`;
+    return `${st.path} — a picture (${(st.mime || '').replace('image/', '').toUpperCase()}${px ? `, ${px.w}×${px.h}` : ''}, ${mbText(st.size)}), open on your screen. Its pixels can't be read as words here: say what it is for from its name and where it came from.`;
   }
   const f = sh.os.readText(sh.who, args[0], sh.opt());
   sh.seen.set(f.path, f.info.version);
@@ -232,7 +232,7 @@ cmd(['read', 'cat', 'view', 'show'], 'files', 'read <file> [from-line] [lines]',
   const want = Math.max(1, Math.min(1000, Math.floor(Number(args[2]) || READ_LINES)));
   let out = [], chars = 0, i = from - 1;
   for (; i < all.length && out.length < want; i++) { if (chars + all[i].length > READ_CHARS && out.length) break; out.push(all[i]); chars += all[i].length + 1; }
-  const head = `${f.path} - ${f.kind === 'doc' ? 'a document\'s words, ' : ''}${plural(all.length, 'line')}, ${mbText(f.info.size)}, version ${f.info.version}, changed ${sh.when(f.info.modified)}${f.info.by !== sh.c.tag ? ` by ${sh.by(f.info.by)}` : ''}`;
+  const head = `${f.path} — ${f.kind === 'doc' ? 'a document\'s words, ' : ''}${plural(all.length, 'line')}, ${mbText(f.info.size)}, version ${f.info.version}, changed ${sh.when(f.info.modified)}${f.info.by !== sh.c.tag ? ` by ${sh.by(f.info.by)}` : ''}`;
   if (!f.text) return `${head}\n(empty)`;
   const range = from > 1 || i < all.length ? ` (lines ${from}–${i} of ${all.length})` : '';
   return `${head}${range}\n${out.join('\n')}${i < all.length ? `\n… ${plural(all.length - i, 'more line')}: read ${f.path} ${i + 1}` : ''}`;
@@ -262,7 +262,7 @@ cmd(['edit', 'replace'], 'files', 'edit <file> (+find, +replace)', 'change one p
   let find = ex.find, repl = ex.replace;
   if (find === undefined && typeof ex.text === 'string') {
     const m = /^([\s\S]*?)\n={5,}\n([\s\S]*)$/.exec(ex.text);
-    need(m, 'edit needs "find" and "replace" - or a text with the old words, a line of =====, then the new words');
+    need(m, 'edit needs "find" and "replace" — or a text with the old words, a line of =====, then the new words');
     find = m[1]; repl = m[2];
   }
   need(typeof find === 'string' && find.length, 'edit needs "find": the exact words to change');
@@ -300,7 +300,7 @@ cmd(['rm', 'del', 'delete'], 'files', 'rm <path>', 'put a file or folder in the 
 cmd('trash', 'files', 'trash [~ or /teams/<team>]', 'what is in the trash', (sh, a) => {
   const r = sh.os.trashList(sh.who, a[0] || '~', sh.opt());
   if (!r.items.length) return 'the trash is empty';
-  return r.items.slice(0, 40).map(i => `[${i.id}] ${i.path}${i.dir ? '/' : ''} - deleted ${sh.when(i.deleted)}`).join('\n') + '\nrestore <id> brings one back';
+  return r.items.slice(0, 40).map(i => `[${i.id}] ${i.path}${i.dir ? '/' : ''} — deleted ${sh.when(i.deleted)}`).join('\n') + '\nrestore <id> brings one back';
 });
 cmd(['restore', 'undelete'], 'files', 'restore <id>', 'bring something back from the trash', (sh, a) => {
   need(/^\d+$/.test(a[0] || ''), 'usage: restore <id> (the number "trash" shows)');
@@ -314,7 +314,7 @@ cmd(['find', 'grep', 'search-files'], 'files', 'find <words> [--in <folder>]', '
   const r = sh.os.find(sh.who, args.join(' '), sh.opt({ in: typeof flags.in === 'string' ? flags.in : null }));
   sh.show = () => findView(r.query, r.results);
   if (!r.results.length) return `nothing found for "${r.query}"`;
-  return `${plural(r.results.length, 'match', 'matches')} for "${r.query}":\n${r.results.map(x => `${x.path}${x.dir ? '/' : ''}${x.snippet ? ` - ${x.snippet}` : ''}`).join('\n')}`;
+  return `${plural(r.results.length, 'match', 'matches')} for "${r.query}":\n${r.results.map(x => `${x.path}${x.dir ? '/' : ''}${x.snippet ? ` — ${x.snippet}` : ''}`).join('\n')}`;
 }, { visitor: true });
 cmd(['info', 'stat'], 'files', 'info <path>', 'size, version and who changed it last', (sh, a) => {
   need(a[0], 'usage: info <path>');
@@ -345,12 +345,12 @@ cmd(['du', 'space', 'storage', 'df'], 'files', 'du', 'how much of the PC\'s stor
 cmd('skills', 'other', 'skills', 'your skills: how-to notes in ~/Skills (the first line says what each is for)', sh => {
   const r = sh.os.list(sh.who, '~/Skills', sh.opt({ limit: 100 }));
   const files = r.entries.filter(e => !e.dir);
-  if (!files.length) return 'no skills yet. Write one: write ~/Skills/<name>.md - first line: what it is for; then the steps that worked.';
-  return files.map(e => { let first = ''; try { first = sh.os.readText(sh.who, e.path, sh.opt()).text.split('\n').find(l => l.trim()) || ''; } catch { /* not text */ } return `${e.path} - ${first.replace(/^#+\s*/, '').slice(0, 120)}`; }).join('\n');
+  if (!files.length) return 'no skills yet. Write one: write ~/Skills/<name>.md — first line: what it is for; then the steps that worked.';
+  return files.map(e => { let first = ''; try { first = sh.os.readText(sh.who, e.path, sh.opt()).text.split('\n').find(l => l.trim()) || ''; } catch { /* not text */ } return `${e.path} — ${first.replace(/^#+\s*/, '').slice(0, 120)}`; }).join('\n');
 });
 
 // --------------------------------------------------------------------------------------------- tasks
-const taskLine = (sh, k, withBoard = false) => `#${k.id} [${COLUMN_NAMES[k.col]}] ${k.title}${k.assignee != null && k.assignee !== sh.c.agent ? ` - ${sh.by(`a:${k.assignee}`)}` : ''}${k.due ? ` · due ${sh.when(k.due, dayStart(k.due, sh.tz) === k.due)}` : ''}${withBoard ? ` · ${sh.boardName(k.board)}` : ''}`;
+const taskLine = (sh, k, withBoard = false) => `#${k.id} [${COLUMN_NAMES[k.col]}] ${k.title}${k.assignee != null && k.assignee !== sh.c.agent ? ` — ${sh.by(`a:${k.assignee}`)}` : ''}${k.due ? ` · due ${sh.when(k.due, dayStart(k.due, sh.tz) === k.due)}` : ''}${withBoard ? ` · ${sh.boardName(k.board)}` : ''}`;
 cmd(['tasks', 'board'], 'tasks', 'tasks [board]', 'your open tasks, or a whole board (~ yours, /teams/<team>)', (sh, a) => {
   sh.show = () => boardView(sh, a[0] || '~');
   if (!a[0] && sh.c.kind === 'agent') {
@@ -363,13 +363,13 @@ cmd(['tasks', 'board'], 'tasks', 'tasks [board]', 'your open tasks, or a whole b
   const cols = COLUMNS.map(col => {
     const ks = b.cards.filter(k => k.col === col);
     const shown = col === 'done' ? ks.slice(-5) : ks;
-    return `${COLUMN_NAMES[col]}${ks.length ? ` (${ks.length})` : ''}: ${shown.length ? `\n${shown.map(k => `  ${taskLine(sh, k)}`).join('\n')}` : '-'}`;
+    return `${COLUMN_NAMES[col]}${ks.length ? ` (${ks.length})` : ''}: ${shown.length ? `\n${shown.map(k => `  ${taskLine(sh, k)}`).join('\n')}` : '—'}`;
   });
   return `${sh.boardName(b.board)}${b.access === 'r' ? ' (read only)' : ''}:\n${cols.join('\n')}`;
 });
 cmd('task', 'tasks', 'task add "<title>" … | task <id> [doing|review|done|note|to|due|rm]', 'add a task, or show / move / change one', (sh, a, ex) => {
   const { args, flags } = parseArgs(a, ['to', 'due', 'on', 'note', 'notes', 'title'], ['to', 'due', 'note', 'notes', 'title']);
-  need(args.length || flags.title, 'usage: task add "<title>" [--to <agent>] [--due <when>] [--on <board>] - or task <id>');
+  need(args.length || flags.title, 'usage: task add "<title>" [--to <agent>] [--due <when>] [--on <board>] — or task <id>');
   if (args[0]?.toLowerCase() === 'add' || args[0]?.toLowerCase() === 'new') {
     const title = flags.title || args.slice(1).join(' ');
     need(title, 'usage: task add "<title>"');
@@ -380,9 +380,9 @@ cmd('task', 'tasks', 'task add "<title>" … | task <id> [doing|review|done|note
     return `added ${taskLine(sh, k)} to ${sh.boardName(k.board)}`;
   }
   const id = Number(String(args[0]).replace(/^#/, ''));
-  need(Number.isInteger(id) && id > 0, 'usage: task <id> - the number after # in "tasks"');
+  need(Number.isInteger(id) && id > 0, 'usage: task <id> — the number after # in "tasks"');
   const verb = (args[1] || '').toLowerCase();
-  // (the board the task is on, with it marked - after the change; one deleted: its board as it is now)
+  // (the board the task is on, with it marked — after the change; one deleted: its board as it is now)
   const board = (() => { try { return sh.os.card(sh.who, id).board; } catch { return null; } })();
   if (board) sh.show = () => boardView(sh, board, verb === 'rm' || verb === 'delete' ? null : id);
   if (!verb) {
@@ -419,7 +419,7 @@ cmd(['cal', 'calendar'], 'calendar', 'cal [today|tomorrow|week|<date>] · cal ad
     else {
       // the title is the first words, the time the longest ending that reads as one
       for (let k = 1; k < rest.length && !w; k++) { const p = parseWhen(rest.slice(k).join(' '), sh.tz, sh.now()); if (p) { w = p; title = rest.slice(0, k).join(' '); } }
-      need(w, 'usage: cal add "<title>" <when> - e.g. cal add "Team call" tomorrow 3pm --for 30m');
+      need(w, 'usage: cal add "<title>" <when> — e.g. cal add "Team call" tomorrow 3pm --for 30m');
     }
     let end = null;
     if (flags.for) { const l = parseLength(flags.for); need(l, `"${flags.for}" isn't a length: e.g. 30m, 1h, 2 days`); end = w.t + l; }
@@ -427,7 +427,7 @@ cmd(['cal', 'calendar'], 'calendar', 'cal [today|tomorrow|week|<date>] · cal ad
     else if (w.allDay) end = w.t + 86400000;
     const e = sh.os.addEvent(sh.who, flags.on || '~', { title, start: w.t, end, allDay: w.allDay && !flags.for, place: flags.at || '', notes: flags.note || ex.text || '' }, sh.opt());
     sh.show = () => calView(sh, weekOf(sh, e.start), e.id);
-    return `put on ${e.calendar === '~' ? 'your calendar' : `the ${e.calendar.replace('/teams/', '')} team's calendar`}: [${e.id}] ${e.title} - ${sh.when(e.start, e.allDay)}${e.allDay ? '' : ` for ${lengthText(e.end - e.start)}`}${e.place ? ` at ${e.place}` : ''}`;
+    return `put on ${e.calendar === '~' ? 'your calendar' : `the ${e.calendar.replace('/teams/', '')} team's calendar`}: [${e.id}] ${e.title} — ${sh.when(e.start, e.allDay)}${e.allDay ? '' : ` for ${lengthText(e.end - e.start)}`}${e.place ? ` at ${e.place}` : ''}`;
   }
   if (verb === 'rm' || verb === 'delete' || verb === 'cancel') { need(/^\d+$/.test(args[1] || ''), 'usage: cal rm <id>'); sh.os.removeEvent(sh.who, Number(args[1])); sh.show = () => calView(sh, dayStart(sh.now(), sh.tz)); return `took [${args[1]}] off the calendar`; }
   if (verb === 'move') {
@@ -459,7 +459,7 @@ cmd(['team', 'teams'], 'other', 'team [name]', 'your teams: who is in them and w
   if (!list.length) return `you are not in a team called "${a.join(' ')}". Your teams: ${ts.map(t => t.slug).join(', ')}`;
   return list.map(t => {
     const ms = t.members.filter(m => m.agent !== sh.c.agent).map(m => `${sh.by(`a:${m.agent}`)} (${m.role})`);
-    return `${t.name} - folder /teams/${t.slug}${t.role ? `, you are ${t.role}` : ''}\n  co-workers: ${ms.join(', ') || 'none yet'}${t.brief ? `\n  brief: ${want ? t.brief : t.brief.slice(0, 300)}` : ''}`;
+    return `${t.name} — folder /teams/${t.slug}${t.role ? `, you are ${t.role}` : ''}\n  co-workers: ${ms.join(', ') || 'none yet'}${t.brief ? `\n  brief: ${want ? t.brief : t.brief.slice(0, 300)}` : ''}`;
   }).join('\n');
 });
 cmd(['whoami', 'me', 'status'], 'other', 'whoami', 'who and where you are, the time, your teams and the storage', sh => {
@@ -486,9 +486,9 @@ cmd(['search', 'google', 'web'], 'browser', 'search <words>', 'search the web', 
   need(a.length, 'usage: search <words>');
   return sh.browser.search(sh, a.join(' '));
 }, { browser: true });
-cmd(['open', 'go', 'visit', 'browse'], 'browser', 'open <url | link number | file>', 'open a web page (a number follows that link of the page you are on) - or a file of your PC (~/…)', async (sh, a, ex) => {
-  need(a.length, 'usage: open <url> - or open <n> for a link of the page you are on');
-  // (a path of the PC - ~/…, /teams/…: that file, as read shows it - a picture on the screen)
+cmd(['open', 'go', 'visit', 'browse'], 'browser', 'open <url | link number | file>', 'open a web page (a number follows that link of the page you are on) — or a file of your PC (~/…)', async (sh, a, ex) => {
+  need(a.length, 'usage: open <url> — or open <n> for a link of the page you are on');
+  // (a path of the PC — ~/…, /teams/…: that file, as read shows it — a picture on the screen)
   if (pcPath(a[0])) return COMMANDS.find(x => x.names.includes('read')).run(sh, a, ex, 'read');
   return sh.browser.open(sh, a.join(' '));
 }, { browser: a => !pcPath(a[0]) });   // (a file of the PC opens without a browser)
@@ -497,7 +497,7 @@ cmd('links', 'browser', 'links', 'the links of the page you are on', async sh =>
 cmd('back', 'browser', 'back', 'the page before', async sh => sh.browser.back(sh), { browser: true });
 cmd('history', 'browser', 'history', 'pages you opened lately', async sh => sh.browser.history(sh), { browser: true });
 cmd('click', 'browser', 'click f<n> | click <n>', 'click a field or button of the page (f<n>, in a browser service), or follow link <n>', async (sh, a) => {
-  need(a[0], 'usage: click f<n> - the fields and buttons are listed under the page');
+  need(a[0], 'usage: click f<n> — the fields and buttons are listed under the page');
   return sh.browser.click(sh, a[0]);
 }, { browser: true });
 cmd('type', 'browser', 'type f<n> "<words>"', 'type into a field of the page (in a browser service)', async (sh, a, ex) => {
@@ -509,7 +509,7 @@ cmd('press', 'browser', 'press Enter|Tab|Escape', 'press a key on the page (in a
   return sh.browser.press(sh, a[0]);
 }, { browser: true });
 cmd('save', 'browser', 'save <file>', 'keep the page you are on as a file (its words and link)', async (sh, a) => {
-  need(a[0], 'usage: save <file> - e.g. save ~/Downloads/article.md');
+  need(a[0], 'usage: save <file> — e.g. save ~/Downloads/article.md');
   return sh.browser.save(sh, a[0]);
 }, { browser: true });
 

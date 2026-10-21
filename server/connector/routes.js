@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What the person does about AI apps (./auth.js), in the route table with the browser's own rules (session, CSRF):
 //   GET  /api/connector/request?id=   the consent page: which app asks, what for, and the person's agents to choose from
 //                                     (the id is the request's secret; a guest sees the app and is asked to sign in)

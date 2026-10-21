@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+# My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 # Refreshes the staging copy's data from live: back up live (hot copy) → stop staging → swap its data → start → check.
 # The staging data it replaces is kept as data.previous. Accounts come along (the same people can sign in on staging),
 # but every session is cleared, so no live session token works on staging. Staging must use its own session cookie

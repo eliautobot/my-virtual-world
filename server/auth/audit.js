@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The append-only audit log (DECISIONS C74, C75, C78): who did what to which account, when and from which address.
 // Rows live in next.db; triggers refuse UPDATE and DELETE (only the recorded retention purge may delete), and each row
 // carries a SHA-256 over the previous row's hash and its own fields, so changes made outside the server show up in

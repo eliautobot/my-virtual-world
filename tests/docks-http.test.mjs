@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The fishing docks over HTTP on a real island (docs/features/fishing.md §Venues): an administrator places a marina at a
 // shore the placing tool fits it to; the server takes the water's level, levels the land just above it, makes the dock
 // store (a real building: a shop with a tackle counter) in the same edit, and undo
@@ -169,7 +169,7 @@ test('a fishing trip from a marina: its grounds laid out on that sea, the starte
 test('a lake trip from a lake dock: its grounds on that lake', async () => {
   let w = await world(), m = (w.worldModules || []).find(x => x.kind === 'lakedock');
   if (!m) { const [spot] = await spotsFor('lakedock'); assert.ok(spot, 'a lake to put a dock on'); assert.equal((await edit(owner, [{ op: 'wmod.add', module: spot }])).status, 200); w = await world(); m = w.worldModules.find(x => x.kind === 'lakedock'); }
-  // (a trip starts from the dock you're at: over there first - on a big island the lake can be far from the marina)
+  // (a trip starts from the dock you're at: over there first — on a big island the lake can be far from the marina)
   const ws = new WebSocket(s.url.replace(/^http/, 'ws') + '/ws', { headers: { cookie: owner.cookie } }), msgs = [];
   ws.onmessage = e => { if (typeof e.data === 'string') msgs.push(JSON.parse(e.data)); };
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('ws')); });
@@ -188,7 +188,7 @@ test('a lake trip from a lake dock: its grounds on that lake', async () => {
   await owner.post('/api/play/abandon', { run: r.json.run });
 });
 
-test('the fish market: a trip\'s catch goes into the inventory; the dock store buys it once - not from out on the water', async () => {
+test('the fish market: a trip\'s catch goes into the inventory; the dock store buys it once — not from out on the water', async () => {
   const { kitFor } = await import('../shared/fishing.js'), { STARTER } = await import('../shared/fishing-gear.js'), { minFightSeconds } = await import('../shared/fishing-fight.js'), { speciesOf } = await import('../shared/fish-species.js');
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   let w = await world(), m = (w.worldModules || []).find(x => x.kind === 'marina');

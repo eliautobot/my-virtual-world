@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Assembles the economy (docs/features/ECONOMY.md) for the server: the core (./economy.js) and its parts, the routes,
 // the clock that settles each day and keeps the totals on disk, the simulation's hooks, and what connected agents may
 // do with their money.
@@ -106,7 +106,7 @@ export function createEconomy(d) {
   };
 }
 /**
- * What an agent does with its money - a connected agent's API call, an approval its owner gave, its Mind's tools
+ * What an agent does with its money — a connected agent's API call, an approval its owner gave, its Mind's tools
  * (./mind-money.js): runAgentAction(action, payload, agentId, approved) runs it within its owner's limits; above the
  * approval threshold it files an approval and answers with its id.
  */

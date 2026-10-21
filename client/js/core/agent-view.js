@@ -1,9 +1,9 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Pure helpers for showing agents that live outside the city (connected agents, WP2.14) in the team list and the chat panel.
 // No page access, so tests/unit/agent-view.test.mjs can run them: what a connected agent's state is called, which agents have no
 // body, and how the events of one chat run add up to what the person sees.
 export const isExt = a => !!a && /^ext-/.test(String(a.key || ''));
-/** Whether this viewer opens the agent's Agent Studio: its owner, or someone it is shared with to manage - whatever its
+/** Whether this viewer opens the agent's Agent Studio: its owner, or someone it is shared with to manage — whatever its
  *  brain, a connected agent (an outside AI) as well (2026-10-11: its friends, messages, activity and spending are there). */
 export const manages = a => !!a && (!!a.mine || a.level === 'manage');
 /** The agent whose body is person i, when this viewer may open its Agent Studio; null otherwise. */

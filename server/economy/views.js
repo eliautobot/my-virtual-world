@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // What the economy window and the map show (docs/features/ECONOMY.md §10): the overview (money supply, treasury,
 // activity, employment, prices, SimCity-style demand bars, wealth), data lenses per building for the property map, and
 // the residents' wealth tiers. Read-only; cached for a few seconds because thousands of wallets are summed.
@@ -136,7 +136,7 @@ export class Views {
   }
   /**
    * A person's money lately (the selection card's money feed), oldest first: what they bought at the city's venues (paid
-   * when the day settles) and, with `ledger`, their wallet's last lines - a resident's daily settlements, or an agent's
+   * when the day settles) and, with `ledger`, their wallet's last lines — a resident's daily settlements, or an agent's
    * statement for its owner. [{ at, when, kind, label, note, amount }] (amount in hundredths of a VC, + in, − out).
    */
   personFeed(i, { ledger = false, limit = 10 } = {}) {

@@ -1,6 +1,6 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // The designer (both editions): a design for an ad or a sign (shared/ads.js normalizeAdCreative) with live previews in
-// every shape it will be shown in - a logo or picture beside a title on a colour, or a full picture (a wide one, and a
+// every shape it will be shown in — a logo or picture beside a title on a colour, or a full picture (a wide one, and a
 // tall one for tall signs), a message and a link for when someone taps it. The ad builder (ui/ads.js), owners' rooftop
 // billboards and signs inside (ui/sign-design.js) and the Marketing tools' own content all use it, so what is designed
 // is exactly what stands in the world (render/ad-paint.js paints both).
@@ -78,7 +78,7 @@ export function designer(root, o = {}) {
     <div class="ab-pic" data-pic="imageSrc"><input type="file" class="ab-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden><button type="button" class="btn small" data-a="pick"></button><span class="dim ab-picname"></span><button type="button" class="btn small hidden" data-a="nopic">Remove</button></div>
     <div class="ab-pic" data-pic="imageTallSrc"><input type="file" class="ab-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden><button type="button" class="btn small" data-a="pick">📷 Upload the tall picture</button><span class="dim ab-picname"></span><button type="button" class="btn small hidden" data-a="nopic">Remove</button></div>
     <p class="hint ab-pichint"></p>
-    <label class="fld">Title <input class="input ab-in" data-k="title" maxlength="${AD_LIMITS.title}" placeholder="${esc(o.placeholder || "e.g. Joe's Pizza - open late")}"></label>
+    <label class="fld">Title <input class="input ab-in" data-k="title" maxlength="${AD_LIMITS.title}" placeholder="${esc(o.placeholder || "e.g. Joe's Pizza — open late")}"></label>
     <label class="fld">Message <small class="dim">(shown when someone taps it)</small><textarea class="input ab-in" data-k="message" maxlength="${AD_LIMITS.message}" rows="2" placeholder="What people should know"></textarea></label>
     <label class="fld">${esc(o.linkLabel || 'Link')} <small class="dim">(optional: "Open link" takes people there in a new tab)</small><input class="input ab-in" data-k="website" inputmode="url" placeholder="yoursite.com"></label>
     <div class="ab-colors"><label>Background <input type="color" class="ab-in" data-k="backgroundColor"></label><label>Text <input type="color" class="ab-in" data-k="textColor"></label></div>

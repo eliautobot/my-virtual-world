@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Roles and capabilities (DECISIONS C57, A16). Every HTTP route and WebSocket message names one capability, checked
 // with Permissions.allowed(principal, capability). Defaults live in CAPS; the owner can change a capability's minimum
 // role, except fixed ones, and capabilities that need an identity never drop to guest.

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Where a player may stand (shared/playernav.js, PLAN WP1.10, I14.10): the server's validation, the soft push between
 // players and the doorway rule, on a generated city.
 import assert from 'node:assert/strict';

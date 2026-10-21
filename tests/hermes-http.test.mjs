@@ -1,10 +1,10 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Hermes as an agent provider on a real server (docs/features/agent-providers.md §9), against the stand-in Hermes backend
 // replaying turns recorded from Hermes 0.21.5 (tests/helpers/fake-hermes.mjs): it connects with the session token, or
-// signs in with a username and password and forgets the password; its profiles become agents; the universal chat - a
+// signs in with a username and password and forgets the password; its profiles become agents; the universal chat — a
 // streamed answer with its reasoning, a command as a step, Hermes' approval with its four choices, its questions, Stop, a
 // message sent while it works (steered into the turn, or after it), the model and thinking level for that chat only,
-// files, an answer's media - the history from Hermes' stored messages; its sessions for whoever manages it; its sub-menu
+// files, an answer's media — the history from Hermes' stored messages; its sessions for whoever manages it; its sub-menu
 // for managers only, a fixed list of calls, never a secret's value, a change against settings changed elsewhere refused.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
@@ -168,7 +168,7 @@ test('the socket to Hermes lost mid-answer: it reconnects by itself, takes up th
   assert.match(end.text, /Stub reply/);
 });
 
-test('a message while it works with Enter, as Hermes Desktop sends it: Hermes\' redirect - the turn goes on with it; its own run ends at once', async () => {
+test('a message while it works with Enter, as Hermes Desktop sends it: Hermes\' redirect — the turn goes on with it; its own run ends at once', async () => {
   const chat = await newChat();
   const first = await owner.post('/api/providers/runs', { agent, session: chat.id, input: 'A long one [[slow]] [[think]]' });
   assert.equal(first.status, 200, first.text);
@@ -185,7 +185,7 @@ test('a message while it works with Enter, as Hermes Desktop sends it: Hermes\' 
   assert.match((await end(idle.json.runId)).text, /Stub answer to: now this/);
 });
 
-test('the socket lost mid-answer: what was missed while it was down is fetched again from Hermes, in order, once - the answer whole', async () => {
+test('the socket lost mid-answer: what was missed while it was down is fetched again from Hermes, in order, once — the answer whole', async () => {
   const chat = await newChat();
   const before = hm.replays || 0;
   const r = await owner.post('/api/providers/runs', { agent, session: chat.id, input: 'Through a drop again [[slow]] [[think]]' });
@@ -234,7 +234,7 @@ test('going back, as Hermes Desktop does: an edit of the first message replaces 
   for (let i = 0; i < 100 && !(await owner.get(`/api/providers/runs/events?run=${r.json.runId}&since=0`)).json.done; i++) await sleep(40);
   h = (await owner.get(`/api/providers/history?agent=${agent}&session=${chat.id}`)).json.messages;
   assert.deepEqual(h.filter(m => m.role === 'user').map(m => m.text), ['one', 'two, edited']);
-  // the first one: the whole chat goes (Hermes asks to be told - the adapter says so)
+  // the first one: the whole chat goes (Hermes asks to be told — the adapter says so)
   const first = h.find(m => m.role === 'user').meta.row;
   const r2 = await owner.post('/api/providers/runs', { agent, session: chat.id, input: 'one again', rewind: first });
   assert.equal(r2.status, 200, r2.text);
@@ -288,7 +288,7 @@ test('a chat waiting for the person says so in the list (an approval asked), the
 
 test('slash commands as Hermes Desktop runs them: Hermes\' own calls only, on the chat\'s own session (a new chat\'s made first and named after the command), answers rebuilt; a skill\'s words shown as its command', async () => {
   const nat = (who, session, method, params, extra = {}) => who.post('/api/providers/native', { agent, session, method, params, ...extra });
-  // (a new chat: /status makes its session on Hermes, which is this chat's from then on - named after the command)
+  // (a new chat: /status makes its session on Hermes, which is this chat's from then on — named after the command)
   const chat = await newChat();
   const st = await nat(owner, chat.id, 'session.status', {}, { preview: '/status' });
   assert.equal(st.status, 200, st.text);
@@ -297,7 +297,7 @@ test('slash commands as Hermes Desktop runs them: Hermes\' own calls only, on th
   assert.equal(st.json.session.label, '/status', 'named after the command until Hermes names it');
   const key = st.json.session.key;
   assert.ok(hm.sessions.get(key), 'made on Hermes'); assert.equal(hm.sessions.get(key).source, 'myvirtualworld');
-  // (the session it acts on is the chat's - never one the page names)
+  // (the session it acts on is the chat's — never one the page names)
   const sv = await nat(owner, chat.id, 'session.save', { session_id: 'someone-elses' });
   assert.equal(sv.status, 200); assert.equal(sv.json.result.file, `/h/sessions/saved/${key}.json`); assert.equal(sv.json.result.secret, undefined, 'rebuilt: nothing beyond its fields');
   // (only Hermes' listed calls, with their arguments)
@@ -405,7 +405,7 @@ test('/btw and /bg: the answer comes later, outside any turn, to whoever asked (
   assert.deepEqual(btw.side, { op: 'side', kind: 'btw', id: b.json.result.task_id, question: 'What did I say?', text: 'Side answer to: What did I say?' });
   assert.equal(bg.side.id, g.json.result.task_id); assert.equal(bg.side.question, undefined);
   assert.equal((await owner.post('/api/providers/native', { agent, session: chat.id, method: 'prompt.btw', params: {} })).status, 400, 'a side question needs its words');
-  // someone the agent is shared with (to use it): no commands - they change how it works, read its machine
+  // someone the agent is shared with (to use it): no commands — they change how it works, read its machine
   await owner.post('/api/agents/share', { id: agent, kind: 'account', who: String((await ann.get('/api/auth/me')).json.account.id), level: 'use' });
   const annChat = await newChat(ann);
   const no = await ann.post('/api/providers/native', { agent, session: annChat.id, method: 'session.status', params: {} });

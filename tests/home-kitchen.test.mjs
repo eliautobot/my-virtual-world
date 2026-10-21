@@ -1,7 +1,7 @@
-// Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+// My Virtual World — Copyright (c) 2026 My Virtual World. Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
 // Home meals follow the home's furniture (2026-10-08, "they place the pan on a countertop and cook without a stove…
 // if the agent has no table they can only eat handheld items… food type and seating type need to go hand in hand"):
-// a generated city run for a day - every cooking is at a stove (a kitchen unit's hob), something cold is made at a
+// a generated city run for a day — every cooking is at a stove (a kitchen unit's hob), something cold is made at a
 // counter only, a home without a stove never makes a dish cooked on one, and a home without a table eats only food held
 // in the hands (on a seat, or standing in the kitchen).
 import assert from 'node:assert/strict';
