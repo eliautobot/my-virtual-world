@@ -9,6 +9,34 @@ import { GU } from './scene.js';
 import { OCEAN_GLSL, seaState } from './ocean-fft.js';
 import { MARKS_U, MARKS_GLSL, hullsUpdate } from './water-marks.js';
 
+/**
+ * Sheltered water (2026-10-15 — a marina's basin is a harbour: the surf rolling through it pinned the boats to the quay
+ * and ran out of step with them): up to four areas, each a rectangle in its own frame (a dock's: render/docks.js),
+ * where the surf dies away and the open sea's swell comes in cut down to CALM_SWELL of itself — over all the basin,
+ * dredged deep for the boats (the sea's depth maps draw it as the beach it was, the swell there all but gone: boats
+ * moored dead still in a storm) — fading out over CALM_FADE m beyond (round its corners: no square outline on the
+ * water). Shared by the sea's shaders (SWASH_GLSL swCalm) and the boats (calmAt: render/sea-probe.js).
+ */
+export const CALM_N = 4, CALM_FADE = 18, CALM_SWELL = 0.35;
+export const CALM = { uCalmA: { value: Array.from({ length: CALM_N }, () => new THREE.Vector4()) }, uCalmB: { value: Array.from({ length: CALM_N }, () => new THREE.Vector4()) }, uCalmN: { value: 0 } };
+/** The areas: [{ x, z, rot (its frame: x = x + s·cos rot + f·sin rot, z = z − s·sin rot + f·cos rot), s0, s1, f0, f1 }]. */
+export function setCalm(list) {
+  const n = Math.min(CALM_N, list.length);
+  for (let i = 0; i < n; i++) { const a = list[i]; CALM.uCalmA.value[i].set(a.x, a.z, Math.cos(a.rot), Math.sin(a.rot)); CALM.uCalmB.value[i].set((a.s0 + a.s1) / 2, (a.f0 + a.f1) / 2, (a.s1 - a.s0) / 2, (a.f1 - a.f0) / 2); }
+  CALM.uCalmN.value = n;
+}
+/** How sheltered (x, z) is: 0 the open sea … 1 inside a harbour (as swCalm). */
+export function calmAt(x, z) {
+  let c = 0;
+  for (let i = 0; i < CALM.uCalmN.value; i++) {
+    const A = CALM.uCalmA.value[i], B = CALM.uCalmB.value[i], dx = x - A.x, dz = z - A.y, s = dx * A.z - dz * A.w, f = dx * A.w + dz * A.z;
+    const qs = Math.abs(s - B.x) - B.z, qf = Math.abs(f - B.y) - B.w, q = Math.hypot(Math.max(qs, 0), Math.max(qf, 0)) + Math.min(Math.max(qs, qf), 0);
+    const u = Math.min(1, Math.max(0, q / CALM_FADE));
+    c = Math.max(c, 1 - u * u * (3 - 2 * u));
+  }
+  return c;
+}
+
 /** Wave height (m) for the weather: { wind (m/s), storm (0..1) }. */
 export const waveHeight = w => 0.18 + 0.045 * (w.wind?.speed ?? 3) + 0.75 * (w.storm || 0);
 
@@ -20,6 +48,20 @@ export const waveHeight = w => 0.18 + 0.045 * (w.wind?.speed ?? 3) + 0.75 * (w.s
  * (signed: below the sea positive, above it negative). Needs uTime, uDepth(N, F), uDepthRect(N, F), uSurf.
  */
 export const SWASH_GLSL = /* glsl */`
+uniform vec4 uCalmA[${CALM_N}], uCalmB[${CALM_N}];
+uniform int uCalmN;
+// how sheltered p is (a harbour: setCalm): 0 the open sea … 1 inside
+float swCalm(vec2 p) {
+  float c = 0.0;
+  for (int i = 0; i < ${CALM_N}; i++) {
+    if (i >= uCalmN) break;
+    vec4 A = uCalmA[i], B = uCalmB[i];
+    vec2 d = p - A.xy; float s = d.x * A.z - d.y * A.w, f = d.x * A.w + d.y * A.z;
+    vec2 q = vec2(abs(s - B.x) - B.z, abs(f - B.y) - B.w);
+    c = max(c, 1.0 - smoothstep(0.0, ${CALM_FADE.toFixed(1)}, length(max(q, 0.0)) + min(max(q.x, q.y), 0.0)));
+  }
+  return c;
+}
 // water depth (x) and reef (y: how much of a reef section is under it, 0..1) from the fine map close round the camera
 // (2 m), else the wide one (8 m)
 vec2 swMap(vec2 p) {
@@ -69,6 +111,8 @@ float swSurf(vec2 p, float d, float sharp, out float dhdd, out vec3 wh) {
   dhdd = 0.0; wh = vec3(0.0);
   float H0 = swH0(), db = H0 * 1.3, reach = swOut();
   if (d <= 0.0 || d >= reach) return 0.0;
+  float calm = 1.0 - swCalm(p);   // (none in a harbour)
+  if (calm <= 0.0) return 0.0;
   float sho = 1.0 - smoothstep(db, reach, d);          // 0 far out .. 1 where it breaks
   float br = 1.0 - smoothstep(db * 0.7, db * 1.05, d);   // 0 a swell .. 1 broken: a bore
   float k = mix(0.5, mix(0.58, 0.8, sharp), max(sho * sho, br));   // the trough's place in the cycle: the front steepens
@@ -90,7 +134,8 @@ float swSurf(vec2 p, float d, float sharp, out float dhdd, out vec3 wh) {
   wh.y = br * ((1.0 - smoothstep(0.0, 0.6, c)) * 0.75 + 0.12) * big;
   wh.z = br;
   wh.xy *= smoothstep(0.0, 0.08, d);
-  return H * (up - 0.32);
+  wh *= calm; dhdd *= calm;
+  return H * (up - 0.32) * calm;
 }
 // where along its cycle the wave arriving here is: 0 as its bore reaches the shore, 1 just before the next
 float swRun(vec2 p) { return fract(uTime * SW_F + swWob(p)); }
@@ -114,7 +159,7 @@ float swSwashFoam(float x, float xTop, float run, float lace, float ex, float ja
   float mark = (1.0 - smoothstep(0.0, 0.3 + ex, abs(x - xTop + 0.15))) * smoothstep(-ex, ex, xb) * smoothstep(0.2, 0.32, run) * (1.0 - smoothstep(0.45, 1.0, run)) * lace * 0.7;
   return clamp(max(max(edge, sheet), mark), 0.0, 1.0);
 }
-float swReach(vec2 p) { return swReachS(p, swSlope(p)); }
+float swReach(vec2 p) { return swReachS(p, swSlope(p)) * (1.0 - swCalm(p)); }
 `;
 
 const WAVES = /* glsl */`
@@ -161,7 +206,7 @@ export class Ocean {
   constructor(seaLevel, normalMap, uSurf = { value: 1 }, waves = null) {
     const blank = () => { const t = new THREE.DataTexture(new Uint16Array(2), 1, 1, THREE.RGFormat, THREE.HalfFloatType); t.unpackAlignment = 4; t.needsUpdate = true; return t; };
     this.depthTex = blank(); this.depthTexN = blank(); this.depthTexF = blank();
-    this.u = { uWaveH: { value: 0.3 }, uTime: GU.uTime, uWind: GU.uWind, uSurf, uNear: { value: new THREE.Vector2() }, uDepth: { value: this.depthTex }, uDepthRect: { value: new THREE.Vector4(0, 0, 1, 0) }, uDepthN: { value: this.depthTexN }, uDepthRectN: { value: new THREE.Vector4(0, 0, 1, 0) }, uDepthF: { value: this.depthTexF }, uDepthRectF: { value: new THREE.Vector4(0, 0, 1, 0) }, ...MARKS_U };   // (MARKS_U: what boats and splashes do to the water, render/water-marks.js)
+    this.u = { uWaveH: { value: 0.3 }, uTime: GU.uTime, uWind: GU.uWind, uSurf, uNear: { value: new THREE.Vector2() }, uDepth: { value: this.depthTex }, uDepthRect: { value: new THREE.Vector4(0, 0, 1, 0) }, uDepthN: { value: this.depthTexN }, uDepthRectN: { value: new THREE.Vector4(0, 0, 1, 0) }, uDepthF: { value: this.depthTexF }, uDepthRectF: { value: new THREE.Vector4(0, 0, 1, 0) }, ...MARKS_U, ...CALM };   // (MARKS_U: what boats and splashes do to the water, render/water-marks.js)
     this.waves = waves;
     if (waves) { this._fft(seaLevel); return; }
     const m = this.material = new THREE.MeshStandardMaterial({ color: 0x14607a, roughness: 0.08, metalness: 0.02, transparent: true, opacity: 0.9, normalMap, normalScale: new THREE.Vector2(0.22, 0.22), depthWrite: false, envMapIntensity: 0.4 });   // (the water's own colour over the sky's glare)
@@ -172,7 +217,7 @@ export class Ocean {
           vec3 wpos0 = (modelMatrix * vec4(position, 1.0)).xyz;
           float fade = 1.0 - smoothstep(700.0, 2600.0, distance(wpos0.xz, uNear));
           vec3 wn; float crest;
-          fade *= shoal(wpos0.xz);
+          fade *= mix(shoal(wpos0.xz), ${CALM_SWELL.toFixed(2)}, swCalm(wpos0.xz));   // (cut down in a harbour)
           vec3 wdisp = gerstner(wpos0.xz, wn, crest) * fade;
           // in the shallows the swell rises into breakers rolling in to the shore (swSurf), and at the shore the
           // water itself runs up the beach and back with each one (swReach) — the beach draws the foam on its edge
@@ -270,7 +315,7 @@ float oLace(vec2 p, float px) {
           float vd = distance(wpos0.xz, uNear);
           // the waves, as fine as the grid is here, calming in shallow water and flat far off (the light still shows them)
           float bd = swDepth(wpos0.xz), nearK = 1.0 - smoothstep(700.0, 1500.0, vd);
-          vec3 wdisp = ocDisp(wpos0.xz, max(1.0, vd * 0.05)) * smoothstep(0.3, 6.0, bd) * (1.0 - smoothstep(1500.0, 4000.0, vd));
+          vec3 wdisp = ocDisp(wpos0.xz, max(1.0, vd * 0.05)) * mix(smoothstep(0.3, 6.0, bd), ${CALM_SWELL.toFixed(2)}, swCalm(wpos0.xz)) * (1.0 - smoothstep(1500.0, 4000.0, vd));   // (cut down in a harbour)
           // in the shallows the swell rises into breakers and bores rolling in to the shore (swSurf), each crest thrown
           // forward as it comes; at the shore the water itself runs up the beach and back with each one (swReach) — the
           // beach draws the foam on its edge
@@ -316,7 +361,7 @@ float oLace(vec2 p, float px) {
         vec2 osl, ost; float ofo;
         ocSurf(vOcP, opx, osl, ost, ofo);
         float osk = smoothstep(0.2, 5.0, od);
-        osl *= mix(0.3, 1.0, osk);
+        osl *= mix(mix(0.3, 1.0, osk), 0.55, swCalm(vOcP));   // (a harbour's: calmer)
         // what boats and splashes did to it (render/water-marks.js): their waves' slopes; below, white water and churned,
         // milky water
         float mkF, mkA; vec2 mkS; mkAt(vOcP, mkF, mkA, mkS);
@@ -440,6 +485,26 @@ float oLace(vec2 p, float px) {
     const t = new THREE.DataTexture(m.px, m.n, m.n, THREE.RGFormat, THREE.HalfFloatType);
     t.magFilter = t.minFilter = THREE.LinearFilter; t.unpackAlignment = 4; t.needsUpdate = true;   // rows of n pairs of half floats, packed
     this['depthTex' + which] = t; this.u['uDepth' + which].value = t; this.u['uDepthRect' + which].value.set(m.x0, m.z0, m.size, m.n);
+    // (and kept here, for the boats: render/sea-probe.js feels the surf over the depth the sea is drawn with)
+    const d = new Float32Array(m.n * m.n); for (let i = 0; i < d.length; i++) d[i] = THREE.DataUtils.fromHalfFloat(m.px[i * 2]);
+    (this.depthCPU ||= {})[which || 'W'] = { d, n: m.n, x0: m.x0, z0: m.z0, size: m.size };
+  }
+  /**
+   * The water's depth at (x, z) as the sea's shaders read it (SWASH_GLSL swMap: the fine map round the camera, else the
+   * wide one, else the whole island's; 50 beyond) — low: as the low sea reads it (the wide map only). Null before any.
+   */
+  depthAt(x, z, low = false) {
+    const D = this.depthCPU;
+    if (!D) return null;
+    const read = (M, u, v) => {
+      const n = M.n, fi = Math.max(0, Math.min(n - 1.001, u * (n - 1))), fj = Math.max(0, Math.min(n - 1.001, v * (n - 1))), i = Math.floor(fi), j = Math.floor(fj), a = fi - i, b = fj - j, o = j * n + i;
+      return (M.d[o] * (1 - a) + M.d[o + 1] * a) * (1 - b) + (M.d[o + n] * (1 - a) + M.d[o + n + 1] * a) * b;
+    };
+    const at = M => (M ? [(x - M.x0) / M.size, (z - M.z0) / M.size] : null);
+    if (!low && D.N) { const [u, v] = at(D.N); if (u > 0.02 && v > 0.02 && u < 0.98 && v < 0.98) return read(D.N, u, v); }
+    if (D.W) { const [u, v] = at(D.W); if (u >= 0 && v >= 0 && u <= 1 && v <= 1) return read(D.W, u, v); }
+    if (!low && D.F) { const [u, v] = at(D.F); if (u >= 0 && v >= 0 && u <= 1 && v <= 1) return read(D.F, u, v); }
+    return 50;
   }
   /** Follow the camera (snapped, so the grid's vertices don't crawl) and set the waves for the weather. */
   update(camPos, weather) {
@@ -576,7 +641,7 @@ export function shoreFoam(material, seaLevel, uSurf, ocean) {
   const prev = material.onBeforeCompile;
   material.onBeforeCompile = (sh, r) => {
     prev?.call(material, sh, r);
-    Object.assign(sh.uniforms, { uSea: { value: seaLevel }, uSurf, uTime: GU.uTime, uDepth: ocean.uDepth, uDepthRect: ocean.uDepthRect, uDepthN: ocean.uDepthN, uDepthRectN: ocean.uDepthRectN, uDepthF: ocean.uDepthF, uDepthRectF: ocean.uDepthRectF });
+    Object.assign(sh.uniforms, CALM, { uSea: { value: seaLevel }, uSurf, uTime: GU.uTime, uDepth: ocean.uDepth, uDepthRect: ocean.uDepthRect, uDepthN: ocean.uDepthN, uDepthRectN: ocean.uDepthRectN, uDepthF: ocean.uDepthF, uDepthRectF: ocean.uDepthRectF });
     sh.vertexShader = 'varying vec3 vWPos;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = `uniform float uSea, uSurf, uTime;\nuniform sampler2D uDepth, uDepthN, uDepthF;\nuniform vec4 uDepthRect, uDepthRectN, uDepthRectF;\nvarying vec3 vWPos;
 ${SWASH_GLSL}

@@ -85,6 +85,10 @@ export class VehicleTraffic {
  choose(l,c,islandWant){const N=l.next;if(!N.length)return null;
   if(!l.graph&&(this.islandCount>=islandWant||this.random()>=.85))return null;
   return N[(this.random()*N.length)|0];}
+ /** Don't block the box: a junction is entered only when the lane beyond it has room for the whole car (the product owner
+  *  2026-10-21: traffic on the drawn roads stood still at junctions — a car went in, stopped on its connector behind a
+  *  queue reaching back to the junction, and held up every crossing move, until queues locked round whole blocks). */
+ room(N,c){const X=N.to;if(!X)return true;const r=X.cars.at(-1);return !r||r.s-r.len/2>=Math.min(c.len+GAP+1,X.len*.5);}
  speed(c,l){return l.graph?Math.min(l.limit*(c.vmax/K[c.k].v)*(c.k===5?.8:1),l.limit*1.05):c.vmax;}
  /** One step. `obstacles`: what traffic must not drive into ({ x, z, len }: cars people drive, people on foot); a car
   *  slows and stops for one ahead of it in its own lane. */
@@ -99,7 +103,7 @@ export class VehicleTraffic {
      let go=true;if(l.signal&&N.kind==='path'&&!N.reserved.has(c.id)){const lt=signalFor(l.signal.plan,l.signal.arm,t);go=lt===2||(lt===3&&N.turn==='left')||(lt===1&&l.len-front<c.v*c.v/6+.5);}
      // a stop sign: stop at the bar (nearly still, within a few metres of the lane's end), then go when the way is free
      if(l.stopSign&&N.kind==='path'&&!N.reserved.has(c.id)&&c.stopped!==l.id){go=false;if(c.v<.35&&l.len-front<4)c.stopped=l.id;}
-     if(go&&N.kind==='path'&&!N.reserved.has(c.id)&&toEnd<=c.v*c.v/(2*DECEL)+c.len/2+4&&N.free(c))N.reserved.add(c.id);
+     if(go&&N.kind==='path'&&!N.reserved.has(c.id)&&toEnd<=c.v*c.v/(2*DECEL)+c.len/2+4&&N.free(c)&&this.room(N,c))N.reserved.add(c.id);
      if(N.kind==='path'&&!N.reserved.has(c.id))gap=Math.min(gap,l.len-front-.5);
      else{const r=N.cars.at(-1);if(r)gap=Math.min(gap,l.len-front+r.s-r.len/2-GAP);}
      cap=Math.sqrt(N.limit*N.limit+2*DECEL*Math.max(0,toEnd));}}

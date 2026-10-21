@@ -135,20 +135,29 @@ void main() {
 }`;
 
 // Probes: the surface's height and slope at a few points (boats riding the waves), packed into bytes for a read back.
+/** How many points the boats' probe answers a frame. */
+export const PROBES = 96;   // (a boat's hull: 35; the moored nearest: 18; a lure, checks)
 const PROBE_FS = /* glsl */`
 precision highp float; precision highp int;
-uniform sampler2D uD0, uD1, uDr0, uDr1;
+uniform sampler2D uD0, uD1, uD2, uDr0, uDr1;
 uniform vec3 uL;
-uniform float uAmp;
-uniform vec4 uPts[32];
+uniform float uAmp, uN, uW2;
+uniform vec4 uPts[96];
 out vec4 oCol;
+// the sea as its mesh is displaced near the camera (OCEAN_GLSL ocDisp with a metre's sample): all three cascades, each
+// as finely as the mesh takes it (2026-10-15: the finest left out, and the others sharper than drawn, the boats rode a
+// sea a little different from the one on the screen)
+float ocLod(float L) { return max(0.0, log2(uN / L)); }
+vec3 disp(vec2 p) {
+  return textureLod(uD0, p / uL.x, ocLod(uL.x)).xyz + textureLod(uD1, p / uL.y, ocLod(uL.y)).xyz + textureLod(uD2, p / uL.z, ocLod(uL.z)).xyz * uW2;
+}
 void main() {
   int i = int(gl_FragCoord.x);
   vec2 p = uPts[i].xy;
-  // (where the displacement moved the water from: one step back, enough for a boat)
-  vec2 d0 = textureLod(uD0, p / uL.x, 0.0).xz + textureLod(uD1, p / uL.y, 0.0).xz;
-  vec2 q = p - d0 * uAmp;
-  float h = (textureLod(uD0, q / uL.x, 0.0).y + textureLod(uD1, q / uL.y, 0.0).y) * uAmp * uPts[i].z;
+  // (where the displacement moved the water from: two steps back)
+  vec2 q = p - disp(p).xz * uAmp;
+  q = p - disp(q).xz * uAmp;
+  float h = disp(q).y * uAmp * uPts[i].z;
   vec2 s = (textureLod(uDr0, q / uL.x, 2.0).xy + textureLod(uDr1, q / uL.y, 3.0).xy) * uAmp * uPts[i].z;
   float hv = clamp(h / 16.0 + 0.5, 0.0, 1.0) * 65535.0;
   oCol = vec4(floor(hv / 256.0) / 255.0, mod(hv, 256.0) / 255.0, clamp(s * 2.0 + 0.5, 0.0, 1.0));
@@ -200,9 +209,10 @@ export class OceanWaves {
     };
     this.state = null; this.fadeS = 1;
     // probes (boats): positions in, heights and slopes out a frame or two later
-    this.probeRT = new THREE.WebGLRenderTarget(32, 1, { depthBuffer: false, stencilBuffer: false });
-    this.probeMat = mat(PROBE_FS, { uD0: { value: null }, uD1: { value: null }, uDr0: { value: null }, uDr1: { value: null }, uL: { value: L }, uAmp: this.uniforms.uOcAmp, uPts: { value: Array.from({ length: 32 }, () => new THREE.Vector4()) } });
-    this.probeBuf = new Uint8Array(32 * 4); this.probeBusy = false; this.probeOut = new Float32Array(32 * 3); this.probeCount = 0;
+    this.probeRT = new THREE.WebGLRenderTarget(PROBES, 1, { depthBuffer: false, stencilBuffer: false });
+    const w2 = this.C >= 3 ? 1 - THREE.MathUtils.smoothstep(1, L.z / 24, L.z / 6) : 0;   // (the finest cascade as the mesh near the camera takes it)
+    this.probeMat = mat(PROBE_FS, { uD0: { value: null }, uD1: { value: null }, uD2: { value: null }, uDr0: { value: null }, uDr1: { value: null }, uL: { value: L }, uAmp: this.uniforms.uOcAmp, uN: { value: n }, uW2: { value: w2 }, uPts: { value: Array.from({ length: PROBES }, () => new THREE.Vector4()) } });
+    this.probeBuf = new Uint8Array(PROBES * 4); this.probeBusy = false; this.probeOut = new Float32Array(PROBES * 3); this.probeCount = 0;
   }
   _gauss(count) {
     const r = rng(this.seed * 7919 + 13), g = new Float32Array(count * 4);
@@ -278,22 +288,22 @@ export class OceanWaves {
     r.setRenderTarget(prevRT); r.xr.enabled = prevXR; r.autoClear = ac;
   }
   /**
-   * Asks for the surface at up to 32 points ({ x, z, k }: k scales the waves there, e.g. the shallows' damping); the
+   * Asks for the surface at up to PROBES points ({ x, z, k }: k scales the waves there, e.g. the shallows' damping); the
    * answers (height, slope x, slope z) arrive a frame or two later in probeOut, in the order asked.
    */
   probe(points) {
-    const P = this.probeMat.uniforms.uPts.value, n = Math.min(32, points.length);
+    const P = this.probeMat.uniforms.uPts.value, n = Math.min(PROBES, points.length);
     for (let i = 0; i < n; i++) P[i].set(points[i].x, points[i].z, points[i].k ?? 1, 0);
     this.probeWant = n;
   }
   _probe(k) {
     if (!this.probeWant || this.probeBusy) return;
     const U = this.probeMat.uniforms, n = this.probeWant;
-    U.uD0.value = this.maps[0][k].textures[0]; U.uD1.value = this.maps[Math.min(1, this.C - 1)][k].textures[0];
+    U.uD0.value = this.maps[0][k].textures[0]; U.uD1.value = this.maps[Math.min(1, this.C - 1)][k].textures[0]; U.uD2.value = this.maps[this.C - 1][k].textures[0];
     U.uDr0.value = this.maps[0][k].textures[1]; U.uDr1.value = this.maps[Math.min(1, this.C - 1)][k].textures[1];
     this._pass(this.probeMat, this.probeRT);
     this.probeBusy = true;
-    this.r.readRenderTargetPixelsAsync(this.probeRT, 0, 0, 32, 1, this.probeBuf).then(() => {
+    this.r.readRenderTargetPixelsAsync(this.probeRT, 0, 0, PROBES, 1, this.probeBuf).then(() => {
       const b = this.probeBuf, o = this.probeOut;
       for (let i = 0; i < n; i++) { o[i * 3] = ((b[i * 4] * 256 + b[i * 4 + 1]) / 65535 - 0.5) * 16; o[i * 3 + 1] = (b[i * 4 + 2] / 255 - 0.5) / 2; o[i * 3 + 2] = (b[i * 4 + 3] / 255 - 0.5) / 2; }
       this.probeCount = n; this.probeBusy = false;

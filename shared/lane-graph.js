@@ -39,13 +39,22 @@ export class PathLane {
   constructor({ id, pts, limit, junction = null, from = null, to = null, turn = 'straight' }) {
     const cum = [0];
     for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
-    Object.assign(this, { id, pts, cum, len: cum.at(-1), limit, junction, from, to, turn, cars: [], next: to ? [to] : [], feeders: [], conflicts: [], reserved: new Set(), kind: 'path', graph: true });
+    // the heading at each point: halfway between the pieces either side (a car's heading turns smoothly along each piece
+    // rather than jumping where two meet: the product owner 2026-10-21, traffic "very choppy on turns")
+    const hx = new Float64Array(pts.length), hz = new Float64Array(pts.length);
+    for (let i = 0; i < pts.length; i++) {
+      let x = 0, z = 0;
+      for (const k of [i, i + 1]) if (k >= 1 && k < pts.length) { const dx = pts[k].x - pts[k - 1].x, dz = pts[k].z - pts[k - 1].z, l = Math.hypot(dx, dz); if (l > 1e-9) { x += dx / l; z += dz / l; } }
+      const l = Math.hypot(x, z); hx[i] = l > 1e-9 ? x / l : 1; hz[i] = l > 1e-9 ? z / l : 0;
+    }
+    Object.assign(this, { id, pts, cum, hx, hz, len: cum.at(-1), limit, junction, from, to, turn, cars: [], next: to ? [to] : [], feeders: [], conflicts: [], reserved: new Set(), kind: 'path', graph: true });
   }
   at(s, c) {
     const { pts, cum } = this; let i = 1;
     if (s <= 0) i = 1; else if (s >= this.len) i = pts.length - 1; else { let lo = 1, hi = pts.length - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] < s) lo = m + 1; else hi = m; } i = lo; }
     const a = pts[i - 1], b = pts[i], seg = cum[i] - cum[i - 1] || 1, t = Math.max(0, Math.min(1, (s - cum[i - 1]) / seg));
-    c.x = a.x + (b.x - a.x) * t; c.y = a.y + (b.y - a.y) * t; c.z = a.z + (b.z - a.z) * t; c.yaw = yawOf(b.x - a.x, b.z - a.z);
+    c.x = a.x + (b.x - a.x) * t; c.y = a.y + (b.y - a.y) * t; c.z = a.z + (b.z - a.z) * t;
+    c.yaw = yawOf(this.hx[i - 1] + (this.hx[i] - this.hx[i - 1]) * t, this.hz[i - 1] + (this.hz[i] - this.hz[i - 1]) * t);
     return c;
   }
   /** Free to enter: nobody on (or committed to) a conflicting connector. */

@@ -117,7 +117,7 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
       while (r.at < r.frames.length) {
         const fr = r.frames[r.at++];
         if (fr.event === 'exec.approval.requested') { r.waiting = fr.payload.id; f.toAll(fr.event, fr.payload); return; }
-        if (fr.event === 'question.requested') { r.waiting = fr.payload.id; f.toSession(r.key, fr.event, fr.payload); return; }
+        if (fr.event === 'question.requested') { r.waiting = fr.payload.id; r.asked = fr.payload; f.toSession(r.key, fr.event, fr.payload); return; }
         if (fr.event === 'question.resolved') continue;   // (sent by question.resolve)
         if (fr.event === 'agent' && fr.payload.stream === 'plan') { const x = f.sessions.get(r.key); x.card = { sessionKey: r.key, revision: 1, updatedAt: Date.now(), markdown: 'Reviewing the docs', steps: fr.payload.data.steps }; }
         if (fr.event === 'exec.approval.resolved') continue;   // (sent by approval.resolve)
@@ -214,6 +214,8 @@ export async function startFakeOpenClaw({ token = 'gw-token', pairing = 'auto', 
         if (r.announced) f.activity(r.key, false, runId);
         return { ok: true, aborted: true, runIds: [runId] };
       },
+      // (the questions waiting for an answer, as OpenClaw lists them for a client that opens later)
+      'question.list': () => ({ questions: [...f.runs.values()].filter(r => r.waiting && r.asked && r.asked.id === r.waiting).map(r => ({ ...r.asked, status: 'pending' })) }),
       'question.resolve': ({ id, answers, cancel }) => {
         f.resolutions.push({ id, answers, cancel });
         for (const [runId, r] of f.runs) if (r.waiting === id) {

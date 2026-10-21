@@ -47,6 +47,20 @@ export class Agents {
     this.group.add(this.chars.group, this.ring);
     this.food = new FoodTable(this.group);   // what people eat and drink, on their tables (render/food-table.js)
   }
+  /** Feet on a drawn road's surface (shared/island-roads.js top: lanes, gutters, curbs and sidewalks as drawn). A walk's
+   *  points carry heights a dozen metres apart, so between them a walker would slope through a curb, and a crossing's
+   *  step down came short of the curb (the product owner 2026-10-21: walkers through the sidewalk's front edge on the
+   *  drawn 4-lane avenues). Within half a metre of the walk's own height only (a bridge's deck over a walker beneath
+   *  it, a dock, a door's steps keep theirs); looked up again once the walker has moved 5 cm. */
+  feet(i, x, y, z) {
+    let t = this.fy[i];
+    if (!(Math.abs(x - this.fx[i]) < 0.05 && Math.abs(z - this.fz[i]) < 0.05)) {
+      const s = this.surfaceAt(x, z);
+      t = s === null || s === undefined ? NaN : s;
+      this.fx[i] = x; this.fz[i] = z; this.fy[i] = t;
+    }
+    return t === t && Math.abs(t - y) < 0.5 ? t : y;
+  }
   ensure(n) {
     if (n <= this.n) return;
     const m = Math.max(n, this.n * 2 || 1024), old = this.n;
@@ -57,10 +71,11 @@ export class Agents {
     this.rx = grow(this.rx, Float32Array); this.ry = grow(this.ry, Float32Array); this.rz = grow(this.rz, Float32Array);
     this.ctx = grow(this.ctx, Int32Array); this.vis = grow(this.vis, Uint8Array); this.use = grow(this.use, Uint8Array);
     this.fl = grow(this.fl, Uint8Array); this.mov = grow(this.mov, Uint8Array);
+    this.fx = grow(this.fx, Float32Array); this.fz = grow(this.fz, Float32Array); this.fy = grow(this.fy, Float32Array);
     this.clip = grow(this.clip, Int16Array); this.pclip = grow(this.pclip, Int16Array);
     this.pph = grow(this.pph, Float32Array); this.lph = grow(this.lph, Float32Array);
     this.fadeT = grow(this.fadeT, Float64Array); this.last = grow(this.last, Int32Array);
-    for (let i = old; i < m; i++) { this.clip[i] = -1; this.ctx[i] = -2; this.last[i] = -9; this.fadeT[i] = -1e9; }
+    for (let i = old; i < m; i++) { this.fx[i] = NaN; this.clip[i] = -1; this.ctx[i] = -2; this.last[i] = -9; this.fadeT[i] = -1e9; }
     this.drawn = new Int32Array(m);
     this.n = m;
   }
@@ -150,6 +165,7 @@ export class Agents {
       }
       this.vis[i] = vis;
       if (!vis) continue;
+      if (c === -1 && this.surfaceAt) { y = this.feet(i, x, y, z); this.ry[i] = y; }
       const cy = y + 0.9;
       let inF = true;
       for (let pl = 0; pl < 6; pl++) { const P = PL[pl], nn = P.normal; if (nn.x * x + nn.y * cy + nn.z * z + P.constant < -1.3) { inF = false; break; } }

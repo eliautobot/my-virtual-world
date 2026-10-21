@@ -273,6 +273,31 @@ one before, in each water's own line.
     (`render/boat-fx.js`); spray is drops drawn as streaks, mist and a splash's crown (`render/spray.js`). The foam's
     pattern is a baked tiling texture (worked out per pixel it cost the phone a third of its frame rate at Medium).
     Dev page: `client/dev/wake.html`; phone timing: `tools-bin/phone-wake.mjs`.
+  - In the water (2026-10-15, redone after the product owner's "it has to feel like a boat going through water, not an
+    object going through potholes"; after J. Kerner's water model for Just Cause 3): the sea's surface at ~35 points
+    of the hull's bottom (`shared/boat-model.js` hullOf: the hull `render/vessels.js` lofts): buoyancy where each is
+    under, damping (against the water's rise at rest, its own at speed), the pressure of water run into (planing lift,
+    a bow driven into a wave), slamming on a fast entry, summed on a hull with mass, the water it carries and inertia.
+    At speed it skims chop shorter than its weight can feel (a big wave still gets through: it flies, lands with a
+    slam); the bow climbs at the hump; on the plane it trims ~4° and rides higher; it floats level at its waterline.
+    The surf the sea draws over the shallows (`render/sea-probe.js` surfAt, the shader's swSurf in JS) lifts it and
+    its breakers shove it toward the shore. The chase camera eases its height. Simulated: at speed in moderate chop
+    a third of the old model's jolting; storms at speed still fly and slam; on the phone it sees the sea the screen
+    draws (2.7 cm).
+  - In the marina (2026-10-15, the product owner: moored boats "go down when the wave comes up … almost like
+    reversed", and a long straight white band off a boat's bow):
+    - The boats read the water's depth from the sea's own depth maps (`render/water.js` depthAt), not the ground's.
+      The marina's dredged basin is drawn as the beach it was, so the surf the boats felt ran out of step with the one
+      on screen.
+    - A marina's basin is a harbour (`render/water.js` setCalm, set by `render/docks.js` for the nearest four): no
+      surf in it, and the open sea's swell comes in at 35% over all of it. The same in the shaders and the probe, faded
+      out over 18 m with rounded corners. On the phone in a storm the moored boats rise and fall 16–26 cm, in step
+      with the water (correlation 0.99, 0.1 s behind).
+    - A boat against a dock stops drifting with the surf (the surf's shove had pinned it to the quay).
+    - The wake keeps a point every stretch the boat moves, however slowly. Creeping in to the dock, its last stretch
+      had reached back to where the boat was last fast: one long straight band. A new trip, or a boat moved at a jump,
+      starts a wake of its own and leaves the old one to fade.
+
   - The water keeps out of the boats' hulls (2026-10-15: waves showed in the cockpit): the water's shaders skip what is
     inside the nearest four hulls (`render/water-marks.js` mkDry: the hull as `render/vessels.js` lofts it, in each
     boat's own frame). Every boat in the water - yours, other players', the moored ones - has a line of foam where it

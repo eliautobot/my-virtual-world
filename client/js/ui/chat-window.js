@@ -1643,7 +1643,8 @@ export function create(a, mgr, o = {}) {
     return `<div class="cw-qs ${pending ? 'pending' : 'done'}" data-key="q:${esc(q.id)}" data-sig="${esc(sigOf(html))}" data-qid="${esc(q.id)}">${html}</div>`;
   }
   async function sendAnswers(card, cancel = false) {
-    const R = W?.run;
+    // (this chat's own run, or one another of its channels runs here: whichever asked)
+    const R = [W?.run, W?.obs].find(x => x && (x.questions || []).some(q => q.id === card.dataset.qid));
     if (!R) return;
     const got = cancel ? {} : answersOf(card);
     if (got.missing) { app.toast?.(`Answer: ${got.missing}`, 'bad'); return; }
@@ -1653,7 +1654,7 @@ export function create(a, mgr, o = {}) {
       const q = R.questions.find(x => x.id === card.dataset.qid);
       if (q) { q.status = cancel ? 'cancelled' : 'answered'; if (!cancel) q.answers = got.answers; }
     } catch (e) { app.toast?.(e.message, 'bad'); card.querySelectorAll('button, input').forEach(x => { x.disabled = false; }); }
-    if (W?.run) paintRun();
+    if (W?.run || W?.obs) paintRun();
   }
   /** Whether this chat's messages can be edited and written again (a provider that keeps the history itself: no). */
   const rewrites = () => W?.can?.caps?.rewrite !== false;

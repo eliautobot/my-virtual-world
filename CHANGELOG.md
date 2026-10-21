@@ -2,6 +2,28 @@
 
 My Virtual World, the self-hosted release (release 2). Release 1 was My Virtual World 1.0.
 
+## v2.0.1 (2026-10-21)
+
+Fixes for the roads drawn with the road tools (every street of the starting map), the boats, and OpenClaw's questions.
+
+- **OpenClaw questions in the chat window, however the turn began**: a question OpenClaw asks during a run started
+  from another channel shows in the chat window watching that session, and Send answer and Skip work for it; questions
+  already waiting when a chat opens show too.
+- **Boats ride the waves**: the hull feels the sea at about 35 points (buoyancy, damping, the pressure of water run
+  into, slamming), so a boat goes through the water like a boat: it skims chop at speed, a big wave makes it fly and
+  land with a slam, and the surf near a shore lifts it and pushes it in. It follows the drawn water within a few
+  centimetres and no longer rolls the wrong way.
+- **Drawn roads: walkers on the curb, not through it**: people outdoors stand on the road surface exactly as drawn,
+  so they step up onto a sidewalk at its curb instead of sinking through its front edge.
+- **Drawn roads: solid curbs for cars**: a car feels the curb and the sidewalk of every drawn road and junction corner
+  (before, the ground under a drawn road was flat from one side to the other).
+- **Drawn roads: a driven car's wheels on the road**: a car a player drives (or has driven) sits on the road as drawn,
+  its tyres no longer sunk into the pavement, and on the ground off the roads.
+- **Drawn roads: no more gridlock, smooth turns**: a car enters a junction only when the lane beyond has room for it
+  (don't block the box), so queues no longer lock up at junctions; cars turn smoothly instead of in small jerks.
+- **Calm marinas**: a marina's basin is a harbour with a gentle swell and no surf, so moored boats rise and fall in
+  step with the water. A boat caught on a dock works itself free, and the long white band off a slow boat's bow is gone.
+
 ## v2.0.0 (2026-10-21)
 
 The self-hosted release of the new My Virtual World: the same city, agents, economy and games as the online world,

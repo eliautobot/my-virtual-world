@@ -195,8 +195,12 @@ export class Traffic {
       if (c.id !== source.id && !_frustum.intersectsSphere(_vehicleBounds) && !(hasShadow && _shadowFrustum.intersectsSphere(_vehicleBounds))) continue;
       const idx = counts[c.k]; if (idx >= this.max) continue; counts[c.k]++;
       const outside = terrain && (c.x < g.minX || c.x > g.maxX || c.z < g.minZ || c.z > g.maxZ);
-      // beyond the city the roads are drawn a little above the graded ground everything runs on: wheels on the road
-      _p.set(c.x, c.y + (outside ? ROAD_TOP : 0), c.z); _s.set(1, 1, 1);
+      // beyond the city the roads are drawn a little above the graded ground everything runs on: wheels on the road.
+      // A car the physics drives (a player's, or one a player used) has its wheels' contacts: each is lifted where it
+      // touches a drawn road (and the body by their mean), so its tyres meet the road as drawn and stay on the ground
+      // off it (the product owner 2026-10-21: an activated car's wheels sank into the drawn roads' pavement)
+      const lift = outside ? this.wheelLifts(c, terrain) : 0;
+      _p.set(c.x, c.y + lift, c.z); _s.set(1, 1, 1);
       _q.set(c.rotation.x, c.rotation.y, c.rotation.z, c.rotation.w);
       if (outside && Math.abs(c.rotation.x) < 1e-6 && Math.abs(c.rotation.z) < 1e-6) groundTilt(_q, c, terrain, KINDS[c.k].L / 2, KINDS[c.k].W / 2);
       _q.multiply(_bridge); _m.compose(_p, _q, _s);
@@ -208,15 +212,35 @@ export class Traffic {
         const state = c.wheels[w], steering = a.wheels[w].centre[2] > 0 ? c.steering : 0;
         composeVehicleWheelMatrix(_m, a.wheels[w].centre, state.spin, _wheelPose, steering, a.wheel.radius + .06 - state.suspensionLength);
         const wheelBox = a.wheel.geometry.boundingBox;
-        groundVehicleWheel(_wheelPose, state, a.wheel.radius, Math.max(Math.abs(wheelBox.min.x), Math.abs(wheelBox.max.x)));
+        groundVehicleWheel(_wheelPose, outside ? this.liftedWheel(state, w) : state, a.wheel.radius, Math.max(Math.abs(wheelBox.min.x), Math.abs(wheelBox.max.x)));
         this.wheelMeshes[c.k].setMatrixAt(idx * 4 + w, _wheelPose);
       }
-      _p.set(c.x, outside ? c.y + ROAD_TOP : blockAt(this.g, c.x, c.z) ? GROUND_Y : 0, c.z); _beamQ.setFromAxisAngle(_up, c.yaw + Math.PI / 2); _beamPose.compose(_p, _beamQ, _s);
+      _p.set(c.x, outside ? c.y + lift : blockAt(this.g, c.x, c.z) ? GROUND_Y : 0, c.z); _beamQ.setFromAxisAngle(_up, c.yaw + Math.PI / 2); _beamPose.compose(_p, _beamQ, _s);
       this.beamMeshes[c.k].setMatrixAt(idx, _beamPose); this.visibleCars.push({ id: c.id, k: c.k, idx });
     }
     this.batches.forEach((parts, k) => parts.forEach(({mesh: im}) => { im.count = counts[k]; uploadUsed(im.instanceMatrix, im.count); uploadUsed(im.instanceColor, im.count); }));
     this.wheelMeshes.forEach((im, k) => { im.count = counts[k] * 4; uploadUsed(im.instanceMatrix, im.count); });
     this.beamMeshes.forEach((im, k) => { im.count = counts[k]; im.visible = GU.uNight.value > .01; if (im.visible) uploadUsed(im.instanceMatrix, im.count); });
+  }
+  /** How far a car is drawn above its physics pose beyond the city (ROAD_TOP on a drawn road, 0 off one): per wheel
+   *  from its contact (kept for liftedWheel), the body by their mean; a car with no contacts (traffic on its lane) the
+   *  road's. */
+  wheelLifts(c, terrain) {
+    const R = terrain?.ground?.island.roads, L = this._lifts || (this._lifts = [0, 0, 0, 0]);
+    let n = 0, sum = 0;
+    for (let w = 0; w < 4; w++) {
+      const st = c.wheels?.[w], p = st?.contact ? st.point : null;
+      L[w] = p && R ? (R.top(p.x, p.z) !== null ? ROAD_TOP : 0) : ROAD_TOP;
+      if (p) { n++; sum += L[w]; }
+    }
+    return n ? sum / n : ROAD_TOP;
+  }
+  /** A wheel's contact raised by its lift (wheelLifts), for groundVehicleWheel. */
+  liftedWheel(state, w) {
+    if (!state?.contact || !state.point) return state;
+    const o = (this._lw || (this._lw = [0, 1, 2, 3].map(() => ({ contact: true, point: { x: 0, y: 0, z: 0 }, normal: null }))))[w];
+    o.point.x = state.point.x; o.point.y = state.point.y + this._lifts[w]; o.point.z = state.point.z; o.normal = state.normal;
+    return o;
   }
   update(dt) {
     if (this.app.driving?.ready) { this.networked = true; this.renderNetwork(); return; }

@@ -15,8 +15,9 @@ import { Harbour } from '../server/world/boats.js';
 
 const DT = 1 / 60;
 const wave = (A, L, dir = 0) => { const k = 2 * Math.PI / L, w = Math.sqrt(9.81 * k), dx = Math.sin(dir), dz = Math.cos(dir); return (t, x, z) => A * Math.sin(k * (x * dx + z * dz) - w * t); };
-/** An open sea: the surface (a function of t, x, z) under the hull, its depth everywhere d. */
+/** An open sea: the surface (a function of t, x, z) at the hull's points, its depth everywhere d. */
 const sea = (s, surf = () => 0, d = 30, extra = {}) => ({
+  water: pts => pts.map(p => surf(s.t, p.x, p.z)),
   plane: (x, z, h) => fitPlane(s.S, s.S.probes.map(([px, pz]) => surf(s.t, x + px * Math.cos(h) + pz * Math.sin(h), z - px * Math.sin(h) + pz * Math.cos(h)))),
   depth: typeof d === 'function' ? d : () => d, ...extra,
 });
@@ -63,6 +64,40 @@ test('it rides the swell — heaving, pitching, rolling with it, never over; a s
     const calm = newBoat(type, 0, 0, 0, Math.PI), cw = wave(0.35, 140, 0);
     assert.ok(!run(calm, 20, { leverTo: 1 }, sea(calm, (t, x, z) => cw(t, x, z))).includes('slam'), `${type}: a long, low swell rides smooth`);
   }
+});
+
+test('it floats level at its waterline; dropped in, it settles in a few bobs', () => {
+  for (const type of Object.keys(BOATS)) {
+    const s = newBoat(type, 0, 0, 0, 0.4); run(s, 10, {}, sea(s));
+    assert.ok(Math.abs(s.y + 0.04) < 0.02 && Math.abs(s.pitch) < 0.01 && Math.abs(s.roll) < 0.01, `${type}: level at its waterline (y ${s.y.toFixed(3)}, pitch ${(s.pitch * 57).toFixed(1)}°)`);
+    s.y += 0.3; s.vy = 0; let bobs = 0, prev = s.y;
+    for (let k = 0; k < 4 / DT; k++) { stepBoat(s, {}, sea(s), DT); if ((prev + 0.04) * (s.y + 0.04) < 0) bobs++; prev = s.y; }
+    assert.ok(bobs >= 1 && bobs <= 8 && Math.abs(s.y + 0.04) < 0.03, `${type}: settles (${bobs} crossings, y ${s.y.toFixed(3)})`);
+  }
+});
+
+test('it goes through the water like a boat: rides a long swell at rest, skims short chop at speed, its bow up on the plane', () => {
+  for (const type of Object.keys(BOATS)) {
+    const sd = a => { const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length); };
+    // at rest on a long swell: up and down with it
+    const rest = newBoat(type, 0, 0, 0, 0.3), swell = wave(0.5, 80, 0); run(rest, 15, {}, sea(rest, swell));
+    const ys = [], ws = [];
+    for (let k = 0; k < 15 / DT; k++) { stepBoat(rest, {}, sea(rest, swell), DT); ys.push(rest.y); ws.push(swell(rest.t, rest.x, rest.z)); }
+    const ratio = sd(ys) / sd(ws);
+    assert.ok(ratio > 0.8 && ratio < 1.25, `${type}: rides the swell (${ratio.toFixed(2)} of its rise and fall)`);
+    // at speed through short chop: it skims it — moving far less than the water, no jolting
+    const fast = newBoat(type, 0, 0, 0, 0.3), chop = wave(0.12, 7, 2.1); run(fast, 25, { leverTo: 1 }, sea(fast, chop));
+    const fy = [], acc = []; let vy0 = fast.vy;
+    for (let k = 0; k < 10 / DT; k++) { stepBoat(fast, { leverTo: 1 }, sea(fast, chop), DT); fy.push(fast.y); acc.push((fast.vy - vy0) / DT); vy0 = fast.vy; }
+    const rms = Math.sqrt(acc.reduce((q, a) => q + a * a, 0) / acc.length);
+    assert.ok(sd(fy) < 0.12 * 0.707 * 0.6 && rms < 1.2, `${type}: skims the chop (heave ${sd(fy).toFixed(3)} m, jolts ${rms.toFixed(2)} m/s²)`);
+    assert.ok(fast.pitch > 0.02 && fast.pitch < 0.15 && fast.y > -0.02, `${type}: on the plane, bow up ${(fast.pitch * 57).toFixed(1)}°, risen to ${fast.y.toFixed(2)}`);
+  }
+});
+
+test('the surf shoves it toward the shore', () => {
+  const s = newBoat('coastal', 0, 0, 0, 0); run(s, 6, {}, sea(s, () => 0, 30, { push: () => ({ x: 1.2, z: 0 }) }));
+  assert.ok(s.x > 3, `carried toward the shore (${s.x.toFixed(1)} m)`);
 });
 
 test('the shallows ground it, the docks stop it, at anchor it stays put in a wind', () => {

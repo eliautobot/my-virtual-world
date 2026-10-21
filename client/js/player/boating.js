@@ -23,12 +23,12 @@ import { S, bus } from '../core/state.js';
 import { h, esc, isTouch } from '../core/util.js';
 import { auth } from '../core/auth.js';
 import { CLIP, CLIP_DUR, CLIP_STRIDE } from '../render/anim.js';
-import { BOATS, newBoat, stepBoat, fitPlane, boatQuat, boatPoint, knots, walkDeck, spotNear } from '/shared/boat-model.js';
+import { BOATS, newBoat, stepBoat, hullOf, boatQuat, boatPoint, knots, walkDeck, spotNear } from '/shared/boat-model.js';
 import { moduleDecks, moduleBoxes, modulesOf, WORLD_KINDS } from '/shared/world-modules.js';
 import { WORLD_HALF } from '/shared/island-chain.js';
 import { boatParts, boatGeometry, HULL_FORM } from '../render/boat-models.js';
 import { hullAt } from '../render/water-marks.js';
-import { heights, waterUnder } from '../render/sea-probe.js';
+import { heights, waterUnder, probeFrames, surfPush } from '../render/sea-probe.js';
 import { BoatFx } from '../render/boat-fx.js';
 
 const DT = 1 / 60, SEND_MS = 100, BOARD_D = 6, WALK = 1.35, REACH = 0.8;
@@ -58,7 +58,7 @@ export function init(a) {
   buildTouch(document.getElementById('ui'));
   app.boating = {
     get active() { return B.active; }, get type() { return B.type; }, get module() { return B.module; }, get id() { return B.id; },
-    state: () => B.s, frame,
+    state: () => B.s, frame, envNow: () => (B.s ? envFor(B.s) : null),   // (envNow: the water and docks as it feels them: checks)
     /** On deck (off the wheel): { x, y, z, yaw, fish } in the boat's frame, or null at the wheel. */
     get walking() { return B.walk; },
     /** The spot being fished from ({ i, x, y, z, yaw, name }: shared/boat-model.js deck spots), or null. */
@@ -117,7 +117,7 @@ function start(m) {
   const P = app.player, Sx = BOATS[m.type], pose = m.pose, w = waterUnder(pose.x, pose.z);
   B.s = newBoat(m.type, pose.x, w ? w.level : pose.y, pose.z, pose.h, app.fishStore?.boatKit?.() || {});   // (your engine and anchor upgrades, the seamanship skill: play/fish-store.js)
   if (m.resumed) { B.s.y = pose.y; B.s.pitch = pose.p || 0; B.s.roll = pose.r || 0; }
-  Object.assign(B, { active: true, id: m.id, type: m.type, module: m.module, acc: 0, sentAt: 0, leaving: false, ending: false, lastT: 0, water: w, walk: null, clip: CLIP.helm, pclip: CLIP.helm, camH: null });
+  Object.assign(B, { active: true, id: m.id, type: m.type, module: m.module, acc: 0, sentAt: 0, leaving: false, ending: false, lastT: 0, water: w, walk: null, clip: CLIP.helm, pclip: CLIP.helm, camH: null, camY: null });
   B.prev = { p: new THREE.Vector3(B.s.x, B.s.y, B.s.z), q: new THREE.Quaternion() };
   B.render = { p: B.prev.p.clone(), q: new THREE.Quaternion() };
   B.keys.clear();
@@ -194,16 +194,20 @@ function autopilot(s) {
 }
 /** The water as the boat feels it: its surface under the hull (the probe), the depth, the docks, the wind, the edge. */
 function envFor(s) {
-  const Sx = s.S, ch = Math.cos(s.heading), sh = Math.sin(s.heading), w = B.water || waterUnder(s.x, s.z);
-  const pts = Sx.probes.map(([px, pz]) => ({ x: s.x + px * ch + pz * sh, z: s.z - px * sh + pz * ch }));
-  const hs = heights(`boat:${B.id}`, pts, w ? w.level : s.y, !!w?.lake);
-  const plane = fitPlane(Sx, hs) || { h: w ? w.level : s.y, sf: 0, ss: 0 };
-  const T = app.terrain, level = w ? w.level : s.y;
+  const w = B.water || waterUnder(s.x, s.z);
+  const T = app.terrain, level = w ? w.level : s.y, lake = !!w?.lake;
+  // the water at each of the hull's points (shared/boat-model.js hullOf), asked where they'll be when the answers come
+  // (the probe's are a few frames old: render/sea-probe.js)
+  const ahead = probeFrames(lake) * (B.real || 1 / 60), vx = (Math.sin(s.heading) * s.u - Math.cos(s.heading) * s.v) * ahead, vz = (Math.cos(s.heading) * s.u + Math.sin(s.heading) * s.v) * ahead;
+  const water = pts => heights(`boat:${B.id}`, pts.map(p => ({ x: p.x + vx, z: p.z + vz })), level, lake);
+  // asked every frame, stepped or not (a frame with no step of its own let the probe drop its points: for a few frames
+  // after, the boat felt a stand-in sea — jumps in the water under it, 2026-10-15)
+  water(hullOf(s.S).el.map(e => boatPoint(s, e.x, e.y, e.z)));
   const now = performance.now();
   if (now - B.solidsAt > 1000) { B.solidsAt = now; B.solids = nearSolids(s.x, s.z); }   // the docks within reach: rectangles to hit
   const W = app.terrain?.weather?.wind, wind = W ? { x: Math.cos(W.dir) * W.speed, z: Math.sin(W.dir) * W.speed } : { x: 0, z: 0 };
   return {
-    plane: () => plane, level, wind,
+    water, level, wind, push: lake ? null : (x, z) => surfPush(x, z, level),   // (the surf's shove toward the shore)
     depth: (x, z) => { const ww = T?.ground?.water(x, z); return ww ? Math.max(0, ww.level - T.pointHeight(x, z)) : 0; },
     solid: (x, z) => B.solids.some(r => Math.abs((x - r.x) * r.c - (z - r.z) * r.n) <= r.hw && Math.abs((x - r.x) * r.n + (z - r.z) * r.c) <= r.hd),
     limit: (x, z) => Math.abs(x) > WORLD_HALF - 250 || Math.abs(z) > WORLD_HALF - 250,
@@ -250,7 +254,10 @@ function frame(P, dt, t) {
   const cam = app.cam;
   if (!W) {   // at the wheel: the chase camera behind and a little above, turning with the boat
     const fx = Math.sin(s.heading), fz = Math.cos(s.heading);
-    cam.follow = () => ({ x: R.p.x + fx * 2, y: R.p.y + 1.6, z: R.p.z + fz * 2 });
+    // (its height eased: the camera rides the swell with it but not every bump and slam — the way boat games hold the
+    // view steady, 2026-10-15)
+    B.camY = B.camY == null ? R.p.y : B.camY + (R.p.y - B.camY) * (1 - Math.exp(-(B.real || 1 / 60) * 2.2));
+    cam.follow = () => ({ x: R.p.x + fx * 2, y: B.camY + 1.6, z: R.p.z + fz * 2 });
     cam.goalYaw = cam.yaw + angDiff(cam.yaw, s.heading + Math.PI);
   } else {   // on deck: following you, free to look about — and swinging round with the boat as it turns
     cam.follow = () => ({ x: hm.x, y: hm.y + 1.15, z: hm.z });

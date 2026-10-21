@@ -482,6 +482,50 @@ test('live activity: a run on another channel in a watched session reaches whoev
   assert.equal((await owner.post('/api/providers/watch', { agent, session: chat.id, on: false })).json.ok, true);
 });
 
+test('questions in a watched session from a run that isn\'t ours: shown to whoever watches it, answered by them; those asked before the page opened come when it does', async () => {
+  const chat = await newChat();
+  await run(owner, chat.id, 'hello');
+  const key = (await owner.get(`/api/chat/recent?agent=${agent}`)).json.sessions.find(x => x.id === chat.id).key;
+  const ws = new (await import('ws')).default(s.url.replace('http', 'ws') + '/ws', { headers: { cookie: owner.cookie, origin: s.url } });
+  const frames = [];
+  ws.on('message', d => { try { const m = JSON.parse(String(d)); if (m.t === 'chat' && m.observed) frames.push(m); } catch { /* not JSON */ } });
+  await new Promise(r => ws.once('open', r));
+  const asked = async () => { for (let i = 0; i < 100; i++) { const f = frames.find(m => m.event && m.event.type === 'question.requested'); if (f) return f; await sleep(50); } return null; };
+  const ended = async ext => { for (let i = 0; i < 100; i++) { if (frames.some(m => m.run === ext && m.event && m.event.type === 'run.end')) return true; await sleep(50); } return false; };
+  try {
+    // 1. the page has the session open; another channel's run asks
+    assert.equal((await owner.post('/api/providers/watch', { agent, session: chat.id })).json.ok, true);
+    await sleep(300);
+    const ext = gw.external(key, 'question');
+    const q = await asked();
+    assert.ok(q, 'the question reaches the page');
+    assert.equal(q.run, ext); assert.equal(q.session, chat.id);
+    assert.deepEqual(q.event.questions.map(x => x.question), ['Which colour do you like?']);
+    assert.equal((await ann.post('/api/providers/questions', { run: ext, question: q.event.questionId, answers: { colour: ['Blue'] } })).status, 404, 'nobody else answers it');
+    assert.equal((await owner.post('/api/providers/questions', { run: ext, question: q.event.questionId, answers: { colour: ['Blue', 'Red'] } })).status, 400, 'checked as for its own runs: one answer only');
+    const ok = await owner.post('/api/providers/questions', { run: ext, question: q.event.questionId, answers: { colour: ['Blue'] } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.deepEqual(gw.resolutions.at(-1).answers, { answers: { colour: ['Blue'] } }, 'question.resolve as OpenClaw takes it');
+    assert.ok(await ended(ext), 'the run goes on to its end');
+    assert.equal((await owner.post('/api/providers/watch', { agent, session: chat.id, on: false })).json.ok, true);
+    // 2. it asks with nobody watching; the page that opens the session afterwards gets it (question.list)
+    frames.length = 0;
+    const ext2 = gw.external(key, 'question');
+    await sleep(400);
+    assert.equal(frames.length, 0, 'nothing while nobody watches');
+    assert.equal((await owner.post('/api/providers/watch', { agent, session: chat.id })).json.ok, true);
+    const q2 = await asked();
+    assert.ok(q2, 'the waiting question comes when the page opens');
+    assert.equal(q2.run, ext2);
+    assert.equal((await owner.post('/api/providers/questions', { run: ext2, question: q2.event.questionId, answers: { colour: ['Red'] } })).status, 200);
+    assert.deepEqual(gw.resolutions.at(-1).answers, { answers: { colour: ['Red'] } });
+    assert.ok(await ended(ext2), 'that run goes on to its end too');
+  } finally {
+    ws.close();
+    await owner.post('/api/providers/watch', { agent, session: chat.id, on: false });
+  }
+});
+
 test('an answer\'s media: what the agent attached, at addresses signed for its chat, served only to who may read it', async () => {
   const chat = await newChat();
   const r = await run(owner, chat.id, 'Show me [[media]]');

@@ -32,7 +32,8 @@ export class LinkChat {
     this.subs = new Map();     // session key → { refs, sub, agentId, client }
     this.prefs = new Map();    // session key → { model, effort } last applied
     this.watched = new Map();  // session key → { agentId, agent, until }: sessions a page has open (live activity from other channels)
-    this.foreign = new Map();  // a run in a watched session that isn't ours → { tr, key, at }
+    this.foreign = new Map();  // a run in a watched session that isn't ours → { tr, key, at, asking }
+    this.asked = new Map();    // a question shown in a watched session from a run that isn't ours → { run, key }
     this.done = new Map();     // our runs that ended lately → when (a late frame of one is never taken for another channel's)
     this.downTimer = null;
   }
@@ -133,7 +134,11 @@ export class LinkChat {
       r?.tr.feed(frame);
       return;
     }
-    if (!runId) { if (evt.event === 'chat' || evt.event === 'agent') this.observe(evt); return; }
+    if (!runId) {
+      if (evt.event === 'chat' || evt.event === 'agent') this.observe(evt);
+      else if (evt.event === 'question.requested' || evt.event === 'question.resolved') this.observeQuestion(evt);
+      return;
+    }
     const r = this.runs.get(runId);
     if (!r) return;
     if (/\.approval\.requested$/.test(evt.event) && p.id) r.approvals.set(String(p.id), evt.event.startsWith('plugin') ? 'plugin' : 'exec');
@@ -148,32 +153,72 @@ export class LinkChat {
     if (w.until < Date.now()) { this.unwatch({ sessionKey: key }); return; }
     const id = normalizeSessionProjectionRunId(p.runId) || String(p.runId);
     if (this.done.has(id) || this.alias.has(id)) return;
+    // (only a run's beginning starts following it: a heartbeat's frames, say, are not a conversation to show)
+    if (!this.foreign.has(id) && evt.event === 'agent' && p.isHeartbeat) return;
+    const o = this.follow(key, w, id);
+    o.tr.feed(evt);
+  }
+  /** Another channel's run in a watched session, followed (made when it is first seen). */
+  follow(key, w, id) {
     const now = Date.now();
-    // (one that went quiet — its end missed — is let go: a run is never shown going on for ever)
-    for (const [fid, f] of this.foreign) if (now - f.at > FOREIGN_QUIET_MS) { this.foreign.delete(fid); f.tr.feed({ event: 'chat', payload: { state: 'error', errorMessage: 'Lost track of this run' } }); }
+    // (one that went quiet — its end missed — is let go: a run is never shown going on for ever; one waiting for an answer is not quiet)
+    for (const [fid, f] of this.foreign) if (now - f.at > FOREIGN_QUIET_MS && !f.asking.size) { this.foreign.delete(fid); f.tr.feed({ event: 'chat', payload: { state: 'error', errorMessage: 'Lost track of this run' } }); }
     let o = this.foreign.get(id);
     if (!o) {
-      // (only a run's beginning starts following it: a heartbeat's frames, say, are not a conversation to show)
-      if (evt.event === 'agent' && p.isHeartbeat) return;
       const base = { kind: this.kind, connectionId: this.link.connectionId, agentKey: String(w.agent || w.agentId), sessionKey: key, runId: id };
-      o = { key, at: now, tr: new RunTranslator({ emit: e => this.out(base, e, () => this.foreign.delete(id), () => [id]) }) };
+      o = { key, at: now, asking: new Set(), tr: new RunTranslator({ emit: e => this.out(base, e, () => this.foreign.delete(id), () => [id]) }) };
       this.foreign.set(id, o);
       this.emit({ ...base, type: 'run.start' });
     }
     o.at = now;
+    return o;
+  }
+  /** The agent asks in a watched session, in a run that isn't ours (another channel's, a job's), or asked before the page
+   *  opened (question.list): shown with the run it belongs to, for whoever has the session open to answer. */
+  observeQuestion(evt) {
+    const p = evt.payload, key = p.sessionKey || (p.id && this.asked.get(String(p.id))?.key), w = key && this.watched.get(key);
+    if (!w || !p.id) return;
+    const qid = String(p.id), was = this.asked.get(qid);
+    const id = was ? was.run : p.runId ? normalizeSessionProjectionRunId(p.runId) || String(p.runId) : `question-${qid}`;
+    if (evt.event === 'question.requested') {
+      if (was) return;   // (shown already: the list brings what the event brought)
+      if (this.done.has(id) || this.alias.has(id)) return;
+      this.asked.set(qid, { run: id, key });
+    } else this.asked.delete(qid);
+    const o = this.follow(key, w, id);
+    if (evt.event === 'question.requested') o.asking.add(qid); else o.asking.delete(qid);
     o.tr.feed(evt);
   }
+  /** The questions waiting in a session (OpenClaw's question.list): to the page that opens it, as if they were just asked. */
+  async pendingQuestions(sessionKey) {
+    let r;
+    try { r = await this.link.request('question.list', {}); } catch { return 0; }
+    let n = 0;
+    for (const q of (r && Array.isArray(r.questions) ? r.questions : [])) {
+      if (!q || q.sessionKey !== sessionKey || (q.status && q.status !== 'pending')) continue;
+      if (q.runId && this.ours(q.runId)) continue;   // (one of our runs: its page has it from the run itself)
+      this.observeQuestion({ event: 'question.requested', payload: q });
+      n++;
+    }
+    return n;
+  }
   /** A page has a session open: its live activity is followed for it (a lease, renewed while it stays open). */
-  async watch({ agentKey, agent, sessionKey, ms = 150000 }) {
+  async watch({ agentKey, agent, sessionKey, ms = 150000, pending = false }) {
     if (!sessionKey || sessionKey === LAZY) return { ok: false };
     const was = this.watched.get(sessionKey);
     this.watched.set(sessionKey, { agentId: String(agentKey || ''), agent: String(agent || agentKey || ''), until: Date.now() + Math.min(600000, ms) });
     if (!was) { try { await this.hold(sessionKey, String(agentKey || '')); } catch (e) { this.watched.delete(sessionKey); throw e; } }
+    // (a page newly open on it: the agent's questions already waiting there — a page that opens later must still be able to answer)
+    if (!was || pending) {
+      if (pending) for (const [qid, a] of this.asked) if (a.key === sessionKey) this.asked.delete(qid);   // (shown again, to the new page)
+      await this.pendingQuestions(sessionKey);
+    }
     return { ok: true };
   }
   unwatch({ sessionKey }) {
     if (!this.watched.has(sessionKey)) return { ok: true };
     this.watched.delete(sessionKey);
+    for (const [qid, a] of this.asked) if (a.key === sessionKey) this.asked.delete(qid);
     this.letGo(sessionKey);
     return { ok: true };
   }

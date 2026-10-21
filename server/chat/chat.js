@@ -427,8 +427,10 @@ export class Chat {
       return { ok: true };
     }
     if (!w) { w = new Map(); this.watchers.set(k, w); }
+    // (this account newly opening it: the provider sends the questions already waiting there, for it to answer)
+    const fresh = !w.has(P.account.id) || w.get(P.account.id).sessionId !== s.id;
     w.set(P.account.id, { agentId: a.id, sessionId: s.id, until: this.now() + 150000 });
-    await this.call(this.linkOf(a), 'watch', { agent: a.key, agentKey: a.nativeId || a.key, sessionKey: s.key, ms: 150000 });
+    await this.call(this.linkOf(a), 'watch', { agent: a.key, agentKey: a.nativeId || a.key, sessionKey: s.key, ms: 150000, ...(fresh ? { pending: true } : {}) });
     return { ok: true };
   }
   /**
@@ -663,6 +665,9 @@ export class Chat {
       if (e.replace && typeof e.text === 'string') o.partial = e.text; else if (e.text) o.partial += e.text;
       if (e.thinking) o.thinking += e.thinking;
     } else o.seq += 1;
+    // (what it asks there: answered by whoever watches the session, its connection's managers — answer())
+    if (e.type === 'question.requested') (o.questions = o.questions || new Map()).set(e.questionId, e.questions);
+    else if (e.type === 'question.resolved') o.questions?.delete(e.questionId);
     if (e.type === 'run.end') this.observed.delete(e.runId);
     if (!w.size) this.watchers.delete(k);
   }
@@ -723,7 +728,14 @@ export class Chat {
   /** Answers what the agent asks (Agent Providers: its questions): answers { questionId: [choices or words] }, or cancel.
    *  Only whoever started the run (for a visitor's, the agent's owner) answers, as with approvals. */
   async answer(P, runId, questionId, { answers = null, cancel = false } = {}) {
-    const run = this.approvalRun(P, runId);
+    let run = this.runs.has(String(runId)) ? this.approvalRun(P, runId) : null;
+    if (!run) {
+      // (a run another of its channels started, in a session this account watches — its connection's manager: the
+      // question shown there is theirs to answer, as in the provider's own app)
+      const o = this.observed.get(String(runId)), w = o && this.watchers.get(o.key), x = w && P.account && w.get(P.account.id);
+      if (!o || !x || x.until < this.now()) throw new ChatError(404, 'not_found', 'No such run');
+      run = { agentId: x.agentId, questions: o.questions };
+    }
     const { a } = this.need(P, run.agentId);
     const asked = run.questions && run.questions.get(String(questionId ?? ''));
     if (!asked) throw new ChatError(404, 'not_found', 'No such question (it may have been answered already)');

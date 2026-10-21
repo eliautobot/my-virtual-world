@@ -129,6 +129,8 @@ async function boot() {
   const net = app.net = new Net();
   const agents = app.agents = new Agents(net, stage);
   agents.refreshWorld(S.world);
+  // walkers' feet on the drawn roads beyond the city (render/agents.js feet); the city's streets keep the city's levels
+  agents.surfaceAt = (x, z) => { const T = app.terrain, H = T?.hole; if (H && x > H.x0 && x < H.x1 && z > H.z0 && z < H.z1) return null; return T?.ground?.island.roads?.top(x, z) ?? null; };
   S.people.forEach((p, i) => agents.setAppearance(i, p.a));
   stage.scene.add(agents.group);
   // what is picked or under the pointer, outlined (render/outline.js): people, buildings, the piece being edited

@@ -17,7 +17,9 @@ import { DOCKS, waterOf, rampOf, toWorldAt } from '/shared/dock-layout.js';
 import { modulesOf, boatSlips } from '/shared/world-modules.js';
 import { boatGeometry, HULL_FORM } from './boat-models.js';
 import { hullAt, waterMarks } from './water-marks.js';
-import { boatQuat } from '/shared/boat-model.js';
+import { boatQuat, BOATS } from '/shared/boat-model.js';
+import { heights, waterUnder } from './sea-probe.js';
+import { setCalm, CALM_N } from './water.js';
 
 const FAR = 3500;   // m: docks farther than this are not drawn
 const SURF = { walk: '#b9b4aa', asphalt: '#4b4e53', pavers: '#bfae94', gravel: '#a39882' };
@@ -40,20 +42,44 @@ export function init(a) {
     hide(id, on = true) { if (on) away.add(id); else away.delete(id); },
     /** The server's list of boats out of their slips: those slips drawn empty. */
     setAway(ids) { away.clear(); for (const i of ids) away.add(i); },
+    /** How a moored boat rides just now: { y, p, r } (checks). */
+    rideOf: id => ride.get(id) || null,
   };
 }
-/** The boats in their slips: one instanced mesh a type, bobbing gently on the basin's ripples (drawn only). */
+/**
+ * The boats in their slips: one instanced mesh a type. The nearest few ride the sea the screen shows (2026-10-15 — the
+ * product owner: "the boats need to react properly to waves"): its height at the bow and either side of the stern (the
+ * probe the boats out use, render/sea-probe.js), they rise, pitch and roll with it, a little behind (their weight); the
+ * rest bob gently. Drawn only.
+ */
+const ride = new Map();   // a slip → { y, p, r, w (its water: { level, lake }) }
+let rideT = null;
 function mooredBoats(t) {
-  const n = {};
+  const n = {}, dt = rideT === null ? 0 : Math.min(0.2, Math.max(0, t - rideT)), c = app.stage.camera.position;
+  rideT = t;
+  const dist = s => Math.hypot(s.x - c.x, s.z - c.z);
+  const near = new Set(slips.filter(s => !away.has(s.id) && dist(s) < 300).sort((a, b) => dist(a) - dist(b)).slice(0, 6).map(s => s.id));
+  const k = 1 - Math.exp(-dt * 8);
   for (const s of slips) {
-    if (away.has(s.id)) continue;
+    if (away.has(s.id)) { ride.delete(s.id); continue; }
     let im = boats[s.kind];
     if (!im) { im = boats[s.kind] = new THREE.InstancedMesh(boatGeometry(s.kind), gmat, 10); im.count = 0; im.castShadow = true; im.frustumCulled = false; im.name = `moored-${s.kind}`; group.add(im); }
-    const k = n[s.kind] || 0; if (k >= im.instanceMatrix.count) continue;
-    const ph = s.x * 0.37 + s.z * 0.21, q = boatQuat({ heading: s.yaw, pitch: Math.sin(t * 0.9 + ph) * 0.012, roll: Math.sin(t * 0.7 + ph * 1.3) * 0.025 });
-    im.setMatrixAt(k, _m.compose(_p.set(s.x, s.y + Math.sin(t * 1.1 + ph) * 0.04, s.z), _q.set(q.x, q.y, q.z, q.w), _s));
+    const j = n[s.kind] || 0; if (j >= im.instanceMatrix.count) continue;
+    let st = ride.get(s.id);
+    if (!st) ride.set(s.id, st = { y: s.y - 0.04, p: 0, r: 0, w: waterUnder(s.x, s.z) });
+    const ph = s.x * 0.37 + s.z * 0.21;
+    let yT, pT, rT;
+    if (near.has(s.id) && st.w) {
+      const F = BOATS[s.kind], ch = Math.cos(s.yaw), sh = Math.sin(s.yaw), P = ([px, pz]) => ({ x: s.x + px * ch + pz * sh, z: s.z - px * sh + pz * ch });
+      const h = heights(`moor:${s.id}`, [[0, F.L * 0.42], [F.B * 0.4, -F.L * 0.4], [-F.B * 0.4, -F.L * 0.4]].map(P), st.w.level, st.w.lake);
+      const aft = (h[1] + h[2]) / 2;   // (port and starboard aft: x is to port)
+      yT = (h[0] + aft) / 2 - 0.04; pT = Math.atan((h[0] - aft) / (F.L * 0.82)); rT = -Math.atan((h[2] - h[1]) / (F.B * 0.8));
+    } else { yT = s.y - 0.04 + Math.sin(t * 1.1 + ph) * 0.04; pT = Math.sin(t * 0.9 + ph) * 0.012; rT = Math.sin(t * 0.7 + ph * 1.3) * 0.025; }
+    st.y += (yT - st.y) * k; st.p += (pT - st.p) * k; st.r += (rT - st.r) * k;
+    const q = boatQuat({ heading: s.yaw, pitch: st.p, roll: st.r });
+    im.setMatrixAt(j, _m.compose(_p.set(s.x, st.y, s.z), _q.set(q.x, q.y, q.z, q.w), _s));
     hullAt(`moored-${s.id}`, HULL_FORM[s.kind], { m: _m });   // (the water keeps out of it and laps at it)
-    n[s.kind] = k + 1;
+    n[s.kind] = j + 1;
   }
   for (const [kind, im] of Object.entries(boats)) { im.count = n[kind] || 0; im.instanceMatrix.needsUpdate = true; }
 }
@@ -359,9 +385,22 @@ function dockSigns(m) {
 }
 
 // ------------------------------------------------------------------ building and keeping them
+/**
+ * A marina's basin is a harbour (2026-10-15 — the product owner: the boats in it "go down when the wave comes up"): the
+ * surf rolled through it as the beach it was, out of step with the boats, and drove them on to the quay. Its water —
+ * the basin, the slips and the ramp — is sheltered (render/water.js setCalm): no surf, the swell cut down. The nearest
+ * few marinas to the camera.
+ */
+let harbours = [];
+function calmNear() {
+  const c = app.stage.camera.position;
+  setCalm(harbours.map(h => [Math.hypot(h.x - c.x, h.z - c.z), h]).sort((a, b) => a[0] - b[0]).slice(0, CALM_N).map(e => e[1]));
+}
 function build() {
   dirty = false;
   const list = modulesOf(S.world).filter(m => DOCKS[m.kind] && Number.isFinite(m.y)), keep = new Set();
+  harbours = list.filter(m => DOCKS[m.kind].water === 'sea').map(m => { const B = DOCKS[m.kind].basin, R = rampOf(m); return { x: m.x, z: m.z, rot: m.rot, s0: B.s0 + 6, s1: 1, f0: Math.min(B.f0, R.f0), f1: B.f1 + 2 }; });
+  calmNear();
   for (const m of list) {
     const key = `${m.id}:${m.kind}:${m.x}:${m.z}:${m.rot}:${m.y}:${m.wy}:${m.name}`; keep.add(key);
     if (meshes.has(key)) continue;
@@ -384,6 +423,7 @@ function update(dt, now) {
   if (slips.length) { waterMarks(app.stage); mooredBoats((now ?? performance.now()) / 1000); }   // (the water lapping at them: its marks)
   if (performance.now() - farCheck < 500 || !meshes.size) return;
   farCheck = performance.now();
+  if (harbours.length > CALM_N) calmNear();
   const c = app.stage.camera.position;
   for (const mesh of meshes.values()) mesh.visible = Math.hypot(mesh.userData.at.x - c.x, mesh.userData.at.z - c.z) < FAR;
 }

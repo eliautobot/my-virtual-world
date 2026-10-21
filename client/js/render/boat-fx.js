@@ -85,13 +85,24 @@ export class BoatFx {
       live.add(b.key);
       let T = this.trails.get(b.key);
       const fx = Math.sin(b.heading), fz = Math.cos(b.heading), sx = b.x - fx * b.L * 0.5, sz = b.z - fz * b.L * 0.5;
+      // a boat back after it had gone (out on a new trip: the same key), or moved at a jump (put back in its slip, set
+      // right by the server): its old wake left to fade where it was, a new one begun — joined on to it, the new wake
+      // drew a long straight band across the water from the boat (2026-10-15, the product owner's screenshot)
+      if (T && (T.gone || Math.hypot(sx - T.px, sz - T.pz) > 3 + Math.abs(b.u) * dt * 3)) {
+        this.trails.delete(b.key); T.gone = true;
+        if (T.pts.length) this.trails.set(`${b.key}~${t}`, T);
+        T = null;
+      }
       if (!T) { T = { pts: [], along: 0, px: sx, pz: sz, h: b.heading, yaw: 0, slam: 0, b }; this.trails.set(b.key, T); }
       T.along += Math.hypot(sx - T.px, sz - T.pz); T.px = sx; T.pz = sz;
       const dh = Math.atan2(Math.sin(b.heading - T.h), Math.cos(b.heading - T.h)); T.h = b.heading;
       T.yaw += ((dt > 0 ? dh / dt : 0) - T.yaw) * Math.min(1, dt * 4);
       T.b = b; T.seen = t; this.marks.level = b.y;
       const sp = Math.abs(b.u), last = T.pts[0];
-      if (sp > 0.6 && (!last || Math.hypot(sx - last.x, sz - last.z) >= Math.max(0.7, sp * 0.11) || t - last.t > 0.8)) {
+      // (a point each stretch it moves, however slowly — creeping in to the dock with none, the wake's last stretch
+      // reached from the boat all the way back to where it was last going fast: a long straight band, 2026-10-15)
+      const moved = last ? Math.hypot(sx - last.x, sz - last.z) : 1e9;
+      if ((sp > 0.6 || moved > 1.2) && (moved >= Math.max(0.7, sp * 0.11) || t - last.t > 0.8)) {
         T.pts.unshift({ x: sx, z: sz, bx: b.x + fx * b.L * 0.3, bz: b.z + fz * b.L * 0.3, fx, fz, sp, pl: b.planing || 0, t, along: T.along, L: b.L, B: b.B });
       }
       while (T.pts.length > PTS || (T.pts.length && t - T.pts[T.pts.length - 1].t > LIFE)) T.pts.pop();
